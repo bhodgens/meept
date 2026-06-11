@@ -39,6 +39,7 @@ import (
 	"github.com/caimlas/meept/internal/repomap"
 	"github.com/caimlas/meept/internal/scheduler"
 	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/internal/pty"
 	"github.com/caimlas/meept/internal/selfimprove"
 	"github.com/caimlas/meept/internal/session"
@@ -68,6 +69,7 @@ type Components struct {
 	ToolRegistry         *tools.Registry
 	SecurityChecker      *security.PermissionChecker
 	SecurityOrchestrator *intsecurity.Orchestrator
+	FenceChecker         *intsecurity.FenceChecker
 	AgentLoop            *agent.AgentLoop
 	ChatHandler          *agent.ChatHandler
 	StatusHandler        *StatusHandler
@@ -131,7 +133,7 @@ type Components struct {
 	PricingSyncer *llm.PricingSyncer
 
 	// Local LLM runtime lifecycle manager
-	RuntimeManager *llm.RuntimeManager
+	ContainerManager *llm.RuntimeManager
 
 	// MCP integration
 	MCPManager *mcp.Manager
@@ -267,6 +269,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 	// Create security orchestrator for input sanitization, output monitoring, and shell scanning
 	c.SecurityOrchestrator = createSecurityOrchestrator(cfg, logger)
+
+	// Create fence checker for path-based sandboxing
+	if cfg.Security.FenceEnabled {
+		wd, _ := os.Getwd()
+		c.FenceChecker = intsecurity.NewFenceChecker(intsecurity.FenceConfig{
+			Enabled:   true,
+			RootPath:  wd,
+			AllowRead: cfg.Security.FenceAllowRead,
+		})
+		logger.Info("Fence checker enabled", "root", wd)
+	}
 
 	// Create LLM client with budget tracking
 	llmCfg := createLLMConfig(c.ModelsConfig, logger)
@@ -462,7 +475,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 
 	// Create runtime manager and scan providers for lifecycle configs
-	c.RuntimeManager = llm.NewRuntimeManager(logger)
+	c.ContainerManager = llm.NewRuntimeManager(logger)
 	lifecycleCfg, lifecycleCfgErr := llm.LoadProvidersConfigDefault()
 	if lifecycleCfgErr != nil {
 		logger.Debug("No providers config available for runtime scanning", "error", lifecycleCfgErr)
@@ -479,7 +492,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			}
 
 			baseURL := provider.Options.BaseURL
-			if err := c.RuntimeManager.RegisterConfig(providerID, rtCfg, baseURL); err != nil {
+			if err := c.ContainerManager.RegisterConfig(providerID, rtCfg, baseURL); err != nil {
 				logger.Error("Failed to register runtime config", "provider", providerID, "error", err)
 			}
 		}
@@ -1047,7 +1060,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	pendingChangesRegistry := builtin.NewPendingChangesRegistry()
 
 	// Create runtime manager for backend-based command execution
-	var runtimeMgr *runtime.Manager
+	var containerMgr *runtime.ContainerManager
 	if cfg.Runtime.Enabled {
 		runtimeCfg := runtime.Config{
 			DefaultBackend: cfg.Runtime.DefaultBackend,
@@ -1058,12 +1071,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			},
 		}
 		var err error
-		runtimeMgr, err = runtime.NewManager(runtimeCfg, logger)
+		containerMgr, err = runtime.NewContainerManager(runtimeCfg, logger)
 		if err != nil {
 			logger.Warn("Failed to create runtime manager, commands will use local exec", "error", err)
-			runtimeMgr = nil
+			containerMgr = nil
 		} else {
-			logger.Info("Runtime manager initialized", "backends", runtimeMgr.ListBackends(), "default", runtimeMgr.DefaultBackend())
+			logger.Info("Runtime manager initialized", "backends", containerMgr.ListBackends(), "default", containerMgr.DefaultBackend())
 		}
 	}
 
@@ -1080,7 +1093,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if c.TaskRegistry != nil {
 		taskStore = c.TaskRegistry.Store()
 	}
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, runtimeMgr, c.PTYManager, logger)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, containerMgr, c.PTYManager, c.LLMClient, c.FenceChecker, logger)
 
 	// Initialize code intelligence if enabled
 	if cfg.CodeIntel.Enabled {
@@ -1584,7 +1597,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		webHandler := &webHandlerAdapter{
 			agentLoop:      c.AgentLoop,
 			statusHandler:  c.StatusHandler,
-			runtimeManager: c.RuntimeManager,
+			runtimeManager: c.ContainerManager,
 		}
 
 		// Create authenticator
@@ -2367,7 +2380,16 @@ func createSecurityOrchestrator(cfg *config.Config, logger *slog.Logger) *intsec
 		AuditDBPath:        cfg.Security.AuditDBPath,
 	}
 
-	return intsecurity.NewOrchestrator(orchCfg, logger)
+	orch := intsecurity.NewOrchestrator(orchCfg, logger)
+
+	// Wire taint tracking if enabled
+	if cfg.Security.Taint.Enabled {
+		taintTracker := taint.NewExtendedTracker(logger.With("component", "taint-tracker"))
+		orch.SetTaintTracker(taintTracker)
+		logger.Info("Taint tracking wired into security orchestrator")
+	}
+
+	return orch
 }
 
 // convertShadowConfig converts config.ShadowConfig to shadow.Config.
@@ -2462,16 +2484,24 @@ func registerBuiltinTools(
 	taskStore *task.Store,
 	sched *scheduler.Scheduler,
 	pendingChangesRegistry *builtin.PendingChangesRegistry,
-	runtimeMgr *runtime.Manager,
+	containerMgr *runtime.ContainerManager,
 	ptyMgr *pty.Manager,
+	llmClient *llm.Client,
+	fenceChecker *intsecurity.FenceChecker,
 	logger *slog.Logger,
 ) {
 	// Shared read cache for hashline edit recovery
 	readCache := builtin.NewReadCache(30)
 
 	// Filesystem tools
-	registry.Register(builtin.NewReadFileTool(checker, readCache))
-	registry.Register(builtin.NewWriteFileTool(checker))
+	readFileTool := builtin.NewReadFileTool(checker, readCache)
+	writeFileTool := builtin.NewWriteFileTool(checker)
+	if fenceChecker != nil {
+		readFileTool.SetFenceChecker(fenceChecker)
+		writeFileTool.SetFenceChecker(fenceChecker)
+	}
+	registry.Register(readFileTool)
+	registry.Register(writeFileTool)
 	// Use the shared pending changes registry passed by the caller so that
 	// file_edit, ast_edit, and lsp_rename all share the same registry.
 	pendingChanges := pendingChangesRegistry
@@ -2482,7 +2512,11 @@ func registerBuiltinTools(
 	}
 	registry.Register(fileEditTool)
 
-	registry.Register(builtin.NewDeleteFileTool(checker))
+	deleteFileTool := builtin.NewDeleteFileTool(checker)
+	if fenceChecker != nil {
+		deleteFileTool.SetFenceChecker(fenceChecker)
+	}
+	registry.Register(deleteFileTool)
 	if pendingChanges != nil {
 		registry.Register(builtin.NewResolveTool(pendingChanges))
 	} else {
@@ -2501,9 +2535,13 @@ func registerBuiltinTools(
 		shellTool.SetSecurityOrchestrator(secOrch)
 		logger.Debug("Shell tool configured with security orchestrator")
 	}
-	if runtimeMgr != nil {
-		shellTool.SetRuntimeManager(runtimeMgr)
-		logger.Info("Shell tool wired to runtime manager", "backend", runtimeMgr.DefaultBackend())
+	if fenceChecker != nil {
+		shellTool.SetFenceChecker(fenceChecker)
+		logger.Debug("Shell tool configured with fence checker")
+	}
+	if containerMgr != nil {
+		shellTool.SetRuntimeManager(containerMgr)
+		logger.Info("Shell tool wired to runtime manager", "backend", containerMgr.DefaultBackend())
 	}
 	if ptyMgr != nil {
 		logger.Info("Shell tool wired to PTY manager")
@@ -2517,7 +2555,11 @@ func registerBuiltinTools(
 	registry.Register(builtin.NewGitValidateTool())
 
 	// Web fetch tool
-	registry.Register(builtin.NewWebFetchTool(30*time.Second, 100000))
+	webFetchTool := builtin.NewWebFetchTool(30*time.Second, 100000)
+	if secOrch != nil {
+		webFetchTool.SetSecurityOrchestrator(secOrch)
+	}
+	registry.Register(webFetchTool)
 
 	// Web search tool (DuckDuckGo)
 	registry.Register(builtin.NewWebSearchTool(15 * time.Second))
@@ -2533,11 +2575,11 @@ func registerBuiltinTools(
 		// Memory curation tools (retain/recall/reflect)
 		registry.Register(builtin.NewMemoryRetainTool(memoryMgr))
 		registry.Register(builtin.NewMemoryRecallTool(memoryMgr))
-		// Memory reflect tool requires LLM client - only register if available
-		// TODO: wire llmClient into registerBuiltinTools and uncomment
-		// if llmClient != nil {
-		//	registry.Register(builtin.NewMemoryReflectTool(memoryMgr, llmClient))
-		// }
+		// Memory reflect tool requires LLM client
+		if llmClient != nil {
+			registry.Register(builtin.NewMemoryReflectTool(memoryMgr, llmClient))
+			logger.Debug("Registered memory_reflect tool")
+		}
 		logger.Debug("Registered memory curation tools")
 
 		logger.Debug("Registered memory tools")

@@ -74,16 +74,23 @@ var dangerousPattern = regexp.MustCompile(
 		`|iptables|nft|deluser|userdel|groupdel)\b`,
 )
 
+// FenceChecker validates paths against fence boundaries.
+type FenceChecker interface {
+	CheckPath(path string, op string) error
+	CheckCommand(cmd string, workDir string) error
+}
+
 // ShellExecuteTool executes shell commands in a sandboxed subprocess.
 type ShellExecuteTool struct {
 	workingDir        string
 	defaultTimeout    time.Duration
 	securityOrch      *intsecurity.Orchestrator
 	knownSafeCommands map[string]struct{}
-	runtimeMgr        *runtime.Manager
+	containerMgr        *runtime.ContainerManager
 	backend           runtime.ExecutionBackend
 	logger            *slog.Logger
 	ptyMgr            *pty.Manager
+	fenceChecker      FenceChecker
 }
 
 // NewShellExecuteTool creates a new shell execution tool.
@@ -107,11 +114,16 @@ func (t *ShellExecuteTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrato
 	t.securityOrch = orch
 }
 
+// SetFenceChecker sets the fence checker for path-based sandboxing.
+func (t *ShellExecuteTool) SetFenceChecker(fc FenceChecker) {
+	t.fenceChecker = fc
+}
+
 // SetRuntimeManager injects a runtime manager for backend-based execution.
 // When set, commands are routed through the configured backend (local or docker).
 // When nil, the tool falls back to direct exec.Command (original behavior).
-func (t *ShellExecuteTool) SetRuntimeManager(mgr *runtime.Manager) {
-	t.runtimeMgr = mgr
+func (t *ShellExecuteTool) SetRuntimeManager(mgr *runtime.ContainerManager) {
+	t.containerMgr = mgr
 	if mgr != nil {
 		t.backend = mgr.GetDefaultBackend()
 		// Preserve working dir by running with a Dir shim via env
@@ -191,6 +203,13 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 			return nil, fmt.Errorf("invalid working directory: %w", err)
 		}
 		workDir = resolved
+	}
+
+	// Check fence boundaries
+	if t.fenceChecker != nil {
+		if err := t.fenceChecker.CheckCommand(command, workDir); err != nil {
+			return nil, fmt.Errorf("fence: %w", err)
+		}
 	}
 
 	// Check command risk level (built-in check)

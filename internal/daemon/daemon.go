@@ -384,8 +384,8 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	}
 
 	// Wire metrics recorder to runtime manager for lifecycle metrics
-	if metricsStore != nil && components != nil && components.RuntimeManager != nil {
-		components.RuntimeManager.SetMetricsRecorder(&runtimeMetricsAdapter{store: metricsStore})
+	if metricsStore != nil && components != nil && components.ContainerManager != nil {
+		components.ContainerManager.SetMetricsRecorder(&runtimeMetricsAdapter{store: metricsStore})
 	}
 
 	// Wire task collector and response analyzer to agent loop
@@ -714,9 +714,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Start local LLM runtimes in the background so the daemon reaches
 	// "running" status without blocking on potentially slow model loading.
-	if d.components != nil && d.components.RuntimeManager != nil {
+	if d.components != nil && d.components.ContainerManager != nil {
 		go func() {
-			if err := d.components.RuntimeManager.StartAll(ctx); err != nil {
+			if err := d.components.ContainerManager.StartAll(ctx); err != nil {
 				d.logger.Error("Failed to start LLM runtimes", "error", err)
 			}
 		}()
@@ -864,8 +864,8 @@ func (d *Daemon) shutdown() error {
 	}
 
 	// Stop local LLM runtimes
-	if d.components != nil && d.components.RuntimeManager != nil {
-		if err := d.components.RuntimeManager.StopAll(ctx); err != nil {
+	if d.components != nil && d.components.ContainerManager != nil {
+		if err := d.components.ContainerManager.StopAll(ctx); err != nil {
 			d.logger.Error("Failed to stop LLM runtimes", "error", err)
 		}
 	}
@@ -1262,7 +1262,7 @@ func nilSafeRuntimeManager(c *Components) *llm.RuntimeManager {
 	if c == nil {
 		return nil
 	}
-	return c.RuntimeManager
+	return c.ContainerManager
 }
 
 func nilSafeProjectManager(c *Components) *project.ProjectManager {

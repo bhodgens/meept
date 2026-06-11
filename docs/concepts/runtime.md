@@ -84,7 +84,7 @@ Test harness runs after code changes and before review approval.
 
 ```go
 // Create runtime manager
-mgr, err := runtime.NewManager(runtime.Config{
+mgr, err := runtime.NewContainerManager(runtime.Config{
     DefaultBackend: "local",
 })
 

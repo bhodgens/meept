@@ -16,7 +16,7 @@ func testLogger() *slog.Logger {
 }
 
 func TestManager_GetBackend_Local(t *testing.T) {
-	mgr, err := NewManager(Config{
+	mgr, err := NewContainerManager(Config{
 		DefaultBackend: "local",
 	}, testLogger())
 	require.NoError(t, err)
@@ -28,7 +28,7 @@ func TestManager_GetBackend_Local(t *testing.T) {
 }
 
 func TestManager_GetBackend_Unknown(t *testing.T) {
-	mgr, err := NewManager(Config{
+	mgr, err := NewContainerManager(Config{
 		DefaultBackend: "local",
 	}, testLogger())
 	require.NoError(t, err)
@@ -38,7 +38,7 @@ func TestManager_GetBackend_Unknown(t *testing.T) {
 }
 
 func TestManager_GetDefaultBackend(t *testing.T) {
-	mgr, err := NewManager(Config{
+	mgr, err := NewContainerManager(Config{
 		DefaultBackend: "local",
 	}, testLogger())
 	require.NoError(t, err)
@@ -49,7 +49,7 @@ func TestManager_GetDefaultBackend(t *testing.T) {
 }
 
 func TestManager_ListBackends(t *testing.T) {
-	mgr, err := NewManager(Config{
+	mgr, err := NewContainerManager(Config{
 		DefaultBackend: "local",
 	}, testLogger())
 	require.NoError(t, err)
@@ -59,7 +59,7 @@ func TestManager_ListBackends(t *testing.T) {
 }
 
 func TestManager_Close(t *testing.T) {
-	mgr, err := NewManager(Config{
+	mgr, err := NewContainerManager(Config{
 		DefaultBackend: "local",
 	}, testLogger())
 	require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestManager_Close(t *testing.T) {
 }
 
 func TestManager_DefaultBackend_Name(t *testing.T) {
-	mgr, err := NewManager(Config{
+	mgr, err := NewContainerManager(Config{
 		DefaultBackend: "local",
 	}, testLogger())
 	require.NoError(t, err)
@@ -82,7 +82,7 @@ func TestManager_DefaultBackend_Name(t *testing.T) {
 }
 
 func TestManager_InvalidDefaultBackend(t *testing.T) {
-	_, err := NewManager(Config{
+	_, err := NewContainerManager(Config{
 		DefaultBackend: "invalid",
 	}, testLogger())
 	assert.Error(t, err)
@@ -90,7 +90,7 @@ func TestManager_InvalidDefaultBackend(t *testing.T) {
 }
 
 func TestManager_ExecAfterClose(t *testing.T) {
-	mgr, err := NewManager(Config{
+	mgr, err := NewContainerManager(Config{
 		DefaultBackend: "local",
 	}, testLogger())
 	require.NoError(t, err)
@@ -104,7 +104,7 @@ func TestManager_ExecAfterClose(t *testing.T) {
 }
 
 func TestManager_LocalBackendExecute(t *testing.T) {
-	mgr, err := NewManager(Config{
+	mgr, err := NewContainerManager(Config{
 		DefaultBackend: "local",
 	}, testLogger())
 	require.NoError(t, err)
@@ -122,7 +122,7 @@ func TestManager_LocalBackendExecute(t *testing.T) {
 }
 
 func TestManager_DockerBackend_FallbackOrUse(t *testing.T) {
-	mgr, err := NewManager(Config{
+	mgr, err := NewContainerManager(Config{
 		DefaultBackend: "docker",
 		Docker: DockerConfig{
 			Image: "alpine:latest",

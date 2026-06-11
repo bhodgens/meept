@@ -7,7 +7,7 @@ import (
 )
 
 // Manager provides access to execution backends.
-type Manager struct {
+type ContainerManager struct {
 	mu            sync.RWMutex
 	config        Config
 	backends      map[string]ExecutionBackend
@@ -17,8 +17,8 @@ type Manager struct {
 }
 
 // NewManager creates a new runtime manager.
-func NewManager(cfg Config, logger *slog.Logger) (*Manager, error) {
-	m := &Manager{
+func NewContainerManager(cfg Config, logger *slog.Logger) (*ContainerManager, error) {
+	m := &ContainerManager{
 		config:   cfg,
 		backends: make(map[string]ExecutionBackend),
 		logger:   logger,
@@ -54,7 +54,7 @@ func NewManager(cfg Config, logger *slog.Logger) (*Manager, error) {
 }
 
 // GetBackend returns a backend by name, or nil if not available.
-func (m *Manager) GetBackend(name string) ExecutionBackend {
+func (m *ContainerManager) GetBackend(name string) ExecutionBackend {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -66,12 +66,12 @@ func (m *Manager) GetBackend(name string) ExecutionBackend {
 }
 
 // GetDefaultBackend returns the default backend.
-func (m *Manager) GetDefaultBackend() ExecutionBackend {
+func (m *ContainerManager) GetDefaultBackend() ExecutionBackend {
 	return m.GetBackend(m.defaultBackend)
 }
 
 // ListBackends returns names of available backends.
-func (m *Manager) ListBackends() []string {
+func (m *ContainerManager) ListBackends() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -83,7 +83,7 @@ func (m *Manager) ListBackends() []string {
 }
 
 // Close shuts down all backends.
-func (m *Manager) Close() error {
+func (m *ContainerManager) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -105,14 +105,14 @@ func (m *Manager) Close() error {
 }
 
 // DefaultBackend returns the name of the configured default backend.
-func (m *Manager) DefaultBackend() string {
+func (m *ContainerManager) DefaultBackend() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.defaultBackend
 }
 
 // initDockerBackend initializes the Docker backend if Docker is available.
-func (m *Manager) initDockerBackend(cfg DockerConfig, logger *slog.Logger) error {
+func (m *ContainerManager) initDockerBackend(cfg DockerConfig, logger *slog.Logger) error {
 	// Set defaults
 	image := cfg.Image
 	if image == "" {

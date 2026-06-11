@@ -35,6 +35,12 @@ type WebFetchTool struct {
 	timeout   time.Duration
 	maxLength int
 	client    *http.Client
+	secOrch   SecurityChecker
+}
+
+// SecurityChecker is an interface for pre-fetch security checks.
+type SecurityChecker interface {
+	CheckWebFetch(url string) (blocked bool, reason string)
 }
 
 // NewWebFetchTool creates a new web fetch tool.
@@ -62,6 +68,11 @@ func NewWebFetchTool(timeout time.Duration, maxLength int) *WebFetchTool {
 }
 
 func (t *WebFetchTool) Name() string { return "web_fetch" }
+
+// SetSecurityOrchestrator sets the security orchestrator for taint/exfil checks.
+func (t *WebFetchTool) SetSecurityOrchestrator(orch SecurityChecker) {
+	t.secOrch = orch
+}
 
 func (t *WebFetchTool) Category() string { return "web" }
 
@@ -99,6 +110,13 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) (any, e
 	url, _ := args["url"].(string)
 	if url == "" {
 		return nil, fmt.Errorf("no URL specified")
+	}
+
+	// Check taint/exfiltration policy
+	if t.secOrch != nil {
+		if blocked, reason := t.secOrch.CheckWebFetch(url); blocked {
+			return nil, fmt.Errorf("web fetch blocked by security policy: %s", reason)
+		}
 	}
 
 	// Validate URL scheme

@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/caimlas/meept/internal/security/taint"
+
 	_ "modernc.org/sqlite" //nolint:revive // blank import for side effects
 )
 
@@ -58,6 +60,7 @@ type Orchestrator struct {
 	outputMonitor *OutputMonitor
 	promptGuard   *PromptGuard
 	tirithScanner *TirithScanner
+	taintTracker  *TaintTracker // optional: information flow tracking
 	logger        *slog.Logger
 	auditDB       *sql.DB // SQLite database for audit logging (nil when disabled)
 
@@ -74,6 +77,17 @@ type Orchestrator struct {
 
 	// Mutex for complex operations
 	mu sync.RWMutex
+}
+
+// TaintTracker is the taint tracking interface used by the orchestrator.
+type TaintTracker = taint.ExtendedTracker
+
+// SetTaintTracker sets the taint tracker for information flow security.
+func (o *Orchestrator) SetTaintTracker(tt *TaintTracker) {
+	if tt != nil {
+		o.taintTracker = tt
+		o.logger.Info("Taint tracking enabled")
+	}
 }
 
 // NewOrchestrator creates a new security orchestrator with the given configuration.
@@ -235,10 +249,26 @@ func (o *Orchestrator) ScanOutput(text string) (sanitized string, ok bool, warni
 	return text, result.HasCredentials, result.Warnings
 }
 
-// ScanShellCommand scans a shell command before execution using Tirith.
+// ScanShellCommand scans a shell command before execution using taint tracking and Tirith.
 // Returns whether the command should be blocked, whether there's a warning, and the reason.
 func (o *Orchestrator) ScanShellCommand(ctx context.Context, command string) (blocked, warning bool, reason string) {
 	o.commandsScanned.Add(1)
+
+	// Check taint tracking first (if enabled)
+	if o.taintTracker != nil {
+		if violation := o.taintTracker.CheckShellCommand(command); violation != nil {
+			o.commandsBlocked.Add(1)
+			o.logger.Warn("Shell command blocked by taint tracking",
+				"command", truncateCommand(command),
+				"violation", violation.Error(),
+			)
+			o.logAuditEvent("taint_blocked", "critical", map[string]any{
+				"command":  truncateCommand(command),
+				"violation": violation.Error(),
+			}, "taint")
+			return true, false, violation.Error()
+		}
+	}
 
 	if !o.config.ScanShellCommands || o.tirithScanner == nil {
 		// Shell command scanning disabled - allow execution
@@ -316,6 +346,26 @@ func (o *Orchestrator) ScanShellCommand(ctx context.Context, command string) (bl
 		"command", truncateCommand(command),
 	)
 	return false, false, ""
+}
+
+// CheckWebFetch checks a URL for taint policy violations (e.g., secret exfiltration).
+// Returns blocked=true and a reason if the URL should be denied.
+func (o *Orchestrator) CheckWebFetch(url string) (blocked bool, reason string) {
+	if o.taintTracker == nil {
+		return false, ""
+	}
+	if violation := o.taintTracker.CheckWebFetch(url); violation != nil {
+		o.logger.Warn("Web fetch blocked by taint tracking",
+			"url", url,
+			"violation", violation.Error(),
+		)
+		o.logAuditEvent("taint_web_blocked", "critical", map[string]any{
+			"url":       url,
+			"violation": violation.Error(),
+		}, "taint")
+		return true, violation.Error()
+	}
+	return false, ""
 }
 
 // WrapUserInput wraps text in user-input boundary markers for prompt injection defense.

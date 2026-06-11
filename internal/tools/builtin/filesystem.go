@@ -30,13 +30,19 @@ const (
 
 // ReadFileTool reads the contents of a file.
 type ReadFileTool struct {
-	checker   *security.PermissionChecker
-	readCache *ReadCache
+	checker      *security.PermissionChecker
+	readCache    *ReadCache
+	fenceChecker FenceChecker
 }
 
 // NewReadFileTool creates a new file read tool.
 func NewReadFileTool(checker *security.PermissionChecker, readCache *ReadCache) *ReadFileTool {
 	return &ReadFileTool{checker: checker, readCache: readCache}
+}
+
+// SetFenceChecker sets the fence checker for path-based sandboxing.
+func (t *ReadFileTool) SetFenceChecker(fc FenceChecker) {
+	t.fenceChecker = fc
 }
 
 func (t *ReadFileTool) Name() string { return "file_read" }
@@ -97,6 +103,13 @@ func (t *ReadFileTool) executeRead(args map[string]any, progress func(tools.Prog
 	// Permission check
 	if t.checker != nil && !t.checker.CheckPath(resolved) {
 		return nil, fmt.Errorf("access denied: %s", resolved)
+	}
+
+	// Fence check
+	if t.fenceChecker != nil {
+		if err := t.fenceChecker.CheckPath(resolved, "read"); err != nil {
+			return nil, err
+		}
 	}
 
 	info, err := os.Stat(resolved)
@@ -256,8 +269,9 @@ func (t *ReadFileTool) executeRead(args map[string]any, progress func(tools.Prog
 
 // WriteFileTool writes content to a file.
 type WriteFileTool struct {
-	checker     *security.PermissionChecker
-	lspNotifier LSPWriteNotifier
+	checker      *security.PermissionChecker
+	lspNotifier  LSPWriteNotifier
+	fenceChecker FenceChecker
 }
 
 // NewWriteFileTool creates a new file write tool.
@@ -271,6 +285,11 @@ func (t *WriteFileTool) SetLSPNotifier(notifier LSPWriteNotifier) {
 	if notifier != nil {
 		t.lspNotifier = notifier
 	}
+}
+
+// SetFenceChecker sets the fence checker for path-based sandboxing.
+func (t *WriteFileTool) SetFenceChecker(fc FenceChecker) {
+	t.fenceChecker = fc
 }
 
 func (t *WriteFileTool) Name() string { return "file_write" }
@@ -349,6 +368,13 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 	// Permission check
 	if t.checker != nil && !t.checker.CheckPath(resolved) {
 		return nil, fmt.Errorf("access denied: %s", resolved)
+	}
+
+	// Fence check
+	if t.fenceChecker != nil {
+		if err := t.fenceChecker.CheckPath(resolved, "write"); err != nil {
+			return nil, err
+		}
 	}
 
 	if progress != nil {
@@ -444,12 +470,18 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 
 // DeleteFileTool deletes a file from the filesystem.
 type DeleteFileTool struct {
-	checker *security.PermissionChecker
+	checker      *security.PermissionChecker
+	fenceChecker FenceChecker
 }
 
 // NewDeleteFileTool creates a new file delete tool.
 func NewDeleteFileTool(checker *security.PermissionChecker) *DeleteFileTool {
 	return &DeleteFileTool{checker: checker}
+}
+
+// SetFenceChecker sets the fence checker for path-based sandboxing.
+func (t *DeleteFileTool) SetFenceChecker(fc FenceChecker) {
+	t.fenceChecker = fc
 }
 
 func (t *DeleteFileTool) Name() string { return "file_delete" }
@@ -487,6 +519,13 @@ func (t *DeleteFileTool) Execute(ctx context.Context, args map[string]any) (any,
 	// Permission check
 	if t.checker != nil && !t.checker.CheckPath(resolved) {
 		return nil, fmt.Errorf("access denied: %s", resolved)
+	}
+
+	// Fence check
+	if t.fenceChecker != nil {
+		if err := t.fenceChecker.CheckPath(resolved, "write"); err != nil {
+			return nil, err
+		}
 	}
 
 	info, err := os.Stat(resolved)

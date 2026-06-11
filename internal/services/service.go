@@ -46,10 +46,10 @@ type ServiceRegistry struct {
 	Daemon       *DaemonService
 	Model        *ModelService
 	Calendar     *CalendarService
-	Runtime      *RuntimeService
 	Terminal     *TerminalService
 	Project      *ProjectService
 	Plan         *PlanService
+	Runtime      *RuntimeService
 	Search       *SearchService
 }
 
@@ -72,7 +72,6 @@ type Config struct {
 	Scheduler        *scheduler.Scheduler
 	CalendarClient   *calendar.Client
 	DaemonController DaemonController
-	RuntimeManager   *llm.RuntimeManager
 	WorkingDir       string
 	PidFile          string
 	StateDir         string
@@ -80,6 +79,7 @@ type Config struct {
 	ProjectManager   *project.ProjectManager
 	PlanManager      *plan.PlanManager
 	PlanStore        plan.PlanStore
+	RuntimeManager   *llm.RuntimeManager
 }
 
 // NewRegistry creates all services with their dependencies.
@@ -143,14 +143,14 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 		reg.Calendar = NewCalendarService(cfg.CalendarClient)
 	}
 
-	// RuntimeService is available if runtime manager is configured
-	if cfg.RuntimeManager != nil {
-		reg.Runtime = NewRuntimeService(cfg.RuntimeManager)
-	}
-
 	// TerminalService is always available if bus is available
 	if cfg.Bus != nil {
 		reg.Terminal = NewTerminalService(cfg.WorkingDir, cfg.Bus, logger)
+	}
+
+	// RuntimeService is available if runtime manager is configured
+	if cfg.RuntimeManager != nil {
+		reg.Runtime = NewRuntimeService(cfg.RuntimeManager)
 	}
 
 	// ProjectService is available if ProjectManager is configured

@@ -815,6 +815,10 @@ type SecurityConfig struct {
 
 	// Taint tracking for information flow security
 	Taint TaintConfig `json:"taint" toml:"taint"`
+
+	// Path fencing for agent sandboxing
+	FenceEnabled   bool     `json:"fence_enabled"    toml:"fence_enabled"`
+	FenceAllowRead []string `json:"fence_allow_read" toml:"fence_allow_read"`
 }
 
 // TaintConfig holds taint tracking configuration for information flow security.

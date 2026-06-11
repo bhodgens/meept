@@ -437,7 +437,7 @@ import (
 )
 
 // Manager provides access to execution backends.
-type Manager struct {
+type ContainerManager struct {
     mu            sync.RWMutex
     config        Config
     backends      map[string]ExecutionBackend
@@ -446,7 +446,7 @@ type Manager struct {
 }
 
 // NewManager creates a new runtime manager.
-func NewManager(cfg Config) (*Manager, error) {
+func NewContainerManager(cfg Config) (*Manager, error) {
     m := &Manager{
         config:   cfg,
         backends: make(map[string]ExecutionBackend),
@@ -864,12 +864,12 @@ Read `internal/tools/builtin/shell.go` to understand current structure.
 // Add field to ShellExecuteTool:
 type ShellExecuteTool struct {
     backend runtime.ExecutionBackend
-    manager *runtime.Manager
+    manager *runtime.ContainerManager
     logger  *slog.Logger
 }
 
 // Add constructor option:
-func NewShellExecuteTool(mgr *runtime.Manager, logger *slog.Logger) *ShellExecuteTool {
+func NewShellExecuteTool(mgr *runtime.ContainerManager, logger *slog.Logger) *ShellExecuteTool {
     return &ShellExecuteTool{
         manager: mgr,
         backend: mgr.GetDefaultBackend(),
@@ -1004,7 +1004,7 @@ git commit -m "feat(config): add runtime configuration schema"
 import "github.com/caimlas/meept/internal/runtime"
 
 type Daemon struct {
-    runtimeMgr *runtime.Manager
+    containerMgr *runtime.ContainerManager
     // ... existing fields
 }
 
@@ -1019,27 +1019,27 @@ func NewDaemon(cfg *Config) (*Daemon, error) {
         },
     }
 
-    var runtimeMgr *runtime.Manager
+    var containerMgr *runtime.ContainerManager
     if cfg.Runtime.Enabled {
         var err error
-        runtimeMgr, err = runtime.NewManager(runtimeCfg)
+        containerMgr, err = runtime.NewContainerManager(runtimeCfg)
         if err != nil {
             logger.Warn("Failed to create runtime manager, using local backend", "error", err)
         }
     }
 
-    // Pass runtimeMgr to shell tool
-    shellTool := builtin.NewShellExecuteTool(runtimeMgr, logger)
+    // Pass containerMgr to shell tool
+    shellTool := builtin.NewShellExecuteTool(containerMgr, logger)
 
     return &Daemon{
-        runtimeMgr: runtimeMgr,
+        containerMgr: containerMgr,
         // ... rest of initialization
     }, nil
 }
 
 func (d *Daemon) Close() error {
-    if d.runtimeMgr != nil {
-        d.runtimeMgr.Close()
+    if d.containerMgr != nil {
+        d.containerMgr.Close()
     }
     // ... rest of cleanup
 }
