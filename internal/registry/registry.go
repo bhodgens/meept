@@ -67,18 +67,41 @@ func (r *Registry) Get(name string) (Component, bool) {
 }
 
 // StartAll starts all registered components in registration order.
+// StartAll starts all components in registration order.
+//
+// CORE-7 FIX: Previously this method held r.mu.RLock while calling
+// component.Start(ctx), which could deadlock if a component's Start()
+// tried to acquire the same write lock. The fix collects all components
+// under the read lock, releases it, then calls Start on each without
+// holding the lock. Errors are logged but do not stop remaining components.
 func (r *Registry) StartAll(ctx context.Context) error {
+	// Collect components under lock to avoid holding lock during Start()
+	// This prevents deadlock if component's Start() calls back into registry
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-
+	type componentEntry struct {
+		name      string
+		component Component
+	}
+	toStart := make([]componentEntry, 0, len(r.order))
 	for _, name := range r.order {
 		c := r.components[name]
-		r.logger.Info("registry: starting component", "name", name)
-		if err := c.Start(ctx); err != nil {
-			return fmt.Errorf("failed to start %s: %w", name, err)
+		toStart = append(toStart, componentEntry{name: name, component: c})
+	}
+	r.mu.RUnlock()
+
+	// Now start components without holding lock
+	var lastErr error
+	for _, entry := range toStart {
+		r.logger.Info("registry: starting component", "name", entry.name)
+		if err := entry.component.Start(ctx); err != nil {
+			r.logger.Error("registry: failed to start component",
+				"name", entry.name,
+				"error", err,
+			)
+			lastErr = err
 		}
 	}
-	return nil
+	return lastErr
 }
 
 // StopAll stops all components in reverse registration order.

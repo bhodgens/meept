@@ -185,7 +185,9 @@ func TestStartAll(t *testing.T) {
 	}
 }
 
-func TestStartAll_StopsOnError(t *testing.T) {
+// TestStartAll_ContinuesOnError verifies that StartAll continues starting
+// remaining components even when one fails (matches StopAll behavior).
+func TestStartAll_ContinuesOnError(t *testing.T) {
 	r := New(nil)
 
 	c1 := newMockComponent("c1")
@@ -202,12 +204,13 @@ func TestStartAll_StopsOnError(t *testing.T) {
 		t.Fatal("StartAll() should return error when component fails to start")
 	}
 
-	// c1 should have started, c2 failed, c3 should not have started
+	// c1 should have started, c2 should have been attempted, c3 should also start
+	// (new behavior: continue on error like StopAll)
 	if c1.started.Load() != 1 {
 		t.Error("c1 should have been started")
 	}
-	if c3.started.Load() != 0 {
-		t.Error("c3 should NOT have been started (error occurred before)")
+	if c3.started.Load() != 1 {
+		t.Error("c3 should have been started (continue on error)")
 	}
 }
 

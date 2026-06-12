@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/caimlas/meept/internal/pathutil"
 	"github.com/tailscale/hujson"
@@ -181,6 +182,7 @@ func ResolveModelRef(ref string, cfg *ProvidersConfig) *ModelConfig {
 		ContextLimit:         modelDef.ContextLimit,
 		Capabilities:         caps,
 		ProviderID:           providerID,
+		Timeout:              time.Duration(provider.Options.Timeout) * time.Second,
 	}
 }
 
@@ -215,6 +217,7 @@ func GetAllModels(cfg *ProvidersConfig) []*ModelConfig {
 				ContextLimit:         modelDef.ContextLimit,
 				Capabilities:         caps,
 				ProviderID:           providerID,
+				Timeout:              time.Duration(provider.Options.Timeout) * time.Second,
 			})
 		}
 	}

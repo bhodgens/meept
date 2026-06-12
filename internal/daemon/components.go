@@ -2342,6 +2342,7 @@ func resolveModelRef(cfg *config.ModelsConfig, modelRef string, logger *slog.Log
 				ContextLimit:         model.ContextLimit,
 				Capabilities:         caps,
 				ProviderID:           providerID,
+				Timeout:              time.Duration(provider.Options.Timeout) * time.Second,
 			}
 		}
 	}

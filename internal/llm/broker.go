@@ -120,6 +120,9 @@ func (b *ModelBroker) newChatterFor(cfg *ModelConfig) Chatter {
 		if b.config.TokenCache != nil {
 			opts = append(opts, WithAnthropicTokenCache(b.config.TokenCache))
 		}
+		if cfg.Timeout > 0 {
+			opts = append(opts, WithAnthropicTimeout(cfg.Timeout))
+		}
 		return NewAnthropicClient(cfg, opts...)
 	}
 
@@ -138,6 +141,9 @@ func (b *ModelBroker) newChatterFor(cfg *ModelConfig) Chatter {
 	}
 	if b.config.TokenCache != nil {
 		opts = append(opts, WithTokenCache(b.config.TokenCache))
+	}
+	if cfg.Timeout > 0 {
+		opts = append(opts, WithTimeout(cfg.Timeout))
 	}
 	return NewClient(cfg, opts...)
 }

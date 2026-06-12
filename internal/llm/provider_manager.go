@@ -120,6 +120,9 @@ func createChatterFor(cfg *ModelConfig, budget *Budget, logger *slog.Logger, tr 
 		if budget != nil {
 			opts = append(opts, WithAnthropicBudget(budget))
 		}
+		if cfg.Timeout > 0 {
+			opts = append(opts, WithAnthropicTimeout(cfg.Timeout))
+		}
 		return NewAnthropicClient(cfg, opts...)
 	}
 
@@ -134,6 +137,9 @@ func createChatterFor(cfg *ModelConfig, budget *Budget, logger *slog.Logger, tr 
 	}
 	if len(cfg.ExtraHeaders) > 0 {
 		opts = append(opts, WithExtraHeaders(cfg.ExtraHeaders))
+	}
+	if cfg.Timeout > 0 {
+		opts = append(opts, WithTimeout(cfg.Timeout))
 	}
 	return NewClient(cfg, opts...)
 }

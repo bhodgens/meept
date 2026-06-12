@@ -75,3 +75,4 @@ worktrees/
 menubar/.build/
 menubar/MeeptMenuBar.app/
 /test
+*.bak

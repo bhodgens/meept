@@ -21,6 +21,24 @@ const (
 	KeyQueued = "queued"
 )
 
+// parseIntParam parses an integer query parameter with validation.
+// Returns the parsed value or defaultValue if not present/invalid.
+// Validates that the value is within [min, max] range.
+func parseIntParam(r *http.Request, key string, defaultValue, min, max int) (int, error) {
+	s := r.URL.Query().Get(key)
+	if s == "" {
+		return defaultValue, nil
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s parameter: must be an integer", key)
+	}
+	if v < min || v > max {
+		return 0, fmt.Errorf("invalid %s parameter: must be between %d and %d", key, min, max)
+	}
+	return v, nil
+}
+
 // handleServiceError writes appropriate HTTP response based on service error type.
 func (s *Server) handleServiceError(w http.ResponseWriter, err error) {
 	switch {
@@ -208,11 +226,10 @@ func (s *Server) handleMemoryRecent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := 10
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if _, err := strconv.Atoi(l); err == nil {
-			limit, _ = strconv.Atoi(l)
-		}
+	limit, err := parseIntParam(r, "limit", 10, 1, 100)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	results, err := s.services.Memory.Recent(r.Context(), limit)

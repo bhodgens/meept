@@ -137,6 +137,9 @@ type ModelConfig struct {
 	// ExtraHeaders are additional HTTP headers sent with every request.
 	// For example, GitHub Models requires X-GitHub-Api-Version.
 	ExtraHeaders map[string]string
+	// Timeout is the per-request timeout in seconds.
+	// When 0, the default timeout (120s) is used.
+	Timeout time.Duration
 }
 
 // HasCapability checks if the model has a specific capability.
