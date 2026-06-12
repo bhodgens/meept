@@ -473,6 +473,12 @@ func (o *Orchestrator) initAuditDB(dbPath string) error {
 	return nil
 }
 
+// AuditDB returns the underlying audit database handle, or nil if audit
+// logging is disabled. The caller should not close the returned DB.
+func (o *Orchestrator) AuditDB() *sql.DB {
+	return o.auditDB
+}
+
 // logAuditEvent inserts an audit event row. It is safe to call when audit
 // logging is disabled (no-op) and silently drops errors so that audit
 // failures never block security operations.

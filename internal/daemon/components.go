@@ -3484,7 +3484,47 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 		skills.WithDiscoveryLogger(logger.With("component", "skills-discovery")),
 	}
 
-	// Add custom search paths if configured
+	// Build base tiers (DefaultTiers may include Hermes auto-discovery)
+	baseTiers := skills.DefaultTiers()
+
+	// Override Hermes tier based on config
+	if !cfg.Skills.AutoDiscoverHermes {
+		// Remove any auto-discovered Hermes tier
+		filtered := make([]skills.DiscoveryTier, 0, len(baseTiers))
+		for _, t := range baseTiers {
+			if t.Priority == skills.PriorityHermes {
+				continue
+			}
+			filtered = append(filtered, t)
+		}
+		baseTiers = filtered
+	} else if cfg.Skills.HermesSkillsDir != "" && cfg.Skills.HermesSkillsDir != "~/.hermes/skills" {
+		// Replace auto-discovered Hermes tier with configured path
+		for i := range baseTiers {
+			if baseTiers[i].Priority == skills.PriorityHermes {
+				baseTiers[i].Path = cfg.Skills.HermesSkillsDir
+				break
+			}
+		}
+		// If no Hermes tier was auto-discovered but config specifies a dir, add it
+		found := false
+		for _, t := range baseTiers {
+			if t.Priority == skills.PriorityHermes {
+				found = true
+				break
+			}
+		}
+		if !found {
+			if info, err := os.Stat(cfg.Skills.HermesSkillsDir); err == nil && info.IsDir() {
+				baseTiers = append(baseTiers, skills.DiscoveryTier{
+					Path:     cfg.Skills.HermesSkillsDir,
+					Priority: skills.PriorityHermes,
+				})
+			}
+		}
+	}
+
+	// Always pass tiers (with Hermes config overrides) to discovery
 	if len(cfg.Skills.SearchPaths) > 0 {
 		customTiers := make([]skills.DiscoveryTier, len(cfg.Skills.SearchPaths))
 		for i, path := range cfg.Skills.SearchPaths {
@@ -3494,9 +3534,23 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 			}
 		}
 		discoveryOpts = append(discoveryOpts, skills.WithTiers(
-			append(skills.DefaultTiers(), customTiers...),
+			append(baseTiers, customTiers...),
 		))
+	} else {
+		discoveryOpts = append(discoveryOpts, skills.WithTiers(baseTiers))
 	}
+
+	hermesTierCount := 0
+	for _, t := range baseTiers {
+		if t.Priority == skills.PriorityHermes {
+			hermesTierCount++
+		}
+	}
+	logger.Info("Skills discovery tiers configured",
+		"total_tiers", len(baseTiers),
+		"hermes_enabled", hermesTierCount > 0,
+		"auto_discover_hermes", cfg.Skills.AutoDiscoverHermes,
+	)
 
 	// Create discovery
 	discovery := skills.NewDiscovery(discoveryOpts...)
@@ -3573,8 +3627,21 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 			executorOpts = append(executorOpts, skills.WithLazyLoader(c.SkillLoader))
 		}
 
+		// Wire Hermes compatibility options
+		if cfg.Skills.ValidatePrerequisites {
+			executorOpts = append(executorOpts,
+				skills.WithValidatePrerequisites(true),
+				skills.WithPrerequisiteChecker(skills.NewDefaultPrerequisiteChecker(logger.With("component", "skills-prereqs"))),
+			)
+		}
+		executorOpts = append(executorOpts,
+			skills.WithToolMapper(skills.NewHermesToolMapper(logger.With("component", "skills-toolmapper"))),
+		)
+
 		c.SkillExecutor = skills.NewExecutor(c.LLMResolver, executorOpts...)
-		logger.Debug("Skills executor initialized")
+		logger.Info("Skills executor initialized with Hermes compatibility",
+			"validate_prerequisites", cfg.Skills.ValidatePrerequisites,
+		)
 	} else {
 		logger.Warn("Skills executor not created - no LLM resolver available")
 	}

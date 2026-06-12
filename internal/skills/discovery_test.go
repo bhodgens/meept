@@ -362,10 +362,14 @@ Body.
 }
 
 func TestDiscovery_ThreeFilesystemTiersAndClaudeSource(t *testing.T) {
-	// DefaultTiers returns 3 filesystem tiers (project, user, system).
+	// DefaultTiers returns 3 filesystem tiers (project, user, system),
+	// plus an optional Hermes tier if ~/.hermes/skills exists.
 	tiers := DefaultTiers()
-	if len(tiers) != 3 {
-		t.Errorf("DefaultTiers returned %d tiers, want 3", len(tiers))
+	if len(tiers) < 3 {
+		t.Errorf("DefaultTiers returned %d tiers, want >= 3", len(tiers))
+	}
+	if len(tiers) > 4 {
+		t.Errorf("DefaultTiers returned %d tiers, want <= 4", len(tiers))
 	}
 
 	// NewDiscovery() adds a ClaudeSource as a 4th source.

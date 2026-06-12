@@ -155,7 +155,7 @@ func NewHermesToolMapper(logger *slog.Logger) *HermesToolMapper {
 			"team_create": "delegate_task",
 			"team_list":   "platform_agents",
 			"team_message": "request_handoff",
-			"image_gen":   "", // no Meept equivalent
+			"image_gen": "", // no Meept equivalent yet — see https://github.com/bhodgens/meept/issues/13
 		},
 	}
 }
@@ -185,9 +185,9 @@ func (m *HermesToolMapper) Translate(toolName string) string {
 // TranslateToolReferences rewrites Hermes tool name references in the skill
 // body text. It handles common patterns:
 //
-//   - `tool_name(...)` style calls
-//   - "Use tool_name to..." natural language references
-//   - `- tool_name` list items
+//   - tool_name( style calls (where tool_name is immediately followed by open paren)
+//   - "tool_name" or `tool_name` quoted references
+//   - "- tool_name" list items at the start of a line
 //
 // Unmapped tools are left unchanged.
 func (m *HermesToolMapper) TranslateToolReferences(body string) string {
@@ -208,17 +208,23 @@ func (m *HermesToolMapper) TranslateToolReferences(body string) string {
 	for _, hermesTool := range keys {
 		meeptTool := m.mapping[hermesTool]
 
-		// Pattern: tool_name( - function call style
-		result = regexp.MustCompile(regexp.QuoteMeta(hermesTool)+`(?=\()`).
-			ReplaceAllString(result, meeptTool)
-
-		// Pattern: "tool_name" or `tool_name` as quoted reference
+		// Pattern: "tool_name" or `tool_name` as quoted reference (do first)
 		result = strings.ReplaceAll(result, `"`+hermesTool+`"`, `"`+meeptTool+`"`)
 		result = strings.ReplaceAll(result, "`"+hermesTool+"`", "`"+meeptTool+"`")
 
+		// Pattern: tool_name( - function call style (word boundary before, ( after)
+		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(hermesTool) + `\(`)
+		result = re.ReplaceAllString(result, meeptTool+"(")
+
 		// Pattern: - tool_name (list items at start of line)
-		result = regexp.MustCompile(`(?m)^(\s*[-*]\s+)`+regexp.QuoteMeta(hermesTool)+`(\s|$)`).
-			ReplaceAllString(result, "${1}"+meeptTool+"${2}")
+		re = regexp.MustCompile(`(?m)^(\s*[-*]\s+)` + regexp.QuoteMeta(hermesTool) + `(\s|$)`)
+		result = re.ReplaceAllString(result, "${1}"+meeptTool+"${2}")
+
+		// Pattern: plain word-boundary replacement for natural language references.
+		// Only matches when not already inside quotes/backticks (which were
+		// handled above). Uses word boundaries to avoid partial matches.
+		re = regexp.MustCompile(`\b` + regexp.QuoteMeta(hermesTool) + `\b`)
+		result = re.ReplaceAllString(result, meeptTool)
 	}
 
 	return result

@@ -329,6 +329,23 @@ func (e *Executor) ExecuteWithMessages(
 		return nil, ErrNoResolver
 	}
 
+	// Validate Hermes prerequisites if configured and present.
+	if e.validatePrerequisites && skill.Prerequisites != nil && e.prerequisiteChecker != nil {
+		if err := CheckPrerequisites(e.prerequisiteChecker, skill.Prerequisites); err != nil {
+			return nil, &ExecutorError{
+				SkillName: skill.Name,
+				Message:   "prerequisites not met",
+				Cause:     err,
+			}
+		}
+	}
+
+	// Translate Hermes tool references in skill body.
+	execBody := skill.Body
+	if e.toolMapper != nil && skill.SourceOrigin == "hermes" {
+		execBody = e.toolMapper.TranslateToolReferences(skill.Body)
+	}
+
 	// Start MCP runtime if skill declares MCP servers.
 	var mcpRuntime *MCPRuntime
 	if len(skill.MCPServers) > 0 {
@@ -385,7 +402,7 @@ func (e *Executor) ExecuteWithMessages(
 	if len(messages) == 0 || messages[0].Role != llm.RoleSystem {
 		systemMsg := llm.ChatMessage{
 			Role:    llm.RoleSystem,
-			Content: skill.Body,
+			Content: execBody,
 		}
 		messages = append([]llm.ChatMessage{systemMsg}, messages...)
 	}

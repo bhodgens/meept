@@ -26,6 +26,8 @@ type SkillIndexEntry struct {
 	AllowedTools []string `json:"allowed_tools,omitempty"`
 	// Examples are sample prompts for trigger matching.
 	Examples []string `json:"examples,omitempty"`
+	// SourceOrigin tracks which skill system the skill originated from ("meept", "claude", "hermes").
+	SourceOrigin string `json:"source_origin,omitempty"`
 }
 
 // HasCapability checks if the entry requires a specific capability.

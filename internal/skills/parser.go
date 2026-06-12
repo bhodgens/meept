@@ -118,6 +118,7 @@ func ParseSkillMetadataOnly(path string) (*SkillIndexEntry, error) {
 		RiskLevel:    meta.RiskLevel,
 		AllowedTools: meta.AllowedTools,
 		Examples:     meta.Examples,
+		SourceOrigin: meta.SourceOrigin,
 	}
 
 	// Apply defaults
@@ -367,12 +368,12 @@ func parseMetadata(frontmatter string) (*SkillMetadata, error) {
 			}
 		}
 
-		// Store prerequisites for execution-time validation.
+		// Mark as Hermes-origin and store prerequisites for execution-time validation.
+		meta.SourceOrigin = "hermes"
 		if hermesMeta.Prerequisites.EnvVars != nil ||
 			hermesMeta.Prerequisites.Commands != nil ||
 			hermesMeta.Prerequisites.PythonPackages != nil {
 			meta.HermesPrereqs = &hermesMeta.Prerequisites
-			meta.SourceOrigin = "hermes"
 		}
 	}
 

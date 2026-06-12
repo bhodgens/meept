@@ -944,10 +944,13 @@ type WorkspaceConfig struct {
 
 // SkillsConfig holds skills settings.
 type SkillsConfig struct {
-	Enabled     bool     `json:"enabled"           toml:"enabled"`
-	SearchPaths []string `json:"search_paths"      toml:"search_paths"`      // Additional skill directories beyond defaults
-	AutoReload  bool     `json:"auto_reload"       toml:"auto_reload"`       // Watch for skill file changes
-	CacheSize   int      `json:"max_cached_skills" toml:"max_cached_skills"` // Max skills to cache in lazy loader (default: 50)
+	Enabled               bool     `json:"enabled"                 toml:"enabled"`
+	SearchPaths           []string `json:"search_paths"            toml:"search_paths"`              // Additional skill directories beyond defaults
+	AutoReload            bool     `json:"auto_reload"             toml:"auto_reload"`               // Watch for skill file changes
+	CacheSize             int      `json:"max_cached_skills"       toml:"max_cached_skills"`         // Max skills to cache in lazy loader (default: 50)
+	AutoDiscoverHermes   bool     `json:"auto_discover_hermes"    toml:"auto_discover_hermes"`       // Auto-discover ~/.hermes/skills (default: true)
+	HermesSkillsDir      string   `json:"hermes_skills_dir"       toml:"hermes_skills_dir"`          // Path to Hermes skills directory (default: ~/.hermes/skills)
+	ValidatePrerequisites bool    `json:"validate_prerequisites"  toml:"validate_prerequisites"`    // Validate Hermes skill prerequisites before execution (default: true)
 }
 
 // SelfImproveConfig holds self-improvement settings.
@@ -1410,10 +1413,13 @@ func DefaultConfig() *Config {
 			CleanupCompleted: false,
 		},
 		Skills: SkillsConfig{
-			Enabled:     false,
-			SearchPaths: []string{},
-			AutoReload:  false,
-			CacheSize:   50,
+			Enabled:                false,
+			SearchPaths:            []string{},
+			AutoReload:             false,
+			CacheSize:              50,
+			AutoDiscoverHermes:     true,
+			HermesSkillsDir:        "~/.hermes/skills",
+			ValidatePrerequisites: true,
 		},
 		SelfImprove: SelfImproveConfig{
 			Enabled:               false,
