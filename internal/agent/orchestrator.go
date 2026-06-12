@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/plan"
@@ -652,9 +653,13 @@ func (o *Orchestrator) handleToolExecutionComplete(ctx context.Context, msg *mod
 		"edited_files", len(event.EditedFiles),
 	)
 
-	// Run reflection in a goroutine to not block the message bus
+	// Run reflection in a goroutine to not block the message bus.
+	// Use a background context with timeout so reflection isn't tied
+	// to the message handler's lifecycle.
 	go func() {
-		result, err := o.reflectionEngine.RunReflection(ctx, event.EditedFiles)
+		reflectCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		result, err := o.reflectionEngine.RunReflection(reflectCtx, event.EditedFiles)
 		if err != nil {
 			o.logger.Error("Reflection failed",
 				"tool_call_id", event.ToolCallID,
@@ -672,7 +677,7 @@ func (o *Orchestrator) handleToolExecutionComplete(ctx context.Context, msg *mod
 			)
 
 			// Apply the fix to the target files
-			appliedFiles := o.applyFix(ctx, result.PendingFix)
+			appliedFiles := o.applyFix(reflectCtx, result.PendingFix)
 			if len(appliedFiles) > 0 {
 				o.logger.Info("Fix applied, re-running reflection",
 					"tool_call_id", event.ToolCallID,
@@ -680,7 +685,7 @@ func (o *Orchestrator) handleToolExecutionComplete(ctx context.Context, msg *mod
 				)
 
 				// Re-run reflection on the applied fix to check for remaining errors
-				retryResult, err := o.reflectionEngine.RunReflection(ctx, appliedFiles)
+				retryResult, err := o.reflectionEngine.RunReflection(reflectCtx, appliedFiles)
 				if err != nil {
 					o.logger.Warn("Reflection re-check failed",
 						"tool_call_id", event.ToolCallID,
@@ -696,7 +701,7 @@ func (o *Orchestrator) handleToolExecutionComplete(ctx context.Context, msg *mod
 							"tool_call_id", event.ToolCallID,
 							"iteration", result.Iterations+1,
 						)
-						appliedFiles = o.applyFix(ctx, retryResult.PendingFix)
+						appliedFiles = o.applyFix(reflectCtx, retryResult.PendingFix)
 						result.PendingFix = retryResult.PendingFix
 						if len(appliedFiles) > 0 {
 							o.logger.Info("Second fix applied",
@@ -735,7 +740,7 @@ func (o *Orchestrator) handleToolExecutionComplete(ctx context.Context, msg *mod
 				"message", result.FinalMessage,
 			)
 			// Publish a notification event so other components know about the reflection outcome
-			o.publishReflectionEvent(ctx, event.ToolCallID, "reflection_gave_up", result)
+			o.publishReflectionEvent(reflectCtx, event.ToolCallID, "reflection_gave_up", result)
 		} else {
 			o.logger.Debug("Reflection completed with no errors",
 				"tool_call_id", event.ToolCallID,
