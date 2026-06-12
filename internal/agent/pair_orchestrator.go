@@ -89,9 +89,10 @@ func (po *PairOrchestrator) Name() string {
 	return "pair-orchestrator"
 }
 
-// GetSession returns a deep copy of the state of an active pair session.
+// GetSession returns a snapshot of the state of an active pair session.
 // Returns nil, false if the session is not found.
-func (po *PairOrchestrator) GetSession(sessionID string) (*BusPairSessionState, bool) {
+// The snapshot is mutex-free for safe concurrent access.
+func (po *PairOrchestrator) GetSession(sessionID string) (*BusPairSessionStateSnapshot, bool) {
 	po.mu.RLock()
 	state, ok := po.sessions[sessionID]
 	po.mu.RUnlock()
@@ -101,10 +102,18 @@ func (po *PairOrchestrator) GetSession(sessionID string) (*BusPairSessionState, 
 
 	state.mu.RLock()
 	defer state.mu.RUnlock()
-	cp := *state
-	cp.Turns = make([]PairTurn, len(state.Turns))
-	copy(cp.Turns, state.Turns)
-	return &cp, true
+	
+	return &BusPairSessionStateSnapshot{
+		SessionID:     state.SessionID,
+		ActorID:       state.ActorID,
+		ReviewerID:    state.ReviewerID,
+		CurrentTurn:   state.CurrentTurn,
+		MaxTurns:      state.MaxTurns,
+		Phase:         state.Phase,
+		LastVerdict:   state.LastVerdict,
+		Turns:         append([]PairTurn(nil), state.Turns...),
+		InitialPrompt: state.InitialPrompt,
+	}, true
 }
 
 // ActiveSessionCount returns the number of active pair sessions.

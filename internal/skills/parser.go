@@ -5,10 +5,35 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+// parseHermesMetadata attempts to parse frontmatter as HermesSkillMetadata.
+// Returns nil if the frontmatter does not contain any Hermes-specific fields.
+func parseHermesMetadata(frontmatter string) *HermesSkillMetadata {
+	var meta HermesSkillMetadata
+	if err := yaml.Unmarshal([]byte(frontmatter), &meta); err != nil {
+		return nil
+	}
+
+	// If no Hermes-specific fields are present, this is not a Hermes skill.
+	hasHermesFields := meta.Version != "" ||
+		meta.License != "" ||
+		len(meta.Platforms) > 0 ||
+		len(meta.Prerequisites.EnvVars) > 0 ||
+		len(meta.Prerequisites.Commands) > 0 ||
+		len(meta.Prerequisites.PythonPackages) > 0 ||
+		(meta.Metadata != nil && meta.Metadata.Hermes != nil)
+
+	if !hasHermesFields {
+		return nil
+	}
+
+	return &meta
+}
 
 // Parser errors.
 var (
@@ -168,6 +193,8 @@ func ParseSkillText(text string) (*Skill, error) {
 		MaxTokens:     meta.MaxTokens,
 		MCPServers:    meta.MCPServers,
 		UIType:        meta.UIType,
+		Prerequisites: meta.HermesPrereqs,
+		SourceOrigin:  meta.SourceOrigin,
 	}
 
 	// Apply defaults
@@ -318,6 +345,35 @@ func parseMetadata(frontmatter string) (*SkillMetadata, error) {
 			meta.Tags = append(meta.Tags, meta.Trigger)
 		}
 		meta.Trigger = ""
+	}
+
+	// --- Hermes pass: parse Hermes-specific frontmatter fields ---
+	// Only attempt if the frontmatter contains Hermes-specific keys.
+	hermesMeta := parseHermesMetadata(frontmatter)
+	if hermesMeta != nil {
+		// Map Hermes "platforms" into Tags (e.g., macos, linux).
+		for _, platform := range hermesMeta.Platforms {
+			if !slices.Contains(meta.Tags, platform) {
+				meta.Tags = append(meta.Tags, platform)
+			}
+		}
+
+		// Map metadata.hermes.triggers into Tags.
+		if hermesMeta.Metadata != nil && hermesMeta.Metadata.Hermes != nil {
+			for _, trigger := range hermesMeta.Metadata.Hermes.Triggers {
+				if !slices.Contains(meta.Tags, trigger) {
+					meta.Tags = append(meta.Tags, trigger)
+				}
+			}
+		}
+
+		// Store prerequisites for execution-time validation.
+		if hermesMeta.Prerequisites.EnvVars != nil ||
+			hermesMeta.Prerequisites.Commands != nil ||
+			hermesMeta.Prerequisites.PythonPackages != nil {
+			meta.HermesPrereqs = &hermesMeta.Prerequisites
+			meta.SourceOrigin = "hermes"
+		}
 	}
 
 	return &meta, nil

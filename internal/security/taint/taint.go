@@ -352,6 +352,7 @@ func (t *Tracker) CheckSink(value *TaintedValue, sink *TaintSink) *TaintViolatio
 
 // CheckShellCommand checks if a shell command should be blocked by taint tracking.
 // Returns a violation if blocked, nil if allowed.
+// It checks both suspicious patterns and stored tainted variables referenced in the command.
 func (t *Tracker) CheckShellCommand(command string) *TaintViolationError {
 	sink := ShellExecSink()
 
@@ -364,12 +365,98 @@ func (t *Tracker) CheckShellCommand(command string) *TaintViolationError {
 		}
 	}
 
+	// Second: check if the command references any stored tainted variables
+	// that are blocked by the shell_exec sink.
+	// Collect (name, value) pairs under RLock, then release before calling CheckSink
+	// (which acquires its own RLock) to avoid deadlocking on the same mutex.
+	t.mu.RLock()
+	type entry struct{ name string; tv *TaintedValue }
+	var matches []entry
+	for name, tv := range t.variables {
+		if tv == nil {
+			continue
+		}
+		if strings.Contains(command, name) {
+			matches = append(matches, entry{name, tv})
+		}
+	}
+	t.mu.RUnlock()
+
+	for _, e := range matches {
+		if violation := t.CheckSink(e.tv, sink); violation != nil {
+			return violation
+		}
+	}
+
+	return nil
+}
+
+// MarkWebFetchedContent marks a value as originating from an external web fetch.
+func (t *Tracker) MarkWebFetchedContent(value, url string) *TaintedValue {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	tv := NewTaintedValue(value, []TaintLabel{TaintExternal}, "web_fetch:"+url)
+	t.logMark("external", "web_fetch:"+url, value)
+	return tv
+}
+
+// CheckWebFetchedVarsInShell checks if a shell command embeds any stored
+// web-fetched (TaintExternal) variables.  Returns a violation when at least
+// one is found.
+//
+// It supports three syntaxes:
+//   - $varName
+//   - ${varName}
+//   - plain varName (substring match)
+func (t *Tracker) CheckWebFetchedVarsInShell(command string) *TaintViolationError {
+	if t == nil {
+		return nil
+	}
+
+	sink := ShellExecSink()
+
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	// First pass: find all variable names with TaintExternal
+	type varEntry struct{ name string; tv *TaintedValue }
+	var candidates []varEntry
+
+	for name, tv := range t.variables {
+		if tv == nil {
+			continue
+		}
+		if tv.HasLabel(TaintExternal) {
+			candidates = append(candidates, varEntry{name, tv})
+		}
+	}
+
+	// Second pass: check if any appear in the command (with shell syntaxes)
+	for _, e := range candidates {
+		// $varName syntax
+		if strings.Contains(command, "$"+e.name) {
+			return t.CheckSink(e.tv, sink)
+		}
+		// ${varName} syntax
+		if strings.Contains(command, "${"+e.name+"}") {
+			return t.CheckSink(e.tv, sink)
+		}
+		// Plain variable name (substring match)
+		if strings.Contains(command, e.name) {
+			return t.CheckSink(e.tv, sink)
+		}
+	}
+
 	return nil
 }
 
 // CheckWebFetch checks if a URL should be blocked by taint tracking.
 // Returns a violation if blocked, nil if allowed.
 func (t *Tracker) CheckWebFetch(url string) *TaintViolationError {
+	if t == nil {
+		return nil
+	}
 	sink := NetFetchSink()
 
 	// Check for exfiltration patterns

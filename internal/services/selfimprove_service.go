@@ -32,10 +32,15 @@ func (s *SelfImproveService) Status(ctx context.Context) (*StatusResponse, error
 		}, nil
 	}
 
-	// TODO: Get actual status from controller
-	return &StatusResponse{
-		Enabled: true,
-	}, nil
+	cs := s.controller.GetStatus()
+	sr := &StatusResponse{
+		Enabled:      true,
+		PendingTasks: cs.IssuesCount,
+	}
+	if cs.CurrentCycle != nil {
+		sr.LastCycle = cs.CurrentCycle.ID
+	}
+	return sr, nil
 }
 
 // TriggerRequest contains trigger parameters.
@@ -49,9 +54,8 @@ func (s *SelfImproveService) Trigger(ctx context.Context, req TriggerRequest) er
 		return wrapError("selfimprove", "Trigger", ErrUnavailable)
 	}
 
-	// TODO: Implement actual trigger logic
-	// For now, just return nil to indicate success
-	return nil
+	_, err := s.controller.RunFullCycle(ctx, !req.Force)
+	return wrapError("selfimprove", "Trigger", err)
 }
 
 // CancelRequest contains cancel parameters.
@@ -68,8 +72,7 @@ func (s *SelfImproveService) Cancel(ctx context.Context, req CancelRequest) erro
 		return wrapError("selfimprove", "Cancel", ErrUnavailable)
 	}
 
-	// TODO: Implement actual cancel logic
-	return nil
+	return wrapError("selfimprove", "Cancel", s.controller.Stop())
 }
 
 // Analyze runs analysis for improvements (alias for Detect).

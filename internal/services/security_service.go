@@ -41,9 +41,13 @@ func (s *SecurityService) Check(ctx context.Context, req CheckRequest) (*CheckRe
 		}, nil
 	}
 
-	// TODO: Implement actual security check
+	details := map[string]string{
+		"resource": req.Resource,
+	}
+	result := s.checker.CheckPermission(req.Action, details)
 	return &CheckResponse{
-		Allowed: true,
+		Allowed: result.Allowed,
+		Reason:  result.Reason,
 	}, nil
 }
 

@@ -24,20 +24,32 @@ type DiscoveryTier struct {
 	Priority int
 }
 
-// DefaultTiers returns the standard 3-tier filesystem discovery paths.
+// DefaultTiers returns the standard filesystem discovery paths.
 // Claude skills (~/.claude/skills/) are handled by the dedicated ClaudeSource.
-// Discovery priority (highest to lowest): project > user > system.
+// Hermes skills (~/.hermes/skills/) are auto-discovered when the directory exists.
+// Discovery priority (highest to lowest): project > user > claude > hermes > system.
 func DefaultTiers() []DiscoveryTier {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		homeDir = "~"
 	}
 
-	return []DiscoveryTier{
+	tiers := []DiscoveryTier{
 		{Path: ".meept/skills", Priority: PriorityProject},
 		{Path: filepath.Join(homeDir, ".meept", "skills"), Priority: PriorityUser},
 		{Path: filepath.Join(homeDir, ".config", "meept", "skills"), Priority: PrioritySystem},
 	}
+
+	// Auto-add Hermes skills tier if directory exists.
+	hermesSkills := filepath.Join(homeDir, ".hermes", "skills")
+	if info, err := os.Stat(hermesSkills); err == nil && info.IsDir() {
+		tiers = append(tiers, DiscoveryTier{
+			Path:     hermesSkills,
+			Priority: PriorityHermes,
+		})
+	}
+
+	return tiers
 }
 
 // Discovery orchestrates skill discovery across pluggable sources with priority shadowing.

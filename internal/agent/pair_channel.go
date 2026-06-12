@@ -64,6 +64,20 @@ type BusPairSessionState struct {
 	mu            sync.RWMutex
 }
 
+// BusPairSessionStateSnapshot is a mutex-free copy of BusPairSessionState
+// for safe concurrent access. Returns from GetSession to avoid copying locks.
+type BusPairSessionStateSnapshot struct {
+	SessionID     string      `json:"session_id"`
+	ActorID       string      `json:"actor_id"`
+	ReviewerID    string      `json:"reviewer_id"`
+	CurrentTurn   int         `json:"current_turn"`
+	MaxTurns      int         `json:"max_turns"`
+	Phase         string      `json:"phase"`
+	LastVerdict   PairVerdict `json:"last_verdict,omitempty"`
+	Turns         []PairTurn  `json:"turns,omitempty"`
+	InitialPrompt string      `json:"initial_prompt"`
+}
+
 // PairResult is the final result of a completed pair session.
 type PairResult struct {
 	SessionID    string      `json:"session_id"`

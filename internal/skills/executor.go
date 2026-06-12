@@ -31,10 +31,11 @@ func createChatter(cfg *llm.ModelConfig, logger *slog.Logger) llm.Chatter {
 
 // Executor errors.
 var (
-	ErrNoSkill       = errors.New("skill is nil")
-	ErrNoLLMClient   = errors.New("LLM client is nil")
-	ErrNoResolver    = errors.New("model resolver is nil")
-	ErrModelNotFound = errors.New("no suitable model found for skill requirements")
+	ErrNoSkill                = errors.New("skill is nil")
+	ErrNoLLMClient            = errors.New("LLM client is nil")
+	ErrNoResolver             = errors.New("model resolver is nil")
+	ErrModelNotFound          = errors.New("no suitable model found for skill requirements")
+	ErrPrerequisitesNotMet    = errors.New("skill prerequisites not met")
 )
 
 // ExecutorError wraps an execution error with context.
@@ -57,10 +58,13 @@ func (e *ExecutorError) Unwrap() error {
 
 // Executor executes skills using the LLM client.
 type Executor struct {
-	resolver   *llm.Resolver
-	client     llm.Chatter
-	logger     *slog.Logger
-	lazyLoader *LazySkillLoader
+	resolver             *llm.Resolver
+	client               llm.Chatter
+	logger               *slog.Logger
+	lazyLoader           *LazySkillLoader
+	prerequisiteChecker  PrerequisiteChecker
+	validatePrerequisites bool
+	toolMapper           *HermesToolMapper
 }
 
 // ExecutorOption is a functional option for configuring Executor.
@@ -88,6 +92,34 @@ func WithClient(client llm.Chatter) ExecutorOption {
 func WithLazyLoader(loader *LazySkillLoader) ExecutorOption {
 	return func(e *Executor) {
 		e.lazyLoader = loader
+	}
+}
+
+// WithPrerequisiteChecker sets a prerequisite checker for Hermes skill validation.
+// Nil checker is ignored (no prerequisite validation).
+func WithPrerequisiteChecker(checker PrerequisiteChecker) ExecutorOption {
+	return func(e *Executor) {
+		if checker != nil {
+			e.prerequisiteChecker = checker
+		}
+	}
+}
+
+// WithValidatePrerequisites enables or disables prerequisite validation.
+// Default is false (no validation).
+func WithValidatePrerequisites(enabled bool) ExecutorOption {
+	return func(e *Executor) {
+		e.validatePrerequisites = enabled
+	}
+}
+
+// WithToolMapper sets a Hermes tool mapper for translating tool references.
+// Nil mapper is ignored.
+func WithToolMapper(mapper *HermesToolMapper) ExecutorOption {
+	return func(e *Executor) {
+		if mapper != nil {
+			e.toolMapper = mapper
+		}
 	}
 }
 

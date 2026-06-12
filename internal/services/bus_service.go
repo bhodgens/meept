@@ -79,8 +79,15 @@ type BusStatsResponse struct {
 
 // Stats returns bus statistics.
 func (s *BusService) Stats(ctx context.Context) (*BusStatsResponse, error) {
-	// TODO: Get actual stats from bus
-	return &BusStatsResponse{}, nil
+	if s.bus == nil {
+		return &BusStatsResponse{}, nil
+	}
+
+	raw := s.bus.Stats()
+	resp := &BusStatsResponse{
+		Subscribers: raw["_total"],
+	}
+	return resp, nil
 }
 
 // Subscribe creates a bus subscription. Returns the subscriber and an unsubscribe function.

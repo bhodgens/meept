@@ -120,7 +120,14 @@ func (t *ExtendedTracker) StoreWithContext(name string, value *TaintedValue) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	ctx := t.CurrentContext()
+	// Inline context lookup — CurrentContext() acquires its own RLock,
+	// but we already hold the write lock here, so a recursive lock would
+	// deadlock. Access the contexts slice directly instead.
+	var ctx *Context
+	if len(t.contexts) > 0 {
+		ctx = t.contexts[len(t.contexts)-1]
+	}
+
 	if ctx != nil {
 		ctx.Variables[name] = value
 		t.Tracker.logger.Debug("taint stored in context",

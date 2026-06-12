@@ -189,6 +189,10 @@ func (s *FileSource) loadSkillFile(path string, priority int, skills map[string]
 	if skill.Source == "" {
 		skill.Source = "meept"
 	}
+	// Override source for Hermes-origin skills detected by parser.
+	if skill.SourceOrigin == "hermes" {
+		skill.Source = "hermes"
+	}
 
 	key := normalizeName(skill.Name)
 	existing, exists := skills[key]

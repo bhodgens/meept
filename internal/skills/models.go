@@ -12,7 +12,8 @@ const (
 	PriorityProject = 0 // .meept/skills/ (project-local)
 	PriorityUser    = 1 // ~/.meept/skills/ (user-global)
 	PriorityClaude  = 2 // ~/.claude/skills/ (Claude Code skills)
-	PrioritySystem  = 3 // ~/.config/meept/skills/ (system-wide)
+	PriorityHermes  = 3 // ~/.hermes/skills/ (Hermes-Agent skills)
+	PrioritySystem  = 4 // ~/.config/meept/skills/ (system-wide)
 )
 
 // Skill represents a parsed skill definition from a SKILL.md file.
@@ -41,7 +42,7 @@ type Skill struct {
 	// Path is the filesystem path the skill was loaded from.
 	Path string `json:"path"`
 
-	// Priority indicates the discovery tier (0=project, 1=user, 2=claude, 3=system).
+	// Priority indicates the discovery tier (0=project, 1=user, 2=claude, 3=hermes, 4=system).
 	Priority int `json:"priority"`
 
 	// Source identifies where the skill was discovered from.
@@ -70,6 +71,14 @@ type Skill struct {
 	// Values: "panel" (renders as a panel), "dialog" (opens a dialog), "external" (opens URL).
 	// Empty means default behavior (description + execute button).
 	UIType string `json:"ui_type,omitempty"`
+
+	// Prerequisites holds Hermes-Agent runtime requirements (env vars, commands, packages).
+	// Nil for Meept-native skills.
+	Prerequisites *HermesPrerequisites `json:"prerequisites,omitempty" yaml:"prerequisites,omitempty"`
+
+	// SourceOrigin tracks which skill system the skill originated from.
+	// Values: "meept" (default), "claude", "hermes".
+	SourceOrigin string `json:"source_origin,omitempty"`
 }
 
 // HasCapability checks if the skill requires a specific capability.
@@ -123,6 +132,10 @@ type SkillMetadata struct {
 
 	// Claude-specific fields (parsed separately, merged into Tags).
 	Trigger string `yaml:"trigger"`
+
+	// Hermes-specific fields (populated during 4th parse pass).
+	HermesPrereqs *HermesPrerequisites `yaml:"-"`
+	SourceOrigin  string               `yaml:"-"`
 }
 
 // DefaultMetadata returns a SkillMetadata with sensible defaults.
