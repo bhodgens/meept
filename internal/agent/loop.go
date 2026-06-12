@@ -582,6 +582,9 @@ type LoopOption func(*AgentLoop)
 // WithLLMClient sets the LLM client (concrete type for backward compatibility).
 func WithLLMClient(client *llm.Client) LoopOption {
 	return func(l *AgentLoop) {
+		if client == nil {
+			return
+		}
 		l.llm = client
 		l.llmClient = client
 	}
@@ -1844,8 +1847,15 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 							"rule", abortErr.RuleName,
 							"iteration", iteration,
 						)
-						// Fall through to handle no-content response
-						response, _ = l.chatWithFailover(ctx, messages, chatOpts...)
+							// Fall through to handle no-content response
+						response, err = l.chatWithFailover(ctx, messages, chatOpts...)
+						if err != nil {
+							l.logger.Error("LLM call failed after TTSR retry",
+								"iteration", iteration,
+								"error", err,
+							)
+							return "", fmt.Errorf("LLM call failed after TTSR retry: %w", err)
+						}
 						if response == nil || response.Content == "" {
 							l.logger.Error("LLM call failed",
 								"iteration", iteration,
