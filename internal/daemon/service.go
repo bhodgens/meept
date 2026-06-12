@@ -13,8 +13,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-
-	"github.com/kardianos/service"
 )
 
 // serviceDependencies is a var so it can be overridden in tests.
@@ -55,48 +53,37 @@ func DefaultServiceConfig() (*ServiceConfig, error) {
 		Description: "Meept AI assistant daemon with multi-agent task orchestration",
 		StateDir:    stateDir,
 		PIDFile:     filepath.Join(stateDir, "meept.pid"),
-		Arguments:   []string{"-f"},
+		Arguments:   []string{},
 	}, nil
 }
 
-// DaemonService satisfies kardianos/service.Interface and also provides the
-// DaemonController contract expected by the HTTP and services layers.
-//
-// When the daemon is installed as a system service (launchd on macOS, systemd
-// on Linux, etc.) kardianos/service manages the plist/unit generation and
-// launchctl/systemctl interactions, replacing the hand-rolled code in
-// launchd.go.
+// DaemonService provides the DaemonController contract expected by the HTTP
+// and services layers.  It delegates to ServiceManager for actual platform
+// service management (launchd on macOS), keeping the PID-file based
+// IsRunning/PID/Uptime methods for status queries.
 //
 // Usage:
 //
 //	cfg, _ := DefaultServiceConfig()
-//	mgr, _ := NewServiceManager(cfg)
+//	mgr, _ := NewDaemonService(cfg)
 //	mgr.Install()   // registers as system service
-//	mgr.Start()     // starts via the service manager
-//	mgr.Stop()      // stops via the service manager
+//	mgr.StartService() // starts via launchd
+//	mgr.StopService()  // stops via launchd
 //	mgr.Uninstall() // removes the system service
 type DaemonService struct {
-	cfg    *ServiceConfig
-	svc    service.Service
-	logger service.Logger
+	cfg *ServiceConfig
+	sm  *ServiceManager
 
 	// isRunning is set to true when Start is called and cleared on Stop.
 	isRunning atomic.Bool
 }
 
-// NewDaemonService creates a DaemonService backed by kardianos/service.
-// It discovers the daemon executable path automatically.  The returned
-// DaemonService implements service.Interface but callers typically use the
-// higher-level Install/Uninstall/Start/Stop/Status methods instead.
+// NewDaemonService creates a DaemonService backed by ServiceManager for
+// platform service lifecycle.  It discovers the daemon executable path
+// automatically.
 func NewDaemonService(cfg *ServiceConfig) (*DaemonService, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("service config must not be nil")
-	}
-
-	// Resolve the daemon executable path.
-	daemonExe, err := os.Executable()
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve executable path: %w", err)
 	}
 
 	// Ensure state directory exists.
@@ -104,80 +91,44 @@ func NewDaemonService(cfg *ServiceConfig) (*DaemonService, error) {
 		return nil, fmt.Errorf("failed to create state directory: %w", err)
 	}
 
-	svcCfg := &service.Config{
-		Name:             cfg.Name,
-		DisplayName:      cfg.DisplayName,
-		Description:      cfg.Description,
-		Executable:       daemonExe,
-		Arguments:         cfg.Arguments,
-		Dependencies:      serviceDependencies,
-		WorkingDirectory:  cfg.StateDir,
-		Option:           service.KeyValue{},
+	// Create the underlying ServiceManager for platform operations.
+	smCfg := &ServiceManagerConfig{
+		LogDir: cfg.StateDir,
+		Name:   cfg.Name,
 	}
-
-	// Set environment variables for the service.
-	// Use the user's current PATH to ensure custom bin directories are available
-	userPath := os.Getenv("PATH")
-	if userPath == "" {
-		userPath = "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin"
-	}
-	svcCfg.EnvVars = map[string]string{
-		"PATH": userPath,
-	}
-
-	// Request that kardianos/service redirects stdout/stderr to log files
-	// (used on macOS/darwin launchd platform).
-	svcCfg.Option["LogOutput"] = true
-
-	// Create the kardianos/service.Service.
-	svc, err := service.New(nil, svcCfg)
+	sm, err := NewServiceManager(smCfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create service: %w", err)
+		return nil, fmt.Errorf("failed to create service manager: %w", err)
 	}
 
 	return &DaemonService{
-		cfg:    cfg,
-		svc:    svc,
-		logger: &noopServiceLogger{},
+		cfg: cfg,
+		sm:  sm,
 	}, nil
 }
 
 // ---------------------------------------------------------------------------
-// service.Interface methods (required by kardianos/service)
+// Higher-level methods matching the DaemonController interface
 //
-// These are called by kardianos/service when Start/Stop are invoked through
-// the service manager.  The daemon main function would use:
+// These implement the same contract as DaemonControl in launchd.go:
 //
-//	svc, _ := service.New(daemonService, svcCfg)
-//	svc.Run()
+//	interface { IsRunning() bool; PID() int; Uptime() time.Duration; Restart(ctx) error }
 //
-// where daemonService.Start launches the actual daemon logic and
-// daemonService.Stop triggers graceful shutdown.
+// This allows DaemonService to be used as a drop-in replacement for
+// DaemonControl in the HTTP server and service registry wiring.
 // ---------------------------------------------------------------------------
 
-// Start implements service.Interface.  Called by the service manager when the
-// service is started.  In the full integration path the daemon's Run()
-// context would be passed here.
-// Start implements service.Interface and is called by kardianos/service
-// when running in in-process mode (via service.Run()).
-// Note: The CLI uses StartService() which delegates to the platform service
-// manager (launchd on macOS). Start() is only used for in-process mode.
-func (ds *DaemonService) Start(s service.Service) error {
-	ds.isRunning.Store(true)
-	ds.logger.Info("DaemonService.Start() called - in-process service mode",
-		"executable", s.String(),
-	)
-	// For in-process mode, we would typically call daemon.Run() here.
-	// However, the current implementation uses StartService() for external
-	// service management via launchd/ServiceManager.
-	// TODO: Wire daemon.Run() for full in-process support
-	return nil
-}
-
-// Stop implements service.Interface.
-func (ds *DaemonService) Stop(_ service.Service) error {
-	ds.isRunning.Store(false)
-	return nil
+// IsRunning returns true if the daemon process is alive (checks PID file).
+func (ds *DaemonService) IsRunning() bool {
+	pid := ds.readPID()
+	if pid == 0 {
+		return false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 // ---------------------------------------------------------------------------
@@ -251,31 +202,36 @@ func (ds *DaemonService) Restart(_ context.Context) error {
 // ---------------------------------------------------------------------------
 
 // Install registers the daemon as a system service (launchd agent on macOS,
-// systemd unit on Linux, etc.).
+// systemd unit on Linux, etc.).  Delegates to ServiceManager.
 func (ds *DaemonService) Install() error {
-	return ds.svc.Install()
+	return ds.sm.Install()
 }
 
-// Uninstall removes the system service registration.
+// Uninstall removes the system service registration.  Delegates to ServiceManager.
 func (ds *DaemonService) Uninstall() error {
-	// Stop first if running.
-	_ = ds.StopService()
-	return ds.svc.Uninstall()
+	return ds.sm.Uninstall()
 }
 
-// StartService starts the daemon via the service manager.
+// StartService starts the daemon via the platform service manager (launchd).
 func (ds *DaemonService) StartService() error {
-	return ds.svc.Start()
+	return ds.sm.Start()
 }
 
-// StopService stops the daemon via the service manager.
+// StopService stops the daemon via the platform service manager (launchd).
 func (ds *DaemonService) StopService() error {
-	return ds.svc.Stop()
+	return ds.sm.Stop()
 }
 
 // Status queries the platform service manager for the current service status.
-func (ds *DaemonService) Status() (service.Status, error) {
-	return ds.svc.Status()
+// Returns status constants: 0 = unknown, 1 = running, 2 = stopped.
+func (ds *DaemonService) Status() (int, error) {
+	if ds.sm.IsRunning() {
+		return 1, nil
+	}
+	if ds.sm.IsLoaded() {
+		return 2, nil
+	}
+	return 0, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -323,16 +279,5 @@ func cleanElapsedTime(s string) string {
 	return string(b)
 }
 
-// noopServiceLogger discards service log output.
-type noopServiceLogger struct{}
-
-func (l *noopServiceLogger) Error(v ...interface{}) error  { return nil }
-func (l *noopServiceLogger) Warning(v ...interface{}) error { return nil }
-func (l *noopServiceLogger) Info(v ...interface{}) error   { return nil }
-
-func (l *noopServiceLogger) Errorf(format string, a ...interface{}) error  { return nil }
-func (l *noopServiceLogger) Warningf(format string, a ...interface{}) error { return nil }
-func (l *noopServiceLogger) Infof(format string, a ...interface{}) error   { return nil }
-
-// Ensure DaemonService satisfies the service.Interface at compile time.
-var _ service.Interface = (*DaemonService)(nil)
+// Ensure DaemonService satisfies the DaemonController interface at compile time.
+var _ DaemonController = (*DaemonService)(nil)

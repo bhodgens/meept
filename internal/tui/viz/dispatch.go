@@ -356,8 +356,8 @@ func (v *DispatchViz) flushPendingActivity() {
 	}
 }
 
-// pushActivity records a pending activity update from a typed event.
-func (v *DispatchViz) pushActivity(agentID, state string, progress float64) {
+// PushActivity records a pending activity update from a typed event.
+func (v *DispatchViz) PushActivity(agentID, state string, progress float64) {
 	v.pendingEventsMu.Lock()
 	v.pendingActivity[agentID] = &agentActivityEntry{
 		agentID:  agentID,
@@ -377,7 +377,7 @@ func (v *DispatchViz) RegisterEventListeners(emitter TypedEventEmitter) {
 	// Turn start: agent begins reasoning.
 	emitter.On(AgentEventTurnStart, "viz.turn-start",
 		func(ctx context.Context, event AgentEvent) {
-			v.pushActivity(event.AgentID, "reasoning", 0)
+			v.PushActivity(event.AgentID, "reasoning", 0)
 		},
 	)
 
@@ -395,14 +395,14 @@ func (v *DispatchViz) RegisterEventListeners(emitter TypedEventEmitter) {
 			if data.HadToolCalls {
 				state = "tool_exec"
 			}
-			v.pushActivity(event.AgentID, state, 1.0)
+			v.PushActivity(event.AgentID, state, 1.0)
 		},
 	)
 
 	// Tool execution start: agent is executing a tool.
 	emitter.On(AgentEventToolExecutionStart, "viz.tool-start",
 		func(ctx context.Context, event AgentEvent) {
-			v.pushActivity(event.AgentID, "tool_exec", 0)
+			v.PushActivity(event.AgentID, "tool_exec", 0)
 		},
 	)
 
@@ -422,7 +422,7 @@ func (v *DispatchViz) RegisterEventListeners(emitter TypedEventEmitter) {
 			case "streaming":
 				progress = 0.6
 			}
-			v.pushActivity(event.AgentID, "tool_exec", progress)
+			v.PushActivity(event.AgentID, "tool_exec", progress)
 		},
 	)
 
@@ -434,11 +434,11 @@ func (v *DispatchViz) RegisterEventListeners(emitter TypedEventEmitter) {
 				return
 			}
 			if !data.Success {
-				v.pushActivity(event.AgentID, "error", 1.0)
+				v.PushActivity(event.AgentID, "error", 1.0)
 				return
 			}
 			// Tool done, agent transitions back to reasoning for the next turn.
-			v.pushActivity(event.AgentID, "reasoning", 1.0)
+			v.PushActivity(event.AgentID, "reasoning", 1.0)
 		},
 	)
 }

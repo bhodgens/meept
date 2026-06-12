@@ -517,6 +517,21 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 				cmds = append(cmds, s.refreshData())
 			case "task.planned", "task.completed", EventTaskFailed:
 				cmds = append(cmds, s.refreshData())
+
+			// DispatchViz: bridge typed agent events to the visualization.
+			// These arrive on "agent.event.<type>" topics via the daemon's
+			// EventEmitter bridgeToBus. The payload is the full AgentEvent
+			// JSON (agent_id, data, etc.) deserialized as map[string]any.
+			case "agent.event.turn_start":
+				s.handleVizTurnStart(e)
+			case "agent.event.turn_end":
+				s.handleVizTurnEnd(e)
+			case "agent.event.tool_execution_start":
+				s.handleVizToolExecStart(e)
+			case "agent.event.tool_execution_update":
+				s.handleVizToolExecUpdate(e)
+			case "agent.event.tool_execution_end":
+				s.handleVizToolExecEnd(e)
 			}
 		}
 		if len(cmds) > 0 {
@@ -828,6 +843,101 @@ func (s *SidebarModel) handleReviewCompletedEvent(e BusEvent) {
 		s.tasksData[i].RevisionCount = revisionCount
 		break
 	}
+}
+
+// --- DispatchViz typed event handlers ---
+// These bridge agent.event.* bus topics to pushActivity calls on the
+// DispatchViz model, mirroring the daemon-side RegisterEventListeners
+// logic. The payload is the full AgentEvent JSON envelope with a nested
+// "data" object.
+
+// vizAgentInfo extracts agent_id and the nested data map from a typed
+// agent event bus payload. Returns nil if the payload can't be decoded.
+func vizAgentInfo(payload any) (agentID string, data map[string]any) {
+	pm, ok := payload.(map[string]any)
+	if !ok {
+		return "", nil
+	}
+	id, _ := pm["agent_id"].(string)
+	d, _ := pm["data"].(map[string]any)
+	return id, d
+}
+
+func (s *SidebarModel) handleVizTurnStart(e BusEvent) {
+	if s.viz == nil {
+		return
+	}
+	agentID, _ := vizAgentInfo(e.Payload)
+	if agentID == "" {
+		return
+	}
+	s.viz.PushActivity(agentID, "reasoning", 0)
+}
+
+func (s *SidebarModel) handleVizTurnEnd(e BusEvent) {
+	if s.viz == nil {
+		return
+	}
+	agentID, data := vizAgentInfo(e.Payload)
+	if agentID == "" {
+		return
+	}
+	state := "waiting"
+	if data != nil {
+		if hadTools, ok := data["had_tool_calls"].(bool); ok && hadTools {
+			state = "tool_exec"
+		}
+	}
+	s.viz.PushActivity(agentID, state, 1.0)
+}
+
+func (s *SidebarModel) handleVizToolExecStart(e BusEvent) {
+	if s.viz == nil {
+		return
+	}
+	agentID, _ := vizAgentInfo(e.Payload)
+	if agentID == "" {
+		return
+	}
+	s.viz.PushActivity(agentID, "tool_exec", 0)
+}
+
+func (s *SidebarModel) handleVizToolExecUpdate(e BusEvent) {
+	if s.viz == nil {
+		return
+	}
+	agentID, data := vizAgentInfo(e.Payload)
+	if agentID == "" || data == nil {
+		return
+	}
+	progress := 0.5 // default mid-progress
+	if status, ok := data["status"].(string); ok {
+		switch status {
+		case "running", "in_progress":
+			progress = 0.3
+		case "nearly_done", "finishing":
+			progress = 0.8
+		case "streaming":
+			progress = 0.6
+		}
+	}
+	s.viz.PushActivity(agentID, "tool_exec", progress)
+}
+
+func (s *SidebarModel) handleVizToolExecEnd(e BusEvent) {
+	if s.viz == nil {
+		return
+	}
+	agentID, data := vizAgentInfo(e.Payload)
+	if agentID == "" || data == nil {
+		return
+	}
+	success, _ := data["success"].(bool)
+	if !success {
+		s.viz.PushActivity(agentID, "error", 1.0)
+		return
+	}
+	s.viz.PushActivity(agentID, "reasoning", 1.0)
 }
 
 // syncVizWithData synchronizes the visualization with current agent/worker data.

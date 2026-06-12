@@ -41,6 +41,10 @@ func main() {
 	rootCmd.Flags().StringVarP(&socketPath, "socket", "s", "", "Unix socket path (default: ~/.meept/meept.sock)")
 	rootCmd.Flags().StringVarP(&stateDir, "state-dir", "d", defaultStateDir, "State directory")
 	rootCmd.Flags().BoolVar(&debug, "debug", false, "Enable debug logging")
+	// -f is accepted for backward compatibility with existing launchd plists.
+	// The daemon always runs in the foreground (daemon.Run() blocks).
+	var foreground bool
+	rootCmd.Flags().BoolVarP(&foreground, "foreground", "f", false, "Run in foreground (default, no-op)")
 
 	// Version command
 	rootCmd.AddCommand(&cobra.Command{

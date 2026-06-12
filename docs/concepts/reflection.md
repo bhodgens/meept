@@ -180,9 +180,9 @@ func getUser(id int) *User {
 ```
 ````
 
-**Known bug:** `parseFixResponse` does NOT correctly parse per-file code blocks. It broadcasts the same content to ALL target files. This is a **critical bug** that can corrupt files when multiple files have errors.
+**Fixed:** `parseFixResponse` now correctly parses per-file code blocks and tool call JSON. Only referenced files are targeted for fixes.
 
-See: `docs/plans/2026-06-12-review-gaps-research-design.md` - Task 2
+See: `docs/plans/2026-06-12-review-gaps-research-design.md` - Task 2 (resolved)
 
 ## Configuration
 
@@ -191,7 +191,7 @@ See: `docs/plans/2026-06-12-review-gaps-research-design.md` - Task 2
   agent: {
     reflection: {
       enabled: true,
-      max_reflections: 3,  // NOTE: This is dead code - orchestrator controls retry
+      max_reflections: 3,  // Deprecated: Use orchestrator's external retry (3-pass fixed)
       auto_lint: true,
       auto_test: true,
     },
@@ -199,7 +199,7 @@ See: `docs/plans/2026-06-12-review-gaps-research-design.md` - Task 2
 }
 ```
 
-**Important:** `max_reflections` config field exists but is **non-functional**. The orchestrator's hardcoded 3-pass retry is the actual behavior.
+**Note:** `max_reflections` is deprecated. The orchestrator's hardcoded 3-pass retry is the actual behavior.
 
 ## When Reflection Runs
 
@@ -257,37 +257,45 @@ Yes → Task complete
 No  → Trigger replan
 ```
 
-## KnownIssues and Technical Debt
+## Known Issues
 
-### 1. Dead `MaxReflections` Loop
+### 1. Orchestrator-Managed Retry (Fixed)
 
-**File:** `internal/agent/reflection.go:85-164`
+**Status:** Fixed - single-pass design with orchestrator retry
 
-The `for i := 0; i < re.config.MaxReflections; i++` loop never iterates. Every code path returns before reaching the bottom of the loop body.
+The `RunReflection` function now explicitly executes a **single pass**. The previous `MaxReflections` loop was removed. Multi-pass retry is handled by the orchestrator externally (`orchestrator.go:654-744`):
 
-**Fix:** Remove the loop wrapper, keep function body. Document orchestrator's external retry.
+1. Call `RunReflection()` -> apply `PendingFix`
+2. Re-call `RunReflection()` on fixed files
+3. Apply one final fix **without re-verification**
 
-### 2. `parseFixResponse` Broadcasts to All Files
+This design separates concerns:
+- **ReflectionEngine**: Diagnose errors, request fixes (single pass)
+- **Orchestrator**: Apply fixes, manage retry count
 
-**File:** `internal/agent/reflection.go:295-319`
+### 2. `parseFixResponse` File Filtering (Fixed)
 
-`parseFixResponse` sets `targetFiles` to ALL original files, regardless of what the LLM response contains. `applyFix` writes the same content to every file.
+**Status:** Fixed - now parses per-file code blocks
 
-**Impact:** Multi-file errors cause file corruption.
+The `parseFixResponse` function now correctly:
+1. Parses `file_edit` tool call JSON blocks to extract `filepath` from arguments
+2. Parses markdown code blocks with file path annotations (`// File: path`, `## File: path`)
+3. Falls back to filename mention heuristic if no structured format found
+4. Returns only files actually referenced in the LLM response
 
-### 3. Missing Documentation
+Tests added:
+- `TestParseFixResponse_MultiFile_ParsesPerFileCodeBlocks`
+- `TestParseFixResponse_FiltersUnreferencedFiles`
+- `TestParseFixResponse_ToolCallJSON`
 
-- No concept doc in `docs/concepts/`
-- Architecture diagram doesn't show reflection
-- Implementation plan is outdated (shows incorrect `continue` statements)
+### 3. Test Coverage Gaps
 
-### 4. No Test Coverage
+**Status:** Partially addressed
 
-No tests for:
-- `parseFixResponse` parsing logic
-- `applyFix` file application
+Tests still needed:
+- `applyFix` file application (integration test with orchestrator)
 - `extractCodeFromMarkdown` code block extraction
-- End-to-end reflection loop
+- End-to-end reflection loop with mock LLM
 
 ## Related Documentation
 

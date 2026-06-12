@@ -34,8 +34,8 @@ func (l *launchService) Init(*service.Service) error { return nil }
 
 func (l *launchService) Start(s service.Service) error {
 	_ = s
-	// Exec the daemon binary in foreground mode.
-	cmd := exec.Command(l.daemonPath, "-f") //nolint:gosec
+	// Exec the daemon binary. daemon.Run() blocks in the foreground by default.
+	cmd := exec.Command(l.daemonPath) //nolint:gosec
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
 }
@@ -259,7 +259,7 @@ func (m *ServiceManager) Install() error {
 		DisplayName: "Meept Daemon",
 		Description: "Meept AI daemon -- agent loop orchestration",
 		Executable:  m.daemonPath,
-		Arguments:   []string{"-f"},
+		Arguments:   []string{},
 	}
 
 	svc, err := service.New(prg, cfg)
@@ -298,7 +298,6 @@ func (m *ServiceManager) writePlistAndLoad(label string) {
     <key>ProgramArguments</key>
     <array>
         <string>%s</string>
-        <string>-f</string>
     </array>
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
@@ -335,7 +334,7 @@ func (m *ServiceManager) Uninstall() error {
 		DisplayName: "Meept Daemon",
 		Description: "Meept AI daemon",
 		Executable:  m.daemonPath,
-		Arguments:   []string{"-f"},
+		Arguments:   []string{},
 	}
 	svc, err := service.New(prg, cfg)
 	if err == nil {
@@ -365,7 +364,7 @@ func (m *ServiceManager) Start() error {
 		DisplayName: "Meept Daemon",
 		Description: "Meept AI daemon",
 		Executable:  m.daemonPath,
-		Arguments:   []string{"-f"},
+		Arguments:   []string{},
 	}
 	svc, err := service.New(prg, cfg)
 	if err == nil {
