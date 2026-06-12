@@ -143,7 +143,8 @@ func (h *PTYHandler) streamSessionWS(w http.ResponseWriter, r *http.Request, ses
 
 	sess := h.ptyMgr.GetSession(sessionID)
 	if sess == nil {
-		http.Error(w, "Session not found", http.StatusNotFound)
+		conn.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseNormalClosure, "session not found"))
 		return
 	}
 

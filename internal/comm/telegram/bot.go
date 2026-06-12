@@ -321,7 +321,7 @@ func (b *Bot) SendMessage(ctx context.Context, chatID int64, text string) error 
 		params := url.Values{}
 		params.Set("chat_id", fmt.Sprintf("%d", chatID))
 		params.Set("text", msg)
-		params.Set("parse_mode", "Markdown")
+		params.Set("parse_mode", "MarkdownV2")
 
 		apiURL := fmt.Sprintf("%s%s/sendMessage", telegramAPIBase, b.config.Token)
 

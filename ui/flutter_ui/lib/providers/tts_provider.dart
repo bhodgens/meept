@@ -4,7 +4,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/tts_service.dart';
 import '../services/storage_service.dart';
-import '../core/constants.dart';
 
 /// TTS state enum.
 enum TtsState {
@@ -66,6 +65,11 @@ class TtsNotifier extends StateNotifier<TtsState> {
 
   /// Initialize the TTS service.
   Future<bool> initialize() async {
+    _service.setOnComplete(() {
+      if (state == TtsState.speaking) {
+        state = TtsState.idle;
+      }
+    });
     return await _service.initialize();
   }
 

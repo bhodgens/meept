@@ -1248,7 +1248,6 @@ func (s *Server) handleRateLimitSummary(w http.ResponseWriter, r *http.Request) 
 }
 
 // ===== Additional Queue Endpoints =====
-// ===== Additional Queue Endpoints =====
 
 // handleQueueGet handles GET /api/v1/queue/jobs/{id}.
 func (s *Server) handleQueueGet(w http.ResponseWriter, r *http.Request) {
@@ -1376,8 +1375,6 @@ func (s *Server) handleQueueRetry(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "retried"})
 }
-
-// ===== Additional Task Endpoints =====
 
 // ===== Additional Task Endpoints =====
 

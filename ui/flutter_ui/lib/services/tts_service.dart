@@ -72,7 +72,7 @@ class TtsService {
 
     try {
       // Set default configuration from current config
-      await _flutterTts.setLanguage(_config.voice.split('_').first ?? "en-US");
+      await _flutterTts.setLanguage(_config.voice.split('_').first);
       await _flutterTts.setSpeechRate(_config.rate);
       await _flutterTts.setVolume(_config.volume);
       await _flutterTts.setPitch(1.0);
@@ -198,7 +198,7 @@ class TtsService {
     if (!_initialized) {
       await initialize();
     }
-    await _flutterTts.setVoice(voiceName);
+    await _flutterTts.setVoice({"name": voiceName, "locale": voiceName.split('-').first});
   }
 
   /// Set the speech rate (0.0 to 1.0).
@@ -216,5 +216,10 @@ class TtsService {
   Future<void> setVolume(double volume) async {
     _config.volume = volume;
     await _flutterTts.setVolume(volume);
+  }
+
+  /// Set a callback invoked when speech completes.
+  void setOnComplete(Function() callback) {
+    _onComplete = callback;
   }
 }

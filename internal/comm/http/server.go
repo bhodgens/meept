@@ -685,7 +685,6 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/config/agents/{id}", s.handleDeleteAgent)
 
 	// Daemon control
-	// Daemon control
 	mux.HandleFunc("GET /api/v1/daemon/status", s.handleDaemonStatus)
 	mux.HandleFunc("POST /api/v1/daemon/restart", s.handleDaemonRestart)
 	mux.HandleFunc("POST /api/v1/daemon/start", s.handleDaemonStart)
@@ -719,6 +718,9 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/chat/stream", s.handleChatStream)
 	mux.HandleFunc("GET /api/v1/chat/queue/{id}", s.handleChatQueueStatus)
 	mux.HandleFunc("POST /api/v1/chat/with-agent", s.handleChatWithAgent)
+	mux.HandleFunc("POST /api/v1/chat/steer", s.handleChatSteer)
+	mux.HandleFunc("POST /api/v1/chat/steer-explicit", s.handleChatSteerExplicit)
+	mux.HandleFunc("POST /api/v1/chat/followup", s.handleChatFollowUp)
 
 	// Memory endpoints
 	mux.HandleFunc("POST /api/v1/memory/query", s.handleMemoryQuery)
@@ -807,8 +809,6 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 
 	// Security endpoints
 	mux.HandleFunc("POST /api/v1/security/check", s.handleSecurityCheck)
-
-	// Scheduler endpoints
 
 	// Scheduler endpoints
 	mux.HandleFunc("GET /api/v1/scheduler/jobs", s.handleSchedulerListJobs)

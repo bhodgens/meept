@@ -57,7 +57,6 @@ class ChatNotifier extends StateNotifier<ChatState> {
   final ApiClient apiClient;
   final WebSocketService websocket;
   final TtsNotifier ttsNotifier;
-  StreamSubscription<Map<String, dynamic>>? _chatSubscription;
   StreamSubscription<Map<String, dynamic>>? _wsChatSubscription;
   String? _sessionId;
   int _loadGeneration = 0;
@@ -304,8 +303,6 @@ class ChatNotifier extends StateNotifier<ChatState> {
   void dispose() {
     _sendingTimeoutTimer?.cancel();
     _sendingTimeoutTimer = null;
-    _chatSubscription?.cancel();
-    _chatSubscription = null;
     _wsChatSubscription?.cancel();
     _wsChatSubscription = null;
     super.dispose();

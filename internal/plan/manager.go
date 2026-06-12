@@ -21,6 +21,7 @@ import (
 type TaskCreator interface {
 	CreateTask(ctx context.Context, name, description string) (*task.Task, error)
 	CreateTaskStep(ctx context.Context, taskID, description string, sequence int) (*task.TaskStep, error)
+	UpdateTaskStep(ctx context.Context, step *task.TaskStep) error
 	LinkSession(ctx context.Context, taskID, sessionID string) error
 }
 
@@ -395,15 +396,36 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 		// Create TaskSteps from parsed step details.
 		pp, hasParsed := parsedPhases[phase.Sequence]
 		if hasParsed {
+			// First pass: create all steps and collect (stepNumber -> stepID) mapping.
+			stepIDByNumber := make(map[int]string)
+			createdSteps := make(map[int]*task.TaskStep) // stepNumber -> created step
 			for seq, step := range pp.Steps {
 				ts, err := m.taskCreator.CreateTaskStep(ctx, childTask.ID, step.Description, seq+1)
 				if err != nil {
 					return fmt.Errorf("create task step %d for phase %s: %w", step.Number, phase.Name, err)
 				}
-
-				// Set dependencies from parsed depends_on (step numbers -> step IDs).
-				// We resolve these after all steps are created, so store a marker for now.
-				_ = ts // Step is persisted via CreateTaskStep
+				stepIDByNumber[step.Number] = ts.ID
+				createdSteps[step.Number] = ts
+			}
+			// Second pass: resolve depends_on step numbers to step IDs and update.
+			for _, step := range pp.Steps {
+				if len(step.DependsOn) == 0 {
+					continue
+				}
+				ts := createdSteps[step.Number]
+				var depIDs []string
+				for _, num := range step.DependsOn {
+					if depID, ok := stepIDByNumber[num]; ok {
+						depIDs = append(depIDs, depID)
+					} else {
+						m.logger.Warn("plan step depends_on references unknown step number, skipping",
+							"step_id", ts.ID, "dep_number", num)
+					}
+				}
+				ts.DependsOn = depIDs
+				if err := m.taskCreator.UpdateTaskStep(ctx, ts); err != nil {
+					return fmt.Errorf("update dependencies for step %d in phase %s: %w", step.Number, phase.Name, err)
+				}
 			}
 		} else {
 			// No parsed steps; create a single placeholder step.

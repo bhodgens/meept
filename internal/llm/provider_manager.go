@@ -310,51 +310,60 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 // ChatWithProgress sends a chat completion request with progress reporting.
 // Attempts each provider in order, calling progress callback on attempt starts and failures.
 func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error) {
-	ordered := pm.getOrderedProviders()
 	pm.mu.RLock()
-	maxRetries := pm.config.MaxRetries
-	pm.mu.RUnlock()
-
-	if maxRetries <= 0 {
-		maxRetries = len(ordered)
+	if !pm.initialized || len(pm.providers) == 0 {
+		pm.mu.RUnlock()
+		return nil, errors.New("provider manager not initialized or no providers configured")
 	}
 
-	var lastErr error
-	for attempt := 0; attempt < maxRetries && attempt < len(ordered); attempt++ {
-		entry := ordered[attempt]
-		chatter := entry.Chatter
+	orderedProviders := pm.getOrderedProviders()
+	healthSnapshot := make([]ProviderStatus, len(orderedProviders))
+	for i, e := range orderedProviders {
+		healthSnapshot[i] = e.Health.Status
+	}
+	pm.mu.RUnlock()
 
-		if !pm.isProviderHealthy(entry) {
-			if progress != nil {
-				progress(ProgressEvent{Type: "provider_skip", Provider: entry.Config.ProviderID, Message: "provider unhealthy"})
-			}
+	var lastErr error
+	var attempts int
+
+	for i, entry := range orderedProviders {
+		if healthSnapshot[i] == ProviderStatusDisabled {
 			continue
 		}
+		if healthSnapshot[i] == ProviderStatusUnhealthy && len(orderedProviders) > 1 {
+			if attempts == 0 {
+				if progress != nil {
+					progress(ProgressStageThinking, fmt.Sprintf("Skipping unhealthy provider %s", entry.Config.ProviderID))
+				}
+				continue
+			}
+		}
 
+		attempts++
 		if progress != nil {
-			progress(ProgressEvent{Type: "provider_attempt", Provider: entry.Config.ProviderID, Attempt: attempt + 1})
+			progress(ProgressStageStarting, fmt.Sprintf("Attempting provider %s (attempt %d)", entry.Config.ProviderID, attempts))
 		}
 
 		start := time.Now()
-		resp, err := chatter.Chat(ctx, messages, opts...)
+		resp, err := entry.Chatter.Chat(ctx, messages, opts...)
 		latency := time.Since(start)
 
 		if err != nil {
 			lastErr = err
 			if progress != nil {
-				progress(ProgressEvent{Type: "provider_error", Provider: entry.Config.ProviderID, Error: err, Latency: latency})
+				progress(ProgressStageDone, fmt.Sprintf("Provider %s failed: %v (%s)", entry.Config.ProviderID, err, latency.Round(time.Millisecond)))
 			}
 			continue
 		}
 
 		if progress != nil {
-			progress(ProgressEvent{Type: "provider_success", Provider: entry.Config.ProviderID, Latency: latency})
+			progress(ProgressStageStreaming, fmt.Sprintf("Provider %s responded (%s)", entry.Config.ProviderID, latency.Round(time.Millisecond)))
 		}
 		return resp, nil
 	}
 
 	if lastErr != nil {
-		return nil, fmt.Errorf("all %d provider(s) failed (last: %w)", len(ordered), lastErr)
+		return nil, fmt.Errorf("all %d provider(s) failed (last: %w)", len(orderedProviders), lastErr)
 	}
 	return nil, fmt.Errorf("no providers available")
 }

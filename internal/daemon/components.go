@@ -213,6 +213,9 @@ type Components struct {
 	// Notification event emitter (shared between agent loop and HTTP server)
 	NotificationEmitter *EventEmitter
 
+	// Agent typed event emitter (for metrics and visualization wiring)
+	AgentEventEmitter *agent.EventEmitter
+
 	Logger *slog.Logger
 }
 
@@ -719,6 +722,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 
 	agentOpts = append(agentOpts, agent.WithEventEmitter(emitter), agent.WithHookRegistry(hookRegistry))
+	c.AgentEventEmitter = emitter
 
 	// Note: memvid and taskStore are wired AFTER their initialization below
 	c.AgentLoop = agent.NewAgentLoop(agentOpts...)

@@ -38,8 +38,6 @@ type Resolver struct {
 }
 
 // NewResolver creates a new model resolver.
-
-// NewResolver creates a new model resolver.
 func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
 	if logger == nil {
 		logger = slog.Default()

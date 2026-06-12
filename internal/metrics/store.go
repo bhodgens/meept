@@ -305,12 +305,14 @@ func (s *Store) flush() {
 
 	tx, err := s.db.Begin()
 	if err != nil {
+		s.logger.Warn("Failed to begin transaction for metrics flush", "error", err)
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.Prepare("INSERT INTO metrics_live (timestamp, metric_name, value, tags) VALUES (?, ?, ?, ?)")
 	if err != nil {
+		s.logger.Warn("Failed to prepare insert statement for metrics flush", "error", err)
 		return
 	}
 	defer stmt.Close()
@@ -321,10 +323,14 @@ func (s *Store) flush() {
 			data, _ := json.Marshal(m.tags)
 			tagsJSON = string(data)
 		}
-		_, _ = stmt.Exec(m.timestamp, m.name, m.value, tagsJSON)
+		if _, err := stmt.Exec(m.timestamp, m.name, m.value, tagsJSON); err != nil {
+			s.logger.Warn("Failed to insert metric row", "error", err)
+		}
 	}
 
-	if err := tx.Commit(); err == nil {
+	if err := tx.Commit(); err != nil {
+		s.logger.Warn("Failed to commit metrics flush", "error", err)
+	} else {
 		s.batch = s.batch[:0]
 		s.lastFlush = time.Now()
 

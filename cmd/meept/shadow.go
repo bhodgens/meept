@@ -52,7 +52,7 @@ func newShadowStatusCmd() *cobra.Command {
 
 			if !manager.IsEnabled() {
 				fmt.Println("shadow training: disabled")
-				fmt.Println("\nTo enable, add [shadow] section to ~/.meept/meept.toml")
+				fmt.Println("\nTo enable, add [shadow] section to ~/.meept/meept.json5")
 				return nil
 			}
 

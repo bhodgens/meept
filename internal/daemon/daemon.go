@@ -425,6 +425,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		coll = metrics.NewCollector(metricsStore, msgBus, nil)
 	}
 
+	// Wire typed event listeners for rich metrics (token tracking, turn timing, etc.)
+	if coll != nil && components != nil && components.AgentEventEmitter != nil {
+		coll.RegisterEventListeners(agentEventAdapter{components.AgentEventEmitter})
+		logger.Info("Metrics collector wired to agent event emitter")
+	}
+
 	// --- Plan system initialization ---
 
 	// Create plan store (SQLite-backed)
@@ -999,6 +1005,93 @@ func (d *Daemon) removePIDFile() {
 	os.Remove(d.pidFile)
 }
 
+// agentEventAdapter wraps an *agent.EventEmitter to satisfy the
+// metrics.TypedEventEmitter interface, bridging the two packages' separate
+// type definitions (both AgentEventType and AgentEvent are string-based
+// mirrors defined independently to avoid import cycles).
+type agentEventAdapter struct {
+	inner *agent.EventEmitter
+}
+
+// convertEventData converts agent event data types to their metrics package
+// mirrors so that the collector's type assertions work correctly.
+func convertEventData(data agent.AgentEventData) any {
+	switch d := data.(type) {
+	case agent.AfterProviderResponseData:
+		return metrics.AfterProviderResponseData{
+			ModelID:        d.ModelID,
+			StatusCode:     d.StatusCode,
+			ResponseTokens: d.ResponseTokens,
+			Latency:        d.Latency,
+			Cached:         d.Cached,
+			Error:          d.Error,
+		}
+	case agent.TurnEndData:
+		return metrics.TurnEndData{
+			TurnNumber:     d.TurnNumber,
+			HadToolCalls:   d.HadToolCalls,
+			ToolCallCount:  d.ToolCallCount,
+			ResponseTokens: d.ResponseTokens,
+			StoppedBy:      d.StoppedBy,
+		}
+	case agent.SessionEndData:
+		return metrics.SessionEndData{
+			SessionID:   d.SessionID,
+			Outcome:     d.Outcome,
+			Duration:    d.Duration,
+			TotalTokens: d.TotalTokens,
+			TotalIter:   d.TotalIter,
+			Error:       d.Error,
+		}
+	case agent.ToolExecutionStartData:
+		return metrics.ToolExecutionStartData{
+			ToolCallID: d.ToolCallID,
+			ToolName:   d.ToolName,
+			Arguments:  d.Arguments,
+		}
+	case agent.ToolExecutionEndData:
+		return metrics.ToolExecutionEndData{
+			ToolCallID:  d.ToolCallID,
+			ToolName:    d.ToolName,
+			Success:     d.Success,
+			Result:      d.Result,
+			Error:       d.Error,
+			Cached:      d.Cached,
+			Duration:    d.Duration,
+			Blocked:     d.Blocked,
+			BlockReason: d.BlockReason,
+		}
+	default:
+		return data
+	}
+}
+
+func (a agentEventAdapter) On(eventType metrics.AgentEventType, name string, listener func(context.Context, metrics.AgentEvent)) {
+	a.inner.On(agent.AgentEventType(eventType), name, func(ctx context.Context, event agent.AgentEvent) {
+		listener(ctx, metrics.AgentEvent{
+			Type:           metrics.AgentEventType(event.Type),
+			Timestamp:      event.Timestamp,
+			AgentID:        event.AgentID,
+			ConversationID: event.ConversationID,
+			Iteration:      event.Iteration,
+			Data:           convertEventData(event.Data),
+		})
+	})
+}
+
+func (a agentEventAdapter) OnAsync(eventType metrics.AgentEventType, name string, listener func(context.Context, metrics.AgentEvent)) {
+	a.inner.OnAsync(agent.AgentEventType(eventType), name, func(ctx context.Context, event agent.AgentEvent) {
+		listener(ctx, metrics.AgentEvent{
+			Type:           metrics.AgentEventType(event.Type),
+			Timestamp:      event.Timestamp,
+			AgentID:        event.AgentID,
+			ConversationID: event.ConversationID,
+			Iteration:      event.Iteration,
+			Data:           convertEventData(event.Data),
+		})
+	})
+}
+
 // reloadConfig reloads configuration from disk and applies changes.
 // Currently supports reloading MCP server configuration.
 func (d *Daemon) reloadConfig(ctx context.Context) error {
@@ -1300,6 +1393,10 @@ func (a *taskCreatorAdapter) CreateTaskStep(ctx context.Context, taskID, descrip
 		return nil, err
 	}
 	return step, nil
+}
+
+func (a *taskCreatorAdapter) UpdateTaskStep(_ context.Context, step *task.TaskStep) error {
+	return a.registry.StepStore().Update(step)
 }
 
 func (a *taskCreatorAdapter) LinkSession(ctx context.Context, taskID, sessionID string) error {

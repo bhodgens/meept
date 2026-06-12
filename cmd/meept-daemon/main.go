@@ -100,7 +100,7 @@ func main() {
 func runDaemon(cmd *cobra.Command, args []string) error {
 	slog.Info("daemon starting", "version", version.String())
 
-	// Load configuration from TOML file
+	// Load configuration from JSON5 file
 	var appCfg *config.Config
 	var err error
 

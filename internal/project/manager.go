@@ -209,7 +209,7 @@ func (pm *ProjectManager) Status(ctx context.Context, id string) (*ProjectStatus
 
 	// Ahead/behind
 	if status.Branch != "" {
-		aheadBehind, _ := pm.gitOutput(ctx, p.LocalPath, "rev-list", "--left-right", "--count", status.Branch+"...HEAD")
+		aheadBehind, _ := pm.gitOutput(ctx, p.LocalPath, "rev-list", "--left-right", "--count", "origin/"+status.Branch+"...HEAD")
 		parts := strings.Fields(aheadBehind)
 		if len(parts) == 2 {
 			fmt.Sscanf(parts[0], "%d", &status.Ahead)

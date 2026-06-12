@@ -50,7 +50,7 @@ type AgentEvent struct {
 	AgentID        string         `json:"agent_id"`
 	ConversationID string         `json:"conversation_id"`
 	Iteration      int            `json:"iteration"`
-	Data           AgentEventData `json:"data"`
+	Data           any            `json:"data"`
 }
 
 // --- Event data types used by the metrics collector ---

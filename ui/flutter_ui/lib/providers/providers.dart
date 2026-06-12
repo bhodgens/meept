@@ -5,6 +5,7 @@ export 'metrics_provider.dart';
 export 'job_provider.dart';
 export 'plan_provider.dart';
 export 'stt_provider.dart';
+export 'tts_provider.dart';
 
 import 'dart:async';
 
@@ -29,7 +30,9 @@ final apiClientProvider = Provider<ApiClient>((ref) {
 // WebSocket Service provider — reads persisted settings from storage
 final websocketProvider = Provider<WebSocketService>((ref) {
   final storage = ref.watch(storageProvider);
-  return WebSocketService.fromStorage(storage);
+  final ws = WebSocketService.fromStorage(storage);
+  ref.onDispose(() => ws.disconnect());
+  return ws;
 });
 
 // Session state provider (StateNotifier for CRUD + selection)
@@ -184,4 +187,3 @@ final connectionMonitorProvider = Provider<ConnectionMonitor>((ref) {
   });
   return monitor;
 });
-export 'tts_provider.dart';
