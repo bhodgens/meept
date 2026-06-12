@@ -793,3 +793,77 @@ response, err := l.chatWithFailoverStream(ctx, messages, onDelta, chatOpts...)
 ```
 
 **Priority:** LOW-MEDIUM — streaming is now fully functional, but enabling it in the agent loop is a product decision based on UX requirements (progressive display vs. wait-for-complete).
+
+---
+
+## Update: Task 3-5 Fix Status (2026-06-12)
+
+### Task 3: Security Hooks - Status: NOT APPLICABLE
+
+**Investigation findings:**
+- The functions `checkFilePermission` and `checkNetworkPermission` mentioned in the original issue **do not exist** in the current codebase
+- SecurityEngine uses a different architecture with these actual methods:
+  - `checkPath()` - filesystem path validation against block/allow rules
+  - `evaluateCommand()` - shell command pattern matching with risk levels
+  - `checkFinancial()` - financial operation detection (config-gated)
+  - `checkOverrides()` - creator permission override handling
+  - `lookupBaseRule()` - tool/action rule lookup
+- All security checks are functional and integrated via the `Check()` method pipeline (lines 259-372)
+
+**Conclusion:** The issue was based on outdated information. No fix needed.
+
+### Task 4: Streaming Parser Tool Calls - Status: FIXED
+
+**Bug identified:** Malformed struct definition in `ChatWithDeltaCallback` (lines 968-988)
+- The `ToolCalls` array JSON tag was incorrectly placed on the closing brace
+- Field indentation was inconsistent, causing JSON unmarshaling to fail silently
+
+**Fix applied:** Corrected the struct definition:
+```go
+ToolCalls []struct {
+    Index    int    `json:"index"`
+    ID       string `json:"id"`
+    Type     string `json:"type"`
+    Function struct {
+        Name      string `json:"name"`
+        Arguments string `json:"arguments"`
+    } `json:"function"`
+} `json:"tool_calls"`
+```
+
+**File changed:** `internal/llm/client.go`
+
+**Verification:** 
+- Compiles successfully
+- All existing LLM client tests pass
+
+### Task 5: TokenCache Dead Code - Status: ALREADY REMOVED
+
+**Investigation findings:**
+- Two unrelated types both named `TokenCache` existed in the codebase:
+  1. `llm.TokenCache` (tokenizer.go:87-121) - string→int memoization wrapper - **DEAD CODE**
+  2. `TokenCacheCoordinator` (token_cache.go) - L1+L2 LLM response cache - **FULLY WIRED**
+- The dead `TokenCache` struct in tokenizer.go has already been removed in a previous commit
+- `TokenCacheCoordinator` is actively used via `WithTokenCache()` injection in:
+  - AnthropicClient (lines 221-223, 338-340)
+  - OpenAI-compatible Client (same pattern)
+  - Daemon wiring (components.go:338-341)
+
+**Conclusion:** The dead code was already cleaned up. The actively-used `TokenCacheCoordinator` has proper eviction:
+- L1: LRU with 10,000 entry limit
+- L2: SQLite with TTL-based cleanup
+- Only gap: L2 has no entry count limit (minor, can add `L2MaxEntries` config if needed)
+
+---
+
+## Summary: All 5 Original Tasks Status
+
+| Task | Issue | Status | Notes |
+|------|-------|--------|-------|
+| 1 | Reflection Loop Single-Iteration | FIXED | Removed dead for-loop, single-pass with orchestrator retry |
+| 2 | parseFixResponse Broadcasting | FIXED | 3-strategy parsing, targets only referenced files |
+| 3 | Security Hooks Stubs | N/A | Functions don't exist; SecurityEngine uses different pattern |
+| 4 | Streaming Parser Tool Calls | FIXED | Corrected struct definition, tool calls now accumulate |
+| 5 | TokenCache Dead Code | ALREADY FIXED | Removed in prior commit; TokenCacheCoordinator is separate |
+
+All identified issues from the 2026-06-12 review gaps have been resolved or verified as non-issues.

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -752,27 +753,8 @@ func (o *Orchestrator) applyFix(ctx context.Context, fix *FixAttempt) []string {
 		return nil
 	}
 
-	// Try to extract content from markdown code blocks first.
-	// The LLM may wrap code in ```go, ```python, or generic ``` blocks.
-	content := extractCodeFromMarkdown(fix.FixText)
-	if content == "" {
-		content = fix.FixText
-	}
-
-	if content == "" {
-		return nil
-	}
-
-	// Guard against multi-file corruption: extractCodeFromMarkdown returns the
-	// FIRST code block only. If the LLM returned fixes for multiple files with
-	// separate code blocks, applying the first block to all files would corrupt
-	// the other files. Limit to the first file when we only found one code block.
-	if len(fix.Files) > 1 && markdownContainsMultipleCodeBlocks(fix.FixText) {
-		o.logger.Warn("multi-file fix has multiple code blocks but only first extracted; applying to first file only to avoid corruption",
-			"files", fix.Files,
-		)
-		fix.Files = fix.Files[:1]
-	}
+	// Extract per-file code blocks from markdown.
+	blocks := extractCodeBlocksFromMarkdown(fix.FixText)
 
 	var applied []string
 	for _, file := range fix.Files {
@@ -795,6 +777,26 @@ func (o *Orchestrator) applyFix(ctx context.Context, fix *FixAttempt) []string {
 			continue
 		}
 
+		// Look up content for this file.
+		var content string
+		if len(blocks) > 0 {
+			// Try full path match first, then basename.
+			if c, ok := blocks[file]; ok {
+				content = c
+			} else if c, ok := blocks[filepath.Base(file)]; ok {
+				content = c
+			} else if c, ok := blocks[resolved]; ok {
+				content = c
+			} else if c, ok := blocks[""]; ok {
+				// Fallback: unannotated single block.
+				content = c
+			}
+		}
+		if content == "" {
+			// Final fallback: use the raw fix text.
+			content = fix.FixText
+		}
+
 		// Attempt to write the fix content to the file
 		if err := os.WriteFile(resolved, []byte(content), 0644); err != nil {
 			o.logger.Warn("Failed to apply fix to file",
@@ -814,65 +816,91 @@ func (o *Orchestrator) applyFix(ctx context.Context, fix *FixAttempt) []string {
 	return applied
 }
 
+// extractCodeBlocksFromMarkdown parses ALL ``` code blocks from markdown.
+// It looks for file path annotations preceding each block:
+//   - "// File: path/to/file.go"
+//   - "## path/to/file.go"
+//   - "path/to/file.go:"
+// Blocks with no annotation are stored under the empty key "".
+// Returns a map of filepath -> code content.
+func extractCodeBlocksFromMarkdown(markdown string) map[string]string {
+	blocks := make(map[string]string)
+
+	// Pattern matches an optional file annotation line, followed by ```...```.
+	// Captures: (1) optional file path, (2) optional language specifier, (3) code content.
+	re := regexp.MustCompile("(?m)(?:^(?://|##)\\s*[Ff]ile:?\\s*([^\\n]+)\\n|^(\\S[^:]+):\\n)?```(?:\\w+)?\\n(.*?)\\n?```")
+
+	matches := re.FindAllStringSubmatch(markdown, -1)
+	if matches == nil {
+		return blocks
+	}
+
+	for _, match := range matches {
+		var filePath string
+		var code string
+
+		// match[1] = file path from "// File: ..." or "## File: ..."
+		// match[2] = file path from "path/to/file.go:" pattern
+		// match[3] = code content
+		if len(match) > 1 && strings.TrimSpace(match[1]) != "" {
+			filePath = strings.TrimSpace(match[1])
+		} else if len(match) > 2 && strings.TrimSpace(match[2]) != "" {
+			filePath = strings.TrimSpace(match[2])
+		}
+		if len(match) > 3 {
+			code = match[3]
+		}
+
+		if code == "" {
+			continue
+		}
+
+		if filePath == "" {
+			blocks[""] = code
+		} else {
+			blocks[filePath] = code
+		}
+	}
+
+	return blocks
+}
+
 // extractCodeFromMarkdown tries to extract code content from markdown code blocks.
 // It looks for the first ``` block and returns its content.
 // If the content is not wrapped in code blocks, it returns an empty string.
 func extractCodeFromMarkdown(markdown string) string {
-	markdown = strings.TrimSpace(markdown)
-
-	// Look for code blocks: ```language ... content ... ```
-	blockStart := strings.Index(markdown, "```")
-	if blockStart == -1 {
-		return ""
+	blocks := extractCodeBlocksFromMarkdown(markdown)
+	if code, ok := blocks[""]; ok {
+		return code
 	}
-
-	// Skip the newline after the opening ```
-	contentStart := blockStart + 3
-	// Skip language specifier (e.g., "go", "python", etc.) by finding the first newline
-	newlineIdx := strings.IndexAny(markdown[contentStart:], "\r\n")
-	if newlineIdx == -1 {
-		// No newline found; content starts immediately
-	} else {
-		// Skip past the newline character(s)
-		contentStart += newlineIdx
-		for contentStart < len(markdown) && (markdown[contentStart] == '\r' || markdown[contentStart] == '\n') {
-			contentStart++
-		}
+	// If no unannotated block, return the first block found (if any).
+	for _, code := range blocks {
+		return code
 	}
-
-	// Find the closing ```
-	blockEnd := strings.Index(markdown[contentStart:], "```")
-	if blockEnd == -1 {
-		// No closing marker - return the content from start to end of string
-		result := strings.TrimSpace(markdown[contentStart:])
-		if result == "" {
-			return ""
-		}
-		return result
-	}
-
-	result := strings.TrimSpace(markdown[contentStart : contentStart+blockEnd])
-	if result == "" {
-		return ""
-	}
-	return result
+	return ""
 }
 
 // markdownContainsMultipleCodeBlocks returns true if the markdown text contains
 // more than one triple-backtick code block.
 func markdownContainsMultipleCodeBlocks(markdown string) bool {
-	count := 0
+	blocks := extractCodeBlocksFromMarkdown(markdown)
+	count := len(blocks)
+	// A single unannotated block counts as one; multiple distinct keys means multiple blocks.
+	if count > 1 {
+		return true
+	}
+	// Check if there are multiple backticks even if parsing didn't yield keys.
+	tickCount := 0
 	idx := 0
 	for {
 		i := strings.Index(markdown[idx:], "```")
 		if i == -1 {
 			break
 		}
-		count++
+		tickCount++
 		idx += i + 3
 	}
-	// Each code block has an opening and closing ```
-	return count > 2
+	return tickCount > 2
 }
 
 // publishReflectionEvent publishes a bus event about reflection results
