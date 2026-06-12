@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -199,6 +200,7 @@ type SessionPickerModal struct {
 	inputBuffer  string // buffer for new session name
 	rpc          *RPCClient
 	clientConfig *ClientConfig
+	planCounts   map[string]int // session_id -> total plan count
 }
 
 // NewSessionPickerModal creates a new session picker modal.
@@ -249,6 +251,46 @@ type SessionListMsg struct {
 // SetSessions updates the session list and rebuilds items.
 func (s *SessionPickerModal) SetSessions(sessions []types.Session) {
 	s.sessions = sessions
+	s.rebuildItems()
+}
+
+// PlanCountsMsg carries plan counts for sessions.
+type PlanCountsMsg struct {
+	Counts map[string]int // session_id -> total plan count
+}
+
+// FetchPlanCounts fetches plan counts for each session via RPC.
+func (s *SessionPickerModal) FetchPlanCounts(sessions []types.Session) tea.Cmd {
+	return func() tea.Msg {
+		if s.rpc == nil || !s.rpc.IsConnected() {
+			return PlanCountsMsg{}
+		}
+		counts := make(map[string]int, len(sessions))
+		for _, sess := range sessions {
+			result, err := s.rpc.Call("plan.count_by_session", map[string]string{ParamSessionID: sess.ID})
+			if err != nil {
+				continue // gracefully degrade
+			}
+			// Result is map[state]count, sum all states
+			var stateCounts map[string]int
+			if err := json.Unmarshal(result, &stateCounts); err != nil {
+				continue
+			}
+			total := 0
+			for _, cnt := range stateCounts {
+				total += cnt
+			}
+			if total > 0 {
+				counts[sess.ID] = total
+			}
+		}
+		return PlanCountsMsg{Counts: counts}
+	}
+}
+
+// SetPlanCounts stores fetched plan counts and rebuilds items.
+func (s *SessionPickerModal) SetPlanCounts(counts map[string]int) {
+	s.planCounts = counts
 	s.rebuildItems()
 }
 
@@ -426,11 +468,12 @@ func (s *SessionPickerModal) View(screenW, screenH int) string {
 			// Format: pointer + name (fixed width) + description + time (right-aligned)
 			namePart := fmt.Sprintf("%-*s", maxNameLen, name)
 			descPart := s.styles.Muted.Render(fmt.Sprintf("%-*s", maxDescLen, desc))
-			// TODO: Plan count indicators per session — requires async data fetching
-			// planCount := s.getPlanCount(sess.ID)
-			// if planCount > 0 {
-			// 	descPart += s.styles.PlanStatePlanning.Render(fmt.Sprintf(" (%d plans)", planCount))
-			// }
+			// Plan count indicators per session
+			if s.planCounts != nil {
+				if cnt, ok := s.planCounts[sess.ID]; ok && cnt > 0 {
+					descPart += s.styles.PlanStatePlanning.Render(fmt.Sprintf(" (%d plans)", cnt))
+				}
+			}
 			timePart := s.styles.Muted.Render(fmt.Sprintf("%*s", timeColWidth, lastActivity))
 
 			line := fmt.Sprintf("%s%s  %s  %s", pointer, namePart, descPart, timePart)

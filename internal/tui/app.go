@@ -841,6 +841,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.currentSession != nil {
 				a.sessionPicker.SetCurrentSession(a.currentSession.ID)
 			}
+			// Fetch plan counts for all sessions (async)
+			if len(msg.Sessions) > 0 {
+				return a, a.sessionPicker.FetchPlanCounts(msg.Sessions)
+			}
+		}
+		return a, nil
+
+	case PlanCountsMsg:
+		if msg.Counts != nil {
+			a.sessionPicker.SetPlanCounts(msg.Counts)
 		}
 		return a, nil
 

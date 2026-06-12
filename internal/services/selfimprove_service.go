@@ -111,12 +111,47 @@ func (s *SelfImproveService) Validate(ctx context.Context, req ValidateImproveme
 	if s.controller == nil {
 		return nil, wrapError("selfimprove", "Validate", ErrUnavailable)
 	}
-	// Validation happens inside the cycle
-	// Return status for now
-	return map[string]any{
-		"validated": true,
-		"id":        req.ImprovementID,
-	}, nil
+
+	// Run validation phase; results are cached on the controller.
+	validations, err := s.controller.Validate(ctx)
+	if err != nil {
+		return nil, wrapError("selfimprove", "Validate", err)
+	}
+
+	// If a specific improvement ID was requested, filter to that fix.
+	if req.ImprovementID != "" {
+		for _, v := range validations {
+			if v.FixID == req.ImprovementID {
+				return map[string]any{
+					"validated":     v.Success,
+					"id":            v.FixID,
+					"tests_passed":  v.TestsPassed,
+					"tests_failed":  v.TestsFailed,
+					"build_success": v.BuildSuccess,
+					"errors":        v.Errors,
+				}, nil
+			}
+		}
+		return map[string]any{
+			"validated": false,
+			"id":        req.ImprovementID,
+			"message":   "fix not found in validation results",
+		}, nil
+	}
+
+	// Return all validation results.
+	results := make([]map[string]any, 0, len(validations))
+	for _, v := range validations {
+		results = append(results, map[string]any{
+			"validated":     v.Success,
+			"id":            v.FixID,
+			"tests_passed":  v.TestsPassed,
+			"tests_failed":  v.TestsFailed,
+			"build_success": v.BuildSuccess,
+			"errors":        v.Errors,
+		})
+	}
+	return map[string]any{"validations": results, "count": len(results)}, nil
 }
 
 // ApplyImprovementRequest contains apply parameters.

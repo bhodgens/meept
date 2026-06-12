@@ -505,6 +505,14 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		return nil, fmt.Errorf("failed to create service registry: %w", err)
 	}
 
+	// Wire audit DB from security orchestrator into security service
+	if components.SecurityOrchestrator != nil && svcRegistry.Security != nil {
+		if auditDB := components.SecurityOrchestrator.AuditDB(); auditDB != nil {
+			svcRegistry.Security.SetAuditDB(auditDB)
+			logger.Info("Audit DB wired to security service")
+		}
+	}
+
 	// Register daemon and model RPC handlers (after service registry is created)
 	if rpcServer != nil {
 		if svcRegistry.Daemon != nil {

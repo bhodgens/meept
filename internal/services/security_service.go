@@ -2,18 +2,25 @@ package services
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/caimlas/meept/pkg/security"
 )
 
 // SecurityService handles security operations.
 type SecurityService struct {
-	checker *security.PermissionChecker
+	checker  *security.PermissionChecker
+	auditDB  *sql.DB
 }
 
 // NewSecurityService creates a security service.
 func NewSecurityService(c *security.PermissionChecker) *SecurityService {
 	return &SecurityService{checker: c}
+}
+
+// SetAuditDB sets the audit database for querying audit entries.
+func (s *SecurityService) SetAuditDB(db *sql.DB) {
+	s.auditDB = db
 }
 
 // CheckRequest contains security check parameters.
@@ -66,6 +73,39 @@ type AuditRequest struct {
 
 // Audit returns recent audit entries.
 func (s *SecurityService) Audit(ctx context.Context, req AuditRequest) ([]AuditEntry, error) {
-	// TODO: Implement actual audit log retrieval
-	return []AuditEntry{}, nil
+	if s.auditDB == nil {
+		return []AuditEntry{}, nil
+	}
+
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+
+	rows, err := s.auditDB.QueryContext(ctx,
+		`SELECT timestamp, event_type, severity, details, source FROM audit_log ORDER BY timestamp DESC LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return []AuditEntry{}, err
+	}
+	defer rows.Close()
+
+	var result []AuditEntry
+	for rows.Next() {
+		var timestamp, eventType, severity, detailsJSON, source string
+		if err := rows.Scan(&timestamp, &eventType, &severity, &detailsJSON, &source); err != nil {
+			continue
+		}
+		result = append(result, AuditEntry{
+			Timestamp: timestamp,
+			Action:    eventType,
+			Resource:  source,
+			Allowed:   severity != "critical" && severity != "error",
+		})
+	}
+	if result == nil {
+		result = []AuditEntry{}
+	}
+	return result, nil
 }

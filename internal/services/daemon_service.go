@@ -84,8 +84,8 @@ func (s *DaemonService) Status(ctx context.Context) (*DaemonStatus, error) {
 		}
 	}
 
-	// TODO: Get detailed status from daemon via RPC if available
-	// For now, return basic status
+	// Basic PID/uptime status. Richer detail (model, methods, budget) is
+	// available through the daemon RPC handler which queries components directly.
 	return status, nil
 }
 
