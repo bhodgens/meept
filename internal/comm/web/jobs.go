@@ -1,7 +1,6 @@
 package web
 
 import (
-	"encoding/json"
 	"net/http"
 )
 
@@ -13,7 +12,7 @@ func (s *Server) handleJobsCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var cfg map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+	if err := readJSON(r, &cfg); err != nil {
 		s.writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}

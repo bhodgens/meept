@@ -1,7 +1,6 @@
 package web
 
 import (
-	"encoding/json"
 	"net/http"
 )
 
@@ -14,7 +13,7 @@ func (s *Server) handleSkillsExecute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req SkillExecuteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := readJSON(r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}

@@ -1,7 +1,6 @@
 package web
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/caimlas/meept/internal/config"
@@ -40,7 +39,7 @@ func (s *Server) handleAgentsDelegate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req DelegateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := readJSON(r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}

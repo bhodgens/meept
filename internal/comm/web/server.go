@@ -415,7 +415,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		Message string `json:"message"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := s.readJSON(w, r, &req, 1<<20); err != nil {
 		s.writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -541,6 +541,15 @@ func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
 	s.writeJSON(w, status, map[string]string{"error": message})
 }
 
+// readJSON reads a JSON request body with a size limit.
+func (s *Server) readJSON(w http.ResponseWriter, r *http.Request, v any, maxBytes int64) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		return err
+	}
+	return nil
+}
+
 // loggingResponseWriter wraps http.ResponseWriter to capture the status code.
 type loggingResponseWriter struct {
 	http.ResponseWriter
@@ -577,4 +586,13 @@ func parseLimit(s string, maxVal int) (int, error) {
 		n = maxVal
 	}
 	return n, nil
+}
+
+// maxRequestBodySize is the maximum allowed size for request bodies (1 MB).
+const maxRequestBodySize = 1 << 20
+
+// readJSON reads and decodes a JSON request body with a size limit.
+func readJSON(r *http.Request, v any) error {
+	r.Body = http.MaxBytesReader(nil, r.Body, maxRequestBodySize)
+	return json.NewDecoder(r.Body).Decode(v)
 }

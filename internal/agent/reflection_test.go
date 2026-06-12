@@ -261,3 +261,63 @@ func TestDetectProjectLanguage(t *testing.T) {
 		t.Errorf("expected empty, got %s", lang)
 	}
 }
+
+// TestParseFixResponse_MultiFile_ParsesPerFileCodeBlocks tests that the function
+// correctly parses markdown code blocks with file path annotations and returns
+// only the files that are actually referenced in the LLM response.
+func TestParseFixResponse_MultiFile_ParsesPerFileCodeBlocks(t *testing.T) {
+	logger := slog.Default()
+	engine := NewReflectionEngine(logger, nil, nil, nil)
+
+	llmResponse := "// File: handler.go\n```go\nfunc handle() {\n\tfmt.Println(\"handler\")\n}\n```\n\n// File: utils.go\n```go\nfunc util() {\n\tfmt.Println(\"utils\")\n}\n```"
+
+	originalFiles := []string{"handler.go", "utils.go"}
+	attempt := engine.parseFixResponse(llmResponse, originalFiles)
+
+	if attempt == nil {
+		t.Fatal("expected non-nil FixAttempt")
+	}
+
+	if len(attempt.Files) != 2 {
+		t.Errorf("expected 2 files, got %d: %v", len(attempt.Files), attempt.Files)
+	}
+}
+
+// TestParseFixResponse_FiltersUnreferencedFiles tests that files not mentioned
+// in the LLM response are excluded from the FixAttempt.
+func TestParseFixResponse_FiltersUnreferencedFiles(t *testing.T) {
+	logger := slog.Default()
+	engine := NewReflectionEngine(logger, nil, nil, nil)
+
+	llmResponse := "Here's the fix for handler.go:\n```go\nfunc handle() {}\n```"
+
+	originalFiles := []string{"handler.go", "unused.go"}
+	attempt := engine.parseFixResponse(llmResponse, originalFiles)
+
+	if attempt == nil {
+		t.Fatal("expected non-nil FixAttempt")
+	}
+
+	if len(attempt.Files) != 1 {
+		t.Errorf("expected 1 file (handler.go), got %d: %v", len(attempt.Files), attempt.Files)
+	}
+}
+
+// TestParseFixResponse_ToolCallJSON tests parsing of file_edit tool call JSON blocks.
+func TestParseFixResponse_ToolCallJSON(t *testing.T) {
+	logger := slog.Default()
+	engine := NewReflectionEngine(logger, nil, nil, nil)
+
+	llmResponse := "I'll fix the file:\n```tool_call\n{\"name\":\"file_edit\",\"arguments\":{\"filepath\":\"handler.go\",\"content\":\"func handle() {}\"}}\n```"
+
+	originalFiles := []string{"handler.go", "other.go"}
+	attempt := engine.parseFixResponse(llmResponse, originalFiles)
+
+	if attempt == nil {
+		t.Fatal("expected non-nil FixAttempt")
+	}
+
+	if len(attempt.Files) != 1 {
+		t.Errorf("expected 1 file, got %d: %v", len(attempt.Files), attempt.Files)
+	}
+}

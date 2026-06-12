@@ -36,20 +36,32 @@ func NewEventEmitter(bufferSize int, logger *slog.Logger) *EventEmitter {
 // events. The returned channel is buffered to prevent blocking the emitter.
 func (e *EventEmitter) Subscribe() chan *NotificationEvent {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	ch := make(chan *NotificationEvent, 100)
+	// Copy buffer under lock to avoid holding lock during replay
+	bufferCopy := make([]*NotificationEvent, len(e.buffer))
+	copy(bufferCopy, e.buffer)
+	e.subscribers = append(e.subscribers, ch)
+	e.mu.Unlock()
 
-	// Send buffered events first (non-blocking to avoid hanging on full channel)
-	for _, event := range e.buffer {
+	// Send buffered events outside lock using non-blocking sends
+	dropped := 0
+	for _, event := range bufferCopy {
 		select {
 		case ch <- event:
 		default:
-			// Channel full, skip
+			// Channel full, skip and count dropped
+			dropped++
 		}
 	}
+	if dropped > 0 {
+		// Log warning if events were dropped during replay
+		// Note: using slog directly since emitter may not have logger
+		slog.Warn("EventEmitter: dropped events during replay",
+			"dropped", dropped,
+			"buffer_size", len(bufferCopy),
+		)
+	}
 
-	e.subscribers = append(e.subscribers, ch)
 	return ch
 }
 
