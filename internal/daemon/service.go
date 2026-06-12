@@ -10,15 +10,11 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
-	"sync/atomic"
 	"syscall"
 	"time"
 )
 
-// serviceDependencies is a var so it can be overridden in tests.
-var serviceDependencies = []string{}
-
-// ServiceConfig holds configuration for the kardianos/service-based daemon manager.
+// ServiceConfig holds configuration for the daemon service manager.
 type ServiceConfig struct {
 	// Name is the system service name (used as launchd label on macOS).
 	Name string
@@ -73,9 +69,6 @@ func DefaultServiceConfig() (*ServiceConfig, error) {
 type DaemonService struct {
 	cfg *ServiceConfig
 	sm  *ServiceManager
-
-	// isRunning is set to true when Start is called and cleared on Stop.
-	isRunning atomic.Bool
 }
 
 // NewDaemonService creates a DaemonService backed by ServiceManager for
@@ -105,30 +98,6 @@ func NewDaemonService(cfg *ServiceConfig) (*DaemonService, error) {
 		cfg: cfg,
 		sm:  sm,
 	}, nil
-}
-
-// ---------------------------------------------------------------------------
-// Higher-level methods matching the DaemonController interface
-//
-// These implement the same contract as DaemonControl in launchd.go:
-//
-//	interface { IsRunning() bool; PID() int; Uptime() time.Duration; Restart(ctx) error }
-//
-// This allows DaemonService to be used as a drop-in replacement for
-// DaemonControl in the HTTP server and service registry wiring.
-// ---------------------------------------------------------------------------
-
-// IsRunning returns true if the daemon process is alive (checks PID file).
-func (ds *DaemonService) IsRunning() bool {
-	pid := ds.readPID()
-	if pid == 0 {
-		return false
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 // ---------------------------------------------------------------------------
