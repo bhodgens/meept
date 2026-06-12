@@ -22,6 +22,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/metrics"
+	"github.com/caimlas/meept/internal/project"
 	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/repomap"
 	"github.com/caimlas/meept/internal/shadow"
@@ -1771,7 +1772,14 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				// Switch the LLM client to the resolved model
 				l.modelMu.Lock()
 				oldModel := l.llmClient.Config().ModelID
-				l.llmClient.SwitchModel(modelConfig)
+				if err := l.llmClient.SwitchModel(modelConfig); err != nil {
+					l.modelMu.Unlock()
+					l.logger.Warn("Failed to switch model",
+						"agent_id", l.agentID,
+						"error", err,
+					)
+					return "", fmt.Errorf("switch model: %w", err)
+				}
 				l.modelMu.Unlock()
 				l.logger.Info("Agent switched model",
 					"agent_id", l.agentID,
@@ -2204,8 +2212,16 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 			}
 			if l.llmClient != nil {
 				l.modelMu.Lock()
-				l.llmClient.SwitchModel(modelConfig)
-				l.modelMu.Unlock()
+				if err := l.llmClient.SwitchModel(modelConfig); err != nil {
+					l.modelMu.Unlock()
+					l.logger.Warn("Failed to switch model during retry",
+						"agent_id", l.agentID,
+						"error", err,
+					)
+					// Continue anyway - model switch failure shouldn't block retry
+				} else {
+					l.modelMu.Unlock()
+				}
 			}
 		}
 
@@ -3550,8 +3566,23 @@ func (l *AgentLoop) loadAgentsContext(workingDir string) string {
 	if workingDir == "" {
 		return ""
 	}
-	_ = filepath.Join(workingDir, "AGENTS.md") // TODO: load and return content
-	return ""
+
+	agentsFiles, err := project.LoadAgentsMDForPath(workingDir, "")
+	if err != nil || len(agentsFiles) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	for _, af := range agentsFiles {
+		if af.RelPath == "" {
+			sb.WriteString("# AGENTS.md (project root)\n\n")
+		} else {
+			sb.WriteString(fmt.Sprintf("# AGENTS.md (%s)\n\n", af.RelPath))
+		}
+		sb.WriteString(af.Content)
+		sb.WriteString("\n\n")
+	}
+	return sb.String()
 }
 
 // skillDiscoveryThreshold returns the configured skill discovery confidence threshold.
