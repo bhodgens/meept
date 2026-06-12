@@ -151,6 +151,23 @@ func (e *Executor) Execute(ctx context.Context, skill *Skill, input string) (*Sk
 		"requires", skill.Requires,
 	)
 
+	// Validate Hermes prerequisites if configured and present.
+	if e.validatePrerequisites && skill.Prerequisites != nil && e.prerequisiteChecker != nil {
+		if err := CheckPrerequisites(e.prerequisiteChecker, skill.Prerequisites); err != nil {
+			return nil, &ExecutorError{
+				SkillName: skill.Name,
+				Message:   "prerequisites not met",
+				Cause:     err,
+			}
+		}
+	}
+
+	// Translate Hermes tool references in skill body if mapper is set and source is hermes.
+	execBody := skill.Body
+	if e.toolMapper != nil && skill.SourceOrigin == "hermes" {
+		execBody = e.toolMapper.TranslateToolReferences(skill.Body)
+	}
+
 	// Start MCP runtime if skill declares MCP servers.
 	var mcpRuntime *MCPRuntime
 	if len(skill.MCPServers) > 0 {
@@ -216,7 +233,7 @@ func (e *Executor) Execute(ctx context.Context, skill *Skill, input string) (*Sk
 	messages := []llm.ChatMessage{
 		{
 			Role:    llm.RoleSystem,
-			Content: skill.Body,
+			Content: execBody,
 		},
 		{
 			Role:    llm.RoleUser,
