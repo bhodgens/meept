@@ -1150,6 +1150,13 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 				if m.ttsEnabled && m.ttsManager != nil {
 					if err := m.ttsManager.Speak(msg.Reply); err != nil {
 						slog.Debug("TTS speak failed", "error", err)
+						// Show toast notification for TTS error
+						return func() tea.Msg {
+							return ChatToastMsg{
+								Title:   "tts error",
+								Message: fmt.Sprintf("speech failed: %v", err),
+							}
+						}
 					}
 				}
 			}

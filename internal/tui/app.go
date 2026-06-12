@@ -1309,7 +1309,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle toast notification request from chat view
 		if a.notifications != nil {
 			level := components.NotifyInfo
-			if msg.Title == "stt error" {
+			if msg.Title == "stt error" || msg.Title == "tts error" {
 				level = components.NotifyError
 			}
 			_, expiryCmd := a.notifications.Push(level, msg.Title, msg.Message)
