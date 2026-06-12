@@ -113,10 +113,14 @@ func runOAuthConnect(cmd *cobra.Command, args []string) error {
 	defer cancel()
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
 	go func() {
-		<-sigCh
-		slog.Debug("oauth connect interrupted by signal")
-		cancel()
+		select {
+		case <-sigCh:
+			slog.Debug("oauth connect interrupted by signal")
+			cancel()
+		case <-ctx.Done():
+		}
 	}()
 
 	flowCfg := providerCfg.DeviceFlowConfig()

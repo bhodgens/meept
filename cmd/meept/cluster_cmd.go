@@ -89,6 +89,7 @@ Examples:
 	cmd.Flags().StringVar(&nodeID, "node-id", "", "node ID (skip ID prompt)")
 	cmd.Flags().StringVar(&gitRemote, "git-remote", "", "git remote URL for cluster registry (skip remote prompt)")
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite existing cluster config")
+	cmd.Flags().Bool("yes", false, "skip interactive prompts")
 	cmd.Flags().StringVar(&configFlag, "config", "", "path to output config file (default: $state_dir/cluster/config.json5)")
 
 	return cmd

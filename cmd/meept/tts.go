@@ -114,6 +114,10 @@ func runTTSVoicesList(format string) error {
 
 // runTTSVoicesDownload downloads a voice.
 func runTTSVoicesDownload(voiceName string) error {
+	if strings.ContainsAny(voiceName, "/\\:") {
+		return fmt.Errorf("invalid voice name: contains path separators")
+	}
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("getting home directory: %w", err)

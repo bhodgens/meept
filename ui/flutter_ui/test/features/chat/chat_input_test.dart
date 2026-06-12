@@ -62,6 +62,15 @@ class _StubWebSocket extends WebSocketService {
   void send(Map<String, dynamic> message) {}
 }
 
+class _StubTtsNotifier extends StateNotifier<TtsState> implements TtsNotifier {
+  _StubTtsNotifier() : super(const TtsState.idle());
+  @override Future<void> speak(String text) async {}
+  @override Future<void> stop() async {}
+  @override Future<void> setVolume(double volume) async {}
+  @override double get volume => 1.0;
+  @override bool get isSpeaking => false;
+}
+
 /// Sets up a full ProviderScope with mocked providers so ChatInput can
 /// be tested in isolation without hitting the real daemon.
 Widget _buildTestApp({
@@ -77,6 +86,7 @@ Widget _buildTestApp({
         (_) => ChatNotifier(
           apiClient: _StubApiClient(),
           websocket: _StubWebSocket(),
+          ttsNotifier: _StubTtsNotifier(),
         ),
       ),
       agentProvider.overrideWith(

@@ -3,6 +3,8 @@ package tui
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/caimlas/meept/internal/tui/types"
@@ -155,6 +157,13 @@ func (c *ConnectionConfig) unwrap() *clientConnection {
 	// "auto" defaults to RPC for now; HTTP client not yet implemented
 	if conn.transport == "auto" {
 		conn.transport = "rpc"
+	}
+
+	// Expand ~ to home directory for socket path
+	if conn.address[:1] == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			conn.address = filepath.Join(home, conn.address[1:])
+		}
 	}
 
 	return conn

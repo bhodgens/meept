@@ -60,10 +60,10 @@ The `MaxReflections` loop in `reflection.go:85-164` is **dead code**. Every code
 2. **Pass 1**: `reflectionEngine.RunReflection(ctx, editedFiles)` — runs linters/tests, returns `PendingFix` if errors found (`orchestrator.go:656`)
 3. **Fix Application**: `orchestrator.applyFix(ctx, result.PendingFix)` — writes LLM fix to disk (`orchestrator.go:674`)
 4. **Pass 2**: `reflectionEngine.RunReflection(ctx, appliedFiles)` — re-runs linters on fixed code (`orchestrator.go:682`)
-5. **Pass 3 (final)**: If pass 2 still has errors, applies one more fix but does **not** re-verify (`orchestrator.go:698-699`)
+5. **Final apply (no verify)**: If pass 2 still has errors, applies one more fix but does **not** re-verify (`orchestrator.go:698-699`)
 6. **Result**: Logs outcome, publishes `"reflection.complete"` bus event if gave up
 
-The orchestrator implements a **hardcoded 3-pass maximum** (initial + retry + one more apply without verify). The comment on line 693 says `"single retry pass to avoid infinite loop"`, confirming awareness of loop risk.
+The orchestrator implements a **hardcoded 2-pass pattern with a final apply-without-verify** (`RunReflection` is called exactly twice; `applyFix` is called twice but the second apply doesn't re-verify). The comment on line 693 says `"single retry pass to avoid infinite loop"`, confirming awareness of loop risk.
 
 **Multi-Iteration Risk Assessment:**
 
@@ -71,7 +71,7 @@ If the internal loop were fixed to use `continue`, there is a real oscillation r
 
 **Recommendation:**
 
-**Remove the dead `MaxReflections` loop and document the orchestrator's hardcoded 3-pass approach as intentional.** The current design is actually sound — the orchestrator controls retry externally with a clear 3-pass ceiling. The internal loop just adds confusion. Fix the `for` loop to be a simple function body (no loop at all). Estimated complexity: **trivial** (remove loop wrapper, keep function body logic).
+**Remove the dead `MaxReflections` loop and document the orchestrator's hardcoded 2-pass approach as intentional.** The current design is actually sound — the orchestrator controls retry externally with a clear 2-pass ceiling plus a final apply-without-verify. The internal loop just adds confusion. Fix the `for` loop to be a simple function body (no loop at all). Estimated complexity: **trivial** (remove loop wrapper, keep function body logic).
 
 ### Qwen Findings:
 
@@ -300,7 +300,7 @@ User Input
     → Tool Execute() method:
         - ShellExecuteTool: FenceChecker.CheckCommand() + ScanShellCommand() ✅ WIRED
         - ReadFile/WriteFile/DeleteFile: FenceChecker.CheckPath() ✅ WIRED
-        - WebFetchTool: SetSecurityOrchestrator() exists but NEVER CALLED ❌
+        - WebFetchTool: SetSecurityOrchestrator() ✅ WIRED (components.go:2568)
     → SecurityEngine.Check() (called by some tools internally) ✅ WORKING
 ```
 

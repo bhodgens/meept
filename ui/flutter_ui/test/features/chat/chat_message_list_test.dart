@@ -7,6 +7,7 @@ import 'package:meept_ui/features/chat/chat_message_list.dart';
 import 'package:meept_ui/features/chat/chat_message_bubble.dart';
 import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/providers/chat_provider.dart';
+import 'package:meept_ui/providers/tts_provider.dart';
 import 'package:meept_ui/services/api_client.dart';
 import 'package:meept_ui/services/websocket_service.dart';
 
@@ -77,8 +78,17 @@ class _StubWebSocket extends WebSocketService {
 }
 
 /// Test-specific ChatNotifier that doesn't load messages on init
+class _StubTtsNotifier extends StateNotifier<TtsState> implements TtsNotifier {
+  _StubTtsNotifier() : super(const TtsState.idle());
+  @override Future<void> speak(String text) async {}
+  @override Future<void> stop() async {}
+  @override Future<void> setVolume(double volume) async {}
+  @override double get volume => 1.0;
+  @override bool get isSpeaking => false;
+}
+
 class _TestChatNotifier extends ChatNotifier {
-  _TestChatNotifier({required super.apiClient, required super.websocket});
+  _TestChatNotifier({required super.apiClient, required super.websocket, required super.ttsNotifier});
 
   @override
   Future<void> loadMessages(String sessionId) async {
@@ -129,6 +139,7 @@ Widget _buildTestApp({
         (_) => _TestChatNotifier(
           apiClient: _StubApiClient(),
           websocket: _StubWebSocket(),
+          ttsNotifier: _StubTtsNotifier(),
         ),
       ),
     ],

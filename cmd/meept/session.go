@@ -106,7 +106,9 @@ func newSessionListCmd() *cobra.Command {
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\n", id, name, desc, created, tasksCount)
 			}
 
-			w.Flush()
+			if err := w.Flush(); err != nil {
+				return err
+			}
 			fmt.Printf("\nTotal: %d sessions\n", len(sessionsList))
 			return nil
 		},

@@ -205,6 +205,9 @@ func (c *RPCClient) callOnce(method string, params any) (json.RawMessage, error)
 	if err := conn.SetDeadline(time.Now().Add(c.timeout)); err != nil {
 		return nil, fmt.Errorf("failed to set deadline: %w", err)
 	}
+	defer func() {
+		_ = conn.SetDeadline(time.Time{})
+	}()
 
 	// Write length-prefixed frame
 	_, err = fmt.Fprintf(writer, "%d\n", len(reqData))

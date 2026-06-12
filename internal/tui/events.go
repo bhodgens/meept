@@ -166,6 +166,7 @@ func (es *EventStream) Poll() tea.Cmd {
 			return nil
 		}
 		subID := es.subscriptionID
+		lastPoll := es.lastPoll
 		es.mu.Unlock()
 
 		if !es.rpc.IsConnected() || subID == "" {
@@ -175,7 +176,7 @@ func (es *EventStream) Poll() tea.Cmd {
 
 		params := map[string]any{
 			"subscription_id": subID,
-			"since":           es.lastPoll.Format(time.RFC3339Nano),
+			"since":           lastPoll.Format(time.RFC3339Nano),
 		}
 
 		result, err := es.rpc.Call("bus.poll", params)
@@ -190,7 +191,9 @@ func (es *EventStream) Poll() tea.Cmd {
 			return EventStreamDataMsg{Events: nil, Err: err}
 		}
 
+		es.mu.Lock()
 		es.lastPoll = time.Now()
+		es.mu.Unlock()
 
 		for _, e := range resp.Events {
 			es.addToBuffer(e)

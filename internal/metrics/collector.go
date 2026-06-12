@@ -536,7 +536,6 @@ func (c *Collector) Shutdown() {
 	// Clean up bus subscriptions to stop goroutines
 	for _, sub := range c.subs {
 		c.bus.Unsubscribe(sub)
-		close(sub.Channel)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/caimlas/meept/internal/tui/types"
@@ -121,7 +122,7 @@ func (c *HTTPClient) callAPI(method string, params any) (json.RawMessage, error)
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(data))
 	}
 	var result struct {
@@ -132,7 +133,7 @@ func (c *HTTPClient) callAPI(method string, params any) (json.RawMessage, error)
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
-		return data, nil
+		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 	if result.Error != nil {
 		return nil, fmt.Errorf("[%d] %s", result.Error.Code, result.Error.Message)
@@ -531,7 +532,7 @@ func (c *HTTPClient) NavigateBranch(sessionID string, targetMessageID int64) err
 		return err
 	}
 	httpReq, err := http.NewRequest(http.MethodPost,
-		c.baseURL+"/api/v1/sessions/"+sessionID+"/branch",
+		c.baseURL+"/api/v1/sessions/"+url.PathEscape(sessionID)+"/branch",
 		bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -551,7 +552,7 @@ func (c *HTTPClient) NavigateBranch(sessionID string, targetMessageID int64) err
 
 // ListBranches lists all branches in a session.
 func (c *HTTPClient) ListBranches(sessionID string) ([]types.BranchInfo, error) {
-	resp, err := c.httpClient.Get(c.baseURL + "/api/v1/sessions/" + sessionID + "/branches")
+	resp, err := c.httpClient.Get(c.baseURL + "/api/v1/sessions/" + url.PathEscape(sessionID) + "/branches")
 	if err != nil {
 		return nil, err
 	}

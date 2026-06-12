@@ -326,7 +326,6 @@ func (m *Manager) reloadPhase1(newConfigs map[string]ServerConfig) []ServerConfi
 			m.logger.Info("restarting MCP server", "name", name)
 			if err := existingClient.Close(); err != nil {
 				m.logger.Error("error closing MCP client during restart", "name", name, "error", err)
-				continue // Keep in map for retry — deleting would orphan the process
 			}
 			delete(m.clients, name)
 		}

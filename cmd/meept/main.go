@@ -29,7 +29,10 @@ func debugEnabled() bool {
 }
 
 func main() {
-	homeDir, _ := os.UserHomeDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = "."
+	}
 	defaultStateDir := filepath.Join(homeDir, ".meept")
 	defaultSocket := filepath.Join(defaultStateDir, "meept.sock")
 
