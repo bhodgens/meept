@@ -111,10 +111,27 @@ type STTConfig struct {
 }
 
 // TTSConfig defines text-to-speech settings for the TUI.
+// Note: Only Enabled, Engine, and Voice are configurable in client.json5.
+// Playback and Behavior settings come from meept.json5 main config.
 type TTSConfig struct {
-	Enabled bool   `json:"enabled"` // Enable text-to-speech (default: false)
-	Engine  string `json:"engine"`  // TTS engine: "piper" or "platform" (default: "piper")
-	Voice   string `json:"voice"`   // Voice identifier (default: "danny-medium")
+	Enabled  bool         `json:"enabled"` // Enable text-to-speech (default: false)
+	Engine   string       `json:"engine"`  // TTS engine: "piper" or "platform" (default: "piper")
+	Voice    string       `json:"voice"`   // Voice identifier (default: "danny-medium")
+	Playback TTSPlayback  `json:"playback,omitempty"`
+	Behavior TTSBehavior  `json:"behavior,omitempty"`
+}
+
+// TTSPlayback holds TTS playback settings (volume, rate).
+type TTSPlayback struct {
+	Volume float64 `json:"volume,omitempty"` // 0.0 to 1.0
+	Rate   float64 `json:"rate,omitempty"`   // 0.5 to 2.0
+}
+
+// TTSBehavior holds TTS behavior settings (interrupt, queue).
+type TTSBehavior struct {
+	InterruptOnNewMsg bool `json:"interrupt_on_new_msg,omitempty"`
+	QueueMessages     bool `json:"queue_messages,omitempty"`
+	MaxQueueSize      int  `json:"max_queue_size,omitempty"`
 }
 
 // DefaultClientConfig returns the default client configuration.

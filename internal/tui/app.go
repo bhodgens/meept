@@ -1,8 +1,9 @@
 package tui
-
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/sharedclient"
 	"github.com/caimlas/meept/internal/stt"
 	"github.com/caimlas/meept/internal/tts"
@@ -18,6 +20,7 @@ import (
 	"github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/internal/tui/viz"
+	"github.com/tailscale/hujson"
 )
 
 // LayoutMode determines how the TUI arranges panels based on terminal size.
@@ -278,21 +281,39 @@ func NewApp(socketPath string) *App {
 		)
 	}
 
-	// Initialize TTS (text-to-speech) from client config
+	// Initialize TTS (text-to-speech) with config merging
+	// Priority: client.json5 overrides meept.json5 for Enabled/Engine/Voice
+	// Playback and Behavior come from meept.json5 (or defaults)
 	if clientConfig.TTS.Enabled {
+		// Start with main config TTS settings as base
+		mainCfg := loadMainConfigForTTS()
 		ttsCfg := tts.Config{
-			Engine:  clientConfig.TTS.Engine,
-			Voice:   clientConfig.TTS.Voice,
+			Engine:    clientConfig.TTS.Engine, // client.json5 overrides
+			Voice:     clientConfig.TTS.Voice,  // client.json5 overrides
 			VoicePath: "",
+			Playback:  mainCfg.Playback, // from meept.json5
+			Behavior:  mainCfg.Behavior, // from meept.json5
 		}
+		// Client config can override playback/behavior if specified
+		if clientConfig.TTS.Playback.Volume != 0 {
+			ttsCfg.Playback.Volume = clientConfig.TTS.Playback.Volume
+		}
+		if clientConfig.TTS.Playback.Rate != 0 {
+			ttsCfg.Playback.Rate = clientConfig.TTS.Playback.Rate
+		}
+		if clientConfig.TTS.Behavior.InterruptOnNewMsg {
+			ttsCfg.Behavior.InterruptOnNewMsg = clientConfig.TTS.Behavior.InterruptOnNewMsg
+		}
+		if clientConfig.TTS.Behavior.MaxQueueSize != 0 {
+			ttsCfg.Behavior.MaxQueueSize = clientConfig.TTS.Behavior.MaxQueueSize
+		}
+
 		// Set default voice path
 		voicePath, err := tts.DefaultVoicePath(ttsCfg.Voice)
 		if err == nil {
 			ttsCfg.Piper.ModelPath = voicePath
 			ttsCfg.Piper.ConfigPath = voicePath + ".json"
 		}
-		ttsCfg.Behavior.InterruptOnNewMsg = true
-		ttsCfg.Behavior.MaxQueueSize = 5
 
 		if mgr, err := tts.NewManager(ttsCfg); err == nil {
 			app.ttsManager = mgr
@@ -308,6 +329,76 @@ func NewApp(socketPath string) *App {
 	return app
 }
 
+// loadMainConfigForTTS loads the main meept.json5 config and returns TTS settings.
+// Used for config merging: meept.json5 provides Playback and Behavior defaults,
+// while client.json5 can override Enabled, Engine, and Voice.
+func loadMainConfigForTTS() tts.Config {
+	// Default TTS config
+	defaultCfg := tts.Config{
+		Playback: tts.PlaybackConfig{
+			Volume: 1.0,
+			Rate:   1.0,
+		},
+		Behavior: tts.BehaviorConfig{
+			InterruptOnNewMsg: true,
+			MaxQueueSize:      5,
+		},
+	}
+
+	// Try project-local first
+	mainPath := ".meept/meept.json5"
+	if cfg := loadMainConfigFile(mainPath); cfg != nil {
+		return *cfg
+	}
+
+	// Try user home directory
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		homePath := filepath.Join(homeDir, ".meept", "meept.json5")
+		if cfg := loadMainConfigFile(homePath); cfg != nil {
+			return *cfg
+		}
+	}
+
+	return defaultCfg
+}
+
+// loadMainConfigFile loads TTS config from main meept.json5 file.
+// loadMainConfigFile loads TTS config from main meept.json5 file.
+func loadMainConfigFile(path string) *tts.Config {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+
+	// Parse JSON5
+	standardJSON, err := hujson.Standardize(data)
+	if err != nil {
+		return nil
+	}
+
+	// Unmarshal into main config schema to get TTS section
+	var mainCfg config.Config
+	if err := json.Unmarshal(standardJSON, &mainCfg); err != nil {
+		return nil
+	}
+
+	// Convert main config TTS to tts.Config (type conversion)
+	return &tts.Config{
+		Engine: mainCfg.TTS.Engine,
+		Voice:  mainCfg.TTS.Voice,
+		Playback: tts.PlaybackConfig{
+			Volume: mainCfg.TTS.Playback.Volume,
+			Rate:   mainCfg.TTS.Playback.Rate,
+		},
+		Behavior: tts.BehaviorConfig{
+			ReadOwnMessages:   mainCfg.TTS.Behavior.ReadOwnMessages,
+			InterruptOnNewMsg: mainCfg.TTS.Behavior.InterruptOnNewMsg,
+			QueueMessages:     mainCfg.TTS.Behavior.QueueMessages,
+			MaxQueueSize:      mainCfg.TTS.Behavior.MaxQueueSize,
+		},
+	}
+}
 // Init initializes the application.
 func (a *App) Init() tea.Cmd {
 	return tea.Batch(

@@ -65,15 +65,14 @@ func NewPiperEngine(cfg Config) (*PiperEngine, error) {
 
 // Synthesize generates speech from text using Piper TTS.
 // It runs piper as a subprocess, captures the WAV output, and plays it.
+//
+// Queue behavior is handled by tts.Manager before calling this method.
 func (e *PiperEngine) Synthesize(ctx context.Context, text string) (*Result, error) {
 	e.mu.Lock()
 	if e.speaking {
 		e.mu.Unlock()
 		if e.config.Behavior.InterruptOnNewMsg {
 			e.Stop()
-		} else if e.config.Behavior.QueueMessages {
-			// Queue for later - simplified handling
-			return nil, fmt.Errorf("queue not implemented in basic engine")
 		}
 		e.mu.Lock()
 	}
