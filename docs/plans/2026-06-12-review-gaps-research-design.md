@@ -727,3 +727,38 @@ For `TokenCacheCoordinator`, the existing eviction strategy (LRU + TTL + periodi
 - Remove dead `tokenizer.TokenCache`: **TRIVIAL** (~5 minutes, ~35 lines removed)
 - Add L2 entry limit: **MODERATE** (~30 minutes, ~20 lines)
 - Add L2 size monitoring: **TRIVIAL** (~10 minutes, metric + warning)
+
+---
+
+## Task 6: Fix OpenAI Streaming Parser — Tool Calls and Usage Data
+
+**Severity:** MEDIUM (latent bug — not active until streaming is enabled for agentic workflows)
+
+**Files:**
+- `internal/llm/client.go` — `ChatWithDeltaCallback` (lines 943-1014)
+- `internal/llm/anthropic.go` — reference implementation (lines 917-1007, already working)
+
+**Problem:** The OpenAI-compatible streaming parser silently drops two critical fields:
+
+1. **Tool call deltas**: `delta.tool_calls[]` from SSE chunks is not parsed. The chunk struct only extracts `delta.content`, so tool calls are lost.
+2. **Usage data**: Token usage from the final chunk is not extracted, returning empty `TokenUsage{}`.
+
+**Impact:**
+- Anthropic Claude streaming: ✅ Full tool call support (already working)
+- OpenAI GPT-4 + streaming: ❌ Tool calls dropped
+- Local llama.cpp + streaming: ❌ Tool calls dropped
+- Ollama + streaming: ❌ Tool calls dropped
+- Azure OpenAI + streaming: ❌ Tool calls dropped
+
+**Current mitigation:** The agent loop uses `chatWithFailover()` (non-streaming), which fully parses tool calls. Production is safe.
+
+**Fix requirements:**
+1. Expand chunk struct to include `delta.tool_calls` fields (`index`, `id`, `function.name`, `function.arguments`)
+2. Add `map[int]*ToolCallAccumulator` to accumulate deltas across chunks
+3. Build `[]ToolCall` from accumulator at stream end
+4. Parse `usage` from final chunk (may need `stream_options: {"include_usage": true}` in request)
+5. Add tests for: text-only, single tool, multiple parallel tools, mixed text+tools, malformed chunks
+
+**Estimated complexity:** ~150 lines (parser changes + tests)
+
+**Priority:** MEDIUM — not blocking current functionality, but required before enabling streaming for agentic workflows or real-time TUI display.

@@ -148,6 +148,7 @@ flowchart TB
 | Conversation | `internal/agent` | Persistent session management |
 | Planner | `internal/agent` | Task decomposition and collaborative review |
 | Workspace | `internal/agent` | Git-backed task tracking |
+| Reflection Engine | `internal/agent` | Auto lint/test validation after code edits |
 
 ### Orchestration
 

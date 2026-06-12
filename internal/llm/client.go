@@ -940,7 +940,16 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 
 	var accumulated strings.Builder
 	var finishReason string
+	var usage TokenUsage
 	scanner := bufio.NewScanner(resp.Body)
+	// Accumulate tool calls across chunks
+	type toolCallAccum struct {
+		ID        string
+		Name      string
+		Arguments strings.Builder
+	}
+	toolCallAccums := make(map[int]*toolCallAccum)
+
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
@@ -960,10 +969,25 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
-					Content string `json:"content"`
+					Content   string        `json:"content"`
+					Role      string        `json:"role"`
+					ToolCalls []struct {
+					Index    int    `json:"index"`
+					ID       string `json:"id"`
+					Type     string `json:"type"`
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
 				} `json:"delta"`
 				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
+			Usage *struct {
+				PromptTokens     int `json:"prompt_tokens"`
+				CompletionTokens int `json:"completion_tokens"`
+				TotalTokens      int `json:"total_tokens"`
+			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			c.logger.Warn("failed to parse stream chunk", "error", err, "data", data)
@@ -973,6 +997,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 			continue
 		}
 
+		// Handle content delta
 		delta := chunk.Choices[0].Delta.Content
 		if delta != "" {
 			accumulated.WriteString(delta)
@@ -980,6 +1005,30 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 				return nil, err // Stream aborted by callback (e.g. TTSR rule)
 			}
 		}
+
+		// Handle tool call deltas
+		for _, tcDelta := range chunk.Choices[0].Delta.ToolCalls {
+			idx := tcDelta.Index
+			if accum, exists := toolCallAccums[idx]; exists {
+				accum.Arguments.WriteString(tcDelta.Function.Arguments)
+			} else {
+				toolCallAccums[idx] = &toolCallAccum{
+					ID:   tcDelta.ID,
+					Name: tcDelta.Function.Name,
+				}
+				toolCallAccums[idx].Arguments.WriteString(tcDelta.Function.Arguments)
+			}
+		}
+
+		// Capture usage from final chunk (providers often include it in the last chunk)
+		if chunk.Usage != nil {
+			usage = TokenUsage{
+				PromptTokens:     chunk.Usage.PromptTokens,
+				CompletionTokens: chunk.Usage.CompletionTokens,
+				TotalTokens:      chunk.Usage.TotalTokens,
+			}
+		}
+
 		if chunk.Choices[0].FinishReason != nil {
 			finishReason = *chunk.Choices[0].FinishReason
 		}
@@ -1005,12 +1054,26 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		}()
 	}
 
-	return &Response{
-		Content:      accumulated.String(),
-		Usage:        TokenUsage{}, // streaming may not include per-request usage
-		Model:        modelID,
-		FinishReason: finishReason,
-	}, nil
+	// Build tool calls from accumulators
+		var toolCalls []ToolCall
+		for _, accum := range toolCallAccums {
+			toolCalls = append(toolCalls, ToolCall{
+				ID:   accum.ID,
+				Type: "function",
+				Function: ToolCallFunction{
+					Name:      accum.Name,
+					Arguments: accum.Arguments.String(),
+				},
+			})
+		}
+
+		return &Response{
+			Content:      accumulated.String(),
+			ToolCalls:    toolCalls,
+			Usage:        usage,
+			Model:        modelID,
+			FinishReason: finishReason,
+		}, nil
 }
 
 // SwitchModel switches to a different model/endpoint at runtime.
