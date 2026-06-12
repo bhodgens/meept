@@ -212,6 +212,10 @@ Widget buildTtsSection(WidgetRef ref) {
                     if (value) {
                       ref.read(ttsBehaviorProvider('queue').notifier).state = false;
                     }
+                    ttsNotifier.setBehaviorSettings(
+                      interrupt: value,
+                      queue: ref.read(ttsBehaviorProvider('queue').notifier).state,
+                    );
                   }
                 : null,
             activeColor: CyberpunkColors.greenSuccess,
@@ -241,6 +245,10 @@ Widget buildTtsSection(WidgetRef ref) {
                     if (value) {
                       ref.read(ttsBehaviorProvider('interrupt').notifier).state = false;
                     }
+                    ttsNotifier.setBehaviorSettings(
+                      interrupt: ref.read(ttsBehaviorProvider('interrupt').notifier).state,
+                      queue: value,
+                    );
                   }
                 : null,
             activeColor: CyberpunkColors.greenSuccess,

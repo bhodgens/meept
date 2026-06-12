@@ -25,6 +25,14 @@ abstract class AppConstants {
   // Storage keys (SharedPreferences)
   static const String apiKeyPref = 'api_key';
   static const String themePref = 'theme';
+  // TTS preferences
+  static const String ttsEnabledPref = 'tts_enabled';
+  static const String ttsVoicePref = 'tts_voice';
+  static const String ttsVolumePref = 'tts_volume';
+  static const String ttsRatePref = 'tts_rate';
+  static const String ttsInterruptPref = 'tts_interrupt';
+  static const String ttsQueuePref = 'tts_queue';
+  static const String ttsMaxQueueSizePref = 'tts_max_queue_size';
   // NOTE: use_tls was removed — HTTPS is mandatory and not configurable
 
   // Default development API key (matches pkg/constants/api_key.go).

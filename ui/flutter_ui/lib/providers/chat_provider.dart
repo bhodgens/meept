@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
 import '../services/api_client.dart';
 import '../services/websocket_service.dart';
-import 'providers.dart';
+import 'providers.dart'; // exports tts_provider.dart
 
 /// Maximum number of messages to keep in memory
 const int _maxMessages = 500;
@@ -49,13 +49,14 @@ class ChatState {
 
 /// StateNotifier that manages chat messages for a session
 class ChatNotifier extends StateNotifier<ChatState> {
-  ChatNotifier({required this.apiClient, required this.websocket})
+  ChatNotifier({required this.apiClient, required this.websocket, required this.ttsNotifier})
       : super(const ChatState()) {
     _initWebSocket();
   }
 
   final ApiClient apiClient;
   final WebSocketService websocket;
+  final TtsNotifier ttsNotifier;
   StreamSubscription<Map<String, dynamic>>? _chatSubscription;
   StreamSubscription<Map<String, dynamic>>? _wsChatSubscription;
   String? _sessionId;
@@ -248,6 +249,11 @@ class ChatNotifier extends StateNotifier<ChatState> {
     try {
       final message = ChatMessage.fromBackendMessage(data);
 
+      // Trigger TTS for assistant messages
+      if (message.role == 'assistant' && message.content.isNotEmpty) {
+        ttsNotifier.speak(message.content);
+      }
+
       // Replace or update existing message by id if it exists
       final existingIndex = state.messages.indexWhere(
         (m) => m.id == message.id,
@@ -311,7 +317,8 @@ final chatProvider =
     StateNotifierProvider<ChatNotifier, ChatState>((ref) {
   final client = ref.watch(apiClientProvider);
   final websocket = ref.watch(websocketProvider);
-  return ChatNotifier(apiClient: client, websocket: websocket);
+  final ttsNotifier = ref.read(ttsProvider.notifier);
+  return ChatNotifier(apiClient: client, websocket: websocket, ttsNotifier: ttsNotifier);
 });
 
 /// Current session ID provider

@@ -3,6 +3,8 @@
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/tts_service.dart';
+import '../services/storage_service.dart';
+import '../core/constants.dart';
 
 /// TTS state enum.
 enum TtsState {
@@ -15,9 +17,43 @@ enum TtsState {
 /// Wraps TtsService and provides state notification to UI.
 class TtsNotifier extends StateNotifier<TtsState> {
   final TtsService _service;
+  final StorageService _storage;
   bool _enabled = false;
 
-  TtsNotifier() : _service = TtsService(), super(TtsState.idle);
+  TtsNotifier() : _service = TtsService(), _storage = StorageService.instance, super(TtsState.idle) {
+    _loadSettings();
+  }
+
+  /// Load persisted TTS settings
+  void _loadSettings() {
+    _enabled = _storage.getTtsEnabled();
+    // Apply other settings to service
+    _service.applyConfig(TtsConfig(
+      enabled: _enabled,
+      voice: _storage.getTtsVoice() ?? 'en-US',
+      volume: _storage.getTtsVolume(),
+      rate: _storage.getTtsRate(),
+      interruptOnNewMsg: _storage.getTtsInterrupt(),
+      queueMessages: _storage.getTtsQueue(),
+      maxQueueSize: _storage.getTtsMaxQueueSize(),
+    ));
+  }
+
+  /// Persist current settings (called from setters)
+  Future<void> _saveSettings({
+    double? volume,
+    double? rate,
+    bool? interrupt,
+    bool? queue,
+    int? maxQueueSize,
+  }) async {
+    await _storage.setTtsEnabled(_enabled);
+    if (volume != null) await _storage.setTtsVolume(volume);
+    if (rate != null) await _storage.setTtsRate(rate);
+    if (interrupt != null) await _storage.setTtsInterrupt(interrupt);
+    if (queue != null) await _storage.setTtsQueue(queue);
+    if (maxQueueSize != null) await _storage.setTtsMaxQueueSize(maxQueueSize);
+  }
 
   /// Whether TTS is enabled.
   bool get enabled => _enabled;
@@ -47,6 +83,7 @@ class TtsNotifier extends StateNotifier<TtsState> {
     if (!value) {
       stop();
     }
+    _saveSettings();
   }
 
   /// Speak text if TTS is enabled.
@@ -71,11 +108,27 @@ class TtsNotifier extends StateNotifier<TtsState> {
   /// Set voice.
   Future<void> setVoice(String voiceName) async {
     await _service.setVoice(voiceName);
+    await _storage.setTtsVoice(voiceName);
+  }
+
+  /// Set behavior settings
+  void setBehaviorSettings({required bool interrupt, required bool queue, int? maxQueueSize}) {
+    _service.applyConfig(TtsConfig(
+      enabled: _enabled,
+      voice: _storage.getTtsVoice() ?? 'en-US',
+      volume: _storage.getTtsVolume(),
+      rate: _storage.getTtsRate(),
+      interruptOnNewMsg: interrupt,
+      queueMessages: queue,
+      maxQueueSize: maxQueueSize ?? 5,
+    ));
+    _saveSettings(interrupt: interrupt, queue: queue, maxQueueSize: maxQueueSize);
   }
 
   /// Set speech speed.
   Future<void> setSpeed(double speed) async {
     await _service.setSpeed(speed);
+    await _storage.setTtsRate(speed);
   }
 
   /// Set pitch.
@@ -86,6 +139,7 @@ class TtsNotifier extends StateNotifier<TtsState> {
   /// Set volume.
   Future<void> setVolume(double volume) async {
     await _service.setVolume(volume);
+    await _storage.setTtsVolume(volume);
   }
 
   @override

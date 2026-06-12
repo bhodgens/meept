@@ -97,6 +97,50 @@ class StorageService {
     await _prefs?.setString(AppConstants.themePref, theme);
   }
 
+  // ------ TTS Settings ------
+
+  bool getTtsEnabled() => _prefs?.getBool(AppConstants.ttsEnabledPref) ?? false;
+
+  Future<void> setTtsEnabled(bool enabled) async {
+    await _prefs?.setBool(AppConstants.ttsEnabledPref, enabled);
+  }
+
+  String? getTtsVoice() => _prefs?.getString(AppConstants.ttsVoicePref);
+
+  Future<void> setTtsVoice(String voice) async {
+    await _prefs?.setString(AppConstants.ttsVoicePref, voice);
+  }
+
+  double getTtsVolume() => _prefs?.getDouble(AppConstants.ttsVolumePref) ?? 1.0;
+
+  Future<void> setTtsVolume(double volume) async {
+    await _prefs?.setDouble(AppConstants.ttsVolumePref, volume);
+  }
+
+  double getTtsRate() => _prefs?.getDouble(AppConstants.ttsRatePref) ?? 0.5;
+
+  Future<void> setTtsRate(double rate) async {
+    await _prefs?.setDouble(AppConstants.ttsRatePref, rate);
+  }
+
+  bool getTtsInterrupt() => _prefs?.getBool(AppConstants.ttsInterruptPref) ?? true;
+
+  Future<void> setTtsInterrupt(bool interrupt) async {
+    await _prefs?.setBool(AppConstants.ttsInterruptPref, interrupt);
+  }
+
+  bool getTtsQueue() => _prefs?.getBool(AppConstants.ttsQueuePref) ?? false;
+
+  Future<void> setTtsQueue(bool queue) async {
+    await _prefs?.setBool(AppConstants.ttsQueuePref, queue);
+  }
+
+  int getTtsMaxQueueSize() => _prefs?.getInt(AppConstants.ttsMaxQueueSizePref) ?? 5;
+
+  Future<void> setTtsMaxQueueSize(int size) async {
+    await _prefs?.setInt(AppConstants.ttsMaxQueueSizePref, size);
+  }
+
   // ------ Connection / Host ------
 
   String? getApiHost() => _prefs?.getString(_hostPref);

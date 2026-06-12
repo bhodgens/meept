@@ -79,6 +79,11 @@ Meept supports client-side Text-to-Speech (TTS) synthesis for reading assistant 
 }
 ```
 
+**Note on Voice Naming:**
+- Piper voices use identifiers like `danny-medium`, `en_US-lessac-high` (from HuggingFace)
+- Platform-native TTS (flutter_tts on macOS/Windows) uses OS-level voice names like `Daniel` (macOS), `Microsoft David` (Windows)
+- When switching between `piper` and `platform` engines, you may need to update the `voice` setting to match the platform's naming convention
+
 ## Commands
 
 ### Voice Management
@@ -211,13 +216,43 @@ cmd.Run()
 audioData, _ := os.ReadFile(tmpFile)
 ```
 
-## Flutter Integration (TODO)
+## Flutter Implementation
 
-The Flutter client should implement TTS using:
-- `flutter_tts` package for platform-native TTS, OR
-- `audioplayers` + Piper subprocess (similar to Go)
+The Flutter client uses `flutter_tts` package for platform-native TTS synthesis:
 
-See `docs/plans/2026-06-11-tts-piper-integration.md` Task 5 for details.
+**Features:**
+- Platform-native synthesis via `flutter_tts` (macOS AVSpeechSynthesizer, Windows SAPI, Android TextToSpeech)
+- Queue/interrupt behavior matching Go implementation
+- Settings persistence via SharedPreferences
+- TTS settings panel in Settings view
+
+**Voice Selection:**
+- Platform TTS uses OS voice identifiers (e.g., `Daniel` on macOS)
+- Available voices can be selected in the Settings panel
+
+**Queue/Interrupt Behavior:**
+- `interrupt_on_new_msg = true`: Stops current speech and speaks new message immediately
+- `queue_messages = true`: Queues messages and speaks them sequentially after current playback
+- `max_queue_size`: Maximum queue length (default: 5, overflow drops oldest)
+
+**Note:** The Flutter implementation is client-side and does not involve the daemon.
+
+## Queue and Interrupt Behavior
+
+The TTS system supports two mutually-exclusive behaviors for handling new messages while speaking:
+
+**Interrupt Mode (`interrupt_on_new_msg = true`):**
+- Immediately stops current speech when a new message arrives
+- Starts speaking the new message right away
+- Best for: Real-time conversation, voice assistants
+
+**Queue Mode (`queue_messages = true`):**
+- Adds new messages to a bounded queue
+- Continues current speech, then speaks queued messages in order
+- Queue overflow (when `max_queue_size` exceeded) drops the oldest message
+- Best for: Reading logs, notifications, batch updates
+
+**Important:** These modes are mutually exclusive. If both are set to `true`, interrupt behavior takes precedence.
 
 ## Testing
 
