@@ -158,8 +158,19 @@ func NewDaemonService(cfg *ServiceConfig) (*DaemonService, error) {
 // Start implements service.Interface.  Called by the service manager when the
 // service is started.  In the full integration path the daemon's Run()
 // context would be passed here.
-func (ds *DaemonService) Start(_ service.Service) error {
+// Start implements service.Interface and is called by kardianos/service
+// when running in in-process mode (via service.Run()).
+// Note: The CLI uses StartService() which delegates to the platform service
+// manager (launchd on macOS). Start() is only used for in-process mode.
+func (ds *DaemonService) Start(s service.Service) error {
 	ds.isRunning.Store(true)
+	ds.logger.Info("DaemonService.Start() called - in-process service mode",
+		"executable", s.String(),
+	)
+	// For in-process mode, we would typically call daemon.Run() here.
+	// However, the current implementation uses StartService() for external
+	// service management via launchd/ServiceManager.
+	// TODO: Wire daemon.Run() for full in-process support
 	return nil
 }
 
