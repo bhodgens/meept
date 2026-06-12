@@ -235,18 +235,42 @@ func (f *NumberField) Reset() {
 
 // --- FloatField ---
 
-type FloatField struct{ baseField }
+type FloatField struct {
+	baseField
+	min *float64
+	max *float64
+}
 
 func NewFloatField(key, label string, value float64) *FloatField {
 	s := strconv.FormatFloat(value, 'f', -1, 64)
-	return &FloatField{baseField{key: key, label: label, orig: s, current: s}}
+	return &FloatField{
+		baseField: baseField{key: key, label: label, orig: s, current: s},
+	}
+}
+
+// NewFloatFieldWithRange creates a FloatField with min/max validation.
+func NewFloatFieldWithRange(key, label string, value, min, max float64) *FloatField {
+	s := strconv.FormatFloat(value, 'f', -1, 64)
+	return &FloatField{
+		baseField: baseField{key: key, label: label, orig: s, current: s},
+		min:       &min,
+		max:       &max,
+	}
 }
 
 func (f *FloatField) Type() FieldType { return FieldFloat }
 
 func (f *FloatField) Set(v string) error {
-	if _, err := strconv.ParseFloat(v, 64); err != nil {
+	val, err := strconv.ParseFloat(v, 64)
+	if err != nil {
 		return fmt.Errorf("float field %q: %q is not a valid number", f.key, v)
+	}
+	// Validate range if min/max are set
+	if f.min != nil && val < *f.min {
+		return fmt.Errorf("float field %q: value %v is below minimum %v", f.key, val, *f.min)
+	}
+	if f.max != nil && val > *f.max {
+		return fmt.Errorf("float field %q: value %v is above maximum %v", f.key, val, *f.max)
 	}
 	f.current = v
 	f.dirty = f.current != f.orig
