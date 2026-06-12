@@ -440,6 +440,18 @@ meept chat
 Ralph Loop adds automatic verification and replanning to the multi-agent execution flow. It monitors task completion and triggers replanning when evidence is insufficient.
 
 ### How It Differs from Standard Flow
+### How It Differs from Reflection
+
+**Reflection** operates at the code-edit level (immediate validation after `file_edit`), while **Ralph Loop** operates at the task-completion level (validation after job completes).
+
+| Aspect | Reflection | Ralph Loop |
+|--------|-----------|------------|
+| Trigger | After `file_edit` tool | After job completion |
+| Scope | Code lint/test errors | Task evidence validation |
+| Fix mechanism | LLM code fix | Replan with new steps |
+| Iteration | Single pass (orchestrator retries) | Up to MaxIterations replans |
+| Documentation | [Reflection](./reflection.md) | [Ralph Loop](./ralph-loop.md) |
+
 
 | Aspect | Standard Flow | Ralph Loop |
 |--------|--------------|------------|

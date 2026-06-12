@@ -762,3 +762,31 @@ For `TokenCacheCoordinator`, the existing eviction strategy (LRU + TTL + periodi
 **Estimated complexity:** ~150 lines (parser changes + tests)
 
 **Priority:** MEDIUM — not blocking current functionality, but required before enabling streaming for agentic workflows or real-time TUI display.
+
+---
+
+## Update: Streaming Parser Fix Status (2026-06-12)
+
+**Status:** ✅ FIXED
+
+The OpenAI-compatible streaming parser in `client.go` has been fixed to properly handle:
+1. Tool call deltas - accumulated across chunks using `map[int]*toolCallAccum`
+2. Usage data - parsed from final chunk when available
+
+**Remaining work to enable streaming in agent loop:**
+- `chatWithFailoverStream()` already exists at `loop.go:2152` but is never called
+- To enable: replace `l.chatWithFailover(ctx, messages, ...)` at line 1814 with `l.chatWithFailoverStream(ctx, messages, onDelta, ...)`
+- Need to provide an `onDelta` callback for TUI display or other progressive rendering
+
+**Wiring example:**
+```go
+// In agent/loop.go around line 1814
+onDelta := func(delta string) error {
+    // E.g., send to TUI for progressive display
+    // Or TTSR check for mid-stream abortion
+    return nil
+}
+response, err := l.chatWithFailoverStream(ctx, messages, onDelta, chatOpts...)
+```
+
+**Priority:** LOW-MEDIUM — streaming is now fully functional, but enabling it in the agent loop is a product decision based on UX requirements (progressive display vs. wait-for-complete).
