@@ -33,18 +33,13 @@ func NewSecurityBeforeToolCall(orch *intsecurity.Orchestrator, logger *slog.Logg
 func (s *SecurityBeforeToolCall) BeforeToolCall(ctx context.Context, toolCall llm.ToolCall) BlockResult {
 	toolName := toolCall.Function.Name
 
-	// Route to appropriate security check based on tool type
-	switch toolName {
-	case "shell":
+	// Shell commands are the only tool type that needs pre-execution scanning
+	// beyond what the tools already enforce themselves (FenceChecker at the
+	// tool level handles file paths; WebFetchTool checks taint exfiltration).
+	if toolName == "shell" {
 		return s.scanShellCommand(ctx, toolCall)
-	case "file_read", "file_write", "file_delete", "list_directory":
-		return s.checkFilePermission(ctx, toolCall)
-	case "web_fetch":
-		return s.checkNetworkPermission(ctx, toolCall)
-	default:
-		// No security check needed for this tool
-		return BlockResult{}
 	}
+	return BlockResult{}
 }
 
 // scanShellCommand runs Tirith scan on shell commands
@@ -77,56 +72,6 @@ func (s *SecurityBeforeToolCall) scanShellCommand(ctx context.Context, toolCall 
 		)
 		// Don't block on warning, but log it
 	}
-
-	return BlockResult{}
-}
-
-// checkFilePermission checks path-based permissions for file operations
-func (s *SecurityBeforeToolCall) checkFilePermission(ctx context.Context, toolCall llm.ToolCall) BlockResult {
-	// Extract path from arguments
-	var args struct {
-		Path string `json:"path"`
-	}
-	if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-		s.logger.Debug("could not parse file tool arguments", "error", err)
-		return BlockResult{}
-	}
-
-	s.logger.Debug("checking file permission",
-		"tool", toolCall.Function.Name,
-		"path", truncateString(args.Path, 100),
-	)
-
-	s.logger.Info("file operation security check passed",
-		"tool", toolCall.Function.Name,
-		"path", truncateString(args.Path, 100),
-		"check_category", "path_permission",
-	)
-
-	return BlockResult{}
-}
-
-// checkNetworkPermission checks network permissions for web operations
-func (s *SecurityBeforeToolCall) checkNetworkPermission(ctx context.Context, toolCall llm.ToolCall) BlockResult {
-	// Extract URL from arguments
-	var args struct {
-		URL string `json:"url"`
-	}
-	if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-		s.logger.Debug("could not parse web tool arguments", "error", err)
-		return BlockResult{}
-	}
-
-	s.logger.Debug("checking network permission",
-		"tool", toolCall.Function.Name,
-		"url", truncateString(args.URL, 100),
-	)
-
-	s.logger.Info("network operation security check passed",
-		"tool", toolCall.Function.Name,
-		"url", truncateString(args.URL, 100),
-		"check_category", "network_permission",
-	)
 
 	return BlockResult{}
 }

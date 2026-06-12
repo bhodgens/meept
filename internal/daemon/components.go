@@ -1433,12 +1433,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		testRunner := lint.NewTestRunner(logger)
 
 		reflectionConfig := agent.ReflectionConfig{
-			MaxReflections: cfg.Agent.Reflection.MaxReflections,
-			AutoLint:       cfg.Agent.Reflection.AutoLint,
-			AutoTest:       cfg.Agent.Reflection.AutoTest,
-		}
-		if reflectionConfig.MaxReflections == 0 {
-			reflectionConfig.MaxReflections = 3
+			AutoLint: cfg.Agent.Reflection.AutoLint,
+			AutoTest: cfg.Agent.Reflection.AutoTest,
 		}
 
 		c.ReflectionEngine = agent.NewReflectionEngineWithConfig(
@@ -1453,7 +1449,6 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		logger.Info("ReflectionEngine initialized",
 			"auto_lint", cfg.Agent.Reflection.AutoLint,
 			"auto_test", cfg.Agent.Reflection.AutoTest,
-			"max_reflections", reflectionConfig.MaxReflections,
 		)
 	}
 

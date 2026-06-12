@@ -11,9 +11,6 @@ import (
 func TestReflectionConfig_Defaults(t *testing.T) {
 	config := DefaultReflectionConfig()
 
-	if config.MaxReflections != 3 {
-		t.Errorf("expected MaxReflections=3, got %d", config.MaxReflections)
-	}
 	if !config.AutoLint {
 		t.Error("expected AutoLint=true")
 	}
@@ -30,8 +27,8 @@ func TestReflectionEngine_NewReflectionEngine(t *testing.T) {
 	// Test with nil LLM client (should still work, just won't fix)
 	engine := NewReflectionEngine(logger, linter, testRunner, nil)
 
-	if engine.config.MaxReflections != 3 {
-		t.Errorf("expected MaxReflections=3, got %d", engine.config.MaxReflections)
+	if !engine.config.AutoLint {
+		t.Error("expected default AutoLint=true")
 	}
 	if engine.linter == nil {
 		t.Error("expected linter to be set")
@@ -47,16 +44,15 @@ func TestReflectionEngine_NewReflectionEngine(t *testing.T) {
 func TestReflectionEngine_NewReflectionEngineWithConfig(t *testing.T) {
 	logger := slog.Default()
 	config := ReflectionConfig{
-		MaxReflections: 5,
-		AutoLint:       false,
-		AutoTest:       true,
-		WorkDir:        "/tmp/test",
+		AutoLint: false,
+		AutoTest: true,
+		WorkDir:  "/tmp/test",
 	}
 
 	engine := NewReflectionEngineWithConfig(logger, nil, nil, nil, config)
 
-	if engine.config.MaxReflections != 5 {
-		t.Errorf("expected MaxReflections=5, got %d", engine.config.MaxReflections)
+	if engine.config.AutoLint != false {
+		t.Error("expected AutoLint=false")
 	}
 	if engine.config.AutoLint != false {
 		t.Error("expected AutoLint=false")

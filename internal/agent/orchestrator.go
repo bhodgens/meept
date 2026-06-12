@@ -763,6 +763,17 @@ func (o *Orchestrator) applyFix(ctx context.Context, fix *FixAttempt) []string {
 		return nil
 	}
 
+	// Guard against multi-file corruption: extractCodeFromMarkdown returns the
+	// FIRST code block only. If the LLM returned fixes for multiple files with
+	// separate code blocks, applying the first block to all files would corrupt
+	// the other files. Limit to the first file when we only found one code block.
+	if len(fix.Files) > 1 && markdownContainsMultipleCodeBlocks(fix.FixText) {
+		o.logger.Warn("multi-file fix has multiple code blocks but only first extracted; applying to first file only to avoid corruption",
+			"files", fix.Files,
+		)
+		fix.Files = fix.Files[:1]
+	}
+
 	var applied []string
 	for _, file := range fix.Files {
 		// Resolve relative paths
@@ -845,6 +856,23 @@ func extractCodeFromMarkdown(markdown string) string {
 		return ""
 	}
 	return result
+}
+
+// markdownContainsMultipleCodeBlocks returns true if the markdown text contains
+// more than one triple-backtick code block.
+func markdownContainsMultipleCodeBlocks(markdown string) bool {
+	count := 0
+	idx := 0
+	for {
+		i := strings.Index(markdown[idx:], "```")
+		if i == -1 {
+			break
+		}
+		count++
+		idx += i + 3
+	}
+	// Each code block has an opening and closing ```
+	return count > 2
 }
 
 // publishReflectionEvent publishes a bus event about reflection results

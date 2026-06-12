@@ -84,42 +84,6 @@ func (t *TiktokenTokenizer) CountTokens(text string) int {
 // Ensure TiktokenTokenizer implements Tokenizer
 var _ Tokenizer = (*TiktokenTokenizer)(nil)
 
-// TokenCache provides caching for token counts to avoid recomputation.
-type TokenCache struct {
-	tokenizer Tokenizer
-	cache     sync.Map // map[string]int
-}
-
-// NewTokenCache creates a new token cache wrapping a tokenizer.
-func NewTokenCache(tokenizer Tokenizer) *TokenCache {
-	return &TokenCache{
-		tokenizer: tokenizer,
-	}
-}
-
-// CountTokens returns cached token count or computes and caches it.
-func (c *TokenCache) CountTokens(text string) int {
-	if text == "" {
-		return 0
-	}
-
-	// Try cache first
-	if cached, ok := c.cache.Load(text); ok {
-		if count, ok := cached.(int); ok {
-			return count
-		}
-	}
-
-	// Compute and cache
-	count := c.tokenizer.CountTokens(text)
-	c.cache.Store(text, count)
-
-	return count
-}
-
-// Ensure TokenCache implements Tokenizer
-var _ Tokenizer = (*TokenCache)(nil)
-
 // NewTokenizerForModel creates an appropriate tokenizer based on model/provider.
 // Returns a tiktoken tokenizer for known models, or heuristic as fallback.
 func NewTokenizerForModel(modelID string) Tokenizer {

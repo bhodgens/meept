@@ -643,12 +643,11 @@ type AgentCompactionConfig struct {
 	TimeoutSeconds    int    `json:"timeout_seconds"      toml:"timeout_seconds"`
 }
 
-// AgentReflectionConfig holds reflection loop settings for auto-fix iterations.
+// AgentReflectionConfig holds reflection settings for auto-lint/test fixing.
+// Multi-pass retry is handled by the orchestrator, not by the engine.
 type AgentReflectionConfig struct {
 	// Enabled turns on the reflection loop for auto-lint/test fixing
 	Enabled bool `json:"enabled" toml:"enabled"`
-	// MaxReflections is the maximum number of fix attempts before giving up
-	MaxReflections int `json:"max_reflections" toml:"max_reflections"`
 	// AutoLint enables automatic linting after code edits
 	AutoLint bool `json:"auto_lint" toml:"auto_lint"`
 	// AutoTest enables automatic testing after successful linting

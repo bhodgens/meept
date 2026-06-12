@@ -59,25 +59,6 @@ func TestTiktokenTokenizer(t *testing.T) {
 	}
 }
 
-func TestTokenCache(t *testing.T) {
-	baseTokenizer := &HeuristicTokenizer{}
-	cache := NewTokenCache(baseTokenizer)
-
-	input := "Test caching behavior"
-	first := cache.CountTokens(input)
-	second := cache.CountTokens(input)
-
-	if first != second {
-		t.Errorf("Cached token count differs: first=%d, second=%d", first, second)
-	}
-
-	// Different inputs should compute separately
-	input2 := "Different input"
-	third := cache.CountTokens(input2)
-	if third == first {
-		t.Error("Different inputs should have different token counts")
-	}
-}
 
 func TestNewTokenizerForModel(t *testing.T) {
 	tests := []struct {
@@ -212,8 +193,8 @@ func BenchmarkTokenizer(b *testing.B) {
 		}
 	})
 
-	b.Run("TokenCache", func(b *testing.B) {
-		tokenizer := NewTokenCache(NewTiktokenTokenizer("cl100k_base"))
+	b.Run("Tiktoken_direct", func(b *testing.B) {
+		tokenizer := NewTiktokenTokenizer("cl100k_base")
 		for range b.N {
 			_ = tokenizer.CountTokens(sampleText)
 		}

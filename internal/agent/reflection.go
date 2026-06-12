@@ -14,22 +14,21 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 )
 
-// ReflectionConfig holds reflection loop parameters
+// ReflectionConfig holds reflection parameters. Note: multi-pass retry is handled
+// externally by the orchestrator, not by the reflection engine itself.
 type ReflectionConfig struct {
-	MaxReflections int    // Default: 3
-	AutoLint       bool   // Enable auto-linting
-	AutoTest       bool   // Enable auto-testing
-	LintCmd        string // Custom lint command (optional)
-	TestCmd        string // Custom test command (optional)
-	WorkDir        string // Working directory for lint/test commands
+	AutoLint bool   // Enable auto-linting
+	AutoTest bool   // Enable auto-testing
+	LintCmd  string // Custom lint command (optional)
+	TestCmd  string // Custom test command (optional)
+	WorkDir  string // Working directory for lint/test commands
 }
 
-// DefaultReflectionConfig returns the default configuration
+// DefaultReflectionConfig returns the default configuration.
 func DefaultReflectionConfig() ReflectionConfig {
 	return ReflectionConfig{
-		MaxReflections: 3,
-		AutoLint:       true,
-		AutoTest:       true,
+		AutoLint: true,
+		AutoTest: true,
 	}
 }
 
@@ -48,11 +47,9 @@ func NewReflectionEngine(logger *slog.Logger, linter *lint.Registry, testRunner 
 	return NewReflectionEngineWithConfig(logger, linter, testRunner, llmClient, DefaultReflectionConfig())
 }
 
-// NewReflectionEngineWithConfig creates a new reflection engine with custom configuration
+// NewReflectionEngineWithConfig creates a new reflection engine with custom configuration.
+// Multi-pass retry is handled externally by the orchestrator (see orchestrator.go:654-744).
 func NewReflectionEngineWithConfig(logger *slog.Logger, linter *lint.Registry, testRunner *lint.TestRunner, llmClient llm.Chatter, config ReflectionConfig) *ReflectionEngine {
-	if config.MaxReflections == 0 {
-		config.MaxReflections = 3
-	}
 	return &ReflectionEngine{
 		config:     config,
 		linter:     linter,
