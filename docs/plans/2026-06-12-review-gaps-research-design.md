@@ -27,6 +27,27 @@
 
 **Deliverable:** A section documenting the current flow, whether multi-iteration makes sense, and a recommended approach (enable multi-iteration with a circuit breaker, or remove `MaxReflections` config and document single-iteration as intentional).
 
+### Kimi Findings: Reflection Loop Single-Iteration Behavior
+
+**Code analysis:** `RunReflection` (`internal/agent/reflection.go:85-164`) has a `for i := 0; i < cfg.MaxReflections; i++` loop that never iterates more than once. Three return paths all exit the function on the first iteration:
+- Lines 117-118: lint errors found → `requestFix` → return
+- Lines 147-148: test failures found → `requestFix` → return
+- Lines 155-156: no errors → `Fixed=true` → return
+
+`MaxReflections` is wired through `ReflectionConfig` → `AgentReflectionConfig` → `daemon/components.go`, but is functionally a no-op.
+
+**Orchestrator's role:** `handleToolExecutionComplete` (`orchestrator.go:627-745`) is the sole caller. It implements its own hardcoded two-pass retry externally:
+1. Call `RunReflection` → apply `PendingFix` → call `RunReflection` again on fixed files
+2. If still failing, apply one more fix but do not re-verify (line 693 comment: "single retry pass to avoid infinite loop")
+
+This means total attempts = 3 (initial + retry + final apply), completely independent of `MaxReflections`.
+
+**Was multi-iteration intended?** Yes — the plan doc (`docs/plans/20260609-auto-lint-test-reflection-implementation.md:696-756`) shows `requestFix` returning `(bool, error)` with `continue` statements for true looping. The actual implementation changed the signature to `(*FixAttempt, error)`, shifting fix application responsibility to the orchestrator.
+
+**Recommendation:** Remove the dead `for` loop and `MaxReflections` config option. The orchestrator's external retry is clearer and safer — it explicitly avoids infinite loops and separates concerns (engine diagnoses, orchestrator applies). Simplify `RunReflection` to a single-pass function. Update config docs to reflect the true behavior. **Fix complexity: trivial** (~15 lines removed, schema/docs update).
+
+Alternative (if multi-iteration desired later): Keep the current structure but add an internal `maxEnginePasses=1` constant, document that the orchestrator handles retry, and leave `MaxReflections` as a backward-compatible no-op with a deprecation comment.
+
 ### GLM Findings: Reflection Loop Single-Iteration Behavior
 
 **Current State:**
@@ -100,6 +121,42 @@ Keep `MaxReflections` as a no-op config field for backward compatibility with a 
 5. What format does the LLM actually return fixes in? Read the prompt in `formatLintFixRequest` and `formatTestFixRequest`.
 
 **Deliverable:** A section documenting the current fix application flow, what the LLM actually returns, and a recommended parsing strategy.
+
+### Kimi Findings: parseFixResponse Indiscriminate File Targeting
+
+**Current flow (three compounding bugs):**
+
+1. **`parseFixResponse`** (`reflection.go:295-319`): Creates `targetFiles` by copying ALL `originalFiles` (line 302-304). The file-reference check loop (lines 308-312) checks if the LLM response contains each file's path, but does nothing with this information — only a debug log and `continue`. The result is that `FixAttempt.Files` always equals the full original file list, regardless of what the LLM actually addressed.
+
+2. **`extractCodeFromMarkdown`** (`orchestrator.go:809-848`): Finds only the FIRST triple-backtick code block in the LLM response. If the LLM returns multiple code blocks (one per file), the rest are ignored. If there are NO code blocks, it returns empty string and `applyFix` falls back to writing the raw LLM prose text to every file.
+
+3. **`applyFix`** (`orchestrator.go:750-804`): Iterates over ALL files in `fix.Files` and writes the exact same `content` (from step 2) to each one. No per-file mapping exists.
+
+**Actual failure mode:** In a multi-file scenario where `file1.go` and `file2.go` both have lint errors:
+- `parseFixResponse` sets `Files = ["file1.go", "file2.go"]`
+- LLM returns a response with two code blocks, one for each file
+- `extractCodeFromMarkdown` grabs only the first code block (e.g., `file1.go` content)
+- `applyFix` writes that `file1.go` content to BOTH `file1.go` AND `file2.go`
+- `file2.go` is now corrupted with code meant for `file1.go`
+- If LLM returns no code blocks (prose explanation), the prose text is written to every file
+
+**What the LLM prompt asks for:** `buildFixPrompt` (`reflection.go:424-432`) instructs: "Use the file_edit tool to apply fixes, or if you're providing code directly, format it as a complete patch with the file path and corrected content." This is ambiguous — the LLM has no tool-calling capability here (it's a raw `Chat()` call), so it typically returns markdown code blocks with file path annotations.
+
+**Unimplemented parsing hint:** Lines 296-299 contain a comment suggesting parsing `file_edit` tool-call JSON blocks (```` ```tool_call\n{"name":"file_edit", ...}\n``` ````), but no such parsing exists.
+
+**Test coverage:** Zero. `reflection_test.go` tests `detectLanguageFromExt`, `uniqueFilesFromErrors`, `filterErrorsForFile`, `reflectionTruncate`, but has NO tests for `parseFixResponse`, `applyFix`, or `extractCodeFromMarkdown`. This confirms the critical path was never validated.
+
+**Recommendation:** This is genuine bug that will corrupt files. A proper fix requires two parts:
+1. **Rewrite `parseFixResponse`** to parse per-file code blocks from the LLM response. A robust strategy:
+   - Match code blocks with preceding file path annotations (patterns: `// File: path`, `## path`, `path:` header)
+   - Build `map[string]string` of filepath → code content
+   - As fallback, if only one code block is found and one file is targeted, apply it
+   - As safety guard: if no per-file mapping can be extracted, return empty `Files` and let the orchestrator skip `applyFix`
+2. **Rewrite `applyFix`** to accept a per-file content map instead of writing the same blob to all files
+
+Alternatively, implement the hinted `file_edit` tool-call JSON parsing — this may be more reliable since the prompt already instructs the LLM to use it. The LLM response format would need to be validated first with actual model outputs.
+
+**Fix complexity: medium** (~60-80 lines across reflection.go + orchestrator.go, plus 80-100 lines of tests). Given the severity (file corruption), this should be prioritized.
 
 ### GLM Findings: parseFixResponse Indiscriminate File Targeting
 
@@ -196,6 +253,36 @@ The core issue is that the orchestration layer runs as a hardcoded 3-pass extern
 5. Should these hooks be removed (redundant with FenceChecker) or implemented (defense-in-depth)?
 
 **Deliverable:** A section documenting the existing security layers, any overlap, and a recommendation (remove redundant hooks, implement real checks, or document as intentional placeholders).
+
+### Kimi Findings: Security Hooks — Intended Enforcement Model
+
+**Existing security layers:** Meept has defense-in-depth with multiple layers:
+1. **Input Sanitization** (`InputSanitizer` + `PromptGuard`, `sanitizer.go`/`prompt_guard.go`): 27 prompt injection pattern detectors, structural token escaping, boundary markers. Wired via `SecurityTransformContext` hook.
+2. **Secret Obfuscation** (`SecretObfuscator`, `secrets.go`): Replaces secrets in messages before sending to LLM.
+3. **Shell Command Scanning** (`TirithScanner` + `Orchestrator.ScanShellCommand`): External `tirith` binary classification (SAFE/LOW/MEDIUM/HIGH/CRITICAL). Wired via `SecurityBeforeToolCall.scanShellCommand`.
+4. **Path Fencing** (`FenceChecker`, `fence.go`): Restricts file ops to project worktree boundaries, configurable `fence_allow_read` for system paths. Wired to all file tools via `SetFenceChecker()` in `components.go:2504-2546`.
+5. **Security Engine** (`Engine`, `engine.go`): SQLite-backed rules with tool risk classification, path rules, command patterns, financial blocks (13 patterns), audit logging. Invoked via `Orchestrator.Check()`.
+6. **Taint Tracking** (`TaintTracker`, `taint/`): Lattice-based information flow tracking blocking tainted data at sinks. Wired via `TaintBeforeToolCall` hook.
+
+**Hook implementation status:** `SecurityBeforeToolCall.BeforeToolCall` (`security_hooks.go:65-163`) handles three tool types:
+- `shell` → `scanShellCommand` → calls `Orchestrator.ScanShellCommand()` → **FULLY WORKING**
+- `file_read`, `file_write`, `file_delete`, `list_directory` → `checkFilePermission` → **STUB** (logs, always returns `BlockResult{}`)
+- `web_fetch` → `checkNetworkPermission` → **STUB** (logs, always returns `BlockResult{}`)
+- `default` → also returns `BlockResult{}`
+
+**Overlap analysis:**
+- **File path checks:** `FenceChecker` is already wired into `ReadFileTool`, `WriteFileTool`, `FileEditTool`, `DeleteFileTool` via `SetFenceChecker()`. The hook's `checkFilePermission` stub is completely redundant — it does not add any additional validation.
+- **Shell command checks:** `scanShellCommand` adds unique value via Tirith scanning, which the tools do not do themselves. This hook should stay.
+- **Network checks:** `WebFetchTool` has a gap — `SetSecurityOrchestrator()` method exists but is **never called** in `components.go`. The `Orchestrator.CheckWebFetch()` (taint exfiltration check) is never invoked. The hook stub does nothing either, so network ops lack any URL validation layer.
+
+**Security model from docs:** `docs/configuration/production-security.md` and `docs/concepts/cluster-architecture.md` describe: file ops restricted to worktree boundaries, network ops restricted via taint tracking (URLs with tainted data blocked), risk classification gates (HIGH/CRITICAL require user confirmation), sensitive path blocks for `~/.ssh/*`, `~/.gnupg/*`, `*/.env*`, `/etc/shadow`.
+
+**Recommended approach:**
+1. **Remove `checkFilePermission` hook** — `FenceChecker` already enforces path boundaries at the tool level, and `SecurityEngine.Check()` provides rule-based enforcement. The hook adds nothing.
+2. **Remove `checkNetworkPermission` hook** (as a stub) but **wire `WebFetchTool.SetSecurityOrchestrator()`** in `components.go` so `CheckWebFetch()` / taint exfiltration detection actually runs. The existing `WebFetchTool` already calls its security orchestrator internally if set — the wiring is just missing.
+3. **Keep `scanShellCommand`** — it provides unique Tirith-based scanning that tools don't do themselves.
+
+**Fix complexity: low** (~30 lines removed from `security_hooks.go`, +1 line added in `components.go` to wire `WebFetchTool`).
 
 ### GLM Findings: Security Hooks — Intended Enforcement Model
 
@@ -308,6 +395,48 @@ Alternatively, if hooks should be the enforcement layer instead of direct tool c
 5. Are there tests for the streaming parser that would need updating?
 
 **Deliverable:** A section documenting the streaming protocol formats, which code paths use streaming, and a recommended implementation approach with estimated complexity.
+
+### Kimi Findings: Streaming Parser Tool Call Delta Handling
+
+**Current OpenAI streaming parser:** `ChatWithDeltaCallback` (`client.go:943-1014`) defines a chunk struct that only extracts `delta.content`:
+```go
+var chunk struct {
+    Choices []struct {
+        Delta struct {
+            Content string `json:"content"`
+        } `json:"delta"`
+        FinishReason *string `json:"finish_reason"`
+    } `json:"choices"`
+}
+```
+Any `delta.tool_calls[]` fields in SSE chunks are silently dropped by `json.Unmarshal`. The returned `Response` always has `ToolCalls: nil` and `Usage: TokenUsage{}`.
+
+**Anthropic streaming parser:** `parseStreamingResponse` (`anthropic.go:917-1007`) is already fully correct:
+- `content_block_start` with type `tool_use` captures `ID` and `Name`
+- `content_block_delta` with `input_json_delta` accumulates `PartialJSON` into `InputJSON`
+- `buildResponseFromBlocks` (1021-1037) converts to `[]ToolCall`
+No fix needed for Anthropic.
+
+**OpenAI streaming protocol for tool calls:** SSE chunks send tool call deltas incrementally:
+```json
+{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"read_file","arguments":""}}]}}]}
+{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":"}}]}}]}
+{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"/foo/bar\"}"}}]}}]}
+```
+The `index` field groups deltas for the same tool call. Parallel tool calls use indices 0, 1, 2, etc. First chunk for each index sends `id` and `function.name`; subsequent chunks append to `function.arguments`.
+
+**Streaming usage in production:** The agent loop (`loop.go:1814`) calls `chatWithFailover()` — the **non-streaming** variant, passing `nil` for `onDelta`. `chatWithFailoverStream()` at `loop.go:2152` is **dead code** — defined but never called. `chatWithFailoverRaw` has a streaming branch when `onDelta != nil`, but since `onDelta` is always `nil`, it always falls through to the non-streaming path. Streaming is only used for TUI display scenarios, not for agentic tool workflows.
+
+**Impact:** This is a **latent bug**, not an active one. It will become critical if/when streaming is enabled for agentic workflows (e.g., real-time TUI display with tool calls).
+
+**Recommended implementation approach:**
+1. Expand the chunk struct in `client.go` to include `delta.tool_calls` fields (`index`, `id`, `type`, `function.name`, `function.arguments`)
+2. Add a `map[int]*ToolCallAccumulator` inside `ChatWithDeltaCallback` to accumulate deltas across chunks
+3. At stream end, build `[]ToolCall` from the accumulator and include it in the final `Response`
+4. Add tests for: text-only streaming, single tool call, multiple parallel tool calls, mixed text+tools, malformed chunks
+5. Optionally add `stream_options: {"include_usage": true}` for usage data in the final chunk
+
+**Fix complexity: medium** (~40 lines parser changes, ~80 lines tests). Not urgent but should be fixed before enabling streaming for agentic workflows.
 
 ### GLM Findings: Streaming Parser Tool Call Delta Handling
 
@@ -464,6 +593,35 @@ The `RawToolCall` type already exists in the codebase (`models.go`). It needs to
 
 **Deliverable:** A section documenting the cache's actual usage pattern, estimated memory footprint, and a recommended strategy with rationale.
 
+### Kimi Findings: TokenCache Growth and Eviction Strategy
+
+**Cache structure:** `TokenCache` (`tokenizer.go:88-121`) wraps a `Tokenizer` with `sync.Map` (key=full text string, value=int count). No eviction. No size limits. No TTL.
+
+**Key format:** The full raw text string is used as the key directly — no hashing, no truncation. For a typical conversation message of 500-2000 chars, the key holds the complete text content.
+
+**Value size:** Just an `int` boxed in `interface{}` via `sync.Map` — approximately 16-24 bytes per entry.
+
+**Usage analysis:** `TokenCache` is **dead code in production**. My investigation confirms `NewTokenCache()` is never called by production code. Call chains:
+- `agent/loop.go:986` calls `llm.NewTokenizerForModel()` → returns bare `TiktokenTokenizer` or `HeuristicTokenizer`
+- `ContextFirewall.countTokens()` uses its own `f.tokenizer` directly (never wrapped in `TokenCache`)
+- `ContextCompactor.countTokens()` and `countMessageTokens()` use `c.tokenizer` directly
+No production code path wraps a tokenizer in `TokenCache`.
+
+**Why it's dead code:** The `TokenCacheCoordinator` (`token_cache.go:88-403`) — the L1 (in-memory LRU at 10K entries) + L2 (SQLite with TTL) response cache — is the actual caching layer used in production. It caches full LLM responses, not token counts. The daemon wires it in `components.go:338-341` via `WithTokenCache()`.
+
+**If it were wired (hypothetical):**
+- Growth rate: ~600 unique entries/hour (3 CountTokens calls per message × 20 messages × 10 turns), ~14,400/day
+- Memory: ~14,400 entries × ~1KB average key = ~14MB/day. Not catastrophic but unbounded.
+- Benefit: Tiktoken `EncodeOrdinary` is already ~1-5µs per call. Saving microseconds is irrelevant compared to 1-30s LLM API latency.
+
+**Recommendation: Remove `TokenCache` entirely** (`tokenizer.go:87-121`). It is dead code that provides no value and is a latent memory leak risk if someone wires it in later. The tests in `tokenizer_test.go` that instantiate it can be simplified to test the underlying tokenizer directly. The `TokenCacheCoordinator` already provides proper LRU + TTL eviction for the response cache, which is where caching actually matters.
+
+Alternative minimal fix (if removal is undesirable): Add a deprecation comment and a `// Deprecated:` annotation. But removal is cleaner.
+
+Regarding the L2 SQLite cache in `TokenCacheCoordinator`: it has TTL cleanup but no entry count limit. Consider adding an `L2MaxEntries` config if the SQLite database grows large over many days of operation.
+
+**Fix complexity: trivial** (~35 lines removed from tokenizer.go, ~10 lines of test simplification).
+
 ### GLM Findings: TokenCache Growth and Eviction Strategy
 
 **Critical Discovery: `tokenizer.TokenCache` is Dead Code**
@@ -505,3 +663,67 @@ This cache already implements all the eviction strategies from the investigation
 - The `TokenCacheCoordinator` (response cache) already has proper eviction and provides real value
 
 If token counting ever becomes a bottleneck (extremely unlikely), add a bounded LRU cache then. Estimated complexity: **trivial** (remove `TokenCache` struct and `NewTokenCache` function, update 2 test references).
+
+### Qwen Findings:
+
+**Cache Structure:**
+
+There are **two unrelated types** both named `TokenCache` in package `llm`:
+
+1. **`llm.TokenCache`** (`tokenizer.go:88-121`) — the raw string-to-int cache wrapping a `Tokenizer`.
+   - Structure: `sync.Map` (map[string]int)
+   - Key: Full raw text string (not hashed)
+   - Eviction: None (unbounded growth)
+   - Construction: `NewTokenCache(tokenizer)` — **never called in production code**
+
+2. **`llm.TokenCacheCoordinator`** (`token_cache.go:88-95`) — the L1+L2 response cache for LLM API responses.
+   - L1Cache: In-memory `map[string]*l1CacheEntry` with LRU eviction at 10,000 entries
+   - L2Cache: SQLite-backed `token_cache` table with TTL cleanup
+   - Key format: SHA256 hashes (not raw strings)
+   - Eviction: LRU + TTL (30 min default) + background cleanup (2 min)
+
+**Usage Pattern:**
+
+**`tokenizer.TokenCache` (dead code):**
+- Only instantiated in test files (`tokenizer_test.go:64` and `tokenizer_test.go:216`)
+- Never wired in production: No call site in `daemon/`, `agent/loop.go`, or any non-test code creates a `*TokenCache`
+- The firewall/compactor/compressor all use their own tokenizer directly (`*TiktokenTokenizer`, `*HeuristicTokenizer`, or nil that defaults to `HeuristicTokenizer`)
+
+**`TokenCacheCoordinator` (fully wired):**
+- Broker config injects `TokenCache ResponseCache` via `WithTokenCache()` — passed to AnthropicClient and OpenAI-compatible Client
+- AnthropicClient uses it on `Chat()` calls (Get at line 221-223, Put at line 338-340)
+- Client (OpenAI-compat) uses same Get/Put pattern in chat methods
+- Daemon wiring (`components.go:338-341`): `TokenCacheCoordinator` is created during daemon init and passed to clients via broker
+
+**Growth Rate Estimate:**
+
+For `tokenizer.TokenCache` (if it were wired):
+- ~600 unique entries/hour (3 CountTokens calls x 20 messages x 10 turns)
+- Key size: 200-20,000 chars per message (full text, not hashed)
+- 24-hour session: ~14,400 entries x ~1KB per key = ~14MB
+
+For `TokenCacheCoordinator` (L1+L2):
+- One get + one put per chat request
+- 500-5000 requests/hour under normal daemon operation
+- L1 bounded at 10,000 entries (~20MB realistic, ~100MB worst case)
+- L2 unbounded disk storage (TTL cleanup prevents indefinite growth)
+
+**Memory Footprint Estimate:**
+
+- **L1 (in-memory):** Default 10,000 entries. Each entry stores a full `Response` struct (~1-10KB). Realistic: 10,000 x 2KB = ~20MB. Worst case: ~100MB.
+- **L2 (SQLite):** Unbounded disk storage. No entry count limit. Over days of operation, could grow to hundreds of MB or several GB.
+- **`tokenizer.TokenCache`:** Not applicable — never instantiated in production.
+
+**Recommendation:**
+
+**Remove `tokenizer.TokenCache` entirely** (`tokenizer.go:87-121`). It is dead code:
+- Never wired in production
+- Would provide negligible benefit (tiktoken is already ~1-5s per call)
+- `sync.Map` with no eviction is a latent memory leak risk
+
+For `TokenCacheCoordinator`, the existing eviction strategy (LRU + TTL + periodic cleanup) is already well-designed. The only gap is L2's unbounded growth — consider adding `L2MaxEntries` config for SQLite row limits.
+
+**Fix Complexity:**
+- Remove dead `tokenizer.TokenCache`: **TRIVIAL** (~5 minutes, ~35 lines removed)
+- Add L2 entry limit: **MODERATE** (~30 minutes, ~20 lines)
+- Add L2 size monitoring: **TRIVIAL** (~10 minutes, metric + warning)
