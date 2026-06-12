@@ -173,11 +173,12 @@ type App struct {
 
 // KeyMap defines the key bindings.
 type KeyMap struct {
-	Quit    key.Binding
-	Enter   key.Binding
-	Escape  key.Binding
-	Help    key.Binding
-	Command key.Binding // Ctrl+X prefix
+	Quit      key.Binding
+	Enter     key.Binding
+	Escape    key.Binding
+	Help      key.Binding
+	Command   key.Binding // Ctrl+X prefix
+	ToggleTTS key.Binding // Ctrl+T
 }
 
 // DefaultKeyMap returns the default key bindings.
@@ -202,6 +203,10 @@ func DefaultKeyMap() KeyMap {
 		Command: key.NewBinding(
 			key.WithKeys("ctrl+x"),
 			key.WithHelp("ctrl+x", "command mode"),
+		),
+		ToggleTTS: key.NewBinding(
+			key.WithKeys("ctrl+t"),
+			key.WithHelp("ctrl+t", "toggle TTS"),
 		),
 	}
 }
@@ -631,6 +636,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.Matches(msg, a.keys.Command) {
 			a.activeModal = ModalCommandPalette
 			a.commandPalette.Show()
+			return a, nil
+		}
+
+		// Check for Ctrl+T to toggle TTS
+		if key.Matches(msg, a.keys.ToggleTTS) {
+			if a.ttsManager != nil {
+				// Toggle TTS enabled state
+				enabled := a.chat.ToggleTTS()
+				status := "off"
+				if enabled {
+					status = "on"
+				}
+				a.statusMessage = fmt.Sprintf("TTS: %s", status)
+				a.statusMessageTime = time.Now()
+			}
 			return a, nil
 		}
 

@@ -384,6 +384,20 @@ func (m *ChatModel) InitTTS(mgr *tts.Manager, enabled bool) {
 	m.ttsManager = mgr
 }
 
+// ToggleTTS toggles text-to-speech on/off and returns the new state.
+func (m *ChatModel) ToggleTTS() bool {
+	m.ttsEnabled = !m.ttsEnabled
+	if m.ttsManager != nil && !m.ttsEnabled {
+		m.ttsManager.Stop()
+	}
+	return m.ttsEnabled
+}
+
+// IsTTSEnabled returns whether TTS is enabled.
+func (m *ChatModel) IsTTSEnabled() bool {
+	return m.ttsEnabled
+}
+
 func generateConversationID() string {
 	return fmt.Sprintf("conv-%d", time.Now().UnixNano())
 }
