@@ -266,7 +266,7 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 	// Extract the connection-scoped done channel injected by server.dispatch.
 	// This allows us to create a subscription context that is cancelled when
 	// the client disconnects, preventing subscription leaks (Bug C8).
-	connDoneCh, _ := ctx.Value(connectionDoneKey{}).(chan struct{})
+	connDoneCh, _ := ctx.Value(connectionDoneKey{}).(<-chan struct{})
 
 	subCtx, cancelFunc := context.WithCancel(context.Background())
 

@@ -308,12 +308,55 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 }
 
 // ChatWithProgress sends a chat completion request with progress reporting.
-// For ProviderManager, progress callbacks are not fully supported across failover,
-// so this just calls Chat() without progress.
+// Attempts each provider in order, calling progress callback on attempt starts and failures.
 func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error) {
-	// Progress reporting not fully implemented for ProviderManager failover
-	// Just call the standard Chat method
-	return pm.Chat(ctx, messages, opts...)
+	ordered := pm.getOrderedProviders()
+	pm.mu.RLock()
+	maxRetries := pm.config.MaxRetries
+	pm.mu.RUnlock()
+
+	if maxRetries <= 0 {
+		maxRetries = len(ordered)
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < maxRetries && attempt < len(ordered); attempt++ {
+		entry := ordered[attempt]
+		chatter := entry.Chatter
+
+		if !pm.isProviderHealthy(entry) {
+			if progress != nil {
+				progress(ProgressEvent{Type: "provider_skip", Provider: entry.Config.ProviderID, Message: "provider unhealthy"})
+			}
+			continue
+		}
+
+		if progress != nil {
+			progress(ProgressEvent{Type: "provider_attempt", Provider: entry.Config.ProviderID, Attempt: attempt + 1})
+		}
+
+		start := time.Now()
+		resp, err := chatter.Chat(ctx, messages, opts...)
+		latency := time.Since(start)
+
+		if err != nil {
+			lastErr = err
+			if progress != nil {
+				progress(ProgressEvent{Type: "provider_error", Provider: entry.Config.ProviderID, Error: err, Latency: latency})
+			}
+			continue
+		}
+
+		if progress != nil {
+			progress(ProgressEvent{Type: "provider_success", Provider: entry.Config.ProviderID, Latency: latency})
+		}
+		return resp, nil
+	}
+
+	if lastErr != nil {
+		return nil, fmt.Errorf("all %d provider(s) failed (last: %w)", len(ordered), lastErr)
+	}
+	return nil, fmt.Errorf("no providers available")
 }
 
 // getOrderedProviders returns providers sorted by preference.

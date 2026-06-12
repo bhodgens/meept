@@ -817,11 +817,17 @@ func extractCodeFromMarkdown(markdown string) string {
 
 	// Skip the newline after the opening ```
 	contentStart := blockStart + 3
-	// Skip language specifier (e.g., "go", "python", etc.)
-	contentStart += strings.IndexFunc(markdown[contentStart:], func(r rune) bool {
-		return r != '\n' && r != '\r' && r != ' ' && r != '\t'
-	})
-	contentStart++ // skip past any non-newline character after the block open
+	// Skip language specifier (e.g., "go", "python", etc.) by finding the first newline
+	newlineIdx := strings.IndexAny(markdown[contentStart:], "\r\n")
+	if newlineIdx == -1 {
+		// No newline found; content starts immediately
+	} else {
+		// Skip past the newline character(s)
+		contentStart += newlineIdx
+		for contentStart < len(markdown) && (markdown[contentStart] == '\r' || markdown[contentStart] == '\n') {
+			contentStart++
+		}
+	}
 
 	// Find the closing ```
 	blockEnd := strings.Index(markdown[contentStart:], "```")

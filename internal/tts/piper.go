@@ -153,6 +153,7 @@ func (e *PiperEngine) Synthesize(ctx context.Context, text string) (*Result, err
 	if err := e.player.Play(audioData); err != nil {
 		logger.Warn("TTS playback failed", "error", err)
 	}
+	e.speaking = false
 
 	return &Result{
 		AudioPath: tmpPath,
