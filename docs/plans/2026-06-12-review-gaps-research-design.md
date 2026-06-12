@@ -40,7 +40,7 @@
 1. Call `RunReflection` → apply `PendingFix` → call `RunReflection` again on fixed files
 2. If still failing, apply one more fix but do not re-verify (line 693 comment: "single retry pass to avoid infinite loop")
 
-This means total attempts = 3 (initial + retry + final apply), completely independent of `MaxReflections`.
+This means total attempts = 2 verified passes + 1 final apply-without-verify, completely independent of `MaxReflections`.
 
 **Was multi-iteration intended?** Yes — the plan doc (`docs/plans/20260609-auto-lint-test-reflection-implementation.md:696-756`) shows `requestFix` returning `(bool, error)` with `continue` statements for true looping. The actual implementation changed the signature to `(*FixAttempt, error)`, shifting fix application responsibility to the orchestrator.
 
@@ -84,19 +84,19 @@ The reflection loop in `reflection.go:85-164` is **dead code**. It declares `for
 The loop always executes exactly **one** iteration. There is no path that reaches the bottom of the for-loop body and continues to the next iteration.
 
 **MaxReflections Usage:**
-`MaxReflections` is declared in `ReflectionConfig` and `AgentReflectionConfig`, wired through `daemon/components.go`, but **never functionally used**. The actual retry logic lives in the orchestrator's `handleToolExecutionComplete()` (`orchestrator.go:654-744`), which has a **hardcoded 3-pass maximum** completely independent of `MaxReflections`:
+`MaxReflections` is declared in `ReflectionConfig` and `AgentReflectionConfig`, wired through `daemon/components.go`, but **never functionally used**. The actual retry logic lives in the orchestrator's `handleToolExecutionComplete()` (`orchestrator.go:654-744`), which has a **hardcoded 2-pass pattern with a final apply-without-verify** completely independent of `MaxReflections`:
 - Pass 1: Call `RunReflection()`, apply `PendingFix` if returned
 - Pass 2: Re-call `RunReflection()` on applied fix files
-- Pass 3: If still `PendingFix`, apply one final time **without re-verification**
+- Final apply: If still `PendingFix`, apply one final time **without re-verification**
 
 **Caller Behavior:**
 The orchestrator waits for `tool.execution.complete` events on `file_edit` tools, then spawns a goroutine that sequentially calls `RunReflection()` → applies fix → calls `RunReflection()` again → applies final fix. No code path re-enters reflection after a fix is applied within the loop itself. The orchestrator controls retry externally.
 
 **Recommendation:**
-**Remove the dead `MaxReflections` loop** from `RunReflection()` and document the orchestrator's hardcoded 3-pass approach as intentional. The internal loop serves no purpose because:
+**Remove the dead `MaxReflections` loop** from `RunReflection()` and document the orchestrator's hardcoded 2-pass approach as intentional. The internal loop serves no purpose because:
 1. It has no fix application logic (only the orchestrator applies fixes)
 2. Multi-iteration would just re-lint the same unchanged files and request identical fixes
-3. The orchestrator already provides a clear, documented 3-pass ceiling
+3. The orchestrator already provides a clear, documented 2-pass ceiling with final apply
 
 Keep `MaxReflections` as a no-op config field for backward compatibility with a deprecation comment, or remove it entirely.
 
@@ -225,7 +225,7 @@ The prompt asks for "patch with the file path and corrected content" but `parseF
 The LLM is prompted to "format it as a complete patch with the file path and corrected content" but may return multiple code blocks for multiple files. The current parsing broadcasts the first code block to all files, potentially overwriting unrelated files with incorrect content.
 
 **Recommendation:**
-The core issue is that the orchestration layer runs as a hardcoded 3-pass external retry loop. The fix has two parts:
+The core issue is that the orchestration layer runs as a hardcoded 2-pass external retry loop with a final apply-without-verify. The fix has two parts:
 1. **Remove the dead `for` loop from `RunReflection`** — trivial, ~10 lines removed
 2. **Rewrite `parseFixResponse`** to actually parse the LLM response into per-file content chunks. For higher reliability, implement tool call parsing if the LLM is expected to return `file_edit` tool calls.
 
@@ -271,18 +271,19 @@ The core issue is that the orchestration layer runs as a hardcoded 3-pass extern
 - `default` → also returns `BlockResult{}`
 
 **Overlap analysis:**
-- **File path checks:** `FenceChecker` is already wired into `ReadFileTool`, `WriteFileTool`, `FileEditTool`, `DeleteFileTool` via `SetFenceChecker()`. The hook's `checkFilePermission` stub is completely redundant — it does not add any additional validation.
+- **File path checks:** `FenceChecker` is already wired into `ReadFileTool`, `WriteFileTool`, `FileEditTool`, `DeleteFileTool` via `SetFenceChecker()`. **However, `ListDirectoryTool`, `FileFindTool`, and `FileGrepTool` lack `SetFenceChecker()`** — these read-only tools can access paths outside the worktree without fence validation. The hook's `checkFilePermission` stub is completely redundant — it does not add any additional validation.
 - **Shell command checks:** `scanShellCommand` adds unique value via Tirith scanning, which the tools do not do themselves. This hook should stay.
-- **Network checks:** `WebFetchTool` has a gap — `SetSecurityOrchestrator()` method exists but is **never called** in `components.go`. The `Orchestrator.CheckWebFetch()` (taint exfiltration check) is never invoked. The hook stub does nothing either, so network ops lack any URL validation layer.
+- **Network checks:** `WebFetchTool` is correctly wired — `SetSecurityOrchestrator()` is called at `components.go:2568`, so `CheckWebFetch()` (taint exfiltration check) is invoked. The hook stub does nothing, but the tool-level check is in place.
 
 **Security model from docs:** `docs/configuration/production-security.md` and `docs/concepts/cluster-architecture.md` describe: file ops restricted to worktree boundaries, network ops restricted via taint tracking (URLs with tainted data blocked), risk classification gates (HIGH/CRITICAL require user confirmation), sensitive path blocks for `~/.ssh/*`, `~/.gnupg/*`, `*/.env*`, `/etc/shadow`.
 
 **Recommended approach:**
 1. **Remove `checkFilePermission` hook** — `FenceChecker` already enforces path boundaries at the tool level, and `SecurityEngine.Check()` provides rule-based enforcement. The hook adds nothing.
-2. **Remove `checkNetworkPermission` hook** (as a stub) but **wire `WebFetchTool.SetSecurityOrchestrator()`** in `components.go` so `CheckWebFetch()` / taint exfiltration detection actually runs. The existing `WebFetchTool` already calls its security orchestrator internally if set — the wiring is just missing.
+2. **Remove `checkNetworkPermission` hook** (as a stub) — `WebFetchTool.SetSecurityOrchestrator()` is already wired at `components.go:2568`, so `CheckWebFetch()` runs at the tool level.
 3. **Keep `scanShellCommand`** — it provides unique Tirith-based scanning that tools don't do themselves.
+4. **Wire `SetFenceChecker()` on `ListDirectoryTool`, `FileFindTool`, and `FileGrepTool`** — these read-only tools lack fence validation.
 
-**Fix complexity: low** (~30 lines removed from `security_hooks.go`, +1 line added in `components.go` to wire `WebFetchTool`).
+**Fix complexity: low** (~30 lines removed from `security_hooks.go`, +3 lines added in `components.go` to wire fence checking on read-only tools).
 
 ### GLM Findings: Security Hooks — Intended Enforcement Model
 
@@ -299,7 +300,8 @@ User Input
         - web_fetch: checkNetworkPermission() ❌ STUB — logs, always passes
     → Tool Execute() method:
         - ShellExecuteTool: FenceChecker.CheckCommand() + ScanShellCommand() ✅ WIRED
-        - ReadFile/WriteFile/DeleteFile: FenceChecker.CheckPath() ✅ WIRED
+        - ReadFile/WriteFile/DeleteFile/FileEdit: FenceChecker.CheckPath() ✅ WIRED
+        - ListDirectory/FileFind/FileGrep: ❌ NO FenceChecker wired
         - WebFetchTool: SetSecurityOrchestrator() ✅ WIRED (components.go:2568)
     → SecurityEngine.Check() (called by some tools internally) ✅ WORKING
 ```
@@ -308,11 +310,11 @@ User Input
 
 1. **`checkFilePermission` and `checkNetworkPermission` are stubs** — they extract the path/URL, log it, then always return `BlockResult{}` (not blocked). They never call `FenceChecker.CheckPath()` or `orchestrator.CheckWebFetch()`.
 
-2. **`FenceChecker` IS properly wired** into all file tools via `SetFenceChecker()` in `components.go:2504-2546`. It enforces worktree boundaries for write/exec ops and allows reads from configured system paths. Symlinks are resolved before checking to prevent bypass attacks.
+2. **`FenceChecker` IS properly wired** into most file tools via `SetFenceChecker()` in `components.go:2504-2546`: `ReadFileTool`, `WriteFileTool`, `FileEditTool`, `DeleteFileTool`, and `ShellExecuteTool`. **However, `ListDirectoryTool`, `FileFindTool`, and `FileGrepTool` lack `SetFenceChecker()`** — these tools can access paths outside the worktree without fence validation.
 
 3. **`scanShellCommand` is the one working hook** — it correctly calls `orchestrator.ScanShellCommand()` which runs taint tracking + Tirith scanning.
 
-4. **`WebFetchTool` has a gap**: `SetSecurityOrchestrator()` method exists but is never called in `components.go`, so `CheckWebFetch()` (taint exfiltration check) is never invoked. This is a separate bug from the stub hooks.
+4. **`WebFetchTool` IS properly wired**: `SetSecurityOrchestrator()` is called at `components.go:2568`, so `CheckWebFetch()` (taint exfiltration check) is invoked for web fetch operations. This is correctly configured.
 
 5. **Overlap assessment**: The hooks were designed as a centralized pre-execution gate, but `FenceChecker` and `SecurityEngine.Check()` already provide enforcement at the tool level. The hooks would be **duplicate** enforcement if implemented.
 
@@ -320,12 +322,13 @@ User Input
 
 **Recommendation:**
 
-**Remove the two stub hooks and fix the WebFetchTool wiring gap.** Specifically:
+**Remove the two stub hooks and fix the fencing gaps in read-only tools.** Specifically:
 1. Remove `checkFilePermission` from `SecurityBeforeToolCall` — redundant with `FenceChecker` already wired into each file tool
-2. Remove `checkNetworkPermission` from `SecurityBeforeToolCall` — instead, wire `SetSecurityOrchestrator()` on `WebFetchTool` in `components.go` so `CheckWebFetch()` runs inside the tool
+2. Remove `checkNetworkPermission` from `SecurityBeforeToolCall` — `WebFetchTool` already has `SetSecurityOrchestrator()` wired at `components.go:2568`
 3. Keep `scanShellCommand` as the sole pre-execution hook (it's the only one that provides unique value)
+4. **Wire `SetFenceChecker()` on `ListDirectoryTool`, `FileFindTool`, and `FileGrepTool`** in `components.go` — these read-only tools currently lack fence validation
 
-This is cleaner than implementing defense-in-depth hooks because the per-tool enforcement (`FenceChecker`, `SecurityEngine`) is already complete and tested. Estimated complexity: **low** (remove ~50 lines of stub code, add 1 line of wiring in `components.go`).
+Estimated complexity: **low** (remove ~50 lines of stub code, add 3 lines of `SetFenceChecker()` wiring in `components.go`).
 
 ### Qwen Findings:
 
@@ -341,7 +344,7 @@ This is cleaner than implementing defense-in-depth hooks because the per-tool en
 | Tool: `ReadFileTool` etc. | Direct call | Fence boundary | **WIRED** |
 | `Engine.Check()` | SQLite rules | Permission matrix, financial, path rules, confirmation gates | **WORKING** |
 | `Orchestrator.SanitizeInput` | Prompt guard | Injection detection | **WORKING** |
-| `Orchestrator.CheckWebFetch` | Taint | Secret exfiltration URLs | **WORKING (but not wired to WebFetchTool)** |
+| `Orchestrator.CheckWebFetch` | Taint | Secret exfiltration URLs | **WORKING (wired to WebFetchTool via SetSecurityOrchestrator)** |
 
 **Non-Functional Hooks Behavior:**
 Both `checkFilePermission` and `checkNetworkPermission` (`security_hooks.go:84-132`) are pure pass-through stubs:
@@ -353,7 +356,7 @@ Both `checkFilePermission` and `checkNetworkPermission` (`security_hooks.go:84-1
 
 **Overlap Analysis:**
 The hooks architecture was designed as a clean extension point for pre/post tool enforcement, but:
-- `FenceChecker` is already wired directly into all file/shell tools via `SetFenceChecker()` in `components.go:2504-2546`
+- `FenceChecker` is already wired directly into file/shell tools via `SetFenceChecker()` in `components.go:2504-2546` (but missing on `ListDirectoryTool`, `FileFindTool`, `FileGrepTool`)
 - `SecurityEngine.Check()` provides SQLite-backed permission checks
 - The hooks would be **redundant** with what the tools enforce directly
 
@@ -366,7 +369,7 @@ File ops restricted to project worktree boundaries (configurable `fence_allow_re
 - Shell tools call `FenceChecker.CheckCommand()` + `ScanShellCommand()` directly
 - The only unique value from hooks is `scanShellCommand` (Tirith scanning)
 
-Additionally, wire `SetSecurityOrchestrator()` on `WebFetchTool` in `components.go` so `CheckWebFetch()` is called (the method exists but is never invoked).
+Additionally, wire `SetFenceChecker()` on `ListDirectoryTool`, `FileFindTool`, and `FileGrepTool` in `components.go` — these read-only tools currently lack fence validation (unlike the write/edit/delete tools which already have it).
 
 Alternatively, if hooks should be the enforcement layer instead of direct tool calls, implement them to call:
 - `Engine.Check(action, toolName, details, conversationID)` for file ops
@@ -718,7 +721,7 @@ For `TokenCacheCoordinator` (L1+L2):
 
 **Remove `tokenizer.TokenCache` entirely** (`tokenizer.go:87-121`). It is dead code:
 - Never wired in production
-- Would provide negligible benefit (tiktoken is already ~1-5s per call)
+- Would provide negligible benefit (tiktoken is already ~1-5µs per call)
 - `sync.Map` with no eviction is a latent memory leak risk
 
 For `TokenCacheCoordinator`, the existing eviction strategy (LRU + TTL + periodic cleanup) is already well-designed. The only gap is L2's unbounded growth — consider adding `L2MaxEntries` config for SQLite row limits.
