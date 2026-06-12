@@ -18,12 +18,18 @@ import (
 
 // FileGrepTool searches for regex patterns in files.
 type FileGrepTool struct {
-	checker *security.PermissionChecker
+	checker      *security.PermissionChecker
+	fenceChecker FenceChecker
 }
 
 // NewFileGrepTool creates a new file grep tool.
 func NewFileGrepTool(checker *security.PermissionChecker) *FileGrepTool {
 	return &FileGrepTool{checker: checker}
+}
+
+// SetFenceChecker sets the fence boundary checker for path validation.
+func (t *FileGrepTool) SetFenceChecker(fc FenceChecker) {
+	t.fenceChecker = fc
 }
 
 func (t *FileGrepTool) Name() string { return "file_grep" }
@@ -117,6 +123,13 @@ func (t *FileGrepTool) Execute(ctx context.Context, args map[string]any) (any, e
 	// Permission check
 	if t.checker != nil && !t.checker.CheckPath(resolved) {
 		return nil, fmt.Errorf("access denied: %s", resolved)
+	}
+
+	// Fence check
+	if t.fenceChecker != nil {
+		if err := t.fenceChecker.CheckPath(resolved, "read"); err != nil {
+			return nil, err
+		}
 	}
 
 	info, err := os.Stat(resolved)

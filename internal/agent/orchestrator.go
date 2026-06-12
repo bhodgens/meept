@@ -793,8 +793,13 @@ func (o *Orchestrator) applyFix(ctx context.Context, fix *FixAttempt) []string {
 			}
 		}
 		if content == "" {
-			// Final fallback: use the raw fix text.
-			content = fix.FixText
+			// No matching code block — skip this file rather than
+			// overwriting it with raw LLM prose.
+			o.logger.Warn("Skipping fix — no matching code block for file",
+				"file", resolved,
+				"blocks_available", len(blocks),
+			)
+			continue
 		}
 
 		// Attempt to write the fix content to the file

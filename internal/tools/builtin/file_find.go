@@ -16,12 +16,18 @@ import (
 
 // FileFindTool searches for files and directories matching a glob pattern.
 type FileFindTool struct {
-	checker *security.PermissionChecker
+	checker      *security.PermissionChecker
+	fenceChecker FenceChecker
 }
 
 // NewFileFindTool creates a new file find tool.
 func NewFileFindTool(checker *security.PermissionChecker) *FileFindTool {
 	return &FileFindTool{checker: checker}
+}
+
+// SetFenceChecker sets the fence boundary checker for path validation.
+func (t *FileFindTool) SetFenceChecker(fc FenceChecker) {
+	t.fenceChecker = fc
 }
 
 func (t *FileFindTool) Name() string { return "file_find" }
@@ -91,6 +97,13 @@ func (t *FileFindTool) Execute(ctx context.Context, args map[string]any) (any, e
 	// Permission check
 	if t.checker != nil && !t.checker.CheckPath(resolved) {
 		return nil, fmt.Errorf("access denied: %s", resolved)
+	}
+
+	// Fence check
+	if t.fenceChecker != nil {
+		if err := t.fenceChecker.CheckPath(resolved, "read"); err != nil {
+			return nil, err
+		}
 	}
 
 	info, err := os.Stat(resolved)

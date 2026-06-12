@@ -2527,9 +2527,17 @@ func registerBuiltinTools(
 		localPC := builtin.NewPendingChangesRegistry()
 		registry.Register(builtin.NewResolveTool(localPC))
 	}
-	registry.Register(builtin.NewListDirectoryTool(checker))
-	registry.Register(builtin.NewFileFindTool(checker))
-	registry.Register(builtin.NewFileGrepTool(checker))
+	listDirTool := builtin.NewListDirectoryTool(checker)
+	fileFindTool := builtin.NewFileFindTool(checker)
+	fileGrepTool := builtin.NewFileGrepTool(checker)
+	if fenceChecker != nil {
+		listDirTool.SetFenceChecker(fenceChecker)
+		fileFindTool.SetFenceChecker(fenceChecker)
+		fileGrepTool.SetFenceChecker(fenceChecker)
+	}
+	registry.Register(listDirTool)
+	registry.Register(fileFindTool)
+	registry.Register(fileGrepTool)
 
 	// Shell tool with security orchestrator for Tirith scanning
 	wd, _ := os.Getwd()

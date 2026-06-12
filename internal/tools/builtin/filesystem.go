@@ -570,12 +570,18 @@ func (t *DeleteFileTool) Execute(ctx context.Context, args map[string]any) (any,
 
 // ListDirectoryTool lists the contents of a directory.
 type ListDirectoryTool struct {
-	checker *security.PermissionChecker
+	checker      *security.PermissionChecker
+	fenceChecker FenceChecker
 }
 
 // NewListDirectoryTool creates a new list directory tool.
 func NewListDirectoryTool(checker *security.PermissionChecker) *ListDirectoryTool {
 	return &ListDirectoryTool{checker: checker}
+}
+
+// SetFenceChecker sets the fence boundary checker for path validation.
+func (t *ListDirectoryTool) SetFenceChecker(fc FenceChecker) {
+	t.fenceChecker = fc
 }
 
 func (t *ListDirectoryTool) Name() string { return "list_directory" }
@@ -642,6 +648,13 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (a
 	// Permission check
 	if t.checker != nil && !t.checker.CheckPath(resolved) {
 		return nil, fmt.Errorf("access denied: %s", resolved)
+	}
+
+	// Fence check
+	if t.fenceChecker != nil {
+		if err := t.fenceChecker.CheckPath(resolved, "read"); err != nil {
+			return nil, err
+		}
 	}
 
 	info, err := os.Stat(resolved)
