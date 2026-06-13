@@ -71,11 +71,12 @@ type SessionConfig struct {
 // ptySession implements Session using github.com/creack/pty.
 type ptySession struct {
 	mu         sync.RWMutex
-	ptyCmd     *exec.Cmd  // PTY mode: the actual command started by pty.StartWithSize
-	plainCmd   *exec.Cmd  // Non-PTY mode: process to Wait on.
-	ptmx       *os.File   // PTY master device (PTY mode)
-	stdoutPipe io.Reader  // Non-PTY mode: cmd.Stdout
-	stdinPipe  io.Writer  // Non-PTY mode: cmd.Stdin
+	wg         sync.WaitGroup // waits for readLoop before waitLoop closes channels
+	ptyCmd     *exec.Cmd      // PTY mode: the actual command started by pty.StartWithSize
+	plainCmd   *exec.Cmd      // Non-PTY mode: process to Wait on.
+	ptmx       *os.File       // PTY master device (PTY mode)
+	stdoutPipe io.Reader      // Non-PTY mode: cmd.Stdout
+	stdinPipe  io.Writer      // Non-PTY mode: cmd.Stdin
 	outputChan chan []byte
 	errorChan  chan error
 	done       chan struct{}
@@ -126,6 +127,7 @@ func NewSession(cfg SessionConfig) (Session, error) {
 			fallback:   false,
 		}
 
+		sess.wg.Add(1)
 		go sess.readLoop()
 		go sess.waitLoop()
 
@@ -164,6 +166,7 @@ func NewSession(cfg SessionConfig) (Session, error) {
 	sess.stdoutPipe = stdout
 	sess.stdinPipe = stdin
 
+	sess.wg.Add(1)
 	go sess.readLoop()
 	go sess.waitLoop()
 
@@ -320,6 +323,7 @@ func (s *ptySession) ExitCode() int {
 // readLoop continuously reads from the PTY (or stdout pipe in fallback mode)
 // and pushes to the output channel.
 func (s *ptySession) readLoop() {
+	defer s.wg.Done()
 	var src io.Reader
 	if !s.fallback && s.ptmx != nil {
 		src = s.ptmx
@@ -399,19 +403,20 @@ func (s *ptySession) waitLoop() {
 	}
 	s.mu.Unlock()
 
-	select {
-	case <-s.outputChan:
-	default:
-	}
-	// Check if channel is already closed
-	select {
-	case _, ok := <-s.outputChan:
-		if ok {
+	// Wait for readLoop to finish before closing channels to avoid races
+	// between readLoop sending and waitLoop/closing.
+	s.wg.Wait()
+
+	// Drain any remaining output to unblock readers
+	for {
+		select {
+		case <-s.outputChan:
+		default:
 			close(s.outputChan)
+			goto drained
 		}
-	default:
-		close(s.outputChan)
 	}
+drained:
 
 	close(s.errorChan)
 }
