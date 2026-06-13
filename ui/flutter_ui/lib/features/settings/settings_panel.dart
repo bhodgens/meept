@@ -8,6 +8,7 @@ import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
 import 'settings_inputs.dart';
+import '../../widgets/error_banner.dart';
 
 /// Form field names used throughout the settings panel.
 class SettingsFields {
@@ -250,7 +251,8 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
               padding: EdgeInsets.zero,
               children: [
                 _buildConnectionSection(storage),
-                if (_error != null) _buildErrorBanner(),
+                if (_error != null)
+                  ErrorBanner(message: _error!, onDismiss: _loadConfig),
                 _buildEditor(),
               ],
             ),
@@ -416,31 +418,6 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
               _loadConfig();
             },
             child: const Text('discard'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorBanner() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      color: const Color(0x80FF3030),
-      child: Row(
-        children: [
-          const Icon(Icons.error_outline, color: Color(0xFFFF6060), size: 14),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              _error!,
-              style: const TextStyle(color: Color(0xFFFF6060), fontSize: 10),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          GestureDetector(
-            onTap: _loadConfig,
-            child: const Icon(Icons.refresh, color: Color(0xFFFF6060), size: 14),
           ),
         ],
       ),

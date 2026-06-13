@@ -1,41 +1,7 @@
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meept_ui/providers/job_provider.dart';
-import 'package:meept_ui/services/api_client.dart';
 import 'package:meept_ui/services/websocket_service.dart';
-
-// ===== Mock / Stub Classes =====
-
-class _StubApiClient extends ApiClient {
-  _StubApiClient() : super(host: 'localhost', port: 8081);
-
-  @override
-  Future<T> get<T>(String path, {Map<String, dynamic>? queryParameters}) async {
-    if (path == '/queue/jobs') {
-      return [] as T;
-    }
-    if (path == '/queue/stats') {
-      return {'queue_depth': 0} as T;
-    }
-    return {} as T;
-  }
-
-  @override
-  Future<T> post<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> put<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    throw UnimplementedError();
-  }
-
-  @override
-  Future<T> delete<T>(String path) async {
-    throw UnimplementedError();
-  }
-}
 
 class _TestWebSocket extends WebSocketService {
   _TestWebSocket()

@@ -1,51 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../models/api_models.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
-import 'dart:async';
-
-/// Memory result model matching backend MemoryResult structure
-class MemoryResultModel {
-  final String id;
-  final String content;
-  final String type;
-  final String category;
-  final double relevanceScore;
-  final String source;
-  final DateTime createdAt;
-  final String? sessionId;
-  final String? taskId;
-
-  MemoryResultModel({
-    required this.id,
-    required this.content,
-    required this.type,
-    required this.category,
-    required this.relevanceScore,
-    required this.source,
-    required this.createdAt,
-    this.sessionId,
-    this.taskId,
-  });
-
-  factory MemoryResultModel.fromJson(Map<String, dynamic> json) {
-    final memory = json['memory'] as Map<String, dynamic>? ?? {};
-    return MemoryResultModel(
-      id: memory['id'] as String? ?? '',
-      content: memory['content'] as String? ?? '',
-      type: memory['type'] as String? ?? '',
-      category: memory['category'] as String? ?? '',
-      relevanceScore: (json['relevance_score'] as num?)?.toDouble() ?? 0.0,
-      source: json['source'] as String? ?? '',
-      createdAt: memory['created_at'] != null
-          ? DateTime.parse(memory['created_at'] as String)
-          : DateTime.now(),
-      sessionId: memory['session_id'] as String?,
-      taskId: memory['task_id'] as String?,
-    );
-  }
-}
+import '../../widgets/error_banner.dart';
 
 /// Memory panel - search and browse episodic and task memories
 class MemoryPanel extends ConsumerStatefulWidget {
@@ -161,7 +122,8 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
       child: Column(
         children: [
           _buildHeader(),
-          if (_error != null) _buildErrorBanner(),
+          if (_error != null)
+            ErrorBanner(message: _error!, onDismiss: _loadRecentMemories),
           Expanded(
             child: _isLoading && _memories.isEmpty
                 ? const Center(
@@ -274,34 +236,6 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
               filled: true,
               fillColor: CyberpunkColors.black,
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorBanner() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      color: const Color(0x80FF3030),
-      child: Row(
-        children: [
-          const Icon(Icons.error_outline, color: Color(0xFFFF6060), size: 14),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              _error!,
-              style: const TextStyle(
-                color: Color(0xFFFF6060),
-                fontSize: 10,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          GestureDetector(
-            onTap: _loadRecentMemories,
-            child: const Icon(Icons.refresh, color: Color(0xFFFF6060), size: 14),
           ),
         ],
       ),

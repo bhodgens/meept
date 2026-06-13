@@ -1407,6 +1407,7 @@ func (ts *TacticalScheduler) HandleHandoff(ctx context.Context, msg *models.BusM
 			metadata["depends_on"] = []string{req.FromStepID}
 		}
 		metadata["agent_id"] = req.ToAgentID
+		metadata["is_handoff"] = true
 
 		metadataJSON, err := json.Marshal(metadata)
 		if err != nil {
@@ -1460,6 +1461,7 @@ func (ts *TacticalScheduler) HandleHandoff(ctx context.Context, msg *models.BusM
 		newStep := task.NewTaskStep(req.TaskID, req.Description, sequence)
 		newStep.ToolHint = toolHint
 		newStep.AccumulatedContext = accumulatedContext
+		newStep.IsHandoff = true
 
 		if req.InjectAfter && fromStep != nil {
 			newStep.DependsOn = []string{req.FromStepID}
@@ -1588,12 +1590,11 @@ func (ts *TacticalScheduler) rewireDownstreamDeps(taskID, fromStepID, newStepID 
 
 // agentIDToToolHint maps an agent ID to the corresponding tool hint/intent type.
 // isHandoffStep reports whether a step was created by the handoff system.
-// It checks for the sentinel marker "[Handoff from" in AccumulatedContext.
-//
-// TODO: Replace with a dedicated IsHandoff bool field on TaskStep for
-// reliable detection that doesn't depend on context string formatting.
+// It checks the dedicated IsHandoff field first, with a fallback to the
+// legacy "[Handoff from" sentinel in AccumulatedContext for backwards
+// compatibility with steps stored before the field was added.
 func isHandoffStep(s *task.TaskStep) bool {
-	return s.AccumulatedContext != "" && strings.Contains(s.AccumulatedContext, "[Handoff from")
+	return s.IsHandoff || (s.AccumulatedContext != "" && strings.Contains(s.AccumulatedContext, "[Handoff from"))
 }
 
 func agentIDToToolHint(agentID string) string {

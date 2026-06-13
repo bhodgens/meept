@@ -112,6 +112,7 @@ func (h *AmendmentHandlers) handleAddStep(ctx context.Context, req *AmendmentReq
 		ToolHint    string   `json:"tool_hint,omitempty"`
 		DependsOn   []string `json:"depends_on,omitempty"`
 		AgentID     string   `json:"agent_id,omitempty"`
+		IsHandoff   bool     `json:"is_handoff,omitempty"`
 	}
 	if err := json.Unmarshal(req.Metadata, &metadata); err != nil {
 		return &AmendmentReply{
@@ -144,6 +145,7 @@ func (h *AmendmentHandlers) handleAddStep(ctx context.Context, req *AmendmentReq
 	step.ToolHint = metadata.ToolHint
 	step.DependsOn = metadata.DependsOn
 	step.AgentID = metadata.AgentID
+	step.IsHandoff = metadata.IsHandoff
 
 	if err := h.stepStore.Create(step); err != nil {
 		return &AmendmentReply{

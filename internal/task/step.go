@@ -170,6 +170,8 @@ type TaskStep struct {
 	Phase string `json:"phase,omitempty"`
 	// CheckpointGate indicates if this step is a phase gate requiring validation
 	CheckpointGate bool `json:"checkpoint_gate"`
+	// IsHandoff indicates this step was created by the agent handoff system
+	IsHandoff bool `json:"is_handoff,omitempty"`
 }
 
 // NewTaskStep creates a new task step.
@@ -332,6 +334,7 @@ func (s *StepStore) migrate() error {
 		checklist      TEXT,
 		phase          TEXT,
 		checkpoint_gate BOOLEAN DEFAULT FALSE,
+		is_handoff     BOOLEAN DEFAULT FALSE,
 		created_at     TEXT NOT NULL,
 		updated_at     TEXT NOT NULL,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
@@ -374,6 +377,7 @@ func (s *StepStore) migrate() error {
 		"ALTER TABLE task_steps ADD COLUMN checklist TEXT",
 		"ALTER TABLE task_steps ADD COLUMN phase TEXT",
 		"ALTER TABLE task_steps ADD COLUMN checkpoint_gate BOOLEAN DEFAULT FALSE",
+		"ALTER TABLE task_steps ADD COLUMN is_handoff BOOLEAN DEFAULT FALSE",
 	} {
 		_, _ = s.db.Exec(col)
 	}
@@ -395,9 +399,9 @@ func (s *StepStore) Create(step *TaskStep) error {
 		                        job_id, state, result, sequence, revision_count,
 		                        recommendations, evidence, claims, validated, validation_error,
 		                        token_usage, memory_refs, accumulated_context, model_override,
-		                        checklist, phase, checkpoint_gate,
+		                        checklist, phase, checkpoint_gate, is_handoff,
 		                        created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		step.ID,
 		step.TaskID,
 		step.Description,
@@ -421,6 +425,7 @@ func (s *StepStore) Create(step *TaskStep) error {
 		nullableString(checklistJSON),
 		nullableString(step.Phase),
 		step.CheckpointGate,
+		step.IsHandoff,
 		step.CreatedAt.Format(time.RFC3339),
 		step.UpdatedAt.Format(time.RFC3339),
 	)
@@ -457,7 +462,7 @@ func (s *StepStore) Update(step *TaskStep) error {
 		    job_id = ?, state = ?, result = ?, sequence = ?, revision_count = ?,
 		    recommendations = ?, evidence = ?, claims = ?, validated = ?,
 		    validation_error = ?, token_usage = ?, memory_refs = ?, accumulated_context = ?,
-		    model_override = ?, checklist = ?, phase = ?, checkpoint_gate = ?, updated_at = ?
+		    model_override = ?, checklist = ?, phase = ?, checkpoint_gate = ?, is_handoff = ?, updated_at = ?
 		WHERE id = ?`,
 		step.Description,
 		nullableString(depsJSON),
@@ -480,6 +485,7 @@ func (s *StepStore) Update(step *TaskStep) error {
 		nullableString(checklistJSON),
 		nullableString(step.Phase),
 		step.CheckpointGate,
+		step.IsHandoff,
 		now,
 		step.ID,
 	)
@@ -512,7 +518,7 @@ func (s *StepStore) GetByID(id string) (*TaskStep, error) {
 		       job_id, state, result, sequence, revision_count,
 		       recommendations, evidence, claims, validated, validation_error,
 		       token_usage, memory_refs, accumulated_context, model_override,
-		       checklist, phase, checkpoint_gate,
+		       checklist, phase, checkpoint_gate, is_handoff,
 		       created_at, updated_at
 		FROM task_steps WHERE id = ?`, id)
 
@@ -526,7 +532,7 @@ func (s *StepStore) GetByJobID(jobID string) (*TaskStep, error) {
 		       job_id, state, result, sequence, revision_count,
 		       recommendations, evidence, claims, validated, validation_error,
 		       token_usage, memory_refs, accumulated_context, model_override,
-		       checklist, phase, checkpoint_gate,
+		       checklist, phase, checkpoint_gate, is_handoff,
 		       created_at, updated_at
 		FROM task_steps WHERE job_id = ?`, jobID)
 
@@ -540,7 +546,7 @@ func (s *StepStore) ListByTaskID(taskID string) ([]*TaskStep, error) {
 		       job_id, state, result, sequence, revision_count,
 		       recommendations, evidence, claims, validated, validation_error,
 		       token_usage, memory_refs, accumulated_context, model_override,
-		       checklist, phase, checkpoint_gate,
+		       checklist, phase, checkpoint_gate, is_handoff,
 		       created_at, updated_at
 		FROM task_steps
 		WHERE task_id = ?
@@ -817,6 +823,7 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 		memoryRefs, accumulatedContext      sql.NullString
 		modelOverride, checklist, phase     sql.NullString
 		checkpointGate                      bool
+		isHandoff                           bool
 		createdAt, updatedAt                string
 	)
 
@@ -824,7 +831,7 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 		&jobID, &state, &result, &sequence, &revisionCount,
 		&recommendations, &evidence, &claims, &validated, &validationError,
 		&tokenUsage, &memoryRefs, &accumulatedContext, &modelOverride,
-		&checklist, &phase, &checkpointGate, &createdAt, &updatedAt)
+		&checklist, &phase, &checkpointGate, &isHandoff, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrStepNotFound
@@ -836,7 +843,7 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 		agentID, jobID, result, sequence, revisionCount, tokenUsage,
 		recommendations, evidence, claims, validated, validationError,
 		memoryRefs, accumulatedContext, modelOverride, checklist, phase,
-		checkpointGate, createdAt, updatedAt), nil
+		checkpointGate, isHandoff, createdAt, updatedAt), nil
 }
 
 func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
@@ -851,6 +858,7 @@ func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
 		memoryRefs, accumulatedContext      sql.NullString
 		modelOverride, checklist, phase     sql.NullString
 		checkpointGate                      bool
+		isHandoff                           bool
 		createdAt, updatedAt                string
 	)
 
@@ -858,7 +866,7 @@ func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
 		&jobID, &state, &result, &sequence, &revisionCount,
 		&recommendations, &evidence, &claims, &validated, &validationError,
 		&tokenUsage, &memoryRefs, &accumulatedContext, &modelOverride,
-		&checklist, &phase, &checkpointGate, &createdAt, &updatedAt)
+		&checklist, &phase, &checkpointGate, &isHandoff, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -867,7 +875,7 @@ func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
 		agentID, jobID, result, sequence, revisionCount, tokenUsage,
 		recommendations, evidence, claims, validated, validationError,
 		memoryRefs, accumulatedContext, modelOverride, checklist, phase,
-		checkpointGate, createdAt, updatedAt), nil
+		checkpointGate, isHandoff, createdAt, updatedAt), nil
 }
 
 func buildStep(id, taskID, description, state string,
@@ -877,6 +885,7 @@ func buildStep(id, taskID, description, state string,
 	validated bool, validationError sql.NullString,
 	memoryRefs, accumulatedContext, modelOverride, checklist, phase sql.NullString,
 	checkpointGate bool,
+	isHandoff bool,
 	createdAt, updatedAt string) *TaskStep {
 
 	step := &TaskStep{
@@ -890,6 +899,7 @@ func buildStep(id, taskID, description, state string,
 		Validated:          validated,
 		MemoryRefs:         decodeStringSlice(memoryRefs.String),
 		AccumulatedContext: accumulatedContext.String,
+		IsHandoff:          isHandoff,
 	}
 
 	if modelOverride.Valid {

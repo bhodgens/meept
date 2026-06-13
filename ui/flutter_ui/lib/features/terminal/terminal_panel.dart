@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../models/api_models.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
+import '../../widgets/error_banner.dart';
 
 /// Terminal panel - view and execute shell commands
 ///
@@ -124,7 +126,8 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
       child: Column(
         children: [
           _buildHeader(),
-          if (_error != null) _buildErrorBanner(),
+          if (_error != null)
+            ErrorBanner(message: _error!, onDismiss: _loadHistory),
           _buildCommandInput(),
           Expanded(child: _buildHistoryList()),
         ],
@@ -164,34 +167,6 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
             icon: const Icon(Icons.refresh, size: 16),
             onPressed: _loadHistory,
             tooltip: 'refresh',
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorBanner() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      color: const Color(0x80FF3030),
-      child: Row(
-        children: [
-          const Icon(Icons.error_outline, color: Color(0xFFFF6060), size: 14),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              _error!,
-              style: const TextStyle(
-                color: Color(0xFFFF6060),
-                fontSize: 10,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          GestureDetector(
-            onTap: _loadHistory,
-            child: const Icon(Icons.refresh, color: Color(0xFFFF6060), size: 14),
           ),
         ],
       ),
@@ -412,40 +387,5 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
   void dispose() {
     _commandController.dispose();
     super.dispose();
-  }
-}
-
-class CommandEntry {
-  final String id;
-  final String command;
-  final String output;
-  final String stderr;
-  final int exitCode;
-  final DateTime timestamp;
-  final String workingDir;
-  final bool success;
-
-  CommandEntry({
-    required this.id,
-    required this.command,
-    required this.output,
-    required this.stderr,
-    required this.exitCode,
-    required this.timestamp,
-    required this.workingDir,
-    required this.success,
-  });
-
-  factory CommandEntry.fromJson(Map<String, dynamic> json) {
-    return CommandEntry(
-      id: json['id'] as String? ?? '',
-      command: json['command'] as String? ?? '',
-      output: json['output'] as String? ?? '',
-      stderr: json['stderr'] as String? ?? '',
-      exitCode: json['exit_code'] as int? ?? 0,
-      timestamp: DateTime.parse(json['timestamp'] as String? ?? DateTime.now().toIso8601String()),
-      workingDir: json['working_dir'] as String? ?? '',
-      success: json['success'] as bool? ?? true,
-    );
   }
 }

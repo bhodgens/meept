@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../models/api_models.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
+import '../../widgets/error_banner.dart';
 
 /// Files panel - browse files referenced in memory/context
 ///
@@ -80,7 +82,8 @@ class _FilesPanelState extends ConsumerState<FilesPanel> {
       child: Column(
         children: [
           _buildHeader(),
-          if (_error != null) _buildErrorBanner(),
+          if (_error != null)
+            ErrorBanner(message: _error!, onDismiss: _loadFiles),
           Expanded(child: _buildFileList()),
         ],
       ),
@@ -116,34 +119,6 @@ class _FilesPanelState extends ConsumerState<FilesPanel> {
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
             tooltip: 'refresh',
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorBanner() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      color: const Color(0x80FF3030),
-      child: Row(
-        children: [
-          const Icon(Icons.error_outline, color: Color(0xFFFF6060), size: 14),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              _error!,
-              style: const TextStyle(
-                color: Color(0xFFFF6060),
-                fontSize: 10,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          GestureDetector(
-            onTap: _loadFiles,
-            child: const Icon(Icons.refresh, color: Color(0xFFFF6060), size: 14),
           ),
         ],
       ),
@@ -281,9 +256,4 @@ class _FilesPanelState extends ConsumerState<FilesPanel> {
 
     return Icon(icon, color: color, size: 20);
   }
-}
-
-class FileEntry {
-  final String path;
-  FileEntry({required this.path});
 }

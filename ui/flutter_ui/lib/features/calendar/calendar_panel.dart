@@ -1,41 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../../models/api_models.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
-
-/// Calendar event model
-class CalendarEvent {
-  final String id;
-  final String summary;
-  final String? description;
-  final String? location;
-  final DateTime start;
-  final DateTime end;
-
-  CalendarEvent({
-    required this.id,
-    required this.summary,
-    this.description,
-    this.location,
-    required this.start,
-    required this.end,
-  });
-
-  factory CalendarEvent.fromJson(Map<String, dynamic> json) {
-    final startVal = json['start'] ?? {};
-    final endVal = json['end'] ?? {};
-    return CalendarEvent(
-      id: json['id'] as String? ?? '',
-      summary: json['summary'] as String? ?? '',
-      description: json['description'] as String?,
-      location: json['location'] as String?,
-      start: DateTime.tryParse((startVal['dateTime'] as String?) ?? (startVal['date'] as String?) ?? '') ?? DateTime.now(),
-      end: DateTime.tryParse((endVal['dateTime'] as String?) ?? (endVal['date'] as String?) ?? '') ?? DateTime.now(),
-    );
-  }
-}
+import '../../widgets/error_banner.dart';
 
 /// Calendar panel - displays upcoming events and allows creating new ones
 class CalendarPanel extends ConsumerStatefulWidget {
@@ -126,7 +96,8 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
       child: Column(
         children: [
           _buildHeader(),
-          if (_error != null) _buildErrorBanner(),
+          if (_error != null)
+            ErrorBanner(message: _error!, onDismiss: _loadEvents),
           Expanded(child: _buildEventList()),
         ],
       ),
@@ -165,31 +136,6 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
             icon: const Icon(Icons.refresh, size: 16),
             onPressed: _loadEvents,
             tooltip: 'refresh',
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorBanner() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      color: const Color(0x80FF3030),
-      child: Row(
-        children: [
-          const Icon(Icons.error_outline, color: Color(0xFFFF6060), size: 14),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              _error!,
-              style: const TextStyle(color: Color(0xFFFF6060), fontSize: 10),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          GestureDetector(
-            onTap: _loadEvents,
-            child: const Icon(Icons.refresh, color: Color(0xFFFF6060), size: 14),
           ),
         ],
       ),

@@ -77,14 +77,23 @@ class _StubWebSocket extends WebSocketService {
   bool get isConnected => true;
 }
 
-/// Test-specific ChatNotifier that doesn't load messages on init
 class _StubTtsNotifier extends StateNotifier<TtsState> implements TtsNotifier {
-  _StubTtsNotifier() : super(const TtsState.idle());
+  _StubTtsNotifier() : super(TtsState.idle);
+  @override Future<bool> initialize() async => true;
   @override Future<void> speak(String text) async {}
   @override Future<void> stop() async {}
   @override Future<void> setVolume(double volume) async {}
-  @override double get volume => 1.0;
+  @override Future<void> setSpeed(double speed) async {}
+  @override Future<void> setPitch(double pitch) async {}
+  @override Future<void> setVoice(String voiceName) async {}
+  @override Future<List<Map<String, dynamic>>> getVoices() async => [];
+  @override void setEnabled(bool value) {}
+  @override void setBehaviorSettings({required bool interrupt, required bool queue, int? maxQueueSize}) {}
+  @override void toggleTts() {}
+  @override bool get enabled => false;
+  @override bool get isAvailable => false;
   @override bool get isSpeaking => false;
+  double get volume => 1.0;
 }
 
 class _TestChatNotifier extends ChatNotifier {

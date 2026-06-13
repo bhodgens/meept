@@ -40,7 +40,7 @@ class MeeptApi {
   // ===== Daemon =====
 
   Future<Map<String, dynamic>> getDaemonStatus() async {
-    final response = await _dio.get('/daemon/status');
+    final response = await _dio.get('/api/v1/daemon/status');
     return response.data as Map<String, dynamic>;
   }
 
@@ -51,7 +51,7 @@ class MeeptApi {
     String? conversationId,
     String? agentId,
   }) async {
-    final response = await _dio.post('/chat', data: {
+    final response = await _dio.post('/api/v1/chat', data: {
       'message': message,
       if (conversationId != null) 'conversation_id': conversationId,
       if (agentId != null) 'agent_id': agentId,
@@ -64,7 +64,7 @@ class MeeptApi {
     required String conversationId,
     String? source,
   }) async {
-    final response = await _dio.post('/chat/steer', data: {
+    final response = await _dio.post('/api/v1/chat/steer', data: {
       'message': message,
       'conversation_id': conversationId,
       if (source != null) 'source': source,
@@ -77,7 +77,7 @@ class MeeptApi {
     required String conversationId,
     String? source,
   }) async {
-    final response = await _dio.post('/chat/followup', data: {
+    final response = await _dio.post('/api/v1/chat/followup', data: {
       'message': message,
       'conversation_id': conversationId,
       if (source != null) 'source': source,
@@ -304,19 +304,19 @@ class MeeptApi {
   // ===== Projects / Branches =====
 
   Future<List<BranchInfo>> listBranches(String projectId) async {
-    final response = await _dio.get('/projects/$projectId/branches');
+    final response = await _dio.get('/api/v1/projects/$projectId/branches');
     final data = response.data as List<dynamic>;
     return data.map((b) => BranchInfo.fromJson(b as Map<String, dynamic>)).toList();
   }
 
   Future<void> checkoutBranch(String projectId, String branch) async {
-    await _dio.post('/projects/$projectId/checkout', data: {'branch': branch});
+    await _dio.post('/api/v1/projects/$projectId/checkout', data: {'branch': branch});
   }
 
   // ===== Plans =====
 
   Future<List<Plan>> listPlans({String? projectId, int limit = 50}) async {
-    final response = await _dio.get('/plans', queryParameters: {
+    final response = await _dio.get('/api/v1/plans', queryParameters: {
       if (projectId != null) 'project_id': projectId,
       'limit': limit,
     });
@@ -327,12 +327,12 @@ class MeeptApi {
   }
 
   Future<Plan> getPlan(String id) async {
-    final response = await _dio.get('/plans/$id');
+    final response = await _dio.get('/api/v1/plans/$id');
     return Plan.fromJson(response.data as Map<String, dynamic>);
   }
 
   Future<Plan> approvePlan(String id, {String? sessionID, String? by}) async {
-    final response = await _dio.post('/plans/$id/approve', data: {
+    final response = await _dio.post('/api/v1/plans/$id/approve', data: {
       if (sessionID != null) 'session_id': sessionID,
       if (by != null) 'by': by,
     });
@@ -340,7 +340,7 @@ class MeeptApi {
   }
 
   Future<Plan> rejectPlan(String id, {String? sessionID, String? by, String? reason}) async {
-    final response = await _dio.post('/plans/$id/reject', data: {
+    final response = await _dio.post('/api/v1/plans/$id/reject', data: {
       if (sessionID != null) 'session_id': sessionID,
       if (by != null) 'by': by,
       if (reason != null) 'reason': reason,
@@ -349,7 +349,7 @@ class MeeptApi {
   }
 
   Future<Plan> confirmPlan(String id, {String? sessionID, String? by}) async {
-    final response = await _dio.post('/plans/$id/confirm', data: {
+    final response = await _dio.post('/api/v1/plans/$id/confirm', data: {
       if (sessionID != null) 'session_id': sessionID,
       if (by != null) 'by': by,
     });
@@ -357,7 +357,7 @@ class MeeptApi {
   }
 
   Future<Plan> revisePlan(String id, {String? sessionID, String? feedback}) async {
-    final response = await _dio.post('/plans/$id/revise', data: {
+    final response = await _dio.post('/api/v1/plans/$id/revise', data: {
       if (sessionID != null) 'session_id': sessionID,
       if (feedback != null) 'feedback': feedback,
     });
@@ -367,55 +367,55 @@ class MeeptApi {
   // ===== Config Files =====
 
   Future<String> getClientConfig() async {
-    final response = await _dio.get('/config/client');
+    final response = await _dio.get('/api/v1/config/client');
     final data = response.data as Map<String, dynamic>;
     return data['content'] as String? ?? '';
   }
 
   Future<void> saveClientConfig(String content) async {
-    await _dio.post('/config/client', data: {'content': content});
+    await _dio.post('/api/v1/config/client', data: {'content': content});
   }
 
   Future<String> getModelsConfig() async {
-    final response = await _dio.get('/config/models');
+    final response = await _dio.get('/api/v1/config/models');
     final data = response.data as Map<String, dynamic>;
     return data['content'] as String? ?? '';
   }
 
   Future<void> saveModelsConfig(String content) async {
-    await _dio.post('/config/models', data: {'content': content});
+    await _dio.post('/api/v1/config/models', data: {'content': content});
   }
 
   Future<String> getMenubarConfig() async {
-    final response = await _dio.get('/config/menubar');
+    final response = await _dio.get('/api/v1/config/menubar');
     final data = response.data as Map<String, dynamic>;
     return data['content'] as String? ?? '';
   }
 
   Future<void> saveMenubarConfig(String content) async {
-    await _dio.post('/config/menubar', data: {'content': content});
+    await _dio.post('/api/v1/config/menubar', data: {'content': content});
   }
 
   // ===== Terminal =====
 
   Future<Map<String, dynamic>> getTerminalHistory() async {
-    final response = await _dio.get('/terminal/history');
+    final response = await _dio.get('/api/v1/terminal/history');
     return response.data as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> executeCommand(String command) async {
-    final response = await _dio.post('/terminal/exec', data: {'command': command});
+    final response = await _dio.post('/api/v1/terminal/exec', data: {'command': command});
     return response.data as Map<String, dynamic>;
   }
 
   Future<void> clearTerminalHistory() async {
-    await _dio.post('/terminal/clear');
+    await _dio.post('/api/v1/terminal/clear');
   }
 
   // ===== Calendar =====
 
   Future<Map<String, dynamic>> getCalendarToday() async {
-    final response = await _dio.get('/calendar/today');
+    final response = await _dio.get('/api/v1/calendar/today');
     return response.data as Map<String, dynamic>;
   }
 
@@ -425,7 +425,7 @@ class MeeptApi {
     required DateTime end,
     String? description,
   }) async {
-    await _dio.post('/calendar/events', data: {
+    await _dio.post('/api/v1/calendar/events', data: {
       'summary': summary,
       'start': start.toIso8601String(),
       'end': end.toIso8601String(),

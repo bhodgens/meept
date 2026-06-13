@@ -3,26 +3,122 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 part 'api_models.freezed.dart';
 part 'api_models.g.dart';
 
-// ===== Request/Response Models =====
+// ===== UI-Only Panel Models =====
 
-/// Generic API response wrapper.
-///
-/// Not freezed because it is a generic class; freezed does not support
-/// generating code for classes with unconstrained type parameters that are
-/// not themselves serialised.
-class ApiResponse<T> {
-  final T? data;
-  final String? error;
-  final int statusCode;
+/// Simple file entry for the files panel.
+class FileEntry {
+  final String path;
+  FileEntry({required this.path});
+}
 
-  const ApiResponse({
-    this.data,
-    this.error,
-    required this.statusCode,
+/// Memory search result model matching backend MemoryResult structure.
+class MemoryResultModel {
+  final String id;
+  final String content;
+  final String type;
+  final String category;
+  final double relevanceScore;
+  final String source;
+  final DateTime createdAt;
+  final String? sessionId;
+  final String? taskId;
+
+  MemoryResultModel({
+    required this.id,
+    required this.content,
+    required this.type,
+    required this.category,
+    required this.relevanceScore,
+    required this.source,
+    required this.createdAt,
+    this.sessionId,
+    this.taskId,
   });
 
-  bool get isSuccess => statusCode >= 200 && statusCode < 300;
-  bool get isError => statusCode >= 400;
+  factory MemoryResultModel.fromJson(Map<String, dynamic> json) {
+    final memory = json['memory'] as Map<String, dynamic>? ?? {};
+    return MemoryResultModel(
+      id: memory['id'] as String? ?? '',
+      content: memory['content'] as String? ?? '',
+      type: memory['type'] as String? ?? '',
+      category: memory['category'] as String? ?? '',
+      relevanceScore: (json['relevance_score'] as num?)?.toDouble() ?? 0.0,
+      source: json['source'] as String? ?? '',
+      createdAt: memory['created_at'] != null
+          ? DateTime.parse(memory['created_at'] as String)
+          : DateTime.now(),
+      sessionId: memory['session_id'] as String?,
+      taskId: memory['task_id'] as String?,
+    );
+  }
+}
+
+/// Terminal command history entry.
+class CommandEntry {
+  final String id;
+  final String command;
+  final String output;
+  final String stderr;
+  final int exitCode;
+  final DateTime timestamp;
+  final String workingDir;
+  final bool success;
+
+  CommandEntry({
+    required this.id,
+    required this.command,
+    required this.output,
+    required this.stderr,
+    required this.exitCode,
+    required this.timestamp,
+    required this.workingDir,
+    required this.success,
+  });
+
+  factory CommandEntry.fromJson(Map<String, dynamic> json) {
+    return CommandEntry(
+      id: json['id'] as String? ?? '',
+      command: json['command'] as String? ?? '',
+      output: json['output'] as String? ?? '',
+      stderr: json['stderr'] as String? ?? '',
+      exitCode: json['exit_code'] as int? ?? 0,
+      timestamp: DateTime.parse(json['timestamp'] as String? ?? DateTime.now().toIso8601String()),
+      workingDir: json['working_dir'] as String? ?? '',
+      success: json['success'] as bool? ?? true,
+    );
+  }
+}
+
+/// Calendar event model (Google Calendar format).
+class CalendarEvent {
+  final String id;
+  final String summary;
+  final String? description;
+  final String? location;
+  final DateTime start;
+  final DateTime end;
+
+  CalendarEvent({
+    required this.id,
+    required this.summary,
+    this.description,
+    this.location,
+    required this.start,
+    required this.end,
+  });
+
+  factory CalendarEvent.fromJson(Map<String, dynamic> json) {
+    final startVal = json['start'] ?? {};
+    final endVal = json['end'] ?? {};
+    return CalendarEvent(
+      id: json['id'] as String? ?? '',
+      summary: json['summary'] as String? ?? '',
+      description: json['description'] as String?,
+      location: json['location'] as String?,
+      start: DateTime.tryParse((startVal['dateTime'] as String?) ?? (startVal['date'] as String?) ?? '') ?? DateTime.now(),
+      end: DateTime.tryParse((endVal['dateTime'] as String?) ?? (endVal['date'] as String?) ?? '') ?? DateTime.now(),
+    );
+  }
 }
 
 // ===== Chat Models =====
@@ -74,30 +170,6 @@ class ChatMessage with _$ChatMessage {
     if (id is num) return id.toInt().toString();
     return id?.toString() ?? '';
   }
-}
-
-@freezed
-class ChatRequest with _$ChatRequest {
-  const ChatRequest._();
-
-  const factory ChatRequest({
-    required String message,
-    @JsonKey(name: 'conversation_id') String? conversationId,
-    @JsonKey(name: 'agent_id') String? agentId,
-    List<ChatMessage>? history,
-  }) = _ChatRequest;
-
-  /// Custom toJson to omit null / history fields when not needed.
-  factory ChatRequest.fromJson(Map<String, dynamic> json) =>
-      _$$ChatRequestImplFromJson(json);
-
-  @override
-  Map<String, dynamic> toJson() => {
-        'message': message,
-        if (conversationId != null) 'conversation_id': conversationId,
-        if (agentId != null) 'agent_id': agentId,
-        if (history != null) 'history': history!.map((m) => m.toJson()).toList(),
-      };
 }
 
 // ===== Session Models =====

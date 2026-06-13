@@ -28,24 +28,6 @@ Map<String, dynamic> _$$ChatMessageImplToJson(_$ChatMessageImpl instance) =>
       'tool_calls': instance.toolCalls,
     };
 
-_$ChatRequestImpl _$$ChatRequestImplFromJson(Map<String, dynamic> json) =>
-    _$ChatRequestImpl(
-      message: json['message'] as String,
-      conversationId: json['conversation_id'] as String?,
-      agentId: json['agent_id'] as String?,
-      history: (json['history'] as List<dynamic>?)
-          ?.map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-          .toList(),
-    );
-
-Map<String, dynamic> _$$ChatRequestImplToJson(_$ChatRequestImpl instance) =>
-    <String, dynamic>{
-      'message': instance.message,
-      'conversation_id': instance.conversationId,
-      'agent_id': instance.agentId,
-      'history': instance.history,
-    };
-
 _$SessionImpl _$$SessionImplFromJson(Map<String, dynamic> json) =>
     _$SessionImpl(
       id: json['id'] as String,
