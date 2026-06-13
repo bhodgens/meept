@@ -423,7 +423,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
           _focusNode.requestFocus();
           if (_controller.text.isEmpty) {
             _controller.text = '/';
-            _controller.selection = TextSelection.collapsed(offset: 1);
+            _controller.selection = const TextSelection.collapsed(offset: 1);
           }
           ref.read(focusInputRequestProvider.notifier).state = false;
         }

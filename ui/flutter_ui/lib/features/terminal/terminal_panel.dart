@@ -240,7 +240,7 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.terminal, color: CyberpunkColors.midGray, size: 48),
+            const Icon(Icons.terminal, color: CyberpunkColors.midGray, size: 48),
             const SizedBox(height: 8),
             Text(
               'no command history',
@@ -342,7 +342,7 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
           const SizedBox(height: 4),
           Row(
             children: [
-              Icon(Icons.access_time, size: 10, color: CyberpunkColors.midGray),
+              const Icon(Icons.access_time, size: 10, color: CyberpunkColors.midGray),
               const SizedBox(width: 4),
               Text(
                 _formatTime(entry.timestamp),
@@ -354,7 +354,7 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
               ),
               if (entry.workingDir.isNotEmpty) ...[
                 const SizedBox(width: 8),
-                Icon(Icons.folder, size: 10, color: CyberpunkColors.midGray),
+                const Icon(Icons.folder, size: 10, color: CyberpunkColors.midGray),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(

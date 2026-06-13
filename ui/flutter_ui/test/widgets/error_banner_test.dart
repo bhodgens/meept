@@ -9,7 +9,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorBanner(message: 'something went wrong')),
+          home: const Scaffold(body: ErrorBanner(message: 'something went wrong')),
         ),
       );
       await tester.pump();
@@ -48,7 +48,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorBanner(message: 'no dismiss')),
+          home: const Scaffold(body: ErrorBanner(message: 'no dismiss')),
         ),
       );
       await tester.pump();
@@ -71,11 +71,11 @@ void main() {
     });
 
     testWidgets('truncates long messages', (tester) async {
-      final longMessage = 'This is a very long error message that should be truncated';
+      const longMessage = 'This is a very long error message that should be truncated';
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorBanner(message: longMessage)),
+          home: const Scaffold(body: ErrorBanner(message: longMessage)),
         ),
       );
       await tester.pump();
@@ -93,7 +93,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorBanner(message: 'color test')),
+          home: const Scaffold(body: ErrorBanner(message: 'color test')),
         ),
       );
       await tester.pump();
@@ -124,7 +124,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorBanner(message: 'text color test')),
+          home: const Scaffold(body: ErrorBanner(message: 'text color test')),
         ),
       );
       await tester.pump();
@@ -141,7 +141,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorBanner(message: 'bg test')),
+          home: const Scaffold(body: ErrorBanner(message: 'bg test')),
         ),
       );
       await tester.pump();
@@ -157,7 +157,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorBanner(message: 'icon size')),
+          home: const Scaffold(body: ErrorBanner(message: 'icon size')),
         ),
       );
       await tester.pump();
@@ -193,7 +193,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorBanner(message: 'padding test')),
+          home: const Scaffold(body: ErrorBanner(message: 'padding test')),
         ),
       );
       await tester.pump();
@@ -210,7 +210,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorBanner(message: 'multiline test')),
+          home: const Scaffold(body: ErrorBanner(message: 'multiline test')),
         ),
       );
       await tester.pump();
@@ -227,7 +227,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorBanner(message: 'overflow test')),
+          home: const Scaffold(body: ErrorBanner(message: 'overflow test')),
         ),
       );
       await tester.pump();
@@ -246,7 +246,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorText(message: 'disk full')),
+          home: const Scaffold(body: ErrorText(message: 'disk full')),
         ),
       );
       await tester.pump();
@@ -257,7 +257,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorText(message: 'disk full')),
+          home: const Scaffold(body: ErrorText(message: 'disk full')),
         ),
       );
       await tester.pump();
@@ -268,7 +268,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorText(message: 'test')),
+          home: const Scaffold(body: ErrorText(message: 'test')),
         ),
       );
       await tester.pump();
@@ -280,7 +280,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorText(message: 'disk full')),
+          home: const Scaffold(body: ErrorText(message: 'disk full')),
         ),
       );
       await tester.pump();
@@ -297,7 +297,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorText(message: 'timeout')),
+          home: const Scaffold(body: ErrorText(message: 'timeout')),
         ),
       );
       await tester.pump();
@@ -308,7 +308,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorText(message: 'test')),
+          home: const Scaffold(body: ErrorText(message: 'test')),
         ),
       );
       await tester.pump();
@@ -325,7 +325,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorText(message: 'test')),
+          home: const Scaffold(body: ErrorText(message: 'test')),
         ),
       );
       await tester.pump();
@@ -342,7 +342,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: ErrorText(message: 'test')),
+          home: const Scaffold(body: ErrorText(message: 'test')),
         ),
       );
       await tester.pump();

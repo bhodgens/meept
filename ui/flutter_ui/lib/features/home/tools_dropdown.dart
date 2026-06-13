@@ -99,7 +99,7 @@ class _ToolsDropdownState extends ConsumerState<ToolsDropdown> {
                 height: 36,
                 child: Row(
                   children: [
-                    Icon(
+                    const Icon(
                       Icons.tune,
                       size: 16,
                       color: CyberpunkColors.orangeBright,

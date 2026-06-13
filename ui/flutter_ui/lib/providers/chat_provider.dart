@@ -85,7 +85,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
     }
 
     // Clear previous messages when loading a new session
-    state = ChatState(
+    state = const ChatState(
       messages: [],
       isLoading: true,
       error: null,

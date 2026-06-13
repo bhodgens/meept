@@ -71,7 +71,7 @@ class TasksDetail extends ConsumerWidget {
                   TextButton.icon(
                     onPressed: () => _showCancelConfirm(context, ref, task),
                     icon: const Icon(Icons.cancel, size: 16),
-                    label: Text(
+                    label: const Text(
                       'cancel task',
                       style: CyberpunkTypography.bodySmall,
                     ),
@@ -163,8 +163,8 @@ class TasksDetail extends ConsumerWidget {
                   .updateTaskStatus(task.id, value);
               if (result == false && context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: const Text('failed to update task status'),
+                  const SnackBar(
+                    content: Text('failed to update task status'),
                     backgroundColor: CyberpunkColors.redAlert,
                   ),
                 );
@@ -213,19 +213,19 @@ class TasksDetail extends ConsumerWidget {
                 );
               } else {
                 messenger.showSnackBar(
-                  SnackBar(
-                    content: const Text('failed to cancel task'),
+                  const SnackBar(
+                    content: Text('failed to cancel task'),
                     backgroundColor: CyberpunkColors.redAlert,
                   ),
                 );
               }
             },
+            style: TextButton.styleFrom(
+              foregroundColor: CyberpunkColors.redAlert,
+            ),
             child: const Text(
               'cancel',
               style: CyberpunkTypography.bodyMedium,
-            ),
-            style: TextButton.styleFrom(
-              foregroundColor: CyberpunkColors.redAlert,
             ),
           ),
         ],

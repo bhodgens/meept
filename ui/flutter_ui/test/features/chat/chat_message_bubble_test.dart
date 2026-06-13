@@ -271,7 +271,7 @@ void main() {
     });
 
     testWidgets('long content is displayed without overflow', (tester) async {
-      final longMessage = 'This is a very long message to ensure that '
+      const longMessage = 'This is a very long message to ensure that '
           'the bubble content renders correctly and does not cause '
           'overflow issues because the maxWidth is constrained '
           'to 70% of the screen width and wrap text naturally';

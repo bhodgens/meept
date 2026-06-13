@@ -28,12 +28,9 @@ class StorageService {
   /// Initialize the underlying storage instances.
   /// Must be called (awaits) before any synchronous reads.
   Future<void> init() async {
-    if (_prefs == null) {
-      _prefs = await SharedPreferences.getInstance();
-    }
-    if (_secureStorage == null) {
-      // Configure for macOS keychain
-      _secureStorage = const FlutterSecureStorage(
+    _prefs ??= await SharedPreferences.getInstance();
+    // Configure for macOS keychain
+    _secureStorage ??= const FlutterSecureStorage(
         aOptions: AndroidOptions(
           encryptedSharedPreferences: true,
         ),
@@ -44,7 +41,6 @@ class StorageService {
           accessibility: KeychainAccessibility.first_unlock_this_device,
         ),
       );
-    }
 
     // Cache API key from keychain so synchronous reads use secure storage
     _cachedApiKey = await _secureStorage?.read(key: AppConstants.apiKeyPref);

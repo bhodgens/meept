@@ -150,7 +150,7 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(
+                                const Icon(
                                   Icons.search_off,
                                   color: CyberpunkColors.midGray,
                                   size: 48,

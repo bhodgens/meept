@@ -367,7 +367,7 @@ class _ActionButtons extends ConsumerWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(CyberpunkColors.orangeBright))),
+                const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(CyberpunkColors.orangeBright))),
                 const SizedBox(width: 8),
                 Text('executing...', style: CyberpunkTypography.bodySmall.copyWith(color: CyberpunkColors.orangeBright)),
               ],
@@ -383,20 +383,20 @@ class _ActionButtons extends ConsumerWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: CyberpunkColors.darkGray,
-        title: Text('reject plan', style: CyberpunkTypography.headlineMedium),
+        title: const Text('reject plan', style: CyberpunkTypography.headlineMedium),
         content: TextField(
           controller: controller,
           decoration: const InputDecoration(hintText: 'reason (optional)...', hintStyle: CyberpunkTypography.bodySmall),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('cancel', style: CyberpunkTypography.bodyMedium)),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('cancel', style: CyberpunkTypography.bodyMedium)),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: CyberpunkColors.redAlert),
             onPressed: () {
               notifier.rejectPlan(plan.id, sessionID: sessionId, reason: controller.text);
               Navigator.pop(ctx);
             },
-            child: Text('reject', style: CyberpunkTypography.bodyMedium),
+            child: const Text('reject', style: CyberpunkTypography.bodyMedium),
           ),
         ],
       ),
@@ -409,20 +409,20 @@ class _ActionButtons extends ConsumerWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: CyberpunkColors.darkGray,
-        title: Text('request revision', style: CyberpunkTypography.headlineMedium),
+        title: const Text('request revision', style: CyberpunkTypography.headlineMedium),
         content: TextField(
           controller: controller,
           maxLines: 3,
           decoration: const InputDecoration(hintText: 'feedback...', hintStyle: CyberpunkTypography.bodySmall),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('cancel', style: CyberpunkTypography.bodyMedium)),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('cancel', style: CyberpunkTypography.bodyMedium)),
           FilledButton(
             onPressed: () {
               notifier.revisePlan(plan.id, sessionID: sessionId, feedback: controller.text);
               Navigator.pop(ctx);
             },
-            child: Text('revise', style: CyberpunkTypography.bodyMedium),
+            child: const Text('revise', style: CyberpunkTypography.bodyMedium),
           ),
         ],
       ),

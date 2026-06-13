@@ -146,7 +146,7 @@ class _FilesPanelState extends ConsumerState<FilesPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
+            const Icon(
               Icons.folder_open,
               color: CyberpunkColors.midGray,
               size: 48,

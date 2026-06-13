@@ -49,9 +49,10 @@ class _SessionsListState extends ConsumerState<SessionsList> {
               if (controller.text.isNotEmpty) {
                 final session = await notifier.createSession(controller.text);
                 if (session != null) {
+                  if (!context.mounted) return;
                   Navigator.pop(context);
                   ref.read(activeSessionProvider.notifier).state = session;
-                  if (context.mounted) context.go('/');
+                  context.go('/');
                 } else {
                   // Error: don't pop, show feedback (bug F4).
                   if (context.mounted) {

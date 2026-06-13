@@ -198,7 +198,7 @@ class TtsService {
     if (!_initialized) {
       await initialize();
     }
-    await _flutterTts.setVoice({"name": voiceName, "locale": voiceName.split('-').first});
+    await _flutterTts.setVoice({'name': voiceName, 'locale': voiceName.split('-').first});
   }
 
   /// Set the speech rate (0.0 to 1.0).

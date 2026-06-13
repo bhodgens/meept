@@ -205,7 +205,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
                           selectedColor: CyberpunkColors.orangePrimary,
                           checkmarkColor: CyberpunkColors.darkGray,
                           backgroundColor: CyberpunkColors.darkGray,
-                          side: BorderSide(
+                          side: const BorderSide(
                             color: CyberpunkColors.orangePrimary,
                             width: 1,
                           ),
@@ -250,7 +250,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
+          const Icon(
             Icons.search_outlined,
             size: 64,
             color: CyberpunkColors.orangeDark,
@@ -273,7 +273,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
+          const Icon(
             Icons.search_off,
             size: 48,
             color: CyberpunkColors.orangeDark,
@@ -295,7 +295,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
+          const Icon(
             Icons.error_outline,
             size: 48,
             color: CyberpunkColors.orangeDark,

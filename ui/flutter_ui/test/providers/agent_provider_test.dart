@@ -8,56 +8,21 @@ import 'package:meept_ui/services/api_client.dart';
 class _StubApiClient extends ApiClient {
   _StubApiClient() : super(host: 'localhost', port: 8081);
 
-  final List<String> recordedPaths = [];
-
   @override
-  Future<T> get<T>(String path, {Map<String, dynamic>? queryParameters}) async {
-    recordedPaths.add(path);
-
-    if (path == '/config/agents') {
-      return _mockAgentsResponse as T;
-    }
-    return {} as T;
-  }
-
-  @override
-  Future<T> post<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> put<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> delete<T>(String path) async {
-    return {} as T;
+  Future<List<Agent>> listAgents() async {
+    return (_mockAgentsResponse['agents'] as List)
+        .map((a) => Agent.fromJson(a as Map<String, dynamic>))
+        .toList();
   }
 }
 
-/// An API client that throws on any GET, to simulate failure.
+/// An API client that throws on any call, to simulate failure.
 class _FailingApiClient extends ApiClient {
   _FailingApiClient() : super(host: 'localhost', port: 8081);
 
   @override
-  Future<T> get<T>(String path, {Map<String, dynamic>? queryParameters}) async {
+  Future<List<Agent>> listAgents() async {
     throw Exception('network failure');
-  }
-
-  @override
-  Future<T> post<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> put<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> delete<T>(String path) async {
-    return {} as T;
   }
 }
 
@@ -66,26 +31,8 @@ class _EmptyAgentsApiClient extends ApiClient {
   _EmptyAgentsApiClient() : super(host: 'localhost', port: 8081);
 
   @override
-  Future<T> get<T>(String path, {Map<String, dynamic>? queryParameters}) async {
-    if (path == '/config/agents') {
-      return {'agents': <dynamic>[]}.cast<String, dynamic>() as T;
-    }
-    return {} as T;
-  }
-
-  @override
-  Future<T> post<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> put<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> delete<T>(String path) async {
-    return {} as T;
+  Future<List<Agent>> listAgents() async {
+    return [];
   }
 }
 
@@ -94,30 +41,12 @@ class _NullIdAgentApiClient extends ApiClient {
   _NullIdAgentApiClient() : super(host: 'localhost', port: 8081);
 
   @override
-  Future<T> get<T>(String path, {Map<String, dynamic>? queryParameters}) async {
-    if (path == '/config/agents') {
-      return {
-        'agents': [
-          <String, dynamic>{'id': null, 'name': 'No ID'},
-        ],
-      }.cast<String, dynamic>() as T;
-    }
-    return {} as T;
-  }
-
-  @override
-  Future<T> post<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> put<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> delete<T>(String path) async {
-    return {} as T;
+  Future<List<Agent>> listAgents() async {
+    // Agent.fromJson does json['id'] as String which throws on null,
+    // so the caller (AgentNotifier) will get a TypeError.
+    return [
+      Agent.fromJson(<String, dynamic>{'id': null, 'name': 'No ID'}),
+    ];
   }
 }
 
@@ -185,7 +114,7 @@ void main() {
 
     test('AgentState is immutable (uses const + copyWith)', () {
       const state1 = AgentState(isLoading: true);
-      final state2 = AgentState(isLoading: false);
+      const state2 = AgentState(isLoading: false);
 
       expect(identical(state1, state2), isFalse); // different instances
       expect(state1.isLoading, isTrue);

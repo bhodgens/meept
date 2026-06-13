@@ -89,7 +89,7 @@ MarkdownStyleSheet buildCyberpunkMarkdownStyle(BuildContext context) {
       color: Color(0xFF1A1A1A),
     ),
     tableColumnWidth: const FlexColumnWidth(),
-    horizontalRuleDecoration: BoxDecoration(
+    horizontalRuleDecoration: const BoxDecoration(
       border: Border(
         top: BorderSide(
           color: CyberpunkColors.midGray,

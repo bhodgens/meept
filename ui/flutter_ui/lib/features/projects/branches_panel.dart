@@ -203,7 +203,7 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
+          const Icon(
             Icons.error_outline,
             size: 48,
             color: CyberpunkColors.orangeDark,
@@ -236,7 +236,7 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
+            const Icon(
               Icons.call_split_outlined,
               size: 48,
               color: CyberpunkColors.orangeDark,

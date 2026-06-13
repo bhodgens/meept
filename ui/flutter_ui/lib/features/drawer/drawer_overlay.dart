@@ -74,7 +74,7 @@ class _DrawerOverlayState extends ConsumerState<DrawerOverlay>
               child: Container(
                 width: 320,
                 height: double.infinity,
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   color: CyberpunkColors.darkGray,
                   border: Border(
                     right: BorderSide(

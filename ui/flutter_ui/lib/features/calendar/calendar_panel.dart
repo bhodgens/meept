@@ -161,7 +161,7 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.event_busy, color: CyberpunkColors.midGray, size: 48),
+            const Icon(Icons.event_busy, color: CyberpunkColors.midGray, size: 48),
             const SizedBox(height: 8),
             Text(
               'no events today',
@@ -205,7 +205,7 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
         children: [
           Row(
             children: [
-              Icon(
+              const Icon(
                 Icons.access_time,
                 size: 14,
                 color: CyberpunkColors.orangeBright,
@@ -223,7 +223,7 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
               ),
               const Spacer(),
               if (event.location != null)
-                Icon(Icons.location_on, size: 14, color: CyberpunkColors.midGray),
+                const Icon(Icons.location_on, size: 14, color: CyberpunkColors.midGray),
             ],
           ),
           const SizedBox(height: 6),
