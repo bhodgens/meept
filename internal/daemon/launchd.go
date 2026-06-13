@@ -471,28 +471,6 @@ func (m *ServiceManager) DaemonPIDFile() string {
 	return filepath.Join(m.logDir, "meept.pid")
 }
 
-// --- LaunchAgentController: retained for backward compatibility ---
-
-// LaunchAgentController manages the launchd agent for the daemon.
-// Uses kardianos/service under the hood; falls back to launchctl subprocess
-// where service abstraction doesn't fully cover.
-type LaunchAgentController struct {
-	*ServiceManager
-	logDir string
-}
-
-// NewLaunchAgentController creates a new LaunchAgentController backed by
-// kardianos/service on supported platforms.
-func NewLaunchAgentController() (*LaunchAgentController, error) {
-	svcMgr, err := NewServiceManager(nil)
-	if err != nil {
-		return nil, err
-	}
-	return &LaunchAgentController{
-		ServiceManager: svcMgr,
-		logDir:         svcMgr.logDir,
-	}, nil
-}
 
 // --- DaemonControl: HTTP/server control interface ---
 
