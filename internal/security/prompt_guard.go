@@ -243,15 +243,3 @@ func ExtractToolOutput(text, toolName string) (string, bool) {
 	return strings.TrimSpace(content), true
 }
 
-// StripBoundaryMarkers removes all boundary markers from text.
-func StripBoundaryMarkers(text string) string {
-	// Remove user input markers
-	text = strings.ReplaceAll(text, UserInputStart, "")
-	text = strings.ReplaceAll(text, UserInputEnd, "")
-
-	// Remove tool output markers
-	text = toolOutputStartRE.ReplaceAllString(text, "")
-	text = strings.ReplaceAll(text, ToolOutputEndTag, "")
-
-	return text
-}
