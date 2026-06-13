@@ -96,9 +96,32 @@ func main() {
 	)
 	rootCmd.AddCommand(serviceCmd)
 
+	// Set up error handling to suppress usage for config errors
+	rootCmd.SilenceErrors = true
+	rootCmd.SilenceUsage = true
+
 	if err := rootCmd.Execute(); err != nil {
+		// Config errors should not print usage, just the error message
+		if _, ok := err.(configError); ok {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
 		os.Exit(1)
 	}
+}
+
+// configError wraps configuration errors to signal cobra should not print usage.
+type configError struct {
+	err error
+}
+
+func (e configError) Error() string {
+	return e.err.Error()
+}
+
+func (e configError) Unwrap() error {
+	return e.err
 }
 
 func runDaemon(cmd *cobra.Command, args []string) error {
@@ -114,7 +137,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		appCfg, err = config.LoadDefault()
 	}
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		// Use configError to suppress usage output for configuration problems
+		return configError{err: fmt.Errorf("failed to load config: %w", err)}
 	}
 
 	// Build daemon config from app config

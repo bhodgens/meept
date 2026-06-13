@@ -25,7 +25,28 @@ func LoadJSON5(path string, v any) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse JSON5: %w", err)
 	}
-	return json.Unmarshal(stdJSON, v)
+
+	// Unmarshal with detailed error handling for type mismatches
+	decoder := json.NewDecoder(strings.NewReader(string(stdJSON)))
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(v); err != nil {
+		// Provide more specific error messages for common type mismatches
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "cannot unmarshal") {
+			if strings.Contains(errMsg, "type bool") && strings.Contains(errMsg, "array") {
+				return fmt.Errorf("config type mismatch: expected a boolean value but found an array - check the field for a list that should be a single true/false value")
+			}
+			if strings.Contains(errMsg, "cannot unmarshal string") && strings.Contains(errMsg, "type bool") {
+				return fmt.Errorf("config type mismatch: expected a boolean value but found a string - check for quotes around true/false or enum values like 'ask'/'never'/'always'")
+			}
+			if strings.Contains(errMsg, "cannot unmarshal") && strings.Contains(errMsg, "type") {
+				return fmt.Errorf("config type mismatch: %s - verify the field type matches the expected value", errMsg)
+			}
+		}
+		return fmt.Errorf("failed to parse config JSON: %w", err)
+	}
+	return nil
 }
 
 // LoadJSON5WithDefault loads JSON5 from path, or returns default if not found.
