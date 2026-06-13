@@ -175,11 +175,21 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 }
 
 // Start starts all startable services.
+//
+// DESIGN NOTE: The ServiceRegistry acts as a container/state-holder, not a
+// lifecycle manager. The individual services (Chat, Memory, Task, Queue, etc.)
+// are stateless request handlers that delegate to long-lived subsystems
+// (MessageBus, AgentLoop, MemoryManager) which are started and stopped by the
+// daemon's Components layer directly. Therefore Start/Stop are intentional
+// no-ops — there are no background goroutines or resources owned by the
+// registry itself. If a future service needs background lifecycle management,
+// it should be added to internal/daemon/components.go instead.
 func (r *ServiceRegistry) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops all services gracefully.
+// Stop stops all services gracefully. See Start doc for the design rationale
+// on why this is a no-op.
 func (r *ServiceRegistry) Stop(ctx context.Context) error {
 	slog.Info("Stopping service registry")
 	return nil

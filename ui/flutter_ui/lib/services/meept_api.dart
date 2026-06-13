@@ -305,7 +305,8 @@ class MeeptApi {
 
   Future<List<BranchInfo>> listBranches(String projectId) async {
     final response = await _dio.get('/api/v1/projects/$projectId/branches');
-    final data = response.data as List<dynamic>;
+    final body = response.data as Map<String, dynamic>;
+    final data = body['branches'] as List<dynamic>? ?? [];
     return data.map((b) => BranchInfo.fromJson(b as Map<String, dynamic>)).toList();
   }
 

@@ -319,8 +319,8 @@ func runBranchNavigate(sessionID string, targetMessageID int64) error {
 	fmt.Printf("  abandoned msgs:  %d\n", navResult.AbandonedMsgs)
 	if navResult.Summary != "" {
 		summaryPreview := navResult.Summary
-		if len(summaryPreview) > 100 {
-			summaryPreview = summaryPreview[:97] + "..."
+		if len([]rune(summaryPreview)) > 100 {
+			summaryPreview = string([]rune(summaryPreview)[:97]) + "..."
 		}
 		fmt.Printf("  summary:         %s\n", summaryPreview)
 	}

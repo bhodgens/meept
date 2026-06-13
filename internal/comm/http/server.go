@@ -38,7 +38,7 @@ import (
 
 const maxRequestBodySize = 1 << 20 // 1 MB
 
-var defaultWSOrigins = []string{"localhost", "127.0.0.1", "::1", "null", ""}
+var defaultWSOrigins = []string{"localhost", "127.0.0.1", "::1"}
 
 // ServerConfig holds configuration for the HTTP server.
 // TLS is always enabled; there is no option to disable HTTPS.
@@ -53,7 +53,7 @@ type ServerConfig struct {
 	TLSCertFile             string        // TLS certificate file path
 	TLSKeyFile              string        // TLS key file path
 	RESTEnabled             bool                  // Enable REST API at /api/v1/* (default: true)
-	WebSocketAllowedOrigins []string              // Allowed origins for WebSocket (default: localhost, 127.0.0.1, ::1, null, "")
+	WebSocketAllowedOrigins []string              // Allowed origins for WebSocket (default: localhost, 127.0.0.1, ::1)
 	SecurityHeaders         SecurityHeadersConfig // HSTS, CSP, X-Frame-Options, etc.
 	TLSMinVersion           uint16                // Default: tls.VersionTLS12
 	TLSClientAuth           tls.ClientAuthType    // Default: tls.NoClientCert
@@ -147,6 +147,8 @@ type Server struct {
 	rpcCall func(ctx context.Context, method string, params json.RawMessage) (any, error)
 	// Notification handler (optional)
 	notifHandler *NotificationHandler
+	// PTY session handler (optional, set via WithPTY)
+	ptyHandler *PTYHandler
 }
 
 // AgentInfo describes an agent for listing.
@@ -451,6 +453,16 @@ func WithNotification(emitter NotificationEmitter) ServerOption {
 			return
 		}
 		s.notifHandler = NewNotificationHandler(emitter, s.logger)
+	}
+}
+
+// WithPTY enables PTY session endpoints under /api/v1/pty/*.
+// Routes inherit the server's authentication middleware when RequireAuth is enabled.
+func WithPTY(h *PTYHandler) ServerOption {
+	return func(s *Server) {
+		if h != nil {
+			s.ptyHandler = h
+		}
 	}
 }
 // ServerOption is a functional option for configuring a Server.
@@ -875,6 +887,11 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	if s.botWebhookHandler != nil {
 		mux.Handle("POST /api/v1/bot/{botID}/trigger", s.botWebhookHandler)
 	}
+
+	// PTY session endpoints (optional, depends on WithPTY option)
+	if s.ptyHandler != nil {
+		s.ptyHandler.RegisterRoutes(mux)
+	}
 }
 
 // middleware applies common middleware (CORS, logging, auth).
@@ -970,11 +987,11 @@ func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
 	s.writeJSON(w, status, map[string]string{"error": message})
 }
 
-// isLocalOrigin checks whether an Origin header is a safe local origin.
+// isLocalOrigin checks whether an Origin header value is a trusted local host.
+// Empty and "null" origins are not considered local — they are spoofable by
+// sandboxed browser contexts (data: URLs, sandboxed iframes) and must be
+// handled explicitly by callers if non-browser clients need access.
 func isLocalOrigin(origin string) bool {
-	if origin == "" || origin == "null" {
-		return true
-	}
 	u, err := url.Parse(origin)
 	if err != nil {
 		return false

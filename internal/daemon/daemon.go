@@ -615,6 +615,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				logger.Info("Notification endpoint enabled")
 			}
 
+			// PTY session endpoints (if PTY manager is available)
+			if components.PTYManager != nil {
+				httpOpts = append(httpOpts, http.WithPTY(http.NewPTYHandler(components.PTYManager, logger)))
+				logger.Info("PTY session endpoints enabled", "path", "/api/v1/pty/*")
+			}
+
 			var metricsService interface {
 				GetLiveMetrics() (*metrics.LiveMetricsSnapshot, error)
 				GetHistoricalMetrics(ctx context.Context, from, to time.Time, resolution string) ([]metrics.MetricPoint, error)

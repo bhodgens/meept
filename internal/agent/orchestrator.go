@@ -138,19 +138,14 @@ func (o *Orchestrator) Stop(ctx context.Context) error {
 		}
 	}
 
-	done := make(chan struct{})
-	go func() {
-		o.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		o.logger.Info("Orchestrator stopped")
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	// Wait for all subscription goroutines to finish. Since o.cancel() was
+	// called above, goroutines in runSubscription observe ctx.Done() and
+	// exit promptly. Calling wg.Wait() directly (instead of in a separate
+	// goroutine behind a select) avoids leaking a goroutine when the
+	// caller's context has a deadline.
+	o.wg.Wait()
+	o.logger.Info("Orchestrator stopped")
+	return nil
 }
 
 // Name returns the component name.

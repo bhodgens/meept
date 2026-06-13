@@ -214,6 +214,18 @@ class _ChatInputState extends ConsumerState<ChatInput> {
     _slashQuery = '';
   }
 
+  /// Create a new chat session and switch to it.
+  Future<void> _createNewSession() async {
+    final notifier = ref.read(sessionProvider.notifier);
+    final session = await notifier.createSession(
+      'session ${DateTime.now().toIso8601String().substring(0, 16)}',
+    );
+    if (session != null) {
+      ref.read(activeSessionProvider.notifier).state = session;
+      ref.read(chatProvider.notifier).clearMessages();
+    }
+  }
+
   /// Try to handle a slash command locally.
   ///
   /// Returns true if the command was consumed and should NOT be sent
@@ -227,7 +239,8 @@ class _ChatInputState extends ConsumerState<ChatInput> {
 
     switch (command) {
       case '/new':
-        ref.read(chatProvider.notifier).clearMessages();
+        // Create a new session and switch to it
+        _createNewSession();
         return true;
       case '/clear':
         ref.read(chatProvider.notifier).clearMessages();
@@ -332,20 +345,15 @@ class _ChatInputState extends ConsumerState<ChatInput> {
         _lastEnterTime = now;
         _enterDebounceTimer?.cancel();
 
-        // Check configured double-enter behavior from storage
-        final storage = ref.read(storageProvider);
-        final mode = storage.getDoubleEnter();
-
         _enterDebounceTimer = Timer(
           const Duration(milliseconds: _doubleEnterThresholdMs),
           () {
             _lastEnterTime = null;
-            if (mode == 'steer') {
-              _sendNormal(_controller.text);
-            } else {
-              // interrupt / preempt — not yet wired to backend endpoints
-              _sendNormal(_controller.text);
-            }
+            // All modes (steer, interrupt, preempt) currently send as a
+            // normal message. Interrupt/preempt require backend endpoints
+            // that do not exist yet; steer is the default and uses the
+            // normal send path.
+            _sendNormal(_controller.text);
           },
         );
         return KeyEventResult.handled;

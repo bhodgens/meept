@@ -705,7 +705,9 @@ func WithShadowManager(mgr *shadow.Manager) LoopOption {
 // WithResultCache sets the result cache for the agent loop.
 func WithResultCache(cache *ResultCache) LoopOption {
 	return func(l *AgentLoop) {
-		l.cache = cache
+		if cache != nil {
+			l.cache = cache
+		}
 	}
 }
 
@@ -886,7 +888,9 @@ func (l *AgentLoop) ClearModelOverride() {
 // WithTaskCollector sets the task collector for metrics recording.
 func WithTaskCollector(tc *metrics.TaskCollector) LoopOption {
 	return func(l *AgentLoop) {
-		l.taskCollector = tc
+		if tc != nil {
+			l.taskCollector = tc
+		}
 	}
 }
 
@@ -902,7 +906,9 @@ func (l *AgentLoop) SetTaskCollector(tc *metrics.TaskCollector) {
 // WithResponseAnalyzer sets the response analyzer for quality metrics.
 func WithResponseAnalyzer(ra *metrics.ResponseAnalyzer) LoopOption {
 	return func(l *AgentLoop) {
-		l.responseAnalyzer = ra
+		if ra != nil {
+			l.responseAnalyzer = ra
+		}
 	}
 }
 

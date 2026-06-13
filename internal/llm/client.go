@@ -417,6 +417,18 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		}
 	}
 
+	// Compute adaptive timeout if available (mirrors Chat() logic)
+	if c.timeoutCalc != nil {
+		estimatedTokens := chatOpts.maxTokens
+		if estimatedTokens <= 0 {
+			estimatedTokens = 4096 // Safe default
+		}
+		timeout := c.timeoutCalc.Calculate(ctx, cfg.ProviderID, cfg.ModelID, estimatedTokens, defaultTimeout)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
 	// Build request payload
 	msgDicts := make([]map[string]any, len(messages))
 	for i, msg := range messages {

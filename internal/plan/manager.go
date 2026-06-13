@@ -112,7 +112,10 @@ func (m *PlanManager) SubmitPlan(ctx context.Context, planID string) error {
 		return fmt.Errorf("set plan state: %w", err)
 	}
 
-	phases, _ := m.store.GetPhases(ctx, planID)
+	phases, err := m.store.GetPhases(ctx, planID)
+	if err != nil {
+		m.logger.Warn("failed to get phases for submit event", "plan_id", planID, "error", err)
+	}
 	totalSteps := 0
 	for _, ph := range phases {
 		totalSteps += ph.TotalSteps
@@ -278,7 +281,10 @@ func (m *PlanManager) ConfirmPlan(ctx context.Context, planID, sessionID, by str
 	}
 
 	// Update plan.md to reflect confirmed state.
-	phases, _ := m.store.GetPhases(ctx, planID)
+	phases, phaseErr := m.store.GetPhases(ctx, planID)
+	if phaseErr != nil {
+		m.logger.Warn("failed to get phases for plan.md update", "plan_id", planID, "error", phaseErr)
+	}
 	if err := UpdatePlanStatus(plan.FilePath, StateConfirmed, phasesToValues(phases)); err != nil {
 		m.logger.Warn("failed to update plan.md on confirm", "plan_id", planID, "error", err)
 	}
@@ -295,6 +301,15 @@ func (m *PlanManager) ConfirmPlan(ctx context.Context, planID, sessionID, by str
 
 // CancelPlan cancels a plan for the given reason.
 func (m *PlanManager) CancelPlan(ctx context.Context, planID, reason string) error {
+	plan, err := m.store.GetPlan(ctx, planID)
+	if err != nil {
+		return fmt.Errorf("get plan: %w", err)
+	}
+
+	if plan.State.IsTerminal() {
+		return fmt.Errorf("plan %s is already in terminal state %s", planID, plan.State)
+	}
+
 	if err := m.store.SetPlanState(ctx, planID, StateCancelled); err != nil {
 		return fmt.Errorf("set plan state: %w", err)
 	}
@@ -535,7 +550,10 @@ func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID string) error 
 	}
 
 	// Update plan.md.
-	phases, _ := m.store.GetPhases(ctx, plan.ID)
+	phases, phaseErr := m.store.GetPhases(ctx, plan.ID)
+	if phaseErr != nil {
+		m.logger.Warn("failed to get phases for plan.md update", "plan_id", plan.ID, "error", phaseErr)
+	}
 	if err := UpdatePlanStatus(plan.FilePath, StateCompleted, phasesToValues(phases)); err != nil {
 		m.logger.Warn("failed to update plan.md on completion", "error", err)
 	}

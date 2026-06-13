@@ -21,22 +21,27 @@ void main() async {
   // Initialize certificate pinning before any HTTP/WebSocket connections
   await ApiClient.initCertPinning();
 
-  // Initialize Sentry for crash reporting
-  await SentryFlutter.init(
-    (options) {
-      options.dsn = Platform.environment['SENTRY_DSN'] ??
-          'https://placeholder@placeholder.ingest.sentry.io/placeholder';
-      options.debug = true;
-      options.tracesSampleRate = 1.0;
-    },
-    appRunner: () {
-      runApp(
+  // Initialize Sentry for crash reporting (only when a real DSN is configured)
+  final sentryDsn = Platform.environment['SENTRY_DSN'];
+  if (sentryDsn != null && sentryDsn.isNotEmpty) {
+    await SentryFlutter.init(
+      (options) {
+        options.dsn = sentryDsn;
+        options.tracesSampleRate = 1.0;
+      },
+      appRunner: () => runApp(
         const ProviderScope(
           child: CyberpunkApp(),
         ),
-      );
-    },
-  );
+      ),
+    );
+  } else {
+    runApp(
+      const ProviderScope(
+        child: CyberpunkApp(),
+      ),
+    );
+  }
 }
 
 class CyberpunkApp extends StatelessWidget {
