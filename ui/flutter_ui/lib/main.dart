@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'services/storage_service.dart';
+import 'services/api_client.dart';
 import 'services/websocket_service.dart';
 import 'theme/cyberpunk_theme.dart';
 import 'core/constants.dart';
@@ -16,6 +17,9 @@ void main() async {
 
   // Initialize persistent storage before any provider or service reads
   await StorageService.instance.init();
+
+  // Initialize certificate pinning before any HTTP/WebSocket connections
+  await ApiClient.initCertPinning();
 
   // Initialize Sentry for crash reporting
   await SentryFlutter.init(

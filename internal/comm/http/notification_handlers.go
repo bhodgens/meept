@@ -138,7 +138,13 @@ func (h *NotificationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	events := h.emitter.GetEventsSince(since)
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	origin := r.Header.Get("Origin")
+	if origin == "" || isLocalOrigin(origin) {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+	}
 
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"events": events,

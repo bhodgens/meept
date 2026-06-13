@@ -193,23 +193,25 @@ func (e *NativeEngine) transcribeWithPython(filePath string) (string, error) {
 
 	slog.Debug("stt: native: using python3 speech_recognition")
 
-	script := fmt.Sprintf(`
+	script := `
 import speech_recognition as sr
 import sys
+if len(sys.argv) < 2:
+    sys.exit(1)
 r = sr.Recognizer()
-with sr.AudioFile(%q) as source:
+with sr.AudioFile(sys.argv[1]) as source:
     audio = r.record(source)
 try:
     text = r.recognize_google(audio)
     print(text)
 except sr.UnknownValueError:
     print("", end="")
-except Exception as e:
+except Exception:
     print("", end="")
     sys.exit(1)
-`, filePath)
+`
 
-	cmd := exec.Command("python3", "-c", script)
+	cmd := exec.Command("python3", "-c", script, filePath)
 	stdout, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("stt: native: python transcription failed: %w", err)

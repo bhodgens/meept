@@ -5,6 +5,7 @@ import '../core/constants.dart';
 import '../models/api_models.dart';
 import 'storage_service.dart';
 import 'meept_api.dart';
+import 'daemon_cert_pinner.dart';
 
 /// Build the base URL from host and port. HTTPS is mandatory.
 String _buildBaseUrl(String? host, int? port) {
@@ -46,15 +47,13 @@ class ApiClient {
             },
           ),
         ) {
-    // Configure Dio to accept self-signed certificates for localhost.
-    // TODO: pin the specific certificate fingerprint instead of blanket
-    // hostname acceptance. Accepting any self-signed cert for localhost
-    // exposes the connection to active local MITM attacks.
+    // Configure Dio with certificate pinning for the daemon's self-signed cert.
     _dio.httpClientAdapter = IOHttpClientAdapter(
       createHttpClient: () {
         final client = HttpClient();
         client.badCertificateCallback =
-            (X509Certificate cert, String host, int port) => host == 'localhost' || host == '127.0.0.1' || host == '::1';
+            (X509Certificate cert, String host, int port) =>
+                DaemonCertPinner.validateCert(cert, host);
         return client;
       },
     );
@@ -95,6 +94,12 @@ class ApiClient {
 
   /// Expose the underlying Dio instance for advanced usage (e.g. interceptors).
   Dio get dio => _dio;
+
+  /// Initialize cert pinning by loading the daemon's certificate fingerprint.
+  /// Must be called before constructing any ApiClient instances.
+  static Future<void> initCertPinning() async {
+    await DaemonCertPinner.loadFingerprint();
+  }
 
   /// Dispose the underlying Dio/HttpClient resources.
   ///

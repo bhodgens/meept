@@ -167,6 +167,11 @@ func expandConfigPaths(cfg *Config) {
 	for i, p := range cfg.SelfImprove.Safety.BlockedPaths {
 		cfg.SelfImprove.Safety.BlockedPaths[i] = expandPath(p)
 	}
+
+	// Expand additional path fields
+	cfg.Projects.BaseDir = expandPath(cfg.Projects.BaseDir)
+	cfg.OAuth.TokenDir = expandPath(cfg.OAuth.TokenDir)
+	cfg.Bots.DataDir = expandPath(cfg.Bots.DataDir)
 }
 
 // ModelsConfig represents the models.json5 configuration structure.

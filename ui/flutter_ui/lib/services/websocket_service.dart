@@ -8,6 +8,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart' show IOWebSocketChannel;
 import '../core/constants.dart';
 import 'storage_service.dart';
+import 'daemon_cert_pinner.dart';
 
 /// WebSocket service for real-time updates
 ///
@@ -442,16 +443,13 @@ class WebSocketService {
     disconnect();
   }
 
-  /// Create an HttpClient that accepts self-signed TLS certificates
-  /// for localhost connections.
-  /// TODO: pin the specific certificate fingerprint instead of blanket
-  /// hostname acceptance. Accepting any self-signed cert for localhost
-  /// exposes the connection to active local MITM attacks.
+  /// Create an HttpClient with certificate pinning for the daemon's
+  /// self-signed TLS cert.
   io.HttpClient _createHttpClient() {
     final client = io.HttpClient();
     client.badCertificateCallback =
         (io.X509Certificate cert, String host, int port) =>
-            host == 'localhost' || host == '127.0.0.1' || host == '::1';
+            DaemonCertPinner.validateCert(cert, host);
     return client;
   }
 }
