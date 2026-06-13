@@ -143,3 +143,95 @@ func TestLoadAgentsMDForPath_PartialHierarchy(t *testing.T) {
 		t.Error("second should be deep")
 	}
 }
+
+// Test LoadAllAgentsMD — loads AGENTS.md from all directories
+
+func TestLoadAllAgentsMD_EmptyRoot(t *testing.T) {
+	loaded, err := LoadAllAgentsMD("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(loaded) != 0 {
+		t.Fatalf("expected empty, got %d", len(loaded))
+	}
+}
+
+func TestLoadAllAgentsMD_NoFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	loaded, err := LoadAllAgentsMD(tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(loaded) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(loaded))
+	}
+}
+
+func TestLoadAllAgentsMD_FindsAllSubdirs(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Root
+	os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte("# Root"), 0o644)
+
+	// internal/
+	internalDir := filepath.Join(tmpDir, "internal")
+	os.MkdirAll(internalDir, 0o755)
+	os.WriteFile(filepath.Join(internalDir, "AGENTS.md"), []byte("# Internal"), 0o644)
+
+	// internal/agent/
+	agentDir := filepath.Join(internalDir, "agent")
+	os.MkdirAll(agentDir, 0o755)
+	os.WriteFile(filepath.Join(agentDir, "AGENTS.md"), []byte("# Agent"), 0o644)
+
+	// internal/tools/ (no AGENTS.md — should not appear)
+	toolsDir := filepath.Join(internalDir, "tools")
+	os.MkdirAll(toolsDir, 0o755)
+
+	// docs/ (extra subdirectory with AGENTS.md)
+	docsDir := filepath.Join(tmpDir, "docs")
+	os.MkdirAll(docsDir, 0o755)
+	os.WriteFile(filepath.Join(docsDir, "AGENTS.md"), []byte("# Docs"), 0o644)
+
+	loaded, err := LoadAllAgentsMD(tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(loaded) != 4 {
+		t.Fatalf("expected 4 results, got %d", len(loaded))
+	}
+
+	// WalkDir visits in lexical order, so root, docs, internal, internal/agent
+	expectContains(t, loaded[0], "Root", "root")
+	expectContains(t, loaded[1], "Docs", "docs")
+	expectContains(t, loaded[2], "Internal", "internal")
+	expectContains(t, loaded[3], "Agent", "agent")
+}
+
+func TestLoadAllAgentsMD_IgnoresNonAGENTS(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte("# Root"), 0o644)
+	os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("not this"), 0o644)
+
+	subDir := filepath.Join(tmpDir, "sub")
+	os.MkdirAll(subDir, 0o755)
+	os.WriteFile(filepath.Join(subDir, "CLERKS.md"), []byte("not this either"), 0o644)
+
+	loaded, err := LoadAllAgentsMD(tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(loaded))
+	}
+	if !strings.Contains(loaded[0].Content, "Root") {
+		t.Errorf("expected root content, got %q", loaded[0].Content)
+	}
+}
+
+func expectContains(t *testing.T, got AgentsMD, wantContent, desc string) {
+	t.Helper()
+	if !strings.Contains(got.Content, wantContent) {
+		t.Errorf("expected %s content containing %q, got %q", desc, wantContent, got.Content)
+	}
+}

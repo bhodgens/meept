@@ -3561,13 +3561,14 @@ func (l *AgentLoop) SetMCPServerLister(lister func() []MCPServerInfo) {
 }
 
 // loadAgentsContext loads AGENTS.md and related project convention context
-// from the given working directory. Returns empty string if no context found.
+// from the given working directory and all subdirectories.
+// Returns empty string if no context found.
 func (l *AgentLoop) loadAgentsContext(workingDir string) string {
 	if workingDir == "" {
 		return ""
 	}
 
-	agentsFiles, err := project.LoadAgentsMDForPath(workingDir, "")
+	agentsFiles, err := project.LoadAllAgentsMD(workingDir)
 	if err != nil || len(agentsFiles) == 0 {
 		return ""
 	}

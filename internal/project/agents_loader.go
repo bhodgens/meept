@@ -81,3 +81,40 @@ func LoadAgentsMDForPath(projectRoot, filePath string) ([]AgentsMD, error) {
 
 	return results, nil
 }
+
+// LoadAllAgentsMD walks the entire projectRoot tree and returns ALL AGENTS.md
+// files found at any depth, ordered root-to-leaf (breadth-first among siblings).
+func LoadAllAgentsMD(projectRoot string) ([]AgentsMD, error) {
+	if projectRoot == "" {
+		return nil, nil
+	}
+
+	var results []AgentsMD
+
+	err := filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // Skip directories we can't access
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if filepath.Base(path) != "AGENTS.md" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil // Skip unreadable files
+		}
+		rel, _ := filepath.Rel(projectRoot, filepath.Dir(path))
+		if rel == "." {
+			rel = ""
+		}
+		results = append(results, AgentsMD{RelPath: rel, Content: string(data)})
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	return results, nil
+}
