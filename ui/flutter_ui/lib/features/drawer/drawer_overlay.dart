@@ -7,7 +7,7 @@ import 'panels/status_panel.dart';
 import 'panels/agent_activity_panel.dart';
 import 'panels/tasks_panel.dart';
 import 'panels/recent_memory_panel.dart';
-import 'panels/metrics_panel.dart';
+import '../metrics/metrics_panel.dart';
 
 /// Drawer panel tabs.
 enum DrawerTab { status, agents, tasks, memory, metrics }
@@ -166,7 +166,7 @@ class _DrawerOverlayState extends ConsumerState<DrawerOverlay>
       case DrawerTab.memory:
         return const RecentMemoryPanel();
       case DrawerTab.metrics:
-        return const MetricsPanel();
+        return const MetricsPanel(compact: true);
     }
   }
 }

@@ -181,7 +181,6 @@ type Dispatcher struct {
 	router            *ReportRouter
 	modelParser       *ModelReassignmentParser
 	planManager       *plan.PlanManager
-	lastClassificationErr error
 }
 
 // IntentClassifier is an interface for classifying intents.
@@ -395,7 +394,8 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	}
 
 	// 4. Classify primary intent
-	intent := d.classifyIntent(ctx, resolvedInput, memCtx)
+	intent, classificationErr := d.classifyIntent(ctx, resolvedInput, memCtx)
+	// classificationErr captured for potential ClassificationNotice
 
 	// 5. Extract memory refs for context continuity
 	intent.MemoryRefs = d.extractMemoryRefs(memCtx.Results)
@@ -478,10 +478,10 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 
 	// Attach classification degradation notice if the LLM classifier failed
 	// but fallback succeeded.
-	if d.lastClassificationErr != nil {
-		result.ClassificationNotice = llm.ClassificationUserGuidance(d.lastClassificationErr)
+	if classificationErr != nil {
+		result.ClassificationNotice = llm.ClassificationUserGuidance(classificationErr)
 		d.logger.Debug("Classification used fallback",
-			"failure_kind", llm.ClassifyClassificationFailure(d.lastClassificationErr),
+			"failure_kind", llm.ClassifyClassificationFailure(classificationErr),
 			"notice", result.ClassificationNotice,
 		)
 	}
@@ -494,10 +494,8 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 // 4. If LLM fails OR confidence < threshold → try Keyword classifier
 // 5. If Keyword fails AND no strong keyword signal → improved heuristic fallback (Issue 0036)
 // 6. Final fallback to Chat for clarification
-func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *MemoryContext) *Intent {
+func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *MemoryContext) (*Intent, error) {
 	d.recordTotalDispatch()
-	d.lastClassificationErr = nil
-
 	// --- Guard: short/simple messages skip the full classifier chain ---
 	// Tiny models over-classify simple greetings, arithmetic, and short phrases
 	// as compound multi-agent tasks. Short inputs are overwhelmingly chat.
@@ -514,7 +512,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			Confidence: 0.9,
 			AgentType:  config.AgentIDChat,
 			Summary:    extractSummary(input),
-		}
+		}, nil
 	}
 
 	// Step 1: Try capability matcher first (fast, no LLM)
@@ -536,7 +534,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			d.recordClassificationMethod("capability_matcher")
 			d.recordAgent(result.AgentID)
 			d.recordIntentType(result.IntentType)
-			return d.applyContextWeighting(intent, memCtx, input)
+			return d.applyContextWeighting(intent, memCtx, input), nil
 		}
 		if result != nil {
 			d.logger.Debug("Capability matcher result below threshold",
@@ -559,7 +557,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				d.recordClassificationMethod("llm")
 				d.recordAgent(intent.AgentType)
 				d.recordIntentType(intent.Type)
-				return d.applyContextWeighting(intent, memCtx, input)
+				return d.applyContextWeighting(intent, memCtx, input), nil
 			}
 			d.logger.Debug("LLM classifier result below threshold",
 				"intent", intent.Type,
@@ -572,7 +570,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				"error", err,
 				"failure_kind", kind,
 			)
-			d.lastClassificationErr = err
+			// classification error captured in ClassificationNotice below
 		}
 	}
 
@@ -587,7 +585,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			d.recordClassificationMethod("keyword")
 			d.recordAgent(intent.AgentType)
 			d.recordIntentType(intent.Type)
-			return d.applyContextWeighting(intent, memCtx, input)
+			return d.applyContextWeighting(intent, memCtx, input), nil
 		}
 		if intent != nil {
 			d.logger.Debug("Keyword classifier result below threshold",
@@ -615,7 +613,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			d.recordClassificationMethod("semantic")
 			d.recordAgent(intent.AgentType)
 			d.recordIntentType(intent.Type)
-			return d.applyContextWeighting(intent, memCtx, input)
+			return d.applyContextWeighting(intent, memCtx, input), nil
 		}
 	}
 
@@ -630,7 +628,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 		d.recordClassificationMethod("heuristic_fallback")
 		d.recordAgent(heuristic.AgentType)
 		d.recordIntentType(heuristic.Type)
-		return d.applyContextWeighting(heuristic, memCtx, input)
+		return d.applyContextWeighting(heuristic, memCtx, input), nil
 	}
 
 	// Step 5: Final fallback to Chat for clarification
@@ -643,7 +641,8 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 		Confidence: 0.3,
 		AgentType:  config.AgentIDChat,
 		Summary:    "Could not determine intent, clarifying with user",
-	}
+	}, nil
+
 }
 
 // buildMemoryContext builds memory context with session history.
@@ -829,7 +828,7 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 			resolvedInput := d.resolveAnaphora(combinedInput, memCtx)
 
 			// Classify and route normally.
-			intent := d.classifyIntent(ctx, resolvedInput, memCtx)
+			intent, _ := d.classifyIntent(ctx, resolvedInput, memCtx)
 			intent.MemoryRefs = d.extractMemoryRefs(memCtx.Results)
 			intent.TrueAnalysis = analysis
 
@@ -1877,13 +1876,6 @@ func (d *Dispatcher) ShouldRouteToCollaborate(result *DispatchResult) bool {
 		return false
 	}
 	return IntentType(result.Intent.Type) == IntentCollaborate
-}
-
-// LastClassificationError returns the most recent classification error from the
-// LLM classifier, if any. Returns nil if classification succeeded or no LLM
-// classifier is configured.
-func (d *Dispatcher) LastClassificationError() error {
-	return d.lastClassificationErr
 }
 
 // RoutingValidation checks if a task was routed correctly.

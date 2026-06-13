@@ -387,7 +387,7 @@ func TestDispatcher_FallbackChain(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			intent := d.classifyIntent(context.Background(), tt.input, nil)
+			intent, _ := d.classifyIntent(context.Background(), tt.input, nil)
 			if intent == nil {
 				t.Fatalf("classifyIntent returned nil intent")
 			}

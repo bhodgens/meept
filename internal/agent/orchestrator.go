@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/repomap"
@@ -30,6 +31,7 @@ type Orchestrator struct {
 	ralphLoop            *RalphLoop               // optional: Ralph loop for auto-replanning
 	reflectionEngine     *ReflectionEngine       // optional: auto-fix reflection loop
 	repoMapGen           *repomap.RepoMapGenerator // optional: repository map for context enrichment
+	fenceChecker         *intsecurity.FenceChecker // path boundary enforcement
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -46,6 +48,7 @@ type OrchestratorDeps struct {
 	RalphLoop           *RalphLoop               // optional: Ralph loop for auto-replanning
 	Bus                 *bus.MessageBus
 	Logger              *slog.Logger
+	FenceChecker        *intsecurity.FenceChecker // path boundary enforcement
 }
 
 // SetRepoMapGenerator sets the repo map generator for context enrichment.
@@ -69,6 +72,7 @@ func NewOrchestrator(deps OrchestratorDeps) *Orchestrator {
 		ralphLoop:           deps.RalphLoop,
 		bus:                 deps.Bus,
 		logger:              deps.Logger,
+		fenceChecker:        deps.FenceChecker,
 	}
 }
 
@@ -654,10 +658,11 @@ func (o *Orchestrator) handleToolExecutionComplete(ctx context.Context, msg *mod
 	)
 
 	// Run reflection in a goroutine to not block the message bus.
-	// Use a background context with timeout so reflection isn't tied
-	// to the message handler's lifecycle.
+	// Use the orchestrator's lifecycle context so reflection stops on shutdown.
+	o.wg.Add(1)
 	go func() {
-		reflectCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer o.wg.Done()
+		reflectCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
 		result, err := o.reflectionEngine.RunReflection(reflectCtx, event.EditedFiles)
 		if err != nil {
@@ -771,6 +776,14 @@ func (o *Orchestrator) applyFix(ctx context.Context, fix *FixAttempt) []string {
 				if _, err2 := os.Stat(abs); err2 == nil {
 					resolved = abs
 				}
+			}
+		}
+
+		// Check path against fence before writing
+		if o.fenceChecker != nil {
+			if err := o.fenceChecker.CheckPath(resolved, "write"); err != nil {
+				o.logger.Warn("reflection fix blocked by path fence", "path", resolved, "error", err)
+				continue
 			}
 		}
 

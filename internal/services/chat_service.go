@@ -118,6 +118,9 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 	defer s.bus.Unsubscribe(sub)
 
 	// Watch for responses (context-aware)
+	done := make(chan struct{})
+	defer close(done)
+
 	go func() {
 		for {
 			select {
@@ -134,6 +137,8 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 				}
 			case <-ctx.Done():
 				return
+			case <-done:
+				return
 			}
 		}
 	}()
@@ -142,6 +147,9 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 	s.bus.Publish("chat.request", msg)
 
 	// Wait for response
+	timer := time.NewTimer(2 * time.Minute)
+	defer timer.Stop()
+
 	select {
 	case resp := <-respChan:
 		var reply struct {
@@ -157,7 +165,7 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 			Model:      reply.Model,
 			TokensUsed: reply.TokensUsed,
 		}, nil
-	case <-time.After(2 * time.Minute):
+	case <-timer.C:
 		return nil, wrapError("chat", "Chat", ErrTimeout)
 	case <-ctx.Done():
 		return nil, ctx.Err()

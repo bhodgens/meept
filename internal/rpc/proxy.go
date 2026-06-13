@@ -213,6 +213,9 @@ func (p *ProxyHandler) makeProxy(requestTopic, responseTopic string, timeout tim
 		p.bus.Publish(requestTopic, msg)
 
 		// Wait for response
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+
 		select {
 		case resp := <-respChan:
 			var result any
@@ -220,7 +223,7 @@ func (p *ProxyHandler) makeProxy(requestTopic, responseTopic string, timeout tim
 				return resp.Payload, nil // Return raw if can't unmarshal
 			}
 			return result, nil
-		case <-time.After(timeout):
+		case <-timer.C:
 			return nil, fmt.Errorf("timeout waiting for response on %s", responseTopic)
 		case <-ctx.Done():
 			return nil, ctx.Err()

@@ -531,11 +531,9 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 				h.logger.Error("Dispatch failed", "error", dispatchErr)
 				err = dispatchErr
 				// Include classification failure guidance for the user.
-				if classErr := h.dispatcher.LastClassificationError(); classErr != nil {
-					guidance := llm.ClassificationUserGuidance(classErr)
-					kind := llm.ClassifyClassificationFailure(classErr)
+				if result != nil && result.ClassificationNotice != "" {
+					guidance := result.ClassificationNotice
 					h.logger.Info("Classification failure details",
-						"kind", kind,
 						"guidance", guidance,
 					)
 					// Attach guidance to the reply so the user sees actionable info.

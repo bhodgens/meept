@@ -31,7 +31,7 @@ class MetricsPanel extends ConsumerWidget {
           ? const _MetricsLoading()
           : state.error != null
               ? _MetricsError(message: state.error!)
-              : _MetricsContent(snapshot: state.current),
+              : _MetricsContent(snapshot: state.current, compact: compact),
     );
   }
 }
@@ -87,13 +87,22 @@ class _MetricsError extends StatelessWidget {
 
 class _MetricsContent extends StatelessWidget {
   final MetricsSnapshot? snapshot;
+  final bool compact;
 
-  const _MetricsContent({this.snapshot});
+  const _MetricsContent({this.snapshot, required this.compact});
 
   @override
   Widget build(BuildContext context) {
     if (snapshot == null) return const SizedBox.shrink();
 
+    if (compact) {
+      return _buildCompactLayout();
+    } else {
+      return _buildFullGridView();
+    }
+  }
+
+  Widget _buildFullGridView() {
     final queueDepth = snapshot!.queueDepth;
     final activeAgents = snapshot!.activeAgents;
     final runningJobs = snapshot!.runningJobs;
@@ -190,6 +199,25 @@ class _MetricsContent extends StatelessWidget {
       ],
     );
   }
+
+  Widget _buildCompactLayout() {
+    final queueDepth = snapshot!.queueDepth;
+    final activeAgents = snapshot!.activeAgents;
+    final runningJobs = snapshot!.runningJobs;
+    final pendingJobs = snapshot!.pendingJobs;
+
+    return Row(
+      children: [
+        _CompactMetricTile(label: 'agents', value: '$activeAgents'),
+        const SizedBox(width: 12),
+        _CompactMetricTile(label: 'queue', value: '$queueDepth'),
+        const SizedBox(width: 12),
+        _CompactMetricTile(label: 'running', value: '$runningJobs'),
+        const SizedBox(width: 12),
+        _CompactMetricTile(label: 'pending', value: '$pendingJobs'),
+      ],
+    );
+  }
 }
 
 class _MetricTile extends StatelessWidget {
@@ -247,6 +275,36 @@ class _MetricTile extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _CompactMetricTile extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _CompactMetricTile({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: CyberpunkTypography.bodySmall.copyWith(
+            color: CyberpunkColors.midGray,
+          ),
+        ),
+        Text(
+          value,
+          style: CyberpunkTypography.bodyMedium.copyWith(
+            color: CyberpunkColors.greenSuccess,
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
     );
   }
 }

@@ -1245,7 +1245,7 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 
 	// Trigger learning pipeline if available and response was successful
 	if l.learningPipeline != nil && err == nil {
-		go l.triggerLearning(context.Background(), conv, conversationID, finalResponse)
+		go l.triggerLearning(loopCtx, conv, conversationID, finalResponse)
 	}
 
 	// Add final response to conversation
@@ -2131,8 +2131,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			if l.llmClient != nil {
 				modelID = l.llmClient.Config().ModelID
 			}
-			go l.shadowMgr.CaptureInteraction(
-				context.Background(),
+			go l.shadowMgr.CaptureInteraction(ctx,
 				conversationID,
 				messages,
 				response,
@@ -2531,7 +2530,7 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 
 	// Record memory of this task execution
 	if l.memvid != nil {
-		go l.recordTaskExecution(context.Background(), t, response)
+		go l.recordTaskExecution(ctx, t, response)
 	}
 
 	// Record task metrics on successful completion

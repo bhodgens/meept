@@ -1415,6 +1415,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				RalphLoop:           ralphLoop,
 				Bus:                 msgBus,
 				Logger:              logger.With("component", "orchestrator"),
+				FenceChecker:        c.FenceChecker,
 			})
 
 			logger.Info("Orchestrator initialized with strategic and tactical layers")

@@ -483,15 +483,21 @@ func (b *Budget) CleanupStaleEntries(ttl time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	cutoff := time.Now().Add(-ttl)
-	// Since we only track token counts (not timestamps) per task/session,
-	// we remove entries whose token count hasn't changed since last check.
-	// For a proper TTL we'd need timestamp tracking, so as a simpler
-	// approximation: remove all tasks/sessions that were at exactly the
-	// same count during the previous cleanup. For now, we just remove
-	// entries with zero tokens (already cleaned up externally) or let
-	// the caller use RemoveTask/RemoveSession for deterministic cleanup.
-	_ = cutoff
+	// Remove task entries with zero tokens (completed/drained tasks).
+	// Full TTL-based cleanup requires timestamp tracking and is handled
+	// by StartPeriodicCleanup, which maintains its own timestamp maps.
+	for id, count := range b.tasks {
+		if count == 0 {
+			delete(b.tasks, id)
+		}
+	}
+	for id, count := range b.sessions {
+		if count == 0 {
+			delete(b.sessions, id)
+		}
+	}
+
+	_ = ttl // reserved for future timestamp-based cleanup
 }
 
 // StartPeriodicCleanup starts a background goroutine that periodically
