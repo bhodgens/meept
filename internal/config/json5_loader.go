@@ -27,10 +27,7 @@ func LoadJSON5(path string, v any) error {
 	}
 
 	// Unmarshal with detailed error handling for type mismatches
-	decoder := json.NewDecoder(strings.NewReader(string(stdJSON)))
-	decoder.DisallowUnknownFields()
-
-	if err := decoder.Decode(v); err != nil {
+	if err := json.Unmarshal(stdJSON, v); err != nil {
 		// Provide more specific error messages for common type mismatches
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "cannot unmarshal") {
