@@ -275,16 +275,18 @@ func (q *MessageQueue) FollowUp(ctx context.Context, content, source string) err
 	q.generation++
 	depth := len(q.followUpQueue)
 
-	// Persist async if persister is available.
-	if q.persister != nil {
+	// Capture persister under lock, spawn goroutine after unlock.
+	persister := q.persister
+
+	q.mu.Unlock()
+
+	if persister != nil {
 		go func() {
-			if err := q.persister.PersistSync(msg); err != nil {
+			if err := persister.PersistSync(msg); err != nil {
 				q.logger.Warn("failed to persist follow-up", "id", msg.ID, "err", err)
 			}
 		}()
 	}
-
-	q.mu.Unlock()
 
 	q.notifyNonBlocking()
 	q.publishEvent(bus.EventQueueFollowUpAdded, QueueEventPayload{

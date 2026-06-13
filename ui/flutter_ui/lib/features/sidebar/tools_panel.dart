@@ -41,11 +41,7 @@ final _skillIconMap = <String, IconData>{
 };
 
 /// Display label for a skill slug (human-readable)
-String _slugToLabel(String slug) => slug
-    .split('_')
-    .map((w) => w.isEmpty ? '' : w[0].toUpperCase() + w.substring(1))
-    .join(' ')
-    .trim();
+String _slugToLabel(String slug) => slug.replaceAll('_', ' ');
 
 /// Icon for a skill slug, falling back to a generic tool icon
 IconData _slugToIcon(String slug) =>

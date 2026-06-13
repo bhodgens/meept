@@ -85,8 +85,8 @@ func newSelfImproveDetectCmd() *cobra.Command {
 			fmt.Fprintln(w, "ID\tTYPE\tSEVERITY\tDESCRIPTION")
 			for _, issue := range resp.Issues {
 				desc := issue.Description
-				if len(desc) > 60 {
-					desc = desc[:60] + "..."
+				if len([]rune(desc)) > 60 {
+					desc = string([]rune(desc)[:57]) + "..."
 				}
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 					issue.ID, issue.Type, issue.Severity, desc)
@@ -144,8 +144,8 @@ func newSelfImproveAnalyzeCmd() *cobra.Command {
 			fmt.Fprintln(w, "ISSUE ID\tROOT CAUSE\tCONFIDENCE")
 			for _, a := range resp.Analyses {
 				cause := a.RootCause
-				if len(cause) > 50 {
-					cause = cause[:50] + "..."
+				if len([]rune(cause)) > 50 {
+					cause = string([]rune(cause)[:47]) + "..."
 				}
 				fmt.Fprintf(w, "%s\t%s\t%.2f\n", a.IssueID, cause, a.Confidence)
 			}
@@ -206,8 +206,8 @@ func newSelfImproveGenerateCmd() *cobra.Command {
 			fmt.Fprintln(w, "FIX ID\tISSUE ID\tFILES\tDESCRIPTION")
 			for _, f := range resp.Fixes {
 				desc := f.Description
-				if len(desc) > 40 {
-					desc = desc[:40] + "..."
+				if len([]rune(desc)) > 40 {
+					desc = string([]rune(desc)[:37]) + "..."
 				}
 				fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", f.ID, f.IssueID, f.FilesCount, desc)
 			}
@@ -273,8 +273,8 @@ func newSelfImproveValidateCmd() *cobra.Command {
 					passed++
 				}
 				msg := v.Message
-				if len(msg) > 50 {
-					msg = msg[:50] + "..."
+				if len([]rune(msg)) > 50 {
+					msg = string([]rune(msg)[:47]) + "..."
 				}
 				fmt.Fprintf(w, "%s\t%s\t%s\n", v.FixID, status, msg)
 			}

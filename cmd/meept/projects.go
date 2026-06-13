@@ -82,8 +82,9 @@ func newProjectsListCmd() *cobra.Command {
 				localPath := getStringOr(proj, "local_path", "")
 
 				// Truncate path
-				if len(localPath) > 50 {
-					localPath = "..." + localPath[len(localPath)-47:]
+				r := []rune(localPath)
+				if len(r) > 50 {
+					localPath = "..." + string(r[len(r)-47:])
 				}
 
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", name, mode, branch, status, localPath)

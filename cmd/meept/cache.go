@@ -206,8 +206,8 @@ func runCacheInspect(promptHash string) error {
 		if entry.Response != "" {
 			// Truncate long responses for display
 			response := entry.Response
-			if len(response) > 500 {
-				response = response[:500] + "..."
+			if len([]rune(response)) > 500 {
+				response = string([]rune(response)[:500]) + "..."
 			}
 			fmt.Println("  Response:")
 			for line := range strings.SplitSeq(response, "\n") {

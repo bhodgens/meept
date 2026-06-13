@@ -267,6 +267,13 @@ func (t *WebFetchTool) ExecuteStreaming(ctx context.Context, args map[string]any
 
 	onUpdate(tools.ProgressUpdate{Message: fmt.Sprintf("fetching %s...", url), Percent: 10})
 
+	// Check taint/exfiltration policy
+	if t.secOrch != nil {
+		if blocked, reason := t.secOrch.CheckWebFetch(url); blocked {
+			return nil, fmt.Errorf("web fetch blocked by security policy: %s", reason)
+		}
+	}
+
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		return nil, fmt.Errorf("only http:// and https:// URLs are supported")
 	}

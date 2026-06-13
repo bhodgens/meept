@@ -914,6 +914,12 @@ func (m *Manager) Consolidate(ctx context.Context) (*ConsolidationReport, error)
 }
 
 // StartPeriodicConsolidation starts background consolidation.
+//
+// This is an alternative to the scheduler-based consolidation job wired in
+// daemon/components.go (MemoryOptimizerAdapter). The scheduler approach is
+// preferred in production because it benefits from cron expressions, logging,
+// and job dependency tracking. Use this method only when running without a
+// scheduler (e.g., tests or embedded mode).
 func (m *Manager) StartPeriodicConsolidation(ctx context.Context) {
 	m.mu.RLock()
 	if !m.initialized || m.consolidator == nil {

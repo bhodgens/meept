@@ -124,8 +124,9 @@ func runMemorySearch(query string, limit int) error {
 		// Truncate content
 		content := item.Content
 		content = strings.ReplaceAll(content, "\n", " ")
-		if len(content) > 80 {
-			content = content[:77] + "..."
+		runes := []rune(content)
+		if len(runes) > 80 {
+			content = string(runes[:77]) + "..."
 		}
 
 		fmt.Printf("\n%s[%d] %s%s\n", typeColor, i+1, memType, "\033[0m")
@@ -253,8 +254,8 @@ func runVectorSearch(query string, limit int) error {
 
 	for i, r := range result.Results {
 		content := strings.ReplaceAll(r.Content, "\n", " ")
-		if len(content) > 80 {
-			content = content[:77] + "..."
+		if len([]rune(content)) > 80 {
+			content = string([]rune(content)[:77]) + "..."
 		}
 
 		fmt.Printf("\n\033[36m[%d]\033[0m %s\n", i+1, r.MemoryID)

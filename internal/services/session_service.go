@@ -343,7 +343,7 @@ func (s *SessionService) CompactSession(ctx context.Context, req CompactSessionR
 	}
 
 	return map[string]any{
-		"status":        "triggered",
+		"status":        "counted",
 		"session_id":    sess.ID,
 		"message_count": len(path),
 	}, nil

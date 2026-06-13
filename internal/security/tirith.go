@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -84,20 +85,38 @@ func ScanCommand(ctx context.Context, command, binary string) *TirithResult {
 	cmd := exec.CommandContext(ctx, binary, "check", "--", command)
 	output, err := cmd.CombinedOutput()
 
-	// If timeout or other error, determine whether to allow or block.
-	if ctx.Err() != nil || err != nil {
-		// Check if it's just a non-zero exit code (expected for blocked/warning)
-		exitError := &exec.ExitError{}
-		if errors.As(err, &exitError) {
-			return nil // Non-zero exit = tirith's explicit allow
-		}
-		// Scanner failure (crash, signal, pipe error) = block by default (Bug S3).
-		// This is safer than allowing execution when the scanner is broken.
-		msg := "tirith scanner error: " + err.Error()
+	// Handle errors and exit codes.
+	// Tirith exit codes: 0=allow, 1=block, 2=warn.
+	// Timeout and scanner failures are treated as block (fail-closed).
+	outputStr := string(output)
+
+	if ctx.Err() != nil {
+		msg := "tirith scanner timeout"
 		return &TirithResult{Blocked: true, Message: &msg}
 	}
-
-	outputStr := string(output)
+	if err != nil {
+		exitError := &exec.ExitError{}
+		if errors.As(err, &exitError) {
+			// Non-zero exit from tirith carries a verdict via stdout.
+			// Fall through to parse the output for BLOCKED/WARNING below.
+			// If stdout is empty or unparseable, the exit code alone determines action:
+			//   exit 1 = BLOCKED, exit 2 = WARNING, any other = block (fail-closed).
+			if outputStr == "" {
+				code := exitError.ExitCode()
+				if code == 2 {
+					warnMsg := "tirith warning (exit code 2)"
+					return &TirithResult{Blocked: false, Warning: true, Message: &warnMsg}
+				}
+				msg := "tirith scanner blocked command (exit code " + strconv.Itoa(code) + ")"
+				return &TirithResult{Blocked: true, Message: &msg}
+			}
+			// Output available — continue to parse below for BLOCKED/WARNING markers
+		} else {
+			// Scanner failure (crash, signal, pipe error) = block by default.
+			msg := "tirith scanner error: " + err.Error()
+			return &TirithResult{Blocked: true, Message: &msg}
+		}
+	}
 
 	var severity, ruleID *string
 

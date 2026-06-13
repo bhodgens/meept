@@ -417,15 +417,35 @@ func (r *AgentRegistry) RunAgent(ctx context.Context, agentID, message, conversa
 	return loop.RunOnce(ctx, message, conversationID)
 }
 
-// Close shuts down all agent loops.
+// Close shuts down all agent loops and releases resources.
 func (r *AgentRegistry) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Clear all loops
+	// Close all active conversation-scoped queues.
+	r.activeQueuesMu.Lock()
+	for convID, entry := range r.activeQueues {
+		if entry != nil && entry.Queue != nil {
+			entry.Queue.Close()
+		}
+		delete(r.activeQueues, convID)
+	}
+	r.activeQueuesMu.Unlock()
+
+	// Clear all loops (AgentLoop has no explicit Stop/Close method,
+	// but dropping references allows GC to reclaim resources).
 	r.loops = make(map[string]*AgentLoop)
+
+	// Close the database connection used for queue persistence.
+	var firstErr error
+	if r.db != nil {
+		if err := r.db.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
 	r.logger.Info("Agent registry closed")
-	return nil
+	return firstErr
 }
 
 // MemvidClient returns the shared memvid client.

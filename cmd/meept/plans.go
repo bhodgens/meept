@@ -110,8 +110,8 @@ func newPlansListCmd() *cobra.Command {
 				}
 
 				// Truncate title
-				if len(title) > 40 {
-					title = title[:37] + "..."
+				if len([]rune(title)) > 40 {
+					title = string([]rune(title)[:37]) + "..."
 				}
 
 				// Truncate updated date

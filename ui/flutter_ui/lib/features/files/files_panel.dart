@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
@@ -235,7 +236,7 @@ class _FilesPanelState extends ConsumerState<FilesPanel> {
           IconButton(
             icon: const Icon(Icons.copy, size: 14),
             onPressed: () {
-              // Copy path to clipboard would go here
+              Clipboard.setData(ClipboardData(text: file.path));
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   content: Text('path copied'),

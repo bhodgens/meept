@@ -129,7 +129,7 @@ func parseCompositeDuration(s string) (int64, error) {
 				return 0, fmt.Errorf("invalid duration: %q", s)
 			}
 			var f float64
-			if _, err := fmt.Sscanf(prefix+"%", "%f", &f); err != nil {
+			if _, err := fmt.Sscanf(prefix, "%f", &f); err != nil {
 				// Check for another unit: e.g. "1h" -> try next char as unit start
 				break
 			}

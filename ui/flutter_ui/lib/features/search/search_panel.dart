@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
-import '../../services/api_client.dart';
+import '../../models/api_models.dart';
 import '../../providers/providers.dart';
 
 /// SearchPanel provides full-text search across sessions, tasks, memories, and plans.

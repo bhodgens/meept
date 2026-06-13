@@ -114,8 +114,8 @@ func newSkillsListCmd() *cobra.Command {
 				risk := getStringOr(skill, "risk_level", "medium")
 
 				// Truncate description
-				if len(desc) > 50 {
-					desc = desc[:47] + "..."
+				if len([]rune(desc)) > 50 {
+					desc = string([]rune(desc)[:47]) + "..."
 				}
 
 				// Format tags

@@ -93,9 +93,9 @@ func newSessionListCmd() *cobra.Command {
 					tasksCount = len(tasks)
 				}
 
-				// Truncate description
-				if len(desc) > 40 {
-					desc = desc[:37] + "..."
+				// Truncate description (rune-aware)
+				if len([]rune(desc)) > 40 {
+					desc = string([]rune(desc)[:37]) + "..."
 				}
 
 				// Truncate created date

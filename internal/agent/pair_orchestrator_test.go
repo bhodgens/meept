@@ -160,13 +160,14 @@ func TestClassifyVerdict(t *testing.T) {
 		expectedVerdict  PairVerdict
 		expectedEmpty    bool // true if feedback should be empty
 	}{
-		{"approved prefix", "APPROVED: looks great", PairVerdictApproved, true},
-		{"rejected prefix", "REJECTED: fix the error handling", PairVerdictRejected, false},
-		{"needs_more prefix", "NEEDS_MORE: what about edge cases?", PairVerdictNeedsMore, false},
+		{"approved with colon", "APPROVED: looks great", PairVerdictApproved, false},
+		{"rejected with colon", "REJECTED: fix the error handling", PairVerdictRejected, false},
+		{"needs_more with colon", "NEEDS_MORE: what about edge cases?", PairVerdictNeedsMore, false},
 		{"approved no colon", "APPROVED", PairVerdictApproved, true},
 		{"rejected no colon", "REJECTED", PairVerdictRejected, true},
-		{"no prefix defaults approved", "This is fine, the output is acceptable.", PairVerdictApproved, true},
-		{"empty string", "", PairVerdictApproved, true},
+		{"needs_more no colon", "NEEDS_MORE", PairVerdictNeedsMore, true},
+		{"no prefix defaults needs_more", "This is fine, the output is acceptable.", PairVerdictNeedsMore, false},
+		{"empty string", "", PairVerdictNeedsMore, true},
 	}
 
 	for _, tt := range tests {

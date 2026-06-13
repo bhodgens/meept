@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -168,7 +169,23 @@ func (g *PatchGenerator) readAffectedFiles(files []string) string {
 	for _, file := range files {
 		fullPath := file
 		if !strings.HasPrefix(file, "/") {
-			fullPath = g.projectRoot + "/" + file
+			fullPath = filepath.Join(g.projectRoot, file)
+		}
+
+		// Validate that the resolved path is within the project root.
+		absPath, absErr := filepath.Abs(fullPath)
+		if absErr != nil {
+			fmt.Fprintf(&sb, "// Unable to resolve %s: %v\n", file, absErr)
+			continue
+		}
+		absRoot, rootErr := filepath.Abs(g.projectRoot)
+		if rootErr != nil {
+			fmt.Fprintf(&sb, "// Unable to resolve project root: %v\n", rootErr)
+			continue
+		}
+		if absPath != absRoot && !strings.HasPrefix(absPath, absRoot+string(os.PathSeparator)) {
+			fmt.Fprintf(&sb, "// Skipped %s: path escapes project root\n", file)
+			continue
 		}
 
 		content, err := os.ReadFile(fullPath)

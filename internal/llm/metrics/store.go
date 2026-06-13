@@ -278,8 +278,9 @@ ON CONFLICT(date, provider_id, model_id) DO UPDATE SET
 }
 
 // GetStats retrieves aggregated statistics for a provider/model pair.
+// Returns nil, nil if no stats exist for the given provider/model/window.
 func (s *Store) GetStats(ctx context.Context, providerID, modelID string, windowHours int) (*ProviderStats, error) {
-	var stats ProviderStats
+	var stats *ProviderStats
 	err := s.pool.WithConn(ctx, func(db *sql.DB) error {
 		const q = `
 SELECT provider_id, model_id, window_hours, request_count, error_count, error_rate, avg_latency, p50_latency, p95_latency, p99_latency, avg_tokens_sec, updated_at
@@ -289,14 +290,19 @@ LIMIT 1
 `
 		row := db.QueryRowContext(ctx, q, providerID, modelID, windowHours)
 		var updatedAtUnix int64
-		err := row.Scan(&stats.ProviderID, &stats.ModelID, &stats.WindowHours, &stats.RequestCount, &stats.ErrorCount, &stats.ErrorRate, &stats.AvgLatencyMs, &stats.P50LatencyMs, &stats.P95LatencyMs, &stats.P99LatencyMs, &stats.AvgTokensSec, &updatedAtUnix)
+		var s ProviderStats
+		err := row.Scan(&s.ProviderID, &s.ModelID, &s.WindowHours, &s.RequestCount, &s.ErrorCount, &s.ErrorRate, &s.AvgLatencyMs, &s.P50LatencyMs, &s.P95LatencyMs, &s.P99LatencyMs, &s.AvgTokensSec, &updatedAtUnix)
 		if err == sql.ErrNoRows {
 			return nil
 		}
-		stats.LastUpdated = time.UnixMilli(updatedAtUnix)
-		return err
+		if err != nil {
+			return err
+		}
+		s.LastUpdated = time.UnixMilli(updatedAtUnix)
+		stats = &s
+		return nil
 	})
-	return &stats, err
+	return stats, err
 }
 
 // GetAllStats retrieves statistics for all providers/models in a window.

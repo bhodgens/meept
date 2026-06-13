@@ -104,6 +104,9 @@ func (s *ProjectService) SetProject(ctx context.Context, req SetProjectRequest) 
 	if s.pm == nil {
 		return wrapError("project", "Set", ErrUnavailable)
 	}
+	if s.store == nil {
+		return wrapError("project", "Set", ErrUnavailable)
+	}
 	if req.SessionID == "" || req.ProjectID == "" {
 		return wrapError("project", "Set", fmt.Errorf("session_id and project_id are required"))
 	}

@@ -136,7 +136,11 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 		reg.Daemon = NewDaemonService(cfg.PidFile, cfg.StateDir, cfg.BinPath, cfg.DaemonController)
 	}
 	// ModelService is always available if stateDir is set (for credential store)
-	reg.Model, _ = NewModelService("", cfg.StateDir)
+	var err error
+	reg.Model, err = NewModelService("", cfg.StateDir)
+	if err != nil {
+		slog.Warn("model service initialization failed", "error", err)
+	}
 
 	// CalendarService is available if client is configured
 	if cfg.CalendarClient != nil {
@@ -177,5 +181,6 @@ func (r *ServiceRegistry) Start(ctx context.Context) error {
 
 // Stop stops all services gracefully.
 func (r *ServiceRegistry) Stop(ctx context.Context) error {
+	slog.Info("Stopping service registry")
 	return nil
 }

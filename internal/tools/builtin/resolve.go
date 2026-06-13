@@ -12,7 +12,8 @@ import (
 
 // ResolveTool allows accepting or rejecting pending file changes.
 type ResolveTool struct {
-	registry *PendingChangesRegistry
+	registry      *PendingChangesRegistry
+	defaultExpiry time.Duration
 }
 
 // NewResolveTool creates a new resolve tool.
@@ -153,8 +154,9 @@ func (t *ResolveTool) Execute(ctx context.Context, args map[string]any) (any, er
 }
 
 // SetDefaultExpiry sets a default expiration for pending changes.
+// TODO: apply this duration automatically when new changes are registered.
 func (t *ResolveTool) SetDefaultExpiry(duration time.Duration) {
-	_ = duration // Future: store as default for registry
+	t.defaultExpiry = duration
 }
 
 // Ensure ResolveTool implements the Tool interface.

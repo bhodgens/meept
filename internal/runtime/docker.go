@@ -100,6 +100,9 @@ func (b *DockerBackend) Execute(ctx context.Context, cmd Command) (*CommandResul
 
 	timeout := b.config.Timeout
 	if cmd.Timeout > 0 {
+		timeout = cmd.Timeout
+	}
+	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()

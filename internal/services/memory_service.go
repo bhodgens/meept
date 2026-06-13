@@ -209,6 +209,10 @@ func (s *MemoryService) VectorDelete(ctx context.Context, memoryID string) error
 
 // VectorStats returns vector shard statistics.
 func (s *MemoryService) VectorStats() (VectorStats, error) {
+	if s.manager == nil {
+		return VectorStats{}, wrapError("memory", "VectorStats", ErrUnavailable)
+	}
+
 	// Get the vector searcher from manager if available
 	searcher := s.manager.GetVectorSearcher()
 	if searcher == nil {

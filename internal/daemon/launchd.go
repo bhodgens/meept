@@ -380,6 +380,7 @@ func (m *ServiceManager) Start() error {
 		if strings.Contains(out.String(), "already running") {
 			return nil
 		}
+		return fmt.Errorf("launchctl kickstart failed: %w", err)
 	}
 	return nil
 }
@@ -405,7 +406,7 @@ func (m *ServiceManager) Restart() error {
 	return m.Start()
 }
 
-// Load loads (但不 start) the launchd config.
+// Load loads (but does not start) the launchd config.
 func (m *ServiceManager) Load() error {
 	return m.Install()
 }

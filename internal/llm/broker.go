@@ -24,6 +24,7 @@ type BrokerConfig struct {
 	TimeoutCalc     *metrics.Calculator
 	Budget          *Budget
 	TokenCache      ResponseCache
+	TokenResolver   TokenResolver
 	Logger          *slog.Logger
 }
 
@@ -141,6 +142,12 @@ func (b *ModelBroker) newChatterFor(cfg *ModelConfig) Chatter {
 	}
 	if b.config.TokenCache != nil {
 		opts = append(opts, WithTokenCache(b.config.TokenCache))
+	}
+	if b.config.TokenResolver != nil {
+		opts = append(opts, WithTokenResolver(b.config.TokenResolver, cfg.OAuthProvider))
+	}
+	if len(cfg.ExtraHeaders) > 0 {
+		opts = append(opts, WithExtraHeaders(cfg.ExtraHeaders))
 	}
 	if cfg.Timeout > 0 {
 		opts = append(opts, WithTimeout(cfg.Timeout))

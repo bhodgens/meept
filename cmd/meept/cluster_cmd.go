@@ -46,6 +46,7 @@ func newClusterCmd() *cobra.Command {
 }
 
 // remoteCmd is the parent command for cluster remote operations.
+// It is package-level so subcommands can be added before registration in newClusterCmd.
 var remoteCmd = newClusterRemoteCmd()
 
 // ---------------------------------------------------------------------------
@@ -75,7 +76,7 @@ Examples:
   meept cluster init
   meept cluster init --cluster-name "production" --node-name "node-1" --git-remote https://git.example.com/cluster.git`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			nonInteractive := !cmd.Flags().Changed("yes")
+			nonInteractive := cmd.Flags().Changed("yes")
 			// Also detect non-interactive when stdin is not a TTY
 			if fi, err := os.Stdin.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) == 0 {
 				nonInteractive = true
@@ -830,7 +831,8 @@ func promptLine(defaultVal, prompt string) string {
 }
 
 // promptInput is an alias for promptLine for backward compatibility.
-func promptInput(r *bufio.Reader, prompt, defaultVal string) string {
+// The reader parameter is unused but retained for API compatibility.
+func promptInput(_ *bufio.Reader, prompt, defaultVal string) string {
 	return promptLine(defaultVal, prompt)
 }
 

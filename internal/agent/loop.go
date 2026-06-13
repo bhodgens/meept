@@ -1865,11 +1865,10 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 							return "", fmt.Errorf("LLM call failed after TTSR retry: %w", err)
 						}
 						if response == nil || response.Content == "" {
-							l.logger.Error("LLM call failed",
+							l.logger.Warn("LLM returned empty response after TTSR retry",
 								"iteration", iteration,
-								"error", err,
 							)
-							return "", fmt.Errorf("LLM call failed: %w", err)
+							return "", fmt.Errorf("LLM returned empty response after TTSR retry")
 						}
 					} else {
 						l.logger.Error("LLM call failed",
@@ -1892,7 +1891,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		cachedTokens += response.Usage.CachedTokens
 
 		// Emit after-provider-response event with cache data
-		if l.notificationPublisher != nil {
+		if l.eventEmitter != nil {
 			l.eventEmitter.EmitWithFields(ctx, AgentEvent{
 				Type:           AgentEventAfterProviderResponse,
 				ConversationID: conversationID,

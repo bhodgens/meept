@@ -91,9 +91,15 @@ type GenerateImprovementRequest struct {
 }
 
 // Generate creates improvements (part of cycle).
+// Note: ImprovementID is not supported by the underlying controller's RunFullCycle,
+// which always generates improvements for all detected issues. If ImprovementID is
+// set, an error is returned to avoid giving a false impression of targeted generation.
 func (s *SelfImproveService) Generate(ctx context.Context, req GenerateImprovementRequest) error {
 	if s.controller == nil {
 		return wrapError("selfimprove", "Generate", ErrUnavailable)
+	}
+	if req.ImprovementID != "" {
+		return wrapError("selfimprove", "Generate", ErrInvalidInput)
 	}
 	// Generation happens in the full cycle
 	// This endpoint triggers a focused cycle

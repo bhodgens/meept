@@ -155,8 +155,19 @@ func (v *FixValidator) applyFix(sandboxPath string, fix *ProposedFix) error {
 		return err
 	}
 
-	// Read the file
+	// Validate the file path resolves inside the sandbox to prevent path traversal.
 	filePath := filepath.Join(sandboxPath, fix.FilePath)
+	absTarget, err := filepath.Abs(filePath)
+	if err != nil {
+		return fmt.Errorf("resolve fix path: %w", err)
+	}
+	absSandbox, err := filepath.Abs(sandboxPath)
+	if err != nil {
+		return fmt.Errorf("resolve sandbox path: %w", err)
+	}
+	if absTarget != absSandbox && !strings.HasPrefix(absTarget, absSandbox+string(os.PathSeparator)) {
+		return fmt.Errorf("fix file path escapes sandbox: %q", fix.FilePath)
+	}
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return err

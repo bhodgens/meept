@@ -61,6 +61,11 @@ func NewWorkspaceManager(cfg WorkspaceConfig, logger *slog.Logger) *WorkspaceMan
 
 // Create creates a new workspace directory and initializes it as a git repo.
 func (w *WorkspaceManager) Create(ctx context.Context, taskID, description string) (string, error) {
+	// Validate taskID to prevent path traversal
+	if strings.Contains(taskID, "..") || strings.ContainsAny(taskID, "/\\") {
+		return "", fmt.Errorf("invalid task ID: must not contain path separators or parent references")
+	}
+
 	w.mu.Lock()
 	defer w.mu.Unlock()
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -394,26 +395,34 @@ func (po *PairOrchestrator) buildRevisionPrompt(state *BusPairSessionState, acto
 
 // classifyVerdict parses the reviewer output to determine the verdict.
 func (po *PairOrchestrator) classifyVerdict(reviewerOutput string) (PairVerdict, string) {
-	if len(reviewerOutput) >= 8 && reviewerOutput[:8] == "APPROVED" {
+	trimmed := strings.TrimSpace(reviewerOutput)
+
+	if strings.HasPrefix(trimmed, "APPROVED:") {
+		feedback := strings.TrimSpace(trimmed[9:])
+		return PairVerdictApproved, feedback
+	}
+	if strings.HasPrefix(trimmed, "APPROVED") {
 		return PairVerdictApproved, ""
 	}
-	if len(reviewerOutput) >= 8 && reviewerOutput[:8] == "REJECTED" {
-		feedback := ""
-		if len(reviewerOutput) > 9 {
-			feedback = reviewerOutput[9:]
-		}
+	if strings.HasPrefix(trimmed, "REJECTED:") {
+		feedback := strings.TrimSpace(trimmed[9:])
 		return PairVerdictRejected, feedback
 	}
-	if len(reviewerOutput) >= 10 && reviewerOutput[:10] == "NEEDS_MORE" {
-		feedback := ""
-		if len(reviewerOutput) > 11 {
-			feedback = reviewerOutput[11:]
-		}
+	if strings.HasPrefix(trimmed, "REJECTED") {
+		feedback := strings.TrimSpace(trimmed[8:])
+		return PairVerdictRejected, feedback
+	}
+	if strings.HasPrefix(trimmed, "NEEDS_MORE:") {
+		feedback := strings.TrimSpace(trimmed[11:])
+		return PairVerdictNeedsMore, feedback
+	}
+	if strings.HasPrefix(trimmed, "NEEDS_MORE") {
+		feedback := strings.TrimSpace(trimmed[10:])
 		return PairVerdictNeedsMore, feedback
 	}
 
-	// Default: treat as approved if no explicit verdict marker
-	return PairVerdictApproved, ""
+	// Default: treat as needs_more if no explicit verdict marker
+	return PairVerdictNeedsMore, trimmed
 }
 
 // publishTurn publishes a pair turn to the session-specific topic.

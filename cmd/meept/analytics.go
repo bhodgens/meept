@@ -98,6 +98,10 @@ func runAnalyticsSummary(cmd *cobra.Command, args []string) error {
 		results = append(results, r)
 	}
 
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed during row iteration: %w", err)
+	}
+
 	if len(results) == 0 {
 		fmt.Println("No analytics data available")
 		return nil
@@ -178,6 +182,10 @@ func runAnalyticsErrors(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to scan row: %w", err)
 		}
 		results = append(results, r)
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed during row iteration: %w", err)
 	}
 
 	if len(results) == 0 {
@@ -264,6 +272,10 @@ func runAnalyticsModels(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to scan row: %w", err)
 		}
 		results = append(results, r)
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed during row iteration: %w", err)
 	}
 
 	if len(results) == 0 {
@@ -378,6 +390,10 @@ func runAnalyticsExport(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to scan row: %w", err)
 		}
 		results = append(results, r)
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed during row iteration: %w", err)
 	}
 
 	if len(results) == 0 {

@@ -43,7 +43,7 @@ func (s *SecurityService) Check(ctx context.Context, req CheckRequest) (*CheckRe
 
 	if s.checker == nil {
 		return &CheckResponse{
-			Allowed: true,
+			Allowed: false,
 			Reason:  "security checker not available",
 		}, nil
 	}

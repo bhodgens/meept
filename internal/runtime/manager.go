@@ -38,12 +38,7 @@ func NewContainerManager(cfg Config, logger *slog.Logger) (*ContainerManager, er
 	}
 
 	// Initialize Docker backend if configured
-	if (cfg.DefaultBackend == "docker" || cfg.Docker.Image != "") && m.defaultBackend != "docker" {
-		if err := m.initDockerBackend(cfg.Docker, logger); err != nil {
-			logger.Warn("Docker backend unavailable, falling back to local", "error", err)
-			m.defaultBackend = "local"
-		}
-	} else if cfg.DefaultBackend == "docker" || cfg.Docker.Image != "" {
+	if cfg.DefaultBackend == "docker" || cfg.Docker.Image != "" {
 		if err := m.initDockerBackend(cfg.Docker, logger); err != nil {
 			logger.Warn("Docker backend unavailable, falling back to local", "error", err)
 			m.defaultBackend = "local"

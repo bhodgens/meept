@@ -53,14 +53,23 @@ var _ http.NotificationEmitter = (*EventEmitter)(nil)
 // The caller must read from the channel to prevent blocking.
 func (e *EventEmitter) Subscribe() chan *http.NotificationEvent {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	ch := make(chan *http.NotificationEvent, e.maxBuffer)
 	e.subscribers = append(e.subscribers, ch)
 
-	// Send buffered events to new subscriber
-	for _, event := range e.buffer {
-		ch <- event
+	// Copy buffer under lock to avoid blocking sends while holding the lock.
+	buffer := make([]*http.NotificationEvent, len(e.buffer))
+	copy(buffer, e.buffer)
+
+	e.mu.Unlock()
+
+	// Replay buffered events outside the lock using non-blocking sends.
+	for _, event := range buffer {
+		select {
+		case ch <- event:
+		default:
+			// Drop event if subscriber channel is full
+		}
 	}
 
 	e.logger.Debug("new notification subscriber added", "buffer_size", e.maxBuffer)

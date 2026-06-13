@@ -2,7 +2,10 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -270,7 +273,26 @@ func (s *ModelService) DeleteCredential(ctx context.Context, providerID string) 
 }
 
 // writeConfig writes the configuration to disk.
-// Note: This is delegated to the HTTP ConfigService for now since it handles JSON5.
+// It writes to the user config path (~/.meept/models.json5).
 func (s *ModelService) writeConfig(cfg *llm.ProvidersConfig) error {
-	return wrapError("model", "writeConfig", fmt.Errorf("use ConfigService for config modification"))
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return wrapError("model", "writeConfig", fmt.Errorf("failed to get home directory: %w", err))
+	}
+
+	configDir := filepath.Join(homeDir, ".meept")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		return wrapError("model", "writeConfig", fmt.Errorf("failed to create config directory: %w", err))
+	}
+
+	configPath := filepath.Join(configDir, "models.json5")
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return wrapError("model", "writeConfig", fmt.Errorf("failed to marshal config: %w", err))
+	}
+
+	if err := os.WriteFile(configPath, data, 0o644); err != nil {
+		return wrapError("model", "writeConfig", fmt.Errorf("failed to write config: %w", err))
+	}
+	return nil
 }

@@ -1055,25 +1055,25 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 	}
 
 	// Build tool calls from accumulators
-		var toolCalls []ToolCall
-		for _, accum := range toolCallAccums {
-			toolCalls = append(toolCalls, ToolCall{
-				ID:   accum.ID,
-				Type: "function",
-				Function: ToolCallFunction{
-					Name:      accum.Name,
-					Arguments: accum.Arguments.String(),
-				},
-			})
-		}
+	var toolCalls []ToolCall
+	for _, accum := range toolCallAccums {
+		toolCalls = append(toolCalls, ToolCall{
+			ID:   accum.ID,
+			Type: "function",
+			Function: ToolCallFunction{
+				Name:      accum.Name,
+				Arguments: accum.Arguments.String(),
+			},
+		})
+	}
 
-		return &Response{
-			Content:      accumulated.String(),
-			ToolCalls:    toolCalls,
-			Usage:        usage,
-			Model:        modelID,
-			FinishReason: finishReason,
-		}, nil
+	return &Response{
+		Content:      accumulated.String(),
+		ToolCalls:    toolCalls,
+		Usage:        usage,
+		Model:        modelID,
+		FinishReason: finishReason,
+	}, nil
 }
 
 // SwitchModel switches to a different model/endpoint at runtime.

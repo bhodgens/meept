@@ -154,10 +154,10 @@ func (p *sentenceTransformerProvider) GenerateEmbedding(_ context.Context, text 
 }
 
 // GenerateEmbeddings generates embeddings for multiple texts.
-func (p *sentenceTransformerProvider) GenerateEmbeddings(_ context.Context, texts []string) ([][]float32, error) {
+func (p *sentenceTransformerProvider) GenerateEmbeddings(ctx context.Context, texts []string) ([][]float32, error) {
 	embeddings := make([][]float32, len(texts))
 	for i, text := range texts {
-		emb, err := p.GenerateEmbedding(nil, text)
+		emb, err := p.GenerateEmbedding(ctx, text)
 		if err != nil {
 			return nil, fmt.Errorf("embedding %d: %w", i, err)
 		}

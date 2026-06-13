@@ -47,8 +47,8 @@ func runJobs(cmd *cobra.Command, args []string) error {
 		if name == "" {
 			name = job.ID
 		}
-		if len(name) > 20 {
-			name = name[:17] + "..."
+		if len([]rune(name)) > 20 {
+			name = string([]rune(name)[:17]) + "..."
 		}
 
 		schedule := job.Schedule
@@ -58,8 +58,8 @@ func runJobs(cmd *cobra.Command, args []string) error {
 		if schedule == "" {
 			schedule = "n/a"
 		}
-		if len(schedule) > 20 {
-			schedule = schedule[:17] + "..."
+		if len([]rune(schedule)) > 20 {
+			schedule = string([]rune(schedule)[:17]) + "..."
 		}
 
 		nextRun := job.NextRunTime

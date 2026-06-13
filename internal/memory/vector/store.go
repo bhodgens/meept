@@ -324,9 +324,10 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// serializeVector converts a vector to a byte array.
 // Compile-time assertion that Store implements io.Closer.
 var _ io.Closer = (*Store)(nil)
+
+// serializeVector converts a vector to a byte array.
 
 func serializeVector(vector []float32) []byte {
 	// Each float32 is 4 bytes

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -328,14 +327,3 @@ func (s *SecretObfuscator) deobfuscateMessage(msg any) any {
 	}
 }
 
-// ExpandHome expands a leading ~ in a path to the user's home directory.
-func expandHome(path string) string {
-	if strings.HasPrefix(path, "~") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return path
-		}
-		return filepath.Join(home, path[1:])
-	}
-	return path
-}

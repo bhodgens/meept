@@ -177,7 +177,9 @@ func NewCollector(store *Store, messageBus *bus.MessageBus, cfg *CollectorConfig
 
 // startCollection starts the background collection goroutine.
 func (c *Collector) startCollection(interval time.Duration) {
-	c.wg.Go(func() {
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -189,7 +191,7 @@ func (c *Collector) startCollection(interval time.Duration) {
 				return
 			}
 		}
-	})
+	}()
 }
 
 // subscribeToBus subscribes to relevant bus messages for metrics.
@@ -558,7 +560,9 @@ func NewPeriodicCollector(ctx context.Context, fn CollectFunc, interval time.Dur
 		stopChan: make(chan struct{}),
 	}
 
-	c.wg.Go(func() {
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -572,7 +576,7 @@ func NewPeriodicCollector(ctx context.Context, fn CollectFunc, interval time.Dur
 				return
 			}
 		}
-	})
+	}()
 
 	return c
 }
@@ -655,6 +659,10 @@ func NewTaskCollector(dbPath string, logger *slog.Logger) (*TaskCollector, error
 		return nil, fmt.Errorf("failed to initialize agent task schema: %w", err)
 	}
 
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	c := &TaskCollector{
 		db:          db,
 		logger:      logger.With("component", "task-collector"),
@@ -664,7 +672,8 @@ func NewTaskCollector(dbPath string, logger *slog.Logger) (*TaskCollector, error
 	}
 
 	// Start background flush loop
-	c.wg.Go(c.flushLoop)
+	c.wg.Add(1)
+	go c.flushLoop()
 
 	return c, nil
 }
