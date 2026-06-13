@@ -312,41 +312,6 @@ func (c *Collector) RecordToolCall(toolName string, duration time.Duration, succ
 	}
 }
 
-// RecordQueueDepth records the current queue depth.
-func (c *Collector) RecordQueueDepth(depth int) {
-	c.store.Record("queue.depth", float64(depth), nil)
-}
-
-// RecordJobDuration records a job's execution duration.
-func (c *Collector) RecordJobDuration(jobName string, duration time.Duration, success bool) {
-	tags := map[string]string{
-		"job_name": jobName,
-	}
-	if !success {
-		tags["error"] = "true"
-	}
-
-	c.store.Record("job.duration", duration.Seconds(), tags)
-	c.store.Record("job.completions", 1, tags)
-}
-
-// RecordMemoryOperation records a memory operation.
-func (c *Collector) RecordMemoryOperation(opType string, duration time.Duration) {
-	c.store.Record("memory.operations", 1, map[string]string{
-		"operation": opType,
-	})
-	c.store.Record("memory.duration", duration.Seconds(), map[string]string{
-		"operation": opType,
-	})
-}
-
-// RecordModelResolution records a model resolution event.
-func (c *Collector) RecordModelResolution(modelID, provider string) {
-	c.store.Record("model.resolutions", 1, map[string]string{
-		"model_id": modelID,
-		"provider": provider,
-	})
-}
 
 // RecordReviewResult records a review result metric.
 func (c *Collector) RecordReviewResult(status, reviewerID string, confidence float64) {
@@ -541,56 +506,6 @@ func (c *Collector) Shutdown() {
 	}
 }
 
-// CollectFunc is a function that collects metrics.
-type CollectFunc func()
-
-// PeriodicCollector runs a collection function periodically.
-type PeriodicCollector struct {
-	fn       CollectFunc
-	interval time.Duration
-	stopChan chan struct{}
-	wg       sync.WaitGroup
-}
-
-// NewPeriodicCollector creates a new periodic collector.
-func NewPeriodicCollector(ctx context.Context, fn CollectFunc, interval time.Duration) *PeriodicCollector {
-	c := &PeriodicCollector{
-		fn:       fn,
-		interval: interval,
-		stopChan: make(chan struct{}),
-	}
-
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				c.fn()
-			case <-c.stopChan:
-				return
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-
-	return c
-}
-
-// Shutdown stops the periodic collector.
-func (c *PeriodicCollector) Shutdown() {
-	select {
-	case <-c.stopChan:
-		// Already closed
-	default:
-		close(c.stopChan)
-	}
-	c.wg.Wait()
-}
 
 // AgentTaskMetrics represents metrics for a single agent task execution.
 type AgentTaskMetrics struct {
