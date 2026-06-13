@@ -830,7 +830,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
           ),
           if (result.error != null) ...[
             const SizedBox(height: 8),
-            Text(
+            SelectableText(
               result.error!,
               style: CyberpunkTypography.bodySmall.copyWith(
                 color: CyberpunkColors.redAlert,
@@ -839,7 +839,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
           ],
           if (result.output.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(
+            SelectableText(
               result.output,
               style: CyberpunkTypography.bodySmall.copyWith(
                 fontFamily: 'SourceCodePro',

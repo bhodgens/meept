@@ -27,13 +27,12 @@ class ErrorBanner extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
+            child: SelectableText(
               message,
               style: CyberpunkTypography.bodySmall.copyWith(
                 color: CyberpunkColors.redAlert,
               ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+              maxLines: 3,
             ),
           ),
           if (onDismiss != null) ...[
@@ -72,7 +71,7 @@ class ErrorText extends StatelessWidget {
               color: CyberpunkColors.redAlert,
             ),
             const SizedBox(height: 12),
-            Text(
+            SelectableText(
               'error: $message',
               style: CyberpunkTypography.bodySmall.copyWith(
                 color: CyberpunkColors.redAlert,

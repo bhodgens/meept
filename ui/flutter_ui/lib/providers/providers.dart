@@ -154,7 +154,7 @@ class ConnectionMonitor {
       // the daemon is still reachable
       if (!_websocket.isConnected) {
         try {
-          await _apiClient.get<Map<String, dynamic>>('/daemon/status');
+          await _apiClient.getDaemonStatus();
           _proposeState(true);
         } catch (_) {
           _proposeState(false);

@@ -327,15 +327,14 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
                 color: CyberpunkColors.midGray.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(4),
               ),
-              child: Text(
+              child: SelectableText(
                 entry.output,
                 style: CyberpunkTypography.bodySmall.copyWith(
                   fontFamily: 'SourceCodePro',
                   fontSize: 9,
                   color: CyberpunkColors.lightGray,
                 ),
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
+                maxLines: 5,
               ),
             ),
           ],
