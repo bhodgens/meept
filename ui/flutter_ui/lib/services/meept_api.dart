@@ -88,7 +88,7 @@ class MeeptApi {
   // ===== Sessions =====
 
   Future<List<Session>> listSessions() async {
-    final response = await _dio.get('/sessions');
+    final response = await _dio.get('/api/v1/sessions');
     final data = response.data as Map<String, dynamic>;
     final raw = data['sessions'] as List?;
     if (raw == null) return [];
@@ -96,7 +96,7 @@ class MeeptApi {
   }
 
   Future<Session> getSession(String id) async {
-    final response = await _dio.get('/sessions/$id');
+    final response = await _dio.get('/api/v1/sessions/$id');
     return Session.fromJson(response.data as Map<String, dynamic>);
   }
 
@@ -105,7 +105,7 @@ class MeeptApi {
     int offset = 0,
     int limit = 1000,
   }) async {
-    final response = await _dio.get('/sessions/$id/messages', queryParameters: {
+    final response = await _dio.get('/api/v1/sessions/$id/messages', queryParameters: {
       'offset': offset,
       'limit': limit,
     });
@@ -121,7 +121,7 @@ class MeeptApi {
     required String title,
     String? agentId,
   }) async {
-    final response = await _dio.post('/sessions', data: {
+    final response = await _dio.post('/api/v1/sessions', data: {
       'name': title,
       if (agentId != null) 'agent_id': agentId,
     });
@@ -129,11 +129,11 @@ class MeeptApi {
   }
 
   Future<void> deleteSession(String id) async {
-    await _dio.delete('/sessions/$id');
+    await _dio.delete('/api/v1/sessions/$id');
   }
 
   Future<List<Plan>> listPlansBySession(String sessionId) async {
-    final response = await _dio.get('/sessions/$sessionId/plans');
+    final response = await _dio.get('/api/v1/sessions/$sessionId/plans');
     final data = response.data as Map<String, dynamic>;
     final raw = data['plans'] as List?;
     if (raw == null) return [];
@@ -143,7 +143,7 @@ class MeeptApi {
   // ===== Agents =====
 
   Future<List<Agent>> listAgents() async {
-    final response = await _dio.get('/config/agents');
+    final response = await _dio.get('/api/v1/config/agents');
     final data = response.data as Map<String, dynamic>;
     final raw = data['agents'] as List?;
     if (raw == null) return [];
@@ -151,14 +151,14 @@ class MeeptApi {
   }
 
   Future<Agent> updateAgent(String id, Map<String, dynamic> config) async {
-    final response = await _dio.post('/config/agents/$id', data: config);
+    final response = await _dio.post('/api/v1/config/agents/$id', data: config);
     return Agent.fromJson(response.data as Map<String, dynamic>);
   }
 
   // ===== Tasks =====
 
   Future<List<Task>> listTasks({String? sessionId}) async {
-    final response = await _dio.get('/tasks', queryParameters: {
+    final response = await _dio.get('/api/v1/tasks', queryParameters: {
       if (sessionId != null) 'session_id': sessionId,
     });
     final data = response.data as Map<String, dynamic>;
@@ -168,7 +168,7 @@ class MeeptApi {
   }
 
   Future<Task> getTask(String id) async {
-    final response = await _dio.get('/tasks/$id');
+    final response = await _dio.get('/api/v1/tasks/$id');
     return Task.fromJson(response.data as Map<String, dynamic>);
   }
 
@@ -176,7 +176,7 @@ class MeeptApi {
     required String title,
     String? sessionId,
   }) async {
-    final response = await _dio.post('/tasks', data: {
+    final response = await _dio.post('/api/v1/tasks', data: {
       'name': title,
       if (sessionId != null) 'session_id': sessionId,
     });
@@ -187,23 +187,23 @@ class MeeptApi {
     final body = <String, dynamic>{};
     if (name != null) body['name'] = name;
     if (state != null) body['state'] = state;
-    final response = await _dio.put('/tasks/$id', data: body);
+    final response = await _dio.put('/api/v1/tasks/$id', data: body);
     return Task.fromJson(response.data as Map<String, dynamic>);
   }
 
   Future<void> deleteTask(String id) async {
-    await _dio.delete('/tasks/$id');
+    await _dio.delete('/api/v1/tasks/$id');
   }
 
   Future<Map<String, dynamic>> cancelTask(String id) async {
-    final response = await _dio.post('/tasks/$id/cancel');
+    final response = await _dio.post('/api/v1/tasks/$id/cancel');
     return response.data as Map<String, dynamic>;
   }
 
   // ===== Queue / Jobs =====
 
   Future<List<Job>> listJobs({String? agentId}) async {
-    final response = await _dio.get('/queue/jobs', queryParameters: {
+    final response = await _dio.get('/api/v1/queue/jobs', queryParameters: {
       if (agentId != null) 'agent_id': agentId,
     });
     final data = response.data as Map<String, dynamic>;
@@ -213,14 +213,14 @@ class MeeptApi {
   }
 
   Future<Map<String, dynamic>> getQueueStats() async {
-    final response = await _dio.get('/queue/stats');
+    final response = await _dio.get('/api/v1/queue/stats');
     return response.data as Map<String, dynamic>;
   }
 
   // ===== Metrics =====
 
   Future<Map<String, dynamic>> getLiveMetrics() async {
-    final response = await _dio.get('/metrics/live');
+    final response = await _dio.get('/api/v1/metrics/live');
     return response.data as Map<String, dynamic>;
   }
 
@@ -231,7 +231,7 @@ class MeeptApi {
     int limit = 10,
     String? category,
   }) async {
-    final response = await _dio.post('/memory/query', data: {
+    final response = await _dio.post('/api/v1/memory/query', data: {
       'query': query,
       'limit': limit,
       if (category != null) 'category': category,
@@ -243,7 +243,7 @@ class MeeptApi {
   }
 
   Future<List<Map<String, dynamic>>> getRecentMemories({int limit = 10}) async {
-    final response = await _dio.get('/memory/recent', queryParameters: {
+    final response = await _dio.get('/api/v1/memory/recent', queryParameters: {
       'limit': limit,
     });
     final data = response.data as Map<String, dynamic>;
@@ -255,7 +255,7 @@ class MeeptApi {
   // ===== Skills =====
 
   Future<List<Skill>> getSkills({String? category}) async {
-    final response = await _dio.get('/skills', queryParameters: {
+    final response = await _dio.get('/api/v1/skills', queryParameters: {
       if (category != null) 'category': category,
     });
     final data = response.data as Map<String, dynamic>;
@@ -265,7 +265,7 @@ class MeeptApi {
   }
 
   Future<SkillUiDescriptor> getSkillUi(String slug) async {
-    final response = await _dio.get('/skills/$slug/ui');
+    final response = await _dio.get('/api/v1/skills/$slug/ui');
     return SkillUiDescriptor.fromJson(response.data as Map<String, dynamic>);
   }
 
@@ -273,7 +273,7 @@ class MeeptApi {
     required String slug,
     required String prompt,
   }) async {
-    final response = await _dio.post('/skills/$slug/execute', data: {
+    final response = await _dio.post('/api/v1/skills/$slug/execute', data: {
       'prompt': prompt,
     });
     return SkillExecuteResult.fromJson(response.data as Map<String, dynamic>);
@@ -283,7 +283,7 @@ class MeeptApi {
     required String slug,
     required Map<String, dynamic> params,
   }) async {
-    final response = await _dio.post('/skills/$slug/execute', data: params);
+    final response = await _dio.post('/api/v1/skills/$slug/execute', data: params);
     return SkillExecuteResult.fromJson(response.data as Map<String, dynamic>);
   }
 
@@ -297,7 +297,7 @@ class MeeptApi {
     if (scope != SearchScope.all) {
       data['scope'] = scope.name;
     }
-    final response = await _dio.post('/search', data: data);
+    final response = await _dio.post('/api/v1/search', data: data);
     return SearchResults.fromJson(response.data as Map<String, dynamic>);
   }
 
