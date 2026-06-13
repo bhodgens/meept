@@ -5,9 +5,9 @@ package configui
 func buildSessionFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.Session
-	autoForkStr := "never"
-	if s.AutoFork {
-		autoForkStr = "always"
+	autoForkStr := s.AutoFork
+	if autoForkStr == "" {
+		autoForkStr = "never"
 	}
 	return []Field{
 		NewToggleField("persistence", "persistence", s.Persistence),

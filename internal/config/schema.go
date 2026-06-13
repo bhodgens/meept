@@ -110,7 +110,7 @@ type ProjectsConfig struct {
 	MaxWorktreesPerProject      int    `json:"max_worktrees_per_project"      toml:"max_worktrees_per_project"`
 	CleanupOrphanedWorktrees    bool   `json:"cleanup_orphaned_worktrees"     toml:"cleanup_orphaned_worktrees"`
 	FenceEnabled                bool   `json:"fence_enabled"                  toml:"fence_enabled"`
-	AllowReadSystemPaths        bool   `json:"allow_read_system_paths"        toml:"allow_read_system_paths"`
+	AllowReadSystemPaths        []string `json:"allow_read_system_paths"      toml:"allow_read_system_paths"`
 	AutoSyncOnAttach            bool   `json:"auto_sync_on_attach"            toml:"auto_sync_on_attach"`
 }
 
@@ -196,7 +196,8 @@ type SessionConfig struct {
 	// MaxBranches limits the number of branches per session.
 	MaxBranches int `json:"max_branches" toml:"max_branches"`
 	// AutoFork enables automatic forking on context overflow.
-	AutoFork bool `json:"auto_fork" toml:"auto_fork"`
+	// Values: "never", "ask", "always"
+	AutoFork string `json:"auto_fork" toml:"auto_fork"`
 	// Compaction enables automatic context compaction.
 	Compaction bool `json:"compaction" toml:"compaction"`
 	// CompactionThreshold is the token count that triggers compaction.
