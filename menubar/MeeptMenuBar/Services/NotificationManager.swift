@@ -7,7 +7,7 @@ import Foundation
 import UserNotifications
 import Combine
 
-class NotificationManager: ObservableObject {
+class NotificationManager: NSObject, ObservableObject {
     static let shared = NotificationManager()
 
     private let notificationCenter = UNUserNotificationCenter.current()
@@ -28,7 +28,8 @@ class NotificationManager: ObservableObject {
         var isRead: Bool = false
     }
 
-    private init() {
+    private override init() {
+        super.init()
         requestAuthorization()
         setupWebSocket()
     }
@@ -62,7 +63,7 @@ class NotificationManager: ObservableObject {
             self?.handleWebSocketMessage(data)
         }
 
-        websocket?.onDisconnect = { [weak self] error in
+        websocket?.onDisconnect = { error in
             print("Notification WebSocket disconnected: \(error?.localizedDescription ?? "unknown")")
             // Reconnection is handled by WebSocketManager
         }

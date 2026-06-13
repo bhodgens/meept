@@ -50,7 +50,7 @@ dependencies:
   timeago: ^3.6.1
 
   # Error reporting
-  sentry_flutter: ^8.0.0
+  sentry_flutter: ^9.15.0
 
   # Markdown rendering
   flutter_markdown: ^0.6.23
