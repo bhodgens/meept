@@ -29,7 +29,7 @@ func Load(path string) (*Config, error) {
 			expandConfigPaths(cfg)
 			return cfg, nil
 		}
-		return nil, fmt.Errorf("failed to read config file: %w", err)
+		return nil, fmt.Errorf("failed to read config file %s: %w", path, err)
 	}
 
 	// Expand environment variables in the raw TOML content
@@ -37,13 +37,62 @@ func Load(path string) (*Config, error) {
 
 	cfg := DefaultConfig()
 	if err := toml.Unmarshal([]byte(content), cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config: %w", err)
+		return nil, wrapTOMLUnmarshalError(err, path)
 	}
 
 	// Expand tilde paths in the loaded config
 	expandConfigPaths(cfg)
 
 	return cfg, nil
+}
+
+// wrapTOMLUnmarshalError provides detailed, user-friendly error messages for TOML unmarshaling failures.
+func wrapTOMLUnmarshalError(err error, configPath string) error {
+	errMsg := err.Error()
+
+	// Extract line information if available
+	var lineInfo string
+	if strings.Contains(errMsg, "line:") {
+		if idx := strings.Index(errMsg, "line:"); idx != -1 {
+			remainder := errMsg[idx:]
+			parts := strings.Fields(remainder)
+			if len(parts) >= 2 {
+				lineInfo = parts[1]
+			}
+		}
+	}
+
+	// Build context-aware error messages
+	var detailMsg string
+	var hintMsg string
+
+	switch {
+	case strings.Contains(errMsg, "cannot unmarshal") && strings.Contains(errMsg, "into"):
+		detailMsg = extractTypeMismatch(errMsg)
+		hintMsg = "Hint: Check that the value type matches what the field expects."
+
+	case strings.Contains(errMsg, "unexpected"):
+		detailMsg = "unexpected token or syntax issue"
+		hintMsg = "Hint: Check for missing quotes, unclosed strings, or invalid TOML syntax."
+
+	case strings.Contains(errMsg, "duplicate"):
+		detailMsg = "duplicate field or key"
+		hintMsg = "Hint: Each configuration key should appear only once."
+
+	default:
+		detailMsg = errMsg
+		hintMsg = "Hint: Review the TOML syntax at the reported location."
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("failed to parse TOML config %s:\n", configPath))
+	if lineInfo != "" {
+		sb.WriteString(fmt.Sprintf("  Line: %s\n", lineInfo))
+	}
+	sb.WriteString(fmt.Sprintf("  Detail: %s\n", detailMsg))
+	sb.WriteString(fmt.Sprintf("  %s", hintMsg))
+
+	return fmt.Errorf("%s", sb.String())
 }
 
 // LoadDefault loads configuration from the default location.
@@ -75,7 +124,8 @@ func LoadJSON5Config(path string) (*Config, error) {
 			expandConfigPaths(cfg)
 			return cfg, nil
 		}
-		return nil, fmt.Errorf("failed to load JSON5 config: %w", err)
+		// Error already includes path from LoadJSON5
+		return nil, err
 	}
 
 	expandConfigPaths(cfg)
@@ -218,7 +268,7 @@ type Model struct {
 func LoadModelsConfig(path string) (*ModelsConfig, error) {
 	var cfg ModelsConfig
 	if err := LoadJSON5(path, &cfg); err != nil {
-		return nil, fmt.Errorf("failed to load models config: %w", err)
+		return nil, fmt.Errorf("failed to load models config %s: %w", path, err)
 	}
 
 	// Apply default timeout to providers that don't specify one

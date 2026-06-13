@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
 	"github.com/tailscale/hujson"
 )
 
@@ -16,34 +17,118 @@ var durationToken = regexp.MustCompile(`(?m)(?:^|[:\s,])\s*(\d+(?:\.\d+)?(?:ns|u
 func LoadJSON5(path string, v any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		if os.IsNotExist(err) {
+			return fmt.Errorf("config file not found: %s", path)
+		}
+		return fmt.Errorf("failed to read config file %s: %w", path, err)
 	}
+
 	// Expand env vars in raw content
 	content := expandEnvVars(string(data))
+
 	// Standardize JSON5 to JSON
 	stdJSON, err := hujson.Standardize([]byte(content))
 	if err != nil {
-		return fmt.Errorf("failed to parse JSON5: %w", err)
+		return fmt.Errorf("failed to parse JSON5 config %s: %w\n\nHint: JSON5 supports comments (// and /* */), trailing commas, and unquoted keys. Check for syntax errors near the reported position.", path, err)
 	}
 
 	// Unmarshal with detailed error handling for type mismatches
 	if err := json.Unmarshal(stdJSON, v); err != nil {
-		// Provide more specific error messages for common type mismatches
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "cannot unmarshal") {
-			if strings.Contains(errMsg, "type bool") && strings.Contains(errMsg, "array") {
-				return fmt.Errorf("config type mismatch: expected a boolean value but found an array - check the field for a list that should be a single true/false value")
-			}
-			if strings.Contains(errMsg, "cannot unmarshal string") && strings.Contains(errMsg, "type bool") {
-				return fmt.Errorf("config type mismatch: expected a boolean value but found a string - check for quotes around true/false or enum values like 'ask'/'never'/'always'")
-			}
-			if strings.Contains(errMsg, "cannot unmarshal") && strings.Contains(errMsg, "type") {
-				return fmt.Errorf("config type mismatch: %s - verify the field type matches the expected value", errMsg)
-			}
-		}
-		return fmt.Errorf("failed to parse config JSON: %w", err)
+		return wrapJSONUnmarshalError(err, path)
 	}
 	return nil
+}
+
+// wrapJSONUnmarshalError provides detailed, user-friendly error messages for JSON unmarshaling failures.
+func wrapJSONUnmarshalError(err error, configPath string) error {
+	errMsg := err.Error()
+
+	// Extract field information from error message
+	var fieldInfo string
+	if idx := strings.Index(errMsg, "into"); idx != -1 {
+		// Error format: "json: cannot unmarshal X into Go struct field Y.Z of type T"
+		remainder := errMsg[idx:]
+		if strings.Contains(remainder, "field") {
+			parts := strings.Split(remainder, " ")
+			for i, part := range parts {
+				if part == "field" && i+1 < len(parts) {
+					fieldInfo = parts[i+1]
+					break
+				}
+			}
+		}
+	}
+
+	// Build context-aware error messages
+	var detailMsg string
+	var hintMsg string
+
+	switch {
+	case strings.Contains(errMsg, "cannot unmarshal") && strings.Contains(errMsg, "type bool") && strings.Contains(errMsg, "array"):
+		detailMsg = "expected a boolean value (true/false) but found an array [list]"
+		hintMsg = "Hint: This field should be a single true/false value, not a list. Remove the square brackets [] or change to true/false."
+
+	case strings.Contains(errMsg, "cannot unmarshal") && strings.Contains(errMsg, "type bool") && strings.Contains(errMsg, "string"):
+		detailMsg = "expected a boolean value (true/false) but found a string"
+		hintMsg = "Hint: This field should be true or false (without quotes). If you're trying to set an enum value like 'ask', 'never', or 'always', check the config documentation for valid options."
+
+	case strings.Contains(errMsg, "cannot unmarshal") && strings.Contains(errMsg, "type int") && strings.Contains(errMsg, "string"):
+		detailMsg = "expected an integer value but found a string"
+		hintMsg = "Hint: Remove quotes around numeric values. For durations, use the raw number or a quoted duration string like \"30s\" if the field supports it."
+
+	case strings.Contains(errMsg, "cannot unmarshal") && strings.Contains(errMsg, "type []string") && strings.Contains(errMsg, "string"):
+		detailMsg = "expected an array of strings but found a single string"
+		hintMsg = "Hint: Wrap the value in square brackets: [\"value\"] or add more items: [\"value1\", \"value2\"]"
+
+	case strings.Contains(errMsg, "cannot unmarshal") && strings.Contains(errMsg, "cannot unmarshal"):
+		// Generic type mismatch - extract as much info as possible
+		detailMsg = fmt.Sprintf("type mismatch: %s", extractTypeMismatch(errMsg))
+		hintMsg = "Hint: Check that the value type matches what the field expects (bool, int, string, array, or object)."
+
+	case strings.Contains(errMsg, "unknown field"):
+		detailMsg = "unknown configuration field"
+		hintMsg = "Hint: This field name is not recognized. Check for typos or see if this feature requires a newer version."
+
+	default:
+		detailMsg = errMsg
+		hintMsg = "Hint: Review the config file syntax and field values."
+	}
+
+	// Build the detailed error message
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("failed to parse config %s:\n", configPath))
+	if fieldInfo != "" {
+		sb.WriteString(fmt.Sprintf("  Field: %s\n", fieldInfo))
+	}
+	sb.WriteString(fmt.Sprintf("  Detail: %s\n", detailMsg))
+	sb.WriteString(fmt.Sprintf("  %s", hintMsg))
+
+	return fmt.Errorf("%s", sb.String())
+}
+
+// extractTypeMismatch extracts the core type information from a Go json.Unmarshal error.
+func extractTypeMismatch(errMsg string) string {
+	// Parse error like: "json: cannot unmarshal string into Go struct field Config.projects.enabled of type bool"
+	parts := strings.Split(errMsg, "cannot unmarshal ")
+	if len(parts) < 2 {
+		return errMsg
+	}
+
+	remainder := parts[1]
+	wordParts := strings.SplitN(remainder, " ", 2)
+	if len(wordParts) < 1 {
+		return errMsg
+	}
+
+	foundType := wordParts[0]
+
+	// Find the target type
+	if idx := strings.Index(remainder, " of type "); idx != -1 {
+		targetType := remainder[idx+9:]
+		return fmt.Sprintf("found %s, expected %s", foundType, targetType)
+	}
+
+	return fmt.Sprintf("found %s", foundType)
 }
 
 // LoadJSON5WithDefault loads JSON5 from path, or returns default if not found.

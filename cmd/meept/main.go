@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -102,9 +103,10 @@ Analytics:
   meept analytics errors                 # Error breakdown by type
   meept analytics models                 # Model performance comparison
   meept analytics export                 # Export analytics as JSON`,
-		SilenceUsage: true,
-		Args:         cobra.MaximumNArgs(1),
-		RunE:         runChat, // Default to chat when no subcommand
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args:          cobra.MaximumNArgs(1),
+		RunE:          runChat, // Default to chat when no subcommand
 	}
 
 	// Global flags
@@ -149,8 +151,26 @@ Analytics:
 	rootCmd.AddCommand(newTTSCmd())
 
 	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "\nError: %v\n\n", err)
+		// Provide helpful context for common errors
+		errStr := err.Error()
+		if containsAny(errStr, "connection", "connect", "socket", "dial") {
+			fmt.Fprintf(os.Stderr, "Hint: The daemon may not be running. Try:\n")
+			fmt.Fprintf(os.Stderr, "  meept-daemon -f      # Start daemon in foreground\n")
+			fmt.Fprintf(os.Stderr, "  meept daemon start   # Install and start as system service\n\n")
+		}
 		os.Exit(1)
 	}
+}
+
+// containsAny checks if a string contains any of the given substrings.
+func containsAny(s string, substrings ...string) bool {
+	for _, sub := range substrings {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 func newVersionCmd() *cobra.Command {

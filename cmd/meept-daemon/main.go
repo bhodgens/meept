@@ -8,6 +8,7 @@ import (
 	_ "modernc.org/sqlite" // Ensure sqlite driver is registered for side effects
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -101,12 +102,20 @@ func main() {
 	rootCmd.SilenceUsage = true
 
 	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "\n")
 		// Config errors should not print usage, just the error message
 		if _, ok := err.(configError); ok {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Configuration Error:\n")
+			fmt.Fprintf(os.Stderr, "  %v\n\n", err)
+			fmt.Fprintf(os.Stderr, "Configuration file locations:\n")
+			fmt.Fprintf(os.Stderr, "  - Main config: ~/.meept/meept.json5 (or ~/.meept/meept.toml)\n")
+			fmt.Fprintf(os.Stderr, "  - Models config: ~/.meept/models.json5\n")
+			fmt.Fprintf(os.Stderr, "  - MCP servers: ~/.meept/mcp_servers.json5\n")
+			fmt.Fprintf(os.Stderr, "\nTip: Run 'meept config' to edit configuration interactively.\n")
 		} else {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		}
+		fmt.Fprintf(os.Stderr, "\n")
 		os.Exit(1)
 	}
 }
@@ -132,13 +141,13 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	var err error
 
 	if configPath != "" {
-		appCfg, err = config.Load(configPath)
+		appCfg, err = loadConfigByExtension(configPath)
 	} else {
 		appCfg, err = config.LoadDefault()
 	}
 	if err != nil {
 		// Use configError to suppress usage output for configuration problems
-		return configError{err: fmt.Errorf("failed to load config: %w", err)}
+		return configError{err: err}
 	}
 
 	// Build daemon config from app config
@@ -182,6 +191,14 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 
 	return d.Run(context.Background())
+}
+
+// loadConfigByExtension loads config from JSON5 or TOML based on file extension.
+func loadConfigByExtension(path string) (*config.Config, error) {
+	if strings.HasSuffix(path, ".json5") || strings.HasSuffix(path, ".json") {
+		return config.LoadJSON5Config(path)
+	}
+	return config.Load(path)
 }
 
 func checkStatus(cmd *cobra.Command, args []string) error {
