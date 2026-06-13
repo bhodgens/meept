@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:crypto/crypto.dart';
 
@@ -8,6 +9,8 @@ class DaemonCertPinner {
 
   /// Load and cache the daemon cert's SHA-256 fingerprint.
   ///
+  /// Reads the PEM file, extracts the base64 DER content, and hashes
+  /// the DER bytes so the fingerprint is comparable to [X509Certificate.der].
   /// Returns null if the cert file cannot be found or read.
   static Future<String?> loadFingerprint() async {
     if (_cachedFingerprint != null) return _cachedFingerprint;
@@ -19,12 +22,24 @@ class DaemonCertPinner {
     try {
       final certFile = File(certPath);
       if (!await certFile.exists()) return null;
-      final certBytes = await certFile.readAsBytes();
-      _cachedFingerprint = sha256.convert(certBytes).toString();
+      final pemContent = await certFile.readAsString();
+      // Extract base64 content between PEM headers and decode to DER.
+      final derBytes = _pemToDer(pemContent);
+      _cachedFingerprint = sha256.convert(derBytes).toString();
       return _cachedFingerprint;
     } catch (_) {
       return null;
     }
+  }
+
+  /// Extract DER bytes from a PEM-encoded certificate string.
+  static Uint8List _pemToDer(String pem) {
+    final b64 = pem
+        .split('\n')
+        .where((line) => !line.startsWith('-----'))
+        .join()
+        .trim();
+    return base64.decode(b64);
   }
 
   /// Clear cached fingerprint (for testing or after cert rotation).
