@@ -67,8 +67,6 @@ type EpisodicMemory struct {
 type EpisodicConfig struct {
 	// DataDir is the directory for database files.
 	DataDir string
-	// PoolSize is the number of database connections. Default: 5.
-	PoolSize int
 	// Logger for operations.
 	Logger *slog.Logger
 }

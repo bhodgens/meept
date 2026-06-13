@@ -74,8 +74,6 @@ type TaskMemoryConfig struct {
 	// Domains is the list of knowledge domains to track.
 	// Defaults to ["general", "code", "commands"].
 	Domains []string
-	// PoolSize is the number of database connections. Default: 5.
-	PoolSize int
 	// Logger for operations.
 	Logger *slog.Logger
 }
@@ -85,7 +83,6 @@ func DefaultTaskMemoryConfig(dataDir string) TaskMemoryConfig {
 	return TaskMemoryConfig{
 		DataDir:  dataDir,
 		Domains:  []string{DomainGeneral, DomainCode, DomainCommands},
-		PoolSize: 5,
 		Logger:   slog.Default(),
 	}
 }
