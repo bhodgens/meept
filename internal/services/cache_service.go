@@ -43,13 +43,18 @@ type ClearCacheRequest struct {
 	Prefix string `json:"prefix,omitempty"`
 }
 
-// Clear removes cached entries.
+// Clear removes cached entries. If req.Prefix is non-empty, only entries whose
+// model ID starts with that prefix are removed. Otherwise all entries are cleared.
 func (s *CacheService) Clear(ctx context.Context, req ClearCacheRequest) error {
 	if s.cache == nil {
 		return nil
 	}
 
-	s.cache.Clear()
+	if req.Prefix != "" {
+		s.cache.ClearByModelPrefix(req.Prefix)
+	} else {
+		s.cache.Clear()
+	}
 	return nil
 }
 

@@ -394,8 +394,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	}
 
 	// 4. Classify primary intent
-	intent, classificationErr := d.classifyIntent(ctx, resolvedInput, memCtx)
-	// classificationErr captured for potential ClassificationNotice
+	intent, _ := d.classifyIntent(ctx, resolvedInput, memCtx)
 
 	// 5. Extract memory refs for context continuity
 	intent.MemoryRefs = d.extractMemoryRefs(memCtx.Results)
@@ -475,16 +474,6 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 
 	// Record intent in session tracker
 	d.sessionTracker.RecordIntent(sessionID, intent, intent.AgentType)
-
-	// Attach classification degradation notice if the LLM classifier failed
-	// but fallback succeeded.
-	if classificationErr != nil {
-		result.ClassificationNotice = llm.ClassificationUserGuidance(classificationErr)
-		d.logger.Debug("Classification used fallback",
-			"failure_kind", llm.ClassifyClassificationFailure(classificationErr),
-			"notice", result.ClassificationNotice,
-		)
-	}
 
 	return result, nil
 }
@@ -570,7 +559,6 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				"error", err,
 				"failure_kind", kind,
 			)
-			// classification error captured in ClassificationNotice below
 		}
 	}
 

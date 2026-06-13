@@ -55,6 +55,12 @@ import (
 	"github.com/caimlas/meept/pkg/security"
 )
 
+// Status map key and state value constants.
+const (
+	KeyStatus    = "status"
+	StateRunning = "running"
+)
+
 // Components holds all the daemon components.
 type Components struct {
 	ctx    context.Context    // lifecycle context, cancelled on Stop
@@ -1480,8 +1486,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			watchedFiles = discoverProjectFiles(cfg.Projects.BaseDir, logger)
 		}
 		if len(watchedFiles) == 0 && cfg.Projects.AutoDetect {
-			// Try to pick up files from the project store
-			watchedFiles = discoverProjectFiles(cfg.Projects.BaseDir, logger)
+			// Try to pick up files from the working directory
+			if wd, err := os.Getwd(); err == nil {
+				watchedFiles = discoverProjectFiles(wd, logger)
+			}
 		}
 
 		gen, err := repomap.NewRepoMapGenerator(repoMapCfg, logger.With("component", "repomap"), watchedFiles)

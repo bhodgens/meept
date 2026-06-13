@@ -21,12 +21,21 @@ func isAnthropic(cfg *llm.ModelConfig) bool {
 
 // createChatter creates a Chatter for a ModelConfig, selecting the right
 // client implementation (Anthropic vs OpenAI-compatible) based on provider ID
-// and base URL.
-func createChatter(cfg *llm.ModelConfig, logger *slog.Logger) llm.Chatter {
+// and base URL. It injects TokenResolver and ExtraHeaders when present so that
+// skills that use OAuth-protected providers or providers requiring custom headers
+// work correctly.
+func createChatter(cfg *llm.ModelConfig, logger *slog.Logger, tokenResolver llm.TokenResolver, extraHeaders map[string]string) llm.Chatter {
 	if isAnthropic(cfg) {
 		return llm.NewAnthropicClient(cfg, llm.WithAnthropicLogger(logger))
 	}
-	return llm.NewClient(cfg, llm.WithLogger(logger))
+	opts := []llm.ClientOption{llm.WithLogger(logger)}
+	if tokenResolver != nil {
+		opts = append(opts, llm.WithTokenResolver(tokenResolver, cfg.OAuthProvider))
+	}
+	if len(extraHeaders) > 0 {
+		opts = append(opts, llm.WithExtraHeaders(extraHeaders))
+	}
+	return llm.NewClient(cfg, opts...)
 }
 
 // Executor errors.
@@ -65,6 +74,8 @@ type Executor struct {
 	prerequisiteChecker  PrerequisiteChecker
 	validatePrerequisites bool
 	toolMapper           *HermesToolMapper
+	tokenResolver        llm.TokenResolver
+	extraHeaders         map[string]string
 }
 
 // ExecutorOption is a functional option for configuring Executor.
@@ -119,6 +130,28 @@ func WithToolMapper(mapper *HermesToolMapper) ExecutorOption {
 	return func(e *Executor) {
 		if mapper != nil {
 			e.toolMapper = mapper
+		}
+	}
+}
+
+// WithExecutorTokenResolver sets the OAuth token resolver for the executor.
+// When set, locally created clients will use it to obtain fresh access tokens.
+// Nil resolver is ignored.
+func WithExecutorTokenResolver(tr llm.TokenResolver) ExecutorOption {
+	return func(e *Executor) {
+		if tr != nil {
+			e.tokenResolver = tr
+		}
+	}
+}
+
+// WithExecutorExtraHeaders sets additional HTTP headers for locally created
+// LLM clients (e.g. for providers that require custom headers like
+// X-GitHub-Api-Version). Nil map is ignored.
+func WithExecutorExtraHeaders(headers map[string]string) ExecutorOption {
+	return func(e *Executor) {
+		if headers != nil {
+			e.extraHeaders = headers
 		}
 	}
 }
@@ -212,11 +245,11 @@ func (e *Executor) Execute(ctx context.Context, skill *Skill, input string) (*Sk
 	createdLocally := false
 	switch {
 	case e.client == nil:
-		chatter = createChatter(modelConfig, e.logger)
+		chatter = createChatter(modelConfig, e.logger, e.tokenResolver, e.extraHeaders)
 		createdLocally = true
 	case e.client.Config().ModelID != modelConfig.ModelID:
 		// AnthropicClient doesn't support SwitchModel, so create a new one
-		chatter = createChatter(modelConfig, e.logger)
+		chatter = createChatter(modelConfig, e.logger, e.tokenResolver, e.extraHeaders)
 		createdLocally = true
 	default:
 		chatter = e.client
@@ -381,11 +414,11 @@ func (e *Executor) ExecuteWithMessages(
 	createdLocally := false
 	switch {
 	case e.client == nil:
-		chatter = createChatter(modelConfig, e.logger)
+		chatter = createChatter(modelConfig, e.logger, e.tokenResolver, e.extraHeaders)
 		createdLocally = true
 	case e.client.Config().ModelID != modelConfig.ModelID:
 		// AnthropicClient doesn't support SwitchModel, so create a new one
-		chatter = createChatter(modelConfig, e.logger)
+		chatter = createChatter(modelConfig, e.logger, e.tokenResolver, e.extraHeaders)
 		createdLocally = true
 	default:
 		chatter = e.client

@@ -251,6 +251,20 @@ func (c *TokenCacheCoordinator) Clear() {
 	c.stats = CacheStats{}
 }
 
+// ClearByModelPrefix removes all cache entries whose model ID starts with the
+// given prefix. For example, prefix "gpt-4" removes entries for "gpt-4",
+// "gpt-4-turbo", etc. Returns the number of entries removed.
+func (c *TokenCacheCoordinator) ClearByModelPrefix(prefix string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	removed := c.l1Cache.ClearByKeyPrefix(prefix)
+	if c.l2Cache != nil {
+		removed += c.l2Cache.ClearByModelPrefix(prefix)
+	}
+	return removed
+}
+
 // Stats returns current cache statistics.
 func (c *TokenCacheCoordinator) Stats() CacheStats {
 	c.mu.RLock()

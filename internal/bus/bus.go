@@ -42,6 +42,7 @@ type MessageBus struct {
 	bufferSize  int
 	closed      bool
 	logger      *slog.Logger
+	messagesSent int64
 }
 
 // Config holds MessageBus configuration.
@@ -83,6 +84,7 @@ func (b *MessageBus) Publish(topic string, msg *models.BusMessage) int {
 
 	msg.Topic = topic
 	delivered := 0
+	b.messagesSent++
 
 	// Direct topic subscribers
 	for _, sub := range b.subscribers[topic] {
@@ -194,11 +196,17 @@ func (b *MessageBus) Stats() map[string]int {
 
 	stats := make(map[string]int)
 	total := 0
+	queued := 0
 	for topic, subs := range b.subscribers {
 		stats[topic] = len(subs)
 		total += len(subs)
+		for _, sub := range subs {
+			queued += len(sub.Channel)
+		}
 	}
 	stats["_total"] = total
+	stats["_messages_sent"] = int(b.messagesSent)
+	stats["_queued"] = queued
 	return stats
 }
 

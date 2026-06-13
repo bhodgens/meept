@@ -77,8 +77,8 @@ class WebSocketService {
 
   bool get isConnected => _connectionSubject.value;
 
-  /// Whether the subjects have been closed (i.e. disconnect() was called).
-  bool get _isDisposed => _connectionSubject.isClosed;
+  /// Whether disconnect() was called (subjects closed, no reconnect).
+  bool get _isDisposed => _disposed;
 
   /// Connect to WebSocket.
   ///

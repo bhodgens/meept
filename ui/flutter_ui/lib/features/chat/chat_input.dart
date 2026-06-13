@@ -202,9 +202,63 @@ class _ChatInputState extends ConsumerState<ChatInput> {
     return expanded;
   }
 
+  /// Reset all input state after sending or handling a command.
+  void _resetInputState() {
+    _controller.clear();
+    _previousText = '';
+    _pasteStore.clear();
+    _pasteCounter = 0;
+    _attachments.clear();
+    _ghostText = null;
+    _showSlashAutocomplete = false;
+    _slashQuery = '';
+  }
+
+  /// Try to handle a slash command locally.
+  ///
+  /// Returns true if the command was consumed and should NOT be sent
+  /// to the backend as a chat message. Commands that are not recognized
+  /// or need backend processing return false.
+  bool _tryHandleSlashCommand(String text) {
+    final spaceIdx = text.indexOf(' ');
+    final command = spaceIdx == -1 ? text : text.substring(0, spaceIdx);
+    // ignore: unused_local_variable -- reserved for future commands that take args
+    final args = spaceIdx == -1 ? '' : text.substring(spaceIdx + 1).trim();
+
+    switch (command) {
+      case '/new':
+        ref.read(chatProvider.notifier).clearMessages();
+        return true;
+      case '/clear':
+        ref.read(chatProvider.notifier).clearMessages();
+        return true;
+      case '/stop':
+        // Interrupt: send as steer with empty content to signal stop
+        ref.read(chatProvider.notifier).sendSteer(
+              sessionId: widget.sessionId,
+              text: '/stop',
+            );
+        return true;
+      case '/status':
+        // Open drawer to show status
+        ref.read(drawerOpenProvider.notifier).state = true;
+        return true;
+      default:
+        // Unknown or backend-handled commands: let them through as chat text
+        // so the daemon can process them (e.g. /model, /help, /task, /plan).
+        return false;
+    }
+  }
+
   void _sendNormal(String text) {
     final payload = _preparePayload(text);
     if (payload.isEmpty) return;
+
+    // Intercept slash commands that are handled locally in the UI.
+    if (_tryHandleSlashCommand(payload)) {
+      _resetInputState();
+      return;
+    }
 
     final chatNotifier = ref.read(chatProvider.notifier);
     final activeAgent = ref.read(activeAgentProvider);
@@ -215,14 +269,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
       agentId: activeAgent?.id ?? _selectedAgent,
     );
 
-    _controller.clear();
-    _previousText = '';
-    _pasteStore.clear();
-    _pasteCounter = 0;
-    _attachments.clear();
-    _ghostText = null;
-    _showSlashAutocomplete = false;
-    _slashQuery = '';
+    _resetInputState();
   }
 
   void _sendSteer(String text) {
@@ -234,14 +281,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
       text: payload,
     );
 
-    _controller.clear();
-    _previousText = '';
-    _pasteStore.clear();
-    _pasteCounter = 0;
-    _attachments.clear();
-    _ghostText = null;
-    _showSlashAutocomplete = false;
-    _slashQuery = '';
+    _resetInputState();
   }
 
   /// Handle raw key events for Enter, Shift+Enter, Escape

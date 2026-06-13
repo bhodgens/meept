@@ -333,7 +333,34 @@ class PlanPhase with _$PlanPhase {
 
 enum SearchScope { all, sessions, tasks, memories, plans }
 
+extension SearchScopeX on SearchScope {
+  String get displayName => switch (this) {
+        SearchScope.all => 'all',
+        SearchScope.sessions => 'sessions',
+        SearchScope.tasks => 'tasks',
+        SearchScope.memories => 'memories',
+        SearchScope.plans => 'plans',
+      };
+
+  String get name => switch (this) {
+        SearchScope.all => '',
+        SearchScope.sessions => 'sessions',
+        SearchScope.tasks => 'tasks',
+        SearchScope.memories => 'memories',
+        SearchScope.plans => 'plans',
+      };
+}
+
 enum SearchResultType { session, task, memory, plan }
+
+extension SearchResultTypeX on SearchResultType {
+  String get displayName => switch (this) {
+        SearchResultType.session => 'sessions',
+        SearchResultType.task => 'tasks',
+        SearchResultType.memory => 'memories',
+        SearchResultType.plan => 'plans',
+      };
+}
 
 @freezed
 class SearchResults with _$SearchResults {

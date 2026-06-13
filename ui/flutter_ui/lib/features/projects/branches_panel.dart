@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../models/api_models.dart';
 import '../../services/api_client.dart';
 import '../../providers/providers.dart';
 
@@ -37,23 +38,7 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
     });
 
     try {
-      final data = await _apiClient
-          .get<Map<String, dynamic>>('/projects/default/branches');
-      final rawBranches = data['branches'] as List?;
-      if (rawBranches == null || rawBranches.isEmpty) {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _branches = [];
-            _currentBranch = null;
-          });
-        }
-        return;
-      }
-
-      final branches = rawBranches
-          .map((b) => BranchInfo.fromJson(b as Map<String, dynamic>))
-          .toList();
+      final branches = await _apiClient.listBranches('default');
       final current = branches.where((b) => b.isCurrent).firstOrNull;
 
       if (mounted) {
@@ -81,29 +66,14 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
 
     if (confirmed == true && mounted) {
       try {
-        final data = await _apiClient
-            .post<Map<String, dynamic>>('/projects/default/checkout', data: {
-          'branch': branchName,
-        });
-        final success = data['success'] as bool? ?? false;
-        final message = data['message'] as String?;
-
-        if (success && mounted) {
-          // Refresh branch list so is_current flags are accurate
-          await _loadBranches();
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(message ?? 'switched to branch $branchName'),
-                backgroundColor: CyberpunkColors.orangePrimary,
-              ),
-            );
-          }
-        } else if (mounted) {
+        await _apiClient.checkoutBranch('default', branchName);
+        // Refresh branch list so is_current flags are accurate
+        await _loadBranches();
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(message ?? 'failed to switch branch'),
-              backgroundColor: CyberpunkColors.orangeDark,
+              content: Text('switched to branch $branchName'),
+              backgroundColor: CyberpunkColors.orangePrimary,
             ),
           );
         }
@@ -329,26 +299,6 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
           onTap: isCurrent ? null : () => _checkoutBranch(branch.name),
         );
       },
-    );
-  }
-}
-
-class BranchInfo {
-  final String name;
-  final bool isCurrent;
-  final bool isHead;
-
-  BranchInfo({
-    required this.name,
-    this.isCurrent = false,
-    this.isHead = false,
-  });
-
-  factory BranchInfo.fromJson(Map<String, dynamic> json) {
-    return BranchInfo(
-      name: json['name'] as String? ?? '',
-      isCurrent: json['is_current'] as bool? ?? false,
-      isHead: json['is_head'] as bool? ?? false,
     );
   }
 }

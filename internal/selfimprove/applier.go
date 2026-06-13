@@ -95,7 +95,7 @@ func (a *ChangeApplier) applyFix(_ context.Context, fix *ProposedFix) (*AppliedF
 	}
 
 	// Parse the diff
-	original, fixed, err := a.parseDiff(fix.Diff)
+	original, fixed, err := parseDiff(fix.Diff)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse diff: %w", err)
 	}
@@ -255,43 +255,6 @@ func (a *ChangeApplier) createBackup(fix *ProposedFix) (string, error) {
 	}
 
 	return backupPath, nil
-}
-
-// parseDiff parses a conflict-style diff.
-func (a *ChangeApplier) parseDiff(diff string) (original, fixed string, err error) {
-	lines := strings.Split(diff, "\n")
-	inOriginal := false
-	inFixed := false
-	var origLines, fixedLines []string
-
-	for _, line := range lines {
-		if strings.HasPrefix(line, "<<<<<<< ORIGINAL") {
-			inOriginal = true
-			continue
-		}
-		if line == "=======" {
-			inOriginal = false
-			inFixed = true
-			continue
-		}
-		if strings.HasPrefix(line, ">>>>>>> FIXED") {
-			inFixed = false
-			continue
-		}
-
-		if inOriginal {
-			origLines = append(origLines, line)
-		}
-		if inFixed {
-			fixedLines = append(fixedLines, line)
-		}
-	}
-
-	if len(origLines) == 0 && len(fixedLines) == 0 {
-		return "", "", fmt.Errorf("could not parse diff")
-	}
-
-	return strings.Join(origLines, "\n"), strings.Join(fixedLines, "\n"), nil
 }
 
 // hasGit checks if the project has a git repository.

@@ -150,7 +150,7 @@ func (v *FixValidator) copyProject(sandboxPath string) error {
 // applyFix applies a fix to the sandbox.
 func (v *FixValidator) applyFix(sandboxPath string, fix *ProposedFix) error {
 	// Parse the diff to extract original and fixed code
-	original, fixed, err := v.parseDiff(fix.Diff)
+	original, fixed, err := parseDiff(fix.Diff)
 	if err != nil {
 		return err
 	}
@@ -180,43 +180,6 @@ func (v *FixValidator) applyFix(sandboxPath string, fix *ProposedFix) error {
 	}
 
 	return os.WriteFile(filePath, []byte(newContent), 0o644) //nolint:gosec // workspace plan/data files are user-readable
-}
-
-// parseDiff parses a conflict-style diff.
-func (v *FixValidator) parseDiff(diff string) (original, fixed string, err error) {
-	lines := strings.Split(diff, "\n")
-	inOriginal := false
-	inFixed := false
-	var origLines, fixedLines []string
-
-	for _, line := range lines {
-		if strings.HasPrefix(line, "<<<<<<< ORIGINAL") {
-			inOriginal = true
-			continue
-		}
-		if line == "=======" {
-			inOriginal = false
-			inFixed = true
-			continue
-		}
-		if strings.HasPrefix(line, ">>>>>>> FIXED") {
-			inFixed = false
-			continue
-		}
-
-		if inOriginal {
-			origLines = append(origLines, line)
-		}
-		if inFixed {
-			fixedLines = append(fixedLines, line)
-		}
-	}
-
-	if len(origLines) == 0 && len(fixedLines) == 0 {
-		return "", "", fmt.Errorf("could not parse diff")
-	}
-
-	return strings.Join(origLines, "\n"), strings.Join(fixedLines, "\n"), nil
 }
 
 // runBuild runs the build in the sandbox.

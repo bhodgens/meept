@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../models/api_models.dart';
-import '../../providers/plan_provider.dart';
 import '../../providers/providers.dart';
 
 class PlansTab extends ConsumerStatefulWidget {

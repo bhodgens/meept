@@ -64,10 +64,13 @@ func NewQAgent(logger *slog.Logger, cfg config.QAgentConfig, memvidClient *memvi
 		AgentDesignerConfig{},
 	)
 
+	homeDir, _ := os.UserHomeDir()
+	skillsDir := filepath.Join(homeDir, ".meept", "skills")
+
 	skillDesigner := NewSkillDesigner(
 		logger,
 		SkillDesignerConfig{
-			SkillsDir: "~/.meept/skills",
+			SkillsDir: skillsDir,
 		},
 	)
 

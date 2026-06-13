@@ -79,6 +79,7 @@ class TtsNotifier extends StateNotifier<TtsState> {
     if (!_enabled) {
       stop();
     }
+    _saveSettings();
   }
 
   /// Set TTS enabled state.

@@ -350,6 +350,28 @@ func (c *L2Cache) Clear() {
 	c.logger.Debug("L2 cache cleared")
 }
 
+// ClearByModelPrefix removes all cache entries whose model_id starts with the
+// given prefix. Returns the number of entries removed.
+func (c *L2Cache) ClearByModelPrefix(prefix string) int {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Use LIKE with a trailing wildcard to match model_id prefix.
+	result, err := c.pool.Exec(ctx, `DELETE FROM token_cache WHERE model_id LIKE ?`, prefix+"%")
+	if err != nil {
+		c.logger.Error("L2 clear by model prefix failed", "prefix", prefix, "error", err)
+		return 0
+	}
+
+	removed, _ := result.RowsAffected()
+	if removed > 0 {
+		c.recordEvictionMetric(removed, "model_prefix_clear")
+		c.recordEntryCountMetric()
+		c.logger.Debug("L2 cleared by model prefix", "prefix", prefix, "removed", removed)
+	}
+	return int(removed)
+}
+
 // Count returns the number of entries in the cache.
 func (c *L2Cache) Count() int {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

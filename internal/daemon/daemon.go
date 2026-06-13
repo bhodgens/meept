@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -1131,7 +1132,7 @@ func (d *Daemon) reloadConfig(ctx context.Context) error {
 		// Re-register MCP tools with the tool registry
 		// First, unregister old MCP tools (those with "." in name indicating server.tool format)
 		for _, name := range d.components.ToolRegistry.Names() {
-			if hasDot(name) {
+			if strings.Contains(name, ".") {
 				if err := d.components.ToolRegistry.Unregister(name); err != nil {
 					d.logger.Debug("daemon: failed to unregister old MCP tool", "name", name, "error", err)
 				}
@@ -1150,16 +1151,6 @@ func (d *Daemon) reloadConfig(ctx context.Context) error {
 
 	d.logger.Info("daemon: configuration reloaded successfully")
 	return nil
-}
-
-// hasDot checks if a string contains a dot.
-func hasDot(s string) bool {
-	for _, c := range s {
-		if c == '.' {
-			return true
-		}
-	}
-	return false
 }
 
 // Status returns the current daemon status.

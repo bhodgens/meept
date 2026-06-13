@@ -181,6 +181,27 @@ func (c *L1Cache) Clear() {
 	c.logger.Debug("L1 cache cleared")
 }
 
+// ClearByKeyPrefix removes all entries whose composite key starts with the
+// given prefix. L1 keys are formatted as "modelID:promptHash:..." so a model
+// ID prefix filters by model. Returns the number of entries removed.
+func (c *L1Cache) ClearByKeyPrefix(prefix string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	removed := 0
+	for k := range c.entries {
+		if strings.HasPrefix(k, prefix) {
+			delete(c.entries, k)
+			removed++
+		}
+	}
+	if removed > 0 {
+		c.recordEntryCountMetric()
+		c.logger.Debug("L1 cache cleared by key prefix", "prefix", prefix, "removed", removed)
+	}
+	return removed
+}
+
 // Count returns the number of entries.
 func (c *L1Cache) Count() int {
 	c.mu.RLock()

@@ -85,7 +85,9 @@ func (s *BusService) Stats(ctx context.Context) (*BusStatsResponse, error) {
 
 	raw := s.bus.Stats()
 	resp := &BusStatsResponse{
-		Subscribers: raw["_total"],
+		Subscribers:    raw["_total"],
+		MessagesSent:   int64(raw["_messages_sent"]),
+		QueuedMessages: raw["_queued"],
 	}
 	return resp, nil
 }

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../models/api_models.dart';
+import '../../services/api_client.dart';
 import '../../providers/providers.dart';
 
 /// SearchPanel provides full-text search across sessions, tasks, memories, and plans.
@@ -19,12 +20,12 @@ class SearchPanel extends ConsumerStatefulWidget {
 
 class _SearchPanelState extends ConsumerState<SearchPanel> {
   final _searchController = TextEditingController();
-  final _debouncer = Debouncer(delay: const Duration(milliseconds: 300));
+  final _debouncer = _Debouncer(delay: const Duration(milliseconds: 300));
 
   late final ApiClient _apiClient;
   late final VoidCallback _searchListener;
 
-  List<SearchResult> _results = [];
+  List<SearchResultItem> _results = [];
   bool _isSearching = false;
   String _lastQuery = '';
   SearchScope _scope = SearchScope.all;
@@ -69,30 +70,14 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
     });
 
     try {
-      final scopeName = _scope == SearchScope.all ? '' : _scope.name;
-      final data = await _apiClient.post<Map<String, dynamic>>(
-        '/search',
-        data: {
-          'query': query,
-          if (scopeName.isNotEmpty) 'scope': scopeName,
-        },
+      final searchResults = await _apiClient.search(
+        query: query,
+        scope: _scope,
       );
 
       if (!mounted) return;
 
-      final rawResults = data['results'] as List?;
-      final List<SearchResult> parsed = [];
-      if (rawResults != null) {
-        for (final r in rawResults) {
-          final map = r as Map<String, dynamic>;
-          parsed.add(SearchResult(
-            type: _parseResultType(map['type'] as String?),
-            id: map['id'] as String? ?? '',
-            title: map['title'] as String? ?? '',
-            snippet: map['snippet'] as String? ?? '',
-          ));
-        }
-      }
+      final List<SearchResultItem> parsed = searchResults.results;
 
       setState(() {
         _isSearching = false;
@@ -111,21 +96,6 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
         _isSearching = false;
         _error = 'search failed: $e';
       });
-    }
-  }
-
-  SearchResultType _parseResultType(String? type) {
-    switch (type) {
-      case 'session':
-        return SearchResultType.session;
-      case 'task':
-        return SearchResultType.task;
-      case 'memory':
-        return SearchResultType.memory;
-      case 'plan':
-        return SearchResultType.plan;
-      default:
-        return SearchResultType.session;
     }
   }
 
@@ -345,7 +315,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
 
   Widget _buildResults() {
     // Group results by type
-    final grouped = <SearchResultType, List<SearchResult>>{};
+    final grouped = <SearchResultType, List<SearchResultItem>>{};
     for (final result in _results) {
       grouped.putIfAbsent(result.type, () => []).add(result);
     }
@@ -378,7 +348,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
     );
   }
 
-  Widget _buildResultTile(SearchResult result) {
+  Widget _buildResultTile(SearchResultItem result) {
     return ListTile(
       title: Text(
         result.title,
@@ -409,68 +379,12 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
   }
 }
 
-enum SearchScope {
-  all,
-  sessions,
-  tasks,
-  memories,
-  plans;
-
-  String get displayName {
-    switch (this) {
-      case SearchScope.all:
-        return 'all';
-      case SearchScope.sessions:
-        return 'sessions';
-      case SearchScope.tasks:
-        return 'tasks';
-      case SearchScope.memories:
-        return 'memories';
-      case SearchScope.plans:
-        return 'plans';
-    }
-  }
-}
-
-enum SearchResultType {
-  session,
-  task,
-  memory,
-  plan;
-
-  String get displayName {
-    switch (this) {
-      case SearchResultType.session:
-        return 'sessions';
-      case SearchResultType.task:
-        return 'tasks';
-      case SearchResultType.memory:
-        return 'memories';
-      case SearchResultType.plan:
-        return 'plans';
-    }
-  }
-}
-
-class SearchResult {
-  final SearchResultType type;
-  final String id;
-  final String title;
-  final String snippet;
-
-  SearchResult({
-    required this.type,
-    required this.id,
-    required this.title,
-    this.snippet = '',
-  });
-}
-
-class Debouncer {
+/// Private debounce helper — file-local to avoid polluting the public API.
+class _Debouncer {
   final Duration delay;
   Timer? _timer;
 
-  Debouncer({required this.delay});
+  _Debouncer({required this.delay});
 
   void run(VoidCallback action) {
     _timer?.cancel();
