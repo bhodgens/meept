@@ -35,11 +35,10 @@ abstract class AppConstants {
   static const String ttsMaxQueueSizePref = 'tts_max_queue_size';
   // NOTE: use_tls was removed — HTTPS is mandatory and not configurable
 
-  // Default development API key (matches pkg/constants/api_key.go).
-  // WARNING: This should NEVER be used as a fallback. It is only here for
-  // documentation purposes. Users must configure their own API key via settings.
-  // Using this default key in production is a security risk.
-  static const String defaultApiKey = 'MEEPT_DEV_KEY_REPLACE_ME';
+  // Default development API key (must match pkg/constants/api_key.go).
+  // Used automatically when the user hasn't configured a custom key.
+  // In production, generate a custom key via `meept token generate --save`.
+  static const String defaultApiKey = 'meept_dev_default_key_CHANGE_ME';
 
   // Agent IDs (must match backend)
   static const String agentDispatcher = 'dispatcher';

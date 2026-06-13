@@ -51,10 +51,12 @@ class StorageService {
   /// Read API key synchronously.
   /// Returns the cached keychain value if [init] has been awaited,
   /// otherwise falls back to SharedPreferences for backward compatibility.
-  /// Returns null if no API key is configured - caller must handle this case.
+  /// Falls back to the default dev key when no key is configured.
   String? getApiKey() {
-    if (_cachedApiKey != null) return _cachedApiKey;
-    return _prefs?.getString(AppConstants.apiKeyPref);
+    if (_cachedApiKey != null && _cachedApiKey!.isNotEmpty) return _cachedApiKey;
+    final prefsKey = _prefs?.getString(AppConstants.apiKeyPref);
+    if (prefsKey != null && prefsKey.isNotEmpty) return prefsKey;
+    return AppConstants.defaultApiKey;
   }
 
   /// Read API key from keychain (async) for full security.

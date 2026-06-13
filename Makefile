@@ -508,6 +508,12 @@ ifeq ($(GUI_PLATFORM),macos)
 	fi
 	@echo "Running CocoaPods install for macOS Flutter app..."
 	cd $(FLUTTER_UI_DIR)/macos && pod install
+	@echo "Applying Swift 6 compatibility patch for flutter_tts..."
+	@if [ -f "$(FLUTTER_UI_DIR)/patch-flutter-tts.sh" ]; then \
+		$(FLUTTER_UI_DIR)/patch-flutter-tts.sh; \
+	else \
+		echo "Warning: patch-flutter-tts.sh not found, Swift 6 warnings may appear"; \
+	fi
 endif
 	@echo "Flutter dependencies check complete."
 
