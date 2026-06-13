@@ -545,31 +545,6 @@ func (c *Consolidator) deduplicateTasks(ctx context.Context) (int, error) {
 	return removed, nil
 }
 
-// PruneOld removes memories older than maxAge.
-func (c *Consolidator) PruneOld(ctx context.Context, maxAge time.Duration) (int, error) {
-	cutoff := time.Now().Add(-maxAge)
-	pruned := 0
-
-	// Prune old memories via backend
-	oldMemories, err := c.backend.GetOldMemories(ctx, cutoff, 1000)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get old memories: %w", err)
-	}
-
-	if len(oldMemories) > 0 {
-		ids := make([]string, len(oldMemories))
-		for i, m := range oldMemories {
-			ids[i] = m.Memory.ID
-		}
-		deleted, err := c.backend.DeleteByIDs(ctx, ids)
-		if err != nil {
-			return pruned, fmt.Errorf("failed to prune memories: %w", err)
-		}
-		pruned += deleted
-	}
-
-	return pruned, nil
-}
 
 // StartPeriodicConsolidation starts a background goroutine that runs
 // consolidation at the specified interval.

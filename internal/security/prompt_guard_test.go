@@ -274,32 +274,6 @@ func TestExtractToolOutput(t *testing.T) {
 	}
 }
 
-func TestStripBoundaryMarkers(t *testing.T) {
-	input := `Text <<<USER_INPUT>>>
-User content
-<<<END_USER_INPUT>>>
-More text <<<TOOL_OUTPUT:shell>>>
-Tool result
-<<<END_TOOL_OUTPUT>>>`
-
-	result := StripBoundaryMarkers(input)
-
-	if strings.Contains(result, "<<<USER_INPUT>>>") {
-		t.Error("Should strip user input start marker")
-	}
-	if strings.Contains(result, "<<<END_USER_INPUT>>>") {
-		t.Error("Should strip user input end marker")
-	}
-	if strings.Contains(result, "<<<TOOL_OUTPUT:shell>>>") {
-		t.Error("Should strip tool output start marker")
-	}
-	if strings.Contains(result, "<<<END_TOOL_OUTPUT>>>") {
-		t.Error("Should strip tool output end marker")
-	}
-	if !strings.Contains(result, "User content") {
-		t.Error("Should preserve content between markers")
-	}
-}
 
 func TestPromptGuardReminderIntervalMinimum(t *testing.T) {
 	// Test that interval is clamped to minimum of 1

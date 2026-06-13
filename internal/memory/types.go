@@ -139,25 +139,6 @@ func ParseMetadata(jsonStr string) map[string]any {
 	return meta
 }
 
-// Backend is the interface that memory storage backends must implement.
-type Backend interface {
-	// Initialize sets up the backend.
-	Initialize() error
-	// Store persists a memory and returns its ID.
-	Store(content string, category string, metadata map[string]any) (string, error)
-	// Search finds memories matching the query.
-	Search(query string, limit int) ([]MemoryResult, error)
-	// GetRecent retrieves the most recent memories.
-	GetRecent(limit int) ([]MemoryResult, error)
-	// Delete removes a memory by ID.
-	Delete(id string) error
-	// DeleteByIDs removes multiple memories by ID.
-	DeleteByIDs(ids []string) (int, error)
-	// Count returns the total number of memories.
-	Count() (int, error)
-	// Close releases resources.
-	Close() error
-}
 
 // ConsolidationBackend provides the data operations needed for memory consolidation.
 // Implementations wrap specific storage backends (SQLite, memvid, etc.).
