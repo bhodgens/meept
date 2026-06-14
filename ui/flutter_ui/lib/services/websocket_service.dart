@@ -104,24 +104,31 @@ class WebSocketService {
   /// backoff and retry.  Exits only when [_disposed] or
   /// [_wasExplicitlyDisconnected] is set.
   Future<void> _connectWithRetry(String wsPath) async {
-    while (!_disposed && !_wasExplicitlyDisconnected) {
-      try {
-        await _openConnection(wsPath);
-        // Connection succeeded and the WebSocket stream ended (onDone).
-        // Reset retry count (already done in _openConnection on first
-        // message) and loop back to reconnect.
-        if (_disposed || _wasExplicitlyDisconnected) return;
-        _errorSubject.addSafe('Connection closed, reconnecting...');
-        final delay = _nextReconnectDelay();
-        await Future<void>.delayed(delay);
-      } catch (e) {
-        if (_disposed || _wasExplicitlyDisconnected) return;
-        _errorSubject.addSafe('Reconnecting: $e');
-        final delay = _nextReconnectDelay();
-        await Future<void>.delayed(delay);
+    // try/finally ensures _isConnecting is reset on EVERY exit path,
+    // including the early `return` statements when pause()/disconnect()
+    // is called mid-loop. Without this, the next connect() call would
+    // see _isConnecting stuck true and refuse to reconnect.
+    try {
+      while (!_disposed && !_wasExplicitlyDisconnected) {
+        try {
+          await _openConnection(wsPath);
+          // Connection succeeded and the WebSocket stream ended (onDone).
+          // Reset retry count (already done in _openConnection on first
+          // message) and loop back to reconnect.
+          if (_disposed || _wasExplicitlyDisconnected) return;
+          _errorSubject.addSafe('Connection closed, reconnecting...');
+          final delay = _nextReconnectDelay();
+          await Future<void>.delayed(delay);
+        } catch (e) {
+          if (_disposed || _wasExplicitlyDisconnected) return;
+          _errorSubject.addSafe('Reconnecting: $e');
+          final delay = _nextReconnectDelay();
+          await Future<void>.delayed(delay);
+        }
       }
+    } finally {
+      _isConnecting = false;
     }
-    _isConnecting = false;
   }
 
   /// Send any subscribe messages that were queued before the connection

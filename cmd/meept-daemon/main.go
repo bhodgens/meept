@@ -8,7 +8,9 @@ import (
 	_ "modernc.org/sqlite" // Ensure sqlite driver is registered for side effects
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -165,8 +167,11 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		RequireConfirmationCritical: appCfg.Security.RequireConfirmationCritical,
 	}
 
-	// Override with command-line flags
-	if stateDir != "" {
+	// Override with command-line flags.
+	// Use Changed() instead of `stateDir != ""` because the flag has a
+	// non-empty default, so the truthy check would always fire and clobber
+	// any daemon.socket_path / daemon.pid_file values from the config file.
+	if cmd.Flags().Changed("state-dir") {
 		daemonCfg.StateDir = stateDir
 		daemonCfg.SocketPath = filepath.Join(stateDir, "meept.sock")
 		daemonCfg.PIDFile = filepath.Join(stateDir, "meept.pid")
@@ -203,7 +208,7 @@ func loadConfigByExtension(path string) (*config.Config, error) {
 
 func checkStatus(cmd *cobra.Command, args []string) error {
 	cfg := daemon.DefaultConfig()
-	if stateDir != "" {
+	if cmd.Flags().Changed("state-dir") {
 		cfg.PIDFile = filepath.Join(stateDir, "meept.pid")
 	}
 
@@ -216,7 +221,26 @@ func checkStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read PID file: %w", err)
 	}
 
-	fmt.Printf("Daemon is running (PID %s)\n", string(data))
+	// Verify the PID is actually alive — stale PID files are left behind
+	// by crashes, so reading the file alone is insufficient evidence that
+	// the daemon is running.
+	pidStr := strings.TrimSpace(string(data))
+	pid, perr := strconv.Atoi(pidStr)
+	if perr != nil {
+		fmt.Printf("Daemon PID file is corrupt (expected integer, got %q)\n", pidStr)
+		return nil
+	}
+	proc, ferr := os.FindProcess(pid)
+	if ferr != nil {
+		fmt.Printf("Daemon PID %d not found\n", pid)
+		return nil
+	}
+	if serr := proc.Signal(syscall.Signal(0)); serr != nil {
+		fmt.Printf("Daemon is not running (stale PID file: PID %d not alive)\n", pid)
+		return nil
+	}
+
+	fmt.Printf("Daemon is running (PID %d)\n", pid)
 	return nil
 }
 

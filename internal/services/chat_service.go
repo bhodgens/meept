@@ -101,7 +101,13 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 		"conversation_id": conversationID,
 		"agent_id":        req.AgentID,
 	}
-	payloadBytes, _ := json.Marshal(payload)
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		// Marshal failures on a simple map literal are extremely unlikely,
+		// but if it happens, fail loudly rather than publishing an empty
+		// payload that hangs the request until the 2-minute timeout.
+		return nil, wrapError("chat", "Chat", fmt.Errorf("marshal chat payload: %w", err))
+	}
 	msg := &models.BusMessage{
 		ID:      msgID,
 		Type:    models.MessageTypeRequest,

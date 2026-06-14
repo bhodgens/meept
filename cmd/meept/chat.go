@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
@@ -82,8 +83,10 @@ func runChat(cmd *cobra.Command, args []string) error {
 	}
 	defer client.Close()
 
-	// Generate a conversation ID for this single message
-	conversationID := fmt.Sprintf("cli-%d", os.Getpid())
+	// Generate a conversation ID for this single message.
+	// Include a nanosecond timestamp so multiple `meept "msg"` invocations
+	// from the same shell do not collide in the session store.
+	conversationID := fmt.Sprintf("cli-%d-%d", os.Getpid(), time.Now().UnixNano())
 
 	// If --project or --nofence are set, create a managed session and bind project
 	if chatProject != "" || chatNoFence {

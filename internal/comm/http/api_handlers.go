@@ -2827,14 +2827,14 @@ func (s *Server) handleMemoryVectorSearch(w http.ResponseWriter, r *http.Request
 	}
 
 	var req services.VectorSearchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBodySize)).Decode(&req); err != nil {
 		s.writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	results, err := s.services.Memory.VectorSearch(r.Context(), req)
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.handleServiceError(w, err)
 		return
 	}
 
@@ -2849,13 +2849,13 @@ func (s *Server) handleMemoryVectorStore(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req services.VectorStoreRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBodySize)).Decode(&req); err != nil {
 		s.writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if err := s.services.Memory.VectorStore(r.Context(), req); err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.handleServiceError(w, err)
 		return
 	}
 

@@ -962,6 +962,14 @@ func (c *Conversation) Clone() *Conversation {
 		maps.Copy(clone.anchorMessages, c.anchorMessages)
 	}
 
+	// Preserve cache-related fields so prefix-cache invalidation and
+	// snapshot-based prompt building behave consistently on a cloned
+	// conversation (used by branching, pair sessions, and snapshots).
+	clone.memoryContext = c.memoryContext
+	clone.memorySnapshot = c.memorySnapshot
+	clone.cachePrefixHash = c.cachePrefixHash
+	clone.cachePrefixChanged = c.cachePrefixChanged
+
 	return clone
 }
 

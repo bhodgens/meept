@@ -390,8 +390,13 @@ func (w *Watchdog) checkWorkers() {
 			})
 		}
 
-		// Check for stuck state (same stage for too many iterations)
-		if state.Iteration >= stuckCount && state.LastHeartbeat.Sub(state.StartTime) < time.Second {
+		// Check for stuck state: same stage for too many iterations AND the
+		// worker's heartbeat is stale (worker is not making forward progress).
+		// The original condition `state.LastHeartbeat.Sub(state.StartTime) < time.Second`
+		// was always false for workers with stuckCount+ iterations (they've
+		// been alive longer than 1 second by definition), making this dead code.
+		// Compare heartbeat staleness against `now` instead.
+		if state.Iteration >= stuckCount && now.Sub(state.LastHeartbeat) > time.Duration(w.config.HeartbeatIntervalSec*2)*time.Second {
 			state.IsStuck = true
 			w.logger.Warn("Worker appears stuck",
 				"worker_id", workerID,

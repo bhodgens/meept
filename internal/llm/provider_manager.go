@@ -351,7 +351,21 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 		}
 
 		start := time.Now()
-		resp, err := entry.Chatter.Chat(ctx, messages, opts...)
+
+		// Create timeout context for this attempt, mirroring Chat() so a
+		// stalled primary yields to failover under progress-based calls too.
+		// Without this, a hung provider blocks all progress-based callers
+		// indefinitely.
+		var attemptCtx context.Context
+		var cancel context.CancelFunc
+		if pm.config.FailoverTimeout > 0 {
+			attemptCtx, cancel = context.WithTimeout(ctx, pm.config.FailoverTimeout)
+		} else {
+			attemptCtx, cancel = context.WithCancel(ctx)
+		}
+		resp, err := entry.Chatter.Chat(attemptCtx, messages, opts...)
+		cancel()
+
 		latency := time.Since(start)
 
 		if err != nil {

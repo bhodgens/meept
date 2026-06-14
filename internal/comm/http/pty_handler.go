@@ -60,7 +60,7 @@ func (h *PTYHandler) handleSessions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req PTYSessionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBodySize)).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -208,7 +208,7 @@ func (h *PTYHandler) writeToSession(w http.ResponseWriter, r *http.Request, sess
 	var req struct {
 		Input string `json:"input"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBodySize)).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

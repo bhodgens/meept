@@ -2,14 +2,30 @@
 package http
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/tailscale/hujson"
 )
+
+// validAgentID matches safe agent identifiers used as directory names.
+// Disallows path separators, dots, and other shell/path metacharacters
+// to prevent path traversal in GetAgent/SaveAgent/DeleteAgent.
+var validAgentID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// validateAgentID returns an error if id is not a safe agent identifier
+// (rejects "..", "/", "\", and any non-[A-Za-z0-9_-] character).
+func validateAgentID(id string) error {
+	if id == "" || !validAgentID.MatchString(id) {
+		return errors.New("invalid agent id: must be non-empty and match [A-Za-z0-9_-]+")
+	}
+	return nil
+}
 
 // ConfigService handles configuration file operations.
 type ConfigService struct {
@@ -297,6 +313,9 @@ func (s *ConfigService) ListAgents() ([]AgentInfo, error) {
 
 // GetAgent gets a specific agent's configuration.
 func (s *ConfigService) GetAgent(id string) (*Agent, error) {
+	if err := validateAgentID(id); err != nil {
+		return nil, err
+	}
 	agentsDir := s.getAgentsDir()
 
 	// Check if agents directory exists
@@ -361,6 +380,9 @@ func (s *ConfigService) GetAgent(id string) (*Agent, error) {
 
 // SaveAgent saves an agent's configuration.
 func (s *ConfigService) SaveAgent(id string, agent *Agent) error {
+	if err := validateAgentID(id); err != nil {
+		return err
+	}
 	agentsDir := s.getAgentsDir()
 
 	// Create agent directory
@@ -397,6 +419,9 @@ func (s *ConfigService) SaveAgent(id string, agent *Agent) error {
 
 // DeleteAgent deletes an agent.
 func (s *ConfigService) DeleteAgent(id string) error {
+	if err := validateAgentID(id); err != nil {
+		return err
+	}
 	agentsDir := s.getAgentsDir()
 	agentDir := filepath.Join(agentsDir, id)
 

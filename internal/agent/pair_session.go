@@ -139,7 +139,14 @@ func (pc *PairContext) ReviewerPrompt(actorOutput string) string {
 	if len(pc.Attempts) > 1 {
 		prompt += "## Prior Rounds Summary\n\n"
 		for _, a := range pc.Attempts[:len(pc.Attempts)-1] {
-			prompt += fmt.Sprintf("- Round %d: %s\n", a.Round, a.Review.Status)
+			// Attempt.Review is a pointer and may be nil if a round was
+			// recorded without a review (reviewer error, context cancel).
+			// Guard against nil deref when summarizing prior rounds.
+			status := "pending"
+			if a.Review != nil {
+				status = string(a.Review.Status)
+			}
+			prompt += fmt.Sprintf("- Round %d: %s\n", a.Round, status)
 		}
 		prompt += "\n"
 	}
