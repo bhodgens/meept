@@ -482,6 +482,13 @@ func (c *ContextCompressor) Stats() CompressionStatsSnapshot {
 // critical messages, and the last n non-system messages from the input slice.
 // Critical messages that would otherwise fall outside the tail window are
 // retained in their original order.
+
+// keepTail is the shared helper that preserves all system messages, all
+// critical messages, and the last n non-system messages from the input slice.
+// Critical messages that would otherwise fall outside the tail window are
+// retained in their original order.
+// D1 FIX: Also preserves tool-call/tool-result pairing to prevent orphaned
+// tool results that cause API rejections.
 func keepTail(messages []ChatMessage, n int) []ChatMessage {
 	var systemMsgs []ChatMessage
 	var nonSystemMsgs []ChatMessage
@@ -494,9 +501,35 @@ func keepTail(messages []ChatMessage, n int) []ChatMessage {
 		}
 	}
 
+	// D1 FIX: Build keep set with tool-call/tool-result pairing
+	keepSet := make(map[int]bool)
+
+	// First: identify tool results and mark their parent assistant tool_call messages
+	for i := len(nonSystemMsgs) - 1; i >= 0; i-- {
+		msg := nonSystemMsgs[i]
+		if msg.Role == RoleTool && msg.ToolCallID != "" {
+			// Keep this tool result
+			keepSet[i] = true
+			// Find and mark the parent assistant message with matching tool call
+			for j := i - 1; j >= 0; j-- {
+				parent := nonSystemMsgs[j]
+				if parent.Role == RoleAssistant {
+					// Check if this assistant message has the matching tool call
+					for _, tc := range parent.ToolCalls {
+						if tc.ID == msg.ToolCallID {
+							keepSet[j] = true
+							break
+						}
+					}
+					// Stop at first assistant message
+					break
+				}
+			}
+		}
+	}
+
 	// Determine which non-system messages to keep: the tail of n plus any
 	// critical messages that fall outside the tail window.
-	keepSet := make(map[int]bool)
 	tailStart := max(len(nonSystemMsgs)-n, 0)
 	for i := tailStart; i < len(nonSystemMsgs); i++ {
 		keepSet[i] = true

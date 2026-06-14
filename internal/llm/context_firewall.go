@@ -598,7 +598,7 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 				// Append remaining chunks as new messages
 				for _, chunk := range chunks[1:] {
 					result = append(result, ChatMessage{
-						Role:    RoleUser,
+						Role:    lastMsg.Role,
 						Content: chunk,
 					})
 				}
@@ -639,6 +639,10 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 
 // dropOldContext removes old messages, keeping only system prompt and last 2 messages.
 // This is used when the hard limit is exceeded to quickly free up context space.
+
+// dropOldContext removes old messages while preserving tool-call/tool-result pairing.
+// This is used when the hard limit is exceeded to quickly free up context space.
+// D1 FIX: Walk backward from tail, keeping tool-results AND their parent tool_calls.
 func (f *ContextFirewall) dropOldContext(messages []ChatMessage) []ChatMessage {
 	if len(messages) <= 3 {
 		return messages // Already minimal
@@ -656,15 +660,48 @@ func (f *ContextFirewall) dropOldContext(messages []ChatMessage) []ChatMessage {
 		}
 	}
 
-	// Keep system + last 2 non-system messages
-	result := make([]ChatMessage, 0, len(systemMsgs)+2)
-	result = append(result, systemMsgs...)
+	// D1 FIX: Build keep set for non-system messages.
+	// Walk backward from tail, keeping tool-results AND their parent tool_calls.
+	keepSet := make(map[int]bool)
 
-	// Keep last 2 messages
-	if len(nonSystemMsgs) > 2 {
-		result = append(result, nonSystemMsgs[len(nonSystemMsgs)-2:]...)
-	} else {
-		result = append(result, nonSystemMsgs...)
+	// First: identify tool results and mark their parent assistant tool_call messages
+	for i := len(nonSystemMsgs) - 1; i >= 0; i-- {
+		msg := nonSystemMsgs[i]
+		if msg.Role == RoleTool && msg.ToolCallID != "" {
+			// Keep this tool result
+			keepSet[i] = true
+			// Find and mark the parent assistant message with matching tool call
+			for j := i - 1; j >= 0; j-- {
+				parent := nonSystemMsgs[j]
+				if parent.Role == RoleAssistant {
+					// Check if this assistant message has the matching tool call
+					for _, tc := range parent.ToolCalls {
+						if tc.ID == msg.ToolCallID {
+							keepSet[j] = true
+							break
+						}
+					}
+					// Stop at first assistant message (tool calls are in immediate parent)
+					break
+				}
+			}
+		}
+	}
+
+	// Now keep the last N non-system messages, plus any marked for tool pairing
+	const minTail = 4 // Keep at least 4 non-system messages for coherent context
+	tailStart := max(len(nonSystemMsgs)-minTail, 0)
+	for i := tailStart; i < len(nonSystemMsgs); i++ {
+		keepSet[i] = true
+	}
+
+	// Build result preserving original order
+	result := make([]ChatMessage, 0, len(systemMsgs)+len(keepSet))
+	result = append(result, systemMsgs...)
+	for i, msg := range nonSystemMsgs {
+		if keepSet[i] {
+			result = append(result, msg)
+		}
 	}
 
 	dropped := len(messages) - len(result)
@@ -681,8 +718,6 @@ func (f *ContextFirewall) dropOldContext(messages []ChatMessage) []ChatMessage {
 
 	return result
 }
-
-// chunkMessage splits a message at paragraph or sentence boundaries.
 func (f *ContextFirewall) chunkMessage(content string, maxTokens int) []string {
 	// Estimate max characters based on 3 chars per token
 	maxChars := maxTokens * 3
