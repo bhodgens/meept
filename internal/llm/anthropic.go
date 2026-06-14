@@ -185,7 +185,11 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 				)
 				lastErr = err
 				if attempt < anthropicMaxRetries {
+					// D11: Prefer Retry-After header from rate limit response
 					sleepDuration := time.Duration(anthropicRetryBackoff*float64(attempt)) * time.Second
+					if rlErr, ok := err.(*RateLimitError); ok && rlErr.RetryAfter > 0 {
+						sleepDuration = rlErr.RetryAfter
+					}
 					select {
 					case <-time.After(sleepDuration):
 						continue
@@ -328,7 +332,11 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 				)
 				lastErr = err
 				if attempt < anthropicMaxRetries {
+					// D11: Prefer Retry-After header from rate limit response
 					sleepDuration := time.Duration(anthropicRetryBackoff*float64(attempt)) * time.Second
+					if rlErr, ok := err.(*RateLimitError); ok && rlErr.RetryAfter > 0 {
+						sleepDuration = rlErr.RetryAfter
+					}
 					select {
 					case <-time.After(sleepDuration):
 						continue
