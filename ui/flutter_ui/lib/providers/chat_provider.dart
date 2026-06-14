@@ -217,9 +217,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
     );
 
     try {
+      Map<String, dynamic>? chatResp;
       switch (endpoint) {
         case _SendEndpoint.normal:
-          await apiClient.sendChatMessage(
+          chatResp = await apiClient.sendChatMessage(
             message: text,
             conversationId: sessionId,
             agentId: agentId,
@@ -237,10 +238,28 @@ class ChatNotifier extends StateNotifier<ChatState> {
             source: 'flutter_ui',
           );
       }
-      state = ChatState(
-        messages: state.messages,
-        isLoading: false,
-      );
+
+      // Check for agent-side errors in the response body (LLM failures, etc.)
+      if (chatResp != null && chatResp['error'] != null) {
+        final errorMsg = chatResp['error'].toString();
+        // Add error as a system message so it's visible in the chat history
+        final errMessage = ChatMessage(
+          id: 'error_${DateTime.now().millisecondsSinceEpoch}',
+          role: 'system',
+          content: errorMsg,
+          timestamp: DateTime.now(),
+        );
+        state = ChatState(
+          messages: [...state.messages, errMessage],
+          isLoading: false,
+          error: errorMsg,
+        );
+      } else {
+        state = ChatState(
+          messages: state.messages,
+          isLoading: false,
+        );
+      }
     } catch (e) {
       // Extract URL from DioException for better error messages.
       String errorStr;

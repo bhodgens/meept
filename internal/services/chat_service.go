@@ -33,6 +33,7 @@ type ChatResponse struct {
 	Reply      string `json:"reply"`
 	Model      string `json:"model,omitempty"`
 	TokensUsed int    `json:"tokens_used,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 // NewChatService creates a chat service.
@@ -156,6 +157,7 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 			Reply      string `json:"reply"`
 			Model      string `json:"model,omitempty"`
 			TokensUsed int    `json:"tokens_used,omitempty"`
+			Error      string `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(resp.Payload, &reply); err != nil {
 			return &ChatResponse{Reply: string(resp.Payload)}, nil
@@ -164,6 +166,7 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 			Reply:      reply.Reply,
 			Model:      reply.Model,
 			TokensUsed: reply.TokensUsed,
+			Error:      reply.Error,
 		}, nil
 	case <-timer.C:
 		return nil, wrapError("chat", "Chat", ErrTimeout)

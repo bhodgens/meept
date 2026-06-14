@@ -9,8 +9,11 @@ import 'meept_api.dart';
 import 'daemon_cert_pinner.dart';
 
 /// Build the base URL from host and port. HTTPS is mandatory.
+///
+/// Does NOT include the /api/v1 prefix — endpoint paths in MeeptApi
+/// already include it, so adding it here would cause double-prefixing.
 String _buildBaseUrl(String? host, int? port) {
-  return 'https://${host ?? AppConstants.defaultApiHost}:${port ?? AppConstants.defaultApiPort}/api/${AppConstants.apiVersion}';
+  return 'https://${host ?? AppConstants.defaultApiHost}:${port ?? AppConstants.defaultApiPort}';
 }
 
 /// API client for Meept HTTP backend (always uses HTTPS).

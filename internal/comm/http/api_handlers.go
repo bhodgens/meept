@@ -83,6 +83,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Agent-side errors (LLM failures, etc.) come back as HTTP 200 with an error field
+	// so the client can display the error message rather than getting a generic 500.
 	s.writeJSON(w, http.StatusOK, resp)
 }
 

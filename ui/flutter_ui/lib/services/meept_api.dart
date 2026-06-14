@@ -27,13 +27,7 @@ class MeeptApi {
 
   /// GET /health (outside /api/v1 prefix -- uses root URL).
   Future<Map<String, dynamic>> healthCheck() async {
-    // Health is at root /health, not under the API prefix.
-    // The caller should construct a separate Dio for this, or we strip the
-    // base path.  For simplicity, use the full URL relative to root.
-    final rootUrl = _dio.options.baseUrl;
-    final idx = rootUrl.indexOf('/api/');
-    final rootBase = idx >= 0 ? rootUrl.substring(0, idx) : rootUrl;
-    final response = await _dio.get('$rootBase/health');
+    final response = await _dio.get('${_dio.options.baseUrl}/health');
     return response.data as Map<String, dynamic>;
   }
 

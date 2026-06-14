@@ -1600,12 +1600,16 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	wsServer := &websocket.Server{
 		Handler: websocket.Handler(func(conn *websocket.Conn) {
 			s.wsHub.Register(conn)
-			s.logger.Info("WebSocket client connected", "remote", conn.RemoteAddr())
+			// Use r.RemoteAddr instead of conn.RemoteAddr() because x/net/websocket's
+			// RemoteAddr() returns config.Origin which is nil for server-side conns
+			// when the client doesn't send an Origin header, causing a nil pointer
+			// panic in url.URL.String().
+			s.logger.Info("WebSocket client connected", "remote", r.RemoteAddr)
 			welcome := WSMessage{Type: "status", Data: []byte(`{"connected":true}`)}
 			_ = websocket.JSON.Send(conn, welcome)
 			defer func() {
 				s.wsHub.Unregister(conn)
-				s.logger.Info("WebSocket client disconnected", "remote", conn.RemoteAddr())
+				s.logger.Info("WebSocket client disconnected", "remote", r.RemoteAddr)
 			}()
 
 			for {

@@ -624,7 +624,8 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 	c.configMu.RUnlock()
 	url := baseURL + "/chat/completions"
 
-	c.logger.Debug("Making LLM request", "url", url, "model", modelID)
+	// Log request for diagnosis
+	c.logger.Debug("Making LLM request", "url", url, "model", modelID, "payload_len", len(body), "messages_count", len(payload["messages"].([]map[string]any)))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {

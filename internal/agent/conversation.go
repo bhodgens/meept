@@ -602,15 +602,14 @@ func (c *Conversation) TruncateByTokens(tokenBudget int) int {
 	availableBudget := tokenBudget - systemTokens
 	if availableBudget <= 0 {
 		// System prompt alone exceeds budget, keep at least last message
-		// but preserve anchors
+		// but preserve anchors. Always keep the last message (which should
+		// be the most recent user input) so the LLM has something to respond to.
 		newMessages := make([]llm.ChatMessage, 0, 2)
-		for _, msg := range c.messages {
-			if c.isAnchorMessageUnsafe(msg.Content) {
+		lastIdx := len(c.messages) - 1
+		for i, msg := range c.messages {
+			if c.isAnchorMessageUnsafe(msg.Content) || i == lastIdx {
 				newMessages = append(newMessages, msg)
 			}
-		}
-		if len(newMessages) == 0 && len(c.messages) > 1 {
-			newMessages = append(newMessages, c.messages[len(c.messages)-1])
 		}
 		removed := len(c.messages) - len(newMessages)
 		c.messages = newMessages
