@@ -1705,7 +1705,7 @@ func (s *Server) handleMCPPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read body with limit
+	// Read body with limit (10 MB — higher than 1 MB REST limit to accommodate MCP tool payloads)
 	body, err := io.ReadAll(io.LimitReader(r.Body, 10*1024*1024))
 	if err != nil {
 		s.logger.Error("MCP POST: read body", "error", err)

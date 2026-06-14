@@ -1874,9 +1874,16 @@ func (c *Components) Start(ctx context.Context) error {
 		if err := c.ClusterEngine.Start(ctx); err != nil {
 			c.Logger.Error("Failed to start gossip engine", "error", err)
 		} else {
+			// D16: Guard against nil ClusterConfig (initialization decoupling)
+			clusterID := "unknown"
+			nodeID := "unknown"
+			if c.ClusterConfig != nil {
+				clusterID = c.ClusterConfig.ClusterID
+				nodeID = c.ClusterConfig.NodeID
+			}
 			c.Logger.Info("Gossip engine started",
-				"cluster_id", c.ClusterConfig.ClusterID,
-				"node_id", c.ClusterConfig.NodeID,
+				"cluster_id", clusterID,
+				"node_id", nodeID,
 			)
 		}
 	}

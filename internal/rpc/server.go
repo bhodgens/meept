@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -357,10 +358,18 @@ func (s *Server) dispatch(connCtx context.Context, connCancel context.CancelFunc
 				nil,
 			)
 		}
+		// D18: Use appropriate JSON-RPC 2.0 error codes
+		// -32602 (InvalidParams) for parameter/validation errors
+		// -32603 (Internal) for other handler errors
+		errStr := err.Error()
+		code := models.ErrCodeInternal
+		if isParameterError(errStr) {
+			code = models.ErrCodeInvalidParams
+		}
 		return MakeErrorResponse(
 			req.ID,
-			models.ErrCodeInternal,
-			err.Error(),
+			code,
+			errStr,
 			nil,
 		)
 	}
@@ -522,3 +531,20 @@ var counter atomic.Int64
 func atomicCounter() int64 {
 	return counter.Add(1)
 }
+
+// isParameterError returns true if the error message suggests
+// a parameter validation issue (maps to JSON-RPC -32602 InvalidParams).
+func isParameterError(errStr string) bool {
+	errStr = strings.ToLower(errStr)
+	paramKeywords := []string{
+		"param", "argument", "argument", "invalid", "missing",
+		"required", "expected", "type", "parse", "unmarshal",
+	}
+	for _, kw := range paramKeywords {
+		if strings.Contains(errStr, kw) {
+			return true
+		}
+	}
+	return false
+}
+
