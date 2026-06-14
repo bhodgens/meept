@@ -263,3 +263,61 @@ Total: 11 Go files + 1 Dart file + 1 documentation file
 - 4199ba1: D2, D9, D15
 
 All builds pass: `go build ./...`
+
+---
+
+## Session 3: Final Items (2026-06-14)
+
+### D3: Streaming Metrics - VERIFIED (No Changes)
+Per user decision: Keep existing "record at end of stream" behavior.
+- Current: Metrics recorded after parseStreamingResponse() succeeds
+- On mid-stream failure: No metrics (stream didn't complete)
+- This is ACCEPTED behavior - no schema changes required
+
+### D4: Stream Retry - REMAINING
+Requires careful implementation of:
+1. Retry loop (max 3 attempts) around stream request
+2. Resume capability (track last event ID/position)
+3. Fallback to full replay on subsequent attempts
+4. Exponential backoff (2s, 4s, 8s) with Retry-After respect
+
+**Implementation approach (recommended):**
+- Extract stream logic into `doStreamingRequestWithRetry()` helper
+- Pass retry state (accumulated content, deltas sent count)
+- On first retry: attempt resume via `Last-Event-ID` header (if supported)
+- On subsequent retries: full replay (client must handle duplicate suppression)
+
+**Why deferred:** Requires careful testing to ensure:
+- No duplicate deltas sent to client on resume
+- Proper accumulator reset on full replay
+- Callback state consistency across retries
+
+---
+
+## Final Completion Summary
+
+| Category | Count | Percentage |
+|----------|-------|------------|
+| Total GLM-52 findings | 33 | 100% |
+| Implemented | 28 | 85% |
+| Verified (no change needed) | 1 (D3) | 3% |
+| Documented as intentional | 1 (D20) | 3% |
+| Deferred (complex refactor) | 2 (D4 partial, D3 partial) | 6% |
+| Duplicate in findings | 1 | 3% |
+
+**Actionable items completed: 28 of 30 (93%)**
+
+**Commits: 10**
+- 0bef66e: Phase 0 (F1-F13)
+- abb776e: Phase 1 (D5, D6, D17)
+- 475c6a4: Phase 2 (D1, D8)
+- c7b44b5: Phase 4 (D12, D13)
+- 5e30dd7: Phase 5 (D7, D10)
+- da16305: Phase 6 (D16, D18, D19)
+- f48ea8b: Phase 3 partial (D11)
+- 453a036: docs update
+- 4199ba1: D2, D9, D15
+- 5f0290b: final status update
+
+**New skill created:**
+- `deferred-item-implementation`: Systematic approach to implementing large backlogs
