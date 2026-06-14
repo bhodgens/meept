@@ -173,6 +173,7 @@ func (b *Budget) maybeResetDaily() {
 		b.dailyUsed = 0
 		b.dailyCostUsed = 0
 		b.hourlyCostWindow = b.hourlyCostWindow[:0]
+		b.hourlyWindow = b.hourlyWindow[:0]  // D7: Also reset hourly window (was asymmetric)
 		b.currentDay = today
 	}
 }

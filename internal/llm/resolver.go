@@ -225,6 +225,12 @@ func (r *Resolver) ResolveForAlias(aliasName string) (*ModelConfig, error) {
 	if !health.CooldownUntil.IsZero() && now.Before(health.CooldownUntil) {
 		r.rotateToNext(aliasName, alias)
 		health = r.getOrCreateHealth(aliasName)
+		// D10: Validate the rotated model is also out of cooldown
+		// If still in cooldown, iterate through remaining models
+		for i := 0; i < len(alias.Models)-1 && !health.CooldownUntil.IsZero() && now.Before(health.CooldownUntil); i++ {
+			r.rotateToNext(aliasName, alias)
+			health = r.getOrCreateHealth(aliasName)
+		}
 	}
 
 	// Return the active model
