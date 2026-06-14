@@ -197,7 +197,10 @@ class WebSocketService {
       if (!kIsWeb && _apiKey != null && _apiKey.isNotEmpty) {
         final ws = await io.WebSocket.connect(
           uri.toString(),
-          headers: {'Authorization': 'Bearer $_apiKey'},
+          headers: {
+            'Authorization': 'Bearer $_apiKey',
+            'Origin': 'http://localhost:$_port',
+          },
           customClient: _createHttpClient(),
         );
         final channel = IOWebSocketChannel(ws);

@@ -177,6 +177,16 @@ class ChatNotifier extends StateNotifier<ChatState> {
       return;
     }
 
+    // Block sending when disconnected — the daemon won't receive the message.
+    if (!websocket.isConnected) {
+      state = ChatState(
+        messages: state.messages,
+        isLoading: false,
+        error: 'not connected to daemon — check that meept-daemon is running',
+      );
+      return;
+    }
+
     _isSending = true;
 
     // Set safety timeout to reset flag if something goes wrong

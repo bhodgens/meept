@@ -1599,8 +1599,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 		}),
 		Handshake: func(config *websocket.Config, request *http.Request) error {
-			if !isLocalOrigin(request.Header.Get("Origin")) {
-				return fmt.Errorf("origin not allowed: %s", request.Header.Get("Origin"))
+			origin := request.Header.Get("Origin")
+			// Non-browser clients (Dart io.WebSocket, curl, CLI tools) may not
+			// send an Origin header. Allow empty/absent Origin since auth is
+			// already enforced above. Only reject non-empty origins that are
+			// not localhost.
+			if origin != "" && !isLocalOrigin(origin) {
+				return fmt.Errorf("origin not allowed: %s", origin)
 			}
 			return nil
 		},
