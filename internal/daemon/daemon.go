@@ -715,12 +715,14 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Start all registry components (RPC server, etc.)
 	if err := d.registry.StartAll(ctx); err != nil {
+		d.shutdown() // D5: Clean up any partially-initialized state
 		return fmt.Errorf("failed to start components: %w", err)
 	}
 
 	// Start agent components (chat handler, status handler, etc.)
 	if d.components != nil {
 		if err := d.components.Start(ctx); err != nil {
+			d.shutdown() // D5: Clean up registry components on agent start failure
 			return fmt.Errorf("failed to start agent components: %w", err)
 		}
 		d.logger.Info("daemon: agent components started",
@@ -735,9 +737,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Start local LLM runtimes in the background so the daemon reaches
 	// "running" status without blocking on potentially slow model loading.
+	// D6: Derive a cancellable context from the parent so the goroutine
+	// can be stopped on shutdown/reload instead of running indefinitely.
 	if d.components != nil && d.components.ContainerManager != nil {
+		llmCtx, cancelLlm := context.WithCancel(ctx)
 		go func() {
-			if err := d.components.ContainerManager.StartAll(ctx); err != nil {
+			defer cancelLlm() // Ensure cleanup on exit
+			if err := d.components.ContainerManager.StartAll(llmCtx); err != nil {
 				d.logger.Error("Failed to start LLM runtimes", "error", err)
 			}
 		}()
@@ -845,7 +851,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 }
 
+// shutdownOnce ensures shutdown() is idempotent - safe to call multiple times
+// or on error paths during startup when partial initialization occurred.
+var shutdownOnce atomic.Bool
+
 func (d *Daemon) shutdown() error {
+	// Idempotent guard: skip if already shutting down or stopped
+	if !shutdownOnce.CompareAndSwap(false, true) {
+		return nil
+	}
+
 	d.logger.Info("daemon: shutting down")
 	d.status.Store(models.StatusStopping)
 

@@ -2052,6 +2052,16 @@ func (c *Components) Stop(ctx context.Context) error {
 		c.LLMClient.Close()
 	}
 
+	// D17: Close auxiliary LLM clients to prevent TCP connection leaks
+	// on daemon restart. These are created for specialized tasks and
+	// must be explicitly closed to release resources.
+	if c.ClassifierClient != nil {
+		c.ClassifierClient.Close()
+	}
+	if c.SummarizerClient != nil {
+		c.SummarizerClient.Close()
+	}
+
 	if c.AgentRegistry != nil {
 		c.AgentRegistry.Close()
 	}
