@@ -122,14 +122,22 @@ func NewContextCompactor(cfg CompactorConfig, summarizer Chatter, tokenizer Toke
 }
 
 func (c *ContextCompactor) Compact(ctx context.Context, messages []ChatMessage) CompactResult {
+	// D9 FIX: Copy config/state under lock to minimize lock hold time.
+	// LLM summarizer calls are made without holding the mutex to avoid
+	// serializing all compactions system-wide.
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Strategy "off" skips compaction entirely.
 	strategy := c.config.Strategy
 	if strategy == "" {
-		strategy = c.config.SummaryFormat // fall back to SummaryFormat for backward compat
+		strategy = c.config.SummaryFormat
 	}
+	summarizer := c.summarizer
+	timeout := time.Duration(c.config.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	c.mu.Unlock()
+
+	// Strategy "off" skips compaction entirely.
 	if strategy == "off" {
 		result := CompactResult{TokensBefore: c.countTokens(messages), Messages: messages}
 		return result
@@ -140,7 +148,7 @@ func (c *ContextCompactor) Compact(ctx context.Context, messages []ChatMessage) 
 
 	tokensBefore := c.countTokens(messages)
 	result := CompactResult{TokensBefore: tokensBefore}
-	if c.summarizer == nil {
+	if summarizer == nil {
 		result.Messages = messages
 		return result
 	}
@@ -153,11 +161,7 @@ func (c *ContextCompactor) Compact(ctx context.Context, messages []ChatMessage) 
 		return result
 	}
 
-	timeout := time.Duration(c.config.TimeoutSeconds) * time.Second
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
-
+	// D9: LLM calls made without mutex held
 	var summary string
 	if cut.SplitTurn && cut.SplitTurnIndex >= 0 && cut.SplitTurnIndex < len(cut.ToCompact) {
 		var err error
@@ -181,12 +185,15 @@ func (c *ContextCompactor) Compact(ctx context.Context, messages []ChatMessage) 
 		}
 	}
 
+	// D9: Re-lock only for updating shared state
+	c.mu.Lock()
 	extract := c.parseSummaryResponse(summary)
 	c.updateFileOps(extract)
 	result.FileOps = c.fileOps
 	compactionMsg := c.buildCompactionMessage(summary, c.fileOps)
 	result.SummaryContent = summary
 	c.lastSummary = summary
+	c.mu.Unlock()
 
 	final := make([]ChatMessage, 0, len(cut.SystemMsgs)+1+len(cut.ToKeep))
 	final = append(final, cut.SystemMsgs...)

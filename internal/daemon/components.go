@@ -1704,21 +1704,72 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 }
 
 // Start starts all components that need background processing.
+// D15 FIX: Tracks started handlers and rolls them back on error.
 func (c *Components) Start(ctx context.Context) error {
+	var startedHandlers []string
+	
+	// rollback stops all handlers that were successfully started
+	defer func() {
+		if c == nil {
+			return
+		}
+		for i := len(startedHandlers) - 1; i >= 0; i-- {
+			name := startedHandlers[i]
+			c.Logger.Debug("rolling back handler", "handler", name)
+			switch name {
+			case "chat":
+				if c.ChatHandler != nil {
+					c.ChatHandler.Stop(ctx)
+				}
+			case "status":
+				if c.StatusHandler != nil {
+					c.StatusHandler.Stop(ctx)
+				}
+			case "session":
+				if c.SessionHandler != nil {
+					c.SessionHandler.Stop(ctx)
+				}
+			case "queue":
+				if c.QueueHandler != nil {
+					c.QueueHandler.Stop(ctx)
+				}
+			case "task":
+				if c.TaskHandler != nil {
+					c.TaskHandler.Stop(ctx)
+				}
+			case "worker":
+				if c.WorkerHandler != nil {
+					c.WorkerHandler.Stop(ctx)
+				}
+			case "sync":
+				if c.SyncHandler != nil {
+					c.SyncHandler.Stop(ctx)
+				}
+			case "syncmgr":
+				if c.SyncManager != nil {
+					c.SyncManager.Stop()
+				}
+			}
+		}
+	}()
+	
 	// Start chat handler
 	if err := c.ChatHandler.Start(ctx); err != nil {
 		return err
 	}
+	startedHandlers = append(startedHandlers, "chat")
 
 	// Start status handler
 	if err := c.StatusHandler.Start(ctx); err != nil {
 		return err
 	}
+	startedHandlers = append(startedHandlers, "status")
 
 	// Start session handler
 	if err := c.SessionHandler.Start(ctx); err != nil {
 		return err
 	}
+	startedHandlers = append(startedHandlers, "session")
 
 	// Start memory handler
 	if c.MemoryHandler != nil {
@@ -1737,6 +1788,8 @@ func (c *Components) Start(ctx context.Context) error {
 	if c.QueueHandler != nil {
 		if err := c.QueueHandler.Start(ctx); err != nil {
 			c.Logger.Error("Failed to start queue handler", "error", err)
+		} else {
+			startedHandlers = append(startedHandlers, "queue")
 		}
 	}
 
@@ -1744,6 +1797,8 @@ func (c *Components) Start(ctx context.Context) error {
 	if c.TaskHandler != nil {
 		if err := c.TaskHandler.Start(ctx); err != nil {
 			c.Logger.Error("Failed to start task handler", "error", err)
+		} else {
+			startedHandlers = append(startedHandlers, "task")
 		}
 	}
 
@@ -1751,6 +1806,8 @@ func (c *Components) Start(ctx context.Context) error {
 	if c.WorkerHandler != nil {
 		if err := c.WorkerHandler.Start(ctx); err != nil {
 			c.Logger.Error("Failed to start worker handler", "error", err)
+		} else {
+			startedHandlers = append(startedHandlers, "worker")
 		}
 	}
 

@@ -156,58 +156,111 @@ func (b *ModelBroker) newChatterFor(cfg *ModelConfig) Chatter {
 }
 
 // Chat sends a request to the broker, which routes to a healthy provider.
-// If no healthy provider exists and fallback is enabled, uses the fallback model.
+// D2 FIX: On runtime failure (5xx/rate-limit), iterates through remaining
+// healthy providers before falling back or failing.
 func (b *ModelBroker) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
 	b.mu.RLock()
-	// Try to find a healthy provider (iterate in deterministic order)
-	var healthyEntry *brokerEntry
+	// Collect all healthy providers
+	var healthyEntries []*brokerEntry
 	for _, key := range b.entryKeys {
 		entry := b.entries[key]
 		if entry.status == ProviderStatusHealthy {
-			healthyEntry = entry
-			break
+			healthyEntries = append(healthyEntries, entry)
 		}
 	}
 	b.mu.RUnlock()
 
-	// If no healthy provider and fallback enabled, use fallback
-	if healthyEntry == nil && b.config.FallbackEnabled && b.fallback != nil {
-		b.logger.Warn("using fallback model due to degraded providers")
+	// D2: Try each healthy provider in order until one succeeds
+	var lastErr error
+	for i, entry := range healthyEntries {
+		resp, err := entry.chatter.Chat(ctx, messages, opts...)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+
+		// D2: Only retry on transient errors (5xx, rate limits)
+		if !isRetryableError(err) {
+			b.logger.Warn("non-retryable error from provider",
+				"provider", fmt.Sprintf("%s/%s", entry.model.ProviderID, entry.model.ModelID),
+				"error", err)
+			return nil, err
+		}
+
+		// Log retry and continue to next provider
+		b.logger.Debug("retryable error from provider, trying next",
+			"provider", fmt.Sprintf("%s/%s", entry.model.ProviderID, entry.model.ModelID),
+			"attempt", i+1,
+			"total_healthy", len(healthyEntries),
+			"error", err)
+	}
+
+	// All healthy providers failed, try fallback if enabled
+	if len(healthyEntries) > 0 && b.config.FallbackEnabled && b.fallback != nil {
+		b.logger.Warn("all healthy providers failed, using fallback",
+			"last_error", lastErr)
 		return b.fallback.Chat(ctx, messages, opts...)
 	}
 
-	// If still no provider, return error
-	if healthyEntry == nil {
+	if len(healthyEntries) == 0 {
 		return nil, errors.New("no healthy providers available")
 	}
 
-	return healthyEntry.chatter.Chat(ctx, messages, opts...)
+	return nil, fmt.Errorf("all %d healthy providers failed: %w", len(healthyEntries), lastErr)
 }
 
 // ChatWithProgress sends a request with progress reporting.
+// D2 FIX: On runtime failure (5xx/rate-limit), iterates through remaining
+// healthy providers before falling back or failing.
 func (b *ModelBroker) ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error) {
 	b.mu.RLock()
-	// Try to find a healthy provider (iterate in deterministic order)
-	var healthyEntry *brokerEntry
+	// Collect all healthy providers
+	var healthyEntries []*brokerEntry
 	for _, key := range b.entryKeys {
 		entry := b.entries[key]
 		if entry.status == ProviderStatusHealthy {
-			healthyEntry = entry
-			break
+			healthyEntries = append(healthyEntries, entry)
 		}
 	}
 	b.mu.RUnlock()
 
-	if healthyEntry == nil && b.config.FallbackEnabled && b.fallback != nil {
-		b.logger.Warn("using fallback model due to degraded providers")
+	// D2: Try each healthy provider in order until one succeeds
+	var lastErr error
+	for i, entry := range healthyEntries {
+		resp, err := entry.chatter.ChatWithProgress(ctx, messages, progress, opts...)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+
+		// D2: Only retry on transient errors (5xx, rate limits)
+		if !isRetryableError(err) {
+			b.logger.Warn("non-retryable error from provider",
+				"provider", fmt.Sprintf("%s/%s", entry.model.ProviderID, entry.model.ModelID),
+				"error", err)
+			return nil, err
+		}
+
+		// Log retry and continue to next provider
+		b.logger.Debug("retryable error from provider, trying next",
+			"provider", fmt.Sprintf("%s/%s", entry.model.ProviderID, entry.model.ModelID),
+			"attempt", i+1,
+			"total_healthy", len(healthyEntries),
+			"error", err)
+	}
+
+	// All healthy providers failed, try fallback if enabled
+	if len(healthyEntries) > 0 && b.config.FallbackEnabled && b.fallback != nil {
+		b.logger.Warn("all healthy providers failed, using fallback",
+			"last_error", lastErr)
 		return b.fallback.ChatWithProgress(ctx, messages, progress, opts...)
 	}
 
-	if healthyEntry == nil {
+	if len(healthyEntries) == 0 {
 		return nil, errors.New("no healthy providers available")
 	}
 
-	return healthyEntry.chatter.ChatWithProgress(ctx, messages, progress, opts...)
+	return nil, fmt.Errorf("all %d healthy providers failed: %w", len(healthyEntries), lastErr)
 }
 
 // ChatWithModel sends a request to a specific model, bypassing health checks.
@@ -369,4 +422,18 @@ func (b *ModelBroker) ChatterForModel(modelRef string) Chatter {
 }
 
 // Ensure ModelBroker implements Chatter
+// isRetryableError returns true for transient errors that warrant retry.
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check for rate limit errors
+	if IsRateLimitError(err) {
+		return true
+	}
+	// Check for server errors (5xx)
+	errStr := err.Error()
+	return strings.Contains(errStr, "5") && (strings.Contains(errStr, "00") || strings.Contains(errStr, "02") || strings.Contains(errStr, "03") || strings.Contains(errStr, "04"))
+}
+
 var _ Chatter = (*ModelBroker)(nil)
