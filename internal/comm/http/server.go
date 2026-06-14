@@ -939,11 +939,25 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 
 		handler.ServeHTTP(lrw, r)
 
-		s.logger.Debug("HTTP request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", lrw.statusCode,
-			"duration", time.Since(start))
+		duration := time.Since(start)
+
+		// Log client connections and errors for observability.
+		switch {
+		case lrw.statusCode >= 400:
+			// Log all errors at Warn level for diagnosis.
+			s.logger.Warn("HTTP error response",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", lrw.statusCode,
+				"remote", r.RemoteAddr,
+				"duration", duration)
+		default:
+			s.logger.Debug("HTTP request",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", lrw.statusCode,
+				"duration", duration)
+		}
 	})
 }
 
@@ -1586,9 +1600,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	wsServer := &websocket.Server{
 		Handler: websocket.Handler(func(conn *websocket.Conn) {
 			s.wsHub.Register(conn)
+			s.logger.Info("WebSocket client connected", "remote", conn.RemoteAddr())
 			welcome := WSMessage{Type: "status", Data: []byte(`{"connected":true}`)}
 			_ = websocket.JSON.Send(conn, welcome)
-			defer s.wsHub.Unregister(conn)
+			defer func() {
+				s.wsHub.Unregister(conn)
+				s.logger.Info("WebSocket client disconnected", "remote", conn.RemoteAddr())
+			}()
 
 			for {
 				var msg WSMessage

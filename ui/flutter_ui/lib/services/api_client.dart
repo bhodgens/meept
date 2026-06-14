@@ -1,6 +1,7 @@
 import 'dart:io' show HttpClient, X509Certificate;
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
+import 'package:flutter/foundation.dart';
 import '../core/constants.dart';
 import '../models/api_models.dart';
 import 'storage_service.dart';
@@ -57,6 +58,17 @@ class ApiClient {
         return client;
       },
     );
+
+    // Log all requests and errors for debugging.
+    _dio.interceptors.add(LogInterceptor(
+      requestHeader: false,
+      responseHeader: false,
+      requestBody: false,
+      responseBody: false,
+      error: true,
+      logPrint: (obj) => debugPrint('[http] $obj'),
+    ));
+
     _api = MeeptApi(_dio);
   }
 

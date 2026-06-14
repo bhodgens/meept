@@ -2,6 +2,7 @@ import 'dart:async';
 
 /// Timeout for _isSending flag to prevent permanent lockout
 
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
 import '../services/api_client.dart';
@@ -241,10 +242,20 @@ class ChatNotifier extends StateNotifier<ChatState> {
         isLoading: false,
       );
     } catch (e) {
+      // Extract URL from DioException for better error messages.
+      String errorStr;
+      if (e is DioException) {
+        final code = e.response?.statusCode;
+        final url = e.requestOptions.path;
+        final method = e.requestOptions.method;
+        errorStr = '$method $url -> ${code ?? e.type}';
+      } else {
+        errorStr = e.toString();
+      }
       state = ChatState(
         messages: state.messages,
         isLoading: false,
-        error: e.toString(),
+        error: errorStr,
       );
     } finally {
       _sendingTimeoutTimer?.cancel();

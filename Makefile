@@ -1,4 +1,4 @@
-.PHONY: help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server
+.PHONY: help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server
 
 help:
 	@echo "Usage: make [target]"
@@ -47,6 +47,7 @@ help:
 	@echo "Daemon:"
 	@echo "  daemon           Build and run daemon (foreground)"
 	@echo "  daemon-debug     Run daemon with debug logging"
+	@echo "  devbuild         Wipe ~/.meept, rebuild daemon+CLI+GUI (incremental), install"
 	@echo "  status           Check daemon status"
 	@echo ""
 	@echo "Cross-compilation:"
@@ -82,6 +83,16 @@ GO_LDFLAGS_VERSION := -X github.com/caimlas/meept/internal/version.Version=$(VER
 
 # Build flags (after version info so it can reference GO_LDFLAGS_VERSION)
 GO_BUILD_FLAGS := -ldflags "$(GO_LDFLAGS) $(GO_LDFLAGS_VERSION)"
+
+# Flutter GUI directory and platform (needed by multiple targets)
+FLUTTER_UI_DIR := ui/flutter_ui
+ifeq ($(shell uname -s),Darwin)
+  GUI_PLATFORM := macos
+else ifeq ($(shell uname -s),Linux)
+  GUI_PLATFORM := linux
+else
+  GUI_PLATFORM := windows
+endif
 # =============================================================================
 # Setup
 # =============================================================================
@@ -243,6 +254,67 @@ daemon: build-daemon setup
 daemon-debug: build-daemon setup
 	@echo "Starting daemon (debug mode)..."
 	$(DAEMON) --foreground --log-level debug
+
+# =============================================================================
+# Development: fast iteration build
+# =============================================================================
+
+# devbuild: Wipe ~/.meept for a clean slate, rebuild only changed Go code and
+# the Flutter GUI (incremental, no dependency re-download), install to
+# GOPATH/bin and ~/Applications, and run setup to recreate config templates.
+#
+# Speed notes:
+#   - Go: uses go build directly (incremental Go build cache)
+#   - Flutter: uses flutter build (incremental, skips if no .dart changes)
+#   - Does NOT run gui-deps, pod install, or dependency downloads
+#   - Does NOT build menubar, gendoc, or meept-lite
+.PHONY: devbuild
+devbuild:
+	@echo "==> Wiping $(MEEPT_HOME)..."
+	@rm -rf $(MEEPT_HOME)
+	@echo "==> Building daemon + CLI (incremental)..."
+	@mkdir -p $(BIN_DIR)
+	@go build $(GO_BUILD_FLAGS) -o $(DAEMON) ./cmd/meept-daemon
+	@go build $(GO_BUILD_FLAGS) -o $(CLI) ./cmd/meept
+	@echo "==> Installing Go binaries to GOPATH/bin..."
+	@go install $(GO_BUILD_FLAGS) ./cmd/meept-daemon
+	@go install $(GO_BUILD_FLAGS) ./cmd/meept
+	@echo "==> Installing config files..."
+	@mkdir -p $(MEEPT_HOME)/agents $(MEEPT_HOME)/prompts $(MEEPT_HOME)/plugins $(MEEPT_HOME)/memory $(MEEPT_HOME)/workspaces
+	@for f in $(CONFIG_FILES); do \
+		src="config/$$(basename $$f)"; \
+		if [ -f $$src ]; then \
+			cp $$src $$f; \
+			echo "  created $$f"; \
+		else \
+			echo "  skipping $$f (no template)"; \
+		fi; \
+	done
+	@if [ -d config/agents ]; then \
+		cp -r config/agents/* $(MEEPT_HOME)/agents/ 2>/dev/null || true; \
+		echo "  copied agent definitions"; \
+	fi
+	@if [ -d config/prompts ]; then \
+		cp -r config/prompts/* $(MEEPT_HOME)/prompts/ 2>/dev/null || true; \
+		echo "  copied prompts"; \
+	fi
+ifeq ($(GUI_PLATFORM),macos)
+	@echo "==> Building Flutter GUI (incremental)..."
+	@cd $(FLUTTER_UI_DIR) && flutter build $(GUI_PLATFORM) --release 2>&1 | tail -1
+	@echo "==> Installing GUI to ~/Applications..."
+	@mkdir -p ~/Applications
+	@rm -rf ~/Applications/Meept\ Client\ GUI.app
+	@cp -r "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client.app" \
+		~/Applications/Meept\ Client\ GUI.app
+	@touch ~/Applications/Meept\ Client\ GUI.app/.metadata_never_index
+endif
+	@echo "==> devbuild complete."
+	@echo "    binaries:  $$(go env GOPATH)/bin/meept{,-daemon}"
+ifeq ($(GUI_PLATFORM),macos)
+	@echo "    gui:       ~/Applications/Meept Client GUI.app"
+endif
+	@echo "    config:    $(MEEPT_HOME)"
+	@echo "    start:     meept-daemon -f"
 
 status: build-cli
 	@$(CLI) status
@@ -416,13 +488,10 @@ MENUBAR_XCODEPROJ := $(MENUBAR_DIR)/MeeptMenuBar.xcodeproj
 FLUTTER_UI_DIR := ui/flutter_ui
 UNAME_S := $(shell uname -s 2>/dev/null || echo Linux)
 ifeq ($(UNAME_S),Darwin)
-  GUI_PLATFORM := macos
   GUI_BIN := $(BIN_DIR)/meept-gui-darwin-$(shell uname -m)
 else ifeq ($(UNAME_S),Linux)
-  GUI_PLATFORM := linux
   GUI_BIN := $(BIN_DIR)/meept-gui-linux-$(shell uname -m)
 else
-  GUI_PLATFORM := windows
   GUI_BIN := $(BIN_DIR)/meept-gui-windows-amd64.exe
 endif
 
