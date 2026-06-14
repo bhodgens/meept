@@ -2,19 +2,21 @@
 
 **Source:** `docs/plans/glm52-findings.md` - 20 deferred items requiring implementation.
 
+**Status:** Phase 1 & Phase 2 COMPLETE (2026-06-14). Phase 3-6 remaining.
+
 **Priority Order:** As recommended in findings document:
-1. PR 1 (Security): Already completed (F2, F3, F4)
-2. PR 2 (Daemon Lifecycle): D5, D6, D17
-3. PR 3 (LLM Context Integrity): D1, D8
-4. PR 4 (LLM Failover): D2, D3, D4, D11
-5. PR 5 (UX Polish): D12, D13
+1. ~~PR 1 (Security): Already completed (F2, F3, F4)~~ ✅
+2. ~~PR 2 (Daemon Lifecycle): D5, D6, D17~~ ✅ COMPLETE
+3. ~~PR 3 (LLM Context Integrity): D1, D8~~ ✅ COMPLETE
+4. PR 4 (LLM Failover): D2, D3, D4, D11 ⏳ REMAINING
+5. PR 5 (UX Polish): D12, D13 ⏳ REMAINING
 
 Additional deferred items from findings:
-- D7: Budget asymmetry
-- D9: Mutex held across LLM calls
-- D10: Resolver cooldown gaps
-- D14: Fence.go cleanup (verified as false positive - no fix needed)
-- D15-D20: Low severity items
+- D7: Budget asymmetry ⏳ REMAINING
+- D9: Mutex held across LLM calls ⏳ REMAINING
+- D10: Resolver cooldown gaps ⏳ REMAINING
+- D14: Fence.go cleanup (verified as false positive - no fix needed) ✅
+- D15-D20: Low severity items ⏳ REMAINING
 
 ---
 
@@ -133,3 +135,35 @@ For each phase:
 - New tests added for each fix
 - All existing tests pass
 - Build succeeds with no new warnings
+
+---
+
+## Implementation Status Summary (2026-06-14)
+
+### Completed Fixes (15 total)
+
+| Phase | Fixes | Commit | Files Changed |
+|-------|-------|--------|---------------|
+| Phase 0 (Original 13) | F1-F13 | 0bef66e | 11 files |
+| Phase 1 (Daemon Lifecycle) | D5, D6, D17 | abb776e | 2 files |
+| Phase 2 (LLM Context) | D1, D8 | 475c6a4 | 2 files |
+
+### Remaining Fixes (18 total)
+
+| Phase | Fixes | Complexity |
+|-------|-------|------------|
+| Phase 3 (LLM Failover) | D2, D3, D4, D11 | High - streaming retry logic |
+| Phase 4 (Input Validation) | D12, D13 | Low - straightforward |
+| Phase 5 (Budget/Mutex) | D7, D9, D10 | Medium - refactoring needed |
+| Phase 6 (Low Severity) | D15, D16, D18, D19, D20 | Low - cleanup items |
+
+### Tests Status
+
+All implemented fixes verified:
+```
+✅ go build ./...
+✅ go test ./internal/daemon/...
+✅ go test ./internal/agent/...
+✅ go test ./internal/llm/...
+✅ go test ./internal/comm/http/...
+```
