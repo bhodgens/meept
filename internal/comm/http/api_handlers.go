@@ -307,11 +307,10 @@ func (s *Server) handleQueueList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	state := r.URL.Query().Get("state")
-	limit := 50
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if _, err := strconv.Atoi(l); err == nil {
-			limit, _ = strconv.Atoi(l)
-		}
+	limit, err := parseIntParam(r, "limit", 50, 1, 1000)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	jobs, err := s.services.Queue.ListByState(r.Context(), services.ListRequest{
@@ -375,11 +374,10 @@ func (s *Server) handleTaskList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := 50
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if _, err := strconv.Atoi(l); err == nil {
-			limit, _ = strconv.Atoi(l)
-		}
+	limit, err := parseIntParam(r, "limit", 50, 1, 1000)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	sessionID := r.URL.Query().Get("session_id")
@@ -500,11 +498,10 @@ func (s *Server) handleSessionList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := 50
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if _, err := strconv.Atoi(l); err == nil {
-			limit, _ = strconv.Atoi(l)
-		}
+	limit, err := parseIntParam(r, "limit", 50, 1, 1000)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	sessions, err := s.services.Session.List(r.Context(), services.ListSessionsRequest{
@@ -584,11 +581,10 @@ func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	limit := 1000
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if _, err := strconv.Atoi(l); err == nil {
-			limit, _ = strconv.Atoi(l)
-		}
+	limit, err := parseIntParam(r, "limit", 50, 1, 1000)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	messages, err := s.services.Session.GetMessages(r.Context(), services.GetMessagesRequest{
@@ -634,11 +630,10 @@ func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := 50
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if _, err := strconv.Atoi(l); err == nil {
-			limit, _ = strconv.Atoi(l)
-		}
+	limit, err := parseIntParam(r, "limit", 50, 1, 1000)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	skills, err := s.services.Skills.List(r.Context(), services.SkillsListRequest{
@@ -2301,11 +2296,10 @@ func (s *Server) handleTerminalHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := 50
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil && n > 0 {
-			limit = n
-		}
+	limit, err := parseIntParam(r, "limit", 50, 1, 1000)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	history := s.services.Terminal.GetHistory(limit)
@@ -2593,11 +2587,10 @@ func (s *Server) handlePlanList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	projectID := r.URL.Query().Get("project_id")
-	limit := 50
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil {
-			limit = v
-		}
+	limit, err := parseIntParam(r, "limit", 50, 1, 1000)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	plans, err := s.services.Plan.List(r.Context(), projectID, limit)
@@ -2959,7 +2952,11 @@ func (s *Server) handleTemplatesList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	limit, err := parseIntParam(r, "limit", 50, 1, 1000)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	result, err := s.services.Templates.List(r.Context(), services.TemplatesListRequest{Limit: limit})
 	if err != nil {
 		s.handleServiceError(w, err)
@@ -3037,7 +3034,7 @@ func (s *Server) handleTemplatesClear(w http.ResponseWriter, r *http.Request) {
 
 	result, err := s.services.Templates.ClearSession(r.Context(), services.TemplatesClearRequest{
 		ConversationID: conversationID,
-		Name:          name,
+		Name:           name,
 	})
 	if err != nil {
 		s.handleServiceError(w, err)

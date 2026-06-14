@@ -922,6 +922,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
 			w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
+			w.Header().Set("Vary", "Origin")  // D13: Prevent cache poisoning via CDN/proxy
 
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusOK)
