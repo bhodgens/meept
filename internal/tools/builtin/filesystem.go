@@ -42,7 +42,9 @@ func NewReadFileTool(checker *security.PermissionChecker, readCache *ReadCache) 
 
 // SetFenceChecker sets the fence checker for path-based sandboxing.
 func (t *ReadFileTool) SetFenceChecker(fc FenceChecker) {
-	t.fenceChecker = fc
+	if fc != nil {
+		t.fenceChecker = fc
+	}
 }
 
 func (t *ReadFileTool) Name() string { return "file_read" }
@@ -289,7 +291,9 @@ func (t *WriteFileTool) SetLSPNotifier(notifier LSPWriteNotifier) {
 
 // SetFenceChecker sets the fence checker for path-based sandboxing.
 func (t *WriteFileTool) SetFenceChecker(fc FenceChecker) {
-	t.fenceChecker = fc
+	if fc != nil {
+		t.fenceChecker = fc
+	}
 }
 
 func (t *WriteFileTool) Name() string { return "file_write" }
@@ -481,7 +485,9 @@ func NewDeleteFileTool(checker *security.PermissionChecker) *DeleteFileTool {
 
 // SetFenceChecker sets the fence checker for path-based sandboxing.
 func (t *DeleteFileTool) SetFenceChecker(fc FenceChecker) {
-	t.fenceChecker = fc
+	if fc != nil {
+		t.fenceChecker = fc
+	}
 }
 
 func (t *DeleteFileTool) Name() string { return "file_delete" }
@@ -581,7 +587,9 @@ func NewListDirectoryTool(checker *security.PermissionChecker) *ListDirectoryToo
 
 // SetFenceChecker sets the fence boundary checker for path validation.
 func (t *ListDirectoryTool) SetFenceChecker(fc FenceChecker) {
-	t.fenceChecker = fc
+	if fc != nil {
+		t.fenceChecker = fc
+	}
 }
 
 func (t *ListDirectoryTool) Name() string { return "list_directory" }
