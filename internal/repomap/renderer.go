@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/caimlas/meept/internal/code/ast"
 )
@@ -20,6 +21,7 @@ type ContextRenderer struct {
 	maxLineLength int    // Default: 100
 	contextLines  int    // Lines of context around each symbol
 	treeCache     map[string]string
+	mu            sync.RWMutex // protects treeCache
 	logger        *slog.Logger
 	parser        *ast.ParserManager
 }
@@ -174,9 +176,12 @@ func (r *ContextRenderer) getSourceContext(tag RankedTag) string {
 
 	// Check cache first
 	cacheKey := fmt.Sprintf("%s:%d", tag.FName, tag.Line)
+	r.mu.RLock()
 	if cached, ok := r.treeCache[cacheKey]; ok {
+		r.mu.RUnlock()
 		return cached
 	}
+	r.mu.RUnlock()
 
 	// Read the source file
 	source, err := os.ReadFile(tag.FName)
@@ -215,9 +220,11 @@ func (r *ContextRenderer) getSourceContext(tag RankedTag) string {
 	result := strings.Join(contextLines, "\n")
 
 	// Cache the result
+	r.mu.Lock()
 	if r.treeCache != nil {
 		r.treeCache[cacheKey] = result
 	}
+	r.mu.Unlock()
 
 	return result
 }
@@ -438,6 +445,8 @@ func escapeJSON(s string) string {
 
 // ClearCache clears the rendering cache.
 func (r *ContextRenderer) ClearCache() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.treeCache != nil {
 		r.treeCache = make(map[string]string)
 	}
@@ -445,6 +454,8 @@ func (r *ContextRenderer) ClearCache() {
 
 // CacheSize returns the number of entries in the cache.
 func (r *ContextRenderer) CacheSize() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	if r.treeCache == nil {
 		return 0
 	}

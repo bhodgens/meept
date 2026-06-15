@@ -68,8 +68,12 @@ func (l *Loader) Load(ref string) (string, error) {
 	// Convert reference to path
 	path := l.refToPath(ref)
 
-	// Search paths
-	for _, searchPath := range l.searchPaths {
+	// Snapshot search paths under RLock
+	l.mu.RLock()
+	searchPaths := l.searchPaths
+	l.mu.RUnlock()
+
+	for _, searchPath := range searchPaths {
 		fullPath := filepath.Join(searchPath, path)
 		content, err := os.ReadFile(fullPath)
 		if err == nil {
@@ -81,7 +85,7 @@ func (l *Loader) Load(ref string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("prompt component not found: %s (searched: %v)", ref, l.searchPaths)
+	return "", fmt.Errorf("prompt component not found: %s (searched: %v)", ref, searchPaths)
 }
 
 // LoadAll loads multiple prompt components and returns them in order.
@@ -129,8 +133,12 @@ func (l *Loader) ClearCache() {
 
 // Exists checks if a prompt component exists.
 func (l *Loader) Exists(ref string) bool {
+	l.mu.RLock()
+	searchPaths := l.searchPaths
+	l.mu.RUnlock()
+
 	path := l.refToPath(ref)
-	for _, searchPath := range l.searchPaths {
+	for _, searchPath := range searchPaths {
 		fullPath := filepath.Join(searchPath, path)
 		if _, err := os.Stat(fullPath); err == nil {
 			return true
@@ -141,10 +149,14 @@ func (l *Loader) Exists(ref string) bool {
 
 // ListComponents returns all available prompt components.
 func (l *Loader) ListComponents() []string {
+	l.mu.RLock()
+	searchPaths := l.searchPaths
+	l.mu.RUnlock()
+
 	seen := make(map[string]bool)
 	var components []string
 
-	for _, searchPath := range l.searchPaths {
+	for _, searchPath := range searchPaths {
 		if err := filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
@@ -187,10 +199,14 @@ func (l *Loader) pathToRef(path string) string {
 
 // AddSearchPath adds a search path to the loader.
 func (l *Loader) AddSearchPath(path string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.searchPaths = append([]string{path}, l.searchPaths...)
 }
 
 // SearchPaths returns the current search paths.
 func (l *Loader) SearchPaths() []string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	return l.searchPaths
 }
