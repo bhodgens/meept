@@ -168,7 +168,7 @@ func TestApp_RenderTabs(t *testing.T) {
 	tabs := ansi.Strip(app.renderTabs())
 
 	// Check that all tabs are present
-	expectedTabs := []string{"Chat", "Sessions", "Tasks", "Queue", "Memory", "Plans"}
+	expectedTabs := []string{"chat", "sessions", "tasks", "queue", "memory", "plans"}
 	for _, tab := range expectedTabs {
 		if !strings.Contains(tabs, tab) {
 			t.Errorf("expected tabs to contain %q", tab)
@@ -208,8 +208,8 @@ func TestApp_RenderError(t *testing.T) {
 
 	errorView := app.renderError()
 
-	if !strings.Contains(errorView, "Connection Error") {
-		t.Error("expected 'Connection Error' in error view")
+	if !strings.Contains(errorView, "connection error") {
+		t.Error("expected 'connection error' in error view")
 	}
 	if !strings.Contains(errorView, "connection failed") {
 		t.Error("expected error message in error view")
@@ -339,7 +339,7 @@ func TestApp_CopyErrorMessage(t *testing.T) {
 	newModel, _ := app.Update(CopyErrorMsg{Err: &testError{"copy failed"}})
 	newApp := newModel.(*App)
 
-	if !strings.Contains(newApp.statusMessage, "Copy failed") {
+	if !strings.Contains(newApp.statusMessage, "copy failed") {
 		t.Error("expected status message to contain error")
 	}
 }

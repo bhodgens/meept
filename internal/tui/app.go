@@ -663,7 +663,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if newState {
 					status = "on"
 				}
-				a.chat.AddSystemMessage(fmt.Sprintf("Steer mode: %s", status))
+				a.chat.AddSystemMessage(fmt.Sprintf("steer mode: %s", status))
 				return a, nil
 			}
 			// Navigate to sessions tab
@@ -818,7 +818,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case SessionLoadedMsg:
 		if msg.Err != nil {
-			a.statusMessage = fmt.Sprintf("Session error: %v", msg.Err)
+			a.statusMessage = fmt.Sprintf("session error: %v", msg.Err)
 			a.statusMessageTime = time.Now()
 		} else if msg.Session != nil {
 			a.currentSession = msg.Session
@@ -828,9 +828,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.plans.SetSession(msg.Session.ID)
 			sessionCmd := a.chat.SetSession(msg.Session)
 			if msg.IsNew {
-				a.statusMessage = fmt.Sprintf("Created session: %s", msg.Session.Name)
+				a.statusMessage = fmt.Sprintf("created session: %s", msg.Session.Name)
 			} else {
-				a.statusMessage = fmt.Sprintf("Resumed session: %s", msg.Session.Name)
+				a.statusMessage = fmt.Sprintf("resumed session: %s", msg.Session.Name)
 			}
 			a.statusMessageTime = time.Now()
 			clearCmd := tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
@@ -874,7 +874,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Wire up session ID for plans filtering
 			a.plans.SetSession(msg.Session.ID)
 			sessionCmd := a.chat.SetSession(msg.Session)
-			a.statusMessage = fmt.Sprintf("Switched to: %s", msg.Session.Name)
+			a.statusMessage = fmt.Sprintf("switched to: %s", msg.Session.Name)
 			a.statusMessageTime = time.Now()
 			clearCmd := tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
 				return StatusMessageClearMsg{}
@@ -1342,7 +1342,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case CopyErrorMsg:
-		a.statusMessage = fmt.Sprintf("Copy failed: %v", msg.Err)
+		a.statusMessage = fmt.Sprintf("copy failed: %v", msg.Err)
 		a.statusMessageTime = time.Now()
 
 	case CommandResultMsg:
@@ -1391,10 +1391,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case StopSessionResultMsg:
 		a.activeModal = ModalNone
 		if msg.Error != nil {
-			a.statusMessage = fmt.Sprintf("Stop failed: %v", msg.Error)
+			a.statusMessage = fmt.Sprintf("stop failed: %v", msg.Error)
 		} else {
 			workers := len(msg.Response.WorkersStopped)
-			a.statusMessage = fmt.Sprintf("Stopped %d worker(s)", workers)
+			a.statusMessage = fmt.Sprintf("stopped %d worker(s)", workers)
 			// Reset loading state in chat
 			if a.chat != nil {
 				a.chat.ClearLoading()
@@ -1534,14 +1534,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.currentSession != nil && msg.ProjectID != "" {
 			err := a.rpc.SetProject(a.currentSession.ID, msg.ProjectID)
 			if err != nil {
-				a.statusMessage = fmt.Sprintf("Failed to set project: %v", err)
+				a.statusMessage = fmt.Sprintf("failed to set project: %v", err)
 				a.statusMessageTime = time.Now()
 				return a, tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
 					return StatusMessageClearMsg{}
 				})
 			}
 			// Refresh project info to update the indicator
-			a.statusMessage = fmt.Sprintf("Project set: %s", msg.ProjectID)
+			a.statusMessage = fmt.Sprintf("project set: %s", msg.ProjectID)
 			a.statusMessageTime = time.Now()
 			clearCmd := tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
 				return StatusMessageClearMsg{}
@@ -1699,7 +1699,7 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.tasks.SetCurrentSession(sess.ID)
 				a.plans.SetSession(sess.ID)
 				sessionCmd := a.chat.SetSession(sess)
-				a.statusMessage = fmt.Sprintf("Switched to: %s", sess.Name)
+				a.statusMessage = fmt.Sprintf("switched to: %s", sess.Name)
 				a.statusMessageTime = time.Now()
 				clearCmd := tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
 					return StatusMessageClearMsg{}
@@ -1999,12 +1999,12 @@ func (a *App) renderTabs() string {
 		name string
 		view ViewType
 	}{
-		{"Chat", ViewChat},
-		{"Sessions", ViewSessions},
-		{"Tasks", ViewTasks},
-		{"Queue", ViewQueue},
-		{"Memory", ViewMemory},
-		{"Plans", ViewPlans},
+		{"chat", ViewChat},
+		{"sessions", ViewSessions},
+		{"tasks", ViewTasks},
+		{"queue", ViewQueue},
+		{"memory", ViewMemory},
+		{"plans", ViewPlans},
 	}
 
 	renderedTabs := make([]string, 0, len(tabs))
@@ -2209,11 +2209,11 @@ func (a *App) renderProjectIndicator() string {
 }
 
 func (a *App) renderError() string {
-	errMsg := fmt.Sprintf("Error: %v", a.err)
+	errMsg := fmt.Sprintf("error: %v", a.err)
 	return a.styles.Panel.
 		Width(a.width - 4).
 		Render(
-			a.styles.Error.Render("Connection Error") + "\n\n" +
+			a.styles.Error.Render("connection error") + "\n\n" +
 				a.styles.Paragraph.Render(errMsg) + "\n\n" +
 				a.styles.Muted.Render("Make sure the meept daemon is running:\n  meept daemon start"),
 		)
