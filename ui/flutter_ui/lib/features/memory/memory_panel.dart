@@ -41,7 +41,10 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
   Future<void> _loadRecentMemories() async {
     setState(() {
       _isLoading = true;
-      _hasSearched = true;
+      // Do NOT set _hasSearched here: this is the "browse/recent" path,
+      // not an explicit search. Keeping it false lets the placeholder
+      // ("search or browse memories") render until results arrive, so
+      // users see the invitation rather than a flash of empty space.
     });
     try {
       final client = ref.read(apiClientProvider);
@@ -138,14 +141,14 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
                       ),
                     ),
                   )
-                : !_hasSearched
-                    ? const Center(
-                        child: Text(
-                          'search or browse memories',
-                          style: CyberpunkTypography.bodySmall,
-                        ),
+                : _memories.isNotEmpty
+                    ? ListView.builder(
+                        itemCount: _memories.length,
+                        itemBuilder: (context, index) {
+                          return _buildMemoryItem(_memories[index]);
+                        },
                       )
-                    : _memories.isEmpty
+                    : _hasSearched
                         ? Center(
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
@@ -165,11 +168,11 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
                               ],
                             ),
                           )
-                        : ListView.builder(
-                            itemCount: _memories.length,
-                            itemBuilder: (context, index) {
-                              return _buildMemoryItem(_memories[index]);
-                            },
+                        : const Center(
+                            child: Text(
+                              'search or browse memories',
+                              style: CyberpunkTypography.bodySmall,
+                            ),
                           ),
           ),
         ],
