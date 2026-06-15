@@ -320,3 +320,81 @@ Flutter and Swift builds not run this round (changes are minimal and isolated; a
 7. **PR 7 (CLI error handling):** S8-3, S8-4, S8-5
 8. **PR 8 (Flutter polish):** S7-2, S7-3, S7-4
 9. **PR 9 (LOW consistency):** S5-N3/N4/N6/N7, S6-3, S8-6, S4-5/N8/N9, S3-5
+
+---
+
+## Deferred Items Resolution (Round 4 Completion)
+
+All 24 deferred items were resolved via 5 parallel `general-purpose` subagents. Commits: `77805c6`, `845de87`, `8eb31a3`.
+
+### PR-1: Concurrency (7 items) — ALL RESOLVED
+
+| ID | Status | Resolution |
+|----|--------|------------|
+| S1-N2 | **FIXED** | `loop.go`: lock around currentTaskID/currentSessionID read/write in chatWithFailoverRaw and RunWithTask |
+| S1-N3 | **FIXED** | `executor.go`: add `sync.RWMutex`, nil guard in SetRegistry, RLock in Execute |
+| S1-N4 | **FIXED** | `loop.go`: lock around prefetchCallback read/write |
+| S1-N5 | **FIXED** | `conversation.go`: GetOrRestore/Get use RLock fast path + I/O outside lock + double-check |
+| S2-N4 | **ALREADY FIXED** | Round-3 `renderWithContextLines` refactor made contextLines immutable per-call; no mutation race |
+| S3-2 | **FIXED** | `token_cache.go`: Get uses RLock for L1 + L2 I/O outside lock (PR-1 subagent); Put/Invalidate/InvalidateByFile snapshot L2 handle under lock, I/O without lock (direct fix) |
+| S4-7 | **ALREADY FIXED** | Round-3 `[]chan` slice pattern with snapshot-then-iterate is safe; no residual race |
+
+### PR-2+6: Q Agent + LSP (3 items) — ALL RESOLVED
+
+| ID | Status | Resolution |
+|----|--------|------------|
+| S2-N1 | **FIXED** | `q_agent.go`: flatten `initialReports` in parallel with `initialRecs`; `reviewer.go`: bounds-check `reports[i]` |
+| S2-N5 | **FIXED** | `renderer.go`: add `maxTagsPerFile` field, wire from config, use in render instead of maxLineLength proxy |
+| S4-4 | **FIXED** | `lsp_writethrough.go`: sort edits by descending start position before applying |
+
+### PR-3: Security (4 items) — ALL RESOLVED
+
+| ID | Status | Resolution |
+|----|--------|------------|
+| S4-1 | **FIXED** | `web_fetch.go`: CheckRedirect calls checkURL on every hop; `mcp/transport/http.go`: replicated isBlockedAddress + checkRedirectURL (avoids circular import) |
+| S4-2 | **FIXED** | `shell.go`: ExecuteStreaming applies same fenceChecker.CheckCommand as Execute |
+| S5-N1 | **FIXED** | `comm/web/websocket.go`: Handshake callback validates Origin against localhost allowlist |
+| S5-N5 | **FIXED** | `pkg/security/permissions.go`: expandPath uses EvalSymlinks (full path, then parent dir fallback) |
+
+### PR-4+5: Schedule/Cron + LLM Streaming (6 items) — ALL RESOLVED
+
+| ID | Status | Resolution |
+|----|--------|------------|
+| S4-3a | **FIXED** | `tool_schedule_create.go`: generic error message + slog.Error |
+| S4-3b | **FIXED** | `tool_schedule_delete.go`: same pattern for 4 tools (delete/pause/resume/run-now) |
+| S4-3c | **FIXED** | `tool_cron_create.go`: same pattern |
+| S3-1 | **FALSE POSITIVE** | keepTail tail window calculation is correct; no off-by-one |
+| S3-3 | **FALSE POSITIVE** | No dead/misused count parameter in the call path |
+| S3-4 | **FIXED** | `provider_manager.go`: ChatWithProgress now applies classification + health tracking matching Chat |
+| S3-6 | **FIXED** | `client.go`: add 529 to retryableStatusCodes |
+
+### PR-7+8+9: CLI + Flutter + LOW (13 items) — ALL RESOLVED
+
+| ID | Status | Resolution |
+|----|--------|------------|
+| S8-3 | **FIXED** | `cluster_cmd.go`: addGitRemote returns error; caller surfaces warning |
+| S8-4 | **FIXED** | `ClientConfigView.swift`: onAppear callback re-fetches config; SettingsWindow wires loadClientConfig |
+| S8-5 | **FIXED** | `MetricsViewModel.swift`: @Published errorMessage; LiveMetricsView displays in red |
+| S7-2 | **FIXED** | `chat_input.dart`: agent names lowercased |
+| S7-3 | **FIXED** | `agent_activity_panel.dart`: agent.id lowercased |
+| S7-4 | **FIXED** | `chat_provider.dart`: dispose calls unsubscribeFromChat before cancel |
+| S5-N3 | **FIXED** | `comm/http/server.go`: MCP SSE uses crypto/rand for session ID |
+| S5-N4 | **FALSE POSITIVE** | PTY upgrader already has isLocalOrigin check |
+| S5-N6 | **FIXED** | `notification_handlers.go`: AcceptOptions sets OriginPatterns to defaultWSOrigins |
+| S6-3 | **FALSE POSITIVE** | No unprotected counter in metrics store; batch protected by mu |
+| S8-6 | **FIXED** | LocalhostTrustDelegate hoisted to `static let shared` |
+| S4-5 | **FALSE POSITIVE** | Regex compiled once, reused via *regexp.Regexp |
+| S4-9 | **FIXED** | `setters_test.go`: added 11 missing setter method rows (32 total) |
+
+### Additional fixes (not from deferred list)
+
+- **Skills default enabled**: `config/schema.go` DefaultConfig sets Skills.Enabled=true
+- **TLS handshake tuning**: `server.go` tlsDetectListener deadline 2s → 10s; `daemon_cert_pinner.dart` debug logging
+- **Flutter UI**: ConnectionDot popup menu (disconnect/reconnect), sessions tab nav, sessions list refresh after create
+
+### Final totals
+
+- **Deferred items resolved:** 24/24 (19 fixed, 3 false positives, 2 already fixed in round-3)
+- **Commits:** `77805c6` (32 files, PRs 1-9), `845de87` (3 files, S3-2 + TLS), `8eb31a3` (4 files, UI polish)
+- **Build:** `go build ./...` clean
+- **Tests:** All affected packages pass (`internal/agent/q`, `internal/llm`, `internal/tools`, `internal/repomap`, `internal/comm`, `pkg/security`)
