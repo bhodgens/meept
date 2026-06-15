@@ -1793,7 +1793,7 @@ func (a *App) initCurrentView() tea.Cmd {
 // View renders the application.
 func (a *App) View() tea.View {
 	if a.width == 0 || a.height == 0 {
-		return tea.NewView("Loading...")
+		return tea.NewView("loading...")
 	}
 
 	// Render modal overlay if active

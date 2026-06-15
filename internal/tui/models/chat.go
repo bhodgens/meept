@@ -104,7 +104,7 @@ type ChatModel struct {
 	sessionMessages map[string][]ChatMessage
 
 	// Pending message tracking
-	pendingMsgIdx int // index of the "Sending..." message, -1 if none
+	pendingMsgIdx int // index of the "sending..." message, -1 if none
 
 	// Progress state for the current pending message
 	progressState *ProgressState
@@ -246,7 +246,7 @@ func NewChatModel(rpc RPCClient, userStyle, assistantStyle, systemStyle lipgloss
 // NewChatModelWithConfig creates a new chat model with input configuration.
 func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyle lipgloss.Style, escapeBehavior string, inputConfig InputBehaviorConfig, chatConfig ChatConfig) *ChatModel {
 	ta := textarea.New()
-	ta.Placeholder = "Type a message..."
+	ta.Placeholder = "type a message..."
 	ta.Focus()
 	ta.CharLimit = 4000
 	ta.SetWidth(80)
@@ -442,7 +442,7 @@ func (m *ChatModel) SetScreenYOffset(offset int) {
 // Init initializes the chat model.
 func (m *ChatModel) Init() tea.Cmd {
 	if len(m.messages) == 0 {
-		m.addMessage(RoleSystem, "Welcome to Meept! Type a message to begin.")
+		m.addMessage(RoleSystem, "welcome to meept! type a message to begin.")
 	}
 	return textarea.Blink
 }
@@ -584,7 +584,7 @@ type ProgressState struct {
 // Render returns the formatted progress string for display.
 func (p *ProgressState) Render() string {
 	if p == nil {
-		return "Sending..."
+		return "sending..."
 	}
 
 	var parts []string
@@ -624,7 +624,7 @@ func (p *ProgressState) Render() string {
 	}
 
 	if len(parts) == 0 {
-		return "Processing..."
+		return "processing..."
 	}
 
 	return strings.Join(parts, " │ ")
@@ -1389,9 +1389,9 @@ func (m *ChatModel) getMessageContent(msg ChatMessage) string {
 	var prefix string
 	switch msg.Role {
 	case RoleUser:
-		prefix = "You: "
+		prefix = "you: "
 	case RoleAssistant:
-		prefix = "Meept: "
+		prefix = "meept: "
 	case RoleParticipant:
 		prefix = fmt.Sprintf("[%s] ", msg.SourceClient)
 	case StatePending:
@@ -1515,7 +1515,7 @@ func (m *ChatModel) doSendMessage() tea.Cmd {
 			return m.SteerQueue(text)
 		}
 		// Follow-up mode
-		m.AddSystemMessage("Message queued (follow-up)")
+		m.AddSystemMessage("message queued (follow-up)")
 		return m.FollowUpQueue(text)
 	}
 
@@ -1530,11 +1530,11 @@ func (m *ChatModel) doSendMessage() tea.Cmd {
 
 	// Initialize progress state
 	m.progressState = &ProgressState{
-		Stage:      "Sending...",
+		Stage:      "sending...",
 		LastUpdate: time.Now(),
 	}
 
-	// Add pending "Sending..." message immediately
+	// Add pending "sending..." message immediately
 	m.pendingMsgIdx = len(m.messages)
 	m.messages = append(m.messages, ChatMessage{
 		Role:      StatePending,
@@ -1668,7 +1668,7 @@ func (m *ChatModel) updateProgressMessage() {
 func (m *ChatModel) renderProgressContent() string {
 	p := m.progressState
 	if p == nil {
-		return "Sending..."
+		return "sending..."
 	}
 
 	var parts []string

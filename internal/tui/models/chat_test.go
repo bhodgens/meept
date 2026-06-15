@@ -287,7 +287,7 @@ func TestChatModel_ReceiveResponse(t *testing.T) {
 	model.pendingMsgIdx = len(model.messages)
 	model.messages = append(model.messages, ChatMessage{
 		Role:    "pending",
-		Content: "Sending...",
+		Content: "sending...",
 	})
 
 	// Receive response
@@ -329,7 +329,7 @@ func TestChatModel_ReceiveError(t *testing.T) {
 	model.pendingMsgIdx = len(model.messages)
 	model.messages = append(model.messages, ChatMessage{
 		Role:    "pending",
-		Content: "Sending...",
+		Content: "sending...",
 	})
 
 	// Receive error
@@ -854,7 +854,7 @@ func TestChatModel_AutoDescription(t *testing.T) {
 	model.addMessage("user", "What is the weather like today")
 	model.loading = true
 	model.pendingMsgIdx = len(model.messages)
-	model.messages = append(model.messages, ChatMessage{Role: "pending", Content: "Sending..."})
+	model.messages = append(model.messages, ChatMessage{Role: "pending", Content: "sending..."})
 
 	// Receive first response - should trigger auto-description
 	responseMsg := ChatResponseMsg{Reply: "The weather is sunny!", Err: nil}
@@ -892,7 +892,7 @@ func TestChatModel_NoAutoDescriptionOnSecondExchange(t *testing.T) {
 	model.addMessage("user", "Second message")
 	model.loading = true
 	model.pendingMsgIdx = len(model.messages)
-	model.messages = append(model.messages, ChatMessage{Role: "pending", Content: "Sending..."})
+	model.messages = append(model.messages, ChatMessage{Role: "pending", Content: "sending..."})
 
 	responseMsg := ChatResponseMsg{Reply: "Second response", Err: nil}
 	model.Update(responseMsg)
