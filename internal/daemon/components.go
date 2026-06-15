@@ -3800,6 +3800,10 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 			hermesTierCount++
 		}
 	}
+
+	// Add ClaudeSource to discover skills from ~/.claude/skills/
+	// This is wired separately from file tiers since Claude uses a different skill format
+	discoveryOpts = append(discoveryOpts, skills.WithSources(skills.NewClaudeSource(logger)))
 	logger.Info("Skills discovery tiers configured",
 		"total_tiers", len(baseTiers),
 		"hermes_enabled", hermesTierCount > 0,

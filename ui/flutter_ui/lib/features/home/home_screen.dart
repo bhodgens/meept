@@ -23,6 +23,9 @@ class _ConnectionDot extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final connected = ref.watch(connectionStateProvider);
+    final isConnecting = ref.watch(isConnectingProvider);
+    final statusText = ref.watch(connectionStatusProvider);
+    final statusColor = ref.watch(connectionColorProvider);
 
     return PopupMenuButton<String>(
       onSelected: (value) {
@@ -52,19 +55,23 @@ class _ConnectionDot extends ConsumerWidget {
             width: 8,
             height: 8,
             decoration: BoxDecoration(
-              color: connected
-                  ? CyberpunkColors.greenSuccess
-                  : CyberpunkColors.redAlert,
+              color: isConnecting
+                  ? CyberpunkColors.orangePrimary
+                  : connected
+                      ? CyberpunkColors.greenSuccess
+                      : CyberpunkColors.redAlert,
               shape: BoxShape.circle,
             ),
           ),
           const SizedBox(width: 6),
           Text(
-            connected ? 'connected' : 'disconnected',
+            statusText,
             style: CyberpunkTypography.bodySmall.copyWith(
-              color: connected
+              color: statusColor == 'green'
                   ? CyberpunkColors.greenSuccess
-                  : CyberpunkColors.redAlert,
+                  : statusColor == 'orange'
+                      ? CyberpunkColors.orangePrimary
+                      : CyberpunkColors.redAlert,
               fontFamily: 'SourceCodePro',
               fontSize: 10,
             ),
