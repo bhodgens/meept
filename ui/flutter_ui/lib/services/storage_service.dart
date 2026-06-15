@@ -51,22 +51,34 @@ class StorageService {
   /// Read API key synchronously.
   /// Returns the cached keychain value if [init] has been awaited,
   /// otherwise falls back to SharedPreferences for backward compatibility.
-  /// Falls back to the default dev key when no key is configured.
-  String? getApiKey() {
-    if (_cachedApiKey != null && _cachedApiKey!.isNotEmpty) return _cachedApiKey;
+  /// Throws if no API key is configured (storage, config, or build-time injected).
+  String getApiKey() {
+    if (_cachedApiKey != null && _cachedApiKey!.isNotEmpty) {
+      return _cachedApiKey!;
+    }
     final prefsKey = _prefs?.getString(AppConstants.apiKeyPref);
     if (prefsKey != null && prefsKey.isNotEmpty) return prefsKey;
-    return AppConstants.defaultApiKey;
+    // Build-time injected fallback (empty in release builds per Obs-6)
+    if (AppConstants.defaultApiKey.isNotEmpty) return AppConstants.defaultApiKey;
+    throw StateError(
+      'No API key configured. Configure one via menubar app settings, '
+      'or run `meept token generate --save`.',
+    );
   }
 
   /// Read API key from keychain (async) for full security.
   /// Falls back to SharedPreferences if keychain unavailable.
+  /// Returns null if no key is configured anywhere (storage, config, or build-time).
   Future<String?> getApiKeyAsync() async {
     // Try keychain first
     final keychainKey = await _secureStorage?.read(key: AppConstants.apiKeyPref);
     if (keychainKey != null) return keychainKey;
     // Fallback to SharedPreferences for backward compatibility
-    return _prefs?.getString(AppConstants.apiKeyPref);
+    final prefsKey = _prefs?.getString(AppConstants.apiKeyPref);
+    if (prefsKey != null) return prefsKey;
+    // Build-time injected fallback (empty in release builds)
+    if (AppConstants.defaultApiKey.isNotEmpty) return AppConstants.defaultApiKey;
+    return null;
   }
 
   /// Write API key to both keychain and SharedPreferences.

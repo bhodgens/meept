@@ -184,6 +184,22 @@ All configuration uses **JSON5** format (JSON with comments and trailing commas)
 
 Templates are in `config/` and copied on `make install` if not present.
 
+### Development API Key
+
+The default development API key is defined in exactly one place:
+`pkg/constants/api_key.go` (`constants.DefaultDevAPIKey`).
+
+- **Go code**: Always reference `constants.DefaultDevAPIKey`. Never hardcode the literal.
+- **Flutter**: Use `--dart-define=MEEPT_DEV_API_KEY=<key>` at build time.
+  The `defaultApiKey` constant uses `String.fromEnvironment()` so it is empty in release builds.
+  Debug builds (flutter run): pass the dart-define flag.
+- **Swift (MenuBar)**: Gated behind `#if DEBUG`. The `MenubarConfigService.apiToken`
+  property returns `nil` in release builds when no config token is set, triggering
+  a clear authentication error rather than silently using a known key.
+- **Config files**: Set `"api_token": null` in `menubar.json5`; the app falls back to
+  the `#if DEBUG` constant in debug builds. For production, generate a custom key
+  via `meept token generate --save`.
+
 ### Transport Configuration
 
 The daemon supports two transports (can be enabled independently):
