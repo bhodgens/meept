@@ -350,23 +350,25 @@ func TestIntegration_CORSHeaders(t *testing.T) {
 	// Wrap with middleware like the server does
 	handler2 := s.TestMiddleware(mux)
 
-	// Test OPTIONS preflight
+	// Test OPTIONS preflight with an allowed origin
 	req := httptest.NewRequest(http.MethodOptions, "/api/v1/status", http.NoBody)
+	req.Header.Set("Origin", "http://localhost:3000")
 	w := httptest.NewRecorder()
 	handler2.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 for OPTIONS, got %d", w.Code)
 	}
-	if origin := w.Header().Get("Access-Control-Allow-Origin"); origin != "*" {
-		t.Fatalf("expected CORS origin *, got %s", origin)
+	if origin := w.Header().Get("Access-Control-Allow-Origin"); origin != "http://localhost:3000" {
+		t.Fatalf("expected CORS origin http://localhost:3000, got %s", origin)
 	}
 
 	// Test actual request has CORS headers
 	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/status", http.NoBody)
+	req2.Header.Set("Origin", "http://localhost:3000")
 	w2 := httptest.NewRecorder()
 	handler2.ServeHTTP(w2, req2)
-	if origin := w2.Header().Get("Access-Control-Allow-Origin"); origin != "*" {
-		t.Fatalf("expected CORS origin *, got %s", origin)
+	if origin := w2.Header().Get("Access-Control-Allow-Origin"); origin != "http://localhost:3000" {
+		t.Fatalf("expected CORS origin http://localhost:3000, got %s", origin)
 	}
 }
 
