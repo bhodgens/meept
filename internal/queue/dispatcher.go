@@ -25,6 +25,7 @@ type Dispatcher struct {
 	// Channels for coordination
 	jobAvailable chan struct{}
 	cancel       context.CancelFunc
+	wg           sync.WaitGroup // QUEUE-M2: tracks dispatch/cleanup goroutines so Stop can wait
 }
 
 // NewDispatcher creates a new job dispatcher.
@@ -137,18 +138,27 @@ func (d *Dispatcher) workerCanHandle(worker *WorkerInfo, requiredCaps []string) 
 func (d *Dispatcher) Start(ctx context.Context) error {
 	ctx, d.cancel = context.WithCancel(ctx)
 
-	go d.runDispatchLoop(ctx)
-	go d.runCleanupLoop(ctx)
+	d.wg.Add(2)
+	go func() {
+		defer d.wg.Done()
+		d.runDispatchLoop(ctx)
+	}()
+	go func() {
+		defer d.wg.Done()
+		d.runCleanupLoop(ctx)
+	}()
 
 	d.logger.Info("Dispatcher started")
 	return nil
 }
 
-// Stop stops the dispatcher.
+// Stop stops the dispatcher and waits for the dispatch/cleanup goroutines to exit
+// so callers can be certain no goroutine is touching the queue after Stop returns.
 func (d *Dispatcher) Stop() {
 	if d.cancel != nil {
 		d.cancel()
 	}
+	d.wg.Wait()
 }
 
 func (d *Dispatcher) runDispatchLoop(ctx context.Context) {

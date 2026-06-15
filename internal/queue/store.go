@@ -970,10 +970,14 @@ func (s *Store) scanClusterMember(row Scanner, m *ClusterMember) error {
 	m.ClusterIP = clusterIP.String
 	m.Status = status
 	if joinedAt > 0 {
-		m.JoinedAt = time.Unix(joinedAt, 0)
+		// joined_at is stored as UnixNano (see cluster_schema_test.go).
+		m.JoinedAt = time.Unix(0, joinedAt)
 	}
 	if lastHb > 0 {
-		m.LastHeartbeat = time.Unix(lastHb, 0)
+		// last_heartbeat is stored as UnixNano (see cluster_schema_test.go and
+		// CheckNodeReachability in cluster_queue.go). Treat it as nanoseconds,
+		// not seconds, so LastHeartbeat reflects the actual write time.
+		m.LastHeartbeat = time.Unix(0, lastHb)
 	}
 	if capabilities != "" {
 		_ = json.Unmarshal([]byte(capabilities), &m.Capabilities)
