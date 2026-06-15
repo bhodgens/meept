@@ -1516,7 +1516,12 @@ func (m *Manager) QueuePrefetch(query string, maxItems int) {
 func (m *Manager) StopPrefetchService() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.stopPrefetchServiceLocked()
+}
 
+// stopPrefetchServiceLocked stops the prefetch service assuming the caller
+// already holds m.mu. Used by Close() to avoid unlock/relock during shutdown.
+func (m *Manager) stopPrefetchServiceLocked() {
 	if m.prefetchQueue == nil {
 		return // Not running
 	}
@@ -1555,12 +1560,7 @@ func (m *Manager) Close() error {
 	}
 
 	// MEM-5 FIX: Stop prefetch service before closing other subsystems
-	if m.prefetchQueue != nil {
-		// Need to unlock mutex temporarily for StopPrefetchService to acquire it
-		m.mu.Unlock()
-		m.StopPrefetchService()
-		m.mu.Lock()
-	}
+	m.stopPrefetchServiceLocked()
 
 	if m.episodic != nil {
 		if err := m.episodic.Close(); err != nil {
