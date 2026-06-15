@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
@@ -63,8 +64,9 @@ const (
 
 // Components holds all the daemon components.
 type Components struct {
-	ctx    context.Context    // lifecycle context, cancelled on Stop
-	cancel context.CancelFunc // cancels the lifecycle context
+	ctx      context.Context    // lifecycle context, cancelled on Stop
+	cancel   context.CancelFunc // cancels the lifecycle context
+	stopOnce sync.Once          // ensures Stop() is idempotent
 
 	Config               *config.Config
 	ModelsConfig         *config.ModelsConfig
@@ -2069,8 +2071,19 @@ func (c *Components) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops all components.
+// Stop stops all components. It is idempotent — safe to call multiple times.
+// Only the first call executes the shutdown sequence; subsequent calls return
+// nil immediately.
 func (c *Components) Stop(ctx context.Context) error {
+	var stopErr error
+	c.stopOnce.Do(func() {
+		stopErr = c.stopComponents(ctx)
+	})
+	return stopErr
+}
+
+// stopComponents is the actual shutdown logic, invoked once by Stop().
+func (c *Components) stopComponents(ctx context.Context) error {
 	// Cancel lifecycle context to unblock background goroutines
 	if c.cancel != nil {
 		c.cancel()
