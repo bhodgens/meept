@@ -1737,6 +1737,35 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if len(allowedOrigins) == 0 {
 		allowedOrigins = defaultWSOrigins
 	}
+	// Build the origin allowlist as a set for O(1) lookup. Both the raw host
+	// (e.g. "localhost") and full origin URLs (e.g. "https://meept.local")
+	// are accepted; entries are compared case-insensitively.
+	allowedOriginSet := make(map[string]struct{}, len(allowedOrigins)+len(defaultWSOrigins))
+	for _, o := range allowedOrigins {
+		allowedOriginSet[strings.ToLower(o)] = struct{}{}
+	}
+	// Always include the default local origins so that loopback browser
+	// clients continue to work even when the operator only configures
+	// non-local origins.
+	for _, o := range defaultWSOrigins {
+		allowedOriginSet[strings.ToLower(o)] = struct{}{}
+	}
+	originAllowed := func(origin string) bool {
+		if origin == "" {
+			return true // non-browser clients
+		}
+		if _, ok := allowedOriginSet[strings.ToLower(origin)]; ok {
+			return true
+		}
+		// Also accept by hostname so that callers can put either
+		// "localhost" or "https://localhost" in the allowlist.
+		if u, err := url.Parse(origin); err == nil && u.Host != "" {
+			if _, ok := allowedOriginSet[strings.ToLower(u.Hostname())]; ok {
+				return true
+			}
+		}
+		return false
+	}
 
 	wsServer := &websocket.Server{
 		Handler: websocket.Handler(func(conn *websocket.Conn) {
@@ -1765,9 +1794,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			origin := request.Header.Get("Origin")
 			// Non-browser clients (Dart io.WebSocket, curl, CLI tools) may not
 			// send an Origin header. Allow empty/absent Origin since auth is
-			// already enforced above. Only reject non-empty origins that are
-			// not localhost.
-			if origin != "" && !isLocalOrigin(origin) {
+			// already enforced above. For browser clients, enforce the
+			// configured allowlist.
+			if origin != "" && !originAllowed(origin) {
 				return fmt.Errorf("origin not allowed: %s", origin)
 			}
 			return nil
