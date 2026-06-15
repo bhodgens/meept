@@ -1,19 +1,12 @@
-// Package errcls provides shared error classification helpers that replace
-// ad-hoc strings.Contains(err.Error(), ...) checks across the codebase.
-//
-// All helpers return false on nil errors. They use errors.As / errors.Is so
-// wrapping via fmt.Errorf("...: %w", err) is handled correctly.
-//
-// To avoid import cycles, errcls only depends on internal/llm (a leaf package)
-// and the standard library. Higher-level packages that define sentinel errors
-// (e.g. internal/services) register them via RegisterSentinels at init time.
 package errcls
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -187,4 +180,50 @@ func isConnError(err error) bool {
 		return true
 	}
 	return false
+}
+
+// IsJSONSyntaxError reports whether err is a JSON syntax error from
+// encoding/json (e.g. "unexpected end of JSON input" or "invalid
+// character"). Uses errors.As against *json.SyntaxError for structured
+// detection, then falls back to a centralized substring check for drivers
+// that wrap the error without preserving the type.
+func IsJSONSyntaxError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) {
+		return true
+	}
+	// Fall back to centralized substring check for wrapped errors that lose
+	// the *json.SyntaxError type (e.g. fmt.Errorf("parse: %w", err) where the
+	// inner error is a plain error from a third-party decoder).
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unexpected end") || strings.Contains(msg, "invalid character")
+}
+
+// IsDuplicateColumn reports whether err is a SQLite "duplicate column" error
+// returned by ALTER TABLE ADD COLUMN when the column already exists. SQLite
+// drivers (modernc.org/sqlite, mattn/go-sqlite3) do not expose a typed error,
+// so this centralizes the substring check in one place. Callers should use
+// this instead of sprinkling strings.Contains(err.Error(), "duplicate
+// column") across migration code.
+func IsDuplicateColumn(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate column")
+}
+
+// IsAlreadyInstalled reports whether err is a "service already installed"
+// error returned by github.com/kardianos/service. The kardianos/service
+// package returns untyped fmt.Errorf strings, so this centralizes the
+// substring check in one place.
+func IsAlreadyInstalled(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "already installed")
 }
