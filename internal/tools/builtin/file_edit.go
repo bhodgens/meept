@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
+	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
@@ -46,6 +47,7 @@ type FileEditTool struct {
 	blockResolver           BlockResolver
 	pendingChangesRegistry  *PendingChangesRegistry
 	fenceChecker            FenceChecker
+	secOrch                 *intsecurity.Orchestrator
 	recoveryConfig          RecoveryConfig
 }
 
@@ -87,6 +89,14 @@ func (t *FileEditTool) SetRecoveryConfig(cfg RecoveryConfig) {
 func (t *FileEditTool) SetFenceChecker(fc FenceChecker) {
 	if fc != nil {
 		t.fenceChecker = fc
+	}
+}
+
+// SetSecurityOrchestrator sets the security orchestrator for content scanning.
+// Follows the typed-nil interface guard pattern mandated by CLAUDE.md.
+func (t *FileEditTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
+	if orch != nil {
+		t.secOrch = orch
 	}
 }
 

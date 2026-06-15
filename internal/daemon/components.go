@@ -2715,10 +2715,8 @@ func registerBuiltinTools(
 		writeFileTool.SetFenceChecker(fenceChecker)
 	}
 	if secOrch != nil {
-		// TODO: SetSecurityOrchestrator not yet implemented on ReadFileTool/WriteFileTool
-		// readFileTool.SetSecurityOrchestrator(secOrch)
-		// writeFileTool.SetSecurityOrchestrator(secOrch)
-		_ = secOrch
+		readFileTool.SetSecurityOrchestrator(secOrch)
+		writeFileTool.SetSecurityOrchestrator(secOrch)
 	}
 	registry.Register(readFileTool)
 	registry.Register(writeFileTool)
@@ -2734,9 +2732,7 @@ func registerBuiltinTools(
 		fileEditTool.SetFenceChecker(fenceChecker)
 	}
 	if secOrch != nil {
-		// TODO: SetSecurityOrchestrator not yet implemented on FileEditTool
-		// fileEditTool.SetSecurityOrchestrator(secOrch)
-		_ = secOrch
+		fileEditTool.SetSecurityOrchestrator(secOrch)
 	}
 	registry.Register(fileEditTool)
 
@@ -2745,9 +2741,7 @@ func registerBuiltinTools(
 		deleteFileTool.SetFenceChecker(fenceChecker)
 	}
 	if secOrch != nil {
-		// TODO: SetSecurityOrchestrator not yet implemented on DeleteFileTool
-		// deleteFileTool.SetSecurityOrchestrator(secOrch)
-		_ = secOrch
+		deleteFileTool.SetSecurityOrchestrator(secOrch)
 	}
 	registry.Register(deleteFileTool)
 	if pendingChanges != nil {
@@ -2766,9 +2760,7 @@ func registerBuiltinTools(
 		fileGrepTool.SetFenceChecker(fenceChecker)
 	}
 	if secOrch != nil {
-		// TODO: SetSecurityOrchestrator not yet implemented on ListDirectoryTool
-		// listDirTool.SetSecurityOrchestrator(secOrch)
-		_ = secOrch
+		listDirTool.SetSecurityOrchestrator(secOrch)
 	}
 	registry.Register(listDirTool)
 	registry.Register(fileFindTool)

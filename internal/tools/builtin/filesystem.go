@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/caimlas/meept/internal/llm"
+	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
@@ -33,6 +34,7 @@ type ReadFileTool struct {
 	checker      *security.PermissionChecker
 	readCache    *ReadCache
 	fenceChecker FenceChecker
+	secOrch      *intsecurity.Orchestrator
 }
 
 // NewReadFileTool creates a new file read tool.
@@ -44,6 +46,14 @@ func NewReadFileTool(checker *security.PermissionChecker, readCache *ReadCache) 
 func (t *ReadFileTool) SetFenceChecker(fc FenceChecker) {
 	if fc != nil {
 		t.fenceChecker = fc
+	}
+}
+
+// SetSecurityOrchestrator sets the security orchestrator for output scanning.
+// Follows the typed-nil interface guard pattern mandated by CLAUDE.md.
+func (t *ReadFileTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
+	if orch != nil {
+		t.secOrch = orch
 	}
 }
 
@@ -274,6 +284,7 @@ type WriteFileTool struct {
 	checker      *security.PermissionChecker
 	lspNotifier  LSPWriteNotifier
 	fenceChecker FenceChecker
+	secOrch      *intsecurity.Orchestrator
 }
 
 // NewWriteFileTool creates a new file write tool.
@@ -293,6 +304,14 @@ func (t *WriteFileTool) SetLSPNotifier(notifier LSPWriteNotifier) {
 func (t *WriteFileTool) SetFenceChecker(fc FenceChecker) {
 	if fc != nil {
 		t.fenceChecker = fc
+	}
+}
+
+// SetSecurityOrchestrator sets the security orchestrator for input sanitization.
+// Follows the typed-nil interface guard pattern mandated by CLAUDE.md.
+func (t *WriteFileTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
+	if orch != nil {
+		t.secOrch = orch
 	}
 }
 
@@ -476,6 +495,7 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 type DeleteFileTool struct {
 	checker      *security.PermissionChecker
 	fenceChecker FenceChecker
+	secOrch      *intsecurity.Orchestrator
 }
 
 // NewDeleteFileTool creates a new file delete tool.
@@ -487,6 +507,14 @@ func NewDeleteFileTool(checker *security.PermissionChecker) *DeleteFileTool {
 func (t *DeleteFileTool) SetFenceChecker(fc FenceChecker) {
 	if fc != nil {
 		t.fenceChecker = fc
+	}
+}
+
+// SetSecurityOrchestrator sets the security orchestrator for audit logging.
+// Follows the typed-nil interface guard pattern mandated by CLAUDE.md.
+func (t *DeleteFileTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
+	if orch != nil {
+		t.secOrch = orch
 	}
 }
 
@@ -578,6 +606,7 @@ func (t *DeleteFileTool) Execute(ctx context.Context, args map[string]any) (any,
 type ListDirectoryTool struct {
 	checker      *security.PermissionChecker
 	fenceChecker FenceChecker
+	secOrch      *intsecurity.Orchestrator
 }
 
 // NewListDirectoryTool creates a new list directory tool.
@@ -589,6 +618,14 @@ func NewListDirectoryTool(checker *security.PermissionChecker) *ListDirectoryToo
 func (t *ListDirectoryTool) SetFenceChecker(fc FenceChecker) {
 	if fc != nil {
 		t.fenceChecker = fc
+	}
+}
+
+// SetSecurityOrchestrator sets the security orchestrator for output scanning.
+// Follows the typed-nil interface guard pattern mandated by CLAUDE.md.
+func (t *ListDirectoryTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
+	if orch != nil {
+		t.secOrch = orch
 	}
 }
 

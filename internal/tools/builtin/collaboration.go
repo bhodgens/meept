@@ -23,6 +23,7 @@ func NewInitiateCollaborationTool() *InitiateCollaborationTool {
 
 // SetCallback sets the collaboration callback.
 func (t *InitiateCollaborationTool) SetCallback(cb func(ctx context.Context, mode, taskDesc, reason string, preferredAgents []string) (string, error)) {
+	if cb != nil {
 		t.callback = cb
 	}
 }
