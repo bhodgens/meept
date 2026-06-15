@@ -75,6 +75,12 @@ class SttNotifier extends StateNotifier<SttState> {
     _service.cancelRecording();
     state = SttState.idle;
   }
+
+  @override
+  void dispose() {
+    _service.dispose();
+    super.dispose();
+  }
 }
 
 /// Global Riverpod provider for STT recording state.

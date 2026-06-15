@@ -223,4 +223,27 @@ class TtsService {
   void setOnComplete(Function() callback) {
     _onComplete = callback;
   }
+
+  /// Release platform resources held by this service.
+  ///
+  /// Stops any in-flight synthesis, clears the queue, and drops callbacks
+  /// so the underlying [FlutterTts] engine can be GC'd.  Safe to call
+  /// multiple times.  Must be invoked by the owning provider's
+  /// [StateNotifier.dispose] to avoid leaking the platform synthesizer
+  /// across hot-reload or panel teardown.
+  void dispose() {
+    // Stop synchronously schedules the platform-channel stop; we cannot
+    // await in a sync dispose, but clearing _isSpeaking and _queue
+    // prevents further queued playback.
+    if (_isSpeaking || _queue.isNotEmpty) {
+      _flutterTts.stop();
+      _isSpeaking = false;
+      _queue.clear();
+      _processingQueue = false;
+    }
+    _onError = null;
+    _onStart = null;
+    _onComplete = null;
+    _initialized = false;
+  }
 }

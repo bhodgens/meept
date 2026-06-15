@@ -95,4 +95,26 @@ class SttService {
     _isRecording = false;
     _lastResult = '';
   }
+
+  /// Release platform resources held by this service.
+  ///
+  /// Stops any in-flight recognition session and drops the error callback
+  /// so the underlying recognizer can be GC'd.  Safe to call multiple times.
+  /// Must be invoked by the owning provider's [StateNotifier.dispose] to
+  /// avoid leaking the platform speech session across hot-reload or panel
+  /// teardown.
+  void dispose() {
+    if (_isRecording) {
+      // Fire-and-forget cancel: we cannot await in a sync dispose, but the
+      // plugin's cancel() schedules the platform-channel stop immediately.
+      _speech.cancel();
+      _isRecording = false;
+    }
+    _onError = null;
+    _lastResult = '';
+    // Note: speech_to_text does not expose an explicit close(). Setting
+    // _initialized false forces the next caller to re-initialize, which
+    // re-requests permissions and reuses the same native singleton.
+    _initialized = false;
+  }
 }

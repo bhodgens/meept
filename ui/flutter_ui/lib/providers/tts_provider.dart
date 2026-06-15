@@ -149,7 +149,8 @@ class TtsNotifier extends StateNotifier<TtsState> {
 
   @override
   void dispose() {
-    _service.stop();
+    // Stop any in-flight synthesis, then release platform resources.
+    _service.dispose();
     super.dispose();
   }
 }
