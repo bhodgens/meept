@@ -292,3 +292,52 @@ func TestShellExecuteTool_SetRuntimeManager_NilGuard(t *testing.T) {
 	}
 }
 
+// TestClassifyRisk_QuotedPipes verifies that splitOnUnquotedPipes correctly
+// distinguishes between real shell pipelines and pipe characters inside
+// quoted strings. This guards against regressions in the quote-aware
+// tokenization used by classifyRisk (S3-H1 fix, Obs-3).
+func TestClassifyRisk_QuotedPipes(t *testing.T) {
+	tool := NewShellExecuteTool("", 0, nil)
+
+	tests := []struct {
+		name    string
+		command string
+		want    ShellCommandRisk
+	}{
+		{
+			name:    "pipe in single quotes",
+			command: `echo '|'`,
+			want:    RiskMedium, // echo is read-only; pipe is quoted (not a pipeline)
+		},
+		{
+			name:    "pipe in double quotes",
+			command: `echo "|"`,
+			want:    RiskMedium, // echo is read-only; pipe is quoted (not a pipeline)
+		},
+		{
+			name:    "real pipe",
+			command: "echo hello | wc",
+			want:    RiskMedium, // both echo and wc are read-only
+		},
+		{
+			name:    "sudo after pipe",
+			command: "echo hi | sudo rm -rf /",
+			want:    RiskCritical, // sudo segment escalates to CRITICAL
+		},
+		{
+			name:    "awk with pipe separator",
+			command: `awk -F'|' '{print $2}'`,
+			want:    RiskMedium, // awk is read-only; -F'|' must not be treated as a pipeline
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tool.classifyRisk(tt.command)
+			if got != tt.want {
+				t.Errorf("classifyRisk(%q) = %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
