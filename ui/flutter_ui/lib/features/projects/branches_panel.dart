@@ -38,7 +38,21 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
     });
 
     try {
-      final branches = await _apiClient.listBranches('default');
+      // Resolve the active project from the provider rather than hardcoding
+      // 'default'. The daemon assigns UUIDs to auto-registered projects, so
+      // the literal 'default' only works for one manually-registered project.
+      final project = ref.read(resolveActiveProjectProvider).valueOrNull;
+      if (project == null) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _error = 'no active project registered. add a project with '
+                '`meept projects add <path>` first.';
+          });
+        }
+        return;
+      }
+      final branches = await _apiClient.listBranches(project.id);
       final current = branches.where((b) => b.isCurrent).firstOrNull;
 
       if (mounted) {
@@ -66,7 +80,19 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
 
     if (confirmed == true && mounted) {
       try {
-        await _apiClient.checkoutBranch('default', branchName);
+        final project = ref.read(resolveActiveProjectProvider).valueOrNull;
+        if (project == null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('no active project'),
+                backgroundColor: CyberpunkColors.orangeDark,
+              ),
+            );
+          }
+          return;
+        }
+        await _apiClient.checkoutBranch(project.id, branchName);
         // Refresh branch list so is_current flags are accurate
         await _loadBranches();
         if (mounted) {

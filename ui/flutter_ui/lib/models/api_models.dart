@@ -457,6 +457,42 @@ class SearchResultItem with _$SearchResultItem {
       _$$SearchResultItemImplFromJson(json);
 }
 
+// ===== Project Models =====
+
+/// Project model matching the daemon's `GET /api/v1/projects` response.
+///
+/// Mirrors `internal/project/types.go:Project`. Hand-rolled (not freezed)
+/// to avoid forcing a build_runner run for a single panel fix, matching the
+/// pattern used by [MemoryResultModel] above.
+class Project {
+  final String id;
+  final String name;
+  final String mode; // "git" or "local"
+  final String branch;
+  final String localPath;
+  final String status; // "active", "archived", "error"
+
+  const Project({
+    required this.id,
+    required this.name,
+    this.mode = 'git',
+    this.branch = '',
+    this.localPath = '',
+    this.status = 'active',
+  });
+
+  factory Project.fromJson(Map<String, dynamic> json) {
+    return Project(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? json['id'] as String? ?? '',
+      mode: json['mode'] as String? ?? 'git',
+      branch: json['branch'] as String? ?? '',
+      localPath: json['local_path'] as String? ?? '',
+      status: json['status'] as String? ?? 'active',
+    );
+  }
+}
+
 // ===== Branch Models =====
 
 @freezed

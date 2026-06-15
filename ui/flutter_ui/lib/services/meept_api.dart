@@ -297,6 +297,17 @@ class MeeptApi {
 
   // ===== Projects / Branches =====
 
+  /// Lists registered projects from `GET /api/v1/projects`.
+  /// Response order is `created_at DESC` (newest first) on the daemon side.
+  Future<List<Project>> listProjects() async {
+    final response = await _dio.get('/api/v1/projects');
+    final body = response.data as Map<String, dynamic>;
+    final data = body['projects'] as List<dynamic>? ?? [];
+    return data
+        .map((p) => Project.fromJson(p as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<List<BranchInfo>> listBranches(String projectId) async {
     final response = await _dio.get('/api/v1/projects/$projectId/branches');
     final body = response.data as Map<String, dynamic>;

@@ -48,6 +48,32 @@ final activeSessionProvider = StateProvider<Session?>((ref) => null);
 // Active agent state
 final activeAgentProvider = StateProvider<Agent?>((ref) => null);
 
+/// Active project state.
+///
+/// Set by callers (e.g., project picker) or auto-resolved on first read by
+/// [resolveActiveProjectProvider]. The branches panel and other per-project
+/// UI read this to determine which registered project to operate on, instead
+/// of hardcoding the literal "default".
+final activeProjectProvider = StateProvider<Project?>((ref) => null);
+
+/// Resolves the active project: returns the explicitly-selected project if
+/// set, otherwise falls back to the first project with `status == "active"`
+/// from `GET /api/v1/projects` (matching the Go TUI heuristic at
+/// `internal/tui/app.go:496-526`). Returns null if the daemon has no
+/// registered projects or the request fails.
+final resolveActiveProjectProvider = FutureProvider<Project?>((ref) async {
+  final explicit = ref.watch(activeProjectProvider);
+  if (explicit != null) return explicit;
+  final client = ref.watch(apiClientProvider);
+  try {
+    final projects = await client.listProjects();
+    final active = projects.where((p) => p.status == 'active').toList();
+    return active.isEmpty ? null : active.first;
+  } catch (_) {
+    return null;
+  }
+});
+
 // Connection state
 final connectionStateProvider = StateProvider<bool>((ref) => false);
 

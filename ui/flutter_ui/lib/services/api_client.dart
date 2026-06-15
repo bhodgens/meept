@@ -407,6 +407,8 @@ class ApiClient {
 
   // ===== Project/Branch Endpoints =====
 
+  Future<List<Project>> listProjects() => _api.listProjects();
+
   Future<List<BranchInfo>> listBranches(String projectId) =>
       _api.listBranches(projectId);
 
