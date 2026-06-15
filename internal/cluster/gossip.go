@@ -313,19 +313,17 @@ func (g *GossipEngine) handleClusterEvent(msg *models.BusMessage) {
 		return
 	}
 
-	// Deduplicate via xxhash of event_id
+	// Deduplicate via xxhash of event_id — atomic check-and-set under a
+	// single write lock to prevent the TOCTOU race where two concurrent
+	// handlers for the same eventID both pass the RLock check.
 	checksum := fmt.Sprintf("%d", xxhash.Sum64String(event.EventID))
-	g.dedupMu.RLock()
+	g.dedupMu.Lock()
 	if expiry, seen := g.dedupCache[checksum]; seen {
 		if time.Now().Before(expiry) {
-			g.dedupMu.RUnlock()
+			g.dedupMu.Unlock()
 			return // duplicate, skip
 		}
-		g.dedupMu.RUnlock()
-	} else {
-		g.dedupMu.RUnlock()
 	}
-	g.dedupMu.Lock()
 	g.dedupCache[checksum] = time.Now().Add(g.cfg.Gossip.EventRetention)
 	g.dedupMu.Unlock()
 
