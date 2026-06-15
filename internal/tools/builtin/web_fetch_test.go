@@ -42,6 +42,8 @@ func TestWebFetchTool_Execute(t *testing.T) {
 	defer server.Close()
 
 	tool := NewWebFetchTool(time.Second*5, 50000)
+	// Test server binds to 127.0.0.1; bypass SSRF filter for these unit tests.
+	tool.SetAllowPrivateRanges(true)
 	ctx := context.Background()
 
 	// Test plain text
@@ -206,6 +208,7 @@ func TestWebFetchTool_Timeout(t *testing.T) {
 	defer server.Close()
 
 	tool := NewWebFetchTool(100*time.Millisecond, 50000)
+	tool.SetAllowPrivateRanges(true)
 	ctx := context.Background()
 
 	_, err := tool.Execute(ctx, map[string]any{
@@ -232,6 +235,8 @@ func TestWebFetchTool_Redirects(t *testing.T) {
 	defer server.Close()
 
 	tool := NewWebFetchTool(time.Second*5, 50000)
+	// Test server binds to 127.0.0.1; bypass SSRF filter for these unit tests.
+	tool.SetAllowPrivateRanges(true)
 	ctx := context.Background()
 
 	result, err := tool.Execute(ctx, map[string]any{

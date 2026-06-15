@@ -36,6 +36,10 @@ type WebFetchTool struct {
 	maxLength int
 	client    *http.Client
 	secOrch   SecurityChecker
+	// allowPrivateRanges disables the SSRF private/loopback IP filter.
+	// Production code never sets this; it exists for unit tests that run
+	// against httptest.NewServer (which binds to 127.0.0.1).
+	allowPrivateRanges bool
 }
 
 // SecurityChecker is an interface for pre-fetch security checks.
@@ -72,6 +76,13 @@ func (t *WebFetchTool) Name() string { return "web_fetch" }
 // SetSecurityOrchestrator sets the security orchestrator for taint/exfil checks.
 func (t *WebFetchTool) SetSecurityOrchestrator(orch SecurityChecker) {
 	t.secOrch = orch
+}
+
+// SetAllowPrivateRanges disables SSRF protection for private/loopback IPs.
+// Intended only for unit tests that exercise the fetch path against
+// httptest.NewServer. Production callers must never invoke this.
+func (t *WebFetchTool) SetAllowPrivateRanges(allow bool) {
+	t.allowPrivateRanges = allow
 }
 
 func (t *WebFetchTool) Category() string { return "web" }
@@ -119,7 +130,16 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) (any, e
 		}
 	}
 
-	// Validate URL scheme
+	// SSRF guard: refuse private/loopback/link-local targets before
+	// constructing the request. This catches both raw-IP and hostname
+	// targets that resolve to blocked ranges.
+	if !t.allowPrivateRanges {
+		if err := checkURL(url); err != nil {
+			return nil, fmt.Errorf("web_fetch blocked: %w", err)
+		}
+	}
+
+	// Validate URL scheme (defense in depth; checkURL also enforces this)
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		return nil, fmt.Errorf("only http:// and https:// URLs are supported")
 	}
@@ -271,6 +291,14 @@ func (t *WebFetchTool) ExecuteStreaming(ctx context.Context, args map[string]any
 	if t.secOrch != nil {
 		if blocked, reason := t.secOrch.CheckWebFetch(url); blocked {
 			return nil, fmt.Errorf("web fetch blocked by security policy: %s", reason)
+		}
+	}
+
+	// SSRF guard: refuse private/loopback/link-local targets before
+	// constructing the request.
+	if !t.allowPrivateRanges {
+		if err := checkURL(url); err != nil {
+			return nil, fmt.Errorf("web_fetch blocked: %w", err)
 		}
 	}
 
