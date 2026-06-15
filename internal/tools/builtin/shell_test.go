@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -235,3 +236,45 @@ func TestShellRisk_ConfigurableAllowlist(t *testing.T) {
 		t.Errorf("classifyRisk(rm) = %v, want RiskCritical (blocked list wins)", got)
 	}
 }
+
+// mockFenceChecker is a test double for FenceChecker.
+type mockFenceChecker struct {
+	rejectCmd string
+	rejectDir string
+}
+
+func (m *mockFenceChecker) CheckPath(path string, op string) error {
+	return nil
+}
+
+func (m *mockFenceChecker) CheckCommand(cmd string, workDir string) error {
+	if m.rejectDir != "" && workDir == m.rejectDir {
+		return fmt.Errorf("fence rejected: dir %s is outside allowed boundaries", workDir)
+	}
+	return nil
+}
+
+// TestShellExecuteTool_CreateSession_FenceCheck verifies that CreateSession
+// honors the fence checker for the working directory (SEC-H4 fix).
+func TestShellExecuteTool_CreateSession_FenceCheck(t *testing.T) {
+	fence := &mockFenceChecker{rejectDir: "/forbidden"}
+
+	tool := NewShellExecuteTool("", time.Second*10, nil)
+	tool.SetFenceChecker(fence)
+
+	_, err := tool.CreateSession("test-session", tools.PTYSessionConfig{
+		Cmd:  "bash",
+		Args: []string{},
+		Dir:  "/forbidden",
+		Rows: 24,
+		Cols: 80,
+	})
+
+	if err == nil {
+		t.Fatal("expected fence rejection error, got nil")
+	}
+	if !strings.Contains(err.Error(), "fence") {
+		t.Errorf("expected fence-related error, got: %v", err)
+	}
+}
+

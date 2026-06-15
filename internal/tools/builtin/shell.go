@@ -572,6 +572,15 @@ func (t *ShellExecuteTool) GetRiskLevel(command string) security.RiskLevel {
 
 // CreateSession creates a new PTY session.
 func (t *ShellExecuteTool) CreateSession(sessionID string, config tools.PTYSessionConfig) (*tools.PTYSessionInfo, error) {
+	// SEC-H4 FIX: Check fence boundaries before creating PTY sessions.
+	// Regular shell execution checks at lines 208-213, but PTY sessions
+	// previously bypassed the fence entirely.
+	if t.fenceChecker != nil && config.Dir != "" {
+		if err := t.fenceChecker.CheckCommand(config.Cmd, config.Dir); err != nil {
+			return nil, fmt.Errorf("pty session rejected by fence: %w", err)
+		}
+	}
+
 	if t.ptyMgr == nil {
 		return nil, fmt.Errorf("PTY manager not available")
 	}
