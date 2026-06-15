@@ -313,7 +313,7 @@ func (c *Consolidator) summarizeByDate(memories []MemoryResult) []Summary {
 				totalChars += len(snippet)
 			}
 			if totalChars > 2000 {
-				snippets = append(snippets, fmt.Sprintf("... and %d more", len(mems)-len(ids)))
+				snippets = append(snippets, fmt.Sprintf("... and %d more", len(mems)-len(snippets)))
 				break
 			}
 		}
