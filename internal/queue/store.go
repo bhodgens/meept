@@ -91,7 +91,8 @@ CREATE TABLE IF NOT EXISTS dead_letter (
 	retry_count   INTEGER,
 	error         TEXT,
 	created_at    TEXT NOT NULL,
-	died_at       TEXT NOT NULL
+	died_at       TEXT NOT NULL,
+	due_at        TEXT
 );
 
 -- queued_followups table for persisted follow-up messages (Phase 4).
@@ -181,6 +182,7 @@ func (s *Store) migrate() error {
 		"ALTER TABLE jobs ADD COLUMN agent_id TEXT",
 		"ALTER TABLE dead_letter ADD COLUMN agent_id TEXT",
 		"ALTER TABLE jobs ADD COLUMN next_retry_at TEXT",
+		"ALTER TABLE dead_letter ADD COLUMN due_at TEXT",
 	}
 
 	for _, m := range migrations {
@@ -728,10 +730,10 @@ func (s *Store) moveToDead(jobID string) error {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Insert into dead_letter
+	// Insert into dead_letter, preserving due_at from the original job.
 	_, err = tx.Exec(`
-		INSERT INTO dead_letter (id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, error, created_at, died_at)
-		SELECT id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, error, created_at, ?
+		INSERT INTO dead_letter (id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, error, created_at, died_at, due_at)
+		SELECT id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, error, created_at, ?, due_at
 		FROM jobs WHERE id = ?`,
 		now, jobID)
 	if err != nil {
@@ -761,7 +763,7 @@ func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
 
 	// Select from dead_letter
 	row := tx.QueryRow(`
-		SELECT id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, error, created_at
+		SELECT id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, error, created_at, due_at
 		FROM dead_letter WHERE id = ?`, jobID)
 
 	var (
@@ -770,10 +772,11 @@ func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
 		taskID, agentID                  sql.NullString
 		errMsg                           sql.NullString
 		createdAt                        string
+		dueAt                            sql.NullString
 	)
 
 	err = row.Scan(&id, &taskID, &agentID, &jobType, &priority, &payload, &capsJSON,
-		&maxRetries, &retryCount, &errMsg, &createdAt)
+		&maxRetries, &retryCount, &errMsg, &createdAt, &dueAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("dead letter job not found: %s", jobID)
@@ -781,7 +784,7 @@ func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
 		return nil, fmt.Errorf("failed to read dead letter: %w", err)
 	}
 
-	// Re-insert into jobs with reset state
+	// Re-insert into jobs with reset state, preserving due_at from dead_letter.
 	_, err = tx.Exec(`
 		INSERT INTO jobs (id, task_id, agent_id, type, priority, state, payload, required_caps,
 		                  max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at)
@@ -795,13 +798,13 @@ func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
 		payload,
 		capsJSON,
 		maxRetries,
-		0,              // Reset retry_count
+		0, // Reset retry_count
 		(*string)(nil), // claimed_by
 		(*string)(nil), // result
 		(*string)(nil), // Reset error
 		createdAt,
 		now,
-		(*string)(nil), // due_at
+		dueAt, // Preserve due_at from dead letter
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to re-insert job: %w", err)
@@ -836,7 +839,7 @@ func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
 func (s *Store) ListDeadLetter(limit int) ([]*Job, error) {
 	rows, err := s.db.Query(`
 		SELECT id, task_id, agent_id, type, priority, payload, required_caps,
-		       max_retries, retry_count, error, created_at, died_at
+		       max_retries, retry_count, error, created_at, died_at, due_at
 		FROM dead_letter
 		ORDER BY died_at ASC
 		LIMIT ?`, limit)
@@ -853,10 +856,11 @@ func (s *Store) ListDeadLetter(limit int) ([]*Job, error) {
 			taskID, agentID                  sql.NullString
 			errMsg                           sql.NullString
 			createdAt, diedAt                string
+			dueAt                            sql.NullString
 		)
 
 		err := rows.Scan(&id, &taskID, &agentID, &jobType, &priority, &payload, &capsJSON,
-			&maxRetries, &retryCount, &errMsg, &createdAt, &diedAt)
+			&maxRetries, &retryCount, &errMsg, &createdAt, &diedAt, &dueAt)
 		if err != nil {
 			s.logger.Error("Failed to scan dead letter job", "error", err)
 			continue
@@ -886,6 +890,12 @@ func (s *Store) ListDeadLetter(limit int) ([]*Job, error) {
 
 		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 			job.CreatedAt = t
+		}
+
+		if dueAt.Valid {
+			if t, err := time.Parse(time.RFC3339, dueAt.String); err == nil {
+				job.DueAt = &t
+			}
 		}
 
 		jobs = append(jobs, job)
