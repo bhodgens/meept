@@ -1169,10 +1169,14 @@ func DefaultConfig() *Config {
 		},
 		LLM: LLMConfig{
 			Budget: BudgetConfig{
-				HourlyTokenLimit: 100000,
-				DailyTokenLimit:  1000000,
-				RateLimitRPM:     30,
-				Aggressiveness:   0.5,
+				HourlyTokenLimit:     100000,
+				DailyTokenLimit:      1000000,
+				DailyCostLimit:       10.0,
+				HourlyCostLimit:      2.0,
+				RateLimitRPM:         30,
+				Aggressiveness:       0.5,
+				PerTaskTokenLimit:    50000,
+				PerSessionTokenLimit: 100000,
 			},
 			Broker: LLMBrokerConfig{
 				MaxErrorRate:    0.10,

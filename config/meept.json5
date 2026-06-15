@@ -43,13 +43,18 @@
 
   // LLM configuration (models moved to models.json5)
   "llm": {
+    // Token budget - prevents runaway costs and rate limit violations
+    // All limits use aggressiveness factor: effective_limit = base * (0.5 + 0.5 * aggressiveness)
+    // At aggressiveness=0.5 (default), you can use 75% of configured limits
     "budget": {
-      "hourly_token_limit": 0,   // 0 = unlimited
-      "daily_token_limit": 0,    // 0 = unlimited
-      "daily_cost_limit": 0,     // max USD per UTC day (0 = unlimited)
-      "hourly_cost_limit": 0,    // max USD per sliding hour (0 = unlimited)
-      "rate_limit_rpm": 0,       // 0 = unlimited
-      "aggressiveness": 0.5,     // 0.0 = very conservative, 1.0 = use full budget
+      "hourly_token_limit": 100000,    // Tokens per sliding hour (0 = unlimited)
+      "daily_token_limit": 1000000,    // Tokens per UTC day (0 = unlimited)
+      "daily_cost_limit": 10.0,        // Max USD per UTC day (0 = no cost limit)
+      "hourly_cost_limit": 2.0,        // Max USD per sliding hour (0 = no limit)
+      "rate_limit_rpm": 30,            // Max requests per minute (0 = unlimited)
+      "aggressiveness": 0.5,           // 0.0-1.0: conservative to aggressive
+      "per_task_token_limit": 50000,   // Max tokens per single task (0 = no cap)
+      "per_session_token_limit": 100000, // Max tokens per session (0 = no cap)
     },
     // Model broker - circuit breaker and fallback
     "broker": {

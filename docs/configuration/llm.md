@@ -101,32 +101,55 @@ Model aliases provide cooldown-based failover for high-availability:
 - **timeout**: Cooldown period after failure (seconds)
 - **max_fails**: Maximum consecutive failures before switching
 
-## Budget Configuration (meept.toml)
+## Budget Configuration
 
-Budget settings control LLM usage costs and rate limiting:
+For comprehensive budget documentation, see [Token Budgets Configuration](token-budgets.md).
 
-```toml
-[llm.budget]
-hourly_token_limit = 100000
-daily_token_limit = 1000000
-rate_limit_rpm = 30
-aggressiveness = 0.5  # 0.0 = very conservative, 1.0 = use full budget
+Quick reference (`~/.meept/meept.json5`):
+
+```json5
+{
+  "llm": {
+    "budget": {
+      "hourly_token_limit": 100000,      // Tokens per sliding hour
+      "daily_token_limit": 1000000,      // Tokens per UTC day
+      "daily_cost_limit": 10.0,          // Max USD per day
+      "hourly_cost_limit": 2.0,          // Max USD per hour
+      "rate_limit_rpm": 30,              // Max requests per minute
+      "aggressiveness": 0.5,             // 0.0-1.0 usage factor
+      "per_task_token_limit": 50000,     // Cap per single task
+      "per_session_token_limit": 100000, // Cap per session
+    }
+  }
+}
 ```
 
 ### Budget Options
 
-- **hourly_token_limit**: Maximum tokens per hour
-- **daily_token_limit**: Maximum tokens per day
-- **rate_limit_rpm**: Maximum requests per minute
-- **aggressiveness**: Budget usage strategy (0.0-1.0)
+| Field | Description | Default |
+|-------|-------------|---------|
+| `hourly_token_limit` | Maximum tokens in sliding 1-hour window | 100000 |
+| `daily_token_limit` | Maximum tokens per UTC day | 1000000 |
+| `daily_cost_limit` | Maximum USD cost per UTC day | 10.0 |
+| `hourly_cost_limit` | Maximum USD cost per sliding hour | 2.0 |
+| `rate_limit_rpm` | Maximum requests per minute | 30 |
+| `aggressiveness` | Budget usage factor (0.0-1.0) | 0.5 |
+| `per_task_token_limit` | Token cap per individual task | 50000 |
+| `per_session_token_limit` | Token cap per conversation session | 100000 |
+
+**Note:** Setting any limit to `0` disables that specific limit. When all limits are `0`, budget enforcement is completely disabled.
 
 ### Token Budget Enforcement
 
 The budget system:
-- Tracks token usage across all providers
-- Enforces hourly and daily limits
-- Automatically throttles when limits are approached
-- Uses aggressiveness setting to balance cost vs. performance
+- Tracks token usage across all providers and models
+- Enforces hourly and daily token limits
+- Enforces hourly and daily dollar cost limits (requires model pricing)
+- Blocks requests when limits are exceeded with `BudgetExceededError`
+- Uses aggressiveness setting to apply safety margin (default 75% of configured limits)
+- Implements per-task and per-session caps for isolation
+
+See [Token Budgets Configuration](token-budgets.md) for detailed examples and troubleshooting.
 
 ## Model Broker Configuration
 

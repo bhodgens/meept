@@ -168,24 +168,68 @@ GROUP BY tool_name;
 
 ## Budget Tracking
 
-### LLM Cost Tracking
+For comprehensive budget configuration, see [Token Budgets Configuration](../configuration/token-budgets.md).
 
-```toml
-[llm.budget]
-hourly_token_limit = 100000
-daily_token_limit = 1000000
-rate_limit_rpm = 30
-aggressiveness = 0.5
+### Budget Configuration
+
+```json5
+{
+  "llm": {
+    "budget": {
+      "hourly_token_limit": 100000,
+      "daily_token_limit": 1000000,
+      "daily_cost_limit": 10.0,
+      "hourly_cost_limit": 2.0,
+      "rate_limit_rpm": 30,
+      "aggressiveness": 0.5,
+      "per_task_token_limit": 50000,
+      "per_session_token_limit": 100000,
+    }
+  }
+}
 ```
 
-### Cost Metrics
+### Budget Metrics (via `meept status --json`)
 
-- `tokens_used_hourly` - Tokens used in current hour
-- `tokens_used_daily` - Tokens used in current day
-- `cost_estimated` - Estimated cost based on provider rates
-- `budget_utilization` - Percentage of budget used
+| Metric | Type | Description |
+|--------|------|-------------|
+| `hourly_used` | int | Tokens used in current sliding 1-hour window |
+| `hourly_limit` | int | Effective hourly limit (after aggressiveness factor) |
+| `hourly_remaining` | int | Tokens remaining in hourly window |
+| `daily_used` | int | Tokens used in current UTC day |
+| `daily_limit` | int | Effective daily limit (after aggressiveness factor) |
+| `daily_remaining` | int | Tokens remaining for current UTC day |
+| `per_task_budget` | int | Per-task token cap (0 = no cap) |
+| `per_task_used` | int | Total tokens across all active tasks |
+| `per_session_budget` | int | Per-session token cap (0 = no cap) |
+| `per_session_used` | int | Total tokens across all active sessions |
+| `rpm_current` | int | Requests in current minute window |
+| `rpm_limit` | int | Max requests per minute (0 = unlimited) |
+| `aggressiveness` | float | Current aggressiveness factor (0.0-1.0) |
+| `within_budget` | bool | true if all budget limits are satisfied |
+| `task_budget_exhausted` | bool | true if any task hit its per-task cap |
+| `session_budget_exhausted` | bool | true if any session hit its per-session cap |
+| `daily_cost_used` | float | Dollar cost used today (UTC) |
+| `daily_cost_limit` | float | Effective daily cost limit |
+| `daily_cost_remaining` | float | Remaining daily cost allowance |
+| `hourly_cost_used` | float | Dollar cost in current hour |
+| `hourly_cost_limit` | float | Effective hourly cost limit |
+| `within_cost_budget` | bool | true if all cost limits are satisfied |
 
-### Alerts
+### Budget Limit Reasons
+
+When budget is exceeded, the `reason` field indicates which limit was hit:
+
+| Reason | Description |
+|--------|-------------|
+| `hourly_token` | Hourly token budget exceeded |
+| `daily_token` | Daily token budget exceeded |
+| `hourly_cost` | Hourly cost budget exceeded |
+| `daily_cost` | Daily cost budget exceeded |
+| `per_task` | Per-task token cap exceeded |
+| `per_session` | Per-session token cap exceeded |
+
+### Budget Alerts
 
 ```toml
 [alerts]

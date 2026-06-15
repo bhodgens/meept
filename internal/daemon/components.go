@@ -349,10 +349,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			"provider", llmCfg.ProviderID,
 			"model", llmCfg.ModelID,
 			"base_url", llmCfg.BaseURL,
-			"budget_hourly_limit", cfg.LLM.Budget.HourlyTokenLimit,
-			"budget_daily_limit", cfg.LLM.Budget.DailyTokenLimit,
+			"budget_hourly_token_limit", cfg.LLM.Budget.HourlyTokenLimit,
+			"budget_daily_token_limit", cfg.LLM.Budget.DailyTokenLimit,
+			"budget_hourly_cost_limit", cfg.LLM.Budget.HourlyCostLimit,
+			"budget_daily_cost_limit", cfg.LLM.Budget.DailyCostLimit,
 			"budget_per_task_limit", cfg.LLM.Budget.PerTaskTokenLimit,
 			"budget_per_session_limit", cfg.LLM.Budget.PerSessionTokenLimit,
+			"budget_aggressiveness", cfg.LLM.Budget.Aggressiveness,
 		)
 
 		// Create LLM resolver for skill model resolution (must be initialized
