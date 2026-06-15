@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/caimlas/meept/internal/errcls"
 	"github.com/kardianos/service"
 )
 
@@ -271,7 +272,7 @@ func (m *ServiceManager) Install() error {
 	// internally writes a plist and runs launchctl, which is exactly
 	// what we want on macOS.
 	err = svc.Install()
-	if err != nil && !strings.Contains(err.Error(), "already installed") {
+	if err != nil && !errcls.IsAlreadyInstalled(err) {
 		// Fallback: write plist manually + launchctl load.
 		m.writePlistAndLoad(label)
 		return nil
