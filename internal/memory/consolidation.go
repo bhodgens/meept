@@ -430,7 +430,7 @@ func (c *Consolidator) summarizeClusters(ctx context.Context, clusters [][]Memor
 				totalChars += len(snippet)
 			}
 			if totalChars > 2000 {
-				snippets = append(snippets, fmt.Sprintf("... and %d more", len(cluster)-len(snippets)))
+				snippets = append(snippets, fmt.Sprintf("... and %d more", len(cluster)-(len(snippets)-1)))
 				break
 			}
 		}

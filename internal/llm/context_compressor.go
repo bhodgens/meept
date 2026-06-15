@@ -510,19 +510,24 @@ func keepTail(messages []ChatMessage, n int) []ChatMessage {
 		if msg.Role == RoleTool && msg.ToolCallID != "" {
 			// Keep this tool result
 			keepSet[i] = true
-			// Find and mark the parent assistant message with matching tool call
+			// Find and mark the parent assistant message with matching tool call.
+			// Walk backwards until we find the assistant message whose ToolCalls
+			// contains the matching ID. Do NOT break on the first assistant message
+			// — it may be a text-only turn between the tool result and its parent.
 			for j := i - 1; j >= 0; j-- {
 				parent := nonSystemMsgs[j]
 				if parent.Role == RoleAssistant {
-					// Check if this assistant message has the matching tool call
 					for _, tc := range parent.ToolCalls {
 						if tc.ID == msg.ToolCallID {
 							keepSet[j] = true
 							break
 						}
 					}
-					// Stop at first assistant message
-					break
+					// Only break if we found the matching parent; otherwise
+					// keep scanning backwards for the real parent.
+					if keepSet[j] {
+						break
+					}
 				}
 			}
 		}
