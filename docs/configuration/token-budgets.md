@@ -37,6 +37,8 @@ All budget settings are in `~/.meept/meept.json5` under `llm.budget`:
       // Scope-based caps
       "per_task_token_limit": 50000,     // Max tokens per single task (0 = no cap)
       "per_session_token_limit": 100000, // Max tokens per single session (0 = no cap)
+      "per_task_cost_limit": 5.0,        // Max USD per single task (0 = no cap)
+      "per_session_cost_limit": 10.0,    // Max USD per single session (0 = no cap)
     }
   }
 }
@@ -54,6 +56,29 @@ All budget settings are in `~/.meept/meept.json5` under `llm.budget`:
 | `aggressiveness` | float | 0.5 | Multiplier applied to all limits (see formula below). Range: 0.0-1.0. |
 | `per_task_token_limit` | int | 50000 | Maximum tokens a single task can consume. Prevents one task from exhausting the budget. |
 | `per_session_token_limit` | int | 100000 | Maximum tokens a single conversation session can consume. |
+| `per_task_cost_limit` | float | 5.0 | Maximum USD cost a single task can incur. Prevents expensive tasks from exhausting the budget. |
+| `per_session_cost_limit` | float | 10.0 | Maximum USD cost a single conversation session can incur. |
+
+### Per-Task vs. Per-Session Budgets
+
+The budget system supports both token-based and dollar-cost limits with per-task and per-session scoping:
+
+**Per-Task Budgets** (`per_task_token_limit`, `per_task_cost_limit`):
+- Limits apply to individual tasks executed via `RunWithTask()`
+- When exceeded, the task fails with a non-retryable `BudgetExceededError`
+- Budget entries are automatically cleaned up when tasks complete
+- Prevents a single runaway task from consuming the entire budget
+
+**Per-Session Budgets** (`per_session_token_limit`, `per_session_cost_limit`):
+- Limits apply to conversation sessions (identified by session ID)
+- Multiple tasks within the same session share the session budget
+- Useful for limiting per-user or per-conversation spending
+- Cleanup occurs when tasks complete to prevent unbounded map growth
+
+**Scope Application**:
+- Scoped budgets are applied when using `agent/loop.go`'s `RunWithTask()` method
+- Direct chat methods (`RunOnce()`, `RunWithSkill()`) use global hourly/daily budgets only
+- The agent layer automatically tracks task/session scope during execution
 
 ### The Aggressiveness Factor
 
@@ -335,6 +360,24 @@ meept per-session token budget reached: 105000 / 100000 tokens used
 ```
 
 **Fix:** Start a new conversation session, or increase `per_session_token_limit`.
+
+#### Per-Task Cost Budget Exceeded
+
+```
+meept per-task cost budget reached: $5.50 / $5.00 used
+(config: llm.budget.per_task_cost_limit)
+```
+
+**Fix:** Split the task into smaller subtasks, or increase `per_task_cost_limit`.
+
+#### Per-Session Cost Budget Exceeded
+
+```
+meept per-session cost budget reached: $12.00 / $10.00 used
+(config: llm.budget.per_session_cost_limit)
+```
+
+**Fix:** Start a new conversation session, or increase `per_session_cost_limit`.
 
 ### Budget Seems Wrong After Config Change
 

@@ -319,6 +319,40 @@ components:
           type: number
         budget_remaining:
           type: number
+        # Hourly budget
+        hourly_used:
+          type: integer
+        hourly_remaining:
+          type: integer
+        # Daily budget
+        daily_used:
+          type: integer
+        daily_remaining:
+          type: integer
+        # Rate limiting
+        rpm_current:
+          type: integer
+        rpm_limit:
+          type: integer
+        # Cost budgets
+        daily_cost_used:
+          type: number
+        daily_cost_limit:
+          type: number
+        hourly_cost_used:
+          type: number
+        hourly_cost_limit:
+          type: number
+        # Per-task budgets
+        per_task_cost:
+          type: number
+        per_task_budget:
+          type: integer
+        # Per-session budgets
+        per_session_cost:
+          type: number
+        per_session_budget:
+          type: integer
         registered_methods:
           type: integer
         bus_subscribers:
