@@ -113,10 +113,17 @@ class JobNotifier extends StateNotifier<JobState> {
     final gen = ++_fetchGeneration;
     try {
       final jobs = await apiClient.listJobs();
-      final stats = await apiClient.getQueueStats();
-      if (_disposed || gen != _fetchGeneration) return;
-      final depth = stats['queue_depth'] as int? ?? stats['depth'] as int? ?? 0;
 
+      // Stats fetch is non-fatal; keep last known queueDepth on failure.
+      int? depth;
+      try {
+        final stats = await apiClient.getQueueStats();
+        depth = stats['queue_depth'] as int? ?? stats['depth'] as int? ?? 0;
+      } catch (_) {
+        // Stats fetch is non-fatal; keep last known queueDepth.
+      }
+
+      if (_disposed || gen != _fetchGeneration) return;
       state = state.copyWith(
         updates: jobs
             .map((j) => JobUpdate(
@@ -127,7 +134,7 @@ class JobNotifier extends StateNotifier<JobState> {
                   timestamp: j.createdAt,
                 ))
             .toList(),
-        queueDepth: depth,
+        queueDepth: depth ?? state.queueDepth,
         isLoading: false,
         error: null,
       );
