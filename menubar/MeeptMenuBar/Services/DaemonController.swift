@@ -30,7 +30,13 @@ class DaemonController {
             throw DaemonError.loadFailed(loadResult.output)
         }
 
-        _ = runLaunchctl("kickstart", "-k", launchAgentLabel)
+        let kickResult = runLaunchctl("kickstart", "-k", launchAgentLabel)
+        if !kickResult.success {
+            // The service is loaded but kickstart failed to (re)launch it.
+            // Surface as a warning-tier error so the UI can tell the user
+            // the daemon may not have started cleanly.
+            throw DaemonError.kickstartFailed(kickResult.output)
+        }
     }
 
     func stopDaemon() async throws {
@@ -138,12 +144,18 @@ enum DaemonError: LocalizedError {
     case plistNotFound
     case loadFailed(String)
     case unloadFailed(String)
+    case kickstartFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .plistNotFound: return "launchd plist not found"
         case .loadFailed(let output): return "Failed to load: \(output)"
         case .unloadFailed(let output): return "Failed to unload: \(output)"
+        case .kickstartFailed(let output):
+            if output.isEmpty {
+                return "launchd kickstart returned non-zero status (daemon may not have started)"
+            }
+            return "launchd kickstart failed: \(output)"
         }
     }
 }
