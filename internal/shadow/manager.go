@@ -38,6 +38,10 @@ type Manager struct {
 
 	// Synchronization
 	mu sync.RWMutex
+	wg sync.WaitGroup
+
+	// shutdown flag (guarded by mu)
+	shutdown bool
 }
 
 // ManagerConfig holds configuration for creating a Manager.
@@ -159,12 +163,18 @@ func (m *Manager) GetTeacherResponse(ctx context.Context, messages []llm.ChatMes
 	return m.teacher.GetResponse(ctx, messages)
 }
 
-// ProcessRecord scores and stores a shadow record.
+// ProcessRecord scores and stores a shadow record. The mutex is only held
+// for store writes, not during the (potentially slow) LLM scoring calls.
 func (m *Manager) ProcessRecord(ctx context.Context, record *ShadowRecord) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	// Check shutdown status under lock
+	m.mu.RLock()
+	if m.shutdown {
+		m.mu.RUnlock()
+		return fmt.Errorf("shadow manager is shut down")
+	}
+	m.mu.RUnlock()
 
-	// Score the record
+	// Score the record (LLM call — no lock held)
 	result, err := m.scorer.Score(ctx, record)
 	if err != nil {
 		return fmt.Errorf("scoring failed: %w", err)
@@ -173,7 +183,7 @@ func (m *Manager) ProcessRecord(ctx context.Context, record *ShadowRecord) error
 	record.QualityScore = result.Score
 	record.IsHighQuality = result.IsHighQuality
 
-	// Determine preference if we have both responses
+	// Determine preference if we have both responses (LLM call — no lock held)
 	if record.HasTeacherResponse() {
 		studentScore, teacherScore, err := m.scorer.ScoreComparison(ctx, record)
 		if err != nil {
@@ -192,14 +202,25 @@ func (m *Manager) ProcessRecord(ctx context.Context, record *ShadowRecord) error
 			// Create preference pair if there's a clear preference
 			if record.Preference != PreferenceTie {
 				pair := NewPreferencePair(record, studentScore, teacherScore)
+				m.mu.Lock()
+				if m.shutdown {
+					m.mu.Unlock()
+					return fmt.Errorf("shadow manager is shut down")
+				}
 				if err := m.trainingStore.SavePreferencePair(ctx, pair); err != nil {
 					m.logger.Warn("Failed to save preference pair", "error", err)
 				}
+				m.mu.Unlock()
 			}
 		}
 	}
 
-	// Save the record
+	// Save the record (store write — hold lock)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.shutdown {
+		return fmt.Errorf("shadow manager is shut down")
+	}
 	if err := m.trainingStore.SaveRecord(ctx, record); err != nil {
 		return fmt.Errorf("failed to save record: %w", err)
 	}
@@ -281,9 +302,12 @@ func (m *Manager) CaptureInteraction(ctx context.Context, conversationID string,
 		}
 
 	case ModeAsync, ModeSelective:
-		// Process in background
+		// Process in background with WaitGroup tracking so Close() can
+		// wait for in-flight records before shutting down.
+		m.wg.Add(1)
 		//nolint:gosec // goroutine outlives request context
 		go func() {
+			defer m.wg.Done()
 			bgCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 
@@ -598,8 +622,10 @@ func (m *Manager) CaptureToolInteraction(ctx context.Context, conversationID str
 		}
 
 	case ModeAsync, ModeSelective:
+		m.wg.Add(1)
 		//nolint:gosec // goroutine outlives request context
 		go func() {
+			defer m.wg.Done()
 			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if err := m.ProcessRecord(bgCtx, record); err != nil {
@@ -698,10 +724,20 @@ func (m *Manager) StopAutoTrain() {
 	}
 }
 
-// Close closes all resources.
+// Close closes all resources. It marks the manager as shut down (so in-flight
+// ProcessRecord calls exit early), waits for background goroutines to finish,
+// then closes the stores.
 func (m *Manager) Close() error {
+	// Mark shutdown so no new ProcessRecord work proceeds
+	m.mu.Lock()
+	m.shutdown = true
+	m.mu.Unlock()
+
 	// Stop auto-train checker first
 	m.StopAutoTrain()
+
+	// Wait for in-flight async CaptureInteraction/CaptureToolInteraction goroutines
+	m.wg.Wait()
 
 	var lastErr error
 
