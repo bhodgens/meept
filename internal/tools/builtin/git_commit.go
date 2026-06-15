@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -14,7 +15,8 @@ import (
 
 // GitCommitTool creates git commits with validation and multi-commit support.
 type GitCommitTool struct {
-	workingDir string
+	workingDir    string
+	fenceChecker  FenceChecker
 }
 
 // BatchCommitEntry represents a single commit in a batch operation.
@@ -36,6 +38,14 @@ func NewGitCommitTool(workingDir string) *GitCommitTool {
 		workingDir, _ = os.Getwd()
 	}
 	return &GitCommitTool{workingDir: workingDir}
+}
+
+// SetFenceChecker installs a path fence so all working_dir and file arguments
+// are validated before being passed to git. Passing nil clears the fence.
+func (t *GitCommitTool) SetFenceChecker(fc FenceChecker) {
+	if fc != nil {
+		t.fenceChecker = fc
+	}
 }
 
 func (t *GitCommitTool) Name() string { return "git_commit" }
@@ -99,6 +109,15 @@ func (t *GitCommitTool) Execute(ctx context.Context, args map[string]any) (any, 
 		workingDir = wd
 	}
 
+	// Fence check: validate working directory is inside the sandbox before
+	// invoking any git commands. This prevents the LLM from targeting
+	// directories outside the project root.
+	if t.fenceChecker != nil {
+		if err := t.fenceChecker.CheckPath(workingDir, "write"); err != nil {
+			return nil, fmt.Errorf("git commit: working_dir fence: %w", err)
+		}
+	}
+
 	validate, _ := args["validate"].(bool)
 	if !validate {
 		validate = true // Default to validation enabled
@@ -137,6 +156,15 @@ func (t *GitCommitTool) Execute(ctx context.Context, args map[string]any) (any, 
 	// Stage files if specified
 	if len(files) > 0 {
 		for _, file := range files {
+			if t.fenceChecker != nil {
+				absFile := file
+				if !filepath.IsAbs(file) {
+					absFile = filepath.Join(workingDir, file)
+				}
+				if err := t.fenceChecker.CheckPath(absFile, "write"); err != nil {
+					return nil, fmt.Errorf("git commit: file %q fence: %w", file, err)
+				}
+			}
 			if _, err := t.runGitCmd(ctx, workingDir, "add", file); err != nil {
 				return nil, fmt.Errorf("failed to stage %s: %w", file, err)
 			}
@@ -213,6 +241,20 @@ func (t *GitCommitTool) executeBatchCommits(ctx context.Context, workingDir stri
 
 		if len(files) > 0 {
 			for _, file := range files {
+				if t.fenceChecker != nil {
+					absFile := file
+					if !filepath.IsAbs(file) {
+						absFile = filepath.Join(workingDir, file)
+					}
+					if err := t.fenceChecker.CheckPath(absFile, "write"); err != nil {
+						allSuccess = false
+						results = append(results, GitCommitResult{
+							Success: false,
+							Message: fmt.Sprintf("commit %d: file %q fence: %v", i, file, err),
+						})
+						continue
+					}
+				}
 				if _, err := t.runGitCmd(ctx, workingDir, "add", file); err != nil {
 					allSuccess = false
 					results = append(results, GitCommitResult{

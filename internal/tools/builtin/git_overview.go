@@ -13,7 +13,8 @@ import (
 
 // GitOverviewTool provides a summary of working tree changes.
 type GitOverviewTool struct {
-	workingDir string
+	workingDir   string
+	fenceChecker FenceChecker
 }
 
 // NewGitOverviewTool creates a new git overview tool.
@@ -22,6 +23,14 @@ func NewGitOverviewTool(workingDir string) *GitOverviewTool {
 		workingDir, _ = os.Getwd()
 	}
 	return &GitOverviewTool{workingDir: workingDir}
+}
+
+// SetFenceChecker installs a path fence so working_dir arguments are
+// validated before git is invoked. Passing nil clears the fence.
+func (t *GitOverviewTool) SetFenceChecker(fc FenceChecker) {
+	if fc != nil {
+		t.fenceChecker = fc
+	}
 }
 
 func (t *GitOverviewTool) Name() string { return "git_overview" }
@@ -82,6 +91,12 @@ func (t *GitOverviewTool) Execute(ctx context.Context, args map[string]any) (any
 	workingDir := t.workingDir
 	if wd, ok := args["working_dir"].(string); ok && wd != "" {
 		workingDir = wd
+	}
+
+	if t.fenceChecker != nil {
+		if err := t.fenceChecker.CheckPath(workingDir, "write"); err != nil {
+			return nil, fmt.Errorf("git overview: working_dir fence: %w", err)
+		}
 	}
 
 	result := GitOverviewResult{

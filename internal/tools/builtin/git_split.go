@@ -32,7 +32,8 @@ var lockFileSuffixes = []string{
 
 // GitSplitTool suggests atomic commit groups from working tree changes.
 type GitSplitTool struct {
-	workingDir string
+	workingDir   string
+	fenceChecker FenceChecker
 }
 
 // NewGitSplitTool creates a new git split tool.
@@ -41,6 +42,14 @@ func NewGitSplitTool(workingDir string) *GitSplitTool {
 		workingDir, _ = os.Getwd()
 	}
 	return &GitSplitTool{workingDir: workingDir}
+}
+
+// SetFenceChecker installs a path fence so working_dir arguments are
+// validated before git is invoked. Passing nil clears the fence.
+func (t *GitSplitTool) SetFenceChecker(fc FenceChecker) {
+	if fc != nil {
+		t.fenceChecker = fc
+	}
 }
 
 func (t *GitSplitTool) Name() string { return "git_split" }
@@ -89,6 +98,12 @@ func (t *GitSplitTool) Execute(ctx context.Context, args map[string]any) (any, e
 	workingDir := t.workingDir
 	if wd, ok := args["working_dir"].(string); ok && wd != "" {
 		workingDir = wd
+	}
+
+	if t.fenceChecker != nil {
+		if err := t.fenceChecker.CheckPath(workingDir, "write"); err != nil {
+			return nil, fmt.Errorf("git split: working_dir fence: %w", err)
+		}
 	}
 
 	groupBy, ok := args["group_by"].(string)

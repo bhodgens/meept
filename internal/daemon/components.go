@@ -2782,9 +2782,17 @@ func registerBuiltinTools(
 	registry.Register(shellTool)
 
 	// Git tools for commit workflow
-	registry.Register(builtin.NewGitOverviewTool(wd))
-	registry.Register(builtin.NewGitSplitTool(wd))
-	registry.Register(builtin.NewGitCommitTool(wd))
+	gitOverviewTool := builtin.NewGitOverviewTool(wd)
+	gitSplitTool := builtin.NewGitSplitTool(wd)
+	gitCommitTool := builtin.NewGitCommitTool(wd)
+	if fenceChecker != nil {
+		gitOverviewTool.SetFenceChecker(fenceChecker)
+		gitSplitTool.SetFenceChecker(fenceChecker)
+		gitCommitTool.SetFenceChecker(fenceChecker)
+	}
+	registry.Register(gitOverviewTool)
+	registry.Register(gitSplitTool)
+	registry.Register(gitCommitTool)
 	registry.Register(builtin.NewGitValidateTool())
 
 	// Web fetch tool
