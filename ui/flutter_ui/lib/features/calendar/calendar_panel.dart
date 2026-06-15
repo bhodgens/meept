@@ -267,6 +267,15 @@ class _CreateEventDialogState extends State<_CreateEventDialog> {
   DateTime _startDate = DateTime.now();
   DateTime _endDate = DateTime.now().add(const Duration(hours: 1));
 
+  /// Ensures [_endDate] is strictly greater than [_startDate].
+  /// If they are equal or [_endDate] is earlier, bumps [_endDate] to
+  /// [_startDate] + 1 minute. Called after every date/time mutation.
+  void _clampEndDate() {
+    if (!_endDate.isAfter(_startDate)) {
+      _endDate = _startDate.add(const Duration(minutes: 1));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -295,6 +304,17 @@ class _CreateEventDialogState extends State<_CreateEventDialog> {
               style: CyberpunkTypography.bodySmall,
             ),
             const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'start',
+                style: CyberpunkTypography.bodySmall.copyWith(
+                  color: CyberpunkColors.lightGray,
+                  fontSize: 10,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
             Row(
               children: [
                 Expanded(
@@ -308,9 +328,17 @@ class _CreateEventDialogState extends State<_CreateEventDialog> {
                       );
                       if (picked != null) {
                         setState(() {
+                          // Preserve the time component and duration delta.
                           final duration = _endDate.difference(_startDate);
-                          _startDate = picked;
-                          _endDate = picked.add(duration);
+                          _startDate = DateTime(
+                            picked.year,
+                            picked.month,
+                            picked.day,
+                            _startDate.hour,
+                            _startDate.minute,
+                          );
+                          _endDate = _startDate.add(duration);
+                          _clampEndDate();
                         });
                       }
                     },
@@ -328,18 +356,96 @@ class _CreateEventDialogState extends State<_CreateEventDialog> {
                       );
                       if (time != null) {
                         setState(() {
-                          _startDate = DateTime(
+                          final newStart = DateTime(
                             _startDate.year,
                             _startDate.month,
                             _startDate.day,
                             time.hour,
                             time.minute,
                           );
+                          // Preserve positive duration; collapse to +1m if needed.
+                          final duration = _endDate.difference(_startDate);
+                          _startDate = newStart;
+                          if (duration.inMinutes < 1) {
+                            _endDate = newStart.add(const Duration(minutes: 1));
+                          } else {
+                            _endDate = newStart.add(duration);
+                          }
+                          _clampEndDate();
                         });
                       }
                     },
                     icon: const Icon(Icons.access_time),
                     label: Text(DateFormat('HH:mm').format(_startDate)),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'end',
+                style: CyberpunkTypography.bodySmall.copyWith(
+                  color: CyberpunkColors.lightGray,
+                  fontSize: 10,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _endDate.isAfter(_startDate)
+                            ? _endDate
+                            : _startDate.add(const Duration(minutes: 1)),
+                        firstDate: _startDate,
+                        lastDate: _startDate.add(const Duration(days: 365)),
+                      );
+                      if (picked != null) {
+                        setState(() {
+                          _endDate = DateTime(
+                            picked.year,
+                            picked.month,
+                            picked.day,
+                            _endDate.hour,
+                            _endDate.minute,
+                          );
+                          _clampEndDate();
+                        });
+                      }
+                    },
+                    icon: const Icon(Icons.event),
+                    label: Text(DateFormat('yyyy-MM-dd').format(_endDate)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      final time = await showTimePicker(
+                        context: context,
+                        initialTime: TimeOfDay.fromDateTime(_endDate),
+                      );
+                      if (time != null) {
+                        setState(() {
+                          _endDate = DateTime(
+                            _endDate.year,
+                            _endDate.month,
+                            _endDate.day,
+                            time.hour,
+                            time.minute,
+                          );
+                          _clampEndDate();
+                        });
+                      }
+                    },
+                    icon: const Icon(Icons.access_time),
+                    label: Text(DateFormat('HH:mm').format(_endDate)),
                   ),
                 ),
               ],
