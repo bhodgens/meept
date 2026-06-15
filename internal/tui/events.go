@@ -23,7 +23,6 @@ type EventStream struct {
 	rpc            *RPCClient
 	subscriptionID string
 	topics         []string
-	events         chan BusEvent
 	done           chan struct{}
 	mu             sync.Mutex
 	running        bool
@@ -72,7 +71,6 @@ func NewEventStream(rpc *RPCClient, cfg *EventStreamConfig) *EventStream {
 	return &EventStream{
 		rpc:          rpc,
 		topics:       cfg.Topics,
-		events:       make(chan BusEvent, cfg.BufferSize),
 		done:         make(chan struct{}),
 		pollInterval: cfg.PollInterval,
 		buffer:       make([]BusEvent, cfg.BufferSize),
@@ -257,11 +255,6 @@ func (es *EventStream) Update(msg tea.Msg) tea.Cmd {
 		return nil
 	}
 	return nil
-}
-
-// Events returns the event channel (for external consumers).
-func (es *EventStream) Events() <-chan BusEvent {
-	return es.events
 }
 
 // IsRunning returns whether the stream is active.
