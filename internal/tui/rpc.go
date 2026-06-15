@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/caimlas/meept/internal/errcls"
 	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -133,21 +134,22 @@ func (c *RPCClient) Call(method string, params any) (json.RawMessage, error) {
 }
 
 // isConnectionError returns true if the error suggests connection issues.
+// Uses errcls.IsNetworkError for structured detection (syscall.Errno,
+// io.EOF, net.ErrClosed) and also checks for the local "not connected"
+// sentinel string used when the client knows it has no active connection.
 func (c *RPCClient) isConnectionError(err error) bool {
 	if err == nil {
 		return false
 	}
-	// Check for EOF explicitly (daemon exited/crashed)
-	if errors.Is(err, io.EOF) {
+	if errcls.IsNetworkError(err) {
 		return true
 	}
+	// Check for the local ErrNotConnected string constant. This is a plain
+	// errors.New("not connected to daemon") — no structured sentinel — so
+	// errcls.IsNetworkError won't catch it. TODO: convert ErrNotConnected
+	// to a sentinel error variable for fully structured detection.
 	errStr := err.Error()
-	return strings.Contains(errStr, "failed to write") ||
-		strings.Contains(errStr, "failed to read") ||
-		strings.Contains(errStr, "connection reset") ||
-		strings.Contains(errStr, "broken pipe") ||
-		strings.Contains(errStr, "not connected") ||
-		strings.Contains(errStr, "connection refused")
+	return strings.Contains(errStr, ErrNotConnected)
 }
 
 // callOnce makes a single RPC call attempt.

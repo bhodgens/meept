@@ -2,11 +2,14 @@ package tui
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -394,5 +397,37 @@ func TestMemoryItemGetType(t *testing.T) {
 	item = types.MemoryItem{Type: "task"}
 	if item.GetType() != "task" {
 		t.Errorf("expected 'task', got '%s'", item.GetType())
+	}
+}
+
+// TestRPCClientIsConnectionError verifies that isConnectionError correctly
+// detects network-level failures using structured error detection.
+// Regression: wrapped io.EOF (from daemon crash) must still be detected.
+func TestRPCClientIsConnectionError(t *testing.T) {
+	client := NewRPCClient("/tmp/test.sock")
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"EOF", io.EOF, true},
+		{"wrapped EOF", fmt.Errorf("read: %w", io.EOF), true},
+		{"ECONNREFUSED", syscall.ECONNREFUSED, true},
+		{"ECONNRESET", syscall.ECONNRESET, true},
+		{"EPIPE", syscall.EPIPE, true},
+		{"wrapped ECONNREFUSED", fmt.Errorf("dial: %w", syscall.ECONNREFUSED), true},
+		{"net.ErrClosed", net.ErrClosed, true},
+		{"not connected", errors.New(ErrNotConnected), true},
+		{"plain error", errors.New("something else"), false},
+		{"plain 'connection refused' string (not wrapped)", errors.New("connection refused text"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := client.isConnectionError(tt.err); got != tt.want {
+				t.Errorf("isConnectionError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }
