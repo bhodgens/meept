@@ -137,6 +137,9 @@ type MessageQueue struct {
 	logger  Logger
 
 	persister QueuePersisterOps
+
+	// wg tracks in-flight persistence goroutines so Close can wait for them.
+	wg sync.WaitGroup
 }
 
 // QueuePersisterOps is the subset of QueuePersister used by MessageQueue.
@@ -281,7 +284,9 @@ func (q *MessageQueue) FollowUp(ctx context.Context, content, source string) err
 	q.mu.Unlock()
 
 	if persister != nil {
+		q.wg.Add(1)
 		go func() {
+			defer q.wg.Done()
 			if err := persister.PersistSync(msg); err != nil {
 				q.logger.Warn("failed to persist follow-up", "id", msg.ID, "err", err)
 			}
@@ -377,6 +382,10 @@ func (q *MessageQueue) Close() {
 	if !q.closed.CompareAndSwap(false, true) {
 		return // already closed
 	}
+
+	// Wait for in-flight persistence goroutines to complete before
+	// persisting remaining state, preventing races with persistPending.
+	q.wg.Wait()
 
 	// Persist pending follow-ups before closing.
 	if q.config.PersistFollowUp && q.persister != nil {
