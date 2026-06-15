@@ -39,6 +39,11 @@ func (pm *ProjectManager) RegisterGit(ctx context.Context, id, name, gitURL stri
 	if id == "" {
 		id = uuid.New().String()
 	}
+	// Reject URLs that begin with '-' to prevent option injection into
+	// git clone (e.g. "--upload-pack=...").
+	if strings.HasPrefix(gitURL, "-") {
+		return nil, fmt.Errorf("clone URL %q starts with '-' (refusing ambiguous git arg)", gitURL)
+	}
 
 	localPath := filepath.Join(pm.cfg.BaseDir, id)
 
@@ -46,8 +51,8 @@ func (pm *ProjectManager) RegisterGit(ctx context.Context, id, name, gitURL stri
 	if _, err := os.Stat(localPath); err == nil {
 		pm.logger.Info("project directory already exists, skipping clone", "path", localPath)
 	} else {
-		// Clone the repo
-		if err := pm.runGit(ctx, "", "clone", gitURL, localPath); err != nil {
+		// Clone the repo. Use '--' to separate git options from the URL/path.
+		if err := pm.runGit(ctx, "", "clone", "--", gitURL, localPath); err != nil {
 			return nil, fmt.Errorf("git clone: %w", err)
 		}
 	}

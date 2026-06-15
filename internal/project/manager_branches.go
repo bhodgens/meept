@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -71,6 +72,14 @@ func (pm *ProjectManager) ListBranches(ctx context.Context, id string) ([]*Branc
 
 // CheckoutBranch checks out a branch in a git project.
 func (pm *ProjectManager) CheckoutBranch(ctx context.Context, id, branch string) error {
+	if branch == "" {
+		return errors.New("branch name required")
+	}
+	// Reject branch names that begin with '-' to prevent option injection:
+	// a branch named "--delete" would be interpreted as a flag by git.
+	if strings.HasPrefix(branch, "-") {
+		return fmt.Errorf("branch name %q starts with '-' (refusing ambiguous git arg)", branch)
+	}
 	p, err := pm.store.GetProject(ctx, id)
 	if err != nil {
 		return err
@@ -80,7 +89,7 @@ func (pm *ProjectManager) CheckoutBranch(ctx context.Context, id, branch string)
 	}
 
 	// Checkout the branch
-	if err := pm.runGit(ctx, p.LocalPath, "checkout", branch); err != nil {
+	if err := pm.runGit(ctx, p.LocalPath, "checkout", "--", branch); err != nil {
 		return fmt.Errorf("git checkout: %w", err)
 	}
 

@@ -206,3 +206,48 @@ func TestStatus(t *testing.T) {
 		t.Error("clean repo should not be dirty")
 	}
 }
+
+// TestCheckoutBranch_RejectsDashPrefixedNames verifies the option-injection
+// guard refuses branch names beginning with '-'.
+func TestCheckoutBranch_RejectsDashPrefixedNames(t *testing.T) {
+	pm, _ := newTestManager(t)
+	ctx := context.Background()
+
+	// Create a fake git project so we get past the mode check.
+	dir := t.TempDir()
+	if err := exec.CommandContext(ctx, "git", "init", dir).Run(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := pm.store.CreateProject(ctx, &Project{
+		ID:        "p1",
+		Name:      "p1",
+		Mode:      ModeGit,
+		LocalPath: dir,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	for _, branch := range []string{"-b", "--orphan"} {
+		if err := pm.CheckoutBranch(ctx, "p1", branch); err == nil {
+			t.Errorf("CheckoutBranch(%q) succeeded; want error", branch)
+		}
+	}
+
+	// Empty branch must also be rejected.
+	if err := pm.CheckoutBranch(ctx, "p1", ""); err == nil {
+		t.Error("CheckoutBranch(\"\") succeeded; want error")
+	}
+}
+
+// TestRegisterGit_RejectsDashPrefixedURL verifies the URL guard refuses
+// clone URLs beginning with '-'.
+func TestRegisterGit_RejectsDashPrefixedURL(t *testing.T) {
+	pm, _ := newTestManager(t)
+	ctx := context.Background()
+	for _, url := range []string{"-x", "--upload-pack=evil"} {
+		if _, err := pm.RegisterGit(ctx, "x"+url, "n", url); err == nil {
+			t.Errorf("RegisterGit(%q) succeeded; want error", url)
+		}
+	}
+}
