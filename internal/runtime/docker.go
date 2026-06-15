@@ -93,10 +93,17 @@ func (b *DockerBackend) Name() string {
 	return "docker"
 }
 
-// Execute runs a command inside the container.
+// Execute runs a command inside the container. It snapshots the container ID
+// under a brief lock, then runs the exec without holding the lock so multiple
+// concurrent Execute calls do not serialize.
 func (b *DockerBackend) Execute(ctx context.Context, cmd Command) (*CommandResult, error) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	containerID := b.containerID
+	b.mu.Unlock()
+
+	if containerID == "" {
+		return nil, fmt.Errorf("docker backend is closed")
+	}
 
 	timeout := b.config.Timeout
 	if cmd.Timeout > 0 {
@@ -120,7 +127,7 @@ func (b *DockerBackend) Execute(ctx context.Context, cmd Command) (*CommandResul
 	execOpts := docker.CreateExecOptions{
 		AttachStdout: true,
 		AttachStderr: true,
-		Container:    b.containerID,
+		Container:    containerID,
 		Cmd:          []string{"/bin/sh", "-c", cmd.Cmd},
 		WorkingDir:   cmd.Dir,
 		Env:          env,
