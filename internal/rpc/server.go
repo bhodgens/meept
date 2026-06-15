@@ -53,7 +53,7 @@ type Server struct {
 
 	// BudgetStatusGetter is an optional callback that returns budget status.
 	// Used by the status handler to report actual token and cost usage (FIX #0031/#0035).
-	BudgetStatusGetter func() (hourlyUsed int, hourlyRemaining int, dailyUsed int, dailyRemaining int, rpmCurrent int, rpmLimit int, dailyCostUsed float64, dailyCostLimit float64, hourlyCostUsed float64, hourlyCostLimit float64)
+	BudgetStatusGetter func() (hourlyUsed int, hourlyRemaining int, dailyUsed int, dailyRemaining int, rpmCurrent int, rpmLimit int, dailyCostUsed float64, dailyCostLimit float64, hourlyCostUsed float64, hourlyCostLimit float64, perTaskCost float64, perSessionCost float64, perTaskBudget int, perSessionBudget int)
 
 	// Connection tracking
 	connMu   sync.Mutex
@@ -425,7 +425,7 @@ func (s *Server) registerBuiltinHandlers() {
 
 		// Include budget stats if a getter is configured (FIX #0031/#0035)
 		if s.BudgetStatusGetter != nil {
-			hu, hr, du, dr, rc, rl, dcu, dcl, hcu, hcl := s.BudgetStatusGetter()
+			hu, hr, du, dr, rc, rl, dcu, dcl, hcu, hcl, ptc, psc, ptb, psb := s.BudgetStatusGetter()
 			result["tokens_used"] = hu
 			result["tokens_remaining"] = hr
 			result["daily_used"] = du

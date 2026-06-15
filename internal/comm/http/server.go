@@ -122,7 +122,7 @@ type Server struct {
 
 	// BudgetStatusGetter is an optional callback that returns budget stats.
 	// Used by the status handler to report actual token and cost usage.
-	BudgetStatusGetter func() (hourlyUsed int, hourlyRemaining int, dailyUsed int, dailyRemaining int, rpmCurrent int, rpmLimit int, dailyCostUsed float64, dailyCostLimit float64, hourlyCostUsed float64, hourlyCostLimit float64)
+	BudgetStatusGetter func() (hourlyUsed int, hourlyRemaining int, dailyUsed int, dailyRemaining int, rpmCurrent int, rpmLimit int, dailyCostUsed float64, dailyCostLimit float64, hourlyCostUsed float64, hourlyCostLimit float64, perTaskCost float64, perSessionCost float64, perTaskBudget int, perSessionBudget int)
 
 	wsHub *WebSocketHub
 
@@ -1433,19 +1433,23 @@ func (s *Server) handleDaemonStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Add budget status if BudgetStatusGetter is available
 	if s.BudgetStatusGetter != nil {
-		hourlyUsed, hourlyRemaining, dailyUsed, dailyRemaining, rpmCurrent, rpmLimit, dailyCostUsed, dailyCostLimit, hourlyCostUsed, hourlyCostLimit := s.BudgetStatusGetter()
+		hourlyUsed, hourlyRemaining, dailyUsed, dailyRemaining, rpmCurrent, rpmLimit, dailyCostUsed, dailyCostLimit, hourlyCostUsed, hourlyCostLimit, perTaskCost, perSessionCost, perTaskBudget, perSessionBudget := s.BudgetStatusGetter()
 		status["budget"] = map[string]any{
-			"hourly_used":       hourlyUsed,
-			"hourly_remaining":  hourlyRemaining,
-			"daily_used":        dailyUsed,
-			"daily_remaining":   dailyRemaining,
-			"rpm_current":       rpmCurrent,
-			"rpm_limit":         rpmLimit,
-			"daily_cost_used":   dailyCostUsed,
-			"daily_cost_limit":  dailyCostLimit,
-			"hourly_cost_used":  hourlyCostUsed,
-			"hourly_cost_limit": hourlyCostLimit,
-			"within_budget":     hourlyUsed < hourlyRemaining && dailyUsed < dailyRemaining,
+			"hourly_used":        hourlyUsed,
+			"hourly_remaining":   hourlyRemaining,
+			"daily_used":         dailyUsed,
+			"daily_remaining":    dailyRemaining,
+			"rpm_current":        rpmCurrent,
+			"rpm_limit":          rpmLimit,
+			"daily_cost_used":    dailyCostUsed,
+			"daily_cost_limit":   dailyCostLimit,
+			"hourly_cost_used":   hourlyCostUsed,
+			"hourly_cost_limit":  hourlyCostLimit,
+			"per_task_cost":      perTaskCost,
+			"per_session_cost":   perSessionCost,
+			"per_task_budget":    perTaskBudget,
+			"per_session_budget": perSessionBudget,
+			"within_budget":      hourlyUsed < hourlyRemaining && dailyUsed < dailyRemaining,
 		}
 	}
 

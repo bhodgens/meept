@@ -244,9 +244,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		if rpcServer != nil && components.LLMClient != nil {
 			budget := components.LLMClient.Budget()
 			if budget != nil {
-				rpcServer.BudgetStatusGetter = func() (int, int, int, int, int, int, float64, float64, float64, float64) {
+				rpcServer.BudgetStatusGetter = func() (int, int, int, int, int, int, float64, float64, float64, float64, float64, float64, int, int) {
 					bs := budget.GetStatus()
-					return bs.HourlyUsed, bs.HourlyRemaining, bs.DailyUsed, bs.DailyRemaining, bs.RPMCurrent, bs.RPMLimit, bs.DailyCostUsed, bs.DailyCostLimit, bs.HourlyCostUsed, bs.HourlyCostLimit
+					return bs.HourlyUsed, bs.HourlyRemaining, bs.DailyUsed, bs.DailyRemaining, bs.RPMCurrent, bs.RPMLimit, bs.DailyCostUsed, bs.DailyCostLimit, bs.HourlyCostUsed, bs.HourlyCostLimit, bs.PerTaskCost, bs.PerSessionCost, bs.PerTaskBudget, bs.PerSessionBudget
 				}
 			}
 		}
@@ -643,9 +643,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			if components.LLMClient != nil {
 				budget := components.LLMClient.Budget()
 				if budget != nil {
-					httpSrv.BudgetStatusGetter = func() (int, int, int, int, int, int, float64, float64, float64, float64) {
+					httpSrv.BudgetStatusGetter = func() (int, int, int, int, int, int, float64, float64, float64, float64, float64, float64, int, int) {
 						bs := budget.GetStatus()
-						return bs.HourlyUsed, bs.HourlyRemaining, bs.DailyUsed, bs.DailyRemaining, bs.RPMCurrent, bs.RPMLimit, bs.DailyCostUsed, bs.DailyCostLimit, bs.HourlyCostUsed, bs.HourlyCostLimit
+						return bs.HourlyUsed, bs.HourlyRemaining, bs.DailyUsed, bs.DailyRemaining, bs.RPMCurrent, bs.RPMLimit, bs.DailyCostUsed, bs.DailyCostLimit, bs.HourlyCostUsed, bs.HourlyCostLimit, bs.PerTaskCost, bs.PerSessionCost, bs.PerTaskBudget, bs.PerSessionBudget
 					}
 					logger.Info("Budget stats HTTP getter registered")
 				}

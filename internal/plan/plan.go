@@ -85,24 +85,24 @@ type PlanSignoff struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-var planIDCounter uint64
+var planIDCounter atomic.Uint64
 
 func generatePlanID() string {
-	seq := atomic.AddUint64(&planIDCounter, 1)
+	seq := planIDCounter.Add(1)
 	return fmt.Sprintf("plan-%s-%04d", time.Now().UTC().Format("20060102150405"), seq)
 }
 
-var phaseIDCounter uint64
+var phaseIDCounter atomic.Uint64
 
 func generatePhaseID() string {
-	seq := atomic.AddUint64(&phaseIDCounter, 1)
+	seq := phaseIDCounter.Add(1)
 	return fmt.Sprintf("phase-%s-%04d", time.Now().UTC().Format("20060102150405"), seq)
 }
 
-var signoffIDCounter uint64
+var signoffIDCounter atomic.Uint64
 
 func generateSignoffID() string {
-	seq := atomic.AddUint64(&signoffIDCounter, 1)
+	seq := signoffIDCounter.Add(1)
 	return fmt.Sprintf("signoff-%s-%04d", time.Now().UTC().Format("20060102150405"), seq)
 }
 
