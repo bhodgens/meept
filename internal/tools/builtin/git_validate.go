@@ -101,9 +101,9 @@ func (t *GitValidateTool) Execute(ctx context.Context, args map[string]any) (any
 		Valid:       true,
 	}
 
-	checkState, _ := args["check_state"].(bool)
-	if !checkState {
-		checkState = true
+	checkState := true
+	if v, ok := args["check_state"].(bool); ok {
+		checkState = v
 	}
 
 	workingDir, _ := args["working_dir"].(string)
@@ -177,7 +177,7 @@ func (t *GitValidateTool) validateMessage(message string) ValidationResult {
 	if matches[3] != "" {
 		vr.Scope = matches[3]
 	}
-	vr.HasBreaking = matches[4] == "!"
+	vr.HasBreaking = strings.Contains(message, "!:")
 	vr.Description = matches[len(matches)-1]
 
 	if !validCommitTypes[vr.MessageType] {

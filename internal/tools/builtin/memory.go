@@ -491,12 +491,21 @@ func (t *MemoryGetVersionHistoryTool) Execute(ctx context.Context, args map[stri
 // getCurrentVersionFromList finds the current version from a list of versions.
 func getCurrentVersionFromList(versions []map[string]any) int {
 	for _, v := range slices.Backward(versions) {
-		if isCurrent, ok := v["is_current"].(int); ok && isCurrent == 1 {
-			if v, ok := v["version"].(int); ok {
-				return v
-			}
-			if v, ok := v["version"].(float64); ok {
-				return int(v)
+		var isCurrent int
+		switch val := v["is_current"].(type) {
+		case int:
+			isCurrent = val
+		case float64:
+			isCurrent = int(val)
+		default:
+			continue
+		}
+		if isCurrent == 1 {
+			switch ver := v["version"].(type) {
+			case int:
+				return ver
+			case float64:
+				return int(ver)
 			}
 		}
 	}

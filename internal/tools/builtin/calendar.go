@@ -68,6 +68,10 @@ func (t *CalendarListTool) Execute(ctx context.Context, args map[string]any) (an
 		return tools.NewErrorResult(fmt.Sprintf("invalid end time: %v", err)), nil
 	}
 
+	if t.client == nil {
+		return tools.NewErrorResult("calendar client not configured"), nil
+	}
+
 	events, err := t.client.ListEvents(ctx, start, end, maxResults)
 	if err != nil {
 		return tools.NewErrorResult(fmt.Sprintf("failed to list events: %v", err)), nil
@@ -139,6 +143,10 @@ func (t *CalendarCreateTool) Execute(ctx context.Context, args map[string]any) (
 		return tools.NewErrorResult("end time is required"), nil
 	}
 
+	if t.client == nil {
+		return tools.NewErrorResult("calendar client not configured"), nil
+	}
+
 	event := &calendar.Event{
 		Summary:     summary,
 		Description: calendarGetString(args, "description"),
@@ -196,6 +204,10 @@ func (t *CalendarQuickAddTool) Execute(ctx context.Context, args map[string]any)
 		return tools.NewErrorResult("text is required"), nil
 	}
 
+	if t.client == nil {
+		return tools.NewErrorResult("calendar client not configured"), nil
+	}
+
 	event, err := t.client.QuickAdd(ctx, text)
 	if err != nil {
 		return tools.NewErrorResult(fmt.Sprintf("failed to create event: %v", err)), nil
@@ -231,6 +243,10 @@ func (t *CalendarTodayTool) Parameters() llm.FunctionParameters {
 }
 
 func (t *CalendarTodayTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	if t.client == nil {
+		return tools.NewErrorResult("calendar client not configured"), nil
+	}
+
 	events, err := t.client.GetToday(ctx)
 	if err != nil {
 		return tools.NewErrorResult(fmt.Sprintf("failed to get today's events: %v", err)), nil

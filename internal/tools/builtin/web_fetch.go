@@ -62,6 +62,7 @@ func NewWebFetchTool(timeout time.Duration, maxLength int) *WebFetchTool {
 	}
 	t.client = &http.Client{
 		Timeout:       timeout,
+		Transport:     &http.Transport{MaxConnsPerHost: 8},
 		CheckRedirect: t.checkRedirect,
 	}
 	return t

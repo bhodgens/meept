@@ -145,6 +145,10 @@ func (t *DebugTool) Parameters() llm.FunctionParameters {
 }
 
 func (t *DebugTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	if t.manager == nil {
+		return nil, fmt.Errorf("debug manager not configured")
+	}
+
 	action, _ := args["action"].(string)
 	if action == "" {
 		return nil, fmt.Errorf("action is required")
