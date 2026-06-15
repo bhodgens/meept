@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -146,7 +147,7 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 func (p *ProxyHandler) makeProxy(requestTopic, responseTopic string, timeout time.Duration) Handler {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
 		// Create request message
-		msgID := fmt.Sprintf("proxy-%d", time.Now().UnixNano())
+		msgID := id.Generate("proxy-")
 		msg := &models.BusMessage{
 			ID:      msgID,
 			Type:    models.MessageTypeRequest,
@@ -264,7 +265,7 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 	}
 
 	// Create subscription ID
-	subID := fmt.Sprintf("sub-%d", time.Now().UnixNano())
+	subID := id.Generate("sub-")
 
 	// Extract the connection-scoped done channel injected by server.dispatch.
 	// This allows us to create a subscription context that is cancelled when

@@ -10,6 +10,7 @@ import (
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/session"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -95,7 +96,7 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 		s.logger.Info("Chat request with agent override", "agent_id", req.AgentID, "conversation_id", conversationID)
 	}
 
-	msgID := fmt.Sprintf("svc-chat-%d", time.Now().UnixNano())
+	msgID := id.Generate("svc-chat-")
 	payload := map[string]any{
 		"message":         req.Message,
 		"conversation_id": conversationID,

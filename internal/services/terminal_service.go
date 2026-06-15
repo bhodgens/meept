@@ -14,6 +14,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/tools/builtin"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
@@ -134,7 +135,7 @@ func (svc *TerminalService) ExecuteCommand(ctx context.Context, cmd, workDir str
 
 	// Create history entry
 	historyEntry := CommandHistory{
-		ID:         fmt.Sprintf("cmd-%d", startTime.UnixNano()),
+		ID:         id.Generate("cmd-"),
 		Command:    cmd,
 		Output:     output,
 		Stderr:     stderr,
