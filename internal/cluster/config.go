@@ -121,6 +121,12 @@ func (c *Config) setDefault() {
 	if c.Gossip.MaxRetryAttempts == 0 {
 		c.Gossip.MaxRetryAttempts = 3
 	}
+	if c.Gossip.EventRetention == 0 {
+		// Without a positive retention the dedupCache expiry equals "now", so
+		// time.Now().Before(expiry) is always false and duplicate gossip events
+		// are re-processed and re-broadcast on every hop (unbounded storm).
+		c.Gossip.EventRetention = 1 * time.Hour
+	}
 	if c.Queue.DefaultClaimTimeout == 0 {
 		c.Queue.DefaultClaimTimeout = 5 * time.Minute
 	}

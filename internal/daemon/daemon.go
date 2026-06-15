@@ -62,9 +62,10 @@ type Daemon struct {
 	planManager *plan.PlanManager
 	planHandler *plan.PlanHandler
 
-	status    atomic.Value // stores models.DaemonStatus
-	startTime time.Time
-	pidFile   string
+	status       atomic.Value // stores models.DaemonStatus
+	startTime    time.Time
+	pidFile      string
+	shutdownOnce atomic.Bool // DAE-H1: per-instance guard (was package-level, broke test isolation)
 }
 
 // Config holds daemon configuration.
@@ -853,11 +854,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 // shutdownOnce ensures shutdown() is idempotent - safe to call multiple times
 // or on error paths during startup when partial initialization occurred.
-var shutdownOnce atomic.Bool
+// NOTE: This is a per-Daemon field (d.shutdownOnce). A previous package-level
+// var leaked shutdown state across Daemon instances in the same process, which
+// broke test isolation and would prevent any future in-process restart.
 
 func (d *Daemon) shutdown() error {
 	// Idempotent guard: skip if already shutting down or stopped
-	if !shutdownOnce.CompareAndSwap(false, true) {
+	if !d.shutdownOnce.CompareAndSwap(false, true) {
 		return nil
 	}
 
