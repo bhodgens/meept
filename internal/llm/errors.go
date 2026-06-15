@@ -159,6 +159,13 @@ func UserMessage(err error) string {
 	return err.Error()
 }
 
+// IsRateLimitErrorMessage is a string-only fallback for rate-limit detection.
+//
+// Deprecated: Use errcls.IsRateLimit(err) with a structured error value.
+// This function is retained for callers that only have the serialized
+// error string (e.g. errors deserialized from the message bus). It will
+// not be removed until all such callers are migrated to pass the original
+// error value.
 func IsRateLimitErrorMessage(errMsg string) bool {
 	lower := strings.ToLower(errMsg)
 	return strings.Contains(lower, "rate limit") ||
@@ -463,26 +470,39 @@ const (
 )
 
 // ClassifyClassificationFailure determines the failure kind from an error.
+// Uses errors.As/Is for structured error types; falls back to substring
+// matching only for errors that lack a structured type (e.g. empty response).
 func ClassifyClassificationFailure(err error) ClassificationFailureKind {
 	if err == nil {
 		return ClassificationFailureUnknown
 	}
-	switch {
-	case errors.Is(err, context.DeadlineExceeded):
+	if errors.Is(err, context.DeadlineExceeded) {
 		return ClassificationFailureTimeout
-	default:
-		msg := err.Error()
+	}
+	var budgetErr *BudgetExceededError
+	if errors.As(err, &budgetErr) {
+		return ClassificationFailureBudget
+	}
+	var capErr *CapabilityError
+	if errors.As(err, &capErr) {
+		return ClassificationFailureUnavailable
+	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
 		switch {
-		case strings.Contains(msg, "budget") || strings.Contains(msg, "exhausted"):
-			return ClassificationFailureBudget
-		case strings.Contains(msg, "unavailable") || strings.Contains(msg, "no models"):
+		case apiErr.StatusCode == 429:
+			return ClassificationFailureUnavailable // rate limited
+		case apiErr.StatusCode >= 500:
 			return ClassificationFailureUnavailable
-		case strings.Contains(msg, "empty") || strings.Contains(msg, "no content"):
-			return ClassificationFailureEmptyResponse
-		default:
-			return ClassificationFailureUnknown
 		}
 	}
+	// EmptyResponse is still string-based because no structured type exists.
+	// See follow-up: define *EmptyResponseError.
+	msg := err.Error()
+	if strings.Contains(msg, "no choices in response") || strings.Contains(msg, "empty content") {
+		return ClassificationFailureEmptyResponse
+	}
+	return ClassificationFailureUnknown
 }
 
 // ClassificationUserGuidance returns a user-friendly message explaining
