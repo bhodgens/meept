@@ -2861,8 +2861,9 @@ func (s *Server) handleMemoryVectorDelete(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Extract memory ID from URL path
-	memoryID := strings.TrimPrefix(r.URL.Path, "/api/v1/memory/vector/")
+	// Use r.PathValue instead of TrimPrefix: the route is registered as
+	// "DELETE /api/v1/memory/vector/{id}" so the framework handles parsing.
+	memoryID := r.PathValue("id")
 	if memoryID == "" {
 		s.writeError(w, http.StatusBadRequest, "memory ID required")
 		return

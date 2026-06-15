@@ -80,8 +80,13 @@ func (a *APIKeyAuth) Middleware(next http.Handler) http.Handler {
 // visible in server/proxy access logs (Bug S1).
 func (a *APIKeyAuth) extractKey(r *http.Request) string {
 	auth := r.Header.Get("Authorization")
-	if auth != "" {
-		return strings.TrimPrefix(auth, "Bearer ")
+	// Require the standard "Bearer <token>" scheme. A non-Bearer header
+	// (e.g. "Basic <b64>") must NOT be accepted as a raw key — return ""
+	// so it is treated as missing auth.
+	const bearerPrefix = "Bearer "
+	// Case-insensitive prefix match per RFC 7235.
+	if len(auth) > len(bearerPrefix) && strings.EqualFold(auth[:len(bearerPrefix)], bearerPrefix) {
+		return auth[len(bearerPrefix):]
 	}
 
 	// For WebSocket clients, check Sec-WebSocket-Protocol header.
@@ -91,7 +96,7 @@ func (a *APIKeyAuth) extractKey(r *http.Request) string {
 			for _, p := range strings.Split(proto, ",") {
 				p = strings.TrimSpace(p)
 				if strings.HasPrefix(p, "bearer.") {
-					return strings.TrimPrefix(p, "bearer.")
+					return p[len("bearer."):]
 				}
 			}
 		}

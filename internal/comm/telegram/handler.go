@@ -174,8 +174,9 @@ func (h *AgentHandler) saveSessions() error {
 	}
 
 	path := filepath.Join(h.sessionsDir, "telegram_sessions.json")
-	//nolint:gosec // user config directory/file permissions
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	// Restrict to owner read/write: the file contains user-identifying data
+	// (chat IDs mapped to sessions).
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write sessions file: %w", err)
 	}
 
@@ -201,8 +202,9 @@ func (h *AgentHandler) saveSessionsLocked() error {
 	}
 
 	path := filepath.Join(h.sessionsDir, "telegram_sessions.json")
-	//nolint:gosec // user config directory/file permissions
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	// Restrict to owner read/write: the file contains user-identifying data
+	// (chat IDs mapped to sessions).
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write sessions file: %w", err)
 	}
 

@@ -1716,7 +1716,15 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 			authHeader = "Bearer " + token
 		} else {
-			authHeader = strings.TrimPrefix(authHeader, "Bearer ")
+			// Case-insensitive prefix match per RFC 7235. A non-Bearer
+			// header leaves authHeader empty so the constant-time compare
+			// fails below.
+			const bearerPrefix = "Bearer "
+			if len(authHeader) > len(bearerPrefix) && strings.EqualFold(authHeader[:len(bearerPrefix)], bearerPrefix) {
+				authHeader = authHeader[len(bearerPrefix):]
+			} else {
+				authHeader = ""
+			}
 		}
 
 		// Validate token against configured API keys using constant-time compare
