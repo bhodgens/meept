@@ -91,8 +91,8 @@ class DaemonController {
     </array>
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
-    <key>StandardOutPathString</key><string>\(homeDir)/.meept/daemon.log</string>
-    <key>StandardErrorPathString</key><string>\(homeDir)/.meept/daemon.err</string>
+    <key>StandardOutPath</key><string>\(homeDir)/.meept/daemon.log</string>
+    <key>StandardErrorPath</key><string>\(homeDir)/.meept/daemon.err</string>
 </dict>
 </plist>
 """
