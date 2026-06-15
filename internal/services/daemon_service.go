@@ -154,8 +154,13 @@ func (s *DaemonService) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start daemon: %w", err)
 	}
 
-	// Wait briefly to check if it started successfully
-	time.Sleep(200 * time.Millisecond)
+	// Wait briefly to check if it started successfully, but respect a
+	// cancelled context so the caller can abort the startup check.
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(200 * time.Millisecond):
+	}
 
 	// Check if process is still running
 	if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
