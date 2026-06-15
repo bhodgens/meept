@@ -79,7 +79,6 @@ class TtsService {
 
       // Set up completion handlers
       _flutterTts.setStartHandler(() {
-        _isSpeaking = true;
         _onStart?.call();
       });
 
@@ -135,11 +134,13 @@ class TtsService {
   }
 
   Future<void> _doSpeak(String text) async {
+    _isSpeaking = true; // set synchronously before platform call
     try {
       await _flutterTts.speak(text);
     } catch (e) {
       _handleError(e.toString());
     }
+    // Do NOT clear _isSpeaking here — the completion handler does that.
   }
 
   void _addToQueue(String text) {
