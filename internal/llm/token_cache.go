@@ -200,9 +200,6 @@ func (c *TokenCacheCoordinator) Get(ctx context.Context, key CacheKey) (*CacheEn
 
 // Put stores a response in both L1 and L2 caches.
 func (c *TokenCacheCoordinator) Put(ctx context.Context, key CacheKey, response *Response) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if !c.config.Enabled {
 		return
 	}
@@ -218,36 +215,40 @@ func (c *TokenCacheCoordinator) Put(ctx context.Context, key CacheKey, response 
 		FileHashes:     key.FileHashes,
 	}
 
-	// Store in L1
+	// Snapshot L2 handle under lock, then perform I/O without holding it.
+	c.mu.Lock()
+	l2 := c.l2Cache
 	c.l1Cache.Put(key, entry)
+	c.mu.Unlock()
 
-	// Store in L2 if enabled
-	if c.l2Cache != nil {
-		c.l2Cache.Put(ctx, key, entry)
+	if l2 != nil {
+		l2.Put(ctx, key, entry)
 	}
 }
 
 // Invalidate removes a specific entry from both caches.
 func (c *TokenCacheCoordinator) Invalidate(ctx context.Context, key CacheKey) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
+	l2 := c.l2Cache
 	c.l1Cache.Invalidate(key)
-	if c.l2Cache != nil {
-		c.l2Cache.Invalidate(ctx, key)
+	c.mu.Unlock()
+
+	if l2 != nil {
+		l2.Invalidate(ctx, key)
 	}
 }
 
 // InvalidateByFile removes all entries referencing the given file path.
 func (c *TokenCacheCoordinator) InvalidateByFile(ctx context.Context, filePath string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.l2Cache != nil {
-		c.l2Cache.InvalidateByFile(ctx, filePath)
-	}
+	l2 := c.l2Cache
 	// L1 invalidation by file path is handled by checking FileHashes
 	c.l1Cache.InvalidateByFile(filePath)
+	c.mu.Unlock()
+
+	if l2 != nil {
+		l2.InvalidateByFile(ctx, filePath)
+	}
 }
 
 // Clear removes all entries from both caches.

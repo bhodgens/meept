@@ -43,14 +43,19 @@ class DaemonCertPinner {
     final certPath = '$homeDir/.meept/tls/cert.pem';
     try {
       final certFile = File(certPath);
-      if (!certFile.existsSync()) return;
+      if (!certFile.existsSync()) {
+        debugPrint('[cert] Cert file not found: $certPath');
+        return;
+      }
       final pemContent = certFile.readAsStringSync();
       final derBytes = _pemToDer(pemContent);
       _cachedFingerprint = sha256.convert(derBytes).toString();
-    } catch (_) {
+      debugPrint('[cert] Fingerprint loaded: $_cachedFingerprint');
+    } catch (e) {
       // Cert not found or unreadable (App Sandbox, permissions, etc.).
       // Leaves fingerprint null — validateCert will fall back to
       // localhost-only trust.
+      debugPrint('[cert] Failed to load fingerprint: $e');
     }
   }
 

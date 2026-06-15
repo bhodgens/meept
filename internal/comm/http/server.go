@@ -753,7 +753,10 @@ func (l *tlsDetectListener) Accept() (net.Conn, error) {
 			return nil, err
 		}
 		// Peek at the first byte with a short timeout
-		if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		// 10 second timeout for TLS handshake - gives Flutter/Dart time to complete
+        // certificate verification. Shorter timeouts (2s) cause EOF errors when
+        // the client's cert validation takes longer than expected.
+        if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
 			conn.Close()
 			continue
 		}
