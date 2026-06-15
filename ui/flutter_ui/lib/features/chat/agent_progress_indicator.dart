@@ -42,13 +42,13 @@ class AgentProgressIndicator extends StatelessWidget {
 
   Widget _buildIndicator(bool isError) {
     if (isError) {
-      return Icon(
+      return const Icon(
         Icons.error_outline,
-        color: Colors.red[300],
+        color: Colors.red,
         size: 16,
       );
     }
-    return SizedBox(
+    return const SizedBox(
       width: 12,
       height: 12,
       child: CircularProgressIndicator(
