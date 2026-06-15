@@ -20,13 +20,20 @@ enum _SendEndpoint { normal, steer, followUp }
 /// State for the chat provider
 class ChatState {
   final List<ChatMessage> messages;
+  /// Whether the session history is being loaded from the server.
   final bool isLoading;
+  /// Whether the agent is actively processing (receiving progress events
+  /// via WebSocket).  This tracks the real agent lifecycle separately from the
+  /// HTTP call lifecycle so the progress indicator stays visible while the
+  /// agent works.
+  final bool isAgentProcessing;
   final String? error;
   final AgentProgress? currentProgress;
 
   const ChatState({
     this.messages = const [],
     this.isLoading = false,
+    this.isAgentProcessing = false,
     this.error,
     this.currentProgress,
   });
@@ -34,6 +41,7 @@ class ChatState {
   ChatState copyWith({
     List<ChatMessage>? messages,
     bool? isLoading,
+    bool? isAgentProcessing,
     Object? error = _unset,
     AgentProgress? currentProgress,
   }) {
@@ -46,6 +54,7 @@ class ChatState {
     return ChatState(
       messages: limitedMessages,
       isLoading: isLoading ?? this.isLoading,
+      isAgentProcessing: isAgentProcessing ?? this.isAgentProcessing,
       error: identical(error, _unset) ? this.error : error as String?,
       currentProgress: currentProgress ?? this.currentProgress,
     );
@@ -225,6 +234,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
     state = ChatState(
       messages: newMessages,
       isLoading: true,
+      isAgentProcessing: true,
       error: null,
     );
 
@@ -264,9 +274,15 @@ class ChatNotifier extends StateNotifier<ChatState> {
         state = ChatState(
           messages: [...state.messages, errMessage],
           isLoading: false,
+          isAgentProcessing: false,
           error: errorMsg,
         );
       } else {
+        // HTTP call succeeded but the agent may still be processing —
+        // keep isAgentProcessing=true so the progress indicator stays
+        // visible.  We clear isLoading here because the HTTP fetch is
+        // done; the agent's final chat_message will clear
+        // isAgentProcessing.
         state = ChatState(
           messages: state.messages,
           isLoading: false,
@@ -286,6 +302,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
       state = ChatState(
         messages: state.messages,
         isLoading: false,
+        isAgentProcessing: false,
         error: errorStr,
       );
     } finally {
@@ -322,7 +339,15 @@ class ChatNotifier extends StateNotifier<ChatState> {
         newMessages = newMessages.sublist(newMessages.length - _maxMessages);
       }
 
-      state = state.copyWith(messages: newMessages);
+      // When an assistant message arrives, the agent has finished producing
+      // its response — stop the processing indicator.  User/system messages
+      // don't signal completion.
+      final newIsAgentProcessing =
+          (message.role == 'assistant' && message.content.isNotEmpty)
+              ? false
+              : state.isAgentProcessing;
+
+      state = state.copyWith(messages: newMessages, isAgentProcessing: newIsAgentProcessing);
     } catch (e) {
       final errorMessage = ChatMessage(
         id: 'error_${DateTime.now().millisecondsSinceEpoch}',
@@ -333,6 +358,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
       state = ChatState(
         messages: [...state.messages, errorMessage],
         isLoading: false,
+        isAgentProcessing: false,
         error: e.toString(),
       );
     }
@@ -343,6 +369,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
     state = ChatState(
       messages: state.messages,
       isLoading: state.isLoading,
+      isAgentProcessing: state.isAgentProcessing,
     );
   }
 

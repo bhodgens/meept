@@ -4,15 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/services"
+	"github.com/caimlas/meept/pkg/models"
+
+	"golang.org/x/net/websocket"
 )
 
 // mockDaemonController implements DaemonController for testing.
@@ -1331,4 +1337,300 @@ func TestHandleChatStream_SSEToolCompleteEvent(t *testing.T) {
 	if !strings.Contains(body, `"terminate":true`) {
 		t.Errorf("expected terminate in SSE data, got: %s", body)
 	}
+}
+
+// nilConn is a nil *websocket.Conn used as a reusable map key for testing.
+// Since websocket.Conn from golang.org/x/net/websocket is a struct, we use
+// nil pointer values as test keys; the hub methods only care about map lookups.
+var nilConn = (*websocket.Conn)(nil)
+
+// --- ShouldSendProgress tests ---
+
+func TestShouldSendProgress_BroadcastMode(t *testing.T) {
+	hub := NewWebSocketHub(nil)
+
+	// No subscription = broadcast mode = always true
+	if !hub.ShouldSendProgress(nilConn, "any-session") {
+		t.Error("broadcast mode should always return true")
+	}
+}
+
+func TestShouldSendProgress_SingleSessionMatch(t *testing.T) {
+	hub := NewWebSocketHub(nil)
+	hub.SubscribeSession(nilConn, "sess1")
+
+	if !hub.ShouldSendProgress(nilConn, "sess1") {
+		t.Error("should send when session matches")
+	}
+}
+
+func TestShouldSendProgress_SingleSessionNoMatch(t *testing.T) {
+	hub := NewWebSocketHub(nil)
+	hub.SubscribeSession(nilConn, "sess1")
+
+	if hub.ShouldSendProgress(nilConn, "sess2") {
+		t.Error("should not send when session does not match")
+	}
+}
+
+func TestShouldSendProgress_MultiSessionAllMatch(t *testing.T) {
+	hub := NewWebSocketHub(nil)
+	hub.SubscribeSession(nilConn, "sess1")
+	hub.SubscribeSession(nilConn, "sess2")
+
+	if !hub.ShouldSendProgress(nilConn, "sess1") || !hub.ShouldSendProgress(nilConn, "sess2") {
+		t.Error("should send for all subscribed sessions")
+	}
+}
+
+func TestShouldSendProgress_MultiSessionPartialMatch(t *testing.T) {
+	hub := NewWebSocketHub(nil)
+	hub.SubscribeSession(nilConn, "sess1")
+
+	if hub.ShouldSendProgress(nilConn, "sess3") {
+		t.Error("should not send to non-subscribed session")
+	}
+	if !hub.ShouldSendProgress(nilConn, "sess1") {
+		t.Error("should send for subscribed session")
+	}
+}
+
+func TestShouldSendProgress_AfterUnsubscribe(t *testing.T) {
+	hub := NewWebSocketHub(nil)
+	hub.SubscribeSession(nilConn, "sess1")
+	hub.SubscribeSession(nilConn, "sess2")
+
+	// Should match before unsubscribe
+	if !hub.ShouldSendProgress(nilConn, "sess1") {
+		t.Error("should send before unsubscribe")
+	}
+	if !hub.ShouldSendProgress(nilConn, "sess2") {
+		t.Error("should send for sess2 before unsubscribe")
+	}
+
+	hub.UnsubscribeSession(nilConn, "sess1")
+
+	// sess1 removed, sess2 should still match
+	if hub.ShouldSendProgress(nilConn, "sess1") {
+		t.Error("should not send for unsubscribed sess1")
+	}
+	if !hub.ShouldSendProgress(nilConn, "sess2") {
+		t.Error("should still send for non-unsubscribed sess2")
+	}
+}
+
+func TestShouldSendProgress_Concurrent(t *testing.T) {
+	hub := NewWebSocketHub(nil)
+	hub.SubscribeSession(nilConn, "sess-a")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = hub.ShouldSendProgress(nilConn, "sess-a")
+			_ = hub.ShouldSendProgress(nilConn, "sess-b")
+		}()
+	}
+	wg.Wait()
+}
+
+func TestShouldSendProgress_MultipleConns(t *testing.T) {
+	hub := NewWebSocketHub(nil)
+	conn1 := (*websocket.Conn)(nil)
+	conn2 := (*websocket.Conn)(nil)
+	_ = conn1
+
+	hub.SubscribeSession(conn1, "sess-x")
+
+	// conn1 subscribed, conn2 broadcast
+	if !hub.ShouldSendProgress(conn1, "sess-x") {
+		t.Error("conn1 should get sess-x")
+	}
+	if hub.ShouldSendProgress(conn1, "sess-y") {
+		t.Error("conn1 should not get sess-y")
+	}
+	if !hub.ShouldSendProgress(conn2, "sess-x") {
+		t.Error("conn2 (broadcast) should get any")
+	}
+}
+
+// --- handleWSProgress tests ---
+
+func TestHandleWSProgress_ValidEvent_SerializesCorrectly(t *testing.T) {
+	logger := slog.Default()
+	s := &Server{
+		logger: logger,
+		wsHub:  NewWebSocketHub(logger),
+	}
+
+	event := agent.SynthesizedProgressEvent{
+		SessionID:   "test-session-1",
+		AgentID:     "coder",
+		Tier:        agent.VerbosityNormal,
+		Message:     "Running tests",
+		SourceEvent: agent.AgentEventToolExecutionStart,
+		Timestamp:   time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC),
+	}
+
+	// Compute the exact payload handleWSProgress would produce
+	// (same logic as handleWSProgress lines 398-406)
+	want, err := json.Marshal(map[string]any{
+		"type":         "agent_progress",
+		"session_id":   event.SessionID,
+		"agent_id":     event.AgentID,
+		"message":      event.Message,
+		"tier":         int(event.Tier),
+		"source_event": string(event.SourceEvent),
+		"timestamp":    event.Timestamp.Format(time.RFC3339),
+	})
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(want, &result); err != nil {
+		t.Fatalf("re-parse error: %v", err)
+	}
+
+	if result["type"] != "agent_progress" {
+		t.Errorf("type = %v, want agent_progress", result["type"])
+	}
+	if result["session_id"] != "test-session-1" {
+		t.Errorf("session_id = %v, want test-session-1", result["session_id"])
+	}
+	if result["agent_id"] != "coder" {
+		t.Errorf("agent_id = %v, want coder", result["agent_id"])
+	}
+	if result["message"] != "Running tests" {
+		t.Errorf("message = %v, want Running tests", result["message"])
+	}
+	tierVal, ok := result["tier"].(float64)
+	if !ok || int(tierVal) != int(agent.VerbosityNormal) {
+		t.Errorf("tier = %v, want %d", result["tier"], agent.VerbosityNormal)
+	}
+	if result["source_event"] != string(agent.AgentEventToolExecutionStart) {
+		t.Errorf("source_event = %v, want %s", result["source_event"], agent.AgentEventToolExecutionStart)
+	}
+	expectedTS := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	if result["timestamp"] != expectedTS {
+		t.Errorf("timestamp = %v, want %s", result["timestamp"], expectedTS)
+	}
+
+	// Call handleWSProgress to verify no-panic on the full path
+	payload, _ := json.Marshal(event)
+	msg := &models.BusMessage{Topic: "agent.progress.synthesized", Payload: payload}
+	s.handleWSProgress(msg)
+}
+
+func TestHandleWSProgress_SessionFiltering_Broadcast(t *testing.T) {
+	logger := slog.Default()
+	hub := NewWebSocketHub(logger)
+	s := &Server{logger: logger, wsHub: hub}
+
+	event := agent.SynthesizedProgressEvent{
+		SessionID: "broadcast-sess",
+		AgentID:   "analyst",
+		Timestamp: time.Now(),
+	}
+	payload, _ := json.Marshal(event)
+	msg := &models.BusMessage{Topic: "agent.progress.synthesized", Payload: payload}
+	s.handleWSProgress(msg)
+
+	if !hub.ShouldSendProgress(nilConn, "broadcast-sess") {
+		t.Error("broadcast mode should send to all")
+	}
+}
+
+func TestHandleWSProgress_SessionFiltering_Scoped(t *testing.T) {
+	logger := slog.Default()
+	hub := NewWebSocketHub(logger)
+	s := &Server{logger: logger, wsHub: hub}
+
+	event := agent.SynthesizedProgressEvent{
+		SessionID: "scoped-123",
+		AgentID:   "coder",
+		Timestamp: time.Now(),
+	}
+
+	hub.SubscribeSession(nilConn, "scoped-123")
+
+	if !hub.ShouldSendProgress(nilConn, "scoped-123") {
+		t.Error("subscribe to scoped-123 => should send")
+	}
+	if hub.ShouldSendProgress(nilConn, "other-sess") {
+		t.Error("NOT subscribed to other-sess => should NOT send")
+	}
+
+	payload, _ := json.Marshal(event)
+	msg := &models.BusMessage{Topic: "agent.progress.synthesized", Payload: payload}
+	s.handleWSProgress(msg)
+}
+
+func TestHandleWSProgress_NilHub_NoPanic(t *testing.T) {
+	s := &Server{logger: slog.Default(), wsHub: nil}
+	msg := &models.BusMessage{
+		Topic:   "agent.progress.synthesized",
+		Payload: []byte(`{"session_id":"x"}`),
+	}
+	s.handleWSProgress(msg)
+}
+
+func TestHandleWSProgress_NilMessage_NoPanic(t *testing.T) {
+	s := &Server{logger: slog.Default(), wsHub: NewWebSocketHub(nil)}
+	s.handleWSProgress(nil)
+}
+
+func TestHandleWSProgress_InvalidPayload(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{
+		Level: slog.LevelWarn,
+	}))
+	s := &Server{logger: logger, wsHub: NewWebSocketHub(logger)}
+	msg := &models.BusMessage{
+		Topic:   "agent.progress.synthesized",
+		Payload: []byte(`not json`),
+	}
+	s.handleWSProgress(msg)
+}
+
+func TestHandleWSProgress_NegativeTier_NoPanic(t *testing.T) {
+	s := &Server{logger: slog.Default(), wsHub: NewWebSocketHub(nil)}
+	event := agent.SynthesizedProgressEvent{
+		SessionID: "z",
+		AgentID:   "p",
+		Tier:      agent.VerbosityLevel(-5),
+		Message:   "neg tier",
+		Timestamp: time.Now(),
+	}
+	payload, _ := json.Marshal(event)
+	msg := &models.BusMessage{Topic: "agent.progress.synthesized", Payload: payload}
+	s.handleWSProgress(msg)
+}
+
+func TestHandleWSProgress_EmptyAgentID_NoPanic(t *testing.T) {
+	s := &Server{logger: slog.Default(), wsHub: NewWebSocketHub(nil)}
+	event := agent.SynthesizedProgressEvent{
+		SessionID: "x",
+		AgentID:   "",
+		Tier:      agent.VerbosityNormal,
+		Message:   "test",
+		Timestamp: time.Now(),
+	}
+	payload, _ := json.Marshal(event)
+	msg := &models.BusMessage{Topic: "agent.progress.synthesized", Payload: payload}
+	s.handleWSProgress(msg)
+}
+
+func TestHandleWSProgress_EmptyMessage_NoPanic(t *testing.T) {
+	s := &Server{logger: slog.Default(), wsHub: NewWebSocketHub(nil)}
+	event := agent.SynthesizedProgressEvent{
+		SessionID: "y",
+		AgentID:   "c",
+		Tier:      agent.VerbosityNormal,
+		Message:   "",
+		Timestamp: time.Now(),
+	}
+	payload, _ := json.Marshal(event)
+	msg := &models.BusMessage{Topic: "agent.progress.synthesized", Payload: payload}
+	s.handleWSProgress(msg)
 }

@@ -7,9 +7,9 @@
 
 ---
 
-## Problem Statement
+## Problem Statement (Resolved)
 
-The Flutter UI currently displays only `"thinking..."` while the agent processes requests, despite the backend having rich agent event data available:
+The Flutter UI displayed only `"thinking..."` while the agent processed requests, despite the backend having rich agent event data available:
 
 - Tool execution status (which tool, arguments, result preview)
 - Turn iteration count with token/tool stats
@@ -17,7 +17,7 @@ The Flutter UI currently displays only `"thinking..."` while the agent processes
 - Resource usage (tokens, iterations remaining)
 - Queue depth and job status
 
-Users see a generic loading indicator instead of actionable progress information like:
+Users now see actionable progress information instead:
 - `"coder: executing ReadFile..."`
 - `"dispatcher: classifying intent (code)...`
 - `"analyst: turn 2 done (3 tool calls, 245 tokens)"`
@@ -37,17 +37,25 @@ Users see a generic loading indicator instead of actionable progress information
 
 **Current Data Flow:**
 ```
-AgentLoop → EventEmitter → MessageBus → (in-process only)
-                                    ↓
-                            ProgressSynthesizer (unused by UI)
-                                    ↓
-                           (not broadcast to WebSocket)
+AgentLoop → EventEmitter → bus.Publish("agent.event.*")
+                         → ProgressSynthesizer → bus.Publish("agent.progress.synthesized")
+                                                    ↓
+                                           handleWSProgress → WebSocket Hub
+                                                        ↓
+                                          ShouldSendProgress → client connections
 ```
 
-**Flutter UI:**
-- `chat_message_list.dart:118` - Shows static `"thinking..."` text
-- `websocket_service.dart:403` - Filters for `type == 'chat_message'` only
-- No subscription mechanism for agent progress events
+SSE path (via `handleChatStream`):
+```
+EventEmitter → bus.Publish("agent.progress")
+               ↓
+         SSE event stream → client
+```
+
+**Flutter UI (existing code, before this plan):**
+- `chat_message_list.dart:118` - Shows fallback `ThinkingIndicator` when no progress available
+- `websocket_service.dart:403` - Filters for `type == 'chat_message'` only (chat subscription)
+- No agent progress subscription or display widget existed yet
 
 ---
 
@@ -67,25 +75,17 @@ Expose real-time agent progress to Flutter UI by:
 
 **Files:** `internal/comm/http/server.go`, `internal/agent/handler.go`
 
-**Tasks:**
-
-1.1. Add agent progress subscription to WebSocket handler
-   - Create `AgentProgressEmitter` that subscribes to `agent.event.*` bus topics
-   - Serialize `SynthesizedProgressEvent` and send to WebSocket clients
-   - Message format: `{type: "agent_progress", data: {agent_id, session_id, message, tier, timestamp}}`
-
-1.2. Filter progress by session
-   - Clients subscribe to progress for specific session IDs
-   - Only broadcast events matching subscribed sessions
-
-1.3. Rate limiting (optional)
-   - Debounce rapid events to prevent UI spam
-   - Configurable: `progress_update_interval: 100ms`
+> **Status: COMPLETE** -- implemented and merged.
+>
+> - SSE: `handleChatStream` subscribes to `agent.progress` and forwards as SSE events (`api_handlers.go:115-175`)
+> - WebSocket: `handleWSProgress` subscribes to `agent.progress.synthesized` (via ProgressSynthesizer), validates fields, serializes to `{type: "agent_progress", ...}` and broadcasts session-scoped (`server.go:355-448`)
+> - Session filtering via `wsHub.ShouldSendProgress(conn, sessionID)`
+> - Rate limiting: not implemented (no debounce/throttle)
 
 **Acceptance Criteria:**
-- [ ] Agent events flow from EventEmitter → MessageBus → WebSocket
-- [ ] Flutter client can receive `{type: "agent_progress"}` messages
-- [ ] Events include: agent_id, session_id, human-readable message, tier
+- [x] Agent events flow from EventEmitter → MessageBus → WebSocket: SSE path via `agent.progress` + WS path via `agent.progress.synthesized` → ProgressSynthesizer → `handleWSProgress` → WebSocket Hub
+- [x] Flutter client receives `{type: "agent_progress"}` messages
+- [x] Events include: agent_id, session_id, human-readable message, tier, source_event, timestamp
 
 ---
 
@@ -93,43 +93,17 @@ Expose real-time agent progress to Flutter UI by:
 
 **Files:** `ui/flutter_ui/lib/services/websocket_service.dart`, `ui/flutter_ui/lib/providers/chat_provider.dart`
 
-**Tasks:**
-
-2.1. Add progress subscription to `WebSocketService`
-   ```dart
-   Stream<Map<String, dynamic>> subscribeToAgentProgress(String sessionId) {
-     return _messageSubject.stream.where((m) =>
-       m['type'] == 'agent_progress' && m['session_id'] == sessionId
-     );
-   }
-   ```
-
-2.2. Add progress state to `ChatState`
-   ```dart
-   class ChatState {
-     final List<ChatMessage> messages;
-     final bool isLoading;
-     final String? error;
-     final AgentProgress? currentProgress; // NEW
-   }
-
-   class AgentProgress {
-     final String agentId;
-     final String message;
-     final int tier; // VerbosityLevel
-     final DateTime timestamp;
-   }
-   ```
-
-2.3. Wire up subscription in `ChatNotifier`
-   - Subscribe when `loadMessages` is called
-   - Update state on progress events
-   - Unsubscribe on session change/dispose
+> **Status: COMPLETE** -- implemented and merged.
+>
+> - `subscribeToAgentProgress(sessionId)` in `websocket_service.dart:451-483`: sends `subscribe` with `channel: 'progress'`, filters on `type == 'agent_progress' && session_id == sessionId`
+> - `ChatState.currentProgress` field present (`chat_provider.dart:25`): optional `AgentProgress?`
+> - `AgentProgress` model in `api_models.dart` with `fromJson` supporting flat and nested formats
+> - `ChatNotifier._progressSubscription` subscribed in `loadMessages` (line 138-141), cancelled in `dispose` (line 360-361)
 
 **Acceptance Criteria:**
-- [ ] `WebSocketService.subscribeToAgentProgress()` returns filtered stream
-- [ ] `ChatState` includes optional `currentProgress` field
-- [ ] Progress updates trigger UI rebuild via Riverpod
+- [x] `WebSocketService.subscribeToAgentProgress()` returns filtered stream
+- [x] `ChatState` includes optional `currentProgress` field
+- [x] Progress updates trigger UI rebuild via Riverpod
 
 ---
 
@@ -137,37 +111,18 @@ Expose real-time agent progress to Flutter UI by:
 
 **Files:** `ui/flutter_ui/lib/features/chat/chat_message_list.dart`
 
-**Tasks:**
-
-3.1. Replace static `"thinking..."` with progress-aware widget
-   ```dart
-   if (chatState.isLoading) {
-     if (chatState.currentProgress != null) {
-       return AgentProgressIndicator(progress: chatState.currentProgress!);
-     } else {
-       return const ThinkingIndicator(); // fallback
-     }
-   }
-   ```
-
-3.2. Create `AgentProgressIndicator` widget
-   - Display agent_id (lowercase per convention)
-   - Display human-readable message
-   - Visual styling based on tier:
-     - `VerbosityQuiet` (Tier 0): Minimal, subtle
-     - `VerbosityNormal` (Tier 1): Standard styling
-     - `VerbosityVerbose` (Tier 2): Detailed, collapsed by default
-
-3.3. Animation/UX polish
-   - Fade transition when progress updates
-   - Auto-scroll behavior preserved
-   - Progress message truncated if too long (60 char max)
+> **Status: COMPLETE** -- implemented and merged.
+>
+> - `AgentProgressIndicator` widget in `agent_progress_indicator.dart`: shows `agent_id` (lowercase), human-readable message, tier-based colors (0=lightGray, 1=midGray, 2=italic+lightGray), truncation at 60 chars
+> - `AnimatedSwitcher` with 150ms fade in `chat_message_list.dart:104-114`: uses `ValueKey` based on message+timestamp for smooth transitions
+> - Fallback `ThinkingIndicator` shown when `currentProgress == null` (line 115-138)
+> - Auto-scroll preserved (existing `_scrollToBottom` logic untouched)
 
 **Acceptance Criteria:**
-- [ ] Progress message visible during agent processing
-- [ ] Shows agent ID + action being performed
-- [ ] Tier-based styling applied
-- [ ] Falls back to generic "thinking..." if no progress available
+- [x] Progress message visible during agent processing
+- [x] Shows agent ID + action being performed
+- [x] Tier-based styling applied (tier 0: light gray normal, tier 1: mid gray normal, tier 2: light gray italic)
+- [x] Falls back to generic "thinking..." if no progress available
 
 ---
 
@@ -178,23 +133,23 @@ Expose real-time agent progress to Flutter UI by:
 **Tasks:**
 
 4.1. Backend unit tests
-   - [x] Test event serialization to WebSocket format -- `TestHandleChatStream_SSEAgentProgressEvent` in `server_test.go` validates SSE agent progress forwarding
-   - [x] Test session filtering logic -- `ShouldSendProgress` uses `sessionSubs` map with broadcast fallback; no dedicated unit test but covered by integration flow
-   - [x] Rate limiting -- not implemented (no debounce/throttle on `handleWSProgress`)
+   - [-] SSE event serialization: `TestHandleChatStream_SSEAgentProgressEvent` in `server_test.go` validates SSE agent progress forwarding; no dedicated Go test for `handleWSProgress` WebSocket path yet
+   - [-] Session filtering: `ShouldSendProgress` uses `sessionSubs` map with broadcast fallback; no dedicated unit test but covered by integration flow
+   - [ ] Rate limiting: not implemented (no debounce/throttle on `handleWSProgress`)
 
 4.2. Flutter widget tests
-   - [x] Tests pass (119 passed, 5 failed -- all pre-existing `error_banner_test.dart` failures, unrelated to agent progress)
+   - [-] General Flutter tests pass (119 passed, 5 failed -- all pre-existing `error_banner_test.dart` failures, unrelated to agent progress)
    - [ ] No dedicated `AgentProgressIndicator` widget tests exist yet
 
 4.3. Integration testing
-   - [ ] Manual test not yet performed (requires running daemon + Flutter UI together)
+   - [ ] Manual end-to-end test not yet performed (requires running daemon + Flutter UI together)
    - [ ] Cross-intent-type testing not yet performed
-   - [ ] Performance testing not yet performed
+   - [ ] Performance/load testing not yet performed
 
 **Acceptance Criteria:**
-- [ ] Unit tests pass for backend event broadcast
-- [ ] Flutter tests pass for progress display
-- [ ] Manual verification: progress visible during real agent execution
+- [ ] Dedicated Go unit test for `handleWSProgress` WebSocket serialization
+- [ ] Flutter widget tests for `AgentProgressIndicator`
+- [ ] Manual integration verification: progress visible during real agent execution
 
 ---
 
@@ -233,7 +188,7 @@ The server sends a flat message (not wrapped in `data`):
 - ✅ Agent events already defined (`internal/agent/events.go`)
 - ✅ ProgressSynthesizer already implemented (`internal/agent/progress_synthesizer.go`)
 - ✅ WebSocket infrastructure in place
-- ⏳ Need to wire events through to WebSocket layer
+- ✅ Events wired through to WebSocket layer (`handleWSProgress` subscribes to `agent.progress.synthesized`)
 
 ---
 
@@ -271,20 +226,25 @@ The server sends a flat message (not wrapped in `data`):
 
 Before marking complete:
 
-- [x] Backend events flow through to WebSocket: `handleWSProgress` subscribes to `agent.progress.synthesized` bus topic, serializes to JSON `{type: "agent_progress", ...}`, and writes to WebSocket connections subscribed to the relevant session
+- [x] Backend events flow through to WebSocket: `handleWSProgress` subscribes to `agent.progress.synthesized` bus topic, serializes to JSON `{type: "agent_progress", ...}`, and writes to WebSocket connections via `ShouldSendProgress` session-scoped filtering
 - [ ] Flutter receives and displays progress for all agent types: Manual integration test pending
-- [ ] Tier-based filtering works correctly: Tier logic verified in `AgentProgressIndicator` (0=light gray, 1=mid gray, 2=italic light gray); `handleWSProgress` passes tier as `int(event.Tier)` over WebSocket
-- [ ] No regression in chat message delivery latency: No coupling between progress and chat message paths observed
-- [x] Documentation updated: `docs/reference/http-api.md` WebSocket section expanded (2026-06-15); `docs/concepts/multi-agent.md` not updated (no agent-level changes needed)
+- [x] Tier-based filtering works correctly: Tier logic verified in `AgentProgressIndicator` (0=light gray normal, 1=mid gray normal, 2=light gray italic); `handleWSProgress` passes tier as `int(event.Tier)` over WebSocket
+- [ ] No regression in chat message delivery latency: Progress path decoupled from chat message delivery (separate bus topics and subscriptions), but no formal latency regression test performed
+- [ ] Rate limiting implemented: Currently not present -- rapid agent events may arrive at full frequency without debounce/throttle on `handleWSProgress`
+- [x] Documentation updated: `docs/reference/http-api.md` WebSocket section expanded (2026-06-15) with SSE vs WebSocket schema difference; `docs/concepts/multi-agent.md` not updated (no agent-level changes needed)
 
 ---
 
 ## Estimates
 
-| Phase | Effort |
-|-------|--------|
-| Phase 1: Backend WebSocket Broadcast | 1.5-2 hours |
-| Phase 2: Flutter Subscription | 1 hour |
-| Phase 3: Flutter UI Display | 1-1.5 hours |
-| Phase 4: Testing | 1 hour |
-| **Total** | **~4.5-5.5 hours** |
+Phases 1-3 are complete. Remaining work:
+
+| Phase | Effort | Status |
+|-------|--------|--------|
+| Phase 1: Backend WebSocket Broadcast | 0 hours | ✅ Done |
+| Phase 2: Flutter Subscription | 0 hours | ✅ Done |
+| Phase 3: Flutter UI Display | 0 hours | ✅ Done |
+| Phase 4.1: Backend unit test for `handleWSProgress` | 0.5-1 hour | Remaining |
+| Phase 4.2: Flutter widget tests for `AgentProgressIndicator` | 0.5-1 hour | Remaining |
+| Phase 4.3: Manual integration testing | 0.5 hour | Remaining |
+| **Total remaining** | **~1.5-2.5 hours** | |

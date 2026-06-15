@@ -231,3 +231,59 @@ flowchart LR
 5. **OpenAI-compatible API** — LLM providers all use the OpenAI chat completion format, making it easy to add new providers.
 
 6. **Client-side STT** — Speech-to-text runs entirely in the client (TUI or Flutter), not through the daemon. The `internal/stt` package provides a `Transcriber` interface with pluggable engines (whisper, parakeet, native). Recording and transcription happen locally; only the resulting text is sent to the daemon as a normal chat message.
+
+## Dual-Path Progress Event Architecture
+
+The agent progress event system routes events through **two separate paths** depending on the transport mechanism: SSE (Server-Sent Events) receives legacy raw events, while WebSocket receives synthesized progress messages. This dual-path design preserves backward compatibility for existing SSE clients while enabling richer, session-scoped progress updates for real-time WebSocket clients (Flutter UI, web clients).
+
+```mermaid
+flowchart TB
+    subgraph Source["Event Source"]
+        AgentLoop[AgentLoop emits agent.event.*]
+    end
+
+    subgraph Bus["Message Bus"]
+        EventBus[agent.event.<type>]
+    end
+
+    subgraph SSE_Path["SSE Path (legacy)"]
+        SSE_Sub[Subscribes agent.progress]
+        SSE_Format[SSE payload: legacy format<br/>conversation_id, iteration, stage, detail]
+    end
+
+    subgraph WS_Path["WebSocket Path (synthesized)"]
+        Synthesizer[ProgressSynthesizer]
+        WS_Sub[Subscribes agent.progress.synthesized]
+        WS_Format[WebSocket payload: synthesized format<br/>type, session_id, agent_id, message, tier]
+    end
+
+    AgentLoop --> EventBus
+    EventBus --> SSE_Sub
+    EventBus --> Synthesizer
+
+    SSE_Sub --> SSE_Format
+    Synthesizer --> WS_Sub
+    WS_Sub --> WS_Format
+```
+
+### Why Two Paths
+
+1. **Legacy SSE clients** — The SSE endpoint (`/api/v1/chat/stream`) was the first real-time transport. It subscribes to raw `agent.progress` bus events emitted directly by the AgentLoop. These events use the legacy schema with fields like `conversation_id`, `iteration`, `stage`, and `detail`. This path remains unchanged for backward compatibility.
+
+2. **WebSocket clients need richer context** — The WebSocket endpoint (`/ws`) requires a synthesized, session-scoped format with human-readable messages, agent identification, verbosity tiers, and source event tracking. The `ProgressSynthesizer` consumes raw `agent.event.*` bus messages and emits consolidated `agent.progress.synthesized` events on a separate bus topic.
+
+### Schema Summary
+
+The two paths emit **completely different payload schemas**. Do not assume field names or semantics are compatible between them:
+
+| Field | SSE (legacy) | WebSocket (synthesized) |
+|-------|-------------|------------------------|
+| Session identifier | `conversation_id` | `session_id` |
+| Agent identity | Not present | `agent_id` |
+| Human-readable message | Not present (structured fields only) | `message` |
+| Time tracking | `iteration` (loop counter) | `timestamp` (RFC 3339) |
+| Verbosity | Not supported | `tier` (0, 1, 2) |
+| Source tracking | `stage` + `detail` | `source_event` |
+| Token usage | `token_count` | Not present |
+
+Consult the [HTTP API Reference](../reference/http-api.md#transport-specific-progress-schemas) for complete field documentation of each schema.

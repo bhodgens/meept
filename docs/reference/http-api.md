@@ -48,9 +48,66 @@ curl -X POST http://localhost:8081/api/v1/chat \
 
 **Chat Stream (SSE):**
 `GET /api/v1/chat/stream` returns a Server-Sent Events stream subscribing to `tool.execution.progress`, `agent.progress`, and `tool.execution.complete` bus topics. Includes a 15-second heartbeat.
+
+**IMPORTANT: SSE and WebSocket use different payload schemas for progress events.** SSE subscribes to the legacy `agent.progress` topic, while WebSocket subscribes to the newer `agent.progress.synthesized` topic. See [Transport-Specific Progress Schemas](#transport-specific-progress-schemas) below for details.
+
 ```bash
 curl -N http://localhost:8081/api/v1/chat/stream
 ```
+
+### Transport-Specific Progress Schemas
+
+The agent progress event uses **two different payload schemas** depending on the transport mechanism: SSE (Server-Sent Events) uses the legacy schema, while WebSocket uses the synthesized schema from the ProgressSynthesizer.
+
+#### SSE Progress Format (legacy)
+
+SSE subscribes to the `agent.progress` bus topic directly. Payloads use the original event structure emitted by the agent loop:
+
+```json
+{
+  "conversation_id": "abc-123",
+  "iteration": 3,
+  "stage": "executing",
+  "detail": "ReadFile",
+  "token_count": 245
+}
+```
+
+Fields:
+- `conversation_id` - the conversation/session the event belongs to
+- `iteration` - the agent loop iteration number
+- `stage` - current stage (e.g., `executing`, `llm`, `complete`, `error`)
+- `detail` - specific action or tool name
+- `token_count` - tokens used in this step
+
+#### WebSocket Progress Format (synthesized)
+
+WebSocket subscribes to the `agent.progress.synthesized` bus topic via the ProgressSynthesizer. Payloads use a session-scoped, human-readable format designed for real-time UI display:
+
+```json
+{"type": "agent_progress", "session_id": "abc-123", "agent_id": "coder", "message": "coder: executing ReadFile (internal/file/read)", "tier": 1, "source_event": "tool_execution_start", "timestamp": "2026-06-15T10:30:00Z"}
+```
+
+Fields:
+- `type` - always `"agent_progress"` to distinguish from other WebSocket message types
+- `session_id` - the session the progress event belongs to
+- `agent_id` - the agent performing the action (e.g., `dispatcher`, `coder`, `analyst`)
+- `message` - human-readable description of current activity
+- `tier` - verbosity level: `0` (quiet), `1` (normal), `2` (verbose)
+- `source_event` - original event type that triggered this synthesis (e.g., `tool_execution_start`, `tool_execution_complete`, `llm_response`)
+- `timestamp` - RFC 3339 timestamp of the event
+
+#### Schema Comparison
+
+| Aspect | SSE (legacy) | WebSocket (synthesized) |
+|--------|-------------|------------------------|
+| Bus topic | `agent.progress` | `agent.progress.synthesized` |
+| Format source | AgentLoop direct emission | ProgressSynthesizer |
+| Session identifier | `conversation_id` | `session_id` |
+| Agent identity | Not included | `agent_id` |
+| Human-readable message | No (structured fields only) | Yes (`message` field) |
+| Verbosity control | No | Yes (`tier` field) |
+| Timestamp | No | Yes (`timestamp` field) |
 
 **Chat with Agent:**
 ```bash
@@ -643,7 +700,7 @@ wscat -c ws://localhost:8081/ws
 
 **chat events:** Bus events are forwarded with their original topic as the `type` field.
 
-**agent_progress:** Session-scoped progress messages from the agent progress synthesizer. These are emitted when the dispatcher and specialist agents perform work during request processing.
+**agent_progress:** Session-scoped progress messages from the agent progress synthesizer. These are emitted when the dispatcher and specialist agents perform work during request processing. Use the synthesized schema (see [WebSocket Progress Format](#websocket-progress-format-synthesized)) — this differs from the SSE progress format ([SSE Progress Format](#sse-progress-format-legacy)).
 
 ```json
 {"type": "agent_progress", "session_id": "abc-123", "agent_id": "coder", "message": "coder: executing ReadFile (internal/file/read)", "tier": 1, "source_event": "tool_execution_start", "timestamp": "2026-06-15T10:30:00Z"}

@@ -93,7 +93,7 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                     padding: EdgeInsets.fromLTRB(16, 16, 16, chatState.error != null ? 100 : 16),
                     reverse: false,
                     itemCount:
-                        chatState.messages.length + (chatState.isLoading ? 1 : 0),
+                        chatState.messages.length + (chatState.isLoading || chatState.isAgentProcessing ? 1 : 0),
                     itemBuilder: (context, index) {
                       if (index < chatState.messages.length) {
                         final message = chatState.messages[index];
@@ -101,8 +101,17 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                       } else {
                         // Dynamic progress indicator or fallback thinking
                         if (chatState.currentProgress != null) {
-                          return AgentProgressIndicator(
-                              progress: chatState.currentProgress!);
+                          return AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 150),
+                            switchInCurve: Curves.easeIn,
+                            switchOutCurve: Curves.easeOut,
+                            child: AgentProgressIndicator(
+                              key: ValueKey(
+                                '${chatState.currentProgress!.message}-${chatState.currentProgress!.timestamp.millisecondsSinceEpoch}',
+                              ),
+                              progress: chatState.currentProgress!,
+                            ),
+                          );
                         } else {
                           return const Padding(
                             padding: EdgeInsets.symmetric(vertical: 8),

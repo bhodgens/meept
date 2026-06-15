@@ -11,6 +11,7 @@ servers:
 tags:
   - name: health
   - name: v1
+  - name: WebSocket
 
 components:
   securitySchemes:
@@ -1896,6 +1897,52 @@ components:
           type: integer
       required:
         - desired_count
+    WSSubscribeMessage:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+            - subscribe
+        channel:
+          type: string
+        session_id:
+          type: string
+
+    WSUnsubscribeMessage:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+            - unsubscribe
+        channel:
+          type: string
+        session_id:
+          type: string
+
+    AgentProgressEvent:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+            - agent_progress
+        session_id:
+          type: string
+        agent_id:
+          type: string
+        message:
+          type: string
+        tier:
+          type: integer
+          minimum: 0
+          maximum: 2
+        source_event:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
 
 paths:
   /api/v1/bus/publish:
@@ -4058,3 +4105,21 @@ paths:
           description: Unauthorized
         '500':
           description: Internal server error
+  /ws:
+    get:
+      summary: WebSocket connection for real-time updates
+      description: |
+        Establishes a WebSocket connection for receiving real-time agent progress events.
+        Clients can subscribe to specific sessions via subscribe messages.
+      operationId: getWebSocket
+      tags:
+        - WebSocket
+      parameters:
+        - name: session_id
+          in: query
+          schema:
+            type: string
+          description: Optional session ID to filter events
+      responses:
+        '101':
+          description: Switching Protocols - WebSocket established

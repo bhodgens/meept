@@ -395,12 +395,32 @@ func (s *Server) handleWSProgress(msg *models.BusMessage) {
 		return
 	}
 
+	// Validate event fields to prevent malformed events from reaching WebSocket clients.
+	if event.AgentID == "" {
+		s.logger.Warn("handleWSProgress: skipping event with empty agent_id", "session_id", event.SessionID)
+		return
+	}
+
+	if event.Message == "" {
+		s.logger.Warn("handleWSProgress: skipping event with empty message", "agent_id", event.AgentID)
+		return
+	}
+
+	tier := int(event.Tier)
+	if tier < 0 {
+		tier = 1 // default to Normal
+	}
+
+	if event.Timestamp.IsZero() {
+		event.Timestamp = time.Now()
+	}
+
 	payload, err := json.Marshal(map[string]any{
 		"type":         "agent_progress",
 		"session_id":   event.SessionID,
 		"agent_id":     event.AgentID,
 		"message":      event.Message,
-		"tier":         int(event.Tier),
+		"tier":         tier,
 		"source_event": string(event.SourceEvent),
 		"timestamp":    event.Timestamp.Format(time.RFC3339),
 	})
@@ -1752,6 +1772,8 @@ func (s *Server) handleWSMessage(conn *websocket.Conn, msg *WSMessage) {
 		_ = websocket.JSON.Send(conn, WSMessage{Type: "pong"})
 	case "subscribe":
 		s.handleWSSubscribe(conn, msg)
+	case "unsubscribe":
+		s.handleWSUnsubscribe(conn, msg)
 	default:
 		s.logger.Debug("ws unknown message type", "type", msg.Type)
 	}
@@ -1796,6 +1818,47 @@ func (s *Server) handleWSSubscribe(conn *websocket.Conn, msg *WSMessage) {
 	}
 
 	s.logger.Debug("ws client subscribed", "remote", conn.RemoteAddr(), "channel", channel, "session", sessionID)
+}
+
+// handleWSUnsubscribe handles unsubscribe messages from WebSocket clients.
+// Clients send this to remove session filters so they no longer receive
+// progress events for a specific session.
+func (s *Server) handleWSUnsubscribe(conn *websocket.Conn, msg *WSMessage) {
+	if s.wsHub == nil {
+		_ = websocket.JSON.Send(conn, WSMessage{Type: "error", Data: json.RawMessage(`{"message":"WebSocket not enabled"}`)})
+		return
+	}
+
+	// Extract channel and session_id from msg.Data
+	var channel string
+	var sessionID string
+	if msg.Data != nil {
+		var parsed map[string]any
+		if err := json.Unmarshal(msg.Data, &parsed); err == nil {
+			if ch, ok := parsed["channel"].(string); ok {
+				channel = ch
+			}
+			if sid, ok := parsed["session_id"].(string); ok {
+				sessionID = sid
+			}
+		}
+	}
+
+	if sessionID != "" {
+		s.wsHub.UnsubscribeSession(conn, sessionID)
+		s.logger.Debug("ws client unsubscribed", "remote", conn.RemoteAddr(), "channel", channel, "session", sessionID)
+	} else if channel != "" {
+		// Unsubscribe all sessions for this channel:
+		// remove all session filters on this connection since the channel is gone.
+		s.wsHub.mu.Lock()
+		if subs, ok := s.wsHub.sessionSubs[conn]; ok {
+			for sid := range subs {
+				s.logger.Debug("ws auto-unsubscribed all sessions", "remote", conn.RemoteAddr(), "channel", channel, "session", sid)
+			}
+			delete(s.wsHub.sessionSubs, conn)
+		}
+		s.wsHub.mu.Unlock()
+	}
 }
 
 // handleMCPPost handles POST /mcp - JSON-RPC requests over HTTP.

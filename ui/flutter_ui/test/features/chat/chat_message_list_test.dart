@@ -286,7 +286,30 @@ void main() {
       );
     });
 
-    testWidgets('does not show loading indicator when not loading',
+    testWidgets('shows loading indicator when isAgentProcessing is true',
+        (tester) async {
+      await tester.pumpWidget(_buildTestApp(
+        child: const ChatMessageList(sessionId: 'test-session'),
+        initialChatState: ChatState(
+          messages: fixtureMessages,
+          isLoading: false,
+          isAgentProcessing: true,
+        ),
+      ));
+
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(
+        find.text('thinking...', skipOffstage: false),
+        findsOneWidget,
+      );
+      expect(
+        find.byType(CircularProgressIndicator),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('does not show loading indicator when neither flag is true',
         (tester) async {
       await tester.pumpWidget(_buildTestApp(
         child: const ChatMessageList(sessionId: 'test-session'),
