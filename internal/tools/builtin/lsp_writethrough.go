@@ -68,6 +68,11 @@ type lspWriteNotifier struct {
 	diagnosticsOnWrite bool
 	diagnosticsTimeout time.Duration
 	logger             *slog.Logger
+
+	// diagMu protects diagWaiters and diagOnce.
+	diagMu       sync.Mutex
+	diagWaiters  map[string]chan []lsp.Diagnostic // keyed by URI
+	diagRegOnce  map[*lsp.Client]*sync.Once       // per-client registration guard
 }
 
 // NewLSPWriteNotifier creates a new LSP write notifier.
@@ -88,6 +93,8 @@ func NewLSPWriteNotifier(manager *lsp.Manager, cfg config.LSPConfig, logger *slo
 		diagnosticsOnWrite: cfg.DiagnosticsOnWrite,
 		diagnosticsTimeout: timeout,
 		logger:             logger,
+		diagWaiters:        make(map[string]chan []lsp.Diagnostic),
+		diagRegOnce:        make(map[*lsp.Client]*sync.Once),
 	}
 }
 
@@ -189,26 +196,48 @@ func (n *lspWriteNotifier) formatFile(ctx context.Context, srv *lsp.ServerInstan
 func (n *lspWriteNotifier) collectDiagnostics(ctx context.Context, srv *lsp.ServerInstance, absPath string, content string) *DiagnosticsSummary {
 	uri := lsp.PathToURI(absPath)
 
-	// Set up a one-shot diagnostics listener using sync.Once to guarantee
-	// the handler fires at most once, then unregisters itself to prevent
-	// listener accumulation across repeated calls.
-	diagChan := make(chan []lsp.Diagnostic, 1)
-	var once sync.Once
+	// Register a single multiplexing diagnostic handler per LSP client.
+	// Without sync.Once, each call to collectDiagnostics would overwrite the
+	// previous handler via OnNotification (which stores one handler per
+	// method), causing earlier callers to time out. The handler routes
+	// diagnostics by URI to whichever caller is waiting.
+	n.diagMu.Lock()
+	once, ok := n.diagRegOnce[srv.Client]
+	if !ok {
+		once = &sync.Once{}
+		n.diagRegOnce[srv.Client] = once
+	}
+	n.diagMu.Unlock()
 
-	srv.Client.OnNotification("textDocument/publishDiagnostics", func(method string, params json.RawMessage) {
-		var diagParams lsp.PublishDiagnosticsParams
-		if err := json.Unmarshal(params, &diagParams); err != nil {
-			return
-		}
-		if diagParams.URI == uri {
-			once.Do(func() {
-				diagChan <- diagParams.Diagnostics
-				// Replace ourselves with a no-op so subsequent notifications
-				// for this URI don't accumulate dead closures.
-				srv.Client.OnNotification("textDocument/publishDiagnostics", func(string, json.RawMessage) {})
-			})
-		}
+	once.Do(func() {
+		srv.Client.OnNotification("textDocument/publishDiagnostics", func(method string, params json.RawMessage) {
+			var diagParams lsp.PublishDiagnosticsParams
+			if err := json.Unmarshal(params, &diagParams); err != nil {
+				return
+			}
+			n.diagMu.Lock()
+			ch, waiting := n.diagWaiters[diagParams.URI]
+			n.diagMu.Unlock()
+			if waiting {
+				select {
+				case ch <- diagParams.Diagnostics:
+				default:
+					// Channel buffer is full; caller already has a result.
+				}
+			}
+		})
 	})
+
+	// Subscribe for this URI.
+	diagChan := make(chan []lsp.Diagnostic, 1)
+	n.diagMu.Lock()
+	n.diagWaiters[uri] = diagChan
+	n.diagMu.Unlock()
+	defer func() {
+		n.diagMu.Lock()
+		delete(n.diagWaiters, uri)
+		n.diagMu.Unlock()
+	}()
 
 	// Send a didSave to trigger fresh diagnostics
 	_ = srv.Client.Notify(ctx, "textDocument/didSave", map[string]any{
