@@ -3,9 +3,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"syscall"
 
+	"github.com/caimlas/meept/internal/errcls"
 	"github.com/caimlas/meept/internal/sharedclient"
 	"github.com/caimlas/meept/internal/sharedclient/menus"
 	"github.com/caimlas/meept/internal/transport"
@@ -649,9 +652,11 @@ func (t *TUI) sendChatMessage(message string) {
 	go func() {
 		reply, err := t.client.Chat(message, t.sessionMgr.GetSessionName())
 		if err != nil {
-			if strings.Contains(err.Error(), "connection refused") ||
-				strings.Contains(err.Error(), "no such file") ||
-				strings.Contains(err.Error(), "network unreachable") {
+			// Use structured network error detection. Also check for
+			// syscall.ENOENT which occurs when the Unix socket file doesn't
+			// exist (daemon not started). ENOENT is intentionally not in
+			// errcls.IsNetworkError because it's too broad for general use.
+			if errcls.IsNetworkError(err) || errors.Is(err, syscall.ENOENT) {
 				t.addScrollback("error: unable to reach the daemon. is it running?")
 			} else {
 				t.addScrollback(fmt.Sprintf("error: %v", err))

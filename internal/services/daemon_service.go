@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -181,14 +182,14 @@ func (s *DaemonService) Stop(ctx context.Context) error {
 		// Read PID file
 		pidData, err := os.ReadFile(s.pidFile)
 		if err != nil {
-			return fmt.Errorf("daemon is not running (no PID file)")
+			return fmt.Errorf("%w (no PID file)", ErrDaemonNotRunning)
 		}
 		pid, err = strconv.Atoi(strings.TrimSpace(string(pidData)))
 		if err != nil {
 			return fmt.Errorf("invalid PID file")
 		}
 	} else {
-		return fmt.Errorf("daemon is not running")
+		return ErrDaemonNotRunning
 	}
 
 	// Find and stop process
@@ -232,7 +233,7 @@ func (s *DaemonService) Restart(ctx context.Context) error {
 	}
 
 	// Manual restart
-	if err := s.Stop(ctx); err != nil && !strings.Contains(err.Error(), "not running") {
+	if err := s.Stop(ctx); err != nil && !errors.Is(err, ErrDaemonNotRunning) {
 		return err
 	}
 

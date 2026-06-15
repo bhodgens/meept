@@ -16,13 +16,14 @@ func init() {
 
 // Standard service errors for consistent cross-transport handling.
 var (
-	ErrNotFound      = errors.New("resource not found")
-	ErrAlreadyExists = errors.New("resource already exists")
-	ErrInvalidInput  = errors.New("invalid input")
-	ErrUnauthorized  = errors.New("unauthorized")
-	ErrInternal      = errors.New("internal error")
-	ErrTimeout       = errors.New("operation timed out")
-	ErrUnavailable   = errors.New("service unavailable")
+	ErrNotFound         = errors.New("resource not found")
+	ErrAlreadyExists    = errors.New("resource already exists")
+	ErrInvalidInput     = errors.New("invalid input")
+	ErrUnauthorized     = errors.New("unauthorized")
+	ErrInternal         = errors.New("internal error")
+	ErrTimeout          = errors.New("operation timed out")
+	ErrUnavailable      = errors.New("service unavailable")
+	ErrDaemonNotRunning = errors.New("daemon not running")
 )
 
 // ServiceError wraps errors with service context.
