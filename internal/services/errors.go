@@ -1,6 +1,18 @@
 package services
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/caimlas/meept/internal/errcls"
+)
+
+// Register service sentinels with errcls so that errcls.IsParameterError and
+// errcls.IsAuthError can recognize them without importing services directly
+// (avoids import cycle: services -> scheduler -> rpc -> errcls -> services).
+func init() {
+	errcls.RegisterParameterSentinels(ErrInvalidInput)
+	errcls.RegisterAuthSentinels(ErrUnauthorized)
+}
 
 // Standard service errors for consistent cross-transport handling.
 var (
