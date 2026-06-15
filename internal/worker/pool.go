@@ -82,6 +82,9 @@ func (p *Pool) Start(ctx context.Context, workerCount int) error {
 		for i := range workerCount {
 			if _, err := p.AddWorker(p.defaultCaps); err != nil {
 				p.logger.Error("Failed to add worker", "index", i, "error", err)
+				if startErr == nil {
+					startErr = fmt.Errorf("failed to add worker %d: %w", i, err)
+				}
 			}
 		}
 
@@ -90,6 +93,9 @@ func (p *Pool) Start(ctx context.Context, workerCount int) error {
 			worker.wg = &p.wg
 			if err := worker.Start(ctx); err != nil {
 				p.logger.Error("Worker failed to start", "id", worker.ID, "error", err)
+				if startErr == nil {
+					startErr = fmt.Errorf("worker %s failed to start: %w", worker.ID, err)
+				}
 			}
 		}
 
