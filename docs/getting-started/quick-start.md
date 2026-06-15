@@ -81,3 +81,68 @@ The scheduler agent creates a cron job that fires a reminder through the message
 - [First Run](first-run.md) — What to expect and how to verify everything works
 - [Configuration](../configuration/index.md) — Customize your setup
 - [Concepts](../concepts/index.md) — Understand how Meept works
+
+## Optional: Using the Flutter GUI
+
+Meept includes a cross-platform Flutter-based GUI for macOS, Linux, and Windows.
+
+### Prerequisites
+
+- [Flutter SDK](https://docs.flutter.dev/get-started/install) (3.0+)
+- macOS: Xcode command line tools
+- Linux: GTK development libraries
+- Windows: Visual Studio Build Tools
+
+### Build and Run
+
+```bash
+cd ui/flutter_ui
+
+# Install dependencies
+flutter pub get
+
+# Run in development mode
+flutter run
+
+# Or build for your platform
+flutter build macos    # macOS
+flutter build linux    # Linux
+flutter build windows  # Windows
+```
+
+### API Key Configuration
+
+The Flutter app needs an API key to authenticate with the daemon:
+
+**Development (default):** The app automatically uses the default dev API key (`meept_dev_default_key_CHANGE_ME`). No configuration needed.
+
+**Production:** Generate a secure API key and configure it in the app:
+
+1. Generate a key:
+   ```bash
+   ./bin/meept token generate
+   ```
+
+2. In the Flutter app:
+   - Open Settings (gear icon)
+   - Enter the API key in the "API Token" field
+   - Save
+
+Alternatively, set it in `~/.meept/menubar.json5`:
+```json5
+{
+  "daemon": {
+    "http_url": "https://localhost:8081",
+    "api_token": "your-generated-key-here"
+  }
+}
+```
+
+### Troubleshooting
+
+**401 Unauthorized errors:** The API key is missing or incorrect. Check Settings.
+
+**TLS handshake errors:** Ensure the daemon is running with HTTPS enabled (default). The Flutter app requires HTTPS.
+
+**Connection refused:** Verify the daemon is running on port 8081 (default) in `~/.meept/menubar.json5`.
+

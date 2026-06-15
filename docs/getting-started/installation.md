@@ -107,3 +107,66 @@ go version
 ## Next Steps
 
 Continue to [Quick Start](quick-start.md) for your first agent session.
+
+## Optional: Build the Flutter GUI
+
+Meept includes a cross-platform GUI built with Flutter.
+
+### Prerequisites
+
+- [Flutter SDK 3.0+](https://docs.flutter.dev/get-started/install)
+- Platform-specific tools:
+  - **macOS**: Xcode command line tools
+  - **Linux**: GTK development libraries (`libgtk-3-dev`)
+  - **Windows**: Visual Studio Build Tools
+
+### Build
+
+```bash
+cd ui/flutter_ui
+
+# Install dependencies
+flutter pub get
+
+# Run in development mode
+flutter run
+
+# Or build for release
+flutter build macos    # macOS
+flutter build linux    # Linux  
+flutter build windows  # Windows
+```
+
+The built app will be in:
+- macOS: `build/macos/Build/Products/Release/flutter_ui.app`
+- Linux: `build/linux/x64/release/bundle/`
+- Windows: `build/windows/runner/Release/`
+
+### API Key Setup
+
+**Development:** The Flutter app automatically uses the default dev API key. No setup required.
+
+**Production:** Generate a secure key:
+
+```bash
+./bin/meept token generate
+```
+
+Then configure in the app:
+1. Open the Flutter app
+2. Go to Settings (gear icon)
+3. Enter the API key
+4. Save
+
+Or set in `~/.meept/menubar.json5`:
+```json5
+{
+  "daemon": {
+    "http_url": "https://localhost:8081",
+    "api_token": "your-generated-key"
+  }
+}
+```
+
+See [Quick Start](quick-start.md#optional-using-the-flutter-gui) for more details.
+
