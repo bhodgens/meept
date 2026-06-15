@@ -379,14 +379,16 @@ type LLMMetricsConfig struct {
 
 // BudgetConfig holds token budget settings.
 type BudgetConfig struct {
-	HourlyTokenLimit  int     `json:"hourly_token_limit"  toml:"hourly_token_limit"`
-	DailyTokenLimit   int     `json:"daily_token_limit"   toml:"daily_token_limit"`
-	DailyCostLimit    float64 `json:"daily_cost_limit"    toml:"daily_cost_limit"`
-	HourlyCostLimit   float64 `json:"hourly_cost_limit"   toml:"hourly_cost_limit"`
-	RateLimitRPM      int     `json:"rate_limit_rpm"      toml:"rate_limit_rpm"`
-	Aggressiveness    float64 `json:"aggressiveness"      toml:"aggressiveness"`
-	PerTaskTokenLimit int     `json:"per_task_token_limit" toml:"per_task_token_limit"`
-	PerSessionTokenLimit int  `json:"per_session_token_limit" toml:"per_session_token_limit"`
+	HourlyTokenLimit      int     `json:"hourly_token_limit"   toml:"hourly_token_limit"`
+	DailyTokenLimit       int     `json:"daily_token_limit"    toml:"daily_token_limit"`
+	DailyCostLimit        float64 `json:"daily_cost_limit"     toml:"daily_cost_limit"`
+	HourlyCostLimit       float64 `json:"hourly_cost_limit"    toml:"hourly_cost_limit"`
+	RateLimitRPM          int     `json:"rate_limit_rpm"       toml:"rate_limit_rpm"`
+	Aggressiveness        float64 `json:"aggressiveness"       toml:"aggressiveness"`
+	PerTaskTokenLimit     int     `json:"per_task_token_limit" toml:"per_task_token_limit"`
+	PerSessionTokenLimit  int     `json:"per_session_token_limit" toml:"per_session_token_limit"`
+	PerTaskCostLimit      float64 `json:"per_task_cost_limit"  toml:"per_task_cost_limit"`
+	PerSessionCostLimit   float64 `json:"per_session_cost_limit" toml:"per_session_cost_limit"`
 }
 
 // MemoryBackend defines the storage backend for memory.
@@ -1177,6 +1179,8 @@ func DefaultConfig() *Config {
 				Aggressiveness:       0.5,
 				PerTaskTokenLimit:    50000,
 				PerSessionTokenLimit: 100000,
+				PerTaskCostLimit:     5.0,   // $5 per task max
+				PerSessionCostLimit:  10.0,  // $10 per session max
 			},
 			Broker: LLMBrokerConfig{
 				MaxErrorRate:    0.10,

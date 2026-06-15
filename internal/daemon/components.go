@@ -74,6 +74,7 @@ type Components struct {
 	LLMResolver          *llm.Resolver
 	ToolRegistry         *tools.Registry
 	SecurityChecker      *security.PermissionChecker
+	BudgetCleanupStop    chan struct{} // Stop channel for budget periodic cleanup
 	SecurityOrchestrator *intsecurity.Orchestrator
 	FenceChecker         *intsecurity.FenceChecker
 	AgentLoop            *agent.AgentLoop
@@ -296,15 +297,21 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if llmCfg != nil {
 		// Create budget tracker from config
 		budgetTracker = llm.NewBudget(llm.BudgetConfig{
-			HourlyLimit:      cfg.LLM.Budget.HourlyTokenLimit,
-			DailyLimit:       cfg.LLM.Budget.DailyTokenLimit,
-			DailyCostLimit:   cfg.LLM.Budget.DailyCostLimit,
-			HourlyCostLimit:  cfg.LLM.Budget.HourlyCostLimit,
-			RateLimitRPM:     cfg.LLM.Budget.RateLimitRPM,
-			Aggressiveness:   cfg.LLM.Budget.Aggressiveness,
-			PerTaskBudget:    cfg.LLM.Budget.PerTaskTokenLimit,
-			PerSessionBudget: cfg.LLM.Budget.PerSessionTokenLimit,
+			HourlyLimit:         cfg.LLM.Budget.HourlyTokenLimit,
+			DailyLimit:          cfg.LLM.Budget.DailyTokenLimit,
+			DailyCostLimit:      cfg.LLM.Budget.DailyCostLimit,
+			HourlyCostLimit:     cfg.LLM.Budget.HourlyCostLimit,
+			RateLimitRPM:        cfg.LLM.Budget.RateLimitRPM,
+			Aggressiveness:      cfg.LLM.Budget.Aggressiveness,
+			PerTaskBudget:       cfg.LLM.Budget.PerTaskTokenLimit,
+			PerSessionBudget:    cfg.LLM.Budget.PerSessionTokenLimit,
+			PerTaskCostLimit:    cfg.LLM.Budget.PerTaskCostLimit,
+			PerSessionCostLimit: cfg.LLM.Budget.PerSessionCostLimit,
 		}, logger.With("component", "budget"))
+
+		// Start periodic cleanup of stale task/session entries (TTL=24h, run hourly)
+		c.BudgetCleanupStop = budgetTracker.StartPeriodicCleanup(24*time.Hour, 1*time.Hour)
+		logger.Info("Budget periodic cleanup started", "ttl", "24h", "frequency", "1h")
 
 		// Create token cache if enabled
 		var tokenCache *llm.TokenCacheCoordinator
@@ -1438,7 +1445,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 
 	// Wire ReflectionEngine for auto-lint/test fixing (works with or without multi-agent)
-	if cfg.Agent.Reflection.Enabled && c.LLMClient != nil && c.Orchestrator != nil {
+	if cfg.Agent.Reflection.Enabled && c.LLMClient != nil {
 		lintRegistry := lint.NewRegistry()
 		testRunner := lint.NewTestRunner(logger)
 
@@ -1454,11 +1461,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			c.LLMClient,
 			reflectionConfig,
 		)
-		c.Orchestrator.SetReflectionEngine(c.ReflectionEngine)
+		if c.Orchestrator != nil {
+			c.Orchestrator.SetReflectionEngine(c.ReflectionEngine)
+		}
 
 		logger.Info("ReflectionEngine initialized",
 			"auto_lint", cfg.Agent.Reflection.AutoLint,
 			"auto_test", cfg.Agent.Reflection.AutoTest,
+			"orchestrator_wired", c.Orchestrator != nil,
 		)
 	}
 
@@ -2064,6 +2074,12 @@ func (c *Components) Stop(ctx context.Context) error {
 	// Cancel lifecycle context to unblock background goroutines
 	if c.cancel != nil {
 		c.cancel()
+	}
+
+	// Stop budget periodic cleanup goroutine
+	if c.BudgetCleanupStop != nil {
+		close(c.BudgetCleanupStop)
+		c.Logger.Info("Budget periodic cleanup stopped")
 	}
 
 	var lastErr error
@@ -2685,6 +2701,12 @@ func registerBuiltinTools(
 		readFileTool.SetFenceChecker(fenceChecker)
 		writeFileTool.SetFenceChecker(fenceChecker)
 	}
+	if secOrch != nil {
+		// TODO: SetSecurityOrchestrator not yet implemented on ReadFileTool/WriteFileTool
+		// readFileTool.SetSecurityOrchestrator(secOrch)
+		// writeFileTool.SetSecurityOrchestrator(secOrch)
+		_ = secOrch
+	}
 	registry.Register(readFileTool)
 	registry.Register(writeFileTool)
 	// Use the shared pending changes registry passed by the caller so that
@@ -2698,11 +2720,21 @@ func registerBuiltinTools(
 	if fenceChecker != nil {
 		fileEditTool.SetFenceChecker(fenceChecker)
 	}
+	if secOrch != nil {
+		// TODO: SetSecurityOrchestrator not yet implemented on FileEditTool
+		// fileEditTool.SetSecurityOrchestrator(secOrch)
+		_ = secOrch
+	}
 	registry.Register(fileEditTool)
 
 	deleteFileTool := builtin.NewDeleteFileTool(checker)
 	if fenceChecker != nil {
 		deleteFileTool.SetFenceChecker(fenceChecker)
+	}
+	if secOrch != nil {
+		// TODO: SetSecurityOrchestrator not yet implemented on DeleteFileTool
+		// deleteFileTool.SetSecurityOrchestrator(secOrch)
+		_ = secOrch
 	}
 	registry.Register(deleteFileTool)
 	if pendingChanges != nil {
@@ -2719,6 +2751,11 @@ func registerBuiltinTools(
 		listDirTool.SetFenceChecker(fenceChecker)
 		fileFindTool.SetFenceChecker(fenceChecker)
 		fileGrepTool.SetFenceChecker(fenceChecker)
+	}
+	if secOrch != nil {
+		// TODO: SetSecurityOrchestrator not yet implemented on ListDirectoryTool
+		// listDirTool.SetSecurityOrchestrator(secOrch)
+		_ = secOrch
 	}
 	registry.Register(listDirTool)
 	registry.Register(fileFindTool)

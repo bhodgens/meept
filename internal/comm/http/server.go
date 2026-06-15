@@ -1372,6 +1372,24 @@ func (s *Server) handleDaemonStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Add budget status if BudgetStatusGetter is available
+	if s.BudgetStatusGetter != nil {
+		hourlyUsed, hourlyRemaining, dailyUsed, dailyRemaining, rpmCurrent, rpmLimit, dailyCostUsed, dailyCostLimit, hourlyCostUsed, hourlyCostLimit := s.BudgetStatusGetter()
+		status["budget"] = map[string]any{
+			"hourly_used":       hourlyUsed,
+			"hourly_remaining":  hourlyRemaining,
+			"daily_used":        dailyUsed,
+			"daily_remaining":   dailyRemaining,
+			"rpm_current":       rpmCurrent,
+			"rpm_limit":         rpmLimit,
+			"daily_cost_used":   dailyCostUsed,
+			"daily_cost_limit":  dailyCostLimit,
+			"hourly_cost_used":  hourlyCostUsed,
+			"hourly_cost_limit": hourlyCostLimit,
+			"within_budget":     hourlyUsed < hourlyRemaining && dailyUsed < dailyRemaining,
+		}
+	}
+
 	s.writeJSON(w, http.StatusOK, status)
 }
 

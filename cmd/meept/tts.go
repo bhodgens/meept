@@ -287,7 +287,11 @@ func mergeVoiceList(catalog []PiperVoice, installed map[string]bool) []PiperVoic
 	return result
 }
 
-// downloadFile downloads a file from URL to destPath.
+// downloadFile downloads a file from URL to destPath atomically.
+// It writes to destPath + ".part", verifies Content-Length if the server
+// provides one, then renames into place on success. On failure the partial
+// file is removed so a subsequent run does not mistake it for a complete
+// download.
 func downloadFile(ctx context.Context, url, destPath string) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
@@ -306,12 +310,34 @@ func downloadFile(ctx context.Context, url, destPath string) error {
 		return fmt.Errorf("download failed: %s", resp.Status)
 	}
 
-	out, err := os.Create(destPath)
+	partPath := destPath + ".part"
+	out, err := os.Create(partPath)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
 
-	_, err = io.Copy(out, io.LimitReader(resp.Body, 1<<30)) // 1 GiB limit
-	return err
+	// Reader is capped at 1 GiB to prevent unbounded downloads.
+	written, copyErr := io.Copy(out, io.LimitReader(resp.Body, 1<<30))
+	closeErr := out.Close()
+	if copyErr != nil {
+		_ = os.Remove(partPath)
+		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(partPath)
+		return closeErr
+	}
+
+	// Verify Content-Length when the server provides it. Some redirect
+	// chains (e.g. Hugging Face LFS) may omit it; treat -1 / 0 as unknown.
+	if cl := resp.ContentLength; cl > 0 && written != cl {
+		_ = os.Remove(partPath)
+		return fmt.Errorf("download truncated: wrote %d bytes, expected %d", written, cl)
+	}
+
+	if err := os.Rename(partPath, destPath); err != nil {
+		_ = os.Remove(partPath)
+		return fmt.Errorf("install downloaded file: %w", err)
+	}
+	return nil
 }

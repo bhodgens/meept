@@ -585,3 +585,102 @@ func TestBudgetWaitForRateLimitReservation(t *testing.T) {
 	}
 }
 
+
+func TestBudget_RecordCostWithScope(t *testing.T) {
+	b := NewBudget(BudgetConfig{
+		HourlyLimit:      100000,
+		DailyLimit:       1000000,
+		PerTaskCostLimit: 5.0,
+		PerSessionCostLimit: 10.0,
+	}, nil)
+
+	b.RecordCostWithScope(CostRecord{CostUSD: 2.0, Timestamp: time.Now()}, "task1", "session1")
+
+	status := b.GetStatus()
+	if status.PerTaskCost != 2.0 {
+		t.Errorf("PerTaskCost = %v, want 2.0", status.PerTaskCost)
+	}
+	if status.PerSessionCost != 2.0 {
+		t.Errorf("PerSessionCost = %v, want 2.0", status.PerSessionCost)
+	}
+}
+
+func TestBudget_PerTaskCostExhaustion(t *testing.T) {
+	b := NewBudget(BudgetConfig{
+		HourlyLimit:      100000,
+		PerTaskCostLimit: 5.0,
+	}, nil)
+
+	b.RecordCostWithScope(CostRecord{CostUSD: 3.0, Timestamp: time.Now()}, "task1", "")
+	result := b.CheckBudgetWithScope("task1", "")
+	if result.Exceeded {
+		t.Error("Should not be exceeded yet (3.0 < 5.0)")
+	}
+
+	b.RecordCostWithScope(CostRecord{CostUSD: 3.0, Timestamp: time.Now()}, "task1", "")
+	result = b.CheckBudgetWithScope("task1", "")
+	if !result.Exceeded {
+		t.Error("Should be exceeded (6.0 >= 5.0)")
+	}
+	if result.Reason != BudgetLimitPerTaskCost {
+		t.Errorf("Reason = %v, want %v", result.Reason, BudgetLimitPerTaskCost)
+	}
+}
+
+func TestBudget_PerSessionCostExhaustion(t *testing.T) {
+	b := NewBudget(BudgetConfig{
+		HourlyLimit:       100000,
+		PerSessionCostLimit: 10.0,
+	}, nil)
+
+	b.RecordCostWithScope(CostRecord{CostUSD: 5.0, Timestamp: time.Now()}, "", "session1")
+	result := b.CheckBudgetWithScope("", "session1")
+	if result.Exceeded {
+		t.Error("Should not be exceeded yet (5.0 < 10.0)")
+	}
+
+	b.RecordCostWithScope(CostRecord{CostUSD: 6.0, Timestamp: time.Now()}, "", "session1")
+	result = b.CheckBudgetWithScope("", "session1")
+	if !result.Exceeded {
+		t.Error("Should be exceeded (11.0 >= 10.0)")
+	}
+	if result.Reason != BudgetLimitPerSessionCost {
+		t.Errorf("Reason = %v, want %v", result.Reason, BudgetLimitPerSessionCost)
+	}
+}
+
+func TestBudget_RemoveTaskCost(t *testing.T) {
+	b := NewBudget(BudgetConfig{
+		HourlyLimit: 100000,
+	}, nil)
+
+	b.RecordCostWithScope(CostRecord{CostUSD: 5.0, Timestamp: time.Now()}, "task1", "")
+	status := b.GetStatus()
+	if status.PerTaskCost != 5.0 {
+		t.Errorf("PerTaskCost = %v, want 5.0", status.PerTaskCost)
+	}
+
+	b.RemoveTaskCost(context.Background(), "task1")
+	status = b.GetStatus()
+	if status.PerTaskCost != 0 {
+		t.Errorf("PerTaskCost after removal = %v, want 0", status.PerTaskCost)
+	}
+}
+
+func TestBudget_RemoveSessionCost(t *testing.T) {
+	b := NewBudget(BudgetConfig{
+		HourlyLimit: 100000,
+	}, nil)
+
+	b.RecordCostWithScope(CostRecord{CostUSD: 5.0, Timestamp: time.Now()}, "", "session1")
+	status := b.GetStatus()
+	if status.PerSessionCost != 5.0 {
+		t.Errorf("PerSessionCost = %v, want 5.0", status.PerSessionCost)
+	}
+
+	b.RemoveSessionCost(context.Background(), "session1")
+	status = b.GetStatus()
+	if status.PerSessionCost != 0 {
+		t.Errorf("PerSessionCost after removal = %v, want 0", status.PerSessionCost)
+	}
+}

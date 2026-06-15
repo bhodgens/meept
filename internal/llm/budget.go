@@ -30,8 +30,10 @@ type Budget struct {
 	aggressiveness float64
 
 	// Per-task and per-session caps (0 = no cap)
-	perTaskBudget    int
-	perSessionBudget int
+	perTaskBudget       int     // max tokens per single task
+	perSessionBudget    int     // max tokens per single session
+	perTaskCostLimit    float64 // max USD per single task (0 = no cap)
+	perSessionCostLimit float64 // max USD per single session (0 = no cap)
 
 	// Sliding window for the last hour
 	hourlyWindow []usageRecord
@@ -41,10 +43,12 @@ type Budget struct {
 	currentDay int // ordinal day number
 
 	// Per-task tracking
-	tasks map[string]int // taskID -> tokens used in this task
+	tasks     map[string]int    // taskID -> tokens used
+	taskCosts map[string]float64 // taskID -> USD cost
 
 	// Per-session tracking
-	sessions map[string]int // sessionID -> tokens used in this session
+	sessions     map[string]int    // sessionID -> tokens used
+	sessionCosts map[string]float64 // sessionID -> USD cost
 
 	// RPM tracking (sliding window of request timestamps)
 	requestTimestamps []time.Time
@@ -64,14 +68,16 @@ type Budget struct {
 
 // BudgetConfig holds configuration for token budget tracking.
 type BudgetConfig struct {
-	HourlyLimit      int
-	DailyLimit       int
-	DailyCostLimit   float64 // Max dollar cost per UTC day (0 = no limit)
-	HourlyCostLimit  float64 // Max dollar cost per sliding hour (0 = no limit)
-	RateLimitRPM     int
-	Aggressiveness   float64
-	PerTaskBudget    int // max tokens per single task (0 = no cap)
-	PerSessionBudget int // max tokens per single session (0 = no cap)
+	HourlyLimit       int
+	DailyLimit        int
+	DailyCostLimit    float64 // Max dollar cost per UTC day (0 = no limit)
+	HourlyCostLimit   float64 // Max dollar cost per sliding hour (0 = no limit)
+	RateLimitRPM      int
+	Aggressiveness    float64
+	PerTaskBudget     int     // max tokens per single task (0 = no cap)
+	PerSessionBudget  int     // max tokens per single session (0 = no cap)
+	PerTaskCostLimit  float64 // max USD per single task (0 = no cap)
+	PerSessionCostLimit float64 // max USD per single session (0 = no cap)
 }
 
 // NewBudget creates a new token budget tracker.
@@ -90,22 +96,26 @@ func NewBudget(cfg BudgetConfig, logger *slog.Logger) *Budget {
 	now := time.Now().UTC()
 
 	return &Budget{
-		hourlyLimit:       cfg.HourlyLimit,
-		dailyLimit:        cfg.DailyLimit,
-		rateLimitRPM:      cfg.RateLimitRPM,
-		aggressiveness:    cfg.Aggressiveness,
-		perTaskBudget:     cfg.PerTaskBudget,
-		perSessionBudget:  cfg.PerSessionBudget,
-		hourlyWindow:      make([]usageRecord, 0),
-		dailyUsed:         0,
-		currentDay:        dayOrdinal(now),
-		requestTimestamps: make([]time.Time, 0),
-		dailyCostLimit:    cfg.DailyCostLimit,
-		hourlyCostLimit:   cfg.HourlyCostLimit,
-		hourlyCostWindow:  make([]costRecord, 0),
-		tasks:             make(map[string]int),
-		sessions:          make(map[string]int),
-		logger:            logger,
+		hourlyLimit:         cfg.HourlyLimit,
+		dailyLimit:          cfg.DailyLimit,
+		rateLimitRPM:        cfg.RateLimitRPM,
+		aggressiveness:      cfg.Aggressiveness,
+		perTaskBudget:       cfg.PerTaskBudget,
+		perSessionBudget:    cfg.PerSessionBudget,
+		perTaskCostLimit:    cfg.PerTaskCostLimit,
+		perSessionCostLimit: cfg.PerSessionCostLimit,
+		hourlyWindow:        make([]usageRecord, 0),
+		dailyUsed:           0,
+		currentDay:          dayOrdinal(now),
+		requestTimestamps:   make([]time.Time, 0),
+		dailyCostLimit:      cfg.DailyCostLimit,
+		hourlyCostLimit:     cfg.HourlyCostLimit,
+		hourlyCostWindow:    make([]costRecord, 0),
+		tasks:               make(map[string]int),
+		taskCosts:           make(map[string]float64),
+		sessions:            make(map[string]int),
+		sessionCosts:        make(map[string]float64),
+		logger:              logger,
 	}
 }
 
@@ -220,6 +230,11 @@ type CostRecord struct {
 
 // RecordCost records a dollar cost against the budget.
 func (b *Budget) RecordCost(r CostRecord) {
+	b.RecordCostWithScope(r, "", "")
+}
+
+// RecordCostWithScope records a dollar cost and tracks it per-task and per-session.
+func (b *Budget) RecordCostWithScope(r CostRecord, taskID, sessionID string) {
 	if r.CostUSD <= 0 {
 		return
 	}
@@ -239,10 +254,21 @@ func (b *Budget) RecordCost(r CostRecord) {
 	})
 	b.dailyCostUsed += r.CostUSD
 
-	b.logger.Debug("Recorded dollar cost",
+	// Track per-task cost
+	if len(taskID) > 0 {
+		b.taskCosts[taskID] += r.CostUSD
+	}
+	// Track per-session cost
+	if len(sessionID) > 0 {
+		b.sessionCosts[sessionID] += r.CostUSD
+	}
+
+	b.logger.Debug("Recorded dollar cost with scope",
 		"cost_usd", r.CostUSD,
 		"hourly_cost", b.hourlyCostUsed(),
 		"daily_cost", b.dailyCostUsed,
+		"task", taskID,
+		"session", sessionID,
 	)
 }
 
@@ -380,14 +406,15 @@ func (b *Budget) CheckBudgetWithScope(taskID, sessionID string) BudgetCheckResul
 	defer b.mu.Unlock()
 
 	// Allow all requests when budget is unconfigured (limits = 0)
-	if b.hourlyLimit == 0 && b.dailyLimit == 0 && b.dailyCostLimit == 0 && b.hourlyCostLimit == 0 {
+	if b.hourlyLimit == 0 && b.dailyLimit == 0 && b.dailyCostLimit == 0 && b.hourlyCostLimit == 0 &&
+		b.perTaskBudget == 0 && b.perSessionBudget == 0 && b.perTaskCostLimit == 0 && b.perSessionCostLimit == 0 {
 		return BudgetCheckResult{Exceeded: false}
 	}
 
 	b.maybeResetDaily()
 	b.pruneHourlyWindow()
 
-	// Per-task cap check
+	// Per-task token cap check
 	if b.perTaskBudget > 0 && len(taskID) > 0 {
 		if taskUsed, exists := b.tasks[taskID]; exists {
 			if taskUsed >= b.perTaskBudget {
@@ -396,11 +423,29 @@ func (b *Budget) CheckBudgetWithScope(taskID, sessionID string) BudgetCheckResul
 		}
 	}
 
-	// Per-session cap check
+	// Per-session token cap check
 	if b.perSessionBudget > 0 && len(sessionID) > 0 {
 		if sessionUsed, exists := b.sessions[sessionID]; exists {
 			if sessionUsed >= b.perSessionBudget {
 				return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitPerSession, Used: float64(sessionUsed), Limit: float64(b.perSessionBudget)}
+			}
+		}
+	}
+
+	// Per-task cost cap check
+	if b.perTaskCostLimit > 0 && len(taskID) > 0 {
+		if taskCost, exists := b.taskCosts[taskID]; exists {
+			if taskCost >= b.perTaskCostLimit {
+				return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitPerTaskCost, Used: taskCost, Limit: b.perTaskCostLimit}
+			}
+		}
+	}
+
+	// Per-session cost cap check
+	if b.perSessionCostLimit > 0 && len(sessionID) > 0 {
+		if sessionCost, exists := b.sessionCosts[sessionID]; exists {
+			if sessionCost >= b.perSessionCostLimit {
+				return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitPerSessionCost, Used: sessionCost, Limit: b.perSessionCostLimit}
 			}
 		}
 	}
@@ -474,6 +519,20 @@ func (b *Budget) RemoveSession(_ context.Context, sessionID string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.sessions, sessionID)
+}
+
+// RemoveTaskCost removes a completed task's cost tracking entry.
+func (b *Budget) RemoveTaskCost(_ context.Context, taskID string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.taskCosts, taskID)
+}
+
+// RemoveSessionCost removes a completed session's cost tracking entry.
+func (b *Budget) RemoveSessionCost(_ context.Context, sessionID string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.sessionCosts, sessionID)
 }
 
 // CleanupStaleEntries removes task and session entries that haven't been
@@ -562,8 +621,10 @@ type Status struct {
 	DailyRemaining         int     `json:"daily_remaining"`
 	PerTaskBudget          int     `json:"per_task_budget"`
 	PerTaskUsed            int     `json:"per_task_used"`
+	PerTaskCost            float64 `json:"per_task_cost"`
 	PerSessionBudget       int     `json:"per_session_budget"`
 	PerSessionUsed         int     `json:"per_session_used"`
+	PerSessionCost         float64 `json:"per_session_cost"`
 	RPMCurrent             int     `json:"rpm_current"`
 	RPMLimit               int     `json:"rpm_limit"`
 	Aggressiveness         float64 `json:"aggressiveness"`
@@ -596,12 +657,20 @@ func (b *Budget) GetStatus() Status {
 
 	// Aggregate task/session usage
 	totalTaskUsed := 0
+	totalTaskCost := 0.0
 	for _, v := range b.tasks {
 		totalTaskUsed += v
 	}
+	for _, cost := range b.taskCosts {
+		totalTaskCost += cost
+	}
 	totalSessionUsed := 0
+	totalSessionCost := 0.0
 	for _, v := range b.sessions {
 		totalSessionUsed += v
+	}
+	for _, cost := range b.sessionCosts {
+		totalSessionCost += cost
 	}
 
 	// Check if any specific task or session has exhausted its cap
@@ -643,8 +712,10 @@ func (b *Budget) GetStatus() Status {
 		DailyRemaining:         dailyRemaining,
 		PerTaskBudget:          b.perTaskBudget,
 		PerTaskUsed:            totalTaskUsed,
+		PerTaskCost:            totalTaskCost,
 		PerSessionBudget:       b.perSessionBudget,
 		PerSessionUsed:         totalSessionUsed,
+		PerSessionCost:         totalSessionCost,
 		RPMCurrent:             len(b.requestTimestamps),
 		RPMLimit:               b.rateLimitRPM,
 		Aggressiveness:         b.aggressiveness,
@@ -710,12 +781,14 @@ func (b *Budget) WaitForRateLimit(ctx context.Context) error {
 type BudgetLimit string
 
 const (
-	BudgetLimitHourlyTokens BudgetLimit = "hourly_token"
-	BudgetLimitDailyTokens  BudgetLimit = "daily_token"
-	BudgetLimitHourlyCost   BudgetLimit = "hourly_cost"
-	BudgetLimitDailyCost    BudgetLimit = "daily_cost"
-	BudgetLimitPerTask      BudgetLimit = "per_task"
-	BudgetLimitPerSession   BudgetLimit = "per_session"
+	BudgetLimitHourlyTokens    BudgetLimit = "hourly_token"
+	BudgetLimitDailyTokens     BudgetLimit = "daily_token"
+	BudgetLimitHourlyCost      BudgetLimit = "hourly_cost"
+	BudgetLimitDailyCost       BudgetLimit = "daily_cost"
+	BudgetLimitPerTask         BudgetLimit = "per_task"
+	BudgetLimitPerSession      BudgetLimit = "per_session"
+	BudgetLimitPerTaskCost     BudgetLimit = "per_task_cost"
+	BudgetLimitPerSessionCost  BudgetLimit = "per_session_cost"
 )
 
 // Message returns an internal log message for this budget limit reason.
@@ -733,6 +806,10 @@ func (r BudgetLimit) Message(used, limit float64) string {
 		return fmt.Sprintf("per-task token budget exceeded: %.0f / %.0f tokens", used, limit)
 	case BudgetLimitPerSession:
 		return fmt.Sprintf("per-session token budget exceeded: %.0f / %.0f tokens", used, limit)
+	case BudgetLimitPerTaskCost:
+		return fmt.Sprintf("per-task cost budget exceeded: $%.4f / $%.4f", used, limit)
+	case BudgetLimitPerSessionCost:
+		return fmt.Sprintf("per-session cost budget exceeded: $%.4f / $%.4f", used, limit)
 	default:
 		return "budget limit exceeded"
 	}
@@ -781,6 +858,10 @@ func (e *BudgetExceededError) UserMessage() string {
 		return fmt.Sprintf("meept per-task token budget reached: %.0f / %.0f tokens used (config: llm.budget.per_task_token_limit)", e.Used, e.Limit)
 	case BudgetLimitPerSession:
 		return fmt.Sprintf("meept per-session token budget reached: %.0f / %.0f tokens used (config: llm.budget.per_session_token_limit)", e.Used, e.Limit)
+	case BudgetLimitPerTaskCost:
+		return fmt.Sprintf("meept per-task cost budget reached: $%.4f / $%.4f used (config: llm.budget.per_task_cost_limit)", e.Used, e.Limit)
+	case BudgetLimitPerSessionCost:
+		return fmt.Sprintf("meept per-session cost budget reached: $%.4f / $%.4f used (config: llm.budget.per_session_cost_limit)", e.Used, e.Limit)
 	default:
 		if e.Used > 0 || e.Limit > 0 {
 			return fmt.Sprintf("meept budget limit reached: %.0f / %.0f", e.Used, e.Limit)
