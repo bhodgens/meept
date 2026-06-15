@@ -76,6 +76,10 @@ type PersistentQueue struct {
 	bus             *bus.MessageBus
 	logger          *slog.Logger
 	isTaskCancelled IsTaskCancelledFunc
+	// hasCancelFilter is true when SetTaskCancelledCallback has installed a
+	// real (non-default) callback. When false, Claim can take the fast
+	// atomic path via store.ClaimNextForAgent without listing pending jobs.
+	hasCancelFilter bool
 
 	mu     sync.RWMutex
 	closed bool
@@ -97,6 +101,7 @@ func NewPersistentQueue(dbPath string, msgBus *bus.MessageBus, logger *slog.Logg
 		bus:             msgBus,
 		logger:          logger,
 		isTaskCancelled: func(taskID string) (bool, string) { return false, "" }, // Default: no tasks cancelled
+		hasCancelFilter: false,
 	}
 
 	logger.Info("Persistent queue initialized", "path", dbPath)
@@ -107,7 +112,13 @@ func NewPersistentQueue(dbPath string, msgBus *bus.MessageBus, logger *slog.Logg
 func (q *PersistentQueue) SetTaskCancelledCallback(fn IsTaskCancelledFunc) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if fn == nil {
+		q.isTaskCancelled = func(taskID string) (bool, string) { return false, "" }
+		q.hasCancelFilter = false
+		return
+	}
 	q.isTaskCancelled = fn
+	q.hasCancelFilter = true
 }
 
 // Store returns the underlying store for cluster-aware operations.
@@ -146,6 +157,16 @@ func (q *PersistentQueue) Enqueue(ctx context.Context, job *Job) error {
 
 // Claim claims the next available job for a worker.
 // Skips jobs belonging to cancelled tasks.
+//
+// Fast path: when no real cancellation filter is installed (the common
+// case), Claim delegates to store.ClaimNextForAgent which performs the
+// SELECT + UPDATE atomically inside a single transaction. This eliminates
+// the list-then-claim race where two workers could both see the same
+// pending job.
+//
+// Slow path: when SetTaskCancelledCallback has installed a real callback,
+// we fall back to the list-then-skip-then-claim flow so cancelled-task
+// jobs can be bypassed before claiming.
 func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []string) (*Job, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -154,7 +175,24 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 		return nil, fmt.Errorf("queue is closed")
 	}
 
-	// List pending jobs and find first non-cancelled one
+	// Fast path: no cancellation filter installed.
+	if !q.hasCancelFilter {
+		claimedJob, err := q.store.ClaimNextForAgent(workerID, caps, "")
+		if err != nil {
+			return nil, err
+		}
+		if claimedJob != nil {
+			q.publishEvent("queue.job.claimed", map[string]any{
+				KeyJobID:    claimedJob.ID,
+				"worker_id": workerID,
+			})
+		}
+		return claimedJob, nil
+	}
+
+	// Slow path: list pending jobs and skip cancelled-task ones.
+	cancelFn := q.isTaskCancelled
+
 	pendingJobs, err := q.store.ListByState(StatePending, 50)
 	if err != nil {
 		return nil, err
@@ -165,7 +203,7 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 	for _, job := range pendingJobs {
 		// Skip cancelled tasks
 		if job.TaskID != "" {
-			if cancelled, _ := q.isTaskCancelled(job.TaskID); cancelled {
+			if cancelled, _ := cancelFn(job.TaskID); cancelled {
 				q.logger.Debug("Skipping job from cancelled task", KeyJobID, job.ID, "task_id", job.TaskID)
 				continue
 			}

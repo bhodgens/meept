@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -411,5 +413,88 @@ func TestPersistentQueue_ClaimNoTaskID(t *testing.T) {
 	}
 	if claimed.ID != job.ID {
 		t.Errorf("expected job %q, got %q", job.ID, claimed.ID)
+	}
+}
+
+// TestPersistentQueue_ClaimThroughputUnderContention enqueues N jobs and then
+// has M workers claim them concurrently. The test verifies:
+//   - Every claim returns a distinct job (no double-claims).
+//   - The total number of claimed jobs equals the number enqueued.
+//   - No errors occur during contention.
+//
+// This exercises the fast-path atomic Claim via store.ClaimNextForAgent
+// and serves as a throughput stress test under the -race detector.
+func TestPersistentQueue_ClaimThroughputUnderContention(t *testing.T) {
+	q := newTestQueue(t)
+	ctx := context.Background()
+
+	const numJobs = 50
+	const numWorkers = 8
+
+	// Enqueue N jobs.
+	enqueuedIDs := make(map[string]struct{}, numJobs)
+	for i := 0; i < numJobs; i++ {
+		job, err := NewJob(JobTypeOneOff, map[string]string{
+			"prompt": "throughput-test",
+			"idx":    string(rune('a' + i%26)),
+		})
+		if err != nil {
+			t.Fatalf("NewJob %d failed: %v", i, err)
+		}
+		if err := q.Enqueue(ctx, job); err != nil {
+			t.Fatalf("Enqueue %d failed: %v", i, err)
+		}
+		enqueuedIDs[job.ID] = struct{}{}
+	}
+
+	// Workers claim concurrently.
+	var (
+		wg         sync.WaitGroup
+		claimed    int32
+		errCount   int32
+		seenIDsMu  sync.Mutex
+		seenIDs    = make(map[string]int, numJobs)
+	)
+	start := make(chan struct{})
+	wg.Add(numWorkers)
+
+	for w := 0; w < numWorkers; w++ {
+		go func(workerID int) {
+			defer wg.Done()
+			<-start
+			for {
+				job, err := q.Claim(ctx, "worker-test", nil)
+				if err != nil {
+					if !errors.Is(err, ErrNoJobAvailable) {
+						atomic.AddInt32(&errCount, 1)
+					}
+					return
+				}
+				if job == nil {
+					return
+				}
+				atomic.AddInt32(&claimed, 1)
+				seenIDsMu.Lock()
+				seenIDs[job.ID]++
+				seenIDsMu.Unlock()
+			}
+		}(w)
+	}
+	close(start)
+	wg.Wait()
+
+	if errCount > 0 {
+		t.Errorf("expected zero errors during contention, got %d", errCount)
+	}
+
+	// Every enqueued job should have been claimed exactly once.
+	if int(claimed) != numJobs {
+		t.Errorf("expected %d claims, got %d", numJobs, claimed)
+	}
+	for id := range enqueuedIDs {
+		count := seenIDs[id]
+		if count != 1 {
+			t.Errorf("job %q: expected exactly 1 claim, got %d (double-claim race)", id, count)
+		}
 	}
 }
