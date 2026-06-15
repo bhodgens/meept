@@ -441,6 +441,10 @@ func (s *Server) registerBuiltinHandlers() {
 			result["budget_used"] = dcu
 			result["budget_remaining"] = max(dcl-dcu, 0)
 			result["within_cost_budget"] = dcu < dcl && hcu < hcl
+			result["per_task_cost"] = ptc
+			result["per_session_cost"] = psc
+			result["per_task_budget"] = ptb
+			result["per_session_budget"] = psb
 		}
 
 		return result, nil

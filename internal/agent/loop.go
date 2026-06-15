@@ -2477,6 +2477,12 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	l.currentTaskID = t.ID
 	l.currentSessionID = conversationID
 	defer func() {
+		// Cleanup budget tracking entries for completed task
+		if l.llmClient != nil && l.llmClient.Budget() != nil {
+			budget := l.llmClient.Budget()
+			budget.RemoveTaskCost(context.Background(), l.currentTaskID)
+			budget.RemoveSessionCost(context.Background(), l.currentSessionID)
+		}
 		l.currentTaskID = ""
 		l.currentSessionID = ""
 	}()

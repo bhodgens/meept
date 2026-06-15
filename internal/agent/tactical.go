@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -18,6 +19,9 @@ import (
 	"github.com/caimlas/meept/internal/validator"
 	"github.com/caimlas/meept/pkg/models"
 )
+
+// ErrNoExecutionSlot is returned when the semaphore blocks a step from executing.
+var ErrNoExecutionSlot = errors.New("no available execution slot")
 
 // StepJobPayload is the payload stored in a queue job for a task step.
 type StepJobPayload struct {
@@ -175,7 +179,7 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 
 		if err := ts.scheduleStep(ctx, step); err != nil {
 			// Check if this was a semaphore block (expected, not an error)
-			if strings.Contains(err.Error(), "no available execution slot") {
+			if errors.Is(err, ErrNoExecutionSlot) {
 				semaphoreBlockedCount++
 				ts.logger.Debug("Step blocked due to execution limit",
 					"step_id", step.ID,
@@ -271,7 +275,7 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 
 	// Acquire semaphore slots (non-blocking)
 	if !ts.acquireSlots(agentID) {
-		return fmt.Errorf("no available execution slot for agent %s", agentID)
+		return fmt.Errorf("%w: for agent %s", ErrNoExecutionSlot, agentID)
 	}
 
 	// Create job payload with step context
