@@ -1254,8 +1254,10 @@ func (h *ChatHandler) startCollaborationSession(ctx context.Context, result *Dis
 	}
 
 	// Run the session asynchronously so the chat handler returns immediately.
+	h.wg.Add(1)
 	go func() {
-		runCtx, cancel := context.WithTimeout(context.Background(), cfg.TimeBudget)
+		defer h.wg.Done()
+		runCtx, cancel := context.WithTimeout(ctx, cfg.TimeBudget)
 		defer cancel()
 
 		collabResult, runErr := h.collabEngine.RunSession(runCtx, sess.ID)
