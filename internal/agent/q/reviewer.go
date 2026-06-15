@@ -93,7 +93,10 @@ func (v *ReviewerValidator) ValidateRecommendations(ctx context.Context, recs []
 	results := make([]*ValidationResult, 0, len(recs))
 
 	for i, rec := range recs {
-		report := reports[i]
+		var report *ResearchReport
+		if i < len(reports) {
+			report = reports[i]
+		}
 		if report == nil {
 			results = append(results, &ValidationResult{
 				Status:   agent.ReviewRejected,

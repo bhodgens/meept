@@ -27,7 +27,7 @@ class APIClient {
         config.tlsMinimumSupportedProtocolVersion = .TLSv12
         self.session = URLSession(
             configuration: config,
-            delegate: LocalhostTrustDelegate(),
+            delegate: LocalhostTrustDelegate.shared,
             delegateQueue: nil
         )
     }
@@ -140,7 +140,9 @@ class APIClient {
 
 // MARK: - URLSessionDelegate for self-signed localhost certs
 
-class LocalhostTrustDelegate: NSObject, URLSessionDelegate {
+class LocalhostTrustDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {
+    static let shared = LocalhostTrustDelegate()
+
     func urlSession(
         _ session: URLSession,
         didReceive challenge: URLAuthenticationChallenge,

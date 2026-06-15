@@ -3,6 +3,7 @@ package builtin
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/scheduler"
@@ -65,10 +66,11 @@ func (t *ScheduleDeleteTool) Execute(ctx context.Context, args map[string]any) (
 
 	err := t.sched.Unschedule(jobID)
 	if err != nil {
+		slog.Error("failed to delete scheduled job", "error", err, "job_id", jobID)
 		return ScheduleDeleteResult{
 			Success: false,
 			JobID:   jobID,
-			Error:   err.Error(),
+			Error:   "failed to delete scheduled job",
 		}, nil
 	}
 
@@ -134,11 +136,12 @@ func (t *SchedulePauseTool) Execute(ctx context.Context, args map[string]any) (a
 
 	err := t.sched.PauseJob(jobID)
 	if err != nil {
+		slog.Error("failed to pause scheduled job", "error", err, "job_id", jobID)
 		return SchedulePauseResult{
 			Success: false,
 			JobID:   jobID,
-			Error:   err.Error(),
-		}, err
+			Error:   "failed to pause scheduled job",
+		}, nil
 	}
 
 	return SchedulePauseResult{
@@ -203,11 +206,12 @@ func (t *ScheduleResumeTool) Execute(ctx context.Context, args map[string]any) (
 
 	err := t.sched.ResumeJob(jobID)
 	if err != nil {
+		slog.Error("failed to resume scheduled job", "error", err, "job_id", jobID)
 		return ScheduleResumeResult{
 			Success: false,
 			JobID:   jobID,
-			Error:   err.Error(),
-		}, err
+			Error:   "failed to resume scheduled job",
+		}, nil
 	}
 
 	return ScheduleResumeResult{
@@ -272,11 +276,12 @@ func (t *ScheduleRunNowTool) Execute(ctx context.Context, args map[string]any) (
 
 	err := t.sched.RunNow(jobID)
 	if err != nil {
+		slog.Error("failed to trigger scheduled job", "error", err, "job_id", jobID)
 		return ScheduleRunNowResult{
 			Success: false,
 			JobID:   jobID,
-			Error:   err.Error(),
-		}, err
+			Error:   "failed to trigger scheduled job",
+		}, nil
 	}
 
 	return ScheduleRunNowResult{

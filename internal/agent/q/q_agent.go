@@ -164,12 +164,17 @@ func (q *QAgent) RunAnalysis(ctx context.Context) (*AnalysisResult, error) {
 	// Validate recommendations through reviewer
 	ctxReviewer, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	initialRecs := make([]Recommendation, 0)
+	initialReports := make([]*ResearchReport, 0)
 	for _, rr := range researchReports {
-		if rr != nil {
-			initialRecs = append(initialRecs, rr.Recommendations...)
+		if rr == nil {
+			continue
+		}
+		for _, rec := range rr.Recommendations {
+			initialRecs = append(initialRecs, rec)
+			initialReports = append(initialReports, rr)
 		}
 	}
-	validationResults, err := q.reviewer.ValidateRecommendations(ctxReviewer, initialRecs, researchReports)
+	validationResults, err := q.reviewer.ValidateRecommendations(ctxReviewer, initialRecs, initialReports)
 	cancel()
 	if err != nil {
 		q.logger.Warn("recommendation validation failed", "error", err)

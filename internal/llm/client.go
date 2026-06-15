@@ -34,6 +34,7 @@ var retryableStatusCodes = map[int]bool{
 	502: true, // Bad Gateway
 	503: true, // Service Unavailable
 	504: true, // Gateway Timeout
+	529: true, // Overloaded (Anthropic-specific)
 }
 
 // Error types

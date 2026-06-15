@@ -606,7 +606,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  agent.name,
+                  agent.name.toLowerCase(),
                   style: CyberpunkTypography.bodySmall.copyWith(
                     fontFamily: 'SourceCodePro',
                     color: agent.id == selectedAgentId
@@ -636,7 +636,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
             ),
             const SizedBox(width: 6),
             Text(
-              activeAgent?.name ?? _selectedAgent,
+              (activeAgent?.name ?? _selectedAgent).toLowerCase(),
               style: CyberpunkTypography.label.copyWith(
                 fontSize: 10,
                 color: CyberpunkColors.orangePrimary,

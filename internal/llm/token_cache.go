@@ -151,38 +151,49 @@ func NewTokenCacheCoordinatorWithMetrics(config CacheConfig, metricsStore *metri
 
 // Get retrieves a cached response, checking L1 first, then L2.
 func (c *TokenCacheCoordinator) Get(ctx context.Context, key CacheKey) (*CacheEntry, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if !c.config.Enabled {
+		c.mu.Lock()
 		c.stats.Misses++
+		c.mu.Unlock()
 		c.recordMetric("cache.miss", 1, key)
 		return nil, false
 	}
 
-	// Check L1 first
+	// L1 fast path under RLock.
+	c.mu.RLock()
 	if entry, found := c.l1Cache.Get(key); found {
 		c.stats.Hits++
 		c.stats.L1Hits++
+		c.mu.RUnlock()
 		c.recordMetric("cache.hit", 1, key)
 		return entry, true
 	}
+	l2 := c.l2Cache
+	c.mu.RUnlock()
 
-	// Check L2 if enabled (may promote to L1)
-	if c.l2Cache != nil {
-		if entry, found := c.l2Cache.Get(ctx, key); found {
-			// Promote to L1
-			c.l1Cache.Put(key, entry)
+	// L2 lookup outside the lock (may hit SQLite I/O).
+	if l2 != nil {
+		if entry, found := l2.Get(ctx, key); found {
+			// Promote to L1 under write lock; re-check L1 to avoid duplicate work.
+			c.mu.Lock()
+			if _, already := c.l1Cache.Get(key); !already {
+				c.l1Cache.Put(key, entry)
+			}
 			c.stats.Hits++
 			c.stats.L2Hits++
+			c.mu.Unlock()
 			c.recordMetric("cache.hit", 1, key)
 			return entry, true
 		}
+		c.mu.Lock()
 		c.stats.L2Misses++
+		c.mu.Unlock()
 	}
 
+	c.mu.Lock()
 	c.stats.L1Misses++
 	c.stats.Misses++
+	c.mu.Unlock()
 	c.recordMetric("cache.miss", 1, key)
 	return nil, false
 }

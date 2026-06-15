@@ -19,7 +19,8 @@ struct SettingsWindow: View {
                     set: { configViewModel.clientConfig = $0 }
                 ),
                 isSaving: configViewModel.isSaving,
-                onSave: { content in configViewModel.saveClientConfig(content: content) }
+                onSave: { content in configViewModel.saveClientConfig(content: content) },
+                onAppear: { configViewModel.loadClientConfig() }
             )
             .tabItem {
                 Label("client", systemImage: "gearshape")

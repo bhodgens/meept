@@ -121,7 +121,14 @@ func (pc *PermissionChecker) expandPath(path string) string {
 		path = pc.homeDir + path[1:]
 	}
 	// Clean the path
-	return filepath.Clean(path)
+	cleaned := filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
+		return resolved
+	}
+	if resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(cleaned)); err == nil {
+		return filepath.Join(resolvedParent, filepath.Base(cleaned))
+	}
+	return cleaned
 }
 
 // CheckPath returns true if the path is allowed.

@@ -11,6 +11,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -2186,9 +2187,14 @@ func (s *Server) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create session for this client
+	// Create session for this client with a random, unpredictable ID
+	var sidBytes [16]byte
+	if _, err := rand.Read(sidBytes[:]); err != nil {
+		s.writeError(w, http.StatusInternalServerError, "failed to generate session ID")
+		return
+	}
 	session := &MCPSession{
-		sessionID: fmt.Sprintf("http-%d", time.Now().UnixNano()),
+		sessionID: "mcp-" + hex.EncodeToString(sidBytes[:]),
 		eventChan: make(chan *SSEEvent, 100),
 		done:      make(chan struct{}),
 	}

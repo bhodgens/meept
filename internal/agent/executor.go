@@ -352,6 +352,7 @@ func (r *ExecutionResult) ToChatMessage() llm.ChatMessage {
 
 // Executor handles tool execution with security checks.
 type Executor struct {
+	mu          sync.RWMutex
 	registry    ToolRegistry
 	security    *security.PermissionChecker
 	logger      *slog.Logger
@@ -425,7 +426,12 @@ func NewExecutor(registry ToolRegistry, permChecker *security.PermissionChecker,
 // This is used when the registry needs to be swapped (e.g., for skill execution
 // with filtered tools). AGENT-6 fix.
 func (e *Executor) SetRegistry(registry ToolRegistry) {
+	if registry == nil {
+		return
+	}
+	e.mu.Lock()
 	e.registry = registry
+	e.mu.Unlock()
 }
 
 // Execute runs a single tool call with security checks.
@@ -471,7 +477,10 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	}
 
 	// Look up tool
-	if e.registry == nil {
+	e.mu.RLock()
+	registry := e.registry
+	e.mu.RUnlock()
+	if registry == nil {
 		return &ExecutionResult{
 			ToolCallID: toolCall.ID,
 			Success:    false,
@@ -479,7 +488,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 		}
 	}
 
-	tool := e.registry.Get(toolName)
+	tool := registry.Get(toolName)
 	if tool == nil {
 		e.logger.Warn("Unknown tool requested", "tool", toolName)
 		return &ExecutionResult{

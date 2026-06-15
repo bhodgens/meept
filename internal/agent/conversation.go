@@ -1632,15 +1632,29 @@ func (s *ConversationStore) SetPersistence(fn PersistenceFunc) {
 // Otherwise, restoreFn is called to load messages from the backing store.
 // On restore failure, an empty conversation is created and the error is returned.
 func (s *ConversationStore) GetOrRestore(id string, restoreFn func() ([]llm.ChatMessage, error)) (*Conversation, error) {
+	// Fast path: check cache under RLock.
+	s.mu.RLock()
+	if conv, ok := s.conversations[id]; ok {
+		s.mu.RUnlock()
+		s.mu.Lock()
+		s.moveToEnd(id)
+		s.mu.Unlock()
+		return conv, nil
+	}
+	s.mu.RUnlock()
+
+	// Slow path: perform I/O outside the lock.
+	messages, err := restoreFn()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Double-check: another goroutine may have restored the same ID.
 	if conv, ok := s.conversations[id]; ok {
 		s.moveToEnd(id)
 		return conv, nil
 	}
 
-	messages, err := restoreFn()
 	if err != nil {
 		conv := NewConversation()
 		s.conversations[id] = conv
@@ -1661,11 +1675,21 @@ func (s *ConversationStore) GetOrRestore(id string, restoreFn func() ([]llm.Chat
 
 // Get retrieves a conversation by ID, creating a new one if it doesn't exist.
 func (s *ConversationStore) Get(id string) *Conversation {
+	s.mu.RLock()
+	if conv, ok := s.conversations[id]; ok {
+		s.mu.RUnlock()
+		s.mu.Lock()
+		s.moveToEnd(id)
+		s.mu.Unlock()
+		return conv
+	}
+	s.mu.RUnlock()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Double-check after acquiring write lock.
 	if conv, ok := s.conversations[id]; ok {
-		// Move to end (most recently used)
 		s.moveToEnd(id)
 		return conv
 	}

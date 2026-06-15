@@ -18,12 +18,13 @@ import (
 
 // ContextRenderer renders code structure with surrounding context for LLM consumption.
 type ContextRenderer struct {
-	maxLineLength int    // Default: 100
-	contextLines  int    // Lines of context around each symbol
-	treeCache     map[string]string
-	mu            sync.RWMutex // protects treeCache
-	logger        *slog.Logger
-	parser        *ast.ParserManager
+	maxLineLength  int    // Default: 100
+	maxTagsPerFile int    // Default: 20
+	contextLines   int    // Lines of context around each symbol
+	treeCache      map[string]string
+	mu             sync.RWMutex // protects treeCache
+	logger         *slog.Logger
+	parser         *ast.ParserManager
 }
 
 // RendererConfig holds rendering configuration options.
@@ -70,17 +71,24 @@ func NewContextRenderer(config RendererConfig, logger *slog.Logger) *ContextRend
 	}
 
 	return &ContextRenderer{
-		maxLineLength: config.MaxLineLength,
-		contextLines:  config.ContextLines,
-		treeCache:     make(map[string]string),
-		logger:        logger,
-		parser:        ast.NewParserManager(ast.DefaultParserConfig()),
+		maxLineLength:  config.MaxLineLength,
+		maxTagsPerFile: config.MaxTagsPerFile,
+		contextLines:   config.ContextLines,
+		treeCache:      make(map[string]string),
+		logger:         logger,
+		parser:         ast.NewParserManager(ast.DefaultParserConfig()),
 	}
 }
 
 // Render creates the tree view for ranked tags.
 // This is the main entry point that converts ranked tags into rendered output.
 func (r *ContextRenderer) Render(ranked RankedTags) RenderedMap {
+	return r.renderWithContextLines(ranked, r.contextLines)
+}
+
+// renderWithContextLines is the shared renderer that uses the provided
+// contextLines override instead of mutating r.contextLines.
+func (r *ContextRenderer) renderWithContextLines(ranked RankedTags, contextLines int) RenderedMap {
 	if len(ranked) == 0 {
 		return RenderedMap{Content: "", Tokens: 0}
 	}
@@ -103,13 +111,13 @@ func (r *ContextRenderer) Render(ranked RankedTags) RenderedMap {
 		lines = append(lines, fmt.Sprintf("%s:", file))
 
 		// Limit tags per file
-		if len(tags) > r.maxLineLength { // Using maxLineLength as a proxy for MaxTagsPerFile
-			tags = tags[:r.maxLineLength]
+		if len(tags) > r.maxTagsPerFile {
+			tags = tags[:r.maxTagsPerFile]
 		}
 
 		// Render each symbol with context
 		for _, tag := range tags {
-			symbolLine := r.renderSymbol(tag)
+			symbolLine := r.renderSymbolWithContext(tag, contextLines)
 			lines = append(lines, symbolLine)
 		}
 	}
@@ -152,10 +160,16 @@ func (r *ContextRenderer) sortFilesByRelevance(byFile map[string]RankedTags) []s
 
 // renderSymbol renders a single symbol with its context.
 func (r *ContextRenderer) renderSymbol(tag RankedTag) string {
+	return r.renderSymbolWithContext(tag, r.contextLines)
+}
+
+// renderSymbolWithContext renders a single symbol using the provided context
+// lines override instead of reading r.contextLines.
+func (r *ContextRenderer) renderSymbolWithContext(tag RankedTag, contextLines int) string {
 	kindIndicator := getKindIndicator(tag.Kind)
 
 	// Get source context around this symbol if available
-	sourceContext := r.getSourceContext(tag)
+	sourceContext := r.getSourceContextWithContext(tag, contextLines)
 
 	if sourceContext != "" {
 		// Format: "    fn symbol_name (line N) { context }"
@@ -169,6 +183,12 @@ func (r *ContextRenderer) renderSymbol(tag RankedTag) string {
 
 // getSourceContext reads the source file and extracts context around the symbol.
 func (r *ContextRenderer) getSourceContext(tag RankedTag) string {
+	return r.getSourceContextWithContext(tag, r.contextLines)
+}
+
+// getSourceContextWithContext reads the source file and extracts context around
+// the symbol using the provided context lines override.
+func (r *ContextRenderer) getSourceContextWithContext(tag RankedTag, contextLines int) string {
 	// Use FName if available, otherwise we can't read the file
 	if tag.FName == "" {
 		return ""
@@ -195,8 +215,8 @@ func (r *ContextRenderer) getSourceContext(tag RankedTag) string {
 	}
 
 	// Get context lines around the symbol
-	startLine := tag.Line - r.contextLines
-	endLine := tag.Line + r.contextLines + 1
+	startLine := tag.Line - contextLines
+	endLine := tag.Line + contextLines + 1
 
 	if startLine < 0 {
 		startLine = 0
@@ -206,18 +226,18 @@ func (r *ContextRenderer) getSourceContext(tag RankedTag) string {
 	}
 
 	// Extract the relevant lines
-	var contextLines []string
+	var extracted []string
 	for i := startLine; i < endLine; i++ {
 		line := lines[i]
 		// Indicate which line has the definition
 		if i == tag.Line {
-			contextLines = append(contextLines, "> "+line)
+			extracted = append(extracted, "> "+line)
 		} else {
-			contextLines = append(contextLines, "  "+line)
+			extracted = append(extracted, "  "+line)
 		}
 	}
 
-	result := strings.Join(contextLines, "\n")
+	result := strings.Join(extracted, "\n")
 
 	// Cache the result
 	r.mu.Lock()
@@ -274,16 +294,7 @@ func truncateLine(line string, maxLen int) string {
 
 // RenderCompact renders ranked tags in a more compact format (less context).
 func (r *ContextRenderer) RenderCompact(ranked RankedTags) RenderedMap {
-	if len(ranked) == 0 {
-		return RenderedMap{Content: "", Tokens: 0}
-	}
-
-	// Save original context lines and set to minimal
-	origContextLines := r.contextLines
-	r.contextLines = 0
-	defer func() { r.contextLines = origContextLines }()
-
-	return r.Render(ranked)
+	return r.renderWithContextLines(ranked, 0)
 }
 
 // RenderWithFullPath renders ranked tags using full file paths.

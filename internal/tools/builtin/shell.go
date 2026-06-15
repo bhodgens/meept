@@ -369,6 +369,13 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 		workDir = resolved
 	}
 
+	// Check fence boundaries
+	if t.fenceChecker != nil {
+		if err := t.fenceChecker.CheckCommand(command, workDir); err != nil {
+			return nil, fmt.Errorf("fence: %w", err)
+		}
+	}
+
 	// Check command risk level
 	risk := t.classifyRisk(command)
 	if risk == RiskCritical {

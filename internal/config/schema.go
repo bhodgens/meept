@@ -1422,7 +1422,7 @@ func DefaultConfig() *Config {
 			CleanupCompleted: false,
 		},
 		Skills: SkillsConfig{
-			Enabled:                false,
+			Enabled:                true,
 			SearchPaths:            []string{},
 			AutoReload:             false,
 			CacheSize:              50,

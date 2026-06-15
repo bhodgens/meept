@@ -10,6 +10,7 @@ struct ClientConfigView: View {
     @State private var showValidationSuccess = false
     let isSaving: Bool
     let onSave: (String) -> Void
+    var onAppear: (() -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,6 +47,9 @@ struct ClientConfigView: View {
                 .foregroundColor(.secondary)
         }
         .padding(8)
+        .onAppear {
+            onAppear?()
+        }
     }
 
     private func saveSettings() {

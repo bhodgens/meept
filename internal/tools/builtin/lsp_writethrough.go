@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -71,8 +72,8 @@ type lspWriteNotifier struct {
 
 	// diagMu protects diagWaiters and diagOnce.
 	diagMu       sync.Mutex
-	diagWaiters  map[string]chan []lsp.Diagnostic // keyed by URI
-	diagRegOnce  map[*lsp.Client]*sync.Once       // per-client registration guard
+	diagWaiters  map[string][]chan []lsp.Diagnostic // keyed by URI
+	diagRegOnce  map[*lsp.Client]*sync.Once         // per-client registration guard
 }
 
 // NewLSPWriteNotifier creates a new LSP write notifier.
@@ -93,7 +94,7 @@ func NewLSPWriteNotifier(manager *lsp.Manager, cfg config.LSPConfig, logger *slo
 		diagnosticsOnWrite: cfg.DiagnosticsOnWrite,
 		diagnosticsTimeout: timeout,
 		logger:             logger,
-		diagWaiters:        make(map[string]chan []lsp.Diagnostic),
+		diagWaiters:        make(map[string][]chan []lsp.Diagnostic),
 		diagRegOnce:        make(map[*lsp.Client]*sync.Once),
 	}
 }
@@ -216,9 +217,9 @@ func (n *lspWriteNotifier) collectDiagnostics(ctx context.Context, srv *lsp.Serv
 				return
 			}
 			n.diagMu.Lock()
-			ch, waiting := n.diagWaiters[diagParams.URI]
+			chans := n.diagWaiters[diagParams.URI]
 			n.diagMu.Unlock()
-			if waiting {
+			for _, ch := range chans {
 				select {
 				case ch <- diagParams.Diagnostics:
 				default:
@@ -231,11 +232,22 @@ func (n *lspWriteNotifier) collectDiagnostics(ctx context.Context, srv *lsp.Serv
 	// Subscribe for this URI.
 	diagChan := make(chan []lsp.Diagnostic, 1)
 	n.diagMu.Lock()
-	n.diagWaiters[uri] = diagChan
+	n.diagWaiters[uri] = append(n.diagWaiters[uri], diagChan)
 	n.diagMu.Unlock()
 	defer func() {
 		n.diagMu.Lock()
-		delete(n.diagWaiters, uri)
+		chans := n.diagWaiters[uri]
+		filtered := chans[:0]
+		for _, ch := range chans {
+			if ch != diagChan {
+				filtered = append(filtered, ch)
+			}
+		}
+		if len(filtered) > 0 {
+			n.diagWaiters[uri] = filtered
+		} else {
+			delete(n.diagWaiters, uri)
+		}
 		n.diagMu.Unlock()
 	}()
 
@@ -291,9 +303,18 @@ func applyFormattingEdits(filePath string, edits []lsp.TextEdit) error {
 
 	lines := strings.Split(string(content), "\n")
 
-	// Apply edits in reverse order to preserve positions
-	for i := len(edits) - 1; i >= 0; i-- {
-		edit := edits[i]
+	// Sort edits by descending start position so earlier edits don't shift
+	// later offsets. LSP spec doesn't guarantee pre-sorted/non-overlapping.
+	sorted := make([]lsp.TextEdit, len(edits))
+	copy(sorted, edits)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Range.Start.Line != sorted[j].Range.Start.Line {
+			return sorted[i].Range.Start.Line > sorted[j].Range.Start.Line
+		}
+		return sorted[i].Range.Start.Character > sorted[j].Range.Start.Character
+	})
+
+	for _, edit := range sorted {
 		startLine := edit.Range.Start.Line
 		startChar := edit.Range.Start.Character
 		endLine := edit.Range.End.Line

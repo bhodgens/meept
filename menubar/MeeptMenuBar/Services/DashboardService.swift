@@ -13,7 +13,7 @@ class DashboardService {
         config.tlsMinimumSupportedProtocolVersion = .TLSv12
         return URLSession(
             configuration: config,
-            delegate: LocalhostTrustDelegate(),
+            delegate: LocalhostTrustDelegate.shared,
             delegateQueue: nil
         )
     }()

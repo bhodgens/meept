@@ -99,7 +99,7 @@ class _AgentActivityPanelState extends ConsumerState<AgentActivityPanel> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      agent.id,
+                      agent.id.toLowerCase(),
                       style: CyberpunkTypography.bodySmall.copyWith(
                         color: CyberpunkColors.midGray,
                         fontSize: 10,

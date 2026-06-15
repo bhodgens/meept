@@ -14,6 +14,7 @@ class MetricsViewModel: ObservableObject {
     @Published var isLoadingLive = false
     @Published var isLoadingHistorical = false
     @Published var lastUpdated: Date?
+    @Published var errorMessage: String?
 
     // Historical query state
     @Published var fromDate = Date().addingTimeInterval(-3600 * 24)
@@ -60,8 +61,9 @@ class MetricsViewModel: ObservableObject {
             do {
                 liveMetrics = try await dashboardService.getLiveMetrics()
                 lastUpdated = Date()
+                errorMessage = nil
             } catch {
-                // Silently ignore metric fetch errors; next poll will retry
+                errorMessage = error.localizedDescription
             }
             isLoadingLive = false
         }
@@ -80,8 +82,10 @@ class MetricsViewModel: ObservableObject {
                 historicalData = try await dashboardService.getHistoricalMetrics(
                     from: fromISO, to: toISO, resolution: resolution
                 )
+                errorMessage = nil
             } catch {
                 logger.error("failed to fetch historical metrics: \(error.localizedDescription)")
+                errorMessage = error.localizedDescription
             }
             isLoadingHistorical = false
         }

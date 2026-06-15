@@ -56,19 +56,27 @@ func NewWebFetchTool(timeout time.Duration, maxLength int) *WebFetchTool {
 		maxLength = DefaultMaxOutputLength
 	}
 
-	return &WebFetchTool{
+	t := &WebFetchTool{
 		timeout:   timeout,
 		maxLength: maxLength,
-		client: &http.Client{
-			Timeout: timeout,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				if len(via) >= 5 {
-					return fmt.Errorf("too many redirects")
-				}
-				return nil
-			},
-		},
 	}
+	t.client = &http.Client{
+		Timeout:       timeout,
+		CheckRedirect: t.checkRedirect,
+	}
+	return t
+}
+
+func (t *WebFetchTool) checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 5 {
+		return fmt.Errorf("too many redirects")
+	}
+	if !t.allowPrivateRanges {
+		if err := checkURL(req.URL.String()); err != nil {
+			return fmt.Errorf("redirect blocked: %w", err)
+		}
+	}
+	return nil
 }
 
 func (t *WebFetchTool) Name() string { return "web_fetch" }

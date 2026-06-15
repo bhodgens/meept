@@ -20,7 +20,7 @@ class ConfigService {
         sessionConfig.tlsMinimumSupportedProtocolVersion = .TLSv12
         self.session = URLSession(
             configuration: sessionConfig,
-            delegate: LocalhostTrustDelegate(),
+            delegate: LocalhostTrustDelegate.shared,
             delegateQueue: nil
         )
     }

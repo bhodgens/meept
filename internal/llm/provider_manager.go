@@ -370,15 +370,48 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 
 		if err != nil {
 			lastErr = err
-			if progress != nil {
-				progress(ProgressStageDone, fmt.Sprintf("Provider %s failed: %v (%s)", entry.Config.ProviderID, err, latency.Round(time.Millisecond)))
+
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
 			}
-			continue
+
+			switch {
+			case IsRateLimitError(err):
+				if progress != nil {
+					progress(ProgressStageDone, fmt.Sprintf("Provider %s rate limited, rotating (%s)", entry.Config.ProviderID, latency.Round(time.Millisecond)))
+				}
+				continue
+
+			case isAuthError(err):
+				pm.recordFailure(entry, err, latency)
+				pm.mu.Lock()
+				entry.Health.Status = ProviderStatusUnhealthy
+				entry.Health.LastError = err.Error()
+				pm.mu.Unlock()
+				if progress != nil {
+					progress(ProgressStageDone, fmt.Sprintf("Provider %s auth error, marked unhealthy (%s)", entry.Config.ProviderID, latency.Round(time.Millisecond)))
+				}
+				continue
+
+			case isClientError(err):
+				if progress != nil {
+					progress(ProgressStageDone, fmt.Sprintf("Provider %s client error, not rotating (%s)", entry.Config.ProviderID, latency.Round(time.Millisecond)))
+				}
+				return nil, err
+
+			default:
+				pm.recordFailure(entry, err, latency)
+				if progress != nil {
+					progress(ProgressStageDone, fmt.Sprintf("Provider %s failed: %v (%s)", entry.Config.ProviderID, err, latency.Round(time.Millisecond)))
+				}
+				continue
+			}
 		}
 
 		if progress != nil {
 			progress(ProgressStageStreaming, fmt.Sprintf("Provider %s responded (%s)", entry.Config.ProviderID, latency.Round(time.Millisecond)))
 		}
+		pm.recordSuccess(entry, resp, latency)
 		return resp, nil
 	}
 

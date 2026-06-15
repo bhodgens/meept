@@ -234,7 +234,9 @@ func runClusterInit(cmd *cobra.Command, clusterName, nodeName, nodeID, gitRemote
 
 	// Attempt git remote setup if URL provided and git is available
 	if gitRemote != "" {
-		addGitRemote(gitRemote)
+		if err := addGitRemote(gitRemote); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: git remote setup failed: %v\n", err)
+		}
 	}
 
 	fmt.Println("Next steps:")
@@ -963,23 +965,34 @@ func x25519(privKey []byte) ([]byte, error) {
 // ---------------------------------------------------------------------------
 
 // addGitRemote configures a git remote in the cluster registry directory.
-func addGitRemote(remoteURL string) {
+// Returns an error if git operations fail (other than "already exists" cases).
+func addGitRemote(remoteURL string) error {
 	clusterRepoPath := filepath.Join(stateDir, stateDirCluster, "registry")
 	if err := os.MkdirAll(clusterRepoPath, 0755); err != nil {
-		return
+		return fmt.Errorf("failed to create registry directory: %w", err)
 	}
 
-	// Try git init
+	// Try git init (ok if already initialized)
 	initCmd := exec.Command("git", "-C", clusterRepoPath, "init", "-b", "cluster")
-	if _, err := initCmd.CombinedOutput(); err != nil {
-		// already initialized, ignore
+	if output, err := initCmd.CombinedOutput(); err != nil {
+		if !strings.Contains(string(output), "already exists") {
+			return fmt.Errorf("git init failed: %w\n%s", err, string(output))
+		}
 	}
 
 	// Add remote
 	addCmd := exec.Command("git", "-C", clusterRepoPath, "remote", "add", "cluster", remoteURL)
-	if _, err := addCmd.CombinedOutput(); err != nil {
-		// might already exist
+	if output, err := addCmd.CombinedOutput(); err != nil {
+		if !strings.Contains(string(output), "already exists") {
+			return fmt.Errorf("failed to add git remote: %w\n%s", err, string(output))
+		}
+		// Update if already exists
+		updateCmd := exec.Command("git", "-C", clusterRepoPath, "remote", "set-url", "cluster", remoteURL)
+		if out, err := updateCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to update git remote: %w\n%s", err, string(out))
+		}
 	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

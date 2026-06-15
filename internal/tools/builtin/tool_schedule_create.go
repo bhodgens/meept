@@ -4,6 +4,7 @@ package builtin
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -205,10 +206,11 @@ func (t *ScheduleCreateTool) Execute(ctx context.Context, args map[string]any) (
 
 	scheduledID, err := t.sched.ScheduleConfig(cfg)
 	if err != nil {
+		slog.Error("failed to create scheduled job", "error", err, "job_id", jobID, "name", name)
 		return ScheduleCreateResult{
 			Success: false,
-			Error:   err.Error(),
-		}, err
+			Error:   "failed to create scheduled job",
+		}, nil
 	}
 
 	return ScheduleCreateResult{

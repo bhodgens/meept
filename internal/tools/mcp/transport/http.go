@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +21,49 @@ const (
 	// This prevents memory exhaustion from malicious or misconfigured servers.
 	MaxResponseSize = 10 * 1024 * 1024
 )
+
+func isBlockedAddress(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if host == "" {
+		return false
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()
+}
+
+func checkRedirectURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid redirect URL: %w", err)
+	}
+	if !strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https") {
+		return fmt.Errorf("scheme %q not allowed", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("redirect URL missing host")
+	}
+	if isBlockedAddress(host) {
+		return fmt.Errorf("redirect host %q is blocked", host)
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(context.Background(), host)
+	if err != nil {
+		return fmt.Errorf("resolve redirect %s: %w", host, err)
+	}
+	for _, ip := range ips {
+		if isBlockedAddress(ip.IP.String()) {
+			return fmt.Errorf("redirect host %s resolves to blocked address %s", host, ip.IP)
+		}
+	}
+	return nil
+}
 
 // HTTPTransport implements MCP transport over HTTP.
 //
@@ -51,6 +96,9 @@ func NewHTTPTransport(url string, headers map[string]string, config Config) *HTT
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				if len(via) >= 5 {
 					return fmt.Errorf("too many redirects")
+				}
+				if err := checkRedirectURL(req.URL.String()); err != nil {
+					return err
 				}
 				return nil
 			},

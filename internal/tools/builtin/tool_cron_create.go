@@ -4,6 +4,7 @@ package builtin
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -203,10 +204,11 @@ func (t *CronCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 
 	scheduledID, err := t.sched.ScheduleConfig(cfg)
 	if err != nil {
+		slog.Error("failed to create cron job", "error", err, "job_id", jobID, "name", name)
 		return CronCreateResult{
 			Success: false,
-			Error:   err.Error(),
-		}, err
+			Error:   "failed to create cron job",
+		}, nil
 	}
 
 	return CronCreateResult{

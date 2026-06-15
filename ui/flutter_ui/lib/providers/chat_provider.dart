@@ -407,6 +407,9 @@ class ChatNotifier extends StateNotifier<ChatState> {
     _wsChatSubscription = null;
     _progressSubscription?.cancel();
     _progressSubscription = null;
+    if (_sessionId != null) {
+      websocket.unsubscribeFromChat(_sessionId!);
+    }
     super.dispose();
   }
 }

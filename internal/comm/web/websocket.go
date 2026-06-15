@@ -2,12 +2,39 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 
 	"golang.org/x/net/websocket"
 )
+
+var wsAllowedOrigins = map[string]struct{}{
+	"localhost": {},
+	"127.0.0.1": {},
+	"::1":       {},
+}
+
+func isAllowedWSOrigin(origin string) bool {
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if _, ok := wsAllowedOrigins[strings.ToLower(host)]; ok {
+		return true
+	}
+	if _, ok := wsAllowedOrigins[strings.ToLower(origin)]; ok {
+		return true
+	}
+	return false
+}
 
 // WSMessage represents a message sent/received over WebSocket.
 type WSMessage struct {
@@ -96,21 +123,29 @@ func (h *WebSocketHub) Broadcast(msgType string, data any) {
 
 // handleWebSocket upgrades an HTTP connection to WebSocket and manages the lifecycle.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	wsHandler := websocket.Handler(func(conn *websocket.Conn) {
-		s.wsHub.Register(conn)
-		defer s.wsHub.Unregister(conn)
+	wsServer := &websocket.Server{
+		Handler: func(conn *websocket.Conn) {
+			s.wsHub.Register(conn)
+			defer s.wsHub.Unregister(conn)
 
-		for {
-			var msg WSMessage
-			if err := websocket.JSON.Receive(conn, &msg); err != nil {
-				// Client disconnected or error
-				return
+			for {
+				var msg WSMessage
+				if err := websocket.JSON.Receive(conn, &msg); err != nil {
+					return
+				}
+				s.handleWSMessage(conn, &msg)
 			}
-			s.handleWSMessage(conn, &msg)
-		}
-	})
+		},
+		Handshake: func(config *websocket.Config, request *http.Request) error {
+			origin := request.Header.Get("Origin")
+			if !isAllowedWSOrigin(origin) {
+				return fmt.Errorf("origin not allowed: %s", origin)
+			}
+			return nil
+		},
+	}
 
-	wsHandler.ServeHTTP(w, r)
+	wsServer.ServeHTTP(w, r)
 }
 
 // handleWSMessage processes incoming WebSocket messages.

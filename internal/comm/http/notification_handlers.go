@@ -62,6 +62,7 @@ func NewNotificationHandler(emitter NotificationEmitter, logger *slog.Logger) *N
 func (h *NotificationHandler) ServeWebSocket(w http.ResponseWriter, req *http.Request) {
 	conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
 		CompressionMode: websocket.CompressionContextTakeover,
+		OriginPatterns:  defaultWSOrigins,
 	})
 	if err != nil {
 		h.logger.Error("failed to accept websocket connection", "error", err)

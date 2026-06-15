@@ -28,6 +28,13 @@ struct LiveMetricsView: View {
                 }
             }
 
+            if let errorMessage = metricsViewModel.errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             if let metrics = metricsViewModel.liveMetrics {
                 LazyVGrid(columns: [
                     GridItem(.flexible()),

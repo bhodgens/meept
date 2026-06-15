@@ -1058,7 +1058,9 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 // SetPrefetchCallback sets the callback for prefetching memory context.
 // This is used to wire the memory manager's QueuePrefetch method after construction.
 func (l *AgentLoop) SetPrefetchCallback(callback func(query string, maxItems int)) {
+	l.mu.Lock()
 	l.prefetchCallback = callback
+	l.mu.Unlock()
 }
 
 // SetContextFirewallConfig wires context firewall settings from the user-facing
@@ -1267,8 +1269,11 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 
 	// Queue prefetch for next turn (Hermes pattern)
 	// Prefetch is triggered with the last user message as query
-	if l.prefetchCallback != nil && sanitizedMessage != "" {
-		l.prefetchCallback(sanitizedMessage, 5) // Prefetch 5 context items
+	l.mu.RLock()
+	prefetchCB := l.prefetchCallback
+	l.mu.RUnlock()
+	if prefetchCB != nil && sanitizedMessage != "" {
+		prefetchCB(sanitizedMessage, 5) // Prefetch 5 context items
 	}
 
 	return finalResponse, nil
@@ -2191,8 +2196,12 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 	baseBackoff := 2 * time.Second
 
 	// Prepend WithTaskScope option if scope is set
-	if l.currentTaskID != "" || l.currentSessionID != "" {
-		opts = append([]llm.ChatOption{llm.WithTaskScope(l.currentTaskID, l.currentSessionID)}, opts...)
+	l.mu.RLock()
+	taskID := l.currentTaskID
+	sessionID := l.currentSessionID
+	l.mu.RUnlock()
+	if taskID != "" || sessionID != "" {
+		opts = append([]llm.ChatOption{llm.WithTaskScope(taskID, sessionID)}, opts...)
 	}
 
 	attempt := 0
@@ -2478,17 +2487,24 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	}
 
 	// Set budget scope tracking for this task
+	l.mu.Lock()
 	l.currentTaskID = t.ID
 	l.currentSessionID = conversationID
+	l.mu.Unlock()
 	defer func() {
 		// Cleanup budget tracking entries for completed task
-		if l.llmClient != nil && l.llmClient.Budget() != nil {
-			budget := l.llmClient.Budget()
-			budget.RemoveTaskCost(context.Background(), l.currentTaskID)
-			budget.RemoveSessionCost(context.Background(), l.currentSessionID)
-		}
+		l.mu.Lock()
+		taskID := l.currentTaskID
+		sessionID := l.currentSessionID
 		l.currentTaskID = ""
 		l.currentSessionID = ""
+		l.mu.Unlock()
+
+		if l.llmClient != nil && l.llmClient.Budget() != nil {
+			budget := l.llmClient.Budget()
+			budget.RemoveTaskCost(context.Background(), taskID)
+			budget.RemoveSessionCost(context.Background(), sessionID)
+		}
 	}()
 
 	// Run reasoning cycle
