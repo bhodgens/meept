@@ -80,13 +80,13 @@ void main() {
       );
       await tester.pump();
       expect(find.text(longMessage), findsOneWidget);
-      final text = tester.widget<Text>(
+      final text = tester.widget<SelectableText>(
         find.descendant(
           of: find.byType(ErrorBanner),
-          matching: find.byType(Text),
+          matching: find.byType(SelectableText),
         ),
       );
-      expect(text.overflow, TextOverflow.ellipsis);
+      expect(text.maxLines, isNotNull);
     });
 
     testWidgets('error icon color is redAlert', (tester) async {
@@ -128,10 +128,10 @@ void main() {
         ),
       );
       await tester.pump();
-      final text = tester.widget<Text>(
+      final text = tester.widget<SelectableText>(
         find.descendant(
           of: find.byType(ErrorBanner),
-          matching: find.byType(Text),
+          matching: find.byType(SelectableText),
         ),
       );
       expect(text.style!.color, CyberpunkColors.redAlert);
@@ -206,7 +206,7 @@ void main() {
       expect(container.padding, const EdgeInsets.all(12));
     });
 
-    testWidgets('message has maxLines 2', (tester) async {
+    testWidgets('message has maxLines 3', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
@@ -214,31 +214,17 @@ void main() {
         ),
       );
       await tester.pump();
-      final text = tester.widget<Text>(
+      final text = tester.widget<SelectableText>(
         find.descendant(
           of: find.byType(ErrorBanner),
-          matching: find.byType(Text),
+          matching: find.byType(SelectableText),
         ),
       );
-      expect(text.maxLines, 2);
+      expect(text.maxLines, 3);
     });
 
-    testWidgets('message has ellipsis overflow', (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: ThemeData.dark(),
-          home: const Scaffold(body: ErrorBanner(message: 'overflow test')),
-        ),
-      );
-      await tester.pump();
-      final text = tester.widget<Text>(
-        find.descendant(
-          of: find.byType(ErrorBanner),
-          matching: find.byType(Text),
-        ),
-      );
-      expect(text.overflow, TextOverflow.ellipsis);
-    });
+    // Note: overflow test removed - SelectableText does not support overflow.
+    // The widget intentionally uses SelectableText so users can copy error messages.
   });
 
   group('ErrorText', () {
@@ -312,10 +298,10 @@ void main() {
         ),
       );
       await tester.pump();
-      final text = tester.widget<Text>(
+      final text = tester.widget<SelectableText>(
         find.descendant(
           of: find.byType(ErrorText),
-          matching: find.byType(Text),
+          matching: find.byType(SelectableText),
         ),
       );
       expect(text.style!.color, CyberpunkColors.redAlert);
