@@ -416,7 +416,14 @@ func (r *Registry) ExecuteWithRetry(ctx context.Context, name string, args map[s
 		if attempt < policy.MaxRetries {
 			delay := policy.RetryDelay
 			if policy.Exponential {
-				delay *= time.Duration(1 << uint(attempt))
+				// Cap the shift exponent to prevent overflow for very high
+				// MaxRetries values. 1 << 30 (~17 minutes at 1s base) is the
+				// practical ceiling before time.Duration int64 overflow.
+				shift := attempt
+				if shift > 30 {
+					shift = 30
+				}
+				delay *= time.Duration(1 << uint(shift))
 			}
 
 			select {
