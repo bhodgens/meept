@@ -34,11 +34,18 @@ class MetricsViewModel: ObservableObject {
     func startLivePolling() {
         fetchLiveMetrics()
         metricsTimer?.invalidate()
-        metricsTimer = Timer.scheduledTimer(withTimeInterval: updateInterval, repeats: true) { [weak self] _ in
+        // Use Timer(timeInterval:...) + RunLoop.common so the timer continues
+        // to fire during modal interactions (e.g. NSMenu tracking, scroll).
+        // Timer.scheduledTimer only attaches to .default, which pauses during
+        // menu tracking, causing metrics polling to stall while the menu is
+        // open.
+        let timer = Timer(timeInterval: updateInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.fetchLiveMetrics()
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        metricsTimer = timer
     }
 
     func stopLivePolling() {

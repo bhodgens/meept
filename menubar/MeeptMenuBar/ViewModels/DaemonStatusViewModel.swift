@@ -29,11 +29,17 @@ class DaemonStatusViewModel: ObservableObject {
 
     func startPolling() {
         statusTimer?.invalidate()
-        statusTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+        // Use Timer(timeInterval:...) + RunLoop.common so the timer continues
+        // to fire during modal interactions (e.g. NSMenu tracking, scroll) the
+        // way .common-priority work does. Timer.scheduledTimer only attaches
+        // to .default, which pauses during menu tracking.
+        let timer = Timer(timeInterval: 5.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.refreshStatus()
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        statusTimer = timer
         refreshStatus()
     }
 
