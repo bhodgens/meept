@@ -1,12 +1,15 @@
 package http
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/internal/pty"
@@ -249,8 +252,18 @@ func (h *PTYHandler) closeSession(w http.ResponseWriter, r *http.Request, sessio
 }
 
 // Helpers
+var fallbackID uint64
+
+// generateSessionID returns a random 128-bit session ID prefixed with "pty-".
+// It uses crypto/rand so the IDs are unpredictable. If rand.Read fails
+// (which should essentially never happen) we fall back to a timestamp and
+// atomic counter to guarantee uniqueness.
 func generateSessionID() string {
-	return fmt.Sprintf("pty-%d", time.Now().UnixNano())
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("pty-%d-%d", time.Now().UnixNano(), atomic.AddUint64(&fallbackID, 1))
+	}
+	return "pty-" + hex.EncodeToString(b)
 }
 
 func extractSessionID(path string) string {
