@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -180,7 +181,10 @@ func (c *ResultCache) hashArgs(args map[string]any) string {
 	jsonBytes, err := json.Marshal(sortedArgs)
 	if err != nil {
 		c.logger.Warn("Failed to marshal args for hashing", "error", err)
-		return string(MessageTypeError)
+		// Fall back to a deterministic value derived from the arg keys so distinct
+		// arg sets do not share a single cache entry (the previous fallback
+		// returned the constant string "error", causing cache collisions).
+		return "unmarshallable:" + strings.Join(keys, ",")
 	}
 
 	// Generate SHA256 hash

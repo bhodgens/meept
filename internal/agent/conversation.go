@@ -763,7 +763,11 @@ func (c *Conversation) TruncateByImportance(tokenBudget int) int {
 		removedTokens += mi.tokens
 	}
 
+	// Start with all messages kept, then mark low-importance ones for removal.
 	keepMask := make([]bool, len(c.messages))
+	for i := range keepMask {
+		keepMask[i] = true
+	}
 	tokensRemoved := 0
 	for _, mi := range indices {
 		if tokensRemoved >= removedTokens {
