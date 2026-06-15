@@ -302,6 +302,11 @@ func (s *Scheduler) Unschedule(jobID string) error {
 
 // RunNow triggers immediate execution of a job.
 func (s *Scheduler) RunNow(jobID string) error {
+	// Guard against calls after Stop()
+	if !s.running.Load() {
+		return fmt.Errorf("scheduler not running")
+	}
+
 	s.mu.Lock()
 	job, ok := s.jobs[jobID]
 	if !ok {
