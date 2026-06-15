@@ -344,10 +344,10 @@ func TestStatusModel_RenderInfoPanel(t *testing.T) {
 	if !strings.Contains(panel, "quick actions") {
 		t.Error("expected 'quick actions' title")
 	}
-	if !strings.Contains(panel, "Chat view") {
+	if !strings.Contains(panel, "chat view") {
 		t.Error("expected chat hint")
 	}
-	if !strings.Contains(panel, "Refresh") {
+	if !strings.Contains(panel, "refresh") {
 		t.Error("expected refresh hint")
 	}
 }

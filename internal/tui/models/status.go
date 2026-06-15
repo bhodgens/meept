@@ -289,11 +289,11 @@ func (m *StatusModel) renderInfoPanel(width int) string {
 		Foreground(lipgloss.Color(ColorAmber)).
 		Bold(true)
 
-	content += keyStyle.Render("c") + helpStyle.Render(" - Chat view") + "\n"
-	content += keyStyle.Render("t") + helpStyle.Render(" - Tasks view") + "\n"
-	content += keyStyle.Render("m") + helpStyle.Render(" - Memory view") + "\n"
-	content += keyStyle.Render("r") + helpStyle.Render(" - Refresh status") + "\n"
-	content += keyStyle.Render("q") + helpStyle.Render(" - Quit") + "\n"
+	content += keyStyle.Render("c") + helpStyle.Render(" - chat view") + "\n"
+	content += keyStyle.Render("t") + helpStyle.Render(" - tasks view") + "\n"
+	content += keyStyle.Render("m") + helpStyle.Render(" - memory view") + "\n"
+	content += keyStyle.Render("r") + helpStyle.Render(" - refresh status") + "\n"
+	content += keyStyle.Render("q") + helpStyle.Render(" - quit") + "\n"
 
 	return panelStyle.Render(content)
 }
