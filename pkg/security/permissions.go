@@ -105,15 +105,34 @@ func NewPermissionChecker(cfg Config) *PermissionChecker {
 		pc.homeDir = u.HomeDir
 	}
 
-	// Pre-expand paths
+	// Pre-expand paths: store BOTH resolved and raw forms so that paths
+	// which cannot be symlink-resolved at check time (e.g. non-existent
+	// files under autofs mounts) still match their configured prefix.
 	for _, p := range cfg.AllowedPaths {
-		pc.allowedGlobs = append(pc.allowedGlobs, pc.expandPath(p))
+		pc.allowedGlobs = append(pc.allowedGlobs, pc.expandPathAll(p)...)
 	}
 	for _, p := range cfg.BlockedPaths {
-		pc.blockedGlobs = append(pc.blockedGlobs, pc.expandPath(p))
+		pc.blockedGlobs = append(pc.blockedGlobs, pc.expandPathAll(p)...)
 	}
 
 	return pc
+}
+
+// expandPathAll returns the resolved and raw cleaned forms of a path.
+// Both are needed because EvalSymlinks may succeed for the configured
+// pattern but fail for a requested path under it (common on macOS where
+// /home is an autofs mount). Storing both forms ensures the prefix
+// check succeeds regardless of which side resolves.
+func (pc *PermissionChecker) expandPathAll(path string) []string {
+	if strings.HasPrefix(path, "~") && pc.homeDir != "" {
+		path = pc.homeDir + path[1:]
+	}
+	cleaned := filepath.Clean(path)
+	forms := []string{cleaned}
+	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil && resolved != cleaned {
+		forms = append(forms, resolved)
+	}
+	return forms
 }
 
 func (pc *PermissionChecker) expandPath(path string) string {
