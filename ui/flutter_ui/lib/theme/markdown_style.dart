@@ -36,7 +36,9 @@ MarkdownStyleSheet buildCyberpunkMarkdownStyle(BuildContext context) {
     p: CyberpunkTypography.bodyMedium.copyWith(
       color: CyberpunkColors.orangeGlow,
       fontSize: 14,
+      height: 1.5,
     ),
+    pPadding: const EdgeInsets.only(bottom: 8),
     strong: const TextStyle(
       color: Color(0xFFFFFFFF),
       fontWeight: FontWeight.bold,
@@ -54,11 +56,17 @@ MarkdownStyleSheet buildCyberpunkMarkdownStyle(BuildContext context) {
       backgroundColor: const Color(0xFF1F2937),
       fontFamily: 'SourceCodePro',
       fontSize: 12,
+      height: 1.4,
     ),
-    codeblockDecoration: const BoxDecoration(
-      color: Color(0xFF111827),
-      borderRadius: BorderRadius.all(Radius.circular(4)),
+    codeblockDecoration: BoxDecoration(
+      color: const Color(0xFF111827),
+      borderRadius: const BorderRadius.all(Radius.circular(4)),
+      border: Border.all(
+        color: CyberpunkColors.midGray,
+        width: 1,
+      ),
     ),
+    codeblockPadding: const EdgeInsets.all(12),
     blockquote: CyberpunkTypography.bodyMedium.copyWith(
       color: CyberpunkColors.orangeGlow,
     ),

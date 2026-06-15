@@ -134,7 +134,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 	}
 
 	if c.budget != nil {
-		result := c.budget.CheckBudget()
+		result := c.budget.CheckBudgetWithScope(chatOpts.taskID, chatOpts.sessionID)
 		if result.Exceeded {
 			return nil, &BudgetExceededError{
 				Message: result.Reason.Message(result.Used, result.Limit),
@@ -206,7 +206,19 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 		}
 
 		if c.budget != nil {
-			c.budget.RecordUsage(resp.Usage)
+			c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
+			// Record cost with scope if model pricing is available
+			if c.config != nil {
+				costUSD := float64(resp.Usage.PromptTokens)*c.config.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*c.config.CostPerMillionOutput/1_000_000
+				if costUSD > 0 {
+					c.budget.RecordCostWithScope(CostRecord{
+						Timestamp:        time.Now(),
+						CostUSD:          costUSD,
+						PromptTokens:     resp.Usage.PromptTokens,
+						CompletionTokens: resp.Usage.CompletionTokens,
+					}, chatOpts.taskID, chatOpts.sessionID)
+				}
+			}
 		}
 
 		// Store in cache
@@ -265,7 +277,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 
 	if c.budget != nil {
 		reportProgress(ProgressStageStarting, "Checking token budget...")
-		result := c.budget.CheckBudget()
+		result := c.budget.CheckBudgetWithScope(chatOpts.taskID, chatOpts.sessionID)
 		if result.Exceeded {
 			return nil, &BudgetExceededError{
 				Message: result.Reason.Message(result.Used, result.Limit),
@@ -359,7 +371,19 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 		reportProgress(ProgressStageStreaming, "Receiving response...")
 
 		if c.budget != nil {
-			c.budget.RecordUsage(resp.Usage)
+			c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
+			// Record cost with scope if model pricing is available
+			if c.config != nil {
+				costUSD := float64(resp.Usage.PromptTokens)*c.config.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*c.config.CostPerMillionOutput/1_000_000
+				if costUSD > 0 {
+					c.budget.RecordCostWithScope(CostRecord{
+						Timestamp:        time.Now(),
+						CostUSD:          costUSD,
+						PromptTokens:     resp.Usage.PromptTokens,
+						CompletionTokens: resp.Usage.CompletionTokens,
+					}, chatOpts.taskID, chatOpts.sessionID)
+				}
+			}
 		}
 
 		// Store in cache

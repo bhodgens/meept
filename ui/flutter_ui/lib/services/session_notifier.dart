@@ -54,9 +54,10 @@ class SessionNotifier extends StateNotifier<SessionState> {
   Future<Session?> createSession(String title) async {
     try {
       final session = await apiClient.createSession(title: title);
-      state = state.copyWith(
-        sessions: [...state.sessions, session],
-      );
+      // Reload sessions from server to ensure we have the persisted list
+      state = state.copyWith(isLoading: true, error: null);
+      final sessions = await apiClient.listSessions();
+      state = state.copyWith(sessions: sessions, isLoading: false);
       return session;
     } catch (e) {
       state = state.copyWith(

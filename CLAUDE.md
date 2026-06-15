@@ -419,6 +419,39 @@ Triggered by `IntentPair` intent type. Default actor/reviewer mapping: analyst/p
   }
   ```
 
+- **Setter methods**: Every `Set*` method on a tool/service struct that accepts an
+  interface or pointer type MUST include a nil guard as the first line. The test
+  suite (`internal/tools/builtin/setters_test.go`) verifies this project-wide.
+  ```go
+  // RIGHT: nil guard prevents typed-nil panic
+  func (t *SomeTool) SetFenceChecker(fc FenceChecker) {
+      if fc != nil {
+          t.fenceChecker = fc
+      }
+  }
+
+  // WRONG: direct assignment allows typed-nil panic
+  func (t *SomeTool) SetFenceChecker(fc FenceChecker) {
+      t.fenceChecker = fc  // fc could be a typed-nil interface
+  }
+  ```
+
+- **Mutex scope**: Never hold a mutex across I/O operations (network calls,
+  disk reads/writes, LLM calls, channel sends). Use the "collect under lock,
+  release, then operate" pattern:
+  ```go
+  // RIGHT: snapshot under lock, operate without lock
+  mu.Lock()
+  cfg := m.config  // immutable after construction
+  mu.Unlock()
+  result, err := doNetworkCall(ctx, cfg)
+
+  // WRONG: lock held across network call
+  mu.Lock()
+  defer mu.Unlock()
+  result, err := doNetworkCall(ctx, m.config)  // blocks all other callers during I/O
+  ```
+
 ## Project Structure
 
 ```

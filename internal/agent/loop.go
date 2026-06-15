@@ -497,6 +497,10 @@ type AgentLoop struct {
 	// Set before reasoningCycle() runs; cleared after application.
 	modelOverride string
 
+	// Budget scope tracking for per-task/per-session token and cost limits
+	currentTaskID    string
+	currentSessionID string
+
 	// Metrics collection for analytics
 	taskCollector      *metrics.TaskCollector
 	responseAnalyzer   *metrics.ResponseAnalyzer
@@ -2182,6 +2186,11 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 	const maxBackoff = 30 * time.Second
 	baseBackoff := 2 * time.Second
 
+	// Prepend WithTaskScope option if scope is set
+	if l.currentTaskID != "" || l.currentSessionID != "" {
+		opts = append([]llm.ChatOption{llm.WithTaskScope(l.currentTaskID, l.currentSessionID)}, opts...)
+	}
+
 	attempt := 0
 	currentBackoff := baseBackoff
 
@@ -2463,6 +2472,14 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 			)
 		}
 	}
+
+	// Set budget scope tracking for this task
+	l.currentTaskID = t.ID
+	l.currentSessionID = conversationID
+	defer func() {
+		l.currentTaskID = ""
+		l.currentSessionID = ""
+	}()
 
 	// Run reasoning cycle
 	taskIterations := 0 // Track iterations for metrics

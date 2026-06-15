@@ -31,36 +31,46 @@ final GoRouter router = GoRouter(
     GoRoute(
       path: '/',
       name: 'chat',
-      builder: (context, state) {
-        return const _HomeShell(initialTab: HomeTab.chat);
+      pageBuilder: (context, state) {
+        return NoTransitionPage(
+          child: _HomeShell(initialTab: HomeTab.chat),
+        );
       },
     ),
     GoRoute(
       path: '/sessions',
       name: 'sessions',
-      builder: (context, state) {
-        return const _HomeShell(initialTab: HomeTab.sessions);
+      pageBuilder: (context, state) {
+        return NoTransitionPage(
+          child: _HomeShell(initialTab: HomeTab.sessions),
+        );
       },
     ),
     GoRoute(
       path: '/tasks',
       name: 'tasks',
-      builder: (context, state) {
-        return const _HomeShell(initialTab: HomeTab.tasks);
+      pageBuilder: (context, state) {
+        return NoTransitionPage(
+          child: _HomeShell(initialTab: HomeTab.tasks),
+        );
       },
     ),
     GoRoute(
       path: '/plans',
       name: 'plans',
-      builder: (context, state) {
-        return const _HomeShell(initialTab: HomeTab.plans);
+      pageBuilder: (context, state) {
+        return NoTransitionPage(
+          child: _HomeShell(initialTab: HomeTab.plans),
+        );
       },
     ),
     GoRoute(
       path: '/agents',
       name: 'agents',
-      builder: (context, state) {
-        return const _HomeShell(initialTab: HomeTab.agents);
+      pageBuilder: (context, state) {
+        return NoTransitionPage(
+          child: _HomeShell(initialTab: HomeTab.agents),
+        );
       },
     ),
 

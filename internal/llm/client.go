@@ -253,7 +253,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 
 	// Budget gate
 	if c.budget != nil {
-		result := c.budget.CheckBudget()
+		result := c.budget.CheckBudgetWithScope(chatOpts.taskID, chatOpts.sessionID)
 		if result.Exceeded {
 			return nil, &BudgetExceededError{
 				Message: result.Reason.Message(result.Used, result.Limit),
@@ -355,9 +355,21 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 			continue
 		}
 
-		// Record usage
+		// Record usage with scope
 		if c.budget != nil {
-			c.budget.RecordUsage(resp.Usage)
+			c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
+			// Record cost with scope if model pricing is available
+			if c.config != nil {
+				costUSD := float64(resp.Usage.PromptTokens)*c.config.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*c.config.CostPerMillionOutput/1_000_000
+				if costUSD > 0 {
+					c.budget.RecordCostWithScope(CostRecord{
+						Timestamp:        time.Now(),
+						CostUSD:          costUSD,
+						PromptTokens:     resp.Usage.PromptTokens,
+						CompletionTokens: resp.Usage.CompletionTokens,
+					}, chatOpts.taskID, chatOpts.sessionID)
+				}
+			}
 		}
 
 		// Store in cache
@@ -427,7 +439,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 	// Budget gate
 	if c.budget != nil {
 		reportProgress(ProgressStageStarting, "Checking token budget...")
-		result := c.budget.CheckBudget()
+		result := c.budget.CheckBudgetWithScope(chatOpts.taskID, chatOpts.sessionID)
 		if result.Exceeded {
 			return nil, &BudgetExceededError{
 				Message: result.Reason.Message(result.Used, result.Limit),
@@ -540,9 +552,21 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		// Streaming stage - response received
 		reportProgress(ProgressStageStreaming, "Receiving response...")
 
-		// Record usage
+		// Record usage with scope
 		if c.budget != nil {
-			c.budget.RecordUsage(resp.Usage)
+			c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
+			// Record cost with scope if model pricing is available
+			if c.config != nil {
+				costUSD := float64(resp.Usage.PromptTokens)*c.config.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*c.config.CostPerMillionOutput/1_000_000
+				if costUSD > 0 {
+					c.budget.RecordCostWithScope(CostRecord{
+						Timestamp:        time.Now(),
+						CostUSD:          costUSD,
+						PromptTokens:     resp.Usage.PromptTokens,
+						CompletionTokens: resp.Usage.CompletionTokens,
+					}, chatOpts.taskID, chatOpts.sessionID)
+				}
+			}
 		}
 
 		// Store in cache
@@ -578,6 +602,8 @@ type chatOptions struct {
 	frequencyPenalty float64
 	presencePenalty  float64
 	stopSequences    []string
+	taskID           string
+	sessionID        string
 }
 
 // ChatOption is a functional option for configuring a chat request.
@@ -629,6 +655,14 @@ func WithPresencePenalty(p float64) ChatOption {
 func WithStopSequences(seqs []string) ChatOption {
 	return func(o *chatOptions) {
 		o.stopSequences = seqs
+	}
+}
+
+// WithTaskScope sets the task and session scope for budget tracking.
+func WithTaskScope(taskID, sessionID string) ChatOption {
+	return func(o *chatOptions) {
+		o.taskID = taskID
+		o.sessionID = sessionID
 	}
 }
 
@@ -935,6 +969,22 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		return nil, &ClientError{Message: "failed to marshal request", Cause: err}
 	}
 
+	// Budget gate with scope
+	if c.budget != nil {
+		result := c.budget.CheckBudgetWithScope(chatOpts.taskID, chatOpts.sessionID)
+		if result.Exceeded {
+			return nil, &BudgetExceededError{
+				Message: result.Reason.Message(result.Used, result.Limit),
+				Reason:  result.Reason,
+				Used:    result.Used,
+				Limit:   result.Limit,
+			}
+		}
+		if err := c.budget.WaitForRateLimit(ctx); err != nil {
+			return nil, err
+		}
+	}
+
 	// D4: Retry loop for transient errors with resume capability
 	var lastErr error
 	retryState := &streamRetryState{
@@ -950,6 +1000,23 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 
 		resp, httpResp, err := c.doStreamRequest(ctx, body, onDelta, retryState)
 		if err == nil {
+			// Record usage with scope
+			if c.budget != nil && resp != nil {
+				c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
+				// Record cost with scope if model pricing is available
+				if c.config != nil {
+					costUSD := float64(resp.Usage.PromptTokens)*c.config.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*c.config.CostPerMillionOutput/1_000_000
+					if costUSD > 0 {
+						c.budget.RecordCostWithScope(CostRecord{
+							Timestamp:        time.Now(),
+							CostUSD:          costUSD,
+							PromptTokens:     resp.Usage.PromptTokens,
+							CompletionTokens: resp.Usage.CompletionTokens,
+						}, chatOpts.taskID, chatOpts.sessionID)
+					}
+				}
+			}
+
 			// Record metrics on success
 			if c.metricsStore != nil {
 				costUSD := float64(0)

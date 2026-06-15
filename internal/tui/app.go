@@ -654,7 +654,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		// Check for Ctrl+S: toggle steer mode when agent active, otherwise open session picker
+		// Check for Ctrl+S: toggle steer mode when agent active, otherwise navigate to sessions tab
 		if msg.String() == "ctrl+s" {
 			if a.chat != nil && a.chat.IsAgentActive() {
 				// Agent is running - toggle steer mode
@@ -666,9 +666,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.chat.AddSystemMessage(fmt.Sprintf("Steer mode: %s", status))
 				return a, nil
 			}
-			a.activeModal = ModalSessionPicker
-			a.sessionPicker.Show()
-			return a, a.sessionPicker.RefreshSessions()
+			// Navigate to sessions tab
+			a.currentView = ViewSessions
+			a.statusMessage = "sessions tab (create: n, delete: d)"
+			a.statusMessageTime = time.Now()
+			clearCmd := tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
+				return StatusMessageClearMsg{}
+			})
+			return a, clearCmd
 		}
 
 		// Check for Ctrl+V: cycle verbosity level
@@ -681,6 +686,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Check for Ctrl+P to open fuzzy finder
 		if msg.String() == "ctrl+p" {
+			if a.fuzzyFinder == nil {
+				a.statusMessage = "fuzzy finder not initialized"
+				a.statusMessageTime = time.Now()
+				return a, nil
+			}
 			a.activeModal = ModalFuzzyFinder
 			a.fuzzyFinder.Show()
 			return a, tea.Batch(a.fuzzyFinder.FetchSessions(), a.fuzzyFinder.FetchTasks())

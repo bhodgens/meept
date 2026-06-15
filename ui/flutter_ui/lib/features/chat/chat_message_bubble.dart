@@ -17,6 +17,53 @@ class ChatMessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isUser = message.role == 'user';
+    final isSystem = message.role == 'system';
+
+    // System messages have distinct styling for errors and notifications
+    if (isSystem) {
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: CyberpunkColors.redAlert.withValues(alpha: 0.15),
+          border: Border.all(
+            color: CyberpunkColors.redAlert,
+            width: 1,
+          ),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.error_outline,
+                  color: CyberpunkColors.redAlert,
+                  size: 16,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'system',
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    color: CyberpunkColors.redAlert,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message.content,
+              style: CyberpunkTypography.bodyMedium.copyWith(
+                color: CyberpunkColors.redAlert,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -56,6 +103,7 @@ class ChatMessageBubble extends StatelessWidget {
               ),
               selectable: true,
               syntaxHighlighter: CyberpunkSyntaxHighlighter(),
+              softLineBreak: true,
             ),
             const SizedBox(height: 4),
             Text(

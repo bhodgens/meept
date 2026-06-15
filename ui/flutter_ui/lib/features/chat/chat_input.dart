@@ -54,11 +54,19 @@ class _ChatInputState extends ConsumerState<ChatInput> {
 
   // File path attachments
   final List<String> _attachments = [];
+  bool _hasFocused = false;
 
   @override
   void initState() {
     super.initState();
     _controller.addListener(_onTextChanged);
+    // Auto-focus the input field when the chat tab is first shown
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_hasFocused) {
+        _focusNode.requestFocus();
+        _hasFocused = true;
+      }
+    });
   }
 
   @override

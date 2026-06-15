@@ -315,6 +315,24 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// Add a chat message from websocket stream
   void addStreamMessage(Map<String, dynamic> data) {
     try {
+      // Handle system/non-chat messages (token budget, errors, etc.)
+      final messageType = data['type'] as String?;
+      if (messageType == 'non-chat' || messageType == 'system' || messageType == 'error') {
+        final systemMessage = ChatMessage(
+          id: 'system_${DateTime.now().millisecondsSinceEpoch}',
+          role: 'system',
+          content: data['content'] as String? ?? data['message'] as String? ?? 'System notification',
+          timestamp: DateTime.now(),
+        );
+        state = state.copyWith(
+          messages: [...state.messages, systemMessage],
+          isLoading: false,
+          isAgentProcessing: false,
+          error: systemMessage.content,
+        );
+        return;
+      }
+
       final message = ChatMessage.fromBackendMessage(data);
 
       // Trigger TTS for assistant messages
