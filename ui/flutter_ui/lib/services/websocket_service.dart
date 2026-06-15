@@ -204,11 +204,14 @@ class WebSocketService {
       // desktop/mobile platforms.  Flutter Web's underlying browser
       // WebSocket API does not support custom headers, so we fall
       // back to the `token` query parameter only on web.
-      if (!kIsWeb && _apiKey != null && _apiKey.isNotEmpty) {
+      // Use custom HTTP client with certificate pinning for all non-web
+      // connections. This ensures self-signed certs are accepted for localhost.
+      if (!kIsWeb) {
         final ws = await io.WebSocket.connect(
           uri.toString(),
           headers: {
-            'Authorization': 'Bearer $_apiKey',
+            if (_apiKey != null && _apiKey.isNotEmpty)
+              'Authorization': 'Bearer $_apiKey',
             'Origin': 'http://localhost:$_port',
           },
           customClient: _createHttpClient(),
@@ -220,6 +223,8 @@ class WebSocketService {
         }
         _channel = channel;
       } else {
+        // Web platform: use token query parameter (browser WebSocket API
+        // doesn't support custom headers)
         var webUri = uri;
         if (_apiKey != null && _apiKey.isNotEmpty) {
           webUri = uri.replace(
