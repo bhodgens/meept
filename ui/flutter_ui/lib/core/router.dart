@@ -32,7 +32,7 @@ final GoRouter router = GoRouter(
       path: '/',
       name: 'chat',
       pageBuilder: (context, state) {
-        return NoTransitionPage(
+        return const NoTransitionPage(
           child: _HomeShell(initialTab: HomeTab.chat),
         );
       },
@@ -41,7 +41,7 @@ final GoRouter router = GoRouter(
       path: '/sessions',
       name: 'sessions',
       pageBuilder: (context, state) {
-        return NoTransitionPage(
+        return const NoTransitionPage(
           child: _HomeShell(initialTab: HomeTab.sessions),
         );
       },
@@ -50,7 +50,7 @@ final GoRouter router = GoRouter(
       path: '/tasks',
       name: 'tasks',
       pageBuilder: (context, state) {
-        return NoTransitionPage(
+        return const NoTransitionPage(
           child: _HomeShell(initialTab: HomeTab.tasks),
         );
       },
@@ -59,7 +59,7 @@ final GoRouter router = GoRouter(
       path: '/plans',
       name: 'plans',
       pageBuilder: (context, state) {
-        return NoTransitionPage(
+        return const NoTransitionPage(
           child: _HomeShell(initialTab: HomeTab.plans),
         );
       },
@@ -68,7 +68,7 @@ final GoRouter router = GoRouter(
       path: '/agents',
       name: 'agents',
       pageBuilder: (context, state) {
-        return NoTransitionPage(
+        return const NoTransitionPage(
           child: _HomeShell(initialTab: HomeTab.agents),
         );
       },
