@@ -77,7 +77,7 @@ func (c *L1Cache) buildKey(key CacheKey) string {
 		jsonBytes, _ := json.Marshal(hashInput)
 		h := sha256.New()
 		h.Write(jsonBytes)
-		fileHashStr = ":" + hex.EncodeToString(h.Sum(nil)[:8])
+		fileHashStr = ":" + hex.EncodeToString(h.Sum(nil)[:16])
 	}
 
 	return key.ModelID + ":" + key.PromptHash + fileHashStr

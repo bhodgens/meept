@@ -525,7 +525,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
                           minLines: _minLines,
                           maxLines: _maxLines,
                           keyboardType: TextInputType.multiline,
-                          textCapitalization: TextCapitalization.sentences,
+                          textCapitalization: TextCapitalization.none,
                           onSubmitted: (_) {},
                         ),
                       ],
