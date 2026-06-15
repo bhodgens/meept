@@ -1,6 +1,7 @@
 package task
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -583,10 +584,14 @@ func decodeStringSlice(s string) []string {
 // RecoverStaleTasks finds all tasks in non-terminal states (pending, planning,
 // executing, testing) and marks them as failed with reason "daemon_shutdown".
 // It also marks any non-terminal steps belonging to those tasks as failed.
+// All updates run inside a single transaction so a crash cannot leave the
+// database in an inconsistent state (tasks failed but steps non-terminal).
 // Returns the number of tasks that were recovered.
 func (s *Store) RecoverStaleTasks() (int, error) {
+	ctx := context.Background()
+
 	// Collect IDs of stale tasks in non-terminal states.
-	rows, err := s.db.Query(`
+	rows, err := s.db.QueryContext(ctx, `
 		SELECT id FROM tasks
 		WHERE state IN ('pending', 'planning', 'executing', 'testing')`)
 	if err != nil {
@@ -613,27 +618,46 @@ func (s *Store) RecoverStaleTasks() (int, error) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to begin transaction for stale recovery: %w", err)
+	}
+	// Safe to call after Commit; a no-op on a committed transaction.
+	defer tx.Rollback()
+
+	// Orphan sweep: catch steps left non-terminal by prior incomplete recoveries.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE task_steps
+		SET state = 'failed', result = 'daemon_shutdown', updated_at = ?
+		WHERE state IN ('pending', 'ready', 'running')
+		  AND task_id IN (SELECT id FROM tasks WHERE state = 'failed')`,
+		now); err != nil {
+		s.logger.Error("Failed to sweep orphaned stale steps", "error", err)
+	}
+
 	// Mark stale tasks as failed.
-	_, err = s.db.Exec(`
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE tasks
 		SET state = 'failed', updated_at = ?
 		WHERE state IN ('pending', 'planning', 'executing', 'testing')`,
-		now)
-	if err != nil {
+		now); err != nil {
 		return 0, fmt.Errorf("failed to mark stale tasks as failed: %w", err)
 	}
 
 	// Mark non-terminal steps belonging to stale tasks as failed.
 	for _, taskID := range taskIDs {
-		_, err := s.db.Exec(`
+		if _, err := tx.ExecContext(ctx, `
 			UPDATE task_steps
 			SET state = 'failed', result = 'daemon_shutdown', updated_at = ?
 			WHERE task_id = ? AND state NOT IN ('completed', 'approved', 'failed', 'skipped', 'rejected')`,
-			now, taskID)
-		if err != nil {
+			now, taskID); err != nil {
 			s.logger.Error("Failed to mark stale steps as failed", "task_id", taskID, "error", err)
 			// Continue processing remaining tasks.
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("failed to commit stale recovery: %w", err)
 	}
 
 	s.logger.Info("Recovered stale tasks", "count", len(taskIDs))
