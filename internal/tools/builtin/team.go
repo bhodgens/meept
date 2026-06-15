@@ -87,7 +87,9 @@ func NewTeamCreateTool() *TeamCreateTool {
 
 // SetCallback wires the create callback.
 func (t *TeamCreateTool) SetCallback(cb func(ctx context.Context, config TeamCreateConfig) (string, error)) {
-	t.callback = cb
+	if cb != nil {
+		t.callback = cb
+	}
 }
 
 func (t *TeamCreateTool) Name() string     { return "platform_team_create" }
@@ -223,7 +225,9 @@ func NewTeamAssignTool() *TeamAssignTool {
 
 // SetCallback wires the assign callback.
 func (t *TeamAssignTool) SetCallback(cb func(ctx context.Context, teamID string, assignment TaskAssignment) error) {
-	t.callback = cb
+	if cb != nil {
+		t.callback = cb
+	}
 }
 
 func (t *TeamAssignTool) Name() string     { return "team_assign" }
@@ -340,7 +344,9 @@ func NewTeamStatusTool() *TeamStatusTool {
 
 // SetCallback wires the status callback.
 func (t *TeamStatusTool) SetCallback(cb func(ctx context.Context, teamID string) (*TeamStatusResult, error)) {
-	t.callback = cb
+	if cb != nil {
+		t.callback = cb
+	}
 }
 
 func (t *TeamStatusTool) Name() string     { return "team_status" }
@@ -400,7 +406,9 @@ func NewTeamMessageTool() *TeamMessageTool {
 
 // SetCallback wires the message callback.
 func (t *TeamMessageTool) SetCallback(cb func(ctx context.Context, teamID string, msg TeamMessage) error) {
-	t.callback = cb
+	if cb != nil {
+		t.callback = cb
+	}
 }
 
 func (t *TeamMessageTool) Name() string     { return "team_message" }
@@ -516,7 +524,9 @@ func NewTeamResultTool() *TeamResultTool {
 
 // SetCallback wires the result callback.
 func (t *TeamResultTool) SetCallback(cb func(ctx context.Context, teamID string, result MemberResult) error) {
-	t.callback = cb
+	if cb != nil {
+		t.callback = cb
+	}
 }
 
 func (t *TeamResultTool) Name() string     { return "team_result" }
@@ -646,7 +656,9 @@ func NewTeamPresetCreateTool() *TeamPresetCreateTool {
 
 // SetCallback wires the preset create callback.
 func (t *TeamPresetCreateTool) SetCallback(cb func(ctx context.Context, presetName string, taskDescription string, maxConcurrentOverride int) (string, error)) {
-	t.callback = cb
+	if cb != nil {
+		t.callback = cb
+	}
 }
 
 func (t *TeamPresetCreateTool) Name() string     { return "team_preset_create" }
