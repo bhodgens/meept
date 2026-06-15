@@ -47,6 +47,11 @@ class WebSocketManager: NSObject {
         guard !isConnecting else { return }
         isConnecting = true
         shouldReconnect = true
+        // Explicit (re)connect resets the backoff window. Without this, a
+        // user-triggered reconnect after an extended outage would still be
+        // throttled by the prior reconnectAttempts counter and effectively
+        // never fire.
+        reconnectAttempts = 0
 
         var request = URLRequest(url: baseURL.appendingPathComponent("/ws/notifications"))
         if let token = apiToken, !token.isEmpty {

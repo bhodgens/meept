@@ -13,6 +13,9 @@ class NotificationManager: NSObject, ObservableObject {
     private let notificationCenter = UNUserNotificationCenter.current()
     private var websocket: WebSocketManager?
     private var lastNotificationTime: Date = Date.distantPast
+    // Cached once so WebSocket setup and per-event filtering read the same
+    // snapshot instead of re-parsing menubar.json5 on every notification.
+    private let configService: MenubarConfigService
 
     @Published var notifications: [NotificationEvent] = []
     @Published var isEnabled: Bool = true
@@ -29,6 +32,7 @@ class NotificationManager: NSObject, ObservableObject {
     }
 
     private override init() {
+        self.configService = MenubarConfigService()
         super.init()
         requestAuthorization()
         setupWebSocket()
@@ -51,13 +55,12 @@ class NotificationManager: NSObject, ObservableObject {
     // MARK: - WebSocket Setup
 
     private func setupWebSocket() {
-        let config = MenubarConfigService()
         // Use wss:// for secure WebSocket; daemon should handle TLS
-        let wsURL = config.daemonBaseURL
+        let wsURL = configService.daemonBaseURL
             .replacingOccurrences(of: "https://", with: "wss://")
             .replacingOccurrences(of: "http://", with: "ws://")
 
-        websocket = WebSocketManager(url: wsURL, apiToken: config.apiToken)
+        websocket = WebSocketManager(url: wsURL, apiToken: configService.apiToken)
 
         websocket?.onMessage = { [weak self] data in
             self?.handleWebSocketMessage(data)
@@ -92,10 +95,8 @@ class NotificationManager: NSObject, ObservableObject {
     // MARK: - Local Notifications
 
     func showLocalNotification(_ event: NotificationEvent) {
-        let config = MenubarConfigService()
-
         // Check notification level filter
-        let level = config.notificationsLevel
+        let level = configService.notificationsLevel
         switch level {
         case "none":
             return
