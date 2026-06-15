@@ -67,13 +67,22 @@ class ConfigViewModel: ObservableObject {
         isSaving = true
         Task { [weak self] in
             guard let self else { return }
+            // Two distinct failure modes warrant separate UI surfaces:
+            // - normalize failure: bad JSON5 syntax (showNormalizeError)
+            // - save failure: server-side rejection (showSaveError)
             do {
                 _ = try await configService.normalizeJSON5(content: content)
+            } catch {
+                self.showNormalizeError = true
+                self.isSaving = false
+                return
+            }
+            do {
                 try await configService.saveClientConfig(content: content)
             } catch {
-                showNormalizeError = true
+                self.showSaveError = true
             }
-            isSaving = false
+            self.isSaving = false
         }
     }
 
@@ -83,11 +92,17 @@ class ConfigViewModel: ObservableObject {
             guard let self else { return }
             do {
                 _ = try await configService.normalizeJSON5(content: content)
+            } catch {
+                self.showNormalizeError = true
+                self.isSaving = false
+                return
+            }
+            do {
                 try await configService.saveModelsConfig(content: content)
             } catch {
-                showNormalizeError = true
+                self.showSaveError = true
             }
-            isSaving = false
+            self.isSaving = false
         }
     }
 
