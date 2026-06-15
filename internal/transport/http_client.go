@@ -3,11 +3,18 @@ package transport
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/tui/types"
@@ -65,7 +72,99 @@ func NewHTTPClient(baseURL string, timeout time.Duration, opts ...HTTPClientOpti
 	for _, opt := range opts {
 		opt(c)
 	}
+	// If a fingerprint pin was configured, install the verification callback
+	// and force chain validation on. This overrides any InsecureSkipVerify
+	// that may have been set earlier by another option.
+	if c.certFingerprint != "" || c.spkiFingerprint != "" {
+		c.applyPinning()
+	}
 	return c
+}
+
+// applyPinning wires the VerifyPeerCertificate callback into the underlying
+// *http.Transport's TLSClientConfig. It is invoked once from NewHTTPClient
+// when a fingerprint pin is configured.
+func (c *httpClient) applyPinning() {
+	transport, ok := c.client.Transport.(*http.Transport)
+	if !ok || transport.TLSClientConfig == nil {
+		return
+	}
+	transport.TLSClientConfig.InsecureSkipVerify = false
+	transport.TLSClientConfig.MinVersion = tls.VersionTLS12
+	transport.TLSClientConfig.VerifyPeerCertificate = c.verifyPinnedCert
+}
+
+// buildTLSConfig constructs the tls.Config that would be used by this client.
+// Exposed primarily for tests so the pinning callback can be exercised in
+// isolation.
+func (c *httpClient) buildTLSConfig() *tls.Config {
+	cfg := &tls.Config{
+		InsecureSkipVerify: true,
+		MinVersion:         tls.VersionTLS12,
+	}
+	if c.certFingerprint != "" || c.spkiFingerprint != "" {
+		cfg.InsecureSkipVerify = false
+		cfg.VerifyPeerCertificate = c.verifyPinnedCert
+	}
+	return cfg
+}
+
+// verifyPinnedCert enforces certificate / SPKI fingerprint pinning. It is
+// invoked by crypto/tls after the normal verification chain when
+// InsecureSkipVerify=false. When a pin is configured we force
+// InsecureSkipVerify=false so both the chain and the pin are validated.
+func (c *httpClient) verifyPinnedCert(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+	if len(rawCerts) == 0 {
+		return errors.New("pinning: no peer certificates")
+	}
+	cert := rawCerts[0]
+	certSum := sha256.Sum256(cert)
+	certHex := hex.EncodeToString(certSum[:])
+	if c.certFingerprint != "" && !strings.EqualFold(certHex, c.certFingerprint) {
+		return fmt.Errorf("pinning: cert fingerprint mismatch (got %s)", certHex)
+	}
+	if c.spkiFingerprint != "" {
+		parsed, err := x509.ParseCertificate(cert)
+		if err != nil {
+			return fmt.Errorf("pinning: parse peer cert: %w", err)
+		}
+		spki, err := x509.MarshalPKIXPublicKey(parsed.PublicKey)
+		if err != nil {
+			return fmt.Errorf("pinning: marshal SPKI: %w", err)
+		}
+		spkiSum := sha256.Sum256(spki)
+		spkiHex := hex.EncodeToString(spkiSum[:])
+		if !strings.EqualFold(spkiHex, c.spkiFingerprint) {
+			return fmt.Errorf("pinning: SPKI fingerprint mismatch (got %s)", spkiHex)
+		}
+	}
+	return nil
+}
+
+// isLoopbackBaseURL reports whether the host portion of baseURL resolves to
+// loopback. Used by DefaultConfig in client.go to decide whether to set
+// InsecureSkipVerify=true when no pin is configured.
+func isLoopbackBaseURL(baseURL string) bool {
+	host := baseURL
+	if u, err := url.Parse(baseURL); err == nil && u.Host != "" {
+		host = u.Hostname()
+	}
+	if host == "" {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return false
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *httpClient) Connect() error {

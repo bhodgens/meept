@@ -86,12 +86,19 @@ type Config struct {
 }
 
 // DefaultConfig returns the default client transport config.
+//
+// InsecureSkipVerify defaults to true only for loopback targets when no
+// fingerprint pin is available — matching the historical out-of-the-box
+// behaviour for self-signed localhost certs. Non-loopback targets default to
+// false, and a fingerprint pin (loaded from ~/.meept/tls/fingerprint.txt via
+// transport.New) always takes precedence and forces chain validation on.
 func DefaultConfig() *Config {
+	httpBase := "https://localhost:8081"
 	return &Config{
 		Transport:          "rpc",
 		SocketPath:         "~/.meept/meept.sock",
-		HTTPBaseURL:        "https://localhost:8081",
-		InsecureSkipVerify: true, // Default true for self-signed local certs
+		HTTPBaseURL:        httpBase,
+		InsecureSkipVerify: isLoopbackBaseURL(httpBase),
 		Timeout:            120 * time.Second,
 	}
 }
