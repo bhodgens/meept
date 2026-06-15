@@ -282,10 +282,13 @@ class ChatNotifier extends StateNotifier<ChatState> {
         // keep isAgentProcessing=true so the progress indicator stays
         // visible.  We clear isLoading here because the HTTP fetch is
         // done; the agent's final chat_message will clear
-        // isAgentProcessing.
+        // isAgentProcessing.  Preserve currentProgress so the
+        // AgentProgressIndicator keeps rendering until the first WS event.
         state = ChatState(
           messages: state.messages,
           isLoading: false,
+          isAgentProcessing: true,
+          currentProgress: state.currentProgress,
         );
       }
     } catch (e) {

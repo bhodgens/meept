@@ -125,8 +125,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 let app = NSApplication.shared
-MainActor.assumeIsolated {
-    let delegate = AppDelegate()
-    app.delegate = delegate
-}
+// NSApplication.delegate is weak; keep a strong reference for the lifetime of app.run().
+let appDelegate = MainActor.assumeIsolated { AppDelegate() }
+app.delegate = appDelegate
 app.run()

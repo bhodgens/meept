@@ -213,21 +213,19 @@ func (e *ImpactEstimator) AggregateImpact(estimates []*ImpactEstimate) *Aggregat
 	}
 
 	totalTimeSaved := 0.0
-	highestConfidence := 0.0
+	totalConfidence := 0.0
 
 	for _, est := range estimates {
 		// Extract time saved from weekly impact
 		totalTimeSaved += e.extractTimeSaved(est.WeeklyImpact)
-		if est.Confidence > highestConfidence {
-			highestConfidence = est.Confidence
-		}
+		totalConfidence += est.Confidence
 	}
 
 	return &AggregateImpact{
 		TotalWeeklyTimeSaved:  totalTimeSaved,
 		TotalMonthlyTimeSaved: totalTimeSaved * 4,
 		RecommendationCount:   len(estimates),
-		AverageConfidence:     highestConfidence / float64(len(estimates)),
+		AverageConfidence:     totalConfidence / float64(len(estimates)),
 		EstimatedMonthlyCost:  e.estimateCostSavings(totalTimeSaved),
 	}
 }

@@ -324,7 +324,31 @@ func (r *Registry) Close() error {
 	}
 
 	r.closed = true
-	return r.store.Close()
+	var lastErr error
+
+	// Close the amendment manager first so its subscriber goroutine exits and
+	// pending amendments are marked ignored. Without this the goroutine and
+	// bus subscription leak on every daemon shutdown.
+	if r.amendmentMgr != nil {
+		if err := r.amendmentMgr.Close(); err != nil {
+			r.logger.Error("Failed to close amendment manager", "error", err)
+			lastErr = err
+		}
+	}
+	// Trigger interrupt tokens so in-flight tasks awaiting an interrupt at
+	// shutdown receive one rather than blocking until process exit.
+	if r.interruptMgr != nil {
+		if err := r.interruptMgr.Close(); err != nil {
+			r.logger.Error("Failed to close interrupt manager", "error", err)
+			lastErr = err
+		}
+	}
+
+	if err := r.store.Close(); err != nil {
+		r.logger.Error("Failed to close task store", "error", err)
+		lastErr = err
+	}
+	return lastErr
 }
 
 func (r *Registry) publishEvent(topic string, data map[string]any) {

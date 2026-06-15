@@ -88,8 +88,10 @@ func (pm *ProjectManager) CheckoutBranch(ctx context.Context, id, branch string)
 		return fmt.Errorf("cannot checkout branch for non-git project %s", id)
 	}
 
-	// Checkout the branch
-	if err := pm.runGit(ctx, p.LocalPath, "checkout", "--", branch); err != nil {
+	// Checkout the branch. The `--` separator goes AFTER the branch name:
+	// `git checkout -- <x>` treats <x> as a pathspec, which fails with
+	// "pathspec did not match" for a legitimate branch name.
+	if err := pm.runGit(ctx, p.LocalPath, "checkout", branch, "--"); err != nil {
 		return fmt.Errorf("git checkout: %w", err)
 	}
 

@@ -590,7 +590,12 @@ func PageRankWithTeleportation(g *RepoGraph, config PageRankConfig, teleportTo [
 		teleportBias[file] = 1.0
 	}
 
-	// Merge with existing personalization
+	// Merge with existing personalization. Initialize the map if the caller
+	// passed a zero-value PageRankConfig (Personalization == nil) — writing
+	// to a nil map panics in Go.
+	if config.Personalization == nil {
+		config.Personalization = make(map[string]float64)
+	}
 	for file, weight := range teleportBias {
 		config.Personalization[file] += weight
 	}

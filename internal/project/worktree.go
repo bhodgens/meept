@@ -119,13 +119,26 @@ func (pm *ProjectManager) MergeWorktree(ctx context.Context, worktreeID, targetB
 		return fmt.Errorf("get project: %w", err)
 	}
 
-	// Checkout target branch in main repo
-	if err := pm.runGit(ctx, p.LocalPath, "checkout", targetBranch); err != nil {
+	// Reject target branch names beginning with '-' to prevent option injection
+	// (matches the guard in CheckoutBranch). w.Branch is internally generated
+	// but guarded too for defense in depth.
+	if strings.HasPrefix(targetBranch, "-") {
+		return fmt.Errorf("target branch %q starts with '-' (refusing ambiguous git arg)", targetBranch)
+	}
+	if strings.HasPrefix(w.Branch, "-") {
+		return fmt.Errorf("worktree branch %q starts with '-' (refusing ambiguous git arg)", w.Branch)
+	}
+
+	// Checkout target branch in main repo. The `--` separator goes AFTER
+	// the branch name (not before): `git checkout -- <x>` treats <x> as a
+	// pathspec; `git checkout <branch> --` separates the branch from any
+	// optional pathspecs.
+	if err := pm.runGit(ctx, p.LocalPath, "checkout", targetBranch, "--"); err != nil {
 		return fmt.Errorf("checkout %s: %w", targetBranch, err)
 	}
 
 	// Merge the worktree branch
-	if err := pm.runGit(ctx, p.LocalPath, "merge", w.Branch); err != nil {
+	if err := pm.runGit(ctx, p.LocalPath, "merge", w.Branch, "--"); err != nil {
 		return fmt.Errorf("merge %s into %s: %w", w.Branch, targetBranch, err)
 	}
 

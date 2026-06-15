@@ -31,8 +31,11 @@ func NewASTEditTool(parser *ast.ParserManager) (*ASTEditTool, error) {
 }
 
 // SetPendingChangesRegistry sets the pending changes registry for preview/accept workflow.
+// Nil guard is required per CLAUDE.md "Setter methods" coding practice.
 func (t *ASTEditTool) SetPendingChangesRegistry(registry *builtin.PendingChangesRegistry) {
-	t.pendingChangesRegistry = registry
+	if registry != nil {
+		t.pendingChangesRegistry = registry
+	}
 }
 
 func (t *ASTEditTool) Name() string { return "ast_edit" }

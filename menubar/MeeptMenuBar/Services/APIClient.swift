@@ -11,7 +11,14 @@ class APIClient {
     private let session: URLSession
 
     init(baseURL: String = "https://localhost:8081", apiToken: String? = nil) {
-        self.baseURL = URL(string: baseURL)!
+        // Fall back to the canonical localhost URL if the configured value
+        // is malformed — matches ConfigService/DashboardService behavior and
+        // avoids a force-unwrap crash on user-controlled menubar.json5 input.
+        if let url = URL(string: baseURL) {
+            self.baseURL = url
+        } else {
+            self.baseURL = URL(string: "https://localhost:8081")!
+        }
         self.apiToken = apiToken
 
         // Accept self-signed certs for localhost — matches the Go server's

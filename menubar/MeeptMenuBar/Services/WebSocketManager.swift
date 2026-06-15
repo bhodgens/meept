@@ -27,7 +27,14 @@ class WebSocketManager: NSObject {
     var onConnect: (() -> Void)?
 
     init(url: String = "wss://localhost:8081", apiToken: String? = nil) {
-        self.baseURL = URL(string: url)!
+        // Fall back to the canonical localhost URL if the configured value
+        // is malformed. Avoids a force-unwrap crash on user-controlled
+        // menubar.json5 input.
+        if let parsed = URL(string: url) {
+            self.baseURL = parsed
+        } else {
+            self.baseURL = URL(string: "wss://localhost:8081")!
+        }
         self.apiToken = apiToken
         super.init()
 

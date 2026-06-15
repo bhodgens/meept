@@ -2309,6 +2309,16 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		}
 	}
 
+	// Stop all PTY sessions. Without this, child processes (debuggers, REPLs,
+	// long-running shells) survive daemon shutdown, get reparented to init,
+	// and run indefinitely. Their readLoop/waitLoop goroutines also leak.
+	if c.PTYManager != nil {
+		if err := c.PTYManager.Close(); err != nil {
+			c.Logger.Error("Failed to close PTY manager", "error", err)
+			lastErr = err
+		}
+	}
+
 	// Stop cluster components (gossip engine, git sync, cluster queue)
 	if c.ClusterEngine != nil {
 		if err := c.ClusterEngine.Stop(); err != nil {
@@ -2325,6 +2335,15 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	if c.ClusterQueue != nil {
 		if err := c.ClusterQueue.Close(); err != nil {
 			c.Logger.Error("Failed to stop cluster queue", "error", err)
+			lastErr = err
+		}
+	}
+	// Stop the WireGuard manager. Its Stop() is currently a no-op but is
+	// provided as a future-cleanup hook; wire it now so any future work that
+	// adds real cleanup (interface teardown, peer revert) runs on shutdown.
+	if c.ClusterWireGuard != nil {
+		if err := c.ClusterWireGuard.Stop(); err != nil {
+			c.Logger.Error("Failed to stop WireGuard manager", "error", err)
 			lastErr = err
 		}
 	}

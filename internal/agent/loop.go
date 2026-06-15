@@ -1253,9 +1253,13 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 		}
 	}
 
-	// Trigger learning pipeline if available and response was successful
+	// Trigger learning pipeline if available and response was successful.
+	// Use context.Background() rather than loopCtx: loopCancel() fires as
+	// soon as RunOnce returns, but learning is an asynchronous best-effort
+	// operation whose LLM calls (Judge/Distill/StorePattern) must outlive
+	// the request that triggered them.
 	if l.learningPipeline != nil && err == nil {
-		go l.triggerLearning(loopCtx, conv, conversationID, finalResponse)
+		go l.triggerLearning(context.Background(), conv, conversationID, finalResponse)
 	}
 
 	// Add final response to conversation
