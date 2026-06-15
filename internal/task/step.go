@@ -1,6 +1,7 @@
 package task
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -440,10 +441,22 @@ func (s *StepStore) Create(step *TaskStep) error {
 }
 
 // Update updates an existing task step and records state transitions.
+// The SELECT, UPDATE, and state-transition INSERT are wrapped in a single
+// transaction (BEGIN IMMEDIATE) so that concurrent updates serialize and the
+// recorded FromState is always correct.
 func (s *StepStore) Update(step *TaskStep) error {
-	// Fetch current state for transition recording
+	ctx := context.Background()
+
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction for step update %s: %w", step.ID, err)
+	}
+	// Safe to call after Commit; a no-op on a committed transaction.
+	defer tx.Rollback()
+
+	// Fetch current state for transition recording (inside the transaction).
 	var oldState StepState
-	row := s.db.QueryRow("SELECT state FROM task_steps WHERE id = ?", step.ID)
+	row := tx.QueryRowContext(ctx, "SELECT state FROM task_steps WHERE id = ?", step.ID)
 	if err := row.Scan(&oldState); err != nil {
 		return fmt.Errorf("failed to get current state for step %s: %w", step.ID, err)
 	}
@@ -456,7 +469,7 @@ func (s *StepStore) Update(step *TaskStep) error {
 	checklistJSON := encodeChecklist(step.Checklist)
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	_, err := s.db.Exec(`
+	_, err = tx.ExecContext(ctx, `
 		UPDATE task_steps
 		SET description = ?, depends_on = ?, tool_hint = ?, agent_id = ?,
 		    job_id = ?, state = ?, result = ?, sequence = ?, revision_count = ?,
@@ -495,19 +508,26 @@ func (s *StepStore) Update(step *TaskStep) error {
 		return fmt.Errorf("failed to update step: %w", err)
 	}
 
-	// Record transition when state actually changed
+	// Record transition when state actually changed (inside the same transaction).
 	if oldState != step.State {
-		if err := s.RecordTransition(&StateTransition{
-			StepID:    step.ID,
-			FromState: oldState,
-			ToState:   step.State,
-			Reason:    "update",
-			Timestamp: time.Now().UTC(),
-		}); err != nil {
-			s.logger.Warn("Failed to record state transition", "step_id", step.ID, "error", err)
+		_, tErr := tx.ExecContext(ctx, `
+			INSERT INTO task_state_transitions (step_id, from_state, to_state, reason, agent_id, timestamp)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+			step.ID,
+			string(oldState),
+			string(step.State),
+			nullableString("update"),
+			nullableString(""),
+			time.Now().UTC().Format(time.RFC3339),
+		)
+		if tErr != nil {
+			s.logger.Warn("Failed to record state transition", "step_id", step.ID, "error", tErr)
 		}
 	}
 
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit step update %s: %w", step.ID, err)
+	}
 	return nil
 }
 
