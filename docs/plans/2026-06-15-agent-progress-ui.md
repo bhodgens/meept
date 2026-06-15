@@ -137,7 +137,7 @@ Expose real-time agent progress to Flutter UI by:
 4.1. Backend unit tests
    - [x] SSE event serialization: `TestHandleChatStream_SSEAgentProgressEvent` in `server_test.go` validates SSE agent progress forwarding
    - [x] Session filtering: `ShouldSendProgress` uses `sessionSubs` map with broadcast fallback (covered by integration flow)
-   - [ ] Rate limiting: not implemented (no debounce/throttle on `handleWSProgress`)
+   - [x] Rate limiting: implemented with interval-based throttling (default: 100ms per connection)
 
 4.2. Flutter widget tests
    - [x] General Flutter tests pass (119 passed, 5 failed -- all pre-existing `error_banner_test.dart` failures, unrelated to agent progress)
