@@ -395,8 +395,8 @@ func TestTasksModel_ViewLoading(t *testing.T) {
 
 	view := model.View()
 
-	if !strings.Contains(view, "Loading") {
-		t.Error("expected 'Loading' in view")
+	if !strings.Contains(view, "loading") {
+		t.Error("expected 'loading' in view")
 	}
 }
 
@@ -411,7 +411,7 @@ func TestTasksModel_ViewLoadingWithExistingJobs(t *testing.T) {
 	view := model.View()
 
 	// Should show jobs, not loading screen
-	if strings.Contains(view, "Loading jobs...") {
+	if strings.Contains(view, "loading jobs...") {
 		t.Error("expected jobs view, not loading screen, when jobs exist")
 	}
 }
@@ -424,8 +424,8 @@ func TestTasksModel_ViewError(t *testing.T) {
 
 	view := model.View()
 
-	if !strings.Contains(view, "Error") {
-		t.Error("expected 'Error' in view")
+	if !strings.Contains(view, "error") {
+		t.Error("expected 'error' in view")
 	}
 	if !strings.Contains(view, "test error") {
 		t.Error("expected error message in view")
@@ -456,10 +456,10 @@ func TestTasksModel_ViewHelp(t *testing.T) {
 
 	view := model.View()
 
-	if !strings.Contains(view, "Tasks View Help") {
+	if !strings.Contains(view, "tasks view help") {
 		t.Error("expected help title in view")
 	}
-	if !strings.Contains(view, "Move cursor up") {
+	if !strings.Contains(view, "move cursor up") {
 		t.Error("expected help content in view")
 	}
 }
@@ -474,8 +474,8 @@ func TestTasksModel_ViewWithJobs(t *testing.T) {
 
 	view := model.View()
 
-	if !strings.Contains(view, "Scheduled Jobs") {
-		t.Error("expected 'Scheduled Jobs' title")
+	if !strings.Contains(view, "scheduled jobs") {
+		t.Error("expected 'scheduled jobs' title")
 	}
 	if !strings.Contains(view, "refresh") {
 		t.Error("expected refresh hint")
@@ -493,8 +493,8 @@ func TestTasksModel_ViewWithSelectedJob(t *testing.T) {
 
 	view := model.View()
 
-	if !strings.Contains(view, "Job Detail") {
-		t.Error("expected 'Job Detail' panel")
+	if !strings.Contains(view, "job detail") {
+		t.Error("expected 'job detail' panel")
 	}
 	if !strings.Contains(view, "Daily Backup") {
 		t.Error("expected job name in detail")
@@ -547,7 +547,7 @@ func TestTasksModel_ViewEmptyDetail(t *testing.T) {
 
 	view := model.View()
 
-	if !strings.Contains(view, "Select a job") {
+	if !strings.Contains(view, "select a job") {
 		t.Error("expected empty detail hint")
 	}
 }
@@ -643,8 +643,8 @@ func TestTasksModel_LineageViewRendering(t *testing.T) {
 	view := model.View()
 
 	// Check that lineage view shows parent and children
-	if !strings.Contains(view, "Task Lineage") {
-		t.Error("expected 'Task Lineage' header")
+	if !strings.Contains(view, "task lineage") {
+		t.Error("expected 'task lineage' header")
 	}
 	if !strings.Contains(view, "Build auth system") {
 		t.Error("expected parent task name")

@@ -42,7 +42,7 @@ const (
 
 // Table column title constants.
 const (
-	ColState = "State"
+	ColState = "state"
 )
 
 // Task step state constants.

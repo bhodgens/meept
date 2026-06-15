@@ -67,13 +67,13 @@ func NewTasksModel(rpc TasksRPCClient) *TasksModel {
 	// Initialize with task columns (7) since default viewMode is ViewModeTasks.
 	// SetSize() will adjust column widths; setJobsColumns() switches to 4 job columns.
 	columns := []table.Column{
-		{Title: "Name", Width: 20},
+		{Title: "name", Width: 20},
 		{Title: ColState, Width: 8},
-		{Title: "Agent", Width: 12},
-		{Title: "Steps", Width: 7},
-		{Title: "Progress", Width: 12},
-		{Title: "Memory", Width: 10},
-		{Title: "Updated", Width: 10},
+		{Title: "agent", Width: 12},
+		{Title: "steps", Width: 7},
+		{Title: "progress", Width: 12},
+		{Title: "memory", Width: 10},
+		{Title: "updated", Width: 10},
 	}
 
 	t := table.New(
@@ -217,10 +217,10 @@ func (m *TasksModel) setJobsColumns() {
 
 	colWidth := max((m.width-20)/4, 10)
 	m.table.SetColumns([]table.Column{
-		{Title: "Name", Width: colWidth},
-		{Title: "Schedule", Width: colWidth},
-		{Title: "Next Run", Width: colWidth},
-		{Title: "Status", Width: 10},
+		{Title: "name", Width: colWidth},
+		{Title: "schedule", Width: colWidth},
+		{Title: "next run", Width: colWidth},
+		{Title: "status", Width: 10},
 	})
 }
 
@@ -243,13 +243,13 @@ func (m *TasksModel) setTasksColumns() {
 	}
 
 	m.table.SetColumns([]table.Column{
-		{Title: "Name", Width: nameW},
+		{Title: "name", Width: nameW},
 		{Title: ColState, Width: stateW},
-		{Title: "Agent", Width: agentW},
-		{Title: "Steps", Width: stepsW},
-		{Title: "Progress", Width: progressW},
-		{Title: "Memory", Width: memoryW},
-		{Title: "Updated", Width: updatedW},
+		{Title: "agent", Width: agentW},
+		{Title: "steps", Width: stepsW},
+		{Title: "progress", Width: progressW},
+		{Title: "memory", Width: memoryW},
+		{Title: "updated", Width: updatedW},
 	})
 }
 
@@ -775,14 +775,14 @@ func (m *TasksModel) renderHeader() string {
 
 	switch m.viewMode {
 	case ViewModeTasks:
-		title = titleStyle.Render("Tasks")
-		tabs = activeStyle.Render("Tasks") + " " + modeStyle.Render("Jobs") + " " + modeStyle.Render("Lineage")
+		title = titleStyle.Render("tasks")
+		tabs = activeStyle.Render("tasks") + " " + modeStyle.Render("jobs") + " " + modeStyle.Render("lineage")
 	case ViewModeLineage:
-		title = titleStyle.Render("Task Lineage")
-		tabs = modeStyle.Render("Tasks") + " " + modeStyle.Render("Jobs") + " " + activeStyle.Render("Lineage")
+		title = titleStyle.Render("task lineage")
+		tabs = modeStyle.Render("tasks") + " " + modeStyle.Render("jobs") + " " + activeStyle.Render("lineage")
 	default:
-		title = titleStyle.Render("Scheduled Jobs")
-		tabs = modeStyle.Render("Tasks") + " " + activeStyle.Render("Jobs") + " " + modeStyle.Render("Lineage")
+		title = titleStyle.Render("scheduled jobs")
+		tabs = modeStyle.Render("tasks") + " " + activeStyle.Render("jobs") + " " + modeStyle.Render("lineage")
 	}
 
 	// Filter indicator
@@ -790,15 +790,15 @@ func (m *TasksModel) renderHeader() string {
 	if m.viewMode == ViewModeTasks {
 		switch m.filter {
 		case FilterAll:
-			filterText = filterStyle.Render("[All]")
+			filterText = filterStyle.Render("[all]")
 		case FilterActive:
-			filterText = filterStyle.Render("[Active]")
+			filterText = filterStyle.Render("[active]")
 		case FilterMine:
-			filterText = filterStyle.Render("[Mine]")
+			filterText = filterStyle.Render("[mine]")
 		case FilterCompleted:
-			filterText = filterStyle.Render("[Completed]")
+			filterText = filterStyle.Render("[completed]")
 		case FilterFailed:
-			filterText = filterStyle.Render("[Failed]")
+			filterText = filterStyle.Render("[failed]")
 		}
 	}
 
@@ -840,12 +840,12 @@ func (m *TasksModel) renderTaskPreview() string {
 	// Quick preview
 	var content strings.Builder
 
-	content.WriteString(labelStyle.Render("ID:"))
+	content.WriteString(labelStyle.Render("id:"))
 	content.WriteString(valueStyle.Render(types.TruncateString(task.ID, 40)))
 	content.WriteString("\n")
 
 	if task.Description != "" {
-		content.WriteString(labelStyle.Render("Desc:"))
+		content.WriteString(labelStyle.Render("desc:"))
 		content.WriteString(valueStyle.Render(types.TruncateString(task.Description, 50)))
 		content.WriteString("\n")
 	}
@@ -858,7 +858,7 @@ func (m *TasksModel) renderTaskPreview() string {
 		inherited = fmt.Sprintf("from %s", types.TruncateString(task.InheritedFrom, 20))
 	}
 
-	content.WriteString(labelStyle.Render("Memory:"))
+	content.WriteString(labelStyle.Render("memory:"))
 	content.WriteString(memStyle.Render(fmt.Sprintf("⚡%d refs  📝%d created  %s", memRefs, createdMems, inherited)))
 	content.WriteString("\n")
 
@@ -868,20 +868,20 @@ func (m *TasksModel) renderTaskPreview() string {
 		if len(models) > 40 {
 			models = models[:37] + "..."
 		}
-		content.WriteString(labelStyle.Render("Models:"))
+		content.WriteString(labelStyle.Render("models:"))
 		content.WriteString(valueStyle.Render(models))
 		content.WriteString("\n")
 	}
 
 	if task.ErrorCount > 0 {
-		content.WriteString(labelStyle.Render("Errors:"))
+		content.WriteString(labelStyle.Render("errors:"))
 		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Render(fmt.Sprintf("%d", task.ErrorCount)))
 		content.WriteString("\n")
 	}
 
 	// Child tasks with progress
 	if len(task.ChildTasks) > 0 {
-		content.WriteString(labelStyle.Render("Children:"))
+		content.WriteString(labelStyle.Render("children:"))
 		for i, child := range task.ChildTasks {
 			prefix := "├─"
 			if i == len(task.ChildTasks)-1 {
@@ -902,7 +902,7 @@ func (m *TasksModel) renderLoading() string {
 		Align(lipgloss.Center).
 		Padding(4, 0)
 
-	return style.Render("Loading jobs...")
+	return style.Render("loading jobs...")
 }
 
 func (m *TasksModel) renderError() string {
@@ -918,11 +918,11 @@ func (m *TasksModel) renderError() string {
 	}
 
 	return style.Render(
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("Error") +
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("error") +
 			"\n\n" +
 			errMsg +
 			"\n\n" +
-			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("Press 'r' to refresh"),
+			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("press 'r' to refresh"),
 	)
 }
 
@@ -959,15 +959,15 @@ func (m *TasksModel) renderJobDetail() string {
 		status = "paused"
 	}
 
-	content := titleStyle.Render("Job Detail") + "\n\n"
+	content := titleStyle.Render("job detail") + "\n\n"
 
 	name := job.Name
 	if name == "" {
 		name = job.ID
 	}
-	content += labelStyle.Render("Name:") + valueStyle.Render(name) + "\n"
-	content += labelStyle.Render("ID:") + valueStyle.Render(job.ID) + "\n"
-	content += labelStyle.Render("Status:") + statusStyle.Render(status) + "\n"
+	content += labelStyle.Render("name:") + valueStyle.Render(name) + "\n"
+	content += labelStyle.Render("id:") + valueStyle.Render(job.ID) + "\n"
+	content += labelStyle.Render("status:") + statusStyle.Render(status) + "\n"
 
 	schedule := job.Schedule
 	if schedule == "" {
@@ -976,22 +976,22 @@ func (m *TasksModel) renderJobDetail() string {
 	if schedule == "" {
 		schedule = StatusNA
 	}
-	content += labelStyle.Render("Schedule:") + valueStyle.Render(schedule) + "\n"
+	content += labelStyle.Render("schedule:") + valueStyle.Render(schedule) + "\n"
 
 	nextRun := job.NextRunTime
 	if nextRun == "" {
 		nextRun = StatusNA
 	}
-	content += labelStyle.Render("Next Run:") + valueStyle.Render(nextRun) + "\n"
+	content += labelStyle.Render("next run:") + valueStyle.Render(nextRun) + "\n"
 
 	lastResult := job.LastResult
 	if lastResult == "" {
 		lastResult = StatusNA
 	}
-	content += labelStyle.Render("Last Result:") + valueStyle.Render(lastResult) + "\n"
+	content += labelStyle.Render("last result:") + valueStyle.Render(lastResult) + "\n"
 
 	if job.Action != "" {
-		content += labelStyle.Render("Action:") + valueStyle.Render(job.Action) + "\n"
+		content += labelStyle.Render("action:") + valueStyle.Render(job.Action) + "\n"
 	}
 
 	return panelStyle.Render(content)
@@ -1007,7 +1007,7 @@ func (m *TasksModel) renderEmptyDetail() string {
 	content := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ColorGray)).
 		Italic(true).
-		Render("Select a job to view details")
+		Render("select a job to view details")
 
 	return panelStyle.Render(content)
 }
@@ -1056,34 +1056,34 @@ func (m *TasksModel) renderTaskDetailModal() string {
 	if name == "" {
 		name = task.ID
 	}
-	content.WriteString(titleStyle.Render("Task: " + types.TruncateString(name, 50)))
+	content.WriteString(titleStyle.Render("task: " + types.TruncateString(name, 50)))
 	content.WriteString("\n\n")
 
 	// Basic info
-	content.WriteString(labelStyle.Render("ID:"))
+	content.WriteString(labelStyle.Render("id:"))
 	content.WriteString(valueStyle.Render(task.ID))
 	content.WriteString("\n")
 
-	content.WriteString(labelStyle.Render("State:"))
+	content.WriteString(labelStyle.Render("state:"))
 	content.WriteString(statusStyle.Render(m.getStateIcon(task.State)))
 	content.WriteString("\n")
 
 	if task.AssignedAgent != "" {
-		content.WriteString(labelStyle.Render("Agent:"))
+		content.WriteString(labelStyle.Render("agent:"))
 		content.WriteString(valueStyle.Render(task.AssignedAgent))
 		content.WriteString("\n")
 	}
 
-	content.WriteString(labelStyle.Render("Created:"))
+	content.WriteString(labelStyle.Render("created:"))
 	content.WriteString(valueStyle.Render(task.CreatedAt))
 	content.WriteString("\n")
 
-	content.WriteString(labelStyle.Render("Updated:"))
+	content.WriteString(labelStyle.Render("updated:"))
 	content.WriteString(valueStyle.Render(task.UpdatedAt))
 	content.WriteString("\n\n")
 
 	// Progress section
-	content.WriteString(labelStyle.Render("Progress:"))
+	content.WriteString(labelStyle.Render("progress:"))
 	progress := m.renderProgressBar(task.CompletedJobs, task.TotalJobs, 20)
 	percent := float64(0)
 	if task.TotalJobs > 0 {
@@ -1109,7 +1109,7 @@ func (m *TasksModel) renderTaskDetailModal() string {
 	// Steps section
 	if len(task.Steps) > 0 {
 		content.WriteString("\n")
-		content.WriteString(sectionStyle.Render("─── Steps ───"))
+		content.WriteString(sectionStyle.Render("─── steps ───"))
 		content.WriteString("\n")
 
 		agentStyle := lipgloss.NewStyle().
@@ -1175,17 +1175,17 @@ func (m *TasksModel) renderTaskDetailModal() string {
 
 	// Memory Context section
 	content.WriteString("\n")
-	content.WriteString(sectionStyle.Render("─── Memory Context ───"))
+	content.WriteString(sectionStyle.Render("─── memory context ───"))
 	content.WriteString("\n")
 
 	if task.InheritedFrom != "" {
-		content.WriteString(labelStyle.Render("Inherited:"))
+		content.WriteString(labelStyle.Render("inherited:"))
 		content.WriteString(valueStyle.Render(task.InheritedFrom))
 		content.WriteString("\n")
 	}
 
 	if len(task.MemoryRefs) > 0 {
-		content.WriteString(labelStyle.Render("Memory refs:"))
+		content.WriteString(labelStyle.Render("memory refs:"))
 		refs := strings.Join(task.MemoryRefs, ", ")
 		if len(refs) > 50 {
 			refs = refs[:47] + "..."
@@ -1195,13 +1195,13 @@ func (m *TasksModel) renderTaskDetailModal() string {
 	}
 
 	if task.ContextQuery != "" {
-		content.WriteString(labelStyle.Render("Query:"))
+		content.WriteString(labelStyle.Render("query:"))
 		content.WriteString(valueStyle.Render(fmt.Sprintf("%q", task.ContextQuery)))
 		content.WriteString("\n")
 	}
 
 	if len(task.CreatedMemories) > 0 {
-		content.WriteString(labelStyle.Render("Created:"))
+		content.WriteString(labelStyle.Render("created:"))
 		mems := strings.Join(task.CreatedMemories, ", ")
 		if len(mems) > 50 {
 			mems = mems[:47] + "..."
@@ -1213,7 +1213,7 @@ func (m *TasksModel) renderTaskDetailModal() string {
 	// Linked Sessions section
 	if len(task.LinkedSessions) > 0 {
 		content.WriteString("\n")
-		content.WriteString(sectionStyle.Render("─── Linked Sessions ───"))
+		content.WriteString(sectionStyle.Render("─── linked sessions ───"))
 		content.WriteString("\n")
 		for _, sess := range task.LinkedSessions {
 			content.WriteString("  • ")
@@ -1227,7 +1227,7 @@ func (m *TasksModel) renderTaskDetailModal() string {
 	footerStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ColorGray)).
 		Italic(true)
-	content.WriteString(footerStyle.Render("[Esc/q] close"))
+	content.WriteString(footerStyle.Render("[esc/q] close"))
 
 	return modalStyle.Render(content.String())
 }
@@ -1386,8 +1386,8 @@ func (m *TasksModel) renderLineageView() string {
 		Bold(true).
 		Padding(0, 1)
 
-	tabs := modeStyle.Render("Tasks") + " " + modeStyle.Render("Jobs") + " " + activeStyle.Render("Lineage")
-	b.WriteString(titleStyle.Render("Task Lineage"))
+	tabs := modeStyle.Render("tasks") + " " + modeStyle.Render("jobs") + " " + activeStyle.Render("lineage")
+	b.WriteString(titleStyle.Render("task lineage"))
 	b.WriteString("  ")
 	b.WriteString(tabs)
 	b.WriteString("\n\n")
@@ -1416,7 +1416,7 @@ func (m *TasksModel) renderLineageView() string {
 
 	if len(rootTasks) == 0 {
 		b.WriteString(panelStyle.Render(
-			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Italic(true).Render("No tasks with lineage information"),
+			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Italic(true).Render("no tasks with lineage information"),
 		))
 	} else {
 		var treeContent strings.Builder
@@ -1555,36 +1555,36 @@ func (m *TasksModel) renderHelp() string {
 	descStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#E5E7EB"))
 
-	content := titleStyle.Render("Tasks View Help") + "\n\n"
+	content := titleStyle.Render("tasks view help") + "\n\n"
 
-	content += sectionStyle.Render("Navigation") + "\n"
-	content += keyStyle.Render("up/k") + descStyle.Render("Move cursor up") + "\n"
-	content += keyStyle.Render("down/j") + descStyle.Render("Move cursor down") + "\n"
-	content += keyStyle.Render("enter") + descStyle.Render("Open task detail modal") + "\n"
-	content += keyStyle.Render("esc") + descStyle.Render("Close modal / clear selection") + "\n"
+	content += sectionStyle.Render("navigation") + "\n"
+	content += keyStyle.Render("up/k") + descStyle.Render("move cursor up") + "\n"
+	content += keyStyle.Render("down/j") + descStyle.Render("move cursor down") + "\n"
+	content += keyStyle.Render("enter") + descStyle.Render("open task detail modal") + "\n"
+	content += keyStyle.Render("esc") + descStyle.Render("close modal / clear selection") + "\n"
 
-	content += "\n" + sectionStyle.Render("View Controls") + "\n"
-	content += keyStyle.Render("tab") + descStyle.Render("Cycle Tasks/Jobs/Lineage views") + "\n"
-	content += keyStyle.Render("t") + descStyle.Render("Toggle lineage view") + "\n"
-	content += keyStyle.Render("f") + descStyle.Render("Cycle through filters (All/Active/Mine/Done/Failed)") + "\n"
-	content += keyStyle.Render("r") + descStyle.Render("Refresh data") + "\n"
-	content += keyStyle.Render("←/→") + descStyle.Render("Collapse/expand task tree") + "\n"
-	content += keyStyle.Render("?") + descStyle.Render("Toggle this help") + "\n"
+	content += "\n" + sectionStyle.Render("view controls") + "\n"
+	content += keyStyle.Render("tab") + descStyle.Render("cycle tasks/jobs/lineage views") + "\n"
+	content += keyStyle.Render("t") + descStyle.Render("toggle lineage view") + "\n"
+	content += keyStyle.Render("f") + descStyle.Render("cycle through filters (all/active/mine/done/failed)") + "\n"
+	content += keyStyle.Render("r") + descStyle.Render("refresh data") + "\n"
+	content += keyStyle.Render("←/→") + descStyle.Render("collapse/expand task tree") + "\n"
+	content += keyStyle.Render("?") + descStyle.Render("toggle this help") + "\n"
 
-	content += "\n" + sectionStyle.Render("Memory Indicators") + "\n"
+	content += "\n" + sectionStyle.Render("memory indicators") + "\n"
 	content += keyStyle.Render("⚡N") + descStyle.Render("N memory references") + "\n"
 	content += keyStyle.Render("⬅N") + descStyle.Render("N inherited memories") + "\n"
 	content += keyStyle.Render("📝N") + descStyle.Render("N memories created") + "\n"
 
-	content += "\n" + sectionStyle.Render("State Icons") + "\n"
-	content += keyStyle.Render("○") + descStyle.Render("Pending") + "\n"
-	content += keyStyle.Render("◐") + descStyle.Render("Planning") + "\n"
-	content += keyStyle.Render("●") + descStyle.Render("Executing") + "\n"
-	content += keyStyle.Render("✓") + descStyle.Render("Completed") + "\n"
-	content += keyStyle.Render("✗") + descStyle.Render("Failed") + "\n"
+	content += "\n" + sectionStyle.Render("state icons") + "\n"
+	content += keyStyle.Render("○") + descStyle.Render("pending") + "\n"
+	content += keyStyle.Render("◐") + descStyle.Render("planning") + "\n"
+	content += keyStyle.Render("●") + descStyle.Render("executing") + "\n"
+	content += keyStyle.Render("✓") + descStyle.Render("completed") + "\n"
+	content += keyStyle.Render("✗") + descStyle.Render("failed") + "\n"
 
 	content += "\n"
-	content += lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("Press any key to close")
+	content += lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("press any key to close")
 
 	return panelStyle.Render(content)
 }
