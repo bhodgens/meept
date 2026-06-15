@@ -432,44 +432,10 @@ func TestAnthropicUsage_CacheFields(t *testing.T) {
 	}
 }
 
-// TestIsToolErrorContent verifies the LLM-M2 fix: the old substring check
-// (strings.Contains "error") is replaced with conservative prefix/envelope
-// detection so that successful tool output containing the word "error" is
-// not falsely flagged as an error.
-func TestIsToolErrorContent(t *testing.T) {
-	tests := []struct {
-		name    string
-		content string
-		want    bool
-	}{
-		// Should NOT be flagged as error
-		{"clean output", "0 errors found", false},
-		{"code with error handling", "if err != nil {\n    return err\n}", false},
-		{"exit status non-zero", "exit status 1", false},
-		{"error word in sentence", "no error handling needed here", false},
-		{"empty string", "", false},
-
-		// SHOULD be flagged as error
-		{"error prefix lowercase", "error: file not found", true},
-		{"error prefix capitalized", "Error: file not found", true},
-		{"error prefix with whitespace", "  Error: something went wrong", true},
-		{"structured error envelope", `{"error_code": "execution_failed", "error_message": "command failed"}`, true},
-		{"structured error minimal", `{"error": "something"}`, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isToolErrorContent(tt.content)
-			if got != tt.want {
-				t.Errorf("isToolErrorContent(%q) = %v, want %v", tt.content, got, tt.want)
-			}
-		})
-	}
-}
-
 // TestAnthropicClient_BuildRequest_ToolResultIsError verifies that the
-// IsError flag in the Anthropic tool_result block is set correctly after
-// the LLM-M2 fix (no more broad substring matching).
+// IsError flag in the Anthropic tool_result block is driven by the
+// structured IsToolError field on ChatMessage (EC-6), not by substring
+// content matching.
 func TestAnthropicClient_BuildRequest_ToolResultIsError(t *testing.T) {
 	cfg := &ModelConfig{
 		ProviderID: "anthropic",
@@ -481,13 +447,19 @@ func TestAnthropicClient_BuildRequest_ToolResultIsError(t *testing.T) {
 	c := NewAnthropicClient(cfg)
 
 	tests := []struct {
-		name     string
-		content  string
-		wantErr  bool
+		name        string
+		content     string
+		isToolError bool
+		wantErr     bool
 	}{
-		{"clean output", "0 errors found", false},
-		{"error prefix", "error: file not found", true},
-		{"exit status", "exit status 1", false},
+		// Success path — IsToolError is false, so IsError must be false
+		// even if the content looks like an error.
+		{"success with error-looking content", "error: file not found", false, false},
+		{"success clean output", "0 errors found", false, false},
+		// Failure path — IsToolError is true, so IsError must be true
+		// even if the content does not look like an error.
+		{"failure with clean content", "exit status 1", true, true},
+		{"failure structured envelope", `{"error_code": "boom"}`, true, true},
 	}
 
 	for _, tt := range tests {
@@ -497,7 +469,7 @@ func TestAnthropicClient_BuildRequest_ToolResultIsError(t *testing.T) {
 				{Role: RoleAssistant, Content: "", ToolCalls: []ToolCall{
 					{ID: "tc1", Type: "function", Function: ToolCallFunction{Name: "f", Arguments: "{}"}},
 				}},
-				{Role: RoleTool, Content: tt.content, ToolCallID: "tc1"},
+				{Role: RoleTool, Content: tt.content, ToolCallID: "tc1", IsToolError: tt.isToolError},
 			}
 			req, err := c.buildRequest(messages, &chatOptions{maxTokens: 128}, false)
 			if err != nil {
@@ -509,8 +481,8 @@ func TestAnthropicClient_BuildRequest_ToolResultIsError(t *testing.T) {
 				for _, c := range m.Content {
 					if c.Type == "tool_result" {
 						if c.IsError != tt.wantErr {
-							t.Errorf("IsError = %v, want %v for content %q",
-								c.IsError, tt.wantErr, tt.content)
+							t.Errorf("IsError = %v, want %v for content %q (IsToolError=%v)",
+								c.IsError, tt.wantErr, tt.content, tt.isToolError)
 						}
 						found = true
 					}

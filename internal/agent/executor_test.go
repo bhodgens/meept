@@ -80,6 +80,28 @@ func TestExecutionResult(t *testing.T) {
 			t.Error("expected non-empty content")
 		}
 	})
+
+	t.Run("ToChatMessage sets IsToolError from Success", func(t *testing.T) {
+		// Success -> IsToolError == false
+		successResult := &ExecutionResult{
+			ToolCallID: "call_ok",
+			Success:    true,
+			Result:     "ok",
+		}
+		if got := successResult.ToChatMessage().IsToolError; got {
+			t.Errorf("expected IsToolError=false for Success=true, got %v", got)
+		}
+
+		// Failure -> IsToolError == true
+		failResult := &ExecutionResult{
+			ToolCallID: "call_fail",
+			Success:    false,
+			Error:      "boom",
+		}
+		if got := failResult.ToChatMessage().IsToolError; !got {
+			t.Errorf("expected IsToolError=true for Success=false, got %v", got)
+		}
+	})
 }
 
 func TestPlaceholderToolRegistry(t *testing.T) {

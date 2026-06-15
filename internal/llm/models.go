@@ -25,6 +25,10 @@ type ChatMessage struct {
 	Name       string     `json:"name,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+	// IsToolError indicates that this tool-role message represents a failed
+	// tool execution. Used by the Anthropic client to set the IsError flag
+	// on tool_result blocks. Not serialized to external APIs (set per-trip).
+	IsToolError bool `json:"-"`
 	// SummaryLevel tracks the hierarchical summarization depth for this
 	// message. 0 = original, 1 = first-level summary, 2 = summary of
 	// summaries, etc. Not serialized to external APIs.

@@ -346,6 +346,7 @@ func (r *ExecutionResult) ToChatMessage() llm.ChatMessage {
 		Role:       llm.RoleTool,
 		Content:    r.ToJSON(),
 		ToolCallID: r.ToolCallID,
+		IsToolError: !r.Success,
 	}
 }
 

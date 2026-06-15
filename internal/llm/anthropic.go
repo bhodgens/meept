@@ -506,26 +506,6 @@ type contentBlockAccum struct {
 	Thinking  strings.Builder
 }
 
-// isToolErrorContent detects whether a tool result message represents an error.
-// It matches the structured error envelope produced by agent.ToolExecutionError.ToJSON
-// (keys "error_code" or "error_message") and the conventional "error:" / "Error:"
-// prefix. It avoids the broad substring-on-any-position check that would falsely
-// flag output like "0 errors found" or code containing "if err != nil".
-func isToolErrorContent(content string) bool {
-	trimmed := strings.TrimSpace(content)
-	lower := strings.ToLower(trimmed)
-	// Prefix-based detection for "error:" convention (e.g. "Error: file not found").
-	if strings.HasPrefix(lower, "error:") {
-		return true
-	}
-	// Structured error envelope from agent.ToolExecutionError.ToJSON starts with
-	// '{"error_code":' or contains '"error_message"' at the start.
-	if strings.HasPrefix(trimmed, `{"error`) {
-		return true
-	}
-	return false
-}
-
 // buildRequest constructs an Anthropic API request from our internal message format.
 func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions, stream bool) (*anthropicRequest, error) {
 	// Extract system prompt from messages
@@ -550,19 +530,16 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 			// LLM-1 FIX: Tool results must be separate user messages per Anthropic API spec
 			// Do NOT append to assistant message content - create a new user message
 			msgIndexToAPIIndex[i] = len(apiMessages)
-			// LLM-M2 FIX: The previous substring check (strings.Contains "error")
-			// falsely flagged successful output containing the word "error" (e.g.
-			// "0 errors found", code with "if err != nil"). Now we detect tool
-			// errors by checking for the structured error envelope produced by
-			// agent.ToolExecutionError.ToJSON (keys "error_code"/"error_message")
-			// and the common "error:" prefix convention.
+			// EC-6: IsError is now set from the structured IsToolError field
+			// (populated by ExecutionResult.ToChatMessage via Success bool)
+			// instead of substring content matching.
 			apiMessages = append(apiMessages, anthropicMessage{
 				Role: "user",
 				Content: []anthropicContent{{
 					Type:      "tool_result",
 					ToolUseID: msg.ToolCallID,
 					Content:   msg.Content,
-					IsError:   isToolErrorContent(msg.Content),
+					IsError:   msg.IsToolError,
 				}},
 			})
 		case RoleUser, RoleAssistant:
