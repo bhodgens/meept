@@ -976,13 +976,24 @@ func (t *FileEditTool) applyEdits(lines []string, ops []editOp) []string {
 			if start < 0 {
 				start = 0
 			}
+			if start >= len(result) {
+				// Start is past the end of the file — nothing to delete.
+				continue
+			}
 			if end >= len(result) {
 				end = len(result) - 1
 			}
 			if start > end {
 				continue
 			}
-			result = append(result[:start], result[end+1:]...)
+			// Copy into a fresh backing array to avoid slice aliasing between
+			// result[:start] and result[end+1:] which share the same array.
+			// The in-place append mutation corrupts data when subsequent
+			// operations reference the same backing array.
+			kept := make([]string, 0, len(result)-(end-start+1))
+			kept = append(kept, result[:start]...)
+			kept = append(kept, result[end+1:]...)
+			result = kept
 
 		case "insert":
 			idx := op.startLine - 1
@@ -992,9 +1003,17 @@ func (t *FileEditTool) applyEdits(lines []string, ops []editOp) []string {
 			if idx > len(result) {
 				idx = len(result)
 			}
+			// Copy replacement slices into fresh backing arrays before
+			// modifying to avoid aliasing with the result slice.
 			insertSlice := make([]string, len(op.content))
 			copy(insertSlice, op.content)
-			result = append(result[:idx], append(insertSlice, result[idx:]...)...)
+			// Build a new slice rather than mutating result in place to
+			// avoid the classic append(result[:idx], ...) aliasing bug.
+			newResult := make([]string, 0, len(result)+len(insertSlice))
+			newResult = append(newResult, result[:idx]...)
+			newResult = append(newResult, insertSlice...)
+			newResult = append(newResult, result[idx:]...)
+			result = newResult
 		}
 	}
 

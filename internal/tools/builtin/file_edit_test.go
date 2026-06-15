@@ -1449,3 +1449,52 @@ func TestLevenshteinRatio(t *testing.T) {
 		}
 	}
 }
+
+// TestFileEdit_MultipleDeletes_NoAliasing verifies that multiple
+// delete_range operations in a single applyEdits call do not corrupt
+// each other due to slice aliasing in the result backing array.
+func TestFileEdit_MultipleDeletes_NoAliasing(t *testing.T) {
+	content := "line1\nline2\nline3\nline4\nline5\nline6"
+	path, lines, tool := helperFileEditSetup(t, content)
+	ctx := context.Background()
+
+	// Delete line 2 and line 5 — two non-overlapping ranges that would
+	// corrupt data if the backing array is shared (the classic aliasing bug).
+	anchor2 := helperAnchorStripped(lines, 2)
+	anchor5 := helperAnchorStripped(lines, 5)
+
+	result, err := tool.Execute(ctx, map[string]any{
+		"path": path,
+		"edits": []any{
+			map[string]any{
+				"op":     "delete",
+				"anchor": anchor2,
+			},
+			map[string]any{
+				"op":     "delete",
+				"anchor": anchor5,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	tr, ok := result.(tools.ToolResult)
+	if !ok {
+		t.Fatalf("expected ToolResult, got %T", result)
+	}
+	if !tr.Success {
+		t.Fatalf("expected success, got error: %s", tr.Error)
+	}
+
+	got := readFileLines(t, path)
+	want := []string{"line1", "line3", "line4", "line6"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d lines, got %d (%v)", len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("line %d: got %q, want %q", i, got[i], want[i])
+		}
+	}
+}

@@ -270,7 +270,7 @@ func applyFormattingEdits(filePath string, edits []lsp.TextEdit) error {
 		endLine := edit.Range.End.Line
 		endChar := edit.Range.End.Character
 
-		if startLine >= len(lines) || endLine > len(lines) {
+		if startLine >= len(lines) || endLine >= len(lines) {
 			continue // Skip out-of-bounds edits
 		}
 
