@@ -123,6 +123,7 @@ class ConnectionMonitor {
   Timer? _timer;
   Timer? _debounceTimer;
   StreamSubscription<bool>? _connectionSub;
+  Timer? _connectingTimer;
 
   bool? _pendingState;
   bool _confirmed = false;
@@ -140,11 +141,18 @@ class ConnectionMonitor {
 
   void _listenToWebSocket() {
     _connectionSub = _websocket.connectionStream.listen((connected) {
-      // When WebSocket disconnects after being connected, show "connecting..." briefly
-      if (_pendingState == true && !connected) {
-        _container.read(isConnectingProvider.notifier).state = true;
-      }
       _proposeState(connected);
+    });
+
+    // Poll WebSocket's isConnecting flag to show "connecting..." state
+    // This fires while the WebSocket is attempting to connect/reconnect
+    _connectingTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
+      if (_websocket.isConnecting) {
+        _container.read(isConnectingProvider.notifier).state = true;
+      } else if (_websocket.isConnected) {
+        // Clear connecting state only when actually connected
+        _container.read(isConnectingProvider.notifier).state = false;
+      }
     });
   }
 
@@ -155,7 +163,7 @@ class ConnectionMonitor {
     if (prevState == null) {
       _pendingState = connected;
       _confirmed = false;
-      _debounceTimer = Timer(const Duration(seconds: 1), () {
+      _debounceTimer = Timer(const Duration(milliseconds: 500), () {
         _applyState(connected);
       });
       return;
@@ -173,7 +181,7 @@ class ConnectionMonitor {
 
     _pendingState = connected;
     _confirmed = false;
-    _debounceTimer = Timer(const Duration(seconds: 1), () {
+    _debounceTimer = Timer(const Duration(milliseconds: 500), () {
       _applyState(connected);
     });
   }
@@ -182,13 +190,12 @@ class ConnectionMonitor {
     _pendingState = connected;
     _confirmed = true;
     _container.read(connectionStateProvider.notifier).state = connected;
-    // Clear connecting state once we have a definitive state
-    _container.read(isConnectingProvider.notifier).state = false;
+    // Don't clear isConnecting here - let the polling timer manage it
   }
 
   void _startHealthChecks() {
     _timer = Timer.periodic(const Duration(seconds: 30), (_) async {
-      if (!_websocket.isConnected) {
+      if (!_websocket.isConnected && !_websocket.isConnecting) {
         try {
           await _apiClient.getDaemonStatus();
           _proposeState(true);
@@ -203,5 +210,6 @@ class ConnectionMonitor {
     _timer?.cancel();
     _debounceTimer?.cancel();
     _connectionSub?.cancel();
+    _connectingTimer?.cancel();
   }
 }

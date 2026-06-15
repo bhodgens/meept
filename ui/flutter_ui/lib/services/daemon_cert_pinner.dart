@@ -86,19 +86,29 @@ class DaemonCertPinner {
   /// because the daemon binds exclusively to localhost and security
   /// is enforced via API key authentication.
   static bool validateCert(X509Certificate cert, String host) {
+    debugPrint('[cert] validateCert called: host=$host, hasFingerprint=${_cachedFingerprint != null}');
+
     // Only allow localhost connections.
     if (host != 'localhost' && host != '127.0.0.1' && host != '::1') {
+      debugPrint('[cert] REJECTED: non-localhost host=$host');
       return false;
     }
 
     // If we have a fingerprint, enforce pinning.
     if (_cachedFingerprint != null) {
       final actual = sha256.convert(cert.der).toString();
-      return actual == _cachedFingerprint;
+      final match = actual == _cachedFingerprint;
+      debugPrint('[cert] Fingerprint check: match=$match');
+      if (!match) {
+        debugPrint('[cert] REJECTED: fingerprint mismatch');
+        debugPrint('[cert]   Expected: $_cachedFingerprint');
+        debugPrint('[cert]   Got:      $actual');
+      }
+      return match;
     }
 
     // No fingerprint available (App Sandbox, missing file, etc.).
-    // Accept the cert for localhost — security is provided by API key auth.
+    debugPrint('[cert] ACCEPTED: no fingerprint, localhost connection');
     return true;
   }
 }

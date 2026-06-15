@@ -80,6 +80,9 @@ class WebSocketService {
   /// Whether disconnect() was called (subjects closed, no reconnect).
   bool get _isDisposed => _disposed;
 
+
+  /// Whether currently attempting to connect or reconnect.
+  bool get isConnecting => _isConnecting;
   /// Connect to WebSocket.
   ///
   /// Uses a manual reconnect loop with exponential backoff (1 s base,
