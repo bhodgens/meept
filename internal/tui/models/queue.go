@@ -37,11 +37,11 @@ type QueueRPCClient interface {
 // NewQueueModel creates a new queue model.
 func NewQueueModel(rpc QueueRPCClient) *QueueModel {
 	columns := []table.Column{
-		{Title: "ID", Width: 20},
-		{Title: "Type", Width: 12},
-		{Title: "Priority", Width: 10},
+		{Title: "id", Width: 20},
+		{Title: "type", Width: 12},
+		{Title: "priority", Width: 10},
 		{Title: ColState, Width: 12},
-		{Title: "Task", Width: 20},
+		{Title: "task", Width: 20},
 	}
 
 	t := table.New(
@@ -87,11 +87,11 @@ func (m *QueueModel) SetSize(width, height int) {
 	remaining := width - 54 // ID(20) + type(12) + priority(10) + state(12)
 	taskWidth := max(remaining, 10)
 	m.table.SetColumns([]table.Column{
-		{Title: "ID", Width: 20},
-		{Title: "Type", Width: 12},
-		{Title: "Priority", Width: 10},
+		{Title: "id", Width: 20},
+		{Title: "type", Width: 12},
+		{Title: "priority", Width: 10},
 		{Title: ColState, Width: 12},
-		{Title: "Task", Width: taskWidth},
+		{Title: "task", Width: taskWidth},
 	})
 }
 
@@ -290,7 +290,7 @@ func (m *QueueModel) View() string {
 		Foreground(lipgloss.Color("#06B6D4")).
 		MarginBottom(1)
 
-	b.WriteString(titleStyle.Render("Job Queue"))
+	b.WriteString(titleStyle.Render("job queue"))
 	b.WriteString("\n\n")
 
 	// Stats panel
@@ -300,9 +300,9 @@ func (m *QueueModel) View() string {
 	// Filter indicator
 	filterStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ColorGray))
-	filterLabel := "All Jobs"
+	filterLabel := "all jobs"
 	if m.filterState != "" {
-		filterLabel = fmt.Sprintf("Filter: %s", m.filterState)
+		filterLabel = fmt.Sprintf("filter: %s", m.filterState)
 	}
 	b.WriteString(filterStyle.Render(filterLabel))
 	b.WriteString("\n\n")
@@ -338,7 +338,7 @@ func (m *QueueModel) renderStatsPanel() string {
 		Width(m.width - 4)
 
 	if m.stats == nil {
-		return panelStyle.Render(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("Loading statistics..."))
+		return panelStyle.Render(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("loading statistics..."))
 	}
 
 	// Build stats line
@@ -368,13 +368,13 @@ func (m *QueueModel) renderStatsPanel() string {
 	completed := m.stats.ByState[StateCompleted]
 	failed := m.stats.ByState[StateFailed]
 
-	parts = append(parts, labelStyle.Render("Pending: ")+pendingStyle.Render(fmt.Sprintf("%d", pending)), labelStyle.Render("Processing: ")+processingStyle.Render(fmt.Sprintf("%d", processing)), labelStyle.Render("Completed: ")+completedStyle.Render(fmt.Sprintf("%d", completed)), labelStyle.Render("Failed: ")+failedStyle.Render(fmt.Sprintf("%d", failed)))
+	parts = append(parts, labelStyle.Render("pending: ")+pendingStyle.Render(fmt.Sprintf("%d", pending)), labelStyle.Render("processing: ")+processingStyle.Render(fmt.Sprintf("%d", processing)), labelStyle.Render("completed: ")+completedStyle.Render(fmt.Sprintf("%d", completed)), labelStyle.Render("failed: ")+failedStyle.Render(fmt.Sprintf("%d", failed)))
 
 	if m.stats.DeadCount > 0 {
 		deadStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#DC2626")).
 			Bold(true)
-		parts = append(parts, labelStyle.Render("Dead: ")+deadStyle.Render(fmt.Sprintf("%d", m.stats.DeadCount)))
+		parts = append(parts, labelStyle.Render("dead: ")+deadStyle.Render(fmt.Sprintf("%d", m.stats.DeadCount)))
 	}
 
 	return panelStyle.Render(strings.Join(parts, "  │  "))
@@ -386,7 +386,7 @@ func (m *QueueModel) renderLoading() string {
 		Align(lipgloss.Center).
 		Padding(4, 0)
 
-	return style.Render("Loading queue data...")
+	return style.Render("loading queue data...")
 }
 
 func (m *QueueModel) renderError() string {
@@ -397,11 +397,11 @@ func (m *QueueModel) renderError() string {
 		Width(m.width - 4)
 
 	return style.Render(
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("Error") +
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("error") +
 			"\n\n" +
 			fmt.Sprintf("%v", m.err) +
 			"\n\n" +
-			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("Press 'r' to refresh"),
+			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("press 'r' to refresh"),
 	)
 }
 
@@ -454,14 +454,14 @@ func (m *QueueModel) renderJobDetail() string {
 		priority = fmt.Sprintf("%d", job.Priority)
 	}
 
-	content := titleStyle.Render("Job Detail") + "\n"
-	content += labelStyle.Render("ID:") + valueStyle.Render(job.ID) + "\n"
-	content += labelStyle.Render("Type:") + valueStyle.Render(job.Type) + "\n"
-	content += labelStyle.Render("State:") + stateStyle.Render(job.State) + "\n"
-	content += labelStyle.Render("Priority:") + valueStyle.Render(priority) + "\n"
+	content := titleStyle.Render("job detail") + "\n"
+	content += labelStyle.Render("id:") + valueStyle.Render(job.ID) + "\n"
+	content += labelStyle.Render("type:") + valueStyle.Render(job.Type) + "\n"
+	content += labelStyle.Render("state:") + stateStyle.Render(job.State) + "\n"
+	content += labelStyle.Render("priority:") + valueStyle.Render(priority) + "\n"
 
 	if job.TaskID != "" {
-		content += labelStyle.Render("Task:") + valueStyle.Render(job.TaskID) + "\n"
+		content += labelStyle.Render("task:") + valueStyle.Render(job.TaskID) + "\n"
 	}
 
 	return panelStyle.Render(content)
@@ -487,21 +487,21 @@ func (m *QueueModel) renderHelp() string {
 	descStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#E5E7EB"))
 
-	content := titleStyle.Render("Queue View Help") + "\n\n"
-	content += keyStyle.Render("up/k") + descStyle.Render("Move cursor up") + "\n"
-	content += keyStyle.Render("down/j") + descStyle.Render("Move cursor down") + "\n"
-	content += keyStyle.Render("enter") + descStyle.Render("Select job for detail") + "\n"
-	content += keyStyle.Render("esc") + descStyle.Render("Clear selection") + "\n"
-	content += keyStyle.Render("r") + descStyle.Render("Refresh data") + "\n"
-	content += keyStyle.Render("R") + descStyle.Render("Retry selected failed job") + "\n"
+	content := titleStyle.Render("queue view help") + "\n\n"
+	content += keyStyle.Render("up/k") + descStyle.Render("move cursor up") + "\n"
+	content += keyStyle.Render("down/j") + descStyle.Render("move cursor down") + "\n"
+	content += keyStyle.Render("enter") + descStyle.Render("select job for detail") + "\n"
+	content += keyStyle.Render("esc") + descStyle.Render("clear selection") + "\n"
+	content += keyStyle.Render("r") + descStyle.Render("refresh data") + "\n"
+	content += keyStyle.Render("R") + descStyle.Render("retry selected failed job") + "\n"
 	content += "\n"
-	content += titleStyle.Render("Filters") + "\n"
-	content += keyStyle.Render("p") + descStyle.Render("Show pending jobs") + "\n"
-	content += keyStyle.Render("f") + descStyle.Render("Show failed jobs") + "\n"
-	content += keyStyle.Render("c") + descStyle.Render("Show completed jobs") + "\n"
-	content += keyStyle.Render("a") + descStyle.Render("Show all jobs") + "\n"
+	content += titleStyle.Render("filters") + "\n"
+	content += keyStyle.Render("p") + descStyle.Render("show pending jobs") + "\n"
+	content += keyStyle.Render("f") + descStyle.Render("show failed jobs") + "\n"
+	content += keyStyle.Render("c") + descStyle.Render("show completed jobs") + "\n"
+	content += keyStyle.Render("a") + descStyle.Render("show all jobs") + "\n"
 	content += "\n"
-	content += lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("Press any key to close")
+	content += lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("press any key to close")
 
 	return panelStyle.Render(content)
 }
