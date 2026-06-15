@@ -407,20 +407,23 @@ func TestApp_ModalOverlayRendering(t *testing.T) {
 	}
 }
 
-func TestApp_SessionPickerModal(t *testing.T) {
+func TestApp_SessionsKeyNavigatesToView(t *testing.T) {
 	app := createTestApp()
 
-	// Open command palette first
+	// Open command palette first (leader-key dispatch happens via palette)
 	app.activeModal = ModalCommandPalette
 	app.commandPalette.Show()
 
-	// Press 'S' (shift+s) to open session picker
+	// Press 'S' (shift+s) — now navigates to sessions view (Issue 9).
 	msg := tea.KeyPressMsg{Code: 'S', Text: "S"}
 	newModel, _ := app.Update(msg)
 	newApp := newModel.(*App)
 
-	if newApp.activeModal != ModalSessionPicker {
-		t.Error("expected session picker to be open")
+	if newApp.currentView != ViewSessions {
+		t.Errorf("expected current view %d (ViewSessions), got %d", ViewSessions, newApp.currentView)
+	}
+	if newApp.activeModal != ModalNone {
+		t.Error("expected modal to be closed after navigating to sessions view")
 	}
 }
 

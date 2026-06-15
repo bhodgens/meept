@@ -49,6 +49,8 @@ class _SessionsListState extends ConsumerState<SessionsList> {
               if (controller.text.isNotEmpty) {
                 final session = await notifier.createSession(controller.text);
                 if (session != null) {
+                  // Refresh the list so the new session appears immediately (Issue 6).
+                  await notifier.loadSessions();
                   if (!context.mounted) return;
                   Navigator.pop(context);
                   ref.read(activeSessionProvider.notifier).state = session;

@@ -15,7 +15,8 @@ import 'tools_dropdown.dart';
 /// Home tab enum - 5 tabs
 enum HomeTab { chat, sessions, plans, tasks, agents }
 
-/// Connection status dot - small indicator in toolbar
+/// Connection status dot - small indicator in toolbar.
+/// Tapping opens a popup menu with disconnect/reconnect actions.
 class _ConnectionDot extends ConsumerWidget {
   const _ConnectionDot();
 
@@ -23,31 +24,53 @@ class _ConnectionDot extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final connected = ref.watch(connectionStateProvider);
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: connected
-                ? CyberpunkColors.greenSuccess
-                : CyberpunkColors.redAlert,
-            shape: BoxShape.circle,
+    return PopupMenuButton<String>(
+      onSelected: (value) {
+        if (value == 'disconnect') {
+          ref.read(websocketProvider).disconnect();
+        } else if (value == 'reconnect') {
+          ref.read(websocketProvider).connect();
+        }
+      },
+      itemBuilder: (context) => connected
+          ? const [
+              PopupMenuItem<String>(
+                value: 'disconnect',
+                child: Text('disconnect'),
+              ),
+            ]
+          : const [
+              PopupMenuItem<String>(
+                value: 'reconnect',
+                child: Text('reconnect'),
+              ),
+            ],
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: connected
+                  ? CyberpunkColors.greenSuccess
+                  : CyberpunkColors.redAlert,
+              shape: BoxShape.circle,
+            ),
           ),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          connected ? 'connected' : 'disconnected',
-          style: CyberpunkTypography.bodySmall.copyWith(
-            color: connected
-                ? CyberpunkColors.greenSuccess
-                : CyberpunkColors.redAlert,
-            fontFamily: 'SourceCodePro',
-            fontSize: 10,
+          const SizedBox(width: 6),
+          Text(
+            connected ? 'connected' : 'disconnected',
+            style: CyberpunkTypography.bodySmall.copyWith(
+              color: connected
+                  ? CyberpunkColors.greenSuccess
+                  : CyberpunkColors.redAlert,
+              fontFamily: 'SourceCodePro',
+              fontSize: 10,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

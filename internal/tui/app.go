@@ -1637,9 +1637,13 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return tea.WindowSizeMsg{Width: a.width, Height: a.height}
 			}
 		case keys.Sessions:
-			a.activeModal = ModalSessionPicker
-			a.sessionPicker.Show()
-			return a, a.sessionPicker.RefreshSessions()
+			// Navigate to sessions tab (Issue 9: replaces deprecated ModalSessionPicker).
+			a.currentView = ViewSessions
+			a.statusMessage = "sessions tab (create: n, delete: d)"
+			a.statusMessageTime = time.Now()
+			return a, tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
+				return StatusMessageClearMsg{}
+			})
 		case keys.NewSession:
 			// Create a new session directly with default name
 			cmd := a.createSession(a.clientConfig.Session.DefaultName)
