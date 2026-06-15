@@ -9,7 +9,7 @@ import Foundation
 /// Only available in DEBUG builds. In release builds, the API token must
 /// be configured via `menubar.json5` or the settings UI.
 #if DEBUG
-let DefaultDevAPIKey: String? = "meept_dev_default_key_CHANGE_ME"
+let DefaultDevAPIKey = "meept_dev_default_key_CHANGE_ME"
 #else
 let DefaultDevAPIKey: String? = nil
 #endif
