@@ -118,8 +118,10 @@ func (t *GitCommitTool) Execute(ctx context.Context, args map[string]any) (any, 
 		}
 	}
 
-	validate, _ := args["validate"].(bool)
-	if !validate {
+	// Distinguish "validate" key absent (default to true) from explicitly
+	// set to false (caller wants to bypass validation).
+	validate, validateSpecified := args["validate"].(bool)
+	if !validateSpecified {
 		validate = true // Default to validation enabled
 	}
 
