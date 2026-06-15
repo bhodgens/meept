@@ -61,7 +61,7 @@ func (i memoryListItem) FilterValue() string {
 func NewMemoryModel(rpc MemoryRPCClient) *MemoryModel {
 	// Search input
 	ti := textinput.New()
-	ti.Placeholder = "Search memory..."
+	ti.Placeholder = "search memory..."
 	ti.Focus()
 	ti.CharLimit = 256
 	ti.SetWidth(50)
@@ -77,7 +77,7 @@ func NewMemoryModel(rpc MemoryRPCClient) *MemoryModel {
 		Background(lipgloss.Color("#7C3AED"))
 
 	l := list.New([]list.Item{}, delegate, 40, 10)
-	l.Title = "Search Results"
+	l.Title = "search results"
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.Styles.Title = lipgloss.NewStyle().
@@ -220,7 +220,7 @@ func (m *MemoryModel) View() string {
 		Foreground(lipgloss.Color("#7C3AED")).
 		MarginBottom(1)
 
-	b.WriteString(titleStyle.Render("Memory Browser"))
+	b.WriteString(titleStyle.Render("memory browser"))
 	b.WriteString("\n\n")
 
 	// Search input
@@ -273,7 +273,7 @@ func (m *MemoryModel) renderLoading() string {
 		Padding(2, 0).
 		Foreground(lipgloss.Color("#6B7280"))
 
-	return style.Render("Searching...")
+	return style.Render("searching...")
 }
 
 func (m *MemoryModel) renderError() string {
@@ -284,7 +284,7 @@ func (m *MemoryModel) renderError() string {
 		Width(m.width - 4)
 
 	return style.Render(
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true).Render("Search Error") +
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true).Render("search error") +
 			"\n\n" +
 			fmt.Sprintf("%v", m.err),
 	)
@@ -298,7 +298,7 @@ func (m *MemoryModel) renderEmpty() string {
 		Foreground(lipgloss.Color("#6B7280")).
 		Italic(true)
 
-	return style.Render("No results. Enter a search query and press Enter.")
+	return style.Render("no results. enter a search query and press enter.")
 }
 
 func (m *MemoryModel) renderList(width int) string {
@@ -326,7 +326,7 @@ func (m *MemoryModel) renderDetail(width int) string {
 		content := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6B7280")).
 			Italic(true).
-			Render("Select an item to view details")
+			Render("select an item to view details")
 		return panelStyle.Render(content)
 	}
 
@@ -358,26 +358,26 @@ func (m *MemoryModel) renderDetail(width int) string {
 		Foreground(lipgloss.Color(typeColor)).
 		Bold(true)
 
-	content := titleStyle.Render("Memory Detail") + "\n\n"
-	content += labelStyle.Render("ID:") + valueStyle.Render(item.ID) + "\n"
-	content += labelStyle.Render("Type:") + typeStyle.Render(memType) + "\n"
+	content := titleStyle.Render("memory detail") + "\n\n"
+	content += labelStyle.Render("id:") + valueStyle.Render(item.ID) + "\n"
+	content += labelStyle.Render("type:") + typeStyle.Render(memType) + "\n"
 
 	if item.Category != "" {
-		content += labelStyle.Render("Category:") + valueStyle.Render(item.Category) + "\n"
+		content += labelStyle.Render("category:") + valueStyle.Render(item.Category) + "\n"
 	}
 
-	content += labelStyle.Render("Relevance:") + valueStyle.Render(fmt.Sprintf("%.2f", item.RelevanceScore)) + "\n"
+	content += labelStyle.Render("relevance:") + valueStyle.Render(fmt.Sprintf("%.2f", item.RelevanceScore)) + "\n"
 
 	if item.CreatedAt != "" {
-		content += labelStyle.Render("Created:") + valueStyle.Render(item.CreatedAt) + "\n"
+		content += labelStyle.Render("created:") + valueStyle.Render(item.CreatedAt) + "\n"
 	}
 
 	if item.UpdatedAt != "" {
-		content += labelStyle.Render("Updated:") + valueStyle.Render(item.UpdatedAt) + "\n"
+		content += labelStyle.Render("updated:") + valueStyle.Render(item.UpdatedAt) + "\n"
 	}
 
 	content += "\n"
-	content += lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED")).Render("Content:") + "\n\n"
+	content += lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED")).Render("content:") + "\n\n"
 
 	// Word-wrap content
 	contentText := item.Content
