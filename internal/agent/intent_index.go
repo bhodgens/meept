@@ -48,26 +48,24 @@ func buildIntentText(t IntentType) string {
 
 // BuildIndex pre-computes embeddings for all intent definitions.
 func (idx *SemanticIndex) BuildIndex(ctx context.Context) error {
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-
 	allIntents := []IntentType{
 		IntentChat, IntentReport, IntentRecall, IntentPlatform,
 		IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit,
 		IntentSchedule, IntentAnalyze, IntentSearch, IntentSkill,
 	}
 
+	entries := make([]IntentEntry, 0, len(allIntents))
 	for _, intentType := range allIntents {
 		text := buildIntentText(intentType)
-		idx.entries = append(idx.entries, IntentEntry{
+		entries = append(entries, IntentEntry{
 			IntentType:  intentType,
 			Description: text,
 			Keywords:    intentType.Keywords(),
 		})
 	}
 
-	texts := make([]string, len(idx.entries))
-	for i, e := range idx.entries {
+	texts := make([]string, len(entries))
+	for i, e := range entries {
 		texts[i] = e.Description
 	}
 
@@ -76,6 +74,9 @@ func (idx *SemanticIndex) BuildIndex(ctx context.Context) error {
 		return fmt.Errorf("failed to compute intent embeddings: %w", err)
 	}
 
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	idx.entries = entries
 	idx.vectors = vectors
 	idx.ready = true
 	return nil
@@ -83,17 +84,20 @@ func (idx *SemanticIndex) BuildIndex(ctx context.Context) error {
 
 // Match finds the best matching intent by semantic similarity.
 func (idx *SemanticIndex) Match(input string, minConfidence float64) *SemanticMatch {
-	if !idx.ready {
+	idx.mu.RLock()
+	ready := idx.ready
+	idx.mu.RUnlock()
+	if !ready {
 		return nil
 	}
-
-	idx.mu.RLock()
-	defer idx.mu.RUnlock()
 
 	vector, err := idx.client.Embed(context.Background(), input)
 	if err != nil {
 		return nil
 	}
+
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
 
 	var bestMatch *SemanticMatch
 	bestSimilarity := 0.0

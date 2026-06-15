@@ -164,11 +164,7 @@ func (d *PairProgrammingDriver) runTurnLoop(ctx context.Context, sess *Collabora
 
 		// Check token budget
 		if sess.TokenBudget > 0 {
-			var totalTokens int64
-			for _, turn := range sess.TurnLog {
-				totalTokens += turn.TokensUsed
-			}
-			if totalTokens >= sess.TokenBudget {
+			if sess.TotalTokensUsed() >= sess.TokenBudget {
 				sess.MarkExhausted()
 				return nil, ErrBudgetExceeded
 			}
@@ -256,13 +252,7 @@ func (d *PairProgrammingDriver) runTurnLoop(ctx context.Context, sess *Collabora
 	}
 
 	sess.MarkExhausted()
-	lastDriverOutput := ""
-	for i := len(sess.TurnLog) - 1; i >= 0; i-- {
-		if sess.TurnLog[i].Role == "driver" {
-			lastDriverOutput = sess.TurnLog[i].Content
-			break
-		}
-	}
+	lastDriverOutput := sess.LastContentByRole("driver")
 	return &CollaborationResult{
 		SessionID:   sess.ID,
 		State:       SessionExhausted,
@@ -279,9 +269,10 @@ func (d *PairProgrammingDriver) buildDriverPrompt(sess *CollaborationSession, co
 	prompt += fmt.Sprintf("**Observer:** %s\n\n", observerID)
 	prompt += fmt.Sprintf("## Task\n\n%s\n\n", sess.TaskID)
 
-	if len(sess.TurnLog) > 0 {
+	turnLog := sess.CopyTurnLog()
+	if len(turnLog) > 0 {
 		prompt += "## Conversation History\n\n"
-		for _, turn := range sess.TurnLog {
+		for _, turn := range turnLog {
 			prompt += fmt.Sprintf("**%s (%s):** %s\n\n", turn.AgentID, turn.Role, truncateString(turn.Content, 1000))
 		}
 	}
@@ -306,9 +297,10 @@ func (d *PairProgrammingDriver) buildObserverPrompt(sess *CollaborationSession, 
 	prompt += fmt.Sprintf("**Your role:** Observer (review and provide feedback)\n\n")
 	prompt += fmt.Sprintf("## Task\n\n%s\n\n", sess.TaskID)
 
-	if len(sess.TurnLog) > 0 {
+	turnLog := sess.CopyTurnLog()
+	if len(turnLog) > 0 {
 		prompt += "## Conversation History\n\n"
-		for _, turn := range sess.TurnLog {
+		for _, turn := range turnLog {
 			prompt += fmt.Sprintf("**%s (%s):** %s\n\n", turn.AgentID, turn.Role, truncateString(turn.Content, 1000))
 		}
 	}

@@ -473,6 +473,9 @@ func (r *AgentRegistry) CapabilitiesMap() *CapabilitiesMap {
 
 // SetCapabilitiesMap sets the capabilities map for fast routing.
 func (r *AgentRegistry) SetCapabilitiesMap(capMap *CapabilitiesMap) {
+	if capMap == nil {
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.capabilitiesMap = capMap
@@ -740,6 +743,9 @@ func mergeStringMaps(base, overlay map[string]string) map[string]string {
 // SetCapabilityIndex sets the capability index for all agents.
 // Invalidates existing loops so they get recreated with the new index.
 func (r *AgentRegistry) SetCapabilityIndex(ci *skills.CapabilityIndex) {
+	if ci == nil {
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.capabilityIndex = ci
@@ -751,6 +757,9 @@ func (r *AgentRegistry) SetCapabilityIndex(ci *skills.CapabilityIndex) {
 // SetSkillLoader sets the lazy skill loader for all agents.
 // Invalidates existing loops so they get recreated with the new loader.
 func (r *AgentRegistry) SetSkillLoader(loader *skills.LazySkillLoader) {
+	if loader == nil {
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.skillLoader = loader
@@ -762,6 +771,9 @@ func (r *AgentRegistry) SetSkillLoader(loader *skills.LazySkillLoader) {
 // SetTTSRManager sets the TT-SR stream rule manager for all agents.
 // Invalidates existing loops so they get recreated with the new manager.
 func (r *AgentRegistry) SetTTSRManager(mgr *TTSRManager) {
+	if mgr == nil {
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.ttsrManager = mgr

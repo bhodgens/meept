@@ -189,10 +189,11 @@ func (to *TeamOrchestrator) handleTeamStart(ctx context.Context, msg *models.Bus
 	}
 
 	if len(req.Roster) > teamDefaultMaxMembers {
+		originalCount := len(req.Roster)
 		req.Roster = req.Roster[:teamDefaultMaxMembers]
 		to.logger.Warn("Roster truncated to max members",
 			"session_id", req.SessionID,
-			"original_count", len(req.Roster),
+			"original_count", originalCount,
 			"max", teamDefaultMaxMembers,
 		)
 	}

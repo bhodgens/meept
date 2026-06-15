@@ -878,7 +878,7 @@ func (d *Dispatcher) getPendingClarification(sessionID string) *pendingClarifica
 		return nil
 	}
 	state := d.sessionTracker.GetSession(sessionID)
-	if state == nil || state.TotalRequests == 0 {
+	if state == nil || state.TotalRequests == 0 || len(state.IntentHistory) == 0 {
 		return nil
 	}
 	lastIntent := state.IntentHistory[len(state.IntentHistory)-1]
@@ -1706,11 +1706,23 @@ func (d *Dispatcher) GetStats() DispatcherStats {
 	defer d.stats.mu.RUnlock()
 	fallbackDetails := make([]FallbackEntry, len(d.stats.FallbackDetails))
 	copy(fallbackDetails, d.stats.FallbackDetails)
+	byMethod := make(map[string]int, len(d.stats.ByMethod))
+	for k, v := range d.stats.ByMethod {
+		byMethod[k] = v
+	}
+	byAgent := make(map[string]int, len(d.stats.ByAgent))
+	for k, v := range d.stats.ByAgent {
+		byAgent[k] = v
+	}
+	byIntent := make(map[string]int, len(d.stats.ByIntent))
+	for k, v := range d.stats.ByIntent {
+		byIntent[k] = v
+	}
 	return DispatcherStats{
 		TotalDispatched: d.stats.TotalDispatched,
-		ByMethod:        d.stats.ByMethod,
-		ByAgent:         d.stats.ByAgent,
-		ByIntent:        d.stats.ByIntent,
+		ByMethod:        byMethod,
+		ByAgent:         byAgent,
+		ByIntent:        byIntent,
 		FallbackCount:   d.stats.FallbackCount,
 		FallbackDetails: fallbackDetails,
 	}
@@ -1729,7 +1741,9 @@ func (d *Dispatcher) GetFallbackDetails(limit int) []FallbackEntry {
 	if limit == 0 {
 		return nil
 	}
-	return d.stats.FallbackDetails[len(d.stats.FallbackDetails)-limit:]
+	result := make([]FallbackEntry, limit)
+	copy(result, d.stats.FallbackDetails[len(d.stats.FallbackDetails)-limit:])
+	return result
 }
 
 // DispatcherStats returns statistics about the dispatcher.
@@ -1927,7 +1941,9 @@ func (d *Dispatcher) GetCapabilityMatcher() *CapabilityMatcher {
 
 // SetCapabilityMatcher sets the capability matcher for fast routing.
 func (d *Dispatcher) SetCapabilityMatcher(matcher *CapabilityMatcher) {
-	d.capabilityMatcher = matcher
+	if matcher != nil {
+		d.capabilityMatcher = matcher
+	}
 }
 
 // GetActiveTasks returns all active tasks from the task store.

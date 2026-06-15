@@ -168,3 +168,36 @@ func (s *CollaborationSession) MarkFailed() {
 	s.UpdatedAt = time.Now().UTC()
 	s.mu.Unlock()
 }
+
+// CopyTurnLog returns a snapshot copy of the turn log (thread-safe).
+func (s *CollaborationSession) CopyTurnLog() []TurnEntry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]TurnEntry, len(s.TurnLog))
+	copy(out, s.TurnLog)
+	return out
+}
+
+// TotalTokensUsed sums TokensUsed across all turns (thread-safe).
+func (s *CollaborationSession) TotalTokensUsed() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var total int64
+	for _, turn := range s.TurnLog {
+		total += turn.TokensUsed
+	}
+	return total
+}
+
+// LastContentByRole returns the content of the most recent turn with the
+// given role, or "" if none exists (thread-safe).
+func (s *CollaborationSession) LastContentByRole(role string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i := len(s.TurnLog) - 1; i >= 0; i-- {
+		if s.TurnLog[i].Role == role {
+			return s.TurnLog[i].Content
+		}
+	}
+	return ""
+}

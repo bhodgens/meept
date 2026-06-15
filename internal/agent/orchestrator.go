@@ -53,7 +53,9 @@ type OrchestratorDeps struct {
 
 // SetRepoMapGenerator sets the repo map generator for context enrichment.
 func (o *Orchestrator) SetRepoMapGenerator(gen *repomap.RepoMapGenerator) {
-	o.repoMapGen = gen
+	if gen != nil {
+		o.repoMapGen = gen
+	}
 }
 
 // NewOrchestrator creates a new orchestrator.

@@ -212,29 +212,34 @@ func (t *SessionTracker) PersistIdleSessions(ctx context.Context) error {
 		return nil // No memvid client configured
 	}
 
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	idleThreshold := time.Duration(t.sessionIdleTriggerHours) * time.Hour
 	now := time.Now()
-	var lastErr error
 
+	t.mu.Lock()
+	var toPersist []*TrackerSessionState
 	for _, state := range t.sessions {
 		if state.Persisted {
-			continue // Already persisted
+			continue
 		}
-
 		if now.Sub(state.LastActivityAt) > idleThreshold {
-			if err := t.persistSession(ctx, state); err != nil {
-				t.logger.Error("Failed to persist idle session",
-					"session_id", state.SessionID,
-					"error", err,
-				)
-				lastErr = fmt.Errorf("session %s: %w", state.SessionID, err)
-				continue
-			}
-			state.Persisted = true
+			toPersist = append(toPersist, state)
 		}
+	}
+	t.mu.Unlock()
+
+	var lastErr error
+	for _, state := range toPersist {
+		if err := t.persistSession(ctx, state); err != nil {
+			t.logger.Error("Failed to persist idle session",
+				"session_id", state.SessionID,
+				"error", err,
+			)
+			lastErr = fmt.Errorf("session %s: %w", state.SessionID, err)
+			continue
+		}
+		t.mu.Lock()
+		state.Persisted = true
+		t.mu.Unlock()
 	}
 
 	return lastErr

@@ -482,9 +482,9 @@ func (d *ParallelTeamDriver) runAgent(ctx context.Context, agentID, message, con
 }
 
 func (d *ParallelTeamDriver) updateMemberStatus(sessionID, memberID string, status MemberStatus, errMsg string) {
-	d.convMu.RLock()
+	d.convMu.Lock()
+	defer d.convMu.Unlock()
 	ts, ok := d.conversations[sessionID]
-	d.convMu.RUnlock()
 	if !ok {
 		return
 	}

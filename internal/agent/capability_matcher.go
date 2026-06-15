@@ -376,7 +376,9 @@ func (m *CapabilityMatcher) MatchAll(input string) []*MatchResult {
 
 // SetCapabilityIndex updates the capability index.
 func (m *CapabilityMatcher) SetCapabilityIndex(ci *skills.CapabilityIndex) {
-	m.capabilityIndex = ci
+	if ci != nil {
+		m.capabilityIndex = ci
+	}
 }
 
 // CapabilityIndex returns the current capability index.

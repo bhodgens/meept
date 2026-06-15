@@ -570,6 +570,9 @@ func (rm *ReviewManager) publishReviewEvent(stepID, taskID string, result *Revie
 
 // SetPolicy updates the review policy.
 func (rm *ReviewManager) SetPolicy(policy *ReviewPolicy) {
+	if policy == nil {
+		return
+	}
 	rm.policy = policy
 	rm.logger.Info("Review policy updated")
 }
@@ -756,6 +759,9 @@ func extractKeywords(desc string) []string {
 
 // SetValidationPolicy updates the validation policy.
 func (rm *ReviewManager) SetValidationPolicy(policy *ValidationPolicy) {
+	if policy == nil {
+		return
+	}
 	rm.validationPolicy = policy
 	rm.logger.Info("Validation policy updated")
 }
