@@ -49,21 +49,23 @@ class StorageService {
   // ------ API Key (secure storage) ------
 
   /// Read API key synchronously.
+  ///
   /// Returns the cached keychain value if [init] has been awaited,
   /// otherwise falls back to SharedPreferences for backward compatibility.
-  /// Throws if no API key is configured (storage, config, or build-time injected).
-  String getApiKey() {
+  /// Returns null when no key is configured. Callers (e.g. [ApiClient.storage])
+  /// treat null as "no Authorization header". UI surfaces a warning when the
+  /// resolved key equals [AppConstants.defaultApiKey] (the dev fallback) so
+  /// operators notice misconfiguration instead of silently authing with a
+  /// well-known value.
+  String? getApiKey() {
     if (_cachedApiKey != null && _cachedApiKey!.isNotEmpty) {
-      return _cachedApiKey!;
+      return _cachedApiKey;
     }
     final prefsKey = _prefs?.getString(AppConstants.apiKeyPref);
     if (prefsKey != null && prefsKey.isNotEmpty) return prefsKey;
-    // Build-time injected fallback (empty in release builds per Obs-6)
+    // Dev-only fallback (empty in release builds per --dart-define).
     if (AppConstants.defaultApiKey.isNotEmpty) return AppConstants.defaultApiKey;
-    throw StateError(
-      'No API key configured. Configure one via menubar app settings, '
-      'or run `meept token generate --save`.',
-    );
+    return null;
   }
 
   /// Read API key from keychain (async) for full security.

@@ -6,6 +6,7 @@ import '../../services/api_client.dart';
 import '../../services/storage_service.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../core/constants.dart';
 import '../../providers/providers.dart';
 import 'settings_inputs.dart';
 import '../../widgets/error_banner.dart';
@@ -51,6 +52,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
 
   bool _apiKeyObscured = true;
   String? _apiKeyStatus;
+  bool _isUsingDefaultKey = false;
 
   late final ApiClient _client;
   late final TextEditingController _configController;
@@ -87,6 +89,13 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
         _apiKeyStatus = apiKey != null && apiKey.isNotEmpty
             ? 'token configured'
             : 'no token configured';
+        // Surface a warning when the resolved key is the well-known dev
+        // default -- operators should generate their own via
+        // `meept token generate --save` to avoid silent auth with a known key.
+        _isUsingDefaultKey = apiKey != null &&
+            apiKey.isNotEmpty &&
+            AppConstants.defaultApiKey.isNotEmpty &&
+            apiKey == AppConstants.defaultApiKey;
       });
       // Pre-fill the form field once the form is built.
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -180,10 +189,14 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
 
   Future<void> _saveApiKey() async {
     final apiKey = (_formKey.currentState?.value[SettingsFields.apiKey] as String?) ?? '';
-    await StorageService.instance.setApiKey(apiKey.trim());
+    final trimmed = apiKey.trim();
+    await StorageService.instance.setApiKey(trimmed);
     if (mounted) {
       setState(() {
-        _apiKeyStatus = apiKey.trim().isNotEmpty ? 'token configured' : 'no token configured';
+        _apiKeyStatus = trimmed.isNotEmpty ? 'token configured' : 'no token configured';
+        _isUsingDefaultKey = trimmed.isNotEmpty &&
+            AppConstants.defaultApiKey.isNotEmpty &&
+            trimmed == AppConstants.defaultApiKey;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -383,6 +396,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
       child: _FormSections(
         apiKeyObscured: _apiKeyObscured,
         apiKeyStatus: _apiKeyStatus,
+        isUsingDefaultKey: _isUsingDefaultKey,
         onToggleApiKeyObscure: () {
           setState(() => _apiKeyObscured = !_apiKeyObscured);
         },
@@ -504,6 +518,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
 class _FormSections extends StatelessWidget {
   final bool apiKeyObscured;
   final String? apiKeyStatus;
+  final bool isUsingDefaultKey;
   final VoidCallback onToggleApiKeyObscure;
   final VoidCallback onSaveApiKey;
   final VoidCallback onSaveConnection;
@@ -512,6 +527,7 @@ class _FormSections extends StatelessWidget {
   const _FormSections({
     required this.apiKeyObscured,
     required this.apiKeyStatus,
+    required this.isUsingDefaultKey,
     required this.onToggleApiKeyObscure,
     required this.onSaveApiKey,
     required this.onSaveConnection,
@@ -770,6 +786,41 @@ class _FormSections extends StatelessWidget {
             ),
             validator: (value) => ApiTokenInput.dirty(value ?? '').error,
           ),
+          if (isUsingDefaultKey)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: CyberpunkColors.redAlert.withValues(alpha: 0.12),
+                  border: Border.all(
+                    color: CyberpunkColors.redAlert.withValues(alpha: 0.5),
+                  ),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.warning_amber,
+                      size: 14,
+                      color: CyberpunkColors.redAlert,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'using the default dev API key — '
+                        'run `meept token generate --save` to set a unique key',
+                        style: CyberpunkTypography.bodySmall.copyWith(
+                          color: CyberpunkColors.redAlert,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           const SizedBox(height: 8),
           Row(
             children: [
