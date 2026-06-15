@@ -12,7 +12,7 @@ func (s *Server) handleJobsCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var cfg map[string]any
-	if err := readJSON(r, &cfg); err != nil {
+	if err := readJSON(w, r, &cfg); err != nil {
 		s.writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}

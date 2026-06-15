@@ -13,7 +13,7 @@ func (s *Server) handleSkillsExecute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req SkillExecuteRequest
-	if err := readJSON(r, &req); err != nil {
+	if err := readJSON(w, r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}

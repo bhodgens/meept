@@ -15,11 +15,15 @@ import (
 
 // ServerConfig holds configuration for the HTTP server.
 type ServerConfig struct {
-	Addr           string        // Listen address (default: :8080)
-	ReadTimeout    time.Duration // Read timeout
-	WriteTimeout   time.Duration // Write timeout
-	MaxHeaderBytes int           // Max header size
-	EnableCORS     bool          // Enable CORS headers
+	Addr                string        // Listen address (default: :8080)
+	ReadTimeout         time.Duration // Read timeout
+	WriteTimeout        time.Duration // Write timeout
+	MaxHeaderBytes      int           // Max header size
+	EnableCORS          bool          // Enable CORS headers
+	CORSAllowedOrigins  []string      // Optional CORS allowlist; defaults to localhost
+	TLSCertFile         string        // TLS cert file. When non-empty, TLS is enabled.
+	TLSKeyFile          string        // TLS key file. When non-empty, TLS is enabled.
+	RequireAuth         bool          // Require authentication (default: false for backwards compat)
 }
 
 // DefaultServerConfig returns sensible defaults.
@@ -251,11 +255,17 @@ func (s *Server) Start(ctx context.Context) error {
 		MaxHeaderBytes: s.config.MaxHeaderBytes,
 	}
 
-	s.logger.Info("HTTP server starting", "addr", s.config.Addr)
+	s.logger.Info("HTTP server starting", "addr", s.config.Addr, "tls", s.config.TLSCertFile != "")
 
 	errCh := make(chan error, 1)
 	go func() {
-		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		var err error
+		if s.config.TLSCertFile != "" && s.config.TLSKeyFile != "" {
+			err = s.server.ListenAndServeTLS(s.config.TLSCertFile, s.config.TLSKeyFile)
+		} else {
+			err = s.server.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 	}()
@@ -354,7 +364,18 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 
 		// CORS headers
 		if s.config.EnableCORS {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
+			origin := r.Header.Get("Origin")
+			allowed := s.config.CORSAllowedOrigins
+			if len(allowed) == 0 {
+				allowed = []string{"http://localhost:3000", "http://127.0.0.1:3000"}
+			}
+			for _, a := range allowed {
+				if strings.EqualFold(a, origin) {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Vary", "Origin")
+					break
+				}
+			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
@@ -415,7 +436,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		Message string `json:"message"`
 	}
 
-	if err := readJSON(r, &req); err != nil {
+	if err := readJSON(w, r, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -583,7 +604,10 @@ func parseLimit(s string, maxVal int) (int, error) {
 const maxRequestBodySize = 1 << 20
 
 // readJSON reads and decodes a JSON request body with a size limit.
-func readJSON(r *http.Request, v any) error {
-	r.Body = http.MaxBytesReader(nil, r.Body, maxRequestBodySize)
+// The ResponseWriter is required by http.MaxBytesReader so that the
+// connection is closed on oversize bodies instead of merely returning an
+// error from io.ReadAll.
+func readJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	return json.NewDecoder(r.Body).Decode(v)
 }
