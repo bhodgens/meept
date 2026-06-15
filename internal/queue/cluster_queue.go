@@ -22,10 +22,10 @@ type ClusterQueue struct {
 	cfg         ClusterQueueConfig
 	bus         *bus.MessageBus
 
-	mu      sync.RWMutex
-	claimed map[string]*ClaimRecord
-
-	stopCh chan struct{}
+	mu        sync.RWMutex
+	claimed   map[string]*ClaimRecord
+	stopCh    chan struct{}
+	closeOnce sync.Once
 }
 
 // ClusterQueueConfig holds configuration for the distributed queue.
@@ -221,19 +221,29 @@ func (cq *ClusterQueue) IsClaimed(ctx context.Context, jobID string) (string, bo
 }
 
 // ReclaimIfStale checks all locally tracked claims and reclaims any whose
-// timeout has expired.
+// timeout has expired. It collects stale job IDs under a brief RLock, releases
+// the lock, then reclaims each job individually under its own Lock to avoid
+// holding the write lock across slow I/O (store, bus publish).
 func (cq *ClusterQueue) ReclaimIfStale(ctx context.Context) []*Job {
-	cq.mu.Lock()
-	defer cq.mu.Unlock()
+	now := time.Now()
 
-	var reclaiming []*Job
+	// Snapshot stale job IDs under RLock
+	cq.mu.RLock()
+	var staleIDs []string
 	for jobID, record := range cq.claimed {
-		if time.Now().After(record.TimeoutAt) {
-			reclaiming = append(reclaiming, &Job{ID: jobID})
-			if err := cq.reclaimJobUnlocked(ctx, jobID, "claim_stale"); err != nil {
-				cq.logger.Warn("cluster_queue: reclaim_if_stale: reclaim failed",
-					"job_id", jobID, "error", err)
-			}
+		if now.After(record.TimeoutAt) {
+			staleIDs = append(staleIDs, jobID)
+		}
+	}
+	cq.mu.RUnlock()
+
+	// Reclaim each job individually under its own Lock
+	var reclaiming []*Job
+	for _, jobID := range staleIDs {
+		reclaiming = append(reclaiming, &Job{ID: jobID})
+		if err := cq.ReclaimJob(ctx, jobID, "claim_stale"); err != nil {
+			cq.logger.Warn("cluster_queue: reclaim_if_stale: reclaim failed",
+				"job_id", jobID, "error", err)
 		}
 	}
 
@@ -251,9 +261,12 @@ func (cq *ClusterQueue) Stats(ctx context.Context) (*ClusterQueueStats, error) {
 	}, nil
 }
 
-// Close releases resources held by the cluster queue.
+// Close releases resources held by the cluster queue. It is safe to call
+// multiple times; only the first call closes the stop channel.
 func (cq *ClusterQueue) Close() error {
-	close(cq.stopCh)
+	cq.closeOnce.Do(func() {
+		close(cq.stopCh)
+	})
 	return nil
 }
 
