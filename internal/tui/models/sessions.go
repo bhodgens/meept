@@ -55,9 +55,9 @@ type SessionPlansUpdateMsg struct {
 // NewSessionsModel creates a new sessions model.
 func NewSessionsModel(rpc SessionsRPCClient) *SessionsModel {
 	columns := []table.Column{
-		{Title: "Title", Width: 28},
-		{Title: "Created", Width: 12},
-		{Title: "Last Activity", Width: 14},
+		{Title: "title", Width: 28},
+		{Title: "created", Width: 12},
+		{Title: "last activity", Width: 14},
 	}
 
 	t := table.New(
@@ -110,9 +110,9 @@ func (m *SessionsModel) setSessionsColumns() {
 	}
 
 	m.table.SetColumns([]table.Column{
-		{Title: "Title", Width: titleW},
-		{Title: "Created", Width: createdW},
-		{Title: "Last Activity", Width: activityW},
+		{Title: "title", Width: titleW},
+		{Title: "created", Width: createdW},
+		{Title: "last activity", Width: activityW},
 	})
 }
 
@@ -508,30 +508,30 @@ func (m *SessionsModel) renderSessionDetailModal() string {
 	content.WriteString(titleStyle.Render("session: " + types.TruncateString(displayTitle, 50)))
 	content.WriteString("\n\n")
 
-	content.WriteString(labelStyle.Render("ID:"))
+	content.WriteString(labelStyle.Render("id:"))
 	content.WriteString(valueStyle.Render(sess.ID))
 	content.WriteString("\n")
 
-	content.WriteString(labelStyle.Render("Name:"))
+	content.WriteString(labelStyle.Render("name:"))
 	content.WriteString(valueStyle.Render(sess.Name))
 	content.WriteString("\n")
 
 	if sess.Description != "" {
-		content.WriteString(labelStyle.Render("Description:"))
+		content.WriteString(labelStyle.Render("description:"))
 		content.WriteString(valueStyle.Render(sess.Description))
 		content.WriteString("\n")
 	}
 
-	content.WriteString(labelStyle.Render("Created:"))
+	content.WriteString(labelStyle.Render("created:"))
 	content.WriteString(valueStyle.Render(m.formatTime(sess.CreatedAt)))
 	content.WriteString("\n")
 
-	content.WriteString(labelStyle.Render("Last Activity:"))
+	content.WriteString(labelStyle.Render("last activity:"))
 	content.WriteString(valueStyle.Render(m.formatTimeRelative(sess.LastActivity)))
 	content.WriteString("\n")
 
 	if len(sess.AttachedClients) > 0 {
-		content.WriteString(labelStyle.Render("Clients:"))
+		content.WriteString(labelStyle.Render("clients:"))
 		content.WriteString(valueStyle.Render(fmt.Sprintf("%d attached", len(sess.AttachedClients))))
 		content.WriteString("\n")
 	}
