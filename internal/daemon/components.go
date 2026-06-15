@@ -1707,11 +1707,23 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 // D15 FIX: Tracks started handlers and rolls them back on error.
 func (c *Components) Start(ctx context.Context) error {
 	var startedHandlers []string
-	
-	// rollback stops all handlers that were successfully started
+	started := false // success flag: prevents rollback when Start completes normally
+
+	// rollback stops all handlers that were successfully started.
+	// Only fires when started == false (i.e., Start returned an error).
+	// Also cancels the lifecycle context so context-bound goroutines
+	// (PricingSyncer, etc.) exit even without a Stop method.
 	defer func() {
+		if started {
+			return
+		}
 		if c == nil {
 			return
+		}
+		// Cancel the lifecycle context first so context-bound goroutines
+		// (PricingSyncer, which has no Stop method) exit promptly.
+		if c.cancel != nil {
+			c.cancel()
 		}
 		for i := len(startedHandlers) - 1; i >= 0; i-- {
 			name := startedHandlers[i]
@@ -1741,13 +1753,73 @@ func (c *Components) Start(ctx context.Context) error {
 				if c.WorkerHandler != nil {
 					c.WorkerHandler.Stop(ctx)
 				}
-			case "sync":
-				if c.SyncHandler != nil {
-					c.SyncHandler.Stop(ctx)
+			case "memory":
+				if c.MemoryHandler != nil {
+					c.MemoryHandler.Stop(ctx)
+				}
+			case "cache":
+				if c.ResultCache != nil {
+					c.ResultCache.Stop()
+				}
+			case "pool":
+				if c.WorkerPool != nil {
+					c.WorkerPool.Stop(ctx)
+				}
+			case "scheduler":
+				if c.Scheduler != nil {
+					c.Scheduler.Stop(ctx)
+				}
+			case "orchestrator":
+				if c.Orchestrator != nil {
+					c.Orchestrator.Stop(ctx)
+				}
+			case "team":
+				if c.TeamOrchestrator != nil {
+					c.TeamOrchestrator.Stop(ctx)
+				}
+			case "watchdog":
+				if c.Watchdog != nil {
+					c.Watchdog.Stop()
+				}
+			case "selfimprove":
+				if c.SelfImproveSched != nil {
+					c.SelfImproveSched.Stop()
+				}
+			case "calendar":
+				if c.CalendarReminder != nil {
+					c.CalendarReminder.Stop()
+				}
+			case "refresh":
+				if c.RefreshManager != nil {
+					c.RefreshManager.Stop()
 				}
 			case "syncmgr":
 				if c.SyncManager != nil {
 					c.SyncManager.Stop()
+				}
+			case "sync":
+				if c.SyncHandler != nil {
+					c.SyncHandler.Stop(ctx)
+				}
+			case "web":
+				if c.WebServer != nil {
+					_ = c.WebServer.Shutdown(ctx)
+				}
+			case "telegram":
+				if c.TelegramBot != nil {
+					c.TelegramBot.Stop()
+				}
+			case "bot":
+				if c.BotManager != nil {
+					c.BotManager.StopAll()
+				}
+			case "cluster":
+				if c.ClusterEngine != nil {
+					_ = c.ClusterEngine.Stop()
+				}
+			case "clustergit":
+				if c.ClusterGitSync != nil {
+					_ = c.ClusterGitSync.Stop()
 				}
 			}
 		}
@@ -1775,6 +1847,8 @@ func (c *Components) Start(ctx context.Context) error {
 	if c.MemoryHandler != nil {
 		if err := c.MemoryHandler.Start(ctx); err != nil {
 			c.Logger.Error("Failed to start memory handler", "error", err)
+		} else {
+			startedHandlers = append(startedHandlers, "memory")
 		}
 	}
 
@@ -1782,6 +1856,7 @@ func (c *Components) Start(ctx context.Context) error {
 	if c.ResultCache != nil {
 		c.ResultCache.Start()
 		c.Logger.Debug("Result cache cleanup started")
+		startedHandlers = append(startedHandlers, "cache")
 	}
 
 	// Start queue handler
@@ -1819,6 +1894,8 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 		if err := c.WorkerPool.Start(ctx, poolSize); err != nil {
 			c.Logger.Error("Failed to start worker pool", "error", err)
+		} else {
+			startedHandlers = append(startedHandlers, "pool")
 		}
 	}
 
@@ -1826,6 +1903,8 @@ func (c *Components) Start(ctx context.Context) error {
 	if c.Scheduler != nil {
 		if err := c.Scheduler.Start(ctx); err != nil {
 			c.Logger.Error("Failed to start scheduler", "error", err)
+		} else {
+			startedHandlers = append(startedHandlers, "scheduler")
 		}
 	}
 
@@ -1833,6 +1912,8 @@ func (c *Components) Start(ctx context.Context) error {
 	if c.Orchestrator != nil {
 		if err := c.Orchestrator.Start(ctx); err != nil {
 			c.Logger.Error("Failed to start orchestrator", "error", err)
+		} else {
+			startedHandlers = append(startedHandlers, "orchestrator")
 		}
 	}
 
@@ -1840,24 +1921,29 @@ func (c *Components) Start(ctx context.Context) error {
 	if c.TeamOrchestrator != nil {
 		if err := c.TeamOrchestrator.Start(ctx); err != nil {
 			c.Logger.Error("Failed to start team orchestrator", "error", err)
+		} else {
+			startedHandlers = append(startedHandlers, "team")
 		}
 	}
 
 	// Start watchdog monitor for agent stuck/timeout detection
 	if c.Watchdog != nil {
 		c.Watchdog.Start(ctx)
+		startedHandlers = append(startedHandlers, "watchdog")
 	}
 
 	// Start self-improve scheduler (if configured)
 	if c.SelfImproveSched != nil {
 		go c.SelfImproveSched.Start(ctx)
 		c.Logger.Info("Self-improve scheduler started")
+		startedHandlers = append(startedHandlers, "selfimprove")
 	}
 
 	// Start calendar reminder watcher (if configured)
 	if c.CalendarReminder != nil {
 		go c.CalendarReminder.Start(ctx)
 		c.Logger.Info("Calendar reminder watcher started")
+		startedHandlers = append(startedHandlers, "calendar")
 	}
 
 	// Start OAuth token refresh manager (background goroutine).
@@ -1873,9 +1959,12 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 		c.RefreshManager.Start(ctx, interval)
 		c.Logger.Info("OAuth token refresh manager started", "interval", interval)
+		startedHandlers = append(startedHandlers, "refresh")
 	}
 
 	// Start periodic pricing sync (if configured)
+	// PricingSyncer has no Stop() method; lifecycle is tied to ctx cancellation.
+	// Rollback relies on c.cancel() being called (see deferred rollback above).
 	if c.PricingSyncer != nil {
 		go func() {
 			stop := c.PricingSyncer.StartPeriodicSync(ctx)
@@ -1889,11 +1978,15 @@ func (c *Components) Start(ctx context.Context) error {
 	if c.SyncManager != nil {
 		if err := c.SyncManager.Start(ctx); err != nil {
 			c.Logger.Error("Failed to start sync manager", "error", err)
+		} else {
+			startedHandlers = append(startedHandlers, "syncmgr")
 		}
 	}
 	if c.SyncHandler != nil {
 		if err := c.SyncHandler.Start(ctx); err != nil {
 			c.Logger.Error("Failed to start sync handler", "error", err)
+		} else {
+			startedHandlers = append(startedHandlers, "sync")
 		}
 	}
 
@@ -1905,6 +1998,7 @@ func (c *Components) Start(ctx context.Context) error {
 			}
 		}()
 		c.Logger.Info("Web server started")
+		startedHandlers = append(startedHandlers, "web")
 	}
 
 	// Start Telegram bot
@@ -1915,6 +2009,7 @@ func (c *Components) Start(ctx context.Context) error {
 				c.Logger.Error("Telegram bot error", "error", err)
 			}
 		}()
+		startedHandlers = append(startedHandlers, "telegram")
 	}
 
 	// Start bot framework
@@ -1923,6 +2018,7 @@ func (c *Components) Start(ctx context.Context) error {
 			c.Logger.Error("Failed to start bots", "error", err)
 		} else {
 			c.Logger.Info("Bot framework started")
+			startedHandlers = append(startedHandlers, "bot")
 		}
 	}
 
@@ -1931,6 +2027,7 @@ func (c *Components) Start(ctx context.Context) error {
 		if err := c.ClusterEngine.Start(ctx); err != nil {
 			c.Logger.Error("Failed to start gossip engine", "error", err)
 		} else {
+			startedHandlers = append(startedHandlers, "cluster")
 			// D16: Guard against nil ClusterConfig (initialization decoupling)
 			clusterID := "unknown"
 			nodeID := "unknown"
@@ -1951,9 +2048,11 @@ func (c *Components) Start(ctx context.Context) error {
 			c.Logger.Error("Failed to start git sync", "error", err)
 		} else {
 			c.Logger.Info("Git sync loop started")
+			startedHandlers = append(startedHandlers, "clustergit")
 		}
 	}
 
+	started = true // signal success so the deferred rollback does not fire
 	return nil
 }
 
