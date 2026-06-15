@@ -180,23 +180,25 @@ When the tool already encodes the failure in its result struct (`Success: false`
 
 Grouped by recommended follow-up PR. File:line is given where the subagent provided it; in a few cases only a function name is available and is noted.
 
-### PR-1: Security hardening (HIGH/CRITICAL, design needed)
+### PR-1: Security hardening (HIGH/CRITICAL, design needed) — FIXED
 
-| ID | File:line | Issue |
-|----|-----------|-------|
-| S5-C1 | `internal/transport/client.go:94`, `http_client.go:19-36,48-54` | TLS fingerprint pinning (`WithPinnedFingerprint`) stores values but no `VerifyPeerCertificate` callback reads them; default `InsecureSkipVerify: true` is effectively unmitigated. Implement verification callback, default to secure. |
-| S3-C2 | `internal/tools/builtin/web_fetch.go:122-125,271-279` | SSRF: URL validation is scheme-prefix only; no private-IP / link-local filtering. `http://169.254.169.254/...` is reachable. Add `isPrivateIP` resolver check. |
-| S3-C1 | `internal/tools/builtin/git_commit.go:138-143,206-213` | `GitCommitTool` passes LLM-provided paths to `git add` with no fence check; can stage `/etc/passwd`, `~/.ssh/id_rsa`. Add `FenceChecker` field + validate every file path. `GitSplitTool`/`GitOverviewTool` also lack fence on `workingDir`. |
-| S5-H1 | `internal/comm/http/server.go:1596-1634` | `WebSocketAllowedOrigins` config is computed but never consulted (handshake calls only `isLocalOrigin`). Operator-facing config is silently ignored. |
-| S5-H2 | `internal/comm/web/server.go:258` | `comm/web` server has no TLS code path; `ListenAndServe` only. Default config exposes endpoints in plaintext. Either delete (likely deprecated) or add TLS + require auth. |
-| S5-H3 | `internal/comm/web/server.go:355-365` | CORS unconditionally returns `Access-Control-Allow-Origin: *` when `EnableCORS=true`, regardless of `RequireAuth`. Combined with credentialed requests → cross-origin read. Add `Vary: Origin`, echo allowlist only. |
-| S5-H4 | `internal/comm/http/pty_handler.go:252-254` | `generateSessionID` uses `time.Now().UnixNano()` — predictable. PTY session IDs gate terminal read/write. Use `crypto/rand`. |
-| S5-H5 | `internal/comm/http/api_handlers.go:2571`, `internal/project/manager_branches.go:83`, `manager.go:50` | `git checkout` and `git clone` accept user-controlled refs/URLs without `-` prefix guard or `--` separator. `--orphan=pwn` creates orphan branch, `--upload-pack` style attack on clone. |
-| S5-H6 | `internal/comm/web/server.go:586-589` | `MaxBytesReader(nil, ...)` passes nil ResponseWriter — defeats connection-close on body-limit excess. Sister impl in `comm/http/server.go:1025` does it correctly. |
-| S5-M2 | `internal/auth/encryption_other.go:11-18` | AES-GCM key derivation degrades to predictable (binary install path) on non-darwin/non-linux. Returns explicit error or fall back to random persisted key. |
-| S5-M3 | `internal/comm/telegram/handler.go:178,205` | Telegram session files written mode `0644`; rest of codebase uses `0600`. Inconsistent. |
-| S5-M5 | `internal/comm/http/auth.go:81-85` | `TrimPrefix` without prefix check accepts `Authorization: <key>` without `Bearer ` scheme. Use `HasPrefix` + slice. |
-| S5-M6 | `internal/comm/http/api_handlers.go:2865` | `handleMemoryVectorDelete` parses ID via `TrimPrefix` instead of `r.PathValue("id")`. Brittle. |
+All PR-1 rows resolved in Sprint 1 (commits `ede955a` through `b62944a`).
+
+| ID | File:line | Issue | Status |
+|----|-----------|-------|--------|
+| S5-C1 | `internal/transport/client.go:94`, `http_client.go:19-36,48-54` | TLS fingerprint pinning (`WithPinnedFingerprint`) stores values but no `VerifyPeerCertificate` callback reads them; default `InsecureSkipVerify: true` is effectively unmitigated. Implement verification callback, default to secure. | fixed (`ede955a`) |
+| S3-C2 | `internal/tools/builtin/web_fetch.go:122-125,271-279` | SSRF: URL validation is scheme-prefix only; no private-IP / link-local filtering. `http://169.254.169.254/...` is reachable. Add `isPrivateIP` resolver check. | fixed (`2133cb9`) |
+| S3-C1 | `internal/tools/builtin/git_commit.go:138-143,206-213` | `GitCommitTool` passes LLM-provided paths to `git add` with no fence check; can stage `/etc/passwd`, `~/.ssh/id_rsa`. Add `FenceChecker` field + validate every file path. `GitSplitTool`/`GitOverviewTool` also lack fence on `workingDir`. | fixed (`492d068`) |
+| S5-H1 | `internal/comm/http/server.go:1596-1634` | `WebSocketAllowedOrigins` config is computed but never consulted (handshake calls only `isLocalOrigin`). Operator-facing config is silently ignored. | fixed (`cddba4f`) |
+| S5-H2 | `internal/comm/web/server.go:258` | `comm/web` server has no TLS code path; `ListenAndServe` only. Default config exposes endpoints in plaintext. Either delete (likely deprecated) or add TLS + require auth. | fixed (`a7d9e27`) |
+| S5-H3 | `internal/comm/web/server.go:355-365` | CORS unconditionally returns `Access-Control-Allow-Origin: *` when `EnableCORS=true`, regardless of `RequireAuth`. Combined with credentialed requests → cross-origin read. Add `Vary: Origin`, echo allowlist only. | fixed (`a7d9e27`) |
+| S5-H4 | `internal/comm/http/pty_handler.go:252-254` | `generateSessionID` uses `time.Now().UnixNano()` — predictable. PTY session IDs gate terminal read/write. Use `crypto/rand`. | fixed (`7dfdf53`) |
+| S5-H5 | `internal/comm/http/api_handlers.go:2571`, `internal/project/manager_branches.go:83`, `manager.go:50` | `git checkout` and `git clone` accept user-controlled refs/URLs without `-` prefix guard or `--` separator. `--orphan=pwn` creates orphan branch, `--upload-pack` style attack on clone. | fixed (`f7195b0`) |
+| S5-H6 | `internal/comm/web/server.go:586-589` | `MaxBytesReader(nil, ...)` passes nil ResponseWriter — defeats connection-close on body-limit excess. Sister impl in `comm/http/server.go:1025` does it correctly. | fixed (`a7d9e27`) |
+| S5-M2 | `internal/auth/encryption_other.go:11-18` | AES-GCM key derivation degrades to predictable (binary install path) on non-darwin/non-linux. Returns explicit error or fall back to random persisted key. | fixed (`b62944a`) |
+| S5-M3 | `internal/comm/telegram/handler.go:178,205` | Telegram session files written mode `0644`; rest of codebase uses `0600`. Inconsistent. | fixed (`b62944a`) |
+| S5-M5 | `internal/comm/http/auth.go:81-85` | `TrimPrefix` without prefix check accepts `Authorization: <key>` without `Bearer ` scheme. Use `HasPrefix` + slice. | fixed (`b62944a`) |
+| S5-M6 | `internal/comm/http/api_handlers.go:2865` | `handleMemoryVectorDelete` parses ID via `TrimPrefix` instead of `r.PathValue("id")`. Brittle. | fixed (`b62944a`) |
 
 ### PR-2: Concurrency / lifecycle (HIGH)
 
