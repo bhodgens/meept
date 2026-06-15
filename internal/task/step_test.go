@@ -2,7 +2,10 @@ package task
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +18,10 @@ func newTestStepStore(t *testing.T) *StepStore {
 	if err != nil {
 		t.Fatalf("failed to open test db: %v", err)
 	}
+	// Force a single connection so that all goroutines share the same
+	// in-memory database. Without this, the connection pool hands out
+	// separate :memory: databases per connection.
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
 
 	store, err := NewStepStore(db, nil)
@@ -812,5 +819,146 @@ func TestStepStore_AccumulatedContextRoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(got2.AccumulatedContext, "---") {
 		t.Error("missing separator in accumulated context after update")
+	}
+}
+
+// TestStepStore_SetState_ConcurrentRace verifies that SetState serializes
+// concurrent transitions from the same starting state. Two goroutines attempt
+// to move the same step from StepPending to StepRunning simultaneously; both
+// must succeed without error, but the recorded transitions must reflect the
+// serialized ordering (exactly one transition from pending->running and at
+// most one from running->running, depending on write ordering).
+//
+// The key invariant tested under -race is that the SELECT-UPDATE-INSERT
+// sequence is atomic: no write is lost, and no stale oldState leaks into the
+// transitions table.
+func TestStepStore_SetState_ConcurrentRace(t *testing.T) {
+	store := newTestStepStore(t)
+
+	step := NewTaskStep("task-race", "race contender", 0)
+	if err := store.Create(step); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	const goroutines = 8
+	var (
+		wg         sync.WaitGroup
+		successCnt int32
+		errCnt     int32
+	)
+	start := make(chan struct{})
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			<-start // barrier so all goroutines fire at once
+			err := store.SetState(step.ID, StepRunning)
+			if err == nil {
+				atomic.AddInt32(&successCnt, 1)
+			} else {
+				atomic.AddInt32(&errCnt, 1)
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	if errCnt > 0 {
+		t.Errorf("expected zero SetState errors, got %d", errCnt)
+	}
+	if int(successCnt) != goroutines {
+		t.Errorf("expected all %d SetState calls to succeed, got %d", goroutines, successCnt)
+	}
+
+	// Final state must be StepRunning.
+	got, err := store.GetByID(step.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if got.State != StepRunning {
+		t.Errorf("expected final state %q, got %q", StepRunning, got.State)
+	}
+
+	// At least one pending->running transition must be recorded. Additional
+	// transitions may be running->running (subsequent writers see the
+	// already-mutated row) and are filtered out by the transition recorder
+	// (no transition is logged when from == to).
+	transitions, err := store.GetTransitions(step.ID)
+	if err != nil {
+		t.Fatalf("GetTransitions failed: %v", err)
+	}
+	var pendingToRunning int
+	for _, tr := range transitions {
+		if tr.FromState == StepPending && tr.ToState == StepRunning {
+			pendingToRunning++
+		}
+	}
+	if pendingToRunning != 1 {
+		t.Errorf("expected exactly one pending->running transition, got %d", pendingToRunning)
+	}
+}
+
+// TestStepStore_SetStateWithReason_ConcurrentRace mirrors
+// TestStepStore_SetState_ConcurrentRace for SetStateWithReason, ensuring the
+// reason path is also atomic.
+func TestStepStore_SetStateWithReason_ConcurrentRace(t *testing.T) {
+	store := newTestStepStore(t)
+
+	step := NewTaskStep("task-race-reason", "race contender", 0)
+	if err := store.Create(step); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	const goroutines = 8
+	var (
+		wg         sync.WaitGroup
+		successCnt int32
+		errCnt     int32
+	)
+	start := make(chan struct{})
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			<-start
+			err := store.SetStateWithReason(step.ID, StepRunning,
+				fmt.Sprintf("worker-%d", idx))
+			if err == nil {
+				atomic.AddInt32(&successCnt, 1)
+			} else {
+				atomic.AddInt32(&errCnt, 1)
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	if errCnt > 0 {
+		t.Errorf("expected zero SetStateWithReason errors, got %d", errCnt)
+	}
+	if int(successCnt) != goroutines {
+		t.Errorf("expected all %d calls to succeed, got %d", goroutines, successCnt)
+	}
+
+	got, err := store.GetByID(step.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if got.State != StepRunning {
+		t.Errorf("expected final state %q, got %q", StepRunning, got.State)
+	}
+
+	transitions, err := store.GetTransitions(step.ID)
+	if err != nil {
+		t.Fatalf("GetTransitions failed: %v", err)
+	}
+	var pendingToRunning int
+	for _, tr := range transitions {
+		if tr.FromState == StepPending && tr.ToState == StepRunning {
+			pendingToRunning++
+		}
+	}
+	if pendingToRunning != 1 {
+		t.Errorf("expected exactly one pending->running transition, got %d", pendingToRunning)
 	}
 }

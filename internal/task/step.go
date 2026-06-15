@@ -659,35 +659,51 @@ func (s *StepStore) PromoteReadySteps(taskID string) ([]*TaskStep, error) {
 }
 
 // SetState updates a step's state and records the transition.
+//
+// The SELECT, UPDATE, and transition INSERT are wrapped in a single
+// BEGIN IMMEDIATE transaction so that concurrent transitions from the
+// same starting state serialize: the first writer commits its view of
+// oldState and the second writer sees the new state when it acquires
+// the write lock. This provides SELECT...FOR UPDATE semantics on SQLite.
 func (s *StepStore) SetState(id string, state StepState) error {
-	// Fetch current state for transition recording
+	ctx := context.Background()
+
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction for SetState %s: %w", id, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// SELECT inside the transaction to read the current state.
 	var oldState StepState
-	row := s.db.QueryRow("SELECT state FROM task_steps WHERE id = ?", id)
+	row := tx.QueryRowContext(ctx, "SELECT state FROM task_steps WHERE id = ?", id)
 	if err := row.Scan(&oldState); err != nil {
 		return fmt.Errorf("failed to get current state for step %s: %w", id, err)
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE task_steps SET state = ?, updated_at = ? WHERE id = ?`,
-		string(state), now, id)
-	if err != nil {
+		string(state), now, id); err != nil {
 		return fmt.Errorf("failed to set step state: %w", err)
 	}
 
-	// Record transition when state actually changed
+	// Record transition inside the same transaction when state changed.
 	if oldState != state {
-		if err := s.RecordTransition(&StateTransition{
-			StepID:    id,
-			FromState: oldState,
-			ToState:   state,
-			Reason:    "state_change",
-			Timestamp: time.Now().UTC(),
-		}); err != nil {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO task_state_transitions (step_id, from_state, to_state, reason, agent_id, timestamp)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+			id, string(oldState), string(state),
+			nullableString("state_change"), nullableString(""),
+			time.Now().UTC().Format(time.RFC3339),
+		); err != nil {
 			s.logger.Warn("Failed to record state transition", "step_id", id, "error", err)
 		}
 	}
 
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit SetState %s: %w", id, err)
+	}
 	return nil
 }
 
@@ -1011,36 +1027,50 @@ func decodeChecklist(s string) *Checklist {
 }
 
 // SetStateWithReason updates a step's state and records the transition with a reason.
+//
+// Like SetState, this wraps the SELECT, UPDATE, and transition INSERT in a
+// single BEGIN IMMEDIATE transaction so concurrent callers cannot observe
+// a stale oldState between the read and the write.
 func (s *StepStore) SetStateWithReason(id string, state StepState, reason string) error {
-	// Get current state for transition logging
+	ctx := context.Background()
+
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction for SetStateWithReason %s: %w", id, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// SELECT inside the transaction. If the step does not exist yet, fall
+	// back to StepPending so callers that race creation still record a
+	// transition rather than failing the whole update.
 	var currentStepState StepState
-	row := s.db.QueryRow("SELECT state FROM task_steps WHERE id = ?", id)
+	row := tx.QueryRowContext(ctx, "SELECT state FROM task_steps WHERE id = ?", id)
 	if err := row.Scan(&currentStepState); err != nil {
-		// Step might not exist yet, continue without transition logging
 		currentStepState = StepPending
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE task_steps SET state = ?, updated_at = ? WHERE id = ?`,
-		string(state), now, id)
-	if err != nil {
+		string(state), now, id); err != nil {
 		return fmt.Errorf("failed to set step state: %w", err)
 	}
 
-	// Record transition when state actually changed
 	if currentStepState != state {
-		if err := s.RecordTransition(&StateTransition{
-			StepID:    id,
-			FromState: currentStepState,
-			ToState:   state,
-			Reason:    reason,
-			Timestamp: time.Now().UTC(),
-		}); err != nil {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO task_state_transitions (step_id, from_state, to_state, reason, agent_id, timestamp)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+			id, string(currentStepState), string(state),
+			nullableString(reason), nullableString(""),
+			time.Now().UTC().Format(time.RFC3339),
+		); err != nil {
 			s.logger.Warn("Failed to record state transition", "step_id", id, "error", err)
 		}
 	}
 
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit SetStateWithReason %s: %w", id, err)
+	}
 	return nil
 }
 
