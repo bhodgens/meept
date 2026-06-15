@@ -12,6 +12,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite" // sqlite3 driver registration
+
+	"github.com/caimlas/meept/internal/errcls"
 )
 
 // Ensure implementations satisfy interfaces
@@ -158,7 +160,7 @@ func (s *SQLiteTrainingStore) migrateToV2() {
 	`)
 	// Ignore error if column already exists (duplicate column). Otherwise log
 	// at WARN so unexpected migration failures are visible.
-	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+	if err != nil && !errcls.IsDuplicateColumn(err) {
 		slog.Warn("shadow training store migration: ALTER failed", "error", err)
 	}
 
@@ -166,7 +168,7 @@ func (s *SQLiteTrainingStore) migrateToV2() {
 	_, err = s.db.Exec(`
 		ALTER TABLE shadow_records ADD COLUMN exported_at TEXT;
 	`)
-	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+	if err != nil && !errcls.IsDuplicateColumn(err) {
 		slog.Warn("shadow training store migration: add exported_at failed", "error", err)
 	}
 
@@ -767,7 +769,7 @@ func (s *SQLiteExamplesStore) migrateToV2() {
 	_, err := s.db.Exec(`
 		ALTER TABLE fewshot_examples ADD COLUMN tags TEXT DEFAULT '';
 	`)
-	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+	if err != nil && !errcls.IsDuplicateColumn(err) {
 		slog.Warn("shadow examples store migration: add tags failed", "error", err)
 	}
 
@@ -775,7 +777,7 @@ func (s *SQLiteExamplesStore) migrateToV2() {
 	_, err = s.db.Exec(`
 		ALTER TABLE fewshot_examples ADD COLUMN last_used_at TEXT;
 	`)
-	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+	if err != nil && !errcls.IsDuplicateColumn(err) {
 		slog.Warn("shadow examples store migration: add last_used_at failed", "error", err)
 	}
 }
