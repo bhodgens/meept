@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -20,7 +21,7 @@ const (
 	anthropicDefaultTimeout = 5 * time.Minute
 	anthropicAPIVersion     = "2023-06-01"
 	anthropicMaxRetries     = 3
-	anthropicRetryBackoff   = 2.0 // seconds - exponential: 2, 4, 8
+	anthropicRetryBackoff   = 2.0 // seconds - exponential base: 2^1=2, 2^2=4, 2^3=8
 )
 
 // Anthropic HTTP status codes that warrant a retry
@@ -186,7 +187,9 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 				lastErr = err
 				if attempt < anthropicMaxRetries {
 					// D11: Prefer Retry-After header from rate limit response
-					sleepDuration := time.Duration(anthropicRetryBackoff*float64(attempt)) * time.Second
+					// LLM-H1: Use exponential backoff (2^attempt) with jitter, matching the OpenAI client.
+					expDelay := time.Duration(math.Pow(anthropicRetryBackoff, float64(attempt)) * float64(time.Second))
+					sleepDuration := BackoffWithJitter(expDelay, retryBackoffMaxDelay, true)
 					if rlErr, ok := err.(*RateLimitError); ok && rlErr.RetryAfter > 0 {
 						sleepDuration = rlErr.RetryAfter
 					}
@@ -333,7 +336,9 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 				lastErr = err
 				if attempt < anthropicMaxRetries {
 					// D11: Prefer Retry-After header from rate limit response
-					sleepDuration := time.Duration(anthropicRetryBackoff*float64(attempt)) * time.Second
+					// LLM-H1: Use exponential backoff (2^attempt) with jitter, matching the OpenAI client.
+					expDelay := time.Duration(math.Pow(anthropicRetryBackoff, float64(attempt)) * float64(time.Second))
+					sleepDuration := BackoffWithJitter(expDelay, retryBackoffMaxDelay, true)
 					if rlErr, ok := err.(*RateLimitError); ok && rlErr.RetryAfter > 0 {
 						sleepDuration = rlErr.RetryAfter
 					}
@@ -501,6 +506,26 @@ type contentBlockAccum struct {
 	Thinking  strings.Builder
 }
 
+// isToolErrorContent detects whether a tool result message represents an error.
+// It matches the structured error envelope produced by agent.ToolExecutionError.ToJSON
+// (keys "error_code" or "error_message") and the conventional "error:" / "Error:"
+// prefix. It avoids the broad substring-on-any-position check that would falsely
+// flag output like "0 errors found" or code containing "if err != nil".
+func isToolErrorContent(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	lower := strings.ToLower(trimmed)
+	// Prefix-based detection for "error:" convention (e.g. "Error: file not found").
+	if strings.HasPrefix(lower, "error:") {
+		return true
+	}
+	// Structured error envelope from agent.ToolExecutionError.ToJSON starts with
+	// '{"error_code":' or contains '"error_message"' at the start.
+	if strings.HasPrefix(trimmed, `{"error`) {
+		return true
+	}
+	return false
+}
+
 // buildRequest constructs an Anthropic API request from our internal message format.
 func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions, stream bool) (*anthropicRequest, error) {
 	// Extract system prompt from messages
@@ -525,13 +550,19 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 			// LLM-1 FIX: Tool results must be separate user messages per Anthropic API spec
 			// Do NOT append to assistant message content - create a new user message
 			msgIndexToAPIIndex[i] = len(apiMessages)
+			// LLM-M2 FIX: The previous substring check (strings.Contains "error")
+			// falsely flagged successful output containing the word "error" (e.g.
+			// "0 errors found", code with "if err != nil"). Now we detect tool
+			// errors by checking for the structured error envelope produced by
+			// agent.ToolExecutionError.ToJSON (keys "error_code"/"error_message")
+			// and the common "error:" prefix convention.
 			apiMessages = append(apiMessages, anthropicMessage{
 				Role: "user",
 				Content: []anthropicContent{{
 					Type:      "tool_result",
 					ToolUseID: msg.ToolCallID,
 					Content:   msg.Content,
-					IsError:   strings.Contains(strings.ToLower(msg.Content), "error"),
+					IsError:   isToolErrorContent(msg.Content),
 				}},
 			})
 		case RoleUser, RoleAssistant:

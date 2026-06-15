@@ -431,3 +431,95 @@ func TestAnthropicUsage_CacheFields(t *testing.T) {
 		t.Errorf("CacheReadInputTokens = %d, want 80", u.CacheReadInputTokens)
 	}
 }
+
+// TestIsToolErrorContent verifies the LLM-M2 fix: the old substring check
+// (strings.Contains "error") is replaced with conservative prefix/envelope
+// detection so that successful tool output containing the word "error" is
+// not falsely flagged as an error.
+func TestIsToolErrorContent(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		// Should NOT be flagged as error
+		{"clean output", "0 errors found", false},
+		{"code with error handling", "if err != nil {\n    return err\n}", false},
+		{"exit status non-zero", "exit status 1", false},
+		{"error word in sentence", "no error handling needed here", false},
+		{"empty string", "", false},
+
+		// SHOULD be flagged as error
+		{"error prefix lowercase", "error: file not found", true},
+		{"error prefix capitalized", "Error: file not found", true},
+		{"error prefix with whitespace", "  Error: something went wrong", true},
+		{"structured error envelope", `{"error_code": "execution_failed", "error_message": "command failed"}`, true},
+		{"structured error minimal", `{"error": "something"}`, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isToolErrorContent(tt.content)
+			if got != tt.want {
+				t.Errorf("isToolErrorContent(%q) = %v, want %v", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAnthropicClient_BuildRequest_ToolResultIsError verifies that the
+// IsError flag in the Anthropic tool_result block is set correctly after
+// the LLM-M2 fix (no more broad substring matching).
+func TestAnthropicClient_BuildRequest_ToolResultIsError(t *testing.T) {
+	cfg := &ModelConfig{
+		ProviderID: "anthropic",
+		ModelID:    "claude-test",
+		BaseURL:    "https://api.anthropic.com",
+		APIKey:     "test",
+		MaxTokens:  1024,
+	}
+	c := NewAnthropicClient(cfg)
+
+	tests := []struct {
+		name     string
+		content  string
+		wantErr  bool
+	}{
+		{"clean output", "0 errors found", false},
+		{"error prefix", "error: file not found", true},
+		{"exit status", "exit status 1", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			messages := []ChatMessage{
+				{Role: RoleUser, Content: "test"},
+				{Role: RoleAssistant, Content: "", ToolCalls: []ToolCall{
+					{ID: "tc1", Type: "function", Function: ToolCallFunction{Name: "f", Arguments: "{}"}},
+				}},
+				{Role: RoleTool, Content: tt.content, ToolCallID: "tc1"},
+			}
+			req, err := c.buildRequest(messages, &chatOptions{maxTokens: 128}, false)
+			if err != nil {
+				t.Fatalf("buildRequest: %v", err)
+			}
+			// Find the tool_result content block across all messages.
+			var found bool
+			for _, m := range req.Messages {
+				for _, c := range m.Content {
+					if c.Type == "tool_result" {
+						if c.IsError != tt.wantErr {
+							t.Errorf("IsError = %v, want %v for content %q",
+								c.IsError, tt.wantErr, tt.content)
+						}
+						found = true
+					}
+				}
+			}
+			if !found {
+				t.Fatal("no tool_result content block found in request messages")
+			}
+		})
+	}
+}
+
