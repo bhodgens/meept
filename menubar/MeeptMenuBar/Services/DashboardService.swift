@@ -8,6 +8,15 @@ import Foundation
 class DashboardService {
     private let baseURL: URL
     private let apiToken: String?
+    private lazy var session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.tlsMinimumSupportedProtocolVersion = .TLSv12
+        return URLSession(
+            configuration: config,
+            delegate: LocalhostTrustDelegate(),
+            delegateQueue: nil
+        )
+    }()
 
     init() {
         let config = MenubarConfigService()
@@ -72,7 +81,7 @@ class DashboardService {
     }
 
     private func performData(request: URLRequest) async throws -> Data {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }
