@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/caimlas/meept/internal/errcls"
 )
 
 // ToolErrorCode represents the type of error that occurred during tool execution
@@ -87,12 +89,19 @@ func (b *ErrorBuilder) JSONSyntaxError(parseErr error, argsJSON string) *ToolExe
 	suggestion := "Ensure all objects, arrays, and strings are properly closed. Check for trailing commas, missing quotes, or unescaped special characters."
 	example := ""
 
-	if strings.Contains(parseErr.Error(), "unexpected end") {
-		suggestion = "The JSON appears to be incomplete. Ensure all objects, arrays, and strings are properly closed."
-		example = "Correct: {\"path\": \"/tmp/file.txt\", \"offset\": 10}\nIncorrect: {\"path\": \"/tmp/file.txt\", \"offset\":"
-	} else if strings.Contains(parseErr.Error(), "invalid character") {
-		suggestion = "Check for unquoted keys, missing commas between fields, or invalid escape sequences."
-		example = "Correct: {\"path\": \"/tmp/file.txt\"}\nIncorrect: {path: \"/tmp/file.txt\"}"
+	// errcls.IsJSONSyntaxError provides structured detection via errors.As
+	// against *json.SyntaxError. The message-based differentiation below is
+	// UI text processing (choosing the most helpful suggestion), not error
+	// classification.
+	if errcls.IsJSONSyntaxError(parseErr) {
+		errStr := parseErr.Error()
+		if strings.Contains(errStr, "unexpected end") {
+			suggestion = "The JSON appears to be incomplete. Ensure all objects, arrays, and strings are properly closed."
+			example = "Correct: {\"path\": \"/tmp/file.txt\", \"offset\": 10}\nIncorrect: {\"path\": \"/tmp/file.txt\", \"offset\":"
+		} else if strings.Contains(errStr, "invalid character") {
+			suggestion = "Check for unquoted keys, missing commas between fields, or invalid escape sequences."
+			example = "Correct: {\"path\": \"/tmp/file.txt\"}\nIncorrect: {path: \"/tmp/file.txt\"}"
+		}
 	}
 
 	return &ToolExecutionError{
