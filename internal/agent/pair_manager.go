@@ -149,6 +149,7 @@ func (pm *PairManager) RunRound(ctx context.Context, sessionID string) (*Attempt
 	actorPrompt := session.Context.ActorPrompt()
 	actorConvID := fmt.Sprintf("%s-%s-r%d-%d", actorConvPrefix, session.TaskID, round, time.Now().UnixNano())
 
+	startedAt := time.Now().UTC()
 	actorOutput, err := pm.runAgent(ctx, session.ActorAgentID, actorPrompt, actorConvID)
 	if err != nil {
 		pm.logger.Error("Actor agent failed",
@@ -217,7 +218,7 @@ func (pm *PairManager) RunRound(ctx context.Context, sessionID string) (*Attempt
 		Round:       round,
 		ActorOutput: actorOutput,
 		Review:      reviewResult,
-		StartedAt:   time.Now().UTC().Add(-time.Minute), // approximate
+		StartedAt:   startedAt,
 		CompletedAt: time.Now().UTC(),
 	}
 
