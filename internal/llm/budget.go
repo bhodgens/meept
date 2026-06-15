@@ -662,60 +662,47 @@ func (b *Budget) GetStatus() Status {
 
 // WaitForRateLimit blocks until the RPM rate limit window allows another request.
 // If rateLimitRPM is 0 (unlimited), this returns immediately.
+//
+// LLM-M1 FIX: This method reserves a rate-limit slot by appending time.Now()
+// to requestTimestamps when capacity is available. Without the reservation,
+// N concurrent callers would all observe the same spare capacity and all
+// proceed, exceeding RPM. RecordUsage appends again post-completion; the
+// reservation is a conservative over-count that is safe for rate limiting.
 func (b *Budget) WaitForRateLimit(ctx context.Context) error {
 	if b.rateLimitRPM <= 0 {
 		return nil
 	}
 
-	b.mu.Lock()
-	b.pruneRPMWindow()
-
-	if len(b.requestTimestamps) < b.rateLimitRPM {
-		b.mu.Unlock()
-		return nil
-	}
-
-	// Calculate how long until the oldest request falls out of the window
-	oldest := b.requestTimestamps[0]
-	waitDuration := time.Minute - time.Since(oldest)
-	b.mu.Unlock()
-
-	if waitDuration <= 0 {
-		return nil
-	}
-
-	b.logger.Info("Rate limited - waiting", "duration", waitDuration)
-
-	select {
-	case <-time.After(waitDuration):
-		// Re-acquire lock, prune expired timestamps, and re-check.
-		// Multiple goroutines may wake at the same time; without this
-		// re-check they could all exceed RPM.
+	for {
 		b.mu.Lock()
 		b.pruneRPMWindow()
+
 		if len(b.requestTimestamps) < b.rateLimitRPM {
+			// Reserve a slot atomically with the capacity check so that
+			// concurrent callers see one fewer free slot.
+			b.requestTimestamps = append(b.requestTimestamps, time.Now())
 			b.mu.Unlock()
 			return nil
 		}
-		// Still over limit — wait for the next window slot
-		if len(b.requestTimestamps) > 0 {
-			oldest = b.requestTimestamps[0]
-			remaining := time.Minute - time.Since(oldest)
-			b.mu.Unlock()
-			if remaining > 0 {
-				select {
-				case <-time.After(remaining):
-					return nil
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
-			return nil
-		}
+
+		// Over limit: calculate how long until the oldest request expires.
+		oldest := b.requestTimestamps[0]
+		waitDuration := time.Minute - time.Since(oldest)
 		b.mu.Unlock()
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+
+		if waitDuration <= 0 {
+			// Oldest timestamp should have been pruned; loop to re-check.
+			continue
+		}
+
+		b.logger.Info("Rate limited - waiting", "duration", waitDuration)
+
+		select {
+		case <-time.After(waitDuration):
+			// Loop back and re-check under the lock.
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
 

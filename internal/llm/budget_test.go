@@ -519,3 +519,69 @@ func TestBudget_ZeroCostLimitNoRestriction(t *testing.T) {
 		t.Error("zero cost limit should report within budget")
 	}
 }
+
+// TestBudgetWaitForRateLimitReservation verifies that WaitForRateLimit
+// reserves a slot (LLM-M1 FIX). With RateLimitRPM=1 and N concurrent
+// callers, at most 1 caller should proceed immediately; the rest must
+// block. Previously, all N callers observed the same spare capacity and
+// all proceeded, exceeding RPM.
+func TestBudgetWaitForRateLimitReservation(t *testing.T) {
+	b := NewBudget(BudgetConfig{
+		HourlyLimit:  100000,
+		DailyLimit:   1000000,
+		RateLimitRPM: 1, // Only 1 request per minute allowed
+	}, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	const N = 10
+	var wg sync.WaitGroup
+	immediateCh := make(chan int, N)
+
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			start := time.Now()
+			err := b.WaitForRateLimit(ctx)
+			if err != nil {
+				// Context cancelled (expected for callers that had to wait)
+				return
+			}
+			elapsed := time.Since(start)
+			if elapsed < 50*time.Millisecond {
+				select {
+				case immediateCh <- id:
+				default:
+				}
+			}
+		}(i)
+	}
+
+	// Wait for all goroutines (or context timeout).
+	doneCh := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(doneCh)
+	}()
+
+	select {
+	case <-doneCh:
+	case <-time.After(6 * time.Second):
+		t.Fatal("timed out waiting for goroutines")
+	}
+
+	close(immediateCh)
+	immediateCount := 0
+	for range immediateCh {
+		immediateCount++
+	}
+
+	// With RPM=1 and reservation, at most 1 caller should proceed immediately.
+	// The rest either block or get context-cancelled.
+	if immediateCount > 1 {
+		t.Errorf("expected at most 1 caller to proceed immediately, got %d (RPM reservation not working)", immediateCount)
+	}
+}
+
