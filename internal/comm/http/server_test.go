@@ -1685,3 +1685,91 @@ func TestHandleWebSocket_HandshakeRespectsConfiguredOrigins(t *testing.T) {
 	}
 }
 
+
+// TestProgressRateLimiter tests the rate limiting logic for WebSocket progress events.
+func TestProgressRateLimiter(t *testing.T) {
+	interval := 50 * time.Millisecond
+	limiter := newProgressRateLimiter(interval)
+
+	// Create a mock connection (nil conn for unit testing)
+	var mockConn *websocket.Conn
+
+	// First send should be allowed (no previous send recorded)
+	if !limiter.shouldSend(mockConn) {
+		t.Fatal("First send should be allowed")
+	}
+
+	// Record the send
+	limiter.recordSend(mockConn)
+
+	// Immediate second send should be blocked
+	if limiter.shouldSend(mockConn) {
+		t.Error("Second send should be blocked within interval")
+	}
+
+	// After interval passes, should be allowed again
+	time.Sleep(interval + 10*time.Millisecond)
+	if !limiter.shouldSend(mockConn) {
+		t.Error("Send should be allowed after interval")
+	}
+}
+
+// TestProgressRateLimiterCleanup tests that stale entries are cleaned up.
+func TestProgressRateLimiter_Cleanup(t *testing.T) {
+	limiter := newProgressRateLimiter(100 * time.Millisecond)
+
+	// Test cleanup removes stale entries
+	// Note: nil pointers all map to same key, so we test the cleanup mechanism
+
+	// Verify initial state: no entries, shouldSend returns true
+	var mockConn *websocket.Conn
+	if !limiter.shouldSend(mockConn) {
+		t.Error("Initial state should allow send")
+	}
+
+	// Record a send
+	limiter.recordSend(mockConn)
+
+	// Now should be blocked
+	if limiter.shouldSend(mockConn) {
+		t.Error("Should be blocked after recordSend")
+	}
+
+	// Cleanup with empty active set should remove the entry
+	limiter.cleanup(map[*websocket.Conn]struct{}{})
+
+	// After cleanup, should allow sends again
+	if !limiter.shouldSend(mockConn) {
+		t.Error("Should allow send after cleanup")
+	}
+}
+func TestHandleWSProgress_RateLimiting(t *testing.T) {
+	logger := slog.Default()
+	s := &Server{
+		logger:              logger,
+		wsHub:               NewWebSocketHub(logger),
+		progressRateLimiter: newProgressRateLimiter(50 * time.Millisecond),
+	}
+
+	// Use nil conn for unit testing (all nil conns map to same key)
+	var mockConn *websocket.Conn
+
+	// First send should be allowed
+	if !s.progressRateLimiter.shouldSend(mockConn) {
+		t.Error("First send should be allowed")
+	}
+
+	// Record the send (simulating what handleWSProgress does)
+	s.progressRateLimiter.recordSend(mockConn)
+
+	// Immediate second send should be blocked
+	if s.progressRateLimiter.shouldSend(mockConn) {
+		t.Error("Rate limiter should have blocked immediate second send")
+	}
+
+	// After interval, should be allowed again
+	time.Sleep(60 * time.Millisecond)
+	if !s.progressRateLimiter.shouldSend(mockConn) {
+		t.Error("Rate limiter should allow send after interval")
+	}
+}

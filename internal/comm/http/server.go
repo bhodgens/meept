@@ -133,6 +133,9 @@ type Server struct {
 	wsSubMu       sync.Mutex
 	wsBus         *bus.MessageBus // stored for unsubscribe during Shutdown
 
+	// progressRateLimiter prevents spamming WebSocket clients with rapid progress updates.
+	progressRateLimiter *progressRateLimiter
+
 	// Bot webhook handler (optional, set via WithBotWebhook)
 	botWebhookHandler http.Handler
 
@@ -212,6 +215,55 @@ type WebSocketHub struct {
 	// used for session-scoped progress event filtering.
 	sessionSubs map[*websocket.Conn]map[string]struct{}
 	sessMu      sync.RWMutex
+}
+
+// progressRateLimiter prevents spamming WebSocket clients with rapid progress updates.
+// It uses a simple interval-based approach: only one progress event per connection
+// per interval is sent; excess events are dropped.
+type progressRateLimiter struct {
+	mu       sync.RWMutex
+	lastSent map[*websocket.Conn]time.Time // last send time per connection
+	interval time.Duration                  // minimum interval between sends
+}
+
+// newProgressRateLimiter creates a rate limiter with the specified interval.
+func newProgressRateLimiter(interval time.Duration) *progressRateLimiter {
+	if interval <= 0 {
+		interval = 100 * time.Millisecond // default: 100ms
+	}
+	return &progressRateLimiter{
+		lastSent: make(map[*websocket.Conn]time.Time),
+		interval: interval,
+	}
+}
+
+// shouldSend reports whether enough time has passed since the last send for this connection.
+func (r *progressRateLimiter) shouldSend(conn *websocket.Conn) bool {
+	r.mu.RLock()
+	last, ok := r.lastSent[conn]
+	r.mu.RUnlock()
+	if !ok {
+		return true // no previous send, allow
+	}
+	return time.Since(last) >= r.interval
+}
+
+// recordSend updates the last send time for this connection.
+func (r *progressRateLimiter) recordSend(conn *websocket.Conn) {
+	r.mu.Lock()
+	r.lastSent[conn] = time.Now()
+	r.mu.Unlock()
+}
+
+// cleanup removes stale entries for disconnected connections.
+func (r *progressRateLimiter) cleanup(conns map[*websocket.Conn]struct{}) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for conn := range r.lastSent {
+		if _, ok := conns[conn]; !ok {
+			delete(r.lastSent, conn)
+		}
+	}
 }
 
 // NewWebSocketHub creates a new WebSocket hub.
@@ -332,6 +384,7 @@ func WithWebSocket(msgBus *bus.MessageBus, wsPath string) ServerOption {
 		}
 		s.wsPath = wsPath
 		s.wsHub = NewWebSocketHub(s.logger)
+		s.progressRateLimiter = newProgressRateLimiter(100 * time.Millisecond) // default: 100ms
 		s.wsBus = msgBus
 
 		// Subscribe to all bus topic patterns that produce frontend events.
@@ -440,9 +493,15 @@ func (s *Server) handleWSProgress(msg *models.BusMessage) {
 	h.mu.RUnlock()
 
 	for _, conn := range conns {
+		// Apply rate limiting to prevent UI spam
+		if s.progressRateLimiter != nil && !s.progressRateLimiter.shouldSend(conn) {
+			continue // skip this event for this connection
+		}
 		if _, err := conn.Write(payload); err != nil {
 			s.logger.Warn("ws progress write error, removing client", "error", err)
 			h.Unregister(conn)
+		} else if s.progressRateLimiter != nil {
+			s.progressRateLimiter.recordSend(conn)
 		}
 	}
 }
