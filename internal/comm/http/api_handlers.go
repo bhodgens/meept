@@ -1244,12 +1244,11 @@ func (s *Server) handleRateLimitSummary(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	limitStr := r.URL.Query().Get("limit")
-	limit := 20
-	if limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
-			limit = l
-		}
+	// D12 completion: bound ?limit= to prevent memory exhaustion (was unbounded).
+	limit, err := parseIntParam(r, "limit", 20, 1, 1000)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	summary, err := s.RateLimitSummaryGetter(r.Context(), limit)
@@ -2081,11 +2080,11 @@ func (s *Server) handleCalendarList(w http.ResponseWriter, r *http.Request) {
 
 	timeMin := r.URL.Query().Get("time_min")
 	timeMax := r.URL.Query().Get("time_max")
-	maxResults := 50
-	if mr := r.URL.Query().Get("max_results"); mr != "" {
-		if n, err := strconv.Atoi(mr); err == nil && n > 0 {
-			maxResults = n
-		}
+	// HTTP-H1: bound max_results (was unbounded — DoS via resource exhaustion).
+	maxResults, err := parseIntParam(r, "max_results", 50, 1, 250)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	var tMin, tMax time.Time
@@ -2243,11 +2242,11 @@ func (s *Server) handleCalendarUpcoming(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	maxResults := 10
-	if mr := r.URL.Query().Get("max_results"); mr != "" {
-		if n, err := strconv.Atoi(mr); err == nil && n > 0 {
-			maxResults = n
-		}
+	// HTTP-H1: bound max_results (was unbounded — DoS via resource exhaustion).
+	maxResults, err := parseIntParam(r, "max_results", 10, 1, 250)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	resp, err := s.services.Calendar.GetUpcoming(r.Context(), duration, maxResults)
