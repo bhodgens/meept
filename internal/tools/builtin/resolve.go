@@ -13,12 +13,24 @@ import (
 // ResolveTool allows accepting or rejecting pending file changes.
 type ResolveTool struct {
 	registry      *PendingChangesRegistry
+	fenceChecker  FenceChecker
 	defaultExpiry time.Duration
 }
 
 // NewResolveTool creates a new resolve tool.
 func NewResolveTool(registry *PendingChangesRegistry) *ResolveTool {
 	return &ResolveTool{registry: registry}
+}
+
+// SetFenceChecker installs a path fence so the accept branch can re-validate
+// staged file paths at write time (defense in depth — the path was validated
+// when the pending change was registered, but configuration may have changed
+// since then or future code paths may bypass registration-time checks).
+// Follows the typed-nil interface guard pattern mandated by CLAUDE.md.
+func (t *ResolveTool) SetFenceChecker(fc FenceChecker) {
+	if fc != nil {
+		t.fenceChecker = fc
+	}
 }
 
 func (t *ResolveTool) Name() string { return "resolve" }
@@ -120,6 +132,15 @@ func (t *ResolveTool) Execute(ctx context.Context, args map[string]any) (any, er
 		}
 
 		if action == "accept" {
+			// Re-validate the staged file path against the fence at write time.
+			// The path was checked at registration, but configuration may have
+			// changed or future code paths may bypass that check.
+			if t.fenceChecker != nil {
+				if err := t.fenceChecker.CheckPath(change.FilePath, "write"); err != nil {
+					result.Failed = append(result.Failed, id)
+					continue
+				}
+			}
 			// Write the modified content to the file
 			if err := os.WriteFile(change.FilePath, []byte(change.Modified), 0644); err != nil {
 				result.Failed = append(result.Failed, id)

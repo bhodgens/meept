@@ -22,17 +22,20 @@ class ChatState {
   final List<ChatMessage> messages;
   final bool isLoading;
   final String? error;
+  final AgentProgress? currentProgress;
 
   const ChatState({
     this.messages = const [],
     this.isLoading = false,
     this.error,
+    this.currentProgress,
   });
 
   ChatState copyWith({
     List<ChatMessage>? messages,
     bool? isLoading,
     Object? error = _unset,
+    AgentProgress? currentProgress,
   }) {
     // Limit messages to prevent memory leaks
     List<ChatMessage> limitedMessages = messages ?? this.messages;
@@ -44,6 +47,7 @@ class ChatState {
       messages: limitedMessages,
       isLoading: isLoading ?? this.isLoading,
       error: identical(error, _unset) ? this.error : error as String?,
+      currentProgress: currentProgress ?? this.currentProgress,
     );
   }
 }
@@ -59,6 +63,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
   final WebSocketService websocket;
   final TtsNotifier ttsNotifier;
   StreamSubscription<Map<String, dynamic>>? _wsChatSubscription;
+  StreamSubscription<Map<String, dynamic>>? _progressSubscription;
   String? _sessionId;
   int _loadGeneration = 0;
 
@@ -126,6 +131,13 @@ class ChatNotifier extends StateNotifier<ChatState> {
     // messages arriving via WS are appended to (not replaced by) the fetch.
     _wsChatSubscription = websocket.subscribeToChat(sessionId).listen((message) {
       addStreamMessage(message);
+    });
+
+    // Subscribe to agent progress for this session
+    _progressSubscription?.cancel();
+    _progressSubscription = websocket.subscribeToAgentProgress(sessionId).listen((message) {
+      final progress = AgentProgress.fromJson(message);
+      state = state.copyWith(currentProgress: progress);
     });
   }
 
@@ -345,6 +357,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
     _sendingTimeoutTimer = null;
     _wsChatSubscription?.cancel();
     _wsChatSubscription = null;
+    _progressSubscription?.cancel();
+    _progressSubscription = null;
     super.dispose();
   }
 }

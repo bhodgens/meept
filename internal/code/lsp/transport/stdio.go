@@ -9,14 +9,16 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // StdioTransport implements Transport over stdio to a subprocess.
 type StdioTransport struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout io.ReadCloser
-	reader *bufio.Reader
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	stdout  io.ReadCloser
+	reader  *bufio.Reader
+	writeMu sync.Mutex // serializes header+content writes to avoid interleaved frames
 }
 
 // NewStdioTransport creates a transport by starting a subprocess.
@@ -90,6 +92,11 @@ func (t *StdioTransport) Read(ctx context.Context) ([]byte, error) {
 // Write writes a message to the transport with LSP framing.
 func (t *StdioTransport) Write(ctx context.Context, data []byte) error {
 	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(data))
+
+	// Hold the write mutex across both writes so concurrent Write callers can't
+	// interleave header and content on the pipe and corrupt the JSON-RPC framing.
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
 
 	if _, err := t.stdin.Write([]byte(header)); err != nil {
 		return fmt.Errorf("failed to write header: %w", err)

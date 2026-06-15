@@ -670,7 +670,11 @@ func (f *ContextFirewall) dropOldContext(messages []ChatMessage) []ChatMessage {
 		if msg.Role == RoleTool && msg.ToolCallID != "" {
 			// Keep this tool result
 			keepSet[i] = true
-			// Find and mark the parent assistant message with matching tool call
+			// Find and mark the parent assistant message with matching tool call.
+			// Walk backwards over all earlier messages; don't stop at the first
+			// RoleAssistant encountered, because intermediate assistant messages
+			// (text-only, injected by summarizers, etc.) may not contain the
+			// matching ToolCallID. Only the inner break (on match) exits early.
 			for j := i - 1; j >= 0; j-- {
 				parent := nonSystemMsgs[j]
 				if parent.Role == RoleAssistant {
@@ -681,8 +685,6 @@ func (f *ContextFirewall) dropOldContext(messages []ChatMessage) []ChatMessage {
 							break
 						}
 					}
-					// Stop at first assistant message (tool calls are in immediate parent)
-					break
 				}
 			}
 		}

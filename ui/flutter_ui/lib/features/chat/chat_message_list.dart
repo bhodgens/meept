@@ -4,6 +4,7 @@ import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../widgets/error_banner.dart';
 import '../../providers/chat_provider.dart';
+import 'agent_progress_indicator.dart';
 import 'chat_message_bubble.dart';
 
 /// Chat message list - displays chat messages with auto-scroll
@@ -98,29 +99,34 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                         final message = chatState.messages[index];
                         return ChatMessageBubble(message: message);
                       } else {
-                        // Loading indicator for pending message
-                        return const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 8),
-                          child: Row(
-                            children: [
-                              SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                    CyberpunkColors.orangePrimary,
+                        // Dynamic progress indicator or fallback thinking
+                        if (chatState.currentProgress != null) {
+                          return AgentProgressIndicator(
+                              progress: chatState.currentProgress!);
+                        } else {
+                          return const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 8),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      CyberpunkColors.orangePrimary,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              SizedBox(width: 8),
-                              Text(
-                                'thinking...',
-                                style: CyberpunkTypography.bodySmall,
-                              ),
-                            ],
-                          ),
-                        );
+                                SizedBox(width: 8),
+                                Text(
+                                  'thinking...',
+                                  style: CyberpunkTypography.bodySmall,
+                                ),
+                              ],
+                            ),
+                          );
+                        }
                       }
                     },
                   ),

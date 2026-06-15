@@ -200,7 +200,7 @@ func (t *ScheduleCreateTool) Execute(ctx context.Context, args map[string]any) (
 		return ScheduleCreateResult{
 			Success: false,
 			Error:   err.Error(),
-		}, err
+		}, nil
 	}
 
 	scheduledID, err := t.sched.ScheduleConfig(cfg)

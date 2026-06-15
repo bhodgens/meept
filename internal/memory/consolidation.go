@@ -297,7 +297,7 @@ func (c *Consolidator) summarizeByDate(memories []MemoryResult) []Summary {
 		// Build a compact summary from snippets
 		var snippets []string
 		totalChars := 0
-		for _, m := range mems {
+		for i, m := range mems {
 			// Filter out empty/zero-value IDs
 			if m.Memory.ID != "" {
 				ids = append(ids, m.Memory.ID)
@@ -313,7 +313,12 @@ func (c *Consolidator) summarizeByDate(memories []MemoryResult) []Summary {
 				totalChars += len(snippet)
 			}
 			if totalChars > 2000 {
-				snippets = append(snippets, fmt.Sprintf("... and %d more", len(mems)-len(snippets)))
+				// Compute remaining items relative to the current loop index so
+				// filtered-out entries (empty snippets) don't inflate the count.
+				remaining := len(mems) - i - 1
+				if remaining > 0 {
+					snippets = append(snippets, fmt.Sprintf("... and %d more", remaining))
+				}
 				break
 			}
 		}

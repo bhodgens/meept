@@ -70,8 +70,11 @@ func (t *FileEditTool) SetBlockResolver(resolver BlockResolver) {
 }
 
 // SetPendingChangesRegistry sets the pending changes registry for preview/accept workflow.
+// Follows the typed-nil interface guard pattern mandated by CLAUDE.md.
 func (t *FileEditTool) SetPendingChangesRegistry(registry *PendingChangesRegistry) {
-	t.pendingChangesRegistry = registry
+	if registry != nil {
+		t.pendingChangesRegistry = registry
+	}
 }
 
 // SetRecoveryConfig sets the recovery configuration.

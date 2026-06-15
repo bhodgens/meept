@@ -1375,13 +1375,13 @@ func (m *Manager) GetExpiredMemories(ctx context.Context, days int) ([]Memory, e
 		}
 
 		memories = append(memories, Memory{
-			ID:        id,
-			Content:   content,
-			Type:      MemoryTypeEpisodic,
-			Category:  category,
-			Metadata:  ParseMetadata(metaJSON),
-			CreatedAt: createdAt,
-			UpdatedAt: lastAccessed,
+			ID:             id,
+			Content:        content,
+			Type:           MemoryTypeEpisodic,
+			Category:       category,
+			Metadata:       ParseMetadata(metaJSON),
+			CreatedAt:      createdAt,
+			LastAccessedAt: lastAccessed,
 		})
 	}
 

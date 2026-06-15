@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
@@ -35,6 +36,7 @@ type PlanManager struct {
 	logger       *slog.Logger
 	phaseTaskMap map[string]string // taskID -> phaseID, populated during Synthesize
 	taskPlanMap  map[string]string // taskID -> planID, populated during Synthesize
+	mu           sync.RWMutex      // protects phaseTaskMap and taskPlanMap
 }
 
 // NewPlanManager creates a new PlanManager.
@@ -390,7 +392,9 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 	plan.State = StateExecuting
 
 	// Track parent task -> plan mapping for OnTaskCompleted.
+	m.mu.Lock()
 	m.taskPlanMap[parentTask.ID] = planID
+	m.mu.Unlock()
 	plan.UpdatedAt = time.Now().UTC()
 	if err := m.store.UpdatePlan(ctx, plan); err != nil {
 		return fmt.Errorf("update plan with task ID: %w", err)
@@ -405,8 +409,10 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 		}
 
 		// Track mapping: childTask.ID -> phase.ID, childTask.ID -> plan.ID
+		m.mu.Lock()
 		m.phaseTaskMap[childTask.ID] = phase.ID
 		m.taskPlanMap[childTask.ID] = planID
+		m.mu.Unlock()
 
 		// Create TaskSteps from parsed step details.
 		pp, hasParsed := parsedPhases[phase.Sequence]
@@ -478,18 +484,21 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 // OnStepCompleted is called when a task step completes. It updates the
 // corresponding phase progress.
 func (m *PlanManager) OnStepCompleted(ctx context.Context, taskID, stepID string) error {
+	m.mu.RLock()
 	phaseID, ok := m.phaseTaskMap[taskID]
 	if !ok {
+		m.mu.RUnlock()
 		// Not a plan-tracked task; ignore silently.
 		return nil
 	}
+	planID := m.taskPlanMap[taskID]
+	m.mu.RUnlock()
 
 	if err := m.store.IncrementPhaseProgress(ctx, phaseID, "completed_steps", 1); err != nil {
 		return fmt.Errorf("increment phase progress: %w", err)
 	}
 
-	// Look up the planID for this task to scope the phase query.
-	planID := m.taskPlanMap[taskID]
+	// planID was looked up under the lock above to scope the phase query.
 
 	// Check if the phase is now complete.
 	phases, err := m.store.GetPhases(ctx, planID)
@@ -513,7 +522,10 @@ func (m *PlanManager) OnStepCompleted(ctx context.Context, taskID, stepID string
 // it updates the phase state. If the task is the plan's parent task, it marks
 // the plan as completed.
 func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID string) error {
+	m.mu.RLock()
 	phaseID, isPhase := m.phaseTaskMap[taskID]
+	planID, hasPlan := m.taskPlanMap[taskID]
+	m.mu.RUnlock()
 	if isPhase {
 		// Child task (phase) completed.
 		if err := m.store.SetPhaseState(ctx, phaseID, PhaseCompleted); err != nil {
@@ -528,7 +540,6 @@ func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID string) error 
 	}
 
 	// Check if this is the plan's parent task via taskPlanMap.
-	planID, hasPlan := m.taskPlanMap[taskID]
 	if !hasPlan {
 		return nil
 	}

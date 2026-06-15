@@ -527,8 +527,9 @@ func (t *ShellExecuteTool) classifyRisk(command string) ShellCommandRisk {
 	// Check pipes first - evaluate each segment independently so that a
 	// blocked/sudo segment in a pipeline is detected as CRITICAL rather than
 	// being masked by a HIGH dangerous-pattern match on the full line.
-	if strings.Contains(command, "|") {
-		segments := strings.Split(command, "|")
+	// Split on unquoted `|` only so commands like `awk -F'|' '{print $2}'`
+	// are not broken apart at pipes inside quotes.
+	if segments, ok := splitOnUnquotedPipes(command); ok {
 		maxRisk := RiskMedium
 		for _, seg := range segments {
 			segRisk := t.classifyRisk(strings.TrimSpace(seg))

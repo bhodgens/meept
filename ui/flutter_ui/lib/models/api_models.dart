@@ -121,6 +121,45 @@ class CalendarEvent {
   }
 }
 
+// ===== Agent Progress Model =====
+
+/// Represents a real-time agent progress event from the WebSocket stream.
+///
+/// Populated from the `{type: "agent_progress", data: {...}}` messages
+/// sent by the backend's progress synthesizer.
+class AgentProgress {
+  final String agentId;
+  final String message;
+  final int tier;         // VerbosityLevel: 0=Quiet, 1=Normal, 2=Verbose
+  final String? sourceEvent;
+  final DateTime timestamp;
+
+  AgentProgress({
+    required this.agentId,
+    required this.message,
+    required this.tier,
+    this.sourceEvent,
+    required this.timestamp,
+  });
+
+  factory AgentProgress.fromJson(Map<String, dynamic> json) {
+    // The server sends a flat {type, session_id, agent_id, message, tier, ...}
+    // message directly (not wrapped in a "data" envelope).
+    final data = json['data'] as Map<String, dynamic>?;
+    return AgentProgress(
+      agentId: (data?['agent_id'] ?? json['agent_id'] ?? '') as String,
+      message: (data?['message'] ?? json['message'] ?? '') as String,
+      tier: (data?['tier'] ?? json['tier'] ?? 1) as int,
+      sourceEvent: (data?['source_event'] ?? json['source_event']) as String?,
+      timestamp: DateTime.tryParse(
+              data?['timestamp'] as String? ??
+                  json['timestamp'] as String? ??
+                  DateTime.now().toIso8601String()) ??
+          DateTime.now(),
+    );
+  }
+}
+
 // ===== Chat Models =====
 
 @freezed

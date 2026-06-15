@@ -9,6 +9,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"gonum.org/v1/gonum/graph"
 	"gonum.org/v1/gonum/graph/multi"
@@ -36,7 +37,7 @@ type RepoGraph struct {
 	tags  []Tag                 // underlying tags for lookups
 }
 
-// nodeID is used to generate unique node IDs
+// nodeID is used to generate unique node IDs atomically across concurrent BuildGraph calls.
 var nodeID int64
 
 // NewRepoGraph creates a new empty RepoGraph.
@@ -55,8 +56,9 @@ func (g *RepoGraph) getOrCreateNode(filePath string) graph.Node {
 		return node
 	}
 
-	node := &fileNode{id: nodeID, filePath: filePath}
-	nodeID++
+	// Atomic increment-and-fetch prevents duplicate IDs under concurrent repomap builds.
+	id := atomic.AddInt64(&nodeID, 1) - 1
+	node := &fileNode{id: id, filePath: filePath}
 	g.nodes[filePath] = node
 	g.g.AddNode(node)
 	return node

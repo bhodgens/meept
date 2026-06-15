@@ -47,7 +47,7 @@ help:
 	@echo "Daemon:"
 	@echo "  daemon           Build and run daemon (foreground)"
 	@echo "  daemon-debug     Run daemon with debug logging"
-	@echo "  devbuild         Wipe ~/.meept, rebuild daemon+CLI+GUI (incremental), install"
+	@echo "  devbuild         Rebuild daemon+CLI+GUI (incremental), install (preserves ~/.meept)"
 	@echo "  status           Check daemon status"
 	@echo ""
 	@echo "Cross-compilation:"
@@ -259,19 +259,18 @@ daemon-debug: build-daemon setup
 # Development: fast iteration build
 # =============================================================================
 
-# devbuild: Wipe ~/.meept for a clean slate, rebuild only changed Go code and
-# the Flutter GUI (incremental, no dependency re-download), install to
-# GOPATH/bin and ~/Applications, and run setup to recreate config templates.
+# devbuild: Rebuild only changed Go code and the Flutter GUI (incremental,
+# no dependency re-download), install to GOPATH/bin and ~/Applications,
+# and run setup to recreate config templates.
 #
 # Speed notes:
 #   - Go: uses go build directly (incremental Go build cache)
 #   - Flutter: uses flutter build (incremental, skips if no .dart changes)
 #   - Does NOT run gui-deps, pod install, or dependency downloads
 #   - Does NOT build menubar, gendoc, or meept-lite
+#   - Does NOT wipe ~/.meept (preserves config and data)
 .PHONY: devbuild
 devbuild:
-	@echo "==> Wiping $(MEEPT_HOME)..."
-	@rm -rf $(MEEPT_HOME)
 	@echo "==> Building daemon + CLI (incremental)..."
 	@mkdir -p $(BIN_DIR)
 	@go build $(GO_BUILD_FLAGS) -o $(DAEMON) ./cmd/meept-daemon
@@ -279,7 +278,7 @@ devbuild:
 	@echo "==> Installing Go binaries to GOPATH/bin..."
 	@go install $(GO_BUILD_FLAGS) ./cmd/meept-daemon
 	@go install $(GO_BUILD_FLAGS) ./cmd/meept
-	@echo "==> Installing config files..."
+	@echo "==> Setting up directories and config files..."
 	@mkdir -p $(MEEPT_HOME)/agents $(MEEPT_HOME)/prompts $(MEEPT_HOME)/plugins $(MEEPT_HOME)/memory $(MEEPT_HOME)/workspaces
 	@for f in $(CONFIG_FILES); do \
 		src="config/$$(basename $$f)"; \

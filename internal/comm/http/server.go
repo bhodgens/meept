@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/mcp"
 	"github.com/caimlas/meept/internal/metrics"
@@ -206,6 +207,11 @@ type WebSocketHub struct {
 	mu      sync.RWMutex
 	clients map[*websocket.Conn]struct{}
 	logger  *slog.Logger
+
+	// sessionSubs tracks which sessions each connection subscribes to,
+	// used for session-scoped progress event filtering.
+	sessionSubs map[*websocket.Conn]map[string]struct{}
+	sessMu      sync.RWMutex
 }
 
 // NewWebSocketHub creates a new WebSocket hub.
@@ -214,8 +220,9 @@ func NewWebSocketHub(logger *slog.Logger) *WebSocketHub {
 		logger = slog.Default()
 	}
 	return &WebSocketHub{
-		clients: make(map[*websocket.Conn]struct{}),
-		logger:  logger,
+		clients:     make(map[*websocket.Conn]struct{}),
+		sessionSubs: make(map[*websocket.Conn]map[string]struct{}),
+		logger:      logger,
 	}
 }
 
@@ -232,6 +239,11 @@ func (h *WebSocketHub) Unregister(conn *websocket.Conn) {
 	h.mu.Lock()
 	delete(h.clients, conn)
 	h.mu.Unlock()
+
+	h.sessMu.Lock()
+	delete(h.sessionSubs, conn)
+	h.sessMu.Unlock()
+
 	conn.Close()
 	h.logger.Debug("ws client unregistered", "remote", conn.RemoteAddr())
 }
@@ -241,6 +253,40 @@ func (h *WebSocketHub) ClientCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.clients)
+}
+
+// SubscribeSession records that this websocket connection is interested
+// in progress events for the given session ID.
+func (h *WebSocketHub) SubscribeSession(conn *websocket.Conn, sessionID string) {
+	h.sessMu.Lock()
+	defer h.sessMu.Unlock()
+	if h.sessionSubs[conn] == nil {
+		h.sessionSubs[conn] = make(map[string]struct{})
+	}
+	h.sessionSubs[conn][sessionID] = struct{}{}
+}
+
+// UnsubscribeSession removes a session filter for the given connection.
+func (h *WebSocketHub) UnsubscribeSession(conn *websocket.Conn, sessionID string) {
+	h.sessMu.Lock()
+	defer h.sessMu.Unlock()
+	if subs := h.sessionSubs[conn]; subs != nil {
+		delete(subs, sessionID)
+	}
+}
+
+// ShouldSendProgress reports whether this connection should receive a progress
+// event for the given session ID. Returns true when the connection has no
+// session filters (broadcast mode) or explicitly subscribed to this session.
+func (h *WebSocketHub) ShouldSendProgress(conn *websocket.Conn, sessionID string) bool {
+	h.sessMu.RLock()
+	defer h.sessMu.RUnlock()
+	subs := h.sessionSubs[conn]
+	if subs == nil {
+		return true // no filters = broadcast to all
+	}
+	_, ok := subs[sessionID]
+	return ok
 }
 
 // Broadcast sends a typed message to all connected WebSocket clients.
@@ -304,6 +350,17 @@ func WithWebSocket(msgBus *bus.MessageBus, wsPath string) ServerOption {
 				}
 			}(sub)
 		}
+
+		// Subscribe to synthesized progress events for session-scoped broadcast.
+		progSub := msgBus.Subscribe("http-ws-agent.progress.synthesized", "agent.progress.synthesized")
+		s.wsSubMu.Lock()
+		s.wsSubscribers = append(s.wsSubscribers, progSub)
+		s.wsSubMu.Unlock()
+		go func() {
+			for msg := range progSub.Channel {
+				s.handleWSProgress(msg)
+			}
+		}()
 	}
 }
 
@@ -323,6 +380,51 @@ func (s *Server) handleWSEvent(msg *models.BusMessage) {
 		return
 	}
 	s.wsHub.Broadcast(eventType, frontendData)
+}
+
+// handleWSProgress forwards a synthesized progress event to WebSocket
+// connections that are subscribed to the relevant session.
+func (s *Server) handleWSProgress(msg *models.BusMessage) {
+	if s.wsHub == nil || msg == nil {
+		return
+	}
+
+	var event agent.SynthesizedProgressEvent
+	if err := json.Unmarshal(msg.Payload, &event); err != nil {
+		s.logger.Warn("ws progress unmarshal error", "error", err)
+		return
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"type":         "agent_progress",
+		"session_id":   event.SessionID,
+		"agent_id":     event.AgentID,
+		"message":      event.Message,
+		"tier":         int(event.Tier),
+		"source_event": string(event.SourceEvent),
+		"timestamp":    event.Timestamp.Format(time.RFC3339),
+	})
+	if err != nil {
+		s.logger.Warn("ws progress marshal error", "error", err)
+		return
+	}
+
+	h := s.wsHub
+	h.mu.RLock()
+	conns := make([]*websocket.Conn, 0, len(h.clients))
+	for conn := range h.clients {
+		if h.ShouldSendProgress(conn, event.SessionID) {
+			conns = append(conns, conn)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, conn := range conns {
+		if _, err := conn.Write(payload); err != nil {
+			s.logger.Warn("ws progress write error, removing client", "error", err)
+			h.Unregister(conn)
+		}
+	}
 }
 
 // transformBusEventToWS converts a bus event into a frontend-compatible flat map.
@@ -1687,6 +1789,11 @@ func (s *Server) handleWSSubscribe(conn *websocket.Conn, msg *WSMessage) {
 		Type: "subscribed",
 		Data: subscribeData,
 	})
+
+	// Register session filter for progress event filtering.
+	if sessionID != "" {
+		s.wsHub.SubscribeSession(conn, sessionID)
+	}
 
 	s.logger.Debug("ws client subscribed", "remote", conn.RemoteAddr(), "channel", channel, "session", sessionID)
 }

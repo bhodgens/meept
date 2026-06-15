@@ -448,6 +448,42 @@ class WebSocketService {
     });
   }
 
+  /// Session-scoped agent progress subscription.
+  ///
+  /// Returns a stream that emits only [Map] entries matching the given
+  /// [sessionId] and having type `agent_progress`.  The caller is
+  /// responsible for managing the server-side subscription (typically
+  /// by sending a `subscribe` message with `channel: 'progress'`).
+  Stream<Map<String, dynamic>> subscribeToAgentProgress(String sessionId) {
+    // Track the subscription so it can be flushed once connected.
+    _chatSubscriptions[sessionId] = SessionSubscription(sessionId);
+    if (isConnected) {
+      send({
+        'type': 'subscribe',
+        'channel': 'progress',
+        'session_id': sessionId,
+      });
+    }
+
+    return _messageSubject.stream.where((m) {
+      final type = m['type'] as String?;
+      final sid = m['session_id'] as String?;
+      return type == 'agent_progress' && sid == sessionId;
+    });
+  }
+
+  /// Unsubscribe from agent progress updates for a session.
+  void unsubscribeFromAgentProgress(String sessionId) {
+    _chatSubscriptions.remove(sessionId);
+    if (isConnected) {
+      send({
+        'type': 'unsubscribe',
+        'channel': 'progress',
+        'session_id': sessionId,
+      });
+    }
+  }
+
   /// Dispose all resources
   void dispose() {
     disconnect();

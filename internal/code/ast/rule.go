@@ -122,15 +122,18 @@ func (e *RuleExecutor) ExecuteRule(source []byte, lang Language, rule *Rule) (*R
 	if err != nil {
 		return nil, fmt.Errorf("parse error: %w", err)
 	}
+	defer tree.Close()
 
 	// Compile the query
 	query, err := sitter.NewQuery([]byte(rule.Pattern), grammar)
 	if err != nil {
 		return nil, fmt.Errorf("invalid query pattern: %w", err)
 	}
+	defer query.Close()
 
 	// Execute query
 	cursor := sitter.NewQueryCursor()
+	defer cursor.Close()
 	cursor.Exec(query, tree.RootNode())
 
 	result := &RuleResult{

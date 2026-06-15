@@ -198,7 +198,7 @@ func (t *CronCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 		return CronCreateResult{
 			Success: false,
 			Error:   err.Error(),
-		}, err
+		}, nil
 	}
 
 	scheduledID, err := t.sched.ScheduleConfig(cfg)

@@ -101,13 +101,16 @@ func (r *ASTRewriter) RunRewrite(source []byte, lang Language, queryPattern, rew
 	if err != nil {
 		return nil, fmt.Errorf("parse error: %w", err)
 	}
+	defer tree.Close()
 
 	query, err := sitter.NewQuery([]byte(queryPattern), grammar)
 	if err != nil {
 		return nil, fmt.Errorf("invalid query: %w", err)
 	}
+	defer query.Close()
 
 	cursor := sitter.NewQueryCursor()
+	defer cursor.Close()
 	cursor.Exec(query, tree.RootNode())
 
 	rewrite := &ASTRewrite{

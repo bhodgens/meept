@@ -44,12 +44,12 @@
   // LLM configuration (models moved to models.json5)
   "llm": {
     "budget": {
-      "hourly_token_limit": 100000,
-      "daily_token_limit": 1000000,
+      "hourly_token_limit": 0,   // 0 = unlimited
+      "daily_token_limit": 0,    // 0 = unlimited
       "daily_cost_limit": 0,     // max USD per UTC day (0 = unlimited)
       "hourly_cost_limit": 0,    // max USD per sliding hour (0 = unlimited)
-      "rate_limit_rpm": 30,
-      "aggressiveness": 0.5,  // 0.0 = very conservative, 1.0 = use full budget
+      "rate_limit_rpm": 0,       // 0 = unlimited
+      "aggressiveness": 0.5,     // 0.0 = very conservative, 1.0 = use full budget
     },
     // Model broker - circuit breaker and fallback
     "broker": {

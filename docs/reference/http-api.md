@@ -635,12 +635,30 @@ wscat -c ws://localhost:8081/ws
 {"type": "ping", "data": {}}
 ```
 
-**Supported Message Types:**
+**Client → Server Messages:**
 - `ping` - Keep-alive, responds with `pong`
-- `subscribe` - Subscribe to real-time updates
+- `subscribe` - Subscribe to real-time updates (supports `channel: "chat"`, `"progress"`, `"notifications"`)
+
+**Server → Client Messages:**
+
+**chat events:** Bus events are forwarded with their original topic as the `type` field.
+
+**agent_progress:** Session-scoped progress messages from the agent progress synthesizer. These are emitted when the dispatcher and specialist agents perform work during request processing.
+
+```json
+{"type": "agent_progress", "session_id": "abc-123", "agent_id": "coder", "message": "coder: executing ReadFile (internal/file/read)", "tier": 1, "source_event": "tool_execution_start", "timestamp": "2026-06-15T10:30:00Z"}
+```
+
+Fields:
+- `session_id` - the session the progress event belongs to
+- `agent_id` - the agent performing the action (e.g., `dispatcher`, `coder`, `analyst`)
+- `message` - human-readable description of current activity
+- `tier` - verbosity level: `0` (quiet), `1` (normal), `2` (verbose)
+- `source_event` - original event type that triggered this synthesis (e.g., `tool_execution_start`, `tool_execution_complete`, `llm_response`)
+- `timestamp` - RFC 3339 timestamp of the event
 
 **Bus Event Broadcasting:**
-When enabled, the WebSocket handler subscribes to the message bus and broadcasts events to all connected clients in real-time.
+When enabled, the WebSocket handler subscribes to the message bus and broadcasts general bus events to all connected clients in real-time. The handler also subscribes to `agent.progress.synthesized` for session-scoped progress events (filtered by client subscription via `SubscribeSession`).
 
 ### MCP (Model Context Protocol)
 

@@ -69,7 +69,7 @@ func (t *ScheduleDeleteTool) Execute(ctx context.Context, args map[string]any) (
 			Success: false,
 			JobID:   jobID,
 			Error:   err.Error(),
-		}, err
+		}, nil
 	}
 
 	return ScheduleDeleteResult{

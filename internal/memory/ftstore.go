@@ -389,9 +389,13 @@ func (s *SQLiteFTSStore) Close() error {
 // Ensure SQLiteFTSStore implements io.Closer
 var _ io.Closer = (*SQLiteFTSStore)(nil)
 
-// escapeLikeWildcards escapes SQLite LIKE wildcard characters (% and _)
-// in user-supplied query strings to prevent unintended pattern matching.
+// escapeLikeWildcards escapes SQLite LIKE wildcard characters (% and _) and the
+// escape character (backslash) itself in user-supplied query strings to prevent
+// unintended pattern matching or wildcard injection via the escape prefix.
+// The corresponding queries use `ESCAPE '\'` semantics.
 func escapeLikeWildcards(s string) string {
+	// Escape the escape character first, before introducing new backslashes.
+	s = strings.ReplaceAll(s, "\\", "\\\\")
 	s = strings.ReplaceAll(s, "%", "\\%")
 	s = strings.ReplaceAll(s, "_", "\\_")
 	return s
