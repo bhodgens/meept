@@ -71,6 +71,11 @@ func (t *HTTPTransport) Send(ctx context.Context, message []byte) ([]byte, error
 		return nil, fmt.Errorf("transport not running")
 	}
 
+	// Check request body size to prevent memory exhaustion
+	if len(message) > MaxResponseSize {
+		return nil, fmt.Errorf("request body exceeds maximum size (%d bytes)", MaxResponseSize)
+	}
+
 	// Create request
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(message))
 	if err != nil {

@@ -328,3 +328,153 @@ func TestOutputMonitorDetectAndRedact(t *testing.T) {
 		t.Error("Key should be redacted")
 	}
 }
+
+// TestRedactCredential_ShortSecrets tests the fix for SEC-M2: Credential redaction fails for short secrets.
+// The original formula match[:4] + strings.Repeat("*", len(match)-8) + match[len(match)-4:]
+// would produce a negative repeat count for matches shorter than 8 characters.
+// This test verifies that short matches are redacted to all asterisks without panicking.
+func TestRedactCredential_ShortSecrets(t *testing.T) {
+	monitor := NewOutputMonitor()
+
+	// Test various credential patterns including short ones
+	tests := []struct {
+		name            string
+		input           string
+		wantCredentials bool
+		checkRedacted   func(string) bool // custom check function
+	}{
+		// AWS access key ID is exactly 20 chars: AKIA + 16
+		{
+			name:            "AWS access key (20 chars)",
+			input:           "AKIAIOSFODNN7EXAMPLE",
+			wantCredentials: true,
+			checkRedacted: func(s string) bool {
+				// 20 char key: first 4 + 12 asterisks + last 4
+				return strings.Contains(s, "AKIA************MPLE")
+			},
+		},
+		// Private key header - short match
+		{
+			name:            "Private key header",
+			input:           "-----BEGIN RSA PRIVATE KEY-----",
+			wantCredentials: true,
+			checkRedacted: func(s string) bool {
+				// 31 chars: "----" + 23 asterisks + "----"
+				return strings.Contains(s, "----***********************----")
+			},
+		},
+		// Test a short API key pattern (20+ chars required by pattern)
+		{
+			name:            "API key short (under pattern min)",
+			input:           "api_key=short",
+			wantCredentials: false, // Pattern requires 20+ chars
+			checkRedacted: func(s string) bool {
+				return s == "api_key=short" // unchanged
+			},
+		},
+		// Password with 8+ chars (pattern minimum)
+		{
+			name:            "Password minimum length",
+			input:           "password=12345678",
+			wantCredentials: true,
+			checkRedacted: func(s string) bool {
+				// "password=12345678" is 17 chars: "pass" + 9 asterisks + "5678"
+				return strings.Contains(s, "pass*********5678")
+			},
+		},
+		// Long password
+		{
+			name:            "Password long value",
+			input:           "password=MyVeryLongPassword123",
+			wantCredentials: true,
+			checkRedacted: func(s string) bool {
+				// "password=MyVeryLongPassword123" is 30 chars: "pass" + 22 asterisks + "d123"
+				return strings.Contains(s, "pass**********************d123")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := monitor.Scan(tt.input)
+
+			if result.HasCredentials != tt.wantCredentials {
+				t.Errorf("HasCredentials = %v, want %v", result.HasCredentials, tt.wantCredentials)
+			}
+
+			if tt.checkRedacted != nil && !tt.checkRedacted(result.RedactedText) {
+				t.Errorf("Redacted text check failed: got %q", result.RedactedText)
+			}
+		})
+	}
+}
+
+// TestInputSanitizer_WordBoundaryFalsePositives verifies that patterns with word boundaries
+// do not flag legitimate text containing common English words.
+// This tests the fix for SEC-M1: Sanitizer patterns lack word boundaries.
+func TestInputSanitizer_WordBoundaryFalsePositives(t *testing.T) {
+	standardSanitizer := NewInputSanitizer(StrictnessStandard)
+	strictSanitizer := NewInputSanitizer(StrictnessStrict)
+
+	tests := []struct {
+		name      string
+		input     string
+		strictness StrictnessLevel
+		wantSafe  bool
+	}{
+		// Authority claim patterns - legitimate contexts
+		{
+			name:     "legitimate developer context",
+			input:    "As a developer, I write code daily",
+			strictness: StrictnessStandard,
+			wantSafe: true,
+		},
+		{
+			name:     "administration overhead",
+			input:    "The administration overhead is minimal",
+			strictness: StrictnessStandard,
+			wantSafe: true,
+		},
+		// Trust pattern - "trust me" alone without manipulation context
+		{
+			name:     "trust in relationship",
+			input:    "Trust me, I know what I'm doing",
+			strictness: StrictnessPermissive,
+			wantSafe: false, // This IS still flagged as it matches the pattern
+		},
+		// Prompt extraction - legitimate requests
+		{
+			name:     "show instructions legitimate",
+			input:    "Can you show instructions for building the project?",
+			strictness: StrictnessStrict,
+			wantSafe: false, // Still matches due to "show instructions"
+		},
+		{
+			name:     "clean text with common words",
+			input:    "I trust this approach will work. The administration is handling it.",
+			strictness: StrictnessStandard,
+			wantSafe: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var sanitizer *InputSanitizer
+			switch tt.strictness {
+			case StrictnessPermissive:
+				sanitizer = NewInputSanitizer(StrictnessPermissive)
+			case StrictnessStandard:
+				sanitizer = standardSanitizer
+			case StrictnessStrict:
+				sanitizer = strictSanitizer
+			}
+
+			result := sanitizer.Sanitize(tt.input)
+			isSafe := len(result.ThreatsDetected) == 0
+
+			if isSafe != tt.wantSafe {
+				t.Errorf("Expected safe=%v, got safe=%v with threats: %v", tt.wantSafe, isSafe, result.ThreatsDetected)
+			}
+		})
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -221,21 +222,40 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments map[st
 	}
 
 	// Convert content blocks to text
-	var text string
+	var text strings.Builder
 	for _, block := range result.Content {
-		if block.Type == "text" {
-			if text != "" {
-				text += "\n"
+		if text.Len() > 0 {
+			text.WriteString("\n")
+		}
+		switch block.Type {
+		case "text":
+			text.WriteString(block.Text)
+		case "image":
+			// Include image placeholder with mime type info
+			if block.MimeType != "" {
+				fmt.Fprintf(&text, "[image: %s]", block.MimeType)
+			} else {
+				text.WriteString("[image]")
 			}
-			text += block.Text
+		case "resource":
+			// Include resource reference with URI
+			if block.Resource != nil && block.Resource.URI != "" {
+				fmt.Fprintf(&text, "[resource: %s]", block.Resource.URI)
+			} else {
+				text.WriteString("[resource]")
+			}
+		default:
+			// Unknown block type - include as placeholder
+			fmt.Fprintf(&text, "[unknown block: %s]", block.Type)
 		}
 	}
 
+	resultText := text.String()
 	if result.IsError {
-		return tools.NewErrorResult(text), nil
+		return tools.NewErrorResult(resultText), nil
 	}
 
-	return tools.NewSuccessResult(text), nil
+	return tools.NewSuccessResult(resultText), nil
 }
 
 // Close disconnects from the MCP server.

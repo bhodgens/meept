@@ -367,23 +367,42 @@ func (t *Tracker) CheckShellCommand(command string) *TaintViolationError {
 
 	// Second: check if the command references any stored tainted variables
 	// that are blocked by the shell_exec sink.
-	// Collect (name, value) pairs under RLock, then release before calling CheckSink
-	// (which acquires its own RLock) to avoid deadlocking on the same mutex.
+	// Copy the TaintedValue structs (not pointers) under RLock to avoid TOCTOU race.
+	// CheckSink is called outside the lock using the copied values.
 	t.mu.RLock()
-	type entry struct{ name string; tv *TaintedValue }
+	type entry struct {
+		name   string
+		taints []TaintLabel
+		value  string
+		source string
+	}
 	var matches []entry
 	for name, tv := range t.variables {
 		if tv == nil {
 			continue
 		}
 		if strings.Contains(command, name) {
-			matches = append(matches, entry{name, tv})
+			// Deep-copy the TaintedValue fields while holding the lock
+			taintsCopy := make([]TaintLabel, len(tv.Taints))
+			copy(taintsCopy, tv.Taints)
+			matches = append(matches, entry{
+				name:   name,
+				taints: taintsCopy,
+				value:  tv.Value,
+				source: tv.Source,
+			})
 		}
 	}
 	t.mu.RUnlock()
 
+	// Check the copied values outside the lock
 	for _, e := range matches {
-		if violation := t.CheckSink(e.tv, sink); violation != nil {
+		tv := &TaintedValue{
+			Value:  e.value,
+			Taints: e.taints,
+			Source: e.source,
+		}
+		if violation := t.CheckSink(tv, sink); violation != nil {
 			return violation
 		}
 	}

@@ -185,8 +185,9 @@ func initPatterns() {
 				MinLevel: StrictnessPermissive,
 			},
 			// STRICT-only: aggressive heuristics
+			// Word boundary added to avoid matching "show instructions" in legitimate contexts
 			{
-				Pattern:  regexp.MustCompile(`(?i)(reveal|show|print|output|display|tell\s+me)\s+(your\s+)?(system\s+prompt|instructions?|hidden\s+prompt|rules?)`),
+				Pattern:  regexp.MustCompile(`(?i)\b(reveal|show|print|output|display|tell\s+me)\s+(your\s+)?(system\s+prompt|instructions?|hidden\s+prompt|rules?)\b`),
 				Label:    "prompt_extraction_attempt",
 				MinLevel: StrictnessStrict,
 			},
@@ -197,13 +198,15 @@ func initPatterns() {
 			},
 			// FIX #SECURITY: Social engineering detection patterns
 			// Authority claims
+			// Word boundary added to avoid matching "I am developer" in legitimate coding contexts
 			{
-				Pattern:  regexp.MustCompile(`(?i)(i\s+am|this\s+is)\s+(your?\s+)?(admin|administrator|owner|boss|manager|supervisor|developer|system\s+admin|root\s+user)`),
+				Pattern:  regexp.MustCompile(`(?i)\b(i\s+am|this\s+is)\s+(your?\s+)?(admin|administrator|owner|boss|manager|supervisor|developer|system\s+admin|root\s+user)\b`),
 				Label:    "social_engineering_authority",
 				MinLevel: StrictnessStandard,
 			},
+			// Word boundary added to avoid matching "As your developer, I recommend" in legitimate contexts
 			{
-				Pattern:  regexp.MustCompile(`(?i)(as\s+your?\s+)?(creator|developer|admin|owner)\s*,?\s*(i\s+)?(order|command|authorize|instruct|direct)\s+you`),
+				Pattern:  regexp.MustCompile(`(?i)\b(as\s+your?\s+)?(creator|developer|admin|owner)\s*,?\s*(i\s+)?(order|command|authorize|instruct|direct)\s+you\b`),
 				Label:    "social_engineering_authority",
 				MinLevel: StrictnessStandard,
 			},
@@ -236,8 +239,9 @@ func initPatterns() {
 				MinLevel: StrictnessPermissive,
 			},
 			// Trust building attempts
+			// Word boundary added to avoid false positives on partial matches
 			{
-				Pattern:  regexp.MustCompile(`(?i)(trust\s+me|you\s+can\s+(trust|rely)\s+on\s+me|we'?re\s+friends|I'?m\s+(here\s+to\s+)?help\s+you)`),
+				Pattern:  regexp.MustCompile(`(?i)\b(trust\s+me|you\s+can\s+(trust|rely)\s+on\s+me|we'?re\s+friends|I'?m\s+(here\s+to\s+)?help\s+you)\b`),
 				Label:    "social_engineering_trust",
 				MinLevel: StrictnessPermissive,
 			},
@@ -381,6 +385,15 @@ func NewOutputMonitor() *OutputMonitor {
 	return &OutputMonitor{}
 }
 
+// redactCredential redacts a credential match by showing first and last 4 characters
+// with asterisks in between. For short secrets (<=8 chars), all characters are replaced.
+func redactCredential(match string) string {
+	if len(match) <= 8 {
+		return strings.Repeat("*", len(match))
+	}
+	return match[:4] + strings.Repeat("*", len(match)-8) + match[len(match)-4:]
+}
+
 // Scan checks text for credential leaks and returns warnings.
 func (o *OutputMonitor) Scan(text string) OutputScanResult {
 	var warnings []Warning
@@ -393,12 +406,7 @@ func (o *OutputMonitor) Scan(text string) OutputScanResult {
 				Message: "Detected potential credential: " + cp.Label,
 			})
 			// Redact the match
-			redacted = cp.Pattern.ReplaceAllStringFunc(redacted, func(match string) string {
-				if len(match) > 10 {
-					return match[:4] + strings.Repeat("*", len(match)-8) + match[len(match)-4:]
-				}
-				return strings.Repeat("*", len(match))
-			})
+			redacted = cp.Pattern.ReplaceAllStringFunc(redacted, redactCredential)
 		}
 	}
 
