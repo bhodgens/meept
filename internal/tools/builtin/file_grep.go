@@ -29,7 +29,9 @@ func NewFileGrepTool(checker *security.PermissionChecker) *FileGrepTool {
 
 // SetFenceChecker sets the fence boundary checker for path validation.
 func (t *FileGrepTool) SetFenceChecker(fc FenceChecker) {
-	t.fenceChecker = fc
+	if fc != nil {
+		t.fenceChecker = fc
+	}
 }
 
 func (t *FileGrepTool) Name() string { return "file_grep" }

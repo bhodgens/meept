@@ -27,7 +27,9 @@ func NewFileFindTool(checker *security.PermissionChecker) *FileFindTool {
 
 // SetFenceChecker sets the fence boundary checker for path validation.
 func (t *FileFindTool) SetFenceChecker(fc FenceChecker) {
-	t.fenceChecker = fc
+	if fc != nil {
+		t.fenceChecker = fc
+	}
 }
 
 func (t *FileFindTool) Name() string { return "file_find" }

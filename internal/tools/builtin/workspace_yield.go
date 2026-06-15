@@ -22,7 +22,8 @@ func NewWorkspaceYieldTool() *WorkspaceYieldTool {
 
 // SetCallback sets the callback for when an agent yields.
 func (t *WorkspaceYieldTool) SetCallback(cb func(ctx context.Context, action, feedback string) error) {
-	t.callback = cb
+		t.callback = cb
+	}
 }
 
 func (t *WorkspaceYieldTool) Name() string        { return "workspace_yield" }

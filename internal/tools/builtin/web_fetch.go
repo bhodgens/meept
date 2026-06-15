@@ -75,7 +75,9 @@ func (t *WebFetchTool) Name() string { return "web_fetch" }
 
 // SetSecurityOrchestrator sets the security orchestrator for taint/exfil checks.
 func (t *WebFetchTool) SetSecurityOrchestrator(orch SecurityChecker) {
-	t.secOrch = orch
+	if orch != nil {
+		t.secOrch = orch
+	}
 }
 
 // SetAllowPrivateRanges disables SSRF protection for private/loopback IPs.
