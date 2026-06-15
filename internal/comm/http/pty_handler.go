@@ -194,6 +194,13 @@ func (h *PTYHandler) streamSessionOutput(sessionID string, sess pty.Session) {
 		subs := h.subs[sessionID]
 		h.mu.RUnlock()
 
+		if len(subs) == 0 {
+			// No subscribers: discard output to avoid goroutine blocking
+			// on a full channel. The goroutine still runs (to drain the
+			// session output channel) but does negligible work.
+			continue
+		}
+
 		for _, ch := range subs {
 			select {
 			case ch <- output:

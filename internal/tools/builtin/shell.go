@@ -110,13 +110,18 @@ func NewShellExecuteTool(workingDir string, defaultTimeout time.Duration, ptyMgr
 }
 
 // SetSecurityOrchestrator sets the security orchestrator for command scanning.
+// Follows the typed-nil interface guard pattern mandated by CLAUDE.md.
 func (t *ShellExecuteTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
-	t.securityOrch = orch
+	if orch != nil {
+		t.securityOrch = orch
+	}
 }
 
 // SetFenceChecker sets the fence checker for path-based sandboxing.
 func (t *ShellExecuteTool) SetFenceChecker(fc FenceChecker) {
-	t.fenceChecker = fc
+	if fc != nil {
+		t.fenceChecker = fc
+	}
 }
 
 // SetRuntimeManager injects a runtime manager for backend-based execution.

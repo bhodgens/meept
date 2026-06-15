@@ -80,8 +80,11 @@ func (t *FileEditTool) SetRecoveryConfig(cfg RecoveryConfig) {
 }
 
 // SetFenceChecker sets the fence checker for path-based sandboxing.
+// Follows the typed-nil interface guard pattern mandated by CLAUDE.md.
 func (t *FileEditTool) SetFenceChecker(fc FenceChecker) {
-	t.fenceChecker = fc
+	if fc != nil {
+		t.fenceChecker = fc
+	}
 }
 
 func (t *FileEditTool) Name() string { return "file_edit" }
