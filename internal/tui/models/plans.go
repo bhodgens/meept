@@ -49,12 +49,12 @@ type PlansRPCClient interface {
 // NewPlansModel creates a new plans model.
 func NewPlansModel(rpcClient PlansRPCClient) *PlansModel {
 	columns := []table.Column{
-		{Title: "Title", Width: 22},
+		{Title: "title", Width: 22},
 		{Title: ColState, Width: 10},
-		{Title: "Phases", Width: 8},
-		{Title: "Steps", Width: 8},
-		{Title: "Progress", Width: 12},
-		{Title: "Updated", Width: 10},
+		{Title: "phases", Width: 8},
+		{Title: "steps", Width: 8},
+		{Title: "progress", Width: 12},
+		{Title: "updated", Width: 10},
 	}
 
 	t := table.New(
@@ -131,12 +131,12 @@ func (m *PlansModel) setPlansColumns() {
 	}
 
 	m.table.SetColumns([]table.Column{
-		{Title: "Title", Width: titleW},
+		{Title: "title", Width: titleW},
 		{Title: ColState, Width: stateW},
-		{Title: "Phases", Width: phasesW},
-		{Title: "Steps", Width: stepsW},
-		{Title: "Progress", Width: progressW},
-		{Title: "Updated", Width: updatedW},
+		{Title: "phases", Width: phasesW},
+		{Title: "steps", Width: stepsW},
+		{Title: "progress", Width: progressW},
+		{Title: "updated", Width: updatedW},
 	})
 }
 
@@ -516,26 +516,26 @@ func (m *PlansModel) renderPlanPreview() string {
 
 	var content strings.Builder
 
-	content.WriteString(labelStyle.Render("ID:"))
+	content.WriteString(labelStyle.Render("id:"))
 	content.WriteString(valueStyle.Render(types.TruncateString(plan.ID, 40)))
 	content.WriteString("\n")
 
 	if plan.Description != "" {
-		content.WriteString(labelStyle.Render("Desc:"))
+		content.WriteString(labelStyle.Render("desc:"))
 		content.WriteString(valueStyle.Render(types.TruncateString(plan.Description, 60)))
 		content.WriteString("\n")
 	}
 
 	// File path
 	if plan.FilePath != "" {
-		content.WriteString(labelStyle.Render("File:"))
+		content.WriteString(labelStyle.Render("file:"))
 		content.WriteString(valueStyle.Render(types.TruncateString(plan.FilePath, 50)))
 		content.WriteString("\n")
 	}
 
 	// Phase summary
 	if len(plan.Phases) > 0 {
-		content.WriteString(labelStyle.Render("Phases:"))
+		content.WriteString(labelStyle.Render("phases:"))
 		var phaseParts []string
 		for _, ph := range plan.Phases {
 			phaseParts = append(phaseParts, fmt.Sprintf("%s (%d/%d)", ph.Name, ph.CompletedSteps, ph.TotalSteps))
@@ -551,7 +551,7 @@ func (m *PlansModel) renderPlanPreview() string {
 	// Revision count
 	if plan.RevisionCount > 0 {
 		revStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAmber))
-		content.WriteString(labelStyle.Render("Revisions:"))
+		content.WriteString(labelStyle.Render("revisions:"))
 		content.WriteString(revStyle.Render(fmt.Sprintf("%d", plan.RevisionCount)))
 		content.WriteString("\n")
 	}
@@ -606,55 +606,55 @@ func (m *PlansModel) renderPlanDetailModal() string {
 	content.WriteString("\n\n")
 
 	// Basic info
-	content.WriteString(labelStyle.Render("ID:"))
+	content.WriteString(labelStyle.Render("id:"))
 	content.WriteString(valueStyle.Render(plan.ID))
 	content.WriteString("\n")
 
-	content.WriteString(labelStyle.Render("State:"))
+	content.WriteString(labelStyle.Render("state:"))
 	content.WriteString(stateStyle.Render(m.getPlanStateIcon(plan.State)))
 	content.WriteString("\n")
 
 	if plan.ProjectID != "" {
-		content.WriteString(labelStyle.Render("Project:"))
+		content.WriteString(labelStyle.Render("project:"))
 		content.WriteString(valueStyle.Render(plan.ProjectID))
 		content.WriteString("\n")
 	}
 
 	if plan.SourceSession != "" {
-		content.WriteString(labelStyle.Render("Session:"))
+		content.WriteString(labelStyle.Render("session:"))
 		content.WriteString(valueStyle.Render(plan.SourceSession))
 		content.WriteString("\n")
 	}
 
 	if plan.TaskID != "" {
-		content.WriteString(labelStyle.Render("Task:"))
+		content.WriteString(labelStyle.Render("task:"))
 		content.WriteString(valueStyle.Render(plan.TaskID))
 		content.WriteString("\n")
 	}
 
 	if plan.FilePath != "" {
-		content.WriteString(labelStyle.Render("File:"))
+		content.WriteString(labelStyle.Render("file:"))
 		content.WriteString(valueStyle.Render(plan.FilePath))
 		content.WriteString("\n")
 	}
 
-	content.WriteString(labelStyle.Render("Created:"))
+	content.WriteString(labelStyle.Render("created:"))
 	content.WriteString(valueStyle.Render(plan.CreatedAt))
 	content.WriteString("\n")
 
-	content.WriteString(labelStyle.Render("Updated:"))
+	content.WriteString(labelStyle.Render("updated:"))
 	content.WriteString(valueStyle.Render(plan.UpdatedAt))
 	content.WriteString("\n")
 
 	if plan.RevisionCount > 0 {
-		content.WriteString(labelStyle.Render("Revisions:"))
+		content.WriteString(labelStyle.Render("revisions:"))
 		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAmber)).Render(fmt.Sprintf("%d", plan.RevisionCount)))
 		content.WriteString("\n")
 	}
 
 	// Overall progress
 	content.WriteString("\n")
-	content.WriteString(labelStyle.Render("Progress:"))
+	content.WriteString(labelStyle.Render("progress:"))
 	progress := m.renderProgressBar(plan.CompletedSteps, plan.TotalSteps, 20)
 	percent := float64(0)
 	if plan.TotalSteps > 0 {
