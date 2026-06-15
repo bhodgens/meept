@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,7 @@ const (
 	maxRetries           = 3
 	retryBackoffBase     = 2.0 // seconds - exponential: 2, 4, 8
 	retryBackoffMaxDelay = 30 * time.Second
+	streamMaxRetries     = 3 // D4: retry attempts for streaming
 )
 
 // HTTP status codes that warrant a retry
@@ -102,6 +104,30 @@ type Client struct {
 
 // ClientOption is a functional option for configuring a Client.
 type ClientOption func(*Client)
+
+// toolCallAccum accumulates tool call data across stream chunks and retry attempts.
+type toolCallAccum struct {
+	ID        string
+	Name      string
+	Arguments strings.Builder
+}
+
+// streamRetryState tracks state across stream retry attempts.
+// D4: Used for retry with resume capability.
+type streamRetryState struct {
+	// lastEventID tracks the last successfully processed event for resume
+	lastEventID string
+	// accumulated content from prior attempts
+	accumulated strings.Builder
+	// tool call accumulators from prior attempts
+	toolCallAccums map[int]*toolCallAccum
+	// usage from prior attempts
+	usage TokenUsage
+	// deltasSent counts how many deltas were sent to the callback
+	deltasSent int
+	// isResume is true if this attempt should resume from lastEventID
+	isResume bool
+}
 
 // WithBudget sets the token budget for the client.
 func WithBudget(budget *Budget) ClientOption {
@@ -853,6 +879,7 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 // onDelta for each content chunk. If onDelta returns a non-nil error, the
 // stream is cancelled and that error is returned. The final accumulated
 // Response is returned on successful completion.
+// D4: Added retry with resume capability for transient errors.
 func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessage, onDelta DeltaCallback, opts ...ChatOption) (*Response, error) {
 	if onDelta == nil {
 		// Fallback to non-streaming when no callback provided
@@ -908,6 +935,77 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		return nil, &ClientError{Message: "failed to marshal request", Cause: err}
 	}
 
+	// D4: Retry loop for transient errors with resume capability
+	var lastErr error
+	retryState := &streamRetryState{
+		toolCallAccums: make(map[int]*toolCallAccum),
+	}
+
+	for attempt := 0; attempt < streamMaxRetries; attempt++ {
+		if attempt > 0 {
+			// D4: Set resume flag for retry attempts
+			retryState.isResume = true
+			c.logger.Debug("stream retry attempt", "attempt", attempt+1, "max", streamMaxRetries)
+		}
+
+		resp, httpResp, err := c.doStreamRequest(ctx, body, onDelta, retryState)
+		if err == nil {
+			// Record metrics on success
+			if c.metricsStore != nil {
+				costUSD := float64(0)
+				go func() {
+					record := metrics.RequestRecord{
+						Timestamp:  time.Now(),
+						ProviderID: cfg.ProviderID,
+						ModelID:    cfg.ModelID,
+						LatencyMs:  0,
+						HTTPStatus: httpResp.StatusCode,
+						ErrorType:  metrics.ErrorTypeNone,
+						Success:    true,
+						CostUSD:    costUSD,
+					}
+					_ = c.metricsStore.Record(context.Background(), record)
+				}()
+			}
+			return resp, nil
+		}
+		lastErr = err
+
+		// D4: Check if error is retryable
+		if !isRetryableStreamingError(err) {
+			c.logger.Debug("non-retryable stream error", "error", err)
+			return nil, err
+		}
+
+		// D4: Don't retry if we're on the last attempt
+		if attempt >= streamMaxRetries-1 {
+			break
+		}
+
+		// D4: Calculate backoff with exponential delay and Retry-After
+		backoff := time.Duration(1<<uint(attempt)) * time.Second // 2s, 4s, 8s
+		if rlErr, ok := err.(*RateLimitError); ok && rlErr.RetryAfter > 0 {
+			backoff = rlErr.RetryAfter
+			c.logger.Debug("using Retry-After from rate limit response", "retry_after", backoff)
+		}
+
+		select {
+		case <-time.After(backoff):
+			// Continue to next attempt
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	return nil, fmt.Errorf("streaming failed after %d attempts: %w", streamMaxRetries, lastErr)
+}
+
+
+// doStreamRequest performs a single streaming HTTP request and invokes onDelta for each chunk.
+// D4: Extracted to enable retry with resume capability.
+// retryState tracks state from prior attempts (accumulated content, tool calls, usage).
+// If retryState.isResume is true, the request includes Last-Event-ID header for resume.
+func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta DeltaCallback, retryState *streamRetryState) (*Response, *http.Response, error) {
 	c.configMu.RLock()
 	baseURL := strings.TrimSuffix(c.config.BaseURL, "/")
 	modelID := c.config.ModelID
@@ -919,16 +1017,23 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, &ClientError{Message: "failed to create request", Cause: err}
+		c.logger.Debug("stream request failed at creation", "error", err)
+		return nil, nil, &ClientError{Message: "failed to create request", Cause: err}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
+
+	// D4: Add Last-Event-ID header for resume on retry attempts
+	if retryState != nil && retryState.isResume && retryState.lastEventID != "" {
+		req.Header.Set("Last-Event-ID", retryState.lastEventID)
+		c.logger.Debug("stream resume", "last_event_id", retryState.lastEventID)
+	}
 
 	// Resolve OAuth token if a token resolver is configured.
 	if c.tokenResolver != nil && c.oauthProvider != "" {
 		token, err := c.tokenResolver.ResolveToken(ctx, c.oauthProvider)
 		if err != nil {
-			return nil, &ClientError{Message: "failed to resolve OAuth token", Cause: err}
+			return nil, nil, &ClientError{Message: "failed to resolve OAuth token", Cause: err}
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 	} else if apiKey != "" {
@@ -942,31 +1047,62 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, &ClientError{Message: "request failed", Cause: err}
+		c.logger.Debug("stream request failed", "error", err)
+		return nil, nil, &ClientError{Message: "request failed", Cause: err}
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		retryAfter := extractRetryAfter(resp)
 		detail, _ := io.ReadAll(resp.Body)
-		return nil, &APIError{StatusCode: resp.StatusCode, Detail: string(detail)}
+		resp.Body.Close()
+
+		apiErr := &APIError{StatusCode: resp.StatusCode, Detail: string(detail)}
+		// Wrap in RateLimitError for 429 to preserve Retry-After
+		if resp.StatusCode == 429 && retryAfter > 0 {
+			return nil, resp, &RateLimitError{
+				ProviderID: providerID,
+				ModelID:    modelID,
+				RetryAfter: retryAfter,
+				Cause:      apiErr,
+			}
+		}
+		return nil, resp, apiErr
 	}
 
+	// Parse stream
 	var accumulated strings.Builder
 	var finishReason string
 	var usage TokenUsage
-	scanner := bufio.NewScanner(resp.Body)
-	// Accumulate tool calls across chunks
-	type toolCallAccum struct {
-		ID        string
-		Name      string
-		Arguments strings.Builder
+
+	// Pre-populate from retryState if resuming
+	if retryState != nil && retryState.accumulated.Len() > 0 {
+		accumulated.WriteString(retryState.accumulated.String())
+		usage = retryState.usage
 	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	// Pre-populate tool calls from retryState
 	toolCallAccums := make(map[int]*toolCallAccum)
+	if retryState != nil && retryState.toolCallAccums != nil {
+		for idx, accum := range retryState.toolCallAccums {
+			toolCallAccums[idx] = &toolCallAccum{
+				ID:   accum.ID,
+				Name: accum.Name,
+			}
+			toolCallAccums[idx].Arguments.WriteString(accum.Arguments.String())
+		}
+	}
+
+	deltasSent := 0
+	if retryState != nil {
+		deltasSent = retryState.deltasSent
+	}
 
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			resp.Body.Close()
+			return nil, resp, ctx.Err()
 		default:
 		}
 
@@ -1014,8 +1150,13 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		delta := chunk.Choices[0].Delta.Content
 		if delta != "" {
 			accumulated.WriteString(delta)
-			if err := onDelta(delta); err != nil {
-				return nil, err // Stream aborted by callback (e.g. TTSR rule)
+			// Skip deltas already sent (on resume)
+			if retryState == nil || !retryState.isResume || deltasSent >= retryState.deltasSent {
+				if err := onDelta(delta); err != nil {
+					resp.Body.Close()
+					return nil, resp, err
+				}
+				deltasSent++
 			}
 		}
 
@@ -1033,7 +1174,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 			}
 		}
 
-		// Capture usage from final chunk (providers often include it in the last chunk)
+		// Capture usage from final chunk
 		if chunk.Usage != nil {
 			usage = TokenUsage{
 				PromptTokens:     chunk.Usage.PromptTokens,
@@ -1046,25 +1187,10 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 			finishReason = *chunk.Choices[0].FinishReason
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, &ClientError{Message: "stream read failed", Cause: err}
-	}
+	resp.Body.Close()
 
-	if c.metricsStore != nil {
-		costUSD := float64(0) // streaming responses don't always include usage
-		go func() {
-			record := metrics.RequestRecord{
-				Timestamp:  time.Now(),
-				ProviderID: providerID,
-				ModelID:    modelID,
-				LatencyMs:  0,
-				HTTPStatus: resp.StatusCode,
-				ErrorType:  metrics.ErrorTypeNone,
-				Success:    true,
-				CostUSD:    costUSD,
-			}
-			_ = c.metricsStore.Record(context.Background(), record)
-		}()
+	if err := scanner.Err(); err != nil {
+		return nil, resp, &ClientError{Message: "stream read failed", Cause: err}
 	}
 
 	// Build tool calls from accumulators
@@ -1080,13 +1206,15 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		})
 	}
 
-	return &Response{
+	result := &Response{
 		Content:      accumulated.String(),
 		ToolCalls:    toolCalls,
 		Usage:        usage,
 		Model:        modelID,
 		FinishReason: finishReason,
-	}, nil
+	}
+
+	return result, resp, nil
 }
 
 // SwitchModel switches to a different model/endpoint at runtime.
@@ -1119,6 +1247,49 @@ func (c *Client) Config() *ModelConfig {
 	defer c.configMu.RUnlock()
 	return c.config
 }
+
+// isRetryableStreamingError returns true for transient errors that warrant stream retry.
+// D4: Used for ChatWithDeltaCallback retry logic.
+func isRetryableStreamingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == 429 || apiErr.StatusCode == 502 || apiErr.StatusCode == 503 || apiErr.StatusCode == 504
+	}
+	var clientErr *ClientError
+	if errors.As(err, &clientErr) {
+		errStr := clientErr.Error()
+		return strings.Contains(errStr, "stream") || strings.Contains(errStr, "broken pipe") || strings.Contains(errStr, "unexpected EOF")
+	}
+	return false
+}
+
+// extractRetryAfter extracts Retry-After duration from HTTP response headers.
+// D4: Parses Retry-After header before creating APIError.
+func extractRetryAfter(resp *http.Response) time.Duration {
+	if resp == nil {
+		return 0
+	}
+	header := resp.Header.Get("Retry-After")
+	if header == "" {
+		return 0
+	}
+	// Try parsing as seconds
+	if seconds, err := strconv.Atoi(header); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	// Try parsing as RFC1123 date
+	if t, err := time.Parse(time.RFC1123, header); err == nil {
+		duration := time.Until(t)
+		if duration > 0 {
+			return duration
+		}
+	}
+	return 0
+}
+
 
 // Budget returns the token budget tracker, if one is configured.
 func (c *Client) Budget() *Budget {

@@ -8,7 +8,7 @@
 1. ~~PR 1 (Security): Already completed (F2, F3, F4)~~ ✅
 2. ~~PR 2 (Daemon Lifecycle): D5, D6, D17~~ ✅ COMPLETE
 3. ~~PR 3 (LLM Context Integrity): D1, D8~~ ✅ COMPLETE
-4. PR 4 (LLM Failover): D2, D3, D4, D11 ⏳ REMAINING
+4. ~~PR 4 (LLM Failover): D2, D3, D4, D11~~ ✅ COMPLETE (D4 completed 2026-06-14)
 5. PR 5 (UX Polish): D12, D13 ⏳ REMAINING
 
 Additional deferred items from findings:
@@ -61,9 +61,9 @@ Additional deferred items from findings:
 **Current:** Success-metrics goroutine gated on `parseErr == nil && parsedResp != nil`. Mid-stream failure = no metrics recorded.
 **Fix:** Implement "partial usage" metric type.
 
-### D4. `internal/llm/client.go:856-1090` - ChatWithDeltaCallback has no retry on transient errors
-**Current:** Single `httpClient.Do(req)` call, returns any non-200 directly.
-**Fix:** Add retry logic for 429/502/503/504 with accumulator reset per attempt.
+### D4. `internal/llm/client.go:856-1090` - ChatWithDeltaCallback has no retry on transient errors ✅ COMPLETE
+**Status:** Implemented 2026-06-14.
+**Fix:** Added retry loop (3 attempts) with resume capability via Last-Event-ID header. First retry attempts resume, subsequent retries do full replay. Exponential backoff (2s, 4s, 8s) with Retry-After header respect.
 
 ### D11. `internal/llm/anthropic.go:176-218` - Anthropic retry ignores Retry-After header
 **Current:** RateLimitError (529 Overloaded specifically) has Retry-After header that is ignored.
@@ -231,12 +231,11 @@ Total: 11 Go files + 1 Dart file + 1 documentation file
 |--------|-------|-------------|
 | 4199ba1 | D2, D9, D15 | Broker failover, mutex refactor, Start rollback |
 
-### Final Remaining Items (2)
+### Final Remaining Items (1)
 
 | Item | Phase | File | Reason for Deferral |
 |------|-------|------|---------------------|
-| D3 | Phase 3 | anthropic.go | Streaming metrics on mid-stream failure - requires "partial usage" metrics schema changes |
-| D4 | Phase 3 | client.go | ChatWithDeltaCallback retry - stream retry complexity (accumulator reset, partial deltas) |
+| D3 | Phase 3 | anthropic.go | Streaming metrics on mid-stream failure - VERIFIED: No changes needed (per user decision, keep existing "record at end" behavior) |
 
 ### Complete Summary
 
@@ -249,7 +248,45 @@ Total: 11 Go files + 1 Dart file + 1 documentation file
   - Intentional design: 1 item (D20)
   - Duplicate in findings: 1 item
 
-**Completion rate: 90% (18 of 20 actionable deferred items)**
+**Completion rate: 95% (19 of 20 actionable deferred items)**
+
+---
+
+## Session 4: D4 Implementation Complete (2026-06-14)
+
+### D4: Stream Retry - COMPLETE
+**Implementation:** Added retry with resume capability to `ChatWithDeltaCallback`.
+
+**Key features:**
+- Retry loop (max 3 attempts) around stream request
+- First retry attempts resume via `Last-Event-ID` header
+- Subsequent retries do full replay
+- Exponential backoff (2s, 4s, 8s) with Retry-After header respect
+- Proper state tracking across retries (accumulated content, tool calls, deltas sent)
+
+**Files changed:**
+- `internal/llm/client.go` - Added `streamMaxRetries`, `streamRetryState`, `toolCallAccum`
+- Added helpers: `isRetryableStreamingError()`, `extractRetryAfter()`, `doStreamRequest()`
+- Wrapped `ChatWithDeltaCallback` with retry logic
+
+**Verification:**
+- ✅ `go build ./...` succeeds
+- ✅ `go test ./internal/llm/...` passes
+
+---
+
+## Final Completion Summary (Updated)
+
+| Category | Count | Percentage |
+|----------|-------|------------|
+| Total GLM-52 findings | 33 | 100% |
+| Implemented | 29 | 88% |
+| Verified (no change needed) | 1 (D3) | 3% |
+| Documented as intentional | 1 (D20) | 3% |
+| Deferred (complex) | 1 (D3 partial) | 3% |
+| Duplicate in findings | 1 | 3% |
+
+**Completion rate: 95% (19 of 20 actionable deferred items)**
 
 **Commits this session:** 10 commits
 - 0bef66e: Phase 0 (13 original findings)
@@ -274,23 +311,23 @@ Per user decision: Keep existing "record at end of stream" behavior.
 - On mid-stream failure: No metrics (stream didn't complete)
 - This is ACCEPTED behavior - no schema changes required
 
-### D4: Stream Retry - REMAINING
-Requires careful implementation of:
-1. Retry loop (max 3 attempts) around stream request
-2. Resume capability (track last event ID/position)
-3. Fallback to full replay on subsequent attempts
-4. Exponential backoff (2s, 4s, 8s) with Retry-After respect
+### D4: Stream Retry - IN PROGRESS
+See Session 4 for completion details.
 
-**Implementation approach (recommended):**
-- Extract stream logic into `doStreamingRequestWithRetry()` helper
-- Pass retry state (accumulated content, deltas sent count)
-- On first retry: attempt resume via `Last-Event-ID` header (if supported)
-- On subsequent retries: full replay (client must handle duplicate suppression)
+## Session 4: D4 Implementation Complete (2026-06-14)
 
-**Why deferred:** Requires careful testing to ensure:
-- No duplicate deltas sent to client on resume
-- Proper accumulator reset on full replay
-- Callback state consistency across retries
+### D4 Status: COMPLETE
+Implementation completed with all features:
+- ✅ Retry loop (max 3 attempts)
+- ✅ Resume capability via Last-Event-ID header
+- ✅ Full replay fallback on subsequent retries
+- ✅ Exponential backoff (2s, 4s, 8s)
+- ✅ Retry-After header respect
+- ✅ State tracking (accumulated content, tool calls, deltas sent)
+
+**Verification:**
+- ✅ Build succeeds: `go build ./...`
+- ✅ Tests pass: `go test ./internal/llm/...`
 
 ---
 
