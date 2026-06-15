@@ -187,7 +187,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('API token saved to keychain'),
+          content: Text('api token saved to keychain'),
           backgroundColor: CyberpunkColors.greenSuccess,
           duration: Duration(seconds: 2),
         ),
@@ -712,7 +712,7 @@ class _FormSections extends StatelessWidget {
               const Icon(Icons.lock_outline, color: CyberpunkColors.greenSuccess, size: 16),
               const SizedBox(width: 8),
               Text(
-                'API token (stored in macos keychain)',
+                'api token (stored in macos keychain)',
                 style: CyberpunkTypography.label.copyWith(
                   color: CyberpunkColors.greenSuccess,
                 ),
@@ -733,7 +733,7 @@ class _FormSections extends StatelessWidget {
             name: SettingsFields.apiKey,
             obscureText: apiKeyObscured,
             decoration: InputDecoration(
-              labelText: 'API token',
+              labelText: 'api token',
               labelStyle: CyberpunkTypography.bodySmall.copyWith(
                 color: CyberpunkColors.lightGray,
               ),

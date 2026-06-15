@@ -207,10 +207,10 @@ class ApiClient {
       case DioExceptionType.badResponse:
         switch (statusCode) {
           case 401:
-            message = serverMessage ?? 'Missing API token — configure in settings';
+            message = serverMessage ?? 'missing API token — configure in settings';
             break;
           case 418:
-            message = serverMessage ?? 'Invalid API token (HTTP 418)';
+            message = serverMessage ?? 'invalid API token (HTTP 418)';
             break;
           case 426:
             message = serverMessage ?? 'Use HTTPS for this endpoint (HTTP 426)';

@@ -188,7 +188,7 @@ class TasksDetail extends ConsumerWidget {
           style: CyberpunkTypography.headlineMedium,
         ),
         content: Text(
-          'Are you sure you want to cancel "${task.title}"?',
+          'are you sure you want to cancel "${task.title}"?',
           style: CyberpunkTypography.bodyMedium,
         ),
         actions: [

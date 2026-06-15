@@ -51,7 +51,7 @@ class CyberpunkApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp.router(
       routerConfig: router,
-      title: 'Meept GUI Client v${AppConstants.appVersion}',
+      title: 'meept gui client v${AppConstants.appVersion}',
       debugShowCheckedModeBanner: false,
       theme: CyberpunkTheme.darkTheme,
       builder: (context, child) {
