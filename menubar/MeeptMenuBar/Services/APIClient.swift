@@ -28,7 +28,7 @@ class APIClient {
     // MARK: - Daemon Status (async/await)
 
     func getDaemonStatus() async throws -> DaemonStatus {
-        let request = makeRequest(path: "/api/v1/daemon/status", method: "GET")
+        let request = try makeRequest(path: "/api/v1/daemon/status", method: "GET")
         let data = try await performData(request: request)
         let decoder = JSONDecoder()
         let status = try decoder.decode(DaemonStatusResponse.self, from: data)
@@ -41,7 +41,7 @@ class APIClient {
     }
 
     func restartDaemon() async throws {
-        let request = makeRequest(path: "/api/v1/daemon/restart", method: "POST")
+        let request = try makeRequest(path: "/api/v1/daemon/restart", method: "POST")
         try await performVoid(request: request)
     }
 
@@ -71,13 +71,14 @@ class APIClient {
 
     // MARK: - Private helpers
 
-    private func makeRequest(path: String, method: String) -> URLRequest {
+    private func makeRequest(path: String, method: String) throws -> URLRequest {
         let url = baseURL.appendingPathComponent(path)
         var request = URLRequest(url: url)
         request.httpMethod = method
-        if let token = apiToken, !token.isEmpty {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        guard let token = apiToken, !token.isEmpty else {
+            throw APIError.noAPITokenConfigured
         }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         return request
     }
 
@@ -168,6 +169,7 @@ enum APIError: LocalizedError {
     case httpError(Int, String?)
     case networkError(String)
     case decodingError(String)
+    case noAPITokenConfigured
 
     var errorDescription: String? {
         switch self {
@@ -193,6 +195,8 @@ enum APIError: LocalizedError {
             return "network error: \(msg)"
         case .decodingError(let msg):
             return "failed to decode response: \(msg)"
+        case .noAPITokenConfigured:
+            return "no API token configured — run 'meept token generate --save' or add api_token to ~/.meept/menubar.json5"
         }
     }
 }

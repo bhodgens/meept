@@ -6,8 +6,13 @@
 import Foundation
 
 /// Default development API key shared with the daemon and other clients.
-/// In production, replace via `meept token generate --save`.
+/// Only available in DEBUG builds. In release builds, the API token must
+/// be configured via `menubar.json5` or the settings UI.
+#if DEBUG
 let DefaultDevAPIKey = "meept_dev_default_key_CHANGE_ME"
+#else
+let DefaultDevAPIKey: String? = nil
+#endif
 
 struct MenubarConfig: Codable {
     var daemon: DaemonConfig
@@ -65,7 +70,17 @@ class MenubarConfigService {
     }
 
     var apiToken: String? {
-        return config.daemon.apiToken ?? DefaultDevAPIKey
+        let configToken = config.daemon.apiToken
+        if let token = configToken, !token.isEmpty {
+            return token
+        }
+        #if DEBUG
+        return DefaultDevAPIKey
+        #else
+        // In release builds, return nil to trigger a clear auth error
+        // rather than silently using a known key.
+        return nil
+        #endif
     }
 
     var showInMenuBar: Bool {
