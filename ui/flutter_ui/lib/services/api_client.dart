@@ -94,6 +94,18 @@ class ApiClient {
       apiKey = storage.getApiKey();
     }
 
+    // Fallback to default dev API key if not configured
+    // This allows the Flutter app to work out-of-the-box in development
+    // The daemon uses this same key when no api_keys are configured
+    if (apiKey == null || apiKey.isEmpty) {
+      if (AppConstants.defaultApiKey.isNotEmpty) {
+        apiKey = AppConstants.defaultApiKey;
+      } else {
+        // Hardcoded fallback matching pkg/constants/api_key.go DefaultDevAPIKey
+        apiKey = 'meept_dev_default_key_CHANGE_ME';
+      }
+    }
+
     return ApiClient(
       host: host,
       port: port,
