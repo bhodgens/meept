@@ -1,14 +1,17 @@
 package builtin
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseTime(t *testing.T) {
 	tests := []struct {
-		name     string
-		in       string
-		wantH    int
-		wantM    int
-		wantErr  bool
+		name    string
+		in      string
+		wantH   int
+		wantM   int
+		wantErr bool
 	}{
 		{"3pm", "3pm", 15, 0, false},
 		{"9:00am", "9:00am", 9, 0, false},
@@ -34,5 +37,64 @@ func TestParseTime(t *testing.T) {
 				t.Errorf("parseTime(%q) = (%d, %d), want (%d, %d)", tt.in, h, m, tt.wantH, tt.wantM)
 			}
 		})
+	}
+}
+
+// TestBuildCronExpression_DayOfMonthDefault verifies that an absent
+// day_of_month defaults to 1 (cron field "0 9 1 * *").
+func TestBuildCronExpression_DayOfMonthDefault(t *testing.T) {
+	tool := &CronCreateTool{}
+	expr, err := tool.buildCronExpression(map[string]any{
+		"interval": "monthly",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Default at_time is 9:00am → "0 9 1 * *"
+	if expr != "0 9 1 * *" {
+		t.Errorf("expected '0 9 1 * *', got %q", expr)
+	}
+}
+
+// TestBuildCronExpression_DayOfMonthOutOfRange verifies that an explicit
+// out-of-range day_of_month returns an error rather than silently defaulting.
+func TestBuildCronExpression_DayOfMonthOutOfRange(t *testing.T) {
+	tool := &CronCreateTool{}
+	_, err := tool.buildCronExpression(map[string]any{
+		"interval":      "monthly",
+		"day_of_month":  float64(0),
+	})
+	if err == nil {
+		t.Fatal("expected error for day_of_month=0, got nil")
+	}
+	if !strings.Contains(err.Error(), "out of range") {
+		t.Fatalf("expected 'out of range' error, got %v", err)
+	}
+
+	_, err = tool.buildCronExpression(map[string]any{
+		"interval":      "monthly",
+		"day_of_month":  float64(32),
+	})
+	if err == nil {
+		t.Fatal("expected error for day_of_month=32, got nil")
+	}
+	if !strings.Contains(err.Error(), "out of range") {
+		t.Fatalf("expected 'out of range' error, got %v", err)
+	}
+}
+
+// TestBuildCronExpression_DayOfMonthValid verifies that a valid explicit
+// day_of_month is honored.
+func TestBuildCronExpression_DayOfMonthValid(t *testing.T) {
+	tool := &CronCreateTool{}
+	expr, err := tool.buildCronExpression(map[string]any{
+		"interval":      "monthly",
+		"day_of_month":  float64(15),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if expr != "0 9 15 * *" {
+		t.Errorf("expected '0 9 15 * *', got %q", expr)
 	}
 }

@@ -267,10 +267,15 @@ func (t *CronCreateTool) buildCronExpression(args map[string]any) (string, error
 		if err != nil {
 			return "", fmt.Errorf("invalid at_time: %w", err)
 		}
-		domFloat, _ := args["day_of_month"].(float64)
-		dom := int(domFloat)
-		if dom < 1 || dom > 31 {
-			dom = 1
+		// Default to 1 only when the key is absent; an explicit out-of-range
+		// value is an error the caller should see.
+		dom := 1
+		if domRaw, exists := args["day_of_month"]; exists {
+			domFloat, _ := domRaw.(float64)
+			dom = int(domFloat)
+			if dom < 1 || dom > 31 {
+				return "", fmt.Errorf("day_of_month %d out of range (1-31)", dom)
+			}
 		}
 		return fmt.Sprintf("%d %d %d * *", minute, hour, dom), nil
 
