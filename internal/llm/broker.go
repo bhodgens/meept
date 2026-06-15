@@ -431,9 +431,15 @@ func isRetryableError(err error) bool {
 	if IsRateLimitError(err) {
 		return true
 	}
-	// Check for server errors (5xx)
-	errStr := err.Error()
-	return strings.Contains(errStr, "5") && (strings.Contains(errStr, "00") || strings.Contains(errStr, "02") || strings.Contains(errStr, "03") || strings.Contains(errStr, "04"))
+	// Check for server errors (5xx) via structured APIError so HTTP 529
+	// (Anthropic "Overloaded") and other 5xx codes are detected. The previous
+	// substring match on "5" + "00"/"02"/"03"/"04" missed 529 and could false
+	// positive on arbitrary error strings containing those digits.
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode >= 500 && apiErr.StatusCode < 600
+	}
+	return false
 }
 
 var _ Chatter = (*ModelBroker)(nil)
