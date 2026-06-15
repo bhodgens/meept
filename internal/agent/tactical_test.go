@@ -1,7 +1,10 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -9,6 +12,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/task"
 )
 
@@ -419,5 +423,97 @@ func TestTacticalScheduler_PublishTokenProgress(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for publishTokenProgress event")
+	}
+}
+
+// TestTacticalScheduler_IsRateLimitError_FromError tests the error-based
+// rate-limit classifier that uses errcls.IsRateLimit (structured errors.As)
+// instead of substring matching on the error message.
+func TestTacticalScheduler_IsRateLimitError_FromError(t *testing.T) {
+	ts := &TacticalScheduler{}
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"RateLimitError", &llm.RateLimitError{ProviderID: "x", ModelID: "y"}, true},
+		{"APIError 429", &llm.APIError{StatusCode: 429}, true},
+		{"APIError 500", &llm.APIError{StatusCode: 500}, false},
+		{"wrapped RateLimitError", fmt.Errorf("ctx: %w", &llm.RateLimitError{}), true},
+		{"plain error", errors.New("something else"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ts.isRateLimitErrorFromErr(tt.err); got != tt.want {
+				t.Errorf("isRateLimitErrorFromErr(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestTacticalScheduler_IsRetryableError_FromError tests the error-based
+// retryable classifier. Key improvements over the string-based version:
+//   - context.DeadlineExceeded is now correctly retryable (was a false negative)
+//   - *llm.APIError 529 is now correctly retryable
+//   - *llm.BudgetExceededError and *llm.ContextSizeExceededError are non-retryable
+func TestTacticalScheduler_IsRetryableError_FromError(t *testing.T) {
+	ts := &TacticalScheduler{}
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"RateLimitError", &llm.RateLimitError{}, true},
+		{"APIError 429", &llm.APIError{StatusCode: 429}, true},
+		{"APIError 500", &llm.APIError{StatusCode: 500}, true},
+		{"APIError 529 overload", &llm.APIError{StatusCode: 529}, true},
+		{"APIError 400", &llm.APIError{StatusCode: 400}, false},
+		{"BudgetExceededError (non-retryable)", &llm.BudgetExceededError{}, false},
+		{"ContextSizeExceededError (non-retryable)", &llm.ContextSizeExceededError{}, false},
+		{"context deadline exceeded (was false negative)", context.DeadlineExceeded, true},
+		{"plain internal error", errors.New("internal failure"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ts.isRetryableErrorFromErr(tt.err); got != tt.want {
+				t.Errorf("isRetryableErrorFromErr(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestTacticalScheduler_IsRetryableError_StringFallback verifies the
+// string-based fallback still works for errors serialized through the bus.
+// This includes the fix for "context deadline exceeded" which the old
+// substring method missed (no "timeout" substring).
+func TestTacticalScheduler_IsRetryableError_StringFallback(t *testing.T) {
+	ts := &TacticalScheduler{}
+
+	tests := []struct {
+		msg  string
+		want bool
+	}{
+		// Rate limit strings still detected
+		{"HTTP 429: Too Many Requests", true},
+		{"rate limit exceeded", true},
+		// Budget strings still non-retryable
+		{"token budget exceeded", false},
+		{"budget exceeded for session", false},
+		{"context size exceeds model limit", false},
+		// "context deadline exceeded" — old code missed this (no "timeout")
+		// We now add "deadline" to transient patterns to catch it.
+		{"context deadline exceeded", true},
+		// Plain non-retryable
+		{"permission denied", false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		if got := ts.isRetryableError(tc.msg); got != tc.want {
+			t.Errorf("isRetryableError(%q) = %v, want %v", tc.msg, got, tc.want)
+		}
 	}
 }

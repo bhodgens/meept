@@ -11,6 +11,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/errcls"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/task"
@@ -1097,13 +1098,24 @@ func (ts *TacticalScheduler) publishTokenProgress(t *task.Task) {
 }
 
 // isRateLimitError checks if an error message indicates a rate limit error.
+// This is the string-based fallback used when the error has been serialized
+// through the message bus (OnJobFailed receives event.Error as a string).
+// For callers that have the original error value, prefer isRateLimitErrorFromErr.
 func (ts *TacticalScheduler) isRateLimitError(errMsg string) bool {
-	// Use the llm package helper if available
-	// First try to see if we can parse it as an LLM error
 	return llm.IsRateLimitErrorMessage(errMsg)
 }
 
+// isRateLimitErrorFromErr uses structured error classification via errcls.
+// Prefer this method when the original error value is available.
+func (ts *TacticalScheduler) isRateLimitErrorFromErr(err error) bool {
+	return errcls.IsRateLimit(err)
+}
+
 // isRetryableError checks if an error is transient and worth retrying.
+// This is the string-based fallback used when the error has been serialized
+// through the message bus (OnJobFailed receives event.Error as a string).
+// For callers that have the original error value, prefer isRetryableErrorFromErr.
+//
 // This includes rate limits, timeouts, network errors, and other temporary failures.
 func (ts *TacticalScheduler) isRetryableError(errMsg string) bool {
 	// Non-retryable errors should never be retried (FIX #0042)
@@ -1122,6 +1134,7 @@ func (ts *TacticalScheduler) isRetryableError(errMsg string) bool {
 	// Check for transient error patterns
 	transientPatterns := []string{
 		"timeout",
+		"deadline", // EC-3 fix: "context deadline exceeded" was a false negative
 		"temporary",
 		"connection refused",
 		"connection reset",
@@ -1142,6 +1155,14 @@ func (ts *TacticalScheduler) isRetryableError(errMsg string) bool {
 	}
 
 	return false
+}
+
+// isRetryableErrorFromErr uses structured error classification via errcls.
+// Prefer this method when the original error value is available. It correctly
+// handles context.DeadlineExceeded (which the string method missed) and
+// *llm.APIError with StatusCode 529 (overloaded).
+func (ts *TacticalScheduler) isRetryableErrorFromErr(err error) bool {
+	return errcls.IsRetryable(err)
 }
 
 // runValidationGateIfDue increments the validation counter for a task and runs
