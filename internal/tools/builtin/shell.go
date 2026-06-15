@@ -126,14 +126,24 @@ func (t *ShellExecuteTool) SetFenceChecker(fc FenceChecker) {
 
 // SetRuntimeManager injects a runtime manager for backend-based execution.
 // When set, commands are routed through the configured backend (local or docker).
-// When nil, the tool falls back to direct exec.Command (original behavior).
+// When nil, the tool falls back to direct exec.Command (original behavior) and
+// any previously-injected manager is cleared.
 func (t *ShellExecuteTool) SetRuntimeManager(mgr *runtime.ContainerManager) {
-	t.containerMgr = mgr
-	if mgr != nil {
-		t.backend = mgr.GetDefaultBackend()
-		// Preserve working dir by running with a Dir shim via env
-		t.logger = slog.Default().With("component", "shell-tool")
+	if mgr == nil {
+		t.containerMgr = nil
+		t.backend = nil
+		return
 	}
+	t.containerMgr = mgr
+	t.backend = mgr.GetDefaultBackend()
+	// Derive the component logger from the existing tool logger so that any
+	// fields set by upstream wiring (request-id, agent-id, etc.) are
+	// preserved. Fall back to slog.Default() only when t.logger is nil.
+	base := t.logger
+	if base == nil {
+		base = slog.Default()
+	}
+	t.logger = base.With("component", "shell-tool")
 }
 
 // SetKnownSafeCommands configures a set of base command names that are

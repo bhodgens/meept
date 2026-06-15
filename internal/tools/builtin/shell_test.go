@@ -278,3 +278,17 @@ func TestShellExecuteTool_CreateSession_FenceCheck(t *testing.T) {
 	}
 }
 
+// TestShellExecuteTool_SetRuntimeManager_NilGuard verifies that passing nil
+// to SetRuntimeManager does not panic and clears any previously-set manager.
+func TestShellExecuteTool_SetRuntimeManager_NilGuard(t *testing.T) {
+	tool := NewShellExecuteTool("", time.Second*10, nil)
+	// Calling with nil must not panic.
+	tool.SetRuntimeManager(nil)
+	if tool.containerMgr != nil {
+		t.Errorf("expected containerMgr to be nil after SetRuntimeManager(nil)")
+	}
+	if tool.backend != nil {
+		t.Errorf("expected backend to be nil after SetRuntimeManager(nil)")
+	}
+}
+
