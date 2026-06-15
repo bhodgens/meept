@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -269,15 +270,16 @@ func (m *Manager) Reload(ctx context.Context, configs []ServerConfig) error {
 	// We use a helper function to ensure the lock is always released properly
 	configsToStart := m.reloadPhase1(newConfigs)
 
-	// Phase 2: Start servers (outside lock to avoid deadlock with StartServer)
-	var lastErr error
+	// Phase 2: Start servers (outside lock to avoid deadlock with StartServer).
+	// Use errors.Join so that every failure is surfaced, not just the last.
+	var errs []error
 	for _, cfg := range configsToStart {
 		if err := m.StartServer(ctx, cfg); err != nil {
 			m.logger.Error("failed to start MCP server during reload",
 				"name", cfg.Name,
 				"error", err,
 			)
-			lastErr = err
+			errs = append(errs, fmt.Errorf("server %q: %w", cfg.Name, err))
 		}
 	}
 
@@ -287,7 +289,7 @@ func (m *Manager) Reload(ctx context.Context, configs []ServerConfig) error {
 
 	m.logger.Info("MCP configuration reloaded", "active_servers", activeCount)
 
-	return lastErr
+	return errors.Join(errs...)
 }
 
 // reloadPhase1 handles the locked portion of reload - stopping old servers
