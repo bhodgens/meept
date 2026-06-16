@@ -165,6 +165,10 @@ class WebSocketService {
   /// Manual reconnect loop: try [wsPath], on failure wait with exponential
   /// backoff and retry.  Exits only when [_disposed] or
   /// [_wasExplicitlyDisconnected] is set.
+  ///
+  /// Circuit-breaker: after 5+ consecutive failures, retries occur every
+  /// ~30 seconds (with jitter). On HTTP 401 errors, shows a helpful message
+  /// prompting the user to configure an API key in Settings.
   Future<void> _connectWithRetry(String wsPath) async {
     // try/finally ensures _isConnecting is reset on EVERY exit path,
     // including the early `return` statements when pause()/disconnect()
@@ -182,7 +186,17 @@ class WebSocketService {
           await Future<void>.delayed(delay);
         } catch (e) {
           if (_disposed || _wasExplicitlyDisconnected) return;
-          _errorSubject.addSafe('Reconnecting: $e');
+
+          // Check if this is an HTTP 401 (unauthorized) error
+          final is401 = e is io.WebSocketException &&
+              e.toString().contains('401');
+          if (is401) {
+            _errorSubject.addSafe(
+                'Authentication failed (401). Configure API key in Settings.');
+          } else {
+            _errorSubject.addSafe('Reconnecting: $e');
+          }
+
           final delay = _nextReconnectDelay();
           await Future<void>.delayed(delay);
         }

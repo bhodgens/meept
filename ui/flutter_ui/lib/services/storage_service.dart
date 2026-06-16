@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../core/constants.dart';
@@ -27,23 +28,39 @@ class StorageService {
 
   /// Initialize the underlying storage instances.
   /// Must be called (awaits) before any synchronous reads.
+  ///
+  /// Resilient to storage plugin failures: if SharedPreferences or
+  /// FlutterSecureStorage fail to initialize, the app continues with
+  /// null storage (all getters return null). This prevents crashes
+  /// on misconfigured platforms while allowing the UI to render.
   Future<void> init() async {
-    _prefs ??= await SharedPreferences.getInstance();
-    // Configure for macOS keychain
-    _secureStorage ??= const FlutterSecureStorage(
-        aOptions: AndroidOptions(
-          encryptedSharedPreferences: true,
-        ),
-        iOptions: IOSOptions(
-          accessibility: KeychainAccessibility.first_unlock_this_device,
-        ),
-        mOptions: MacOsOptions(
-          accessibility: KeychainAccessibility.first_unlock_this_device,
-        ),
-      );
+    try {
+      _prefs ??= await SharedPreferences.getInstance();
+    } catch (e) {
+      debugPrint('[warn] SharedPreferences init failed: $e');
+      // Continue with null _prefs - getters will return null
+    }
 
-    // Cache API key from keychain so synchronous reads use secure storage
-    _cachedApiKey = await _secureStorage?.read(key: AppConstants.apiKeyPref);
+    try {
+      // Configure for macOS keychain
+      _secureStorage ??= const FlutterSecureStorage(
+          aOptions: AndroidOptions(
+            encryptedSharedPreferences: true,
+          ),
+          iOptions: IOSOptions(
+            accessibility: KeychainAccessibility.first_unlock_this_device,
+          ),
+          mOptions: MacOsOptions(
+            accessibility: KeychainAccessibility.first_unlock_this_device,
+          ),
+        );
+
+      // Cache API key from keychain so synchronous reads use secure storage
+      _cachedApiKey = await _secureStorage?.read(key: AppConstants.apiKeyPref);
+    } catch (e) {
+      debugPrint('[warn] FlutterSecureStorage init failed: $e');
+      // Continue with null _secureStorage - falls back to SharedPreferences
+    }
   }
 
   // ------ API Key (secure storage) ------

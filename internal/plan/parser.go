@@ -112,6 +112,9 @@ func ParsePlanContent(content string) (*ParsedPlan, error) {
 	)
 
 	scanner := bufio.NewScanner(strings.NewReader(content))
+	// Raise the per-line limit from 64KB to 1MB so long plan lines don't
+	// trigger bufio.ErrTooLong.
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)

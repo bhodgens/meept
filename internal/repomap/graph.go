@@ -40,6 +40,12 @@ type RepoGraph struct {
 // nodeID is used to generate unique node IDs atomically across concurrent BuildGraph calls.
 var nodeID int64
 
+// edgeID is a separate counter for edge IDs. Previously edges packed two node
+// IDs together (from.ID()*1e9 + to.ID()), which collides once node IDs exceed
+// ~1e9 or when specific combinations align. Allocating from a dedicated
+// counter guarantees uniqueness.
+var edgeID atomic.Int64
+
 // NewRepoGraph creates a new empty RepoGraph.
 func NewRepoGraph() *RepoGraph {
 	return &RepoGraph{
@@ -130,13 +136,14 @@ type weightedLine struct {
 
 // newWeightedLine creates a new weighted line with a unique ID.
 func newWeightedLine(from, to graph.Node, weight float64) *weightedLine {
-	// Pack two int64 node IDs into a single unique ID using integer arithmetic.
-	// This requires node IDs to stay well below 1e9 (1,000,000,000) to avoid overflow.
+	// Allocate edge IDs from a dedicated atomic counter. The previous packed
+	// formula (from.ID()*1e9 + to.ID()) collided when node IDs grew large or
+	// aligned unfavourably (see S2-9).
 	return &weightedLine{
 		from:   from,
 		to:     to,
 		weight: weight,
-		IDVal:  from.ID()*int64(1e9) + to.ID(), // Generate unique ID
+		IDVal:  edgeID.Add(1),
 	}
 }
 
@@ -166,7 +173,7 @@ func (e *weightedLine) ReversedLine() graph.Line {
 		from:   e.to,
 		to:     e.from,
 		weight: e.weight,
-		IDVal:  e.to.ID()*1e9 + e.from.ID(),
+		IDVal:  edgeID.Add(1),
 	}
 }
 

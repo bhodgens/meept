@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/pkg/models"
@@ -82,9 +84,37 @@ func (h *PlanHandler) handleStepCompleted(ctx context.Context, msg *models.BusMe
 		h.logger.Error("plan handler: failed to parse step completed event", "error", err)
 		return
 	}
-	if err := h.manager.OnStepCompleted(ctx, payload.TaskID, payload.StepID); err != nil {
-		h.logger.Error("plan handler: failed to process step completed", "task_id", payload.TaskID, "error", err)
+	// Retry transient (SQLite busy/locked) errors with exponential backoff
+	// before giving up and logging (S2-16).
+	backoffs := []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond}
+	var lastErr error
+	for attempt := 0; attempt <= len(backoffs); attempt++ {
+		err := h.manager.OnStepCompleted(ctx, payload.TaskID, payload.StepID)
+		if err == nil {
+			return
+		}
+		lastErr = err
+		if !isTransientDBError(err) {
+			break
+		}
+		if attempt < len(backoffs) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoffs[attempt]):
+			}
+		}
 	}
+	if lastErr != nil {
+		h.logger.Error("plan handler: failed to process step completed",
+			"task_id", payload.TaskID, "error", lastErr)
+	}
+}
+
+// isTransientDBError reports whether err is a transient SQLite error worth retrying.
+func isTransientDBError(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "SQLITE_BUSY")
 }
 
 func (h *PlanHandler) handleTaskCompleted(ctx context.Context, msg *models.BusMessage) {

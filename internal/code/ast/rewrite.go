@@ -3,6 +3,7 @@ package ast
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"os"
 	"regexp"
 	"sort"
@@ -25,6 +26,10 @@ type ProposedEdit struct {
 	StartChar int
 	EndLine   int
 	EndChar   int
+	// StartByte/EndByte, when non-zero, let ApplyEdits skip the O(n) line
+	// scan in positionToByte and use the byte offsets directly (S2-12).
+	StartByte int
+	EndByte   int
 	OldText   string
 	NewText   string
 	NodeKind  string
@@ -185,6 +190,8 @@ func (r *ASTRewriter) RunRewrite(source []byte, lang Language, queryPattern, rew
 			StartChar: startChar,
 			EndLine:   endLine,
 			EndChar:   endChar,
+			StartByte: int(startByte),
+			EndByte:   int(endByte),
 			OldText:   oldText,
 			NewText:   newText,
 			NodeKind:  targetNode.Type(),
@@ -224,6 +231,11 @@ func (r *ASTRewriter) RunRewriteOnFile(filePath, queryPattern, rewriteTemplate s
 }
 
 // ApplyEdits applies the proposed edits to source code and returns the modified content.
+// Edits are applied in reverse document order so earlier offsets remain valid.
+// When StartByte/EndByte are populated (non-zero), the expensive linear scan
+// in positionToByte is skipped (S2-12). If positionToByte reports an
+// out-of-range position, the edit is skipped with a warning rather than
+// silently clamping to EOF (S2-20).
 func ApplyEdits(source []byte, edits []ProposedEdit) []byte {
 	sortedEdits := make([]ProposedEdit, len(edits))
 	copy(sortedEdits, edits)
@@ -238,10 +250,34 @@ func ApplyEdits(source []byte, edits []ProposedEdit) []byte {
 	copy(result, source)
 
 	for _, edit := range sortedEdits {
-		startByte := positionToByte(result, edit.StartLine, edit.StartChar)
-		endByte := positionToByte(result, edit.EndLine, edit.EndChar)
+		var startByte, endByte int
+		var err error
 
-		newResult := make([]byte, 0, len(result)-int(endByte-startByte)+len(edit.NewText))
+		if edit.StartByte > 0 || edit.EndByte > 0 {
+			startByte = edit.StartByte
+			endByte = edit.EndByte
+		} else {
+			startByte, err = positionToByte(result, edit.StartLine, edit.StartChar)
+			if err != nil {
+				slog.Warn("skipping edit: start position out of range",
+					"line", edit.StartLine, "char", edit.StartChar, "error", err)
+				continue
+			}
+			endByte, err = positionToByte(result, edit.EndLine, edit.EndChar)
+			if err != nil {
+				slog.Warn("skipping edit: end position out of range",
+					"line", edit.EndLine, "char", edit.EndChar, "error", err)
+				continue
+			}
+		}
+
+		if startByte < 0 || endByte < 0 || startByte > len(result) || endByte > len(result) || startByte > endByte {
+			slog.Warn("skipping edit: byte offsets out of range or inverted",
+				"start_byte", startByte, "end_byte", endByte, "source_len", len(result))
+			continue
+		}
+
+		newResult := make([]byte, 0, len(result)-(endByte-startByte)+len(edit.NewText))
 		newResult = append(newResult, result[:startByte]...)
 		newResult = append(newResult, edit.NewText...)
 		newResult = append(newResult, result[endByte:]...)
@@ -251,12 +287,15 @@ func ApplyEdits(source []byte, edits []ProposedEdit) []byte {
 	return result
 }
 
-func positionToByte(source []byte, line, char int) int {
+// positionToByte converts a (line, char) pair to a byte offset in source.
+// Returns an error if the position is out of range instead of silently
+// clamping to len(source) (S2-20).
+func positionToByte(source []byte, line, char int) (int, error) {
 	currentLine := 0
 	currentChar := 0
 	for i, b := range source {
 		if currentLine == line && currentChar == char {
-			return i
+			return i, nil
 		}
 		if b == '\n' {
 			currentLine++
@@ -265,5 +304,10 @@ func positionToByte(source []byte, line, char int) int {
 			currentChar++
 		}
 	}
-	return len(source)
+	// Check the end-of-source case: (line, char) may point at the position
+	// right after the last byte.
+	if currentLine == line && currentChar == char {
+		return len(source), nil
+	}
+	return -1, fmt.Errorf("position %d:%d out of range for source of %d bytes", line, char, len(source))
 }

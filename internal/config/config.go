@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -167,8 +168,7 @@ func ExpandEnvVars(s string) string {
 	}
 	// Warn if we hit the cap (cycle detected) - caller should log
 	if envVarPattern.MatchString(result) {
-		// Return result with remaining unresolved vars
-		// Caller responsible for logging warning about potential cycle
+		slog.Warn("env var expansion hit maxPasses — possible cycle", "input", s)
 	}
 	return result
 }

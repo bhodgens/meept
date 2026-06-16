@@ -113,7 +113,12 @@ func (a *ChangeApplier) applyFix(_ context.Context, fix *ProposedFix, approvedBy
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	// Apply the replacement
+	// Apply the replacement.
+	// Fail closed when the snippet is ambiguous rather than silently patching
+	// the wrong site (S2-10).
+	if n := strings.Count(string(content), original); n > 1 {
+		return nil, fmt.Errorf("ambiguous fix: original snippet appears %d times in file; refusing to patch without explicit location", n)
+	}
 	newContent := strings.Replace(string(content), original, fixed, 1)
 	if newContent == string(content) {
 		return nil, fmt.Errorf("original code not found in file")

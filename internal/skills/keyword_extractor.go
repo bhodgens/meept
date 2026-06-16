@@ -38,6 +38,10 @@ type KeywordExtractor struct {
 	maxPhraseLen int
 }
 
+// nameSplitter is a package-level compiled regex used by extractFromName.
+// Hoisting it avoids recompiling on every call (S2-14).
+var nameSplitter = regexp.MustCompile(`[-_\s]+`)
+
 // NewKeywordExtractor creates a new keyword extractor.
 func NewKeywordExtractor() *KeywordExtractor {
 	return &KeywordExtractor{
@@ -116,7 +120,7 @@ func (ke *KeywordExtractor) extractFromName(name string) []string {
 	keywords = append(keywords, nameLower) // Full name
 
 	// Split by common separators
-	parts := regexp.MustCompile(`[-_\s]+`).Split(nameLower, -1)
+	parts := nameSplitter.Split(nameLower, -1)
 	for _, part := range parts {
 		if len(part) >= ke.minWordLen && !ke.stopWords[part] {
 			keywords = append(keywords, part)

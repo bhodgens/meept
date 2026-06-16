@@ -316,16 +316,17 @@ func (g *RepoMapGenerator) buildPersonalization(chatFiles, mentionedIdentifiers 
 		pers[file] = 3.0
 	}
 
-	// Medium bias for files matching mentioned identifiers
+	// Medium bias for files matching mentioned identifiers.
+	// RLock hoisted to wrap both loops, avoiding per-identifier lock thrash (S2-11).
+	g.mu.RLock()
 	for _, ident := range mentionedIdentifiers {
-		g.mu.RLock()
 		for _, file := range g.watchedFiles {
 			if matchesPathComponents(filepath.Base(file), ident) {
 				pers[file] += 1.5
 			}
 		}
-		g.mu.RUnlock()
 	}
+	g.mu.RUnlock()
 
 	return pers
 }

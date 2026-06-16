@@ -264,8 +264,9 @@ func (m *PlanManager) ConfirmPlan(ctx context.Context, planID, sessionID, by str
 		return fmt.Errorf("get plan: %w", err)
 	}
 
-	if plan.State != StateCompleted {
-		return fmt.Errorf("plan %s is in state %s, expected completed", planID, plan.State)
+	// Allow confirmation from completed, failed, or cancelled states.
+	if plan.State != StateCompleted && plan.State != StateFailed && plan.State != StateCancelled {
+		return fmt.Errorf("plan %s is in state %s, expected terminal state", planID, plan.State)
 	}
 
 	signoff := NewPlanSignoff(planID, "", sessionID, by, "confirmed", "")

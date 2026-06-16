@@ -183,32 +183,43 @@ func (m *Manager) StartServer(ctx context.Context, name string, cfg config.LSPSe
 }
 
 // StopServer stops a specific LSP server.
+// The map entry is deleted AFTER close calls succeed (or fail with a warning)
+// so that a slow shutdown doesn't leave a stale, unusable entry (S2-17).
 func (m *Manager) StopServer(ctx context.Context, name string) error {
+	// Collect the server under lock, then release before doing I/O.
 	m.mu.Lock()
 	srv, ok := m.servers[name]
+	m.mu.Unlock()
 	if !ok {
-		m.mu.Unlock()
 		return nil
 	}
-	delete(m.servers, name)
-	m.mu.Unlock()
 
 	m.logger.Info("Stopping LSP server", "name", name)
 
-	// Close all documents
+	// Close all documents (I/O — do not hold the lock here).
 	if err := srv.DocMgr.CloseAll(ctx); err != nil {
-		m.logger.Warn("Failed to close documents", "error", err)
+		m.logger.Warn("Failed to close documents", "name", name, "error", err)
 	}
 
-	// Shutdown server
+	// Shutdown server (I/O).
 	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	if err := srv.Client.Shutdown(shutdownCtx); err != nil {
-		m.logger.Warn("Failed to shutdown server gracefully", "error", err)
+		m.logger.Warn("Failed to shutdown server gracefully", "name", name, "error", err)
 	}
 
-	return srv.Client.Close()
+	if err := srv.Client.Close(); err != nil {
+		m.logger.Warn("Failed to close client connection", "name", name, "error", err)
+	}
+
+	// Remove the entry after close calls. If any close call failed we still
+	// delete — the OS resources are unreachable, and a stale entry is worse.
+	m.mu.Lock()
+	delete(m.servers, name)
+	m.mu.Unlock()
+
+	return nil
 }
 
 // StopAll stops all running LSP servers.
