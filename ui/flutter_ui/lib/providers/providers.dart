@@ -14,6 +14,7 @@ import '../services/api_client.dart';
 import '../services/websocket_service.dart';
 import '../services/storage_service.dart';
 import '../services/session_notifier.dart';
+import '../services/daemon_cert_pinner.dart';
 import '../models/api_models.dart';
 
 // Storage service — initialized in main() before runApp
@@ -95,6 +96,173 @@ final shortcutHelpProvider = StateProvider<bool>((ref) => false);
 
 // Focus input with slash prefix request
 final focusInputRequestProvider = StateProvider<bool>((ref) => false);
+
+/// Connection detail row data.
+class _ConnDataRow {
+  final String label;
+  final String value;
+  const _ConnDataRow(this.label, this.value);
+}
+
+/// Connection details — fetched from the API on successful connect.
+class ConnectionDetails {
+  final String? version;
+  final int? pid;
+  final String? uptime;
+  final String state;
+  final String host;
+  final int port;
+  final bool tls;
+  final DateTime? connectedAt;
+  final String? certFingerprint;
+
+  const ConnectionDetails({
+    this.version,
+    this.pid,
+    this.uptime,
+    this.state = 'unknown',
+    required this.host,
+    required this.port,
+    required this.tls,
+    this.connectedAt,
+    this.certFingerprint,
+  });
+
+  /// Duration since connection was established.
+  String get duration {
+    final since = connectedAt;
+    if (since == null) return '—';
+    final diff = DateTime.now().difference(since);
+    final hh = diff.inHours;
+    final mm = diff.inMinutes % 60;
+    final ss = diff.inSeconds % 60;
+    if (hh > 0) return '$hh h $mm m';
+    if (mm > 0) return '$mm m $ss s';
+    return '$ss s';
+  }
+
+  /// Build a short summary line for the popup menu.
+  String get summary {
+    final parts = <String>[];
+    if (state != 'unknown') parts.add(state);
+    if (pid != null) parts.add('pid $pid');
+    return parts.join(' • ');
+  }
+
+  /// Build the rows for the connection details dialog.
+  List<_ConnDataRow> get dialogRows => <_ConnDataRow>[
+        const _ConnDataRow('host', ''),
+        const _ConnDataRow('port', ''),
+        _ConnDataRow('tls', tls ? 'yes (self-signed)' : 'no'),
+        if (tls)
+          _ConnDataRow('certificate', certFingerprint ?? 'pinned (no file)'),
+        _ConnDataRow('connection', connectedAt != null ? 'alive' : '—'),
+        if (connectedAt != null) _ConnDataRow('duration', duration),
+        if (pid != null) _ConnDataRow('pid', pid.toString()),
+        if (state != 'unknown') _ConnDataRow('state', state),
+        if (uptime != null) _ConnDataRow('uptime', uptime!),
+        if (version != null) _ConnDataRow('version', version!),
+      ];
+
+  /// Get the row value for a given label.
+  String rowValue(String label) {
+    return switch (label) {
+      'host' => host,
+      'port' => port.toString(),
+      _ => '',
+    };
+  }
+}
+
+final connectionDetailsProvider = StateNotifierProvider<ConnectionDetailsNotifier, ConnectionDetails?>((ref) {
+  return ConnectionDetailsNotifier(ref);
+});
+
+/// Provides daemon info (version, pid, uptime, state) and connection metadata.
+/// Updated on each successful connection.
+class ConnectionDetailsNotifier extends StateNotifier<ConnectionDetails?> {
+  final Ref _ref;
+  Timer? _fetchTimer;
+
+  ConnectionDetailsNotifier(this._ref) : super(null) {
+    // Periodically refresh daemon state while connected
+    _fetchTimer = Timer.periodic(const Duration(seconds: 60), (_) async {
+      final connected = _ref.read(connectionStateProvider);
+      if (connected) await _fetch();
+    });
+  }
+
+  Future<void> _fetch() async {
+    ConnectionDetails result;
+
+    try {
+      final host = _ref.read(websocketProvider).host;
+      final port = _ref.read(websocketProvider).port;
+      final connectedAt = _ref.read(websocketProvider).connectedAt;
+      final fp = DaemonCertPinner.currentFingerprint;
+
+      try {
+        final client = _ref.read(apiClientProvider);
+        final status = await client.getDaemonStatus();
+        final dState = status['state'] as String? ?? 'unknown';
+        final pid = status['pid'] as int?;
+        final uptime = status['uptime'] as String?;
+
+        // Try to extract version from status
+        String? version;
+        if (status['version'] != null) {
+          version = status['version'] as String;
+        } else if (status['build'] != null) {
+          version = status['build'] as String;
+        }
+
+        result = ConnectionDetails(
+          version: version,
+          pid: pid,
+          uptime: uptime,
+          state: dState,
+          host: host,
+          port: port,
+          tls: true,
+          connectedAt: connectedAt,
+          certFingerprint: fp,
+        );
+      } catch (_) {
+        // Still show connection metadata even if daemon is unreachable
+        result = ConnectionDetails(
+          host: host,
+          port: port,
+          tls: true,
+          connectedAt: connectedAt,
+          certFingerprint: fp,
+        );
+      }
+    } catch (_) {
+      // Best-effort — only connection metadata available
+      try {
+        final ws = _ref.read(websocketProvider);
+        final fp = DaemonCertPinner.currentFingerprint;
+        result = ConnectionDetails(
+          host: ws.host,
+          port: ws.port,
+          tls: true,
+          connectedAt: ws.connectedAt,
+          certFingerprint: fp,
+        );
+      } catch (_) {
+        return;
+      }
+    }
+
+    state = result;
+  }
+
+  @override
+  void dispose() {
+    _fetchTimer?.cancel();
+    super.dispose();
+  }
+}
 
 // ConnectionMonitor provider - manages WebSocket health monitoring
 final connectionMonitorProvider = Provider<ConnectionMonitor>((ref) {
@@ -189,6 +357,19 @@ class ConnectionMonitor {
     _confirmed = true;
     _container.read(connectionStateProvider.notifier).state = connected;
     // Don't clear isConnecting here - let the polling timer manage it
+    // Fetch daemon details on successful connect
+    if (connected) {
+      _fetchConnectionDetails();
+    }
+  }
+
+  Future<void> _fetchConnectionDetails() async {
+    try {
+      final details = _container.read(connectionDetailsProvider.notifier);
+      await details._fetch();
+    } catch (_) {
+      // Best-effort only; don't disrupt connection
+    }
   }
 
   void _startHealthChecks() {

@@ -20,6 +20,9 @@ class DaemonCertPinner {
   static String? _cachedFingerprint;
   static bool _loadAttempted = false;
 
+  /// The cached certificate SHA-256 fingerprint fingerprint, when available.
+  static String? get currentFingerprint => _cachedFingerprint;
+
   /// Load and cache the daemon cert's SHA-256 fingerprint.
   ///
   /// Reads the PEM file, extracts the base64 DER content, and hashes

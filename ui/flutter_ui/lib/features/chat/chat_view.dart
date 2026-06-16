@@ -71,7 +71,6 @@ class _ChatViewState extends ConsumerState<ChatView> {
               maxLines: 1,
             ),
           ),
-          const Divider(height: 1, color: CyberpunkColors.midGray),
           // Message list
           Expanded(
             child: ChatMessageList(sessionId: widget.sessionId),

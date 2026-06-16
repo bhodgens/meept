@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/router.dart';
@@ -11,11 +12,85 @@ import '../../providers/providers.dart';
 import 'tab_content.dart';
 import 'tools_dropdown.dart';
 
+/// Dialog showing connection details (host, port, cert, uptime, version).
+class _ConnectionDetailsDialog extends ConsumerWidget {
+  final ConnectionDetails? details;
+
+  const _ConnectionDetailsDialog({required this.details});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final rows = details?.dialogRows ?? [];
+
+    return AlertDialog(
+      backgroundColor: CyberpunkColors.darkGray,
+      title: Text(
+        'connection details',
+        style: CyberpunkTypography.bodyMedium.copyWith(
+          color: CyberpunkColors.orangePrimary,
+        ),
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: rows.map((row) {
+            final value = details != null ? details!.rowValue(row.label) : row.value;
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 90,
+                    child: Text(
+                      '${row.label}:',
+                      style: CyberpunkTypography.bodySmall.copyWith(
+                        color: CyberpunkColors.midGray,
+                        fontFamily: 'SourceCodePro',
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: GestureDetector(
+                      onLongPress: () {
+                        Clipboard.setData(ClipboardData(text: value));
+                      },
+                      child: Text(
+                        value,
+                        style: CyberpunkTypography.bodySmall.copyWith(
+                          color: CyberpunkColors.lightGray,
+                          fontFamily: 'SourceCodePro',
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(
+            'close',
+            style: CyberpunkTypography.bodySmall.copyWith(
+              color: CyberpunkColors.orangePrimary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// Home tab enum - 5 tabs
 enum HomeTab { chat, sessions, plans, tasks, agents }
 
 /// Connection status dot - small indicator in toolbar.
-/// Tapping opens a popup menu with disconnect/reconnect actions.
+/// Tapping opens a popup menu with details, disconnect/reconnect actions.
 class _ConnectionDot extends ConsumerWidget {
   const _ConnectionDot();
 
@@ -25,28 +100,53 @@ class _ConnectionDot extends ConsumerWidget {
     final isConnecting = ref.watch(isConnectingProvider);
     final statusText = ref.watch(connectionStatusProvider);
     final statusColor = ref.watch(connectionColorProvider);
+    final details = ref.watch(connectionDetailsProvider);
+    final summary = details?.summary;
+
+    final items = <PopupMenuEntry<String>>[
+      if (summary != null)
+        PopupMenuItem<String>(
+          enabled: false,
+          child: Text(
+            summary,
+            style: CyberpunkTypography.bodySmall.copyWith(
+              color: CyberpunkColors.midGray,
+            ),
+          ),
+        ),
+      if (summary != null) const PopupMenuDivider(),
+      if (connected)
+        PopupMenuItem<String>(
+          value: 'details',
+          child: Text('details'),
+        ),
+      if (connected)
+        PopupMenuItem<String>(
+          value: 'disconnect',
+          child: Text('disconnect'),
+        ),
+      if (!connected)
+        PopupMenuItem<String>(
+          value: 'reconnect',
+          child: Text('reconnect'),
+        ),
+    ];
 
     return PopupMenuButton<String>(
       onSelected: (value) {
-        if (value == 'disconnect') {
+        if (value == 'details') {
+          final details = ref.read(connectionDetailsProvider);
+          showDialog(
+            context: context,
+            builder: (_) => _ConnectionDetailsDialog(details: details),
+          );
+        } else if (value == 'disconnect') {
           ref.read(websocketProvider).disconnect();
         } else if (value == 'reconnect') {
           ref.read(websocketProvider).connect();
         }
       },
-      itemBuilder: (context) => connected
-          ? const [
-              PopupMenuItem<String>(
-                value: 'disconnect',
-                child: Text('disconnect'),
-              ),
-            ]
-          : const [
-              PopupMenuItem<String>(
-                value: 'reconnect',
-                child: Text('reconnect'),
-              ),
-            ],
+      itemBuilder: (context) => items,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [

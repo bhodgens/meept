@@ -19,8 +19,52 @@ class ChatInput extends ConsumerStatefulWidget {
   ConsumerState<ChatInput> createState() => _ChatInputState();
 }
 
+// Custom TextEditingController that renders a blinking terminal cursor
+// (underscore character) at the actual text cursor position, replacing
+// the need for a suffix widget that sits at the far right edge.
+class _TerminalCursorController extends TextEditingController {
+  final AnimationController animation;
+  bool _hasFocus = false;
+
+  _TerminalCursorController({
+    required this.animation,
+    String value = '',
+  }) : super(text: value);
+
+  set focus(bool value) => _hasFocus = value;
+
+  @override
+  TextEditingValue get value {
+    final base = super.value;
+    final isSelected = _hasFocus &&
+        base.selection.isValid &&
+        base.selection.start <= base.text.length &&
+        base.selection.end <= base.text.length;
+    final cursorVisible = animation.value > 0.5;
+
+    if (!isSelected || !cursorVisible) {
+      return base;
+    }
+
+    // Insert the cursor character at the current selection position,
+    // so the visible cursor always sits at the correct spot.
+    final offset = base.selection.end;
+    final before = base.text.substring(0, offset);
+    final after = base.text.substring(offset);
+    final newText = '$before$_cursorChar$after';
+    final newOffset = offset + 1;
+
+    return base.copyWith(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newOffset),
+    );
+  }
+
+  String get _cursorChar => '_';
+}
+
 class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProviderStateMixin {
-  final _controller = TextEditingController();
+  late final _TerminalCursorController _controller;
   final _focusNode = FocusNode();
   late final AnimationController _cursorController;
 
@@ -60,12 +104,23 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
       duration: const Duration(milliseconds: 600),
       vsync: this,
     )..repeat(reverse: true);
+    _controller = _TerminalCursorController(
+      animation: _cursorController,
+    );
     _controller.addListener(_onTextChanged);
+    _focusNode.addListener(_onFocusChange);
     // Auto-focus the input field when the chat tab is first shown
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusNode.requestFocus();
       _hasFocused = true;
     });
+  }
+
+  void _onFocusChange() {
+    _controller.focus = _focusNode.hasFocus;
+    if (_focusNode.hasFocus) {
+      setState(() {});
+    }
   }
 
   @override
@@ -91,13 +146,17 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
   }
 
   void _onTextChanged() {
-    final currentText = _controller.text;
+    final currentText = _stripCursor(_controller.text);
     _detectPaste(currentText);
     _detectSlashCommand(currentText);
     _detectFilePaths(currentText);
     _updateGhostText(currentText);
     _previousText = currentText;
   }
+
+  /// Remove the blinking cursor character from display text so
+  /// internal logic (paste detect, slash detect, etc.) never sees it.
+  String _stripCursor(String text) => text.replaceAll('_', '');
 
   /// Update ghost text for single slash command match.
   void _updateGhostText(String text) {
@@ -169,10 +228,11 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
   }
 
   void _onSlashSelected(SlashCommand command) {
+    final cmdText = '${command.name} ';
     setState(() {
-      _controller.text = '${command.name} ';
+      _controller.text = cmdText;
       _controller.selection = TextSelection.collapsed(
-        offset: _controller.text.length,
+        offset: cmdText.length,
       );
       _showSlashAutocomplete = false;
       _slashQuery = '';
@@ -199,7 +259,8 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
       // notification (bug F6: _onTextChanged called from listener + mutation).
       _controller.removeListener(_onTextChanged);
       _controller.text = newText;
-      _controller.selection = TextSelection.collapsed(offset: newText.length);
+      final finalLen = newText.length;
+      _controller.selection = TextSelection.collapsed(offset: finalLen);
       _controller.addListener(_onTextChanged);
     }
   }
@@ -224,7 +285,7 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
 
   /// Reset all input state after sending or handling a command.
   void _resetInputState() {
-    _controller.clear();
+    _controller.text = '';
     _previousText = '';
     _pasteStore.clear();
     _pasteCounter = 0;
@@ -274,7 +335,7 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
   }
 
   void _sendNormal(String text) {
-    final payload = _preparePayload(text);
+    final payload = _preparePayload(_stripCursor(text));
     if (payload.isEmpty) return;
 
     if (_tryHandleSlashCommand(payload)) {
@@ -295,7 +356,7 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
   }
 
   void _sendSteer(String text) {
-    final payload = _preparePayload(text);
+    final payload = _preparePayload(_stripCursor(text));
     if (payload.isEmpty) return;
 
     ref.read(chatProvider.notifier).sendSteer(
@@ -304,23 +365,6 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
     );
 
     _resetInputState();
-  }
-
-  /// Build the blinking cursor widget for terminal-style input.
-  Widget _buildBlinkingCursor() {
-    return AnimatedBuilder(
-      animation: _cursorController,
-      builder: (context, child) {
-        return Text(
-          '_',
-          style: CyberpunkTypography.bodyMedium.copyWith(
-            color: CyberpunkColors.greenSuccess,
-            fontFamily: 'SourceCodePro',
-            fontWeight: _cursorController.value > 0.5 ? FontWeight.bold : FontWeight.normal,
-          ),
-        );
-      },
-    );
   }
 
   /// Handle raw key events for Enter, Shift+Enter, Escape
@@ -333,17 +377,19 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
         final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
 
         if (isShiftPressed) {
-          final text = _controller.text;
-          final selection = _controller.selection;
-          final newText = text.replaceRange(
-            selection.start,
-            selection.end,
-            '\n',
-          );
-          _controller.text = newText;
-          _controller.selection = TextSelection.collapsed(
-            offset: selection.start + 1,
-          );
+          // Work with cursor-free text
+          final cleanText = _stripCursor(_controller.text);
+          final baseValue = _controller.value;
+          final offset = baseValue.selection.end.clamp(0, cleanText.length);
+          final before = cleanText.substring(0, offset);
+          final after = cleanText.substring(offset);
+          final fullNewText = '$before\n$after';
+          final cursorNewPos = offset + 1;
+
+          _controller.removeListener(_onTextChanged);
+          _controller.text = fullNewText;
+          _controller.selection = TextSelection.collapsed(offset: cursorNewPos);
+          _controller.addListener(_onTextChanged);
           return KeyEventResult.handled;
         }
 
@@ -363,7 +409,7 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
           if (delta <= _doubleEnterThresholdMs) {
             _enterDebounceTimer?.cancel();
             _lastEnterTime = null;
-            _sendSteer(_controller.text);
+            _sendSteer(_stripCursor(_controller.text));
             return KeyEventResult.handled;
           }
         }
@@ -375,7 +421,7 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
           const Duration(milliseconds: _doubleEnterThresholdMs),
           () {
             _lastEnterTime = null;
-            _sendNormal(_controller.text);
+            _sendNormal(_stripCursor(_controller.text));
           },
         );
         return KeyEventResult.handled;
@@ -418,8 +464,9 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
       if (event.logicalKey == LogicalKeyboardKey.tab) {
         if (_ghostText != null) {
           _controller.text = _ghostText!;
+          final ghostLen = _ghostText!.length;
           _controller.selection = TextSelection.collapsed(
-            offset: _controller.text.length,
+            offset: ghostLen,
           );
           _ghostText = null;
           setState(() {
@@ -438,14 +485,13 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
 
   @override
   Widget build(BuildContext context) {
-    final chatState = ref.watch(chatProvider);
     // Listen for focus-input requests from the shortcut system
     ref.listen<bool>(
       focusInputRequestProvider,
       (previous, next) {
         if (next) {
           _focusNode.requestFocus();
-          if (_controller.text.isEmpty) {
+          if (_stripCursor(_controller.text).isEmpty) {
             _controller.text = '/';
             _controller.selection = const TextSelection.collapsed(offset: 1);
           }
@@ -457,9 +503,9 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
     return Focus(
       onKeyEvent: _handleKeyEvent,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: const BoxDecoration(
-          color: CyberpunkColors.darkGray,
+          color: CyberpunkColors.black,
           border: Border(
             top: BorderSide(color: CyberpunkColors.orangePrimary, width: 1),
           ),
@@ -485,8 +531,8 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
                 Expanded(
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 2,
+                      horizontal: 8,
+                      vertical: 4,
                     ),
                     decoration: BoxDecoration(
                       color: CyberpunkColors.black,
@@ -502,11 +548,14 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
                         TextField(
                           controller: _controller,
                           focusNode: _focusNode,
-                          enabled: !chatState.isLoading,
+                          // Always enabled so users can type/edit during "thinking..." state.
+                          // The send button already disables itself (onTap: null) when loading.
                           style: CyberpunkTypography.bodyMedium.copyWith(
                             color: CyberpunkColors.greenSuccess,
                             fontFamily: 'SourceCodePro',
                           ),
+                          // Hide the native selection indicator; we render the cursor
+                          // as a character at the real cursor position instead.
                           cursorColor: Colors.transparent,
                           cursorWidth: 0,
                           decoration: InputDecoration(
@@ -515,7 +564,10 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
                             border: InputBorder.none,
                             contentPadding: EdgeInsets.zero,
                             isDense: true,
-                            suffix: _buildBlinkingCursor(),
+                            // NOTE: No suffix needed — the custom
+                            // _TerminalCursorController renders the
+                            // blinking underscore at the actual
+                            // cursor position.
                           ),
                           minLines: _minLines,
                           maxLines: _maxLines,

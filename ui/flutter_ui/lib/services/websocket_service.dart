@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
 import 'dart:math';
-import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb, kReleaseMode;
 import 'package:rxdart/rxdart.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart' show IOWebSocketChannel;
@@ -57,6 +57,34 @@ class WebSocketService {
   Timer? _pongTimeoutTimer;
   final _random = Random();
 
+  /// Timestamp when the connection was last established (null when disconnected).
+  DateTime? _connectedAt;
+
+  /// Whether the current WebSocket connection uses TLS (always true in production).
+  bool get usesTls => true;
+
+  /// The host this service is connected to.
+  String get host => _host;
+
+  /// The port this service is connected to.
+  int get port => _port;
+
+  /// When the connection was established, or null if disconnected.
+  DateTime? get connectedAt => _connectedAt;
+
+  /// Format connection duration as a human-readable string.
+  String get connectionDuration {
+    final since = _connectedAt;
+    if (since == null) return '—';
+    final diff = DateTime.now().difference(since);
+    final h = diff.inHours;
+    final m = diff.inMinutes % 60;
+    final s = diff.inSeconds % 60;
+    if (h > 0) return '$h h $m m';
+    if (m > 0) return '$m m $s s';
+    return '$s s';
+  }
+
   WebSocketService({
     String? host,
     int? port,
@@ -70,17 +98,26 @@ class WebSocketService {
   ///
   /// Note: Storage must be initialized before calling this.
   factory WebSocketService.fromStorage(StorageService storage) {
-    var apiKey = storage.getApiKey();
-    // Match ApiClient.storage() fallback: use dev key when none configured
-    // so the WebSocket auth matches the REST client behavior.
-    if (apiKey == null || apiKey.isEmpty) {
-      if (AppConstants.defaultApiKey.isNotEmpty) {
-        apiKey = AppConstants.defaultApiKey;
-        debugPrint('[warn] Using hardcoded dev API key — configure a real key for production');
-      } else {
-        apiKey = 'meept_dev_default_key_CHANGE_ME';
-        debugPrint('[warn] Using fallback dev API key — configure a real key for production');
+    final stored = storage.getApiKey();
+    // Resolve the effective API key:
+    //  - If the user configured one in Settings, use it.
+    //  - Else, in debug builds, fall back to `AppConstants.defaultApiKey`
+    //    (populated via --dart-define=MEEPT_DEV_API_KEY=...).
+    //  - In release builds, refuse to fall back to any hardcoded key —
+    //    throw and force the user to configure a real key. This prevents
+    //    a release app from silently connecting with a known dev key.
+    final apiKey = (stored != null && stored.isNotEmpty)
+        ? stored
+        : AppConstants.defaultApiKey;
+    if (apiKey.isEmpty) {
+      if (kReleaseMode) {
+        throw ArgumentError(
+            'No API key configured. Set the API key in Settings before connecting.');
       }
+      debugPrint('[warn] No API key configured — connecting without auth. '
+          'Configure a real key for production.');
+    } else if (!kReleaseMode) {
+      debugPrint('[warn] Using default dev API key — configure a real key for production');
     }
     return WebSocketService(
       host: storage.getApiHost(),
@@ -266,6 +303,7 @@ class WebSocketService {
       // This fixes the "connecting..." stuck status issue
       if (!isConnected) {
         _isConnecting = false; // Stop showing "connecting..." once we're connected
+        _connectedAt = DateTime.now();
         _connectionSubject.add(true);
         _startPingTimer();
         _retryCount = 0;
@@ -330,6 +368,7 @@ class WebSocketService {
           // Mark as connected so the caller proceeds.
           if (!isConnected) {
             _isConnecting = false;
+            _connectedAt = DateTime.now();
             _connectionSubject.add(true);
             _startPingTimer();
             _retryCount = 0;
@@ -366,6 +405,7 @@ class WebSocketService {
     _pongTimeoutTimer = null;
     _channel?.sink.close();
     _channel = null;
+    _connectedAt = null;
     // Explicitly complete streamDone for callers like pause() and pong
     // timeout that bypass the natural onDone path.
     if (_streamDone != null && !_streamDone!.isCompleted) {
