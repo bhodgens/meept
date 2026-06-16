@@ -1,6 +1,7 @@
 # OpenAPI SDK Migration - Complete
 
 **Date**: 2026-06-16
+**Last Updated**: 2026-06-16 (Connectivity fixes)
 **Status**: ✅ Complete
 
 ## Summary
@@ -89,6 +90,53 @@ make sdk-generate-dart  # Dart SDK
 
 ---
 
+## Phase 5: Connectivity Fix (Critical Bugs) ✅
+
+**Problem**: End-to-end connectivity analysis revealed critical string interpolation bugs in Flutter `MeeptApi` class that would cause HTTP 404 errors at runtime.
+
+**Root Cause**: Dart string interpolation uses `$variable` syntax. Escaped `\$variable` produces the literal string `$variable` instead of the variable value.
+
+**Files Fixed**:
+- `ui/flutter_ui/lib/services/meept_api.dart` - 16+ string interpolation bugs
+
+**Bug Pattern** (16 occurrences):
+```dart
+// BEFORE (broken - sends literal "$id" in URL):
+final response = await _dio.get('/api/v1/sessions/\$id');
+
+// AFTER (fixed - interpolates variable value):
+final response = await _dio.get('/api/v1/sessions/$id');
+```
+
+**Affected Endpoints**:
+- `getSession()` - line 91
+- `getMessages()` - line 100
+- `deleteSession()` - line 124
+- `listPlansBySession()` - line 128
+- `updateAgent()` - line 146
+- `getTask()` - line 163
+- `deleteTask()` - line 179
+- `cancelTask()` - line 183
+- `getSkillUi()` - line 251
+- `executeSkill()` - line 259
+- `checkoutBranch()` - line 289
+- `approvePlan()` - line 306
+- `rejectPlan()` - line 313
+- `confirmPlan()` - line 321
+- `revisePlan()` - line 328
+
+**Additional Methods Added**:
+- `getPlan(String id)` - retrieves single plan by ID
+- `listBranches(String projectId)` - lists project branches
+
+**Verification**:
+```bash
+flutter analyze lib/services/meept_api.dart  # ✅ No issues
+go build ./...                                # ✅ Success
+```
+
+---
+
 ## Architecture After Migration
 
 ```
@@ -107,12 +155,11 @@ make sdk-generate-dart  # Dart SDK
 │         │                       │   models         │        │
 │         ▼                       └──────────────────┘        │
 │  ┌──────────────────┐                    │                  │
-│  │ sdk/go/          │                    │                  │
-│  │ - APIClient      │                    ▼                  │
-│  │ - V1API          │           ┌──────────────────┐        │
-│  │ - 149 models     │           │ sdk/dart/        │        │
-│  └──────────────────┘           │ - models only    │        │
-│                                 └──────────────────┘        │
+│  │ sdk/go/          │                    ▼                  │
+│  │ - APIClient      │           ┌──────────────────┐        │
+│  │ - V1API          │           │ sdk/dart/        │        │
+│  │ - 149 models     │           │ - models only    │        │
+│  └──────────────────┘           └──────────────────┘        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -173,3 +220,35 @@ make sdk-clean
 go build ./...
 cd ui/flutter_ui && flutter pub get && flutter build
 ```
+
+---
+
+## Connectivity Analysis Observations
+
+### Critical Issues Fixed
+
+1. **String Interpolation Bugs** (16 occurrences) - All path-parameter endpoints in Flutter were sending literal `$id` instead of interpolated values, causing HTTP 404 errors.
+
+2. **Missing Methods** - `ApiClient` called `_api.getPlan(id)` and `_api.listBranches(projectId)` which did not exist in `MeeptApi`.
+
+### Lower Priority Observations
+
+1. **Health endpoint path inconsistency**: `SDKClient` uses `/health` while `httpClient` uses `/api/v1/health`. Both work because the handler is registered at both paths.
+
+2. **TUI hard-coded to RPC only**: `tui/app.go:216` directly creates `tui.RPCClient` - no HTTP option for TUI. The transport layer is only used by the CLI.
+
+3. **WebSocket auth implemented inline**: `WebSocketService` extracts API key from headers directly instead of reusing `auth.go extractKey()`. Not a bug, but duplicated logic.
+
+4. **Origin header scheme mismatch**: `WebSocketService` uses `http://` scheme for WSS connections. Browsers may reject this for secure connections.
+
+5. **mustJSON helper panics**: `SDKClient.mustJSON()` panics on marshal error instead of returning error. Unlikely to trigger (marshal errors indicate programming bugs) but violates Go error handling conventions.
+
+### Corner Cases to Be Aware Of
+
+1. **TLS self-signed cert fingerprint**: Flutter uses certificate pinning via `DaemonCertPinner`. If the daemon regenerates certs, Flutter must reload the fingerprint via `menubar daemon restart`.
+
+2. **API key fallback**: Both Flutter and Go clients fall back to `meept_dev_default_key_CHANGE_ME` if no key configured. This is intentional for development but should be changed for production.
+
+3. **RPC framing protocol**: Unix socket uses length-prefixed JSON-RPC: `"<length>\n<JSON>"`. This is handled by `tui.RPCClient` internally.
+
+4. **WebSocket reconnection**: `WebSocketService.reconnect()` has exponential backoff but no maximum retry limit. Long network outages will retry indefinitely.

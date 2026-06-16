@@ -41,7 +41,7 @@ func NewSDKClient(baseURL string, timeout time.Duration, apiKey string) *SDKClie
 
 // Connect verifies the endpoint is reachable.
 func (c *SDKClient) Connect() error {
-	resp, err := c.http.Get(c.baseURL + "/health")
+	resp, err := c.http.Get(c.baseURL + "/api/v1/health")
 	if err != nil {
 		return fmt.Errorf("failed to connect to daemon HTTP: %w", err)
 	}
@@ -57,7 +57,7 @@ func (c *SDKClient) Close() error { return nil }
 
 // IsConnected checks if the daemon is reachable.
 func (c *SDKClient) IsConnected() bool {
-	resp, err := c.http.Get(c.baseURL + "/health")
+	resp, err := c.http.Get(c.baseURL + "/api/v1/health")
 	return err == nil && resp.StatusCode == http.StatusOK
 }
 
@@ -113,17 +113,25 @@ func (c *SDKClient) Call(method string, params any) (json.RawMessage, error) {
 func (c *SDKClient) Chat(message, conversationID string) (string, error) {
 	req := meeptclient.NewChatRequest(message, conversationID)
 
+	reqBody, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("marshal chat request: %w", err)
+	}
+
 	resp, err := c.cfg.HTTPClient.Post(
 		c.baseURL+"/api/v1/chat",
 		"application/json",
-		bytes.NewReader(mustJSON(req)),
+		bytes.NewReader(reqBody),
 	)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
-	data, _ := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
 	var result struct {
 		Reply string `json:"reply"`
 	}
@@ -523,14 +531,6 @@ func (c *SDKClient) callAPI(method string, params any) (json.RawMessage, error) 
 	return c.Call(method, params)
 }
 
-// mustJSON marshals a value to JSON, panicking on error.
-func mustJSON(v any) []byte {
-	data, err := json.Marshal(v)
-	if err != nil {
-		panic(err)
-	}
-	return data
-}
 
 // Ensure SDKClient implements Client at compile time.
 var _ Client = (*SDKClient)(nil)

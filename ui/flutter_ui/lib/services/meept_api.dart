@@ -88,7 +88,7 @@ class MeeptApi {
   }
 
   Future<Session> getSession(String id) async {
-    final response = await _dio.get('/api/v1/sessions/\$id');
+    final response = await _dio.get('/api/v1/sessions/$id');
     return Session.fromJson(response.data as Map<String, dynamic>);
   }
 
@@ -97,7 +97,7 @@ class MeeptApi {
     int offset = 0,
     int limit = 1000,
   }) async {
-    final response = await _dio.get('/api/v1/sessions/\$id/messages', queryParameters: {
+    final response = await _dio.get('/api/v1/sessions/$id/messages', queryParameters: {
       'offset': offset,
       'limit': limit,
     });
@@ -121,11 +121,11 @@ class MeeptApi {
   }
 
   Future<void> deleteSession(String id) async {
-    await _dio.delete('/api/v1/sessions/\$id');
+    await _dio.delete('/api/v1/sessions/$id');
   }
 
   Future<List<Plan>> listPlansBySession(String sessionId) async {
-    final response = await _dio.get('/api/v1/sessions/\$sessionId/plans');
+    final response = await _dio.get('/api/v1/sessions/$sessionId/plans');
     final data = response.data as Map<String, dynamic>;
     final raw = data['plans'] as List?;
     if (raw == null) return [];
@@ -143,7 +143,7 @@ class MeeptApi {
   }
 
   Future<Agent> updateAgent(String id, Map<String, dynamic> config) async {
-    final response = await _dio.post('/api/v1/config/agents/\$id', data: config);
+    final response = await _dio.post('/api/v1/config/agents/$id', data: config);
     return Agent.fromJson(response.data as Map<String, dynamic>);
   }
 
@@ -160,7 +160,7 @@ class MeeptApi {
   }
 
   Future<Task> getTask(String id) async {
-    final response = await _dio.get('/api/v1/tasks/\$id');
+    final response = await _dio.get('/api/v1/tasks/$id');
     return Task.fromJson(response.data as Map<String, dynamic>);
   }
 
@@ -176,11 +176,11 @@ class MeeptApi {
   }
 
   Future<void> deleteTask(String id) async {
-    await _dio.delete('/api/v1/tasks/\$id');
+    await _dio.delete('/api/v1/tasks/$id');
   }
 
   Future<void> cancelTask(String id) async {
-    await _dio.post('/api/v1/tasks/\$id/cancel');
+    await _dio.post('/api/v1/tasks/$id/cancel');
   }
 
   // ===== Queue / Jobs =====
@@ -248,7 +248,7 @@ class MeeptApi {
   }
 
   Future<SkillUiDescriptor> getSkillUi(String slug) async {
-    final response = await _dio.get('/api/v1/skills/\$slug/ui');
+    final response = await _dio.get('/api/v1/skills/$slug/ui');
     return SkillUiDescriptor.fromJson(response.data as Map<String, dynamic>);
   }
 
@@ -256,7 +256,7 @@ class MeeptApi {
     required String slug,
     required String prompt,
   }) async {
-    final response = await _dio.post('/api/v1/skills/\$slug/execute', data: {
+    final response = await _dio.post('/api/v1/skills/$slug/execute', data: {
       'prompt': prompt,
     });
     return SkillExecuteResult.fromJson(response.data as Map<String, dynamic>);
@@ -286,7 +286,7 @@ class MeeptApi {
   }
 
   Future<void> checkoutBranch(String projectId, String branch) async {
-    await _dio.post('/api/v1/projects/\$projectId/checkout', data: {'branch': branch});
+    await _dio.post('/api/v1/projects/$projectId/checkout', data: {'branch': branch});
   }
 
   // ===== Plans =====
@@ -303,14 +303,14 @@ class MeeptApi {
   }
 
   Future<void> approvePlan(String id, {String? sessionId, String? by}) async {
-    await _dio.post('/api/v1/plans/\$id/approve', data: {
+    await _dio.post('/api/v1/plans/$id/approve', data: {
       if (sessionId != null) 'session_id': sessionId,
       if (by != null) 'by': by,
     });
   }
 
   Future<void> rejectPlan(String id, {String? sessionId, String? by, String? reason}) async {
-    await _dio.post('/api/v1/plans/\$id/reject', data: {
+    await _dio.post('/api/v1/plans/$id/reject', data: {
       if (sessionId != null) 'session_id': sessionId,
       if (by != null) 'by': by,
       if (reason != null) 'reason': reason,
@@ -318,17 +318,34 @@ class MeeptApi {
   }
 
   Future<void> confirmPlan(String id, {String? sessionId, String? by}) async {
-    await _dio.post('/api/v1/plans/\$id/confirm', data: {
+    await _dio.post('/api/v1/plans/$id/confirm', data: {
       if (sessionId != null) 'session_id': sessionId,
       if (by != null) 'by': by,
     });
   }
 
   Future<void> revisePlan(String id, {String? sessionId, String? feedback}) async {
-    await _dio.post('/api/v1/plans/\$id/revise', data: {
+    await _dio.post('/api/v1/plans/$id/revise', data: {
       if (sessionId != null) 'session_id': sessionId,
       if (feedback != null) 'feedback': feedback,
     });
+  }
+
+  // ===== Additional Plan Endpoints =====
+
+  Future<Plan> getPlan(String id) async {
+    final response = await _dio.get('/api/v1/plans/$id');
+    return Plan.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  // ===== Additional Project Endpoints =====
+
+  Future<List<BranchInfo>> listBranches(String projectId) async {
+    final response = await _dio.get('/api/v1/projects/$projectId/branches');
+    final data = response.data as Map<String, dynamic>;
+    final raw = data['branches'] as List?;
+    if (raw == null) return [];
+    return raw.map((b) => BranchInfo.fromJson(b as Map<String, dynamic>)).toList();
   }
 
   // ===== Config Files =====
