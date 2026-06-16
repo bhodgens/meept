@@ -70,11 +70,11 @@ func NewMemoryModel(rpc MemoryRPCClient) *MemoryModel {
 	delegate := list.NewDefaultDelegate()
 	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
 		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#7C3AED")).
+		Background(lipgloss.Color("#F97316")).
 		Bold(true)
 	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
 		Foreground(lipgloss.Color("#E5E7EB")).
-		Background(lipgloss.Color("#7C3AED"))
+		Background(lipgloss.Color("#F97316"))
 
 	l := list.New([]list.Item{}, delegate, 40, 10)
 	l.Title = "search results"
@@ -82,7 +82,7 @@ func NewMemoryModel(rpc MemoryRPCClient) *MemoryModel {
 	l.SetFilteringEnabled(false)
 	l.Styles.Title = lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED"))
+		Foreground(lipgloss.Color("#F97316"))
 
 	return &MemoryModel{
 		rpc:           rpc,
@@ -217,7 +217,7 @@ func (m *MemoryModel) View() string {
 	// Title
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(lipgloss.Color("#F97316")).
 		MarginBottom(1)
 
 	b.WriteString(titleStyle.Render("memory browser"))
@@ -231,7 +231,7 @@ func (m *MemoryModel) View() string {
 		Width(m.width - 4)
 
 	if m.focusedSearch {
-		searchStyle = searchStyle.BorderForeground(lipgloss.Color("#7C3AED"))
+		searchStyle = searchStyle.BorderForeground(lipgloss.Color("#F97316"))
 	}
 
 	b.WriteString(searchStyle.Render(m.searchInput.View()))
@@ -308,7 +308,7 @@ func (m *MemoryModel) renderList(width int) string {
 		Width(width - 2)
 
 	if !m.focusedSearch {
-		listStyle = listStyle.BorderForeground(lipgloss.Color("#7C3AED"))
+		listStyle = listStyle.BorderForeground(lipgloss.Color("#F97316"))
 	}
 
 	return listStyle.Render(m.list.View())
@@ -334,7 +334,7 @@ func (m *MemoryModel) renderDetail(width int) string {
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED"))
+		Foreground(lipgloss.Color("#F97316"))
 
 	labelStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#6B7280")).
@@ -377,7 +377,7 @@ func (m *MemoryModel) renderDetail(width int) string {
 	}
 
 	content += "\n"
-	content += lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED")).Render("content:") + "\n\n"
+	content += lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F97316")).Render("content:") + "\n\n"
 
 	// Word-wrap content
 	contentText := item.Content

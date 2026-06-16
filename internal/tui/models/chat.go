@@ -1412,6 +1412,21 @@ func (m *ChatModel) getMessageContent(msg ChatMessage) string {
 		}
 	}
 
+	// Try JSON formatting for assistant messages (format raw JSON responses)
+	if msg.Role == RoleAssistant {
+		trimmed := strings.TrimSpace(content)
+		if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
+			// Try to parse and format as JSON
+			var js any
+			if err := json.Unmarshal([]byte(trimmed), &js); err == nil {
+				if formatted, err := json.MarshalIndent(js, "", "  "); err == nil {
+					// Wrap in code block for display
+					content = "```json\n" + string(formatted) + "\n```"
+				}
+			}
+		}
+	}
+
 	// Try markdown rendering for assistant messages
 	if m.renderMarkdown && m.mdRenderer != nil && msg.Role == RoleAssistant {
 		// Check if markdown is detected

@@ -69,11 +69,11 @@ func NewPlansModel(rpcClient PlansRPCClient) *PlansModel {
 		BorderForeground(lipgloss.Color("#374151")).
 		BorderBottom(true).
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED"))
+		Foreground(lipgloss.Color("#F97316"))
 
 	s.Selected = s.Selected.
 		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#7C3AED")).
+		Background(lipgloss.Color("#F97316")).
 		Bold(true)
 
 	t.SetStyles(s)
@@ -426,7 +426,7 @@ func (m *PlansModel) View() string {
 func (m *PlansModel) renderHeader() string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED"))
+		Foreground(lipgloss.Color("#F97316"))
 
 	tabInactiveStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ColorGray)).
@@ -435,7 +435,7 @@ func (m *PlansModel) renderHeader() string {
 
 	tabActiveStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#7C3AED")).
+		Background(lipgloss.Color("#F97316")).
 		Bold(true).
 		Padding(0, 1)
 
@@ -503,7 +503,7 @@ func (m *PlansModel) renderPlanPreview() string {
 
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7C3AED")).
+		BorderForeground(lipgloss.Color("#F97316")).
 		Padding(0, 1).
 		Width(m.width - 4)
 
@@ -569,13 +569,13 @@ func (m *PlansModel) renderPlanDetailModal() string {
 
 	modalStyle := lipgloss.NewStyle().
 		Border(lipgloss.DoubleBorder()).
-		BorderForeground(lipgloss.Color("#7C3AED")).
+		BorderForeground(lipgloss.Color("#F97316")).
 		Padding(1, 2).
 		Width(modalWidth)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(lipgloss.Color("#F97316")).
 		MarginBottom(1)
 
 	sectionStyle := lipgloss.NewStyle().
@@ -864,13 +864,13 @@ func (m *PlansModel) renderEmptyDetail() string {
 func (m *PlansModel) renderHelp() string {
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7C3AED")).
+		BorderForeground(lipgloss.Color("#F97316")).
 		Padding(2, 4).
 		Width(m.width - 4)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(lipgloss.Color("#F97316")).
 		MarginBottom(1)
 
 	sectionStyle := lipgloss.NewStyle().

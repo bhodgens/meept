@@ -3,6 +3,7 @@ package http
 
 import (
 	"context"
+	"strings"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -60,16 +61,50 @@ func NewNotificationHandler(emitter NotificationEmitter, logger *slog.Logger) *N
 
 // ServeWebSocket handles WebSocket connections for real-time notifications.
 func (h *NotificationHandler) ServeWebSocket(w http.ResponseWriter, req *http.Request) {
+	// Validate API token if auth is required (check header, Sec-WebSocket-Protocol, or query param)
+	authHeader := req.Header.Get("Authorization")
+	token := ""
+	if authHeader != "" {
+		const bearerPrefix = "Bearer "
+		if len(authHeader) > len(bearerPrefix) && strings.EqualFold(authHeader[:len(bearerPrefix)], bearerPrefix) {
+			token = authHeader[len(bearerPrefix):]
+		}
+	}
+	if token == "" {
+		// Check Sec-WebSocket-Protocol for bearer token
+		if proto := req.Header.Get("Sec-WebSocket-Protocol"); proto != "" {
+			for _, p := range strings.Split(proto, ",") {
+				p = strings.TrimSpace(p)
+				if strings.HasPrefix(p, "bearer.") {
+					token = p[len("bearer."):]
+					break
+				}
+			}
+		}
+	}
+	if token == "" {
+		token = req.URL.Query().Get("token")
+	}
+	if token == "" {
+		h.logger.Warn("notification websocket connection rejected: missing API token", "remote", req.RemoteAddr)
+		http.Error(w, "unauthorized: missing API token", http.StatusUnauthorized)
+		return
+	}
+
 	conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
-		CompressionMode: websocket.CompressionContextTakeover,
-		OriginPatterns:  defaultWSOrigins,
-	})
+		CompressionMode:     websocket.CompressionContextTakeover,
+		OriginPatterns:      defaultWSOrigins,
+		InsecureSkipVerify:  true, // Allow non-TLS for localhost
+		})
 	if err != nil {
 		h.logger.Error("failed to accept websocket connection", "error", err)
 		http.Error(w, "failed to accept connection", http.StatusBadRequest)
 		return
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "closing")
+
+	// Note: token validation against configured keys is done by the auth middleware
+	// This handler just checks that a token is present
 
 	// Subscribe to events
 	eventChan := h.emitter.Subscribe()

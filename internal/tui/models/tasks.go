@@ -88,11 +88,11 @@ func NewTasksModel(rpc TasksRPCClient) *TasksModel {
 		BorderForeground(lipgloss.Color("#374151")).
 		BorderBottom(true).
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED"))
+		Foreground(lipgloss.Color("#F97316"))
 
 	s.Selected = s.Selected.
 		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#7C3AED")).
+		Background(lipgloss.Color("#F97316")).
 		Bold(true)
 
 	t.SetStyles(s)
@@ -753,7 +753,7 @@ func (m *TasksModel) View() string {
 func (m *TasksModel) renderHeader() string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED"))
+		Foreground(lipgloss.Color("#F97316"))
 
 	modeStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ColorGray)).
@@ -762,7 +762,7 @@ func (m *TasksModel) renderHeader() string {
 
 	activeStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#7C3AED")).
+		Background(lipgloss.Color("#F97316")).
 		Bold(true).
 		Padding(0, 1)
 
@@ -823,7 +823,7 @@ func (m *TasksModel) renderTaskPreview() string {
 
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7C3AED")).
+		BorderForeground(lipgloss.Color("#F97316")).
 		Padding(0, 1).
 		Width(m.width - 4)
 
@@ -931,13 +931,13 @@ func (m *TasksModel) renderJobDetail() string {
 
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7C3AED")).
+		BorderForeground(lipgloss.Color("#F97316")).
 		Padding(1, 2).
 		Width(m.width - 4)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED"))
+		Foreground(lipgloss.Color("#F97316"))
 
 	labelStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ColorGray)).
@@ -1023,13 +1023,13 @@ func (m *TasksModel) renderTaskDetailModal() string {
 
 	modalStyle := lipgloss.NewStyle().
 		Border(lipgloss.DoubleBorder()).
-		BorderForeground(lipgloss.Color("#7C3AED")).
+		BorderForeground(lipgloss.Color("#F97316")).
 		Padding(1, 2).
 		Width(modalWidth)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(lipgloss.Color("#F97316")).
 		MarginBottom(1)
 
 	sectionStyle := lipgloss.NewStyle().
@@ -1373,7 +1373,7 @@ func (m *TasksModel) renderLineageView() string {
 	// Header
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED"))
+		Foreground(lipgloss.Color("#F97316"))
 
 	modeStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ColorGray)).
@@ -1382,7 +1382,7 @@ func (m *TasksModel) renderLineageView() string {
 
 	activeStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#7C3AED")).
+		Background(lipgloss.Color("#F97316")).
 		Bold(true).
 		Padding(0, 1)
 
@@ -1410,7 +1410,7 @@ func (m *TasksModel) renderLineageView() string {
 	// Render tree
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7C3AED")).
+		BorderForeground(lipgloss.Color("#F97316")).
 		Padding(1, 2).
 		Width(m.width - 4)
 
@@ -1533,13 +1533,13 @@ func (m *TasksModel) renderTaskNode(b *strings.Builder, task types.TaskExtended,
 func (m *TasksModel) renderHelp() string {
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7C3AED")).
+		BorderForeground(lipgloss.Color("#F97316")).
 		Padding(2, 4).
 		Width(m.width - 4)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(lipgloss.Color("#F97316")).
 		MarginBottom(1)
 
 	sectionStyle := lipgloss.NewStyle().

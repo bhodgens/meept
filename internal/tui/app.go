@@ -896,6 +896,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := a.deleteSession(msg.SessionID)
 		return a, cmd
 
+	case models.OpenCreateSessionModalMsg:
+		// Open rename modal for creating a new session (uses default name)
+		a.activeModal = ModalSessionRename
+		a.sessionRename.Show("", a.clientConfig.Session.DefaultName)
+		return a, nil
+
 	case OpenRenameModalMsg:
 		// Open rename modal for a session
 		a.activeModal = ModalSessionRename
@@ -903,6 +909,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case SessionRenameMsg:
+		if msg.SessionID == "" {
+			// Create new session (sessionID is empty when opened from create modal)
+			cmd := a.createSession(msg.NewName)
+			return a, cmd
+		}
 		// Rename a session (update description)
 		cmd := a.renameSession(msg.SessionID, msg.NewName)
 		return a, cmd

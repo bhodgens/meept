@@ -52,6 +52,9 @@ type SessionPlansUpdateMsg struct {
 	Err       error
 }
 
+// OpenCreateSessionModalMsg signals a request to open the create session modal.
+type OpenCreateSessionModalMsg struct{}
+
 // NewSessionsModel creates a new sessions model.
 func NewSessionsModel(rpc SessionsRPCClient) *SessionsModel {
 	columns := []table.Column{
@@ -72,11 +75,11 @@ func NewSessionsModel(rpc SessionsRPCClient) *SessionsModel {
 		BorderForeground(lipgloss.Color("#374151")).
 		BorderBottom(true).
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED"))
+		Foreground(lipgloss.Color("#F97316"))
 
 	s.Selected = s.Selected.
 		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#7C3AED")).
+		Background(lipgloss.Color("#F97316")).
 		Bold(true)
 
 	t.SetStyles(s)
@@ -200,6 +203,12 @@ func (m *SessionsModel) Update(msg tea.Msg) tea.Cmd {
 		}
 
 		switch msg.String() {
+		case "n":
+			// Request to create a new session - app will show input modal
+			return func() tea.Msg {
+				return OpenCreateSessionModalMsg{}
+			}
+
 		case "r":
 			m.loading = true
 			return m.fetchSessions
@@ -340,7 +349,7 @@ func (m *SessionsModel) View() string {
 	// Detail pane
 	detailStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7C3AED")).
+		BorderForeground(lipgloss.Color("#F97316")).
 		Width(detailWidth).
 		Height(m.height - 8)
 
@@ -363,7 +372,7 @@ func (m *SessionsModel) View() string {
 		Foreground(lipgloss.Color(ColorGray)).
 		MarginTop(1)
 
-	b.WriteString(hintStyle.Render("r: refresh | enter: details | up/down: navigate | ?: help"))
+	b.WriteString(hintStyle.Render("n: new | r: refresh | enter: details | up/down: navigate | ?: help"))
 
 	return b.String()
 }
@@ -371,7 +380,7 @@ func (m *SessionsModel) View() string {
 func (m *SessionsModel) renderHeader() string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED"))
+		Foreground(lipgloss.Color("#F97316"))
 
 	countStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ColorGray))
@@ -483,13 +492,13 @@ func (m *SessionsModel) renderSessionDetailModal() string {
 
 	modalStyle := lipgloss.NewStyle().
 		Border(lipgloss.DoubleBorder()).
-		BorderForeground(lipgloss.Color("#7C3AED")).
+		BorderForeground(lipgloss.Color("#F97316")).
 		Padding(1, 2).
 		Width(modalWidth)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(lipgloss.Color("#F97316")).
 		MarginBottom(1)
 
 	labelStyle := lipgloss.NewStyle().
@@ -615,13 +624,13 @@ func (m *SessionsModel) renderError() string {
 func (m *SessionsModel) renderHelp() string {
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7C3AED")).
+		BorderForeground(lipgloss.Color("#F97316")).
 		Padding(2, 4).
 		Width(m.width - 4)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(lipgloss.Color("#F97316")).
 		MarginBottom(1)
 
 	keyStyle := lipgloss.NewStyle().
@@ -633,7 +642,7 @@ func (m *SessionsModel) renderHelp() string {
 		Foreground(lipgloss.Color("#E5E7EB"))
 
 	content := titleStyle.Render("sessions view help") + "\n\n"
-
+	content += keyStyle.Render("n") + descStyle.Render("create new session") + "\n"
 	content += keyStyle.Render("up/k") + descStyle.Render("move cursor up") + "\n"
 	content += keyStyle.Render("down/j") + descStyle.Render("move cursor down") + "\n"
 	content += keyStyle.Render("enter") + descStyle.Render("open session detail") + "\n"

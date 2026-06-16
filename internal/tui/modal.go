@@ -182,7 +182,6 @@ func CommandPaletteModal(styles *Styles, config *ClientConfig) *Modal {
 		{Key: keys.ViewMemory, Label: "memory", Description: "switch to memory view"},
 		{Key: keys.ViewPlans, Label: "plans", Description: "switch to plans view"},
 		{Key: keys.Sidebar, Label: "toggle sidebar", Description: "show/hide sidebar"},
-		{Key: keys.Sessions, Label: "sessions picker", Description: "quick session switch"},
 		{Key: keys.Projects, Label: "projects", Description: "manage projects"},
 		{Key: keys.NewSession, Label: "new session", Description: "create a new session"},
 		{Key: keys.RenameSession, Label: "edit description", Description: "edit session description"},
@@ -1131,7 +1130,7 @@ func (f *FuzzyFinderModal) View(screenW, screenH int) string {
 	// Search input
 	inputStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7C3AED")).
+		BorderForeground(lipgloss.Color("#F97316")).
 		Padding(0, 1).
 		Width(f.width - 10)
 	b.WriteString("\n")

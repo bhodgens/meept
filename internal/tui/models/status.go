@@ -177,7 +177,7 @@ func (m *StatusModel) renderStatusPanel(width int) string {
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(lipgloss.Color("#F97316")).
 		MarginBottom(1)
 
 	labelStyle := lipgloss.NewStyle().
@@ -230,7 +230,7 @@ func (m *StatusModel) renderMetricsPanel(width int) string {
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(lipgloss.Color("#F97316")).
 		MarginBottom(1)
 
 	labelStyle := lipgloss.NewStyle().
@@ -277,7 +277,7 @@ func (m *StatusModel) renderInfoPanel(width int) string {
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(lipgloss.Color("#F97316")).
 		MarginBottom(1)
 
 	content := titleStyle.Render("quick actions") + "\n\n"
