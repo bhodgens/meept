@@ -643,3 +643,152 @@ make docs-generate    # Generate reference docs from Go source
 - README.md feature list must stay in sync with `docs/workflows/`
 
 Documentation should always reflect the current implementation state. If you add a new agent, tool, or architectural component, document it immediately.
+
+## Deferred Item Resolution Protocol
+
+After ANY systematic review, audit, or multi-agent code analysis run:
+
+### 1. IMMEDIATE: Catalog all deferred items before ending session
+
+Before committing or ending a session that produced review findings:
+
+```bash
+# Extract all deferred items from findings docs
+grep -rn "deferred\|DEFERRED\|TODO.*later\|TODO.*future" docs/plans/*findings*.md | \
+  grep -v "fixed\|resolved\|closed" > /tmp/deferred-items-todo.txt
+
+# Or search for untracked deferred items
+find docs/plans -name "*.md" -exec grep -l "deferred" {} \; | \
+  xargs grep "deferred" | grep -v "resolved"
+```
+
+### 2. REQUIRED: Create or update deferred implementation plan
+
+For each batch of deferred items, create/update `docs/plans/[review-name]-deferred-implementation.md`:
+
+```markdown
+# [Review Name] Deferred Implementation
+
+**Source:** `docs/plans/[review-name]-findings.md`
+
+## Deferred Items
+
+| ID | Severity | File | Description | Resolution |
+|----|----------|------|-------------|------------|
+| S1-1 | High | file.go:123 | Description | Fixed in PR #X / Documented as intentional / False positive |
+
+## Resolution Status
+
+- [ ] All deferred items addressed (fixed, documented, or closed as false positive)
+- [ ] Completion rate: X% (Y of Z actionable items)
+```
+
+### 3. VERIFICATION: Run deferred item check before session end
+
+Add to your pre-commit or session-end checklist:
+
+```bash
+# Check for unresolved deferred items
+if grep -r "deferred" docs/plans/*findings*.md 2>/dev/null | grep -qv "resolved\|fixed\|closed"; then
+  echo "WARNING: Unresolved deferred items found"
+  grep -rn "deferred" docs/plans/*findings*.md | grep -v "resolved\|fixed\|closed"
+  echo ""
+  echo "ACTION REQUIRED: Either (1) create deferred implementation plan, or (2) resolve items now"
+fi
+```
+
+### 4. PREVENTION: Inline resolution during review
+
+When running review subagents, instruct them to:
+
+```
+For each finding discovered:
+- If it's a bug -> fix it immediately in the same session
+- If it requires design decision -> document in findings as "PENDING: design decision needed"
+
+Do NOT mark findings as deferred without:
+1. A specific reason why it cannot be fixed now
+2. A recommended follow-up action
+3. An estimated priority (next sprint / backlog / never)
+```
+
+### 5. GIT HOOK: Pre-commit check for deferred items
+
+Create `.git/hooks/pre-commit-deferred` (and source it from your main pre-commit hook):
+
+```bash
+#!/bin/bash
+# Pre-commit check for deferred items in findings documents
+
+# Check if committing changes to findings docs
+CHANGED_FINDINGS=$(git diff --cached --name-only | grep "docs/plans/.*findings" || true)
+
+if [ -n "$CHANGED_FINDINGS" ]; then
+  # Count deferred items in staged findings files
+  DEFERRED_COUNT=0
+  DEFERRED_ITEMS=""
+  
+  for file in $CHANGED_FINDINGS; do
+    if [ -f "$file" ]; then
+      # Count lines with "deferred" that don't have resolution keywords
+      FILE_DEFERRED=$(grep -in "deferred" "$file" 2>/dev/null | grep -iv "resolved\|fixed\|closed\|resolution:" | wc -l | tr -d ' ')
+      if [ "$FILE_DEFERRED" -gt 0 ]; then
+        DEFERRED_COUNT=$((DEFERRED_COUNT + FILE_DEFERRED))
+        DEFERRED_ITEMS="$DEFERRED_ITEMS\n$file:$FILE_DEFERRED items"
+      fi
+    fi
+  done
+  
+  if [ "$DEFERRED_COUNT" -gt 0 ]; then
+    echo "⚠️  Found $DEFERRED_COUNT unresolved deferred item(s) in staged findings files:"
+    echo -e "$DEFERRED_ITEMS"
+    echo ""
+    echo "📋 ACTION REQUIRED:"
+    echo "   Option 1: Create docs/plans/[review]-deferred-implementation.md"
+    echo "   Option 2: Resolve the deferred items before committing"
+    echo "   Option 3: Skip this check with --no-verify (not recommended)"
+    echo ""
+    echo "📖 See CLAUDE.md 'Deferred Item Resolution Protocol' for details"
+    echo ""
+    exit 1
+  fi
+fi
+
+# Also check for new findings docs without corresponding deferred plan
+NEW_FINDINGS=$(git diff --cached --name-only | grep "docs/plans/.*findings.*\.md$" | grep -v "deferred-implementation" || true)
+
+for finding in $NEW_FINDINGS; do
+  if [ -f "$finding" ]; then
+    # Check if the findings doc mentions deferred items
+    HAS_DEFERRED=$(grep -c "deferred" "$finding" 2>/dev/null || echo 0)
+    if [ "$HAS_DEFERRED" -gt 0 ]; then
+      # Look for corresponding deferred implementation plan
+      BASENAME=$(basename "$finding" .md)
+      DEFERRED_PLAN="docs/plans/${BASENAME}-deferred-implementation.md"
+      if [ ! -f "$DEFERRED_PLAN" ]; then
+        echo "⚠️  Findings document '$finding' mentions deferred items"
+        echo "   but no corresponding deferred implementation plan found."
+        echo ""
+        echo "📋 Expected plan: $DEFERRED_PLAN"
+        echo ""
+        echo "📖 See CLAUDE.md 'Deferred Item Resolution Protocol' for details"
+        echo ""
+        exit 1
+      fi
+    fi
+  fi
+done
+
+exit 0
+```
+
+Make the hook executable:
+```bash
+chmod +x .git/hooks/pre-commit-deferred
+```
+
+To integrate with an existing pre-commit hook, add this line before the final `exit 0`:
+```bash
+# Run deferred item check
+.git/hooks/pre-commit-deferred || exit 1
+```
