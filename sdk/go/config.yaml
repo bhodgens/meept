@@ -1,0 +1,11 @@
+# Go SDK Generator Configuration
+generatorName: go
+outputDir: ./go
+inputSpec: ../../docs/reference/http-api/openapi.yaml
+
+additionalProperties:
+  packageName: meeptclient
+  packageVersion: 0.2.0
+  withGoCodegenComment: true
+  generateInterfaces: true
+  interfaceMode: deferentially

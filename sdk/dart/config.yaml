@@ -1,0 +1,10 @@
+# Dart SDK Generator Configuration  
+generatorName: dart
+outputDir: ./dart
+inputSpec: ../../docs/reference/http-api/openapi.yaml
+
+additionalProperties:
+  packageName: meept_client
+  packageVersion: 0.2.0
+  pubName: meept_client
+  useNullSafety: true
