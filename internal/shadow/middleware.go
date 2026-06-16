@@ -333,30 +333,9 @@ func getConversationID(ctx context.Context) string {
 
 // containsAny checks if text contains any of the keywords (case-insensitive).
 func containsAny(text string, keywords []string) bool {
-	lower := toLower(text)
+	lower := strings.ToLower(text)
 	for _, kw := range keywords {
-		if containsSubstr(lower, toLower(kw)) {
-			return true
-		}
-	}
-	return false
-}
-
-func toLower(s string) string {
-	b := make([]byte, len(s))
-	for i := range s {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 'a' - 'A'
-		}
-		b[i] = c
-	}
-	return string(b)
-}
-
-func containsSubstr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
+		if strings.Contains(lower, strings.ToLower(kw)) {
 			return true
 		}
 	}

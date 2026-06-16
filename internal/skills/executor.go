@@ -524,5 +524,7 @@ func (e *Executor) LazyLoader() *LazySkillLoader {
 
 // SetLazyLoader sets the lazy loader for on-demand skill loading.
 func (e *Executor) SetLazyLoader(loader *LazySkillLoader) {
-	e.lazyLoader = loader
+	if loader != nil {
+		e.lazyLoader = loader
+	}
 }

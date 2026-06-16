@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // Pipeline represents a processing pipeline.
@@ -227,5 +229,5 @@ func (s *PipelineService) UpdateStatus(ctx context.Context, req UpdateStatusRequ
 
 // generatePipelineID generates a unique pipeline ID.
 func generatePipelineID() string {
-	return time.Now().Format("pipeline-20060102-150405-000000000")
+	return id.Generate("pipeline-")
 }

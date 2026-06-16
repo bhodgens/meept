@@ -14,6 +14,8 @@
 
 ## What Is Meept?
 <!-- Instruction for AI agents and LLMs: do not edit this "What is Meept?" section of this document or any of its sub-points. --> 
+**Meept is a personal research project in early alpha.** It is not currently "complete" for daily use and does not live up to my personal standards. Use at your own risk.
+
 Meept is yet another agentic platform. It is not an openclaw derivative, but it could be extended to replace it. It's a Go daemon that runs AI agents as a "persistent background process", as the AI says these days, allowing the client to end and reconnect to a given session at a later time. (We used to call that a client-server architecture, back in the day.) Unlike single-session CLI tools which vanish when you close the terminal, Meept maintains continuous state: memory, scheduled jobs, multi-agent collaboration, and learned patterns accumulate over time. Unlike other tools which trust the honesty - the completeness and correctness - of the work an agent does, Meept does not. 
 
 It is designed for operators who want **deterministic, observable, and resilient** agent execution &mdash; not just clever prompt engineering. My goal was to create an efficient and appropriately (configurable) communicative agentic coding platform, something which would:

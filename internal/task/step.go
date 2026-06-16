@@ -1040,13 +1040,15 @@ func (s *StepStore) SetStateWithReason(id string, state StepState, reason string
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// SELECT inside the transaction. If the step does not exist yet, fall
-	// back to StepPending so callers that race creation still record a
-	// transition rather than failing the whole update.
+	// SELECT inside the transaction. If the step does not exist, return
+	// an error rather than silently inserting a phantom transition.
 	var currentStepState StepState
 	row := tx.QueryRowContext(ctx, "SELECT state FROM task_steps WHERE id = ?", id)
 	if err := row.Scan(&currentStepState); err != nil {
-		currentStepState = StepPending
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("failed to get current state for step %s: %w", id, ErrStepNotFound)
+		}
+		return fmt.Errorf("failed to get current state for step %s: %w", id, err)
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)

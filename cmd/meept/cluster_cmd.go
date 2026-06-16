@@ -45,9 +45,6 @@ func newClusterCmd() *cobra.Command {
 	return cmd
 }
 
-// remoteCmd is the parent command for cluster remote operations.
-// It is package-level so subcommands can be added before registration in newClusterCmd.
-var remoteCmd = newClusterRemoteCmd()
 
 // ---------------------------------------------------------------------------
 // cluster init

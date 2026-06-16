@@ -94,9 +94,6 @@ func saveMainConfigSection(sm *SectionModel) error {
 		}
 	} else {
 		prefix := sm.SectionKey()
-		if sm.IsDrilldown() {
-			prefix = sm.DrilldownPrefix()
-		}
 		for _, f := range sm.Fields() {
 			if f.IsDirty() {
 				fullPath := resolveFullPath(prefix, f.Key())

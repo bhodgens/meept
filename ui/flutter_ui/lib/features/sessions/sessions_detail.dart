@@ -25,6 +25,16 @@ class _SessionsDetailPaneState extends ConsumerState<SessionsDetailPane> {
     _fetchRelatedItems();
   }
 
+  @override
+  void didUpdateWidget(covariant SessionsDetailPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Re-fetch related items when the session changes so the detail pane
+    // doesn't show stale tasks/plans from the previously-selected session.
+    if (oldWidget.session.id != widget.session.id) {
+      _fetchRelatedItems();
+    }
+  }
+
   Future<void> _fetchRelatedItems() async {
     setState(() => _loading = true);
     try {

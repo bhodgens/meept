@@ -674,10 +674,8 @@ func slugify(title string) string {
 	s := strings.ToLower(title)
 	s = nonAlphaNum.ReplaceAllString(s, "-")
 	s = strings.Trim(s, "-")
-	// Collapse multiple dashes.
-	for strings.Contains(s, "--") {
-		s = strings.ReplaceAll(s, "--", "-")
-	}
+	// The + quantifier in nonAlphaNum already collapses consecutive
+	// non-alphanumeric runs into a single dash, so no -- collapse loop needed.
 	if len(s) > 64 {
 		s = s[:64]
 	}

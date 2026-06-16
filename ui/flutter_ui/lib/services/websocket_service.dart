@@ -188,8 +188,10 @@ class WebSocketService {
           if (_disposed || _wasExplicitlyDisconnected) return;
 
           // Check if this is an HTTP 401 (unauthorized) error
-          final is401 = e is io.WebSocketException &&
-              e.toString().contains('401');
+          // Use toString() check for robustness across DioException, WebSocketException, etc.
+          final errorStr = e.toString();
+          final is401 = errorStr.contains('401') ||
+              errorStr.contains('Unauthorized');
           if (is401) {
             _errorSubject.addSafe(
                 'Authentication failed (401). Configure API key in Settings.');

@@ -185,6 +185,7 @@ final connectionDetailsProvider = StateNotifierProvider<ConnectionDetailsNotifie
 class ConnectionDetailsNotifier extends StateNotifier<ConnectionDetails?> {
   final Ref _ref;
   Timer? _fetchTimer;
+  bool _isFetching = false;
 
   ConnectionDetailsNotifier(this._ref) : super(null) {
     // Periodically refresh daemon state while connected
@@ -195,9 +196,15 @@ class ConnectionDetailsNotifier extends StateNotifier<ConnectionDetails?> {
   }
 
   Future<void> _fetch() async {
-    ConnectionDetails result;
-
+    // Prevent concurrent fetches (e.g., on connect + periodic timer race)
+    if (_isFetching) {
+      debugPrint('[warn] ConnectionDetailsNotifier._fetch() skipped - already fetching');
+      return;
+    }
+    _isFetching = true;
     try {
+      ConnectionDetails result;
+
       final host = _ref.read(websocketProvider).host;
       final port = _ref.read(websocketProvider).port;
       final connectedAt = _ref.read(websocketProvider).connectedAt;
@@ -240,26 +247,14 @@ class ConnectionDetailsNotifier extends StateNotifier<ConnectionDetails?> {
           certFingerprint: fp,
         );
       }
+
+      state = result;
     } catch (e) {
       debugPrint('[warn] ConnectionDetails fetch metadata: $e');
       // Best-effort — only connection metadata available
-      try {
-        final ws = _ref.read(websocketProvider);
-        final fp = DaemonCertPinner.currentFingerprint;
-        result = ConnectionDetails(
-          host: ws.host,
-          port: ws.port,
-          tls: true,
-          connectedAt: ws.connectedAt,
-          certFingerprint: fp,
-        );
-      } catch (e) {
-        debugPrint('[warn] ConnectionDetails fetch fallback: $e');
-        return;
-      }
+    } finally {
+      _isFetching = false;
     }
-
-    state = result;
   }
 
   @override

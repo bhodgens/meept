@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/plan"
@@ -255,6 +256,25 @@ func (rl *RalphLoop) Reset(taskID string) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 	delete(rl.iterations, taskID)
+}
+
+// Cleanup removes iteration entries that haven't been touched within maxAge
+// (S1-18). This prevents unbounded growth of the iterations map from
+// abandoned or long-completed tasks. Callers should invoke this periodically
+// (e.g. from a scheduler job); it is not auto-scheduled.
+func (rl *RalphLoop) Cleanup(maxAge time.Duration, lastTouched func(string) time.Time) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	now := time.Now()
+	for taskID := range rl.iterations {
+		ts := lastTouched(taskID)
+		if ts.IsZero() {
+			continue // unknown — skip
+		}
+		if now.Sub(ts) > maxAge {
+			delete(rl.iterations, taskID)
+		}
+	}
 }
 
 // extractKeyTerms extracts important terms from a task description.

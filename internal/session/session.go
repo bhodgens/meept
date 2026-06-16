@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	sid "github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -1203,7 +1204,7 @@ func (h *Handler) handleStop(msg *models.BusMessage) (any, error) {
 			"action":     "stop",
 		})
 		stopMsg := &models.BusMessage{
-			ID:        fmt.Sprintf("stop-%d", time.Now().UnixNano()),
+			ID:        sid.Generate("stop-"),
 			Type:      models.MessageTypeRequest,
 			Topic:     "worker.stop",
 			Source:    "session-handler",
@@ -1323,7 +1324,7 @@ func (h *Handler) sendResponse(replyTo, topic string, response any, err error) {
 	}
 
 	msg := &models.BusMessage{
-		ID:        fmt.Sprintf("session-resp-%d", time.Now().UnixNano()),
+		ID:        sid.Generate("session-resp-"),
 		Type:      models.MessageTypeResponse,
 		Topic:     topic,
 		Source:    "session-handler",

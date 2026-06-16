@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
@@ -33,6 +34,7 @@ type ValidationResult struct {
 
 // ReviewManager orchestrates the review process for task steps.
 type ReviewManager struct {
+	mu               sync.RWMutex
 	registry         *AgentRegistry
 	stepStore        *task.StepStore
 	taskStore        *task.Store
@@ -91,8 +93,13 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 		rm.logger.Error("Failed to set step to reviewing", "error", err)
 	}
 
+	// Snapshot policy under lock to avoid racing with SetPolicy (S1-17).
+	rm.mu.RLock()
+	policy := rm.policy
+	rm.mu.RUnlock()
+
 	// Check if review is needed based on policy
-	if !rm.policy.NeedsReview(step) {
+	if !policy.NeedsReview(step) {
 		rm.logger.Debug("Step does not require review", "step_id", step.ID)
 		return &ReviewResult{
 			Status:     ReviewApproved,
@@ -102,7 +109,7 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 	}
 
 	// Check auto-approve patterns
-	if rm.policy.ShouldAutoApprove(step) {
+	if policy.ShouldAutoApprove(step) {
 		rm.logger.Debug("Step auto-approved", "step_id", step.ID)
 		if err := rm.stepStore.SetState(step.ID, task.StepApproved); err != nil {
 			rm.logger.Error("Failed to set step to approved", "error", err)
@@ -115,12 +122,12 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 	}
 
 	// Check if human intervention is needed
-	if rm.policy.RequiresHumanIntervention(step) {
+	if policy.RequiresHumanIntervention(step) {
 		rm.logger.Warn("Step requires human intervention",
 			"step_id", step.ID,
 			"revision_count", step.RevisionCount,
 		)
-		feedback := fmt.Sprintf("Maximum revision cycles (%d) exceeded. Human intervention required.", rm.policy.MaxRevisionCycles)
+		feedback := fmt.Sprintf("Maximum revision cycles (%d) exceeded. Human intervention required.", policy.MaxRevisionCycles)
 		if spec != nil {
 			for _, c := range spec.Criteria {
 				if c.StepSequence == step.Sequence {
@@ -177,7 +184,7 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 	}
 
 	// Select reviewer agent
-	reviewerID := rm.policy.SelectReviewer(step)
+	reviewerID := policy.SelectReviewer(step)
 	rm.logger.Debug("Selected reviewer",
 		"step_id", step.ID,
 		"reviewer", reviewerID,
@@ -577,7 +584,9 @@ func (rm *ReviewManager) SetPolicy(policy *ReviewPolicy) {
 	if policy == nil {
 		return
 	}
+	rm.mu.Lock()
 	rm.policy = policy
+	rm.mu.Unlock()
 	rm.logger.Info("Review policy updated")
 }
 
@@ -585,8 +594,14 @@ func (rm *ReviewManager) SetPolicy(policy *ReviewPolicy) {
 // It examines the step's result, evidence, and claims to determine if the work
 // described in the step was fully completed.
 func (rm *ReviewManager) ValidateCompletion(ctx context.Context, step *task.TaskStep, taskDesc string) (*ValidationResult, error) {
+	// Snapshot validation policy under lock to avoid racing with
+	// SetValidationPolicy (S1-17).
+	rm.mu.RLock()
+	validationPolicy := rm.validationPolicy
+	rm.mu.RUnlock()
+
 	// Check if validation is needed
-	if !rm.validationPolicy.NeedsValidation(step) {
+	if !validationPolicy.NeedsValidation(step) {
 		return &ValidationResult{
 			Status:   CompletionValid,
 			Feedback: "Validation not required for this step type",
@@ -766,17 +781,23 @@ func (rm *ReviewManager) SetValidationPolicy(policy *ValidationPolicy) {
 	if policy == nil {
 		return
 	}
+	rm.mu.Lock()
 	rm.validationPolicy = policy
+	rm.mu.Unlock()
 	rm.logger.Info("Validation policy updated")
 }
 
 // GetValidationPolicy returns the current validation policy.
 func (rm *ReviewManager) GetValidationPolicy() *ValidationPolicy {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
 	return rm.validationPolicy
 }
 
 // GetPolicy returns the current review policy.
 func (rm *ReviewManager) GetPolicy() *ReviewPolicy {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
 	return rm.policy
 }
 

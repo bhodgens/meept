@@ -124,14 +124,19 @@ func (f *Framework) Run(ctx context.Context) (*BenchmarkResult, error) {
 	}
 
 	// Queue all tasks
+queueLoop:
 	for _, task := range f.config.Tasks {
 		for i := 0; i < f.config.NumTests; i++ {
 			select {
 			case <-ctx.Done():
-				break
+				break queueLoop
 			default:
 				taskCopy := task
-				taskChan <- &taskCopy
+				select {
+				case taskChan <- &taskCopy:
+				case <-ctx.Done():
+					break queueLoop
+				}
 			}
 		}
 	}

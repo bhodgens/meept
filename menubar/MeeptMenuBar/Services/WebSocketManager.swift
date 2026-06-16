@@ -129,11 +129,14 @@ class WebSocketManager: NSObject {
             return
         }
 
-        // Exponential backoff
-        let delay = min(
+        // Exponential backoff with jitter to avoid thundering herd on
+        // daemon restart when multiple clients reconnect simultaneously.
+        let baseDelay = min(
             baseReconnectDelay * pow(2.0, Double(reconnectAttempts)),
             maxReconnectDelay
         )
+        let jitter = Double.random(in: 0..<baseDelay * 0.5)
+        let delay = baseDelay + jitter
         reconnectAttempts += 1
 
         logger.info("websocket: reconnecting in \(delay)s (attempt \(self.reconnectAttempts)/\(self.maxReconnectAttempts))")

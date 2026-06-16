@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	sid "github.com/caimlas/meept/pkg/id"
 	_ "modernc.org/sqlite" // sqlite3 driver registration
 )
 
@@ -283,8 +284,8 @@ func (s *SQLiteStore) Create(name string) (*Session, error) {
 	defer s.mu.Unlock()
 
 	now := time.Now().UTC()
-	id := fmt.Sprintf("session-%d", now.UnixNano())
-	convID := fmt.Sprintf("conv-%d", now.UnixNano())
+	id := sid.Generate("session-")
+	convID := sid.Generate("conv-")
 
 	session := &Session{
 		ID:              id,

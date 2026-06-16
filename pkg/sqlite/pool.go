@@ -151,7 +151,10 @@ func (p *Pool) Get(ctx context.Context) (*sql.DB, error) {
 	p.mu.Unlock()
 
 	select {
-	case db := <-p.conns:
+	case db, ok := <-p.conns:
+		if !ok || db == nil {
+			return nil, errors.New("pool is closed")
+		}
 		// Test the connection
 		if err := db.PingContext(ctx); err != nil {
 			// Connection is bad, try to create a new one
@@ -171,12 +174,12 @@ func (p *Pool) Put(db *sql.DB) {
 	}
 
 	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	if p.closed {
-		p.mu.Unlock()
 		db.Close()
 		return
 	}
-	p.mu.Unlock()
 
 	select {
 	case p.conns <- db:

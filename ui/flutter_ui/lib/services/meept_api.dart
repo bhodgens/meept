@@ -289,7 +289,7 @@ class MeeptApi {
   }) async {
     final data = <String, dynamic>{'query': query};
     if (scope != SearchScope.all) {
-      data['scope'] = scope.name;
+      data['scope'] = scope.apiValue;
     }
     final response = await _dio.post('/api/v1/search', data: data);
     return SearchResults.fromJson(response.data as Map<String, dynamic>);

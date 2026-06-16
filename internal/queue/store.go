@@ -668,39 +668,39 @@ func (s *Store) GetStats() (*QueueStats, error) {
 	}
 
 	// Count by state
-	rows, err := s.db.Query(`SELECT state, COUNT(*) FROM jobs GROUP BY state`)
+	stateRows, err := s.db.Query(`SELECT state, COUNT(*) FROM jobs GROUP BY state`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get state stats: %w", err)
 	}
-	defer rows.Close()
+	defer stateRows.Close()
 
-	for rows.Next() {
+	for stateRows.Next() {
 		var state string
 		var count int
-		if err := rows.Scan(&state, &count); err != nil {
+		if err := stateRows.Scan(&state, &count); err != nil {
 			continue
 		}
 		stats.ByState[JobState(state)] = count
 	}
-	if err := rows.Err(); err != nil {
+	if err := stateRows.Err(); err != nil {
 		return nil, fmt.Errorf("failed iterating state stats: %w", err)
 	}
 
 	// Count by priority for pending jobs
-	rows, err = s.db.Query(`SELECT priority, COUNT(*) FROM jobs WHERE state = 'pending' GROUP BY priority`)
+	priorityRows, err := s.db.Query(`SELECT priority, COUNT(*) FROM jobs WHERE state = 'pending' GROUP BY priority`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get priority stats: %w", err)
 	}
-	defer rows.Close()
+	defer priorityRows.Close()
 
-	for rows.Next() {
+	for priorityRows.Next() {
 		var priority, count int
-		if err := rows.Scan(&priority, &count); err != nil {
+		if err := priorityRows.Scan(&priority, &count); err != nil {
 			continue
 		}
 		stats.ByPriority[Priority(priority)] = count
 	}
-	if err := rows.Err(); err != nil {
+	if err := priorityRows.Err(); err != nil {
 		return nil, fmt.Errorf("failed iterating priority stats: %w", err)
 	}
 

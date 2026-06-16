@@ -30,8 +30,11 @@ func NewLSPRenameTool(manager *lsp.Manager) (*LSPRenameTool, error) {
 }
 
 // SetPendingChangesRegistry sets the pending changes registry for preview/accept workflow.
+// Nil guard is required per CLAUDE.md "Setter methods" coding practice.
 func (t *LSPRenameTool) SetPendingChangesRegistry(registry *builtin.PendingChangesRegistry) {
-	t.pendingChangesRegistry = registry
+	if registry != nil {
+		t.pendingChangesRegistry = registry
+	}
 }
 
 func (t *LSPRenameTool) Name() string { return "lsp_rename" }

@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tailscale/hujson"
 )
@@ -180,71 +182,21 @@ func quotedDurationToNanos(data string) string {
 }
 
 // parseDuration parses a Go duration string (e.g. "30s", "2m", "1h30m").
-func parseDuration(s string) (d int64, err error) {
-	var raw string
-	// Try to find the suffix
-	for _, suffix := range []string{"ns", "us", "ms", "s", "m", "h", "d"} {
-		if strings.HasSuffix(s, suffix) {
-			raw = s[:len(s)-len(suffix)]
-			break
+// Uses time.ParseDuration for standard Go durations and falls back to a
+// custom parser only for the non-standard "d" (day) suffix.
+func parseDuration(s string) (int64, error) {
+	// Handle the non-standard "d" (day) suffix by converting to hours.
+	if strings.HasSuffix(s, "d") {
+		numStr := s[:len(s)-1]
+		f, err := strconv.ParseFloat(numStr, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid duration: %q", s)
 		}
+		return int64(f * 24 * float64(time.Hour.Nanoseconds())), nil
 	}
-	if raw == "" {
-		// Try composite format like "1h30m" or "1h30m15s"
-		raw = s
-		d, err = parseCompositeDuration(s)
-		return
-	}
-	var f float64
-	_, err = fmt.Sscanf(raw, "%f", &f)
+	d, err := time.ParseDuration(s)
 	if err != nil {
-		return 0, fmt.Errorf("invalid duration: %q", s)
+		return 0, fmt.Errorf("invalid duration: %q: %w", s, err)
 	}
-	switch s[len(raw):] {
-	case "ns":
-		return int64(f), nil
-	case "us", "µs":
-		return int64(f * 1e3), nil
-	case "ms":
-		return int64(f * 1e6), nil
-	case "s":
-		return int64(f * 1e9), nil
-	case "m":
-		return int64(f * 60 * 1e9), nil
-	case "h":
-		return int64(f * 3600 * 1e9), nil
-	case "d":
-		return int64(f * 86400 * 1e9), nil
-	default:
-		return 0, fmt.Errorf("unknown duration suffix: %q", s[len(raw):])
-	}
-}
-
-// parseCompositeDuration parses composite duration strings like "1h30m15s".
-func parseCompositeDuration(s string) (int64, error) {
-	var d int64
-	raw := s
-	units := map[string]int64{"d": 86400e9, "h": 3600e9, "m": 60e9, "s": 1e9, "ms": 1e6, "us": 1e3, "ns": 1}
-	for _, suffix := range []string{"d", "h", "m", "s", "ms", "us", "ns"} {
-		for strings.HasSuffix(raw, suffix) {
-			prefix := raw[:len(raw)-len(suffix)]
-			if prefix == "" {
-				return 0, fmt.Errorf("invalid duration: %q", s)
-			}
-			var f float64
-			if _, err := fmt.Sscanf(prefix, "%f", &f); err != nil {
-				// Check for another unit: e.g. "1h" -> try next char as unit start
-				break
-			}
-			d += int64(float64(f) * float64(units[suffix]))
-			raw = prefix
-			if raw == "" {
-				return 0, fmt.Errorf("invalid duration: %q", s)
-			}
-		}
-	}
-	if raw != "" {
-		return 0, fmt.Errorf("invalid duration: %q", s)
-	}
-	return d, nil
+	return int64(d), nil
 }

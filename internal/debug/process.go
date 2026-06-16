@@ -152,7 +152,7 @@ func DetectAdapterForProcess(pid int) (*AdapterConfig, error) {
 		"python3.12": "debugpy",
 		"python3.13": "debugpy",
 		"go":       "dlv",
-		"node":     "debugpy",
+		"node":     "codelldb",
 	}
 
 	if adapterName, ok := nameToAdapter[base]; ok {

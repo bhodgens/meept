@@ -316,11 +316,16 @@ func (m *Manager) Reload(ctx context.Context, configs []ServerConfig) error {
 	return errors.Join(errs...)
 }
 
-// reloadPhase1 handles the locked portion of reload - stopping old servers
-// and preparing configs to start. Returns configs that need to be started.
+// reloadPhase1 handles stopping old servers and preparing configs to start.
+// Returns configs that need to be started.
+//
+// Per CLAUDE.md mutex-scope rule, client.Close() calls (which perform
+// subprocess I/O) are done OUTSIDE the lock. We snapshot the clients to
+// close under the lock, release it, perform the I/O, then re-acquire the
+// lock to delete the entries.
 func (m *Manager) reloadPhase1(newConfigs map[string]ServerConfig) []ServerConfig {
+	// Phase 1a: under lock, snapshot what needs closing
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	// Determine what servers to stop
 	var serversToStop []string
@@ -336,26 +341,41 @@ func (m *Manager) reloadPhase1(newConfigs map[string]ServerConfig) []ServerConfi
 		serversToStart = append(serversToStart, name)
 	}
 
-	// Stop servers that are no longer in the config
-	for _, name := range serversToStop {
-		client := m.clients[name]
-		m.logger.Info("stopping removed MCP server", "name", name)
-		if err := client.Close(); err != nil {
-			m.logger.Error("error closing MCP client during reload", "name", name, "error", err)
-		}
-		delete(m.clients, name)
+	// Collect clients to close (removed + restart-needed)
+	type clientToClose struct {
+		name   string
+		client *Client
+		reason string
 	}
 
-	// Mark servers for restart (close them but don't start yet)
-	for _, name := range serversToStart {
-		if existingClient, exists := m.clients[name]; exists {
-			m.logger.Info("restarting MCP server", "name", name)
-			if err := existingClient.Close(); err != nil {
-				m.logger.Error("error closing MCP client during restart", "name", name, "error", err)
-			}
-			delete(m.clients, name)
+	var toClose []clientToClose
+	for _, name := range serversToStop {
+		if c, ok := m.clients[name]; ok {
+			toClose = append(toClose, clientToClose{name, c, "removed"})
 		}
 	}
+	for _, name := range serversToStart {
+		if existingClient, exists := m.clients[name]; exists {
+			toClose = append(toClose, clientToClose{name, existingClient, "restart"})
+		}
+	}
+
+	m.mu.Unlock()
+
+	// Phase 1b: outside lock, close clients with I/O
+	for _, ctc := range toClose {
+		m.logger.Info("closing MCP client for reload", "name", ctc.name, "reason", ctc.reason)
+		if err := ctc.client.Close(); err != nil {
+			m.logger.Error("error closing MCP client during reload", "name", ctc.name, "error", err)
+		}
+	}
+
+	// Phase 1c: under lock, delete closed clients from the map
+	m.mu.Lock()
+	for _, ctc := range toClose {
+		delete(m.clients, ctc.name)
+	}
+	m.mu.Unlock()
 
 	// Store configs to start
 	configsToStart := make([]ServerConfig, 0, len(serversToStart))

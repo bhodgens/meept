@@ -131,6 +131,7 @@ func DetectCoreAdapterForBinary(adapterName, program string) (CoreAdapterType, e
 // AnalyzeCoreGDB runs gdb in batch mode to analyze a core dump.
 // It executes bt, info registers, and info locals commands, then parses the output.
 func AnalyzeCoreGDB(ctx context.Context, coreFile, program string, timeout time.Duration) (*CoreDumpResult, error) {
+	_ = timeout // timeout is enforced by the caller via context; kept for API compatibility
 	logger := slog.Default().With("component", "core-gdb")
 
 	// Build gdb command arguments: -batch with multiple -ex commands.
@@ -166,6 +167,7 @@ func AnalyzeCoreGDB(ctx context.Context, coreFile, program string, timeout time.
 // AnalyzeCoreLLDB runs lldb in batch mode to analyze a core dump.
 // It executes bt, frame variable, and register read commands.
 func AnalyzeCoreLLDB(ctx context.Context, coreFile, program string, timeout time.Duration) (*CoreDumpResult, error) {
+	_ = timeout // timeout is enforced by the caller via context; kept for API compatibility
 	logger := slog.Default().With("component", "core-lldb")
 
 	cmd := exec.CommandContext(ctx, "lldb",
@@ -197,6 +199,7 @@ func AnalyzeCoreLLDB(ctx context.Context, coreFile, program string, timeout time
 
 // AnalyzeCoreDelve runs delve in core mode to analyze a Go core dump.
 func AnalyzeCoreDelve(ctx context.Context, coreFile, program string, timeout time.Duration) (*CoreDumpResult, error) {
+	_ = timeout // timeout is enforced by the caller via context; kept for API compatibility
 	logger := slog.Default().With("component", "core-delve")
 
 	// delve core mode: dlv core <program> <core>

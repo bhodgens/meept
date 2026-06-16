@@ -63,10 +63,9 @@ func (h *NotificationHandler) ServeWebSocket(w http.ResponseWriter, req *http.Re
 	// Auth is enforced by middleware.
 
 	conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
-		CompressionMode:     websocket.CompressionContextTakeover,
-		OriginPatterns:      defaultWSOrigins,
-		InsecureSkipVerify:  true, // Allow non-TLS for localhost
-		})
+		CompressionMode: websocket.CompressionContextTakeover,
+		OriginPatterns:  defaultWSOrigins,
+	})
 	if err != nil {
 		h.logger.Error("failed to accept websocket connection", "error", err)
 		http.Error(w, "failed to accept connection", http.StatusBadRequest)

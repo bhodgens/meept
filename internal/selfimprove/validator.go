@@ -173,11 +173,18 @@ func (v *FixValidator) applyFix(sandboxPath string, fix *ProposedFix) error {
 		return err
 	}
 
-	// Apply the replacement
-	newContent := strings.Replace(string(content), original, fixed, 1)
-	if newContent == string(content) {
+	// Apply the replacement.
+	// Count occurrences to reject ambiguous matches (the original snippet
+	// appears in multiple locations, so a blind Replace could modify the
+	// wrong one). This mirrors the S2-10 fix applied to applier.go.
+	matchCount := strings.Count(string(content), original)
+	if matchCount == 0 {
 		return fmt.Errorf("original code not found in file")
 	}
+	if matchCount > 1 {
+		return fmt.Errorf("original code is ambiguous: %d occurrences in %s", matchCount, fix.FilePath)
+	}
+	newContent := strings.Replace(string(content), original, fixed, 1)
 
 	return os.WriteFile(filePath, []byte(newContent), 0o644) //nolint:gosec // workspace plan/data files are user-readable
 }

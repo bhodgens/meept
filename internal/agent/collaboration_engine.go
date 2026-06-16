@@ -227,6 +227,26 @@ func (e *CollaborationEngine) resolveParticipants(mode string, preferred []strin
 	}
 }
 
+// CleanupSessions removes terminal sessions from the sessions map, preventing
+// unbounded growth (S1-19). It also cleans up the corresponding nestedCount
+// entries. Callers should invoke this periodically; it is not auto-scheduled.
+func (e *CollaborationEngine) CleanupSessions() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	removed := 0
+	for id, s := range e.sessions {
+		if s.GetState().IsTerminal() {
+			delete(e.sessions, id)
+			delete(e.nestedCount, id)
+			removed++
+		}
+	}
+	if removed > 0 {
+		e.logger.Info("Cleaned up terminal collaboration sessions", "removed", removed)
+	}
+	return removed
+}
+
 // ActiveSessionCount returns the number of active sessions.
 func (e *CollaborationEngine) ActiveSessionCount() int {
 	e.mu.RLock()

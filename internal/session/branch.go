@@ -9,6 +9,7 @@ import (
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
+	sid "github.com/caimlas/meept/pkg/id"
 )
 
 // BranchSummarizer interface for testability.
@@ -119,7 +120,7 @@ func (bm *BranchManager) NavigateToBranch(ctx context.Context, sessionID string,
 	}
 
 	// Generate new branch ID
-	newBranchID := fmt.Sprintf("branch-%d", time.Now().UnixNano())
+	newBranchID := sid.Generate("branch-")
 
 	var summary string
 

@@ -3,6 +3,7 @@ package validator
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/caimlas/meept/internal/task"
@@ -82,12 +83,9 @@ func parseStatusValue(value string) int {
 	for part := range parts {
 		kv := strings.Split(part, "=")
 		if len(kv) == 2 && kv[0] == "status" {
-			// Parse status code
-			var status int
-			for _, c := range kv[1] {
-				if c >= '0' && c <= '9' {
-					status = status*10 + int(c-'0')
-				}
+			status, err := strconv.Atoi(strings.TrimSpace(kv[1]))
+			if err != nil {
+				return 0
 			}
 			return status
 		}

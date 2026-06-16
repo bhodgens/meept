@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -196,7 +197,7 @@ func (g *GossipEngine) persistEvent(event *models.ClusterEvent) {
 
 	sigB64 := ""
 	if event.Signature != nil {
-		sigB64 = string(event.Signature)
+		sigB64 = base64.StdEncoding.EncodeToString(event.Signature)
 	}
 
 	vcJSON, _ := json.Marshal(event.VectorClock)

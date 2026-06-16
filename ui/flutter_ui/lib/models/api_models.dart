@@ -453,7 +453,10 @@ extension SearchScopeX on SearchScope {
         SearchScope.plans => 'plans',
       };
 
-  String get name => switch (this) {
+  /// API parameter value for this scope.  Note: this must NOT be named
+  /// `name` because Dart 2.15+ enums have a built-in `Enum.name` getter
+  /// that shadows any extension getter with the same name.
+  String get apiValue => switch (this) {
         SearchScope.all => '',
         SearchScope.sessions => 'sessions',
         SearchScope.tasks => 'tasks',

@@ -60,7 +60,10 @@ class _TerminalCursorController extends TextEditingController {
     );
   }
 
-  String get _cursorChar => '_';
+  // Use a Unicode full block as the terminal cursor.  This avoids
+  // colliding with legitimate underscore characters in user input —
+  // _stripCursor only removes this sentinel, not user underscores.
+  String get _cursorChar => '\u2588';
 }
 
 class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProviderStateMixin {
@@ -156,7 +159,8 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
 
   /// Remove the blinking cursor character from display text so
   /// internal logic (paste detect, slash detect, etc.) never sees it.
-  String _stripCursor(String text) => text.replaceAll('_', '');
+  /// Only removes the sentinel full-block char (\u2588), not user underscores.
+  String _stripCursor(String text) => text.replaceAll('\u2588', '');
 
   /// Update ghost text for single slash command match.
   void _updateGhostText(String text) {

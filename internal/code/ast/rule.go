@@ -347,11 +347,11 @@ metadata:
 	"debug_prints": `
 id: debug-prints
 language: go
-pattern: "(call_expression function: (identifier) @func)"
+pattern: "(call_expression function: [(selector_expression) @func (identifier) @func])"
 constraints:
   - regex:
       node: func
-      pattern: "^(fmt\\.Print|log\\.Print|panic)$"
+      pattern: "^(fmt\\.Print|log\\.Print|panic)"
 metadata:
   description: "Find debug print statements that should be removed"
 `,
