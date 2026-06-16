@@ -135,7 +135,7 @@ func runTUI() error {
 	// The TUI requires RPC for event streaming and real-time updates.
 	// If --transport=http is set, warn and fall back to RPC.
 	if transportFlag == "http" {
-		fmt.Fprintln(os.Stderr, "warning: TUI requires RPC transport (event streaming); falling back to RPC socket")
+		return fmt.Errorf("TUI does not yet support --transport=http; use the default RPC transport or the Flutter web UI")
 	}
 	app := tui.NewApp(getSocketPath())
 	p := tea.NewProgram(app)

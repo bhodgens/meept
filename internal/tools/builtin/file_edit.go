@@ -13,6 +13,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
@@ -378,16 +379,16 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 		diff := t.generateDiffPreview(resolved, originalContent, output)
 		
 		// Create pending change with session ID from context (or generate one)
-		sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
+		sessionID := id.Generate("edit-")
 		if sid, ok := ctx.Value("session_id").(string); ok && sid != "" {
 			sessionID = sid
 		}
-		
+
 		now := time.Now()
 		expiresAt := now.Add(30 * time.Minute) // Default expiry: 30 minutes
-		
+
 		change := &PendingChange{
-			ID:        fmt.Sprintf("change_%s_%d", resolved, now.UnixNano()),
+			ID:        id.Generate("edit-"),
 			SessionID: sessionID,
 			FilePath:  resolved,
 			Original:  originalContent,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/caimlas/meept/internal/debug"
 	"github.com/caimlas/meept/internal/llm"
@@ -942,6 +943,7 @@ func rawToMap(data json.RawMessage) map[string]any {
 	}
 	var m map[string]any
 	if err := json.Unmarshal(data, &m); err != nil {
+		slog.Debug("rawToMap: falling back to raw", "err", err)
 		return map[string]any{"raw": string(data)}
 	}
 	return m

@@ -216,6 +216,8 @@ func (t *HTTPTransport) Send(ctx context.Context, message []byte) ([]byte, error
 // parseSSEResponse parses a Server-Sent Events response.
 func (t *HTTPTransport) parseSSEResponse(r io.Reader) ([]byte, error) {
 	scanner := bufio.NewScanner(r)
+	// Use a larger buffer (up to 10MB) to handle large SSE events.
+	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -225,23 +227,29 @@ func (t *HTTPTransport) parseSSEResponse(r io.Reader) ([]byte, error) {
 			continue
 		}
 
-		// Handle data line
+		// Handle data line — SSE spec allows "data:" with or without a space.
+		// Try "data: " (with space) first, then fall back to "data:" (without space).
+		var data string
 		if after, ok := strings.CutPrefix(line, "data: "); ok {
-			data := after
+			data = after
+		} else if after, ok := strings.CutPrefix(line, "data:"); ok {
+			data = strings.TrimSpace(after)
+		} else {
+			continue
+		}
 
-			// Try to parse as JSON to verify it's a response
-			var parsed map[string]any
-			if err := json.Unmarshal([]byte(data), &parsed); err != nil {
-				continue
-			}
+		// Try to parse as JSON to verify it's a response
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(data), &parsed); err != nil {
+			continue
+		}
 
-			// Check if it's a response (has result or error)
-			if _, hasResult := parsed["result"]; hasResult {
-				return []byte(data), nil
-			}
-			if _, hasError := parsed["error"]; hasError {
-				return []byte(data), nil
-			}
+		// Check if it's a response (has result or error)
+		if _, hasResult := parsed["result"]; hasResult {
+			return []byte(data), nil
+		}
+		if _, hasError := parsed["error"]; hasError {
+			return []byte(data), nil
 		}
 	}
 

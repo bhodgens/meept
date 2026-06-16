@@ -246,10 +246,15 @@ func (p *Pool) GetStats() PoolStats {
 }
 
 // Scale adjusts the number of workers in the pool.
+// The count is snapshotted under the lock, then AddWorker/RemoveWorker
+// (which acquire the lock internally) perform the actual modifications.
+// This follows the "collect under lock, release, then operate" pattern
+// from CLAUDE.md, since holding the lock across AddWorker/RemoveWorker
+// would deadlock.
 func (p *Pool) Scale(ctx context.Context, targetCount int) error {
-	p.mu.Lock()
+	p.mu.RLock()
 	currentCount := len(p.workers)
-	p.mu.Unlock()
+	p.mu.RUnlock()
 
 	if targetCount == currentCount {
 		return nil

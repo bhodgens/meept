@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"sort"
 	"sync"
 	"time"
 
@@ -40,7 +41,7 @@ type GossipTransport struct {
 
 	// Track which events we've already sent to each peer to avoid
 	// sending duplicates back to the originator.
-	sentEvents map[string]map[string]bool // peerAddr -> eventID -> true
+	sentEvents map[string]map[string]time.Time // peerAddr -> eventID -> sent time
 	sentMu     sync.RWMutex
 }
 
@@ -54,7 +55,7 @@ func NewGossipTransport(cfg *Config, localNode string, gossip *GossipEngine, mem
 		members:    members,
 		stopCh:     make(chan struct{}),
 		doneCh:     make(chan struct{}),
-		sentEvents: make(map[string]map[string]bool),
+		sentEvents: make(map[string]map[string]time.Time),
 	}
 }
 
@@ -336,7 +337,8 @@ func (t *GossipTransport) hasSentToPeer(nodeID, eventID string) bool {
 	if !ok {
 		return false
 	}
-	return peerMap[eventID]
+	_, exists := peerMap[eventID]
+	return exists
 }
 
 // markSentToPeer records that an event was successfully sent to a peer.
@@ -345,19 +347,32 @@ func (t *GossipTransport) markSentToPeer(nodeID, eventID string) {
 	defer t.sentMu.Unlock()
 
 	if _, ok := t.sentEvents[nodeID]; !ok {
-		t.sentEvents[nodeID] = make(map[string]bool)
+		t.sentEvents[nodeID] = make(map[string]time.Time)
 	}
-	t.sentEvents[nodeID][eventID] = true
+	t.sentEvents[nodeID][eventID] = time.Now()
 
-	// Prune old entries to prevent unbounded growth (keep last 1000 per peer)
+	// Prune oldest entries to prevent unbounded growth (keep last 1000 per peer).
+	// Uses timestamps for LRU eviction instead of random deletion.
 	if len(t.sentEvents[nodeID]) > 1000 {
-		count := 0
-		for k := range t.sentEvents[nodeID] {
-			if count > 500 {
-				break
-			}
-			delete(t.sentEvents[nodeID], k)
-			count++
+		// Find and remove the 500 oldest entries.
+		type entry struct {
+			id string
+			ts time.Time
+		}
+		entries := make([]entry, 0, len(t.sentEvents[nodeID]))
+		for k, v := range t.sentEvents[nodeID] {
+			entries = append(entries, entry{id: k, ts: v})
+		}
+		// Partial sort: find the 500 oldest.
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].ts.Before(entries[j].ts)
+		})
+		toRemove := 500
+		if toRemove > len(entries) {
+			toRemove = len(entries)
+		}
+		for i := range toRemove {
+			delete(t.sentEvents[nodeID], entries[i].id)
 		}
 	}
 }

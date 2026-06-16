@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -223,6 +224,12 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 	// Claim the selected job atomically
 	claimedJob, err := q.store.ClaimNextByID(targetJob.ID, workerID)
 	if err != nil {
+		// If the job was already claimed by another worker (race condition
+		// in the slow path), translate to ErrNoJobAvailable so the worker
+		// treats it as "try again" instead of an error.
+		if errors.Is(err, ErrJobAlreadyClaimed) {
+			return nil, ErrNoJobAvailable
+		}
 		return nil, err
 	}
 

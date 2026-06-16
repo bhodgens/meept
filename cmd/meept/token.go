@@ -88,16 +88,18 @@ func loadConfigForModification() (hujson.Value, string, error) {
 	return v, cp, nil
 }
 
-// saveConfig saves the config file back to disk
-func saveConfig(configPath string, v hujson.Value) error {
+// saveConfig saves the config file back to disk.
+// The parameter is named filePath to avoid shadowing the package-level
+// configPath() function.
+func saveConfig(filePath string, v hujson.Value) error {
 	// Ensure directory exists
-	dir := filepath.Dir(configPath)
+	dir := filepath.Dir(filePath)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
 	data := v.Pack()
-	if err := os.WriteFile(configPath, data, 0o600); err != nil {
+	if err := os.WriteFile(filePath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 

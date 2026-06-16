@@ -149,8 +149,8 @@ enum DaemonError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .plistNotFound: return "launchd plist not found"
-        case .loadFailed(let output): return "Failed to load: \(output)"
-        case .unloadFailed(let output): return "Failed to unload: \(output)"
+        case .loadFailed(let output): return "failed to load: \(output)"
+        case .unloadFailed(let output): return "failed to unload: \(output)"
         case .kickstartFailed(let output):
             if output.isEmpty {
                 return "launchd kickstart returned non-zero status (daemon may not have started)"

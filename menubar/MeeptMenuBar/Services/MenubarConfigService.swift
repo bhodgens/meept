@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import os.log
 
 /// Default development API key shared with the daemon and other clients.
 /// Only available in DEBUG builds. In release builds, the API token must
@@ -30,13 +31,9 @@ struct MenubarConfig: Codable {
     }
 
     struct UIConfig: Codable {
-        var showInMenuBar: Bool
-        var startAtLogin: Bool
         var iconStyle: String
 
         enum CodingKeys: String, CodingKey {
-            case showInMenuBar = "show_in_menu_bar"
-            case startAtLogin = "start_at_login"
             case iconStyle = "icon_style"
         }
     }
@@ -50,7 +47,7 @@ struct MenubarConfig: Codable {
 extension MenubarConfig {
     static let `default` = MenubarConfig(
         daemon: DaemonConfig(httpURL: "https://localhost:8081", apiToken: nil),
-        ui: UIConfig(showInMenuBar: true, startAtLogin: false, iconStyle: "icon"),
+        ui: UIConfig(iconStyle: "icon"),
         notifications: NotificationsConfig(enabled: true, level: "errors_only")
     )
 }
@@ -58,6 +55,7 @@ extension MenubarConfig {
 class MenubarConfigService {
     private let fileURL: URL
     private var config: MenubarConfig = .default
+    private let logger = Logger(subsystem: "com.caimlas.meept.menubar", category: "MenubarConfigService")
 
     init() {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
@@ -81,14 +79,6 @@ class MenubarConfigService {
         // rather than silently using a known key.
         return nil
         #endif
-    }
-
-    var showInMenuBar: Bool {
-        return config.ui.showInMenuBar
-    }
-
-    var startAtLogin: Bool {
-        return config.ui.startAtLogin
     }
 
     var notificationsEnabled: Bool {
@@ -119,7 +109,7 @@ class MenubarConfigService {
             self.config = try decoder.decode(MenubarConfig.self, from: cleanData)
         } catch {
             // On parse error, keep defaults
-            print("Failed to load menubar config: \(error)")
+            logger.error("failed to load menubar config: \(error.localizedDescription)")
         }
     }
 

@@ -230,9 +230,15 @@ func (s *Server) acceptLoop() {
 	for s.running.Load() {
 		conn, err := s.listener.Accept()
 		if err != nil {
+			// If the listener is closed, the server is shutting down.
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
 			if s.running.Load() {
 				s.logger.Error("rpc: accept failed", "error", err)
 			}
+			// Brief backoff to avoid a tight loop on transient errors.
+			time.Sleep(50 * time.Millisecond)
 			continue
 		}
 

@@ -197,13 +197,13 @@ func (cq *ClusterQueue) ReclaimJob(ctx context.Context, jobID, reason string) er
 // CheckNodeReachability checks if a node is reachable by querying the
 // cluster_members table for a recent heartbeat. Returns true if the node
 // has heartbeat within the configured reachability timeout.
-func (cq *ClusterQueue) CheckNodeReachability(nodeID string) bool {
+func (cq *ClusterQueue) CheckNodeReachability(ctx context.Context, nodeID string) bool {
 	if cq.store == nil {
 		return false
 	}
 
 	var lastHeartbeat int64
-	row := cq.store.db.QueryRow(
+	row := cq.store.db.QueryRowContext(ctx,
 		`SELECT last_heartbeat FROM cluster_members WHERE node_id = ?`,
 		nodeID,
 	)

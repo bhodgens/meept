@@ -14,9 +14,11 @@ struct LiveMetrics: Codable {
     let model_failovers: Int
 }
 
-struct MetricPoint: Codable {
+struct MetricPoint: Codable, Identifiable {
     let timestamp: String
     let name: String
     let value: Double
     let tags: [String: String]?
+
+    var id: String { "\(name)-\(timestamp)" }
 }

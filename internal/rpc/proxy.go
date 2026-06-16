@@ -318,7 +318,10 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 	sub.Subscriber = subscriber
 
 	// Start goroutine to collect events from all topics
-	// This goroutine monitors context cancellation for cleanup
+	// This goroutine monitors context cancellation for cleanup.
+	// Note: handleBusUnsubscribe also performs synchronous cleanup, so this
+	// goroutine acts as a fallback for client disconnects where the explicit
+	// unsubscribe call is never made.
 	go func() {
 		// Wait for context cancellation (client disconnect)
 		<-subCtx.Done()
@@ -474,9 +477,6 @@ func (p *ProxyHandler) handleBusUnsubscribe(ctx context.Context, params json.Raw
 	sub := subVal.(*busSubscription)
 
 	// Cancel the context to trigger cleanup of goroutines.
-	// The cleanup goroutine handles unsubscribing topic subs and deleting
-	// from the map, so we only need to cancel here + unsubscribe the
-	// combined subscriber.
 	if sub.cancelFunc != nil {
 		sub.cancelFunc()
 	}
@@ -485,6 +485,17 @@ func (p *ProxyHandler) handleBusUnsubscribe(ctx context.Context, params json.Raw
 	if sub.Subscriber != nil {
 		p.bus.Unsubscribe(sub.Subscriber)
 	}
+
+	// Synchronously remove topic subscriptions and delete from the map
+	// so that after this call returns, the subscription is fully gone.
+	sub.mu.Lock()
+	for _, ts := range sub.TopicSubs {
+		p.bus.Unsubscribe(ts)
+	}
+	sub.TopicSubs = nil
+	sub.mu.Unlock()
+
+	p.subscriptions.Delete(req.SubscriptionID)
 
 	return map[string]any{
 		RPCKeyStatus: "unsubscribed",

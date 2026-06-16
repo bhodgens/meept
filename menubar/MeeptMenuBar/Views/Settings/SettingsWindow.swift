@@ -54,7 +54,7 @@ struct SettingsWindow: View {
         )) {
             Button("ok", role: .cancel) { }
         } message: {
-            Text("Failed to save configuration. Please try again.")
+            Text("failed to save configuration. please try again.")
         }
         .alert("normalization error", isPresented: Binding(
             get: { configViewModel.showNormalizeError },
@@ -62,7 +62,7 @@ struct SettingsWindow: View {
         )) {
             Button("ok", role: .cancel) { }
         } message: {
-            Text("Failed to normalize JSON5. Please check your syntax.")
+            Text("failed to normalize JSON5. please check your syntax.")
         }
         .onAppear {
             configViewModel.loadConfigs()

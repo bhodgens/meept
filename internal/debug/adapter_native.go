@@ -631,9 +631,8 @@ func parseGDBVariable(line string) *CoreVariable {
 
 	// Skip lines that are clearly not variable output.
 	if strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "Thread") ||
-		strings.HasPrefix(trimmed, "No") || strings.HasPrefix(trimmed, " ") == false {
-		// Variables from "info locals" typically start at column 0 or have a known pattern.
-		// Be lenient: check for "=" in the line.
+		strings.HasPrefix(trimmed, "No") {
+		return nil
 	}
 
 	eqIdx := strings.Index(trimmed, "=")

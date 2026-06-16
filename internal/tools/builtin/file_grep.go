@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -449,14 +450,7 @@ func formatGrepContent(matches []grepMatch, contextLines int) string {
 		for ln := range showLines {
 			sortedLines = append(sortedLines, ln)
 		}
-		// Simple sort
-		for i := 0; i < len(sortedLines); i++ {
-			for j := i + 1; j < len(sortedLines); j++ {
-				if sortedLines[j] < sortedLines[i] {
-					sortedLines[i], sortedLines[j] = sortedLines[j], sortedLines[i]
-				}
-			}
-		}
+		sort.Ints(sortedLines)
 
 		for _, ln := range sortedLines {
 			lineContent := fd.lines[ln-1]

@@ -138,9 +138,24 @@ func (m *Modal) renderContent() string {
 
 // HandleKey processes a key press and returns the selected item key or empty string.
 func (m *Modal) HandleKey(key string) string {
+	// Case-insensitive match for single-character alpha keys so "S" matches
+	// "s" bindings. Multi-char bindings (e.g., "ctrl+s", "enter") use exact
+	// matching. This prevents caps lock or shift from breaking single-char
+	// shortcuts.
+	keyMatch := key
+	if len(key) == 1 {
+		keyMatch = strings.ToLower(key)
+	}
 	// Check for direct key match
 	for _, item := range m.items {
-		if !item.Disabled && item.Key == key {
+		if item.Disabled {
+			continue
+		}
+		itemKey := item.Key
+		if len(itemKey) == 1 {
+			itemKey = strings.ToLower(itemKey)
+		}
+		if itemKey == keyMatch {
 			m.Hide()
 			return item.Key
 		}

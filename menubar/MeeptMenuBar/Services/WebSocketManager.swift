@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import os.log
 
 /// WebSocket manager with auto-reconnection and exponential backoff.
 class WebSocketManager: NSObject {
@@ -22,6 +23,7 @@ class WebSocketManager: NSObject {
     private var shouldReconnect = true
 
     // Callbacks
+    private let logger = Logger(subsystem: "com.caimlas.meept.menubar", category: "WebSocketManager")
     var onMessage: ((Data) -> Void)?
     var onDisconnect: ((Error?) -> Void)?
     var onConnect: (() -> Void)?
@@ -52,6 +54,10 @@ class WebSocketManager: NSObject {
 
     func connect() {
         guard !isConnecting else { return }
+        guard let session = urlSession else {
+            isConnecting = false
+            return
+        }
         isConnecting = true
         shouldReconnect = true
         // Explicit (re)connect resets the backoff window. Without this, a
@@ -65,7 +71,7 @@ class WebSocketManager: NSObject {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
-        webSocketTask = urlSession?.webSocketTask(with: request)
+        webSocketTask = session.webSocketTask(with: request)
         webSocketTask?.resume()
         receiveMessage()
     }
@@ -79,9 +85,9 @@ class WebSocketManager: NSObject {
 
     func send(_ message: String) {
         let wsMessage = URLSessionWebSocketTask.Message.string(message)
-        webSocketTask?.send(wsMessage) { error in
+        webSocketTask?.send(wsMessage) { [weak self] error in
             if let error = error {
-                print("WebSocket send error: \(error)")
+                self?.logger.error("websocket send error: \(error.localizedDescription)")
             }
         }
     }
@@ -108,7 +114,7 @@ class WebSocketManager: NSObject {
                 self.receiveMessage()
 
             case .failure(let error):
-                print("WebSocket receive error: \(error)")
+                logger.error("websocket receive error: \(error.localizedDescription)")
                 self.handleDisconnect(error: error)
             }
         }
@@ -119,7 +125,7 @@ class WebSocketManager: NSObject {
         onDisconnect?(error)
 
         guard shouldReconnect, reconnectAttempts < maxReconnectAttempts else {
-            print("WebSocket: max reconnect attempts reached or reconnect disabled")
+            logger.info("websocket: max reconnect attempts reached or reconnect disabled")
             return
         }
 
@@ -130,7 +136,7 @@ class WebSocketManager: NSObject {
         )
         reconnectAttempts += 1
 
-        print("WebSocket: reconnecting in \(delay)s (attempt \(reconnectAttempts)/\(maxReconnectAttempts))")
+        logger.info("websocket: reconnecting in \(delay)s (attempt \(self.reconnectAttempts)/\(self.maxReconnectAttempts))")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             self?.connect()
@@ -146,7 +152,7 @@ extension WebSocketManager: URLSessionWebSocketDelegate {
         webSocketTask: URLSessionWebSocketTask,
         didOpenWithProtocol protocol: String?
     ) {
-        print("WebSocket: connected")
+        logger.info("websocket: connected")
         isConnecting = true
         reconnectAttempts = 0
         onConnect?()
@@ -158,7 +164,7 @@ extension WebSocketManager: URLSessionWebSocketDelegate {
         didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
         reason: Data?
     ) {
-        print("WebSocket: disconnected with code \(closeCode)")
+        logger.info("websocket: disconnected with code \(closeCode.rawValue)")
         handleDisconnect(error: nil)
     }
 

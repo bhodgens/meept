@@ -204,6 +204,7 @@ func (t *LSPRenameTool) Execute(ctx context.Context, args map[string]any) (any, 
 		now := time.Now()
 		expiresAt := now.Add(30 * time.Minute)
 
+		var pendingChangeIDs []string
 		for _, fe := range fileEdits {
 			// Read original content
 			originalContent, err := os.ReadFile(fe.path)
@@ -217,8 +218,9 @@ func (t *LSPRenameTool) Execute(ctx context.Context, args map[string]any) (any, 
 			// Generate simple diff
 			diff := generateSimpleDiff(string(originalContent), modifiedContent, fe.path)
 
+			changeID := id.Generate("lsp-rename-")
 			change := &builtin.PendingChange{
-				ID:        fmt.Sprintf("lsp_%s_%d", fe.path, now.UnixNano()),
+				ID:        changeID,
 				SessionID: sessionID,
 				FilePath:  fe.path,
 				Original:  string(originalContent),
@@ -234,11 +236,12 @@ func (t *LSPRenameTool) Execute(ctx context.Context, args map[string]any) (any, 
 			}
 
 			t.pendingChangesRegistry.Add(change)
+			pendingChangeIDs = append(pendingChangeIDs, changeID)
 		}
 
 		return map[string]any{
 			SchemaPropFound:       true,
-			"pending_change_ids":  []string{fmt.Sprintf("lsp_renamed_%d", now.UnixNano())},
+			"pending_change_ids":  pendingChangeIDs,
 			SchemaPropMessage:     fmt.Sprintf("Rename preview created for %d files. Use 'resolve' tool to accept/reject changes.", len(fileEdits)),
 			"new_name":            newName,
 			"changes":             changes,

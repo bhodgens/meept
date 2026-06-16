@@ -357,10 +357,7 @@ func (h *DevHandler) handleConfig(ctx context.Context, params json.RawMessage) (
 // handleReload reloads the models configuration.
 func (h *DevHandler) handleReload(ctx context.Context, params json.RawMessage) (any, error) {
 	if err := h.loadModels(); err != nil {
-		return map[string]any{
-			RPCKeySuccess: false,
-			"error":       err.Error(),
-		}, nil
+		return nil, fmt.Errorf("load models: %w", err)
 	}
 
 	return map[string]any{

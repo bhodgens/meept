@@ -21,9 +21,10 @@ type Client struct {
 	stdin  io.WriteCloser
 	stdout *bufio.Reader
 
-	mu      sync.Mutex
-	seq     atomic.Int64
-	pending map[int64]chan *DAPResponse
+	mu         sync.Mutex
+	seq        atomic.Int64
+	pending    map[int64]chan *DAPResponse
+	cancelFunc context.CancelFunc
 
 	events chan *DAPEvent
 	done   chan struct{}
@@ -189,6 +190,11 @@ func NewClient(cmd *exec.Cmd) (*Client, error) {
 
 // Start begins the read loop that processes incoming DAP messages.
 func (c *Client) Start(ctx context.Context) {
+	// Create a cancellable context so Close() can signal the read loop.
+	ctx, cancel := context.WithCancel(ctx)
+	c.mu.Lock()
+	c.cancelFunc = cancel
+	c.mu.Unlock()
 	go c.readLoop(ctx)
 }
 
@@ -582,6 +588,14 @@ func (c *Client) Disconnect(ctx context.Context) error {
 // Close terminates the adapter subprocess and releases resources.
 func (c *Client) Close() error {
 	var lastErr error
+
+	// Cancel the read loop context (signals ctx.Done() in readLoop).
+	c.mu.Lock()
+	if c.cancelFunc != nil {
+		c.cancelFunc()
+		c.cancelFunc = nil
+	}
+	c.mu.Unlock()
 
 	// Try to close stdin to signal the adapter.
 	if err := c.stdin.Close(); err != nil {

@@ -118,6 +118,12 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 		defer agentUnsub()
 	}
 
+	// Subscribe to synthesized agent progress events (emitted on agent.progress.synthesized)
+	synthSub, synthUnsub := s.services.Bus.Subscribe(subID+"-synth", "agent.progress.synthesized")
+	if synthSub != nil {
+		defer synthUnsub()
+	}
+
 	// Subscribe to tool completion events
 	completeSub, completeUnsub := s.services.Bus.Subscribe(subID+"-complete", "tool.execution.complete")
 	if completeSub != nil {
@@ -125,9 +131,12 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract channels for select, guarding against nil subscriptions
-	var agentCh, completeCh <-chan *models.BusMessage
+	var agentCh, synthCh, completeCh <-chan *models.BusMessage
 	if agentSub != nil {
 		agentCh = agentSub.Channel
+	}
+	if synthSub != nil {
+		synthCh = synthSub.Channel
 	}
 	if completeSub != nil {
 		completeCh = completeSub.Channel
@@ -167,6 +176,19 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// Forward agent progress as SSE
+			var payload map[string]any
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				continue
+			}
+			if err := sse.SendEvent("agent_progress", payload); err != nil {
+				return
+			}
+
+		case msg, ok := <-synthCh:
+			if !ok {
+				return
+			}
+			// Forward synthesized agent progress as SSE
 			var payload map[string]any
 			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 				continue
@@ -310,7 +332,7 @@ func (s *Server) handleQueueList(w http.ResponseWriter, r *http.Request) {
 	state := r.URL.Query().Get("state")
 	limit, err := parseIntParam(r, "limit", 50, 1, 1000)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -377,7 +399,7 @@ func (s *Server) handleTaskList(w http.ResponseWriter, r *http.Request) {
 
 	limit, err := parseIntParam(r, "limit", 50, 1, 1000)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -501,7 +523,7 @@ func (s *Server) handleSessionList(w http.ResponseWriter, r *http.Request) {
 
 	limit, err := parseIntParam(r, "limit", 50, 1, 1000)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -584,7 +606,7 @@ func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
 
 	limit, err := parseIntParam(r, "limit", 50, 1, 1000)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -633,7 +655,7 @@ func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
 
 	limit, err := parseIntParam(r, "limit", 50, 1, 1000)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -1942,16 +1964,7 @@ func (s *Server) handleChatQueueStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Only allow GET
-	if r.Method != http.MethodGet {
-		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-
 	conversationID := r.PathValue("id")
-	if conversationID == "" {
-		// Fallback for routers that don't support PathValue
-		conversationID = strings.TrimPrefix(r.URL.Path, "/api/v1/chat/queue/")
-	}
 	if conversationID == "" {
 		s.writeError(w, http.StatusBadRequest, "conversation_id is required")
 		return
@@ -2298,7 +2311,7 @@ func (s *Server) handleTerminalHistory(w http.ResponseWriter, r *http.Request) {
 
 	limit, err := parseIntParam(r, "limit", 50, 1, 1000)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -2589,7 +2602,7 @@ func (s *Server) handlePlanList(w http.ResponseWriter, r *http.Request) {
 	projectID := r.URL.Query().Get("project_id")
 	limit, err := parseIntParam(r, "limit", 50, 1, 1000)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -2955,7 +2968,7 @@ func (s *Server) handleTemplatesList(w http.ResponseWriter, r *http.Request) {
 
 	limit, err := parseIntParam(r, "limit", 50, 1, 1000)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	result, err := s.services.Templates.List(r.Context(), services.TemplatesListRequest{Limit: limit})

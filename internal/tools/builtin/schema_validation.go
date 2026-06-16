@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -144,42 +145,75 @@ func validateEnum(value any, enumSpec any) error {
 }
 
 // ExtractJSONFromText attempts to extract a JSON object from text.
-// Looks for ```json ... ``` blocks, then tries raw JSON parse.
+// It tries multiple strategies in order, continuing to the next if a
+// strategy finds candidate content that fails to parse:
+//  1. ```json ... ``` fenced code blocks
+//  2. Any ``` ... ``` fenced code block (with optional language tag)
+//  3. The entire text as raw JSON
+//
+// A strategy only "wins" if it both finds candidate content AND the
+// content parses as valid JSON.
 func ExtractJSONFromText(text string) (map[string]any, error) {
-	// Try to extract from a ```json code block
-	if idx := strings.Index(text, "```json"); idx != -1 {
+	var parseErrs []error
+
+	// Strategy 1: extract from ```json code blocks.
+	// Try every occurrence, not just the first.
+	searchFrom := 0
+	for {
+		idx := strings.Index(text[searchFrom:], "```json")
+		if idx == -1 {
+			break
+		}
+		idx += searchFrom
 		start := idx + len("```json")
 		end := strings.Index(text[start:], "```")
-		if end != -1 {
-			jsonStr := strings.TrimSpace(text[start : start+end])
-			var result map[string]any
-			if err := json.Unmarshal([]byte(jsonStr), &result); err == nil {
-				return result, nil
-			}
+		if end == -1 {
+			searchFrom = start
+			continue
 		}
+		jsonStr := strings.TrimSpace(text[start : start+end])
+		searchFrom = start + end + 3
+		var result map[string]any
+		if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+			parseErrs = append(parseErrs, fmt.Errorf("```json block: %w", err))
+			continue
+		}
+		return result, nil
 	}
 
-	// Try to find any ```-delimited block (without json tag)
-	if idx := strings.Index(text, "```"); idx != -1 {
+	// Strategy 2: extract from any ```-delimited block.
+	searchFrom = 0
+	for {
+		idx := strings.Index(text[searchFrom:], "```")
+		if idx == -1 {
+			break
+		}
+		idx += searchFrom
 		start := idx + len("```")
-		// Skip optional language tag on same line
+		// Skip optional language tag on the same line.
 		if nl := strings.Index(text[start:], "\n"); nl != -1 {
 			start += nl + 1
 		}
 		end := strings.Index(text[start:], "```")
-		if end != -1 {
-			jsonStr := strings.TrimSpace(text[start : start+end])
-			var result map[string]any
-			if err := json.Unmarshal([]byte(jsonStr), &result); err == nil {
-				return result, nil
-			}
+		if end == -1 {
+			searchFrom = start
+			continue
 		}
+		jsonStr := strings.TrimSpace(text[start : start+end])
+		searchFrom = start + end + 3
+		var result map[string]any
+		if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+			parseErrs = append(parseErrs, fmt.Errorf("``` block: %w", err))
+			continue
+		}
+		return result, nil
 	}
 
-	// Try to parse the entire text as JSON
+	// Strategy 3: parse the entire text as JSON.
 	var result map[string]any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(text)), &result); err != nil {
-		return nil, fmt.Errorf("no valid JSON found in text: %w", err)
+		parseErrs = append(parseErrs, fmt.Errorf("raw text: %w", err))
+		return nil, fmt.Errorf("no valid JSON found in text (tried %d strategies): %w", len(parseErrs), errors.Join(parseErrs...))
 	}
 
 	return result, nil

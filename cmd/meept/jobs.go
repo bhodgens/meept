@@ -34,7 +34,7 @@ func runJobs(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(resp.Jobs) == 0 {
-		fmt.Println("No scheduled jobs")
+		fmt.Println("no scheduled jobs")
 		return nil
 	}
 

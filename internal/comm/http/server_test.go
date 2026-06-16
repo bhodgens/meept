@@ -449,14 +449,17 @@ func TestMiddleware_CORS(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
+	// With a localhost Origin, the header should be echoed back.
 	req := httptest.NewRequest(http.MethodGet, "/test", http.NoBody)
+	req.Header.Set("Origin", "http://localhost:3000")
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
 
 	resp := w.Result()
-	if resp.Header.Get("Access-Control-Allow-Origin") != "*" {
-		t.Error("CORS header not set")
+	origin := resp.Header.Get("Access-Control-Allow-Origin")
+	if origin != "http://localhost:3000" {
+		t.Errorf("expected Access-Control-Allow-Origin to echo localhost origin, got %q", origin)
 	}
 }
 
@@ -830,6 +833,7 @@ func TestHandleChatQueueStatus_Active(t *testing.T) {
 	server := NewServer(ServerConfig{}, nil, nil, nil, svcReg, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/chat/queue/conv-789", http.NoBody)
+	req.SetPathValue("id", "conv-789")
 	w := httptest.NewRecorder()
 
 	server.handleChatQueueStatus(w, req)
@@ -860,6 +864,7 @@ func TestHandleChatQueueStatus_NoService(t *testing.T) {
 	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/chat/queue/conv-789", http.NoBody)
+	req.SetPathValue("id", "conv-789")
 	w := httptest.NewRecorder()
 
 	server.handleChatQueueStatus(w, req)

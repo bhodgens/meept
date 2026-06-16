@@ -156,7 +156,7 @@ func TestGossipTransport_PeerGossipAddr(t *testing.T) {
 
 func TestGossipTransport_SentTracking(t *testing.T) {
 	transport := &GossipTransport{
-		sentEvents: make(map[string]map[string]bool),
+		sentEvents: make(map[string]map[string]time.Time),
 	}
 
 	// Initially not sent

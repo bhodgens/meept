@@ -127,9 +127,10 @@ func (m *Manager) Launch(ctx context.Context, adapterCfg *AdapterConfig, program
 	m.mu.Unlock()
 
 	// Start the client read loop using a background context so it
-	// persists beyond the caller's request context.
-	bgCtx := context.Background()
-	client.Start(bgCtx)
+	// persists beyond the caller's request context. The client's Close()
+	// method kills the subprocess (unblocking reads) and cancels its
+	// internal context.
+	client.Start(context.Background())
 
 	// Forward output events to the ring buffer.
 	go m.drainEvents(session)
@@ -233,9 +234,10 @@ func (m *Manager) Attach(ctx context.Context, adapterCfg *AdapterConfig, pid int
 	m.mu.Unlock()
 
 	// Start the client read loop using a background context so it
-	// persists beyond the caller's request context.
-	bgCtx := context.Background()
-	client.Start(bgCtx)
+	// persists beyond the caller's request context. The client's Close()
+	// method kills the subprocess (unblocking reads) and cancels its
+	// internal context.
+	client.Start(context.Background())
 
 	// Forward output events to the ring buffer.
 	go m.drainEvents(session)

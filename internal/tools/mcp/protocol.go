@@ -77,6 +77,12 @@ func (e *RPCError) Error() string {
 // MCP Protocol Version
 const ProtocolVersion = "2024-11-05"
 
+// ClientVersion is the MCP client implementation version.
+// NOTE: keep in sync with internal/mcp.Version (server side).
+// They cannot share a constant due to an import cycle
+// (internal/mcp -> internal/transport -> internal/tui -> internal/config -> internal/tools).
+const ClientVersion = "0.2.0"
+
 // InitializeParams are the parameters for the initialize request.
 type InitializeParams struct {
 	ProtocolVersion string             `json:"protocolVersion"`

@@ -295,12 +295,12 @@ func runAnalyticsModels(cmd *cobra.Command, args []string) error {
 		if len(modelID) > 30 {
 			modelID = modelID[:27] + "..."
 		}
-		avgCost := r.AvgCost
-		if avgCost == 0 {
-			avgCost = -1 // Indicate no data
+		avgCostStr := "n/a"
+		if r.AvgCost != 0 {
+			avgCostStr = fmt.Sprintf("%.2f", r.AvgCost)
 		}
-		fmt.Fprintf(w, "%-30s\t%d\t%.1f%%\t%.2f\t%.0f\n",
-			modelID, r.Tasks, r.SuccessRate, avgCost, r.AvgDuration)
+		fmt.Fprintf(w, "%-30s\t%d\t%.1f%%\t%s\t%.0f\n",
+			modelID, r.Tasks, r.SuccessRate, avgCostStr, r.AvgDuration)
 	}
 
 	return nil

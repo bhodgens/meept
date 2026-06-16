@@ -6,6 +6,7 @@
 import Foundation
 import UserNotifications
 import Combine
+import os.log
 
 class NotificationManager: NSObject, ObservableObject {
     static let shared = NotificationManager()
@@ -16,6 +17,11 @@ class NotificationManager: NSObject, ObservableObject {
     // Cached once so WebSocket setup and per-event filtering read the same
     // snapshot instead of re-parsing menubar.json5 on every notification.
     private let configService: MenubarConfigService
+    private let logger = Logger(subsystem: "com.caimlas.meept.menubar", category: "NotificationManager")
+
+    deinit {
+        websocket?.disconnect()
+    }
 
     @Published var notifications: [NotificationEvent] = []
     @Published var isEnabled: Bool = true
@@ -45,7 +51,7 @@ class NotificationManager: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 self?.isEnabled = granted
                 if let error = error {
-                    print("Notification authorization error: \(error)")
+                    self?.logger.error("notification authorization error: \(error.localizedDescription)")
                 }
             }
         }
@@ -66,16 +72,30 @@ class NotificationManager: NSObject, ObservableObject {
             self?.handleWebSocketMessage(data)
         }
 
-        websocket?.onDisconnect = { error in
-            print("Notification WebSocket disconnected: \(error?.localizedDescription ?? "unknown")")
+        websocket?.onDisconnect = { [weak self] error in
+            self?.logger.info("notification websocket disconnected: \(error?.localizedDescription ?? "unknown")")
             // Reconnection is handled by WebSocketManager
         }
 
-        websocket?.onConnect = {
-            print("Notification WebSocket connected")
+        websocket?.onConnect = { [weak self] in
+            self?.logger.info("notification websocket connected")
         }
 
         websocket?.connect()
+    }
+
+    // MARK: - Reconnect
+
+    /// Reconnects the notification WebSocket after a settings change.
+    func reconnect() {
+        websocket?.disconnect()
+        setupWebSocket()
+    }
+
+    /// Disconnects the notification WebSocket.
+    func disconnect() {
+        websocket?.disconnect()
+        websocket = nil
     }
 
     // MARK: - WebSocket Message Handling
@@ -88,7 +108,7 @@ class NotificationManager: NSObject, ObservableObject {
                 self?.showLocalNotification(event)
             }
         } catch {
-            print("Failed to decode notification event: \(error)")
+            logger.error("failed to decode notification event: \(error.localizedDescription)")
         }
     }
 
@@ -144,9 +164,9 @@ class NotificationManager: NSObject, ObservableObject {
             trigger: nil  // Deliver immediately
         )
 
-        notificationCenter.add(request) { error in
+        notificationCenter.add(request) { [weak self] error in
             if let error = error {
-                print("Failed to show notification: \(error)")
+                self?.logger.error("failed to show notification: \(error.localizedDescription)")
             }
         }
     }
@@ -220,7 +240,7 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
 
         // Handle notification tap - could open relevant view
         if let taskID = userInfo["taskID"] as? String, !taskID.isEmpty {
-            print("Notification tapped for task: \(taskID)")
+            logger.info("notification tapped for task: \(taskID)")
             // Post notification for other parts of the app to handle
             NotificationCenter.default.post(
                 name: .notificationTapped,

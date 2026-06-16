@@ -90,16 +90,17 @@ func (h *AgentHandler) getOrCreateSession(chatID int64) string {
 	h.mu.RUnlock()
 
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
 	// Double-check after acquiring write lock
 	if sid, ok := h.sessions[chatID]; ok {
+		h.mu.Unlock()
 		return sid
 	}
 
 	// Create a new session via the store
 	sess, err := h.sessionMgr.Create(fmt.Sprintf("telegram-%d", chatID))
 	if err != nil {
+		h.mu.Unlock()
 		h.logger.Error("failed to create session", "error", err, "chat_id", chatID)
 		return ""
 	}
@@ -111,13 +112,16 @@ func (h *AgentHandler) getOrCreateSession(chatID int64) string {
 		"conversation_id", sess.ConversationID,
 	)
 
-	// Snapshot sessions under the lock, then persist without holding it.
+	// Snapshot sessions under the lock, then release before persisting
+	// (CLAUDE.md: never hold mutex across disk I/O). Persist synchronously
+	// rather than in a goroutine so the write completes before the caller
+	// (or test cleanup) tears down the sessions directory.
 	snap := h.snapshotSessions()
-	go func() {
-		if saveErr := h.persistSessions(snap); saveErr != nil {
-			h.logger.Warn("failed to persist telegram sessions", "error", saveErr)
-		}
-	}()
+	h.mu.Unlock()
+
+	if saveErr := h.persistSessions(snap); saveErr != nil {
+		h.logger.Warn("failed to persist telegram sessions", "error", saveErr)
+	}
 
 	return sess.ConversationID
 }
@@ -127,6 +131,40 @@ func (h *AgentHandler) GetSessionCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.sessions)
+}
+
+// writeAtomic writes data to path atomically: it writes to a temp file in
+// the same directory and then renames it over the target. Readers either
+// see the previous complete file or the new complete file, never a
+// truncated/partial write.
+func writeAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := f.Name()
+	// Best-effort cleanup if any step below fails.
+	defer func() {
+		if err != nil {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err = f.Write(data); err != nil {
+		f.Close()
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err = f.Chmod(perm); err != nil {
+		f.Close()
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+	if err = f.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
+	if err = os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename temp to final: %w", err)
+	}
+	return nil
 }
 
 // loadSessions loads chat-to-session mappings from disk.
@@ -178,8 +216,9 @@ func (h *AgentHandler) saveSessions() error {
 
 	path := filepath.Join(h.sessionsDir, "telegram_sessions.json")
 	// Restrict to owner read/write: the file contains user-identifying data
-	// (chat IDs mapped to sessions).
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	// (chat IDs mapped to sessions). Use atomic write (temp + rename) so
+	// concurrent readers never observe a truncated file.
+	if err := writeAtomic(path, data, 0o600); err != nil {
 		return fmt.Errorf("write sessions file: %w", err)
 	}
 
@@ -216,8 +255,9 @@ func (h *AgentHandler) persistSessions(sessions map[int64]string) error {
 
 	path := filepath.Join(h.sessionsDir, "telegram_sessions.json")
 	// Restrict to owner read/write: the file contains user-identifying data
-	// (chat IDs mapped to sessions).
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	// (chat IDs mapped to sessions). Use atomic write (temp + rename) so
+	// concurrent readers never observe a truncated file.
+	if err := writeAtomic(path, data, 0o600); err != nil {
 		return fmt.Errorf("write sessions file: %w", err)
 	}
 

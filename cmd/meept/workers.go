@@ -50,7 +50,7 @@ func runWorkersStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get worker stats: %w", err)
 	}
 
-	fmt.Println("Worker Pool Status")
+	fmt.Println("worker pool status")
 	fmt.Println("==================")
 	fmt.Println()
 	fmt.Printf("Total Workers:  %d\n", stats.TotalWorkers)
@@ -78,7 +78,7 @@ func newWorkersListCmd() *cobra.Command {
 			}
 
 			if len(resp.Workers) == 0 {
-				fmt.Println("No workers running")
+				fmt.Println("no workers running")
 				return nil
 			}
 
@@ -146,7 +146,7 @@ func newWorkersScaleCmd() *cobra.Command {
 				return fmt.Errorf("failed to scale worker pool: %w", err)
 			}
 
-			fmt.Printf("Worker pool scaling to %d workers\n", targetCount)
+			fmt.Printf("worker pool scaling to %d workers\n", targetCount)
 			return nil
 		},
 	}

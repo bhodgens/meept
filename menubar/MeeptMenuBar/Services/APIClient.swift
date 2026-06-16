@@ -32,6 +32,17 @@ class APIClient {
         )
     }
 
+    // MARK: - Health Check (no auth required)
+
+    func checkHealth() async throws -> Bool {
+        let request = try makeRequest(path: "/health", method: "GET", requiresAuth: false)
+        let (_, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        return (200..<300).contains(httpResponse.statusCode)
+    }
+
     // MARK: - Daemon Status (async/await)
 
     func getDaemonStatus() async throws -> DaemonStatus {
@@ -78,14 +89,16 @@ class APIClient {
 
     // MARK: - Private helpers
 
-    private func makeRequest(path: String, method: String) throws -> URLRequest {
+    private func makeRequest(path: String, method: String, requiresAuth: Bool = true) throws -> URLRequest {
         let url = baseURL.appendingPathComponent(path)
         var request = URLRequest(url: url)
         request.httpMethod = method
-        guard let token = apiToken, !token.isEmpty else {
-            throw APIError.noAPITokenConfigured
+        if requiresAuth {
+            guard let token = apiToken, !token.isEmpty else {
+                throw APIError.noAPITokenConfigured
+            }
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         return request
     }
 

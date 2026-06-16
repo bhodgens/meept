@@ -136,11 +136,18 @@ func (m *Manager) ListSessions() []string {
 
 // Close shuts down all sessions.
 func (m *Manager) Close() error {
+	// Snapshot session IDs under the lock, then release before doing
+	// per-session I/O (sess.Close) to avoid holding the manager write lock
+	// during blocking operations.
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	ids := make([]string, 0, len(m.sessions))
 	for id := range m.sessions {
-		m.destroySessionLocked(id)
+		ids = append(ids, id)
+	}
+	m.mu.Unlock()
+
+	for _, id := range ids {
+		_ = m.DestroySession(id)
 	}
 
 	return nil

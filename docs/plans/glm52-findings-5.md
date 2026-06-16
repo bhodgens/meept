@@ -1521,51 +1521,157 @@ re-reading the source.
 #### Low (2/12 fixed)
 - S2-22 `ast_resolve` file mode `0` → `0o644`
 
-### Issues Deferred
+### Issues Deferred (Follow-up Round)
 
-The deferred items below are not regressions; they are real findings
-that need more than a one-line fix or have acceptable risk trade-offs.
-Each is documented in this file with its reason for deferral.
+The initially-deferred items below were resolved in a follow-up
+`oneshot-yeet` pass that dispatched 6 parallel fixer subagents (one
+per cluster). Each item below is annotated with its resolution.
+The only items still marked DEFERRED after the follow-up are S4-10
+(requires MCP-spec conformance test, out of scope), S2-7 (needs
+per-step state map refactor — punted to round 6), and the round-4
+mutexio analyzer enhancement.
 
-**S1 cluster:** S1-5 (live pointer from `GetSession`), S1-7 (discarded
-`classifyIntent` err — non-nil-safe today), S1-8 (escalation wallclock
-ordering), S1-9 (live pointer from `GetIdleSessions`), S1-10 (live
-pointer from `TeamOrchestrator.Status`), S1-11 (`generateMessageID`
-fallback).
+**S1 cluster — all 6 resolved:**
+- **S1-5** ✅ `GetSession` now returns a deep copy via `cloneTrackerSessionState`
+  (`internal/agent/session_tracker.go`).
+- **S1-7** ✅ Both `classifyIntent` call sites in `dispatcher.go` now log
+  a Warn on non-nil error.
+- **S1-8** ✅ Added `Seq uint64` field to `EscalationLevel` and
+  `seq atomic.Uint64` to `EscalationManager`; incremented under lock.
+- **S1-9** ✅ `GetIdleSessions` returns deep copies (same helper as S1-5).
+- **S1-10** ✅ Defined `TeamSessionStateSnapshot`; `Status` copies
+  `MemberResults` map and `Roster` slice under RLock.
+- **S1-11** ✅ `generateMessageID` fallback calls `id.Generate("msg")`;
+  primary `randBytes` bumped 4→16.
 
-**S2 cluster:** S2-6 (plan scanner 64KB limit), S2-7 (plan writer
-heuristic), S2-9 (graph ID packing), S2-10 (applier wrong-match),
-S2-11 (RLock thrash), S2-12 (`ApplyEdits` O(n×e)), S2-13 (dead code),
-S2-14 (regex recompile), S2-15 (ConfirmPlan gating), S2-16 (no retry),
-S2-17 (StopServer order), S2-18 (duration parsing), S2-19 (plan IDs),
-S2-20 (silent EOF clamp), S2-21 (swallowed linker errors).
+**S2 cluster — 14 of 15 resolved (S2-7 still deferred):**
+- **S2-6** ✅ Plan parser scanner buffer raised to 1MB.
+- **S2-7** ⏩ Still deferred — requires per-step state map refactor.
+- **S2-9** ✅ `weightedLine` now uses an `atomic.Int64` edge counter
+  instead of `from.ID()*1e9 + to.ID()` packing. Regression test added.
+- **S2-10** ✅ Applier returns an error on ambiguous (multi-occurrence)
+  snippets instead of patching the first textual match.
+- **S2-11** ✅ Single RLock wraps both personalization loops.
+- **S2-12** ✅ `ProposedEdit` now carries `StartByte`/`EndByte`;
+  `ApplyEdits` uses them directly when populated.
+- **S2-13** ✅ Dead Warn block filled with a real `slog.Warn`.
+- **S2-14** ✅ Regex hoisted to package-level `var nameSplitter`.
+- **S2-15** ✅ `ConfirmPlan` now accepts `completed`, `failed`, `cancelled`.
+- **S2-16** ✅ Plan handler retries transient SQLite busy errors 3×
+  (50/100/200ms backoff).
+- **S2-17** ✅ `delete(m.servers, name)` moved after Close calls.
+- **S2-18** ✅ Replaced hand-rolled `parseCompositeDuration` with
+  `time.ParseDuration` plus a `d`→`h` preprocessor.
+- **S2-19** ✅ All three ID generators call `id.Generate`.
+- **S2-20** ✅ `positionToByte` returns `(int, error)`; `ApplyEdits`
+  skips with Warn on out-of-range.
+- **S2-21** ✅ `GoLinter.TypeCheck` surfaces raw stderr as a fallback
+  `LinterResult` when no errors match the parse regex.
 
-**S4 cluster:** S4-7 (predictable IDs across many tools — 7 sites in
-the original finding; the agent-package sites were fixed but the
-tools-package sites remain: `platform.go:373` `generateDelegateID`,
-`tool_schedule_create.go:119`, `tool_cron_create.go:144`,
-`file_edit.go:381`, `review_tools.go:128`, `ast_edit.go:192`,
-`lsp_rename.go:198`). S4-9 (MCP `isError` flag), S4-10 (`AskTool`
-`TerminateHint`), S4-11 (SSE parser), S4-12 (MCP Client data race),
-S4-13 (bubble sort), S4-14 (`rawToMap` error swallow), S4-15 (version
-mismatch), S4-16 (stderr drain goroutine), S4-17 (orderedMap JSON
-non-determinism), S4-18 (`ExtractJSONFromText` first-match bias).
+**S4 cluster — 9 of 10 resolved (S4-10 still deferred):**
+- **S4-7** ✅ All 7 tool-package sites converted to `id.Generate(...)`
+  (`platform.go`, `tool_schedule_create.go`, `tool_cron_create.go`,
+  `file_edit.go`, `review_tools.go`, `ast_edit.go`, `lsp_rename.go`).
+- **S4-9** ✅ `handleToolsCall` sets `"isError": true` on tool error.
+- **S4-10** ⏩ Still deferred — needs MCP-spec conformance test for
+  `AskTool` `TerminateHint`.
+- **S4-11** ✅ SSE parser: 10MB scanner buffer, both `data: ` and
+  `data:` prefixes, surfaces `bufio.ErrTooLong`.
+- **S4-12** ✅ `Client.Connect` snapshots `len(c.tools)` under RLock.
+- **S4-13** ✅ Bubble sort replaced with `sort.Ints`.
+- **S4-14** ✅ `rawToMap` logs `slog.Debug` on unmarshal failure.
+- **S4-15** ✅ `const Version = "0.2.0"` in `internal/mcp`; client
+  references `ClientVersion` with a cross-reference comment.
+- **S4-16** ✅ `StdioTransport.Close` signals `stderrDone` (via
+  `sync.Once`); drain goroutine exits cleanly.
+- **S4-17** ✅ `orderedMap` now a struct with `[]string` key slice +
+  backing map; `MarshalJSON` preserves insertion order.
+- **S4-18** ✅ `ExtractJSONFromText` tries each strategy in turn and
+  only stops when one both finds and parses content.
 
-**S5 / S6 / S7 / S8 clusters:** see main body — most Medium/Low items
-in those sections are deferred.
+**S5 cluster — all 11 resolved:**
+- **S5-2** ✅ CORS `*` replaced with `isLocalOrigin` echo in both branches.
+- **S5-3** ✅ NotificationHandler token-extraction dead code deleted;
+  relies on middleware.
+- **S5-6** ✅ `BusService.Stats` uses presence checks.
+- **S5-8** ✅ `handleChatStream` subscribes to both `agent.progress`
+  and `agent.progress.synthesized`.
+- **S5-9** ✅ Dead method check + TrimPrefix fallback removed from
+  `handleChatQueueStatus`.
+- **S5-10** ✅ All `http.Error` in `api_handlers.go` replaced with
+  `s.writeError`.
+- **S5-11** ✅ `handleReload` returns the error to dispatch.
+- **S5-12** ✅ `acceptLoop` returns on `net.ErrClosed` and sleeps 50ms
+  on transient errors.
+- **S5-13** ✅ `handleBusUnsubscribe` deletes synchronously before
+  returning.
+- **S5-14** ✅ MCP tool handlers thread `r.Context()` through
+  `processMCPRequest`.
+- **S5-15** ✅ Already migrated to `id.Generate` in a prior commit
+  (verified; no change needed).
 
-### Verification
+**S6 cluster — all 9 resolved:**
+- **S6-7** ✅ `Claim` slow path translates `ErrJobAlreadyClaimed` →
+  `ErrNoJobAvailable`.
+- **S6-8** ✅ `CheckNodeReachability` takes `ctx` and uses
+  `QueryRowContext`.
+- **S6-9** ✅ `pty.Manager.Close` snapshots IDs under lock, releases,
+  then destroys each session.
+- **S6-10** ✅ `debug.Client` stores a `cancelFunc`; `Close` cancels
+  before killing the subprocess, unblocking `readLoop`.
+- **S6-11** ✅ Already migrated to `id.Generate` in a prior commit
+  (verified; no change needed).
+- **S6-13** ✅ `sentEvents` upgraded to `map[string]time.Time`; pruning
+  evicts 500 oldest (LRU).
+- **S6-14** ✅ `Pool.Scale` uses RLock for count read; documented
+  collect-under-lock pattern.
+- **S6-15** ✅ Empty-body `if` deleted from `parseGDBVariable`.
+- **S6-16** ✅ `scanClusterMember` validates
+  `len(signingPubRaw) == ed25519.PublicKeySize` (or 0).
+
+**S7 cluster — all 15 resolved:**
+- **S7-2** ✅ `saveConfig` parameter renamed to `filePath`.
+- **S7-3** ✅ `analytics.go` prints `"n/a"` when `AvgCost == 0`.
+- **S7-4** ✅ `runTUI` returns an error on `--transport=http`.
+- **S7-5** ✅ Deleted unwired `startAtLogin` / `showInMenuBar` per
+  CLAUDE.md "no stub code" rule.
+- **S7-6/7/8/19** ✅ Comprehensive lowercase sweep across `cmd/meept/*.go`
+  and `menubar/MeeptMenuBar/**/*.swift` (status, memory, jobs, workers,
+  cluster_cmd, cache, NotificationCenterMenuView, SettingsWindow, Presets,
+  DaemonController).
+- **S7-9** ✅ `DaemonStatusViewModel` split into `isRefreshingStatus`
+  and `isControllingDaemon`.
+- **S7-10** ✅ `HistoricalReportView` renders `historicalData` in a `List`;
+  `MetricPoint` conforms to `Identifiable`.
+- **S7-13** ✅ `pluralize` renamed to `pluralizeEntry`.
+- **S7-14** ✅ `NotificationManager` has `deinit`, `disconnect`,
+  `reconnect`; `print()` → `Logger`.
+- **S7-15** ✅ `WebSocketManager.connect` guards `urlSession` before
+  flag flip; `print()` → `Logger`.
+- **S7-16** ✅ `MenubarConfigService.loadConfig` uses `Logger.error`.
+- **S7-17** ✅ `APIClient.makeRequest(requiresAuth: true)`; `/health`
+  passes `false`.
+- **S7-18** ✅ Asymmetry documented in `cmd/meept/main.go`.
+- **S7-20** ✅ `LoadClientConfig` warns on missing/invalid fields and
+  applies explicit defaults via `checkClientConfigDefaults`.
+
+**Test flakes — both resolved:**
+- `TestAgentHandler_SessionPersistence` ✅ `saveSessions` and
+  `persistSessions` now use a `writeAtomic` (temp + rename) helper;
+  background persistence in `getOrCreateSession` made synchronous.
+- `TestApp_SessionsKeyNavigatesToView` ✅ `Modal.HandleKey` does
+  case-insensitive matching for single-character keys (preserves exact
+  match for multi-char bindings like `ctrl+s`).
+
+### Verification (Follow-up Round)
 
 - `go build ./...` — passes clean
 - `go vet ./...` — passes clean
-- Tests: `go test -count=1 -timeout 180s ./...` passes for all packages
-  except two pre-existing flakes unrelated to this round:
-  - `internal/comm/telegram` `TestAgentHandler_SessionPersistence`:
-    passes in isolation; flakes only under full-suite concurrency load
-  - `internal/tui` `TestApp_SessionsKeyNavigatesToView`: fails on
-    parent commit `cd0f205d` before any round-5 changes (test sends
-    `S` shift+s, but `app.go:658` only handles `ctrl+s` for the
-    sessions-tab navigation — pre-existing test/code mismatch)
+- `go test -count=1 -timeout 300s ./...` — **all packages pass**, zero
+  failures, zero flakes (including the two pre-existing flakes, now fixed)
+- Telegram persistence verified with `-count=10`; TUI sessions-key test
+  verified with `-count=10`
 - MCP transport tests updated to call `transport.SetAllowPrivateRanges(true)`
-  so the new SSRF dialer accepts `httptest.NewServer` (127.0.0.1)
+  so the SSRF dialer accepts `httptest.NewServer` (127.0.0.1)
+- Swift: `swift build` in `menubar/` completes with 0 errors / 0 warnings
 

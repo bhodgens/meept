@@ -1106,7 +1106,14 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 					}
 				}
 			} else {
-				w.Header().Set("Access-Control-Allow-Origin", "*")
+				// Non-authenticated mode: still never emit wildcard. Echo
+				// localhost origins only to prevent cross-origin access.
+				if origin == "" || isLocalOrigin(origin) {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					if origin != "" {
+						w.Header().Set("Access-Control-Allow-Credentials", "true")
+					}
+				}
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
@@ -2043,7 +2050,7 @@ func (s *Server) processMCPRequest(ctx context.Context, req *mcp.JSONRPCRequest)
 	case "tools/list":
 		return s.handleMCPToolsList(req)
 	case "tools/call":
-		return s.handleMCPToolsCall(req)
+		return s.handleMCPToolsCall(ctx, req)
 	default:
 		return &mcp.JSONRPCResponse{
 			JSONRPC: "2.0",
@@ -2087,7 +2094,7 @@ func (s *Server) handleMCPToolsList(req *mcp.JSONRPCRequest) *mcp.JSONRPCRespons
 }
 
 // handleMCPToolsCall handles MCP tools/call request.
-func (s *Server) handleMCPToolsCall(req *mcp.JSONRPCRequest) *mcp.JSONRPCResponse {
+func (s *Server) handleMCPToolsCall(ctx context.Context, req *mcp.JSONRPCRequest) *mcp.JSONRPCResponse {
 	var params struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
@@ -2136,11 +2143,11 @@ func (s *Server) handleMCPToolsCall(req *mcp.JSONRPCRequest) *mcp.JSONRPCRespons
 	case "meept_sessions":
 		result, err = s.mcpToolSessions(params.Arguments)
 	case "meept_send":
-		result, err = s.mcpToolSend(params.Arguments)
+		result, err = s.mcpToolSend(ctx, params.Arguments)
 	case "meept_events":
 		result, err = s.mcpToolEvents(params.Arguments)
 	case "meept_status":
-		result, err = s.mcpToolStatus(params.Arguments)
+		result, err = s.mcpToolStatus(ctx)
 	case "meept_session_history":
 		result, err = s.mcpToolSessionHistory(params.Arguments)
 	}
@@ -2325,7 +2332,7 @@ func (s *Server) mcpToolSessions(args map[string]any) (any, error) {
 }
 
 // mcpToolSend handles MCP meept_send tool.
-func (s *Server) mcpToolSend(args map[string]any) (any, error) {
+func (s *Server) mcpToolSend(ctx context.Context, args map[string]any) (any, error) {
 	sessionID, _ := args["session_id"].(string)
 	message, _ := args["message"].(string)
 	if sessionID == "" || message == "" {
@@ -2336,7 +2343,7 @@ func (s *Server) mcpToolSend(args map[string]any) (any, error) {
 		return nil, fmt.Errorf("bus service not available")
 	}
 
-	err := s.mcpServices.Bus.Publish(context.Background(), services.PublishRequest{
+	err := s.mcpServices.Bus.Publish(ctx, services.PublishRequest{
 		Topic:  "chat.request",
 		Type:   "request",
 		Source: "mcp-http",
@@ -2399,11 +2406,11 @@ func (s *Server) mcpToolEvents(args map[string]any) (any, error) {
 }
 
 // mcpToolStatus handles MCP meept_status tool.
-func (s *Server) mcpToolStatus(args map[string]any) (any, error) {
+func (s *Server) mcpToolStatus(ctx context.Context) (any, error) {
 	if s.mcpServices.Daemon == nil {
 		return nil, fmt.Errorf("daemon service not available")
 	}
-	return s.mcpServices.Daemon.Status(context.Background())
+	return s.mcpServices.Daemon.Status(ctx)
 }
 
 // mcpToolSessionHistory handles MCP meept_session_history tool.

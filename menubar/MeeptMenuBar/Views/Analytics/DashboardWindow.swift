@@ -68,9 +68,25 @@ struct HistoricalReportView: View {
                 ProgressView("loading...")
                     .padding()
             } else {
-                Text("select date range and click load")
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if metricsViewModel.historicalData.isEmpty {
+                    Text("select date range and click load")
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(metricsViewModel.historicalData) { point in
+                        HStack {
+                            Text(point.name)
+                                .font(.system(size: 12, weight: .medium))
+                            Spacer()
+                            Text(String(format: "%.2f", point.value))
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(.secondary)
+                            Text(point.timestamp)
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
             }
 
             Spacer()

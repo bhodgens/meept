@@ -211,7 +211,7 @@ func (t *ASTEditTool) Execute(ctx context.Context, args map[string]any) (any, er
 		diff := generateSimpleDiff(string(source), string(modifiedSource), filePath)
 
 		change := &builtin.PendingChange{
-			ID:        fmt.Sprintf("ast_%s_%d", filePath, now.UnixNano()),
+			ID:        id.Generate("ast-edit-"),
 			SessionID: sessionID,
 			FilePath:  filePath,
 			Original:  string(source),

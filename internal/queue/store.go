@@ -975,6 +975,11 @@ func (s *Store) scanClusterMember(row Scanner, m *ClusterMember) error {
 	m.NodeID = nodeID
 	m.NodeName = nodeName.String
 	m.WireGuardPub = wireguardPub
+	// Validate signing pubkey length: ed25519 public keys are exactly 32 bytes.
+	// An empty slice indicates missing/uninitialized data (despite NOT NULL schema).
+	if len(signingPubRaw) != 0 && len(signingPubRaw) != ed25519.PublicKeySize {
+		return fmt.Errorf("invalid signing pubkey length: %d", len(signingPubRaw))
+	}
 	m.SigningPub = signingPubRaw
 	m.Endpoint = endpoint
 	m.ClusterIP = clusterIP.String

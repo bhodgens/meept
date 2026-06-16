@@ -20,6 +20,10 @@ type Server struct {
 	logger  *slog.Logger
 }
 
+// Version is the MCP implementation version advertised by both the server
+// (internal/mcp) and client (internal/tools/mcp). Keep these in sync.
+const Version = "0.2.0"
+
 // NewServer creates a new MCP server reading from input and writing to output.
 // client may be nil for testing (tools will return errors).
 // A BufferedReader is created to persist the bufio.Reader across message loops.
@@ -90,7 +94,7 @@ func (s *Server) handleInitialize(req *JSONRPCRequest) *JSONRPCResponse {
 		},
 		"serverInfo": map[string]any{
 			"name":    "meept",
-			"version": "0.1.0",
+			"version": Version,
 		},
 	})
 	return &JSONRPCResponse{
@@ -174,7 +178,7 @@ func (s *Server) handleToolsCall(req *JSONRPCRequest) *JSONRPCResponse {
 		return &JSONRPCResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,
-			Result:  mustMarshal(map[string]any{"content": []map[string]any{{"type": "text", "text": fmt.Sprintf("error: %v", err)}}}),
+			Result:  mustMarshal(map[string]any{"content": []map[string]any{{"type": "text", "text": fmt.Sprintf("error: %v", err)}}, "isError": true}),
 		}
 	}
 

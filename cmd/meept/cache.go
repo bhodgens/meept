@@ -118,7 +118,7 @@ func runCacheStatus() error {
 		return fmt.Errorf("failed to get cache stats: %w", err)
 	}
 
-	fmt.Println("Token Cache Statistics")
+	fmt.Println("token cache statistics")
 	fmt.Println("====================")
 	fmt.Printf("L1 Cache:\n")
 	fmt.Printf("  Entries:     %d\n", resp.L1Entries)
@@ -149,7 +149,7 @@ func runCacheClear() error {
 		return fmt.Errorf("failed to clear cache: %w", err)
 	}
 
-	fmt.Println("Token cache cleared successfully")
+	fmt.Println("token cache cleared successfully")
 	return nil
 }
 
@@ -185,7 +185,7 @@ func runCacheInspect(promptHash string) error {
 		return nil
 	}
 
-	fmt.Printf("Found %d cache entr%s for hash: %s\n", resp.Count, pluralize(resp.Count), promptHash)
+	fmt.Printf("Found %d cache entr%s for hash: %s\n", resp.Count, pluralizeEntry(resp.Count), promptHash)
 	fmt.Println()
 
 	for i, entry := range resp.Entries {
@@ -223,7 +223,7 @@ func runCacheInspect(promptHash string) error {
 	return nil
 }
 
-func pluralize(n int) string {
+func pluralizeEntry(n int) string {
 	if n == 1 {
 		return "y"
 	}

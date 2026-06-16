@@ -41,6 +41,12 @@ type StdioTransport struct {
 
 	// relayDone is closed when relayStdout exits.
 	relayDone chan struct{}
+
+	// stderrDone is closed when drainStderr exits, allowing Close() to wait.
+	stderrDone chan struct{}
+
+	// closeOnce ensures stderrDone is closed only once.
+	closeOnce sync.Once
 }
 
 // NewStdioTransport creates a new stdio transport.
@@ -103,6 +109,7 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 	t.stderr = bufio.NewReader(stderr)
 	t.relayCh = make(chan stdoutLine, 32)
 	t.relayDone = make(chan struct{})
+	t.stderrDone = make(chan struct{})
 	t.running.Store(true)
 
 	// Start stderr reader (log to stderr of parent process)
@@ -119,14 +126,15 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 // drainStderr reads stderr from the subprocess and discards it.
 // This prevents the subprocess from blocking on stderr writes.
 //
-// Precondition: this goroutine exits when the subprocess's stderr pipe
-// returns an error (typically EOF when the process terminates). Close()
-// ensures the subprocess is killed or waited on, which in turn closes
-// the stderr pipe and unblocks this goroutine. If Close() is never
-// called and the subprocess lives forever, this goroutine will also
-// live forever — but that would indicate a leaked transport, not a
-// drainStderr bug.
+// The goroutine exits when either:
+//   - the subprocess's stderr pipe returns an error (typically EOF when
+//     the process terminates), or
+//   - Close() sets running to false, which causes the next Read to be
+//     interrupted (subprocess killed in Close) or the loop condition to fail.
+//
+// stderrDone is closed on exit so Close() can wait for a clean shutdown.
 func (t *StdioTransport) drainStderr() {
+	defer t.closeOnce.Do(func() { close(t.stderrDone) })
 	buf := make([]byte, 4096)
 	for t.running.Load() {
 		_, err := t.stderr.Read(buf)
@@ -318,6 +326,15 @@ func (t *StdioTransport) Close() error {
 		case <-t.relayDone:
 		case <-time.After(2 * time.Second):
 			// Relay didn't exit in time; don't block forever
+		}
+	}
+
+	// Wait for stderr drain goroutine to finish as well.
+	if t.stderrDone != nil {
+		select {
+		case <-t.stderrDone:
+		case <-time.After(2 * time.Second):
+			// stderr drain didn't exit in time; don't block forever
 		}
 	}
 

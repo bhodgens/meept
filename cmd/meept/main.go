@@ -106,7 +106,10 @@ Analytics:
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.MaximumNArgs(1),
-		RunE:          runChat, // Default to chat when no subcommand
+		// root.RunE delegates to runChat to preserve `meept --project X` style
+		// flags without requiring `meept chat`. The `chat` subcommand exists for
+		// explicit invocation and shares the same handler.
+		RunE:          runChat,
 	}
 
 	// Global flags

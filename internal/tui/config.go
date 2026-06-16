@@ -3,6 +3,7 @@ package tui
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -220,6 +221,7 @@ func LoadClientConfig() (*ClientConfig, error) {
 	}
 
 	// Return defaults
+	slog.Warn("client config: no config file found, using all defaults")
 	return DefaultClientConfig(), nil
 }
 
@@ -233,6 +235,7 @@ func loadConfigFile(path string) (*ClientConfig, error) {
 	// Convert JSON5 to standard JSON using hujson
 	standardJSON, err := hujson.Standardize(data)
 	if err != nil {
+		slog.Warn("client config: failed to parse JSON5, using defaults", "path", path, "error", err)
 		return nil, err
 	}
 
@@ -241,8 +244,61 @@ func loadConfigFile(path string) (*ClientConfig, error) {
 
 	// Unmarshal on top of defaults to allow partial configs
 	if err := json.Unmarshal(standardJSON, cfg); err != nil {
+		slog.Warn("client config: failed to unmarshal, using defaults", "path", path, "error", err)
 		return nil, err
 	}
 
+	// Warn about fields that may have defaulted due to missing keys
+	checkClientConfigDefaults(path, cfg)
+
 	return cfg, nil
+}
+
+// checkClientConfigDefaults logs warnings for fields that may have
+// silently defaulted when the config file was missing or incomplete.
+func checkClientConfigDefaults(path string, cfg *ClientConfig) {
+	if cfg.Session.DefaultName == "" {
+		slog.Warn("client config: using default for missing field", "field", "session.default_name", "default", "default", "path", path)
+		cfg.Session.DefaultName = "default"
+	}
+	if cfg.Rendering.Theme == "" {
+		slog.Warn("client config: using default for missing field", "field", "rendering.theme", "default", "monokai", "path", path)
+		cfg.Rendering.Theme = "monokai"
+	}
+	if cfg.STT.Engine == "" {
+		slog.Warn("client config: using default for missing field", "field", "stt.engine", "default", "whisper", "path", path)
+		cfg.STT.Engine = "whisper"
+	}
+	if cfg.STT.Language == "" {
+		slog.Warn("client config: using default for missing field", "field", "stt.language", "default", "en", "path", path)
+		cfg.STT.Language = "en"
+	}
+	if cfg.TTS.Engine == "" {
+		slog.Warn("client config: using default for missing field", "field", "tts.engine", "default", "piper", "path", path)
+		cfg.TTS.Engine = "piper"
+	}
+	if cfg.TTS.Voice == "" {
+		slog.Warn("client config: using default for missing field", "field", "tts.voice", "default", "danny-medium", "path", path)
+		cfg.TTS.Voice = "danny-medium"
+	}
+	if cfg.Chat.Verbosity == "" {
+		slog.Warn("client config: using default for missing field", "field", "chat.verbosity", "default", "normal", "path", path)
+		cfg.Chat.Verbosity = "normal"
+	}
+	if cfg.Chat.ScrollSpeed == 0 {
+		slog.Warn("client config: using default for missing field", "field", "chat.scroll_speed", "default", 3, "path", path)
+		cfg.Chat.ScrollSpeed = 3
+	}
+	if cfg.Keybindings.CommandMode == "" {
+		slog.Warn("client config: using default for missing field", "field", "keybindings.command_mode", "default", "ctrl+x", "path", path)
+		cfg.Keybindings.CommandMode = "ctrl+x"
+	}
+	if cfg.Keybindings.Quit == "" {
+		slog.Warn("client config: using default for missing field", "field", "keybindings.quit", "default", "ctrl+c", "path", path)
+		cfg.Keybindings.Quit = "ctrl+c"
+	}
+	if cfg.Keybindings.EscapeBehavior == "" {
+		slog.Warn("client config: using default for missing field", "field", "keybindings.escape_behavior", "default", "once", "path", path)
+		cfg.Keybindings.EscapeBehavior = "once"
+	}
 }

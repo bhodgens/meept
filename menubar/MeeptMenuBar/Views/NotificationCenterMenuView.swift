@@ -12,19 +12,19 @@ struct NotificationCenterMenuView: View {
     var body: some View {
         Menu {
             if notificationManager.notifications.isEmpty {
-                Text("No notifications")
+                Text("no notifications")
                     .foregroundColor(.secondary)
             } else {
                 ForEach(notificationManager.notifications) { notification in
                     NotificationRowView(notification: notification)
                 }
                 Divider()
-                Button("Clear All") {
+                Button("clear all") {
                     notificationManager.clearNotifications()
                 }
             }
             Divider()
-            Toggle("Enable Notifications", isOn: $notificationManager.isEnabled)
+            Toggle("enable notifications", isOn: $notificationManager.isEnabled)
         } label: {
             ZStack {
                 Image(systemName: "bell")

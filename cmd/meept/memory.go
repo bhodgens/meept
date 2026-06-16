@@ -112,7 +112,7 @@ func runMemorySearch(query string, limit int) error {
 
 	items := resp.GetItems()
 	if len(items) == 0 {
-		fmt.Println("No memories found")
+		fmt.Println("no memories found")
 		return nil
 	}
 
@@ -248,7 +248,7 @@ func runVectorSearch(query string, limit int) error {
 	}
 
 	if len(result.Results) == 0 {
-		fmt.Println("No vector search results found")
+		fmt.Println("no vector search results found")
 		return nil
 	}
 
@@ -301,17 +301,17 @@ func runVectorStats() error {
 		return fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	fmt.Println("Vector Shard Statistics")
+	fmt.Println("vector shard statistics")
 	fmt.Println("=======================")
 	fmt.Printf("Loaded Shards: %d / %d (max)\n", stats.LoadedShards, stats.MaxRAMShards)
 	fmt.Printf("LRU Cache: %d hits, %d misses, %d evictions\n\n", stats.LRUHits, stats.LRUMisses, stats.LRUEvictions)
 
 	if len(stats.ShardDetails) == 0 {
-		fmt.Println("No shard details available")
+		fmt.Println("no shard details available")
 		return nil
 	}
 
-	fmt.Println("Shard Details:")
+	fmt.Println("shard details:")
 	for name, detail := range stats.ShardDetails {
 		fmt.Printf("\n  %s:\n", name)
 		fmt.Printf("    Dimension: %d\n", detail.Dimension)

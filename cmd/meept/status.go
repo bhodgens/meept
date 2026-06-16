@@ -42,7 +42,7 @@ func runStatus(jsonOutput bool) error {
 	pidFile := filepath.Join(stateDir, "meept.pid")
 	pidData, err := os.ReadFile(pidFile)
 	if os.IsNotExist(err) {
-		fmt.Println("Daemon is not running")
+		fmt.Println("daemon is not running")
 		return nil
 	}
 	if err != nil {
@@ -52,7 +52,7 @@ func runStatus(jsonOutput bool) error {
 	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
 	if err != nil {
 		// Invalid PID file
-		fmt.Println("Daemon is not running (invalid PID file)")
+		fmt.Println("daemon is not running (invalid PID file)")
 		return nil
 	}
 
@@ -60,7 +60,7 @@ func runStatus(jsonOutput bool) error {
 	client, err := connectDaemon()
 	if err != nil {
 		// Daemon PID exists but can't connect
-		fmt.Printf("Daemon process exists (PID %d) but not responding\n", pid)
+		fmt.Printf("daemon process exists (PID %d) but not responding\n", pid)
 		fmt.Println("Try restarting: meept daemon restart")
 		return nil
 	}
@@ -68,11 +68,11 @@ func runStatus(jsonOutput bool) error {
 
 	status, err := client.Status()
 	if err != nil {
-		fmt.Printf("Daemon is running (PID %d) but status unavailable: %v\n", pid, err)
+		fmt.Printf("daemon is running (PID %d) but status unavailable: %v\n", pid, err)
 		return nil
 	}
 	if status == nil {
-		fmt.Printf("Daemon is running (PID %d) but returned empty status\n", pid)
+		fmt.Printf("daemon is running (PID %d) but returned empty status\n", pid)
 		return nil
 	}
 
@@ -92,7 +92,7 @@ func printStatusText(status *types.DaemonStatusResponse, pid int) {
 	}
 	resetColor := "\033[0m"
 
-	fmt.Printf("Meept Daemon Status\n")
+	fmt.Printf("meept daemon status\n")
 	fmt.Printf("===================\n\n")
 
 	fmt.Printf("  Status:     %s%s%s\n", statusColor, status.Status, resetColor)
@@ -112,7 +112,7 @@ func printStatusText(status *types.DaemonStatusResponse, pid int) {
 	fmt.Println()
 
 	// Token usage
-	fmt.Printf("Token Budget\n")
+	fmt.Printf("token budget\n")
 	fmt.Printf("------------\n")
 	tokensUsed := status.TokensUsed
 	tokensRemaining := status.TokensRemaining
@@ -136,7 +136,7 @@ func printStatusText(status *types.DaemonStatusResponse, pid int) {
 	// Dollar cost budget
 	if status.DailyCostLimit > 0 || status.HourlyCostLimit > 0 {
 		fmt.Println()
-		fmt.Printf("Cost Budget\n")
+		fmt.Printf("cost budget\n")
 		fmt.Printf("-----------\n")
 		if status.DailyCostLimit > 0 {
 			dailyPercent := status.DailyCostUsed / status.DailyCostLimit * 100
@@ -151,7 +151,7 @@ func printStatusText(status *types.DaemonStatusResponse, pid int) {
 	fmt.Println()
 
 	// RPC info
-	fmt.Printf("RPC Server\n")
+	fmt.Printf("rpc server\n")
 	fmt.Printf("----------\n")
 	fmt.Printf("  Methods:    %d registered\n", len(status.RegisteredMethods))
 	fmt.Printf("  Bus Subs:   %d\n", status.BusSubscribers)

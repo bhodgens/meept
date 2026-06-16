@@ -11,7 +11,8 @@ import os.log
 @MainActor
 class DaemonStatusViewModel: ObservableObject {
     @Published var daemonStatus = DaemonStatus()
-    @Published var isUpdating = false
+    @Published var isRefreshingStatus = false
+    @Published var isControllingDaemon = false
 
     var onStatusChanged: (() -> Void)?
 
@@ -51,8 +52,8 @@ class DaemonStatusViewModel: ObservableObject {
     // MARK: - Status
 
     func refreshStatus() {
-        guard !isUpdating else { return }
-        isUpdating = true
+        guard !isRefreshingStatus else { return }
+        isRefreshingStatus = true
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -61,15 +62,15 @@ class DaemonStatusViewModel: ObservableObject {
             } catch {
                 logger.error("failed to fetch daemon status: \(error.localizedDescription)")
             }
-            isUpdating = false
+            isRefreshingStatus = false
         }
     }
 
     // MARK: - Control
 
     func startDaemon() {
-        guard !isUpdating else { return }
-        isUpdating = true
+        guard !isControllingDaemon else { return }
+        isControllingDaemon = true
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -77,14 +78,14 @@ class DaemonStatusViewModel: ObservableObject {
             } catch {
                 logger.error("failed to start daemon: \(error.localizedDescription)")
             }
-            isUpdating = false
+            isControllingDaemon = false
             refreshStatus()
         }
     }
 
     func stopDaemon() {
-        guard !isUpdating else { return }
-        isUpdating = true
+        guard !isControllingDaemon else { return }
+        isControllingDaemon = true
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -92,14 +93,14 @@ class DaemonStatusViewModel: ObservableObject {
             } catch {
                 logger.error("failed to stop daemon: \(error.localizedDescription)")
             }
-            isUpdating = false
+            isControllingDaemon = false
             refreshStatus()
         }
     }
 
     func restartDaemon() {
-        guard !isUpdating else { return }
-        isUpdating = true
+        guard !isControllingDaemon else { return }
+        isControllingDaemon = true
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -107,7 +108,7 @@ class DaemonStatusViewModel: ObservableObject {
             } catch {
                 logger.error("failed to restart daemon: \(error.localizedDescription)")
             }
-            isUpdating = false
+            isControllingDaemon = false
             refreshStatus()
         }
     }

@@ -79,11 +79,17 @@ func (c *Client) Connect(ctx context.Context) error {
 	}
 
 	c.connected.Store(true)
+
+	// Snapshot tool count under lock for logging.
+	c.mu.RLock()
+	toolCount := len(c.tools)
+	c.mu.RUnlock()
+
 	c.logger.Info("connected to MCP server",
 		"name", c.name,
 		"server", initResult.ServerInfo.Name,
 		"version", initResult.ServerInfo.Version,
-		"tools", len(c.tools),
+		"tools", toolCount,
 	)
 
 	return nil
@@ -96,7 +102,9 @@ func (c *Client) initialize(ctx context.Context) (*InitializeResult, error) {
 		Capabilities:    ClientCapabilities{},
 		ClientInfo: ImplementationInfo{
 			Name:    "meept",
-			Version: "0.2.0",
+			// NOTE: keep in sync with internal/mcp.Version.
+			// Cannot import internal/mcp directly due to import cycle.
+			Version: ClientVersion,
 		},
 	}
 

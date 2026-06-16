@@ -220,7 +220,7 @@ func runClusterInit(cmd *cobra.Command, clusterName, nodeName, nodeID, gitRemote
 
 	// --- output ----------------------------------------------------------
 	fmt.Println("===========================================")
-	fmt.Println("     Cluster Initialized Successfully")
+	fmt.Println("     cluster initialized successfully")
 	fmt.Println("===========================================")
 	fmt.Println()
 	fmt.Printf("  Cluster:    %s\n", cfg.ClusterName)
@@ -229,7 +229,7 @@ func runClusterInit(cmd *cobra.Command, clusterName, nodeName, nodeID, gitRemote
 	fmt.Printf("  Config:     %s\n", configPath)
 	fmt.Printf("  Private Key: %s\n", privPath)
 	fmt.Println()
-	fmt.Println("  IMPORTANT: Keep the private key file secure!")
+	fmt.Println("  important: keep the private key file secure!")
 	fmt.Println()
 
 	// Attempt git remote setup if URL provided and git is available
@@ -239,7 +239,7 @@ func runClusterInit(cmd *cobra.Command, clusterName, nodeName, nodeID, gitRemote
 		}
 	}
 
-	fmt.Println("Next steps:")
+	fmt.Println("next steps:")
 	fmt.Println("  1. Other nodes can join with: meept cluster join <join-key>")
 	if gitRemote != "" {
 		fmt.Println("  2. Share the cluster registry via git")

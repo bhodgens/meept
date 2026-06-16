@@ -47,8 +47,8 @@ func TestServerHandlesInitialize(t *testing.T) {
 	if serverInfo["name"] != "meept" {
 		t.Errorf("serverInfo.name = %v, want meept", serverInfo["name"])
 	}
-	if serverInfo["version"] != "0.1.0" {
-		t.Errorf("serverInfo.version = %v, want 0.1.0", serverInfo["version"])
+	if serverInfo["version"] != Version {
+		t.Errorf("serverInfo.version = %v, want %s", serverInfo["version"], Version)
 	}
 
 	// Verify capabilities

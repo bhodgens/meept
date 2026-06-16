@@ -132,57 +132,28 @@ func (p *PatchParser) Grammar() string {
 // function calling, Anthropic tool_use, or JSON Schema mode). The schema
 // describes the shape of a single edit object within the "edits" array.
 func (p *PatchParser) GrammarForConstrainedDecoding() string {
-	// Use a map that will be serialized in a deterministic field order.
-	anchorProps := orderedMap{
-		"oneOf": []orderedMap{
-			{
-				"type":            "string",
-				"pattern":         `^[1-9][0-9]*:[a-z]{2}$`,
-				"description":     "line anchor in legacy format (LINE:HASH)",
-			},
-			{
-				"type":            "string",
-				"pattern":         `^[1-9][0-9]*:[0-9a-f]{4}:[a-z]{2}$`,
-				"description":     "line anchor with snapshot tag (LINE:TAG:HASH)",
-			},
-			{
-				"enum":            []string{"BOF"},
-				"description":     "beginning of file",
-			},
-			{
-				"enum":            []string{"EOF"},
-				"description":     "end of file",
-			},
+	// Build schema with deterministic key ordering using orderedMap.
+	anchorProps := omSet(
+		"oneOf", []any{
+			om("type", "string", "pattern", `^[1-9][0-9]*:[a-z]{2}$`, "description", "line anchor in legacy format (LINE:HASH)"),
+			om("type", "string", "pattern", `^[1-9][0-9]*:[0-9a-f]{4}:[a-z]{2}$`, "description", "line anchor with snapshot tag (LINE:TAG:HASH)"),
+			om("enum", []string{"BOF"}, "description", "beginning of file"),
+			om("enum", []string{"EOF"}, "description", "end of file"),
 		},
-	}
+	)
 
-	editSchema := orderedMap{
-		"type": "object",
-		"properties": orderedMap{
-			"op": orderedMap{
-				"type":        "string",
-				"enum":        []string{"replace", "replace_block", "insert_after", "insert_before", "delete", "delete_block"},
-				"description": "edit operation type",
-			},
-			"anchor": anchorProps,
-			"end_anchor": orderedMap{
-				"type":        "string",
-				"pattern":     `^[1-9][0-9]*:[a-z]{2}$|^[1-9][0-9]*:[0-9a-f]{4}:[a-z]{2}$`,
-				"description": "optional end anchor for range operations (LINE:HASH or LINE:TAG:HASH)",
-			},
-			"content": orderedMap{
-				"type":        "string",
-				"description": "replacement content for replace/insert operations (must be empty for delete ops)",
-			},
-			"tag": orderedMap{
-				"type":        "string",
-				"pattern":     `^[0-9a-f]{4}$`,
-				"description": "optional 4-hex-char snapshot tag for cache lookup",
-			},
-		},
-		"required":             []string{"op", "anchor"},
-		"additionalProperties": false,
-	}
+	editSchema := om(
+		"type", "object",
+		"properties", om(
+			"op", om("type", "string", "enum", []string{"replace", "replace_block", "insert_after", "insert_before", "delete", "delete_block"}, "description", "edit operation type"),
+			"anchor", anchorProps,
+			"end_anchor", om("type", "string", "pattern", `^[1-9][0-9]*:[a-z]{2}$|^[1-9][0-9]*:[0-9a-f]{4}:[a-z]{2}$`, "description", "optional end anchor for range operations (LINE:HASH or LINE:TAG:HASH)"),
+			"content", om("type", "string", "description", "replacement content for replace/insert operations (must be empty for delete ops)"),
+			"tag", om("type", "string", "pattern", `^[0-9a-f]{4}$`, "description", "optional 4-hex-char snapshot tag for cache lookup"),
+		),
+		"required", []string{"op", "anchor"},
+		"additionalProperties", false,
+	)
 
 	b, err := json.MarshalIndent(editSchema, "", "  ")
 	if err != nil {
@@ -190,6 +161,27 @@ func (p *PatchParser) GrammarForConstrainedDecoding() string {
 		return "{}"
 	}
 	return string(b)
+}
+
+// om creates an orderedMap from alternating key-value pairs.
+// Panics if the number of arguments is odd (programming error).
+func om(kv ...any) *orderedMap {
+	if len(kv)%2 != 0 {
+		panic(fmt.Sprintf("om: odd number of key-value arguments: %d", len(kv)))
+	}
+	omVal := newOrderedMap()
+	for i := 0; i < len(kv); i += 2 {
+		key, _ := kv[i].(string)
+		omVal.Set(key, kv[i+1])
+	}
+	return omVal
+}
+
+// omSet creates an orderedMap with a single key-value entry.
+func omSet(key string, val any) *orderedMap {
+	omVal := newOrderedMap()
+	omVal.Set(key, val)
+	return omVal
 }
 
 // ParsePatch parses a slice of raw JSON edit maps into validated ParsedEdit
@@ -446,29 +438,67 @@ func (p *PatchParser) parseAnchor(idx int, field, anchor string, errs *[]PatchEr
 	return parsedAnchor{}
 }
 
-// orderedMap is a map[string]any that preserves insertion order during
-// JSON marshaling by using a slice of key-value pairs internally.
-// This is used to produce deterministic, human-readable JSON Schema output.
-type orderedMap map[string]any
-
-// MarshalJSON serializes the ordered map. The standard map iteration order in
-// Go is randomized, but since we control the keys and insert them in a
-// deterministic order in GrammarForConstrainedDecoding, the output is stable.
-// For guaranteed ordering we use json.Marshal on a pre-built struct-equivalent.
-func (om orderedMap) MarshalJSON() ([]byte, error) {
-	// Fall back to standard map marshaling. The keys in our usage are inserted
-	// in a deterministic order at construction time, and Go maps preserve
-	// insertion order in practice (since Go 1.12+), but this is an
-	// implementation detail. For guaranteed ordering, we serialize manually.
-	return marshalOrdered(om)
+// orderedMap is a key-value container that preserves insertion order during
+// JSON marshaling. This is used to produce deterministic, human-readable JSON
+// Schema output. It uses an internal slice of key-value pairs alongside a map
+// for O(1) lookups.
+type orderedMap struct {
+	keys   []string
+	values map[string]any
 }
 
-// marshalOrdered serializes a map in key-insertion order by first collecting
-// keys from the map's natural iteration and then building JSON manually.
-func marshalOrdered(m map[string]any) ([]byte, error) {
-	// Try standard marshaling first — in practice Go preserves insertion order
-	// for small maps, which covers our use case.
-	return json.Marshal(m)
+// newOrderedMap creates a new empty orderedMap.
+func newOrderedMap() *orderedMap {
+	return &orderedMap{
+		values: make(map[string]any),
+	}
+}
+
+// Set adds or updates a key in the orderedMap. If the key is new, it is
+// appended to the key order. If it already exists, the value is updated
+// without changing the order.
+func (om *orderedMap) Set(key string, val any) {
+	if om.values == nil {
+		om.values = make(map[string]any)
+	}
+	if _, exists := om.values[key]; !exists {
+		om.keys = append(om.keys, key)
+	}
+	om.values[key] = val
+}
+
+// Get retrieves a value by key. Returns nil and false if not found.
+func (om *orderedMap) Get(key string) (any, bool) {
+	if om == nil || om.values == nil {
+		return nil, false
+	}
+	v, ok := om.values[key]
+	return v, ok
+}
+
+// MarshalJSON serializes the orderedMap in insertion order, producing
+// deterministic JSON output.
+func (om *orderedMap) MarshalJSON() ([]byte, error) {
+	var buf strings.Builder
+	buf.WriteByte('{')
+	for i, k := range om.keys {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		keyBytes, err := json.Marshal(k)
+		if err != nil {
+			return nil, fmt.Errorf("marshal key %q: %w", k, err)
+		}
+		buf.Write(keyBytes)
+		buf.WriteByte(':')
+		valBytes, err := json.Marshal(om.values[k])
+		if err != nil {
+			return nil, fmt.Errorf("marshal value for key %q: %w", k, err)
+		}
+		buf.Write(valBytes)
+	}
+	buf.WriteByte('}')
+	return []byte(buf.String()), nil
 }
 
 // Ensure PatchParser satisfies a basic interface contract.
