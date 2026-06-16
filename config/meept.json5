@@ -441,7 +441,7 @@
 
   // Skills configuration
   "skills": {
-    "enabled": false,
+    "enabled": true,
     "search_paths": [],
     "auto_reload": false,
     "max_cached_skills": 50,

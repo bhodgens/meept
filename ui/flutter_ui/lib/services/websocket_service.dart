@@ -59,10 +59,20 @@ class WebSocketService {
   ///
   /// Note: Storage must be initialized before calling this.
   factory WebSocketService.fromStorage(StorageService storage) {
+    var apiKey = storage.getApiKey();
+    // Match ApiClient.storage() fallback: use dev key when none configured
+    // so the WebSocket auth matches the REST client behavior.
+    if (apiKey == null || apiKey.isEmpty) {
+      if (AppConstants.defaultApiKey.isNotEmpty) {
+        apiKey = AppConstants.defaultApiKey;
+      } else {
+        apiKey = 'meept_dev_default_key_CHANGE_ME';
+      }
+    }
     return WebSocketService(
       host: storage.getApiHost(),
       port: storage.getApiPort(),
-      apiKey: storage.getApiKey(), // Sync read from SharedPreferences
+      apiKey: apiKey,
     );
   }
 
