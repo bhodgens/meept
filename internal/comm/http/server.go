@@ -1773,31 +1773,16 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Validate API token if auth is required
 	if s.config.RequireAuth {
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			// Also check query param for web clients that can't set headers
-			token := r.URL.Query().Get("token")
-			if token == "" {
-				s.writeError(w, http.StatusUnauthorized, "unauthorized: missing API token")
-				return
-			}
-			authHeader = "Bearer " + token
-		} else {
-			// Case-insensitive prefix match per RFC 7235. A non-Bearer
-			// header leaves authHeader empty so the constant-time compare
-			// fails below.
-			const bearerPrefix = "Bearer "
-			if len(authHeader) > len(bearerPrefix) && strings.EqualFold(authHeader[:len(bearerPrefix)], bearerPrefix) {
-				authHeader = authHeader[len(bearerPrefix):]
-			} else {
-				authHeader = ""
-			}
+		token := ExtractKeyFromRequest(r)
+		if token == "" {
+			s.writeError(w, http.StatusUnauthorized, "unauthorized: missing API token")
+			return
 		}
 
 		// Validate token against configured API keys using constant-time compare
 		valid := false
 		for _, key := range s.config.APIKeys {
-			if subtle.ConstantTimeCompare([]byte(authHeader), []byte(key)) == 1 {
+			if subtle.ConstantTimeCompare([]byte(token), []byte(key)) == 1 {
 				valid = true
 				break
 			}
