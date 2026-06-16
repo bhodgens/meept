@@ -103,26 +103,24 @@ class WebSocketService {
     //  - If the user configured one in Settings, use it.
     //  - Else, in debug builds, fall back to `AppConstants.defaultApiKey`
     //    (populated via --dart-define=MEEPT_DEV_API_KEY=...).
-    //  - In release builds, refuse to fall back to any hardcoded key —
-    //    throw and force the user to configure a real key. This prevents
-    //    a release app from silently connecting with a known dev key.
+    //  - In release builds, allow null/empty API key — the app will start
+    //    and show a "configure API key" prompt in the UI. Connection attempts
+    //    will fail gracefully until a real key is configured.
     final apiKey = (stored != null && stored.isNotEmpty)
         ? stored
         : AppConstants.defaultApiKey;
     if (apiKey.isEmpty) {
-      if (kReleaseMode) {
-        throw ArgumentError(
-            'No API key configured. Set the API key in Settings before connecting.');
-      }
-      debugPrint('[warn] No API key configured — connecting without auth. '
-          'Configure a real key for production.');
+      // Do not throw — allow the app to start. Connection will fail later,
+      // and the UI can show a "configure API key" prompt.
+      debugPrint('[warn] No API key configured — will connect without auth. '
+          'Configure a real key in Settings for production.');
     } else if (!kReleaseMode) {
       debugPrint('[warn] Using default dev API key — configure a real key for production');
     }
     return WebSocketService(
       host: storage.getApiHost(),
       port: storage.getApiPort(),
-      apiKey: apiKey,
+      apiKey: apiKey.isEmpty ? null : apiKey,
     );
   }
 
