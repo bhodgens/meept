@@ -472,7 +472,6 @@ func (m *ServiceManager) DaemonPIDFile() string {
 	return filepath.Join(m.logDir, "meept.pid")
 }
 
-
 // --- DaemonControl: HTTP/server control interface ---
 
 // DaemonController is the interface used by HTTP handlers and services.

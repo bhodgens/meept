@@ -138,12 +138,12 @@ func applyClusterSchemaTo(db *sql.DB) error {
 	if err == nil {
 		for rows.Next() {
 			var (
-				cid         int
-				name        string
-				ctype       string
-				notnull     int
-				dfltValue   sql.NullString
-				pk          int
+				cid       int
+				name      string
+				ctype     string
+				notnull   int
+				dfltValue sql.NullString
+				pk        int
 			)
 			if err2 := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err2 == nil {
 				existingCols = append(existingCols, name)

@@ -9,8 +9,8 @@ import (
 
 // SecurityService handles security operations.
 type SecurityService struct {
-	checker  *security.PermissionChecker
-	auditDB  *sql.DB
+	checker *security.PermissionChecker
+	auditDB *sql.DB
 }
 
 // NewSecurityService creates a security service.

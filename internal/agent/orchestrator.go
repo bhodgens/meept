@@ -11,27 +11,27 @@ import (
 	"sync"
 	"time"
 
-	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/repomap"
+	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/pkg/models"
 )
 
 // Orchestrator coordinates the strategic and tactical layers via bus subscriptions.
 type Orchestrator struct {
-	strategic            *StrategicPlanner
-	tactical             *TacticalScheduler
-	pairManager          *PairManager
-	busPairOrchestrator  *PairOrchestrator    // bus-channel-based agent pairing (Option C)
-	planManager          *plan.PlanManager    // plan system integration for progress tracking
-	bus                   *bus.MessageBus
-	logger                *slog.Logger
-	collaborationEngine   *CollaborationEngine     // optional: enables agent collaboration modes
-	ralphLoop            *RalphLoop               // optional: Ralph loop for auto-replanning
-	reflectionEngine     *ReflectionEngine       // optional: auto-fix reflection loop
-	repoMapGen           *repomap.RepoMapGenerator // optional: repository map for context enrichment
-	fenceChecker         *intsecurity.FenceChecker // path boundary enforcement
+	strategic           *StrategicPlanner
+	tactical            *TacticalScheduler
+	pairManager         *PairManager
+	busPairOrchestrator *PairOrchestrator // bus-channel-based agent pairing (Option C)
+	planManager         *plan.PlanManager // plan system integration for progress tracking
+	bus                 *bus.MessageBus
+	logger              *slog.Logger
+	collaborationEngine *CollaborationEngine      // optional: enables agent collaboration modes
+	ralphLoop           *RalphLoop                // optional: Ralph loop for auto-replanning
+	reflectionEngine    *ReflectionEngine         // optional: auto-fix reflection loop
+	repoMapGen          *repomap.RepoMapGenerator // optional: repository map for context enrichment
+	fenceChecker        *intsecurity.FenceChecker // path boundary enforcement
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -44,8 +44,8 @@ type OrchestratorDeps struct {
 	PairManager         *PairManager
 	BusPairOrchestrator *PairOrchestrator    // optional: enables channel-based pairing (Option C)
 	PlanManager         *plan.PlanManager    // optional: plan system integration
-	CollaborationEngine *CollaborationEngine     // optional: enables agent collaboration modes
-	RalphLoop           *RalphLoop               // optional: Ralph loop for auto-replanning
+	CollaborationEngine *CollaborationEngine // optional: enables agent collaboration modes
+	RalphLoop           *RalphLoop           // optional: Ralph loop for auto-replanning
 	Bus                 *bus.MessageBus
 	Logger              *slog.Logger
 	FenceChecker        *intsecurity.FenceChecker // path boundary enforcement
@@ -83,26 +83,26 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	ctx, o.cancel = context.WithCancel(ctx)
 
 	topics := map[string]func(context.Context, *models.BusMessage){
-		"orchestrator.plan":     o.handlePlanRequest,
-		"orchestrator.schedule": o.handleScheduleRequest,
-		"orchestrator.handoff":  o.handleHandoff,
-		"queue.job.completed":   o.handleJobCompleted,
-		"queue.job.failed":      o.handleJobFailed,
-		"task.amend.applied":    o.handleAmendmentApplied,
-		"task.amend.rejected":   o.handleAmendmentRejected,
-		"pair.session_created":  o.handlePairSessionCreated,
-		"pair.converged":        o.handlePairConverged,
-		"pair.exhausted":        o.handlePairExhausted,
-		"pair.round_failed":     o.handlePairRoundFailed,
-		"collaboration.session_created": o.handleCollabSessionCreated,
+		"orchestrator.plan":               o.handlePlanRequest,
+		"orchestrator.schedule":           o.handleScheduleRequest,
+		"orchestrator.handoff":            o.handleHandoff,
+		"queue.job.completed":             o.handleJobCompleted,
+		"queue.job.failed":                o.handleJobFailed,
+		"task.amend.applied":              o.handleAmendmentApplied,
+		"task.amend.rejected":             o.handleAmendmentRejected,
+		"pair.session_created":            o.handlePairSessionCreated,
+		"pair.converged":                  o.handlePairConverged,
+		"pair.exhausted":                  o.handlePairExhausted,
+		"pair.round_failed":               o.handlePairRoundFailed,
+		"collaboration.session_created":   o.handleCollabSessionCreated,
 		"collaboration.consensus_reached": o.handleCollabConsensus,
-		"collaboration.divergence": o.handleCollabDivergence,
-		"collaboration.result": o.handleCollabResult,
-		"collaboration.error": o.handleCollabError,
-		"collaboration.requested": o.handleCollabRequested,
-		"team.result":           o.handleTeamResult,
-		"team.error":            o.handleTeamError,
-		"tool.execution.complete": o.handleToolExecutionComplete,
+		"collaboration.divergence":        o.handleCollabDivergence,
+		"collaboration.result":            o.handleCollabResult,
+		"collaboration.error":             o.handleCollabError,
+		"collaboration.requested":         o.handleCollabRequested,
+		"team.result":                     o.handleTeamResult,
+		"team.error":                      o.handleTeamError,
+		"tool.execution.complete":         o.handleToolExecutionComplete,
 	}
 
 	for topic, handler := range topics {
@@ -841,6 +841,7 @@ func (o *Orchestrator) applyFix(ctx context.Context, fix *FixAttempt) []string {
 //   - "// File: path/to/file.go"
 //   - "## path/to/file.go"
 //   - "path/to/file.go:"
+//
 // Blocks with no annotation are stored under the empty key "".
 // Returns a map of filepath -> code content.
 func extractCodeBlocksFromMarkdown(markdown string) map[string]string {
@@ -931,13 +932,13 @@ func (o *Orchestrator) publishReflectionEvent(ctx context.Context, toolCallID, p
 	}
 
 	payload := map[string]any{
-		"tool_call_id": toolCallID,
-		"phase":        phase,
-		"fixed":        result.Fixed,
-		"gave_up":      result.GaveUp,
-		"iterations":   result.Iterations,
-		"message":      result.FinalMessage,
-		"lint_errors":  len(result.LintErrors),
+		"tool_call_id":  toolCallID,
+		"phase":         phase,
+		"fixed":         result.Fixed,
+		"gave_up":       result.GaveUp,
+		"iterations":    result.Iterations,
+		"message":       result.FinalMessage,
+		"lint_errors":   len(result.LintErrors),
 		"test_failures": len(result.TestFailures),
 	}
 

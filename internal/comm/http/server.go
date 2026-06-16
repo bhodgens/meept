@@ -45,15 +45,15 @@ var defaultWSOrigins = []string{"localhost", "127.0.0.1", "::1"}
 // ServerConfig holds configuration for the HTTP server.
 // TLS is always enabled; there is no option to disable HTTPS.
 type ServerConfig struct {
-	Addr                    string        // Listen address (default: :8081)
-	ReadTimeout             time.Duration // Read timeout
-	WriteTimeout            time.Duration // Write timeout
-	MaxHeaderBytes          int           // Max header size
-	EnableCORS              bool          // Enable CORS headers
-	APIKeys                 []string      // Valid API keys for authentication
-	RequireAuth             bool          // Require API key authentication (default: true)
-	TLSCertFile             string        // TLS certificate file path
-	TLSKeyFile              string        // TLS key file path
+	Addr                    string                // Listen address (default: :8081)
+	ReadTimeout             time.Duration         // Read timeout
+	WriteTimeout            time.Duration         // Write timeout
+	MaxHeaderBytes          int                   // Max header size
+	EnableCORS              bool                  // Enable CORS headers
+	APIKeys                 []string              // Valid API keys for authentication
+	RequireAuth             bool                  // Require API key authentication (default: true)
+	TLSCertFile             string                // TLS certificate file path
+	TLSKeyFile              string                // TLS key file path
 	RESTEnabled             bool                  // Enable REST API at /api/v1/* (default: true)
 	WebSocketAllowedOrigins []string              // Allowed origins for WebSocket (default: localhost, 127.0.0.1, ::1)
 	SecurityHeaders         SecurityHeadersConfig // HSTS, CSP, X-Frame-Options, etc.
@@ -70,16 +70,16 @@ func DefaultServerConfig() ServerConfig {
 	defaultKeyFile := filepath.Join(homeDir, ".meept", "tls", "key.pem")
 
 	return ServerConfig{
-		Addr:           ":8081", // Different from existing web server (:8080)
-		ReadTimeout:    30 * time.Second,
-		WriteTimeout:   30 * time.Second,
-		MaxHeaderBytes: 1 << 20, // 1 MB
-		EnableCORS:     true,    // Enable CORS for local HTTP clients
-		RequireAuth:    true,    // Enabled by default for security
-		APIKeys:        []string{},
-		TLSCertFile:    defaultCertFile,
-		TLSKeyFile:     defaultKeyFile,
-		RESTEnabled:    true, // REST API enabled by default
+		Addr:            ":8081", // Different from existing web server (:8080)
+		ReadTimeout:     30 * time.Second,
+		WriteTimeout:    30 * time.Second,
+		MaxHeaderBytes:  1 << 20, // 1 MB
+		EnableCORS:      true,    // Enable CORS for local HTTP clients
+		RequireAuth:     true,    // Enabled by default for security
+		APIKeys:         []string{},
+		TLSCertFile:     defaultCertFile,
+		TLSKeyFile:      defaultKeyFile,
+		RESTEnabled:     true, // REST API enabled by default
 		SecurityHeaders: DefaultSecurityHeaders(),
 		TLSMinVersion:   tls.VersionTLS12,
 		TLSClientAuth:   tls.NoClientCert,
@@ -224,7 +224,7 @@ type WebSocketHub struct {
 type progressRateLimiter struct {
 	mu       sync.RWMutex
 	lastSent map[*websocket.Conn]time.Time // last send time per connection
-	interval time.Duration                  // minimum interval between sends
+	interval time.Duration                 // minimum interval between sends
 }
 
 // newProgressRateLimiter creates a rate limiter with the specified interval.
@@ -627,7 +627,6 @@ func WithRPCCall(fn func(ctx context.Context, method string, params json.RawMess
 	}
 }
 
-
 // WithNotification enables the notification event system.
 func WithNotification(emitter NotificationEmitter) ServerOption {
 	return func(s *Server) {
@@ -647,6 +646,7 @@ func WithPTY(h *PTYHandler) ServerOption {
 		}
 	}
 }
+
 // ServerOption is a functional option for configuring a Server.
 type ServerOption func(*Server)
 
@@ -754,9 +754,9 @@ func (l *tlsDetectListener) Accept() (net.Conn, error) {
 		}
 		// Peek at the first byte with a short timeout
 		// 10 second timeout for TLS handshake - gives Flutter/Dart time to complete
-        // certificate verification. Shorter timeouts (2s) cause EOF errors when
-        // the client's cert validation takes longer than expected.
-        if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		// certificate verification. Shorter timeouts (2s) cause EOF errors when
+		// the client's cert validation takes longer than expected.
+		if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
 			conn.Close()
 			continue
 		}
@@ -1107,7 +1107,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
 			w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
-			w.Header().Set("Vary", "Origin")  // D13: Prevent cache poisoning via CDN/proxy
+			w.Header().Set("Vary", "Origin") // D13: Prevent cache poisoning via CDN/proxy
 
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusOK)

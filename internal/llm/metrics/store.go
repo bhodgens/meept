@@ -715,10 +715,10 @@ type RateLimitEntry struct {
 
 // RateLimitSummary holds aggregated rate limit statistics.
 type RateLimitSummary struct {
-	Total24h      int                         // Total rate limit errors in last 24h
-	ByProvider    map[string]int              // Count by provider_id
-	ByModel       map[string]int              // Count by model_id
-	RecentEntries []RateLimitEntry            // Last N rate limit events (limit with query param)
+	Total24h      int              // Total rate limit errors in last 24h
+	ByProvider    map[string]int   // Count by provider_id
+	ByModel       map[string]int   // Count by model_id
+	RecentEntries []RateLimitEntry // Last N rate limit events (limit with query param)
 }
 
 // GetRateLimitSummary returns aggregated rate limit error statistics.

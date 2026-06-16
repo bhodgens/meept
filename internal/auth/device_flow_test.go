@@ -14,9 +14,9 @@ func TestStartDeviceFlow_Success(t *testing.T) {
 	wantResp := deviceCodeResponse{
 		DeviceCode:      "dc_abc123",
 		UserCode:        "ABCD-1234",
-		VerificationURI:  "https://github.com/login/device",
-		ExpiresIn:        900,
-		Interval:         5,
+		VerificationURI: "https://github.com/login/device",
+		ExpiresIn:       900,
+		Interval:        5,
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -57,9 +57,9 @@ func TestStartDeviceFlow_DefaultInterval(t *testing.T) {
 	resp := deviceCodeResponse{
 		DeviceCode:      "dc_abc",
 		UserCode:        "ABCD-1234",
-		VerificationURI:  "https://example.com",
-		ExpiresIn:        600,
-		Interval:         0, // server returns 0
+		VerificationURI: "https://example.com",
+		ExpiresIn:       600,
+		Interval:        0, // server returns 0
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +115,7 @@ func writeTokenError(w http.ResponseWriter, code, desc string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
 	json.NewEncoder(w).Encode(tokenResponse{
-		Error:    code,
+		Error:     code,
 		ErrorDesc: desc,
 	})
 }

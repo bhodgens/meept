@@ -406,7 +406,7 @@ func (s *SQLiteStore) GetSignoffs(ctx context.Context, planID string) ([]*PlanSi
 	for rows.Next() {
 		var (
 			id, planID, sessionID, by, action, createdAt string
-			phaseID, comment                              sql.NullString
+			phaseID, comment                             sql.NullString
 		)
 		if err := rows.Scan(&id, &planID, &phaseID, &sessionID, &by, &action, &comment, &createdAt); err != nil {
 			s.logger.Error("Failed to scan signoff", "error", err)
@@ -481,13 +481,13 @@ func (s *SQLiteStore) CountPlansBySessionAndState(ctx context.Context, sessionID
 
 func (s *SQLiteStore) scanPlan(row *sql.Row) (*Plan, error) {
 	var (
-		id, title, filePath, state   string
-		createdAt, updatedAt         string
-		description, projectID       sql.NullString
-		taskID, sourceSession        sql.NullString
-		approvedAt, confirmedAt      sql.NullString
-		approvedBy, confirmedBy      sql.NullString
-		revisionCount                int
+		id, title, filePath, state string
+		createdAt, updatedAt       string
+		description, projectID     sql.NullString
+		taskID, sourceSession      sql.NullString
+		approvedAt, confirmedAt    sql.NullString
+		approvedBy, confirmedBy    sql.NullString
+		revisionCount              int
 	)
 
 	err := row.Scan(&id, &title, &description, &filePath, &projectID, &state, &taskID,
@@ -509,13 +509,13 @@ func (s *SQLiteStore) scanPlans(rows *sql.Rows) ([]*Plan, error) {
 	var plans []*Plan
 	for rows.Next() {
 		var (
-			id, title, filePath, state   string
-			createdAt, updatedAt         string
-			description, projectID       sql.NullString
-			taskID, sourceSession        sql.NullString
-			approvedAt, confirmedAt      sql.NullString
-			approvedBy, confirmedBy      sql.NullString
-			revisionCount                int
+			id, title, filePath, state string
+			createdAt, updatedAt       string
+			description, projectID     sql.NullString
+			taskID, sourceSession      sql.NullString
+			approvedAt, confirmedAt    sql.NullString
+			approvedBy, confirmedBy    sql.NullString
+			revisionCount              int
 		)
 
 		err := rows.Scan(&id, &title, &description, &filePath, &projectID, &state, &taskID,
@@ -591,7 +591,6 @@ func buildPlan(id, title, filePath, state, createdAt, updatedAt string,
 
 	return p, nil
 }
-
 
 // ---------- Nullable helpers ----------
 

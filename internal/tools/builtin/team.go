@@ -132,13 +132,13 @@ func (t *TeamCreateTool) Parameters() llm.FunctionParameters {
 
 // TeamCreateResult is returned after creating a team.
 type TeamCreateResult struct {
-	TeamID       string   `json:"team_id"`
-	Success      bool     `json:"success"`
-	LeadAgent    string   `json:"lead_agent"`
-	Roster       []string `json:"roster"`
+	TeamID        string   `json:"team_id"`
+	Success       bool     `json:"success"`
+	LeadAgent     string   `json:"lead_agent"`
+	Roster        []string `json:"roster"`
 	MaxConcurrent int      `json:"max_concurrent"`
-	Mode         string   `json:"mode"`
-	Message      string   `json:"message"`
+	Mode          string   `json:"mode"`
+	Message       string   `json:"message"`
 }
 
 func (t *TeamCreateTool) Execute(ctx context.Context, args map[string]any) (any, error) {
@@ -569,11 +569,11 @@ func (t *TeamResultTool) Parameters() llm.FunctionParameters {
 
 // TeamResultSubmitResult is returned after submitting a team result.
 type TeamResultSubmitResult struct {
-	Success  bool     `json:"success"`
-	TeamID   string   `json:"team_id"`
-	AgentID  string   `json:"agent_id"`
-	Status   string   `json:"status"`
-	Message  string   `json:"message"`
+	Success bool   `json:"success"`
+	TeamID  string `json:"team_id"`
+	AgentID string `json:"agent_id"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
 }
 
 func (t *TeamResultTool) Execute(ctx context.Context, args map[string]any) (any, error) {
@@ -695,13 +695,13 @@ func (t *TeamPresetCreateTool) Parameters() llm.FunctionParameters {
 
 // TeamPresetCreateResult is returned after creating a team from a preset.
 type TeamPresetCreateResult struct {
-	Success      bool     `json:"success"`
-	TeamID       string   `json:"team_id"`
-	PresetName   string   `json:"preset_name"`
-	LeadAgent    string   `json:"lead_agent"`
-	Roster       []string `json:"roster"`
+	Success       bool     `json:"success"`
+	TeamID        string   `json:"team_id"`
+	PresetName    string   `json:"preset_name"`
+	LeadAgent     string   `json:"lead_agent"`
+	Roster        []string `json:"roster"`
 	MaxConcurrent int      `json:"max_concurrent"`
-	Message      string   `json:"message"`
+	Message       string   `json:"message"`
 }
 
 func (t *TeamPresetCreateTool) Execute(ctx context.Context, args map[string]any) (any, error) {

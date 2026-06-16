@@ -274,7 +274,6 @@ func TestExtractToolOutput(t *testing.T) {
 	}
 }
 
-
 func TestPromptGuardReminderIntervalMinimum(t *testing.T) {
 	// Test that interval is clamped to minimum of 1
 	pg := NewPromptGuardWithInterval(0)

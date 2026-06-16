@@ -7,15 +7,16 @@ import (
 )
 
 // RiskLevel represents the severity of an action.
+//
 //go:generate go run golang.org/x/tools/cmd/stringer -type=RiskLevel
 type RiskLevel int
 
 const (
-	RiskSafe RiskLevel = iota // SAFE
-	RiskLow                   // LOW
-	RiskMedium                // MEDIUM
-	RiskHigh                  // HIGH
-	RiskCritical              // CRITICAL
+	RiskSafe     RiskLevel = iota // SAFE
+	RiskLow                       // LOW
+	RiskMedium                    // MEDIUM
+	RiskHigh                      // HIGH
+	RiskCritical                  // CRITICAL
 )
 
 // Decision represents the result of a permission check.

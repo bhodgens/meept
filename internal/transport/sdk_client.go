@@ -9,17 +9,17 @@ import (
 	"net/http"
 	"time"
 
-	meeptclient "github.com/caimlas/meept/sdk/go"
 	"github.com/caimlas/meept/internal/tui/types"
+	meeptclient "github.com/caimlas/meept/sdk/go"
 )
 
 // SDKClient implements Client using the generated OpenAPI SDK.
 type SDKClient struct {
-	cfg      *meeptclient.Configuration
-	http     *http.Client
-	baseURL  string
-	apiKey   string
-	timeout  time.Duration
+	cfg     *meeptclient.Configuration
+	http    *http.Client
+	baseURL string
+	apiKey  string
+	timeout time.Duration
 }
 
 // NewSDKClient creates a new SDK-backed HTTP client.

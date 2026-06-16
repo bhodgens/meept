@@ -338,11 +338,11 @@ func TestExecutor_ExecuteWithMCPServers_StartupError(t *testing.T) {
 
 func TestSkillExecutionResult_MCPFields(t *testing.T) {
 	result := &SkillExecutionResult{
-		Content:           "response",
-		Model:             "model-a",
-		PromptTokens:      10,
-		CompletionTokens:  5,
-		TotalTokens:       15,
+		Content:          "response",
+		Model:            "model-a",
+		PromptTokens:     10,
+		CompletionTokens: 5,
+		TotalTokens:      15,
 		MCPTools: []ToolDef{
 			{Name: "myserver.tool_a", Description: "A tool", ServerName: "myserver"},
 			{Name: "myserver.tool_b", Description: "B tool", ServerName: "myserver"},

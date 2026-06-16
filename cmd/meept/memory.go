@@ -281,18 +281,18 @@ func runVectorStats() error {
 	}
 
 	var stats struct {
-		LoadedShards  int    `json:"loaded_shards"`
-		MaxRAMShards  int    `json:"max_ram_shards"`
-		LRUHits       int64  `json:"lru_hits"`
-		LRUMisses     int64  `json:"lru_misses"`
-		LRUEvictions  int64  `json:"lru_evictions"`
-		ShardDetails  map[string]struct {
-			Dimension      int   `json:"dimension"`
-			M              int   `json:"m"`
-			EFConstruction int   `json:"ef_construction"`
-			EFSearch       int   `json:"ef_search"`
-			VectorCount    int64 `json:"vector_count"`
-			DatabaseSize   int64 `json:"database_size_bytes"`
+		LoadedShards int   `json:"loaded_shards"`
+		MaxRAMShards int   `json:"max_ram_shards"`
+		LRUHits      int64 `json:"lru_hits"`
+		LRUMisses    int64 `json:"lru_misses"`
+		LRUEvictions int64 `json:"lru_evictions"`
+		ShardDetails map[string]struct {
+			Dimension      int    `json:"dimension"`
+			M              int    `json:"m"`
+			EFConstruction int    `json:"ef_construction"`
+			EFSearch       int    `json:"ef_search"`
+			VectorCount    int64  `json:"vector_count"`
+			DatabaseSize   int64  `json:"database_size_bytes"`
 			ShardID        string `json:"shard_id"`
 		} `json:"shard_details"`
 	}

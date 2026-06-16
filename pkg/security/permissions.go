@@ -14,7 +14,7 @@ type RiskLevel int
 //go:generate go run golang.org/x/tools/cmd/stringer -type=RiskLevel -linecomment
 
 const (
-	RiskSafe RiskLevel = iota   // SAFE
+	RiskSafe     RiskLevel = iota // SAFE
 	RiskLow                       // LOW
 	RiskMedium                    // MEDIUM
 	RiskHigh                      // HIGH

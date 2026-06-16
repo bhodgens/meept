@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
-	"github.com/caimlas/meept/internal/calendar"
 	botpkg "github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/calendar"
 	"github.com/caimlas/meept/internal/cluster"
 	"github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/config"

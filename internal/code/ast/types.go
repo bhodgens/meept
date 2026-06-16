@@ -196,10 +196,10 @@ type QueryResult struct {
 
 // ContextMatch wraps a QueryMatch with surrounding source context.
 type ContextMatch struct {
-	Match          QueryMatch `json:"match"`
-	BeforeContext  []string   `json:"before_context,omitempty"`
-	AfterContext   []string   `json:"after_context,omitempty"`
-	MatchedLines   []string   `json:"matched_lines,omitempty"`
+	Match         QueryMatch `json:"match"`
+	BeforeContext []string   `json:"before_context,omitempty"`
+	AfterContext  []string   `json:"after_context,omitempty"`
+	MatchedLines  []string   `json:"matched_lines,omitempty"`
 }
 
 // SymbolFilter specifies which symbol kinds to include.

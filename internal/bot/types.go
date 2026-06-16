@@ -53,26 +53,26 @@ func (t *BotTrigger) Validate() error {
 }
 
 type BotConstraints struct {
-	MaxIterations       int           `json:"max_iterations"`
-	Timeout             time.Duration `json:"timeout"`
-	MaxTokensPerTurn    int           `json:"max_tokens_per_turn,omitempty"`
-	DailyBudgetCents    int           `json:"daily_budget_cents,omitempty"`
-	MaxInvocationsPerDay int          `json:"max_invocations_per_day,omitempty"`
+	MaxIterations        int           `json:"max_iterations"`
+	Timeout              time.Duration `json:"timeout"`
+	MaxTokensPerTurn     int           `json:"max_tokens_per_turn,omitempty"`
+	DailyBudgetCents     int           `json:"daily_budget_cents,omitempty"`
+	MaxInvocationsPerDay int           `json:"max_invocations_per_day,omitempty"`
 }
 
 type BotDefinition struct {
-	ID          string       `json:"id"`
-	Name        string       `json:"name"`
-	Description string       `json:"description"`
-	Prompt      string       `json:"prompt"`
-	Model       string       `json:"model,omitempty"`
-	Triggers    []BotTrigger `json:"triggers"`
-	MemoryScope MemoryScope  `json:"memory_scope"`
-	Tools       []string     `json:"tools"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Prompt      string         `json:"prompt"`
+	Model       string         `json:"model,omitempty"`
+	Triggers    []BotTrigger   `json:"triggers"`
+	MemoryScope MemoryScope    `json:"memory_scope"`
+	Tools       []string       `json:"tools"`
 	Constraints BotConstraints `json:"constraints"`
-	Enabled     bool         `json:"enabled"`
-	CreatedAt   time.Time    `json:"created_at"`
-	UpdatedAt   time.Time    `json:"updated_at"`
+	Enabled     bool           `json:"enabled"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
 }
 
 func (d *BotDefinition) Validate() error {

@@ -7,15 +7,15 @@ import (
 
 // PendingChange represents a file modification awaiting acceptance.
 type PendingChange struct {
-	ID          string            `json:"id"`
-	SessionID   string            `json:"session_id"`
-	FilePath    string            `json:"file_path"`
-	Original    string            `json:"original"`      // Original file content
-	Modified    string            `json:"modified"`      // Modified content (preview)
-	Diff        string            `json:"diff"`          // Unified diff preview
-	CreatedAt   time.Time         `json:"created_at"`
-	ExpiresAt   *time.Time        `json:"expires_at,omitempty"`
-	Metadata    map[string]any    `json:"metadata,omitempty"`
+	ID        string         `json:"id"`
+	SessionID string         `json:"session_id"`
+	FilePath  string         `json:"file_path"`
+	Original  string         `json:"original"` // Original file content
+	Modified  string         `json:"modified"` // Modified content (preview)
+	Diff      string         `json:"diff"`     // Unified diff preview
+	CreatedAt time.Time      `json:"created_at"`
+	ExpiresAt *time.Time     `json:"expires_at,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
 }
 
 // PendingChangesRegistry manages session-scoped pending changes.

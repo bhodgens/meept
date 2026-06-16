@@ -6,5 +6,6 @@ package constants
 // so that HTTP transport works out of the box for local development.
 //
 // In production, always replace this with a generated key via:
-//    meept token generate --save
+//
+//	meept token generate --save
 const DefaultDevAPIKey = "meept_dev_default_key_CHANGE_ME"

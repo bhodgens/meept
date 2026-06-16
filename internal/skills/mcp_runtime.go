@@ -24,11 +24,11 @@ type ToolDef struct {
 
 // mcpServerProc tracks a running MCP server process and its discovered tools.
 type mcpServerProc struct {
-	config   MCPServerConfig
-	client   *mcp.Client
+	config    MCPServerConfig
+	client    *mcp.Client
 	transport transport.Transport
-	tools    []ToolDef
-	started  bool
+	tools     []ToolDef
+	started   bool
 }
 
 // MCPRuntime manages the lifecycle of MCP servers for a skill execution.

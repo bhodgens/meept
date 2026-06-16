@@ -3,10 +3,10 @@ package http
 
 import (
 	"context"
-	"strings"
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"nhooyr.io/websocket"
@@ -26,7 +26,7 @@ const (
 type NotificationEvent struct {
 	ID        string                 `json:"id"`
 	Timestamp string                 `json:"timestamp"` // RFC3339
-	Type      NotificationType      `json:"type"`
+	Type      NotificationType       `json:"type"`
 	Title     string                 `json:"title"`
 	Message   string                 `json:"message"`
 	Data      map[string]interface{} `json:"data,omitempty"`
@@ -92,10 +92,10 @@ func (h *NotificationHandler) ServeWebSocket(w http.ResponseWriter, req *http.Re
 	}
 
 	conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
-		CompressionMode:     websocket.CompressionContextTakeover,
-		OriginPatterns:      defaultWSOrigins,
-		InsecureSkipVerify:  true, // Allow non-TLS for localhost
-		})
+		CompressionMode:    websocket.CompressionContextTakeover,
+		OriginPatterns:     defaultWSOrigins,
+		InsecureSkipVerify: true, // Allow non-TLS for localhost
+	})
 	if err != nil {
 		h.logger.Error("failed to accept websocket connection", "error", err)
 		http.Error(w, "failed to accept connection", http.StatusBadRequest)

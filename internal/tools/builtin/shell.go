@@ -15,10 +15,10 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/pty"
 	"github.com/caimlas/meept/internal/runtime"
 	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/tools"
-	"github.com/caimlas/meept/internal/pty"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
@@ -31,13 +31,14 @@ const (
 )
 
 // ShellCommandRisk represents the risk level of a shell command.
+//
 //go:generate go run golang.org/x/tools/cmd/stringer -type=ShellCommandRisk
 type ShellCommandRisk int
 
 const (
-	RiskMedium ShellCommandRisk = iota // MEDIUM
-	RiskHigh                           // HIGH
-	RiskCritical                       // CRITICAL
+	RiskMedium   ShellCommandRisk = iota // MEDIUM
+	RiskHigh                             // HIGH
+	RiskCritical                         // CRITICAL
 )
 
 // readOnlyCommands are considered low-risk read operations.
@@ -86,7 +87,7 @@ type ShellExecuteTool struct {
 	defaultTimeout    time.Duration
 	securityOrch      *intsecurity.Orchestrator
 	knownSafeCommands map[string]struct{}
-	containerMgr        *runtime.ContainerManager
+	containerMgr      *runtime.ContainerManager
 	backend           runtime.ExecutionBackend
 	logger            *slog.Logger
 	ptyMgr            *pty.Manager

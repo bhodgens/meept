@@ -20,10 +20,10 @@ type GitSync struct {
 	logger   *slog.Logger
 	localCfg *Config
 
-	mu       sync.Mutex
-	running  bool
-	stopCh   chan struct{}
-	doneCh   chan struct{}
+	mu      sync.Mutex
+	running bool
+	stopCh  chan struct{}
+	doneCh  chan struct{}
 
 	// Git repository path (local clone of the membership registry)
 	gitRepoPath string

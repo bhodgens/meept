@@ -310,7 +310,6 @@ func parseTime(timeStr string) (hour, minute int, err error) {
 	return 0, 0, fmt.Errorf("invalid time format: %s", timeStr)
 }
 
-
 // dayOfWeekToNumber converts a day name to cron dow number (0-6, Sunday=0).
 func dayOfWeekToNumber(day string) (int, error) {
 	day = strings.ToLower(strings.TrimSpace(day))

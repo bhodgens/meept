@@ -25,10 +25,10 @@ type TeamPreset struct {
 // builtInPresets is the registry of available team presets.
 var builtInPresets = map[string]TeamPreset{
 	"hyperplan": {
-		Name:        "hyperplan",
-		Description: "5 diverse critic agents review a plan simultaneously from different perspectives",
-		LeadAgent:   "planner",
-		Roster:      []string{"analyst", "coder", "debugger", "planner", "analyst"},
+		Name:          "hyperplan",
+		Description:   "5 diverse critic agents review a plan simultaneously from different perspectives",
+		LeadAgent:     "planner",
+		Roster:        []string{"analyst", "coder", "debugger", "planner", "analyst"},
 		MaxConcurrent: 5,
 		PromptTemplate: `## Hyperplan: Multi-Perspective Plan Review
 
@@ -54,10 +54,10 @@ You are one of 5 specialist critics reviewing this plan. Each critic examines th
 `,
 	},
 	"security_research": {
-		Name:        "security_research",
-		Description: "3 hunters find vulnerabilities + 2 PoC engineers write proof-of-concept exploits",
-		LeadAgent:   "analyst",
-		Roster:      []string{"coder", "coder", "coder", "debugger", "debugger"},
+		Name:          "security_research",
+		Description:   "3 hunters find vulnerabilities + 2 PoC engineers write proof-of-concept exploits",
+		LeadAgent:     "analyst",
+		Roster:        []string{"coder", "coder", "coder", "debugger", "debugger"},
 		MaxConcurrent: 5,
 		PromptTemplate: `## Security Research Team
 

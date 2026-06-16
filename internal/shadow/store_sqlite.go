@@ -257,7 +257,7 @@ func (s *SQLiteTrainingStore) ListRecords(ctx context.Context, opts ListRecordsO
 	if len(conditions) > 0 {
 		// #nosec G202 -- conditions use parameterized ? placeholders; dynamic WHERE is safe
 		query += " WHERE " + strings.Join(conditions, " AND ") // #nosec G202 -- conditions use parameterized ? placeholders; dynamic WHERE is safe
-	//nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
+		//nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
 	}
 	query += " ORDER BY created_at DESC"
 
@@ -377,7 +377,7 @@ func (s *SQLiteTrainingStore) ListPreferencePairs(ctx context.Context, opts List
 	if len(conditions) > 0 {
 		// #nosec G202 -- conditions use parameterized ? placeholders; dynamic WHERE is safe
 		query += " WHERE " + strings.Join(conditions, " AND ") // #nosec G202 -- conditions use parameterized ? placeholders; dynamic WHERE is safe
-	//nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
+		//nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
 	}
 	query += " ORDER BY margin DESC"
 
@@ -834,7 +834,7 @@ func (s *SQLiteExamplesStore) ListExamples(ctx context.Context, domain Domain, t
 	if len(conditions) > 0 {
 		// #nosec G202 -- conditions use parameterized ? placeholders; dynamic WHERE is safe
 		query += " WHERE " + strings.Join(conditions, " AND ") // #nosec G202 -- conditions use parameterized ? placeholders; dynamic WHERE is safe
-	//nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
+		//nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
 	}
 	query += " ORDER BY quality_score DESC, created_at DESC"
 

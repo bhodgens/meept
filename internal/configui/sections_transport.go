@@ -1,7 +1,6 @@
 // internal/configui/sections_transport.go
 package configui
 
-
 func buildTransportFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	t := &cfg.Transport

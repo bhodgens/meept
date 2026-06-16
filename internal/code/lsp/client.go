@@ -456,6 +456,7 @@ func (c *Client) WillRenameFiles(ctx context.Context, oldURI, newURI string) (*W
 
 	return &edit, nil
 }
+
 // TypeDefinition finds the type definition of a symbol at a position.
 func (c *Client) TypeDefinition(ctx context.Context, uri string, line, char int) ([]Location, error) {
 	params := TextDocumentPositionParams{

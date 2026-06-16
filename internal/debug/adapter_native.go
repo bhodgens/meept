@@ -25,23 +25,23 @@ const (
 
 // CoreDumpResult holds the parsed output of a core dump analysis.
 type CoreDumpResult struct {
-	Adapter    CoreAdapterType `json:"adapter"`
-	Program     string         `json:"program"`
-	CoreFile    string         `json:"core_file"`
-	Signal      string         `json:"signal,omitempty"`       // e.g. "SIGSEGV", "SIGABRT"
-	FaultAddr   string         `json:"fault_addr,omitempty"`   // Address that caused the fault
-	CrashReason string         `json:"crash_reason,omitempty"` // Human-readable crash reason
-	Threads     []CoreThread   `json:"threads,omitempty"`
-	Variables   []CoreVariable `json:"variables,omitempty"`
-	RawOutput   string         `json:"raw_output,omitempty"`
+	Adapter     CoreAdapterType `json:"adapter"`
+	Program     string          `json:"program"`
+	CoreFile    string          `json:"core_file"`
+	Signal      string          `json:"signal,omitempty"`       // e.g. "SIGSEGV", "SIGABRT"
+	FaultAddr   string          `json:"fault_addr,omitempty"`   // Address that caused the fault
+	CrashReason string          `json:"crash_reason,omitempty"` // Human-readable crash reason
+	Threads     []CoreThread    `json:"threads,omitempty"`
+	Variables   []CoreVariable  `json:"variables,omitempty"`
+	RawOutput   string          `json:"raw_output,omitempty"`
 }
 
 // CoreThread represents a thread from a core dump.
 type CoreThread struct {
-	ID        int           `json:"id"`
-	IsCrashed bool          `json:"is_crashed"`
-	Stack     []CoreFrame   `json:"stack,omitempty"`
-	Reason    string        `json:"reason,omitempty"`
+	ID        int         `json:"id"`
+	IsCrashed bool        `json:"is_crashed"`
+	Stack     []CoreFrame `json:"stack,omitempty"`
+	Reason    string      `json:"reason,omitempty"`
 }
 
 // CoreFrame represents a single stack frame.

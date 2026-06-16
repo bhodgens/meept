@@ -1,7 +1,6 @@
 // internal/configui/sections_daemon.go
 package configui
 
-
 func buildDaemonFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	d := &cfg.Daemon

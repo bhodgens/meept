@@ -15,8 +15,8 @@ import (
 
 // GitCommitTool creates git commits with validation and multi-commit support.
 type GitCommitTool struct {
-	workingDir    string
-	fenceChecker  FenceChecker
+	workingDir   string
+	fenceChecker FenceChecker
 }
 
 // BatchCommitEntry represents a single commit in a batch operation.
@@ -27,9 +27,9 @@ type BatchCommitEntry struct {
 
 // BatchCommitResult contains results from a multi-commit batch operation.
 type BatchCommitResult struct {
-	Success  bool            `json:"success"`
-	Commits  []GitCommitResult `json:"commits,omitempty"`
-	Message  string           `json:"message"`
+	Success bool              `json:"success"`
+	Commits []GitCommitResult `json:"commits,omitempty"`
+	Message string            `json:"message"`
 }
 
 // NewGitCommitTool creates a new git commit tool.

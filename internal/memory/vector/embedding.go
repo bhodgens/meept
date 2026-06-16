@@ -317,8 +317,8 @@ func NewProviderFromConfig(cfg config.EmbeddingConfig) (Provider, error) {
 
 	case "sentence-transformer":
 		return NewSentenceTransformerProvider(SentenceTransformerConfig{
-			ModelID:     cfg.Model,
-			TargetDim:   cfg.Dimension,
+			ModelID:   cfg.Model,
+			TargetDim: cfg.Dimension,
 		})
 
 	default:

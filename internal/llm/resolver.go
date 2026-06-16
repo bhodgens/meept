@@ -26,15 +26,15 @@ type SkillRequirements struct {
 
 // Resolver resolves model selection based on capability matching.
 type Resolver struct {
-	config       *ProvidersConfig
-	defaultModel *ModelConfig
-	smallModel   *ModelConfig
-	allModels    []*ModelConfig
-	aliases      map[string]*AliasEntry
-	health       map[string]*AliasHealth
+	config        *ProvidersConfig
+	defaultModel  *ModelConfig
+	smallModel    *ModelConfig
+	allModels     []*ModelConfig
+	aliases       map[string]*AliasEntry
+	health        map[string]*AliasHealth
 	pricingSyncer *PricingSyncer
-	mu           sync.Mutex
-	logger       *slog.Logger
+	mu            sync.Mutex
+	logger        *slog.Logger
 }
 
 // NewResolver creates a new model resolver.

@@ -30,12 +30,12 @@ func DefaultTreeContextOptions() TreeContextOptions {
 
 // TreeContextResult contains the generated tree context.
 type TreeContextResult struct {
-	String         string
-	MarkedLines    []int
-	Scopes         []TreeScope
-	Language       Language
-	FilePath       string
-	TotalLines     int
+	String      string
+	MarkedLines []int
+	Scopes      []TreeScope
+	Language    Language
+	FilePath    string
+	TotalLines  int
 }
 
 // TreeScope represents a structural scope in the code.
@@ -239,28 +239,28 @@ type scopeInfo struct {
 
 var scopeKinds = map[string]map[string]*scopeInfo{
 	"go": {
-		"function_declaration":   {NodeType: "function_declaration", Kind: "function"},
-		"method_declaration":     {NodeType: "method_declaration", Kind: "method"},
-		"type_declaration":       {NodeType: "type_declaration", Kind: "type"},
-		"interface_declaration":  {NodeType: "interface_declaration", Kind: "interface"},
-		"struct_declaration":     {NodeType: "struct_declaration", Kind: "struct"},
-		"block":                  {NodeType: "block", Kind: "block"},
+		"function_declaration":  {NodeType: "function_declaration", Kind: "function"},
+		"method_declaration":    {NodeType: "method_declaration", Kind: "method"},
+		"type_declaration":      {NodeType: "type_declaration", Kind: "type"},
+		"interface_declaration": {NodeType: "interface_declaration", Kind: "interface"},
+		"struct_declaration":    {NodeType: "struct_declaration", Kind: "struct"},
+		"block":                 {NodeType: "block", Kind: "block"},
 	},
 	"python": {
-		"function_definition":    {NodeType: "function_definition", Kind: "function"},
-		"class_definition":       {NodeType: "class_definition", Kind: "class"},
+		"function_definition": {NodeType: "function_definition", Kind: "function"},
+		"class_definition":    {NodeType: "class_definition", Kind: "class"},
 	},
 	"typescript": {
-		"function_declaration":   {NodeType: "function_declaration", Kind: "function"},
-		"method_definition":      {NodeType: "method_definition", Kind: "method"},
-		"class_declaration":      {NodeType: "class_declaration", Kind: "class"},
-		"interface_declaration":  {NodeType: "interface_declaration", Kind: "interface"},
+		"function_declaration":  {NodeType: "function_declaration", Kind: "function"},
+		"method_definition":     {NodeType: "method_definition", Kind: "method"},
+		"class_declaration":     {NodeType: "class_declaration", Kind: "class"},
+		"interface_declaration": {NodeType: "interface_declaration", Kind: "interface"},
 	},
 	"rust": {
-		"function_item":          {NodeType: "function_item", Kind: "function"},
-		"impl_item":              {NodeType: "impl_item", Kind: "impl"},
-		"struct_item":            {NodeType: "struct_item", Kind: "struct"},
-		"enum_item":              {NodeType: "enum_item", Kind: "enum"},
+		"function_item": {NodeType: "function_item", Kind: "function"},
+		"impl_item":     {NodeType: "impl_item", Kind: "impl"},
+		"struct_item":   {NodeType: "struct_item", Kind: "struct"},
+		"enum_item":     {NodeType: "enum_item", Kind: "enum"},
 	},
 }
 

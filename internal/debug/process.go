@@ -142,17 +142,17 @@ func DetectAdapterForProcess(pid int) (*AdapterConfig, error) {
 	// Extension-based detection failed. Try heuristic: check for known binary names.
 	base := baseName(binary)
 	nameToAdapter := map[string]string{
-		"dlv":      "dlv",
-		"python":   "debugpy",
-		"python3":  "debugpy",
-		"python3.8": "debugpy",
-		"python3.9": "debugpy",
+		"dlv":        "dlv",
+		"python":     "debugpy",
+		"python3":    "debugpy",
+		"python3.8":  "debugpy",
+		"python3.9":  "debugpy",
 		"python3.10": "debugpy",
 		"python3.11": "debugpy",
 		"python3.12": "debugpy",
 		"python3.13": "debugpy",
-		"go":       "dlv",
-		"node":     "debugpy",
+		"go":         "dlv",
+		"node":       "debugpy",
 	}
 
 	if adapterName, ok := nameToAdapter[base]; ok {

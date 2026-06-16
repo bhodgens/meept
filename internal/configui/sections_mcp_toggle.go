@@ -1,7 +1,6 @@
 // internal/configui/sections_mcp_toggle.go
 package configui
 
-
 func buildMCPFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.MCP

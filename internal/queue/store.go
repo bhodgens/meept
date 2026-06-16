@@ -206,12 +206,12 @@ func (s *Store) applyClusterSchema() error {
 	if err == nil {
 		for rows.Next() {
 			var (
-				cid        int
-				name       string
-				ctype      string
-				notnull    int
-				dfltValue  sql.NullString
-				pk         int
+				cid       int
+				name      string
+				ctype     string
+				notnull   int
+				dfltValue sql.NullString
+				pk        int
 			)
 			if err2 := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err2 == nil {
 				existingCols = append(existingCols, name)
@@ -798,7 +798,7 @@ func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
 		payload,
 		capsJSON,
 		maxRetries,
-		0, // Reset retry_count
+		0,              // Reset retry_count
 		(*string)(nil), // claimed_by
 		(*string)(nil), // result
 		(*string)(nil), // Reset error
@@ -960,12 +960,12 @@ func (s *Store) GetClusterMembers() ([]*ClusterMember, error) {
 // scanClusterMember scans a row into a ClusterMember struct.
 func (s *Store) scanClusterMember(row Scanner, m *ClusterMember) error {
 	var (
-		joinedAt, lastHb        int64
-		signingPubRaw           []byte
-		capabilities, endpoint  string
-		wireguardPub, nodeID    string
-		nodeName, clusterIP     sql.NullString
-		status                  string
+		joinedAt, lastHb       int64
+		signingPubRaw          []byte
+		capabilities, endpoint string
+		wireguardPub, nodeID   string
+		nodeName, clusterIP    sql.NullString
+		status                 string
 	)
 	if err := row.Scan(&nodeID, &nodeName, &wireguardPub, &signingPubRaw,
 		&endpoint, &capabilities, &clusterIP,
@@ -997,17 +997,17 @@ func (s *Store) scanClusterMember(row Scanner, m *ClusterMember) error {
 
 // ClusterMember is a simplified representation of a cluster peer.
 type ClusterMember struct {
-	NodeID       string        `json:"node_id"`
-	NodeName     string        `json:"node_name"`
-	WireGuardPub string        `json:"wireguard_pubkey"`
-	SigningPub   ed25519.PublicKey `json:"signing_pubkey"`
-	WireGuardKey []byte        `json:"-"`
-	Capabilities []string      `json:"capabilities"`
-	Endpoint     string        `json:"endpoint"`
-	ClusterIP    string        `json:"cluster_ip"`
-	JoinedAt     time.Time     `json:"joined_at"`
-	LastHeartbeat time.Time    `json:"last_heartbeat"`
-	Status       string        `json:"status"`
+	NodeID        string            `json:"node_id"`
+	NodeName      string            `json:"node_name"`
+	WireGuardPub  string            `json:"wireguard_pubkey"`
+	SigningPub    ed25519.PublicKey `json:"signing_pubkey"`
+	WireGuardKey  []byte            `json:"-"`
+	Capabilities  []string          `json:"capabilities"`
+	Endpoint      string            `json:"endpoint"`
+	ClusterIP     string            `json:"cluster_ip"`
+	JoinedAt      time.Time         `json:"joined_at"`
+	LastHeartbeat time.Time         `json:"last_heartbeat"`
+	Status        string            `json:"status"`
 }
 
 // Scanner is a minimal interface for rows/row.

@@ -1,7 +1,6 @@
 // internal/configui/sections_llm.go
 package configui
 
-
 func buildLLMFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	llm := &cfg.LLM

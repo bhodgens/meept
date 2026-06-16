@@ -15,8 +15,8 @@ import (
 // LinterResult represents the output of a linting run
 type LinterResult struct {
 	File     string
-	Line     int    // 0-based line number
-	Column   int    // 0-based column (optional)
+	Line     int // 0-based line number
+	Column   int // 0-based column (optional)
 	Message  string
 	Severity string // "error" | "warning" | "info"
 	Rule     string // Lint rule identifier

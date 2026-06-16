@@ -1,7 +1,6 @@
 // internal/configui/sections_distributed_memory.go
 package configui
 
-
 func buildDistributedMemoryFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.DistributedMemory

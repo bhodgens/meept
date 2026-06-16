@@ -59,7 +59,6 @@ func TestTiktokenTokenizer(t *testing.T) {
 	}
 }
 
-
 func TestNewTokenizerForModel(t *testing.T) {
 	tests := []struct {
 		name          string

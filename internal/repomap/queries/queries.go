@@ -9,6 +9,7 @@ import (
 )
 
 // queriesFS embeds the query files.
+//
 //go:embed "go"
 //go:embed "python"
 //go:embed "typescript"

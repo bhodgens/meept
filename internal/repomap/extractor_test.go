@@ -179,8 +179,8 @@ func TestFilterTagsByKind(t *testing.T) {
 func TestDeduplicateTags(t *testing.T) {
 	tags := []Tag{
 		{FName: "test.go", Line: 10, Name: "Foo", IsDef: true},
-		{FName: "test.go", Line: 10, Name: "Foo", IsDef: true}, // duplicate
-		{FName: "test.go", Line: 15, Name: "Foo", IsDef: true}, // different line
+		{FName: "test.go", Line: 10, Name: "Foo", IsDef: true},  // duplicate
+		{FName: "test.go", Line: 15, Name: "Foo", IsDef: true},  // different line
 		{FName: "test.go", Line: 10, Name: "Bar", IsDef: false}, // different name
 	}
 

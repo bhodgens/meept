@@ -36,7 +36,7 @@ func WithRefreshMargin(d time.Duration) RefreshManagerOption {
 // The manager must be started with Start and stopped with Stop.
 func NewRefreshManager(store *TokenStore, opts ...RefreshManagerOption) *RefreshManager {
 	rm := &RefreshManager{
-		store: store,
+		store:  store,
 		margin: 10 * time.Minute,
 		fails:  make(map[string]int),
 		done:   make(chan struct{}),

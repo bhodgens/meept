@@ -41,14 +41,14 @@ type BlockResolver interface {
 
 // FileEditTool performs incremental file edits using hashline-anchored line references.
 type FileEditTool struct {
-	checker                 *security.PermissionChecker
-	readCache               *ReadCache
-	lspNotifier             LSPWriteNotifier
-	blockResolver           BlockResolver
-	pendingChangesRegistry  *PendingChangesRegistry
-	fenceChecker            FenceChecker
-	secOrch                 *intsecurity.Orchestrator
-	recoveryConfig          RecoveryConfig
+	checker                *security.PermissionChecker
+	readCache              *ReadCache
+	lspNotifier            LSPWriteNotifier
+	blockResolver          BlockResolver
+	pendingChangesRegistry *PendingChangesRegistry
+	fenceChecker           FenceChecker
+	secOrch                *intsecurity.Orchestrator
+	recoveryConfig         RecoveryConfig
 }
 
 // NewFileEditTool creates a new file edit tool.
@@ -373,19 +373,19 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 	if t.pendingChangesRegistry != nil {
 		// Create pending change instead of applying directly
 		originalContent := string(content)
-		
+
 		// Generate unified diff preview
 		diff := t.generateDiffPreview(resolved, originalContent, output)
-		
+
 		// Create pending change with session ID from context (or generate one)
 		sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
 		if sid, ok := ctx.Value("session_id").(string); ok && sid != "" {
 			sessionID = sid
 		}
-		
+
 		now := time.Now()
 		expiresAt := now.Add(30 * time.Minute) // Default expiry: 30 minutes
-		
+
 		change := &PendingChange{
 			ID:        fmt.Sprintf("change_%s_%d", resolved, now.UnixNano()),
 			SessionID: sessionID,
@@ -402,9 +402,9 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 				"new_lines": len(result),
 			},
 		}
-		
+
 		t.pendingChangesRegistry.Add(change)
-		
+
 		return tools.ToolResult{
 			Success: true,
 			Result: fmt.Sprintf("Created pending change %s for %s (%d edits, %d -> %d lines). Use 'resolve' tool to accept or reject.",
@@ -1035,17 +1035,17 @@ func (t *FileEditTool) generateDiffPreview(filePath, original, modified string) 
 	// Simple unified diff format
 	lines := strings.Split(original, "\n")
 	modLines := strings.Split(modified, "\n")
-	
+
 	var diff []string
 	diff = append(diff, fmt.Sprintf("--- a/%s", filePath))
 	diff = append(diff, fmt.Sprintf("+++ b/%s", filePath))
-	
+
 	// Simple line-by-line comparison
 	maxLen := len(lines)
 	if len(modLines) > maxLen {
 		maxLen = len(modLines)
 	}
-	
+
 	for i := 0; i < maxLen; i++ {
 		oldLine := ""
 		newLine := ""
@@ -1055,7 +1055,7 @@ func (t *FileEditTool) generateDiffPreview(filePath, original, modified string) 
 		if i < len(modLines) {
 			newLine = modLines[i]
 		}
-		
+
 		if i >= len(lines) {
 			// Added line
 			diff = append(diff, fmt.Sprintf("+%s", newLine))
@@ -1068,7 +1068,7 @@ func (t *FileEditTool) generateDiffPreview(filePath, original, modified string) 
 			diff = append(diff, fmt.Sprintf("+%s", newLine))
 		}
 	}
-	
+
 	return strings.Join(diff, "\n")
 }
 

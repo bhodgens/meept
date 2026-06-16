@@ -544,4 +544,3 @@ func atomicCounter() int64 {
 func isParameterError(err error) bool {
 	return errcls.IsParameterError(err)
 }
-

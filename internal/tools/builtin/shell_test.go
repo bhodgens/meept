@@ -340,4 +340,3 @@ func TestClassifyRisk_QuotedPipes(t *testing.T) {
 		})
 	}
 }
-

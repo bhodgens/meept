@@ -513,9 +513,9 @@ func TestTeamMessageTool_Broadcast(t *testing.T) {
 	})
 
 	result, err := tool.Execute(context.Background(), map[string]any{
-		"team_id":       "team-abc",
-		"content":       "starting work now",
-		"message_type":  "info",
+		"team_id":      "team-abc",
+		"content":      "starting work now",
+		"message_type": "info",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -549,7 +549,7 @@ func TestTeamMessageTool_Targeted(t *testing.T) {
 		"team_id":      "team-abc",
 		"content":      "please review my PR",
 		"target_agent": "coder",
-		"message_type":  "request",
+		"message_type": "request",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -678,10 +678,10 @@ func TestTeamResultTool_Success(t *testing.T) {
 	})
 
 	result, err := tool.Execute(context.Background(), map[string]any{
-		"team_id":  "team-abc",
-		"agent_id": "coder",
-		"output":   "implemented login handler with 5 tests",
-		"status":   "completed",
+		"team_id":   "team-abc",
+		"agent_id":  "coder",
+		"output":    "implemented login handler with 5 tests",
+		"status":    "completed",
 		"artifacts": []any{"auth/login.go", "auth/login_test.go"},
 	})
 	if err != nil {
@@ -932,11 +932,11 @@ func TestTeamPresetCreateTool_MissingRequiredParams(t *testing.T) {
 			"preset_name": "hyperplan",
 		}},
 		{"empty preset_name", map[string]any{
-			"preset_name":       "",
+			"preset_name":      "",
 			"task_description": "review this plan",
 		}},
 		{"empty task_description", map[string]any{
-			"preset_name":       "hyperplan",
+			"preset_name":      "hyperplan",
 			"task_description": "",
 		}},
 	}
@@ -974,9 +974,9 @@ func TestTeamPresetCreateTool_Success(t *testing.T) {
 	})
 
 	result, err := tool.Execute(context.Background(), map[string]any{
-		"preset_name":       "hyperplan",
-		"task_description":  "review the authentication system design",
-		"max_concurrent":    float64(3),
+		"preset_name":      "hyperplan",
+		"task_description": "review the authentication system design",
+		"max_concurrent":   float64(3),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

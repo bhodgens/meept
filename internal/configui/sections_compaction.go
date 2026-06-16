@@ -1,7 +1,6 @@
 // internal/configui/sections_compaction.go
 package configui
 
-
 func buildCompactionFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.Compaction

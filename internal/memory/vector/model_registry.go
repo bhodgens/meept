@@ -2,67 +2,67 @@ package vector
 
 // ModelInfo holds metadata about a known sentence-transformer model.
 type ModelInfo struct {
-	ID              string
-	Dimension       int
-	MaxSequenceLen  int
-	ONNXModelPath   string // Path inside the model directory
-	TokenizerPath   string // Path inside the model directory
-	TokenizerType   string // "bert" | "sentencepiece" | "bpe"
-	PoolingMethod   string // "mean" | "cls"
-	Normalize       bool
-	Tags            []string
-	Description     string
+	ID             string
+	Dimension      int
+	MaxSequenceLen int
+	ONNXModelPath  string // Path inside the model directory
+	TokenizerPath  string // Path inside the model directory
+	TokenizerType  string // "bert" | "sentencepiece" | "bpe"
+	PoolingMethod  string // "mean" | "cls"
+	Normalize      bool
+	Tags           []string
+	Description    string
 }
 
 // knownModels is the registry of supported sentence-transformer models.
 var knownModels = map[string]ModelInfo{
 	"nomic-embed-text-v1.5": {
-		ID:              "nomic-embed-text-v1.5",
-		Dimension:       768,
-		MaxSequenceLen:  8192,
-		ONNXModelPath:   "onnx/model.onnx",
-		TokenizerPath:   "tokenizer.json",
-		TokenizerType:   "bpe",
-		PoolingMethod:   "mean",
-		Normalize:       true,
-		Tags:            []string{"nomic", "matryoshka", "text-embedding"},
-		Description:     "Nomic embed text v1.5 -- high-quality English text embeddings with Matryoshka dimension support (768/512/256/128)",
+		ID:             "nomic-embed-text-v1.5",
+		Dimension:      768,
+		MaxSequenceLen: 8192,
+		ONNXModelPath:  "onnx/model.onnx",
+		TokenizerPath:  "tokenizer.json",
+		TokenizerType:  "bpe",
+		PoolingMethod:  "mean",
+		Normalize:      true,
+		Tags:           []string{"nomic", "matryoshka", "text-embedding"},
+		Description:    "Nomic embed text v1.5 -- high-quality English text embeddings with Matryoshka dimension support (768/512/256/128)",
 	},
 	"all-MiniLM-L6-v2": {
-		ID:              "all-MiniLM-L6-v2",
-		Dimension:       384,
-		MaxSequenceLen:  512,
-		ONNXModelPath:   "onnx/model.onnx",
-		TokenizerPath:   "tokenizer.json",
-		TokenizerType:   "bpe",
-		PoolingMethod:   "mean",
-		Normalize:       true,
-		Tags:            []string{"sentence-transformers", "fast", "text-embedding"},
-		Description:     "All-MiniLM-L6-v2 -- fast, compact embeddings suitable for semantic search (384-dim)",
+		ID:             "all-MiniLM-L6-v2",
+		Dimension:      384,
+		MaxSequenceLen: 512,
+		ONNXModelPath:  "onnx/model.onnx",
+		TokenizerPath:  "tokenizer.json",
+		TokenizerType:  "bpe",
+		PoolingMethod:  "mean",
+		Normalize:      true,
+		Tags:           []string{"sentence-transformers", "fast", "text-embedding"},
+		Description:    "All-MiniLM-L6-v2 -- fast, compact embeddings suitable for semantic search (384-dim)",
 	},
 	"all-mpnet-base-v2": {
-		ID:              "all-mpnet-base-v2",
-		Dimension:       768,
-		MaxSequenceLen:  512,
-		ONNXModelPath:   "onnx/model.onnx",
-		TokenizerPath:   "tokenizer.json",
-		TokenizerType:   "bpe",
-		PoolingMethod:   "mean",
-		Normalize:       true,
-		Tags:            []string{"sentence-transformers", "high-quality", "text-embedding"},
-		Description:     "all-mpnet-base-v2 -- high-quality English embeddings from Sentence-Transformers",
+		ID:             "all-mpnet-base-v2",
+		Dimension:      768,
+		MaxSequenceLen: 512,
+		ONNXModelPath:  "onnx/model.onnx",
+		TokenizerPath:  "tokenizer.json",
+		TokenizerType:  "bpe",
+		PoolingMethod:  "mean",
+		Normalize:      true,
+		Tags:           []string{"sentence-transformers", "high-quality", "text-embedding"},
+		Description:    "all-mpnet-base-v2 -- high-quality English embeddings from Sentence-Transformers",
 	},
 	"paraphrase-multilingual-mpnet-base-v2": {
-		ID:              "paraphrase-multilingual-mpnet-base-v2",
-		Dimension:       768,
-		MaxSequenceLen:  512,
-		ONNXModelPath:   "onnx/model.onnx",
-		TokenizerPath:   "tokenizer.json",
-		TokenizerType:   "bpe",
-		PoolingMethod:   "mean",
-		Normalize:       true,
-		Tags:            []string{"sentence-transformers", "multilingual", "text-embedding"},
-		Description:     "paraphrase-multilingual-mpnet-base-v2 -- supports 50+ languages for cross-lingual search",
+		ID:             "paraphrase-multilingual-mpnet-base-v2",
+		Dimension:      768,
+		MaxSequenceLen: 512,
+		ONNXModelPath:  "onnx/model.onnx",
+		TokenizerPath:  "tokenizer.json",
+		TokenizerType:  "bpe",
+		PoolingMethod:  "mean",
+		Normalize:      true,
+		Tags:           []string{"sentence-transformers", "multilingual", "text-embedding"},
+		Description:    "paraphrase-multilingual-mpnet-base-v2 -- supports 50+ languages for cross-lingual search",
 	},
 }
 

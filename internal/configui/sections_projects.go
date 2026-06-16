@@ -1,8 +1,7 @@
 // internal/configui/sections_projects.go
 package configui
 
-import (
-)
+import ()
 
 func buildProjectsFields() []Field {
 	cfg := loadMainConfigOrFallback()

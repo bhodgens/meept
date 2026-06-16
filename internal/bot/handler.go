@@ -42,7 +42,9 @@ func (h *RPCHandler) handleCreate(ctx context.Context, raw json.RawMessage) (any
 }
 
 func (h *RPCHandler) handleGet(ctx context.Context, raw json.RawMessage) (any, error) {
-	var req struct{ ID string `json:"id"` }
+	var req struct {
+		ID string `json:"id"`
+	}
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, err
 	}
@@ -69,7 +71,9 @@ func (h *RPCHandler) handleUpdate(ctx context.Context, raw json.RawMessage) (any
 }
 
 func (h *RPCHandler) handleDelete(ctx context.Context, raw json.RawMessage) (any, error) {
-	var req struct{ ID string `json:"id"` }
+	var req struct {
+		ID string `json:"id"`
+	}
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, err
 	}
@@ -80,7 +84,9 @@ func (h *RPCHandler) handleDelete(ctx context.Context, raw json.RawMessage) (any
 }
 
 func (h *RPCHandler) handlePause(ctx context.Context, raw json.RawMessage) (any, error) {
-	var req struct{ ID string `json:"id"` }
+	var req struct {
+		ID string `json:"id"`
+	}
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, err
 	}
@@ -91,7 +97,9 @@ func (h *RPCHandler) handlePause(ctx context.Context, raw json.RawMessage) (any,
 }
 
 func (h *RPCHandler) handleResume(ctx context.Context, raw json.RawMessage) (any, error) {
-	var req struct{ ID string `json:"id"` }
+	var req struct {
+		ID string `json:"id"`
+	}
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, err
 	}
@@ -102,7 +110,9 @@ func (h *RPCHandler) handleResume(ctx context.Context, raw json.RawMessage) (any
 }
 
 func (h *RPCHandler) handleStatus(ctx context.Context, raw json.RawMessage) (any, error) {
-	var req struct{ ID string `json:"id"` }
+	var req struct {
+		ID string `json:"id"`
+	}
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, err
 	}

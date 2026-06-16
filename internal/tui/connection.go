@@ -154,7 +154,7 @@ func (c *ConnectionConfig) unwrap() *clientConnection {
 		}
 	}
 
-	// "auto" defaults to RPC for now; HTTP client not yet implemented
+	// "auto" defaults to RPC for now
 	if conn.transport == "auto" {
 		conn.transport = "rpc"
 	}

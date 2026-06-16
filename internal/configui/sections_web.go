@@ -1,7 +1,6 @@
 // internal/configui/sections_web.go
 package configui
 
-
 func buildWebFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.Web

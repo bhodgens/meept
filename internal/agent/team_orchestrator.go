@@ -37,14 +37,14 @@ type TeamStartRequest struct {
 
 // TeamSessionState holds the runtime state of an active team session.
 type TeamSessionState struct {
-	SessionID      string                       `json:"session_id"`
-	TaskID         string                       `json:"task_id"`
-	LeadAgent      string                       `json:"lead_agent"`
-	Roster         []string                     `json:"roster"`
-	Phase          string                       `json:"phase"` // "running", "synthesizing", "completed", "failed"
-	MemberResults  map[string]*TeamMemberResult `json:"member_results,omitempty"`
-	FinalOutput    string                       `json:"final_output,omitempty"`
-	StartTime      time.Time                    `json:"start_time"`
+	SessionID     string                       `json:"session_id"`
+	TaskID        string                       `json:"task_id"`
+	LeadAgent     string                       `json:"lead_agent"`
+	Roster        []string                     `json:"roster"`
+	Phase         string                       `json:"phase"` // "running", "synthesizing", "completed", "failed"
+	MemberResults map[string]*TeamMemberResult `json:"member_results,omitempty"`
+	FinalOutput   string                       `json:"final_output,omitempty"`
+	StartTime     time.Time                    `json:"start_time"`
 }
 
 // SubtaskAssignment holds a subtask assignment for a team member.
@@ -219,9 +219,9 @@ func (to *TeamOrchestrator) handleTeamStart(ctx context.Context, msg *models.Bus
 
 	to.logger.Info("Team session started",
 		"session_id", req.SessionID,
-		KeyTaskID,    req.TaskID,
-		"lead",        req.LeadAgent,
-		"roster",      req.Roster,
+		KeyTaskID, req.TaskID,
+		"lead", req.LeadAgent,
+		"roster", req.Roster,
 		"max_concurrent", req.MaxConcurrent,
 	)
 
@@ -299,10 +299,10 @@ func (to *TeamOrchestrator) publishResult(state *TeamSessionState) {
 	delivered := to.bus.Publish(TopicTeamResult, msg)
 	to.logger.Info("Published team result",
 		"session_id", state.SessionID,
-		"phase",      state.Phase,
-		"lead",       state.LeadAgent,
-		"members",    len(state.Roster),
-		"delivered",  delivered,
+		"phase", state.Phase,
+		"lead", state.LeadAgent,
+		"members", len(state.Roster),
+		"delivered", delivered,
 	)
 }
 
@@ -352,9 +352,9 @@ func (to *TeamOrchestrator) AssignSubtask(ctx context.Context, sessionID string,
 
 	to.logger.Info("Subtask assigned to team member",
 		"session_id", sessionID,
-		"agent_id",   assignment.AgentID,
-		"subtask",    assignment.Subtask,
-		"priority",   assignment.Priority,
+		"agent_id", assignment.AgentID,
+		"subtask", assignment.Subtask,
+		"priority", assignment.Priority,
 	)
 	return nil
 }
@@ -411,8 +411,8 @@ func (to *TeamOrchestrator) BroadcastMessage(ctx context.Context, sessionID stri
 		target = tm.TargetAgent
 	}
 	to.logger.Debug("Team message sent",
-		"session_id",   sessionID,
-		"target",       target,
+		"session_id", sessionID,
+		"target", target,
 		"message_type", tm.MessageType,
 	)
 	return nil
@@ -477,8 +477,8 @@ func (to *TeamOrchestrator) ReceiveResult(ctx context.Context, sessionID string,
 
 	to.logger.Info("Team member result received",
 		"session_id", sessionID,
-		"agent_id",   result.AgentID,
-		"status",     string(status),
+		"agent_id", result.AgentID,
+		"status", string(status),
 	)
 	return nil
 }

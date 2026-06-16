@@ -21,18 +21,18 @@ import (
 // ONNX file (binary format) and provides embedding generation with Matryoshka
 // dimension truncation support.
 type sentenceTransformerProvider struct {
-	modelInfo      ModelInfo
-	dimension      int
-	weights        *modelWeights
-	tokenizer      *BPETokenizer
-	logger         *slog.Logger
-	maxSeqLen      int
-	onnxPath       string
-	modelDir       string
-	tokenizerPath  string
-	targetDim      int
-	initialized    bool
-	mu             sync.RWMutex
+	modelInfo     ModelInfo
+	dimension     int
+	weights       *modelWeights
+	tokenizer     *BPETokenizer
+	logger        *slog.Logger
+	maxSeqLen     int
+	onnxPath      string
+	modelDir      string
+	tokenizerPath string
+	targetDim     int
+	initialized   bool
+	mu            sync.RWMutex
 }
 
 // SentenceTransformerConfig holds configuration for the sentence transformer provider.
@@ -275,13 +275,13 @@ func (p *sentenceTransformerProvider) forward(tokens []uint32) ([]float32, error
 // loadDummyWeights creates minimal weights when no model file is available.
 func loadDummyWeights(info ModelInfo) *modelWeights {
 	return &modelWeights{
-		hiddenIn:          info.Dimension,
-		hiddenOut:         info.Dimension,
-		vocabSize:         51200,
-		maxSeqLen:         info.MaxSequenceLen,
-		tokenEmbeding:     nil,
-		positionEmbeding:  nil,
-		matryoshkaDims:    []int{768, 512, 256, 128},
+		hiddenIn:         info.Dimension,
+		hiddenOut:        info.Dimension,
+		vocabSize:        51200,
+		maxSeqLen:        info.MaxSequenceLen,
+		tokenEmbeding:    nil,
+		positionEmbeding: nil,
+		matryoshkaDims:   []int{768, 512, 256, 128},
 	}
 }
 
@@ -372,11 +372,11 @@ func loadWeights(path string, logger *slog.Logger) (*modelWeights, error) {
 	}
 
 	mw := &modelWeights{
-		hiddenIn:        int(hiddenIn),
-		hiddenOut:       int(hiddenOut),
-		vocabSize:       int(vocabSize),
-		maxSeqLen:       int(maxSeqLen),
-		matryoshkaDims:  []int{768, 512, 256, 128},
+		hiddenIn:       int(hiddenIn),
+		hiddenOut:      int(hiddenOut),
+		vocabSize:      int(vocabSize),
+		maxSeqLen:      int(maxSeqLen),
+		matryoshkaDims: []int{768, 512, 256, 128},
 	}
 
 	// Split weights into layers: token embedding + position + linear
@@ -424,12 +424,12 @@ func loadWeights(path string, logger *slog.Logger) (*modelWeights, error) {
 
 // BPETokenizer implements byte-pair encoding tokenization.
 type BPETokenizer struct {
-	vocab     map[string]uint32
-	merges    [][2]string
-	padToken  string
-	eosToken  string
-	unkToken  string
-	bosToken  string
+	vocab    map[string]uint32
+	merges   [][2]string
+	padToken string
+	eosToken string
+	unkToken string
+	bosToken string
 }
 
 // NewBPETokenizerFallback creates a BPE tokenizer, loading from a JSON file if available.
@@ -445,11 +445,11 @@ func newBPETokenizerFallback(path string) (*BPETokenizer, error) {
 // NewDefaultTokenizer creates a basic tokenizer with a minimal vocabulary.
 func NewDefaultTokenizer() (*BPETokenizer, bool) {
 	tok := &BPETokenizer{
-		vocab:      make(map[string]uint32),
-		eosToken:   "</s>",
-		unkToken:   "<unk>",
-		bosToken:   "<s>",
-		padToken:   "<pad>",
+		vocab:    make(map[string]uint32),
+		eosToken: "</s>",
+		unkToken: "<unk>",
+		bosToken: "<s>",
+		padToken: "<pad>",
 	}
 
 	// BOS, PAD, EOS, UNK
@@ -519,17 +519,17 @@ func NewDefaultTokenizer() (*BPETokenizer, bool) {
 // parseTokenizerJSON parses a HuggingFace-style tokenizer.json file.
 func parseTokenizerJSON(data []byte) (*BPETokenizer, error) {
 	tok := &BPETokenizer{
-		vocab:      make(map[string]uint32),
-		eosToken:   "</s>",
-		unkToken:   "<unk>",
-		bosToken:   "<s>",
-		padToken:   "<pad>",
+		vocab:    make(map[string]uint32),
+		eosToken: "</s>",
+		unkToken: "<unk>",
+		bosToken: "<s>",
+		padToken: "<pad>",
 	}
 
 	var raw struct {
-		AddPrefixSpace bool                      `json:"add_prefix_space"`
-		Tokenizer      json.RawMessage           `json:"tokenizer"`
-		AddedTokens    []map[string]any          `json:"added_tokens"`
+		AddPrefixSpace bool             `json:"add_prefix_space"`
+		Tokenizer      json.RawMessage  `json:"tokenizer"`
+		AddedTokens    []map[string]any `json:"added_tokens"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("unmarshal tokenizer: %w", err)
@@ -537,9 +537,9 @@ func parseTokenizerJSON(data []byte) (*BPETokenizer, error) {
 
 	// Parse the tokenizer section
 	var tokSection struct {
-		Type    string          `json:"type"`
-		Vocab   map[string]int  `json:"vocab"`
-		Merges  []string        `json:"merges"`
+		Type   string         `json:"type"`
+		Vocab  map[string]int `json:"vocab"`
+		Merges []string       `json:"merges"`
 	}
 	if err := json.Unmarshal(raw.Tokenizer, &tokSection); err != nil {
 		return nil, fmt.Errorf("unmarshal tokenizer section: %w", err)
@@ -659,7 +659,7 @@ func appendUnknownToken(t *BPETokenizer, token string) []uint32 {
 	h.Write([]byte(token))
 	// Use a range beyond the main vocab
 	baseID := uint32(50000)
-	return []uint32{t.vocab[t.unkToken] + h.Sum32()%(baseID - t.vocab[t.unkToken])}
+	return []uint32{t.vocab[t.unkToken] + h.Sum32()%(baseID-t.vocab[t.unkToken])}
 }
 
 // decodeToken converts a token ID back to its text representation.
@@ -694,5 +694,3 @@ func hashTokenID(tok uint32, dimIdx uint32) uint32 {
 	result ^= result >> 16
 	return result
 }
-
-

@@ -333,14 +333,14 @@ func (t *DebugTool) loadCore(ctx context.Context, args map[string]any) (any, err
 	}
 
 	crashReport := map[string]any{
-		"session_id":  session.ID,
-		"adapter":     session.Adapter,
-		"state":       string(session.State),
-		"mode":        string(session.Mode),
-		"program":     result.Program,
-		"core_file":   result.CoreFile,
-		"signal":      result.Signal,
-		"fault_addr":  result.FaultAddr,
+		"session_id":   session.ID,
+		"adapter":      session.Adapter,
+		"state":        string(session.State),
+		"mode":         string(session.Mode),
+		"program":      result.Program,
+		"core_file":    result.CoreFile,
+		"signal":       result.Signal,
+		"fault_addr":   result.FaultAddr,
 		"crash_reason": result.CrashReason,
 	}
 
@@ -818,9 +818,9 @@ func (t *DebugTool) script(ctx context.Context, args map[string]any) (any, error
 	results := make([]any, 0, len(summary.Results))
 	for _, r := range summary.Results {
 		entry := map[string]any{
-			"index":  r.Index,
-			"line":   r.Line,
-			"action": r.Action,
+			"index":   r.Index,
+			"line":    r.Line,
+			"action":  r.Action,
 			"success": r.Success,
 		}
 		if r.Output != nil {

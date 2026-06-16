@@ -138,7 +138,7 @@ func TestEstimateTokens(t *testing.T) {
 		result := EstimateTokens(tt.input)
 		if result != tt.expected {
 			// Allow some variance due to overhead calculation
-			low := tt.expected * 4 / 5 // -20%
+			low := tt.expected * 4 / 5  // -20%
 			high := tt.expected * 6 / 5 // +20%
 			if result < low || result > high {
 				t.Errorf("EstimateTokens(%q): expected ~%d, got %d", tt.input, tt.expected, result)

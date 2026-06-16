@@ -17,7 +17,7 @@ func TestModelReassignmentParser_Parse(t *testing.T) {
 	}{
 		// Specific model references - no clarification needed
 		{"specific model - synthesis", "use glm-4.7 for synthesis", true, "synthesis", 1, false},
-		{"specific model - planning", "GLM models for planning", true, "planning", 1, true}, // GLM is provider, ambiguous
+		{"specific model - planning", "GLM models for planning", true, "planning", 1, true},        // GLM is provider, ambiguous
 		{"specific model - research", "local models only for research", true, "research", 1, true}, // local is provider, ambiguous
 		{"specific model - claude-opus", "synthesize using claude-opus", true, "synthesize", 1, false},
 		{"specific model - qwen-coder", "code with qwen-coder", true, "code", 1, false},

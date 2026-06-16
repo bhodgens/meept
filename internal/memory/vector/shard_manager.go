@@ -48,21 +48,21 @@ func (s ShardType) IsAlwaysLoaded() bool {
 
 // ShardManager orchestrates multiple vector shards with LRU-based eviction.
 type ShardManager struct {
-	mu          sync.RWMutex
-	shards      map[ShardType]*VectorShard
-	lru         *LRUCache
-	basePath    string
-	logger      *slog.Logger
-	embedder    Provider
+	mu           sync.RWMutex
+	shards       map[ShardType]*VectorShard
+	lru          *LRUCache
+	basePath     string
+	logger       *slog.Logger
+	embedder     Provider
 	maxRAMShards int
 }
 
 // ShardManagerConfig holds configuration for the shard manager.
 type ShardManagerConfig struct {
-	BasePath       string // Base directory for shard files
-	MaxRAMShards   int    // Max shards to keep in RAM (LRU eviction)
-	Embedder       Provider
-	Logger         *slog.Logger
+	BasePath     string // Base directory for shard files
+	MaxRAMShards int    // Max shards to keep in RAM (LRU eviction)
+	Embedder     Provider
+	Logger       *slog.Logger
 }
 
 // NewShardManager creates a new shard manager.
@@ -198,12 +198,12 @@ func (m *ShardManager) Stats() ShardManagerStats {
 	defer m.mu.RUnlock()
 
 	stats := ShardManagerStats{
-		LoadedShards:  len(m.shards),
-		MaxRAMShards:  m.maxRAMShards,
-		LRUHits:       m.lru.Hits(),
-		LRUMisses:     m.lru.Misses(),
-		LRUEvictions:  m.lru.Evictions(),
-		ShardDetails:  make(map[ShardType]ShardStats),
+		LoadedShards: len(m.shards),
+		MaxRAMShards: m.maxRAMShards,
+		LRUHits:      m.lru.Hits(),
+		LRUMisses:    m.lru.Misses(),
+		LRUEvictions: m.lru.Evictions(),
+		ShardDetails: make(map[ShardType]ShardStats),
 	}
 
 	for shardType, shard := range m.shards {
@@ -215,12 +215,12 @@ func (m *ShardManager) Stats() ShardManagerStats {
 
 // ShardManagerStats holds statistics about the shard manager.
 type ShardManagerStats struct {
-	LoadedShards  int
-	MaxRAMShards  int
-	LRUHits       int64
-	LRUMisses     int64
-	LRUEvictions  int64
-	ShardDetails  map[ShardType]ShardStats
+	LoadedShards int
+	MaxRAMShards int
+	LRUHits      int64
+	LRUMisses    int64
+	LRUEvictions int64
+	ShardDetails map[ShardType]ShardStats
 }
 
 // Search performs a multi-shard search across specified shard types.

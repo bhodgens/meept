@@ -242,4 +242,3 @@ func ExtractToolOutput(text, toolName string) (string, bool) {
 	content := text[start+len(startTag) : end]
 	return strings.TrimSpace(content), true
 }
-

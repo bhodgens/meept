@@ -585,12 +585,11 @@ func TestBudgetWaitForRateLimitReservation(t *testing.T) {
 	}
 }
 
-
 func TestBudget_RecordCostWithScope(t *testing.T) {
 	b := NewBudget(BudgetConfig{
-		HourlyLimit:      100000,
-		DailyLimit:       1000000,
-		PerTaskCostLimit: 5.0,
+		HourlyLimit:         100000,
+		DailyLimit:          1000000,
+		PerTaskCostLimit:    5.0,
 		PerSessionCostLimit: 10.0,
 	}, nil)
 
@@ -629,7 +628,7 @@ func TestBudget_PerTaskCostExhaustion(t *testing.T) {
 
 func TestBudget_PerSessionCostExhaustion(t *testing.T) {
 	b := NewBudget(BudgetConfig{
-		HourlyLimit:       100000,
+		HourlyLimit:         100000,
 		PerSessionCostLimit: 10.0,
 	}, nil)
 

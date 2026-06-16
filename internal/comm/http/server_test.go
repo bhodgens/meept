@@ -1685,7 +1685,6 @@ func TestHandleWebSocket_HandshakeRespectsConfiguredOrigins(t *testing.T) {
 	}
 }
 
-
 // TestProgressRateLimiter tests the rate limiting logic for WebSocket progress events.
 func TestProgressRateLimiter(t *testing.T) {
 	interval := 50 * time.Millisecond

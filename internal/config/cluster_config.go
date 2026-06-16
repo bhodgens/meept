@@ -5,16 +5,16 @@ import "time"
 
 // ClusterConfig holds distributed cluster settings.
 type ClusterConfig struct {
-	Enabled              bool                     `json:"enabled" toml:"enabled"`
-	ClusterID            string                   `json:"cluster_id" toml:"cluster_id"`
-	ClusterName          string                   `json:"cluster_name" toml:"cluster_name"`
-	NodeID               string                   `json:"node_id" toml:"node_id"`
-	NodeName             string                   `json:"node_name" toml:"node_name"`
-	Network              ClusterNetworkConfig     `json:"network" toml:"network"`
-	Gossip               ClusterGossipConfig      `json:"gossip" toml:"gossip"`
-	Queue                ClusterQueueConfig       `json:"queue" toml:"queue"`
-	Git                  ClusterGitConfig         `json:"git" toml:"git"`
-	Security             ClusterSecurityConfig    `json:"security" toml:"security"`
+	Enabled     bool                  `json:"enabled" toml:"enabled"`
+	ClusterID   string                `json:"cluster_id" toml:"cluster_id"`
+	ClusterName string                `json:"cluster_name" toml:"cluster_name"`
+	NodeID      string                `json:"node_id" toml:"node_id"`
+	NodeName    string                `json:"node_name" toml:"node_name"`
+	Network     ClusterNetworkConfig  `json:"network" toml:"network"`
+	Gossip      ClusterGossipConfig   `json:"gossip" toml:"gossip"`
+	Queue       ClusterQueueConfig    `json:"queue" toml:"queue"`
+	Git         ClusterGitConfig      `json:"git" toml:"git"`
+	Security    ClusterSecurityConfig `json:"security" toml:"security"`
 }
 
 // ClusterNetworkConfig holds WireGuard network settings.

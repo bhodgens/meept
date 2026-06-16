@@ -425,15 +425,15 @@ func (tr *TestRunner) runJestTests(ctx context.Context, dirPath string, testFile
 func (tr *TestRunner) parseJestOutput(output string) ([]TestResult, error) {
 	// Try to parse as JSON first
 	var jestResult struct {
-		NumTotalTests    int `json:"numTotalTests"`
-		NumPassedTests   int `json:"numPassedTests"`
-		NumFailedTests   int `json:"numFailedTests"`
-		NumPendingTests  int `json:"numPendingTests"`
-		TestResults      []struct {
-			Name          string `json:"name"`
-			Status        string `json:"status"`
-			NumPassingTests int   `json:"numPassingTests"`
-			NumFailingTests int   `json:"numFailingTests"`
+		NumTotalTests   int `json:"numTotalTests"`
+		NumPassedTests  int `json:"numPassedTests"`
+		NumFailedTests  int `json:"numFailedTests"`
+		NumPendingTests int `json:"numPendingTests"`
+		TestResults     []struct {
+			Name             string `json:"name"`
+			Status           string `json:"status"`
+			NumPassingTests  int    `json:"numPassingTests"`
+			NumFailingTests  int    `json:"numFailingTests"`
 			AssertionResults []struct {
 				Status string `json:"status"`
 				Name   string `json:"name"`

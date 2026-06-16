@@ -89,18 +89,18 @@ func (e *ClientError) UserMessage() string {
 
 // Client is an HTTP client for OpenAI-compatible chat completions endpoints.
 type Client struct {
-	config       *ModelConfig
-	configMu     sync.RWMutex
-	budget       *Budget
-	httpClient   *http.Client
-	logger       *slog.Logger
-	metricsStore *metrics.Store
-	timeoutCalc  *metrics.Calculator
-	tokenCache   ResponseCache
-	keyBuilder   *CacheKeyBuilder
-	tokenResolver       TokenResolver
-	oauthProvider       string
-	extraHeaders        map[string]string
+	config        *ModelConfig
+	configMu      sync.RWMutex
+	budget        *Budget
+	httpClient    *http.Client
+	logger        *slog.Logger
+	metricsStore  *metrics.Store
+	timeoutCalc   *metrics.Calculator
+	tokenCache    ResponseCache
+	keyBuilder    *CacheKeyBuilder
+	tokenResolver TokenResolver
+	oauthProvider string
+	extraHeaders  map[string]string
 }
 
 // ClientOption is a functional option for configuring a Client.
@@ -1068,7 +1068,6 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 	return nil, fmt.Errorf("streaming failed after %d attempts: %w", streamMaxRetries, lastErr)
 }
 
-
 // doStreamRequest performs a single streaming HTTP request and invokes onDelta for each chunk.
 // D4: Extracted to enable retry with resume capability.
 // retryState tracks state from prior attempts (accumulated content, tool calls, usage).
@@ -1357,7 +1356,6 @@ func extractRetryAfter(resp *http.Response) time.Duration {
 	}
 	return 0
 }
-
 
 // Budget returns the token budget tracker, if one is configured.
 func (c *Client) Budget() *Budget {

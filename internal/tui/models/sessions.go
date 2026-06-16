@@ -15,17 +15,17 @@ import (
 
 // SessionsModel is a full-screen model for browsing sessions with a detail pane.
 type SessionsModel struct {
-	rpc      SessionsRPCClient
-	sessions []types.Session
-	plans    []types.PlanExtended // Plans for the selected session
-	table    table.Model
-	selected *types.Session
-	width    int
-	height   int
-	loading  bool
+	rpc          SessionsRPCClient
+	sessions     []types.Session
+	plans        []types.PlanExtended // Plans for the selected session
+	table        table.Model
+	selected     *types.Session
+	width        int
+	height       int
+	loading      bool
 	plansLoading bool
-	err       error
-	plansErr  error // Error from fetching plans for selected session
+	err          error
+	plansErr     error // Error from fetching plans for selected session
 
 	// UI state
 	showingDetail bool
@@ -593,7 +593,7 @@ func (m *SessionsModel) renderSessionDetailModal() string {
 
 func (m *SessionsModel) renderLoading() string {
 	style := lipgloss.NewStyle().
-		Width(m.width - 4).
+		Width(m.width-4).
 		Align(lipgloss.Center).
 		Padding(4, 0)
 
@@ -613,10 +613,10 @@ func (m *SessionsModel) renderError() string {
 	}
 
 	return style.Render(
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("error")+
-			"\n\n"+
-			errMsg+
-			"\n\n"+
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("error") +
+			"\n\n" +
+			errMsg +
+			"\n\n" +
 			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("press 'r' to refresh"),
 	)
 }

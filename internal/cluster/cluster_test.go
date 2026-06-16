@@ -226,14 +226,14 @@ func TestLoadSaveMember(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	member := &Member{
-		NodeID:       "node-02",
-		NodeName:     "Another Node",
-		WireGuardPub: "abcXYZ789",
-		Endpoint:     "10.0.0.5:51820",
-		SigningPub:   []byte{0xAB, 0xCD},
-		Capabilities: []string{"debugger", "planner"},
-		ClusterIP:    "10.200.0.2",
-		Status:       "active",
+		NodeID:        "node-02",
+		NodeName:      "Another Node",
+		WireGuardPub:  "abcXYZ789",
+		Endpoint:      "10.0.0.5:51820",
+		SigningPub:    []byte{0xAB, 0xCD},
+		Capabilities:  []string{"debugger", "planner"},
+		ClusterIP:     "10.200.0.2",
+		Status:        "active",
 		LastHeartbeat: time.Date(2026, 6, 6, 14, 30, 0, 0, time.UTC),
 	}
 

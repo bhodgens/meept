@@ -11,13 +11,13 @@ import (
 
 // SecurityHeadersConfig controls which security headers are added to responses.
 type SecurityHeadersConfig struct {
-	EnableHSTS            bool   // Strict-Transport-Security
-	HSTSMaxAge            int    // max-age in seconds (default: 31536000 = 1 year)
-	HSTSIncludeSubdomains bool   // includeSubDomains directive
-	EnableFrameOptions    bool   // X-Frame-Options
-	EnableContentTypeOpts bool   // X-Content-Type-Options
-	EnableReferrerPolicy  bool   // Referrer-Policy
-	EnableCSP             bool   // Content-Security-Policy
+	EnableHSTS            bool // Strict-Transport-Security
+	HSTSMaxAge            int  // max-age in seconds (default: 31536000 = 1 year)
+	HSTSIncludeSubdomains bool // includeSubDomains directive
+	EnableFrameOptions    bool // X-Frame-Options
+	EnableContentTypeOpts bool // X-Content-Type-Options
+	EnableReferrerPolicy  bool // Referrer-Policy
+	EnableCSP             bool // Content-Security-Policy
 }
 
 // DefaultSecurityHeaders returns conservative defaults for a local API.
@@ -87,7 +87,7 @@ func BuildTLSConfig(minVersion uint16, clientAuth tls.ClientAuthType) *tls.Confi
 // Re-export tlsutil helpers for server-side fingerprint management.
 // Clients should import pkg/tlsutil directly.
 var (
-	LoadCertFingerprint    = tlsutil.LoadCertFingerprint
-	SaveFingerprint        = tlsutil.SaveFingerprint
+	LoadCertFingerprint     = tlsutil.LoadCertFingerprint
+	SaveFingerprint         = tlsutil.SaveFingerprint
 	LoadExpectedFingerprint = tlsutil.LoadExpectedFingerprint
 )

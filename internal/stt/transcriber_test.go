@@ -181,7 +181,7 @@ func TestConfigDefaults(t *testing.T) {
 	t.Parallel()
 
 	cfg := Config{
-		Engine: "whisper",
+		Engine:   "whisper",
 		Language: "en",
 	}
 	assert.Equal(t, "whisper", cfg.Engine)

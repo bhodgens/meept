@@ -84,7 +84,7 @@ func (h *PlanHandler) handleList(ctx context.Context, params json.RawMessage) (a
 		return nil, err
 	}
 	return map[string]any{
-		"plans":      plans,
+		"plans":     plans,
 		RPCKeyCount: len(plans),
 	}, nil
 }

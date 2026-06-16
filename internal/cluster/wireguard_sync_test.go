@@ -90,10 +90,10 @@ func TestGenerateConfig_NoEndpoint(t *testing.T) {
 	}
 
 	cfg := &WireGuardConfig{
-		PrivateKey:  "testkey==",
-		ClusterIP:   "10.200.0.1",
-		ListenPort:  51820,
-		DNS:         "8.8.8.8",
+		PrivateKey: "testkey==",
+		ClusterIP:  "10.200.0.1",
+		ListenPort: 51820,
+		DNS:        "8.8.8.8",
 		Peers: []Member{
 			{
 				NodeID:       "node-02",
@@ -352,12 +352,12 @@ func TestWireGuardConfig_JSONMarshal(t *testing.T) {
 	// WireGuardConfig doesn't have custom JSON marshaling, but
 	// verifying JSON round-trip ensures struct tags work.
 	cfg := &WireGuardConfig{
-		PrivateKey:            "testkey==",
-		ClusterIP:             "10.200.0.1",
-		ListenPort:            51820,
-		DNS:                   "8.8.8.8",
-		PersistentKeepalive:   "25",
-		Peers:                 []Member{},
+		PrivateKey:          "testkey==",
+		ClusterIP:           "10.200.0.1",
+		ListenPort:          51820,
+		DNS:                 "8.8.8.8",
+		PersistentKeepalive: "25",
+		Peers:               []Member{},
 	}
 
 	data, err := json.Marshal(cfg)

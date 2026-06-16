@@ -42,23 +42,23 @@ func (s PhaseState) IsTerminal() bool {
 
 // Plan represents a project-scoped plan with a plan.md source of truth.
 type Plan struct {
-	ID            string      `json:"id"`
-	Title         string      `json:"title"`
-	Description   string      `json:"description,omitempty"`
-	FilePath      string      `json:"file_path"`
-	ProjectID     string      `json:"project_id,omitempty"`
-	State         PlanState   `json:"state"`
-	CreatedAt     time.Time   `json:"created_at"`
-	UpdatedAt     time.Time   `json:"updated_at"`
-	ApprovedAt    *time.Time  `json:"approved_at,omitempty"`
-	ConfirmedAt   *time.Time  `json:"confirmed_at,omitempty"`
-	ApprovedBy    string      `json:"approved_by,omitempty"`
-	ConfirmedBy   string      `json:"confirmed_by,omitempty"`
-	TaskID          string            `json:"task_id,omitempty"`
-	SourceSession   string            `json:"source_session,omitempty"`
-	RevisionCount   int               `json:"revision_count,omitempty"`
-	Phases          []PlanPhase       `json:"phases,omitempty"`
-	PlanningContext *PlanningContext  `json:"planning_context,omitempty"`
+	ID              string           `json:"id"`
+	Title           string           `json:"title"`
+	Description     string           `json:"description,omitempty"`
+	FilePath        string           `json:"file_path"`
+	ProjectID       string           `json:"project_id,omitempty"`
+	State           PlanState        `json:"state"`
+	CreatedAt       time.Time        `json:"created_at"`
+	UpdatedAt       time.Time        `json:"updated_at"`
+	ApprovedAt      *time.Time       `json:"approved_at,omitempty"`
+	ConfirmedAt     *time.Time       `json:"confirmed_at,omitempty"`
+	ApprovedBy      string           `json:"approved_by,omitempty"`
+	ConfirmedBy     string           `json:"confirmed_by,omitempty"`
+	TaskID          string           `json:"task_id,omitempty"`
+	SourceSession   string           `json:"source_session,omitempty"`
+	RevisionCount   int              `json:"revision_count,omitempty"`
+	Phases          []PlanPhase      `json:"phases,omitempty"`
+	PlanningContext *PlanningContext `json:"planning_context,omitempty"`
 }
 
 // PlanPhase represents a named phase within a plan.

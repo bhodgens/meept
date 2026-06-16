@@ -494,4 +494,3 @@ func TestAnthropicClient_BuildRequest_ToolResultIsError(t *testing.T) {
 		})
 	}
 }
-

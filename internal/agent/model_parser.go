@@ -50,18 +50,18 @@ func NewModelReassignmentParser() *ModelReassignmentParser {
 		"writing code":   IntentCode,
 
 		// Research/Analysis
-		"research":   IntentResearch,
-		"analysis":   IntentAnalyze,
-		"analyze":    IntentAnalyze,
+		"research":    IntentResearch,
+		"analysis":    IntentAnalyze,
+		"analyze":     IntentAnalyze,
 		"investigate": IntentAnalyze,
-		"study":      IntentResearch,
+		"study":       IntentResearch,
 
 		// Debugging
-		"debugging":     IntentDebug,
-		"debug":         IntentDebug,
+		"debugging":       IntentDebug,
+		"debug":           IntentDebug,
 		"troubleshooting": IntentDebug,
-		"fix":           IntentDebug,
-		"bug":           IntentDebug,
+		"fix":             IntentDebug,
+		"bug":             IntentDebug,
 	}
 
 	modelAliases := map[string]string{
@@ -74,17 +74,17 @@ func NewModelReassignmentParser() *ModelReassignmentParser {
 		"claude-haiku":  "anthropic/claude-3-haiku",
 
 		// Z.AI (GLM)
-		"glm":       "zai/glm-4.7",
-		"glm-4.7":   "zai/glm-4.7",
-		"glm-4.5":   "zai/glm-4.5-air",
-		"glm-air":   "zai/glm-4.5-air",
+		"glm":     "zai/glm-4.7",
+		"glm-4.7": "zai/glm-4.7",
+		"glm-4.5": "zai/glm-4.5-air",
+		"glm-air": "zai/glm-4.5-air",
 
 		// Ollama
-		"qwen":        "ollama/qwen2.5-coder",
-		"qwen-coder":  "ollama/qwen2.5-coder",
-		"llama":       "ollama/llama3.2",
-		"llama3.2":    "ollama/llama3.2",
-		"llama3":      "ollama/llama3.2",
+		"qwen":       "ollama/qwen2.5-coder",
+		"qwen-coder": "ollama/qwen2.5-coder",
+		"llama":      "ollama/llama3.2",
+		"llama3.2":   "ollama/llama3.2",
+		"llama3":     "ollama/llama3.2",
 
 		// OpenAI
 		"gpt-4":       "openai/gpt-4",
@@ -100,13 +100,13 @@ func NewModelReassignmentParser() *ModelReassignmentParser {
 	}
 
 	providerNames := map[string]string{
-		"glm":      "zai",
-		"qwen":     "ollama",
-		"llama":    "ollama",
-		"claude":   "anthropic",
-		"gpt":      "openai",
-		"lfm":      "local",
-		"local":    "local",
+		"glm":    "zai",
+		"qwen":   "ollama",
+		"llama":  "ollama",
+		"claude": "anthropic",
+		"gpt":    "openai",
+		"lfm":    "local",
+		"local":  "local",
 	}
 
 	return &ModelReassignmentParser{

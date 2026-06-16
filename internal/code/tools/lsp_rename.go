@@ -236,13 +236,13 @@ func (t *LSPRenameTool) Execute(ctx context.Context, args map[string]any) (any, 
 		}
 
 		return map[string]any{
-			SchemaPropFound:       true,
-			"pending_change_ids":  []string{fmt.Sprintf("lsp_renamed_%d", now.UnixNano())},
-			SchemaPropMessage:     fmt.Sprintf("Rename preview created for %d files. Use 'resolve' tool to accept/reject changes.", len(fileEdits)),
-			"new_name":            newName,
-			"changes":             changes,
-			"file_count":          len(fileEdits),
-			"edit_count":          totalEdits,
+			SchemaPropFound:      true,
+			"pending_change_ids": []string{fmt.Sprintf("lsp_renamed_%d", now.UnixNano())},
+			SchemaPropMessage:    fmt.Sprintf("Rename preview created for %d files. Use 'resolve' tool to accept/reject changes.", len(fileEdits)),
+			"new_name":           newName,
+			"changes":            changes,
+			"file_count":         len(fileEdits),
+			"edit_count":         totalEdits,
 		}, nil
 	}
 
@@ -358,7 +358,7 @@ func applyTextEditsToString(content string, edits []lsp.TextEdit) string {
 			if endChar < len(lines[endLine]) {
 				after = lines[endLine][endChar:]
 			}
-			newLines := strings.Split(before + edit.NewText + after, "\n")
+			newLines := strings.Split(before+edit.NewText+after, "\n")
 			lines = append(lines[:startLine], append(newLines, lines[endLine+1:]...)...)
 		}
 	}

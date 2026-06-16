@@ -155,10 +155,10 @@ func TestClassifyVerdict(t *testing.T) {
 	po := &PairOrchestrator{logger: slogDiscardLogger()}
 
 	tests := []struct {
-		name             string
-		input            string
-		expectedVerdict  PairVerdict
-		expectedEmpty    bool // true if feedback should be empty
+		name            string
+		input           string
+		expectedVerdict PairVerdict
+		expectedEmpty   bool // true if feedback should be empty
 	}{
 		{"approved with colon", "APPROVED: looks great", PairVerdictApproved, false},
 		{"rejected with colon", "REJECTED: fix the error handling", PairVerdictRejected, false},

@@ -74,16 +74,16 @@ type ParsedEdit struct {
 	Op string
 
 	// --- primary anchor ---
-	AnchorType  AnchorType
-	AnchorLine  int    // 0 for BOF/EOF
-	AnchorHash  string // 2-char bigram (empty for BOF/EOF)
-	AnchorTag   string // 4-char hex snapshot tag (empty for legacy format or BOF/EOF)
+	AnchorType AnchorType
+	AnchorLine int    // 0 for BOF/EOF
+	AnchorHash string // 2-char bigram (empty for BOF/EOF)
+	AnchorTag  string // 4-char hex snapshot tag (empty for legacy format or BOF/EOF)
 
 	// --- optional end anchor (for range ops) ---
-	EndAnchorType  AnchorType
-	EndAnchorLine  int
-	EndAnchorHash  string
-	EndAnchorTag   string
+	EndAnchorType AnchorType
+	EndAnchorLine int
+	EndAnchorHash string
+	EndAnchorTag  string
 
 	// Content is the replacement text for replace/insert ops (empty for delete).
 	Content string
@@ -136,22 +136,22 @@ func (p *PatchParser) GrammarForConstrainedDecoding() string {
 	anchorProps := orderedMap{
 		"oneOf": []orderedMap{
 			{
-				"type":            "string",
-				"pattern":         `^[1-9][0-9]*:[a-z]{2}$`,
-				"description":     "line anchor in legacy format (LINE:HASH)",
+				"type":        "string",
+				"pattern":     `^[1-9][0-9]*:[a-z]{2}$`,
+				"description": "line anchor in legacy format (LINE:HASH)",
 			},
 			{
-				"type":            "string",
-				"pattern":         `^[1-9][0-9]*:[0-9a-f]{4}:[a-z]{2}$`,
-				"description":     "line anchor with snapshot tag (LINE:TAG:HASH)",
+				"type":        "string",
+				"pattern":     `^[1-9][0-9]*:[0-9a-f]{4}:[a-z]{2}$`,
+				"description": "line anchor with snapshot tag (LINE:TAG:HASH)",
 			},
 			{
-				"enum":            []string{"BOF"},
-				"description":     "beginning of file",
+				"enum":        []string{"BOF"},
+				"description": "beginning of file",
 			},
 			{
-				"enum":            []string{"EOF"},
-				"description":     "end of file",
+				"enum":        []string{"EOF"},
+				"description": "end of file",
 			},
 		},
 	}
@@ -313,17 +313,17 @@ func (p *PatchParser) ParseEdit(idx int, raw map[string]any) (*ParsedEdit, []Pat
 
 	// Build the ParsedEdit from parsed components.
 	edit := &ParsedEdit{
-		Op:         op,
-		AnchorType: primaryAnchor.aType,
-		AnchorLine: primaryAnchor.line,
-		AnchorHash: primaryAnchor.hash,
-		AnchorTag:  primaryAnchor.tag,
+		Op:            op,
+		AnchorType:    primaryAnchor.aType,
+		AnchorLine:    primaryAnchor.line,
+		AnchorHash:    primaryAnchor.hash,
+		AnchorTag:     primaryAnchor.tag,
 		EndAnchorType: endAnc.aType,
 		EndAnchorLine: endAnc.line,
 		EndAnchorHash: endAnc.hash,
 		EndAnchorTag:  endAnc.tag,
-		Content:      content,
-		SnapshotTag:  tag,
+		Content:       content,
+		SnapshotTag:   tag,
 	}
 
 	return edit, errs
@@ -473,6 +473,6 @@ func marshalOrdered(m map[string]any) ([]byte, error) {
 
 // Ensure PatchParser satisfies a basic interface contract.
 var (
-	_ interface{ Grammar() string }                      = (*PatchParser)(nil)
+	_ interface{ Grammar() string }                       = (*PatchParser)(nil)
 	_ interface{ GrammarForConstrainedDecoding() string } = (*PatchParser)(nil)
 )

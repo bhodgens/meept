@@ -26,13 +26,13 @@ const (
 
 // ClusterEvent represents a signed, replicated cluster event.
 type ClusterEvent struct {
-	EventID     string                 `json:"event_id"`
-	NodeID      string                 `json:"node_id"`
-	EventType   ClusterEventType       `json:"event_type"`
-	Timestamp   time.Time              `json:"timestamp"`
-	VectorClock map[string]int64       `json:"vector_clock"`
-	Payload     json.RawMessage        `json:"payload"`
-	Signature   []byte                 `json:"signature"`
+	EventID     string           `json:"event_id"`
+	NodeID      string           `json:"node_id"`
+	EventType   ClusterEventType `json:"event_type"`
+	Timestamp   time.Time        `json:"timestamp"`
+	VectorClock map[string]int64 `json:"vector_clock"`
+	Payload     json.RawMessage  `json:"payload"`
+	Signature   []byte           `json:"signature"`
 }
 
 // Sign signs the event with an ed25519 private key.
@@ -51,12 +51,12 @@ func (e *ClusterEvent) Verify(pubKey ed25519.PublicKey) bool {
 // signingData returns the canonical bytes to be signed (everything except the signature).
 func (e *ClusterEvent) signingData() []byte {
 	type signingStruct struct {
-		EventID     string            `json:"event_id"`
-		NodeID      string            `json:"node_id"`
-		EventType   ClusterEventType  `json:"event_type"`
-		Timestamp   int64             `json:"timestamp"`
-		VectorClock map[string]int64  `json:"vector_clock"`
-		Payload     json.RawMessage   `json:"payload"`
+		EventID     string           `json:"event_id"`
+		NodeID      string           `json:"node_id"`
+		EventType   ClusterEventType `json:"event_type"`
+		Timestamp   int64            `json:"timestamp"`
+		VectorClock map[string]int64 `json:"vector_clock"`
+		Payload     json.RawMessage  `json:"payload"`
 	}
 	data, _ := json.Marshal(signingStruct{
 		EventID:     e.EventID,
@@ -131,12 +131,12 @@ type ReclaimPayload struct {
 
 // NodePayload contains node registration data for NODE_JOIN/NODE_LEAVE events.
 type NodePayload struct {
-	NodeID       string   `json:"node_id"`
-	NodeName     string   `json:"node_name"`
-	WireGuardPub string   `json:"wireguard_pubkey"`
-	SigningPub   []byte   `json:"signing_pubkey"`
-	Endpoint     string   `json:"endpoint"`
-	Capabilities []string `json:"capabilities"`
-	ClusterIP    string   `json:"cluster_ip"`
+	NodeID       string    `json:"node_id"`
+	NodeName     string    `json:"node_name"`
+	WireGuardPub string    `json:"wireguard_pubkey"`
+	SigningPub   []byte    `json:"signing_pubkey"`
+	Endpoint     string    `json:"endpoint"`
+	Capabilities []string  `json:"capabilities"`
+	ClusterIP    string    `json:"cluster_ip"`
 	JoinedAt     time.Time `json:"joined_at"`
 }

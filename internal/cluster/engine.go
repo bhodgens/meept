@@ -12,24 +12,24 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 
-	"github.com/cespare/xxhash/v2"
 	q "github.com/caimlas/meept/internal/queue"
+	"github.com/cespare/xxhash/v2"
 )
 
 // Engine is the central orchestrator for cluster operations.
 // It manages gossip communication, git-based membership sync,
 // node signing, and integrates with the task queue store.
 type Engine struct {
-	cfg        *Config
-	localCfg   *Config
-	logger     *slog.Logger
-	msgBus     *bus.MessageBus
-	queueStore *q.Store
+	cfg         *Config
+	localCfg    *Config
+	logger      *slog.Logger
+	msgBus      *bus.MessageBus
+	queueStore  *q.Store
 	gitRepoPath string
 
-	gossip    *GossipEngine
-	gitSync   *GitSync
-	wgMgr     *WireGuardManager
+	gossip      *GossipEngine
+	gitSync     *GitSync
+	wgMgr       *WireGuardManager
 	signingPriv ed25519.PrivateKey
 	signingPub  ed25519.PublicKey
 
@@ -44,14 +44,14 @@ type Engine struct {
 
 // EngineConfig holds parameters for NewEngine.
 type EngineConfig struct {
-	Cfg              *Config
-	LocalCfg         *Config
-	Logger           *slog.Logger
-	MsgBus           *bus.MessageBus
-	QueueStore       *q.Store
-	GitRepoPath      string
-	NodeName         string
-	EnableWireGuard  bool
+	Cfg             *Config
+	LocalCfg        *Config
+	Logger          *slog.Logger
+	MsgBus          *bus.MessageBus
+	QueueStore      *q.Store
+	GitRepoPath     string
+	NodeName        string
+	EnableWireGuard bool
 }
 
 // NewEngine creates a new cluster engine from the given configuration.

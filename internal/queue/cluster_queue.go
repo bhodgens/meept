@@ -37,11 +37,11 @@ type ClusterQueueConfig struct {
 
 // ClaimRecord tracks metadata for a locally claimed job.
 type ClaimRecord struct {
-	TaskID      string
-	ClaimedBy   string
-	ClaimedAt   time.Time
-	TimeoutAt   time.Time
-	IsReplica   bool
+	TaskID       string
+	ClaimedBy    string
+	ClaimedAt    time.Time
+	TimeoutAt    time.Time
+	IsReplica    bool
 	ManagingNode string
 }
 

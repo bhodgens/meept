@@ -34,8 +34,8 @@ func NewAmendmentManager(msgBus *bus.MessageBus, logger *slog.Logger) *Amendment
 		logger = slog.Default()
 	}
 	mgr := &AmendmentManager{
-		ctx:       context.Background(),
-		cancel:    func() {},
+		ctx:    context.Background(),
+		cancel: func() {},
 
 		bus:       msgBus,
 		logger:    logger,

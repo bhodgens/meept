@@ -1,7 +1,6 @@
 // internal/configui/sections_session.go
 package configui
 
-
 func buildSessionFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.Session

@@ -359,12 +359,12 @@ func (t *MemoryGetVersionTool) Execute(ctx context.Context, args map[string]any)
 			if v, ok := m.Metadata["version"]; ok {
 				if fmt.Sprintf("%v", v) == fmt.Sprintf("%d", version) {
 					return map[string]any{
-						"id":        m.ID,
-						"content":   m.Content,
-						"type":      string(m.Type),
-						"category":  m.Category,
+						"id":         m.ID,
+						"content":    m.Content,
+						"type":       string(m.Type),
+						"category":   m.Category,
 						"created_at": m.CreatedAt,
-						"version":   version,
+						"version":    version,
 					}, nil
 				}
 			}
@@ -658,19 +658,19 @@ func (t *MemoryRecallTool) Parameters() llm.FunctionParameters {
 
 // MemoryRecallResult is returned after recalling facts.
 type MemoryRecallResult struct {
-	Success bool              `json:"success"`
-	Results []MemoryFact      `json:"results,omitempty"`
-	Count   int               `json:"count"`
-	Message string            `json:"message"`
+	Success bool         `json:"success"`
+	Results []MemoryFact `json:"results,omitempty"`
+	Count   int          `json:"count"`
+	Message string       `json:"message"`
 }
 
 // MemoryFact represents a recalled fact from the Hindsight bank.
 type MemoryFact struct {
-	ID           string  `json:"id"`
-	Content      string  `json:"content"`
-	Domain       string  `json:"domain,omitempty"`
-	Importance   string  `json:"importance"`
-	RetrievedAt  string  `json:"retrieved_at"`
+	ID          string `json:"id"`
+	Content     string `json:"content"`
+	Domain      string `json:"domain,omitempty"`
+	Importance  string `json:"importance"`
+	RetrievedAt string `json:"retrieved_at"`
 }
 
 func (t *MemoryRecallTool) Execute(ctx context.Context, args map[string]any) (any, error) {
@@ -818,11 +818,11 @@ func (t *MemoryReflectTool) Parameters() llm.FunctionParameters {
 
 // MemoryReflectResult contains reflection insights.
 type MemoryReflectResult struct {
-	Success    bool     `json:"success"`
-	Insights   []string `json:"insights,omitempty"`
-	Summary    string   `json:"summary"`
-	FactsUsed  int      `json:"facts_used"`
-	Message    string   `json:"message"`
+	Success   bool     `json:"success"`
+	Insights  []string `json:"insights,omitempty"`
+	Summary   string   `json:"summary"`
+	FactsUsed int      `json:"facts_used"`
+	Message   string   `json:"message"`
 }
 
 func (t *MemoryReflectTool) Execute(ctx context.Context, args map[string]any) (any, error) {
@@ -909,11 +909,11 @@ func (t *MemoryReflectTool) Execute(ctx context.Context, args map[string]any) (a
 	// Call LLM for reflection
 	messages := []llm.ChatMessage{
 		{
-			Role: llm.RoleSystem,
+			Role:    llm.RoleSystem,
 			Content: "You are performing meta-cognition on retained memories. Analyze the provided facts and generate insights, identify patterns, or synthesize learnings based on the user's reflection prompt.",
 		},
 		{
-			Role: llm.RoleUser,
+			Role:    llm.RoleUser,
 			Content: fmt.Sprintf("%s\n\n---\n\nReflection prompt: %s\n\nGenerate 3-5 key insights and a brief summary.", factsContext.String(), prompt),
 		},
 	}
@@ -944,7 +944,7 @@ var numberedInsightRegex = regexp.MustCompile(`^\d+[\.\)]\s*`)
 func parseInsightsFromResponse(content string) []string {
 	lines := strings.Split(content, "\n")
 	insights := make([]string, 0, 5)
-	
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		// Look for numbered or bulleted insights
@@ -955,12 +955,12 @@ func parseInsightsFromResponse(content string) []string {
 			insights = append(insights, numberedInsightRegex.ReplaceAllString(line, ""))
 		}
 	}
-	
+
 	if len(insights) == 0 {
 		// Fall back to treating entire response as summary
 		insights = append(insights, content)
 	}
-	
+
 	return insights
 }
 

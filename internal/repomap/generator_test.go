@@ -60,28 +60,28 @@ func TestRepoMapGenerator_InvalidateCache(t *testing.T) {
 
 func TestExtractIdentifiers(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		wantMin  int
-		wantMax  int
+		name    string
+		input   string
+		wantMin int
+		wantMax int
 	}{
 		{
-			name:     "simple identifiers",
-			input:    "I want to modify the handleRequest function and update the cache",
-			wantMin:  2,
-			wantMax:  10,
+			name:    "simple identifiers",
+			input:   "I want to modify the handleRequest function and update the cache",
+			wantMin: 2,
+			wantMax: 10,
 		},
 		{
-			name:     "no identifiers",
-			input:    "the quick brown fox",
-			wantMin:  0,
-			wantMax:  5,
+			name:    "no identifiers",
+			input:   "the quick brown fox",
+			wantMin: 0,
+			wantMax: 5,
 		},
 		{
-			name:     "code-like text",
-			input:    "call the initialize method on the Configuration struct",
-			wantMin:  2,
-			wantMax:  10,
+			name:    "code-like text",
+			input:   "call the initialize method on the Configuration struct",
+			wantMin: 2,
+			wantMax: 10,
 		},
 	}
 

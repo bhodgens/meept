@@ -169,33 +169,33 @@ func runClusterInit(cmd *cobra.Command, clusterName, nodeName, nodeID, gitRemote
 	}
 
 	cfg := &clusterConfigJSON{
-		ClusterID:       clusterID,
-		ClusterName:     clusterName,
-		NodeID:          nodeID,
-		NodeName:        nodeName,
-		SigningPub:      hex.EncodeToString(edPub),
-		SigningPriv:     hex.EncodeToString(edPriv),
-		WireGuardPub:    wgKey.Public().String(),
-		WireGuardPriv:   wgKey.Private().String(),
-		NetworkSubnet:   "10.200.0.0/24",
-		NetworkPort:     51820,
-		NetworkInterface: "wg0",
-		ClusterIP:       "10.200.0.1",
-		GossipHeartbeat:   "30s",
-		GossipPeerTimeout: "2m",
-		GossipEventRetention: "1h",
-		GossipMaxRetry:    3,
+		ClusterID:             clusterID,
+		ClusterName:           clusterName,
+		NodeID:                nodeID,
+		NodeName:              nodeName,
+		SigningPub:            hex.EncodeToString(edPub),
+		SigningPriv:           hex.EncodeToString(edPriv),
+		WireGuardPub:          wgKey.Public().String(),
+		WireGuardPriv:         wgKey.Private().String(),
+		NetworkSubnet:         "10.200.0.0/24",
+		NetworkPort:           51820,
+		NetworkInterface:      "wg0",
+		ClusterIP:             "10.200.0.1",
+		GossipHeartbeat:       "30s",
+		GossipPeerTimeout:     "2m",
+		GossipEventRetention:  "1h",
+		GossipMaxRetry:        3,
 		QueueClaimTimeout:     "5m",
 		QueueReachTimeout:     "2m",
 		QueueFullPayload:      true,
-		GitRemote:        gitRemote,
-		GitSyncInterval:  "5m",
-		GitHeartbeat:     false,
-		GitBranch:        "cluster",
-		SecurityRequireSigs: true,
+		GitRemote:             gitRemote,
+		GitSyncInterval:       "5m",
+		GitHeartbeat:          false,
+		GitBranch:             "cluster",
+		SecurityRequireSigs:   true,
 		SecurityKeyRotateDays: 90,
-		JoinKey:          joinKey,
-		Status:           "initialized",
+		JoinKey:               joinKey,
+		Status:                "initialized",
 	}
 
 	// --- write files -----------------------------------------------------
@@ -714,7 +714,7 @@ func newClusterRemoteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "remote",
 		Short: "Manage git remotes for cluster registry",
-		Long: `Manage git remotes used for synchronizing cluster membership.`,
+		Long:  `Manage git remotes used for synchronizing cluster membership.`,
 	}
 
 	cmd.AddCommand(newClusterRemoteAddCmd())
@@ -1001,59 +1001,59 @@ func addGitRemote(remoteURL string) error {
 
 // clusterConfigJSON is the JSON representation stored in the cluster config file.
 type clusterConfigJSON struct {
-	ClusterID       string `json:"cluster_id"`
-	ClusterName     string `json:"cluster_name"`
-	NodeID          string `json:"node_id"`
-	NodeName        string `json:"node_name"`
-	SigningPub      string `json:"signing_pubkey"`
-	SigningPriv     string `json:"signing_private_key"`
-	WireGuardPub    string `json:"wireguard_pubkey"`
-	WireGuardPriv   string `json:"wireguard_private_key"`
-	NetworkSubnet   string `json:"wireguard_subnet"`
-	NetworkPort     int    `json:"wireguard_port"`
-	NetworkInterface string `json:"interface"`
-	ClusterIP       string `json:"cluster_ip"`
-	GossipHeartbeat   string `json:"heartbeat_interval"`
-	GossipPeerTimeout string `json:"peer_timeout"`
-	GossipEventRetention string `json:"event_retention"`
-	GossipMaxRetry    int    `json:"max_retry_attempts"`
+	ClusterID             string `json:"cluster_id"`
+	ClusterName           string `json:"cluster_name"`
+	NodeID                string `json:"node_id"`
+	NodeName              string `json:"node_name"`
+	SigningPub            string `json:"signing_pubkey"`
+	SigningPriv           string `json:"signing_private_key"`
+	WireGuardPub          string `json:"wireguard_pubkey"`
+	WireGuardPriv         string `json:"wireguard_private_key"`
+	NetworkSubnet         string `json:"wireguard_subnet"`
+	NetworkPort           int    `json:"wireguard_port"`
+	NetworkInterface      string `json:"interface"`
+	ClusterIP             string `json:"cluster_ip"`
+	GossipHeartbeat       string `json:"heartbeat_interval"`
+	GossipPeerTimeout     string `json:"peer_timeout"`
+	GossipEventRetention  string `json:"event_retention"`
+	GossipMaxRetry        int    `json:"max_retry_attempts"`
 	QueueClaimTimeout     string `json:"default_claim_timeout"`
 	QueueReachTimeout     string `json:"node_reachability_timeout"`
 	QueueFullPayload      bool   `json:"full_payload_replication"`
-	GitRemote        string `json:"git_remote"`
-	GitSyncInterval  string `json:"sync_interval"`
-	GitHeartbeat     bool   `json:"heartbeat_commit"`
-	GitBranch        string `json:"branch"`
-	SecurityRequireSigs bool `json:"require_node_signatures"`
-	SecurityKeyRotateDays int `json:"key_rotation_days"`
-	JoinKey          string `json:"join_key"`
-	Status           string `json:"status"`
+	GitRemote             string `json:"git_remote"`
+	GitSyncInterval       string `json:"sync_interval"`
+	GitHeartbeat          bool   `json:"heartbeat_commit"`
+	GitBranch             string `json:"branch"`
+	SecurityRequireSigs   bool   `json:"require_node_signatures"`
+	SecurityKeyRotateDays int    `json:"key_rotation_days"`
+	JoinKey               string `json:"join_key"`
+	Status                string `json:"status"`
 }
 
 // clusterConfig is the in-memory config loaded from the config file.
 // For future daemon-side use.
 type clusterConfig struct {
-	ClusterID       string          `json:"cluster_id"`
-	ClusterName     string          `json:"cluster_name"`
-	NodeID          string          `json:"node_id"`
-	NodeName        string          `json:"node_name"`
-	SigningPub      string          `json:"signing_pubkey"`
-	SigningPriv     string          `json:"signing_private_key"`
-	WireGuardPub    string          `json:"wireguard_pubkey"`
-	WireGuardPriv   string          `json:"wireguard_private_key"`
-	Network         networkConfig   `json:"network"`
-	ClusterIP       string          `json:"cluster_ip"`
-	Gossip          gossipConfig    `json:"gossip"`
-	Queue           queueConfig     `json:"queue"`
-	Git             gitConfig       `json:"git"`
-	Security        securityConfig  `json:"security"`
-	JoinKey         string          `json:"join_key"`
-	Status          string          `json:"status"`
+	ClusterID     string         `json:"cluster_id"`
+	ClusterName   string         `json:"cluster_name"`
+	NodeID        string         `json:"node_id"`
+	NodeName      string         `json:"node_name"`
+	SigningPub    string         `json:"signing_pubkey"`
+	SigningPriv   string         `json:"signing_private_key"`
+	WireGuardPub  string         `json:"wireguard_pubkey"`
+	WireGuardPriv string         `json:"wireguard_private_key"`
+	Network       networkConfig  `json:"network"`
+	ClusterIP     string         `json:"cluster_ip"`
+	Gossip        gossipConfig   `json:"gossip"`
+	Queue         queueConfig    `json:"queue"`
+	Git           gitConfig      `json:"git"`
+	Security      securityConfig `json:"security"`
+	JoinKey       string         `json:"join_key"`
+	Status        string         `json:"status"`
 }
 
 type networkConfig struct {
-	Subnet   string `json:"wireguard_subnet"`
-	Port     int    `json:"wireguard_port"`
+	Subnet    string `json:"wireguard_subnet"`
+	Port      int    `json:"wireguard_port"`
 	Interface string `json:"interface"`
 }
 
@@ -1071,10 +1071,10 @@ type queueConfig struct {
 }
 
 type gitConfig struct {
-	Remote        string `json:"remote"`
-	SyncInterval  string `json:"sync_interval"`
-	HeartbeatCommit bool `json:"heartbeat_commit"`
-	Branch        string `json:"branch"`
+	Remote          string `json:"remote"`
+	SyncInterval    string `json:"sync_interval"`
+	HeartbeatCommit bool   `json:"heartbeat_commit"`
+	Branch          string `json:"branch"`
 }
 
 type securityConfig struct {

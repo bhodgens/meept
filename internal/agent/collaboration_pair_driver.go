@@ -18,10 +18,10 @@ import (
 // PairProgrammingDriver runs a symmetric peer collaboration session where two agents
 // share a workspace and take turns holding the editor token.
 type PairProgrammingDriver struct {
-	registry   *AgentRegistry
-	workspace  *WorkspaceManager
-	bus        *bus.MessageBus
-	logger     *slog.Logger
+	registry  *AgentRegistry
+	workspace *WorkspaceManager
+	bus       *bus.MessageBus
+	logger    *slog.Logger
 
 	conversations map[string]*PPConversation
 	convMu        sync.RWMutex
@@ -201,7 +201,7 @@ func (d *PairProgrammingDriver) runTurnLoop(ctx context.Context, sess *Collabora
 		observerOutput, err := d.runAgent(ctx, observerID, observerPrompt, fmt.Sprintf("pp-%s-%s-observed", sess.ID, observerID))
 		if err != nil {
 			sess.MarkFailed()
-				return nil, NewCollaborationError(ErrCodeAgentFailed, sess.ID, "turn_loop", fmt.Sprintf("observer %s failed: %v", observerID, err))
+			return nil, NewCollaborationError(ErrCodeAgentFailed, sess.ID, "turn_loop", fmt.Sprintf("observer %s failed: %v", observerID, err))
 		}
 
 		action, feedback := d.parseObserverResponse(observerOutput)

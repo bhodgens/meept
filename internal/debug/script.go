@@ -13,16 +13,16 @@ import (
 
 // ScriptCommand represents a single command in a debug script.
 type ScriptCommand struct {
-	Action string            `json:"action"`
-	Params map[string]any    `json:"params,omitempty"`
-	Line   int               `json:"line"` // 1-based line number in the script file
+	Action string         `json:"action"`
+	Params map[string]any `json:"params,omitempty"`
+	Line   int            `json:"line"` // 1-based line number in the script file
 }
 
 // ScriptResult holds the result of executing a single script command.
 type ScriptResult struct {
-	Index   int    `json:"index"`   // 0-based command index
-	Line    int    `json:"line"`    // 1-based line number in the script file
-	Action  string `json:"action"`  // action name
+	Index   int    `json:"index"`  // 0-based command index
+	Line    int    `json:"line"`   // 1-based line number in the script file
+	Action  string `json:"action"` // action name
 	Success bool   `json:"success"`
 	Output  any    `json:"output,omitempty"`
 	Error   string `json:"error,omitempty"`
@@ -41,10 +41,10 @@ type ScriptOptions struct {
 
 // ScriptSummary holds the aggregate results of executing a debug script.
 type ScriptSummary struct {
-	Total    int            `json:"total"`
-	Succeeded int           `json:"succeeded"`
-	Failed   int            `json:"failed"`
-	Results  []ScriptResult `json:"results"`
+	Total     int            `json:"total"`
+	Succeeded int            `json:"succeeded"`
+	Failed    int            `json:"failed"`
+	Results   []ScriptResult `json:"results"`
 }
 
 // ParseScriptFile reads a JSON-lines script file and returns a slice of

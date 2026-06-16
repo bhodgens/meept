@@ -28,8 +28,8 @@ func (t *InitiateCollaborationTool) SetCallback(cb func(ctx context.Context, mod
 	}
 }
 
-func (t *InitiateCollaborationTool) Name() string        { return "initiate_collaboration" }
-func (t *InitiateCollaborationTool) Category() string    { return "collaboration" }
+func (t *InitiateCollaborationTool) Name() string     { return "initiate_collaboration" }
+func (t *InitiateCollaborationTool) Category() string { return "collaboration" }
 func (t *InitiateCollaborationTool) Description() string {
 	return "Request a collaborative session with another agent when facing an ambiguous or complex problem."
 }

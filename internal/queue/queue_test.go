@@ -449,11 +449,11 @@ func TestPersistentQueue_ClaimThroughputUnderContention(t *testing.T) {
 
 	// Workers claim concurrently.
 	var (
-		wg         sync.WaitGroup
-		claimed    int32
-		errCount   int32
-		seenIDsMu  sync.Mutex
-		seenIDs    = make(map[string]int, numJobs)
+		wg        sync.WaitGroup
+		claimed   int32
+		errCount  int32
+		seenIDsMu sync.Mutex
+		seenIDs   = make(map[string]int, numJobs)
 	)
 	start := make(chan struct{})
 	wg.Add(numWorkers)

@@ -3,7 +3,6 @@ package configui
 
 import (
 	"strings"
-
 )
 
 func buildShadowFields() []Field {

@@ -1,7 +1,6 @@
 // internal/configui/sections_queue.go
 package configui
 
-
 func buildQueueFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.Queue

@@ -27,9 +27,9 @@ type CategorizedRecommendation struct {
 
 // ChecklistItem represents a single checkbox item in a checklist.
 type ChecklistItem struct {
-	Text      string     `json:"text"`
-	Completed bool       `json:"completed"`
-	CreatedAt time.Time  `json:"created_at,omitempty"`
+	Text        string     `json:"text"`
+	Completed   bool       `json:"completed"`
+	CreatedAt   time.Time  `json:"created_at,omitempty"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 

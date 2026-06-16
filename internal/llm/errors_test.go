@@ -37,17 +37,17 @@ func TestRateLimitError_Error(t *testing.T) {
 		{
 			name: "with metadata fields",
 			err: &RateLimitError{
-				ProviderID:   "openrouter",
-				ModelID:      "moonshotai/Kimi-K2.6",
-				RetryAfter:   2 * time.Second,
-				LimitType:    "tpm_uncached",
+				ProviderID: "openrouter",
+				ModelID:    "moonshotai/Kimi-K2.6",
+				RetryAfter: 2 * time.Second,
+				LimitType:  "tpm_uncached",
 				RetryStrategy: &RetryStrategy{
-					Type:        "tpm_uncached",
+					Type:         "tpm_uncached",
 					InitialDelay: 2 * time.Second,
-					MaxDelay:    60 * time.Second,
-					Backoff:     "exponential",
-					BackoffBase: 2.0,
-					UseJitter:   true,
+					MaxDelay:     60 * time.Second,
+					Backoff:      "exponential",
+					BackoffBase:  2.0,
+					UseJitter:    true,
 				},
 				LimitBudget: &LimitBudget{
 					Used:   289280,
@@ -74,12 +74,12 @@ func TestRateLimitError_MetadataFields(t *testing.T) {
 		ModelID:    "test-model",
 		LimitType:  "rpm",
 		RetryStrategy: &RetryStrategy{
-			Type:        "rpm",
+			Type:         "rpm",
 			InitialDelay: 1 * time.Second,
-			MaxDelay:    30 * time.Second,
-			Backoff:     "linear",
-			BackoffBase: 1.5,
-			UseJitter:   false,
+			MaxDelay:     30 * time.Second,
+			Backoff:      "linear",
+			BackoffBase:  1.5,
+			UseJitter:    false,
 		},
 		LimitBudget: &LimitBudget{
 			Used:   500,
@@ -409,8 +409,8 @@ func TestParseGenericProviderError(t *testing.T) {
 		wantNil  bool
 	}{
 		{
-			name: "simple type+message",
-			body: `{"error":{"type":"rate_limit_error","message":"Too many requests"}}`,
+			name:     "simple type+message",
+			body:     `{"error":{"type":"rate_limit_error","message":"Too many requests"}}`,
 			wantType: "rate_limit_error",
 			wantMsg:  "Too many requests",
 		},
@@ -422,28 +422,28 @@ func TestParseGenericProviderError(t *testing.T) {
 			wantMsg:  "Invalid API key",
 		},
 		{
-			name:     "only message",
-			body:     `{"error":{"message":"Something went wrong"}}`,
-			wantMsg:  "Something went wrong",
+			name:    "only message",
+			body:    `{"error":{"message":"Something went wrong"}}`,
+			wantMsg: "Something went wrong",
 		},
 		{
-			name: "empty error object",
-			body: `{"error":{}}`,
+			name:    "empty error object",
+			body:    `{"error":{}}`,
 			wantNil: true,
 		},
 		{
-			name: "no error key",
-			body: `{"status":"error"}`,
+			name:    "no error key",
+			body:    `{"status":"error"}`,
 			wantNil: true,
 		},
 		{
-			name: "not json",
-			body: "plain text error",
+			name:    "not json",
+			body:    "plain text error",
 			wantNil: true,
 		},
 		{
-			name: "only code",
-			body: `{"error":{"code":"tpm_exceeded"}}`,
+			name:     "only code",
+			body:     `{"error":{"code":"tpm_exceeded"}}`,
 			wantCode: "tpm_exceeded",
 		},
 	}
@@ -631,7 +631,7 @@ func TestParseOpenRouterError_ByteEscapedMessage(t *testing.T) {
 	outer := map[string]interface{}{
 		"error": map[string]interface{}{
 			"message": `Error from provider(nw,moonshotai/Kimi-K2.6: 429): {"error":{"type":"rate_limit_error","code":"tpm_uncached_exceeded","message":"Uncached token rate limit exceeded for moonshotai/Kimi-K2.6. Cold-prefill tokens: 289280, Limit: 200000.","retry_after":2.0,"retry_strategy":{"type":"tpm_uncached","suggested_initial_delay_s":2.0,"max_delay_s":60.0,"backoff":"exponential","backoff_base":2.0,"jitter":true},"retriable":true,"context":{"budget":5,"in_flight":0,"model":"moonshotai/Kimi-K2.6","limit_type":"tpm_uncached","tpm_window_tokens":289280,"tpm_limit":200000}}}`,
-			"code": 429,
+			"code":    429,
 		},
 	}
 
@@ -668,13 +668,13 @@ func TestParseOpenRouterError_ByteEscapedMessage(t *testing.T) {
 func TestRateLimitError_Unwrap(t *testing.T) {
 	cause := errors.New("original error")
 	rlErr := &RateLimitError{
-		ProviderID:   "p",
-		ModelID:      "m",
-		RetryAfter:   5 * time.Second,
-		LimitType:    "tpm_uncached",
+		ProviderID:    "p",
+		ModelID:       "m",
+		RetryAfter:    5 * time.Second,
+		LimitType:     "tpm_uncached",
 		RetryStrategy: &RetryStrategy{Type: "tpm_uncached"},
 		LimitBudget:   &LimitBudget{Used: 100, Limit: 200},
-		Cause:        cause,
+		Cause:         cause,
 	}
 
 	if !errors.Is(rlErr, cause) {

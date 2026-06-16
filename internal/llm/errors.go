@@ -51,13 +51,13 @@ var _ NonRetryableError = (*ContextSizeExceededError)(nil)
 
 // RateLimitError is returned when a rate limit (HTTP 429) is encountered.
 type RateLimitError struct {
-	ProviderID   string
-	ModelID      string
-	RetryAfter   time.Duration
-	LimitType    string         // e.g., "tpm_uncached", "rpm", "concurrent"
+	ProviderID    string
+	ModelID       string
+	RetryAfter    time.Duration
+	LimitType     string         // e.g., "tpm_uncached", "rpm", "concurrent"
 	RetryStrategy *RetryStrategy // Structured backoff advice from provider
-	LimitBudget   *LimitBudget  // Current vs. limit values
-	Cause        error
+	LimitBudget   *LimitBudget   // Current vs. limit values
+	Cause         error
 }
 
 func (e *RateLimitError) Error() string {
@@ -231,12 +231,12 @@ func parseRetryAfterDate(header string) time.Duration {
 
 // RetryStrategy holds structured backoff advice from a provider.
 type RetryStrategy struct {
-	Type        string        // "tpm_uncached", "rpm", etc.
+	Type         string        // "tpm_uncached", "rpm", etc.
 	InitialDelay time.Duration // Provider-suggested initial delay
-	MaxDelay    time.Duration // Provider-suggested max delay
-	Backoff     string        // "exponential", "linear", "fixed"
-	BackoffBase float64       // Exponential base (e.g., 2.0)
-	UseJitter   bool          // Provider recommends jitter
+	MaxDelay     time.Duration // Provider-suggested max delay
+	Backoff      string        // "exponential", "linear", "fixed"
+	BackoffBase  float64       // Exponential base (e.g., 2.0)
+	UseJitter    bool          // Provider recommends jitter
 }
 
 // LimitBudget holds current usage vs. allowed limits.
@@ -248,11 +248,11 @@ type LimitBudget struct {
 
 // ProviderErrorDetail is a provider-agnostic structured error.
 type ProviderErrorDetail struct {
-	Type          string         // "rate_limit_error", "authentication_error", etc.
-	Code          string         // "tpm_uncached_exceeded", "insufficient_quota", etc.
-	Message       string         // Human-readable message
-	Retriable     bool           // Whether the provider says retry is worthwhile
-	RetryAfter    time.Duration  // Explicit retry delay
+	Type          string        // "rate_limit_error", "authentication_error", etc.
+	Code          string        // "tpm_uncached_exceeded", "insufficient_quota", etc.
+	Message       string        // Human-readable message
+	Retriable     bool          // Whether the provider says retry is worthwhile
+	RetryAfter    time.Duration // Explicit retry delay
 	RetryStrategy *RetryStrategy
 	LimitBudget   *LimitBudget
 }
@@ -282,22 +282,22 @@ type openRouterInner struct {
 }
 
 type openRouterInnerError struct {
-	Type         string                `json:"type"`
-	Code         string                `json:"code"`
-	Message      string                `json:"message"`
-	RetryAfter   float64               `json:"retry_after"`
+	Type          string                `json:"type"`
+	Code          string                `json:"code"`
+	Message       string                `json:"message"`
+	RetryAfter    float64               `json:"retry_after"`
 	RetryStrategy *openRouterInnerRetry `json:"retry_strategy"`
-	Retriable    bool                  `json:"retriable"`
-	Context      *openRouterInnerCtx    `json:"context"`
+	Retriable     bool                  `json:"retriable"`
+	Context       *openRouterInnerCtx   `json:"context"`
 }
 
 type openRouterInnerRetry struct {
-	Type                string  `json:"type"`
-	SuggestedInitialS   float64 `json:"suggested_initial_delay_s"`
-	MaxDelayS           float64 `json:"max_delay_s"`
-	Backoff             string  `json:"backoff"`
-	BackoffBase         float64 `json:"backoff_base"`
-	Jitter              bool    `json:"jitter"`
+	Type              string  `json:"type"`
+	SuggestedInitialS float64 `json:"suggested_initial_delay_s"`
+	MaxDelayS         float64 `json:"max_delay_s"`
+	Backoff           string  `json:"backoff"`
+	BackoffBase       float64 `json:"backoff_base"`
+	Jitter            bool    `json:"jitter"`
 }
 
 type openRouterInnerCtx struct {
@@ -343,21 +343,21 @@ func ParseOpenRouterError(body []byte) *ProviderErrorDetail {
 	}
 
 	detail := &ProviderErrorDetail{
-		Type:      inner.Error.Type,
-		Code:      inner.Error.Code,
-		Message:   inner.Error.Message,
-		Retriable: inner.Error.Retriable,
+		Type:       inner.Error.Type,
+		Code:       inner.Error.Code,
+		Message:    inner.Error.Message,
+		Retriable:  inner.Error.Retriable,
 		RetryAfter: time.Duration(inner.Error.RetryAfter * float64(time.Second)),
 	}
 
 	if inner.Error.RetryStrategy != nil {
 		detail.RetryStrategy = &RetryStrategy{
-			Type:        inner.Error.RetryStrategy.Type,
+			Type:         inner.Error.RetryStrategy.Type,
 			InitialDelay: time.Duration(inner.Error.RetryStrategy.SuggestedInitialS * float64(time.Second)),
-			MaxDelay:    time.Duration(inner.Error.RetryStrategy.MaxDelayS * float64(time.Second)),
-			Backoff:     inner.Error.RetryStrategy.Backoff,
-			BackoffBase: inner.Error.RetryStrategy.BackoffBase,
-			UseJitter:   inner.Error.RetryStrategy.Jitter,
+			MaxDelay:     time.Duration(inner.Error.RetryStrategy.MaxDelayS * float64(time.Second)),
+			Backoff:      inner.Error.RetryStrategy.Backoff,
+			BackoffBase:  inner.Error.RetryStrategy.BackoffBase,
+			UseJitter:    inner.Error.RetryStrategy.Jitter,
 		}
 	}
 

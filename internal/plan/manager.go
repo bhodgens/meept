@@ -248,9 +248,9 @@ func (m *PlanManager) RevisePlan(ctx context.Context, planID, sessionID, feedbac
 	}
 
 	m.publishEvent("plan.revised", map[string]any{
-		"plan_id":          planID,
-		"revision_count":   plan.RevisionCount,
-		"feedback":         feedback,
+		"plan_id":        planID,
+		"revision_count": plan.RevisionCount,
+		"feedback":       feedback,
 	})
 
 	m.logger.Info("plan revised", "plan_id", planID, "revision_count", plan.RevisionCount)

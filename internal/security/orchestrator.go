@@ -263,7 +263,7 @@ func (o *Orchestrator) ScanShellCommand(ctx context.Context, command string) (bl
 				"violation", violation.Error(),
 			)
 			o.logAuditEvent("taint_blocked", "critical", map[string]any{
-				"command":  truncateCommand(command),
+				"command":   truncateCommand(command),
 				"violation": violation.Error(),
 			}, "taint")
 			return true, false, violation.Error()

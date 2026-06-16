@@ -367,8 +367,6 @@ func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]any) (an
 	}, nil
 }
 
-
-
 func generateDelegateID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
 }

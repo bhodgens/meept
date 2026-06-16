@@ -67,28 +67,28 @@ func TestExpandWithPlaceholders(t *testing.T) {
 	defer func() { os.Unsetenv("TEST_FOO") }()
 
 	testcases := []struct {
-		name        string
-		in          string
+		name         string
+		in           string
 		placeholders envexpand.PlaceholderVars
-		want        string
+		want         string
 	}{
 		{
-			name:        "placeholder preserved",
-			in:          "${MODEL_PATH}",
+			name:         "placeholder preserved",
+			in:           "${MODEL_PATH}",
 			placeholders: envexpand.PlaceholderVars{"MODEL_PATH": true},
-			want:        "${MODEL_PATH}",
+			want:         "${MODEL_PATH}",
 		},
 		{
-			name:        "non-placeholder expanded",
-			in:          "$TEST_FOO and ${MODEL_PATH}",
+			name:         "non-placeholder expanded",
+			in:           "$TEST_FOO and ${MODEL_PATH}",
 			placeholders: envexpand.PlaceholderVars{"MODEL_PATH": true},
-			want:        "hello and ${MODEL_PATH}",
+			want:         "hello and ${MODEL_PATH}",
 		},
 		{
-			name:        "no placeholders map",
-			in:          "$TEST_FOO and ${MODEL_PATH}",
+			name:         "no placeholders map",
+			in:           "$TEST_FOO and ${MODEL_PATH}",
 			placeholders: nil,
-			want:        "hello and ",
+			want:         "hello and ",
 		},
 	}
 

@@ -40,11 +40,11 @@ func createChatter(cfg *llm.ModelConfig, logger *slog.Logger, tokenResolver llm.
 
 // Executor errors.
 var (
-	ErrNoSkill                = errors.New("skill is nil")
-	ErrNoLLMClient            = errors.New("LLM client is nil")
-	ErrNoResolver             = errors.New("model resolver is nil")
-	ErrModelNotFound          = errors.New("no suitable model found for skill requirements")
-	ErrPrerequisitesNotMet    = errors.New("skill prerequisites not met")
+	ErrNoSkill             = errors.New("skill is nil")
+	ErrNoLLMClient         = errors.New("LLM client is nil")
+	ErrNoResolver          = errors.New("model resolver is nil")
+	ErrModelNotFound       = errors.New("no suitable model found for skill requirements")
+	ErrPrerequisitesNotMet = errors.New("skill prerequisites not met")
 )
 
 // ExecutorError wraps an execution error with context.
@@ -67,15 +67,15 @@ func (e *ExecutorError) Unwrap() error {
 
 // Executor executes skills using the LLM client.
 type Executor struct {
-	resolver             *llm.Resolver
-	client               llm.Chatter
-	logger               *slog.Logger
-	lazyLoader           *LazySkillLoader
-	prerequisiteChecker  PrerequisiteChecker
+	resolver              *llm.Resolver
+	client                llm.Chatter
+	logger                *slog.Logger
+	lazyLoader            *LazySkillLoader
+	prerequisiteChecker   PrerequisiteChecker
 	validatePrerequisites bool
-	toolMapper           *HermesToolMapper
-	tokenResolver        llm.TokenResolver
-	extraHeaders         map[string]string
+	toolMapper            *HermesToolMapper
+	tokenResolver         llm.TokenResolver
+	extraHeaders          map[string]string
 }
 
 // ExecutorOption is a functional option for configuring Executor.

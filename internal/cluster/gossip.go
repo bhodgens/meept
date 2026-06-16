@@ -26,13 +26,13 @@ type GossipEngine struct {
 	msgBus    *bus.MessageBus
 	logger    *slog.Logger
 
-	mu        sync.RWMutex
-	peers     map[string]*PeerInfo
-	running   bool
-	sub       *bus.Subscriber
-	stopCh    chan struct{}
-	doneCh    chan struct{}
-	eventID   string
+	mu      sync.RWMutex
+	peers   map[string]*PeerInfo
+	running bool
+	sub     *bus.Subscriber
+	stopCh  chan struct{}
+	doneCh  chan struct{}
+	eventID string
 
 	// Signing key for this node (ed25519)
 	signingPriv ed25519.PrivateKey
@@ -569,9 +569,9 @@ func (g *GossipEngine) sendHeartbeat() {
 	g.logger.Debug("gossip: sending heartbeat", "node", g.localNode)
 	// Broadcast to cluster bus topic for peer discovery
 	body, _ := models.NewBusMessage(models.MessageTypeEvent, "cluster", map[string]any{
-		"event":        "heartbeat",
-		"node_id":      g.localNode,
-		"peer_count":   g.PeerCount(),
+		"event":      "heartbeat",
+		"node_id":    g.localNode,
+		"peer_count": g.PeerCount(),
 	})
 	if g.msgBus != nil {
 		g.msgBus.Publish("cluster.event.heartbeat", body)

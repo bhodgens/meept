@@ -18,9 +18,9 @@ import (
 
 // ContextRenderer renders code structure with surrounding context for LLM consumption.
 type ContextRenderer struct {
-	maxLineLength  int    // Default: 100
-	maxTagsPerFile int    // Default: 20
-	contextLines   int    // Lines of context around each symbol
+	maxLineLength  int // Default: 100
+	maxTagsPerFile int // Default: 20
+	contextLines   int // Lines of context around each symbol
 	treeCache      map[string]string
 	mu             sync.RWMutex // protects treeCache
 	logger         *slog.Logger
@@ -408,12 +408,12 @@ func (r *ContextRenderer) RenderJSON(ranked RankedTags) (string, int, error) {
 	}
 
 	type jsonTag struct {
-		Name     string  `json:"name"`
-		Kind     string  `json:"kind"`
-		File     string  `json:"file"`
-		Line     int     `json:"line"`
-		Def      bool    `json:"is_definition"`
-		Score    float64 `json:"score"`
+		Name  string  `json:"name"`
+		Kind  string  `json:"kind"`
+		File  string  `json:"file"`
+		Line  int     `json:"line"`
+		Def   bool    `json:"is_definition"`
+		Score float64 `json:"score"`
 	}
 
 	var tags []jsonTag

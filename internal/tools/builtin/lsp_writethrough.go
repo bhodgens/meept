@@ -71,9 +71,9 @@ type lspWriteNotifier struct {
 	logger             *slog.Logger
 
 	// diagMu protects diagWaiters and diagOnce.
-	diagMu       sync.Mutex
-	diagWaiters  map[string][]chan []lsp.Diagnostic // keyed by URI
-	diagRegOnce  map[*lsp.Client]*sync.Once         // per-client registration guard
+	diagMu      sync.Mutex
+	diagWaiters map[string][]chan []lsp.Diagnostic // keyed by URI
+	diagRegOnce map[*lsp.Client]*sync.Once         // per-client registration guard
 }
 
 // NewLSPWriteNotifier creates a new LSP write notifier.

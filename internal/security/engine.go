@@ -237,7 +237,9 @@ func (e *Engine) compilePatterns() error {
 	}
 
 	// Compile financial patterns
-	var financialPatterns []struct{ Pattern string `db:"pattern"` }
+	var financialPatterns []struct {
+		Pattern string `db:"pattern"`
+	}
 	err = e.db.Select(&financialPatterns, `SELECT pattern FROM financial_patterns WHERE enabled = 1`)
 	if err != nil {
 		return err
@@ -397,7 +399,7 @@ func (e *Engine) checkFinancial(details map[string]string) *Decision {
 
 // toolRuleRow maps DB rows for tool_rule lookups.
 type toolRuleRow struct {
-	RiskLevel           int `db:"risk_level"`
+	RiskLevel            int `db:"risk_level"`
 	RequiresConfirmation int `db:"requires_confirmation"`
 }
 
@@ -543,7 +545,9 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 	// Check allow rules
 	// SEC-5 FIX: Use separate variable for allow rows
 	hasAllowRules := false
-	var allowPatterns []struct{ Pattern string `db:"pattern"` }
+	var allowPatterns []struct {
+		Pattern string `db:"pattern"`
+	}
 	err = e.db.Select(&allowPatterns, `
 		SELECT pattern
 		FROM path_rules
@@ -584,13 +588,13 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 
 // permissionOverrideRow maps DB rows for permission_overrides.
 type permissionOverrideRow struct {
-	ID          int64          `db:"id"`
-	Pattern     string         `db:"pattern"`
-	Decision    string         `db:"decision"`
-	Reason      string         `db:"reason"`
-	UsageCount  int            `db:"usage_count"`
-	MaxUses     int            `db:"max_uses"`
-	ExpiresAt   sql.NullString `db:"expires_at"`
+	ID         int64          `db:"id"`
+	Pattern    string         `db:"pattern"`
+	Decision   string         `db:"decision"`
+	Reason     string         `db:"reason"`
+	UsageCount int            `db:"usage_count"`
+	MaxUses    int            `db:"max_uses"`
+	ExpiresAt  sql.NullString `db:"expires_at"`
 }
 
 // checkOverrides checks for creator permission overrides.

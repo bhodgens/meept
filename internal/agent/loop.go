@@ -23,8 +23,8 @@ import (
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/project"
-	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/repomap"
+	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/shadow"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
@@ -396,18 +396,18 @@ type AgentLoop struct {
 	modelMu sync.Mutex // protects SwitchModel calls on shared llmClient
 
 	// Core components
-	llm             llm.Chatter         // Interface for LLM operations (Client or ProviderManager)
-	llmClient       *llm.Client         // Concrete client for config access (may be nil if using ProviderManager)
+	llm             llm.Chatter          // Interface for LLM operations (Client or ProviderManager)
+	llmClient       *llm.Client          // Concrete client for config access (may be nil if using ProviderManager)
 	contextFirewall *llm.ContextFirewall // Reference to the context firewall wrapper (nil if not enabled)
-	resolver        *llm.Resolver       // Model resolver for alias resolution
-	modelRef     string        // Model reference from agent spec (can be alias or direct ref)
-	spec         *AgentSpec    // Agent specification (for inference parameter overrides)
-	executor     *Executor
-	registry     ToolRegistry
-	security     *security.PermissionChecker
-	securityOrch *intsecurity.Orchestrator
-	bus          *bus.MessageBus
-	logger       *slog.Logger
+	resolver        *llm.Resolver        // Model resolver for alias resolution
+	modelRef        string               // Model reference from agent spec (can be alias or direct ref)
+	spec            *AgentSpec           // Agent specification (for inference parameter overrides)
+	executor        *Executor
+	registry        ToolRegistry
+	security        *security.PermissionChecker
+	securityOrch    *intsecurity.Orchestrator
+	bus             *bus.MessageBus
+	logger          *slog.Logger
 
 	// Memory for context injection
 	memvid    *memvid.Client
@@ -502,8 +502,8 @@ type AgentLoop struct {
 	currentSessionID string
 
 	// Metrics collection for analytics
-	taskCollector      *metrics.TaskCollector
-	responseAnalyzer   *metrics.ResponseAnalyzer
+	taskCollector    *metrics.TaskCollector
+	responseAnalyzer *metrics.ResponseAnalyzer
 }
 
 // sessionStore is an interface for session persistence operations needed by AgentLoop.
@@ -573,7 +573,6 @@ type LearnedPattern struct {
 	Pattern     string
 	Confidence  float64
 }
-
 
 // NotificationPublisher is an interface for publishing task notifications.
 // This allows the agent to publish notifications without depending on the daemon package.
@@ -1081,16 +1080,16 @@ func (l *AgentLoop) FirewallStats() map[string]any {
 	}
 	stats := l.contextFirewall.Stats()
 	return map[string]any{
-		"summarization_failures":       stats.SummarizationFailures,
-		"dropped_messages":             stats.DroppedMessages,
-		"drop_events":                  stats.DropEvents,
-		"compression_warning_events":   stats.CompressionWarningEvents,
-		"compression_summarize_events": stats.CompressionSummarizeEvents,
+		"summarization_failures":        stats.SummarizationFailures,
+		"dropped_messages":              stats.DroppedMessages,
+		"drop_events":                   stats.DropEvents,
+		"compression_warning_events":    stats.CompressionWarningEvents,
+		"compression_summarize_events":  stats.CompressionSummarizeEvents,
 		"compression_aggressive_events": stats.CompressionAggressiveEvents,
 		"compression_hard_limit_events": stats.CompressionHardLimitEvents,
-		"compression_tokens_saved":     stats.CompressionTokensSaved,
-		"avg_quality_score":            stats.AvgQualityScore,
-		"total_compressions":           stats.TotalCompressions,
+		"compression_tokens_saved":      stats.CompressionTokensSaved,
+		"avg_quality_score":             stats.AvgQualityScore,
+		"total_compressions":            stats.TotalCompressions,
 	}
 }
 
@@ -1874,7 +1873,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 							"rule", abortErr.RuleName,
 							"iteration", iteration,
 						)
-							// Fall through to handle no-content response
+						// Fall through to handle no-content response
 						response, err = l.chatWithFailover(ctx, messages, chatOpts...)
 						if err != nil {
 							l.logger.Error("LLM call failed after TTSR retry",
@@ -2510,7 +2509,7 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	// Run reasoning cycle
 	taskIterations := 0 // Track iterations for metrics
 	startTime := time.Now()
-	
+
 	// Start long-running task notification goroutine (after 30s)
 	if l.notificationPublisher != nil {
 		go func() {
@@ -2529,7 +2528,7 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 			}
 		}()
 	}
-	
+
 	response, err := l.reasoningCycle(ctx, conv, conversationID)
 	if err != nil {
 		l.logger.Error("Task reasoning cycle failed",
@@ -3786,7 +3785,6 @@ func (l *AgentLoop) buildTerminateResponse(results []*ExecutionResult) string {
 	}
 	return strings.Join(parts, "\n")
 }
-
 
 // recordTaskMetrics records task execution metrics to the task collector.
 func (l *AgentLoop) recordTaskMetrics(t *task.Task, modelID string, success bool, iterations int, durationMs int64, tokensIn, tokensOut int, response string) {

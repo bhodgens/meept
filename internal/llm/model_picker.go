@@ -96,12 +96,12 @@ func NewModelPicker(config ModelPickerConfig) *ModelPicker {
 	modelList.SetFilteringEnabled(true)
 
 	mp := &ModelPicker{
-		mode:           ModeSelectProvider,
-		config:         config,
-		providerList:   providerList,
-		modelList:      modelList,
-		providers:      allProviders,
-		providersCfg:   config.ProvidersConfig,
+		mode:         ModeSelectProvider,
+		config:       config,
+		providerList: providerList,
+		modelList:    modelList,
+		providers:    allProviders,
+		providersCfg: config.ProvidersConfig,
 	}
 
 	// Pre-select provider if specified

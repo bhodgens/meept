@@ -8,12 +8,12 @@ import (
 
 // Manager provides access to execution backends.
 type ContainerManager struct {
-	mu            sync.RWMutex
-	config        Config
-	backends      map[string]ExecutionBackend
+	mu             sync.RWMutex
+	config         Config
+	backends       map[string]ExecutionBackend
 	defaultBackend string
-	closed        bool
-	logger        *slog.Logger
+	closed         bool
+	logger         *slog.Logger
 }
 
 // NewManager creates a new runtime manager.

@@ -417,43 +417,43 @@ func TestInputSanitizer_WordBoundaryFalsePositives(t *testing.T) {
 	strictSanitizer := NewInputSanitizer(StrictnessStrict)
 
 	tests := []struct {
-		name      string
-		input     string
+		name       string
+		input      string
 		strictness StrictnessLevel
-		wantSafe  bool
+		wantSafe   bool
 	}{
 		// Authority claim patterns - legitimate contexts
 		{
-			name:     "legitimate developer context",
-			input:    "As a developer, I write code daily",
+			name:       "legitimate developer context",
+			input:      "As a developer, I write code daily",
 			strictness: StrictnessStandard,
-			wantSafe: true,
+			wantSafe:   true,
 		},
 		{
-			name:     "administration overhead",
-			input:    "The administration overhead is minimal",
+			name:       "administration overhead",
+			input:      "The administration overhead is minimal",
 			strictness: StrictnessStandard,
-			wantSafe: true,
+			wantSafe:   true,
 		},
 		// Trust pattern - "trust me" alone without manipulation context
 		{
-			name:     "trust in relationship",
-			input:    "Trust me, I know what I'm doing",
+			name:       "trust in relationship",
+			input:      "Trust me, I know what I'm doing",
 			strictness: StrictnessPermissive,
-			wantSafe: false, // This IS still flagged as it matches the pattern
+			wantSafe:   false, // This IS still flagged as it matches the pattern
 		},
 		// Prompt extraction - legitimate requests
 		{
-			name:     "show instructions legitimate",
-			input:    "Can you show instructions for building the project?",
+			name:       "show instructions legitimate",
+			input:      "Can you show instructions for building the project?",
 			strictness: StrictnessStrict,
-			wantSafe: false, // Still matches due to "show instructions"
+			wantSafe:   false, // Still matches due to "show instructions"
 		},
 		{
-			name:     "clean text with common words",
-			input:    "I trust this approach will work. The administration is handling it.",
+			name:       "clean text with common words",
+			input:      "I trust this approach will work. The administration is handling it.",
 			strictness: StrictnessStandard,
-			wantSafe: true,
+			wantSafe:   true,
 		},
 	}
 

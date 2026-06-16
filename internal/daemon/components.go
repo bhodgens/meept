@@ -19,29 +19,29 @@ import (
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/calendar"
+	"github.com/caimlas/meept/internal/cluster"
 	"github.com/caimlas/meept/internal/code/ast"
 	"github.com/caimlas/meept/internal/code/lsp"
 	codetools "github.com/caimlas/meept/internal/code/tools"
 	"github.com/caimlas/meept/internal/comm/telegram"
 	"github.com/caimlas/meept/internal/comm/web"
 	"github.com/caimlas/meept/internal/config"
-	"github.com/caimlas/meept/internal/cluster"
 	"github.com/caimlas/meept/internal/debug"
 	"github.com/caimlas/meept/internal/lint"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
-	"github.com/caimlas/meept/internal/runtime"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	memsync "github.com/caimlas/meept/internal/memory/sync"
 	"github.com/caimlas/meept/internal/memory/vector"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/project"
+	"github.com/caimlas/meept/internal/pty"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/repomap"
+	"github.com/caimlas/meept/internal/runtime"
 	"github.com/caimlas/meept/internal/scheduler"
 	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/security/taint"
-	"github.com/caimlas/meept/internal/pty"
 	"github.com/caimlas/meept/internal/selfimprove"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/shadow"
@@ -118,9 +118,9 @@ type Components struct {
 	MemoryHandler *memory.Handler
 
 	// Memvid and multi-agent
-	MemvidClient         *memvid.Client
-	AgentRegistry        *agent.AgentRegistry
-	Dispatcher           *agent.Dispatcher
+	MemvidClient  *memvid.Client
+	AgentRegistry *agent.AgentRegistry
+	Dispatcher    *agent.Dispatcher
 
 	// Shadow training
 	ShadowManager *shadow.Manager
@@ -210,11 +210,11 @@ type Components struct {
 	RepoMapGen *repomap.RepoMapGenerator
 
 	// Distributed cluster support
-	ClusterEngine  *cluster.GossipEngine
-	ClusterGitSync *cluster.GitSync
-	ClusterQueue   *queue.ClusterQueue
-	ClusterConfig       *cluster.Config
-	ClusterWireGuard    *cluster.WireGuardManager
+	ClusterEngine    *cluster.GossipEngine
+	ClusterGitSync   *cluster.GitSync
+	ClusterQueue     *queue.ClusterQueue
+	ClusterConfig    *cluster.Config
+	ClusterWireGuard *cluster.WireGuardManager
 
 	// PTY sessions for interactive tool streaming
 	PTYManager *pty.Manager
@@ -1839,7 +1839,7 @@ func (c *Components) Start(ctx context.Context) error {
 			}
 		}
 	}()
-	
+
 	// Start chat handler
 	if err := c.ChatHandler.Start(ctx); err != nil {
 		return err
@@ -3642,9 +3642,9 @@ func (c *Components) registerOAuthProviders(pm *llm.ProviderManager, logger *slo
 		}
 
 		modelCfg := &llm.ModelConfig{
-			ProviderID:   info.Provider,
-			BaseURL:      providerCfg.BaseURL,
-			ModelID:      info.Provider, // Use provider ID as model ID placeholder
+			ProviderID:    info.Provider,
+			BaseURL:       providerCfg.BaseURL,
+			ModelID:       info.Provider, // Use provider ID as model ID placeholder
 			OAuthProvider: info.Provider,
 			ExtraHeaders:  providerCfg.ExtraHeaders,
 		}
