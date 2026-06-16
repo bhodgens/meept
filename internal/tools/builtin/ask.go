@@ -79,9 +79,10 @@ type AskResult struct {
 	Options  []string `json:"options,omitempty"`
 }
 
-// TerminateHint implements tools.TerminatingTool. The ask tool result is a
-// terminating signal because the user's reply should be returned directly
-// to the LLM as context for the next step, not re-processed by the LLM.
+// TerminateHint implements tools.TerminatingTool. The ask tool does NOT
+// terminate: the user's reply must be fed back to the LLM so it can
+// incorporate the answer into its next action. Returning true here would
+// suppress the LLM follow-up and silently drop the user's response.
 func (t *AskTool) TerminateHint(args map[string]any) bool {
 	return false
 }

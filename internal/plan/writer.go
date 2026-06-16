@@ -113,12 +113,24 @@ func UpdatePlanStatus(filePath string, planState PlanState, phases []PlanPhase) 
 			total = len(pp.Steps)
 		}
 
+		// Phase fully complete: all steps are completed regardless of order.
+		if total > 0 && completed >= total {
+			for j := range pp.Steps {
+				pp.Steps[j].State = StepStatusCompleted
+			}
+			continue
+		}
+
+		// Partial completion: preserve existing per-step state. Only apply the
+		// in-order heuristic to steps still marked pending so we never downgrade
+		// a previously-completed step (out-of-order completion via DependsOn).
 		for j := range pp.Steps {
 			step := &pp.Steps[j]
-			if completed >= total {
-				// All steps completed.
-				step.State = StepStatusCompleted
-			} else if step.Number <= completed {
+			if step.State == StepStatusCompleted {
+				// Already done — preserve.
+				continue
+			}
+			if step.Number <= completed {
 				step.State = StepStatusCompleted
 			} else {
 				step.State = StepStatusPending

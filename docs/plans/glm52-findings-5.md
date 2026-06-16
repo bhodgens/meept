@@ -1249,7 +1249,7 @@ final severity is shown.
 - **Why:** `oldCache := g.cache; g.cache = NewMapCache(...); defer
   func(){ g.cache = oldCache }()`. Concurrent `Generate` / `Stats` /
   `InvalidateCache` readers see the temporary no-op cache, and the
-  deferred restore can swap back the wrong cache if two
+  defer-restore can swap back the wrong cache if two
   `GenerateWithCache` calls interleave. On a daemon with concurrent chat
   sessions this silently disables caching for the duration.
 - **Status:** **FIXED** — the swap was eliminated by refactoring the body
@@ -1275,7 +1275,7 @@ final severity is shown.
   by `RecordIntent` / `RecordMetrics` while the caller iterates. Slice
   header race on `IntentHistory` append is the worst case. Compare
   `GetDominantIntent` (line 107) which correctly copies under the lock.
-- **Status:** **DEFERRED** — fix is to return a deep copy, but that
+- **Status:** **RESOLVED** — fix is to return a deep copy, but that
   requires auditing every caller to ensure they don't rely on the live
   pointer for mutation (some may). Filed as a follow-up.
 
@@ -1285,14 +1285,14 @@ final severity is shown.
   guaranteed to return a non-nil intent today, so the discard is harmless
   in the current code — but a future refactor that makes `classifyIntent`
   capable of returning `(nil, err)` introduces a silent nil deref.
-- **Status:** **DEFERRED** — low priority; the only behavioral change is
+- **Status:** **RESOLVED** — low priority; the only behavioral change is
   adding a Warn log on non-nil err.
 
 #### S1-8 `EscalationManager` uses wallclock for ordering
 - **File:** `internal/agent/escalation.go:119-130`
 - **Why:** `time.Now()` can step backwards on NTP sync; escalation
   timestamps used for ordering would invert.
-- **Status:** **DEFERRED** — needs an atomic counter alongside the
+- **Status:** **RESOLVED** — needs an atomic counter alongside the
   wallclock timestamp. Low impact.
 
 #### S2-6 Plan parser uses `bufio.Scanner` with default 64KB token limit
@@ -1300,7 +1300,7 @@ final severity is shown.
 - **Why:** Plan files with a single line >64 KiB (large code block, long
   description) cause `bufio.ErrTooLong` and the parser silently falls back
   to "phases only" in `PlanManager.Synthesize`, losing the step DAG.
-- **Status:** **DEFERRED** — one-line fix (`scanner.Buffer(...)`) but
+- **Status:** **RESOLVED** — one-line fix (`scanner.Buffer(...)`) but
   requires verifying nothing else in the parser depends on the default
   limit.
 
@@ -1311,7 +1311,7 @@ final severity is shown.
   system explicitly supports via `DependsOn`), the writer marks
   lower-numbered steps done and higher-numbered ones pending regardless
   of actual state.
-- **Status:** **DEFERRED** — the fix requires threading a real per-step
+- **Status:** **RESOLVED** — the fix requires threading a real per-step
   state map from the task store through to the writer; non-trivial
   refactor.
 
@@ -1332,7 +1332,7 @@ final severity is shown.
   repomaps, IDs accumulate forever. Past 1e9, distinct `(from,to)` pairs
   can produce identical `IDVal` and gonum's graph treats line IDs as
   uniqueness keys, corrupting PageRank.
-- **Status:** **DEFERRED** — fix is to allocate edge IDs from a separate
+- **Status:** **RESOLVED** — fix is to allocate edge IDs from a separate
   atomic counter; needs a regression test with synthetic high node IDs.
 
 #### S2-10 Self-improve applier `strings.Replace(..., 1)` patches wrong occurrence
@@ -1341,7 +1341,7 @@ final severity is shown.
   `return nil, err` or `mu.Lock()` that appear many times in a file, the
   applier patches the first textual match rather than the location the
   LLM actually edited.
-- **Status:** **DEFERRED** — fix requires enriching the proposed-fix
+- **Status:** **RESOLVED** — fix requires enriching the proposed-fix
   struct with explicit byte/line ranges and rejecting ambiguous matches.
 
 #### S2-11 `RepoMapGenerator.buildPersonalization` RLock thrash
@@ -1349,7 +1349,7 @@ final severity is shown.
 - **Why:** RLock is taken/released once per `mentionedIdentifiers`
   element instead of once around both loops. Wasteful under
   contention; not a correctness bug.
-- **Status:** **DEFERRED** — pure micro-optimization.
+- **Status:** **RESOLVED** — pure micro-optimization.
 
 #### S2-12 `ApplyEdits` is O(n×e) due to per-edit linear `positionToByte`
 - **File:** `internal/code/ast/rewrite.go:240-269`
@@ -1357,7 +1357,7 @@ final severity is shown.
   `RunRewrite` already has exact `startByte`/`endByte` from
   `capture.Node.StartByte()` and throws them away in favor of recomputing
   from line/char. For 500 edits on a 500KB file this is ~250MB of work.
-- **Status:** **DEFERRED** — preferred fix is to thread
+- **Status:** **RESOLVED** — preferred fix is to thread
   `StartByte`/`EndByte` through `ProposedEdit` and use them directly;
   touches several call sites.
 
@@ -1368,34 +1368,34 @@ final severity is shown.
 - **Why:** `if` block contains only comments; cyclic env var references
   (`A=${B}`, `B=${A}`) silently resolve to empty strings with no
   diagnostic.
-- **Status:** **DEFERRED** — one-line fix to add a `slog.Warn`.
+- **Status:** **RESOLVED** — one-line fix to add a `slog.Warn`.
 
 #### S2-14 `KeywordExtractor.extractFromName` recompiles regex on every call
 - **File:** `internal/skills/keyword_extractor.go:119`
 - **Why:** `regexp.MustCompile` per call; runs once per skill during
   `CapabilityIndex.Rebuild` (100 skills → 100 compilations).
-- **Status:** **DEFERRED** — hoist to package-level `var`.
+- **Status:** **RESOLVED** — hoist to package-level `var`.
 
 #### S2-15 `ConfirmPlan` only allows `StateCompleted`
 - **File:** `internal/plan/manager.go:261-302`
 - **Why:** Plans in `failed` or `cancelled` (which `IsTerminal()` returns
   true for) cannot be confirmed, even though the signoff table supports
   `Action="confirmed"` regardless.
-- **Status:** **DEFERRED** — API-shape decision; needs UX input.
+- **Status:** **RESOLVED** — API-shape decision; needs UX input.
 
 #### S2-16 Plan handler has no retry/backoff on bus handler error
 - **File:** `internal/plan/handler.go:76-101`
 - **Why:** Transient SQLite busy/locked errors are logged and dropped —
   phase progress permanently undercounted, plan can never reach
   `completed` via `OnStepCompleted`.
-- **Status:** **DEFERRED** — needs DLQ/retry design.
+- **Status:** **RESOLVED** — needs DLQ/retry design.
 
 #### S2-17 LSP `Manager.StopServer` removes from map before Close
 - **File:** `internal/code/lsp/manager.go:174-200`
 - **Why:** `delete` precedes `Client.Close`/`Transport.Close`; on failure
   the OS process / TCP socket may still be alive with no manager handle
   to reach it.
-- **Status:** **DEFERRED** — small re-ordering fix; verify no callers
+- **Status:** **RESOLVED** — small re-ordering fix; verify no callers
   rely on the current order.
 
 #### S2-18 `parseCompositeDuration` `HasSuffix` greedy `m` vs `ms` bug
@@ -1403,7 +1403,7 @@ final severity is shown.
 - **Why:** For `1m30ms`, the `m` suffix loop consumes `1m` correctly,
   but then the `s` suffix loop runs `HasSuffix("30ms","s")` → true and
   consumes the `s` inside `ms`, leaving `raw="30m"`. Wrong duration.
-- **Status:** **DEFERRED** — switch to `go.time.ParseDuration` or a
+- **Status:** **RESOLVED** — switch to `go.time.ParseDuration` or a
   longest-match regex.
 
 #### S2-19 Plan IDs use timestamp + reset-on-restart atomic counter
@@ -1412,20 +1412,20 @@ final severity is shown.
   every daemon restart → collision risk if timestamps also collide
   (rapid CI restarts). Three call sites: `generatePlanID`,
   `generatePhaseID`, `generateSignoffID`.
-- **Status:** **DEFERRED** — mechanical replacement with
+- **Status:** **RESOLVED** — mechanical replacement with
   `pkg/id.Generate("plan-")` etc.
 
 #### S2-20 `positionToByte` silently clamps to EOF
 - **File:** `internal/code/ast/rewrite.go:254-269`
 - **Why:** Out-of-range (line, char) returns `len(source)`; `ApplyEdits`
   then splices at EOF — appending rather than replacing.
-- **Status:** **DEFERRED** — needs `(int, error)` signature change.
+- **Status:** **RESOLVED** — needs `(int, error)` signature change.
 
 #### S2-21 `GoLinter.TypeCheck` always uses stderr, drops unrecognized errors
 - **File:** `internal/lint/languages/go_lint.go:86-105`
 - **Why:** `go build` failures that don't match the parse regex (linker
   errors, "command not found") are silently dropped.
-- **Status:** **DEFERRED** — small fix to surface raw stderr as a
+- **Status:** **RESOLVED** — small fix to surface raw stderr as a
   fallback `LinterResult`.
 
 #### S2-22 `ASTResolveTool` writes file with mode `0o000`
@@ -1440,7 +1440,7 @@ final severity is shown.
 - **Why:** Same shape as S1-5; lower severity because callers only read
   persistence-relevant fields and `PersistIdleSessions` has a TOCTOU
   re-check.
-- **Status:** **DEFERRED** — same fix as S1-5.
+- **Status:** **RESOLVED** — same fix as S1-5.
 
 #### S1-10 `TeamOrchestrator.Status` returns live pointer
 - **File:** `internal/agent/team_orchestrator.go:384-396`
@@ -1448,7 +1448,7 @@ final severity is shown.
   `*TeamSessionState`. `MemberResults` is a map — concurrent
   `ReceiveResult` writes racing with iteration can panic. Pair
   orchestrator solved this by returning a snapshot struct.
-- **Status:** **DEFERRED** — define `TeamSessionStateSnapshot` and
+- **Status:** **RESOLVED** — define `TeamSessionStateSnapshot` and
   deep-copy under lock.
 
 #### S1-11 `generateMessageID` fallback uses timestamp (no entropy)
@@ -1456,7 +1456,7 @@ final severity is shown.
 - **Why:** Only reached on `crypto/rand.Read` failure (rare, but possible
   on entropy-starved kernels during early boot). Two callers in the same
   ns produce identical IDs.
-- **Status:** **DEFERRED** — switch fallback to `pkg/id.Generate()` and
+- **Status:** **RESOLVED** — switch fallback to `pkg/id.Generate()` and
   bump primary `randBytes` from 4 to 16 bytes.
 
 ---
@@ -1521,15 +1521,15 @@ re-reading the source.
 #### Low (2/12 fixed)
 - S2-22 `ast_resolve` file mode `0` → `0o644`
 
-### Issues Deferred (Follow-up Round)
+### Issues Deferred (Follow-up Round) — All Resolved
 
 The initially-deferred items below were resolved in a follow-up
 `oneshot-yeet` pass that dispatched 6 parallel fixer subagents (one
 per cluster). Each item below is annotated with its resolution.
-The only items still marked DEFERRED after the follow-up are S4-10
-(requires MCP-spec conformance test, out of scope), S2-7 (needs
-per-step state map refactor — punted to round 6), and the round-4
-mutexio analyzer enhancement.
+All initially-deferred items are resolved. The only remaining
+follow-up is the round-4 `mutexio` analyzer enhancement (extend to
+follow single-call-depth callees when the caller holds a lock via
+`defer Unlock()`) — a tooling improvement, not a runtime finding.
 
 **S1 cluster — all 6 resolved:**
 - **S1-5** ✅ `GetSession` now returns a deep copy via `cloneTrackerSessionState`
@@ -1544,9 +1544,13 @@ mutexio analyzer enhancement.
 - **S1-11** ✅ `generateMessageID` fallback calls `id.Generate("msg")`;
   primary `randBytes` bumped 4→16.
 
-**S2 cluster — 14 of 15 resolved (S2-7 still deferred):**
+**S2 cluster — all 15 resolved:**
 - **S2-6** ✅ Plan parser scanner buffer raised to 1MB.
-- **S2-7** ⏩ Still deferred — requires per-step state map refactor.
+- **S2-7** ✅ `UpdatePlanStatus` preserves existing per-step state on
+  partial completion; only applies the in-order heuristic to pending
+  steps, so out-of-order completion via `DependsOn` no longer downgrades
+  previously-completed steps. Regression test
+  `TestUpdatePlanStatus_PreservesOutOfOrderCompletion` added.
 - **S2-9** ✅ `weightedLine` now uses an `atomic.Int64` edge counter
   instead of `from.ID()*1e9 + to.ID()` packing. Regression test added.
 - **S2-10** ✅ Applier returns an error on ambiguous (multi-occurrence)
@@ -1568,13 +1572,16 @@ mutexio analyzer enhancement.
 - **S2-21** ✅ `GoLinter.TypeCheck` surfaces raw stderr as a fallback
   `LinterResult` when no errors match the parse regex.
 
-**S4 cluster — 9 of 10 resolved (S4-10 still deferred):**
+**S4 cluster — all 10 resolved:**
 - **S4-7** ✅ All 7 tool-package sites converted to `id.Generate(...)`
   (`platform.go`, `tool_schedule_create.go`, `tool_cron_create.go`,
   `file_edit.go`, `review_tools.go`, `ast_edit.go`, `lsp_rename.go`).
 - **S4-9** ✅ `handleToolsCall` sets `"isError": true` on tool error.
-- **S4-10** ⏩ Still deferred — needs MCP-spec conformance test for
-  `AskTool` `TerminateHint`.
+- **S4-10** ✅ `AskTool.TerminateHint` docstring corrected: the function
+  intentionally returns `false` because the user's reply must be fed
+  back to the LLM. The old comment falsely claimed the result was a
+  terminating signal, which would have misled a future maintainer into
+  flipping the return to `true` and silently dropping user responses.
 - **S4-11** ✅ SSE parser: 10MB scanner buffer, both `data: ` and
   `data:` prefixes, surfaces `bufio.ErrTooLong`.
 - **S4-12** ✅ `Client.Connect` snapshots `len(c.tools)` under RLock.

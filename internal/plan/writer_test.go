@@ -354,3 +354,69 @@ func TestWriteFromParsed(t *testing.T) {
 		t.Errorf("Notes = %v, want %v", parsed.Notes, original.Notes)
 	}
 }
+
+// TestUpdatePlanStatus_PreservesOutOfOrderCompletion verifies that a previously
+// completed step is never downgraded back to pending when a later-numbered step
+// has already been marked done (e.g. via DependsOn reordering).
+func TestUpdatePlanStatus_PreservesOutOfOrderCompletion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out-of-order-plan.md")
+
+	// Write a plan with 3 steps in phase 1, all pending.
+	plan := newTestPlanForWriter()
+	phases := []ParsedPhase{
+		{
+			Name:     "Implementation",
+			Sequence: 1,
+			State:    PhasePending,
+			Steps: []ParsedStep{
+				{Number: 1, Description: "step 1", State: StepStatusPending},
+				{Number: 2, Description: "step 2", State: StepStatusPending},
+				{Number: 3, Description: "step 3", State: StepStatusPending},
+			},
+		},
+	}
+
+	if err := WritePlanMarkdown(path, plan, phases); err != nil {
+		t.Fatalf("WritePlanMarkdown returned error: %v", err)
+	}
+
+	// Simulate out-of-order completion: mark step 3 as completed and step 2 as
+	// pending by writing a modified plan via WritePlanFromParsed.
+	parsed, err := ParsePlan(path)
+	if err != nil {
+		t.Fatalf("ParsePlan returned error: %v", err)
+	}
+	parsed.Phases[0].Steps[2].State = StepStatusCompleted // step 3 done out of order
+	if err := WritePlanFromParsed(path, parsed); err != nil {
+		t.Fatalf("WritePlanFromParsed returned error: %v", err)
+	}
+
+	// Now call UpdatePlanStatus with CompletedSteps=1 (only step 1 done in-order).
+	planPhases := []PlanPhase{
+		{Sequence: 1, TotalSteps: 3, CompletedSteps: 1, State: PhaseInProgress},
+	}
+	if err := UpdatePlanStatus(path, StateExecuting, planPhases); err != nil {
+		t.Fatalf("UpdatePlanStatus returned error: %v", err)
+	}
+
+	// Re-read and verify.
+	updated, err := ParsePlan(path)
+	if err != nil {
+		t.Fatalf("ParsePlan returned error: %v", err)
+	}
+	ph1 := updated.Phases[0]
+
+	// Step 1 (Number 1 <= CompletedSteps 1): should be completed by heuristic.
+	if ph1.Steps[0].State != StepStatusCompleted {
+		t.Errorf("Step 1 State = %q, want %q (heuristic)", ph1.Steps[0].State, StepStatusCompleted)
+	}
+	// Step 2 (Number 2 > CompletedSteps 1): should be pending.
+	if ph1.Steps[1].State != StepStatusPending {
+		t.Errorf("Step 2 State = %q, want %q", ph1.Steps[1].State, StepStatusPending)
+	}
+	// Step 3 was already completed out of order: must NOT be downgraded to pending.
+	if ph1.Steps[2].State != StepStatusCompleted {
+		t.Errorf("Step 3 State = %q, want %q (preserved out-of-order completion)", ph1.Steps[2].State, StepStatusCompleted)
+	}
+}
