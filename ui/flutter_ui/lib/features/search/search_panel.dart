@@ -26,6 +26,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
 
   late final ApiClient _apiClient;
   late final VoidCallback _searchListener;
+  late final FocusNode _keyboardFocusNode;
 
   List<SearchResultItem> _results = [];
   bool _isSearching = false;
@@ -38,6 +39,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
   void initState() {
     super.initState();
     _apiClient = ref.read(apiClientProvider);
+    _keyboardFocusNode = FocusNode();
     _searchListener = () {
       final hasText = _searchController.text.isNotEmpty;
       if (hasText != _showClear) {
@@ -49,6 +51,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
 
   @override
   void dispose() {
+    _keyboardFocusNode.dispose();
     _searchController.removeListener(_searchListener);
     _searchController.dispose();
     _debouncer.dispose();
@@ -108,7 +111,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
   @override
   Widget build(BuildContext context) {
     return KeyboardListener(
-      focusNode: FocusNode(),
+      focusNode: _keyboardFocusNode,
       onKeyEvent: (KeyEvent event) {
         if (event.logicalKey == LogicalKeyboardKey.escape) {
           _closePanel();

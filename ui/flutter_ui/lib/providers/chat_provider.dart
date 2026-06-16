@@ -13,6 +13,7 @@ import 'providers.dart'; // exports tts_provider.dart
 const int _maxMessages = 500;
 
 const _unset = Object();
+const _progressUnset = Object();
 
 /// Send endpoint type — distinct route for normal, steer, and follow-up messages.
 enum _SendEndpoint { normal, steer, followUp }
@@ -43,7 +44,7 @@ class ChatState {
     bool? isLoading,
     bool? isAgentProcessing,
     Object? error = _unset,
-    AgentProgress? currentProgress,
+    Object? currentProgress = _progressUnset,
   }) {
     // Limit messages to prevent memory leaks
     List<ChatMessage> limitedMessages = messages ?? this.messages;
@@ -56,7 +57,9 @@ class ChatState {
       isLoading: isLoading ?? this.isLoading,
       isAgentProcessing: isAgentProcessing ?? this.isAgentProcessing,
       error: identical(error, _unset) ? this.error : error as String?,
-      currentProgress: currentProgress ?? this.currentProgress,
+      currentProgress: identical(currentProgress, _progressUnset)
+          ? this.currentProgress
+          : currentProgress as AgentProgress?,
     );
   }
 }
@@ -396,11 +399,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
   /// Clear error state without removing messages
   void clearError() {
-    state = ChatState(
-      messages: state.messages,
-      isLoading: state.isLoading,
-      isAgentProcessing: state.isAgentProcessing,
-    );
+    state = state.copyWith(error: null);
   }
 
   /// Clear all messages

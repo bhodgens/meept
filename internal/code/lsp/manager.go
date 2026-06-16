@@ -159,6 +159,18 @@ func (m *Manager) StartServer(ctx context.Context, name string, cfg config.LSPSe
 	}
 
 	m.mu.Lock()
+	// Re-check: another goroutine may have started the same server concurrently.
+	if existing, ok := m.servers[name]; ok {
+		m.mu.Unlock()
+		// Close the just-spawned loser and return the existing instance.
+		m.logger.Info("LSP server already started by concurrent call, closing duplicate",
+			"name", name,
+		)
+		srv.DocMgr.CloseAll(ctx)
+		srv.Client.Shutdown(ctx)
+		srv.Client.Close()
+		return existing, nil
+	}
 	m.servers[name] = srv
 	m.mu.Unlock()
 

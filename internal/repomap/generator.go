@@ -173,6 +173,12 @@ func (g *RepoMapGenerator) UpdateWatchedFiles(files []string) {
 // chatFiles are the files actively being discussed in the conversation.
 // mentionedIdentifiers are the identifiers (functions, types, etc.) mentioned in the conversation.
 func (g *RepoMapGenerator) Generate(ctx context.Context, chatFiles, mentionedIdentifiers []string) (*RenderedMap, error) {
+	return g.generateInternal(ctx, chatFiles, mentionedIdentifiers, g.cache)
+}
+
+// generateInternal is the core generation logic that accepts an explicit cache.
+// This avoids mutating g.cache across goroutines (S2-4).
+func (g *RepoMapGenerator) generateInternal(ctx context.Context, chatFiles, mentionedIdentifiers []string, cache *MapCache) (*RenderedMap, error) {
 	if !g.config.Enabled {
 		return nil, nil
 	}
@@ -186,7 +192,7 @@ func (g *RepoMapGenerator) Generate(ctx context.Context, chatFiles, mentionedIde
 	}
 
 	// Check memory cache first
-	if cached, ok := g.cache.Get(chatFiles, mentionedIdentifiers, 5*time.Minute); ok {
+	if cached, ok := cache.Get(chatFiles, mentionedIdentifiers, 5*time.Minute); ok {
 		g.logger.Debug("using cached RepoMap", "tokens", cached.Tokens)
 		return &RenderedMap{
 			Content: cached.Content,
@@ -233,7 +239,7 @@ func (g *RepoMapGenerator) Generate(ctx context.Context, chatFiles, mentionedIde
 
 	// Cache the result
 	if rendered.Content != "" {
-		g.cache.Set(chatFiles, mentionedIdentifiers, rendered)
+		cache.Set(chatFiles, mentionedIdentifiers, rendered)
 	}
 
 	return &rendered, nil
@@ -350,13 +356,11 @@ func calculateTargetTokens(config RepoMapConfig, chatFiles []string) int {
 // GenerateWithCache generates with explicit cache handling.
 // This is useful when callers want to control caching behavior.
 func (g *RepoMapGenerator) GenerateWithCache(ctx context.Context, chatFiles, mentionedIdentifiers []string, useCache bool) (*RenderedMap, error) {
+	cache := g.cache
 	if !useCache {
-		// Bypass cache by using a unique context
-		oldCache := g.cache
-		g.cache = NewMapCache(CacheConfig{EnableMemoryCache: false})
-		defer func() { g.cache = oldCache }()
+		cache = NewMapCache(CacheConfig{EnableMemoryCache: false})
 	}
-	return g.Generate(ctx, chatFiles, mentionedIdentifiers)
+	return g.generateInternal(ctx, chatFiles, mentionedIdentifiers, cache)
 }
 
 // InvalidateCache invalidates all cached data.

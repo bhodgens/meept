@@ -49,6 +49,7 @@ type EscalationLevel struct {
 	Level        int       `json:"level"`
 	Reason       string    `json:"reason"`
 	OriginalTask string    `json:"original_task"`
+	FirstFailure string    `json:"first_failure,omitempty"`
 	ReplanResult string    `json:"replan_result,omitempty"`
 	Timestamp    time.Time `json:"timestamp"`
 }
@@ -106,25 +107,64 @@ func (em *EscalationManager) Escalate(ctx context.Context, failure FailureContex
 		return nil
 	}
 
+	// Fast path: check map under lock
 	em.mu.Lock()
 	level, exists := em.escalations[failure.TaskID]
+	em.mu.Unlock()
+
 	if !exists {
-		// Fetch the original task description from the store
+		// Query task store WITHOUT holding the lock
 		originalTaskDesc := ""
 		if em.taskStore != nil {
 			if t, err := em.taskStore.GetByID(failure.TaskID); err == nil && t != nil {
 				originalTaskDesc = t.Description
 			}
 		}
-		level = &EscalationLevel{
-			TaskID:       failure.TaskID,
-			Level:        0,
-			OriginalTask: originalTaskDesc,
-			Timestamp:    time.Now(),
+
+		// Re-acquire lock and handle TOCTOU (another goroutine may have inserted first)
+		em.mu.Lock()
+		if existing, ok := em.escalations[failure.TaskID]; ok {
+			level = existing
+		} else {
+			level = &EscalationLevel{
+				TaskID:       failure.TaskID,
+				Level:        0,
+				OriginalTask: originalTaskDesc,
+				FirstFailure: failure.Error,
+				Timestamp:    time.Now(),
+			}
+			em.escalations[failure.TaskID] = level
 		}
-		em.escalations[failure.TaskID] = level
+		level.Level++
+		level.Reason = failure.Error
+		level.Timestamp = time.Now()
+		currentLevel := level.Level
+		em.mu.Unlock()
+
+		em.logger.Info("Escalating task",
+			"task_id", failure.TaskID,
+			"step_id", failure.StepID,
+			"agent_id", failure.AgentID,
+			"level", currentLevel,
+			"max_levels", em.config.MaxEscalationLevels,
+			"error", failure.Error,
+		)
+
+		// Check if max escalation reached
+		if currentLevel >= em.config.MaxEscalationLevels {
+			em.logger.Warn("Max escalation level reached, requesting human intervention",
+				"task_id", failure.TaskID,
+				"level", currentLevel,
+			)
+			return em.notifyHumanIntervention(ctx, failure, currentLevel)
+		}
+
+		// Attempt re-planning
+		return em.triggerReplan(ctx, failure, currentLevel)
 	}
 
+	// Existing entry: take lock, increment, release
+	em.mu.Lock()
 	level.Level++
 	level.Reason = failure.Error
 	level.Timestamp = time.Now()

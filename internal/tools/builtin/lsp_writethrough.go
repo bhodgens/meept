@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -69,11 +68,12 @@ type lspWriteNotifier struct {
 	diagnosticsOnWrite bool
 	diagnosticsTimeout time.Duration
 	logger             *slog.Logger
+	fenceChecker       FenceChecker
 
 	// diagMu protects diagWaiters and diagOnce.
-	diagMu       sync.Mutex
-	diagWaiters  map[string][]chan []lsp.Diagnostic // keyed by URI
-	diagRegOnce  map[*lsp.Client]*sync.Once         // per-client registration guard
+	diagMu      sync.Mutex
+	diagWaiters map[string][]chan []lsp.Diagnostic // keyed by URI
+	diagRegOnce map[*lsp.Client]*sync.Once         // per-client registration guard
 }
 
 // NewLSPWriteNotifier creates a new LSP write notifier.
@@ -99,6 +99,14 @@ func NewLSPWriteNotifier(manager *lsp.Manager, cfg config.LSPConfig, logger *slo
 	}
 }
 
+// SetFenceChecker sets the fence checker for path-based sandboxing.
+// Nil guard is required per CLAUDE.md "Setter methods" coding practice.
+func (n *lspWriteNotifier) SetFenceChecker(fc FenceChecker) {
+	if fc != nil {
+		n.fenceChecker = fc
+	}
+}
+
 // NotifyWrite notifies the LSP server about a file write, optionally formatting
 // and collecting diagnostics.
 func (n *lspWriteNotifier) NotifyWrite(ctx context.Context, filePath string, content string) *WritethroughResult {
@@ -113,7 +121,7 @@ func (n *lspWriteNotifier) NotifyWrite(ctx context.Context, filePath string, con
 		return nil
 	}
 
-	absPath, err := absPath(filePath)
+	absPath, err := resolvePath(filePath)
 	if err != nil {
 		return nil
 	}
@@ -165,6 +173,16 @@ func (n *lspWriteNotifier) formatFile(ctx context.Context, srv *lsp.ServerInstan
 
 	if len(edits) == 0 {
 		return &FormatResult{EditsApplied: 0, LinesChanged: 0, Reformatted: false}
+	}
+
+	// Fence check before applying formatting edits. The file may be outside
+	// the workspace if a compromised LSP server returned edits targeting
+	// unrelated paths. Defense in depth.
+	if n.fenceChecker != nil {
+		if err := n.fenceChecker.CheckPath(absPath, "write"); err != nil {
+			n.logger.Debug("LSP writethrough: fence check rejected formatting write", "path", absPath, "error", err)
+			return nil
+		}
 	}
 
 	// Apply formatting edits
@@ -348,20 +366,4 @@ func applyFormattingEdits(filePath string, edits []lsp.TextEdit) error {
 	}
 
 	return os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o644)
-}
-
-// absPath resolves a file path to absolute, expanding ~ and resolving relative paths.
-func absPath(path string) (string, error) {
-	if strings.HasPrefix(path, "~") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		path = home + path[1:]
-	}
-	abs, err := filepath.Abs(strings.TrimSpace(path))
-	if err != nil {
-		return "", err
-	}
-	return filepath.Clean(abs), nil
 }

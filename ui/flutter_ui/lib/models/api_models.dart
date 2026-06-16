@@ -149,7 +149,7 @@ class AgentProgress {
     return AgentProgress(
       agentId: (data?['agent_id'] ?? json['agent_id'] ?? '') as String,
       message: (data?['message'] ?? json['message'] ?? '') as String,
-      tier: (data?['tier'] ?? json['tier'] ?? 1) as int,
+      tier: ((data?['tier'] ?? json['tier'] ?? 1) as num).toInt(),
       sourceEvent: (data?['source_event'] ?? json['source_event']) as String?,
       timestamp: DateTime.tryParse(
               data?['timestamp'] as String? ??

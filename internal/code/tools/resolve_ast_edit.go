@@ -8,12 +8,14 @@ import (
 	"github.com/caimlas/meept/internal/code/ast"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/internal/tools/builtin"
 )
 
 // ResolveASTEditTool applies or discards pending ast_edit proposals.
 // This tool provides an explicit resolve pattern for the preview-before-apply workflow.
 type ResolveASTEditTool struct {
-	parser *ast.ParserManager
+	parser       *ast.ParserManager
+	fenceChecker builtin.FenceChecker
 }
 
 // NewResolveASTEditTool creates a new resolve AST edit tool.
@@ -22,6 +24,14 @@ func NewResolveASTEditTool(parser *ast.ParserManager) (*ResolveASTEditTool, erro
 		return nil, fmt.Errorf("ast.ParserManager cannot be nil")
 	}
 	return &ResolveASTEditTool{parser: parser}, nil
+}
+
+// SetFenceChecker sets the fence checker for path-based sandboxing.
+// Nil guard is required per CLAUDE.md "Setter methods" coding practice.
+func (t *ResolveASTEditTool) SetFenceChecker(fc builtin.FenceChecker) {
+	if fc != nil {
+		t.fenceChecker = fc
+	}
 }
 
 func (t *ResolveASTEditTool) Name() string { return "resolve_ast_edit" }
@@ -171,6 +181,14 @@ func (t *ResolveASTEditTool) Execute(ctx context.Context, args map[string]any) (
 	if action == "apply" {
 		modifiedSource := ast.ApplyEdits(source, result.Rewrite.ProposedEdits)
 		response["applied"] = true
+
+		// Fence check: validate the resolved file path against the workspace
+		// boundary before writing. Mirrors the ASTEditTool write guard.
+		if t.fenceChecker != nil {
+			if err := t.fenceChecker.CheckPath(filePath, "write"); err != nil {
+				return nil, fmt.Errorf("fence check failed: %w", err)
+			}
+		}
 
 		// Write to file
 		if err := os.WriteFile(filePath, modifiedSource, 0o644); err != nil {

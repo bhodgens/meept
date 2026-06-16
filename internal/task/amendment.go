@@ -2,8 +2,9 @@ package task
 
 import (
 	"encoding/json"
-	"fmt"
 	"time"
+
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // AmendmentType represents the type of amendment.
@@ -61,7 +62,7 @@ type AmendmentReply struct {
 // NewAmendmentRequest creates a new amendment request.
 func NewAmendmentRequest(taskID string, typ AmendmentType, content string) *AmendmentRequest {
 	return &AmendmentRequest{
-		ID:        fmt.Sprintf("amend-%s-%d", taskID, time.Now().UnixNano()),
+		ID:        id.Generate("amend-"),
 		TaskID:    taskID,
 		Type:      typ,
 		Content:   content,

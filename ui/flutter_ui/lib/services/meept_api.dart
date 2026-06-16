@@ -27,7 +27,7 @@ class MeeptApi {
 
   /// GET /health (outside /api/v1 prefix -- uses root URL).
   Future<Map<String, dynamic>> healthCheck() async {
-    final response = await _dio.get('${_dio.options.baseUrl}/health');
+    final response = await _dio.get('/health');
     return response.data as Map<String, dynamic>;
   }
 

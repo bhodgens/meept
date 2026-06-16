@@ -203,16 +203,33 @@ func filterLockFiles(changes []FileChangeInfo) []FileChangeInfo {
 func (t *GitSplitTool) parseSimpleStatus(output string) []FileChangeInfo {
 	var changes []FileChangeInfo
 	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimSpace(line)
+		// Note: do NOT TrimSpace the whole line. The leading character in
+		// porcelain v1 format is the X status, which may legitimately be a
+		// space (worktree-only changes). Trailing whitespace is safe to strip.
+		line = strings.TrimRight(line, " \t\r")
 		if line == "" {
 			continue
 		}
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
+		// Git --porcelain=v1 format: "XY PATH" where XY is a 2-char status
+		// starting at column 0 and PATH starts at column 3. Use fixed-width
+		// extraction instead of strings.Fields so paths with spaces survive.
+		if len(line) < 4 {
 			continue
 		}
-		status := parts[0]
-		filePath := parts[1]
+		status := strings.TrimSpace(line[:2])
+		rest := line[3:]
+
+		// For renames (R status), the format is "R  ORIG_PATH\tNEW_PATH".
+		var filePath string
+		if idx := strings.IndexByte(rest, '\t'); idx >= 0 && strings.HasPrefix(status, "R") {
+			filePath = rest[idx+1:]
+		} else {
+			filePath = rest
+		}
+		filePath = strings.TrimSpace(filePath)
+		if filePath == "" {
+			continue
+		}
 
 		changeType := "modified"
 		switch {

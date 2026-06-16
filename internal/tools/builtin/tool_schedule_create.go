@@ -10,6 +10,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/scheduler"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // ScheduleCreateTool creates a new scheduled job.
@@ -116,7 +117,7 @@ func (t *ScheduleCreateTool) Execute(ctx context.Context, args map[string]any) (
 	}
 
 	// Generate job ID
-	jobID := fmt.Sprintf("job-%d", time.Now().UnixNano())
+	jobID := id.Generate("sched-")
 
 	// Build job config based on type
 	cfg := scheduler.JobConfig{

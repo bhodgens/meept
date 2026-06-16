@@ -11,6 +11,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -147,7 +148,7 @@ func (pm *PairManager) RunRound(ctx context.Context, sessionID string) (*Attempt
 
 	// --- Actor phase ---
 	actorPrompt := session.Context.ActorPrompt()
-	actorConvID := fmt.Sprintf("%s-%s-r%d-%d", actorConvPrefix, session.TaskID, round, time.Now().UnixNano())
+	actorConvID := fmt.Sprintf("%s-%s-r%d-%s", actorConvPrefix, session.TaskID, round, id.Generate(""))
 
 	startedAt := time.Now().UTC()
 	actorOutput, err := pm.runAgent(ctx, session.ActorAgentID, actorPrompt, actorConvID)
@@ -190,7 +191,7 @@ func (pm *PairManager) RunRound(ctx context.Context, sessionID string) (*Attempt
 
 	// --- Reviewer phase ---
 	reviewerPrompt := session.Context.ReviewerPrompt(actorOutput)
-	reviewerConvID := fmt.Sprintf("%s-%s-r%d-%d", reviewerConvPrefix, session.TaskID, round, time.Now().UnixNano())
+	reviewerConvID := fmt.Sprintf("%s-%s-r%d-%s", reviewerConvPrefix, session.TaskID, round, id.Generate(""))
 
 	reviewOutput, err := pm.runAgent(ctx, session.ReviewerAgentID, reviewerPrompt, reviewerConvID)
 	if err != nil {

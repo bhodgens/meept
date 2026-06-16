@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tui"
+	"github.com/caimlas/meept/pkg/id"
 )
 
 var (
@@ -86,7 +86,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 	// Generate a conversation ID for this single message.
 	// Include a nanosecond timestamp so multiple `meept "msg"` invocations
 	// from the same shell do not collide in the session store.
-	conversationID := fmt.Sprintf("cli-%d-%d", os.Getpid(), time.Now().UnixNano())
+	conversationID := id.Generate("cli-")
 
 	// If --project or --nofence are set, create a managed session and bind project
 	if chatProject != "" || chatNoFence {

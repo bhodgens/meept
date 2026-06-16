@@ -12,6 +12,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/internal/tools/builtin"
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // LSPRenameTool renames a symbol across the workspace.
@@ -195,7 +196,7 @@ func (t *LSPRenameTool) Execute(ctx context.Context, args map[string]any) (any, 
 	// Handle preview/accept workflow when registry is available and apply=false
 	if t.pendingChangesRegistry != nil && !apply {
 		// Create pending changes for each file
-		sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
+		sessionID := id.Generate("lsp-")
 		if sid, ok := ctx.Value("session_id").(string); ok && sid != "" {
 			sessionID = sid
 		}

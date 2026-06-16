@@ -8,13 +8,15 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 // TCPTransport implements Transport over TCP.
 type TCPTransport struct {
-	conn   net.Conn
-	reader *bufio.Reader
+	conn    net.Conn
+	reader  *bufio.Reader
+	writeMu sync.Mutex
 }
 
 // NewTCPTransport creates a transport by connecting to a TCP endpoint.
@@ -93,6 +95,9 @@ func (t *TCPTransport) Write(ctx context.Context, data []byte) error {
 	}
 
 	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(data))
+
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
 
 	if _, err := t.conn.Write([]byte(header)); err != nil {
 		return fmt.Errorf("failed to write header: %w", err)

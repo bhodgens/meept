@@ -49,6 +49,9 @@ func TestAllSetters_NilSafe(t *testing.T) {
 		{"FileEditTool.SetBlockResolver", func() { (&FileEditTool{}).SetBlockResolver(nil) }},
 		{"FileEditTool.SetPendingChangesRegistry", func() { (&FileEditTool{}).SetPendingChangesRegistry((*PendingChangesRegistry)(nil)) }},
 		{"FileEditTool.SetSecurityOrchestrator", func() { (&FileEditTool{}).SetSecurityOrchestrator((*intsecurity.Orchestrator)(nil)) }},
+		// Setters added by round-5 S4-x fixes (fence-checker coverage gaps)
+		{"DebugTool.SetFenceChecker", func() { (&DebugTool{}).SetFenceChecker(nil) }},
+		{"lspWriteNotifier.SetFenceChecker", func() { (&lspWriteNotifier{}).SetFenceChecker(nil) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

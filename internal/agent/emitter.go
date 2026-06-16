@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -250,5 +251,5 @@ var legacyTopicMap = map[AgentEventType]string{
 
 // generateEventID creates a unique event ID.
 func generateEventID() string {
-	return time.Now().UTC().Format("20060102150405.000000000")
+	return id.Generate("evt-")
 }

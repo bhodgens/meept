@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
@@ -22,6 +23,10 @@ import (
 
 // ErrNoExecutionSlot is returned when the semaphore blocks a step from executing.
 var ErrNoExecutionSlot = errors.New("no available execution slot")
+
+// tacticalSeq provides a monotonically increasing sequence counter for handoff steps,
+// replacing the old time.Now().UnixNano()%1000 pattern that produced predictable IDs.
+var tacticalSeq atomic.Uint64
 
 // StepJobPayload is the payload stored in a queue job for a task step.
 type StepJobPayload struct {
@@ -1482,7 +1487,7 @@ func (ts *TacticalScheduler) HandleHandoff(ctx context.Context, msg *models.BusM
 		// still needs to shift downstream dependencies from fromStep to newStepID.
 	} else {
 		// 7b. Direct step creation (no amendment system)
-		sequence := int(9000 + time.Now().UnixNano()%1000)
+		sequence := int(9000 + tacticalSeq.Add(1)%1000)
 		newStep := task.NewTaskStep(req.TaskID, req.Description, sequence)
 		newStep.ToolHint = toolHint
 		newStep.AccumulatedContext = accumulatedContext

@@ -13,7 +13,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/internal/agent/prompts"
@@ -28,12 +27,10 @@ import (
 	"github.com/caimlas/meept/internal/shadow"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
-
-// convIDCounter ensures unique conversation IDs even when generated in quick succession
-var convIDCounter atomic.Uint64
 
 // Default values for the agent loop.
 const (
@@ -3664,8 +3661,7 @@ func (l *AgentLoop) skillDiscoveryThreshold() float64 {
 
 // generateConversationID creates a new conversation ID.
 func generateConversationID() string {
-	counter := convIDCounter.Add(1)
-	return fmt.Sprintf("conv-%d-%d", time.Now().UnixNano(), counter)
+	return id.Generate("conv-")
 }
 
 // Run starts the agent loop in a continuous mode, processing messages from a channel.

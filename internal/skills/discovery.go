@@ -142,7 +142,7 @@ func (d *Discovery) DiscoverWithContext(ctx context.Context) ([]*Skill, error) {
 			key := normalizeName(skill.Name)
 			existing, exists := skills[key]
 			if exists {
-				if skill.Priority <= existing.Priority {
+				if skill.Priority < existing.Priority {
 					d.logger.Debug("Skill shadowed by higher priority",
 						"name", skill.Name,
 						"source", source.Name(),
@@ -231,7 +231,7 @@ func (d *Discovery) DiscoverMetadataOnly() ([]*SkillIndexEntry, error) {
 			key := normalizeName(entry.Name)
 			existing, exists := entries[key]
 			if exists {
-				if entry.Priority <= existing.Priority {
+				if entry.Priority < existing.Priority {
 					d.logger.Debug("Skill metadata shadowed by higher priority",
 						"name", entry.Name,
 						"source", source.Name(),

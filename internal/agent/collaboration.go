@@ -2,9 +2,10 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
+
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // SessionState represents the lifecycle state of a collaboration session.
@@ -88,7 +89,7 @@ const (
 func NewCollaborationSession(mode, taskID string, participants []string, config SessionConfig) *CollaborationSession {
 	now := time.Now().UTC()
 	return &CollaborationSession{
-		ID:           fmt.Sprintf("collab-%s-%d", taskID, now.UnixNano()),
+		ID:           id.Generate("collab-") + "-" + taskID,
 		Mode:         mode,
 		TaskID:       taskID,
 		State:        SessionCreated,

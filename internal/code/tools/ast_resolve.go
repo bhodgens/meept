@@ -113,7 +113,7 @@ func (t *ASTResolveTool) Execute(ctx context.Context, args map[string]any) (any,
 	}
 
 	result := ast.ApplyEdits(source, edits)
-	if err := os.WriteFile(filePath, result, 0); err != nil {
+	if err := os.WriteFile(filePath, result, 0o644); err != nil {
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 

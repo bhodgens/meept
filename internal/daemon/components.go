@@ -19,29 +19,29 @@ import (
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/calendar"
+	"github.com/caimlas/meept/internal/cluster"
 	"github.com/caimlas/meept/internal/code/ast"
 	"github.com/caimlas/meept/internal/code/lsp"
 	codetools "github.com/caimlas/meept/internal/code/tools"
 	"github.com/caimlas/meept/internal/comm/telegram"
 	"github.com/caimlas/meept/internal/comm/web"
 	"github.com/caimlas/meept/internal/config"
-	"github.com/caimlas/meept/internal/cluster"
 	"github.com/caimlas/meept/internal/debug"
 	"github.com/caimlas/meept/internal/lint"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
-	"github.com/caimlas/meept/internal/runtime"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	memsync "github.com/caimlas/meept/internal/memory/sync"
 	"github.com/caimlas/meept/internal/memory/vector"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/project"
+	"github.com/caimlas/meept/internal/pty"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/repomap"
+	"github.com/caimlas/meept/internal/runtime"
 	"github.com/caimlas/meept/internal/scheduler"
 	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/security/taint"
-	"github.com/caimlas/meept/internal/pty"
 	"github.com/caimlas/meept/internal/selfimprove"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/shadow"
@@ -52,6 +52,7 @@ import (
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/internal/tools/mcp"
 	"github.com/caimlas/meept/internal/worker"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
@@ -118,9 +119,9 @@ type Components struct {
 	MemoryHandler *memory.Handler
 
 	// Memvid and multi-agent
-	MemvidClient         *memvid.Client
-	AgentRegistry        *agent.AgentRegistry
-	Dispatcher           *agent.Dispatcher
+	MemvidClient  *memvid.Client
+	AgentRegistry *agent.AgentRegistry
+	Dispatcher    *agent.Dispatcher
 
 	// Shadow training
 	ShadowManager *shadow.Manager
@@ -213,11 +214,11 @@ type Components struct {
 	RepoMapGen *repomap.RepoMapGenerator
 
 	// Distributed cluster support
-	ClusterEngine  *cluster.GossipEngine
-	ClusterGitSync *cluster.GitSync
-	ClusterQueue   *queue.ClusterQueue
-	ClusterConfig       *cluster.Config
-	ClusterWireGuard    *cluster.WireGuardManager
+	ClusterEngine    *cluster.GossipEngine
+	ClusterGitSync   *cluster.GitSync
+	ClusterQueue     *queue.ClusterQueue
+	ClusterConfig    *cluster.Config
+	ClusterWireGuard *cluster.WireGuardManager
 
 	// PTY sessions for interactive tool streaming
 	PTYManager *pty.Manager
@@ -1843,7 +1844,7 @@ func (c *Components) Start(ctx context.Context) error {
 			}
 		}
 	}()
-	
+
 	// Start chat handler
 	if err := c.ChatHandler.Start(ctx); err != nil {
 		return err
@@ -3032,7 +3033,7 @@ func registerTeamTools(
 				MaxConcurrent:   config.MaxConcurrent,
 			}
 			// Generate a session ID
-			req.SessionID = fmt.Sprintf("team-%d", time.Now().UnixNano())
+			req.SessionID = id.Generate("team-")
 
 			// Publish to team.start bus topic so the TeamOrchestrator picks it up
 			payload, err := json.Marshal(req)
@@ -3040,7 +3041,7 @@ func registerTeamTools(
 				return "", fmt.Errorf("failed to marshal team start request: %w", err)
 			}
 			busMsg := &models.BusMessage{
-				ID:        fmt.Sprintf("team-create-%d", time.Now().UnixNano()),
+				ID:        id.Generate("team-create-"),
 				Type:      models.MessageTypeEvent,
 				Topic:     agent.TopicTeamStart,
 				Source:    "daemon-team-tools",
@@ -3062,7 +3063,7 @@ func registerTeamTools(
 			}
 
 			req := agent.TeamStartRequest{
-				SessionID:       fmt.Sprintf("team-%d", time.Now().UnixNano()),
+				SessionID:       id.Generate("team-"),
 				TaskID:          taskDescription,
 				LeadAgent:       teamCfg.LeadAgent,
 				Roster:          teamCfg.Roster,
@@ -3077,7 +3078,7 @@ func registerTeamTools(
 				return "", fmt.Errorf("failed to marshal preset team start request: %w", err)
 			}
 			busMsg := &models.BusMessage{
-				ID:        fmt.Sprintf("team-preset-%d", time.Now().UnixNano()),
+				ID:        id.Generate("team-preset-"),
 				Type:      models.MessageTypeEvent,
 				Topic:     agent.TopicTeamStart,
 				Source:    "daemon-team-tools",
@@ -3413,11 +3414,17 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, pendingChangesRegis
 		if pendingChangesRegistry != nil {
 			tool.SetPendingChangesRegistry(pendingChangesRegistry)
 		}
+		if c.FenceChecker != nil {
+			tool.SetFenceChecker(c.FenceChecker)
+		}
 		c.ToolRegistry.Register(tool)
 	}
 	if tool, err := codetools.NewResolveASTEditTool(c.ASTParser); err != nil {
 		logger.Error("Failed to initialize resolve AST edit tool", "error", err)
 	} else {
+		if c.FenceChecker != nil {
+			tool.SetFenceChecker(c.FenceChecker)
+		}
 		c.ToolRegistry.Register(tool)
 	}
 	logger.Debug("Registered AST tools")
@@ -3510,6 +3517,13 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, pendingChangesRegis
 		// Wire LSP writethrough notifier into file tools
 		lspNotifier := builtin.NewLSPWriteNotifier(c.LSPManager, cfg.CodeIntel.LSP, logger.With("component", "lsp-writethrough"))
 		if lspNotifier != nil {
+			// Wire fence checker into the notifier so formatting edits are
+			// validated against the workspace boundary before being applied.
+			if c.FenceChecker != nil {
+				if fc, ok := lspNotifier.(interface{ SetFenceChecker(builtin.FenceChecker) }); ok {
+					fc.SetFenceChecker(c.FenceChecker)
+				}
+			}
 			if tool := c.ToolRegistry.Get("file_write"); tool != nil {
 				if wt, ok := tool.(interface {
 					SetLSPNotifier(builtin.LSPWriteNotifier)
@@ -3548,7 +3562,11 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, pendingChangesRegis
 // initializeDebugTools sets up DAP debugging support.
 func (c *Components) initializeDebugTools(registry *tools.Registry, checker *security.PermissionChecker, logger *slog.Logger) {
 	c.DebugManager = debug.NewManager()
-	registry.Register(builtin.NewDebugTool(c.DebugManager, checker))
+	debugTool := builtin.NewDebugTool(c.DebugManager, checker)
+	if c.FenceChecker != nil {
+		debugTool.SetFenceChecker(c.FenceChecker)
+	}
+	registry.Register(debugTool)
 	logger.Info("Debug tools registered")
 }
 
@@ -3659,9 +3677,9 @@ func (c *Components) registerOAuthProviders(pm *llm.ProviderManager, logger *slo
 		}
 
 		modelCfg := &llm.ModelConfig{
-			ProviderID:   info.Provider,
-			BaseURL:      providerCfg.BaseURL,
-			ModelID:      info.Provider, // Use provider ID as model ID placeholder
+			ProviderID:    info.Provider,
+			BaseURL:       providerCfg.BaseURL,
+			ModelID:       info.Provider, // Use provider ID as model ID placeholder
 			OAuthProvider: info.Provider,
 			ExtraHeaders:  providerCfg.ExtraHeaders,
 		}
@@ -4228,7 +4246,7 @@ func (h *webHandlerAdapter) Chat(ctx context.Context, message string) (string, e
 		return "", fmt.Errorf("agent loop not available")
 	}
 	// Use AgentLoop.RunOnce for synchronous chat
-	conversationID := fmt.Sprintf("web-%d", time.Now().UnixNano())
+	conversationID := id.Generate("web-")
 	return h.agentLoop.RunOnce(ctx, message, conversationID)
 }
 

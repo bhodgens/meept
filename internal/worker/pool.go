@@ -10,6 +10,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/queue"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -570,7 +571,7 @@ func (h *Handler) sendResponse(replyTo, topic string, response any, err error) {
 	}
 
 	respMsg := &models.BusMessage{
-		ID:        fmt.Sprintf("worker-resp-%d", time.Now().UnixNano()),
+		ID:        id.Generate("worker-resp-"),
 		Type:      models.MessageTypeResponse,
 		Topic:     topic,
 		Source:    "worker-handler",

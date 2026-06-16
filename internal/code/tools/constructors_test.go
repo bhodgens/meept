@@ -106,3 +106,24 @@ func TestNewASTResolveTool_OK(t *testing.T) {
 		t.Fatal("expected non-nil tool")
 	}
 }
+
+// TestSetters_NilSafe verifies the SetFenceChecker setters added in
+// round-5 S4-3 are nil-safe per the CLAUDE.md setter rule.
+func TestSetters_NilSafe(t *testing.T) {
+	t.Run("ASTEditTool.SetFenceChecker", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("panicked on nil: %v", r)
+			}
+		}()
+		(&ASTEditTool{}).SetFenceChecker(nil)
+	})
+	t.Run("ResolveASTEditTool.SetFenceChecker", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("panicked on nil: %v", r)
+			}
+		}()
+		(&ResolveASTEditTool{}).SetFenceChecker(nil)
+	})
+}

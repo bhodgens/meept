@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -206,7 +207,7 @@ func (m *AmendmentManager) publishEvent(topic string, data any) {
 		payload = []byte("{}")
 	}
 	msg := &models.BusMessage{
-		ID:        fmt.Sprintf("amend-%d", time.Now().UnixNano()),
+		ID:        id.Generate("amend-"),
 		Type:      models.MessageTypeEvent,
 		Topic:     topic,
 		Source:    "amendment-manager",

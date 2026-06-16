@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 
 	"github.com/cespare/xxhash/v2"
@@ -270,7 +271,7 @@ func (g *GossipEngine) Publish(event *models.ClusterEvent) {
 		eventPayload, _ := json.Marshal(event)
 		busPayload, _ := json.Marshal(map[string]json.RawMessage{"event": eventPayload})
 		body := &models.BusMessage{
-			ID:        fmt.Sprintf("gossip-pub-%d", time.Now().UnixNano()),
+			ID:        id.Generate("gossip-pub-"),
 			Type:      models.MessageTypeEvent,
 			Source:    "gossip",
 			Timestamp: time.Now().UTC(),
@@ -332,7 +333,12 @@ func (g *GossipEngine) handleClusterEvent(msg *models.BusMessage) {
 	g.dedupMu.Unlock()
 
 	// Verify signature if node signature requirement is enabled
-	if g.cfg.Security.RequireNodeSignatures && len(event.Signature) > 0 {
+	if g.cfg.Security.RequireNodeSignatures {
+		if len(event.Signature) == 0 {
+			g.logger.Warn("gossip: rejecting unsigned event (signatures required)",
+				"event_id", event.EventID, "node_id", event.NodeID)
+			return
+		}
 		pubKey, found := g.PeerSigningKey(event.NodeID)
 		if !found {
 			g.logger.Warn("gossip: no signing key for event sender", "node_id", event.NodeID)
@@ -361,7 +367,7 @@ func (g *GossipEngine) handleClusterEvent(msg *models.BusMessage) {
 		eventPayload, _ := json.Marshal(event)
 		busPayload, _ := json.Marshal(map[string]json.RawMessage{"event": eventPayload})
 		body := &models.BusMessage{
-			ID:        fmt.Sprintf("gossip-%s-%d", g.localNode, time.Now().UnixNano()),
+			ID:        id.Generate("gossip-"),
 			Type:      models.MessageTypeEvent,
 			Source:    g.localNode,
 			Timestamp: time.Now().UTC(),

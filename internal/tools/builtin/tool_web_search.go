@@ -66,6 +66,7 @@ func NewWebSearchTool(timeout time.Duration) *WebSearchTool {
 			Timeout: timeout,
 			Transport: &http.Transport{
 				MaxConnsPerHost: 8,
+				DialContext:     ssrfDialContext(false),
 			},
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				if len(via) >= 5 {

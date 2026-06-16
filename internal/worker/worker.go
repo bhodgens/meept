@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/queue"
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // JobProcessor defines the interface for processing jobs.
@@ -374,9 +374,6 @@ type WorkerStats struct {
 	CurrentJobID string
 }
 
-var workerIDCounter atomic.Uint64
-
 func generateWorkerID() string {
-	seq := workerIDCounter.Add(1)
-	return fmt.Sprintf("worker-%d-%04d", time.Now().UnixNano(), seq)
+	return id.Generate("worker-")
 }

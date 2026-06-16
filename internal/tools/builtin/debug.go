@@ -14,8 +14,9 @@ import (
 // DebugTool provides DAP debugging capabilities as a single tool with
 // action-based dispatch.
 type DebugTool struct {
-	manager *debug.Manager
-	checker *security.PermissionChecker
+	manager      *debug.Manager
+	checker      *security.PermissionChecker
+	fenceChecker FenceChecker
 }
 
 // NewDebugTool creates a new debug tool.
@@ -23,6 +24,14 @@ func NewDebugTool(manager *debug.Manager, checker *security.PermissionChecker) *
 	return &DebugTool{
 		manager: manager,
 		checker: checker,
+	}
+}
+
+// SetFenceChecker sets the fence checker for path-based sandboxing.
+// Nil guard is required per CLAUDE.md "Setter methods" coding practice.
+func (t *DebugTool) SetFenceChecker(fc FenceChecker) {
+	if fc != nil {
+		t.fenceChecker = fc
 	}
 }
 
@@ -152,6 +161,39 @@ func (t *DebugTool) Execute(ctx context.Context, args map[string]any) (any, erro
 	action, _ := args["action"].(string)
 	if action == "" {
 		return nil, fmt.Errorf("action is required")
+	}
+
+	// Validate file paths against fence boundary before any action runs.
+	// "program" is read for launch and load_core; "core_file" is read for
+	// load_core; "script_file" is read by the script action; "cwd" is the
+	// working directory the launched program inherits.
+	if t.fenceChecker != nil {
+		validatePath := func(p string) error {
+			if p == "" {
+				return nil
+			}
+			return t.fenceChecker.CheckPath(p, "read")
+		}
+		if p, _ := args["program"].(string); p != "" {
+			if err := validatePath(p); err != nil {
+				return nil, fmt.Errorf("fence check failed for program: %w", err)
+			}
+		}
+		if p, _ := args["core_file"].(string); p != "" {
+			if err := validatePath(p); err != nil {
+				return nil, fmt.Errorf("fence check failed for core_file: %w", err)
+			}
+		}
+		if p, _ := args["script_file"].(string); p != "" {
+			if err := validatePath(p); err != nil {
+				return nil, fmt.Errorf("fence check failed for script_file: %w", err)
+			}
+		}
+		if p, _ := args["cwd"].(string); p != "" {
+			if err := validatePath(p); err != nil {
+				return nil, fmt.Errorf("fence check failed for cwd: %w", err)
+			}
+		}
 	}
 
 	switch action {
@@ -333,14 +375,14 @@ func (t *DebugTool) loadCore(ctx context.Context, args map[string]any) (any, err
 	}
 
 	crashReport := map[string]any{
-		"session_id":  session.ID,
-		"adapter":     session.Adapter,
-		"state":       string(session.State),
-		"mode":        string(session.Mode),
-		"program":     result.Program,
-		"core_file":   result.CoreFile,
-		"signal":      result.Signal,
-		"fault_addr":  result.FaultAddr,
+		"session_id":   session.ID,
+		"adapter":      session.Adapter,
+		"state":        string(session.State),
+		"mode":         string(session.Mode),
+		"program":      result.Program,
+		"core_file":    result.CoreFile,
+		"signal":       result.Signal,
+		"fault_addr":   result.FaultAddr,
 		"crash_reason": result.CrashReason,
 	}
 
@@ -818,9 +860,9 @@ func (t *DebugTool) script(ctx context.Context, args map[string]any) (any, error
 	results := make([]any, 0, len(summary.Results))
 	for _, r := range summary.Results {
 		entry := map[string]any{
-			"index":  r.Index,
-			"line":   r.Line,
-			"action": r.Action,
+			"index":   r.Index,
+			"line":    r.Line,
+			"action":  r.Action,
 			"success": r.Success,
 		}
 		if r.Output != nil {

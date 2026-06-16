@@ -49,6 +49,7 @@ class WebSocketService {
 
   // Channel subscription tracking
   final Map<String, SessionSubscription> _chatSubscriptions = {};
+  final Map<String, SessionSubscription> _progressSubscriptions = {};
   bool _jobsSubscribed = false;
   bool _metricsSubscribed = false;
 
@@ -538,7 +539,7 @@ class WebSocketService {
   /// by sending a `subscribe` message with `channel: 'progress'`).
   Stream<Map<String, dynamic>> subscribeToAgentProgress(String sessionId) {
     // Track the subscription so it can be flushed once connected.
-    _chatSubscriptions[sessionId] = SessionSubscription(sessionId);
+    _progressSubscriptions[sessionId] = SessionSubscription(sessionId);
     if (isConnected) {
       send({
         'type': 'subscribe',
@@ -556,7 +557,7 @@ class WebSocketService {
 
   /// Unsubscribe from agent progress updates for a session.
   void unsubscribeFromAgentProgress(String sessionId) {
-    _chatSubscriptions.remove(sessionId);
+    _progressSubscriptions.remove(sessionId);
     if (isConnected) {
       send({
         'type': 'unsubscribe',

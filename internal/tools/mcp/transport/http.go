@@ -93,6 +93,9 @@ func NewHTTPTransport(url string, headers map[string]string, config Config) *HTT
 		config:  config,
 		client: &http.Client{
 			Timeout: timeout,
+			Transport: &http.Transport{
+				DialContext: ssrfDialContext(false),
+			},
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				if len(via) >= 5 {
 					return fmt.Errorf("too many redirects")
@@ -102,6 +105,30 @@ func NewHTTPTransport(url string, headers map[string]string, config Config) *HTT
 				}
 				return nil
 			},
+		},
+	}
+}
+
+// SetAllowPrivateRanges disables SSRF IP filtering for private/loopback
+// addresses. This is intended only for tests that use httptest.NewServer
+// (which binds 127.0.0.1). Production callers must not use it.
+func (t *HTTPTransport) SetAllowPrivateRanges(allow bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	timeout := t.client.Timeout
+	t.client = &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DialContext: ssrfDialContext(allow),
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects")
+			}
+			if err := checkRedirectURL(req.URL.String()); err != nil {
+				return err
+			}
+			return nil
 		},
 	}
 }

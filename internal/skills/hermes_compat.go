@@ -8,6 +8,7 @@ package skills
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"regexp"
 	"sort"
@@ -103,10 +104,9 @@ func (c *DefaultPrerequisiteChecker) CheckEnvVars(vars []string) error {
 
 // checkEnvVar checks a single environment variable.
 func (c *DefaultPrerequisiteChecker) checkEnvVar(name string) error {
-	// Use exec.Command to resolve variable (handles shell expansion).
-	out, err := exec.Command("sh", "-c", "printenv "+name).Output()
-	if err != nil || len(strings.TrimSpace(string(out))) == 0 {
-		return fmt.Errorf("missing required env var: %s", name)
+	v, ok := os.LookupEnv(name)
+	if !ok || v == "" {
+		return fmt.Errorf("missing required env var %s", name)
 	}
 	return nil
 }

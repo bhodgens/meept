@@ -114,8 +114,16 @@ func (p *QueuePersister) EnqueueAsync(msg QueuedMessage) {
 			"pending", len(p.pending),
 			"max_pending", p.maxPending,
 		)
-		// flushLockedHeld drains pending while keeping the caller's lock held.
-		p.flushLockedHeld()
+		// Snapshot pending under lock, release for I/O, then re-acquire.
+		pending := p.pending
+		p.pending = make([]QueuedMessage, 0)
+		p.mu.Unlock()
+
+		// Flush without holding the lock (SQLite I/O).
+		p.flushPending(pending)
+
+		// Re-acquire the lock to append the new message and reset the timer.
+		p.mu.Lock()
 	}
 
 	p.pending = append(p.pending, msg)
@@ -173,18 +181,6 @@ func (p *QueuePersister) Flush() {
 	p.mu.Unlock()
 
 	p.flushPending(pending)
-}
-
-// flushLockedHeld drains the pending buffer to SQLite.
-// Caller must hold p.mu for the duration -- the lock is never released.
-func (p *QueuePersister) flushLockedHeld() {
-	if len(p.pending) == 0 {
-		return
-	}
-	pending := p.pending
-	p.pending = make([]QueuedMessage, 0)
-
-	p.flushPendingLocked(pending)
 }
 
 // flushPending writes messages to SQLite in a single transaction, re-enqueuing failures.
@@ -259,75 +255,6 @@ func (p *QueuePersister) flushPending(pending []QueuedMessage) {
 		}
 		p.flushTimer.Reset(p.flushDelay)
 		p.mu.Unlock()
-	}
-}
-
-// flushPendingLocked is like flushPending but assumes the caller already holds p.mu.
-// It does NOT acquire or release the lock. Used by flushLockedHeld for the write-behind path.
-func (p *QueuePersister) flushPendingLocked(pending []QueuedMessage) {
-	tx, err := p.db.Begin()
-	if err != nil {
-		p.logger.Warn("queue persister: failed to begin flush transaction", "err", err)
-		// Re-enqueue everything (lock already held)
-		p.pending = append(p.pending, pending...)
-		if !p.flushTimer.Stop() {
-			select {
-			case <-p.flushTimer.C:
-			default:
-			}
-		}
-		p.flushTimer.Reset(p.flushDelay)
-		return
-	}
-
-	var failed []QueuedMessage
-	now := time.Now().UTC().Format(time.RFC3339)
-	for _, msg := range pending {
-		_, err := tx.Exec(`
-			INSERT OR REPLACE INTO queued_followups
-				(conversation_id, message_id, content, queue_type, source, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`,
-			p.conversationID,
-			msg.ID,
-			msg.Content,
-			string(msg.QueueType),
-			msg.Source,
-			now,
-			now,
-		)
-		if err != nil {
-			p.logger.Warn("queue persister: failed to persist follow-up in batch", "id", msg.ID, "err", err)
-			failed = append(failed, msg)
-		} else {
-			p.publishPersistedEvent(msg)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		p.logger.Warn("queue persister: failed to commit flush transaction", "err", err)
-		// All messages may or may not have been written; re-enqueue everything (lock already held)
-		p.pending = append(p.pending, pending...)
-		if !p.flushTimer.Stop() {
-			select {
-			case <-p.flushTimer.C:
-			default:
-			}
-		}
-		p.flushTimer.Reset(p.flushDelay)
-		return
-	}
-
-	// Re-enqueue only the individual failures (lock already held)
-	if len(failed) > 0 {
-		p.pending = append(p.pending, failed...)
-		if !p.flushTimer.Stop() {
-			select {
-			case <-p.flushTimer.C:
-			default:
-			}
-		}
-		p.flushTimer.Reset(p.flushDelay)
 	}
 }
 

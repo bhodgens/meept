@@ -11,6 +11,7 @@ import (
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // PlatformStatusTool returns platform status including uptime and component health.
@@ -321,7 +322,7 @@ func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]any) (an
 	}
 
 	// Generate a conversation ID for this delegation
-	conversationID := "delegate-" + agentID + "-" + generateDelegateID()
+	conversationID := id.Generate("delegate-")
 
 	// Run the agent
 	response, err := t.registry.RunAgent(ctx, spec.ID, fullMessage, conversationID)
@@ -367,11 +368,6 @@ func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]any) (an
 	}, nil
 }
 
-
-
-func generateDelegateID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
-}
 
 // SessionHistoryTool provides access to recent session activity and completed work.
 // This enables agents to provide reports about what was accomplished.

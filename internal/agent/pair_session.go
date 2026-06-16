@@ -3,6 +3,8 @@ package agent
 import (
 	"fmt"
 	"time"
+
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // PairSessionState represents the lifecycle state of a pair session.
@@ -206,7 +208,7 @@ type PairSession struct {
 func NewPairSession(taskID, originalSpec, actorID, reviewerID string, maxRounds int) *PairSession {
 	now := time.Now().UTC()
 	return &PairSession{
-		ID:              fmt.Sprintf("pair-%s-%d", taskID, now.UnixNano()),
+		ID:              id.Generate("pair-") + "-" + taskID,
 		TaskID:          taskID,
 		ActorAgentID:    actorID,
 		ReviewerAgentID: reviewerID,

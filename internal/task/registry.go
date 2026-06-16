@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -798,7 +799,7 @@ func (h *Handler) sendResponse(replyTo, topic string, response any, err error) {
 	}
 
 	msg := &models.BusMessage{
-		ID:        fmt.Sprintf("task-resp-%d", time.Now().UnixNano()),
+		ID:        id.Generate("task-resp-"),
 		Type:      models.MessageTypeResponse,
 		Topic:     topic,
 		Source:    "task-handler",

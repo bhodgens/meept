@@ -11,6 +11,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/scheduler"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // CronCreateTool creates a cron-style recurring job.
@@ -129,7 +130,7 @@ func (t *CronCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 		return CronCreateResult{
 			Success: false,
 			Error:   err.Error(),
-		}, err
+		}, nil
 	}
 
 	// Validate the cron expression
@@ -141,7 +142,7 @@ func (t *CronCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 	}
 
 	// Generate job ID
-	jobID := fmt.Sprintf("cron-%d", time.Now().UnixNano())
+	jobID := id.Generate("cron-")
 
 	// Build job config
 	cfg := scheduler.JobConfig{
@@ -309,7 +310,6 @@ func parseTime(timeStr string) (hour, minute int, err error) {
 	}
 	return 0, 0, fmt.Errorf("invalid time format: %s", timeStr)
 }
-
 
 // dayOfWeekToNumber converts a day name to cron dow number (0-6, Sunday=0).
 func dayOfWeekToNumber(day string) (int, error) {

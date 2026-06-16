@@ -18,7 +18,7 @@ func LoadJSON5(path string, v any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("config file not found: %s", path)
+			return fmt.Errorf("config file not found: %s: %w", path, err)
 		}
 		return fmt.Errorf("failed to read config file %s: %w", path, err)
 	}

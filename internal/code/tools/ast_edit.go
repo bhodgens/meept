@@ -10,6 +10,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/internal/tools/builtin"
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // ASTEditTool performs structural AST-based edits with preview/apply pattern.
@@ -17,6 +18,7 @@ type ASTEditTool struct {
 	rewriter               *ast.ASTRewriter
 	parser                 *ast.ParserManager
 	pendingChangesRegistry *builtin.PendingChangesRegistry
+	fenceChecker           builtin.FenceChecker
 }
 
 // NewASTEditTool creates a new AST edit tool.
@@ -35,6 +37,14 @@ func NewASTEditTool(parser *ast.ParserManager) (*ASTEditTool, error) {
 func (t *ASTEditTool) SetPendingChangesRegistry(registry *builtin.PendingChangesRegistry) {
 	if registry != nil {
 		t.pendingChangesRegistry = registry
+	}
+}
+
+// SetFenceChecker sets the fence checker for path-based sandboxing.
+// Nil guard is required per CLAUDE.md "Setter methods" coding practice.
+func (t *ASTEditTool) SetFenceChecker(fc builtin.FenceChecker) {
+	if fc != nil {
+		t.fenceChecker = fc
 	}
 }
 
@@ -189,7 +199,7 @@ func (t *ASTEditTool) Execute(ctx context.Context, args map[string]any) (any, er
 
 	// Handle preview/accept workflow when registry is available and preview_only=true
 	if t.pendingChangesRegistry != nil && previewOnly {
-		sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
+		sessionID := id.Generate("ast-")
 		if sid, ok := ctx.Value("session_id").(string); ok && sid != "" {
 			sessionID = sid
 		}
@@ -225,6 +235,15 @@ func (t *ASTEditTool) Execute(ctx context.Context, args map[string]any) (any, er
 
 	// Apply edits immediately when preview_only=false or no registry
 	response["modified_source"] = string(modifiedSource)
+
+	// Fence check: validate the resolved file path against the workspace
+	// boundary before writing. This prevents AST edits from reaching paths
+	// outside the fence (e.g., /etc/passwd, ~/.ssh/authorized_keys).
+	if t.fenceChecker != nil {
+		if err := t.fenceChecker.CheckPath(filePath, "write"); err != nil {
+			return nil, fmt.Errorf("fence check failed: %w", err)
+		}
+	}
 
 	// Write to file
 	if err := os.WriteFile(filePath, modifiedSource, 0o644); err != nil {

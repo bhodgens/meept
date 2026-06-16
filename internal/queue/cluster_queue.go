@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -148,10 +149,15 @@ func (cq *ClusterQueue) reclaimJobUnlocked(ctx context.Context, jobID, reason st
 	}
 
 	// 2. Reset job state to PENDING in the store
-	if err := cq.store.ResetToPending(ctx, jobID); err != nil {
-		cq.logger.Warn("cluster_queue: failed to reset job to pending",
-			"job_id", jobID, "reason", reason, "error", err)
-		// Non-fatal: other nodes still learned about the reclaim via the event.
+	if cq.store != nil {
+		if err := cq.store.ResetToPending(ctx, jobID); err != nil {
+			cq.logger.Warn("cluster_queue: failed to reset job to pending",
+				"job_id", jobID, "reason", reason, "error", err)
+			// Non-fatal: other nodes still learned about the reclaim via the event.
+		}
+	} else {
+		cq.logger.Warn("cluster_queue: store is nil, skipping ResetToPending",
+			"job_id", jobID, "reason", reason)
 	}
 
 	// 3. Remove local claim record (caller holds the lock, no need to acquire)
@@ -282,7 +288,7 @@ func (s *Store) RecordClaimEvent(ctx context.Context, jobID, nodeID, action stri
 		INSERT INTO cluster_events (event_id, node_id, event_type, timestamp, vector_clock, payload, signature, received_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`
-	eventID := fmt.Sprintf("claim-%s-%s-%d", jobID, action, time.Now().UnixNano())
+	eventID := id.Generate("claim-")
 	body := fmt.Sprintf(`{"job_id":"%s","action":"%s"}`, jobID, action)
 	sig := []byte(action) // placeholder: real signatures via ed25519
 

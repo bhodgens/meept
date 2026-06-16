@@ -25,6 +25,7 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
   bool _hasSearched = false;
   String? _error;
   Timer? _debounceTimer;
+  late final FocusNode _keyboardFocusNode;
 
   void _closePanel() {
     context.go('/');
@@ -33,11 +34,13 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
   @override
   void initState() {
     super.initState();
+    _keyboardFocusNode = FocusNode();
     _loadRecentMemories();
   }
 
   @override
   void dispose() {
+    _keyboardFocusNode.dispose();
     _queryController.dispose();
     _debounceTimer?.cancel();
     super.dispose();
@@ -114,7 +117,7 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
   @override
   Widget build(BuildContext context) {
     return KeyboardListener(
-      focusNode: FocusNode(),
+      focusNode: _keyboardFocusNode,
       onKeyEvent: (KeyEvent event) {
         if (event.logicalKey == LogicalKeyboardKey.escape) {
           _closePanel();

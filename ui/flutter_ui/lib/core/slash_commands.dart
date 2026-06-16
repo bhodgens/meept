@@ -37,11 +37,8 @@ class SlashCommandRegistry {
   /// Get a single command by exact name.
   SlashCommand? get(String name) {
     final n = name.startsWith('/') ? name : '/$name';
-    try {
-      return all.firstWhere((cmd) => cmd.name == n);
-    } catch (_) {
-      return null;
-    }
+    final matches = all.where((cmd) => cmd.name == n);
+    return matches.isEmpty ? null : matches.first;
   }
 
   /// Add custom commands (fetched from daemon API).

@@ -9,6 +9,7 @@ export 'tts_provider.dart';
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/api_client.dart';
 import '../services/websocket_service.dart';
@@ -61,7 +62,8 @@ final resolveActiveProjectProvider = FutureProvider<Project?>((ref) async {
     final projects = await client.listProjects();
     final active = projects.where((p) => p.status == 'active').toList();
     return active.isEmpty ? null : active.first;
-  } catch (_) {
+  } catch (e) {
+    debugPrint('[warn] resolveActiveProjectProvider: $e');
     return null;
   }
 });
@@ -227,7 +229,8 @@ class ConnectionDetailsNotifier extends StateNotifier<ConnectionDetails?> {
           connectedAt: connectedAt,
           certFingerprint: fp,
         );
-      } catch (_) {
+      } catch (e) {
+        debugPrint('[warn] ConnectionDetails fetch daemon status: $e');
         // Still show connection metadata even if daemon is unreachable
         result = ConnectionDetails(
           host: host,
@@ -237,7 +240,8 @@ class ConnectionDetailsNotifier extends StateNotifier<ConnectionDetails?> {
           certFingerprint: fp,
         );
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[warn] ConnectionDetails fetch metadata: $e');
       // Best-effort — only connection metadata available
       try {
         final ws = _ref.read(websocketProvider);
@@ -249,7 +253,8 @@ class ConnectionDetailsNotifier extends StateNotifier<ConnectionDetails?> {
           connectedAt: ws.connectedAt,
           certFingerprint: fp,
         );
-      } catch (_) {
+      } catch (e) {
+        debugPrint('[warn] ConnectionDetails fetch fallback: $e');
         return;
       }
     }
@@ -367,7 +372,8 @@ class ConnectionMonitor {
     try {
       final details = _container.read(connectionDetailsProvider.notifier);
       await details._fetch();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[warn] fetchConnectionDetails: $e');
       // Best-effort only; don't disrupt connection
     }
   }
@@ -378,7 +384,8 @@ class ConnectionMonitor {
         try {
           await _apiClient.getDaemonStatus();
           _proposeState(true);
-        } catch (_) {
+        } catch (e) {
+          debugPrint('[warn] health check daemon status: $e');
           _proposeState(false);
         }
       }

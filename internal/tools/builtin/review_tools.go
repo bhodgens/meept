@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // RequestReviewTool invokes the appropriate reviewer agent inline during
@@ -125,7 +125,7 @@ func (t *RequestReviewTool) Execute(ctx context.Context, args map[string]any) (a
 	reviewPrompt := t.buildReviewPrompt(message, workContent, callerAgentID)
 
 	// Generate an isolated conversation ID for this review
-	conversationID := "review-" + spec.ID + "-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	conversationID := id.Generate("review-")
 
 	// Invoke the reviewer synchronously (same mechanism as delegate_task)
 	response, err := t.registry.RunAgent(ctx, spec.ID, reviewPrompt, conversationID)

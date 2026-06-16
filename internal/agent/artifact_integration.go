@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	artifactcontext "github.com/caimlas/meept/internal/context"
@@ -22,6 +23,7 @@ type ArtifactManager struct {
 
 	// Cache of scanned artifacts per directory
 	artifactCache map[string]*artifactcontext.Artifacts
+	mu            sync.RWMutex
 
 	// Cache expiry
 	cacheExpiry time.Duration
@@ -52,9 +54,12 @@ func NewArtifactManager(logger *slog.Logger) *ArtifactManager {
 // ScanDirectory scans a directory for Claude artifacts and caches the results.
 func (am *ArtifactManager) ScanDirectory(dir string) (*artifactcontext.Artifacts, error) {
 	// Check cache first
+	am.mu.RLock()
 	if cached, ok := am.artifactCache[dir]; ok {
+		am.mu.RUnlock()
 		return cached, nil
 	}
+	am.mu.RUnlock()
 
 	// Scan directory
 	artifacts, err := am.claudeManager.ScanDirectory(dir)
@@ -68,7 +73,9 @@ func (am *ArtifactManager) ScanDirectory(dir string) (*artifactcontext.Artifacts
 	}
 
 	// Cache results
+	am.mu.Lock()
 	am.artifactCache[dir] = artifacts
+	am.mu.Unlock()
 
 	if artifacts.Available {
 		skillCount := 0
@@ -157,7 +164,9 @@ func (am *ArtifactManager) HasArtifacts(workingDir string) bool {
 
 // InvalidateCache invalidates the cache for a specific directory.
 func (am *ArtifactManager) InvalidateCache(dir string) {
+	am.mu.Lock()
 	delete(am.artifactCache, dir)
+	am.mu.Unlock()
 	if err := am.claudeManager.Invalidate(dir); err != nil {
 		am.logger.Warn("failed to invalidate artifact cache", "dir", dir, "error", err)
 	}
@@ -165,12 +174,16 @@ func (am *ArtifactManager) InvalidateCache(dir string) {
 
 // InvalidateAll clears all cached artifacts.
 func (am *ArtifactManager) InvalidateAll() {
+	am.mu.Lock()
 	am.artifactCache = make(map[string]*artifactcontext.Artifacts)
+	am.mu.Unlock()
 	am.claudeManager.InvalidateAll()
 }
 
 // GetArtifacts returns the cached artifacts for a directory.
 func (am *ArtifactManager) GetArtifacts(dir string) *artifactcontext.Artifacts {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
 	return am.artifactCache[dir]
 }
 
@@ -383,8 +396,12 @@ func truncateAtNewline(s string, maxLen int) string {
 func (am *ArtifactManager) GetCacheStats() map[string]any {
 	claudeStats := am.claudeManager.GetCacheStats()
 
+	am.mu.RLock()
+	dirsCached := len(am.artifactCache)
+	am.mu.RUnlock()
+
 	return map[string]any{
-		"directories_cached": len(am.artifactCache),
+		"directories_cached": dirsCached,
 		"claude_stats":       claudeStats,
 		"cache_expiry":       am.cacheExpiry.String(),
 	}

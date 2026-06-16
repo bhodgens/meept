@@ -56,6 +56,7 @@ func TestHTTPTransport_Send(t *testing.T) {
 	defer server.Close()
 
 	transport := NewHTTPTransport(server.URL, nil, DefaultConfig())
+	transport.SetAllowPrivateRanges(true)
 
 	ctx := context.Background()
 	_ = transport.Start(ctx)
@@ -105,6 +106,7 @@ func TestHTTPTransport_SendWithHeaders(t *testing.T) {
 		"Authorization": "Bearer test-token",
 		"X-Custom":      "custom-value",
 	}, DefaultConfig())
+	transport.SetAllowPrivateRanges(true)
 
 	ctx := context.Background()
 	_ = transport.Start(ctx)
@@ -143,6 +145,7 @@ func TestHTTPTransport_SessionID(t *testing.T) {
 	defer server.Close()
 
 	transport := NewHTTPTransport(server.URL, nil, DefaultConfig())
+	transport.SetAllowPrivateRanges(true)
 
 	ctx := context.Background()
 	_ = transport.Start(ctx)
@@ -176,6 +179,7 @@ func TestHTTPTransport_SSEResponse(t *testing.T) {
 	defer server.Close()
 
 	transport := NewHTTPTransport(server.URL, nil, DefaultConfig())
+	transport.SetAllowPrivateRanges(true)
 
 	ctx := context.Background()
 	_ = transport.Start(ctx)
@@ -207,6 +211,7 @@ func TestHTTPTransport_HTTPError(t *testing.T) {
 	defer server.Close()
 
 	transport := NewHTTPTransport(server.URL, nil, DefaultConfig())
+	transport.SetAllowPrivateRanges(true)
 
 	ctx := context.Background()
 	_ = transport.Start(ctx)

@@ -33,7 +33,7 @@ class _ToolsDropdownState extends ConsumerState<ToolsDropdown> {
         _skills = skills.where((s) => s.enabled).toList();
       });
     } catch (e) {
-      // skills remain empty on error
+      debugPrint('[warn] skills load failed: $e');
     }
   }
 

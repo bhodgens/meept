@@ -12,6 +12,7 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -221,7 +222,7 @@ func (sp *StrategicPlanner) ConductInterview(ctx context.Context, req PlanReques
 	interviewCtx, cancel := context.WithTimeout(ctx, sp.plannerTimeout)
 	defer cancel()
 
-	conversationID := fmt.Sprintf("interview-%s-%d", req.TaskID, time.Now().UnixNano())
+	conversationID := fmt.Sprintf("interview-%s-%s", req.TaskID, id.Generate(""))
 	output, err := plannerLoop.RunOnce(interviewCtx, prompt, conversationID)
 	if err != nil {
 		sp.logger.Warn("Interview question generation failed, skipping",
@@ -537,7 +538,7 @@ func (sp *StrategicPlanner) generatePlan(ctx context.Context, req PlanRequest) (
 	planCtx, cancel := context.WithTimeout(ctx, sp.plannerTimeout)
 	defer cancel()
 
-	conversationID := fmt.Sprintf("plan-%s-%d", req.TaskID, time.Now().UnixNano())
+	conversationID := fmt.Sprintf("plan-%s-%s", req.TaskID, id.Generate(""))
 	output, err := plannerLoop.RunOnce(planCtx, prompt, conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("planner failed: %w", err)

@@ -43,14 +43,18 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
   // Execution result
   SkillExecuteResult? _executeResult;
 
+  late final FocusNode _keyboardFocusNode;
+
   @override
   void initState() {
     super.initState();
+    _keyboardFocusNode = FocusNode();
     _loadSkills();
   }
 
   @override
   void dispose() {
+    _keyboardFocusNode.dispose();
     for (final c in _textControllers.values) {
       c.dispose();
     }
@@ -248,7 +252,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
   @override
   Widget build(BuildContext context) {
     return KeyboardListener(
-      focusNode: FocusNode(),
+      focusNode: _keyboardFocusNode,
       onKeyEvent: (KeyEvent event) {
         if (event.logicalKey == LogicalKeyboardKey.escape) {
           _closePanel();

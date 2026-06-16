@@ -14,6 +14,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/errcls"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -471,7 +472,7 @@ func (s *Server) registerBuiltinHandlers() {
 		}
 
 		msg := &models.BusMessage{
-			ID:      fmt.Sprintf("rpc-%d", atomicCounter()),
+			ID:      id.Generate("rpc-bus-"),
 			Type:    models.MessageTypeEvent,
 			Topic:   p.Topic,
 			Source:  "rpc.client",
@@ -500,7 +501,7 @@ func (s *Server) registerBuiltinHandlers() {
 			return nil, fmt.Errorf("task_id and type are required")
 		}
 
-		amendmentID := fmt.Sprintf("amend-%d", atomicCounter())
+		amendmentID := id.Generate("rpc-amend-")
 
 		// Publish the amendment request on the bus for the orchestrator to handle
 		payload, err := json.Marshal(map[string]any{
@@ -514,7 +515,7 @@ func (s *Server) registerBuiltinHandlers() {
 		}
 
 		msg := &models.BusMessage{
-			ID:      fmt.Sprintf("rpc-%d", atomicCounter()),
+			ID:      id.Generate("rpc-amend-"),
 			Type:    models.MessageTypeRequest,
 			Topic:   "task.amend.request",
 			Source:  "rpc.client",
@@ -529,13 +530,6 @@ func (s *Server) registerBuiltinHandlers() {
 		}, nil
 	})
 }
-
-var counter atomic.Int64
-
-func atomicCounter() int64 {
-	return counter.Add(1)
-}
-
 // isParameterError returns true for parameter-validation errors that should
 // map to JSON-RPC -32602 InvalidParams. Uses structured detection via
 // errcls.IsParameterError (errors.Is / errors.As) instead of the old

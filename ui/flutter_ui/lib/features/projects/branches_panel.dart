@@ -25,12 +25,20 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
   String? _error;
 
   late final ApiClient _apiClient;
+  late final FocusNode _keyboardFocusNode;
 
   @override
   void initState() {
     super.initState();
     _apiClient = ref.read(apiClientProvider);
+    _keyboardFocusNode = FocusNode();
     _loadBranches();
+  }
+
+  @override
+  void dispose() {
+    _keyboardFocusNode.dispose();
+    super.dispose();
   }
 
   Future<void> _loadBranches() async {
@@ -160,7 +168,7 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
   @override
   Widget build(BuildContext context) {
     return KeyboardListener(
-      focusNode: FocusNode(),
+      focusNode: _keyboardFocusNode,
       onKeyEvent: (KeyEvent event) {
         if (event.logicalKey == LogicalKeyboardKey.escape) {
           _closePanel();

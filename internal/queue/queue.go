@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -765,7 +766,7 @@ func (h *Handler) sendResponse(replyTo, topic string, response any, err error) {
 	}
 
 	respMsg := &models.BusMessage{
-		ID:        fmt.Sprintf("queue-resp-%d", time.Now().UnixNano()),
+		ID:        id.Generate("queue-resp-"),
 		Type:      models.MessageTypeResponse,
 		Topic:     topic,
 		Source:    "queue-handler",

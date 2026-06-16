@@ -100,10 +100,9 @@ class ApiClient {
     if (apiKey == null || apiKey.isEmpty) {
       if (AppConstants.defaultApiKey.isNotEmpty) {
         apiKey = AppConstants.defaultApiKey;
-      } else {
-        // Hardcoded fallback matching pkg/constants/api_key.go DefaultDevAPIKey
-        apiKey = 'meept_dev_default_key_CHANGE_ME';
       }
+      // else: leave apiKey null — daemon will reject unauthenticated requests
+      // and the UI will surface a clear error.
     }
 
     return ApiClient(
