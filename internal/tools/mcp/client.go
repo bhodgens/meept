@@ -213,12 +213,12 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments map[st
 
 	resp, err := c.request(ctx, "tools/call", params)
 	if err != nil {
-		return tools.NewErrorResult(err.Error()), err
+		return tools.NewErrorResultErr(err), err
 	}
 
 	result, err := ExtractResult[*CallToolResult](resp)
 	if err != nil {
-		return tools.NewErrorResult(err.Error()), err
+		return tools.NewErrorResultErr(err), err
 	}
 
 	// Convert content blocks to text

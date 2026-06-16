@@ -256,11 +256,12 @@ type LSPServerConfig struct {
 //gendoc:desc Configuration for the daemon process including socket, logging, and data directory.
 //gendoc:example [daemon] socket_path = "~/.meept/meept.sock"
 type DaemonConfig struct {
-	SocketPath      string `json:"socket_path"      toml:"socket_path"`
-	PIDFile         string `json:"pid_file"          toml:"pid_file"`
-	LogLevel        string `json:"log_level"         toml:"log_level"`
-	DataDir         string `json:"data_dir"          toml:"data_dir"`
-	ShutdownTimeout string `json:"shutdown_timeout"  toml:"shutdown_timeout"`
+	SocketPath        string `json:"socket_path"        toml:"socket_path"`
+	PIDFile           string `json:"pid_file"            toml:"pid_file"`
+	LogLevel          string `json:"log_level"           toml:"log_level"`
+	DataDir           string `json:"data_dir"            toml:"data_dir"`
+	ShutdownTimeout   string `json:"shutdown_timeout"    toml:"shutdown_timeout"`
+	ChatTimeoutSeconds int   `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
 }
 
 // TransportConfig controls which transports the daemon exposes.
@@ -1698,6 +1699,14 @@ func (c *Config) ShutdownTimeout() time.Duration {
 		}
 	}
 	return 10 * time.Second
+}
+
+// ChatTimeout returns the configured chat response timeout, falling back to 2m.
+func (c *Config) ChatTimeout() time.Duration {
+	if c.Daemon.ChatTimeoutSeconds > 0 {
+		return time.Duration(c.Daemon.ChatTimeoutSeconds) * time.Second
+	}
+	return 2 * time.Minute
 }
 
 // OAuthConfig holds configuration for the OAuth token management system.

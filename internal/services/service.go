@@ -5,6 +5,7 @@ package services
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
@@ -80,6 +81,7 @@ type Config struct {
 	PlanManager      *plan.PlanManager
 	PlanStore        plan.PlanStore
 	RuntimeManager   *llm.RuntimeManager
+	ChatTimeout      time.Duration
 }
 
 // NewRegistry creates all services with their dependencies.
@@ -93,7 +95,10 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 	reg := &ServiceRegistry{
 		// ChatService is always created if Bus is available;
 		// it gracefully handles nil AgentRegistry (Steer/FollowUp return ErrUnavailable).
-		Chat:     NewChatService(cfg.Bus, cfg.AgentRegistry, logger, WithSessionStore(cfg.SessionStore)),
+		Chat: NewChatService(cfg.Bus, cfg.AgentRegistry, logger,
+			WithSessionStore(cfg.SessionStore),
+			WithChatTimeout(cfg.ChatTimeout),
+		),
 		Pipeline: NewPipelineService(),
 		Bus:      NewBusService(cfg.Bus),
 	}

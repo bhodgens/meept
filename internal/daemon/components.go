@@ -174,6 +174,9 @@ type Components struct {
 	// Result cache for tool outputs
 	ResultCache *agent.ResultCache
 
+	// Pending changes registry (background-expiry managed by Start/Stop lifecycle)
+	PendingChanges *builtin.PendingChangesRegistry
+
 	// Reflection engine for auto-lint/test fixing
 	ReflectionEngine *agent.ReflectionEngine
 
@@ -1080,6 +1083,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 	// Create shared pending changes registry for preview/accept workflow
 	pendingChangesRegistry := builtin.NewPendingChangesRegistry()
+	c.PendingChanges = pendingChangesRegistry
 
 	// Create runtime manager for backend-based command execution
 	var containerMgr *runtime.ContainerManager
@@ -1874,6 +1878,13 @@ func (c *Components) Start(ctx context.Context) error {
 		startedHandlers = append(startedHandlers, "cache")
 	}
 
+	// Start pending-changes background expiration
+	if c.PendingChanges != nil {
+		c.PendingChanges.Start(5 * time.Minute)
+		c.Logger.Debug("Pending changes expiration started", "interval", "5m")
+		startedHandlers = append(startedHandlers, "pending")
+	}
+
 	// Start queue handler
 	if c.QueueHandler != nil {
 		if err := c.QueueHandler.Start(ctx); err != nil {
@@ -2364,6 +2375,12 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	if c.ResultCache != nil {
 		c.ResultCache.Stop()
 		c.Logger.Debug("Result cache cleanup stopped")
+	}
+
+	// Stop pending-changes background expiration goroutine
+	if c.PendingChanges != nil {
+		c.PendingChanges.Stop()
+		c.Logger.Debug("Pending changes expiration stopped")
 	}
 
 	return lastErr

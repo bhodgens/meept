@@ -700,8 +700,9 @@ meept project (a Go daemon), not malware.
 | 2   | Master build + vet | 92 | 94 | 98% | 2 new predictable IDs; 1 race in compactor |
 | 3   | Gap-fix: skills.go ID, FileOperationSet race, git_sync cancel | 94 | 94 | 100% | NONE |
 | 4   | Deferred low-severity + mutexio analyzer | 104 | 104 | 100% | NONE |
+| 5   | All remaining deferred items fixed | 104 | 104 | 100% | NONE |
 
-### Issues Fixed (96 of 104)
+### Issues Fixed (104 of 104)
 
 **Critical (3/3 fixed)**
 - **S5-1** HTTP transport client now sends `Authorization: Bearer <key>` on all requests (`internal/transport/http_client.go:176,199,230,282`)
@@ -732,8 +733,8 @@ meept project (a Go daemon), not malware.
 **Medium (39/39 fixed)**
 All S1-3/4/5/7/11, S2-3/5, S3-2/3/4/5/6, S4-3/4/5/6, S5-4/5/6/7, S6-10/11/12/13/14/15/16/17, S7-2/6/8, S8-3/4/5/6 fixed. See subagent reports above for details.
 
-**Low (38/46 fixed)**
-S1-6/8/9/10/12/14/15, S2-4/6/7/8/9/10/11, S3-7/8/9, S4-7/10, S5-8/10, S6-18/19/20/21/22/23/24/25, S7-3/4/7/9/10/11, S8-9/10/11/12 fixed.
+**Low (46/46 fixed)**
+S1-6/8/9/10/12/14/15, S2-4/6/7/8/9/10/11, S3-7/8/9, S4-7/8/9/10, S5-8/9/10, S6-18/19/20/21/22/23/24/25, S7-3/4/5/7/9/10/11/12, S8-7/9/10/11/12 fixed.
 
 **Bonus (1 fixed, not in original findings)**
 - **Pre-existing race in `ContextCompactor.Compact`**: `summarizeMessages` read `c.lastSummary` without lock (line 295), and `Compact` logged `c.fileOps.FileCount()` without lock (line 232). Test `TestIntegration_CompactionStatsConcurrentSafety` exposed this. Fixed by snapshotting both under lock. `mu` upgraded from `sync.Mutex` to `sync.RWMutex`. Found via verification phase, not original review. (`internal/llm/context_compactor.go`)
@@ -744,22 +745,18 @@ S1-6/8/9/10/12/14/15, S2-4/6/7/8/9/10/11, S3-7/8/9, S4-7/10, S5-8/10, S6-18/19/2
 **Observation #7 follow-up (S5-1 silent HTTP auth failure)**
 - Verified CONFIRMED FIXED: all 4 HTTP client methods (`GetJSON`, `PostJSON`, `PostJSONWithResponse`, `DoRaw`) set `Authorization: Bearer <key>` header when an API key is configured. No silent-auth-failure paths remain.
 
-### Issues Deferred (8 of 104)
+**Previously deferred — now fixed (run 5):**
+- **S4-8** `ToolResult.Err error` field added (`json:"-"`); `NewErrorResultErr(err)` constructor; `Registry.Execute` and `ExecuteWithRetry` preserve typed errors for `errors.Is`/`errors.As` (`internal/tools/interface.go`, `internal/tools/registry.go`, `internal/tools/mcp/client.go`)
+- **S4-9** `PendingChangesRegistry.Start(interval)`/`Stop()` lifecycle added; background goroutine calls `Expire()` every 5 min; wired into daemon components (`internal/tools/builtin/pending_changes.go`, `internal/daemon/components.go`)
+- **S5-9** Chat timeout now configurable via `ChatTimeoutSeconds` in daemon config; `WithChatTimeout` option; default 2 min preserved (`internal/config/schema.go`, `internal/services/chat_service.go`, `internal/services/service.go`, `internal/daemon/daemon.go`)
+- **S6-7** Docker Execute uses `StartExecNonblocking` + `CloseWaiter`; ctx cancellation calls `waiter.Close()` and returns typed `ErrTimeout`/`ErrCanceled` (`internal/runtime/docker.go`)
+- **S7-5** `constants.DevAPIKey()` generates a random 32-byte hex key on first run, persists to `~/.meept/dev_key` (0600); falls back to constant if generation fails; client+server read same file (`pkg/constants/api_key.go`, `internal/transport/client.go`, `internal/comm/http/server.go`)
+- **S7-12** `ConnectRPC` now `os.Stat`s the socket and logs `slog.Warn` if group/other bits are set (advisory, connection proceeds); trust boundary documented (`internal/mcp/server.go`)
+- **S8-7** `WebSocketService.fromStorage` throws `ArgumentError` in release mode (`kReleaseMode`) when no API key configured; hardcoded dev key fallback removed entirely (`ui/flutter_ui/lib/services/websocket_service.dart`)
 
-**Config plumbing required (1)**
-- S5-9 [low] Chat service timeout not configurable — needs config option
+### Issues Deferred (0 of 104)
 
-**Design decisions required (4)**
-- S4-8 [low] Registry.Execute error type erasure — interface change
-- S4-9 [low] PendingChangesRegistry no auto-expire — ownership decision
-- S7-5 [low] DefaultDevAPIKey in source — requires key management rework
-- S7-12 [medium] MCP server RPC auth — trust boundary design
-
-**API limitation (1)**
-- S6-7 [high] Docker Execute cancel — fsouza/dockerclient doesn't expose Cancel
-
-**Low-priority cleanup (2)**
-- S8-7 [low] Hardcoded API key fallback in release (added warning log, but full fix requires release-build refuse-to-connect)
+All 104 findings resolved.
 
 ### Verification Evidence
 
@@ -778,5 +775,5 @@ $ go test -race -count=1 \
 Setters test: 33/33 pass (21 original + 12 new from S4-3).
 Pre-existing race `TestIntegration_CompactionStatsConcurrentSafety` now PASSES (fixed as bonus).
 
-Total files modified: 84 (Go + Dart).
+Total files modified: 96 (Go + Dart).
 

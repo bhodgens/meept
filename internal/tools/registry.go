@@ -149,7 +149,7 @@ func (r *Registry) Execute(ctx context.Context, name string, args map[string]any
 			"name", name,
 			"error", err,
 		)
-		return NewErrorResult(err.Error()), nil
+		return NewErrorResultErr(err), nil
 	}
 
 	// If result is already a ToolResult, return it directly to preserve evidence
@@ -409,7 +409,7 @@ func (r *Registry) ExecuteWithRetry(ctx context.Context, name string, args map[s
 			if lastResult != nil {
 				return lastResult, nil
 			}
-			return NewErrorResult(lastErr.Error()), nil
+			return NewErrorResultErr(lastErr), nil
 		}
 
 		// Wait before retry (if not last attempt)
@@ -428,7 +428,7 @@ func (r *Registry) ExecuteWithRetry(ctx context.Context, name string, args map[s
 
 			select {
 			case <-ctx.Done():
-				return NewErrorResult(ctx.Err().Error()), ctx.Err()
+				return NewErrorResultErr(ctx.Err()), ctx.Err()
 			case <-time.After(delay):
 				r.logger.Debug("Retrying tool execution",
 					"name", name,
@@ -453,7 +453,7 @@ func (r *Registry) ExecuteWithRetry(ctx context.Context, name string, args map[s
 	if lastResult != nil {
 		return lastResult, nil
 	}
-	return NewErrorResult(lastErr.Error()), nil
+	return NewErrorResultErr(lastErr), nil
 }
 
 // Executor is a Registry that implements ToolExecutor.

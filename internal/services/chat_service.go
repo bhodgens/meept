@@ -21,6 +21,7 @@ type ChatService struct {
 	agentRegistry *agent.AgentRegistry
 	sessionStore  session.Store
 	logger        *slog.Logger
+	timeout       time.Duration
 }
 
 // ChatRequest contains chat input.
@@ -61,6 +62,16 @@ type ChatServiceOption func(*ChatService)
 func WithSessionStore(store session.Store) ChatServiceOption {
 	return func(s *ChatService) {
 		s.sessionStore = store
+	}
+}
+
+// WithChatTimeout sets the response wait timeout for chat requests.
+// If d is zero or negative, the default (2 minutes) is used.
+func WithChatTimeout(d time.Duration) ChatServiceOption {
+	return func(s *ChatService) {
+		if d > 0 {
+			s.timeout = d
+		}
 	}
 }
 
@@ -162,7 +173,11 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 	s.bus.Publish("chat.request", msg)
 
 	// Wait for response
-	timer := time.NewTimer(2 * time.Minute)
+	timeout := s.timeout
+	if timeout <= 0 {
+		timeout = 2 * time.Minute
+	}
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
 	select {

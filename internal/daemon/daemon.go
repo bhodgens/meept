@@ -502,6 +502,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		ProjectManager:   nilSafeProjectManager(components),
 		PlanManager:      planManagerInst,
 		PlanStore:        planStoreIF,
+		ChatTimeout:      fullCfg.ChatTimeout(),
 	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create service registry: %w", err)

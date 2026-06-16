@@ -23,6 +23,15 @@ type PendingChangesRegistry struct {
 	mu       sync.RWMutex
 	changes  map[string]*PendingChange // keyed by change ID
 	sessions map[string][]string       // sessionID -> change IDs
+
+	// Background expiration lifecycle. stopCh/doneCh are lazily allocated
+	// inside Start() so that registries which never call Start (e.g. test
+	// fixtures, fallback local registries) don't need explicit teardown.
+	stopCh         chan struct{}
+	doneCh         chan struct{}
+	expireInterval time.Duration
+	startOnce      sync.Once
+	stopOnce       sync.Once
 }
 
 // NewPendingChangesRegistry creates a new pending changes registry.
@@ -152,4 +161,61 @@ func (r *PendingChangesRegistry) SetExpiry(id string, expiresAt time.Time) bool 
 
 	change.ExpiresAt = &expiresAt
 	return true
+}
+
+// Start launches a background goroutine that periodically calls Expire() to
+// reap pending changes whose ExpiresAt has passed. interval is the tick
+// cadence; a value <= 0 falls back to the default of 5 minutes.
+//
+// Start is idempotent: calling it multiple times is a no-op after the
+// first successful invocation. The caller is expected to invoke Stop() to
+// release the background goroutine.
+func (r *PendingChangesRegistry) Start(interval time.Duration) {
+	if r == nil {
+		return
+	}
+
+	r.startOnce.Do(func() {
+		if interval <= 0 {
+			interval = 5 * time.Minute
+		}
+		r.expireInterval = interval
+		r.stopCh = make(chan struct{})
+		r.doneCh = make(chan struct{})
+
+		go func() {
+			defer close(r.doneCh)
+
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ticker.C:
+					r.Expire()
+				case <-r.stopCh:
+					return
+				}
+			}
+		}()
+	})
+}
+
+// Stop signals the background expiration goroutine to exit and blocks until
+// it has terminated. Safe to call when Start was never invoked (no-op) and
+// idempotent on subsequent calls.
+func (r *PendingChangesRegistry) Stop() {
+	if r == nil {
+		return
+	}
+
+	r.stopOnce.Do(func() {
+		if r.stopCh != nil {
+			close(r.stopCh)
+		}
+	})
+
+	if r.doneCh != nil {
+		<-r.doneCh
+	}
 }

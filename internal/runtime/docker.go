@@ -138,7 +138,11 @@ func (b *DockerBackend) Execute(ctx context.Context, cmd Command) (*CommandResul
 		return nil, fmt.Errorf("failed to create container exec: %w", err)
 	}
 
-	// Start exec and capture output
+	// Start exec and capture output. The blocking StartExec call does not
+	// observe ctx cancellation, so we use StartExecNonBlocking which returns
+	// a CloseWaiter. We then Wait() in a goroutine and select on ctx.Done()
+	// to honor caller deadlines. On cancellation we Close() the waiter, which
+	// terminates the exec's hijacked connection and stops the process.
 	var stdout, stderr bytes.Buffer
 
 	// Enable raw terminal so sh output is unbuffered
@@ -150,11 +154,40 @@ func (b *DockerBackend) Execute(ctx context.Context, cmd Command) (*CommandResul
 		RawTerminal:  true,
 	}
 
-	if err := b.client.StartExec(exec.ID, startOpts); err != nil {
+	waiter, startErr := b.client.StartExecNonBlocking(exec.ID, startOpts)
+	if startErr != nil {
 		// Retry without raw terminal for certain errors
 		startOpts.RawTerminal = false
-		if retryErr := b.client.StartExec(exec.ID, startOpts); retryErr != nil {
-			return nil, fmt.Errorf("failed to start container exec: %w (raw retry: %v)", err, retryErr)
+		retryWaiter, retryErr := b.client.StartExecNonBlocking(exec.ID, startOpts)
+		if retryErr != nil {
+			return nil, fmt.Errorf("failed to start container exec: %w (raw retry: %v)", startErr, retryErr)
+		}
+		waiter = retryWaiter
+	}
+
+	type execResult struct{ err error }
+	done := make(chan execResult, 1)
+
+	go func() {
+		done <- execResult{waiter.Wait()}
+	}()
+
+	select {
+	case <-ctx.Done():
+		// Best-effort: terminate the exec's hijacked connection. This causes
+		// the process inside the container to receive SIGHUP / be reaped.
+		_ = waiter.Close()
+		// Drain the goroutine so it doesn't leak; ignore its result since we
+		// already decided to return a cancellation error.
+		go func() { <-done }()
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("%w: %s", ErrTimeout, cmd.Cmd)
+		}
+		return nil, fmt.Errorf("%w: %s", ErrCanceled, cmd.Cmd)
+	case res := <-done:
+		_ = waiter.Close()
+		if res.err != nil {
+			return nil, fmt.Errorf("container exec failed: %w", res.err)
 		}
 	}
 

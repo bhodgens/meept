@@ -185,8 +185,11 @@ func NewServer(cfg ServerConfig, configSvc *ConfigService, daemonCtrl DaemonCont
 	}
 
 	if cfg.RequireAuth && len(cfg.APIKeys) == 0 {
-		cfg.APIKeys = []string{constants.DefaultDevAPIKey}
-		logger.Warn("using default development API key",
+		// Use the per-installation dev key. DevAPIKey() reads (or creates)
+		// ~/.meept/dev_key, so the server and CLI client resolve to the
+		// SAME unique key on this machine for local development.
+		cfg.APIKeys = []string{constants.DevAPIKey()}
+		logger.Warn("using development API key",
 			"hint", "replace with a generated key via `meept token generate --save` for production",
 			"default_key_visible", false) // key is never logged
 	}

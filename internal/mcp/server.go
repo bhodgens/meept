@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 
 	"github.com/caimlas/meept/internal/transport"
 )
@@ -306,8 +307,28 @@ func mustMarshal(v any) json.RawMessage {
 	return data
 }
 
-// ConnectRPC establishes the RPC connection to meept-daemon.
+// ConnectRPC connects to the daemon's Unix socket. The socket is trusted to
+// provide authenticated RPC. If the socket file is world-accessible, a warning
+// is logged so the operator can investigate unintended permission drift.
+//
+// The check is advisory: the connection still proceeds when broad permissions
+// are detected, because the operator may have intentionally set them (for
+// example, when multiple trusted users share a development machine).
 func (s *Server) ConnectRPC(socketPath string) error {
+	// Advisory permission check: warn if the socket is more permissive than
+	// owner-only access. We check the group/other bits (0o077) so that any
+	// non-owner read, write, or execute triggers the warning.
+	if info, err := os.Stat(socketPath); err == nil {
+		perm := info.Mode().Perm()
+		if perm&0o077 != 0 {
+			s.logger.Warn("rpc socket is accessible beyond the owner",
+				"socket_path", socketPath,
+				"mode", fmt.Sprintf("%04o", perm),
+				"hint", "consider `chmod 0600 <socket>` if this is unintended",
+			)
+		}
+	}
+
 	cfg := transport.DefaultConfig()
 	cfg.SocketPath = socketPath
 	client, err := transport.New(cfg)

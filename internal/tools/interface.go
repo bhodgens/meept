@@ -46,6 +46,7 @@ type ToolResult struct {
 	Success   bool              `json:"success"`
 	Result    any               `json:"result,omitempty"`
 	Error     string            `json:"error,omitempty"`
+	Err       error             `json:"-"` // Original typed error (when available) so callers can use errors.Is/As
 	Evidence  []models.Evidence `json:"evidence,omitempty"`
 	Terminate bool              `json:"terminate,omitempty"` // Advisory: hint that result is final and needs no LLM follow-up
 }
@@ -68,11 +69,27 @@ func NewSuccessResultWithTerminate(result any) *ToolResult {
 	}
 }
 
-// NewErrorResult creates a failed tool result.
+// NewErrorResult creates a failed tool result from a plain string.
+// Use NewErrorResultErr when you have a typed error so callers can use
+// errors.Is / errors.As on the returned *ToolResult.
 func NewErrorResult(err string) *ToolResult {
 	return &ToolResult{
 		Success: false,
 		Error:   err,
+	}
+}
+
+// NewErrorResultErr creates a failed tool result that preserves the original
+// typed error alongside its string representation. Callers can use the Err
+// field with errors.Is / errors.As to inspect specific error types.
+func NewErrorResultErr(err error) *ToolResult {
+	if err == nil {
+		return &ToolResult{Success: false}
+	}
+	return &ToolResult{
+		Success: false,
+		Error:   err.Error(),
+		Err:     err,
 	}
 }
 

@@ -116,8 +116,10 @@ func New(cfg *Config) (Client, error) {
 		if certFP, spkiFP := loadFingerprint(); certFP != "" || spkiFP != "" {
 			opts = append(opts, WithPinnedFingerprint(certFP, spkiFP))
 		}
-		// Use default dev key so HTTP transport works out of the box
-		opts = append(opts, WithAPIKey(constants.DefaultDevAPIKey))
+		// Use the per-installation dev key so HTTP transport works out of
+		// the box. DevAPIKey() reads (or creates) ~/.meept/dev_key so the
+		// client and daemon resolve to the SAME unique key on this machine.
+		opts = append(opts, WithAPIKey(constants.DevAPIKey()))
 		return NewHTTPClient(cfg.HTTPBaseURL, cfg.Timeout, opts...), nil
 	case "rpc", "unix", "socket":
 		return NewRPCClient(cfg.SocketPath, cfg.Timeout), nil
