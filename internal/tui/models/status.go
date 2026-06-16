@@ -67,6 +67,9 @@ func (m *StatusModel) tickCmd() tea.Cmd {
 }
 
 func (m *StatusModel) fetchStatus() tea.Msg {
+	if !m.rpc.IsConnected() {
+		return StatusUpdateMsg{Err: fmt.Errorf("not connected")}
+	}
 	status, err := m.rpc.Status()
 	return StatusUpdateMsg{Status: status, Err: err}
 }

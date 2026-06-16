@@ -126,10 +126,10 @@ func (po *PairOrchestrator) ActiveSessionCount() int {
 
 func (po *PairOrchestrator) runSubscription(ctx context.Context, sub *bus.Subscriber, handler func(context.Context, *models.BusMessage)) {
 	defer po.wg.Done()
+	defer po.bus.Unsubscribe(sub)
 	for {
 		select {
 		case <-ctx.Done():
-			po.bus.Unsubscribe(sub)
 			return
 		case msg, ok := <-sub.Channel:
 			if !ok {

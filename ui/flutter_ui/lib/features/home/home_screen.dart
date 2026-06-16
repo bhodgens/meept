@@ -8,7 +8,6 @@ import '../../theme/effects.dart';
 import '../../theme/typography.dart';
 import '../../widgets/tab_bar.dart';
 import '../../providers/providers.dart';
-import '../drawer/drawer_overlay.dart';
 import 'tab_content.dart';
 import 'tools_dropdown.dart';
 
@@ -107,10 +106,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _leaderController = LeaderKeyController();
     _leaderController.onTabSelected = _onLeaderTabSelected;
     _leaderController.onNavigate = _onLeaderNavigate;
-    _leaderController.onToggleDrawer = () {
-      final isOpen = ref.read(drawerOpenProvider);
-      ref.read(drawerOpenProvider.notifier).state = !isOpen;
-    };
     _leaderController.onShowHelp = _showHelpDialog;
     _leaderController.onFocusInput = ({slashPrefix = false}) {
       if (_selectedTab != HomeTab.chat) {
@@ -207,7 +202,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             children: [
               _buildHelpRow('leader s', 'sessions tab'),
               _buildHelpRow('leader c', 'chat tab'),
-              _buildHelpRow('leader d', 'toggle drawer'),
               _buildHelpRow('leader p', 'find / search'),
               _buildHelpRow('leader b', 'branches'),
               _buildHelpRow('leader ?', 'this help'),
@@ -269,7 +263,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final drawerOpen = ref.watch(drawerOpenProvider);
     ref.listen<bool>(connectionStateProvider, (prev, connected) {
       _onConnectionChanged(connected);
     });
@@ -296,29 +289,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         context.go(_tabRoutes[index]);
                       },
                     ),
-                    // Toolbar with drawer toggle, tools dropdown + connection indicator
+                    // Toolbar with tools dropdown + connection indicator
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                       color: CyberpunkColors.blackTransparent(0.7),
                       child: Row(
                         children: [
-                          GestureDetector(
-                            onTap: () {
-                              ref.read(drawerOpenProvider.notifier).state = true;
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(
-                                color: CyberpunkColors.darkGray,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: const Icon(
-                                Icons.menu,
-                                size: 16,
-                                color: CyberpunkColors.orangePrimary,
-                              ),
-                            ),
-                          ),
                           const Spacer(),
                           ToolsDropdown(
                             onToolSelected: (route) {
@@ -346,8 +322,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                   ],
                 ),
-                // Drawer overlay
-                if (drawerOpen) const DrawerOverlay(),
                 // Leader key waiting indicator
                 if (_leaderController.isWaiting)
                   Positioned(

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
@@ -154,6 +156,10 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
     });
   }
 
+  void _closePanel() {
+    context.go('/');
+  }
+
   Future<void> _executeSkill() async {
     if (_selectedSkill == null || _uiDescriptor == null) return;
 
@@ -241,7 +247,14 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return KeyboardListener(
+      focusNode: FocusNode(),
+      onKeyEvent: (KeyEvent event) {
+        if (event.logicalKey == LogicalKeyboardKey.escape) {
+          _closePanel();
+        }
+      },
+      child: Container(
       decoration: BoxDecoration(
         color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
         border: Border(
@@ -313,6 +326,13 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
             ),
           ),
           const Spacer(),
+          IconButton(
+            icon: const Icon(Icons.close, size: 18),
+            onPressed: _closePanel,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            tooltip: 'close',
+          ),
           if (_selectedSkill == null)
             GestureDetector(
               onTap: _loadSkills,

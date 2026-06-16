@@ -3,6 +3,7 @@ package security
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -11,7 +12,7 @@ func TestCheckPath_InsideRoot(t *testing.T) {
 	fc := NewFenceChecker(FenceConfig{
 		Enabled:  true,
 		RootPath: root,
-	})
+	}, nil)
 
 	// File inside root should be allowed for all ops
 	for _, op := range []string{"read", "write", "exec"} {
@@ -36,7 +37,7 @@ func TestCheckPath_OutsideRoot_ReadAllowed(t *testing.T) {
 		Enabled:   true,
 		RootPath:  root,
 		AllowRead: []string{allowedDir},
-	})
+	}, nil)
 
 	outsidePath := filepath.Join(allowedDir, "system", "lib.h")
 	err := fc.CheckPath(outsidePath, "read")
@@ -53,7 +54,7 @@ func TestCheckPath_OutsideRoot_WriteBlocked(t *testing.T) {
 		Enabled:   true,
 		RootPath:  root,
 		AllowRead: []string{allowedDir},
-	})
+	}, nil)
 
 	outsidePath := filepath.Join(allowedDir, "system", "lib.h")
 	err := fc.CheckPath(outsidePath, "write")
@@ -71,7 +72,7 @@ func TestCheckPath_OutsideRoot_ReadOutsideAllowRead(t *testing.T) {
 		Enabled:   true,
 		RootPath:  root,
 		AllowRead: []string{allowedDir},
-	})
+	}, nil)
 
 	outsidePath := filepath.Join(otherDir, "secret.txt")
 	err := fc.CheckPath(outsidePath, "read")
@@ -88,7 +89,7 @@ func TestCheckPath_NoFence(t *testing.T) {
 		Enabled:  true,
 		RootPath: root,
 		NoFence:  true,
-	})
+	}, nil)
 
 	outsidePath := filepath.Join(otherDir, "anywhere.txt")
 	for _, op := range []string{"read", "write", "exec"} {
@@ -106,7 +107,7 @@ func TestCheckPath_NotEnabled(t *testing.T) {
 	fc := NewFenceChecker(FenceConfig{
 		Enabled:  false,
 		RootPath: root,
-	})
+	}, nil)
 
 	outsidePath := filepath.Join(otherDir, "anywhere.txt")
 	for _, op := range []string{"read", "write", "exec"} {
@@ -121,13 +122,15 @@ func TestCheckPath_EmptyRootPath(t *testing.T) {
 	fc := NewFenceChecker(FenceConfig{
 		Enabled:  true,
 		RootPath: "",
-	})
+	}, nil)
 
-	// With empty root path, everything resolves to CWD which equals the root;
-	// the checker should not panic. Any relative path resolves to within root.
+	// Empty root path is now detected as misconfiguration and blocked.
 	err := fc.CheckPath(".", "read")
-	if err != nil {
-		t.Errorf("CheckPath(\".\", \"read\") = %v, want nil (empty root, cwd is root)", err)
+	if err == nil {
+		t.Error("CheckPath(\".\", \"read\") = nil, want error (empty root is misconfigured)")
+	}
+	if !strings.Contains(err.Error(), "misconfigured") {
+		t.Errorf("CheckPath error = %v, want 'misconfigured' error", err)
 	}
 }
 
@@ -137,7 +140,7 @@ func TestCheckPath_RelativePathInsideRoot(t *testing.T) {
 	fc := NewFenceChecker(FenceConfig{
 		Enabled:  true,
 		RootPath: root,
-	})
+	}, nil)
 
 	// Save and restore working directory
 	origWd, _ := os.Getwd()
@@ -169,7 +172,7 @@ func TestCheckPath_SymlinkInsideRoot(t *testing.T) {
 	fc := NewFenceChecker(FenceConfig{
 		Enabled:  true,
 		RootPath: root,
-	})
+	}, nil)
 
 	err := fc.CheckPath(linkFile, "read")
 	if err != nil {
@@ -184,7 +187,7 @@ func TestCheckCommand(t *testing.T) {
 	fc := NewFenceChecker(FenceConfig{
 		Enabled:  true,
 		RootPath: root,
-	})
+	}, nil)
 
 	// WorkDir inside root -> allowed
 	err := fc.CheckCommand("ls", root)
@@ -200,12 +203,12 @@ func TestCheckCommand(t *testing.T) {
 }
 
 func TestIsNoFence(t *testing.T) {
-	fc := NewFenceChecker(FenceConfig{NoFence: true})
+	fc := NewFenceChecker(FenceConfig{NoFence: true}, nil)
 	if !fc.IsNoFence() {
 		t.Error("IsNoFence() = false, want true")
 	}
 
-	fc2 := NewFenceChecker(FenceConfig{NoFence: false})
+	fc2 := NewFenceChecker(FenceConfig{NoFence: false}, nil)
 	if fc2.IsNoFence() {
 		t.Error("IsNoFence() = true, want false")
 	}
@@ -219,7 +222,7 @@ func TestCheckPath_ExactAllowReadMatch(t *testing.T) {
 		Enabled:   true,
 		RootPath:  root,
 		AllowRead: []string{allowedDir},
-	})
+	}, nil)
 
 	// Exact match of the allowed directory itself should be permitted
 	err := fc.CheckPath(allowedDir, "read")
@@ -234,7 +237,7 @@ func TestCheckPath_PathTraversalAttempt(t *testing.T) {
 	fc := NewFenceChecker(FenceConfig{
 		Enabled:  true,
 		RootPath: root,
-	})
+	}, nil)
 
 	// Save and restore working directory
 	origWd, _ := os.Getwd()

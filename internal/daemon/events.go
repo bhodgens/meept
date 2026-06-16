@@ -27,10 +27,19 @@ type NotificationEvent = http.NotificationEvent
 // EventEmitter manages notification subscriptions and event distribution.
 type EventEmitter struct {
 	mu          sync.RWMutex
-	subscribers []chan *http.NotificationEvent
+	subscribers []*subscriberSlot
 	buffer      []*http.NotificationEvent
 	maxBuffer   int
 	logger      *slog.Logger
+}
+
+// subscriberSlot bundles a subscriber channel with a closed flag so that
+// Publish can skip closed subscribers without relying on a panic recover
+// (S6-12). All access to a slot's fields must be performed while holding
+// the parent EventEmitter's mu.
+type subscriberSlot struct {
+	ch     chan *http.NotificationEvent
+	closed bool
 }
 
 // NewEventEmitter creates a new event emitter with the specified buffer size.
@@ -39,7 +48,7 @@ func NewEventEmitter(bufferSize int, logger *slog.Logger) *EventEmitter {
 		logger = slog.Default()
 	}
 	return &EventEmitter{
-		subscribers: make([]chan *http.NotificationEvent, 0),
+		subscribers: make([]*subscriberSlot, 0),
 		buffer:      make([]*http.NotificationEvent, 0),
 		maxBuffer:   bufferSize,
 		logger:      logger,
@@ -55,7 +64,8 @@ func (e *EventEmitter) Subscribe() chan *http.NotificationEvent {
 	e.mu.Lock()
 
 	ch := make(chan *http.NotificationEvent, e.maxBuffer)
-	e.subscribers = append(e.subscribers, ch)
+	slot := &subscriberSlot{ch: ch}
+	e.subscribers = append(e.subscribers, slot)
 
 	// Copy buffer under lock to avoid blocking sends while holding the lock.
 	buffer := make([]*http.NotificationEvent, len(e.buffer))
@@ -82,9 +92,14 @@ func (e *EventEmitter) Unsubscribe(ch chan *http.NotificationEvent) {
 	defer e.mu.Unlock()
 
 	for i, sub := range e.subscribers {
-		if sub == ch {
-			e.subscribers = append(e.subscribers[:i], e.subscribers[i+1:]...)
+		if sub.ch == ch {
+			// Mark the slot as closed BEFORE closing the channel and
+			// removing the slot. Publish reads this flag under the lock
+			// and skips closed slots, eliminating the need for recover
+			// against send-on-close (S6-12).
+			sub.closed = true
 			close(ch)
+			e.subscribers = append(e.subscribers[:i], e.subscribers[i+1:]...)
 			e.logger.Debug("notification subscriber removed")
 			return
 		}
@@ -98,30 +113,40 @@ func (e *EventEmitter) Publish(event *http.NotificationEvent) {
 	// Add to buffer
 	e.buffer = append(e.buffer, event)
 	if len(e.buffer) > e.maxBuffer {
-		e.buffer = e.buffer[1:]
+		// Shift left and null out the dropped slot to allow GC of the
+		// pointer (the underlying array is retained by the slice header
+		// otherwise).
+		copy(e.buffer, e.buffer[1:])
+		e.buffer[len(e.buffer)-1] = nil
+		e.buffer = e.buffer[:len(e.buffer)-1]
 	}
 
-	subscribers := make([]chan *http.NotificationEvent, len(e.subscribers))
-	copy(subscribers, e.subscribers)
+	// Snapshot the subscriber channels and their closed flags under the
+	// lock, then send outside the lock. A closed slot is skipped, which
+	// removes the previous reliance on recover() for send-on-closed-
+	// channel panic safety (S6-12).
+	type sendTarget struct {
+		ch     chan *http.NotificationEvent
+		closed bool
+	}
+	targets := make([]sendTarget, len(e.subscribers))
+	for i, sub := range e.subscribers {
+		targets[i] = sendTarget{ch: sub.ch, closed: sub.closed}
+	}
 
 	e.mu.Unlock()
 
-	// Send to all subscribers (non-blocking)
-	for _, ch := range subscribers {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					// Channel was closed by Unsubscribe, that's ok
-					e.logger.Debug("notification channel closed during publish", "recover", r)
-				}
-			}()
-			select {
-			case ch <- event:
-			default:
-				// Channel full, skip this subscriber
-				e.logger.Warn("notification subscriber channel full, skipping")
-			}
-		}()
+	// Send to all subscribers (non-blocking). Skips closed slots.
+	for _, t := range targets {
+		if t.closed {
+			continue
+		}
+		select {
+		case t.ch <- event:
+		default:
+			// Channel full, skip this subscriber
+			e.logger.Warn("notification subscriber channel full, skipping")
+		}
 	}
 }
 

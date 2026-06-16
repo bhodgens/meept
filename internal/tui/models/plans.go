@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
@@ -38,6 +39,7 @@ type PlansModel struct {
 	// UI state
 	showingDetail bool
 	showingHelp   bool
+	filteredCount int
 }
 
 // PlansRPCClient interface for the plans model.
@@ -335,6 +337,7 @@ func (m *PlansModel) filterPlans() []types.PlanExtended {
 
 func (m *PlansModel) updatePlansTable() {
 	plans := m.filterPlans()
+	m.filteredCount = len(plans)
 	rows := make([]table.Row, len(plans))
 
 	for i, plan := range plans {
@@ -472,10 +475,9 @@ func (m *PlansModel) renderHeader() string {
 
 	tabs := allTab + " " + activeTab + " " + pendingTab + " " + completedTab
 
-	// Plan count
-	filtered := m.filterPlans()
+	// Plan count (cached from updatePlansTable to avoid redundant filtering)
 	countStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray))
-	count := countStyle.Render(fmt.Sprintf("(%d/%d)", len(filtered), len(m.plans)))
+	count := countStyle.Render(fmt.Sprintf("(%d/%d)", m.filteredCount, len(m.plans)))
 
 	header := lipgloss.JoinHorizontal(
 		lipgloss.Left,
@@ -760,10 +762,10 @@ func (m *PlansModel) formatTimeAgo(timestamp string) string {
 	if timestamp == "" {
 		return StatusNA
 	}
-	if len(timestamp) > 5 {
-		return types.TruncateString(timestamp[len(timestamp)-8:], 8)
+	if t, err := time.Parse(time.RFC3339, timestamp); err == nil {
+		return t.Format("15:04:05")
 	}
-	return timestamp
+	return types.TruncateString(timestamp, 10)
 }
 
 func (m *PlansModel) getPlanStateIcon(state string) string {

@@ -236,15 +236,19 @@ func (p *ProxyHandler) makeProxy(requestTopic, responseTopic string, timeout tim
 func (p *ProxyHandler) makeFireAndForget(topic string) Handler {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
 		msg := &models.BusMessage{
-			ID:      fmt.Sprintf("fire-%d", time.Now().UnixNano()),
+			ID:      id.Generate("fire-"),
 			Type:    models.MessageTypeEvent,
 			Topic:   topic,
 			Source:  "rpc.proxy",
 			Payload: params,
 		}
 		delivered := p.bus.Publish(topic, msg)
+		status := "published"
+		if delivered == 0 {
+			status = "dropped"
+		}
 		return map[string]any{
-			RPCKeyStatus: "published",
+			RPCKeyStatus: status,
 			"topic":      topic,
 			"delivered":  delivered,
 		}, nil

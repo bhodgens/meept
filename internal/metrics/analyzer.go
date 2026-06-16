@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+// codeBlockPattern matches fenced code blocks in markdown responses.
+// It is compiled once at package init rather than on every Analyze call
+// to avoid repeated regex compilation overhead (S6-15).
+var codeBlockPattern = regexp.MustCompile("```[^`]*```")
+
 // ResponseAnalyzer analyzes LLM responses for quality metrics.
 type ResponseAnalyzer struct {
 	lazyPatterns []*regexp.Regexp
@@ -76,7 +81,6 @@ func (a *ResponseAnalyzer) Analyze(response string, tokenCount int) *ResponseQua
 	// Calculate code token percentage if there are code blocks
 	if quality.HasCodeBlocks && tokenCount > 0 {
 		// Estimate code tokens by measuring code block content
-		codeBlockPattern := regexp.MustCompile("```[^`]*```")
 		codeBlocks := codeBlockPattern.FindAllString(response, -1)
 		if len(codeBlocks) > 0 {
 			var totalCodeChars int

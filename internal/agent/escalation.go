@@ -190,6 +190,21 @@ func (em *EscalationManager) ClearEscalation(taskID string) {
 	delete(em.escalations, taskID)
 }
 
+// Cleanup removes escalation entries whose Timestamp is older than maxAge
+// (S1-12). This prevents unbounded growth of the escalations map for
+// abandoned or long-completed tasks. Callers should invoke this periodically
+// (e.g. from a scheduler job); it is not auto-scheduled.
+func (em *EscalationManager) Cleanup(maxAge time.Duration) {
+	em.mu.Lock()
+	defer em.mu.Unlock()
+	cutoff := time.Now().Add(-maxAge)
+	for id, level := range em.escalations {
+		if level.Timestamp.Before(cutoff) {
+			delete(em.escalations, id)
+		}
+	}
+}
+
 // triggerReplan attempts to re-plan a failed task into smaller, more manageable steps.
 func (em *EscalationManager) triggerReplan(ctx context.Context, failure FailureContext, level int) error {
 	// Publish escalation event on the bus

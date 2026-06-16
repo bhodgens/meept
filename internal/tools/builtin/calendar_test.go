@@ -76,7 +76,15 @@ func TestCalendarListTool_Execute(t *testing.T) {
 }
 
 func TestCalendarListTool_Execute_InvalidStart(t *testing.T) {
-	tool := NewCalendarListTool(nil)
+	// Use a test client so the nil-client check doesn't fire first
+	// (S4-7: nil client check now precedes arg validation).
+	client, server := newTestCalendarClient(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items": []}`))
+	})
+	defer server.Close()
+
+	tool := NewCalendarListTool(client)
 	result, err := tool.Execute(context.Background(), map[string]any{
 		"start": "not-a-date",
 		"end":   "2024-06-15T23:59:59Z",
@@ -91,7 +99,15 @@ func TestCalendarListTool_Execute_InvalidStart(t *testing.T) {
 }
 
 func TestCalendarListTool_Execute_MissingEnd(t *testing.T) {
-	tool := NewCalendarListTool(nil)
+	// Use a test client so the nil-client check doesn't fire first
+	// (S4-7: nil client check now precedes arg validation).
+	client, server := newTestCalendarClient(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items": []}`))
+	})
+	defer server.Close()
+
+	tool := NewCalendarListTool(client)
 	result, err := tool.Execute(context.Background(), map[string]any{
 		"start": "2024-06-15T00:00:00Z",
 	})
@@ -101,6 +117,22 @@ func TestCalendarListTool_Execute_MissingEnd(t *testing.T) {
 	resultJSON, _ := json.Marshal(result)
 	if !contains(string(resultJSON), "invalid end time") {
 		t.Errorf("should report invalid end time: %s", string(resultJSON))
+	}
+}
+
+func TestCalendarListTool_Execute_NilClient(t *testing.T) {
+	// S4-7: nil client check should fire before arg validation.
+	tool := NewCalendarListTool(nil)
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"start": "not-a-date",
+		"end":   "2024-06-15T23:59:59Z",
+	})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	resultJSON, _ := json.Marshal(result)
+	if !contains(string(resultJSON), "calendar client not configured") {
+		t.Errorf("should report calendar client not configured: %s", string(resultJSON))
 	}
 }
 

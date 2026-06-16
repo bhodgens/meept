@@ -239,6 +239,10 @@ func AnalyzeCoreDelve(ctx context.Context, coreFile, program string, timeout tim
 		if cmd.Process != nil {
 			cmd.Process.Kill()
 		}
+		// Reap the process to avoid a zombie (S6-6). The cmd.Wait call
+		// in the goroutine above has either returned already or will
+		// return as a result of the Kill.
+		<-done
 		return nil, ctx.Err()
 	case err := <-done:
 		if err != nil {

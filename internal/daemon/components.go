@@ -289,7 +289,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			Enabled:   true,
 			RootPath:  wd,
 			AllowRead: cfg.Security.FenceAllowRead,
-		})
+		}, logger)
 		logger.Info("Fence checker enabled", "root", wd)
 	}
 

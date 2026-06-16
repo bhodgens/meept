@@ -218,19 +218,29 @@ func (m *AmendmentManager) publishEvent(topic string, data any) {
 
 // Close shuts down the amendment manager.
 func (m *AmendmentManager) Close() error {
+	// Snapshot cancel under the lock, release the lock before calling
+	// cancel() to avoid holding the mutex across the context-cancellation
+	// propagation (S6-11 — mu held across cancel()).
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	cancelFn := m.cancel
+	pendingSnapshot := m.pending
+	m.pending = nil // prevent further mutation by other callers
+	m.mu.Unlock()
 
-	// Cancel the subscription context to stop the goroutine
-	if m.cancel != nil {
-		m.cancel()
-	}
-
-	// Mark all pending as ignored
-	for _, req := range m.pending {
+	// Mark all pending as ignored BEFORE cancelling so observers see the
+	// final status rather than "pending-then-cancelled" tearing.
+	m.mu.Lock()
+	for _, req := range pendingSnapshot {
 		if req.Status == AmendmentPending {
 			req.Status = AmendmentIgnored
 		}
+	}
+	m.pending = pendingSnapshot
+	m.mu.Unlock()
+
+	// Cancel the subscription context outside the lock.
+	if cancelFn != nil {
+		cancelFn()
 	}
 	return nil
 }

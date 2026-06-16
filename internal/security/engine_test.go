@@ -506,7 +506,7 @@ func newEngineWithFence(t *testing.T, fenceCfg *FenceConfig) *Engine {
 	require.NoError(t, err, "failed to insert test allow rule")
 
 	if fenceCfg != nil {
-		engine.SetFenceChecker(NewFenceChecker(*fenceCfg))
+		engine.SetFenceChecker(NewFenceChecker(*fenceCfg, nil))
 	}
 	return engine
 }

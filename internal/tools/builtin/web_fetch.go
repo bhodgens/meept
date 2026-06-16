@@ -61,8 +61,11 @@ func NewWebFetchTool(timeout time.Duration, maxLength int) *WebFetchTool {
 		maxLength: maxLength,
 	}
 	t.client = &http.Client{
-		Timeout:       timeout,
-		Transport:     &http.Transport{MaxConnsPerHost: 8},
+		Timeout: timeout,
+		Transport: &http.Transport{
+			MaxConnsPerHost: 8,
+			DialContext:     ssrfDialContext(false),
+		},
 		CheckRedirect: t.checkRedirect,
 	}
 	return t
@@ -94,6 +97,11 @@ func (t *WebFetchTool) SetSecurityOrchestrator(orch SecurityChecker) {
 // httptest.NewServer. Production callers must never invoke this.
 func (t *WebFetchTool) SetAllowPrivateRanges(allow bool) {
 	t.allowPrivateRanges = allow
+	// Rebuild the transport so the dial-time SSRF check is also disabled.
+	t.client.Transport = &http.Transport{
+		MaxConnsPerHost: 8,
+		DialContext:     ssrfDialContext(allow),
+	}
 }
 
 func (t *WebFetchTool) Category() string { return "web" }

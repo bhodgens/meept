@@ -59,10 +59,10 @@ func (h *PlanHandler) Stop() {
 // provided handler until the context is cancelled or the channel is closed.
 func (h *PlanHandler) runSubscription(ctx context.Context, sub *bus.Subscriber, handler func(context.Context, *models.BusMessage)) {
 	defer h.wg.Done()
+	defer h.bus.Unsubscribe(sub)
 	for {
 		select {
 		case <-ctx.Done():
-			h.bus.Unsubscribe(sub)
 			return
 		case msg, ok := <-sub.Channel:
 			if !ok {

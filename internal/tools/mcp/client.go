@@ -267,6 +267,14 @@ func (c *Client) Close() error {
 	c.connected.Store(false)
 	c.logger.Info("disconnecting from MCP server", "name", c.name)
 
+	// Clear cached state so stale tools/capabilities can't be accessed
+	// after the connection is closed.
+	c.mu.Lock()
+	c.tools = nil
+	c.serverInfo = ImplementationInfo{}
+	c.capabilities = ServerCapabilities{}
+	c.mu.Unlock()
+
 	return c.transport.Close()
 }
 

@@ -82,11 +82,11 @@ func (a *ChangeApplier) Apply(ctx context.Context, fix *ProposedFix, validation 
 		}
 	}
 
-	return a.applyFix(ctx, fix)
+	return a.applyFix(ctx, fix, approvedBy)
 }
 
 // applyFix performs the actual fix application.
-func (a *ChangeApplier) applyFix(_ context.Context, fix *ProposedFix) (*AppliedFix, error) {
+func (a *ChangeApplier) applyFix(_ context.Context, fix *ProposedFix, approvedBy string) (*AppliedFix, error) {
 	// Create backup
 	backupPath, err := a.createBackup(fix)
 	if err != nil {
@@ -139,7 +139,7 @@ func (a *ChangeApplier) applyFix(_ context.Context, fix *ProposedFix) (*AppliedF
 	applied := &AppliedFix{
 		FixID:             fix.ID,
 		AppliedAt:         time.Now(),
-		ApprovedBy:        "auto",
+		ApprovedBy:        approvedBy,
 		CommitHash:        commitHash,
 		RollbackAvailable: backupPath != "",
 		BackupPath:        backupPath,
@@ -161,11 +161,10 @@ func (a *ChangeApplier) Approve(ctx context.Context, fixID string) (*AppliedFix,
 	delete(a.pendingApprovals, fixID)
 	a.mu.Unlock()
 
-	applied, err := a.applyFix(ctx, pending.Fix)
+	applied, err := a.applyFix(ctx, pending.Fix, "human")
 	if err != nil {
 		return nil, err
 	}
-	applied.ApprovedBy = "human"
 	return applied, nil
 }
 

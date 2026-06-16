@@ -43,19 +43,19 @@ func NewManager(logger *slog.Logger) *Manager {
 
 // StartServer starts an MCP server connection.
 func (m *Manager) StartServer(ctx context.Context, cfg ServerConfig) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if cfg.Name == "" {
 		return fmt.Errorf("server name is required")
 	}
 
-	// Check if already running
+	// Check if already running (under lock, released before I/O)
+	m.mu.Lock()
 	if _, exists := m.clients[cfg.Name]; exists {
+		m.mu.Unlock()
 		return fmt.Errorf("server %q already running", cfg.Name)
 	}
+	m.mu.Unlock()
 
-	// Create transport based on config
+	// Create transport based on config (no lock held)
 	var trans transport.Transport
 	transportType := cfg.Type
 	if transportType == "" {
@@ -97,16 +97,28 @@ func (m *Manager) StartServer(ctx context.Context, cfg ServerConfig) error {
 	// Create client
 	client := NewClient(cfg.Name, trans, m.logger)
 
-	// Connect
+	// Connect — no lock held during subprocess I/O
 	if err := client.Connect(ctx); err != nil {
 		return fmt.Errorf("server %q: failed to connect: %w", cfg.Name, err)
 	}
 
+	// Re-acquire lock to insert client. Re-check for a concurrent StartServer
+	// that may have inserted an entry while the lock was released.
+	m.mu.Lock()
+	if _, exists := m.clients[cfg.Name]; exists {
+		m.mu.Unlock()
+		// Another goroutine started the same server; close the duplicate
+		_ = client.Close()
+		return fmt.Errorf("server %q already running", cfg.Name)
+	}
 	m.clients[cfg.Name] = client
+	toolCount := len(client.ListTools())
+	m.mu.Unlock()
+
 	m.logger.Info("started MCP server",
 		"name", cfg.Name,
 		"type", transportType,
-		"tools", len(client.ListTools()),
+		"tools", toolCount,
 	)
 
 	return nil
@@ -114,19 +126,25 @@ func (m *Manager) StartServer(ctx context.Context, cfg ServerConfig) error {
 
 // StopServer stops a specific MCP server connection.
 func (m *Manager) StopServer(name string) error {
+	// Snapshot the client under the lock, then release before I/O
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	client, exists := m.clients[name]
 	if !exists {
+		m.mu.Unlock()
 		return fmt.Errorf("server %q not found", name)
 	}
+	m.mu.Unlock()
 
+	// Close outside the lock to avoid blocking other callers during subprocess I/O
 	if err := client.Close(); err != nil {
 		m.logger.Error("error closing MCP client", "name", name, "error", err)
 	}
 
+	// Re-acquire lock to remove the entry
+	m.mu.Lock()
 	delete(m.clients, name)
+	m.mu.Unlock()
+
 	m.logger.Info("stopped MCP server", "name", name)
 
 	return nil
@@ -134,17 +152,23 @@ func (m *Manager) StopServer(name string) error {
 
 // StopAll stops all MCP server connections.
 func (m *Manager) StopAll() {
+	// Snapshot all clients under the lock, then release before I/O
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	snapshot := make(map[string]*Client, len(m.clients))
+	for k, v := range m.clients {
+		snapshot[k] = v
+	}
+	m.clients = make(map[string]*Client)
+	m.mu.Unlock()
 
-	for name, client := range m.clients {
+	// Close each client outside the lock
+	for name, client := range snapshot {
 		if err := client.Close(); err != nil {
 			m.logger.Error("error closing MCP client", "name", name, "error", err)
 		}
 		m.logger.Debug("stopped MCP server", "name", name)
 	}
 
-	m.clients = make(map[string]*Client)
 	m.logger.Info("stopped all MCP servers")
 }
 

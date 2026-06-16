@@ -394,6 +394,7 @@ func (l *AgentLoop) shouldFetchOnQuery() bool {
 type AgentLoop struct {
 	mu      sync.RWMutex
 	modelMu sync.Mutex // protects SwitchModel calls on shared llmClient
+	wg      sync.WaitGroup // tracks best-effort background goroutines (learning, shadow)
 
 	// Core components
 	llm             llm.Chatter         // Interface for LLM operations (Client or ProviderManager)
@@ -1112,19 +1113,25 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 	}
 
 	// Register queue for external access if both queue and registry are available
+	queueRegistered := false
 	if l.agentRegistry != nil && l.queue != nil {
 		gen := l.agentRegistry.RegisterActiveQueue(conversationID, l.queue)
-		defer func() {
-			l.agentRegistry.UnregisterActiveQueue(conversationID)
-		}()
+		queueRegistered = true
 		l.logger.Debug("registered queue for conversation",
 			"conversation_id", conversationID,
 			"generation", gen,
 		)
 	}
 
-	// Publish lifecycle ended event
+	// Publish lifecycle ended event.
+	// S1-15: Unregister the active queue FIRST (before publishing the ended
+	// event) so that external callers observe the conversation as inactive
+	// before they receive the lifecycle-ended notification.
 	defer func() {
+		if queueRegistered {
+			l.agentRegistry.UnregisterActiveQueue(conversationID)
+		}
+
 		reason := "completed"
 		if err != nil && err.Error() == "maximum iterations reached" {
 			reason = "max_iterations"
@@ -1261,7 +1268,11 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 	// operation whose LLM calls (Judge/Distill/StorePattern) must outlive
 	// the request that triggered them.
 	if l.learningPipeline != nil && err == nil {
-		go l.triggerLearning(context.Background(), conv, conversationID, finalResponse)
+		l.wg.Add(1)
+		go func() {
+			defer l.wg.Done()
+			l.triggerLearning(context.Background(), conv, conversationID, finalResponse)
+		}()
 	}
 
 	// Add final response to conversation
@@ -1780,6 +1791,12 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		}
 
 		// Resolve alias to get the current model and switch the LLM client
+		// Snapshot llmClient under the lock once at the top of this block so
+		// the nil check and SwitchModel call use the same pointer (S1-6).
+		l.modelMu.Lock()
+		llmClientSnap := l.llmClient
+		l.modelMu.Unlock()
+
 		if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
 			modelConfig, err := l.resolver.ResolveForAlias(l.modelRef)
 			if err != nil {
@@ -1787,11 +1804,11 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					"alias", l.modelRef,
 					"error", err,
 				)
-			} else if l.llmClient != nil {
+			} else if llmClientSnap != nil {
 				// Switch the LLM client to the resolved model
 				l.modelMu.Lock()
-				oldModel := l.llmClient.Config().ModelID
-				if err := l.llmClient.SwitchModel(modelConfig); err != nil {
+				oldModel := llmClientSnap.Config().ModelID
+				if err := llmClientSnap.SwitchModel(modelConfig); err != nil {
 					l.modelMu.Unlock()
 					l.logger.Warn("Failed to switch model",
 						"agent_id", l.agentID,
@@ -1813,11 +1830,11 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// Apply model override from user's reassignment directive (if set).
 		// This takes precedence over alias resolution when a user explicitly
 		// requests a specific model for this task/step.
-		if override := l.GetModelOverride(); override != "" && l.resolver != nil && l.llmClient != nil {
+		if override := l.GetModelOverride(); override != "" && l.resolver != nil && llmClientSnap != nil {
 			if modelConfig := l.resolver.ResolveRef(override); modelConfig != nil {
 				l.modelMu.Lock()
-				oldModel := l.llmClient.Config().ModelID
-				err := l.llmClient.SwitchModel(modelConfig)
+				oldModel := llmClientSnap.Config().ModelID
+				err := llmClientSnap.SwitchModel(modelConfig)
 				l.modelMu.Unlock()
 				if err == nil {
 					l.logger.Info("Applied model override from user directive",
@@ -2149,7 +2166,11 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			if l.llmClient != nil {
 				modelID = l.llmClient.Config().ModelID
 			}
-			go l.shadowMgr.CaptureInteraction(ctx,
+			// Use context.Background() to match the CaptureToolInteraction call
+			// above (line ~1951): the reasoningCycle context will be cancelled
+			// when the loop returns, but shadow capture is best-effort and
+			// should outlive the request (S1-9).
+			go l.shadowMgr.CaptureInteraction(context.Background(),
 				conversationID,
 				messages,
 				response,

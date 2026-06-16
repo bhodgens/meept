@@ -8,6 +8,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/skills"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -203,7 +204,7 @@ func (h *SkillsHandler) sendResponse(replyTo string, result any, err error) {
 	}
 
 	respMsg := &models.BusMessage{
-		ID:        fmt.Sprintf("skills-%d", time.Now().UnixNano()),
+		ID:        id.Generate("skills-"),
 		Type:      models.MessageTypeResponse,
 		Topic:     "skills.result",
 		Source:    "skills-handler",

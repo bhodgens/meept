@@ -143,7 +143,21 @@ func (e *WhisperEngine) transcribe(filePath string) (string, error) {
 
 	slog.Debug("stt: running whisper-cli", "args", args)
 
-	cmd := exec.Command(bin, args...)
+	// Use CommandContext with a cancellable background context so that
+	// engine shutdown can interrupt a runaway transcription process
+	// (S6-4). The cancel func is registered via shutdownCtx, allowing
+	// a future Stop hook to abort long-running transcriptions.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, args...)
+	// Ensure process kill on context cancellation (default on some
+	// platforms, but explicit here for portability).
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			return cmd.Process.Kill()
+		}
+		return nil
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", fmt.Errorf("stt: whisper: create stdout pipe: %w", err)

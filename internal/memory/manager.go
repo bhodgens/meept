@@ -71,6 +71,10 @@ type Manager struct {
 	// LLM client for intelligent summarization (optional; nil falls back to date-based grouping)
 	llm llm.Chatter
 
+	// Embedder for semantic similarity clustering (optional; nil falls back to LLM/date grouping).
+	// S3-3 FIX: wired through to Consolidator so MergeRelated can use semantic clustering.
+	embedder EmbeddingProvider
+
 	// Vector store for semantic search (optional; nil means semantic search unavailable)
 	vectorStore VectorSearcher
 
@@ -104,6 +108,10 @@ type ManagerConfig struct {
 	// LLM is an optional chat client used for intelligent memory summarization.
 	// If nil, the consolidator falls back to naive date-based grouping.
 	LLM llm.Chatter
+	// Embedder is an optional embedding provider for semantic similarity clustering.
+	// If set, the consolidator's MergeRelated will cluster memories by embedding
+	// similarity before falling back to LLM or date-based grouping.
+	Embedder EmbeddingProvider
 	// VectorStore is an optional vector store for semantic search.
 	// If nil, SearchSemantic and SearchHybrid will fall back to keyword search.
 	VectorStore VectorSearcher
@@ -122,6 +130,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 		sanitizer:      cfg.Sanitizer,
 		securityCfg:    cfg.SecurityConfig,
 		llm:            cfg.LLM,
+		embedder:       cfg.Embedder,
 		vectorStore:    cfg.VectorStore,
 	}
 }
@@ -213,10 +222,11 @@ func (m *Manager) Initialize(ctx context.Context) error {
 		consolidationBackend = NewSQLiteConsolidationBackend(m.episodic, m.task, m)
 	}
 	m.consolidator = NewConsolidator(ConsolidatorConfig{
-		Manager: m,
-		Backend: consolidationBackend,
-		Logger:  m.logger.With("subsystem", "consolidator"),
-		LLM:     m.llm,
+		Manager:  m,
+		Backend:  consolidationBackend,
+		Logger:   m.logger.With("subsystem", "consolidator"),
+		LLM:      m.llm,
+		Embedder: m.embedder,
 	})
 
 	// Initialize knowledge graph

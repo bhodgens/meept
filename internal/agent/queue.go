@@ -266,6 +266,13 @@ func (q *MessageQueue) FollowUp(ctx context.Context, content, source string) err
 		return ErrQueueFull
 	}
 
+	// Re-check closed flag under lock to avoid spawning a persistence
+	// goroutine that Close() will never observe (S1-13).
+	if q.closed.Load() {
+		q.mu.Unlock()
+		return ErrQueueClosed
+	}
+
 	msg := QueuedMessage{
 		ID:        uuid.NewString(),
 		Content:   content,
@@ -280,11 +287,15 @@ func (q *MessageQueue) FollowUp(ctx context.Context, content, source string) err
 
 	// Capture persister under lock, spawn goroutine after unlock.
 	persister := q.persister
+	// Increment wg inside the lock so that Close() cannot observe wg == 0
+	// between the unlock and the Add (S1-13).
+	if persister != nil {
+		q.wg.Add(1)
+	}
 
 	q.mu.Unlock()
 
 	if persister != nil {
-		q.wg.Add(1)
 		go func() {
 			defer q.wg.Done()
 			if err := persister.PersistSync(msg); err != nil {

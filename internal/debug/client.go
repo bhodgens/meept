@@ -179,7 +179,7 @@ func NewClient(cmd *exec.Cmd) (*Client, error) {
 		stdin:   stdin,
 		stdout:  bufio.NewReaderSize(stdout, 65536),
 		pending: make(map[int64]chan *DAPResponse),
-		events:  make(chan *DAPEvent, 64),
+		events:  make(chan *DAPEvent, 128),
 		done:    make(chan struct{}),
 		logger:  slog.Default().With("component", "dap-client"),
 	}
@@ -328,12 +328,13 @@ func (c *Client) handleEvent(evt *DAPEvent) {
 	select {
 	case c.events <- evt:
 	default:
-		// Drop oldest event if channel is full.
-		select {
-		case <-c.events:
-		default:
+		// Channel is full — log and drop the event rather than blocking
+		// the readLoop or evicting an earlier event via nested select
+		// (S6-9).
+		if c.logger != nil {
+			c.logger.Warn("DAP event dropped (channel full)",
+				"event", evt.Event)
 		}
-		c.events <- evt
 	}
 }
 

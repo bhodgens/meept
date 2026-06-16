@@ -3,6 +3,7 @@ package transport
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -100,7 +101,7 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 	t.stdoutFile = stdout
 	t.stdout = bufio.NewReader(stdout)
 	t.stderr = bufio.NewReader(stderr)
-	t.relayCh = make(chan stdoutLine, 1)
+	t.relayCh = make(chan stdoutLine, 32)
 	t.relayDone = make(chan struct{})
 	t.running.Store(true)
 
@@ -117,6 +118,14 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 
 // drainStderr reads stderr from the subprocess and discards it.
 // This prevents the subprocess from blocking on stderr writes.
+//
+// Precondition: this goroutine exits when the subprocess's stderr pipe
+// returns an error (typically EOF when the process terminates). Close()
+// ensures the subprocess is killed or waited on, which in turn closes
+// the stderr pipe and unblocks this goroutine. If Close() is never
+// called and the subprocess lives forever, this goroutine will also
+// live forever — but that would indicate a leaked transport, not a
+// drainStderr bug.
 func (t *StdioTransport) drainStderr() {
 	buf := make([]byte, 4096)
 	for t.running.Load() {
@@ -131,6 +140,33 @@ func (t *StdioTransport) drainStderr() {
 type stdoutLine struct {
 	data []byte
 	err  error
+}
+
+// rpcEnvelope is a minimal JSON-RPC message used to extract the id and
+// distinguish responses from notifications.
+type rpcEnvelope struct {
+	ID     json.RawMessage `json:"id,omitempty"`
+	Method string          `json:"method,omitempty"`
+}
+
+// extractRPCID parses the JSON-RPC id from a message. Returns nil for
+// notifications (which have no id field or have "method" but no "id").
+func extractRPCID(data []byte) json.RawMessage {
+	var env rpcEnvelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		return nil
+	}
+	return env.ID
+}
+
+// isNotification reports whether a JSON-RPC message is a notification
+// (has "method" but no "id").
+func isNotification(data []byte) bool {
+	var env rpcEnvelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		return false
+	}
+	return env.Method != "" && len(env.ID) == 0
 }
 
 // relayStdout reads lines from stdout in a single goroutine and sends them
@@ -166,6 +202,10 @@ func (t *StdioTransport) Send(ctx context.Context, message []byte) ([]byte, erro
 	t.reqMu.Lock()
 	defer t.reqMu.Unlock()
 
+	// Extract the request id so we can match the response and skip
+	// interleaved notifications or unrelated responses.
+	wantID := extractRPCID(message)
+
 	// Write message with newline
 	if _, err := t.stdin.Write(append(message, '\n')); err != nil {
 		return nil, fmt.Errorf("failed to write message: %w", err)
@@ -180,17 +220,37 @@ func (t *StdioTransport) Send(ctx context.Context, message []byte) ([]byte, erro
 	readCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	select {
-	case <-readCtx.Done():
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+	for {
+		select {
+		case <-readCtx.Done():
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, fmt.Errorf("request timed out after %v", timeout)
+		case line := <-t.relayCh:
+			if line.err != nil {
+				return nil, fmt.Errorf("failed to read response: %w", line.err)
+			}
+			// If we can't extract an id from the request (e.g., the message
+			// doesn't have one), return the first non-notification line.
+			if len(wantID) == 0 {
+				if isNotification(line.data) {
+					continue // skip notifications, wait for a response
+				}
+				return line.data, nil
+			}
+			// Skip notifications (no id field, has method).
+			if isNotification(line.data) {
+				continue
+			}
+			// Check if this response matches our request id.
+			respID := extractRPCID(line.data)
+			if len(respID) == 0 || string(respID) == string(wantID) {
+				return line.data, nil
+			}
+			// Different response id — could be from a concurrent request
+			// that timed out. Discard and keep waiting for ours.
 		}
-		return nil, fmt.Errorf("request timed out after %v", timeout)
-	case line := <-t.relayCh:
-		if line.err != nil {
-			return nil, fmt.Errorf("failed to read response: %w", line.err)
-		}
-		return line.data, nil
 	}
 }
 

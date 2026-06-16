@@ -131,7 +131,16 @@ func (e *ParakeetEngine) transcribe(filePath string) (string, error) {
 
 	slog.Debug("stt: running parakeet-transcribe", "args", args)
 
-	cmd := exec.Command(bin, args...)
+	// CommandContext for cancellability on shutdown (S6-4).
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			return cmd.Process.Kill()
+		}
+		return nil
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", fmt.Errorf("stt: parakeet: create stdout pipe: %w", err)

@@ -168,7 +168,14 @@ func isLoopbackBaseURL(baseURL string) bool {
 }
 
 func (c *httpClient) Connect() error {
-	resp, err := c.client.Get(c.baseURL + "/api/v1/health")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, c.baseURL+"/api/v1/health", http.NoBody)
+	if err != nil {
+		return fmt.Errorf("build health request: %w", err)
+	}
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("daemon not reachable: %w", err)
 	}
@@ -184,7 +191,13 @@ func (c *httpClient) Close() error { return nil }
 func (c *httpClient) IsConnected() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/health", http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/health", http.NoBody)
+	if err != nil {
+		return false
+	}
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return false
@@ -207,11 +220,16 @@ func (c *httpClient) callAPI(method string, params any) (json.RawMessage, error)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.client.Post(
-		c.baseURL+"/api/v1/bus/call",
-		"application/json",
-		bytes.NewReader(body),
-	)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+		c.baseURL+"/api/v1/bus/call", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -254,11 +272,16 @@ func (c *httpClient) Chat(message, conversationID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resp, err := c.client.Post(
-		c.baseURL+"/api/v1/chat",
-		"application/json",
-		bytes.NewReader(body),
-	)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+		c.baseURL+"/api/v1/chat", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return "", err
 	}

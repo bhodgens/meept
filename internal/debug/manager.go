@@ -44,6 +44,16 @@ type DebugSession struct {
 
 	// CurrentThreads caches the most recent thread list from the adapter.
 	CurrentThreadID int
+
+	// mu protects State, LastActivity, CurrentThreadID from concurrent
+	// access between drainEvents and readers (Manager.List/Active/Get
+	// callers). Use RLock when reading these fields.
+	mu sync.RWMutex
+
+	// drainDone is closed when drainEvents exits, allowing Terminate to
+	// wait for the goroutine to fully stop before marking the session
+	// terminated (S6-3).
+	drainDone chan struct{}
 }
 
 // Manager manages debug sessions.
@@ -107,6 +117,7 @@ func (m *Manager) Launch(ctx context.Context, adapterCfg *AdapterConfig, program
 		CreatedAt:    time.Now(),
 		LastActivity: time.Now(),
 		Program:      program,
+		drainDone:    make(chan struct{}),
 	}
 
 	// Register session.
@@ -146,8 +157,10 @@ func (m *Manager) Launch(ctx context.Context, adapterCfg *AdapterConfig, program
 		return nil, fmt.Errorf("failed to launch program: %w", err)
 	}
 
+	session.mu.Lock()
 	session.State = SessionConfigured
 	session.LastActivity = time.Now()
+	session.mu.Unlock()
 
 	m.logger.Info("debug session launched",
 		"id", id,
@@ -210,6 +223,7 @@ func (m *Manager) Attach(ctx context.Context, adapterCfg *AdapterConfig, pid int
 		CreatedAt:    time.Now(),
 		LastActivity: time.Now(),
 		Program:      programLabel,
+		drainDone:    make(chan struct{}),
 	}
 
 	// Register session.
@@ -247,8 +261,10 @@ func (m *Manager) Attach(ctx context.Context, adapterCfg *AdapterConfig, pid int
 		return nil, fmt.Errorf("failed to attach to process %d: %w", pid, err)
 	}
 
+	session.mu.Lock()
 	session.State = SessionConfigured
 	session.LastActivity = time.Now()
+	session.mu.Unlock()
 
 	m.logger.Info("debug session attached",
 		"id", id,
@@ -316,27 +332,43 @@ func (m *Manager) LoadCore(ctx context.Context, coreFile, program, adapterName s
 
 // drainEvents reads events from the client and updates session state.
 func (m *Manager) drainEvents(session *DebugSession) {
+	// Signal exit when the loop terminates so Terminate can synchronize.
+	defer func() {
+		if session.drainDone != nil {
+			close(session.drainDone)
+		}
+	}()
 	for evt := range session.Client.Events() {
+		session.mu.Lock()
 		session.LastActivity = time.Now()
 
 		switch evt.Event {
 		case "stopped":
 			session.State = SessionStopped
+			session.mu.Unlock()
 			var body StoppedEventBody
 			if err := parseJSON(evt.Body, &body); err == nil {
+				session.mu.Lock()
 				session.CurrentThreadID = body.ThreadID
+				session.mu.Unlock()
 			}
 		case "continued":
 			session.State = SessionRunning
+			session.mu.Unlock()
 		case "terminated":
 			session.State = SessionTerminated
+			session.mu.Unlock()
 		case "exited":
 			session.State = SessionTerminated
+			session.mu.Unlock()
 		case "output":
+			session.mu.Unlock()
 			var body OutputEventBody
 			if err := parseJSON(evt.Body, &body); err == nil {
 				_, _ = session.Output.Write([]byte(body.Output))
 			}
+		default:
+			session.mu.Unlock()
 		}
 
 		m.logger.Debug("DAP event",
@@ -399,7 +431,21 @@ func (m *Manager) Terminate(ctx context.Context, id string) error {
 	_ = session.Client.Disconnect(disconnectCtx)
 	_ = session.Client.Close()
 
+	// Wait for drainEvents to exit before marking state, to avoid a
+	// race where drainEvents overwrites State after Terminate sets it
+	// (S6-3). Use a timeout to avoid blocking forever if drainEvents
+	// is stuck.
+	if session.drainDone != nil {
+		select {
+		case <-session.drainDone:
+		case <-time.After(2 * time.Second):
+			m.logger.Warn("drainEvents did not exit within timeout", "session", id)
+		}
+	}
+
+	session.mu.Lock()
 	session.State = SessionTerminated
+	session.mu.Unlock()
 
 	m.logger.Info("debug session terminated", "id", id)
 	return nil

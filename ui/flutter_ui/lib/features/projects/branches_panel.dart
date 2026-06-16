@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
@@ -153,7 +155,14 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return KeyboardListener(
+      focusNode: FocusNode(),
+      onKeyEvent: (KeyEvent event) {
+        if (event.logicalKey == LogicalKeyboardKey.escape) {
+          _closePanel();
+        }
+      },
+      child: Container(
       color: CyberpunkColors.darkGray,
       child: Column(
         children: [

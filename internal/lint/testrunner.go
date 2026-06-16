@@ -88,8 +88,8 @@ func NewTestRunnerWithConfig(logger *slog.Logger, config *TestConfig) *TestRunne
 
 // RunTests executes tests for the given files or directory
 func (tr *TestRunner) RunTests(ctx context.Context, lang, dirPath string, testFiles []string) ([]TestResult, error) {
-	// Apply timeout if not set
-	if ctx.Err() == nil {
+	// Apply timeout if the caller hasn't already set a deadline.
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, tr.config.Timeout)
 		defer cancel()

@@ -3,12 +3,19 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 )
+
+// ErrTimeout is returned when a command exceeds its configured timeout.
+var ErrTimeout = errors.New("command timed out")
+
+// ErrCanceled is returned when a command is canceled via context cancellation.
+var ErrCanceled = errors.New("command canceled")
 
 // LocalBackend executes commands on the local system using exec.Command.
 type LocalBackend struct {
@@ -60,6 +67,12 @@ func (b *LocalBackend) Execute(ctx context.Context, cmd Command) (*CommandResult
 		// Don't return error for non-zero exit codes - caller handles them
 		err = nil
 	} else if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("%w: %s", ErrTimeout, cmd.Cmd)
+		}
+		if errors.Is(err, context.Canceled) {
+			return nil, fmt.Errorf("%w: %s", ErrCanceled, cmd.Cmd)
+		}
 		return nil, fmt.Errorf("failed to execute command: %w", err)
 	}
 

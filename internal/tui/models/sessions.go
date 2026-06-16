@@ -13,6 +13,11 @@ import (
 	"github.com/caimlas/meept/internal/tui/types"
 )
 
+// SessionSwitchToChatMsg signals a session switch that also switches view to chat.
+type SessionSwitchToChatMsg struct {
+	Session *types.Session
+}
+
 // SessionsModel is a full-screen model for browsing sessions with a detail pane.
 type SessionsModel struct {
 	rpc      SessionsRPCClient
@@ -221,8 +226,11 @@ func (m *SessionsModel) Update(msg tea.Msg) tea.Cmd {
 			if len(m.sessions) > 0 {
 				idx := m.table.Cursor()
 				if idx >= 0 && idx < len(m.sessions) {
-					m.selected = &m.sessions[idx]
-					m.showingDetail = true
+					sess := &m.sessions[idx]
+					// Return command that signals session switch with chat view
+					return func() tea.Msg {
+						return SessionSwitchToChatMsg{Session: sess}
+					}
 				}
 			}
 			return nil

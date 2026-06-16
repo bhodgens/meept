@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"log/slog"
 	"os"
 )
 
@@ -66,6 +67,7 @@ func ServerTLSConfig(cfg TLSConfig) (*tls.Config, error) {
 
 		switch cfg.VerifyMode {
 		case "none":
+			slog.Warn("mTLS disabled: verify_mode=none — client certs will not be verified")
 			tlsConfig.ClientAuth = tls.NoClientCert
 		case "optional":
 			tlsConfig.ClientAuth = tls.VerifyClientCertIfGiven

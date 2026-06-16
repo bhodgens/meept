@@ -36,7 +36,10 @@ type TeamStartRequest struct {
 }
 
 // TeamSessionState holds the runtime state of an active team session.
+// All fields must be accessed with mu held (read or write) when the state is
+// concurrently accessible (e.g. after it has been stored in to.teams).
 type TeamSessionState struct {
+	mu             sync.RWMutex                 `json:"-"`
 	SessionID      string                       `json:"session_id"`
 	TaskID         string                       `json:"task_id"`
 	LeadAgent      string                       `json:"lead_agent"`
@@ -160,10 +163,10 @@ func (to *TeamOrchestrator) ActiveTeamCount() int {
 
 func (to *TeamOrchestrator) runSubscription(ctx context.Context, sub *bus.Subscriber, handler func(context.Context, *models.BusMessage)) {
 	defer to.wg.Done()
+	defer to.bus.Unsubscribe(sub)
 	for {
 		select {
 		case <-ctx.Done():
-			to.bus.Unsubscribe(sub)
 			return
 		case msg, ok := <-sub.Channel:
 			if !ok {
@@ -254,21 +257,28 @@ func (to *TeamOrchestrator) handleTeamStart(ctx context.Context, msg *models.Bus
 			return
 		}
 
-		// Run the team session in a background goroutine
+		// Run the team session in a background goroutine.
+		// Detach from the orchestrator's cancel context so that Stop() on the
+		// orchestrator does not abort an in-flight team session (S1-7).
+		teamCtx := context.WithoutCancel(ctx)
 		to.wg.Add(1)
 		go func() {
 			defer to.wg.Done()
 			defer to.teams.Delete(req.SessionID)
 
-			result, err := to.collabEngine.RunSession(ctx, sess.ID)
+			result, err := to.collabEngine.RunSession(teamCtx, sess.ID)
 			if err != nil {
+				state.mu.Lock()
 				state.Phase = "failed"
+				state.mu.Unlock()
 				to.publishError(req.SessionID, fmt.Sprintf("team session failed: %v", err))
 				return
 			}
 
+			state.mu.Lock()
 			state.Phase = "completed"
 			state.FinalOutput = result.FinalOutput
+			state.mu.Unlock()
 
 			to.publishResult(state)
 		}()
@@ -282,7 +292,13 @@ func (to *TeamOrchestrator) handleTeamStart(ctx context.Context, msg *models.Bus
 
 // publishResult publishes the final team result.
 func (to *TeamOrchestrator) publishResult(state *TeamSessionState) {
+	state.mu.RLock()
 	payload, err := json.Marshal(state)
+	phase := state.Phase
+	leadAgent := state.LeadAgent
+	rosterLen := len(state.Roster)
+	sessionID := state.SessionID
+	state.mu.RUnlock()
 	if err != nil {
 		to.logger.Error("Failed to marshal team result", "error", err)
 		return
@@ -298,10 +314,10 @@ func (to *TeamOrchestrator) publishResult(state *TeamSessionState) {
 	}
 	delivered := to.bus.Publish(TopicTeamResult, msg)
 	to.logger.Info("Published team result",
-		"session_id", state.SessionID,
-		"phase",      state.Phase,
-		"lead",       state.LeadAgent,
-		"members",    len(state.Roster),
+		"session_id", sessionID,
+		"phase",      phase,
+		"lead",       leadAgent,
+		"members",    rosterLen,
 		"delivered",  delivered,
 	)
 }
@@ -317,6 +333,7 @@ func (to *TeamOrchestrator) AssignSubtask(ctx context.Context, sessionID string,
 	state := val.(*TeamSessionState)
 
 	// Verify agent is on the roster
+	state.mu.RLock()
 	found := false
 	for _, m := range state.Roster {
 		if m == assignment.AgentID {
@@ -324,15 +341,19 @@ func (to *TeamOrchestrator) AssignSubtask(ctx context.Context, sessionID string,
 			break
 		}
 	}
-	if !found && assignment.AgentID != state.LeadAgent {
+	leadAgent := state.LeadAgent
+	state.mu.RUnlock()
+	if !found && assignment.AgentID != leadAgent {
 		return fmt.Errorf("agent %q is not a member of team %q", assignment.AgentID, sessionID)
 	}
 
 	// Update member result with the assigned subtask
+	state.mu.Lock()
 	if mr, exists := state.MemberResults[assignment.AgentID]; exists {
 		mr.Subtask = assignment.Subtask
 		mr.Status = MemberPending
 	}
+	state.mu.Unlock()
 
 	// Publish assignment to per-session message topic
 	topic := TeamMessageTopic(sessionID)
@@ -365,7 +386,13 @@ func (to *TeamOrchestrator) Status(ctx context.Context, sessionID string) (*Team
 	if !ok {
 		return nil, fmt.Errorf("team %q not found", sessionID)
 	}
-	return val.(*TeamSessionState), nil
+	// Caller receives a pointer to the live state. Document that callers
+	// should not mutate it without the struct's mutex. Acquire the read lock
+	// briefly to ensure we don't hand back a state in the middle of a write.
+	state := val.(*TeamSessionState)
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	return state, nil
 }
 
 // BroadcastMessage sends a message to team members via the per-session
@@ -379,6 +406,7 @@ func (to *TeamOrchestrator) BroadcastMessage(ctx context.Context, sessionID stri
 
 	// Validate target agent if specified
 	if tm.TargetAgent != "" {
+		state.mu.RLock()
 		found := false
 		for _, m := range state.Roster {
 			if m == tm.TargetAgent {
@@ -386,7 +414,9 @@ func (to *TeamOrchestrator) BroadcastMessage(ctx context.Context, sessionID stri
 				break
 			}
 		}
-		if !found && tm.TargetAgent != state.LeadAgent {
+		leadAgent := state.LeadAgent
+		state.mu.RUnlock()
+		if !found && tm.TargetAgent != leadAgent {
 			return fmt.Errorf("agent %q is not a member of team %q", tm.TargetAgent, sessionID)
 		}
 	}
@@ -428,6 +458,7 @@ func (to *TeamOrchestrator) ReceiveResult(ctx context.Context, sessionID string,
 	state := val.(*TeamSessionState)
 
 	// Verify agent is on the roster
+	state.mu.RLock()
 	found := false
 	for _, m := range state.Roster {
 		if m == result.AgentID {
@@ -435,7 +466,9 @@ func (to *TeamOrchestrator) ReceiveResult(ctx context.Context, sessionID string,
 			break
 		}
 	}
-	if !found && result.AgentID != state.LeadAgent {
+	leadAgent := state.LeadAgent
+	state.mu.RUnlock()
+	if !found && result.AgentID != leadAgent {
 		return fmt.Errorf("agent %q is not a member of team %q", result.AgentID, sessionID)
 	}
 
@@ -447,6 +480,7 @@ func (to *TeamOrchestrator) ReceiveResult(ctx context.Context, sessionID string,
 		status = MemberRunning
 	}
 
+	state.mu.Lock()
 	if mr, exists := state.MemberResults[result.AgentID]; exists {
 		mr.Output = result.Output
 		mr.Status = status
@@ -457,6 +491,7 @@ func (to *TeamOrchestrator) ReceiveResult(ctx context.Context, sessionID string,
 			Status:  status,
 		}
 	}
+	state.mu.Unlock()
 
 	// Publish partial result to per-session result topic
 	topic := TeamResultTopic(sessionID)

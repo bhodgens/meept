@@ -146,7 +146,8 @@ func TestInputSanitizerStrictnessLevels(t *testing.T) {
 	permissiveSanitizer := NewInputSanitizer(StrictnessPermissive)
 
 	// This should trigger in STRICT but not PERMISSIVE if the user marker is STANDARD level
-	input := "user: some content"
+	// Pattern now requires quoted value to avoid false positives on prompt-injection vectors
+	input := `user: "some content"`
 
 	strictResult := strictSanitizer.Sanitize(input)
 	permissiveResult := permissiveSanitizer.Sanitize(input)

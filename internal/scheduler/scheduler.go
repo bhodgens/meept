@@ -138,8 +138,11 @@ func (s *Scheduler) Start(ctx context.Context) error {
 
 	s.logger.Info("scheduler: starting", "timezone", s.location.String())
 
-	// Create shutdown-aware context for RunNow jobs
-	s.runNowCtx, s.runNowCancel = context.WithCancel(context.Background())
+	// Create shutdown-aware context for RunNow jobs. Derive from the
+	// caller-provided ctx so that RunNow jobs are cancelled when the
+	// parent context (e.g. daemon shutdown) is cancelled, rather than
+	// running detached (S6-17).
+	s.runNowCtx, s.runNowCancel = context.WithCancel(ctx)
 
 	// Load persisted jobs
 	if err := s.loadPersistedJobs(); err != nil {

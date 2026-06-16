@@ -238,7 +238,12 @@ func (t *SessionTracker) PersistIdleSessions(ctx context.Context) error {
 			continue
 		}
 		t.mu.Lock()
-		state.Persisted = true
+		// Re-verify the session still exists: another goroutine may have
+		// deleted it via cleanupExpired() between the snapshot above and
+		// the lock acquisition (S1-4 TOCTOU).
+		if cur, ok := t.sessions[state.SessionID]; ok {
+			cur.Persisted = true
+		}
 		t.mu.Unlock()
 	}
 

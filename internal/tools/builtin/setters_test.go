@@ -3,6 +3,9 @@ package builtin
 import (
 	"context"
 	"testing"
+
+	"github.com/caimlas/meept/internal/runtime"
+	intsecurity "github.com/caimlas/meept/internal/security"
 )
 
 // TestAllSetters_NilSafe verifies that all Set* methods on tool structs
@@ -33,6 +36,19 @@ func TestAllSetters_NilSafe(t *testing.T) {
 		{"FileEditTool.SetLSPNotifier", func() { (&FileEditTool{}).SetLSPNotifier(nil) }},
 		{"ResolveTool.SetFenceChecker", func() { (&ResolveTool{}).SetFenceChecker(nil) }},
 		{"AskTool.SetResponseFunc", func() { (&AskTool{}).SetResponseFunc(nil) }},
+		// Additional setters that must be nil-safe (S4-3 coverage gap)
+		{"GitCommitTool.SetFenceChecker", func() { (&GitCommitTool{}).SetFenceChecker(nil) }},
+		{"GitOverviewTool.SetFenceChecker", func() { (&GitOverviewTool{}).SetFenceChecker(nil) }},
+		{"GitSplitTool.SetFenceChecker", func() { (&GitSplitTool{}).SetFenceChecker(nil) }},
+		{"ReadFileTool.SetSecurityOrchestrator", func() { (&ReadFileTool{}).SetSecurityOrchestrator(nil) }},
+		{"WriteFileTool.SetLSPNotifier", func() { (&WriteFileTool{}).SetLSPNotifier(nil) }},
+		{"WriteFileTool.SetSecurityOrchestrator", func() { (&WriteFileTool{}).SetSecurityOrchestrator(nil) }},
+		{"DeleteFileTool.SetSecurityOrchestrator", func() { (&DeleteFileTool{}).SetSecurityOrchestrator(nil) }},
+		{"ListDirectoryTool.SetSecurityOrchestrator", func() { (&ListDirectoryTool{}).SetSecurityOrchestrator(nil) }},
+		{"ShellExecuteTool.SetRuntimeManager", func() { (&ShellExecuteTool{}).SetRuntimeManager((*runtime.ContainerManager)(nil)) }},
+		{"FileEditTool.SetBlockResolver", func() { (&FileEditTool{}).SetBlockResolver(nil) }},
+		{"FileEditTool.SetPendingChangesRegistry", func() { (&FileEditTool{}).SetPendingChangesRegistry((*PendingChangesRegistry)(nil)) }},
+		{"FileEditTool.SetSecurityOrchestrator", func() { (&FileEditTool{}).SetSecurityOrchestrator((*intsecurity.Orchestrator)(nil)) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -252,7 +251,7 @@ func (svc *TerminalService) updateSession(workDir string) {
 	now := time.Now()
 	if session == nil {
 		session = &TerminalSession{
-			ID:           fmt.Sprintf("session-%s", absPath),
+			ID:           id.Generate("session-"),
 			WorkingDir:   absPath,
 			CreatedAt:    now,
 			LastUsed:     now,

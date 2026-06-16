@@ -500,7 +500,8 @@ func (s *SessionPickerModal) View(screenW, screenH int) string {
 
 // SessionSwitchMsg indicates a session switch request.
 type SessionSwitchMsg struct {
-	Session *types.Session
+	Session     *types.Session
+	SwitchToChat bool // If true, switch to ViewChat after session change
 }
 
 // SessionCreateMsg indicates a new session creation request.
@@ -901,7 +902,7 @@ func (m *ConfirmModal) View(screenW, screenH int) string {
 	// Footer hint
 	b.WriteString("\n")
 	hintStyle := m.styles.Muted.Align(lipgloss.Center).Width(m.width - 4)
-	b.WriteString(hintStyle.Render("←/→ to select · enter to confirm · esc to cancel"))
+	b.WriteString(hintStyle.Render("←/→ to select · enter to activate · esc to cancel"))
 
 	content := boxStyle.Render(b.String())
 	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center, content)

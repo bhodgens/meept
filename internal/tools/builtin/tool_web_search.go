@@ -71,6 +71,11 @@ func NewWebSearchTool(timeout time.Duration) *WebSearchTool {
 				if len(via) >= 5 {
 					return fmt.Errorf("too many redirects")
 				}
+				// SSRF guard on redirect targets to prevent redirects to
+				// private/loopback/link-local addresses.
+				if err := checkURL(req.URL.String()); err != nil {
+					return fmt.Errorf("redirect blocked: %w", err)
+				}
 				return nil
 			},
 		},

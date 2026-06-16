@@ -72,6 +72,9 @@ func (s *TokenStore) Save(provider string, token *TokenResult) error {
 	}
 
 	path := s.tokenPath(provider)
+	if path == "" {
+		return fmt.Errorf("invalid provider name: %s", provider)
+	}
 	// Write to a temp file then rename for atomicity.
 	tmpPath := path + ".tmp"
 	if err := os.WriteFile(tmpPath, encrypted, 0600); err != nil {
@@ -89,6 +92,9 @@ func (s *TokenStore) Save(provider string, token *TokenResult) error {
 // Load reads and decrypts the stored token for the given provider.
 func (s *TokenStore) Load(provider string) (*TokenResult, error) {
 	path := s.tokenPath(provider)
+	if path == "" {
+		return nil, fmt.Errorf("invalid provider name: %s", provider)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -113,6 +119,9 @@ func (s *TokenStore) Load(provider string) (*TokenResult, error) {
 // Delete removes the stored token for the given provider.
 func (s *TokenStore) Delete(provider string) error {
 	path := s.tokenPath(provider)
+	if path == "" {
+		return fmt.Errorf("invalid provider name: %s", provider)
+	}
 	err := os.Remove(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -155,6 +164,9 @@ func (s *TokenStore) List() ([]StoredTokenInfo, error) {
 // reading the file modification time, then decrypting enough to get expiry.
 func (s *TokenStore) stat(provider string) (StoredTokenInfo, error) {
 	path := s.tokenPath(provider)
+	if path == "" {
+		return StoredTokenInfo{}, fmt.Errorf("invalid provider name: %s", provider)
+	}
 
 	fileInfo, err := os.Stat(path)
 	if err != nil {
@@ -226,8 +238,14 @@ func (s *TokenStore) ResolveToken(ctx context.Context, provider string) (string,
 }
 
 // tokenPath returns the file path for a provider's token.
+// Returns "" if the provider resolves to an unsafe path (e.g., directory
+// traversal via "../"). Callers must check for the empty string.
 func (s *TokenStore) tokenPath(provider string) string {
-	return filepath.Join(s.dir, provider+".json")
+	safe := filepath.Base(provider)
+	if safe == "." || safe == string(filepath.Separator) {
+		return ""
+	}
+	return filepath.Join(s.dir, safe+".json")
 }
 
 // Dir returns the store directory path.

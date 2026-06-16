@@ -137,6 +137,13 @@ func (s *CollaborationSession) TurnCount() int {
 	return len(s.TurnLog)
 }
 
+// GetState returns the current session state (thread-safe).
+func (s *CollaborationSession) GetState() SessionState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.State
+}
+
 // MarkActive transitions to active state.
 func (s *CollaborationSession) MarkActive() {
 	s.mu.Lock()

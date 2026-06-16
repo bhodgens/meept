@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/services"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -103,7 +104,7 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Subscribe to tool progress and agent events
-	subID := fmt.Sprintf("sse-chat-%d", time.Now().UnixNano())
+	subID := id.Generate("sse-chat-")
 	sub, unsub := s.services.Bus.Subscribe(subID, "tool.execution.progress")
 	if sub == nil {
 		_ = sse.SendError("bus subscription failed")

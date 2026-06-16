@@ -25,6 +25,12 @@ type GitSync struct {
 	stopCh   chan struct{}
 	doneCh   chan struct{}
 
+	// runCtx is stored from Start so that git/hasStagedChanges/cloneRepo
+	// can pass a cancellable context to exec.CommandContext, enabling
+	// shutdown-time process termination (S6-8). Guarded by mu.
+	runCtx    context.Context
+	runCancel context.CancelFunc
+
 	// Git repository path (local clone of the membership registry)
 	gitRepoPath string
 }
@@ -49,6 +55,10 @@ func (g *GitSync) Start(ctx context.Context) error {
 		return fmt.Errorf("git sync already running")
 	}
 	g.running = true
+	// Store a derived context so git/hasStagedChanges/cloneRepo can be
+	// cancelled on parent cancellation (S6-8). We derive rather than
+	// storing ctx directly to avoid lifetime issues.
+	g.runCtx, g.runCancel = context.WithCancel(ctx)
 	g.mu.Unlock()
 
 	g.logger.Info("git_sync: starting", "repo", g.gitRepoPath)
@@ -72,6 +82,10 @@ func (g *GitSync) Stop() error {
 		return nil
 	}
 	g.running = false
+	// Cancel any in-flight git subprocesses (S6-8).
+	if g.runCancel != nil {
+		g.runCancel()
+	}
 	g.mu.Unlock()
 
 	close(g.stopCh)
@@ -277,7 +291,9 @@ func (g *GitSync) pullRemote() error {
 // aborting the rebase and re-trying with merge instead.
 func (g *GitSync) handleRebaseConflict() error {
 	// Abort current rebase
-	g.git("rebase", "--abort")
+	if abortErr := g.git("rebase", "--abort"); abortErr != nil {
+		g.logger.Debug("git_sync: rebase --abort returned error", "error", abortErr)
+	}
 	g.logger.Debug("git_sync: aborted rebase due to conflict")
 
 	// Fetch latest
@@ -288,7 +304,9 @@ func (g *GitSync) handleRebaseConflict() error {
 	// Try merge instead
 	if err := g.git("merge", "origin/main"); err != nil {
 		// Merge also conflicts -- abort and accept worst case
-		g.git("merge", "--abort")
+		if abortErr := g.git("merge", "--abort"); abortErr != nil {
+			g.logger.Debug("git_sync: merge --abort returned error", "error", abortErr)
+		}
 		g.logger.Warn("git_sync: merge also conflicted, keeping local state")
 		return fmt.Errorf("handleRebaseConflict: merge conflicted, keeping local state")
 	}
@@ -397,9 +415,20 @@ func (g *GitSync) initGit() error {
 	return nil
 }
 
+// gitCtx returns the run context stored from Start, or
+// context.Background() if Start hasn't been called yet (S6-8).
+func (g *GitSync) gitCtx() context.Context {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.runCtx != nil {
+		return g.runCtx
+	}
+	return context.Background()
+}
+
 // hasStagedChanges checks if there are staged (or uncommitted) changes.
 func (g *GitSync) hasStagedChanges() (bool, error) {
-	cmd := exec.Command("git", "status", "--porcelain")
+	cmd := exec.CommandContext(g.gitCtx(), "git", "status", "--porcelain")
 	cmd.Dir = g.gitRepoPath
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 
@@ -412,7 +441,7 @@ func (g *GitSync) hasStagedChanges() (bool, error) {
 
 // git runs a git command in the repository directory.
 func (g *GitSync) git(args ...string) error {
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(g.gitCtx(), "git", args...)
 	cmd.Dir = g.gitRepoPath
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 
@@ -443,7 +472,7 @@ func (g *GitSync) cloneRepo(remoteURL string) error {
 		}
 	}
 
-	cmd := exec.Command("git", "clone", remoteURL, g.gitRepoPath)
+	cmd := exec.CommandContext(g.gitCtx(), "git", "clone", remoteURL, g.gitRepoPath)
 	cmd.Dir = parentDir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 

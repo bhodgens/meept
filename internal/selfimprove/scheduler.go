@@ -13,9 +13,10 @@ type Scheduler struct {
 	interval   time.Duration
 	logger     *slog.Logger
 
-	mu      sync.Mutex
-	stopCh  chan struct{}
-	running bool
+	mu       sync.Mutex
+	stopCh   chan struct{}
+	stopOnce sync.Once
+	running  bool
 }
 
 // NewScheduler creates a new periodic analysis scheduler.
@@ -50,6 +51,9 @@ func (s *Scheduler) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			s.mu.Lock()
+			s.running = false
+			s.mu.Unlock()
 			s.logger.Info("self-improve scheduler stopped (context)")
 			return
 		case <-s.stopCh:
@@ -72,10 +76,11 @@ func (s *Scheduler) Start(ctx context.Context) {
 // Stop signals the scheduler to stop. It is safe to call multiple times.
 func (s *Scheduler) Stop() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if !s.running {
+		s.mu.Unlock()
 		return
 	}
-	close(s.stopCh)
 	s.running = false
+	s.mu.Unlock()
+	s.stopOnce.Do(func() { close(s.stopCh) })
 }

@@ -159,17 +159,17 @@ func (c *TokenCacheCoordinator) Get(ctx context.Context, key CacheKey) (*CacheEn
 		return nil, false
 	}
 
-	// L1 fast path under RLock.
-	c.mu.RLock()
+	// S3-1 FIX: Use write lock for L1 check because the hit path mutates stats.
+	c.mu.Lock()
 	if entry, found := c.l1Cache.Get(key); found {
 		c.stats.Hits++
 		c.stats.L1Hits++
-		c.mu.RUnlock()
+		c.mu.Unlock()
 		c.recordMetric("cache.hit", 1, key)
 		return entry, true
 	}
 	l2 := c.l2Cache
-	c.mu.RUnlock()
+	c.mu.Unlock()
 
 	// L2 lookup outside the lock (may hit SQLite I/O).
 	if l2 != nil {
@@ -343,15 +343,19 @@ type InspectResult struct {
 // Inspect searches both L1 and L2 caches for entries matching the given prompt hash.
 // It returns all matching entries across models and file hash combinations.
 func (c *TokenCacheCoordinator) Inspect(promptHash string) []InspectResult {
+	// S3-6 FIX: snapshot the cache handles under RLock, then release the lock
+	// before performing any SQLite I/O so concurrent writers aren't blocked.
 	c.mu.RLock()
-	defer c.mu.RUnlock()
+	l1 := c.l1Cache
+	l2 := c.l2Cache
+	c.mu.RUnlock()
 
 	var results []InspectResult
 	seen := make(map[string]bool) // modelID+fileHashKey -> already added
 
 	// Search L2 first (authoritative, has all entries)
-	if c.l2Cache != nil {
-		for _, entry := range c.l2Cache.Inspect(promptHash) {
+	if l2 != nil {
+		for _, entry := range l2.Inspect(promptHash) {
 			key := entry.ModelID + ":" + fileHashKey(entry.FileHashes)
 			if !seen[key] {
 				seen[key] = true
@@ -370,7 +374,7 @@ func (c *TokenCacheCoordinator) Inspect(promptHash string) []InspectResult {
 	}
 
 	// Search L1 for entries not already found in L2
-	for _, entry := range c.l1Cache.Inspect(promptHash) {
+	for _, entry := range l1.Inspect(promptHash) {
 		key := entry.ModelID + ":" + fileHashKey(entry.FileHashes)
 		if !seen[key] {
 			seen[key] = true

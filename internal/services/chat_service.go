@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
@@ -125,11 +126,13 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 	sub := s.bus.Subscribe(msgID, replyTopic)
 	defer s.bus.Unsubscribe(sub)
 
-	// Watch for responses (context-aware)
-	done := make(chan struct{})
-	defer close(done)
+	// Watch for responses (context-aware, with deterministic cleanup)
+	watcherCtx, cancelWatcher := context.WithCancel(ctx)
+	var watcherWG sync.WaitGroup
+	watcherWG.Add(1)
 
 	go func() {
+		defer watcherWG.Done()
 		for {
 			select {
 			case resp, ok := <-sub.Channel:
@@ -143,12 +146,16 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 					}
 					return
 				}
-			case <-ctx.Done():
-				return
-			case <-done:
+			case <-watcherCtx.Done():
 				return
 			}
 		}
+	}()
+
+	// Ensure the watcher goroutine exits before we return.
+	defer func() {
+		cancelWatcher()
+		watcherWG.Wait()
 	}()
 
 	// Publish request

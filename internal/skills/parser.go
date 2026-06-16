@@ -3,6 +3,7 @@ package skills
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -234,7 +235,17 @@ func splitFrontmatter(text string) (frontmatter, body string, err error) {
 	// Find the closing --- (can be at start of a line or immediately after opening)
 	// Check for --- at start of remaining content (empty frontmatter case)
 	if strings.HasPrefix(rest, "---") {
-		// Empty frontmatter
+		// Empty frontmatter — the skill has delimiters but no metadata.
+		bodyContent := strings.TrimSpace(rest[3:])
+		if bodyContent != "" {
+			preview := bodyContent
+			if len(preview) > 80 {
+				preview = preview[:80]
+			}
+			slog.Warn("skill has empty YAML frontmatter (--- ---) but non-empty body; no metadata parsed",
+				"body_preview", preview,
+			)
+		}
 		afterClose := rest[3:]
 		_, after, ok := strings.Cut(afterClose, "\n")
 		if ok {

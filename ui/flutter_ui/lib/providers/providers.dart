@@ -90,9 +90,6 @@ final isConnectingProvider = StateProvider<bool>((ref) => false);
 // Active tool panel route
 final activeToolProvider = StateProvider<String>((ref) => '');
 
-// Drawer overlay visibility
-final drawerOpenProvider = StateProvider<bool>((ref) => false);
-
 // Keyboard shortcut help dialog visibility
 final shortcutHelpProvider = StateProvider<bool>((ref) => false);
 
@@ -145,13 +142,14 @@ class ConnectionMonitor {
     });
 
     // Poll WebSocket's isConnecting flag to show "connecting..." state
-    // This fires while the WebSocket is attempting to connect/reconnect
-    _connectingTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
-      if (_websocket.isConnecting) {
-        _container.read(isConnectingProvider.notifier).state = true;
-      } else if (_websocket.isConnected) {
-        // Clear connecting state only when actually connected
-        _container.read(isConnectingProvider.notifier).state = false;
+    // This fires while the WebSocket is attempting to connect/reconnect.
+    // Only writes to the provider when the value changes to avoid
+    // excessive provider notifications.
+    _connectingTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      final newValue = _websocket.isConnecting;
+      final currentValue = _container.read(isConnectingProvider.notifier).state;
+      if (newValue != currentValue) {
+        _container.read(isConnectingProvider.notifier).state = newValue;
       }
     });
   }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -200,9 +201,10 @@ func parseGoroutineStatus(userState string) GoroutineStatus {
 
 // IsGoBinary checks whether the file at the given path is a compiled Go binary.
 // It inspects the binary for Go-specific markers without executing it.
+// To avoid reading very large files entirely into memory, only the first ~8MB
+// and last ~1MB are scanned (Go buildinfo is typically at the end of the binary).
 func IsGoBinary(path string) (bool, error) {
-	// Read the first few KB of the binary and look for Go-specific strings.
-	data, err := os.ReadFile(path)
+	data, err := readBoundedBinary(path)
 	if err != nil {
 		return false, err
 	}
@@ -226,6 +228,61 @@ func IsGoBinary(path string) (bool, error) {
 
 	// If we find at least 2 markers, consider it a Go binary.
 	return found >= 2, nil
+}
+
+// readBoundedBinary reads at most the first ~8MB and last ~1MB of a file to
+// avoid loading very large binaries entirely into memory. The Go buildinfo
+// section is at the end of the binary, and runtime symbols are near the start.
+// Total work is capped at ~10MB.
+func readBoundedBinary(path string) ([]byte, error) {
+	const (
+		headSize   = 8 * 1024 * 1024 // 8MB from the start
+		tailSize   = 1 * 1024 * 1024 // 1MB from the end
+		maxBufSize = headSize + tailSize
+	)
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+
+	fileSize := info.Size()
+	if fileSize <= int64(headSize+tailSize) {
+		// File is small enough to read entirely.
+		return os.ReadFile(path)
+	}
+
+	f, err := os.Open(path) //nolint:gosec
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	buf := make([]byte, 0, maxBufSize)
+
+	// Read head.
+	head := make([]byte, headSize)
+	n, err := io.ReadFull(f, head)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return nil, err
+	}
+	buf = append(buf, head[:n]...)
+
+	// Seek to tail.
+	tailStart := fileSize - int64(tailSize)
+	if _, err := f.Seek(tailStart, io.SeekStart); err != nil {
+		return nil, err
+	}
+
+	// Read tail.
+	tail := make([]byte, tailSize)
+	n, err = io.ReadFull(f, tail)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return nil, err
+	}
+	buf = append(buf, tail[:n]...)
+
+	return buf, nil
 }
 
 // findStringInBinary searches for a string in binary data.

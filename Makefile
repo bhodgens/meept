@@ -348,6 +348,11 @@ vet:
 	@echo "Running go vet..."
 	go vet ./...
 
+.PHONY: mutexio
+mutexio:
+	@echo "Running mutexio analyzer..."
+	@go run ./tools/analyzers/mutexio/ ./...
+
 mod-tidy:
 	@echo "Tidying Go modules..."
 	go mod tidy

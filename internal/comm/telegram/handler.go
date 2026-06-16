@@ -111,10 +111,13 @@ func (h *AgentHandler) getOrCreateSession(chatID int64) string {
 		"conversation_id", sess.ConversationID,
 	)
 
-	// Persist the mapping (we hold the write lock, so use saveSessionsLocked)
-	if saveErr := h.saveSessionsLocked(); saveErr != nil {
-		h.logger.Warn("failed to persist telegram sessions", "error", saveErr)
-	}
+	// Snapshot sessions under the lock, then persist without holding it.
+	snap := h.snapshotSessions()
+	go func() {
+		if saveErr := h.persistSessions(snap); saveErr != nil {
+			h.logger.Warn("failed to persist telegram sessions", "error", saveErr)
+		}
+	}()
 
 	return sess.ConversationID
 }
@@ -183,10 +186,20 @@ func (h *AgentHandler) saveSessions() error {
 	return nil
 }
 
-// saveSessionsLocked persists sessions to disk. The caller must hold h.mu
-// (either read or write) -- this method snapshots the map without acquiring
-// the lock itself.
-func (h *AgentHandler) saveSessionsLocked() error {
+// snapshotSessions returns a shallow copy of the sessions map. The caller
+// must hold h.mu (read or write) before calling this method.
+func (h *AgentHandler) snapshotSessions() map[int64]string {
+	snap := make(map[int64]string, len(h.sessions))
+	for k, v := range h.sessions {
+		snap[k] = v
+	}
+	return snap
+}
+
+// persistSessions writes the session map snapshot to disk. This method does
+// NOT acquire h.mu and must be called without holding the lock to avoid
+// holding it across file I/O.
+func (h *AgentHandler) persistSessions(sessions map[int64]string) error {
 	if h.sessionsDir == "" {
 		return nil
 	}
@@ -196,7 +209,7 @@ func (h *AgentHandler) saveSessionsLocked() error {
 		return fmt.Errorf("create sessions dir: %w", err)
 	}
 
-	data, err := json.MarshalIndent(h.sessions, "", "  ")
+	data, err := json.MarshalIndent(sessions, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal sessions: %w", err)
 	}

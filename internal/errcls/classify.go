@@ -77,7 +77,7 @@ func IsRetryable(err error) bool {
 		return true
 	}
 	var netErr net.Error
-	if errors.As(err, &netErr) && (netErr.Temporary() || netErr.Timeout()) {
+	if errors.As(err, &netErr) && netErr.Timeout() {
 		return true
 	}
 	if isConnError(err) {

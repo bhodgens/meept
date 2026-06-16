@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
@@ -99,9 +101,20 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
     }
   }
 
+  void _closePanel() {
+    context.go('/');
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return KeyboardListener(
+      focusNode: FocusNode(),
+      onKeyEvent: (KeyEvent event) {
+        if (event.logicalKey == LogicalKeyboardKey.escape) {
+          _closePanel();
+        }
+      },
+      child: Container(
       color: CyberpunkColors.darkGray,
       child: Column(
         children: [
@@ -120,6 +133,15 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
               children: [
                 Row(
                   children: [
+                    GestureDetector(
+                      onTap: _closePanel,
+                      child: const Icon(
+                        Icons.arrow_back,
+                        color: CyberpunkColors.orangePrimary,
+                        size: 18,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     const Icon(
                       Icons.search,
                       color: CyberpunkColors.orangeBright,
@@ -131,6 +153,14 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
                       style: CyberpunkTypography.headlineSmall.copyWith(
                         color: CyberpunkColors.orangePrimary,
                       ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: _closePanel,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      tooltip: 'close',
                     ),
                   ],
                 ),
@@ -242,6 +272,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
           ),
         ],
       ),
+    ),
     );
   }
 

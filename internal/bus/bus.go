@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -42,7 +43,7 @@ type MessageBus struct {
 	bufferSize  int
 	closed      bool
 	logger      *slog.Logger
-	messagesSent int64
+	messagesSent atomic.Int64
 }
 
 // Config holds MessageBus configuration.
@@ -84,7 +85,7 @@ func (b *MessageBus) Publish(topic string, msg *models.BusMessage) int {
 
 	msg.Topic = topic
 	delivered := 0
-	b.messagesSent++
+	b.messagesSent.Add(1)
 
 	// Direct topic subscribers
 	for _, sub := range b.subscribers[topic] {
@@ -205,7 +206,7 @@ func (b *MessageBus) Stats() map[string]int {
 		}
 	}
 	stats["_total"] = total
-	stats["_messages_sent"] = int(b.messagesSent)
+	stats["_messages_sent"] = int(b.messagesSent.Load())
 	stats["_queued"] = queued
 	return stats
 }

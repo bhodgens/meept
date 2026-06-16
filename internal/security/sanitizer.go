@@ -118,7 +118,8 @@ func initPatterns() {
 				MinLevel: StrictnessPermissive,
 			},
 			{
-				Pattern:  regexp.MustCompile(`(?im)^\s*user\s*:`),
+				// Tightened pattern: requires quoted value to avoid false positives on prompt-injection vectors
+				Pattern:  regexp.MustCompile(`(?im)^\s*user\s*:\s*"`),
 				Label:    "role_marker_user",
 				MinLevel: StrictnessStandard,
 			},

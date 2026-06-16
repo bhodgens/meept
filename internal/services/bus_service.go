@@ -96,7 +96,7 @@ func (s *BusService) Stats(ctx context.Context) (*BusStatsResponse, error) {
 // Returns nil if the bus is not available.
 func (s *BusService) Subscribe(id, topic string) (sub *bus.Subscriber, cleanup func()) {
 	if s.bus == nil {
-		return nil, nil
+		return nil, func() {}
 	}
 	sub = s.bus.Subscribe(id, topic)
 	cleanup = func() {

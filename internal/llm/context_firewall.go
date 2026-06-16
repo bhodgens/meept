@@ -685,6 +685,11 @@ func (f *ContextFirewall) dropOldContext(messages []ChatMessage) []ChatMessage {
 							break
 						}
 					}
+					// S3-7 FIX: exit outer loop once the parent has been
+					// marked, mirroring keepTail in context_compressor.go.
+					if keepSet[j] {
+						break
+					}
 				}
 			}
 		}

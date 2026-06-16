@@ -33,6 +33,7 @@ import (
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/services"
 	"github.com/caimlas/meept/pkg/constants"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 
 	"golang.org/x/net/websocket"
@@ -2215,7 +2216,7 @@ func (s *Server) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
 		defer close(session.eventChan)
 		for msg := range sub.Channel {
 			event := &SSEEvent{
-				ID:   fmt.Sprintf("%d", time.Now().UnixNano()),
+				ID:   id.Generate("mcp-sse-"),
 				Type: msg.Topic,
 				Data: msg.Payload,
 			}

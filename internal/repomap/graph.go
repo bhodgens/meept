@@ -130,11 +130,13 @@ type weightedLine struct {
 
 // newWeightedLine creates a new weighted line with a unique ID.
 func newWeightedLine(from, to graph.Node, weight float64) *weightedLine {
+	// Pack two int64 node IDs into a single unique ID using integer arithmetic.
+	// This requires node IDs to stay well below 1e9 (1,000,000,000) to avoid overflow.
 	return &weightedLine{
 		from:   from,
 		to:     to,
 		weight: weight,
-		IDVal:  from.ID()*1e9 + to.ID(), // Generate unique ID
+		IDVal:  from.ID()*int64(1e9) + to.ID(), // Generate unique ID
 	}
 }
 

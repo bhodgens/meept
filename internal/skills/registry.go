@@ -46,10 +46,13 @@ func (r *Registry) Register(skill *Skill) {
 	key := normalizeName(skill.Name)
 
 	if existing, ok := r.skills[key]; ok {
-		r.logger.Warn("Replacing existing skill registration",
-			"name", skill.Name,
-			"old_path", existing.Path,
+		r.logger.Warn("Case-insensitive skill name collision detected - consider renaming to avoid shadowing",
+			"normalized_key", key,
+			"existing_name", existing.Name,
+			"existing_path", existing.Path,
+			"new_name", skill.Name,
 			"new_path", skill.Path,
+			"hint", "Rename one of the skills to use a distinct name",
 		)
 	}
 

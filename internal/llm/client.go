@@ -1127,14 +1127,16 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		apiErr := &APIError{StatusCode: resp.StatusCode, Detail: string(detail)}
 		// Wrap in RateLimitError for 429 to preserve Retry-After
 		if resp.StatusCode == 429 && retryAfter > 0 {
-			return nil, resp, &RateLimitError{
+			return nil, nil, &RateLimitError{
 				ProviderID: providerID,
 				ModelID:    modelID,
 				RetryAfter: retryAfter,
 				Cause:      apiErr,
 			}
 		}
-		return nil, resp, apiErr
+		// S3-9 FIX: return nil resp — body is already closed; returning it
+		// would let callers dereference a closed-body http.Response.
+		return nil, nil, apiErr
 	}
 
 	// Parse stream
@@ -1170,7 +1172,8 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		select {
 		case <-ctx.Done():
 			resp.Body.Close()
-			return nil, resp, ctx.Err()
+			// S3-9 FIX: body is now closed; don't return resp.
+			return nil, nil, ctx.Err()
 		default:
 		}
 
@@ -1222,7 +1225,8 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 			if retryState == nil || !retryState.isResume || deltasSent >= retryState.deltasSent {
 				if err := onDelta(delta); err != nil {
 					resp.Body.Close()
-					return nil, resp, err
+					// S3-9 FIX: body is now closed; don't return resp.
+					return nil, nil, err
 				}
 				deltasSent++
 			}
@@ -1258,7 +1262,8 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 	resp.Body.Close()
 
 	if err := scanner.Err(); err != nil {
-		return nil, resp, &ClientError{Message: "stream read failed", Cause: err}
+		// S3-9 FIX: body is already closed above; don't return resp.
+		return nil, nil, &ClientError{Message: "stream read failed", Cause: err}
 	}
 
 	// Build tool calls from accumulators

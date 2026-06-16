@@ -52,6 +52,30 @@ func NewFileOperationSet() *FileOperationSet {
 	return &FileOperationSet{Read: make(map[string]bool), Written: make(map[string]bool), Edited: make(map[string]bool)}
 }
 
+// snapshotFileOps returns a deep-copied snapshot of the receiver. The caller
+// must hold c.mu when calling this on c.fileOps so that the source maps are
+// not mutated during the copy.
+func (c *ContextCompactor) snapshotFileOps() *FileOperationSet {
+	if c.fileOps == nil {
+		return NewFileOperationSet()
+	}
+	snap := &FileOperationSet{
+		Read:    make(map[string]bool, len(c.fileOps.Read)),
+		Written: make(map[string]bool, len(c.fileOps.Written)),
+		Edited:  make(map[string]bool, len(c.fileOps.Edited)),
+	}
+	for k, v := range c.fileOps.Read {
+		snap.Read[k] = v
+	}
+	for k, v := range c.fileOps.Written {
+		snap.Written[k] = v
+	}
+	for k, v := range c.fileOps.Edited {
+		snap.Edited[k] = v
+	}
+	return snap
+}
+
 func (f *FileOperationSet) Merge(other *FileOperationSet) {
 	if other == nil {
 		return
@@ -106,7 +130,7 @@ type ContextCompactor struct {
 	summarizer  Chatter
 	tokenizer   Tokenizer
 	logger      *slog.Logger
-	mu          sync.Mutex
+	mu          sync.RWMutex
 	fileOps     *FileOperationSet
 	lastSummary string
 }
@@ -189,8 +213,11 @@ func (c *ContextCompactor) Compact(ctx context.Context, messages []ChatMessage) 
 	c.mu.Lock()
 	extract := c.parseSummaryResponse(summary)
 	c.updateFileOps(extract)
-	result.FileOps = c.fileOps
-	compactionMsg := c.buildCompactionMessage(summary, c.fileOps)
+	// Snapshot fileOps under the lock so concurrent Compact callers don't race
+	// on the shared map (FileCount/FormatCompact read while updateFileOps writes).
+	fileOpsSnap := c.snapshotFileOps()
+	result.FileOps = fileOpsSnap
+	compactionMsg := c.buildCompactionMessage(summary, fileOpsSnap)
 	result.SummaryContent = summary
 	c.lastSummary = summary
 	c.mu.Unlock()
@@ -202,7 +229,11 @@ func (c *ContextCompactor) Compact(ctx context.Context, messages []ChatMessage) 
 	result.Messages = final
 	result.Compacted = true
 	result.TokensAfter = c.countTokens(final)
-	c.logger.Info("context compacted", "tokens_before", tokensBefore, "tokens_after", result.TokensAfter, "split_turn", result.SplitTurn, "files_tracked", c.fileOps.FileCount())
+	// Snapshot fileOps.FileCount under the lock to avoid racing with updateFileOps.
+	c.mu.RLock()
+	filesTracked := c.fileOps.FileCount()
+	c.mu.RUnlock()
+	c.logger.Info("context compacted", "tokens_before", tokensBefore, "tokens_after", result.TokensAfter, "split_turn", result.SplitTurn, "files_tracked", filesTracked)
 	return result
 }
 
@@ -265,7 +296,11 @@ func (c *ContextCompactor) summarizeMessages(ctx context.Context, messages []Cha
 	if conversationText == "" {
 		return "", nil
 	}
-	prompt := c.buildSummaryPrompt(conversationText, c.lastSummary)
+	// Snapshot lastSummary under the lock since Compact writes it concurrently.
+	c.mu.RLock()
+	lastSummary := c.lastSummary
+	c.mu.RUnlock()
+	prompt := c.buildSummaryPrompt(conversationText, lastSummary)
 	sumCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	resp, err := c.summarizer.Chat(sumCtx, []ChatMessage{{Role: RoleUser, Content: prompt}})

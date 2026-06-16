@@ -25,11 +25,6 @@ class ChatTabIntent extends AppIntent {
   const ChatTabIntent();
 }
 
-/// Toggle drawer overlay.
-class ToggleDrawerIntent extends AppIntent {
-  const ToggleDrawerIntent();
-}
-
 /// Focus input with '/' prefix.
 class FocusInputIntent extends AppIntent {
   const FocusInputIntent();
@@ -79,11 +74,8 @@ class LeaderKeyController extends ChangeNotifier {
   /// up to the containing widget. Index maps to [HomeTab.values].
   void Function(int index)? onTabSelected;
 
-  /// Set this callback to toggle the drawer.
-  VoidCallback? onToggleDrawer;
-
   /// Set this callback to focus the chat input, optionally with '/' prefix.
-  void Function({bool slashPrefix})? onFocusInput;
+  VoidCallback? onFocusInput;
 
   /// Set this callback to show help.
   VoidCallback? onShowHelp;
@@ -128,7 +120,7 @@ class LeaderKeyController extends ChangeNotifier {
 
     // --- Direct shortcuts ---
     if (_isFocusInputTrigger(event)) {
-      onFocusInput?.call(slashPrefix: true);
+      onFocusInput?.call();
       return KeyEventResult.handled;
     }
 
@@ -166,9 +158,6 @@ class LeaderKeyController extends ChangeNotifier {
       case 'b':
         _navigate('/tools/branches');
         onBranches?.call();
-        break;
-      case 'd':
-        onToggleDrawer?.call();
         break;
       case 'c':
         _navigate('/');
@@ -240,7 +229,6 @@ class LeaderKeyController extends ChangeNotifier {
     if (key == LogicalKeyboardKey.keyS) return 's';
     if (key == LogicalKeyboardKey.keyP) return 'p';
     if (key == LogicalKeyboardKey.keyB) return 'b';
-    if (key == LogicalKeyboardKey.keyD) return 'd';
     if (key == LogicalKeyboardKey.keyC) return 'c';
     if (key == LogicalKeyboardKey.slash) return '?';
     if (key == LogicalKeyboardKey.digit1) return '1';
@@ -286,7 +274,7 @@ class _AppShortcutsState extends State<AppShortcuts> {
           ),
           FocusInputIntent: CallbackAction<FocusInputIntent>(
             onInvoke: (_) {
-              widget.controller.onFocusInput?.call(slashPrefix: true);
+              widget.controller.onFocusInput?.call();
               return null;
             },
           ),

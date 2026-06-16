@@ -70,11 +70,11 @@ func NewPiperEngine(cfg Config) (*PiperEngine, error) {
 func (e *PiperEngine) Synthesize(ctx context.Context, text string) (*Result, error) {
 	e.mu.Lock()
 	if e.speaking {
-		e.mu.Unlock()
 		if e.config.Behavior.InterruptOnNewMsg {
-			e.Stop()
+			// Stop playback while holding the lock to avoid an
+			// unlock-relock race window (S6-23).
+			e.stopLocked()
 		}
-		e.mu.Lock()
 	}
 	e.speaking = true
 	e.mu.Unlock()
@@ -89,7 +89,6 @@ func (e *PiperEngine) Synthesize(ctx context.Context, text string) (*Result, err
 	}
 	tmpPath := tmpFile.Name()
 	tmpFile.Close()
-	defer os.Remove(tmpPath)
 
 	// Build piper command
 	args := []string{
@@ -145,6 +144,10 @@ func (e *PiperEngine) Synthesize(ctx context.Context, text string) (*Result, err
 		e.mu.Unlock()
 		return nil, fmt.Errorf("reading audio file: %w", err)
 	}
+	// Audio data is now in memory; remove the temp file eagerly so it does
+	// not accumulate on disk. AudioPath is left empty to avoid dangling
+	// references (S6-1).
+	os.Remove(tmpPath)
 
 	// Play audio
 	e.mu.Lock()
@@ -156,7 +159,7 @@ func (e *PiperEngine) Synthesize(ctx context.Context, text string) (*Result, err
 	e.speaking = false
 
 	return &Result{
-		AudioPath: tmpPath,
+		AudioPath: "",
 		AudioData: audioData,
 	}, nil
 }
@@ -170,6 +173,12 @@ func (e *PiperEngine) Play(audio []byte) error {
 func (e *PiperEngine) Stop() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	return e.stopLocked()
+}
+
+// stopLocked stops playback and clears the speaking flag. The caller must hold
+// e.mu (S6-23).
+func (e *PiperEngine) stopLocked() error {
 	e.speaking = false
 	return e.player.Stop()
 }

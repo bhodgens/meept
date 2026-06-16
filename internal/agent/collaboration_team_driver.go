@@ -234,6 +234,10 @@ func (d *ParallelTeamDriver) Run(ctx context.Context, sess *CollaborationSession
 
 	d.publishTeamStatus(sess.ID, teamStatus)
 
+	// S1-16: Publish partial results BEFORE synthesis so they are always
+	// available even if the synthesis step fails.
+	d.publishPartialResults(sess.ID, resultsMap)
+
 	// Phase 2: Lead agent synthesizes final result from partial results
 	teamStatus.Phase = "synthesize"
 	synthesizedOutput, err := d.synthesize(runCtx, sess, teamCfg, resultsMap)
@@ -246,9 +250,6 @@ func (d *ParallelTeamDriver) Run(ctx context.Context, sess *CollaborationSession
 		})
 		return nil, fmt.Errorf("lead agent synthesis failed: %w", err)
 	}
-
-	// Publish partial results to per-session topic
-	d.publishPartialResults(sess.ID, resultsMap)
 
 	sess.MarkConverged()
 	duration := time.Since(startTime)
@@ -526,6 +527,12 @@ func (d *ParallelTeamDriver) publishTeamStatus(sessionID string, status *TeamSta
 	if d.bus == nil {
 		return
 	}
+
+	// Acquire the conversations map read-lock to ensure the TeamStatus
+	// (Phase, MemberResults) is not concurrently mutated by updateMemberStatus
+	// while we marshal and publish it (S1-5).
+	d.convMu.RLock()
+	defer d.convMu.RUnlock()
 
 	topic := TeamStatusTopic(sessionID)
 	msg, err := models.NewBusMessage(models.MessageTypeStatusUpdate, "parallel-team-driver", status)

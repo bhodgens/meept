@@ -598,15 +598,13 @@ type permissionOverrideRow struct {
 // SQLITE-FIX: Two-phase approach — drain the read cursor into memory first, close it,
 // then perform writes. Prevents SQLITE_BUSY from open cursor blocking writes.
 func (e *Engine) checkOverrides(action string, details map[string]string) *Decision {
-	now := time.Now().UTC().Format(time.RFC3339)
-
 	// Phase 1: Collect matching overrides into memory.
 	var overrides []permissionOverrideRow
 	err := e.db.Select(&overrides, `
 		SELECT id, pattern, decision, reason, usage_count, max_uses, expires_at
 		FROM permission_overrides
-		WHERE action = ? AND (expires_at IS NULL OR expires_at > ?)
-		ORDER BY created_at DESC`, action, now)
+		WHERE action = ? AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
+		ORDER BY created_at DESC`, action)
 	if err != nil {
 		return nil
 	}
@@ -690,10 +688,6 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 			decisionStr: o.Decision,
 			reason:      o.Reason,
 		})
-	}
-
-	if err != nil {
-		e.logger.Error("Error iterating permission overrides", "error", err)
 	}
 
 	// Phase 2: Cursor is now closed. Attempt atomic usage count increment

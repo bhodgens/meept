@@ -418,7 +418,7 @@ func (c *Consolidator) summarizeClusters(ctx context.Context, clusters [][]Memor
 		// Fallback: build a snippet-based summary from the cluster.
 		var snippets []string
 		totalChars := 0
-		for _, m := range cluster {
+		for i, m := range cluster {
 			snippet := m.Content
 			if len(snippet) > 200 {
 				snippet = snippet[:200]
@@ -430,7 +430,10 @@ func (c *Consolidator) summarizeClusters(ctx context.Context, clusters [][]Memor
 				totalChars += len(snippet)
 			}
 			if totalChars > 2000 {
-				snippets = append(snippets, fmt.Sprintf("... and %d more", len(cluster)-(len(snippets)-1)))
+				remaining := len(cluster) - i - 1
+				if remaining > 0 {
+					snippets = append(snippets, fmt.Sprintf("... and %d more", remaining))
+				}
 				break
 			}
 		}

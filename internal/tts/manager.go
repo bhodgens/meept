@@ -62,10 +62,10 @@ func (m *Manager) Speak(text string) error {
 	m.processing = true
 	go func() {
 		defer func() {
-			m.mu.Lock()
-			m.speaking = false
-			m.processing = false
-			m.mu.Unlock()
+			// Synthesis of the immediate message is done; drain any
+			// queued messages iteratively (S6-13: no recursive
+			// goroutine spawn). processQueue clears m.speaking and
+			// m.processing when the queue is empty.
 			m.processQueue()
 		}()
 
@@ -85,29 +85,37 @@ func (m *Manager) Speak(text string) error {
 }
 
 // processQueue processes queued messages after current playback completes.
+// It runs as an iterative loop rather than recursively spawning goroutines,
+// avoiding unbounded goroutine growth when many messages are queued
+// back-to-back (S6-13). The caller is expected to have set m.processing
+// and m.speaking appropriately; this function clears them when done.
 func (m *Manager) processQueue() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	for {
+		m.mu.Lock()
+		if len(m.queue) == 0 {
+			// No more queued messages; stop processing.
+			m.processing = false
+			m.speaking = false
+			m.mu.Unlock()
+			return
+		}
+		// Pop next message.
+		next := m.queue[0]
+		m.queue = m.queue[1:]
+		m.mu.Unlock()
 
-	if m.processing || len(m.queue) == 0 {
-		return
-	}
-
-	m.processing = true
-	next := m.queue[0]
-	m.queue = m.queue[1:]
-	m.speaking = true
-
-	go func() {
+		// Synthesize + play sequentially. Errors are logged but the
+		// loop continues to drain remaining queued messages.
 		ctx := context.Background()
 		result, err := m.synth.Synthesize(ctx, next)
 		if err == nil {
 			if err := m.synth.Play(result.AudioData); err != nil {
 				logger.Warn("TTS playback failed", "error", err)
 			}
+		} else {
+			logger.Warn("TTS synthesis failed", "error", err)
 		}
-		m.processQueue()
-	}()
+	}
 }
 
 // QueueLength returns the number of queued messages.

@@ -233,7 +233,7 @@ func (e *CollaborationEngine) ActiveSessionCount() int {
 	defer e.mu.RUnlock()
 	count := 0
 	for _, s := range e.sessions {
-		if !s.State.IsTerminal() {
+		if !s.GetState().IsTerminal() {
 			count++
 		}
 	}
@@ -246,7 +246,7 @@ func (e *CollaborationEngine) ListSessions(activeOnly bool) []*CollaborationSess
 	defer e.mu.RUnlock()
 	var result []*CollaborationSession
 	for _, s := range e.sessions {
-		if activeOnly && s.State.IsTerminal() {
+		if activeOnly && s.GetState().IsTerminal() {
 			continue
 		}
 		result = append(result, s)

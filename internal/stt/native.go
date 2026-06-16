@@ -169,7 +169,16 @@ func findHelperBinary() (string, error) {
 func (e *NativeEngine) transcribeWithHelper(helperBin, filePath string) (string, error) {
 	slog.Debug("stt: native: using helper binary", "bin", helperBin)
 
-	cmd := exec.Command(helperBin, filePath)
+	// Cancellable context for shutdown safety (S6-4).
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cmd := exec.CommandContext(ctx, helperBin, filePath)
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			return cmd.Process.Kill()
+		}
+		return nil
+	}
 	stdout, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("stt: native: helper failed: %w", err)
@@ -185,8 +194,18 @@ func (e *NativeEngine) transcribeWithPython(filePath string) (string, error) {
 		return "", fmt.Errorf("stt: native: python3 not found")
 	}
 
+	// Cancellable context for shutdown safety (S6-4).
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Check that speech_recognition is importable.
-	check := exec.Command("python3", "-c", "import speech_recognition")
+	check := exec.CommandContext(ctx, "python3", "-c", "import speech_recognition")
+	check.Cancel = func() error {
+		if check.Process != nil {
+			return check.Process.Kill()
+		}
+		return nil
+	}
 	if err := check.Run(); err != nil {
 		return "", fmt.Errorf("stt: native: python3 speech_recognition module not installed")
 	}
@@ -211,7 +230,13 @@ except Exception:
     sys.exit(1)
 `
 
-	cmd := exec.Command("python3", "-c", script, filePath)
+	cmd := exec.CommandContext(ctx, "python3", "-c", script, filePath)
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			return cmd.Process.Kill()
+		}
+		return nil
+	}
 	stdout, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("stt: native: python transcription failed: %w", err)
@@ -234,7 +259,15 @@ func checkNativeAvailable() error {
 
 	// Check if python3 + speech_recognition is available.
 	if _, err := exec.LookPath("python3"); err == nil {
-		check := exec.Command("python3", "-c", "import speech_recognition")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		check := exec.CommandContext(ctx, "python3", "-c", "import speech_recognition")
+		check.Cancel = func() error {
+			if check.Process != nil {
+				return check.Process.Kill()
+			}
+			return nil
+		}
 		if err := check.Run(); err == nil {
 			return nil
 		}

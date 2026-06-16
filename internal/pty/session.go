@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"sync"
@@ -294,12 +295,21 @@ func (s *ptySession) Close() error {
 		}
 	}
 
-	// Kill command if still running
+	// Kill command if still running. waitLoop is already calling
+	// cmd.Wait() in the background, so Kill on its own is sufficient to
+	// trigger reap-on-wait. We do NOT call cmd.Wait() here because doing
+	// so concurrently with waitLoop would race (only one caller can
+	// successfully Wait on a process). waitLoop's goroutine is the
+	// single owner of the reaping call.
 	if s.ptyCmd != nil && s.ptyCmd.Process != nil {
-		s.ptyCmd.Process.Kill()
+		if err := s.ptyCmd.Process.Kill(); err != nil {
+			log.Printf("pty: kill ptyCmd: %v", err)
+		}
 	}
 	if s.plainCmd != nil && s.plainCmd.Process != nil {
-		s.plainCmd.Process.Kill()
+		if err := s.plainCmd.Process.Kill(); err != nil {
+			log.Printf("pty: kill plainCmd: %v", err)
+		}
 	}
 
 	close(s.done)

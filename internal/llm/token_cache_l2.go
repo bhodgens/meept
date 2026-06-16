@@ -357,7 +357,12 @@ func (c *L2Cache) ClearByModelPrefix(prefix string) int {
 	defer cancel()
 
 	// Use LIKE with a trailing wildcard to match model_id prefix.
-	result, err := c.pool.Exec(ctx, `DELETE FROM token_cache WHERE model_id LIKE ?`, prefix+"%")
+	// S3-4 FIX: escape LIKE metacharacters in the user-provided prefix to
+	// prevent wildcard injection (e.g. model IDs containing % or _).
+	escaped := strings.ReplaceAll(prefix, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `%`, `\%`)
+	escaped = strings.ReplaceAll(escaped, `_`, `\_`)
+	result, err := c.pool.Exec(ctx, `DELETE FROM token_cache WHERE model_id LIKE ? ESCAPE '\'`, escaped+"%")
 	if err != nil {
 		c.logger.Error("L2 clear by model prefix failed", "prefix", prefix, "error", err)
 		return 0

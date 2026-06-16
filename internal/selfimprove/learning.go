@@ -557,9 +557,9 @@ func (lp *LearningPipeline) distillHeuristic(trajectory Trajectory, judgment *Ju
 // StorePattern stores a pattern after judgment.
 func (lp *LearningPipeline) StorePattern(ctx context.Context, pattern *LearnedPattern) error {
 	lp.mu.Lock()
-	defer lp.mu.Unlock()
 
 	if !lp.initialized {
+		lp.mu.Unlock()
 		return errors.New("learning pipeline not initialized")
 	}
 
@@ -574,7 +574,9 @@ func (lp *LearningPipeline) StorePattern(ctx context.Context, pattern *LearnedPa
 		existing.UpdatedAt = time.Now()
 		// Boost confidence
 		existing.Confidence = minFloat(1.0, existing.Confidence*1.1)
-		return lp.savePatterns()
+		snapshot := lp.snapshotPatterns()
+		lp.mu.Unlock()
+		return lp.savePatternsFromSnapshot(snapshot)
 	}
 
 	// Activate if confidence is high enough
@@ -583,15 +585,17 @@ func (lp *LearningPipeline) StorePattern(ctx context.Context, pattern *LearnedPa
 	}
 
 	lp.patterns[pattern.ID] = pattern
-	return lp.savePatterns()
+	snapshot := lp.snapshotPatterns()
+	lp.mu.Unlock()
+	return lp.savePatternsFromSnapshot(snapshot)
 }
 
 // Consolidate performs deduplication, contradiction detection, and pruning.
 func (lp *LearningPipeline) Consolidate(ctx context.Context) (*ConsolidationResult, error) {
 	lp.mu.Lock()
-	defer lp.mu.Unlock()
 
 	if !lp.initialized {
+		lp.mu.Unlock()
 		return nil, errors.New("learning pipeline not initialized")
 	}
 
@@ -682,8 +686,10 @@ func (lp *LearningPipeline) Consolidate(ctx context.Context) (*ConsolidationResu
 	result.ConsolidatedAt = time.Now()
 	result.Duration = time.Since(start)
 	lp.lastConsolidation = result.ConsolidatedAt
+	snapshot := lp.snapshotPatterns()
+	lp.mu.Unlock()
 
-	if err := lp.savePatterns(); err != nil {
+	if err := lp.savePatternsFromSnapshot(snapshot); err != nil {
 		return result, fmt.Errorf("failed to save patterns: %w", err)
 	}
 
@@ -825,15 +831,19 @@ func (lp *LearningPipeline) GetPatterns() []*LearnedPattern {
 // Close stops the pipeline and saves state.
 func (lp *LearningPipeline) Close() error {
 	lp.mu.Lock()
-	defer lp.mu.Unlock()
+	snapshot := make(map[string]*LearnedPattern, len(lp.patterns))
+	for k, v := range lp.patterns {
+		snapshot[k] = v
+	}
+	lp.mu.Unlock()
 
-	return lp.savePatterns()
+	return lp.savePatternsFromSnapshot(snapshot)
 }
 
 // Helper functions
 
 func (lp *LearningPipeline) generatePatternID(content string) string {
-	hash := sha256.Sum256([]byte(content + time.Now().String()))
+	hash := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(hash[:8])
 }
 
@@ -879,10 +889,30 @@ func (lp *LearningPipeline) similarity(a, b string) float64 {
 	return float64(intersection) / float64(union)
 }
 
+// snapshotPatterns returns a shallow copy of the patterns map. Must be called
+// with lp.mu held (read or write).
+func (lp *LearningPipeline) snapshotPatterns() map[string]*LearnedPattern {
+	snapshot := make(map[string]*LearnedPattern, len(lp.patterns))
+	for k, v := range lp.patterns {
+		snapshot[k] = v
+	}
+	return snapshot
+}
+
 func (lp *LearningPipeline) savePatterns() error {
+	lp.mu.Lock()
+	snapshot := lp.snapshotPatterns()
+	lp.mu.Unlock()
+
+	return lp.savePatternsFromSnapshot(snapshot)
+}
+
+// savePatternsFromSnapshot writes the given patterns to disk without holding
+// any lock. Callers must snapshot under the lock before calling this method.
+func (lp *LearningPipeline) savePatternsFromSnapshot(patterns map[string]*LearnedPattern) error {
 	path := filepath.Join(lp.dataDir, "patterns.json")
 
-	data, err := json.MarshalIndent(lp.patterns, "", "  ")
+	data, err := json.MarshalIndent(patterns, "", "  ")
 	if err != nil {
 		return err
 	}

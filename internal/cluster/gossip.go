@@ -34,6 +34,10 @@ type GossipEngine struct {
 	doneCh    chan struct{}
 	eventID   string
 
+	// wg tracks background goroutines (run and retryLoop) so Stop can
+	// wait for both to fully exit before returning (S6-16).
+	wg sync.WaitGroup
+
 	// Signing key for this node (ed25519)
 	signingPriv ed25519.PrivateKey
 	signingPub  map[string]ed25519.PublicKey // indexed by peer nodeID
@@ -399,9 +403,13 @@ func (g *GossipEngine) cleanupDedupCache() {
 }
 
 // startRetryLoop launches a background goroutine that retries failed event broadcasts
-// up to maxRetryAttempts times.
+// up to maxRetryAttempts times. Tracked via wg so Stop waits for it (S6-16).
 func (g *GossipEngine) startRetryLoop(ctx context.Context) {
-	go g.retryLoop(ctx)
+	g.wg.Add(1)
+	go func() {
+		defer g.wg.Done()
+		g.retryLoop(ctx)
+	}()
 }
 
 // retryLoop processes the retry queue, re-publishing events until max attempts.
@@ -468,7 +476,11 @@ func (g *GossipEngine) Start(ctx context.Context) error {
 	}
 
 	// Heartbeat and event propagation goroutine
-	go g.run(ctx)
+	g.wg.Add(1)
+	go func() {
+		defer g.wg.Done()
+		g.run(ctx)
+	}()
 
 	return nil
 }
@@ -484,6 +496,11 @@ func (g *GossipEngine) Stop() error {
 	g.mu.Unlock()
 
 	close(g.stopCh)
+	// Wait for run and retryLoop goroutines to fully exit (S6-16).
+	// doneCh is closed by run when it exits; wg.Add(1)/Done() also covers
+	// retryLoop. We wait on both for defense in depth — doneCh for run,
+	// wg for the broader set.
+	g.wg.Wait()
 	<-g.doneCh
 
 	// Stop TCP transport

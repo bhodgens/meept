@@ -879,6 +879,34 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			clearCmd := tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
 				return StatusMessageClearMsg{}
 			})
+			// Switch to chat view if requested
+			if msg.SwitchToChat {
+				a.currentView = ViewChat
+			}
+			if sessionCmd != nil {
+				return a, tea.Batch(sessionCmd, clearCmd)
+			}
+			return a, clearCmd
+		}
+		return a, nil
+
+	case models.SessionSwitchToChatMsg:
+		// Switch to selected session AND switch view to chat
+		if msg.Session != nil {
+			a.currentSession = msg.Session
+			a.sessionMgr.SetSession(msg.Session)
+			// Wire up session ID for tasks FilterMine feature
+			a.tasks.SetCurrentSession(msg.Session.ID)
+			// Wire up session ID for plans filtering
+			a.plans.SetSession(msg.Session.ID)
+			sessionCmd := a.chat.SetSession(msg.Session)
+			a.statusMessage = fmt.Sprintf("switched to: %s", msg.Session.Name)
+			a.statusMessageTime = time.Now()
+			clearCmd := tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
+				return StatusMessageClearMsg{}
+			})
+			// Switch to chat view
+			a.currentView = ViewChat
 			if sessionCmd != nil {
 				return a, tea.Batch(sessionCmd, clearCmd)
 			}

@@ -297,11 +297,19 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 		// Success
 		pm.recordSuccess(entry, resp, latency)
 
-		pm.logger.Debug("Provider call succeeded",
-			"provider", entry.Config.ProviderID,
-			"latency", latency,
-			"tokens", resp.Usage.TotalTokens,
-		)
+		// S3-8 FIX: guard resp dereference in debug log.
+		if resp != nil {
+			pm.logger.Debug("Provider call succeeded",
+				"provider", entry.Config.ProviderID,
+				"latency", latency,
+				"tokens", resp.Usage.TotalTokens,
+			)
+		} else {
+			pm.logger.Debug("Provider call succeeded",
+				"provider", entry.Config.ProviderID,
+				"latency", latency,
+			)
+		}
 
 		return resp, nil
 	}
@@ -473,6 +481,11 @@ func (pm *ProviderManager) getOrderedProviders() []*ProviderEntry {
 
 // recordSuccess updates health metrics after a successful call.
 func (pm *ProviderManager) recordSuccess(entry *ProviderEntry, resp *Response, latency time.Duration) {
+	// S3-8 FIX: guard against nil resp (callers may pass nil on edge cases).
+	if resp == nil {
+		return
+	}
+
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -871,7 +884,13 @@ func (pm *ProviderManager) runHealthCheck(ctx context.Context) {
 
 // Stop stops the provider manager and closes all clients.
 func (pm *ProviderManager) Stop() {
-	close(pm.stopChan)
+	// S3-5 FIX: guard against double-close of stopChan using select pattern.
+	select {
+	case <-pm.stopChan:
+		return // already closed
+	default:
+		close(pm.stopChan)
+	}
 
 	pm.mu.Lock()
 	defer pm.mu.Unlock()

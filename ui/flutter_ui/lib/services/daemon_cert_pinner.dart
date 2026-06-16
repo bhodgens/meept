@@ -100,9 +100,7 @@ class DaemonCertPinner {
       final match = actual == _cachedFingerprint;
       debugPrint('[cert] Fingerprint check: match=$match');
       if (!match) {
-        debugPrint('[cert] REJECTED: fingerprint mismatch');
-        debugPrint('[cert]   Expected: $_cachedFingerprint');
-        debugPrint('[cert]   Got:      $actual');
+        debugPrint('[cert] REJECTED: fingerprint mismatch (got: $actual)');
       }
       return match;
     }

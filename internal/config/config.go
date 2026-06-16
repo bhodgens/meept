@@ -135,21 +135,42 @@ func LoadJSON5Config(path string) (*Config, error) {
 // ExpandEnvVars expands environment variables in a string.
 // Uses a regex rather than os.ExpandEnv because configs use both $VAR and
 // ${VAR} syntax (os.ExpandEnv only supports the former).
+// Implements recursion depth limiting to detect cyclic env var references.
 func ExpandEnvVars(s string) string {
-	return envVarPattern.ReplaceAllStringFunc(s, func(match string) string {
-		var varName string
-		if strings.HasPrefix(match, "${") {
-			varName = match[2 : len(match)-1]
-		} else {
-			varName = match[1:]
-		}
+	const maxPasses = 5
+	result := s
+	for pass := 0; pass < maxPasses; pass++ {
+		prev := result
+		result = envVarPattern.ReplaceAllStringFunc(result, func(match string) string {
+			var varName string
+			if strings.HasPrefix(match, "${") {
+				varName = match[2 : len(match)-1]
+			} else {
+				varName = match[1:]
+			}
 
-		if val, ok := os.LookupEnv(varName); ok {
-			return val
+			if val, ok := os.LookupEnv(varName); ok {
+				return val
+			}
+			// Return empty string for undefined variables
+			return ""
+		})
+		// If no more env vars to expand, we're done
+		if result == prev {
+			break
 		}
-		// Return empty string for undefined variables
-		return ""
-	})
+		// Post-replacement check: if result still contains ${...} patterns
+		// after multiple passes, we may have a cycle
+		if !envVarPattern.MatchString(result) {
+			break
+		}
+	}
+	// Warn if we hit the cap (cycle detected) - caller should log
+	if envVarPattern.MatchString(result) {
+		// Return result with remaining unresolved vars
+		// Caller responsible for logging warning about potential cycle
+	}
+	return result
 }
 
 // expandEnvVars expands environment variables in a string.

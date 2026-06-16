@@ -167,7 +167,8 @@ func ScanCommand(ctx context.Context, command, binary string) *TirithResult {
 
 // TirithScanner provides an interface for scanning commands.
 type TirithScanner struct {
-	binary string
+	binary   string
+	failOpen bool // When true, scanner errors return allowed instead of blocked
 }
 
 // NewTirithScanner creates a new TirithScanner.
@@ -178,6 +179,14 @@ func NewTirithScanner(binary string) *TirithScanner {
 	return &TirithScanner{binary: binary}
 }
 
+// SetFailOpen configures whether scanner errors should fail open (allow) or fail closed (block).
+// When failOpen is true, scanner errors (timeout, crash, binary not found) return allowed.
+// When false (default), scanner errors return blocked (fail-closed security posture).
+// This method allows runtime configuration without changing config schema.
+func (t *TirithScanner) SetFailOpen(failOpen bool) {
+	t.failOpen = failOpen
+}
+
 // IsAvailable checks if tirith is available.
 func (t *TirithScanner) IsAvailable(ctx context.Context) bool {
 	return CheckTirithAvailable(ctx, t.binary)
@@ -185,7 +194,17 @@ func (t *TirithScanner) IsAvailable(ctx context.Context) bool {
 
 // Scan scans a command for security issues.
 func (t *TirithScanner) Scan(ctx context.Context, command string) *TirithResult {
-	return ScanCommand(ctx, command, t.binary)
+	result := ScanCommand(ctx, command, t.binary)
+	// Apply fail-open behavior: if scanner errored and failOpen is true, return allowed
+	if result != nil && t.failOpen && result.Blocked && result.Message != nil &&
+		(strings.Contains(*result.Message, "timeout") || strings.Contains(*result.Message, "error")) {
+		return &TirithResult{
+			Blocked: false,
+			Warning: true,
+			Message: result.Message,
+		}
+	}
+	return result
 }
 
 // ShouldBlock returns true if the command should be blocked.

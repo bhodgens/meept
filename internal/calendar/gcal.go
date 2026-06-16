@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -85,6 +86,10 @@ type Client struct {
 	calendarID  string
 	baseURL     string // defaults to googleCalendarAPIBase; overridden in tests
 	logger      *slog.Logger
+
+	// mu guards accessToken from concurrent read/write between
+	// doRequest (read) and SetAccessToken (write) — S6-10.
+	mu sync.RWMutex
 }
 
 // ClientConfig holds configuration for the calendar client.
@@ -263,7 +268,10 @@ func (c *Client) doRequest(ctx context.Context, method, apiURL string, body []by
 		return nil, err
 	}
 
-	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+	c.mu.RLock()
+	token := c.accessToken
+	c.mu.RUnlock()
+	req.Header.Set("Authorization", "Bearer "+token)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -288,6 +296,8 @@ func (c *Client) doRequest(ctx context.Context, method, apiURL string, body []by
 
 // SetAccessToken updates the access token.
 func (c *Client) SetAccessToken(token string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.accessToken = token
 }
 

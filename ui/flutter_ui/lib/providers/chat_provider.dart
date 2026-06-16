@@ -79,6 +79,9 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// Prevents duplicate message sends from rapid button taps
   bool _isSending = false;
 
+  /// Guard against setState after dispose
+  bool _disposed = false;
+
   /// Timer to reset _isSending flag if it gets stuck (safety mechanism)
   Timer? _sendingTimeoutTimer;
 
@@ -117,11 +120,13 @@ class ChatNotifier extends StateNotifier<ChatState> {
     // Fetch messages from the HTTP API
     try {
       final messages = await apiClient.getMessages(sessionId);
+      if (_disposed) return;
       state = ChatState(
         messages: messages,
         isLoading: false,
       );
     } catch (e) {
+      if (_disposed) return;
       // Don't show error for default session (no session selected)
       if (sessionId == 'default') {
         state = const ChatState(messages: [], isLoading: false);
@@ -134,7 +139,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
       }
     }
 
-    if (generation != _loadGeneration) return;
+    if (_disposed || generation != _loadGeneration) return;
 
     // Set up WS subscription AFTER the HTTP fetch completes so that any
     // messages arriving via WS are appended to (not replaced by) the fetch.
@@ -145,6 +150,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
     // Subscribe to agent progress for this session
     _progressSubscription?.cancel();
     _progressSubscription = websocket.subscribeToAgentProgress(sessionId).listen((message) {
+      if (_disposed) return;
       final progress = AgentProgress.fromJson(message);
       state = state.copyWith(currentProgress: progress);
     });
@@ -261,6 +267,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
           );
       }
 
+      if (_disposed) return;
+
       // Check for agent-side errors in the response body (LLM failures, etc.)
       if (chatResp != null && chatResp['error'] != null) {
         final errorMsg = chatResp['error'].toString();
@@ -292,6 +300,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
         );
       }
     } catch (e) {
+      if (_disposed) return;
       // Extract URL from DioException for better error messages.
       String errorStr;
       if (e is DioException) {
@@ -401,6 +410,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
   @override
   void dispose() {
+    _disposed = true;
     _sendingTimeoutTimer?.cancel();
     _sendingTimeoutTimer = null;
     _wsChatSubscription?.cancel();

@@ -695,6 +695,13 @@ func (c *Controller) publishStatus(phase string, data any) {
 	if c.bus == nil {
 		return
 	}
+	// If data is a *ImprovementCycle, snapshot it into a value copy to avoid
+	// pointer aliasing: a concurrent mutation to the cycle (e.g. from the
+	// defer in RunFullCycle) could produce a torn marshalled result.
+	if cycle, ok := data.(*ImprovementCycle); ok && cycle != nil {
+		cycleCopy := *cycle
+		data = cycleCopy
+	}
 	c.mu.RLock()
 	cycleID := ""
 	if c.currentCycle != nil {
@@ -733,12 +740,10 @@ type persistedState struct {
 }
 
 func (c *Controller) saveState() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	//nolint:gosec // user config directory/file permissions
 	_ = os.MkdirAll(c.config.DataPath, 0o755)
 
+	c.mu.Lock()
 	state := persistedState{
 		Issues:              c.issues,
 		Analyses:            c.analyses,
@@ -750,6 +755,7 @@ func (c *Controller) saveState() error {
 		ConsecutiveFailures: c.consecutiveFailures,
 		Timestamp:           time.Now(),
 	}
+	c.mu.Unlock()
 
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {

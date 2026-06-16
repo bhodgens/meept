@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../models/api_models.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
@@ -24,10 +26,13 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
   String? _error;
   Timer? _debounceTimer;
 
+  void _closePanel() {
+    context.go('/');
+  }
+
   @override
   void initState() {
     super.initState();
-    // Load recent memories on startup
     _loadRecentMemories();
   }
 
@@ -41,10 +46,6 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
   Future<void> _loadRecentMemories() async {
     setState(() {
       _isLoading = true;
-      // Do NOT set _hasSearched here: this is the "browse/recent" path,
-      // not an explicit search. Keeping it false lets the placeholder
-      // ("search or browse memories") render until results arrive, so
-      // users see the invitation rather than a flash of empty space.
     });
     try {
       final client = ref.read(apiClientProvider);
@@ -112,71 +113,79 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
-        border: Border(
-          top: BorderSide(
-            color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
-            width: 1,
+    return KeyboardListener(
+      focusNode: FocusNode(),
+      onKeyEvent: (KeyEvent event) {
+        if (event.logicalKey == LogicalKeyboardKey.escape) {
+          _closePanel();
+        }
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
+          border: Border(
+            top: BorderSide(
+              color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
+              width: 1,
+            ),
           ),
         ),
-      ),
-      child: Column(
-        children: [
-          _buildHeader(),
-          if (_error != null)
-            ErrorBanner(message: _error!, onDismiss: _loadRecentMemories),
-          Expanded(
-            child: _isLoading && _memories.isEmpty
-                ? const Center(
-                    child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          CyberpunkColors.orangePrimary,
+        child: Column(
+          children: [
+            _buildHeader(),
+            if (_error != null)
+              ErrorBanner(message: _error!, onDismiss: _loadRecentMemories),
+            Expanded(
+              child: _isLoading && _memories.isEmpty
+                  ? const Center(
+                      child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            CyberpunkColors.orangePrimary,
+                          ),
                         ),
                       ),
-                    ),
-                  )
-                : _memories.isNotEmpty
-                    ? ListView.builder(
-                        itemCount: _memories.length,
-                        itemBuilder: (context, index) {
-                          return _buildMemoryItem(_memories[index]);
-                        },
-                      )
-                    : _hasSearched
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.search_off,
-                                  color: CyberpunkColors.midGray,
-                                  size: 48,
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'no memories found',
-                                  style: CyberpunkTypography.bodySmall.copyWith(
+                    )
+                  : _memories.isNotEmpty
+                      ? ListView.builder(
+                          itemCount: _memories.length,
+                          itemBuilder: (context, index) {
+                            return _buildMemoryItem(_memories[index]);
+                          },
+                        )
+                      : _hasSearched
+                          ? Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.search_off,
                                     color: CyberpunkColors.midGray,
+                                    size: 48,
                                   ),
-                                ),
-                              ],
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'no memories found',
+                                    style: CyberpunkTypography.bodySmall.copyWith(
+                                      color: CyberpunkColors.midGray,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : const Center(
+                              child: Text(
+                                'search or browse memories',
+                                style: CyberpunkTypography.bodySmall,
+                              ),
                             ),
-                          )
-                        : const Center(
-                            child: Text(
-                              'search or browse memories',
-                              style: CyberpunkTypography.bodySmall,
-                            ),
-                          ),
           ),
         ],
       ),
+    ),
     );
   }
 
@@ -193,6 +202,15 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
         children: [
           Row(
             children: [
+              GestureDetector(
+                onTap: _closePanel,
+                child: const Icon(
+                  Icons.arrow_back,
+                  color: CyberpunkColors.orangePrimary,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 8),
               const Icon(
                 Icons.memory,
                 color: CyberpunkColors.orangePrimary,
@@ -206,6 +224,13 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
                 ),
               ),
               const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                onPressed: _closePanel,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                tooltip: 'close',
+              ),
               IconButton(
                 icon: const Icon(Icons.refresh, size: 16),
                 onPressed: _loadRecentMemories,

@@ -36,8 +36,11 @@ func (l *launchService) Init(*service.Service) error { return nil }
 func (l *launchService) Start(s service.Service) error {
 	_ = s
 	// Exec the daemon binary. daemon.Run() blocks in the foreground by default.
+	// The daemon uses slog handlers for all structured output, so stdout is
+	// unused. Direct stderr to os.Stderr so early-init panics are captured by
+	// launchd's log (S6-25).
 	cmd := exec.Command(l.daemonPath) //nolint:gosec
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 

@@ -184,10 +184,10 @@ func (o *Orchestrator) ReflectionEngine() *ReflectionEngine {
 
 func (o *Orchestrator) runSubscription(ctx context.Context, sub *bus.Subscriber, handler func(context.Context, *models.BusMessage)) {
 	defer o.wg.Done()
+	defer o.bus.Unsubscribe(sub)
 	for {
 		select {
 		case <-ctx.Done():
-			o.bus.Unsubscribe(sub)
 			return
 		case msg, ok := <-sub.Channel:
 			if !ok {
@@ -655,11 +655,12 @@ func (o *Orchestrator) handleToolExecutionComplete(ctx context.Context, msg *mod
 	)
 
 	// Run reflection in a goroutine to not block the message bus.
-	// Use the orchestrator's lifecycle context so reflection stops on shutdown.
+	// Detach from the orchestrator's cancel context so reflection is not
+	// aborted by orchestrator shutdown (S1-11).
 	o.wg.Add(1)
 	go func() {
 		defer o.wg.Done()
-		reflectCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		reflectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 		defer cancel()
 		result, err := o.reflectionEngine.RunReflection(reflectCtx, event.EditedFiles)
 		if err != nil {

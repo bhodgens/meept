@@ -126,7 +126,7 @@ func (d *PairProgrammingDriver) Run(ctx context.Context, sess *CollaborationSess
 	result.Duration = duration
 	d.publishEvent(sess.ID, TopicCollabResult, map[string]any{
 		"session_id":  sess.ID,
-		"state":       string(sess.State),
+		"state":       string(sess.GetState()),
 		"turn_count":  result.TurnCount,
 		"workspace":   workspacePath,
 		"duration_ms": duration.Milliseconds(),

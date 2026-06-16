@@ -46,6 +46,10 @@ type Store struct {
 	stopChan      chan struct{}
 	closeOnce     sync.Once
 
+	// notifyWG tracks in-flight notifySubscribers goroutines so Close
+	// can wait for them to finish before closing the DB (S6-14).
+	notifyWG sync.WaitGroup
+
 	// Subscriber management for real-time updates
 	subMu       sync.RWMutex
 	subscribers map[chan *LiveMetricsSnapshot]struct{}
@@ -334,8 +338,14 @@ func (s *Store) flush() {
 		s.batch = s.batch[:0]
 		s.lastFlush = time.Now()
 
-		// Notify subscribers after successful flush
-		go s.notifySubscribers()
+		// Notify subscribers after successful flush. Tracked via the
+		// notifyWG WaitGroup so Close can wait for these goroutines to
+		// finish before closing the DB (S6-14).
+		s.notifyWG.Add(1)
+		go func() {
+			defer s.notifyWG.Done()
+			s.notifySubscribers()
+		}()
 	}
 }
 
@@ -638,6 +648,10 @@ func (s *Store) Close() error {
 		close(s.stopChan)
 		// Final flush
 		s.flush()
+		// Wait for any in-flight notifySubscribers goroutines spawned
+		// by flush() to finish before closing the DB to prevent reads
+		// against a closed handle (S6-14).
+		s.notifyWG.Wait()
 		dbErr = s.db.Close()
 	})
 	return dbErr

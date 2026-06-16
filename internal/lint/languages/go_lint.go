@@ -201,23 +201,29 @@ func parseGoErrors(output, targetFile string) ([]LinterResult, error) {
 		if matches := errorPattern.FindStringSubmatch(line); matches != nil {
 			lineNum := 0
 			colNum := 0
-			strconv.Atoi(matches[2])
-			fmt.Sscanf(matches[2], "%d", &lineNum)
+			lineNum, _ = strconv.Atoi(matches[2])
 			if matches[3] != "" {
-				fmt.Sscanf(matches[3], "%d", &colNum)
+				colNum, _ = strconv.Atoi(matches[3])
+			}
+			file := targetFile
+			if file == "" {
+				file = matches[1]
 			}
 			result = LinterResult{
-				File:     targetFile,
+				File:     file,
 				Line:     lineNum - 1, // Convert to 0-based
 				Column:   colNum - 1,
 				Message:  matches[4],
 				Severity: "error",
 			}
 		} else if matches := simplePattern.FindStringSubmatch(line); matches != nil {
-			lineNum := 0
-			fmt.Sscanf(matches[2], "%d", &lineNum)
+			lineNum, _ := strconv.Atoi(matches[2])
+			file := targetFile
+			if file == "" {
+				file = matches[1]
+			}
 			result = LinterResult{
-				File:     targetFile,
+				File:     file,
 				Line:     lineNum - 1,
 				Message:  matches[3],
 				Severity: "error",

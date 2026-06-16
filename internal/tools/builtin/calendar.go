@@ -51,6 +51,10 @@ func (t *CalendarListTool) Parameters() llm.FunctionParameters {
 }
 
 func (t *CalendarListTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	if t.client == nil {
+		return tools.NewErrorResult("calendar client not configured"), nil
+	}
+
 	startStr, _ := args["start"].(string)
 	endStr, _ := args["end"].(string)
 	maxResults := 10
@@ -66,10 +70,6 @@ func (t *CalendarListTool) Execute(ctx context.Context, args map[string]any) (an
 	end, err := time.Parse(time.RFC3339, endStr)
 	if err != nil {
 		return tools.NewErrorResult(fmt.Sprintf("invalid end time: %v", err)), nil
-	}
-
-	if t.client == nil {
-		return tools.NewErrorResult("calendar client not configured"), nil
 	}
 
 	events, err := t.client.ListEvents(ctx, start, end, maxResults)

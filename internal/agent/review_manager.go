@@ -453,6 +453,8 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 	}
 
 	var revisions []*task.TaskStep
+	// outErr accumulates errors from non-fatal SetResult calls (S1-10).
+	var outErr error
 
 	switch result.Status {
 	case ReviewApproved:
@@ -480,6 +482,7 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 		}
 		if err := rm.stepStore.SetResult(step.ID, result.Feedback); err != nil {
 			rm.logger.Error("Failed to set rejection feedback", "error", err)
+			outErr = fmt.Errorf("failed to set rejection feedback: %w", err)
 		}
 		rm.logger.Info("Step rejected", "step_id", step.ID, "issues", result.Issues)
 
@@ -521,11 +524,12 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 		// Keep in reviewing state, update result with feedback
 		if err := rm.stepStore.SetResult(step.ID, result.Feedback); err != nil {
 			rm.logger.Error("Failed to set needs_info feedback", "error", err)
+			outErr = fmt.Errorf("failed to set needs_info feedback: %w", err)
 		}
 		rm.logger.Info("Step needs more info", "step_id", step.ID)
 	}
 
-	return revisions, nil
+	return revisions, outErr
 }
 
 // publishReviewEvent publishes a review completion event.
