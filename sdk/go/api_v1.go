@@ -19,12 +19,1258 @@ import (
 )
 
 
+type V1API interface {
+
+	/*
+	ApiV1BusPublishPost s.handleBusPublish
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1BusPublishPostRequest
+	*/
+	ApiV1BusPublishPost(ctx context.Context) ApiApiV1BusPublishPostRequest
+
+	// ApiV1BusPublishPostExecute executes the request
+	ApiV1BusPublishPostExecute(r ApiApiV1BusPublishPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1BusStatsGet s.handleBusStats
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1BusStatsGetRequest
+	*/
+	ApiV1BusStatsGet(ctx context.Context) ApiApiV1BusStatsGetRequest
+
+	// ApiV1BusStatsGetExecute executes the request
+	ApiV1BusStatsGetExecute(r ApiApiV1BusStatsGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1CacheClearPost s.handleCacheClear
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1CacheClearPostRequest
+	*/
+	ApiV1CacheClearPost(ctx context.Context) ApiApiV1CacheClearPostRequest
+
+	// ApiV1CacheClearPostExecute executes the request
+	ApiV1CacheClearPostExecute(r ApiApiV1CacheClearPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1CacheInspectGet s.handleCacheInspect
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1CacheInspectGetRequest
+	*/
+	ApiV1CacheInspectGet(ctx context.Context) ApiApiV1CacheInspectGetRequest
+
+	// ApiV1CacheInspectGetExecute executes the request
+	ApiV1CacheInspectGetExecute(r ApiApiV1CacheInspectGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1CacheInvalidatePost s.handleCacheInvalidate
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1CacheInvalidatePostRequest
+	*/
+	ApiV1CacheInvalidatePost(ctx context.Context) ApiApiV1CacheInvalidatePostRequest
+
+	// ApiV1CacheInvalidatePostExecute executes the request
+	ApiV1CacheInvalidatePostExecute(r ApiApiV1CacheInvalidatePostRequest) (*http.Response, error)
+
+	/*
+	ApiV1CacheStatsGet s.handleCacheStats
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1CacheStatsGetRequest
+	*/
+	ApiV1CacheStatsGet(ctx context.Context) ApiApiV1CacheStatsGetRequest
+
+	// ApiV1CacheStatsGetExecute executes the request
+	ApiV1CacheStatsGetExecute(r ApiApiV1CacheStatsGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1CalendarEventsGet s.handleCalendarList
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1CalendarEventsGetRequest
+	*/
+	ApiV1CalendarEventsGet(ctx context.Context) ApiApiV1CalendarEventsGetRequest
+
+	// ApiV1CalendarEventsGetExecute executes the request
+	ApiV1CalendarEventsGetExecute(r ApiApiV1CalendarEventsGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1CalendarEventsIdGet s.handleCalendarGet
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1CalendarEventsIdGetRequest
+	*/
+	ApiV1CalendarEventsIdGet(ctx context.Context) ApiApiV1CalendarEventsIdGetRequest
+
+	// ApiV1CalendarEventsIdGetExecute executes the request
+	ApiV1CalendarEventsIdGetExecute(r ApiApiV1CalendarEventsIdGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1CalendarQuickaddPost s.handleCalendarQuickAdd
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1CalendarQuickaddPostRequest
+	*/
+	ApiV1CalendarQuickaddPost(ctx context.Context) ApiApiV1CalendarQuickaddPostRequest
+
+	// ApiV1CalendarQuickaddPostExecute executes the request
+	ApiV1CalendarQuickaddPostExecute(r ApiApiV1CalendarQuickaddPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1CalendarTodayGet s.handleCalendarToday
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1CalendarTodayGetRequest
+	*/
+	ApiV1CalendarTodayGet(ctx context.Context) ApiApiV1CalendarTodayGetRequest
+
+	// ApiV1CalendarTodayGetExecute executes the request
+	ApiV1CalendarTodayGetExecute(r ApiApiV1CalendarTodayGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1CalendarUpcomingGet s.handleCalendarUpcoming
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1CalendarUpcomingGetRequest
+	*/
+	ApiV1CalendarUpcomingGet(ctx context.Context) ApiApiV1CalendarUpcomingGetRequest
+
+	// ApiV1CalendarUpcomingGetExecute executes the request
+	ApiV1CalendarUpcomingGetExecute(r ApiApiV1CalendarUpcomingGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1ChatPost s.handleChat
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ChatPostRequest
+	*/
+	ApiV1ChatPost(ctx context.Context) ApiApiV1ChatPostRequest
+
+	// ApiV1ChatPostExecute executes the request
+	ApiV1ChatPostExecute(r ApiApiV1ChatPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1ChatQueueIdGet s.handleChatQueueStatus
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ChatQueueIdGetRequest
+	*/
+	ApiV1ChatQueueIdGet(ctx context.Context) ApiApiV1ChatQueueIdGetRequest
+
+	// ApiV1ChatQueueIdGetExecute executes the request
+	ApiV1ChatQueueIdGetExecute(r ApiApiV1ChatQueueIdGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1ChatStreamGet s.handleChatStream
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ChatStreamGetRequest
+	*/
+	ApiV1ChatStreamGet(ctx context.Context) ApiApiV1ChatStreamGetRequest
+
+	// ApiV1ChatStreamGetExecute executes the request
+	ApiV1ChatStreamGetExecute(r ApiApiV1ChatStreamGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1ChatWithAgentPost s.handleChatWithAgent
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ChatWithAgentPostRequest
+	*/
+	ApiV1ChatWithAgentPost(ctx context.Context) ApiApiV1ChatWithAgentPostRequest
+
+	// ApiV1ChatWithAgentPostExecute executes the request
+	ApiV1ChatWithAgentPostExecute(r ApiApiV1ChatWithAgentPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1ConfigAgentsGet s.handleListAgents
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ConfigAgentsGetRequest
+	*/
+	ApiV1ConfigAgentsGet(ctx context.Context) ApiApiV1ConfigAgentsGetRequest
+
+	// ApiV1ConfigAgentsGetExecute executes the request
+	ApiV1ConfigAgentsGetExecute(r ApiApiV1ConfigAgentsGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1ConfigAgentsIdPost s.handleSaveAgent
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ConfigAgentsIdPostRequest
+	*/
+	ApiV1ConfigAgentsIdPost(ctx context.Context) ApiApiV1ConfigAgentsIdPostRequest
+
+	// ApiV1ConfigAgentsIdPostExecute executes the request
+	ApiV1ConfigAgentsIdPostExecute(r ApiApiV1ConfigAgentsIdPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1ConfigClientPost s.handleSaveClientConfig
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ConfigClientPostRequest
+	*/
+	ApiV1ConfigClientPost(ctx context.Context) ApiApiV1ConfigClientPostRequest
+
+	// ApiV1ConfigClientPostExecute executes the request
+	ApiV1ConfigClientPostExecute(r ApiApiV1ConfigClientPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1ConfigMenubarGet s.handleGetMenubarConfig
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ConfigMenubarGetRequest
+	*/
+	ApiV1ConfigMenubarGet(ctx context.Context) ApiApiV1ConfigMenubarGetRequest
+
+	// ApiV1ConfigMenubarGetExecute executes the request
+	ApiV1ConfigMenubarGetExecute(r ApiApiV1ConfigMenubarGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1ConfigModelsPost s.handleSaveModelsConfig
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ConfigModelsPostRequest
+	*/
+	ApiV1ConfigModelsPost(ctx context.Context) ApiApiV1ConfigModelsPostRequest
+
+	// ApiV1ConfigModelsPostExecute executes the request
+	ApiV1ConfigModelsPostExecute(r ApiApiV1ConfigModelsPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1ConfigNormalizePost s.handleNormalizeConfig
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ConfigNormalizePostRequest
+	*/
+	ApiV1ConfigNormalizePost(ctx context.Context) ApiApiV1ConfigNormalizePostRequest
+
+	// ApiV1ConfigNormalizePostExecute executes the request
+	ApiV1ConfigNormalizePostExecute(r ApiApiV1ConfigNormalizePostRequest) (*http.Response, error)
+
+	/*
+	ApiV1DaemonRestartPost s.handleDaemonRestart
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1DaemonRestartPostRequest
+	*/
+	ApiV1DaemonRestartPost(ctx context.Context) ApiApiV1DaemonRestartPostRequest
+
+	// ApiV1DaemonRestartPostExecute executes the request
+	ApiV1DaemonRestartPostExecute(r ApiApiV1DaemonRestartPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1DaemonStartPost s.handleDaemonStart
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1DaemonStartPostRequest
+	*/
+	ApiV1DaemonStartPost(ctx context.Context) ApiApiV1DaemonStartPostRequest
+
+	// ApiV1DaemonStartPostExecute executes the request
+	ApiV1DaemonStartPostExecute(r ApiApiV1DaemonStartPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1DaemonStatusGet s.handleDaemonStatus
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1DaemonStatusGetRequest
+	*/
+	ApiV1DaemonStatusGet(ctx context.Context) ApiApiV1DaemonStatusGetRequest
+
+	// ApiV1DaemonStatusGetExecute executes the request
+	ApiV1DaemonStatusGetExecute(r ApiApiV1DaemonStatusGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1DaemonStopPost s.handleDaemonStop
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1DaemonStopPostRequest
+	*/
+	ApiV1DaemonStopPost(ctx context.Context) ApiApiV1DaemonStopPostRequest
+
+	// ApiV1DaemonStopPostExecute executes the request
+	ApiV1DaemonStopPostExecute(r ApiApiV1DaemonStopPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1HealthGet s.handleHealth
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1HealthGetRequest
+	*/
+	ApiV1HealthGet(ctx context.Context) ApiApiV1HealthGetRequest
+
+	// ApiV1HealthGetExecute executes the request
+	ApiV1HealthGetExecute(r ApiApiV1HealthGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1MemoryExportPost s.handleMemoryExport
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1MemoryExportPostRequest
+	*/
+	ApiV1MemoryExportPost(ctx context.Context) ApiApiV1MemoryExportPostRequest
+
+	// ApiV1MemoryExportPostExecute executes the request
+	ApiV1MemoryExportPostExecute(r ApiApiV1MemoryExportPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1MemoryQueryPost s.handleMemoryQuery
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1MemoryQueryPostRequest
+	*/
+	ApiV1MemoryQueryPost(ctx context.Context) ApiApiV1MemoryQueryPostRequest
+
+	// ApiV1MemoryQueryPostExecute executes the request
+	ApiV1MemoryQueryPostExecute(r ApiApiV1MemoryQueryPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1MemoryRecentGet s.handleMemoryRecent
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1MemoryRecentGetRequest
+	*/
+	ApiV1MemoryRecentGet(ctx context.Context) ApiApiV1MemoryRecentGetRequest
+
+	// ApiV1MemoryRecentGetExecute executes the request
+	ApiV1MemoryRecentGetExecute(r ApiApiV1MemoryRecentGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1MemoryVectorIdDelete s.handleMemoryVectorDelete
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1MemoryVectorIdDeleteRequest
+	*/
+	ApiV1MemoryVectorIdDelete(ctx context.Context) ApiApiV1MemoryVectorIdDeleteRequest
+
+	// ApiV1MemoryVectorIdDeleteExecute executes the request
+	ApiV1MemoryVectorIdDeleteExecute(r ApiApiV1MemoryVectorIdDeleteRequest) (*http.Response, error)
+
+	/*
+	ApiV1MemoryVectorSearchPost s.handleMemoryVectorSearch
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1MemoryVectorSearchPostRequest
+	*/
+	ApiV1MemoryVectorSearchPost(ctx context.Context) ApiApiV1MemoryVectorSearchPostRequest
+
+	// ApiV1MemoryVectorSearchPostExecute executes the request
+	ApiV1MemoryVectorSearchPostExecute(r ApiApiV1MemoryVectorSearchPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1MemoryVectorStatsGet s.handleMemoryVectorStats
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1MemoryVectorStatsGetRequest
+	*/
+	ApiV1MemoryVectorStatsGet(ctx context.Context) ApiApiV1MemoryVectorStatsGetRequest
+
+	// ApiV1MemoryVectorStatsGetExecute executes the request
+	ApiV1MemoryVectorStatsGetExecute(r ApiApiV1MemoryVectorStatsGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1MemoryVectorStorePost s.handleMemoryVectorStore
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1MemoryVectorStorePostRequest
+	*/
+	ApiV1MemoryVectorStorePost(ctx context.Context) ApiApiV1MemoryVectorStorePostRequest
+
+	// ApiV1MemoryVectorStorePostExecute executes the request
+	ApiV1MemoryVectorStorePostExecute(r ApiApiV1MemoryVectorStorePostRequest) (*http.Response, error)
+
+	/*
+	ApiV1MetricsFirewallGet s.handleFirewallStats
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1MetricsFirewallGetRequest
+	*/
+	ApiV1MetricsFirewallGet(ctx context.Context) ApiApiV1MetricsFirewallGetRequest
+
+	// ApiV1MetricsFirewallGetExecute executes the request
+	ApiV1MetricsFirewallGetExecute(r ApiApiV1MetricsFirewallGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1MetricsHistoricalGet s.handleHistoricalMetrics
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1MetricsHistoricalGetRequest
+	*/
+	ApiV1MetricsHistoricalGet(ctx context.Context) ApiApiV1MetricsHistoricalGetRequest
+
+	// ApiV1MetricsHistoricalGetExecute executes the request
+	ApiV1MetricsHistoricalGetExecute(r ApiApiV1MetricsHistoricalGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1MetricsLiveGet s.handleLiveMetrics
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1MetricsLiveGetRequest
+	*/
+	ApiV1MetricsLiveGet(ctx context.Context) ApiApiV1MetricsLiveGetRequest
+
+	// ApiV1MetricsLiveGetExecute executes the request
+	ApiV1MetricsLiveGetExecute(r ApiApiV1MetricsLiveGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1MetricsRateLimitsGet s.handleRateLimitSummary
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1MetricsRateLimitsGetRequest
+	*/
+	ApiV1MetricsRateLimitsGet(ctx context.Context) ApiApiV1MetricsRateLimitsGetRequest
+
+	// ApiV1MetricsRateLimitsGetExecute executes the request
+	ApiV1MetricsRateLimitsGetExecute(r ApiApiV1MetricsRateLimitsGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1MetricsStreamGet s.handleMetricsStream
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1MetricsStreamGetRequest
+	*/
+	ApiV1MetricsStreamGet(ctx context.Context) ApiApiV1MetricsStreamGetRequest
+
+	// ApiV1MetricsStreamGetExecute executes the request
+	ApiV1MetricsStreamGetExecute(r ApiApiV1MetricsStreamGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1ModelsCredentialsProviderDelete s.handleModelsDeleteCredential
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ModelsCredentialsProviderDeleteRequest
+	*/
+	ApiV1ModelsCredentialsProviderDelete(ctx context.Context) ApiApiV1ModelsCredentialsProviderDeleteRequest
+
+	// ApiV1ModelsCredentialsProviderDeleteExecute executes the request
+	ApiV1ModelsCredentialsProviderDeleteExecute(r ApiApiV1ModelsCredentialsProviderDeleteRequest) (*http.Response, error)
+
+	/*
+	ApiV1ModelsDefaultPost s.handleModelsSetDefault
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ModelsDefaultPostRequest
+	*/
+	ApiV1ModelsDefaultPost(ctx context.Context) ApiApiV1ModelsDefaultPostRequest
+
+	// ApiV1ModelsDefaultPostExecute executes the request
+	ApiV1ModelsDefaultPostExecute(r ApiApiV1ModelsDefaultPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1ModelsGet s.handleModelsList
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ModelsGetRequest
+	*/
+	ApiV1ModelsGet(ctx context.Context) ApiApiV1ModelsGetRequest
+
+	// ApiV1ModelsGetExecute executes the request
+	ApiV1ModelsGetExecute(r ApiApiV1ModelsGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1ModelsProviderModelDelete s.handleModelsRemove
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ModelsProviderModelDeleteRequest
+	*/
+	ApiV1ModelsProviderModelDelete(ctx context.Context) ApiApiV1ModelsProviderModelDeleteRequest
+
+	// ApiV1ModelsProviderModelDeleteExecute executes the request
+	ApiV1ModelsProviderModelDeleteExecute(r ApiApiV1ModelsProviderModelDeleteRequest) (*http.Response, error)
+
+	/*
+	ApiV1ModelsProvidersGet s.handleModelsProviders
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ModelsProvidersGetRequest
+	*/
+	ApiV1ModelsProvidersGet(ctx context.Context) ApiApiV1ModelsProvidersGetRequest
+
+	// ApiV1ModelsProvidersGetExecute executes the request
+	ApiV1ModelsProvidersGetExecute(r ApiApiV1ModelsProvidersGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1PlansGet s.handlePlanList
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1PlansGetRequest
+	*/
+	ApiV1PlansGet(ctx context.Context) ApiApiV1PlansGetRequest
+
+	// ApiV1PlansGetExecute executes the request
+	ApiV1PlansGetExecute(r ApiApiV1PlansGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1PlansIdApprovePost s.handlePlanApprove
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1PlansIdApprovePostRequest
+	*/
+	ApiV1PlansIdApprovePost(ctx context.Context) ApiApiV1PlansIdApprovePostRequest
+
+	// ApiV1PlansIdApprovePostExecute executes the request
+	ApiV1PlansIdApprovePostExecute(r ApiApiV1PlansIdApprovePostRequest) (*http.Response, error)
+
+	/*
+	ApiV1PlansIdConfirmPost s.handlePlanConfirm
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1PlansIdConfirmPostRequest
+	*/
+	ApiV1PlansIdConfirmPost(ctx context.Context) ApiApiV1PlansIdConfirmPostRequest
+
+	// ApiV1PlansIdConfirmPostExecute executes the request
+	ApiV1PlansIdConfirmPostExecute(r ApiApiV1PlansIdConfirmPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1PlansIdGet s.handlePlanGet
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1PlansIdGetRequest
+	*/
+	ApiV1PlansIdGet(ctx context.Context) ApiApiV1PlansIdGetRequest
+
+	// ApiV1PlansIdGetExecute executes the request
+	ApiV1PlansIdGetExecute(r ApiApiV1PlansIdGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1PlansIdRejectPost s.handlePlanReject
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1PlansIdRejectPostRequest
+	*/
+	ApiV1PlansIdRejectPost(ctx context.Context) ApiApiV1PlansIdRejectPostRequest
+
+	// ApiV1PlansIdRejectPostExecute executes the request
+	ApiV1PlansIdRejectPostExecute(r ApiApiV1PlansIdRejectPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1PlansIdRevisePost s.handlePlanRevise
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1PlansIdRevisePostRequest
+	*/
+	ApiV1PlansIdRevisePost(ctx context.Context) ApiApiV1PlansIdRevisePostRequest
+
+	// ApiV1PlansIdRevisePostExecute executes the request
+	ApiV1PlansIdRevisePostExecute(r ApiApiV1PlansIdRevisePostRequest) (*http.Response, error)
+
+	/*
+	ApiV1ProjectsDetectPost s.handleProjectDetect
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ProjectsDetectPostRequest
+	*/
+	ApiV1ProjectsDetectPost(ctx context.Context) ApiApiV1ProjectsDetectPostRequest
+
+	// ApiV1ProjectsDetectPostExecute executes the request
+	ApiV1ProjectsDetectPostExecute(r ApiApiV1ProjectsDetectPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1ProjectsGet s.handleProjectList
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ProjectsGetRequest
+	*/
+	ApiV1ProjectsGet(ctx context.Context) ApiApiV1ProjectsGetRequest
+
+	// ApiV1ProjectsGetExecute executes the request
+	ApiV1ProjectsGetExecute(r ApiApiV1ProjectsGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1ProjectsIdBranchesGet s.handleProjectBranches
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ProjectsIdBranchesGetRequest
+	*/
+	ApiV1ProjectsIdBranchesGet(ctx context.Context) ApiApiV1ProjectsIdBranchesGetRequest
+
+	// ApiV1ProjectsIdBranchesGetExecute executes the request
+	ApiV1ProjectsIdBranchesGetExecute(r ApiApiV1ProjectsIdBranchesGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1ProjectsIdCheckoutPost s.handleProjectCheckout
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ProjectsIdCheckoutPostRequest
+	*/
+	ApiV1ProjectsIdCheckoutPost(ctx context.Context) ApiApiV1ProjectsIdCheckoutPostRequest
+
+	// ApiV1ProjectsIdCheckoutPostExecute executes the request
+	ApiV1ProjectsIdCheckoutPostExecute(r ApiApiV1ProjectsIdCheckoutPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1ProjectsIdGet s.handleProjectGet
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ProjectsIdGetRequest
+	*/
+	ApiV1ProjectsIdGet(ctx context.Context) ApiApiV1ProjectsIdGetRequest
+
+	// ApiV1ProjectsIdGetExecute executes the request
+	ApiV1ProjectsIdGetExecute(r ApiApiV1ProjectsIdGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1ProjectsIdStatusGet s.handleProjectStatus
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ProjectsIdStatusGetRequest
+	*/
+	ApiV1ProjectsIdStatusGet(ctx context.Context) ApiApiV1ProjectsIdStatusGetRequest
+
+	// ApiV1ProjectsIdStatusGetExecute executes the request
+	ApiV1ProjectsIdStatusGetExecute(r ApiApiV1ProjectsIdStatusGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1ProjectsIdSyncPost s.handleProjectSync
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1ProjectsIdSyncPostRequest
+	*/
+	ApiV1ProjectsIdSyncPost(ctx context.Context) ApiApiV1ProjectsIdSyncPostRequest
+
+	// ApiV1ProjectsIdSyncPostExecute executes the request
+	ApiV1ProjectsIdSyncPostExecute(r ApiApiV1ProjectsIdSyncPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1QueueFollowupPost s.handleQueueFollowUpRoute
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1QueueFollowupPostRequest
+	*/
+	ApiV1QueueFollowupPost(ctx context.Context) ApiApiV1QueueFollowupPostRequest
+
+	// ApiV1QueueFollowupPostExecute executes the request
+	ApiV1QueueFollowupPostExecute(r ApiApiV1QueueFollowupPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1QueueJobsGet s.handleQueueList
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1QueueJobsGetRequest
+	*/
+	ApiV1QueueJobsGet(ctx context.Context) ApiApiV1QueueJobsGetRequest
+
+	// ApiV1QueueJobsGetExecute executes the request
+	ApiV1QueueJobsGetExecute(r ApiApiV1QueueJobsGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1QueueJobsIdClaimPost s.handleQueueClaim
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1QueueJobsIdClaimPostRequest
+	*/
+	ApiV1QueueJobsIdClaimPost(ctx context.Context) ApiApiV1QueueJobsIdClaimPostRequest
+
+	// ApiV1QueueJobsIdClaimPostExecute executes the request
+	ApiV1QueueJobsIdClaimPostExecute(r ApiApiV1QueueJobsIdClaimPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1QueueJobsIdCompletePost s.handleQueueComplete
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1QueueJobsIdCompletePostRequest
+	*/
+	ApiV1QueueJobsIdCompletePost(ctx context.Context) ApiApiV1QueueJobsIdCompletePostRequest
+
+	// ApiV1QueueJobsIdCompletePostExecute executes the request
+	ApiV1QueueJobsIdCompletePostExecute(r ApiApiV1QueueJobsIdCompletePostRequest) (*http.Response, error)
+
+	/*
+	ApiV1QueueJobsIdFailPost s.handleQueueFail
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1QueueJobsIdFailPostRequest
+	*/
+	ApiV1QueueJobsIdFailPost(ctx context.Context) ApiApiV1QueueJobsIdFailPostRequest
+
+	// ApiV1QueueJobsIdFailPostExecute executes the request
+	ApiV1QueueJobsIdFailPostExecute(r ApiApiV1QueueJobsIdFailPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1QueueJobsIdGet s.handleQueueGet
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1QueueJobsIdGetRequest
+	*/
+	ApiV1QueueJobsIdGet(ctx context.Context) ApiApiV1QueueJobsIdGetRequest
+
+	// ApiV1QueueJobsIdGetExecute executes the request
+	ApiV1QueueJobsIdGetExecute(r ApiApiV1QueueJobsIdGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1QueueJobsIdRetryPost s.handleQueueRetry
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1QueueJobsIdRetryPostRequest
+	*/
+	ApiV1QueueJobsIdRetryPost(ctx context.Context) ApiApiV1QueueJobsIdRetryPostRequest
+
+	// ApiV1QueueJobsIdRetryPostExecute executes the request
+	ApiV1QueueJobsIdRetryPostExecute(r ApiApiV1QueueJobsIdRetryPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1QueueStatsGet s.handleQueueStats
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1QueueStatsGetRequest
+	*/
+	ApiV1QueueStatsGet(ctx context.Context) ApiApiV1QueueStatsGetRequest
+
+	// ApiV1QueueStatsGetExecute executes the request
+	ApiV1QueueStatsGetExecute(r ApiApiV1QueueStatsGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1QueueStatusIdGet s.handleQueueStatusRoute
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1QueueStatusIdGetRequest
+	*/
+	ApiV1QueueStatusIdGet(ctx context.Context) ApiApiV1QueueStatusIdGetRequest
+
+	// ApiV1QueueStatusIdGetExecute executes the request
+	ApiV1QueueStatusIdGetExecute(r ApiApiV1QueueStatusIdGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1QueueSteerPost s.handleQueueSteerRoute
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1QueueSteerPostRequest
+	*/
+	ApiV1QueueSteerPost(ctx context.Context) ApiApiV1QueueSteerPostRequest
+
+	// ApiV1QueueSteerPostExecute executes the request
+	ApiV1QueueSteerPostExecute(r ApiApiV1QueueSteerPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1RuntimeRestartProviderPost s.handleRuntimeRestart
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1RuntimeRestartProviderPostRequest
+	*/
+	ApiV1RuntimeRestartProviderPost(ctx context.Context) ApiApiV1RuntimeRestartProviderPostRequest
+
+	// ApiV1RuntimeRestartProviderPostExecute executes the request
+	ApiV1RuntimeRestartProviderPostExecute(r ApiApiV1RuntimeRestartProviderPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1RuntimeStartProviderPost s.handleRuntimeStart
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1RuntimeStartProviderPostRequest
+	*/
+	ApiV1RuntimeStartProviderPost(ctx context.Context) ApiApiV1RuntimeStartProviderPostRequest
+
+	// ApiV1RuntimeStartProviderPostExecute executes the request
+	ApiV1RuntimeStartProviderPostExecute(r ApiApiV1RuntimeStartProviderPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1RuntimeStatusGet s.handleRuntimeStatus
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1RuntimeStatusGetRequest
+	*/
+	ApiV1RuntimeStatusGet(ctx context.Context) ApiApiV1RuntimeStatusGetRequest
+
+	// ApiV1RuntimeStatusGetExecute executes the request
+	ApiV1RuntimeStatusGetExecute(r ApiApiV1RuntimeStatusGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1RuntimeStatusProviderGet s.handleRuntimeStatusProvider
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1RuntimeStatusProviderGetRequest
+	*/
+	ApiV1RuntimeStatusProviderGet(ctx context.Context) ApiApiV1RuntimeStatusProviderGetRequest
+
+	// ApiV1RuntimeStatusProviderGetExecute executes the request
+	ApiV1RuntimeStatusProviderGetExecute(r ApiApiV1RuntimeStatusProviderGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1RuntimeStopProviderPost s.handleRuntimeStop
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1RuntimeStopProviderPostRequest
+	*/
+	ApiV1RuntimeStopProviderPost(ctx context.Context) ApiApiV1RuntimeStopProviderPostRequest
+
+	// ApiV1RuntimeStopProviderPostExecute executes the request
+	ApiV1RuntimeStopProviderPostExecute(r ApiApiV1RuntimeStopProviderPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SchedulerJobsGet s.handleSchedulerListJobs
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SchedulerJobsGetRequest
+	*/
+	ApiV1SchedulerJobsGet(ctx context.Context) ApiApiV1SchedulerJobsGetRequest
+
+	// ApiV1SchedulerJobsGetExecute executes the request
+	ApiV1SchedulerJobsGetExecute(r ApiApiV1SchedulerJobsGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1SchedulerJobsIdDelete s.handleSchedulerRemoveJob
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SchedulerJobsIdDeleteRequest
+	*/
+	ApiV1SchedulerJobsIdDelete(ctx context.Context) ApiApiV1SchedulerJobsIdDeleteRequest
+
+	// ApiV1SchedulerJobsIdDeleteExecute executes the request
+	ApiV1SchedulerJobsIdDeleteExecute(r ApiApiV1SchedulerJobsIdDeleteRequest) (*http.Response, error)
+
+	/*
+	ApiV1SchedulerJobsIdEnablePost s.handleSchedulerEnableJob
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SchedulerJobsIdEnablePostRequest
+	*/
+	ApiV1SchedulerJobsIdEnablePost(ctx context.Context) ApiApiV1SchedulerJobsIdEnablePostRequest
+
+	// ApiV1SchedulerJobsIdEnablePostExecute executes the request
+	ApiV1SchedulerJobsIdEnablePostExecute(r ApiApiV1SchedulerJobsIdEnablePostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SchedulerJobsIdPausePost s.handleSchedulerPauseJob
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SchedulerJobsIdPausePostRequest
+	*/
+	ApiV1SchedulerJobsIdPausePost(ctx context.Context) ApiApiV1SchedulerJobsIdPausePostRequest
+
+	// ApiV1SchedulerJobsIdPausePostExecute executes the request
+	ApiV1SchedulerJobsIdPausePostExecute(r ApiApiV1SchedulerJobsIdPausePostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SchedulerJobsIdResumePost s.handleSchedulerResumeJob
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SchedulerJobsIdResumePostRequest
+	*/
+	ApiV1SchedulerJobsIdResumePost(ctx context.Context) ApiApiV1SchedulerJobsIdResumePostRequest
+
+	// ApiV1SchedulerJobsIdResumePostExecute executes the request
+	ApiV1SchedulerJobsIdResumePostExecute(r ApiApiV1SchedulerJobsIdResumePostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SearchPost s.handleSearch
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SearchPostRequest
+	*/
+	ApiV1SearchPost(ctx context.Context) ApiApiV1SearchPostRequest
+
+	// ApiV1SearchPostExecute executes the request
+	ApiV1SearchPostExecute(r ApiApiV1SearchPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SecurityCheckPost s.handleSecurityCheck
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SecurityCheckPostRequest
+	*/
+	ApiV1SecurityCheckPost(ctx context.Context) ApiApiV1SecurityCheckPostRequest
+
+	// ApiV1SecurityCheckPostExecute executes the request
+	ApiV1SecurityCheckPostExecute(r ApiApiV1SecurityCheckPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SelfimproveAnalyzePost s.handleSelfImproveAnalyze
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SelfimproveAnalyzePostRequest
+	*/
+	ApiV1SelfimproveAnalyzePost(ctx context.Context) ApiApiV1SelfimproveAnalyzePostRequest
+
+	// ApiV1SelfimproveAnalyzePostExecute executes the request
+	ApiV1SelfimproveAnalyzePostExecute(r ApiApiV1SelfimproveAnalyzePostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SelfimproveApplyPost s.handleSelfImproveApply
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SelfimproveApplyPostRequest
+	*/
+	ApiV1SelfimproveApplyPost(ctx context.Context) ApiApiV1SelfimproveApplyPostRequest
+
+	// ApiV1SelfimproveApplyPostExecute executes the request
+	ApiV1SelfimproveApplyPostExecute(r ApiApiV1SelfimproveApplyPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SelfimproveGeneratePost s.handleSelfImproveGenerate
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SelfimproveGeneratePostRequest
+	*/
+	ApiV1SelfimproveGeneratePost(ctx context.Context) ApiApiV1SelfimproveGeneratePostRequest
+
+	// ApiV1SelfimproveGeneratePostExecute executes the request
+	ApiV1SelfimproveGeneratePostExecute(r ApiApiV1SelfimproveGeneratePostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SelfimproveRejectPost s.handleSelfImproveReject
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SelfimproveRejectPostRequest
+	*/
+	ApiV1SelfimproveRejectPost(ctx context.Context) ApiApiV1SelfimproveRejectPostRequest
+
+	// ApiV1SelfimproveRejectPostExecute executes the request
+	ApiV1SelfimproveRejectPostExecute(r ApiApiV1SelfimproveRejectPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SelfimproveStatusGet s.handleSelfImproveStatus
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SelfimproveStatusGetRequest
+	*/
+	ApiV1SelfimproveStatusGet(ctx context.Context) ApiApiV1SelfimproveStatusGetRequest
+
+	// ApiV1SelfimproveStatusGetExecute executes the request
+	ApiV1SelfimproveStatusGetExecute(r ApiApiV1SelfimproveStatusGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1SelfimproveTriggerPost s.handleSelfImproveTrigger
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SelfimproveTriggerPostRequest
+	*/
+	ApiV1SelfimproveTriggerPost(ctx context.Context) ApiApiV1SelfimproveTriggerPostRequest
+
+	// ApiV1SelfimproveTriggerPostExecute executes the request
+	ApiV1SelfimproveTriggerPostExecute(r ApiApiV1SelfimproveTriggerPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SelfimproveValidatePost s.handleSelfImproveValidate
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SelfimproveValidatePostRequest
+	*/
+	ApiV1SelfimproveValidatePost(ctx context.Context) ApiApiV1SelfimproveValidatePostRequest
+
+	// ApiV1SelfimproveValidatePostExecute executes the request
+	ApiV1SelfimproveValidatePostExecute(r ApiApiV1SelfimproveValidatePostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SessionsGet s.handleSessionList
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SessionsGetRequest
+	*/
+	ApiV1SessionsGet(ctx context.Context) ApiApiV1SessionsGetRequest
+
+	// ApiV1SessionsGetExecute executes the request
+	ApiV1SessionsGetExecute(r ApiApiV1SessionsGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1SessionsIdAttachPost s.handleSessionAttach
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SessionsIdAttachPostRequest
+	*/
+	ApiV1SessionsIdAttachPost(ctx context.Context) ApiApiV1SessionsIdAttachPostRequest
+
+	// ApiV1SessionsIdAttachPostExecute executes the request
+	ApiV1SessionsIdAttachPostExecute(r ApiApiV1SessionsIdAttachPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SessionsIdBranchPost s.handleSessionBranch
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SessionsIdBranchPostRequest
+	*/
+	ApiV1SessionsIdBranchPost(ctx context.Context) ApiApiV1SessionsIdBranchPostRequest
+
+	// ApiV1SessionsIdBranchPostExecute executes the request
+	ApiV1SessionsIdBranchPostExecute(r ApiApiV1SessionsIdBranchPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SessionsIdBranchesGet s.handleSessionBranches
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SessionsIdBranchesGetRequest
+	*/
+	ApiV1SessionsIdBranchesGet(ctx context.Context) ApiApiV1SessionsIdBranchesGetRequest
+
+	// ApiV1SessionsIdBranchesGetExecute executes the request
+	ApiV1SessionsIdBranchesGetExecute(r ApiApiV1SessionsIdBranchesGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1SessionsIdCompactPost s.handleSessionCompact
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SessionsIdCompactPostRequest
+	*/
+	ApiV1SessionsIdCompactPost(ctx context.Context) ApiApiV1SessionsIdCompactPostRequest
+
+	// ApiV1SessionsIdCompactPostExecute executes the request
+	ApiV1SessionsIdCompactPostExecute(r ApiApiV1SessionsIdCompactPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SessionsIdDelete s.handleSessionDelete
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SessionsIdDeleteRequest
+	*/
+	ApiV1SessionsIdDelete(ctx context.Context) ApiApiV1SessionsIdDeleteRequest
+
+	// ApiV1SessionsIdDeleteExecute executes the request
+	ApiV1SessionsIdDeleteExecute(r ApiApiV1SessionsIdDeleteRequest) (*http.Response, error)
+
+	/*
+	ApiV1SessionsIdDetachPost s.handleSessionDetach
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SessionsIdDetachPostRequest
+	*/
+	ApiV1SessionsIdDetachPost(ctx context.Context) ApiApiV1SessionsIdDetachPostRequest
+
+	// ApiV1SessionsIdDetachPostExecute executes the request
+	ApiV1SessionsIdDetachPostExecute(r ApiApiV1SessionsIdDetachPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SessionsIdForkPost s.handleSessionFork
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SessionsIdForkPostRequest
+	*/
+	ApiV1SessionsIdForkPost(ctx context.Context) ApiApiV1SessionsIdForkPostRequest
+
+	// ApiV1SessionsIdForkPostExecute executes the request
+	ApiV1SessionsIdForkPostExecute(r ApiApiV1SessionsIdForkPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SessionsIdMessagesGet s.handleSessionMessages
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SessionsIdMessagesGetRequest
+	*/
+	ApiV1SessionsIdMessagesGet(ctx context.Context) ApiApiV1SessionsIdMessagesGetRequest
+
+	// ApiV1SessionsIdMessagesGetExecute executes the request
+	ApiV1SessionsIdMessagesGetExecute(r ApiApiV1SessionsIdMessagesGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1SessionsIdPlansGet s.handleSessionPlans
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SessionsIdPlansGetRequest
+	*/
+	ApiV1SessionsIdPlansGet(ctx context.Context) ApiApiV1SessionsIdPlansGetRequest
+
+	// ApiV1SessionsIdPlansGetExecute executes the request
+	ApiV1SessionsIdPlansGetExecute(r ApiApiV1SessionsIdPlansGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1SessionsIdResumePost s.handleSessionResume
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SessionsIdResumePostRequest
+	*/
+	ApiV1SessionsIdResumePost(ctx context.Context) ApiApiV1SessionsIdResumePostRequest
+
+	// ApiV1SessionsIdResumePostExecute executes the request
+	ApiV1SessionsIdResumePostExecute(r ApiApiV1SessionsIdResumePostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SessionsIdTreeGet s.handleSessionTree
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SessionsIdTreeGetRequest
+	*/
+	ApiV1SessionsIdTreeGet(ctx context.Context) ApiApiV1SessionsIdTreeGetRequest
+
+	// ApiV1SessionsIdTreeGetExecute executes the request
+	ApiV1SessionsIdTreeGetExecute(r ApiApiV1SessionsIdTreeGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1SkillsGet s.handleSkillsList
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SkillsGetRequest
+	*/
+	ApiV1SkillsGet(ctx context.Context) ApiApiV1SkillsGetRequest
+
+	// ApiV1SkillsGetExecute executes the request
+	ApiV1SkillsGetExecute(r ApiApiV1SkillsGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1SkillsSlugExecutePost s.handleSkillsExecute
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SkillsSlugExecutePostRequest
+	*/
+	ApiV1SkillsSlugExecutePost(ctx context.Context) ApiApiV1SkillsSlugExecutePostRequest
+
+	// ApiV1SkillsSlugExecutePostExecute executes the request
+	ApiV1SkillsSlugExecutePostExecute(r ApiApiV1SkillsSlugExecutePostRequest) (*http.Response, error)
+
+	/*
+	ApiV1SkillsSlugGet s.handleSkillsGet
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SkillsSlugGetRequest
+	*/
+	ApiV1SkillsSlugGet(ctx context.Context) ApiApiV1SkillsSlugGetRequest
+
+	// ApiV1SkillsSlugGetExecute executes the request
+	ApiV1SkillsSlugGetExecute(r ApiApiV1SkillsSlugGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1SkillsSlugUiGet s.handleSkillUI
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1SkillsSlugUiGetRequest
+	*/
+	ApiV1SkillsSlugUiGet(ctx context.Context) ApiApiV1SkillsSlugUiGetRequest
+
+	// ApiV1SkillsSlugUiGetExecute executes the request
+	ApiV1SkillsSlugUiGetExecute(r ApiApiV1SkillsSlugUiGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1TasksGet s.handleTaskList
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1TasksGetRequest
+	*/
+	ApiV1TasksGet(ctx context.Context) ApiApiV1TasksGetRequest
+
+	// ApiV1TasksGetExecute executes the request
+	ApiV1TasksGetExecute(r ApiApiV1TasksGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1TasksIdCancelPost s.handleTaskCancel
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1TasksIdCancelPostRequest
+	*/
+	ApiV1TasksIdCancelPost(ctx context.Context) ApiApiV1TasksIdCancelPostRequest
+
+	// ApiV1TasksIdCancelPostExecute executes the request
+	ApiV1TasksIdCancelPostExecute(r ApiApiV1TasksIdCancelPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1TasksIdDelete s.handleTaskDelete
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1TasksIdDeleteRequest
+	*/
+	ApiV1TasksIdDelete(ctx context.Context) ApiApiV1TasksIdDeleteRequest
+
+	// ApiV1TasksIdDeleteExecute executes the request
+	ApiV1TasksIdDeleteExecute(r ApiApiV1TasksIdDeleteRequest) (*http.Response, error)
+
+	/*
+	ApiV1TasksIdStepsGet s.handleTaskSteps
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1TasksIdStepsGetRequest
+	*/
+	ApiV1TasksIdStepsGet(ctx context.Context) ApiApiV1TasksIdStepsGetRequest
+
+	// ApiV1TasksIdStepsGetExecute executes the request
+	ApiV1TasksIdStepsGetExecute(r ApiApiV1TasksIdStepsGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1TerminalClearPost s.handleTerminalClear
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1TerminalClearPostRequest
+	*/
+	ApiV1TerminalClearPost(ctx context.Context) ApiApiV1TerminalClearPostRequest
+
+	// ApiV1TerminalClearPostExecute executes the request
+	ApiV1TerminalClearPostExecute(r ApiApiV1TerminalClearPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1TerminalExecPost s.handleTerminalExec
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1TerminalExecPostRequest
+	*/
+	ApiV1TerminalExecPost(ctx context.Context) ApiApiV1TerminalExecPostRequest
+
+	// ApiV1TerminalExecPostExecute executes the request
+	ApiV1TerminalExecPostExecute(r ApiApiV1TerminalExecPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1TerminalHistoryGet s.handleTerminalHistory
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1TerminalHistoryGetRequest
+	*/
+	ApiV1TerminalHistoryGet(ctx context.Context) ApiApiV1TerminalHistoryGetRequest
+
+	// ApiV1TerminalHistoryGetExecute executes the request
+	ApiV1TerminalHistoryGetExecute(r ApiApiV1TerminalHistoryGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1TerminalSessionsGet s.handleTerminalSessions
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1TerminalSessionsGetRequest
+	*/
+	ApiV1TerminalSessionsGet(ctx context.Context) ApiApiV1TerminalSessionsGetRequest
+
+	// ApiV1TerminalSessionsGetExecute executes the request
+	ApiV1TerminalSessionsGetExecute(r ApiApiV1TerminalSessionsGetRequest) (*http.Response, error)
+
+	/*
+	ApiV1WorkersIdDelete s.handleWorkerRemove
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1WorkersIdDeleteRequest
+	*/
+	ApiV1WorkersIdDelete(ctx context.Context) ApiApiV1WorkersIdDeleteRequest
+
+	// ApiV1WorkersIdDeleteExecute executes the request
+	ApiV1WorkersIdDeleteExecute(r ApiApiV1WorkersIdDeleteRequest) (*http.Response, error)
+
+	/*
+	ApiV1WorkersPost s.handleWorkerAdd
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1WorkersPostRequest
+	*/
+	ApiV1WorkersPost(ctx context.Context) ApiApiV1WorkersPostRequest
+
+	// ApiV1WorkersPostExecute executes the request
+	ApiV1WorkersPostExecute(r ApiApiV1WorkersPostRequest) (*http.Response, error)
+
+	/*
+	ApiV1WorkersScalePost s.handleWorkerScale
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1WorkersScalePostRequest
+	*/
+	ApiV1WorkersScalePost(ctx context.Context) ApiApiV1WorkersScalePostRequest
+
+	// ApiV1WorkersScalePostExecute executes the request
+	ApiV1WorkersScalePostExecute(r ApiApiV1WorkersScalePostRequest) (*http.Response, error)
+
+	/*
+	ApiV1WorkersStatsGet s.handleWorkerStats
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiApiV1WorkersStatsGetRequest
+	*/
+	ApiV1WorkersStatsGet(ctx context.Context) ApiApiV1WorkersStatsGetRequest
+
+	// ApiV1WorkersStatsGetExecute executes the request
+	ApiV1WorkersStatsGetExecute(r ApiApiV1WorkersStatsGetRequest) (*http.Response, error)
+}
+
 // V1APIService V1API service
 type V1APIService service
 
 type ApiApiV1BusPublishPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1BusPublishPostRequest) Execute() (*http.Response, error) {
@@ -124,7 +1370,7 @@ func (a *V1APIService) ApiV1BusPublishPostExecute(r ApiApiV1BusPublishPostReques
 
 type ApiApiV1BusStatsGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1BusStatsGetRequest) Execute() (*http.Response, error) {
@@ -224,7 +1470,7 @@ func (a *V1APIService) ApiV1BusStatsGetExecute(r ApiApiV1BusStatsGetRequest) (*h
 
 type ApiApiV1CacheClearPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1CacheClearPostRequest) Execute() (*http.Response, error) {
@@ -324,7 +1570,7 @@ func (a *V1APIService) ApiV1CacheClearPostExecute(r ApiApiV1CacheClearPostReques
 
 type ApiApiV1CacheInspectGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1CacheInspectGetRequest) Execute() (*http.Response, error) {
@@ -424,7 +1670,7 @@ func (a *V1APIService) ApiV1CacheInspectGetExecute(r ApiApiV1CacheInspectGetRequ
 
 type ApiApiV1CacheInvalidatePostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1CacheInvalidatePostRequest) Execute() (*http.Response, error) {
@@ -524,7 +1770,7 @@ func (a *V1APIService) ApiV1CacheInvalidatePostExecute(r ApiApiV1CacheInvalidate
 
 type ApiApiV1CacheStatsGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1CacheStatsGetRequest) Execute() (*http.Response, error) {
@@ -624,7 +1870,7 @@ func (a *V1APIService) ApiV1CacheStatsGetExecute(r ApiApiV1CacheStatsGetRequest)
 
 type ApiApiV1CalendarEventsGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1CalendarEventsGetRequest) Execute() (*http.Response, error) {
@@ -724,7 +1970,7 @@ func (a *V1APIService) ApiV1CalendarEventsGetExecute(r ApiApiV1CalendarEventsGet
 
 type ApiApiV1CalendarEventsIdGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1CalendarEventsIdGetRequest) Execute() (*http.Response, error) {
@@ -824,7 +2070,7 @@ func (a *V1APIService) ApiV1CalendarEventsIdGetExecute(r ApiApiV1CalendarEventsI
 
 type ApiApiV1CalendarQuickaddPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1CalendarQuickaddPostRequest) Execute() (*http.Response, error) {
@@ -924,7 +2170,7 @@ func (a *V1APIService) ApiV1CalendarQuickaddPostExecute(r ApiApiV1CalendarQuicka
 
 type ApiApiV1CalendarTodayGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1CalendarTodayGetRequest) Execute() (*http.Response, error) {
@@ -1024,7 +2270,7 @@ func (a *V1APIService) ApiV1CalendarTodayGetExecute(r ApiApiV1CalendarTodayGetRe
 
 type ApiApiV1CalendarUpcomingGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1CalendarUpcomingGetRequest) Execute() (*http.Response, error) {
@@ -1124,7 +2370,7 @@ func (a *V1APIService) ApiV1CalendarUpcomingGetExecute(r ApiApiV1CalendarUpcomin
 
 type ApiApiV1ChatPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ChatPostRequest) Execute() (*http.Response, error) {
@@ -1224,7 +2470,7 @@ func (a *V1APIService) ApiV1ChatPostExecute(r ApiApiV1ChatPostRequest) (*http.Re
 
 type ApiApiV1ChatQueueIdGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ChatQueueIdGetRequest) Execute() (*http.Response, error) {
@@ -1324,7 +2570,7 @@ func (a *V1APIService) ApiV1ChatQueueIdGetExecute(r ApiApiV1ChatQueueIdGetReques
 
 type ApiApiV1ChatStreamGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ChatStreamGetRequest) Execute() (*http.Response, error) {
@@ -1424,7 +2670,7 @@ func (a *V1APIService) ApiV1ChatStreamGetExecute(r ApiApiV1ChatStreamGetRequest)
 
 type ApiApiV1ChatWithAgentPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ChatWithAgentPostRequest) Execute() (*http.Response, error) {
@@ -1524,7 +2770,7 @@ func (a *V1APIService) ApiV1ChatWithAgentPostExecute(r ApiApiV1ChatWithAgentPost
 
 type ApiApiV1ConfigAgentsGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ConfigAgentsGetRequest) Execute() (*http.Response, error) {
@@ -1624,7 +2870,7 @@ func (a *V1APIService) ApiV1ConfigAgentsGetExecute(r ApiApiV1ConfigAgentsGetRequ
 
 type ApiApiV1ConfigAgentsIdPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ConfigAgentsIdPostRequest) Execute() (*http.Response, error) {
@@ -1724,7 +2970,7 @@ func (a *V1APIService) ApiV1ConfigAgentsIdPostExecute(r ApiApiV1ConfigAgentsIdPo
 
 type ApiApiV1ConfigClientPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ConfigClientPostRequest) Execute() (*http.Response, error) {
@@ -1824,7 +3070,7 @@ func (a *V1APIService) ApiV1ConfigClientPostExecute(r ApiApiV1ConfigClientPostRe
 
 type ApiApiV1ConfigMenubarGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ConfigMenubarGetRequest) Execute() (*http.Response, error) {
@@ -1924,7 +3170,7 @@ func (a *V1APIService) ApiV1ConfigMenubarGetExecute(r ApiApiV1ConfigMenubarGetRe
 
 type ApiApiV1ConfigModelsPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ConfigModelsPostRequest) Execute() (*http.Response, error) {
@@ -2024,7 +3270,7 @@ func (a *V1APIService) ApiV1ConfigModelsPostExecute(r ApiApiV1ConfigModelsPostRe
 
 type ApiApiV1ConfigNormalizePostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ConfigNormalizePostRequest) Execute() (*http.Response, error) {
@@ -2124,7 +3370,7 @@ func (a *V1APIService) ApiV1ConfigNormalizePostExecute(r ApiApiV1ConfigNormalize
 
 type ApiApiV1DaemonRestartPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1DaemonRestartPostRequest) Execute() (*http.Response, error) {
@@ -2224,7 +3470,7 @@ func (a *V1APIService) ApiV1DaemonRestartPostExecute(r ApiApiV1DaemonRestartPost
 
 type ApiApiV1DaemonStartPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1DaemonStartPostRequest) Execute() (*http.Response, error) {
@@ -2324,7 +3570,7 @@ func (a *V1APIService) ApiV1DaemonStartPostExecute(r ApiApiV1DaemonStartPostRequ
 
 type ApiApiV1DaemonStatusGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1DaemonStatusGetRequest) Execute() (*http.Response, error) {
@@ -2424,7 +3670,7 @@ func (a *V1APIService) ApiV1DaemonStatusGetExecute(r ApiApiV1DaemonStatusGetRequ
 
 type ApiApiV1DaemonStopPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1DaemonStopPostRequest) Execute() (*http.Response, error) {
@@ -2524,7 +3770,7 @@ func (a *V1APIService) ApiV1DaemonStopPostExecute(r ApiApiV1DaemonStopPostReques
 
 type ApiApiV1HealthGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1HealthGetRequest) Execute() (*http.Response, error) {
@@ -2624,7 +3870,7 @@ func (a *V1APIService) ApiV1HealthGetExecute(r ApiApiV1HealthGetRequest) (*http.
 
 type ApiApiV1MemoryExportPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1MemoryExportPostRequest) Execute() (*http.Response, error) {
@@ -2724,7 +3970,7 @@ func (a *V1APIService) ApiV1MemoryExportPostExecute(r ApiApiV1MemoryExportPostRe
 
 type ApiApiV1MemoryQueryPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1MemoryQueryPostRequest) Execute() (*http.Response, error) {
@@ -2824,7 +4070,7 @@ func (a *V1APIService) ApiV1MemoryQueryPostExecute(r ApiApiV1MemoryQueryPostRequ
 
 type ApiApiV1MemoryRecentGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1MemoryRecentGetRequest) Execute() (*http.Response, error) {
@@ -2924,7 +4170,7 @@ func (a *V1APIService) ApiV1MemoryRecentGetExecute(r ApiApiV1MemoryRecentGetRequ
 
 type ApiApiV1MemoryVectorIdDeleteRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1MemoryVectorIdDeleteRequest) Execute() (*http.Response, error) {
@@ -3024,7 +4270,7 @@ func (a *V1APIService) ApiV1MemoryVectorIdDeleteExecute(r ApiApiV1MemoryVectorId
 
 type ApiApiV1MemoryVectorSearchPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1MemoryVectorSearchPostRequest) Execute() (*http.Response, error) {
@@ -3124,7 +4370,7 @@ func (a *V1APIService) ApiV1MemoryVectorSearchPostExecute(r ApiApiV1MemoryVector
 
 type ApiApiV1MemoryVectorStatsGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1MemoryVectorStatsGetRequest) Execute() (*http.Response, error) {
@@ -3224,7 +4470,7 @@ func (a *V1APIService) ApiV1MemoryVectorStatsGetExecute(r ApiApiV1MemoryVectorSt
 
 type ApiApiV1MemoryVectorStorePostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1MemoryVectorStorePostRequest) Execute() (*http.Response, error) {
@@ -3324,7 +4570,7 @@ func (a *V1APIService) ApiV1MemoryVectorStorePostExecute(r ApiApiV1MemoryVectorS
 
 type ApiApiV1MetricsFirewallGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1MetricsFirewallGetRequest) Execute() (*http.Response, error) {
@@ -3424,7 +4670,7 @@ func (a *V1APIService) ApiV1MetricsFirewallGetExecute(r ApiApiV1MetricsFirewallG
 
 type ApiApiV1MetricsHistoricalGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1MetricsHistoricalGetRequest) Execute() (*http.Response, error) {
@@ -3524,7 +4770,7 @@ func (a *V1APIService) ApiV1MetricsHistoricalGetExecute(r ApiApiV1MetricsHistori
 
 type ApiApiV1MetricsLiveGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1MetricsLiveGetRequest) Execute() (*http.Response, error) {
@@ -3624,7 +4870,7 @@ func (a *V1APIService) ApiV1MetricsLiveGetExecute(r ApiApiV1MetricsLiveGetReques
 
 type ApiApiV1MetricsRateLimitsGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1MetricsRateLimitsGetRequest) Execute() (*http.Response, error) {
@@ -3724,7 +4970,7 @@ func (a *V1APIService) ApiV1MetricsRateLimitsGetExecute(r ApiApiV1MetricsRateLim
 
 type ApiApiV1MetricsStreamGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1MetricsStreamGetRequest) Execute() (*http.Response, error) {
@@ -3824,7 +5070,7 @@ func (a *V1APIService) ApiV1MetricsStreamGetExecute(r ApiApiV1MetricsStreamGetRe
 
 type ApiApiV1ModelsCredentialsProviderDeleteRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ModelsCredentialsProviderDeleteRequest) Execute() (*http.Response, error) {
@@ -3924,7 +5170,7 @@ func (a *V1APIService) ApiV1ModelsCredentialsProviderDeleteExecute(r ApiApiV1Mod
 
 type ApiApiV1ModelsDefaultPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ModelsDefaultPostRequest) Execute() (*http.Response, error) {
@@ -4024,7 +5270,7 @@ func (a *V1APIService) ApiV1ModelsDefaultPostExecute(r ApiApiV1ModelsDefaultPost
 
 type ApiApiV1ModelsGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ModelsGetRequest) Execute() (*http.Response, error) {
@@ -4124,7 +5370,7 @@ func (a *V1APIService) ApiV1ModelsGetExecute(r ApiApiV1ModelsGetRequest) (*http.
 
 type ApiApiV1ModelsProviderModelDeleteRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ModelsProviderModelDeleteRequest) Execute() (*http.Response, error) {
@@ -4224,7 +5470,7 @@ func (a *V1APIService) ApiV1ModelsProviderModelDeleteExecute(r ApiApiV1ModelsPro
 
 type ApiApiV1ModelsProvidersGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ModelsProvidersGetRequest) Execute() (*http.Response, error) {
@@ -4324,7 +5570,7 @@ func (a *V1APIService) ApiV1ModelsProvidersGetExecute(r ApiApiV1ModelsProvidersG
 
 type ApiApiV1PlansGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1PlansGetRequest) Execute() (*http.Response, error) {
@@ -4424,7 +5670,7 @@ func (a *V1APIService) ApiV1PlansGetExecute(r ApiApiV1PlansGetRequest) (*http.Re
 
 type ApiApiV1PlansIdApprovePostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1PlansIdApprovePostRequest) Execute() (*http.Response, error) {
@@ -4524,7 +5770,7 @@ func (a *V1APIService) ApiV1PlansIdApprovePostExecute(r ApiApiV1PlansIdApprovePo
 
 type ApiApiV1PlansIdConfirmPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1PlansIdConfirmPostRequest) Execute() (*http.Response, error) {
@@ -4624,7 +5870,7 @@ func (a *V1APIService) ApiV1PlansIdConfirmPostExecute(r ApiApiV1PlansIdConfirmPo
 
 type ApiApiV1PlansIdGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1PlansIdGetRequest) Execute() (*http.Response, error) {
@@ -4724,7 +5970,7 @@ func (a *V1APIService) ApiV1PlansIdGetExecute(r ApiApiV1PlansIdGetRequest) (*htt
 
 type ApiApiV1PlansIdRejectPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1PlansIdRejectPostRequest) Execute() (*http.Response, error) {
@@ -4824,7 +6070,7 @@ func (a *V1APIService) ApiV1PlansIdRejectPostExecute(r ApiApiV1PlansIdRejectPost
 
 type ApiApiV1PlansIdRevisePostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1PlansIdRevisePostRequest) Execute() (*http.Response, error) {
@@ -4924,7 +6170,7 @@ func (a *V1APIService) ApiV1PlansIdRevisePostExecute(r ApiApiV1PlansIdRevisePost
 
 type ApiApiV1ProjectsDetectPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ProjectsDetectPostRequest) Execute() (*http.Response, error) {
@@ -5024,7 +6270,7 @@ func (a *V1APIService) ApiV1ProjectsDetectPostExecute(r ApiApiV1ProjectsDetectPo
 
 type ApiApiV1ProjectsGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ProjectsGetRequest) Execute() (*http.Response, error) {
@@ -5124,7 +6370,7 @@ func (a *V1APIService) ApiV1ProjectsGetExecute(r ApiApiV1ProjectsGetRequest) (*h
 
 type ApiApiV1ProjectsIdBranchesGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ProjectsIdBranchesGetRequest) Execute() (*http.Response, error) {
@@ -5224,7 +6470,7 @@ func (a *V1APIService) ApiV1ProjectsIdBranchesGetExecute(r ApiApiV1ProjectsIdBra
 
 type ApiApiV1ProjectsIdCheckoutPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ProjectsIdCheckoutPostRequest) Execute() (*http.Response, error) {
@@ -5324,7 +6570,7 @@ func (a *V1APIService) ApiV1ProjectsIdCheckoutPostExecute(r ApiApiV1ProjectsIdCh
 
 type ApiApiV1ProjectsIdGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ProjectsIdGetRequest) Execute() (*http.Response, error) {
@@ -5424,7 +6670,7 @@ func (a *V1APIService) ApiV1ProjectsIdGetExecute(r ApiApiV1ProjectsIdGetRequest)
 
 type ApiApiV1ProjectsIdStatusGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ProjectsIdStatusGetRequest) Execute() (*http.Response, error) {
@@ -5524,7 +6770,7 @@ func (a *V1APIService) ApiV1ProjectsIdStatusGetExecute(r ApiApiV1ProjectsIdStatu
 
 type ApiApiV1ProjectsIdSyncPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1ProjectsIdSyncPostRequest) Execute() (*http.Response, error) {
@@ -5624,7 +6870,7 @@ func (a *V1APIService) ApiV1ProjectsIdSyncPostExecute(r ApiApiV1ProjectsIdSyncPo
 
 type ApiApiV1QueueFollowupPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1QueueFollowupPostRequest) Execute() (*http.Response, error) {
@@ -5724,7 +6970,7 @@ func (a *V1APIService) ApiV1QueueFollowupPostExecute(r ApiApiV1QueueFollowupPost
 
 type ApiApiV1QueueJobsGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1QueueJobsGetRequest) Execute() (*http.Response, error) {
@@ -5824,7 +7070,7 @@ func (a *V1APIService) ApiV1QueueJobsGetExecute(r ApiApiV1QueueJobsGetRequest) (
 
 type ApiApiV1QueueJobsIdClaimPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1QueueJobsIdClaimPostRequest) Execute() (*http.Response, error) {
@@ -5924,7 +7170,7 @@ func (a *V1APIService) ApiV1QueueJobsIdClaimPostExecute(r ApiApiV1QueueJobsIdCla
 
 type ApiApiV1QueueJobsIdCompletePostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1QueueJobsIdCompletePostRequest) Execute() (*http.Response, error) {
@@ -6024,7 +7270,7 @@ func (a *V1APIService) ApiV1QueueJobsIdCompletePostExecute(r ApiApiV1QueueJobsId
 
 type ApiApiV1QueueJobsIdFailPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1QueueJobsIdFailPostRequest) Execute() (*http.Response, error) {
@@ -6124,7 +7370,7 @@ func (a *V1APIService) ApiV1QueueJobsIdFailPostExecute(r ApiApiV1QueueJobsIdFail
 
 type ApiApiV1QueueJobsIdGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1QueueJobsIdGetRequest) Execute() (*http.Response, error) {
@@ -6224,7 +7470,7 @@ func (a *V1APIService) ApiV1QueueJobsIdGetExecute(r ApiApiV1QueueJobsIdGetReques
 
 type ApiApiV1QueueJobsIdRetryPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1QueueJobsIdRetryPostRequest) Execute() (*http.Response, error) {
@@ -6324,7 +7570,7 @@ func (a *V1APIService) ApiV1QueueJobsIdRetryPostExecute(r ApiApiV1QueueJobsIdRet
 
 type ApiApiV1QueueStatsGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1QueueStatsGetRequest) Execute() (*http.Response, error) {
@@ -6424,7 +7670,7 @@ func (a *V1APIService) ApiV1QueueStatsGetExecute(r ApiApiV1QueueStatsGetRequest)
 
 type ApiApiV1QueueStatusIdGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1QueueStatusIdGetRequest) Execute() (*http.Response, error) {
@@ -6524,7 +7770,7 @@ func (a *V1APIService) ApiV1QueueStatusIdGetExecute(r ApiApiV1QueueStatusIdGetRe
 
 type ApiApiV1QueueSteerPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1QueueSteerPostRequest) Execute() (*http.Response, error) {
@@ -6624,7 +7870,7 @@ func (a *V1APIService) ApiV1QueueSteerPostExecute(r ApiApiV1QueueSteerPostReques
 
 type ApiApiV1RuntimeRestartProviderPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1RuntimeRestartProviderPostRequest) Execute() (*http.Response, error) {
@@ -6724,7 +7970,7 @@ func (a *V1APIService) ApiV1RuntimeRestartProviderPostExecute(r ApiApiV1RuntimeR
 
 type ApiApiV1RuntimeStartProviderPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1RuntimeStartProviderPostRequest) Execute() (*http.Response, error) {
@@ -6824,7 +8070,7 @@ func (a *V1APIService) ApiV1RuntimeStartProviderPostExecute(r ApiApiV1RuntimeSta
 
 type ApiApiV1RuntimeStatusGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1RuntimeStatusGetRequest) Execute() (*http.Response, error) {
@@ -6924,7 +8170,7 @@ func (a *V1APIService) ApiV1RuntimeStatusGetExecute(r ApiApiV1RuntimeStatusGetRe
 
 type ApiApiV1RuntimeStatusProviderGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1RuntimeStatusProviderGetRequest) Execute() (*http.Response, error) {
@@ -7024,7 +8270,7 @@ func (a *V1APIService) ApiV1RuntimeStatusProviderGetExecute(r ApiApiV1RuntimeSta
 
 type ApiApiV1RuntimeStopProviderPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1RuntimeStopProviderPostRequest) Execute() (*http.Response, error) {
@@ -7124,7 +8370,7 @@ func (a *V1APIService) ApiV1RuntimeStopProviderPostExecute(r ApiApiV1RuntimeStop
 
 type ApiApiV1SchedulerJobsGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SchedulerJobsGetRequest) Execute() (*http.Response, error) {
@@ -7224,7 +8470,7 @@ func (a *V1APIService) ApiV1SchedulerJobsGetExecute(r ApiApiV1SchedulerJobsGetRe
 
 type ApiApiV1SchedulerJobsIdDeleteRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SchedulerJobsIdDeleteRequest) Execute() (*http.Response, error) {
@@ -7324,7 +8570,7 @@ func (a *V1APIService) ApiV1SchedulerJobsIdDeleteExecute(r ApiApiV1SchedulerJobs
 
 type ApiApiV1SchedulerJobsIdEnablePostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SchedulerJobsIdEnablePostRequest) Execute() (*http.Response, error) {
@@ -7424,7 +8670,7 @@ func (a *V1APIService) ApiV1SchedulerJobsIdEnablePostExecute(r ApiApiV1Scheduler
 
 type ApiApiV1SchedulerJobsIdPausePostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SchedulerJobsIdPausePostRequest) Execute() (*http.Response, error) {
@@ -7524,7 +8770,7 @@ func (a *V1APIService) ApiV1SchedulerJobsIdPausePostExecute(r ApiApiV1SchedulerJ
 
 type ApiApiV1SchedulerJobsIdResumePostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SchedulerJobsIdResumePostRequest) Execute() (*http.Response, error) {
@@ -7624,7 +8870,7 @@ func (a *V1APIService) ApiV1SchedulerJobsIdResumePostExecute(r ApiApiV1Scheduler
 
 type ApiApiV1SearchPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SearchPostRequest) Execute() (*http.Response, error) {
@@ -7724,7 +8970,7 @@ func (a *V1APIService) ApiV1SearchPostExecute(r ApiApiV1SearchPostRequest) (*htt
 
 type ApiApiV1SecurityCheckPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SecurityCheckPostRequest) Execute() (*http.Response, error) {
@@ -7824,7 +9070,7 @@ func (a *V1APIService) ApiV1SecurityCheckPostExecute(r ApiApiV1SecurityCheckPost
 
 type ApiApiV1SelfimproveAnalyzePostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SelfimproveAnalyzePostRequest) Execute() (*http.Response, error) {
@@ -7924,7 +9170,7 @@ func (a *V1APIService) ApiV1SelfimproveAnalyzePostExecute(r ApiApiV1SelfimproveA
 
 type ApiApiV1SelfimproveApplyPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SelfimproveApplyPostRequest) Execute() (*http.Response, error) {
@@ -8024,7 +9270,7 @@ func (a *V1APIService) ApiV1SelfimproveApplyPostExecute(r ApiApiV1SelfimproveApp
 
 type ApiApiV1SelfimproveGeneratePostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SelfimproveGeneratePostRequest) Execute() (*http.Response, error) {
@@ -8124,7 +9370,7 @@ func (a *V1APIService) ApiV1SelfimproveGeneratePostExecute(r ApiApiV1Selfimprove
 
 type ApiApiV1SelfimproveRejectPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SelfimproveRejectPostRequest) Execute() (*http.Response, error) {
@@ -8224,7 +9470,7 @@ func (a *V1APIService) ApiV1SelfimproveRejectPostExecute(r ApiApiV1SelfimproveRe
 
 type ApiApiV1SelfimproveStatusGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SelfimproveStatusGetRequest) Execute() (*http.Response, error) {
@@ -8324,7 +9570,7 @@ func (a *V1APIService) ApiV1SelfimproveStatusGetExecute(r ApiApiV1SelfimproveSta
 
 type ApiApiV1SelfimproveTriggerPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SelfimproveTriggerPostRequest) Execute() (*http.Response, error) {
@@ -8424,7 +9670,7 @@ func (a *V1APIService) ApiV1SelfimproveTriggerPostExecute(r ApiApiV1SelfimproveT
 
 type ApiApiV1SelfimproveValidatePostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SelfimproveValidatePostRequest) Execute() (*http.Response, error) {
@@ -8524,7 +9770,7 @@ func (a *V1APIService) ApiV1SelfimproveValidatePostExecute(r ApiApiV1Selfimprove
 
 type ApiApiV1SessionsGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SessionsGetRequest) Execute() (*http.Response, error) {
@@ -8624,7 +9870,7 @@ func (a *V1APIService) ApiV1SessionsGetExecute(r ApiApiV1SessionsGetRequest) (*h
 
 type ApiApiV1SessionsIdAttachPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SessionsIdAttachPostRequest) Execute() (*http.Response, error) {
@@ -8724,7 +9970,7 @@ func (a *V1APIService) ApiV1SessionsIdAttachPostExecute(r ApiApiV1SessionsIdAtta
 
 type ApiApiV1SessionsIdBranchPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SessionsIdBranchPostRequest) Execute() (*http.Response, error) {
@@ -8824,7 +10070,7 @@ func (a *V1APIService) ApiV1SessionsIdBranchPostExecute(r ApiApiV1SessionsIdBran
 
 type ApiApiV1SessionsIdBranchesGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SessionsIdBranchesGetRequest) Execute() (*http.Response, error) {
@@ -8924,7 +10170,7 @@ func (a *V1APIService) ApiV1SessionsIdBranchesGetExecute(r ApiApiV1SessionsIdBra
 
 type ApiApiV1SessionsIdCompactPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SessionsIdCompactPostRequest) Execute() (*http.Response, error) {
@@ -9024,7 +10270,7 @@ func (a *V1APIService) ApiV1SessionsIdCompactPostExecute(r ApiApiV1SessionsIdCom
 
 type ApiApiV1SessionsIdDeleteRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SessionsIdDeleteRequest) Execute() (*http.Response, error) {
@@ -9124,7 +10370,7 @@ func (a *V1APIService) ApiV1SessionsIdDeleteExecute(r ApiApiV1SessionsIdDeleteRe
 
 type ApiApiV1SessionsIdDetachPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SessionsIdDetachPostRequest) Execute() (*http.Response, error) {
@@ -9224,7 +10470,7 @@ func (a *V1APIService) ApiV1SessionsIdDetachPostExecute(r ApiApiV1SessionsIdDeta
 
 type ApiApiV1SessionsIdForkPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SessionsIdForkPostRequest) Execute() (*http.Response, error) {
@@ -9324,7 +10570,7 @@ func (a *V1APIService) ApiV1SessionsIdForkPostExecute(r ApiApiV1SessionsIdForkPo
 
 type ApiApiV1SessionsIdMessagesGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SessionsIdMessagesGetRequest) Execute() (*http.Response, error) {
@@ -9424,7 +10670,7 @@ func (a *V1APIService) ApiV1SessionsIdMessagesGetExecute(r ApiApiV1SessionsIdMes
 
 type ApiApiV1SessionsIdPlansGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SessionsIdPlansGetRequest) Execute() (*http.Response, error) {
@@ -9524,7 +10770,7 @@ func (a *V1APIService) ApiV1SessionsIdPlansGetExecute(r ApiApiV1SessionsIdPlansG
 
 type ApiApiV1SessionsIdResumePostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SessionsIdResumePostRequest) Execute() (*http.Response, error) {
@@ -9624,7 +10870,7 @@ func (a *V1APIService) ApiV1SessionsIdResumePostExecute(r ApiApiV1SessionsIdResu
 
 type ApiApiV1SessionsIdTreeGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SessionsIdTreeGetRequest) Execute() (*http.Response, error) {
@@ -9724,7 +10970,7 @@ func (a *V1APIService) ApiV1SessionsIdTreeGetExecute(r ApiApiV1SessionsIdTreeGet
 
 type ApiApiV1SkillsGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SkillsGetRequest) Execute() (*http.Response, error) {
@@ -9824,7 +11070,7 @@ func (a *V1APIService) ApiV1SkillsGetExecute(r ApiApiV1SkillsGetRequest) (*http.
 
 type ApiApiV1SkillsSlugExecutePostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SkillsSlugExecutePostRequest) Execute() (*http.Response, error) {
@@ -9924,7 +11170,7 @@ func (a *V1APIService) ApiV1SkillsSlugExecutePostExecute(r ApiApiV1SkillsSlugExe
 
 type ApiApiV1SkillsSlugGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SkillsSlugGetRequest) Execute() (*http.Response, error) {
@@ -10024,7 +11270,7 @@ func (a *V1APIService) ApiV1SkillsSlugGetExecute(r ApiApiV1SkillsSlugGetRequest)
 
 type ApiApiV1SkillsSlugUiGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1SkillsSlugUiGetRequest) Execute() (*http.Response, error) {
@@ -10124,7 +11370,7 @@ func (a *V1APIService) ApiV1SkillsSlugUiGetExecute(r ApiApiV1SkillsSlugUiGetRequ
 
 type ApiApiV1TasksGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1TasksGetRequest) Execute() (*http.Response, error) {
@@ -10224,7 +11470,7 @@ func (a *V1APIService) ApiV1TasksGetExecute(r ApiApiV1TasksGetRequest) (*http.Re
 
 type ApiApiV1TasksIdCancelPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1TasksIdCancelPostRequest) Execute() (*http.Response, error) {
@@ -10324,7 +11570,7 @@ func (a *V1APIService) ApiV1TasksIdCancelPostExecute(r ApiApiV1TasksIdCancelPost
 
 type ApiApiV1TasksIdDeleteRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1TasksIdDeleteRequest) Execute() (*http.Response, error) {
@@ -10424,7 +11670,7 @@ func (a *V1APIService) ApiV1TasksIdDeleteExecute(r ApiApiV1TasksIdDeleteRequest)
 
 type ApiApiV1TasksIdStepsGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1TasksIdStepsGetRequest) Execute() (*http.Response, error) {
@@ -10524,7 +11770,7 @@ func (a *V1APIService) ApiV1TasksIdStepsGetExecute(r ApiApiV1TasksIdStepsGetRequ
 
 type ApiApiV1TerminalClearPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1TerminalClearPostRequest) Execute() (*http.Response, error) {
@@ -10624,7 +11870,7 @@ func (a *V1APIService) ApiV1TerminalClearPostExecute(r ApiApiV1TerminalClearPost
 
 type ApiApiV1TerminalExecPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1TerminalExecPostRequest) Execute() (*http.Response, error) {
@@ -10724,7 +11970,7 @@ func (a *V1APIService) ApiV1TerminalExecPostExecute(r ApiApiV1TerminalExecPostRe
 
 type ApiApiV1TerminalHistoryGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1TerminalHistoryGetRequest) Execute() (*http.Response, error) {
@@ -10824,7 +12070,7 @@ func (a *V1APIService) ApiV1TerminalHistoryGetExecute(r ApiApiV1TerminalHistoryG
 
 type ApiApiV1TerminalSessionsGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1TerminalSessionsGetRequest) Execute() (*http.Response, error) {
@@ -10924,7 +12170,7 @@ func (a *V1APIService) ApiV1TerminalSessionsGetExecute(r ApiApiV1TerminalSession
 
 type ApiApiV1WorkersIdDeleteRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1WorkersIdDeleteRequest) Execute() (*http.Response, error) {
@@ -11024,7 +12270,7 @@ func (a *V1APIService) ApiV1WorkersIdDeleteExecute(r ApiApiV1WorkersIdDeleteRequ
 
 type ApiApiV1WorkersPostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1WorkersPostRequest) Execute() (*http.Response, error) {
@@ -11124,7 +12370,7 @@ func (a *V1APIService) ApiV1WorkersPostExecute(r ApiApiV1WorkersPostRequest) (*h
 
 type ApiApiV1WorkersScalePostRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1WorkersScalePostRequest) Execute() (*http.Response, error) {
@@ -11224,7 +12470,7 @@ func (a *V1APIService) ApiV1WorkersScalePostExecute(r ApiApiV1WorkersScalePostRe
 
 type ApiApiV1WorkersStatsGetRequest struct {
 	ctx context.Context
-	ApiService *V1APIService
+	ApiService V1API
 }
 
 func (r ApiApiV1WorkersStatsGetRequest) Execute() (*http.Response, error) {

@@ -19,12 +19,26 @@ import (
 )
 
 
+type HealthAPI interface {
+
+	/*
+	HealthGet s.handleHealth
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiHealthGetRequest
+	*/
+	HealthGet(ctx context.Context) ApiHealthGetRequest
+
+	// HealthGetExecute executes the request
+	HealthGetExecute(r ApiHealthGetRequest) (*http.Response, error)
+}
+
 // HealthAPIService HealthAPI service
 type HealthAPIService service
 
 type ApiHealthGetRequest struct {
 	ctx context.Context
-	ApiService *HealthAPIService
+	ApiService HealthAPI
 }
 
 func (r ApiHealthGetRequest) Execute() (*http.Response, error) {

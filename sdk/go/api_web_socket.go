@@ -19,12 +19,30 @@ import (
 )
 
 
+type WebSocketAPI interface {
+
+	/*
+	GetWebSocket WebSocket connection for real-time updates
+
+	Establishes a WebSocket connection for receiving real-time agent progress events.
+Clients can subscribe to specific sessions via subscribe messages.
+
+
+	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+	@return ApiGetWebSocketRequest
+	*/
+	GetWebSocket(ctx context.Context) ApiGetWebSocketRequest
+
+	// GetWebSocketExecute executes the request
+	GetWebSocketExecute(r ApiGetWebSocketRequest) (*http.Response, error)
+}
+
 // WebSocketAPIService WebSocketAPI service
 type WebSocketAPIService service
 
 type ApiGetWebSocketRequest struct {
 	ctx context.Context
-	ApiService *WebSocketAPIService
+	ApiService WebSocketAPI
 	sessionId *string
 }
 

@@ -49,11 +49,11 @@ type APIClient struct {
 
 	// API Services
 
-	HealthAPI *HealthAPIService
+	HealthAPI HealthAPI
 
-	V1API *V1APIService
+	V1API V1API
 
-	WebSocketAPI *WebSocketAPIService
+	WebSocketAPI WebSocketAPI
 }
 
 type service struct {
