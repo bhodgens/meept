@@ -8,7 +8,9 @@
 // ignore_for_file: constant_identifier_names
 // ignore_for_file: lines_longer_than_80_chars
 
-part of openapi.api;
+// Standalone model file
+import 'dart:convert' show json;
+import 'package:collection/collection.dart';
 
 class SkillsService {
   /// Returns a new [SkillsService] instance.
