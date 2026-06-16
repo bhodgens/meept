@@ -37,6 +37,16 @@ class WebSocketService {
   Timer? _pingTimer;
   StreamSubscription? _wsSubscription;
 
+  /// Completer for the current connection's stream-done signal.
+  ///
+  /// When `_cleanupChannel` is called from external paths (pause, pong
+  /// timeout), this completer is completed explicitly so that
+  /// `_openConnection`'s `await streamDone.future` unblocks and the
+  /// `_connectWithRetry` loop can proceed.  Without this, calling
+  /// `_cleanupChannel` before the sink closes prevents `onDone` from
+  /// firing, permanently blocking reconnection.
+  Completer<void>? _streamDone;
+
   // Channel subscription tracking
   final Map<String, SessionSubscription> _chatSubscriptions = {};
   bool _jobsSubscribed = false;
@@ -45,6 +55,7 @@ class WebSocketService {
   bool _disposed = false;
   int _retryCount = 0;
   Timer? _pongTimeoutTimer;
+  final _random = Random();
 
   WebSocketService({
     String? host,
@@ -65,8 +76,10 @@ class WebSocketService {
     if (apiKey == null || apiKey.isEmpty) {
       if (AppConstants.defaultApiKey.isNotEmpty) {
         apiKey = AppConstants.defaultApiKey;
+        debugPrint('[warn] Using hardcoded dev API key — configure a real key for production');
       } else {
         apiKey = 'meept_dev_default_key_CHANGE_ME';
+        debugPrint('[warn] Using fallback dev API key — configure a real key for production');
       }
     }
     return WebSocketService(
@@ -126,8 +139,7 @@ class WebSocketService {
         try {
           await _openConnection(wsPath);
           // Connection succeeded and the WebSocket stream ended (onDone).
-          // Reset retry count (already done in _openConnection on first
-          // message) and loop back to reconnect.
+          // _isConnecting was set to false in _openConnection on success.
           if (_disposed || _wasExplicitlyDisconnected) return;
           _errorSubject.addSafe('Connection closed, reconnecting...');
           final delay = _nextReconnectDelay();
@@ -189,7 +201,7 @@ class WebSocketService {
     final shift = _retryCount.clamp(0, 10);
     final exponentialDelay = baseDelay * (1 << shift);
     final capped = exponentialDelay > maxDelay ? maxDelay : exponentialDelay;
-    final jitter = Duration(milliseconds: Random().nextInt(1000));
+    final jitter = Duration(milliseconds: _random.nextInt(1000));
     _retryCount++;
     return capped + jitter;
   }
@@ -243,11 +255,23 @@ class WebSocketService {
         _channel = WebSocketChannel.connect(webUri);
       }
 
-      // Completer that resolves once the connection is confirmed (first
-      // message received).  After that the stream listener continues
-      // running until onDone fires, which completes the returned future.
+      // Completer that resolves once the connection is confirmed.
+      // We mark as connected immediately when the socket opens (not waiting
+      // for first message) so the UI shows "connected" right away.
       final ready = Completer<void>();
-      final streamDone = Completer<void>();
+      _streamDone = Completer<void>();
+      final streamDone = _streamDone!;
+
+      // Mark as connected as soon as the socket is established
+      // This fixes the "connecting..." stuck status issue
+      if (!isConnected) {
+        _isConnecting = false; // Stop showing "connecting..." once we're connected
+        _connectionSubject.add(true);
+        _startPingTimer();
+        _retryCount = 0;
+        _flushPendingSubscriptions();
+        if (!ready.isCompleted) ready.complete();
+      }
 
       _wsSubscription = _channel!.stream.listen(
         (data) {
@@ -272,15 +296,6 @@ class WebSocketService {
             }
 
             _messageSubject.addSafe(flatMessage);
-
-            // First message means the connection is live.
-            if (!isConnected) {
-              _connectionSubject.add(true);
-              _startPingTimer();
-              _retryCount = 0;
-              _flushPendingSubscriptions();
-              if (!ready.isCompleted) ready.complete();
-            }
           } catch (e) {
             _errorSubject.addSafe('Failed to parse message: $e');
           }
@@ -314,6 +329,7 @@ class WebSocketService {
           // Timeout is not fatal — the connection may still be usable.
           // Mark as connected so the caller proceeds.
           if (!isConnected) {
+            _isConnecting = false;
             _connectionSubject.add(true);
             _startPingTimer();
             _retryCount = 0;
@@ -336,6 +352,11 @@ class WebSocketService {
 
   /// Tear down the current channel and subscription without disposing
   /// the subjects.  Used between reconnect attempts.
+  ///
+  /// Completes [_streamDone] explicitly so that any caller awaiting the
+  /// stream-done future in [_openConnection] unblocks, even if the
+  /// `onDone` callback was prevented from firing (which happens when the
+  /// subscription is cancelled before the sink closes).
   void _cleanupChannel() {
     _wsSubscription?.cancel();
     _wsSubscription = null;
@@ -345,6 +366,11 @@ class WebSocketService {
     _pongTimeoutTimer = null;
     _channel?.sink.close();
     _channel = null;
+    // Explicitly complete streamDone for callers like pause() and pong
+    // timeout that bypass the natural onDone path.
+    if (_streamDone != null && !_streamDone!.isCompleted) {
+      _streamDone!.complete();
+    }
   }
 
   /// Pause the WebSocket connection for lifecycle events (e.g. app

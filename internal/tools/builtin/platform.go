@@ -88,28 +88,33 @@ type AgentsResult struct {
 
 func (t *PlatformAgentsTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	if t.registry == nil {
-		return AgentsResult{
-			Agents: []AgentInfo{},
-			Count:  0,
-		}, nil
+		return "No agents available.", nil
 	}
 
 	specs := t.registry.ListSpecs()
-	agents := make([]AgentInfo, 0, len(specs))
-
-	for _, spec := range specs {
-		agents = append(agents, AgentInfo{
-			ID:      spec.ID,
-			Name:    spec.Name,
-			Role:    string(spec.Role),
-			Purpose: spec.Purpose,
-		})
+	if len(specs) == 0 {
+		return "No agents available.", nil
 	}
 
-	return AgentsResult{
-		Agents: agents,
-		Count:  len(agents),
-	}, nil
+	// Build formatted markdown output for better readability
+	var sb strings.Builder
+	sb.WriteString("## Available Agents\n\n")
+	sb.WriteString("Specialist agents for different task types:\n\n")
+
+	for _, spec := range specs {
+		sb.WriteString(fmt.Sprintf("### %s (`%s`)\n", spec.Name, spec.ID))
+		sb.WriteString(fmt.Sprintf("**Role**: %s\n\n", spec.Role))
+		// Truncate long purpose descriptions for readability
+		purpose := spec.Purpose
+		if len(purpose) > 300 {
+			purpose = purpose[:297] + "..."
+		}
+		sb.WriteString(fmt.Sprintf("%s\n\n", purpose))
+	}
+
+	sb.WriteString(fmt.Sprintf("*Total: %d agents*\n", len(specs)))
+
+	return sb.String(), nil
 }
 
 // PlatformToolsTool lists registered tools with their names and descriptions.
@@ -152,26 +157,49 @@ type ToolsResult struct {
 
 func (t *PlatformToolsTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	if t.registry == nil {
-		return ToolsResult{
-			Tools: []ToolInfo{},
-			Count: 0,
-		}, nil
+		return "No tools available.", nil
 	}
 
 	registeredTools := t.registry.List()
-	toolInfos := make([]ToolInfo, 0, len(registeredTools))
+	if len(registeredTools) == 0 {
+		return "No tools available.", nil
+	}
 
+	// Group tools by category for better organization
+	toolsByCategory := make(map[string][]ToolInfo)
 	for _, tool := range registeredTools {
-		toolInfos = append(toolInfos, ToolInfo{
+		cat := tools.GetCategory(tool)
+		if cat == "" {
+			cat = "other"
+		}
+		toolsByCategory[cat] = append(toolsByCategory[cat], ToolInfo{
 			Name:        tool.Name(),
 			Description: tool.Description(),
 		})
 	}
 
-	return ToolsResult{
-		Tools: toolInfos,
-		Count: len(toolInfos),
-	}, nil
+	// Build formatted markdown output
+	var sb strings.Builder
+	sb.WriteString("## Available Tools\n\n")
+
+	// Sort categories for consistent output
+	categories := make([]string, 0, len(toolsByCategory))
+	for cat := range toolsByCategory {
+		categories = append(categories, cat)
+	}
+
+	for _, cat := range categories {
+		tools := toolsByCategory[cat]
+		sb.WriteString(fmt.Sprintf("### %s Tools\n\n", strings.Title(cat)))
+		for _, tool := range tools {
+			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", tool.Name, tool.Description))
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(fmt.Sprintf("*Total: %d tools*\n", len(registeredTools)))
+
+	return sb.String(), nil
 }
 
 // delegateRegistry defines the subset of AgentRegistry used by DelegateTaskTool.

@@ -1429,9 +1429,9 @@ type keywordPattern struct {
 var keywordPatterns = []keywordPattern{
 	// Platform introspection (highest priority - matches first)
 	{[]string{"what are your capabilities", "what can you do", "what tools", "what agents", "what kind of systems", "help me understand", "system access", "platform status",
-		"internal capabilities", "your capabilities", "tell me about your", "built into", "agent harness", "memory system", "tool system",
+		"internal capabilities", "your capabilities", "tell me about your", "tell me about capabilities", "built into", "agent harness", "memory system", "tool system",
 		"what models", "what agents are", "available tools", "your tools", "your features", "how are you built", "your architecture",
-		"what are you aware of", "what do you have access to", "platform capabilities", "system capabilities"}, string(IntentPlatform), config.AgentIDChat, 0.9, false},
+		"what are you aware of", "what do you have access to", "platform capabilities", "system capabilities", "capabilities"}, string(IntentPlatform), config.AgentIDChat, 0.9, false},
 
 	// Report/Summary requests (high priority - handle inline, not async)
 	{[]string{"give me a report", "report on", "what did you do", "what have you done", "what did you accomplish", "summarize what", "summary of work", "work summary", "status report", "progress report", "what happened"}, string(IntentReport), config.AgentIDChat, 0.9, false},
