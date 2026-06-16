@@ -111,14 +111,17 @@ func New(cfg *Config) (Client, error) {
 
 	switch cfg.Transport {
 	case "http":
-		opts := []HTTPClientOption{WithInsecureSkipVerify(cfg.InsecureSkipVerify)}
-		// Try to auto-discover and pin the server's certificate fingerprint
+		// Use SDK-backed client for HTTP transport
+		apiKey := constants.DefaultDevAPIKey
 		if certFP, spkiFP := loadFingerprint(); certFP != "" || spkiFP != "" {
+			// Fingerprint loading succeeds, use pinned cert client
+			opts := []HTTPClientOption{WithInsecureSkipVerify(cfg.InsecureSkipVerify)}
 			opts = append(opts, WithPinnedFingerprint(certFP, spkiFP))
+			opts = append(opts, WithAPIKey(apiKey))
+			return NewHTTPClient(cfg.HTTPBaseURL, cfg.Timeout, opts...), nil
 		}
-		// Use default dev key so HTTP transport works out of the box
-		opts = append(opts, WithAPIKey(constants.DefaultDevAPIKey))
-		return NewHTTPClient(cfg.HTTPBaseURL, cfg.Timeout, opts...), nil
+		// No fingerprint, use SDK client with default TLS
+		return NewSDKClient(cfg.HTTPBaseURL, cfg.Timeout, apiKey), nil
 	case "rpc", "unix", "socket":
 		return NewRPCClient(cfg.SocketPath, cfg.Timeout), nil
 	default:
