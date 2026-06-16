@@ -398,3 +398,72 @@ All 24 deferred items were resolved via 5 parallel `general-purpose` subagents. 
 - **Commits:** `77805c6` (32 files, PRs 1-9), `845de87` (3 files, S3-2 + TLS), `8eb31a3` (4 files, UI polish)
 - **Build:** `go build ./...` clean
 - **Tests:** All affected packages pass (`internal/agent/q`, `internal/llm`, `internal/tools`, `internal/repomap`, `internal/comm`, `pkg/security`)
+
+---
+
+## Gap Closure (Round 4+)
+
+### Re-investigated false positives (3 items)
+
+The fix subagents incorrectly dismissed these as false positives. Re-investigation confirmed all three are real bugs.
+
+| ID | Original Status | Actual Status | Resolution |
+|----|----------------|---------------|------------|
+| S3-1 | FALSE POSITIVE (subagent) | **FIXED** (commit `936f8ce`) | `keepTail` broke on first RoleAssistant without checking ToolCallID match — orphaned tool results. Fixed: only break when matching parent found. |
+| S3-3 | FALSE POSITIVE (subagent) | **FIXED** (commit `936f8ce`) | `summarizeClusters` "... and N more" count off by 1 — len(snippets) included the just-appended marker string. Fixed: subtract 1. |
+| S7-2 | FIXED (subagent lowercased labels) | **FIXED** (commit `6515822`) | Subagent fixed display labels but missed the actual finding: `TextCapitalization.sentences` auto-capitalized user input. Fixed: set to `TextCapitalization.none`. |
+
+### Remaining LOW items fixed (3 items)
+
+| ID | Status | Resolution |
+|----|--------|------------|
+| S3-5 | **FIXED** (commit `6515822`) | L1 cache file hash truncated from 8 bytes (64-bit) to 16 bytes (128-bit) to eliminate collision risk |
+| S5-N7 | **FIXED** (commit `95184d8`) | Created `pkg/id` helper with crypto/rand. Replaced `time.Now().UnixNano()` IDs in rpc/proxy.go, services/chat_service.go, services/terminal_service.go |
+| S4-8 | **FIXED** (commit `8c2b1b3`) | Added MaxConnsPerHost:8 to http.Transport in web_fetch.go and tool_web_search.go |
+
+### Pre-existing test failure fixed
+
+| Item | Status | Resolution |
+|----|--------|------------|
+| TestExecutorWithSecurity/allowed_path | **FIXED** (commit `f84f72e`) | macOS autofs `/home` symlink resolves differently for allow pattern vs requested path. Fixed: store both raw cleaned and symlink-resolved forms of allow/block patterns. |
+
+### Coverage gap files reviewed and fixed
+
+#### S1 Agent (32 files reviewed, 11 fixed)
+
+Files reviewed in full: `collaboration.go`, `collaboration_pair_driver.go`, `collaboration_team_driver.go`, `dispatcher.go`, `intent_index.go`, `orchestrator.go`, `registry.go`, `review_manager.go`, `session_tracker.go`, `team_orchestrator.go`, `capability_matcher.go`, plus 21 more (spec.go, capabilities.go, hallucination.go, hooks.go, events.go, escalation.go, progress_synthesizer.go, embedding.go, model_parser.go, feedback_propagation.go, ttsr.go, handoff*.go, strategic.go, report*.go).
+
+Fixes applied (commit `c2e2879`):
+- collaboration.go: mutex for shared state
+- collaboration_pair_driver.go: lock scope fix (snapshot-then-operate)
+- collaboration_team_driver.go: same mutex pattern
+- dispatcher.go: nil guards, lock around shared maps
+- intent_index.go: RWMutex for concurrent intent map access
+- orchestrator.go: nil guard
+- registry.go: lock around shared state
+- review_manager.go: mutex for review queue
+- session_tracker.go: atomic/lock for session tracking
+- team_orchestrator.go: nil guard
+- capability_matcher.go: SetCapabilityIndex nil guard (CLAUDE.md)
+
+#### S4 Tools (22 files reviewed, 7 fixed)
+
+Files reviewed in full: `calendar.go`, `memory.go`, `task.go`, `knowledge_graph.go`, `ask.go`, `handoff.go`, `debug.go`, `platform.go`, `review_tools.go`, `mcp_servers.go`, `memory_curation.go`, `block_resolver.go`, `patch_validator.go`, `hashline.go`, `hashline_parser.go`, `workspace_yield.go`, `collaboration.go`, `team.go`, `tool_template_clear.go`, `tool_template_invoke.go`, `git_validate.go`, `tool_web_search.go`.
+
+Fixes applied (commit `8c2b1b3`):
+- calendar.go: context cancellation check in ListEvents
+- debug.go: nil guard on debugger field
+- git_validate.go: default check_state only when key absent; HasBreaking detection (!: substring vs regex group)
+- memory.go: nil guard on manager in multiple methods
+- platform.go: return nil error on delegation failure (result carries error)
+- tool_web_search.go + web_fetch.go: MaxConnsPerHost ceiling (S4-8)
+
+### Gap closure totals
+
+- **Re-investigated false positives:** 3/3 were real bugs, all FIXED
+- **Remaining LOW items:** 3/3 FIXED (S3-5, S5-N7, S4-8)
+- **Pre-existing test failure:** FIXED
+- **Coverage gap files reviewed:** 54 (32 S1 + 22 S4)
+- **Coverage gap fixes:** 18 (11 S1 + 7 S4)
+- **All tests pass with `-race` flag on agent and tools packages**
+- **Commits:** `936f8ce`, `6515822`, `f84f72e`, `95184d8`, `8c2b1b3`, `c2e2879`
