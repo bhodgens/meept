@@ -12,17 +12,7 @@ func buildClientFields() []Field {
 	kb := &cfg.Keybindings
 	cp := &kb.CommandPalette
 	sb := &cfg.Rendering.Sidebar
-	rt := &cfg.Connection.Retry
 	return []Field{
-		NewSelectField("connection.transport", "connection transport", cfg.Connection.Transport, []string{"rpc", "http", "auto"}),
-		NewTextField("connection.address", "connection address", cfg.Connection.Address),
-		NewTextField("connection.timeout", "connection timeout", cfg.Connection.Timeout),
-		NewDrilldownField("connection.retry", "connection retry", []DrilldownItem{
-			{Name: "retry", Fields: []Field{
-				NewNumberField("connection.retry.attempts", "retry attempts", rt.Attempts),
-				NewTextField("connection.retry.delay", "retry delay", rt.Delay),
-			}},
-		}),
 		NewToggleField("session.auto_resume", "session auto resume", cfg.Session.AutoResume),
 		NewTextField("session.default_name", "session default name", cfg.Session.DefaultName),
 		NewDrilldownField("keybindings", "keybindings", []DrilldownItem{

@@ -20,10 +20,6 @@ type ClientConfig struct {
 	STT         STTConfig         `json:"stt"`
 	TTS         TTSConfig         `json:"tts"`
 
-	// Connection configures how the CLI connects to the daemon.
-	// Transport: "rpc", "http", or "auto" (default: "auto" -> rpc)
-	// Address: overrides socket path or HTTP endpoint
-	Connection ConnectionConfig `json:"connection"`
 }
 
 // VimConfig defines vim mode settings.

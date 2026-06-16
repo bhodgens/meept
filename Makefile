@@ -720,23 +720,6 @@ uninstall-all: uninstall uninstall-gui
 	@echo "Full uninstall complete."
 	@echo "Note: Flutter build cache not removed. Run 'cd ui/flutter_ui && flutter clean' if needed."
 
-# Documentation generation
-	@echo "Regenerating all documentation..."
-	go generate ./...
-	@echo "Documentation generation complete"
-
-# =============================================================================
-# OpenAPI SDK Generation
-# =============================================================================
-
-SDK_DIR := sdk
-
-.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean
-
-# Generate all SDKs from OpenAPI spec
-sdk-generate: sdk-generate-go sdk-generate-dart
-	@echo "SDK generation complete."
-
 # =============================================================================
 # OpenAPI SDK Generation
 # =============================================================================
