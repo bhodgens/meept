@@ -289,6 +289,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
           ),
         ],
       ),
+    ),
     );
   }
 

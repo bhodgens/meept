@@ -1,0 +1,33 @@
+# Go SDK Generator Configuration
+# See: https://openapi-generator.tech/docs/generators/go
+generatorName: go
+outputDir: ./go
+inputSpec: ../../docs/reference/http-api/openapi.yaml
+templateDir: null
+
+# Generator-specific options
+additionalProperties:
+  packageName: meeptclient
+  packageVersion: 0.2.0
+
+  # Use WithDefaults configuration pattern
+  withGoCodegenComment: true
+  generateInterfaces: true
+  interfaceMode: deferentially
+
+  # Skip model generation for types we define locally
+  models: ""
+
+  # Customization
+  importMapping: {}
+
+  # Naming
+  generatedConstructor: NewAPIClient
+
+# Files to generate (all by default)
+generatorOptions:
+  - apis
+  - models
+  - supportingFiles
+
+# Global properties (optional)

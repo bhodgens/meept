@@ -74,6 +74,10 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
     }
   }
 
+  void _closePanel() {
+    context.go('/');
+  }
+
   Future<void> _checkoutBranch(String branchName) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -230,6 +234,7 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
           ),
         ],
       ),
+    ),
     );
   }
 

@@ -1,0 +1,25 @@
+# Dart SDK Generator Configuration
+# See: https://openapi-generator.tech/docs/generators/dart
+generatorName: dart
+outputDir: ./dart
+inputSpec: ../../docs/reference/http-api/openapi.yaml
+templateDir: null
+
+# Generator-specific options
+additionalProperties:
+  packageName: meept_client
+  packageVersion: 0.2.0
+  pubName: meept_client
+  pubLibrary: meept_client
+
+  # Use null-safe Dart
+  useNullSafety: true
+
+  # Generate only what we need
+  models: ""
+  apis: ""
+
+# Files to generate
+generatorOptions:
+  - apis
+  - models
