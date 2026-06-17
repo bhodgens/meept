@@ -1,11 +1,12 @@
 # OpenAPI SDK Cleanup - Complete
 
 **Date**: 2026-06-16
+**Last Updated**: 2026-06-16 (Task 5 completed)
 **Status**: ✅ Complete
 
 ## Overview
 
-Completed lower-priority cleanup tasks and fixes from the OpenAPI SDK migration connectivity analysis.
+Completed all cleanup tasks and fixes from the OpenAPI SDK migration connectivity analysis.
 
 ## Tasks Completed
 
@@ -75,19 +76,35 @@ if err != nil {
 
 ---
 
-## Tasks Deferred
+### Task 5: WebSocket Auth Logic Duplication ✅
 
-### Task 1: Remove Legacy HTTP Client
+**Files Modified**:
+- `internal/comm/http/auth.go` - Added exported `ExtractKeyFromRequest()` function
+- `internal/comm/http/server.go` - WebSocket handler now calls shared function
 
-**Status**: Already deleted in previous session
+**Change**: Refactored 30+ lines of duplicated auth logic to use shared `ExtractKeyFromRequest()` function.
 
-The file `internal/tui/http_client.go` was already removed during the connectivity fix session. The `internal/transport/http_client.go` file is actively used (it's the HTTP-backed transport client, not legacy).
+```go
+// BEFORE (server.go - 30+ lines duplicated)
+authHeader := r.Header.Get("Authorization")
+if authHeader == "" {
+    token := r.URL.Query().Get("token")
+    // ... 15 lines of Bearer prefix parsing ...
+}
 
-### Task 5: WebSocket Auth Logic Duplication
+// AFTER (server.go - 5 lines)
+token := ExtractKeyFromRequest(r)
+if token == "" {
+    s.writeError(w, http.StatusUnauthorized, "unauthorized: missing API token")
+    return
+}
+```
 
-**Status**: Deferred (very low priority)
-
-The WebSocket handler extracts API keys inline rather than reusing `auth.go`'s `extractKey()` function. This is code duplication but doesn't cause functional issues - both paths work correctly. Can be refactored incrementally.
+**Benefits**:
+- All auth paths (REST, WebSocket, MCP) now use identical extraction logic
+- Sec-WebSocket-Protocol header support now consistent across all handlers
+- Security gap closed: WebSocket handler now supports all 3 auth methods
+- Maintenance burden reduced: new auth methods added in one place
 
 ---
 
@@ -102,6 +119,9 @@ $ go build ./...
 $ go test ./internal/transport/...
 ok  github.com/caimlas/meept/internal/transport 0.342s
 
+$ go test ./internal/comm/http/...
+ok  github.com/caimlas/meept/internal/comm/http 36.5s
+
 # Flutter analyze (pre-existing errors in sdk_client.dart unrelated to these changes)
 $ cd ui/flutter_ui && flutter analyze
 ✅ websocket_service.dart passes analysis
@@ -115,12 +135,22 @@ $ cd ui/flutter_ui && flutter analyze
 |------|---------|
 | `internal/transport/sdk_client.go` | Fixed health paths (2), replaced mustJSON with error handling |
 | `ui/flutter_ui/lib/services/websocket_service.dart` | Fixed Origin header scheme |
+| `internal/comm/http/auth.go` | Added exported `ExtractKeyFromRequest()` |
+| `internal/comm/http/server.go` | Refactored WebSocket auth to use shared function |
 | `docs/plans/openapi-sdk-cleanup-complete.md` | This document |
 
 ---
 
 ## Impact Summary
 
-- **Go code**: More idiomatic error handling, consistent API paths
+- **Go code**: More idiomatic error handling, consistent API paths, deduplicated auth logic
 - **Flutter code**: Correct WebSocket Origin header for secure connections
+- **Security**: All auth paths now support identical authentication methods
 - **No breaking changes**: All fixes are internal improvements
+
+---
+
+## Commits
+
+1. `79d1a0b3` - fix: OpenAPI SDK connectivity fixes and cleanup
+2. `5c1d9a1c` - refactor(http): deduplicate WebSocket auth logic
