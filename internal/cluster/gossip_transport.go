@@ -128,6 +128,7 @@ func (t *GossipTransport) Stop() error {
 
 // SendEvent sends a cluster event to all known active peers via TCP.
 // This is called by the GossipEngine after publishing an event locally.
+// Uses a buffered channel to bound the number of concurrent send goroutines.
 func (t *GossipTransport) SendEvent(event *models.ClusterEvent) {
 	if event == nil {
 		return
@@ -145,6 +146,10 @@ func (t *GossipTransport) SendEvent(event *models.ClusterEvent) {
 		return
 	}
 
+	// Limit concurrent send goroutines to prevent unbounded growth.
+	// Most clusters have far fewer peers than this limit.
+	sem := make(chan struct{}, 32)
+
 	for nodeID, member := range members {
 		if nodeID == t.localNode {
 			continue // Don't send to self
@@ -156,7 +161,7 @@ func (t *GossipTransport) SendEvent(event *models.ClusterEvent) {
 		}
 
 		peerAddr := t.peerGossipAddr(member)
-		go t.sendToPeer(peerAddr, nodeID, data, event.EventID)
+		go t.sendToPeer(sem, peerAddr, nodeID, data, event.EventID)
 	}
 }
 
@@ -252,7 +257,9 @@ func (t *GossipTransport) handleConnection(ctx context.Context, conn net.Conn) {
 }
 
 // sendToPeer sends event data to a single peer via TCP.
-func (t *GossipTransport) sendToPeer(addr, nodeID string, data []byte, eventID string) {
+// The semaphore channel bounds the total number of concurrent sends.
+func (t *GossipTransport) sendToPeer(sem chan struct{}, addr, nodeID string, data []byte, eventID string) {
+	defer func() { <-sem }()
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 	if err != nil {
 		t.logger.Debug("gossip_transport: failed to connect to peer",

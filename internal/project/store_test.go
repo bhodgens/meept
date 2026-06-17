@@ -258,6 +258,15 @@ func TestCleanupOrphanedWorktrees(t *testing.T) {
 		Branch:    "session/sess-1",
 		Status:    "active",
 	})
+	// active with plan_id only -> not orphaned
+	s.CreateWorktree(ctx, &Worktree{
+		ID:        "wt-plan",
+		ProjectID: "wc1",
+		PlanID:    "plan-42",
+		Path:      "/tmp/plan",
+		Branch:    "plan/plan-42",
+		Status:    "active",
+	})
 
 	cleaned, err := s.CleanupOrphanedWorktrees(ctx)
 	if err != nil {
@@ -275,6 +284,11 @@ func TestCleanupOrphanedWorktrees(t *testing.T) {
 	got2, _ := s.GetWorktree(ctx, "wt-session")
 	if got2.Status != "active" {
 		t.Errorf("session worktree status = %q, want %q", got2.Status, "active")
+	}
+
+	got3, _ := s.GetWorktree(ctx, "wt-plan")
+	if got3.Status != "active" {
+		t.Errorf("plan worktree status = %q, want %q", got3.Status, "active")
 	}
 }
 

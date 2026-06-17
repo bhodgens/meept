@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/rpc"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/robfig/cron/v3"
 )
 
@@ -67,7 +68,7 @@ func (h *RPCHandler) AddJob(ctx context.Context, params json.RawMessage) (any, e
 
 	// Generate ID if not provided
 	if p.ID == "" {
-		p.ID = fmt.Sprintf("job-%d", time.Now().UnixNano())
+		p.ID = id.Generate("job-")
 	}
 
 	// Build job config

@@ -117,11 +117,20 @@ func (po *PairOrchestrator) GetSession(sessionID string) (*BusPairSessionStateSn
 	}, true
 }
 
-// ActiveSessionCount returns the number of active pair sessions.
+// ActiveSessionCount returns the number of active (non-terminal) pair sessions.
 func (po *PairOrchestrator) ActiveSessionCount() int {
 	po.mu.RLock()
 	defer po.mu.RUnlock()
-	return len(po.sessions)
+	count := 0
+	for _, state := range po.sessions {
+		state.mu.RLock()
+		phase := state.Phase
+		state.mu.RUnlock()
+		if phase != "completed" && phase != "failed" {
+			count++
+		}
+	}
+	return count
 }
 
 func (po *PairOrchestrator) runSubscription(ctx context.Context, sub *bus.Subscriber, handler func(context.Context, *models.BusMessage)) {

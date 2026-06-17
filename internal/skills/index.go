@@ -286,9 +286,20 @@ func (idx *SkillIndex) Match(query string) *SkillIndexEntry {
 	var bestMatch *SkillIndexEntry
 	bestScore := 0
 
-	for _, entry := range idx.entries {
+	// Iterate in sorted name order so ties at the same score resolve
+	// deterministically (later-sorted name wins via the >= comparison).
+	// Without this, map iteration order makes Match() non-deterministic
+	// across runs for equally-scored entries.
+	names := make([]string, 0, len(idx.entries))
+	for name := range idx.entries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		entry := idx.entries[name]
 		score := matchEntryScore(entry, queryLower)
-		if score > bestScore {
+		if score >= bestScore && score > 0 {
 			bestScore = score
 			bestMatch = entry
 		}

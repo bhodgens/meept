@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -297,27 +298,7 @@ func isRetryableError(err error) bool {
 
 // containsIgnoreCase checks if s contains substr (case-insensitive).
 func containsIgnoreCase(s, substr string) bool {
-	sLower := toLowerASCII(s)
-	substrLower := toLowerASCII(substr)
-	for i := 0; i <= len(sLower)-len(substrLower); i++ {
-		if sLower[i:i+len(substrLower)] == substrLower {
-			return true
-		}
-	}
-	return false
-}
-
-// toLowerASCII converts ASCII letters to lowercase.
-func toLowerASCII(s string) string {
-	b := make([]byte, len(s))
-	for i := range len(s) {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 'a' - 'A'
-		}
-		b[i] = c
-	}
-	return string(b)
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
 func (t *TeacherClient) callTeacher(ctx context.Context, client *llm.Client, messages []llm.ChatMessage) (*llm.Response, error) {

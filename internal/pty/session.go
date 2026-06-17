@@ -80,12 +80,15 @@ type ptySession struct {
 	stdinPipe  io.Writer      // Non-PTY mode: cmd.Stdin
 	outputChan chan []byte
 	errorChan  chan error
-	done       chan struct{}
-	closed     bool
-	exitCode   int
-	rows       int
-	cols       int
-	fallback   bool
+	// pending holds the unread remainder of a large output chunk so
+	// that the next Read() call can serve it without data loss.
+	pending   []byte
+	done      chan struct{}
+	closed    bool
+	exitCode  int
+	rows      int
+	cols      int
+	fallback  bool
 }
 
 var (
@@ -217,6 +220,13 @@ func (s *ptySession) Write(data []byte) (int, error) {
 
 // Read reads output from the PTY (context-aware).
 func (s *ptySession) Read(ctx context.Context, buf []byte) (int, error) {
+	// Serve any remaining unread data from a previous large chunk.
+	if len(s.pending) > 0 {
+		n := copy(buf, s.pending)
+		s.pending = s.pending[n:]
+		return n, nil
+	}
+
 	select {
 	case <-ctx.Done():
 		return 0, ctx.Err()
@@ -226,6 +236,11 @@ func (s *ptySession) Read(ctx context.Context, buf []byte) (int, error) {
 		return 0, err
 	case chunk := <-s.outputChan:
 		n := copy(buf, chunk)
+		if n < len(chunk) {
+			// Chunk is larger than the caller's buffer; save the
+			// remainder so the next Read() call can serve it.
+			s.pending = append(s.pending[:0], chunk[n:]...)
+		}
 		return n, nil
 	}
 }

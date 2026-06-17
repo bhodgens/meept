@@ -519,7 +519,7 @@ func LoadAgentsForContext(projectRoot, workingFile string) ([]string, error) {
 		}
 
 		parent := filepath.Dir(dir)
-		if parent == dir || strings.HasPrefix(parent, projectRoot) && parent == projectRoot {
+		if parent == dir || dir == projectRoot {
 			// Also load root AGENTS.md if not already loaded
 			rootAgents := filepath.Join(projectRoot, "AGENTS.md")
 			if _, err := os.Stat(rootAgents); err == nil {

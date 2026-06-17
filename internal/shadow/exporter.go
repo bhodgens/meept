@@ -500,7 +500,7 @@ func textHash(text string) string {
 // tokenizeForDedup tokenizes text for deduplication similarity comparison.
 func tokenizeForDedup(text string) []string {
 	// Simple whitespace tokenization with lowercasing
-	text = toLowerString(text)
+	text = strings.ToLower(text)
 	var tokens []string
 	var current []byte
 
@@ -520,19 +520,6 @@ func tokenizeForDedup(text string) []string {
 	}
 
 	return tokens
-}
-
-// toLowerString converts a string to lowercase without using strings package.
-func toLowerString(s string) string {
-	b := make([]byte, len(s))
-	for i := range len(s) {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 'a' - 'A'
-		}
-		b[i] = c
-	}
-	return string(b)
 }
 
 // jaccardSimilarity computes the Jaccard similarity between two token multisets.

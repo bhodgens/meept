@@ -25,7 +25,7 @@ type RuntimeStatusResponse struct {
 // Status returns the status of all managed runtimes.
 func (s *RuntimeService) Status(ctx context.Context) (*RuntimeStatusResponse, error) {
 	if s.manager == nil {
-		return nil, fmt.Errorf("runtime manager not available")
+		return nil, wrapError("runtime", "Status", ErrUnavailable)
 	}
 	statuses := s.manager.Status()
 	return &RuntimeStatusResponse{Runtimes: statuses}, nil
@@ -34,11 +34,11 @@ func (s *RuntimeService) Status(ctx context.Context) (*RuntimeStatusResponse, er
 // StatusForProvider returns the status of a specific provider.
 func (s *RuntimeService) StatusForProvider(ctx context.Context, providerID string) (*llm.RuntimeStatus, error) {
 	if s.manager == nil {
-		return nil, fmt.Errorf("runtime manager not available")
+		return nil, wrapError("runtime", "StatusForProvider", ErrUnavailable)
 	}
 	status, ok := s.manager.StatusForProvider(providerID)
 	if !ok {
-		return nil, fmt.Errorf("provider %s not found", providerID)
+		return nil, wrapError("runtime", "StatusForProvider", fmt.Errorf("provider %s not found", providerID))
 	}
 	return &status, nil
 }
@@ -46,7 +46,7 @@ func (s *RuntimeService) StatusForProvider(ctx context.Context, providerID strin
 // StartProvider starts a specific provider's runtime.
 func (s *RuntimeService) StartProvider(ctx context.Context, providerID string) error {
 	if s.manager == nil {
-		return fmt.Errorf("runtime manager not available")
+		return wrapError("runtime", "StartProvider", ErrUnavailable)
 	}
 	return s.manager.StartProvider(ctx, providerID)
 }
@@ -54,7 +54,7 @@ func (s *RuntimeService) StartProvider(ctx context.Context, providerID string) e
 // StopProvider stops a specific provider's runtime.
 func (s *RuntimeService) StopProvider(ctx context.Context, providerID string) error {
 	if s.manager == nil {
-		return fmt.Errorf("runtime manager not available")
+		return wrapError("runtime", "StopProvider", ErrUnavailable)
 	}
 	return s.manager.StopProvider(ctx, providerID)
 }
@@ -62,7 +62,7 @@ func (s *RuntimeService) StopProvider(ctx context.Context, providerID string) er
 // RestartProvider restarts a specific provider's runtime.
 func (s *RuntimeService) RestartProvider(ctx context.Context, providerID string) error {
 	if s.manager == nil {
-		return fmt.Errorf("runtime manager not available")
+		return wrapError("runtime", "RestartProvider", ErrUnavailable)
 	}
 	return s.manager.RestartProvider(ctx, providerID)
 }

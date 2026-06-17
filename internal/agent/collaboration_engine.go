@@ -208,22 +208,28 @@ func (e *CollaborationEngine) nestedDepth(sessionID string) int {
 // resolve a lead agent + specialist roster based on the mode's team config.
 func (e *CollaborationEngine) resolveParticipants(mode string, preferred []string) []string {
 	if len(preferred) >= 2 {
-		return preferred
+		// Return a copy so callers cannot be affected by future mutations.
+		out := make([]string, len(preferred))
+		copy(out, preferred)
+		return out
 	}
+
+	out := make([]string, 0, len(preferred)+3)
+	out = append(out, preferred...)
 
 	switch mode {
 	case "pair_programming":
-		return append(preferred, "coder", "planner")
+		return append(out, "coder", "planner")
 	case "differential":
-		return append(preferred, "coder", "planner", "analyst")
+		return append(out, "coder", "planner", "analyst")
 	case "team_parallel":
 		// Team mode: lead (planner) + specialist roster (coder, analyst, debugger)
 		if len(preferred) == 0 {
-			preferred = []string{"planner"}
+			out = append(out, "planner")
 		}
-		return append(preferred, "coder", "analyst", "debugger")
+		return append(out, "coder", "analyst", "debugger")
 	default:
-		return append(preferred, "coder", "planner")
+		return append(out, "coder", "planner")
 	}
 }
 

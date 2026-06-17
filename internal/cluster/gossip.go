@@ -93,8 +93,13 @@ func NewGossipEngine(cfg *Config, localNode string, msgBus *bus.MessageBus, logg
 
 	// Generate an ed25519 signing key pair if signing is required
 	if g.signingPriv == nil && cfg.Security.RequireNodeSignatures {
-		_, privBytes, _ := ed25519.GenerateKey(rand.Reader)
-		g.signingPriv = privBytes
+		pub, priv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			g.logger.Error("gossip: failed to generate signing key, events will be unsigned", "error", err)
+		} else {
+			g.signingPriv = priv
+			g.signingPub[localNode] = pub
+		}
 	}
 
 	for _, opt := range opts {

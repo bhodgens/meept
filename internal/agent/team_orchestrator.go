@@ -151,11 +151,17 @@ func (to *TeamOrchestrator) GetTeam(sessionID string) *TeamSessionState {
 	return val.(*TeamSessionState)
 }
 
-// ActiveTeamCount returns the number of active team sessions.
+// ActiveTeamCount returns the number of active (non-terminal) team sessions.
 func (to *TeamOrchestrator) ActiveTeamCount() int {
 	count := 0
-	to.teams.Range(func(_, _ any) bool {
-		count++
+	to.teams.Range(func(_, v any) bool {
+		state := v.(*TeamSessionState)
+		state.mu.RLock()
+		phase := state.Phase
+		state.mu.RUnlock()
+		if phase == "running" || phase == "synthesizing" {
+			count++
+		}
 		return true
 	})
 	return count

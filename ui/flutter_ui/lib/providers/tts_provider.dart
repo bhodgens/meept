@@ -1,6 +1,7 @@
 // Riverpod provider for TTS service.
 // Follows the same pattern as stt_provider.dart.
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/tts_service.dart';
 import '../services/storage_service.dart';
@@ -74,21 +75,25 @@ class TtsNotifier extends StateNotifier<TtsState> {
   }
 
   /// Toggle TTS on/off.
-  void toggleTts() {
+  void toggleTts() async {
     _enabled = !_enabled;
     if (!_enabled) {
-      stop();
+      await stop();
     }
-    _saveSettings();
+    await _saveSettings().catchError((e) {
+      debugPrint('[tts] Failed to save settings: $e');
+    });
   }
 
   /// Set TTS enabled state.
-  void setEnabled(bool value) {
+  void setEnabled(bool value) async {
     _enabled = value;
     if (!value) {
-      stop();
+      await stop();
     }
-    _saveSettings();
+    await _saveSettings().catchError((e) {
+      debugPrint('[tts] Failed to save settings: $e');
+    });
   }
 
   /// Speak text if TTS is enabled.

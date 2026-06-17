@@ -101,6 +101,13 @@ func (k *EncryptionKey) Key() []byte {
 
 // deriveMachineKey generates a 256-bit key from machine-specific identifiers.
 // It combines hostname + username + a platform-specific hardware ID.
+//
+// Stability note: the hostname component can change across reboots, DHCP
+// renewals, or container rebuilds, which invalidates previously-encrypted
+// tokens. Operators who need stable cross-environment keys should pass an
+// explicit userKey to NewEncryptionKey, which bypasses this derivation
+// entirely and uses the operator-supplied value instead.
+//
 // The platformMachineID function is defined in per-platform files (darwin, linux, other).
 func deriveMachineKey() (string, error) {
 	hostname, err := os.Hostname()

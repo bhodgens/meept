@@ -182,28 +182,37 @@ func (m *WireGuardManager) ApplyConfig(cfg *WireGuardConfig) error {
 // AddPeer adds a single peer to the WireGuard interface by re-applying the
 // full config with the peer appended to the list.
 func (m *WireGuardManager) AddPeer(peer Member, cfg *WireGuardConfig) error {
-	cfg.Peers = append(cfg.Peers, peer)
-	return m.ApplyConfig(cfg)
+	// Copy the config to avoid mutating the caller's peer slice.
+	cfgCopy := *cfg
+	peers := make([]Member, len(cfg.Peers)+1)
+	copy(peers, cfg.Peers)
+	peers[len(peers)-1] = peer
+	cfgCopy.Peers = peers
+	return m.ApplyConfig(&cfgCopy)
 }
 
 // RemovePeer removes a peer from the WireGuard interface by filtering it out
 // and re-applying the config.
 func (m *WireGuardManager) RemovePeer(nodeID string, cfg *WireGuardConfig) error {
-	var peers []Member
+	// Build a new peer slice and copy the config to avoid mutating caller.
+	peers := make([]Member, 0, len(cfg.Peers))
 	for _, p := range cfg.Peers {
 		if p.NodeID != nodeID {
 			peers = append(peers, p)
 		}
 	}
-	cfg.Peers = peers
-	return m.ApplyConfig(cfg)
+	cfgCopy := *cfg
+	cfgCopy.Peers = peers
+	return m.ApplyConfig(&cfgCopy)
 }
 
 // UpdatePeers replaces the entire peer list with the provided members and
 // applies the new configuration.
 func (m *WireGuardManager) UpdatePeers(peers []Member, cfg *WireGuardConfig) error {
-	cfg.Peers = peers
-	return m.ApplyConfig(cfg)
+	// Copy the config to avoid mutating the caller's peer slice.
+	cfgCopy := *cfg
+	cfgCopy.Peers = peers
+	return m.ApplyConfig(&cfgCopy)
 }
 
 // SyncWithInterface reads the current WireGuard interface state via

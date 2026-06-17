@@ -112,9 +112,9 @@ func ApplyPreset(presetName string, taskDescription string) (*TeamConfig, error)
 		return nil, err
 	}
 
-	// Render the prompt template with the task description
-	// (The rendered prompt is accessible via PresetPrompt; ApplyPreset focuses on TeamConfig.)
-	_ = fmt.Sprintf(preset.PromptTemplate, taskDescription)
+	if _, err := PresetPrompt(presetName, taskDescription); err != nil {
+		return nil, fmt.Errorf("failed to render preset prompt: %w", err)
+	}
 
 	// Copy roster to avoid shared mutable state
 	roster := make([]string, len(preset.Roster))

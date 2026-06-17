@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -188,6 +189,7 @@ func (t *PlatformToolsTool) Execute(ctx context.Context, args map[string]any) (a
 	for cat := range toolsByCategory {
 		categories = append(categories, cat)
 	}
+	sort.Strings(categories)
 
 	for _, cat := range categories {
 		tools := toolsByCategory[cat]

@@ -71,13 +71,16 @@ func (h *TestHarness) Validate(ctx context.Context, workdir string) (*Validation
 		Timeout: h.config.Timeout,
 	})
 
-	result.Output = testResult.Output
 	result.Duration = time.Since(start)
 
 	if err != nil {
+		// testResult may be nil when the backend returns an error
+		// (e.g., local backend: nil, fmt.Errorf(...)), so defer
+		//encing testResult before the err check would panic.
 		return nil, err
 	}
 
+	result.Output = testResult.Output
 	result.Passed = testResult.ExitCode == 0
 	return result, nil
 }

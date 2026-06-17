@@ -304,7 +304,7 @@ func (s *Store) DeleteWorktree(ctx context.Context, id string) error {
 // associated session as "cleaned".
 func (s *Store) CleanupOrphanedWorktrees(ctx context.Context) (int, error) {
 	res, err := s.pool.Exec(ctx,
-		`UPDATE project_worktrees SET status = 'cleaned' WHERE status = 'active' AND (session_id = '' OR session_id IS NULL)`)
+		`UPDATE project_worktrees SET status = 'cleaned' WHERE status = 'active' AND (session_id = '' OR session_id IS NULL) AND (plan_id = '' OR plan_id IS NULL)`)
 	if err != nil {
 		return 0, fmt.Errorf("cleanup orphaned worktrees: %w", err)
 	}

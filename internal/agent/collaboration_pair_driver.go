@@ -348,14 +348,55 @@ func parseStructuredObserverResponse(output string) (string, string, bool) {
 		return "", "", false
 	}
 
-	jsonStart := strings.LastIndex(output[:actionIdx], "{")
-	jsonEnd := strings.Index(output[actionIdx:], "}")
-	if jsonStart == -1 || jsonEnd == -1 {
+	// Scan backward from "action" to find the matching opening brace,
+	// skipping balanced braces encountered along the way.  This avoids
+	// picking up stray "{" from markdown code fences or nested objects
+	// that happen to contain the literal string "action" in them.
+	jsonStart := -1
+	depth := 0
+	for i := actionIdx - 1; i >= 0; i-- {
+		switch output[i] {
+		case '}':
+			depth++
+		case '{':
+			if depth == 0 {
+				jsonStart = i
+			} else {
+				depth--
+			}
+		}
+		if jsonStart >= 0 {
+			break
+		}
+	}
+	if jsonStart == -1 {
 		return "", "", false
 	}
-	jsonEnd += actionIdx + 1
 
-	jsonStr := output[jsonStart:jsonEnd]
+	// Find the closing brace that matches the opening brace.
+	rest := output[jsonStart:]
+	braceDepth := 0
+	jsonEnd := -1
+	for i := 0; i < len(rest); i++ {
+		switch rest[i] {
+		case '{':
+			braceDepth++
+		case '}':
+			braceDepth--
+			if braceDepth == 0 {
+				jsonEnd = i + 1
+				break
+			}
+		}
+		if jsonEnd > 0 {
+			break
+		}
+	}
+	if jsonEnd == -1 {
+		return "", "", false
+	}
+
+	jsonStr := output[jsonStart : jsonStart+jsonEnd]
 
 	var parsed struct {
 		Action   string `json:"action"`

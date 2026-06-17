@@ -243,7 +243,6 @@ func (s *Scheduler) Schedule(job Job) (string, error) {
 
 	// Persist job config
 	cfg := job.Config()
-	cfg.Enabled = true
 	if cfg.CreatedAt.IsZero() {
 		cfg.CreatedAt = time.Now().UTC()
 	}
@@ -478,7 +477,9 @@ func (s *Scheduler) JobCount() int {
 // wrapJob creates a function wrapper for the job that handles execution tracking.
 func (s *Scheduler) wrapJob(job Job) func() {
 	return func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		// Derive from runNowCtx so shutdown can signal cancellation,
+		// rather than using detached context.Background().
+		ctx, cancel := context.WithTimeout(s.runNowCtx, 30*time.Minute)
 		defer cancel()
 
 		s.executeJob(ctx, job)
