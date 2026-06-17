@@ -225,13 +225,11 @@ func NewClient(config *ModelConfig, opts ...ClientOption) *Client {
 	return c
 }
 
-// Chat sends a chat completion request and returns the parsed response.
-func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
-	c.configMu.RLock()
-	cfg := c.config
-	c.configMu.RUnlock()
-
-	// Apply chat options, starting with model defaults
+// buildChatRequest constructs the chat options and JSON payload shared by
+// Chat(), ChatWithProgress(), and ChatWithDeltaCallback().
+// If addStream is true, the payload includes "stream": true.
+func (c *Client) buildChatRequest(messages []ChatMessage, cfg *ModelConfig, opts []ChatOption, addStream bool) (*chatOptions, map[string]any, error) {
+	// Build chatOptions from config defaults
 	chatOpts := &chatOptions{
 		temperature:      cfg.Temperature,
 		maxTokens:        cfg.MaxTokens,
@@ -242,6 +240,55 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 	}
 	for _, opt := range opts {
 		opt(chatOpts)
+	}
+
+	// Build request payload
+	msgDicts := make([]map[string]any, len(messages))
+	for i, msg := range messages {
+		msgDicts[i] = msg.ToOpenAIDict()
+	}
+
+	payload := map[string]any{
+		"model":       cfg.ModelID,
+		"messages":    msgDicts,
+		"temperature": chatOpts.temperature,
+		"max_tokens":  chatOpts.maxTokens,
+	}
+
+	// Add optional parameters if set
+	if chatOpts.topP > 0 {
+		payload["top_p"] = chatOpts.topP
+	}
+	if chatOpts.frequencyPenalty != 0 {
+		payload["frequency_penalty"] = chatOpts.frequencyPenalty
+	}
+	if chatOpts.presencePenalty != 0 {
+		payload["presence_penalty"] = chatOpts.presencePenalty
+	}
+	if len(chatOpts.stopSequences) > 0 {
+		payload["stop"] = chatOpts.stopSequences
+	}
+
+	if len(chatOpts.tools) > 0 {
+		payload["tools"] = chatOpts.tools
+	}
+
+	if addStream {
+		payload["stream"] = true
+	}
+
+	return chatOpts, payload, nil
+}
+
+// Chat sends a chat completion request and returns the parsed response.
+func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
+	c.configMu.RLock()
+	cfg := c.config
+	c.configMu.RUnlock()
+
+	chatOpts, payload, err := c.buildChatRequest(messages, cfg, opts, false)
+	if err != nil {
+		return nil, err
 	}
 
 	// Check cache
@@ -278,37 +325,6 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
-	}
-
-	// Build request payload
-	msgDicts := make([]map[string]any, len(messages))
-	for i, msg := range messages {
-		msgDicts[i] = msg.ToOpenAIDict()
-	}
-
-	payload := map[string]any{
-		"model":       cfg.ModelID,
-		"messages":    msgDicts,
-		"temperature": chatOpts.temperature,
-		"max_tokens":  chatOpts.maxTokens,
-	}
-
-	// Add optional parameters if set
-	if chatOpts.topP > 0 {
-		payload["top_p"] = chatOpts.topP
-	}
-	if chatOpts.frequencyPenalty != 0 {
-		payload["frequency_penalty"] = chatOpts.frequencyPenalty
-	}
-	if chatOpts.presencePenalty != 0 {
-		payload["presence_penalty"] = chatOpts.presencePenalty
-	}
-	if len(chatOpts.stopSequences) > 0 {
-		payload["stop"] = chatOpts.stopSequences
-	}
-
-	if len(chatOpts.tools) > 0 {
-		payload["tools"] = chatOpts.tools
 	}
 
 	var lastErr error
@@ -415,17 +431,9 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 	cfg := c.config
 	c.configMu.RUnlock()
 
-	// Apply chat options, starting with model defaults
-	chatOpts := &chatOptions{
-		temperature:      cfg.Temperature,
-		maxTokens:        cfg.MaxTokens,
-		topP:             cfg.TopP,
-		frequencyPenalty: cfg.FrequencyPenalty,
-		presencePenalty:  cfg.PresencePenalty,
-		stopSequences:    cfg.StopSequences,
-	}
-	for _, opt := range opts {
-		opt(chatOpts)
+	chatOpts, payload, err := c.buildChatRequest(messages, cfg, opts, false)
+	if err != nil {
+		return nil, err
 	}
 
 	// Check cache
@@ -468,35 +476,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		defer cancel()
 	}
 
-	// Build request payload
-	msgDicts := make([]map[string]any, len(messages))
-	for i, msg := range messages {
-		msgDicts[i] = msg.ToOpenAIDict()
-	}
-
-	payload := map[string]any{
-		"model":       cfg.ModelID,
-		"messages":    msgDicts,
-		"temperature": chatOpts.temperature,
-		"max_tokens":  chatOpts.maxTokens,
-	}
-
-	// Add optional parameters if set
-	if chatOpts.topP > 0 {
-		payload["top_p"] = chatOpts.topP
-	}
-	if chatOpts.frequencyPenalty != 0 {
-		payload["frequency_penalty"] = chatOpts.frequencyPenalty
-	}
-	if chatOpts.presencePenalty != 0 {
-		payload["presence_penalty"] = chatOpts.presencePenalty
-	}
-	if len(chatOpts.stopSequences) > 0 {
-		payload["stop"] = chatOpts.stopSequences
-	}
-
 	if len(chatOpts.tools) > 0 {
-		payload["tools"] = chatOpts.tools
 		reportProgress(ProgressStageToolCall, fmt.Sprintf("Request includes %d tools", len(chatOpts.tools)))
 	}
 
@@ -916,6 +896,9 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 // Response is returned on successful completion.
 // D4: Added retry with resume capability for transient errors.
 func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessage, onDelta DeltaCallback, opts ...ChatOption) (*Response, error) {
+	// Time the HTTP request
+	start := time.Now()
+
 	if onDelta == nil {
 		// Fallback to non-streaming when no callback provided
 		return c.Chat(ctx, messages, opts...)
@@ -925,44 +908,9 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 	cfg := c.config
 	c.configMu.RUnlock()
 
-	chatOpts := &chatOptions{
-		temperature:      cfg.Temperature,
-		maxTokens:        cfg.MaxTokens,
-		topP:             cfg.TopP,
-		frequencyPenalty: cfg.FrequencyPenalty,
-		presencePenalty:  cfg.PresencePenalty,
-		stopSequences:    cfg.StopSequences,
-	}
-	for _, opt := range opts {
-		opt(chatOpts)
-	}
-
-	msgDicts := make([]map[string]any, len(messages))
-	for i, msg := range messages {
-		msgDicts[i] = msg.ToOpenAIDict()
-	}
-
-	payload := map[string]any{
-		"model":       cfg.ModelID,
-		"messages":    msgDicts,
-		"temperature": chatOpts.temperature,
-		"max_tokens":  chatOpts.maxTokens,
-		"stream":      true,
-	}
-	if chatOpts.topP > 0 {
-		payload["top_p"] = chatOpts.topP
-	}
-	if chatOpts.frequencyPenalty != 0 {
-		payload["frequency_penalty"] = chatOpts.frequencyPenalty
-	}
-	if chatOpts.presencePenalty != 0 {
-		payload["presence_penalty"] = chatOpts.presencePenalty
-	}
-	if len(chatOpts.stopSequences) > 0 {
-		payload["stop"] = chatOpts.stopSequences
-	}
-	if len(chatOpts.tools) > 0 {
-		payload["tools"] = chatOpts.tools
+	chatOpts, payload, err := c.buildChatRequest(messages, cfg, opts, true)
+	if err != nil {
+		return nil, err
 	}
 
 	body, err := json.Marshal(payload)
@@ -1020,17 +968,22 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 
 			// Record metrics on success
 			if c.metricsStore != nil {
-				costUSD := float64(0)
+				latencyMs := time.Since(start).Milliseconds()
+				costUSD := float64(resp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
+				//nolint:gosec // goroutine outlives request context
 				go func() {
 					record := metrics.RequestRecord{
-						Timestamp:  time.Now(),
-						ProviderID: cfg.ProviderID,
-						ModelID:    cfg.ModelID,
-						LatencyMs:  0,
-						HTTPStatus: httpResp.StatusCode,
-						ErrorType:  metrics.ErrorTypeNone,
-						Success:    true,
-						CostUSD:    costUSD,
+						Timestamp:        time.Now(),
+						ProviderID:       cfg.ProviderID,
+						ModelID:          cfg.ModelID,
+						PromptTokens:     resp.Usage.PromptTokens,
+						CompletionTokens: resp.Usage.CompletionTokens,
+						CachedTokens:     resp.Usage.CachedTokens,
+						LatencyMs:        latencyMs,
+						HTTPStatus:       httpResp.StatusCode,
+						ErrorType:        metrics.ErrorTypeNone,
+						Success:          true,
+						CostUSD:          costUSD,
 					}
 					_ = c.metricsStore.Record(context.Background(), record)
 				}()
@@ -1073,6 +1026,8 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 // D4: Extracted to enable retry with resume capability.
 // retryState tracks state from prior attempts (accumulated content, tool calls, usage).
 // If retryState.isResume is true, the request includes Last-Event-ID header for resume.
+// NOTE: resp.Body is closed before the function returns (line 1270). Callers only access
+// resp.StatusCode and must not read resp.Body.
 func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta DeltaCallback, retryState *streamRetryState) (*Response, *http.Response, error) {
 	c.configMu.RLock()
 	baseURL := strings.TrimSuffix(c.config.BaseURL, "/")

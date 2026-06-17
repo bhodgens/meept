@@ -193,7 +193,7 @@ func (t IntentType) Keywords() []string {
 	case IntentSkill:
 		return []string{"/skill", "invoke", "run skill"}
 	case IntentPair:
-		return []string{"debate", "brainstorm", "explore", "discuss", "pair", "collaborate"}
+		return []string{"brainstorm", "explore", "discuss", "pair"}
 	case IntentCollaborate:
 		return []string{"collaborate", "pair program", "debate", "a/b test", "differential", "compare approaches"}
 	case IntentCompound:

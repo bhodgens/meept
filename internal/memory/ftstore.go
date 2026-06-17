@@ -233,6 +233,10 @@ func (s *SQLiteFTSStore) HasFTS5Public() bool {
 }
 
 // Store executes a store operation.
+// Note: RLock released before I/O per CLAUDE.md "no mutex across I/O" rule.
+// Race window: Close() could fire between unlock and ExecContext.
+// Mitigation: ExecContext returns "database is closed" error, caller handles gracefully.
+// This is a shutdown-edge-case only; normal operation is unaffected.
 func (s *SQLiteFTSStore) Store(ctx context.Context, query string, args ...any) error {
 	s.mu.RLock()
 	if !s.initialized {
@@ -246,6 +250,7 @@ func (s *SQLiteFTSStore) Store(ctx context.Context, query string, args ...any) e
 }
 
 // Delete executes a delete operation.
+// Note: RLock released before I/O per CLAUDE.md -- see Store() for rationale.
 // Returns ErrNotFound if no rows are deleted.
 func (s *SQLiteFTSStore) Delete(ctx context.Context, query string, args ...any) error {
 	s.mu.RLock()
@@ -272,6 +277,7 @@ func (s *SQLiteFTSStore) Delete(ctx context.Context, query string, args ...any) 
 }
 
 // DeleteByIDs removes multiple items by ID.
+// Note: RLock released before I/O per CLAUDE.md -- see Store() for rationale.
 func (s *SQLiteFTSStore) DeleteByIDs(ctx context.Context, tableName string, ids []string) (int, error) {
 	if len(ids) == 0 {
 		return 0, nil
@@ -302,6 +308,7 @@ func (s *SQLiteFTSStore) DeleteByIDs(ctx context.Context, tableName string, ids 
 }
 
 // Count returns the total number of items.
+// Note: RLock released before I/O per CLAUDE.md -- see Store() for rationale.
 func (s *SQLiteFTSStore) Count(ctx context.Context, tableName string) (int, error) {
 	s.mu.RLock()
 	if !s.initialized {
@@ -317,6 +324,7 @@ func (s *SQLiteFTSStore) Count(ctx context.Context, tableName string) (int, erro
 }
 
 // GetOldestTimestamp returns the created_at of the oldest item.
+// Note: RLock released before I/O per CLAUDE.md -- see Store() for rationale.
 func (s *SQLiteFTSStore) GetOldestTimestamp(ctx context.Context, tableName string) (*time.Time, error) {
 	s.mu.RLock()
 	if !s.initialized {
@@ -344,6 +352,7 @@ func (s *SQLiteFTSStore) GetOldestTimestamp(ctx context.Context, tableName strin
 }
 
 // GetNewestTimestamp returns the created_at of the newest item.
+// Note: RLock released before I/O per CLAUDE.md -- see Store() for rationale.
 func (s *SQLiteFTSStore) GetNewestTimestamp(ctx context.Context, tableName string) (*time.Time, error) {
 	s.mu.RLock()
 	if !s.initialized {
@@ -402,6 +411,7 @@ func escapeLikeWildcards(s string) string {
 }
 
 // FindDuplicateGroups finds groups of items with identical content exceeding the threshold.
+// Note: RLock released before I/O per CLAUDE.md -- see Store() for rationale.
 func (s *SQLiteFTSStore) FindDuplicateGroups(ctx context.Context, tableName string, thresholdChars int) ([][]string, error) {
 	s.mu.RLock()
 	if !s.initialized {

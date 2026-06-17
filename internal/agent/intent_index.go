@@ -50,8 +50,12 @@ func buildIntentText(t IntentType) string {
 func (idx *SemanticIndex) BuildIndex(ctx context.Context) error {
 	allIntents := []IntentType{
 		IntentChat, IntentReport, IntentRecall, IntentPlatform,
+		IntentStatus,
 		IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit,
-		IntentSchedule, IntentAnalyze, IntentSearch, IntentSkill,
+		IntentSchedule, IntentAnalyze, IntentSearch, IntentResearch,
+		IntentSecurity, IntentToolUse,
+		IntentPair, IntentCollaborate,
+		IntentSkill, IntentCompound, IntentClarify,
 	}
 
 	entries := make([]IntentEntry, 0, len(allIntents))

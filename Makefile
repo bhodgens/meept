@@ -353,6 +353,15 @@ mutexio:
 	@echo "Running mutexio analyzer..."
 	@go run ./tools/analyzers/mutexio/ ./...
 
+.PHONY: predid
+predid:
+	@echo "Running predid analyzer..."
+	@go run ./tools/analyzers/predid/ ./...
+
+.PHONY: analyzers
+analyzers: mutexio predid
+	@echo "All analyzers complete."
+
 mod-tidy:
 	@echo "Tidying Go modules..."
 	go mod tidy

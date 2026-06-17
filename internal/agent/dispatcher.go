@@ -2175,16 +2175,36 @@ func hasKeywordMatch(input string) bool {
 	return false
 }
 
-// compoundSignalWords lists conjunctions and signal words that indicate a
-// request genuinely contains multiple distinct intents.
+// compoundSignalWords lists conjunctions and multi-word signal phrases that
+// indicate a request genuinely contains multiple distinct intents. These use
+// simple substring match (they already contain surrounding spaces in the
+// literal so they won't false-match inside words).
 var compoundSignalWords = []string{
 	" and also", " as well as ", " plus ", " while ", " then ",
 	" and do", " and create", " and write", " and fix",
 	" and implement", " and also create", " and also write",
 	" and also fix", " and also implement", " and also add",
 	" and then", " but also", " at the same time",
-	"first", "second", "after that", "next",
+	"after that",
 }
+
+// shortCompoundWords are single-letter/signal words that need word-boundary
+// matching so they don't false-match inside larger words (e.g. "next" in
+// "packet", "socket", "context").
+var shortCompoundWords = []string{"first", "second", "next"}
+
+// compoundSignalRegex is a pre-compiled alternation of the short compound words
+// with word boundaries. Using a single regex is more efficient than compiling
+// a separate pattern per word.
+func buildCompoundRegex() *regexp.Regexp {
+	quoted := make([]string, len(shortCompoundWords))
+	for i, w := range shortCompoundWords {
+		quoted[i] = regexp.QuoteMeta(w)
+	}
+	return regexp.MustCompile(`\b(?:` + strings.Join(quoted, "|") + `)\b`)
+}
+
+var compoundSignalRegex = buildCompoundRegex()
 
 // hasCompoundSignalWords returns true if the input is long enough and contains
 // at least one compound signal word, suggesting multiple distinct intents.
@@ -2198,7 +2218,9 @@ func hasCompoundSignalWords(input string) bool {
 			return true
 		}
 	}
-	return false
+	// Short single words need word-boundary matching to avoid false positives
+	// inside compound words (e.g. "next" in "packet", "first" in "aircraft").
+	return compoundSignalRegex.MatchString(lower)
 }
 
 // heuristicFallback provides targeted keyword-based routing when all other

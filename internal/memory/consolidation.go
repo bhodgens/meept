@@ -13,6 +13,9 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 )
 
+// Max error strings appended to ConsolidationReport.Error before truncation.
+const maxConsolidationErrors = 5
+
 // Consolidator compacts and summarizes old memories.
 // It performs:
 // 1. Fetching old episodic memories (older than a configurable threshold)
@@ -84,6 +87,7 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 
 	start := time.Now()
 	report := &ConsolidationReport{}
+	var errorCount int
 
 	// Access-based expiration (run before consolidation)
 	cfg := c.manager.Config().Expiration
@@ -96,10 +100,17 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 	cutoff := time.Now().Add(-time.Duration(olderThanHours) * time.Hour)
 	episodicReport, err := c.consolidateEpisodic(ctx, cutoff)
 	if err != nil {
-		if report.Error != "" {
-			report.Error += "; "
+		if errorCount < maxConsolidationErrors {
+			if report.Error != "" {
+				report.Error += "; "
+			}
+			report.Error += err.Error()
+			errorCount++
 		}
-		report.Error += err.Error()
+		if errorCount == maxConsolidationErrors+1 {
+			report.Error += "; ... (additional errors omitted)"
+			errorCount++
+		}
 		c.logger.Error("Episodic consolidation failed", "error", err)
 	} else {
 		report.EpisodicArchived = episodicReport.archived
@@ -109,10 +120,17 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 	// Task deduplication
 	removed, err := c.deduplicateTasks(ctx)
 	if err != nil {
-		if report.Error != "" {
-			report.Error += "; "
+		if errorCount < maxConsolidationErrors {
+			if report.Error != "" {
+				report.Error += "; "
+			}
+			report.Error += err.Error()
+			errorCount++
 		}
-		report.Error += err.Error()
+		if errorCount == maxConsolidationErrors+1 {
+			report.Error += "; ... (additional errors omitted)"
+			errorCount++
+		}
 		c.logger.Error("Task deduplication failed", "error", err)
 	} else {
 		report.DuplicatesRemoved = removed

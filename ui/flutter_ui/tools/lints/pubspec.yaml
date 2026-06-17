@@ -1,0 +1,13 @@
+name: meept_lints
+description: Project-local custom_lint rules for the meept Flutter UI.
+version: 0.1.0+1
+publish_to: none
+
+environment:
+  sdk: '>=3.10.3 <4.0.0'
+
+dependencies:
+  # Pinned to match the app's analyzer range once custom_lint is added.
+  # See INTEGRATION_NOTES.md in this directory for the upgrade path.
+  analyzer: ^7.0.0
+  custom_lint_builder: ^0.7.0

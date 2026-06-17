@@ -202,6 +202,9 @@ func (t *TaskMemory) Search(ctx context.Context, query, domain string, limit int
 		escapedQuery := escapeLikeWildcards(query)
 		likePattern := "%" + escapedQuery + "%"
 		if domain != "" {
+			// Note: ESCAPE '\' uses a Go raw string literal, so backslash has no special meaning
+			// in the string itself - the raw backslash is correctly passed to SQLite as the
+			// escape character for LIKE pattern matching.
 			rows, err = db.QueryContext(ctx, `
 				SELECT id, content, domain, metadata_json, created_at
 				FROM task_memories

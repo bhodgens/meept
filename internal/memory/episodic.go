@@ -201,6 +201,9 @@ func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([
 		`, safeQuery, limit)
 	} else {
 		// Fallback to LIKE-based search (slower but works without FTS5)
+		// Note: ESCAPE '\' uses a Go raw string literal, so backslash has no special meaning
+		// in the string itself - the raw backslash is correctly passed to SQLite as the
+		// escape character for LIKE pattern matching.
 		escapedQuery := escapeLikeWildcards(query)
 		likePattern := "%" + escapedQuery + "%"
 		rows, err = db.QueryContext(ctx, `
@@ -224,11 +227,27 @@ func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([
 	}
 
 	// Update last_accessed_at asynchronously to avoid blocking.
+	// Copy IDs to avoid a data race on the results slice backing array: the
+	// caller may reuse or replace the slice after Return, and while
+	// updateLastAccessed extracts its own ids []string internally, the
+	// goroutine must not depend on the caller's slice still being valid.
+	// Recover is added as a safety net for any unexpected panic in the
+	// background write path.
+	memoryIDs := make([]string, len(results))
+	for i, r := range results {
+		memoryIDs[i] = r.Memory.ID
+	}
 	//nolint:gosec // goroutine outlives request context
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				e.logger.Debug("updateLastAccessedByIDs panic recovered", "reason", r)
+			}
+		}()
+
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := e.updateLastAccessed(updateCtx, results); err != nil {
+		if err := e.updateLastAccessedByIDs(updateCtx, memoryIDs); err != nil {
 			e.logger.Warn("Failed to update last_accessed_at", "error", err)
 		}
 	}()
@@ -237,6 +256,7 @@ func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([
 }
 
 // updateLastAccessed updates the last_accessed_at timestamp for retrieved memories.
+// Deprecated: use updateLastAccessedByIDs instead to avoid slice-backed data races.
 func (e *EpisodicMemory) updateLastAccessed(ctx context.Context, results []MemoryResult) error {
 	if len(results) == 0 {
 		return nil
@@ -248,6 +268,24 @@ func (e *EpisodicMemory) updateLastAccessed(ctx context.Context, results []Memor
 		ids[i] = result.Memory.ID
 	}
 
+	return e.updateLastAccessedByIDsImpl(ctx, nowISO, ids)
+}
+
+// updateLastAccessedByIDs updates the last_accessed_at timestamp for memories
+// identified by the given IDs. This variant accepts raw IDs rather than full
+// MemoryResult structs, callers should pass a copied ID slice to avoid data
+// races on the original search-results slice.
+func (e *EpisodicMemory) updateLastAccessedByIDs(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	nowISO := time.Now().UTC().Format(time.RFC3339Nano)
+	return e.updateLastAccessedByIDsImpl(ctx, nowISO, ids)
+}
+
+// updateLastAccessedByIDsImpl is the shared implementation for the above two
+// methods; it builds and executes the UPDATE … WHERE id IN (...) statement.
+func (e *EpisodicMemory) updateLastAccessedByIDsImpl(ctx context.Context, nowISO string, ids []string) error {
 	placeholders := make([]string, len(ids))
 	args := make([]any, len(ids)+1)
 	args[0] = nowISO

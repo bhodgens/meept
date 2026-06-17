@@ -171,6 +171,10 @@ func (h *Handler) sendResults(replyTo string, results []MemoryResult) {
 		return
 	}
 
+	// Note: Uses a nanosecond-precision timestamp as the message ID.
+	// Collision is theoretically possible if two messages are generated in the same nanosecond,
+	// but the probability is near-zero in practice. UUID is used elsewhere in the memory system
+	// for identification and comparison where uniqueness is critical.
 	respMsg := &models.BusMessage{
 		ID:        time.Now().Format("20060102150405.000000000"),
 		Type:      models.MessageTypeResponse,
@@ -195,6 +199,10 @@ func (h *Handler) sendError(replyTo, errMsg string) {
 
 	payload, _ := json.Marshal(response)
 
+	// Note: Uses a nanosecond-precision timestamp as the message ID.
+	// Collision is theoretically possible if two messages are generated in the same nanosecond,
+	// but the probability is near-zero in practice. UUID is used elsewhere in the memory system
+	// for identification and comparison where uniqueness is critical.
 	respMsg := &models.BusMessage{
 		ID:        time.Now().Format("20060102150405.000000000"),
 		Type:      models.MessageTypeResponse,

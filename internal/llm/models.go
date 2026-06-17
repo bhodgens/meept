@@ -340,6 +340,8 @@ func (m *ResponseMessage) ContentString() string {
 	if err := json.Unmarshal(m.Content, &blocks); err == nil {
 		var sb strings.Builder
 		first := true
+		// Note: Non-text blocks (tool_use, image) are intentionally skipped.
+		// Tool calls are handled separately via msg.ToolCalls - dual-path design by convention.
 		for _, b := range blocks {
 			if b.Type != "text" {
 				continue

@@ -1142,7 +1142,7 @@ type StoreOptions struct {
 func (m *Manager) StoreVersioned(ctx context.Context, mem Memory, opts StoreOptions) (string, error) {
 	if opts.CreateVersion && mem.ID != "" {
 		// Mark old version as non-current
-		if err := m.markVersionNonCurrent(ctx, mem.ID); err != nil {
+		if err := m.markVersionNonCurrent(ctx, opts.ParentID); err != nil {
 			m.logger.Warn("Failed to mark version non-current", "error", err)
 		}
 
@@ -1223,8 +1223,8 @@ func (m *Manager) getCurrentVersion(ctx context.Context, id string) int {
 	return maxVersion
 }
 
-// GetVersionHistory retrieves all versions of a memory by ID or parent ID.
-// Uses the SQL parent_id column for efficient querying.
+// GetVersionHistory retrieves all versions of a memory by traversing the
+// full parent_id chain using a recursive CTE, handling arbitrary depth.
 func (m *Manager) GetVersionHistory(ctx context.Context, id string) ([]Memory, error) {
 	if m.episodic == nil {
 		return nil, errors.New("episodic memory not available")
@@ -1234,13 +1234,20 @@ func (m *Manager) GetVersionHistory(ctx context.Context, id string) ([]Memory, e
 
 	// Find all versions using the SQL parent_id column
 	rows, err := db.QueryContext(ctx, `
+		WITH RECURSIVE version_chain AS (
+			SELECT id, content, category, metadata_json, created_at, last_accessed_at
+			FROM episodic_memories
+			WHERE id = ?
+			UNION ALL
+			SELECT e.id, e.content, e.category, e.metadata_json, e.created_at, e.last_accessed_at
+			FROM episodic_memories e
+			INNER JOIN version_chain vc ON e.id = vc.parent_id
+			WHERE vc.parent_id IS NOT NULL
+		)
 		SELECT id, content, category, metadata_json, created_at, last_accessed_at
-		FROM episodic_memories
-		WHERE id = ?
-		   OR parent_id = ?
-		   OR id = (SELECT parent_id FROM episodic_memories WHERE id = ?)
+		FROM version_chain
 		ORDER BY created_at ASC
-	`, id, id, id)
+	`, id)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to query version history: %w", err)
