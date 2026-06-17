@@ -378,9 +378,9 @@ func TestHermesToolMappingIntegration(t *testing.T) {
 
 		// Verify all mapped tool names appear in the result.
 		expectedMappings := []struct {
-			from              string
-			to                string
-			skipAbsenceCheck  bool // true when from is a substring of to
+			from             string
+			to               string
+			skipAbsenceCheck bool // true when from is a substring of to
 		}{
 			{from: "schedule", to: "schedule_create", skipAbsenceCheck: true},
 			{from: "skill_view", to: "skills.get", skipAbsenceCheck: false},

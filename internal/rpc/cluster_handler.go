@@ -15,17 +15,17 @@ import (
 // ClusterHandler provides native RPC methods for cluster management.
 // It exposes cluster status, peer lists, and sync operations via JSON-RPC.
 type ClusterHandler struct {
-	gossip       *cluster.GossipEngine
-	gitSync      *cluster.GitSync
-	clusterMQ    *queue.ClusterQueue
-	cfg          *cluster.Config
-	store        *queue.Store
+	gossip    *cluster.GossipEngine
+	gitSync   *cluster.GitSync
+	clusterMQ *queue.ClusterQueue
+	cfg       *cluster.Config
+	store     *queue.Store
 }
 
 // NewClusterHandler creates a new cluster RPC handler.
 func NewClusterHandler(gossip *cluster.GossipEngine, gitSync *cluster.GitSync, cfg *cluster.Config) *ClusterHandler {
 	return &ClusterHandler{
-		gossip: gossip,
+		gossip:  gossip,
 		gitSync: gitSync,
 		cfg:     cfg,
 	}
@@ -135,11 +135,11 @@ func (h *ClusterHandler) handleReset(_ context.Context, params json.RawMessage) 
 
 // JoinResponse is the structured response returned by cluster.join.
 type JoinResponse struct {
-	ClusterID   string                `json:"cluster_id"`
-	ClusterName string                `json:"cluster_name"`
-	Network     cluster.NetworkConfig `json:"network"`
-	Gossip      cluster.GossipConfig  `json:"gossip"`
-	Queue       cluster.QueueConfig   `json:"queue"`
+	ClusterID   string                 `json:"cluster_id"`
+	ClusterName string                 `json:"cluster_name"`
+	Network     cluster.NetworkConfig  `json:"network"`
+	Gossip      cluster.GossipConfig   `json:"gossip"`
+	Queue       cluster.QueueConfig    `json:"queue"`
 	Security    cluster.SecurityConfig `json:"security"`
 }
 

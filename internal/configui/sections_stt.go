@@ -1,7 +1,6 @@
 // internal/configui/sections_stt.go
 package configui
 
-
 func buildSTTFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.STT

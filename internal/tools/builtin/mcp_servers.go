@@ -73,6 +73,6 @@ func (t *MCPServersTool) TerminateHint(args map[string]any) bool { return true }
 
 // Ensure MCPServersTool implements the required interfaces.
 var (
-	_ tools.Tool           = (*MCPServersTool)(nil)
+	_ tools.Tool            = (*MCPServersTool)(nil)
 	_ tools.TerminatingTool = (*MCPServersTool)(nil)
 )

@@ -286,7 +286,7 @@ class WebSocketService {
           headers: {
             if (_apiKey != null && _apiKey.isNotEmpty)
               'Authorization': 'Bearer $_apiKey',
-            'Origin': 'http://localhost:$_port',
+            'Origin': 'https://localhost:$_port',
           },
           customClient: _createHttpClient(),
         );

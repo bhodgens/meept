@@ -15,15 +15,15 @@ import (
 
 // ServerConfig holds configuration for the HTTP server.
 type ServerConfig struct {
-	Addr                string        // Listen address (default: :8080)
-	ReadTimeout         time.Duration // Read timeout
-	WriteTimeout        time.Duration // Write timeout
-	MaxHeaderBytes      int           // Max header size
-	EnableCORS          bool          // Enable CORS headers
-	CORSAllowedOrigins  []string      // Optional CORS allowlist; defaults to localhost
-	TLSCertFile         string        // TLS cert file. When non-empty, TLS is enabled.
-	TLSKeyFile          string        // TLS key file. When non-empty, TLS is enabled.
-	RequireAuth         bool          // Require authentication (default: false for backwards compat)
+	Addr               string        // Listen address (default: :8080)
+	ReadTimeout        time.Duration // Read timeout
+	WriteTimeout       time.Duration // Write timeout
+	MaxHeaderBytes     int           // Max header size
+	EnableCORS         bool          // Enable CORS headers
+	CORSAllowedOrigins []string      // Optional CORS allowlist; defaults to localhost
+	TLSCertFile        string        // TLS cert file. When non-empty, TLS is enabled.
+	TLSKeyFile         string        // TLS key file. When non-empty, TLS is enabled.
+	RequireAuth        bool          // Require authentication (default: false for backwards compat)
 }
 
 // DefaultServerConfig returns sensible defaults.

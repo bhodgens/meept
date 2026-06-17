@@ -626,7 +626,7 @@ func (a *App) viewSection() string {
 	}
 	s := a.styles.breadcrumb.Render("meept config > ") + a.styles.title.Render(a.section.Title()) + unsavedMarker + "\n\n"
 	if a.errMsg != "" {
-		s += a.styles.dirtyMarker.Render("error: " + a.errMsg) + "\n\n"
+		s += a.styles.dirtyMarker.Render("error: "+a.errMsg) + "\n\n"
 	}
 	for i, f := range a.section.Fields() {
 		cursor := "  "

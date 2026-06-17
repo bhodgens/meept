@@ -32,10 +32,10 @@ type CachedModel struct {
 
 // ModelDownloader manages downloading and caching models from HuggingFace.
 type ModelDownloader struct {
-	cacheDir  string
-	client    *http.Client
-	logger    *slog.Logger
-	apiBase   string
+	cacheDir string
+	client   *http.Client
+	logger   *slog.Logger
+	apiBase  string
 }
 
 // NewModelDownloader creates a model downloader with the given cache directory.
@@ -327,11 +327,11 @@ func (d *ModelDownloader) saveCommit(modelID, commitSHA string) error {
 
 // HFModelInfo holds model information from the HuggingFace API.
 type HFModelInfo struct {
-	ModelID        string    `json:"modelId"`
-	CommitSHA      string    `json:"sha"`
-	LastModified   time.Time `json:"lastModified"`
-	Private        bool      `json:"private"`
-	SpaceSDK       string    `json:"sdk"`
+	ModelID      string    `json:"modelId"`
+	CommitSHA    string    `json:"sha"`
+	LastModified time.Time `json:"lastModified"`
+	Private      bool      `json:"private"`
+	SpaceSDK     string    `json:"sdk"`
 }
 
 // progressWriter wraps an io.Writer and logs progress periodically.
@@ -353,7 +353,7 @@ func (pw *progressWriter) Write(p []byte) (int, error) {
 		pw.logger.Info("downloading model file", "file", pw.filename, "downloaded_mb", float64(pw.totalWritten)/1e6, "total_mb", float64(pw.total)/1e6)
 	} else if pw.total > 0 {
 		digit := int(pw.totalWritten * 10 / pw.total)
-		prev := int((pw.totalWritten-int64(n)) * 10 / pw.total)
+		prev := int((pw.totalWritten - int64(n)) * 10 / pw.total)
 		if digit > prev {
 			pw.logger.Info("downloading model file", "file", pw.filename, "progress", strconv.Itoa(digit*10)+"%")
 		}

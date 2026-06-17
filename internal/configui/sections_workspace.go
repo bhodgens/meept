@@ -1,7 +1,6 @@
 // internal/configui/sections_workspace.go
 package configui
 
-
 func buildWorkspaceFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.Workspace

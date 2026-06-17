@@ -40,16 +40,16 @@ type RepoMapConfig struct {
 // DefaultRepoMapConfig returns a RepoMapConfig with default values.
 func DefaultRepoMapConfig() RepoMapConfig {
 	return RepoMapConfig{
-		Enabled:         true,
-		MaxMapTokens:    1024,
-		MapMulNoFiles:   8.0,
-		CacheDir:        "~/.meept/repomap_cache",
-		MaxCacheSize:    500 * 1024 * 1024,
-		Damping:         0.85,
-		MaxIterations:   100,
-		ConvergenceTol:  1e-6,
-		ContextLines:    2,
-		MaxLineLength:   100,
+		Enabled:        true,
+		MaxMapTokens:   1024,
+		MapMulNoFiles:  8.0,
+		CacheDir:       "~/.meept/repomap_cache",
+		MaxCacheSize:   500 * 1024 * 1024,
+		Damping:        0.85,
+		MaxIterations:  100,
+		ConvergenceTol: 1e-6,
+		ContextLines:   2,
+		MaxLineLength:  100,
 	}
 }
 
@@ -132,11 +132,11 @@ func NewRepoMapGenerator(config RepoMapConfig, logger *slog.Logger, watchedFiles
 
 	// Create cache
 	cacheConfig := CacheConfig{
-		CacheDir:         config.CacheDir,
-		MaxCacheSize:     config.MaxCacheSize,
+		CacheDir:          config.CacheDir,
+		MaxCacheSize:      config.MaxCacheSize,
 		EnableMemoryCache: true,
-		MemoryCacheSize:  100,
-		Logger:           logger,
+		MemoryCacheSize:   100,
+		Logger:            logger,
 	}
 
 	tagCache, err := NewTagCache(cacheConfig)
@@ -216,9 +216,9 @@ func (g *RepoMapGenerator) generateInternal(ctx context.Context, chatFiles, ment
 	// Step 3: Compute PageRank
 	personalization := g.buildPersonalization(chatFiles, mentionedIdentifiers)
 	pageRankConfig := PageRankConfig{
-		Damping:        g.config.Damping,
-		MaxIterations:  g.config.MaxIterations,
-		ConvergenceTol: g.config.ConvergenceTol,
+		Damping:         g.config.Damping,
+		MaxIterations:   g.config.MaxIterations,
+		ConvergenceTol:  g.config.ConvergenceTol,
 		Personalization: personalization,
 	}
 	ranked := g.ranker.Compute(graph, pageRankConfig)

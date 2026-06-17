@@ -544,4 +544,3 @@ func (s *Server) registerBuiltinHandlers() {
 func isParameterError(err error) bool {
 	return errcls.IsParameterError(err)
 }
-

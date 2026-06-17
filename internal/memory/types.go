@@ -139,7 +139,6 @@ func ParseMetadata(jsonStr string) map[string]any {
 	return meta
 }
 
-
 // ConsolidationBackend provides the data operations needed for memory consolidation.
 // Implementations wrap specific storage backends (SQLite, memvid, etc.).
 type ConsolidationBackend interface {

@@ -12,6 +12,7 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -328,7 +329,7 @@ func (s *SyncManager) Distill(ctx context.Context, taskID, agentID string) (*Dis
 		// Queue for retry if configured
 		if s.config.Sync.RetryOnFailure {
 			s.queueRetry(RetryItem{
-				ID:          fmt.Sprintf("distill-%s-%d", taskID, time.Now().UnixNano()),
+				ID:          id.Generate("distill-"+taskID+"-"),
 				Operation:   OperationDistill,
 				TaskID:      taskID,
 				AgentID:     agentID,
@@ -401,7 +402,7 @@ func (s *SyncManager) Distill(ctx context.Context, taskID, agentID string) (*Dis
 			// Queue for retry
 			if s.config.Sync.RetryOnFailure {
 				s.queueRetry(RetryItem{
-					ID:          fmt.Sprintf("promote-%s-%d", candidate.MemoryID, time.Now().UnixNano()),
+					ID:          id.Generate("promote-" + candidate.MemoryID + "-"),
 					Operation:   OperationDistill,
 					MemoryID:    candidate.MemoryID,
 					Memory:      distilled,

@@ -1,7 +1,6 @@
 // internal/configui/sections_tooling.go
 package configui
 
-
 func buildToolingFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.Tooling

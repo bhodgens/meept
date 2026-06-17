@@ -27,8 +27,8 @@ func (t *WorkspaceYieldTool) SetCallback(cb func(ctx context.Context, action, fe
 	}
 }
 
-func (t *WorkspaceYieldTool) Name() string        { return "workspace_yield" }
-func (t *WorkspaceYieldTool) Category() string    { return "collaboration" }
+func (t *WorkspaceYieldTool) Name() string     { return "workspace_yield" }
+func (t *WorkspaceYieldTool) Category() string { return "collaboration" }
 func (t *WorkspaceYieldTool) Description() string {
 	return "End your turn as the active driver in a pair programming session. " +
 		"Optionally approve the current state, request changes, or request the token."
@@ -39,7 +39,7 @@ func (t *WorkspaceYieldTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"action": {
-				Type:        schemaTypeString,
+				Type: schemaTypeString,
 				Description: "approve = pass turn to other agent; " +
 					"request_changes = ask other to fix something; " +
 					"request_token = take over as driver",

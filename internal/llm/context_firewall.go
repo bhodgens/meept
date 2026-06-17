@@ -232,9 +232,9 @@ type ContextFirewall struct {
 	summarizationFailures atomic.Uint64
 	droppedMessages       atomic.Uint64
 	dropEvents            atomic.Uint64
-	compactionEvents       atomic.Uint64
-	compactionFallbacks    atomic.Uint64
-	compactionTokensSaved  atomic.Uint64
+	compactionEvents      atomic.Uint64
+	compactionFallbacks   atomic.Uint64
+	compactionTokensSaved atomic.Uint64
 }
 
 // FirewallStats is a snapshot of firewall counters including compression stats.
@@ -252,9 +252,9 @@ type FirewallStats struct {
 	AvgQualityScore   float64 // Running average quality score across compressions
 	TotalCompressions uint64  // Total number of compression passes applied
 	// Compaction stats (direct compactor trigger in processMessages)
-	CompactionEvents       uint64
-	CompactionFallbacks    uint64
-	CompactionTokensSaved  uint64
+	CompactionEvents      uint64
+	CompactionFallbacks   uint64
+	CompactionTokensSaved uint64
 }
 
 // Stats returns a snapshot of firewall counters. When proactive compression
@@ -266,7 +266,7 @@ func (f *ContextFirewall) Stats() FirewallStats {
 		DropEvents:            f.dropEvents.Load(),
 		CompactionEvents:      f.compactionEvents.Load(),
 		CompactionFallbacks:   f.compactionFallbacks.Load(),
-		CompactionTokensSaved:  f.compactionTokensSaved.Load(),
+		CompactionTokensSaved: f.compactionTokensSaved.Load(),
 	}
 
 	if f.compressor != nil {

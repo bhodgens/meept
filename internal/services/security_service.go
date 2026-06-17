@@ -9,8 +9,8 @@ import (
 
 // SecurityService handles security operations.
 type SecurityService struct {
-	checker  *security.PermissionChecker
-	auditDB  *sql.DB
+	checker *security.PermissionChecker
+	auditDB *sql.DB
 }
 
 // NewSecurityService creates a security service.
@@ -20,7 +20,9 @@ func NewSecurityService(c *security.PermissionChecker) *SecurityService {
 
 // SetAuditDB sets the audit database for querying audit entries.
 func (s *SecurityService) SetAuditDB(db *sql.DB) {
-	s.auditDB = db
+	if db != nil {
+		s.auditDB = db
+	}
 }
 
 // CheckRequest contains security check parameters.

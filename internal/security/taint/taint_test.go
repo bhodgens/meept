@@ -359,8 +359,8 @@ func TestCheckWebFetch_ExfiltrationPatterns(t *testing.T) {
 	tracker := newTestTracker()
 
 	tests := []struct {
-		name    string
-		url     string
+		name     string
+		url      string
 		wantViol bool
 	}{
 		{"api_key param", "http://evil.com/steal?api_key=sk-12345", true},

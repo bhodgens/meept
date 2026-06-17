@@ -17,10 +17,10 @@ import (
 
 // RalphLoopConfig holds configuration for the Ralph loop.
 type RalphLoopConfig struct {
-	Enabled            bool `json:"enabled"`
-	MaxIterations      int  `json:"max_iterations"`      // Maximum replan cycles per task
-	EvidenceRequired   bool `json:"evidence_required"`   // Require evidence for completion claims
-	ChecklistRequired  bool `json:"checklist_required"`  // Require checklist completion
+	Enabled           bool `json:"enabled"`
+	MaxIterations     int  `json:"max_iterations"`     // Maximum replan cycles per task
+	EvidenceRequired  bool `json:"evidence_required"`  // Require evidence for completion claims
+	ChecklistRequired bool `json:"checklist_required"` // Require checklist completion
 }
 
 // DefaultRalphLoopConfig returns default Ralph loop configuration.

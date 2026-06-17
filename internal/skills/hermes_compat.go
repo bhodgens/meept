@@ -149,13 +149,13 @@ func NewHermesToolMapper(logger *slog.Logger) *HermesToolMapper {
 	return &HermesToolMapper{
 		logger: logger,
 		mapping: map[string]string{
-			"schedule":    "schedule_create",
-			"skill_view":  "skills.get",
-			"skills_list": "skills.list",
-			"team_create": "delegate_task",
-			"team_list":   "platform_agents",
+			"schedule":     "schedule_create",
+			"skill_view":   "skills.get",
+			"skills_list":  "skills.list",
+			"team_create":  "delegate_task",
+			"team_list":    "platform_agents",
 			"team_message": "request_handoff",
-			"image_gen": "", // no Meept equivalent yet — see https://github.com/bhodgens/meept/issues/13
+			"image_gen":    "", // no Meept equivalent yet — see https://github.com/bhodgens/meept/issues/13
 		},
 	}
 }

@@ -68,8 +68,8 @@ type GitConfig struct {
 
 // SecurityConfig holds security settings.
 type SecurityConfig struct {
-	RequireNodeSignatures   bool `json:"require_node_signatures"`
-	Ed25519KeyRotationDays  int  `json:"ed25519_key_rotation_days"`
+	RequireNodeSignatures  bool `json:"require_node_signatures"`
+	Ed25519KeyRotationDays int  `json:"ed25519_key_rotation_days"`
 }
 
 // LoadClusterConfig loads cluster configuration from a JSON5 file.

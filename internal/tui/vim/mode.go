@@ -14,10 +14,10 @@ type Mode int
 //go:generate go run golang.org/x/tools/cmd/stringer -type=Mode -linecomment
 
 const (
-	ModeNormal Mode = iota   // NORMAL
-	ModeInsert                // INSERT
-	ModeVisual                // VISUAL
-	ModeCommand               // COMMAND
+	ModeNormal  Mode = iota // NORMAL
+	ModeInsert              // INSERT
+	ModeVisual              // VISUAL
+	ModeCommand             // COMMAND
 )
 
 // State holds the vim editing state.

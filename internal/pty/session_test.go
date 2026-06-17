@@ -93,7 +93,7 @@ func TestPTYSession_Size(t *testing.T) {
 	}
 
 	sess, err := NewSession(SessionConfig{
-		Cmd: "cat",
+		Cmd:  "cat",
 		Rows: 40,
 		Cols: 120,
 	})
@@ -117,7 +117,7 @@ func TestPTYSession_Resize(t *testing.T) {
 	}
 
 	sess, err := NewSession(SessionConfig{
-		Cmd: "cat",
+		Cmd:  "cat",
 		Rows: 24,
 		Cols: 80,
 	})

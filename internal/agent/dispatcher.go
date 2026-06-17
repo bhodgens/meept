@@ -38,21 +38,21 @@ var SteeringHeuristicTable = map[IntentType]bool{
 	IntentPlan:     true, // Plan changes redirect execution
 
 	// MEDIUM/LOW URGENCY - Follow-up (wait for natural stop)
-	IntentChat:     false, // General chat can wait
-	IntentRecall:   false, // Memory recall is not urgent
-	IntentResearch: false, // Research extensions follow naturally
-	IntentReport:   false, // Reporting status/information
-	IntentPlatform: false, // Platform events are informational
-	IntentStatus:   false, // Status inquiries
-	IntentReview:   false, // Review requests build on completion
-	IntentSchedule: false, // Scheduling is not urgent
-	IntentAnalyze:  false, // Analysis extends naturally
-	IntentSearch:   false, // Search queries are not urgent
-	IntentSkill:    false, // Skill operations can wait
+	IntentChat:        false, // General chat can wait
+	IntentRecall:      false, // Memory recall is not urgent
+	IntentResearch:    false, // Research extensions follow naturally
+	IntentReport:      false, // Reporting status/information
+	IntentPlatform:    false, // Platform events are informational
+	IntentStatus:      false, // Status inquiries
+	IntentReview:      false, // Review requests build on completion
+	IntentSchedule:    false, // Scheduling is not urgent
+	IntentAnalyze:     false, // Analysis extends naturally
+	IntentSearch:      false, // Search queries are not urgent
+	IntentSkill:       false, // Skill operations can wait
 	IntentPair:        false, // Pair tasks are not urgent
 	IntentCollaborate: false, // Collaboration tasks are not urgent
-	IntentCompound:     false, // Compound intents default to follow-up
-	IntentUnknown:      false,
+	IntentCompound:    false, // Compound intents default to follow-up
+	IntentUnknown:     false,
 }
 
 // shouldSteer determines if a message should interrupt the current flow.
@@ -352,14 +352,14 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 
 	// 1. Parse model reassignment directive (if user specified model preferences)
 	parseResult := d.modelParser.Parse(input)
-	
+
 	// 2. Handle clarification if needed
 	if parseResult.Found && parseResult.Directive.ClarificationNeeded {
 		return &DispatchResult{
-			ModelDirective:       parseResult.Directive,
-			ClarificationReply:   d.buildClarificationQuestion(parseResult.Directive),
-			ClarificationNeeded:  true,
-			AgentID:              config.AgentIDChat, // Use chat agent for clarification dialog
+			ModelDirective:      parseResult.Directive,
+			ClarificationReply:  d.buildClarificationQuestion(parseResult.Directive),
+			ClarificationNeeded: true,
+			AgentID:             config.AgentIDChat, // Use chat agent for clarification dialog
 		}, nil
 	}
 
@@ -430,7 +430,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		} else if len(parseResult.Directive.ModelReferences) > 0 {
 			modelRef = parseResult.Directive.ModelReferences[0]
 		}
-		
+
 		if modelRef != "" {
 			meta := map[string]any{
 				"model_override":      modelRef,
@@ -440,7 +440,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 			if parseResult.Directive.TargetIntent != nil {
 				meta["model_target_intent"] = string(*parseResult.Directive.TargetIntent)
 			}
-			
+
 			metaJSON, err := json.Marshal(meta)
 			if err == nil {
 				// Merge with existing metadata
@@ -477,6 +477,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 
 	return result, nil
 }
+
 // 1. Short-message guard: brief inputs route directly to chat (Issues 0006, 0029, 0036)
 // 2. Try capability matcher (fast, no LLM) if available and confident
 // 3. Try LLM classifier (if available)
@@ -708,10 +709,10 @@ func (d *Dispatcher) routeToPlan(ctx context.Context, input string, intent *Inte
 	)
 
 	return &DispatchResult{
-		AgentID: config.AgentIDPlanner,
-		Intent:  intent,
+		AgentID:  config.AgentIDPlanner,
+		Intent:   intent,
 		Response: fmt.Sprintf("plan created: %s (status: %s)", p.Title, p.State),
-		Plan:    p,
+		Plan:     p,
 	}, nil
 }
 
@@ -835,7 +836,7 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 				Task:          createdTask,
 				AgentID:       intent.AgentType,
 				Intent:        intent,
-				MemoryContext:  memCtx.Results,
+				MemoryContext: memCtx.Results,
 				OriginalInput: combinedInput,
 			}
 
@@ -1054,7 +1055,7 @@ func (d *Dispatcher) routeCompoundWithModel(ctx context.Context, multi *MultiInt
 			Description: intent.Summary,
 			AgentID:     intent.AgentType,
 		}
-		
+
 		// Attach model override if directive matches this step's intent
 		if modelDirective != nil && modelDirective.TargetIntent != nil {
 			intentType := IntentType(intent.Type)
@@ -1072,7 +1073,7 @@ func (d *Dispatcher) routeCompoundWithModel(ctx context.Context, multi *MultiInt
 				)
 			}
 		}
-		
+
 		steps = append(steps, step)
 	}
 
@@ -1084,7 +1085,7 @@ func (d *Dispatcher) routeCompoundWithModel(ctx context.Context, multi *MultiInt
 			Summary: multi.Summary,
 		},
 		OriginalInput: input,
-		Steps: steps,
+		Steps:         steps,
 	}, nil
 }
 
@@ -2372,8 +2373,8 @@ func (d *Dispatcher) buildModelListQuestion(scope string) string {
 	if scope != "" {
 		return fmt.Sprintf(
 			"I can use specific models for %s. Which model would you prefer? You can specify:\n"+
-			"- A specific model (e.g., 'glm-4.7', 'claude-opus', 'qwen-coder')\n"+
-			"- A provider (e.g., 'zai', 'anthropic', 'ollama', 'local')",
+				"- A specific model (e.g., 'glm-4.7', 'claude-opus', 'qwen-coder')\n"+
+				"- A provider (e.g., 'zai', 'anthropic', 'ollama', 'local')",
 			scope,
 		)
 	}
@@ -2386,11 +2387,11 @@ func (d *Dispatcher) buildScopeQuestion(modelRefs []string) string {
 	models := strings.Join(modelRefs, ", ")
 	return fmt.Sprintf(
 		"I can use %s for your task. What should these models handle?\n"+
-		"- coding/implementation\n"+
-		"- research/analysis\n"+
-		"- planning/synthesis\n"+
-		"- debugging\n"+
-		"- the entire task",
+			"- coding/implementation\n"+
+			"- research/analysis\n"+
+			"- planning/synthesis\n"+
+			"- debugging\n"+
+			"- the entire task",
 		models,
 	)
 }

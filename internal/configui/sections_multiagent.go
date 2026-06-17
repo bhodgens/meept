@@ -1,7 +1,6 @@
 // internal/configui/sections_multiagent.go
 package configui
 
-
 func buildMultiAgentFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.MultiAgent

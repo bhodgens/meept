@@ -439,7 +439,10 @@ func (t *Tracker) CheckWebFetchedVarsInShell(command string) *TaintViolationErro
 	defer t.mu.RUnlock()
 
 	// First pass: find all variable names with TaintExternal
-	type varEntry struct{ name string; tv *TaintedValue }
+	type varEntry struct {
+		name string
+		tv   *TaintedValue
+	}
 	var candidates []varEntry
 
 	for name, tv := range t.variables {

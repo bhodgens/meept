@@ -23,10 +23,10 @@ func TestDispatcher_BuildClarificationQuestion(t *testing.T) {
 		{
 			name: "no models parsed",
 			directive: &ModelReassignmentDirective{
-				Instruction:          "use something",
-				ModelReferences:      nil,
-				TargetScope:          "coding",
-				ClarificationNeeded:  true,
+				Instruction:            "use something",
+				ModelReferences:        nil,
+				TargetScope:            "coding",
+				ClarificationNeeded:    true,
 				ClarificationQuestions: []string{"Which model?"},
 			},
 			wantEmpty: false,
@@ -34,9 +34,9 @@ func TestDispatcher_BuildClarificationQuestion(t *testing.T) {
 		{
 			name: "no scope parsed",
 			directive: &ModelReassignmentDirective{
-				Instruction:     "use GLM models",
-				ModelReferences: []string{"provider:zai"},
-				TargetScope:      "",
+				Instruction:         "use GLM models",
+				ModelReferences:     []string{"provider:zai"},
+				TargetScope:         "",
 				ClarificationNeeded: true,
 			},
 			wantEmpty: false,
@@ -44,9 +44,9 @@ func TestDispatcher_BuildClarificationQuestion(t *testing.T) {
 		{
 			name: "provider reference needs clarification",
 			directive: &ModelReassignmentDirective{
-				Instruction:     "use GLM for coding",
-				ModelReferences: []string{"provider:zai"},
-				TargetScope:      "coding",
+				Instruction:         "use GLM for coding",
+				ModelReferences:     []string{"provider:zai"},
+				TargetScope:         "coding",
 				ClarificationNeeded: true,
 			},
 			wantEmpty: false,
@@ -68,9 +68,9 @@ func TestDispatcher_BuildClarificationQuestion(t *testing.T) {
 func TestDispatcher_ModelDirectiveInDispatchResult(t *testing.T) {
 	// Verify that DispatchResult struct has the ModelDirective field
 	result := &DispatchResult{
-		ModelDirective:       &ModelReassignmentDirective{Instruction: "use GLM for coding"},
-		ClarificationReply:   "Which GLM model?",
-		ClarificationNeeded:  true,
+		ModelDirective:      &ModelReassignmentDirective{Instruction: "use GLM for coding"},
+		ClarificationReply:  "Which GLM model?",
+		ClarificationNeeded: true,
 	}
 
 	assert.NotNil(t, result.ModelDirective)

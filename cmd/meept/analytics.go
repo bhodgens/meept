@@ -169,10 +169,10 @@ func runAnalyticsErrors(cmd *cobra.Command, args []string) error {
 	defer rows.Close()
 
 	type ErrorRow struct {
-		ErrorType       string `db:"error_type"`
-		Count           int    `db:"count"`
-		AffectedTasks   int    `db:"affected_tasks"`
-		ResolvedCount   int    `db:"resolved_count"`
+		ErrorType     string `db:"error_type"`
+		Count         int    `db:"count"`
+		AffectedTasks int    `db:"affected_tasks"`
+		ResolvedCount int    `db:"resolved_count"`
 	}
 
 	var results []ErrorRow
@@ -351,29 +351,29 @@ func runAnalyticsExport(cmd *cobra.Command, args []string) error {
 	defer rows.Close()
 
 	type OutcomeRow struct {
-		ID                    int            `json:"id"`
-		Timestamp             string         `json:"timestamp"`
-		TaskID                string         `json:"task_id"`
-		AgentID               string         `json:"agent_id"`
-		SkillName             sql.NullString `json:"skill_name"`
-		Status                sql.NullString `json:"status"`
-		Success               sql.NullBool   `json:"success"`
-		Iterations            sql.NullInt64  `json:"iterations"`
-		DurationMs            sql.NullInt64  `json:"duration_ms"`
-		TokensInput           sql.NullInt64  `json:"tokens_input"`
-		TokensOutput          sql.NullInt64  `json:"tokens_output"`
-		EstimatedCostCents    sql.NullFloat64 `json:"estimated_cost_cents"`
-		ResponseWellFormed    sql.NullBool   `json:"response_well_formed"`
-		SyntaxErrorsCount     sql.NullInt64  `json:"syntax_errors_count"`
-		IndentationErrorsCount sql.NullInt64 `json:"indentation_errors_count"`
-		LazyResponseDetected  sql.NullBool   `json:"lazy_response_detected"`
-		ContextExhausted      sql.NullBool   `json:"context_exhausted"`
-		ReflectionIterations sql.NullInt64  `json:"reflection_iterations"`
-		ReflectionSuccessful  sql.NullBool   `json:"reflection_successful"`
-		UserInterventions     sql.NullInt64  `json:"user_interventions"`
-		UserSatisfaction      sql.NullInt64  `json:"user_satisfaction"`
-		ModelID               sql.NullString `json:"model_id"`
-		EditFormat            sql.NullString `json:"edit_format"`
+		ID                     int             `json:"id"`
+		Timestamp              string          `json:"timestamp"`
+		TaskID                 string          `json:"task_id"`
+		AgentID                string          `json:"agent_id"`
+		SkillName              sql.NullString  `json:"skill_name"`
+		Status                 sql.NullString  `json:"status"`
+		Success                sql.NullBool    `json:"success"`
+		Iterations             sql.NullInt64   `json:"iterations"`
+		DurationMs             sql.NullInt64   `json:"duration_ms"`
+		TokensInput            sql.NullInt64   `json:"tokens_input"`
+		TokensOutput           sql.NullInt64   `json:"tokens_output"`
+		EstimatedCostCents     sql.NullFloat64 `json:"estimated_cost_cents"`
+		ResponseWellFormed     sql.NullBool    `json:"response_well_formed"`
+		SyntaxErrorsCount      sql.NullInt64   `json:"syntax_errors_count"`
+		IndentationErrorsCount sql.NullInt64   `json:"indentation_errors_count"`
+		LazyResponseDetected   sql.NullBool    `json:"lazy_response_detected"`
+		ContextExhausted       sql.NullBool    `json:"context_exhausted"`
+		ReflectionIterations   sql.NullInt64   `json:"reflection_iterations"`
+		ReflectionSuccessful   sql.NullBool    `json:"reflection_successful"`
+		UserInterventions      sql.NullInt64   `json:"user_interventions"`
+		UserSatisfaction       sql.NullInt64   `json:"user_satisfaction"`
+		ModelID                sql.NullString  `json:"model_id"`
+		EditFormat             sql.NullString  `json:"edit_format"`
 	}
 
 	var results []OutcomeRow
@@ -403,20 +403,20 @@ func runAnalyticsExport(cmd *cobra.Command, args []string) error {
 
 	// Convert to JSON-friendly format
 	type ExportRow struct {
-		ID                 int             `json:"id"`
-		Timestamp          string          `json:"timestamp"`
-		TaskID             string          `json:"task_id"`
-		AgentID            string          `json:"agent_id"`
-		SkillName          *string         `json:"skill_name,omitempty"`
-		Status             *string         `json:"status,omitempty"`
-		Success            *bool           `json:"success,omitempty"`
-		Iterations         *int64          `json:"iterations,omitempty"`
-		DurationMs         *int64          `json:"duration_ms,omitempty"`
-		TokensInput        *int64          `json:"tokens_input,omitempty"`
-		TokensOutput       *int64          `json:"tokens_output,omitempty"`
-		EstimatedCostCents *float64        `json:"estimated_cost_cents,omitempty"`
-		ModelID            *string         `json:"model_id,omitempty"`
-		EditFormat         *string         `json:"edit_format,omitempty"`
+		ID                 int      `json:"id"`
+		Timestamp          string   `json:"timestamp"`
+		TaskID             string   `json:"task_id"`
+		AgentID            string   `json:"agent_id"`
+		SkillName          *string  `json:"skill_name,omitempty"`
+		Status             *string  `json:"status,omitempty"`
+		Success            *bool    `json:"success,omitempty"`
+		Iterations         *int64   `json:"iterations,omitempty"`
+		DurationMs         *int64   `json:"duration_ms,omitempty"`
+		TokensInput        *int64   `json:"tokens_input,omitempty"`
+		TokensOutput       *int64   `json:"tokens_output,omitempty"`
+		EstimatedCostCents *float64 `json:"estimated_cost_cents,omitempty"`
+		ModelID            *string  `json:"model_id,omitempty"`
+		EditFormat         *string  `json:"edit_format,omitempty"`
 	}
 
 	var exportData []ExportRow

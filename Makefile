@@ -1,4 +1,4 @@
-.PHONY: help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server
+.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server
 
 help:
 	@echo "Usage: make [target]"
@@ -734,14 +734,60 @@ uninstall-all: uninstall uninstall-gui
 	@echo "Full uninstall complete."
 	@echo "Note: Flutter build cache not removed. Run 'cd ui/flutter_ui && flutter clean' if needed."
 
-# Documentation generation
-docs-generate-openapi:
-	@echo "Generating OpenAPI specification..."
-	go build -o $(BIN_DIR)/gendoc-openapi ./cmd/gendoc-openapi
-	$(BIN_DIR)/gendoc-openapi -output docs/reference/http-api/openapi.yaml
-	@echo "Generated docs/reference/http-api/openapi.yaml"
+# =============================================================================
+# OpenAPI SDK Generation
+# =============================================================================
 
-docs-generate: docs-generate-openapi
-	@echo "Regenerating all documentation..."
-	go generate ./...
-	@echo "Documentation generation complete"
+SDK_DIR := sdk
+
+.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean sdk-test
+
+# Generate all SDKs from OpenAPI spec
+sdk-generate: sdk-generate-go sdk-generate-dart
+	@echo ""
+	@echo "SDK generation complete."
+	@echo "  Go SDK:  $(SDK_DIR)/go/"
+	@echo "  Dart SDK: $(SDK_DIR)/dart/"
+
+# Generate Go SDK
+sdk-generate-go:
+	@echo "Generating Go SDK..."
+	@mkdir -p $(SDK_DIR)/go
+	@openapi-generator-cli generate \
+		-i docs/reference/http-api/openapi.yaml \
+		-g go \
+		-o $(SDK_DIR)/go \
+		--skip-validate-spec \
+		--additional-properties=packageName=meeptclient,packageVersion=0.2.0,generateInterfaces=true,interfaceMode=deferentially
+	@echo "Go SDK generated at $(SDK_DIR)/go/"
+
+# Generate Dart SDK  
+sdk-generate-dart:
+	@echo "Generating Dart SDK..."
+	@mkdir -p $(SDK_DIR)/dart
+	@openapi-generator-cli generate \
+		-i docs/reference/http-api/openapi.yaml \
+		-g dart \
+		-o $(SDK_DIR)/dart \
+		--skip-validate-spec \
+		--additional-properties=packageName=meept_client,packageVersion=0.2.0,pubName=meept_client,useNullSafety=true
+	@echo "Dart SDK generated at $(SDK_DIR)/dart/"
+
+# Clean generated SDKs
+sdk-clean:
+	@echo "Cleaning generated SDKs..."
+	rm -rf $(SDK_DIR)/go $(SDK_DIR)/dart
+	@echo "SDKs cleaned."
+
+# Test SDKs compile
+sdk-test: sdk-test-go sdk-test-dart
+
+sdk-test-go:
+	@echo "Testing Go SDK compiles..."
+	cd $(SDK_DIR)/go && go build ./...
+	@echo "Go SDK compiles OK"
+
+sdk-test-dart:
+	@echo "Testing Dart SDK compiles..."
+	cd $(SDK_DIR)/dart && flutter pub get && dart analyze
+	@echo "Dart SDK compiles OK"

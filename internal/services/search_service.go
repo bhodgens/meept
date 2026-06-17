@@ -13,7 +13,7 @@ import (
 
 // SearchResult represents a single search result from any scope.
 type SearchResult struct {
-	Type      string  `json:"type"`      // "session", "task", "memory", "plan"
+	Type      string  `json:"type"` // "session", "task", "memory", "plan"
 	ID        string  `json:"id"`
 	Title     string  `json:"title"`
 	Snippet   string  `json:"snippet"`
@@ -174,7 +174,7 @@ func (s *SearchService) searchMemories(ctx context.Context, query string) []Sear
 
 	memResults, err := s.memoryMgr.Search(ctx, memory.MemoryQuery{
 		Query: query,
-		Limit:  20,
+		Limit: 20,
 	})
 	if err != nil {
 		return nil

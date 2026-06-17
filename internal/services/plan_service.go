@@ -123,7 +123,7 @@ func (s *PlanService) Approve(ctx context.Context, req ApprovePlanRequest) (*pla
 	if req.PlanID == "" {
 		return nil, wrapError("plan", "Approve", ErrInvalidInput)
 	}
-	if s.manager == nil {
+	if s.manager == nil || s.store == nil {
 		return nil, wrapError("plan", "Approve", ErrUnavailable)
 	}
 	if err := s.manager.ApprovePlan(ctx, req.PlanID, req.SessionID, req.By); err != nil {
@@ -141,7 +141,7 @@ func (s *PlanService) Reject(ctx context.Context, req RejectPlanRequest) (*plan.
 	if req.PlanID == "" {
 		return nil, wrapError("plan", "Reject", ErrInvalidInput)
 	}
-	if s.manager == nil {
+	if s.manager == nil || s.store == nil {
 		return nil, wrapError("plan", "Reject", ErrUnavailable)
 	}
 	if err := s.manager.RejectPlan(ctx, req.PlanID, req.SessionID, req.By, req.Reason); err != nil {
@@ -159,7 +159,7 @@ func (s *PlanService) Confirm(ctx context.Context, req ConfirmPlanRequest) (*pla
 	if req.PlanID == "" {
 		return nil, wrapError("plan", "Confirm", ErrInvalidInput)
 	}
-	if s.manager == nil {
+	if s.manager == nil || s.store == nil {
 		return nil, wrapError("plan", "Confirm", ErrUnavailable)
 	}
 	if err := s.manager.ConfirmPlan(ctx, req.PlanID, req.SessionID, req.By); err != nil {
@@ -192,7 +192,7 @@ func (s *PlanService) Revise(ctx context.Context, req RevisePlanRequest) (*plan.
 	if req.PlanID == "" || req.Feedback == "" {
 		return nil, wrapError("plan", "Revise", ErrInvalidInput)
 	}
-	if s.manager == nil {
+	if s.manager == nil || s.store == nil {
 		return nil, wrapError("plan", "Revise", ErrUnavailable)
 	}
 	if err := s.manager.RevisePlan(ctx, req.PlanID, req.SessionID, req.Feedback); err != nil {

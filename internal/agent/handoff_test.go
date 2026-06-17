@@ -23,13 +23,13 @@ import (
 // mockQueue is a no-op implementation of queue.Queue for testing.
 type mockQueue struct{}
 
-func (m *mockQueue) Enqueue(_ context.Context, _ *queue.Job) error  { return nil }
+func (m *mockQueue) Enqueue(_ context.Context, _ *queue.Job) error { return nil }
 func (m *mockQueue) Claim(_ context.Context, _ string, _ []string) (*queue.Job, error) {
 	return nil, nil
 }
-func (m *mockQueue) MarkProcessing(_ context.Context, _ string) error { return nil }
+func (m *mockQueue) MarkProcessing(_ context.Context, _ string) error  { return nil }
 func (m *mockQueue) Complete(_ context.Context, _ string, _ any) error { return nil }
-func (m *mockQueue) Fail(_ context.Context, _ string, _ error) error  { return nil }
+func (m *mockQueue) Fail(_ context.Context, _ string, _ error) error   { return nil }
 func (m *mockQueue) Retry(_ context.Context, _ string) error           { return nil }
 func (m *mockQueue) Get(_ context.Context, _ string) (*queue.Job, error) {
 	return nil, nil
@@ -50,7 +50,7 @@ func (m *mockQueue) ListDeadLetter(_ context.Context, _ int) ([]*queue.Job, erro
 	return nil, nil
 }
 func (m *mockQueue) DeadLetterStats(_ context.Context) (int, error) { return 0, nil }
-func (m *mockQueue) Close() error                                     { return nil }
+func (m *mockQueue) Close() error                                   { return nil }
 
 // newTestTaskAndStepStore creates a task store (with step store) for testing.
 // The task store creates both tables in the same DB.
@@ -129,7 +129,7 @@ func TestTacticalScheduler_HandleHandoff_CreatesNewStep(t *testing.T) {
 		Description:   "Debug the failing test",
 		Reason:        "Tests are failing after implementation",
 		PartialResult: "Implemented feature X",
-		InjectAfter:    true,
+		InjectAfter:   true,
 	}
 
 	msg := handoffBusMsg(req)
@@ -296,7 +296,7 @@ func TestTacticalScheduler_HandleHandoff_RewiresDownstreamDependencies(t *testin
 		Description:   "Debug step A output",
 		Reason:        "Found potential issues",
 		PartialResult: "Implemented initial version",
-		InjectAfter:    true,
+		InjectAfter:   true,
 	}
 
 	msg := handoffBusMsg(req)
@@ -376,12 +376,12 @@ func TestTacticalScheduler_HandleHandoff_ToolHintDerivedFromAgent(t *testing.T) 
 	}
 
 	scheduler := NewTacticalScheduler(TacticalSchedulerConfig{
-		StepStore:        stepStore,
-		TaskStore:        taskStore,
-		Queue:            &mockQueue{},
-		Bus:              msgBus,
-		Logger:           slogDiscardLogger(),
-		MaxHandoffSteps:  0, // disable rate limiting for this test
+		StepStore:           stepStore,
+		TaskStore:           taskStore,
+		Queue:               &mockQueue{},
+		Bus:                 msgBus,
+		Logger:              slogDiscardLogger(),
+		MaxHandoffSteps:     0, // disable rate limiting for this test
 		HandoffUseAmendment: false,
 	})
 
@@ -409,7 +409,7 @@ func TestTacticalScheduler_HandleHandoff_ToolHintDerivedFromAgent(t *testing.T) 
 				Description:   "test step " + tt.name,
 				Reason:        "testing",
 				PartialResult: "partial",
-				InjectAfter:    true,
+				InjectAfter:   true,
 			}
 			if tt.explicit != "" {
 				req.ToolHint = tt.explicit
@@ -537,7 +537,7 @@ func TestOrchestrator_HandoffSubscription_FullFlow(t *testing.T) {
 		Description:   "Review and debug step A",
 		Reason:        "Need validation of approach",
 		PartialResult: "Implemented feature X with approach Y",
-		InjectAfter:    true,
+		InjectAfter:   true,
 	}
 
 	msg := handoffBusMsg(req)
@@ -730,12 +730,12 @@ func TestTacticalScheduler_HandleHandoff_RateLimitReached(t *testing.T) {
 	}
 
 	scheduler := NewTacticalScheduler(TacticalSchedulerConfig{
-		StepStore:        stepStore,
-		TaskStore:        taskStore,
-		Queue:            &mockQueue{},
-		Bus:              msgBus,
-		Logger:           slogDiscardLogger(),
-		MaxHandoffSteps:  5,
+		StepStore:           stepStore,
+		TaskStore:           taskStore,
+		Queue:               &mockQueue{},
+		Bus:                 msgBus,
+		Logger:              slogDiscardLogger(),
+		MaxHandoffSteps:     5,
 		HandoffUseAmendment: false, // direct path for simplicity
 	})
 
@@ -747,7 +747,7 @@ func TestTacticalScheduler_HandleHandoff_RateLimitReached(t *testing.T) {
 		Description:   "This should be rejected",
 		Reason:        "exceeds rate limit",
 		PartialResult: "too many handoffs",
-		InjectAfter:    true,
+		InjectAfter:   true,
 	}
 
 	msg := handoffBusMsg(req)
@@ -826,7 +826,7 @@ func TestTacticalScheduler_HandleHandoff_AmendmentPath(t *testing.T) {
 		Description:   "Debug the failing test",
 		Reason:        "Tests are failing",
 		PartialResult: "Implemented feature X",
-		InjectAfter:    true,
+		InjectAfter:   true,
 	}
 
 	msg := handoffBusMsg(req)
@@ -941,7 +941,7 @@ func TestTacticalScheduler_HandleHandoff_AmendmentPathRejected(t *testing.T) {
 		Description:   "This should be rejected",
 		Reason:        "exceeds capacity",
 		PartialResult: "partial",
-		InjectAfter:    true,
+		InjectAfter:   true,
 	}
 
 	msg := handoffBusMsg(req)
@@ -998,13 +998,13 @@ func TestTacticalScheduler_HandleHandoff_AmendmentFallbackToDirect(t *testing.T)
 	})
 
 	req := HandoffRequest{
-		TaskID:       tk.ID,
-		FromStepID:   fromStep.ID,
-		FromAgentID:  config.AgentIDCoder,
-		ToAgentID:    config.AgentIDDebugger,
-		Description:  "Fallback to direct creation",
-		Reason:       "amendment manager unavailable",
-		InjectAfter:   true,
+		TaskID:      tk.ID,
+		FromStepID:  fromStep.ID,
+		FromAgentID: config.AgentIDCoder,
+		ToAgentID:   config.AgentIDDebugger,
+		Description: "Fallback to direct creation",
+		Reason:      "amendment manager unavailable",
+		InjectAfter: true,
 	}
 
 	msg := handoffBusMsg(req)

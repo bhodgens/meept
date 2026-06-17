@@ -48,37 +48,37 @@ func skillUIType(skill *skills.Skill) string {
 
 // SkillUIDescriptor describes the UI rendering hints for a skill.
 type SkillUIDescriptor struct {
-	Slug        string         `json:"slug"`
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	UIType      string         `json:"ui_type"`
-	Category    string         `json:"category,omitempty"`
-	Tags        []string       `json:"tags,omitempty"`
-	Examples    []string       `json:"examples,omitempty"`
-	RiskLevel   string         `json:"risk_level,omitempty"`
-	Body        string         `json:"body,omitempty"`
-	Fields      []UIFieldDef   `json:"fields,omitempty"`
-	Actions     []UIActionDef  `json:"actions,omitempty"`
+	Slug        string        `json:"slug"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	UIType      string        `json:"ui_type"`
+	Category    string        `json:"category,omitempty"`
+	Tags        []string      `json:"tags,omitempty"`
+	Examples    []string      `json:"examples,omitempty"`
+	RiskLevel   string        `json:"risk_level,omitempty"`
+	Body        string        `json:"body,omitempty"`
+	Fields      []UIFieldDef  `json:"fields,omitempty"`
+	Actions     []UIActionDef `json:"actions,omitempty"`
 }
 
 // UIFieldDef describes a form field for skill UI rendering.
 type UIFieldDef struct {
-	Name        string `json:"name"`
-	Label       string `json:"label"`
-	Type        string `json:"type"` // "text", "textarea", "select", "number", "boolean"
-	Required    bool   `json:"required,omitempty"`
-	Default     any    `json:"default,omitempty"`
+	Name        string   `json:"name"`
+	Label       string   `json:"label"`
+	Type        string   `json:"type"` // "text", "textarea", "select", "number", "boolean"
+	Required    bool     `json:"required,omitempty"`
+	Default     any      `json:"default,omitempty"`
 	Options     []string `json:"options,omitempty"`
-	Placeholder string `json:"placeholder,omitempty"`
-	Help        string `json:"help,omitempty"`
+	Placeholder string   `json:"placeholder,omitempty"`
+	Help        string   `json:"help,omitempty"`
 }
 
 // UIActionDef describes an action button for skill UI rendering.
 type UIActionDef struct {
-	ID     string `json:"id"`
-	Label  string `json:"label"`
-	Type   string `json:"type"` // "execute", "cancel"
-	Style  string `json:"style,omitempty"` // "primary", "secondary", "danger"
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Type  string `json:"type"`            // "execute", "cancel"
+	Style string `json:"style,omitempty"` // "primary", "secondary", "danger"
 }
 
 // List returns available skills.

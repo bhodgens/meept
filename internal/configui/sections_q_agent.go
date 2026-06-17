@@ -1,7 +1,6 @@
 // internal/configui/sections_q_agent.go
 package configui
 
-
 func buildQAgentFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.QAgent

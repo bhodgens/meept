@@ -1206,8 +1206,8 @@ func TestAbsorbBoundaries_LeadingMatch(t *testing.T) {
 	anchor := fmt.Sprintf("%d:%s", 3, ComputeLineHash(fileLines[2]))
 	ops := []editOp{
 		{
-			Op:     "replace",
-			Anchor: anchor,
+			Op:      "replace",
+			Anchor:  anchor,
 			Content: "beta\nGAMMA_NEW",
 		},
 	}
@@ -1242,8 +1242,8 @@ func TestAbsorbBoundaries_TrailingMatch(t *testing.T) {
 	anchor := fmt.Sprintf("%d:%s", 2, ComputeLineHash(fileLines[1]))
 	ops := []editOp{
 		{
-			Op:     "replace",
-			Anchor: anchor,
+			Op:      "replace",
+			Anchor:  anchor,
 			Content: "BETA_NEW\ngamma",
 		},
 	}
@@ -1281,8 +1281,8 @@ func TestAbsorbBoundaries_BothBoundaries(t *testing.T) {
 	anchor := fmt.Sprintf("%d:%s", 3, ComputeLineHash(fileLines[2]))
 	ops := []editOp{
 		{
-			Op:     "replace",
-			Anchor: anchor,
+			Op:      "replace",
+			Anchor:  anchor,
 			Content: "beta\nGAMMA_NEW\ndelta",
 		},
 	}
@@ -1429,8 +1429,8 @@ func TestAbsorbBoundaries_EmptyContent(t *testing.T) {
 
 func TestLevenshteinRatio(t *testing.T) {
 	tests := []struct {
-		a, b     string
-		want     float64
+		a, b      string
+		want      float64
 		tolerance float64
 	}{
 		{"abc", "abc", 1.0, 0},

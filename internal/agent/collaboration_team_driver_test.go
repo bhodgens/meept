@@ -59,9 +59,9 @@ func TestParallelTeamDriver_Name(t *testing.T) {
 func TestParallelTeamDriver_CanInitiate(t *testing.T) {
 	d := newTestTeamDriver()
 	tests := []struct {
-		name    string
-		reason  string
-		want    bool
+		name   string
+		reason string
+		want   bool
 	}{
 		{"team keyword", "needs a team approach", true},
 		{"multi keyword", "use multi-agent for this", true},
@@ -319,9 +319,9 @@ func TestParallelTeamDriver_fanOut_NoRegistry(t *testing.T) {
 	// Set up team status so updateMemberStatus can find it
 	d.convMu.Lock()
 	d.conversations[sess.ID] = &TeamStatus{
-		SessionID:     sess.ID,
-		LeadAgent:     "lead",
-		Phase:         "fan_out",
+		SessionID: sess.ID,
+		LeadAgent: "lead",
+		Phase:     "fan_out",
 		MemberResults: map[string]*TeamMemberResult{
 			"member1": {AgentID: "member1", Status: MemberPending},
 			"member2": {AgentID: "member2", Status: MemberPending},
@@ -388,9 +388,9 @@ func TestParallelTeamDriver_fanOut_CancelledContext(t *testing.T) {
 	// Pre-populate conversation status
 	d.convMu.Lock()
 	d.conversations[sess.ID] = &TeamStatus{
-		SessionID:     sess.ID,
-		LeadAgent:     "lead",
-		Phase:         "fan_out",
+		SessionID: sess.ID,
+		LeadAgent: "lead",
+		Phase:     "fan_out",
 		MemberResults: map[string]*TeamMemberResult{
 			"member1": {AgentID: "member1", Status: MemberPending},
 		},
@@ -696,9 +696,9 @@ func TestParallelTeamDriver_TeamStatus_PhaseTransitions(t *testing.T) {
 
 	d.convMu.Lock()
 	d.conversations[sess.ID] = &TeamStatus{
-		SessionID:     sess.ID,
-		LeadAgent:     "lead",
-		Phase:         "fan_out",
+		SessionID: sess.ID,
+		LeadAgent: "lead",
+		Phase:     "fan_out",
 		MemberResults: map[string]*TeamMemberResult{
 			"m1": {AgentID: "m1", Status: MemberPending},
 		},

@@ -1,7 +1,6 @@
 // internal/configui/sections_workers.go
 package configui
 
-
 func buildWorkersFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.Workers

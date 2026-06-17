@@ -22,8 +22,8 @@ func NewRetainTool(manager *memory.Manager) *RetainTool {
 	return &RetainTool{manager: manager}
 }
 
-func (t *RetainTool) Name() string        { return "retain" }
-func (t *RetainTool) Category() string    { return "memory" }
+func (t *RetainTool) Name() string                      { return "retain" }
+func (t *RetainTool) Category() string                  { return "memory" }
 func (t *RetainTool) TerminateHint(map[string]any) bool { return true }
 
 func (t *RetainTool) Description() string {
@@ -188,8 +188,8 @@ func NewReflectTool(manager *memory.Manager) *ReflectTool {
 	return &ReflectTool{manager: manager}
 }
 
-func (t *ReflectTool) Name() string     { return "reflect" }
-func (t *ReflectTool) Category() string { return "memory" }
+func (t *ReflectTool) Name() string                      { return "reflect" }
+func (t *ReflectTool) Category() string                  { return "memory" }
 func (t *ReflectTool) TerminateHint(map[string]any) bool { return true }
 
 func (t *ReflectTool) Description() string {

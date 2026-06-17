@@ -51,8 +51,8 @@ func TestBotLifecycle_Integration(t *testing.T) {
 		MemoryScope: bot.MemoryScopePrivate,
 		Tools:       []string{"web_fetch", "memory_store", "memory_search"},
 		Constraints: bot.BotConstraints{
-			MaxIterations:       5,
-			Timeout:             2 * time.Minute,
+			MaxIterations:        5,
+			Timeout:              2 * time.Minute,
 			DailyBudgetCents:     100,
 			MaxInvocationsPerDay: 50,
 		},

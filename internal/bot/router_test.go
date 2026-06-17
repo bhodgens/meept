@@ -43,10 +43,10 @@ func TestEventActionRouter_BusEvent(t *testing.T) {
 		Name: "Calendar Bot",
 		Triggers: []BotTrigger{
 			{
-				Type:          TriggerTypeBusEvent,
-				Topic:         "calendar.reminder",
+				Type:           TriggerTypeBusEvent,
+				Topic:          "calendar.reminder",
 				PromptTemplate: "Calendar event: {{.summary}} starts in {{.starts_in}}",
-				Enabled:       true,
+				Enabled:        true,
 			},
 		},
 	}

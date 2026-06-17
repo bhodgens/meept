@@ -103,7 +103,7 @@ func (po *PairOrchestrator) GetSession(sessionID string) (*BusPairSessionStateSn
 
 	state.mu.RLock()
 	defer state.mu.RUnlock()
-	
+
 	return &BusPairSessionStateSnapshot{
 		SessionID:     state.SessionID,
 		ActorID:       state.ActorID,

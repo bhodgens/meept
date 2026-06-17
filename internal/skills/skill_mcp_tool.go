@@ -13,8 +13,8 @@ import (
 // Unlike mcp.MCPTool which routes through the global Manager, this calls
 // the MCP client directly for skill-scoped tool execution.
 type SkillMCPTool struct {
-	def    llm.ToolDefinition
-	client *mcp.Client
+	def     llm.ToolDefinition
+	client  *mcp.Client
 	rawName string // unprefixed tool name for the client call
 }
 

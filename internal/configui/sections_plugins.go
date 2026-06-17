@@ -1,7 +1,6 @@
 // internal/configui/sections_plugins.go
 package configui
 
-
 func buildPluginsFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.Plugins

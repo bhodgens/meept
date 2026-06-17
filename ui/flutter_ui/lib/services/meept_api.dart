@@ -1,23 +1,12 @@
 import 'package:dio/dio.dart';
+import 'package:meept_client/model/chat_request.dart';
+import 'package:meept_client/model/steer_request.dart';
+import 'package:meept_client/model/daemon_status.dart';
 import '../models/api_models.dart';
 
-/// Typed HTTP client for the Meept REST API.
+/// Typed HTTP client for the Meept REST API using OpenAPI SDK models.
 ///
-/// Provides a fully-typed interface for every endpoint consumed by the
-/// Flutter UI.  Wraps a pre-configured [Dio] instance that carries the
-/// base URL, timeouts, TLS config, and auth header.
-///
-/// This replaces the generic `ApiClient.get<T>/post<T>` calls with
-/// named, typed methods.  Construct via [MeeptApi] passing a [Dio]
-/// instance configured by [ApiClient].
-///
-/// Example:
-/// ```dart
-/// final dio = ...; // configured with baseUrl, TLS, auth
-/// final api = MeeptApi(dio);
-/// final status = await api.getDaemonStatus();
-/// final sessions = await api.listSessions();
-/// ```
+/// Uses generated SDK models for request serialization.
 class MeeptApi {
   final Dio _dio;
 
@@ -25,7 +14,6 @@ class MeeptApi {
 
   // ===== Health =====
 
-  /// GET /health (outside /api/v1 prefix -- uses root URL).
   Future<Map<String, dynamic>> healthCheck() async {
     final response = await _dio.get('/health');
     return response.data as Map<String, dynamic>;
@@ -33,9 +21,18 @@ class MeeptApi {
 
   // ===== Daemon =====
 
-  Future<Map<String, dynamic>> getDaemonStatus() async {
+  Future<DaemonStatus> getDaemonStatus() async {
     final response = await _dio.get('/api/v1/daemon/status');
-    return response.data as Map<String, dynamic>;
+    final data = response.data as Map<String, dynamic>;
+    return DaemonStatus.fromJson(data) ?? DaemonStatus(
+      status: 'unknown',
+      tokensUsed: 0,
+      tokensRemaining: 0,
+      budgetUsed: 0.0,
+      budgetRemaining: 0.0,
+      registeredMethods: 0,
+      busSubscribers: 0,
+    );
   }
 
   // ===== Chat =====
@@ -45,25 +42,26 @@ class MeeptApi {
     String? conversationId,
     String? agentId,
   }) async {
-    final response = await _dio.post('/api/v1/chat', data: {
-      'message': message,
-      if (conversationId != null) 'conversation_id': conversationId,
-      if (agentId != null) 'agent_id': agentId,
-    });
+    final request = ChatRequest(
+      message: message,
+      conversationId: conversationId ?? '',
+      agentIdCommaOmitempty: agentId,
+    );
+    final response = await _dio.post('/api/v1/chat', data: request.toJson());
     return response.data as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> sendSteerMessage({
+  Future<void> sendSteerMessage({
     required String message,
     required String conversationId,
     String? source,
   }) async {
-    final response = await _dio.post('/api/v1/chat/steer', data: {
-      'message': message,
-      'conversation_id': conversationId,
-      if (source != null) 'source': source,
-    });
-    return response.data as Map<String, dynamic>;
+    final request = SteerRequest(
+      message: message,
+      conversationId: conversationId,
+      sourceCommaOmitempty: source,
+    );
+    await _dio.post('/api/v1/chat/steer', data: request.toJson());
   }
 
   Future<Map<String, dynamic>> sendFollowUpMessage({
@@ -112,11 +110,11 @@ class MeeptApi {
   }
 
   Future<Session> createSession({
-    required String title,
+    required String name,
     String? agentId,
   }) async {
     final response = await _dio.post('/api/v1/sessions', data: {
-      'name': title,
+      'name': name,
       if (agentId != null) 'agent_id': agentId,
     });
     return Session.fromJson(response.data as Map<String, dynamic>);
@@ -167,21 +165,13 @@ class MeeptApi {
   }
 
   Future<Task> createTask({
-    required String title,
+    required String name,
     String? sessionId,
   }) async {
     final response = await _dio.post('/api/v1/tasks', data: {
-      'name': title,
+      'name': name,
       if (sessionId != null) 'session_id': sessionId,
     });
-    return Task.fromJson(response.data as Map<String, dynamic>);
-  }
-
-  Future<Task> updateTask(String id, {String? name, String? state}) async {
-    final body = <String, dynamic>{};
-    if (name != null) body['name'] = name;
-    if (state != null) body['state'] = state;
-    final response = await _dio.put('/api/v1/tasks/$id', data: body);
     return Task.fromJson(response.data as Map<String, dynamic>);
   }
 
@@ -189,9 +179,8 @@ class MeeptApi {
     await _dio.delete('/api/v1/tasks/$id');
   }
 
-  Future<Map<String, dynamic>> cancelTask(String id) async {
-    final response = await _dio.post('/api/v1/tasks/$id/cancel');
-    return response.data as Map<String, dynamic>;
+  Future<void> cancelTask(String id) async {
+    await _dio.post('/api/v1/tasks/$id/cancel');
   }
 
   // ===== Queue / Jobs =====
@@ -273,14 +262,6 @@ class MeeptApi {
     return SkillExecuteResult.fromJson(response.data as Map<String, dynamic>);
   }
 
-  Future<SkillExecuteResult> executeSkillWithParams({
-    required String slug,
-    required Map<String, dynamic> params,
-  }) async {
-    final response = await _dio.post('/api/v1/skills/$slug/execute', data: params);
-    return SkillExecuteResult.fromJson(response.data as Map<String, dynamic>);
-  }
-
   // ===== Search =====
 
   Future<SearchResults> search({
@@ -295,24 +276,13 @@ class MeeptApi {
     return SearchResults.fromJson(response.data as Map<String, dynamic>);
   }
 
-  // ===== Projects / Branches =====
+  // ===== Projects =====
 
-  /// Lists registered projects from `GET /api/v1/projects`.
-  /// Response order is `created_at DESC` (newest first) on the daemon side.
   Future<List<Project>> listProjects() async {
     final response = await _dio.get('/api/v1/projects');
     final body = response.data as Map<String, dynamic>;
     final data = body['projects'] as List<dynamic>? ?? [];
-    return data
-        .map((p) => Project.fromJson(p as Map<String, dynamic>))
-        .toList();
-  }
-
-  Future<List<BranchInfo>> listBranches(String projectId) async {
-    final response = await _dio.get('/api/v1/projects/$projectId/branches');
-    final body = response.data as Map<String, dynamic>;
-    final data = body['branches'] as List<dynamic>? ?? [];
-    return data.map((b) => BranchInfo.fromJson(b as Map<String, dynamic>)).toList();
+    return data.map((p) => Project.fromJson(p as Map<String, dynamic>)).toList();
   }
 
   Future<void> checkoutBranch(String projectId, String branch) async {
@@ -332,42 +302,50 @@ class MeeptApi {
     return raw.map((p) => Plan.fromJson(p as Map<String, dynamic>)).toList();
   }
 
+  Future<void> approvePlan(String id, {String? sessionId, String? by}) async {
+    await _dio.post('/api/v1/plans/$id/approve', data: {
+      if (sessionId != null) 'session_id': sessionId,
+      if (by != null) 'by': by,
+    });
+  }
+
+  Future<void> rejectPlan(String id, {String? sessionId, String? by, String? reason}) async {
+    await _dio.post('/api/v1/plans/$id/reject', data: {
+      if (sessionId != null) 'session_id': sessionId,
+      if (by != null) 'by': by,
+      if (reason != null) 'reason': reason,
+    });
+  }
+
+  Future<void> confirmPlan(String id, {String? sessionId, String? by}) async {
+    await _dio.post('/api/v1/plans/$id/confirm', data: {
+      if (sessionId != null) 'session_id': sessionId,
+      if (by != null) 'by': by,
+    });
+  }
+
+  Future<void> revisePlan(String id, {String? sessionId, String? feedback}) async {
+    await _dio.post('/api/v1/plans/$id/revise', data: {
+      if (sessionId != null) 'session_id': sessionId,
+      if (feedback != null) 'feedback': feedback,
+    });
+  }
+
+  // ===== Additional Plan Endpoints =====
+
   Future<Plan> getPlan(String id) async {
     final response = await _dio.get('/api/v1/plans/$id');
     return Plan.fromJson(response.data as Map<String, dynamic>);
   }
 
-  Future<Plan> approvePlan(String id, {String? sessionID, String? by}) async {
-    final response = await _dio.post('/api/v1/plans/$id/approve', data: {
-      if (sessionID != null) 'session_id': sessionID,
-      if (by != null) 'by': by,
-    });
-    return Plan.fromJson(response.data as Map<String, dynamic>);
-  }
+  // ===== Additional Project Endpoints =====
 
-  Future<Plan> rejectPlan(String id, {String? sessionID, String? by, String? reason}) async {
-    final response = await _dio.post('/api/v1/plans/$id/reject', data: {
-      if (sessionID != null) 'session_id': sessionID,
-      if (by != null) 'by': by,
-      if (reason != null) 'reason': reason,
-    });
-    return Plan.fromJson(response.data as Map<String, dynamic>);
-  }
-
-  Future<Plan> confirmPlan(String id, {String? sessionID, String? by}) async {
-    final response = await _dio.post('/api/v1/plans/$id/confirm', data: {
-      if (sessionID != null) 'session_id': sessionID,
-      if (by != null) 'by': by,
-    });
-    return Plan.fromJson(response.data as Map<String, dynamic>);
-  }
-
-  Future<Plan> revisePlan(String id, {String? sessionID, String? feedback}) async {
-    final response = await _dio.post('/api/v1/plans/$id/revise', data: {
-      if (sessionID != null) 'session_id': sessionID,
-      if (feedback != null) 'feedback': feedback,
-    });
-    return Plan.fromJson(response.data as Map<String, dynamic>);
+  Future<List<BranchInfo>> listBranches(String projectId) async {
+    final response = await _dio.get('/api/v1/projects/$projectId/branches');
+    final data = response.data as Map<String, dynamic>;
+    final raw = data['branches'] as List?;
+    if (raw == null) return [];
+    return raw.map((b) => BranchInfo.fromJson(b as Map<String, dynamic>)).toList();
   }
 
   // ===== Config Files =====

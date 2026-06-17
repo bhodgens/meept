@@ -250,8 +250,8 @@ func (sp *StrategicPlanner) ConductInterview(ctx context.Context, req PlanReques
 	pctx := &plan.PlanningContext{
 		InterviewQuestions: questions,
 		InterviewCompleted: false,
-		TrueGoal:         req.TrueAnalysis.Goal,
-		Ambiguities:      req.TrueAnalysis.SuggestedQuestions,
+		TrueGoal:           req.TrueAnalysis.Goal,
+		Ambiguities:        req.TrueAnalysis.SuggestedQuestions,
 	}
 
 	sp.logger.Info("Interview questions generated",

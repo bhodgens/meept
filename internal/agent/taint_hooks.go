@@ -20,10 +20,10 @@ type TaintBeforeToolCall struct {
 
 // TaintHookConfig holds configuration for taint tracking hooks.
 type TaintHookConfig struct {
-	BlockUserInputShell   bool
-	BlockSecretNetwork    bool
-	BlockUntrustedAgent   bool
-	BlockExternalShell    bool
+	BlockUserInputShell bool
+	BlockSecretNetwork  bool
+	BlockUntrustedAgent bool
+	BlockExternalShell  bool
 }
 
 // NewTaintBeforeToolCall creates a new taint tracking hook for tool call interception.

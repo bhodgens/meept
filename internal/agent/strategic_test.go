@@ -536,10 +536,10 @@ func TestConductInterview_SkipWhenLowAmbiguity(t *testing.T) {
 		TaskID: "task-1",
 		Input:  "fix the typo in readme",
 		TrueAnalysis: &TrueIntentAnalysis{
-			Goal:      "fix typo in readme",
-			Ambiguity: 0.2,
-			Scope:     "narrow",
-			Category:  "fix",
+			Goal:       "fix typo in readme",
+			Ambiguity:  0.2,
+			Scope:      "narrow",
+			Category:   "fix",
 			Confidence: 0.95,
 		},
 	}
@@ -585,10 +585,10 @@ func TestConductInterview_SkipWhenNoRegistry(t *testing.T) {
 		TaskID: "task-1",
 		Input:  "something complex",
 		TrueAnalysis: &TrueIntentAnalysis{
-			Goal:      "build something",
-			Ambiguity: 0.9,
-			Scope:     "broad",
-			Category:  "implementation",
+			Goal:       "build something",
+			Ambiguity:  0.9,
+			Scope:      "broad",
+			Category:   "implementation",
 			Confidence: 0.5,
 		},
 	}

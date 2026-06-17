@@ -1,7 +1,6 @@
 // internal/configui/sections_memvid.go
 package configui
 
-
 func buildMemvidFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.Memvid

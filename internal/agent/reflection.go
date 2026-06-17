@@ -71,8 +71,8 @@ type ReflectionResult struct {
 	LintErrors   []lint.LinterResult
 	TestFailures []lint.TestResult
 	FinalMessage string
-	GaveUp       bool               // True if max reflections reached without fix
-	PendingFix   *FixAttempt        // Non-nil if a fix was generated but needs application by the agent loop
+	GaveUp       bool        // True if max reflections reached without fix
+	PendingFix   *FixAttempt // Non-nil if a fix was generated but needs application by the agent loop
 }
 
 // RunReflection executes a single-pass reflection check after code edits.
@@ -232,9 +232,9 @@ func (re *ReflectionEngine) runTests(ctx context.Context, editedFiles []string) 
 
 // FixAttempt records a pending fix for later application by the agent loop
 type FixAttempt struct {
-	Prompt    string
-	FixText   string
-	Files     []string // files that the LLM response references
+	Prompt  string
+	FixText string
+	Files   []string // files that the LLM response references
 }
 
 // requestFix sends error context to LLM and returns the parsed fix attempt.
@@ -503,13 +503,13 @@ func detectLanguageFromExt(filePath string) string {
 func detectProjectLanguage(editedFiles []string, workDir string) string {
 	// Check for go.mod, package.json, requirements.txt, etc.
 	indicators := map[string]string{
-		"go.mod":            "go",
-		"package.json":      "javascript",
-		"requirements.txt":  "python",
-		"setup.py":          "python",
-		"pyproject.toml":    "python",
-		"Cargo.toml":        "rust",
-		"Gemfile":           "ruby",
+		"go.mod":           "go",
+		"package.json":     "javascript",
+		"requirements.txt": "python",
+		"setup.py":         "python",
+		"pyproject.toml":   "python",
+		"Cargo.toml":       "rust",
+		"Gemfile":          "ruby",
 	}
 
 	for _, file := range editedFiles {

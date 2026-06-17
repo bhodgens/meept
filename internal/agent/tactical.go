@@ -59,7 +59,7 @@ type TacticalScheduler struct {
 	validationGateMu       sync.Mutex               // Protects validationGateCounter
 	maxHandoffSteps        int                      // Max handoff steps per task (0 = unlimited)
 	handoffUseAmendment    bool                     // Route handoffs through amendment system
-	amendmentMgr           AmendmentSubmitter        // Optional: enables amendment-based step creation
+	amendmentMgr           AmendmentSubmitter       // Optional: enables amendment-based step creation
 }
 
 // AmendmentSubmitter is the interface for submitting amendment requests.
@@ -81,12 +81,12 @@ type TacticalSchedulerConfig struct {
 	ValidatorManager       *validator.ValidatorManager
 	EscalationManager      *EscalationManager
 	Logger                 *slog.Logger
-	MaxConcurrentJobs      int // Global concurrent job limit (default: 10)
-	MaxConcurrentPerAgent  int // Per-agent concurrent job limit (default: 3)
-	ValidationGateInterval int // Run validation gate every N steps (default: 3, 0 to disable)
-	MaxHandoffSteps        int                    // Max handoff steps per task (0 = unlimited, default: 5)
-	HandoffUseAmendment    bool                   // Route handoffs through amendment system (default: true)
-	AmendmentManager       AmendmentSubmitter      // Optional: enables amendment-based step creation
+	MaxConcurrentJobs      int                // Global concurrent job limit (default: 10)
+	MaxConcurrentPerAgent  int                // Per-agent concurrent job limit (default: 3)
+	ValidationGateInterval int                // Run validation gate every N steps (default: 3, 0 to disable)
+	MaxHandoffSteps        int                // Max handoff steps per task (0 = unlimited, default: 5)
+	HandoffUseAmendment    bool               // Route handoffs through amendment system (default: true)
+	AmendmentManager       AmendmentSubmitter // Optional: enables amendment-based step creation
 }
 
 // NewTacticalScheduler creates a new tactical scheduler.
@@ -1555,10 +1555,10 @@ func (ts *TacticalScheduler) HandleHandoff(ctx context.Context, msg *models.BusM
 	})
 
 	ts.logger.Info("Handoff step created",
-		KeyTaskID,     req.TaskID,
-		KeyStepID,     newStepID,
-		KeyAgentID,    req.ToAgentID,
-		"from_step",   req.FromStepID,
+		KeyTaskID, req.TaskID,
+		KeyStepID, newStepID,
+		KeyAgentID, req.ToAgentID,
+		"from_step", req.FromStepID,
 		"description", req.Description,
 	)
 
@@ -1601,20 +1601,20 @@ func (ts *TacticalScheduler) rewireDownstreamDeps(taskID, fromStepID, newStepID 
 			}
 			rewired++
 			ts.logger.Info("Rewired downstream dependency",
-				KeyStepID,    ds.ID,
-				"old_dep",    fromStepID,
-				"new_dep",    newStepID,
-				"task_id",    taskID,
+				KeyStepID, ds.ID,
+				"old_dep", fromStepID,
+				"new_dep", newStepID,
+				"task_id", taskID,
 			)
 		}
 	}
 
 	if rewired > 0 {
 		ts.logger.Info("Rewired downstream dependencies",
-			KeyTaskID,    taskID,
-			"count",      rewired,
-			"from_step",  fromStepID,
-			"new_step",   newStepID,
+			KeyTaskID, taskID,
+			"count", rewired,
+			"from_step", fromStepID,
+			"new_step", newStepID,
 		)
 	}
 

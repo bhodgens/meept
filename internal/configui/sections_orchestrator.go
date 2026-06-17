@@ -1,7 +1,6 @@
 // internal/configui/sections_orchestrator.go
 package configui
 
-
 func buildOrchestratorFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.Orchestrator

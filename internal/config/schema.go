@@ -101,17 +101,17 @@ type PlansConfirmationConfig struct {
 
 // ProjectsConfig holds configuration for the project system.
 type ProjectsConfig struct {
-	Enabled                     bool   `json:"enabled"                        toml:"enabled"`
-	BaseDir                     string `json:"base_dir"                       toml:"base_dir"`
-	DefaultBranch               string `json:"default_branch"                 toml:"default_branch"`
-	WorktreePerPlan             string `json:"worktree_per_plan"              toml:"worktree_per_plan"`
-	WorktreeIsolationThreshold  int    `json:"worktree_isolation_threshold"   toml:"worktree_isolation_threshold"`
-	AutoDetect                  bool   `json:"auto_detect"                    toml:"auto_detect"`
-	MaxWorktreesPerProject      int    `json:"max_worktrees_per_project"      toml:"max_worktrees_per_project"`
-	CleanupOrphanedWorktrees    bool   `json:"cleanup_orphaned_worktrees"     toml:"cleanup_orphaned_worktrees"`
-	FenceEnabled                bool   `json:"fence_enabled"                  toml:"fence_enabled"`
-	AllowReadSystemPaths        []string `json:"allow_read_system_paths"      toml:"allow_read_system_paths"`
-	AutoSyncOnAttach            bool   `json:"auto_sync_on_attach"            toml:"auto_sync_on_attach"`
+	Enabled                    bool     `json:"enabled"                        toml:"enabled"`
+	BaseDir                    string   `json:"base_dir"                       toml:"base_dir"`
+	DefaultBranch              string   `json:"default_branch"                 toml:"default_branch"`
+	WorktreePerPlan            string   `json:"worktree_per_plan"              toml:"worktree_per_plan"`
+	WorktreeIsolationThreshold int      `json:"worktree_isolation_threshold"   toml:"worktree_isolation_threshold"`
+	AutoDetect                 bool     `json:"auto_detect"                    toml:"auto_detect"`
+	MaxWorktreesPerProject     int      `json:"max_worktrees_per_project"      toml:"max_worktrees_per_project"`
+	CleanupOrphanedWorktrees   bool     `json:"cleanup_orphaned_worktrees"     toml:"cleanup_orphaned_worktrees"`
+	FenceEnabled               bool     `json:"fence_enabled"                  toml:"fence_enabled"`
+	AllowReadSystemPaths       []string `json:"allow_read_system_paths"      toml:"allow_read_system_paths"`
+	AutoSyncOnAttach           bool     `json:"auto_sync_on_attach"            toml:"auto_sync_on_attach"`
 }
 
 // CalendarConfig holds Google Calendar integration settings.
@@ -279,20 +279,20 @@ type RPCTransportConfig struct {
 
 // HTTPTransportConfig configures the HTTP REST transport.
 type HTTPTransportConfig struct {
-	Enabled      bool     `json:"enabled"       toml:"enabled"`       // Enable HTTP server (default: false)
-	Addr         string   `json:"addr"          toml:"addr"`          // Listen address (default: ":8081")
-	UseTLS       bool     `json:"use_tls"       toml:"use_tls"`       // Enable HTTPS
-	AutoTLSCert  bool     `json:"auto_tls_cert" toml:"auto_tls_cert"` // Auto-generate self-signed cert
-	TLSCertFile  string   `json:"tls_cert_file" toml:"tls_cert_file"` // TLS certificate file path
-	TLSKeyFile   string   `json:"tls_key_file"  toml:"tls_key_file"`  // TLS key file path
-	TLSMinVersion string  `json:"tls_min_version" toml:"tls_min_version"` // Minimum TLS version
-	RequireAuth  bool     `json:"require_auth"  toml:"require_auth"`  // Require API key auth
-	APIKeys      []string `json:"api_keys"      toml:"api_keys"`      // Valid API keys
-	REST         bool     `json:"rest"          toml:"rest"`          // Enable REST API
-	WebSocket    bool     `json:"websocket"     toml:"websocket"`     // Enable WebSocket
-	WSPath       string   `json:"ws_path"       toml:"ws_path"`       // WebSocket endpoint path
-	MCP          bool     `json:"mcp"           toml:"mcp"`           // Enable MCP over HTTP+SSE
-	MCPPath      string   `json:"mcp_path"      toml:"mcp_path"`      // MCP endpoint path
+	Enabled       bool     `json:"enabled"       toml:"enabled"`           // Enable HTTP server (default: false)
+	Addr          string   `json:"addr"          toml:"addr"`              // Listen address (default: ":8081")
+	UseTLS        bool     `json:"use_tls"       toml:"use_tls"`           // Enable HTTPS
+	AutoTLSCert   bool     `json:"auto_tls_cert" toml:"auto_tls_cert"`     // Auto-generate self-signed cert
+	TLSCertFile   string   `json:"tls_cert_file" toml:"tls_cert_file"`     // TLS certificate file path
+	TLSKeyFile    string   `json:"tls_key_file"  toml:"tls_key_file"`      // TLS key file path
+	TLSMinVersion string   `json:"tls_min_version" toml:"tls_min_version"` // Minimum TLS version
+	RequireAuth   bool     `json:"require_auth"  toml:"require_auth"`      // Require API key auth
+	APIKeys       []string `json:"api_keys"      toml:"api_keys"`          // Valid API keys
+	REST          bool     `json:"rest"          toml:"rest"`              // Enable REST API
+	WebSocket     bool     `json:"websocket"     toml:"websocket"`         // Enable WebSocket
+	WSPath        string   `json:"ws_path"       toml:"ws_path"`           // WebSocket endpoint path
+	MCP           bool     `json:"mcp"           toml:"mcp"`               // Enable MCP over HTTP+SSE
+	MCPPath       string   `json:"mcp_path"      toml:"mcp_path"`          // MCP endpoint path
 }
 
 // LLMConfig holds LLM configuration including budget, broker, and metrics.
@@ -380,16 +380,16 @@ type LLMMetricsConfig struct {
 
 // BudgetConfig holds token budget settings.
 type BudgetConfig struct {
-	HourlyTokenLimit      int     `json:"hourly_token_limit"   toml:"hourly_token_limit"`
-	DailyTokenLimit       int     `json:"daily_token_limit"    toml:"daily_token_limit"`
-	DailyCostLimit        float64 `json:"daily_cost_limit"     toml:"daily_cost_limit"`
-	HourlyCostLimit       float64 `json:"hourly_cost_limit"    toml:"hourly_cost_limit"`
-	RateLimitRPM          int     `json:"rate_limit_rpm"       toml:"rate_limit_rpm"`
-	Aggressiveness        float64 `json:"aggressiveness"       toml:"aggressiveness"`
-	PerTaskTokenLimit     int     `json:"per_task_token_limit" toml:"per_task_token_limit"`
-	PerSessionTokenLimit  int     `json:"per_session_token_limit" toml:"per_session_token_limit"`
-	PerTaskCostLimit      float64 `json:"per_task_cost_limit"  toml:"per_task_cost_limit"`
-	PerSessionCostLimit   float64 `json:"per_session_cost_limit" toml:"per_session_cost_limit"`
+	HourlyTokenLimit     int     `json:"hourly_token_limit"   toml:"hourly_token_limit"`
+	DailyTokenLimit      int     `json:"daily_token_limit"    toml:"daily_token_limit"`
+	DailyCostLimit       float64 `json:"daily_cost_limit"     toml:"daily_cost_limit"`
+	HourlyCostLimit      float64 `json:"hourly_cost_limit"    toml:"hourly_cost_limit"`
+	RateLimitRPM         int     `json:"rate_limit_rpm"       toml:"rate_limit_rpm"`
+	Aggressiveness       float64 `json:"aggressiveness"       toml:"aggressiveness"`
+	PerTaskTokenLimit    int     `json:"per_task_token_limit" toml:"per_task_token_limit"`
+	PerSessionTokenLimit int     `json:"per_session_token_limit" toml:"per_session_token_limit"`
+	PerTaskCostLimit     float64 `json:"per_task_cost_limit"  toml:"per_task_cost_limit"`
+	PerSessionCostLimit  float64 `json:"per_session_cost_limit" toml:"per_session_cost_limit"`
 }
 
 // MemoryBackend defines the storage backend for memory.
@@ -501,15 +501,15 @@ type PersonalityConfig struct {
 
 // EmbeddingConfig holds vector embedding settings for semantic memory search.
 type EmbeddingConfig struct {
-	Enabled        bool     `json:"enabled"         toml:"enabled"`
-	Provider       string   `json:"provider"        toml:"provider"` // "openai" or "ollama"
-	APIKey         string   `json:"api_key"         toml:"api_key"`
-	BaseURL        string   `json:"base_url"        toml:"base_url"`
-	Model          string   `json:"model"           toml:"model"`
-	Dimension      int      `json:"dimension"       toml:"dimension"`
-	ShardBasePath  string   `json:"shard_base_path" toml:"shard_base_path"` // Directory for shard files
-	MaxRAMShards   int      `json:"max_ram_shards"  toml:"max_ram_shards"`  // LRU cache size
-	ShardTypes     []string `json:"shard_types"     toml:"shard_types"`     // Enabled shard types
+	Enabled       bool     `json:"enabled"         toml:"enabled"`
+	Provider      string   `json:"provider"        toml:"provider"` // "openai" or "ollama"
+	APIKey        string   `json:"api_key"         toml:"api_key"`
+	BaseURL       string   `json:"base_url"        toml:"base_url"`
+	Model         string   `json:"model"           toml:"model"`
+	Dimension     int      `json:"dimension"       toml:"dimension"`
+	ShardBasePath string   `json:"shard_base_path" toml:"shard_base_path"` // Directory for shard files
+	MaxRAMShards  int      `json:"max_ram_shards"  toml:"max_ram_shards"`  // LRU cache size
+	ShardTypes    []string `json:"shard_types"     toml:"shard_types"`     // Enabled shard types
 }
 
 // MemvidConfig holds memvid service settings.
@@ -855,19 +855,19 @@ type TaintConfig struct {
 // TaintLabelsConfig holds taint label priority settings.
 // Higher values indicate more restrictive taint levels.
 type TaintLabelsConfig struct {
-	UserInput  int `json:"user_input"  toml:"user_input"`  // Direct user input
-	Secret     int `json:"secret"      toml:"secret"`      // API keys, tokens, passwords
-	Untrusted  int `json:"untrusted"   toml:"untrusted"`   // From sandboxed/untrusted agents
-	External   int `json:"external"    toml:"external"`    // From external network requests
-	Shell      int `json:"shell"       toml:"shell"`       // Data destined for shell execution
+	UserInput int `json:"user_input"  toml:"user_input"` // Direct user input
+	Secret    int `json:"secret"      toml:"secret"`     // API keys, tokens, passwords
+	Untrusted int `json:"untrusted"   toml:"untrusted"`  // From sandboxed/untrusted agents
+	External  int `json:"external"    toml:"external"`   // From external network requests
+	Shell     int `json:"shell"       toml:"shell"`      // Data destined for shell execution
 }
 
 // TaintSinksConfig holds taint sink blocking settings.
 type TaintSinksConfig struct {
-	BlockUserInputShell     bool `json:"block_user_input_shell"      toml:"block_user_input_shell"`      // Block user input in shell commands
-	BlockSecretNetwork      bool `json:"block_secret_network"        toml:"block_secret_network"`        // Block secrets in URLs/network requests
-	BlockUntrustedAgent     bool `json:"block_untrusted_agent"       toml:"block_untrusted_agent"`       // Block untrusted data in cross-agent messages
-	BlockExternalShell      bool `json:"block_external_shell"        toml:"block_external_shell"`        // Block external data in shell commands
+	BlockUserInputShell bool `json:"block_user_input_shell"      toml:"block_user_input_shell"` // Block user input in shell commands
+	BlockSecretNetwork  bool `json:"block_secret_network"        toml:"block_secret_network"`   // Block secrets in URLs/network requests
+	BlockUntrustedAgent bool `json:"block_untrusted_agent"       toml:"block_untrusted_agent"`  // Block untrusted data in cross-agent messages
+	BlockExternalShell  bool `json:"block_external_shell"        toml:"block_external_shell"`   // Block external data in shell commands
 }
 
 // TaintDeclassificationConfig holds declassification settings.
@@ -949,12 +949,12 @@ type WorkspaceConfig struct {
 // SkillsConfig holds skills settings.
 type SkillsConfig struct {
 	Enabled               bool     `json:"enabled"                 toml:"enabled"`
-	SearchPaths           []string `json:"search_paths"            toml:"search_paths"`              // Additional skill directories beyond defaults
-	AutoReload            bool     `json:"auto_reload"             toml:"auto_reload"`               // Watch for skill file changes
-	CacheSize             int      `json:"max_cached_skills"       toml:"max_cached_skills"`         // Max skills to cache in lazy loader (default: 50)
-	AutoDiscoverHermes   bool     `json:"auto_discover_hermes"    toml:"auto_discover_hermes"`       // Auto-discover ~/.hermes/skills (default: true)
-	HermesSkillsDir      string   `json:"hermes_skills_dir"       toml:"hermes_skills_dir"`          // Path to Hermes skills directory (default: ~/.hermes/skills)
-	ValidatePrerequisites bool    `json:"validate_prerequisites"  toml:"validate_prerequisites"`    // Validate Hermes skill prerequisites before execution (default: true)
+	SearchPaths           []string `json:"search_paths"            toml:"search_paths"`           // Additional skill directories beyond defaults
+	AutoReload            bool     `json:"auto_reload"             toml:"auto_reload"`            // Watch for skill file changes
+	CacheSize             int      `json:"max_cached_skills"       toml:"max_cached_skills"`      // Max skills to cache in lazy loader (default: 50)
+	AutoDiscoverHermes    bool     `json:"auto_discover_hermes"    toml:"auto_discover_hermes"`   // Auto-discover ~/.hermes/skills (default: true)
+	HermesSkillsDir       string   `json:"hermes_skills_dir"       toml:"hermes_skills_dir"`      // Path to Hermes skills directory (default: ~/.hermes/skills)
+	ValidatePrerequisites bool     `json:"validate_prerequisites"  toml:"validate_prerequisites"` // Validate Hermes skill prerequisites before execution (default: true)
 }
 
 // SelfImproveConfig holds self-improvement settings.
@@ -1005,18 +1005,18 @@ type SafetyConfig struct {
 
 // DetectionConfig holds detection settings for self-improvement.
 type DetectionConfig struct {
-	ScanPytest          bool     `json:"scan_pytest"           toml:"scan_pytest"`
-	ScanRuntimeLogs     bool     `json:"scan_runtime_logs"     toml:"scan_runtime_logs"`
-	ScanTypeCheck       bool     `json:"scan_type_check"       toml:"scan_type_check"`
-	ScanLint            bool     `json:"scan_lint"             toml:"scan_lint"`
-	LogFile             string   `json:"log_file"              toml:"log_file"`
-	LogLookbackHours    int      `json:"log_lookback_hours"    toml:"log_lookback_hours"`
-	PytestArgs          []string `json:"pytest_args"           toml:"pytest_args"`
-	MypyArgs            []string `json:"mypy_args"             toml:"mypy_args"`
-	RuffArgs            []string `json:"ruff_args"             toml:"ruff_args"`
-	CodeErrorPatterns   []string `json:"code_error_patterns"   toml:"code_error_patterns"`
-	MaxCodeIssuesPerFile int     `json:"max_code_issues_per_file" toml:"max_code_issues_per_file"`
-	DeduplicateTODOs    bool     `json:"deduplicate_todos"     toml:"deduplicate_todos"`
+	ScanPytest           bool     `json:"scan_pytest"           toml:"scan_pytest"`
+	ScanRuntimeLogs      bool     `json:"scan_runtime_logs"     toml:"scan_runtime_logs"`
+	ScanTypeCheck        bool     `json:"scan_type_check"       toml:"scan_type_check"`
+	ScanLint             bool     `json:"scan_lint"             toml:"scan_lint"`
+	LogFile              string   `json:"log_file"              toml:"log_file"`
+	LogLookbackHours     int      `json:"log_lookback_hours"    toml:"log_lookback_hours"`
+	PytestArgs           []string `json:"pytest_args"           toml:"pytest_args"`
+	MypyArgs             []string `json:"mypy_args"             toml:"mypy_args"`
+	RuffArgs             []string `json:"ruff_args"             toml:"ruff_args"`
+	CodeErrorPatterns    []string `json:"code_error_patterns"   toml:"code_error_patterns"`
+	MaxCodeIssuesPerFile int      `json:"max_code_issues_per_file" toml:"max_code_issues_per_file"`
+	DeduplicateTODOs     bool     `json:"deduplicate_todos"     toml:"deduplicate_todos"`
 }
 
 // OrchestratorConfig holds hierarchical orchestrator settings.
@@ -1180,8 +1180,8 @@ func DefaultConfig() *Config {
 				Aggressiveness:       0.5,
 				PerTaskTokenLimit:    50000,
 				PerSessionTokenLimit: 100000,
-				PerTaskCostLimit:     5.0,   // $5 per task max
-				PerSessionCostLimit:  10.0,  // $10 per session max
+				PerTaskCostLimit:     5.0,  // $5 per task max
+				PerSessionCostLimit:  10.0, // $10 per session max
 			},
 			Broker: LLMBrokerConfig{
 				MaxErrorRate:    0.10,
@@ -1423,12 +1423,12 @@ func DefaultConfig() *Config {
 			CleanupCompleted: false,
 		},
 		Skills: SkillsConfig{
-			Enabled:                true,
-			SearchPaths:            []string{},
-			AutoReload:             false,
-			CacheSize:              50,
-			AutoDiscoverHermes:     true,
-			HermesSkillsDir:        "~/.hermes/skills",
+			Enabled:               true,
+			SearchPaths:           []string{},
+			AutoReload:            false,
+			CacheSize:             50,
+			AutoDiscoverHermes:    true,
+			HermesSkillsDir:       "~/.hermes/skills",
 			ValidatePrerequisites: true,
 		},
 		SelfImprove: SelfImproveConfig{
@@ -1655,22 +1655,22 @@ func DefaultConfig() *Config {
 			WebhookEnabled:              false,
 		},
 		STT: STTConfig{
-			Enabled:    false,
-			Engine:     "whisper",
-			Language:   "en",
-			AutoSend:   false,
-			Whisper:    WhisperConfig{BinPath: "whisper-cli", ModelPath: "", Threads: 4},
-			Parakeet:   ParakeetConfig{BinPath: "parakeet-transcribe", ModelPath: ""},
-			Recording:  RecordingConfig{RecorderBin: "ffmpeg", SampleRate: 16000, Channels: 1, Format: "wav"},
+			Enabled:   false,
+			Engine:    "whisper",
+			Language:  "en",
+			AutoSend:  false,
+			Whisper:   WhisperConfig{BinPath: "whisper-cli", ModelPath: "", Threads: 4},
+			Parakeet:  ParakeetConfig{BinPath: "parakeet-transcribe", ModelPath: ""},
+			Recording: RecordingConfig{RecorderBin: "ffmpeg", SampleRate: 16000, Channels: 1, Format: "wav"},
 		},
 		TTS: TTSConfig{
 			Enabled:   false,
 			Engine:    "piper",
 			Voice:     "danny-medium",
 			VoicePath: "",
-			Piper:      PiperTTSConfig{BinPath: "piper", ModelPath: "", ConfigPath: "", Speaker: ""},
-			Playback:   TTSPlaybackConfig{Volume: 1.0, Rate: 1.0, AudioDevice: ""},
-			Behavior:   TTSBehaviorConfig{ReadOwnMessages: false, InterruptOnNewMsg: true, QueueMessages: false, MaxQueueSize: 5},
+			Piper:     PiperTTSConfig{BinPath: "piper", ModelPath: "", ConfigPath: "", Speaker: ""},
+			Playback:  TTSPlaybackConfig{Volume: 1.0, Rate: 1.0, AudioDevice: ""},
+			Behavior:  TTSBehaviorConfig{ReadOwnMessages: false, InterruptOnNewMsg: true, QueueMessages: false, MaxQueueSize: 5},
 		},
 	}
 }
@@ -1711,12 +1711,12 @@ func (c *Config) ChatTimeout() time.Duration {
 
 // OAuthConfig holds configuration for the OAuth token management system.
 type OAuthConfig struct {
-	Enabled        bool                          `json:"enabled"          toml:"enabled"`
+	Enabled         bool                          `json:"enabled"          toml:"enabled"`
 	RefreshInterval string                        `json:"refresh_interval" toml:"refresh_interval"`
-	RefreshMargin  string                        `json:"refresh_margin"   toml:"refresh_margin"`
-	EncryptionKey  string                        `json:"encryption_key"   toml:"encryption_key"`
-	TokenDir       string                        `json:"token_dir"        toml:"token_dir"`
-	Providers      map[string]OAuthProviderEntry `json:"providers"       toml:"providers"`
+	RefreshMargin   string                        `json:"refresh_margin"   toml:"refresh_margin"`
+	EncryptionKey   string                        `json:"encryption_key"   toml:"encryption_key"`
+	TokenDir        string                        `json:"token_dir"        toml:"token_dir"`
+	Providers       map[string]OAuthProviderEntry `json:"providers"       toml:"providers"`
 }
 
 // OAuthProviderEntry holds per-provider OAuth overrides.
@@ -1773,14 +1773,14 @@ type TestHarnessConfig struct {
 
 // STTConfig holds configuration for speech-to-text transcription.
 type STTConfig struct {
-	Enabled  bool              `json:"enabled"       toml:"enabled"`
-	Engine   string            `json:"engine"        toml:"engine"`
-	Language string            `json:"language"      toml:"language"`
-	AutoSend bool              `json:"auto_send"     toml:"auto_send"`
-	Whisper  WhisperConfig     `json:"whisper"       toml:"whisper"`
-	Parakeet ParakeetConfig    `json:"parakeet"      toml:"parakeet"`
-	Native   NativeConfig      `json:"native"        toml:"native"`
-	Recording RecordingConfig  `json:"recording"     toml:"recording"`
+	Enabled   bool            `json:"enabled"       toml:"enabled"`
+	Engine    string          `json:"engine"        toml:"engine"`
+	Language  string          `json:"language"      toml:"language"`
+	AutoSend  bool            `json:"auto_send"     toml:"auto_send"`
+	Whisper   WhisperConfig   `json:"whisper"       toml:"whisper"`
+	Parakeet  ParakeetConfig  `json:"parakeet"      toml:"parakeet"`
+	Native    NativeConfig    `json:"native"        toml:"native"`
+	Recording RecordingConfig `json:"recording"     toml:"recording"`
 }
 
 // WhisperConfig holds whisper.cpp engine settings.
@@ -1811,23 +1811,23 @@ type RecordingConfig struct {
 
 // PTYConfig holds pseudo-terminal streaming settings.
 type PTYConfig struct {
-	Enabled      bool   `json:"enabled"          toml:"enabled"`
-	MaxSessions  int    `json:"max_sessions"     toml:"max_sessions"`
-	MaxTerminalRows int `json:"max_terminal_rows" toml:"max_terminal_rows"`
-	MaxTerminalCols int `json:"max_terminal_cols" toml:"max_terminal_cols"`
-	SocketPath   string `json:"socket_path"      toml:"socket_path"`
-	TLSEnabled   bool   `json:"tls_enabled"      toml:"tls_enabled"`
+	Enabled         bool   `json:"enabled"          toml:"enabled"`
+	MaxSessions     int    `json:"max_sessions"     toml:"max_sessions"`
+	MaxTerminalRows int    `json:"max_terminal_rows" toml:"max_terminal_rows"`
+	MaxTerminalCols int    `json:"max_terminal_cols" toml:"max_terminal_cols"`
+	SocketPath      string `json:"socket_path"      toml:"socket_path"`
+	TLSEnabled      bool   `json:"tls_enabled"      toml:"tls_enabled"`
 }
 
 // TTSConfig holds text-to-speech settings for client-side speech synthesis.
 type TTSConfig struct {
-	Enabled   bool              `json:"enabled"   toml:"enabled"`
-	Engine    string            `json:"engine"    toml:"engine"` // "piper" | "platform"
-	Voice     string            `json:"voice"     toml:"voice"`  // voice identifier e.g. "danny-medium"
-	VoicePath string            `json:"voice_path" toml:"voice_path"`
+	Enabled   bool   `json:"enabled"   toml:"enabled"`
+	Engine    string `json:"engine"    toml:"engine"` // "piper" | "platform"
+	Voice     string `json:"voice"     toml:"voice"`  // voice identifier e.g. "danny-medium"
+	VoicePath string `json:"voice_path" toml:"voice_path"`
 
 	// Piper-specific settings
-	Piper    PiperTTSConfig    `json:"piper"    toml:"piper"`
+	Piper PiperTTSConfig `json:"piper"    toml:"piper"`
 
 	// Playback settings
 	Playback TTSPlaybackConfig `json:"playback" toml:"playback"`
@@ -1846,9 +1846,9 @@ type PiperTTSConfig struct {
 
 // TTSPlaybackConfig holds audio playback settings.
 type TTSPlaybackConfig struct {
-	Volume      float64 `json:"volume"       toml:"volume"`        // 0.0 to 1.0
-	Rate        float64 `json:"rate"         toml:"rate"`          // 0.5 to 2.0
-	AudioDevice string  `json:"audio_device" toml:"audio_device"`  // empty = system default
+	Volume      float64 `json:"volume"       toml:"volume"`       // 0.0 to 1.0
+	Rate        float64 `json:"rate"         toml:"rate"`         // 0.5 to 2.0
+	AudioDevice string  `json:"audio_device" toml:"audio_device"` // empty = system default
 }
 
 // TTSBehaviorConfig holds TTS behavior settings.

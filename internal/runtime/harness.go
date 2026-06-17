@@ -60,7 +60,7 @@ func (h *TestHarness) Validate(ctx context.Context, workdir string) (*Validation
 
 	// Run test command
 	if h.backend == nil {
-		result.Passed = true  // No backend means no tests to fail
+		result.Passed = true // No backend means no tests to fail
 		result.Duration = time.Since(start)
 		return result, nil
 	}

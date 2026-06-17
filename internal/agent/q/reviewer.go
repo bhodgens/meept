@@ -145,5 +145,3 @@ func (v *ReviewerValidator) LogValidationResult(ctx context.Context, rec Recomme
 	_, err := v.memvidClient.StoreWithZone(ctx, string(content), "q_validations", metadata)
 	return err
 }
-
-

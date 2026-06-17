@@ -41,4 +41,3 @@ type ProjectStatus struct {
 	Behind        int    `json:"behind"`
 	ModifiedFiles int    `json:"modified_files"`
 }
-

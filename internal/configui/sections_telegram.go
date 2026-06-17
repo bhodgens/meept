@@ -3,7 +3,6 @@ package configui
 
 import (
 	"strconv"
-
 )
 
 func buildTelegramFields() []Field {

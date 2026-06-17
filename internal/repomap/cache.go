@@ -293,18 +293,18 @@ func (c *TagCache) Stats() (numFiles int64, sizeBytes int64, err error) {
 
 // CachedMap represents a cached rendered map with its parameters.
 type CachedMap struct {
-	Content      string
-	Tokens       int
-	FileSetHash  string
-	Timestamp    time.Time
-	ChatFiles    []string
-	Identifiers  []string
+	Content     string
+	Tokens      int
+	FileSetHash string
+	Timestamp   time.Time
+	ChatFiles   []string
+	Identifiers []string
 }
 
 // MapCache is an in-memory cache for complete rendered maps.
 type MapCache struct {
-	mu    sync.RWMutex
-	cache map[string]*CachedMap
+	mu     sync.RWMutex
+	cache  map[string]*CachedMap
 	config CacheConfig
 }
 
@@ -315,7 +315,7 @@ func NewMapCache(config CacheConfig) *MapCache {
 	}
 
 	return &MapCache{
-		cache: make(map[string]*CachedMap, config.MemoryCacheSize),
+		cache:  make(map[string]*CachedMap, config.MemoryCacheSize),
 		config: config,
 	}
 }
@@ -411,8 +411,8 @@ func (m *MapCache) Size() int {
 
 // RenderCache is an in-memory cache for rendered tree output.
 type RenderCache struct {
-	mu    sync.RWMutex
-	cache map[string]string // Key: file:line hash -> rendered content
+	mu     sync.RWMutex
+	cache  map[string]string // Key: file:line hash -> rendered content
 	config CacheConfig
 }
 
@@ -423,7 +423,7 @@ func NewRenderCache(config CacheConfig) *RenderCache {
 	}
 
 	return &RenderCache{
-		cache: make(map[string]string, config.MemoryCacheSize),
+		cache:  make(map[string]string, config.MemoryCacheSize),
 		config: config,
 	}
 }
@@ -507,11 +507,11 @@ func (r *RenderCache) Size() int {
 
 // CacheManager manages all three cache layers and provides a unified interface.
 type CacheManager struct {
-	tagCache   *TagCache
-	mapCache   *MapCache
+	tagCache    *TagCache
+	mapCache    *MapCache
 	renderCache *RenderCache
-	config     CacheConfig
-	logger     *slog.Logger
+	config      CacheConfig
+	logger      *slog.Logger
 }
 
 // NewCacheManager creates a new CacheManager with all cache layers.

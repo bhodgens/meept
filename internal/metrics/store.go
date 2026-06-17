@@ -768,17 +768,17 @@ type Event struct {
 
 // ModelPerformanceRecord represents aggregated model performance metrics.
 type ModelPerformanceRecord struct {
-	ID             int64   `db:"id" json:"id"`
-	ModelID        string  `db:"model_id" json:"model_id"`
-	Provider       string  `db:"provider" json:"provider"`
-	TotalRequests  int     `db:"total_requests" json:"total_requests"`
-	TotalErrors    int     `db:"total_errors" json:"total_errors"`
-	AvgLatencyMs   float64 `db:"avg_latency_ms" json:"avg_latency_ms"`
-	AvgTokensIn    float64 `db:"avg_tokens_in" json:"avg_tokens_in"`
-	AvgTokensOut   float64 `db:"avg_tokens_out" json:"avg_tokens_out"`
-	PeriodStart    string  `db:"period_start" json:"period_start"`
-	PeriodEnd      string  `db:"period_end" json:"period_end"`
-	UpdatedAt      string  `db:"updated_at" json:"updated_at"`
+	ID            int64   `db:"id" json:"id"`
+	ModelID       string  `db:"model_id" json:"model_id"`
+	Provider      string  `db:"provider" json:"provider"`
+	TotalRequests int     `db:"total_requests" json:"total_requests"`
+	TotalErrors   int     `db:"total_errors" json:"total_errors"`
+	AvgLatencyMs  float64 `db:"avg_latency_ms" json:"avg_latency_ms"`
+	AvgTokensIn   float64 `db:"avg_tokens_in" json:"avg_tokens_in"`
+	AvgTokensOut  float64 `db:"avg_tokens_out" json:"avg_tokens_out"`
+	PeriodStart   string  `db:"period_start" json:"period_start"`
+	PeriodEnd     string  `db:"period_end" json:"period_end"`
+	UpdatedAt     string  `db:"updated_at" json:"updated_at"`
 }
 
 // ErrorRecord represents an error record for retry tracking.

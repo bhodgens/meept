@@ -1,4 +1,5 @@
 package tui
+
 import (
 	"encoding/json"
 	"fmt"
@@ -406,6 +407,7 @@ func loadMainConfigFile(path string) *tts.Config {
 		},
 	}
 }
+
 // Init initializes the application.
 func (a *App) Init() tea.Cmd {
 	return tea.Batch(

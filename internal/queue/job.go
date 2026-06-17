@@ -14,10 +14,10 @@ type Priority int
 //go:generate go run golang.org/x/tools/cmd/stringer -type=Priority -linecomment
 
 const (
-	PriorityLow    Priority = 1   // low
-	PriorityNormal Priority = 2   // normal
-	PriorityHigh   Priority = 3   // high
-	PriorityUrgent Priority = 4   // urgent
+	PriorityLow    Priority = 1 // low
+	PriorityNormal Priority = 2 // normal
+	PriorityHigh   Priority = 3 // high
+	PriorityUrgent Priority = 4 // urgent
 )
 
 // JobState represents the current state of a job.
@@ -61,9 +61,9 @@ type Job struct {
 	NextRetryAt  *time.Time      `json:"next_retry_at,omitempty"` // Retry backoff time
 
 	// Cluster fields
-	ManagingNode  string   `json:"managing_node,omitempty"` // Node that manages this task
-	ClaimedByNode string   `json:"claimed_by_node,omitempty"`
-	TimeoutAt     string   `json:"timeout_at,omitempty"`
+	ManagingNode  string `json:"managing_node,omitempty"` // Node that manages this task
+	ClaimedByNode string `json:"claimed_by_node,omitempty"`
+	TimeoutAt     string `json:"timeout_at,omitempty"`
 }
 
 // NewJob creates a new job with default values.

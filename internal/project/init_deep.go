@@ -57,7 +57,7 @@ type DeepInitResult struct {
 // AgentsFile describes a single generated AGENTS.md.
 type AgentsFile struct {
 	Path        string `json:"path"`
-	Level       string `json:"level"`       // "root", "domain", "component"
+	Level       string `json:"level"` // "root", "domain", "component"
 	FileCount   int    `json:"file_count"`
 	SymbolCount int    `json:"symbol_count"`
 }
@@ -125,12 +125,12 @@ func (di *DeepInitializer) Run(ctx context.Context) (*DeepInitResult, error) {
 
 // dirInfo holds scan results for one directory.
 type dirInfo struct {
-	Path        string
-	Depth       int
-	Files       []string // source code files only
-	Symbols     []ast.Symbol
-	ChildPaths  []string // immediate subdirectories with source files
-	ParentPath  string
+	Path       string
+	Depth      int
+	Files      []string // source code files only
+	Symbols    []ast.Symbol
+	ChildPaths []string // immediate subdirectories with source files
+	ParentPath string
 }
 
 func (di *DeepInitializer) scanTree(ctx context.Context, root string) ([]*dirInfo, error) {

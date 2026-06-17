@@ -21,10 +21,6 @@ type ClientConfig struct {
 	STT         STTConfig         `json:"stt"`
 	TTS         TTSConfig         `json:"tts"`
 
-	// Connection configures how the CLI connects to the daemon.
-	// Transport: "rpc", "http", or "auto" (default: "auto" -> rpc)
-	// Address: overrides socket path or HTTP endpoint
-	Connection ConnectionConfig `json:"connection"`
 }
 
 // VimConfig defines vim mode settings.
@@ -115,11 +111,11 @@ type STTConfig struct {
 // Note: Only Enabled, Engine, and Voice are configurable in client.json5.
 // Playback and Behavior settings come from meept.json5 main config.
 type TTSConfig struct {
-	Enabled  bool         `json:"enabled"` // Enable text-to-speech (default: false)
-	Engine   string       `json:"engine"`  // TTS engine: "piper" or "platform" (default: "piper")
-	Voice    string       `json:"voice"`   // Voice identifier (default: "danny-medium")
-	Playback TTSPlayback  `json:"playback,omitempty"`
-	Behavior TTSBehavior  `json:"behavior,omitempty"`
+	Enabled  bool        `json:"enabled"` // Enable text-to-speech (default: false)
+	Engine   string      `json:"engine"`  // TTS engine: "piper" or "platform" (default: "piper")
+	Voice    string      `json:"voice"`   // Voice identifier (default: "danny-medium")
+	Playback TTSPlayback `json:"playback,omitempty"`
+	Behavior TTSBehavior `json:"behavior,omitempty"`
 }
 
 // TTSPlayback holds TTS playback settings (volume, rate).

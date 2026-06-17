@@ -1,7 +1,6 @@
 // internal/configui/sections_isolation.go
 package configui
 
-
 func buildIsolationFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.Isolation

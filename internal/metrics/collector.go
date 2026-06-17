@@ -126,7 +126,7 @@ type TypedEventEmitter interface {
 
 // Collector collects metrics from various sources.
 type Collector struct {
-	subs          []*bus.Subscriber
+	subs            []*bus.Subscriber
 	store           *Store
 	bus             *bus.MessageBus
 	stopChan        chan struct{}
@@ -311,7 +311,6 @@ func (c *Collector) RecordToolCall(toolName string, duration time.Duration, succ
 		})
 	}
 }
-
 
 // RecordReviewResult records a review result metric.
 func (c *Collector) RecordReviewResult(status, reviewerID string, confidence float64) {
@@ -505,7 +504,6 @@ func (c *Collector) Shutdown() {
 		c.bus.Unsubscribe(sub)
 	}
 }
-
 
 // AgentTaskMetrics represents metrics for a single agent task execution.
 type AgentTaskMetrics struct {

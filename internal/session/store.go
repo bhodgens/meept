@@ -10,8 +10,8 @@ type Message struct {
 	Role       string    `json:"role"`
 	Content    string    `json:"content"`
 	Timestamp  time.Time `json:"timestamp"`
-	EntryType  string    `json:"entry_type"`            // "message", "branch_point", "compaction", "summary"
-	BranchID   string    `json:"branch_id"`             // "main" or branch identifier
+	EntryType  string    `json:"entry_type"` // "message", "branch_point", "compaction", "summary"
+	BranchID   string    `json:"branch_id"`  // "main" or branch identifier
 	Model      string    `json:"model,omitempty"`
 	Name       string    `json:"name,omitempty"`
 	ToolCallID string    `json:"tool_call_id,omitempty"`

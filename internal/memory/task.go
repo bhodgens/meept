@@ -81,9 +81,9 @@ type TaskMemoryConfig struct {
 // DefaultTaskMemoryConfig returns configuration with sensible defaults.
 func DefaultTaskMemoryConfig(dataDir string) TaskMemoryConfig {
 	return TaskMemoryConfig{
-		DataDir:  dataDir,
-		Domains:  []string{DomainGeneral, DomainCode, DomainCommands},
-		Logger:   slog.Default(),
+		DataDir: dataDir,
+		Domains: []string{DomainGeneral, DomainCode, DomainCommands},
+		Logger:  slog.Default(),
 	}
 }
 

@@ -41,7 +41,7 @@ func TestGetModelInfo(t *testing.T) {
 			wantMaxSeq: 512,
 		},
 		{
-			name:   "unknown model",
+			name:    "unknown model",
 			modelID: "unknown/foobar",
 			wantOK:  false,
 		},
@@ -92,16 +92,16 @@ func TestRegisterModel(t *testing.T) {
 	origSize := len(knownModels)
 
 	RegisterModel(ModelInfo{
-		ID:              "test/custom-model",
-		Dimension:       256,
-		MaxSequenceLen:  512,
-		ONNXModelPath:   "model.onnx",
-		TokenizerPath:   "tokenizer.json",
-		TokenizerType:   "bpe",
-		PoolingMethod:   "mean",
-		Normalize:       true,
-		Tags:            []string{"custom", "test"},
-		Description:     "Test custom model",
+		ID:             "test/custom-model",
+		Dimension:      256,
+		MaxSequenceLen: 512,
+		ONNXModelPath:  "model.onnx",
+		TokenizerPath:  "tokenizer.json",
+		TokenizerType:  "bpe",
+		PoolingMethod:  "mean",
+		Normalize:      true,
+		Tags:           []string{"custom", "test"},
+		Description:    "Test custom model",
 	})
 
 	info, ok := GetModelInfo("test/custom-model")
@@ -130,9 +130,9 @@ func TestHasModel(t *testing.T) {
 
 func TestModelInfo_SupportsMatryoshka(t *testing.T) {
 	testCases := []struct {
-		name      string
-		modelID   string
-		wantBool  bool
+		name     string
+		modelID  string
+		wantBool bool
 	}{
 		{"nomic matryoshka", "nomic-embed-text-v1.5", true},
 		{"minilm fast", "all-MiniLM-L6-v2", false},

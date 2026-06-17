@@ -195,17 +195,17 @@ type ChatModel struct {
 	agentActiveBadgeStyle lipgloss.Style
 
 	// Speech-to-text state
-	recordingState sttState       // current state in the STT state machine
+	recordingState sttState        // current state in the STT state machine
 	transcriber    stt.Transcriber // nil if STT disabled or unavailable
 	sttConfig      stt.Config
-	sttAvailable   bool   // true if engine dependencies found
-	sttEnabled     bool   // true if stt is enabled in config
-	sttAutoSend    bool   // true if transcription results should auto-send
+	sttAvailable   bool      // true if engine dependencies found
+	sttEnabled     bool      // true if stt is enabled in config
+	sttAutoSend    bool      // true if transcription results should auto-send
 	lastEnterTime  time.Time // tracks double-enter detection for STT activation
 
 	// Text-to-speech state
-	ttsManager     *tts.Manager // nil if TTS disabled or unavailable
-	ttsEnabled     bool         // true if tts is enabled in config
+	ttsManager *tts.Manager // nil if TTS disabled or unavailable
+	ttsEnabled bool         // true if tts is enabled in config
 }
 
 // RPCClient interface for the chat model.
@@ -1146,7 +1146,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 				m.addMessage(RoleSystem, content)
 			} else {
 				m.addMessage(RoleAssistant, msg.Reply)
-				
+
 				// Trigger TTS if enabled
 				if m.ttsEnabled && m.ttsManager != nil {
 					if err := m.ttsManager.Speak(msg.Reply); err != nil {
@@ -2922,7 +2922,6 @@ func (m *ChatModel) renderTTSIndicator() string {
 
 	return style.Render(indicator)
 }
-
 
 // renderQueueIndicator renders a single-line indicator bar showing agent
 // activity, steer mode, and queue depth as styled badges joined horizontally.

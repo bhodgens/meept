@@ -19,10 +19,10 @@ const (
 // TurnManager tracks editor token ownership and enforces turn limits.
 type TurnManager struct {
 	participants []string
-	tokenHolder  int        // index into participants holding the editor token
+	tokenHolder  int // index into participants holding the editor token
 	turnCount    int
 	maxTurns     int
-	maxTokens    int64  // per turn token limit
+	maxTokens    int64 // per turn token limit
 	turnTimeout  time.Duration
 
 	mu sync.RWMutex

@@ -70,9 +70,9 @@ type tokenResponse struct {
 // RFC 8628 error codes.
 const (
 	errAuthorizationPending = "authorization_pending"
-	errSlowDown              = "slow_down"
-	errExpiredToken          = "expired_token"
-	errAccessDenied          = "access_denied"
+	errSlowDown             = "slow_down"
+	errExpiredToken         = "expired_token"
+	errAccessDenied         = "access_denied"
 )
 
 // DeviceFlowError represents an error returned during the device code flow.
@@ -206,7 +206,6 @@ func PollForToken(ctx context.Context, cfg DeviceFlowConfig, result *DeviceCodeR
 		return token, nil
 	}
 }
-
 
 // pollOnce sends a single token request. It returns the token on success,
 // a DeviceFlowError for known RFC 8628 errors, or a generic error.

@@ -117,9 +117,9 @@ func TestRecordExecution_FailureTracking(t *testing.T) {
 	mgr.CreateBot(ctx, def)
 
 	failResult := &BotExecutionResult{
-		BotID:  "fail-bot",
-		Success: false,
-		Error:   "LLM timeout",
+		BotID:    "fail-bot",
+		Success:  false,
+		Error:    "LLM timeout",
 		Duration: time.Second,
 	}
 	ct.RecordExecution(ctx, "fail-bot", failResult, ExecutionCost{CostCents: 1})

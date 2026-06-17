@@ -30,14 +30,14 @@ const (
 
 // GoroutineInfo represents information about a single goroutine.
 type GoroutineInfo struct {
-	ID        int              `json:"id"`
-	Status    GoroutineStatus  `json:"status"`
-	Function  string           `json:"function,omitempty"`
-	File      string           `json:"file,omitempty"`
-	Line      int              `json:"line,omitempty"`
-	Args      []GoroutineArg   `json:"args,omitempty"`
+	ID        int               `json:"id"`
+	Status    GoroutineStatus   `json:"status"`
+	Function  string            `json:"function,omitempty"`
+	File      string            `json:"file,omitempty"`
+	Line      int               `json:"line,omitempty"`
+	Args      []GoroutineArg    `json:"args,omitempty"`
 	Labels    map[string]string `json:"labels,omitempty"`
-	UserState string           `json:"user_state,omitempty"`
+	UserState string            `json:"user_state,omitempty"`
 }
 
 // GoroutineArg represents a single argument of a goroutine's current function.
@@ -48,7 +48,7 @@ type GoroutineArg struct {
 
 // GoroutinesResult is the result of listing all goroutines.
 type GoroutinesResult struct {
-	Total int            `json:"total"`
+	Total int             `json:"total"`
 	List  []GoroutineInfo `json:"list"`
 }
 
@@ -66,7 +66,7 @@ func ListGoroutines(ctx context.Context, client *Client) (*GoroutinesResult, err
 	// Delve's DAP server may support evaluating dlv-specific commands.
 	evaluateBody, err := client.Evaluate(ctx, EvaluateArguments{
 		Expression: "runtime.NumGoroutine()",
-		Context:     "repl",
+		Context:    "repl",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to query goroutine count: %w", err)
@@ -120,8 +120,8 @@ func listGoroutinesViaCustomRequest(ctx context.Context, client *Client) ([]Goro
 
 	var body struct {
 		Goroutines []struct {
-			ID        int    `json:"id"`
-			UserState string `json:"userState"`
+			ID         int    `json:"id"`
+			UserState  string `json:"userState"`
 			CurrentLoc struct {
 				Function string `json:"function"`
 				File     string `json:"file"`

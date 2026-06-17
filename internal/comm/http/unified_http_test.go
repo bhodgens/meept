@@ -1,8 +1,8 @@
 package http_test
 
 import (
-	"crypto/tls"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"net"
@@ -40,7 +40,7 @@ func startTestServer(t *testing.T, opts ...http.ServerOption) (baseURL string, c
 	// Use temp paths so self-signed certs are generated in temp dirs
 	cfg.TLSCertFile = filepath.Join(t.TempDir(), "cert.pem")
 	cfg.TLSKeyFile = filepath.Join(t.TempDir(), "key.pem")
-	cfg.RequireAuth = false   // Disable auth for test servers (no API keys)
+	cfg.RequireAuth = false // Disable auth for test servers (no API keys)
 
 	srv := http.NewServer(cfg, nil, nil, nil, nil, nil, opts...)
 	if srv == nil {
@@ -124,7 +124,7 @@ func TestUnifiedHTTPServer_BothOptions(t *testing.T) {
 func TestUnifiedHTTPServer_ContextCancellation(t *testing.T) {
 	dir := t.TempDir()
 	cfg := http.DefaultServerConfig()
-	cfg.Addr = ":0"         // Let OS choose available port
+	cfg.Addr = ":0" // Let OS choose available port
 	cfg.TLSCertFile = dir + "/cert.pem"
 	cfg.TLSKeyFile = dir + "/key.pem"
 	cfg.RequireAuth = false // Disable auth for test server

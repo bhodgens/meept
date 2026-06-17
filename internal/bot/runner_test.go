@@ -8,10 +8,10 @@ import (
 
 func TestBotRunner_BuildSystemPrompt(t *testing.T) {
 	def := BotDefinition{
-		ID:      "test-bot",
-		Name:    "Test Bot",
-		Prompt:  "You are a monitoring bot. Check the CI status.",
-		Tools:   []string{"web_fetch", "memory_store", "memory_search"},
+		ID:     "test-bot",
+		Name:   "Test Bot",
+		Prompt: "You are a monitoring bot. Check the CI status.",
+		Tools:  []string{"web_fetch", "memory_store", "memory_search"},
 		Constraints: BotConstraints{
 			MaxIterations:    5,
 			Timeout:          2 * time.Minute,

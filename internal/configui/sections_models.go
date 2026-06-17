@@ -41,5 +41,3 @@ func buildProviderItems(providers map[string]llm.ProviderConfig) []DrilldownItem
 	}
 	return items
 }
-
-

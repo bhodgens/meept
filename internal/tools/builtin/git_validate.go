@@ -57,11 +57,11 @@ func (t *GitValidateTool) Parameters() llm.FunctionParameters {
 
 // GitValidateResult contains validation results.
 type GitValidateResult struct {
-	Valid       bool              `json:"valid"`
-	Message     string            `json:"message"`
+	Valid       bool               `json:"valid"`
+	Message     string             `json:"message"`
 	Results     []ValidationResult `json:"results,omitempty"`
-	GitState    *GitStateInfo     `json:"git_state,omitempty"`
-	Suggestions []string          `json:"suggestions,omitempty"`
+	GitState    *GitStateInfo      `json:"git_state,omitempty"`
+	Suggestions []string           `json:"suggestions,omitempty"`
 }
 
 // ValidationResult describes validation of a single message.

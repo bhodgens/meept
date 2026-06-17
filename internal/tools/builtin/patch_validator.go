@@ -38,8 +38,8 @@ var opsRequiringContent = map[string]bool{
 
 // opsForbiddingContent are operations that must have empty content.
 var opsForbiddingContent = map[string]bool{
-	"delete":        true,
-	"delete_block":  true,
+	"delete":       true,
+	"delete_block": true,
 }
 
 const maxLineNum = 1000000

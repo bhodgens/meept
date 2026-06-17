@@ -89,12 +89,12 @@ func TestDetectCoreAdapterForBinary(t *testing.T) {
 // TestCrashReport tests the CrashReport formatting function.
 func TestCrashReport(t *testing.T) {
 	result := &CoreDumpResult{
-		Adapter:      CoreAdapterGDB,
-		Program:      "/usr/bin/test",
-		CoreFile:     "/tmp/core.12345",
-		Signal:       "SIGSEGV",
-		FaultAddr:    "0x0000000000000000",
-		CrashReason:  "Segmentation fault (core dumped)",
+		Adapter:     CoreAdapterGDB,
+		Program:     "/usr/bin/test",
+		CoreFile:    "/tmp/core.12345",
+		Signal:      "SIGSEGV",
+		FaultAddr:   "0x0000000000000000",
+		CrashReason: "Segmentation fault (core dumped)",
 		Variables: []CoreVariable{
 			{Name: "ptr", Value: "0x0", Type: "int *"},
 			{Name: "len", Value: "42", Type: "int"},
@@ -110,7 +110,7 @@ func TestCrashReport(t *testing.T) {
 				},
 			},
 			{
-				ID:    2,
+				ID: 2,
 				Stack: []CoreFrame{
 					{Index: 0, Function: "runtime.gopark", File: "proc.go", Line: 300},
 				},
@@ -245,9 +245,9 @@ int x = 99
 // TestParseGDBFrame tests individual frame parsing.
 func TestParseGDBFrame(t *testing.T) {
 	tests := []struct {
-		input   string
-		wantIdx int
-		wantFn  string
+		input    string
+		wantIdx  int
+		wantFn   string
 		wantFile string
 		wantLine int
 	}{
@@ -325,10 +325,10 @@ func TestParseGDBVariable(t *testing.T) {
 // TestParseLLDBOutput tests LLDB output parsing with sample output.
 func TestParseLLDBOutput(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		wantSig  string
-		wantThr  int
+		name    string
+		input   string
+		wantSig string
+		wantThr int
 	}{
 		{
 			name: "exc_bad_access",
@@ -367,9 +367,9 @@ func TestParseLLDBOutput(t *testing.T) {
 // TestParseLLDBFrame tests individual LLDB frame parsing.
 func TestParseLLDBFrame(t *testing.T) {
 	tests := []struct {
-		input   string
-		wantIdx int
-		wantFn  string
+		input    string
+		wantIdx  int
+		wantFn   string
 		wantFile string
 		wantLine int
 	}{
@@ -534,11 +534,11 @@ func TestExtractAddress(t *testing.T) {
 // TestCoreDumpResultStruct verifies the CoreDumpResult struct fields are serializable.
 func TestCoreDumpResultStruct(t *testing.T) {
 	result := &CoreDumpResult{
-		Adapter:    CoreAdapterGDB,
-		Program:    "/usr/bin/test",
-		CoreFile:   "/tmp/core",
-		Signal:     "SIGSEGV",
-		FaultAddr:  "0x0",
+		Adapter:     CoreAdapterGDB,
+		Program:     "/usr/bin/test",
+		CoreFile:    "/tmp/core",
+		Signal:      "SIGSEGV",
+		FaultAddr:   "0x0",
 		CrashReason: "segfault",
 		Threads: []CoreThread{
 			{

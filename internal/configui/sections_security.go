@@ -1,7 +1,6 @@
 // internal/configui/sections_security.go
 package configui
 
-
 func buildSecurityFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.Security

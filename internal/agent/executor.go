@@ -47,7 +47,7 @@ var ToolActionMap = map[string]string{
 	"task_update": "task_write",
 
 	// Agent delegation
-	"delegate_task":    "agent_delegate",
+	"delegate_task":   "agent_delegate",
 	ToolRequestReview: "agent_delegate",
 
 	// Code intelligence - AST (read-only, safe)
@@ -343,9 +343,9 @@ func detectLanguageFromContent(s string) ast.Language {
 // ToChatMessage converts the result to a tool role chat message.
 func (r *ExecutionResult) ToChatMessage() llm.ChatMessage {
 	return llm.ChatMessage{
-		Role:       llm.RoleTool,
-		Content:    r.ToJSON(),
-		ToolCallID: r.ToolCallID,
+		Role:        llm.RoleTool,
+		Content:     r.ToJSON(),
+		ToolCallID:  r.ToolCallID,
 		IsToolError: !r.Success,
 	}
 }

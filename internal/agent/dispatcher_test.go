@@ -586,10 +586,10 @@ func TestIsPendingClarification_LastIntentWasClarify(t *testing.T) {
 		AgentType:  config.AgentIDChat,
 		Summary:    "fix something",
 		TrueAnalysis: &TrueIntentAnalysis{
-			Goal:      "fix something",
-			Ambiguity: 0.8,
-			Scope:     "broad",
-			Category:  "fix",
+			Goal:       "fix something",
+			Ambiguity:  0.8,
+			Scope:      "broad",
+			Category:   "fix",
 			Confidence: 0.7,
 		},
 	}
@@ -635,7 +635,7 @@ func TestGetPendingClarification_ValidState(t *testing.T) {
 			Ambiguity:          0.8,
 			Scope:              "broad",
 			Category:           "fix",
-			SuggestedQuestions:  []string{"Which auth system?", "What's the bug?"},
+			SuggestedQuestions: []string{"Which auth system?", "What's the bug?"},
 			Confidence:         0.7,
 		},
 	}

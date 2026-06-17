@@ -1572,7 +1572,7 @@ func (s *SQLiteStore) GetToolCallsForMessages(messageIDs []int64) (map[int64][]T
 	}
 
 	// #nosec G201 -- placeholders are all "?"; IN clause args are parameterized
-		//nolint:gosec // placeholders are all "?"; IN clause args are parameterized
+	//nolint:gosec // placeholders are all "?"; IN clause args are parameterized
 	query := fmt.Sprintf(`
 		SELECT id, message_id, tool_name, tool_call_id, arguments, result, seq
 		FROM session_tool_calls

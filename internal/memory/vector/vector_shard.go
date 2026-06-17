@@ -20,13 +20,13 @@ func init() {
 
 // ShardStats holds statistics about a vector shard.
 type ShardStats struct {
-	Dimension      int     `json:"dimension"`
-	M              int     `json:"M"`
-	EFConstruction int     `json:"ef_construction"`
-	EFSearch       int     `json:"ef_search"`
-	VectorCount    int64   `json:"vector_count"`
-	DatabaseSize   int64   `json:"database_size_bytes"`
-	ShardID        string  `json:"shard_id"`
+	Dimension      int    `json:"dimension"`
+	M              int    `json:"M"`
+	EFConstruction int    `json:"ef_construction"`
+	EFSearch       int    `json:"ef_search"`
+	VectorCount    int64  `json:"vector_count"`
+	DatabaseSize   int64  `json:"database_size_bytes"`
+	ShardID        string `json:"shard_id"`
 }
 
 // VectorShard is an HNSW-powered vector index backed by sqlite-vec.
@@ -425,10 +425,10 @@ func (s *VectorShard) Stats() ShardStats {
 	return stats
 }
 
-func (s *VectorShard) Dimension() int        { return s.dimension }
-func (s *VectorShard) ShardID() string       { return s.shardID }
-func (s *VectorShard) EFSearch() int         { return s.efSearch }
-func (s *VectorShard) SetEFSearch(ef int)    { s.efSearch = ef }
+func (s *VectorShard) Dimension() int                       { return s.dimension }
+func (s *VectorShard) ShardID() string                      { return s.shardID }
+func (s *VectorShard) EFSearch() int                        { return s.efSearch }
+func (s *VectorShard) SetEFSearch(ef int)                   { s.efSearch = ef }
 func (s *VectorShard) WithProvider(p Provider) *VectorShard { s.provider = p; return s }
 
 func JSONFloat32Slice(v []float32) string {

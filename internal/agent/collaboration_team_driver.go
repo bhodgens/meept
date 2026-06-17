@@ -69,9 +69,9 @@ type TeamMemberResult struct {
 
 // TeamConfig holds configuration for a parallel team session.
 type TeamConfig struct {
-	LeadAgent     string   `json:"lead_agent"`
-	Roster        []string `json:"roster"`
-	MaxConcurrent int      `json:"max_concurrent"`
+	LeadAgent     string        `json:"lead_agent"`
+	Roster        []string      `json:"roster"`
+	MaxConcurrent int           `json:"max_concurrent"`
 	MemberTimeout time.Duration `json:"member_timeout"`
 }
 
@@ -86,11 +86,11 @@ type TeamStatus struct {
 // ParallelTeamDriver implements CollaborationMode for N-agent parallel team
 // execution with a lead agent that synthesizes partial results.
 type ParallelTeamDriver struct {
-	registry   *AgentRegistry
-	workspace  *WorkspaceManager
-	pairMgr    *PairManager
-	bus        *bus.MessageBus
-	logger     *slog.Logger
+	registry  *AgentRegistry
+	workspace *WorkspaceManager
+	pairMgr   *PairManager
+	bus       *bus.MessageBus
+	logger    *slog.Logger
 
 	conversations map[string]*TeamStatus
 	convMu        sync.RWMutex
@@ -98,11 +98,11 @@ type ParallelTeamDriver struct {
 
 // ParallelTeamDriverDeps holds dependencies.
 type ParallelTeamDriverDeps struct {
-	Registry   *AgentRegistry
-	Workspace *WorkspaceManager
+	Registry    *AgentRegistry
+	Workspace   *WorkspaceManager
 	PairManager *PairManager
-	Bus        *bus.MessageBus
-	Logger     *slog.Logger
+	Bus         *bus.MessageBus
+	Logger      *slog.Logger
 }
 
 // NewParallelTeamDriver creates a new parallel team driver.
@@ -553,11 +553,11 @@ func (d *ParallelTeamDriver) publishMemberCompleted(sessionID, memberID, leadAge
 
 	topic := TeamMessageTopic(sessionID)
 	msg, err := models.NewBusMessage(models.MessageTypeEvent, "parallel-team-driver", map[string]any{
-		"session_id":  sessionID,
-		"member_id":    memberID,
-		"lead_agent":   leadAgent,
-		"event":        "member_completed",
-		"timestamp":    time.Now().UTC(),
+		"session_id": sessionID,
+		"member_id":  memberID,
+		"lead_agent": leadAgent,
+		"event":      "member_completed",
+		"timestamp":  time.Now().UTC(),
 	})
 	if err != nil {
 		d.logger.Error("failed to create member completed message", "error", err)
@@ -576,9 +576,9 @@ func (d *ParallelTeamDriver) publishPartialResults(sessionID string, results map
 	topic := TeamResultTopic(sessionID)
 	msg, err := models.NewBusMessage(models.MessageTypeEvent, "parallel-team-driver", map[string]any{
 		"session_id": sessionID,
-		"event":       "partial_results",
-		"results":     results,
-		"timestamp":   time.Now().UTC(),
+		"event":      "partial_results",
+		"results":    results,
+		"timestamp":  time.Now().UTC(),
 	})
 	if err != nil {
 		d.logger.Error("failed to create partial results message", "error", err)

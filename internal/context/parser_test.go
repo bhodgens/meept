@@ -408,13 +408,13 @@ func TestExtractYAMLFrontmatter(t *testing.T) {
 
 func TestParseSkillFrontmatter_EdgeCases(t *testing.T) {
 	tests := []struct {
-		name          string
-		frontmatter   string
-		wantName      string
-		wantDesc      string
-		wantVersion   string
-		wantRequires  []string
-		wantErr       bool
+		name         string
+		frontmatter  string
+		wantName     string
+		wantDesc     string
+		wantVersion  string
+		wantRequires []string
+		wantErr      bool
 	}{
 		{
 			name: "basic fields",

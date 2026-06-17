@@ -9,12 +9,12 @@ import (
 
 func TestParseHermesFrontmatter(t *testing.T) {
 	tests := []struct {
-		name         string
-		frontmatter  string
-		wantName     string
-		wantSource   string
-		wantTags     []string
-		wantPrereqs  bool
+		name        string
+		frontmatter string
+		wantName    string
+		wantSource  string
+		wantTags    []string
+		wantPrereqs bool
 	}{
 		{
 			name: "full hermes skill",
@@ -259,8 +259,8 @@ func TestHermesToolMapping(t *testing.T) {
 		{"team_create", "delegate_task"},
 		{"team_list", "platform_agents"},
 		{"team_message", "request_handoff"},
-		{"shell", "shell"},       // passthrough
-		{"file_read", "file_read"}, // passthrough
+		{"shell", "shell"},               // passthrough
+		{"file_read", "file_read"},       // passthrough
 		{"unknown_tool", "unknown_tool"}, // passthrough
 	}
 

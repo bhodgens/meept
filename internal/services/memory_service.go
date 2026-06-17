@@ -135,12 +135,12 @@ type VectorStats struct {
 
 // ShardDetail contains per-shard statistics.
 type ShardDetail struct {
-	Dimension      int   `json:"dimension"`
-	M              int   `json:"m"`
-	EFConstruction int   `json:"ef_construction"`
-	EFSearch       int   `json:"ef_search"`
-	VectorCount    int64 `json:"vector_count"`
-	DatabaseSize   int64 `json:"database_size_bytes"`
+	Dimension      int    `json:"dimension"`
+	M              int    `json:"m"`
+	EFConstruction int    `json:"ef_construction"`
+	EFSearch       int    `json:"ef_search"`
+	VectorCount    int64  `json:"vector_count"`
+	DatabaseSize   int64  `json:"database_size_bytes"`
 	ShardID        string `json:"shard_id"`
 }
 
@@ -239,12 +239,12 @@ func (s *MemoryService) VectorStats() (VectorStats, error) {
 		}
 
 		return VectorStats{
-			LoadedShards:  stats.LoadedShards,
-			MaxRAMShards:  stats.MaxRAMShards,
-			LRUHits:       stats.LRUHits,
-			LRUMisses:     stats.LRUMisses,
-			LRUEvictions:  stats.LRUEvictions,
-			ShardDetails:  shardDetails,
+			LoadedShards: stats.LoadedShards,
+			MaxRAMShards: stats.MaxRAMShards,
+			LRUHits:      stats.LRUHits,
+			LRUMisses:    stats.LRUMisses,
+			LRUEvictions: stats.LRUEvictions,
+			ShardDetails: shardDetails,
 		}, nil
 	}
 

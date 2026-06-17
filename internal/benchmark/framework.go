@@ -21,40 +21,40 @@ import (
 
 // BenchmarkConfig defines the configuration for running benchmarks.
 type BenchmarkConfig struct {
-	Tasks       []BenchmarkTask `json:"tasks"`
-	Model       string          `json:"model"`
-	EditFormat  string          `json:"edit_format"`
-	NumTests    int             `json:"num_tests"`
-	MaxThreads  int             `json:"max_threads"`
-	Timeout     time.Duration   `json:"timeout"`
+	Tasks      []BenchmarkTask `json:"tasks"`
+	Model      string          `json:"model"`
+	EditFormat string          `json:"edit_format"`
+	NumTests   int             `json:"num_tests"`
+	MaxThreads int             `json:"max_threads"`
+	Timeout    time.Duration   `json:"timeout"`
 }
 
 // BenchmarkTask defines a single benchmark task to run.
 type BenchmarkTask struct {
 	ID            string   `json:"id"`
 	Description   string   `json:"description"`
-	Setup         string   `json:"setup"`         // Shell command to prepare environment
+	Setup         string   `json:"setup"`        // Shell command to prepare environment
 	TestCommand   string   `json:"test_command"` // Shell command to run tests
 	ExpectedFiles []string `json:"expected_files"`
 }
 
 // BenchmarkResult contains the aggregated results of a benchmark run.
 type BenchmarkResult struct {
-	Timestamp          string       `json:"timestamp"`
-	Model              string       `json:"model"`
-	EditFormat         string       `json:"edit_format"`
-	CommitHash         string       `json:"commit_hash"`
-	MeeptVersion       string       `json:"meept_version"`
-	PassRate           float64      `json:"pass_rate"`
-	WellFormedPct      float64      `json:"well_formed_pct"`
-	NumMalformed       int          `json:"num_malformed"`
-	SyntaxErrors       int          `json:"syntax_errors"`
-	IndentationErrors  int          `json:"indentation_errors"`
-	LazyResponses      int          `json:"lazy_responses"`
-	ContextExhausted   int          `json:"context_exhausted"`
-	TaskTimeouts       int          `json:"task_timeouts"`
-	UserAsks           int          `json:"user_asks"`
-	TaskResults        []TaskResult `json:"task_results"`
+	Timestamp         string       `json:"timestamp"`
+	Model             string       `json:"model"`
+	EditFormat        string       `json:"edit_format"`
+	CommitHash        string       `json:"commit_hash"`
+	MeeptVersion      string       `json:"meept_version"`
+	PassRate          float64      `json:"pass_rate"`
+	WellFormedPct     float64      `json:"well_formed_pct"`
+	NumMalformed      int          `json:"num_malformed"`
+	SyntaxErrors      int          `json:"syntax_errors"`
+	IndentationErrors int          `json:"indentation_errors"`
+	LazyResponses     int          `json:"lazy_responses"`
+	ContextExhausted  int          `json:"context_exhausted"`
+	TaskTimeouts      int          `json:"task_timeouts"`
+	UserAsks          int          `json:"user_asks"`
+	TaskResults       []TaskResult `json:"task_results"`
 }
 
 // TaskResult contains the result of a single task execution.
@@ -71,11 +71,11 @@ type TaskResult struct {
 
 // Framework runs benchmarks and collects results.
 type Framework struct {
-	config        BenchmarkConfig
-	results       []TaskResult
-	mu            sync.Mutex
-	semaphore     chan struct{}
-	WorkingDir    string // Working directory for benchmark execution
+	config     BenchmarkConfig
+	results    []TaskResult
+	mu         sync.Mutex
+	semaphore  chan struct{}
+	WorkingDir string // Working directory for benchmark execution
 }
 
 // NewFramework creates a new benchmark framework with the given configuration.
@@ -281,21 +281,21 @@ func (f *Framework) calculateResults(startTime time.Time, commitHash, meeptVersi
 	wellFormedPct := 100 - float64(0) // Would track actual metrics
 
 	return &BenchmarkResult{
-		Timestamp:          startTime.Format(time.RFC3339),
-		Model:              f.config.Model,
-		EditFormat:         f.config.EditFormat,
-		CommitHash:         commitHash,
-		MeeptVersion:       meeptVersion,
-		PassRate:           passRate,
-		WellFormedPct:      wellFormedPct,
-		NumMalformed:       0,
-		SyntaxErrors:       0,
-		IndentationErrors:  0,
-		LazyResponses:      0,
-		ContextExhausted:   0,
-		TaskTimeouts:       0,
-		UserAsks:           0,
-		TaskResults:        f.results,
+		Timestamp:         startTime.Format(time.RFC3339),
+		Model:             f.config.Model,
+		EditFormat:        f.config.EditFormat,
+		CommitHash:        commitHash,
+		MeeptVersion:      meeptVersion,
+		PassRate:          passRate,
+		WellFormedPct:     wellFormedPct,
+		NumMalformed:      0,
+		SyntaxErrors:      0,
+		IndentationErrors: 0,
+		LazyResponses:     0,
+		ContextExhausted:  0,
+		TaskTimeouts:      0,
+		UserAsks:          0,
+		TaskResults:       f.results,
 	}
 }
 

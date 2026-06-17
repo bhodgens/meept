@@ -1,7 +1,6 @@
 // internal/configui/sections_scheduler.go
 package configui
 
-
 func buildSchedulerFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.Scheduler

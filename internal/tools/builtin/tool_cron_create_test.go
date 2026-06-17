@@ -61,8 +61,8 @@ func TestBuildCronExpression_DayOfMonthDefault(t *testing.T) {
 func TestBuildCronExpression_DayOfMonthOutOfRange(t *testing.T) {
 	tool := &CronCreateTool{}
 	_, err := tool.buildCronExpression(map[string]any{
-		"interval":      "monthly",
-		"day_of_month":  float64(0),
+		"interval":     "monthly",
+		"day_of_month": float64(0),
 	})
 	if err == nil {
 		t.Fatal("expected error for day_of_month=0, got nil")
@@ -72,8 +72,8 @@ func TestBuildCronExpression_DayOfMonthOutOfRange(t *testing.T) {
 	}
 
 	_, err = tool.buildCronExpression(map[string]any{
-		"interval":      "monthly",
-		"day_of_month":  float64(32),
+		"interval":     "monthly",
+		"day_of_month": float64(32),
 	})
 	if err == nil {
 		t.Fatal("expected error for day_of_month=32, got nil")
@@ -88,8 +88,8 @@ func TestBuildCronExpression_DayOfMonthOutOfRange(t *testing.T) {
 func TestBuildCronExpression_DayOfMonthValid(t *testing.T) {
 	tool := &CronCreateTool{}
 	expr, err := tool.buildCronExpression(map[string]any{
-		"interval":      "monthly",
-		"day_of_month":  float64(15),
+		"interval":     "monthly",
+		"day_of_month": float64(15),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

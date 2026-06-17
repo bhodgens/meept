@@ -11,8 +11,8 @@ import (
 func TestSentenceTransformerProvider_DimensionReturnsConfiguredDim(t *testing.T) {
 	// Create a default provider (uses fallback tokenizer and dummy weights)
 	provider, err := NewSentenceTransformerProvider(SentenceTransformerConfig{
-		ModelID:     "nomic-embed-text-v1.5",
-		TargetDim:   512,
+		ModelID:   "nomic-embed-text-v1.5",
+		TargetDim: 512,
 	})
 	if err != nil {
 		t.Fatalf("NewSentenceTransformerProvider error: %v", err)
@@ -189,10 +189,14 @@ func TestModelWeights_loadWeights(t *testing.T) {
 	// Format: [hiddenIn int32][hiddenOut int32][vocabSize int32][maxSeqLen int32][weights...]
 	data := make([]byte, 16+4*100)
 	idx := 0
- binaryWrite(idx, data, int32(768)); idx += 4
- binaryWrite(idx, data, int32(768)); idx += 4
- binaryWrite(idx, data, int32(51200)); idx += 4
- binaryWrite(idx, data, int32(512)); idx += 4
+	binaryWrite(idx, data, int32(768))
+	idx += 4
+	binaryWrite(idx, data, int32(768))
+	idx += 4
+	binaryWrite(idx, data, int32(51200))
+	idx += 4
+	binaryWrite(idx, data, int32(512))
+	idx += 4
 
 	// Fill remaining with test weights
 	weightData := data[idx:]
@@ -233,13 +237,13 @@ func binaryWrite(p int, data []byte, v int32) {
 // Dummy weights are loaded when no actual model file is present.
 func TestLoadDummyWeights(t *testing.T) {
 	info := ModelInfo{
-		ID:              "test-model",
-		Dimension:       768,
-		MaxSequenceLen:  512,
-		TokenizerType:   "bpe",
-		PoolingMethod:   "mean",
-		Normalize:       true,
-		Description:     "test",
+		ID:             "test-model",
+		Dimension:      768,
+		MaxSequenceLen: 512,
+		TokenizerType:  "bpe",
+		PoolingMethod:  "mean",
+		Normalize:      true,
+		Description:    "test",
 	}
 	w := loadDummyWeights(info)
 	if w.hiddenIn != 768 {
@@ -336,11 +340,11 @@ func TestDefaultTokenizer_Encode(t *testing.T) {
 	}
 
 	tests := []struct {
-		text     string
-		wantLen  int // expected length of result (BOS + tokens + EOS)
+		text    string
+		wantLen int // expected length of result (BOS + tokens + EOS)
 	}{
-		{"", 2},    // just BOS + EOS
-		{"hello", 3}, // BOS + "hello" + EOS
+		{"", 2},                   // just BOS + EOS
+		{"hello", 3},              // BOS + "hello" + EOS
 		{"code function test", 5}, // BOS + 3 tokens + EOS
 	}
 

@@ -115,6 +115,39 @@ func (a *APIKeyAuth) extractKey(r *http.Request) string {
 	return ""
 }
 
+
+// ExtractKeyFromRequest extracts the API key from HTTP request headers or
+// query parameters using the same logic as the APIKeyAuth middleware.
+// Returns the key if found, empty string if missing.
+// Priority: Authorization header > Sec-WebSocket-Protocol > query param ?token=
+func ExtractKeyFromRequest(r *http.Request) string {
+	auth := r.Header.Get("Authorization")
+	const bearerPrefix = "Bearer "
+	if len(auth) > len(bearerPrefix) && strings.EqualFold(auth[:len(bearerPrefix)], bearerPrefix) {
+		return auth[len(bearerPrefix):]
+	}
+
+	// For WebSocket clients, check Sec-WebSocket-Protocol header
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		if proto := r.Header.Get("Sec-WebSocket-Protocol"); proto != "" {
+			for _, p := range strings.Split(proto, ",") {
+				p = strings.TrimSpace(p)
+				if strings.HasPrefix(p, "bearer.") {
+					return p[len("bearer."):]
+				}
+			}
+		}
+		// Legacy fallback - warning logged inline
+		if token := r.URL.Query().Get("token"); token != "" {
+			slog.Warn("websocket auth via query param (credentials visible in logs)",
+				"remote", r.RemoteAddr,
+				"hint", "use Authorization header or Sec-WebSocket-Protocol: bearer.<key>",
+			)
+			return token
+		}
+	}
+	return ""
+}
 // APIKeyFromContext retrieves API key from context.
 func APIKeyFromContext(ctx context.Context) (string, bool) {
 	key, ok := ctx.Value(apiKeyContextKey).(string)

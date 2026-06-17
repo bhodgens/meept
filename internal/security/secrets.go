@@ -326,4 +326,3 @@ func (s *SecretObfuscator) deobfuscateMessage(msg any) any {
 		return msg
 	}
 }
-

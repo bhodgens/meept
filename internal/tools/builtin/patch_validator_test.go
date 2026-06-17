@@ -338,9 +338,9 @@ func TestValidatePatch_ContentMustBeEmpty(t *testing.T) {
 
 func TestValidatePatch_LineNumberBounds(t *testing.T) {
 	tests := []struct {
-		name     string
-		anchor   string
-		wantMsg  string
+		name    string
+		anchor  string
+		wantMsg string
 	}{
 		{"line zero", "0:ab", "must be > 0"},
 		{"negative line", "-1:ab", "must be > 0"},

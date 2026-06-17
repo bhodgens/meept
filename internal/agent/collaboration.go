@@ -26,26 +26,26 @@ func (s SessionState) IsTerminal() bool {
 
 // TurnEntry records a single turn in a collaboration session.
 type TurnEntry struct {
-	TurnNumber  int       `json:"turn_number"`
-	AgentID     string    `json:"agent_id"`
-	Role        string    `json:"role"` // "driver" or "observer"
-	Content     string    `json:"content"`
-	Action      string    `json:"action,omitempty"`      // "approve", "request_changes", "request_token", "yield"
-	Feedback    string    `json:"feedback,omitempty"`
-	Timestamp   time.Time `json:"timestamp"`
-	TokensUsed  int64     `json:"tokens_used,omitempty"`
+	TurnNumber int       `json:"turn_number"`
+	AgentID    string    `json:"agent_id"`
+	Role       string    `json:"role"` // "driver" or "observer"
+	Content    string    `json:"content"`
+	Action     string    `json:"action,omitempty"` // "approve", "request_changes", "request_token", "yield"
+	Feedback   string    `json:"feedback,omitempty"`
+	Timestamp  time.Time `json:"timestamp"`
+	TokensUsed int64     `json:"tokens_used,omitempty"`
 }
 
 // CollaborationSession represents an active collaboration instance.
 type CollaborationSession struct {
 	ID           string
-	Mode         string        // "pair_programming" | "differential"
-	TaskID       string        // parent task
+	Mode         string // "pair_programming" | "differential"
+	TaskID       string // parent task
 	State        SessionState
-	Workspace    string        // base workspace path
-	Participants []string      // agent IDs involved
-	TurnLog      []TurnEntry   // complete turn history
-	ParentID     string        // for nested (agent-initiated) sessions
+	Workspace    string      // base workspace path
+	Participants []string    // agent IDs involved
+	TurnLog      []TurnEntry // complete turn history
+	ParentID     string      // for nested (agent-initiated) sessions
 	TokenBudget  int64
 	TimeBudget   time.Duration
 	TurnTimeout  time.Duration // max time per turn

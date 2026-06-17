@@ -31,9 +31,9 @@ type PageRankConfig struct {
 // DefaultPageRankConfig returns a PageRankConfig with default values.
 func DefaultPageRankConfig() PageRankConfig {
 	return PageRankConfig{
-		Damping:       0.85,
-		MaxIterations: 100,
-		ConvergenceTol: 1e-6,
+		Damping:         0.85,
+		MaxIterations:   100,
+		ConvergenceTol:  1e-6,
 		Personalization: map[string]float64{
 			// Default personalization weights can be set here
 		},

@@ -17,7 +17,7 @@ import (
 type PlanFilter int
 
 const (
-	PlanFilterAll       PlanFilter = iota
+	PlanFilterAll PlanFilter = iota
 	PlanFilterActive
 	PlanFilterPending
 	PlanFilterCompleted
@@ -820,7 +820,7 @@ func (m *PlansModel) getPlanStateColor(state string) string {
 
 func (m *PlansModel) renderLoading() string {
 	style := lipgloss.NewStyle().
-		Width(m.width - 4).
+		Width(m.width-4).
 		Align(lipgloss.Center).
 		Padding(4, 0)
 
@@ -840,10 +840,10 @@ func (m *PlansModel) renderError() string {
 	}
 
 	return style.Render(
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("error")+
-			"\n\n"+
-			errMsg+
-			"\n\n"+
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("error") +
+			"\n\n" +
+			errMsg +
+			"\n\n" +
 			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("press 'r' to refresh"),
 	)
 }

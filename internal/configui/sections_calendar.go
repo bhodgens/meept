@@ -1,7 +1,6 @@
 // internal/configui/sections_calendar.go
 package configui
 
-
 func buildCalendarFields() []Field {
 	cfg := loadMainConfigOrFallback()
 	s := &cfg.Calendar

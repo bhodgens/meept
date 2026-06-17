@@ -43,11 +43,11 @@ type Budget struct {
 	currentDay int // ordinal day number
 
 	// Per-task tracking
-	tasks     map[string]int    // taskID -> tokens used
+	tasks     map[string]int     // taskID -> tokens used
 	taskCosts map[string]float64 // taskID -> USD cost
 
 	// Per-session tracking
-	sessions     map[string]int    // sessionID -> tokens used
+	sessions     map[string]int     // sessionID -> tokens used
 	sessionCosts map[string]float64 // sessionID -> USD cost
 
 	// RPM tracking (sliding window of request timestamps)
@@ -68,15 +68,15 @@ type Budget struct {
 
 // BudgetConfig holds configuration for token budget tracking.
 type BudgetConfig struct {
-	HourlyLimit       int
-	DailyLimit        int
-	DailyCostLimit    float64 // Max dollar cost per UTC day (0 = no limit)
-	HourlyCostLimit   float64 // Max dollar cost per sliding hour (0 = no limit)
-	RateLimitRPM      int
-	Aggressiveness    float64
-	PerTaskBudget     int     // max tokens per single task (0 = no cap)
-	PerSessionBudget  int     // max tokens per single session (0 = no cap)
-	PerTaskCostLimit  float64 // max USD per single task (0 = no cap)
+	HourlyLimit         int
+	DailyLimit          int
+	DailyCostLimit      float64 // Max dollar cost per UTC day (0 = no limit)
+	HourlyCostLimit     float64 // Max dollar cost per sliding hour (0 = no limit)
+	RateLimitRPM        int
+	Aggressiveness      float64
+	PerTaskBudget       int     // max tokens per single task (0 = no cap)
+	PerSessionBudget    int     // max tokens per single session (0 = no cap)
+	PerTaskCostLimit    float64 // max USD per single task (0 = no cap)
 	PerSessionCostLimit float64 // max USD per single session (0 = no cap)
 }
 
@@ -183,7 +183,7 @@ func (b *Budget) maybeResetDaily() {
 		b.dailyUsed = 0
 		b.dailyCostUsed = 0
 		b.hourlyCostWindow = b.hourlyCostWindow[:0]
-		b.hourlyWindow = b.hourlyWindow[:0]  // D7: Also reset hourly window (was asymmetric)
+		b.hourlyWindow = b.hourlyWindow[:0] // D7: Also reset hourly window (was asymmetric)
 		b.currentDay = today
 	}
 }
@@ -781,14 +781,14 @@ func (b *Budget) WaitForRateLimit(ctx context.Context) error {
 type BudgetLimit string
 
 const (
-	BudgetLimitHourlyTokens    BudgetLimit = "hourly_token"
-	BudgetLimitDailyTokens     BudgetLimit = "daily_token"
-	BudgetLimitHourlyCost      BudgetLimit = "hourly_cost"
-	BudgetLimitDailyCost       BudgetLimit = "daily_cost"
-	BudgetLimitPerTask         BudgetLimit = "per_task"
-	BudgetLimitPerSession      BudgetLimit = "per_session"
-	BudgetLimitPerTaskCost     BudgetLimit = "per_task_cost"
-	BudgetLimitPerSessionCost  BudgetLimit = "per_session_cost"
+	BudgetLimitHourlyTokens   BudgetLimit = "hourly_token"
+	BudgetLimitDailyTokens    BudgetLimit = "daily_token"
+	BudgetLimitHourlyCost     BudgetLimit = "hourly_cost"
+	BudgetLimitDailyCost      BudgetLimit = "daily_cost"
+	BudgetLimitPerTask        BudgetLimit = "per_task"
+	BudgetLimitPerSession     BudgetLimit = "per_session"
+	BudgetLimitPerTaskCost    BudgetLimit = "per_task_cost"
+	BudgetLimitPerSessionCost BudgetLimit = "per_session_cost"
 )
 
 // Message returns an internal log message for this budget limit reason.

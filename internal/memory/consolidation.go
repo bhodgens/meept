@@ -571,7 +571,6 @@ func (c *Consolidator) deduplicateTasks(ctx context.Context) (int, error) {
 	return removed, nil
 }
 
-
 // StartPeriodicConsolidation starts a background goroutine that runs
 // consolidation at the specified interval.
 func (c *Consolidator) StartPeriodicConsolidation(ctx context.Context, interval time.Duration, olderThanHours int) {

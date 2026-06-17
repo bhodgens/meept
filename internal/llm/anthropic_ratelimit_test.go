@@ -66,11 +66,11 @@ func TestAnthropicClient_DoRequest_ReturnsRateLimitError(t *testing.T) {
 			wantRateLimit: false,
 		},
 		{
-			name:          "429 with Retry-After HTTP-date",
-			statusCode:    http.StatusTooManyRequests,
-			body:          `{"error":{"type":"rate_limit_error","message":"Rate limit"}}`,
-			retryAfter:    "dynamic", // set in handler
-			wantRateLimit: true,
+			name:           "429 with Retry-After HTTP-date",
+			statusCode:     http.StatusTooManyRequests,
+			body:           `{"error":{"type":"rate_limit_error","message":"Rate limit"}}`,
+			retryAfter:     "dynamic", // set in handler
+			wantRateLimit:  true,
 			wantRetryAfter: 3 * time.Second, // approximately
 			wantProviderID: "anthropic",
 			wantModelID:    "claude-test",

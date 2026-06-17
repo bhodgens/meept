@@ -303,8 +303,8 @@ type DrilldownItem struct {
 
 type DrilldownField struct {
 	baseField
-	Items          []DrilldownItem
-	originalItems  []DrilldownItem // snapshot of items at load time for dirty tracking
+	Items         []DrilldownItem
+	originalItems []DrilldownItem // snapshot of items at load time for dirty tracking
 
 	// StringSliceKey, when non-empty, indicates this drilldown represents a
 	// []string at the given keypath in the config (e.g. "security.allowed_paths").

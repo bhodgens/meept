@@ -234,9 +234,9 @@ func TestDebugToolAttachInvalidAdapter(t *testing.T) {
 	tool := NewDebugTool(mgr, nil)
 
 	_, err := tool.Execute(context.Background(), map[string]any{
-		"action":      "attach",
-		"process_id":  float64(os.Getpid()),
-		"adapter":     "nonexistent",
+		"action":     "attach",
+		"process_id": float64(os.Getpid()),
+		"adapter":    "nonexistent",
 	})
 	if err == nil {
 		t.Fatal("expected error for invalid adapter on attach")
@@ -622,7 +622,7 @@ func TestDebugToolScriptFileNotFound(t *testing.T) {
 
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"action":      "script",
-		"script_file":  "/nonexistent/path/script.jsonl",
+		"script_file": "/nonexistent/path/script.jsonl",
 	})
 	if err == nil {
 		t.Fatal("expected error for nonexistent script file")
@@ -758,8 +758,8 @@ func TestDebugToolScriptWithErrorsContinue(t *testing.T) {
 	}
 
 	result, err := tool.Execute(context.Background(), map[string]any{
-		"action":      "script",
-		"script_file": scriptPath,
+		"action":        "script",
+		"script_file":   scriptPath,
 		"stop_on_error": false,
 	})
 	if err != nil {
@@ -800,7 +800,7 @@ func TestDebugToolScriptStopOnError(t *testing.T) {
 	}
 
 	result, err := tool.Execute(context.Background(), map[string]any{
-		"action":       "script",
+		"action":        "script",
 		"script_file":   scriptPath,
 		"stop_on_error": true,
 	})

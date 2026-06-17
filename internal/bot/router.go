@@ -23,17 +23,17 @@ type EventActionRouter struct {
 	handler BotTriggerHandler
 	logger  *slog.Logger
 
-	mu         sync.RWMutex
-	topicSubs  map[string]map[string]BotTrigger // topic -> set of bot IDs
+	mu        sync.RWMutex
+	topicSubs map[string]map[string]BotTrigger // topic -> set of bot IDs
 }
 
 // NewEventActionRouter creates a new event-to-action router.
 func NewEventActionRouter(msgBus *bus.MessageBus, handler BotTriggerHandler) *EventActionRouter {
 	return &EventActionRouter{
-		bus:        msgBus,
-		handler:    handler,
-		logger:     slog.Default(),
-		topicSubs:  make(map[string]map[string]BotTrigger),
+		bus:       msgBus,
+		handler:   handler,
+		logger:    slog.Default(),
+		topicSubs: make(map[string]map[string]BotTrigger),
 	}
 }
 

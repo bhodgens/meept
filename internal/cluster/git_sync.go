@@ -20,10 +20,10 @@ type GitSync struct {
 	logger   *slog.Logger
 	localCfg *Config
 
-	mu       sync.Mutex
-	running  bool
-	stopCh   chan struct{}
-	doneCh   chan struct{}
+	mu      sync.Mutex
+	running bool
+	stopCh  chan struct{}
+	doneCh  chan struct{}
 
 	// runCtx is stored from Start so that git/hasStagedChanges/cloneRepo
 	// can pass a cancellable context to exec.CommandContext, enabling
