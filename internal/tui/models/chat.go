@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"regexp"
 	"slices"
 
 	"fmt"
@@ -2288,29 +2289,37 @@ func (m *ChatModel) SetMarkdownEnabled(enabled bool) {
 	m.updateViewport()
 }
 
+// pasteTokenRe matches "{paste: N lines}" tokens for expansion.
+var pasteTokenRe = regexp.MustCompile(`\{paste: \d+ lines\}`)
+
 // expandPasteTokens replaces {paste: N lines} tokens with their original content.
 func (m *ChatModel) expandPasteTokens(text string) string {
 	if len(m.compressedPastes) == 0 {
 		return text
 	}
 
-	result := text
-	// Expand paste tokens in reverse order of pasteID to handle multiple pastes
+	// Collect paste contents in reverse pasteID order (most recent first).
+	var contents []string
 	for id := m.pasteCounter; id >= 1; id-- {
-		content, exists := m.compressedPastes[id]
-		if !exists {
-			continue
+		if content, exists := m.compressedPastes[id]; exists {
+			contents = append(contents, content)
 		}
+	}
 
-		// Find and replace the token for this paste
-		// Token format: {paste: N lines}
-		for lineCount := 100; lineCount >= 3; lineCount-- {
-			token := fmt.Sprintf("{paste: %d lines}", lineCount)
-			if strings.Contains(result, token) {
-				result = strings.Replace(result, token, content, 1)
-				break
-			}
+	if len(contents) == 0 {
+		return text
+	}
+
+	// Replace each {paste: N lines} token with the corresponding content.
+	// Tokens appear in the text in chronological order (oldest first), and
+	// pasteIDs are assigned sequentially, so we match in forward order.
+	result := text
+	for i := len(contents) - 1; i >= 0; i-- {
+		loc := pasteTokenRe.FindStringIndex(result)
+		if loc == nil {
+			break
 		}
+		result = result[:loc[0]] + contents[i] + result[loc[1]:]
 	}
 
 	return result

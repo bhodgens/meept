@@ -978,8 +978,11 @@ func (h *CommandHandler) executeEdit(args []string) *CommandResult {
 	}
 
 	filePath := args[0]
+	// Shell-quote filePath to prevent injection via user-supplied argument.
+	// We use single quotes and escape any embedded single quotes.
+	quoted := "'" + strings.ReplaceAll(filePath, "'", "'\"'\"'") + "'"
 	result, err := h.rpc.Call("shell.execute", map[string]any{
-		"command": fmt.Sprintf("${EDITOR:-vi} %s", filePath),
+		"command": fmt.Sprintf("${EDITOR:-vi} %s", quoted),
 	})
 	if err != nil {
 		return &CommandResult{

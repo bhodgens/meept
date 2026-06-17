@@ -66,11 +66,21 @@ func (fc *FenceChecker) Valid() bool {
 // resolveSymlinks resolves symlinks in a path, even if the final component
 // doesn't exist yet. It walks up to the longest existing ancestor, resolves
 // symlinks there, then appends the remaining non-existent suffix.
-func resolveSymlinks(path string) string {
+//
+// Returns (", false) when no existing ancestor could be resolved (i.e.
+// EvalSymlinks failed on every ancestor including the filesystem root). In
+// normal operation this never happens because EvalSymlinks("/") always
+// succeeds; the failure case exists as defense-in-depth for misconfigured or
+// broken environments. Callers must treat a false return as "path cannot be
+// safely resolved" and refuse the operation rather than falling back to the
+// raw input — returning an unresolved path would allow crafted inputs such as
+// "/../etc/passwd" to bypass the fence when the filesystem is in an
+// unexpected state.
+func resolveSymlinks(path string) (string, bool) {
 	// Normalize relative paths with .. components before symlink resolution
 	path = filepath.Clean(path)
 	if evaled, err := filepath.EvalSymlinks(path); err == nil {
-		return evaled
+		return evaled, true
 	}
 	// Walk up to find an existing ancestor, then re-append the rest.
 	p := path
@@ -78,14 +88,17 @@ func resolveSymlinks(path string) string {
 	for {
 		if evaled, err := filepath.EvalSymlinks(p); err == nil {
 			if suffix == "" {
-				return evaled
+				return evaled, true
 			}
-			return filepath.Join(evaled, suffix)
+			return filepath.Join(evaled, suffix), true
 		}
 		suffix = filepath.Join(filepath.Base(p), suffix)
 		p = filepath.Dir(p)
 		if p == "/" || p == "." {
-			return path
+			// Fail closed: every ancestor failed to resolve, including the
+			// filesystem root. Returning the unresolvable input would allow
+			// traversal payloads to skip the fence.
+			return "", false
 		}
 	}
 }
@@ -103,18 +116,26 @@ func (fc *FenceChecker) CheckPath(path string, op string) error {
 		return fmt.Errorf("fence: misconfigured (invalid RootPath)")
 	}
 
-	// Normalize relative paths with .. components (defense in depth)
-	path = filepath.Clean(path)
-
+	// filepath.Abs calls filepath.Clean internally; resolveSymlinks cleans
+	// again, so an explicit Clean here is redundant (S1-2).
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("fence: cannot resolve path: %w", err)
 	}
-	abs = resolveSymlinks(abs)
+	abs, ok := resolveSymlinks(abs)
+	if !ok {
+		return fmt.Errorf("fence: cannot resolve symlinks for %q", path)
+	}
 
 	// Check if path is within root
-	root, _ := filepath.Abs(fc.cfg.RootPath)
-	root = resolveSymlinks(root)
+	rootAbs, err := filepath.Abs(fc.cfg.RootPath)
+	if err != nil {
+		return fmt.Errorf("fence: cannot resolve root path: %w", err)
+	}
+	root, ok := resolveSymlinks(rootAbs)
+	if !ok {
+		return fmt.Errorf("fence: cannot resolve symlinks for root %q", fc.cfg.RootPath)
+	}
 	if strings.HasPrefix(abs, root+string(os.PathSeparator)) || abs == root {
 		return nil
 	}
@@ -122,9 +143,15 @@ func (fc *FenceChecker) CheckPath(path string, op string) error {
 	// Check allow-read system paths
 	if op == "read" {
 		for _, allowed := range fc.cfg.AllowRead {
-			allowedAbs, _ := filepath.Abs(allowed)
-			allowedAbs = resolveSymlinks(allowedAbs)
-			if strings.HasPrefix(abs, allowedAbs+string(os.PathSeparator)) || abs == allowedAbs {
+			allowedAbs, err := filepath.Abs(allowed)
+			if err != nil {
+				continue
+			}
+			resolved, ok := resolveSymlinks(allowedAbs)
+			if !ok {
+				continue
+			}
+			if strings.HasPrefix(abs, resolved+string(os.PathSeparator)) || abs == resolved {
 				return nil
 			}
 		}

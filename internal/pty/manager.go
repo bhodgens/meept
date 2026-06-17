@@ -101,25 +101,25 @@ func (m *Manager) GetSession(id string) Session {
 }
 
 // DestroySession closes and removes a session.
+//
+// The session is removed from the map under the lock, then Close() is called
+// outside the lock. Close() does I/O (process kill, PTY close) and holding the
+// manager write lock during that time violates the CLAUDE.md mutex-scope rule.
+// If Close() fails the session is still removed (best-effort) so the caller
+// doesn't observe a stale entry.
 func (m *Manager) DestroySession(id string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	return m.destroySessionLocked(id)
-}
-
-func (m *Manager) destroySessionLocked(id string) error {
 	sess, exists := m.sessions[id]
+	if exists {
+		delete(m.sessions, id)
+	}
+	m.mu.Unlock()
+
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrSessionNotFound, id)
 	}
 
-	if err := sess.Close(); err != nil {
-		return err
-	}
-
-	delete(m.sessions, id)
-	return nil
+	return sess.Close()
 }
 
 // ListSessions returns all active session IDs.

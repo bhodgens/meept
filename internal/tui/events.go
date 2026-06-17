@@ -122,19 +122,23 @@ func (es *EventStream) subscribe() {
 // Stop stops the event stream.
 func (es *EventStream) Stop() {
 	es.mu.Lock()
-	defer es.mu.Unlock()
-
 	if !es.running {
+		es.mu.Unlock()
 		return
 	}
 
 	es.running = false
 	close(es.done)
 
+	// Snapshot subscription state before releasing the lock so the RPC
+	// call below does not perform I/O while holding the mutex.
+	subID := es.subscriptionID
+	es.mu.Unlock()
+
 	// Unsubscribe if we have a subscription
-	if es.subscriptionID != "" && es.rpc.IsConnected() {
+	if subID != "" && es.rpc.IsConnected() {
 		params := map[string]string{
-			"subscription_id": es.subscriptionID,
+			"subscription_id": subID,
 		}
 		_, _ = es.rpc.Call("bus.unsubscribe", params)
 	}
@@ -390,7 +394,11 @@ func (mc *MetricsCollector) Update(msg tea.Msg) tea.Cmd {
 		mc.mu.Lock()
 		mc.history = append(mc.history, msg.Snapshot)
 		if len(mc.history) > mc.historySize {
-			mc.history = mc.history[1:]
+			// Copy remaining elements into a fresh slice to avoid retaining
+			// references to old snapshots in the underlying array (memory leak).
+			tmp := make([]MetricsSnapshot, len(mc.history)-1, mc.historySize)
+			copy(tmp, mc.history[1:])
+			mc.history = tmp
 		}
 		mc.mu.Unlock()
 		return nil

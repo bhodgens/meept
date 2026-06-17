@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -163,8 +164,11 @@ func (h *ClusterHandler) handleJoin(_ context.Context, params json.RawMessage) (
 
 	// Validate join key: if the cluster has a join key set, the request key
 	// must match. If the cluster join key is empty, any key is accepted (open mode).
-	if h.cfg.JoinKey != "" && h.cfg.JoinKey != req.JoinKey {
-		return nil, fmt.Errorf("invalid join key")
+	// Use constant-time comparison to prevent timing side-channels on the join key.
+	if h.cfg.JoinKey != "" {
+		if subtle.ConstantTimeCompare([]byte(h.cfg.JoinKey), []byte(req.JoinKey)) != 1 {
+			return nil, fmt.Errorf("invalid join key")
+		}
 	}
 
 	// Build the config payload that the joining node needs to save locally.

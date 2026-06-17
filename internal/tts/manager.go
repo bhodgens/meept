@@ -47,8 +47,11 @@ func (m *Manager) Speak(text string) error {
 				m.queueOverflow = true
 			}
 			m.queue = append(m.queue, text)
-			// Start queue processing if not already processing
+			// Start queue processing if not already processing.
+			// Set processing=true BEFORE spawning so concurrent Speak
+			// callers don't each spawn their own processQueue goroutine.
 			if !m.processing {
+				m.processing = true
 				go m.processQueue()
 			}
 			return nil

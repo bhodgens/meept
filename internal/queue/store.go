@@ -467,9 +467,18 @@ func (s *Store) Complete(jobID string, result any) error {
 func (s *Store) Fail(jobID, errMsg string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Get current retry count
+	// Use BEGIN IMMEDIATE so the retry_count read and the state update are
+	// atomic across concurrent Fail/Retry callers. Without this, two Fail
+	// calls could both observe retryCount<maxRetries, both transition to
+	// StateFailed, and neither trigger dead-lettering.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin fail tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // safe: no-op after Commit
+
 	var retryCount, maxRetries int
-	row := s.db.QueryRow(`SELECT retry_count, max_retries FROM jobs WHERE id = ?`, jobID)
+	row := tx.QueryRow(`SELECT retry_count, max_retries FROM jobs WHERE id = ?`, jobID)
 	if err := row.Scan(&retryCount, &maxRetries); err != nil {
 		return fmt.Errorf("failed to get retry count: %w", err)
 	}
@@ -479,18 +488,21 @@ func (s *Store) Fail(jobID, errMsg string) error {
 		newState = StateDead
 	}
 
-	_, err := s.db.Exec(`
+	if _, err := tx.Exec(`
 		UPDATE jobs SET state = ?, error = ?, updated_at = ?
 		WHERE id = ?`,
-		string(newState), errMsg, now, jobID)
-
-	if err != nil {
+		string(newState), errMsg, now, jobID); err != nil {
 		return fmt.Errorf("failed to update job failure: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit fail tx: %w", err)
 	}
 
 	s.logger.Info("Job failed", "id", jobID, "state", newState, "error", errMsg)
 
-	// Move to dead letter if too many retries
+	// Move to dead letter if too many retries. Done after commit so a
+	// dead-letter move failure does not roll back the state transition.
 	if newState == StateDead {
 		if err := s.moveToDead(jobID); err != nil {
 			s.logger.Error("Failed to move job to dead letter", "id", jobID, "error", err)
@@ -508,9 +520,19 @@ const retryBackoffBase = 2 * time.Second
 func (s *Store) Retry(jobID string) error {
 	now := time.Now().UTC()
 
+	// Wrap the read-modify-write in a transaction so retry_count cannot
+	// change between the SELECT and the UPDATE. BEGIN IMMEDIATE acquires
+	// a write lock up front, preventing a concurrent Fail() from
+	// observing an inconsistent state.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin retry tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // safe: no-op after Commit
+
 	// Get current retry count to calculate backoff
 	var retryCount int
-	row := s.db.QueryRow(`SELECT retry_count FROM jobs WHERE id = ?`, jobID)
+	row := tx.QueryRow(`SELECT retry_count FROM jobs WHERE id = ?`, jobID)
 	if err := row.Scan(&retryCount); err != nil {
 		return fmt.Errorf("failed to get retry count: %w", err)
 	}
@@ -521,7 +543,7 @@ func (s *Store) Retry(jobID string) error {
 
 	nextRetryAt := now.Add(backoff)
 
-	result, err := s.db.Exec(`
+	result, err := tx.Exec(`
 		UPDATE jobs
 		SET state = 'pending',
 		    retry_count = retry_count + 1,
@@ -539,6 +561,10 @@ func (s *Store) Retry(jobID string) error {
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("job not found or not in retryable state: %s", jobID)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit retry tx: %w", err)
 	}
 
 	s.logger.Info("Job queued for retry with backoff",

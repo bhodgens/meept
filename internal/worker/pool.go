@@ -100,8 +100,13 @@ func (p *Pool) Start(ctx context.Context, workerCount int) error {
 			}
 		}
 
-		// Start monitoring
-		go p.monitor(ctx)
+		// Start monitoring. Tracked in p.wg so Stop() waits for the monitor
+		// goroutine to return (prevents goroutine leak on shutdown).
+		p.wg.Add(1)
+		go func() {
+			defer p.wg.Done()
+			p.monitor(ctx)
+		}()
 
 		p.logger.Info("Worker pool started", "workers", workerCount)
 		p.publishEvent("worker.pool.started", map[string]any{

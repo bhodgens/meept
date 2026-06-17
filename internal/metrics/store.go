@@ -299,17 +299,31 @@ func (s *Store) aggregationLoop() {
 }
 
 // flush writes batched metrics to the database.
+//
+// The lock is held only long enough to snapshot (swap out) the current batch.
+// DB I/O runs without the lock so concurrent Record() callers are not blocked
+// on disk/network latency (CLAUDE.md "Mutex scope" rule). On successful
+// commit the lock is reacquired briefly to update lastFlush; the batch was
+// already swapped out, so appending during the DB write does not lose data.
 func (s *Store) flush() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if len(s.batch) == 0 {
+		s.mu.Unlock()
 		return
 	}
+	// Swap the batch out so concurrent Record() callers append to a fresh
+	// slice and don't race with our iteration.
+	batch := s.batch
+	s.batch = nil
+	s.mu.Unlock()
 
 	tx, err := s.db.Begin()
 	if err != nil {
 		s.logger.Warn("Failed to begin transaction for metrics flush", "error", err)
+		// Re-merge the batch under lock so we don't lose the metrics.
+		s.mu.Lock()
+		s.batch = append(batch, s.batch...)
+		s.mu.Unlock()
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -317,11 +331,15 @@ func (s *Store) flush() {
 	stmt, err := tx.Prepare("INSERT INTO metrics_live (timestamp, metric_name, value, tags) VALUES (?, ?, ?, ?)")
 	if err != nil {
 		s.logger.Warn("Failed to prepare insert statement for metrics flush", "error", err)
+		_ = tx.Rollback()
+		s.mu.Lock()
+		s.batch = append(batch, s.batch...)
+		s.mu.Unlock()
 		return
 	}
 	defer stmt.Close()
 
-	for _, m := range s.batch {
+	for _, m := range batch {
 		var tagsJSON string
 		if len(m.tags) > 0 {
 			data, _ := json.Marshal(m.tags)
@@ -334,19 +352,24 @@ func (s *Store) flush() {
 
 	if err := tx.Commit(); err != nil {
 		s.logger.Warn("Failed to commit metrics flush", "error", err)
-	} else {
-		s.batch = s.batch[:0]
-		s.lastFlush = time.Now()
-
-		// Notify subscribers after successful flush. Tracked via the
-		// notifyWG WaitGroup so Close can wait for these goroutines to
-		// finish before closing the DB (S6-14).
-		s.notifyWG.Add(1)
-		go func() {
-			defer s.notifyWG.Done()
-			s.notifySubscribers()
-		}()
+		// Don't merge back: a partial commit may have written some rows.
+		// Re-merging would risk duplicate inserts on the next flush; treat
+		// the loss as preferable to duplicates.
+		return
 	}
+
+	s.mu.Lock()
+	s.lastFlush = time.Now()
+	s.mu.Unlock()
+
+	// Notify subscribers after successful flush. Tracked via the
+	// notifyWG WaitGroup so Close can wait for these goroutines to
+	// finish before closing the DB (S6-14).
+	s.notifyWG.Add(1)
+	go func() {
+		defer s.notifyWG.Done()
+		s.notifySubscribers()
+	}()
 }
 
 // aggregateHourly computes hourly aggregations from raw metrics.

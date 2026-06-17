@@ -1056,6 +1056,9 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 // SetPrefetchCallback sets the callback for prefetching memory context.
 // This is used to wire the memory manager's QueuePrefetch method after construction.
 func (l *AgentLoop) SetPrefetchCallback(callback func(query string, maxItems int)) {
+	if callback == nil {
+		return
+	}
 	l.mu.Lock()
 	l.prefetchCallback = callback
 	l.mu.Unlock()
@@ -1064,6 +1067,8 @@ func (l *AgentLoop) SetPrefetchCallback(callback func(query string, maxItems int
 // SetContextFirewallConfig wires context firewall settings from the user-facing
 // config schema into the agent loop config.
 func (l *AgentLoop) SetContextFirewallConfig(fw config.LLMContextFirewallConfig) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.config.ProactiveCompression = fw.ProactiveCompression
 	l.config.ModelContextLimit = fw.ModelContextLimit
 	l.config.HierarchicalSummarization = fw.HierarchicalSummarization
@@ -3548,6 +3553,9 @@ func (l *AgentLoop) GetConfig() AgentConfig {
 // This allows wiring the client after the loop is created when
 // dependencies are initialized in a specific order.
 func (l *AgentLoop) SetMemvidClient(client *memvid.Client) {
+	if client == nil {
+		return
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.memvid = client
@@ -3557,6 +3565,9 @@ func (l *AgentLoop) SetMemvidClient(client *memvid.Client) {
 // This allows wiring the store after the loop is created when
 // dependencies are initialized in a specific order.
 func (l *AgentLoop) SetTaskStore(store *task.Store) {
+	if store == nil {
+		return
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.taskStore = store
@@ -3564,6 +3575,9 @@ func (l *AgentLoop) SetTaskStore(store *task.Store) {
 
 // SetNotificationEmitter sets the notification emitter for desktop notifications.
 func (l *AgentLoop) SetNotificationPublisher(publisher NotificationPublisher) {
+	if publisher == nil {
+		return
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.notificationPublisher = publisher
@@ -3572,6 +3586,9 @@ func (l *AgentLoop) SetNotificationPublisher(publisher NotificationPublisher) {
 // SetRepoMapGenerator sets the repository map generator for context enrichment.
 // This is called by the daemon after the RepoMapGen is created.
 func (l *AgentLoop) SetRepoMapGenerator(gen *repomap.RepoMapGenerator) {
+	if gen == nil {
+		return
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.repoMapGen = gen
@@ -3581,6 +3598,9 @@ func (l *AgentLoop) SetRepoMapGenerator(gen *repomap.RepoMapGenerator) {
 // This allows wiring the index after the loop is created when
 // skills are initialized in a specific order.
 func (l *AgentLoop) SetCapabilityIndex(ci *skills.CapabilityIndex) {
+	if ci == nil {
+		return
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.capabilityIndex = ci
@@ -3590,6 +3610,9 @@ func (l *AgentLoop) SetCapabilityIndex(ci *skills.CapabilityIndex) {
 // This allows wiring the loader after the loop is created when
 // skills are initialized in a specific order.
 func (l *AgentLoop) SetSkillLoader(loader *skills.LazySkillLoader) {
+	if loader == nil {
+		return
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.skillLoader = loader

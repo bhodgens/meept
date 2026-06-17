@@ -219,14 +219,19 @@ func (m *RuntimeManager) StartProvider(ctx context.Context, providerID string) e
 
 	proc := m.processes[providerID]
 	hc := m.healthCheckers[providerID]
+	// Snapshot metrics recorder under lock to avoid race with
+	// SetMetricsRecorder (D1) and to allow recordSpawnLocked to run without
+	// re-acquiring the mutex (which would deadlock — sync.Mutex is
+	// non-reentrant).
+	rec := m.metrics
 
 	m.logger.Info("Starting runtime", "provider", providerID)
 	start := time.Now()
 	if err := proc.Start(ctx); err != nil {
-		m.recordSpawn(providerID, time.Since(start), false)
+		m.recordSpawnLocked(rec, providerID, time.Since(start), false)
 		return fmt.Errorf("failed to start runtime %s: %w", providerID, err)
 	}
-	m.recordSpawn(providerID, time.Since(start), true)
+	m.recordSpawnLocked(rec, providerID, time.Since(start), true)
 
 	hc.Start(ctx)
 
@@ -326,14 +331,36 @@ func (m *RuntimeManager) attemptAutoRestart(providerID string) {
 	}
 }
 
+// recordSpawn records a spawn metric.
+//
+// Callers that already hold m.mu must use recordSpawnLocked instead to avoid
+// a self-deadlock (Go's sync.Mutex is non-reentrant).
 func (m *RuntimeManager) recordSpawn(providerID string, duration time.Duration, success bool) {
-	if rec := m.metrics; rec != nil {
+	m.mu.Lock()
+	rec := m.metrics
+	m.mu.Unlock()
+	if rec != nil {
+		rec.RecordRuntimeSpawn(providerID, duration, success)
+	}
+}
+
+// recordSpawnLocked is the lock-free variant for callers already holding m.mu.
+// The Record* call happens after the caller has released the lock to avoid
+// performing I/O (or callbacks) under the mutex — see StartProvider which
+// snapshots the recorder before calling out. When the caller cannot easily
+// defer the call past its unlock, it is acceptable to invoke rec.Record*
+// under the lock because the metrics backend is expected to be non-blocking.
+func (m *RuntimeManager) recordSpawnLocked(rec MetricsRecorder, providerID string, duration time.Duration, success bool) {
+	if rec != nil {
 		rec.RecordRuntimeSpawn(providerID, duration, success)
 	}
 }
 
 func (m *RuntimeManager) recordRestart(providerID string, attempt int, success bool) {
-	if rec := m.metrics; rec != nil {
+	m.mu.Lock()
+	rec := m.metrics
+	m.mu.Unlock()
+	if rec != nil {
 		rec.RecordRuntimeRestart(providerID, attempt, success)
 	}
 }

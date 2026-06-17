@@ -2,6 +2,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,6 +138,7 @@ type App struct {
 	currentProjectName  string
 	currentProjectMode  string
 	currentProjectDirty bool
+	currentProjectBranch string
 
 	// SessionManager is the shared session manager used by both TUI and meept-lite
 	sessionMgr *sharedclient.SessionManager
@@ -449,9 +451,13 @@ func (a *App) connectDaemon() tea.Msg {
 	if err := a.rpc.Connect(); err != nil {
 		return ConnectErrorMsg{Err: err}
 	}
-	// Connect the event stream RPC client on its own connection
+	// Connect the event stream RPC client on its own connection.
+	// Event streaming is non-critical; if this fails we still report success
+	// on the main connection but log the failure for debugging.
 	if a.eventRPC != nil {
-		_ = a.eventRPC.Connect()
+		if err := a.eventRPC.Connect(); err != nil {
+			slog.Debug("event RPC connect failed (event streaming may be degraded)", "error", err)
+		}
 	}
 	return ConnectSuccessMsg{}
 }
@@ -507,10 +513,12 @@ func (a *App) fetchCurrentProject() tea.Msg {
 	for _, p := range projects.Projects {
 		if p.Status == "active" {
 			dirty := false
+			branch := ""
 			if p.Mode == "git" {
 				status, err := a.rpc.ProjectStatus(p.ID)
 				if err == nil {
 					dirty = status.Dirty
+					branch = status.Branch
 				}
 			}
 			return ProjectInfoUpdatedMsg{
@@ -518,6 +526,7 @@ func (a *App) fetchCurrentProject() tea.Msg {
 				ProjectName: p.Name,
 				ProjectMode: string(p.Mode),
 				Dirty:       dirty,
+				Branch:      branch,
 			}
 		}
 	}
@@ -531,6 +540,7 @@ type ProjectInfoUpdatedMsg struct {
 	ProjectName string
 	ProjectMode string
 	Dirty       bool
+	Branch      string
 }
 
 // Update handles messages and updates the model.
@@ -1384,6 +1394,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.statusMessage = fmt.Sprintf("copy failed: %v", msg.Err)
 		a.statusMessageTime = time.Now()
 
+	case RenameErrorMsg:
+		a.statusMessage = fmt.Sprintf("rename failed: %v", msg.Err)
+		a.statusMessageTime = time.Now()
+
 	case CommandResultMsg:
 		// Handle slash command result
 		if msg.Result != nil {
@@ -1559,6 +1573,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.currentProjectName = msg.ProjectName
 		a.currentProjectMode = msg.ProjectMode
 		a.currentProjectDirty = msg.Dirty
+		a.currentProjectBranch = msg.Branch
 		return a, nil
 
 	case ProjectListMsg:
@@ -1813,7 +1828,7 @@ func (a *App) renameSession(sessionID, newName string) tea.Cmd {
 	return func() tea.Msg {
 		err := a.rpc.UpdateSessionDescription(sessionID, newName)
 		if err != nil {
-			return CopyErrorMsg{Err: err} // Reuse error display
+			return RenameErrorMsg{Err: err}
 		}
 		// Refresh session list so names stay in sync
 		_, _ = a.sessionMgr.ListSessions(nil)
@@ -2233,13 +2248,11 @@ func (a *App) renderProjectIndicator() string {
 
 	switch a.currentProjectMode {
 	case "git":
-		// Fetch branch from project status (we already have dirty cached)
+		// Branch and dirty state are cached from fetchCurrentProject()
+		// background updates — never perform RPC in the render path.
 		branch := ""
-		if a.currentProjectID != "" {
-			status, err := a.rpc.ProjectStatus(a.currentProjectID)
-			if err == nil && status.Branch != "" {
-				branch = " " + status.Branch
-			}
+		if a.currentProjectBranch != "" {
+			branch = " " + a.currentProjectBranch
 		}
 		dirty := ""
 		if a.currentProjectDirty {
@@ -2275,6 +2288,11 @@ type CopySuccessMsg struct {
 
 // CopyErrorMsg indicates clipboard copy failed.
 type CopyErrorMsg struct {
+	Err error
+}
+
+// RenameErrorMsg indicates a session rename operation failed.
+type RenameErrorMsg struct {
 	Err error
 }
 

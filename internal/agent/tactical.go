@@ -334,10 +334,12 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 // acquireSlots attempts to acquire both global and per-agent semaphore slots.
 // Returns true if both acquired, false otherwise (no blocking).
 func (ts *TacticalScheduler) acquireSlots(agentID string) bool {
-	// Get or create per-agent semaphore with single lock hold
+	// Get or create per-agent semaphore under lock, then release the lock
+	// before performing channel operations. The channels themselves are
+	// concurrency-safe; holding the mutex across channel sends both violates
+	// the "no I/O under mutex" rule and serializes all acquire attempts
+	// behind a single holder even when slots are independently available.
 	ts.semaphoreMu.Lock()
-	defer ts.semaphoreMu.Unlock()
-
 	agentSem, ok := ts.agentSemaphore[agentID]
 	if !ok {
 		// Create semaphore for unknown agents
@@ -348,7 +350,8 @@ func (ts *TacticalScheduler) acquireSlots(agentID string) bool {
 		agentSem = make(chan struct{}, maxPerAgent)
 		ts.agentSemaphore[agentID] = agentSem
 	}
-	// Note: We keep the lock held until after semaphore acquisition to prevent races
+	ts.semaphoreMu.Unlock()
+
 	// Try to acquire global slot (non-blocking)
 	select {
 	case ts.globalSemaphore <- struct{}{}:

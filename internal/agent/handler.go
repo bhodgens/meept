@@ -1087,23 +1087,31 @@ func (h *ChatHandler) getPlanReference(taskID string) string {
 
 // SetMetricsStore sets the metrics store for duration estimates.
 func (h *ChatHandler) SetMetricsStore(store *metrics.Store) {
-	h.metricsStore = store
+	if store != nil {
+		h.metricsStore = store
+	}
 }
 
 // SetStepStore sets the step store for fetching step summaries.
 func (h *ChatHandler) SetStepStore(store *task.StepStore) {
-	h.stepStore = store
+	if store != nil {
+		h.stepStore = store
+	}
 }
 
 // SetTaskStore sets the task store for looking up linked sessions.
 func (h *ChatHandler) SetTaskStore(store *task.Store) {
-	h.taskStore = store
+	if store != nil {
+		h.taskStore = store
+	}
 }
 
 // SetBudget sets the token budget tracker for async dispatch pre-checks.
 // This prevents zombie tasks from being created when the budget is exceeded.
 func (h *ChatHandler) SetBudget(budget *llm.Budget) {
-	h.budget = budget
+	if budget != nil {
+		h.budget = budget
+	}
 }
 
 // SetSyncMode enables or disables synchronous dispatch mode.
@@ -1210,7 +1218,9 @@ func (h *ChatHandler) pairReviewerForActor(actorID string) string {
 
 // SetCollaborationEngine sets the collaboration engine for starting collaboration sessions.
 func (h *ChatHandler) SetCollaborationEngine(engine *CollaborationEngine) {
-	h.collabEngine = engine
+	if engine != nil {
+		h.collabEngine = engine
+	}
 }
 
 // startCollaborationSession initiates a collaboration session via the CollaborationEngine

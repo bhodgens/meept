@@ -224,8 +224,10 @@ func (r *Resolver) ResolveForAlias(aliasName string) (*ModelConfig, error) {
 	now := time.Now()
 	if !health.CooldownUntil.IsZero() && now.Before(health.CooldownUntil) {
 		// Iterate through all models in the alias to find one that isn't in cooldown.
-		// We must NOT rely on health.CooldownUntil to become zero (rotateToNext resets it),
-		// so we track remaining candidates explicitly.
+		// The health pointer refers to a single AliasHealth that tracks one cooldown
+		// for the alias as a whole, so each candidate inherits the current cooldown.
+		// We reset the cooldown and failure counter for the candidate we're trying,
+		// then break because that candidate is now considered healthy.
 		startIdx := (health.CurrentIndex + 1) % len(alias.Models)
 		for i := 0; i < len(alias.Models)-1; i++ {
 			nextIdx := (startIdx + i) % len(alias.Models)
@@ -235,11 +237,7 @@ func (r *Resolver) ResolveForAlias(aliasName string) (*ModelConfig, error) {
 			health.CurrentIndex = nextIdx
 			health.ConsecutiveFails = 0
 			health.CooldownUntil = time.Time{} // Reset cooldown for this candidate
-			health = r.getOrCreateHealth(aliasName)
-			// Check if this model is now out of cooldown
-			if health.CooldownUntil.IsZero() || now.After(health.CooldownUntil) {
-				break // found a healthy model
-			}
+			break
 		}
 	}
 
@@ -324,7 +322,15 @@ func (r *Resolver) HasAlias(aliasName string) bool {
 	return ok
 }
 
-// HasHealthyModels checks if an alias has any models that are not in cooldown.
+// HasHealthyModels reports whether an alias has at least one model that can
+// serve a request right now. A model is considered healthy if:
+//   - It is the currently active model AND not in cooldown, OR
+//   - It is a non-current model (always available for rotation, per the
+//     ResolveForAlias rotation semantics)
+//
+// Because non-current models are always considered available, this function
+// only returns false when the alias has exactly one model AND that single
+// model is currently in cooldown.
 func (r *Resolver) HasHealthyModels(aliasName string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -333,21 +339,21 @@ func (r *Resolver) HasHealthyModels(aliasName string) bool {
 	if !ok {
 		return false
 	}
-
-	now := time.Now()
-	for i := range alias.Models {
-		health := r.getOrCreateHealth(aliasName)
-		// Check if this model is the current one and not in cooldown
-		if i == health.CurrentIndex {
-			if health.CooldownUntil.IsZero() || now.After(health.CooldownUntil) {
-				return true
-			}
-		} else {
-			// Non-current models are always available for rotation
-			return true
-		}
+	if len(alias.Models) == 0 {
+		return false
 	}
-	return false
+
+	health := r.getOrCreateHealth(aliasName)
+
+	// If there is more than one model, a non-current model is always available
+	// for rotation — short-circuit.
+	if len(alias.Models) > 1 {
+		return true
+	}
+
+	// Single-model alias: healthy only if that model is not in cooldown.
+	now := time.Now()
+	return health.CooldownUntil.IsZero() || now.After(health.CooldownUntil)
 }
 
 // RotateToNextModel forces rotation to the next model in an alias and resets failure counters.

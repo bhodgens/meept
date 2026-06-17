@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // StdioTransport implements Transport over stdio to a subprocess.
@@ -110,6 +111,9 @@ func (t *StdioTransport) Write(ctx context.Context, data []byte) error {
 }
 
 // Close closes the transport and terminates the subprocess.
+// After killing the process, Wait() is called to reap it, avoiding zombie
+// processes. The wait is bounded by a 5-second timeout so a wedged process
+// doesn't block Close indefinitely.
 func (t *StdioTransport) Close() error {
 	if t.stdin != nil {
 		t.stdin.Close()
@@ -118,7 +122,18 @@ func (t *StdioTransport) Close() error {
 		t.stdout.Close()
 	}
 	if t.cmd != nil && t.cmd.Process != nil {
-		return t.cmd.Process.Kill()
+		if err := t.cmd.Process.Kill(); err != nil {
+			// Process may already be dead; fall through to Wait.
+		}
+		// Reap the process to avoid zombies. Use a goroutine + timer so
+		// Close doesn't block forever on an unresponsive child.
+		done := make(chan error, 1)
+		go func() { done <- t.cmd.Wait() }()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			// Best-effort; process may still be reaped by init later.
+		}
 	}
 	return nil
 }

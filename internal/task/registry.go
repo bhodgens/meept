@@ -167,8 +167,19 @@ func (r *Registry) ListSummaries(ctx context.Context, limit int) ([]TaskSummary,
 }
 
 // UpdateState changes a task's state.
+//
+// Read-modify-write is performed under a single write lock to prevent lost
+// updates from concurrent callers (the previous Get+mutate+Update sequence
+// released the read lock between the read and the write).
 func (r *Registry) UpdateState(ctx context.Context, taskID string, state TaskState) error {
-	task, err := r.Get(ctx, taskID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return fmt.Errorf("registry is closed")
+	}
+
+	task, err := r.store.GetByID(taskID)
 	if err != nil {
 		return err
 	}
@@ -177,7 +188,15 @@ func (r *Registry) UpdateState(ctx context.Context, taskID string, state TaskSta
 	}
 
 	task.SetState(state)
-	return r.Update(ctx, task)
+	if err := r.store.Update(task); err != nil {
+		return err
+	}
+
+	r.publishEvent("task.update", map[string]any{
+		KeyTaskID: task.ID,
+		"state":   task.State.String(),
+	})
+	return nil
 }
 
 // LinkSession links a session to a task.
@@ -248,8 +267,19 @@ func (r *Registry) GetTasksForSession(ctx context.Context, sessionID string) ([]
 }
 
 // IncrementJobCount increments the total job count for a task.
+//
+// Read-modify-write under a single write lock to prevent lost updates from
+// concurrent IncrementJobCount callers (e.g., two enqueued jobs could both
+// read TotalJobs=N, both set TotalJobs=N+1, losing one increment).
 func (r *Registry) IncrementJobCount(ctx context.Context, taskID string) error {
-	task, err := r.Get(ctx, taskID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return fmt.Errorf("registry is closed")
+	}
+
+	task, err := r.store.GetByID(taskID)
 	if err != nil {
 		return err
 	}
@@ -258,12 +288,31 @@ func (r *Registry) IncrementJobCount(ctx context.Context, taskID string) error {
 	}
 
 	task.IncrementJobs()
-	return r.Update(ctx, task)
+	if err := r.store.Update(task); err != nil {
+		return err
+	}
+
+	r.publishEvent("task.update", map[string]any{
+		KeyTaskID: task.ID,
+		"state":   task.State.String(),
+	})
+	return nil
 }
 
 // CompleteJob marks a job as completed for a task.
+//
+// Read-modify-write under a single write lock so the auto-complete
+// transition (CompletedJobs == TotalJobs) observes a consistent pair of
+// counters.
 func (r *Registry) CompleteJob(ctx context.Context, taskID string) error {
-	task, err := r.Get(ctx, taskID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return fmt.Errorf("registry is closed")
+	}
+
+	task, err := r.store.GetByID(taskID)
 	if err != nil {
 		return err
 	}
@@ -278,12 +327,30 @@ func (r *Registry) CompleteJob(ctx context.Context, taskID string) error {
 		task.SetState(StateCompleted)
 	}
 
-	return r.Update(ctx, task)
+	if err := r.store.Update(task); err != nil {
+		return err
+	}
+
+	r.publishEvent("task.update", map[string]any{
+		KeyTaskID: task.ID,
+		"state":   task.State.String(),
+	})
+	return nil
 }
 
 // FailJob marks a job as failed for a task.
+//
+// Read-modify-write under a single write lock to prevent lost updates from
+// concurrent FailJob callers.
 func (r *Registry) FailJob(ctx context.Context, taskID string) error {
-	task, err := r.Get(ctx, taskID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return fmt.Errorf("registry is closed")
+	}
+
+	task, err := r.store.GetByID(taskID)
 	if err != nil {
 		return err
 	}
@@ -292,7 +359,15 @@ func (r *Registry) FailJob(ctx context.Context, taskID string) error {
 	}
 
 	task.FailJob()
-	return r.Update(ctx, task)
+	if err := r.store.Update(task); err != nil {
+		return err
+	}
+
+	r.publishEvent("task.update", map[string]any{
+		KeyTaskID: task.ID,
+		"state":   task.State.String(),
+	})
+	return nil
 }
 
 // Close closes the registry.

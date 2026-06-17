@@ -327,8 +327,39 @@ func (c *ContextCompactor) buildTurnPrefixPrompt(turnText string) string {
 	return fmt.Sprintf(turnPrefixPrompt, turnText)
 }
 
-func (c *ContextCompactor) LastSummary() string               { return c.lastSummary }
-func (c *ContextCompactor) FileOperations() *FileOperationSet { return c.fileOps }
+// LastSummary returns the most recent compaction summary.
+// Acquires RLock because Compact() writes c.lastSummary under the write lock.
+func (c *ContextCompactor) LastSummary() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.lastSummary
+}
+
+// FileOperations returns a snapshot of the tracked file operations.
+// Acquires RLock because Compact() writes c.fileOps under the write lock.
+// The returned pointer is a snapshot copy, safe for independent use.
+func (c *ContextCompactor) FileOperations() *FileOperationSet {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.fileOps == nil {
+		return nil
+	}
+	snap := &FileOperationSet{
+		Read:    make(map[string]bool, len(c.fileOps.Read)),
+		Written: make(map[string]bool, len(c.fileOps.Written)),
+		Edited:  make(map[string]bool, len(c.fileOps.Edited)),
+	}
+	for k, v := range c.fileOps.Read {
+		snap.Read[k] = v
+	}
+	for k, v := range c.fileOps.Written {
+		snap.Written[k] = v
+	}
+	for k, v := range c.fileOps.Edited {
+		snap.Edited[k] = v
+	}
+	return snap
+}
 
 func (c *ContextCompactor) findCutPoint(messages []ChatMessage) CutResult {
 	keepBudget := c.config.KeepRecentTokens

@@ -239,9 +239,10 @@ func (c *ResultCache) Get(toolName string, args map[string]any) (any, bool) {
 	c.mu.Lock()
 	entry.HitCount++
 	c.stats.Hits++
+	hitCount := entry.HitCount
 	c.mu.Unlock()
 
-	c.logger.Debug("Cache hit", "tool", toolName, "key", key, "hit_count", entry.HitCount)
+	c.logger.Debug("Cache hit", "tool", toolName, "key", key, "hit_count", hitCount)
 	return entry.Result, true
 }
 

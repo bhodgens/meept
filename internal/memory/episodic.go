@@ -220,7 +220,9 @@ func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([
 	}
 
 	results, err := e.scanResults(rows, hasFTS5)
-	rows.Close()
+	if cerr := rows.Close(); cerr != nil {
+		e.logger.Debug("rows.Close error after scanResults", "error", cerr)
+	}
 
 	if err != nil {
 		return nil, err

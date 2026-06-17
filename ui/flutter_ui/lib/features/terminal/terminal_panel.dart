@@ -42,6 +42,9 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
               .map((e) => CommandEntry.fromJson(e as Map<String, dynamic>))
               .toList();
           _isLoading = false;
+          // Clear stale error on successful retry so the error banner
+          // does not persist after the issue is resolved.
+          _error = null;
         });
       }
     } catch (e) {

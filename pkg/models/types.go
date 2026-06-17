@@ -3,8 +3,8 @@ package models
 
 import (
 	crypto_rand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"time"
 )
 
@@ -104,18 +104,29 @@ type ComponentInfo struct {
 	Running bool   `json:"running"`
 }
 
-// generateID creates a simple unique ID.
+// generateID creates a unique ID for a bus message.
+// Uses 16 bytes (128 bits) of crypto randomness rendered as 32 hex chars.
+// The previous implementation mixed time.Now().UnixNano() with 8 hex chars
+// of randomness, which produced collisions on fast hosts where two messages
+// could land in the same nanosecond (the predictable-IDs anti-pattern called
+// out in CLAUDE.md). The new form drops the timestamp and doubles the
+// entropy. crypto/rand failures are treated the same way as pkg/id.Generate:
+// the all-zero ID is returned and the caller should treat it as a fatal
+// signal of catastrophic entropy starvation.
 func generateID() string {
-	return fmt.Sprintf("%d-%s", time.Now().UnixNano(), randomHex(8))
+	b := make([]byte, 16)
+	if _, err := crypto_rand.Read(b); err != nil {
+		return hex.EncodeToString(b) // all-zero ID
+	}
+	return hex.EncodeToString(b)
 }
 
+// randomHex is retained for backward compatibility with any external callers
+// that may have referenced it. It now uses hex.EncodeToString for correctness
+// (the previous version used modulo bias by indexing into the hex alphabet
+// with `randBytes[i]%16`).
 func randomHex(n int) string {
-	const hex = "0123456789abcdef"
-	b := make([]byte, n)
 	randBytes := make([]byte, n)
 	_, _ = crypto_rand.Read(randBytes)
-	for i := range b {
-		b[i] = hex[randBytes[i]%16]
-	}
-	return string(b)
+	return hex.EncodeToString(randBytes)
 }

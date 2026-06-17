@@ -698,7 +698,15 @@ func (s *Server) Start(ctx context.Context) error {
 		Addr:           s.config.Addr,
 		Handler:        handler,
 		ReadTimeout:    s.config.ReadTimeout,
-		WriteTimeout:   s.config.WriteTimeout,
+		// WriteTimeout is intentionally set to 0 (no global write deadline).
+		// A non-zero WriteTimeout breaks SSE streams (/mcp/sse, /api/v1/chat/stream)
+		// and WebSocket upgrades because Go's http.Server applies the deadline
+		// to the entire response body write, not just the headers. Long-running
+		// streaming endpoints would be killed after WriteTimeout elapses.
+		// Instead, per-handler deadlines are enforced via r.Context().Done()
+		// and explicit heartbeat/keepalive logic in SSE handlers.
+		WriteTimeout:   0,
+		IdleTimeout:    120 * time.Second, // Reap idle keep-alive connections
 		MaxHeaderBytes: s.config.MaxHeaderBytes,
 		TLSConfig:      tlsConfig,
 	}
@@ -1097,22 +1105,12 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		// CORS headers
 		if s.config.EnableCORS {
 			origin := r.Header.Get("Origin")
-			if s.config.RequireAuth {
-				// Authenticated endpoints: never wildcard. Echo localhost origins only.
-				if origin == "" || isLocalOrigin(origin) {
-					w.Header().Set("Access-Control-Allow-Origin", origin)
-					if origin != "" {
-						w.Header().Set("Access-Control-Allow-Credentials", "true")
-					}
-				}
-			} else {
-				// Non-authenticated mode: still never emit wildcard. Echo
-				// localhost origins only to prevent cross-origin access.
-				if origin == "" || isLocalOrigin(origin) {
-					w.Header().Set("Access-Control-Allow-Origin", origin)
-					if origin != "" {
-						w.Header().Set("Access-Control-Allow-Credentials", "true")
-					}
+			// Never emit wildcard. Echo localhost origins only to prevent
+			// cross-origin access (both authenticated and non-authenticated modes).
+			if origin == "" || isLocalOrigin(origin) {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				if origin != "" {
+					w.Header().Set("Access-Control-Allow-Credentials", "true")
 				}
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -1786,11 +1784,20 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if s.config.RequireAuth {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			// Also check query param for web clients that can't set headers
+			// Legacy fallback for WebSocket clients that cannot set headers
+			// (e.g. browser APIs). Credentials in query params are visible in
+			// server access logs and should be migrated to the
+			// Sec-WebSocket-Protocol: bearer.<key> convention (D1-1).
 			token := r.URL.Query().Get("token")
 			if token == "" {
 				s.writeError(w, http.StatusUnauthorized, "unauthorized: missing API token")
 				return
+			}
+			if s.logger != nil {
+				s.logger.Warn("websocket auth via query param (credentials visible in access logs)",
+					"remote", r.RemoteAddr,
+					"hint", "use Authorization header or Sec-WebSocket-Protocol: bearer.<key>",
+				)
 			}
 			authHeader = "Bearer " + token
 		} else {
@@ -2393,10 +2400,12 @@ func (s *Server) mcpToolEvents(args map[string]any) (any, error) {
 				}
 			}
 		} else {
-			events = sess.events
+			events = make([]mcpEventRecord, len(sess.events))
+			copy(events, sess.events)
 		}
 	} else {
-		events = sess.events
+		events = make([]mcpEventRecord, len(sess.events))
+		copy(events, sess.events)
 	}
 
 	if events == nil {

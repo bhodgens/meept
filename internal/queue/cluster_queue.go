@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -284,19 +285,37 @@ type ClusterQueueStats struct {
 
 // RecordClaimEvent stores a claim lifecycle event in the cluster events table.
 func (s *Store) RecordClaimEvent(ctx context.Context, jobID, nodeID, action string) error {
+	// Validate action against a strict allowlist to prevent log/event spoofing
+	// and SQL/JSON value injection through the "TASK_"+action concatenation.
+	switch action {
+	case "CLAIMED", "RELEASED", "COMPLETED", "FAILED", "RETRY":
+	default:
+		return fmt.Errorf("invalid claim event action: %q", action)
+	}
+
+	// Build the JSON payload via json.Marshal so jobID cannot break out of the
+	// JSON string (prevents JSON/SQL injection in the stored payload).
+	payload := struct {
+		JobID  string `json:"job_id"`
+		Action string `json:"action"`
+	}{JobID: jobID, Action: action}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal claim event payload: %w", err)
+	}
+
 	query := `
 		INSERT INTO cluster_events (event_id, node_id, event_type, timestamp, vector_clock, payload, signature, received_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	eventID := id.Generate("claim-")
-	body := fmt.Sprintf(`{"job_id":"%s","action":"%s"}`, jobID, action)
 	sig := []byte(action) // placeholder: real signatures via ed25519
 
-	_, err := s.db.ExecContext(ctx, query,
+	_, err = s.db.ExecContext(ctx, query,
 		eventID, nodeID, "TASK_"+action,
 		time.Now().UnixNano(),
 		`{}`,
-		[]byte(body), sig, time.Now().UnixNano(),
+		body, sig, time.Now().UnixNano(),
 	)
 	return err
 }

@@ -63,6 +63,9 @@ class _FilesPanelState extends ConsumerState<FilesPanel> {
         setState(() {
           _files = filePaths.take(20).map((path) => FileEntry(path: path)).toList();
           _isLoading = false;
+          // Clear stale error on successful retry so the error banner
+          // does not persist after the issue is resolved.
+          _error = null;
         });
       }
     } catch (e) {

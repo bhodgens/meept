@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/internal/tui/types"
@@ -19,6 +21,14 @@ type HTTPClient struct {
 	baseURL    string
 	httpClient *http.Client
 	timeout    time.Duration
+
+	// Cached connection state to avoid HTTP health-check on every IsConnected() call.
+	// The TUI calls IsConnected() from the render loop (many times per second);
+	// without caching each call would fire an HTTP request.
+	connCacheMu   sync.Mutex
+	connCacheVal  atomic.Bool
+	connCacheTime time.Time
+	connCacheTTL  time.Duration
 }
 
 // NewHTTPClient creates an HTTP client for the daemon REST API.
@@ -26,25 +36,26 @@ func NewHTTPClient(baseURL string) *HTTPClient {
 	if baseURL == "" {
 		baseURL = "https://localhost:8081"
 	}
-	return &HTTPClient{
+	c := &HTTPClient{
 		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		timeout: 30 * time.Second,
+		timeout:       30 * time.Second,
+		connCacheTTL:  2 * time.Second,
 	}
+	return c
 }
 
 // Connect verifies the HTTP endpoint is reachable.
 func (c *HTTPClient) Connect() error {
-	resp, err := c.httpClient.Get(c.baseURL + "/api/v1/health")
-	if err != nil {
-		return fmt.Errorf("failed to connect to daemon HTTP: %w", err)
+	if !c.checkHealth() {
+		return fmt.Errorf("failed to connect to daemon HTTP: health check failed")
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("daemon health check returned %d", resp.StatusCode)
-	}
+	c.connCacheMu.Lock()
+	c.connCacheVal.Store(true)
+	c.connCacheTime = time.Now()
+	c.connCacheMu.Unlock()
 	return nil
 }
 
@@ -52,7 +63,30 @@ func (c *HTTPClient) Connect() error {
 func (c *HTTPClient) Close() error { return nil }
 
 // IsConnected checks if the daemon is reachable.
+// Uses a short-lived cache to avoid an HTTP health check on every call,
+// since the TUI render loop invokes IsConnected() many times per second.
 func (c *HTTPClient) IsConnected() bool {
+	c.connCacheMu.Lock()
+	cached := c.connCacheVal.Load()
+	cacheTime := c.connCacheTime
+	ttl := c.connCacheTTL
+	c.connCacheMu.Unlock()
+
+	if time.Since(cacheTime) < ttl {
+		return cached
+	}
+
+	// Cache is stale; perform a health check and update the cache.
+	result := c.checkHealth()
+	c.connCacheMu.Lock()
+	c.connCacheVal.Store(result)
+	c.connCacheTime = time.Now()
+	c.connCacheMu.Unlock()
+	return result
+}
+
+// checkHealth performs an actual HTTP health check against the daemon.
+func (c *HTTPClient) checkHealth() bool {
 	resp, err := c.httpClient.Get(c.baseURL + "/api/v1/health")
 	if err != nil {
 		return false
@@ -587,7 +621,7 @@ func (c *HTTPClient) ForkSession(sessionID string, fromMessageID int64, name str
 		return "", err
 	}
 	httpReq, err := http.NewRequest(http.MethodPost,
-		c.baseURL+"/api/v1/sessions/"+sessionID+"/fork",
+		c.baseURL+"/api/v1/sessions/"+url.PathEscape(sessionID)+"/fork",
 		bytes.NewReader(body))
 	if err != nil {
 		return "", err
@@ -616,7 +650,7 @@ func (c *HTTPClient) ForkSession(sessionID string, fromMessageID int64, name str
 
 // GetTree returns the conversation tree for a session.
 func (c *HTTPClient) GetTree(sessionID string) ([]types.TreeNodeInfo, error) {
-	resp, err := c.httpClient.Get(c.baseURL + "/api/v1/sessions/" + sessionID + "/tree")
+	resp, err := c.httpClient.Get(c.baseURL + "/api/v1/sessions/" + url.PathEscape(sessionID) + "/tree")
 	if err != nil {
 		return nil, err
 	}

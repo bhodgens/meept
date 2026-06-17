@@ -67,14 +67,13 @@ func (am *ArtifactManager) ScanDirectory(dir string) (*artifactcontext.Artifacts
 		return nil, fmt.Errorf("failed to scan directory: %w", err)
 	}
 
-	// Update context builder if artifacts found
+	// Cache results and update context builder under lock to prevent
+	// data races with concurrent readers of am.contextBuilder.
+	am.mu.Lock()
+	am.artifactCache[dir] = artifacts
 	if artifacts.Available {
 		am.contextBuilder = artifactcontext.NewContextBuilder(artifacts)
 	}
-
-	// Cache results
-	am.mu.Lock()
-	am.artifactCache[dir] = artifacts
 	am.mu.Unlock()
 
 	if artifacts.Available {
@@ -97,22 +96,32 @@ func (am *ArtifactManager) ScanDirectory(dir string) (*artifactcontext.Artifacts
 	return artifacts, nil
 }
 
+// getContextBuilder returns the current context builder under a read lock.
+// Callers must use the returned pointer rather than reading am.contextBuilder
+// directly to avoid data races with ScanDirectory which writes the field.
+func (am *ArtifactManager) getContextBuilder() *artifactcontext.ContextBuilder {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	return am.contextBuilder
+}
+
 // BuildContext builds relevant context for a task based on Claude artifacts.
 func (am *ArtifactManager) BuildContext(taskDesc, workingDir string) (string, bool) {
 	// Ensure directory is scanned
 	artifacts, err := am.ScanDirectory(workingDir)
-	if err != nil || !artifacts.Available || am.contextBuilder == nil {
+	cb := am.getContextBuilder()
+	if err != nil || !artifacts.Available || cb == nil {
 		return "", false
 	}
 
 	// Build context for task
-	taskCtx := am.contextBuilder.BuildForTask(taskDesc)
+	taskCtx := cb.BuildForTask(taskDesc)
 
 	// Format for prompt
-	promptContext := am.contextBuilder.FormatForPrompt(taskCtx)
+	promptContext := cb.FormatForPrompt(taskCtx)
 
 	// Check if context should be injected
-	if !am.contextBuilder.ShouldInjectContext(taskDesc) {
+	if !cb.ShouldInjectContext(taskDesc) {
 		return "", false
 	}
 
@@ -123,33 +132,36 @@ func (am *ArtifactManager) BuildContext(taskDesc, workingDir string) (string, bo
 func (am *ArtifactManager) GetRelevantCommands(taskDesc, workingDir string) []artifactcontext.BuildCommand {
 	// Ensure directory is scanned
 	artifacts, err := am.ScanDirectory(workingDir)
-	if err != nil || !artifacts.Available || am.contextBuilder == nil {
+	cb := am.getContextBuilder()
+	if err != nil || !artifacts.Available || cb == nil {
 		return nil
 	}
 
-	return am.contextBuilder.GetRelevantCommands(taskDesc)
+	return cb.GetRelevantCommands(taskDesc)
 }
 
 // FindSkillForTask finds a relevant skill from .claude/skills/ for a task.
 func (am *ArtifactManager) FindSkillForTask(taskDesc, workingDir string) *artifactcontext.Skill {
 	// Ensure directory is scanned
 	artifacts, err := am.ScanDirectory(workingDir)
-	if err != nil || !artifacts.Available || am.contextBuilder == nil {
+	cb := am.getContextBuilder()
+	if err != nil || !artifacts.Available || cb == nil {
 		return nil
 	}
 
-	return am.contextBuilder.FindSkillForTask(taskDesc)
+	return cb.FindSkillForTask(taskDesc)
 }
 
 // FindAgentForTask finds a relevant agent from .claude/agents/ for a task.
 func (am *ArtifactManager) FindAgentForTask(taskDesc, workingDir string) *artifactcontext.AgentDefinition {
 	// Ensure directory is scanned
 	artifacts, err := am.ScanDirectory(workingDir)
-	if err != nil || !artifacts.Available || am.contextBuilder == nil {
+	cb := am.getContextBuilder()
+	if err != nil || !artifacts.Available || cb == nil {
 		return nil
 	}
 
-	return am.contextBuilder.FindAgentForTask(taskDesc)
+	return cb.FindAgentForTask(taskDesc)
 }
 
 // HasArtifacts checks if Claude artifacts are available in a directory.

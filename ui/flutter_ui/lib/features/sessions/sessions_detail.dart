@@ -42,7 +42,12 @@ class _SessionsDetailPaneState extends ConsumerState<SessionsDetailPane> {
       await ref.read(taskProvider.notifier).loadTasks();
       await ref.read(planProvider.notifier).loadPlans(sessionID: widget.session.id);
       if (mounted) {
-        setState(() => _loading = false);
+        setState(() {
+          _loading = false;
+          // Clear stale error on successful retry so the error banner
+          // does not persist visually after the underlying issue is fixed.
+          _error = null;
+        });
       }
     } catch (e) {
       if (mounted) {

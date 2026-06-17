@@ -70,9 +70,17 @@ func (e *ClusterEvent) signingData() []byte {
 }
 
 // GenerateEventID creates a unique 32-character hex event ID from 16 random bytes.
+//
+// If crypto/rand fails (catastrophic system failure), a zero-filled ID is
+// returned. Callers that require hard uniqueness guarantees should treat a
+// zero-suffixed ID as a fatal signal. See pkg/id.Generate for the project's
+// canonical predictable-ID-safe generator with documented fallback behavior.
 func GenerateEventID() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Unrecoverable host state; mirror pkg/id.Generate fallback contract.
+		return hex.EncodeToString(b) // all-zero ID
+	}
 	return hex.EncodeToString(b)
 }
 

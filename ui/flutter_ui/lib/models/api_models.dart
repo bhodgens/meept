@@ -146,10 +146,19 @@ class AgentProgress {
     // The server sends a flat {type, session_id, agent_id, message, tier, ...}
     // message directly (not wrapped in a "data" envelope).
     final data = json['data'] as Map<String, dynamic>?;
+
+    // Coerce tier defensively: some backends send it as a string ("1") which
+    // would throw on `as num`. Fall back to 1 (Normal) on parse failure.
+    int coerceTier(dynamic v) {
+      if (v is num) return v.toInt();
+      if (v is String) return int.tryParse(v) ?? 1;
+      return 1;
+    }
+
     return AgentProgress(
       agentId: (data?['agent_id'] ?? json['agent_id'] ?? '') as String,
       message: (data?['message'] ?? json['message'] ?? '') as String,
-      tier: ((data?['tier'] ?? json['tier'] ?? 1) as num).toInt(),
+      tier: coerceTier(data?['tier'] ?? json['tier'] ?? 1),
       sourceEvent: (data?['source_event'] ?? json['source_event']) as String?,
       timestamp: DateTime.tryParse(
               data?['timestamp'] as String? ??

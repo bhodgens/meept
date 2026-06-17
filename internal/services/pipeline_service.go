@@ -76,25 +76,30 @@ func (s *PipelineService) Status(ctx context.Context, req StatusRequest) (*Pipel
 
 	s.mu.RLock()
 	pipeline, exists := s.pipelines[req.PipelineID]
-	s.mu.RUnlock()
-
 	if !exists {
+		s.mu.RUnlock()
 		return nil, wrapError("pipeline", "Status", ErrNotFound)
 	}
 
+	// Snapshot all fields under the lock. UpdateStatus() modifies
+	// pipeline.Status and pipeline.UpdatedAt under Lock, so reading
+	// those fields after releasing RLock would be a data race.
 	steps := make([]PipelineStepStatus, len(pipeline.Steps))
 	for i, step := range pipeline.Steps {
 		steps[i] = PipelineStepStatus(step)
 	}
 
-	return &PipelineStatusResponse{
+	resp := &PipelineStatusResponse{
 		PipelineID: pipeline.ID,
 		Name:       pipeline.Name,
 		Status:     pipeline.Status,
 		Steps:      steps,
 		CreatedAt:  pipeline.CreatedAt,
 		UpdatedAt:  pipeline.UpdatedAt,
-	}, nil
+	}
+	s.mu.RUnlock()
+
+	return resp, nil
 }
 
 // PipelineListRequest contains list parameters.

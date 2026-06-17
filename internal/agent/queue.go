@@ -418,6 +418,9 @@ func (q *MessageQueue) Close() {
 // SetPersister attaches a persistence backend for follow-up messages.
 // Called per-conversation in RunOnce() when persistence is enabled.
 func (q *MessageQueue) SetPersister(p QueuePersisterOps) {
+	if p == nil {
+		return
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.persister = p

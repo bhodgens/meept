@@ -167,12 +167,13 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return KeyboardListener(
+    return Focus(
       focusNode: _keyboardFocusNode,
-      onKeyEvent: (KeyEvent event) {
+      onKeyEvent: (FocusNode node, KeyEvent event) {
         if (event.logicalKey == LogicalKeyboardKey.escape) {
           _closePanel();
         }
+        return KeyEventResult.ignored;
       },
       child: Container(
       color: CyberpunkColors.darkGray,

@@ -312,7 +312,7 @@ func (m *ServiceManager) writePlistAndLoad(label string) {
 </plist>
 `, label, m.daemonPath, getHomeDirOrFallback())
 
-	if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
+	if err := os.WriteFile(plistPath, []byte(plist), 0o600); err != nil {
 		return
 	}
 	_ = exec.Command("launchctl", "unload", plistPath).Run()

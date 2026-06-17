@@ -7,15 +7,21 @@ import '../../theme/typography.dart';
 /// Slash command autocomplete popup overlay.
 ///
 /// Displays up to 8 matching commands below the input field.
-/// Handles arrow/tab/enter navigation internally, esc to cancel.
+/// The selected index is owned by the parent (ChatInput) and passed down so
+/// that both the parent's key handler and this widget's own Focus tree stay
+/// in sync. Arrow-key navigation is handled by the parent; this widget only
+/// handles click selection, Tab/Enter to accept, and Escape to dismiss.
 class SlashAutocomplete extends StatefulWidget {
   final String query;
+  /// Parent-owned selection index (0-based within the visible 8-item window).
+  final int selectedIndex;
   final void Function(SlashCommand command)? onSelected;
   final VoidCallback? onDismiss;
 
   const SlashAutocomplete({
     super.key,
     required this.query,
+    required this.selectedIndex,
     this.onSelected,
     this.onDismiss,
   });
@@ -28,12 +34,12 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
   static final _registry = SlashCommandRegistry();
 
   late List<SlashCommand> _matches;
-  int _selectedIndex = 0;
 
   @override
   void initState() {
     super.initState();
     _updateMatches();
+    _isStateReady = true;
   }
 
   @override
@@ -55,35 +61,25 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
       });
       return;
     }
-    // Clamp selected index to visible range (max 8 items)
-    final visibleCount = _matches.length > 8 ? 8 : _matches.length;
-    _selectedIndex = _selectedIndex.clamp(0, visibleCount - 1);
+    if (!_isStateReady) return;
     setState(() {});
   }
 
+  /// Set to true once initState has finished, so _updateMatches can
+  /// safely call setState on subsequent invocations (e.g. from didUpdateWidget).
+  bool _isStateReady = false;
+
   void _accept() {
     if (_matches.isEmpty) return;
-    widget.onSelected?.call(_matches[_selectedIndex]);
-  }
-
-  void _moveSelection(int delta) {
-    final visibleCount = _matches.length > 8 ? 8 : _matches.length;
-    setState(() {
-      _selectedIndex =
-          (_selectedIndex + delta).clamp(0, visibleCount - 1);
-    });
+    final visible = _matches.take(8).toList();
+    final idx = widget.selectedIndex.clamp(0, visible.length - 1);
+    widget.onSelected?.call(visible[idx]);
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent) {
-      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        _moveSelection(1);
-        return KeyEventResult.handled;
-      }
-      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-        _moveSelection(-1);
-        return KeyEventResult.handled;
-      }
+      // Arrow-key navigation is handled by the parent (ChatInput) which owns
+      // the selected index. We only handle accept/cancel here.
       if (event.logicalKey == LogicalKeyboardKey.tab ||
           event.logicalKey == LogicalKeyboardKey.enter) {
         _accept();
@@ -120,7 +116,7 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
             itemCount: visible.length,
             itemBuilder: (context, index) {
               final cmd = visible[index];
-              final isSelected = index == _selectedIndex;
+              final isSelected = index == widget.selectedIndex;
               return _buildItem(cmd, widget.query, isSelected, index);
             },
           ),
@@ -137,7 +133,6 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
 
     return InkWell(
       onTap: () {
-        setState(() => _selectedIndex = index);
         _accept();
       },
       child: Container(

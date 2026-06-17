@@ -316,7 +316,13 @@ func (c *TokenCacheCoordinator) SetMetricsStore(store *metrics.Store) {
 
 //nolint:unparam // value is intentionally parameterized for future metric variations
 func (c *TokenCacheCoordinator) recordMetric(name string, value float64, key CacheKey) {
-	if c.metricsStore == nil {
+	// Snapshot metricsStore under lock to avoid racing with SetMetricsStore.
+	// The actual Record call is then performed without holding the lock so that
+	// concurrent cache operations are not blocked by metrics I/O.
+	c.mu.RLock()
+	store := c.metricsStore
+	c.mu.RUnlock()
+	if store == nil {
 		return
 	}
 	tags := map[string]string{
@@ -325,7 +331,7 @@ func (c *TokenCacheCoordinator) recordMetric(name string, value float64, key Cac
 	if key.AgentID != "" {
 		tags["agent_id"] = key.AgentID
 	}
-	c.metricsStore.Record(name, value, tags)
+	store.Record(name, value, tags)
 }
 
 // InspectResult holds the details of a single inspected cache entry.

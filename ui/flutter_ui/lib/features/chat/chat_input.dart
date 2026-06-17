@@ -520,6 +520,7 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
             if (_showSlashAutocomplete)
               SlashAutocomplete(
                 query: _slashQuery,
+                selectedIndex: _slashSelectedIndex,
                 onSelected: _onSlashSelected,
                 onDismiss: () {
                   setState(() {

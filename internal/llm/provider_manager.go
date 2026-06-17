@@ -757,9 +757,13 @@ func (pm *ProviderManager) RemoveProvider(providerID string) error {
 
 	for i, p := range pm.providers {
 		if p.Config.ProviderID == providerID {
-			// Close the chatter if it implements io.Closer
-			if closer, ok := p.Chatter.(interface{ Close() }); ok {
-				closer.Close()
+			// Close the chatter if it implements io.Closer.
+			// Concrete Chatter implementations (Client, AnthropicClient) have
+			// signature Close() error, so the assertion must match that.
+			if closer, ok := p.Chatter.(interface{ Close() error }); ok {
+				if err := closer.Close(); err != nil {
+					pm.logger.Warn("Error closing provider client", "provider", providerID, "error", err)
+				}
 			}
 
 			// Remove from slice
@@ -896,8 +900,11 @@ func (pm *ProviderManager) Stop() {
 	defer pm.mu.Unlock()
 
 	for _, p := range pm.providers {
-		if closer, ok := p.Chatter.(interface{ Close() }); ok {
-			closer.Close()
+		// Match Close() error signature (both Client and AnthropicClient).
+		if closer, ok := p.Chatter.(interface{ Close() error }); ok {
+			if err := closer.Close(); err != nil {
+				pm.logger.Warn("Error closing provider client", "error", err)
+			}
 		}
 	}
 
