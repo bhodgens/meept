@@ -4,25 +4,29 @@ This directory contains git hooks for enforcing code quality and documentation s
 
 ## Installation
 
-To install the hooks:
+### Recommended: Use git config
+
+The hooks are configured to run automatically when you clone the repository. If they're not running:
 
 ```bash
-# Make hooks executable
-chmod +x .git/hooks/pre-commit*
-
-# Optional: Install to shared location for all contributors
-cp .git/hooks/pre-commit* /usr/local/share/meept-hooks/
+# From project root
+git config core.hooksPath .githooks
 ```
 
-For a project-wide installation that persists across clones:
+### Alternative: Install script
 
 ```bash
-# Create a hooks directory in the project root
-mkdir -p .githooks
-cp .git/hooks/pre-commit* .githooks/
+# Run the installation script
+./scripts/install-hooks.sh
+```
 
-# Configure git to use this directory
-git config core.hooksPath .githooks
+This configures git and verifies the hooks are working.
+
+### Manual installation (not recommended)
+
+```bash
+# Only if .githooks is not available
+chmod +x .githooks/*
 ```
 
 ## Available Hooks
@@ -30,8 +34,9 @@ git config core.hooksPath .githooks
 ### pre-commit (Main Hook)
 
 Entry point that runs all checks sequentially:
-1. Deferred item validation
-2. Feature documentation check
+
+1. **Deferred item validation** - Checks findings docs have resolution plans
+2. **Feature documentation check** - Verifies code changes include doc updates
 
 ### pre-commit-deferred
 
@@ -70,7 +75,7 @@ When documentation is missing, the hook offers to:
 # Install aider
 pip install aider-chat
 
-# Configure for glm-5.2
+# Configure for glm-5.2 (already in project .aider.conf.yml)
 echo "model: glm-5.2" > ~/.aider.conf.yml
 
 # Generate documentation
@@ -82,7 +87,7 @@ aider --model glm-5.2 \
 
 **Configuration:**
 ```bash
-# Override model
+# Override model (default: glm-5.2)
 export AIDER_MODEL=glm-5.2
 
 # Or use a different model
@@ -97,47 +102,71 @@ For emergency commits (not recommended):
 git commit --no-verify -m "Emergency fix"
 ```
 
-⚠️ **Warning:** Skipping hooks bypasses important quality checks. Only use for:
+**Warning:** Skipping hooks bypasses important quality checks. Only use for:
 - WIP commits during active development
 - Emergency hotfixes
 - Resolving hook-related issues
 
-## Hook Development
+## Testing Hooks
 
 To test hooks without committing:
 
 ```bash
-# Run hooks manually
-.git/hooks/pre-commit
+# Run all hooks manually
+.githooks/pre-commit
 
-# Run individual hook
-.git/hooks/pre-commit-feature-docs
+# Run individual hooks
+.githooks/pre-commit-deferred
+.githooks/pre-commit-feature-docs
 
-# Debug mode (show what would be checked)
-bash -x .git/hooks/pre-commit-feature-docs
+# Debug mode (verbose output)
+bash -x .githooks/pre-commit-feature-docs
 ```
+
+Note: Hooks check staged changes. If nothing is staged, they'll report "No staged changes to check".
 
 ## Troubleshooting
 
 ### Hook not running
 
-Ensure hooks are executable:
+**Cause:** git config not set or hooks not executable
+
+**Solution:**
 ```bash
-chmod +x .git/hooks/pre-commit*
+# Verify configuration
+git config --get core.hooksPath  # Should output: .githooks
+
+# If empty, set it
+git config core.hooksPath .githooks
+
+# Ensure hooks are executable
+chmod +x .githooks/*
 ```
 
 ### Aider not found
 
-Install aider:
+**Cause:** aider is not installed
+
+**Solution:**
 ```bash
 pip install aider-chat
+# Or: brew install aider (if available on your system)
 ```
 
 ### False positives in documentation check
 
-The hook may flag files that are actually documented elsewhere. In this case:
+**Cause:** The hook may flag files that are actually documented elsewhere
+
+**Solution:**
 1. Update the feature mapping in `pre-commit-feature-docs`
 2. Or add the file to the exclusion list in `is_feature_code()`
+3. Or stage the documentation file with your code changes
+
+### Bash version issues
+
+**Cause:** Some hook features may require bash 4+
+
+**Solution:** The hooks are written to be compatible with bash 3.x (macOS default). If you encounter issues, ensure you're using bash 4+ or report the bug.
 
 ## Feature Mapping
 
@@ -162,8 +191,33 @@ The hook maps code directories to documentation files:
 | `internal/project/` | `docs/workflows/project-context.md` |
 | `internal/daemon/` | `docs/concepts/architecture.md` |
 
+## Development
+
+### Adding new feature mappings
+
+Edit `.githooks/pre-commit-feature-docs`:
+
+```bash
+extract_feature_name() {
+  case "$base_feature" in
+    "newfeature") echo "new-feature-doc" ;;
+    # ... existing mappings
+  esac
+}
+```
+
+### Adding new hooks
+
+1. Create hook script in `.githooks/`
+2. Make executable: `chmod +x .githooks/new-hook`
+3. Source from `pre-commit`:
+   ```bash
+   .githooks/new-hook || exit 1
+   ```
+
 ## Additional Resources
 
 - [Git Hooks Documentation](https://git-scm.com/book/en/v2/Customizing-Git-Git-Hooks)
 - [Aider Documentation](https://aider.chat/)
+- [glm-5.2 Model](https://z.ai/) - Z.ai language model
 - CLAUDE.md - Project-specific guidelines
