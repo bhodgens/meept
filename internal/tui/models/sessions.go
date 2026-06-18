@@ -107,8 +107,6 @@ func (m *SessionsModel) SetSize(width, height int) {
 }
 
 func (m *SessionsModel) setSessionsColumns() {
-	m.table.SetRows([]table.Row{})
-
 	titleW := m.width*38/100 - 2
 	createdW := 12
 	activityW := 14
@@ -122,6 +120,13 @@ func (m *SessionsModel) setSessionsColumns() {
 		{Title: "created", Width: createdW},
 		{Title: "last activity", Width: activityW},
 	})
+
+	// Repopulate rows from cached data so resize doesn't wipe the table.
+	// setSessionsColumns is called on every WindowSizeMsg; without this,
+	// rows are lost and only restored when a new SessionsUpdateMsg arrives.
+	if len(m.sessions) > 0 {
+		m.updateSessionsTable()
+	}
 }
 
 // Init initializes the sessions model.
@@ -267,6 +272,13 @@ func (m *SessionsModel) Update(msg tea.Msg) tea.Cmd {
 func (m *SessionsModel) updateSessionsTable() {
 	rows := make([]table.Row, len(m.sessions))
 
+	// Derive title truncation from the dynamic column width so wider
+	// terminals can show more of the session name/description.
+	titleW := m.width*38/100 - 2
+	if titleW < 15 {
+		titleW = 15
+	}
+
 	for i, sess := range m.sessions {
 		title := sess.Description
 		if title == "" {
@@ -277,7 +289,7 @@ func (m *SessionsModel) updateSessionsTable() {
 		activity := m.formatTimeRelative(sess.LastActivity)
 
 		rows[i] = table.Row{
-			types.TruncateString(title, 28),
+			types.TruncateString(title, titleW),
 			created,
 			activity,
 		}
