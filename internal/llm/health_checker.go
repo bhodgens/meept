@@ -67,6 +67,14 @@ func (h *HealthChecker) checkOnce() {
 	url := h.baseURL + h.config.HealthEndpoint
 	resp, err := h.client.Get(url)
 
+	// Read status code and close the body before acquiring the lock so that
+	// no I/O happens while the mutex is held (CLAUDE.md mutex-scope rule).
+	statusOK := false
+	if err == nil {
+		statusOK = resp.StatusCode == http.StatusOK
+		_ = resp.Body.Close()
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -78,9 +86,8 @@ func (h *HealthChecker) checkOnce() {
 		h.notifyTransition(wasHealthy)
 		return
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusOK {
+	if statusOK {
 		h.unhealthyCount = 0
 		h.healthy = true
 	} else {

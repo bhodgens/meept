@@ -35,7 +35,8 @@ Add a `lifecycle` section to your provider configuration in `config/models.json5
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `runtime` | string | yes | Runtime type: `llama-cpp` or `mlx` |
-| `model_path` | string | yes | Path to the model file (supports `~` expansion) |
+| `model_path` | string | see note | Path to a single model file (supports `~` expansion). Required unless `model_paths` is set |
+| `model_paths` | object | see note | Map of `modelKey` → model path, for multi-model servers sharing one subprocess. Required unless `model_path` is set |
 | `auto_start` | bool | no | Auto-start on daemon startup (default: false) |
 | `auto_stop_on_exit` | bool | no | Stop on daemon shutdown (default: true) |
 | `pid_file` | string | yes | Path to PID file for process tracking |
@@ -46,12 +47,39 @@ Add a `lifecycle` section to your provider configuration in `config/models.json5
 | `health_check.timeout_seconds` | int | no | HTTP request timeout (default: 5) |
 | `health_check.unhealthy_threshold` | int | no | Consecutive failures before marking unhealthy (default: 3) |
 
+### `model_path` vs `model_paths`
+
+- For single-model runtimes, use `model_path` (the legacy form). It is equivalent to `model_paths: { "default": <model_path> }`.
+- For multi-model servers (e.g. MLX or llama.cpp serving several models on one port), use `model_paths`:
+
+```json5
+"lifecycle": {
+  "runtime": "mlx",
+  "model_paths": {
+    "lfm-code":            "~/models/lfm-code-4bit",
+    "lfm-thinking-claude": "~/models/lfm-thinking-claude-4bit"
+  },
+  "spawn_command": ["mlx_server", "--port", "8080", "--models", "${MODEL_PATHS_JSON}"]
+}
+```
+
+At least one of the two fields is required. Setting both is allowed; `model_paths` takes precedence.
+
+### Localhost requirement
+
+The provider's `options.baseURL` must point at a loopback address (`localhost`, `127.0.0.1`, `::1`, `0:0:0:0:0:0:0:1`). Any other host is rejected at daemon startup with a warning. This applies to all lifecycle-enabled providers regardless of `auto_start`.
+
 ## Variable Expansion
 
-The `spawn_command` array supports environment variable expansion:
+The `spawn_command` array supports these expansions:
 
-- `${MODEL_PATH}` - Expanded to the configured `model_path`
-- `${VAR_NAME}` - Expanded from environment variables
+| Variable | Expansion |
+|----------|-----------|
+| `${MODEL_PATH}` | First declared path (backward compat with single-model configs) |
+| `${MODEL_PATHS}` | Space-separated list of all paths |
+| `${MODEL_PATHS_JSON}` | JSON array string, e.g. `["/path/a","/path/b"]` |
+| `${MODEL_PATH:<key>}` | Specific model's path (e.g. `${MODEL_PATH:lfm-code}`) |
+| `${VAR_NAME}` | Any other `${VAR}` resolves from the environment |
 
 Example:
 ```json5
@@ -85,13 +113,18 @@ If no provider is specified, `local` is used by default.
 
 ## How It Works
 
-1. **Daemon Startup**: The daemon scans all providers for `lifecycle` configurations. For each with `auto_start: true`, it spawns the runtime process.
+1. **Daemon Startup**: The daemon scans all providers for `lifecycle` configurations. For each provider:
+   - The `options.baseURL` host must be loopback (`localhost`, `127.0.0.1`, `::1`, `0:0:0:0:0:0:0:1`). Non-loopback providers are skipped with a warning.
+   - The validated config is registered against an **endpoint key** of the form `<runtime>:<host>:<port>`. Multiple providers on the same endpoint key merge into a single shared subprocess (first spawn command wins; later providers contribute their model paths).
+   - At least one of the provider's models must be in the daemon-wide **in-use set** (referenced by an enabled agent, a model slot, or a model alias). Endpoints with no in-use models are skipped with a debug log.
 
-2. **Health Monitoring**: A background health checker polls the runtime's HTTP endpoint every N seconds. If the runtime becomes unhealthy, it's marked but NOT automatically restarted (manual intervention required).
+2. **Health Monitoring**: A background health checker per endpoint polls the runtime's HTTP endpoint every N seconds. Health transitions fan out to every per-model log on the endpoint. If `restart_policy.enabled` is true, unhealthy transitions trigger an auto-restart (see [Auto-Restart Policy](#auto-restart-policy)).
 
-3. **PID File Management**: The runtime PID is stored in a file for cross-restart tracking. Stale PID files (from crashes) are automatically cleaned up on next startup.
+3. **Per-Model Logging**: A structured JSON-line log is written per model at `~/.meept/logs/runtimes/<providerID>-<modelKey>.log`. Events: `register`, `spawn_attempt`, `spawn_success`, `spawn_failure`, `health_transition`, `restart_attempt`, `restart_success`, `restart_failed`, `stop`. Raw subprocess output goes to `~/.meept/logs/runtimes/<host>-<port>.process.log` with `out:`/`err:` line prefixes. Files rotate at 10 MB with one `.1` backup.
 
-4. **Graceful Shutdown**: On daemon exit, runtimes with `auto_stop_on_exit: true` receive SIGTERM, then SIGKILL if they don't exit within the timeout.
+4. **PID File Management**: The runtime PID is stored in a file for cross-restart tracking. Stale PID files (from crashes) are automatically cleaned up on next startup. The `pid_file` of the first provider to register an endpoint wins; subsequent providers' `pid_file` values are ignored (debug log if they differ).
+
+5. **Graceful Shutdown**: On daemon exit, each endpoint (not each provider) receives a single SIGTERM, then SIGKILL if it doesn't exit within the timeout. Health checkers are stopped and per-model/per-process log files are closed.
 
 ## Troubleshooting
 

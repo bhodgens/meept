@@ -2,6 +2,7 @@ package llm_test
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,7 +23,7 @@ func TestRuntimeProcess_Start_NoSpawnCommand(t *testing.T) {
 		PIDFile:      filepath.Join(createTempPIDDir(t), "test.pid"),
 	}
 	p := llm.NewRuntimeProcess(cfg)
-	err := p.Start(context.Background())
+	err := p.Start(context.Background(), io.Discard, io.Discard)
 	if err == nil {
 		t.Fatal("expected error when no spawn command configured, got nil")
 	}
@@ -50,7 +51,7 @@ func TestRuntimeProcess_PIDWriteRead(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := p.Start(ctx); err != nil {
+	if err := p.Start(ctx, io.Discard, io.Discard); err != nil {
 		t.Fatalf("unexpected error starting process: %v", err)
 	}
 
@@ -135,7 +136,7 @@ func TestRuntimeProcess_StopGraceful(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := p.Start(ctx); err != nil {
+	if err := p.Start(ctx, io.Discard, io.Discard); err != nil {
 		t.Fatalf("failed to start process: %v", err)
 	}
 
@@ -170,7 +171,7 @@ func TestRuntimeProcess_StopAlreadyDead(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := p.Start(ctx); err != nil {
+	if err := p.Start(ctx, io.Discard, io.Discard); err != nil {
 		t.Fatalf("failed to start process: %v", err)
 	}
 
@@ -219,7 +220,7 @@ func TestRuntimeProcess_ConcurrentStart(t *testing.T) {
 	ctx1, cancel1 := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel1()
 
-	if err := p.Start(ctx1); err != nil {
+	if err := p.Start(ctx1, io.Discard, io.Discard); err != nil {
 		t.Fatalf("first start failed: %v", err)
 	}
 
@@ -227,7 +228,7 @@ func TestRuntimeProcess_ConcurrentStart(t *testing.T) {
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel2()
 
-	if err := p.Start(ctx2); err != nil {
+	if err := p.Start(ctx2, io.Discard, io.Discard); err != nil {
 		t.Fatalf("second start should succeed (already running): %v", err)
 	}
 

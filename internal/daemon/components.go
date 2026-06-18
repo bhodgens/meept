@@ -510,6 +510,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				continue
 			}
 
+			// Localhost gate: only register lifecycle configs whose baseURL
+			// host is a loopback address. This prevents accidental remote
+			// process spawns when a user reuses a provider block for a
+			// public endpoint.
+			if !llm.IsLoopbackBaseURL(provider.Options.BaseURL) {
+				logger.Warn("Skipping runtime config: baseURL is not loopback",
+					"provider", providerID,
+					"baseURL", provider.Options.BaseURL)
+				continue
+			}
+
 			rtCfg, err := llm.ValidateAndNormalize(*provider.Lifecycle)
 			if err != nil {
 				logger.Warn("Skipping invalid runtime config", "provider", providerID, "error", err)
@@ -517,9 +528,24 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			}
 
 			baseURL := provider.Options.BaseURL
+			rtCfg.EndpointKey = llm.ComputeEndpointKey(string(rtCfg.Type), baseURL)
 			if err := c.ContainerManager.RegisterConfig(providerID, rtCfg, baseURL); err != nil {
 				logger.Error("Failed to register runtime config", "provider", providerID, "error", err)
 			}
+		}
+
+		// Compute the in-use model set from agent definitions and slot
+		// assignments so Section 2's gate has input before StartAll runs.
+		// Classifier/Summarizer model slots are not surfaced on LLMConfig
+		// today (see schema.go); they are left empty as best-effort.
+		agentRefs := loadAgentModelRefs(cfg, logger)
+		slots := llm.ModelSlots{
+			Model:      lifecycleCfg.Model,
+			SmallModel: lifecycleCfg.SmallModel,
+		}
+		inUse := llm.BuildModelsInUse(agentRefs, slots, lifecycleCfg.ModelAliases, lifecycleCfg.DisabledProviders)
+		if len(inUse) > 0 {
+			c.ContainerManager.SetModelsInUse(inUse)
 		}
 	}
 
@@ -4499,4 +4525,26 @@ func gitLsFiles(dir string) ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+// loadAgentModelRefs loads the default agent definitions and returns a slice
+// of AgentModelRef values suitable for BuildModelsInUse. Best-effort: on
+// failure, returns nil (the in-use gate degrades to "start everything").
+func loadAgentModelRefs(cfg *config.Config, logger *slog.Logger) []llm.AgentModelRef {
+	agentsMap, err := config.LoadAgentDefinitionsDefault(&cfg.Agents)
+	if err != nil {
+		logger.Debug("Failed to load agent definitions for in-use computation", "error", err)
+		return nil
+	}
+	if len(agentsMap) == 0 {
+		return nil
+	}
+	out := make([]llm.AgentModelRef, 0, len(agentsMap))
+	for _, a := range agentsMap {
+		if a == nil {
+			continue
+		}
+		out = append(out, llm.AgentModelRef{Model: a.Model, Enabled: a.Enabled})
+	}
+	return out
 }

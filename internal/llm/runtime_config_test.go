@@ -173,3 +173,169 @@ func TestValidateAndNormalize_OSExpandVars(t *testing.T) {
 		t.Errorf("expected env var expansion to '9999', got %q", result.SpawnCommand[4])
 	}
 }
+
+func TestIsLoopbackBaseURL(t *testing.T) {
+	cases := []struct {
+		url  string
+		want bool
+	}{
+		{"http://localhost:8080/v1", true},
+		{"http://127.0.0.1:8080/v1", true},
+		{"http://[::1]:8080/v1", true},
+		{"http://::1:8080/v1", true},
+		{"http://0:0:0:0:0:0:0:1:8080/v1", true},
+		{"https://LOCALHOST:443", true},
+		{"http://0.0.0.0:8080", false},
+		{"http://192.168.1.5:8080", false},
+		{"https://api.example.com/v1", false},
+		{"http://8.8.8.8", false},
+		{"", false},
+		{"not a url", false},
+		{"http://fe80::1", false},
+		{"http://10.0.0.1", false},
+		{"http://172.16.0.1", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.url, func(t *testing.T) {
+			got := llm.IsLoopbackBaseURL(tc.url)
+			if got != tc.want {
+				t.Errorf("IsLoopbackBaseURL(%q) = %v, want %v", tc.url, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateAndNormalize_ModelPaths(t *testing.T) {
+	// Create two model files.
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "model-a.gguf")
+	pathB := filepath.Join(dir, "model-b.gguf")
+	for _, p := range []string{pathA, pathB} {
+		if err := os.WriteFile(p, []byte("fake"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	pidDir := filepath.Join(t.TempDir(), "pid")
+	cfg := llm.RuntimeLifecycleConfig{
+		Runtime:    "mlx",
+		ModelPaths: map[string]string{"alpha": pathA, "beta": pathB},
+		PIDFile:    filepath.Join(pidDir, "mlx.pid"),
+		SpawnCommand: []string{
+			"./mlx-server",
+			"--first", "${MODEL_PATH}",
+			"--all", "${MODEL_PATHS}",
+			"--json", "${MODEL_PATHS_JSON}",
+			"--alpha", "${MODEL_PATH:alpha}",
+		},
+	}
+
+	result, err := llm.ValidateAndNormalize(cfg)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if len(result.ModelPaths) != 2 {
+		t.Errorf("expected 2 model paths, got %d: %v", len(result.ModelPaths), result.ModelPaths)
+	}
+	if result.ModelPaths["alpha"] != pathA {
+		t.Errorf("alpha path mismatch: got %q", result.ModelPaths["alpha"])
+	}
+	if result.ModelPaths["beta"] != pathB {
+		t.Errorf("beta path mismatch: got %q", result.ModelPaths["beta"])
+	}
+
+	// MODEL_PATH is the first path (sorted by key => "alpha" => pathA).
+	if result.ModelPath != pathA {
+		t.Errorf("expected ModelPath to be %q, got %q", pathA, result.ModelPath)
+	}
+
+	// Verify spawn-command expansion.
+	// Sorted keys: [alpha, beta]; paths: [pathA, pathB]
+	// [0] = "./mlx-server"
+	// [1] = "--first"
+	// [2] = ${MODEL_PATH} => pathA
+	// [3] = "--all"
+	// [4] = ${MODEL_PATHS} => "pathA pathB"
+	// [5] = "--json"
+	// [6] = ${MODEL_PATHS_JSON} => `["pathA","pathB"]`
+	// [7] = "--alpha"
+	// [8] = ${MODEL_PATH:alpha} => pathA
+	if result.SpawnCommand[2] != pathA {
+		t.Errorf("MODEL_PATH expansion: got %q", result.SpawnCommand[2])
+	}
+	if result.SpawnCommand[4] != pathA+" "+pathB {
+		t.Errorf("MODEL_PATHS expansion: got %q", result.SpawnCommand[4])
+	}
+	wantJSON := `["` + pathA + `","` + pathB + `"]`
+	if result.SpawnCommand[6] != wantJSON {
+		t.Errorf("MODEL_PATHS_JSON expansion: got %q, want %q", result.SpawnCommand[6], wantJSON)
+	}
+	if result.SpawnCommand[8] != pathA {
+		t.Errorf("MODEL_PATH:alpha expansion: got %q", result.SpawnCommand[8])
+	}
+}
+
+func TestValidateAndNormalize_LegacyModelPathMirroredToDefault(t *testing.T) {
+	modelPath := createTempModelFile(t)
+	pidDir := filepath.Join(t.TempDir(), "pid")
+	cfg := llm.RuntimeLifecycleConfig{
+		Runtime:   "llama-cpp",
+		ModelPath: modelPath,
+		PIDFile:   filepath.Join(pidDir, "llama.pid"),
+	}
+
+	result, err := llm.ValidateAndNormalize(cfg)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(result.ModelPaths) != 1 {
+		t.Fatalf("expected 1 model path, got %d", len(result.ModelPaths))
+	}
+	if result.ModelPaths["default"] != modelPath {
+		t.Errorf("expected 'default' key to mirror model_path, got %q", result.ModelPaths["default"])
+	}
+}
+
+func TestValidateAndNormalize_NoModelPaths(t *testing.T) {
+	pidDir := filepath.Join(t.TempDir(), "pid")
+	cfg := llm.RuntimeLifecycleConfig{
+		Runtime: "llama-cpp",
+		PIDFile: filepath.Join(pidDir, "llama.pid"),
+	}
+	_, err := llm.ValidateAndNormalize(cfg)
+	if err == nil {
+		t.Fatal("expected error when no model_path or model_paths configured")
+	}
+}
+
+func TestValidateAndNormalize_MissingModelInPaths(t *testing.T) {
+	pidDir := filepath.Join(t.TempDir(), "pid")
+	cfg := llm.RuntimeLifecycleConfig{
+		Runtime:    "llama-cpp",
+		ModelPaths: map[string]string{"key": "/nonexistent/model.gguf"},
+		PIDFile:    filepath.Join(pidDir, "llama.pid"),
+	}
+	_, err := llm.ValidateAndNormalize(cfg)
+	if err == nil {
+		t.Fatal("expected error for missing model in model_paths")
+	}
+}
+
+func TestComputeEndpointKey(t *testing.T) {
+	cases := []struct {
+		runtime, baseURL, want string
+	}{
+		{"llama-cpp", "http://127.0.0.1:8080/v1", "llama-cpp:127.0.0.1:8080"},
+		{"mlx", "http://localhost:9090", "mlx:localhost:9090"},
+		{"llama-cpp", "http://localhost", "llama-cpp:localhost:8080"},
+		{"mlx", "", "mlx:127.0.0.1:8080"},
+		{"llama-cpp", "not a url", "llama-cpp:127.0.0.1:8080"},
+	}
+	for _, tc := range cases {
+		got := llm.ComputeEndpointKey(tc.runtime, tc.baseURL)
+		if got != tc.want {
+			t.Errorf("ComputeEndpointKey(%q, %q) = %q, want %q", tc.runtime, tc.baseURL, got, tc.want)
+		}
+	}
+}

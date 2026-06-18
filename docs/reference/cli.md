@@ -265,6 +265,46 @@ meept daemon stop
 meept daemon restart
 ```
 
+### `meept runtime` - Local LLM Runtime Management
+
+Manage local LLM runtime subprocesses (llama.cpp, MLX). Providers must have a `lifecycle` block in `config/models.json5` and a loopback `baseURL` to be eligible.
+
+```bash
+# Status (default provider is "local")
+meept runtime status
+meept runtime status local
+meept runtime status local --format json
+
+# Start (waits for health by default)
+meept runtime start [provider]
+meept runtime start [provider] --wait=false
+
+# Stop / restart
+meept runtime stop [provider]
+meept runtime restart [provider]
+```
+
+Status output (text):
+
+```
+Runtime local: running (PID: 12345)
+  Health endpoint:  http://127.0.0.1:8080/health
+  PID file:         /Users/me/.meept/run/local.pid
+  Process group:    llama-cpp:127.0.0.1:8080
+  In-use models:    lfm-code, lfm-thinking-claude
+  Would start:      true
+```
+
+Status output (JSON) adds three fields:
+
+| Field | Description |
+|-------|-------------|
+| `process_group` | Endpoint key (`<runtime>:<host>:<port>`). Shared across all providers on the same port |
+| `in_use_models` | Subset of the provider's models referenced by enabled agents, model slots, or aliases |
+| `would_start` | `true` when `auto_start: true` and at least one in-use model is present |
+
+Use `--format json` for scripting; the text form is for humans.
+
 ### `meept queue` - Queue Management
 
 View and manage job queue.

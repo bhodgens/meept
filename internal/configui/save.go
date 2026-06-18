@@ -1,6 +1,7 @@
 package configui
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
@@ -366,8 +367,29 @@ func saveModelsConfig(sm *SectionModel) error {
 				if !f.IsDirty() {
 					continue
 				}
-				if err := setStructField(&provider, f.Key(), f.Get()); err != nil {
-					return fmt.Errorf("set providers.%s.%s: %w", providerName, f.Key(), err)
+				key := f.Key()
+				// Initialize lifecycle pointer if we're writing a lifecycle field.
+				if strings.HasPrefix(key, "lifecycle.") && provider.Lifecycle == nil {
+					provider.Lifecycle = &llm.RuntimeLifecycleConfig{}
+				}
+				switch {
+				case key == "lifecycle.model_paths":
+					// Parse JSON-encoded map[string]string.
+					var m map[string]string
+					if err := json.Unmarshal([]byte(f.Get()), &m); err != nil {
+						return fmt.Errorf("set providers.%s.%s: %w", providerName, key, err)
+					}
+					if provider.Lifecycle != nil {
+						provider.Lifecycle.ModelPaths = m
+					}
+				case key == "lifecycle.spawn_command":
+					if provider.Lifecycle != nil {
+						provider.Lifecycle.SpawnCommand = strings.Fields(f.Get())
+					}
+				default:
+					if err := setStructField(&provider, key, f.Get()); err != nil {
+						return fmt.Errorf("set providers.%s.%s: %w", providerName, key, err)
+					}
 				}
 			}
 			cfg.Providers[providerName] = provider

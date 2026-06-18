@@ -336,3 +336,197 @@ func TestRuntimeManager_StartAll_SkipNonAutoStart(t *testing.T) {
 		t.Error("expected no PID file for non-auto-start provider")
 	}
 }
+
+// TestRuntimeManager_SharedProcess_Merge verifies that two providers targeting
+// the same (runtime, host, port) share one subprocess.
+func TestRuntimeManager_SharedProcess_Merge(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	mgr := llm.NewRuntimeManager(slog.Default())
+	pidDir := t.TempDir()
+	pidFile := filepath.Join(pidDir, "shared.pid")
+
+	cfg1 := &llm.RuntimeConfig{
+		Type:            llm.RuntimeLlamaCpp,
+		ModelPath:       createTempModelFile(t),
+		ModelPaths:      map[string]string{"alpha": createTempModelFile(t)},
+		EndpointKey:     "llama-cpp:127.0.0.1:9999",
+		PIDFile:         pidFile,
+		AutoStart:       true,
+		AutoStop:        true,
+		SpawnCommand:    []string{"sleep", "0.1"},
+		SpawnTimeout:    2 * time.Second,
+		HealthEndpoint:  "/health",
+		HealthInterval:  100 * time.Millisecond,
+		HealthTimeout:   1 * time.Second,
+		HealthThreshold: 1,
+	}
+	cfg2 := &llm.RuntimeConfig{
+		Type:            llm.RuntimeLlamaCpp,
+		ModelPath:       createTempModelFile(t),
+		ModelPaths:      map[string]string{"beta": createTempModelFile(t)},
+		EndpointKey:     "llama-cpp:127.0.0.1:9999", // Same endpoint.
+		PIDFile:         pidFile,
+		AutoStart:       true,
+		AutoStop:        true,
+		SpawnCommand:    []string{"sleep", "0.1"},
+		SpawnTimeout:    2 * time.Second,
+		HealthEndpoint:  "/health",
+		HealthInterval:  100 * time.Millisecond,
+		HealthTimeout:   1 * time.Second,
+		HealthThreshold: 1,
+	}
+
+	// Both providers point at the same httptest URL but EndpointKey
+	// is explicitly set to force the shared endpoint.
+	if err := mgr.RegisterConfig("provider-a", cfg1, server.URL); err != nil {
+		t.Fatalf("RegisterConfig provider-a: %v", err)
+	}
+	if err := mgr.RegisterConfig("provider-b", cfg2, server.URL); err != nil {
+		t.Fatalf("RegisterConfig provider-b: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := mgr.StartAll(ctx); err != nil {
+		t.Fatalf("StartAll: %v", err)
+	}
+
+	// Status reports both providers but they share the same PID via the endpoint.
+	statuses := mgr.Status()
+	if len(statuses) != 2 {
+		t.Fatalf("expected 2 status entries, got %d", len(statuses))
+	}
+
+	// Find the two provider statuses; both should report the same PID (non-zero).
+	pids := make(map[int]struct{})
+	for _, s := range statuses {
+		if s.PID != 0 {
+			pids[s.PID] = struct{}{}
+		}
+	}
+	if len(pids) == 0 {
+		t.Fatal("no PID reported from either provider (process not running)")
+	}
+	if len(pids) > 1 {
+		t.Errorf("expected both providers to share one PID, got %d distinct PIDs: %v", len(pids), pids)
+	}
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopCancel()
+	if err := mgr.StopAll(stopCtx); err != nil {
+		t.Fatalf("StopAll: %v", err)
+	}
+}
+
+// TestRuntimeManager_InUseGate verifies that StartAll skips endpoints with no
+// model in the in-use set.
+func TestRuntimeManager_InUseGate(t *testing.T) {
+	mgr := llm.NewRuntimeManager(slog.Default())
+	pidFile := filepath.Join(t.TempDir(), "gated.pid")
+	cfg := &llm.RuntimeConfig{
+		Type:            llm.RuntimeLlamaCpp,
+		ModelPath:       createTempModelFile(t),
+		ModelPaths:      map[string]string{"unused": createTempModelFile(t)},
+		EndpointKey:     "llama-cpp:127.0.0.1:8765",
+		PIDFile:         pidFile,
+		AutoStart:       true,
+		AutoStop:        true,
+		SpawnCommand:    []string{"sleep", "10"},
+		SpawnTimeout:    2 * time.Second,
+		HealthEndpoint:  "/health",
+		HealthInterval:  1 * time.Second,
+		HealthTimeout:   2 * time.Second,
+		HealthThreshold: 1,
+	}
+	if err := mgr.RegisterConfig("gated-provider", cfg, "http://127.0.0.1:8765"); err != nil {
+		t.Fatalf("RegisterConfig: %v", err)
+	}
+
+	// Set an in-use set that does NOT include our provider/model.
+	mgr.SetModelsInUse(map[string]struct{}{"other/model": {}})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := mgr.StartAll(ctx); err != nil {
+		t.Fatalf("StartAll: %v", err)
+	}
+
+	// PID file should NOT exist because the endpoint was gated.
+	if _, err := os.Stat(pidFile); err == nil {
+		t.Error("PID file should not exist; provider was not in in-use set")
+	}
+
+	// Status should reflect WouldStart=false and InUseModels empty.
+	status, ok := mgr.StatusForProvider("gated-provider")
+	if !ok {
+		t.Fatal("provider not found in status")
+	}
+	if status.WouldStart {
+		t.Error("expected WouldStart=false for gated provider")
+	}
+	if len(status.InUseModels) != 0 {
+		t.Errorf("expected no InUseModels, got %v", status.InUseModels)
+	}
+	if status.ProcessGroup == "" {
+		t.Error("expected non-empty ProcessGroup")
+	}
+}
+
+// TestRuntimeManager_InUseGate_IncludesModel verifies that when the in-use set
+// includes the provider's model, StartAll spawns.
+func TestRuntimeManager_InUseGate_IncludesModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	mgr := llm.NewRuntimeManager(slog.Default())
+	pidFile := filepath.Join(t.TempDir(), "included.pid")
+	cfg := &llm.RuntimeConfig{
+		Type:            llm.RuntimeLlamaCpp,
+		ModelPath:       createTempModelFile(t),
+		ModelPaths:      map[string]string{"alpha": createTempModelFile(t)},
+		EndpointKey:     "llama-cpp:127.0.0.1:8766",
+		PIDFile:         pidFile,
+		AutoStart:       true,
+		AutoStop:        true,
+		SpawnCommand:    []string{"sleep", "0.1"},
+		SpawnTimeout:    2 * time.Second,
+		HealthEndpoint:  "/health",
+		HealthInterval:  100 * time.Millisecond,
+		HealthTimeout:   1 * time.Second,
+		HealthThreshold: 1,
+	}
+	if err := mgr.RegisterConfig("included-provider", cfg, server.URL); err != nil {
+		t.Fatalf("RegisterConfig: %v", err)
+	}
+
+	mgr.SetModelsInUse(map[string]struct{}{"included-provider/alpha": {}})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := mgr.StartAll(ctx); err != nil {
+		t.Fatalf("StartAll: %v", err)
+	}
+
+	if _, err := os.Stat(pidFile); err != nil {
+		t.Errorf("expected PID file after gated start: %v", err)
+	}
+
+	status, _ := mgr.StatusForProvider("included-provider")
+	if !status.WouldStart {
+		t.Error("expected WouldStart=true for in-use provider")
+	}
+	if len(status.InUseModels) != 1 || status.InUseModels[0] != "alpha" {
+		t.Errorf("expected InUseModels=['alpha'], got %v", status.InUseModels)
+	}
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopCancel()
+	mgr.StopAll(stopCtx)
+}

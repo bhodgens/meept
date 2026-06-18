@@ -258,3 +258,15 @@ export OPENROUTER_API_KEY="your-key"
 ## Runtime Lifecycle Management
 
 Meept can automatically manage local LLM runtimes (spawn on startup, health monitoring, graceful shutdown). See [LLM Runtime Lifecycle Management](llm-lifecycle.md) for configuration details.
+
+### Localhost requirement
+
+A provider's `lifecycle` block is only activated when its `options.baseURL` host is a loopback address (`localhost`, `127.0.0.1`, `::1`, or `0:0:0:0:0:0:0:1`). Providers with any other host (private ranges like `192.168.*` or `10.*`, public hostnames, public IPs, or missing `baseURL`) are skipped at daemon startup with a warning. This prevents the daemon from spawning subprocesses against remote or untrusted endpoints.
+
+### Agent-gated startup
+
+A runtime is only spawned at daemon startup when at least one of its provider's models is "in use" — referenced by an enabled agent's `model` field, one of the models.json5 slots (`model`, `small_model`, `classifier_model`, `summarizer_model`), or a `model_aliases` target. Runtimes with no in-use models are skipped with a debug log. Use `meept runtime status` to see the `would_start` verdict per provider.
+
+### Shared process per port
+
+Multiple providers (or multiple models within one provider) targeting the same `(runtime, host, port)` triplet share a single subprocess. The first provider registered for an endpoint wins the spawn command; later registrations merge their models into the existing process. See [LLM Runtime Lifecycle Management](llm-lifecycle.md) for the `model_paths` multi-model configuration.

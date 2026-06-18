@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/pathutil"
 	"github.com/spf13/cobra"
@@ -168,23 +171,33 @@ func runRuntimeStatusFormatted(ctx context.Context, provider, format string) err
 		provider = "local"
 	}
 
-	_, pc, err := loadRuntimeConfig(provider)
+	cfg, pc, err := loadRuntimeConfig(provider)
 	if err != nil {
 		return err
 	}
 
 	pidFile := pidFileFromConfig(pc.Lifecycle)
 
+	// Compute lifecycle-derived metadata. Best-effort: on failure, fields are
+	// zero-valued and the status command still succeeds.
+	processGroup := computeProcessGroup(pc)
+	inUseModels := computeInUseModels(cfg, pc, provider)
+	wouldStart := len(inUseModels) > 0 && pc.Lifecycle.AutoStart
+
 	data, err := os.ReadFile(pidFile)
 	if os.IsNotExist(err) {
 		if format == "json" {
 			return jsonOutput(map[string]any{
-				"provider": provider,
-				"running":  false,
-				"pid":      nil,
+				"provider":      provider,
+				"running":       false,
+				"pid":           nil,
+				"process_group": processGroup,
+				"in_use_models": inUseModels,
+				"would_start":   wouldStart,
 			})
 		}
 		fmt.Printf("Runtime %s: not running (no PID file)\n", provider)
+		printStatusExtras(processGroup, inUseModels, wouldStart)
 		return nil
 	}
 	if err != nil {
@@ -200,13 +213,17 @@ func runRuntimeStatusFormatted(ctx context.Context, provider, format string) err
 	if !running {
 		if format == "json" {
 			return jsonOutput(map[string]any{
-				"provider": provider,
-				"running":  false,
-				"pid":      pid,
-				"note":     "process dead, stale PID file",
+				"provider":      provider,
+				"running":       false,
+				"pid":           pid,
+				"note":          "process dead, stale PID file",
+				"process_group": processGroup,
+				"in_use_models": inUseModels,
+				"would_start":   wouldStart,
 			})
 		}
 		fmt.Printf("Runtime %s: not running (process dead, PID: %d)\n", provider, pid)
+		printStatusExtras(processGroup, inUseModels, wouldStart)
 		return nil
 	}
 
@@ -223,13 +240,69 @@ func runRuntimeStatusFormatted(ctx context.Context, provider, format string) err
 			"pid":             pid,
 			"health_endpoint": baseURL + healthEndpoint,
 			"pid_file":        pidFile,
+			"process_group":   processGroup,
+			"in_use_models":   inUseModels,
+			"would_start":     wouldStart,
 		})
 	}
 
 	fmt.Printf("Runtime %s: running (PID: %d)\n", provider, pid)
 	fmt.Printf("  Health endpoint:  %s%s\n", baseURL, healthEndpoint)
 	fmt.Printf("  PID file:         %s\n", pidFile)
+	printStatusExtras(processGroup, inUseModels, wouldStart)
 	return nil
+}
+
+// printStatusExtras prints process_group, in_use_models, and would_start in text mode.
+func printStatusExtras(processGroup string, inUseModels []string, wouldStart bool) {
+	if processGroup != "" {
+		fmt.Printf("  Process group:    %s\n", processGroup)
+	}
+	if len(inUseModels) > 0 {
+		fmt.Printf("  In-use models:    %s\n", strings.Join(inUseModels, ", "))
+	} else {
+		fmt.Printf("  In-use models:    (none)\n")
+	}
+	fmt.Printf("  Would start:      %v\n", wouldStart)
+}
+
+// computeProcessGroup returns the endpoint key for the provider's runtime.
+func computeProcessGroup(pc *llm.ProviderConfig) string {
+	if pc == nil || pc.Lifecycle == nil {
+		return ""
+	}
+	return llm.ComputeEndpointKey(pc.Lifecycle.Runtime, pc.Options.BaseURL)
+}
+
+// computeInUseModels computes which of the provider's models appear in the
+// daemon-wide in-use set. Best-effort: returns nil on any error.
+func computeInUseModels(cfg *llm.ProvidersConfig, pc *llm.ProviderConfig, providerID string) []string {
+	if cfg == nil || pc == nil {
+		return nil
+	}
+	// Build AgentModelRef list from default-loaded agent definitions.
+	agentRefs := loadAgentRefsCLI()
+	slots := llm.ModelSlots{
+		Model:      cfg.Model,
+		SmallModel: cfg.SmallModel,
+	}
+	inUse := llm.BuildModelsInUse(agentRefs, slots, cfg.ModelAliases, cfg.DisabledProviders)
+	if len(inUse) == 0 {
+		return nil
+	}
+	// Filter to just this provider's models.
+	var out []string
+	keys := make([]string, 0, len(pc.Models))
+	for k := range pc.Models {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if _, isInUse := inUse[providerID+"/"+k]; isInUse {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 // jsonOutput writes data as indented JSON to stdout.
@@ -269,7 +342,7 @@ func runRuntimeStart(ctx context.Context, provider string, wait bool) error {
 
 	// Spawn the process
 	runtimeProc := llm.NewRuntimeProcess(rtCfg)
-	if err := runtimeProc.Start(ctx); err != nil {
+	if err := runtimeProc.Start(ctx, io.Discard, io.Discard); err != nil {
 		return fmt.Errorf("failed to start runtime: %w", err)
 	}
 
@@ -357,4 +430,22 @@ func runtimePIDConfig(pc *llm.ProviderConfig, pidFile string) *llm.RuntimeConfig
 	return &llm.RuntimeConfig{
 		PIDFile: pidFile,
 	}
+}
+
+// loadAgentRefsCLI loads default agent definitions and converts them to the
+// minimal AgentModelRef form used by BuildModelsInUse. Best-effort: returns
+// nil on any error.
+func loadAgentRefsCLI() []llm.AgentModelRef {
+	agents, err := config.LoadAgentDefinitionsDefault(nil)
+	if err != nil || len(agents) == 0 {
+		return nil
+	}
+	out := make([]llm.AgentModelRef, 0, len(agents))
+	for _, a := range agents {
+		if a == nil {
+			continue
+		}
+		out = append(out, llm.AgentModelRef{Model: a.Model, Enabled: a.Enabled})
+	}
+	return out
 }

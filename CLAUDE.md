@@ -180,9 +180,19 @@ All configuration uses **JSON5** format (JSON with comments and trailing commas)
 - **Client**: `~/.meept/client.json5` (TUI keybindings/rendering)
 - **Menubar**: `~/.meept/menubar.json5` (menubar app settings)
 - **Metrics DB**: `~/.meept/metrics.db` (SQLite time-series storage)
+- **Runtime logs**: `~/.meept/logs/runtimes/` (per-model JSON logs + per-process raw logs)
 - **launchd Plist**: `~/Library/LaunchAgents/com.caimlas.meept-daemon.plist` (macOS)
 
 Templates are in `config/` and copied on `make install` if not present.
+
+### Local Runtime Lifecycle Gating
+
+Provider `lifecycle` blocks are activated only when **all** of the following hold:
+
+1. **Localhost gate**: `options.baseURL` host is loopback (`localhost`, `127.0.0.1`, `::1`, `0:0:0:0:0:0:0:1`). Non-loopback providers are skipped with a warning at daemon startup.
+2. **In-use gate**: at least one of the provider's models is referenced by an enabled agent, a model slot (`model`/`small_model`/`classifier_model`/`summarizer_model`), or a `model_aliases` entry. Endpoints with no in-use models are skipped with a debug log; `meept runtime status` shows `would_start: false` for these.
+
+Providers (or models within one provider) targeting the same `(runtime, host, port)` share a single subprocess — the first registration's `spawn_command` and `pid_file` win. Use `model_paths` (map form) instead of `model_path` (singular) to spawn multi-model servers. Spawn-command variable expansion supports `${MODEL_PATH}`, `${MODEL_PATHS}`, `${MODEL_PATHS_JSON}`, and `${MODEL_PATH:<key>}`. See `docs/configuration/llm-lifecycle.md` for the full reference.
 
 ### Development API Key
 

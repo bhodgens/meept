@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,8 +27,15 @@ func NewRuntimeProcess(cfg *RuntimeConfig) *RuntimeProcess {
 	}
 }
 
-// Start spawns the runtime process.
-func (p *RuntimeProcess) Start(ctx context.Context) error {
+// Start spawns the runtime process. stdout and stderr are used for the
+// subprocess's output streams; nil falls back to os.Stdout/os.Stderr.
+func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) error {
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+	if stderr == nil {
+		stderr = os.Stderr
+	}
 	// Check if already running via PID file
 	if pid, err := p.readPIDFile(); err == nil && pid > 0 {
 		if p.isProcessRunning(pid) {
@@ -46,8 +54,8 @@ func (p *RuntimeProcess) Start(ctx context.Context) error {
 	args := p.config.SpawnCommand[1:]
 
 	p.cmd = exec.CommandContext(ctx, name, args...)
-	p.cmd.Stdout = os.Stdout
-	p.cmd.Stderr = os.Stderr
+	p.cmd.Stdout = stdout
+	p.cmd.Stderr = stderr
 	p.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := p.cmd.Start(); err != nil {
