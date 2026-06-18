@@ -509,14 +509,21 @@ class _ChatInputState extends ConsumerState<ChatInput>
       },
     );
 
+    final hasFocus = _focusNode.hasFocus;
+
     return Focus(
       onKeyEvent: _handleKeyEvent,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           color: CyberpunkColors.black,
           border: Border(
-            top: BorderSide(color: CyberpunkColors.orangePrimary, width: 1),
+            top: BorderSide(
+              color: hasFocus
+                  ? CyberpunkColors.orangePrimary
+                  : CyberpunkColors.midGray,
+              width: 1,
+            ),
           ),
         ),
         child: Column(
@@ -539,46 +546,29 @@ class _ChatInputState extends ConsumerState<ChatInput>
               children: [
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
+                  child: TextField(
+                    controller: _controller,
+                    focusNode: _focusNode,
+                    style: CyberpunkTypography.bodyMedium.copyWith(
+                      color: CyberpunkColors.greenSuccess,
+                      fontFamily: 'SourceCodePro',
                     ),
-                    decoration: BoxDecoration(
-                      color: CyberpunkColors.black,
-                      border: Border.all(
-                        color: CyberpunkColors.midGray,
-                        width: 1,
-                      ),
-                      borderRadius: BorderRadius.circular(4),
+                    cursorColor: Colors.transparent,
+                    cursorWidth: 0,
+                    decoration: const InputDecoration(
+                      hintText: '',
+                      hintStyle: CyberpunkTypography.bodySmall,
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                      isDense: true,
+                      filled: true,
+                      fillColor: CyberpunkColors.black,
                     ),
-                    child: TextField(
-                      controller: _controller,
-                      focusNode: _focusNode,
-                      // Always enabled so users can type/edit during "thinking..." state.
-                      // The send button already disables itself (onTap: null) when loading.
-                      style: CyberpunkTypography.bodyMedium.copyWith(
-                        color: CyberpunkColors.greenSuccess,
-                        fontFamily: 'SourceCodePro',
-                      ),
-                      // Hide the native bar cursor — the custom
-                      // _TerminalCursorController.buildTextSpan renders
-                      // a terminal-style blinking underscore instead.
-                      cursorColor: Colors.transparent,
-                      cursorWidth: 0,
-                      decoration: const InputDecoration(
-                        hintText: '',
-                        hintStyle: CyberpunkTypography.bodySmall,
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.zero,
-                        isDense: true,
-                      ),
-                      minLines: _minLines,
-                      maxLines: _maxLines,
-                      keyboardType: TextInputType.multiline,
-                      textCapitalization: TextCapitalization.none,
-                      onSubmitted: (_) {},
-                    ),
+                    minLines: _minLines,
+                    maxLines: _maxLines,
+                    keyboardType: TextInputType.multiline,
+                    textCapitalization: TextCapitalization.none,
+                    onSubmitted: (_) {},
                   ),
                 ),
                 const SizedBox(width: 8),
