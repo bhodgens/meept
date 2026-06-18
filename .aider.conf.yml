@@ -1,0 +1,28 @@
+# Aider Configuration for Meept
+# See: https://aider.chat/docs/config.html
+
+# Model configuration
+model: glm-5.2
+
+# Don't auto-commit changes - let the user review first
+auto-commits: false
+
+# Show diffs after changes
+show-diffs: true
+
+# Disable fancy UI features that might interfere with hook usage
+fancy-input: false
+
+# Keep history file manageable
+history-file: ~/.aider.history.meept
+
+# Model-specific settings
+# glm-5.2 is a Z.ai model - configure API if needed
+# export ANTHROPIC_API_KEY=your_key_here  # if using Claude
+# export Z_API_KEY=your_key_here          # if using Z.ai/GLM models
+
+# Reasoning efficiency - balance between thorough and fast
+reasoning-effort: medium
+
+# Verify context before making changes
+verify-context: true
