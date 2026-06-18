@@ -269,6 +269,18 @@ class StorageService {
 
   // ------ General helpers ------
 
+  bool? getBool(String key) => _prefs?.getBool(key);
+
+  Future<void> setBool(String key, bool value) async {
+    await _prefs?.setBool(key, value);
+  }
+
+  double? getDouble(String key) => _prefs?.getDouble(key);
+
+  Future<void> setDouble(String key, double value) async {
+    await _prefs?.setDouble(key, value);
+  }
+
   Future<bool> clearAll() async {
     await _secureStorage?.deleteAll();
     return await _prefs?.clear() ?? false;

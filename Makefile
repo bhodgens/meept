@@ -62,7 +62,7 @@ help:
 	@echo ""
 	@echo "Documentation:"
 	@echo "  docs-serve       Start local docs dev server"
-	@echo "  docs-build       Build static docs site"
+	@echo "  docs-build       Build static docs site (includes llms-readme-full.txt)"
 	@echo "  docs-generate    Generate reference docs from Go source"
 
 MEEPT_HOME := $(HOME)/.meept
@@ -499,6 +499,8 @@ docs-serve: docs-deps
 
 docs-build: docs-deps
 	@echo "Building docs..."
+	@echo "Generating LLM flat doc..."
+	@go run ./cmd/llmdoc -output docs/generated/llms-readme-full.txt
 	@if [ -d docs/.venv ]; then \
 		. docs/.venv/bin/activate && mkdocs build -d site; \
 	else \

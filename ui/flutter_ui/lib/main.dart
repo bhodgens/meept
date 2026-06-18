@@ -4,9 +4,11 @@ import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
+import 'package:window_manager/window_manager.dart';
 import 'services/storage_service.dart';
 import 'services/sdk_client.dart';
 import 'services/websocket_service.dart';
+import 'services/window_geometry_service.dart';
 import 'theme/cyberpunk_theme.dart';
 import 'core/constants.dart';
 import 'core/router.dart';
@@ -17,6 +19,14 @@ void main() async {
 
   // Initialize persistent storage before any provider or service reads
   await StorageService.instance.init();
+
+  // Restore saved window size/position on desktop platforms
+  await WindowGeometryService.initialize();
+  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+    // Intercept the native close button so we can persist geometry
+    await windowManager.setPreventClose(true);
+    windowManager.addListener(_WindowCloseHandler());
+  }
 
   // Initialize certificate pinning before any HTTP/WebSocket connections
   await SdkApiClient.initCertPinning();
@@ -41,6 +51,17 @@ void main() async {
         child: CyberpunkApp(),
       ),
     );
+  }
+}
+
+/// Listens for the native close event, saves window geometry, then
+/// allows the window to close.
+class _WindowCloseHandler extends WindowListener {
+  @override
+  void onWindowClose() async {
+    await WindowGeometryService.save();
+    await windowManager.setPreventClose(false);
+    await windowManager.destroy();
   }
 }
 

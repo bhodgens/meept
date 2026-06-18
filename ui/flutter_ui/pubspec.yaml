@@ -36,6 +36,9 @@ dependencies:
   shared_preferences: ^2.2.2
   flutter_secure_storage: ^9.2.2
 
+  # Desktop window management (position/size persistence)
+  window_manager: ^0.4.3
+
   # Speech-to-text
   speech_to_text: ^7.0.0
   

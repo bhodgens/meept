@@ -35,6 +35,13 @@ abstract class AppConstants {
   static const String ttsMaxQueueSizePref = 'tts_max_queue_size';
   // NOTE: use_tls was removed — HTTPS is mandatory and not configurable
 
+  // Window geometry (desktop only)
+  static const String windowWidthPref = 'window_width';
+  static const String windowHeightPref = 'window_height';
+  static const String windowXPref = 'window_x';
+  static const String windowYPref = 'window_y';
+  static const String windowMaximizedPref = 'window_maximized';
+
   /// Development API key (injected at build time via --dart-define).
   /// In debug builds: pass `--dart-define=MEEPT_DEV_API_KEY=meept_dev_default_key_CHANGE_ME`.
   /// In release builds: empty string — no fallback prevents silent auth with known keys.
