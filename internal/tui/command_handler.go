@@ -7,6 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caimlas/meept/internal/skills"
+	"github.com/caimlas/meept/internal/tui/commands"
 	"github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
 )
@@ -36,9 +38,11 @@ type CommandResultMsg struct {
 
 // CommandHandler handles execution of slash commands.
 type CommandHandler struct {
-	rpc *RPCClient
-	// getChatModel returns the current chat model for undo/retry operations.
+	rpc          *RPCClient
 	getChatModel func() *models.ChatModel
+	// skillRegistry holds discovered skills for /skill command.
+	skillRegistry  *skills.Registry
+	skillCommand   *commands.SkillCommand
 }
 
 // CommandHandlerOption configures a CommandHandler.
@@ -51,6 +55,14 @@ func WithChatModelGetter(fn func() *models.ChatModel) CommandHandlerOption {
 	}
 }
 
+// WithSkillRegistry sets the skill registry for /skill command.
+func WithSkillRegistry(reg *skills.Registry) CommandHandlerOption {
+	return func(h *CommandHandler) {
+		h.skillRegistry = reg
+		h.skillCommand = commands.NewSkillCommand(reg)
+	}
+}
+
 // NewCommandHandler creates a new command handler with the given options.
 func NewCommandHandler(rpc *RPCClient, opts ...CommandHandlerOption) *CommandHandler {
 	h := &CommandHandler{
@@ -58,6 +70,10 @@ func NewCommandHandler(rpc *RPCClient, opts ...CommandHandlerOption) *CommandHan
 	}
 	for _, opt := range opts {
 		opt(h)
+	}
+	// Initialize skill command if registry available
+	if h.skillRegistry != nil && h.skillCommand == nil {
+		h.skillCommand = commands.NewSkillCommand(h.skillRegistry)
 	}
 	return h
 }
@@ -82,6 +98,21 @@ func (h *CommandHandler) executeSync(cmd *SlashCommand) *CommandResult {
 	// Check if this is a built-in command
 	if IsBuiltin(cmd.Name) {
 		return h.executeBuiltin(cmd)
+	}
+
+	// Check if this is the /skill command
+	if cmd.Name == "skill" {
+		if h.skillCommand == nil {
+			return &CommandResult{
+				Output:  "skill system not initialized",
+				IsError: true,
+			}
+		}
+		result := h.skillCommand.Execute(cmd.Args)
+		return &CommandResult{
+			Output:  result.Output,
+			IsError: result.IsError,
+		}
 	}
 
 	// Try template invocation via RPC
@@ -154,9 +185,7 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 			IsError: true,
 		}
 	}
-}
-
-// executeHelp shows help for commands.
+}// executeHelp shows help for commands.
 func (h *CommandHandler) executeHelp(args []string) *CommandResult {
 	if len(args) > 0 {
 		// Help for specific command

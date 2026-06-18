@@ -226,6 +226,7 @@ func SetCustomCommands(cmds map[string]CustomCommand) {
 // Discovery order (project-local overrides user-global on name collision):
 //  1. .meept/commands/*.md  (project-local, if .meept/ exists in cwd)
 //  2. ~/.meept/commands/*.md (user-global)
+//  3. ~/.claude/commands/*.md (Claude Code compatibility - lowest priority)
 func DiscoverCustomCommands() map[string]CustomCommand {
 	cmds := make(map[string]CustomCommand)
 
@@ -234,6 +235,10 @@ func DiscoverCustomCommands() map[string]CustomCommand {
 	if err == nil {
 		userPath := filepath.Join(homeDir, ".meept", "commands")
 		loadCommandsFromDir(cmds, userPath)
+
+		// Claude Code commands - lowest priority
+		claudePath := filepath.Join(homeDir, ".claude", "commands")
+		loadCommandsFromDir(cmds, claudePath)
 	}
 
 	// Project-local second (higher priority, overwrites user-global on collision)
