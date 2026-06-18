@@ -320,7 +320,7 @@ func (s *Scheduler) RunNow(jobID string) error {
 	// Stop() ran between the atomic check above and acquiring the lock.
 	// Without this, runNowWg.Add could happen after Stop's runNowWg.Wait
 	// returns, leaking a goroutine past shutdown.
-	if !s.running.Load() { //nolint:mutexio // atomic.Bool.Load is not I/O
+	if !s.running.Load() {
 		s.mu.Unlock()
 		return fmt.Errorf("scheduler not running")
 	}
@@ -379,7 +379,7 @@ func (s *Scheduler) ListJobs() []JobInfo {
 		}
 
 		// Get last run info from store
-		if cfg, ok := s.store.Get(jobID); ok { //nolint:mutexio // in-memory map lookup via internal RLock, not I/O
+		if cfg, ok := s.store.Get(jobID); ok {
 			info.LastRun = cfg.LastRunAt
 			info.LastError = cfg.LastError
 			info.RunCount = cfg.RunCount
@@ -419,7 +419,7 @@ func (s *Scheduler) GetJob(jobID string) (JobInfo, bool) {
 		}
 	}
 
-	if cfg, ok := s.store.Get(jobID); ok { //nolint:mutexio // in-memory map lookup via internal RLock, not I/O
+	if cfg, ok := s.store.Get(jobID); ok {
 		info.LastRun = cfg.LastRunAt
 		info.LastError = cfg.LastError
 		info.RunCount = cfg.RunCount

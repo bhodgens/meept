@@ -56,7 +56,7 @@ func (c *RPCClient) Connect() error {
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
 
-	if c.connected.Load() { //nolint:mutexio // atomic.Bool.Load is not I/O
+	if c.connected.Load() {
 		return nil
 	}
 
@@ -77,7 +77,7 @@ func (c *RPCClient) Close() error {
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
 
-	if !c.connected.Load() { //nolint:mutexio // atomic.Bool.Load is not I/O
+	if !c.connected.Load() {
 		return nil
 	}
 
@@ -187,7 +187,7 @@ func (c *RPCClient) callOnce(method string, params any) (json.RawMessage, error)
 	defer c.callMu.Unlock()
 
 	// Re-check connection status after acquiring lock
-	if !c.connected.Load() { //nolint:mutexio // atomic.Bool.Load is not I/O
+	if !c.connected.Load() {
 		return nil, errors.New(ErrNotConnected)
 	}
 

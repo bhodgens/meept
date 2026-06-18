@@ -1316,7 +1316,11 @@ func (d *Dispatcher) handlePlatformIntrospection(ctx context.Context, input stri
 		specs := d.registry.ListSpecs()
 		sb.WriteString("### Available Agents\n\n")
 		for _, spec := range specs {
-			fmt.Fprintf(&sb, "- **%s** (%s): %s\n", spec.Name, spec.ID, truncateString(spec.Purpose, 100))
+			desc := extractBriefDescription(spec.Purpose)
+			if desc == "" {
+				desc = truncateString(spec.Purpose, 100)
+			}
+			fmt.Fprintf(&sb, "- **%s** (`%s`): %s\n", spec.Name, spec.ID, truncateString(desc, 120))
 		}
 		sb.WriteString("\n")
 	}

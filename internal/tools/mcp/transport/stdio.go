@@ -63,7 +63,7 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if t.running.Load() { //nolint:mutexio // atomic.Bool.Load is not I/O
+	if t.running.Load() {
 		return fmt.Errorf("transport already running")
 	}
 
@@ -285,7 +285,7 @@ func (t *StdioTransport) Close() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if !t.running.Load() { //nolint:mutexio // atomic.Bool.Load is not I/O
+	if !t.running.Load() {
 		return nil
 	}
 

@@ -15,6 +15,22 @@ import (
 	"github.com/caimlas/meept/pkg/id"
 )
 
+// extractFirstLine returns the first non-heading, non-empty line from a
+// markdown body. Used to produce brief summaries from agent purpose bodies.
+func extractFirstLine(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		return trimmed
+	}
+	return ""
+}
+
 // PlatformStatusTool returns platform status including uptime and component health.
 type PlatformStatusTool struct {
 	getStatus func() map[string]any
@@ -106,8 +122,12 @@ func (t *PlatformAgentsTool) Execute(ctx context.Context, args map[string]any) (
 	for _, spec := range specs {
 		sb.WriteString(fmt.Sprintf("### %s (`%s`)\n", spec.Name, spec.ID))
 		sb.WriteString(fmt.Sprintf("**Role**: %s\n\n", spec.Role))
-		// Truncate long purpose descriptions for readability
-		purpose := spec.Purpose
+		// Extract first meaningful line from the purpose body to avoid
+		// nested markdown headings breaking the list structure.
+		purpose := extractFirstLine(spec.Purpose)
+		if purpose == "" {
+			purpose = spec.Purpose
+		}
 		if len(purpose) > 300 {
 			purpose = purpose[:297] + "..."
 		}

@@ -117,7 +117,7 @@ func (l *LazySkillLoader) loadAndCache(ctx context.Context, key string) (*Skill,
 	l.stats.Misses++
 
 	// Get path from index
-	indexEntry := l.index.Get(key) //nolint:mutexio // in-memory index map lookup, not I/O
+	indexEntry := l.index.Get(key)
 	if indexEntry == nil {
 		l.stats.Errors++
 		return nil, fmt.Errorf("skill not found in index: %s", key)

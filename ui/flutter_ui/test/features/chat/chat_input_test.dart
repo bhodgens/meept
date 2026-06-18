@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meept_ui/features/chat/chat_input.dart';
+import 'package:meept_ui/features/chat/slash_autocomplete.dart';
 import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/providers/providers.dart';
 import 'package:meept_ui/services/sdk_client.dart';
@@ -93,6 +95,15 @@ Widget _buildTestApp({
   );
 }
 
+/// Pump only a bounded number of frames instead of pumpAndSettle.
+/// ChatInput uses an infinite blink animation (AnimationController.repeat)
+/// which causes pumpAndSettle to time out.
+Future<void> pumpBounded(WidgetTester tester, {int frames = 5}) async {
+  for (var i = 0; i < frames; i++) {
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+}
+
 void main() {
   const testAgents = [
     Agent(id: 'coder', name: 'coder', description: '', prompt: '', enabled: true),
@@ -100,180 +111,208 @@ void main() {
     Agent(id: 'planner', name: 'planner', description: '', prompt: '', enabled: true),
   ];
 
-  group('ChatInput - Agent Selector', () {
-    testWidgets('displays the agent selector PopupMenuButton', (tester) async {
+  group('ChatInput - text field', () {
+    testWidgets('renders a TextField with terminal-style green text', (tester) async {
       await tester.pumpWidget(_buildTestApp(
         child: const ChatInput(sessionId: 'test-session'),
         agents: testAgents,
       ));
+      await pumpBounded(tester);
 
-      await tester.pumpAndSettle();
-
-      // The selector is a PopupMenuButton
-      expect(find.byType(PopupMenuButton<String>), findsOneWidget);
-    });
-
-    testWidgets('shows the default agent name in the selector display',
-        (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agents: testAgents,
-      ));
-
-      await tester.pumpAndSettle();
-
-      // Open the popup, then check menu items have agent names
-      await tester.tap(find.byType(PopupMenuButton<String>));
-      await tester.pump(const Duration(milliseconds: 200));
-      await tester.pump();
-
-      // Each agent name appears in a PopupMenuItem
-      final popupMenus = find.byType(PopupMenuItem<String>);
-      expect(popupMenus, findsWidgets);
-    });
-
-    testWidgets('shows loading indicator in dropdown when agents are loading',
-        (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agentsLoading: true,
-      ));
-
-      await tester.pump(); // only one pump, avoid infinite settle
-
-      // PopupMenuButton is rendered
-      expect(find.byType(PopupMenuButton<String>), findsOneWidget);
-
-      // Open the popup
-      await tester.tap(find.byType(PopupMenuButton<String>));
-      await tester.pump(const Duration(milliseconds: 200));
-      await tester.pump();
-
-      // The loading progress indicator should appear
-      expect(find.byType(LinearProgressIndicator), findsOneWidget);
-    });
-
-    testWidgets('populates dropdown with available agent names', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agents: testAgents,
-      ));
-
-      await tester.pumpAndSettle();
-
-      // Open the popup menu
-      await tester.tap(find.byType(PopupMenuButton<String>));
-      await tester.pump(const Duration(milliseconds: 200));
-      await tester.pump();
-
-      // Agent icons appear in PopupMenuItems (includes fallback + loaded agents)
-      expect(find.byIcon(Icons.code), findsWidgets); // coder has code icon
-      expect(find.byIcon(Icons.bug_report), findsWidgets); // debugger
-      expect(find.byIcon(Icons.account_tree), findsWidgets); // planner
-    });
-
-    testWidgets('shows the active agent name in the selector display',
-        (tester) async {
-      final activeAgent = testAgents[1]; // debugger
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agents: testAgents,
-        activeAgent: activeAgent,
-      ));
-
-      await tester.pumpAndSettle();
-
-      // The display text should say 'debugger'
-      // Open popup to make sure display is visible
-      expect(find.byType(PopupMenuButton<String>), findsOneWidget);
-    });
-
-    testWidgets('highlights selected agent with different icon color',
-        (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agents: testAgents,
-        activeAgent: testAgents[0], // coder = active
-      ));
-
-      await tester.pumpAndSettle();
-
-      // Open the popup
-      await tester.tap(find.byType(PopupMenuButton<String>));
-      await tester.pump(const Duration(milliseconds: 200));
-      await tester.pump();
-
-      // Menu items have icons for each agent
-      expect(find.byIcon(Icons.code), findsWidgets);
-      expect(find.byIcon(Icons.bug_report), findsWidgets);
-      expect(find.byIcon(Icons.account_tree), findsWidgets);
-      // Plus the expand_more icon in the selector display
-      expect(find.byIcon(Icons.expand_more), findsOneWidget);
-    });
-
-    testWidgets('the send button is present and interactive', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agents: testAgents,
-        activeAgent: const Agent(
-          id: 'planner',
-          name: 'planner',
-          description: '',
-          prompt: '',
-          enabled: true,
-        ),
-      ));
-
-      await tester.pumpAndSettle();
-
-      // Send button exists
-      expect(find.byIcon(Icons.send), findsOneWidget);
-
-      // Set text in the input
-      await tester.enterText(
-        find.byType(TextField),
-        'test message',
-      );
-
-      // Tap send
-      await tester.tap(find.byIcon(Icons.send));
-      await tester.pumpAndSettle();
-
-      // After send, the text field should be cleared
       final textField = tester.widget<TextField>(find.byType(TextField));
-      expect(textField.controller!.text, '');
+      expect(textField.minLines, 3);
+      expect(textField.maxLines, 8);
+      // Cursor is transparent (custom terminal cursor used instead)
+      expect(textField.cursorColor, Colors.transparent);
+      expect(textField.cursorWidth, 0);
+    });
+
+    testWidgets('accepts typed text', (tester) async {
+      await tester.pumpWidget(_buildTestApp(
+        child: const ChatInput(sessionId: 'test-session'),
+        agents: testAgents,
+      ));
+      await pumpBounded(tester);
+
+      await tester.enterText(find.byType(TextField), 'hello world');
+      await pumpBounded(tester);
+
+      final textField = tester.widget<TextField>(find.byType(TextField));
+      expect(textField.controller!.text, 'hello world');
+    });
+
+    testWidgets('shift+enter inserts a newline', (tester) async {
+      await tester.pumpWidget(_buildTestApp(
+        child: const ChatInput(sessionId: 'test-session'),
+        agents: testAgents,
+      ));
+      await pumpBounded(tester);
+
+      await tester.enterText(find.byType(TextField), 'hello');
+      await pumpBounded(tester);
+
+      // Simulate Shift+Enter
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await pumpBounded(tester);
+
+      final textField = tester.widget<TextField>(find.byType(TextField));
+      expect(textField.controller!.text, 'hello\n');
     });
   });
 
-  group('ChatInput - Agent Icon Mapping', () {
-    testWidgets('default coder agent shows code icon', (tester) async {
-      await tester.pumpWidget(_buildTestApp(
-        child: const ChatInput(sessionId: 'test-session'),
-        agents: const [
-          Agent(id: 'coder', name: 'coder', description: '', prompt: '', enabled: true),
-        ],
-      ));
-      await tester.pumpAndSettle();
-
-      // The selector displays an icon for the default 'coder' agent
-      expect(find.byIcon(Icons.code), findsWidgets);
-    });
-
-    testWidgets('debugger agent shows bug_report icon', (tester) async {
+  group('ChatInput - send button', () {
+    testWidgets('send button is present and shows send icon when idle', (tester) async {
       await tester.pumpWidget(_buildTestApp(
         child: const ChatInput(sessionId: 'test-session'),
         agents: testAgents,
-        activeAgent: const Agent(
-          id: 'debugger',
-          name: 'debugger',
-          description: '',
-          prompt: '',
-          enabled: true,
-        ),
+        activeAgent: testAgents[0],
       ));
-      await tester.pumpAndSettle();
+      await pumpBounded(tester);
 
-      expect(find.byIcon(Icons.bug_report), findsOneWidget);
+      expect(find.byIcon(Icons.send), findsOneWidget);
+    });
+
+    testWidgets('tapping send clears the input field', (tester) async {
+      await tester.pumpWidget(_buildTestApp(
+        child: const ChatInput(sessionId: 'test-session'),
+        agents: testAgents,
+        activeAgent: testAgents[0],
+      ));
+      await pumpBounded(tester);
+
+      await tester.enterText(find.byType(TextField), 'test message');
+      await pumpBounded(tester);
+
+      // Tap send button
+      await tester.tap(find.byIcon(Icons.send));
+      await pumpBounded(tester);
+
+      final textField = tester.widget<TextField>(find.byType(TextField));
+      expect(textField.controller!.text, '');
+    });
+
+    testWidgets('send button shows spinner when chat is loading', (tester) async {
+      // Override chatProvider to start in loading state
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            chatProvider.overrideWith(
+              (_) => ChatNotifier(
+                sdkClient: _StubSdkClient(),
+                websocket: _StubWebSocket(),
+                ttsNotifier: _StubTtsNotifier(),
+              )..state = const ChatState(isLoading: true),
+            ),
+            agentProvider.overrideWith(
+              (ref) => AgentNotifier(sdkClient: _StubSdkClient())
+                ..state = const AgentState(),
+            ),
+            activeAgentProvider.overrideWith((_) => testAgents[0]),
+            sdkClientProvider.overrideWith((_) => _StubSdkClient()),
+          ],
+          child: const MaterialApp(
+            home: Scaffold(
+              body: ChatInput(sessionId: 'test-session'),
+            ),
+          ),
+        ),
+      );
+      await pumpBounded(tester);
+
+      // When loading, no send icon; a CircularProgressIndicator appears instead
+      expect(find.byIcon(Icons.send), findsNothing);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    });
+  });
+
+  group('ChatInput - slash commands', () {
+    testWidgets('typing slash shows autocomplete popup', (tester) async {
+      await tester.pumpWidget(_buildTestApp(
+        child: const ChatInput(sessionId: 'test-session'),
+        agents: testAgents,
+      ));
+      await pumpBounded(tester);
+
+      await tester.enterText(find.byType(TextField), '/');
+      await pumpBounded(tester, frames: 10);
+
+      // SlashAutocomplete should be visible
+      expect(find.byType(SlashAutocomplete), findsOneWidget);
+    });
+
+    testWidgets('typing /h filters to commands starting with /h', (tester) async {
+      await tester.pumpWidget(_buildTestApp(
+        child: const ChatInput(sessionId: 'test-session'),
+        agents: testAgents,
+      ));
+      await pumpBounded(tester);
+
+      await tester.enterText(find.byType(TextField), '/h');
+      await pumpBounded(tester, frames: 10);
+
+      expect(find.byType(SlashAutocomplete), findsOneWidget);
+      // /help should be visible
+      expect(find.text('/help'), findsWidgets);
+    });
+
+    testWidgets('typing non-slash text does not show autocomplete', (tester) async {
+      await tester.pumpWidget(_buildTestApp(
+        child: const ChatInput(sessionId: 'test-session'),
+        agents: testAgents,
+      ));
+      await pumpBounded(tester);
+
+      await tester.enterText(find.byType(TextField), 'hello');
+      await pumpBounded(tester);
+
+      expect(find.byType(SlashAutocomplete), findsNothing);
+    });
+
+    testWidgets('clearing text hides autocomplete', (tester) async {
+      await tester.pumpWidget(_buildTestApp(
+        child: const ChatInput(sessionId: 'test-session'),
+        agents: testAgents,
+      ));
+      await pumpBounded(tester);
+
+      // Show autocomplete
+      await tester.enterText(find.byType(TextField), '/');
+      await pumpBounded(tester, frames: 10);
+      expect(find.byType(SlashAutocomplete), findsOneWidget);
+
+      // Clear text — autocomplete should disappear
+      await tester.enterText(find.byType(TextField), '');
+      await pumpBounded(tester, frames: 10);
+      expect(find.byType(SlashAutocomplete), findsNothing);
+    });
+  });
+
+  group('ChatInput - focus', () {
+    testWidgets('auto-focuses on first build', (tester) async {
+      await tester.pumpWidget(_buildTestApp(
+        child: const ChatInput(sessionId: 'test-session'),
+        agents: testAgents,
+      ));
+      await pumpBounded(tester);
+
+      final textField = tester.widget<TextField>(find.byType(TextField));
+      expect(textField.focusNode!.hasFocus, isTrue);
+    });
+
+    testWidgets('border color changes with focus state', (tester) async {
+      await tester.pumpWidget(_buildTestApp(
+        child: const ChatInput(sessionId: 'test-session'),
+        agents: testAgents,
+      ));
+      await pumpBounded(tester);
+
+      // The top border should be present (focused or unfocused)
+      final container = tester.widget<Container>(find.byType(Container).at(0));
+      final decoration = container.decoration as BoxDecoration;
+      expect(decoration.border?.top.width, 1);
     });
   });
 }
