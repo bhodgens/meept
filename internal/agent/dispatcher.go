@@ -2202,6 +2202,8 @@ func hasKeywordMatch(input string) bool {
 		"search", "find", "look up",
 		// Security
 		"security", "vulnerability", "exploit",
+		// Platform introspection
+		"capabilities", "what can you do", "your tools", "your agents",
 		// Git
 		"git",
 	}

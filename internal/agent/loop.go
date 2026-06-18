@@ -3806,11 +3806,19 @@ func (l *AgentLoop) buildMCPContextSection() string {
 }
 
 // buildTerminateResponse builds a response string from tool execution results.
-// Successful results are JSON-encoded and joined; if all results failed, returns "done".
+// Successful results are joined; string results are used directly (no JSON encoding)
+// to preserve formatting. Non-string results are JSON-encoded. If all results failed,
+// returns "done".
 func (l *AgentLoop) buildTerminateResponse(results []*ExecutionResult) string {
 	var parts []string
 	for _, r := range results {
 		if r == nil || !r.Success {
+			continue
+		}
+		// String results are used as-is to preserve markdown/text formatting.
+		// JSON-encoding them would produce escaped \n and wrapping quotes.
+		if s, ok := r.Result.(string); ok {
+			parts = append(parts, s)
 			continue
 		}
 		data, err := json.Marshal(r.Result)
