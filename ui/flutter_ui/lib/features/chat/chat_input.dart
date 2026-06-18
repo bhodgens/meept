@@ -563,7 +563,7 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
                           // as a character at the real cursor position instead.
                           cursorColor: Colors.transparent,
                           cursorWidth: 0,
-                          decoration: InputDecoration(
+                          decoration: const InputDecoration(
                             hintText: '',
                             hintStyle: CyberpunkTypography.bodySmall,
                             border: InputBorder.none,

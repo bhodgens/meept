@@ -12,7 +12,7 @@ Name | Type | Description | Notes
 **label** | **String** |  | 
 **type** | **String** |  | 
 **requiredCommaOmitempty** | **bool** |  | [optional] 
-**defaultCommaOmitempty** | **Object** |  | [optional] 
+**defaultCommaOmitempty** | [**JsonObject**](.md) |  | [optional] 
 **optionsCommaOmitempty** | **String** |  | [optional] 
 **placeholderCommaOmitempty** | **String** |  | [optional] 
 **helpCommaOmitempty** | **String** |  | [optional] 

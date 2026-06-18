@@ -12,6 +12,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/api_client.dart';
+import '../services/sdk_client.dart';
 import '../services/websocket_service.dart';
 import '../services/storage_service.dart';
 import '../services/session_notifier.dart';
@@ -21,10 +22,29 @@ import '../models/api_models.dart';
 // Storage service — initialized in main() before runApp
 final storageProvider = Provider<StorageService>((ref) => StorageService.instance);
 
-// API Client provider — loads persisted host/port and API key from storage
+// API Client provider — loads persisted host/port and API key from storage.
+//
+// NOTE: This provider is retained for feature panels that still use the
+// hand-written [ApiClient].  Provider classes (chat/task/agent/metrics/
+// job/plan) have migrated to [sdkClientProvider] and no longer reference
+// this provider.  Do not introduce new usages — prefer [sdkClientProvider].
 final apiClientProvider = Provider<ApiClient>((ref) {
   final storage = ref.watch(storageProvider);
   final client = ApiClient.storage(storage: storage);
+  ref.onDispose(() => client.dispose());
+  return client;
+});
+
+// SDK Client provider — wraps the OpenAPI-generated Dart SDK.
+//
+// Loads the same persisted host/port/API key as [apiClientProvider] so the
+// two are interchangeable at the transport layer.  Migrated providers should
+// depend on this provider; feature panels that still call hand-written
+// endpoint shims may continue to use [apiClientProvider] until they are
+// ported to [SdkApiClient].
+final sdkClientProvider = Provider<SdkApiClient>((ref) {
+  final storage = ref.watch(storageProvider);
+  final client = SdkApiClient.storage(storage: storage);
   ref.onDispose(() => client.dispose());
   return client;
 });
@@ -100,10 +120,10 @@ final shortcutHelpProvider = StateProvider<bool>((ref) => false);
 final focusInputRequestProvider = StateProvider<bool>((ref) => false);
 
 /// Connection detail row data.
-class _ConnDataRow {
+class ConnDataRow {
   final String label;
   final String value;
-  const _ConnDataRow(this.label, this.value);
+  const ConnDataRow(this.label, this.value);
 }
 
 /// Connection details — fetched from the API on successful connect.
@@ -152,18 +172,18 @@ class ConnectionDetails {
   }
 
   /// Build the rows for the connection details dialog.
-  List<_ConnDataRow> get dialogRows => <_ConnDataRow>[
-        const _ConnDataRow('host', ''),
-        const _ConnDataRow('port', ''),
-        _ConnDataRow('tls', tls ? 'yes (self-signed)' : 'no'),
+  List<ConnDataRow> get dialogRows => <ConnDataRow>[
+        const ConnDataRow('host', ''),
+        const ConnDataRow('port', ''),
+        ConnDataRow('tls', tls ? 'yes (self-signed)' : 'no'),
         if (tls)
-          _ConnDataRow('certificate', certFingerprint ?? 'pinned (no file)'),
-        _ConnDataRow('connection', connectedAt != null ? 'alive' : '—'),
-        if (connectedAt != null) _ConnDataRow('duration', duration),
-        if (pid != null) _ConnDataRow('pid', pid.toString()),
-        if (state != 'unknown') _ConnDataRow('state', state),
-        if (uptime != null) _ConnDataRow('uptime', uptime!),
-        if (version != null) _ConnDataRow('version', version!),
+          ConnDataRow('certificate', certFingerprint ?? 'pinned (no file)'),
+        ConnDataRow('connection', connectedAt != null ? 'alive' : '—'),
+        if (connectedAt != null) ConnDataRow('duration', duration),
+        if (pid != null) ConnDataRow('pid', pid.toString()),
+        if (state != 'unknown') ConnDataRow('state', state),
+        if (uptime != null) ConnDataRow('uptime', uptime!),
+        if (version != null) ConnDataRow('version', version!),
       ];
 
   /// Get the row value for a given label.

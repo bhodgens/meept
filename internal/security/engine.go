@@ -850,7 +850,7 @@ func (e *Engine) RecordOverride(action, pattern, decision, reason, conversationI
 		INSERT INTO permission_overrides
 		(action, pattern, decision, reason, max_uses, expires_at, conversation_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		action, pattern, decision, reason, maxUses, expiresAt, convID)
+		action, pattern, decision, reason, maxUses, expiresAt, convID) //nolint:mutexio // mutex serializes sqlite connection access
 
 	if err != nil {
 		return 0, err

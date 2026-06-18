@@ -12,7 +12,7 @@ Name | Type | Description | Notes
 **name** | **String** |  | 
 **description** | **String** |  | 
 **status** | **String** |  | 
-**steps** | **List<String>** |  | [default to const []]
+**steps** | **BuiltList&lt;String&gt;** |  | 
 **metadata** | **String** |  | 
 **createdAt** | **String** |  | 
 **updatedAt** | **String** |  | 

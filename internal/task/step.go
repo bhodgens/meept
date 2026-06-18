@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/pkg/models"
+	sid "github.com/caimlas/meept/pkg/id"
 )
 
 // ErrStepNotFound is returned when a step cannot be found by ID.
@@ -179,7 +180,7 @@ type TaskStep struct {
 func NewTaskStep(taskID, description string, sequence int) *TaskStep {
 	now := time.Now().UTC()
 	return &TaskStep{
-		ID:          fmt.Sprintf("step-%s-%d-%d", taskID, sequence, now.UnixNano()),
+		ID:          fmt.Sprintf("step-%s-%d-%s", taskID, sequence, sid.Generate("")),
 		TaskID:      taskID,
 		Description: description,
 		State:       StepPending,
@@ -252,7 +253,7 @@ func CreateRevisionWithContext(original *TaskStep, feedback string, revisionCont
 func CreateRevision(original *TaskStep, feedback string) *TaskStep {
 	now := time.Now().UTC()
 	revision := &TaskStep{
-		ID:            fmt.Sprintf("step-%s-rev-%d-%d", original.TaskID, original.Sequence+1000+original.RevisionCount, now.UnixNano()),
+		ID:            fmt.Sprintf("step-%s-rev-%d-%s", original.TaskID, original.Sequence+1000+original.RevisionCount, sid.Generate("")),
 		TaskID:        original.TaskID,
 		Description:   fmt.Sprintf("[REVISION] %s\n\nFeedback: %s", original.Description, feedback),
 		ToolHint:      original.ToolHint,

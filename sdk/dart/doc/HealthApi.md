@@ -25,11 +25,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = HealthApi();
+final api = MeeptClient().getHealthApi();
 
 try {
-    api_instance.healthGet();
-} catch (e) {
+    api.healthGet();
+} on DioException catch (e) {
     print('Exception when calling HealthApi->healthGet: $e\n');
 }
 ```

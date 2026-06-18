@@ -23,12 +23,12 @@ Establishes a WebSocket connection for receiving real-time agent progress events
 ```dart
 import 'package:meept_client/api.dart';
 
-final api_instance = WebSocketApi();
-final sessionId = sessionId_example; // String | Optional session ID to filter events
+final api = MeeptClient().getWebSocketApi();
+final String sessionId = sessionId_example; // String | Optional session ID to filter events
 
 try {
-    api_instance.getWebSocket(sessionId);
-} catch (e) {
+    api.getWebSocket(sessionId);
+} on DioException catch (e) {
     print('Exception when calling WebSocketApi->getWebSocket: $e\n');
 }
 ```

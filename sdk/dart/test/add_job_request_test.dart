@@ -1,21 +1,12 @@
-//
-// AUTO-GENERATED FILE, DO NOT MODIFY!
-//
-// @dart=2.18
-
-// ignore_for_file: unused_element, unused_import
-// ignore_for_file: always_put_required_named_parameters_first
-// ignore_for_file: constant_identifier_names
-// ignore_for_file: lines_longer_than_80_chars
-
-import 'package:meept_client/api.dart';
 import 'package:test/test.dart';
+import 'package:meept_client/meept_client.dart';
 
 // tests for AddJobRequest
 void main() {
-  // final instance = AddJobRequest();
+  final instance = AddJobRequestBuilder();
+  // TODO add properties to the builder and call build()
 
-  group('test AddJobRequest', () {
+  group(AddJobRequest, () {
     // String id
     test('to test the property `id`', () async {
       // TODO
@@ -36,12 +27,12 @@ void main() {
       // TODO
     });
 
-    // Object agentConfigCommaOmitempty
+    // JsonObject agentConfigCommaOmitempty
     test('to test the property `agentConfigCommaOmitempty`', () async {
       // TODO
     });
 
-    // Object shellConfigCommaOmitempty
+    // JsonObject shellConfigCommaOmitempty
     test('to test the property `shellConfigCommaOmitempty`', () async {
       // TODO
     });
@@ -51,7 +42,5 @@ void main() {
       // TODO
     });
 
-
   });
-
 }

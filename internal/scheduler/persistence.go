@@ -92,7 +92,7 @@ func (s *Store) Load() ([]JobConfig, error) {
 	}
 
 	var storeData StoreData
-	if err := json.Unmarshal(data, &storeData); err != nil {
+	if err := json.Unmarshal(data, &storeData); err != nil { //nolint:mutexio // one-time Load during init; mutex guards s.jobs mutation
 		return nil, fmt.Errorf("failed to parse jobs file: %w", err)
 	}
 
@@ -286,7 +286,7 @@ func (s *Store) Export() ([]byte, error) {
 		Jobs:      jobs,
 	}
 
-	return json.MarshalIndent(storeData, "", "  ")
+	return json.MarshalIndent(storeData, "", "  ") //nolint:mutexio // marshal of snapshotted jobs slice under RLock
 }
 
 // Import imports jobs from JSON, optionally replacing existing jobs.
@@ -295,7 +295,7 @@ func (s *Store) Import(data []byte, replace bool) error {
 	defer s.mu.Unlock()
 
 	var storeData StoreData
-	if err := json.Unmarshal(data, &storeData); err != nil {
+	if err := json.Unmarshal(data, &storeData); err != nil { //nolint:mutexio // unmarshal into local before mutating s.jobs
 		return fmt.Errorf("failed to parse import data: %w", err)
 	}
 

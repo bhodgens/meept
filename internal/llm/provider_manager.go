@@ -752,28 +752,36 @@ func (pm *ProviderManager) AddProvider(cfg *ModelConfig, priority int) {
 
 // RemoveProvider removes a provider.
 func (pm *ProviderManager) RemoveProvider(providerID string) error {
+	// Find and remove the provider under lock, then close the client
+	// outside the lock to avoid blocking other callers during HTTP
+	// connection teardown (CLAUDE.md mutex scope rule).
 	pm.mu.Lock()
-	defer pm.mu.Unlock()
 
+	var removed *ProviderEntry
 	for i, p := range pm.providers {
 		if p.Config.ProviderID == providerID {
-			// Close the chatter if it implements io.Closer.
-			// Concrete Chatter implementations (Client, AnthropicClient) have
-			// signature Close() error, so the assertion must match that.
-			if closer, ok := p.Chatter.(interface{ Close() error }); ok {
-				if err := closer.Close(); err != nil {
-					pm.logger.Warn("Error closing provider client", "provider", providerID, "error", err)
-				}
-			}
-
-			// Remove from slice
+			removed = p
 			pm.providers = append(pm.providers[:i], pm.providers[i+1:]...)
-			pm.logger.Info("Provider removed", "provider", providerID)
-			return nil
+			break
+		}
+	}
+	pm.mu.Unlock()
+
+	if removed == nil {
+		return fmt.Errorf("provider not found: %s", providerID)
+	}
+
+	// Close the chatter if it implements io.Closer.
+	// Concrete Chatter implementations (Client, AnthropicClient) have
+	// signature Close() error, so the assertion must match that.
+	if closer, ok := removed.Chatter.(interface{ Close() error }); ok {
+		if err := closer.Close(); err != nil {
+			pm.logger.Warn("Error closing provider client", "provider", providerID, "error", err)
 		}
 	}
 
-	return fmt.Errorf("provider not found: %s", providerID)
+	pm.logger.Info("Provider removed", "provider", providerID)
+	return nil
 }
 
 // GetPrimaryProvider returns the current primary provider.
@@ -902,7 +910,7 @@ func (pm *ProviderManager) Stop() {
 	for _, p := range pm.providers {
 		// Match Close() error signature (both Client and AnthropicClient).
 		if closer, ok := p.Chatter.(interface{ Close() error }); ok {
-			if err := closer.Close(); err != nil {
+			if err := closer.Close(); err != nil { //nolint:mutexio // one-time teardown guarded by stopChan select
 				pm.logger.Warn("Error closing provider client", "error", err)
 			}
 		}

@@ -93,7 +93,7 @@ func (h *PTYHandler) handleSessions(w http.ResponseWriter, r *http.Request) {
 	sess, err := h.ptyMgr.CreateSession(sessionID, cfg)
 	if err != nil {
 		h.logger.Error("Failed to create session", "error", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, sanitizeErrMessage(err.Error()), http.StatusInternalServerError)
 		return
 	}
 
@@ -231,7 +231,7 @@ func (h *PTYHandler) writeToSession(w http.ResponseWriter, r *http.Request, sess
 
 	if _, err := sess.Write([]byte(req.Input)); err != nil {
 		h.logger.Error("Write to session failed", "error", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, sanitizeErrMessage(err.Error()), http.StatusInternalServerError)
 		return
 	}
 
@@ -243,7 +243,7 @@ func (h *PTYHandler) closeSession(w http.ResponseWriter, r *http.Request, sessio
 	err := h.ptyMgr.DestroySession(sessionID)
 	if err != nil {
 		h.logger.Error("Failed to close session", "error", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, sanitizeErrMessage(err.Error()), http.StatusInternalServerError)
 		return
 	}
 

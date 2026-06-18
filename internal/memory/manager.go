@@ -206,7 +206,7 @@ func (m *Manager) Initialize(ctx context.Context) error {
 			DataDir: personalityDir,
 			Logger:  m.logger.With("subsystem", "personality"),
 		})
-		if err := m.personality.Load(ctx); err != nil {
+		if err := m.personality.Load(ctx); err != nil { //nolint:mutexio // one-time init; m.mu serializes initialization, not concurrent request state
 			return fmt.Errorf("failed to load personality: %w", err)
 		}
 		m.logger.Info("Personality model loaded")
@@ -1580,28 +1580,28 @@ func (m *Manager) Close() error {
 	m.stopPrefetchServiceLocked()
 
 	if m.episodic != nil {
-		if err := m.episodic.Close(); err != nil {
+		if err := m.episodic.Close(); err != nil { //nolint:mutexio // teardown under init/closed flag guard; no concurrent work expected
 			lastErr = err
 		}
 		m.episodic = nil
 	}
 
 	if m.task != nil {
-		if err := m.task.Close(); err != nil {
+		if err := m.task.Close(); err != nil { //nolint:mutexio // teardown under init/closed flag guard; no concurrent work expected
 			lastErr = err
 		}
 		m.task = nil
 	}
 
 	if m.personality != nil {
-		if err := m.personality.Close(); err != nil {
+		if err := m.personality.Close(); err != nil { //nolint:mutexio // teardown under init/closed flag guard; no concurrent work expected
 			lastErr = err
 		}
 		m.personality = nil
 	}
 
 	if m.graph != nil {
-		if err := m.graph.Close(); err != nil {
+		if err := m.graph.Close(); err != nil { //nolint:mutexio // teardown under init/closed flag guard; no concurrent work expected
 			lastErr = err
 		}
 		m.graph = nil

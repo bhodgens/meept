@@ -8,7 +8,7 @@ import 'package:meept_client/api.dart';
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**memory** | **Object** |  | 
+**memory** | [**JsonObject**](.md) |  | 
 **relevanceScore** | **num** |  | 
 **source_** | **String** |  | 
 

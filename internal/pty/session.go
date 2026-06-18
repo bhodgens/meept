@@ -300,13 +300,13 @@ func (s *ptySession) Close() error {
 
 	// Close PTY master
 	if s.ptmx != nil {
-		s.ptmx.Close()
+		s.ptmx.Close() //nolint:mutexio // one-time teardown guarded by closed flag
 	}
 
 	// Close stdin pipe in fallback mode
 	if s.stdinPipe != nil {
 		if closer, ok := s.stdinPipe.(io.Closer); ok {
-			closer.Close()
+			closer.Close() //nolint:mutexio // one-time teardown guarded by closed flag
 		}
 	}
 

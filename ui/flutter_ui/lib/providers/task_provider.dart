@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
-import '../services/api_client.dart';
-import 'providers.dart'; // Import apiClientProvider from providers.dart
+import '../services/sdk_client.dart';
+import 'providers.dart';
 
 const _unset = Object();
 
@@ -32,16 +32,20 @@ class TaskState {
 
 /// StateNotifier that manages task loading
 class TaskNotifier extends StateNotifier<TaskState> {
-  TaskNotifier({required this.apiClient})
+  TaskNotifier({required this.sdkClient})
       : super(const TaskState());
 
-  final ApiClient apiClient;
+  final SdkApiClient sdkClient;
 
   /// Fetch all tasks for the active session from the server
   Future<void> loadTasks() async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      final tasks = await apiClient.listTasks();
+      // SdkApiClient.listTasks returns the raw `tasks` array — callers
+      // deserialize each entry via Task.fromJson because the OpenAPI spec
+      // leaves the Task entity untyped.
+      final rawTasks = await sdkClient.listTasks();
+      final tasks = rawTasks.map((t) => Task.fromJson(t)).toList(growable: false);
       state = state.copyWith(tasks: tasks, isLoading: false);
     } catch (e) {
       state = state.copyWith(
@@ -58,10 +62,11 @@ class TaskNotifier extends StateNotifier<TaskState> {
   }) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      final task = await apiClient.createTask(
+      final raw = await sdkClient.createTask(
         title: title,
         sessionId: sessionId,
       );
+      final task = Task.fromJson(raw);
       state = state.copyWith(tasks: [...state.tasks, task], isLoading: false);
       return task;
     } catch (e) {
@@ -77,7 +82,7 @@ class TaskNotifier extends StateNotifier<TaskState> {
   Future<bool?> updateTaskStatus(String id, String newStatus) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      await apiClient.updateTask(id, state: newStatus);
+      await sdkClient.updateTask(id, state: newStatus);
       // Refresh the full list from server
       await loadTasks();
       return true;
@@ -94,7 +99,7 @@ class TaskNotifier extends StateNotifier<TaskState> {
   Future<bool> cancelTask(String id) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      await apiClient.cancelTask(id);
+      await sdkClient.cancelTask(id);
       await loadTasks();
       return true;
     } catch (e) {
@@ -110,6 +115,6 @@ class TaskNotifier extends StateNotifier<TaskState> {
 /// Task state provider
 final taskProvider =
     StateNotifierProvider<TaskNotifier, TaskState>((ref) {
-  final client = ref.watch(apiClientProvider);
-  return TaskNotifier(apiClient: client);
+  final client = ref.watch(sdkClientProvider);
+  return TaskNotifier(sdkClient: client);
 });

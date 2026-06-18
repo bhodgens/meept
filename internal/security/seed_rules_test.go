@@ -1,6 +1,7 @@
 package security
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -257,27 +258,9 @@ func TestSeedRulesCategories(t *testing.T) {
 	}
 }
 
+// containsSubstring is a case-insensitive substring check used by tests.
+// Uses strings.EqualFold + strings.ToLower to handle multi-byte UTF-8 safely
+// (avoiding byte-level ASCII case conversion that would corrupt é/ñ/etc.).
 func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		match := true
-		for j := range len(substr) {
-			// Case-insensitive comparison
-			sc := s[i+j]
-			tc := substr[j]
-			if sc >= 'A' && sc <= 'Z' {
-				sc += 32
-			}
-			if tc >= 'A' && tc <= 'Z' {
-				tc += 32
-			}
-			if sc != tc {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }

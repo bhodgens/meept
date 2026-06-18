@@ -132,23 +132,37 @@ func (m *AmendmentManager) Process(ctx context.Context, requestID string) (*Amen
 			Success:   false,
 			Message:   fmt.Sprintf("no handler for amendment type: %s", req.Type),
 		}
+		m.mu.Lock()
 		req.Status = AmendmentRejected
+		m.mu.Unlock()
 		return reply, nil
 	}
 
-	// Call handler
+	// Call handler outside the lock (handler may be slow / do I/O).
 	reply, err := handler(ctx, req)
 	if err != nil {
+		m.mu.Lock()
 		req.Status = AmendmentRejected
+		m.mu.Unlock()
 		return nil, err
 	}
 
+	// Re-acquire the lock before mutating req.Status so readers observing the
+	// pending map (GetPending, CancelPendingForTask, Close) see a consistent
+	// value rather than racing with the write.
+	m.mu.Lock()
 	if reply.Success {
 		req.Status = AmendmentApplied
 		req.ProcessedAt = time.Now().UTC()
-		m.publishEvent("task.amend.applied", req)
 	} else {
 		req.Status = AmendmentRejected
+	}
+	m.mu.Unlock()
+
+	// Publish events outside the lock (bus publish may block).
+	if reply.Success {
+		m.publishEvent("task.amend.applied", req)
+	} else {
 		m.publishEvent("task.amend.rejected", req)
 	}
 

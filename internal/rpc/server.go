@@ -188,12 +188,17 @@ func (s *Server) Stop(ctx context.Context) error {
 		s.listener.Close()
 	}
 
-	// Close all connections
+	// Close all connections. Snapshot under lock, then close outside to
+	// avoid holding connMu during network teardown (CLAUDE.md mutex scope).
 	s.connMu.Lock()
+	conns := make([]net.Conn, 0, len(s.conns))
 	for conn := range s.conns {
-		conn.Close()
+		conns = append(conns, conn)
 	}
 	s.connMu.Unlock()
+	for _, conn := range conns {
+		conn.Close()
+	}
 
 	// Wait for active requests to drain with configurable timeout
 	done := make(chan struct{})

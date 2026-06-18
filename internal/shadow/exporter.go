@@ -566,10 +566,30 @@ func jaccardSimilarity(a, b map[string]int) float64 {
 	return float64(intersection) / float64(union)
 }
 
+// expandPath expands a leading `~/` to the user's home directory.
+//
+// Only `~/` and `~` (alone) are expanded; POSIX `~user` syntax is not supported
+// (config paths are operator-controlled and never use `~user` form). If
+// os.UserHomeDir fails the original path is returned unmodified — silently
+// producing a path like "/<rest>" would be worse than returning the literal.
 func expandPath(path string) string {
-	if path != "" && path[0] == '~' {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, path[1:])
+	if path == "" || path[0] != '~' {
+		return path
 	}
+	// Bare "~" or "~/..." — both are home-relative.
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			// Best effort: return the literal tilde path. The caller will
+			// hit a clear "no such file" error rather than silently writing
+			// to the wrong location.
+			return path
+		}
+		if path == "~" {
+			return home
+		}
+		return filepath.Join(home, path[2:])
+	}
+	// `~user` form — not supported; return as-is so caller sees explicit error.
 	return path
 }

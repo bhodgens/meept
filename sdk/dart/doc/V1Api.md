@@ -16,7 +16,10 @@ Method | HTTP request | Description
 [**apiV1CacheInvalidatePost**](V1Api.md#apiv1cacheinvalidatepost) | **POST** /api/v1/cache/invalidate | s.handleCacheInvalidate
 [**apiV1CacheStatsGet**](V1Api.md#apiv1cachestatsget) | **GET** /api/v1/cache/stats | s.handleCacheStats
 [**apiV1CalendarEventsGet**](V1Api.md#apiv1calendareventsget) | **GET** /api/v1/calendar/events | s.handleCalendarList
+[**apiV1CalendarEventsIdDelete**](V1Api.md#apiv1calendareventsiddelete) | **DELETE** /api/v1/calendar/events/{id} | s.handleCalendarDelete
 [**apiV1CalendarEventsIdGet**](V1Api.md#apiv1calendareventsidget) | **GET** /api/v1/calendar/events/{id} | s.handleCalendarGet
+[**apiV1CalendarEventsIdPut**](V1Api.md#apiv1calendareventsidput) | **PUT** /api/v1/calendar/events/{id} | s.handleCalendarUpdate
+[**apiV1CalendarEventsPost**](V1Api.md#apiv1calendareventspost) | **POST** /api/v1/calendar/events | s.handleCalendarCreate
 [**apiV1CalendarQuickaddPost**](V1Api.md#apiv1calendarquickaddpost) | **POST** /api/v1/calendar/quickadd | s.handleCalendarQuickAdd
 [**apiV1CalendarTodayGet**](V1Api.md#apiv1calendartodayget) | **GET** /api/v1/calendar/today | s.handleCalendarToday
 [**apiV1CalendarUpcomingGet**](V1Api.md#apiv1calendarupcomingget) | **GET** /api/v1/calendar/upcoming | s.handleCalendarUpcoming
@@ -25,9 +28,14 @@ Method | HTTP request | Description
 [**apiV1ChatStreamGet**](V1Api.md#apiv1chatstreamget) | **GET** /api/v1/chat/stream | s.handleChatStream
 [**apiV1ChatWithAgentPost**](V1Api.md#apiv1chatwithagentpost) | **POST** /api/v1/chat/with-agent | s.handleChatWithAgent
 [**apiV1ConfigAgentsGet**](V1Api.md#apiv1configagentsget) | **GET** /api/v1/config/agents | s.handleListAgents
+[**apiV1ConfigAgentsIdDelete**](V1Api.md#apiv1configagentsiddelete) | **DELETE** /api/v1/config/agents/{id} | s.handleDeleteAgent
+[**apiV1ConfigAgentsIdGet**](V1Api.md#apiv1configagentsidget) | **GET** /api/v1/config/agents/{id} | s.handleGetAgent
 [**apiV1ConfigAgentsIdPost**](V1Api.md#apiv1configagentsidpost) | **POST** /api/v1/config/agents/{id} | s.handleSaveAgent
+[**apiV1ConfigClientGet**](V1Api.md#apiv1configclientget) | **GET** /api/v1/config/client | s.handleGetClientConfig
 [**apiV1ConfigClientPost**](V1Api.md#apiv1configclientpost) | **POST** /api/v1/config/client | s.handleSaveClientConfig
 [**apiV1ConfigMenubarGet**](V1Api.md#apiv1configmenubarget) | **GET** /api/v1/config/menubar | s.handleGetMenubarConfig
+[**apiV1ConfigMenubarPost**](V1Api.md#apiv1configmenubarpost) | **POST** /api/v1/config/menubar | s.handleSaveMenubarConfig
+[**apiV1ConfigModelsGet**](V1Api.md#apiv1configmodelsget) | **GET** /api/v1/config/models | s.handleGetModelsConfig
 [**apiV1ConfigModelsPost**](V1Api.md#apiv1configmodelspost) | **POST** /api/v1/config/models | s.handleSaveModelsConfig
 [**apiV1ConfigNormalizePost**](V1Api.md#apiv1confignormalizepost) | **POST** /api/v1/config/normalize | s.handleNormalizeConfig
 [**apiV1DaemonRestartPost**](V1Api.md#apiv1daemonrestartpost) | **POST** /api/v1/daemon/restart | s.handleDaemonRestart
@@ -48,6 +56,9 @@ Method | HTTP request | Description
 [**apiV1MetricsRateLimitsGet**](V1Api.md#apiv1metricsratelimitsget) | **GET** /api/v1/metrics/rate-limits | s.handleRateLimitSummary
 [**apiV1MetricsStreamGet**](V1Api.md#apiv1metricsstreamget) | **GET** /api/v1/metrics/stream | s.handleMetricsStream
 [**apiV1ModelsCredentialsProviderDelete**](V1Api.md#apiv1modelscredentialsproviderdelete) | **DELETE** /api/v1/models/credentials/{provider} | s.handleModelsDeleteCredential
+[**apiV1ModelsCredentialsProviderGet**](V1Api.md#apiv1modelscredentialsproviderget) | **GET** /api/v1/models/credentials/{provider} | s.handleModelsGetCredential
+[**apiV1ModelsCredentialsProviderPost**](V1Api.md#apiv1modelscredentialsproviderpost) | **POST** /api/v1/models/credentials/{provider} | s.handleModelsSetCredential
+[**apiV1ModelsDefaultGet**](V1Api.md#apiv1modelsdefaultget) | **GET** /api/v1/models/default | s.handleModelsGetDefault
 [**apiV1ModelsDefaultPost**](V1Api.md#apiv1modelsdefaultpost) | **POST** /api/v1/models/default | s.handleModelsSetDefault
 [**apiV1ModelsGet**](V1Api.md#apiv1modelsget) | **GET** /api/v1/models | s.handleModelsList
 [**apiV1ModelsProviderModelDelete**](V1Api.md#apiv1modelsprovidermodeldelete) | **DELETE** /api/v1/models/{provider}/{model} | s.handleModelsRemove
@@ -58,13 +69,16 @@ Method | HTTP request | Description
 [**apiV1PlansIdGet**](V1Api.md#apiv1plansidget) | **GET** /api/v1/plans/{id} | s.handlePlanGet
 [**apiV1PlansIdRejectPost**](V1Api.md#apiv1plansidrejectpost) | **POST** /api/v1/plans/{id}/reject | s.handlePlanReject
 [**apiV1PlansIdRevisePost**](V1Api.md#apiv1plansidrevisepost) | **POST** /api/v1/plans/{id}/revise | s.handlePlanRevise
+[**apiV1PlansPost**](V1Api.md#apiv1planspost) | **POST** /api/v1/plans | s.handlePlanCreate
 [**apiV1ProjectsDetectPost**](V1Api.md#apiv1projectsdetectpost) | **POST** /api/v1/projects/detect | s.handleProjectDetect
 [**apiV1ProjectsGet**](V1Api.md#apiv1projectsget) | **GET** /api/v1/projects | s.handleProjectList
 [**apiV1ProjectsIdBranchesGet**](V1Api.md#apiv1projectsidbranchesget) | **GET** /api/v1/projects/{id}/branches | s.handleProjectBranches
 [**apiV1ProjectsIdCheckoutPost**](V1Api.md#apiv1projectsidcheckoutpost) | **POST** /api/v1/projects/{id}/checkout | s.handleProjectCheckout
+[**apiV1ProjectsIdDelete**](V1Api.md#apiv1projectsiddelete) | **DELETE** /api/v1/projects/{id} | s.handleProjectUnregister
 [**apiV1ProjectsIdGet**](V1Api.md#apiv1projectsidget) | **GET** /api/v1/projects/{id} | s.handleProjectGet
 [**apiV1ProjectsIdStatusGet**](V1Api.md#apiv1projectsidstatusget) | **GET** /api/v1/projects/{id}/status | s.handleProjectStatus
 [**apiV1ProjectsIdSyncPost**](V1Api.md#apiv1projectsidsyncpost) | **POST** /api/v1/projects/{id}/sync | s.handleProjectSync
+[**apiV1ProjectsPost**](V1Api.md#apiv1projectspost) | **POST** /api/v1/projects | s.handleProjectRegister
 [**apiV1QueueFollowupPost**](V1Api.md#apiv1queuefollowuppost) | **POST** /api/v1/queue/followup | s.handleQueueFollowUpRoute
 [**apiV1QueueJobsGet**](V1Api.md#apiv1queuejobsget) | **GET** /api/v1/queue/jobs | s.handleQueueList
 [**apiV1QueueJobsIdClaimPost**](V1Api.md#apiv1queuejobsidclaimpost) | **POST** /api/v1/queue/jobs/{id}/claim | s.handleQueueClaim
@@ -72,6 +86,7 @@ Method | HTTP request | Description
 [**apiV1QueueJobsIdFailPost**](V1Api.md#apiv1queuejobsidfailpost) | **POST** /api/v1/queue/jobs/{id}/fail | s.handleQueueFail
 [**apiV1QueueJobsIdGet**](V1Api.md#apiv1queuejobsidget) | **GET** /api/v1/queue/jobs/{id} | s.handleQueueGet
 [**apiV1QueueJobsIdRetryPost**](V1Api.md#apiv1queuejobsidretrypost) | **POST** /api/v1/queue/jobs/{id}/retry | s.handleQueueRetry
+[**apiV1QueueJobsPost**](V1Api.md#apiv1queuejobspost) | **POST** /api/v1/queue/jobs | s.handleQueueEnqueue
 [**apiV1QueueStatsGet**](V1Api.md#apiv1queuestatsget) | **GET** /api/v1/queue/stats | s.handleQueueStats
 [**apiV1QueueStatusIdGet**](V1Api.md#apiv1queuestatusidget) | **GET** /api/v1/queue/status/{id} | s.handleQueueStatusRoute
 [**apiV1QueueSteerPost**](V1Api.md#apiv1queuesteerpost) | **POST** /api/v1/queue/steer | s.handleQueueSteerRoute
@@ -85,6 +100,7 @@ Method | HTTP request | Description
 [**apiV1SchedulerJobsIdEnablePost**](V1Api.md#apiv1schedulerjobsidenablepost) | **POST** /api/v1/scheduler/jobs/{id}/enable | s.handleSchedulerEnableJob
 [**apiV1SchedulerJobsIdPausePost**](V1Api.md#apiv1schedulerjobsidpausepost) | **POST** /api/v1/scheduler/jobs/{id}/pause | s.handleSchedulerPauseJob
 [**apiV1SchedulerJobsIdResumePost**](V1Api.md#apiv1schedulerjobsidresumepost) | **POST** /api/v1/scheduler/jobs/{id}/resume | s.handleSchedulerResumeJob
+[**apiV1SchedulerJobsPost**](V1Api.md#apiv1schedulerjobspost) | **POST** /api/v1/scheduler/jobs | s.handleSchedulerAddJob
 [**apiV1SearchPost**](V1Api.md#apiv1searchpost) | **POST** /api/v1/search | s.handleSearch
 [**apiV1SecurityCheckPost**](V1Api.md#apiv1securitycheckpost) | **POST** /api/v1/security/check | s.handleSecurityCheck
 [**apiV1SelfimproveAnalyzePost**](V1Api.md#apiv1selfimproveanalyzepost) | **POST** /api/v1/selfimprove/analyze | s.handleSelfImproveAnalyze
@@ -102,10 +118,12 @@ Method | HTTP request | Description
 [**apiV1SessionsIdDelete**](V1Api.md#apiv1sessionsiddelete) | **DELETE** /api/v1/sessions/{id} | s.handleSessionDelete
 [**apiV1SessionsIdDetachPost**](V1Api.md#apiv1sessionsiddetachpost) | **POST** /api/v1/sessions/{id}/detach | s.handleSessionDetach
 [**apiV1SessionsIdForkPost**](V1Api.md#apiv1sessionsidforkpost) | **POST** /api/v1/sessions/{id}/fork | s.handleSessionFork
+[**apiV1SessionsIdGet**](V1Api.md#apiv1sessionsidget) | **GET** /api/v1/sessions/{id} | s.handleSessionGet
 [**apiV1SessionsIdMessagesGet**](V1Api.md#apiv1sessionsidmessagesget) | **GET** /api/v1/sessions/{id}/messages | s.handleSessionMessages
 [**apiV1SessionsIdPlansGet**](V1Api.md#apiv1sessionsidplansget) | **GET** /api/v1/sessions/{id}/plans | s.handleSessionPlans
 [**apiV1SessionsIdResumePost**](V1Api.md#apiv1sessionsidresumepost) | **POST** /api/v1/sessions/{id}/resume | s.handleSessionResume
 [**apiV1SessionsIdTreeGet**](V1Api.md#apiv1sessionsidtreeget) | **GET** /api/v1/sessions/{id}/tree | s.handleSessionTree
+[**apiV1SessionsPost**](V1Api.md#apiv1sessionspost) | **POST** /api/v1/sessions | s.handleSessionCreate
 [**apiV1SkillsGet**](V1Api.md#apiv1skillsget) | **GET** /api/v1/skills | s.handleSkillsList
 [**apiV1SkillsSlugExecutePost**](V1Api.md#apiv1skillsslugexecutepost) | **POST** /api/v1/skills/{slug}/execute | s.handleSkillsExecute
 [**apiV1SkillsSlugGet**](V1Api.md#apiv1skillsslugget) | **GET** /api/v1/skills/{slug} | s.handleSkillsGet
@@ -113,7 +131,10 @@ Method | HTTP request | Description
 [**apiV1TasksGet**](V1Api.md#apiv1tasksget) | **GET** /api/v1/tasks | s.handleTaskList
 [**apiV1TasksIdCancelPost**](V1Api.md#apiv1tasksidcancelpost) | **POST** /api/v1/tasks/{id}/cancel | s.handleTaskCancel
 [**apiV1TasksIdDelete**](V1Api.md#apiv1tasksiddelete) | **DELETE** /api/v1/tasks/{id} | s.handleTaskDelete
+[**apiV1TasksIdGet**](V1Api.md#apiv1tasksidget) | **GET** /api/v1/tasks/{id} | s.handleTaskGet
+[**apiV1TasksIdPut**](V1Api.md#apiv1tasksidput) | **PUT** /api/v1/tasks/{id} | s.handleTaskUpdate
 [**apiV1TasksIdStepsGet**](V1Api.md#apiv1tasksidstepsget) | **GET** /api/v1/tasks/{id}/steps | s.handleTaskSteps
+[**apiV1TasksPost**](V1Api.md#apiv1taskspost) | **POST** /api/v1/tasks | s.handleTaskCreate
 [**apiV1TerminalClearPost**](V1Api.md#apiv1terminalclearpost) | **POST** /api/v1/terminal/clear | s.handleTerminalClear
 [**apiV1TerminalExecPost**](V1Api.md#apiv1terminalexecpost) | **POST** /api/v1/terminal/exec | s.handleTerminalExec
 [**apiV1TerminalHistoryGet**](V1Api.md#apiv1terminalhistoryget) | **GET** /api/v1/terminal/history | s.handleTerminalHistory
@@ -137,11 +158,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1BusPublishPost();
-} catch (e) {
+    api.apiV1BusPublishPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1BusPublishPost: $e\n');
 }
 ```
@@ -177,11 +198,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1BusStatsGet();
-} catch (e) {
+    api.apiV1BusStatsGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1BusStatsGet: $e\n');
 }
 ```
@@ -217,11 +238,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1CacheClearPost();
-} catch (e) {
+    api.apiV1CacheClearPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1CacheClearPost: $e\n');
 }
 ```
@@ -257,11 +278,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1CacheInspectGet();
-} catch (e) {
+    api.apiV1CacheInspectGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1CacheInspectGet: $e\n');
 }
 ```
@@ -297,11 +318,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1CacheInvalidatePost();
-} catch (e) {
+    api.apiV1CacheInvalidatePost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1CacheInvalidatePost: $e\n');
 }
 ```
@@ -337,11 +358,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1CacheStatsGet();
-} catch (e) {
+    api.apiV1CacheStatsGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1CacheStatsGet: $e\n');
 }
 ```
@@ -377,12 +398,52 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1CalendarEventsGet();
-} catch (e) {
+    api.apiV1CalendarEventsGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1CalendarEventsGet: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1CalendarEventsIdDelete**
+> apiV1CalendarEventsIdDelete()
+
+s.handleCalendarDelete
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1CalendarEventsIdDelete();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1CalendarEventsIdDelete: $e\n');
 }
 ```
 
@@ -417,12 +478,92 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1CalendarEventsIdGet();
-} catch (e) {
+    api.apiV1CalendarEventsIdGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1CalendarEventsIdGet: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1CalendarEventsIdPut**
+> apiV1CalendarEventsIdPut()
+
+s.handleCalendarUpdate
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1CalendarEventsIdPut();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1CalendarEventsIdPut: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1CalendarEventsPost**
+> apiV1CalendarEventsPost()
+
+s.handleCalendarCreate
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1CalendarEventsPost();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1CalendarEventsPost: $e\n');
 }
 ```
 
@@ -457,11 +598,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1CalendarQuickaddPost();
-} catch (e) {
+    api.apiV1CalendarQuickaddPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1CalendarQuickaddPost: $e\n');
 }
 ```
@@ -497,11 +638,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1CalendarTodayGet();
-} catch (e) {
+    api.apiV1CalendarTodayGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1CalendarTodayGet: $e\n');
 }
 ```
@@ -537,11 +678,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1CalendarUpcomingGet();
-} catch (e) {
+    api.apiV1CalendarUpcomingGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1CalendarUpcomingGet: $e\n');
 }
 ```
@@ -577,11 +718,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ChatPost();
-} catch (e) {
+    api.apiV1ChatPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ChatPost: $e\n');
 }
 ```
@@ -617,11 +758,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ChatQueueIdGet();
-} catch (e) {
+    api.apiV1ChatQueueIdGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ChatQueueIdGet: $e\n');
 }
 ```
@@ -657,11 +798,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ChatStreamGet();
-} catch (e) {
+    api.apiV1ChatStreamGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ChatStreamGet: $e\n');
 }
 ```
@@ -697,11 +838,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ChatWithAgentPost();
-} catch (e) {
+    api.apiV1ChatWithAgentPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ChatWithAgentPost: $e\n');
 }
 ```
@@ -737,12 +878,92 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ConfigAgentsGet();
-} catch (e) {
+    api.apiV1ConfigAgentsGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ConfigAgentsGet: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1ConfigAgentsIdDelete**
+> apiV1ConfigAgentsIdDelete()
+
+s.handleDeleteAgent
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1ConfigAgentsIdDelete();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1ConfigAgentsIdDelete: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1ConfigAgentsIdGet**
+> apiV1ConfigAgentsIdGet()
+
+s.handleGetAgent
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1ConfigAgentsIdGet();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1ConfigAgentsIdGet: $e\n');
 }
 ```
 
@@ -777,12 +998,52 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ConfigAgentsIdPost();
-} catch (e) {
+    api.apiV1ConfigAgentsIdPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ConfigAgentsIdPost: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1ConfigClientGet**
+> apiV1ConfigClientGet()
+
+s.handleGetClientConfig
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1ConfigClientGet();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1ConfigClientGet: $e\n');
 }
 ```
 
@@ -817,11 +1078,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ConfigClientPost();
-} catch (e) {
+    api.apiV1ConfigClientPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ConfigClientPost: $e\n');
 }
 ```
@@ -857,12 +1118,92 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ConfigMenubarGet();
-} catch (e) {
+    api.apiV1ConfigMenubarGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ConfigMenubarGet: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1ConfigMenubarPost**
+> apiV1ConfigMenubarPost()
+
+s.handleSaveMenubarConfig
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1ConfigMenubarPost();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1ConfigMenubarPost: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1ConfigModelsGet**
+> apiV1ConfigModelsGet()
+
+s.handleGetModelsConfig
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1ConfigModelsGet();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1ConfigModelsGet: $e\n');
 }
 ```
 
@@ -897,11 +1238,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ConfigModelsPost();
-} catch (e) {
+    api.apiV1ConfigModelsPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ConfigModelsPost: $e\n');
 }
 ```
@@ -937,11 +1278,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ConfigNormalizePost();
-} catch (e) {
+    api.apiV1ConfigNormalizePost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ConfigNormalizePost: $e\n');
 }
 ```
@@ -977,11 +1318,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1DaemonRestartPost();
-} catch (e) {
+    api.apiV1DaemonRestartPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1DaemonRestartPost: $e\n');
 }
 ```
@@ -1017,11 +1358,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1DaemonStartPost();
-} catch (e) {
+    api.apiV1DaemonStartPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1DaemonStartPost: $e\n');
 }
 ```
@@ -1057,11 +1398,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1DaemonStatusGet();
-} catch (e) {
+    api.apiV1DaemonStatusGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1DaemonStatusGet: $e\n');
 }
 ```
@@ -1097,11 +1438,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1DaemonStopPost();
-} catch (e) {
+    api.apiV1DaemonStopPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1DaemonStopPost: $e\n');
 }
 ```
@@ -1137,11 +1478,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1HealthGet();
-} catch (e) {
+    api.apiV1HealthGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1HealthGet: $e\n');
 }
 ```
@@ -1177,11 +1518,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1MemoryExportPost();
-} catch (e) {
+    api.apiV1MemoryExportPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1MemoryExportPost: $e\n');
 }
 ```
@@ -1217,11 +1558,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1MemoryQueryPost();
-} catch (e) {
+    api.apiV1MemoryQueryPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1MemoryQueryPost: $e\n');
 }
 ```
@@ -1257,11 +1598,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1MemoryRecentGet();
-} catch (e) {
+    api.apiV1MemoryRecentGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1MemoryRecentGet: $e\n');
 }
 ```
@@ -1297,11 +1638,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1MemoryVectorIdDelete();
-} catch (e) {
+    api.apiV1MemoryVectorIdDelete();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1MemoryVectorIdDelete: $e\n');
 }
 ```
@@ -1337,11 +1678,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1MemoryVectorSearchPost();
-} catch (e) {
+    api.apiV1MemoryVectorSearchPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1MemoryVectorSearchPost: $e\n');
 }
 ```
@@ -1377,11 +1718,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1MemoryVectorStatsGet();
-} catch (e) {
+    api.apiV1MemoryVectorStatsGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1MemoryVectorStatsGet: $e\n');
 }
 ```
@@ -1417,11 +1758,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1MemoryVectorStorePost();
-} catch (e) {
+    api.apiV1MemoryVectorStorePost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1MemoryVectorStorePost: $e\n');
 }
 ```
@@ -1457,11 +1798,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1MetricsFirewallGet();
-} catch (e) {
+    api.apiV1MetricsFirewallGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1MetricsFirewallGet: $e\n');
 }
 ```
@@ -1497,11 +1838,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1MetricsHistoricalGet();
-} catch (e) {
+    api.apiV1MetricsHistoricalGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1MetricsHistoricalGet: $e\n');
 }
 ```
@@ -1537,11 +1878,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1MetricsLiveGet();
-} catch (e) {
+    api.apiV1MetricsLiveGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1MetricsLiveGet: $e\n');
 }
 ```
@@ -1577,11 +1918,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1MetricsRateLimitsGet();
-} catch (e) {
+    api.apiV1MetricsRateLimitsGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1MetricsRateLimitsGet: $e\n');
 }
 ```
@@ -1617,11 +1958,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1MetricsStreamGet();
-} catch (e) {
+    api.apiV1MetricsStreamGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1MetricsStreamGet: $e\n');
 }
 ```
@@ -1657,12 +1998,132 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ModelsCredentialsProviderDelete();
-} catch (e) {
+    api.apiV1ModelsCredentialsProviderDelete();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ModelsCredentialsProviderDelete: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1ModelsCredentialsProviderGet**
+> apiV1ModelsCredentialsProviderGet()
+
+s.handleModelsGetCredential
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1ModelsCredentialsProviderGet();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1ModelsCredentialsProviderGet: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1ModelsCredentialsProviderPost**
+> apiV1ModelsCredentialsProviderPost()
+
+s.handleModelsSetCredential
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1ModelsCredentialsProviderPost();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1ModelsCredentialsProviderPost: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1ModelsDefaultGet**
+> apiV1ModelsDefaultGet()
+
+s.handleModelsGetDefault
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1ModelsDefaultGet();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1ModelsDefaultGet: $e\n');
 }
 ```
 
@@ -1697,11 +2158,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ModelsDefaultPost();
-} catch (e) {
+    api.apiV1ModelsDefaultPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ModelsDefaultPost: $e\n');
 }
 ```
@@ -1737,11 +2198,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ModelsGet();
-} catch (e) {
+    api.apiV1ModelsGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ModelsGet: $e\n');
 }
 ```
@@ -1777,11 +2238,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ModelsProviderModelDelete();
-} catch (e) {
+    api.apiV1ModelsProviderModelDelete();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ModelsProviderModelDelete: $e\n');
 }
 ```
@@ -1817,11 +2278,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ModelsProvidersGet();
-} catch (e) {
+    api.apiV1ModelsProvidersGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ModelsProvidersGet: $e\n');
 }
 ```
@@ -1857,11 +2318,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1PlansGet();
-} catch (e) {
+    api.apiV1PlansGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1PlansGet: $e\n');
 }
 ```
@@ -1897,11 +2358,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1PlansIdApprovePost();
-} catch (e) {
+    api.apiV1PlansIdApprovePost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1PlansIdApprovePost: $e\n');
 }
 ```
@@ -1937,11 +2398,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1PlansIdConfirmPost();
-} catch (e) {
+    api.apiV1PlansIdConfirmPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1PlansIdConfirmPost: $e\n');
 }
 ```
@@ -1977,11 +2438,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1PlansIdGet();
-} catch (e) {
+    api.apiV1PlansIdGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1PlansIdGet: $e\n');
 }
 ```
@@ -2017,11 +2478,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1PlansIdRejectPost();
-} catch (e) {
+    api.apiV1PlansIdRejectPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1PlansIdRejectPost: $e\n');
 }
 ```
@@ -2057,12 +2518,52 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1PlansIdRevisePost();
-} catch (e) {
+    api.apiV1PlansIdRevisePost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1PlansIdRevisePost: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1PlansPost**
+> apiV1PlansPost()
+
+s.handlePlanCreate
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1PlansPost();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1PlansPost: $e\n');
 }
 ```
 
@@ -2097,11 +2598,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ProjectsDetectPost();
-} catch (e) {
+    api.apiV1ProjectsDetectPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ProjectsDetectPost: $e\n');
 }
 ```
@@ -2137,11 +2638,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ProjectsGet();
-} catch (e) {
+    api.apiV1ProjectsGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ProjectsGet: $e\n');
 }
 ```
@@ -2177,11 +2678,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ProjectsIdBranchesGet();
-} catch (e) {
+    api.apiV1ProjectsIdBranchesGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ProjectsIdBranchesGet: $e\n');
 }
 ```
@@ -2217,12 +2718,52 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ProjectsIdCheckoutPost();
-} catch (e) {
+    api.apiV1ProjectsIdCheckoutPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ProjectsIdCheckoutPost: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1ProjectsIdDelete**
+> apiV1ProjectsIdDelete()
+
+s.handleProjectUnregister
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1ProjectsIdDelete();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1ProjectsIdDelete: $e\n');
 }
 ```
 
@@ -2257,11 +2798,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ProjectsIdGet();
-} catch (e) {
+    api.apiV1ProjectsIdGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ProjectsIdGet: $e\n');
 }
 ```
@@ -2297,11 +2838,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ProjectsIdStatusGet();
-} catch (e) {
+    api.apiV1ProjectsIdStatusGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ProjectsIdStatusGet: $e\n');
 }
 ```
@@ -2337,12 +2878,52 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1ProjectsIdSyncPost();
-} catch (e) {
+    api.apiV1ProjectsIdSyncPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1ProjectsIdSyncPost: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1ProjectsPost**
+> apiV1ProjectsPost()
+
+s.handleProjectRegister
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1ProjectsPost();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1ProjectsPost: $e\n');
 }
 ```
 
@@ -2377,11 +2958,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1QueueFollowupPost();
-} catch (e) {
+    api.apiV1QueueFollowupPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1QueueFollowupPost: $e\n');
 }
 ```
@@ -2417,11 +2998,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1QueueJobsGet();
-} catch (e) {
+    api.apiV1QueueJobsGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1QueueJobsGet: $e\n');
 }
 ```
@@ -2457,11 +3038,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1QueueJobsIdClaimPost();
-} catch (e) {
+    api.apiV1QueueJobsIdClaimPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1QueueJobsIdClaimPost: $e\n');
 }
 ```
@@ -2497,11 +3078,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1QueueJobsIdCompletePost();
-} catch (e) {
+    api.apiV1QueueJobsIdCompletePost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1QueueJobsIdCompletePost: $e\n');
 }
 ```
@@ -2537,11 +3118,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1QueueJobsIdFailPost();
-} catch (e) {
+    api.apiV1QueueJobsIdFailPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1QueueJobsIdFailPost: $e\n');
 }
 ```
@@ -2577,11 +3158,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1QueueJobsIdGet();
-} catch (e) {
+    api.apiV1QueueJobsIdGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1QueueJobsIdGet: $e\n');
 }
 ```
@@ -2617,12 +3198,52 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1QueueJobsIdRetryPost();
-} catch (e) {
+    api.apiV1QueueJobsIdRetryPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1QueueJobsIdRetryPost: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1QueueJobsPost**
+> apiV1QueueJobsPost()
+
+s.handleQueueEnqueue
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1QueueJobsPost();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1QueueJobsPost: $e\n');
 }
 ```
 
@@ -2657,11 +3278,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1QueueStatsGet();
-} catch (e) {
+    api.apiV1QueueStatsGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1QueueStatsGet: $e\n');
 }
 ```
@@ -2697,11 +3318,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1QueueStatusIdGet();
-} catch (e) {
+    api.apiV1QueueStatusIdGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1QueueStatusIdGet: $e\n');
 }
 ```
@@ -2737,11 +3358,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1QueueSteerPost();
-} catch (e) {
+    api.apiV1QueueSteerPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1QueueSteerPost: $e\n');
 }
 ```
@@ -2777,11 +3398,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1RuntimeRestartProviderPost();
-} catch (e) {
+    api.apiV1RuntimeRestartProviderPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1RuntimeRestartProviderPost: $e\n');
 }
 ```
@@ -2817,11 +3438,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1RuntimeStartProviderPost();
-} catch (e) {
+    api.apiV1RuntimeStartProviderPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1RuntimeStartProviderPost: $e\n');
 }
 ```
@@ -2857,11 +3478,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1RuntimeStatusGet();
-} catch (e) {
+    api.apiV1RuntimeStatusGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1RuntimeStatusGet: $e\n');
 }
 ```
@@ -2897,11 +3518,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1RuntimeStatusProviderGet();
-} catch (e) {
+    api.apiV1RuntimeStatusProviderGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1RuntimeStatusProviderGet: $e\n');
 }
 ```
@@ -2937,11 +3558,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1RuntimeStopProviderPost();
-} catch (e) {
+    api.apiV1RuntimeStopProviderPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1RuntimeStopProviderPost: $e\n');
 }
 ```
@@ -2977,11 +3598,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SchedulerJobsGet();
-} catch (e) {
+    api.apiV1SchedulerJobsGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SchedulerJobsGet: $e\n');
 }
 ```
@@ -3017,11 +3638,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SchedulerJobsIdDelete();
-} catch (e) {
+    api.apiV1SchedulerJobsIdDelete();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SchedulerJobsIdDelete: $e\n');
 }
 ```
@@ -3057,11 +3678,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SchedulerJobsIdEnablePost();
-} catch (e) {
+    api.apiV1SchedulerJobsIdEnablePost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SchedulerJobsIdEnablePost: $e\n');
 }
 ```
@@ -3097,11 +3718,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SchedulerJobsIdPausePost();
-} catch (e) {
+    api.apiV1SchedulerJobsIdPausePost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SchedulerJobsIdPausePost: $e\n');
 }
 ```
@@ -3137,12 +3758,52 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SchedulerJobsIdResumePost();
-} catch (e) {
+    api.apiV1SchedulerJobsIdResumePost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SchedulerJobsIdResumePost: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1SchedulerJobsPost**
+> apiV1SchedulerJobsPost()
+
+s.handleSchedulerAddJob
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1SchedulerJobsPost();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1SchedulerJobsPost: $e\n');
 }
 ```
 
@@ -3177,11 +3838,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SearchPost();
-} catch (e) {
+    api.apiV1SearchPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SearchPost: $e\n');
 }
 ```
@@ -3217,11 +3878,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SecurityCheckPost();
-} catch (e) {
+    api.apiV1SecurityCheckPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SecurityCheckPost: $e\n');
 }
 ```
@@ -3257,11 +3918,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SelfimproveAnalyzePost();
-} catch (e) {
+    api.apiV1SelfimproveAnalyzePost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SelfimproveAnalyzePost: $e\n');
 }
 ```
@@ -3297,11 +3958,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SelfimproveApplyPost();
-} catch (e) {
+    api.apiV1SelfimproveApplyPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SelfimproveApplyPost: $e\n');
 }
 ```
@@ -3337,11 +3998,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SelfimproveGeneratePost();
-} catch (e) {
+    api.apiV1SelfimproveGeneratePost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SelfimproveGeneratePost: $e\n');
 }
 ```
@@ -3377,11 +4038,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SelfimproveRejectPost();
-} catch (e) {
+    api.apiV1SelfimproveRejectPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SelfimproveRejectPost: $e\n');
 }
 ```
@@ -3417,11 +4078,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SelfimproveStatusGet();
-} catch (e) {
+    api.apiV1SelfimproveStatusGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SelfimproveStatusGet: $e\n');
 }
 ```
@@ -3457,11 +4118,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SelfimproveTriggerPost();
-} catch (e) {
+    api.apiV1SelfimproveTriggerPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SelfimproveTriggerPost: $e\n');
 }
 ```
@@ -3497,11 +4158,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SelfimproveValidatePost();
-} catch (e) {
+    api.apiV1SelfimproveValidatePost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SelfimproveValidatePost: $e\n');
 }
 ```
@@ -3537,11 +4198,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SessionsGet();
-} catch (e) {
+    api.apiV1SessionsGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SessionsGet: $e\n');
 }
 ```
@@ -3577,11 +4238,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SessionsIdAttachPost();
-} catch (e) {
+    api.apiV1SessionsIdAttachPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SessionsIdAttachPost: $e\n');
 }
 ```
@@ -3617,11 +4278,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SessionsIdBranchPost();
-} catch (e) {
+    api.apiV1SessionsIdBranchPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SessionsIdBranchPost: $e\n');
 }
 ```
@@ -3657,11 +4318,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SessionsIdBranchesGet();
-} catch (e) {
+    api.apiV1SessionsIdBranchesGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SessionsIdBranchesGet: $e\n');
 }
 ```
@@ -3697,11 +4358,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SessionsIdCompactPost();
-} catch (e) {
+    api.apiV1SessionsIdCompactPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SessionsIdCompactPost: $e\n');
 }
 ```
@@ -3737,11 +4398,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SessionsIdDelete();
-} catch (e) {
+    api.apiV1SessionsIdDelete();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SessionsIdDelete: $e\n');
 }
 ```
@@ -3777,11 +4438,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SessionsIdDetachPost();
-} catch (e) {
+    api.apiV1SessionsIdDetachPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SessionsIdDetachPost: $e\n');
 }
 ```
@@ -3817,12 +4478,52 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SessionsIdForkPost();
-} catch (e) {
+    api.apiV1SessionsIdForkPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SessionsIdForkPost: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1SessionsIdGet**
+> apiV1SessionsIdGet()
+
+s.handleSessionGet
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1SessionsIdGet();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1SessionsIdGet: $e\n');
 }
 ```
 
@@ -3857,11 +4558,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SessionsIdMessagesGet();
-} catch (e) {
+    api.apiV1SessionsIdMessagesGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SessionsIdMessagesGet: $e\n');
 }
 ```
@@ -3897,11 +4598,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SessionsIdPlansGet();
-} catch (e) {
+    api.apiV1SessionsIdPlansGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SessionsIdPlansGet: $e\n');
 }
 ```
@@ -3937,11 +4638,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SessionsIdResumePost();
-} catch (e) {
+    api.apiV1SessionsIdResumePost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SessionsIdResumePost: $e\n');
 }
 ```
@@ -3977,12 +4678,52 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SessionsIdTreeGet();
-} catch (e) {
+    api.apiV1SessionsIdTreeGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SessionsIdTreeGet: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1SessionsPost**
+> apiV1SessionsPost()
+
+s.handleSessionCreate
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1SessionsPost();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1SessionsPost: $e\n');
 }
 ```
 
@@ -4017,11 +4758,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SkillsGet();
-} catch (e) {
+    api.apiV1SkillsGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SkillsGet: $e\n');
 }
 ```
@@ -4057,11 +4798,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SkillsSlugExecutePost();
-} catch (e) {
+    api.apiV1SkillsSlugExecutePost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SkillsSlugExecutePost: $e\n');
 }
 ```
@@ -4097,11 +4838,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SkillsSlugGet();
-} catch (e) {
+    api.apiV1SkillsSlugGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SkillsSlugGet: $e\n');
 }
 ```
@@ -4137,11 +4878,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1SkillsSlugUiGet();
-} catch (e) {
+    api.apiV1SkillsSlugUiGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1SkillsSlugUiGet: $e\n');
 }
 ```
@@ -4177,11 +4918,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1TasksGet();
-} catch (e) {
+    api.apiV1TasksGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1TasksGet: $e\n');
 }
 ```
@@ -4217,11 +4958,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1TasksIdCancelPost();
-} catch (e) {
+    api.apiV1TasksIdCancelPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1TasksIdCancelPost: $e\n');
 }
 ```
@@ -4257,12 +4998,92 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1TasksIdDelete();
-} catch (e) {
+    api.apiV1TasksIdDelete();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1TasksIdDelete: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1TasksIdGet**
+> apiV1TasksIdGet()
+
+s.handleTaskGet
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1TasksIdGet();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1TasksIdGet: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1TasksIdPut**
+> apiV1TasksIdPut()
+
+s.handleTaskUpdate
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1TasksIdPut();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1TasksIdPut: $e\n');
 }
 ```
 
@@ -4297,12 +5118,52 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1TasksIdStepsGet();
-} catch (e) {
+    api.apiV1TasksIdStepsGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1TasksIdStepsGet: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[ApiKeyAuth](../README.md#ApiKeyAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **apiV1TasksPost**
+> apiV1TasksPost()
+
+s.handleTaskCreate
+
+### Example
+```dart
+import 'package:meept_client/api.dart';
+// TODO Configure API key authorization: ApiKeyAuth
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKey = 'YOUR_API_KEY';
+// uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+//defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
+
+final api = MeeptClient().getV1Api();
+
+try {
+    api.apiV1TasksPost();
+} on DioException catch (e) {
+    print('Exception when calling V1Api->apiV1TasksPost: $e\n');
 }
 ```
 
@@ -4337,11 +5198,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1TerminalClearPost();
-} catch (e) {
+    api.apiV1TerminalClearPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1TerminalClearPost: $e\n');
 }
 ```
@@ -4377,11 +5238,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1TerminalExecPost();
-} catch (e) {
+    api.apiV1TerminalExecPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1TerminalExecPost: $e\n');
 }
 ```
@@ -4417,11 +5278,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1TerminalHistoryGet();
-} catch (e) {
+    api.apiV1TerminalHistoryGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1TerminalHistoryGet: $e\n');
 }
 ```
@@ -4457,11 +5318,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1TerminalSessionsGet();
-} catch (e) {
+    api.apiV1TerminalSessionsGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1TerminalSessionsGet: $e\n');
 }
 ```
@@ -4497,11 +5358,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1WorkersIdDelete();
-} catch (e) {
+    api.apiV1WorkersIdDelete();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1WorkersIdDelete: $e\n');
 }
 ```
@@ -4537,11 +5398,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1WorkersPost();
-} catch (e) {
+    api.apiV1WorkersPost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1WorkersPost: $e\n');
 }
 ```
@@ -4577,11 +5438,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1WorkersScalePost();
-} catch (e) {
+    api.apiV1WorkersScalePost();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1WorkersScalePost: $e\n');
 }
 ```
@@ -4617,11 +5478,11 @@ import 'package:meept_client/api.dart';
 // uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 //defaultApiClient.getAuthentication<ApiKeyAuth>('ApiKeyAuth').apiKeyPrefix = 'Bearer';
 
-final api_instance = V1Api();
+final api = MeeptClient().getV1Api();
 
 try {
-    api_instance.apiV1WorkersStatsGet();
-} catch (e) {
+    api.apiV1WorkersStatsGet();
+} on DioException catch (e) {
     print('Exception when calling V1Api->apiV1WorkersStatsGet: $e\n');
 }
 ```

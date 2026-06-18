@@ -528,21 +528,23 @@ func (d *ParallelTeamDriver) publishTeamStatus(sessionID string, status *TeamSta
 		return
 	}
 
-	// Acquire the conversations map read-lock to ensure the TeamStatus
-	// (Phase, MemberResults) is not concurrently mutated by updateMemberStatus
-	// while we marshal and publish it (S1-5).
+	// Marshal under the read-lock (prevents concurrent mutation of
+	// status.MemberResults during JSON encoding, per S1-5), then release
+	// before calling Publish (CLAUDE.md mutex scope rule: no bus sends
+	// under lock).
 	d.convMu.RLock()
-	defer d.convMu.RUnlock()
-
-	topic := TeamStatusTopic(sessionID)
 	msg, err := models.NewBusMessage(models.MessageTypeStatusUpdate, "parallel-team-driver", status)
+	phase := status.Phase
+	d.convMu.RUnlock()
 	if err != nil {
 		d.logger.Error("failed to marshal team status", "error", err)
 		return
 	}
+
+	topic := TeamStatusTopic(sessionID)
 	msg.Topic = topic
 	d.bus.Publish(topic, msg)
-	d.logger.Debug("published team status", "session_id", sessionID, "phase", status.Phase)
+	d.logger.Debug("published team status", "session_id", sessionID, "phase", phase)
 }
 
 // publishMemberCompleted publishes a member completion event.

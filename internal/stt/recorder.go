@@ -51,7 +51,7 @@ func (r *Recorder) Start() error {
 	}
 	r.tmpFile = tmp
 	// Close the file handle so ffmpeg can write to it.
-	tmp.Close()
+	tmp.Close() //nolint:mutexio // closing fresh temp file handle; no concurrent access possible
 
 	sampleRate := r.config.SampleRate
 	if sampleRate <= 0 {

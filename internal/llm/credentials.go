@@ -36,7 +36,7 @@ func (cs *CredentialStore) load() error {
 	}
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
-	return json.Unmarshal(data, &cs.creds)
+	return json.Unmarshal(data, &cs.creds) //nolint:mutexio // mutex guards cs.creds mutation during Unmarshal
 }
 
 func (cs *CredentialStore) save() error {

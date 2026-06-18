@@ -1,12 +1,11 @@
 import 'package:dio/dio.dart';
-import 'package:meept_client/model/chat_request.dart';
-import 'package:meept_client/model/steer_request.dart';
-import 'package:meept_client/model/daemon_status.dart';
 import '../models/api_models.dart';
 
-/// Typed HTTP client for the Meept REST API using OpenAPI SDK models.
+/// Typed HTTP client for the Meept REST API.
 ///
-/// Uses generated SDK models for request serialization.
+/// This is the hand-written shim used by [ApiClient].  It will eventually be
+/// replaced by the generated SDK wrapper ([SdkApiClient]); for now it uses
+/// local types from `api_models.dart` and hand-rolled JSON payloads.
 class MeeptApi {
   final Dio _dio;
 
@@ -21,18 +20,9 @@ class MeeptApi {
 
   // ===== Daemon =====
 
-  Future<DaemonStatus> getDaemonStatus() async {
+  Future<Map<String, dynamic>> getDaemonStatus() async {
     final response = await _dio.get('/api/v1/daemon/status');
-    final data = response.data as Map<String, dynamic>;
-    return DaemonStatus.fromJson(data) ?? DaemonStatus(
-      status: 'unknown',
-      tokensUsed: 0,
-      tokensRemaining: 0,
-      budgetUsed: 0.0,
-      budgetRemaining: 0.0,
-      registeredMethods: 0,
-      busSubscribers: 0,
-    );
+    return response.data as Map<String, dynamic>;
   }
 
   // ===== Chat =====
@@ -42,12 +32,11 @@ class MeeptApi {
     String? conversationId,
     String? agentId,
   }) async {
-    final request = ChatRequest(
-      message: message,
-      conversationId: conversationId ?? '',
-      agentIdCommaOmitempty: agentId,
-    );
-    final response = await _dio.post('/api/v1/chat', data: request.toJson());
+    final response = await _dio.post('/api/v1/chat', data: {
+      'message': message,
+      'conversation_id': conversationId ?? '',
+      if (agentId != null) 'agent_id': agentId,
+    });
     return response.data as Map<String, dynamic>;
   }
 
@@ -56,12 +45,11 @@ class MeeptApi {
     required String conversationId,
     String? source,
   }) async {
-    final request = SteerRequest(
-      message: message,
-      conversationId: conversationId,
-      sourceCommaOmitempty: source,
-    );
-    await _dio.post('/api/v1/chat/steer', data: request.toJson());
+    await _dio.post('/api/v1/chat/steer', data: {
+      'message': message,
+      'conversation_id': conversationId,
+      if (source != null) 'source': source,
+    });
   }
 
   Future<Map<String, dynamic>> sendFollowUpMessage({
@@ -179,6 +167,14 @@ class MeeptApi {
     await _dio.delete('/api/v1/tasks/$id');
   }
 
+  Future<Task> updateTask(String id, {String? name, String? state}) async {
+    final response = await _dio.post('/api/v1/tasks/$id', data: {
+      if (name != null) 'name': name,
+      if (state != null) 'state': state,
+    });
+    return Task.fromJson(response.data as Map<String, dynamic>);
+  }
+
   Future<void> cancelTask(String id) async {
     await _dio.post('/api/v1/tasks/$id/cancel');
   }
@@ -259,6 +255,14 @@ class MeeptApi {
     final response = await _dio.post('/api/v1/skills/$slug/execute', data: {
       'prompt': prompt,
     });
+    return SkillExecuteResult.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  Future<SkillExecuteResult> executeSkillWithParams({
+    required String slug,
+    required Map<String, dynamic> params,
+  }) async {
+    final response = await _dio.post('/api/v1/skills/$slug/execute', data: params);
     return SkillExecuteResult.fromJson(response.data as Map<String, dynamic>);
   }
 

@@ -47,6 +47,7 @@ type SyncManager struct { //nolint:revive // stutter is intentional
 
 	// Background ticker for periodic distillation
 	periodicStop chan struct{}
+	stopOnce     sync.Once
 	periodicWg   sync.WaitGroup
 }
 
@@ -124,11 +125,15 @@ func (s *SyncManager) Start(ctx context.Context) error {
 }
 
 // Stop shuts down background processing.
+// Safe to call multiple times — sync.Once ensures the stop channel is
+// closed exactly once, preventing a panic on double-close.
 func (s *SyncManager) Stop() error {
-	if s.periodicStop != nil {
-		close(s.periodicStop)
-		s.periodicWg.Wait()
-	}
+	s.stopOnce.Do(func() {
+		if s.periodicStop != nil {
+			close(s.periodicStop)
+		}
+	})
+	s.periodicWg.Wait()
 	return nil
 }
 

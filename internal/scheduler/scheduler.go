@@ -175,12 +175,18 @@ func (s *Scheduler) Stop(ctx context.Context) error {
 
 	s.logger.Info("scheduler: stopping")
 
-	// Stop accepting new jobs
+	// Stop accepting new jobs. Acquire the scheduler lock while flipping
+	// the running flag and capturing the WaitGroup/cancel so that a
+	// concurrent RunNow cannot observe running=true, then add to the
+	// WaitGroup after we've already called Wait() below.
+	s.mu.Lock()
 	s.running.Store(false)
+	runNowCancel := s.runNowCancel
+	s.mu.Unlock()
 
 	// Cancel in-flight RunNow jobs and wait for them
-	if s.runNowCancel != nil {
-		s.runNowCancel()
+	if runNowCancel != nil {
+		runNowCancel()
 	}
 	s.runNowWg.Wait()
 
@@ -304,12 +310,20 @@ func (s *Scheduler) Unschedule(jobID string) error {
 
 // RunNow triggers immediate execution of a job.
 func (s *Scheduler) RunNow(jobID string) error {
-	// Guard against calls after Stop()
+	// Quick check without lock to avoid contention in the common case.
 	if !s.running.Load() {
 		return fmt.Errorf("scheduler not running")
 	}
 
 	s.mu.Lock()
+	// Re-check running under the lock to defend against a race where
+	// Stop() ran between the atomic check above and acquiring the lock.
+	// Without this, runNowWg.Add could happen after Stop's runNowWg.Wait
+	// returns, leaking a goroutine past shutdown.
+	if !s.running.Load() { //nolint:mutexio // atomic.Bool.Load is not I/O
+		s.mu.Unlock()
+		return fmt.Errorf("scheduler not running")
+	}
 	job, ok := s.jobs[jobID]
 	if !ok {
 		s.mu.Unlock()
@@ -320,13 +334,16 @@ func (s *Scheduler) RunNow(jobID string) error {
 		return fmt.Errorf("job already running: %s", jobID)
 	}
 	s.runningJobs[jobID] = true
+	// Add to the WaitGroup under the lock so that a concurrent Stop()
+	// cannot return from runNowWg.Wait() before this Add is observed.
+	s.runNowWg.Add(1)
+	runNowCtx := s.runNowCtx
 	s.mu.Unlock()
 
 	// Run job in goroutine with shutdown-aware context
-	s.runNowWg.Add(1)
 	go func() {
 		defer s.runNowWg.Done()
-		ctx, cancel := context.WithTimeout(s.runNowCtx, 30*time.Minute)
+		ctx, cancel := context.WithTimeout(runNowCtx, 30*time.Minute)
 		defer cancel()
 
 		s.executeJob(ctx, job)
@@ -362,7 +379,7 @@ func (s *Scheduler) ListJobs() []JobInfo {
 		}
 
 		// Get last run info from store
-		if cfg, ok := s.store.Get(jobID); ok {
+		if cfg, ok := s.store.Get(jobID); ok { //nolint:mutexio // in-memory map lookup via internal RLock, not I/O
 			info.LastRun = cfg.LastRunAt
 			info.LastError = cfg.LastError
 			info.RunCount = cfg.RunCount
@@ -402,7 +419,7 @@ func (s *Scheduler) GetJob(jobID string) (JobInfo, bool) {
 		}
 	}
 
-	if cfg, ok := s.store.Get(jobID); ok {
+	if cfg, ok := s.store.Get(jobID); ok { //nolint:mutexio // in-memory map lookup via internal RLock, not I/O
 		info.LastRun = cfg.LastRunAt
 		info.LastError = cfg.LastError
 		info.RunCount = cfg.RunCount

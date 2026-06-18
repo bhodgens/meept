@@ -1,42 +1,33 @@
-//
-// AUTO-GENERATED FILE, DO NOT MODIFY!
-//
-// @dart=2.18
-
-// ignore_for_file: unused_element, unused_import
-// ignore_for_file: always_put_required_named_parameters_first
-// ignore_for_file: constant_identifier_names
-// ignore_for_file: lines_longer_than_80_chars
-
-import 'package:meept_client/api.dart';
 import 'package:test/test.dart';
+import 'package:meept_client/meept_client.dart';
 
 // tests for TerminalService
 void main() {
-  // final instance = TerminalService();
+  final instance = TerminalServiceBuilder();
+  // TODO add properties to the builder and call build()
 
-  group('test TerminalService', () {
-    // Object shellTool
+  group(TerminalService, () {
+    // JsonObject shellTool
     test('to test the property `shellTool`', () async {
       // TODO
     });
 
-    // Object bus
+    // JsonObject bus
     test('to test the property `bus`', () async {
       // TODO
     });
 
-    // Object logger
+    // JsonObject logger
     test('to test the property `logger`', () async {
       // TODO
     });
 
-    // List<String> history (default value: const [])
+    // BuiltList<String> history
     test('to test the property `history`', () async {
       // TODO
     });
 
-    // Object historyMu
+    // JsonObject historyMu
     test('to test the property `historyMu`', () async {
       // TODO
     });
@@ -56,12 +47,10 @@ void main() {
       // TODO
     });
 
-    // Object sessionMu
+    // JsonObject sessionMu
     test('to test the property `sessionMu`', () async {
       // TODO
     });
 
-
   });
-
 }

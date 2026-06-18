@@ -5,7 +5,7 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
-import '../services/api_client.dart';
+import '../services/sdk_client.dart';
 import '../services/websocket_service.dart';
 import 'providers.dart'; // exports tts_provider.dart
 
@@ -66,12 +66,12 @@ class ChatState {
 
 /// StateNotifier that manages chat messages for a session
 class ChatNotifier extends StateNotifier<ChatState> {
-  ChatNotifier({required this.apiClient, required this.websocket, required this.ttsNotifier})
+  ChatNotifier({required this.sdkClient, required this.websocket, required this.ttsNotifier})
       : super(const ChatState()) {
     _initWebSocket();
   }
 
-  final ApiClient apiClient;
+  final SdkApiClient sdkClient;
   final WebSocketService websocket;
   final TtsNotifier ttsNotifier;
   StreamSubscription<Map<String, dynamic>>? _wsChatSubscription;
@@ -122,8 +122,14 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
     // Fetch messages from the HTTP API
     try {
-      final messages = await apiClient.getMessages(sessionId);
+      // SdkApiClient.getMessages returns the raw `messages` array — callers
+      // deserialize each entry via ChatMessage.fromBackendMessage because
+      // the OpenAPI spec leaves the ChatMessage entity untyped.
+      final rawMessages = await sdkClient.getMessages(sessionId);
       if (_disposed) return;
+      final messages = rawMessages
+          .map((m) => ChatMessage.fromBackendMessage(m))
+          .toList(growable: false);
       state = ChatState(
         messages: messages,
         isLoading: false,
@@ -251,19 +257,19 @@ class ChatNotifier extends StateNotifier<ChatState> {
       Map<String, dynamic>? chatResp;
       switch (endpoint) {
         case _SendEndpoint.normal:
-          chatResp = await apiClient.sendChatMessage(
+          chatResp = await sdkClient.sendChatMessage(
             message: text,
             conversationId: sessionId,
             agentId: agentId,
           );
         case _SendEndpoint.steer:
-          await apiClient.sendSteerMessage(
+          await sdkClient.sendSteerMessage(
             message: text,
             conversationId: sessionId,
             source: 'flutter_ui',
           );
         case _SendEndpoint.followUp:
-          await apiClient.sendFollowUpMessage(
+          await sdkClient.sendFollowUpMessage(
             message: text,
             conversationId: sessionId,
             source: 'flutter_ui',
@@ -426,10 +432,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
 /// Chat provider
 final chatProvider =
     StateNotifierProvider<ChatNotifier, ChatState>((ref) {
-  final client = ref.watch(apiClientProvider);
+  final client = ref.watch(sdkClientProvider);
   final websocket = ref.watch(websocketProvider);
   final ttsNotifier = ref.read(ttsProvider.notifier);
-  return ChatNotifier(apiClient: client, websocket: websocket, ttsNotifier: ttsNotifier);
+  return ChatNotifier(sdkClient: client, websocket: websocket, ttsNotifier: ttsNotifier);
 });
 
 /// Current session ID provider

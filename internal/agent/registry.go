@@ -426,7 +426,7 @@ func (r *AgentRegistry) Close() error {
 	r.activeQueuesMu.Lock()
 	for convID, entry := range r.activeQueues {
 		if entry != nil && entry.Queue != nil {
-			entry.Queue.Close()
+			entry.Queue.Close() //nolint:mutexio // registry teardown; no concurrent callers expected
 		}
 		delete(r.activeQueues, convID)
 	}
@@ -439,7 +439,7 @@ func (r *AgentRegistry) Close() error {
 	// Close the database connection used for queue persistence.
 	var firstErr error
 	if r.db != nil {
-		if err := r.db.Close(); err != nil && firstErr == nil {
+		if err := r.db.Close(); err != nil && firstErr == nil { //nolint:mutexio // registry teardown; no concurrent callers expected
 			firstErr = err
 		}
 	}
@@ -819,16 +819,20 @@ func (r *AgentRegistry) RegisterActiveQueue(conversationID string, q *MessageQue
 // UnregisterActiveQueue removes the queue when the loop exits.
 // Also closes the queue to reject any in-flight injection attempts.
 func (r *AgentRegistry) UnregisterActiveQueue(conversationID string) {
+	// Snapshot under lock, then close outside to avoid holding the map
+	// mutex across queue shutdown I/O (CLAUDE.md mutex scope rule).
 	r.activeQueuesMu.Lock()
-	defer r.activeQueuesMu.Unlock()
-
 	entry, exists := r.activeQueues[conversationID]
+	if exists {
+		delete(r.activeQueues, conversationID)
+	}
+	r.activeQueuesMu.Unlock()
+
 	if !exists {
 		return
 	}
 
 	entry.Queue.Close()
-	delete(r.activeQueues, conversationID)
 }
 
 // GetActiveQueue returns the queue for a running conversation, or nil if not found.

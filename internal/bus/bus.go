@@ -206,7 +206,7 @@ func (b *MessageBus) Stats() map[string]int {
 		}
 	}
 	stats["_total"] = total
-	stats["_messages_sent"] = int(b.messagesSent.Load())
+	stats["_messages_sent"] = int(b.messagesSent.Load()) //nolint:mutexio // atomic.Int64.Load is not I/O
 	stats["_queued"] = queued
 	return stats
 }

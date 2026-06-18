@@ -6,11 +6,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
 // ArtifactScanner scans for Claude artifacts in a directory
 type ArtifactScanner struct {
+	mu         sync.RWMutex
 	workingDir string
 	cache      *ArtifactCache
 }
@@ -25,15 +27,22 @@ func NewArtifactScanner(workingDir string, cache *ArtifactCache) *ArtifactScanne
 
 // Scan scans the working directory for Claude artifacts
 func (as *ArtifactScanner) Scan() (*Artifacts, error) {
+	// Snapshot workingDir under read lock; release before doing any I/O
+	// (filesystem traversal, cache reads/writes).
+	as.mu.RLock()
+	workingDir := as.workingDir
+	cache := as.cache
+	as.mu.RUnlock()
+
 	// Normalize the working directory
-	normalizedDir, err := NormalizePath(as.workingDir)
+	normalizedDir, err := NormalizePath(workingDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to normalize working directory: %w", err)
 	}
 
 	// Check cache first
-	if as.cache != nil {
-		if cached, found := as.cache.Get(normalizedDir); found {
+	if cache != nil {
+		if cached, found := cache.Get(normalizedDir); found {
 			return cached, nil
 		}
 	}
@@ -73,8 +82,11 @@ func (as *ArtifactScanner) Scan() (*Artifacts, error) {
 	artifacts.LastScanned = time.Now()
 
 	// Cache the results
-	if as.cache != nil {
-		as.cache.Put(normalizedDir, artifacts)
+	as.mu.RLock()
+	cache = as.cache
+	as.mu.RUnlock()
+	if cache != nil {
+		cache.Put(normalizedDir, artifacts)
 	}
 
 	return artifacts, nil
@@ -247,17 +259,28 @@ func (as *ArtifactScanner) InvalidateCache(dir string) {
 		return
 	}
 
-	if as.cache != nil {
-		as.cache.Invalidate(normalizedDir)
+	as.mu.RLock()
+	cache := as.cache
+	as.mu.RUnlock()
+	if cache != nil {
+		cache.Invalidate(normalizedDir)
 	}
 }
 
-// SetWorkingDir changes the working directory
+// SetWorkingDir changes the working directory.
+//
+// Safe for concurrent use with Scan/GetWorkingDir/InvalidateCache. Callers that
+// want atomic "set dir then scan" semantics must hold their own higher-level
+// coordination — this method only guards the workingDir field itself.
 func (as *ArtifactScanner) SetWorkingDir(dir string) {
+	as.mu.Lock()
 	as.workingDir = dir
+	as.mu.Unlock()
 }
 
 // GetWorkingDir returns the current working directory
 func (as *ArtifactScanner) GetWorkingDir() string {
+	as.mu.RLock()
+	defer as.mu.RUnlock()
 	return as.workingDir
 }

@@ -2,48 +2,21 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meept_ui/providers/metrics_provider.dart';
 import 'package:meept_ui/providers/providers.dart';
-import 'package:meept_ui/services/api_client.dart';
+import 'package:meept_ui/services/sdk_client.dart';
 import 'package:meept_ui/services/websocket_service.dart';
 import 'package:meept_ui/models/api_models.dart';
 
 // ===== Mock / Stub Classes =====
 
-class _StubApiClient extends ApiClient {
-  _StubApiClient() : super(host: 'localhost', port: 8081);
-
-  @override
-  Future<T> get<T>(String path, {Map<String, dynamic>? queryParameters}) async {
-    if (path == '/metrics/live') {
-      return {
-        'timestamp': DateTime.now().toIso8601String(),
-        'active_agents': 2,
-        'requests_per_sec': 1.5,
-        'token_usage_rate': 50.0,
-        'queue_depth': 3,
-        'total_sessions': 5,
-        'total_jobs': 10,
-        'running_jobs': 2,
-        'pending_jobs': 3,
-        'version': '0.1.0',
-      } as T;
-    }
-    return {} as T;
-  }
-
-  @override
-  Future<T> post<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> put<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    throw UnimplementedError();
-  }
-
-  @override
-  Future<T> delete<T>(String path) async {
-    throw UnimplementedError();
-  }
+/// SDK-backed client pointed at a closed port so network calls fail fast.
+///
+/// Pre-SDK, the test suite stubbed [ApiClient.get] by overriding the generic
+/// transport method. [SdkApiClient] uses private `_get`/`_post` helpers that
+/// cannot be overridden by subclasses; instead, the notifier's happy-path
+/// behavior is covered by integration tests and the unit tests here exercise
+/// the error + lifecycle paths against a real (failing) client.
+class _FailingSdkClient extends SdkApiClient {
+  _FailingSdkClient() : super(host: 'localhost', port: 12345);
 }
 
 class _TestWebSocket extends WebSocketService {
@@ -89,18 +62,18 @@ void main() {
     test('initially isLoading', () {
       final ws = _TestWebSocket();
       final notifier = MetricsNotifier(
-        apiClient: _StubApiClient(),
+        sdkClient: _FailingSdkClient(),
         websocket: ws,
       );
       expect(notifier.state.isLoading, isTrue);
     });
 
     test('sets error when fetch fails', () async {
-      // Use an API client that throws (connection refused to port 12345)
-      final client = ApiClient(host: 'localhost', port: 12345);
+      // Use an SDK client that throws (connection refused to port 12345)
+      final client = _FailingSdkClient();
       final ws = _TestWebSocket();
       final notifier = MetricsNotifier(
-        apiClient: client,
+        sdkClient: client,
         websocket: ws,
       );
 
@@ -113,7 +86,7 @@ void main() {
     test('disposes subscriptions', () {
       final ws = _TestWebSocket();
       final notifier = MetricsNotifier(
-        apiClient: _StubApiClient(),
+        sdkClient: _FailingSdkClient(),
         websocket: ws,
       );
 

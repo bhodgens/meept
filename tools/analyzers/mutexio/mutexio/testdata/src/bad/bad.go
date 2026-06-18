@@ -76,3 +76,74 @@ func violationRWMutex() {
 	defer mu.RUnlock()
 	fcp.Persist() // want `mutexio: Persist called while holding a mutex`
 }
+
+// ---- selector-receiver fixtures (the gap this change closes) ----
+
+type wrapper struct {
+	mu sync.Mutex
+}
+
+type nested struct {
+	inner *wrapper
+}
+
+var w wrapper
+var n nested
+
+// violationSelectorRecv: p.mu.Lock() ... p.mu.Unlock() with I/O inside
+// must be flagged now that receiver identity generalizes past *ast.Ident.
+func violationSelectorRecv() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	fc.Do() // want `mutexio: Do called while holding a mutex`
+}
+
+// violationNestedSelectorRecv: deeply nested selector a.b.mu.Lock().
+// Confirms receiverKey walks arbitrary depth and pairs correctly.
+func violationNestedSelectorRecv() {
+	n.inner.mu.Lock()
+	defer n.inner.mu.Unlock()
+	fc.Chat() // want `mutexio: Chat called while holding a mutex`
+}
+
+// violationSelectorRecvNonDefer: selector-receiver pair with a direct
+// (non-deferred) Unlock. Exercises endPos = unlockCall.Pos() branch.
+func violationSelectorRecvNonDefer() {
+	w.mu.Lock()
+	fc.Save() // want `mutexio: Save called while holding a mutex`
+	w.mu.Unlock()
+}
+
+// cleanSelectorRecv: selector-receiver Lock/Unlock with no I/O between
+// them must NOT be flagged.
+func cleanSelectorRecv() {
+	w.mu.Lock()
+	x := fc
+	w.mu.Unlock()
+	x.Do()
+}
+
+// cleanSelectorRecvNested: nested selector receiver, no I/O in range.
+func cleanSelectorRecvNested() {
+	n.inner.mu.Lock()
+	defer n.inner.mu.Unlock()
+	_ = 1 + 2
+}
+
+// ---- suppression fixtures ----
+
+// suppressedDirect: I/O under mutex but suppressed with //nolint:mutexio.
+// Verifies the analyzer honors the suppression directive.
+func suppressedDirect() {
+	var mu sync.Mutex
+	mu.Lock()
+	defer mu.Unlock()
+	fc.Do() //nolint:mutexio // intentional: one-time init pattern
+}
+
+// suppressedSelectorRecv: selector-receiver with nolint suppression.
+func suppressedSelectorRecv() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	fc.Chat() //nolint:mutexio // mutex serializes connection access
+}

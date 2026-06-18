@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -58,6 +59,7 @@ func (a *BearerAuth) Authenticate(r *http.Request) bool {
 // BasicAuth authenticates using HTTP Basic Auth.
 // Passwords are stored as bcrypt hashes.
 type BasicAuth struct {
+	mu    sync.RWMutex
 	users map[string]string // username -> bcrypt hash
 }
 
@@ -83,7 +85,9 @@ func (a *BasicAuth) SetCredentials(username, password string) error {
 	if err != nil {
 		return err
 	}
+	a.mu.Lock()
 	a.users[username] = string(hash)
+	a.mu.Unlock()
 	return nil
 }
 
@@ -94,7 +98,9 @@ func (a *BasicAuth) Authenticate(r *http.Request) bool {
 		return false
 	}
 
+	a.mu.RLock()
 	hashedPassword, exists := a.users[username]
+	a.mu.RUnlock()
 	if !exists {
 		return false
 	}

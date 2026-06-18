@@ -107,6 +107,9 @@ func NewController(cfg Config, msgBus *bus.MessageBus, llmClient *llm.Client, pr
 // patches and applied fixes. This should be called after NewController but
 // before Initialize or RunFullCycle.
 func (c *Controller) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
+	if orch == nil {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.securityOrch = orch
@@ -619,6 +622,9 @@ func (c *Controller) GetStatus() *ControllerStatus {
 // SetProgressCallback sets an optional callback invoked during cycle execution
 // to report phase progress. Safe to call before or after Initialize.
 func (c *Controller) SetProgressCallback(cb ProgressCallback) {
+	if cb == nil {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.progressCallback = cb

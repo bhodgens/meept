@@ -66,15 +66,15 @@ func (w *WorkspaceManager) Create(ctx context.Context, taskID, description strin
 		return "", fmt.Errorf("invalid task ID: must not contain path separators or parent references")
 	}
 
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	// Read baseDir under lock, then release for I/O.
+	w.mu.RLock()
+	baseDir := w.baseDir
+	w.mu.RUnlock()
 
-	workspace := filepath.Join(w.baseDir, taskID)
+	workspace := filepath.Join(baseDir, taskID)
 	if err := os.MkdirAll(workspace, 0o755); err != nil { //nolint:gosec // task workspace dirs are user-readable
 		return "", fmt.Errorf("failed to create workspace directory: %w", err)
 	}
-
-	w.workspaces[taskID] = workspace
 
 	// Initialize git repo
 	if ok, _ := w.gitCmd(ctx, workspace, "init"); !ok {
@@ -89,7 +89,20 @@ func (w *WorkspaceManager) Create(ctx context.Context, taskID, description strin
 		return "", fmt.Errorf("failed to write README: %w", err)
 	}
 
-	if w.autoCommit {
+	// Register the workspace path under the lock.
+	w.mu.Lock()
+	// Check for duplicate registration (TOCTOU: another goroutine may have
+	// created the same workspace concurrently).
+	if existing, ok := w.workspaces[taskID]; ok {
+		w.mu.Unlock()
+		// Another goroutine already registered this workspace; return it.
+		return existing, nil
+	}
+	w.workspaces[taskID] = workspace
+	autoCommit := w.autoCommit
+	w.mu.Unlock()
+
+	if autoCommit {
 		if err := w.commitInternal(ctx, taskID, "Initial workspace setup"); err != nil {
 			w.logger.Warn("workspace: initial commit failed", "task_id", taskID, "error", err)
 		}
@@ -101,13 +114,14 @@ func (w *WorkspaceManager) Create(ctx context.Context, taskID, description strin
 
 // Commit stages and commits changes in the task workspace.
 func (w *WorkspaceManager) Commit(ctx context.Context, taskID, message string, paths []string) error {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
 	return w.commitInternal(ctx, taskID, message, paths...)
 }
 
 func (w *WorkspaceManager) commitInternal(ctx context.Context, taskID, message string, paths ...string) error {
+	// Snapshot workspace path under lock, then release for git I/O.
+	w.mu.RLock()
 	workspace, ok := w.workspaces[taskID]
+	w.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("unknown workspace: %s", taskID)
 	}
@@ -189,15 +203,16 @@ func (w *WorkspaceManager) Log(ctx context.Context, taskID string, maxEntries in
 
 // Cleanup removes the workspace directory entirely.
 func (w *WorkspaceManager) Cleanup(taskID string) error {
+	// Snapshot workspace path under lock, then release for I/O.
 	w.mu.Lock()
-	defer w.mu.Unlock()
-
 	workspace, ok := w.workspaces[taskID]
 	if !ok {
+		w.mu.Unlock()
 		return nil
 	}
-
 	delete(w.workspaces, taskID)
+	w.mu.Unlock()
+
 	if err := os.RemoveAll(workspace); err != nil {
 		w.logger.Error("workspace: cleanup failed", "task_id", taskID, "error", err)
 		return err

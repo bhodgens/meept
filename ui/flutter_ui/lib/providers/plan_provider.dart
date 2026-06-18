@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
-import '../services/api_client.dart';
+import '../services/sdk_client.dart';
 import 'providers.dart';
 
 const _unset = Object();
@@ -30,16 +30,20 @@ class PlanState {
 }
 
 class PlanNotifier extends StateNotifier<PlanState> {
-  PlanNotifier({required this.apiClient}) : super(const PlanState());
+  PlanNotifier({required this.sdkClient}) : super(const PlanState());
 
-  final ApiClient apiClient;
+  final SdkApiClient sdkClient;
 
   Future<void> loadPlans({String? sessionID, String? projectID}) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      final plans = sessionID != null
-          ? await apiClient.listPlansBySession(sessionID)
-          : await apiClient.listPlans(projectID: projectID);
+      // SdkApiClient.listPlansBySession/listPlans return the raw `plans`
+      // arrays — callers deserialize each entry via Plan.fromJson because
+      // the OpenAPI spec leaves the Plan entity untyped.
+      final rawPlans = sessionID != null
+          ? await sdkClient.listPlansBySession(sessionID)
+          : await sdkClient.listPlans(projectId: projectID);
+      final plans = rawPlans.map((p) => Plan.fromJson(p)).toList(growable: false);
       state = state.copyWith(plans: plans, isLoading: false);
     } catch (e) {
       state = state.copyWith(isLoading: false, error: e.toString());
@@ -48,8 +52,8 @@ class PlanNotifier extends StateNotifier<PlanState> {
 
   Future<void> approvePlan(String planID, {String? sessionID}) async {
     try {
-      final updated = await apiClient.approvePlan(planID, sessionID: sessionID, by: 'flutter_ui');
-      _updatePlanInList(updated);
+      await sdkClient.approvePlan(planID, sessionID: sessionID, by: 'flutter_ui');
+      await loadPlans(sessionID: sessionID);
     } catch (e) {
       state = state.copyWith(error: e.toString());
     }
@@ -57,8 +61,8 @@ class PlanNotifier extends StateNotifier<PlanState> {
 
   Future<void> rejectPlan(String planID, {String? sessionID, String? reason}) async {
     try {
-      final updated = await apiClient.rejectPlan(planID, sessionID: sessionID, by: 'flutter_ui', reason: reason);
-      _updatePlanInList(updated);
+      await sdkClient.rejectPlan(planID, sessionID: sessionID, by: 'flutter_ui', reason: reason);
+      await loadPlans(sessionID: sessionID);
     } catch (e) {
       state = state.copyWith(error: e.toString());
     }
@@ -66,8 +70,8 @@ class PlanNotifier extends StateNotifier<PlanState> {
 
   Future<void> confirmPlan(String planID, {String? sessionID}) async {
     try {
-      final updated = await apiClient.confirmPlan(planID, sessionID: sessionID, by: 'flutter_ui');
-      _updatePlanInList(updated);
+      await sdkClient.confirmPlan(planID, sessionID: sessionID, by: 'flutter_ui');
+      await loadPlans(sessionID: sessionID);
     } catch (e) {
       state = state.copyWith(error: e.toString());
     }
@@ -75,16 +79,11 @@ class PlanNotifier extends StateNotifier<PlanState> {
 
   Future<void> revisePlan(String planID, {String? sessionID, String? feedback}) async {
     try {
-      final updated = await apiClient.revisePlan(planID, sessionID: sessionID, feedback: feedback);
-      _updatePlanInList(updated);
+      await sdkClient.revisePlan(planID, sessionID: sessionID, feedback: feedback);
+      await loadPlans(sessionID: sessionID);
     } catch (e) {
       state = state.copyWith(error: e.toString());
     }
-  }
-
-  void _updatePlanInList(Plan updated) {
-    final newPlans = state.plans.map((p) => p.id == updated.id ? updated : p).toList();
-    state = state.copyWith(plans: newPlans);
   }
 
   void clearError() {
@@ -93,6 +92,6 @@ class PlanNotifier extends StateNotifier<PlanState> {
 }
 
 final planProvider = StateNotifierProvider<PlanNotifier, PlanState>((ref) {
-  final client = ref.watch(apiClientProvider);
-  return PlanNotifier(apiClient: client);
+  final client = ref.watch(sdkClientProvider);
+  return PlanNotifier(sdkClient: client);
 });

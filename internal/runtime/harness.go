@@ -75,8 +75,8 @@ func (h *TestHarness) Validate(ctx context.Context, workdir string) (*Validation
 
 	if err != nil {
 		// testResult may be nil when the backend returns an error
-		// (e.g., local backend: nil, fmt.Errorf(...)), so defer
-		//encing testResult before the err check would panic.
+		// (e.g., local backend returns nil, fmt.Errorf(...)), so
+		// referencing testResult before the err check would panic.
 		return nil, err
 	}
 

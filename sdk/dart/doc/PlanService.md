@@ -8,8 +8,8 @@ import 'package:meept_client/api.dart';
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**manager** | **Object** |  | [optional] 
-**store** | **Object** |  | [optional] 
+**manager** | [**JsonObject**](.md) |  | [optional] 
+**store** | [**JsonObject**](.md) |  | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

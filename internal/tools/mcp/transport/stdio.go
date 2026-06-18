@@ -63,7 +63,7 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if t.running.Load() {
+	if t.running.Load() { //nolint:mutexio // atomic.Bool.Load is not I/O
 		return fmt.Errorf("transport already running")
 	}
 
@@ -85,20 +85,20 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		stdin.Close()
+		stdin.Close() //nolint:mutexio // one-time init cleanup path
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		stdin.Close()
-		stdout.Close()
+		stdin.Close()   //nolint:mutexio // one-time init cleanup path
+		stdout.Close()  //nolint:mutexio // one-time init cleanup path
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
 	// Start the process
 	if err := cmd.Start(); err != nil {
-		stdin.Close()
+		stdin.Close() //nolint:mutexio // one-time init cleanup path
 		return fmt.Errorf("failed to start process: %w", err)
 	}
 
@@ -285,7 +285,7 @@ func (t *StdioTransport) Close() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if !t.running.Load() {
+	if !t.running.Load() { //nolint:mutexio // atomic.Bool.Load is not I/O
 		return nil
 	}
 
@@ -293,13 +293,13 @@ func (t *StdioTransport) Close() error {
 
 	// Close stdin to signal EOF to the subprocess
 	if t.stdin != nil {
-		t.stdin.Close()
+		t.stdin.Close() //nolint:mutexio // one-time teardown guarded by running flag
 	}
 
 	if t.cmd == nil || t.cmd.Process == nil {
 		// Close stdout file to unblock relayStdout
 		if t.stdoutFile != nil {
-			t.stdoutFile.Close()
+			t.stdoutFile.Close() //nolint:mutexio // one-time teardown guarded by running flag
 		}
 		return nil
 	}
@@ -340,7 +340,7 @@ func (t *StdioTransport) Close() error {
 
 	// Close stdout file after relayStdout has exited.
 	if t.stdoutFile != nil {
-		t.stdoutFile.Close()
+		t.stdoutFile.Close() //nolint:mutexio // one-time teardown guarded by running flag
 	}
 
 	return nil

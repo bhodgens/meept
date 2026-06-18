@@ -23,6 +23,7 @@ import (
 	"github.com/caimlas/meept/internal/sharedclient"
 	"github.com/caimlas/meept/internal/stt"
 	"github.com/caimlas/meept/internal/tts"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/internal/tui/render"
 	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/internal/tui/vim"
@@ -400,7 +401,7 @@ func (m *ChatModel) IsTTSEnabled() bool {
 }
 
 func generateConversationID() string {
-	return fmt.Sprintf("conv-%d", time.Now().UnixNano())
+	return id.Generate("conv-")
 }
 
 // SetSize updates the model dimensions.

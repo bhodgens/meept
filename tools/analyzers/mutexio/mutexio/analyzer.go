@@ -10,11 +10,26 @@
 // (by receiver ident), it reports. Defer-based unlocks are handled by
 // treating the end of the function body as the effective unlock position
 // when a `defer X.Unlock()` is seen without a later non-deferred unlock.
+//
+// # Suppression
+//
+// Findings can be suppressed on a per-call basis with a trailing comment
+// on the same line as the I/O call:
+//
+//	s.db.Exec(...) //nolint:mutexio // mutex serializes sqlite connection access
+//
+// The comment must contain the literal "nolint:mutexio". Any text after
+// is treated as rationale for human readers and is ignored by the
+// analyzer. This mirrors the golangci-lint nolint directive convention
+// so the same directive works whether running under golangci-lint or
+// the standalone runner (make mutexio).
 package mutexio
 
 import (
 	"go/ast"
 	"go/token"
+	"strconv"
+	"strings"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
@@ -71,11 +86,39 @@ var ioMethods = map[string]bool{
 
 func run(pass *analysis.Pass) (interface{}, error) {
 	insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
-	nodeFilter := []ast.Node{
+
+	// Collect all comment groups so checkRange can honor //nolint:mutexio
+	// directives. We collect them once per package, not per function.
+	var allComments []*ast.CommentGroup
+	commentFilter := []ast.Node{
+		(*ast.File)(nil),
+	}
+	insp.Preorder(commentFilter, func(n ast.Node) {
+		if f, ok := n.(*ast.File); ok {
+			allComments = append(allComments, f.Comments...)
+		}
+	})
+
+	// Build a per-line nolint:mutexio set keyed by "filename:line".
+	// Any comment starting on that line containing "nolint:mutexio"
+	// marks the line suppressed.
+	nolintLines := map[string]bool{}
+	fset := pass.Fset
+	for _, cg := range allComments {
+		for _, c := range cg.List {
+			if !strings.Contains(c.Text, "nolint:mutexio") {
+				continue
+			}
+			p := fset.Position(c.Pos())
+			nolintLines[p.Filename+":"+strconv.Itoa(p.Line)] = true
+		}
+	}
+
+	funcFilter := []ast.Node{
 		(*ast.FuncDecl)(nil),
 		(*ast.FuncLit)(nil),
 	}
-	insp.Preorder(nodeFilter, func(n ast.Node) {
+	insp.Preorder(funcFilter, func(n ast.Node) {
 		var body *ast.BlockStmt
 		switch fn := n.(type) {
 		case *ast.FuncDecl:
@@ -86,24 +129,44 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		if body == nil {
 			return
 		}
-		checkBody(pass, body)
+		checkBody(pass, body, nolintLines, fset)
 	})
 	return nil, nil
 }
 
 // callInfo is a single selector-method call recorded during linear scan.
 type callInfo struct {
-	call      *ast.CallExpr
-	method    string
-	recvIdent *ast.Ident // receiver ident if it's a simple selector
-	isLock    bool
-	isUnlock  bool
-	isDefer   bool // true if call is inside a DeferStmt
+	call    *ast.CallExpr
+	method  string
+	recvKey string // canonical dotted path of the receiver (e.g. "s.mu", "p.mu")
+	isLock  bool
+	isUnlock bool
+	isDefer bool // true if call is inside a DeferStmt
+}
+
+// receiverKey extracts a canonical string key identifying the receiver
+// expression. Supports nested selector expressions (p.mu.Lock(),
+// a.b.c.mu.Lock()) and simple idents (mu.Lock()). Returns "" if the
+// receiver is something more complex (e.g., a function call result),
+// in which case pairing is skipped (callInfo.recvKey stays "").
+func receiverKey(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.SelectorExpr:
+		parent := receiverKey(e.X)
+		if parent == "" {
+			return ""
+		}
+		return parent + "." + e.Sel.Name
+	default:
+		return ""
+	}
 }
 
 // checkBody scans a function body for Lock/Unlock pairs and flags any
 // I/O-method calls that appear textually between them.
-func checkBody(pass *analysis.Pass, body *ast.BlockStmt) {
+func checkBody(pass *analysis.Pass, body *ast.BlockStmt, nolintLines map[string]bool, fset *token.FileSet) {
 	deferCalls := collectDeferCalls(body)
 	var calls []callInfo
 	ast.Inspect(body, func(n ast.Node) bool {
@@ -123,14 +186,12 @@ func checkBody(pass *analysis.Pass, body *ast.BlockStmt) {
 		case "Unlock", "RUnlock":
 			ci.isUnlock = true
 		}
-		if id, ok := sel.X.(*ast.Ident); ok {
-			ci.recvIdent = id
-		}
+		ci.recvKey = receiverKey(sel.X)
 		calls = append(calls, ci)
 		return true
 	})
 
-	// Pair lock/unlock by receiver ident name using a stack.
+	// Pair lock/unlock by receiver key using a stack.
 	// When the unlock is deferred, use the function-body end as the
 	// effective unlock position so I/O between the Lock and the end of
 	// the function is flagged (matches the CLAUDE.md rule intent).
@@ -146,13 +207,13 @@ func checkBody(pass *analysis.Pass, body *ast.BlockStmt) {
 		if !ci.isUnlock {
 			continue
 		}
-		// find matching lock (innermost with same receiver ident name)
+		// find matching lock (innermost with same receiver key)
 		for j := len(stack) - 1; j >= 0; j-- {
 			lf := stack[j]
-			if lf.ci.recvIdent == nil || ci.recvIdent == nil {
+			if lf.ci.recvKey == "" || ci.recvKey == "" {
 				continue
 			}
-			if lf.ci.recvIdent.Name != ci.recvIdent.Name {
+			if lf.ci.recvKey != ci.recvKey {
 				continue
 			}
 			// Matching pair: scan between lock and unlock positions.
@@ -164,7 +225,7 @@ func checkBody(pass *analysis.Pass, body *ast.BlockStmt) {
 			} else {
 				endPos = ci.call.Pos()
 			}
-			checkRange(pass, body, lf.ci.call, ci.call, startPos, endPos)
+			checkRange(pass, body, lf.ci.call, ci.call, startPos, endPos, nolintLines, fset)
 			stack = append(stack[:j], stack[j+1:]...)
 			break
 		}
@@ -192,7 +253,7 @@ func collectDeferCalls(body *ast.BlockStmt) map[*ast.CallExpr]bool {
 // lockCall and unlockCall are passed so we can skip the unlock's own
 // CallExpr (which would otherwise match for some methods) and so we
 // can avoid treating the lock's receiver as I/O.
-func checkRange(pass *analysis.Pass, body *ast.BlockStmt, lockCall, unlockCall *ast.CallExpr, startPos, endPos token.Pos) {
+func checkRange(pass *analysis.Pass, body *ast.BlockStmt, lockCall, unlockCall *ast.CallExpr, startPos, endPos token.Pos, nolintLines map[string]bool, fset *token.FileSet) {
 	deferCalls := collectDeferCalls(body)
 	ast.Inspect(body, func(n ast.Node) bool {
 		ce, ok := n.(*ast.CallExpr)
@@ -216,14 +277,13 @@ func checkRange(pass *analysis.Pass, body *ast.BlockStmt, lockCall, unlockCall *
 			return true
 		}
 		// Skip if the receiver is the mutex itself (e.g., the unlock
-		// call or other operations on the mutex).
-		if id, ok := sel.X.(*ast.Ident); ok {
-			if lid, ok2 := lockCall.Fun.(*ast.SelectorExpr); ok2 {
-				if lid2, ok3 := lid.X.(*ast.Ident); ok3 {
-					if id.Name == lid2.Name {
-						return true
-					}
-				}
+		// call or other operations on the mutex). Compare full receiver
+		// keys so p.mu.Lock() / p.mu.Unlock() / p.mu.SomethingElse() all
+		// share the same key.
+		if lid, ok2 := lockCall.Fun.(*ast.SelectorExpr); ok2 {
+			lockKey := receiverKey(lid.X)
+			if lockKey != "" && lockKey == receiverKey(sel.X) {
+				return true
 			}
 		}
 		// Skip deferred calls — they execute at function return, not
@@ -232,7 +292,40 @@ func checkRange(pass *analysis.Pass, body *ast.BlockStmt, lockCall, unlockCall *
 		if deferCalls[ce] {
 			return true
 		}
+		// Honor //nolint:mutexio suppression directives on any line
+		// spanned by the call expression. This allows legitimate patterns
+		// (SQLite connection serialization, one-time init/teardown) to be
+		// annotated even when the call spans multiple lines.
+		if isNoLintMutexIO(ce, nolintLines, fset) {
+			return true
+		}
 		pass.Reportf(ce.Pos(), "mutexio: %s called while holding a mutex (CLAUDE.md mutex scope rule)", method)
 		return true
 	})
+}
+
+// isNoLintMutexIO reports whether any line spanned by the given call
+// expression is marked with a //nolint:mutexio suppression directive.
+// Checking the full line range (not just the starting line) allows
+// nolint directives on the closing line of multi-line calls, e.g.:
+//
+//	_, err := s.db.Exec(`
+//		SELECT ...`,
+//		arg1) //nolint:mutexio // mutex serializes sqlite connection access
+func isNoLintMutexIO(ce *ast.CallExpr, nolintLines map[string]bool, fset *token.FileSet) bool {
+	if len(nolintLines) == 0 || fset == nil {
+		return false
+	}
+	startPos := fset.Position(ce.Pos())
+	endPos := fset.Position(ce.End())
+	if startPos.Filename != endPos.Filename {
+		// Defensive: shouldn't happen for a single call expression.
+		return false
+	}
+	for line := startPos.Line; line <= endPos.Line; line++ {
+		if nolintLines[startPos.Filename+":"+strconv.Itoa(line)] {
+			return true
+		}
+	}
+	return false
 }

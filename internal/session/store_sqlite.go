@@ -311,7 +311,7 @@ func (s *SQLiteStore) Create(name string) (*Session, error) {
 		string(attachedJSON),
 		string(workersJSON),
 		session.Description,
-	)
+	) //nolint:mutexio // mutex serializes sqlite connection access
 
 	if err != nil {
 		s.logger.Error("Failed to create session", "error", err)
@@ -347,7 +347,7 @@ func (s *SQLiteStore) GetMostRecent() *Session {
 		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence
 		FROM sessions
 		ORDER BY last_activity DESC
-		LIMIT 1`)
+		LIMIT 1`) //nolint:mutexio // mutex serializes sqlite connection access
 
 	return s.scanSession(row)
 }
@@ -432,7 +432,7 @@ func (s *SQLiteStore) List() ([]*Session, error) {
 			SELECT 1 FROM session_messages sm
 			WHERE sm.session_id = s.id AND sm.role = 'assistant'
 		)
-		ORDER BY s.last_activity DESC`)
+		ORDER BY s.last_activity DESC`) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		s.logger.Error("Failed to list sessions", "error", err)
 		return nil, fmt.Errorf("failed to list sessions: %w", err)
@@ -509,7 +509,7 @@ func (s *SQLiteStore) Delete(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	result, err := s.db.Exec("DELETE FROM sessions WHERE id = ?", id)
+	result, err := s.db.Exec("DELETE FROM sessions WHERE id = ?", id) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		s.logger.Error("Failed to delete session", "id", id, "error", err)
 		return false
@@ -572,7 +572,7 @@ func (s *SQLiteStore) UpdateActivity(sessionID string) error {
 	defer s.mu.Unlock()
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec("UPDATE sessions SET last_activity = ? WHERE id = ?", now, sessionID)
+	_, err := s.db.Exec("UPDATE sessions SET last_activity = ? WHERE id = ?", now, sessionID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		s.logger.Error("Failed to update session activity", "id", sessionID, "error", err)
 		return fmt.Errorf("failed to update session activity: %w", err)
@@ -652,7 +652,7 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 		}
 
 		_, err := stmt.Exec(sessionID, msg.Role, msg.Content, msg.Timestamp.Format(time.RFC3339),
-			msg.ParentID, entryType, branchID, msg.Model, msg.Name, msg.ToolCallID)
+			msg.ParentID, entryType, branchID, msg.Model, msg.Name, msg.ToolCallID) //nolint:mutexio // mutex serializes sqlite connection access
 		if err != nil {
 			return fmt.Errorf("failed to insert message: %w", err)
 		}
@@ -671,7 +671,7 @@ func (s *SQLiteStore) GetMessages(sessionID string, offset, limit int) ([]Messag
 		FROM session_messages
 		WHERE session_id = ?
 		ORDER BY id
-		LIMIT ? OFFSET ?`, sessionID, limit, offset)
+		LIMIT ? OFFSET ?`, sessionID, limit, offset) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, fmt.Errorf("failed to query messages: %w", err)
 	}
@@ -723,7 +723,7 @@ func (s *SQLiteStore) GetMessageCount(sessionID string) (int, error) {
 	defer s.mu.RUnlock()
 
 	var count int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM session_messages WHERE session_id = ?", sessionID).Scan(&count)
+	err := s.db.QueryRow("SELECT COUNT(*) FROM session_messages WHERE session_id = ?", sessionID).Scan(&count) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return 0, fmt.Errorf("failed to count messages: %w", err)
 	}
@@ -735,7 +735,7 @@ func (s *SQLiteStore) UpdateDescription(sessionID, description string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	result, err := s.db.Exec("UPDATE sessions SET description = ? WHERE id = ?", description, sessionID)
+	result, err := s.db.Exec("UPDATE sessions SET description = ? WHERE id = ?", description, sessionID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return fmt.Errorf("failed to update description: %w", err)
 	}
@@ -752,7 +752,7 @@ func (s *SQLiteStore) UpdateName(sessionID, name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	result, err := s.db.Exec("UPDATE sessions SET name = ? WHERE id = ?", name, sessionID)
+	result, err := s.db.Exec("UPDATE sessions SET name = ? WHERE id = ?", name, sessionID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return fmt.Errorf("failed to update name: %w", err)
 	}
@@ -774,7 +774,7 @@ func (s *SQLiteStore) HasResponses(sessionID string) (bool, error) {
 		SELECT EXISTS(
 			SELECT 1 FROM session_messages
 			WHERE session_id = ? AND role = 'assistant'
-		)`, sessionID).Scan(&exists)
+		)`, sessionID).Scan(&exists) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return false, fmt.Errorf("failed to check responses: %w", err)
 	}
@@ -848,7 +848,7 @@ func (s *SQLiteStore) GetLeafMessageID(sessionID string) (int64, error) {
 	defer s.mu.RUnlock()
 
 	var leafID sql.NullInt64
-	err := s.db.QueryRow(`SELECT leaf_message_id FROM sessions WHERE id = ?`, sessionID).Scan(&leafID)
+	err := s.db.QueryRow(`SELECT leaf_message_id FROM sessions WHERE id = ?`, sessionID).Scan(&leafID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return 0, fmt.Errorf("failed to get leaf message id: %w", err)
 	}
@@ -863,7 +863,7 @@ func (s *SQLiteStore) SetLeafMessageID(sessionID string, messageID int64) error 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	result, err := s.db.Exec(`UPDATE sessions SET leaf_message_id = ? WHERE id = ?`, messageID, sessionID)
+	result, err := s.db.Exec(`UPDATE sessions SET leaf_message_id = ? WHERE id = ?`, messageID, sessionID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return fmt.Errorf("failed to set leaf message id: %w", err)
 	}
@@ -882,7 +882,7 @@ func (s *SQLiteStore) SetProject(sessionID, projectID, projectPath string) error
 	result, err := s.db.Exec(
 		`UPDATE sessions SET project_id = ?, project_path = ?, last_activity = ? WHERE id = ?`,
 		projectID, projectPath, time.Now().UTC().Format(time.RFC3339), sessionID,
-	)
+	) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return fmt.Errorf("failed to set project for session: %w", err)
 	}
@@ -914,7 +914,7 @@ func (s *SQLiteStore) GetMessagePath(sessionID string, leafID int64) ([]Message,
 	FROM path
 	ORDER BY id`
 
-	rows, err := s.db.Query(query, leafID, sessionID, sessionID)
+	rows, err := s.db.Query(query, leafID, sessionID, sessionID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, fmt.Errorf("failed to query message path: %w", err)
 	}
@@ -973,7 +973,7 @@ func (s *SQLiteStore) GetMessageBranches(sessionID string) ([]Branch, error) {
 	GROUP BY branch_id
 	ORDER BY MIN(id)`
 
-	rows, err := s.db.Query(query, sessionID)
+	rows, err := s.db.Query(query, sessionID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, fmt.Errorf("failed to query branches: %w", err)
 	}
@@ -1002,7 +1002,7 @@ func (s *SQLiteStore) GetTree(sessionID string) ([]TreeNode, error) {
 
 	// Get the current leaf for IsLeaf marking
 	var leafID sql.NullInt64
-	_ = s.db.QueryRow(`SELECT leaf_message_id FROM sessions WHERE id = ?`, sessionID).Scan(&leafID)
+	_ = s.db.QueryRow(`SELECT leaf_message_id FROM sessions WHERE id = ?`, sessionID).Scan(&leafID) //nolint:mutexio // mutex serializes sqlite connection access
 
 	query := `
 	SELECT id, COALESCE(parent_id, 0), role, COALESCE(entry_type, 'message'), COALESCE(branch_id, 'main'),
@@ -1011,7 +1011,7 @@ func (s *SQLiteStore) GetTree(sessionID string) ([]TreeNode, error) {
 	WHERE session_id = ?
 	ORDER BY id`
 
-	rows, err := s.db.Query(query, sessionID)
+	rows, err := s.db.Query(query, sessionID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, fmt.Errorf("failed to query tree: %w", err)
 	}
@@ -1056,7 +1056,7 @@ func (s *SQLiteStore) NavigateToBranch(sessionID string, targetMessageID int64) 
 
 	// Get current leaf
 	var oldLeaf sql.NullInt64
-	err := s.db.QueryRow(`SELECT leaf_message_id FROM sessions WHERE id = ?`, sessionID).Scan(&oldLeaf)
+	err := s.db.QueryRow(`SELECT leaf_message_id FROM sessions WHERE id = ?`, sessionID).Scan(&oldLeaf) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return 0, fmt.Errorf("failed to get current leaf: %w", err)
 	}
@@ -1068,7 +1068,7 @@ func (s *SQLiteStore) NavigateToBranch(sessionID string, targetMessageID int64) 
 	// Validate target message exists in this session
 	var exists bool
 	err = s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM session_messages WHERE id = ? AND session_id = ?)`,
-		targetMessageID, sessionID).Scan(&exists)
+		targetMessageID, sessionID).Scan(&exists) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return 0, fmt.Errorf("failed to validate target message: %w", err)
 	}
@@ -1077,7 +1077,7 @@ func (s *SQLiteStore) NavigateToBranch(sessionID string, targetMessageID int64) 
 	}
 
 	// Update leaf to target
-	result, err := s.db.Exec(`UPDATE sessions SET leaf_message_id = ? WHERE id = ?`, targetMessageID, sessionID)
+	result, err := s.db.Exec(`UPDATE sessions SET leaf_message_id = ? WHERE id = ?`, targetMessageID, sessionID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return 0, fmt.Errorf("failed to update leaf: %w", err)
 	}
@@ -1134,7 +1134,7 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 		newID, newName, newConvID,
 		now.Format(time.RFC3339), now.Format(time.RFC3339),
 		string(attachedJSON), string(workersJSON),
-	)
+	) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, fmt.Errorf("failed to create forked session: %w", err)
 	}
@@ -1155,7 +1155,7 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 		)
 		SELECT id, role, content, timestamp, parent_id, entry_type, branch_id, model, name, tool_call_id
 		FROM ancestors
-		ORDER BY id`, fromMessageID, sourceSessionID, sourceSessionID)
+		ORDER BY id`, fromMessageID, sourceSessionID, sourceSessionID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, fmt.Errorf("failed to query messages for fork: %w", err)
 	}
@@ -1239,7 +1239,7 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 		}
 
 		result, err := insertStmt.Exec(newID, sm.role, sm.content, sm.timestamp,
-			newParentID, entryType, branchID, model, name, toolCallID)
+			newParentID, entryType, branchID, model, name, toolCallID) //nolint:mutexio // mutex serializes sqlite connection access
 		if err != nil {
 			return nil, fmt.Errorf("failed to insert copied message: %w", err)
 		}
@@ -1274,7 +1274,7 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 			WHERE message_id IN (%s)
 			ORDER BY seq`, strings.Join(placeholders, ","))
 
-		tcRows, err := tx.Query(tcQuery, args...)
+		tcRows, err := tx.Query(tcQuery, args...) //nolint:mutexio // mutex serializes sqlite connection access
 		if err != nil {
 			return nil, fmt.Errorf("failed to query tool calls for fork: %w", err)
 		}
@@ -1305,7 +1305,7 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 			if tcResult.Valid {
 				resultVal = tcResult.String
 			}
-			if _, err := tcInsertStmt.Exec(newMsgID, tcToolName, tcToolCallID, tcArgs, resultVal, tcSeq); err != nil {
+			if _, err := tcInsertStmt.Exec(newMsgID, tcToolName, tcToolCallID, tcArgs, resultVal, tcSeq); err != nil { //nolint:mutexio // mutex serializes sqlite connection access
 				return nil, fmt.Errorf("failed to insert copied tool call: %w", err)
 			}
 		}
@@ -1315,7 +1315,7 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 	}
 
 	// 7. Set leaf_message_id on new session
-	_, err = tx.Exec(`UPDATE sessions SET leaf_message_id = ? WHERE id = ?`, newLeafID, newID)
+	_, err = tx.Exec(`UPDATE sessions SET leaf_message_id = ? WHERE id = ?`, newLeafID, newID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, fmt.Errorf("failed to set leaf on forked session: %w", err)
 	}
@@ -1369,7 +1369,7 @@ func (s *SQLiteStore) InsertCompaction(sessionID string, parentID int64, summary
 		string(contentJSON),
 		time.Now().UTC().Format(time.RFC3339),
 		parentID,
-	)
+	) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert compaction: %w", err)
 	}
@@ -1417,7 +1417,7 @@ func (s *SQLiteStore) ReparentAfterCompaction(sessionID string, afterID, compact
 		SET parent_id = ?
 		WHERE session_id = ? AND parent_id = ?`,
 		compactionID, sessionID, afterID,
-	)
+	) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return fmt.Errorf("failed to re-parent messages after compaction: %w", err)
 	}
@@ -1442,7 +1442,7 @@ func (s *SQLiteStore) GetCompactionEntries(sessionID string) ([]CompactionEntry,
 		SELECT id, session_id, content, timestamp, parent_id
 		FROM session_messages
 		WHERE session_id = ? AND entry_type = 'compaction'
-		ORDER BY id`, sessionID)
+		ORDER BY id`, sessionID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, fmt.Errorf("failed to query compaction entries: %w", err)
 	}
@@ -1465,7 +1465,7 @@ func (s *SQLiteStore) GetCompactionEntries(sessionID string) ([]CompactionEntry,
 
 		// Parse the JSON content to extract CompressedIDs
 		var content CompactionContent
-		if err := json.Unmarshal([]byte(entry.Content), &content); err == nil {
+		if err := json.Unmarshal([]byte(entry.Content), &content); err == nil { //nolint:mutexio // mutex serializes sqlite connection access
 			entry.CompressedIDs = content.CompressedIDs
 		} else {
 			s.logger.Warn("Failed to parse compaction content JSON",
@@ -1510,7 +1510,7 @@ func (s *SQLiteStore) SaveToolCalls(messageID int64, toolCalls []ToolCall) error
 	defer stmt.Close()
 
 	for _, tc := range toolCalls {
-		_, err := stmt.Exec(messageID, tc.ToolName, tc.ToolCallID, tc.Arguments, tc.Result, tc.Seq)
+		_, err := stmt.Exec(messageID, tc.ToolName, tc.ToolCallID, tc.Arguments, tc.Result, tc.Seq) //nolint:mutexio // mutex serializes sqlite connection access
 		if err != nil {
 			return fmt.Errorf("failed to insert tool call: %w", err)
 		}
@@ -1528,7 +1528,7 @@ func (s *SQLiteStore) GetToolCalls(messageID int64) ([]ToolCall, error) {
 		SELECT id, message_id, tool_name, tool_call_id, arguments, result, seq
 		FROM session_tool_calls
 		WHERE message_id = ?
-		ORDER BY seq`, messageID)
+		ORDER BY seq`, messageID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, fmt.Errorf("failed to query tool calls: %w", err)
 	}
@@ -1579,7 +1579,7 @@ func (s *SQLiteStore) GetToolCallsForMessages(messageIDs []int64) (map[int64][]T
 		WHERE message_id IN (%s)
 		ORDER BY seq`, strings.Join(placeholders, ","))
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.Query(query, args...) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, fmt.Errorf("failed to query tool calls for messages: %w", err)
 	}

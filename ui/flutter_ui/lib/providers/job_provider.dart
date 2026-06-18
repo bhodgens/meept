@@ -1,7 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/api_client.dart';
+import '../models/api_models.dart';
+import '../services/sdk_client.dart';
 import 'providers.dart';
 import '../services/websocket_service.dart';
 
@@ -73,13 +74,13 @@ class JobUpdate {
 /// WebSocket real-time updates (Task 20).
 class JobNotifier extends StateNotifier<JobState> {
   JobNotifier({
-    required this.apiClient,
+    required this.sdkClient,
     required this.websocket,
   }) : super(const JobState(isLoading: true)) {
     _init();
   }
 
-  final ApiClient apiClient;
+  final SdkApiClient sdkClient;
   final WebSocketService websocket;
   StreamSubscription<Map<String, dynamic>>? _jobsSubscription;
   StreamSubscription<bool>? _connectionSubscription;
@@ -112,12 +113,16 @@ class JobNotifier extends StateNotifier<JobState> {
   Future<void> _fetchJobs() async {
     final gen = ++_fetchGeneration;
     try {
-      final jobs = await apiClient.listJobs();
+      // SdkApiClient.listJobs returns the raw `jobs` array — callers
+      // deserialize each entry via Job.fromJson because the OpenAPI spec
+      // leaves the Job entity untyped.
+      final rawJobs = await sdkClient.listJobs();
+      final jobs = rawJobs.map((j) => Job.fromJson(j)).toList(growable: false);
 
       // Stats fetch is non-fatal; keep last known queueDepth on failure.
       int? depth;
       try {
-        final stats = await apiClient.getQueueStats();
+        final stats = await sdkClient.getQueueStats();
         depth = stats['queue_depth'] as int? ?? stats['depth'] as int? ?? 0;
       } catch (_) {
         // Stats fetch is non-fatal; keep last known queueDepth.
@@ -210,7 +215,7 @@ class JobNotifier extends StateNotifier<JobState> {
 /// Job queue provider
 final jobProvider =
     StateNotifierProvider<JobNotifier, JobState>((ref) {
-  final client = ref.watch(apiClientProvider);
+  final client = ref.watch(sdkClientProvider);
   final websocket = ref.watch(websocketProvider);
-  return JobNotifier(apiClient: client, websocket: websocket);
+  return JobNotifier(sdkClient: client, websocket: websocket);
 });

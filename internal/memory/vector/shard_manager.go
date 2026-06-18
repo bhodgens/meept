@@ -128,10 +128,15 @@ func (m *ShardManager) loadShard(shardType ShardType) error {
 
 // unloadShard closes and removes a shard from RAM.
 func (m *ShardManager) unloadShard(shardType ShardType) error {
+	// Snapshot under lock, then close outside to avoid holding the map
+	// mutex across disk I/O (CLAUDE.md mutex scope rule).
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	shard, ok := m.shards[shardType]
+	if ok {
+		delete(m.shards, shardType)
+	}
+	m.mu.Unlock()
+
 	if !ok {
 		return nil // not loaded
 	}
@@ -140,7 +145,6 @@ func (m *ShardManager) unloadShard(shardType ShardType) error {
 		m.logger.Warn("failed to close shard", "type", shardType, "error", err)
 	}
 
-	delete(m.shards, shardType)
 	m.logger.Info("unloaded shard", "type", shardType)
 	return nil
 }

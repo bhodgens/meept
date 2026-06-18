@@ -295,7 +295,7 @@ func (s *VectorShard) InsertBatch(ctx context.Context, memoryIDs []string, embed
 		}
 
 		var rowID int64
-		err = tx.QueryRow("SELECT last_insert_rowid()").Scan(&rowID)
+		err = tx.QueryRow("SELECT last_insert_rowid()").Scan(&rowID) //nolint:mutexio // mutex serializes transaction, Scan is on stmt not connection pool
 		if err != nil {
 			return fmt.Errorf("get rowid at %d: %w", i, err)
 		}
@@ -400,7 +400,7 @@ func (s *VectorShard) Delete(ctx context.Context, memoryID string) error {
 func (s *VectorShard) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.db.Close()
+	return s.db.Close() //nolint:mutexio // teardown under lock; closing requires exclusive access
 }
 
 // Stats returns statistics about the vector shard.

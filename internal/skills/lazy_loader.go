@@ -117,7 +117,7 @@ func (l *LazySkillLoader) loadAndCache(ctx context.Context, key string) (*Skill,
 	l.stats.Misses++
 
 	// Get path from index
-	indexEntry := l.index.Get(key)
+	indexEntry := l.index.Get(key) //nolint:mutexio // in-memory index map lookup, not I/O
 	if indexEntry == nil {
 		l.stats.Errors++
 		return nil, fmt.Errorf("skill not found in index: %s", key)
@@ -291,7 +291,9 @@ func (l *LazySkillLoader) SetIndex(index *SkillIndex) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	l.index = index
+	if index != nil {
+		l.index = index
+	}
 	// Clear cache since index changed
 	l.cache = make(map[string]*cacheEntry)
 	l.order = make([]string, 0)

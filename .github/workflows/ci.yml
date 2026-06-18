@@ -1,0 +1,232 @@
+name: CI
+
+# CI for the meept project. Runs on every push to main and every PR.
+# Covers:
+#   - Go build (daemon + CLI + tools)
+#   - Go vet
+#   - golangci-lint (with all linters from .golangci.yml)
+#   - gosec security scan (G201 SQL injection, G202 string concatenation in SQL)
+#   - Project analyzers (mutexio, predid)
+#   - Python audit scripts (UTF-8 byte arithmetic, Dart enum shadowing)
+#   - Go test with race detector (highest-risk packages only for speed)
+#   - Full Go test without race detector
+#
+# Adding a new analyzer: drop it under tools/analyzers/ and add a step below.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs for the same branch when a new commit is pushed.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── Go: build + vet + lint + analyzers + audit scripts ──────────────
+  go-static-analysis:
+    name: Go static analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Download deps
+        run: go mod download
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=10m
+
+      - name: gosec (G201, G202)
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec -include=G201,G202 ./...
+
+      # Project analyzers — these enforce CLAUDE.md project rules.
+      #   - mutexio: no I/O under mutex (CLAUDE.md "Mutex scope" rule)
+      #   - predid:  no time.Now().UnixNano() used as unique ID
+      #              (CLAUDE.md mandates pkg/id.Generate)
+      - name: mutexio analyzer
+        run: go run ./tools/analyzers/mutexio/ ./...
+
+      - name: predid analyzer
+        run: go run ./tools/analyzers/predid/ ./...
+
+  # ─── Python audit scripts ─────────────────────────────────────────────
+  python-audits:
+    name: Python audit scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # UTF-8 byte arithmetic: flags hand-rolled ASCII case-conversion
+      # (c |= 0x20, c += 'a' - 'A') that corrupts multi-byte UTF-8.
+      - name: UTF-8 byte-arithmetic audit
+        run: python3 scripts/audit-utf8-byte-arithmetic.py
+
+      # Dart enum-name-shadow: flags Dart extensions that shadow
+      # Enum.name/index (silent footgun that broke SearchScope.name).
+      # Only runs if Flutter UI exists in the PR.
+      - name: Dart enum-name-shadow audit
+        run: |
+          if [ -d ui/flutter_ui/lib ]; then
+            python3 scripts/audit-dart-enum-name-shadow.py
+          else
+            echo "ui/flutter_ui/lib not present; skipping dart audit"
+          fi
+
+  # ─── Go tests (race detector, highest-risk packages) ─────────────────
+  # Race detection is expensive; we run it only on packages with known
+  # concurrency surface area. The full suite runs without -race below.
+  go-test-race:
+    name: Go tests (race, high-risk pkgs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Download deps
+        run: go mod download
+
+      # Highest-risk packages: those with concurrent access patterns and
+      # those that have been fixed in prior review rounds.
+      #
+      # internal/llm and internal/comm/http are slow under -race
+      # (~90s and ~40s per iteration respectively) but historically
+      # most race bugs cluster here, so the cost is justified.
+      - name: go test -race (high-risk packages)
+        run: |
+          go test -race -count=1 \
+            ./internal/agent/... \
+            ./internal/llm/... \
+            ./internal/memory/... \
+            ./internal/comm/http/... \
+            ./internal/rpc/... \
+            ./internal/queue/... \
+            ./internal/task/... \
+            ./internal/services/... \
+            ./internal/security/... \
+            ./internal/scheduler/... \
+            ./internal/code/... \
+            ./internal/pty/... \
+            ./internal/tts/... \
+            ./pkg/...
+
+  # ─── Go tests (full suite, no race detector) ──────────────────────────
+  go-test:
+    name: Go tests (full)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Download deps
+        run: go mod download
+
+      - name: go test (short)
+        run: go test -short -count=1 ./...
+
+  # ─── Setter nil-guard regression check ────────────────────────────────
+  # Locks in the CLAUDE.md rule that every Set* method accepting a pointer
+  # or interface must be nil-safe. Catches typed-nil panics.
+  go-setter-tests:
+    name: Setter nil-guard tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Run setter nil-safety tests
+        run: |
+          go test -count=1 -run TestAllSetters \
+            ./internal/agent/ \
+            ./internal/services/ \
+            ./internal/llm/ \
+            ./internal/llm/metrics/ \
+            ./internal/rpc/ \
+            ./internal/queue/ \
+            ./internal/security/ \
+            ./internal/skills/ \
+            ./internal/selfimprove/ \
+            ./internal/comm/telegram/ \
+            ./internal/daemon/ \
+            ./internal/code/tools/ \
+            ./internal/lint/ \
+            ./internal/tools/builtin/
+
+  # ─── pkg/id tests ─────────────────────────────────────────────────────
+  # pkg/id is mandated by CLAUDE.md as the project's ID generator. Ensure
+  # its uniqueness, format, and concurrency-safety contracts hold.
+  pkg-id-tests:
+    name: pkg/id tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: go test -race ./pkg/id/...
+        run: go test -race -count=3 ./pkg/id/...
+
+  # ─── Aggregate gate ───────────────────────────────────────────────────
+  # Required-status-check name for branch protection. Succeeds only when
+  # every job above succeeds.
+  ci-success:
+    name: CI success
+    runs-on: ubuntu-latest
+    needs:
+      - go-static-analysis
+      - python-audits
+      - go-test-race
+      - go-test
+      - go-setter-tests
+      - pkg-id-tests
+    steps:
+      - name: Report success
+        run: echo "All CI checks passed."

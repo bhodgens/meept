@@ -33,7 +33,9 @@ func NewClusterHandler(gossip *cluster.GossipEngine, gitSync *cluster.GitSync, c
 
 // SetClusterQueue attaches the cluster-aware queue to the handler.
 func (h *ClusterHandler) SetClusterQueue(mq *queue.ClusterQueue) {
-	h.clusterMQ = mq
+	if mq != nil {
+		h.clusterMQ = mq
+	}
 }
 
 // SetStore attaches the queue store (for event log queries) to the handler.

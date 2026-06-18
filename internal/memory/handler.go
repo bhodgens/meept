@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -176,7 +177,7 @@ func (h *Handler) sendResults(replyTo string, results []MemoryResult) {
 	// but the probability is near-zero in practice. UUID is used elsewhere in the memory system
 	// for identification and comparison where uniqueness is critical.
 	respMsg := &models.BusMessage{
-		ID:        time.Now().Format("20060102150405.000000000"),
+		ID:        id.Generate("memory-resp-"),
 		Type:      models.MessageTypeResponse,
 		Topic:     "memory.result",
 		Source:    "memory-handler",
@@ -204,7 +205,7 @@ func (h *Handler) sendError(replyTo, errMsg string) {
 	// but the probability is near-zero in practice. UUID is used elsewhere in the memory system
 	// for identification and comparison where uniqueness is critical.
 	respMsg := &models.BusMessage{
-		ID:        time.Now().Format("20060102150405.000000000"),
+		ID:        id.Generate("memory-resp-"),
 		Type:      models.MessageTypeResponse,
 		Topic:     "memory.result",
 		Source:    "memory-handler",

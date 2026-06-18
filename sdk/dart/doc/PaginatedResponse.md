@@ -8,7 +8,7 @@ import 'package:meept_client/api.dart';
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | **List<String>** |  | [default to const []]
+**items** | **BuiltList&lt;String&gt;** |  | 
 **total** | **int** |  | 
 **hasMore** | **bool** |  | 
 **nextOffsetCommaOmitempty** | **int** |  | [optional] 

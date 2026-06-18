@@ -1,102 +1,93 @@
-//
-// AUTO-GENERATED FILE, DO NOT MODIFY!
-//
-// @dart=2.18
-
-// ignore_for_file: unused_element, unused_import
-// ignore_for_file: always_put_required_named_parameters_first
-// ignore_for_file: constant_identifier_names
-// ignore_for_file: lines_longer_than_80_chars
-
-import 'package:meept_client/api.dart';
 import 'package:test/test.dart';
+import 'package:meept_client/meept_client.dart';
 
 // tests for Config
 void main() {
-  // final instance = Config();
+  final instance = ConfigBuilder();
+  // TODO add properties to the builder and call build()
 
-  group('test Config', () {
-    // Object bus
+  group(Config, () {
+    // JsonObject bus
     test('to test the property `bus`', () async {
       // TODO
     });
 
-    // Object agentRegistry
+    // JsonObject agentRegistry
     test('to test the property `agentRegistry`', () async {
       // TODO
     });
 
-    // Object queue
+    // JsonObject queue
     test('to test the property `queue`', () async {
       // TODO
     });
 
-    // Object memoryManager
+    // JsonObject memoryManager
     test('to test the property `memoryManager`', () async {
       // TODO
     });
 
-    // Object taskRegistry
+    // JsonObject taskRegistry
     test('to test the property `taskRegistry`', () async {
       // TODO
     });
 
-    // Object sessionStore
+    // JsonObject sessionStore
     test('to test the property `sessionStore`', () async {
       // TODO
     });
 
-    // Object workerPool
+    // JsonObject workerPool
     test('to test the property `workerPool`', () async {
       // TODO
     });
 
-    // Object skillRegistry
+    // JsonObject skillRegistry
     test('to test the property `skillRegistry`', () async {
       // TODO
     });
 
-    // Object skillExecutor
+    // JsonObject skillExecutor
     test('to test the property `skillExecutor`', () async {
       // TODO
     });
 
-    // Object templateRegistry
+    // JsonObject templateRegistry
     test('to test the property `templateRegistry`', () async {
       // TODO
     });
 
-    // Object selfImprove
+    // JsonObject selfImprove
     test('to test the property `selfImprove`', () async {
       // TODO
     });
 
-    // Object tokenCache
+    // JsonObject tokenCache
     test('to test the property `tokenCache`', () async {
       // TODO
     });
 
-    // Object securityChecker
+    // JsonObject securityChecker
     test('to test the property `securityChecker`', () async {
       // TODO
     });
 
-    // Object scheduler
+    // JsonObject scheduler
     test('to test the property `scheduler`', () async {
       // TODO
     });
 
-    // Object calendarClient
+    // JsonObject calendarClient
     test('to test the property `calendarClient`', () async {
       // TODO
     });
 
-    // Object daemonController
+    // JsonObject daemonController
     test('to test the property `daemonController`', () async {
       // TODO
     });
 
-    // Object runtimeManager
+    // JsonObject runtimeManager
     test('to test the property `runtimeManager`', () async {
       // TODO
     });
@@ -121,22 +112,20 @@ void main() {
       // TODO
     });
 
-    // Object projectManager
+    // JsonObject projectManager
     test('to test the property `projectManager`', () async {
       // TODO
     });
 
-    // Object planManager
+    // JsonObject planManager
     test('to test the property `planManager`', () async {
       // TODO
     });
 
-    // Object planStore
+    // JsonObject planStore
     test('to test the property `planStore`', () async {
       // TODO
     });
 
-
   });
-
 }

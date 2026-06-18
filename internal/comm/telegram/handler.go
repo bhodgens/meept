@@ -208,7 +208,7 @@ func (h *AgentHandler) saveSessions() error {
 	}
 
 	h.mu.RLock()
-	data, err := json.MarshalIndent(h.sessions, "", "  ")
+	data, err := json.MarshalIndent(h.sessions, "", "  ") //nolint:mutexio // marshal under RLock for consistent snapshot
 	h.mu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("marshal sessions: %w", err)

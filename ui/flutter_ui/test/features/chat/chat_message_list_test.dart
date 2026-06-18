@@ -8,53 +8,45 @@ import 'package:meept_ui/features/chat/chat_message_bubble.dart';
 import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/providers/chat_provider.dart';
 import 'package:meept_ui/providers/tts_provider.dart';
-import 'package:meept_ui/services/api_client.dart';
+import 'package:meept_ui/services/sdk_client.dart';
 import 'package:meept_ui/services/websocket_service.dart';
 
 // ===== Mock / Stub Classes =====
 
-class _StubApiClient extends ApiClient {
-  _StubApiClient() : super(host: 'localhost', port: 8081);
+/// Stub [SdkApiClient] for chat tests that overrides the chat-related
+/// endpoint methods so tests don't hit the network.
+class _StubSdkClient extends SdkApiClient {
+  _StubSdkClient() : super(host: 'localhost', port: 8081);
 
   @override
-  Future<T> get<T>(
-    String path, {
-    Map<String, dynamic>? queryParameters,
-  }) async {
-    // Return empty list for sessions/tasks/agents queries
-    return {'sessions': [], 'tasks': [], 'agents': [], 'results': []} as T;
-  }
+  Future<List<Map<String, dynamic>>> getMessages(String id,
+      {int offset = 0, int limit = 1000}) async => [];
 
   @override
-  Future<T> post<T>(
-    String path, {
-    dynamic data,
-    Map<String, dynamic>? queryParameters,
-  }) async {
-    if (path == '/chat') {
-      return {
-        'id': 'msg',
-        'role': 'assistant',
-        'content': 'response',
-        'timestamp': DateTime.now().toIso8601String(),
-      } as T;
-    }
-    return {'sessions': [], 'tasks': [], 'agents': [], 'results': []} as T;
-  }
+  Future<Map<String, dynamic>> sendChatMessage({
+    required String message,
+    String? conversationId,
+    String? agentId,
+  }) async => {
+    'id': 'msg',
+    'role': 'assistant',
+    'content': 'response',
+    'timestamp': DateTime.now().toIso8601String(),
+  };
 
   @override
-  Future<T> put<T>(
-    String path, {
-    dynamic data,
-    Map<String, dynamic>? queryParameters,
-  }) async {
-    return {'sessions': [], 'tasks': [], 'agents': [], 'results': []} as T;
-  }
+  Future<Map<String, dynamic>> sendSteerMessage({
+    required String message,
+    required String conversationId,
+    String? source,
+  }) async => {};
 
   @override
-  Future<T> delete<T>(String path) async {
-    return {'success': true} as T;
-  }
+  Future<Map<String, dynamic>> sendFollowUpMessage({
+    required String message,
+    required String conversationId,
+    String? source,
+  }) async => {};
 }
 
 class _StubWebSocket extends WebSocketService {
@@ -97,7 +89,7 @@ class _StubTtsNotifier extends StateNotifier<TtsState> implements TtsNotifier {
 }
 
 class _TestChatNotifier extends ChatNotifier {
-  _TestChatNotifier({required super.apiClient, required super.websocket, required super.ttsNotifier});
+  _TestChatNotifier({required super.sdkClient, required super.websocket, required super.ttsNotifier});
 
   @override
   Future<void> loadMessages(String sessionId) async {
@@ -146,7 +138,7 @@ Widget _buildTestApp({
     overrides: [
       chatProvider.overrideWith(
         (_) => _TestChatNotifier(
-          apiClient: _StubApiClient(),
+          sdkClient: _StubSdkClient(),
           websocket: _StubWebSocket(),
           ttsNotifier: _StubTtsNotifier(),
         ),

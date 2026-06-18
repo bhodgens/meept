@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/pkg/models"
+	sid "github.com/caimlas/meept/pkg/id"
 )
 
 // MembersProvider resolves cluster members for peer address lookup.
@@ -239,7 +240,7 @@ func (t *GossipTransport) handleConnection(ctx context.Context, conn net.Conn) {
 		payloadMap := map[string]json.RawMessage{"event": data}
 		payload, _ := json.Marshal(payloadMap)
 		body := &models.BusMessage{
-			ID:        fmt.Sprintf("transport-recv-%d", time.Now().UnixNano()),
+			ID:        sid.Generate("transport-recv-"),
 			Type:      models.MessageTypeEvent,
 			Source:    "gossip_transport",
 			Timestamp: time.Now().UTC(),

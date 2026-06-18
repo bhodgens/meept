@@ -36,57 +36,90 @@ func (s *ScopedMemoryManager) Store(ctx context.Context, mem Memory) (string, er
 	return s.manager.Store(ctx, mem)
 }
 
+// scopedManagerDefaultLimit is the default limit used when a caller supplies
+// 0 or a negative value. It matches the previous expansion threshold so
+// existing call sites continue to receive a bounded batch from the backend.
+const scopedManagerDefaultLimit = 100
+
+// scopedManagerMaxLimit caps the expansion factor to avoid integer overflow on
+// 32-bit platforms and to prevent accidentally requesting huge batches.
+const scopedManagerMaxLimit = 10000
+
+// expandLimit applies a *5 expansion factor to the supplied limit while
+// handling edge cases:
+//   - limit <= 0: returns scopedManagerDefaultLimit (caller intent treated
+//     as "use a sensible default"; downstream truncation is skipped).
+//   - expanded value > scopedManagerMaxLimit: clamped to scopedManagerMaxLimit
+//     to prevent overflow and unreasonable backend load.
+//   - expanded value < limit+5 (only possible for very small positive limits):
+//     bumped to limit+5 to guarantee strictly larger than the source limit.
+//
+// Callers should use the returned value as the backend query limit, and use
+// the original `limit` to decide whether to truncate (skipping truncation
+// when limit <= 0).
+func expandLimit(limit int) int {
+	if limit <= 0 {
+		return scopedManagerDefaultLimit
+	}
+	expanded := limit * 5
+	if expanded > scopedManagerMaxLimit {
+		expanded = scopedManagerMaxLimit
+	}
+	if expanded < limit+5 {
+		expanded = limit + 5
+	}
+	return expanded
+}
+
 // Search finds memories matching the query, filtering to only those
 // belonging to this bot.
 // It fetches a larger batch from the underlying store so that filtering
 // by bot_id does not silently truncate results (e.g. requesting limit=10
 // but all 10 rows belong to a different bot would previously return
 // an empty slice with no indication).
+//
+// A non-positive query.Limit disables truncation: the caller receives all
+// filtered results (up to the backend's own limit). Otherwise the filtered
+// slice is truncated to query.Limit.
 func (s *ScopedMemoryManager) Search(ctx context.Context, query MemoryQuery) ([]MemoryResult, error) {
 	expandedQuery := query
-	if expandedQuery.Limit < 100 {
-		expandedQuery.Limit = expandedQuery.Limit * 5
-	}
+	expandedQuery.Limit = expandLimit(query.Limit)
 	results, err := s.manager.Search(ctx, expandedQuery)
 	if err != nil {
 		return nil, err
 	}
 	filtered := s.filterResults(results)
-	if len(filtered) > query.Limit {
+	if query.Limit > 0 && len(filtered) > query.Limit {
 		filtered = filtered[:query.Limit]
 	}
 	return filtered, nil
 }
 
 // GetRecent retrieves the most recent memories belonging to this bot.
+// A non-positive limit disables truncation.
 func (s *ScopedMemoryManager) GetRecent(ctx context.Context, limit int) ([]MemoryResult, error) {
-	expandedLimit := limit * 5
-	if expandedLimit < limit+5 {
-		expandedLimit = limit + 5
-	}
+	expandedLimit := expandLimit(limit)
 	results, err := s.manager.GetRecent(ctx, expandedLimit)
 	if err != nil {
 		return nil, err
 	}
 	filtered := s.filterResults(results)
-	if len(filtered) > limit {
+	if limit > 0 && len(filtered) > limit {
 		filtered = filtered[:limit]
 	}
 	return filtered, nil
 }
 
 // GetRelevantContext retrieves memories relevant to a query, scoped to this bot.
+// A non-positive maxItems disables truncation.
 func (s *ScopedMemoryManager) GetRelevantContext(ctx context.Context, query string, maxItems int) ([]MemoryResult, error) {
-	expandedMax := maxItems * 5
-	if expandedMax < maxItems+5 {
-		expandedMax = maxItems + 5
-	}
+	expandedMax := expandLimit(maxItems)
 	results, err := s.manager.GetRelevantContext(ctx, query, expandedMax)
 	if err != nil {
 		return nil, err
 	}
 	filtered := s.filterResults(results)
-	if len(filtered) > maxItems {
+	if maxItems > 0 && len(filtered) > maxItems {
 		filtered = filtered[:maxItems]
 	}
 	return filtered, nil
@@ -148,51 +181,46 @@ func (s *ScopedMemoryManager) Delete(ctx context.Context, id string) error {
 }
 
 // SearchSemantic performs vector similarity search, scoped to this bot.
+// A non-positive limit disables truncation.
 func (s *ScopedMemoryManager) SearchSemantic(ctx context.Context, query string, limit int) ([]MemoryResult, error) {
-	expandedLimit := limit * 5
-	if expandedLimit < limit+5 {
-		expandedLimit = limit + 5
-	}
+	expandedLimit := expandLimit(limit)
 	results, err := s.manager.SearchSemantic(ctx, query, expandedLimit)
 	if err != nil {
 		return nil, err
 	}
 	filtered := s.filterResults(results)
-	if len(filtered) > limit {
+	if limit > 0 && len(filtered) > limit {
 		filtered = filtered[:limit]
 	}
 	return filtered, nil
 }
 
 // SearchHybrid performs hybrid search, scoped to this bot.
+// A non-positive limit disables truncation.
 func (s *ScopedMemoryManager) SearchHybrid(ctx context.Context, query string, limit int) ([]MemoryResult, error) {
-	expandedLimit := limit * 5
-	if expandedLimit < limit+5 {
-		expandedLimit = limit + 5
-	}
+	expandedLimit := expandLimit(limit)
 	results, err := s.manager.SearchHybrid(ctx, query, expandedLimit)
 	if err != nil {
 		return nil, err
 	}
 	filtered := s.filterResults(results)
-	if len(filtered) > limit {
+	if limit > 0 && len(filtered) > limit {
 		filtered = filtered[:limit]
 	}
 	return filtered, nil
 }
 
 // SearchWithGraph performs graph-aware search, scoped to this bot.
+// A non-positive query.Limit disables truncation.
 func (s *ScopedMemoryManager) SearchWithGraph(ctx context.Context, query MemoryQuery, alpha float64) ([]MemoryResult, error) {
 	expandedQuery := query
-	if expandedQuery.Limit < 100 {
-		expandedQuery.Limit = expandedQuery.Limit * 5
-	}
+	expandedQuery.Limit = expandLimit(query.Limit)
 	results, err := s.manager.SearchWithGraph(ctx, expandedQuery, alpha)
 	if err != nil {
 		return nil, err
 	}
 	filtered := s.filterResults(results)
-	if len(filtered) > query.Limit {
+	if query.Limit > 0 && len(filtered) > query.Limit {
 		filtered = filtered[:query.Limit]
 	}
 	return filtered, nil

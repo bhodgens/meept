@@ -967,20 +967,26 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 			}
 
 			// Record metrics on success
-			if c.metricsStore != nil {
+			if c.metricsStore != nil && resp != nil && httpResp != nil {
 				latencyMs := time.Since(start).Milliseconds()
 				costUSD := float64(resp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
+				// Snapshot values accessed by the goroutine to avoid races
+				// on resp/httpResp which are scoped to the outer for loop.
+				promptTokens := resp.Usage.PromptTokens
+				completionTokens := resp.Usage.CompletionTokens
+				cachedTokens := resp.Usage.CachedTokens
+				httpStatus := httpResp.StatusCode
 				//nolint:gosec // goroutine outlives request context
 				go func() {
 					record := metrics.RequestRecord{
 						Timestamp:        time.Now(),
 						ProviderID:       cfg.ProviderID,
 						ModelID:          cfg.ModelID,
-						PromptTokens:     resp.Usage.PromptTokens,
-						CompletionTokens: resp.Usage.CompletionTokens,
-						CachedTokens:     resp.Usage.CachedTokens,
+						PromptTokens:     promptTokens,
+						CompletionTokens: completionTokens,
+						CachedTokens:     cachedTokens,
 						LatencyMs:        latencyMs,
-						HTTPStatus:       httpResp.StatusCode,
+						HTTPStatus:       httpStatus,
 						ErrorType:        metrics.ErrorTypeNone,
 						Success:          true,
 						CostUSD:          costUSD,

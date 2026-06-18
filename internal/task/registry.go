@@ -406,7 +406,7 @@ func (r *Registry) Close() error {
 	// pending amendments are marked ignored. Without this the goroutine and
 	// bus subscription leak on every daemon shutdown.
 	if r.amendmentMgr != nil {
-		if err := r.amendmentMgr.Close(); err != nil {
+		if err := r.amendmentMgr.Close(); err != nil { //nolint:mutexio // one-time teardown guarded by closed flag
 			r.logger.Error("Failed to close amendment manager", "error", err)
 			lastErr = err
 		}
@@ -414,13 +414,13 @@ func (r *Registry) Close() error {
 	// Trigger interrupt tokens so in-flight tasks awaiting an interrupt at
 	// shutdown receive one rather than blocking until process exit.
 	if r.interruptMgr != nil {
-		if err := r.interruptMgr.Close(); err != nil {
+		if err := r.interruptMgr.Close(); err != nil { //nolint:mutexio // one-time teardown guarded by closed flag
 			r.logger.Error("Failed to close interrupt manager", "error", err)
 			lastErr = err
 		}
 	}
 
-	if err := r.store.Close(); err != nil {
+	if err := r.store.Close(); err != nil { //nolint:mutexio // one-time teardown guarded by closed flag
 		r.logger.Error("Failed to close task store", "error", err)
 		lastErr = err
 	}

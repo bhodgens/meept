@@ -56,7 +56,7 @@ func (c *RPCClient) Connect() error {
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
 
-	if c.connected.Load() {
+	if c.connected.Load() { //nolint:mutexio // atomic.Bool.Load is not I/O
 		return nil
 	}
 
@@ -77,13 +77,13 @@ func (c *RPCClient) Close() error {
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
 
-	if !c.connected.Load() {
+	if !c.connected.Load() { //nolint:mutexio // atomic.Bool.Load is not I/O
 		return nil
 	}
 
 	c.connected.Store(false)
 	if c.conn != nil {
-		return c.conn.Close()
+		return c.conn.Close() //nolint:mutexio // one-time teardown guarded by connected flag
 	}
 	return nil
 }
@@ -117,7 +117,7 @@ func (c *RPCClient) Call(method string, params any) (json.RawMessage, error) {
 			c.connMu.Lock()
 			c.connected.Store(false)
 			if c.conn != nil {
-				c.conn.Close()
+				c.conn.Close() //nolint:mutexio // reconnect teardown; brief hold during retry
 			}
 			c.connMu.Unlock()
 
@@ -187,7 +187,7 @@ func (c *RPCClient) callOnce(method string, params any) (json.RawMessage, error)
 	defer c.callMu.Unlock()
 
 	// Re-check connection status after acquiring lock
-	if !c.connected.Load() {
+	if !c.connected.Load() { //nolint:mutexio // atomic.Bool.Load is not I/O
 		return nil, errors.New(ErrNotConnected)
 	}
 
@@ -249,7 +249,7 @@ func (c *RPCClient) callOnce(method string, params any) (json.RawMessage, error)
 
 	// Parse response
 	var resp models.JSONRPCResponse
-	if err := json.Unmarshal(respData, &resp); err != nil {
+	if err := json.Unmarshal(respData, &resp); err != nil { //nolint:mutexio // unmarshal of local respData under callMu serialize-RPC lock
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 

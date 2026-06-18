@@ -119,7 +119,12 @@ hooks:
 	@echo "Installing git hooks..."
 	@cp scripts/pre-commit .git/hooks/pre-commit
 	@chmod +x .git/hooks/pre-commit
-	@echo "Installed pre-commit hook (runs golangci-lint on staged packages)"
+	@if [ -f scripts/check-deferred-items.sh ]; then \
+		cp scripts/check-deferred-items.sh .git/hooks/pre-commit-deferred 2>/dev/null || true; \
+		chmod +x .git/hooks/pre-commit-deferred 2>/dev/null || true; \
+	fi
+	@echo "Installed pre-commit hook (golangci-lint + mutexio + predid + audit scripts)"
+	@echo "See scripts/pre-commit for details; bypass with --no-verify."
 
 deps:
 	@echo "Downloading Go dependencies..."
@@ -339,6 +344,13 @@ gosec:
 	@which gosec > /dev/null 2>&1 || (echo "Install: go install github.com/securego/gosec/v2/cmd/gosec@latest" && exit 1)
 	gosec -include=G201,G202 ./...
 
+# lint-ci runs all checks expected to pass in CI. Use this as the canonical
+# "is this branch shippable?" target. Includes project-specific analyzers
+# (mutexio for I/O-under-mutex, predid for predictable IDs) plus the audit
+# scripts that catch UTF-8 corruption bugs and Dart enum-shadowing.
+lint-ci: lint analyzers audit-scripts
+	@echo "All CI lint checks passed."
+
 fmt:
 	@echo "Formatting code..."
 	go fmt ./...
@@ -360,7 +372,25 @@ predid:
 
 .PHONY: analyzers
 analyzers: mutexio predid
-	@echo "All analyzers complete."
+	@echo "All Go analyzers complete."
+
+# audit-scripts runs the Python-based codebase audits:
+#   - dart-enum-name-shadow: flags Dart extensions that shadow Enum.name/index
+#     (silent footgun that broke SearchScope.name; see Round 6 findings)
+#   - utf8-byte-arithmetic: flags hand-rolled ASCII case-conversion that
+#     corrupts multi-byte UTF-8 (e.g., c |= 0x20 on é bytes)
+.PHONY: audit-scripts
+audit-scripts:
+	@echo "Running audit scripts..."
+	@if [ -f scripts/audit-dart-enum-name-shadow.py ]; then \
+		echo "  dart-enum-name-shadow..."; \
+		python3 scripts/audit-dart-enum-name-shadow.py || exit 1; \
+	fi
+	@if [ -f scripts/audit-utf8-byte-arithmetic.py ]; then \
+		echo "  utf8-byte-arithmetic..."; \
+		python3 scripts/audit-utf8-byte-arithmetic.py || exit 1; \
+	fi
+	@echo "Audit scripts complete."
 
 mod-tidy:
 	@echo "Tidying Go modules..."
@@ -761,16 +791,16 @@ sdk-generate-go:
 		--additional-properties=packageName=meeptclient,packageVersion=0.2.0,generateInterfaces=true,interfaceMode=deferentially
 	@echo "Go SDK generated at $(SDK_DIR)/go/"
 
-# Generate Dart SDK  
+# Generate Dart SDK (dart-dio: package:dio based, typed responses)
 sdk-generate-dart:
-	@echo "Generating Dart SDK..."
+	@echo "Generating Dart SDK (dart-dio)..."
 	@mkdir -p $(SDK_DIR)/dart
 	@openapi-generator-cli generate \
 		-i docs/reference/http-api/openapi.yaml \
-		-g dart \
+		-g dart-dio \
 		-o $(SDK_DIR)/dart \
 		--skip-validate-spec \
-		--additional-properties=packageName=meept_client,packageVersion=0.2.0,pubName=meept_client,useNullSafety=true
+		--additional-properties=packageName=meept_client,pubspecVersion=0.3.0,pubName=meept_client,useNullSafety=true,clientName=MeeptClient
 	@echo "Dart SDK generated at $(SDK_DIR)/dart/"
 
 # Clean generated SDKs

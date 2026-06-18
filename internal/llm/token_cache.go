@@ -161,7 +161,7 @@ func (c *TokenCacheCoordinator) Get(ctx context.Context, key CacheKey) (*CacheEn
 
 	// S3-1 FIX: Use write lock for L1 check because the hit path mutates stats.
 	c.mu.Lock()
-	if entry, found := c.l1Cache.Get(key); found {
+	if entry, found := c.l1Cache.Get(key); found { //nolint:mutexio // in-memory LRU Get, not I/O
 		c.stats.Hits++
 		c.stats.L1Hits++
 		c.mu.Unlock()
@@ -176,7 +176,7 @@ func (c *TokenCacheCoordinator) Get(ctx context.Context, key CacheKey) (*CacheEn
 		if entry, found := l2.Get(ctx, key); found {
 			// Promote to L1 under write lock; re-check L1 to avoid duplicate work.
 			c.mu.Lock()
-			if _, already := c.l1Cache.Get(key); !already {
+			if _, already := c.l1Cache.Get(key); !already { //nolint:mutexio // in-memory LRU Get, not I/O
 				c.l1Cache.Put(key, entry)
 			}
 			c.stats.Hits++

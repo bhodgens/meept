@@ -78,7 +78,7 @@ func (p *PersonalityMemory) Load(ctx context.Context) error {
 	}
 
 	// Try to load existing file
-	data, err := os.ReadFile(p.filePath)
+	data, err := os.ReadFile(p.filePath) //nolint:mutexio // one-time init Load; mutex serializes one-time setup, not concurrent requests
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Create default profile

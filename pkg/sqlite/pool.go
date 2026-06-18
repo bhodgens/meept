@@ -173,10 +173,14 @@ func (p *Pool) Put(db *sql.DB) {
 		return
 	}
 
+	// Check closed flag under lock, then operate on db outside lock.
+	// db.Close() is I/O and must not be called while holding p.mu
+	// (CLAUDE.md "Mutex scope" rule).
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	closed := p.closed
+	p.mu.Unlock()
 
-	if p.closed {
+	if closed {
 		db.Close()
 		return
 	}

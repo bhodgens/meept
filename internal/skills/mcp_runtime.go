@@ -208,7 +208,7 @@ func (r *MCPRuntime) Shutdown() error {
 		// The MCP spec says servers should handle this gracefully.
 		_ = r.sendShutdown(srv)
 
-		if err := srv.client.Close(); err != nil {
+		if err := srv.client.Close(); err != nil { //nolint:mutexio // one-time teardown guarded by started flag
 			r.logger.Warn("error closing MCP server",
 				"server", name,
 				"error", err,

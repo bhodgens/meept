@@ -28,12 +28,20 @@ const DefaultDevAPIKey = "meept_dev_default_key_CHANGE_ME"
 // under the user's ~/.meept directory.
 const devKeyFileName = "dev_key"
 
-// devKeyMu guards devKeyCached during lazy initialization.
-var (
-	devKeyMu     sync.Mutex
-	devKeyCached string
-	devKeyLoaded bool
-)
+// devKeyOnce ensures devKeyCached is computed exactly once.
+//
+// Previously this used devKeyMu with a loaded-flag, which required holding
+// the mutex across disk I/O (ReadFile/WriteFile) on first call — a violation
+// of the CLAUDE.md "Mutex scope" rule (no I/O under mutex) that the mutexio
+// analyzer catches. sync.Once is the correct primitive for one-shot lazy
+// initialization and avoids the issue: the lock is held only briefly to
+// coordinate the once.Do, and the I/O happens inside the function passed to
+// once.Do (which the implementer is free to make pure of any user-held lock).
+var devKeyOnce sync.Once
+
+// devKeyCached is the process-lifetime cached value of DevAPIKey(). Read
+// freely after devKeyOnce has fired; written exactly once inside once.Do.
+var devKeyCached string
 
 // DevAPIKey returns the per-installation development API key.
 //
@@ -54,19 +62,23 @@ var (
 // The result is cached for the lifetime of the process; the underlying file
 // is only read/written on the first call.
 func DevAPIKey() string {
-	devKeyMu.Lock()
-	defer devKeyMu.Unlock()
-	if devKeyLoaded {
-		return devKeyCached
-	}
-	devKeyLoaded = true
+	devKeyOnce.Do(func() {
+		devKeyCached = loadOrGenerateDevKey()
+	})
+	return devKeyCached
+}
 
+// loadOrGenerateDevKey performs the disk I/O for DevAPIKey.
+//
+// Called exactly once from devKeyOnce.Do. All I/O happens here, outside
+// any caller-held mutex — the sync.Once primitive handles the locking
+// internally with a brief critical section that does not span this call.
+func loadOrGenerateDevKey() string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		slog.Warn("dev key: cannot resolve home directory; using default constant",
 			"error", err)
-		devKeyCached = DefaultDevAPIKey
-		return devKeyCached
+		return DefaultDevAPIKey
 	}
 
 	keyPath := filepath.Join(homeDir, ".meept", devKeyFileName)
@@ -74,8 +86,7 @@ func DevAPIKey() string {
 	// Step 1: try to read an existing key file.
 	if data, err := os.ReadFile(keyPath); err == nil {
 		if k := string(data); len(k) > 0 {
-			devKeyCached = k
-			return devKeyCached
+			return k
 		}
 	}
 
@@ -84,8 +95,7 @@ func DevAPIKey() string {
 	if _, err := rand.Read(raw); err != nil {
 		slog.Warn("dev key: crypto/rand failed; using default constant",
 			"error", err)
-		devKeyCached = DefaultDevAPIKey
-		return devKeyCached
+		return DefaultDevAPIKey
 	}
 	generated := hex.EncodeToString(raw)
 
@@ -96,12 +106,10 @@ func DevAPIKey() string {
 	if err := os.WriteFile(keyPath, []byte(generated), 0o600); err != nil {
 		slog.Warn("dev key: cannot persist generated key; using default constant",
 			"path", keyPath, "error", err)
-		devKeyCached = DefaultDevAPIKey
-		return devKeyCached
+		return DefaultDevAPIKey
 	}
 
 	slog.Info("dev key: generated new per-installation key",
 		"path", keyPath)
-	devKeyCached = generated
-	return devKeyCached
+	return generated
 }

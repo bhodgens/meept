@@ -103,10 +103,8 @@ func (s *Store) initialize() error {
 // Store stores an embedding for a memory.
 // Uses a transaction to ensure atomicity of embedding and metadata inserts.
 func (s *Store) Store(ctx context.Context, memoryID, content string, metadata map[string]any) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Generate embedding
+	// Generate embedding before acquiring the lock to avoid holding the
+	// mutex across a potentially slow network call (CLAUDE.md mutex-scope rule).
 	embedding, err := s.provider.GenerateEmbedding(ctx, content)
 	if err != nil {
 		return fmt.Errorf("failed to generate embedding: %w", err)
@@ -114,6 +112,9 @@ func (s *Store) Store(ctx context.Context, memoryID, content string, metadata ma
 
 	// Serialize vector to blob
 	vectorBlob := serializeVector(embedding)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// Begin transaction to ensure atomicity
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -177,7 +178,7 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]SearchRe
 	}
 	rows, err := s.db.Query(`
 		SELECT id, vector FROM embeddings ORDER BY rowid DESC LIMIT ?
-	`, maxRows)
+	`, maxRows) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, fmt.Errorf("failed to query embeddings: %w", err)
 	}
@@ -285,7 +286,7 @@ func (s *Store) GetEmbedding(memoryID string) ([]float32, bool) {
 	var vectorBlob []byte
 	err := s.db.QueryRow(`
 		SELECT vector FROM embeddings WHERE id = ?
-	`, memoryID).Scan(&vectorBlob)
+	`, memoryID).Scan(&vectorBlob) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, false
 	}
@@ -308,14 +309,14 @@ func (s *Store) Delete(memoryID string) error {
 
 	_, err := s.db.Exec(`
 		DELETE FROM embeddings WHERE id = ?
-	`, memoryID)
+	`, memoryID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return err
 	}
 
 	_, err = s.db.Exec(`
 		DELETE FROM metadata WHERE memory_id = ?
-	`, memoryID)
+	`, memoryID) //nolint:mutexio // mutex serializes sqlite connection access
 	return err
 }
 

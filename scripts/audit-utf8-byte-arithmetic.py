@@ -86,6 +86,14 @@ SKIP_DIRS = {
 
 SKIP_FILE_PREFIXES = ('.min.',)
 
+# File basenames to skip — the audit scripts themselves contain the regex
+# patterns they search for (in comments/docstrings), which produce false
+# positives on themselves.
+SKIP_FILE_BASENAMES = {
+    'audit-utf8-byte-arithmetic.py',
+    'audit-dart-enum-name-shadow.py',
+}
+
 # ── Scanner ────────────────────────────────────────────────────────────
 
 
@@ -99,12 +107,82 @@ def should_scan(path: Path) -> bool:
     for prefix in SKIP_FILE_PREFIXES:
         if prefix in name:
             return False
+    # Skip audit scripts themselves (they describe the patterns they look for)
+    if name in SKIP_FILE_BASENAMES:
+        return False
     # Skip files in skip directories
     parts = path.parts
     for skip in SKIP_DIRS:
         if skip in parts:
             return False
     return True
+
+
+# Patterns that indicate TRUE byte-level case conversion (vs. stdlib delegation).
+_UNSAFE_CASE_BODY_PATTERNS = [
+    re.compile(r"'\s*[A-Za-z]\s*'\s*-\s*'\s*[A-Za-z]\s*'"),  # 'a' - 'A'
+    re.compile(r"\+\s*32\b"),                                   # += 32
+    re.compile(r"-\s*32\b"),                                   # -= 32
+    re.compile(r"\|\s*0x20"),                                   # |= 0x20
+    re.compile(r"&\s*~0x20"),                                   # &= ~0x20
+    re.compile(r">=\s*'A'\s*&&\s*<=\s*'Z'"),                    # >= 'A' && <= 'Z'
+    re.compile(r">=\s*97\s*&&\s*<=\s*122"),                     # ASCII numeric form
+]
+
+
+def _extract_function_body(lines: List[str], start_idx: int) -> str:
+    """Return the body of a Go/C/Java/JS function starting at start_idx.
+
+    Looks for the opening `{` after the func signature, then returns all
+    lines up to (but not including) the matching closing `}` at column 0
+    (top-level Go funcs are column-0 closed). Best-effort — never raises.
+    """
+    if start_idx >= len(lines):
+        return ""
+    out: List[str] = []
+    brace_depth = 0
+    seen_open = False
+    for j in range(start_idx, min(start_idx + 100, len(lines))):
+        line = lines[j]
+        out.append(line)
+        # Track brace depth, ignoring braces inside string/char literals
+        # (simple state machine — good enough for the typical case).
+        in_str = False
+        str_ch = ''
+        for ch in line:
+            if in_str:
+                if ch == str_ch and (len(out) == 0 or out[-1][-1:] != '\\'):
+                    in_str = False
+            else:
+                if ch in '"\'`':
+                    in_str = True
+                    str_ch = ch
+                elif ch == '{':
+                    brace_depth += 1
+                    seen_open = True
+                elif ch == '}':
+                    brace_depth -= 1
+                    if seen_open and brace_depth == 0:
+                        return '\n'.join(out)
+        # Bounded so we don't scan a 1000-line function.
+        if j - start_idx > 80:
+            return '\n'.join(out)
+    return '\n'.join(out)
+
+
+def _body_has_unsafe_caseconv(body: str) -> bool:
+    """Return True if function body contains byte-level ASCII case conversion.
+
+    Functions whose body uses strings.ToLower / strings.ToUpper / etc. are
+    safe — only flag bodies that contain the actual unsafe patterns.
+    """
+    if not body:
+        # Could not extract body; be conservative and flag.
+        return True
+    for pat in _UNSAFE_CASE_BODY_PATTERNS:
+        if pat.search(body):
+            return True
+    return False
 
 
 def scan_file(path: Path) -> List[Tuple[int, str, str]]:
@@ -134,10 +212,17 @@ def scan_file(path: Path) -> List[Tuple[int, str, str]]:
                 findings.append((i, f"byte-arithmetic: {desc}", line.rstrip()))
                 break  # one finding per line is enough
 
-        # Check for function name patterns (hand-rolled case conversion)
+        # Check for function name patterns (hand-rolled case conversion).
+        # Look-ahead: only flag if the function body actually does byte
+        # arithmetic or range checks. A function named containsIgnoreCase
+        # that delegates to strings.ToLower is safe; only flag if its body
+        # contains `+ 32`, `- 32`, `| 0x20`, or `>= 'A' && <= 'Z'`.
         for pattern in FUNC_NAME_PATTERNS:
             if pattern.search(line):
-                findings.append((i, "hand-rolled case function", line.rstrip()))
+                # Find function body (up to next closing brace at column 0).
+                body = _extract_function_body(lines, i - 1)
+                if _body_has_unsafe_caseconv(body):
+                    findings.append((i, "hand-rolled case function", line.rstrip()))
                 break
 
         # Check for ASCII range check (flag for manual case conversion)

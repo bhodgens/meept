@@ -5,6 +5,7 @@ import 'package:meept_ui/features/chat/chat_input.dart';
 import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/providers/providers.dart';
 import 'package:meept_ui/services/api_client.dart';
+import 'package:meept_ui/services/sdk_client.dart';
 import 'package:meept_ui/services/websocket_service.dart';
 
 // ===== Mock / Stub Classes =====
@@ -47,6 +48,16 @@ class _StubApiClient extends ApiClient {
   Future<T> delete<T>(String path) async {
     throw UnimplementedError();
   }
+}
+
+/// Stub [SdkApiClient] for tests that need the migrated providers.
+/// Returns an empty agents list so [AgentNotifier.loadAgents] succeeds
+/// without hitting the network.
+class _StubSdkClient extends SdkApiClient {
+  _StubSdkClient() : super(host: 'localhost', port: 8081);
+
+  @override
+  Future<List<Map<String, dynamic>>> listAgents() async => [];
 }
 
 class _StubWebSocket extends WebSocketService {
@@ -94,13 +105,13 @@ Widget _buildTestApp({
     overrides: [
       chatProvider.overrideWith(
         (_) => ChatNotifier(
-          apiClient: _StubApiClient(),
+          sdkClient: _StubSdkClient(),
           websocket: _StubWebSocket(),
           ttsNotifier: _StubTtsNotifier(),
         ),
       ),
       agentProvider.overrideWith(
-        (ref) => AgentNotifier(apiClient: _StubApiClient())
+        (ref) => AgentNotifier(sdkClient: _StubSdkClient())
           ..state = AgentState(
             agents: agents ?? const [],
             isLoading: agentsLoading,
@@ -112,6 +123,9 @@ Widget _buildTestApp({
       ),
       apiClientProvider.overrideWith(
         (_) => _StubApiClient(),
+      ),
+      sdkClientProvider.overrideWith(
+        (_) => _StubSdkClient(),
       ),
     ],
     child: MaterialApp(

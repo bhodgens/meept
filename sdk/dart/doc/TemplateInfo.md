@@ -10,7 +10,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **name** | **String** |  | 
 **description** | **String** |  | 
-**scope** | **Object** |  | 
+**scope** | [**JsonObject**](.md) |  | 
 **pathCommaOmitempty** | **String** |  | [optional] 
 **priority** | **int** |  | 
 **bodyCommaOmitempty** | **String** |  | [optional] 

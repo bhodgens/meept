@@ -258,7 +258,7 @@ class ApiClient {
     agentId: agentId,
   );
 
-  Future<Map<String, dynamic>> sendSteerMessage({
+  Future<void> sendSteerMessage({
     required String message,
     required String conversationId,
     String? source,
@@ -291,7 +291,7 @@ class ApiClient {
   Future<Session> createSession({
     required String title,
     String? agentId,
-  }) => _api.createSession(title: title, agentId: agentId);
+  }) => _api.createSession(name: title, agentId: agentId);
 
   Future<void> deleteSession(String id) => _api.deleteSession(id);
 
@@ -312,14 +312,14 @@ class ApiClient {
   Future<Task> createTask({
     required String title,
     String? sessionId,
-  }) => _api.createTask(title: title, sessionId: sessionId);
+  }) => _api.createTask(name: title, sessionId: sessionId);
 
   Future<Task> updateTask(String id, {String? name, String? state}) =>
       _api.updateTask(id, name: name, state: state);
 
   Future<void> deleteTask(String id) => _api.deleteTask(id);
 
-  Future<Map<String, dynamic>> cancelTask(String id) => _api.cancelTask(id);
+  Future<void> cancelTask(String id) => _api.cancelTask(id);
 
   // ===== Queue Endpoints =====
 
@@ -374,19 +374,19 @@ class ApiClient {
   Future<List<Plan>> listPlansBySession(String sessionID) =>
       _api.listPlansBySession(sessionID);
 
-  Future<Plan> approvePlan(String id, {String? sessionID, String? by}) =>
-      _api.approvePlan(id, sessionID: sessionID, by: by);
+  Future<void> approvePlan(String id, {String? sessionID, String? by}) =>
+      _api.approvePlan(id, sessionId: sessionID, by: by);
 
-  Future<Plan> rejectPlan(String id,
+  Future<void> rejectPlan(String id,
           {String? sessionID, String? by, String? reason}) =>
-      _api.rejectPlan(id, sessionID: sessionID, by: by, reason: reason);
+      _api.rejectPlan(id, sessionId: sessionID, by: by, reason: reason);
 
-  Future<Plan> confirmPlan(String id, {String? sessionID, String? by}) =>
-      _api.confirmPlan(id, sessionID: sessionID, by: by);
+  Future<void> confirmPlan(String id, {String? sessionID, String? by}) =>
+      _api.confirmPlan(id, sessionId: sessionID, by: by);
 
-  Future<Plan> revisePlan(String id,
+  Future<void> revisePlan(String id,
           {String? sessionID, String? feedback}) =>
-      _api.revisePlan(id, sessionID: sessionID, feedback: feedback);
+      _api.revisePlan(id, sessionId: sessionID, feedback: feedback);
 
   // ===== Daemon Endpoints =====
 

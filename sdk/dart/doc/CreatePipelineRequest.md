@@ -11,7 +11,7 @@ Name | Type | Description | Notes
 **idCommaOmitempty** | **String** |  | [optional] 
 **name** | **String** |  | 
 **descriptionCommaOmitempty** | **String** |  | [optional] 
-**stepsCommaOmitempty** | **List<String>** |  | [optional] [default to const []]
+**stepsCommaOmitempty** | **BuiltList&lt;String&gt;** |  | [optional] 
 **metadataCommaOmitempty** | **String** |  | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)

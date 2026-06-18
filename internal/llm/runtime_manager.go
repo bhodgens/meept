@@ -91,32 +91,46 @@ func (m *RuntimeManager) RegisterConfig(providerID string, cfg *RuntimeConfig, b
 
 // StartAll starts all registered runtimes with auto_start=true.
 func (m *RuntimeManager) StartAll(ctx context.Context) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	// Snapshot configs/processes/checkers under lock, then release
+	// before doing any I/O (subprocess spawn, HTTP health polling).
+	type startItem struct {
+		providerID string
+		cfg        *RuntimeConfig
+		proc       *RuntimeProcess
+		hc         *HealthChecker
+	}
 
+	m.mu.Lock()
+	var items []startItem
 	for providerID, cfg := range m.configs {
 		if !cfg.AutoStart {
 			continue
 		}
+		items = append(items, startItem{
+			providerID: providerID,
+			cfg:        cfg,
+			proc:       m.processes[providerID],
+			hc:         m.healthCheckers[providerID],
+		})
+	}
+	m.mu.Unlock()
 
-		proc := m.processes[providerID]
-		hc := m.healthCheckers[providerID]
-
-		m.logger.Info("Starting runtime", "provider", providerID)
-		if err := proc.Start(ctx); err != nil {
-			return fmt.Errorf("failed to start runtime %s: %w", providerID, err)
+	for _, item := range items {
+		m.logger.Info("Starting runtime", "provider", item.providerID)
+		if err := item.proc.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start runtime %s: %w", item.providerID, err)
 		}
 
 		// Start health checker
-		hc.Start(ctx)
+		item.hc.Start(ctx)
 
 		// Wait for healthy
-		if err := hc.WaitForHealthy(ctx, cfg.SpawnTimeout); err != nil {
-			proc.Stop(ctx)
-			return fmt.Errorf("runtime %s did not become healthy: %w", providerID, err)
+		if err := item.hc.WaitForHealthy(ctx, item.cfg.SpawnTimeout); err != nil {
+			item.proc.Stop(ctx)
+			return fmt.Errorf("runtime %s did not become healthy: %w", item.providerID, err)
 		}
 
-		m.logger.Info("Runtime started and healthy", "provider", providerID)
+		m.logger.Info("Runtime started and healthy", "provider", item.providerID)
 	}
 
 	return nil
@@ -124,25 +138,45 @@ func (m *RuntimeManager) StartAll(ctx context.Context) error {
 
 // StopAll stops all running runtimes that have auto_stop_on_exit=true.
 func (m *RuntimeManager) StopAll(ctx context.Context) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	// Snapshot processes/configs/checkers under lock, then release
+	// before doing I/O (subprocess termination).
+	type stopItem struct {
+		providerID string
+		autoStop   bool
+		proc       *RuntimeProcess
+		hc         *HealthChecker
+	}
 
+	m.mu.Lock()
+	var items []stopItem
 	for providerID, proc := range m.processes {
 		cfg := m.configs[providerID]
-		if !cfg.AutoStop {
-			m.logger.Debug("Skipping runtime stop (auto_stop disabled)", "provider", providerID)
+		items = append(items, stopItem{
+			providerID: providerID,
+			autoStop:   cfg.AutoStop,
+			proc:       proc,
+			hc:         m.healthCheckers[providerID],
+		})
+	}
+	m.mu.Unlock()
+
+	for _, item := range items {
+		if !item.autoStop {
+			m.logger.Debug("Skipping runtime stop (auto_stop disabled)", "provider", item.providerID)
 			continue
 		}
-		m.logger.Info("Stopping runtime", "provider", providerID)
-		if err := proc.Stop(ctx); err != nil {
-			m.logger.Error("Failed to stop runtime", "provider", providerID, "error", err)
+		m.logger.Info("Stopping runtime", "provider", item.providerID)
+		if err := item.proc.Stop(ctx); err != nil {
+			m.logger.Error("Failed to stop runtime", "provider", item.providerID, "error", err)
 		}
 	}
 
 	// Stop health checkers
-	for providerID, hc := range m.healthCheckers {
-		hc.Stop()
-		m.logger.Debug("Health checker stopped", "provider", providerID)
+	for _, item := range items {
+		if item.hc != nil {
+			item.hc.Stop()
+			m.logger.Debug("Health checker stopped", "provider", item.providerID)
+		}
 	}
 
 	return nil
@@ -209,29 +243,25 @@ func (m *RuntimeManager) StatusForProvider(providerID string) (RuntimeStatus, bo
 
 // StartProvider starts a specific provider's runtime.
 func (m *RuntimeManager) StartProvider(ctx context.Context, providerID string) error {
+	// Snapshot under lock, then release for I/O.
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	cfg, ok := m.configs[providerID]
 	if !ok {
+		m.mu.Unlock()
 		return fmt.Errorf("provider %s not registered", providerID)
 	}
 
 	proc := m.processes[providerID]
 	hc := m.healthCheckers[providerID]
-	// Snapshot metrics recorder under lock to avoid race with
-	// SetMetricsRecorder (D1) and to allow recordSpawnLocked to run without
-	// re-acquiring the mutex (which would deadlock — sync.Mutex is
-	// non-reentrant).
-	rec := m.metrics
+	m.mu.Unlock()
 
 	m.logger.Info("Starting runtime", "provider", providerID)
 	start := time.Now()
 	if err := proc.Start(ctx); err != nil {
-		m.recordSpawnLocked(rec, providerID, time.Since(start), false)
+		m.recordSpawn(providerID, time.Since(start), false)
 		return fmt.Errorf("failed to start runtime %s: %w", providerID, err)
 	}
-	m.recordSpawnLocked(rec, providerID, time.Since(start), true)
+	m.recordSpawn(providerID, time.Since(start), true)
 
 	hc.Start(ctx)
 
@@ -246,10 +276,12 @@ func (m *RuntimeManager) StartProvider(ctx context.Context, providerID string) e
 
 // StopProvider stops a specific provider's runtime.
 func (m *RuntimeManager) StopProvider(ctx context.Context, providerID string) error {
+	// Snapshot under lock, then release for I/O.
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	proc, ok := m.processes[providerID]
+	hc := m.healthCheckers[providerID]
+	m.mu.Unlock()
+
 	if !ok {
 		return fmt.Errorf("provider %s not registered", providerID)
 	}
@@ -260,7 +292,7 @@ func (m *RuntimeManager) StopProvider(ctx context.Context, providerID string) er
 	}
 
 	// Stop health checker
-	if hc, ok := m.healthCheckers[providerID]; ok {
+	if hc != nil {
 		hc.Stop()
 	}
 

@@ -442,7 +442,7 @@ func (q *MessageQueue) Status() QueueStatus {
 	return QueueStatus{
 		SteeringDepth: len(q.steeringQueue),
 		FollowUpDepth: len(q.followUpQueue),
-		IsActive:      !q.closed.Load(),
+		IsActive:      !q.closed.Load(), //nolint:mutexio // atomic.Bool.Load is not I/O
 		Generation:    q.generation,
 	}
 }

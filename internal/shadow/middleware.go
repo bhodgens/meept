@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 )
@@ -17,12 +18,23 @@ type ChatterWithConfig interface {
 	Config() *llm.ModelConfig
 }
 
+// shadowProcessingTimeout bounds how long a single shadow record can take.
+// Shadow work is best-effort background processing; if a record takes longer
+// than this it is abandoned to keep the queue draining.
+const shadowProcessingTimeout = 5 * time.Minute
+
 // Middleware wraps an LLM client to intercept and shadow requests.
 type Middleware struct {
 	client  ChatterWithConfig
 	manager *Manager
 	config  *Config
 	logger  *slog.Logger
+
+	// ctx is the lifecycle context for async shadow work. Cancelled by Close
+	// so in-flight shadowRequest processing can short-circuit rather than
+	// running to completion after the daemon is shutting down.
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	// For async shadowing
 	shadowQueue chan *shadowRequest
@@ -31,6 +43,7 @@ type Middleware struct {
 
 type shadowRequest struct {
 	ctx            context.Context
+	cancel         context.CancelFunc
 	conversationID string
 	messages       []llm.ChatMessage
 	response       *llm.Response
@@ -50,11 +63,14 @@ func WithMiddlewareLogger(logger *slog.Logger) MiddlewareOption {
 
 // NewMiddleware creates a new shadow middleware.
 func NewMiddleware(client ChatterWithConfig, manager *Manager, config *Config, opts ...MiddlewareOption) *Middleware {
+	ctx, cancel := context.WithCancel(context.Background())
 	m := &Middleware{
 		client:      client,
 		manager:     manager,
 		config:      config,
 		logger:      slog.Default(),
+		ctx:         ctx,
+		cancel:      cancel,
 		shadowQueue: make(chan *shadowRequest, config.Shadowing.QueueSize),
 	}
 
@@ -108,7 +124,13 @@ func (m *Middleware) Config() *llm.ModelConfig {
 }
 
 // Close stops background workers and waits for them to finish.
+//
+// Cancel m.ctx first so any in-flight shadowRequest processing short-circuits
+// at its earliest opportunity (ProcessRecord may take seconds-to-minutes to
+// compute embeddings). Then close shadowQueue to drain the backlog and wait
+// for workers to exit.
 func (m *Middleware) Close() {
+	m.cancel()
 	close(m.shadowQueue)
 	m.wg.Wait()
 }
@@ -169,8 +191,13 @@ func (m *Middleware) shadowSync(ctx context.Context, convID string, messages []l
 }
 
 func (m *Middleware) queueShadow(convID string, messages []llm.ChatMessage, response *llm.Response, domain Domain, taskType TaskType) {
+	// Derive a child of m.ctx so Close() can cancel in-flight shadow records
+	// without affecting unrelated work. Timeout bounds the shadow work even
+	// if the daemon is killed without Close() (e.g., SIGKILL).
+	ctx, cancel := context.WithTimeout(m.ctx, shadowProcessingTimeout)
 	req := &shadowRequest{
-		ctx:            context.Background(), // Use background context for async processing
+		ctx:            ctx,
+		cancel:         cancel,
 		conversationID: convID,
 		messages:       messages,
 		response:       response,
@@ -182,6 +209,10 @@ func (m *Middleware) queueShadow(convID string, messages []llm.ChatMessage, resp
 	case m.shadowQueue <- req:
 		// Queued successfully
 	default:
+		// Queue full: release the per-request context resources immediately
+		// so the timeout goroutine (and its timer) can be collected before
+		// m.ctx is cancelled at Close().
+		cancel()
 		m.logger.Warn("Shadow queue full, dropping request")
 	}
 }
@@ -197,11 +228,25 @@ func (m *Middleware) worker() {
 	defer m.wg.Done()
 
 	for req := range m.shadowQueue {
+		// Short-circuit if Close() has cancelled the lifecycle context
+		// (e.g., daemon shutdown). Avoids spending teacher-LLM tokens on
+		// work that will be discarded.
+		if req.ctx.Err() != nil {
+			if req.cancel != nil {
+				req.cancel()
+			}
+			continue
+		}
 		m.processShadowRequest(req)
 	}
 }
 
 func (m *Middleware) processShadowRequest(req *shadowRequest) {
+	// Always release the per-request context resources when done.
+	if req.cancel != nil {
+		defer req.cancel()
+	}
+
 	// Convert llm.ChatMessage to shadow.Message
 	shadowMessages := make([]Message, len(req.messages))
 	for i, msg := range req.messages {

@@ -200,7 +200,7 @@ func (g *KnowledgeGraph) Initialize(ctx context.Context) error {
 
 	// Initialize schema
 	if err := g.initSchema(ctx); err != nil {
-		pool.Close()
+		pool.Close() //nolint:mutexio // one-time init cleanup path
 		return fmt.Errorf("failed to initialize schema: %w", err)
 	}
 
@@ -1336,7 +1336,7 @@ func (g *KnowledgeGraph) Close() error {
 
 	g.initialized = false
 	if g.pool != nil {
-		return g.pool.Close()
+		return g.pool.Close() //nolint:mutexio // one-time teardown; initialized flag prevents re-entry
 	}
 	return nil
 }

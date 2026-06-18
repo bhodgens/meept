@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -227,6 +228,11 @@ type ContextFirewall struct {
 	compactor    *ContextCompactor
 
 	compactorTriggerRatio float64
+	// compactorMu guards compactor and compactorTriggerRatio. SetCompactor writes
+	// here; reader sites in processMessages and summarizeWithLevel snapshot the
+	// pointer under RLock and then operate on the local copy outside the lock
+	// to avoid holding the mutex across the Compact call (which may perform I/O).
+	compactorMu sync.RWMutex
 
 	// Counters (atomic-safe for concurrent callers)
 	summarizationFailures atomic.Uint64
@@ -384,14 +390,22 @@ func NewContextFirewall(
 }
 
 // SetCompactor sets the ContextCompactor for smart summarization.
+// The write to f.compactor / f.compactorTriggerRatio happens under the
+// compactorMu write lock; the propagation to f.compressor (which has its own
+// internal mutex) is performed outside the lock to avoid lock-ordering issues.
 func (f *ContextFirewall) SetCompactor(compactor *ContextCompactor, triggerRatio ...float64) {
 	if compactor == nil {
 		return
 	}
+	f.compactorMu.Lock()
 	f.compactor = compactor
 	if len(triggerRatio) > 0 {
 		f.compactorTriggerRatio = triggerRatio[0]
 	}
+	f.compactorMu.Unlock()
+
+	// Propagate to the compressor outside compactorMu; the compressor manages
+	// its own internal locking.
 	if f.compressor != nil {
 		f.compressor.SetCompactor(compactor)
 	}
@@ -515,9 +529,15 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 
 	// Compactor trigger: if a trigger ratio is set and utilization exceeds it,
 	// attempt compaction before proactive compression.
-	if f.compactor != nil && f.compactorTriggerRatio > 0 && utilization >= f.compactorTriggerRatio {
+	// Snapshot compactor state under RLock, then operate on the local copy
+	// outside the lock to avoid holding the mutex across the Compact call.
+	f.compactorMu.RLock()
+	compactor := f.compactor
+	compactorTriggerRatio := f.compactorTriggerRatio
+	f.compactorMu.RUnlock()
+	if compactor != nil && compactorTriggerRatio > 0 && utilization >= compactorTriggerRatio {
 		before := currentTokens
-		cr := f.compactor.Compact(ctx, result)
+		cr := compactor.Compact(ctx, result)
 		if cr.Compacted {
 			f.compactionEvents.Add(1)
 			saved := before - cr.TokensAfter
@@ -832,8 +852,12 @@ func (f *ContextFirewall) summarizeOldHistory(ctx context.Context, messages []Ch
 // then formatted as a compact, information-dense summary message.
 func (f *ContextFirewall) summarizeWithLevel(ctx context.Context, messages []ChatMessage, level int) ([]ChatMessage, error) {
 	// At level 1, prefer the compactor if available.
-	if f.compactor != nil && level == 1 {
-		cr := f.compactor.Compact(ctx, messages)
+	// Snapshot under RLock; call Compact on the local copy.
+	f.compactorMu.RLock()
+	compactor := f.compactor
+	f.compactorMu.RUnlock()
+	if compactor != nil && level == 1 {
+		cr := compactor.Compact(ctx, messages)
 		if cr.Compacted {
 			return cr.Messages, nil
 		}

@@ -489,10 +489,13 @@ func (c *L2Cache) SetMetricsStore(store *metrics.Store) {
 
 // recordEvictionMetric records a cache eviction metric if metrics store is available.
 func (c *L2Cache) recordEvictionMetric(count int64, reason string) {
-	if c.metricsStore == nil {
+	c.mu.RLock()
+	store := c.metricsStore
+	c.mu.RUnlock()
+	if store == nil {
 		return
 	}
-	c.metricsStore.Record("cache.eviction", float64(count), map[string]string{
+	store.Record("cache.eviction", float64(count), map[string]string{
 		KeyLevel: "l2",
 		"reason": reason,
 	})
@@ -500,10 +503,13 @@ func (c *L2Cache) recordEvictionMetric(count int64, reason string) {
 
 // recordEntryCountMetric records the current L2 entry count as a metric.
 func (c *L2Cache) recordEntryCountMetric() {
-	if c.metricsStore == nil {
+	c.mu.RLock()
+	store := c.metricsStore
+	c.mu.RUnlock()
+	if store == nil {
 		return
 	}
-	c.metricsStore.Record("cache.entry_count", float64(c.Count()), map[string]string{
+	store.Record("cache.entry_count", float64(c.Count()), map[string]string{
 		KeyLevel: "l2",
 	})
 }
@@ -522,7 +528,7 @@ func (c *L2Cache) Close() error {
 	defer c.mu.Unlock()
 
 	if c.pool != nil {
-		return c.pool.Close()
+		return c.pool.Close() //nolint:mutexio // one-time teardown; closing requires exclusive access
 	}
 	return nil
 }

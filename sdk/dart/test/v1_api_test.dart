@@ -1,22 +1,12 @@
-//
-// AUTO-GENERATED FILE, DO NOT MODIFY!
-//
-// @dart=2.18
-
-// ignore_for_file: unused_element, unused_import
-// ignore_for_file: always_put_required_named_parameters_first
-// ignore_for_file: constant_identifier_names
-// ignore_for_file: lines_longer_than_80_chars
-
-import 'package:meept_client/api.dart';
 import 'package:test/test.dart';
+import 'package:meept_client/meept_client.dart';
 
 
 /// tests for V1Api
 void main() {
-  // final instance = V1Api();
+  final instance = MeeptClient().getV1Api();
 
-  group('tests for V1Api', () {
+  group(V1Api, () {
     // s.handleBusPublish
     //
     //Future apiV1BusPublishPost() async
@@ -66,10 +56,31 @@ void main() {
       // TODO
     });
 
+    // s.handleCalendarDelete
+    //
+    //Future apiV1CalendarEventsIdDelete() async
+    test('test apiV1CalendarEventsIdDelete', () async {
+      // TODO
+    });
+
     // s.handleCalendarGet
     //
     //Future apiV1CalendarEventsIdGet() async
     test('test apiV1CalendarEventsIdGet', () async {
+      // TODO
+    });
+
+    // s.handleCalendarUpdate
+    //
+    //Future apiV1CalendarEventsIdPut() async
+    test('test apiV1CalendarEventsIdPut', () async {
+      // TODO
+    });
+
+    // s.handleCalendarCreate
+    //
+    //Future apiV1CalendarEventsPost() async
+    test('test apiV1CalendarEventsPost', () async {
       // TODO
     });
 
@@ -129,10 +140,31 @@ void main() {
       // TODO
     });
 
+    // s.handleDeleteAgent
+    //
+    //Future apiV1ConfigAgentsIdDelete() async
+    test('test apiV1ConfigAgentsIdDelete', () async {
+      // TODO
+    });
+
+    // s.handleGetAgent
+    //
+    //Future apiV1ConfigAgentsIdGet() async
+    test('test apiV1ConfigAgentsIdGet', () async {
+      // TODO
+    });
+
     // s.handleSaveAgent
     //
     //Future apiV1ConfigAgentsIdPost() async
     test('test apiV1ConfigAgentsIdPost', () async {
+      // TODO
+    });
+
+    // s.handleGetClientConfig
+    //
+    //Future apiV1ConfigClientGet() async
+    test('test apiV1ConfigClientGet', () async {
       // TODO
     });
 
@@ -147,6 +179,20 @@ void main() {
     //
     //Future apiV1ConfigMenubarGet() async
     test('test apiV1ConfigMenubarGet', () async {
+      // TODO
+    });
+
+    // s.handleSaveMenubarConfig
+    //
+    //Future apiV1ConfigMenubarPost() async
+    test('test apiV1ConfigMenubarPost', () async {
+      // TODO
+    });
+
+    // s.handleGetModelsConfig
+    //
+    //Future apiV1ConfigModelsGet() async
+    test('test apiV1ConfigModelsGet', () async {
       // TODO
     });
 
@@ -290,6 +336,27 @@ void main() {
       // TODO
     });
 
+    // s.handleModelsGetCredential
+    //
+    //Future apiV1ModelsCredentialsProviderGet() async
+    test('test apiV1ModelsCredentialsProviderGet', () async {
+      // TODO
+    });
+
+    // s.handleModelsSetCredential
+    //
+    //Future apiV1ModelsCredentialsProviderPost() async
+    test('test apiV1ModelsCredentialsProviderPost', () async {
+      // TODO
+    });
+
+    // s.handleModelsGetDefault
+    //
+    //Future apiV1ModelsDefaultGet() async
+    test('test apiV1ModelsDefaultGet', () async {
+      // TODO
+    });
+
     // s.handleModelsSetDefault
     //
     //Future apiV1ModelsDefaultPost() async
@@ -360,6 +427,13 @@ void main() {
       // TODO
     });
 
+    // s.handlePlanCreate
+    //
+    //Future apiV1PlansPost() async
+    test('test apiV1PlansPost', () async {
+      // TODO
+    });
+
     // s.handleProjectDetect
     //
     //Future apiV1ProjectsDetectPost() async
@@ -388,6 +462,13 @@ void main() {
       // TODO
     });
 
+    // s.handleProjectUnregister
+    //
+    //Future apiV1ProjectsIdDelete() async
+    test('test apiV1ProjectsIdDelete', () async {
+      // TODO
+    });
+
     // s.handleProjectGet
     //
     //Future apiV1ProjectsIdGet() async
@@ -406,6 +487,13 @@ void main() {
     //
     //Future apiV1ProjectsIdSyncPost() async
     test('test apiV1ProjectsIdSyncPost', () async {
+      // TODO
+    });
+
+    // s.handleProjectRegister
+    //
+    //Future apiV1ProjectsPost() async
+    test('test apiV1ProjectsPost', () async {
       // TODO
     });
 
@@ -455,6 +543,13 @@ void main() {
     //
     //Future apiV1QueueJobsIdRetryPost() async
     test('test apiV1QueueJobsIdRetryPost', () async {
+      // TODO
+    });
+
+    // s.handleQueueEnqueue
+    //
+    //Future apiV1QueueJobsPost() async
+    test('test apiV1QueueJobsPost', () async {
       // TODO
     });
 
@@ -546,6 +641,13 @@ void main() {
     //
     //Future apiV1SchedulerJobsIdResumePost() async
     test('test apiV1SchedulerJobsIdResumePost', () async {
+      // TODO
+    });
+
+    // s.handleSchedulerAddJob
+    //
+    //Future apiV1SchedulerJobsPost() async
+    test('test apiV1SchedulerJobsPost', () async {
       // TODO
     });
 
@@ -668,6 +770,13 @@ void main() {
       // TODO
     });
 
+    // s.handleSessionGet
+    //
+    //Future apiV1SessionsIdGet() async
+    test('test apiV1SessionsIdGet', () async {
+      // TODO
+    });
+
     // s.handleSessionMessages
     //
     //Future apiV1SessionsIdMessagesGet() async
@@ -693,6 +802,13 @@ void main() {
     //
     //Future apiV1SessionsIdTreeGet() async
     test('test apiV1SessionsIdTreeGet', () async {
+      // TODO
+    });
+
+    // s.handleSessionCreate
+    //
+    //Future apiV1SessionsPost() async
+    test('test apiV1SessionsPost', () async {
       // TODO
     });
 
@@ -745,10 +861,31 @@ void main() {
       // TODO
     });
 
+    // s.handleTaskGet
+    //
+    //Future apiV1TasksIdGet() async
+    test('test apiV1TasksIdGet', () async {
+      // TODO
+    });
+
+    // s.handleTaskUpdate
+    //
+    //Future apiV1TasksIdPut() async
+    test('test apiV1TasksIdPut', () async {
+      // TODO
+    });
+
     // s.handleTaskSteps
     //
     //Future apiV1TasksIdStepsGet() async
     test('test apiV1TasksIdStepsGet', () async {
+      // TODO
+    });
+
+    // s.handleTaskCreate
+    //
+    //Future apiV1TasksPost() async
+    test('test apiV1TasksPost', () async {
       // TODO
     });
 

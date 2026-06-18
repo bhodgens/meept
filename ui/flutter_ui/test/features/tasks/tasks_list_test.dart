@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:meept_ui/features/tasks/tasks_list.dart';
 import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/providers/task_provider.dart';
-import 'package:meept_ui/services/api_client.dart';
+import 'package:meept_ui/services/sdk_client.dart';
 
 // ===== Task model helper =====
 
@@ -23,24 +23,27 @@ Task _makeTask({
   );
 }
 
-// ===== ApiClient stubs =====
+// ===== SdkApiClient stubs =====
 
-/// Returns a predefined list of tasks
-class _TestApiClient extends ApiClient {
+/// Returns a predefined list of tasks.
+class _TestSdkClient extends SdkApiClient {
   final List<Task> _tasks;
   final List<Task> _created = [];
 
-  _TestApiClient([this._tasks = const []]) : super(host: 'localhost', port: 65432);
+  _TestSdkClient([this._tasks = const []]) : super(host: 'localhost', port: 65432);
 
   List<Task> get createdTasks => _created;
 
   @override
-  Future<List<Task>> listTasks({String? sessionId}) async {
-    return [..._tasks];
+  Future<List<Map<String, dynamic>>> listTasks({String? sessionId}) async {
+    return _tasks.map((t) => t.toJson()).toList();
   }
 
   @override
-  Future<Task> createTask({required String title, String? sessionId}) async {
+  Future<Map<String, dynamic>> createTask({
+    required String title,
+    String? sessionId,
+  }) async {
     final task = Task(
       id: 'new-${_created.length + 1}',
       title: title,
@@ -50,66 +53,43 @@ class _TestApiClient extends ApiClient {
       sessionId: sessionId,
     );
     _created.add(task);
-    return task;
+    return task.toJson();
   }
-
-  @override
-  Future<Task> getTask(String id) async {
-    throw UnimplementedError();
-  }
-
-  @override
-  Future<T> get<T>(String path, {Map<String, dynamic>? queryParameters}) async => {} as T;
-
-  @override
-  Future<T> post<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async => {} as T;
-
-  @override
-  Future<T> put<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async => {} as T;
-
-  @override
-  Future<T> delete<T>(String path) async => {} as T;
 }
 
-/// Client that throws on listTasks to test error state
-class _ThrowingClient extends ApiClient {
-  _ThrowingClient() : super(host: 'localhost', port: 65433);
+/// Client that throws on listTasks to test error state.
+class _ThrowingSdkClient extends SdkApiClient {
+  _ThrowingSdkClient() : super(host: 'localhost', port: 65433);
 
   @override
-  Future<List<Task>> listTasks({String? sessionId}) async {
+  Future<List<Map<String, dynamic>>> listTasks({String? sessionId}) async {
     throw Exception('connection refused');
   }
 
   @override
-  Future<Task> createTask({required String title, String? sessionId}) async {
+  Future<Map<String, dynamic>> createTask({
+    required String title,
+    String? sessionId,
+  }) async {
     throw Exception('connection refused');
   }
-
-  @override
-  Future<T> get<T>(String path, {Map<String, dynamic>? queryParameters}) async => {} as T;
-
-  @override
-  Future<T> post<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async => {} as T;
-
-  @override
-  Future<T> put<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async => {} as T;
-
-  @override
-  Future<T> delete<T>(String path) async => {} as T;
 }
 
-/// Client with a delay on listTasks so loading state is visible
-class _SlowLoadClient extends ApiClient {
-  _SlowLoadClient() : super(host: 'localhost', port: 65434);
+/// Client with a delay on listTasks so loading state is visible.
+class _SlowLoadSdkClient extends SdkApiClient {
+  _SlowLoadSdkClient() : super(host: 'localhost', port: 65434);
 
   @override
-  Future<List<Task>> listTasks({String? sessionId}) async {
+  Future<List<Map<String, dynamic>>> listTasks({String? sessionId}) async {
     await Future.delayed(const Duration(milliseconds: 100));
     return [];
   }
 
   @override
-  Future<Task> createTask({required String title, String? sessionId}) async {
+  Future<Map<String, dynamic>> createTask({
+    required String title,
+    String? sessionId,
+  }) async {
     final task = Task(
       id: 'new-1',
       title: title,
@@ -117,20 +97,8 @@ class _SlowLoadClient extends ApiClient {
       status: 'pending',
       createdAt: DateTime.now(),
     );
-    return task;
+    return task.toJson();
   }
-
-  @override
-  Future<T> get<T>(String path, {Map<String, dynamic>? queryParameters}) async => {} as T;
-
-  @override
-  Future<T> post<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async => {} as T;
-
-  @override
-  Future<T> put<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters}) async => {} as T;
-
-  @override
-  Future<T> delete<T>(String path) async => {} as T;
 }
 
 // ===== Widget tests: TasksList =====
@@ -142,7 +110,7 @@ void main() {
         ProviderScope(
           overrides: [
             taskProvider.overrideWith(
-                (ref) => TaskNotifier(apiClient: _SlowLoadClient())),
+                (ref) => TaskNotifier(sdkClient: _SlowLoadSdkClient())),
           ],
           child: const MaterialApp(
             home: Scaffold(body: TasksList()),
@@ -161,7 +129,7 @@ void main() {
         ProviderScope(
           overrides: [
             taskProvider.overrideWith(
-                (ref) => TaskNotifier(apiClient: _TestApiClient([]))),
+                (ref) => TaskNotifier(sdkClient: _TestSdkClient([]))),
           ],
           child: const MaterialApp(
             home: Scaffold(body: TasksList()),
@@ -177,7 +145,7 @@ void main() {
         ProviderScope(
           overrides: [
             taskProvider.overrideWith(
-                (ref) => TaskNotifier(apiClient: _ThrowingClient())),
+                (ref) => TaskNotifier(sdkClient: _ThrowingSdkClient())),
           ],
           child: const MaterialApp(
             home: Scaffold(body: TasksList()),
@@ -194,7 +162,7 @@ void main() {
           overrides: [
             taskProvider.overrideWith((ref) {
               final notifier = TaskNotifier(
-                apiClient: _TestApiClient(
+                sdkClient: _TestSdkClient(
                   [_makeTask(), _makeTask(id: '2', title: 'Second Task')],
                 ),
               );
@@ -219,7 +187,7 @@ void main() {
           overrides: [
             taskProvider.overrideWith((ref) {
               return TaskNotifier(
-                apiClient: _TestApiClient([_makeTask(status: 'failed')]),
+                sdkClient: _TestSdkClient([_makeTask(status: 'failed')]),
               );
             }),
           ],
@@ -240,7 +208,7 @@ void main() {
         ProviderScope(
           overrides: [
             taskProvider.overrideWith(
-                (ref) => TaskNotifier(apiClient: _TestApiClient([]))),
+                (ref) => TaskNotifier(sdkClient: _TestSdkClient([]))),
           ],
           child: const MaterialApp(
             home: Scaffold(body: TasksList()),
@@ -261,12 +229,12 @@ void main() {
 
     testWidgets('dialog creates task when create is tapped with text',
         (tester) async {
-      final client = _TestApiClient();
+      final client = _TestSdkClient();
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
             taskProvider.overrideWith(
-                (ref) => TaskNotifier(apiClient: client)),
+                (ref) => TaskNotifier(sdkClient: client)),
           ],
           child: const MaterialApp(
             home: Scaffold(body: TasksList()),
@@ -293,12 +261,12 @@ void main() {
 
     testWidgets('dialog does not create task with empty title',
         (tester) async {
-      final client = _TestApiClient();
+      final client = _TestSdkClient();
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
             taskProvider.overrideWith(
-                (ref) => TaskNotifier(apiClient: client)),
+                (ref) => TaskNotifier(sdkClient: client)),
           ],
           child: const MaterialApp(
             home: Scaffold(body: TasksList()),
@@ -325,7 +293,7 @@ void main() {
         ProviderScope(
           overrides: [
             taskProvider.overrideWith(
-                (ref) => TaskNotifier(apiClient: _TestApiClient([]))),
+                (ref) => TaskNotifier(sdkClient: _TestSdkClient([]))),
           ],
           child: const MaterialApp(
             home: Scaffold(body: TasksList()),
@@ -349,7 +317,7 @@ void main() {
         ProviderScope(
           overrides: [
             taskProvider.overrideWith(
-                (ref) => TaskNotifier(apiClient: _TestApiClient([]))),
+                (ref) => TaskNotifier(sdkClient: _TestSdkClient([]))),
           ],
           child: const MaterialApp(
             home: Scaffold(body: TasksList()),
@@ -367,12 +335,12 @@ void main() {
 
     testWidgets('creating a task appends it to the list after API succeeds',
         (tester) async {
-      final client = _TestApiClient();
+      final client = _TestSdkClient();
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
             taskProvider.overrideWith(
-                (ref) => TaskNotifier(apiClient: client)),
+                (ref) => TaskNotifier(sdkClient: client)),
           ],
           child: const MaterialApp(
             home: Scaffold(body: TasksList()),
@@ -400,15 +368,15 @@ void main() {
 
   group('TaskNotifier', () {
     test('state starts empty', () {
-      final notifier = TaskNotifier(apiClient: _TestApiClient([]));
+      final notifier = TaskNotifier(sdkClient: _TestSdkClient([]));
       expect(notifier.state.tasks, isEmpty);
       expect(notifier.state.isLoading, isFalse);
       expect(notifier.state.error, isNull);
     });
 
     test('loadTasks populates tasks', () async {
-      final client = _TestApiClient([_makeTask(), _makeTask(id: '2')]);
-      final notifier = TaskNotifier(apiClient: client);
+      final client = _TestSdkClient([_makeTask(), _makeTask(id: '2')]);
+      final notifier = TaskNotifier(sdkClient: client);
       await notifier.loadTasks();
 
       expect(notifier.state.tasks, hasLength(2));
@@ -417,7 +385,7 @@ void main() {
     });
 
     test('loadTasks sets error on failure', () async {
-      final notifier = TaskNotifier(apiClient: _ThrowingClient());
+      final notifier = TaskNotifier(sdkClient: _ThrowingSdkClient());
       await notifier.loadTasks();
 
       expect(notifier.state.tasks, isEmpty);
@@ -426,8 +394,8 @@ void main() {
     });
 
     test('createTask appends new task', () async {
-      final client = _TestApiClient([]);
-      final notifier = TaskNotifier(apiClient: client);
+      final client = _TestSdkClient([]);
+      final notifier = TaskNotifier(sdkClient: client);
       expect(notifier.state.tasks, isEmpty);
 
       final newTask = await notifier.createTask(title: 'Created Task');
@@ -438,15 +406,15 @@ void main() {
     });
 
     test('createTask sets error on failure', () async {
-      final notifier = TaskNotifier(apiClient: _ThrowingClient());
+      final notifier = TaskNotifier(sdkClient: _ThrowingSdkClient());
       final result = await notifier.createTask(title: 'fails');
       expect(result, isNull);
       expect(notifier.state.error, isNotNull);
     });
 
     test('createTask preserves existing tasks in state', () async {
-      final client = _TestApiClient([_makeTask(id: 'existing')]);
-      final notifier = TaskNotifier(apiClient: client);
+      final client = _TestSdkClient([_makeTask(id: 'existing')]);
+      final notifier = TaskNotifier(sdkClient: client);
       await notifier.loadTasks();
 
       await notifier.createTask(title: 'new task');

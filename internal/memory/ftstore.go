@@ -102,8 +102,8 @@ func (s *SQLiteFTSStore) Initialize(ctx context.Context) error {
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA synchronous=NORMAL",
 	} {
-		if _, err := db.Exec(pragma); err != nil {
-			db.Close()
+		if _, err := db.Exec(pragma); err != nil { //nolint:mutexio // one-time init guarded by initialized flag
+			db.Close() //nolint:mutexio // one-time init cleanup path
 			return fmt.Errorf("failed to set pragma: %w", err)
 		}
 	}
@@ -112,7 +112,7 @@ func (s *SQLiteFTSStore) Initialize(ctx context.Context) error {
 
 	// Initialize schema
 	if err := s.initSchema(ctx); err != nil {
-		db.Close()
+		db.Close() //nolint:mutexio // one-time init cleanup path
 		return fmt.Errorf("failed to initialize schema: %w", err)
 	}
 
@@ -390,7 +390,7 @@ func (s *SQLiteFTSStore) Close() error {
 
 	s.initialized = false
 	if s.db != nil {
-		return s.db.Close()
+		return s.db.Close() //nolint:mutexio // one-time teardown; initialized flag prevents re-entry
 	}
 	return nil
 }

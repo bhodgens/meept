@@ -12,7 +12,7 @@ Name | Type | Description | Notes
 **idleWorkers** | **int** |  | 
 **busyWorkers** | **int** |  | 
 **errorWorkers** | **int** |  | 
-**workerStats** | **List<String>** |  | [default to const []]
+**workerStats** | **BuiltList&lt;String&gt;** |  | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

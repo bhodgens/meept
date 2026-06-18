@@ -139,7 +139,7 @@ void main() {
 
       testWidgets('does not truncate messages 60 characters or shorter',
           (tester) async {
-        final shortMessage = 'This is a short message';
+        const shortMessage = 'This is a short message';
         final progress = _makeProgress(message: shortMessage);
         await tester.pumpWidget(_buildWidget(progress: progress));
 
@@ -279,7 +279,7 @@ void main() {
 
       testWidgets('very long agent ID displays in lowercase',
           (tester) async {
-        final longId =
+        const longId =
             'THIS_IS A VERY LONG AGENT ID THAT EXCEEDS REASONABLE LENGTH';
         final progress = _makeProgress(agentId: longId);
         await tester.pumpWidget(_buildWidget(progress: progress));

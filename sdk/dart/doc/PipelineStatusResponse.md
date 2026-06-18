@@ -11,7 +11,7 @@ Name | Type | Description | Notes
 **pipelineId** | **String** |  | 
 **name** | **String** |  | 
 **status** | **String** |  | 
-**steps** | **List<String>** |  | [default to const []]
+**steps** | **BuiltList&lt;String&gt;** |  | 
 **createdAt** | **String** |  | 
 **updatedAt** | **String** |  | 
 

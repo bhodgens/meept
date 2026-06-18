@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
-import '../services/api_client.dart';
+import '../services/sdk_client.dart';
 import 'providers.dart';
 import '../services/websocket_service.dart';
 
@@ -37,13 +37,13 @@ class MetricsState {
 /// WebSocket updates for live metrics display (Task 19).
 class MetricsNotifier extends StateNotifier<MetricsState> {
   MetricsNotifier({
-    required this.apiClient,
+    required this.sdkClient,
     required this.websocket,
   }) : super(const MetricsState(isLoading: true)) {
     _init();
   }
 
-  final ApiClient apiClient;
+  final SdkApiClient sdkClient;
   final WebSocketService websocket;
   StreamSubscription<Map<String, dynamic>>? _metricsSubscription;
   StreamSubscription<bool>? _connectionSubscription;
@@ -89,7 +89,7 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
   Future<void> _fetchMetrics() async {
     try {
       _checkMounted();
-      final data = await apiClient.getLiveMetrics();
+      final data = await sdkClient.getLiveMetrics();
       if (_disposed) return;
       // Try to parse as MetricsSnapshot from the raw response
       // The backend /metrics/live returns a map with metric fields
@@ -158,7 +158,7 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
 /// Metrics provider
 final metricsProvider =
     StateNotifierProvider<MetricsNotifier, MetricsState>((ref) {
-  final client = ref.watch(apiClientProvider);
+  final client = ref.watch(sdkClientProvider);
   final websocket = ref.watch(websocketProvider);
-  return MetricsNotifier(apiClient: client, websocket: websocket);
+  return MetricsNotifier(sdkClient: client, websocket: websocket);
 });

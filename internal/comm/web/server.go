@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -562,10 +563,35 @@ func (s *Server) writeJSON(w http.ResponseWriter, status int, data any) {
 	}
 }
 
-// writeError writes an error response.
+// writeError writes an error response. The message is sanitized to strip
+// internal paths and Go package identifiers before being sent to clients.
 func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
-	s.writeJSON(w, status, map[string]string{"error": message})
+	s.writeJSON(w, status, map[string]string{"error": sanitizeErrMsg(message)})
 }
+
+// sanitizeErrMsg strips absolute filesystem paths, Go import paths, and
+// file.go:line: debug prefixes from error messages before they are sent to
+// HTTP clients. This prevents leaking internal directory layout, package
+// structure, or build paths through error responses. Messages longer than
+// 1024 characters are truncated.
+func sanitizeErrMsg(msg string) string {
+	// Strip absolute paths: /Users/x, /home/x, /tmp/x, C:\Users\x, etc.
+	msg = webAbsPathRe.ReplaceAllString(msg, "<path>")
+	// Strip Go package paths: github.com/x/y/z, example.com/pkg/sub
+	msg = webGoImportPathRe.ReplaceAllString(msg, "<pkg>")
+	// Collapse "file.go:NN:" debug prefixes.
+	msg = webFileLineRe.ReplaceAllString(msg, "")
+	if len(msg) > 1024 {
+		msg = msg[:1024] + "...(truncated)"
+	}
+	return msg
+}
+
+var (
+	webAbsPathRe     = regexp.MustCompile(`(?:/[A-Za-z0-9._-]+)+(?:\.[A-Za-z0-9]+)?|[A-Za-z]:\\[A-Za-z0-9._\\-]+`)
+	webGoImportPathRe = regexp.MustCompile(`[a-z0-9.-]+\.[a-z]{2,}/[A-Za-z0-9._/-]+`)
+	webFileLineRe     = regexp.MustCompile(`[A-Za-z0-9_-]+\.go:\d+(?::\d+)?:\s*`)
+)
 
 // loggingResponseWriter wraps http.ResponseWriter to capture the status code.
 type loggingResponseWriter struct {

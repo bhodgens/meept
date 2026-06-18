@@ -287,8 +287,10 @@ type ClusterQueueStats struct {
 func (s *Store) RecordClaimEvent(ctx context.Context, jobID, nodeID, action string) error {
 	// Validate action against a strict allowlist to prevent log/event spoofing
 	// and SQL/JSON value injection through the "TASK_"+action concatenation.
+	// Values must match the strings passed by callers (Complete, Fail,
+	// reclaimJobUnlocked).
 	switch action {
-	case "CLAIMED", "RELEASED", "COMPLETED", "FAILED", "RETRY":
+	case "complete", "fail", "reclaim":
 	default:
 		return fmt.Errorf("invalid claim event action: %q", action)
 	}

@@ -396,7 +396,7 @@ func (q *PersistentQueue) Close() error {
 	}
 
 	q.closed = true
-	return q.store.Close()
+	return q.store.Close() //nolint:mutexio // one-time teardown guarded by closed flag
 }
 
 func (q *PersistentQueue) publishEvent(topic string, data map[string]any) {

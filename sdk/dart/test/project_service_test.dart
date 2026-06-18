@@ -1,32 +1,21 @@
-//
-// AUTO-GENERATED FILE, DO NOT MODIFY!
-//
-// @dart=2.18
-
-// ignore_for_file: unused_element, unused_import
-// ignore_for_file: always_put_required_named_parameters_first
-// ignore_for_file: constant_identifier_names
-// ignore_for_file: lines_longer_than_80_chars
-
-import 'package:meept_client/api.dart';
 import 'package:test/test.dart';
+import 'package:meept_client/meept_client.dart';
 
 // tests for ProjectService
 void main() {
-  // final instance = ProjectService();
+  final instance = ProjectServiceBuilder();
+  // TODO add properties to the builder and call build()
 
-  group('test ProjectService', () {
-    // Object pm
+  group(ProjectService, () {
+    // JsonObject pm
     test('to test the property `pm`', () async {
       // TODO
     });
 
-    // Object store
+    // JsonObject store
     test('to test the property `store`', () async {
       // TODO
     });
 
-
   });
-
 }

@@ -15,8 +15,8 @@ Name | Type | Description | Notes
 **exitCode** | **int** |  | 
 **timestamp** | **String** |  | 
 **workingDir** | **String** |  | 
-**durationMs** | **Object** |  | 
-**riskLevel** | **Object** |  | 
+**durationMs** | [**JsonObject**](.md) |  | 
+**riskLevel** | [**JsonObject**](.md) |  | 
 **success** | **bool** |  | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)

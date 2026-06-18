@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -1192,9 +1193,44 @@ func (s *Server) writeJSON(w http.ResponseWriter, status int, data any) {
 }
 
 // writeError writes an error response.
+//
+// The message is lightly sanitized to avoid leaking internal Go file paths,
+// package paths, and runtime stack snippets to clients. Internal messages
+// like "open /Users/foo/go/src/github.com/.../file.go: permission denied"
+// become "open: permission denied" so clients get actionable errors without
+// learning the server's filesystem layout.
+//
+// Sanitization is conservative: only paths and Go package paths are stripped.
+// Sentinel error messages (e.g. "job not found: foo") pass through unchanged
+// because they typically contain operator-controlled IDs.
 func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
-	s.writeJSON(w, status, map[string]string{"error": message})
+	s.writeJSON(w, status, map[string]string{"error": sanitizeErrMessage(message)})
 }
+
+// sanitizeErrMessage strips filesystem paths and Go package/import paths from
+// error messages before sending them to HTTP clients.
+func sanitizeErrMessage(msg string) string {
+	// Strip absolute paths: /Users/x, /home/x, /tmp/x, C:\Users\x, etc.
+	msg = absPathRe.ReplaceAllString(msg, "<path>")
+	// Strip Go package paths: github.com/x/y/z, example.com/pkg/sub
+	msg = goImportPathRe.ReplaceAllString(msg, "<pkg>")
+	// Collapse "file.go:NN:" debug prefixes that survive the above.
+	msg = fileLineRe.ReplaceAllString(msg, "")
+	if len(msg) > 1024 {
+		msg = msg[:1024] + "...(truncated)"
+	}
+	return msg
+}
+
+var (
+	// absPathRe matches Unix absolute paths and Windows drive-letter paths.
+	absPathRe = regexp.MustCompile(`(?:/[A-Za-z0-9._-]+)+(?:\.[A-Za-z0-9]+)?|[A-Za-z]:\\[A-Za-z0-9._\\-]+`)
+	// goImportPathRe matches domain/pkg import paths like
+	// "github.com/caimlas/meept/...".
+	goImportPathRe = regexp.MustCompile(`[a-z0-9.-]+\.[a-z]{2,}/[A-Za-z0-9._/-]+`)
+	// fileLineRe matches "file.go:42:" or "file.go:42:43:" prefixes.
+	fileLineRe = regexp.MustCompile(`[A-Za-z0-9_-]+\.go:\d+(?::\d+)?:\s*`)
+)
 
 // isLocalOrigin checks whether an Origin header value is a trusted local host.
 // Empty and "null" origins are not considered local — they are spoofable by

@@ -1,51 +1,55 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meept_ui/providers/agent_provider.dart';
 import 'package:meept_ui/models/api_models.dart';
-import 'package:meept_ui/services/api_client.dart';
+import 'package:meept_ui/services/sdk_client.dart';
 
 // ===== Stub classes =====
 
-class _StubApiClient extends ApiClient {
-  _StubApiClient() : super(host: 'localhost', port: 8081);
+/// Stub [SdkApiClient] that returns a fixed agents payload.
+///
+/// Overrides the endpoint method (now a regular instance method on
+/// [SdkApiClient]) so the test doesn't need to hit the network.
+class _StubSdkClient extends SdkApiClient {
+  _StubSdkClient() : super(host: 'localhost', port: 8081);
 
   @override
-  Future<List<Agent>> listAgents() async {
+  Future<List<Map<String, dynamic>>> listAgents() async {
     return (_mockAgentsResponse['agents'] as List)
-        .map((a) => Agent.fromJson(a as Map<String, dynamic>))
+        .map((a) => Map<String, dynamic>.from(a as Map))
         .toList();
   }
 }
 
-/// An API client that throws on any call, to simulate failure.
-class _FailingApiClient extends ApiClient {
-  _FailingApiClient() : super(host: 'localhost', port: 8081);
+/// An SDK client that throws on any call, to simulate failure.
+class _FailingSdkClient extends SdkApiClient {
+  _FailingSdkClient() : super(host: 'localhost', port: 8081);
 
   @override
-  Future<List<Agent>> listAgents() async {
+  Future<List<Map<String, dynamic>>> listAgents() async {
     throw Exception('network failure');
   }
 }
 
-/// An API client that returns an empty agents list.
-class _EmptyAgentsApiClient extends ApiClient {
-  _EmptyAgentsApiClient() : super(host: 'localhost', port: 8081);
+/// An SDK client that returns an empty agents list.
+class _EmptyAgentsSdkClient extends SdkApiClient {
+  _EmptyAgentsSdkClient() : super(host: 'localhost', port: 8081);
 
   @override
-  Future<List<Agent>> listAgents() async {
+  Future<List<Map<String, dynamic>>> listAgents() async {
     return [];
   }
 }
 
-/// An API client that returns one agent with null id, to verify error handling.
-class _NullIdAgentApiClient extends ApiClient {
-  _NullIdAgentApiClient() : super(host: 'localhost', port: 8081);
+/// An SDK client that returns one agent with null id, to verify error handling.
+class _NullIdAgentSdkClient extends SdkApiClient {
+  _NullIdAgentSdkClient() : super(host: 'localhost', port: 8081);
 
   @override
-  Future<List<Agent>> listAgents() async {
-    // Agent.fromJson does json['id'] as String which throws on null,
-    // so the caller (AgentNotifier) will get a TypeError.
+  Future<List<Map<String, dynamic>>> listAgents() async {
+    // The notifier will call Agent.fromJson which does json['id'] as String
+    // and throws on null, surfacing a TypeError.
     return [
-      Agent.fromJson(<String, dynamic>{'id': null, 'name': 'No ID'}),
+      <String, dynamic>{'id': null, 'name': 'No ID'},
     ];
   }
 }
@@ -178,12 +182,12 @@ void main() {
 
   group('AgentNotifier.loadAgents()', () {
     test('initial state is loading = false', () {
-      final notifier = AgentNotifier(apiClient: _StubApiClient());
+      final notifier = AgentNotifier(sdkClient: _StubSdkClient());
       expect(notifier.state.isLoading, isFalse);
     });
 
     test('loadAgents sets loading to true then false on success', () async {
-      final notifier = AgentNotifier(apiClient: _StubApiClient());
+      final notifier = AgentNotifier(sdkClient: _StubSdkClient());
       expect(notifier.state.isLoading, isFalse);
 
       notifier.loadAgents();
@@ -194,7 +198,7 @@ void main() {
     });
 
     test('loadAgents populates agents list on success', () async {
-      final notifier = AgentNotifier(apiClient: _StubApiClient());
+      final notifier = AgentNotifier(sdkClient: _StubSdkClient());
       notifier.loadAgents();
       await Future.delayed(const Duration(milliseconds: 100));
 
@@ -205,7 +209,7 @@ void main() {
     });
 
     test('loadAgents clears error on success', () async {
-      final notifier = AgentNotifier(apiClient: _StubApiClient());
+      final notifier = AgentNotifier(sdkClient: _StubSdkClient());
       notifier.loadAgents();
       await Future.delayed(const Duration(milliseconds: 100));
 
@@ -213,7 +217,7 @@ void main() {
     });
 
     test('loadAgents sets error on failure', () async {
-      final notifier = AgentNotifier(apiClient: _FailingApiClient());
+      final notifier = AgentNotifier(sdkClient: _FailingSdkClient());
       notifier.loadAgents();
       await Future.delayed(const Duration(milliseconds: 100));
 
@@ -223,8 +227,8 @@ void main() {
     });
 
     test('loadAgents sets error message from exception', () async {
-      final client = _FailingApiClient();
-      final notifier = AgentNotifier(apiClient: client);
+      final client = _FailingSdkClient();
+      final notifier = AgentNotifier(sdkClient: client);
       notifier.loadAgents();
       await Future.delayed(const Duration(milliseconds: 100));
 
@@ -234,7 +238,7 @@ void main() {
     test('loadAgents does not overwrite non-null error if already set', () {
       // The notifier starts with no error. After loadAgents() succeeds,
       // the error should be null since we set error: null in the first setState.
-      final notifier = AgentNotifier(apiClient: _StubApiClient());
+      final notifier = AgentNotifier(sdkClient: _StubSdkClient());
       notifier.loadAgents();
       // Even during loading, error is cleared immediately
     });
@@ -242,8 +246,8 @@ void main() {
     // ===== Edge cases =====
 
     test('loadAgents with empty agents list from API', () async {
-      final client = _EmptyAgentsApiClient();
-      final notifier = AgentNotifier(apiClient: client);
+      final client = _EmptyAgentsSdkClient();
+      final notifier = AgentNotifier(sdkClient: client);
       notifier.loadAgents();
       await Future.delayed(const Duration(milliseconds: 100));
 
@@ -254,8 +258,8 @@ void main() {
 
     test('loadAgents populates correctly when API returns agents with null id',
         () async {
-      final client = _NullIdAgentApiClient();
-      final notifier = AgentNotifier(apiClient: client);
+      final client = _NullIdAgentSdkClient();
+      final notifier = AgentNotifier(sdkClient: client);
       notifier.loadAgents();
       await Future.delayed(const Duration(milliseconds: 100));
 

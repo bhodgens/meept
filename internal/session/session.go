@@ -595,8 +595,8 @@ func (s *MemoryStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 
 	// Create new session
 	now := time.Now().UTC()
-	newID := fmt.Sprintf("session-%d", now.UnixNano())
-	newConvID := fmt.Sprintf("conv-%d", now.UnixNano())
+	newID := sid.Generate("session-")
+	newConvID := sid.Generate("conv-")
 	if newName == "" {
 		newName = "fork of " + source.Name
 	}
@@ -689,7 +689,7 @@ func (s *MemoryStore) GetCompactionEntries(sessionID string) ([]CompactionEntry,
 			Timestamp: msg.Timestamp,
 		}
 		var content CompactionContent
-		if err := json.Unmarshal([]byte(msg.Content), &content); err == nil {
+		if err := json.Unmarshal([]byte(msg.Content), &content); err == nil { //nolint:mutexio // unmarshal of in-memory msg.Content under RLock
 			entry.CompressedIDs = content.CompressedIDs
 		}
 		entries = append(entries, entry)

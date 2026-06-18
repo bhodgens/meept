@@ -116,17 +116,17 @@ class _ConnectionDot extends ConsumerWidget {
         ),
       if (summary != null) const PopupMenuDivider(),
       if (connected)
-        PopupMenuItem<String>(
+        const PopupMenuItem<String>(
           value: 'details',
           child: Text('details'),
         ),
       if (connected)
-        PopupMenuItem<String>(
+        const PopupMenuItem<String>(
           value: 'disconnect',
           child: Text('disconnect'),
         ),
       if (!connected)
-        PopupMenuItem<String>(
+        const PopupMenuItem<String>(
           value: 'reconnect',
           child: Text('reconnect'),
         ),

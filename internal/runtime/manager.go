@@ -88,7 +88,7 @@ func (m *ContainerManager) Close() error {
 
 	var lastErr error
 	for name, backend := range m.backends {
-		if err := backend.Close(); err != nil {
+		if err := backend.Close(); err != nil { //nolint:mutexio // one-time teardown guarded by closed flag
 			lastErr = err
 			m.logger.Warn("error closing backend", "backend", name, "error", err)
 		}

@@ -203,7 +203,9 @@ func (c *Collector) subscribeToBus() {
 	// Subscribe to metrics topic and process messages in a goroutine
 	sub := c.bus.Subscribe("metrics-collector", "metrics")
 	c.subs = append(c.subs, sub)
+	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
 		for msg := range sub.Channel {
 			c.handleBusMessage(msg)
 		}
@@ -212,7 +214,9 @@ func (c *Collector) subscribeToBus() {
 	// Subscribe to review events for review metrics
 	reviewSub := c.bus.Subscribe("metrics-collector-review", "step.*")
 	c.subs = append(c.subs, reviewSub)
+	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
 		for msg := range reviewSub.Channel {
 			c.handleBusMessage(msg)
 		}
@@ -497,12 +501,14 @@ func (c *Collector) Shutdown() {
 	default:
 		close(c.stopChan)
 	}
-	c.wg.Wait()
 
-	// Clean up bus subscriptions to stop goroutines
+	// Clean up bus subscriptions first so the subscriber goroutines' range
+	// loops exit, then wait for all goroutines (collection + subscribers) to
+	// finish.
 	for _, sub := range c.subs {
 		c.bus.Unsubscribe(sub)
 	}
+	c.wg.Wait()
 }
 
 // AgentTaskMetrics represents metrics for a single agent task execution.

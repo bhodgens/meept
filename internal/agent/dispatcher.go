@@ -181,6 +181,13 @@ type Dispatcher struct {
 	router            *ReportRouter
 	modelParser       *ModelReassignmentParser
 	planManager       *plan.PlanManager
+
+	// Lifecycle management for background goroutines spawned by NewDispatcher.
+	// indexCtx is cancelled by Stop(); indexWG tracks the BuildIndex goroutine
+	// so Stop can confirm it has exited before returning.
+	indexCtx    context.Context
+	indexCancel context.CancelFunc
+	indexWG     sync.WaitGroup
 }
 
 // IntentClassifier is an interface for classifying intents.
@@ -259,10 +266,17 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 	// Initialize semantic index if embedding client is provided
 	if cfg.EmbeddingClient != nil {
 		d.semanticIndex = NewSemanticIndex(cfg.EmbeddingClient)
-		// Build index in background
+		// Tie the background BuildIndex goroutine to a cancellable context so
+		// Stop() can interrupt it at shutdown; track via WaitGroup so callers
+		// can confirm exit.
+		d.indexCtx, d.indexCancel = context.WithCancel(context.Background())
+		d.indexWG.Add(1)
 		go func() { //nolint:gosec // background goroutine outlives request context
-			if err := d.semanticIndex.BuildIndex(context.Background()); err != nil {
-				d.logger.Warn("Failed to build semantic index", "error", err)
+			defer d.indexWG.Done()
+			if err := d.semanticIndex.BuildIndex(d.indexCtx); err != nil {
+				if d.indexCtx.Err() == nil {
+					d.logger.Warn("Failed to build semantic index", "error", err)
+				}
 			}
 		}()
 	}
@@ -289,6 +303,25 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 	})
 
 	return d
+}
+
+// Stop gracefully shuts down background goroutines spawned by NewDispatcher
+// (currently the semantic-index BuildIndex goroutine). It is safe to call
+// multiple times: a second call is a no-op once indexCancel has fired.
+//
+// Callers that construct a Dispatcher with an EmbeddingClient should defer
+// Stop() so the BuildIndex goroutine does not outlive the dispatcher in
+// tests or short-lived processes. Long-lived daemons can rely on process
+// exit, but wiring Stop into the daemon shutdown path is recommended.
+//
+// TODO: wire Stop() into Components.Stop() in internal/daemon/components.go
+// for a fully clean shutdown. Today the dispatcher lives for the daemon
+// lifetime so the leak is benign, but adding the call closes the gap.
+func (d *Dispatcher) Stop() {
+	if d.indexCancel != nil {
+		d.indexCancel()
+	}
+	d.indexWG.Wait()
 }
 
 // ClassifyAndRoute is the main entry point for the dispatcher.

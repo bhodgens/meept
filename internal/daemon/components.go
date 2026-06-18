@@ -2229,6 +2229,13 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		}
 	}
 
+	// Stop dispatcher background goroutines (e.g. semantic index BuildIndex).
+	// Safe to call even when no EmbeddingClient was configured.
+	if c.Dispatcher != nil {
+		c.Dispatcher.Stop()
+		c.Logger.Info("Dispatcher stopped")
+	}
+
 	// Close stores
 	if c.TaskRegistry != nil {
 		if err := c.TaskRegistry.Close(); err != nil {
@@ -4063,7 +4070,7 @@ func (h *StatusHandler) handleStatusRequest(msg *models.BusMessage) {
 	payload, _ := json.Marshal(response)
 
 	respMsg := &models.BusMessage{
-		ID:        time.Now().Format("20060102150405.000000000"),
+		ID:        id.Generate("status-resp-"),
 		Type:      models.MessageTypeResponse,
 		Topic:     "status.response",
 		Source:    "status-handler",

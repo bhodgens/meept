@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -122,7 +123,8 @@ type ContextCompressor struct {
 	config     CompressionConfig
 	stats      CompressionStats
 	summarizer Chatter           // Optional: when set, enables LLM-based summarization at stage 2
-	compactor  *ContextCompactor // Optional: preferred over summarizer when set
+	compactorMu sync.RWMutex
+	compactor  *ContextCompactor // Optional: preferred over summarizer when set; protected by compactorMu
 	logger     *slog.Logger
 	tokenizer  Tokenizer
 }
@@ -380,8 +382,12 @@ func (c *ContextCompressor) buildQualityMetrics(before, after []ChatMessage, tok
 // messages. When a compactor is available, it uses it for smart summarization.
 // Falls back to LLM summarizer, then to tail-keep truncation.
 func (c *ContextCompressor) summarizeOldHistory(ctx context.Context, messages []ChatMessage) []ChatMessage {
-	if c.compactor != nil {
-		result := c.compactor.Compact(ctx, messages)
+	c.compactorMu.RLock()
+	compactor := c.compactor
+	c.compactorMu.RUnlock()
+
+	if compactor != nil {
+		result := compactor.Compact(ctx, messages)
 		if result.Compacted {
 			return result.Messages
 		}
@@ -401,7 +407,9 @@ func (c *ContextCompressor) summarizeOldHistory(ctx context.Context, messages []
 // SetCompactor sets the ContextCompactor for smart summarization.
 func (c *ContextCompressor) SetCompactor(compactor *ContextCompactor) {
 	if compactor != nil {
+		c.compactorMu.Lock()
 		c.compactor = compactor
+		c.compactorMu.Unlock()
 	}
 }
 
@@ -457,8 +465,12 @@ func (c *ContextCompressor) summarizeWithLLM(ctx context.Context, messages []Cha
 // plus the last 4 non-system messages. It first attempts smart compaction
 // before falling back to keepTail truncation.
 func (c *ContextCompressor) aggressiveCompress(ctx context.Context, messages []ChatMessage) []ChatMessage {
-	if c.compactor != nil {
-		result := c.compactor.Compact(ctx, messages)
+	c.compactorMu.RLock()
+	compactor := c.compactor
+	c.compactorMu.RUnlock()
+
+	if compactor != nil {
+		result := compactor.Compact(ctx, messages)
 		if result.Compacted {
 			return result.Messages
 		}

@@ -326,6 +326,12 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 		// Wait for context cancellation (client disconnect)
 		<-subCtx.Done()
 
+		// Unsubscribe the combined subscriber (tui.sub.<subID>)
+		if sub.Subscriber != nil {
+			p.bus.Unsubscribe(sub.Subscriber)
+			sub.Subscriber = nil
+		}
+
 		// Unsubscribe all topic subscriptions
 		sub.mu.Lock()
 		for _, ts := range sub.TopicSubs {
@@ -376,7 +382,7 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 					// Parse payload
 					if msg.Payload != nil {
 						var payload any
-						if err := json.Unmarshal(msg.Payload, &payload); err == nil {
+						if err := json.Unmarshal(msg.Payload, &payload); err == nil { //nolint:mutexio // unmarshal into local; mutex guards sub.Events append
 							event.Payload = payload
 						}
 					}

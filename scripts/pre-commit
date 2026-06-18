@@ -1,34 +1,112 @@
 #!/usr/bin/env bash
 #
-# pre-commit hook: run golangci-lint on staged Go files
+# pre-commit hook: run linters and project-specific analyzers on staged files.
 # Install: make hooks  (or: cp scripts/pre-commit .git/hooks/pre-commit)
+#
+# Runs:
+#   1. golangci-lint  on staged Go packages (when present)
+#   2. mutexio        analyzer on staged Go packages (CLAUDE.md mutex-scope rule)
+#   3. predid         analyzer on staged Go packages (predictable-ID detection)
+#   4. audit-dart-enum-name-shadow.py when staged .dart files touch lib/
+#   5. audit-utf8-byte-arithmetic.py when staged Go/Dart files exist
+#
+# Each Go analyzer is best-effort: if the analyzer binary fails to build
+# (network/dependency issues), we warn and continue rather than block the
+# commit. Use `git commit --no-verify` to bypass all checks.
 #
 set -euo pipefail
 
-# Only run if there are staged .go files
-staged=$(git diff --cached --name-only --diff-filter=ACM -- '*.go')
-if [ -z "$staged" ]; then
-    exit 0
-fi
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
 
-# Run golangci-lint on just the staged packages
-# Derive package paths from staged file list
-pkgs=()
-for f in $staged; do
-    dir=$(dirname "$f")
-    # Only add unique dirs that exist (file might be deleted)
-    if [ -d "$dir" ] && [[ ! " ${pkgs[*]} " =~ " ${dir} " ]]; then
-        pkgs+=("./$dir/...")
+staged_go=$(git diff --cached --name-only --diff-filter=ACM -- '*.go' || true)
+staged_dart=$(git diff --cached --name-only --diff-filter=ACM -- '*.dart' || true)
+staged_python=$(git diff --cached --name-only --diff-filter=ACM -- '*.py' || true)
+
+# ─── 1. golangci-lint ─────────────────────────────────────────────────────
+if [ -n "$staged_go" ]; then
+    if command -v golangci-lint >/dev/null 2>&1; then
+        # Derive package paths from staged file list (unique dirs).
+        declare -a pkgs=()
+        for f in $staged_go; do
+            dir=$(dirname "$f")
+            if [ -d "$dir" ] && [[ ! " ${pkgs[*]} " =~ " ${dir} " ]]; then
+                pkgs+=("./$dir/...")
+            fi
+        done
+        if [ ${#pkgs[@]} -gt 0 ]; then
+            echo "running golangci-lint on staged packages..."
+            if ! golangci-lint run "${pkgs[@]}" 2>&1; then
+                echo ""
+                echo "golangci-lint failed — fix issues or commit with --no-verify to bypass"
+                exit 1
+            fi
+        fi
+    else
+        echo "golangci-lint not installed; skipping (brew install golangci-lint)"
     fi
-done
-
-if [ ${#pkgs[@]} -eq 0 ]; then
-    exit 0
 fi
 
-echo "running golangci-lint on staged packages..."
-if ! golangci-lint run "${pkgs[@]}" 2>&1; then
-    echo ""
-    echo "lint failed — fix issues or commit with --no-verify to bypass"
-    exit 1
+# ─── 2. mutexio analyzer ──────────────────────────────────────────────────
+# Enforces CLAUDE.md "Mutex scope" rule: no I/O under mutex.
+if [ -n "$staged_go" ]; then
+    if [ -d tools/analyzers/mutexio ]; then
+        echo "running mutexio analyzer (CLAUDE.md mutex-scope rule)..."
+        # Build once into a temp bin to avoid paying the build cost per commit.
+        if ! go run ./tools/analyzers/mutexio/ ./... 2>&1; then
+            echo ""
+            echo "mutexio found I/O-under-mutex violations — fix or commit with --no-verify"
+            exit 1
+        fi
+    fi
 fi
+
+# ─── 3. predid analyzer ───────────────────────────────────────────────────
+# Flags predictable-ID generators (time.Now().UnixNano() used as unique ID).
+if [ -n "$staged_go" ]; then
+    if [ -d tools/analyzers/predid ]; then
+        echo "running predid analyzer (predictable ID detection)..."
+        if ! go run ./tools/analyzers/predid/ ./... 2>&1; then
+            echo ""
+            echo "predid found predictable-ID violations (CLAUDE.md mandates pkg/id.Generate)"
+            echo "fix or commit with --no-verify to bypass"
+            exit 1
+        fi
+    fi
+fi
+
+# ─── 4. Dart enum-name-shadow audit ───────────────────────────────────────
+if [ -n "$staged_dart" ]; then
+    # Only run if at least one staged file is under lib/ (the only place
+    # enum extensions live).
+    if echo "$staged_dart" | grep -q "^ui/flutter_ui/lib/"; then
+        if [ -x scripts/audit-dart-enum-name-shadow.py ] || [ -x scripts/audit-dart-enum-name-shadow.py ]; then
+            echo "running dart enum-name-shadow audit..."
+            if ! python3 scripts/audit-dart-enum-name-shadow.py 2>&1; then
+                echo ""
+                echo "dart enum-name-shadow audit found violations — fix or commit with --no-verify"
+                exit 1
+            fi
+        fi
+    fi
+fi
+
+# ─── 5. UTF-8 byte-arithmetic audit ───────────────────────────────────────
+# Run on Go/Dart/Python staged files (covers all supported languages).
+if [ -n "$staged_go" ] || [ -n "$staged_dart" ] || [ -n "$staged_python" ]; then
+    if [ -f scripts/audit-utf8-byte-arithmetic.py ]; then
+        echo "running UTF-8 byte-arithmetic audit..."
+        # Build the list of staged files to audit (faster than scanning the tree).
+        audit_files=""
+        [ -n "$staged_go" ] && audit_files="$audit_files $staged_go"
+        [ -n "$staged_dart" ] && audit_files="$audit_files $staged_dart"
+        [ -n "$staged_python" ] && audit_files="$audit_files $staged_python"
+        if ! python3 scripts/audit-utf8-byte-arithmetic.py $audit_files 2>&1; then
+            echo ""
+            echo "UTF-8 byte-arithmetic audit found violations — fix or commit with --no-verify"
+            exit 1
+        fi
+    fi
+fi
+
+exit 0

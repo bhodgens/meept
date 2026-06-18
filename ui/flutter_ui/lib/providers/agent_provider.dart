@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
-import '../services/api_client.dart';
+import '../services/sdk_client.dart';
 import 'providers.dart';
 
 const _unset = Object();
@@ -32,15 +32,20 @@ class AgentState {
 
 /// StateNotifier that manages agent loading from the daemon
 class AgentNotifier extends StateNotifier<AgentState> {
-  AgentNotifier({required this.apiClient}) : super(const AgentState());
+  AgentNotifier({required this.sdkClient}) : super(const AgentState());
 
-  final ApiClient apiClient;
+  final SdkApiClient sdkClient;
 
   /// Fetch all agents from the daemon configuration
   Future<void> loadAgents() async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      final agents = await apiClient.listAgents();
+      // SdkApiClient.listAgents returns the raw `agents` array — callers
+      // are responsible for deserializing each entry via Agent.fromJson
+      // because the OpenAPI spec leaves the Session entity untyped.
+      final rawAgents = await sdkClient.listAgents();
+      final agents =
+          rawAgents.map((a) => Agent.fromJson(a)).toList(growable: false);
       state = state.copyWith(agents: agents, isLoading: false);
     } catch (e) {
       state = state.copyWith(
@@ -54,6 +59,6 @@ class AgentNotifier extends StateNotifier<AgentState> {
 /// Agent state provider
 final agentProvider =
     StateNotifierProvider<AgentNotifier, AgentState>((ref) {
-  final client = ref.watch(apiClientProvider);
-  return AgentNotifier(apiClient: client);
+  final client = ref.watch(sdkClientProvider);
+  return AgentNotifier(sdkClient: client);
 });
