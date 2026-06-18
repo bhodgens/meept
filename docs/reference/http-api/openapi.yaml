@@ -2007,6 +2007,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusStatsResponse'
         '400':
           description: Bad request
         '401':
@@ -2041,6 +2045,12 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CacheInspectResult'
         '400':
           description: Bad request
         '401':
@@ -2075,6 +2085,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheStatsResponse'
         '400':
           description: Bad request
         '401':
@@ -2092,6 +2106,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalendarEvent'
         '400':
           description: Bad request
         '401':
@@ -2107,6 +2125,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListEventsResponse'
         '400':
           description: Bad request
         '401':
@@ -2139,6 +2161,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalendarEvent'
         '400':
           description: Bad request
         '401':
@@ -2154,6 +2180,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalendarEvent'
         '400':
           description: Bad request
         '401':
@@ -2171,6 +2201,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalendarEvent'
         '400':
           description: Bad request
         '401':
@@ -2188,6 +2222,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListEventsResponse'
         '400':
           description: Bad request
         '401':
@@ -2205,6 +2243,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListEventsResponse'
         '400':
           description: Bad request
         '401':
@@ -2222,6 +2264,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
         '400':
           description: Bad request
         '401':
@@ -2501,6 +2547,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DaemonStatus'
         '400':
           description: Bad request
         '401':
@@ -2569,6 +2619,20 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  memories:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MemoryResult'
+                  count:
+                    type: integer
+                required:
+                  - memories
+                  - count
         '400':
           description: Bad request
         '401':
@@ -2586,6 +2650,20 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  memories:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MemoryResult'
+                  count:
+                    type: integer
+                required:
+                  - memories
+                  - count
         '400':
           description: Bad request
         '401':
@@ -2603,6 +2681,17 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/VectorSearchResult'
+                required:
+                  - results
         '400':
           description: Bad request
         '401':
@@ -2620,6 +2709,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VectorStats'
         '400':
           description: Bad request
         '401':
@@ -2756,6 +2849,20 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ModelInfo'
+                  count:
+                    type: integer
+                required:
+                  - models
+                  - count
         '400':
           description: Bad request
         '401':
@@ -2820,6 +2927,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelInfo'
         '400':
           description: Bad request
         '401':
@@ -2852,6 +2963,20 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  providers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProviderInfo'
+                  count:
+                    type: integer
+                required:
+                  - providers
+                  - count
         '400':
           description: Bad request
         '401':
@@ -3286,6 +3411,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueStatusResponse'
         '400':
           description: Bad request
         '401':
@@ -3303,6 +3432,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueStatusResponse'
         '400':
           description: Bad request
         '401':
@@ -3371,6 +3504,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeStatusResponse'
         '400':
           description: Bad request
         '401':
@@ -3388,6 +3525,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeStatusResponse'
         '400':
           description: Bad request
         '401':
@@ -3522,6 +3663,20 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SearchResult'
+                  count:
+                    type: integer
+                required:
+                  - results
+                  - count
         '400':
           description: Bad request
         '401':
@@ -3539,6 +3694,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckResponse'
         '400':
           description: Bad request
         '401':
@@ -3909,6 +4068,20 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  skills:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SkillInfo'
+                  count:
+                    type: integer
+                required:
+                  - skills
+                  - count
         '400':
           description: Bad request
         '401':
@@ -3926,6 +4099,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillInfo'
         '400':
           description: Bad request
         '401':
@@ -3943,6 +4120,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecuteResult'
         '400':
           description: Bad request
         '401':
@@ -3960,6 +4141,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillUIDescriptor'
         '400':
           description: Bad request
         '401':
@@ -4107,6 +4292,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecuteResult'
         '400':
           description: Bad request
         '401':
@@ -4124,6 +4313,20 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  history:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CommandHistory'
+                  count:
+                    type: integer
+                required:
+                  - history
+                  - count
         '400':
           description: Bad request
         '401':
@@ -4141,6 +4344,12 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TerminalSession'
         '400':
           description: Bad request
         '401':
@@ -4192,6 +4401,10 @@ paths:
       responses:
         '200':
           description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerStatsResponse'
         '400':
           description: Bad request
         '401':

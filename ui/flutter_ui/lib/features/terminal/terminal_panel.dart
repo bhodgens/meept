@@ -33,8 +33,8 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
   Future<void> _loadHistory() async {
     setState(() => _isLoading = true);
     try {
-      final client = ref.read(apiClientProvider);
-      final data = await client.getTerminalHistory();
+      final client = ref.read(sdkClientProvider);
+      final data = await client.getTerminalHistoryRaw();
       final historyData = data['history'] as List? ?? [];
       if (mounted) {
         setState(() {
@@ -63,8 +63,8 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
 
     setState(() => _isExecuting = true);
     try {
-      final client = ref.read(apiClientProvider);
-      final result = await client.executeCommand(cmd);
+      final client = ref.read(sdkClientProvider);
+      final result = await client.executeCommandRaw(cmd);
 
       if (mounted) {
         _commandController.clear();
@@ -99,7 +99,7 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
 
   Future<void> _clearHistory() async {
     try {
-      final client = ref.read(apiClientProvider);
+      final client = ref.read(sdkClientProvider);
       await client.clearTerminalHistory();
       if (mounted) {
         _loadHistory();

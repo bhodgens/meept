@@ -7,7 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../models/api_models.dart';
-import '../../services/api_client.dart';
+import '../../services/sdk_client.dart';
 import '../../providers/providers.dart';
 
 /// SearchPanel provides full-text search across sessions, tasks, memories, and plans.
@@ -24,7 +24,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
   final _searchController = TextEditingController();
   final _debouncer = _Debouncer(delay: const Duration(milliseconds: 300));
 
-  late final ApiClient _apiClient;
+  late final SdkApiClient _sdkClient;
   late final VoidCallback _searchListener;
   late final FocusNode _keyboardFocusNode;
 
@@ -38,7 +38,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
   @override
   void initState() {
     super.initState();
-    _apiClient = ref.read(apiClientProvider);
+    _sdkClient = ref.read(sdkClientProvider);
     _keyboardFocusNode = FocusNode();
     _searchListener = () {
       final hasText = _searchController.text.isNotEmpty;
@@ -75,7 +75,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
     });
 
     try {
-      final searchResults = await _apiClient.search(
+      final searchResults = await _sdkClient.searchWithScope(
         query: query,
         scope: _scope,
       );
@@ -88,7 +88,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
         _isSearching = false;
         _results = parsed;
       });
-    } on ApiClientException catch (e) {
+    } on SdkApiException catch (e) {
       if (!mounted) return;
       setState(() {
         _isSearching = false;

@@ -28,6 +28,7 @@ package mutexio
 import (
 	"go/ast"
 	"go/token"
+	"go/types"
 	"strconv"
 	"strings"
 
@@ -35,6 +36,39 @@ import (
 	"golang.org/x/tools/go/analysis/passes/inspect"
 	"golang.org/x/tools/go/ast/inspector"
 )
+
+// atomicMethods are method names that are part of the sync/atomic API.
+// When called on an atomic type (atomic.Bool, atomic.Int64, etc.) they
+// are in-memory operations and must not be flagged as I/O.
+var atomicMethods = map[string]bool{
+	"Load":           true,
+	"Store":          true,
+	"Add":            true,
+	"Swap":           true,
+	"CompareAndSwap": true,
+}
+
+// mapLikeMethods are method names that read or mutate in-memory maps.
+// When called on a sync.Map or a project-local map-like type (one whose
+// receiver struct contains a sync.Mutex / sync.RWMutex field) these are
+// not I/O and must not be flagged.
+var mapLikeMethods = map[string]bool{
+	"Load":           true,
+	"LoadOrStore":    true,
+	"LoadAndDelete":  true,
+	"Delete":         true,
+	"Range":          true,
+	"Get":            true,
+	"Len":            true,
+	"Size":           true,
+	"Has":            true,
+	"Contains":       true,
+	"Swap":           true,
+	"CompareAndSwap": true,
+	"Put":            true,
+	"Invalidate":     true,
+	"Set":            true,
+}
 
 const doc = `detect mutex held across I/O operations
 
@@ -286,6 +320,14 @@ func checkRange(pass *analysis.Pass, body *ast.BlockStmt, lockCall, unlockCall *
 				return true
 			}
 		}
+		// Skip false positives: in-memory atomic loads/stores and map
+		// lookups on sync.Map or project-local map-like types. These
+		// share method names with real I/O (Load, Get, etc.) but perform
+		// no I/O. Be conservative — when the receiver type can't be
+		// resolved (e.g., interface) fall through to the existing logic.
+		if isInMemoryMethod(pass, sel) {
+			return true
+		}
 		// Skip deferred calls — they execute at function return, not
 		// while the lock is held (unless the lock itself is deferred,
 		// which is unusual and out of scope).
@@ -326,6 +368,133 @@ func isNoLintMutexIO(ce *ast.CallExpr, nolintLines map[string]bool, fset *token.
 		if nolintLines[startPos.Filename+":"+strconv.Itoa(line)] {
 			return true
 		}
+	}
+	return false
+}
+
+// isInMemoryMethod reports whether the given selector call is an in-memory
+// operation (sync/atomic, sync.Map, or a project-local map-like type) that
+// happens to share its method name with an I/O method and therefore should
+// NOT be flagged by mutexio.
+//
+// Returns false (do not skip) when:
+//   - the receiver type cannot be resolved (e.g., interface, generic type
+//     parameter) — conservative: let the existing logic apply
+//   - the method name is not part of the atomic or map-like vocabulary
+//   - the receiver is a real I/O type (http.Client, os.File, *sql.DB, etc.)
+//
+// Returns true (skip, do not flag) when:
+//   - receiver is a sync/atomic type and method is an atomic op (Load/Store/...)
+//   - receiver is sync.Map and method is a map operation
+//   - receiver is a project-local struct that embeds or declares a
+//     sync.Mutex / sync.RWMutex field, and the method is a map-like operation
+//     (Get/Put/Lookup/Len/Has/etc.). This is how the codebase's concurrent
+//     map wrappers (L1Cache, scheduler.Store, SkillIndex, etc.) are shaped.
+func isInMemoryMethod(pass *analysis.Pass, sel *ast.SelectorExpr) bool {
+	method := sel.Sel.Name
+	if !atomicMethods[method] && !mapLikeMethods[method] {
+		return false
+	}
+	t := pass.TypesInfo.TypeOf(sel.X)
+	if t == nil {
+		return false
+	}
+	// Named type? Check package path + name first — this catches
+	// sync/atomic types and sync.Map regardless of underlying struct.
+	if named, ok := t.(*types.Named); ok {
+		obj := named.Obj()
+		if obj != nil && obj.Pkg() != nil {
+			pkgPath := obj.Pkg().Path()
+			pkgName := obj.Pkg().Name()
+			// sync/atomic.Bool, .Int64, .Int32, .Uint64, .Uint32,
+			// .Uintptr, .Pointer[T], .Value — all in-memory atomics.
+			if pkgPath == "sync/atomic" || pkgName == "atomic" {
+				return atomicMethods[method]
+			}
+			// sync.Map and sync.Map look-alikes in the standard library.
+			if pkgPath == "sync" && obj.Name() == "Map" {
+				return mapLikeMethods[method]
+			}
+		}
+	}
+	// Underlying struct: check for a sync.Mutex / sync.RWMutex field or
+	// embed. This catches project-local concurrent-map types
+	// (L1Cache, scheduler.Store, SkillIndex, etc.) whose Get/Load/Len
+	// methods are in-memory map reads guarded by an internal lock.
+	var structType *types.Struct
+	switch u := t.Underlying().(type) {
+	case *types.Struct:
+		structType = u
+	case *types.Pointer:
+		if s, ok := u.Elem().Underlying().(*types.Struct); ok {
+			structType = s
+		}
+	}
+	if structType == nil {
+		return false
+	}
+	if structHasMutexField(structType) && mapLikeMethods[method] {
+		return true
+	}
+	return false
+}
+
+// structHasMutexField reports whether the given struct type declares or
+// embeds a sync.Mutex, sync.RWMutex, or another struct that does. The check
+// is bounded by a depth counter to prevent infinite recursion through
+// self-referential types.
+func structHasMutexField(s *types.Struct) bool {
+	return structHasMutexFieldDepth(s, 0)
+}
+
+const maxMutexFieldDepth = 4
+
+func structHasMutexFieldDepth(s *types.Struct, depth int) bool {
+	if s == nil || depth > maxMutexFieldDepth {
+		return false
+	}
+	for i := 0; i < s.NumFields(); i++ {
+		f := s.Field(i)
+		if f == nil {
+			continue
+		}
+		if isMutexType(f.Type()) {
+			return true
+		}
+		// Embedded anonymous fields: recurse into them. This also
+		// catches types that embed sync.RWMutex directly.
+		if f.Embedded() {
+			if inner, ok := f.Type().Underlying().(*types.Struct); ok {
+				if structHasMutexFieldDepth(inner, depth+1) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// isMutexType reports whether the given type is sync.Mutex or sync.RWMutex
+// (by package path + type name, not by structural match).
+func isMutexType(t types.Type) bool {
+	ptr, ok := t.(*types.Pointer)
+	if ok {
+		t = ptr.Elem()
+	}
+	named, ok := t.(*types.Named)
+	if !ok {
+		return false
+	}
+	obj := named.Obj()
+	if obj == nil || obj.Pkg() == nil {
+		return false
+	}
+	if obj.Pkg().Path() != "sync" {
+		return false
+	}
+	switch obj.Name() {
+	case "Mutex", "RWMutex":
+		return true
 	}
 	return false
 }

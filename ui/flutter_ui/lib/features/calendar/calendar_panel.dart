@@ -29,9 +29,9 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
   Future<void> _loadEvents() async {
     setState(() => _isLoading = true);
     try {
-      final client = ref.read(apiClientProvider);
+      final client = ref.read(sdkClientProvider);
       // Get today's events
-      final data = await client.getCalendarToday();
+      final data = await client.getCalendarTodayRaw();
       final eventsData = data['events'] as List? ?? [];
       if (mounted) {
         setState(() {
@@ -63,7 +63,7 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
 
   Future<void> _createEvent(String summary, DateTime start, DateTime end, String? description) async {
     try {
-      final client = ref.read(apiClientProvider);
+      final client = ref.read(sdkClientProvider);
       await client.createCalendarEvent(
         summary: summary,
         start: start,

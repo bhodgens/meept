@@ -4,51 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meept_ui/features/chat/chat_input.dart';
 import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/providers/providers.dart';
-import 'package:meept_ui/services/api_client.dart';
 import 'package:meept_ui/services/sdk_client.dart';
 import 'package:meept_ui/services/websocket_service.dart';
 
 // ===== Mock / Stub Classes =====
-
-class _StubApiClient extends ApiClient {
-  _StubApiClient() : super(host: 'localhost', port: 8081);
-
-  @override
-  Future<List<Agent>> listAgents() async {
-    return [];
-  }
-
-  @override
-  Future<T> get<T>(
-    String path, {
-    Map<String, dynamic>? queryParameters,
-  }) async {
-    throw UnimplementedError('not needed');
-  }
-
-  @override
-  Future<T> post<T>(
-    String path, {
-    dynamic data,
-    Map<String, dynamic>? queryParameters,
-  }) async {
-    return null as T;
-  }
-
-  @override
-  Future<T> put<T>(
-    String path, {
-    dynamic data,
-    Map<String, dynamic>? queryParameters,
-  }) async {
-    throw UnimplementedError();
-  }
-
-  @override
-  Future<T> delete<T>(String path) async {
-    throw UnimplementedError();
-  }
-}
 
 /// Stub [SdkApiClient] for tests that need the migrated providers.
 /// Returns an empty agents list so [AgentNotifier.loadAgents] succeeds
@@ -120,9 +79,6 @@ Widget _buildTestApp({
       ),
       activeAgentProvider.overrideWith(
         (_) => activeAgent,
-      ),
-      apiClientProvider.overrideWith(
-        (_) => _StubApiClient(),
       ),
       sdkClientProvider.overrideWith(
         (_) => _StubSdkClient(),

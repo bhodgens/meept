@@ -35,9 +35,9 @@ class _FilesPanelState extends ConsumerState<FilesPanel> {
       _error = null;
     });
     try {
-      final client = ref.read(apiClientProvider);
+      final client = ref.read(sdkClientProvider);
       // Query memory for file-related entries
-      final memories = await client.queryMemory(
+      final memories = await client.queryMemoryRaw(
         query: 'file path read write',
         limit: 50,
         category: 'episodic',

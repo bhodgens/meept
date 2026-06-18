@@ -5,17 +5,17 @@ import 'package:meept_ui/features/sessions/sessions_list.dart';
 import 'package:meept_ui/providers/providers.dart';
 import 'package:meept_ui/services/session_notifier.dart';
 import 'package:meept_ui/models/api_models.dart';
-import 'package:meept_ui/services/api_client.dart';
+import 'package:meept_ui/services/sdk_client.dart';
 
 void main() {
   group('SessionsList widget', () {
     testWidgets('displays loading indicator when loading', (tester) async {
-      final client = _SlowLoadClient();
+      final client = _SlowLoadSdkClient();
 
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            sessionProvider.overrideWith((ref) => SessionNotifier(apiClient: client)),
+            sessionProvider.overrideWith((ref) => SessionNotifier(sdkClient: client)),
           ],
           child: const MaterialApp(
             home: Scaffold(body: SessionsList()),
@@ -24,7 +24,7 @@ void main() {
       );
 
       // initState callback fires after addPostFrameCallback (first pump)
-      // _SlowLoadClient has a 50ms initial delay, so we pump once to trigger load
+      // _SlowLoadSdkClient has a 50ms initial delay, so we pump once to trigger load
       await tester.pump();
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
 
@@ -38,7 +38,7 @@ void main() {
         ProviderScope(
           overrides: [
             sessionProvider.overrideWith(
-                (ref) => SessionNotifier(apiClient: _TestApiClient([]))),
+                (ref) => SessionNotifier(sdkClient: _TestSdkClient([]))),
           ],
           child: const MaterialApp(
             home: Scaffold(body: SessionsList()),
@@ -57,7 +57,7 @@ void main() {
         ProviderScope(
           overrides: [
             sessionProvider.overrideWith((ref) {
-              final notifier = SessionNotifier(apiClient: _TestApiClient(_testSessions));
+              final notifier = SessionNotifier(sdkClient: _TestSdkClient(_testSessions));
               return notifier;
             }),
           ],
@@ -87,7 +87,7 @@ void main() {
         ProviderScope(
           overrides: [
             sessionProvider.overrideWith((ref) {
-              return SessionNotifier(apiClient: _TestApiClient([session]));
+              return SessionNotifier(sdkClient: _TestSdkClient([session]));
             }),
             activeSessionProvider.overrideWith((ref) => null),
           ],
@@ -135,7 +135,7 @@ void main() {
         ProviderScope(
           overrides: [
             sessionProvider.overrideWith(
-                (ref) => SessionNotifier(apiClient: _TestApiClient([]))),
+                (ref) => SessionNotifier(sdkClient: _TestSdkClient([]))),
           ],
           child: const MaterialApp(
             home: Scaffold(body: SessionsList()),
@@ -160,7 +160,7 @@ void main() {
         ProviderScope(
           overrides: [
             sessionProvider.overrideWith((ref) {
-              final notifier = SessionNotifier(apiClient: _TestApiClient([
+              final notifier = SessionNotifier(sdkClient: _TestSdkClient([
                 Session(
                   id: '1',
                   title: 'Delete Me',
@@ -190,14 +190,14 @@ void main() {
 
   group('SessionNotifier', () {
     test('state starts empty', () {
-      final notifier = SessionNotifier(apiClient: _TestApiClient([]));
+      final notifier = SessionNotifier(sdkClient: _TestSdkClient([]));
       expect(notifier.state.sessions, isEmpty);
       expect(notifier.state.isLoading, isFalse);
       expect(notifier.state.error, isNull);
     });
 
     test('loadSessions populates sessions', () async {
-      final notifier = SessionNotifier(apiClient: _TestApiClient(_testSessions));
+      final notifier = SessionNotifier(sdkClient: _TestSdkClient(_testSessions));
       await notifier.loadSessions();
 
       expect(notifier.state.sessions, hasLength(_testSessions.length));
@@ -206,7 +206,7 @@ void main() {
     });
 
     test('loadSessions sets error on failure', () async {
-      final notifier = SessionNotifier(apiClient: _ThrowingClient());
+      final notifier = SessionNotifier(sdkClient: _ThrowingSdkClient());
       await notifier.loadSessions();
 
       expect(notifier.state.sessions, isEmpty);
@@ -215,8 +215,8 @@ void main() {
     });
 
     test('createSession appends new session', () async {
-      final client = _TestApiClient(_testSessions);
-      final notifier = SessionNotifier(apiClient: client);
+      final client = _TestSdkClient(_testSessions);
+      final notifier = SessionNotifier(sdkClient: client);
       await notifier.loadSessions();
 
       final count = notifier.state.sessions.length;
@@ -225,8 +225,8 @@ void main() {
     });
 
     test('deleteSession removes session', () async {
-      final client = _TestApiClient(_testSessions);
-      final notifier = SessionNotifier(apiClient: client);
+      final client = _TestSdkClient(_testSessions);
+      final notifier = SessionNotifier(sdkClient: client);
       await notifier.loadSessions();
 
       final firstId = _testSessions[0].id;
@@ -253,119 +253,62 @@ final _testSessions = [
   ),
 ];
 
-/// Test ApiClient that returns a predefined list of sessions
-class _TestApiClient extends ApiClient {
+/// Test SdkApiClient that returns a predefined list of sessions.
+/// `_sessions` is returned verbatim; `_localSessions` is mutated by
+/// create/delete so the create-then-list flow has deterministic behavior.
+class _TestSdkClient extends SdkApiClient {
   final List<Session> _sessions;
-  final List<Session> _localSessions;
+  final List<Session> _localSessions = [];
 
-  _TestApiClient(this._sessions)
-      : _localSessions = [],
-        super(host: 'localhost', port: 65432);
+  _TestSdkClient(this._sessions) : super(host: 'localhost', port: 65432);
 
   @override
-  Future<List<Session>> listSessions() async {
-    return [..._sessions, ..._localSessions];
+  Future<List<Map<String, dynamic>>> listSessions({int? limit}) async {
+    return [..._sessions, ..._localSessions].map((s) => s.toJson()).toList();
   }
 
   @override
-  Future<Session> createSession({required String title, String? agentId}) async {
-    return Session(
+  Future<Map<String, dynamic>> createSession({
+    required String title,
+    String? agentId,
+  }) async {
+    final session = Session(
       id: 'new-${_localSessions.length + 1}',
       title: title,
       createdAt: DateTime.now(),
     );
+    _localSessions.add(session);
+    return session.toJson();
   }
 
   @override
   Future<void> deleteSession(String id) async {
     _localSessions.removeWhere((s) => s.id == id);
-  }
-
-  @override
-  Future<T> get<T>(String path, {Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> post<T>(String path,
-      {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> put<T>(String path,
-      {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> delete<T>(String path) async {
-    return {} as T;
+    // Also allow deletion from the seed list (tests assert length shrink).
+    // No-op for seed list here because _sessions is final; tests that need
+    // delete-from-seed semantics build a client with the seed and rely on
+    // the notifier filtering locally.
   }
 }
 
-/// Client with a short delay to simulate async load
-class _SlowLoadClient extends ApiClient {
-  _SlowLoadClient() : super(host: 'localhost', port: 65431);
+/// Client with a short delay to simulate async load.
+class _SlowLoadSdkClient extends SdkApiClient {
+  _SlowLoadSdkClient() : super(host: 'localhost', port: 65431);
 
   @override
-  Future<List<Session>> listSessions() async {
+  Future<List<Map<String, dynamic>>> listSessions({int? limit}) async {
     // 50ms delay so loading state is visible
     await Future.delayed(const Duration(milliseconds: 50));
     return [];
   }
-
-  @override
-  Future<T> get<T>(String path, {Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> post<T>(String path,
-      {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> put<T>(String path,
-      {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> delete<T>(String path) async {
-    return {} as T;
-  }
 }
 
-/// Client that throws on listSessions
-class _ThrowingClient extends ApiClient {
-  _ThrowingClient() : super(host: 'localhost', port: 65433);
+/// Client that throws on listSessions.
+class _ThrowingSdkClient extends SdkApiClient {
+  _ThrowingSdkClient() : super(host: 'localhost', port: 65433);
 
   @override
-  Future<List<Session>> listSessions() async {
+  Future<List<Map<String, dynamic>>> listSessions({int? limit}) async {
     throw Exception('connection refused');
-  }
-
-  @override
-  Future<T> get<T>(String path, {Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> post<T>(String path,
-      {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> put<T>(String path,
-      {dynamic data, Map<String, dynamic>? queryParameters}) async {
-    return {} as T;
-  }
-
-  @override
-  Future<T> delete<T>(String path) async {
-    return {} as T;
   }
 }

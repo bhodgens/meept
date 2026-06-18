@@ -93,6 +93,14 @@ else ifeq ($(shell uname -s),Linux)
 else
   GUI_PLATFORM := windows
 endif
+
+# Dev API key for Flutter release builds.
+# The daemon generates a per-installation key at ~/.meept/dev_key.
+# We inject it at build time via --dart-define so the Flutter app can
+# authenticate with the daemon out of the box. If the file doesn't exist,
+# we fall back to the legacy constant in pkg/constants/api_key.go.
+MEEPT_DEV_API_KEY := $(shell cat $(HOME)/.meept/dev_key 2>/dev/null || echo "meept_dev_default_key_CHANGE_ME")
+FLUTTER_DART_DEFINES := --dart-define=MEEPT_DEV_API_KEY=$(MEEPT_DEV_API_KEY)
 # =============================================================================
 # Setup
 # =============================================================================
@@ -304,7 +312,7 @@ devbuild:
 	fi
 ifeq ($(GUI_PLATFORM),macos)
 	@echo "==> Building Flutter GUI (incremental)..."
-	@cd $(FLUTTER_UI_DIR) && flutter build $(GUI_PLATFORM) --release 2>&1 | tail -1
+	@cd $(FLUTTER_UI_DIR) && flutter build $(GUI_PLATFORM) --release $(FLUTTER_DART_DEFINES) 2>&1 | tail -1
 	@echo "==> Installing GUI to ~/Applications..."
 	@mkdir -p ~/Applications
 	@rm -rf ~/Applications/Meept\ Client\ GUI.app
@@ -635,7 +643,7 @@ gui-clean:
 build-gui: gui-deps
 	@mkdir -p $(BIN_DIR)
 	@echo "Building meept-gui for $(GUI_PLATFORM)..."
-	cd $(FLUTTER_UI_DIR) && flutter build $(GUI_PLATFORM) --release
+	cd $(FLUTTER_UI_DIR) && flutter build $(GUI_PLATFORM) --release $(FLUTTER_DART_DEFINES)
 ifeq ($(GUI_PLATFORM),macos)
 	@echo "Setting version $(VERSION) in macOS Info.plist..."
 	@# Inject version into the built app bundle's Info.plist so the
@@ -770,7 +778,7 @@ uninstall-all: uninstall uninstall-gui
 
 SDK_DIR := sdk
 
-.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean sdk-test
+.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean sdk-test check-java-17
 
 # Generate all SDKs from OpenAPI spec
 sdk-generate: sdk-generate-go sdk-generate-dart
@@ -779,8 +787,24 @@ sdk-generate: sdk-generate-go sdk-generate-dart
 	@echo "  Go SDK:  $(SDK_DIR)/go/"
 	@echo "  Dart SDK: $(SDK_DIR)/dart/"
 
+# Verify Java 17+ is available (required by openapi-generator-cli)
+check-java-17:
+	@command -v java >/dev/null 2>&1 || { \
+		echo "Error: Java 17+ required by openapi-generator-cli but 'java' not found."; \
+		echo "Install with 'brew install openjdk@17' (macOS) or your system package manager."; \
+		exit 1; }
+	@JAVA_VERSION=$$(java -version 2>&1 | awk -F[\".] -v RS='\n' '/version/ { \
+		v=$$2; \
+		if (v == "1") { print $$3; exit } \
+		else { print v; exit } }'); \
+	if [ -z "$$JAVA_VERSION" ] || [ "$$JAVA_VERSION" -lt 17 ]; then \
+		echo "Error: Java 17+ required, found major version $$JAVA_VERSION."; \
+		echo "Upgrade with 'brew install openjdk@17' (macOS) or your system package manager."; \
+		exit 1; fi
+	@echo "Java version OK (major version $$JAVA_VERSION)"
+
 # Generate Go SDK
-sdk-generate-go:
+sdk-generate-go: check-java-17
 	@echo "Generating Go SDK..."
 	@mkdir -p $(SDK_DIR)/go
 	@openapi-generator-cli generate \
@@ -792,7 +816,8 @@ sdk-generate-go:
 	@echo "Go SDK generated at $(SDK_DIR)/go/"
 
 # Generate Dart SDK (dart-dio: package:dio based, typed responses)
-sdk-generate-dart:
+# Automatically runs build_runner to regenerate built_value serializers.
+sdk-generate-dart: check-java-17
 	@echo "Generating Dart SDK (dart-dio)..."
 	@mkdir -p $(SDK_DIR)/dart
 	@openapi-generator-cli generate \
@@ -801,6 +826,8 @@ sdk-generate-dart:
 		-o $(SDK_DIR)/dart \
 		--skip-validate-spec \
 		--additional-properties=packageName=meept_client,pubspecVersion=0.3.0,pubName=meept_client,useNullSafety=true,clientName=MeeptClient
+	@cd $(SDK_DIR)/dart && dart pub get
+	@cd $(SDK_DIR)/dart && dart run build_runner build --delete-conflicting-outputs
 	@echo "Dart SDK generated at $(SDK_DIR)/dart/"
 
 # Clean generated SDKs

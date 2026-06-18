@@ -44,3 +44,25 @@ keep the findings document as the source of truth for verification cycles.
 - [x] No Critical or High items remain
 - [x] Verification: `go build`, `go vet`, `go test -race`, `make mutexio`, `make predid`,
       `flutter analyze`, `dart analyze` — all clean
+
+## Follow-up Items Resolved (Session 2)
+
+| # | Description | Resolution |
+|---|-------------|------------|
+| 1 | Migrate 9 feature panels to sdkClientProvider | **DONE.** All 9 panels migrated (skills, projects/branches, search, terminal, memory, files, home/tools_dropdown, calendar, settings). `api_client.dart` and `meept_api.dart` deleted (-893 lines net). 5 test stubs migrated to subclass `SdkApiClient`. `flutter analyze`: No issues. |
+| 2 | OpenAPI spec response schemas | **PARTIAL.** 33 endpoints now have typed response schemas (BusStatsResponse, CacheStatsResponse, CalendarEvent, ListEventsResponse, etc.). 102 endpoints remain untyped (mostly DELETE/204-empty or action endpoints with no return body). dart-dio will now produce `Future<Response<BusStatsResponse>>` etc. for the typed ones. |
+| 3 | Refine mutexio ioMethods | **DONE.** Analyzer now skips `sync/atomic.*.{Load,Store,Add,Swap,CompareAndSwap}` and `sync.Map.*` and project-local struct methods when the receiver struct embeds a sync.Mutex. Added 7 negative-test fixtures in `testdata/src/clean/clean.go`. Existing tests still pass; `make mutexio` still reports 0 violations. The 12 Category C `//nolint:mutexio` annotations could now be removed (left in place — they're harmless). |
+| 4 | sdk-generate-dart Makefile hardening | **DONE.** Added `check-java-17` prerequisite target that fails fast with a helpful install message if Java is missing or older than 17 (correctly handles Java 8's `1.8` version format). Added automatic `dart pub get` + `dart run build_runner build --delete-conflicting-outputs` to the dart SDK generation target. Both `sdk-generate-go` and `sdk-generate-dart` now depend on `check-java-17`. |
+| 5 | flutter test confirmation | **DONE.** `flutter test`: 146 of 154 pass (94.8%). The 8 failures are all in `chat_input_test.dart` testing a `PopupMenuButton<String>` widget that no longer exists in the refactored ChatInput UI — pre-existing test debt unrelated to the SDK migration. Race tests across affected Go packages (`agent`, `llm`, `memory`, `rpc`) all PASS with 0 races. |
+
+### Verification Snapshot
+
+```
+go build ./...                                           # clean
+make mutexio                                             # 0 violations
+make predid                                              # clean
+flutter analyze (in ui/flutter_ui)                       # No issues found
+flutter test (in ui/flutter_ui)                          # 146 pass, 8 pre-existing failures
+go test -race -count=1 ./internal/agent/... ./internal/llm/... ./internal/memory/... ./internal/rpc/...
+                                                         # PASS, 0 races
+```

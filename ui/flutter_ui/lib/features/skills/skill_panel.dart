@@ -67,8 +67,12 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
       _error = null;
     });
     try {
-      final client = ref.read(apiClientProvider);
-      final skills = await client.getSkills();
+      // SdkApiClient.getSkillsRaw returns the raw `skills` array; we
+      // deserialize via the local Skill.fromJson because the local model
+      // carries `tags`/`capabilities` arrays not modeled by sdk.SkillInfo.
+      final client = ref.read(sdkClientProvider);
+      final rawSkills = await client.getSkillsRaw();
+      final skills = rawSkills.map(Skill.fromJson).toList();
       if (mounted) {
         setState(() {
           _skills = skills.where((s) => s.enabled).toList();
@@ -106,8 +110,12 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
 
   Future<void> _loadSkillUi(String slug) async {
     try {
-      final client = ref.read(apiClientProvider);
-      final descriptor = await client.getSkillUi(slug);
+      // SdkApiClient.getSkillUiRaw returns the raw JSON; we deserialize
+      // via the local SkillUiDescriptor.fromJson because the local model
+      // carries a `form_fields` array of SkillFormField objects.
+      final client = ref.read(sdkClientProvider);
+      final raw = await client.getSkillUiRaw(slug);
+      final descriptor = SkillUiDescriptor.fromJson(raw);
       if (mounted) {
         // Pre-populate form controllers from descriptor defaults
         _initFormControllers(descriptor);
@@ -192,12 +200,15 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
     });
 
     try {
-      final client = ref.read(apiClientProvider);
+      // SdkApiClient.executeSkillWithParamsRaw returns the raw JSON; we
+      // deserialize via the local SkillExecuteResult.fromJson.
+      final client = ref.read(sdkClientProvider);
       final params = _collectFormValues();
-      final result = await client.executeSkillWithParams(
+      final raw = await client.executeSkillWithParamsRaw(
         slug: _selectedSkill!.slug,
         params: params,
       );
+      final result = SkillExecuteResult.fromJson(raw);
       if (mounted) {
         setState(() {
           _executeResult = result;

@@ -27,8 +27,12 @@ class _ToolsDropdownState extends ConsumerState<ToolsDropdown> {
 
   Future<void> _loadSkills() async {
     try {
-      final skills = await ref.read(apiClientProvider).getSkills();
+      // SdkApiClient.getSkillsRaw returns the raw `skills` array; we
+      // deserialize via the local Skill.fromJson because the local model
+      // carries `tags`/`capabilities` arrays not modeled by sdk.SkillInfo.
+      final raw = await ref.read(sdkClientProvider).getSkillsRaw();
       if (!mounted) return;
+      final skills = raw.map(Skill.fromJson).toList();
       setState(() {
         _skills = skills.where((s) => s.enabled).toList();
       });

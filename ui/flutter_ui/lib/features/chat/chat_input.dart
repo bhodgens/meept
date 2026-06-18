@@ -19,57 +19,59 @@ class ChatInput extends ConsumerStatefulWidget {
   ConsumerState<ChatInput> createState() => _ChatInputState();
 }
 
-// Custom TextEditingController that renders a blinking terminal cursor
-// (underscore character) at the actual text cursor position, replacing
-// the need for a suffix widget that sits at the far right edge.
+/// TextEditingController that paints a terminal-style underscore cursor
+/// by overriding [buildTextSpan] — the Flutter API for custom text rendering
+/// inside an EditableText.
+///
+/// Unlike overriding the `value` getter (which corrupts the text model),
+/// `buildTextSpan` only changes what pixels the user sees. The actual
+/// text, selection, and composing region in `value` stay untouched.
 class _TerminalCursorController extends TextEditingController {
-  final AnimationController animation;
-  bool _hasFocus = false;
+  bool showCursor = false;
 
-  _TerminalCursorController({
-    required this.animation,
-    String value = '',
-  }) : super(text: value);
-
-  set focus(bool value) => _hasFocus = value;
+  _TerminalCursorController();
 
   @override
-  TextEditingValue get value {
-    final base = super.value;
-    final isSelected = _hasFocus &&
-        base.selection.isValid &&
-        base.selection.start <= base.text.length &&
-        base.selection.end <= base.text.length;
-    final cursorVisible = animation.value > 0.5;
+  TextSpan buildTextSpan({
+    required BuildContext context,
+    TextStyle? style,
+    required bool withComposing,
+  }) {
+    final value = this.value;
 
-    if (!isSelected || !cursorVisible) {
-      return base;
+    if (!showCursor ||
+        !value.selection.isValid ||
+        !value.selection.isCollapsed) {
+      return TextSpan(text: value.text, style: style);
     }
 
-    // Insert the cursor character at the current selection position,
-    // so the visible cursor always sits at the correct spot.
-    final offset = base.selection.end;
-    final before = base.text.substring(0, offset);
-    final after = base.text.substring(offset);
-    final newText = '$before$_cursorChar$after';
-    final newOffset = offset + 1;
+    final offset = value.selection.baseOffset.clamp(0, value.text.length);
+    final before = value.text.substring(0, offset);
+    final after = value.text.substring(offset);
 
-    return base.copyWith(
-      text: newText,
-      selection: TextSelection.collapsed(offset: newOffset),
+    return TextSpan(
+      style: style,
+      children: [
+        TextSpan(text: before),
+        TextSpan(
+          text: '\u2582', // lower quarter block — thick underscore
+          style: style?.copyWith(color: CyberpunkColors.greenSuccess),
+        ),
+        TextSpan(text: after),
+      ],
     );
   }
 
-  // Use a Unicode full block as the terminal cursor.  This avoids
-  // colliding with legitimate underscore characters in user input —
-  // _stripCursor only removes this sentinel, not user underscores.
-  String get _cursorChar => '\u2588';
+  /// Trigger a repaint (called by the blink timer).
+  void refresh() => notifyListeners();
 }
 
-class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProviderStateMixin {
+class _ChatInputState extends ConsumerState<ChatInput>
+    with SingleTickerProviderStateMixin {
   late final _TerminalCursorController _controller;
   final _focusNode = FocusNode();
-  late final AnimationController _cursorController;
+  late final AnimationController _blinkController;
+  bool _cursorVisible = false;
 
   // Paste detection state
   String _previousText = '';
@@ -103,13 +105,18 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
   @override
   void initState() {
     super.initState();
-    _cursorController = AnimationController(
-      duration: const Duration(milliseconds: 600),
+    _blinkController = AnimationController(
+      duration: const Duration(milliseconds: 530),
       vsync: this,
-    )..repeat(reverse: true);
-    _controller = _TerminalCursorController(
-      animation: _cursorController,
-    );
+    )..addStatusListener((status) {
+        final visible = status == AnimationStatus.forward;
+        if (visible != _cursorVisible) {
+          _cursorVisible = visible;
+          _controller.showCursor = visible && _focusNode.hasFocus;
+          _controller.refresh();
+        }
+      });
+    _controller = _TerminalCursorController();
     _controller.addListener(_onTextChanged);
     _focusNode.addListener(_onFocusChange);
     // Auto-focus the input field when the chat tab is first shown
@@ -120,10 +127,14 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
   }
 
   void _onFocusChange() {
-    _controller.focus = _focusNode.hasFocus;
     if (_focusNode.hasFocus) {
-      setState(() {});
+      _blinkController.repeat(reverse: true);
+    } else {
+      _blinkController.stop();
+      _cursorVisible = false;
+      _controller.showCursor = false;
     }
+    setState(() {});
   }
 
   @override
@@ -141,7 +152,7 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
   @override
   void dispose() {
     _enterDebounceTimer?.cancel();
-    _cursorController.dispose();
+    _blinkController.dispose();
     _controller.removeListener(_onTextChanged);
     _controller.dispose();
     _focusNode.dispose();
@@ -149,18 +160,13 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
   }
 
   void _onTextChanged() {
-    final currentText = _stripCursor(_controller.text);
+    final currentText = _controller.text;
     _detectPaste(currentText);
     _detectSlashCommand(currentText);
     _detectFilePaths(currentText);
     _updateGhostText(currentText);
     _previousText = currentText;
   }
-
-  /// Remove the blinking cursor character from display text so
-  /// internal logic (paste detect, slash detect, etc.) never sees it.
-  /// Only removes the sentinel full-block char (\u2588), not user underscores.
-  String _stripCursor(String text) => text.replaceAll('\u2588', '');
 
   /// Update ghost text for single slash command match.
   void _updateGhostText(String text) {
@@ -339,7 +345,7 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
   }
 
   void _sendNormal(String text) {
-    final payload = _preparePayload(_stripCursor(text));
+    final payload = _preparePayload(text);
     if (payload.isEmpty) return;
 
     if (_tryHandleSlashCommand(payload)) {
@@ -360,7 +366,7 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
   }
 
   void _sendSteer(String text) {
-    final payload = _preparePayload(_stripCursor(text));
+    final payload = _preparePayload(text);
     if (payload.isEmpty) return;
 
     ref.read(chatProvider.notifier).sendSteer(
@@ -381,8 +387,7 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
         final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
 
         if (isShiftPressed) {
-          // Work with cursor-free text
-          final cleanText = _stripCursor(_controller.text);
+          final cleanText = _controller.text;
           final baseValue = _controller.value;
           final offset = baseValue.selection.end.clamp(0, cleanText.length);
           final before = cleanText.substring(0, offset);
@@ -413,7 +418,7 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
           if (delta <= _doubleEnterThresholdMs) {
             _enterDebounceTimer?.cancel();
             _lastEnterTime = null;
-            _sendSteer(_stripCursor(_controller.text));
+            _sendSteer(_controller.text);
             return KeyEventResult.handled;
           }
         }
@@ -425,7 +430,7 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
           const Duration(milliseconds: _doubleEnterThresholdMs),
           () {
             _lastEnterTime = null;
-            _sendNormal(_stripCursor(_controller.text));
+            _sendNormal(_controller.text);
           },
         );
         return KeyEventResult.handled;
@@ -495,7 +500,7 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
       (previous, next) {
         if (next) {
           _focusNode.requestFocus();
-          if (_stripCursor(_controller.text).isEmpty) {
+          if (_controller.text.isEmpty) {
             _controller.text = '/';
             _controller.selection = const TextSelection.collapsed(offset: 1);
           }
@@ -547,40 +552,32 @@ class _ChatInputState extends ConsumerState<ChatInput> with SingleTickerProvider
                       ),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Stack(
-                      alignment: Alignment.centerLeft,
-                      children: [
-                        TextField(
-                          controller: _controller,
-                          focusNode: _focusNode,
-                          // Always enabled so users can type/edit during "thinking..." state.
-                          // The send button already disables itself (onTap: null) when loading.
-                          style: CyberpunkTypography.bodyMedium.copyWith(
-                            color: CyberpunkColors.greenSuccess,
-                            fontFamily: 'SourceCodePro',
-                          ),
-                          // Hide the native selection indicator; we render the cursor
-                          // as a character at the real cursor position instead.
-                          cursorColor: Colors.transparent,
-                          cursorWidth: 0,
-                          decoration: const InputDecoration(
-                            hintText: '',
-                            hintStyle: CyberpunkTypography.bodySmall,
-                            border: InputBorder.none,
-                            contentPadding: EdgeInsets.zero,
-                            isDense: true,
-                            // NOTE: No suffix needed — the custom
-                            // _TerminalCursorController renders the
-                            // blinking underscore at the actual
-                            // cursor position.
-                          ),
-                          minLines: _minLines,
-                          maxLines: _maxLines,
-                          keyboardType: TextInputType.multiline,
-                          textCapitalization: TextCapitalization.none,
-                          onSubmitted: (_) {},
-                        ),
-                      ],
+                    child: TextField(
+                      controller: _controller,
+                      focusNode: _focusNode,
+                      // Always enabled so users can type/edit during "thinking..." state.
+                      // The send button already disables itself (onTap: null) when loading.
+                      style: CyberpunkTypography.bodyMedium.copyWith(
+                        color: CyberpunkColors.greenSuccess,
+                        fontFamily: 'SourceCodePro',
+                      ),
+                      // Hide the native bar cursor — the custom
+                      // _TerminalCursorController.buildTextSpan renders
+                      // a terminal-style blinking underscore instead.
+                      cursorColor: Colors.transparent,
+                      cursorWidth: 0,
+                      decoration: const InputDecoration(
+                        hintText: '',
+                        hintStyle: CyberpunkTypography.bodySmall,
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.zero,
+                        isDense: true,
+                      ),
+                      minLines: _minLines,
+                      maxLines: _maxLines,
+                      keyboardType: TextInputType.multiline,
+                      textCapitalization: TextCapitalization.none,
+                      onSubmitted: (_) {},
                     ),
                   ),
                 ),

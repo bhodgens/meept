@@ -11,7 +11,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/api_client.dart';
 import '../services/sdk_client.dart';
 import '../services/websocket_service.dart';
 import '../services/storage_service.dart';
@@ -22,26 +21,10 @@ import '../models/api_models.dart';
 // Storage service — initialized in main() before runApp
 final storageProvider = Provider<StorageService>((ref) => StorageService.instance);
 
-// API Client provider — loads persisted host/port and API key from storage.
-//
-// NOTE: This provider is retained for feature panels that still use the
-// hand-written [ApiClient].  Provider classes (chat/task/agent/metrics/
-// job/plan) have migrated to [sdkClientProvider] and no longer reference
-// this provider.  Do not introduce new usages — prefer [sdkClientProvider].
-final apiClientProvider = Provider<ApiClient>((ref) {
-  final storage = ref.watch(storageProvider);
-  final client = ApiClient.storage(storage: storage);
-  ref.onDispose(() => client.dispose());
-  return client;
-});
-
 // SDK Client provider — wraps the OpenAPI-generated Dart SDK.
 //
-// Loads the same persisted host/port/API key as [apiClientProvider] so the
-// two are interchangeable at the transport layer.  Migrated providers should
-// depend on this provider; feature panels that still call hand-written
-// endpoint shims may continue to use [apiClientProvider] until they are
-// ported to [SdkApiClient].
+// Loads persisted host/port/API key from storage. All feature panels and
+// provider classes route through this provider.
 final sdkClientProvider = Provider<SdkApiClient>((ref) {
   final storage = ref.watch(storageProvider);
   final client = SdkApiClient.storage(storage: storage);
@@ -60,8 +43,8 @@ final websocketProvider = Provider<WebSocketService>((ref) {
 // Session state provider (StateNotifier for CRUD + selection)
 final sessionProvider =
     StateNotifierProvider<SessionNotifier, SessionState>((ref) {
-  final client = ref.watch(apiClientProvider);
-  return SessionNotifier(apiClient: client);
+  final client = ref.watch(sdkClientProvider);
+  return SessionNotifier(sdkClient: client);
 });
 
 // Active session state
@@ -77,9 +60,10 @@ final activeProjectProvider = StateProvider<Project?>((ref) => null);
 final resolveActiveProjectProvider = FutureProvider<Project?>((ref) async {
   final explicit = ref.watch(activeProjectProvider);
   if (explicit != null) return explicit;
-  final client = ref.watch(apiClientProvider);
+  final client = ref.watch(sdkClientProvider);
   try {
-    final projects = await client.listProjects();
+    final rawProjects = await client.listProjects();
+    final projects = rawProjects.map(Project.fromJson).toList();
     final active = projects.where((p) => p.status == 'active').toList();
     return active.isEmpty ? null : active.first;
   } catch (e) {
@@ -231,8 +215,8 @@ class ConnectionDetailsNotifier extends StateNotifier<ConnectionDetails?> {
       final fp = DaemonCertPinner.currentFingerprint;
 
       try {
-        final client = _ref.read(apiClientProvider);
-        final status = await client.getDaemonStatus();
+        final client = _ref.read(sdkClientProvider);
+        final status = await client.getDaemonStatusRaw();
         final dState = status['state'] as String? ?? 'unknown';
         final pid = status['pid'] as int?;
         final uptime = status['uptime'] as String?;
@@ -287,12 +271,12 @@ class ConnectionDetailsNotifier extends StateNotifier<ConnectionDetails?> {
 // ConnectionMonitor provider - manages WebSocket health monitoring
 final connectionMonitorProvider = Provider<ConnectionMonitor>((ref) {
   final websocket = ref.watch(websocketProvider);
-  final apiClient = ref.watch(apiClientProvider);
+  final sdkClient = ref.watch(sdkClientProvider);
   final container = ref.container;
 
   final monitor = ConnectionMonitor(
     websocket: websocket,
-    apiClient: apiClient,
+    sdkClient: sdkClient,
     container: container,
   );
 
@@ -303,7 +287,7 @@ final connectionMonitorProvider = Provider<ConnectionMonitor>((ref) {
 /// Monitors WebSocket + HTTP health and updates connectionStateProvider.
 class ConnectionMonitor {
   final WebSocketService _websocket;
-  final ApiClient _apiClient;
+  final SdkApiClient _sdkClient;
   final ProviderContainer _container;
   Timer? _timer;
   Timer? _debounceTimer;
@@ -315,10 +299,10 @@ class ConnectionMonitor {
 
   ConnectionMonitor({
     required WebSocketService websocket,
-    required ApiClient apiClient,
+    required SdkApiClient sdkClient,
     required ProviderContainer container,
   })  : _websocket = websocket,
-        _apiClient = apiClient,
+        _sdkClient = sdkClient,
         _container = container {
     _listenToWebSocket();
     _startHealthChecks();
@@ -397,7 +381,7 @@ class ConnectionMonitor {
     _timer = Timer.periodic(const Duration(seconds: 30), (_) async {
       if (!_websocket.isConnected && !_websocket.isConnecting) {
         try {
-          await _apiClient.getDaemonStatus();
+          await _sdkClient.getDaemonStatus();
           _proposeState(true);
         } catch (e) {
           debugPrint('[warn] health check daemon status: $e');

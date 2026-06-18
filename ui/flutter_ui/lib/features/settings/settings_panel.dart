@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_form_builder/flutter_form_builder.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../services/api_client.dart';
+import '../../services/sdk_client.dart';
 import '../../services/storage_service.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
@@ -54,7 +54,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
   String? _apiKeyStatus;
   bool _isUsingDefaultKey = false;
 
-  late final ApiClient _client;
+  late final SdkApiClient _client;
   late final TextEditingController _configController;
 
   final Map<String, String> _configLabels = {
@@ -66,7 +66,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
   @override
   void initState() {
     super.initState();
-    _client = ref.read(apiClientProvider);
+    _client = ref.read(sdkClientProvider);
     _configController = TextEditingController(text: _configContent);
     _loadApiKey();
     _loadConfig();

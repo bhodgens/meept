@@ -10,11 +10,10 @@ import 'package:meept_ui/models/api_models.dart';
 
 /// SDK-backed client pointed at a closed port so network calls fail fast.
 ///
-/// Pre-SDK, the test suite stubbed [ApiClient.get] by overriding the generic
-/// transport method. [SdkApiClient] uses private `_get`/`_post` helpers that
-/// cannot be overridden by subclasses; instead, the notifier's happy-path
-/// behavior is covered by integration tests and the unit tests here exercise
-/// the error + lifecycle paths against a real (failing) client.
+/// [SdkApiClient] uses private `_get`/`_post` helpers that cannot be overridden
+/// by subclasses; instead, the notifier's happy-path behavior is covered by
+/// integration tests and the unit tests here exercise the error + lifecycle
+/// paths against a real (failing) client.
 class _FailingSdkClient extends SdkApiClient {
   _FailingSdkClient() : super(host: 'localhost', port: 12345);
 }

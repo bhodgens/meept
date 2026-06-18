@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../models/api_models.dart';
-import '../../services/api_client.dart';
+import '../../services/sdk_client.dart';
 import '../../providers/providers.dart';
 
 /// BranchesPanel displays git branches for the current project.
@@ -24,13 +24,13 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
   bool _isLoading = false;
   String? _error;
 
-  late final ApiClient _apiClient;
+  late final SdkApiClient _sdkClient;
   late final FocusNode _keyboardFocusNode;
 
   @override
   void initState() {
     super.initState();
-    _apiClient = ref.read(apiClientProvider);
+    _sdkClient = ref.read(sdkClientProvider);
     _keyboardFocusNode = FocusNode();
     _loadBranches();
   }
@@ -62,7 +62,8 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
         }
         return;
       }
-      final branches = await _apiClient.listBranches(project.id);
+      final branchesRaw = await _sdkClient.listBranches(project.id);
+      final branches = branchesRaw.map(BranchInfo.fromJson).toList();
       final current = branches.where((b) => b.isCurrent).firstOrNull;
 
       if (mounted) {
@@ -72,7 +73,7 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
           _currentBranch = current?.name;
         });
       }
-    } on ApiClientException catch (e) {
+    } on SdkApiException catch (e) {
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -106,7 +107,7 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
           }
           return;
         }
-        await _apiClient.checkoutBranch(project.id, branchName);
+        await _sdkClient.checkoutBranch(project.id, branchName);
         // Refresh branch list so is_current flags are accurate
         await _loadBranches();
         if (mounted) {
@@ -117,7 +118,7 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
             ),
           );
         }
-      } on ApiClientException catch (e) {
+      } on SdkApiException catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(

@@ -61,6 +61,64 @@ class StorageService {
       debugPrint('[warn] FlutterSecureStorage init failed: $e');
       // Continue with null _secureStorage - falls back to SharedPreferences
     }
+
+    // If no key was found in keychain/prefs, try reading the daemon's
+    // per-installation dev key from ~/.meept/dev_key. Under macOS App
+    // Sandbox, Platform.environment['HOME'] points to the container
+    // directory, so we also try the real home via getpwuid.
+    if (_cachedApiKey == null || _cachedApiKey!.isEmpty) {
+      _cachedApiKey = await _tryReadDevKeyFile();
+    }
+  }
+
+  /// Attempt to read the daemon's per-installation dev key from
+  /// `~/.meept/dev_key`. Returns null if the file doesn't exist or
+  /// can't be read.
+  ///
+  /// Under macOS App Sandbox, `$HOME` is the container path. We try
+  /// multiple strategies to find the real home directory:
+  /// 1. `$HOME/.meept/dev_key` (works outside sandbox)
+  /// 2. Resolve real home via `sh -c 'echo ~$USER'` (works in sandbox
+  ///    with temporary-exception file access entitlement)
+  Future<String?> _tryReadDevKeyFile() async {
+    final candidates = <String>[];
+
+    // Strategy 1: direct $HOME (works outside App Sandbox)
+    final home = Platform.environment['HOME'];
+    if (home != null) {
+      candidates.add('$home/.meept/dev_key');
+    }
+
+    // Strategy 2: resolve real home via shell (works in sandbox with
+    // temporary-exception entitlement for /Users/)
+    try {
+      final result = await Process.run(
+        'sh', ['-c', 'eval echo ~\$(id -un)'],
+        runInShell: false,
+      );
+      final realHome = (result.stdout as String).trim();
+      if (realHome.isNotEmpty && realHome != home) {
+        candidates.add('$realHome/.meept/dev_key');
+      }
+    } catch (_) {
+      // Shell not available or command failed — skip this strategy.
+    }
+
+    for (final path in candidates) {
+      try {
+        final file = File(path);
+        if (file.existsSync()) {
+          final key = file.readAsStringSync().trim();
+          if (key.isNotEmpty) {
+            debugPrint('[storage] Loaded dev key from $path');
+            return key;
+          }
+        }
+      } catch (_) {
+        // File not readable — try next candidate.
+      }
+    }
+    return null;
   }
 
   // ------ API Key (secure storage) ------
@@ -69,7 +127,7 @@ class StorageService {
   ///
   /// Returns the cached keychain value if [init] has been awaited,
   /// otherwise falls back to SharedPreferences for backward compatibility.
-  /// Returns null when no key is configured. Callers (e.g. [ApiClient.storage])
+  /// Returns null when no key is configured. Callers (e.g. [SdkApiClient.storage])
   /// treat null as "no Authorization header". UI surfaces a warning when the
   /// resolved key equals [AppConstants.defaultApiKey] (the dev fallback) so
   /// operators notice misconfiguration instead of silently authing with a

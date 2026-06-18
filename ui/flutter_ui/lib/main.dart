@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'services/storage_service.dart';
-import 'services/api_client.dart';
+import 'services/sdk_client.dart';
 import 'services/websocket_service.dart';
 import 'theme/cyberpunk_theme.dart';
 import 'core/constants.dart';
@@ -19,7 +19,7 @@ void main() async {
   await StorageService.instance.init();
 
   // Initialize certificate pinning before any HTTP/WebSocket connections
-  await ApiClient.initCertPinning();
+  await SdkApiClient.initCertPinning();
 
   // Initialize Sentry for crash reporting (only when a real DSN is configured)
   final sentryDsn = Platform.environment['SENTRY_DSN'];

@@ -7,51 +7,25 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meept_ui/features/memory/memory_panel.dart';
 import 'package:meept_ui/providers/providers.dart';
-import 'package:meept_ui/services/api_client.dart';
+import 'package:meept_ui/services/sdk_client.dart';
 import 'package:meept_ui/services/websocket_service.dart';
 
-class _EmptyMemoriesApiClient extends ApiClient {
-  _EmptyMemoriesApiClient() : super(host: 'localhost', port: 8081);
+class _EmptyMemoriesSdkClient extends SdkApiClient {
+  _EmptyMemoriesSdkClient() : super(host: 'localhost', port: 8081);
 
   @override
-  Future<List<Map<String, dynamic>>> getRecentMemories({int limit = 10}) async {
+  Future<List<Map<String, dynamic>>> getRecentMemoriesRaw({int limit = 10}) async {
     return [];
   }
 
   @override
-  Future<List<Map<String, dynamic>>> queryMemory({
+  Future<List<Map<String, dynamic>>> queryMemoryRaw({
     required String query,
     int limit = 10,
     String? category,
   }) async {
     return [];
   }
-
-  @override
-  Future<T> get<T>(
-    String path, {
-    Map<String, dynamic>? queryParameters,
-  }) async =>
-      <String, dynamic>{} as T;
-
-  @override
-  Future<T> post<T>(
-    String path, {
-    dynamic data,
-    Map<String, dynamic>? queryParameters,
-  }) async =>
-      <String, dynamic>{} as T;
-
-  @override
-  Future<T> put<T>(
-    String path, {
-    dynamic data,
-    Map<String, dynamic>? queryParameters,
-  }) async =>
-      <String, dynamic>{} as T;
-
-  @override
-  Future<T> delete<T>(String path) async => <String, dynamic>{} as T;
 }
 
 class _StubWebSocket extends WebSocketService {
@@ -68,7 +42,7 @@ class _StubWebSocket extends WebSocketService {
 Widget _buildTestApp() {
   return ProviderScope(
     overrides: [
-      apiClientProvider.overrideWith((_) => _EmptyMemoriesApiClient()),
+      sdkClientProvider.overrideWith((_) => _EmptyMemoriesSdkClient()),
       websocketProvider.overrideWith((_) => _StubWebSocket()),
     ],
     child: const MaterialApp(
@@ -81,7 +55,7 @@ void main() {
   testWidgets('renders placeholder when no memories and not searched',
       (tester) async {
     await tester.pumpWidget(_buildTestApp());
-    // Allow initState + getRecentMemories to complete.
+    // Allow initState + getRecentMemoriesRaw to complete.
     await tester.pump(const Duration(milliseconds: 50));
     await tester.pump(const Duration(milliseconds: 50));
 

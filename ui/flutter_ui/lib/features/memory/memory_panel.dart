@@ -51,13 +51,14 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
       _isLoading = true;
     });
     try {
-      final client = ref.read(apiClientProvider);
-      final data = await client.getRecentMemories(limit: 20);
+      // SdkApiClient.getRecentMemoriesRaw returns the raw `memories`
+      // array; we deserialize via the local MemoryResultModel.fromJson
+      // because it expects a nested `memory` Map shape.
+      final client = ref.read(sdkClientProvider);
+      final data = await client.getRecentMemoriesRaw(limit: 20);
       if (mounted) {
         setState(() {
-          _memories = data
-              .map((m) => MemoryResultModel.fromJson(m))
-              .toList();
+          _memories = data.map((m) => MemoryResultModel.fromJson(m)).toList();
           _isLoading = false;
           _error = null;
         });
@@ -84,13 +85,11 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
       _hasSearched = true;
     });
     try {
-      final client = ref.read(apiClientProvider);
-      final data = await client.queryMemory(query: query, limit: 20);
+      final client = ref.read(sdkClientProvider);
+      final data = await client.queryMemoryRaw(query: query, limit: 20);
       if (mounted) {
         setState(() {
-          _memories = data
-              .map((m) => MemoryResultModel.fromJson(m))
-              .toList();
+          _memories = data.map((m) => MemoryResultModel.fromJson(m)).toList();
           _isLoading = false;
           _error = null;
         });

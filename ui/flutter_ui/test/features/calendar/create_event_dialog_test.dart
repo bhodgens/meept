@@ -3,14 +3,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meept_ui/features/calendar/calendar_panel.dart';
 import 'package:meept_ui/providers/providers.dart';
-import 'package:meept_ui/services/api_client.dart';
+import 'package:meept_ui/services/sdk_client.dart';
 import 'package:meept_ui/services/websocket_service.dart';
 
-class _StubApiClient extends ApiClient {
-  _StubApiClient() : super(host: 'localhost', port: 8081);
+class _StubSdkClient extends SdkApiClient {
+  _StubSdkClient() : super(host: 'localhost', port: 8081);
 
   @override
-  Future<Map<String, dynamic>> getCalendarToday() async => {'events': []};
+  Future<Map<String, dynamic>> getCalendarTodayRaw() async => {'events': []};
 
   @override
   Future<void> createCalendarEvent({
@@ -19,32 +19,6 @@ class _StubApiClient extends ApiClient {
     required DateTime end,
     String? description,
   }) async {}
-
-  @override
-  Future<T> get<T>(
-    String path, {
-    Map<String, dynamic>? queryParameters,
-  }) async =>
-      <String, dynamic>{} as T;
-
-  @override
-  Future<T> post<T>(
-    String path, {
-    dynamic data,
-    Map<String, dynamic>? queryParameters,
-  }) async =>
-      <String, dynamic>{} as T;
-
-  @override
-  Future<T> put<T>(
-    String path, {
-    dynamic data,
-    Map<String, dynamic>? queryParameters,
-  }) async =>
-      <String, dynamic>{} as T;
-
-  @override
-  Future<T> delete<T>(String path) async => <String, dynamic>{} as T;
 }
 
 class _StubWebSocket extends WebSocketService {
@@ -61,7 +35,7 @@ class _StubWebSocket extends WebSocketService {
 Widget _buildTestApp() {
   return ProviderScope(
     overrides: [
-      apiClientProvider.overrideWith((_) => _StubApiClient()),
+      sdkClientProvider.overrideWith((_) => _StubSdkClient()),
       websocketProvider.overrideWith((_) => _StubWebSocket()),
     ],
     child: const MaterialApp(

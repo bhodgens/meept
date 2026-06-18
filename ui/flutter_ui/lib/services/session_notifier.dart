@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
-import 'api_client.dart';
+import 'sdk_client.dart';
 
 const _unset = Object();
 
@@ -31,16 +31,21 @@ class SessionState {
 
 /// StateNotifier that manages session CRUD operations
 class SessionNotifier extends StateNotifier<SessionState> {
-  SessionNotifier({required this.apiClient})
+  SessionNotifier({required this.sdkClient})
       : super(const SessionState());
 
-  final ApiClient apiClient;
+  final SdkApiClient sdkClient;
 
   /// Fetch all sessions from the server
   Future<void> loadSessions() async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      final sessions = await apiClient.listSessions();
+      // SdkApiClient.listSessions returns the raw `sessions` array;
+      // callers deserialize each entry via Session.fromJson because
+      // the OpenAPI spec leaves the Session entity untyped.
+      final rawSessions = await sdkClient.listSessions();
+      final sessions =
+          rawSessions.map(Session.fromJson).toList(growable: false);
       state = state.copyWith(sessions: sessions, isLoading: false);
     } catch (e) {
       state = state.copyWith(
@@ -53,10 +58,13 @@ class SessionNotifier extends StateNotifier<SessionState> {
   /// Create a new session with the given title
   Future<Session?> createSession(String title) async {
     try {
-      final session = await apiClient.createSession(title: title);
+      final raw = await sdkClient.createSession(title: title);
+      final session = Session.fromJson(raw);
       // Reload sessions from server to ensure we have the persisted list
       state = state.copyWith(isLoading: true, error: null);
-      final sessions = await apiClient.listSessions();
+      final rawSessions = await sdkClient.listSessions();
+      final sessions =
+          rawSessions.map(Session.fromJson).toList(growable: false);
       state = state.copyWith(sessions: sessions, isLoading: false);
       return session;
     } catch (e) {
@@ -71,7 +79,7 @@ class SessionNotifier extends StateNotifier<SessionState> {
   /// Delete a session by its ID
   Future<void> deleteSession(String id) async {
     try {
-      await apiClient.deleteSession(id);
+      await sdkClient.deleteSession(id);
       state = state.copyWith(
         sessions: state.sessions.where((s) => s.id != id).toList(),
       );

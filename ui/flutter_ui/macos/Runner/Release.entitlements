@@ -12,5 +12,18 @@
     <true/>
     <key>com.apple.security.speech-recognition</key>
     <true/>
+    <!-- Allow reading daemon files outside the sandbox container.
+         The daemon stores its TLS cert and dev API key in ~/.meept/,
+         which is outside the App Sandbox container at
+         ~/Library/Containers/com.caimlas.meept.gui/Data/.
+         These temporary-exception entries let the app read the real
+         home directory's ~/.meept/ so cert pinning and API key
+         resolution work correctly. -->
+    <key>com.apple.security.temporary-exception.files.absolute-path</key>
+    <array>
+        <string>/Users/</string>
+    </array>
+    <key>com.apple.security.files.user-selected.read-only</key>
+    <true/>
 </dict>
 </plist>

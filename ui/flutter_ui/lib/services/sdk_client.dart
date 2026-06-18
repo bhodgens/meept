@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:meept_client/meept_client.dart' as sdk;
 
 import '../core/constants.dart';
+import '../models/api_models.dart' show SearchResults, SearchScope, SearchScopeX;
 import 'daemon_cert_pinner.dart';
 import 'storage_service.dart';
 
@@ -29,11 +30,6 @@ import 'storage_service.dart';
 /// ```dart
 /// import 'package:meept_client/meept_client.dart' as sdk;
 /// ```
-///
-/// NOTE: This client is currently aspirational -- it is not wired into the
-/// app's providers, which still route through [ApiClient] -> [MeeptApi].
-/// Once the migration completes, providers will switch to [SdkApiClient]
-/// and [MeeptApi] will be deleted.
 class SdkApiClient {
   final Dio _dio;
   final String baseUrl;
@@ -101,8 +97,7 @@ class SdkApiClient {
   }
 
   /// Create an SDK-backed client, optionally loading persisted host/port/API
-  /// key from [StorageService].  Mirrors [ApiClient.storage] so the two are
-  /// interchangeable from a provider perspective.
+  /// key from [StorageService].
   ///
   /// **Note:** The underlying storage must have been initialized (via
   /// `StorageService.init()` in `main`) before constructing the client.
@@ -129,8 +124,7 @@ class SdkApiClient {
   /// Initialize cert pinning by loading the daemon's certificate fingerprint.
   /// Must be called before constructing any SdkApiClient instances.
   ///
-  /// Delegates to the same [DaemonCertPinner] used by [ApiClient] so the
-  /// fingerprint is loaded exactly once regardless of which client is used.
+  /// Delegates to [DaemonCertPinner] which loads the fingerprint exactly once.
   static Future<void> initCertPinning() async {
     await DaemonCertPinner.loadFingerprint();
   }
@@ -284,6 +278,13 @@ class SdkApiClient {
     } on DioException catch (e) {
       throw _handleError(e);
     }
+  }
+
+  /// Returns the raw `/api/v1/daemon/status` JSON for callers that need
+  /// to inspect fields (e.g. `state`, `pid`, `uptime`) as dynamic values
+  /// without going through the typed [sdk.DaemonStatus] model.
+  Future<Map<String, dynamic>> getDaemonStatusRaw() async {
+    return _get('/api/v1/daemon/status');
   }
 
   // ===== Chat =====
@@ -583,6 +584,39 @@ class SdkApiClient {
     }
   }
 
+  /// Returns the raw `memories` array for callers that need to deserialize
+  /// via a local model whose shape differs from [sdk.MemoryResult]
+  /// (e.g. the local `MemoryResultModel` with its nested `memory` Map).
+  Future<List<Map<String, dynamic>>> queryMemoryRaw({
+    required String query,
+    int limit = 10,
+    String? category,
+  }) async {
+    final body = <String, dynamic>{
+      'query': query,
+      'limit': limit,
+      if (category != null) 'category': category,
+    };
+    final raw = await _post('/api/v1/memory/query', body: body);
+    final memoriesRaw = raw['memories'] as List? ?? [];
+    return memoriesRaw
+        .whereType<Map>()
+        .map((m) => Map<String, dynamic>.from(m))
+        .toList();
+  }
+
+  /// Returns the raw `memories` array for callers that need to deserialize
+  /// via a local model whose shape differs from [sdk.MemoryResult].
+  Future<List<Map<String, dynamic>>> getRecentMemoriesRaw(
+      {int limit = 10}) async {
+    final raw = await _get('/api/v1/memory/recent', query: {'limit': limit});
+    final memoriesRaw = raw['memories'] as List? ?? [];
+    return memoriesRaw
+        .whereType<Map>()
+        .map((m) => Map<String, dynamic>.from(m))
+        .toList();
+  }
+
   // ===== Skills =====
 
   Future<List<sdk.SkillInfo>> getSkills({String? category}) async {
@@ -632,6 +666,36 @@ class SdkApiClient {
     return _fromJson<sdk.ExecuteResult>(raw);
   }
 
+  /// Returns the raw `skills` array for callers that need to deserialize
+  /// via a local model whose shape differs from [sdk.SkillInfo]
+  /// (e.g. the local `Skill` class with `tags` and `capabilities` arrays).
+  Future<List<Map<String, dynamic>>> getSkillsRaw({String? category}) async {
+    final query = <String, dynamic>{};
+    if (category != null) query['category'] = category;
+    final raw = await _get('/api/v1/skills', query: query);
+    final skillsRaw = raw['skills'] as List? ?? [];
+    return skillsRaw
+        .whereType<Map>()
+        .map((s) => Map<String, dynamic>.from(s))
+        .toList();
+  }
+
+  /// Returns the raw `/api/v1/skills/{slug}/ui` JSON for callers that
+  /// need to deserialize via a local model whose shape differs from
+  /// [sdk.SkillUIDescriptor].
+  Future<Map<String, dynamic>> getSkillUiRaw(String slug) async {
+    return _get('/api/v1/skills/$slug/ui');
+  }
+
+  /// Returns the raw `/api/v1/skills/{slug}/execute` JSON for callers
+  /// that need to deserialize via the local `SkillExecuteResult` model.
+  Future<Map<String, dynamic>> executeSkillWithParamsRaw({
+    required String slug,
+    required Map<String, dynamic> params,
+  }) async {
+    return _post('/api/v1/skills/$slug/execute', body: params);
+  }
+
   // ===== Search =====
 
   /// Returns the raw search-response JSON.  The SDK only models the
@@ -645,6 +709,18 @@ class SdkApiClient {
 
     final raw = await _post('/api/v1/search', body: _toJson(req));
     return raw;
+  }
+
+  /// Convenience overload accepting the local [SearchScope] enum and
+  /// returning a typed [SearchResults] for panels that prefer the local
+  /// model.
+  Future<SearchResults> searchWithScope({
+    required String query,
+    SearchScope scope = SearchScope.all,
+  }) async {
+    final scopeValue = scope == SearchScope.all ? null : scope.apiValue;
+    final raw = await search(query: query, scope: scopeValue);
+    return SearchResults.fromJson(raw);
   }
 
   // ===== Projects / Branches =====
@@ -802,10 +878,25 @@ class SdkApiClient {
     return _fromJson<sdk.CommandHistory>(history);
   }
 
+  /// Returns the raw `/api/v1/terminal/history` JSON (with the
+  /// `history` array) for panels that deserialize entries via the
+  /// local `CommandEntry.fromJson`.  Use this when you need the
+  /// array shape rather than the typed [sdk.CommandHistory] model.
+  Future<Map<String, dynamic>> getTerminalHistoryRaw() async {
+    return _get('/api/v1/terminal/history');
+  }
+
   Future<sdk.ExecuteResult?> executeCommand(String command) async {
     final body = <String, dynamic>{'command': command};
     final raw = await _post('/api/v1/terminal/exec', body: body);
     return _fromJson<sdk.ExecuteResult>(raw);
+  }
+
+  /// Returns the raw `/api/v1/terminal/exec` JSON for panels that
+  /// inspect fields (e.g. `success`) not modeled on [sdk.ExecuteResult].
+  Future<Map<String, dynamic>> executeCommandRaw(String command) async {
+    final body = <String, dynamic>{'command': command};
+    return _post('/api/v1/terminal/exec', body: body);
   }
 
   Future<void> clearTerminalHistory() async {
@@ -826,6 +917,14 @@ class SdkApiClient {
     } on DioException catch (e) {
       throw _handleError(e);
     }
+  }
+
+  /// Returns the raw `/api/v1/calendar/today` JSON (with the `events`
+  /// array) for panels that deserialize entries via the local
+  /// `CalendarEvent.fromJson`.  Use this when the panel needs the
+  /// wrapped list shape rather than a single typed event.
+  Future<Map<String, dynamic>> getCalendarTodayRaw() async {
+    return _get('/api/v1/calendar/today');
   }
 
   Future<void> createCalendarEvent({
