@@ -1,0 +1,103 @@
+#!/bin/bash
+# Pre-commit check for deferred items in findings documents
+# 
+# This hook ensures that any findings document with deferred items
+# has a corresponding deferred implementation plan.
+#
+# Installation:
+#   chmod +x .git/hooks/pre-commit-deferred
+#   # Then source from your main pre-commit hook:
+#   .git/hooks/pre-commit-deferred || exit 1
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+NC='\033[0m' # No Color
+
+EXIT_CODE=0
+
+# Check if committing changes to findings docs
+# Exclude *-deferred-implementation.md files themselves — they ARE the resolution plans.
+CHANGED_FINDINGS=$(git diff --cached --name-only 2>/dev/null | grep "docs/plans/.*findings" | grep -v "deferred-implementation" || true)
+
+if [ -n "$CHANGED_FINDINGS" ]; then
+  # Count deferred items in staged findings files
+  DEFERRED_COUNT=0
+  DEFERRED_ITEMS=""
+  
+  for file in $CHANGED_FINDINGS; do
+    if [ -f "$file" ]; then
+      # Count deferred ITEM markers, not prose mentions.
+      # An "unresolved deferred item" is a finding heading or table row
+      # whose line contains "deferred" without a same-line resolution
+      # keyword. We restrict the match to lines that look like item
+      # records: markdown headings (### ...), table rows (| ... |), or
+      # bullet list items (- .../ * ...) starting the line. This excludes
+      # prose paragraphs and summary tables that merely discuss the
+      # concept of deferral.
+      # Lines with "rationale" are by definition documented deferrals.
+      # Lines with "round" / "follow-up" / "run " / "wall" / "kept deferred" /
+      # "bugs deferred" / "findings:" / "deferred:" (tally lines) are historical
+      # summary/log entries, not actionable items.
+      FILE_DEFERRED=$(grep -inE "^(#|.*\||\s*[-*])\s.*deferred" "$file" 2>/dev/null \
+        | grep -iv "resolved\|fixed\|closed\|resolution:\|intentional\|all resolved\|(all resolved)\|rationale\|follow-up\|round [0-9]\|iteration log\|run log\|wall clock\|kept deferred\|bugs deferred\|deferred-implementation\|\*\*deferred:\*\*\|findings:\|non-deferred\|deferred item resolution\|pre-commit-deferred" \
+        | wc -l | tr -d ' ')
+      if [ "$FILE_DEFERRED" -gt 0 ]; then
+        DEFERRED_COUNT=$((DEFERRED_COUNT + FILE_DEFERRED))
+        DEFERRED_ITEMS="$DEFERRED_ITEMS\n  - $file ($FILE_DEFERRED items)"
+      fi
+    fi
+  done
+  
+  if [ "$DEFERRED_COUNT" -gt 0 ]; then
+    echo -e "${YELLOW}⚠️  Found $DEFERRED_COUNT unresolved deferred item(s) in staged findings files:${NC}"
+    echo -e "$DEFERRED_ITEMS"
+    echo ""
+    echo -e "${GREEN}📋 ACTION REQUIRED:${NC}"
+    echo "   Option 1: Create docs/plans/[review]-deferred-implementation.md"
+    echo "   Option 2: Resolve the deferred items before committing"
+    echo "   Option 3: Skip this check with --no-verify (not recommended)"
+    echo ""
+    echo "📖 See CLAUDE.md 'Deferred Item Resolution Protocol' for details"
+    echo ""
+    EXIT_CODE=1
+  fi
+fi
+
+# Also check for new findings docs without corresponding deferred plan
+NEW_FINDINGS=$(git diff --cached --name-only 2>/dev/null | grep "docs/plans/.*findings.*\.md$" | grep -v "deferred-implementation" || true)
+
+for finding in $NEW_FINDINGS; do
+  if [ -f "$finding" ]; then
+    # Check if the findings doc mentions deferred items
+    HAS_DEFERRED=$(grep -c "deferred" "$finding" 2>/dev/null || echo 0)
+    if [ "$HAS_DEFERRED" -gt 0 ]; then
+      # Look for corresponding deferred implementation plan
+      BASENAME=$(basename "$finding" .md)
+      DEFERRED_PLAN="docs/plans/${BASENAME}-deferred-implementation.md"
+      
+      # Check if plan exists (allow staged but not committed yet)
+      PLAN_EXISTS=$(git ls-files --cached "$DEFERRED_PLAN" 2>/dev/null || echo "")
+      
+      if [ -z "$PLAN_EXISTS" ] && [ ! -f "$DEFERRED_PLAN" ]; then
+        echo -e "${YELLOW}⚠️  Findings document '$finding' mentions deferred items${NC}"
+        echo "   but no corresponding deferred implementation plan found."
+        echo ""
+        echo "📋 Expected plan: $DEFERRED_PLAN"
+        echo ""
+        echo "📖 See CLAUDE.md 'Deferred Item Resolution Protocol' for details"
+        echo ""
+        EXIT_CODE=1
+      fi
+    fi
+  fi
+done
+
+if [ $EXIT_CODE -eq 0 ]; then
+  echo -e "${GREEN}✅ No unresolved deferred items detected${NC}"
+fi
+
+exit $EXIT_CODE

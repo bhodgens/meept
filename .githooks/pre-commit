@@ -1,0 +1,13 @@
+#!/bin/bash
+# Main pre-commit hook - runs all checks including deferred item validation
+# and feature documentation checks
+
+set -e
+
+# Run deferred item check
+.git/hooks/pre-commit-deferred || exit 1
+
+# Run feature documentation check
+.git/hooks/pre-commit-feature-docs || exit 1
+
+exit 0
