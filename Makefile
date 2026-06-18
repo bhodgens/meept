@@ -854,3 +854,21 @@ sdk-test-dart:
 	@echo "Testing Dart SDK compiles..."
 	cd $(SDK_DIR)/dart && flutter pub get && dart analyze
 	@echo "Dart SDK compiles OK"
+
+# Slash Commands:
+#  install-commands  Install pre-built slash command templates
+#  commands-clean    Remove installed command templates
+
+.PHONY: install-commands commands-clean
+
+install-commands:
+	@echo "Installing slash command templates..."
+	@mkdir -p $(MEEPT_HOME)/commands
+	@cp config/commands/*.md $(MEEPT_HOME)/commands/ 2>/dev/null || true
+	@echo "Commands installed to $(MEEPT_HOME)/commands/"
+	@echo "Available commands: research, qa-docker, playwright-test"
+
+commands-clean:
+	@echo "Removing installed command templates..."
+	@rm -rf $(MEEPT_HOME)/commands
+	@echo "Commands removed. To reinstall: make install-commands"
