@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/errcls"
+	tuimodels "github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -208,7 +209,10 @@ func (c *RPCClient) callOnce(method string, params any) (json.RawMessage, error)
 		return nil, fmt.Errorf("failed to set deadline: %w", err)
 	}
 	defer func() {
-		_ = conn.SetDeadline(time.Time{})
+		// Best-effort deadline reset; connection may already be closed.
+		if dErr := conn.SetDeadline(time.Time{}); dErr != nil {
+			// connection likely already closed; nothing to do
+		}
 	}()
 
 	// Write length-prefixed frame
@@ -1121,6 +1125,33 @@ func (c *RPCClient) DetectProject(path string) (*types.ProjectInfo, error) {
 	var resp types.ProjectInfo
 	if err := json.Unmarshal(result, &resp); err != nil {
 		return nil, fmt.Errorf("failed to parse project detect response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// ============================================================================
+// Search Methods
+// ============================================================================
+
+// SearchSemantic performs a cross-scope semantic search via the daemon's
+// search.semantic RPC handler. Returns results ranked by relevance. If the
+// daemon has no embedding provider, the response Mode will be "keyword"
+// (keyword fallback) instead of "semantic".
+func (c *RPCClient) SearchSemantic(query, scope string, limit int) (*tuimodels.SemanticSearchRPCResponse, error) {
+	params := map[string]any{
+		"query": query,
+		"scope": scope,
+		"limit": limit,
+	}
+	result, err := c.Call("search.semantic", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp tuimodels.SemanticSearchRPCResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse semantic search response: %w", err)
 	}
 
 	return &resp, nil

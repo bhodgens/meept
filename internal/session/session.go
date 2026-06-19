@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -712,6 +713,59 @@ func (s *MemoryStore) GetToolCallsForMessages(messageIDs []int64) (map[int64][]T
 	return make(map[int64][]ToolCall), nil
 }
 
+// SearchMessages performs a case-insensitive substring search across all
+// messages in all sessions. Used as an in-memory fallback when SQLite is
+// unavailable (tests, ephemeral runs).
+func (s *MemoryStore) SearchMessages(ctx context.Context, query string, limit int) ([]MessageSearchResult, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if query == "" {
+		return nil, nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	needle := strings.ToLower(query)
+	var results []MessageSearchResult
+	for sid, msgs := range s.messages {
+		for _, msg := range msgs {
+			if msg.Role != "user" && msg.Role != "assistant" {
+				continue
+			}
+			if idx := strings.ToLower(strings.TrimSpace(msg.Content)); strings.Contains(idx, needle) {
+				results = append(results, MessageSearchResult{
+					MessageID: msg.ID,
+					SessionID: sid,
+					Role:      msg.Role,
+					Content:   msg.Content,
+					Snippet:   truncateSnippet(msg.Content, 200),
+					Relevance: 1.0,
+					Timestamp: msg.Timestamp.Format(time.RFC3339),
+				})
+				if len(results) >= limit {
+					return results, nil
+				}
+			}
+		}
+	}
+	return results, nil
+}
+
+// SearchMessagesSemantic is unsupported in MemoryStore.
+func (s *MemoryStore) SearchMessagesSemantic(ctx context.Context, embedding []float32, limit int) ([]MessageSearchResult, error) {
+	return nil, ErrSemanticUnavailable
+}
+
+// StoreEmbedding is a no-op in MemoryStore (embeddings are only persisted in SQLite).
+func (s *MemoryStore) StoreEmbedding(ctx context.Context, messageID int64, embedding []float32) error {
+	return nil
+}
+
+// UnembeddedMessages returns empty in MemoryStore (embeddings are not tracked).
+func (s *MemoryStore) UnembeddedMessages(ctx context.Context, limit int) ([]MessageSearchResult, error) {
+	return nil, nil
+}
+
 // Ensure MemoryStore implements Store interface.
 var _ Store = (*MemoryStore)(nil)
 
@@ -1316,11 +1370,18 @@ func (h *Handler) handleTreeGetMsg(msg *models.BusMessage) (any, error) {
 // sendResponse publishes a response to the bus.
 func (h *Handler) sendResponse(replyTo, topic string, response any, err error) {
 	var payload []byte
+	var mErr error
 
 	if err != nil {
-		payload, _ = json.Marshal(map[string]string{"error": err.Error()})
+		payload, mErr = json.Marshal(map[string]string{"error": err.Error()})
+		if mErr != nil {
+			slog.Warn("failed to marshal session error response", "error", mErr)
+		}
 	} else {
-		payload, _ = json.Marshal(response)
+		payload, mErr = json.Marshal(response)
+		if mErr != nil {
+			slog.Warn("failed to marshal session response", "error", mErr)
+		}
 	}
 
 	msg := &models.BusMessage{

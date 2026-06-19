@@ -515,8 +515,9 @@ func (s *SessionPickerModal) View(screenW, screenH int) string {
 
 // SessionSwitchMsg indicates a session switch request.
 type SessionSwitchMsg struct {
-	Session     *types.Session
-	SwitchToChat bool // If true, switch to ViewChat after session change
+	Session      *types.Session
+	SwitchToChat bool   // If true, switch to ViewChat after session change
+	Err          error  // Non-nil if session switch failed
 }
 
 // SessionCreateMsg indicates a new session creation request.

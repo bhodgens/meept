@@ -1,6 +1,10 @@
 package session
 
-import "time"
+import (
+	"context"
+	"errors"
+	"time"
+)
 
 // Message represents a chat message persisted in a session.
 type Message struct {
@@ -48,6 +52,21 @@ type TreeNode struct {
 	IsLeaf    bool   `json:"is_leaf"`
 }
 
+// MessageSearchResult is a single hit from message content search.
+type MessageSearchResult struct {
+	MessageID int64   `json:"message_id"`
+	SessionID string  `json:"session_id"`
+	Role      string  `json:"role"`
+	Content   string  `json:"content"`
+	Snippet   string  `json:"snippet"`   // truncated content with match context
+	Relevance float64 `json:"relevance"` // 0..1
+	Timestamp string  `json:"timestamp"`
+}
+
+// ErrSemanticUnavailable is returned by SearchMessagesSemantic when no
+// embedding index is available.
+var ErrSemanticUnavailable = errors.New("semantic search unavailable: no embedding provider configured")
+
 // Store defines the interface for session persistence.
 type Store interface {
 	Create(name string) (*Session, error)
@@ -85,4 +104,15 @@ type Store interface {
 
 	// Project operations
 	SetProject(sessionID, projectID, projectPath string) error
+
+	// Search operations
+	// SearchMessages performs FTS5 keyword search over session_messages.
+	SearchMessages(ctx context.Context, query string, limit int) ([]MessageSearchResult, error)
+	// SearchMessagesSemantic performs vector similarity search over message embeddings.
+	// Returns ErrSemanticUnavailable if no embedding index is available.
+	SearchMessagesSemantic(ctx context.Context, embedding []float32, limit int) ([]MessageSearchResult, error)
+	// StoreEmbedding persists an embedding for a message.
+	StoreEmbedding(ctx context.Context, messageID int64, embedding []float32) error
+	// UnembeddedMessages returns message IDs that have no embedding yet.
+	UnembeddedMessages(ctx context.Context, limit int) ([]MessageSearchResult, error)
 }

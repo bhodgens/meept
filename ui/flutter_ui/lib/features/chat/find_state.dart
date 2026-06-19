@@ -78,6 +78,7 @@ FindMatches computeFindMatches({
   }
 
   final needle = caseSensitive ? query : query.toLowerCase();
+  outer:
   for (var i = 0; i < contents.length; i++) {
     final raw = contents[i];
     final hay = caseSensitive ? raw : raw.toLowerCase();
@@ -88,7 +89,7 @@ FindMatches computeFindMatches({
       if (idx < 0) break;
       final end = idx + needle.length;
       matches.add(FindMatch(messageIndex: i, start: idx, end: end));
-      if (matches.length >= maxMatches) break;
+      if (matches.length >= maxMatches) break outer;
       start = end;
     }
   }

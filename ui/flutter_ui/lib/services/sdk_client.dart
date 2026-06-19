@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:meept_client/meept_client.dart' as sdk;
 
 import '../core/constants.dart';
-import '../models/api_models.dart' show SearchResults, SearchScope, SearchScopeX;
+import '../models/api_models.dart' show SearchResults, SemanticSearchResults, SearchScope, SearchScopeX;
 import 'daemon_cert_pinner.dart';
 import 'storage_service.dart';
 
@@ -721,6 +721,24 @@ class SdkApiClient {
     final scopeValue = scope == SearchScope.all ? null : scope.apiValue;
     final raw = await search(query: query, scope: scopeValue);
     return SearchResults.fromJson(raw);
+  }
+
+  /// Semantic search via `POST /api/v1/search/semantic`.
+  ///
+  /// The server may fall back to keyword mode and signals this via
+  /// `SemanticSearchResults.mode`.  Check [SemanticSearchResults.err] for
+  /// server-reported errors.
+  Future<SemanticSearchResults> searchSemantic({
+    required String query,
+    SearchScope scope = SearchScope.all,
+    int limit = 20,
+  }) async {
+    final res = await _post('/api/v1/search/semantic', body: {
+      'query': query,
+      'scope': scope == SearchScope.all ? '' : scope.apiValue,
+      'limit': limit,
+    });
+    return SemanticSearchResults.fromJson(res);
   }
 
   // ===== Projects / Branches =====

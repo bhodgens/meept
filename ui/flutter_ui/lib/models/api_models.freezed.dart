@@ -1277,13 +1277,12 @@ class _$TaskStepImpl implements _TaskStep {
 
 abstract class _TaskStep implements TaskStep {
   const factory _TaskStep(
-          {required final String id,
-          @JsonKey(name: 'task_id') required final String taskId,
-          required final String description,
-          @JsonKey(name: 'state') required final String status,
-          @JsonKey(name: 'result') final String? output,
-          @JsonKey(name: 'created_at') final DateTime? createdAt}) =
-      _$TaskStepImpl;
+      {required final String id,
+      @JsonKey(name: 'task_id') required final String taskId,
+      required final String description,
+      @JsonKey(name: 'state') required final String status,
+      @JsonKey(name: 'result') final String? output,
+      @JsonKey(name: 'created_at') final DateTime? createdAt}) = _$TaskStepImpl;
 
   factory _TaskStep.fromJson(Map<String, dynamic> json) =
       _$TaskStepImpl.fromJson;
@@ -1296,12 +1295,14 @@ abstract class _TaskStep implements TaskStep {
   @override
   String get description;
   @override
+  @JsonKey(name: 'state')
   String get status;
   @override
+  @JsonKey(name: 'result')
   String? get output;
   @override
-  @JsonKey(name: 'completed_at')
-  DateTime? get completedAt;
+  @JsonKey(name: 'created_at')
+  DateTime? get createdAt;
   @override
   @JsonKey(ignore: true)
   _$$TaskStepImplCopyWith<_$TaskStepImpl> get copyWith =>
@@ -3527,6 +3528,7 @@ mixin _$SearchResultItem {
   String get id => throw _privateConstructorUsedError;
   String get title => throw _privateConstructorUsedError;
   String get snippet => throw _privateConstructorUsedError;
+  double get relevance => throw _privateConstructorUsedError;
 
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
   @JsonKey(ignore: true)
@@ -3540,7 +3542,12 @@ abstract class $SearchResultItemCopyWith<$Res> {
           SearchResultItem value, $Res Function(SearchResultItem) then) =
       _$SearchResultItemCopyWithImpl<$Res, SearchResultItem>;
   @useResult
-  $Res call({SearchResultType type, String id, String title, String snippet});
+  $Res call(
+      {SearchResultType type,
+      String id,
+      String title,
+      String snippet,
+      double relevance});
 }
 
 /// @nodoc
@@ -3560,6 +3567,7 @@ class _$SearchResultItemCopyWithImpl<$Res, $Val extends SearchResultItem>
     Object? id = null,
     Object? title = null,
     Object? snippet = null,
+    Object? relevance = null,
   }) {
     return _then(_value.copyWith(
       type: null == type
@@ -3578,6 +3586,10 @@ class _$SearchResultItemCopyWithImpl<$Res, $Val extends SearchResultItem>
           ? _value.snippet
           : snippet // ignore: cast_nullable_to_non_nullable
               as String,
+      relevance: null == relevance
+          ? _value.relevance
+          : relevance // ignore: cast_nullable_to_non_nullable
+              as double,
     ) as $Val);
   }
 }
@@ -3590,7 +3602,12 @@ abstract class _$$SearchResultItemImplCopyWith<$Res>
       __$$SearchResultItemImplCopyWithImpl<$Res>;
   @override
   @useResult
-  $Res call({SearchResultType type, String id, String title, String snippet});
+  $Res call(
+      {SearchResultType type,
+      String id,
+      String title,
+      String snippet,
+      double relevance});
 }
 
 /// @nodoc
@@ -3608,6 +3625,7 @@ class __$$SearchResultItemImplCopyWithImpl<$Res>
     Object? id = null,
     Object? title = null,
     Object? snippet = null,
+    Object? relevance = null,
   }) {
     return _then(_$SearchResultItemImpl(
       type: null == type
@@ -3626,6 +3644,10 @@ class __$$SearchResultItemImplCopyWithImpl<$Res>
           ? _value.snippet
           : snippet // ignore: cast_nullable_to_non_nullable
               as String,
+      relevance: null == relevance
+          ? _value.relevance
+          : relevance // ignore: cast_nullable_to_non_nullable
+              as double,
     ));
   }
 }
@@ -3637,7 +3659,8 @@ class _$SearchResultItemImpl implements _SearchResultItem {
       {required this.type,
       required this.id,
       required this.title,
-      this.snippet = ''});
+      this.snippet = '',
+      this.relevance = 0.0});
 
   factory _$SearchResultItemImpl.fromJson(Map<String, dynamic> json) =>
       _$$SearchResultItemImplFromJson(json);
@@ -3651,10 +3674,13 @@ class _$SearchResultItemImpl implements _SearchResultItem {
   @override
   @JsonKey()
   final String snippet;
+  @override
+  @JsonKey()
+  final double relevance;
 
   @override
   String toString() {
-    return 'SearchResultItem(type: $type, id: $id, title: $title, snippet: $snippet)';
+    return 'SearchResultItem(type: $type, id: $id, title: $title, snippet: $snippet, relevance: $relevance)';
   }
 
   @override
@@ -3665,12 +3691,15 @@ class _$SearchResultItemImpl implements _SearchResultItem {
             (identical(other.type, type) || other.type == type) &&
             (identical(other.id, id) || other.id == id) &&
             (identical(other.title, title) || other.title == title) &&
-            (identical(other.snippet, snippet) || other.snippet == snippet));
+            (identical(other.snippet, snippet) || other.snippet == snippet) &&
+            (identical(other.relevance, relevance) ||
+                other.relevance == relevance));
   }
 
   @JsonKey(ignore: true)
   @override
-  int get hashCode => Object.hash(runtimeType, type, id, title, snippet);
+  int get hashCode =>
+      Object.hash(runtimeType, type, id, title, snippet, relevance);
 
   @JsonKey(ignore: true)
   @override
@@ -3692,7 +3721,8 @@ abstract class _SearchResultItem implements SearchResultItem {
       {required final SearchResultType type,
       required final String id,
       required final String title,
-      final String snippet}) = _$SearchResultItemImpl;
+      final String snippet,
+      final double relevance}) = _$SearchResultItemImpl;
 
   factory _SearchResultItem.fromJson(Map<String, dynamic> json) =
       _$SearchResultItemImpl.fromJson;
@@ -3706,9 +3736,201 @@ abstract class _SearchResultItem implements SearchResultItem {
   @override
   String get snippet;
   @override
+  double get relevance;
+  @override
   @JsonKey(ignore: true)
   _$$SearchResultItemImplCopyWith<_$SearchResultItemImpl> get copyWith =>
       throw _privateConstructorUsedError;
+}
+
+SemanticSearchResults _$SemanticSearchResultsFromJson(
+    Map<String, dynamic> json) {
+  return _SemanticSearchResults.fromJson(json);
+}
+
+/// @nodoc
+mixin _$SemanticSearchResults {
+  List<SearchResultItem> get results => throw _privateConstructorUsedError;
+  String get mode => throw _privateConstructorUsedError;
+  String get err => throw _privateConstructorUsedError;
+
+  Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
+  @JsonKey(ignore: true)
+  $SemanticSearchResultsCopyWith<SemanticSearchResults> get copyWith =>
+      throw _privateConstructorUsedError;
+}
+
+/// @nodoc
+abstract class $SemanticSearchResultsCopyWith<$Res> {
+  factory $SemanticSearchResultsCopyWith(SemanticSearchResults value,
+          $Res Function(SemanticSearchResults) then) =
+      _$SemanticSearchResultsCopyWithImpl<$Res, SemanticSearchResults>;
+  @useResult
+  $Res call({List<SearchResultItem> results, String mode, String err});
+}
+
+/// @nodoc
+class _$SemanticSearchResultsCopyWithImpl<$Res,
+        $Val extends SemanticSearchResults>
+    implements $SemanticSearchResultsCopyWith<$Res> {
+  _$SemanticSearchResultsCopyWithImpl(this._value, this._then);
+
+  // ignore: unused_field
+  final $Val _value;
+  // ignore: unused_field
+  final $Res Function($Val) _then;
+
+  @pragma('vm:prefer-inline')
+  @override
+  $Res call({
+    Object? results = null,
+    Object? mode = null,
+    Object? err = null,
+  }) {
+    return _then(_value.copyWith(
+      results: null == results
+          ? _value.results
+          : results // ignore: cast_nullable_to_non_nullable
+              as List<SearchResultItem>,
+      mode: null == mode
+          ? _value.mode
+          : mode // ignore: cast_nullable_to_non_nullable
+              as String,
+      err: null == err
+          ? _value.err
+          : err // ignore: cast_nullable_to_non_nullable
+              as String,
+    ) as $Val);
+  }
+}
+
+/// @nodoc
+abstract class _$$SemanticSearchResultsImplCopyWith<$Res>
+    implements $SemanticSearchResultsCopyWith<$Res> {
+  factory _$$SemanticSearchResultsImplCopyWith(
+          _$SemanticSearchResultsImpl value,
+          $Res Function(_$SemanticSearchResultsImpl) then) =
+      __$$SemanticSearchResultsImplCopyWithImpl<$Res>;
+  @override
+  @useResult
+  $Res call({List<SearchResultItem> results, String mode, String err});
+}
+
+/// @nodoc
+class __$$SemanticSearchResultsImplCopyWithImpl<$Res>
+    extends _$SemanticSearchResultsCopyWithImpl<$Res,
+        _$SemanticSearchResultsImpl>
+    implements _$$SemanticSearchResultsImplCopyWith<$Res> {
+  __$$SemanticSearchResultsImplCopyWithImpl(_$SemanticSearchResultsImpl _value,
+      $Res Function(_$SemanticSearchResultsImpl) _then)
+      : super(_value, _then);
+
+  @pragma('vm:prefer-inline')
+  @override
+  $Res call({
+    Object? results = null,
+    Object? mode = null,
+    Object? err = null,
+  }) {
+    return _then(_$SemanticSearchResultsImpl(
+      results: null == results
+          ? _value._results
+          : results // ignore: cast_nullable_to_non_nullable
+              as List<SearchResultItem>,
+      mode: null == mode
+          ? _value.mode
+          : mode // ignore: cast_nullable_to_non_nullable
+              as String,
+      err: null == err
+          ? _value.err
+          : err // ignore: cast_nullable_to_non_nullable
+              as String,
+    ));
+  }
+}
+
+/// @nodoc
+@JsonSerializable()
+class _$SemanticSearchResultsImpl implements _SemanticSearchResults {
+  const _$SemanticSearchResultsImpl(
+      {final List<SearchResultItem> results = const [],
+      this.mode = 'semantic',
+      this.err = ''})
+      : _results = results;
+
+  factory _$SemanticSearchResultsImpl.fromJson(Map<String, dynamic> json) =>
+      _$$SemanticSearchResultsImplFromJson(json);
+
+  final List<SearchResultItem> _results;
+  @override
+  @JsonKey()
+  List<SearchResultItem> get results {
+    if (_results is EqualUnmodifiableListView) return _results;
+    // ignore: implicit_dynamic_type
+    return EqualUnmodifiableListView(_results);
+  }
+
+  @override
+  @JsonKey()
+  final String mode;
+  @override
+  @JsonKey()
+  final String err;
+
+  @override
+  String toString() {
+    return 'SemanticSearchResults(results: $results, mode: $mode, err: $err)';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        (other.runtimeType == runtimeType &&
+            other is _$SemanticSearchResultsImpl &&
+            const DeepCollectionEquality().equals(other._results, _results) &&
+            (identical(other.mode, mode) || other.mode == mode) &&
+            (identical(other.err, err) || other.err == err));
+  }
+
+  @JsonKey(ignore: true)
+  @override
+  int get hashCode => Object.hash(
+      runtimeType, const DeepCollectionEquality().hash(_results), mode, err);
+
+  @JsonKey(ignore: true)
+  @override
+  @pragma('vm:prefer-inline')
+  _$$SemanticSearchResultsImplCopyWith<_$SemanticSearchResultsImpl>
+      get copyWith => __$$SemanticSearchResultsImplCopyWithImpl<
+          _$SemanticSearchResultsImpl>(this, _$identity);
+
+  @override
+  Map<String, dynamic> toJson() {
+    return _$$SemanticSearchResultsImplToJson(
+      this,
+    );
+  }
+}
+
+abstract class _SemanticSearchResults implements SemanticSearchResults {
+  const factory _SemanticSearchResults(
+      {final List<SearchResultItem> results,
+      final String mode,
+      final String err}) = _$SemanticSearchResultsImpl;
+
+  factory _SemanticSearchResults.fromJson(Map<String, dynamic> json) =
+      _$SemanticSearchResultsImpl.fromJson;
+
+  @override
+  List<SearchResultItem> get results;
+  @override
+  String get mode;
+  @override
+  String get err;
+  @override
+  @JsonKey(ignore: true)
+  _$$SemanticSearchResultsImplCopyWith<_$SemanticSearchResultsImpl>
+      get copyWith => throw _privateConstructorUsedError;
 }
 
 BranchInfo _$BranchInfoFromJson(Map<String, dynamic> json) {

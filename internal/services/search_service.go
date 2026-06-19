@@ -2,13 +2,15 @@ package services
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/task"
-	"sort"
 )
 
 // SearchResult represents a single search result from any scope.
@@ -267,4 +269,204 @@ func keywordRelevance(query, title, desc string) float64 {
 	}
 
 	return score
+}
+
+// SemanticSearchRequest contains parameters for a semantic+keyword search.
+type SemanticSearchRequest struct {
+	Query string `json:"query"`
+	Scope string `json:"scope,omitempty"` // "all", "sessions", "messages", "memories", "tasks", "plans"
+	Limit int    `json:"limit,omitempty"`
+}
+
+// SemanticSearchResponse is the result of a SearchSemantic call.
+type SemanticSearchResponse struct {
+	Results []SearchResult `json:"results"`
+	Mode    string         `json:"mode"` // "semantic" or "keyword" (fallback)
+	Err     string         `json:"err,omitempty"`
+}
+
+// SearchSemantic performs a semantic search across the requested scopes.
+// If no embedding provider is available or the embedding call fails, it
+// falls back to keyword search and sets Mode = "keyword" in the response.
+func (s *SearchService) SearchSemantic(ctx context.Context, req SemanticSearchRequest) (SemanticSearchResponse, error) {
+	if req.Query == "" {
+		return SemanticSearchResponse{}, wrapError("search", "SearchSemantic", ErrInvalidInput)
+	}
+	if req.Scope == "" {
+		req.Scope = "all"
+	}
+	// "sessions" and "messages" both map to the session message store;
+	// accept either alias.
+	scope := req.Scope
+	if scope == "sessions" {
+		scope = "messages"
+	}
+	totalLimit := req.Limit
+	if totalLimit <= 0 {
+		totalLimit = 20
+	}
+
+	// Determine whether semantic mode is available.
+	var queryEmb []float32
+	mode := "semantic"
+	semanticOK := true
+	if s.memoryMgr == nil {
+		semanticOK = false
+	} else if embedder := s.memoryMgr.Embedder(); embedder == nil {
+		semanticOK = false
+	} else {
+		emb, err := embedder.GenerateEmbedding(ctx, req.Query)
+		if err != nil || len(emb) == 0 {
+			semanticOK = false
+		} else {
+			queryEmb = emb
+		}
+	}
+	if !semanticOK {
+		mode = "keyword"
+	}
+
+	var allResults []SearchResult
+	lowerQuery := strings.ToLower(req.Query)
+
+	// messages scope: session message content
+	if scope == "all" || scope == "messages" {
+		if semanticOK {
+			ms, err := s.sessionStore.SearchMessagesSemantic(ctx, queryEmb, totalLimit)
+			if err == nil {
+				allResults = append(allResults, sessionResultsToSearchResults(ms)...)
+			} else if !errors.Is(err, session.ErrSemanticUnavailable) {
+				// Unexpected error — log via empty/zero and fall through to keyword
+			}
+		}
+		// Always also run keyword on messages: FTS covers everything and
+		// complements vector hits with exact-match boosts.
+		if s.sessionStore != nil {
+			ms, err := s.sessionStore.SearchMessages(ctx, req.Query, totalLimit)
+			if err == nil {
+				allResults = append(allResults, sessionResultsToSearchResults(ms)...)
+			}
+		}
+		// Also include session name/description keyword matches for the
+		// "all"/"sessions" scope so users can find a session by title.
+		if scope == "all" && s.sessionStore != nil {
+			allResults = append(allResults, s.searchSessions(ctx, lowerQuery)...)
+		}
+	}
+
+	if scope == "all" || scope == "memories" {
+		if semanticOK && s.memoryMgr != nil {
+			mem, err := s.memoryMgr.SearchSemantic(ctx, req.Query, totalLimit)
+			if err == nil {
+				allResults = append(allResults, memoryResultsToSearchResults(mem)...)
+			}
+		} else if s.memoryMgr != nil {
+			allResults = append(allResults, s.searchMemories(ctx, lowerQuery)...)
+		}
+	}
+
+	if scope == "all" || scope == "tasks" {
+		allResults = append(allResults, s.searchTasks(ctx, lowerQuery)...)
+	}
+
+	if scope == "all" || scope == "plans" {
+		allResults = append(allResults, s.searchPlans(ctx, lowerQuery)...)
+	}
+
+	// De-duplicate by (Type, ID) keeping the highest relevance.
+	allResults = dedupeAndSort(allResults)
+	if len(allResults) > totalLimit {
+		allResults = allResults[:totalLimit]
+	}
+
+	return SemanticSearchResponse{
+		Results: allResults,
+		Mode:    mode,
+	}, nil
+}
+
+func sessionResultsToSearchResults(ms []session.MessageSearchResult) []SearchResult {
+	if len(ms) == 0 {
+		return nil
+	}
+	out := make([]SearchResult, 0, len(ms))
+	for _, m := range ms {
+		title := m.Role
+		if title == "" {
+			title = "message"
+		}
+		snippet := m.Snippet
+		if snippet == "" {
+			snippet = m.Content
+		}
+		out = append(out, SearchResult{
+			Type:      "message",
+			ID:        fmt.Sprintf("%s:%d", m.SessionID, m.MessageID),
+			Title:     title,
+			Snippet:   snippet,
+			Relevance: clampRelevance(m.Relevance),
+		})
+	}
+	return out
+}
+
+func memoryResultsToSearchResults(mem []memory.MemoryResult) []SearchResult {
+	if len(mem) == 0 {
+		return nil
+	}
+	out := make([]SearchResult, 0, len(mem))
+	for _, mr := range mem {
+		snippet := mr.Memory.Content
+		if len(snippet) > 200 {
+			snippet = snippet[:200] + "..."
+		}
+		title := mr.Memory.Category
+		if title == "" {
+			title = string(mr.Memory.Type)
+		}
+		out = append(out, SearchResult{
+			Type:      "memory",
+			ID:        mr.Memory.ID,
+			Title:     title,
+			Snippet:   snippet,
+			Relevance: clampRelevance(mr.RelevanceScore),
+		})
+	}
+	return out
+}
+
+func clampRelevance(r float64) float64 {
+	if r < 0 {
+		return 0
+	}
+	if r > 1 {
+		return 1
+	}
+	return r
+}
+
+func dedupeAndSort(results []SearchResult) []SearchResult {
+	if len(results) == 0 {
+		return results
+	}
+	byKey := make(map[string]int, len(results))
+	out := make([]SearchResult, 0, len(results))
+	for _, r := range results {
+		key := r.Type + ":" + r.ID
+		if idx, ok := byKey[key]; ok {
+			if r.Relevance > out[idx].Relevance {
+				out[idx] = r
+			}
+		} else {
+			byKey[key] = len(out)
+			out = append(out, r)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Relevance != out[j].Relevance {
+			return out[i].Relevance > out[j].Relevance
+		}
+		return out[i].Type < out[j].Type
+	})
+	return out
 }

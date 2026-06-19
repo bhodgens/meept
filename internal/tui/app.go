@@ -44,6 +44,7 @@ const (
 	ViewQueue
 	ViewMemory
 	ViewPlans
+	ViewSearch
 )
 
 // VerbosityLevel controls how much progress detail to show in the TUI.
@@ -105,6 +106,7 @@ type App struct {
 	queue    *models.QueueModel
 	memory   *models.MemoryModel
 	plans    *models.PlansModel
+	search   *models.SearchModel
 
 	// Sidebar
 	sidebar *SidebarModel
@@ -249,6 +251,7 @@ func NewApp(socketPath string) *App {
 		queue:          models.NewQueueModel(rpc),
 		memory:         models.NewMemoryModel(rpc),
 		plans:          models.NewPlansModel(rpc),
+		search:         models.NewSearchModel(rpc, slog.Default()),
 		sidebar:        NewSidebarModel(rpc, eventRPC, styles, clientConfig.Rendering.SidebarAnimation),
 		keys:           DefaultKeyMap(),
 		clientConfig:   clientConfig,
@@ -586,6 +589,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.queue.SetSize(mainWidth, msg.Height-chromeHeight)
 		a.memory.SetSize(mainWidth, msg.Height-chromeHeight)
 		a.plans.SetSize(mainWidth, msg.Height-chromeHeight)
+		if a.search != nil {
+			a.search.SetSize(mainWidth, msg.Height-chromeHeight)
+		}
 
 		return a, nil
 
@@ -887,6 +893,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case SessionSwitchMsg:
 		// Switch to selected session
+		if msg.Err != nil {
+			a.statusMessage = fmt.Sprintf("session switch failed: %v", msg.Err)
+			a.statusMessageTime = time.Now()
+			return a, tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
+				return StatusMessageClearMsg{}
+			})
+		}
 		if msg.Session != nil {
 			a.currentSession = msg.Session
 			a.sessionMgr.SetSession(msg.Session)
@@ -949,6 +962,29 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Open rename modal for creating a new session (uses default name)
 		a.activeModal = ModalSessionRename
 		a.sessionRename.Show("", a.clientConfig.Session.DefaultName)
+		return a, nil
+
+	case models.OpenSearchViewMsg:
+		// Switch to the global search view
+		a.currentView = ViewSearch
+		if a.search != nil {
+			return a, a.search.Init()
+		}
+		return a, nil
+
+	case models.CloseSearchViewMsg:
+		// Return to the sessions view
+		a.currentView = ViewSessions
+		return a, nil
+
+	case models.NavigateToSessionMsg:
+		// Navigate from search results to a session in chat view.
+		// For MVP, loading the session is sufficient; scrolling to a
+		// specific message is logged for future enhancement.
+		if msg.SessionID != "" {
+			// Find the session by ID and load it into chat
+			return a, a.switchToSessionByID(msg.SessionID, msg.MessageID)
+		}
 		return a, nil
 
 	case OpenRenameModalMsg:
@@ -1430,7 +1466,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			// Handle vim toggle - mode was already toggled by the command handler.
-			_ = msg.Result.ToggleVimMode
+			// (ToggleVimMode consumed in command handler; no-op here)
 
 			// Handle project switch
 			if msg.Result.SetProjectID != "" {
@@ -1665,6 +1701,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = a.memory.Update(msg)
 	case ViewPlans:
 		cmd = a.plans.Update(msg)
+	case ViewSearch:
+		if a.search != nil {
+			cmd = a.search.Update(msg)
+		}
 	}
 	if cmd != nil {
 		cmds = append(cmds, cmd)
@@ -1830,6 +1870,31 @@ func (a *App) createSession(name string) tea.Cmd {
 	}
 }
 
+// switchToSessionByID loads a session by ID into the chat view. Used by the
+// global search view to navigate to a message result. For MVP, scrolling to
+// a specific message ID is logged for future enhancement.
+func (a *App) switchToSessionByID(sessionID string, messageID int64) tea.Cmd {
+	return func() tea.Msg {
+		if !a.rpc.IsConnected() {
+			return SessionSwitchMsg{Err: fmt.Errorf("not connected")}
+		}
+		// Fetch the session by scanning the session list. The RPC layer
+		// does not have a GetSessionByID method, so we use ListSessions
+		// and find by ID. This is acceptable for MVP since search
+		// navigation is user-initiated and infrequent.
+		resp, err := a.rpc.ListSessions()
+		if err != nil {
+			return SessionSwitchMsg{Err: err}
+		}
+		for _, sess := range resp.Sessions {
+			if sess.ID == sessionID {
+				return SessionSwitchMsg{Session: &sess, SwitchToChat: true}
+			}
+		}
+		return SessionSwitchMsg{Err: fmt.Errorf("session not found: %s", sessionID)}
+	}
+}
+
 // deleteSession deletes a session via SessionManager.
 func (a *App) deleteSession(sessionID string) tea.Cmd {
 	return func() tea.Msg {
@@ -1857,7 +1922,9 @@ func (a *App) renameSession(sessionID, newName string) tea.Cmd {
 			return RenameErrorMsg{Err: err}
 		}
 		// Refresh session list so names stay in sync
-		_, _ = a.sessionMgr.ListSessions(nil)
+		if _, err := a.sessionMgr.ListSessions(nil); err != nil {
+			slog.Debug("failed to refresh session list", "error", err)
+		}
 		return models.SessionDescriptionUpdatedMsg{
 			SessionID:   sessionID,
 			Description: newName,
@@ -1880,6 +1947,10 @@ func (a *App) initCurrentView() tea.Cmd {
 		return a.memory.Init()
 	case ViewPlans:
 		return a.plans.Init()
+	case ViewSearch:
+		if a.search != nil {
+			return a.search.Init()
+		}
 	}
 	return nil
 }
@@ -1925,6 +1996,12 @@ func (a *App) View() tea.View {
 			mainView = a.memory.View()
 		case ViewPlans:
 			mainView = a.plans.View()
+		case ViewSearch:
+			if a.search != nil {
+				mainView = a.search.View()
+			} else {
+				mainView = "search unavailable"
+			}
 		}
 	}
 
@@ -2247,6 +2324,14 @@ func (a *App) getQuickActions() []string {
 			a.styles.HelpKey.Render(KeyEnter)+" "+a.styles.HelpValue.Render("details"),
 			a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"),
 			a.styles.HelpKey.Render("/")+" "+a.styles.HelpValue.Render("filter"),
+		)
+
+	case ViewSearch:
+		actions = append(actions,
+			a.styles.HelpKey.Render(KeyEnter)+" "+a.styles.HelpValue.Render("open"),
+			a.styles.HelpKey.Render(KeyEsc)+" "+a.styles.HelpValue.Render("back"),
+			a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"),
+			a.styles.HelpKey.Render("tab")+" "+a.styles.HelpValue.Render("scope"),
 		)
 	}
 

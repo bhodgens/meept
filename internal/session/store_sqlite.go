@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -118,6 +119,55 @@ func (s *SQLiteStore) migrate() error {
 	// Add indexes for tree queries
 	s.migrationCreateIndex("CREATE INDEX IF NOT EXISTS idx_session_messages_session_parent ON session_messages(session_id, parent_id)", "idx_session_messages_session_parent")
 	s.migrationCreateIndex("CREATE INDEX IF NOT EXISTS idx_session_messages_session_branch ON session_messages(session_id, branch_id)", "idx_session_messages_session_branch")
+
+	// FTS5 mirror of session_messages for keyword search.
+	ftsSchema := `
+	CREATE VIRTUAL TABLE IF NOT EXISTS session_messages_fts USING fts5(
+		message_id UNINDEXED,
+		session_id UNINDEXED,
+		role UNINDEXED,
+		content,
+		tokenize = 'porter unicode61'
+	);
+
+	CREATE TRIGGER IF NOT EXISTS session_messages_ai_fts AFTER INSERT ON session_messages BEGIN
+		INSERT INTO session_messages_fts(message_id, session_id, role, content)
+		VALUES (new.id, new.session_id, new.role, new.content);
+	END;
+	CREATE TRIGGER IF NOT EXISTS session_messages_ad_fts AFTER DELETE ON session_messages BEGIN
+		DELETE FROM session_messages_fts WHERE message_id = old.id;
+	END;
+	CREATE TRIGGER IF NOT EXISTS session_messages_au_fts AFTER UPDATE ON session_messages BEGIN
+		DELETE FROM session_messages_fts WHERE message_id = old.id;
+		INSERT INTO session_messages_fts(message_id, session_id, role, content)
+		VALUES (new.id, new.session_id, new.role, new.content);
+	END;
+	`
+	if _, err := s.db.Exec(ftsSchema); err != nil {
+		return fmt.Errorf("failed to create session_messages_fts: %w", err)
+	}
+
+	// Backfill FTS for any messages inserted before the triggers existed.
+	// Idempotent: re-running just no-ops on duplicates because we delete-first.
+	if err := s.backfillFTS(); err != nil {
+		// Non-fatal: FTS may be unavailable on some SQLite builds.
+		s.logger.Warn("FTS backfill skipped", "error", err)
+	}
+
+	// Embedding dimension is fixed at 768 for the MVP. Matches nomic-embed-text
+	// default via Ollama. If the configured provider uses a different dimension,
+	// a future migration can alter this.
+	const embeddingDim = 768
+	vectorSchema := fmt.Sprintf(`
+	CREATE VIRTUAL TABLE IF NOT EXISTS session_message_vectors USING vec0(
+		message_id INTEGER PRIMARY KEY,
+		embedding float[%d]
+	);
+	`, embeddingDim)
+	if _, err := s.db.Exec(vectorSchema); err != nil {
+		// vec0 may be unavailable on some builds; degrade to keyword-only.
+		s.logger.Warn("session_message_vectors unavailable; semantic search disabled", "error", err)
+	}
 
 	// Backfill parent_id for messages created before the column existed.
 	// Orders messages by id ASC within each session and chains them so each
@@ -628,7 +678,11 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone {
+			slog.Debug("transaction rollback error", "error", rErr)
+		}
+	}()
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO session_messages (session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, name, tool_call_id)
@@ -1000,9 +1054,11 @@ func (s *SQLiteStore) GetTree(sessionID string) ([]TreeNode, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Get the current leaf for IsLeaf marking
+	// Get the current leaf for IsLeaf marking (best-effort; leafID stays null on error)
 	var leafID sql.NullInt64
-	_ = s.db.QueryRow(`SELECT leaf_message_id FROM sessions WHERE id = ?`, sessionID).Scan(&leafID) //nolint:mutexio // mutex serializes sqlite connection access
+	if qErr := s.db.QueryRow(`SELECT leaf_message_id FROM sessions WHERE id = ?`, sessionID).Scan(&leafID); qErr != nil && qErr != sql.ErrNoRows { //nolint:mutexio // mutex serializes sqlite connection access
+		slog.Debug("failed to read leaf_message_id", "session", sessionID, "error", qErr)
+	}
 
 	query := `
 	SELECT id, COALESCE(parent_id, 0), role, COALESCE(entry_type, 'message'), COALESCE(branch_id, 'main'),
@@ -1107,7 +1163,11 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone {
+			slog.Debug("transaction rollback error", "error", rErr)
+		}
+	}()
 
 	// 3. Create new session
 	now := time.Now().UTC()
@@ -1499,7 +1559,11 @@ func (s *SQLiteStore) SaveToolCalls(messageID int64, toolCalls []ToolCall) error
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone {
+			slog.Debug("transaction rollback error", "error", rErr)
+		}
+	}()
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO session_tool_calls (message_id, tool_name, tool_call_id, arguments, result, seq)
@@ -1607,3 +1671,228 @@ func (s *SQLiteStore) GetToolCallsForMessages(messageIDs []int64) (map[int64][]T
 
 // Ensure SQLiteStore implements Store interface.
 var _ Store = (*SQLiteStore)(nil)
+
+// backfillFTS populates session_messages_fts for rows inserted before the
+// triggers existed. Bounded by a batch size to avoid lock contention.
+func (s *SQLiteStore) backfillFTS() error {
+	const batchSize = 500
+	type row struct{ id int64; sessionID, role, content string }
+	for {
+		var batch []row
+		q := `SELECT sm.id, sm.session_id, sm.role, sm.content
+		      FROM session_messages sm
+		      LEFT JOIN session_messages_fts fts ON fts.message_id = sm.id
+		      WHERE fts.message_id IS NULL
+		      ORDER BY sm.id LIMIT ?`
+		rs, err := s.db.Query(q, batchSize)
+		if err != nil {
+			return fmt.Errorf("query unindexed messages: %w", err)
+		}
+		for rs.Next() {
+			var r row
+			if err := rs.Scan(&r.id, &r.sessionID, &r.role, &r.content); err != nil {
+				rs.Close()
+				return fmt.Errorf("scan unindexed row: %w", err)
+			}
+			batch = append(batch, r)
+		}
+		if err := rs.Err(); err != nil {
+			rs.Close()
+			return fmt.Errorf("iterate unindexed rows: %w", err)
+		}
+		rs.Close()
+		if len(batch) == 0 {
+			return nil
+		}
+		tx, err := s.db.Begin()
+		if err != nil {
+			return fmt.Errorf("begin fts backfill tx: %w", err)
+		}
+		stmt, err := tx.Prepare(`INSERT INTO session_messages_fts(message_id, session_id, role, content) VALUES (?, ?, ?, ?)`)
+		if err != nil {
+			tx.Rollback()
+			return fmt.Errorf("prepare fts insert: %w", err)
+		}
+		for _, r := range batch {
+			if _, err := stmt.Exec(r.id, r.sessionID, r.role, r.content); err != nil {
+				stmt.Close()
+				tx.Rollback()
+				return fmt.Errorf("insert fts row %d: %w", r.id, err)
+			}
+		}
+		stmt.Close()
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit fts backfill tx: %w", err)
+		}
+		if len(batch) < batchSize {
+			return nil
+		}
+	}
+}
+
+// SearchMessages performs FTS5 keyword search over session_messages.
+func (s *SQLiteStore) SearchMessages(ctx context.Context, query string, limit int) ([]MessageSearchResult, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	q := `
+	SELECT sm.id, sm.session_id, sm.role, sm.content, sm.timestamp,
+	       bm25(session_messages_fts) AS rank,
+	       snippet(session_messages_fts, 3, '<mark>', '</mark>', '...', 20) AS snip
+	FROM session_messages_fts fts
+	JOIN session_messages sm ON sm.id = fts.message_id
+	WHERE session_messages_fts MATCH ?
+	ORDER BY rank
+	LIMIT ?`
+	rows, err := s.db.QueryContext(ctx, q, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("SearchMessages query: %w", err)
+	}
+	defer rows.Close()
+
+	var results []MessageSearchResult
+	for rows.Next() {
+		var r MessageSearchResult
+		var rank float64
+		if err := rows.Scan(&r.MessageID, &r.SessionID, &r.Role, &r.Content, &r.Timestamp, &rank, &r.Snippet); err != nil {
+			return nil, fmt.Errorf("scan SearchMessages row: %w", err)
+		}
+		// bm25 returns negative scores (lower = better). Normalize to 0..1 with
+		// a simple inverse-exponential. Exact scale is non-meaningful; consumers
+		// should treat as relative ranking only.
+		r.Relevance = 1.0 / (1.0 + max(-rank, 0))
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate SearchMessages rows: %w", err)
+	}
+	return results, nil
+}
+
+// SearchMessagesSemantic performs vec0 KNN search over message embeddings.
+// Returns ErrSemanticUnavailable if vec0 is not registered.
+func (s *SQLiteStore) SearchMessagesSemantic(ctx context.Context, embedding []float32, limit int) ([]MessageSearchResult, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if len(embedding) == 0 {
+		return nil, ErrSemanticUnavailable
+	}
+	// Probe whether the vec0 table exists.
+	var name string
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='session_message_vectors'`).Scan(&name)
+	if err == sql.ErrNoRows {
+		return nil, ErrSemanticUnavailable
+	}
+	if err != nil {
+		return nil, fmt.Errorf("probe session_message_vectors: %w", err)
+	}
+
+	// Serialize embedding for vec0 MATCH.
+	emb := serializeVec0Embedding(embedding)
+	q := `
+	SELECT v.message_id, sm.session_id, sm.role, sm.content, sm.timestamp, v.distance
+	FROM session_message_vectors v
+	JOIN session_messages sm ON sm.id = v.message_id
+	WHERE v.embedding MATCH ? AND k = ?
+	ORDER BY v.distance
+	LIMIT ?`
+	rows, err := s.db.QueryContext(ctx, q, emb, limit, limit)
+	if err != nil {
+		return nil, fmt.Errorf("SearchMessagesSemantic query: %w", err)
+	}
+	defer rows.Close()
+
+	var results []MessageSearchResult
+	for rows.Next() {
+		var r MessageSearchResult
+		var distance float64
+		if err := rows.Scan(&r.MessageID, &r.SessionID, &r.Role, &r.Content, &r.Timestamp, &distance); err != nil {
+			return nil, fmt.Errorf("scan SearchMessagesSemantic row: %w", err)
+		}
+		// cosine distance is in 0..2; relevance = 1 - distance/2.
+		r.Relevance = 1.0 - distance/2.0
+		if r.Relevance < 0 {
+			r.Relevance = 0
+		}
+		if r.Snippet == "" {
+			r.Snippet = truncateSnippet(r.Content, 200)
+		}
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate SearchMessagesSemantic rows: %w", err)
+	}
+	return results, nil
+}
+
+// StoreEmbedding persists an embedding for a message, replacing any prior.
+func (s *SQLiteStore) StoreEmbedding(ctx context.Context, messageID int64, embedding []float32) error {
+	if len(embedding) == 0 {
+		return fmt.Errorf("StoreEmbedding: empty embedding")
+	}
+	emb := serializeVec0Embedding(embedding)
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO session_message_vectors(message_id, embedding) VALUES (?, ?)`,
+		messageID, emb)
+	if err != nil {
+		return fmt.Errorf("StoreEmbedding: %w", err)
+	}
+	return nil
+}
+
+// UnembeddedMessages returns up to limit messages that have no embedding.
+func (s *SQLiteStore) UnembeddedMessages(ctx context.Context, limit int) ([]MessageSearchResult, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	q := `
+	SELECT sm.id, sm.session_id, sm.role, sm.content, sm.timestamp
+	FROM session_messages sm
+	LEFT JOIN session_message_vectors v ON v.message_id = sm.id
+	WHERE v.message_id IS NULL
+	  AND sm.role IN ('user', 'assistant')
+	ORDER BY sm.id DESC
+	LIMIT ?`
+	rows, err := s.db.QueryContext(ctx, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("UnembeddedMessages query: %w", err)
+	}
+	defer rows.Close()
+
+	var results []MessageSearchResult
+	for rows.Next() {
+		var r MessageSearchResult
+		if err := rows.Scan(&r.MessageID, &r.SessionID, &r.Role, &r.Content, &r.Timestamp); err != nil {
+			return nil, fmt.Errorf("scan UnembeddedMessages row: %w", err)
+		}
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate UnembeddedMessages rows: %w", err)
+	}
+	return results, nil
+}
+
+// serializeVec0Embedding serializes a float32 vector into the JSON array
+// format expected by sqlite-vec's MATCH operator via modernc.org/sqlite.
+func serializeVec0Embedding(vec []float32) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, v := range vec {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, "%g", v)
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
+// truncateSnippet returns the first n bytes of content, suffixed with "…".
+func truncateSnippet(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}

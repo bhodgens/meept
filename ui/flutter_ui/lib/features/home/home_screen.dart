@@ -224,6 +224,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       final sid = session?.id ?? 'default';
       ref.read(findBarVisibleProvider(sid).notifier).state = true;
     };
+    _leaderController.onGlobalSearch = () {
+      // Single `f` key shortcut fires only when on the sessions tab.
+      if (_selectedTab == HomeTab.sessions) {
+        context.goToolSearch();
+      }
+    };
     _leaderController.onBranches = () {
       context.goToolBranches();
     };

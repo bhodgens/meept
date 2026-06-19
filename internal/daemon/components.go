@@ -86,6 +86,7 @@ type Components struct {
 	StatusHandler        *StatusHandler
 	SessionStore         session.Store
 	SessionHandler       *session.Handler
+	EmbeddingWorker      *session.EmbeddingWorker
 
 	// Multi-agent orchestration components
 	Queue         queue.Queue
@@ -851,9 +852,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 	// Create vector shard manager for semantic search
 	var vectorSearcher memory.VectorSearcher
+	var embedder vector.Provider
 	if cfg.Memory.Embeddings.Enabled {
 		// Create embedding provider
-		embedder, err := vector.NewProviderFromConfig(cfg.Memory.Embeddings)
+		var err error
+		embedder, err = vector.NewProviderFromConfig(cfg.Memory.Embeddings)
 		if err != nil {
 			logger.Warn("Failed to create embedding provider, vector search disabled", "error", err)
 		} else {
@@ -896,6 +899,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 
 	// Create memory manager
+	// Wire the embedder into ManagerConfig so it is available via
+	// MemoryManager.Embedder() for downstream consumers (clustering,
+	// session embedding worker, etc.). embedder is a vector.Provider which
+	// satisfies memory.EmbeddingProvider (structural typing).
 	c.MemoryManager = memory.NewManager(memory.ManagerConfig{
 		Config:            cfg.Memory,
 		MemvidConfig:      cfg.Memvid,
@@ -904,6 +911,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		Sanitizer:         c.SecurityOrchestrator.InputSanitizer(),
 		SecurityConfig:    cfg.Memory.Security,
 		LLM:               c.LLMProvider,
+		Embedder:          embedder,
 		VectorStore:       vectorSearcher,
 	})
 	if err := c.MemoryManager.Initialize(context.Background()); err != nil {
@@ -1028,6 +1036,31 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if c.AgentLoop != nil && cfg.Session.Persistence && cfg.Session.Branching && branchMgr != nil {
 		c.AgentLoop.SetBranchManager(branchMgr)
 		logger.Info("Branch navigation wired to agent loop")
+	}
+
+	// Start session embedding background worker.
+	// Only started when both the session store and an embedding provider are
+	// available. When the worker is nil (no embedder), semantic search on
+	// session messages gracefully falls back to keyword-only mode.
+	if c.SessionStore != nil && embedder != nil {
+		c.EmbeddingWorker = session.NewEmbeddingWorker(
+			c.SessionStore,
+			embedder,
+			logger.With("component", "embedding-worker"),
+			session.EmbeddingWorkerConfig{
+				Batch:    20,
+				Interval: 60 * time.Second,
+			},
+		)
+		if c.EmbeddingWorker != nil {
+			c.EmbeddingWorker.Start()
+			logger.Info("Session embedding worker started",
+				"batch", 20,
+				"interval", "60s",
+			)
+		}
+	} else {
+		logger.Info("Session embedding worker disabled (no embedding provider or session store)")
 	}
 
 	// Create project manager if projects feature is enabled
@@ -1869,7 +1902,9 @@ func (c *Components) Start(ctx context.Context) error {
 				}
 			case "web":
 				if c.WebServer != nil {
-					_ = c.WebServer.Shutdown(ctx)
+					if err := c.WebServer.Shutdown(ctx); err != nil {
+						slog.Warn("web server shutdown error", "error", err)
+					}
 				}
 			case "telegram":
 				if c.TelegramBot != nil {
@@ -1881,11 +1916,15 @@ func (c *Components) Start(ctx context.Context) error {
 				}
 			case "cluster":
 				if c.ClusterEngine != nil {
-					_ = c.ClusterEngine.Stop()
+					if err := c.ClusterEngine.Stop(); err != nil {
+						slog.Warn("cluster engine stop error", "error", err)
+					}
 				}
 			case "clustergit":
 				if c.ClusterGitSync != nil {
-					_ = c.ClusterGitSync.Stop()
+					if err := c.ClusterGitSync.Stop(); err != nil {
+						slog.Warn("cluster git sync stop error", "error", err)
+					}
 				}
 			}
 		}
@@ -2325,6 +2364,12 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		if err := c.Queue.Close(); err != nil {
 			lastErr = err
 		}
+	}
+
+	// Stop the session embedding worker before closing the session store.
+	if c.EmbeddingWorker != nil {
+		c.EmbeddingWorker.Stop()
+		c.Logger.Info("Session embedding worker stopped")
 	}
 
 	if c.SessionStore != nil {

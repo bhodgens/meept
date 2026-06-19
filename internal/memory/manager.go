@@ -774,7 +774,12 @@ func (m *Manager) GetRelevantContext(ctx context.Context, query string, maxItems
 
 	// Apply graph ranking if available
 	if m.graph != nil && len(results) > 0 {
-		results, _ = m.graph.RankResults(ctx, results, 0.3)
+		ranked, err := m.graph.RankResults(ctx, results, 0.3)
+		if err != nil {
+			slog.Debug("graph ranking failed, using original order", "error", err)
+		} else {
+			results = ranked
+		}
 	}
 
 	// Sort by relevance descending, recency as tie-breaker
@@ -1790,6 +1795,12 @@ func (m *Manager) SearchHybrid(ctx context.Context, query string, limit int) ([]
 // Returns nil if vector search is not configured.
 func (m *Manager) GetVectorSearcher() VectorSearcher {
 	return m.vectorStore
+}
+
+// Embedder returns the configured embedding provider, or nil if none is set.
+// Callers should nil-check before use.
+func (m *Manager) Embedder() EmbeddingProvider {
+	return m.embedder
 }
 
 // ScopedManager returns a ScopedMemoryManager that filters all operations

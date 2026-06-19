@@ -35,6 +35,13 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
   String? _error;
   bool _showClear = false;
 
+  /// Semantic search toggle (default on per spec).
+  bool _semanticEnabled = true;
+
+  /// Mode returned by the last search response (`'semantic'` or
+  /// `'keyword'`).  Displayed as a small muted label below the input.
+  String _mode = 'semantic';
+
   @override
   void initState() {
     super.initState();
@@ -75,18 +82,38 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
     });
 
     try {
-      final searchResults = await _sdkClient.searchWithScope(
-        query: query,
-        scope: _scope,
-      );
+      List<SearchResultItem> parsed;
+      String mode = _semanticEnabled ? 'semantic' : 'keyword';
+
+      if (_semanticEnabled) {
+        final semantic = await _sdkClient.searchSemantic(
+          query: query,
+          scope: _scope,
+        );
+        parsed = semantic.results;
+        mode = semantic.mode.isNotEmpty ? semantic.mode : 'semantic';
+        if (semantic.err.isNotEmpty && parsed.isEmpty) {
+          if (!mounted) return;
+          setState(() {
+            _isSearching = false;
+            _error = semantic.err;
+          });
+          return;
+        }
+      } else {
+        final keyword = await _sdkClient.searchWithScope(
+          query: query,
+          scope: _scope,
+        );
+        parsed = keyword.results;
+      }
 
       if (!mounted) return;
-
-      final List<SearchResultItem> parsed = searchResults.results;
 
       setState(() {
         _isSearching = false;
         _results = parsed;
+        _mode = mode;
       });
     } on SdkApiException catch (e) {
       if (!mounted) return;
@@ -254,6 +281,63 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
                     }),
                   ],
                 ),
+                const SizedBox(height: 8),
+                // Semantic toggle + mode indicator
+                Row(
+                  children: [
+                    Text(
+                      'mode:',
+                      style: CyberpunkTypography.bodySmall.copyWith(
+                        color: CyberpunkColors.orangeDark,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Tooltip(
+                      message: _semanticEnabled
+                          ? 'semantic search uses vector embeddings; keyword uses exact match'
+                          : 'keyword search uses exact match; semantic uses vector embeddings',
+                      child: FilterChip(
+                        label: Text(
+                          _semanticEnabled ? 'semantic' : 'keyword',
+                          style: CyberpunkTypography.bodySmall.copyWith(
+                            color: _semanticEnabled
+                                ? CyberpunkColors.darkGray
+                                : CyberpunkColors.orangePrimary,
+                          ),
+                        ),
+                        selected: _semanticEnabled,
+                        selectedColor: CyberpunkColors.cyanAccent,
+                        checkmarkColor: CyberpunkColors.darkGray,
+                        backgroundColor: CyberpunkColors.darkGray,
+                        side: BorderSide(
+                          color: _semanticEnabled
+                              ? CyberpunkColors.cyanAccent
+                              : CyberpunkColors.orangePrimary,
+                          width: 1,
+                        ),
+                        onSelected: (selected) {
+                          setState(() {
+                            _semanticEnabled = selected;
+                            _mode = selected ? 'semantic' : 'keyword';
+                          });
+                          if (_lastQuery.isNotEmpty) {
+                            _search(_lastQuery);
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // Mode indicator showing last response mode
+                    if (_results.isNotEmpty || _lastQuery.isNotEmpty)
+                      Text(
+                        'mode: $_mode',
+                        style: CyberpunkTypography.bodySmall.copyWith(
+                          color: CyberpunkColors.midGray,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -384,6 +468,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
   }
 
   Widget _buildResultTile(SearchResultItem result) {
+    final hasRelevance = result.relevance > 0.0;
     return ListTile(
       title: Text(
         result.title,
@@ -392,25 +477,89 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
         ),
       ),
       subtitle: result.snippet.isNotEmpty
-          ? Text(
-              result.snippet,
-              style: CyberpunkTypography.bodySmall.copyWith(
-                color: CyberpunkColors.midGray,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (result.snippet.isNotEmpty)
+                  Text(
+                    result.snippet,
+                    style: CyberpunkTypography.bodySmall.copyWith(
+                      color: CyberpunkColors.midGray,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                if (hasRelevance)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      'relevance: ${(result.relevance * 100).toStringAsFixed(0)}%',
+                      style: CyberpunkTypography.bodySmall.copyWith(
+                        color: CyberpunkColors.midGray,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+              ],
             )
           : null,
-      onTap: () {
-        // TODO: Navigate to the result based on type and id
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('navigating to ${result.type.displayName}: ${result.title}'),
-            backgroundColor: CyberpunkColors.orangePrimary,
-          ),
-        );
-      },
+      onTap: () => _navigateToResult(result),
     );
+  }
+
+  /// Navigate to the appropriate view based on result type.
+  ///
+  /// MVP wiring:
+  /// - session: fetch raw session JSON, construct a [Session], set as
+  ///   active, load messages, navigate to chat.
+  /// - message: parse `sessionID:msgID` from [result.id], navigate to
+  ///   the parent session.  Scroll-to-message is out of scope for MVP.
+  /// - task: navigate to the tasks tab.
+  /// - memory: navigate to the memory tool panel.
+  /// - plan: navigate to the plans tab.
+  Future<void> _navigateToResult(SearchResultItem result) async {
+    switch (result.type) {
+      case SearchResultType.session:
+        await _navigateToSession(result.id);
+        break;
+      case SearchResultType.message:
+        // Message IDs are formatted as "sessionID:msgID".
+        final parts = result.id.split(':');
+        if (parts.length >= 2) {
+          await _navigateToSession(parts.first);
+        } else {
+          // Fallback: treat the whole id as a session id.
+          await _navigateToSession(result.id);
+        }
+        break;
+      case SearchResultType.task:
+        context.go('/tasks');
+        break;
+      case SearchResultType.memory:
+        context.go('/tools/memory');
+        break;
+      case SearchResultType.plan:
+        context.go('/plans');
+        break;
+    }
+  }
+
+  /// Fetch a session by ID, set it as active, and navigate to chat.
+  Future<void> _navigateToSession(String sessionId) async {
+    try {
+      final raw = await _sdkClient.getSession(sessionId);
+      if (!mounted) return;
+      final session = Session.fromJson(raw);
+      ref.read(activeSessionProvider.notifier).state = session;
+      ref.read(chatProvider.notifier).loadMessages(session.id);
+      context.go('/');
+    } catch (e) {
+      // If the session fetch fails, fall back to the sessions list
+      // rather than stranding the user on the search panel.
+      if (!mounted) return;
+      context.go('/sessions');
+    }
   }
 }
 

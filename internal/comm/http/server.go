@@ -521,10 +521,12 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 		return nil
 	}
 
-	// Unmarshal the payload once for inspection
+	// Unmarshal the payload once for inspection (best-effort; payload stays nil on failure)
 	var payload map[string]any
 	if msg.Payload != nil && len(msg.Payload) > 0 {
-		_ = json.Unmarshal(msg.Payload, &payload)
+		if jErr := json.Unmarshal(msg.Payload, &payload); jErr != nil {
+			// payload stays nil; default event type classification is used
+		}
 	}
 
 	var eventType string
@@ -1071,6 +1073,7 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 
 	// Search endpoint
 	mux.HandleFunc("POST /api/v1/search", s.handleSearch)
+	mux.HandleFunc("POST /api/v1/search/semantic", s.handleSearchSemantic)
 
 	// Plan endpoints
 	mux.HandleFunc("GET /api/v1/plans", s.handlePlanList)
@@ -1909,7 +1912,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			// panic in url.URL.String().
 			s.logger.Info("WebSocket client connected", "remote", r.RemoteAddr)
 			welcome := WSMessage{Type: "status", Data: []byte(`{"connected":true}`)}
-			_ = websocket.JSON.Send(conn, welcome)
+			if err := websocket.JSON.Send(conn, welcome); err != nil {
+				s.logger.Debug("ws welcome send failed", "remote", r.RemoteAddr, "error", err)
+			}
 			defer func() {
 				s.wsHub.Unregister(conn)
 				s.logger.Info("WebSocket client disconnected", "remote", r.RemoteAddr)
@@ -1949,7 +1954,9 @@ type WSMessage struct {
 func (s *Server) handleWSMessage(conn *websocket.Conn, msg *WSMessage) {
 	switch msg.Type {
 	case "ping":
-		_ = websocket.JSON.Send(conn, WSMessage{Type: "pong"})
+		if err := websocket.JSON.Send(conn, WSMessage{Type: "pong"}); err != nil {
+			s.logger.Debug("ws pong send failed", "error", err)
+		}
 	case "subscribe":
 		s.handleWSSubscribe(conn, msg)
 	case "unsubscribe":
@@ -1963,7 +1970,9 @@ func (s *Server) handleWSMessage(conn *websocket.Conn, msg *WSMessage) {
 // Clients can subscribe to channels: chat, jobs, metrics.
 func (s *Server) handleWSSubscribe(conn *websocket.Conn, msg *WSMessage) {
 	if s.wsHub == nil {
-		_ = websocket.JSON.Send(conn, WSMessage{Type: "error", Data: json.RawMessage(`{"message":"WebSocket not enabled"}`)})
+		if err := websocket.JSON.Send(conn, WSMessage{Type: "error", Data: json.RawMessage(`{"message":"WebSocket not enabled"}`)}); err != nil {
+			s.logger.Debug("ws error send failed", "error", err)
+		}
 		return
 	}
 
@@ -1987,10 +1996,12 @@ func (s *Server) handleWSSubscribe(conn *websocket.Conn, msg *WSMessage) {
 	}
 
 	subscribeData, _ := json.Marshal(map[string]string{"channel": channel})
-	_ = websocket.JSON.Send(conn, WSMessage{
+	if err := websocket.JSON.Send(conn, WSMessage{
 		Type: "subscribed",
 		Data: subscribeData,
-	})
+	}); err != nil {
+		s.logger.Debug("ws subscribed send failed", "error", err)
+	}
 
 	// Register session filter for progress event filtering.
 	if sessionID != "" {
@@ -2005,7 +2016,9 @@ func (s *Server) handleWSSubscribe(conn *websocket.Conn, msg *WSMessage) {
 // progress events for a specific session.
 func (s *Server) handleWSUnsubscribe(conn *websocket.Conn, msg *WSMessage) {
 	if s.wsHub == nil {
-		_ = websocket.JSON.Send(conn, WSMessage{Type: "error", Data: json.RawMessage(`{"message":"WebSocket not enabled"}`)})
+		if err := websocket.JSON.Send(conn, WSMessage{Type: "error", Data: json.RawMessage(`{"message":"WebSocket not enabled"}`)}); err != nil {
+			s.logger.Debug("ws error send failed", "error", err)
+		}
 		return
 	}
 
@@ -2280,7 +2293,9 @@ func (s *Server) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
 			// Buffer for meept_events polling
 			var payload any
 			if len(msg.Payload) > 0 {
-				_ = json.Unmarshal(msg.Payload, &payload)
+				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+					s.logger.Debug("mcp event payload unmarshal failed", "error", err)
+				}
 			}
 			session.mu.Lock()
 			session.events = append(session.events, mcpEventRecord{
@@ -2430,8 +2445,13 @@ func (s *Server) mcpToolEvents(args map[string]any) (any, error) {
 	if since != "" {
 		sinceTime, err := time.Parse(time.RFC3339Nano, since)
 		if err != nil {
-			// Try RFC3339 as fallback
-			sinceTime, _ = time.Parse(time.RFC3339, since)
+			// Try RFC3339 as fallback; if that also fails, sinceTime stays zero
+			st2, fbErr := time.Parse(time.RFC3339, since)
+			if fbErr != nil {
+				s.logger.Debug("failed to parse 'since' param", "since", since, "error", fbErr)
+			} else {
+				sinceTime = st2
+			}
 		}
 		if !sinceTime.IsZero() {
 			for _, e := range sess.events {

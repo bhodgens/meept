@@ -451,12 +451,13 @@ class PlanPhase with _$PlanPhase {
 
 // ===== Search Models =====
 
-enum SearchScope { all, sessions, tasks, memories, plans }
+enum SearchScope { all, sessions, messages, tasks, memories, plans }
 
 extension SearchScopeX on SearchScope {
   String get displayName => switch (this) {
         SearchScope.all => 'all',
         SearchScope.sessions => 'sessions',
+        SearchScope.messages => 'messages',
         SearchScope.tasks => 'tasks',
         SearchScope.memories => 'memories',
         SearchScope.plans => 'plans',
@@ -468,17 +469,19 @@ extension SearchScopeX on SearchScope {
   String get apiValue => switch (this) {
         SearchScope.all => '',
         SearchScope.sessions => 'sessions',
+        SearchScope.messages => 'messages',
         SearchScope.tasks => 'tasks',
         SearchScope.memories => 'memories',
         SearchScope.plans => 'plans',
       };
 }
 
-enum SearchResultType { session, task, memory, plan }
+enum SearchResultType { session, message, task, memory, plan }
 
 extension SearchResultTypeX on SearchResultType {
   String get displayName => switch (this) {
         SearchResultType.session => 'sessions',
+        SearchResultType.message => 'messages',
         SearchResultType.task => 'tasks',
         SearchResultType.memory => 'memories',
         SearchResultType.plan => 'plans',
@@ -502,10 +505,27 @@ class SearchResultItem with _$SearchResultItem {
     required String id,
     required String title,
     @Default('') String snippet,
+    @Default(0.0) double relevance,
   }) = _SearchResultItem;
 
   factory SearchResultItem.fromJson(Map<String, dynamic> json) =>
       _$$SearchResultItemImplFromJson(json);
+}
+
+/// Results from the semantic search endpoint (`POST /api/v1/search/semantic`).
+///
+/// Kept separate from [SearchResults] so existing keyword-only callers are
+/// unaffected by the additional `mode`/`err` fields.
+@freezed
+class SemanticSearchResults with _$SemanticSearchResults {
+  const factory SemanticSearchResults({
+    @Default([]) List<SearchResultItem> results,
+    @Default('semantic') String mode,
+    @Default('') String err,
+  }) = _SemanticSearchResults;
+
+  factory SemanticSearchResults.fromJson(Map<String, dynamic> json) =>
+      _$$SemanticSearchResultsImplFromJson(json);
 }
 
 // ===== Project Models =====

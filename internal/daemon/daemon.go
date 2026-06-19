@@ -555,6 +555,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			logger.Info("Runtime RPC handlers registered")
 		}
 
+		// Search handlers (semantic + keyword)
+		if svcRegistry.Search != nil {
+			registerSearchRPCHandlers(rpcServer, svcRegistry.Search)
+			logger.Info("Search RPC handlers registered")
+		}
+
 		// Project management handlers
 		if components.ProjectManager != nil {
 			projectHandler := rpc.NewProjectHandler(components.ProjectManager, nilSafeSessionStore(components))

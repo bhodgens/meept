@@ -107,7 +107,9 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	subID := id.Generate("sse-chat-")
 	sub, unsub := s.services.Bus.Subscribe(subID, "tool.execution.progress")
 	if sub == nil {
-		_ = sse.SendError("bus subscription failed")
+		if err := sse.SendError("bus subscription failed"); err != nil {
+			s.logger.Warn("failed to send SSE error", "error", err)
+		}
 		return
 	}
 	defer unsub()
@@ -296,7 +298,9 @@ func (s *Server) handleMemoryExport(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	if _, err := w.Write(data); err != nil {
+		s.logger.Debug("memory export write failed", "error", err)
+	}
 }
 
 // ===== Queue Endpoints =====
@@ -599,8 +603,8 @@ func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
 
 	offset := 0
 	if o := r.URL.Query().Get("offset"); o != "" {
-		if _, err := strconv.Atoi(o); err == nil {
-			offset, _ = strconv.Atoi(o)
+		if v, err := strconv.Atoi(o); err == nil {
+			offset = v
 		}
 	}
 
@@ -2933,6 +2937,28 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		"results": results,
 		KeyCount:  len(results),
 	})
+}
+
+// handleSearchSemantic handles POST /api/v1/search/semantic.
+// Performs semantic (vector) search with keyword fallback.
+func (s *Server) handleSearchSemantic(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Search == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "search service not available")
+		return
+	}
+
+	var req services.SemanticSearchRequest
+	if !s.readJSON(w, r, &req) {
+		return
+	}
+
+	resp, err := s.services.Search.SearchSemantic(r.Context(), req)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, resp)
 }
 
 // ===== Skill UI Endpoint =====

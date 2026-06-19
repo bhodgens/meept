@@ -227,6 +227,12 @@ func (m *SessionsModel) Update(msg tea.Msg) tea.Cmd {
 				return OpenCreateSessionModalMsg{}
 			}
 
+		case "f":
+			// Open the global search view
+			return func() tea.Msg {
+				return OpenSearchViewMsg{}
+			}
+
 		case "r":
 			m.loading = true
 			return m.fetchSessions
@@ -400,7 +406,7 @@ func (m *SessionsModel) View() string {
 		Foreground(lipgloss.Color(ColorGray)).
 		MarginTop(1)
 
-	b.WriteString(hintStyle.Render("n: new | r: refresh | enter: details | up/down: navigate | ?: help"))
+	b.WriteString(hintStyle.Render("n: new | r: refresh | enter: details | up/down: navigate | f: search | ?: help"))
 
 	return b.String()
 }
@@ -676,6 +682,7 @@ func (m *SessionsModel) renderHelp() string {
 	content += keyStyle.Render("enter") + descStyle.Render("open session detail") + "\n"
 	content += keyStyle.Render("esc") + descStyle.Render("close detail") + "\n"
 	content += keyStyle.Render("r") + descStyle.Render("refresh sessions") + "\n"
+	content += keyStyle.Render("f") + descStyle.Render("global search") + "\n"
 	content += keyStyle.Render("?") + descStyle.Render("toggle this help") + "\n"
 
 	content += "\n"

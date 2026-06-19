@@ -310,6 +310,7 @@ _$SearchResultItemImpl _$$SearchResultItemImplFromJson(
       id: json['id'] as String,
       title: json['title'] as String,
       snippet: json['snippet'] as String? ?? '',
+      relevance: (json['relevance'] as num?)?.toDouble() ?? 0.0,
     );
 
 Map<String, dynamic> _$$SearchResultItemImplToJson(
@@ -319,14 +320,35 @@ Map<String, dynamic> _$$SearchResultItemImplToJson(
       'id': instance.id,
       'title': instance.title,
       'snippet': instance.snippet,
+      'relevance': instance.relevance,
     };
 
 const _$SearchResultTypeEnumMap = {
   SearchResultType.session: 'session',
+  SearchResultType.message: 'message',
   SearchResultType.task: 'task',
   SearchResultType.memory: 'memory',
   SearchResultType.plan: 'plan',
 };
+
+_$SemanticSearchResultsImpl _$$SemanticSearchResultsImplFromJson(
+        Map<String, dynamic> json) =>
+    _$SemanticSearchResultsImpl(
+      results: (json['results'] as List<dynamic>?)
+              ?.map((e) => SearchResultItem.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
+      mode: json['mode'] as String? ?? 'semantic',
+      err: json['err'] as String? ?? '',
+    );
+
+Map<String, dynamic> _$$SemanticSearchResultsImplToJson(
+        _$SemanticSearchResultsImpl instance) =>
+    <String, dynamic>{
+      'results': instance.results,
+      'mode': instance.mode,
+      'err': instance.err,
+    };
 
 _$BranchInfoImpl _$$BranchInfoImplFromJson(Map<String, dynamic> json) =>
     _$BranchInfoImpl(

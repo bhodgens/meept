@@ -51,6 +51,11 @@ class FindIntent extends AppIntent {
   const FindIntent();
 }
 
+/// Global semantic search (single `f` key from sessions tab).
+class GlobalSearchIntent extends AppIntent {
+  const GlobalSearchIntent();
+}
+
 /// Leader key state machine.
 ///
 /// Two-stage input: on leader key, enter "waiting" state. Next
@@ -92,6 +97,12 @@ class LeaderKeyController extends ChangeNotifier {
 
   /// Set this callback to open the in-session find bar (Cmd+F / Ctrl+F).
   VoidCallback? onInSessionFind;
+
+  /// Set this callback to open global search (single `f` key from
+  /// sessions tab).  The callback should check the current tab/route
+  /// before navigating — the controller fires on every unmodified `f`
+  /// press, leaving route-gating to the widget layer.
+  VoidCallback? onGlobalSearch;
 
   /// Optional callback for go_router navigation.
   ///
@@ -140,6 +151,11 @@ class LeaderKeyController extends ChangeNotifier {
 
     if (_isFindTrigger(event)) {
       onInSessionFind?.call();
+      return KeyEventResult.handled;
+    }
+
+    if (_isGlobalSearchTrigger(event)) {
+      onGlobalSearch?.call();
       return KeyEventResult.handled;
     }
 
@@ -251,6 +267,22 @@ class LeaderKeyController extends ChangeNotifier {
       return HardwareKeyboard.instance.isMetaPressed;
     }
     return HardwareKeyboard.instance.isControlPressed;
+  }
+
+  /// Detect a single `f` key press with no modifiers for global search.
+  ///
+  /// Route-gating (only fire when on the sessions tab) is the
+  /// responsibility of the [onGlobalSearch] callback — the controller
+  /// itself is route-agnostic.
+  static bool _isGlobalSearchTrigger(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    if (event.logicalKey != LogicalKeyboardKey.keyF) return false;
+    // No modifiers must be held.
+    if (HardwareKeyboard.instance.isMetaPressed) return false;
+    if (HardwareKeyboard.instance.isControlPressed) return false;
+    if (HardwareKeyboard.instance.isAltPressed) return false;
+    if (HardwareKeyboard.instance.isShiftPressed) return false;
+    return true;
   }
 
   /// Convert common logical keys to their character representation.
