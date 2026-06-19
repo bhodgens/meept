@@ -1,0 +1,21 @@
+#!/bin/bash
+# commit-msg hook — strip Co-Authored-By trailers from commit messages
+#
+# Claude Code and other AI tools add "Co-Authored-By:" trailers by default.
+# This hook silently removes them so commit messages stay clean.
+#
+# The hook reads the commit message file (passed as $1), removes any line
+# matching "Co-Authored-By:" (case-insensitive), and writes it back.
+
+set -euo pipefail
+
+MSG_FILE="$1"
+
+# Remove Co-Authored-By lines and clean up trailing whitespace
+# Uses sed with case-insensitive match
+sed -i '' '/^[Cc]o-[Aa]uthored-[Bb]y:/d' "$MSG_FILE"
+
+# Remove trailing blank lines (collapse to single trailing newline)
+sed -i '' -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$MSG_FILE"
+
+exit 0

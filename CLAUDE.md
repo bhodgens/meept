@@ -408,6 +408,7 @@ Triggered by `IntentPair` intent type. Default actor/reviewer mapping: analyst/p
 
 - Always implement complete wired features, do not leave stub code or partial implementations
 - Always check your work
+- **NEVER add `Co-Authored-By` trailers** to commit messages. Do not add any AI co-author attribution to any commit. A `commit-msg` hook strips them as a safety net, but do not generate them in the first place.
 - **Typed-nil interface guard**: When passing a concrete pointer to a function that accepts an interface, always nil-check the concrete pointer first. A nil `*ConcreteType` assigned to an interface variable produces a non-nil interface that passes `!= nil` but panics on method calls. Guard at the call site AND inside `With*` option functions:
   ```go
   // WRONG: typed-nil panic
