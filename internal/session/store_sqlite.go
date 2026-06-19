@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -16,15 +17,37 @@ import (
 	_ "modernc.org/sqlite/vec" // sqlite-vec extension (vec0 virtual table)
 )
 
+// defaultEmbeddingDim is the vector dimension used when no override is
+// supplied via WithEmbeddingDim. It matches nomic-embed-text's default via
+// Ollama. Other providers (e.g. OpenAI text-embedding-3-small = 1536) should
+// override via WithEmbeddingDim at construction time.
+const defaultEmbeddingDim = 768
+
 // SQLiteStore implements Store using SQLite for persistence.
 type SQLiteStore struct {
-	db     *sql.DB
-	mu     sync.RWMutex
-	logger *slog.Logger
+	db          *sql.DB
+	mu          sync.RWMutex
+	logger      *slog.Logger
+	embeddingDim int
+}
+
+// Option configures a SQLiteStore at construction time.
+type Option func(*SQLiteStore)
+
+// WithEmbeddingDim overrides the embedding vector dimension stored in the
+// vec0 virtual table. Must be set at construction time; subsequent changes
+// require a fresh database because the vec0 schema dimension is fixed at
+// CREATE time. A non-positive dim is ignored (falls back to default).
+func WithEmbeddingDim(dim int) Option {
+	return func(s *SQLiteStore) {
+		if dim > 0 {
+			s.embeddingDim = dim
+		}
+	}
 }
 
 // NewSQLiteStore creates a new SQLite-backed session store.
-func NewSQLiteStore(dbPath string, logger *slog.Logger) (*SQLiteStore, error) {
+func NewSQLiteStore(dbPath string, logger *slog.Logger, opts ...Option) (*SQLiteStore, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -35,8 +58,14 @@ func NewSQLiteStore(dbPath string, logger *slog.Logger) (*SQLiteStore, error) {
 	}
 
 	store := &SQLiteStore{
-		db:     db,
-		logger: logger,
+		db:           db,
+		logger:       logger,
+		embeddingDim: defaultEmbeddingDim,
+	}
+	for _, o := range opts {
+		if o != nil {
+			o(store)
+		}
 	}
 
 	if err := store.migrate(); err != nil {
@@ -44,7 +73,7 @@ func NewSQLiteStore(dbPath string, logger *slog.Logger) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
-	logger.Info("SQLite session store initialized", "path", dbPath)
+	logger.Info("SQLite session store initialized", "path", dbPath, "embedding_dim", store.embeddingDim)
 	return store, nil
 }
 
@@ -155,16 +184,16 @@ func (s *SQLiteStore) migrate() error {
 		s.logger.Warn("FTS backfill skipped", "error", err)
 	}
 
-	// Embedding dimension is fixed at 768 for the MVP. Matches nomic-embed-text
-	// default via Ollama. If the configured provider uses a different dimension,
-	// a future migration can alter this.
-	const embeddingDim = 768
+	// Embedding dimension is configurable via WithEmbeddingDim (defaults to
+	// defaultEmbeddingDim = 768, matching nomic-embed-text via Ollama). The
+	// dimension is captured in the vec0 schema at CREATE time, so changing it
+	// requires a new database file.
 	vectorSchema := fmt.Sprintf(`
 	CREATE VIRTUAL TABLE IF NOT EXISTS session_message_vectors USING vec0(
 		message_id INTEGER PRIMARY KEY,
 		embedding float[%d]
 	);
-	`, embeddingDim)
+	`, s.embeddingDim)
 	if _, err := s.db.Exec(vectorSchema); err != nil {
 		// vec0 may be unavailable on some builds; degrade to keyword-only.
 		s.logger.Warn("session_message_vectors unavailable; semantic search disabled", "error", err)
@@ -1736,6 +1765,14 @@ func (s *SQLiteStore) SearchMessages(ctx context.Context, query string, limit in
 	if limit <= 0 {
 		limit = 20
 	}
+	// Sanitize the user query into FTS5-safe quoted tokens. An empty sanitized
+	// result (e.g. whitespace-only input) yields no matches without erroring.
+	sanitized := fts5SanitizeQuery(query)
+	if sanitized == "" {
+		return nil, nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	q := `
 	SELECT sm.id, sm.session_id, sm.role, sm.content, sm.timestamp,
 	       bm25(session_messages_fts) AS rank,
@@ -1745,7 +1782,7 @@ func (s *SQLiteStore) SearchMessages(ctx context.Context, query string, limit in
 	WHERE session_messages_fts MATCH ?
 	ORDER BY rank
 	LIMIT ?`
-	rows, err := s.db.QueryContext(ctx, q, query, limit)
+	rows, err := s.db.QueryContext(ctx, q, sanitized, limit) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, fmt.Errorf("SearchMessages query: %w", err)
 	}
@@ -1758,10 +1795,11 @@ func (s *SQLiteStore) SearchMessages(ctx context.Context, query string, limit in
 		if err := rows.Scan(&r.MessageID, &r.SessionID, &r.Role, &r.Content, &r.Timestamp, &rank, &r.Snippet); err != nil {
 			return nil, fmt.Errorf("scan SearchMessages row: %w", err)
 		}
-		// bm25 returns negative scores (lower = better). Normalize to 0..1 with
-		// a simple inverse-exponential. Exact scale is non-meaningful; consumers
-		// should treat as relative ranking only.
-		r.Relevance = 1.0 / (1.0 + max(-rank, 0))
+		// bm25 returns negative scores where more-negative = better match.
+		// Map to 0..1 via exponential decay on the negative score: a perfect
+		// match (rank very negative) approaches 1.0, while a poor match
+		// (rank near 0) approaches 0. Treat as relative ranking only.
+		r.Relevance = 1.0 - math.Exp(rank)
 		results = append(results, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -1779,9 +1817,11 @@ func (s *SQLiteStore) SearchMessagesSemantic(ctx context.Context, embedding []fl
 	if len(embedding) == 0 {
 		return nil, ErrSemanticUnavailable
 	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	// Probe whether the vec0 table exists.
 	var name string
-	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='session_message_vectors'`).Scan(&name)
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='session_message_vectors'`).Scan(&name) //nolint:mutexio // mutex serializes sqlite connection access
 	if err == sql.ErrNoRows {
 		return nil, ErrSemanticUnavailable
 	}
@@ -1798,7 +1838,7 @@ func (s *SQLiteStore) SearchMessagesSemantic(ctx context.Context, embedding []fl
 	WHERE v.embedding MATCH ? AND k = ?
 	ORDER BY v.distance
 	LIMIT ?`
-	rows, err := s.db.QueryContext(ctx, q, emb, limit, limit)
+	rows, err := s.db.QueryContext(ctx, q, emb, limit, limit) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, fmt.Errorf("SearchMessagesSemantic query: %w", err)
 	}
@@ -1832,10 +1872,15 @@ func (s *SQLiteStore) StoreEmbedding(ctx context.Context, messageID int64, embed
 	if len(embedding) == 0 {
 		return fmt.Errorf("StoreEmbedding: empty embedding")
 	}
+	if len(embedding) != s.embeddingDim {
+		return fmt.Errorf("StoreEmbedding: dimension mismatch (got %d, want %d)", len(embedding), s.embeddingDim)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	emb := serializeVec0Embedding(embedding)
 	_, err := s.db.ExecContext(ctx,
 		`INSERT OR REPLACE INTO session_message_vectors(message_id, embedding) VALUES (?, ?)`,
-		messageID, emb)
+		messageID, emb) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return fmt.Errorf("StoreEmbedding: %w", err)
 	}
@@ -1847,6 +1892,8 @@ func (s *SQLiteStore) UnembeddedMessages(ctx context.Context, limit int) ([]Mess
 	if limit <= 0 {
 		limit = 20
 	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	q := `
 	SELECT sm.id, sm.session_id, sm.role, sm.content, sm.timestamp
 	FROM session_messages sm
@@ -1855,7 +1902,7 @@ func (s *SQLiteStore) UnembeddedMessages(ctx context.Context, limit int) ([]Mess
 	  AND sm.role IN ('user', 'assistant')
 	ORDER BY sm.id DESC
 	LIMIT ?`
-	rows, err := s.db.QueryContext(ctx, q, limit)
+	rows, err := s.db.QueryContext(ctx, q, limit) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, fmt.Errorf("UnembeddedMessages query: %w", err)
 	}
@@ -1890,10 +1937,32 @@ func serializeVec0Embedding(vec []float32) string {
 	return b.String()
 }
 
-// truncateSnippet returns the first n bytes of content, suffixed with "…".
+// fts5SanitizeQuery wraps each whitespace-separated token of the input in
+// double quotes so FTS5 treats them as phrase/term literals rather than
+// query syntax (e.g. "*", "(", "^", "-", ":" are neutralized). Embedded
+// double quotes are escaped by doubling per FTS5 string-literal rules.
+// Returns "" when the input contains no non-whitespace tokens; callers
+// should short-circuit on an empty result rather than issuing a MATCH.
+func fts5SanitizeQuery(q string) string {
+	fields := strings.Fields(q)
+	if len(fields) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(fields))
+	for _, f := range fields {
+		esc := strings.ReplaceAll(f, `"`, `""`)
+		parts = append(parts, `"`+esc+`"`)
+	}
+	return strings.Join(parts, " ")
+}
+
+// truncateSnippet returns the first n RUNES of content, suffixed with "…".
+// It operates on runes rather than bytes so multi-byte UTF-8 sequences
+// (Chinese, emoji, etc.) are not split mid-character.
 func truncateSnippet(s string, n int) string {
-	if len(s) <= n {
+	runes := []rune(s)
+	if len(runes) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return string(runes[:n]) + "…"
 }

@@ -973,9 +973,22 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
-	// Create session store (SQLite-backed for persistence)
+	// Create session store (SQLite-backed for persistence).
+	// Pass the embedder's configured dimension so the vec0 schema matches
+	// the actual embedding size (OpenAI=1536, Ollama=768, etc). Without
+	// this, StoreEmbedding rejects every vector with a dimension mismatch.
 	sessionsDB := filepath.Join(cfg.Daemon.DataDir, "sessions.db")
-	sessionStore, err := session.NewSQLiteStore(sessionsDB, logger)
+	storeOpts := []session.Option{}
+	if embedder != nil {
+		storeOpts = append(storeOpts, session.WithEmbeddingDim(embedder.Dimension()))
+	}
+	sessionStore, err := session.NewSQLiteStore(sessionsDB, logger, storeOpts...)
+	if embedder != nil {
+		logger.Info("Session store embedding dimension wired",
+			"embedding_dim", embedder.Dimension(),
+			"embedding_model", cfg.Memory.Embeddings.Model,
+		)
+	}
 	if err != nil {
 		// Fall back to in-memory store if SQLite fails
 		logger.Warn("Failed to create SQLite session store, using in-memory", "error", err)
@@ -1044,6 +1057,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// session messages gracefully falls back to keyword-only mode.
 	if c.SessionStore != nil && embedder != nil {
 		c.EmbeddingWorker = session.NewEmbeddingWorker(
+			c.ctx,
 			c.SessionStore,
 			embedder,
 			logger.With("component", "embedding-worker"),
@@ -1057,6 +1071,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			logger.Info("Session embedding worker started",
 				"batch", 20,
 				"interval", "60s",
+				"catch_up", "enabled (batch=200, interval=5s when queue is large)",
 			)
 		}
 	} else {

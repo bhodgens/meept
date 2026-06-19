@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -327,6 +328,7 @@ func (s *SearchService) SearchSemantic(ctx context.Context, req SemanticSearchRe
 	}
 
 	var allResults []SearchResult
+	var errs []string // collected non-fatal error messages
 	lowerQuery := strings.ToLower(req.Query)
 
 	// messages scope: session message content
@@ -336,14 +338,21 @@ func (s *SearchService) SearchSemantic(ctx context.Context, req SemanticSearchRe
 			if err == nil {
 				allResults = append(allResults, sessionResultsToSearchResults(ms)...)
 			} else if !errors.Is(err, session.ErrSemanticUnavailable) {
-				// Unexpected error — log via empty/zero and fall through to keyword
+				// Unexpected error — log and record, then fall through to keyword.
+				slog.Default().Warn("search.semantic: session semantic search failed",
+					"scope", "messages", "error", err)
+				errs = append(errs, err.Error())
 			}
 		}
 		// Always also run keyword on messages: FTS covers everything and
 		// complements vector hits with exact-match boosts.
 		if s.sessionStore != nil {
 			ms, err := s.sessionStore.SearchMessages(ctx, req.Query, totalLimit)
-			if err == nil {
+			if err != nil {
+				slog.Default().Warn("search.semantic: session keyword search failed",
+					"scope", "messages", "error", err)
+				errs = append(errs, err.Error())
+			} else {
 				allResults = append(allResults, sessionResultsToSearchResults(ms)...)
 			}
 		}
@@ -357,7 +366,11 @@ func (s *SearchService) SearchSemantic(ctx context.Context, req SemanticSearchRe
 	if scope == "all" || scope == "memories" {
 		if semanticOK && s.memoryMgr != nil {
 			mem, err := s.memoryMgr.SearchSemantic(ctx, req.Query, totalLimit)
-			if err == nil {
+			if err != nil {
+				slog.Default().Warn("search.semantic: memory semantic search failed",
+					"scope", "memories", "error", err)
+				errs = append(errs, err.Error())
+			} else {
 				allResults = append(allResults, memoryResultsToSearchResults(mem)...)
 			}
 		} else if s.memoryMgr != nil {
@@ -379,10 +392,14 @@ func (s *SearchService) SearchSemantic(ctx context.Context, req SemanticSearchRe
 		allResults = allResults[:totalLimit]
 	}
 
-	return SemanticSearchResponse{
+	resp := SemanticSearchResponse{
 		Results: allResults,
 		Mode:    mode,
-	}, nil
+	}
+	if len(errs) > 0 {
+		resp.Err = strings.Join(errs, "; ")
+	}
+	return resp, nil
 }
 
 func sessionResultsToSearchResults(ms []session.MessageSearchResult) []SearchResult {
