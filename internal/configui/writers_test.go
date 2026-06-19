@@ -458,3 +458,147 @@ func TestSaveModelsConfigTopLevel(t *testing.T) {
 		t.Error("expected openai provider to be preserved")
 	}
 }
+
+// TestSaveModelsConfigDrilldownLifecycleModelPaths verifies that a dirty
+// lifecycle.model_paths field, which is a JSON-encoded map[string]string in the
+// text field, round-trips through saveModelsConfig into the written models.json5
+// as a proper "model_paths" map under the provider's lifecycle block.
+// This covers spec §5a (TUI lifecycle field save path for multi-model servers).
+func TestSaveModelsConfigDrilldownLifecycleModelPaths(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json5")
+
+	origLoader := loadProvidersConfig
+	origPath := ConfigFilePath
+	t.Cleanup(func() {
+		loadProvidersConfig = origLoader
+		ConfigFilePath = origPath
+	})
+
+	loadProvidersConfig = func() (*llm.ProvidersConfig, error) {
+		return &llm.ProvidersConfig{
+			Providers: map[string]llm.ProviderConfig{
+				"llama-cpp": {
+					API: "openai",
+					Options: llm.ProviderOptionsConfig{
+						BaseURL: "http://127.0.0.1:8080",
+					},
+				},
+			},
+		}, nil
+	}
+	ConfigFilePath = func(name string) string { return path }
+
+	// Create a drilldown section with a lifecycle.model_paths field. The TUI
+	// renders this map as a JSON-encoded string; saveModelsConfig must parse
+	// it back into a map[string]string.
+	modelPathsField := NewTextField(
+		"lifecycle.model_paths",
+		"model paths (json)",
+		`{}`,
+	)
+	modelPathsField.Set(`{"code":"/models/lfm-code.gguf","chat":"/models/lfm-chat.gguf"}`)
+
+	sm := NewDrilldownSectionModel(
+		"models > providers > llama-cpp", "models", "models.json5",
+		"providers.llama-cpp",
+		[]Field{modelPathsField},
+	)
+
+	if err := saveModelsConfig(sm); err != nil {
+		t.Fatalf("saveModelsConfig: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	providers := got["providers"].(map[string]any)
+	provider := providers["llama-cpp"].(map[string]any)
+	lifecycle, ok := provider["lifecycle"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected lifecycle block; provider contents: %v", provider)
+	}
+	modelPaths, ok := lifecycle["model_paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected model_paths map under lifecycle; lifecycle contents: %v", lifecycle)
+	}
+	if modelPaths["code"] != "/models/lfm-code.gguf" {
+		t.Errorf("expected model_paths[code]='/models/lfm-code.gguf', got %v", modelPaths["code"])
+	}
+	if modelPaths["chat"] != "/models/lfm-chat.gguf" {
+		t.Errorf("expected model_paths[chat]='/models/lfm-chat.gguf', got %v", modelPaths["chat"])
+	}
+}
+
+// TestSaveModelsConfigDrilldownLifecycleSpawnCommand verifies that a dirty
+// lifecycle.spawn_command field (space-separated string in the TUI) is split
+// into []string on save. This covers spec §5a (TUI lifecycle field save path).
+func TestSaveModelsConfigDrilldownLifecycleSpawnCommand(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json5")
+
+	origLoader := loadProvidersConfig
+	origPath := ConfigFilePath
+	t.Cleanup(func() {
+		loadProvidersConfig = origLoader
+		ConfigFilePath = origPath
+	})
+
+	loadProvidersConfig = func() (*llm.ProvidersConfig, error) {
+		return &llm.ProvidersConfig{
+			Providers: map[string]llm.ProviderConfig{
+				"llama-cpp": {API: "openai"},
+			},
+		}, nil
+	}
+	ConfigFilePath = func(name string) string { return path }
+
+	spawnField := NewTextField(
+		"lifecycle.spawn_command",
+		"spawn command",
+		``,
+	)
+	spawnField.Set("llama-server --port 8080 --model ${MODEL_PATH}")
+
+	sm := NewDrilldownSectionModel(
+		"models > providers > llama-cpp", "models", "models.json5",
+		"providers.llama-cpp",
+		[]Field{spawnField},
+	)
+
+	if err := saveModelsConfig(sm); err != nil {
+		t.Fatalf("saveModelsConfig: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	provider := got["providers"].(map[string]any)["llama-cpp"].(map[string]any)
+	lifecycle, ok := provider["lifecycle"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected lifecycle block; provider: %v", provider)
+	}
+	cmd, ok := lifecycle["spawn_command"].([]any)
+	if !ok {
+		t.Fatalf("expected spawn_command array; lifecycle: %v", lifecycle)
+	}
+	want := []string{"llama-server", "--port", "8080", "--model", "${MODEL_PATH}"}
+	if len(cmd) != len(want) {
+		t.Fatalf("expected spawn_command len=%d, got %d (%v)", len(want), len(cmd), cmd)
+	}
+	for i, w := range want {
+		if cmd[i] != w {
+			t.Errorf("spawn_command[%d]: want %q, got %v", i, w, cmd[i])
+		}
+	}
+}

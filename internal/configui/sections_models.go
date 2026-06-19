@@ -17,6 +17,8 @@ func buildModelsFields() []Field {
 	return []Field{
 		NewTextField("model", "default model", cfg.Model),
 		NewTextField("small_model", "small model", cfg.SmallModel),
+		NewTextField("classifier_model", "classifier model", cfg.ClassifierModel),
+		NewTextField("summarizer_model", "summarizer model", cfg.SummarizerModel),
 		NewTextField("disabled_providers", "disabled providers", strings.Join(cfg.DisabledProviders, ", ")),
 		NewDrilldownField("providers", "providers", buildProviderItems(cfg.Providers)),
 	}
@@ -38,12 +40,16 @@ func buildProviderItems(providers map[string]llm.ProviderConfig) []DrilldownItem
 			NewMaskedField("options.apiKey", "api key", p.Options.APIKey),
 			NewNumberField("options.timeout", "timeout", p.Options.Timeout),
 		}
-		// Lifecycle fields are surfaced only when a lifecycle block already
-		// exists. (Adding a brand-new lifecycle via the TUI is a future
-		// enhancement — the field set is the same as for an existing block.)
+		// Lifecycle fields are always surfaced. When no lifecycle block exists
+		// on the provider, fields render with zero-value defaults; the save
+		// path (save.go saveModelsConfig) initializes provider.Lifecycle on
+		// first dirty lifecycle.* field, so a brand-new lifecycle block can
+		// be added entirely from the TUI.
+		lc := llm.RuntimeLifecycleConfig{}
 		if p.Lifecycle != nil {
-			fields = append(fields, lifecycleFields(*p.Lifecycle)...)
+			lc = *p.Lifecycle
 		}
+		fields = append(fields, lifecycleFields(lc)...)
 		items = append(items, DrilldownItem{Name: name, Fields: fields})
 	}
 	return items

@@ -286,7 +286,7 @@ Per endpoint key, not per provider. The `pid_file` in config is used as-is for t
 
 ### Status reporting
 
-`RuntimeManager.Status()` returns one entry per registered provider (so `meept runtime status` shows all configured models), but each entry's `PID` field reflects the shared process's PID. A new field, `process_group`, identifies the shared process (e.g. `"127.0.0.1:8080"`).
+`RuntimeManager.Status()` returns one entry per registered provider (so `meept runtime status` shows all configured models), but each entry's `PID` field reflects the shared process's PID. A new field, `process_group`, identifies the shared process using the full endpoint key (e.g. `"llama-cpp:127.0.0.1:8080"` — `<runtime>:<host>:<port>`). Including the runtime type prefix disambiguates between runtime types (llama-cpp vs mlx) that may share a host:port.
 
 ### Implementation
 
