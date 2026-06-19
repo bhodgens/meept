@@ -57,7 +57,11 @@ type TerminalSession struct {
 // NewTerminalService creates a new terminal service.
 func NewTerminalService(workingDir string, bus *bus.MessageBus, logger *slog.Logger) *TerminalService {
 	if workingDir == "" {
-		workingDir, _ = os.Getwd()
+		if wd, err := os.Getwd(); err == nil {
+			workingDir = wd
+		} else {
+			logger.Warn("getwd failed; falling back to empty working dir", "error", err)
+		}
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -295,8 +299,12 @@ func GetShellOutput(result any) (stdout, stderr string, exitCode int, ok bool) {
 	case builtin.ShellResult:
 		return r.Stdout, r.Stderr, r.ReturnCode, true
 	case map[string]any:
-		stdout, _ = r["stdout"].(string)
-		stderr, _ = r["stderr"].(string)
+		if v, ok := r["stdout"].(string); ok {
+			stdout = v
+		}
+		if v, ok := r["stderr"].(string); ok {
+			stderr = v
+		}
 		if code, ok := r["return_code"].(float64); ok {
 			exitCode = int(code)
 		}
@@ -314,8 +322,12 @@ func GetShellOutput(result any) (stdout, stderr string, exitCode int, ok bool) {
 		return "", "", 0, false
 	}
 
-	stdout, _ = m["stdout"].(string)
-	stderr, _ = m["stderr"].(string)
+	if v, ok := m["stdout"].(string); ok {
+		stdout = v
+	}
+	if v, ok := m["stderr"].(string); ok {
+		stderr = v
+	}
 	if code, ok := m["return_code"].(float64); ok {
 		exitCode = int(code)
 	}

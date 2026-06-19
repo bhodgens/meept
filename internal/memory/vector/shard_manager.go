@@ -182,7 +182,9 @@ func (m *ShardManager) GetShard(shardType ShardType) (*VectorShard, error) {
 
 	// Evict outside the lock
 	if victim != "" {
-		_ = m.unloadShard(victim)
+		if err := m.unloadShard(victim); err != nil {
+			slog.Default().Warn("shard eviction (unload) failed", "victim", victim, "error", err)
+		}
 	}
 
 	return shard, nil

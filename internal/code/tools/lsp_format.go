@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -97,7 +98,9 @@ func (t *LSPFormatTool) Execute(ctx context.Context, args map[string]any) (any, 
 	// Notify the LSP server about the change
 	content, err := os.ReadFile(absPath)
 	if err == nil {
-		_ = srv.DocMgr.UpdateFile(ctx, absPath, string(content))
+		if err := srv.DocMgr.UpdateFile(ctx, absPath, string(content)); err != nil {
+			slog.Default().Warn("lsp format: doc manager update failed", "path", absPath, "error", err)
+		}
 	}
 
 	// Build summary of changes

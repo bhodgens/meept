@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"syscall"
 
@@ -245,7 +246,9 @@ func (t *TUI) quit() {
 			}
 		}
 		if lastUserMsg != "" {
-			_ = t.sessionMgr.UpdateSessionDescription(context.TODO(), lastUserMsg)
+			if err := t.sessionMgr.UpdateSessionDescription(context.TODO(), lastUserMsg); err != nil {
+				slog.Default().Warn("session description update failed", "error", err)
+			}
 		}
 	}
 

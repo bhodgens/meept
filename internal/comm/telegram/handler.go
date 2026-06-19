@@ -148,7 +148,9 @@ func writeAtomic(path string, data []byte, perm os.FileMode) error {
 	// Best-effort cleanup if any step below fails.
 	defer func() {
 		if err != nil {
-			_ = os.Remove(tmpPath)
+			if rmErr := os.Remove(tmpPath); rmErr != nil {
+				slog.Default().Warn("temp file cleanup failed", "path", tmpPath, "error", rmErr)
+			}
 		}
 	}()
 	if _, err = f.Write(data); err != nil {

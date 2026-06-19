@@ -176,7 +176,9 @@ func (b *DockerBackend) Execute(ctx context.Context, cmd Command) (*CommandResul
 	case <-ctx.Done():
 		// Best-effort: terminate the exec's hijacked connection. This causes
 		// the process inside the container to receive SIGHUP / be reaped.
-		_ = waiter.Close()
+		if err := waiter.Close(); err != nil {
+			slog.Default().Warn("docker exec: waiter close on cancellation failed", "cmd", cmd.Cmd, "error", err)
+		}
 		// Drain the goroutine so it doesn't leak; ignore its result since we
 		// already decided to return a cancellation error.
 		go func() { <-done }()
@@ -185,7 +187,9 @@ func (b *DockerBackend) Execute(ctx context.Context, cmd Command) (*CommandResul
 		}
 		return nil, fmt.Errorf("%w: %s", ErrCanceled, cmd.Cmd)
 	case res := <-done:
-		_ = waiter.Close()
+		if err := waiter.Close(); err != nil {
+			slog.Default().Warn("docker exec: waiter close failed", "cmd", cmd.Cmd, "error", err)
+		}
 		if res.err != nil {
 			return nil, fmt.Errorf("container exec failed: %w", res.err)
 		}

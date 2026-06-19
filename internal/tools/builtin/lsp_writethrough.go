@@ -193,7 +193,9 @@ func (n *lspWriteNotifier) formatFile(ctx context.Context, srv *lsp.ServerInstan
 
 	// Notify LSP of the formatting change
 	if updated, err := os.ReadFile(absPath); err == nil {
-		_ = srv.DocMgr.UpdateFile(ctx, absPath, string(updated))
+		if err := srv.DocMgr.UpdateFile(ctx, absPath, string(updated)); err != nil {
+			n.logger.Debug("lsp writethrough: doc manager update failed", "path", absPath, "error", err)
+		}
 	}
 
 	// Count lines changed
@@ -270,11 +272,13 @@ func (n *lspWriteNotifier) collectDiagnostics(ctx context.Context, srv *lsp.Serv
 	}()
 
 	// Send a didSave to trigger fresh diagnostics
-	_ = srv.Client.Notify(ctx, "textDocument/didSave", map[string]any{
+	if err := srv.Client.Notify(ctx, "textDocument/didSave", map[string]any{
 		"textDocument": map[string]any{
 			"uri": uri,
 		},
-	})
+	}); err != nil {
+		n.logger.Debug("lsp writethrough: didSave notify failed", "uri", uri, "error", err)
+	}
 
 	// Wait for diagnostics with timeout
 	timeoutCtx, cancel := context.WithTimeout(ctx, n.diagnosticsTimeout)

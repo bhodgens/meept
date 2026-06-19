@@ -2194,7 +2194,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					"token_count", quality.TokenCount,
 				)
 			}
-			_ = quality // Quality stored for later task metrics
+			// quality var consumed above via structured log fields
 		}
 
 		// Capture interaction for shadow training
@@ -3672,7 +3672,9 @@ func (l *AgentLoop) SetSessionStore(store any, sessionCfg any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if store != nil {
-		l.sessionStore, _ = store.(sessionStore)
+		if ss, ok := store.(sessionStore); ok {
+			l.sessionStore = ss
+		}
 	}
 }
 
@@ -3682,7 +3684,9 @@ func (l *AgentLoop) SetBranchManager(mgr any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if mgr != nil {
-		l.branchManager, _ = mgr.(branchManager)
+		if bm, ok := mgr.(branchManager); ok {
+			l.branchManager = bm
+		}
 	}
 }
 

@@ -97,21 +97,10 @@ func NewSentenceTransformerProvider(cfg SentenceTransformerConfig) (*sentenceTra
 		}
 	}
 
-	// Download if not cached
-	if p.modelDir == "" {
-		downloader := NewModelDownloader(filepath.Join(p.getCacheDir(), cfg.ModelID), p.logger)
-		_ = downloader // cached model
-	}
+	// Model download is performed lazily on first use via EnsureModel
+	// when p.modelDir is empty.
 
 	return p, nil
-}
-
-func (p *sentenceTransformerProvider) getCacheDir() string {
-	home, _ := os.UserHomeDir()
-	if home == "" {
-		home = "."
-	}
-	return filepath.Join(home, ".meept", "models")
 }
 
 // GenerateEmbedding generates an embedding for the given text.
@@ -212,7 +201,11 @@ func (p *sentenceTransformerProvider) ensureInitialized() error {
 	tok, err := newBPETokenizerFallback(p.tokenizerPath)
 	if err != nil {
 		p.logger.Warn("tokenizer load failed, using default", "error", err)
-		tok, _ = NewDefaultTokenizer()
+		if defTok, ok := NewDefaultTokenizer(); ok {
+			tok = defTok
+		} else {
+			p.logger.Warn("default tokenizer creation returned not-ok")
+		}
 	}
 	p.tokenizer = tok
 
@@ -348,10 +341,18 @@ func loadWeights(path string, logger *slog.Logger) (*modelWeights, error) {
 
 	reader := bytes.NewReader(data)
 	var hiddenIn, hiddenOut, vocabSize, maxSeqLen int32
-	_ = binary.Read(reader, binary.LittleEndian, &hiddenIn)
-	_ = binary.Read(reader, binary.LittleEndian, &hiddenOut)
-	_ = binary.Read(reader, binary.LittleEndian, &vocabSize)
-	_ = binary.Read(reader, binary.LittleEndian, &maxSeqLen)
+	if err := binary.Read(reader, binary.LittleEndian, &hiddenIn); err != nil {
+		return nil, fmt.Errorf("read hiddenIn: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &hiddenOut); err != nil {
+		return nil, fmt.Errorf("read hiddenOut: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &vocabSize); err != nil {
+		return nil, fmt.Errorf("read vocabSize: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &maxSeqLen); err != nil {
+		return nil, fmt.Errorf("read maxSeqLen: %w", err)
+	}
 
 	remaining := reader.Len()
 	if remaining%4 != 0 {

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/user"
@@ -33,8 +34,7 @@ type launchService struct {
 
 func (l *launchService) Init(*service.Service) error { return nil }
 
-func (l *launchService) Start(s service.Service) error {
-	_ = s
+func (l *launchService) Start(_ service.Service) error {
 	// Exec the daemon binary. daemon.Run() blocks in the foreground by default.
 	// The daemon uses slog handlers for all structured output, so stdout is
 	// unused. Direct stderr to os.Stderr so early-init panics are captured by
@@ -146,7 +146,9 @@ func (c *legacyController) Stop() error {
 			}
 		}
 		// Force kill if still alive.
-		_ = proc.Signal(syscall.SIGKILL)
+		if err := proc.Signal(syscall.SIGKILL); err != nil {
+			slog.Default().Warn("force kill signal failed", "pid", pid, "error", err)
+		}
 		return nil
 	}
 	return nil
@@ -164,16 +166,34 @@ func parseElapsedTime(s string) time.Duration {
 	case 3:
 		dayPart := parts[0]
 		if idx := strings.Index(dayPart, "-"); idx > 0 {
-			days, _ = strconv.Atoi(dayPart[:idx])
-			hours, _ = strconv.Atoi(dayPart[idx+1:])
+			var err error
+			if days, err = strconv.Atoi(dayPart[:idx]); err != nil {
+				days = 0
+			}
+			if hours, err = strconv.Atoi(dayPart[idx+1:]); err != nil {
+				hours = 0
+			}
 		} else {
-			hours, _ = strconv.Atoi(parts[0])
+			var err error
+			if hours, err = strconv.Atoi(parts[0]); err != nil {
+				hours = 0
+			}
 		}
-		mins, _ = strconv.Atoi(parts[1])
-		secs, _ = strconv.Atoi(parts[2])
+		var err error
+		if mins, err = strconv.Atoi(parts[1]); err != nil {
+			mins = 0
+		}
+		if secs, err = strconv.Atoi(parts[2]); err != nil {
+			secs = 0
+		}
 	case 2:
-		mins, _ = strconv.Atoi(parts[0])
-		secs, _ = strconv.Atoi(parts[1])
+		var err error
+		if mins, err = strconv.Atoi(parts[0]); err != nil {
+			mins = 0
+		}
+		if secs, err = strconv.Atoi(parts[1]); err != nil {
+			secs = 0
+		}
 	default:
 		return 0
 	}
@@ -314,11 +334,15 @@ func (m *ServiceManager) writePlistAndLoad(label string) {
 	if err := os.WriteFile(plistPath, []byte(plist), 0o600); err != nil {
 		return
 	}
-	_ = exec.Command("launchctl", "unload", plistPath).Run()
+	if err := exec.Command("launchctl", "unload", plistPath).Run(); err != nil {
+		slog.Default().Debug("launchctl unload (pre-load) failed; this is usually benign", "path", plistPath, "error", err)
+	}
 	cmd := exec.Command("launchctl", "load", "-w", plistPath)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	_ = cmd.Run()
+	if err := cmd.Run(); err != nil {
+		slog.Default().Warn("launchctl load failed", "path", plistPath, "output", out.String(), "error", err)
+	}
 }
 
 // Uninstall stops the service and removes the plist.
@@ -341,15 +365,21 @@ func (m *ServiceManager) Uninstall() error {
 	}
 	svc, err := service.New(prg, cfg)
 	if err == nil {
-		_ = svc.Stop()
-		_ = svc.Uninstall()
+		if err := svc.Stop(); err != nil {
+			slog.Default().Warn("service stop failed", "label", label, "error", err)
+		}
+		if err := svc.Uninstall(); err != nil {
+			slog.Default().Warn("service uninstall failed", "label", label, "error", err)
+		}
 	}
 
 	// Also clean up the plist file directly as a fallback.
 	home := getHomeDirOrFallback()
 	laDir := filepath.Join(home, "Library", "LaunchAgents")
 	plistPath := filepath.Join(laDir, label+".plist")
-	_ = exec.Command("launchctl", "unload", plistPath).Run()
+	if err := exec.Command("launchctl", "unload", plistPath).Run(); err != nil {
+		slog.Default().Debug("launchctl unload failed; service may not be loaded", "path", plistPath, "error", err)
+	}
 	return os.Remove(plistPath)
 }
 

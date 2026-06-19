@@ -183,11 +183,21 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 		}
 
 		op := editOp{}
-		op.Op, _ = editMap["op"].(string)
-		op.Anchor, _ = editMap["anchor"].(string)
-		op.EndAnchor, _ = editMap["end_anchor"].(string)
-		op.Content, _ = editMap["content"].(string)
-		op.SnapshotTag, _ = editMap["tag"].(string)
+		if v, ok := editMap["op"].(string); ok {
+			op.Op = v
+		}
+		if v, ok := editMap["anchor"].(string); ok {
+			op.Anchor = v
+		}
+		if v, ok := editMap["end_anchor"].(string); ok {
+			op.EndAnchor = v
+		}
+		if v, ok := editMap["content"].(string); ok {
+			op.Content = v
+		}
+		if v, ok := editMap["tag"].(string); ok {
+			op.SnapshotTag = v
+		}
 
 		if op.Op == "" {
 			return nil, fmt.Errorf("edit %d: missing 'op' field", i+1)
@@ -471,7 +481,9 @@ func absorbBoundaries(fileLines []string, ops []editOp) []editOp {
 
 		endLine := startLine
 		if op.EndAnchor != "" {
-			endLine, _, _, _ = ParseSnapshotAnchor(op.EndAnchor)
+			if l, _, _, parseErr := ParseSnapshotAnchor(op.EndAnchor); parseErr == nil {
+				endLine = l
+			}
 		}
 
 		content := strings.Split(op.Content, "\n")
@@ -876,7 +888,9 @@ func (t *FileEditTool) applyEdits(lines []string, ops []editOp) []string {
 			startLine, _, _, _ := ParseSnapshotAnchor(op.Anchor)
 			endLine := startLine
 			if op.EndAnchor != "" {
-				endLine, _, _, _ = ParseSnapshotAnchor(op.EndAnchor)
+				if l, _, _, parseErr := ParseSnapshotAnchor(op.EndAnchor); parseErr == nil {
+					endLine = l
+				}
 			}
 			lineOps = append(lineOps, lineOp{
 				opType:    "delete_range",
@@ -888,7 +902,9 @@ func (t *FileEditTool) applyEdits(lines []string, ops []editOp) []string {
 			startLine, _, _, _ := ParseSnapshotAnchor(op.Anchor)
 			endLine := startLine
 			if op.EndAnchor != "" {
-				endLine, _, _, _ = ParseSnapshotAnchor(op.EndAnchor)
+				if l, _, _, parseErr := ParseSnapshotAnchor(op.EndAnchor); parseErr == nil {
+					endLine = l
+				}
 			}
 			content := strings.Split(op.Content, "\n")
 			if len(content) > 1 && content[len(content)-1] == "" {
@@ -912,7 +928,9 @@ func (t *FileEditTool) applyEdits(lines []string, ops []editOp) []string {
 			} else if op.Anchor == "EOF" {
 				insertLine = len(lines) + 1
 			} else {
-				insertLine, _, _, _ = ParseSnapshotAnchor(op.Anchor)
+				if l, _, _, parseErr := ParseSnapshotAnchor(op.Anchor); parseErr == nil {
+					insertLine = l
+				}
 			}
 			content := strings.Split(op.Content, "\n")
 			if len(content) > 1 && content[len(content)-1] == "" {
@@ -931,8 +949,9 @@ func (t *FileEditTool) applyEdits(lines []string, ops []editOp) []string {
 			} else if op.Anchor == "EOF" {
 				insertLine = len(lines) + 1
 			} else {
-				insertLine, _, _, _ = ParseSnapshotAnchor(op.Anchor)
-				insertLine++
+				if l, _, _, parseErr := ParseSnapshotAnchor(op.Anchor); parseErr == nil {
+					insertLine = l + 1
+				}
 			}
 			content := strings.Split(op.Content, "\n")
 			if len(content) > 1 && content[len(content)-1] == "" {

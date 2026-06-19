@@ -165,7 +165,6 @@ func (g *GossipEngine) SetPeerSigningKey(nodeID string, pubKey ed25519.PublicKey
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.signingPub[nodeID] = pubKey
-	_ = pubKeyID(pubKey)
 }
 
 // PeerSigningKey retrieves the ed25519 public key for a peer node.
@@ -261,7 +260,9 @@ func (g *GossipEngine) Publish(event *models.ClusterEvent) {
 	// Sign the event
 	priv := g.SigningPrivate()
 	if priv != nil {
-		_ = event.Sign(priv)
+		if err := event.Sign(priv); err != nil {
+			g.logger.Warn("event signing failed", "error", err)
+		}
 	}
 
 	// Persist to database before broadcasting

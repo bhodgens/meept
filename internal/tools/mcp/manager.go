@@ -109,7 +109,9 @@ func (m *Manager) StartServer(ctx context.Context, cfg ServerConfig) error {
 	if _, exists := m.clients[cfg.Name]; exists {
 		m.mu.Unlock()
 		// Another goroutine started the same server; close the duplicate
-		_ = client.Close()
+		if err := client.Close(); err != nil {
+			m.logger.Warn("duplicate MCP client close failed", "name", cfg.Name, "error", err)
+		}
 		return fmt.Errorf("server %q already running", cfg.Name)
 	}
 	m.clients[cfg.Name] = client
