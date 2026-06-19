@@ -92,12 +92,18 @@ func (s *UploadService) Upload(ctx context.Context, reader io.Reader, filename s
 	}
 	path := filepath.Join(s.dir, id+ext)
 
-	// Snapshot under lock: ensure dir exists, check dedup, capture prior records.
-	s.mu.Lock()
+	// Ensure dir exists (no lock needed for MkdirAll; idempotent).
 	if err := os.MkdirAll(s.dir, 0755); err != nil {
-		s.mu.Unlock()
 		return nil, fmt.Errorf("failed to create upload directory: %w", err)
 	}
+
+	// Fast path: check dedup under lock. If a fully-stored record exists with
+	// its file present, just bump the refcount and return. We do NOT reserve
+	// a record here — the reservation previously created a race window where
+	// a concurrent caller could observe a half-written state (record saved,
+	// file not yet on disk) and fall through to its own reservation,
+	// clobbering the first caller's refcount.
+	s.mu.Lock()
 	records := s.loadRecords()
 	if existing, ok := records[id]; ok {
 		if _, statErr := os.Stat(existing.Path); statErr == nil {
@@ -109,26 +115,12 @@ func (s *UploadService) Upload(ctx context.Context, reader io.Reader, filename s
 			s.mu.Unlock()
 			return &existing, nil
 		}
-		// File missing — fall through to re-store below
-	}
-	// Reserve a slot to claim dedup after the disk write succeeds.
-	reserved := Upload{
-		ID:        id,
-		Path:      path,
-		MimeType:  mimeType,
-		SizeBytes: int64(len(data)),
-		CreatedAt: time.Now().UTC(),
-		RefCount:  1,
-	}
-	records[id] = reserved
-	if err := s.saveRecords(records); err != nil {
-		s.logger.Warn("failed to persist upload reservation", "id", id, "error", err)
 	}
 	s.mu.Unlock()
 
-	// Disk I/O outside the mutex per CLAUDE.md mutex-scope rule.
-	// If two callers race here with identical content, the second call's
-	// reservation above is idempotent — the file content is identical.
+	// Disk I/O outside the mutex per CLAUDE.md mutex-scope rule. If two
+	// callers race here with identical content, both write the same bytes to
+	// the same path — the result is idempotent.
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return nil, fmt.Errorf("failed to write upload file: %w", err)
 	}
@@ -136,26 +128,48 @@ func (s *UploadService) Upload(ctx context.Context, reader io.Reader, filename s
 	// Extract image dimensions (decode-only, no mutation of service state).
 	width, height := imageDimensions(data, mimeType)
 
-	// Re-acquire briefly to record final dimensions.
+	// Re-acquire the lock and do an atomic insert-or-merge. If another caller
+	// raced and won (record now exists with its file on disk), just bump its
+	// refcount and fill in dimensions if missing. Otherwise insert a fresh
+	// record with all fields populated.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	current := s.loadRecords()
 	if existing, ok := current[id]; ok {
-		existing.Width = width
-		existing.Height = height
-		current[id] = existing
-		if err := s.saveRecords(current); err != nil {
-			s.logger.Warn("failed to persist upload dimensions", "id", id, "error", err)
+		if _, statErr := os.Stat(existing.Path); statErr == nil {
+			// Another caller won the race. Merge: bump refcount and fill in
+			// dimensions only if currently zero (we may have lost the race
+			// before decoding our own copy, but dimensions are identical for
+			// identical content anyway).
+			existing.RefCount++
+			if existing.Width == 0 {
+				existing.Width = width
+			}
+			if existing.Height == 0 {
+				existing.Height = height
+			}
+			current[id] = existing
+			if err := s.saveRecords(current); err != nil {
+				s.logger.Warn("failed to persist upload dimensions", "id", id, "error", err)
+			}
+			return &existing, nil
 		}
-		return &existing, nil
 	}
-	reserved.Width = width
-	reserved.Height = height
-	current[id] = reserved
+	record := Upload{
+		ID:        id,
+		Path:      path,
+		MimeType:  mimeType,
+		SizeBytes: int64(len(data)),
+		Width:     width,
+		Height:    height,
+		CreatedAt: time.Now().UTC(),
+		RefCount:  1,
+	}
+	current[id] = record
 	if err := s.saveRecords(current); err != nil {
 		s.logger.Warn("failed to persist upload record", "id", id, "error", err)
 	}
-	return &reserved, nil
+	return &record, nil
 }
 
 // Load returns the raw bytes and MIME type for an upload by ID.

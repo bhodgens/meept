@@ -24,10 +24,10 @@ import (
 	"github.com/caimlas/meept/internal/sharedclient"
 	"github.com/caimlas/meept/internal/stt"
 	"github.com/caimlas/meept/internal/tts"
-	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/internal/tui/render"
 	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/internal/tui/vim"
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // FocusedElement represents which element has focus in the chat view.
@@ -271,6 +271,16 @@ type attachmentEntry struct {
 	Filename string
 }
 
+// uploadResultMsg carries the result of an asynchronous image upload. It is
+// produced by a tea.Cmd returned from detectAndAttachFile and handled in Update
+// to either attach the UploadID to the pending attachment or demote it to a
+// path-only reference on failure.
+type uploadResultMsg struct {
+	path     string
+	uploadID string
+	err      error
+}
+
 // imageExtensions are file extensions treated as image uploads. Files with
 // these extensions are uploaded via the daemon and converted to
 // ContentPart{Type:"image_url"} entries on send.
@@ -409,9 +419,9 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 			Foreground(lipgloss.Color("#FFFFFF")).
 			Padding(0, 1).
 			Bold(true),
-		findInput:    findInput,
-		findMatches:  nil,
-		findCursor:   -1,
+		findInput:   findInput,
+		findMatches: nil,
+		findCursor:  -1,
 	}
 }
 
@@ -500,7 +510,9 @@ func (m *ChatModel) SetSize(width, height int) {
 
 	// Update markdown renderer width
 	if m.mdRenderer != nil {
-		_ = m.mdRenderer.SetWidth(width - 8) // Account for padding
+		if err := m.mdRenderer.SetWidth(width - 8); err != nil { // Account for padding
+			slog.Debug("markdown renderer SetWidth failed", "width", width-8, "error", err)
+		}
 	}
 
 	// Invalidate render cache when width changes
@@ -1180,6 +1192,31 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		}
 		return nil
 
+	case uploadResultMsg:
+		// finalize an asynchronous image upload started by
+		// detectAndAttachFile. On success, attach the UploadID. On failure,
+		// demote IsImage so subsequent send falls back to a path reference.
+		// The matching attachment may already have been cleared if the user
+		// sent or cleared attachments before the upload resolved; that is
+		// benign.
+		for i := range m.attachments {
+			if m.attachments[i].Path != msg.path {
+				continue
+			}
+			if msg.err != nil {
+				slog.Warn("Image upload failed; falling back to path reference",
+					"path", msg.path,
+					"error", msg.err,
+				)
+				m.attachments[i].IsImage = false
+				m.attachments[i].UploadID = ""
+			} else {
+				m.attachments[i].UploadID = msg.uploadID
+			}
+			break
+		}
+		return nil
+
 	case ChatResponseMsg:
 		m.loading = false
 
@@ -1282,7 +1319,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 	case FlushResultMsg:
 		if msg.Err != nil {
 			// Log flush error but don't show to user - messages are still in memory
-			_ = msg.Err
+			slog.Warn("flush failed; messages remain in memory", "error", msg.Err)
 		}
 		return nil
 
@@ -1461,7 +1498,9 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		// Detect file path drops/pastes: check for newly added path-like content
 		// that refers to an existing file. Only trigger on paste (not typing).
 		if newValue != oldValue && len(newValue) > len(oldValue) {
-			m.detectAndAttachFile(oldValue, newValue)
+			if cmd := m.detectAndAttachFile(oldValue, newValue); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 	}
 
@@ -1770,7 +1809,9 @@ func (m *ChatModel) maybeGenerateDescription() tea.Cmd {
 		if err != nil {
 			// Fallback to simple extraction
 			desc := extractDescription(firstUserContent)
-			_ = rpc.UpdateSessionDescription(sessionID, desc)
+			if uerr := rpc.UpdateSessionDescription(sessionID, desc); uerr != nil {
+				slog.Warn("session description update failed", "session_id", sessionID, "error", uerr)
+			}
 			return SessionDescriptionUpdatedMsg{SessionID: sessionID, Description: desc}
 		}
 		// The daemon already saved both name and description, so just return the result
@@ -2744,10 +2785,12 @@ func (m *ChatModel) renderPlanNotification(msg PlanNotificationMsg) string {
 
 // detectAndAttachFile checks if new input content contains a file path and
 // converts it to an attachment (shown as [filename] in the UI). Image files
-// are uploaded immediately to the daemon's UploadService; the resulting
+// are uploaded asynchronously to the daemon's UploadService; the resulting
 // UploadID is later attached to a multimodal ContentPart on send. Non-image
-// files are stored as path-only attachment entries.
-func (m *ChatModel) detectAndAttachFile(oldValue, newValue string) {
+// files are stored as path-only attachment entries. The returned tea.Cmd, if
+// non-nil, performs the upload and yields an uploadResultMsg that Update
+// dispatches to finalize the attachment.
+func (m *ChatModel) detectAndAttachFile(oldValue, newValue string) tea.Cmd {
 	// Find what was added
 	added := ""
 	for i := 0; i < len(oldValue) && i < len(newValue); i++ {
@@ -2763,7 +2806,7 @@ func (m *ChatModel) detectAndAttachFile(oldValue, newValue string) {
 	// Trim whitespace and check if it looks like a file path
 	candidate := strings.TrimSpace(added)
 	if candidate == "" {
-		return
+		return nil
 	}
 
 	// Expand ~ to home directory
@@ -2775,46 +2818,42 @@ func (m *ChatModel) detectAndAttachFile(oldValue, newValue string) {
 
 	// Must be an absolute path
 	if !filepath.IsAbs(candidate) {
-		return
+		return nil
 	}
 
 	// Check if file exists and is a regular file
 	info, err := os.Stat(candidate)
 	if err != nil || info.IsDir() {
-		return
+		return nil
 	}
 
 	// Avoid duplicates
 	for _, att := range m.attachments {
 		if att.Path == candidate {
-			return
+			return nil
 		}
 	}
 
-	// Build the attachment entry. For image files we attempt to upload to
-	// the daemon now so the upload ID is ready when the user presses send.
-	// Upload failure is non-fatal: we fall back to a path-only attachment so
-	// the user at least sees the file referenced in their message.
+	// Build the attachment entry. For image files we kick off an
+	// asynchronous upload so the TUI render loop is not blocked. The entry
+	// is appended immediately with IsImage=true and an empty UploadID; the
+	// returned tea.Cmd yields an uploadResultMsg that Update dispatches to
+	// fill in the UploadID (or demote IsImage on failure). If the user
+	// sends before the upload resolves, the send path treats an image
+	// attachment with an empty UploadID as a path-only reference.
 	entry := attachmentEntry{
 		Path:     candidate,
 		Filename: filepath.Base(candidate),
 		IsImage:  isImageFile(candidate),
 	}
 
+	var uploadCmd tea.Cmd
 	if entry.IsImage && m.rpc != nil && m.rpc.IsConnected() {
-		// Upload synchronously: detectAndAttachFile runs in the TUI Update
-		// goroutine. Upload latency for typical image sizes (<5MB) is well
-		// under the 120s RPC timeout and a round-trip is simpler than
-		// plumbing async state back into the textarea render path.
-		uploadID, upErr := m.rpc.UploadFile(context.Background(), candidate)
-		if upErr != nil {
-			slog.Warn("Image upload failed; falling back to path reference",
-				"path", candidate,
-				"error", upErr,
-			)
-			entry.IsImage = false
-		} else {
-			entry.UploadID = uploadID
+		rpc := m.rpc
+		path := candidate
+		uploadCmd = func() tea.Msg {
+			uploadID, upErr := rpc.UploadFile(context.Background(), path)
+			return uploadResultMsg{path: path, uploadID: uploadID, err: upErr}
 		}
 	}
 
@@ -2827,6 +2866,8 @@ func (m *ChatModel) detectAndAttachFile(oldValue, newValue string) {
 	cleaned := strings.Replace(currentVal, added, "", 1)
 	cleaned = strings.TrimSpace(cleaned)
 	m.textarea.SetValue(cleaned)
+
+	return uploadCmd
 }
 
 // GetAttachments returns the list of attached file paths.
@@ -3247,7 +3288,9 @@ func (m *ChatModel) cancelRecording() {
 		// after it may have been replaced by a new recording session.
 		t := m.transcriber
 		go func() {
-			_, _ = t.Stop()
+			if _, err := t.Stop(); err != nil {
+				slog.Debug("transcriber stop returned error on cancel", "error", err)
+			}
 		}()
 	}
 	m.recordingState = sttIdle
@@ -3272,10 +3315,7 @@ func (m *ChatModel) renderSTTOverlay() string {
 		// Top padding line
 		content.WriteString("\n")
 		// Center the prompt within the available width
-		availWidth := m.width - 6 // account for borders + padding
-		if availWidth < 1 {
-			availWidth = 1
-		}
+		availWidth := max(m.width-6, 1) // account for borders + padding
 		promptWidth := lipgloss.Width(prompt)
 		if promptWidth < availWidth {
 			padding := (availWidth - promptWidth) / 2
@@ -3303,10 +3343,7 @@ func (m *ChatModel) renderSTTOverlay() string {
 		prompt := promptStyle.Render("transcribing...")
 
 		content.WriteString("\n")
-		availWidth := m.width - 6
-		if availWidth < 1 {
-			availWidth = 1
-		}
+		availWidth := max(m.width-6, 1)
 		promptWidth := lipgloss.Width(prompt)
 		if promptWidth < availWidth {
 			padding := (availWidth - promptWidth) / 2
@@ -3592,10 +3629,7 @@ func (m *ChatModel) scrollTofindCursor() {
 
 	// Center within viewport.
 	height := m.viewport.Height()
-	yoff := line - height/2
-	if yoff < 0 {
-		yoff = 0
-	}
+	yoff := max(line-height/2, 0)
 	totalLines := m.viewport.TotalLineCount()
 	if yoff > totalLines-height {
 		yoff = max(totalLines-height, 0)
@@ -3701,7 +3735,10 @@ func (m *ChatModel) applyFindHighlight(msgIdx int, content string) string {
 		return content
 	}
 	// Collect matches that belong to this message, in order.
-	type span struct{ start, end int; current bool }
+	type span struct {
+		start, end int
+		current    bool
+	}
 	var spans []span
 	for i, fm := range m.findMatches {
 		if fm.messageIdx == msgIdx {
