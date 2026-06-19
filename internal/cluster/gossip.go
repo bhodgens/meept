@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sync"
 	"time"
 
@@ -188,9 +189,7 @@ func (g *GossipEngine) getVC() map[string]int64 {
 	g.vcMu.RLock()
 	defer g.vcMu.RUnlock()
 	cp := make(map[string]int64, len(g.vectorClock))
-	for k, v := range g.vectorClock {
-		cp[k] = v
-	}
+	maps.Copy(cp, g.vectorClock)
 	return cp
 }
 
@@ -257,9 +256,7 @@ func (g *GossipEngine) Publish(event *models.ClusterEvent) {
 	// Increment local vector clock and attach
 	vc := g.RecordLocalVC()
 	event.VectorClock = make(map[string]int64, len(vc))
-	for k, v := range vc {
-		event.VectorClock[k] = v
-	}
+	maps.Copy(event.VectorClock, vc)
 
 	// Sign the event
 	priv := g.SigningPrivate()

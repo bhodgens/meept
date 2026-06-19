@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caimlas/meept/pkg/models"
 	sid "github.com/caimlas/meept/pkg/id"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // MembersProvider resolves cluster members for peer address lookup.
@@ -375,10 +375,7 @@ func (t *GossipTransport) markSentToPeer(nodeID, eventID string) {
 		sort.Slice(entries, func(i, j int) bool {
 			return entries[i].ts.Before(entries[j].ts)
 		})
-		toRemove := 500
-		if toRemove > len(entries) {
-			toRemove = len(entries)
-		}
+		toRemove := min(500, len(entries))
 		for i := range toRemove {
 			delete(t.sentEvents[nodeID], entries[i].id)
 		}

@@ -31,7 +31,7 @@ func LoadJSON5(path string, v any) error {
 	// Standardize JSON5 to JSON
 	stdJSON, err := hujson.Standardize([]byte(content))
 	if err != nil {
-		return fmt.Errorf("failed to parse JSON5 config %s: %w\n\nHint: JSON5 supports comments (// and /* */), trailing commas, and unquoted keys. Check for syntax errors near the reported position.", path, err)
+		return fmt.Errorf("failed to parse JSON5 config %s: %w (JSON5 supports comments (// and /* */), trailing commas, and unquoted keys; check for syntax errors near the reported position)", path, err)
 	}
 
 	// Unmarshal with detailed error handling for type mismatches
@@ -82,7 +82,7 @@ func wrapJSONUnmarshalError(err error, configPath string) error {
 		detailMsg = "expected an array of strings but found a single string"
 		hintMsg = "Hint: Wrap the value in square brackets: [\"value\"] or add more items: [\"value1\", \"value2\"]"
 
-	case strings.Contains(errMsg, "cannot unmarshal") && strings.Contains(errMsg, "cannot unmarshal"):
+	case strings.Contains(errMsg, "cannot unmarshal"):
 		// Generic type mismatch - extract as much info as possible
 		detailMsg = fmt.Sprintf("type mismatch: %s", extractTypeMismatch(errMsg))
 		hintMsg = "Hint: Check that the value type matches what the field expects (bool, int, string, array, or object)."

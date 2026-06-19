@@ -465,10 +465,7 @@ func formatGrepContent(matches []grepMatch, contextLines int) string {
 // isBinary checks if file content appears to be binary by looking for null bytes
 // in the first 8KB.
 func isBinary(data []byte) bool {
-	checkSize := len(data)
-	if checkSize > 8192 {
-		checkSize = 8192
-	}
+	checkSize := min(len(data), 8192)
 	return bytes.Contains(data[:checkSize], []byte{0})
 }
 

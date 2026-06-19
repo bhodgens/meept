@@ -212,7 +212,7 @@ func newPlansShowCmd() *cobra.Command {
 						filled = (completedSteps * barWidth) / totalSteps
 					}
 					bar := ""
-					for j := 0; j < barWidth; j++ {
+					for j := range barWidth {
 						if j < filled {
 							bar += "#"
 						} else {

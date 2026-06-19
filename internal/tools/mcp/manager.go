@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"sync"
 
@@ -155,9 +156,7 @@ func (m *Manager) StopAll() {
 	// Snapshot all clients under the lock, then release before I/O
 	m.mu.Lock()
 	snapshot := make(map[string]*Client, len(m.clients))
-	for k, v := range m.clients {
-		snapshot[k] = v
-	}
+	maps.Copy(snapshot, m.clients)
 	m.clients = make(map[string]*Client)
 	m.mu.Unlock()
 

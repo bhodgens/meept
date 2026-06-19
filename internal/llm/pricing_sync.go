@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"sync"
 	"time"
@@ -160,9 +161,7 @@ func (ps *PricingSyncer) MergeWithCatalog(fetched map[string]*LivePrice) []*Live
 func (ps *PricingSyncer) UpdatePrices(prices map[string]*LivePrice) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	for k, v := range prices {
-		ps.prices[k] = v
-	}
+	maps.Copy(ps.prices, prices)
 }
 
 // GetPrice returns the cached price for a model key, or nil if not found.
@@ -181,9 +180,7 @@ func (ps *PricingSyncer) Sync(ctx context.Context) error {
 		if err != nil {
 			ps.logger.Warn("Failed to fetch OpenRouter pricing", "error", err)
 		} else {
-			for k, v := range prices {
-				allFetched[k] = v
-			}
+			maps.Copy(allFetched, prices)
 		}
 	}
 

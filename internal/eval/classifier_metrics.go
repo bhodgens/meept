@@ -280,7 +280,7 @@ func GenerateComparisonReport(a, b ModelMetrics, benchmarkName string) string {
 
 	sb.WriteString(fmt.Sprintf("## Classifier Benchmark Comparison: %s\n\n", benchmarkName))
 	sb.WriteString(fmt.Sprintf("| Metric | %s | %s |\n", a.ModelName, b.ModelName))
-	sb.WriteString(fmt.Sprintf("|--------|------|------|\n"))
+	sb.WriteString("|--------|------|------|\n")
 	sb.WriteString(fmt.Sprintf("| Overall Accuracy | %.1f%% | %.1f%% |\n", a.OverallAccuracy*100, b.OverallAccuracy*100))
 	sb.WriteString(fmt.Sprintf("| Avg Confidence (correct) | %.1f%% | %.1f%% |\n", a.AvgConfidence*100, b.AvgConfidence*100))
 	sb.WriteString(fmt.Sprintf("| Avg Latency | %.0f ms | %.0f ms |\n", a.AvgLatencyMs, b.AvgLatencyMs))
@@ -393,8 +393,8 @@ func FormatMarkdown(results *BenchmarkResults) string {
 		}
 
 		sb.WriteString(fmt.Sprintf("### %s\n\n", catA.CategoryName))
-		sb.WriteString(fmt.Sprintf("| Metric | Model A | Model B |\n"))
-		sb.WriteString(fmt.Sprintf("|--------|---------|---------|\n"))
+		sb.WriteString("| Metric | Model A | Model B |\n")
+		sb.WriteString("|--------|---------|---------|\n")
 		testB := 0
 		if catB != nil {
 			testB = catB.TestCount

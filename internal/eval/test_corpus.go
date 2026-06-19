@@ -60,7 +60,7 @@ func stripComments(data []byte) []byte {
 		var sb strings.Builder
 		inStr := false
 		escaped := false
-		for i := 0; i < len(line); i++ {
+		for i := range line {
 			if escaped {
 				sb.WriteByte(line[i])
 				escaped = false
@@ -91,7 +91,7 @@ func stripTrailingCommas(data []byte) []byte {
 	var result []byte
 	inStr := false
 	escaped := false
-	for i := 0; i < len(data); i++ {
+	for i := range data {
 		ch := data[i]
 
 		if escaped {

@@ -96,7 +96,7 @@ func (t *TUI) setupMenuCallbacks() {
 	t.sessionMenu.SetCallbacks(
 		func(sess *types.Session) {
 			if sess != nil {
-				t.sessionMgr.SwitchSession(nil, sess.ID)
+				t.sessionMgr.SwitchSession(context.TODO(), sess.ID)
 				t.prompt.SetSessionName(t.sessionMgr.GetSessionName())
 				t.addScrollback(fmt.Sprintf("switched to session: %s", t.sessionMgr.GetSessionName()))
 			}
@@ -107,7 +107,7 @@ func (t *TUI) setupMenuCallbacks() {
 			}
 		},
 		func(id string) {
-			if err := t.sessionMgr.DeleteSession(nil, id); err != nil {
+			if err := t.sessionMgr.DeleteSession(context.TODO(), id); err != nil {
 				t.addScrollback(fmt.Sprintf("error deleting session: %v", err))
 			} else {
 				t.addScrollback(fmt.Sprintf("deleted session: %s", id))
@@ -245,7 +245,7 @@ func (t *TUI) quit() {
 			}
 		}
 		if lastUserMsg != "" {
-			_ = t.sessionMgr.UpdateSessionDescription(nil, lastUserMsg)
+			_ = t.sessionMgr.UpdateSessionDescription(context.TODO(), lastUserMsg)
 		}
 	}
 

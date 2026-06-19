@@ -156,7 +156,7 @@ func applyMapDrilldownFields(cfg *config.Config, prefix string, fields []Field) 
 		}
 		fieldName := f.Key()
 		found := false
-		for i := 0; i < entryVal.NumField(); i++ {
+		for i := range entryVal.NumField() {
 			field := entryVal.Type().Field(i)
 			tag := field.Tag.Get("json")
 			tagName := strings.Split(tag, ",")[0]
@@ -230,7 +230,7 @@ func setStructField(target any, path string, value string) error {
 		parent = parent.Elem()
 		parentType = parent.Type()
 	}
-	for i := 0; i < parentType.NumField(); i++ {
+	for i := range parentType.NumField() {
 		field := parentType.Field(i)
 		tag := field.Tag.Get("json")
 		tagName := strings.Split(tag, ",")[0]
@@ -326,7 +326,7 @@ func resolveMapStringString(target any, path string) (map[string]string, bool) {
 	if parent.Kind() == reflect.Ptr {
 		parent = parent.Elem()
 	}
-	for i := 0; i < parent.NumField(); i++ {
+	for i := range parent.NumField() {
 		field := parent.Type().Field(i)
 		tagName := strings.Split(field.Tag.Get("json"), ",")[0]
 		if tagName == fieldName {

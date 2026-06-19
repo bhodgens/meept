@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -228,9 +229,7 @@ func (d *ParallelTeamDriver) Run(ctx context.Context, sess *CollaborationSession
 
 	// Update team status with collected results
 	teamStatus.Phase = "collect"
-	for memberID, result := range resultsMap {
-		teamStatus.MemberResults[memberID] = result
-	}
+	maps.Copy(teamStatus.MemberResults, resultsMap)
 
 	d.publishTeamStatus(sess.ID, teamStatus)
 
@@ -388,7 +387,7 @@ func (d *ParallelTeamDriver) synthesize(ctx context.Context, sess *Collaboration
 
 // buildMemberPrompt constructs the subtask prompt for a specialist agent.
 func (d *ParallelTeamDriver) buildMemberPrompt(sess *CollaborationSession, memberID string, cfg TeamConfig) string {
-	prompt := fmt.Sprintf("## Team Member Task Assignment\n\n")
+	prompt := "## Team Member Task Assignment\n\n"
 	prompt += fmt.Sprintf("**Session:** %s\n", sess.ID)
 	prompt += fmt.Sprintf("**Lead Agent:** %s\n", cfg.LeadAgent)
 	prompt += fmt.Sprintf("**Your Role:** Specialist team member (%s)\n\n", memberID)
@@ -405,7 +404,7 @@ func (d *ParallelTeamDriver) buildMemberPrompt(sess *CollaborationSession, membe
 
 // buildLeadSynthesisPrompt constructs the prompt for the lead agent to aggregate partial results.
 func (d *ParallelTeamDriver) buildLeadSynthesisPrompt(sess *CollaborationSession, cfg TeamConfig, results map[string]*TeamMemberResult) string {
-	prompt := fmt.Sprintf("## Team Lead: Synthesize Partial Results\n\n")
+	prompt := "## Team Lead: Synthesize Partial Results\n\n"
 	prompt += fmt.Sprintf("**Session:** %s\n", sess.ID)
 	prompt += fmt.Sprintf("**Your Role:** Lead agent (%s) - aggregate and synthesize\n\n", cfg.LeadAgent)
 	prompt += fmt.Sprintf("## Original Task\n\n%s\n\n", sess.TaskID)

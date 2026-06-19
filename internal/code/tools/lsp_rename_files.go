@@ -102,7 +102,7 @@ func (t *LSPRenameFilesTool) Execute(ctx context.Context, args map[string]any) (
 	}
 
 	// Include text changes if any
-	if edit.Changes != nil && len(edit.Changes) > 0 {
+	if len(edit.Changes) > 0 {
 		changes := make([]map[string]any, 0)
 		for fileURI, edits := range edit.Changes {
 			path := lsp.URIToPath(fileURI)
@@ -126,7 +126,7 @@ func (t *LSPRenameFilesTool) Execute(ctx context.Context, args map[string]any) (
 	}
 
 	// Include file operations if any
-	if edit.FileOperations != nil && len(edit.FileOperations) > 0 {
+	if len(edit.FileOperations) > 0 {
 		ops := make([]map[string]any, len(edit.FileOperations))
 		for i, op := range edit.FileOperations {
 			ops[i] = map[string]any{
@@ -145,7 +145,7 @@ func (t *LSPRenameFilesTool) Execute(ctx context.Context, args map[string]any) (
 	}
 
 	// Include document changes if any
-	if edit.DocumentChanges != nil && len(edit.DocumentChanges) > 0 {
+	if len(edit.DocumentChanges) > 0 {
 		docChanges := make([]map[string]any, len(edit.DocumentChanges))
 		for i, dc := range edit.DocumentChanges {
 			docChanges[i] = map[string]any{

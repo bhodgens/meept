@@ -470,10 +470,7 @@ func (r *RenderCache) Set(filePath string, line int, content string) {
 
 // evictHalf removes approximately half of the cache entries.
 func (r *RenderCache) evictHalf() {
-	targetSize := len(r.cache) / 2
-	if targetSize < 10 {
-		targetSize = 10
-	}
+	targetSize := max(len(r.cache)/2, 10)
 
 	// Create new map with target size
 	newCache := make(map[string]string, targetSize)

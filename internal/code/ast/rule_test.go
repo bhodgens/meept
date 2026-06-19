@@ -269,7 +269,7 @@ if false {
 			}
 
 			// Try to execute (may fail due to language mismatch, that's ok)
-			_, err = executor.ExecuteRule(testSource, LangGo, rule)
+			_, _ = executor.ExecuteRule(testSource, LangGo, rule)
 			// We don't fail on execute errors since some rules are for other languages
 		}
 	})

@@ -2040,9 +2040,7 @@ func (c *Components) Start(ctx context.Context) error {
 		generalWorkers := poolSize
 		if generalWorkers > 1 {
 			generalWorkers = generalWorkers / 2
-			if generalWorkers < 1 {
-				generalWorkers = 1
-			}
+			generalWorkers = max(generalWorkers, 1)
 		}
 
 		if err := c.WorkerPool.Start(ctx, generalWorkers); err != nil {

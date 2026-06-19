@@ -1,7 +1,9 @@
 package ast
 
 import (
+	"context"
 	"fmt"
+	"maps"
 	"os"
 	"regexp"
 	"strings"
@@ -118,7 +120,7 @@ func (e *RuleExecutor) ExecuteRule(source []byte, lang Language, rule *Rule) (*R
 	}
 
 	// Parse the source
-	tree, err := e.parser.GetTree(nil, source, lang)
+	tree, err := e.parser.GetTree(context.TODO(), source, lang)
 	if err != nil {
 		return nil, fmt.Errorf("parse error: %w", err)
 	}
@@ -253,9 +255,7 @@ func (e *RuleExecutor) checkConstraint(c Constraint, captures map[string]string,
 // applyTransforms applies transformations to captures.
 func (e *RuleExecutor) applyTransforms(captures map[string]string, transforms []Transform) map[string]string {
 	result := make(map[string]string)
-	for k, v := range captures {
-		result[k] = v
-	}
+	maps.Copy(result, captures)
 
 	for _, t := range transforms {
 		text, ok := captures[t.Node]

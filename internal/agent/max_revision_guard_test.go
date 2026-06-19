@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"testing"
@@ -87,7 +88,7 @@ func TestReviewStep_MaxRevisions_ReturnsNeedsInfo(t *testing.T) {
 		RevisionCount: 2,
 	}
 
-	result, err := rm.ReviewStep(nil, step, spec)
+	result, err := rm.ReviewStep(context.TODO(), step, spec)
 	if err != nil {
 		t.Fatalf("ReviewStep failed: %v", err)
 	}
@@ -122,7 +123,7 @@ func TestReviewStep_MaxRevisions_WithoutSpec(t *testing.T) {
 		RevisionCount: 2,
 	}
 
-	result, err := rm.ReviewStep(nil, step, nil)
+	result, err := rm.ReviewStep(context.TODO(), step, nil)
 	if err != nil {
 		t.Fatalf("ReviewStep failed: %v", err)
 	}

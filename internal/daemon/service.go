@@ -238,7 +238,7 @@ var psElapsedTime = func(pid int) (string, error) {
 func cleanElapsedTime(s string) string {
 	// ps output may have leading/trailing whitespace and newlines.
 	b := make([]byte, 0, len(s))
-	for i := 0; i < len(s); i++ {
+	for i := range s {
 		c := s[i]
 		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
 			continue

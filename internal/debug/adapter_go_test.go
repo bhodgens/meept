@@ -174,7 +174,7 @@ func TestDetectGoBinary(t *testing.T) {
 	}
 
 	// Test with empty path.
-	isGo, dlvPath, err = DetectGoBinary("")
+	_, _, err = DetectGoBinary("")
 	if err == nil {
 		t.Error("DetectGoBinary should return error for empty path")
 	}

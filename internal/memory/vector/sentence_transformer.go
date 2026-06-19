@@ -257,7 +257,7 @@ func (p *sentenceTransformerProvider) forward(tokens []uint32) ([]float32, error
 	// Simplified forward: use token indices to produce deterministic embeddings
 	// This provides working semantic similarity without requiring an actual model file
 	emb := make([]float32, hiddenDim)
-	for i := 0; i < hiddenDim; i++ {
+	for i := range hiddenDim {
 		var val float32
 		for _, tok := range tokens {
 			hash := hashTokenID(tok, uint32(i))
@@ -289,9 +289,9 @@ func loadDummyWeights(info ModelInfo) *modelWeights {
 func meanPool(emb []float32, seqLen int) []float32 {
 	dim := len(emb) / seqLen
 	result := make([]float32, dim)
-	for i := 0; i < dim; i++ {
+	for i := range dim {
 		var sum float32
-		for t := 0; t < seqLen; t++ {
+		for t := range seqLen {
 			sum += emb[t*dim+i]
 		}
 		result[i] = sum / float32(seqLen)
@@ -382,7 +382,7 @@ func loadWeights(path string, logger *slog.Logger) (*modelWeights, error) {
 	// Token embeddings
 	mw.tokenEmbeding = make([][]float32, vocabSize)
 	wIdx := 0
-	for i := 0; i < int(vocabSize); i++ {
+	for i := range int(vocabSize) {
 		end := wIdx + int(hiddenIn)
 		if end > len(weights) {
 			break
@@ -394,7 +394,7 @@ func loadWeights(path string, logger *slog.Logger) (*modelWeights, error) {
 
 	// Position embeddings
 	mw.positionEmbeding = make([][]float32, maxSeqLen)
-	for i := 0; i < int(maxSeqLen); i++ {
+	for i := range int(maxSeqLen) {
 		end := wIdx + int(hiddenIn)
 		if end > len(weights) {
 			break

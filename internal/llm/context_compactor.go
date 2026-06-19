@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -64,15 +65,9 @@ func (c *ContextCompactor) snapshotFileOps() *FileOperationSet {
 		Written: make(map[string]bool, len(c.fileOps.Written)),
 		Edited:  make(map[string]bool, len(c.fileOps.Edited)),
 	}
-	for k, v := range c.fileOps.Read {
-		snap.Read[k] = v
-	}
-	for k, v := range c.fileOps.Written {
-		snap.Written[k] = v
-	}
-	for k, v := range c.fileOps.Edited {
-		snap.Edited[k] = v
-	}
+	maps.Copy(snap.Read, c.fileOps.Read)
+	maps.Copy(snap.Written, c.fileOps.Written)
+	maps.Copy(snap.Edited, c.fileOps.Edited)
 	return snap
 }
 
@@ -349,15 +344,9 @@ func (c *ContextCompactor) FileOperations() *FileOperationSet {
 		Written: make(map[string]bool, len(c.fileOps.Written)),
 		Edited:  make(map[string]bool, len(c.fileOps.Edited)),
 	}
-	for k, v := range c.fileOps.Read {
-		snap.Read[k] = v
-	}
-	for k, v := range c.fileOps.Written {
-		snap.Written[k] = v
-	}
-	for k, v := range c.fileOps.Edited {
-		snap.Edited[k] = v
-	}
+	maps.Copy(snap.Read, c.fileOps.Read)
+	maps.Copy(snap.Written, c.fileOps.Written)
+	maps.Copy(snap.Edited, c.fileOps.Edited)
 	return snap
 }
 

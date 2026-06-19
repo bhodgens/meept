@@ -188,7 +188,7 @@ func (svc *TerminalService) GetHistory(limit int) []CommandHistory {
 
 	// Return most recent first
 	result := make([]CommandHistory, limit)
-	for i := 0; i < limit; i++ {
+	for i := range limit {
 		result[i] = svc.history[len(svc.history)-1-i]
 	}
 	return result

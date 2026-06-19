@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"sync"
 
@@ -104,9 +105,7 @@ func (r *EventActionRouter) handleEvent(ctx context.Context, topic string, msg *
 	r.mu.RLock()
 	src := r.topicSubs[topic]
 	bots := make(map[string]BotTrigger, len(src))
-	for k, v := range src {
-		bots[k] = v
-	}
+	maps.Copy(bots, src)
 	r.mu.RUnlock()
 
 	for botID, trigger := range bots {

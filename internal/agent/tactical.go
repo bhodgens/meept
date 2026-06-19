@@ -1113,7 +1113,18 @@ func (ts *TacticalScheduler) publishTokenProgress(t *task.Task) {
 // This is the string-based fallback used when the error has been serialized
 // through the message bus (OnJobFailed receives event.Error as a string).
 // For callers that have the original error value, prefer isRateLimitErrorFromErr.
+// isRateLimitError checks if an error message indicates a rate limit error.
+// This is the string-based fallback used when the error has been serialized
+// through the message bus (OnJobFailed receives event.Error as a string).
+// For callers that have the original error value, prefer isRateLimitErrorFromErr.
+//
+// SA1019 (deprecated) is suppressed: llm.IsRateLimitErrorMessage is explicitly
+// preserved by its own deprecation notice for exactly this caller pattern —
+// "errors deserialized from the message bus". Migrating to errcls.IsRateLimit
+// requires threading the structured error value through the message bus, which
+// is a cross-package refactor tracked in docs/20260618-checkreview.md D2.
 func (ts *TacticalScheduler) isRateLimitError(errMsg string) bool {
+	//lint:ignore SA1019 caller has only the serialized error string; see doc comment above
 	return llm.IsRateLimitErrorMessage(errMsg)
 }
 

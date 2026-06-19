@@ -92,11 +92,11 @@ func validateType(value any, expected string) error {
 			return fmt.Errorf("expected type number, got %s", reflect.TypeOf(value).Kind())
 		}
 	case "integer":
-		switch value.(type) {
+		switch v := value.(type) {
 		case float64:
 			// JSON numbers parsed via encoding/json are always float64;
 			// accept float64 if it has no fractional part.
-			if value.(float64) != float64(int64(value.(float64))) {
+			if v != float64(int64(v)) {
 				return fmt.Errorf("expected type integer, got float with fractional part")
 			}
 		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:

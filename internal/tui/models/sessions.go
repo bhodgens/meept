@@ -288,10 +288,7 @@ func (m *SessionsModel) updateSessionsTable() {
 
 	// Derive title truncation from the dynamic column width so wider
 	// terminals can show more of the session name/description.
-	titleW := m.width*38/100 - 2
-	if titleW < 15 {
-		titleW = 15
-	}
+	titleW := max(m.width*38/100-2, 15)
 
 	for i, sess := range m.sessions {
 		title := sess.Description
@@ -368,10 +365,7 @@ func (m *SessionsModel) View() string {
 	b.WriteString("\n")
 
 	// Split into left (table) and right (detail) panes
-	detailWidth := m.width / 3
-	if detailWidth < 30 {
-		detailWidth = 30
-	}
+	detailWidth := max(m.width/3, 30)
 	tableWidth := m.width - detailWidth - 4
 
 	// Table

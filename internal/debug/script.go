@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"strings"
 )
@@ -131,9 +132,7 @@ func ExecuteScript(ctx context.Context, commands []ScriptCommand, executor Comma
 		// Build args: merge action with params.
 		args := make(map[string]any, len(cmd.Params)+1)
 		args["action"] = cmd.Action
-		for k, v := range cmd.Params {
-			args[k] = v
-		}
+		maps.Copy(args, cmd.Params)
 
 		result := ScriptResult{
 			Index:  i,

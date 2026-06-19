@@ -139,7 +139,7 @@ func (c *legacyController) Stop() error {
 	}
 	if proc.Signal(syscall.SIGTERM) == nil {
 		// Best-effort wait for graceful shutdown.
-		for i := 0; i < 40; i++ {
+		for range 40 {
 			time.Sleep(250 * time.Millisecond)
 			if proc.Signal(syscall.Signal(0)) != nil {
 				return nil

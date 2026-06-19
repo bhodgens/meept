@@ -105,7 +105,7 @@ func (s *ClaudeSource) scanDir(ctx context.Context, path string) ([]*Skill, erro
 		if entry.IsDir() {
 			// Look for SKILL.md inside the directory
 			skillFile := filepath.Join(entryPath, "SKILL.md")
-			if _, err := os.Stat(skillFile); err == nil {
+			if _, statErr := os.Stat(skillFile); statErr == nil {
 				skill, err = s.loadAndAdapt(skillFile, adapter)
 			}
 		} else if isSkillFile(entry.Name()) {

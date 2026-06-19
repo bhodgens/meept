@@ -821,10 +821,7 @@ func levenshteinDistance(a, b string) int {
 // levenshteinRatio returns the similarity ratio between two strings in [0.0, 1.0].
 // 1.0 means identical, 0.0 means completely different.
 func levenshteinRatio(a, b string) float64 {
-	maxLen := len(a)
-	if len(b) > maxLen {
-		maxLen = len(b)
-	}
+	maxLen := max(len(a), len(b))
 	if maxLen == 0 {
 		return 1.0
 	}
@@ -989,12 +986,8 @@ func (t *FileEditTool) applyEdits(lines []string, ops []editOp) []string {
 
 		case "insert":
 			idx := op.startLine - 1
-			if idx < 0 {
-				idx = 0
-			}
-			if idx > len(result) {
-				idx = len(result)
-			}
+			idx = max(idx, 0)
+			idx = min(idx, len(result))
 			// Copy replacement slices into fresh backing arrays before
 			// modifying to avoid aliasing with the result slice.
 			insertSlice := make([]string, len(op.content))
@@ -1023,12 +1016,9 @@ func (t *FileEditTool) generateDiffPreview(filePath, original, modified string) 
 	diff = append(diff, fmt.Sprintf("+++ b/%s", filePath))
 
 	// Simple line-by-line comparison
-	maxLen := len(lines)
-	if len(modLines) > maxLen {
-		maxLen = len(modLines)
-	}
+	maxLen := max(len(lines), len(modLines))
 
-	for i := 0; i < maxLen; i++ {
+	for i := range maxLen {
 		oldLine := ""
 		newLine := ""
 		if i < len(lines) {

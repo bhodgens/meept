@@ -243,13 +243,13 @@ func (t *LSPRenameTool) Execute(ctx context.Context, args map[string]any) (any, 
 		}
 
 		return map[string]any{
-			SchemaPropFound:       true,
-			"pending_change_ids":  pendingChangeIDs,
-			SchemaPropMessage:     fmt.Sprintf("Rename preview created for %d files. Use 'resolve' tool to accept/reject changes.", len(fileEdits)),
-			"new_name":            newName,
-			"changes":             changes,
-			"file_count":          len(fileEdits),
-			"edit_count":          totalEdits,
+			SchemaPropFound:      true,
+			"pending_change_ids": pendingChangeIDs,
+			SchemaPropMessage:    fmt.Sprintf("Rename preview created for %d files. Use 'resolve' tool to accept/reject changes.", len(fileEdits)),
+			"new_name":           newName,
+			"changes":            changes,
+			"file_count":         len(fileEdits),
+			"edit_count":         totalEdits,
 		}, nil
 	}
 
@@ -295,7 +295,7 @@ func applyTextEdits(filePath string, edits []lsp.TextEdit) error {
 
 		// Build new content
 		var before, after strings.Builder
-		for l := 0; l < startLine; l++ {
+		for l := range startLine {
 			if l > 0 {
 				before.WriteString("\n")
 			}
@@ -365,7 +365,7 @@ func applyTextEditsToString(content string, edits []lsp.TextEdit) string {
 			if endChar < len(lines[endLine]) {
 				after = lines[endLine][endChar:]
 			}
-			newLines := strings.Split(before + edit.NewText + after, "\n")
+			newLines := strings.Split(before+edit.NewText+after, "\n")
 			lines = append(lines[:startLine], append(newLines, lines[endLine+1:]...)...)
 		}
 	}

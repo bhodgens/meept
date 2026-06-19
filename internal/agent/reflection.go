@@ -321,7 +321,7 @@ func (re *ReflectionEngine) parseFixResponse(content string, originalFiles []str
 	// Strategy 2: Parse markdown code blocks with file path annotations
 	// Formats: "// File: path/to/file.go", "## path/to/file.go"
 	if len(referencedFiles) == 0 {
-		codeBlockPattern := regexp.MustCompile("(?m)(?://|##)\\s*[Ff]ile:?\\s*([^\\n]+)")
+		codeBlockPattern := regexp.MustCompile(`(?m)(?://|##)\s*[Ff]ile:?\s*([^\n]+)`)
 		if matches := codeBlockPattern.FindAllStringSubmatch(content, -1); matches != nil {
 			for _, match := range matches {
 				if len(match) > 1 {

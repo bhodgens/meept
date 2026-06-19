@@ -126,7 +126,7 @@ func traverseTreeForErrors(node *sitter.Node, results *[]LinterResult, file, con
 
 	// Recurse into children
 	childCount := int(node.ChildCount())
-	for i := 0; i < childCount; i++ {
+	for i := range childCount {
 		child := node.Child(i)
 		if child != nil {
 			traverseTreeForErrors(child, results, file, content)

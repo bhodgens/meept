@@ -2,6 +2,7 @@ package ast
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -102,7 +103,7 @@ func (r *ASTRewriter) RunRewrite(source []byte, lang Language, queryPattern, rew
 		return nil, fmt.Errorf("invalid rewrite template: %w", err)
 	}
 
-	tree, err := r.parser.GetTree(nil, source, lang)
+	tree, err := r.parser.GetTree(context.TODO(), source, lang)
 	if err != nil {
 		return nil, fmt.Errorf("parse error: %w", err)
 	}

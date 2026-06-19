@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -52,9 +53,7 @@ func (cs *CredentialStore) Set(providerID, apiKey string) error {
 	cs.mu.Lock()
 	cs.creds[providerID] = apiKey
 	snapshot := make(map[string]string, len(cs.creds))
-	for k, v := range cs.creds {
-		snapshot[k] = v
-	}
+	maps.Copy(snapshot, cs.creds)
 	filepath := cs.filepath
 	cs.mu.Unlock()
 	data, err := json.MarshalIndent(snapshot, "", "  ")
@@ -69,9 +68,7 @@ func (cs *CredentialStore) Delete(providerID string) error {
 	cs.mu.Lock()
 	delete(cs.creds, providerID)
 	snapshot := make(map[string]string, len(cs.creds))
-	for k, v := range cs.creds {
-		snapshot[k] = v
-	}
+	maps.Copy(snapshot, cs.creds)
 	filepath := cs.filepath
 	cs.mu.Unlock()
 	data, err := json.MarshalIndent(snapshot, "", "  ")

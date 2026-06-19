@@ -332,7 +332,7 @@ func (d *DifferentialDriver) phaseDifferentiate(ctx context.Context, sess *Colla
 }
 
 func (d *DifferentialDriver) buildDifferentiatorPrompt(sess *CollaborationSession, hasA, hasB bool) string {
-	prompt := fmt.Sprintf("## Differential Analysis Task\n\n")
+	prompt := "## Differential Analysis Task\n\n"
 	prompt += fmt.Sprintf("**Session:** %s\n", sess.ID)
 	prompt += fmt.Sprintf("**Original Task:** %s\n\n", sess.TaskID)
 

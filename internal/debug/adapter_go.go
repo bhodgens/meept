@@ -292,10 +292,7 @@ func findStringInBinary(data []byte, s string) int {
 		return -1
 	}
 	// Only search up to the first 4MB for performance.
-	limit := len(data)
-	if limit > 4*1024*1024 {
-		limit = 4 * 1024 * 1024
-	}
+	limit := min(len(data), 4*1024*1024)
 	b := []byte(s)
 	for i := 0; i <= limit-len(b); i++ {
 		if data[i] == b[0] && matchAt(data, i, b) {
@@ -369,7 +366,7 @@ func GoDebugHint(program string) string {
 	}
 
 	if dlvPath != "" {
-		return fmt.Sprintf("detected Go binary; recommend using the dlv adapter (dlv) for goroutine inspection and Go-specific debugging")
+		return "detected Go binary; recommend using the dlv adapter (dlv) for goroutine inspection and Go-specific debugging"
 	}
 
 	return "detected Go binary; install dlv (go install github.com/go-delve/delve/cmd/dlv@latest) for Go-specific debugging features"

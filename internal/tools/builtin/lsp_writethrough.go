@@ -343,7 +343,7 @@ func applyFormattingEdits(filePath string, edits []lsp.TextEdit) error {
 		}
 
 		var before, after strings.Builder
-		for l := 0; l < startLine; l++ {
+		for l := range startLine {
 			if l > 0 {
 				before.WriteString("\n")
 			}

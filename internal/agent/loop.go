@@ -390,7 +390,7 @@ func (l *AgentLoop) shouldFetchOnQuery() bool {
 // AgentLoop orchestrates LLM reasoning interleaved with tool execution.
 type AgentLoop struct {
 	mu      sync.RWMutex
-	modelMu sync.Mutex // protects SwitchModel calls on shared llmClient
+	modelMu sync.Mutex     // protects SwitchModel calls on shared llmClient
 	wg      sync.WaitGroup // tracks best-effort background goroutines (learning, shadow)
 
 	// Core components
@@ -2846,10 +2846,7 @@ func (l *AgentLoop) buildRepoMapSection(ctx context.Context, conv *Conversation)
 		// When caching is enabled, we have memory of the full session, so scan more
 		contextWindow = len(msgs)
 	}
-	start := len(msgs) - contextWindow
-	if start < 0 {
-		start = 0
-	}
+	start := max(0, len(msgs)-contextWindow)
 	for _, m := range msgs[start:] {
 		if m.Role == llm.RoleUser {
 			textBuf.WriteString(m.Content + " ")

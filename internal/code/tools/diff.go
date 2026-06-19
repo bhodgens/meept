@@ -22,12 +22,9 @@ func generateSimpleDiff(original, modified, filePath string) string {
 	diff = append(diff, fmt.Sprintf("--- a/%s", filePath))
 	diff = append(diff, fmt.Sprintf("+++ b/%s", filePath))
 
-	maxLen := len(origLines)
-	if len(modLines) > maxLen {
-		maxLen = len(modLines)
-	}
+	maxLen := max(len(origLines), len(modLines))
 
-	for i := 0; i < maxLen; i++ {
+	for i := range maxLen {
 		oldLine := ""
 		newLine := ""
 		if i < len(origLines) {

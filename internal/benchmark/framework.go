@@ -108,7 +108,7 @@ func (f *Framework) Run(ctx context.Context) (*BenchmarkResult, error) {
 	taskChan := make(chan *BenchmarkTask, len(f.config.Tasks)*f.config.NumTests)
 
 	// Start workers
-	for i := 0; i < f.config.MaxThreads; i++ {
+	for range f.config.MaxThreads {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -126,7 +126,7 @@ func (f *Framework) Run(ctx context.Context) (*BenchmarkResult, error) {
 	// Queue all tasks
 queueLoop:
 	for _, task := range f.config.Tasks {
-		for i := 0; i < f.config.NumTests; i++ {
+		for range f.config.NumTests {
 			select {
 			case <-ctx.Done():
 				break queueLoop

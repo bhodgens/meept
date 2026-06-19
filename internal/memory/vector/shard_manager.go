@@ -247,10 +247,7 @@ func (m *ShardManager) Search(ctx context.Context, query string, k int, shardTyp
 		if perShardK == 0 {
 			perShardK = k // if fewer shard types than k, use k
 		}
-		efSearch := perShardK * 2 // ef should be >= k for good recall
-		if efSearch < 100 {
-			efSearch = 100
-		}
+		efSearch := max(perShardK*2, 100) // ef should be >= k for good recall
 		results, err := shard.Search(ctx, queryEmb, perShardK, efSearch)
 		if err != nil {
 			m.logger.Warn("shard search failed", "type", shardType, "error", err)
@@ -291,7 +288,7 @@ func ConsolidateResults(results []SearchResult, limit int) []SearchResult {
 
 // SortByRelevance sorts results by RelevanceScore descending.
 func SortByRelevance(results []SearchResult) {
-	for i := 0; i < len(results)-1; i++ {
+	for i := range len(results) - 1 {
 		for j := i + 1; j < len(results); j++ {
 			if results[j].RelevanceScore > results[i].RelevanceScore {
 				results[i], results[j] = results[j], results[i]

@@ -112,10 +112,7 @@ func NewSearchModel(rpc SearchRPCClient, logger *slog.Logger) *SearchModel {
 func (m *SearchModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
-	inputWidth := width - 20
-	if inputWidth < 20 {
-		inputWidth = 20
-	}
+	inputWidth := max(width-20, 20)
 	m.query.SetWidth(inputWidth)
 }
 

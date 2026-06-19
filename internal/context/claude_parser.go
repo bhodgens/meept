@@ -200,7 +200,7 @@ func extractCodeBlocks(content string, languages ...string) []string {
 		for _, want := range languages {
 			if (want == "" && lang == "") || (want != "" && lang == want) {
 				var raw strings.Builder
-				for i := 0; i < cb.Lines().Len(); i++ {
+				for i := range cb.Lines().Len() {
 					line := cb.Lines().At(i)
 					raw.Write(line.Value(src))
 				}

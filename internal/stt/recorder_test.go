@@ -163,14 +163,14 @@ func TestRecorder_Cleanup(t *testing.T) {
 
 	// Verify file was created by the temp file mechanism.
 	// The recorder creates the temp file then closes it for ffmpeg to write.
-	_, statErr := os.Stat(fp)
+	_, _ = os.Stat(fp)
 	// The file may or may not exist depending on timing, so just check no panic.
 
 	r.Stop()
 	r.Cleanup()
 
 	// After cleanup, the file should be removed.
-	_, statErr = os.Stat(fp)
+	_, statErr := os.Stat(fp)
 	assert.True(t, os.IsNotExist(statErr), "expected temp file to be removed after Cleanup")
 }
 

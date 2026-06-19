@@ -40,7 +40,7 @@ func newDockerBackend(cfg DockerConfig, image string, logger *slog.Logger) (*Doc
 
 	// Verify Docker daemon is accessible
 	if err := client.Ping(); err != nil {
-		return nil, fmt.Errorf("Docker daemon not reachable: %w", err)
+		return nil, fmt.Errorf("docker daemon not reachable: %w", err)
 	}
 
 	// Ensure image exists

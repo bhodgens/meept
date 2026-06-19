@@ -106,7 +106,7 @@ func TestHistory_Up(t *testing.T) {
 	}
 
 	// Third Up - oldest entry
-	result, ok = h.Up("current input")
+	_, ok = h.Up("current input")
 	if !ok {
 		// This is allowed - returns oldest entry with ok=false
 		t.Logf("Up returned ok=false at oldest entry")
@@ -170,9 +170,6 @@ func TestHistory_ScrollThenRestore(t *testing.T) {
 	h.Add("d")
 	h.Add("e")
 
-	type nav struct {
-		dir string
-	}
 	var results []string
 
 	// Navigate up 3 steps

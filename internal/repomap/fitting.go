@@ -157,10 +157,7 @@ func FitToBudget(ranked RankedTags, config FittingConfig, renderer RenderingProv
 	}
 
 	// Clamp to valid range
-	numTags := len(ranked)
-	if numTags > config.MaxTags {
-		numTags = config.MaxTags
-	}
+	numTags := min(len(ranked), config.MaxTags)
 
 	// Use binary search to find optimal count
 	// We search in the range [0, numTags] to find the best fit
@@ -245,12 +242,8 @@ func findClosestFit(ranked RankedTags, config FittingConfig, renderer RenderingP
 
 	for _, pct := range percentages {
 		count := len(ranked) * pct / 100
-		if count < config.MinTags {
-			count = config.MinTags
-		}
-		if count > len(ranked) {
-			count = len(ranked)
-		}
+		count = max(count, config.MinTags)
+		count = min(count, len(ranked))
 		if count == 0 {
 			count = 1
 		}
@@ -334,15 +327,9 @@ func FitToBudgetSimple(ranked RankedTags, config FittingConfig) RenderedMap {
 
 	// Calculate max tags based on budget
 	maxTags := config.MaxMapTokens / avgTokensPerTag
-	if maxTags < config.MinTags {
-		maxTags = config.MinTags
-	}
-	if maxTags > len(ranked) {
-		maxTags = len(ranked)
-	}
-	if maxTags > config.MaxTags {
-		maxTags = config.MaxTags
-	}
+	maxTags = max(maxTags, config.MinTags)
+	maxTags = min(maxTags, len(ranked))
+	maxTags = min(maxTags, config.MaxTags)
 
 	// Use top tags up to maxTags
 	selected := ranked
@@ -396,12 +383,8 @@ func TokenBudgetForFiles(numFiles int, baseBudget int) int {
 	maxPerFile := baseBudget / 2
 
 	perFileBudget := baseBudget / numFiles
-	if perFileBudget < minPerFile {
-		perFileBudget = minPerFile
-	}
-	if perFileBudget > maxPerFile {
-		perFileBudget = maxPerFile
-	}
+	perFileBudget = max(perFileBudget, minPerFile)
+	perFileBudget = min(perFileBudget, maxPerFile)
 
 	return numFiles * perFileBudget
 }
@@ -412,7 +395,7 @@ func ValidateConfig(config FittingConfig) error {
 		return fmt.Errorf("MaxMapTokens must be positive, got %d", config.MaxMapTokens)
 	}
 	if config.Tolerance < 0 || config.Tolerance > 1.0 {
-		return fmt.Errorf("Tolerance must be between 0 and 1, got %f", config.Tolerance)
+		return fmt.Errorf("tolerance must be between 0 and 1, got %f", config.Tolerance)
 	}
 	if config.MapMulNoFiles <= 0 {
 		return fmt.Errorf("MapMulNoFiles must be positive, got %f", config.MapMulNoFiles)
@@ -505,10 +488,7 @@ func fitTopN(ranked RankedTags, config FittingConfig, renderer RenderingProvider
 		return RenderedMap{}
 	}
 
-	count := config.MinTags
-	if count > len(ranked) {
-		count = len(ranked)
-	}
+	count := min(config.MinTags, len(ranked))
 
 	selected := ranked[:count]
 	return renderer.Render(selected)

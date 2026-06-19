@@ -111,7 +111,7 @@ func TestSentenceTransformerProvider_EmptyBatch(t *testing.T) {
 		t.Fatalf("NewSentenceTransformerProvider error: %v", err)
 	}
 
-	embeddings, err := provider.GenerateEmbeddings(nil, []string{})
+	embeddings, err := provider.GenerateEmbeddings(context.TODO(), []string{})
 	if err != nil {
 		t.Errorf("GenerateEmbeddings([]) should not error, got: %v", err)
 	}

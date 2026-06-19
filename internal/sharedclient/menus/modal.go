@@ -176,8 +176,8 @@ func (m *Modal) Render() {
 	m.Center(width, height)
 
 	// Draw background
-	for dy := 0; dy < m.height; dy++ {
-		for dx := 0; dx < m.width; dx++ {
+	for dy := range m.height {
+		for dx := range m.width {
 			ch := ' '
 			fg := termbox.Attribute(sharedclient.ColorWhite)
 			bg := termbox.ColorDefault
@@ -260,10 +260,7 @@ func (m *Modal) Render() {
 
 	// Footer hint
 	hint := " ↑/↓=nav enter=select esc=cancel "
-	hintX := m.x + (m.width-len(hint))/2
-	if hintX < m.x+2 {
-		hintX = m.x + 2
-	}
+	hintX := max(m.x+(m.width-len(hint))/2, m.x+2)
 	y := m.y + m.height - 2
 	for i, r := range hint {
 		if hintX+i >= m.x+m.width-2 {

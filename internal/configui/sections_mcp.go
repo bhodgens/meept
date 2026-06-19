@@ -10,8 +10,12 @@ import (
 
 func buildMCPServersFields() []Field {
 	cfg, _ := config.LoadMCPConfigDefault()
+	var servers []mcp.ServerConfig
+	if cfg != nil {
+		servers = cfg.Servers
+	}
 	return []Field{
-		NewDrilldownField("servers", "mcp servers", buildMCPServerItems(cfg.Servers)),
+		NewDrilldownField("servers", "mcp servers", buildMCPServerItems(servers)),
 	}
 }
 

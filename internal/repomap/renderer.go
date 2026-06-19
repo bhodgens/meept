@@ -270,10 +270,7 @@ func truncateLine(line string, maxLen int) string {
 	lastComma := strings.LastIndex(truncated, ",")
 	lastSpace := strings.LastIndex(truncated, " ")
 
-	cutoff := lastComma
-	if lastSpace > lastComma {
-		cutoff = lastSpace
-	}
+	cutoff := max(lastComma, lastSpace)
 
 	if cutoff > maxLen/2 {
 		return strings.TrimSpace(line[:cutoff]) + "..."

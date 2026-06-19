@@ -205,7 +205,7 @@ func AnalyzeCoreDelve(ctx context.Context, coreFile, program string, timeout tim
 	// delve core mode: dlv core <program> <core>
 	// Use -c flag to run commands: goroutines, stack, then quit.
 	// Note: delve's non-DAP CLI mode is interactive, so we pipe commands.
-	script := fmt.Sprintf("goroutines\nstack\nlocals\nquit\n")
+	script := "goroutines\nstack\nlocals\nquit\n"
 
 	cmd := exec.CommandContext(ctx, "dlv", "core", program, coreFile)
 	stdin, err := cmd.StdinPipe()

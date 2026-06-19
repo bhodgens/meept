@@ -1,6 +1,7 @@
 package sharedclient
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,10 +16,6 @@ import (
 // ============================================================================
 // Integration test mock server
 // ============================================================================
-
-type integrationServer struct {
-	handler func(method string, params json.RawMessage) (any, error)
-}
 
 func newIntegrationServer(handler func(method string, params json.RawMessage) (any, error)) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -324,7 +321,7 @@ func TestIntegration_SessionManagerLoadOrCreateFlow(t *testing.T) {
 	sm := sharedclient.NewSessionManager(client, "default")
 
 	// Load or create should load the most recent one
-	err := sm.LoadOrCreateSession(nil, "")
+	err := sm.LoadOrCreateSession(context.TODO(), "")
 	if err != nil {
 		t.Fatalf("LoadOrCreateSession failed: %v", err)
 	}

@@ -195,7 +195,7 @@ func personalizedPageRank(g *multi.DirectedGraph, damping float64, maxIter int, 
 	newRanks := make([]float64, n)
 	alpha := damping
 
-	for iter := 0; iter < maxIter; iter++ {
+	for range maxIter {
 		// Calculate sink node contribution
 		sinkContribution := 0.0
 		for i := range isSink {
@@ -212,7 +212,7 @@ func personalizedPageRank(g *multi.DirectedGraph, damping float64, maxIter int, 
 
 			// Add contributions from incoming edges
 			// Need to find nodes that point to this node
-			for j := 0; j < n; j++ {
+			for j := range n {
 				if weight, ok := edgeWeights[j][i]; ok {
 					if outDegree[j] > 0 {
 						newRanks[i] += alpha * ranks[j] * weight
@@ -491,12 +491,9 @@ func (r RankedTags) String() string {
 	lines = append(lines, fmt.Sprintf("RankedTags(%d):", len(r)))
 
 	// Show top 10
-	maxShow := 10
-	if len(r) < maxShow {
-		maxShow = len(r)
-	}
+	maxShow := min(10, len(r))
 
-	for i := 0; i < maxShow; i++ {
+	for i := range maxShow {
 		rt := r[i]
 		lines = append(lines, fmt.Sprintf("  %.4f %s:%d %s (%s)",
 			rt.Score, rt.RelFname, rt.Line, rt.Name, rt.Kind))

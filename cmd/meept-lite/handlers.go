@@ -341,7 +341,7 @@ func (h *CommandHandler) handleSessionSwitch(args []string) {
 		return
 	}
 	identifier := strings.Join(args, " ")
-	if err := h.tui.sessionMgr.SwitchSession(nil, identifier); err != nil {
+	if err := h.tui.sessionMgr.SwitchSession(context.TODO(), identifier); err != nil {
 		h.addError(err)
 		return
 	}
@@ -368,7 +368,7 @@ func (h *CommandHandler) handleSessionDelete(args []string) {
 		return
 	}
 
-	if err := h.tui.sessionMgr.DeleteSession(nil, identifier); err != nil {
+	if err := h.tui.sessionMgr.DeleteSession(context.TODO(), identifier); err != nil {
 		h.addError(err)
 		return
 	}

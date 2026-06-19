@@ -99,7 +99,7 @@ func writeHeader(b *strings.Builder) {
 	b.WriteString("text file, designed to be fed to LLMs as context. It covers installation, ")
 	b.WriteString("architecture, configuration, workflows, and API reference.\n\n")
 	b.WriteString(fmt.Sprintf("Generated: %s\n", time.Now().UTC().Format(time.RFC3339)))
-	b.WriteString(fmt.Sprintf("Source: https://github.com/caimlas/meept\n\n"))
+	b.WriteString("Source: https://github.com/caimlas/meept\n\n")
 	b.WriteString("---\n\n")
 }
 
@@ -245,7 +245,24 @@ func prettifyFilename(name string) string {
 	if name == "index" {
 		return "Overview"
 	}
-	return strings.Title(name) //nolint:staticcheck // simple title casing for filenames
+	return titleCaseASCII(name)
+}
+
+// titleCaseASCII capitalises the first letter of each space-separated word.
+// It is intentionally ASCII-only: callers feed it slug-derived filenames
+// (e.g. "getting-started" -> "Getting Started"), which never contain
+// non-ASCII characters. This avoids strings.Title (deprecated for Unicode
+// punctuation issues) without pulling in golang.org/x/text/cases.
+func titleCaseASCII(s string) string {
+	out := []byte(s)
+	capitalizeNext := true
+	for i, b := range out {
+		if capitalizeNext && b >= 'a' && b <= 'z' {
+			out[i] = b - ('a' - 'A')
+		}
+		capitalizeNext = b == ' '
+	}
+	return string(out)
 }
 
 // stripFirstH1 removes the first "# " heading line from the content.

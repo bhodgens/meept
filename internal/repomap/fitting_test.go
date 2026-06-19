@@ -162,13 +162,6 @@ func TestFitToBudgetSimple(t *testing.T) {
 
 	result := FitToBudgetSimple(ranked, config)
 
-	// Should estimate based on avgTokensPerTag=20
-	// Max tags = 100/20 = 5
-	expectedTags := 5
-	if len(ranked) < expectedTags {
-		expectedTags = len(ranked)
-	}
-
 	if result.Tokens == 0 {
 		t.Error("expected non-zero tokens")
 	}

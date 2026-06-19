@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"time"
 
@@ -1076,9 +1077,7 @@ func mergeMetadata(existing json.RawMessage, kv map[string]json.RawMessage) json
 	} else {
 		meta = make(map[string]json.RawMessage)
 	}
-	for k, v := range kv {
-		meta[k] = v
-	}
+	maps.Copy(meta, kv)
 	merged, err := json.Marshal(meta)
 	if err != nil {
 		return existing

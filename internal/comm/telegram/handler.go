@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -229,9 +230,7 @@ func (h *AgentHandler) saveSessions() error {
 // must hold h.mu (read or write) before calling this method.
 func (h *AgentHandler) snapshotSessions() map[int64]string {
 	snap := make(map[int64]string, len(h.sessions))
-	for k, v := range h.sessions {
-		snap[k] = v
-	}
+	maps.Copy(snap, h.sessions)
 	return snap
 }
 

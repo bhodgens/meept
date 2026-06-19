@@ -81,7 +81,7 @@ func (t *LSPFormatTool) Execute(ctx context.Context, args map[string]any) (any, 
 		return nil, fmt.Errorf("failed to get formatting edits: %w", err)
 	}
 
-	if edits == nil || len(edits) == 0 {
+	if len(edits) == 0 {
 		return map[string]any{
 			SchemaPropFound:    false,
 			SchemaPropMessage:  "File is already formatted or formatter returned no changes",

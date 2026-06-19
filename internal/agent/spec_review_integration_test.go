@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -149,7 +150,7 @@ func TestEndToEnd_MaxRevisionGuard(t *testing.T) {
 		t.Fatalf("failed to create step in store: %v", err)
 	}
 
-	result, err := rm.ReviewStep(nil, step, spec)
+	result, err := rm.ReviewStep(context.TODO(), step, spec)
 	if err != nil {
 		t.Fatalf("ReviewStep failed: %v", err)
 	}

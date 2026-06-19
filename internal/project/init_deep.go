@@ -191,10 +191,7 @@ func (di *DeepInitializer) scanTree(ctx context.Context, root string) ([]*dirInf
 			continue
 		}
 		rel, _ := filepath.Rel(root, path)
-		info.Depth = strings.Count(rel, string(os.PathSeparator))
-		if info.Depth < 0 {
-			info.Depth = 0
-		}
+		info.Depth = max(0, strings.Count(rel, string(os.PathSeparator)))
 		info.ParentPath = filepath.Dir(path)
 
 		// Extract symbols

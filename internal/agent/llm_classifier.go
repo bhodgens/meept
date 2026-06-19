@@ -24,41 +24,41 @@ const (
 )
 
 var intentThresholds = map[string]float64{
-	string(IntentGit):         0.85,
-	string(IntentSchedule):    0.80,
-	string(IntentCode):        0.75,
-	string(IntentDebug):       0.75,
-	string(IntentReview):      0.75,
-	string(IntentPlan):        0.70,
-	string(IntentPlatform):    0.70,
-	string(IntentReport):      0.70,
-	string(IntentRecall):      0.70,
-	string(IntentAnalyze):     0.60,
-	string(IntentResearch):    0.55,
-	string(IntentSecurity):    0.70,
-	string(IntentSearch):      0.60,
-	string(IntentChat):        0.50,
+	string(IntentGit):      0.85,
+	string(IntentSchedule): 0.80,
+	string(IntentCode):     0.75,
+	string(IntentDebug):    0.75,
+	string(IntentReview):   0.75,
+	string(IntentPlan):     0.70,
+	string(IntentPlatform): 0.70,
+	string(IntentReport):   0.70,
+	string(IntentRecall):   0.70,
+	string(IntentAnalyze):  0.60,
+	string(IntentResearch): 0.55,
+	string(IntentSecurity): 0.70,
+	string(IntentSearch):   0.60,
+	string(IntentChat):     0.50,
 }
 
 var agentMapping = map[string]string{
-	string(IntentGit):       config.AgentIDCommitter,
-	string(IntentSchedule):  config.AgentIDScheduler,
-	string(IntentCode):      config.AgentIDCoder,
-	string(IntentDebug):     config.AgentIDDebugger,
-	string(IntentReview):    config.AgentIDCoder,
-	string(IntentPlan):      config.AgentIDPlanner,
-	string(IntentPlatform):  config.AgentIDChat,
-	string(IntentReport):    config.AgentIDChat,
-	string(IntentRecall):    config.AgentIDChat,
-	string(IntentAnalyze):   config.AgentIDAnalyst,
-	string(IntentSearch):    config.AgentIDAnalyst,
-	string(IntentChat):      config.AgentIDChat,
-	string(IntentResearch):  config.AgentIDAnalyst,
-	string(IntentSecurity):  config.AgentIDChat,
-	string(IntentSkill):     config.AgentIDChat,
-	string(IntentCompound):  config.AgentIDDispatcher,
-	string(IntentToolUse):   config.AgentIDCoder,
-	string(IntentPair):      config.AgentIDChat,
+	string(IntentGit):         config.AgentIDCommitter,
+	string(IntentSchedule):    config.AgentIDScheduler,
+	string(IntentCode):        config.AgentIDCoder,
+	string(IntentDebug):       config.AgentIDDebugger,
+	string(IntentReview):      config.AgentIDCoder,
+	string(IntentPlan):        config.AgentIDPlanner,
+	string(IntentPlatform):    config.AgentIDChat,
+	string(IntentReport):      config.AgentIDChat,
+	string(IntentRecall):      config.AgentIDChat,
+	string(IntentAnalyze):     config.AgentIDAnalyst,
+	string(IntentSearch):      config.AgentIDAnalyst,
+	string(IntentChat):        config.AgentIDChat,
+	string(IntentResearch):    config.AgentIDAnalyst,
+	string(IntentSecurity):    config.AgentIDChat,
+	string(IntentSkill):       config.AgentIDChat,
+	string(IntentCompound):    config.AgentIDDispatcher,
+	string(IntentToolUse):     config.AgentIDCoder,
+	string(IntentPair):        config.AgentIDChat,
 	string(IntentCollaborate): config.AgentIDAnalyst,
 }
 
@@ -415,7 +415,7 @@ func (c *LLMClassifier) parseResponse(content, originalInput string) (*Intent, e
 func extractJSONFromLLM(s string) string {
 	// Find the start of the first JSON object or array.
 	start := -1
-	for i := 0; i < len(s); i++ {
+	for i := range s {
 		if s[i] == '{' || s[i] == '[' {
 			start = i
 			break

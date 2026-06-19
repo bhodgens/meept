@@ -40,7 +40,7 @@ func (p *mockProvider) GenerateEmbedding(_ context.Context, _ string) ([]float32
 func (p *mockProvider) GenerateEmbeddings(_ context.Context, texts []string) ([][]float32, error) {
 	results := make([][]float32, len(texts))
 	for i := range texts {
-		emb, err := p.GenerateEmbedding(nil, texts[i])
+		emb, err := p.GenerateEmbedding(context.TODO(), texts[i])
 		if err != nil {
 			return nil, err
 		}

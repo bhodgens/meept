@@ -140,7 +140,7 @@ func LoadJSON5Config(path string) (*Config, error) {
 func ExpandEnvVars(s string) string {
 	const maxPasses = 5
 	result := s
-	for pass := 0; pass < maxPasses; pass++ {
+	for range maxPasses {
 		prev := result
 		result = envVarPattern.ReplaceAllStringFunc(result, func(match string) string {
 			var varName string

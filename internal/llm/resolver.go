@@ -228,16 +228,13 @@ func (r *Resolver) ResolveForAlias(aliasName string) (*ModelConfig, error) {
 		// for the alias as a whole, so each candidate inherits the current cooldown.
 		// We reset the cooldown and failure counter for the candidate we're trying,
 		// then break because that candidate is now considered healthy.
-		startIdx := (health.CurrentIndex + 1) % len(alias.Models)
-		for i := 0; i < len(alias.Models)-1; i++ {
-			nextIdx := (startIdx + i) % len(alias.Models)
-			if nextIdx == health.CurrentIndex {
-				break // wrapped around back to original
-			}
+		// Advance once to the next model in the rotation. The unconditional
+		// break made this a single-step advance, not a scan.
+		nextIdx := (health.CurrentIndex + 1) % len(alias.Models)
+		if nextIdx != health.CurrentIndex {
 			health.CurrentIndex = nextIdx
 			health.ConsecutiveFails = 0
 			health.CooldownUntil = time.Time{} // Reset cooldown for this candidate
-			break
 		}
 	}
 
@@ -264,10 +261,7 @@ func (r *Resolver) RecordAliasFailure(aliasName string, err error) {
 	if alias == nil {
 		return
 	}
-	shift := health.ConsecutiveFails - 1
-	if shift > 10 {
-		shift = 10
-	}
+	shift := min(health.ConsecutiveFails-1, 10)
 	backoffFactor := 1 << uint(shift)
 	cooldownDuration := alias.Timeout * time.Duration(backoffFactor)
 	health.CooldownUntil = time.Now().Add(cooldownDuration)

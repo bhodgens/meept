@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -1861,7 +1862,7 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // createSession creates a new session via SessionManager.
 func (a *App) createSession(name string) tea.Cmd {
 	return func() tea.Msg {
-		err := a.sessionMgr.CreateSession(nil, name)
+		err := a.sessionMgr.CreateSession(context.TODO(), name)
 		if err != nil {
 			return SessionLoadedMsg{Session: nil, Err: err}
 		}
@@ -1898,12 +1899,12 @@ func (a *App) switchToSessionByID(sessionID string, messageID int64) tea.Cmd {
 // deleteSession deletes a session via SessionManager.
 func (a *App) deleteSession(sessionID string) tea.Cmd {
 	return func() tea.Msg {
-		err := a.sessionMgr.DeleteSession(nil, sessionID)
+		err := a.sessionMgr.DeleteSession(context.TODO(), sessionID)
 		if err != nil {
 			// Just refresh the list to show current state
 		}
 		// Refresh session list
-		sessions, _ := a.sessionMgr.ListSessions(nil)
+		sessions, _ := a.sessionMgr.ListSessions(context.TODO())
 		if len(sessions) > 0 {
 			return SessionListMsg{Sessions: sessions}
 		}
@@ -1922,7 +1923,7 @@ func (a *App) renameSession(sessionID, newName string) tea.Cmd {
 			return RenameErrorMsg{Err: err}
 		}
 		// Refresh session list so names stay in sync
-		if _, err := a.sessionMgr.ListSessions(nil); err != nil {
+		if _, err := a.sessionMgr.ListSessions(context.TODO()); err != nil {
 			slog.Debug("failed to refresh session list", "error", err)
 		}
 		return models.SessionDescriptionUpdatedMsg{

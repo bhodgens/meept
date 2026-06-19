@@ -61,13 +61,8 @@ func expandLimit(limit int) int {
 	if limit <= 0 {
 		return scopedManagerDefaultLimit
 	}
-	expanded := limit * 5
-	if expanded > scopedManagerMaxLimit {
-		expanded = scopedManagerMaxLimit
-	}
-	if expanded < limit+5 {
-		expanded = limit + 5
-	}
+	expanded := min(limit*5, scopedManagerMaxLimit)
+	expanded = max(expanded, limit+5)
 	return expanded
 }
 

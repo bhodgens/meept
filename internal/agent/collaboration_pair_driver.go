@@ -262,9 +262,9 @@ func (d *PairProgrammingDriver) runTurnLoop(ctx context.Context, sess *Collabora
 }
 
 func (d *PairProgrammingDriver) buildDriverPrompt(sess *CollaborationSession, conv *PPConversation, driverID, observerID string) string {
-	prompt := fmt.Sprintf("## You are the CURRENT DRIVER in a pair programming session\n\n")
+	prompt := "## You are the CURRENT DRIVER in a pair programming session\n\n"
 	prompt += fmt.Sprintf("**Session:** %s\n", sess.ID)
-	prompt += fmt.Sprintf("**Your role:** Driver (you have the editor token)\n")
+	prompt += "**Your role:** Driver (you have the editor token)\n"
 	prompt += fmt.Sprintf("**Observer:** %s\n\n", observerID)
 	prompt += fmt.Sprintf("## Task\n\n%s\n\n", sess.TaskID)
 
@@ -290,10 +290,10 @@ func (d *PairProgrammingDriver) buildDriverPrompt(sess *CollaborationSession, co
 }
 
 func (d *PairProgrammingDriver) buildObserverPrompt(sess *CollaborationSession, conv *PPConversation, observerID, driverID, driverOutput string) string {
-	prompt := fmt.Sprintf("## You are the OBSERVER in a pair programming session\n\n")
+	prompt := "## You are the OBSERVER in a pair programming session\n\n"
 	prompt += fmt.Sprintf("**Session:** %s\n", sess.ID)
 	prompt += fmt.Sprintf("**Driver:** %s\n", driverID)
-	prompt += fmt.Sprintf("**Your role:** Observer (review and provide feedback)\n\n")
+	prompt += "**Your role:** Observer (review and provide feedback)\n\n"
 	prompt += fmt.Sprintf("## Task\n\n%s\n\n", sess.TaskID)
 
 	turnLog := sess.CopyTurnLog()
@@ -376,7 +376,7 @@ func parseStructuredObserverResponse(output string) (string, string, bool) {
 	rest := output[jsonStart:]
 	braceDepth := 0
 	jsonEnd := -1
-	for i := 0; i < len(rest); i++ {
+	for i := range rest {
 		switch rest[i] {
 		case '{':
 			braceDepth++
@@ -384,7 +384,6 @@ func parseStructuredObserverResponse(output string) (string, string, bool) {
 			braceDepth--
 			if braceDepth == 0 {
 				jsonEnd = i + 1
-				break
 			}
 		}
 		if jsonEnd > 0 {

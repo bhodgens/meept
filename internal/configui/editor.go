@@ -1,7 +1,10 @@
 // internal/configui/editor.go
 package configui
 
-import "fmt"
+import (
+	"fmt"
+	"maps"
+)
 
 // FieldEditor handles inline editing of a single Field value.
 // It stores the original value at creation time so Cancel can revert.
@@ -138,9 +141,7 @@ func (ed *FieldEditor) InputValue() string {
 // MultiSelectState returns a copy of the current multi-select toggle states.
 func (ed *FieldEditor) MultiSelectState() map[int]bool {
 	out := make(map[int]bool, len(ed.multiSelect))
-	for k, v := range ed.multiSelect {
-		out[k] = v
-	}
+	maps.Copy(out, ed.multiSelect)
 	return out
 }
 

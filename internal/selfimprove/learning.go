@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -935,9 +936,7 @@ func deepCopyPatterns(src map[string]*LearnedPattern) map[string]*LearnedPattern
 		}
 		if p.Metadata != nil {
 			cp.Metadata = make(map[string]any, len(p.Metadata))
-			for mk, mv := range p.Metadata {
-				cp.Metadata[mk] = mv
-			}
+			maps.Copy(cp.Metadata, p.Metadata)
 		}
 		dst[k] = &cp
 	}

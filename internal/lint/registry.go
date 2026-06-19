@@ -255,7 +255,7 @@ func walkTreeForErrors(node *sitter.Node, results *[]LinterResult, file string) 
 
 	// Recurse into children
 	childCount := int(node.ChildCount())
-	for i := 0; i < childCount; i++ {
+	for i := range childCount {
 		child := node.Child(i)
 		if child != nil {
 			walkTreeForErrors(child, results, file)

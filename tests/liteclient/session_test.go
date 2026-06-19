@@ -1,6 +1,7 @@
 package sharedclient
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -201,7 +202,7 @@ func TestSessionManager_LoadOrCreateSession_ByName(t *testing.T) {
 	// Pre-create a session to test switching
 	client.CreateSession("test-session")
 
-	err := sm.LoadOrCreateSession(nil, "test-session")
+	err := sm.LoadOrCreateSession(context.TODO(), "test-session")
 	if err != nil {
 		t.Fatalf("LoadOrCreateSession failed: %v", err)
 	}
@@ -244,7 +245,7 @@ func TestSessionManager_UpdateSessionDescription_NilSession(t *testing.T) {
 	sm := sharedclient.NewSessionManager(nil, "default")
 
 	// Should return nil (no-op) when no session is set
-	err := sm.UpdateSessionDescription(nil, "new description")
+	err := sm.UpdateSessionDescription(context.TODO(), "new description")
 	if err != nil {
 		t.Errorf("expected no error with nil session, got: %v", err)
 	}
@@ -267,7 +268,7 @@ func TestSessionManager_SwitchNonExistent(t *testing.T) {
 	sm := sharedclient.NewSessionManager(client, "default")
 
 	// switchSession with non-existent name should create new session
-	err := sm.SwitchSession(nil, "brand-new-session")
+	err := sm.SwitchSession(context.TODO(), "brand-new-session")
 	if err != nil {
 		t.Fatalf("SwitchSession for new session failed: %v", err)
 	}

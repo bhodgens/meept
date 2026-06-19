@@ -51,7 +51,7 @@ func SetKeypath(cfg *config.Config, path string, value any) error {
 		parent = parent.Elem()
 		parentType = parent.Type()
 	}
-	for i := 0; i < parentType.NumField(); i++ {
+	for i := range parentType.NumField() {
 		field := parentType.Field(i)
 		tag := field.Tag.Get("json")
 		tagName := strings.Split(tag, ",")[0]
@@ -107,7 +107,7 @@ func resolvePath(v reflect.Value, parts []string) (reflect.Value, error) {
 		}
 		t := v.Type()
 		found := false
-		for i := 0; i < t.NumField(); i++ {
+		for i := range t.NumField() {
 			tag := t.Field(i).Tag.Get("json")
 			tagName := strings.Split(tag, ",")[0]
 			if tagName == part {

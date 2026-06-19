@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -68,7 +69,7 @@ func main() {
 
 	// Create session manager
 	sessionMgr := sharedclient.NewSessionManager(client, "default")
-	if err := sessionMgr.LoadOrCreateSession(nil, sessionName); err != nil {
+	if err := sessionMgr.LoadOrCreateSession(context.TODO(), sessionName); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to load session: %v\n", err)
 		os.Exit(1)
 	}

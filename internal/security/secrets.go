@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"regexp"
 	"sort"
@@ -297,9 +298,7 @@ func (s *SecretObfuscator) obfuscateMessage(msg any) any {
 	switch m := msg.(type) {
 	case map[string]any:
 		cp := make(map[string]any, len(m))
-		for k, v := range m {
-			cp[k] = v
-		}
+		maps.Copy(cp, m)
 		if content, ok := cp["content"].(string); ok {
 			cp["content"] = s.Obfuscate(content)
 		}
@@ -315,9 +314,7 @@ func (s *SecretObfuscator) deobfuscateMessage(msg any) any {
 	switch m := msg.(type) {
 	case map[string]any:
 		cp := make(map[string]any, len(m))
-		for k, v := range m {
-			cp[k] = v
-		}
+		maps.Copy(cp, m)
 		if content, ok := cp["content"].(string); ok {
 			cp["content"] = s.Deobfuscate(content)
 		}

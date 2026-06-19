@@ -56,7 +56,7 @@ func (t *SkillMCPTool) ToLLMDefinition() llm.ToolDefinition {
 
 // stripServerPrefix removes the "servername." prefix from a tool name.
 func stripServerPrefix(name string) string {
-	for i := 0; i < len(name); i++ {
+	for i := range name {
 		if name[i] == '.' {
 			return name[i+1:]
 		}

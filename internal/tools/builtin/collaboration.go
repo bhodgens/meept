@@ -103,10 +103,7 @@ func (t *InitiateCollaborationTool) Execute(ctx context.Context, args map[string
 	}
 
 	// Estimate tokens based on task description length (~0.25 tokens per char rough estimate)
-	estTokens := int64(len(taskDesc) / 4)
-	if estTokens < 100 {
-		estTokens = 100
-	}
+	estTokens := max(int64(len(taskDesc)/4), 100)
 
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
