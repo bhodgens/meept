@@ -1,10 +1,10 @@
 {
   // Default model for general use (provider/model-id format)
-  "model": "zai/glm-4.7",
+  "model": "zai/glm-5.2",
 
   // Fast/cheap model for classification, summarization
   // Use "classifier" or "summarizer" aliases for automatic fallback
-  "small_model": "local/lfm-1.2b-4bit",  // Best classifier (69.1% accuracy, 2.9% error rate)
+  "small_model": "local/lfm-8b-4bit",
 
   // Model for intent classification (use alias "classifier" for fallback)
   "classifier_model": "classifier",
@@ -12,15 +12,19 @@
   // Model for session summarization (use alias "summarizer" for fallback)
   "summarizer_model": "summarizer",
 
+  // Model for vision/language tasks (opportunistic loading)
+  "vision_model": "local/lfm-vl-1.6b-6bit",
+
   // Model aliases with cooldown-based failover
   "model_aliases": {
     "classifier": {
       "models": [
-        "local/lfm-1.2b-4bit",        // Primary: Best overall (69.1% accuracy, 2.9% error rate, 279ms)
-        "local/lfm-thinking-claude",  // Fallback 1: Thinking-Claude (58.8% accuracy, better on plan intent)
-        "local/lfm-code",             // Fallback 1: fast local model
-        "zai/glm-4.5-air",            // Fallback 2: remote API
-        "ollama/llama3.2"             // Fallback 3: local Ollama
+        "local/lfm-8b-4bit",         // Primary: LFM2.5-8B-A1B-MLX-4bit
+        "local/lfm-1.2b-4bit",       // Fallback 1: Best overall (69.1% accuracy, 2.9% error rate, 279ms)
+        "local/lfm-thinking-claude", // Fallback 2: Thinking-Claude (58.8% accuracy, better on plan intent)
+        "local/lfm-code",            // Fallback 3: fast local model
+        "zai/glm-4.5-air",           // Fallback 4: remote API
+        "ollama/llama3.2"            // Fallback 5: local Ollama
       ],
       "timeout": 10,
       "max_fails": 2
@@ -35,7 +39,7 @@
       "max_fails": 2
     },
     "coder": {
-      "models": ["zai/glm-4.7", "ollama/llama3.2"],
+      "models": ["zai/glm-5.2", "ollama/llama3.2"],
       "timeout": 30,
       "max_fails": 3
     },
@@ -147,6 +151,17 @@
           "max_output": 512,
           "temperature": 0.1
         },
+        "lfm-8b-4bit": {
+          "name": "LFM2.5-8B-A1B-Instruct-MLX-4bit",
+          "path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
+          "capabilities": ["completion", "code", "reasoning"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 16384,
+          "max_output": 1024,
+          "temperature": 0.7,
+          "max_concurrency": 2
+        },
         "lfm-1.2b-4bit": {
           "name": "/Volumes/LLMs/LFM2.5-1.2B-Instruct-MLX-4bit",
           "path": "/Volumes/LLMs/LFM2.5-1.2B-Instruct-MLX-4bit",
@@ -186,6 +201,17 @@
           "context_limit": 8192,
           "max_output": 512,
           "temperature": 0.1
+        },
+        "lfm-vl-1.6b-6bit": {
+          "name": "LFM2.5-VL-1.6B-MLX-6bit",
+          "path": "/Volumes/LLMs/lmstudio-community/LFM2.5-VL-1.6B-MLX-6bit",
+          "capabilities": ["vision", "completion"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 8192,
+          "max_output": 512,
+          "temperature": 0.7,
+          "max_concurrency": 1
         }
       }
     },
@@ -197,6 +223,16 @@
         "apiKey": "${ZAI_API_KEY}"
       },
       "models": {
+        "glm-5.2": {
+          "name": "glm-5.2",
+          "capabilities": ["completion", "code", "reasoning", "tool_use"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 128000,
+          "max_output": 8192,
+          "temperature": 0.7,
+          "top_p": 0.9
+        },
         "glm-4.7": {
           "name": "glm-4.7",
           "capabilities": ["completion", "code", "reasoning", "tool_use"],
