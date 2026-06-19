@@ -514,7 +514,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
   /// - session: fetch raw session JSON, construct a [Session], set as
   ///   active, load messages, navigate to chat.
   /// - message: parse `sessionID:msgID` from [result.id], navigate to
-  ///   the parent session.  Scroll-to-message is out of scope for MVP.
+  ///   the parent session and scroll to the specific message.
   /// - task: navigate to the tasks tab.
   /// - memory: navigate to the memory tool panel.
   /// - plan: navigate to the plans tab.
@@ -527,7 +527,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
         // Message IDs are formatted as "sessionID:msgID".
         final parts = result.id.split(':');
         if (parts.length >= 2) {
-          await _navigateToSession(parts.first);
+          await _navigateToSession(parts.first, messageId: parts[1]);
         } else {
           // Fallback: treat the whole id as a session id.
           await _navigateToSession(result.id);
@@ -546,11 +546,19 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
   }
 
   /// Fetch a session by ID, set it as active, and navigate to chat.
-  Future<void> _navigateToSession(String sessionId) async {
+  /// If [messageId] is provided, requests ChatMessageList to scroll to
+  /// that message once messages have loaded.
+  Future<void> _navigateToSession(String sessionId, {String? messageId}) async {
     try {
       final raw = await _sdkClient.getSession(sessionId);
       if (!mounted) return;
       final session = Session.fromJson(raw);
+      // Set the pending scroll target before loadMessages so ChatMessageList
+      // sees it on its first build with the new session's messages.
+      if (messageId != null && messageId.isNotEmpty) {
+        ref.read(pendingScrollMessageProvider(session.id).notifier).state =
+            messageId;
+      }
       ref.read(activeSessionProvider.notifier).state = session;
       ref.read(chatProvider.notifier).loadMessages(session.id);
       context.go('/');

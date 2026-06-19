@@ -12,7 +12,8 @@ import (
 	"time"
 
 	sid "github.com/caimlas/meept/pkg/id"
-	_ "modernc.org/sqlite" // sqlite3 driver registration
+	_ "modernc.org/sqlite"     // sqlite3 driver registration
+	_ "modernc.org/sqlite/vec" // sqlite-vec extension (vec0 virtual table)
 )
 
 // SQLiteStore implements Store using SQLite for persistence.

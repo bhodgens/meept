@@ -8,6 +8,7 @@ import 'agent_progress_indicator.dart';
 import 'chat_message_bubble.dart';
 import 'find_bar.dart';
 import 'find_state.dart';
+import 'scroll_state.dart';
 
 /// Chat message list - displays chat messages with auto-scroll
 class ChatMessageList extends ConsumerStatefulWidget {
@@ -21,6 +22,7 @@ class ChatMessageList extends ConsumerStatefulWidget {
 
 class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   final ScrollController _scrollController = ScrollController();
+  final Map<String, GlobalKey> _messageKeys = {};
   bool _isAtBottom = true;
   int _previousMessageCount = 0;
 
@@ -91,6 +93,23 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
       WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _scrollToBottom(); });
     }
 
+    // Pending scroll from search-result navigation.  Consume once the
+    // target message is present in the list.
+    final pendingScrollId = ref.read(pendingScrollMessageProvider(sessionId));
+    if (pendingScrollId.isNotEmpty) {
+      final targetIdx = chatState.messages.indexWhere(
+        (m) => m.id == pendingScrollId,
+      );
+      if (targetIdx >= 0) {
+        // Clear the pending request before scheduling the scroll so a
+        // subsequent rebuild doesn't re-trigger it.
+        ref.read(pendingScrollMessageProvider(sessionId).notifier).state = '';
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _scrollToMessage(pendingScrollId);
+        });
+      }
+    }
+
     // Auto-scroll to current find match when cursor changes.
     if (findVisible && findResult.matches.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -130,17 +149,26 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                             localMatches.add(i);
                           }
                         }
-                        return ChatMessageBubble(
-                          message: message,
-                          highlightQuery: findVisible && findQuery.isNotEmpty ? findQuery : null,
-                          caseSensitive: findCase,
-                          isRegex: findRegex,
-                          highlightRanges: localMatches
-                              .map((absIdx) => findResult.matches[absIdx])
-                              .toList(),
-                          currentRangeAbsIndex: findCursor,
-                          rangeAbsIndices: localMatches,
-                          regexError: findResult.regexError,
+                        // Assign a GlobalKey so scroll-to-message can measure
+                        // this bubble's actual rendered position.
+                        final key = _messageKeys.putIfAbsent(
+                          message.id,
+                          () => GlobalKey(),
+                        );
+                        return KeyedSubtree(
+                          key: key,
+                          child: ChatMessageBubble(
+                            message: message,
+                            highlightQuery: findVisible && findQuery.isNotEmpty ? findQuery : null,
+                            caseSensitive: findCase,
+                            isRegex: findRegex,
+                            highlightRanges: localMatches
+                                .map((absIdx) => findResult.matches[absIdx])
+                                .toList(),
+                            currentRangeAbsIndex: findCursor,
+                            rangeAbsIndices: localMatches,
+                            regexError: findResult.regexError,
+                          ),
                         );
                       } else {
                         // Dynamic progress indicator or fallback thinking
@@ -230,6 +258,48 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
     _scrollController.animateTo(
       clamped,
       duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
+    );
+  }
+
+  /// Scrolls so the message with [messageId] is visible and centered.
+  ///
+  /// Uses the GlobalKey assigned to each message bubble to measure its
+  /// actual rendered position relative to the scroll viewport.  Falls back
+  /// to the approximate (64px-per-message) computation if the key has not
+  /// been registered yet or the render box is unavailable.
+  void _scrollToMessage(String messageId) {
+    if (!_scrollController.hasClients) return;
+    final key = _messageKeys[messageId];
+    if (key == null) return;
+    final ctx = key.currentContext;
+    if (ctx == null) return;
+    final box = ctx.findRenderObject() as RenderBox?;
+    if (box == null || !box.attached) return;
+
+    final scrollable = Scrollable.of(ctx);
+    final scrollRenderBox = scrollable.context.findRenderObject() as RenderBox?;
+    if (scrollRenderBox == null) return;
+
+    // Position of the target message relative to the scrollable's origin.
+    final targetOffset = box.localToGlobal(
+      Offset.zero,
+      ancestor: scrollRenderBox,
+    );
+    final messageHeight = box.size.height;
+    final viewport = _scrollController.position.viewportDimension;
+
+    // Center the target in the viewport.
+    final desiredOffset = _scrollController.offset +
+        targetOffset.dy -
+        (viewport - messageHeight) / 2;
+    final clamped = desiredOffset.clamp(
+      0.0,
+      _scrollController.position.maxScrollExtent,
+    );
+    _scrollController.animateTo(
+      clamped,
+      duration: const Duration(milliseconds: 250),
       curve: Curves.easeOut,
     );
   }

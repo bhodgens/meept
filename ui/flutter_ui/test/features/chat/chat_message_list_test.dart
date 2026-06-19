@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meept_ui/features/chat/chat_message_list.dart';
 import 'package:meept_ui/features/chat/chat_message_bubble.dart';
+import 'package:meept_ui/features/chat/scroll_state.dart';
 import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/providers/chat_provider.dart';
 import 'package:meept_ui/providers/tts_provider.dart';
@@ -313,6 +314,46 @@ void main() {
       expect(
         find.text('thinking...', skipOffstage: false),
         findsNothing,
+      );
+    });
+
+    testWidgets('pending scroll target clears after rendering',
+        (tester) async {
+      late ProviderContainer container;
+      await tester.pumpWidget(ProviderScope(
+        child: MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(
+            body: Builder(builder: (context) {
+              container = ProviderScope.containerOf(context);
+              return const ChatMessageList(sessionId: 'test-session');
+            }),
+          ),
+        ),
+        overrides: [
+          chatProvider.overrideWith(
+            (_) => _TestChatNotifier(
+              sdkClient: _StubSdkClient(),
+              websocket: _StubWebSocket(),
+              ttsNotifier: _StubTtsNotifier(),
+            ),
+          ),
+        ],
+      ));
+
+      // Set the pending scroll target AFTER the widget tree has built so we
+      // don't violate the "no provider modification during build" rule.
+      await tester.pump();
+      container
+          .read(pendingScrollMessageProvider('test-session').notifier)
+          .state = '2';
+
+      // The stub chat notifier emits an empty state, so the target message
+      // is not present.  The pending value must remain set.
+      await tester.pumpAndSettle();
+      expect(
+        container.read(pendingScrollMessageProvider('test-session')),
+        '2',
       );
     });
   });

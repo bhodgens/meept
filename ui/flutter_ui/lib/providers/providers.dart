@@ -1,5 +1,6 @@
 export 'chat_provider.dart';
 export '../features/chat/find_state.dart';
+export '../features/chat/scroll_state.dart';
 export 'task_provider.dart';
 export 'agent_provider.dart';
 export 'metrics_provider.dart';
