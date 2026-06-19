@@ -1,0 +1,80 @@
+#!/bin/bash
+# Pre-commit hook to detect unused exported/unexported Go code (staticcheck U1000)
+#
+# This hook runs staticcheck's U1000 check on staged Go packages.
+# If unused code is detected, the commit is blocked until the code is
+# removed or explicitly suppressed with a //nolint:U1000 directive.
+#
+# Installation:
+#   chmod +x .git/hooks/pre-commit-u1000
+#   # Then source from your main pre-commit hook:
+#   .git/hooks/pre-commit-u1000 || exit 1
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+NC='\033[0m' # No Color
+
+# Check if staticcheck is installed
+if ! command -v staticcheck &>/dev/null; then
+  echo -e "${YELLOW}⚠️  staticcheck not installed — skipping U1000 (unused code) check${NC}"
+  echo "   Install with: go install honnef.co/go/tools/cmd/staticcheck@latest"
+  exit 0
+fi
+
+# Collect staged Go files and derive unique package directories.
+# Force -c color.ui=false so the filename list is never polluted with
+# ANSI escapes (which would break staticcheck's package path args).
+STAGED_GO_FILES=$(git -c color.ui=false -c core.quotepath=false diff --cached --name-only --diff-filter=ACMR 2>/dev/null | grep '\.go$' || true)
+
+if [ -z "$STAGED_GO_FILES" ]; then
+  # No Go files staged — nothing to check
+  exit 0
+fi
+
+# Derive unique package directories from staged Go file paths.
+# Each directory is a Go package; we pass them to staticcheck.
+PACKAGES=""
+while IFS= read -r file; do
+  dir=$(dirname "$file")
+  case "$PACKAGES" in
+    *"$dir"*) ;;  # already seen
+    *) PACKAGES="${PACKAGES}${dir}
+" ;;
+  esac
+done <<< "$STAGED_GO_FILES"
+
+# Run staticcheck U1000 on the staged packages.
+# -tags=test ensures test-only code is also analyzed.
+# -checks=U1000 restricts to the unused-code check.
+VIOLATIONS=""
+EXIT_CODE=0
+
+while IFS= read -r pkg; do
+  [ -z "$pkg" ] && continue
+  # Only check if the directory exists (deleted files won't have a dir)
+  if [ ! -d "$pkg" ]; then
+    continue
+  fi
+  OUTPUT=$(staticcheck -checks=U1000 -tags=test "./${pkg}/" 2>&1) || EXIT_CODE=1
+  if [ -n "$OUTPUT" ]; then
+    VIOLATIONS="${VIOLATIONS}${OUTPUT}
+"
+  fi
+done <<< "$PACKAGES"
+
+if [ $EXIT_CODE -ne 0 ] && [ -n "$VIOLATIONS" ]; then
+  echo -e "${YELLOW}⚠️  staticcheck U1000: unused code detected in staged packages${NC}"
+  echo ""
+  echo "$VIOLATIONS" | sed 's/^/  /'
+  echo -e "${RED}Commit blocked: remove unused code or suppress with //nolint:U1000${NC}"
+  echo ""
+  echo "   To bypass: git commit --no-verify (not recommended)"
+  exit 1
+fi
+
+echo -e "${GREEN}✅ No unused code (U1000) violations detected${NC}"
+exit 0

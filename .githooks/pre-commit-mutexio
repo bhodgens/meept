@@ -1,0 +1,108 @@
+#!/bin/bash
+# Pre-commit hook: mutexio analyzer
+# Blocks commit if any mtx-scope (I/O under mutex) violation exists in staged Go packages.
+#
+# Compatibility: written for /bin/bash 3.2 (macOS default). No mapfile,
+# no associative arrays.
+
+# Color helpers (disabled if output is not a terminal)
+if [ -t 1 ]; then
+    RED='\033[0;31m'
+    NC='\033[0m'
+else
+    RED=''
+    NC=''
+fi
+
+# Collect staged Go files (added, copied, modified).
+# Force -c color.ui=false (and -c core.quotepath=false for unicode filenames)
+# so the filename list is never polluted with ANSI escapes.
+staged_go_files=$(git -c color.ui=false -c core.quotepath=false diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
+
+# Fast path: no Go files staged.
+if [ -z "$staged_go_files" ]; then
+    exit 0
+fi
+
+# Compute the unique set of directory-level package patterns from the file
+# list. Each file looks like "internal/agent/loop.go" -> "./internal/agent/...".
+# Dedupe via sort -u (POSIX); cap at 10 packages for speed.
+# Uses pipe + sort + head instead of bash 4 associative arrays.
+pkgs=""
+count=0
+echo "$staged_go_files" | while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    dirname "$f"
+done | sort -u | head -n 10 | while IFS= read -r dir; do
+    [ -z "$dir" ] && continue
+    echo "./${dir}/..."
+done > /tmp/mutexio-pkgs.$$
+
+pkgs_file=/tmp/mutexio-pkgs.$$
+trap 'rm -f "$pkgs_file"' EXIT
+
+# Read the package patterns into a positional-args list.
+num_pkgs=$(wc -l < "$pkgs_file" | tr -d ' ')
+if [ "$num_pkgs" -eq 0 ]; then
+    exit 0
+fi
+
+echo "mutexio: analyzing ${num_pkgs} package(s) for I/O-under-mutex violations..."
+
+# Build argv-array for `go run` using a portable array (bash 3.2 supports
+# 1-indexed positional-style arrays via set --).
+set --
+while IFS= read -r pkg; do
+    [ -z "$pkg" ] && continue
+    set -- "$@" "$pkg"
+done < "$pkgs_file"
+
+# Run the analyzer with a 60-second time budget. We use a background
+# process and a timeout guard so the hook doesn't hang indefinitely.
+output_file=$(mktemp)
+trap 'rm -f "$output_file" "$pkgs_file"' EXIT
+
+# Start the analyzer in the background.
+go run ./tools/analyzers/mutexio/ "$@" > "$output_file" 2>&1 &
+analyzer_pid=$!
+
+# Poll for completion with a 60-second budget.
+elapsed=0
+timeout_sec=60
+while kill -0 "$analyzer_pid" 2>/dev/null; do
+    if [ "$elapsed" -ge "$timeout_sec" ]; then
+        printf "${RED}mutexio: WARNING -- analyzer exceeded %ss time budget; waiting for completion...${NC}\n" "$timeout_sec"
+        break
+    fi
+    sleep 2
+    elapsed=$((elapsed + 2))
+done
+
+# Wait for the process to finish and collect its exit code.
+# The `|| true` prevents the shell from aborting if the exit code is non-zero
+# (which is expected when the analyzer finds violations -- singlechecker.Main
+# exits 3, and `go run` surfaces it as 1).
+analyzer_exit=0
+wait "$analyzer_pid" 2>/dev/null || analyzer_exit=$?
+
+# singlechecker.Main exits 3 on findings; go run surfaces it as 1.
+if [ "$analyzer_exit" -eq 0 ]; then
+    exit 0
+fi
+
+# Check if the output contains actual violations (mutexio: prefix).
+if grep -q 'mutexio:' "$output_file"; then
+    printf '%b%s%b\n' "$RED" "mutexio: violations found -- commit blocked." "$NC"
+    printf '%b%s%b\n' "$RED" "---" "$NC"
+    while IFS= read -r line; do
+        printf '%b%s%b\n' "$RED" "$line" "$NC"
+    done < "$output_file"
+    printf '%b%s%b\n' "$RED" "---" "$NC"
+    printf '%b%s%b\n' "$RED" "Fix by moving I/O outside the mutex lock/unlock range, or suppress with //nolint:mutexio" "$NC"
+    exit 1
+fi
+
+# Non-zero exit but no mutexio output -- likely a build/compile error.
+# Print the output as-is so the developer sees the real problem.
+cat "$output_file"
+exit "$analyzer_exit"

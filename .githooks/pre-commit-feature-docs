@@ -20,6 +20,17 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Capitalize the first letter of $1 (POSIX-compatible; ${var^} is bash 4+).
+capitalize_first() {
+  local s="$1"
+  if [ -z "$s" ]; then
+    echo ""
+    return
+  fi
+  # Uppercase first char via tr, keep the rest.
+  printf '%s%s\n' "$(printf '%s' "${s:0:1}" | tr '[:lower:]' '[:upper:]')" "${s:1}"
+}
+
 # Configuration
 AIDER_MODEL="${AIDER_MODEL:-glm-5.2}"
 # Use project-level aider config if it exists, otherwise user-level
@@ -208,7 +219,7 @@ EOF
     # Create a temporary documentation template
     local temp_doc="/tmp/feature-doc-${feature}.md"
     cat > "$temp_doc" << EOF
-# ${feature^}
+# $(capitalize_first "$feature")
 
 ## Overview
 <!-- TODO: Describe what this feature does and why it exists -->
@@ -295,10 +306,10 @@ suggest_manual_doc() {
   echo ""
   echo -e "${BLUE}Documentation template:${NC}"
   echo '---'
-  echo "title: ${feature^}"
+  echo "title: $(capitalize_first "$feature")"
   echo '---'
   echo ""
-  echo "# ${feature^}"
+  echo "# $(capitalize_first "$feature")"
   echo ""
   echo "## Overview"
   echo "<!-- What does this feature do? -->"

@@ -1,13 +1,64 @@
 #!/bin/bash
-# Main pre-commit hook - runs all checks including deferred item validation
-# and feature documentation checks
+# Main pre-commit hook - runs all quality and security checks
+#
+# Runs the following checks in order:
+# 1. Deferred item validation (findings docs)
+# 2. Mutex I/O analyzer (Go concurrency)
+# 3. Staticcheck U1000 (unused code)
+# 4. go vet (common Go bugs)
+# 5. Setter nil-safety (typed-nil panics)
+# 6. gosec (security vulnerabilities) - if installed
+# 7. Error handling patterns (anti-patterns)
+# 8. Feature documentation (code changes)
+#
+# Skip with --no-verify for emergencies only.
 
 set -e
 
-# Run deferred item check
-.git/hooks/pre-commit-deferred || exit 1
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Run feature documentation check
-.git/hooks/pre-commit-feature-docs || exit 1
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Pre-commit Quality Checks"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# 1. Deferred item check (findings docs have resolution plans)
+echo -e "\e[34m[1/8]\e[0m Running deferred item validation..."
+"$SCRIPT_DIR/pre-commit-deferred" || exit 1
+
+# 2. Mutex I/O analyzer (CLAUDE.md rule: no I/O under lock)
+echo -e "\e[34m[2/8]\e[0m Running mutex I/O analyzer..."
+"$SCRIPT_DIR/pre-commit-mutexio" || exit 1
+
+# 3. Staticcheck U1000 (unused code detection)
+echo -e "\e[34m[3/8]\e[0m Running unused code check..."
+"$SCRIPT_DIR/pre-commit-u1000" || exit 1
+
+# 4. go vet (common Go bugs)
+echo -e "\e[34m[4/8]\e[0m Running go vet..."
+"$SCRIPT_DIR/pre-commit-vet" || exit 1
+
+# 5. Setter nil-safety (typed-nil interface guard)
+echo -e "\e[34m[5/8]\e[0m Verifying setter nil-safety..."
+"$SCRIPT_DIR/pre-commit-setters" || exit 1
+
+# 6. gosec security scan (if installed)
+echo -e "\e[34m[6/8]\e[0m Running security scan..."
+"$SCRIPT_DIR/pre-commit-gosec" || exit 1
+
+# 7. Error handling patterns
+echo -e "\e[34m[7/8]\e[0m Checking error handling patterns..."
+"$SCRIPT_DIR/pre-commit-errors" || exit 1
+
+# 8. Feature documentation check
+echo -e "\e[34m[8/8]\e[0m Verifying feature documentation..."
+"$SCRIPT_DIR/pre-commit-feature-docs" || exit 1
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo -e "\e[32m✅ All pre-commit checks passed\e[0m"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
 
 exit 0
