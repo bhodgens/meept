@@ -179,6 +179,27 @@ class ChatNotifier extends StateNotifier<ChatState> {
     );
   }
 
+  /// Send a multimodal message with structured content parts.
+  ///
+  /// Mirrors [sendMessage] but routes through
+  /// [SdkApiClient.sendChatMessageWithParts] so the backend receives the
+  /// `parts` array alongside the text fallback.  Used by the chat input
+  /// when the user has attached images.
+  Future<void> sendMessageWithParts({
+    required String sessionId,
+    required String text,
+    required List<Map<String, dynamic>> parts,
+    String? agentId,
+  }) async {
+    await _doSend(
+      sessionId: sessionId,
+      text: text,
+      agentId: agentId,
+      endpoint: _SendEndpoint.normal,
+      parts: parts,
+    );
+  }
+
   /// Send a steering message (double-enter or explicit steer).
   Future<void> sendSteer({
     required String sessionId,
@@ -208,6 +229,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
     required String text,
     String? agentId,
     required _SendEndpoint endpoint,
+    List<Map<String, dynamic>>? parts,
   }) async {
     // Guard against duplicate sends from rapid taps
     if (_isSending) {
@@ -257,11 +279,20 @@ class ChatNotifier extends StateNotifier<ChatState> {
       Map<String, dynamic>? chatResp;
       switch (endpoint) {
         case _SendEndpoint.normal:
-          chatResp = await sdkClient.sendChatMessage(
-            message: text,
-            conversationId: sessionId,
-            agentId: agentId,
-          );
+          if (parts != null && parts.isNotEmpty) {
+            chatResp = await sdkClient.sendChatMessageWithParts(
+              message: text,
+              conversationId: sessionId,
+              agentId: agentId,
+              parts: parts,
+            );
+          } else {
+            chatResp = await sdkClient.sendChatMessage(
+              message: text,
+              conversationId: sessionId,
+              agentId: agentId,
+            );
+          }
         case _SendEndpoint.steer:
           await sdkClient.sendSteerMessage(
             message: text,

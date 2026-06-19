@@ -3,12 +3,16 @@ package tui
 
 import (
 	"bufio"
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +20,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/errcls"
+	"github.com/caimlas/meept/internal/llm"
 	tuimodels "github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/pkg/models"
@@ -296,6 +301,99 @@ func (c *RPCClient) Chat(message, conversationID string) (string, error) {
 	}
 
 	return resp.Reply, nil
+}
+
+// ChatWithParts sends a chat message with multimodal content parts (e.g.
+// image_url references to uploaded files) and returns the response. When
+// parts is empty this behaves identically to Chat.
+func (c *RPCClient) ChatWithParts(message, conversationID string, parts []llm.ContentPart) (string, error) {
+	// Fast path: no parts, delegate to plain Chat to avoid touching params shape.
+	if len(parts) == 0 {
+		return c.Chat(message, conversationID)
+	}
+
+	params := map[string]any{
+		ParamMessage:        message,
+		ParamConversationID: conversationID,
+		"parts":             parts,
+	}
+
+	result, err := c.Call("chat", params)
+	if err != nil {
+		return "", err
+	}
+
+	var resp struct {
+		Reply string `json:"reply"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return "", fmt.Errorf("failed to parse chat response: %w", err)
+	}
+
+	if resp.Error != "" {
+		return resp.Reply, fmt.Errorf("%s", resp.Error)
+	}
+
+	return resp.Reply, nil
+}
+
+// UploadFile uploads a file to the daemon's UploadService and returns the
+// resulting upload ID (SHA-256 of the file content). The ID can be embedded
+// in ContentPart.ImageRef.URL as "file://<id>" for multimodal chat messages.
+// The file is base64-encoded in transit; MIME is derived from the file
+// extension (defaulting to image/png for unknown image extensions).
+func (c *RPCClient) UploadFile(ctx context.Context, filePath string) (string, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+
+	mimeType := mimeTypeForExt(filepath.Ext(filePath))
+
+	encoded := base64.StdEncoding.EncodeToString(data)
+	result, err := c.Call("upload.upload", map[string]any{
+		"data":      encoded,
+		"filename":  filepath.Base(filePath),
+		"mime_type": mimeType,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	// Response shape: {"status":"ok","upload":{...}}
+	raw := struct {
+		Status string         `json:"status"`
+		Upload map[string]any `json:"upload"`
+	}{}
+	if err := json.Unmarshal(result, &raw); err != nil {
+		return "", fmt.Errorf("failed to parse upload response: %w", err)
+	}
+	if raw.Upload == nil {
+		return "", fmt.Errorf("upload response missing upload field")
+	}
+	id, _ := raw.Upload["id"].(string)
+	if id == "" {
+		return "", fmt.Errorf("upload response missing id")
+	}
+	return id, nil
+}
+
+// mimeTypeForExt maps a lowercase file extension (including the dot) to its
+// MIME type. Returns "image/png" as a safe default for unknown image types.
+func mimeTypeForExt(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".png", "":
+		fallthrough
+	default:
+		return "image/png"
+	}
 }
 
 // Status gets the daemon status.

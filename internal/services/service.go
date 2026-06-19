@@ -52,6 +52,7 @@ type ServiceRegistry struct {
 	Plan         *PlanService
 	Runtime      *RuntimeService
 	Search       *SearchService
+	Upload       *UploadService
 }
 
 // Config holds dependencies for service instantiation.
@@ -82,6 +83,9 @@ type Config struct {
 	PlanStore        plan.PlanStore
 	RuntimeManager   *llm.RuntimeManager
 	ChatTimeout      time.Duration
+	UploadsDir       string
+	UploadsMaxMB     int
+	UploadsTypes     []string
 }
 
 // NewRegistry creates all services with their dependencies.
@@ -175,6 +179,19 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 	// SearchService is always created with whatever dependencies are available.
 	// Missing dependencies simply mean those scopes return no results.
 	reg.Search = NewSearchService(cfg.SessionStore, cfg.TaskRegistry, cfg.MemoryManager, cfg.PlanStore)
+
+	// UploadService is created when an uploads directory is configured.
+	if cfg.UploadsDir != "" {
+		maxMB := cfg.UploadsMaxMB
+		if maxMB <= 0 {
+			maxMB = 20
+		}
+		types := cfg.UploadsTypes
+		if len(types) == 0 {
+			types = []string{"image/png", "image/jpeg", "image/gif", "image/webp"}
+		}
+		reg.Upload = NewUploadService(cfg.UploadsDir, maxMB, types)
+	}
 
 	return reg, nil
 }

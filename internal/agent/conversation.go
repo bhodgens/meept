@@ -408,6 +408,18 @@ func (c *Conversation) AddUserMessage(content string) {
 	})
 }
 
+// AddUserMessageWithParts adds a user message with multimodal content parts.
+// When parts is non-empty the LLM serializer uses Parts in place of Content.
+// The text content is still stored for FTS indexing, summarization, and
+// context compaction fallback.
+func (c *Conversation) AddUserMessageWithParts(content string, parts []llm.ContentPart) {
+	c.AddMessage(llm.ChatMessage{
+		Role:    llm.RoleUser,
+		Content: content,
+		Parts:   parts,
+	})
+}
+
 // AddAssistantMessage is a convenience method to add an assistant message.
 func (c *Conversation) AddAssistantMessage(content string) {
 	c.AddMessage(llm.ChatMessage{

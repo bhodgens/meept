@@ -308,6 +308,71 @@ class SdkApiClient {
     return _post('/api/v1/chat', body: _toJson(req));
   }
 
+  /// Sends a chat message with multimodal content parts.
+  ///
+  /// Bypasses the OpenAPI-generated [sdk.ChatRequest] because the schema
+  /// does not yet model content parts.  The body is constructed manually as
+  /// a plain JSON map and dispatched via the same [_post] helper so all
+  /// transport config (TLS, auth header, timeouts) still applies.
+  Future<Map<String, dynamic>> sendChatMessageWithParts({
+    required String message,
+    String? conversationId,
+    String? agentId,
+    List<Map<String, dynamic>>? parts,
+  }) async {
+    final body = <String, dynamic>{
+      'message': message,
+      'conversation_id': conversationId ?? '',
+    };
+    if (agentId != null) body['agent_id'] = agentId;
+    if (parts != null && parts.isNotEmpty) body['parts'] = parts;
+    return _post('/api/v1/chat', body: body);
+  }
+
+  /// Upload a file to the daemon's upload service.
+  ///
+  /// Uses [Dio]'s [FormData] for multipart/form-data upload so we don't need
+  /// a separate `http` package dependency.  The response is the raw upload
+  /// descriptor JSON returned by `POST /api/v1/uploads` (contains `uploads`
+  /// array with `id`, `mime_type`, `size_bytes`, etc.).
+  ///
+  /// Returns `null` on failure so callers can fall back to text references.
+  Future<Map<String, dynamic>?> uploadFile(
+    Uint8List bytes,
+    String filename,
+    String mimeType,
+  ) async {
+    try {
+      final formData = FormData.fromMap({
+        'file': MultipartFile.fromBytes(bytes, filename: filename),
+      });
+      final response = await _dio.post(
+        '/api/v1/uploads',
+        data: formData,
+        options: Options(
+          headers: {
+            // Let Dio set the multipart boundary.
+            'Content-Type': 'multipart/form-data',
+          },
+          // Uploads may take longer than the default receive timeout for
+          // large images — extend the deadline for this request only.
+          receiveTimeout: const Duration(seconds: 60),
+          sendTimeout: const Duration(seconds: 60),
+        ),
+      );
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        return response.data as Map<String, dynamic>;
+      }
+    } on DioException catch (e) {
+      // Best-effort: log via the existing interceptor and return null so
+      // the caller can degrade gracefully (e.g. fall back to text).
+      debugPrint('[sdk-http] uploadFile failed: ${_handleError(e)}');
+    } catch (e) {
+      debugPrint('[sdk-http] uploadFile failed: $e');
+    }
+    return null;
+  }
+
   /// Sends a steering message and returns the raw JSON response map.
   Future<Map<String, dynamic>> sendSteerMessage({
     required String message,

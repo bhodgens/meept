@@ -431,3 +431,24 @@ func TestRPCClientIsConnectionError(t *testing.T) {
 		})
 	}
 }
+
+// TestMimeTypeForExt sanity-checks the extension-to-MIME mapping used by
+// UploadFile when forwarding to the daemon's UploadService.
+func TestMimeTypeForExt(t *testing.T) {
+	cases := map[string]string{
+		".png":  "image/png",
+		".PNG":  "image/png",
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+		".gif":  "image/gif",
+		".webp": "image/webp",
+		// Unknown / missing extensions fall through to a safe image default.
+		".txt": "image/png",
+		"":     "image/png",
+	}
+	for ext, want := range cases {
+		if got := mimeTypeForExt(ext); got != want {
+			t.Errorf("mimeTypeForExt(%q) = %q; want %q", ext, got, want)
+		}
+	}
+}

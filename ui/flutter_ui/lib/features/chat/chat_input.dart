@@ -1,13 +1,54 @@
 import 'dart:async';
+import 'dart:io' show File;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/slash_commands.dart';
+import '../../models/api_models.dart' show Attachment;
+import '../../services/sdk_client.dart' show SdkApiClient;
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
 import 'slash_autocomplete.dart';
+
+/// Image file extensions that should be uploaded as multimodal image parts
+/// rather than appended as plain-text references.
+const Set<String> _kImageExtensions = {
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+};
+
+/// Returns true if [path] has a recognised image file extension.
+bool _isImagePath(String path) {
+  final dot = path.lastIndexOf('.');
+  if (dot < 0) return false;
+  final ext = path.substring(dot).toLowerCase();
+  return _kImageExtensions.contains(ext);
+}
+
+/// Guess the MIME type from the image file extension.
+String _guessImageMime(String path) {
+  final dot = path.lastIndexOf('.');
+  if (dot < 0) return 'application/octet-stream';
+  final ext = path.substring(dot).toLowerCase();
+  return switch (ext) {
+    '.png' => 'image/png',
+    '.jpg' || '.jpeg' => 'image/jpeg',
+    '.gif' => 'image/gif',
+    '.webp' => 'image/webp',
+    _ => 'application/octet-stream',
+  };
+}
+
+/// Extract the basename from a path string (handles both / and \).
+String _basename(String path) {
+  final i = path.lastIndexOf(RegExp(r'[/\\]'));
+  return i < 0 ? path : path.substring(i + 1);
+}
 
 /// Chat input widget - terminal-style with blinking cursor, 3 lines, black bg.
 class ChatInput extends ConsumerStatefulWidget {
@@ -98,8 +139,12 @@ class _ChatInputState extends ConsumerState<ChatInput>
   // Slash command registry
   static final _slashRegistry = SlashCommandRegistry();
 
-  // File path attachments
-  final List<String> _attachments = [];
+  // File path attachments — typed [Attachment] entries once uploaded,
+  // plus raw path strings pending async upload.
+  final List<Attachment> _attachments = [];
+  final List<String> _pendingFilePaths = [];
+  // Paths already dispatched to an in-flight upload, to avoid double-send.
+  final Set<String> _inFlightUploads = {};
   bool _hasFocused = false;
 
   @override
@@ -191,6 +236,13 @@ class _ChatInputState extends ConsumerState<ChatInput>
   }
 
   /// Detect file path pastes: absolute paths that look like files.
+  ///
+  /// Non-image paths are stored as raw strings in [_pendingFilePaths] and
+  /// later rendered as text references in [_preparePayload].  Image paths
+  /// (.png/.jpg/.jpeg/.gif/.webp) are dispatched to [_uploadDetectedImage]
+  /// for asynchronous upload via [SdkApiClient.uploadFile]; on success
+  /// they become typed [Attachment] entries which [_buildParts] turns into
+  /// multimodal `image_url` parts.
   void _detectFilePaths(String currentText) {
     if (currentText.length < _previousText.length) return;
     final added = currentText.substring(_previousText.length);
@@ -204,9 +256,65 @@ class _ChatInputState extends ConsumerState<ChatInput>
     for (final line in added.split('\n')) {
       final candidate = line.trim();
       if (candidate.isEmpty) continue;
-      if (_looksLikeFilePath(candidate) && !_attachments.contains(candidate)) {
-        _attachments.add(candidate);
+      if (!_looksLikeFilePath(candidate)) continue;
+
+      if (_isImagePath(candidate)) {
+        // Avoid double-uploading the same path
+        if (_inFlightUploads.contains(candidate)) continue;
+        if (_attachments.any((a) => a.filename == _basename(candidate))) {
+          continue;
+        }
+        _pendingFilePaths.add(candidate);
+        _inFlightUploads.add(candidate);
+        // Fire-and-forget — updates state on completion.
+        unawaited(_uploadDetectedImage(candidate));
+      } else {
+        if (!_pendingFilePaths.contains(candidate)) {
+          _pendingFilePaths.add(candidate);
+        }
       }
+    }
+  }
+
+  /// Upload a detected image path to the daemon.  Reads the file bytes
+  /// via [File].  On success the path is removed from [_pendingFilePaths]
+  /// and a typed [Attachment] is added.  On failure the path remains in
+  /// [_pendingFilePaths] so it can be sent as a plain-text reference.
+  Future<void> _uploadDetectedImage(String path) async {
+    try {
+      final file = File(path);
+      if (!await file.exists()) return;
+      final bytes = await file.readAsBytes();
+
+      if (!mounted) return;
+      final filename = _basename(path);
+      final mime = _guessImageMime(path);
+      final sdk = ref.read(sdkClientProvider);
+      final upload = await sdk.uploadFile(
+        Uint8List.fromList(bytes),
+        filename,
+        mime,
+      );
+      if (upload == null) return;
+      final uploads = upload['uploads'] as List?;
+      if (uploads == null || uploads.isEmpty) return;
+      final uploadData = uploads.first as Map<String, dynamic>;
+
+      if (!mounted) return;
+      setState(() {
+        _attachments.add(Attachment(
+          uploadId: uploadData['id'] as String? ?? '',
+          filename: filename,
+          mimeType: uploadData['mime_type'] as String? ?? mime,
+          sizeBytes: (uploadData['size_bytes'] as num?)?.toInt() ??
+              bytes.length,
+        ));
+        _pendingFilePaths.remove(path);
+      });
+    } catch (e) {
+      debugPrint('[chat_input] image upload failed for $path: $e');
+    } finally {
+      _inFlightUploads.remove(path);
     }
   }
 
@@ -286,11 +394,45 @@ class _ChatInputState extends ConsumerState<ChatInput>
 
   String _preparePayload(String text) {
     var expanded = _expandPastes(text.trim());
-    // Append file attachments if any
-    if (_attachments.isNotEmpty) {
-      expanded += '\n\n[attachments: ${_attachments.join(', ')}]';
+    // Append non-image file path references (e.g. source files for review).
+    if (_pendingFilePaths.isNotEmpty) {
+      expanded += '\n\n[attachments: ${_pendingFilePaths.join(', ')}]';
     }
     return expanded;
+  }
+
+  /// Build multimodal content parts for a send.
+  ///
+  /// Each uploaded image attachment becomes an `image_url` part; the
+  /// user's text (with paste tokens expanded) becomes the trailing
+  /// `text` part.  Non-image file paths are NOT included here because
+  /// they are already surfaced via [_preparePayload] in the text path.
+  List<Map<String, dynamic>> _buildParts(String text) {
+    final parts = <Map<String, dynamic>>[];
+    for (final attachment in _attachments) {
+      parts.add({
+        'type': 'image_url',
+        'image_url': {'url': 'file://${attachment.uploadId}'},
+      });
+    }
+    final expanded = _expandPastes(text.trim());
+    // Even when we have attachments, keep non-image file path references in
+    // the text body so the agent can read them.
+    if (_pendingFilePaths.isNotEmpty) {
+      final attachmentRef =
+          '\n\n[attachments: ${_pendingFilePaths.join(', ')}]';
+      parts.add({'type': 'text', 'text': '$expanded$attachmentRef'});
+    } else if (expanded.isNotEmpty) {
+      parts.add({'type': 'text', 'text': expanded});
+    }
+    return parts;
+  }
+
+  /// Remove an attachment when the user taps its chip.
+  void _removeAttachment(Attachment attachment) {
+    setState(() {
+      _attachments.remove(attachment);
+    });
   }
 
   /// Reset all input state after sending or handling a command.
@@ -300,6 +442,8 @@ class _ChatInputState extends ConsumerState<ChatInput>
     _pasteStore.clear();
     _pasteCounter = 0;
     _attachments.clear();
+    _pendingFilePaths.clear();
+    _inFlightUploads.clear();
     _ghostText = null;
     _showSlashAutocomplete = false;
     _slashQuery = '';
@@ -345,6 +489,26 @@ class _ChatInputState extends ConsumerState<ChatInput>
   }
 
   void _sendNormal(String text) {
+    // Multimodal path: when image attachments are present, build structured
+    // content parts and route via sendMessageWithParts.  Slash commands are
+    // text-only and never run in this branch.
+    if (_attachments.isNotEmpty) {
+      final parts = _buildParts(text);
+      if (parts.isEmpty) return;
+      final expanded = _expandPastes(text.trim());
+      final chatNotifier = ref.read(chatProvider.notifier);
+      final activeAgent = ref.read(activeAgentProvider);
+      chatNotifier.sendMessageWithParts(
+        sessionId: widget.sessionId,
+        text: expanded.isNotEmpty ? expanded : '(image attached)',
+        parts: parts,
+        agentId: activeAgent?.id ?? 'coder',
+      );
+      _resetInputState();
+      return;
+    }
+
+    // Original text-only path
     final payload = _preparePayload(text);
     if (payload.isEmpty) return;
 
@@ -540,6 +704,44 @@ class _ChatInputState extends ConsumerState<ChatInput>
                     _slashQuery = '';
                   });
                 },
+              ),
+            // Attachment chips — image uploads (typed Attachment) plus
+            // pending file paths that haven't finished uploading yet.
+            if (_attachments.isNotEmpty || _pendingFilePaths.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: <Widget>[
+                      for (final a in _attachments)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: GestureDetector(
+                            onTap: () => _removeAttachment(a),
+                            child: Text(
+                              '[${a.filename}]',
+                              style: CyberpunkTypography.bodySmall.copyWith(
+                                color: CyberpunkColors.greenSuccess,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                        ),
+                      for (final p in _pendingFilePaths)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: Text(
+                            '[${_basename(p)}...]',
+                            style: CyberpunkTypography.bodySmall.copyWith(
+                              color: CyberpunkColors.orangeGlow,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,

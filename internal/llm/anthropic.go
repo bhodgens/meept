@@ -45,6 +45,7 @@ type AnthropicClient struct {
 	timeoutCalc  *metrics.Calculator
 	tokenCache   ResponseCache
 	keyBuilder   *CacheKeyBuilder
+	uploadStore  UploadStore
 }
 
 // AnthropicClientOption is a functional option for configuring an AnthropicClient.
@@ -91,6 +92,15 @@ func WithAnthropicTokenCache(cache ResponseCache) AnthropicClientOption {
 		if cache != nil {
 			c.tokenCache = cache
 			c.keyBuilder = NewCacheKeyBuilder(true) // Enable file-aware caching
+		}
+	}
+}
+
+// WithAnthropicUploadStore sets the upload store for resolving image file references.
+func WithAnthropicUploadStore(store UploadStore) AnthropicClientOption {
+	return func(c *AnthropicClient) {
+		if store != nil {
+			c.uploadStore = store
 		}
 	}
 }
@@ -445,6 +455,15 @@ type anthropicContent struct {
 	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
+	// For images
+	Source *anthropicImageSource `json:"source,omitempty"`
+}
+
+// anthropicImageSource holds base64-encoded image data for the Anthropic API.
+type anthropicImageSource struct {
+	Type      string `json:"type"`       // "base64"
+	MediaType string `json:"media_type"` // "image/png", etc.
+	Data      string `json:"data"`       // base64-encoded image bytes
 }
 
 type anthropicTool struct {
@@ -568,13 +587,20 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 			})
 		case RoleUser, RoleAssistant:
 			msgIndexToAPIIndex[i] = len(apiMessages)
-			apiMessages = append(apiMessages, anthropicMessage{
-				Role: string(msg.Role),
-				Content: []anthropicContent{{
-					Type: ContentTypeText,
-					Text: msg.Content,
-				}},
-			})
+			if len(msg.Parts) > 0 {
+				apiMessages = append(apiMessages, anthropicMessage{
+					Role:    string(msg.Role),
+					Content: c.partsToAnthropicContent(msg.Parts, c.uploadStore),
+				})
+			} else {
+				apiMessages = append(apiMessages, anthropicMessage{
+					Role: string(msg.Role),
+					Content: []anthropicContent{{
+						Type: ContentTypeText,
+						Text: msg.Content,
+					}},
+				})
+			}
 		}
 	}
 
@@ -651,6 +677,53 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 	}
 
 	return req, nil
+}
+
+// partsToAnthropicContent converts ContentParts to Anthropic content blocks.
+// When an image has a Description, it is substituted as text (cached vision result).
+// When store is available and description is empty, image bytes are loaded and
+// sent as an image source block.
+func (c *AnthropicClient) partsToAnthropicContent(parts []ContentPart, store UploadStore) []anthropicContent {
+	var out []anthropicContent
+	for _, p := range parts {
+		switch p.Type {
+		case "text":
+			out = append(out, anthropicContent{
+				Type: ContentTypeText,
+				Text: p.Text,
+			})
+		case "image_url":
+			if p.ImageURL == nil {
+				continue
+			}
+			if p.ImageURL.Description != "" {
+				out = append(out, anthropicContent{
+					Type: ContentTypeText,
+					Text: fmt.Sprintf("[image: %s]", p.ImageURL.Description),
+				})
+			} else {
+				dataURL, err := resolveImageURL(p.ImageURL.URL, store)
+				if err != nil {
+					c.logger.Warn("Failed to resolve image URL", "url", p.ImageURL.URL, "error", err)
+					out = append(out, anthropicContent{
+						Type: ContentTypeText,
+						Text: fmt.Sprintf("[image: unable to load %s]", p.ImageURL.URL),
+					})
+					continue
+				}
+				mimeType, data := parseDataURL(dataURL)
+				out = append(out, anthropicContent{
+					Type: "image",
+					Source: &anthropicImageSource{
+						Type:      "base64",
+						MediaType: mimeType,
+						Data:      data,
+					},
+				})
+			}
+		}
+	}
+	return out
 }
 
 // doRequest performs a non-streaming HTTP request to Anthropic's API.

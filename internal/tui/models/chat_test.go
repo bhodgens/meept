@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -8,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tui/types"
 )
 
@@ -17,6 +19,16 @@ type MockChatRPCClient struct {
 	ChatResponse string
 	ChatError    error
 	ChatCalls    []string // Records messages sent
+
+	// ChatWithParts tracking
+	ChatWithPartsCalls     []string
+	ChatWithPartsPartsList [][]llm.ContentPart
+	ChatWithPartsErr       error
+
+	// Upload tracking
+	UploadCalls  []string
+	UploadID     string
+	UploadErr    error
 
 	// Steering/follow-up tracking
 	SteerCalls     []string
@@ -52,6 +64,35 @@ func (m *MockChatRPCClient) Chat(message, _ string) (string, error) {
 		return m.ChatResponse, nil
 	}
 	return "Mock response to: " + message, nil
+}
+
+// ChatWithParts records the call and delegates to Chat for response logic.
+func (m *MockChatRPCClient) ChatWithParts(message, _ string, parts []llm.ContentPart) (string, error) {
+	m.ChatWithPartsCalls = append(m.ChatWithPartsCalls, message)
+	// Copy parts slice so callers can safely inspect the recorded state even
+	// after the test's source slice is reused.
+	partsCopy := make([]llm.ContentPart, len(parts))
+	copy(partsCopy, parts)
+	m.ChatWithPartsPartsList = append(m.ChatWithPartsPartsList, partsCopy)
+	if m.ChatWithPartsErr != nil {
+		return "", m.ChatWithPartsErr
+	}
+	if m.ChatResponse != "" {
+		return m.ChatResponse, nil
+	}
+	return "Mock response to: " + message, nil
+}
+
+// UploadFile records the path and returns the configured UploadID/err.
+func (m *MockChatRPCClient) UploadFile(_ context.Context, filePath string) (string, error) {
+	m.UploadCalls = append(m.UploadCalls, filePath)
+	if m.UploadErr != nil {
+		return "", m.UploadErr
+	}
+	if m.UploadID != "" {
+		return m.UploadID, nil
+	}
+	return "mock-upload-id", nil
 }
 
 func (m *MockChatRPCClient) IsConnected() bool {
@@ -1475,5 +1516,150 @@ func TestChatModel_UpdateQueueStatus(t *testing.T) {
 	model.UpdateQueueStatus(nil)
 	if model.queueStatus != nil {
 		t.Error("expected queueStatus to be nil after clearing")
+	}
+}
+
+// TestChatModel_SendMessage_WithImageAttachment verifies that when the chat
+// model carries an image attachment (with UploadID populated), doSendMessage:
+//
+//   - calls ChatWithParts (not Chat) on the RPC client
+//   - passes exactly one image_url ContentPart referencing the upload
+//   - leaves the user message body intact (no "[Attached file: ...]" prefix)
+func TestChatModel_SendMessage_WithImageAttachment(t *testing.T) {
+	mock := NewMockChatRPCClient()
+	mock.UploadID = "sha256deadbeef"
+	userStyle := lipgloss.NewStyle()
+	model := NewChatModel(mock, userStyle, userStyle, userStyle, "once")
+	model.SetSize(80, 24)
+	model.agentActive = false
+
+	model.attachments = []attachmentEntry{
+		{
+			Path:     "/tmp/cat.png",
+			UploadID: "sha256deadbeef",
+			IsImage:  true,
+			Filename: "cat.png",
+		},
+	}
+	model.textarea.SetValue("describe this")
+	cmd := model.doSendMessage()
+	if cmd == nil {
+		t.Fatal("expected command returned for image send")
+	}
+	// Execute the returned command so the RPC call is actually made.
+	if msg := cmd(); msg != nil {
+		// Drain the ChatResponseMsg; the test only cares about the side-effect
+		// on the mock. We invoke the closure synchronously.
+		_ = msg.(ChatResponseMsg)
+	}
+
+	if len(mock.ChatWithPartsCalls) != 1 {
+		t.Fatalf("expected 1 ChatWithParts call, got %d (Chat calls=%d)",
+			len(mock.ChatWithPartsCalls), len(mock.ChatCalls))
+	}
+	if len(mock.ChatCalls) != 0 {
+		t.Errorf("expected 0 plain Chat calls, got %d", len(mock.ChatCalls))
+	}
+	if len(mock.ChatWithPartsPartsList) != 1 {
+		t.Fatalf("expected 1 parts slice recorded, got %d", len(mock.ChatWithPartsPartsList))
+	}
+	parts := mock.ChatWithPartsPartsList[0]
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 parts (image + text), got %d", len(parts))
+	}
+	if parts[0].Type != "image_url" || parts[0].ImageURL == nil {
+		t.Errorf("expected first part image_url, got %+v", parts[0])
+	} else if parts[0].ImageURL.URL != "file://sha256deadbeef" {
+		t.Errorf("expected file://sha256deadbeef, got %q", parts[0].ImageURL.URL)
+	}
+	if parts[1].Type != "text" || parts[1].Text != "describe this" {
+		t.Errorf("expected second part text 'describe this', got %+v", parts[1])
+	}
+
+	// Attachments must be cleared after send.
+	if len(model.attachments) != 0 {
+		t.Errorf("expected attachments cleared, got %d", len(model.attachments))
+	}
+}
+
+// TestChatModel_SendMessage_WithNonImageAttachment verifies that non-image
+// attachments fall back to the legacy "[Attached file: <path>]" text prefix
+// and invoke plain Chat (no parts).
+func TestChatModel_SendMessage_WithNonImageAttachment(t *testing.T) {
+	mock := NewMockChatRPCClient()
+	userStyle := lipgloss.NewStyle()
+	model := NewChatModel(mock, userStyle, userStyle, userStyle, "once")
+	model.SetSize(80, 24)
+	model.agentActive = false
+
+	model.attachments = []attachmentEntry{
+		{
+			Path:     "/tmp/notes.txt",
+			IsImage:  false,
+			Filename: "notes.txt",
+		},
+	}
+	model.textarea.SetValue("summary please")
+	cmd := model.doSendMessage()
+	if cmd == nil {
+		t.Fatal("expected command returned for non-image send")
+	}
+	// Execute the returned command so the RPC call is actually made.
+	if msg := cmd(); msg != nil {
+		_ = msg.(ChatResponseMsg)
+	}
+
+	if len(mock.ChatCalls) != 1 {
+		t.Fatalf("expected 1 plain Chat call, got %d", len(mock.ChatCalls))
+	}
+	if len(mock.ChatWithPartsCalls) != 0 {
+		t.Errorf("expected 0 ChatWithParts calls, got %d", len(mock.ChatWithPartsCalls))
+	}
+	if !strings.HasPrefix(mock.ChatCalls[0], "[Attached file: /tmp/notes.txt]") {
+		t.Errorf("expected [Attached file: ...] prefix, got %q", mock.ChatCalls[0])
+	}
+	if !strings.Contains(mock.ChatCalls[0], "summary please") {
+		t.Errorf("expected user text preserved, got %q", mock.ChatCalls[0])
+	}
+}
+
+// TestChatModel_GetAttachments_ReturnsPaths confirms the public API still
+// returns plain path strings even though the internal storage is structured.
+func TestChatModel_GetAttachments_ReturnsPaths(t *testing.T) {
+	model := newTestChatModel()
+	model.attachments = []attachmentEntry{
+		{Path: "/tmp/a.png", IsImage: true, Filename: "a.png", UploadID: "id-a"},
+		{Path: "/tmp/b.txt", IsImage: false, Filename: "b.txt"},
+	}
+	paths := model.GetAttachments()
+	if len(paths) != 2 || paths[0] != "/tmp/a.png" || paths[1] != "/tmp/b.txt" {
+		t.Errorf("unexpected paths: %v", paths)
+	}
+	model.ClearAttachments()
+	if len(model.GetAttachments()) != 0 {
+		t.Error("expected attachments cleared")
+	}
+}
+
+// TestMimeTypeForExt sanity-checks the MIME mapping used by the TUI upload path.
+// The mimeTypeForExt helper lives in package tui (rpc.go); this test is
+// intentionally placed there. We only exercise the models-side helper here.
+
+// TestIsImageFile verifies image-extension detection for the attachment flow.
+func TestIsImageFile(t *testing.T) {
+	cases := map[string]bool{
+		"/tmp/photo.png":  true,
+		"/tmp/photo.JPG":  true,
+		"/tmp/p.jpeg":     true,
+		"/tmp/a.gif":      true,
+		"/tmp/a.webp":     true,
+		"/tmp/notes.txt":  false,
+		"/tmp/noext":      false,
+		"/tmp/README.md":  false,
+	}
+	for path, want := range cases {
+		if got := isImageFile(path); got != want {
+			t.Errorf("isImageFile(%q) = %v; want %v", path, got, want)
+		}
 	}
 }

@@ -144,7 +144,7 @@ type ChatModel struct {
 	pasteCounter     int
 
 	// File attachments - paths dragged/pasted into the input
-	attachments []string
+	attachments []attachmentEntry
 
 	// Mouse selection state
 	mouseDown      bool
@@ -236,6 +236,8 @@ const findMaxMatches = 1000
 // RPCClient interface for the chat model.
 type RPCClient interface {
 	Chat(message, conversationID string) (string, error)
+	ChatWithParts(message, conversationID string, parts []llm.ContentPart) (string, error)
+	UploadFile(ctx context.Context, filePath string) (string, error)
 	IsConnected() bool
 	SaveSessionMessages(sessionID string, msgs []types.SessionMessage) error
 	GetSessionMessages(sessionID string, offset, limit int) (*types.SessionMessagesResponse, error)
@@ -256,6 +258,34 @@ type ChatConfig struct {
 type InputBehaviorConfig struct {
 	EnterBehavior string // "shift_sends" or "double_enter"
 	AutoExpand    bool   // Enable auto-expanding input height
+}
+
+// attachmentEntry tracks a single file attached to the chat input.
+// Image attachments are uploaded to the daemon's UploadService and referenced
+// by UploadID in ContentPart.ImageRef.URL. Non-image attachments keep only
+// their Path so they can be rendered as "[Attached file: <path>]" context.
+type attachmentEntry struct {
+	Path     string // original filesystem path (for display)
+	UploadID string // populated for image uploads; "" for non-images
+	IsImage  bool
+	Filename string
+}
+
+// imageExtensions are file extensions treated as image uploads. Files with
+// these extensions are uploaded via the daemon and converted to
+// ContentPart{Type:"image_url"} entries on send.
+var imageExtensions = map[string]bool{
+	".png":  true,
+	".jpg":  true,
+	".jpeg": true,
+	".gif":  true,
+	".webp": true,
+}
+
+// isImageFile returns true if the path has an image file extension.
+func isImageFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return imageExtensions[ext]
 }
 
 // NewChatModel creates a new chat model.
@@ -1519,6 +1549,18 @@ func (m *ChatModel) sendMessage(text string) tea.Cmd {
 	}
 }
 
+// sendMessageWithParts sends a chat message with optional multimodal parts.
+// When parts is empty it delegates to plain sendMessage.
+func (m *ChatModel) sendMessageWithParts(text string, parts []llm.ContentPart) tea.Cmd {
+	if len(parts) == 0 {
+		return m.sendMessage(text)
+	}
+	return func() tea.Msg {
+		reply, err := m.rpc.ChatWithParts(text, m.conversationID, parts)
+		return ChatResponseMsg{Reply: reply, Err: err}
+	}
+}
+
 func (m *ChatModel) addMessage(role, content string) {
 	m.messages = append(m.messages, ChatMessage{
 		Role:      role,
@@ -1578,14 +1620,23 @@ func (m *ChatModel) doSendMessage() tea.Cmd {
 	// Expand paste tokens to get actual message content
 	actualText := m.expandPasteTokens(text)
 
-	// Prepend attachment file references for the LLM context
-	if len(m.attachments) > 0 {
-		var attachmentRefs []string
-		for _, path := range m.attachments {
-			// Include file path as context for the LLM
-			attachmentRefs = append(attachmentRefs, fmt.Sprintf("[Attached file: %s]", path))
+	// Build multimodal parts for image attachments. Non-image attachments are
+	// surfaced as "[Attached file: <path>]" text references for the LLM.
+	var parts []llm.ContentPart
+	for _, att := range m.attachments {
+		if att.IsImage && att.UploadID != "" {
+			parts = append(parts, llm.ContentPart{
+				Type:     "image_url",
+				ImageURL: &llm.ImageRef{URL: "file://" + att.UploadID},
+			})
+		} else {
+			actualText = fmt.Sprintf("[Attached file: %s]\n%s", att.Path, actualText)
 		}
-		actualText = strings.Join(attachmentRefs, "\n") + "\n\n" + actualText
+	}
+	// When image parts are present, the text body must travel as a text-type
+	// ContentPart so provider serializers emit a valid multimodal message.
+	if len(parts) > 0 {
+		parts = append(parts, llm.ContentPart{Type: "text", Text: actualText})
 	}
 
 	m.textarea.Reset()
@@ -1639,7 +1690,7 @@ func (m *ChatModel) doSendMessage() tea.Cmd {
 	m.updateViewport()
 
 	m.loading = true
-	return m.sendMessage(actualText)
+	return m.sendMessageWithParts(actualText, parts)
 }
 
 // GetInputHeight returns the fixed input height in lines.
@@ -2128,9 +2179,16 @@ func (m *ChatModel) View() string {
 		if len(m.attachments) > 0 {
 			attachStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F97316")) // orange
 			attachLabels := make([]string, 0, len(m.attachments))
-			for _, path := range m.attachments {
-				name := filepath.Base(path)
-				attachLabels = append(attachLabels, attachStyle.Render("["+name+"]"))
+			for _, att := range m.attachments {
+				name := att.Filename
+				if name == "" {
+					name = filepath.Base(att.Path)
+				}
+				label := "[" + name + "]"
+				if att.IsImage {
+					label = "[img:" + name + "]"
+				}
+				attachLabels = append(attachLabels, attachStyle.Render(label))
 			}
 			inputContent.WriteString(strings.Join(attachLabels, " "))
 			inputContent.WriteString("\n")
@@ -2685,7 +2743,10 @@ func (m *ChatModel) renderPlanNotification(msg PlanNotificationMsg) string {
 }
 
 // detectAndAttachFile checks if new input content contains a file path and
-// converts it to an attachment (shown as [filename] in the UI).
+// converts it to an attachment (shown as [filename] in the UI). Image files
+// are uploaded immediately to the daemon's UploadService; the resulting
+// UploadID is later attached to a multimodal ContentPart on send. Non-image
+// files are stored as path-only attachment entries.
 func (m *ChatModel) detectAndAttachFile(oldValue, newValue string) {
 	// Find what was added
 	added := ""
@@ -2724,12 +2785,41 @@ func (m *ChatModel) detectAndAttachFile(oldValue, newValue string) {
 	}
 
 	// Avoid duplicates
-	if slices.Contains(m.attachments, candidate) {
-		return
+	for _, att := range m.attachments {
+		if att.Path == candidate {
+			return
+		}
+	}
+
+	// Build the attachment entry. For image files we attempt to upload to
+	// the daemon now so the upload ID is ready when the user presses send.
+	// Upload failure is non-fatal: we fall back to a path-only attachment so
+	// the user at least sees the file referenced in their message.
+	entry := attachmentEntry{
+		Path:     candidate,
+		Filename: filepath.Base(candidate),
+		IsImage:  isImageFile(candidate),
+	}
+
+	if entry.IsImage && m.rpc != nil && m.rpc.IsConnected() {
+		// Upload synchronously: detectAndAttachFile runs in the TUI Update
+		// goroutine. Upload latency for typical image sizes (<5MB) is well
+		// under the 120s RPC timeout and a round-trip is simpler than
+		// plumbing async state back into the textarea render path.
+		uploadID, upErr := m.rpc.UploadFile(context.Background(), candidate)
+		if upErr != nil {
+			slog.Warn("Image upload failed; falling back to path reference",
+				"path", candidate,
+				"error", upErr,
+			)
+			entry.IsImage = false
+		} else {
+			entry.UploadID = uploadID
+		}
 	}
 
 	// Add to attachments and remove from textarea
-	m.attachments = append(m.attachments, candidate)
+	m.attachments = append(m.attachments, entry)
 
 	// Remove the path from the textarea, keeping other content
 	// Find and remove the added path segment from current textarea value
@@ -2741,7 +2831,11 @@ func (m *ChatModel) detectAndAttachFile(oldValue, newValue string) {
 
 // GetAttachments returns the list of attached file paths.
 func (m *ChatModel) GetAttachments() []string {
-	return m.attachments
+	paths := make([]string, len(m.attachments))
+	for i, att := range m.attachments {
+		paths[i] = att.Path
+	}
+	return paths
 }
 
 // ClearAttachments removes all attachments.

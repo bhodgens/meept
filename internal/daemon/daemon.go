@@ -496,6 +496,11 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	}
 
 	// Create service registry with dependencies
+	uploadCfg := fullCfg.Daemon.Uploads
+	uploadDataDir := filepath.Join(cfg.StateDir, "uploads")
+	if fullCfg.Daemon.DataDir != "" {
+		uploadDataDir = filepath.Join(fullCfg.Daemon.DataDir, "uploads")
+	}
 	svcRegistry, err := services.NewRegistry(services.Config{
 		Bus:              msgBus,
 		AgentRegistry:    nilSafeAgentRegistry(components),
@@ -521,6 +526,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		PlanManager:      planManagerInst,
 		PlanStore:        planStoreIF,
 		ChatTimeout:      fullCfg.ChatTimeout(),
+		UploadsDir:       uploadDataDir,
+		UploadsMaxMB:     uploadCfg.MaxSizeMB,
+		UploadsTypes:     uploadCfg.AllowedTypes,
 	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create service registry: %w", err)
@@ -532,6 +540,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			svcRegistry.Security.SetAuditDB(auditDB)
 			logger.Info("Audit DB wired to security service")
 		}
+	}
+
+	// Wire upload store into agent loop for vision pre-flight image resolution.
+	// The UploadService satisfies llm.UploadStore via its Load method.
+	if svcRegistry.Upload != nil && components.AgentLoop != nil {
+		components.AgentLoop.SetUploadStore(svcRegistry.Upload)
+		logger.Info("Upload service wired to agent loop for vision pre-flight")
 	}
 
 	// Register daemon and model RPC handlers (after service registry is created)
@@ -559,6 +574,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		if svcRegistry.Search != nil {
 			registerSearchRPCHandlers(rpcServer, svcRegistry.Search)
 			logger.Info("Search RPC handlers registered")
+		}
+
+		// Upload handlers (image / file uploads for multimodal chat)
+		if svcRegistry.Upload != nil {
+			uploadHandler := NewUploadRPCHandler(svcRegistry.Upload)
+			uploadHandler.RegisterUploadMethods(rpcServer)
+			logger.Info("Upload RPC handlers registered")
 		}
 
 		// Project management handlers

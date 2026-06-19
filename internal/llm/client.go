@@ -101,6 +101,7 @@ type Client struct {
 	tokenResolver TokenResolver
 	oauthProvider string
 	extraHeaders  map[string]string
+	uploadStore   UploadStore
 	// concurrencySemaphore limits concurrent requests for this model/provider.
 	// When nil, no limit is enforced. Buffered channel used as a semaphore.
 	concurrencySemaphore chan struct{}
@@ -207,6 +208,15 @@ func WithExtraHeaders(headers map[string]string) ClientOption {
 	return func(c *Client) {
 		if headers != nil {
 			c.extraHeaders = headers
+		}
+	}
+}
+
+// WithUploadStore sets the upload store for resolving image file references.
+func WithUploadStore(store UploadStore) ClientOption {
+	return func(c *Client) {
+		if store != nil {
+			c.uploadStore = store
 		}
 	}
 }
@@ -884,8 +894,7 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 	choice := chatResp.Choices[0]
 	msg := choice.Message
 
-	var content string
-	content = msg.ContentString()
+	content := msg.ContentString()
 
 	var toolCalls []ToolCall
 	if len(msg.ToolCalls) > 0 {

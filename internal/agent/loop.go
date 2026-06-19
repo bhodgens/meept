@@ -458,6 +458,9 @@ type AgentLoop struct {
 	// Agent identity
 	agentID string
 
+	// Upload store for resolving image file references (vision pre-flight)
+	uploadStore llm.UploadStore
+
 	// Skill discovery (lightweight, metadata-driven)
 	capabilityIndex *skills.CapabilityIndex
 	skillLoader     *skills.LazySkillLoader
@@ -1097,7 +1100,17 @@ func (l *AgentLoop) FirewallStats() map[string]any {
 }
 
 // RunOnce processes a single user turn through the full reasoning loop.
+// This is a convenience wrapper for callers that have no multimodal parts.
 func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID string) (response string, err error) {
+	return l.RunOnceWithParts(ctx, userMessage, nil, conversationID)
+}
+
+// RunOnceWithParts processes a single user turn through the full reasoning loop,
+// optionally carrying multimodal content parts (e.g. image attachments).
+// When parts is non-empty the underlying ChatMessage is created via
+// Conversation.AddUserMessageWithParts so that provider serializers emit
+// native image blocks.
+func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, parts []llm.ContentPart, conversationID string) (response string, err error) {
 	if l.llm == nil {
 		return "", ErrNoLLMClient
 	}
@@ -1223,8 +1236,13 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 	systemPrompt := l.buildSystemPromptWithSkills(ctx, discovered)
 	conv.SetSystemPrompt(systemPrompt)
 
-	// Add user message (sanitized)
-	conv.AddUserMessage(sanitizedMessage)
+	// Add user message (sanitized). When multimodal parts are present, attach
+	// them to the ChatMessage so provider serializers emit native image blocks.
+	if len(parts) > 0 {
+		conv.AddUserMessageWithParts(sanitizedMessage, parts)
+	} else {
+		conv.AddUserMessage(sanitizedMessage)
+	}
 
 	// Truncate if needed
 	conv.Truncate()
@@ -1777,6 +1795,22 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// Inject few-shot examples from shadow training (only on first iteration)
 		if iteration == 1 && l.shadowMgr != nil && l.shadowMgr.IsEnabled() {
 			messages = l.injectFewShotExamples(ctx, messages, conversationID)
+		}
+
+		// Vision pre-flight: analyze undescribed images before the main turn.
+		// The messages slice is modified in-place — ImageRef.Description fields
+		// are populated so the main LLM turn uses the cached descriptions
+		// instead of raw image bytes (saves tokens + enables vision on non-vision models).
+		if iteration == 1 && needsVisionPreflight(messages) && l.resolver != nil {
+			visionModels := l.resolver.FindByCapabilities([]string{llm.CapImages})
+			if len(visionModels) > 0 {
+				visionClient := llm.NewClient(visionModels[0], llm.WithUploadStore(l.uploadStore))
+				if err := runVisionPreflight(ctx, messages, visionClient, l.uploadStore, l.logger); err != nil {
+					l.logger.Warn("Vision pre-flight completed with errors", "error", err)
+				}
+			} else {
+				l.logger.Warn("Image in message but no vision-capable model configured")
+			}
 		}
 
 		// Build chat options with resolved inference parameters from agent spec
@@ -3622,6 +3656,17 @@ func (l *AgentLoop) SetSkillLoader(loader *skills.LazySkillLoader) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.skillLoader = loader
+}
+
+// SetUploadStore sets the upload store used to resolve image file references
+// for the vision pre-flight step. Nil is safely ignored.
+func (l *AgentLoop) SetUploadStore(store llm.UploadStore) {
+	if store == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.uploadStore = store
 }
 
 // SetSessionStore wires a session store and config for persistence.

@@ -523,7 +523,7 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 
 	// Unmarshal the payload once for inspection (best-effort; payload stays nil on failure)
 	var payload map[string]any
-	if msg.Payload != nil && len(msg.Payload) > 0 {
+	if len(msg.Payload) > 0 {
 		if jErr := json.Unmarshal(msg.Payload, &payload); jErr != nil {
 			// payload stays nil; default event type classification is used
 		}
@@ -937,6 +937,12 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/chat/steer", s.handleChatSteer)
 	mux.HandleFunc("POST /api/v1/chat/steer-explicit", s.handleChatSteerExplicit)
 	mux.HandleFunc("POST /api/v1/chat/followup", s.handleChatFollowUp)
+
+	// Upload endpoints
+	mux.HandleFunc("POST /api/v1/uploads", s.handleUploadCreate)
+	mux.HandleFunc("GET /api/v1/uploads/{id}", s.handleUploadGet)
+	mux.HandleFunc("GET /api/v1/uploads/{id}/metadata", s.handleUploadMetadata)
+	mux.HandleFunc("DELETE /api/v1/uploads/{id}", s.handleUploadDelete)
 
 	// Memory endpoints
 	mux.HandleFunc("POST /api/v1/memory/query", s.handleMemoryQuery)

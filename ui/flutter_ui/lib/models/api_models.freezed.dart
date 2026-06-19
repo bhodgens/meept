@@ -28,6 +28,7 @@ mixin _$ChatMessage {
   String? get sessionId => throw _privateConstructorUsedError;
   @JsonKey(name: 'tool_calls')
   List<String>? get toolCalls => throw _privateConstructorUsedError;
+  List<ChatMessagePart> get parts => throw _privateConstructorUsedError;
 
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
   @JsonKey(ignore: true)
@@ -47,7 +48,8 @@ abstract class $ChatMessageCopyWith<$Res> {
       String content,
       DateTime timestamp,
       @JsonKey(name: 'session_id') String? sessionId,
-      @JsonKey(name: 'tool_calls') List<String>? toolCalls});
+      @JsonKey(name: 'tool_calls') List<String>? toolCalls,
+      List<ChatMessagePart> parts});
 }
 
 /// @nodoc
@@ -69,6 +71,7 @@ class _$ChatMessageCopyWithImpl<$Res, $Val extends ChatMessage>
     Object? timestamp = null,
     Object? sessionId = freezed,
     Object? toolCalls = freezed,
+    Object? parts = null,
   }) {
     return _then(_value.copyWith(
       id: null == id
@@ -95,6 +98,10 @@ class _$ChatMessageCopyWithImpl<$Res, $Val extends ChatMessage>
           ? _value.toolCalls
           : toolCalls // ignore: cast_nullable_to_non_nullable
               as List<String>?,
+      parts: null == parts
+          ? _value.parts
+          : parts // ignore: cast_nullable_to_non_nullable
+              as List<ChatMessagePart>,
     ) as $Val);
   }
 }
@@ -113,7 +120,8 @@ abstract class _$$ChatMessageImplCopyWith<$Res>
       String content,
       DateTime timestamp,
       @JsonKey(name: 'session_id') String? sessionId,
-      @JsonKey(name: 'tool_calls') List<String>? toolCalls});
+      @JsonKey(name: 'tool_calls') List<String>? toolCalls,
+      List<ChatMessagePart> parts});
 }
 
 /// @nodoc
@@ -133,6 +141,7 @@ class __$$ChatMessageImplCopyWithImpl<$Res>
     Object? timestamp = null,
     Object? sessionId = freezed,
     Object? toolCalls = freezed,
+    Object? parts = null,
   }) {
     return _then(_$ChatMessageImpl(
       id: null == id
@@ -159,6 +168,10 @@ class __$$ChatMessageImplCopyWithImpl<$Res>
           ? _value._toolCalls
           : toolCalls // ignore: cast_nullable_to_non_nullable
               as List<String>?,
+      parts: null == parts
+          ? _value._parts
+          : parts // ignore: cast_nullable_to_non_nullable
+              as List<ChatMessagePart>,
     ));
   }
 }
@@ -172,8 +185,10 @@ class _$ChatMessageImpl extends _ChatMessage {
       required this.content,
       required this.timestamp,
       @JsonKey(name: 'session_id') this.sessionId,
-      @JsonKey(name: 'tool_calls') final List<String>? toolCalls})
+      @JsonKey(name: 'tool_calls') final List<String>? toolCalls,
+      final List<ChatMessagePart> parts = const []})
       : _toolCalls = toolCalls,
+        _parts = parts,
         super._();
 
   factory _$ChatMessageImpl.fromJson(Map<String, dynamic> json) =>
@@ -201,9 +216,18 @@ class _$ChatMessageImpl extends _ChatMessage {
     return EqualUnmodifiableListView(value);
   }
 
+  final List<ChatMessagePart> _parts;
+  @override
+  @JsonKey()
+  List<ChatMessagePart> get parts {
+    if (_parts is EqualUnmodifiableListView) return _parts;
+    // ignore: implicit_dynamic_type
+    return EqualUnmodifiableListView(_parts);
+  }
+
   @override
   String toString() {
-    return 'ChatMessage(id: $id, role: $role, content: $content, timestamp: $timestamp, sessionId: $sessionId, toolCalls: $toolCalls)';
+    return 'ChatMessage(id: $id, role: $role, content: $content, timestamp: $timestamp, sessionId: $sessionId, toolCalls: $toolCalls, parts: $parts)';
   }
 
   @override
@@ -219,13 +243,21 @@ class _$ChatMessageImpl extends _ChatMessage {
             (identical(other.sessionId, sessionId) ||
                 other.sessionId == sessionId) &&
             const DeepCollectionEquality()
-                .equals(other._toolCalls, _toolCalls));
+                .equals(other._toolCalls, _toolCalls) &&
+            const DeepCollectionEquality().equals(other._parts, _parts));
   }
 
   @JsonKey(ignore: true)
   @override
-  int get hashCode => Object.hash(runtimeType, id, role, content, timestamp,
-      sessionId, const DeepCollectionEquality().hash(_toolCalls));
+  int get hashCode => Object.hash(
+      runtimeType,
+      id,
+      role,
+      content,
+      timestamp,
+      sessionId,
+      const DeepCollectionEquality().hash(_toolCalls),
+      const DeepCollectionEquality().hash(_parts));
 
   @JsonKey(ignore: true)
   @override
@@ -243,13 +275,13 @@ class _$ChatMessageImpl extends _ChatMessage {
 
 abstract class _ChatMessage extends ChatMessage {
   const factory _ChatMessage(
-          {required final String id,
-          required final String role,
-          required final String content,
-          required final DateTime timestamp,
-          @JsonKey(name: 'session_id') final String? sessionId,
-          @JsonKey(name: 'tool_calls') final List<String>? toolCalls}) =
-      _$ChatMessageImpl;
+      {required final String id,
+      required final String role,
+      required final String content,
+      required final DateTime timestamp,
+      @JsonKey(name: 'session_id') final String? sessionId,
+      @JsonKey(name: 'tool_calls') final List<String>? toolCalls,
+      final List<ChatMessagePart> parts}) = _$ChatMessageImpl;
   const _ChatMessage._() : super._();
 
   factory _ChatMessage.fromJson(Map<String, dynamic> json) =
@@ -269,6 +301,8 @@ abstract class _ChatMessage extends ChatMessage {
   @override
   @JsonKey(name: 'tool_calls')
   List<String>? get toolCalls;
+  @override
+  List<ChatMessagePart> get parts;
   @override
   @JsonKey(ignore: true)
   _$$ChatMessageImplCopyWith<_$ChatMessageImpl> get copyWith =>

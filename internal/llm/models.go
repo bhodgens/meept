@@ -20,11 +20,12 @@ const (
 
 // ChatMessage represents a single message in a chat conversation.
 type ChatMessage struct {
-	Role       Role       `json:"role"`
-	Content    string     `json:"content"`
-	Name       string     `json:"name,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Role       Role          `json:"role"`
+	Content    string        `json:"content"`
+	Parts      []ContentPart `json:"parts,omitempty"` // Non-empty => takes precedence for LLM serialization
+	Name       string        `json:"name,omitempty"`
+	ToolCalls  []ToolCall    `json:"tool_calls,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"`
 	// IsToolError indicates that this tool-role message represents a failed
 	// tool execution. Used by the Anthropic client to set the IsError flag
 	// on tool_result blocks. Not serialized to external APIs (set per-trip).
@@ -42,8 +43,39 @@ type ChatMessage struct {
 // ToOpenAIDict converts the message to the format expected by OpenAI API.
 func (m *ChatMessage) ToOpenAIDict() map[string]any {
 	msg := map[string]any{
-		"role":    string(m.Role),
-		"content": m.Content,
+		"role": string(m.Role),
+	}
+	if len(m.Parts) > 0 {
+		content := make([]map[string]any, 0, len(m.Parts))
+		for _, p := range m.Parts {
+			switch p.Type {
+			case "text":
+				content = append(content, map[string]any{
+					"type": "text",
+					"text": p.Text,
+				})
+			case "image_url":
+				if p.ImageURL == nil {
+					continue
+				}
+				if p.ImageURL.Description != "" {
+					content = append(content, map[string]any{
+						"type": "text",
+						"text": fmt.Sprintf("[image: %s]", p.ImageURL.Description),
+					})
+				} else {
+					content = append(content, map[string]any{
+						"type": "image_url",
+						"image_url": map[string]any{
+							"url": p.ImageURL.URL,
+						},
+					})
+				}
+			}
+		}
+		msg["content"] = content
+	} else {
+		msg["content"] = m.Content
 	}
 	if m.Name != "" {
 		msg["name"] = m.Name

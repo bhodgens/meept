@@ -7,6 +7,13 @@
     "pid_file": "~/.meept/meept.pid",
     "log_level": "INFO",
     "data_dir": "~/.meept",
+    "uploads": {
+      "enabled": true,
+      "max_size_mb": 20,
+      "allowed_types": ["image/png", "image/jpeg", "image/gif", "image/webp"],
+      "gc_retention_days": 7,
+      "gc_interval_hours": 24,
+    },
   },
 
   // Transport configuration - enable/disable RPC and HTTP independently

@@ -34,6 +34,11 @@ class ChatMessageBubble extends StatelessWidget {
     final isUser = message.role == 'user';
     final isSystem = message.role == 'system';
 
+    // Snapshot of image parts for this message, computed once per build.
+    final imageParts = message.parts
+        .where((p) => p.type == 'image_url')
+        .toList(growable: false);
+
     // System messages have distinct styling for errors and notifications
     if (isSystem) {
       return Container(
@@ -141,6 +146,28 @@ class ChatMessageBubble extends StatelessWidget {
                 maxLines: 3,
               ),
             ],
+            // Multimodal image attachment chips.  The backend sends the
+            // user's message content as plain text plus structured `parts`
+            // for images; render the image parts here as removable chips.
+            if (imageParts.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 4,
+                runSpacing: 2,
+                children: [
+                  for (final part in imageParts)
+                    Text(
+                      '[${_labelForImagePart(part)}]',
+                      style: CyberpunkTypography.bodySmall.copyWith(
+                        color: isUser
+                            ? CyberpunkColors.orangeGlow
+                            : CyberpunkColors.greenSuccess,
+                        fontSize: 11,
+                      ),
+                    ),
+                ],
+              ),
+            ],
             const SizedBox(height: 4),
             Text(
               _formatTime(message.timestamp),
@@ -207,5 +234,22 @@ class ChatMessageBubble extends StatelessWidget {
     final hour = time.hour.toString().padLeft(2, '0');
     final minute = time.minute.toString().padLeft(2, '0');
     return '$hour:$minute';
+  }
+
+  /// Derive a display label for an image attachment chip from its URL.
+  /// Falls back to 'image' when the URL is empty or unparseable.
+  String _labelForImagePart(ChatMessagePart part) {
+    final url = part.imageUrl?.url ?? '';
+    if (url.isEmpty) return 'image';
+    final withoutQuery = url.split('?').first;
+    final segs = withoutQuery.split('/');
+    final candidate = segs.isEmpty ? '' : segs.last;
+    if (candidate.isEmpty) return 'image';
+    // strip the 'file://' prefix when present so we show the upload id only.
+    if (candidate.startsWith('file://')) {
+      final rest = candidate.substring('file://'.length);
+      return rest.isEmpty ? 'image' : rest;
+    }
+    return candidate;
   }
 }

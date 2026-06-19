@@ -10,6 +10,7 @@ import (
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
@@ -26,9 +27,10 @@ type ChatService struct {
 
 // ChatRequest contains chat input.
 type ChatRequest struct {
-	Message        string `json:"message"`
-	ConversationID string `json:"conversation_id"`
-	AgentID        string `json:"agent_id,omitempty"`
+	Message        string            `json:"message"`
+	Parts          []llm.ContentPart `json:"parts,omitempty"`
+	ConversationID string            `json:"conversation_id"`
+	AgentID        string            `json:"agent_id,omitempty"`
 }
 
 // ChatResponse contains chat output.

@@ -16,6 +16,10 @@ _$ChatMessageImpl _$$ChatMessageImplFromJson(Map<String, dynamic> json) =>
       toolCalls: (json['tool_calls'] as List<dynamic>?)
           ?.map((e) => e as String)
           .toList(),
+      parts: (json['parts'] as List<dynamic>?)
+              ?.map((e) => ChatMessagePart.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
     );
 
 Map<String, dynamic> _$$ChatMessageImplToJson(_$ChatMessageImpl instance) =>
@@ -26,6 +30,7 @@ Map<String, dynamic> _$$ChatMessageImplToJson(_$ChatMessageImpl instance) =>
       'timestamp': instance.timestamp.toIso8601String(),
       'session_id': instance.sessionId,
       'tool_calls': instance.toolCalls,
+      'parts': instance.parts,
     };
 
 _$SessionImpl _$$SessionImplFromJson(Map<String, dynamic> json) =>

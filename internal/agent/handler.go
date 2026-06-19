@@ -64,9 +64,10 @@ type Worker struct {
 
 // ChatRequest is the expected payload for chat.request messages.
 type ChatRequest struct {
-	Message        string `json:"message"`
-	ConversationID string `json:"conversation_id"`
-	SourceClient   string `json:"source_client,omitempty"`
+	Message        string              `json:"message"`
+	ConversationID string              `json:"conversation_id"`
+	SourceClient   string              `json:"source_client,omitempty"`
+	Parts          []llm.ContentPart   `json:"parts,omitempty"`
 }
 
 // ChatResponse is the payload for chat.response messages.
@@ -615,7 +616,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		}
 	} else {
 		// Direct mode: send to standalone agent loop
-		reply, err = h.loop.RunOnce(ctx, req.Message, conversationID)
+		reply, err = h.loop.RunOnceWithParts(ctx, req.Message, req.Parts, conversationID)
 	}
 
 	// Append classification degradation notice when dispatch used a fallback classifier.

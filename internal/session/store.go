@@ -4,21 +4,24 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/caimlas/meept/internal/llm"
 )
 
 // Message represents a chat message persisted in a session.
 type Message struct {
-	ID         int64     `json:"id"`
-	SessionID  string    `json:"session_id"`
-	ParentID   *int64    `json:"parent_id,omitempty"`
-	Role       string    `json:"role"`
-	Content    string    `json:"content"`
-	Timestamp  time.Time `json:"timestamp"`
-	EntryType  string    `json:"entry_type"` // "message", "branch_point", "compaction", "summary"
-	BranchID   string    `json:"branch_id"`  // "main" or branch identifier
-	Model      string    `json:"model,omitempty"`
-	Name       string    `json:"name,omitempty"`
-	ToolCallID string    `json:"tool_call_id,omitempty"`
+	ID         int64             `json:"id"`
+	SessionID  string            `json:"session_id"`
+	ParentID   *int64            `json:"parent_id,omitempty"`
+	Role       string            `json:"role"`
+	Content    string            `json:"content"`
+	Parts      []llm.ContentPart `json:"parts,omitempty"` // multimodal content
+	Timestamp  time.Time         `json:"timestamp"`
+	EntryType  string            `json:"entry_type"` // "message", "branch_point", "compaction", "summary"
+	BranchID   string            `json:"branch_id"`  // "main" or branch identifier
+	Model      string            `json:"model,omitempty"`
+	Name       string            `json:"name,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
 }
 
 // ToolCall represents a tool invocation associated with a message.

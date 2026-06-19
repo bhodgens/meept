@@ -73,3 +73,9 @@ type TokenResolver interface {
 	// transparently.
 	ResolveToken(ctx context.Context, provider string) (string, error)
 }
+
+// UploadStore provides access to uploaded file storage. The LLM client uses it
+// to resolve file:// references into base64 data URLs for provider APIs.
+type UploadStore interface {
+	Load(ctx context.Context, id string) (data []byte, mimeType string, err error)
+}

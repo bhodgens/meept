@@ -171,6 +171,103 @@ class AgentProgress {
 
 // ===== Chat Models =====
 
+// ===== Multimodal Content Part Models =====
+
+/// One block of a multimodal message. Either text or imageUrl is non-null.
+///
+/// Hand-rolled (not freezed) to avoid forcing a build_runner run for every
+/// edit and to keep the JSON shape under our direct control.
+class ChatMessagePart {
+  final String type; // 'text' | 'image_url'
+  final String? text;
+  final ImageRefData? imageUrl;
+
+  const ChatMessagePart({required this.type, this.text, this.imageUrl});
+
+  ChatMessagePart.text(String t)
+      : type = 'text',
+        text = t,
+        imageUrl = null;
+
+  ChatMessagePart.image(ImageRefData r)
+      : type = 'image_url',
+        text = null,
+        imageUrl = r;
+
+  Map<String, dynamic> toJson() {
+    final json = <String, dynamic>{'type': type};
+    if (type == 'text' && text != null) {
+      json['text'] = text;
+    } else if (type == 'image_url' && imageUrl != null) {
+      json['image_url'] = imageUrl!.toJson();
+    }
+    return json;
+  }
+
+  factory ChatMessagePart.fromJson(Map<String, dynamic> json) {
+    final type = json['type'] as String? ?? 'text';
+    if (type == 'text') {
+      return ChatMessagePart(type: type, text: json['text'] as String?);
+    }
+    final imgJson = json['image_url'] as Map<String, dynamic>?;
+    return ChatMessagePart(
+      type: type,
+      imageUrl: imgJson != null ? ImageRefData.fromJson(imgJson) : null,
+    );
+  }
+}
+
+/// Image reference with optional cached description.
+class ImageRefData {
+  final String url;
+  final String? description;
+  final String? mimeType;
+  final int? width;
+  final int? height;
+
+  const ImageRefData({
+    required this.url,
+    this.description,
+    this.mimeType,
+    this.width,
+    this.height,
+  });
+
+  Map<String, dynamic> toJson() {
+    final json = <String, dynamic>{'url': url};
+    if (description != null) json['description'] = description;
+    if (mimeType != null) json['mime_type'] = mimeType;
+    if (width != null) json['width'] = width;
+    if (height != null) json['height'] = height;
+    return json;
+  }
+
+  factory ImageRefData.fromJson(Map<String, dynamic> json) {
+    return ImageRefData(
+      url: json['url'] as String? ?? '',
+      description: json['description'] as String?,
+      mimeType: json['mime_type'] as String?,
+      width: (json['width'] as num?)?.toInt(),
+      height: (json['height'] as num?)?.toInt(),
+    );
+  }
+}
+
+/// UI-side representation of an uploaded attachment awaiting send.
+class Attachment {
+  final String uploadId;
+  final String filename;
+  final String mimeType;
+  final int sizeBytes;
+
+  const Attachment({
+    required this.uploadId,
+    required this.filename,
+    required this.mimeType,
+    required this.sizeBytes,
+  });
+}
+
 @freezed
 class ChatMessage with _$ChatMessage {
   const ChatMessage._();
@@ -182,6 +279,7 @@ class ChatMessage with _$ChatMessage {
     required DateTime timestamp,
     @JsonKey(name: 'session_id') String? sessionId,
     @JsonKey(name: 'tool_calls') List<String>? toolCalls,
+    @Default([]) List<ChatMessagePart> parts,
   }) = _ChatMessage;
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) =>
@@ -209,6 +307,12 @@ class ChatMessage with _$ChatMessage {
       'timestamp': isoTimestamp,
       'session_id': json['session_id'] as String?,
       'tool_calls': (json['tool_calls'] as List?)?.map((e) => e.toString()).toList(),
+      'parts': (json['parts'] as List?)
+              ?.map((p) =>
+                  ChatMessagePart.fromJson(p as Map<String, dynamic>))
+              .map((p) => p.toJson())
+              .toList() ??
+          const [],
     });
   }
 

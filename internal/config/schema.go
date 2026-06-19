@@ -256,12 +256,22 @@ type LSPServerConfig struct {
 //gendoc:desc Configuration for the daemon process including socket, logging, and data directory.
 //gendoc:example [daemon] socket_path = "~/.meept/meept.sock"
 type DaemonConfig struct {
-	SocketPath        string `json:"socket_path"        toml:"socket_path"`
-	PIDFile           string `json:"pid_file"            toml:"pid_file"`
-	LogLevel          string `json:"log_level"           toml:"log_level"`
-	DataDir           string `json:"data_dir"            toml:"data_dir"`
-	ShutdownTimeout   string `json:"shutdown_timeout"    toml:"shutdown_timeout"`
-	ChatTimeoutSeconds int   `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
+	SocketPath        string        `json:"socket_path"        toml:"socket_path"`
+	PIDFile           string        `json:"pid_file"            toml:"pid_file"`
+	LogLevel          string        `json:"log_level"           toml:"log_level"`
+	DataDir           string        `json:"data_dir"            toml:"data_dir"`
+	ShutdownTimeout   string        `json:"shutdown_timeout"    toml:"shutdown_timeout"`
+	ChatTimeoutSeconds int          `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
+	Uploads           UploadsConfig `json:"uploads"             toml:"uploads"`
+}
+
+// UploadsConfig configures the file upload service for multimodal content.
+type UploadsConfig struct {
+	Enabled         bool     `json:"enabled"          toml:"enabled"`
+	MaxSizeMB       int      `json:"max_size_mb"      toml:"max_size_mb"`
+	AllowedTypes    []string `json:"allowed_types"    toml:"allowed_types"`
+	GCRetentionDays int      `json:"gc_retention_days" toml:"gc_retention_days"`
+	GCIntervalHours int      `json:"gc_interval_hours" toml:"gc_interval_hours"`
 }
 
 // TransportConfig controls which transports the daemon exposes.
@@ -1156,6 +1166,13 @@ func DefaultConfig() *Config {
 			PIDFile:    "~/.meept/meept.pid",
 			LogLevel:   "INFO",
 			DataDir:    "~/.meept",
+			Uploads: UploadsConfig{
+				Enabled:         true,
+				MaxSizeMB:       20,
+				AllowedTypes:    []string{"image/png", "image/jpeg", "image/gif", "image/webp"},
+				GCRetentionDays: 7,
+				GCIntervalHours: 24,
+			},
 		},
 		Transport: TransportConfig{
 			RPC: RPCTransportConfig{

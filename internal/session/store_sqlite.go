@@ -122,6 +122,9 @@ func (s *SQLiteStore) migrate() error {
 	s.migrationAddColumn("ALTER TABLE session_messages ADD COLUMN name TEXT DEFAULT ''", "name")
 	s.migrationAddColumn("ALTER TABLE session_messages ADD COLUMN tool_call_id TEXT DEFAULT ''", "tool_call_id")
 
+	// Add parts column for multimodal content (JSON array of ContentPart)
+	s.migrationAddColumn("ALTER TABLE session_messages ADD COLUMN parts TEXT", "parts")
+
 	// Add project association columns to sessions
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN project_id TEXT DEFAULT ''", "project_id")
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN project_path TEXT DEFAULT ''", "project_path")
@@ -715,8 +718,8 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 	}()
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO session_messages (session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, name, tool_call_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		INSERT INTO session_messages (session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, name, tool_call_id, parts)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -735,8 +738,16 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 			branchID = BranchMain
 		}
 
+		var partsJSON interface{}
+		if len(msg.Parts) > 0 {
+			partsJSON, err = json.Marshal(msg.Parts)
+			if err != nil {
+				return fmt.Errorf("failed to marshal message parts: %w", err)
+			}
+		}
+
 		_, err := stmt.Exec(sessionID, msg.Role, msg.Content, msg.Timestamp.Format(time.RFC3339),
-			msg.ParentID, entryType, branchID, msg.Model, msg.Name, msg.ToolCallID) //nolint:mutexio // mutex serializes sqlite connection access
+			msg.ParentID, entryType, branchID, msg.Model, msg.Name, msg.ToolCallID, partsJSON) //nolint:mutexio // mutex serializes sqlite connection access
 		if err != nil {
 			return fmt.Errorf("failed to insert message: %w", err)
 		}
@@ -751,7 +762,7 @@ func (s *SQLiteStore) GetMessages(sessionID string, offset, limit int) ([]Messag
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT id, session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, name, tool_call_id
+		SELECT id, session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, name, tool_call_id, parts
 		FROM session_messages
 		WHERE session_id = ?
 		ORDER BY id
@@ -766,8 +777,8 @@ func (s *SQLiteStore) GetMessages(sessionID string, offset, limit int) ([]Messag
 		var msg Message
 		var ts string
 		var parentID sql.NullInt64
-		var entryType, branchID, model, name, toolCallID sql.NullString
-		if err := rows.Scan(&msg.ID, &msg.SessionID, &msg.Role, &msg.Content, &ts, &parentID, &entryType, &branchID, &model, &name, &toolCallID); err != nil {
+		var entryType, branchID, model, name, toolCallID, partsJSON sql.NullString
+		if err := rows.Scan(&msg.ID, &msg.SessionID, &msg.Role, &msg.Content, &ts, &parentID, &entryType, &branchID, &model, &name, &toolCallID, &partsJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan message: %w", err)
 		}
 		if t, err := time.Parse(time.RFC3339, ts); err == nil {
@@ -790,6 +801,11 @@ func (s *SQLiteStore) GetMessages(sessionID string, offset, limit int) ([]Messag
 		}
 		if toolCallID.Valid {
 			msg.ToolCallID = toolCallID.String
+		}
+		if partsJSON.Valid && partsJSON.String != "" {
+			if err := json.Unmarshal([]byte(partsJSON.String), &msg.Parts); err != nil { //nolint:mutexio // mutex serializes sqlite connection access
+				s.logger.Debug("failed to unmarshal parts", "error", err)
+			}
 		}
 		messages = append(messages, msg)
 	}
