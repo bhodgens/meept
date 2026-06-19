@@ -55,6 +55,9 @@ func TestConfigLoads(t *testing.T) {
 	if lfm8b.MaxConcurrency != 2 {
 		t.Errorf("lfm-8b-4bit max_concurrency = %d, want 2", lfm8b.MaxConcurrency)
 	}
+	if lfm8b.ContextLimit != 16384 {
+		t.Errorf("lfm-8b-4bit context_limit = %d, want 16384", lfm8b.ContextLimit)
+	}
 
 	// Verify vision model
 	vlmModel, ok := localProvider.Models["lfm-vl-1.6b-6bit"]
