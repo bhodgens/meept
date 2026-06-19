@@ -274,7 +274,7 @@ func (c *Client) buildChatRequest(messages []ChatMessage, cfg *ModelConfig, opts
 	// Build request payload
 	msgDicts := make([]map[string]any, len(messages))
 	for i, msg := range messages {
-		msgDicts[i] = msg.ToOpenAIDict()
+		msgDicts[i] = msg.ToOpenAIDictWithStore(c.uploadStore)
 	}
 
 	payload := map[string]any{
@@ -975,7 +975,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		toolCallAccums: make(map[int]*toolCallAccum),
 	}
 
-	for attempt := 0; attempt < streamMaxRetries; attempt++ {
+	for attempt := range streamMaxRetries {
 		if attempt > 0 {
 			// D4: Set resume flag for retry attempts
 			retryState.isResume = true

@@ -116,6 +116,9 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 		"conversation_id": conversationID,
 		"agent_id":        req.AgentID,
 	}
+	if len(req.Parts) > 0 {
+		payload["parts"] = req.Parts
+	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		// Marshal failures on a simple map literal are extremely unlikely,

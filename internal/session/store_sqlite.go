@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/llm"
 	sid "github.com/caimlas/meept/pkg/id"
 	_ "modernc.org/sqlite"     // sqlite3 driver registration
 	_ "modernc.org/sqlite/vec" // sqlite-vec extension (vec0 virtual table)
@@ -739,14 +740,28 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 		}
 
 		var partsJSON interface{}
+		// searchContent is what the FTS5 trigger indexes and what
+		// GetMessages will later return as msg.Content. For text-only
+		// messages it is identical to msg.Content. For multimodal
+		// messages (image-only or text+image), ContentFromParts
+		// synthesizes a searchable body that includes any cached vision
+		// descriptions, so FTS5 can find image-only messages by their
+		// description. See H3 fix and internal/llm/content_parts.go.
+		searchContent := msg.Content
 		if len(msg.Parts) > 0 {
 			partsJSON, err = json.Marshal(msg.Parts)
 			if err != nil {
 				return fmt.Errorf("failed to marshal message parts: %w", err)
 			}
+			partsText := llm.ContentFromParts(msg.Parts, true)
+			if searchContent == "" {
+				searchContent = partsText
+			} else if partsText != "" {
+				searchContent = searchContent + "\n" + partsText
+			}
 		}
 
-		_, err := stmt.Exec(sessionID, msg.Role, msg.Content, msg.Timestamp.Format(time.RFC3339),
+		_, err := stmt.Exec(sessionID, msg.Role, searchContent, msg.Timestamp.Format(time.RFC3339),
 			msg.ParentID, entryType, branchID, msg.Model, msg.Name, msg.ToolCallID, partsJSON) //nolint:mutexio // mutex serializes sqlite connection access
 		if err != nil {
 			return fmt.Errorf("failed to insert message: %w", err)

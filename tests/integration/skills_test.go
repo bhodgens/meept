@@ -283,7 +283,7 @@ func TestDispatcherSkillInvocation(t *testing.T) {
 
 	// Test ClassifyAndRoute with skill invocation - should attempt skill execution
 	ctx := context.Background()
-	_, err := dispatcher.ClassifyAndRoute(ctx, "/test-dispatch some input", "test-session")
+	_, err := dispatcher.ClassifyAndRoute(ctx, "/test-dispatch some input", "test-session", nil)
 
 	// Without an executor, this will fail
 	if err == nil {
@@ -291,7 +291,7 @@ func TestDispatcherSkillInvocation(t *testing.T) {
 	}
 
 	// Test non-skill invocation falls through to normal routing
-	result, err := dispatcher.ClassifyAndRoute(ctx, "hello world", "test-session")
+	result, err := dispatcher.ClassifyAndRoute(ctx, "hello world", "test-session", nil)
 	if err != nil {
 		t.Errorf("Non-skill invocation should not error: %v", err)
 	}
@@ -700,7 +700,7 @@ func TestDispatcherSkillRoutingWithAllowedTools(t *testing.T) {
 	ctx := context.Background()
 
 	// Test explicit skill invocation with restricted tools
-	_, err := dispatcher.ClassifyAndRoute(ctx, "/restricted-skill some input", "test-session")
+	_, err := dispatcher.ClassifyAndRoute(ctx, "/restricted-skill some input", "test-session", nil)
 	if err == nil {
 		// Without executor, this should error
 		t.Error("Expected error when executor is nil")
@@ -708,7 +708,7 @@ func TestDispatcherSkillRoutingWithAllowedTools(t *testing.T) {
 
 	// Verify non-skill input doesn't trigger skill path
 	var result *agent.DispatchResult
-	result, err = dispatcher.ClassifyAndRoute(ctx, "general question", "test-session")
+	result, err = dispatcher.ClassifyAndRoute(ctx, "general question", "test-session", nil)
 	if err != nil {
 		t.Errorf("General input should not error: %v", err)
 	}
@@ -717,7 +717,7 @@ func TestDispatcherSkillRoutingWithAllowedTools(t *testing.T) {
 	}
 
 	// Verify non-existent skill falls through
-	result, err = dispatcher.ClassifyAndRoute(ctx, "/nonexistent-skill input", "test-session")
+	result, err = dispatcher.ClassifyAndRoute(ctx, "/nonexistent-skill input", "test-session", nil)
 	if err != nil {
 		t.Errorf("Non-existent skill should fall through to normal routing: %v", err)
 	}

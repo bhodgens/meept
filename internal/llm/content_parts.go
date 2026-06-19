@@ -20,12 +20,18 @@ type ContentPart struct {
 // ImageRef references a stored upload. URL is always populated; the daemon
 // rewrites it to a data URL before sending to the LLM. Description is the
 // cached vision-model description (populated lazily after first analysis).
+//
+// AnalysisFailed is set to true when a vision pre-flight attempt failed (or
+// returned empty) so subsequent turns can retry. While true, HasUndescribedImages
+// treats the ref as still needing analysis. It is cleared on a successful
+// analysis or before a retry begins.
 type ImageRef struct {
-	URL         string `json:"url"`                   // "file://<sha256>.<ext>" or "data:..."
-	Description string `json:"description,omitempty"` // Cached vision description
-	MIMEType    string `json:"mime_type,omitempty"`
-	Width       int    `json:"width,omitempty"`
-	Height      int    `json:"height,omitempty"`
+	URL            string `json:"url"`                     // "file://<sha256>.<ext>" or "data:..."
+	Description    string `json:"description,omitempty"`   // Cached vision description
+	AnalysisFailed bool   `json:"analysis_failed,omitempty"` // True if last vision pre-flight attempt failed (retryable)
+	MIMEType       string `json:"mime_type,omitempty"`
+	Width          int    `json:"width,omitempty"`
+	Height         int    `json:"height,omitempty"`
 }
 
 // ContentFromParts synthesizes a flat text string from a slice of content parts.
@@ -69,10 +75,13 @@ func HasImageParts(parts []ContentPart) bool {
 	return false
 }
 
-// HasUndescribedImages returns true if any image part lacks a Description.
+// HasUndescribedImages returns true if any image part lacks a Description OR
+// has its AnalysisFailed flag set (meaning a prior vision pre-flight attempt
+// failed and should be retried on a subsequent turn).
 func HasUndescribedImages(parts []ContentPart) bool {
 	for _, p := range parts {
-		if p.Type == "image_url" && p.ImageURL != nil && p.ImageURL.Description == "" {
+		if p.Type == "image_url" && p.ImageURL != nil &&
+			(p.ImageURL.Description == "" || p.ImageURL.AnalysisFailed) {
 			return true
 		}
 	}

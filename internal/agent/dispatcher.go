@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
 	"regexp"
 	"strings"
@@ -157,6 +158,12 @@ type DispatchResult struct {
 	// (e.g., LLM classifier failed and fallback was used). Empty when classification
 	// succeeded normally.
 	ClassificationNotice string `json:"classification_notice,omitempty"`
+
+	// Parts carries multimodal content parts (e.g. image attachments) from the
+	// original request through the dispatcher so that RouteToAgent can forward
+	// them to the specialist agent's RunOnceWithParts. Text-only requests leave
+	// this nil, preserving the existing RunOnce path.
+	Parts []llm.ContentPart `json:"-"`
 }
 
 // Dispatcher handles intake classification and routing of requests.
@@ -325,8 +332,17 @@ func (d *Dispatcher) Stop() {
 }
 
 // ClassifyAndRoute is the main entry point for the dispatcher.
-func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID string) (*DispatchResult, error) {
-	d.logger.Debug("Dispatching request", "session", sessionID, "input_len", len(input))
+//
+// parts carries optional multimodal content (e.g. image attachments). When
+// non-empty, the parts are attached to the returned DispatchResult so that
+// RouteToAgent can forward them to the specialist agent's RunOnceWithParts.
+// Text-only callers may pass nil.
+func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID string, parts []llm.ContentPart) (*DispatchResult, error) {
+	d.logger.Debug("Dispatching request",
+		"session", sessionID,
+		"input_len", len(input),
+		"parts_count", len(parts),
+	)
 
 	// Check for clarification follow-up: if the last intent for this session
 	// was IntentClarify, treat the current input as the user's response to
@@ -451,6 +467,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		MemoryContext:  memCtx.Results,
 		ModelDirective: parseResult.Directive,
 		OriginalInput:  input,
+		Parts:          parts,
 	}
 
 	// Attach model override to task metadata if task was created
@@ -480,9 +497,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 				if len(createdTask.Metadata) > 0 {
 					var existing map[string]any
 					if json.Unmarshal(createdTask.Metadata, &existing) == nil {
-						for k, v := range meta {
-							existing[k] = v
-						}
+						maps.Copy(existing, meta)
 						metaJSON, _ = json.Marshal(existing)
 					}
 				}
@@ -883,9 +898,11 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 	}
 
 	// Fallback: if intent analysis is unavailable or fails, proceed with normal
-	// classification of the combined input.
+	// classification of the combined input. Parts are not propagated through
+	// the clarification flow — multimodal attachments only attach to the
+	// original user turn.
 	d.clearPendingClarification(sessionID)
-	return d.ClassifyAndRoute(ctx, combinedInput, sessionID)
+	return d.ClassifyAndRoute(ctx, combinedInput, sessionID, nil)
 }
 
 // isPendingClarification checks if the previous intent for a session was a
@@ -1231,8 +1248,16 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 		}
 	}
 
-	// Run the agent
-	response, err := agent.RunOnce(ctx, contextMsg, conversationID)
+	// Run the agent. When the dispatcher is carrying multimodal parts
+	// (e.g. image attachments), route them through RunOnceWithParts so the
+	// provider serializer emits native image blocks. Otherwise use the
+	// plain RunOnce path — the two are equivalent for text-only turns.
+	var response string
+	if len(result.Parts) > 0 {
+		response, err = agent.RunOnceWithParts(ctx, contextMsg, result.Parts, conversationID)
+	} else {
+		response, err = agent.RunOnce(ctx, contextMsg, conversationID)
+	}
 	if err != nil {
 		return "", fmt.Errorf("agent execution failed: %w", err)
 	}
@@ -1269,6 +1294,9 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 			AgentID:       nextAgentID,
 			Intent:        result.Intent,
 			OriginalInput: result.OriginalInput,
+			// Preserve multimodal parts for the next hop so attachments are
+			// not silently dropped during report-router handoffs.
+			Parts: result.Parts,
 		}
 		_ = accumulatedContext // used for context enrichment in recursive call
 		// Recursively route to the next agent
@@ -1736,17 +1764,11 @@ func (d *Dispatcher) GetStats() DispatcherStats {
 	fallbackDetails := make([]FallbackEntry, len(d.stats.FallbackDetails))
 	copy(fallbackDetails, d.stats.FallbackDetails)
 	byMethod := make(map[string]int, len(d.stats.ByMethod))
-	for k, v := range d.stats.ByMethod {
-		byMethod[k] = v
-	}
+	maps.Copy(byMethod, d.stats.ByMethod)
 	byAgent := make(map[string]int, len(d.stats.ByAgent))
-	for k, v := range d.stats.ByAgent {
-		byAgent[k] = v
-	}
+	maps.Copy(byAgent, d.stats.ByAgent)
 	byIntent := make(map[string]int, len(d.stats.ByIntent))
-	for k, v := range d.stats.ByIntent {
-		byIntent[k] = v
-	}
+	maps.Copy(byIntent, d.stats.ByIntent)
 	return DispatcherStats{
 		TotalDispatched: d.stats.TotalDispatched,
 		ByMethod:        byMethod,
@@ -2159,10 +2181,7 @@ func isShortSimpleMessage(input string) bool {
 		}
 		// Single-word or two-word questions that are clearly chat
 		words := strings.Fields(lower)
-		if len(words) <= 3 {
-			return true
-		}
-		return false
+		return len(words) <= 3
 	}
 
 	return false

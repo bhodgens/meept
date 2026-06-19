@@ -41,7 +41,18 @@ type ChatMessage struct {
 }
 
 // ToOpenAIDict converts the message to the format expected by OpenAI API.
+// It is preserved for backward compatibility; callers with access to an
+// UploadStore should use ToOpenAIDictWithStore so that file:// image URLs
+// are resolved to data: URLs before serialization.
 func (m *ChatMessage) ToOpenAIDict() map[string]any {
+	return m.ToOpenAIDictWithStore(nil)
+}
+
+// ToOpenAIDictWithStore is like ToOpenAIDict but resolves file:// image URLs
+// to data: URLs using the provided upload store. A nil store preserves the
+// legacy behavior (URLs pass through verbatim), matching the previous
+// ToOpenAIDict semantics for callers that have not been wired up yet.
+func (m *ChatMessage) ToOpenAIDictWithStore(store UploadStore) map[string]any {
 	msg := map[string]any{
 		"role": string(m.Role),
 	}
@@ -64,10 +75,25 @@ func (m *ChatMessage) ToOpenAIDict() map[string]any {
 						"text": fmt.Sprintf("[image: %s]", p.ImageURL.Description),
 					})
 				} else {
+					url := p.ImageURL.URL
+					if store != nil {
+						resolved, err := resolveImageURL(url, store)
+						if err != nil {
+							// Fall back to a text placeholder so the request
+							// still succeeds, mirroring the Anthropic path
+							// (anthropic.go:708-711).
+							content = append(content, map[string]any{
+								"type": "text",
+								"text": fmt.Sprintf("[image: unable to load %s]", url),
+							})
+							continue
+						}
+						url = resolved
+					}
 					content = append(content, map[string]any{
 						"type": "image_url",
 						"image_url": map[string]any{
-							"url": p.ImageURL.URL,
+							"url": url,
 						},
 					})
 				}

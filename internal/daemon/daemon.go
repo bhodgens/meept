@@ -501,6 +501,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	if fullCfg.Daemon.DataDir != "" {
 		uploadDataDir = filepath.Join(fullCfg.Daemon.DataDir, "uploads")
 	}
+	// Respect the operator's `uploads.enabled = false` toggle — when disabled,
+	// leave UploadsDir empty so services.NewRegistry skips UploadService creation.
+	if !uploadCfg.Enabled {
+		uploadDataDir = ""
+		logger.Info("Upload service disabled by config (uploads.enabled=false)")
+	}
 	svcRegistry, err := services.NewRegistry(services.Config{
 		Bus:              msgBus,
 		AgentRegistry:    nilSafeAgentRegistry(components),

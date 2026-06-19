@@ -526,7 +526,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	if h.dispatcher != nil {
 		// Multi-agent mode: classify and route through dispatcher
 		var dispatchErr error
-		result, dispatchErr = h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID)
+		result, dispatchErr = h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID, req.Parts)
 		switch {
 		case dispatchErr != nil:
 			h.logger.Error("Dispatch failed", "error", dispatchErr)
@@ -543,6 +543,15 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 				}
 			}
 		case h.dispatcher.ShouldRouteToPair(result):
+			// Pair-channel mode is a text-only specialist workflow. If the
+			// user attached multimodal parts, log that they are being dropped
+			// rather than silently swallowing the content.
+			if len(req.Parts) > 0 {
+				h.logger.Warn("Dropping multimodal parts for pair route",
+					"conversation", conversationID,
+					"parts_count", len(req.Parts),
+				)
+			}
 			// Route to pair-channel mode for dual-agent conversation
 			h.logger.Info("Routing to pair-channel mode",
 				"session", conversationID,
@@ -550,6 +559,13 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			)
 			reply = h.startPairSession(result, conversationID)
 		case h.dispatcher.ShouldRouteToCollaborate(result):
+			// Collaboration engine is also a text-only specialist workflow.
+			if len(req.Parts) > 0 {
+				h.logger.Warn("Dropping multimodal parts for collaboration route",
+					"conversation", conversationID,
+					"parts_count", len(req.Parts),
+				)
+			}
 			// Route to collaboration engine for multi-agent collaboration
 			h.logger.Info("Routing to collaboration engine",
 				"session", conversationID,
@@ -557,6 +573,14 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			)
 			reply, err = h.startCollaborationSession(ctx, result, conversationID)
 		case h.dispatcher.ShouldDispatchAsync(result) && result.Task != nil:
+			// Async dispatch goes through the orchestrator pipeline, which is
+			// currently text-only. Warn if parts are being dropped.
+			if len(req.Parts) > 0 {
+				h.logger.Warn("Dropping multimodal parts for async dispatch",
+					"conversation", conversationID,
+					"parts_count", len(req.Parts),
+				)
+			}
 			// Issue 0039: budget pre-check before async dispatch.
 			// Block before creating a zombie task that can never complete.
 			if h.budget != nil {

@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -262,5 +263,133 @@ func TestAnthropicPartsToContentImageBytes(t *testing.T) {
 	}
 	if content[0].Source.Type != "base64" {
 		t.Errorf("expected base64, got %s", content[0].Source.Type)
+	}
+}
+
+// TestToOpenAIDictWithStore_ResolvesFileURL verifies that ToOpenAIDictWithStore
+// converts file:// image references into data: URLs via the UploadStore,
+// matching the behavior the OpenAI wire format requires.
+func TestToOpenAIDictWithStore_ResolvesFileURL(t *testing.T) {
+	store := &mockUploadStore{
+		data:     []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A},
+		mimeType: "image/png",
+	}
+	msg := ChatMessage{
+		Role: RoleUser,
+		Parts: []ContentPart{
+			{Type: "text", Text: "describe this"},
+			{Type: "image_url", ImageURL: &ImageRef{
+				URL:      "file://test-id",
+				MIMEType: "image/png",
+			}},
+		},
+	}
+	dict := msg.ToOpenAIDictWithStore(store)
+
+	content, ok := dict["content"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected content to be []map[string]any, got %T", dict["content"])
+	}
+	if len(content) != 2 {
+		t.Fatalf("expected 2 content parts, got %d", len(content))
+	}
+	if content[1]["type"] != "image_url" {
+		t.Fatalf("expected image_url type, got %v", content[1]["type"])
+	}
+	imgURL, ok := content[1]["image_url"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected image_url to be map[string]any, got %T", content[1]["image_url"])
+	}
+	url, ok := imgURL["url"].(string)
+	if !ok {
+		t.Fatalf("expected url to be string, got %T", imgURL["url"])
+	}
+	if !strings.HasPrefix(url, "data:image/png;base64,") {
+		t.Errorf("expected data URL, got %q", url)
+	}
+	if strings.Contains(url, "file://") {
+		t.Errorf("file:// URL was not resolved: %q", url)
+	}
+}
+
+// TestToOpenAIDictWithStore_NilStorePassesThrough verifies that a nil store
+// preserves the legacy behavior (URLs are emitted verbatim), ensuring
+// backward compatibility for callers that have not been wired up yet.
+func TestToOpenAIDictWithStore_NilStorePassesThrough(t *testing.T) {
+	msg := ChatMessage{
+		Role: RoleUser,
+		Parts: []ContentPart{
+			{Type: "image_url", ImageURL: &ImageRef{
+				URL:      "file://abc123.png",
+				MIMEType: "image/png",
+			}},
+		},
+	}
+	dict := msg.ToOpenAIDictWithStore(nil)
+	content := dict["content"].([]map[string]any)
+	if len(content) != 1 {
+		t.Fatalf("expected 1 part, got %d", len(content))
+	}
+	imgURL := content[0]["image_url"].(map[string]any)
+	url := imgURL["url"].(string)
+	if url != "file://abc123.png" {
+		t.Errorf("expected verbatim file:// URL, got %q", url)
+	}
+}
+
+// TestToOpenAIDictWithStore_LoadErrorFallsBackToText verifies that when the
+// upload store fails to load the image, the image part is replaced with a
+// text placeholder so the request still succeeds (matching the Anthropic
+// client behavior at anthropic.go:708-711).
+func TestToOpenAIDictWithStore_LoadErrorFallsBackToText(t *testing.T) {
+	store := &mockUploadStore{
+		err: fmt.Errorf("disk read failure"),
+	}
+	msg := ChatMessage{
+		Role: RoleUser,
+		Parts: []ContentPart{
+			{Type: "image_url", ImageURL: &ImageRef{
+				URL: "file://missing",
+			}},
+		},
+	}
+	dict := msg.ToOpenAIDictWithStore(store)
+	content := dict["content"].([]map[string]any)
+	if len(content) != 1 {
+		t.Fatalf("expected 1 part, got %d", len(content))
+	}
+	if content[0]["type"] != "text" {
+		t.Errorf("expected text fallback, got %v", content[0]["type"])
+	}
+	text, _ := content[0]["text"].(string)
+	if !strings.Contains(text, "unable to load") {
+		t.Errorf("expected 'unable to load' placeholder, got %q", text)
+	}
+}
+
+// TestToOpenAIDictBackwardCompat verifies the no-arg ToOpenAIDict() still
+// produces the legacy verbatim-URL behavior (it delegates to the nil-store path).
+func TestToOpenAIDictBackwardCompat(t *testing.T) {
+	msg := ChatMessage{
+		Role: RoleUser,
+		Parts: []ContentPart{
+			{Type: "text", Text: "hello"},
+			{Type: "image_url", ImageURL: &ImageRef{URL: "file://x.png"}},
+		},
+	}
+	dict := msg.ToOpenAIDict()
+	content := dict["content"].([]map[string]any)
+	if len(content) != 2 {
+		t.Fatalf("expected 2 parts, got %d", len(content))
+	}
+	if content[0]["type"] != "text" || content[0]["text"] != "hello" {
+		t.Errorf("text part mismatch: %+v", content[0])
+	}
+	if content[1]["type"] != "image_url" {
+		t.Errorf("expected image_url, got %v", content[1]["type"])
+	}
+	imgURL := content[1]["image_url"].(map[string]any)
+	if url := imgURL["url"].(string); url != "file://x.png" {
+		t.Errorf("expected verbatim URL, got %q", url)
 	}
 }
