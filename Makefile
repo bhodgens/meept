@@ -372,6 +372,10 @@ vet:
 mutexio:
 	@echo "Running mutexio analyzer..."
 	@go run ./tools/analyzers/mutexio/ ./...
+	@echo ""
+	@echo "Tip: This same check runs automatically as a pre-commit hook"
+	@echo "     (.git/hooks/pre-commit-mutexio) on staged Go packages."
+	@echo "     To bypass it for a single commit, use: git commit --no-verify"
 
 .PHONY: predid
 predid:

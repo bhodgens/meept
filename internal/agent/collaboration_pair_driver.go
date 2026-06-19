@@ -34,7 +34,6 @@ type PPConversation struct {
 	LastDiff    string
 	TurnManager *TurnManager
 	Converged   bool
-	mu          sync.RWMutex
 }
 
 // PairProgrammingDriverDeps holds dependencies.

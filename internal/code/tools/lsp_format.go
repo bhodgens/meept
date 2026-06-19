@@ -129,12 +129,6 @@ func (t *LSPFormatTool) Execute(ctx context.Context, args map[string]any) (any, 
 	}, nil
 }
 
-// applyFormatEdits is a convenience wrapper for applying formatting edits.
-// It uses the shared applyTextEdits function from lsp_rename.go.
-// Kept for documentation clarity; lsp_format.go uses applyTextEdits directly.
-func applyFormatEdits(filePath string, edits []lsp.TextEdit) error {
-	return applyTextEdits(filePath, edits)
-}
 
 // Ensure tool implements the Tool interface
 var _ tools.Tool = (*LSPFormatTool)(nil)

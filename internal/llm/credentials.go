@@ -43,7 +43,13 @@ func (cs *CredentialStore) save() error {
 	if err := os.MkdirAll(filepath.Dir(cs.filepath), 0o700); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(cs.creds, "", "  ")
+	cs.mu.RLock()
+	snapshot := make(map[string]string, len(cs.creds))
+	for k, v := range cs.creds {
+		snapshot[k] = v
+	}
+	cs.mu.RUnlock()
+	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -61,17 +67,43 @@ func (cs *CredentialStore) Get(providerID string) (string, bool) {
 // Set stores an API key for a provider.
 func (cs *CredentialStore) Set(providerID, apiKey string) error {
 	cs.mu.Lock()
-	defer cs.mu.Unlock()
 	cs.creds[providerID] = apiKey
-	return cs.save()
+	snapshot := make(map[string]string, len(cs.creds))
+	for k, v := range cs.creds {
+		snapshot[k] = v
+	}
+	filepath := cs.filepath
+	cs.mu.Unlock()
+	data, err := json.MarshalIndent(snapshot, "", "  ")
+	if err != nil {
+		return err
+	}
+	return cs.writeToFile(filepath, data)
 }
 
 // Delete removes an API key.
 func (cs *CredentialStore) Delete(providerID string) error {
 	cs.mu.Lock()
-	defer cs.mu.Unlock()
 	delete(cs.creds, providerID)
-	return cs.save()
+	snapshot := make(map[string]string, len(cs.creds))
+	for k, v := range cs.creds {
+		snapshot[k] = v
+	}
+	filepath := cs.filepath
+	cs.mu.Unlock()
+	data, err := json.MarshalIndent(snapshot, "", "  ")
+	if err != nil {
+		return err
+	}
+	return cs.writeToFile(filepath, data)
+}
+
+// writeToFile writes credentials to disk without holding any lock.
+func (cs *CredentialStore) writeToFile(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
 }
 
 // List returns all stored provider IDs.

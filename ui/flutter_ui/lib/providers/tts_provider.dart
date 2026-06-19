@@ -75,7 +75,7 @@ class TtsNotifier extends StateNotifier<TtsState> {
   }
 
   /// Toggle TTS on/off.
-  void toggleTts() async {
+  Future<void> toggleTts() async {
     _enabled = !_enabled;
     if (!_enabled) {
       await stop();
@@ -86,7 +86,7 @@ class TtsNotifier extends StateNotifier<TtsState> {
   }
 
   /// Set TTS enabled state.
-  void setEnabled(bool value) async {
+  Future<void> setEnabled(bool value) async {
     _enabled = value;
     if (!value) {
       await stop();
@@ -122,7 +122,7 @@ class TtsNotifier extends StateNotifier<TtsState> {
   }
 
   /// Set behavior settings
-  void setBehaviorSettings({required bool interrupt, required bool queue, int? maxQueueSize}) {
+  Future<void> setBehaviorSettings({required bool interrupt, required bool queue, int? maxQueueSize}) async {
     _service.applyConfig(TtsConfig(
       enabled: _enabled,
       voice: _storage.getTtsVoice() ?? 'en-US',
@@ -132,7 +132,7 @@ class TtsNotifier extends StateNotifier<TtsState> {
       queueMessages: queue,
       maxQueueSize: maxQueueSize ?? 5,
     ));
-    _saveSettings(interrupt: interrupt, queue: queue, maxQueueSize: maxQueueSize);
+    await _saveSettings(interrupt: interrupt, queue: queue, maxQueueSize: maxQueueSize);
   }
 
   /// Set speech speed.

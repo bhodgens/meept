@@ -97,13 +97,6 @@ type Logger interface {
 	Info(msg string, args ...any)
 }
 
-type stdLogger struct{}
-
-func (stdLogger) Debug(msg string, args ...any) {}
-func (stdLogger) Warn(msg string, args ...any)  {}
-func (stdLogger) Error(msg string, args ...any) {}
-func (stdLogger) Info(msg string, args ...any)  {}
-
 type LLMClassifierConfig struct {
 	Client  *llm.Client
 	Model   string

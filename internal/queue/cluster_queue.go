@@ -81,10 +81,10 @@ func (cq *ClusterQueue) WithMessageBus(b *bus.MessageBus) {
 }
 
 // Claim wraps the underlying queue's Claim with cluster-aware logic.
-func (cq *ClusterQueue) Claim(ctx context.Context, workerID string, caps []string) (*Job, error) {
+func (cq *ClusterQueue) Claim(ctx context.Context, workerID string, caps []string, agentID string) (*Job, error) {
 	// Check if this job was previously claimed by another node
 	// If not, attempt local claim
-	job, err := cq.Queue.Claim(ctx, workerID, caps)
+	job, err := cq.Queue.Claim(ctx, workerID, caps, agentID)
 	if err != nil {
 		return nil, err
 	}

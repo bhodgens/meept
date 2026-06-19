@@ -6,13 +6,17 @@ package llm
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // TestProcessLogger_Rotation verifies that ProcessLogger rotates its shared
@@ -47,8 +51,11 @@ func TestProcessLogger_Rotation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat orig: %v", err)
 	}
-	if fi.Size() >= 1024*1024 {
-		t.Errorf("original file should be < 1MB after rotation, got %d bytes", fi.Size())
+	// After rotation the primary file holds at most one chunk (1MB) plus the
+	// "out: " line prefix applied to the first byte of the post-rotation write.
+	// Allow a small slack for prefix overhead.
+	if fi.Size() >= 1024*1024+16 {
+		t.Errorf("original file should be ~1MB after rotation, got %d bytes", fi.Size())
 	}
 	bfi, err := os.Stat(backupPath)
 	if err != nil {
@@ -259,9 +266,209 @@ func TestPerModelFanOut(t *testing.T) {
 	}
 }
 
+// TestProcessLogger_LinePrefix verifies that the "out: "/"err: " line prefix
+// is actually written to the file (the S3-Bug1 regression). Each newline-
+// delimited line emitted via Stdout/Stderr must be prefixed.
+func TestProcessLogger_LinePrefix(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	pl, err := OpenProcessLogger("127.0.0.1", "9126")
+	if err != nil {
+		t.Fatalf("OpenProcessLogger: %v", err)
+	}
+	defer pl.Close()
+
+	if _, err := pl.Stdout().Write([]byte("hello world\nsecond line\n")); err != nil {
+		t.Fatalf("stdout write: %v", err)
+	}
+	if _, err := pl.Stderr().Write([]byte("warn msg\n")); err != nil {
+		t.Fatalf("stderr write: %v", err)
+	}
+
+	path := filepath.Join(dir, ".meept", "logs", "runtimes", "127.0.0.1-9126.process.log")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	want := "out: hello world\nout: second line\nerr: warn msg\n"
+	if string(data) != want {
+		t.Errorf("unexpected log contents:\n got: %q\nwant: %q", string(data), want)
+	}
+}
+
+// TestRuntimeManager_LegacyModelPath_InUseGate verifies that a provider
+// configured with the legacy singular `model_path` (which ValidateAndNormalize
+// mirrors under the synthetic "default" ModelPaths key) still passes the
+// in-use gate when cfg.ModelKeys is populated from the provider's real models
+// map. This is the S4-Bug1 regression: without ModelKeys, the gate would look
+// for "<provider>/default" and never match the real "<provider>/<model-id>"
+// references in the in-use set, causing the spawn to be skipped silently.
+//
+// We verify the gate decision directly via endpointHasInUseLocked (via the
+// public Status WouldStart field) rather than driving a full StartAll, to
+// avoid depending on a real HTTP health endpoint.
+func TestRuntimeManager_LegacyModelPath_InUseGate(t *testing.T) {
+	mgr := NewRuntimeManager(slog.Default())
+	pidFile := filepath.Join(t.TempDir(), "legacy.pid")
+	cfg := &RuntimeConfig{
+		Type:            RuntimeLlamaCpp,
+		ModelPath:       tempModelFileInternal(t),
+		ModelPaths:      map[string]string{"default": tempModelFileInternal(t)},
+		ModelKeys:       []string{"lfm-code"}, // real model id from provider's models map
+		EndpointKey:     "llama-cpp:127.0.0.1:8770",
+		PIDFile:         pidFile,
+		AutoStart:       true,
+		AutoStop:        true,
+		SpawnCommand:    []string{"sleep", "10"},
+		SpawnTimeout:    2 * time.Second,
+		HealthEndpoint:  "/health",
+		HealthInterval:  1 * time.Second,
+		HealthTimeout:   2 * time.Second,
+		HealthThreshold: 1,
+	}
+	if err := mgr.RegisterConfig("local", cfg, "http://127.0.0.1:8770"); err != nil {
+		t.Fatalf("RegisterConfig: %v", err)
+	}
+
+	// In-use set references the REAL model id, not "default".
+	mgr.SetModelsInUse(map[string]struct{}{"local/lfm-code": {}})
+
+	// The gate must pass: WouldStart=true and InUseModels includes "lfm-code".
+	status, ok := mgr.StatusForProvider("local")
+	if !ok {
+		t.Fatal("provider not found")
+	}
+	if !status.WouldStart {
+		t.Error("expected WouldStart=true for legacy config with ModelKeys populated; the gate did not match the real model id")
+	}
+	found := false
+	for _, m := range status.InUseModels {
+		if m == "lfm-code" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected InUseModels to contain 'lfm-code'; got %v", status.InUseModels)
+	}
+
+	// Negative control: with the in-use set pointing at a different model,
+	// the gate must fail.
+	mgr.SetModelsInUse(map[string]struct{}{"local/other": {}})
+	status2, _ := mgr.StatusForProvider("local")
+	if status2.WouldStart {
+		t.Error("expected WouldStart=false when in-use set does not include the provider's model")
+	}
+}
+
+// tempModelFileInternal is the in-package variant of createTempModelFile
+// (which lives in package llm_test and is therefore not visible here).
+func tempModelFileInternal(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "model.bin")
+	if err := os.WriteFile(path, []byte("dummy"), 0o600); err != nil {
+		t.Fatalf("create temp model file: %v", err)
+	}
+	return path
+}
+
 // bytesBuffer is a small io.Writer adapter for slog that writes to a bytes.Buffer.
 type bytesBuffer struct {
 	b *bytes.Buffer
 }
 
 func (w *bytesBuffer) Write(p []byte) (int, error) { return w.b.Write(p) }
+
+// TestRuntimeManager_SharedSpawn_PerModelFanOut verifies spec §3 + §4: when
+// two providers share an endpoint and StartAll spawns the shared subprocess,
+// BOTH per-model log files must contain the spawn_success event (fan-out).
+// This is the integration counterpart to TestPerModelFanOut (which only
+// exercises logToEndpoint directly).
+func TestRuntimeManager_SharedSpawn_PerModelFanOut(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	server := newHealthTestServer(t)
+	mgr := NewRuntimeManager(slog.New(slog.NewTextHandler(&bytesBuffer{b: &bytes.Buffer{}}, nil)))
+
+	pidFile := filepath.Join(home, "shared-fanout.pid")
+	cfg1 := &RuntimeConfig{
+		Type:            RuntimeLlamaCpp,
+		ModelPath:       tempModelFileInternal(t),
+		ModelPaths:      map[string]string{"alpha": tempModelFileInternal(t)},
+		ModelKeys:       []string{"alpha"},
+		EndpointKey:     "llama-cpp:127.0.0.1:7790",
+		PIDFile:         pidFile,
+		AutoStart:       true,
+		AutoStop:        true,
+		SpawnCommand:    []string{"sleep", "0.1"},
+		SpawnTimeout:    2 * time.Second,
+		HealthEndpoint:  "/health",
+		HealthInterval:  100 * time.Millisecond,
+		HealthTimeout:   1 * time.Second,
+		HealthThreshold: 1,
+	}
+	cfg2 := &RuntimeConfig{
+		Type:            RuntimeLlamaCpp,
+		ModelPath:       tempModelFileInternal(t),
+		ModelPaths:      map[string]string{"beta": tempModelFileInternal(t)},
+		ModelKeys:       []string{"beta"},
+		EndpointKey:     "llama-cpp:127.0.0.1:7790", // Same endpoint.
+		PIDFile:         pidFile,
+		AutoStart:       true,
+		AutoStop:        true,
+		SpawnCommand:    []string{"sleep", "0.1"},
+		SpawnTimeout:    2 * time.Second,
+		HealthEndpoint:  "/health",
+		HealthInterval:  100 * time.Millisecond,
+		HealthTimeout:   1 * time.Second,
+		HealthThreshold: 1,
+	}
+	if err := mgr.RegisterConfig("provider-a", cfg1, server.URL); err != nil {
+		t.Fatalf("RegisterConfig a: %v", err)
+	}
+	if err := mgr.RegisterConfig("provider-b", cfg2, server.URL); err != nil {
+		t.Fatalf("RegisterConfig b: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := mgr.StartAll(ctx); err != nil {
+		t.Fatalf("StartAll: %v", err)
+	}
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopCancel()
+	_ = mgr.StopAll(stopCtx)
+
+	// Both per-model log files must exist and contain a spawn_success event.
+	logsDir := filepath.Join(home, ".meept", "logs", "runtimes")
+	for _, tc := range []struct {
+		provider string
+		model    string
+	}{
+		{"provider-a", "alpha"},
+		{"provider-b", "beta"},
+	} {
+		path := filepath.Join(logsDir, tc.provider+"-"+tc.model+".log")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("read per-model log %s: %v", path, err)
+			continue
+		}
+		if !strings.Contains(string(data), `"event":"spawn_success"`) &&
+			!strings.Contains(string(data), `"event":"spawn_success`) {
+			t.Errorf("expected spawn_success event in %s; contents:\n%s", path, string(data))
+		}
+	}
+}
+
+// newHealthTestServer returns an httptest.Server that responds 200 OK to any
+// request (sufficient for the health checker to mark the endpoint healthy).
+func newHealthTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+}

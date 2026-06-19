@@ -54,6 +54,9 @@ class WindowGeometryService with WindowListener {
       return;
     }
 
+    instance._debounce?.cancel();
+    instance._debounce = null;
+
     try {
       final prefs = StorageService.instance;
       if (!prefs.isInitialized) return;

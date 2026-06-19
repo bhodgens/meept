@@ -54,40 +54,62 @@ func NewStdioTransport(command string, args ...string) (*StdioTransport, error) 
 
 // Read reads a message from the transport following LSP framing.
 func (t *StdioTransport) Read(ctx context.Context) ([]byte, error) {
-	// Read headers until blank line
-	var contentLength int
-	for {
-		line, err := t.reader.ReadString('\n')
-		if err != nil {
-			return nil, fmt.Errorf("failed to read header: %w", err)
-		}
+	// Wrap reader in a channel to enable context cancellation
+	type readResult struct {
+		data []byte
+		err  error
+	}
 
-		line = strings.TrimSpace(line)
-		if line == "" {
-			break
-		}
+	// Use a channel to unblock when context is cancelled
+	resultCh := make(chan readResult, 1)
 
-		if after, ok := strings.CutPrefix(line, "Content-Length:"); ok {
-			lengthStr := strings.TrimSpace(after)
-			contentLength, err = strconv.Atoi(lengthStr)
-			if err != nil {
-				return nil, fmt.Errorf("invalid content length: %w", err)
+	go func() {
+		var contentLength int
+		var readErr error
+		for {
+			var line string
+			line, readErr = t.reader.ReadString('\n')
+			if readErr != nil {
+				resultCh <- readResult{nil, fmt.Errorf("failed to read header: %w", readErr)}
+				return
+			}
+
+			line = strings.TrimSpace(line)
+			if line == "" {
+				break
+			}
+
+			if after, ok := strings.CutPrefix(line, "Content-Length:"); ok {
+				lengthStr := strings.TrimSpace(after)
+				contentLength, readErr = strconv.Atoi(lengthStr)
+				if readErr != nil {
+					resultCh <- readResult{nil, fmt.Errorf("invalid content length: %w", readErr)}
+					return
+				}
 			}
 		}
-	}
 
-	if contentLength == 0 {
-		return nil, fmt.Errorf("missing Content-Length header")
-	}
+		if contentLength == 0 {
+			resultCh <- readResult{nil, fmt.Errorf("missing Content-Length header")}
+			return
+		}
 
-	// Read content
-	content := make([]byte, contentLength)
-	_, err := io.ReadFull(t.reader, content)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read content: %w", err)
-	}
+		content := make([]byte, contentLength)
+		_, readErr = io.ReadFull(t.reader, content)
+		if readErr != nil {
+			resultCh <- readResult{nil, fmt.Errorf("failed to read content: %w", readErr)}
+			return
+		}
 
-	return content, nil
+		resultCh <- readResult{content, nil}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-resultCh:
+		return result.data, result.err
+	}
 }
 
 // Write writes a message to the transport with LSP framing.

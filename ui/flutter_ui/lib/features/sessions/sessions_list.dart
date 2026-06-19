@@ -24,7 +24,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
     });
   }
 
-  void _showCreateSessionDialog() async {
+  Future<void> _showCreateSessionDialog() async {
     final controller = TextEditingController();
     final notifier = ref.read(sessionProvider.notifier);
     await showDialog(

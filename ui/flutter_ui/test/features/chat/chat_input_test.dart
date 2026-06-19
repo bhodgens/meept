@@ -44,9 +44,9 @@ class _StubTtsNotifier extends StateNotifier<TtsState> implements TtsNotifier {
   @override Future<void> setPitch(double pitch) async {}
   @override Future<void> setVoice(String voiceName) async {}
   @override Future<List<Map<String, dynamic>>> getVoices() async => [];
-  @override void setEnabled(bool value) {}
-  @override void setBehaviorSettings({required bool interrupt, required bool queue, int? maxQueueSize}) {}
-  @override void toggleTts() {}
+  @override Future<void> setEnabled(bool value) async {}
+  @override Future<void> setBehaviorSettings({required bool interrupt, required bool queue, int? maxQueueSize}) async {}
+  @override Future<void> toggleTts() async {}
   @override bool get enabled => false;
   @override bool get isAvailable => false;
   @override bool get isSpeaking => false;

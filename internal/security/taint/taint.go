@@ -421,7 +421,7 @@ func (t *Tracker) MarkWebFetchedContent(value, url string) *TaintedValue {
 }
 
 // CheckWebFetchedVarsInShell checks if a shell command embeds any stored
-// web-fetched (TaintExternal) variables.  Returns a violation when at least
+// web-fetched (TaintExternal) variables. Returns a violation when at least
 // one is found.
 //
 // It supports three syntaxes:
@@ -435,38 +435,54 @@ func (t *Tracker) CheckWebFetchedVarsInShell(command string) *TaintViolationErro
 
 	sink := ShellExecSink()
 
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	// First pass: find all variable names with TaintExternal
+	// S2-1 FIX: Snapshot candidates under lock, then check outside to avoid
+	// self-deadlock from calling CheckSink (which acquires its own RLock)
+	// while holding RLock.
 	type varEntry struct {
-		name string
-		tv   *TaintedValue
+		name   string
+		taints []TaintLabel
+		value  string
+		source string
 	}
 	var candidates []varEntry
 
+	t.mu.RLock()
 	for name, tv := range t.variables {
 		if tv == nil {
 			continue
 		}
 		if tv.HasLabel(TaintExternal) {
-			candidates = append(candidates, varEntry{name, tv})
+			// Deep-copy to avoid holding lock during CheckSink
+			taintsCopy := make([]TaintLabel, len(tv.Taints))
+			copy(taintsCopy, tv.Taints)
+			candidates = append(candidates, varEntry{
+				name:   name,
+				taints: taintsCopy,
+				value:  tv.Value,
+				source: tv.Source,
+			})
 		}
 	}
+	t.mu.RUnlock()
 
 	// Second pass: check if any appear in the command (with shell syntaxes)
 	for _, e := range candidates {
+		tv := &TaintedValue{
+			Value:  e.value,
+			Taints: e.taints,
+			Source: e.source,
+		}
 		// $varName syntax
 		if strings.Contains(command, "$"+e.name) {
-			return t.CheckSink(e.tv, sink)
+			return t.CheckSink(tv, sink)
 		}
 		// ${varName} syntax
 		if strings.Contains(command, "${"+e.name+"}") {
-			return t.CheckSink(e.tv, sink)
+			return t.CheckSink(tv, sink)
 		}
 		// Plain variable name (substring match)
 		if strings.Contains(command, e.name) {
-			return t.CheckSink(e.tv, sink)
+			return t.CheckSink(tv, sink)
 		}
 	}
 

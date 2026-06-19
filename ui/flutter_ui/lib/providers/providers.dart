@@ -190,6 +190,7 @@ class ConnectionDetailsNotifier extends StateNotifier<ConnectionDetails?> {
   final Ref _ref;
   Timer? _fetchTimer;
   bool _isFetching = false;
+  bool _disposed = false;
 
   ConnectionDetailsNotifier(this._ref) : super(null) {
     // Periodically refresh daemon state while connected
@@ -200,6 +201,7 @@ class ConnectionDetailsNotifier extends StateNotifier<ConnectionDetails?> {
   }
 
   Future<void> _fetch() async {
+    if (_disposed) return;
     // Prevent concurrent fetches (e.g., on connect + periodic timer race)
     if (_isFetching) {
       debugPrint('[warn] ConnectionDetailsNotifier._fetch() skipped - already fetching');
@@ -252,10 +254,9 @@ class ConnectionDetailsNotifier extends StateNotifier<ConnectionDetails?> {
         );
       }
 
-      state = result;
+      if (!_disposed) state = result;
     } catch (e) {
       debugPrint('[warn] ConnectionDetails fetch metadata: $e');
-      // Best-effort — only connection metadata available
     } finally {
       _isFetching = false;
     }
@@ -263,6 +264,7 @@ class ConnectionDetailsNotifier extends StateNotifier<ConnectionDetails?> {
 
   @override
   void dispose() {
+    _disposed = true;
     _fetchTimer?.cancel();
     super.dispose();
   }

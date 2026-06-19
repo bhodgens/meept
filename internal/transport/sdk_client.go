@@ -58,7 +58,11 @@ func (c *SDKClient) Close() error { return nil }
 // IsConnected checks if the daemon is reachable.
 func (c *SDKClient) IsConnected() bool {
 	resp, err := c.http.Get(c.baseURL + "/api/v1/health")
-	return err == nil && resp.StatusCode == http.StatusOK
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // SetTimeout sets the request timeout.

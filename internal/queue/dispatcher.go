@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -135,7 +136,11 @@ func (d *Dispatcher) workerCanHandle(worker *WorkerInfo, requiredCaps []string) 
 }
 
 // Start begins the dispatcher loop that notifies workers of available jobs.
+// Calling Start more than once returns an error without leaking resources.
 func (d *Dispatcher) Start(ctx context.Context) error {
+	if d.cancel != nil {
+		return fmt.Errorf("dispatcher already started")
+	}
 	ctx, d.cancel = context.WithCancel(ctx)
 
 	d.wg.Add(2)

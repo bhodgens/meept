@@ -340,6 +340,16 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 		sub.TopicSubs = nil
 		sub.mu.Unlock()
 
+		// Unsubscribe the combined subscriber (tui.sub.X) as well so it
+		// doesn't leak on the bus when the client disconnects without
+		// calling bus.unsubscribe. handleBusUnsubscribe already does
+		// this explicitly on the synchronous path; this covers the
+		// async disconnect path.
+		if sub.Subscriber != nil {
+			p.bus.Unsubscribe(sub.Subscriber)
+			sub.Subscriber = nil
+		}
+
 		// Remove from subscriptions map
 		p.subscriptions.Delete(subID)
 		slog.Debug("Cleaned up subscription on context cancellation", "subscription_id", subID)

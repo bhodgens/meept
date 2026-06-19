@@ -81,7 +81,7 @@ func (p *Pool) Start(ctx context.Context, workerCount int) error {
 
 		// Start workers
 		for i := range workerCount {
-			if _, err := p.AddWorker(p.defaultCaps); err != nil {
+			if _, err := p.AddWorker(p.defaultCaps, ""); err != nil {
 				p.logger.Error("Failed to add worker", "index", i, "error", err)
 				if startErr == nil {
 					startErr = fmt.Errorf("failed to add worker %d: %w", i, err)
@@ -153,12 +153,13 @@ func (p *Pool) Stop(ctx context.Context) error {
 }
 
 // AddWorker adds a new worker to the pool.
-func (p *Pool) AddWorker(caps []string) (*Worker, error) {
+func (p *Pool) AddWorker(caps []string, agentID string) (*Worker, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	worker, err := NewWorker(Config{
 		Capabilities: caps,
+		AgentID:      agentID,
 		Queue:        p.queue,
 		Processor:    p.processor,
 		Logger:       p.logger,
@@ -268,7 +269,7 @@ func (p *Pool) Scale(ctx context.Context, targetCount int) error {
 	if targetCount > currentCount {
 		// Add workers
 		for range targetCount - currentCount {
-			worker, err := p.AddWorker(p.defaultCaps)
+			worker, err := p.AddWorker(p.defaultCaps, "")
 			if err != nil {
 				return fmt.Errorf("failed to add worker: %w", err)
 			}
@@ -461,12 +462,13 @@ func (h *Handler) handleMessage(ctx context.Context, topic string, msg *models.B
 func (h *Handler) handleAdd(_ context.Context, msg *models.BusMessage) (any, error) {
 	var params struct {
 		Capabilities []string `json:"capabilities,omitempty"`
+		AgentID      string   `json:"agent_id,omitempty"`
 	}
 	if err := json.Unmarshal(msg.Payload, &params); err != nil {
 		return nil, err
 	}
 
-	worker, err := h.pool.AddWorker(params.Capabilities)
+	worker, err := h.pool.AddWorker(params.Capabilities, params.AgentID)
 	if err != nil {
 		return nil, err
 	}
@@ -501,6 +503,7 @@ func (h *Handler) handleList(_ context.Context, _ *models.BusMessage) (any, erro
 		ws := w.GetStats()
 		workerList = append(workerList, map[string]any{
 			"id":             ws.ID,
+			"agent_id":       ws.AgentID,
 			"state":          string(ws.State),
 			KeyCapabilities:  ws.Capabilities,
 			"start_time":     ws.StartTime.Format(time.RFC3339),
@@ -530,6 +533,7 @@ func (h *Handler) handleStats(_ context.Context, _ *models.BusMessage) (any, err
 	for _, ws := range stats.WorkerStats {
 		workerStats = append(workerStats, map[string]any{
 			"id":             ws.ID,
+			"agent_id":       ws.AgentID,
 			"state":          string(ws.State),
 			KeyCapabilities:  ws.Capabilities,
 			"start_time":     ws.StartTime.Format(time.RFC3339),

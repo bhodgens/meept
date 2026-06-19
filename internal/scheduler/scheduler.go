@@ -142,7 +142,9 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	// caller-provided ctx so that RunNow jobs are cancelled when the
 	// parent context (e.g. daemon shutdown) is cancelled, rather than
 	// running detached (S6-17).
+	s.mu.Lock()
 	s.runNowCtx, s.runNowCancel = context.WithCancel(ctx)
+	s.mu.Unlock()
 
 	// Load persisted jobs
 	if err := s.loadPersistedJobs(); err != nil {
@@ -193,15 +195,9 @@ func (s *Scheduler) Stop(ctx context.Context) error {
 	// Stop cron scheduler and wait for running jobs
 	cronCtx := s.cron.Stop()
 
-	// Wait for running jobs with timeout
-	done := make(chan struct{})
-	go func() {
-		<-cronCtx.Done()
-		close(done)
-	}()
-
+	// Wait for running jobs with timeout (no extra goroutine needed).
 	select {
-	case <-done:
+	case <-cronCtx.Done():
 		s.logger.Debug("scheduler: all jobs completed")
 	case <-ctx.Done():
 		s.logger.Warn("scheduler: shutdown timeout, some jobs may not have completed")
@@ -496,7 +492,11 @@ func (s *Scheduler) wrapJob(job Job) func() {
 	return func() {
 		// Derive from runNowCtx so shutdown can signal cancellation,
 		// rather than using detached context.Background().
-		ctx, cancel := context.WithTimeout(s.runNowCtx, 30*time.Minute)
+		baseCtx := s.runNowCtx
+		if baseCtx == nil {
+			baseCtx = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(baseCtx, 30*time.Minute)
 		defer cancel()
 
 		s.executeJob(ctx, job)

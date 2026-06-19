@@ -797,10 +797,6 @@ func (d *Dispatcher) buildClarificationResult(input string, analysis *TrueIntent
 	}, nil
 }
 
-// clarificationSessionKey is the key used to store the original input and
-// analysis for a pending clarification in the session tracker metadata.
-const clarificationSessionKey = "pending_clarification"
-
 // pendingClarification holds the state needed to resume after a clarification.
 type pendingClarification struct {
 	OriginalInput string              `json:"original_input"`
@@ -1030,11 +1026,6 @@ func (m *MultiIntent) DetectCompound() bool {
 	}
 	m.CompoundType = "parallel"
 	return true
-}
-
-// routeCompound handles compound (multi-intent) request routing.
-func (d *Dispatcher) routeCompound(ctx context.Context, multi *MultiIntent, input, sessionID string) (*DispatchResult, error) {
-	return d.routeCompoundWithModel(ctx, multi, input, sessionID, nil)
 }
 
 // routeCompoundWithModel handles compound routing with model override support.

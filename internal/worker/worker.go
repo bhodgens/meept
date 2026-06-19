@@ -26,6 +26,7 @@ type JobProcessor interface {
 type Worker struct {
 	ID           string
 	Capabilities []string
+	AgentID      string
 	State        State
 	CurrentJob   *queue.Job
 	LastActive   time.Time
@@ -47,6 +48,7 @@ type Worker struct {
 type Config struct {
 	ID           string
 	Capabilities []string
+	AgentID      string
 	Queue        queue.Queue
 	Processor    JobProcessor
 	Logger       *slog.Logger
@@ -70,6 +72,7 @@ func NewWorker(cfg Config) (*Worker, error) {
 	return &Worker{
 		ID:           cfg.ID,
 		Capabilities: cfg.Capabilities,
+		AgentID:      cfg.AgentID,
 		State:        StateStopped,
 		StartTime:    time.Now(),
 		queue:        cfg.Queue,
@@ -141,6 +144,7 @@ func (w *Worker) GetStats() WorkerStats {
 	defer w.mu.RUnlock()
 	return WorkerStats{
 		ID:           w.ID,
+		AgentID:      w.AgentID,
 		State:        w.State,
 		Capabilities: w.Capabilities,
 		StartTime:    w.StartTime,
@@ -219,7 +223,7 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 	w.mu.Unlock()
 
 	// Try to claim a job -- this is the actual work check
-	job, err := w.queue.Claim(ctx, w.ID, w.Capabilities)
+	job, err := w.queue.Claim(ctx, w.ID, w.Capabilities, w.AgentID)
 	if err != nil {
 		if errors.Is(err, queue.ErrNoJobAvailable) {
 			return false, nil // Stay idle, no transition needed
@@ -365,6 +369,7 @@ func (w *Worker) getCurrentJobID() string {
 //nolint:revive // stutter with package name is intentional for API clarity
 type WorkerStats struct {
 	ID           string
+	AgentID      string
 	State        State
 	Capabilities []string
 	StartTime    time.Time

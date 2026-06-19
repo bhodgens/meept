@@ -55,6 +55,7 @@ type Daemon struct {
 	components       *Components // Agent, tools, LLM, etc.
 	metricsStore     *metrics.Store
 	metricsCollector *metrics.Collector
+	taskCollector    *metrics.TaskCollector
 	logger           *slog.Logger
 
 	// Plan system
@@ -391,12 +392,14 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	}
 
 	// Wire task collector and response analyzer to agent loop
+	var taskColl *metrics.TaskCollector
 	if metricsStore != nil && components != nil && components.AgentLoop != nil {
 		metricsDBPath := filepath.Join(cfg.StateDir, "metrics.db")
-		taskColl, err := metrics.NewTaskCollector(metricsDBPath, logger.With("component", "task-collector"))
+		tc, err := metrics.NewTaskCollector(metricsDBPath, logger.With("component", "task-collector"))
 		if err != nil {
 			logger.Warn("Failed to create task collector", "error", err)
 		} else {
+			taskColl = tc
 			components.AgentLoop.SetTaskCollector(taskColl)
 			logger.Info("Task collector wired into agent loop")
 		}
@@ -410,6 +413,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	if metricsStore != nil && components != nil {
 		coll = metrics.NewCollector(metricsStore, msgBus, &metrics.CollectorConfig{
 			GetQueueDepth: func() int {
+				if components.Queue == nil {
+					return 0
+				}
 				ctx := context.Background()
 				stats, err := components.Queue.Stats(ctx)
 				if err != nil || stats.ByState == nil {
@@ -418,6 +424,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				return stats.ByState[queue.StatePending] + stats.ByState[queue.StateClaimed]
 			},
 			GetActiveAgents: func() int {
+				if components.WorkerPool == nil {
+					return 0
+				}
 				stats := components.WorkerPool.GetStats()
 				return stats.BusyWorkers
 			},
@@ -679,6 +688,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		components:       components,
 		metricsStore:     metricsStore,
 		metricsCollector: coll,
+		taskCollector:    taskColl,
 		planStore:        planStoreInst,
 		planManager:      planManagerInst,
 		planHandler:      planHandlerInst,
@@ -693,6 +703,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// Orchestrator to make direct plan queries when needed.
 	if components != nil && components.Orchestrator != nil && planManagerInst != nil {
 		components.Orchestrator.SetPlanManager(planManagerInst)
+	}
+
+	// Wire PlanManager into RalphLoop. The RalphLoop is created in
+	// NewComponents before the plan system is initialized, so its
+	// planManager field is nil at construction time.
+	if components != nil && components.RalphLoop != nil && planManagerInst != nil {
+		components.RalphLoop.SetPlanManager(planManagerInst)
 	}
 
 	return d, nil
@@ -889,6 +906,7 @@ func (d *Daemon) shutdown() error {
 	if d.metricsCollector != nil {
 		d.metricsCollector.Shutdown()
 	}
+
 	if d.metricsStore != nil {
 		d.metricsStore.Close()
 	}
@@ -920,6 +938,14 @@ func (d *Daemon) shutdown() error {
 	// Stop registry components (RPC server, etc.)
 	if err := d.registry.StopAll(ctx); err != nil {
 		d.logger.Error("daemon: shutdown errors", "error", err)
+	}
+
+	// Stop task collector last. Its db.Close() can block if another
+	// connection to the same SQLite DB (metrics.db) is still open.
+	// By this point, metricsStore is already closed and all components
+	// are stopped, so the DB should be exclusively owned by the collector.
+	if d.taskCollector != nil {
+		d.taskCollector.Shutdown()
 	}
 
 	// Close message bus
@@ -1227,7 +1253,7 @@ func (w *metricsStoreWrapper) GetLiveMetrics() (*metrics.LiveMetricsSnapshot, er
 }
 
 func (w *metricsStoreWrapper) GetHistoricalMetrics(ctx context.Context, from, to time.Time, resolution string) ([]metrics.MetricPoint, error) {
-	return w.store.GetHistoricalMetrics(from, to, resolution)
+	return w.store.GetHistoricalMetrics(ctx, from, to, resolution)
 }
 
 func (w *metricsStoreWrapper) SubscribeMetrics() (_ <-chan *metrics.LiveMetricsSnapshot, _ func()) {

@@ -68,6 +68,9 @@ type Synthesizer interface {
 	Name() string
 	// CheckAvailable returns nil if engine dependencies are available.
 	CheckAvailable() error
+	// Close releases any engine-owned audio resources.
+	// Implementations that hold no resources should return nil.
+	Close() error
 }
 
 // NewSynthesizer returns the appropriate implementation based on cfg.Engine.

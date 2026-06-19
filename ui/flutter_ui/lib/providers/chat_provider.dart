@@ -339,10 +339,13 @@ class ChatNotifier extends StateNotifier<ChatState> {
       // Handle system/non-chat messages (token budget, errors, etc.)
       final messageType = data['type'] as String?;
       if (messageType == 'non-chat' || messageType == 'system' || messageType == 'error') {
+        final contentText = data['content'] is String
+            ? data['content'] as String
+            : (data['message'] is String ? data['message'] as String : 'System notification');
         final systemMessage = ChatMessage(
           id: 'system_${DateTime.now().millisecondsSinceEpoch}',
           role: 'system',
-          content: data['content'] as String? ?? data['message'] as String? ?? 'System notification',
+          content: contentText,
           timestamp: DateTime.now(),
         );
         state = state.copyWith(

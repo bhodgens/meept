@@ -1134,17 +1134,19 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 		}
 
 		reason := "completed"
-		if err != nil && err.Error() == "maximum iterations reached" {
-			reason = "max_iterations"
-		} else if err != nil {
-			reason = "error"
+		if err != nil {
+			if errors.Is(err, ErrMaxIterationsReached) {
+				reason = "max_iterations"
+			} else {
+				reason = "error"
+			}
 		}
 		endMsg, deferErr := models.NewBusMessage(models.MessageTypeEvent, "agent", AgentLifecyclePayload{
 			ConversationID: conversationID,
 			AgentID:        l.agentID,
 			Reason:         reason,
 		})
-		if deferErr == nil {
+		if deferErr == nil && l.bus != nil {
 			l.bus.Publish(bus.EventAgentEnded, endMsg)
 		}
 	}()
@@ -2206,6 +2208,11 @@ func (l *AgentLoop) chatWithFailover(ctx context.Context, messages []llm.ChatMes
 // TTSR mid-stream abortion. If onDelta is non-nil and the underlying Chatter
 // supports StreamingChatter, the stream is used; otherwise it falls back to
 // non-streaming behavior.
+//
+// Reserved for enabling streaming in agentic workflows per
+// docs/plans/2026-06-12-review-gaps-research-design.md
+//
+//lint:ignore U1000 reserved for future streaming per docs/plans/2026-06-12-review-gaps-research-design.md
 func (l *AgentLoop) chatWithFailoverStream(ctx context.Context, messages []llm.ChatMessage, onDelta llm.DeltaCallback, opts ...llm.ChatOption) (*llm.Response, error) {
 	return l.chatWithFailoverRaw(ctx, messages, onDelta, opts...)
 }
@@ -2600,7 +2607,7 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 
 	// Record memory of this task execution
 	if l.memvid != nil {
-		go l.recordTaskExecution(ctx, t, response)
+		go l.recordTaskExecution(context.Background(), t, response)
 	}
 
 	// Record task metrics on successful completion

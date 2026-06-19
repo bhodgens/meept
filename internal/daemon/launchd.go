@@ -214,7 +214,6 @@ func findDaemonBinary() (string, error) {
 type ServiceManager struct {
 	daemonPath string
 	logDir     string
-	svc        service.Service // set after Install/Uninstall for status queries
 	name       string
 }
 

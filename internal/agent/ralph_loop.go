@@ -65,6 +65,20 @@ func NewRalphLoop(config RalphLoopConfig, orchestrator *Orchestrator, taskStore 
 	}
 }
 
+// SetPlanManager sets the plan manager. This is called by the daemon after
+// the PlanManager is created (the plan system is initialized after agent
+// components in NewComponents, so the value passed to NewRalphLoop is nil).
+func (rl *RalphLoop) SetPlanManager(pm *plan.PlanManager) {
+	if pm != nil {
+		rl.planManager = pm
+	}
+}
+
+// PlanManager returns the plan manager, if configured.
+func (rl *RalphLoop) PlanManager() *plan.PlanManager {
+	return rl.planManager
+}
+
 // CheckCompletion verifies if a completed task actually achieved its goal.
 // Returns (isComplete bool, evidence []string, needsReplan bool).
 func (rl *RalphLoop) CheckCompletion(ctx context.Context, taskID string, result json.RawMessage) (bool, []string, bool) {

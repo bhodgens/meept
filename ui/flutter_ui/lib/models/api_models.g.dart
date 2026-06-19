@@ -100,11 +100,11 @@ _$TaskStepImpl _$$TaskStepImplFromJson(Map<String, dynamic> json) =>
       id: json['id'] as String,
       taskId: json['task_id'] as String,
       description: json['description'] as String,
-      status: json['status'] as String,
-      output: json['output'] as String?,
-      completedAt: json['completed_at'] == null
+      status: json['state'] as String,
+      output: json['result'] as String?,
+      createdAt: json['created_at'] == null
           ? null
-          : DateTime.parse(json['completed_at'] as String),
+          : DateTime.parse(json['created_at'] as String),
     );
 
 Map<String, dynamic> _$$TaskStepImplToJson(_$TaskStepImpl instance) =>
@@ -112,9 +112,9 @@ Map<String, dynamic> _$$TaskStepImplToJson(_$TaskStepImpl instance) =>
       'id': instance.id,
       'task_id': instance.taskId,
       'description': instance.description,
-      'status': instance.status,
-      'output': instance.output,
-      'completed_at': instance.completedAt?.toIso8601String(),
+      'state': instance.status,
+      'result': instance.output,
+      'created_at': instance.createdAt?.toIso8601String(),
     };
 
 _$AgentImpl _$$AgentImplFromJson(Map<String, dynamic> json) => _$AgentImpl(

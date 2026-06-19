@@ -311,61 +311,75 @@ func (t *TeacherClient) callTeacher(ctx context.Context, client *llm.Client, mes
 }
 
 func (t *TeacherClient) checkLimits(ctx context.Context) error {
+	// Check if we need to reset daily counters, and if so, whether
+	// we need to load from the database. Collect under lock, do I/O
+	// outside lock (CLAUDE.md "Mutex scope" rule).
 	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	// Reset daily counters if needed
 	today := time.Now().UTC().Format("2006-01-02")
-	if t.lastResetDate != today {
+	needReset := t.lastResetDate != today
+	if needReset {
 		t.dailyQueries = 0
 		t.dailyCost = 0
 		t.lastResetDate = today
+	}
+	maxQueries := t.config.MaxDailyQueries
+	maxCost := t.config.MaxDailyCost
+	queries := t.dailyQueries
+	cost := t.dailyCost
+	store := t.trainingStore
+	t.mu.Unlock()
 
-		// Load from database if available
-		if t.trainingStore != nil {
-			queries, cost, err := t.trainingStore.GetTeacherUsageToday(ctx)
-			if err == nil {
-				t.dailyQueries = queries
-				t.dailyCost = cost
-			}
+	// Load from database outside the lock if we reset
+	if needReset && store != nil {
+		dbQueries, dbCost, err := store.GetTeacherUsageToday(ctx)
+		if err == nil {
+			t.mu.Lock()
+			t.dailyQueries = dbQueries
+			t.dailyCost = dbCost
+			queries = dbQueries
+			cost = dbCost
+			t.mu.Unlock()
 		}
 	}
 
 	// Check query limit
-	if t.config.MaxDailyQueries > 0 && t.dailyQueries >= t.config.MaxDailyQueries {
-		return fmt.Errorf("daily teacher query limit reached (%d)", t.config.MaxDailyQueries)
+	if maxQueries > 0 && queries >= maxQueries {
+		return fmt.Errorf("daily teacher query limit reached (%d)", maxQueries)
 	}
 
 	// Check cost limit
-	if t.config.MaxDailyCost > 0 && t.dailyCost >= t.config.MaxDailyCost {
-		return fmt.Errorf("daily teacher cost limit reached ($%.2f)", t.config.MaxDailyCost)
+	if maxCost > 0 && cost >= maxCost {
+		return fmt.Errorf("daily teacher cost limit reached ($%.2f)", maxCost)
 	}
 
 	return nil
 }
 
 func (t *TeacherClient) recordUsage(ctx context.Context, cfg *llm.ModelConfig, response *llm.Response) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.dailyQueries++
-
-	// Calculate cost based on actual token usage from the response
+	// Calculate cost outside the lock (no shared state needed)
 	inputCost := float64(response.Usage.PromptTokens) * cfg.CostPerMillionInput / 1_000_000.0
 	outputCost := float64(response.Usage.CompletionTokens) * cfg.CostPerMillionOutput / 1_000_000.0
 	actualCost := inputCost + outputCost
-	t.dailyCost += actualCost
 
-	// Persist to database if available
-	if t.trainingStore != nil {
-		if err := t.trainingStore.RecordTeacherUsage(ctx, 1, actualCost); err != nil {
+	// Update counters under lock, then do I/O outside lock
+	t.mu.Lock()
+	t.dailyQueries++
+	t.dailyCost += actualCost
+	store := t.trainingStore
+	dailyQueries := t.dailyQueries
+	dailyCost := t.dailyCost
+	t.mu.Unlock()
+
+	// Persist to database outside the lock
+	if store != nil {
+		if err := store.RecordTeacherUsage(ctx, 1, actualCost); err != nil {
 			t.logger.Warn("Failed to record teacher usage", "error", err)
 		}
 	}
 
 	t.logger.Debug("Teacher usage recorded",
-		"daily_queries", t.dailyQueries,
-		"daily_cost", t.dailyCost,
+		"daily_queries", dailyQueries,
+		"daily_cost", dailyCost,
 		"input_tokens", response.Usage.PromptTokens,
 		"output_tokens", response.Usage.CompletionTokens,
 	)

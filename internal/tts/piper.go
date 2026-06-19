@@ -1,9 +1,7 @@
 package tts
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -89,6 +87,7 @@ func (e *PiperEngine) Synthesize(ctx context.Context, text string) (*Result, err
 	}
 	tmpPath := tmpFile.Name()
 	tmpFile.Close()
+	defer os.Remove(tmpPath)
 
 	// Build piper command
 	args := []string{
@@ -144,10 +143,6 @@ func (e *PiperEngine) Synthesize(ctx context.Context, text string) (*Result, err
 		e.mu.Unlock()
 		return nil, fmt.Errorf("reading audio file: %w", err)
 	}
-	// Audio data is now in memory; remove the temp file eagerly so it does
-	// not accumulate on disk. AudioPath is left empty to avoid dangling
-	// references (S6-1).
-	os.Remove(tmpPath)
 
 	// Play audio
 	e.mu.Lock()
@@ -183,6 +178,20 @@ func (e *PiperEngine) stopLocked() error {
 	return e.player.Stop()
 }
 
+// Close releases audio resources held by the underlying AudioPlayer.
+func (e *PiperEngine) Close() error {
+	e.mu.Lock()
+	player := e.player
+	e.speaking = false
+	e.mu.Unlock()
+	// Close outside the mutex: oto.Context.Suspend() may block on the
+	// audio driver and we must not hold e.mu across I/O (CLAUDE.md rule).
+	if player != nil {
+		return player.Close()
+	}
+	return nil
+}
+
 // IsSpeaking returns whether audio is currently playing.
 func (e *PiperEngine) IsSpeaking() bool {
 	e.mu.Lock()
@@ -215,30 +224,3 @@ func (e *PiperEngine) CheckAvailable() error {
 	return nil
 }
 
-// checkPiperAvailable checks if piper binary is available with optional path.
-func checkPiperAvailable(binPath string) error {
-	if binPath == "" {
-		binPath = "piper"
-	}
-	if _, err := exec.LookPath(binPath); err != nil {
-		return fmt.Errorf("piper not found in PATH: %w", err)
-	}
-	return nil
-}
-
-// readPiperConfig reads a Piper voice configuration file.
-func readPiperConfig(configPath string) (map[string]interface{}, error) {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, err
-	}
-
-	// Simple JSON parsing for config
-	var config map[string]interface{}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	if err := dec.Decode(&config); err != nil {
-		return nil, err
-	}
-
-	return config, nil
-}

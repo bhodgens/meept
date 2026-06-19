@@ -103,6 +103,14 @@ func (m *SessionsModel) SetSize(width, height int) {
 	tableHeight := max(height-10, 5)
 	m.table.SetHeight(tableHeight)
 
+	// Set table viewport width to match the rendered table container's
+	// inner width (tableWidth minus border frame). Without this, the
+	// viewport width stays at 0 and View() returns "" — the table
+	// appears blank even though rows are populated and navigation works.
+	detailWidth := max(width/3, 30)
+	tableWidth := width - detailWidth - 4
+	m.table.SetWidth(tableWidth - 2) // -2 for rounded border frame
+
 	m.setSessionsColumns()
 }
 

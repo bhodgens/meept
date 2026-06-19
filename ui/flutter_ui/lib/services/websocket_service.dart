@@ -215,6 +215,9 @@ class WebSocketService {
     for (final sessionId in _chatSubscriptions.keys) {
       send({'type': 'subscribe', 'channel': 'chat', 'session_id': sessionId});
     }
+    for (final sessionId in _progressSubscriptions.keys) {
+      send({'type': 'subscribe', 'channel': 'progress', 'session_id': sessionId});
+    }
     if (_jobsSubscribed) {
       send({'type': 'subscribe', 'channel': 'jobs'});
     }

@@ -67,7 +67,6 @@ type SynthesizedProgressEvent struct {
 type ProgressSynthesizer struct {
 	bus    *bus.MessageBus
 	client *llm.Client
-	model  string
 	logger *slog.Logger
 }
 

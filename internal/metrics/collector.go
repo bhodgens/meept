@@ -670,6 +670,7 @@ func (c *TaskCollector) RecordAgentTask(m *AgentTaskMetrics) error {
 
 // flushLoop runs the background flush loop.
 func (c *TaskCollector) flushLoop() {
+	defer c.wg.Done()
 	for {
 		select {
 		case <-c.flushTicker.C:

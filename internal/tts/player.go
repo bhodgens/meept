@@ -54,3 +54,24 @@ func (p *AudioPlayer) Stop() error {
 func (p *AudioPlayer) IsPlaying() bool {
 	return false
 }
+
+// Close releases the oto audio context. oto v3's Context has no Close method,
+// but Suspend halts the underlying audio driver. The context reference is
+// cleared so subsequent calls are no-ops. Safe to call before any Play()
+// (context is nil) or multiple times.
+func (p *AudioPlayer) Close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.ctx == nil {
+		return nil
+	}
+
+	// Suspend the audio context — oto v3 has no Close(); Suspend halts
+	// the audio driver. The GC finalizer handles the rest.
+	if err := p.ctx.Suspend(); err != nil {
+		return err
+	}
+	p.ctx = nil
+	return nil
+}

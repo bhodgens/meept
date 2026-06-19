@@ -1,6 +1,7 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'router.dart';
@@ -62,7 +63,7 @@ class FindIntent extends AppIntent {
 /// 2. Leave [onNavigate] unset and the controller will use the global
 ///    [router] directly via `router.go(path)`.
 class LeaderKeyController extends ChangeNotifier {
-  static bool get _isMacOS => Platform.isMacOS;
+  static bool get _isMacOS => !kIsWeb && Platform.isMacOS;
 
   /// Whether the leader key is currently in "waiting for sequence" mode.
   bool get isWaiting => _waiting;

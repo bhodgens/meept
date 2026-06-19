@@ -182,7 +182,7 @@ class _TasksListState extends ConsumerState<TasksList> {
     }
   }
 
-  void _showCreateTaskDialog() async {
+  Future<void> _showCreateTaskDialog() async {
     _textController.clear();
     await showDialog(
       context: context,

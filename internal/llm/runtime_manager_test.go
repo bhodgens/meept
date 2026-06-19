@@ -7,6 +7,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -529,4 +532,236 @@ func TestRuntimeManager_InUseGate_IncludesModel(t *testing.T) {
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer stopCancel()
 	mgr.StopAll(stopCtx)
+}
+
+// capturingHandler is a minimal slog.Handler that records log messages and
+// attributes for inspection in tests.
+type capturingHandler struct {
+	records []string
+	mu      sync.Mutex
+}
+
+func (h *capturingHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+
+func (h *capturingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var sb strings.Builder
+	sb.WriteString(r.Level.String())
+	sb.WriteString(" ")
+	sb.WriteString(r.Message)
+	r.Attrs(func(a slog.Attr) bool {
+		sb.WriteString(" ")
+		sb.WriteString(a.Key)
+		sb.WriteString("=")
+		sb.WriteString(a.Value.String())
+		return true
+	})
+	h.records = append(h.records, sb.String())
+	return nil
+}
+
+func (h *capturingHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
+func (h *capturingHandler) WithGroup(_ string) slog.Handler      { return h }
+
+func (h *capturingHandler) dump() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]string, len(h.records))
+	copy(out, h.records)
+	return out
+}
+
+// containsSubstring reports whether any captured record contains substr.
+func (h *capturingHandler) containsSubstring(substr string) bool {
+	for _, r := range h.dump() {
+		if strings.Contains(r, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRuntimeManager_ConflictingSpawnCommand verifies that registering a second
+// provider against an existing endpoint with a DIFFERENT spawn_command logs a
+// warning and keeps the first command. Satisfies spec §4 test requirement:
+// "Conflicting spawn_command on shared port: warning logged, first wins."
+func TestRuntimeManager_ConflictingSpawnCommand(t *testing.T) {
+	handler := &capturingHandler{}
+	logger := slog.New(handler)
+	mgr := llm.NewRuntimeManager(logger)
+
+	cfg1 := &llm.RuntimeConfig{
+		Type:            llm.RuntimeLlamaCpp,
+		ModelPath:       createTempModelFile(t),
+		ModelPaths:      map[string]string{"alpha": createTempModelFile(t)},
+		EndpointKey:     "llama-cpp:127.0.0.1:7771",
+		PIDFile:         filepath.Join(t.TempDir(), "a.pid"),
+		AutoStart:       false,
+		SpawnCommand:    []string{"llama-server", "--port", "7771"},
+		SpawnTimeout:    2 * time.Second,
+		HealthEndpoint:  "/health",
+		HealthInterval:  1 * time.Second,
+		HealthTimeout:   1 * time.Second,
+		HealthThreshold: 1,
+	}
+	cfg2 := &llm.RuntimeConfig{
+		Type:            llm.RuntimeLlamaCpp,
+		ModelPath:       createTempModelFile(t),
+		ModelPaths:      map[string]string{"beta": createTempModelFile(t)},
+		EndpointKey:     "llama-cpp:127.0.0.1:7771", // Same endpoint.
+		PIDFile:         filepath.Join(t.TempDir(), "b.pid"),
+		AutoStart:       false,
+		SpawnCommand:    []string{"mlx_server", "--port", "7771"}, // Different.
+		SpawnTimeout:    2 * time.Second,
+		HealthEndpoint:  "/health",
+		HealthInterval:  1 * time.Second,
+		HealthTimeout:   1 * time.Second,
+		HealthThreshold: 1,
+	}
+
+	if err := mgr.RegisterConfig("provider-a", cfg1, "http://127.0.0.1:7771"); err != nil {
+		t.Fatalf("RegisterConfig provider-a: %v", err)
+	}
+	if err := mgr.RegisterConfig("provider-b", cfg2, "http://127.0.0.1:7771"); err != nil {
+		t.Fatalf("RegisterConfig provider-b: %v", err)
+	}
+
+	if !handler.containsSubstring("Conflicting spawn_command") {
+		t.Errorf("expected 'Conflicting spawn_command' warning in logs; got:\n%s",
+			strings.Join(handler.dump(), "\n"))
+	}
+}
+
+// TestRuntimeManager_ConflictingPIDFile verifies the S4-Bug2 fix: when a
+// second provider registers against an existing endpoint with a different
+// pid_file, a debug log is emitted (first wins). Satisfies spec §4:
+// "subsequent providers' pid_file values are ignored (with a debug log if
+// they differ)."
+func TestRuntimeManager_ConflictingPIDFile(t *testing.T) {
+	handler := &capturingHandler{}
+	logger := slog.New(handler)
+	mgr := llm.NewRuntimeManager(logger)
+
+	cfg1 := &llm.RuntimeConfig{
+		Type:            llm.RuntimeLlamaCpp,
+		ModelPath:       createTempModelFile(t),
+		ModelPaths:      map[string]string{"alpha": createTempModelFile(t)},
+		EndpointKey:     "llama-cpp:127.0.0.1:7772",
+		PIDFile:         filepath.Join(t.TempDir(), "first.pid"),
+		AutoStart:       false,
+		SpawnCommand:    []string{"sleep", "1"},
+		SpawnTimeout:    2 * time.Second,
+		HealthEndpoint:  "/health",
+		HealthInterval:  1 * time.Second,
+		HealthTimeout:   1 * time.Second,
+		HealthThreshold: 1,
+	}
+	cfg2 := &llm.RuntimeConfig{
+		Type:            llm.RuntimeLlamaCpp,
+		ModelPath:       createTempModelFile(t),
+		ModelPaths:      map[string]string{"beta": createTempModelFile(t)},
+		EndpointKey:     "llama-cpp:127.0.0.1:7772",
+		PIDFile:         filepath.Join(t.TempDir(), "second.pid"), // Different.
+		AutoStart:       false,
+		SpawnCommand:    []string{"sleep", "1"},
+		SpawnTimeout:    2 * time.Second,
+		HealthEndpoint:  "/health",
+		HealthInterval:  1 * time.Second,
+		HealthTimeout:   1 * time.Second,
+		HealthThreshold: 1,
+	}
+
+	if err := mgr.RegisterConfig("provider-a", cfg1, "http://127.0.0.1:7772"); err != nil {
+		t.Fatalf("RegisterConfig provider-a: %v", err)
+	}
+	if err := mgr.RegisterConfig("provider-b", cfg2, "http://127.0.0.1:7772"); err != nil {
+		t.Fatalf("RegisterConfig provider-b: %v", err)
+	}
+
+	if !handler.containsSubstring("Conflicting pid_file") {
+		t.Errorf("expected 'Conflicting pid_file' debug log; got:\n%s",
+			strings.Join(handler.dump(), "\n"))
+	}
+}
+
+// TestRuntimeManager_StopAll_OneSIGTERMPerEndpoint verifies that StopAll sends
+// exactly one SIGTERM per shared endpoint, not one per provider. Satisfies
+// spec §4 test requirement: "StopAll sends exactly one SIGTERM per endpoint."
+//
+// We verify this indirectly: a merged endpoint has one RuntimeProcess, and
+// StopAll iterates m.endpoints (not m.configs). After StopAll, the single
+// subprocess must be dead and the single PID file removed. If StopAll had
+// sent multiple SIGTERMs, the second would target a dead/reused PID — but
+// the observable guarantee is that exactly one subprocess was managed and
+// it is no longer running.
+func TestRuntimeManager_StopAll_OneSIGTERMPerEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	mgr := llm.NewRuntimeManager(slog.Default())
+	pidFile := filepath.Join(t.TempDir(), "shared-stop.pid")
+	baseCfg := llm.RuntimeConfig{
+		Type:            llm.RuntimeLlamaCpp,
+		ModelPath:       createTempModelFile(t),
+		ModelPaths:      map[string]string{"alpha": createTempModelFile(t)},
+		EndpointKey:     "llama-cpp:127.0.0.1:7780",
+		PIDFile:         pidFile,
+		AutoStart:       true,
+		AutoStop:        true,
+		SpawnCommand:    []string{"sleep", "30"},
+		SpawnTimeout:    2 * time.Second,
+		HealthEndpoint:  "/health",
+		HealthInterval:  100 * time.Millisecond,
+		HealthTimeout:   1 * time.Second,
+		HealthThreshold: 1,
+	}
+	cfg1 := baseCfg
+	cfg2 := baseCfg
+	cfg2.ModelPaths = map[string]string{"beta": createTempModelFile(t)}
+
+	if err := mgr.RegisterConfig("provider-a", &cfg1, server.URL); err != nil {
+		t.Fatalf("RegisterConfig a: %v", err)
+	}
+	if err := mgr.RegisterConfig("provider-b", &cfg2, server.URL); err != nil {
+		t.Fatalf("RegisterConfig b: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := mgr.StartAll(ctx); err != nil {
+		t.Fatalf("StartAll: %v", err)
+	}
+
+	// Both providers report the same non-zero PID (shared subprocess).
+	s1, _ := mgr.StatusForProvider("provider-a")
+	s2, _ := mgr.StatusForProvider("provider-b")
+	if s1.PID == 0 || s2.PID == 0 {
+		t.Fatalf("expected non-zero PIDs; got a=%d b=%d", s1.PID, s2.PID)
+	}
+	if s1.PID != s2.PID {
+		t.Fatalf("expected shared PID; got a=%d b=%d", s1.PID, s2.PID)
+	}
+	sharedPID := s1.PID
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopCancel()
+	if err := mgr.StopAll(stopCtx); err != nil {
+		t.Fatalf("StopAll: %v", err)
+	}
+
+	// After StopAll: the shared PID must no longer be alive, and the PID file
+	// must be removed (exactly once). If StopAll had iterated per provider,
+	// the second stop would attempt to clean up an already-removed PID file.
+	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
+		t.Errorf("expected PID file removed after StopAll; stat err=%v", err)
+	}
+	proc, err := os.FindProcess(sharedPID)
+	if err != nil {
+		t.Logf("FindProcess(%d) err=%v (acceptable after stop)", sharedPID, err)
+	} else if err := proc.Signal(syscall.Signal(0)); err == nil {
+		t.Errorf("shared subprocess PID %d still alive after StopAll", sharedPID)
+	}
 }

@@ -274,7 +274,16 @@ func (s *SidebarModel) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// scheduleRefresh schedules the next periodic refresh.
+// Cleanup stops background goroutines (event stream, metrics collector).
+// Should be called on app shutdown before tea.Quit.
+func (s *SidebarModel) Cleanup() {
+	if s.eventStream != nil {
+		s.eventStream.Stop()
+	}
+	if s.metricsCollector != nil {
+		s.metricsCollector.Stop()
+	}
+}
 func (s *SidebarModel) scheduleRefresh() tea.Cmd {
 	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 		return SidebarRefreshTick{}

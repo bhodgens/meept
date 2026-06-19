@@ -33,7 +33,9 @@ type Queue interface {
 	Enqueue(ctx context.Context, job *Job) error
 
 	// Claim claims the next available job for a worker.
-	Claim(ctx context.Context, workerID string, caps []string) (*Job, error)
+	// If agentID is non-empty, only jobs targeted to that agent (or unassigned
+	// jobs) are claimable. If agentID is empty, any pending job is claimable.
+	Claim(ctx context.Context, workerID string, caps []string, agentID string) (*Job, error)
 
 	// MarkProcessing marks a job as being processed.
 	MarkProcessing(ctx context.Context, jobID string) error
@@ -169,7 +171,7 @@ func (q *PersistentQueue) Enqueue(ctx context.Context, job *Job) error {
 // Slow path: when SetTaskCancelledCallback has installed a real callback,
 // we fall back to the list-then-skip-then-claim flow so cancelled-task
 // jobs can be bypassed before claiming.
-func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []string) (*Job, error) {
+func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []string, agentID string) (*Job, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -179,7 +181,7 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 
 	// Fast path: no cancellation filter installed.
 	if !q.hasCancelFilter {
-		claimedJob, err := q.store.ClaimNextForAgent(workerID, caps, "")
+		claimedJob, err := q.store.ClaimNextForAgent(workerID, caps, agentID)
 		if err != nil {
 			return nil, err
 		}
@@ -201,8 +203,21 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 	}
 
 	// Find first claimable, non-cancelled job
+	now := time.Now().UTC()
 	var targetJob *Job
 	for _, job := range pendingJobs {
+		// Skip jobs scheduled for the future (due_at not yet reached)
+		if job.DueAt != nil && !job.DueAt.IsZero() && job.DueAt.After(now) {
+			continue
+		}
+		// Skip jobs with retry backoff not yet elapsed
+		if job.NextRetryAt != nil && !job.NextRetryAt.IsZero() && job.NextRetryAt.After(now) {
+			continue
+		}
+		// Skip jobs targeted to a different agent
+		if agentID != "" && job.AgentID != "" && job.AgentID != agentID {
+			continue
+		}
 		// Skip cancelled tasks
 		if job.TaskID != "" {
 			if cancelled, _ := cancelFn(job.TaskID); cancelled {
@@ -598,12 +613,13 @@ func (h *Handler) handleClaim(ctx context.Context, msg *models.BusMessage) (any,
 	var params struct {
 		WorkerID     string   `json:"worker_id"`
 		Capabilities []string `json:"capabilities,omitempty"`
+		AgentID      string   `json:"agent_id,omitempty"`
 	}
 	if err := json.Unmarshal(msg.Payload, &params); err != nil {
 		return nil, err
 	}
 
-	return h.queue.Claim(ctx, params.WorkerID, params.Capabilities)
+	return h.queue.Claim(ctx, params.WorkerID, params.Capabilities, params.AgentID)
 }
 
 func (h *Handler) handleComplete(ctx context.Context, msg *models.BusMessage) (any, error) {

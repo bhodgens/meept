@@ -1065,10 +1065,12 @@ mixin _$TaskStep {
   @JsonKey(name: 'task_id')
   String get taskId => throw _privateConstructorUsedError;
   String get description => throw _privateConstructorUsedError;
+  @JsonKey(name: 'state')
   String get status => throw _privateConstructorUsedError;
+  @JsonKey(name: 'result')
   String? get output => throw _privateConstructorUsedError;
-  @JsonKey(name: 'completed_at')
-  DateTime? get completedAt => throw _privateConstructorUsedError;
+  @JsonKey(name: 'created_at')
+  DateTime? get createdAt => throw _privateConstructorUsedError;
 
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
   @JsonKey(ignore: true)
@@ -1085,9 +1087,9 @@ abstract class $TaskStepCopyWith<$Res> {
       {String id,
       @JsonKey(name: 'task_id') String taskId,
       String description,
-      String status,
-      String? output,
-      @JsonKey(name: 'completed_at') DateTime? completedAt});
+      @JsonKey(name: 'state') String status,
+      @JsonKey(name: 'result') String? output,
+      @JsonKey(name: 'created_at') DateTime? createdAt});
 }
 
 /// @nodoc
@@ -1108,7 +1110,7 @@ class _$TaskStepCopyWithImpl<$Res, $Val extends TaskStep>
     Object? description = null,
     Object? status = null,
     Object? output = freezed,
-    Object? completedAt = freezed,
+    Object? createdAt = freezed,
   }) {
     return _then(_value.copyWith(
       id: null == id
@@ -1131,9 +1133,9 @@ class _$TaskStepCopyWithImpl<$Res, $Val extends TaskStep>
           ? _value.output
           : output // ignore: cast_nullable_to_non_nullable
               as String?,
-      completedAt: freezed == completedAt
-          ? _value.completedAt
-          : completedAt // ignore: cast_nullable_to_non_nullable
+      createdAt: freezed == createdAt
+          ? _value.createdAt
+          : createdAt // ignore: cast_nullable_to_non_nullable
               as DateTime?,
     ) as $Val);
   }
@@ -1151,9 +1153,9 @@ abstract class _$$TaskStepImplCopyWith<$Res>
       {String id,
       @JsonKey(name: 'task_id') String taskId,
       String description,
-      String status,
-      String? output,
-      @JsonKey(name: 'completed_at') DateTime? completedAt});
+      @JsonKey(name: 'state') String status,
+      @JsonKey(name: 'result') String? output,
+      @JsonKey(name: 'created_at') DateTime? createdAt});
 }
 
 /// @nodoc
@@ -1172,7 +1174,7 @@ class __$$TaskStepImplCopyWithImpl<$Res>
     Object? description = null,
     Object? status = null,
     Object? output = freezed,
-    Object? completedAt = freezed,
+    Object? createdAt = freezed,
   }) {
     return _then(_$TaskStepImpl(
       id: null == id
@@ -1195,9 +1197,9 @@ class __$$TaskStepImplCopyWithImpl<$Res>
           ? _value.output
           : output // ignore: cast_nullable_to_non_nullable
               as String?,
-      completedAt: freezed == completedAt
-          ? _value.completedAt
-          : completedAt // ignore: cast_nullable_to_non_nullable
+      createdAt: freezed == createdAt
+          ? _value.createdAt
+          : createdAt // ignore: cast_nullable_to_non_nullable
               as DateTime?,
     ));
   }
@@ -1210,9 +1212,9 @@ class _$TaskStepImpl implements _TaskStep {
       {required this.id,
       @JsonKey(name: 'task_id') required this.taskId,
       required this.description,
-      required this.status,
-      this.output,
-      @JsonKey(name: 'completed_at') this.completedAt});
+      @JsonKey(name: 'state') required this.status,
+      @JsonKey(name: 'result') this.output,
+      @JsonKey(name: 'created_at') this.createdAt});
 
   factory _$TaskStepImpl.fromJson(Map<String, dynamic> json) =>
       _$$TaskStepImplFromJson(json);
@@ -1225,16 +1227,18 @@ class _$TaskStepImpl implements _TaskStep {
   @override
   final String description;
   @override
+  @JsonKey(name: 'state')
   final String status;
   @override
+  @JsonKey(name: 'result')
   final String? output;
   @override
-  @JsonKey(name: 'completed_at')
-  final DateTime? completedAt;
+  @JsonKey(name: 'created_at')
+  final DateTime? createdAt;
 
   @override
   String toString() {
-    return 'TaskStep(id: $id, taskId: $taskId, description: $description, status: $status, output: $output, completedAt: $completedAt)';
+    return 'TaskStep(id: $id, taskId: $taskId, description: $description, status: $status, output: $output, createdAt: $createdAt)';
   }
 
   @override
@@ -1248,14 +1252,14 @@ class _$TaskStepImpl implements _TaskStep {
                 other.description == description) &&
             (identical(other.status, status) || other.status == status) &&
             (identical(other.output, output) || other.output == output) &&
-            (identical(other.completedAt, completedAt) ||
-                other.completedAt == completedAt));
+            (identical(other.createdAt, createdAt) ||
+                other.createdAt == createdAt));
   }
 
   @JsonKey(ignore: true)
   @override
   int get hashCode => Object.hash(
-      runtimeType, id, taskId, description, status, output, completedAt);
+      runtimeType, id, taskId, description, status, output, createdAt);
 
   @JsonKey(ignore: true)
   @override
@@ -1276,9 +1280,9 @@ abstract class _TaskStep implements TaskStep {
           {required final String id,
           @JsonKey(name: 'task_id') required final String taskId,
           required final String description,
-          required final String status,
-          final String? output,
-          @JsonKey(name: 'completed_at') final DateTime? completedAt}) =
+          @JsonKey(name: 'state') required final String status,
+          @JsonKey(name: 'result') final String? output,
+          @JsonKey(name: 'created_at') final DateTime? createdAt}) =
       _$TaskStepImpl;
 
   factory _TaskStep.fromJson(Map<String, dynamic> json) =

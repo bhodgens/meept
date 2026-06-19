@@ -3059,8 +3059,11 @@ func (m *ChatModel) stopRecording() tea.Cmd {
 func (m *ChatModel) cancelRecording() {
 	if m.transcriber != nil && m.transcriber.IsRecording() {
 		// Best-effort stop in a goroutine; we discard the result.
+		// Capture the transcriber pointer locally to avoid reading m.transcriber
+		// after it may have been replaced by a new recording session.
+		t := m.transcriber
 		go func() {
-			_, _ = m.transcriber.Stop()
+			_, _ = t.Stop()
 		}()
 	}
 	m.recordingState = sttIdle

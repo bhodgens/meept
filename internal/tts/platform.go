@@ -32,9 +32,11 @@ func (e *PlatformEngine) Synthesize(ctx context.Context, text string) (*Result, 
 
 // synthesizeMacOS uses the macOS `say` command.
 func (e *PlatformEngine) synthesizeMacOS(ctx context.Context, text string) (*Result, error) {
-	// Use the `say` command which plays through speakers
-	// Note: Cannot capture audio to file without additional tools
-	cmd := exec.CommandContext(ctx, "say", "-v", "Daniel", text)
+	voice := e.config.Voice
+	if voice == "" {
+		voice = "Daniel"
+	}
+	cmd := exec.CommandContext(ctx, "say", "-v", voice, text)
 	return &Result{}, cmd.Run()
 }
 
@@ -79,4 +81,9 @@ func (e *PlatformEngine) CheckAvailable() error {
 	default:
 		return fmt.Errorf("platform TTS not supported on %s", runtime.GOOS)
 	}
+}
+
+// Close is a no-op for platform engines — they hold no audio resources.
+func (e *PlatformEngine) Close() error {
+	return nil
 }

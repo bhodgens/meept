@@ -270,7 +270,11 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 			continue
 		}
 
-		issue := issueMap[analysis.IssueID]
+		issue, ok := issueMap[analysis.IssueID]
+		if !ok {
+			c.logger.Warn("issue not found for analysis", "issue_id", analysis.IssueID)
+			continue
+		}
 		fix, err := c.generator.Generate(ctx, analysis, issue)
 		if err != nil {
 			c.recordFailure(analysis.IssueID)
@@ -515,7 +519,11 @@ func (c *Controller) Generate(ctx context.Context) ([]*ProposedFix, error) {
 			continue
 		}
 
-		issue := issueMap[analysis.IssueID]
+		issue, ok := issueMap[analysis.IssueID]
+		if !ok {
+			c.logger.Warn("issue not found for analysis", "issue_id", analysis.IssueID)
+			continue
+		}
 		fix, err := c.generator.Generate(ctx, analysis, issue)
 		if err != nil {
 			c.recordFailure(analysis.IssueID)
@@ -764,6 +772,7 @@ func (c *Controller) saveState() error {
 	c.mu.Unlock()
 
 	data, err := json.MarshalIndent(state, "", "  ")
+
 	if err != nil {
 		return err
 	}

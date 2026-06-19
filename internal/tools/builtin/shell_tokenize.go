@@ -44,6 +44,11 @@ func (t *tokenizer) nextToken() (string, bool) {
 				t.pos++ // skip closing quote
 				break
 			}
+			// S1-1 FIX: Handle unclosed quotes at end of input
+			if t.pos >= len(t.input)-1 {
+				// End of input without closing quote - return what we have
+				break
+			}
 			t.pos++
 		}
 		return t.input[start:t.pos], true
@@ -66,6 +71,10 @@ func (t *tokenizer) nextToken() (string, bool) {
 				}
 				if t.input[t.pos] == quote {
 					t.pos++
+					break
+				}
+				// S1-2 FIX: Handle unclosed quotes at end of input
+				if t.pos >= len(t.input)-1 {
 					break
 				}
 				t.pos++

@@ -587,7 +587,8 @@ type LiveMetricsSnapshot struct {
 }
 
 // GetHistoricalMetrics returns historical metrics for a time range.
-func (s *Store) GetHistoricalMetrics(from, to time.Time, resolution string) ([]MetricPoint, error) {
+// The ctx allows cancellation of long-running historical queries.
+func (s *Store) GetHistoricalMetrics(ctx context.Context, from, to time.Time, resolution string) ([]MetricPoint, error) {
 	var query string
 
 	switch resolution {
@@ -621,7 +622,7 @@ func (s *Store) GetHistoricalMetrics(from, to time.Time, resolution string) ([]M
 		`
 	}
 
-	rows, err := s.db.Queryx(query, from.Format(time.RFC3339), to.Format(time.RFC3339))
+	rows, err := s.db.QueryxContext(ctx, query, from.Format(time.RFC3339), to.Format(time.RFC3339))
 	if err != nil {
 		return nil, err
 	}

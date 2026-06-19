@@ -101,8 +101,6 @@ func (p *PersonalityMemory) Load(ctx context.Context) error {
 // The summary should describe recent interaction patterns or preferences.
 func (p *PersonalityMemory) Update(ctx context.Context, interactionSummary string) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	p.interactionCount++
 	nowISO := time.Now().UTC().Format(time.RFC3339)
 
@@ -113,12 +111,19 @@ func (p *PersonalityMemory) Update(ctx context.Context, interactionSummary strin
 	now := time.Now()
 	p.lastUpdated = &now
 
-	if err := p.saveUnlocked(); err != nil {
+	// Snapshot for I/O, then release the lock.
+	description := p.description
+	dataDir := p.dataDir
+	filePath := p.filePath
+	interactionCount := p.interactionCount
+	p.mu.Unlock()
+
+	if err := p.saveToFile(description, dataDir, filePath); err != nil {
 		return err
 	}
 
 	p.logger.Info("Personality profile updated",
-		"interaction_count", p.interactionCount,
+		"interaction_count", interactionCount,
 	)
 	return nil
 }
@@ -127,7 +132,6 @@ func (p *PersonalityMemory) Update(ctx context.Context, interactionSummary strin
 // This is useful for tracking specific preferences.
 func (p *PersonalityMemory) UpdateKey(ctx context.Context, section, key, value string) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	// Find or create the section and update/add the key
 	entry := fmt.Sprintf("- %s: %s", key, value)
@@ -136,7 +140,13 @@ func (p *PersonalityMemory) UpdateKey(ctx context.Context, section, key, value s
 	now := time.Now()
 	p.lastUpdated = &now
 
-	return p.saveUnlocked()
+	// Snapshot for I/O, then release the lock.
+	description := p.description
+	dataDir := p.dataDir
+	filePath := p.filePath
+	p.mu.Unlock()
+
+	return p.saveToFile(description, dataDir, filePath)
 }
 
 // GetDescription returns the current personality description as Markdown.
@@ -171,8 +181,25 @@ func (p *PersonalityMemory) LastUpdated() *time.Time {
 // Save persists the current personality profile to disk.
 func (p *PersonalityMemory) Save() error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.saveUnlocked()
+	description := p.description
+	dataDir := p.dataDir
+	filePath := p.filePath
+	p.mu.Unlock()
+	return p.saveToFile(description, dataDir, filePath)
+}
+
+// saveToFile writes the given description to disk without holding any lock.
+func (p *PersonalityMemory) saveToFile(description, dataDir, filePath string) error {
+	//nolint:gosec // user config directory/file permissions
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create data directory: %w", err)
+	}
+	//nolint:gosec // user config directory/file permissions
+	if err := os.WriteFile(filePath, []byte(description), 0o644); err != nil {
+		return fmt.Errorf("failed to write personality file: %w", err)
+	}
+	p.logger.Debug("Saved personality profile", "path", filePath)
+	return nil
 }
 
 func (p *PersonalityMemory) saveUnlocked() error {

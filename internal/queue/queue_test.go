@@ -60,7 +60,7 @@ func TestPersistentQueue_ClaimAndComplete(t *testing.T) {
 	job, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "test"})
 	_ = q.Enqueue(ctx, job)
 
-	claimed, err := q.Claim(ctx, "worker-1", nil)
+	claimed, err := q.Claim(ctx, "worker-1", nil, "")
 	if err != nil {
 		t.Fatalf("Claim failed: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestPersistentQueue_ClaimEmpty(t *testing.T) {
 	q := newTestQueue(t)
 	ctx := context.Background()
 
-	claimed, err := q.Claim(ctx, "worker-1", nil)
+	claimed, err := q.Claim(ctx, "worker-1", nil, "")
 	if !errors.Is(err, ErrNoJobAvailable) {
 		t.Fatalf("expected ErrNoJobAvailable, got: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestPersistentQueue_FailAndRetry(t *testing.T) {
 
 	job, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "test"})
 	_ = q.Enqueue(ctx, job)
-	_, _ = q.Claim(ctx, "worker-1", nil)
+	_, _ = q.Claim(ctx, "worker-1", nil, "")
 
 	if err := q.Fail(ctx, job.ID, errForTestError("something broke")); err != nil {
 		t.Fatalf("Fail failed: %v", err)
@@ -134,7 +134,7 @@ func TestPersistentQueue_ListByState(t *testing.T) {
 	_ = q.Enqueue(ctx, j3)
 
 	// Complete one
-	_, _ = q.Claim(ctx, "w1", nil)
+	_, _ = q.Claim(ctx, "w1", nil, "")
 	_ = q.Complete(ctx, j1.ID, nil)
 
 	pending, err := q.ListByState(ctx, StatePending, 10)
@@ -175,7 +175,7 @@ func TestPersistentQueue_ClosedOperations(t *testing.T) {
 		t.Error("expected error on closed queue")
 	}
 
-	_, err := q.Claim(ctx, "w1", nil)
+	_, err := q.Claim(ctx, "w1", nil, "")
 	if err == nil {
 		t.Error("expected error on closed queue claim")
 	}
@@ -346,7 +346,7 @@ func TestPersistentQueue_ClaimWithCancelledTaskCallback(t *testing.T) {
 	})
 
 	// Claim should skip the cancelled task and return the active one
-	claimed, err := q.Claim(ctx, "worker-1", nil)
+	claimed, err := q.Claim(ctx, "worker-1", nil, "")
 	if err != nil {
 		t.Fatalf("Claim failed: %v", err)
 	}
@@ -381,7 +381,7 @@ func TestPersistentQueue_ClaimAllTasksCancelled(t *testing.T) {
 	})
 
 	// Claim should return ErrNoJobAvailable when all tasks are cancelled
-	claimed, err := q.Claim(ctx, "worker-1", nil)
+	claimed, err := q.Claim(ctx, "worker-1", nil, "")
 	if !errors.Is(err, ErrNoJobAvailable) {
 		t.Fatalf("expected ErrNoJobAvailable, got: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestPersistentQueue_ClaimNoTaskID(t *testing.T) {
 	})
 
 	// Claim should still work for jobs without task_id
-	claimed, err := q.Claim(ctx, "worker-1", nil)
+	claimed, err := q.Claim(ctx, "worker-1", nil, "")
 	if err != nil {
 		t.Fatalf("Claim failed: %v", err)
 	}
@@ -463,7 +463,7 @@ func TestPersistentQueue_ClaimThroughputUnderContention(t *testing.T) {
 			defer wg.Done()
 			<-start
 			for {
-				job, err := q.Claim(ctx, "worker-test", nil)
+				job, err := q.Claim(ctx, "worker-test", nil, "")
 				if err != nil {
 					if !errors.Is(err, ErrNoJobAvailable) {
 						atomic.AddInt32(&errCount, 1)
@@ -496,5 +496,66 @@ func TestPersistentQueue_ClaimThroughputUnderContention(t *testing.T) {
 		if count != 1 {
 			t.Errorf("job %q: expected exactly 1 claim, got %d (double-claim race)", id, count)
 		}
+	}
+}
+
+// TestPersistentQueue_ClaimAgentIDTargeting verifies that when a job has
+// agent_id set, only a worker with a matching agentID can claim it.
+// A worker with a different agentID must NOT claim the targeted job.
+func TestPersistentQueue_ClaimAgentIDTargeting(t *testing.T) {
+	q := newTestQueue(t)
+	ctx := context.Background()
+
+	// Enqueue a job targeted to "coder"
+	coderJob, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "code task"})
+	coderJob.WithAgentID("coder")
+	if err := q.Enqueue(ctx, coderJob); err != nil {
+		t.Fatalf("Enqueue failed: %v", err)
+	}
+
+	// A planner worker must not claim the coder-targeted job
+	claimed, err := q.Claim(ctx, "planner-worker", nil, "planner")
+	if !errors.Is(err, ErrNoJobAvailable) {
+		t.Fatalf("expected ErrNoJobAvailable for mismatched agent, got: %v (job=%v)", err, claimed)
+	}
+	if claimed != nil {
+		t.Fatalf("planner should not claim coder job, got job %q", claimed.ID)
+	}
+
+	// A coder worker MUST claim the coder-targeted job
+	claimed, err = q.Claim(ctx, "coder-worker", nil, "coder")
+	if err != nil {
+		t.Fatalf("Claim failed for matching agent: %v", err)
+	}
+	if claimed == nil {
+		t.Fatal("expected coder to claim the targeted job")
+	}
+	if claimed.ID != coderJob.ID {
+		t.Errorf("expected job %q, got %q", coderJob.ID, claimed.ID)
+	}
+}
+
+// TestPersistentQueue_ClaimAgentIDUnassigned verifies that a worker with
+// a specific agentID can still claim unassigned (agent_id="") jobs.
+func TestPersistentQueue_ClaimAgentIDUnassigned(t *testing.T) {
+	q := newTestQueue(t)
+	ctx := context.Background()
+
+	// Enqueue an unassigned job
+	job, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "any agent task"})
+	if err := q.Enqueue(ctx, job); err != nil {
+		t.Fatalf("Enqueue failed: %v", err)
+	}
+
+	// A coder worker should be able to claim the unassigned job
+	claimed, err := q.Claim(ctx, "coder-worker", nil, "coder")
+	if err != nil {
+		t.Fatalf("Claim failed for unassigned job: %v", err)
+	}
+	if claimed == nil {
+		t.Fatal("expected to claim unassigned job")
+	}
+	if claimed.ID != job.ID {
+		t.Errorf("expected job %q, got %q", job.ID, claimed.ID)
 	}
 }

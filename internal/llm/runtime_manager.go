@@ -49,6 +49,7 @@ type RuntimeManager struct {
 	logger           *slog.Logger
 	metrics          MetricsRecorder
 	inUseModels      map[string]struct{}
+	shutdown         bool
 }
 
 // NewRuntimeManager creates a new manager.
@@ -87,6 +88,13 @@ func (m *RuntimeManager) SetModelsInUse(set map[string]struct{}) {
 // models are merged into the existing process; spawn_command on the first
 // registration wins. Per-model loggers are opened and a `register` event is
 // logged for each model key.
+//
+// Model identity resolution: the in-use gate and per-model loggers key on the
+// provider's real model IDs (cfg.ModelKeys when populated by the caller).
+// When cfg.ModelKeys is empty (legacy callers), it falls back to the
+// cfg.ModelPaths map keys — for legacy single-model configs synthesized under
+// the "default" key, this means the gate will look for "<provider>/default"
+// unless the daemon pre-populates ModelKeys from the provider's models map.
 func (m *RuntimeManager) RegisterConfig(providerID string, cfg *RuntimeConfig, baseURL string) error {
 	if cfg == nil {
 		return fmt.Errorf("nil runtime config for provider %s", providerID)
@@ -96,6 +104,21 @@ func (m *RuntimeManager) RegisterConfig(providerID string, cfg *RuntimeConfig, b
 		endpointKey = ComputeEndpointKey(string(cfg.Type), baseURL)
 		cfg.EndpointKey = endpointKey
 	}
+
+	// Resolve the authoritative model-key list. Prefer cfg.ModelKeys (set by
+	// the daemon from the provider's models map). Fall back to ModelPaths keys
+	// for legacy callers. Without this, a legacy single-model config (whose
+	// ModelPaths only has the synthetic "default" key) would never match the
+	// in-use set built from the real "provider/<model-id>" references.
+	modelKeys := cfg.ModelKeys
+	if len(modelKeys) == 0 {
+		modelKeys = make([]string, 0, len(cfg.ModelPaths))
+		for k := range cfg.ModelPaths {
+			modelKeys = append(modelKeys, k)
+		}
+		sort.Strings(modelKeys)
+	}
+	cfg.ModelKeys = modelKeys
 
 	m.mu.Lock()
 	// Always store the per-provider config and endpoint mapping.
@@ -111,11 +134,6 @@ func (m *RuntimeManager) RegisterConfig(providerID string, cfg *RuntimeConfig, b
 		loggerMap = make(map[string]*ModelLogger)
 		m.modelLoggers[endpointKey] = loggerMap
 	}
-	modelKeys := make([]string, 0, len(cfg.ModelPaths))
-	for k := range cfg.ModelPaths {
-		modelKeys = append(modelKeys, k)
-	}
-	sort.Strings(modelKeys)
 	m.mu.Unlock()
 
 	for _, modelKey := range modelKeys {
@@ -126,7 +144,11 @@ func (m *RuntimeManager) RegisterConfig(providerID string, cfg *RuntimeConfig, b
 		if exists {
 			continue
 		}
-		ml, _ := OpenModelLogger(providerID, modelKey)
+		ml, mlErr := OpenModelLogger(providerID, modelKey)
+		if mlErr != nil {
+			m.logger.Warn("Failed to open per-model log; falling back to stderr",
+				"provider", providerID, "model", modelKey, "error", mlErr)
+		}
 		ml.Log("register", slog.String("model_path", cfg.ModelPaths[modelKey]))
 		m.mu.Lock()
 		loggerMap[modelKey] = ml
@@ -134,8 +156,6 @@ func (m *RuntimeManager) RegisterConfig(providerID string, cfg *RuntimeConfig, b
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	ep, exists := m.endpoints[endpointKey]
 	if !exists {
 		// First registration for this endpoint: create process + health checker.
@@ -159,16 +179,34 @@ func (m *RuntimeManager) RegisterConfig(providerID string, cfg *RuntimeConfig, b
 			"endpoint_key", endpointKey,
 			"runtime", cfg.Type,
 			"auto_restart", cfg.RestartEnabled)
+		m.mu.Unlock()
 		return nil
 	}
 
 	// Merge into existing endpoint.
 	m.mergeProviderLocked(ep, providerID, cfg, modelKeys)
+	needProcessLogger := ep.procLogger == nil
+	m.mu.Unlock()
 
-	// Open process logger if not yet open.
-	if ep.procLogger == nil {
-		if pl, err := OpenProcessLogger(host, port); err == nil {
-			ep.procLogger = pl
+	// Open process logger outside the lock (file I/O).
+	if needProcessLogger {
+		pl, plErr := OpenProcessLogger(host, port)
+		if plErr != nil {
+			m.logger.Warn("Failed to open per-process log; falling back to stderr",
+				"endpoint_key", endpointKey, "error", plErr)
+		}
+		if pl != nil {
+			var dupLogger *ProcessLogger
+			m.mu.Lock()
+			if ep.procLogger == nil {
+				ep.procLogger = pl
+			} else {
+				dupLogger = pl
+			}
+			m.mu.Unlock()
+			if dupLogger != nil {
+				_ = dupLogger.Close()
+			}
 		}
 	}
 
@@ -186,6 +224,15 @@ func (m *RuntimeManager) mergeProviderLocked(ep *endpointProcess, providerID str
 			"provider", providerID,
 			"existing", ep.cfg.SpawnCommand,
 			"new", cfg.SpawnCommand)
+	}
+	// Debug when a later provider's pid_file differs from the first
+	// registration's (the first one wins; this log helps operators diagnose
+	// why their pid_file setting appears to be ignored).
+	if ep.cfg.PIDFile != "" && cfg.PIDFile != "" && ep.cfg.PIDFile != cfg.PIDFile {
+		m.logger.Debug("Conflicting pid_file for shared endpoint; keeping the first",
+			"provider", providerID,
+			"existing", ep.cfg.PIDFile,
+			"new", cfg.PIDFile)
 	}
 
 	if _, ok := ep.providers[providerID]; !ok {
@@ -274,17 +321,40 @@ func (m *RuntimeManager) StartAll(ctx context.Context) error {
 		m.logToEndpoint(item.endpointKey, "spawn_attempt")
 
 		var stdout, stderr io.Writer = nil, nil
-		if item.ep.procLogger == nil {
+		m.mu.Lock()
+		procLogger := item.ep.procLogger
+		m.mu.Unlock()
+		if procLogger == nil {
 			host, port := hostPortFromBaseURL(item.hc.baseURL)
-			if pl, err := OpenProcessLogger(host, port); err == nil {
-				item.ep.procLogger = pl
+			pl, plErr := OpenProcessLogger(host, port)
+			if plErr != nil {
+				m.logger.Warn("Failed to open per-process log; falling back to stderr",
+					"endpoint_key", item.endpointKey, "error", plErr)
+			}
+			if pl != nil {
+				var dupLogger *ProcessLogger
+				m.mu.Lock()
+				if item.ep.procLogger == nil {
+					item.ep.procLogger = pl
+				} else {
+					dupLogger = pl
+				}
+				procLogger = item.ep.procLogger
+				m.mu.Unlock()
+				if dupLogger != nil {
+					_ = dupLogger.Close()
+				}
 			}
 		}
-		if item.ep.procLogger != nil {
-			// Truncate at first spawn of a fresh subprocess.
-			item.ep.procLogger.Truncate()
-			stdout = item.ep.procLogger.Stdout()
-			stderr = item.ep.procLogger.Stderr()
+		if procLogger != nil {
+			// Truncate only when we are about to spawn a fresh subprocess.
+			// If the process is already running (PID file present + alive),
+			// Start will no-op; in that case preserve the existing log.
+			if !item.proc.AlreadyRunning() {
+				procLogger.Truncate()
+			}
+			stdout = procLogger.Stdout()
+			stderr = procLogger.Stderr()
 		}
 
 		start := time.Now()
@@ -324,6 +394,7 @@ func (m *RuntimeManager) StopAll(ctx context.Context) error {
 	}
 
 	m.mu.Lock()
+	m.shutdown = true
 	items := make([]stopItem, 0, len(m.endpoints))
 	for endpointKey, ep := range m.endpoints {
 		items = append(items, stopItem{
@@ -479,27 +550,52 @@ func (m *RuntimeManager) StartProvider(ctx context.Context, providerID string) e
 	}
 
 	m.logger.Info("Starting runtime", "provider", providerID, "endpoint_key", endpointKey)
+	m.logToEndpoint(endpointKey, "spawn_attempt", slog.String("provider", providerID))
 	start := time.Now()
 
 	var stdout, stderr io.Writer = nil, nil
-	if ep.procLogger == nil {
+	m.mu.Lock()
+	procLogger := ep.procLogger
+	m.mu.Unlock()
+	if procLogger == nil {
 		host, port := hostPortFromBaseURL(ep.hc.baseURL)
-		if pl, err := OpenProcessLogger(host, port); err == nil {
-			ep.procLogger = pl
+		pl, plErr := OpenProcessLogger(host, port)
+		if plErr != nil {
+			m.logger.Warn("Failed to open per-process log; falling back to stderr",
+				"endpoint_key", endpointKey, "error", plErr)
+		}
+		if pl != nil {
+			var dupLogger *ProcessLogger
+			m.mu.Lock()
+			if ep.procLogger == nil {
+				ep.procLogger = pl
+			} else {
+				dupLogger = pl
+			}
+			procLogger = ep.procLogger
+			m.mu.Unlock()
+			if dupLogger != nil {
+				_ = dupLogger.Close()
+			}
 		}
 	}
-	if ep.procLogger != nil {
-		ep.procLogger.Truncate()
-		stdout = ep.procLogger.Stdout()
-		stderr = ep.procLogger.Stderr()
+	if procLogger != nil {
+		// Truncate only when actually spawning a fresh subprocess; preserve
+		// the log of an already-running process.
+		if !ep.proc.AlreadyRunning() {
+			procLogger.Truncate()
+		}
+		stdout = procLogger.Stdout()
+		stderr = procLogger.Stderr()
 	}
 
 	if err := ep.proc.Start(ctx, stdout, stderr); err != nil {
+		m.logToEndpoint(endpointKey, "spawn_failure", slog.String("provider", providerID), slog.String("error", err.Error()))
 		m.recordSpawn(providerID, time.Since(start), false)
 		return fmt.Errorf("failed to start runtime %s: %w", providerID, err)
 	}
 	m.recordSpawn(providerID, time.Since(start), true)
-	m.logToEndpoint(endpointKey, "spawn_success", slog.Int("pid", ep.proc.PID()))
+	m.logToEndpoint(endpointKey, "spawn_success", slog.String("provider", providerID), slog.Int("pid", ep.proc.PID()))
 
 	ep.hc.Start(ctx)
 
@@ -571,6 +667,10 @@ func (m *RuntimeManager) GetHealthChecker(providerID string) (*HealthChecker, bo
 
 func (m *RuntimeManager) attemptAutoRestart(endpointKey string) {
 	m.mu.Lock()
+	if m.shutdown {
+		m.mu.Unlock()
+		return
+	}
 	ep, ok := m.endpoints[endpointKey]
 	if !ok || ep.cfg == nil || !ep.cfg.RestartEnabled {
 		m.mu.Unlock()
@@ -648,7 +748,7 @@ func (m *RuntimeManager) endpointHasInUseLocked(endpointKey string) bool {
 		if !ok {
 			continue
 		}
-		for modelKey := range cfg.ModelPaths {
+		for _, modelKey := range cfg.ModelKeys {
 			if _, isInUse := m.inUseModels[providerID+"/"+modelKey]; isInUse {
 				return true
 			}
@@ -660,16 +760,12 @@ func (m *RuntimeManager) endpointHasInUseLocked(endpointKey string) bool {
 // providerInUseModelsLocked returns the subset of the provider's model keys
 // that appear in the in-use set. Caller must hold m.mu.
 func (m *RuntimeManager) providerInUseModelsLocked(providerID string, cfg *RuntimeConfig) []string {
-	if len(m.inUseModels) == 0 || len(cfg.ModelPaths) == 0 {
+	if len(m.inUseModels) == 0 || len(cfg.ModelKeys) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(cfg.ModelPaths))
-	keys := make([]string, 0, len(cfg.ModelPaths))
-	for k := range cfg.ModelPaths {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
+	out := make([]string, 0, len(cfg.ModelKeys))
+	// cfg.ModelKeys is already sorted by RegisterConfig.
+	for _, k := range cfg.ModelKeys {
 		if _, isInUse := m.inUseModels[providerID+"/"+k]; isInUse {
 			out = append(out, k)
 		}

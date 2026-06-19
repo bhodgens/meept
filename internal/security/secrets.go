@@ -235,7 +235,7 @@ func (s *SecretObfuscator) replacementFor(secret string, mode SecretMode) string
 	ph := s.placeholder(s.counter)
 
 	// Ensure uniqueness (extremely unlikely collision, but be safe).
-	for _, exists := s.obfuscateMap[ph]; exists; {
+	for _, exists := s.obfuscateMap[ph]; exists; _, exists = s.obfuscateMap[ph] {
 		s.counter++
 		ph = s.placeholder(s.counter)
 	}

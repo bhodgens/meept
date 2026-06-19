@@ -1712,6 +1712,7 @@ func (s *Server) handleWorkerAdd(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID           string   `json:"id"`
 		Capabilities []string `json:"capabilities"`
+		AgentID      string   `json:"agent_id,omitempty"`
 	}
 	if !s.readJSON(w, r, &req) {
 		return
@@ -1720,6 +1721,7 @@ func (s *Server) handleWorkerAdd(w http.ResponseWriter, r *http.Request) {
 	worker, err := s.services.Worker.Add(r.Context(), services.AddWorkerRequest{
 		ID:           req.ID,
 		Capabilities: req.Capabilities,
+		AgentID:      req.AgentID,
 	})
 	if err != nil {
 		s.handleServiceError(w, err)

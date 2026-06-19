@@ -574,7 +574,7 @@ func (lp *LearningPipeline) StorePattern(ctx context.Context, pattern *LearnedPa
 		existing.UpdatedAt = time.Now()
 		// Boost confidence
 		existing.Confidence = minFloat(1.0, existing.Confidence*1.1)
-		snapshot := lp.snapshotPatterns()
+		snapshot := deepCopyPatterns(lp.patterns)
 		lp.mu.Unlock()
 		return lp.savePatternsFromSnapshot(snapshot)
 	}
@@ -585,7 +585,7 @@ func (lp *LearningPipeline) StorePattern(ctx context.Context, pattern *LearnedPa
 	}
 
 	lp.patterns[pattern.ID] = pattern
-	snapshot := lp.snapshotPatterns()
+	snapshot := deepCopyPatterns(lp.patterns)
 	lp.mu.Unlock()
 	return lp.savePatternsFromSnapshot(snapshot)
 }
@@ -686,10 +686,16 @@ func (lp *LearningPipeline) Consolidate(ctx context.Context) (*ConsolidationResu
 	result.ConsolidatedAt = time.Now()
 	result.Duration = time.Since(start)
 	lp.lastConsolidation = result.ConsolidatedAt
-	snapshot := lp.snapshotPatterns()
+	snapshot := deepCopyPatterns(lp.patterns)
 	lp.mu.Unlock()
 
-	if err := lp.savePatternsFromSnapshot(snapshot); err != nil {
+	patternsPath := filepath.Join(lp.dataDir, "patterns.json")
+	data, err := json.MarshalIndent(snapshot, "", "  ")
+	if err != nil {
+		return result, fmt.Errorf("failed to marshal patterns: %w", err)
+	}
+	//nolint:gosec // user config directory/file permissions
+	if err := os.WriteFile(patternsPath, data, 0o644); err != nil {
 		return result, fmt.Errorf("failed to save patterns: %w", err)
 	}
 
@@ -830,14 +836,20 @@ func (lp *LearningPipeline) GetPatterns() []*LearnedPattern {
 
 // Close stops the pipeline and saves state.
 func (lp *LearningPipeline) Close() error {
+	// Deep-copy patterns under the lock, then marshal and write to disk
+	// outside the lock to avoid holding the mutex during CPU-bound work.
 	lp.mu.Lock()
-	snapshot := make(map[string]*LearnedPattern, len(lp.patterns))
-	for k, v := range lp.patterns {
-		snapshot[k] = v
-	}
+	snapshot := deepCopyPatterns(lp.patterns)
 	lp.mu.Unlock()
 
-	return lp.savePatternsFromSnapshot(snapshot)
+	data, err := json.MarshalIndent(snapshot, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	path := filepath.Join(lp.dataDir, "patterns.json")
+	//nolint:gosec // user config directory/file permissions
+	return os.WriteFile(path, data, 0o644)
 }
 
 // Helper functions
@@ -889,26 +901,26 @@ func (lp *LearningPipeline) similarity(a, b string) float64 {
 	return float64(intersection) / float64(union)
 }
 
-// snapshotPatterns returns a shallow copy of the patterns map. Must be called
-// with lp.mu held (read or write).
-func (lp *LearningPipeline) snapshotPatterns() map[string]*LearnedPattern {
-	snapshot := make(map[string]*LearnedPattern, len(lp.patterns))
-	for k, v := range lp.patterns {
-		snapshot[k] = v
-	}
-	return snapshot
-}
-
 func (lp *LearningPipeline) savePatterns() error {
+	// Deep-copy patterns under the lock to prevent a data race with
+	// RecordPatternUse, then marshal outside the lock.
 	lp.mu.Lock()
-	snapshot := lp.snapshotPatterns()
+	snapshot := deepCopyPatterns(lp.patterns)
 	lp.mu.Unlock()
 
-	return lp.savePatternsFromSnapshot(snapshot)
+	data, err := json.MarshalIndent(snapshot, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	path := filepath.Join(lp.dataDir, "patterns.json")
+	//nolint:gosec // user config directory/file permissions
+	return os.WriteFile(path, data, 0o644)
 }
 
 // savePatternsFromSnapshot writes the given patterns to disk without holding
-// any lock. Callers must snapshot under the lock before calling this method.
+// any lock. Callers must ensure no concurrent mutation of the patterns
+// (e.g., by providing deep copies or holding the lock during marshal).
 func (lp *LearningPipeline) savePatternsFromSnapshot(patterns map[string]*LearnedPattern) error {
 	path := filepath.Join(lp.dataDir, "patterns.json")
 
@@ -919,6 +931,34 @@ func (lp *LearningPipeline) savePatternsFromSnapshot(patterns map[string]*Learne
 
 	//nolint:gosec // user config directory/file permissions
 	return os.WriteFile(path, data, 0o644)
+}
+
+// deepCopyPatterns creates a deep copy of the patterns map so the caller can
+// safely marshal or iterate the snapshot without holding the mutex.
+// Must be called with lp.mu held.
+func deepCopyPatterns(src map[string]*LearnedPattern) map[string]*LearnedPattern {
+	dst := make(map[string]*LearnedPattern, len(src))
+	for k, p := range src {
+		if p == nil {
+			dst[k] = nil
+			continue
+		}
+		cp := *p // shallow copy of value types
+		if p.Examples != nil {
+			cp.Examples = append([]string(nil), p.Examples...)
+		}
+		if p.Tags != nil {
+			cp.Tags = append([]string(nil), p.Tags...)
+		}
+		if p.Metadata != nil {
+			cp.Metadata = make(map[string]any, len(p.Metadata))
+			for mk, mv := range p.Metadata {
+				cp.Metadata[mk] = mv
+			}
+		}
+		dst[k] = &cp
+	}
+	return dst
 }
 
 func (lp *LearningPipeline) loadPatterns() error {

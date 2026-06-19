@@ -208,6 +208,9 @@ func (j *AgentJob) Execute(ctx context.Context) error {
 	}
 
 	// Publish to chat.request topic for the ChatHandler to pick up
+	if j.bus == nil {
+		return fmt.Errorf("message bus not available")
+	}
 	delivered := j.bus.Publish("chat.request", msg)
 	if delivered == 0 {
 		return fmt.Errorf("no subscribers for chat.request topic")
@@ -382,6 +385,9 @@ func (j *ReminderJob) Execute(ctx context.Context) error {
 	}
 
 	// Publish to each configured channel
+	if j.bus == nil {
+		return fmt.Errorf("message bus not available")
+	}
 	var lastErr error
 	totalDelivered := 0
 	for _, channel := range j.channels {

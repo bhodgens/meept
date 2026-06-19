@@ -164,17 +164,3 @@ func TestEndToEnd_MaxRevisionGuard(t *testing.T) {
 	}
 }
 
-// containsString reports whether substr appears within s.
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && len(substr) > 0 && jsonContains(s, substr)
-}
-
-// jsonContains reports whether substr appears in s.
-func jsonContains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

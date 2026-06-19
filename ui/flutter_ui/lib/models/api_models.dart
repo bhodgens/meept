@@ -302,9 +302,9 @@ class TaskStep with _$TaskStep {
     required String id,
     @JsonKey(name: 'task_id') required String taskId,
     required String description,
-    required String status,
-    String? output,
-    @JsonKey(name: 'completed_at') DateTime? completedAt,
+    @JsonKey(name: 'state') required String status,
+    @JsonKey(name: 'result') String? output,
+    @JsonKey(name: 'created_at') DateTime? createdAt,
   }) = _TaskStep;
 
   factory TaskStep.fromJson(Map<String, dynamic> json) =>

@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log/slog"
@@ -41,9 +42,11 @@ func (m *ModelLogger) Close() error {
 	if m == nil || m.file == nil {
 		return nil
 	}
-	err := m.file.Close()
+	m.mu.Lock()
+	f := m.file
 	m.file = nil
-	return err
+	m.mu.Unlock()
+	return f.Close()
 }
 
 // OpenModelLogger opens (creating if needed) a per-model JSON-line log file at
@@ -92,11 +95,12 @@ func newFallbackModelLogger(providerID, modelKey string) *ModelLogger {
 // EBADF write failures (this was a real bug — see
 // TestProcessLogger_StdoutStderrShareFile_AfterRotation).
 type rotatingWriter struct {
-	mu      *sync.Mutex
-	file    **os.File // shared mutably so rotation is visible to partners
-	path    string
-	prefix  string
-	written *int64 // shared byte counter
+	mu        *sync.Mutex
+	file      **os.File // shared mutably so rotation is visible to partners
+	path      string
+	prefix    string
+	written   *int64 // shared byte counter
+	atLineEnd *bool  // shared line-state; true when the next byte starts a new line
 }
 
 func newRotatingWriter(file *os.File, path, prefix string) *rotatingWriter {
@@ -108,15 +112,18 @@ func newRotatingWriter(file *os.File, path, prefix string) *rotatingWriter {
 	}
 	fp := &file
 	wp := &written
-	return &rotatingWriter{mu: &sync.Mutex{}, file: fp, path: path, prefix: prefix, written: wp}
+	atLineEnd := true // a fresh file starts at a line boundary
+	return &rotatingWriter{mu: &sync.Mutex{}, file: fp, path: path, prefix: prefix, written: wp, atLineEnd: &atLineEnd}
 }
 
 // newSharedRotatingWriter creates a rotatingWriter that shares the same **os.File,
-// *int64 counter, and *sync.Mutex as its partner. This ensures that concurrent
-// writes from stdout and stderr don't interleave, and that rotation (which
-// closes and reopens the file) is visible to both writers.
-func newSharedRotatingWriter(filePtr **os.File, writtenPtr *int64, path, prefix string, mu *sync.Mutex) *rotatingWriter {
-	return &rotatingWriter{mu: mu, file: filePtr, path: path, prefix: prefix, written: writtenPtr}
+// *int64 counter, *sync.Mutex, and *bool line-state as its partner. This ensures
+// that concurrent writes from stdout and stderr don't interleave, that rotation
+// (which closes and reopens the file) is visible to both writers, and that the
+// line-boundary state (used to decide when to emit the prefix) is consistent
+// across partners.
+func newSharedRotatingWriter(filePtr **os.File, writtenPtr *int64, atLineEndPtr *bool, path, prefix string, mu *sync.Mutex) *rotatingWriter {
+	return &rotatingWriter{mu: mu, file: filePtr, path: path, prefix: prefix, written: writtenPtr, atLineEnd: atLineEndPtr}
 }
 
 // Truncate truncates the underlying file to zero length. Used when the manager
@@ -134,9 +141,22 @@ func (w *rotatingWriter) Truncate() {
 	if err := (*w.file).Truncate(0); err == nil {
 		_, _ = (*w.file).Seek(0, io.SeekStart)
 		*w.written = 0
+		if w.atLineEnd != nil {
+			*w.atLineEnd = true // truncated file starts at a line boundary
+		}
 	}
 }
 
+// Write writes p to the file with the configured line prefix. Each line
+// (delimited by '\n') is prefixed on its first byte; line state is tracked
+// across Write calls so a write that continues a partial line does not get a
+// spurious prefix while a write that starts a new line does. The mutex
+// serializes stdout/stderr partners so bytes never interleave within a line.
+//
+// Return value n is len(p) (the caller's input length), not the number of
+// bytes physically written (which includes prefix bytes). This matches the
+// io.Writer contract for callers like exec.Cmd that feed in the subprocess
+// output stream. Rotation accounts for prefix bytes via *w.written.
 func (w *rotatingWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -145,12 +165,34 @@ func (w *rotatingWriter) Write(p []byte) (int, error) {
 		fmt.Fprintf(os.Stderr, "%s %s", w.prefix, p)
 		return len(p), nil
 	}
-	n, err := (*w.file).Write(p)
+	var buf bytes.Buffer
+	buf.Grow(len(p))
+	// atLineEnd is shared across stdout/stderr partners; nil-guard for
+	// defense-in-depth (all production constructors set it non-nil).
+	atLineStart := true
+	if w.atLineEnd != nil {
+		atLineStart = *w.atLineEnd // true → next byte begins a new line → prefix needed
+	}
+	for _, b := range p {
+		if atLineStart {
+			buf.WriteString(w.prefix)
+			atLineStart = false
+		}
+		buf.WriteByte(b)
+		if b == '\n' {
+			atLineStart = true
+		}
+	}
+	if w.atLineEnd != nil {
+		*w.atLineEnd = atLineStart
+	}
+	out := buf.Bytes()
+	n, err := (*w.file).Write(out)
 	*w.written += int64(n)
 	if *w.written > maxLogSizeBytes {
 		w.rotateLocked()
 	}
-	return n, err
+	return len(p), err
 }
 
 // rotateLocked performs the rotation: foo.log -> foo.log.1, then recreate foo.log.
@@ -177,6 +219,9 @@ func (w *rotatingWriter) rotateLocked() {
 		if err := (*w.file).Truncate(0); err == nil {
 			_, _ = (*w.file).Seek(0, io.SeekStart)
 			*w.written = 0
+			if w.atLineEnd != nil {
+				*w.atLineEnd = true
+			}
 		}
 		return
 	}
@@ -190,6 +235,9 @@ func (w *rotatingWriter) rotateLocked() {
 	}
 	*w.file = f
 	*w.written = 0
+	if w.atLineEnd != nil {
+		*w.atLineEnd = true // rotated file starts at a line boundary
+	}
 }
 
 // Close closes the underlying file. Only the ProcessLogger.Close path should
@@ -256,16 +304,18 @@ func OpenProcessLogger(host, port string) (*ProcessLogger, error) {
 	path := filepath.Join(dir, fmt.Sprintf("%s-%s.process.log", host, port))
 	sharedMu := &sync.Mutex{}
 	var (
-		filePtr **os.File
-		written int64
+		filePtr    **os.File
+		written    int64
+		atLineEnd  bool = true
 	)
 	writtenPtr := &written
+	atLineEndPtr := &atLineEnd
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		var nilFile *os.File
 		filePtr = &nilFile
 		return &ProcessLogger{
-			out: newSharedRotatingWriter(filePtr, writtenPtr, path, "out: ", sharedMu),
-			err: newSharedRotatingWriter(filePtr, writtenPtr, path, "err: ", sharedMu),
+			out: newSharedRotatingWriter(filePtr, writtenPtr, atLineEndPtr, path, "out: ", sharedMu),
+			err: newSharedRotatingWriter(filePtr, writtenPtr, atLineEndPtr, path, "err: ", sharedMu),
 		}, err
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
@@ -273,16 +323,46 @@ func OpenProcessLogger(host, port string) (*ProcessLogger, error) {
 		var nilFile *os.File
 		filePtr = &nilFile
 		return &ProcessLogger{
-			out: newSharedRotatingWriter(filePtr, writtenPtr, path, "out: ", sharedMu),
-			err: newSharedRotatingWriter(filePtr, writtenPtr, path, "err: ", sharedMu),
+			out: newSharedRotatingWriter(filePtr, writtenPtr, atLineEndPtr, path, "out: ", sharedMu),
+			err: newSharedRotatingWriter(filePtr, writtenPtr, atLineEndPtr, path, "err: ", sharedMu),
 		}, err
 	}
 	if info, statErr := f.Stat(); statErr == nil {
 		written = info.Size()
+		// Detect mid-line state: if the existing file is non-empty and does
+		// not end with '\n', the next byte continues a line and should not be
+		// prefixed. Otherwise (empty file or trailing newline) the next byte
+		// starts a new line and gets the prefix.
+		if written > 0 {
+			if lastByte, readErr := readLastByte(f, int(written)); readErr == nil && lastByte != '\n' {
+				atLineEnd = false
+			}
+		}
 	}
 	filePtr = &f
 	return &ProcessLogger{
-		out: newSharedRotatingWriter(filePtr, writtenPtr, path, "out: ", sharedMu),
-		err: newSharedRotatingWriter(filePtr, writtenPtr, path, "err: ", sharedMu),
+		out: newSharedRotatingWriter(filePtr, writtenPtr, atLineEndPtr, path, "out: ", sharedMu),
+		err: newSharedRotatingWriter(filePtr, writtenPtr, atLineEndPtr, path, "err: ", sharedMu),
 	}, nil
+}
+
+// readLastByte reads the last byte of f without loading the entire file into
+// memory. size is the known file size (from Stat). It seeks to the last byte,
+// reads it, then seeks back to the end so subsequent appends work correctly.
+func readLastByte(f *os.File, size int) (byte, error) {
+	if size <= 0 {
+		return 0, fmt.Errorf("empty file")
+	}
+	_, err := f.Seek(int64(size-1), io.SeekStart)
+	if err != nil {
+		return 0, err
+	}
+	b := make([]byte, 1)
+	_, err = f.Read(b)
+	if err != nil {
+		return 0, err
+	}
+	// Seek to end so subsequent writes append correctly.
+	_, _ = f.Seek(0, io.SeekEnd)
+	return b[0], nil
 }

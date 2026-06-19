@@ -599,9 +599,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			now := time.Now()
 			if now.Sub(a.lastCtrlC) < a.doublePressTTL {
+				a.sidebar.Cleanup()
 				a.rpc.Close()
 				if a.eventRPC != nil {
 					a.eventRPC.Close()
+				}
+				if a.ttsManager != nil {
+					a.ttsManager.Close()
 				}
 				return a, tea.Quit
 			}
@@ -625,9 +629,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "ctrl+d" {
 			now := time.Now()
 			if now.Sub(a.lastCtrlD) < a.doublePressTTL {
+				a.sidebar.Cleanup()
 				a.rpc.Close()
 				if a.eventRPC != nil {
 					a.eventRPC.Close()
+				}
+				if a.ttsManager != nil {
+					a.ttsManager.Close()
 				}
 				return a, tea.Quit
 			}
@@ -762,22 +770,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, cmd
 		}
 
-		// Slash command detection - intercept Enter when input starts with "/"
-		if a.currentView == ViewChat && a.appFocus == FocusChat && msg.String() == KeyEnter {
-			input := a.chat.GetInputValue()
-			if strings.HasPrefix(strings.TrimSpace(input), "/") {
-				// Parse the slash command
-				cmd := ParseSlash(input)
-				if cmd != nil {
-					// Clear the input
-					a.chat.SetInputValue("")
-					// Execute the command
-					return a, a.commandHandler.Execute(cmd)
-				}
-			}
-		}
-
-		// Slash command autocomplete handling
+		// Slash command autocomplete handling (checked before direct Enter
+		// interception so autocomplete selection takes priority when visible)
 		if a.currentView == ViewChat && a.appFocus == FocusChat && a.slashAutocomplete != nil {
 			// Check if autocomplete is visible
 			if a.slashAutocomplete.IsVisible() {
@@ -807,7 +801,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-			// Handle Enter for slash command execution
+			// Handle Enter for slash command execution (when autocomplete is
+			// not visible or autocomplete returned PassThrough for Enter)
 			if msg.String() == KeyEnter {
 				input := a.chat.GetInputValue()
 				if strings.HasPrefix(strings.TrimSpace(input), "/") {
@@ -817,6 +812,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						a.slashAutocomplete.Hide()
 						return a, a.commandHandler.Execute(cmd)
 					}
+				}
+			}
+		} else if a.currentView == ViewChat && a.appFocus == FocusChat && msg.String() == KeyEnter {
+			// Slash command detection - intercept Enter when input starts with "/"
+			// (only when autocomplete is not initialized)
+			input := a.chat.GetInputValue()
+			if strings.HasPrefix(strings.TrimSpace(input), "/") {
+				// Parse the slash command
+				cmd := ParseSlash(input)
+				if cmd != nil {
+					// Clear the input
+					a.chat.SetInputValue("")
+					// Execute the command
+					return a, a.commandHandler.Execute(cmd)
 				}
 			}
 		}
@@ -1426,13 +1435,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Handle project switch
 			if msg.Result.SetProjectID != "" {
 				if a.currentSession != nil {
-					err := a.rpc.SetProject(a.currentSession.ID, msg.Result.SetProjectID)
-					if err != nil {
-						a.statusMessage = fmt.Sprintf("failed to set project: %v", err)
-						a.statusMessageTime = time.Now()
-					}
-					// Refresh project info
-					_ = a.fetchCurrentProject()
+					sessionID := a.currentSession.ID
+					projectID := msg.Result.SetProjectID
+					return a, tea.Batch(
+						func() tea.Msg {
+							err := a.rpc.SetProject(sessionID, projectID)
+							return SetProjectResultMsg{Err: err}
+						},
+						tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+							return StatusMessageClearMsg{}
+						}),
+						a.fetchCurrentProject,
+					)
 				}
 			}
 
@@ -1465,6 +1479,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.statusMessage = ""
 		}
 		return a, nil
+
+	case StopWorkChildTasksMsg:
+		return a, a.handleStopWorkChildTasks(msg)
 
 	case BranchInfoMsg:
 		if a.activeModal == ModalBranchPicker {
@@ -1588,21 +1605,28 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ProjectSelectMsg:
 		// Bind selected project to current session
 		if a.currentSession != nil && msg.ProjectID != "" {
-			err := a.rpc.SetProject(a.currentSession.ID, msg.ProjectID)
-			if err != nil {
-				a.statusMessage = fmt.Sprintf("failed to set project: %v", err)
-				a.statusMessageTime = time.Now()
-				return a, tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
-					return StatusMessageClearMsg{}
-				})
-			}
-			// Refresh project info to update the indicator
+			sessionID := a.currentSession.ID
+			projectID := msg.ProjectID
 			a.statusMessage = fmt.Sprintf("project set: %s", msg.ProjectID)
 			a.statusMessageTime = time.Now()
 			clearCmd := tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
 				return StatusMessageClearMsg{}
 			})
-			return a, tea.Batch(clearCmd, a.fetchCurrentProject)
+			return a, tea.Batch(
+				func() tea.Msg {
+					err := a.rpc.SetProject(sessionID, projectID)
+					return SetProjectResultMsg{Err: err}
+				},
+				clearCmd,
+				a.fetchCurrentProject,
+			)
+		}
+		return a, nil
+
+	case SetProjectResultMsg:
+		if msg.Err != nil {
+			a.statusMessage = fmt.Sprintf("failed to set project: %v", msg.Err)
+			a.statusMessageTime = time.Now()
 		}
 		return a, nil
 	}
@@ -2332,19 +2356,28 @@ func (a *App) stopCurrentWork() tea.Cmd {
 		})
 	}
 
-	// Check if there are child tasks
-	tasks, _ := a.rpc.GetSessionChildTasks(a.currentSession.ID)
+	sessionID := a.currentSession.ID
 
-	if len(tasks) > 0 {
+	// Check if there are child tasks (async to avoid blocking Update)
+	return func() tea.Msg {
+		tasks, _ := a.rpc.GetSessionChildTasks(sessionID)
+		return StopWorkChildTasksMsg{SessionID: sessionID, ChildTaskCount: len(tasks)}
+	}
+}
+
+// handleStopWorkChildTasks processes the result of the async child task count
+// fetch and shows the confirm modal or stops immediately.
+func (a *App) handleStopWorkChildTasks(msg StopWorkChildTasksMsg) tea.Cmd {
+	if msg.ChildTaskCount > 0 {
 		// Show confirm modal to ask about child tasks
 		if a.confirmModal == nil {
 			a.confirmModal = NewConfirmModal(a.styles)
 		}
 		a.activeModal = ModalConfirm
-		sessionID := a.currentSession.ID
+		sessionID := msg.SessionID
 		a.confirmModal.Show(
 			"stop work",
-			fmt.Sprintf("Stop current work? There are %d active tasks.", len(tasks)),
+			fmt.Sprintf("Stop current work? There are %d active tasks.", msg.ChildTaskCount),
 			func() tea.Cmd {
 				return a.doStopSession(sessionID)
 			},
@@ -2357,7 +2390,7 @@ func (a *App) stopCurrentWork() tea.Cmd {
 	}
 
 	// No child tasks, stop immediately
-	return a.doStopSession(a.currentSession.ID)
+	return a.doStopSession(msg.SessionID)
 }
 
 // doStopSession performs the actual session stop RPC call.
@@ -2375,4 +2408,15 @@ func (a *App) doStopSession(sessionID string) tea.Cmd {
 type StopSessionResultMsg struct {
 	Response *types.StopSessionResponse
 	Error    error
+}
+
+// SetProjectResultMsg carries the result of an async SetProject RPC call.
+type SetProjectResultMsg struct {
+	Err error
+}
+
+// StopWorkChildTasksMsg carries the child task count for async stop-work flow.
+type StopWorkChildTasksMsg struct {
+	SessionID     string
+	ChildTaskCount int
 }

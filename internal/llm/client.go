@@ -101,6 +101,9 @@ type Client struct {
 	tokenResolver TokenResolver
 	oauthProvider string
 	extraHeaders  map[string]string
+	// concurrencySemaphore limits concurrent requests for this model/provider.
+	// When nil, no limit is enforced. Buffered channel used as a semaphore.
+	concurrencySemaphore chan struct{}
 }
 
 // ClientOption is a functional option for configuring a Client.
@@ -208,6 +211,17 @@ func WithExtraHeaders(headers map[string]string) ClientOption {
 	}
 }
 
+// WithConcurrencyLimit sets the maximum concurrent requests for this client.
+// When maxConcurrency is 0 or negative, no limit is enforced (unlimited).
+// The limit is enforced using a semaphore (buffered channel).
+func WithConcurrencyLimit(maxConcurrency int) ClientOption {
+	return func(c *Client) {
+		if maxConcurrency > 0 {
+			c.concurrencySemaphore = make(chan struct{}, maxConcurrency)
+		}
+	}
+}
+
 // NewClient creates a new LLM client.
 func NewClient(config *ModelConfig, opts ...ClientOption) *Client {
 	c := &Client{
@@ -216,6 +230,11 @@ func NewClient(config *ModelConfig, opts ...ClientOption) *Client {
 			Timeout: defaultTimeout,
 		},
 		logger: slog.Default(),
+	}
+
+	// Initialize concurrency semaphore from config if set
+	if config.MaxConcurrency > 0 {
+		c.concurrencySemaphore = make(chan struct{}, config.MaxConcurrency)
 	}
 
 	for _, opt := range opts {
@@ -649,6 +668,13 @@ func WithTaskScope(taskID, sessionID string) ChatOption {
 
 // doRequest performs the HTTP request and parses the response.
 func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Response, error) {
+	// Acquire concurrency limit semaphore (if configured)
+	release, err := c.acquireConcurrencyLimit(ctx)
+	if err != nil {
+		return nil, &ClientError{Message: "concurrency limit wait interrupted", Cause: err}
+	}
+	defer release()
+
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, &ClientError{Message: "failed to marshal request", Cause: err}
@@ -1034,6 +1060,14 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 // NOTE: resp.Body is closed before the function returns (line 1270). Callers only access
 // resp.StatusCode and must not read resp.Body.
 func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta DeltaCallback, retryState *streamRetryState) (*Response, *http.Response, error) {
+	// Acquire concurrency limit semaphore (if configured)
+	release, err := c.acquireConcurrencyLimit(ctx)
+	if err != nil {
+		c.logger.Debug("stream concurrency limit wait interrupted", "error", err)
+		return nil, nil, &ClientError{Message: "concurrency limit wait interrupted", Cause: err}
+	}
+	defer release()
+
 	c.configMu.RLock()
 	baseURL := strings.TrimSuffix(c.config.BaseURL, "/")
 	modelID := c.config.ModelID
@@ -1083,6 +1117,9 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		retryAfter := extractRetryAfter(resp)
 		detail, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if len(detail) > 1000 {
+			detail = detail[:1000]
+		}
 
 		apiErr := &APIError{StatusCode: resp.StatusCode, Detail: string(detail)}
 		// Wrap in RateLimitError for 429 to preserve Retry-After
@@ -1326,4 +1363,22 @@ func extractRetryAfter(resp *http.Response) time.Duration {
 // Budget returns the token budget tracker, if one is configured.
 func (c *Client) Budget() *Budget {
 	return c.budget
+}
+
+// acquireConcurrencyLimit blocks until the semaphore is available or context is cancelled.
+// Returns a release function that must be called when the request completes.
+// If no limit is configured (semaphore is nil), returns a no-op release function.
+func (c *Client) acquireConcurrencyLimit(ctx context.Context) (release func(), err error) {
+	if c.concurrencySemaphore == nil {
+		return func() {}, nil
+	}
+
+	select {
+	case c.concurrencySemaphore <- struct{}{}:
+		return func() {
+			<-c.concurrencySemaphore
+		}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }

@@ -33,6 +33,7 @@ func TestAllSetters_NilSafe(t *testing.T) {
 	chatHandler := &ChatHandler{}
 	executor := &Executor{}
 	orch := NewOrchestrator(OrchestratorDeps{})
+	ralphLoop := NewRalphLoop(DefaultRalphLoopConfig(), nil, nil, nil, nil, nil, nil)
 
 	tests := []struct {
 		name    string
@@ -84,6 +85,9 @@ func TestAllSetters_NilSafe(t *testing.T) {
 		{"Orchestrator.SetRepoMapGenerator", func() { orch.SetRepoMapGenerator((*repomap.RepoMapGenerator)(nil)) }},
 		{"Orchestrator.SetPlanManager", func() { orch.SetPlanManager((*plan.PlanManager)(nil)) }},
 		{"Orchestrator.SetReflectionEngine", func() { orch.SetReflectionEngine((*ReflectionEngine)(nil)) }},
+
+		// RalphLoop setters (internal/agent/ralph_loop.go)
+		{"RalphLoop.SetPlanManager", func() { ralphLoop.SetPlanManager((*plan.PlanManager)(nil)) }},
 
 		// Executor setters (internal/agent/executor.go)
 		{"Executor.SetRegistry", func() { executor.SetRegistry(nil) }},

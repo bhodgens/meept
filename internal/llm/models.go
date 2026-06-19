@@ -144,6 +144,10 @@ type ModelConfig struct {
 	// Timeout is the per-request timeout in seconds.
 	// When 0, the default timeout (120s) is used.
 	Timeout time.Duration
+	// MaxConcurrency is the maximum number of concurrent requests allowed
+	// to this model/provider. When 0, no limit is enforced (unlimited).
+	// Use this to prevent overwhelming rate-limited APIs or local LLMs.
+	MaxConcurrency int
 }
 
 // HasCapability checks if the model has a specific capability.

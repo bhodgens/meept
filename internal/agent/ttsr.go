@@ -60,15 +60,13 @@ func NewTTSRManager(logger *slog.Logger) *TTSRManager {
 // YAML frontmatter (indicating a TT-SR rule). Each matching file is parsed and
 // its compiled rules are added to the manager.
 func (m *TTSRManager) LoadRules(skillsDir string) error {
+	rules := m.scanDir(skillsDir)
+
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.rules = rules
+	m.mu.Unlock()
 
-	// Reset rules on reload
-	m.rules = m.rules[:0]
-
-	m.scanDirLocked(skillsDir)
-
-	m.logger.Info("ttsr: rules loaded", "count", len(m.rules))
+	m.logger.Info("ttsr: rules loaded", "count", len(rules))
 	return nil
 }
 
@@ -76,77 +74,85 @@ func (m *TTSRManager) LoadRules(skillsDir string) error {
 // rules from each. Existing rules are reset before loading. Non-existent
 // directories are silently skipped.
 func (m *TTSRManager) LoadRulesFromDirs(dirs []string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.rules = m.rules[:0]
-
+	var rules []*TTSRRule
 	for _, dir := range dirs {
-		m.scanDirLocked(dir)
+		rules = append(rules, m.scanDir(dir)...)
 	}
 
-	m.logger.Info("ttsr: rules loaded", "count", len(m.rules), "dirs", dirs)
+	m.mu.Lock()
+	m.rules = rules
+	m.mu.Unlock()
+
+	m.logger.Info("ttsr: rules loaded", "count", len(rules), "dirs", dirs)
 	return nil
 }
 
-// scanDirLocked scans a single directory for rule files. Caller must hold m.mu.
-func (m *TTSRManager) scanDirLocked(skillsDir string) {
+// scanDir scans a single directory for rule files and returns the parsed rules.
+// Does not acquire m.mu; safe for concurrent use with other scanDir calls.
+func (m *TTSRManager) scanDir(skillsDir string) []*TTSRRule {
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return // no skills directory is fine
+			return nil // no skills directory is fine
 		}
 		m.logger.Warn("ttsr: reading skills directory", "path", skillsDir, "error", err)
-		return
+		return nil
 	}
 
+	var rules []*TTSRRule
 	for _, entry := range entries {
 		if entry.IsDir() {
 			// Check for SKILL.md or RULE.md inside directory
 			for _, name := range []string{"SKILL.md", "RULE.md"} {
 				path := filepath.Join(skillsDir, entry.Name(), name)
-				if err := m.loadRuleFile(path); err != nil {
+				if rule, err := loadRuleFile(path); err != nil {
 					m.logger.Warn("ttsr: failed to load rule file",
 						"path", path,
 						"error", err,
 					)
+				} else if rule != nil {
+					rules = append(rules, rule)
 				}
 			}
 		} else if strings.HasSuffix(entry.Name(), ".md") {
 			path := filepath.Join(skillsDir, entry.Name())
-			if err := m.loadRuleFile(path); err != nil {
+			if rule, err := loadRuleFile(path); err != nil {
 				m.logger.Warn("ttsr: failed to load rule file",
 					"path", path,
 					"error", err,
 				)
+			} else if rule != nil {
+				rules = append(rules, rule)
 			}
 		}
 	}
+	return rules
 }
 
-// loadRuleFile loads a single rule file. Caller must hold m.mu.
-func (m *TTSRManager) loadRuleFile(path string) error {
+// loadRuleFile loads a single rule file and returns the parsed rule (or nil if
+// the file is not a TT-SR rule). Does not access any shared state.
+func loadRuleFile(path string) (*TTSRRule, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
 
 	frontmatter, body, err := splitTTSRFrontmatter(string(data))
 	if err != nil || frontmatter == "" {
-		return nil // not a TT-SR rule file, skip silently
+		return nil, nil // not a TT-SR rule file, skip silently
 	}
 
 	var fm ttsrFrontmatter
 	if err := yaml.Unmarshal([]byte(frontmatter), &fm); err != nil {
-		return fmt.Errorf("parsing frontmatter: %w", err)
+		return nil, fmt.Errorf("parsing frontmatter: %w", err)
 	}
 
 	// Only treat as TT-SR rule if scope is set
 	if fm.Scope == "" {
-		return nil
+		return nil, nil
 	}
 
 	// Validate scope
@@ -154,16 +160,16 @@ func (m *TTSRManager) loadRuleFile(path string) error {
 	case "text", "thinking", "tool_call", "any":
 		// valid
 	default:
-		return fmt.Errorf("invalid scope %q in rule %q", fm.Scope, fm.Name)
+		return nil, fmt.Errorf("invalid scope %q in rule %q", fm.Scope, fm.Name)
 	}
 
 	if fm.Condition == "" {
-		return fmt.Errorf("rule %q has no condition", fm.Name)
+		return nil, fmt.Errorf("rule %q has no condition", fm.Name)
 	}
 
 	compiled, err := regexp.Compile(fm.Condition)
 	if err != nil {
-		return fmt.Errorf("compiling regex for rule %q: %w", fm.Name, err)
+		return nil, fmt.Errorf("compiling regex for rule %q: %w", fm.Name, err)
 	}
 
 	repeat := fm.Repeat
@@ -182,8 +188,7 @@ func (m *TTSRManager) loadRuleFile(path string) error {
 		compiled:  compiled,
 	}
 
-	m.rules = append(m.rules, rule)
-	return nil
+	return rule, nil
 }
 
 // CheckDelta checks a complete response (or streaming delta) against all rules.

@@ -56,7 +56,8 @@ const (
 type RuntimeConfig struct {
 	Type               RuntimeType
 	ModelPath          string // Backward-compat: first declared path (or legacy path)
-	ModelPaths         map[string]string
+	ModelPaths         map[string]string // modelKey -> path, used for spawn-command variable expansion. For legacy single-model configs the key is "default".
+	ModelKeys          []string          // authoritative provider model IDs; used for the in-use gate and per-model logger naming. Populated by RegisterConfig from the provider's models map; falls back to ModelPaths keys when the caller does not supply real model IDs.
 	EndpointKey        string
 	PIDFile            string
 	AutoStart          bool

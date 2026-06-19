@@ -158,12 +158,13 @@ func NewSession(cfg SessionConfig) (Session, error) {
 	stdout, err := sess.plainCmd.StdoutPipe()
 	if err != nil {
 		_ = sess.plainCmd.Process.Kill()
-		_ = sess.plainCmd.Process.Signal(syscall.Signal(0)) // check if alive
+		_ = sess.plainCmd.Wait()
 		return nil, fmt.Errorf("failed to get stdout: %w", err)
 	}
 	stdin, err := sess.plainCmd.StdinPipe()
 	if err != nil {
 		_ = sess.plainCmd.Process.Kill()
+		_ = sess.plainCmd.Wait()
 		return nil, fmt.Errorf("failed to get stdin: %w", err)
 	}
 
@@ -444,20 +445,6 @@ func (s *ptySession) waitLoop() {
 drained:
 
 	close(s.errorChan)
-}
-
-// WriteToPseudoTerminal sends data to the PTY master.
-func WriteToPseudoTerminal(f *os.File, data []byte) error {
-	_, err := f.Write(data)
-	return err
-}
-
-// SetPseudoTerminalSize adjusts the dimensions of the PTY.
-func SetPseudoTerminalSize(f *os.File, rows, cols int) error {
-	return pty.Setsize(f, &pty.Winsize{
-		Rows: uint16(rows),
-		Cols: uint16(cols),
-	})
 }
 
 // IsTerminalAvailable checks if PTY is available on this platform.

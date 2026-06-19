@@ -592,20 +592,9 @@ func (g *KnowledgeGraph) GetPageRank(ctx context.Context, memoryID string) (floa
 			return score, nil
 		}
 	}
-
-	// Cache miss — need write lock to update cache
 	g.mu.RUnlock()
-	g.mu.Lock()
-	defer g.mu.Unlock()
 
-	// Double-check cache after acquiring write lock
-	if time.Since(g.cacheLastUpdated) < g.cacheTTL {
-		if score, ok := g.pageRankCache[memoryID]; ok {
-			return score, nil
-		}
-	}
-
-	// Fetch from database
+	// Fetch from database (outside lock to avoid I/O under mutex)
 	var score float64
 	err := g.pool.WithConn(ctx, func(db *sql.DB) error {
 		return db.QueryRowContext(ctx,
@@ -616,7 +605,10 @@ func (g *KnowledgeGraph) GetPageRank(ctx context.Context, memoryID string) (floa
 		return 0, nil
 	}
 	if err == nil {
+		// Update cache under lock
+		g.mu.Lock()
 		g.pageRankCache[memoryID] = score
+		g.mu.Unlock()
 	}
 	return score, err
 }
@@ -806,20 +798,9 @@ func (g *KnowledgeGraph) GetCommunity(ctx context.Context, memoryID string) (str
 			return community, nil
 		}
 	}
-
-	// Cache miss — need write lock to update cache
 	g.mu.RUnlock()
-	g.mu.Lock()
-	defer g.mu.Unlock()
 
-	// Double-check cache after acquiring write lock
-	if time.Since(g.cacheLastUpdated) < g.cacheTTL {
-		if community, ok := g.communityCache[memoryID]; ok {
-			return community, nil
-		}
-	}
-
-	// Fetch from database
+	// Fetch from database (outside lock to avoid I/O under mutex)
 	var community string
 	err := g.pool.WithConn(ctx, func(db *sql.DB) error {
 		return db.QueryRowContext(ctx,
@@ -830,7 +811,10 @@ func (g *KnowledgeGraph) GetCommunity(ctx context.Context, memoryID string) (str
 		return "", nil
 	}
 	if err == nil {
+		// Update cache under lock
+		g.mu.Lock()
 		g.communityCache[memoryID] = community
+		g.mu.Unlock()
 	}
 	return community, err
 }

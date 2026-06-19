@@ -98,8 +98,15 @@ func (r *EventActionRouter) Start(ctx context.Context) {
 }
 
 func (r *EventActionRouter) handleEvent(ctx context.Context, topic string, msg *models.BusMessage) {
+	// Snapshot the inner map under lock to prevent concurrent map
+	// reads/writes if Unregister modifies the inner map while we
+	// iterate over it.
 	r.mu.RLock()
-	bots := r.topicSubs[topic]
+	src := r.topicSubs[topic]
+	bots := make(map[string]BotTrigger, len(src))
+	for k, v := range src {
+		bots[k] = v
+	}
 	r.mu.RUnlock()
 
 	for botID, trigger := range bots {

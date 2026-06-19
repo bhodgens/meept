@@ -110,53 +110,6 @@ CREATE INDEX IF NOT EXISTS idx_queued_followups_conversation
 	ON queued_followups(conversation_id);
 `
 
-// clusterSchema extends the base schema with cluster support.
-// ALTER TABLE statements are wrapped to tolerate duplicate-column errors
-// so that applying this schema multiple times is safe.
-const clusterSchema = `
--- Add cluster fields to jobs table
-ALTER TABLE jobs ADD COLUMN cluster_task_id TEXT;
-ALTER TABLE jobs ADD COLUMN managing_node TEXT;
-ALTER TABLE jobs ADD COLUMN claimed_by_node TEXT;
-ALTER TABLE jobs ADD COLUMN timeout_at TIMESTAMP;
-ALTER TABLE jobs ADD COLUMN last_heartbeat_at TIMESTAMP;
-ALTER TABLE jobs ADD COLUMN payload_full BLOB;
-ALTER TABLE jobs ADD COLUMN is_replica INTEGER DEFAULT 0;
-
--- Create cluster_events table for gossip replication
-CREATE TABLE IF NOT EXISTS cluster_events (
-	event_id TEXT PRIMARY KEY,
-	node_id TEXT NOT NULL,
-	event_type TEXT NOT NULL,
-	timestamp INTEGER NOT NULL,
-	vector_clock TEXT NOT NULL,
-	payload BLOB NOT NULL,
-	signature BLOB NOT NULL,
-	received_at INTEGER NOT NULL,
-	synced INTEGER DEFAULT 0
-);
-
-CREATE INDEX IF NOT EXISTS idx_events_type ON cluster_events(event_type);
-CREATE INDEX IF NOT EXISTS idx_events_node ON cluster_events(node_id);
-CREATE INDEX IF NOT EXISTS idx_events_time ON cluster_events(timestamp);
-
--- Create cluster_members cache table (populated from git sync)
-CREATE TABLE IF NOT EXISTS cluster_members (
-	node_id TEXT PRIMARY KEY,
-	node_name TEXT,
-	wireguard_pub TEXT NOT NULL,
-	signing_pub BLOB NOT NULL,
-	endpoint TEXT NOT NULL,
-	capabilities TEXT,
-	cluster_ip TEXT,
-	joined_at INTEGER NOT NULL,
-	last_heartbeat INTEGER NOT NULL,
-	status TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_members_status ON cluster_members(status);
-`
-
 // clusterColumnNames lists the cluster-specific ALTER TABLE columns
 // in the same order as they appear in clusterSchema, for idempotency checks.
 var clusterColumnNames = []string{
@@ -204,6 +157,7 @@ func (s *Store) applyClusterSchema() error {
 	var existingCols []string
 	rows, err := s.db.Query(`PRAGMA table_info(jobs)`)
 	if err == nil {
+		defer rows.Close()
 		for rows.Next() {
 			var (
 				cid       int
@@ -217,7 +171,9 @@ func (s *Store) applyClusterSchema() error {
 				existingCols = append(existingCols, name)
 			}
 		}
-		rows.Close()
+		if err := rows.Err(); err != nil {
+			s.logger.Warn("PRAGMA table_info iteration failed", "error", err)
+		}
 	}
 
 	// Filter out existing columns from ALTER statements.
@@ -409,6 +365,10 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 			claimableJob = job
 			break
 		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating claimable jobs: %w", err)
 	}
 
 	if claimableJob == nil {
@@ -629,6 +589,9 @@ func (s *Store) ListByState(state JobState, limit int) ([]*Job, error) {
 		}
 		jobs = append(jobs, job)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate jobs: %w", err)
+	}
 
 	return jobs, nil
 }
@@ -654,6 +617,9 @@ func (s *Store) ListByTaskID(taskID string) ([]*Job, error) {
 			continue
 		}
 		jobs = append(jobs, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate jobs by task: %w", err)
 	}
 
 	return jobs, nil
@@ -681,6 +647,9 @@ func (s *Store) ListByAgentID(agentID string, limit int) ([]*Job, error) {
 			continue
 		}
 		jobs = append(jobs, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate jobs by agent: %w", err)
 	}
 
 	return jobs, nil

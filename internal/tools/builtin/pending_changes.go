@@ -72,11 +72,17 @@ func (r *PendingChangesRegistry) Remove(id string) {
 
 	// Remove from session tracking
 	if change.SessionID != "" {
-		sessionChanges := r.sessions[change.SessionID]
-		for i, cid := range sessionChanges {
-			if cid == id {
-				r.sessions[change.SessionID] = append(sessionChanges[:i], sessionChanges[i+1:]...)
-				break
+		sessionChanges, exists := r.sessions[change.SessionID]
+		if exists {
+			for i, cid := range sessionChanges {
+				if cid == id {
+					r.sessions[change.SessionID] = append(sessionChanges[:i], sessionChanges[i+1:]...)
+					break
+				}
+			}
+			// Clean up empty session entry
+			if len(r.sessions[change.SessionID]) == 0 {
+				delete(r.sessions, change.SessionID)
 			}
 		}
 	}
@@ -134,14 +140,23 @@ func (r *PendingChangesRegistry) Expire() {
 	}
 
 	for _, id := range toRemove {
-		change := r.changes[id]
+		change, exists := r.changes[id]
+		if !exists {
+			continue // Already removed by another goroutine
+		}
 		// Remove from session tracking
 		if change.SessionID != "" {
-			sessionChanges := r.sessions[change.SessionID]
-			for i, cid := range sessionChanges {
-				if cid == id {
-					r.sessions[change.SessionID] = append(sessionChanges[:i], sessionChanges[i+1:]...)
-					break
+			sessionChanges, sessExists := r.sessions[change.SessionID]
+			if sessExists {
+				for i, cid := range sessionChanges {
+					if cid == id {
+						r.sessions[change.SessionID] = append(sessionChanges[:i], sessionChanges[i+1:]...)
+						break
+					}
+				}
+				// Clean up empty session entry
+				if len(r.sessions[change.SessionID]) == 0 {
+					delete(r.sessions, change.SessionID)
 				}
 			}
 		}

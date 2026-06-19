@@ -832,25 +832,6 @@ func levenshteinRatio(a, b string) float64 {
 	return 1.0 - float64(dist)/float64(maxLen)
 }
 
-// remapAnchor adjusts an anchor string using the remap table.
-// BOF and EOF anchors are returned unchanged.
-func remapAnchor(anchor string, remap map[int]int) string {
-	if anchor == "BOF" || anchor == "EOF" {
-		return anchor
-	}
-	lineNum, tag, hash, err := ParseSnapshotAnchor(anchor)
-	if err != nil {
-		return anchor
-	}
-	if newLine, ok := remap[lineNum]; ok {
-		if tag != "" {
-			return fmt.Sprintf("%d:%s:%s", newLine, tag, hash)
-		}
-		return fmt.Sprintf("%d:%s", newLine, hash)
-	}
-	return anchor
-}
-
 // remapAnchorWithHash adjusts an anchor string using the remap table and updates
 // the hash to match the current file content. This is needed for hash/fuzzy
 // recovery where the remapped line may have different content (and thus hash)

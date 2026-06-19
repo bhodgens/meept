@@ -24,7 +24,7 @@ import (
 type mockQueue struct{}
 
 func (m *mockQueue) Enqueue(_ context.Context, _ *queue.Job) error { return nil }
-func (m *mockQueue) Claim(_ context.Context, _ string, _ []string) (*queue.Job, error) {
+func (m *mockQueue) Claim(_ context.Context, _ string, _ []string, _ string) (*queue.Job, error) {
 	return nil, nil
 }
 func (m *mockQueue) MarkProcessing(_ context.Context, _ string) error  { return nil }

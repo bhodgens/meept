@@ -283,8 +283,10 @@ func computeInUseModels(cfg *llm.ProvidersConfig, pc *llm.ProviderConfig, provid
 	// Build AgentModelRef list from default-loaded agent definitions.
 	agentRefs := loadAgentRefsCLI()
 	slots := llm.ModelSlots{
-		Model:      cfg.Model,
-		SmallModel: cfg.SmallModel,
+		Model:           cfg.Model,
+		SmallModel:      cfg.SmallModel,
+		ClassifierModel: cfg.ClassifierModel,
+		SummarizerModel: cfg.SummarizerModel,
 	}
 	inUse := llm.BuildModelsInUse(agentRefs, slots, cfg.ModelAliases, cfg.DisabledProviders)
 	if len(inUse) == 0 {

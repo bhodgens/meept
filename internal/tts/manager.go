@@ -33,11 +33,12 @@ func NewManager(cfg Config) (*Manager, error) {
 // Speak queues or immediately speaks the given text.
 func (m *Manager) Speak(text string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.speaking {
 		if m.config.Behavior.InterruptOnNewMsg {
-			m.synth.Stop()
+			m.mu.Unlock()
+			_ = m.synth.Stop()
+			m.mu.Lock()
 			m.speaking = false
 			m.processing = false
 			// Fall through to speak new text
@@ -54,8 +55,10 @@ func (m *Manager) Speak(text string) error {
 				m.processing = true
 				go m.processQueue()
 			}
+			m.mu.Unlock()
 			return nil
 		} else {
+			m.mu.Unlock()
 			// Neither interrupt nor queue - drop the message
 			return nil
 		}
@@ -63,6 +66,8 @@ func (m *Manager) Speak(text string) error {
 
 	m.speaking = true
 	m.processing = true
+	m.mu.Unlock()
+
 	go func() {
 		defer func() {
 			// Synthesis of the immediate message is done; drain any
@@ -145,9 +150,9 @@ func (m *Manager) ClearOverflow() {
 // Stop stops any ongoing speech.
 func (m *Manager) Stop() error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.speaking = false
 	m.processing = false
+	m.mu.Unlock()
 	return m.synth.Stop()
 }
 
@@ -163,7 +168,11 @@ func (m *Manager) CheckAvailable() error {
 	return m.synth.CheckAvailable()
 }
 
-// Close releases resources used by the manager.
+// Close releases resources used by the manager. It stops playback and closes
+// the underlying synthesizer to release audio resources.
 func (m *Manager) Close() error {
-	return m.Stop()
+	if err := m.Stop(); err != nil {
+		return err
+	}
+	return m.synth.Close()
 }

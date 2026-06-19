@@ -77,6 +77,7 @@ func (s *QueueService) Enqueue(ctx context.Context, req EnqueueRequest) (*queue.
 type ClaimRequest struct {
 	WorkerID     string   `json:"worker_id"`
 	Capabilities []string `json:"capabilities,omitempty"`
+	AgentID      string   `json:"agent_id,omitempty"`
 }
 
 // Claim claims the next available job for a worker.
@@ -85,7 +86,7 @@ func (s *QueueService) Claim(ctx context.Context, req ClaimRequest) (*queue.Job,
 		return nil, wrapError("queue", "Claim", ErrInvalidInput)
 	}
 
-	job, err := s.q.Claim(ctx, req.WorkerID, req.Capabilities)
+	job, err := s.q.Claim(ctx, req.WorkerID, req.Capabilities, req.AgentID)
 	if err != nil {
 		if errors.Is(err, queue.ErrNoJobAvailable) {
 			return nil, wrapError("queue", "Claim", ErrNotFound)

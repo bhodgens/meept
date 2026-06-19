@@ -397,7 +397,8 @@ func WithWebSocket(msgBus *bus.MessageBus, wsPath string) ServerOption {
 		// The bus wildcard "*" only matches single-segment topics, so we
 		// subscribe to multiple prefixes used by the agent system.
 		topics := []string{"*", "agent.*", "agent.*.*", "task.*", "task.*.*", "step.*", "step.*.*", "orchestrator.*",
-			"chat.*", "chat.*.*", "tool.*", "llm.*", "review.*"}
+			"chat.*", "chat.*.*", "tool.*", "llm.*", "review.*",
+			"queue.*", "queue.*.*", "plan.*", "plan.*.*"}
 		for _, topic := range topics {
 			sub := msgBus.Subscribe("http-ws-"+topic, topic)
 			s.wsSubMu.Lock()
@@ -533,8 +534,11 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 		eventType = "chat_message"
 	case strings.HasPrefix(topic, "metrics."):
 		eventType = "metrics_update"
-	case strings.HasPrefix(topic, "task.") || strings.HasPrefix(topic, "step.") || strings.HasPrefix(topic, "job."):
+	case strings.HasPrefix(topic, "task.") || strings.HasPrefix(topic, "step.") || strings.HasPrefix(topic, "job.") ||
+		strings.HasPrefix(topic, "queue."):
 		eventType = "job_update"
+	case strings.HasPrefix(topic, "plan."):
+		eventType = "plan_update"
 	default:
 		// Generic fallback instead of mislabeling as job_update
 		eventType = "event"
@@ -2026,14 +2030,14 @@ func (s *Server) handleWSUnsubscribe(conn *websocket.Conn, msg *WSMessage) {
 	} else if channel != "" {
 		// Unsubscribe all sessions for this channel:
 		// remove all session filters on this connection since the channel is gone.
-		s.wsHub.mu.Lock()
+		s.wsHub.sessMu.Lock()
 		if subs, ok := s.wsHub.sessionSubs[conn]; ok {
 			for sid := range subs {
 				s.logger.Debug("ws auto-unsubscribed all sessions", "remote", conn.RemoteAddr(), "channel", channel, "session", sid)
 			}
 			delete(s.wsHub.sessionSubs, conn)
 		}
-		s.wsHub.mu.Unlock()
+		s.wsHub.sessMu.Unlock()
 	}
 }
 

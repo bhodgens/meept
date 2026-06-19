@@ -212,7 +212,7 @@ func TestClusterQueueReclaim(t *testing.T) {
 		t.Fatalf("Insert failed: %v", err)
 	}
 
-	claimedJob, err := cq.Claim(ctx, "node-001", []string{"code"})
+	claimedJob, err := cq.Claim(ctx, "node-001", []string{"code"}, "")
 	if err != nil {
 		t.Fatalf("Claim failed: %v", err)
 	}
@@ -420,7 +420,7 @@ func TestClusterQueueComplete(t *testing.T) {
 	}
 
 	// Claim the job
-	claimed, err := cq.Claim(ctx, "worker-1", nil)
+	claimed, err := cq.Claim(ctx, "worker-1", nil, "")
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
@@ -475,7 +475,7 @@ func TestClusterQueueFail(t *testing.T) {
 		t.Fatalf("Insert: %v", err)
 	}
 
-	claimed, err := cq.Claim(ctx, "worker-1", nil)
+	claimed, err := cq.Claim(ctx, "worker-1", nil, "")
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}

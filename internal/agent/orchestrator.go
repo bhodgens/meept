@@ -887,43 +887,6 @@ func extractCodeBlocksFromMarkdown(markdown string) map[string]string {
 	return blocks
 }
 
-// extractCodeFromMarkdown tries to extract code content from markdown code blocks.
-// It looks for the first ``` block and returns its content.
-// If the content is not wrapped in code blocks, it returns an empty string.
-func extractCodeFromMarkdown(markdown string) string {
-	blocks := extractCodeBlocksFromMarkdown(markdown)
-	if code, ok := blocks[""]; ok {
-		return code
-	}
-	// If no unannotated block, return the first block found (if any).
-	for _, code := range blocks {
-		return code
-	}
-	return ""
-}
-
-// markdownContainsMultipleCodeBlocks returns true if the markdown text contains
-// more than one triple-backtick code block.
-func markdownContainsMultipleCodeBlocks(markdown string) bool {
-	blocks := extractCodeBlocksFromMarkdown(markdown)
-	count := len(blocks)
-	// A single unannotated block counts as one; multiple distinct keys means multiple blocks.
-	if count > 1 {
-		return true
-	}
-	// Check if there are multiple backticks even if parsing didn't yield keys.
-	tickCount := 0
-	idx := 0
-	for {
-		i := strings.Index(markdown[idx:], "```")
-		if i == -1 {
-			break
-		}
-		tickCount++
-		idx += i + 3
-	}
-	return tickCount > 2
-}
 
 // publishReflectionEvent publishes a bus event about reflection results
 // so other components (like the agent loop) are aware of the outcome.

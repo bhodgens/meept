@@ -93,12 +93,14 @@ func (e *EventEmitter) Unsubscribe(ch chan *http.NotificationEvent) {
 
 	for i, sub := range e.subscribers {
 		if sub.ch == ch {
-			// Mark the slot as closed BEFORE closing the channel and
-			// removing the slot. Publish reads this flag under the lock
-			// and skips closed slots, eliminating the need for recover
-			// against send-on-close (S6-12).
+			// Mark the slot as closed BEFORE removing the slot. Publish
+			// reads this flag under the lock and skips closed slots.
+			// The channel is NOT closed here to avoid a race with
+			// Publish's send loop, which takes a snapshot under the lock
+			// and sends outside the lock. If we closed the channel here,
+			// Publish could panic on send-to-closed-channel between the
+			// snapshot and the send.
 			sub.closed = true
-			close(ch)
 			e.subscribers = append(e.subscribers[:i], e.subscribers[i+1:]...)
 			e.logger.Debug("notification subscriber removed")
 			return

@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestClientChat(t *testing.T) {
@@ -426,5 +428,103 @@ func TestContentString_ArrayBlocksWithNonText(t *testing.T) {
 	got := msg.ContentString()
 	if got != "desc" {
 		t.Errorf("ContentString() = %q, want %q", got, "desc")
+	}
+}
+
+func TestClientConcurrencyLimit(t *testing.T) {
+	// Track concurrent requests
+	var maxConcurrent int
+	var currentConcurrent int
+	var mu sync.Mutex
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		currentConcurrent++
+		if currentConcurrent > maxConcurrent {
+			maxConcurrent = currentConcurrent
+		}
+		mu.Unlock()
+
+		defer func() {
+			mu.Lock()
+			currentConcurrent--
+			mu.Unlock()
+		}()
+
+		// Simulate some latency to allow concurrent requests to overlap
+		time.Sleep(50 * time.Millisecond)
+
+		resp := ChatResponse{
+			ID:    "chatcmpl-123",
+			Model: "test-model",
+			Choices: []Choice{
+				{
+					Message: ResponseMessage{
+						Role:    "assistant",
+						Content: json.RawMessage(`"Hello"`),
+					},
+					FinishReason: "stop",
+				},
+			},
+			Usage: struct {
+				PromptTokens        int `json:"prompt_tokens"`
+				CompletionTokens    int `json:"completion_tokens"`
+				TotalTokens         int `json:"total_tokens"`
+				PromptTokensDetails struct {
+					CachedTokens int `json:"cached_tokens"`
+				} `json:"prompt_tokens_details"`
+			}{
+				PromptTokens:     10,
+				CompletionTokens: 5,
+				TotalTokens:      15,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	// Create client with concurrency limit of 2
+	client := NewClient(&ModelConfig{
+		BaseURL:        server.URL,
+		ModelID:        "test-model",
+		MaxConcurrency: 2,
+	})
+
+	// Launch 5 concurrent requests
+	const numRequests = 5
+	errChan := make(chan error, numRequests)
+	var wg sync.WaitGroup
+
+	for range numRequests {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := client.Chat(context.Background(), []ChatMessage{
+				{Role: RoleUser, Content: "Hello"},
+			})
+			errChan <- err
+		}()
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	// Check all requests succeeded
+	for err := range errChan {
+		if err != nil {
+			t.Fatalf("Chat failed: %v", err)
+		}
+	}
+
+	// Verify concurrency was limited to 2
+	if maxConcurrent > 2 {
+		t.Errorf("maxConcurrent = %d, want <= 2", maxConcurrent)
+	}
+	if maxConcurrent < 2 {
+		t.Errorf("maxConcurrent = %d, want >= 2 (limit was utilized)", maxConcurrent)
 	}
 }

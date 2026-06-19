@@ -882,7 +882,11 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 		if err := json.Unmarshal(respBody, &apiErr); err == nil && apiErr.Error.Message != "" {
 			return nil, &APIError{StatusCode: resp.StatusCode, Detail: apiErr.Error.Message}
 		}
-		return nil, &APIError{StatusCode: resp.StatusCode, Detail: string(respBody)}
+		detail := string(respBody)
+		if len(detail) > 1000 {
+			detail = detail[:1000]
+		}
+		return nil, &APIError{StatusCode: resp.StatusCode, Detail: detail}
 	}
 
 	// Parse the SSE stream

@@ -802,3 +802,73 @@ To integrate with an existing pre-commit hook, add this line before the final `e
 # Run deferred item check
 .git/hooks/pre-commit-deferred || exit 1
 ```
+
+## Feature Documentation Requirements
+
+All code changes to feature implementations must have corresponding documentation updates. This ensures the documentation stays in sync with the implementation.
+
+### Git Hooks
+
+The pre-commit hook system includes automated documentation checking:
+
+| Hook | Purpose |
+|------|---------|
+| `.git/hooks/pre-commit` | Main entry point, runs all checks |
+| `.git/hooks/pre-commit-deferred` | Validates deferred item resolution |
+| `.git/hooks/pre-commit-mutexio` | Blocks commits with I/O-under-mutex violations (mutexio analyzer) |
+| `.git/hooks/pre-commit-u1000` | Staticcheck U1000 unused-code check |
+| `.git/hooks/pre-commit-feature-docs` | Validates feature documentation |
+
+### pre-commit-feature-docs Hook
+
+This hook automatically:
+1. Detects code changes in feature directories (`internal/`, `cmd/`, `pkg/`)
+2. Maps changed files to feature documentation (`docs/workflows/`)
+3. Checks if documentation exists or was modified
+4. Offers to generate documentation using aider with glm-5.2
+
+**Configuration:**
+```bash
+# Override the default model
+export AIDER_MODEL=glm-5.2
+
+# Or use a different model
+export AIDER_MODEL=claude-sonnet-4-6
+```
+
+**When triggered:**
+- If no documentation exists: prompts to create it
+- If documentation exists but wasn't modified: warns and suggests updates
+- Offers interactive aider session to generate docs from code changes
+
+**Manual aider usage:**
+```bash
+# Generate docs with aider
+aider --model glm-5.2 \
+      --message "Update documentation for these changes" \
+      docs/workflows/feature-name.md \
+      internal/feature/file.go
+```
+
+### Documentation Locations
+
+| Directory | Content |
+|-----------|---------|
+| `docs/workflows/` | Feature specifications |
+| `docs/concepts/` | Architecture documentation |
+| `docs/reference/` | CLI, API, and tool references |
+
+### Feature Mapping
+
+The hook automatically maps directories to documentation:
+
+| Code Directory | Documentation File |
+|----------------|-------------------|
+| `internal/agent/` | `docs/workflows/agent-orchestration.md` |
+| `internal/llm/` | `docs/workflows/llm-management.md` |
+| `internal/memory/` | `docs/workflows/memory.md` |
+| `internal/security/` | `docs/workflows/security.md` |
+| `internal/tools/` | `docs/workflows/tool-routing.md` |
+| `internal/code/` | `docs/workflows/code-intelligence.md` |
+| `internal/runtime/` | `docs/workflows/runtime.md` |
+| `internal/pty/` | `docs/workflows/pty-streaming.md` |

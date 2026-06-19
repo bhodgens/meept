@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -529,6 +530,18 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 			baseURL := provider.Options.BaseURL
 			rtCfg.EndpointKey = llm.ComputeEndpointKey(string(rtCfg.Type), baseURL)
+			// Populate the authoritative model-key list from the provider's
+			// models map. This lets the in-use gate match against the real
+			// "provider/<model-id>" references even when the lifecycle block
+			// uses the legacy singular `model_path` (which ValidateAndNormalize
+			// mirrors under the synthetic "default" key in ModelPaths).
+			if len(provider.Models) > 0 {
+				rtCfg.ModelKeys = make([]string, 0, len(provider.Models))
+				for modelID := range provider.Models {
+					rtCfg.ModelKeys = append(rtCfg.ModelKeys, modelID)
+				}
+				sort.Strings(rtCfg.ModelKeys)
+			}
 			if err := c.ContainerManager.RegisterConfig(providerID, rtCfg, baseURL); err != nil {
 				logger.Error("Failed to register runtime config", "provider", providerID, "error", err)
 			}
@@ -536,12 +549,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 		// Compute the in-use model set from agent definitions and slot
 		// assignments so Section 2's gate has input before StartAll runs.
-		// Classifier/Summarizer model slots are not surfaced on LLMConfig
-		// today (see schema.go); they are left empty as best-effort.
+		// All four slot fields are populated: model + small_model directly,
+		// and classifier_model + summarizer_model (which may themselves be
+		// alias names that BuildModelsInUse expands).
 		agentRefs := loadAgentModelRefs(cfg, logger)
 		slots := llm.ModelSlots{
-			Model:      lifecycleCfg.Model,
-			SmallModel: lifecycleCfg.SmallModel,
+			Model:           lifecycleCfg.Model,
+			SmallModel:      lifecycleCfg.SmallModel,
+			ClassifierModel: lifecycleCfg.ClassifierModel,
+			SummarizerModel: lifecycleCfg.SummarizerModel,
 		}
 		inUse := llm.BuildModelsInUse(agentRefs, slots, lifecycleCfg.ModelAliases, lifecycleCfg.DisabledProviders)
 		if len(inUse) > 0 {
@@ -1807,6 +1823,10 @@ func (c *Components) Start(ctx context.Context) error {
 				if c.ResultCache != nil {
 					c.ResultCache.Stop()
 				}
+			case "pending":
+				if c.PendingChanges != nil {
+					c.PendingChanges.Stop()
+				}
 			case "pool":
 				if c.WorkerPool != nil {
 					c.WorkerPool.Stop(ctx)
@@ -2490,25 +2510,6 @@ func createLLMConfig(cfg *config.ModelsConfig, logger *slog.Logger) *llm.ModelCo
 	}
 
 	return resolveModelRef(cfg, modelRef, logger)
-}
-
-// createAuxiliaryLLMClient creates an LLM client for an auxiliary role (classifier,
-// summarizer). If modelRef is empty it returns nil so the caller can fall back to
-// the main client. The returned client shares no state with the main client.
-// Deprecated: Use createAuxiliaryLLMClientWithResolver for alias-based fallback support.
-func createAuxiliaryLLMClient(cfg *config.ModelsConfig, modelRef string, logger *slog.Logger, budget *llm.Budget) *llm.Client {
-	if modelRef == "" {
-		return nil
-	}
-	llmCfg := resolveModelRef(cfg, modelRef, logger)
-	if llmCfg == nil {
-		return nil
-	}
-	opts := []llm.ClientOption{llm.WithLogger(logger)}
-	if budget != nil {
-		opts = append(opts, llm.WithBudget(budget))
-	}
-	return llm.NewClient(llmCfg, opts...)
 }
 
 // createAuxiliaryLLMClientWithResolver creates an LLM client for an auxiliary role

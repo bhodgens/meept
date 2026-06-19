@@ -72,6 +72,7 @@ func (s *WorkerService) Stats(ctx context.Context) (*WorkerStatsResponse, error)
 type AddWorkerRequest struct {
 	ID           string   `json:"id"`
 	Capabilities []string `json:"capabilities"`
+	AgentID      string   `json:"agent_id,omitempty"`
 }
 
 // Add adds a worker to the pool.
@@ -82,7 +83,7 @@ func (s *WorkerService) Add(ctx context.Context, req AddWorkerRequest) (*worker.
 	if s.pool == nil {
 		return nil, wrapError("worker", "Add", ErrUnavailable)
 	}
-	w, err := s.pool.AddWorker(req.Capabilities)
+	w, err := s.pool.AddWorker(req.Capabilities, req.AgentID)
 	if err != nil {
 		return nil, wrapError("worker", "Add", err)
 	}

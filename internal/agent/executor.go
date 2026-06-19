@@ -256,7 +256,7 @@ func looksLikeCode(s string) bool {
 		// Check for lines that look like declarations
 		if strings.HasSuffix(trimmed, "{") ||
 			strings.HasPrefix(trimmed, "//") ||
-			strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, "#!") {
+			(strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, "#!")) {
 			hasStructuralContent = true
 		}
 	}
@@ -323,7 +323,7 @@ func detectLanguageFromContent(s string) ast.Language {
 	}
 
 	// Java indicators
-	if strings.Contains(s, "public class ") || strings.Contains(s, "private ") && strings.Contains(s, "void ") {
+	if (strings.Contains(s, "public class ") || strings.Contains(s, "private ")) && strings.Contains(s, "void ") {
 		return ast.LangJava
 	}
 

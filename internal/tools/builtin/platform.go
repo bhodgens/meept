@@ -213,7 +213,7 @@ func (t *PlatformToolsTool) Execute(ctx context.Context, args map[string]any) (a
 
 	for _, cat := range categories {
 		tools := toolsByCategory[cat]
-		sb.WriteString(fmt.Sprintf("### %s Tools\n\n", strings.Title(cat)))
+		sb.WriteString(fmt.Sprintf("### %s Tools\n\n", strings.ToUpper(cat[:1]) + cat[1:]))
 		for _, tool := range tools {
 			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", tool.Name, tool.Description))
 		}

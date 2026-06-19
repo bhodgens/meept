@@ -216,22 +216,26 @@ func (b *DockerBackend) Execute(ctx context.Context, cmd Command) (*CommandResul
 
 // Close removes the container.
 func (b *DockerBackend) Close() error {
+	// Snapshot container ID under lock, then perform Docker API calls
+	// outside the lock (CLAUDE.md "Mutex scope" rule).
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	containerID := b.containerID
+	b.containerID = ""
+	b.mu.Unlock()
 
-	if b.containerID == "" {
+	if containerID == "" {
 		return nil
 	}
 
 	// Stop container
-	if err := b.client.StopContainer(b.containerID, 5); err != nil {
+	if err := b.client.StopContainer(containerID, 5); err != nil {
 		// Container may already be stopped
-		b.logger.Debug("Docker container already stopped", "id", b.containerID)
+		b.logger.Debug("Docker container already stopped", "id", containerID)
 	}
 
 	// Remove container
 	opts := docker.RemoveContainerOptions{
-		ID:            b.containerID,
+		ID:            containerID,
 		RemoveVolumes: true,
 		Force:         true,
 	}
@@ -240,7 +244,6 @@ func (b *DockerBackend) Close() error {
 		return fmt.Errorf("failed to remove Docker container: %w", err)
 	}
 
-	b.containerID = ""
 	return nil
 }
 

@@ -33,19 +33,22 @@ type ProviderOptionsConfig struct {
 
 // ModelDef represents a model definition in the config.
 type ModelDef struct {
-	Name         string   `json:"name"`
-	Capabilities []string `json:"capabilities"`
-	InputCost    float64  `json:"input_cost"`
-	OutputCost   float64  `json:"output_cost"`
-	ContextLimit int      `json:"context_limit"`
-	MaxOutput    int      `json:"max_output"`
-	Temperature  float64  `json:"temperature"`
+	Name           string   `json:"name"`
+	Capabilities   []string `json:"capabilities"`
+	InputCost      float64  `json:"input_cost"`
+	OutputCost     float64  `json:"output_cost"`
+	ContextLimit   int      `json:"context_limit"`
+	MaxOutput      int      `json:"max_output"`
+	Temperature    float64  `json:"temperature"`
+	MaxConcurrency int      `json:"max_concurrency"` // Max concurrent requests (0 = unlimited)
 }
 
 // ProvidersConfig represents the full models.json5 configuration.
 type ProvidersConfig struct {
 	Model             string                     `json:"model"`
 	SmallModel        string                     `json:"small_model"`
+	ClassifierModel   string                     `json:"classifier_model"`
+	SummarizerModel   string                     `json:"summarizer_model"`
 	DisabledProviders []string                   `json:"disabled_providers"`
 	ModelAliases      map[string]ModelAliasEntry `json:"model_aliases"`
 	Providers         map[string]ProviderConfig  `json:"providers"`
@@ -183,6 +186,7 @@ func ResolveModelRef(ref string, cfg *ProvidersConfig) *ModelConfig {
 		Capabilities:         caps,
 		ProviderID:           providerID,
 		Timeout:              time.Duration(provider.Options.Timeout) * time.Second,
+		MaxConcurrency:       modelDef.MaxConcurrency,
 	}
 }
 
@@ -218,6 +222,7 @@ func GetAllModels(cfg *ProvidersConfig) []*ModelConfig {
 				Capabilities:         caps,
 				ProviderID:           providerID,
 				Timeout:              time.Duration(provider.Options.Timeout) * time.Second,
+				MaxConcurrency:       modelDef.MaxConcurrency,
 			})
 		}
 	}
