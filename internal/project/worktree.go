@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -187,11 +186,4 @@ func (pm *ProjectManager) CountActiveWorktrees(ctx context.Context, projectID st
 		}
 	}
 	return count, nil
-}
-
-// parseGitCount parses a count from git output.
-func parseGitCount(s string) int {
-	s = strings.TrimSpace(s)
-	n, _ := strconv.Atoi(s)
-	return n
 }

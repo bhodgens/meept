@@ -85,7 +85,13 @@ class LeaderKeyController extends ChangeNotifier {
   VoidCallback? onBranches;
 
   /// Set this callback to handle find/search.
+  ///
+  /// For global semantic search (leader+p). In-session find (cmd+f/ctrl+f)
+  /// uses [onInSessionFind].
   VoidCallback? onFind;
+
+  /// Set this callback to open the in-session find bar (Cmd+F / Ctrl+F).
+  VoidCallback? onInSessionFind;
 
   /// Optional callback for go_router navigation.
   ///
@@ -106,6 +112,13 @@ class LeaderKeyController extends ChangeNotifier {
         : LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyK);
   }
 
+  /// Cmd+F (macOS) / Ctrl+F (other) — open in-session find bar.
+  static LogicalKeySet get findKeySet {
+    return _isMacOS
+        ? LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyF)
+        : LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyF);
+  }
+
   /// Handle a raw key event directly (used when not using Flutter's
   /// Actions system, e.g. for sequential leader keys).
   KeyEventResult handleKeyEvent(KeyEvent event) {
@@ -122,6 +135,11 @@ class LeaderKeyController extends ChangeNotifier {
     // --- Direct shortcuts ---
     if (_isFocusInputTrigger(event)) {
       onFocusInput?.call();
+      return KeyEventResult.handled;
+    }
+
+    if (_isFindTrigger(event)) {
+      onInSessionFind?.call();
       return KeyEventResult.handled;
     }
 
@@ -225,6 +243,16 @@ class LeaderKeyController extends ChangeNotifier {
     return HardwareKeyboard.instance.isControlPressed;
   }
 
+  /// Detect Cmd+F / Ctrl+F for in-session find.
+  static bool _isFindTrigger(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    if (event.logicalKey != LogicalKeyboardKey.keyF) return false;
+    if (_isMacOS) {
+      return HardwareKeyboard.instance.isMetaPressed;
+    }
+    return HardwareKeyboard.instance.isControlPressed;
+  }
+
   /// Convert common logical keys to their character representation.
   static String? _logicalKeyToChar(LogicalKeyboardKey key) {
     if (key == LogicalKeyboardKey.keyS) return 's';
@@ -264,6 +292,7 @@ class _AppShortcutsState extends State<AppShortcuts> {
         // by the Focus widget below for leader sequences.
         LeaderKeyController.leaderKeySet: const LeaderIntent(),
         LeaderKeyController.focusInputKeySet: const FocusInputIntent(),
+        LeaderKeyController.findKeySet: const FindIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -276,6 +305,12 @@ class _AppShortcutsState extends State<AppShortcuts> {
           FocusInputIntent: CallbackAction<FocusInputIntent>(
             onInvoke: (_) {
               widget.controller.onFocusInput?.call();
+              return null;
+            },
+          ),
+          FindIntent: CallbackAction<FindIntent>(
+            onInvoke: (_) {
+              widget.controller.onFind?.call();
               return null;
             },
           ),

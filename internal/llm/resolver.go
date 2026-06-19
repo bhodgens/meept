@@ -303,19 +303,6 @@ func (r *Resolver) getOrCreateHealth(aliasName string) *AliasHealth {
 	return health
 }
 
-func (r *Resolver) rotateToNext(aliasName string, alias *AliasEntry) {
-	health := r.health[aliasName]
-	health.CurrentIndex = (health.CurrentIndex + 1) % len(alias.Models)
-	health.ConsecutiveFails = 0
-	health.CooldownUntil = time.Time{} // Reset cooldown
-
-	r.logger.Info("Rotated to next model in alias",
-		"alias", aliasName,
-		"new_model", alias.Models[health.CurrentIndex].ModelID,
-		"new_index", health.CurrentIndex,
-	)
-}
-
 // HasAlias checks if an alias exists.
 func (r *Resolver) HasAlias(aliasName string) bool {
 	_, ok := r.aliases[aliasName]

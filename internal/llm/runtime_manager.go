@@ -589,6 +589,20 @@ func (m *RuntimeManager) StartProvider(ctx context.Context, providerID string) e
 		stderr = procLogger.Stderr()
 	}
 
+	// Re-check shutdown under the lock right before spawning. attemptAutoRestart
+	// checks m.shutdown at its top, but releases m.mu before calling
+	// RestartProvider → StartProvider → ep.proc.Start; if StopAll ran in that
+	// window it would set m.shutdown=true and we must not spawn a subprocess
+	// that survives shutdown (TOCTOU found by TestShutdownBlocksAutoRestart).
+	m.mu.Lock()
+	if m.shutdown {
+		m.mu.Unlock()
+		m.logger.Info("Skipping spawn; manager is shutting down",
+			"provider", providerID, "endpoint_key", endpointKey)
+		return fmt.Errorf("runtime manager is shutting down")
+	}
+	m.mu.Unlock()
+
 	if err := ep.proc.Start(ctx, stdout, stderr); err != nil {
 		m.logToEndpoint(endpointKey, "spawn_failure", slog.String("provider", providerID), slog.String("error", err.Error()))
 		m.recordSpawn(providerID, time.Since(start), false)
@@ -781,18 +795,6 @@ func (m *RuntimeManager) recordSpawn(providerID string, duration time.Duration, 
 	m.mu.Lock()
 	rec := m.metrics
 	m.mu.Unlock()
-	if rec != nil {
-		rec.RecordRuntimeSpawn(providerID, duration, success)
-	}
-}
-
-// recordSpawnLocked is the lock-free variant for callers already holding m.mu.
-// The Record* call happens after the caller has released the lock to avoid
-// performing I/O (or callbacks) under the mutex — see StartProvider which
-// snapshots the recorder before calling out. When the caller cannot easily
-// defer the call past its unlock, it is acceptable to invoke rec.Record*
-// under the lock because the metrics backend is expected to be non-blocking.
-func (m *RuntimeManager) recordSpawnLocked(rec MetricsRecorder, providerID string, duration time.Duration, success bool) {
 	if rec != nil {
 		rec.RecordRuntimeSpawn(providerID, duration, success)
 	}

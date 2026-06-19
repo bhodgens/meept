@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -455,31 +454,5 @@ func (g *GitSync) git(args ...string) error {
 		}
 		return fmt.Errorf("git %s: %w: %s", args, err, string(output))
 	}
-	return nil
-}
-
-// cloneRepo clones the remote repository to the local path.
-func (g *GitSync) cloneRepo(remoteURL string) error {
-	parentDir := filepath.Dir(g.gitRepoPath)
-	if err := os.MkdirAll(parentDir, 0o755); err != nil {
-		return fmt.Errorf("cloneRepo: mkdir: %w", err)
-	}
-
-	// Remove existing directory if present
-	if _, err := os.Stat(g.gitRepoPath); err == nil {
-		if err := os.RemoveAll(g.gitRepoPath); err != nil {
-			return fmt.Errorf("cloneRepo: remove existing: %w", err)
-		}
-	}
-
-	cmd := exec.CommandContext(g.gitCtx(), "git", "clone", remoteURL, g.gitRepoPath)
-	cmd.Dir = parentDir
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("cloneRepo: %w: %s", err, string(output))
-	}
-
 	return nil
 }

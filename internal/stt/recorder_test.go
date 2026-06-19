@@ -3,7 +3,6 @@ package stt
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -339,17 +338,4 @@ func TestRecorder_StartWithWriteWavMock(t *testing.T) {
 
 	r.Stop()
 	r.Cleanup()
-}
-
-// TestRequiresFfmpegOrSox skips the test if neither ffmpeg nor sox is available.
-// This is a helper for integration-style tests.
-func skipWithoutRecorder(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("ffmpeg"); err == nil {
-		return
-	}
-	if _, err := exec.LookPath("sox"); err == nil {
-		return
-	}
-	t.Skip("skipping: ffmpeg and sox not available in PATH")
 }

@@ -6,6 +6,8 @@ import '../../widgets/error_banner.dart';
 import '../../providers/chat_provider.dart';
 import 'agent_progress_indicator.dart';
 import 'chat_message_bubble.dart';
+import 'find_bar.dart';
+import 'find_state.dart';
 
 /// Chat message list - displays chat messages with auto-scroll
 class ChatMessageList extends ConsumerStatefulWidget {
@@ -68,11 +70,33 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   @override
   Widget build(BuildContext context) {
     final chatState = ref.watch(chatProvider);
+    final sessionId = widget.sessionId;
+    final findVisible = ref.watch(findBarVisibleProvider(sessionId));
+    final findQuery = ref.watch(findQueryProvider(sessionId));
+    final findCase = ref.watch(findCaseSensitiveProvider(sessionId));
+    final findRegex = ref.watch(findRegexProvider(sessionId));
+    final findCursor = ref.watch(findCursorProvider(sessionId));
+
+    // Compute matches whenever query/toggles/messages change.
+    final findResult = computeFindMatches(
+      contents: chatState.messages.map((m) => m.content).toList(),
+      query: findQuery,
+      caseSensitive: findCase,
+      regex: findRegex,
+    );
 
     // Auto-scroll when new messages arrive and user is at bottom
     if (chatState.messages.isNotEmpty && _isAtBottom && chatState.messages.length != _previousMessageCount) {
       _previousMessageCount = chatState.messages.length;
       WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _scrollToBottom(); });
+    }
+
+    // Auto-scroll to current find match when cursor changes.
+    if (findVisible && findResult.matches.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _scrollToFindMatch(findResult.matches, findCursor, chatState.messages.length);
+      });
     }
 
     return NotificationListener<ScrollNotification>(
@@ -90,14 +114,34 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                 ? const MessagePlaceholder()
                 : ListView.builder(
                     controller: _scrollController,
-                    padding: EdgeInsets.fromLTRB(16, 16, 16, chatState.error != null ? 100 : 16),
+                    padding: EdgeInsets.fromLTRB(
+                        16, findVisible ? 56 : 16, 16, chatState.error != null ? 100 : 16),
                     reverse: false,
                     itemCount:
                         chatState.messages.length + (chatState.isLoading || chatState.isAgentProcessing ? 1 : 0),
                     itemBuilder: (context, index) {
                       if (index < chatState.messages.length) {
                         final message = chatState.messages[index];
-                        return ChatMessageBubble(message: message);
+                        // Find matches belonging to this message, with their absolute index
+                        // so we can mark the current one.
+                        final localMatches = <int>[];
+                        for (var i = 0; i < findResult.matches.length; i++) {
+                          if (findResult.matches[i].messageIndex == index) {
+                            localMatches.add(i);
+                          }
+                        }
+                        return ChatMessageBubble(
+                          message: message,
+                          highlightQuery: findVisible && findQuery.isNotEmpty ? findQuery : null,
+                          caseSensitive: findCase,
+                          isRegex: findRegex,
+                          highlightRanges: localMatches
+                              .map((absIdx) => findResult.matches[absIdx])
+                              .toList(),
+                          currentRangeAbsIndex: findCursor,
+                          rangeAbsIndices: localMatches,
+                          regexError: findResult.regexError,
+                        );
                       } else {
                         // Dynamic progress indicator or fallback thinking
                         if (chatState.currentProgress != null) {
@@ -153,8 +197,40 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                 ),
               ),
             ),
+          if (findVisible)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: FindBar(
+                sessionId: sessionId,
+                matchCount: findResult.matches.length,
+                regexError: findResult.regexError,
+              ),
+            ),
         ],
       ),
+    );
+  }
+
+  /// Scrolls so the current find match is visible.
+  void _scrollToFindMatch(List<FindMatch> matches, int cursor, int messageCount) {
+    if (!_scrollController.hasClients) return;
+    if (matches.isEmpty || cursor < 0 || cursor >= matches.length) return;
+    final target = matches[cursor];
+    if (target.messageIndex < 0 || target.messageIndex >= messageCount) return;
+    // Approximate: assume each message is ~64 logical pixels tall.
+    const estHeight = 64.0;
+    final viewport = _scrollController.position.viewportDimension;
+    final offset = (target.messageIndex * estHeight) - viewport / 2;
+    final clamped = offset.clamp(
+      0.0,
+      _scrollController.position.maxScrollExtent,
+    );
+    _scrollController.animateTo(
+      clamped,
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
     );
   }
 }

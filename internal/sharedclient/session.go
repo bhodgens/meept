@@ -16,17 +16,6 @@ type SessionClient interface {
 	UpdateSessionDescription(sessionID, description string) error
 }
 
-// sessionAdapter adapts transport.Client to SessionClient.
-// This adapter is defined here to avoid import cycles: liteclient can't import
-// transport (which imports tui), so we accept interfaces instead.
-type sessionAdapter struct {
-	client SessionClient
-}
-
-func (a *sessionAdapter) GetMostRecentSession() (*types.Session, error) {
-	return a.client.GetMostRecentSession()
-}
-
 // SessionManager handles session operations for both meept-lite and meept TUI.
 type SessionManager struct {
 	client         SessionClient

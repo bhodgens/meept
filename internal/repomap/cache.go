@@ -84,7 +84,6 @@ type TagCache struct {
 	cacheDir string
 	config   CacheConfig
 	logger   *slog.Logger
-	mu       sync.RWMutex
 }
 
 // NewTagCache creates a new TagCache with the given configuration.

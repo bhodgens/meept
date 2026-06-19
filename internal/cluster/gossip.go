@@ -535,20 +535,6 @@ func (g *GossipEngine) Stop() error {
 	return nil
 }
 
-// addPeer records information about a newly discovered peer.
-func (g *GossipEngine) addPeer(info PeerInfo) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.peers[info.NodeID] = &info
-}
-
-// removePeer removes a peer from the gossip mesh.
-func (g *GossipEngine) removePeer(nodeID string) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	delete(g.peers, nodeID)
-}
-
 // Peers returns a snapshot of known peers.
 func (g *GossipEngine) Peers() []PeerInfo {
 	g.mu.RLock()

@@ -17,11 +17,15 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - Constants
 - Variables
 - [func BackoffWithJitter\(delay time.Duration, maxDelay time.Duration, useJitter bool\) time.Duration](<#BackoffWithJitter>)
+- [func BuildModelsInUse\(agents \[\]AgentModelRef, slots ModelSlots, aliases map\[string\]ModelAliasEntry, disabled \[\]string\) map\[string\]struct\{\}](<#BuildModelsInUse>)
+- [func ClassificationUserGuidance\(err error\) string](<#ClassificationUserGuidance>)
+- [func ComputeEndpointKey\(runtime, baseURL string\) string](<#ComputeEndpointKey>)
 - [func ContainsSupportedRuntime\(runtimes \[\]string\) bool](<#ContainsSupportedRuntime>)
 - [func CountToolDefinitionsTokens\(tools \[\]ToolDefinition, tokenizer Tokenizer\) int](<#CountToolDefinitionsTokens>)
 - [func DerefOr\[T any\]\(p \*T, def T\) T](<#DerefOr>)
 - [func EstimateTokenCountHeuristic\(content string\) int](<#EstimateTokenCountHeuristic>)
 - [func FormatPIDFilePath\(pidFile string\) \(string, error\)](<#FormatPIDFilePath>)
+- [func IsLoopbackBaseURL\(baseURL string\) bool](<#IsLoopbackBaseURL>)
 - [func IsNonRetryable\(err error\) bool](<#IsNonRetryable>)
 - [func IsRateLimitError\(err error\) bool](<#IsRateLimitError>)
 - [func IsRateLimitErrorMessage\(errMsg string\) bool](<#IsRateLimitErrorMessage>)
@@ -33,6 +37,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type APIError](<#APIError>)
   - [func \(e \*APIError\) Error\(\) string](<#APIError.Error>)
   - [func \(e \*APIError\) UserMessage\(\) string](<#APIError.UserMessage>)
+- [type AgentModelRef](<#AgentModelRef>)
 - [type AliasEntry](<#AliasEntry>)
 - [type AliasHealth](<#AliasHealth>)
 - [type AnthropicClient](<#AnthropicClient>)
@@ -59,12 +64,15 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(b \*Budget\) CleanupStaleEntries\(ttl time.Duration\)](<#Budget.CleanupStaleEntries>)
   - [func \(b \*Budget\) GetStatus\(\) Status](<#Budget.GetStatus>)
   - [func \(b \*Budget\) RecordCost\(r CostRecord\)](<#Budget.RecordCost>)
+  - [func \(b \*Budget\) RecordCostWithScope\(r CostRecord, taskID, sessionID string\)](<#Budget.RecordCostWithScope>)
   - [func \(b \*Budget\) RecordSessionUsage\(sessionID string, tokens int\)](<#Budget.RecordSessionUsage>)
   - [func \(b \*Budget\) RecordTaskUsage\(taskID string, tokens int\)](<#Budget.RecordTaskUsage>)
   - [func \(b \*Budget\) RecordUsage\(usage TokenUsage\)](<#Budget.RecordUsage>)
   - [func \(b \*Budget\) RecordUsageWithScope\(usage TokenUsage, taskID, sessionID string\)](<#Budget.RecordUsageWithScope>)
   - [func \(b \*Budget\) RemoveSession\(\_ context.Context, sessionID string\)](<#Budget.RemoveSession>)
+  - [func \(b \*Budget\) RemoveSessionCost\(\_ context.Context, sessionID string\)](<#Budget.RemoveSessionCost>)
   - [func \(b \*Budget\) RemoveTask\(\_ context.Context, taskID string\)](<#Budget.RemoveTask>)
+  - [func \(b \*Budget\) RemoveTaskCost\(\_ context.Context, taskID string\)](<#Budget.RemoveTaskCost>)
   - [func \(b \*Budget\) StartPeriodicCleanup\(ttl time.Duration, freq time.Duration\) chan struct\{\}](<#Budget.StartPeriodicCleanup>)
   - [func \(b \*Budget\) WaitForRateLimit\(ctx context.Context\) error](<#Budget.WaitForRateLimit>)
 - [type BudgetCheckResult](<#BudgetCheckResult>)
@@ -97,6 +105,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func WithMaxTokens\(tokens int\) ChatOption](<#WithMaxTokens>)
   - [func WithPresencePenalty\(p float64\) ChatOption](<#WithPresencePenalty>)
   - [func WithStopSequences\(seqs \[\]string\) ChatOption](<#WithStopSequences>)
+  - [func WithTaskScope\(taskID, sessionID string\) ChatOption](<#WithTaskScope>)
   - [func WithTemperature\(temp float64\) ChatOption](<#WithTemperature>)
   - [func WithTools\(tools \[\]ToolDefinition\) ChatOption](<#WithTools>)
   - [func WithTopP\(p float64\) ChatOption](<#WithTopP>)
@@ -104,6 +113,8 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type ChatResponse](<#ChatResponse>)
 - [type Chatter](<#Chatter>)
 - [type Choice](<#Choice>)
+- [type ClassificationFailureKind](<#ClassificationFailureKind>)
+  - [func ClassifyClassificationFailure\(err error\) ClassificationFailureKind](<#ClassifyClassificationFailure>)
 - [type Client](<#Client>)
   - [func NewClient\(config \*ModelConfig, opts ...ClientOption\) \*Client](<#NewClient>)
   - [func \(c \*Client\) Budget\(\) \*Budget](<#Client.Budget>)
@@ -112,6 +123,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(c \*Client\) ChatWithProgress\(ctx context.Context, messages \[\]ChatMessage, progress ProgressCallback, opts ...ChatOption\) \(\*Response, error\)](<#Client.ChatWithProgress>)
   - [func \(c \*Client\) Close\(\) error](<#Client.Close>)
   - [func \(c \*Client\) Config\(\) \*ModelConfig](<#Client.Config>)
+  - [func \(c \*Client\) SetMetricsStore\(store \*metrics.Store\)](<#Client.SetMetricsStore>)
   - [func \(c \*Client\) SwitchModel\(config \*ModelConfig\) error](<#Client.SwitchModel>)
 - [type ClientError](<#ClientError>)
   - [func \(e \*ClientError\) Error\(\) string](<#ClientError.Error>)
@@ -119,6 +131,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(e \*ClientError\) UserMessage\(\) string](<#ClientError.UserMessage>)
 - [type ClientOption](<#ClientOption>)
   - [func WithBudget\(budget \*Budget\) ClientOption](<#WithBudget>)
+  - [func WithConcurrencyLimit\(maxConcurrency int\) ClientOption](<#WithConcurrencyLimit>)
   - [func WithExtraHeaders\(headers map\[string\]string\) ClientOption](<#WithExtraHeaders>)
   - [func WithLogger\(logger \*slog.Logger\) ClientOption](<#WithLogger>)
   - [func WithMetricsStore\(store \*metrics.Store\) ClientOption](<#WithMetricsStore>)
@@ -156,7 +169,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(f \*ContextFirewall\) ContextUtilization\(messages \[\]ChatMessage\) float64](<#ContextFirewall.ContextUtilization>)
   - [func \(f \*ContextFirewall\) DerivedConversationBudget\(\) int](<#ContextFirewall.DerivedConversationBudget>)
   - [func \(f \*ContextFirewall\) DerivedIterationBudget\(\) int](<#ContextFirewall.DerivedIterationBudget>)
-  - [func \(f \*ContextFirewall\) SetCompactor\(compactor \*ContextCompactor\)](<#ContextFirewall.SetCompactor>)
+  - [func \(f \*ContextFirewall\) SetCompactor\(compactor \*ContextCompactor, triggerRatio ...float64\)](<#ContextFirewall.SetCompactor>)
   - [func \(f \*ContextFirewall\) Stats\(\) FirewallStats](<#ContextFirewall.Stats>)
   - [func \(f \*ContextFirewall\) ValidateContextSize\(messages \[\]ChatMessage\) error](<#ContextFirewall.ValidateContextSize>)
 - [type ContextFirewallConfig](<#ContextFirewallConfig>)
@@ -196,6 +209,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type L1Cache](<#L1Cache>)
   - [func NewL1Cache\(config L1CacheConfig\) \*L1Cache](<#NewL1Cache>)
   - [func \(c \*L1Cache\) Clear\(\)](<#L1Cache.Clear>)
+  - [func \(c \*L1Cache\) ClearByKeyPrefix\(prefix string\) int](<#L1Cache.ClearByKeyPrefix>)
   - [func \(c \*L1Cache\) Count\(\) int](<#L1Cache.Count>)
   - [func \(c \*L1Cache\) Get\(key CacheKey\) \(\*CacheEntry, bool\)](<#L1Cache.Get>)
   - [func \(c \*L1Cache\) Inspect\(promptHash string\) \[\]L1InspectEntry](<#L1Cache.Inspect>)
@@ -210,6 +224,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type L2Cache](<#L2Cache>)
   - [func NewL2Cache\(config L2CacheConfig\) \(\*L2Cache, error\)](<#NewL2Cache>)
   - [func \(c \*L2Cache\) Clear\(\)](<#L2Cache.Clear>)
+  - [func \(c \*L2Cache\) ClearByModelPrefix\(prefix string\) int](<#L2Cache.ClearByModelPrefix>)
   - [func \(c \*L2Cache\) Close\(\) error](<#L2Cache.Close>)
   - [func \(c \*L2Cache\) Count\(\) int](<#L2Cache.Count>)
   - [func \(c \*L2Cache\) Get\(ctx context.Context, key CacheKey\) \(\*CacheEntry, bool\)](<#L2Cache.Get>)
@@ -246,6 +261,10 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(m \*ModelConfig\) HasCapability\(capability string\) bool](<#ModelConfig.HasCapability>)
   - [func \(m \*ModelConfig\) TotalCost\(\) float64](<#ModelConfig.TotalCost>)
 - [type ModelDef](<#ModelDef>)
+- [type ModelLogger](<#ModelLogger>)
+  - [func OpenModelLogger\(providerID, modelKey string\) \(\*ModelLogger, error\)](<#OpenModelLogger>)
+  - [func \(m \*ModelLogger\) Close\(\) error](<#ModelLogger.Close>)
+  - [func \(m \*ModelLogger\) Log\(event string, kv ...any\)](<#ModelLogger.Log>)
 - [type ModelPicker](<#ModelPicker>)
   - [func NewModelPicker\(config ModelPickerConfig\) \*ModelPicker](<#NewModelPicker>)
   - [func \(m \*ModelPicker\) GetSelectedModel\(\) \*ModelCatalogEntry](<#ModelPicker.GetSelectedModel>)
@@ -256,6 +275,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(m \*ModelPicker\) WasCancelled\(\) bool](<#ModelPicker.WasCancelled>)
 - [type ModelPickerConfig](<#ModelPickerConfig>)
 - [type ModelPickerMode](<#ModelPickerMode>)
+- [type ModelSlots](<#ModelSlots>)
 - [type NonRetryableError](<#NonRetryableError>)
 - [type ParameterProperty](<#ParameterProperty>)
 - [type PricingSyncer](<#PricingSyncer>)
@@ -267,6 +287,12 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(ps \*PricingSyncer\) Sync\(ctx context.Context\) error](<#PricingSyncer.Sync>)
   - [func \(ps \*PricingSyncer\) UpdatePrices\(prices map\[string\]\*LivePrice\)](<#PricingSyncer.UpdatePrices>)
 - [type PricingSyncerConfig](<#PricingSyncerConfig>)
+- [type ProcessLogger](<#ProcessLogger>)
+  - [func OpenProcessLogger\(host, port string\) \(\*ProcessLogger, error\)](<#OpenProcessLogger>)
+  - [func \(p \*ProcessLogger\) Close\(\) error](<#ProcessLogger.Close>)
+  - [func \(p \*ProcessLogger\) Stderr\(\) io.Writer](<#ProcessLogger.Stderr>)
+  - [func \(p \*ProcessLogger\) Stdout\(\) io.Writer](<#ProcessLogger.Stdout>)
+  - [func \(p \*ProcessLogger\) Truncate\(\)](<#ProcessLogger.Truncate>)
 - [type ProgressCallback](<#ProgressCallback>)
 - [type ProgressStage](<#ProgressStage>)
 - [type ProviderConfig](<#ProviderConfig>)
@@ -288,6 +314,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func GetProviderByEnvVar\(envVar string\) \(\*ProviderDef, bool\)](<#GetProviderByEnvVar>)
   - [func GetProviderByID\(id string\) \(\*ProviderDef, bool\)](<#GetProviderByID>)
   - [func ListProviders\(transport ProviderTransport\) \[\]ProviderDef](<#ListProviders>)
+  - [func ProvidersFromConfig\(cfg \*ProvidersConfig\) \[\]ProviderDef](<#ProvidersFromConfig>)
 - [type ProviderEntry](<#ProviderEntry>)
 - [type ProviderErrorDetail](<#ProviderErrorDetail>)
   - [func ParseGenericProviderError\(body \[\]byte\) \*ProviderErrorDetail](<#ParseGenericProviderError>)
@@ -365,6 +392,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(m \*RuntimeManager\) RegisterConfig\(providerID string, cfg \*RuntimeConfig, baseURL string\) error](<#RuntimeManager.RegisterConfig>)
   - [func \(m \*RuntimeManager\) RestartProvider\(ctx context.Context, providerID string\) error](<#RuntimeManager.RestartProvider>)
   - [func \(m \*RuntimeManager\) SetMetricsRecorder\(rec MetricsRecorder\)](<#RuntimeManager.SetMetricsRecorder>)
+  - [func \(m \*RuntimeManager\) SetModelsInUse\(set map\[string\]struct\{\}\)](<#RuntimeManager.SetModelsInUse>)
   - [func \(m \*RuntimeManager\) StartAll\(ctx context.Context\) error](<#RuntimeManager.StartAll>)
   - [func \(m \*RuntimeManager\) StartProvider\(ctx context.Context, providerID string\) error](<#RuntimeManager.StartProvider>)
   - [func \(m \*RuntimeManager\) Status\(\) \[\]RuntimeStatus](<#RuntimeManager.Status>)
@@ -373,10 +401,11 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(m \*RuntimeManager\) StopProvider\(ctx context.Context, providerID string\) error](<#RuntimeManager.StopProvider>)
 - [type RuntimeProcess](<#RuntimeProcess>)
   - [func NewRuntimeProcess\(cfg \*RuntimeConfig\) \*RuntimeProcess](<#NewRuntimeProcess>)
+  - [func \(p \*RuntimeProcess\) AlreadyRunning\(\) bool](<#RuntimeProcess.AlreadyRunning>)
   - [func \(p \*RuntimeProcess\) IsRunning\(\) bool](<#RuntimeProcess.IsRunning>)
   - [func \(p \*RuntimeProcess\) PID\(\) int](<#RuntimeProcess.PID>)
   - [func \(p \*RuntimeProcess\) StalePIDRemoval\(\)](<#RuntimeProcess.StalePIDRemoval>)
-  - [func \(p \*RuntimeProcess\) Start\(ctx context.Context\) error](<#RuntimeProcess.Start>)
+  - [func \(p \*RuntimeProcess\) Start\(ctx context.Context, stdout, stderr io.Writer\) error](<#RuntimeProcess.Start>)
   - [func \(p \*RuntimeProcess\) Stop\(ctx context.Context\) error](<#RuntimeProcess.Stop>)
 - [type RuntimeStatus](<#RuntimeStatus>)
 - [type RuntimeType](<#RuntimeType>)
@@ -393,13 +422,11 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type TiktokenTokenizer](<#TiktokenTokenizer>)
   - [func NewTiktokenTokenizer\(encoding string\) \*TiktokenTokenizer](<#NewTiktokenTokenizer>)
   - [func \(t \*TiktokenTokenizer\) CountTokens\(text string\) int](<#TiktokenTokenizer.CountTokens>)
-- [type TokenCache](<#TokenCache>)
-  - [func NewTokenCache\(tokenizer Tokenizer\) \*TokenCache](<#NewTokenCache>)
-  - [func \(c \*TokenCache\) CountTokens\(text string\) int](<#TokenCache.CountTokens>)
 - [type TokenCacheCoordinator](<#TokenCacheCoordinator>)
   - [func NewTokenCacheCoordinator\(config CacheConfig\) \(\*TokenCacheCoordinator, error\)](<#NewTokenCacheCoordinator>)
   - [func NewTokenCacheCoordinatorWithMetrics\(config CacheConfig, metricsStore \*metrics.Store\) \(\*TokenCacheCoordinator, error\)](<#NewTokenCacheCoordinatorWithMetrics>)
   - [func \(c \*TokenCacheCoordinator\) Clear\(\)](<#TokenCacheCoordinator.Clear>)
+  - [func \(c \*TokenCacheCoordinator\) ClearByModelPrefix\(prefix string\) int](<#TokenCacheCoordinator.ClearByModelPrefix>)
   - [func \(c \*TokenCacheCoordinator\) Close\(\) error](<#TokenCacheCoordinator.Close>)
   - [func \(c \*TokenCacheCoordinator\) Get\(ctx context.Context, key CacheKey\) \(\*CacheEntry, bool\)](<#TokenCacheCoordinator.Get>)
   - [func \(c \*TokenCacheCoordinator\) Inspect\(promptHash string\) \[\]InspectResult](<#TokenCacheCoordinator.Inspect>)
@@ -841,6 +868,34 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 
 BackoffWithJitter computes a backoff duration with optional full jitter. If useJitter is true, returns a uniform random duration in \[0, delay\]. If useJitter is false, returns min\(delay, maxDelay\).
 
+<a name="BuildModelsInUse"></a>
+## func BuildModelsInUse
+
+	func BuildModelsInUse(agents []AgentModelRef, slots ModelSlots, aliases map[string]ModelAliasEntry, disabled []string) map[string]struct{}
+
+BuildModelsInUse computes the set of "provider/model" identifiers that should gate local runtime startup at daemon boot. Sources, in order:
+
+1. enabled agent definitions \(agent.Model in provider/model form\)
+2. the four models.json5 slots \(model, small\_model, classifier\_model, summarizer\_model\)
+3. alias expansion \(single\-level\): for any added value that names an alias, each model in that alias's Models list is also included
+4. disabled\-providers filter: any model whose provider appears in \`disabled\` is removed from the set.
+
+Values without a "/" separator are skipped \(with a debug log\) since they cannot be matched against provider/model\-key form.
+
+<a name="ClassificationUserGuidance"></a>
+## func ClassificationUserGuidance
+
+	func ClassificationUserGuidance(err error) string
+
+ClassificationUserGuidance returns a user\-friendly message explaining why classification failed and what the user can do about it.
+
+<a name="ComputeEndpointKey"></a>
+## func ComputeEndpointKey
+
+	func ComputeEndpointKey(runtime, baseURL string) string
+
+ComputeEndpointKey returns a deterministic key for the \(runtime, baseURL\) triplet in the form \`\<runtime\>:\<host\>:\<port\>\`. Host defaults to 127.0.0.1 and port defaults to 8080 when absent in baseURL.
+
 <a name="ContainsSupportedRuntime"></a>
 ## func ContainsSupportedRuntime
 
@@ -876,6 +931,13 @@ EstimateTokenCountHeuristic estimates tokens using the 3 chars/token heuristic. 
 
 FormatPIDFilePath validates and returns an absolute PID file path.
 
+<a name="IsLoopbackBaseURL"></a>
+## func IsLoopbackBaseURL
+
+	func IsLoopbackBaseURL(baseURL string) bool
+
+IsLoopbackBaseURL reports whether the baseURL's host is a loopback address. Returns false for empty or unparseable URLs, and for any non\-loopback host \(private ranges, public IPs, link\-local, etc.\).
+
 <a name="IsNonRetryable"></a>
 ## func IsNonRetryable
 
@@ -895,7 +957,9 @@ IsNonRetryable checks if an error is non\-retryable.
 
 	func IsRateLimitErrorMessage(errMsg string) bool
 
+IsRateLimitErrorMessage is a string\-only fallback for rate\-limit detection.
 
+Deprecated: Use errcls.IsRateLimit\(err\) with a structured error value. This function is retained for callers that only have the serialized error string \(e.g. errors deserialized from the message bus\). It will not be removed until all such callers are migrated to pass the original error value.
 
 <a name="IsSupportedRuntime"></a>
 ## func IsSupportedRuntime
@@ -955,6 +1019,16 @@ APIError is returned when the remote API returns an error response.
 	func (e *APIError) UserMessage() string
 
 
+
+<a name="AgentModelRef"></a>
+## type AgentModelRef
+
+AgentModelRef is a minimal view of an agent definition used by BuildModelsInUse. Callers adapt from config.AgentDefinition.
+
+	type AgentModelRef struct {
+	    Model   string
+	    Enabled bool
+	}
 
 <a name="AliasEntry"></a>
 ## type AliasEntry
@@ -1102,6 +1176,7 @@ BrokerConfig configures a ModelBroker.
 	    TimeoutCalc     *metrics.Calculator
 	    Budget          *Budget
 	    TokenCache      ResponseCache
+	    TokenResolver   TokenResolver
 	    Logger          *slog.Logger
 	}
 
@@ -1172,6 +1247,13 @@ GetStatus returns a snapshot of current budget status.
 
 RecordCost records a dollar cost against the budget.
 
+<a name="Budget.RecordCostWithScope"></a>
+### func \(\*Budget\) RecordCostWithScope
+
+	func (b *Budget) RecordCostWithScope(r CostRecord, taskID, sessionID string)
+
+RecordCostWithScope records a dollar cost and tracks it per\-task and per\-session.
+
 <a name="Budget.RecordSessionUsage"></a>
 ### func \(\*Budget\) RecordSessionUsage
 
@@ -1207,12 +1289,26 @@ RecordUsageWithScope records token usage and tracks it per\-task and per\-sessio
 
 RemoveSession removes a completed session's tracking entry.
 
+<a name="Budget.RemoveSessionCost"></a>
+### func \(\*Budget\) RemoveSessionCost
+
+	func (b *Budget) RemoveSessionCost(_ context.Context, sessionID string)
+
+RemoveSessionCost removes a completed session's cost tracking entry.
+
 <a name="Budget.RemoveTask"></a>
 ### func \(\*Budget\) RemoveTask
 
 	func (b *Budget) RemoveTask(_ context.Context, taskID string)
 
 RemoveTask removes a completed task's tracking entry.
+
+<a name="Budget.RemoveTaskCost"></a>
+### func \(\*Budget\) RemoveTaskCost
+
+	func (b *Budget) RemoveTaskCost(_ context.Context, taskID string)
+
+RemoveTaskCost removes a completed task's cost tracking entry.
 
 <a name="Budget.StartPeriodicCleanup"></a>
 ### func \(\*Budget\) StartPeriodicCleanup
@@ -1227,6 +1323,8 @@ StartPeriodicCleanup starts a background goroutine that periodically removes tas
 	func (b *Budget) WaitForRateLimit(ctx context.Context) error
 
 WaitForRateLimit blocks until the RPM rate limit window allows another request. If rateLimitRPM is 0 \(unlimited\), this returns immediately.
+
+LLM\-M1 FIX: This method reserves a rate\-limit slot by appending time.Now\(\) to requestTimestamps when capacity is available. Without the reservation, N concurrent callers would all observe the same spare capacity and all proceed, exceeding RPM. RecordUsage appends again post\-completion; the reservation is a conservative over\-count that is safe for rate limiting.
 
 <a name="BudgetCheckResult"></a>
 ## type BudgetCheckResult
@@ -1246,14 +1344,16 @@ BudgetCheckResult describes the outcome of a budget check. If Exceeded is true, 
 BudgetConfig holds configuration for token budget tracking.
 
 	type BudgetConfig struct {
-	    HourlyLimit      int
-	    DailyLimit       int
-	    DailyCostLimit   float64 // Max dollar cost per UTC day (0 = no limit)
-	    HourlyCostLimit  float64 // Max dollar cost per sliding hour (0 = no limit)
-	    RateLimitRPM     int
-	    Aggressiveness   float64
-	    PerTaskBudget    int // max tokens per single task (0 = no cap)
-	    PerSessionBudget int // max tokens per single session (0 = no cap)
+	    HourlyLimit         int
+	    DailyLimit          int
+	    DailyCostLimit      float64 // Max dollar cost per UTC day (0 = no limit)
+	    HourlyCostLimit     float64 // Max dollar cost per sliding hour (0 = no limit)
+	    RateLimitRPM        int
+	    Aggressiveness      float64
+	    PerTaskBudget       int     // max tokens per single task (0 = no cap)
+	    PerSessionBudget    int     // max tokens per single session (0 = no cap)
+	    PerTaskCostLimit    float64 // max USD per single task (0 = no cap)
+	    PerSessionCostLimit float64 // max USD per single session (0 = no cap)
 	}
 
 <a name="BudgetExceededError"></a>
@@ -1299,12 +1399,14 @@ BudgetLimit identifies which budget limit was exceeded.
 <a name="BudgetLimitHourlyTokens"></a>
 
 	const (
-	    BudgetLimitHourlyTokens BudgetLimit = "hourly_token"
-	    BudgetLimitDailyTokens  BudgetLimit = "daily_token"
-	    BudgetLimitHourlyCost   BudgetLimit = "hourly_cost"
-	    BudgetLimitDailyCost    BudgetLimit = "daily_cost"
-	    BudgetLimitPerTask      BudgetLimit = "per_task"
-	    BudgetLimitPerSession   BudgetLimit = "per_session"
+	    BudgetLimitHourlyTokens   BudgetLimit = "hourly_token"
+	    BudgetLimitDailyTokens    BudgetLimit = "daily_token"
+	    BudgetLimitHourlyCost     BudgetLimit = "hourly_cost"
+	    BudgetLimitDailyCost      BudgetLimit = "daily_cost"
+	    BudgetLimitPerTask        BudgetLimit = "per_task"
+	    BudgetLimitPerSession     BudgetLimit = "per_session"
+	    BudgetLimitPerTaskCost    BudgetLimit = "per_task_cost"
+	    BudgetLimitPerSessionCost BudgetLimit = "per_session_cost"
 	)
 
 <a name="BudgetLimit.Message"></a>
@@ -1486,6 +1588,10 @@ ChatMessage represents a single message in a chat conversation.
 	    Name       string     `json:"name,omitempty"`
 	    ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	    ToolCallID string     `json:"tool_call_id,omitempty"`
+	    // IsToolError indicates that this tool-role message represents a failed
+	    // tool execution. Used by the Anthropic client to set the IsError flag
+	    // on tool_result blocks. Not serialized to external APIs (set per-trip).
+	    IsToolError bool `json:"-"`
 	    // SummaryLevel tracks the hierarchical summarization depth for this
 	    // message. 0 = original, 1 = first-level summary, 2 = summary of
 	    // summaries, etc. Not serialized to external APIs.
@@ -1537,6 +1643,13 @@ WithPresencePenalty sets the presence penalty for the chat request.
 	func WithStopSequences(seqs []string) ChatOption
 
 WithStopSequences sets the stop sequences for the chat request.
+
+<a name="WithTaskScope"></a>
+### func WithTaskScope
+
+	func WithTaskScope(taskID, sessionID string) ChatOption
+
+WithTaskScope sets the task and session scope for budget tracking.
 
 <a name="WithTemperature"></a>
 ### func WithTemperature
@@ -1626,6 +1739,30 @@ Choice represents a single choice in the response.
 	    FinishReason string          `json:"finish_reason"`
 	}
 
+<a name="ClassificationFailureKind"></a>
+## type ClassificationFailureKind
+
+ClassificationFailureKind categorizes why LLM classification failed.
+
+	type ClassificationFailureKind string
+
+<a name="ClassificationFailureEmptyResponse"></a>
+
+	const (
+	    ClassificationFailureEmptyResponse ClassificationFailureKind = "empty_response"
+	    ClassificationFailureUnavailable   ClassificationFailureKind = "model_unavailable"
+	    ClassificationFailureBudget        ClassificationFailureKind = "budget_exhausted"
+	    ClassificationFailureTimeout       ClassificationFailureKind = "timeout"
+	    ClassificationFailureUnknown       ClassificationFailureKind = "unknown"
+	)
+
+<a name="ClassifyClassificationFailure"></a>
+### func ClassifyClassificationFailure
+
+	func ClassifyClassificationFailure(err error) ClassificationFailureKind
+
+ClassifyClassificationFailure determines the failure kind from an error. Uses errors.As/Is for structured error types; falls back to substring matching only for errors that lack a structured type \(e.g. empty response\).
+
 <a name="Client"></a>
 ## type Client
 
@@ -1661,7 +1798,7 @@ Chat sends a chat completion request and returns the parsed response.
 
 	func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessage, onDelta DeltaCallback, opts ...ChatOption) (*Response, error)
 
-ChatWithDeltaCallback sends a streaming chat completion request and invokes onDelta for each content chunk. If onDelta returns a non\-nil error, the stream is cancelled and that error is returned. The final accumulated Response is returned on successful completion.
+ChatWithDeltaCallback sends a streaming chat completion request and invokes onDelta for each content chunk. If onDelta returns a non\-nil error, the stream is cancelled and that error is returned. The final accumulated Response is returned on successful completion. D4: Added retry with resume capability for transient errors.
 
 <a name="Client.ChatWithProgress"></a>
 ### func \(\*Client\) ChatWithProgress
@@ -1683,6 +1820,13 @@ Close closes the client \(releases resources\).
 	func (c *Client) Config() *ModelConfig
 
 
+
+<a name="Client.SetMetricsStore"></a>
+### func \(\*Client\) SetMetricsStore
+
+	func (c *Client) SetMetricsStore(store *metrics.Store)
+
+SetMetricsStore sets the metrics store after client creation. This is used when the metrics store is created after the client \(e.g. in daemon wiring where the store lives in daemon.go\).
 
 <a name="Client.SwitchModel"></a>
 ### func \(\*Client\) SwitchModel
@@ -1735,6 +1879,13 @@ ClientOption is a functional option for configuring a Client.
 	func WithBudget(budget *Budget) ClientOption
 
 WithBudget sets the token budget for the client.
+
+<a name="WithConcurrencyLimit"></a>
+### func WithConcurrencyLimit
+
+	func WithConcurrencyLimit(maxConcurrency int) ClientOption
+
+WithConcurrencyLimit sets the maximum concurrent requests for this client. When maxConcurrency is 0 or negative, no limit is enforced \(unlimited\). The limit is enforced using a semaphore \(buffered channel\).
 
 <a name="WithExtraHeaders"></a>
 ### func WithExtraHeaders
@@ -1941,14 +2092,14 @@ Snapshot returns a point\-in\-time copy of the stats fields as plain values.
 
 	func (c *ContextCompactor) FileOperations() *FileOperationSet
 
-
+FileOperations returns a snapshot of the tracked file operations. Acquires RLock because Compact\(\) writes c.fileOps under the write lock. The returned pointer is a snapshot copy, safe for independent use.
 
 <a name="ContextCompactor.LastSummary"></a>
 ### func \(\*ContextCompactor\) LastSummary
 
 	func (c *ContextCompactor) LastSummary() string
 
-
+LastSummary returns the most recent compaction summary. Acquires RLock because Compact\(\) writes c.lastSummary under the write lock.
 
 <a name="ContextCompressor"></a>
 ## type ContextCompressor
@@ -2062,9 +2213,9 @@ DerivedIterationBudget returns the iteration \(per\-turn\) token budget.
 <a name="ContextFirewall.SetCompactor"></a>
 ### func \(\*ContextFirewall\) SetCompactor
 
-	func (f *ContextFirewall) SetCompactor(compactor *ContextCompactor)
+	func (f *ContextFirewall) SetCompactor(compactor *ContextCompactor, triggerRatio ...float64)
 
-SetCompactor sets the ContextCompactor for smart summarization.
+SetCompactor sets the ContextCompactor for smart summarization. The write to f.compactor / f.compactorTriggerRatio happens under the compactorMu write lock; the propagation to f.compressor \(which has its own internal mutex\) is performed outside the lock to avoid lock\-ordering issues.
 
 <a name="ContextFirewall.Stats"></a>
 ### func \(\*ContextFirewall\) Stats
@@ -2284,6 +2435,10 @@ FirewallStats is a snapshot of firewall counters including compression stats.
 	    // Quality metrics (populated when ProactiveCompression is enabled)
 	    AvgQualityScore   float64 // Running average quality score across compressions
 	    TotalCompressions uint64  // Total number of compression passes applied
+	    // Compaction stats (direct compactor trigger in processMessages)
+	    CompactionEvents      uint64
+	    CompactionFallbacks   uint64
+	    CompactionTokensSaved uint64
 	}
 
 <a name="FunctionDef"></a>
@@ -2431,6 +2586,13 @@ NewL1Cache creates a new L1 in\-memory cache.
 
 Clear removes all entries.
 
+<a name="L1Cache.ClearByKeyPrefix"></a>
+### func \(\*L1Cache\) ClearByKeyPrefix
+
+	func (c *L1Cache) ClearByKeyPrefix(prefix string) int
+
+ClearByKeyPrefix removes all entries whose composite key starts with the given prefix. L1 keys are formatted as "modelID:promptHash:..." so a model ID prefix filters by model. Returns the number of entries removed.
+
 <a name="L1Cache.Count"></a>
 ### func \(\*L1Cache\) Count
 
@@ -2443,7 +2605,7 @@ Count returns the number of entries.
 
 	func (c *L1Cache) Get(key CacheKey) (*CacheEntry, bool)
 
-Get retrieves an entry from the cache.
+Get retrieves an entry from the cache. Expired entries are deleted under the write lock to prevent the race where an intervening Put re\-inserts a fresh entry that this method would skip.
 
 <a name="L1Cache.Inspect"></a>
 ### func \(\*L1Cache\) Inspect
@@ -2541,6 +2703,13 @@ NewL2Cache creates a new L2 SQLite\-backed cache. The database is opened lazily 
 	func (c *L2Cache) Clear()
 
 Clear removes all entries from the cache.
+
+<a name="L2Cache.ClearByModelPrefix"></a>
+### func \(\*L2Cache\) ClearByModelPrefix
+
+	func (c *L2Cache) ClearByModelPrefix(prefix string) int
+
+ClearByModelPrefix removes all cache entries whose model\_id starts with the given prefix. Returns the number of entries removed.
 
 <a name="L2Cache.Close"></a>
 ### func \(\*L2Cache\) Close
@@ -2701,7 +2870,7 @@ NewModelBroker creates a new model broker.
 
 	func (b *ModelBroker) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error)
 
-Chat sends a request to the broker, which routes to a healthy provider. If no healthy provider exists and fallback is enabled, uses the fallback model.
+Chat sends a request to the broker, which routes to a healthy provider. D2 FIX: On runtime failure \(5xx/rate\-limit\), iterates through remaining healthy providers before falling back or failing.
 
 <a name="ModelBroker.ChatWithModel"></a>
 ### func \(\*ModelBroker\) ChatWithModel
@@ -2722,7 +2891,7 @@ ChatWithModelProgress sends a request to a specific model with progress reportin
 
 	func (b *ModelBroker) ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error)
 
-ChatWithProgress sends a request with progress reporting.
+ChatWithProgress sends a request with progress reporting. D2 FIX: On runtime failure \(5xx/rate\-limit\), iterates through remaining healthy providers before falling back or failing.
 
 <a name="ModelBroker.ChatterForModel"></a>
 ### func \(\*ModelBroker\) ChatterForModel
@@ -2817,6 +2986,13 @@ ModelConfig holds configuration for a specific LLM model endpoint.
 	    // ExtraHeaders are additional HTTP headers sent with every request.
 	    // For example, GitHub Models requires X-GitHub-Api-Version.
 	    ExtraHeaders map[string]string
+	    // Timeout is the per-request timeout in seconds.
+	    // When 0, the default timeout (120s) is used.
+	    Timeout time.Duration
+	    // MaxConcurrency is the maximum number of concurrent requests allowed
+	    // to this model/provider. When 0, no limit is enforced (unlimited).
+	    // Use this to prevent overwhelming rate-limited APIs or local LLMs.
+	    MaxConcurrency int
 	}
 
 <a name="GetAllModels"></a>
@@ -2860,14 +3036,45 @@ TotalCost returns the total cost per million tokens \(input \+ output\).
 ModelDef represents a model definition in the config.
 
 	type ModelDef struct {
-	    Name         string   `json:"name"`
-	    Capabilities []string `json:"capabilities"`
-	    InputCost    float64  `json:"input_cost"`
-	    OutputCost   float64  `json:"output_cost"`
-	    ContextLimit int      `json:"context_limit"`
-	    MaxOutput    int      `json:"max_output"`
-	    Temperature  float64  `json:"temperature"`
+	    Name           string   `json:"name"`
+	    Capabilities   []string `json:"capabilities"`
+	    InputCost      float64  `json:"input_cost"`
+	    OutputCost     float64  `json:"output_cost"`
+	    ContextLimit   int      `json:"context_limit"`
+	    MaxOutput      int      `json:"max_output"`
+	    Temperature    float64  `json:"temperature"`
+	    MaxConcurrency int      `json:"max_concurrency"` // Max concurrent requests (0 = unlimited)
 	}
+
+<a name="ModelLogger"></a>
+## type ModelLogger
+
+ModelLogger emits structured per\-model lifecycle events as JSON lines.
+
+	type ModelLogger struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="OpenModelLogger"></a>
+### func OpenModelLogger
+
+	func OpenModelLogger(providerID, modelKey string) (*ModelLogger, error)
+
+OpenModelLogger opens \(creating if needed\) a per\-model JSON\-line log file at \`\~/.meept/logs/runtimes/\<providerID\>\-\<modelKey\>.log\`. On open failure it returns a logger backed by os.Stderr with a nil file so callers can proceed.
+
+<a name="ModelLogger.Close"></a>
+### func \(\*ModelLogger\) Close
+
+	func (m *ModelLogger) Close() error
+
+Close closes the underlying file if owned. Best\-effort.
+
+<a name="ModelLogger.Log"></a>
+### func \(\*ModelLogger\) Log
+
+	func (m *ModelLogger) Log(event string, kv ...any)
+
+Log writes an event with arbitrary key/value pairs.
 
 <a name="ModelPicker"></a>
 ## type ModelPicker
@@ -2938,6 +3145,7 @@ ModelPickerConfig holds configuration for the picker.
 	    AllowCustom       bool
 	    PreselectProvider string
 	    PreselectModel    string
+	    ProvidersConfig   *ProvidersConfig // If set, custom providers from config are merged in
 	}
 
 <a name="ModelPickerMode"></a>
@@ -2953,6 +3161,18 @@ ModelPickerMode defines the current picker mode.
 	    ModeSelectProvider ModelPickerMode = iota
 	    ModeSelectModel
 	)
+
+<a name="ModelSlots"></a>
+## type ModelSlots
+
+ModelSlots bundles the four slot fields from ProvidersConfig / models.json5.
+
+	type ModelSlots struct {
+	    Model           string
+	    SmallModel      string
+	    ClassifierModel string
+	    SummarizerModel string
+	}
 
 <a name="NonRetryableError"></a>
 ## type NonRetryableError
@@ -3046,6 +3266,52 @@ PricingSyncerConfig configures the pricing syncer.
 	    HTTPTimeout   time.Duration // Per-request timeout (default: 30s)
 	    Logger        *slog.Logger
 	}
+
+<a name="ProcessLogger"></a>
+## type ProcessLogger
+
+ProcessLogger wraps two rotatingWriter instances sharing the same file with different line prefixes \("out: " and "err: "\).
+
+	type ProcessLogger struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="OpenProcessLogger"></a>
+### func OpenProcessLogger
+
+	func OpenProcessLogger(host, port string) (*ProcessLogger, error)
+
+OpenProcessLogger opens \(creating if needed\) the per\-process raw subprocess log at \`\~/.meept/logs/runtimes/\<host\>\-\<port\>.process.log\`. On failure, returns a logger whose writers fall back to os.Stderr.
+
+Both stdout and stderr writers share the same underlying \*os.File \(via a shared \*\*os.File\), the same \*int64 byte counter, and the same \*sync.Mutex. This ensures concurrent writes are serialized and rotation is visible to both writers — without the shared pointer, rotation on one writer would leave the partner writer holding a closed fd.
+
+<a name="ProcessLogger.Close"></a>
+### func \(\*ProcessLogger\) Close
+
+	func (p *ProcessLogger) Close() error
+
+Close closes the underlying file.
+
+<a name="ProcessLogger.Stderr"></a>
+### func \(\*ProcessLogger\) Stderr
+
+	func (p *ProcessLogger) Stderr() io.Writer
+
+Stderr returns the writer for subprocess stderr.
+
+<a name="ProcessLogger.Stdout"></a>
+### func \(\*ProcessLogger\) Stdout
+
+	func (p *ProcessLogger) Stdout() io.Writer
+
+Stdout returns the writer for subprocess stdout.
+
+<a name="ProcessLogger.Truncate"></a>
+### func \(\*ProcessLogger\) Truncate
+
+	func (p *ProcessLogger) Truncate()
+
+Truncate truncates the underlying file \(called on fresh spawn\).
 
 <a name="ProgressCallback"></a>
 ## type ProgressCallback
@@ -3226,6 +3492,13 @@ GetProviderByID looks up a provider by its canonical ID.
 
 ListProviders returns all providers, optionally filtered by transport type.
 
+<a name="ProvidersFromConfig"></a>
+### func ProvidersFromConfig
+
+	func ProvidersFromConfig(cfg *ProvidersConfig) []ProviderDef
+
+ProvidersFromConfig builds ProviderDef entries from a ProvidersConfig \(models.json5\). Each key in cfg.Providers that doesn't match a canonical provider ID is treated as a user\-defined OpenAI\-compatible provider. Canonical providers get their BaseURL/APIKey overridden from config if present.
+
 <a name="ProviderEntry"></a>
 ## type ProviderEntry
 
@@ -3298,6 +3571,7 @@ ProviderHealth tracks health metrics for a provider.
 	    TotalCost        float64        `json:"total_cost"`
 	    TotalTokens      int64          `json:"total_tokens"`
 	    LastError        string         `json:"last_error,omitempty"`
+	    // contains filtered or unexported fields
 	}
 
 <a name="ProviderManager"></a>
@@ -3335,7 +3609,7 @@ Chat sends a chat completion request with automatic failover.
 
 	func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error)
 
-ChatWithProgress sends a chat completion request with progress reporting. For ProviderManager, progress callbacks are not fully supported across failover, so this just calls Chat\(\) without progress.
+ChatWithProgress sends a chat completion request with progress reporting. Attempts each provider in order, calling progress callback on attempt starts and failures.
 
 <a name="ProviderManager.Config"></a>
 ### func \(\*ProviderManager\) Config
@@ -3530,6 +3804,8 @@ ProvidersConfig represents the full models.json5 configuration.
 	type ProvidersConfig struct {
 	    Model             string                     `json:"model"`
 	    SmallModel        string                     `json:"small_model"`
+	    ClassifierModel   string                     `json:"classifier_model"`
+	    SummarizerModel   string                     `json:"summarizer_model"`
 	    DisabledProviders []string                   `json:"disabled_providers"`
 	    ModelAliases      map[string]ModelAliasEntry `json:"model_aliases"`
 	    Providers         map[string]ProviderConfig  `json:"providers"`
@@ -3703,7 +3979,12 @@ HasAlias checks if an alias exists.
 
 	func (r *Resolver) HasHealthyModels(aliasName string) bool
 
-HasHealthyModels checks if an alias has any models that are not in cooldown.
+HasHealthyModels reports whether an alias has at least one model that can serve a request right now. A model is considered healthy if:
+
+- It is the currently active model AND not in cooldown, OR
+- It is a non\-current model \(always available for rotation, per the ResolveForAlias rotation semantics\)
+
+Because non\-current models are always considered available, this function only returns false when the alias has exactly one model AND that single model is currently in cooldown.
 
 <a name="Resolver.RecordAliasFailure"></a>
 ### func \(\*Resolver\) RecordAliasFailure
@@ -3870,7 +4151,10 @@ RuntimeConfig holds validated runtime configuration.
 
 	type RuntimeConfig struct {
 	    Type               RuntimeType
-	    ModelPath          string
+	    ModelPath          string            // Backward-compat: first declared path (or legacy path)
+	    ModelPaths         map[string]string // modelKey -> path, used for spawn-command variable expansion. For legacy single-model configs the key is "default".
+	    ModelKeys          []string          // authoritative provider model IDs; used for the in-use gate and per-model logger naming. Populated by RegisterConfig from the provider's models map; falls back to ModelPaths keys when the caller does not supply real model IDs.
+	    EndpointKey        string
 	    PIDFile            string
 	    AutoStart          bool
 	    AutoStop           bool
@@ -3891,7 +4175,7 @@ RuntimeConfig holds validated runtime configuration.
 
 	func ValidateAndNormalize(cfg RuntimeLifecycleConfig) (*RuntimeConfig, error)
 
-ValidateAndNormalize validates the config and expands paths.
+ValidateAndNormalize validates the config and expands paths. Supports both legacy \`model\_path\` \(single\) and \`model\_paths\` \(multi\-model\). When \`model\_paths\` is empty and \`model\_path\` is set, the latter is mirrored under the "default" key for a uniform downstream representation.
 
 <a name="RuntimeLifecycleConfig"></a>
 ## type RuntimeLifecycleConfig
@@ -3900,7 +4184,8 @@ RuntimeLifecycleConfig holds configuration for local LLM runtime management.
 
 	type RuntimeLifecycleConfig struct {
 	    Runtime        string              `json:"runtime"`           // "llama-cpp" or "mlx"
-	    ModelPath      string              `json:"model_path"`        // Path to model file
+	    ModelPath      string              `json:"model_path"`        // Legacy single-model path
+	    ModelPaths     map[string]string   `json:"model_paths"`       // Multi-model map: modelKey -> path
 	    AutoStart      bool                `json:"auto_start"`        // Auto-start on daemon startup
 	    AutoStopOnExit bool                `json:"auto_stop_on_exit"` // Stop on daemon shutdown
 	    PIDFile        string              `json:"pid_file"`          // Path to PID file
@@ -3913,7 +4198,7 @@ RuntimeLifecycleConfig holds configuration for local LLM runtime management.
 <a name="RuntimeManager"></a>
 ## type RuntimeManager
 
-RuntimeManager manages local LLM runtime lifecycle.
+RuntimeManager manages local LLM runtime lifecycle. Processes are shared by endpoint key \(runtime:host:port\); each registered provider contributes models and per\-model loggers but the subprocess is spawned/stopped once per endpoint.
 
 	type RuntimeManager struct {
 	    // contains filtered or unexported fields
@@ -3938,7 +4223,9 @@ GetHealthChecker returns the health checker for a provider.
 
 	func (m *RuntimeManager) RegisterConfig(providerID string, cfg *RuntimeConfig, baseURL string) error
 
-RegisterConfig registers a runtime configuration.
+RegisterConfig registers a runtime configuration. If the endpoint key \(cfg.EndpointKey or derived from baseURL\) already exists, this provider's models are merged into the existing process; spawn\_command on the first registration wins. Per\-model loggers are opened and a \`register\` event is logged for each model key.
+
+Model identity resolution: the in\-use gate and per\-model loggers key on the provider's real model IDs \(cfg.ModelKeys when populated by the caller\). When cfg.ModelKeys is empty \(legacy callers\), it falls back to the cfg.ModelPaths map keys — for legacy single\-model configs synthesized under the "default" key, this means the gate will look for "\<provider\>/default" unless the daemon pre\-populates ModelKeys from the provider's models map.
 
 <a name="RuntimeManager.RestartProvider"></a>
 ### func \(\*RuntimeManager\) RestartProvider
@@ -3954,19 +4241,26 @@ RestartProvider restarts a specific provider's runtime.
 
 SetMetricsRecorder sets the metrics recorder for runtime events.
 
+<a name="RuntimeManager.SetModelsInUse"></a>
+### func \(\*RuntimeManager\) SetModelsInUse
+
+	func (m *RuntimeManager) SetModelsInUse(set map[string]struct{})
+
+SetModelsInUse sets the in\-use set used by StartAll to gate spawning.
+
 <a name="RuntimeManager.StartAll"></a>
 ### func \(\*RuntimeManager\) StartAll
 
 	func (m *RuntimeManager) StartAll(ctx context.Context) error
 
-StartAll starts all registered runtimes with auto\_start=true.
+StartAll starts all registered runtimes with auto\_start=true whose endpoint has at least one model in the in\-use set.
 
 <a name="RuntimeManager.StartProvider"></a>
 ### func \(\*RuntimeManager\) StartProvider
 
 	func (m *RuntimeManager) StartProvider(ctx context.Context, providerID string) error
 
-StartProvider starts a specific provider's runtime.
+StartProvider starts a specific provider's runtime \(and, since the process is shared, all models on the same endpoint\).
 
 <a name="RuntimeManager.Status"></a>
 ### func \(\*RuntimeManager\) Status
@@ -3987,19 +4281,19 @@ StatusForProvider returns the status of a specific provider.
 
 	func (m *RuntimeManager) StopAll(ctx context.Context) error
 
-StopAll stops all running runtimes that have auto\_stop\_on\_exit=true.
+StopAll stops all running runtimes that have auto\_stop\_on\_exit=true. Processes are keyed by endpoint so the shared subprocess is stopped once.
 
 <a name="RuntimeManager.StopProvider"></a>
 ### func \(\*RuntimeManager\) StopProvider
 
 	func (m *RuntimeManager) StopProvider(ctx context.Context, providerID string) error
 
-StopProvider stops a specific provider's runtime.
+StopProvider stops a specific provider's runtime \(and the shared subprocess\).
 
 <a name="RuntimeProcess"></a>
 ## type RuntimeProcess
 
-RuntimeProcess manages a spawned LLM runtime process.
+RuntimeProcess manages a spawned LLM runtime process. All fields are protected by mu to prevent data races between Start, Stop, PID, and IsRunning callers \(e.g. RuntimeManager.Status runs concurrently with StartProvider/StopProvider\).
 
 	type RuntimeProcess struct {
 	    // contains filtered or unexported fields
@@ -4011,6 +4305,13 @@ RuntimeProcess manages a spawned LLM runtime process.
 	func NewRuntimeProcess(cfg *RuntimeConfig) *RuntimeProcess
 
 NewRuntimeProcess creates a new process manager.
+
+<a name="RuntimeProcess.AlreadyRunning"></a>
+### func \(\*RuntimeProcess\) AlreadyRunning
+
+	func (p *RuntimeProcess) AlreadyRunning() bool
+
+AlreadyRunning reports whether the runtime process is already running according to the PID file. Returns true when the PID file exists, parses, and the identified process is alive \(signal\-0 succeeds\). Callers use this to decide whether to truncate the process log before calling Start: an already\-running process should not have its log truncated because no new subprocess will be spawned.
 
 <a name="RuntimeProcess.IsRunning"></a>
 ### func \(\*RuntimeProcess\) IsRunning
@@ -4036,9 +4337,9 @@ StalePIDRemoval cleans up a stale PID file for a given runtime config. This is u
 <a name="RuntimeProcess.Start"></a>
 ### func \(\*RuntimeProcess\) Start
 
-	func (p *RuntimeProcess) Start(ctx context.Context) error
+	func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) error
 
-Start spawns the runtime process.
+Start spawns the runtime process. stdout and stderr are used for the subprocess's output streams; nil falls back to os.Stdout/os.Stderr.
 
 <a name="RuntimeProcess.Stop"></a>
 ### func \(\*RuntimeProcess\) Stop
@@ -4053,12 +4354,15 @@ Stop gracefully terminates the runtime process.
 RuntimeStatus describes the current state of a managed runtime.
 
 	type RuntimeStatus struct {
-	    ProviderID string `json:"provider_id"`
-	    Runtime    string `json:"runtime"`
-	    Healthy    bool   `json:"healthy"`
-	    Running    bool   `json:"running"`
-	    PID        int    `json:"pid,omitempty"`
-	    ModelPath  string `json:"model_path"`
+	    ProviderID   string   `json:"provider_id"`
+	    Runtime      string   `json:"runtime"`
+	    Healthy      bool     `json:"healthy"`
+	    Running      bool     `json:"running"`
+	    PID          int      `json:"pid,omitempty"`
+	    ModelPath    string   `json:"model_path"`
+	    ProcessGroup string   `json:"process_group,omitempty"`
+	    InUseModels  []string `json:"in_use_models,omitempty"`
+	    WouldStart   bool     `json:"would_start"`
 	}
 
 <a name="RuntimeType"></a>
@@ -4120,8 +4424,10 @@ Status represents a snapshot of current budget status.
 	    DailyRemaining         int     `json:"daily_remaining"`
 	    PerTaskBudget          int     `json:"per_task_budget"`
 	    PerTaskUsed            int     `json:"per_task_used"`
+	    PerTaskCost            float64 `json:"per_task_cost"`
 	    PerSessionBudget       int     `json:"per_session_budget"`
 	    PerSessionUsed         int     `json:"per_session_used"`
+	    PerSessionCost         float64 `json:"per_session_cost"`
 	    RPMCurrent             int     `json:"rpm_current"`
 	    RPMLimit               int     `json:"rpm_limit"`
 	    Aggressiveness         float64 `json:"aggressiveness"`
@@ -4218,29 +4524,6 @@ If tiktoken fails to load the encoding, falls back to heuristic.
 
 CountTokens returns accurate token count using tiktoken. Falls back to heuristic if tiktoken encoding was not loaded.
 
-<a name="TokenCache"></a>
-## type TokenCache
-
-TokenCache provides caching for token counts to avoid recomputation.
-
-	type TokenCache struct {
-	    // contains filtered or unexported fields
-	}
-
-<a name="NewTokenCache"></a>
-### func NewTokenCache
-
-	func NewTokenCache(tokenizer Tokenizer) *TokenCache
-
-NewTokenCache creates a new token cache wrapping a tokenizer.
-
-<a name="TokenCache.CountTokens"></a>
-### func \(\*TokenCache\) CountTokens
-
-	func (c *TokenCache) CountTokens(text string) int
-
-CountTokens returns cached token count or computes and caches it.
-
 <a name="TokenCacheCoordinator"></a>
 ## type TokenCacheCoordinator
 
@@ -4270,6 +4553,13 @@ NewTokenCacheCoordinatorWithMetrics creates a new token cache coordinator with o
 	func (c *TokenCacheCoordinator) Clear()
 
 Clear removes all entries from both caches.
+
+<a name="TokenCacheCoordinator.ClearByModelPrefix"></a>
+### func \(\*TokenCacheCoordinator\) ClearByModelPrefix
+
+	func (c *TokenCacheCoordinator) ClearByModelPrefix(prefix string) int
+
+ClearByModelPrefix removes all cache entries whose model ID starts with the given prefix. For example, prefix "gpt\-4" removes entries for "gpt\-4", "gpt\-4\-turbo", etc. Returns the number of entries removed.
 
 <a name="TokenCacheCoordinator.Close"></a>
 ### func \(\*TokenCacheCoordinator\) Close

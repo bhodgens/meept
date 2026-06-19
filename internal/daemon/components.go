@@ -1965,11 +1965,43 @@ func (c *Components) Start(ctx context.Context) error {
 		if poolSize <= 0 {
 			poolSize = 4
 		}
-		if err := c.WorkerPool.Start(ctx, poolSize); err != nil {
+
+		// Add agent-specific workers before Start so they are picked up by
+		// the pool's startup loop (which assigns wg and calls worker.Start).
+		// Exclude the dispatcher — it routes jobs but does not execute them.
+		agentIDs := agent.ExecutorAgentIDs()
+		workersPerAgent := 1
+		agentWorkerCount := 0
+		for _, agentID := range agentIDs {
+			if _, err := c.WorkerPool.AddWorker(c.Config.Workers.DefaultCaps, agentID); err != nil {
+				c.Logger.Error("Failed to add agent-specific worker",
+					"agent_id", agentID, "error", err)
+			} else {
+				agentWorkerCount++
+			}
+		}
+
+		// Reserve one general worker slot for unrouted jobs; the remainder of
+		// poolSize is consumed by the agent-specific workers.
+		generalWorkers := poolSize
+		if generalWorkers > 1 {
+			generalWorkers = generalWorkers / 2
+			if generalWorkers < 1 {
+				generalWorkers = 1
+			}
+		}
+
+		if err := c.WorkerPool.Start(ctx, generalWorkers); err != nil {
 			c.Logger.Error("Failed to start worker pool", "error", err)
 		} else {
 			startedHandlers = append(startedHandlers, "pool")
 		}
+
+		c.Logger.Info("Started agent-specific workers",
+			"agent_count", agentWorkerCount,
+			"workers_per_agent", workersPerAgent,
+			"general_workers", generalWorkers,
+		)
 	}
 
 	// Start scheduler

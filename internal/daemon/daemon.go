@@ -394,11 +394,20 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// Wire task collector and response analyzer to agent loop
 	var taskColl *metrics.TaskCollector
 	if metricsStore != nil && components != nil && components.AgentLoop != nil {
-		metricsDBPath := filepath.Join(cfg.StateDir, "metrics.db")
-		tc, err := metrics.NewTaskCollector(metricsDBPath, logger.With("component", "task-collector"))
+		// Share the same *sql.DB handle as the metrics store to avoid
+		// SQLite locking conflicts when both Store and TaskCollector
+		// write to the same metrics.db file concurrently.
+		tc, err := metrics.NewTaskCollectorWithDB(metricsStore.DB(), logger.With("component", "task-collector"))
 		if err != nil {
-			logger.Warn("Failed to create task collector", "error", err)
-		} else {
+			logger.Warn("Failed to create task collector with shared DB, falling back to path-based", "error", err)
+			// Fall back to opening a separate connection (less safe, but keeps the feature working).
+			metricsDBPath := filepath.Join(cfg.StateDir, "metrics.db")
+			tc, err = metrics.NewTaskCollector(metricsDBPath, logger.With("component", "task-collector"))
+			if err != nil {
+				logger.Warn("Failed to create task collector", "error", err)
+			}
+		}
+		if tc != nil {
 			taskColl = tc
 			components.AgentLoop.SetTaskCollector(taskColl)
 			logger.Info("Task collector wired into agent loop")

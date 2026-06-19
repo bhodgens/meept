@@ -17,7 +17,6 @@ Package memory provides memory storage and retrieval for meept.
 - [func ClusterBySimilarity\(ctx context.Context, memories \[\]Memory, threshold float64, embedder EmbeddingProvider\) \(\[\]\[\]Memory, error\)](<#ClusterBySimilarity>)
 - [func ClusterBySimilarityFromResults\(ctx context.Context, results \[\]MemoryResult, threshold float64, embedder EmbeddingProvider, logger \*slog.Logger\) \(\[\]\[\]Memory, error\)](<#ClusterBySimilarityFromResults>)
 - [func ParseMetadata\(jsonStr string\) map\[string\]any](<#ParseMetadata>)
-- [type Backend](<#Backend>)
 - [type ConsolidationBackend](<#ConsolidationBackend>)
 - [type ConsolidationReport](<#ConsolidationReport>)
 - [type Consolidator](<#Consolidator>)
@@ -25,7 +24,6 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(c \*Consolidator\) IsRunning\(\) bool](<#Consolidator.IsRunning>)
   - [func \(c \*Consolidator\) LastRun\(\) \*time.Time](<#Consolidator.LastRun>)
   - [func \(c \*Consolidator\) MergeRelated\(ctx context.Context, memories \[\]MemoryResult\) \(\[\]Summary, error\)](<#Consolidator.MergeRelated>)
-  - [func \(c \*Consolidator\) PruneOld\(ctx context.Context, maxAge time.Duration\) \(int, error\)](<#Consolidator.PruneOld>)
   - [func \(c \*Consolidator\) Run\(ctx context.Context, olderThanHours int\) \(\*ConsolidationReport, error\)](<#Consolidator.Run>)
   - [func \(c \*Consolidator\) StartPeriodicConsolidation\(ctx context.Context, interval time.Duration, olderThanHours int\)](<#Consolidator.StartPeriodicConsolidation>)
   - [func \(c \*Consolidator\) Stop\(\)](<#Consolidator.Stop>)
@@ -175,9 +173,9 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(s \*SQLiteFTSStore\) Delete\(ctx context.Context, query string, args ...any\) error](<#SQLiteFTSStore.Delete>)
   - [func \(s \*SQLiteFTSStore\) DeleteByIDs\(ctx context.Context, tableName string, ids \[\]string\) \(int, error\)](<#SQLiteFTSStore.DeleteByIDs>)
   - [func \(s \*SQLiteFTSStore\) FindDuplicateGroups\(ctx context.Context, tableName string, thresholdChars int\) \(\[\]\[\]string, error\)](<#SQLiteFTSStore.FindDuplicateGroups>)
+  - [func \(s \*SQLiteFTSStore\) GetDB\(\) \*sqlx.DB](<#SQLiteFTSStore.GetDB>)
   - [func \(s \*SQLiteFTSStore\) GetNewestTimestamp\(ctx context.Context, tableName string\) \(\*time.Time, error\)](<#SQLiteFTSStore.GetNewestTimestamp>)
   - [func \(s \*SQLiteFTSStore\) GetOldestTimestamp\(ctx context.Context, tableName string\) \(\*time.Time, error\)](<#SQLiteFTSStore.GetOldestTimestamp>)
-  - [func \(s \*SQLiteFTSStore\) GetPool\(\) \*sqlite.Pool](<#SQLiteFTSStore.GetPool>)
   - [func \(s \*SQLiteFTSStore\) HasFTS5\(\) bool](<#SQLiteFTSStore.HasFTS5>)
   - [func \(s \*SQLiteFTSStore\) HasFTS5Public\(\) bool](<#SQLiteFTSStore.HasFTS5Public>)
   - [func \(s \*SQLiteFTSStore\) Initialize\(ctx context.Context\) error](<#SQLiteFTSStore.Initialize>)
@@ -267,30 +265,6 @@ ClusterBySimilarityFromResults is a convenience wrapper that extracts the underl
 	func ParseMetadata(jsonStr string) map[string]any
 
 ParseMetadata parses a JSON string into metadata.
-
-<a name="Backend"></a>
-## type Backend
-
-Backend is the interface that memory storage backends must implement.
-
-	type Backend interface {
-	    // Initialize sets up the backend.
-	    Initialize() error
-	    // Store persists a memory and returns its ID.
-	    Store(content string, category string, metadata map[string]any) (string, error)
-	    // Search finds memories matching the query.
-	    Search(query string, limit int) ([]MemoryResult, error)
-	    // GetRecent retrieves the most recent memories.
-	    GetRecent(limit int) ([]MemoryResult, error)
-	    // Delete removes a memory by ID.
-	    Delete(id string) error
-	    // DeleteByIDs removes multiple memories by ID.
-	    DeleteByIDs(ids []string) (int, error)
-	    // Count returns the total number of memories.
-	    Count() (int, error)
-	    // Close releases resources.
-	    Close() error
-	}
 
 <a name="ConsolidationBackend"></a>
 ## type ConsolidationBackend
@@ -385,13 +359,6 @@ When an embedding provider is configured, memories are first clustered by semant
 
 When no embedder is set but an LLM client is configured, LLM\-based topic grouping is used. Otherwise, the implementation groups strictly by date \(calendar day\).
 
-<a name="Consolidator.PruneOld"></a>
-### func \(\*Consolidator\) PruneOld
-
-	func (c *Consolidator) PruneOld(ctx context.Context, maxAge time.Duration) (int, error)
-
-PruneOld removes memories older than maxAge.
-
 <a name="Consolidator.Run"></a>
 ### func \(\*Consolidator\) Run
 
@@ -473,8 +440,6 @@ EpisodicConfig holds configuration for episodic memory.
 	type EpisodicConfig struct {
 	    // DataDir is the directory for database files.
 	    DataDir string
-	    // PoolSize is the number of database connections. Default: 5.
-	    PoolSize int
 	    // Logger for operations.
 	    Logger *slog.Logger
 	}
@@ -994,7 +959,7 @@ GetVectorSearcher returns the underlying vector searcher if configured. Returns 
 
 	func (m *Manager) GetVersionHistory(ctx context.Context, id string) ([]Memory, error)
 
-GetVersionHistory retrieves all versions of a memory by ID or parent ID. Uses the SQL parent\_id column for efficient querying.
+GetVersionHistory retrieves all versions of a memory by traversing the full parent\_id chain using a recursive CTE, handling arbitrary depth.
 
 <a name="Manager.Graph"></a>
 ### func \(\*Manager\) Graph
@@ -1101,6 +1066,8 @@ SearchWithGraph searches memories and applies graph\-aware ranking. The alpha pa
 
 StartPeriodicConsolidation starts background consolidation.
 
+This is an alternative to the scheduler\-based consolidation job wired in daemon/components.go \(MemoryOptimizerAdapter\). The scheduler approach is preferred in production because it benefits from cron expressions, logging, and job dependency tracking. Use this method only when running without a scheduler \(e.g., tests or embedded mode\).
+
 <a name="Manager.StartPrefetchService"></a>
 ### func \(\*Manager\) StartPrefetchService
 
@@ -1171,6 +1138,10 @@ ManagerConfig holds configuration for creating a Manager.
 	    // LLM is an optional chat client used for intelligent memory summarization.
 	    // If nil, the consolidator falls back to naive date-based grouping.
 	    LLM llm.Chatter
+	    // Embedder is an optional embedding provider for semantic similarity clustering.
+	    // If set, the consolidator's MergeRelated will cluster memories by embedding
+	    // similarity before falling back to LLM or date-based grouping.
+	    Embedder EmbeddingProvider
 	    // VectorStore is an optional vector store for semantic search.
 	    // If nil, SearchSemantic and SearchHybrid will fall back to keyword search.
 	    VectorStore VectorSearcher
@@ -1602,49 +1573,49 @@ Close releases all resources.
 
 	func (s *SQLiteFTSStore) Count(ctx context.Context, tableName string) (int, error)
 
-Count returns the total number of items.
+Count returns the total number of items. Note: RLock released before I/O per CLAUDE.md \-\- see Store\(\) for rationale.
 
 <a name="SQLiteFTSStore.Delete"></a>
 ### func \(\*SQLiteFTSStore\) Delete
 
 	func (s *SQLiteFTSStore) Delete(ctx context.Context, query string, args ...any) error
 
-Delete executes a delete operation. Returns ErrNotFound if no rows are deleted.
+Delete executes a delete operation. Note: RLock released before I/O per CLAUDE.md \-\- see Store\(\) for rationale. Returns ErrNotFound if no rows are deleted.
 
 <a name="SQLiteFTSStore.DeleteByIDs"></a>
 ### func \(\*SQLiteFTSStore\) DeleteByIDs
 
 	func (s *SQLiteFTSStore) DeleteByIDs(ctx context.Context, tableName string, ids []string) (int, error)
 
-DeleteByIDs removes multiple items by ID.
+DeleteByIDs removes multiple items by ID. Note: RLock released before I/O per CLAUDE.md \-\- see Store\(\) for rationale.
 
 <a name="SQLiteFTSStore.FindDuplicateGroups"></a>
 ### func \(\*SQLiteFTSStore\) FindDuplicateGroups
 
 	func (s *SQLiteFTSStore) FindDuplicateGroups(ctx context.Context, tableName string, thresholdChars int) ([][]string, error)
 
-FindDuplicateGroups finds groups of items with identical content exceeding the threshold.
+FindDuplicateGroups finds groups of items with identical content exceeding the threshold. Note: RLock released before I/O per CLAUDE.md \-\- see Store\(\) for rationale.
+
+<a name="SQLiteFTSStore.GetDB"></a>
+### func \(\*SQLiteFTSStore\) GetDB
+
+	func (s *SQLiteFTSStore) GetDB() *sqlx.DB
+
+GetDB returns the underlying sqlx.DB for custom queries.
 
 <a name="SQLiteFTSStore.GetNewestTimestamp"></a>
 ### func \(\*SQLiteFTSStore\) GetNewestTimestamp
 
 	func (s *SQLiteFTSStore) GetNewestTimestamp(ctx context.Context, tableName string) (*time.Time, error)
 
-GetNewestTimestamp returns the created\_at of the newest item.
+GetNewestTimestamp returns the created\_at of the newest item. Note: RLock released before I/O per CLAUDE.md \-\- see Store\(\) for rationale.
 
 <a name="SQLiteFTSStore.GetOldestTimestamp"></a>
 ### func \(\*SQLiteFTSStore\) GetOldestTimestamp
 
 	func (s *SQLiteFTSStore) GetOldestTimestamp(ctx context.Context, tableName string) (*time.Time, error)
 
-GetOldestTimestamp returns the created\_at of the oldest item.
-
-<a name="SQLiteFTSStore.GetPool"></a>
-### func \(\*SQLiteFTSStore\) GetPool
-
-	func (s *SQLiteFTSStore) GetPool() *sqlite.Pool
-
-GetPool returns the connection pool for custom queries.
+GetOldestTimestamp returns the created\_at of the oldest item. Note: RLock released before I/O per CLAUDE.md \-\- see Store\(\) for rationale.
 
 <a name="SQLiteFTSStore.HasFTS5"></a>
 ### func \(\*SQLiteFTSStore\) HasFTS5
@@ -1686,7 +1657,7 @@ ScanResults scans database rows into a MemoryResult slice using the shared logic
 
 	func (s *SQLiteFTSStore) Store(ctx context.Context, query string, args ...any) error
 
-Store executes a store operation.
+Store executes a store operation. Note: RLock released before I/O per CLAUDE.md "no mutex across I/O" rule. Race window: Close\(\) could fire between unlock and ExecContext. Mitigation: ExecContext returns "database is closed" error, caller handles gracefully. This is a shutdown\-edge\-case only; normal operation is unaffected.
 
 <a name="ScanRowConfig"></a>
 ## type ScanRowConfig
@@ -1736,14 +1707,14 @@ GetByID retrieves a memory by ID. It returns the memory only if it belongs to th
 
 	func (s *ScopedMemoryManager) GetRecent(ctx context.Context, limit int) ([]MemoryResult, error)
 
-GetRecent retrieves the most recent memories belonging to this bot.
+GetRecent retrieves the most recent memories belonging to this bot. A non\-positive limit disables truncation.
 
 <a name="ScopedMemoryManager.GetRelevantContext"></a>
 ### func \(\*ScopedMemoryManager\) GetRelevantContext
 
 	func (s *ScopedMemoryManager) GetRelevantContext(ctx context.Context, query string, maxItems int) ([]MemoryResult, error)
 
-GetRelevantContext retrieves memories relevant to a query, scoped to this bot.
+GetRelevantContext retrieves memories relevant to a query, scoped to this bot. A non\-positive maxItems disables truncation.
 
 <a name="ScopedMemoryManager.GetStats"></a>
 ### func \(\*ScopedMemoryManager\) GetStats
@@ -1771,28 +1742,30 @@ Manager returns the underlying unscoped Manager.
 
 	func (s *ScopedMemoryManager) Search(ctx context.Context, query MemoryQuery) ([]MemoryResult, error)
 
-Search finds memories matching the query, filtering to only those belonging to this bot.
+Search finds memories matching the query, filtering to only those belonging to this bot. It fetches a larger batch from the underlying store so that filtering by bot\_id does not silently truncate results \(e.g. requesting limit=10 but all 10 rows belong to a different bot would previously return an empty slice with no indication\).
+
+A non\-positive query.Limit disables truncation: the caller receives all filtered results \(up to the backend's own limit\). Otherwise the filtered slice is truncated to query.Limit.
 
 <a name="ScopedMemoryManager.SearchHybrid"></a>
 ### func \(\*ScopedMemoryManager\) SearchHybrid
 
 	func (s *ScopedMemoryManager) SearchHybrid(ctx context.Context, query string, limit int) ([]MemoryResult, error)
 
-SearchHybrid performs hybrid search, scoped to this bot.
+SearchHybrid performs hybrid search, scoped to this bot. A non\-positive limit disables truncation.
 
 <a name="ScopedMemoryManager.SearchSemantic"></a>
 ### func \(\*ScopedMemoryManager\) SearchSemantic
 
 	func (s *ScopedMemoryManager) SearchSemantic(ctx context.Context, query string, limit int) ([]MemoryResult, error)
 
-SearchSemantic performs vector similarity search, scoped to this bot.
+SearchSemantic performs vector similarity search, scoped to this bot. A non\-positive limit disables truncation.
 
 <a name="ScopedMemoryManager.SearchWithGraph"></a>
 ### func \(\*ScopedMemoryManager\) SearchWithGraph
 
 	func (s *ScopedMemoryManager) SearchWithGraph(ctx context.Context, query MemoryQuery, alpha float64) ([]MemoryResult, error)
 
-SearchWithGraph performs graph\-aware search, scoped to this bot.
+SearchWithGraph performs graph\-aware search, scoped to this bot. A non\-positive query.Limit disables truncation.
 
 <a name="ScopedMemoryManager.Store"></a>
 ### func \(\*ScopedMemoryManager\) Store
@@ -2010,8 +1983,6 @@ TaskMemoryConfig holds configuration for task memory.
 	    // Domains is the list of knowledge domains to track.
 	    // Defaults to ["general", "code", "commands"].
 	    Domains []string
-	    // PoolSize is the number of database connections. Default: 5.
-	    PoolSize int
 	    // Logger for operations.
 	    Logger *slog.Logger
 	}

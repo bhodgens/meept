@@ -18,7 +18,6 @@ Package config provides configuration loading and validation for meept.
 - [func FilterEnabledAgents\(agents map\[string\]\*AgentDefinition\) map\[string\]\*AgentDefinition](<#FilterEnabledAgents>)
 - [func LoadAgentDefinitions\(configDirs \[\]string\) \(map\[string\]\*AgentDefinition, error\)](<#LoadAgentDefinitions>)
 - [func LoadAgentDefinitionsDefault\(cfg \*AgentsConfig\) \(map\[string\]\*AgentDefinition, error\)](<#LoadAgentDefinitionsDefault>)
-- [func LoadAgentDefinitionsDefaultWithJSON5\(cfg \*AgentsConfig\) \(map\[string\]\*AgentDefinition, error\)](<#LoadAgentDefinitionsDefaultWithJSON5>)
 - [func LoadAgentDefinitionsJSON5\(path string\) \(map\[string\]\*AgentDefinition, error\)](<#LoadAgentDefinitionsJSON5>)
 - [func LoadJSON5\(path string, v any\) error](<#LoadJSON5>)
 - [func LoadJSON5WithDefault\(path string, v any\) error](<#LoadJSON5WithDefault>)
@@ -35,10 +34,11 @@ Package config provides configuration loading and validation for meept.
   - [func \(c AgentConstraintsConfig\) ToTimeout\(\) time.Duration](<#AgentConstraintsConfig.ToTimeout>)
 - [type AgentDefinition](<#AgentDefinition>)
   - [func GetAgentsByRole\(agents map\[string\]\*AgentDefinition, role string\) \[\]\*AgentDefinition](<#GetAgentsByRole>)
-- [type AgentDefinitionJSON5](<#AgentDefinitionJSON5>)
+- [type AgentLintConfig](<#AgentLintConfig>)
 - [type AgentQueuesConfig](<#AgentQueuesConfig>)
+- [type AgentReflectionConfig](<#AgentReflectionConfig>)
 - [type AgentsConfig](<#AgentsConfig>)
-- [type AgentsFileJSON5](<#AgentsFileJSON5>)
+- [type AnalyticsConfig](<#AnalyticsConfig>)
 - [type BotsConfig](<#BotsConfig>)
 - [type BudgetConfig](<#BudgetConfig>)
 - [type CacheConfig](<#CacheConfig>)
@@ -57,11 +57,13 @@ Package config provides configuration loading and validation for meept.
   - [func Load\(path string\) \(\*Config, error\)](<#Load>)
   - [func LoadDefault\(\) \(\*Config, error\)](<#LoadDefault>)
   - [func LoadJSON5Config\(path string\) \(\*Config, error\)](<#LoadJSON5Config>)
+  - [func \(c \*Config\) ChatTimeout\(\) time.Duration](<#Config.ChatTimeout>)
   - [func \(c \*Config\) ShutdownTimeout\(\) time.Duration](<#Config.ShutdownTimeout>)
 - [type DaemonConfig](<#DaemonConfig>)
 - [type DetectionConfig](<#DetectionConfig>)
 - [type DistillationConfig](<#DistillationConfig>)
 - [type DistributedMemoryConfig](<#DistributedMemoryConfig>)
+- [type DockerRuntimeConfig](<#DockerRuntimeConfig>)
 - [type EmbeddingConfig](<#EmbeddingConfig>)
 - [type EpisodicConfig](<#EpisodicConfig>)
 - [type ErrorsConfig](<#ErrorsConfig>)
@@ -97,11 +99,14 @@ Package config provides configuration loading and validation for meept.
   - [func LoadModelsConfigDefault\(\) \(\*ModelsConfig, error\)](<#LoadModelsConfigDefault>)
 - [type MultiAgentConfig](<#MultiAgentConfig>)
 - [type NativeConfig](<#NativeConfig>)
+- [type NotificationsConfig](<#NotificationsConfig>)
 - [type OAuthConfig](<#OAuthConfig>)
 - [type OAuthProviderEntry](<#OAuthProviderEntry>)
 - [type OrchestratorConfig](<#OrchestratorConfig>)
+- [type PTYConfig](<#PTYConfig>)
 - [type ParakeetConfig](<#ParakeetConfig>)
 - [type PersonalityConfig](<#PersonalityConfig>)
+- [type PiperTTSConfig](<#PiperTTSConfig>)
 - [type PlansApprovalConfig](<#PlansApprovalConfig>)
 - [type PlansConfig](<#PlansConfig>)
 - [type PlansConfirmationConfig](<#PlansConfirmationConfig>)
@@ -123,6 +128,7 @@ Package config provides configuration loading and validation for meept.
 - [type RPCTransportConfig](<#RPCTransportConfig>)
 - [type RecordingConfig](<#RecordingConfig>)
 - [type ReviewConfig](<#ReviewConfig>)
+- [type RuntimeConfig](<#RuntimeConfig>)
 - [type STTConfig](<#STTConfig>)
 - [type SafetyConfig](<#SafetyConfig>)
 - [type SandboxConfig](<#SandboxConfig>)
@@ -142,8 +148,16 @@ Package config provides configuration loading and validation for meept.
 - [type ShadowTeacherConfig](<#ShadowTeacherConfig>)
 - [type SkillsConfig](<#SkillsConfig>)
 - [type SyncConfig](<#SyncConfig>)
+- [type TTSBehaviorConfig](<#TTSBehaviorConfig>)
+- [type TTSConfig](<#TTSConfig>)
+- [type TTSPlaybackConfig](<#TTSPlaybackConfig>)
+- [type TaintConfig](<#TaintConfig>)
+- [type TaintDeclassificationConfig](<#TaintDeclassificationConfig>)
+- [type TaintLabelsConfig](<#TaintLabelsConfig>)
+- [type TaintSinksConfig](<#TaintSinksConfig>)
 - [type TaskMemoryConfig](<#TaskMemoryConfig>)
 - [type TelegramConfig](<#TelegramConfig>)
+- [type TestHarnessConfig](<#TestHarnessConfig>)
 - [type ToolingConfig](<#ToolingConfig>)
 - [type TransportConfig](<#TransportConfig>)
 - [type ValidationConfig](<#ValidationConfig>)
@@ -200,7 +214,7 @@ EnsureDataDir creates the data directory if it doesn't exist.
 
 	func ExpandEnvVars(s string) string
 
-ExpandEnvVars expands environment variables in a string. Uses a regex rather than os.ExpandEnv because configs use both $VAR and $\{VAR\} syntax \(os.ExpandEnv only supports the former\).
+ExpandEnvVars expands environment variables in a string. Uses a regex rather than os.ExpandEnv because configs use both $VAR and $\{VAR\} syntax \(os.ExpandEnv only supports the former\). Implements recursion depth limiting to detect cyclic env var references.
 
 <a name="FilterEnabledAgents"></a>
 ## func FilterEnabledAgents
@@ -222,13 +236,6 @@ LoadAgentDefinitions loads all agent definitions from the configured directories
 	func LoadAgentDefinitionsDefault(cfg *AgentsConfig) (map[string]*AgentDefinition, error)
 
 LoadAgentDefinitionsDefault loads agents from default locations. Prefers JSON5 single file, falls back to TOML directory format.
-
-<a name="LoadAgentDefinitionsDefaultWithJSON5"></a>
-## func LoadAgentDefinitionsDefaultWithJSON5
-
-	func LoadAgentDefinitionsDefaultWithJSON5(cfg *AgentsConfig) (map[string]*AgentDefinition, error)
-
-LoadAgentDefinitionsDefaultWithJSON5 tries JSON5 first, then TOML.
 
 <a name="LoadAgentDefinitionsJSON5"></a>
 ## func LoadAgentDefinitionsJSON5
@@ -355,6 +362,10 @@ AgentConfig holds agent loop settings.
 	    Queues AgentQueuesConfig `json:"queues" toml:"queues"`
 	    // Compaction holds context compaction settings
 	    Compaction AgentCompactionConfig `json:"compaction" toml:"compaction"`
+	    // Reflection holds auto-fix reflection loop settings
+	    Reflection AgentReflectionConfig `json:"reflection" toml:"reflection"`
+	    // Lint holds linting and test runner settings
+	    Lint AgentLintConfig `json:"lint" toml:"lint"`
 	}
 
 <a name="AgentConstraintsConfig"></a>
@@ -408,23 +419,22 @@ AgentDefinition represents an agent definition from a TOML or JSON5 file.
 
 GetAgentsByRole returns agents with a specific role.
 
-<a name="AgentDefinitionJSON5"></a>
-## type AgentDefinitionJSON5
+<a name="AgentLintConfig"></a>
+## type AgentLintConfig
 
-AgentDefinitionJSON5 represents an agent in the new JSON5 format.
+AgentLintConfig holds linting and test runner settings.
 
-	type AgentDefinitionJSON5 struct {
-	    ID               string                 `json:"id"`
-	    Name             string                 `json:"name"`
-	    Role             string                 `json:"role"`
-	    Description      string                 `json:"description"`
-	    Model            string                 `json:"model"`
-	    Enabled          bool                   `json:"enabled"`
-	    CanDelegate      bool                   `json:"can_delegate"`
-	    AdditionalTools  []string               `json:"additional_tools"`
-	    Capabilities     []string               `json:"capabilities"`
-	    PromptComponents []string               `json:"prompt_components"`
-	    Constraints      AgentConstraintsConfig `json:"constraints"`
+	type AgentLintConfig struct {
+	    // GoFlags are flags passed to go test
+	    GoFlags []string `json:"go_flags" toml:"go_flags"`
+	    // PytestFlags are flags passed to pytest
+	    PytestFlags []string `json:"pytest_flags" toml:"pytest_flags"`
+	    // JestFlags are flags passed to jest
+	    JestFlags []string `json:"jest_flags" toml:"jest_flags"`
+	    // TimeoutSeconds is the maximum time for lint/test operations
+	    TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
+	    // MaxOutputLines limits the number of output lines captured
+	    MaxOutputLines int `json:"max_output_lines" toml:"max_output_lines"`
 	}
 
 <a name="AgentQueuesConfig"></a>
@@ -456,6 +466,24 @@ AgentQueuesConfig holds steering and follow\-up message queue settings.
 	    FlushDelayMs int `json:"flush_delay_ms" toml:"flush_delay_ms"`
 	}
 
+<a name="AgentReflectionConfig"></a>
+## type AgentReflectionConfig
+
+AgentReflectionConfig holds reflection settings for auto\-lint/test fixing. Multi\-pass retry is handled by the orchestrator, not by the engine.
+
+	type AgentReflectionConfig struct {
+	    // Enabled turns on the reflection loop for auto-lint/test fixing
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // AutoLint enables automatic linting after code edits
+	    AutoLint bool `json:"auto_lint" toml:"auto_lint"`
+	    // AutoTest enables automatic testing after successful linting
+	    AutoTest bool `json:"auto_test" toml:"auto_test"`
+	    // LintCmd is a custom lint command (empty uses built-in linters)
+	    LintCmd string `json:"lint_cmd" toml:"lint_cmd"`
+	    // TestCmd is a custom test command (empty uses built-in test runners)
+	    TestCmd string `json:"test_cmd" toml:"test_cmd"`
+	}
+
 <a name="AgentsConfig"></a>
 ## type AgentsConfig
 
@@ -479,13 +507,14 @@ AgentsConfig holds agent configuration settings.
 	    DispatcherID string `json:"dispatcher_id" toml:"dispatcher_id"`
 	}
 
-<a name="AgentsFileJSON5"></a>
-## type AgentsFileJSON5
+<a name="AnalyticsConfig"></a>
+## type AnalyticsConfig
 
-AgentsFileJSON5 is the root of the agents.json5 file.
+AnalyticsConfig holds configuration for the analytics system.
 
-	type AgentsFileJSON5 struct {
-	    Agents []AgentDefinitionJSON5 `json:"agents"`
+	type AnalyticsConfig struct {
+	    Enabled       bool `json:"enabled,omitempty"          toml:"enabled"`
+	    RetentionDays int  `json:"retention_days,omitempty"   toml:"retention_days"`
 	}
 
 <a name="BotsConfig"></a>
@@ -508,14 +537,16 @@ BotsConfig holds configuration for the persistent bot framework.
 BudgetConfig holds token budget settings.
 
 	type BudgetConfig struct {
-	    HourlyTokenLimit     int     `json:"hourly_token_limit"  toml:"hourly_token_limit"`
-	    DailyTokenLimit      int     `json:"daily_token_limit"   toml:"daily_token_limit"`
-	    DailyCostLimit       float64 `json:"daily_cost_limit"    toml:"daily_cost_limit"`
-	    HourlyCostLimit      float64 `json:"hourly_cost_limit"   toml:"hourly_cost_limit"`
-	    RateLimitRPM         int     `json:"rate_limit_rpm"      toml:"rate_limit_rpm"`
-	    Aggressiveness       float64 `json:"aggressiveness"      toml:"aggressiveness"`
+	    HourlyTokenLimit     int     `json:"hourly_token_limit"   toml:"hourly_token_limit"`
+	    DailyTokenLimit      int     `json:"daily_token_limit"    toml:"daily_token_limit"`
+	    DailyCostLimit       float64 `json:"daily_cost_limit"     toml:"daily_cost_limit"`
+	    HourlyCostLimit      float64 `json:"hourly_cost_limit"    toml:"hourly_cost_limit"`
+	    RateLimitRPM         int     `json:"rate_limit_rpm"       toml:"rate_limit_rpm"`
+	    Aggressiveness       float64 `json:"aggressiveness"       toml:"aggressiveness"`
 	    PerTaskTokenLimit    int     `json:"per_task_token_limit" toml:"per_task_token_limit"`
 	    PerSessionTokenLimit int     `json:"per_session_token_limit" toml:"per_session_token_limit"`
+	    PerTaskCostLimit     float64 `json:"per_task_cost_limit"  toml:"per_task_cost_limit"`
+	    PerSessionCostLimit  float64 `json:"per_session_cost_limit" toml:"per_session_cost_limit"`
 	}
 
 <a name="CacheConfig"></a>
@@ -710,7 +741,12 @@ Config is the root configuration structure loaded from meept.toml.
 	    Plans             PlansConfig             `json:"plans"               toml:"plans"`
 	    Projects          ProjectsConfig          `json:"projects"            toml:"projects"`
 	    STT               STTConfig               `json:"stt"                 toml:"stt"`
+	    TTS               TTSConfig               `json:"tts"                 toml:"tts"`
 	    OAuth             OAuthConfig             `json:"oauth"               toml:"oauth"`
+	    Analytics         AnalyticsConfig         `json:"analytics,omitempty" toml:"analytics"`
+	    Notifications     NotificationsConfig     `json:"notifications,omitempty" toml:"notifications"`
+	    Runtime           RuntimeConfig           `json:"runtime"             toml:"runtime"`
+	    PTY               PTYConfig               `json:"pty"                  toml:"pty"`
 	}
 
 <a name="DefaultConfig"></a>
@@ -741,12 +777,19 @@ LoadDefault loads configuration from the default location. Prefers JSON5, falls 
 
 LoadJSON5Config loads configuration from a JSON5 file.
 
+<a name="Config.ChatTimeout"></a>
+### func \(\*Config\) ChatTimeout
+
+	func (c *Config) ChatTimeout() time.Duration
+
+ChatTimeout returns the configured chat response timeout, falling back to 2m.
+
 <a name="Config.ShutdownTimeout"></a>
 ### func \(\*Config\) ShutdownTimeout
 
 	func (c *Config) ShutdownTimeout() time.Duration
 
-ShutdownTimeout returns the default shutdown timeout.
+ShutdownTimeout returns the configured shutdown timeout, falling back to 10s.
 
 <a name="DaemonConfig"></a>
 ## type DaemonConfig
@@ -754,10 +797,12 @@ ShutdownTimeout returns the default shutdown timeout.
 DaemonConfig holds daemon\-specific settings.
 
 	type DaemonConfig struct {
-	    SocketPath string `json:"socket_path" toml:"socket_path"`
-	    PIDFile    string `json:"pid_file"    toml:"pid_file"`
-	    LogLevel   string `json:"log_level"   toml:"log_level"`
-	    DataDir    string `json:"data_dir"    toml:"data_dir"`
+	    SocketPath         string `json:"socket_path"        toml:"socket_path"`
+	    PIDFile            string `json:"pid_file"            toml:"pid_file"`
+	    LogLevel           string `json:"log_level"           toml:"log_level"`
+	    DataDir            string `json:"data_dir"            toml:"data_dir"`
+	    ShutdownTimeout    string `json:"shutdown_timeout"    toml:"shutdown_timeout"`
+	    ChatTimeoutSeconds int    `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
 	}
 
 <a name="DetectionConfig"></a>
@@ -812,6 +857,22 @@ DistributedMemoryConfig holds settings for 2\-tier distributed memory sync.
 	    Sync SyncConfig `json:"sync" toml:"sync"`
 	    // Distillation configures which memories to promote
 	    Distillation DistillationConfig `json:"distillation" toml:"distillation"`
+	}
+
+<a name="DockerRuntimeConfig"></a>
+## type DockerRuntimeConfig
+
+DockerRuntimeConfig holds Docker backend settings.
+
+	type DockerRuntimeConfig struct {
+	    // Image is the default container image.
+	    Image string `json:"image" toml:"image"`
+	    // VolumeBinds maps host paths to container paths.
+	    VolumeBinds []string `json:"volume_binds" toml:"volume_binds"`
+	    // TimeoutSeconds is the default command timeout.
+	    TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
+	    // AutoCleanup removes containers after use.
+	    AutoCleanup bool `json:"auto_cleanup" toml:"auto_cleanup"`
 	}
 
 <a name="EmbeddingConfig"></a>
@@ -1297,6 +1358,16 @@ NativeConfig holds native \(OS\-level\) speech recognition settings.
 	type NativeConfig struct {
 	}
 
+<a name="NotificationsConfig"></a>
+## type NotificationsConfig
+
+NotificationsConfig holds configuration for desktop notifications.
+
+	type NotificationsConfig struct {
+	    Enabled   bool `json:"enabled,omitempty"       toml:"enabled"`
+	    Retention int  `json:"retention,omitempty"     toml:"retention"`
+	}
+
 <a name="OAuthConfig"></a>
 ## type OAuthConfig
 
@@ -1335,6 +1406,20 @@ OrchestratorConfig holds hierarchical orchestrator settings.
 	    HandoffUseAmendment bool `json:"handoff_use_amendment" toml:"handoff_use_amendment"`
 	}
 
+<a name="PTYConfig"></a>
+## type PTYConfig
+
+PTYConfig holds pseudo\-terminal streaming settings.
+
+	type PTYConfig struct {
+	    Enabled         bool   `json:"enabled"          toml:"enabled"`
+	    MaxSessions     int    `json:"max_sessions"     toml:"max_sessions"`
+	    MaxTerminalRows int    `json:"max_terminal_rows" toml:"max_terminal_rows"`
+	    MaxTerminalCols int    `json:"max_terminal_cols" toml:"max_terminal_cols"`
+	    SocketPath      string `json:"socket_path"      toml:"socket_path"`
+	    TLSEnabled      bool   `json:"tls_enabled"      toml:"tls_enabled"`
+	}
+
 <a name="ParakeetConfig"></a>
 ## type ParakeetConfig
 
@@ -1353,6 +1438,18 @@ PersonalityConfig holds personality memory settings.
 	type PersonalityConfig struct {
 	    Enabled                     bool `json:"enabled"                       toml:"enabled"`
 	    UpdateIntervalConversations int  `json:"update_interval_conversations" toml:"update_interval_conversations"`
+	}
+
+<a name="PiperTTSConfig"></a>
+## type PiperTTSConfig
+
+PiperTTSConfig holds Piper TTS engine settings.
+
+	type PiperTTSConfig struct {
+	    BinPath    string `json:"bin_path"   toml:"bin_path"`
+	    ModelPath  string `json:"model_path" toml:"model_path"`
+	    ConfigPath string `json:"config_path" toml:"config_path"`
+	    Speaker    string `json:"speaker"    toml:"speaker"` // for multi-speaker models
 	}
 
 <a name="PlansApprovalConfig"></a>
@@ -1478,17 +1575,17 @@ ListPresets returns all available preset names.
 ProjectsConfig holds configuration for the project system.
 
 	type ProjectsConfig struct {
-	    Enabled                    bool   `json:"enabled"                        toml:"enabled"`
-	    BaseDir                    string `json:"base_dir"                       toml:"base_dir"`
-	    DefaultBranch              string `json:"default_branch"                 toml:"default_branch"`
-	    WorktreePerPlan            string `json:"worktree_per_plan"              toml:"worktree_per_plan"`
-	    WorktreeIsolationThreshold int    `json:"worktree_isolation_threshold"   toml:"worktree_isolation_threshold"`
-	    AutoDetect                 bool   `json:"auto_detect"                    toml:"auto_detect"`
-	    MaxWorktreesPerProject     int    `json:"max_worktrees_per_project"      toml:"max_worktrees_per_project"`
-	    CleanupOrphanedWorktrees   bool   `json:"cleanup_orphaned_worktrees"     toml:"cleanup_orphaned_worktrees"`
-	    FenceEnabled               bool   `json:"fence_enabled"                  toml:"fence_enabled"`
-	    AllowReadSystemPaths       bool   `json:"allow_read_system_paths"        toml:"allow_read_system_paths"`
-	    AutoSyncOnAttach           bool   `json:"auto_sync_on_attach"            toml:"auto_sync_on_attach"`
+	    Enabled                    bool     `json:"enabled"                        toml:"enabled"`
+	    BaseDir                    string   `json:"base_dir"                       toml:"base_dir"`
+	    DefaultBranch              string   `json:"default_branch"                 toml:"default_branch"`
+	    WorktreePerPlan            string   `json:"worktree_per_plan"              toml:"worktree_per_plan"`
+	    WorktreeIsolationThreshold int      `json:"worktree_isolation_threshold"   toml:"worktree_isolation_threshold"`
+	    AutoDetect                 bool     `json:"auto_detect"                    toml:"auto_detect"`
+	    MaxWorktreesPerProject     int      `json:"max_worktrees_per_project"      toml:"max_worktrees_per_project"`
+	    CleanupOrphanedWorktrees   bool     `json:"cleanup_orphaned_worktrees"     toml:"cleanup_orphaned_worktrees"`
+	    FenceEnabled               bool     `json:"fence_enabled"                  toml:"fence_enabled"`
+	    AllowReadSystemPaths       []string `json:"allow_read_system_paths"      toml:"allow_read_system_paths"`
+	    AutoSyncOnAttach           bool     `json:"auto_sync_on_attach"            toml:"auto_sync_on_attach"`
 	}
 
 <a name="Provider"></a>
@@ -1600,6 +1697,20 @@ ReviewConfig holds code review settings for the multi\-agent system.
 	    AutoApprovePatterns []string `json:"auto_approve_patterns" toml:"auto_approve_patterns"`
 	}
 
+<a name="RuntimeConfig"></a>
+## type RuntimeConfig
+
+RuntimeConfig holds configuration for execution backends \(local, Docker\).
+
+	type RuntimeConfig struct {
+	    // Enabled controls whether runtime backends are initialized.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // DefaultBackend is "local" or "docker".
+	    DefaultBackend string `json:"default_backend" toml:"default_backend"`
+	    // Docker holds Docker-specific configuration.
+	    Docker DockerRuntimeConfig `json:"docker" toml:"docker"`
+	}
+
 <a name="STTConfig"></a>
 ## type STTConfig
 
@@ -1687,6 +1798,13 @@ SecurityConfig holds security settings.
 	    // When false (default), uses lenient three-strategy cascade (substring, glob, trimmed substring).
 	    // Changing this will affect existing overrides - migrate with caution.
 	    StrictOverrideMatching bool `json:"strict_override_matching" toml:"strict_override_matching"`
+	
+	    // Taint tracking for information flow security
+	    Taint TaintConfig `json:"taint" toml:"taint"`
+	
+	    // Path fencing for agent sandboxing
+	    FenceEnabled   bool     `json:"fence_enabled"    toml:"fence_enabled"`
+	    FenceAllowRead []string `json:"fence_allow_read" toml:"fence_allow_read"`
 	}
 
 <a name="SelfImproveConfig"></a>
@@ -1723,7 +1841,8 @@ SessionConfig holds session persistence and branching settings.
 	    // MaxBranches limits the number of branches per session.
 	    MaxBranches int `json:"max_branches" toml:"max_branches"`
 	    // AutoFork enables automatic forking on context overflow.
-	    AutoFork bool `json:"auto_fork" toml:"auto_fork"`
+	    // Values: "never", "ask", "always"
+	    AutoFork string `json:"auto_fork" toml:"auto_fork"`
 	    // Compaction enables automatic context compaction.
 	    Compaction bool `json:"compaction" toml:"compaction"`
 	    // CompactionThreshold is the token count that triggers compaction.
@@ -1886,10 +2005,13 @@ ShadowTeacherConfig configures the teacher model.
 SkillsConfig holds skills settings.
 
 	type SkillsConfig struct {
-	    Enabled     bool     `json:"enabled"           toml:"enabled"`
-	    SearchPaths []string `json:"search_paths"      toml:"search_paths"`      // Additional skill directories beyond defaults
-	    AutoReload  bool     `json:"auto_reload"       toml:"auto_reload"`       // Watch for skill file changes
-	    CacheSize   int      `json:"max_cached_skills" toml:"max_cached_skills"` // Max skills to cache in lazy loader (default: 50)
+	    Enabled               bool     `json:"enabled"                 toml:"enabled"`
+	    SearchPaths           []string `json:"search_paths"            toml:"search_paths"`           // Additional skill directories beyond defaults
+	    AutoReload            bool     `json:"auto_reload"             toml:"auto_reload"`            // Watch for skill file changes
+	    CacheSize             int      `json:"max_cached_skills"       toml:"max_cached_skills"`      // Max skills to cache in lazy loader (default: 50)
+	    AutoDiscoverHermes    bool     `json:"auto_discover_hermes"    toml:"auto_discover_hermes"`   // Auto-discover ~/.hermes/skills (default: true)
+	    HermesSkillsDir       string   `json:"hermes_skills_dir"       toml:"hermes_skills_dir"`      // Path to Hermes skills directory (default: ~/.hermes/skills)
+	    ValidatePrerequisites bool     `json:"validate_prerequisites"  toml:"validate_prerequisites"` // Validate Hermes skill prerequisites before execution (default: true)
 	}
 
 <a name="SyncConfig"></a>
@@ -1910,6 +2032,118 @@ SyncConfig holds sync timing and behavior settings.
 	    RetryOnFailure bool `json:"retry_on_failure" toml:"retry_on_failure"`
 	    // MaxRetries is the max retry attempts for failed operations
 	    MaxRetries int `json:"max_retries" toml:"max_retries"`
+	}
+
+<a name="TTSBehaviorConfig"></a>
+## type TTSBehaviorConfig
+
+TTSBehaviorConfig holds TTS behavior settings.
+
+	type TTSBehaviorConfig struct {
+	    ReadOwnMessages   bool `json:"read_own_messages"   toml:"read_own_messages"`
+	    InterruptOnNewMsg bool `json:"interrupt_on_new_msg" toml:"interrupt_on_new_msg"`
+	    QueueMessages     bool `json:"queue_messages"      toml:"queue_messages"`
+	    MaxQueueSize      int  `json:"max_queue_size"      toml:"max_queue_size"`
+	}
+
+<a name="TTSConfig"></a>
+## type TTSConfig
+
+TTSConfig holds text\-to\-speech settings for client\-side speech synthesis.
+
+	type TTSConfig struct {
+	    Enabled   bool   `json:"enabled"   toml:"enabled"`
+	    Engine    string `json:"engine"    toml:"engine"` // "piper" | "platform"
+	    Voice     string `json:"voice"     toml:"voice"`  // voice identifier e.g. "danny-medium"
+	    VoicePath string `json:"voice_path" toml:"voice_path"`
+	
+	    // Piper-specific settings
+	    Piper PiperTTSConfig `json:"piper"    toml:"piper"`
+	
+	    // Playback settings
+	    Playback TTSPlaybackConfig `json:"playback" toml:"playback"`
+	
+	    // Behavior settings
+	    Behavior TTSBehaviorConfig `json:"behavior" toml:"behavior"`
+	}
+
+<a name="TTSPlaybackConfig"></a>
+## type TTSPlaybackConfig
+
+TTSPlaybackConfig holds audio playback settings.
+
+	type TTSPlaybackConfig struct {
+	    Volume      float64 `json:"volume"       toml:"volume"`       // 0.0 to 1.0
+	    Rate        float64 `json:"rate"         toml:"rate"`         // 0.5 to 2.0
+	    AudioDevice string  `json:"audio_device" toml:"audio_device"` // empty = system default
+	}
+
+<a name="TaintConfig"></a>
+## type TaintConfig
+
+TaintConfig holds taint tracking configuration for information flow security. Taint tracking implements lattice\-based information flow control, tracking data provenance through operations and preventing sensitive data leakage.
+
+See docs/workflows/taint\-tracking.md for full documentation.
+
+	type TaintConfig struct {
+	    // Enabled enables taint tracking for information flow security.
+	    // When enabled, data from untrusted sources (user input, external requests,
+	    // untrusted agents) is tagged and prevented from flowing into sensitive sinks
+	    // (shell execution, network requests with secrets, cross-agent messages).
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	
+	    // TaintDBPath is the path to the taint tracking database.
+	    // Currently in-memory only; this field is reserved for future persistence.
+	    TaintDBPath string `json:"taint_db_path" toml:"taint_db_path"`
+	
+	    // Taint label priorities (higher = more restrictive)
+	    // These control how taints are joined and subsumed.
+	    Labels TaintLabelsConfig `json:"labels" toml:"labels"`
+	
+	    // Sink configuration for blocking decisions
+	    Sinks TaintSinksConfig `json:"sinks" toml:"sinks"`
+	
+	    // Declassification settings
+	    Declassification TaintDeclassificationConfig `json:"declassification" toml:"declassification"`
+	}
+
+<a name="TaintDeclassificationConfig"></a>
+## type TaintDeclassificationConfig
+
+TaintDeclassificationConfig holds declassification settings.
+
+	type TaintDeclassificationConfig struct {
+	    // RequireApprovalHigh requires user approval for high-risk declassification.
+	    RequireApprovalHigh bool `json:"require_approval_high" toml:"require_approval_high"`
+	
+	    // SafeOperations lists operations that automatically declassify data.
+	    // Examples: "sanitize", "validate", "hash"
+	    SafeOperations []string `json:"safe_operations" toml:"safe_operations"`
+	}
+
+<a name="TaintLabelsConfig"></a>
+## type TaintLabelsConfig
+
+TaintLabelsConfig holds taint label priority settings. Higher values indicate more restrictive taint levels.
+
+	type TaintLabelsConfig struct {
+	    UserInput int `json:"user_input"  toml:"user_input"` // Direct user input
+	    Secret    int `json:"secret"      toml:"secret"`     // API keys, tokens, passwords
+	    Untrusted int `json:"untrusted"   toml:"untrusted"`  // From sandboxed/untrusted agents
+	    External  int `json:"external"    toml:"external"`   // From external network requests
+	    Shell     int `json:"shell"       toml:"shell"`      // Data destined for shell execution
+	}
+
+<a name="TaintSinksConfig"></a>
+## type TaintSinksConfig
+
+TaintSinksConfig holds taint sink blocking settings.
+
+	type TaintSinksConfig struct {
+	    BlockUserInputShell bool `json:"block_user_input_shell"      toml:"block_user_input_shell"` // Block user input in shell commands
+	    BlockSecretNetwork  bool `json:"block_secret_network"        toml:"block_secret_network"`   // Block secrets in URLs/network requests
+	    BlockUntrustedAgent bool `json:"block_untrusted_agent"       toml:"block_untrusted_agent"`  // Block untrusted data in cross-agent messages
+	    BlockExternalShell  bool `json:"block_external_shell"        toml:"block_external_shell"`   // Block external data in shell commands
 	}
 
 <a name="TaskMemoryConfig"></a>
@@ -1934,6 +2168,22 @@ TelegramConfig holds Telegram bot settings.
 	    AllowedUsers []int64 `json:"allowed_users" toml:"allowed_users"` // Telegram user IDs allowed to interact (empty = all)
 	    AllowedChats []int64 `json:"allowed_chats" toml:"allowed_chats"` // Telegram chat IDs allowed (empty = all)
 	    PollTimeout  int     `json:"poll_timeout"  toml:"poll_timeout"`  // Long polling timeout in seconds
+	}
+
+<a name="TestHarnessConfig"></a>
+## type TestHarnessConfig
+
+TestHarnessConfig holds test harness settings.
+
+	type TestHarnessConfig struct {
+	    // Enabled controls test harness validation.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // InstallCommand runs before tests (e.g., "go mod download").
+	    InstallCommand string `json:"install_command" toml:"install_command"`
+	    // TestCommand runs tests (e.g., "go test ./...").
+	    TestCommand string `json:"test_command" toml:"test_command"`
+	    // TimeoutSeconds is the test timeout.
+	    TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
 	}
 
 <a name="ToolingConfig"></a>

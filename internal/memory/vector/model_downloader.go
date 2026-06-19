@@ -2,7 +2,6 @@ package vector
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -295,16 +294,6 @@ func (d *ModelDownloader) getCommitInfo(modelID string) (commitSHA string, modif
 		return "", time.Time{}, fmt.Errorf("parse response: %w", err)
 	}
 	return hfInfo.CommitSHA, hfInfo.LastModified, nil
-}
-
-// hashContent returns a SHA-256 hash of the file content.
-func hashContent(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	h := sha256.Sum256(data)
-	return fmt.Sprintf("%x", h[:8]), nil
 }
 
 // getCachedCommit reads the commit SHA from a cached model's metadata.

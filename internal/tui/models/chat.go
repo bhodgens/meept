@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -182,6 +183,16 @@ type ChatModel struct {
 	queueStatus *types.QueueStatusResponse // latest queue state (nil if agent idle)
 	steerMode   bool                       // when true, next message is a steer (ctrl+s toggle)
 
+	// In-session find bar (ctrl+f)
+	findBarVisible      bool
+	findInput           textinput.Model
+	findMatches         []findMatch
+	findCursor          int // index into findMatches, -1 if none
+	findCaseSensitive   bool
+	findRegex           bool
+	findRegexError      string
+	findDebouncePending bool
+
 	// Styles
 	userStyle             lipgloss.Style
 	assistantStyle        lipgloss.Style
@@ -208,6 +219,19 @@ type ChatModel struct {
 	ttsManager *tts.Manager // nil if TTS disabled or unavailable
 	ttsEnabled bool         // true if tts is enabled in config
 }
+
+// findMatch points to a span within a rendered message.
+type findMatch struct {
+	messageIdx int // index into m.messages
+	charStart  int // byte offset in m.messages[messageIdx].Content
+	charEnd    int // exclusive end
+}
+
+// findDebounceDuration is how long to wait after the last keystroke before recomputing matches.
+const findDebounceDuration = 50 * time.Millisecond
+
+// findMaxMatches caps the number of matches to avoid pathological regex backtracking.
+const findMaxMatches = 1000
 
 // RPCClient interface for the chat model.
 type RPCClient interface {
@@ -288,6 +312,18 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 		escapeBehavior = "once"
 	}
 
+	// Initialize find bar input
+	findInput := textinput.New()
+	findInput.Prompt = ""
+	findInput.Placeholder = "find..."
+	findInput.CharLimit = 200
+	findStyles := findInput.Styles()
+	findStyles.Focused.Text = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+	findStyles.Focused.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#F97316"))
+	findStyles.Blurred.Text = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
+	findStyles.Blurred.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#F97316"))
+	findInput.SetStyles(findStyles)
+
 	return &ChatModel{
 		rpc:               rpc,
 		messages:          []ChatMessage{},
@@ -343,6 +379,9 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 			Foreground(lipgloss.Color("#FFFFFF")).
 			Padding(0, 1).
 			Bold(true),
+		findInput:    findInput,
+		findMatches:  nil,
+		findCursor:   -1,
 	}
 }
 
@@ -421,6 +460,13 @@ func (m *ChatModel) SetSize(width, height int) {
 	m.textarea.SetWidth(width - 4)
 	m.viewport.SetWidth(width - 2)
 	// Viewport height is set in View() to match actual render
+
+	// Size find input (bar takes 1 line; leave room for count + toggles).
+	if width > 40 {
+		m.findInput.SetWidth(width / 2)
+	} else {
+		m.findInput.SetWidth(max(width-20, 10))
+	}
 
 	// Update markdown renderer width
 	if m.mdRenderer != nil {
@@ -935,6 +981,19 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			m.clearSelection()
 		}
 
+		// Handle find bar keys first when the bar is visible
+		if m.findBarVisible {
+			if cmd, handled := m.handleFindBarKey(msg); handled {
+				return cmd
+			}
+		}
+
+		// ctrl+f toggles find bar (only when not already handled above)
+		if msg.String() == "ctrl+f" {
+			m.openFindBar()
+			return nil
+		}
+
 		switch msg.String() {
 		case "tab":
 			// Cycle focus within chat view
@@ -1194,6 +1253,15 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		if msg.Err != nil {
 			// Log flush error but don't show to user - messages are still in memory
 			_ = msg.Err
+		}
+		return nil
+
+	case findDebounceMsg:
+		// Recompute matches only if a debounce is still pending (may have been
+		// cleared by escape or replaced by a newer keystroke-driven recompute).
+		if m.findBarVisible && m.findDebouncePending {
+			m.findDebouncePending = false
+			m.recomputeFindMatches()
 		}
 		return nil
 
@@ -1458,7 +1526,11 @@ func (m *ChatModel) addMessage(role, content string) {
 		Timestamp: time.Now(),
 		State:     MessageNormal,
 	})
-	m.updateViewport()
+	if m.findBarVisible && m.findInput.Value() != "" {
+		m.recomputeFindMatches()
+	} else {
+		m.updateViewport()
+	}
 }
 
 // AddSystemMessage adds a system message to the chat transcript.
@@ -1475,7 +1547,11 @@ func (m *ChatModel) AddParticipantMessage(sourceClient, content string) {
 		Timestamp:    time.Now().UTC(),
 		State:        MessageNormal,
 	})
-	m.updateViewport()
+	if m.findBarVisible && m.findInput.Value() != "" {
+		m.recomputeFindMatches()
+	} else {
+		m.updateViewport()
+	}
 }
 
 // trackDirtyMessage adds a message to the dirty buffer for later persistence.
@@ -1843,6 +1919,9 @@ func (m *ChatModel) updateViewport() {
 		// Get message content (handles collapse state)
 		msgContent := m.getMessageContent(msg)
 
+		// Apply find-bar match highlighting before style.Render.
+		msgContent = m.applyFindHighlight(i, msgContent)
+
 		// Add timestamp for non-system messages
 		var timestampStr string
 		if msg.Role != RoleSystem && msg.Role != StatePending {
@@ -1950,6 +2029,12 @@ func formatMessage(text string, width int) string {
 func (m *ChatModel) View() string {
 	var b strings.Builder
 
+	// Find bar (rendered above the viewport when visible)
+	if m.findBarVisible {
+		b.WriteString(m.renderFindBar())
+		b.WriteString("\n")
+	}
+
 	// Chat history viewport with focus-dependent border
 	viewportBorder := m.unfocusedBorder
 	if m.focused == FocusViewport {
@@ -1975,8 +2060,10 @@ func (m *ChatModel) View() string {
 	if m.agentActive || m.steerMode || m.hasQueueItems() {
 		queueIndicatorLines = 1
 	}
-	// viewportContentHeight = height - 2(viewport borders) - copyHintLines - inputLines - 2(input borders) - completionsLines - queueIndicatorLines - 1(statusbar)
-	viewportContentHeight := max(m.height-copyHintLines-inputLines-completionsLines-queueIndicatorLines-5, 1)
+	// Account for find bar lines when visible (1 line, 2 with regex error).
+	findLines := m.findBarLines()
+	// viewportContentHeight = height - 2(viewport borders) - copyHintLines - inputLines - 2(input borders) - completionsLines - queueIndicatorLines - findLines - 1(statusbar)
+	viewportContentHeight := max(m.height-copyHintLines-inputLines-completionsLines-queueIndicatorLines-findLines-5, 1)
 
 	// Update viewport dimensions BEFORE rendering
 	m.viewport.SetWidth(m.width - 2)
@@ -2123,6 +2210,7 @@ func (m *ChatModel) Reset() {
 	m.selectedMsgIdx = -1
 	m.historyIdx = -1
 	m.savedInput = ""
+	m.closeFindBar()
 	if m.history != nil {
 		m.history.Reset("")
 	}
@@ -2136,6 +2224,8 @@ func (m *ChatModel) Reset() {
 
 // SetSession links the chat to a daemon session, preserving messages per session.
 func (m *ChatModel) SetSession(session *types.Session) tea.Cmd {
+	// Always close the find bar on any session change (including nil).
+	m.closeFindBar()
 	if session == nil {
 		m.sessionID = ""
 		m.sessionDescription = ""
@@ -3138,4 +3228,439 @@ func (m *ChatModel) renderSTTOverlay() string {
 		Background(orange).
 		Height(overlayHeight)
 	return overlayStyle.Render(content.String())
+}
+
+// ============================================================================
+// In-Session Find Bar
+// ============================================================================
+
+// findDebounceMsg is emitted by tea.Tick after the user pauses typing in the find bar.
+type findDebounceMsg struct{}
+
+// openFindBar shows the find bar, focuses the input, and clears any prior query.
+func (m *ChatModel) openFindBar() {
+	m.findBarVisible = true
+	m.findInput.Focus()
+	m.findInput.SetValue("")
+	m.findMatches = nil
+	m.findCursor = -1
+	m.findRegexError = ""
+	m.updateViewport()
+}
+
+// closeFindBar hides the find bar and clears all match state.
+func (m *ChatModel) closeFindBar() {
+	m.findBarVisible = false
+	m.findInput.Blur()
+	m.findInput.SetValue("")
+	m.findMatches = nil
+	m.findCursor = -1
+	m.findRegexError = ""
+	m.findDebouncePending = false
+	m.updateViewport()
+}
+
+// handleFindBarKey processes keystrokes while the find bar is visible. Returns
+// (cmd, true) if the key was consumed by the find bar.
+func (m *ChatModel) handleFindBarKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	switch msg.String() {
+	case KeyEsc:
+		m.closeFindBar()
+		return nil, true
+	case "alt+c":
+		m.findCaseSensitive = !m.findCaseSensitive
+		m.recomputeFindMatches()
+		return nil, true
+	case "alt+r":
+		m.findRegex = !m.findRegex
+		m.findRegexError = ""
+		m.recomputeFindMatches()
+		return nil, true
+	case KeyEnter, "down":
+		m.findNext()
+		return nil, true
+	case "shift+enter", "up":
+		m.findPrev()
+		return nil, true
+	case "ctrl+f":
+		// Already open: refocus and clear.
+		m.findInput.Focus()
+		m.findInput.SetValue("")
+		m.recomputeFindMatches()
+		return nil, true
+	}
+
+	// If the find input is focused, route printable keys and editor controls to it.
+	if m.findInput.Focused() {
+		// Only consume keys that textinput knows how to handle; let
+		// ctrl+key combos not listed above pass through.
+		switch msg.String() {
+		case "left", "right", "home", "end", "ctrl+a", "ctrl+e", "backspace", "ctrl+h", "delete", "ctrl+w", "ctrl+u":
+			var cmd tea.Cmd
+			m.findInput, cmd = m.findInput.Update(msg)
+			m.scheduleFindDebounce()
+			return tea.Batch(cmd), true
+		}
+
+		// Printable character: forward to textinput.
+		if msg.Text != "" && !strings.HasPrefix(msg.String(), "ctrl+") && !strings.HasPrefix(msg.String(), "alt+") && !strings.HasPrefix(msg.String(), "shift+") && msg.String() != " " {
+			var cmd tea.Cmd
+			m.findInput, cmd = m.findInput.Update(msg)
+			m.scheduleFindDebounce()
+			return tea.Batch(cmd), true
+		}
+		// Plain space
+		if msg.String() == " " {
+			var cmd tea.Cmd
+			m.findInput, cmd = m.findInput.Update(msg)
+			m.scheduleFindDebounce()
+			return tea.Batch(cmd), true
+		}
+	}
+
+	return nil, false
+}
+
+// scheduleFindDebounce marks a debounce as pending and returns a tick command
+// that will fire after findDebounceDuration. Callers should batch the returned
+// command into their update response.
+func (m *ChatModel) scheduleFindDebounce() tea.Cmd {
+	m.findDebouncePending = true
+	return tea.Tick(findDebounceDuration, func(time.Time) tea.Msg {
+		return findDebounceMsg{}
+	})
+}
+
+// recomputeFindMatches scans m.messages for matches against the current query
+// and toggles. It is called after the debounce tick fires, or immediately when
+// toggles change. Resets findCursor to 0 when matches are found.
+func (m *ChatModel) recomputeFindMatches() {
+	query := m.findInput.Value()
+	if query == "" {
+		m.findMatches = nil
+		m.findCursor = -1
+		m.findRegexError = ""
+		m.updateViewport()
+		return
+	}
+
+	var matches []findMatch
+	if m.findRegex {
+		re, err := regexp.Compile(query)
+		if err != nil {
+			m.findMatches = nil
+			m.findCursor = -1
+			m.findRegexError = err.Error()
+			m.updateViewport()
+			return
+		}
+		m.findRegexError = ""
+		for i := range m.messages {
+			content := m.messages[i].Content
+			if !m.findCaseSensitive {
+				// (?i) makes the regex case-insensitive without recompiling text.
+				// We compile a case-insensitive variant instead.
+				lowerRe, lerr := regexp.Compile("(?i)" + query)
+				if lerr == nil {
+					re = lowerRe
+				}
+			}
+			locs := re.FindAllStringIndex(content, -1)
+			for _, loc := range locs {
+				matches = append(matches, findMatch{messageIdx: i, charStart: loc[0], charEnd: loc[1]})
+				if len(matches) >= findMaxMatches {
+					break
+				}
+			}
+			if len(matches) >= findMaxMatches {
+				break
+			}
+		}
+	} else {
+		haystackNeedle := func(s string) (string, string) {
+			if m.findCaseSensitive {
+				return s, query
+			}
+			return strings.ToLower(s), strings.ToLower(query)
+		}
+		for i := range m.messages {
+			content := m.messages[i].Content
+			hay, needle := haystackNeedle(content)
+			if needle == "" {
+				continue
+			}
+			start := 0
+			for {
+				idx := strings.Index(hay[start:], needle)
+				if idx < 0 {
+					break
+				}
+				begin := start + idx
+				// Match offsets are byte offsets in the lowercased string, which
+				// match the original string for ASCII content. For non-ASCII
+				// content, byte offsets in lowercase=UTF8 still align with the
+				// original because UTF-8 is preserved by lowercasing.
+				end := begin + len(needle)
+				matches = append(matches, findMatch{messageIdx: i, charStart: begin, charEnd: end})
+				if len(matches) >= findMaxMatches {
+					break
+				}
+				start = end
+			}
+			if len(matches) >= findMaxMatches {
+				break
+			}
+		}
+	}
+
+	m.findMatches = matches
+	if len(matches) > 0 {
+		m.findCursor = 0
+	} else {
+		m.findCursor = -1
+	}
+	m.updateViewport()
+}
+
+// findNext advances the cursor to the next match (wraps around) and scrolls.
+func (m *ChatModel) findNext() {
+	if len(m.findMatches) == 0 {
+		return
+	}
+	m.findCursor = (m.findCursor + 1) % len(m.findMatches)
+	m.updateViewport()
+	m.scrollTofindCursor()
+}
+
+// findPrev moves the cursor to the previous match (wraps around) and scrolls.
+func (m *ChatModel) findPrev() {
+	if len(m.findMatches) == 0 {
+		return
+	}
+	if m.findCursor <= 0 {
+		m.findCursor = len(m.findMatches) - 1
+	} else {
+		m.findCursor--
+	}
+	m.updateViewport()
+	m.scrollTofindCursor()
+}
+
+// scrollTofindCursor scrolls the viewport so the current match is centered when possible.
+// Because updateViewport rebuilds the rendered string with ANSI escapes, line computation
+// is approximate: it walks message line counters in the same order as updateViewport.
+func (m *ChatModel) scrollTofindCursor() {
+	if m.findCursor < 0 || m.findCursor >= len(m.findMatches) {
+		return
+	}
+	target := m.findMatches[m.findCursor]
+	if target.messageIdx < 0 || target.messageIdx >= len(m.messages) {
+		return
+	}
+
+	// Approximate: compute the number of newlines before the matched message's
+	// content block in the rendered output. We mirror the structure of
+	// updateViewport (turn separators + header + content) so the line counter
+	// stays in sync.
+	line := 0
+	turnNumber := 0
+	for i := 0; i < target.messageIdx && i < len(m.messages); i++ {
+		msg := m.messages[i]
+		// New-turn separator or thin separator
+		isNewTurn := false
+		switch msg.Role {
+		case RoleUser, RoleParticipant:
+			isNewTurn = true
+		case RoleSystem:
+			if i == 0 || m.messages[i-1].Role != RoleSystem {
+				isNewTurn = true
+			}
+		}
+		if i > 0 {
+			line++ // separator line
+			if isNewTurn {
+				turnNumber++
+			}
+		}
+		// Header line for non-system, non-pending
+		if msg.Role != RoleSystem && msg.Role != StatePending {
+			line++
+		}
+		content := m.getMessageContent(msg)
+		rendered := m.styleForRole(msg.Role).Render(content)
+		line += strings.Count(rendered, "\n") + 1
+	}
+
+	// Position within the matched message: find the line offset of the match.
+	content := m.getMessageContent(m.messages[target.messageIdx])
+	upTo := content[:clampInt(target.charStart, 0, len(content))]
+	line += strings.Count(upTo, "\n")
+
+	// Center within viewport.
+	height := m.viewport.Height()
+	yoff := line - height/2
+	if yoff < 0 {
+		yoff = 0
+	}
+	totalLines := m.viewport.TotalLineCount()
+	if yoff > totalLines-height {
+		yoff = max(totalLines-height, 0)
+	}
+	m.viewport.SetYOffset(yoff)
+}
+
+// styleForRole returns the lipgloss style for a given role, mirroring updateViewport.
+func (m *ChatModel) styleForRole(role string) lipgloss.Style {
+	switch role {
+	case RoleUser:
+		return m.userStyle
+	case RoleAssistant:
+		return m.assistantStyle
+	case RoleParticipant, RoleSystem:
+		return m.systemStyle
+	case StatePending:
+		return m.pendingStyle
+	default:
+		return m.systemStyle
+	}
+}
+
+// clampInt restricts v to [lo, hi].
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// renderFindBar renders the find bar row: [input | N/M | Aa | .* | esc].
+func (m *ChatModel) renderFindBar() string {
+	inputView := m.findInput.View()
+
+	count := "0/0"
+	if m.findInput.Value() != "" {
+		if len(m.findMatches) >= findMaxMatches {
+			count = fmt.Sprintf("%d/%d+", clampInt(m.findCursor+1, 0, len(m.findMatches)), findMaxMatches)
+		} else if len(m.findMatches) > 0 {
+			count = fmt.Sprintf("%d/%d", clampInt(m.findCursor+1, 1, len(m.findMatches)), len(m.findMatches))
+		} else {
+			count = "0/0"
+		}
+	}
+
+	countStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#9CA3AF")).
+		Padding(0, 1)
+	toggleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6B7280")).
+		Padding(0, 1)
+	toggleActiveStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#F97316")).
+		Foreground(lipgloss.Color("#000000")).
+		Bold(true).
+		Padding(0, 1)
+	closeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#9CA3AF")).
+		Padding(0, 1)
+
+	caseLabel := "Aa"
+	caseRendered := toggleStyle.Render(caseLabel)
+	if m.findCaseSensitive {
+		caseRendered = toggleActiveStyle.Render(caseLabel)
+	}
+	regexLabel := ".*"
+	regexRendered := toggleStyle.Render(regexLabel)
+	if m.findRegex {
+		regexRendered = toggleActiveStyle.Render(regexLabel)
+	}
+
+	parts := []string{
+		inputView,
+		countStyle.Render(count),
+		caseRendered,
+		regexRendered,
+		closeStyle.Render("esc"),
+	}
+	bar := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+
+	if m.findRegexError != "" {
+		errStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#EF4444")).
+			Padding(0, 1)
+		bar = lipgloss.JoinVertical(lipgloss.Top, bar, errStyle.Render("regex: "+m.findRegexError))
+	}
+
+	barStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#1F2937")).
+		Padding(0, 1).
+		Width(m.width - 2)
+	return barStyle.Render(bar)
+}
+
+// applyFindHighlight wraps matched spans in msgContent with ANSI backgrounds.
+// currentIdx is the absolute match index that should be highlighted brightly.
+func (m *ChatModel) applyFindHighlight(msgIdx int, content string) string {
+	if !m.findBarVisible || m.findInput.Value() == "" || len(m.findMatches) == 0 {
+		return content
+	}
+	// Collect matches that belong to this message, in order.
+	type span struct{ start, end int; current bool }
+	var spans []span
+	for i, fm := range m.findMatches {
+		if fm.messageIdx == msgIdx {
+			spans = append(spans, span{start: fm.charStart, end: fm.charEnd, current: i == m.findCursor})
+		}
+	}
+	if len(spans) == 0 {
+		return content
+	}
+
+	// Sort by start (matches are appended in scanning order so already sorted).
+	var b strings.Builder
+	prev := 0
+	normalBG := "\x1b[48;5;239m" // #3B3F45-ish
+	normalFG := "\x1b[97m"
+	currentBG := "\x1b[48;5;208m" // orange
+	currentFG := "\x1b[30m"       // black
+	reset := "\x1b[0m"
+	for _, sp := range spans {
+		if sp.start < prev {
+			sp.start = prev
+		}
+		if sp.end > len(content) {
+			sp.end = len(content)
+		}
+		if sp.start >= sp.end {
+			continue
+		}
+		b.WriteString(content[prev:sp.start])
+		if sp.current {
+			b.WriteString(currentBG)
+			b.WriteString(currentFG)
+		} else {
+			b.WriteString(normalBG)
+			b.WriteString(normalFG)
+		}
+		b.WriteString(content[sp.start:sp.end])
+		b.WriteString(reset)
+		prev = sp.end
+	}
+	if prev < len(content) {
+		b.WriteString(content[prev:])
+	}
+	return b.String()
+}
+
+// findBarLines returns the number of terminal lines the find bar occupies (0 if hidden).
+func (m *ChatModel) findBarLines() int {
+	if !m.findBarVisible {
+		return 0
+	}
+	if m.findRegexError != "" {
+		return 2
+	}
+	return 1
 }

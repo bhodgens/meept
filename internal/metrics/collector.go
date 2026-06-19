@@ -544,6 +544,7 @@ type TaskCollector struct {
 	flushTicker *time.Ticker
 	stopChan    chan struct{}
 	wg          sync.WaitGroup
+	ownsDB      bool // whether NewTaskCollector opened its own DB (vs NewTaskCollectorWithDB)
 }
 
 // NewTaskCollector creates a new task metrics collector.
@@ -572,6 +573,19 @@ func NewTaskCollector(dbPath string, logger *slog.Logger) (*TaskCollector, error
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(time.Hour)
 
+	// Apply SQLite pragmas for concurrent safety — WAL mode allows readers
+	// and a single writer to coexist; busy_timeout makes connection attempts
+	// wait rather than failing immediately when another connection holds a
+	// lock (belt-and-suspenders alongside SetMaxOpenConns(1) above).
+	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to set WAL journal mode: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout=5000;"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to set busy_timeout: %w", err)
+	}
+
 	// Initialize schema for agent_task_outcomes
 	if err := initAgentTaskSchema(db); err != nil {
 		db.Close()
@@ -588,6 +602,54 @@ func NewTaskCollector(dbPath string, logger *slog.Logger) (*TaskCollector, error
 		flushQueue:  make(chan *AgentTaskMetrics, 1000),
 		flushTicker: time.NewTicker(5 * time.Second),
 		stopChan:    make(chan struct{}),
+		ownsDB:      true, // path-based open owns the underlying DB
+	}
+
+	// Start background flush loop
+	c.wg.Add(1)
+	go c.flushLoop()
+
+	return c, nil
+}
+
+// NewTaskCollectorWithDB creates a task collector using an existing
+// *sqlite database handle, sharing a single connection between Store
+// and TaskCollector to avoid SQLite locking conflicts on the same file.
+//
+// The caller that passes in the DB handle (typically via metrics.Store.DB())
+// retains ownership of closing the connection. The returned TaskCollector's
+// Shutdown() will NOT close the database handle.
+func NewTaskCollectorWithDB(db *sqlx.DB, logger *slog.Logger) (*TaskCollector, error) {
+	if db == nil {
+		return nil, fmt.Errorf("NewTaskCollectorWithDB: db must not be nil")
+	}
+
+	// Apply the same pragmas to the shared connection. In WAL mode the
+	// pragmas are process-global per database file, so re-applying them
+	// on a shared handle is a no-op if already set.
+	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
+		return nil, fmt.Errorf("failed to set WAL journal mode: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout=5000;"); err != nil {
+		return nil, fmt.Errorf("failed to set busy_timeout: %w", err)
+	}
+
+	// Initialize schema for agent_task_outcomes
+	if err := initAgentTaskSchema(db); err != nil {
+		return nil, fmt.Errorf("failed to initialize agent task schema: %w", err)
+	}
+
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	c := &TaskCollector{
+		db:          db,
+		logger:      logger.With("component", "task-collector"),
+		flushQueue:  make(chan *AgentTaskMetrics, 1000),
+		flushTicker: time.NewTicker(5 * time.Second),
+		stopChan:    make(chan struct{}),
+		ownsDB:      false, // caller owns the DB lifecycle
 	}
 
 	// Start background flush loop
@@ -744,6 +806,9 @@ flush:
 }
 
 // Shutdown stops the task collector and flushes pending metrics.
+// If NewTaskCollector opened its own DB, Shutdown will checkpoint the WAL
+// and close the handle. If NewTaskCollectorWithDB was used (sharing a DB),
+// only the flush goroutine is stopped — the caller owns DB closure.
 func (c *TaskCollector) Shutdown() {
 	select {
 	case <-c.stopChan:
@@ -753,5 +818,12 @@ func (c *TaskCollector) Shutdown() {
 	}
 	c.flushTicker.Stop()
 	c.wg.Wait()
-	_ = c.db.Close()
+	if c.ownsDB {
+		// Checkpoint the WAL before closing so that any pending
+		// writes in the write-ahead log are persisted to the main
+		// DB file. Ignore errors — Closing the connection will
+		// trigger an automatic checkpoint anyway.
+		_, _ = c.db.Exec("PRAGMA wal_checkpoint(TRUNCATE);")
+		_ = c.db.Close()
+	}
 }

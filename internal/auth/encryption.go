@@ -13,8 +13,6 @@ import (
 	"os"
 )
 
-const aesKeySize = 32 // AES-256
-
 // EncryptionKey provides AES-256-GCM encryption for token storage.
 // The key is resolved at construction time from a user-provided key or
 // machine-derived identifiers.

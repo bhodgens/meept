@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -280,33 +279,4 @@ func parsePyrightErrors(output, targetFile string) ([]LinterResult, error) {
 func isCommandAvailable(name string) bool {
 	cmd := exec.Command("which", name)
 	return cmd.Run() == nil
-}
-
-// findPythonModuleRoot finds the python module root directory (where pyproject.toml or setup.py exists)
-func findPythonModuleRoot(path string) string {
-	dir := filepath.Dir(path)
-	if dir == "." {
-		dir, _ = os.Getwd()
-	}
-
-	// Walk up looking for pyproject.toml or setup.py or requirements.txt
-	for {
-		for _, f := range []string{"pyproject.toml", "setup.py", "requirements.txt", "__init__.py"} {
-			if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
-				return dir
-			}
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-
-	// Fall back to current directory
-	if dir, err := os.Getwd(); err == nil {
-		return dir
-	}
-
-	return "."
 }

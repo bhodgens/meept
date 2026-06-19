@@ -470,6 +470,21 @@ func DefaultSpecs() []*AgentSpec {
 	}
 }
 
+// ExecutorAgentIDs returns the canonical list of executor agent IDs (excluding
+// the dispatcher, which routes but does not execute jobs). The IDs are returned
+// in a stable order suitable for deterministic worker bootstrapping.
+func ExecutorAgentIDs() []string {
+	return []string{
+		config.AgentIDChat,
+		config.AgentIDCoder,
+		config.AgentIDDebugger,
+		config.AgentIDPlanner,
+		config.AgentIDAnalyst,
+		config.AgentIDCommitter,
+		config.AgentIDScheduler,
+	}
+}
+
 // HasTool checks if the agent spec includes a tool (baseline or additional).
 func (s *AgentSpec) HasTool(tool string) bool {
 	// Check baseline tools

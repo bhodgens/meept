@@ -110,6 +110,19 @@ func NewStore(cfg *StoreConfig) (*Store, error) {
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(time.Hour)
 
+	// Apply SQLite pragmas for concurrent safety. WAL mode allows readers
+	// and a single writer to coexist; busy_timeout makes connection attempts
+	// wait rather than failing immediately when another connection holds a
+	// lock (belt-and-suspenders alongside the SetMaxOpenConns(1) above).
+	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to set WAL journal mode: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout=5000;"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to set busy_timeout: %w", err)
+	}
+
 	store := &Store{
 		db:            db,
 		batchSize:     cfg.BatchSize,
@@ -135,6 +148,12 @@ func NewStore(cfg *StoreConfig) (*Store, error) {
 
 	return store, nil
 }
+
+// DB returns the underlying *sqlx.DB handle. Callers that share this
+// connection (e.g. TaskCollector via NewTaskCollectorWithDB) must NOT
+// close it — the Store retains ownership of the connection lifecycle
+// and will close it in Close().
+func (s *Store) DB() *sqlx.DB { return s.db }
 
 // initSchema creates the database schema if it doesn't exist.
 func (s *Store) initSchema() error {
@@ -676,6 +695,13 @@ func (s *Store) Close() error {
 		// by flush() to finish before closing the DB to prevent reads
 		// against a closed handle (S6-14).
 		s.notifyWG.Wait()
+		// Checkpoint the WAL before closing so that any data still in
+		// the write-ahead log is flushed to the main DB file. Ignore
+		// errors — if the checkpoint fails, closing the connection will
+		// still trigger SQLite's automatic checkpoint. This is belt-and-
+		// suspenders and mainly matters when other connections share the
+		// same DB file (e.g. TaskCollector).
+		_, _ = s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE);")
 		dbErr = s.db.Close()
 	})
 	return dbErr

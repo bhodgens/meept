@@ -108,8 +108,6 @@ var (
 	lineAnchorTagged = regexp.MustCompile(`^(\d+):([0-9a-f]{4}):([a-z]{2})$`)
 	// hex4Pattern matches a 4-character hex string.
 	hex4Pattern = regexp.MustCompile(`^[0-9a-f]{4}$`)
-	// alpha2Pattern matches a 2-character lowercase alpha string.
-	alpha2Pattern = regexp.MustCompile(`^[a-z]{2}$`)
 )
 
 // PatchParser provides grammar-based parsing and validation of hashline patch

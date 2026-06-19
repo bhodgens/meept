@@ -16,9 +16,6 @@ import (
 	"github.com/nsf/termbox-go"
 )
 
-const (
-	pasteBufferSize = 64 * 1024 // max 64KB paste
-)
 
 // TUI represents the meept-lite terminal interface.
 type TUI struct {
@@ -51,7 +48,6 @@ type TUI struct {
 
 	// Command mode state
 	commandMode bool
-	commandKey  string // waiting for second key after ctrl+x
 
 	// Bracketed paste support
 	inPaste     bool

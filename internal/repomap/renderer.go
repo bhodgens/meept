@@ -158,11 +158,6 @@ func (r *ContextRenderer) sortFilesByRelevance(byFile map[string]RankedTags) []s
 	return result
 }
 
-// renderSymbol renders a single symbol with its context.
-func (r *ContextRenderer) renderSymbol(tag RankedTag) string {
-	return r.renderSymbolWithContext(tag, r.contextLines)
-}
-
 // renderSymbolWithContext renders a single symbol using the provided context
 // lines override instead of reading r.contextLines.
 func (r *ContextRenderer) renderSymbolWithContext(tag RankedTag, contextLines int) string {
@@ -179,11 +174,6 @@ func (r *ContextRenderer) renderSymbolWithContext(tag RankedTag, contextLines in
 
 	// Fallback: just show the symbol without context
 	return fmt.Sprintf("    %s %s (line %d)", kindIndicator, tag.Name, tag.Line+1)
-}
-
-// getSourceContext reads the source file and extracts context around the symbol.
-func (r *ContextRenderer) getSourceContext(tag RankedTag) string {
-	return r.getSourceContextWithContext(tag, r.contextLines)
 }
 
 // getSourceContextWithContext reads the source file and extracts context around

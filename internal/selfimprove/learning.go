@@ -901,23 +901,6 @@ func (lp *LearningPipeline) similarity(a, b string) float64 {
 	return float64(intersection) / float64(union)
 }
 
-func (lp *LearningPipeline) savePatterns() error {
-	// Deep-copy patterns under the lock to prevent a data race with
-	// RecordPatternUse, then marshal outside the lock.
-	lp.mu.Lock()
-	snapshot := deepCopyPatterns(lp.patterns)
-	lp.mu.Unlock()
-
-	data, err := json.MarshalIndent(snapshot, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	path := filepath.Join(lp.dataDir, "patterns.json")
-	//nolint:gosec // user config directory/file permissions
-	return os.WriteFile(path, data, 0o644)
-}
-
 // savePatternsFromSnapshot writes the given patterns to disk without holding
 // any lock. Callers must ensure no concurrent mutation of the patterns
 // (e.g., by providing deep copies or holding the lock during marshal).

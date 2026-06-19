@@ -829,12 +829,6 @@ func promptLine(defaultVal, prompt string) string {
 	return line
 }
 
-// promptInput is an alias for promptLine for backward compatibility.
-// The reader parameter is unused but retained for API compatibility.
-func promptInput(_ *bufio.Reader, prompt, defaultVal string) string {
-	return promptLine(defaultVal, prompt)
-}
-
 // reader returns a buffered reader for stdin.
 func reader() *bufio.Reader {
 	return bufio.NewReader(os.Stdin)
@@ -1025,56 +1019,4 @@ type clusterConfigJSON struct {
 	SecurityKeyRotateDays int    `json:"key_rotation_days"`
 	JoinKey               string `json:"join_key"`
 	Status                string `json:"status"`
-}
-
-// clusterConfig is the in-memory config loaded from the config file.
-// For future daemon-side use.
-type clusterConfig struct {
-	ClusterID     string         `json:"cluster_id"`
-	ClusterName   string         `json:"cluster_name"`
-	NodeID        string         `json:"node_id"`
-	NodeName      string         `json:"node_name"`
-	SigningPub    string         `json:"signing_pubkey"`
-	SigningPriv   string         `json:"signing_private_key"`
-	WireGuardPub  string         `json:"wireguard_pubkey"`
-	WireGuardPriv string         `json:"wireguard_private_key"`
-	Network       networkConfig  `json:"network"`
-	ClusterIP     string         `json:"cluster_ip"`
-	Gossip        gossipConfig   `json:"gossip"`
-	Queue         queueConfig    `json:"queue"`
-	Git           gitConfig      `json:"git"`
-	Security      securityConfig `json:"security"`
-	JoinKey       string         `json:"join_key"`
-	Status        string         `json:"status"`
-}
-
-type networkConfig struct {
-	Subnet    string `json:"wireguard_subnet"`
-	Port      int    `json:"wireguard_port"`
-	Interface string `json:"interface"`
-}
-
-type gossipConfig struct {
-	HeartbeatInterval string `json:"heartbeat_interval"`
-	PeerTimeout       string `json:"peer_timeout"`
-	EventRetention    string `json:"event_retention"`
-	MaxRetryAttempts  int    `json:"max_retry_attempts"`
-}
-
-type queueConfig struct {
-	DefaultClaimTimeout     string `json:"default_claim_timeout"`
-	NodeReachabilityTimeout string `json:"node_reachability_timeout"`
-	FullPayloadReplication  bool   `json:"full_payload_replication"`
-}
-
-type gitConfig struct {
-	Remote          string `json:"remote"`
-	SyncInterval    string `json:"sync_interval"`
-	HeartbeatCommit bool   `json:"heartbeat_commit"`
-	Branch          string `json:"branch"`
-}
-
-type securityConfig struct {
-	RequireNodeSignatures bool `json:"require_node_signatures"`
-	KeyRotationDays       int  `json:"key_rotation_days"`
 }

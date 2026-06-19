@@ -257,22 +257,6 @@ func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([
 	return results, nil
 }
 
-// updateLastAccessed updates the last_accessed_at timestamp for retrieved memories.
-// Deprecated: use updateLastAccessedByIDs instead to avoid slice-backed data races.
-func (e *EpisodicMemory) updateLastAccessed(ctx context.Context, results []MemoryResult) error {
-	if len(results) == 0 {
-		return nil
-	}
-
-	nowISO := time.Now().UTC().Format(time.RFC3339Nano)
-	ids := make([]string, len(results))
-	for i, result := range results {
-		ids[i] = result.Memory.ID
-	}
-
-	return e.updateLastAccessedByIDsImpl(ctx, nowISO, ids)
-}
-
 // updateLastAccessedByIDs updates the last_accessed_at timestamp for memories
 // identified by the given IDs. This variant accepts raw IDs rather than full
 // MemoryResult structs, callers should pass a copied ID slice to avoid data

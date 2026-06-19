@@ -13,9 +13,6 @@ import (
 const (
 	// numBigrams is the total number of two-letter lowercase combinations (26*26).
 	numBigrams = 676
-
-	// hashLineSep separates hash from content in hashline format.
-	hashLineSep = "|"
 )
 
 // bpeBigrams is all 676 two-letter lowercase combinations, ordered alphabetically.

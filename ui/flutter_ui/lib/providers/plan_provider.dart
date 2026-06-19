@@ -1,6 +1,10 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
 import '../services/sdk_client.dart';
+import '../services/websocket_service.dart';
 import 'providers.dart';
 
 const _unset = Object();
@@ -30,11 +34,36 @@ class PlanState {
 }
 
 class PlanNotifier extends StateNotifier<PlanState> {
-  PlanNotifier({required this.sdkClient}) : super(const PlanState());
+  PlanNotifier({
+    required this.sdkClient,
+    this.webSocketService,
+  }) : super(const PlanState()) {
+    if (webSocketService != null) {
+      try {
+        _plansSubscription =
+            webSocketService!.subscribeToPlans().listen((_) {
+          // Refresh plans using the same filter as the last loadPlans call.
+          loadPlans(sessionID: _lastSessionID, projectID: _lastProjectID);
+        });
+      } catch (e) {
+        debugPrint('[warn] PlanNotifier WebSocket subscribe failed: $e');
+      }
+    }
+  }
 
   final SdkApiClient sdkClient;
+  final WebSocketService? webSocketService;
+
+  StreamSubscription<Map<String, dynamic>>? _plansSubscription;
+
+  // Store the params from the last loadPlans() call so that a
+  // WebSocket-triggered refresh uses the same filter.
+  String? _lastSessionID;
+  String? _lastProjectID;
 
   Future<void> loadPlans({String? sessionID, String? projectID}) async {
+    _lastSessionID = sessionID;
+    _lastProjectID = projectID;
     state = state.copyWith(isLoading: true, error: null);
     try {
       // SdkApiClient.listPlansBySession/listPlans return the raw `plans`
@@ -89,9 +118,17 @@ class PlanNotifier extends StateNotifier<PlanState> {
   void clearError() {
     state = state.copyWith(error: null);
   }
+
+  @override
+  void dispose() {
+    _plansSubscription?.cancel();
+    _plansSubscription = null;
+    super.dispose();
+  }
 }
 
 final planProvider = StateNotifierProvider<PlanNotifier, PlanState>((ref) {
   final client = ref.watch(sdkClientProvider);
-  return PlanNotifier(sdkClient: client);
+  final ws = ref.watch(websocketProvider);
+  return PlanNotifier(sdkClient: client, webSocketService: ws);
 });

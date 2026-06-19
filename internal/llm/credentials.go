@@ -39,23 +39,6 @@ func (cs *CredentialStore) load() error {
 	return json.Unmarshal(data, &cs.creds) //nolint:mutexio // mutex guards cs.creds mutation during Unmarshal
 }
 
-func (cs *CredentialStore) save() error {
-	if err := os.MkdirAll(filepath.Dir(cs.filepath), 0o700); err != nil {
-		return err
-	}
-	cs.mu.RLock()
-	snapshot := make(map[string]string, len(cs.creds))
-	for k, v := range cs.creds {
-		snapshot[k] = v
-	}
-	cs.mu.RUnlock()
-	data, err := json.MarshalIndent(snapshot, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(cs.filepath, data, 0o600)
-}
-
 // Get returns the API key for a provider.
 func (cs *CredentialStore) Get(providerID string) (string, bool) {
 	cs.mu.RLock()

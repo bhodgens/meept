@@ -1,11 +1,11 @@
 nav:
-  - llm.md
-  - memory.md
-  - skills.md
   - config.md
   - agent.md
-  - tools.md
-  - scheduler.md
-  - bus.md
   - security.md
+  - memory.md
+  - bus.md
+  - llm.md
+  - tools.md
+  - skills.md
+  - scheduler.md
   - index.md

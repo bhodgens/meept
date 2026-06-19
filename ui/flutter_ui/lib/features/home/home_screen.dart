@@ -216,6 +216,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _leaderController.onFind = () {
       context.goToolSearch();
     };
+    _leaderController.onInSessionFind = () {
+      if (_selectedTab != HomeTab.chat) {
+        setState(() => _selectedTab = HomeTab.chat);
+      }
+      final session = ref.read(activeSessionProvider);
+      final sid = session?.id ?? 'default';
+      ref.read(findBarVisibleProvider(sid).notifier).state = true;
+    };
     _leaderController.onBranches = () {
       context.goToolBranches();
     };

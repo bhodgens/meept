@@ -40,29 +40,6 @@ type CategoryMetrics struct {
 	FalseNegatives int     `json:"-"`
 }
 
-func (cm *CategoryMetrics) calculatePrecision() float64 {
-	if cm.TruePositives+cm.FalsePositives == 0 {
-		return 0
-	}
-	return float64(cm.TruePositives) / float64(cm.TruePositives+cm.FalsePositives)
-}
-
-func (cm *CategoryMetrics) calculateRecall() float64 {
-	if cm.TruePositives+cm.FalseNegatives == 0 {
-		return 0
-	}
-	return float64(cm.TruePositives) / float64(cm.TruePositives+cm.FalseNegatives)
-}
-
-func (cm *CategoryMetrics) calculateF1() float64 {
-	p := cm.calculatePrecision()
-	r := cm.calculateRecall()
-	if p+r == 0 {
-		return 0
-	}
-	return 2 * p * r / (p + r)
-}
-
 // ModelMetrics holds overall metrics for a single model under evaluation.
 type ModelMetrics struct {
 	ModelName         string                      `json:"model_name"`

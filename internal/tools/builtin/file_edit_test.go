@@ -30,11 +30,6 @@ func helperFileEditSetup(t *testing.T, content string) (string, []string, *FileE
 	return filePath, lines, tool
 }
 
-// helperAnchor builds a "LINE:HASH" anchor string for the given line in the lines slice.
-func helperAnchor(lines []string, lineNum int) string {
-	return FormatHashLine(lineNum, lines[lineNum-1])
-}
-
 // helperAnchorStripped returns just the "LINE:HASH" part (without content).
 func helperAnchorStripped(lines []string, lineNum int) string {
 	full := FormatHashLine(lineNum, lines[lineNum-1])

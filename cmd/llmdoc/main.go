@@ -14,7 +14,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -295,9 +294,4 @@ func shouldSkipTopLevel(name string) bool {
 		}
 	}
 	return false
-}
-// the project root when running via `go run`.
-func sourceDir() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Dir(file)
 }

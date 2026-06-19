@@ -120,13 +120,3 @@ func generateID() string {
 	}
 	return hex.EncodeToString(b)
 }
-
-// randomHex is retained for backward compatibility with any external callers
-// that may have referenced it. It now uses hex.EncodeToString for correctness
-// (the previous version used modulo bias by indexing into the hex alphabet
-// with `randBytes[i]%16`).
-func randomHex(n int) string {
-	randBytes := make([]byte, n)
-	_, _ = crypto_rand.Read(randBytes)
-	return hex.EncodeToString(randBytes)
-}

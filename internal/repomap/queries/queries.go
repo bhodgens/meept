@@ -49,12 +49,6 @@ func loadFromFS(langName, queryFile string) (string, error) {
 	return string(data), nil
 }
 
-// listLanguages returns available language query directories.
-func listLanguages() []string {
-	// These are the supported languages with query files
-	return []string{"go", "python", "typescript", "rust", "java", "generic"}
-}
-
 // getDefaultQuery returns default query patterns when no query file is found.
 func getDefaultQuery(langName, queryFile string) string {
 	if queryFile == "definitions.scm" {

@@ -239,7 +239,6 @@ func TestShellRisk_ConfigurableAllowlist(t *testing.T) {
 
 // mockFenceChecker is a test double for FenceChecker.
 type mockFenceChecker struct {
-	rejectCmd string
 	rejectDir string
 }
 

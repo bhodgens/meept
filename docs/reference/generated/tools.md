@@ -15,6 +15,9 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 - [type Categorizer](<#Categorizer>)
 - [type CategoryTools](<#CategoryTools>)
 - [type Deferrable](<#Deferrable>)
+- [type PTYSessionConfig](<#PTYSessionConfig>)
+- [type PTYSessionInfo](<#PTYSessionInfo>)
+- [type PTYTool](<#PTYTool>)
 - [type PreviewResult](<#PreviewResult>)
 - [type ProgressUpdate](<#ProgressUpdate>)
 - [type Registry](<#Registry>)
@@ -38,6 +41,7 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 - [type ToolInfo](<#ToolInfo>)
 - [type ToolResult](<#ToolResult>)
   - [func NewErrorResult\(err string\) \*ToolResult](<#NewErrorResult>)
+  - [func NewErrorResultErr\(err error\) \*ToolResult](<#NewErrorResultErr>)
   - [func NewSuccessResult\(result any\) \*ToolResult](<#NewSuccessResult>)
   - [func NewSuccessResultWithTerminate\(result any\) \*ToolResult](<#NewSuccessResultWithTerminate>)
 - [type ToolRetryPolicy](<#ToolRetryPolicy>)
@@ -136,6 +140,61 @@ Deferrable is an optional interface that tools implement to support a preview\-t
 	    Apply(ctx context.Context, args map[string]any) (any, error)
 	    // Discard cleans up any staged state for the deferred action.
 	    Discard(ctx context.Context, args map[string]any) error
+	}
+
+<a name="PTYSessionConfig"></a>
+## type PTYSessionConfig
+
+PTYSessionConfig holds PTY session configuration.
+
+	type PTYSessionConfig struct {
+	    Cmd     string            `json:"cmd"`
+	    Args    []string          `json:"args,omitempty"`
+	    Dir     string            `json:"dir,omitempty"`
+	    Env     map[string]string `json:"env,omitempty"`
+	    Rows    int               `json:"rows"`
+	    Cols    int               `json:"cols"`
+	    Timeout time.Duration     `json:"-"`
+	}
+
+<a name="PTYSessionInfo"></a>
+## type PTYSessionInfo
+
+PTYSessionInfo holds session metadata returned to clients.
+
+	type PTYSessionInfo struct {
+	    ID        string    `json:"id"`
+	    Cmd       string    `json:"cmd"`
+	    Args      []string  `json:"args,omitempty"`
+	    Dir       string    `json:"dir,omitempty"`
+	    CreatedAt time.Time `json:"created_at"`
+	    Rows      int       `json:"rows"`
+	    Cols      int       `json:"cols"`
+	    IsRunning bool      `json:"is_running"`
+	}
+
+<a name="PTYTool"></a>
+## type PTYTool
+
+PTYTool is a tool that supports interactive PTY sessions for real\-time streaming \(e.g. gdb, ipython, long\-running servers\).
+
+	type PTYTool interface {
+	    Tool
+	
+	    // CreateSession creates a new PTY session.
+	    CreateSession(sessionID string, config PTYSessionConfig) (*PTYSessionInfo, error)
+	
+	    // WriteToSession sends input to a PTY session.
+	    WriteToSession(sessionID string, input []byte) error
+	
+	    // ReadFromSession reads output from a PTY session (context-aware).
+	    ReadFromSession(ctx context.Context, sessionID string) ([]byte, error)
+	
+	    // CloseSession terminates a PTY session.
+	    CloseSession(sessionID string) error
+	
+	    // SessionOutput returns a channel for streaming session output.
+	    SessionOutput(sessionID string) (<-chan []byte, error)
 	}
 
 <a name="PreviewResult"></a>
@@ -359,6 +418,7 @@ ToolResult is the standardized result envelope returned by tool execution.
 	    Success   bool              `json:"success"`
 	    Result    any               `json:"result,omitempty"`
 	    Error     string            `json:"error,omitempty"`
+	    Err       error             `json:"-"` // Original typed error (when available) so callers can use errors.Is/As
 	    Evidence  []models.Evidence `json:"evidence,omitempty"`
 	    Terminate bool              `json:"terminate,omitempty"` // Advisory: hint that result is final and needs no LLM follow-up
 	}
@@ -368,7 +428,14 @@ ToolResult is the standardized result envelope returned by tool execution.
 
 	func NewErrorResult(err string) *ToolResult
 
-NewErrorResult creates a failed tool result.
+NewErrorResult creates a failed tool result from a plain string. Use NewErrorResultErr when you have a typed error so callers can use errors.Is / errors.As on the returned \*ToolResult.
+
+<a name="NewErrorResultErr"></a>
+### func NewErrorResultErr
+
+	func NewErrorResultErr(err error) *ToolResult
+
+NewErrorResultErr creates a failed tool result that preserves the original typed error alongside its string representation. Callers can use the Err field with errors.Is / errors.As to inspect specific error types.
 
 <a name="NewSuccessResult"></a>
 ### func NewSuccessResult

@@ -11,7 +11,6 @@ package stt
 import (
 	"context"
 	"fmt"
-	"log/slog"
 )
 
 // Result represents a transcription result returned by an engine.
@@ -95,5 +94,3 @@ func CheckAvailable(cfg Config) error {
 		return fmt.Errorf("stt: unknown engine %q", cfg.Engine)
 	}
 }
-
-var logger = slog.Default().With("component", "stt")

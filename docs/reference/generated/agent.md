@@ -33,6 +33,7 @@ Package agent provides the agent loop and related components.
 - [func BusTopic\(eventType AgentEventType\) string](<#BusTopic>)
 - [func CosineSimilarity\(a, b \[\]float64\) float64](<#CosineSimilarity>)
 - [func DefaultCoworkerAwareness\(\) string](<#DefaultCoworkerAwareness>)
+- [func ExecutorAgentIDs\(\) \[\]string](<#ExecutorAgentIDs>)
 - [func FormatExampleArgs\(args map\[string\]any\) string](<#FormatExampleArgs>)
 - [func GetThresholdForIntent\(intentType string\) float64](<#GetThresholdForIntent>)
 - [func IsValidIntentType\(s string\) bool](<#IsValidIntentType>)
@@ -68,9 +69,11 @@ Package agent provides the agent loop and related components.
 - [type AgentLoop](<#AgentLoop>)
   - [func NewAgentLoop\(opts ...LoopOption\) \*AgentLoop](<#NewAgentLoop>)
   - [func \(l \*AgentLoop\) ClearConversation\(id string\)](<#AgentLoop.ClearConversation>)
+  - [func \(l \*AgentLoop\) ClearModelOverride\(\)](<#AgentLoop.ClearModelOverride>)
   - [func \(l \*AgentLoop\) FirewallStats\(\) map\[string\]any](<#AgentLoop.FirewallStats>)
   - [func \(l \*AgentLoop\) GetConfig\(\) AgentConfig](<#AgentLoop.GetConfig>)
   - [func \(l \*AgentLoop\) GetConversation\(id string\) \*Conversation](<#AgentLoop.GetConversation>)
+  - [func \(l \*AgentLoop\) GetModelOverride\(\) string](<#AgentLoop.GetModelOverride>)
   - [func \(l \*AgentLoop\) HandleMessage\(ctx context.Context, message string\) \(string, error\)](<#AgentLoop.HandleMessage>)
   - [func \(l \*AgentLoop\) Run\(ctx context.Context, messages \<\-chan \*AgentMessage, responses chan\<\- \*AgentResponse\) error](<#AgentLoop.Run>)
   - [func \(l \*AgentLoop\) RunOnce\(ctx context.Context, userMessage, conversationID string\) \(response string, err error\)](<#AgentLoop.RunOnce>)
@@ -82,9 +85,14 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetContextFirewallConfig\(fw config.LLMContextFirewallConfig\)](<#AgentLoop.SetContextFirewallConfig>)
   - [func \(l \*AgentLoop\) SetMCPServerLister\(lister func\(\) \[\]MCPServerInfo\)](<#AgentLoop.SetMCPServerLister>)
   - [func \(l \*AgentLoop\) SetMemvidClient\(client \*memvid.Client\)](<#AgentLoop.SetMemvidClient>)
+  - [func \(l \*AgentLoop\) SetModelOverride\(modelRef string\)](<#AgentLoop.SetModelOverride>)
+  - [func \(l \*AgentLoop\) SetNotificationPublisher\(publisher NotificationPublisher\)](<#AgentLoop.SetNotificationPublisher>)
   - [func \(l \*AgentLoop\) SetPrefetchCallback\(callback func\(query string, maxItems int\)\)](<#AgentLoop.SetPrefetchCallback>)
+  - [func \(l \*AgentLoop\) SetRepoMapGenerator\(gen \*repomap.RepoMapGenerator\)](<#AgentLoop.SetRepoMapGenerator>)
+  - [func \(l \*AgentLoop\) SetResponseAnalyzer\(ra \*metrics.ResponseAnalyzer\)](<#AgentLoop.SetResponseAnalyzer>)
   - [func \(l \*AgentLoop\) SetSessionStore\(store any, sessionCfg any\)](<#AgentLoop.SetSessionStore>)
   - [func \(l \*AgentLoop\) SetSkillLoader\(loader \*skills.LazySkillLoader\)](<#AgentLoop.SetSkillLoader>)
+  - [func \(l \*AgentLoop\) SetTaskCollector\(tc \*metrics.TaskCollector\)](<#AgentLoop.SetTaskCollector>)
   - [func \(l \*AgentLoop\) SetTaskStore\(store \*task.Store\)](<#AgentLoop.SetTaskStore>)
 - [type AgentMemoryConfig](<#AgentMemoryConfig>)
 - [type AgentMessage](<#AgentMessage>)
@@ -170,6 +178,7 @@ Package agent provides the agent loop and related components.
 - [type BeforeToolCallHook](<#BeforeToolCallHook>)
 - [type BlockResult](<#BlockResult>)
 - [type BusPairSessionState](<#BusPairSessionState>)
+- [type BusPairSessionStateSnapshot](<#BusPairSessionStateSnapshot>)
 - [type CacheConfig](<#CacheConfig>)
   - [func DefaultCacheConfig\(\) CacheConfig](<#DefaultCacheConfig>)
 - [type CacheEntry](<#CacheEntry>)
@@ -215,6 +224,7 @@ Package agent provides the agent loop and related components.
   - [func \(h \*ChatHandler\) GetWorkers\(\) \[\]\*Worker](<#ChatHandler.GetWorkers>)
   - [func \(h \*ChatHandler\) Name\(\) string](<#ChatHandler.Name>)
   - [func \(h \*ChatHandler\) SetBudget\(budget \*llm.Budget\)](<#ChatHandler.SetBudget>)
+  - [func \(h \*ChatHandler\) SetCollaborationEngine\(engine \*CollaborationEngine\)](<#ChatHandler.SetCollaborationEngine>)
   - [func \(h \*ChatHandler\) SetMetricsStore\(store \*metrics.Store\)](<#ChatHandler.SetMetricsStore>)
   - [func \(h \*ChatHandler\) SetStepStore\(store \*task.StepStore\)](<#ChatHandler.SetStepStore>)
   - [func \(h \*ChatHandler\) SetSyncMode\(enabled bool\)](<#ChatHandler.SetSyncMode>)
@@ -228,6 +238,7 @@ Package agent provides the agent loop and related components.
 - [type CollaborationEngine](<#CollaborationEngine>)
   - [func NewCollaborationEngine\(deps CollaborationEngineDeps\) \*CollaborationEngine](<#NewCollaborationEngine>)
   - [func \(e \*CollaborationEngine\) ActiveSessionCount\(\) int](<#CollaborationEngine.ActiveSessionCount>)
+  - [func \(e \*CollaborationEngine\) CleanupSessions\(\) int](<#CollaborationEngine.CleanupSessions>)
   - [func \(e \*CollaborationEngine\) CreateNestedSession\(parentID, mode, taskDesc string, preferredAgents \[\]string, config SessionConfig\) \(\*CollaborationSession, error\)](<#CollaborationEngine.CreateNestedSession>)
   - [func \(e \*CollaborationEngine\) CreateSession\(mode, taskID string, participants \[\]string, config SessionConfig\) \(\*CollaborationSession, error\)](<#CollaborationEngine.CreateSession>)
   - [func \(e \*CollaborationEngine\) GetMode\(name string\) \(CollaborationMode, bool\)](<#CollaborationEngine.GetMode>)
@@ -245,10 +256,14 @@ Package agent provides the agent loop and related components.
 - [type CollaborationSession](<#CollaborationSession>)
   - [func NewCollaborationSession\(mode, taskID string, participants \[\]string, config SessionConfig\) \*CollaborationSession](<#NewCollaborationSession>)
   - [func \(s \*CollaborationSession\) AddTurn\(entry TurnEntry\)](<#CollaborationSession.AddTurn>)
+  - [func \(s \*CollaborationSession\) CopyTurnLog\(\) \[\]TurnEntry](<#CollaborationSession.CopyTurnLog>)
+  - [func \(s \*CollaborationSession\) GetState\(\) SessionState](<#CollaborationSession.GetState>)
+  - [func \(s \*CollaborationSession\) LastContentByRole\(role string\) string](<#CollaborationSession.LastContentByRole>)
   - [func \(s \*CollaborationSession\) MarkActive\(\)](<#CollaborationSession.MarkActive>)
   - [func \(s \*CollaborationSession\) MarkConverged\(\)](<#CollaborationSession.MarkConverged>)
   - [func \(s \*CollaborationSession\) MarkExhausted\(\)](<#CollaborationSession.MarkExhausted>)
   - [func \(s \*CollaborationSession\) MarkFailed\(\)](<#CollaborationSession.MarkFailed>)
+  - [func \(s \*CollaborationSession\) TotalTokensUsed\(\) int64](<#CollaborationSession.TotalTokensUsed>)
   - [func \(s \*CollaborationSession\) TurnCount\(\) int](<#CollaborationSession.TurnCount>)
 - [type CompactionAgentConfig](<#CompactionAgentConfig>)
 - [type CompletionStatus](<#CompletionStatus>)
@@ -342,6 +357,7 @@ Package agent provides the agent loop and related components.
   - [func \(d \*Dispatcher\) ShouldRouteToCollaborate\(result \*DispatchResult\) bool](<#Dispatcher.ShouldRouteToCollaborate>)
   - [func \(d \*Dispatcher\) ShouldRouteToPair\(result \*DispatchResult\) bool](<#Dispatcher.ShouldRouteToPair>)
   - [func \(d \*Dispatcher\) SteerActiveAgent\(ctx context.Context, conversationID, content, source string\) error](<#Dispatcher.SteerActiveAgent>)
+  - [func \(d \*Dispatcher\) Stop\(\)](<#Dispatcher.Stop>)
   - [func \(d \*Dispatcher\) SubmitAmendment\(ctx context.Context, taskID string, amendmentType task.AmendmentType, content string, metadata map\[string\]any\) \(\*task.AmendmentRequest, error\)](<#Dispatcher.SubmitAmendment>)
   - [func \(d \*Dispatcher\) ValidateRouting\(taskID, originalIntent, routedAgent string\) \*RoutingValidation](<#Dispatcher.ValidateRouting>)
 - [type DispatcherConfig](<#DispatcherConfig>)
@@ -364,6 +380,7 @@ Package agent provides the agent loop and related components.
 - [type EscalationLevel](<#EscalationLevel>)
 - [type EscalationManager](<#EscalationManager>)
   - [func NewEscalationManager\(cfg EscalationManagerConfig\) \*EscalationManager](<#NewEscalationManager>)
+  - [func \(em \*EscalationManager\) Cleanup\(maxAge time.Duration\)](<#EscalationManager.Cleanup>)
   - [func \(em \*EscalationManager\) ClearEscalation\(taskID string\)](<#EscalationManager.ClearEscalation>)
   - [func \(em \*EscalationManager\) Escalate\(ctx context.Context, failure FailureContext\) error](<#EscalationManager.Escalate>)
   - [func \(em \*EscalationManager\) EscalateForValidation\(ctx context.Context, failure FailureContext, validationLoops int\) error](<#EscalationManager.EscalateForValidation>)
@@ -402,6 +419,7 @@ Package agent provides the agent loop and related components.
   - [func \(r \*FilteredToolRegistry\) Get\(name string\) tools.Tool](<#FilteredToolRegistry.Get>)
   - [func \(r \*FilteredToolRegistry\) GetDefinitions\(\) \[\]llm.ToolDefinition](<#FilteredToolRegistry.GetDefinitions>)
   - [func \(r \*FilteredToolRegistry\) List\(\) \[\]tools.Tool](<#FilteredToolRegistry.List>)
+- [type FixAttempt](<#FixAttempt>)
 - [type HallucinationConfig](<#HallucinationConfig>)
   - [func DefaultHallucinationConfig\(\) HallucinationConfig](<#DefaultHallucinationConfig>)
 - [type HallucinationDetector](<#HallucinationDetector>)
@@ -478,10 +496,14 @@ Package agent provides the agent loop and related components.
   - [func WithMemvidClient\(client \*memvid.Client\) LoopOption](<#WithMemvidClient>)
   - [func WithMessageBus\(b \*bus.MessageBus\) LoopOption](<#WithMessageBus>)
   - [func WithMessageQueue\(q \*MessageQueue\) LoopOption](<#WithMessageQueue>)
+  - [func WithModelOverride\(modelRef string\) LoopOption](<#WithModelOverride>)
   - [func WithModelRef\(modelRef string\) LoopOption](<#WithModelRef>)
+  - [func WithNotificationPublisher\(publisher NotificationPublisher\) LoopOption](<#WithNotificationPublisher>)
   - [func WithPrefetchCallback\(callback func\(query string, maxItems int\)\) LoopOption](<#WithPrefetchCallback>)
   - [func WithProgressEnabled\(enabled bool\) LoopOption](<#WithProgressEnabled>)
+  - [func WithRepoMapGenerator\(gen \*repomap.RepoMapGenerator\) LoopOption](<#WithRepoMapGenerator>)
   - [func WithResolver\(resolver \*llm.Resolver\) LoopOption](<#WithResolver>)
+  - [func WithResponseAnalyzer\(ra \*metrics.ResponseAnalyzer\) LoopOption](<#WithResponseAnalyzer>)
   - [func WithResultCache\(cache \*ResultCache\) LoopOption](<#WithResultCache>)
   - [func WithSecurityChecker\(checker \*security.PermissionChecker\) LoopOption](<#WithSecurityChecker>)
   - [func WithSecurityOrchestrator\(orch \*intsecurity.Orchestrator\) LoopOption](<#WithSecurityOrchestrator>)
@@ -489,6 +511,7 @@ Package agent provides the agent loop and related components.
   - [func WithSharedConversationStore\(store \*ConversationStore\) LoopOption](<#WithSharedConversationStore>)
   - [func WithSkillLoader\(loader \*skills.LazySkillLoader\) LoopOption](<#WithSkillLoader>)
   - [func WithTTSRManager\(mgr \*TTSRManager\) LoopOption](<#WithTTSRManager>)
+  - [func WithTaskCollector\(tc \*metrics.TaskCollector\) LoopOption](<#WithTaskCollector>)
   - [func WithTaskStore\(store \*task.Store\) LoopOption](<#WithTaskStore>)
   - [func WithToolRegistry\(registry ToolRegistry\) LoopOption](<#WithToolRegistry>)
   - [func WithWatchdog\(w \*Watchdog\) LoopOption](<#WithWatchdog>)
@@ -539,11 +562,16 @@ Package agent provides the agent loop and related components.
 - [type ModelSelectData](<#ModelSelectData>)
 - [type MultiIntent](<#MultiIntent>)
   - [func \(m \*MultiIntent\) DetectCompound\(\) bool](<#MultiIntent.DetectCompound>)
+- [type NotificationPublisher](<#NotificationPublisher>)
 - [type Orchestrator](<#Orchestrator>)
   - [func NewOrchestrator\(deps OrchestratorDeps\) \*Orchestrator](<#NewOrchestrator>)
+  - [func \(o \*Orchestrator\) GenerateRepoMap\(ctx context.Context, chatFiles, mentionedIdentifiers \[\]string\) \(\*repomap.RenderedMap, error\)](<#Orchestrator.GenerateRepoMap>)
   - [func \(o \*Orchestrator\) Name\(\) string](<#Orchestrator.Name>)
   - [func \(o \*Orchestrator\) PlanManager\(\) \*plan.PlanManager](<#Orchestrator.PlanManager>)
+  - [func \(o \*Orchestrator\) ReflectionEngine\(\) \*ReflectionEngine](<#Orchestrator.ReflectionEngine>)
   - [func \(o \*Orchestrator\) SetPlanManager\(pm \*plan.PlanManager\)](<#Orchestrator.SetPlanManager>)
+  - [func \(o \*Orchestrator\) SetReflectionEngine\(reflection \*ReflectionEngine\)](<#Orchestrator.SetReflectionEngine>)
+  - [func \(o \*Orchestrator\) SetRepoMapGenerator\(gen \*repomap.RepoMapGenerator\)](<#Orchestrator.SetRepoMapGenerator>)
   - [func \(o \*Orchestrator\) Start\(ctx context.Context\) error](<#Orchestrator.Start>)
   - [func \(o \*Orchestrator\) Stop\(ctx context.Context\) error](<#Orchestrator.Stop>)
 - [type OrchestratorDeps](<#OrchestratorDeps>)
@@ -575,7 +603,7 @@ Package agent provides the agent loop and related components.
 - [type PairOrchestrator](<#PairOrchestrator>)
   - [func NewPairOrchestrator\(deps PairOrchestratorDeps\) \*PairOrchestrator](<#NewPairOrchestrator>)
   - [func \(po \*PairOrchestrator\) ActiveSessionCount\(\) int](<#PairOrchestrator.ActiveSessionCount>)
-  - [func \(po \*PairOrchestrator\) GetSession\(sessionID string\) \*BusPairSessionState](<#PairOrchestrator.GetSession>)
+  - [func \(po \*PairOrchestrator\) GetSession\(sessionID string\) \(\*BusPairSessionStateSnapshot, bool\)](<#PairOrchestrator.GetSession>)
   - [func \(po \*PairOrchestrator\) Name\(\) string](<#PairOrchestrator.Name>)
   - [func \(po \*PairOrchestrator\) Start\(ctx context.Context\) error](<#PairOrchestrator.Start>)
   - [func \(po \*PairOrchestrator\) Stop\(ctx context.Context\) error](<#PairOrchestrator.Stop>)
@@ -664,13 +692,24 @@ Package agent provides the agent loop and related components.
 - [type QueueUpdateData](<#QueueUpdateData>)
 - [type QueuedMessage](<#QueuedMessage>)
 - [type RalphLoop](<#RalphLoop>)
-  - [func NewRalphLoop\(config RalphLoopConfig, orchestrator \*Orchestrator, taskStore \*task.Store, planManager \*plan.PlanManager, bus \*bus.MessageBus, logger \*slog.Logger\) \*RalphLoop](<#NewRalphLoop>)
+  - [func NewRalphLoop\(config RalphLoopConfig, orchestrator \*Orchestrator, taskStore \*task.Store, stepStore \*task.StepStore, planManager \*plan.PlanManager, bus \*bus.MessageBus, logger \*slog.Logger\) \*RalphLoop](<#NewRalphLoop>)
   - [func \(rl \*RalphLoop\) CheckCompletion\(ctx context.Context, taskID string, result json.RawMessage\) \(bool, \[\]string, bool\)](<#RalphLoop.CheckCompletion>)
+  - [func \(rl \*RalphLoop\) Cleanup\(maxAge time.Duration, lastTouched func\(string\) time.Time\)](<#RalphLoop.Cleanup>)
   - [func \(rl \*RalphLoop\) GetIterationCount\(taskID string\) int](<#RalphLoop.GetIterationCount>)
+  - [func \(rl \*RalphLoop\) PlanManager\(\) \*plan.PlanManager](<#RalphLoop.PlanManager>)
   - [func \(rl \*RalphLoop\) Reset\(taskID string\)](<#RalphLoop.Reset>)
+  - [func \(rl \*RalphLoop\) SetPlanManager\(pm \*plan.PlanManager\)](<#RalphLoop.SetPlanManager>)
   - [func \(rl \*RalphLoop\) TriggerReplan\(ctx context.Context, taskID string, previousEvidence \[\]string\) error](<#RalphLoop.TriggerReplan>)
 - [type RalphLoopConfig](<#RalphLoopConfig>)
   - [func DefaultRalphLoopConfig\(\) RalphLoopConfig](<#DefaultRalphLoopConfig>)
+- [type ReflectionConfig](<#ReflectionConfig>)
+  - [func DefaultReflectionConfig\(\) ReflectionConfig](<#DefaultReflectionConfig>)
+- [type ReflectionEngine](<#ReflectionEngine>)
+  - [func NewReflectionEngine\(logger \*slog.Logger, linter \*lint.Registry, testRunner \*lint.TestRunner, llmClient llm.Chatter\) \*ReflectionEngine](<#NewReflectionEngine>)
+  - [func NewReflectionEngineWithConfig\(logger \*slog.Logger, linter \*lint.Registry, testRunner \*lint.TestRunner, llmClient llm.Chatter, config ReflectionConfig\) \*ReflectionEngine](<#NewReflectionEngineWithConfig>)
+  - [func \(re \*ReflectionEngine\) RunReflection\(ctx context.Context, editedFiles \[\]string\) \(\*ReflectionResult, error\)](<#ReflectionEngine.RunReflection>)
+  - [func \(re \*ReflectionEngine\) SetEditAvailability\(avail bool\)](<#ReflectionEngine.SetEditAvailability>)
+- [type ReflectionResult](<#ReflectionResult>)
 - [type RegistryConfig](<#RegistryConfig>)
 - [type ReportCapture](<#ReportCapture>)
 - [type ReportRouter](<#ReportRouter>)
@@ -797,6 +836,10 @@ Package agent provides the agent loop and related components.
   - [func \(ts \*TacticalScheduler\) OnJobFailed\(ctx context.Context, jobID, jobErr string\) error](<#TacticalScheduler.OnJobFailed>)
   - [func \(ts \*TacticalScheduler\) ScheduleReadySteps\(ctx context.Context, taskID string\) error](<#TacticalScheduler.ScheduleReadySteps>)
 - [type TacticalSchedulerConfig](<#TacticalSchedulerConfig>)
+- [type TaintBeforeToolCall](<#TaintBeforeToolCall>)
+  - [func NewTaintBeforeToolCall\(tracker \*taint.ExtendedTracker, logger \*slog.Logger, config TaintHookConfig\) \*TaintBeforeToolCall](<#NewTaintBeforeToolCall>)
+  - [func \(t \*TaintBeforeToolCall\) BeforeToolCall\(ctx context.Context, toolCall llm.ToolCall\) BlockResult](<#TaintBeforeToolCall.BeforeToolCall>)
+- [type TaintHookConfig](<#TaintHookConfig>)
 - [type TaskMessage](<#TaskMessage>)
   - [func NewResultMessage\(taskID, from string, result \*ResultPayload\) \(\*TaskMessage, error\)](<#NewResultMessage>)
   - [func NewTaskMessage\(from, to string, action ActionType, payload any\) \(\*TaskMessage, error\)](<#NewTaskMessage>)
@@ -1184,6 +1227,10 @@ Package agent provides the agent loop and related components.
 
 	var ErrDepthExceeded = &CollaborationError{Code: ErrCodeDepthExceeded, Message: "maximum collaboration nesting depth exceeded"}
 
+<a name="ErrNoExecutionSlot"></a>ErrNoExecutionSlot is returned when the semaphore blocks a step from executing.
+
+	var ErrNoExecutionSlot = errors.New("no available execution slot")
+
 <a name="SteeringHeuristicTable"></a>SteeringHeuristicTable defines which intent types should interrupt \(steer\) vs wait for a natural stopping point \(follow\-up\) when an agent loop is already running for the conversation.
 
 	var SteeringHeuristicTable = map[IntentType]bool{
@@ -1294,6 +1341,13 @@ CosineSimilarity computes cosine similarity between two vectors.
 	func DefaultCoworkerAwareness() string
 
 DefaultCoworkerAwareness returns the standard coworker awareness prompt.
+
+<a name="ExecutorAgentIDs"></a>
+## func ExecutorAgentIDs
+
+	func ExecutorAgentIDs() []string
+
+ExecutorAgentIDs returns the canonical list of executor agent IDs \(excluding the dispatcher, which routes but does not execute jobs\). The IDs are returned in a stable order suitable for deterministic worker bootstrapping.
 
 <a name="FormatExampleArgs"></a>
 ## func FormatExampleArgs
@@ -1718,6 +1772,13 @@ NewAgentLoop creates a new agent loop.
 
 ClearConversation removes a conversation.
 
+<a name="AgentLoop.ClearModelOverride"></a>
+### func \(\*AgentLoop\) ClearModelOverride
+
+	func (l *AgentLoop) ClearModelOverride()
+
+ClearModelOverride clears the model override after it has been applied.
+
 <a name="AgentLoop.FirewallStats"></a>
 ### func \(\*AgentLoop\) FirewallStats
 
@@ -1738,6 +1799,13 @@ GetConfig returns the current configuration.
 	func (l *AgentLoop) GetConversation(id string) *Conversation
 
 GetConversation returns a conversation by ID.
+
+<a name="AgentLoop.GetModelOverride"></a>
+### func \(\*AgentLoop\) GetModelOverride
+
+	func (l *AgentLoop) GetModelOverride() string
+
+GetModelOverride returns the current model override \(thread\-safe\).
 
 <a name="AgentLoop.HandleMessage"></a>
 ### func \(\*AgentLoop\) HandleMessage
@@ -1816,12 +1884,40 @@ SetMCPServerLister wires a callback that returns current MCP server info. Used b
 
 SetMemvidClient sets the memvid client after construction. This allows wiring the client after the loop is created when dependencies are initialized in a specific order.
 
+<a name="AgentLoop.SetModelOverride"></a>
+### func \(\*AgentLoop\) SetModelOverride
+
+	func (l *AgentLoop) SetModelOverride(modelRef string)
+
+SetModelOverride sets the model override at runtime \(thread\-safe\).
+
+<a name="AgentLoop.SetNotificationPublisher"></a>
+### func \(\*AgentLoop\) SetNotificationPublisher
+
+	func (l *AgentLoop) SetNotificationPublisher(publisher NotificationPublisher)
+
+SetNotificationEmitter sets the notification emitter for desktop notifications.
+
 <a name="AgentLoop.SetPrefetchCallback"></a>
 ### func \(\*AgentLoop\) SetPrefetchCallback
 
 	func (l *AgentLoop) SetPrefetchCallback(callback func(query string, maxItems int))
 
 SetPrefetchCallback sets the callback for prefetching memory context. This is used to wire the memory manager's QueuePrefetch method after construction.
+
+<a name="AgentLoop.SetRepoMapGenerator"></a>
+### func \(\*AgentLoop\) SetRepoMapGenerator
+
+	func (l *AgentLoop) SetRepoMapGenerator(gen *repomap.RepoMapGenerator)
+
+SetRepoMapGenerator sets the repository map generator for context enrichment. This is called by the daemon after the RepoMapGen is created.
+
+<a name="AgentLoop.SetResponseAnalyzer"></a>
+### func \(\*AgentLoop\) SetResponseAnalyzer
+
+	func (l *AgentLoop) SetResponseAnalyzer(ra *metrics.ResponseAnalyzer)
+
+SetResponseAnalyzer sets the response analyzer after agent loop creation. This is used when the metrics store \(from which the analyzer is created\) is created after the agent loop.
 
 <a name="AgentLoop.SetSessionStore"></a>
 ### func \(\*AgentLoop\) SetSessionStore
@@ -1836,6 +1932,13 @@ SetSessionStore wires a session store and config for persistence. Stub implement
 	func (l *AgentLoop) SetSkillLoader(loader *skills.LazySkillLoader)
 
 SetSkillLoader sets the lazy skill loader for on\-demand loading. This allows wiring the loader after the loop is created when skills are initialized in a specific order.
+
+<a name="AgentLoop.SetTaskCollector"></a>
+### func \(\*AgentLoop\) SetTaskCollector
+
+	func (l *AgentLoop) SetTaskCollector(tc *metrics.TaskCollector)
+
+SetTaskCollector sets the task collector after agent loop creation. This is used when the task collector depends on a metrics store created after the agent loop \(e.g. in daemon wiring\).
 
 <a name="AgentLoop.SetTaskStore"></a>
 ### func \(\*AgentLoop\) SetTaskStore
@@ -1897,7 +2000,7 @@ CapabilitiesMap returns the capabilities map \(may be nil\).
 
 	func (r *AgentRegistry) Close() error
 
-Close shuts down all agent loops.
+Close shuts down all agent loops and releases resources.
 
 <a name="AgentRegistry.DB"></a>
 ### func \(\*AgentRegistry\) DB
@@ -2575,6 +2678,24 @@ BusPairSessionState represents the current state of a bus\-channel pair session.
 	    LastVerdict   PairVerdict `json:"last_verdict,omitempty"`
 	    Turns         []PairTurn  `json:"turns,omitempty"`
 	    InitialPrompt string      `json:"initial_prompt"`
+	    // contains filtered or unexported fields
+	}
+
+<a name="BusPairSessionStateSnapshot"></a>
+## type BusPairSessionStateSnapshot
+
+BusPairSessionStateSnapshot is a mutex\-free copy of BusPairSessionState for safe concurrent access. Returns from GetSession to avoid copying locks.
+
+	type BusPairSessionStateSnapshot struct {
+	    SessionID     string      `json:"session_id"`
+	    ActorID       string      `json:"actor_id"`
+	    ReviewerID    string      `json:"reviewer_id"`
+	    CurrentTurn   int         `json:"current_turn"`
+	    MaxTurns      int         `json:"max_turns"`
+	    Phase         string      `json:"phase"`
+	    LastVerdict   PairVerdict `json:"last_verdict,omitempty"`
+	    Turns         []PairTurn  `json:"turns,omitempty"`
+	    InitialPrompt string      `json:"initial_prompt"`
 	}
 
 <a name="CacheConfig"></a>
@@ -2949,6 +3070,13 @@ Name returns the component name for the registry.
 
 SetBudget sets the token budget tracker for async dispatch pre\-checks. This prevents zombie tasks from being created when the budget is exceeded.
 
+<a name="ChatHandler.SetCollaborationEngine"></a>
+### func \(\*ChatHandler\) SetCollaborationEngine
+
+	func (h *ChatHandler) SetCollaborationEngine(engine *CollaborationEngine)
+
+SetCollaborationEngine sets the collaboration engine for starting collaboration sessions.
+
 <a name="ChatHandler.SetMetricsStore"></a>
 ### func \(\*ChatHandler\) SetMetricsStore
 
@@ -3076,6 +3204,13 @@ NewCollaborationEngine creates a new collaboration engine.
 	func (e *CollaborationEngine) ActiveSessionCount() int
 
 ActiveSessionCount returns the number of active sessions.
+
+<a name="CollaborationEngine.CleanupSessions"></a>
+### func \(\*CollaborationEngine\) CleanupSessions
+
+	func (e *CollaborationEngine) CleanupSessions() int
+
+CleanupSessions removes terminal sessions from the sessions map, preventing unbounded growth \(S1\-19\). It also cleans up the corresponding nestedCount entries. Callers should invoke this periodically; it is not auto\-scheduled.
 
 <a name="CollaborationEngine.CreateNestedSession"></a>
 ### func \(\*CollaborationEngine\) CreateNestedSession
@@ -3234,6 +3369,27 @@ NewCollaborationSession creates a new collaboration session.
 
 AddTurn appends a turn entry \(thread\-safe\).
 
+<a name="CollaborationSession.CopyTurnLog"></a>
+### func \(\*CollaborationSession\) CopyTurnLog
+
+	func (s *CollaborationSession) CopyTurnLog() []TurnEntry
+
+CopyTurnLog returns a snapshot copy of the turn log \(thread\-safe\).
+
+<a name="CollaborationSession.GetState"></a>
+### func \(\*CollaborationSession\) GetState
+
+	func (s *CollaborationSession) GetState() SessionState
+
+GetState returns the current session state \(thread\-safe\).
+
+<a name="CollaborationSession.LastContentByRole"></a>
+### func \(\*CollaborationSession\) LastContentByRole
+
+	func (s *CollaborationSession) LastContentByRole(role string) string
+
+LastContentByRole returns the content of the most recent turn with the given role, or "" if none exists \(thread\-safe\).
+
 <a name="CollaborationSession.MarkActive"></a>
 ### func \(\*CollaborationSession\) MarkActive
 
@@ -3261,6 +3417,13 @@ MarkExhausted transitions to exhausted state.
 	func (s *CollaborationSession) MarkFailed()
 
 MarkFailed transitions to failed state.
+
+<a name="CollaborationSession.TotalTokensUsed"></a>
+### func \(\*CollaborationSession\) TotalTokensUsed
+
+	func (s *CollaborationSession) TotalTokensUsed() int64
+
+TotalTokensUsed sums TokensUsed across all turns \(thread\-safe\).
 
 <a name="CollaborationSession.TurnCount"></a>
 ### func \(\*CollaborationSession\) TurnCount
@@ -3847,6 +4010,10 @@ DispatchResult is the result of dispatching a request.
 	    ClarificationNeeded bool `json:"clarification_needed,omitempty"`
 	    // Plan is the created plan if plan routing was triggered.
 	    Plan *plan.Plan `json:"plan,omitempty"`
+	    // ClassificationNotice is a user-facing notice about classification degradation
+	    // (e.g., LLM classifier failed and fallback was used). Empty when classification
+	    // succeeded normally.
+	    ClassificationNotice string `json:"classification_notice,omitempty"`
 	}
 
 <a name="Dispatcher"></a>
@@ -3997,6 +4164,17 @@ ShouldRouteToPair returns true if the dispatch result should use channel\-based 
 	func (d *Dispatcher) SteerActiveAgent(ctx context.Context, conversationID, content, source string) error
 
 SteerActiveAgent sends a steering message to an active agent for the given conversation. This interrupts the current flow. Returns ErrQueueNotFound if no active queue exists.
+
+<a name="Dispatcher.Stop"></a>
+### func \(\*Dispatcher\) Stop
+
+	func (d *Dispatcher) Stop()
+
+Stop gracefully shuts down background goroutines spawned by NewDispatcher \(currently the semantic\-index BuildIndex goroutine\). It is safe to call multiple times: a second call is a no\-op once indexCancel has fired.
+
+Callers that construct a Dispatcher with an EmbeddingClient should defer Stop\(\) so the BuildIndex goroutine does not outlive the dispatcher in tests or short\-lived processes. Long\-lived daemons can rely on process exit, but wiring Stop into the daemon shutdown path is recommended.
+
+TODO: wire Stop\(\) into Components.Stop\(\) in internal/daemon/components.go for a fully clean shutdown. Today the dispatcher lives for the daemon lifetime so the leak is benign, but adding the call closes the gap.
 
 <a name="Dispatcher.SubmitAmendment"></a>
 ### func \(\*Dispatcher\) SubmitAmendment
@@ -4200,6 +4378,7 @@ EscalationLevel tracks escalation history for a task.
 	    Level        int       `json:"level"`
 	    Reason       string    `json:"reason"`
 	    OriginalTask string    `json:"original_task"`
+	    FirstFailure string    `json:"first_failure,omitempty"`
 	    ReplanResult string    `json:"replan_result,omitempty"`
 	    Timestamp    time.Time `json:"timestamp"`
 	}
@@ -4219,6 +4398,13 @@ EscalationManager handles task escalation and re\-planning when tasks fail.
 	func NewEscalationManager(cfg EscalationManagerConfig) *EscalationManager
 
 NewEscalationManager creates a new escalation manager.
+
+<a name="EscalationManager.Cleanup"></a>
+### func \(\*EscalationManager\) Cleanup
+
+	func (em *EscalationManager) Cleanup(maxAge time.Duration)
+
+Cleanup removes escalation entries whose Timestamp is older than maxAge \(S1\-12\). This prevents unbounded growth of the escalations map for abandoned or long\-completed tasks. Callers should invoke this periodically \(e.g. from a scheduler job\); it is not auto\-scheduled.
 
 <a name="EscalationManager.ClearEscalation"></a>
 ### func \(\*EscalationManager\) ClearEscalation
@@ -4522,6 +4708,17 @@ GetDefinitions returns tool definitions for only allowed tools.
 	func (r *FilteredToolRegistry) List() []tools.Tool
 
 List returns only allowed tools.
+
+<a name="FixAttempt"></a>
+## type FixAttempt
+
+FixAttempt records a pending fix for later application by the agent loop
+
+	type FixAttempt struct {
+	    Prompt  string
+	    FixText string
+	    Files   []string // files that the LLM response references
+	}
 
 <a name="HallucinationConfig"></a>
 ## type HallucinationConfig
@@ -5211,12 +5408,26 @@ WithMessageBus sets the message bus for event publishing.
 
 WithMessageQueue sets the steering/follow\-up message queue. When nil \(default\), queue processing is skipped with no behavior change.
 
+<a name="WithModelOverride"></a>
+### func WithModelOverride
+
+	func WithModelOverride(modelRef string) LoopOption
+
+WithModelOverride sets the model override for the next reasoning cycle. This is used by the dispatcher to apply user\-specified model reassignment.
+
 <a name="WithModelRef"></a>
 ### func WithModelRef
 
 	func WithModelRef(modelRef string) LoopOption
 
 WithModelRef sets the model reference \(alias name or direct model ref\) from the agent spec.
+
+<a name="WithNotificationPublisher"></a>
+### func WithNotificationPublisher
+
+	func WithNotificationPublisher(publisher NotificationPublisher) LoopOption
+
+WithNotificationPublisher sets the notification publisher for desktop notifications.
 
 <a name="WithPrefetchCallback"></a>
 ### func WithPrefetchCallback
@@ -5232,12 +5443,26 @@ WithPrefetchCallback sets the callback for prefetching memory context. This impl
 
 WithProgressEnabled enables or disables progress event publishing.
 
+<a name="WithRepoMapGenerator"></a>
+### func WithRepoMapGenerator
+
+	func WithRepoMapGenerator(gen *repomap.RepoMapGenerator) LoopOption
+
+WithRepoMapGenerator sets the repository map generator for context enrichment.
+
 <a name="WithResolver"></a>
 ### func WithResolver
 
 	func WithResolver(resolver *llm.Resolver) LoopOption
 
 WithResolver sets the model resolver for alias resolution.
+
+<a name="WithResponseAnalyzer"></a>
+### func WithResponseAnalyzer
+
+	func WithResponseAnalyzer(ra *metrics.ResponseAnalyzer) LoopOption
+
+WithResponseAnalyzer sets the response analyzer for quality metrics.
 
 <a name="WithResultCache"></a>
 ### func WithResultCache
@@ -5287,6 +5512,13 @@ WithSkillLoader sets the lazy skill loader for on\-demand loading.
 	func WithTTSRManager(mgr *TTSRManager) LoopOption
 
 WithTTSRManager sets the TT\-SR manager for mid\-stream rule enforcement. When enabled, each streaming delta is checked against loaded rules. If a rule matches, the stream is aborted and the rule content is retried on the next reasoning cycle.
+
+<a name="WithTaskCollector"></a>
+### func WithTaskCollector
+
+	func WithTaskCollector(tc *metrics.TaskCollector) LoopOption
+
+WithTaskCollector sets the task collector for metrics recording.
 
 <a name="WithTaskStore"></a>
 ### func WithTaskStore
@@ -5770,6 +6002,15 @@ MultiIntent represents multiple detected intents in a single request.
 
 DetectCompound analyzes intents and determines if they're compound. Adds confidence and complexity guards \(Issues 0006, 0029\): \- Requires at least 2 intents with confidence \>= 0.5 \- Both must be non\-chat intents to qualify as compound
 
+<a name="NotificationPublisher"></a>
+## type NotificationPublisher
+
+NotificationPublisher is an interface for publishing task notifications. This allows the agent to publish notifications without depending on the daemon package.
+
+	type NotificationPublisher interface {
+	    PublishTaskNotification(taskID, agentID string, notifType string, title, message string)
+	}
+
 <a name="Orchestrator"></a>
 ## type Orchestrator
 
@@ -5786,6 +6027,13 @@ Orchestrator coordinates the strategic and tactical layers via bus subscriptions
 
 NewOrchestrator creates a new orchestrator.
 
+<a name="Orchestrator.GenerateRepoMap"></a>
+### func \(\*Orchestrator\) GenerateRepoMap
+
+	func (o *Orchestrator) GenerateRepoMap(ctx context.Context, chatFiles, mentionedIdentifiers []string) (*repomap.RenderedMap, error)
+
+GenerateRepoMap creates a repository map for context enrichment. chatFiles are the files actively being discussed in the conversation. mentionedIdentifiers are identifiers \(functions, types, etc.\) from the conversation.
+
 <a name="Orchestrator.Name"></a>
 ### func \(\*Orchestrator\) Name
 
@@ -5800,12 +6048,33 @@ Name returns the component name.
 
 PlanManager returns the plan manager, if configured.
 
+<a name="Orchestrator.ReflectionEngine"></a>
+### func \(\*Orchestrator\) ReflectionEngine
+
+	func (o *Orchestrator) ReflectionEngine() *ReflectionEngine
+
+ReflectionEngine returns the reflection engine, if configured.
+
 <a name="Orchestrator.SetPlanManager"></a>
 ### func \(\*Orchestrator\) SetPlanManager
 
 	func (o *Orchestrator) SetPlanManager(pm *plan.PlanManager)
 
 SetPlanManager sets the plan manager for plan system integration. This is called by the daemon after the PlanManager is created, since the plan system is initialized after the agent components.
+
+<a name="Orchestrator.SetReflectionEngine"></a>
+### func \(\*Orchestrator\) SetReflectionEngine
+
+	func (o *Orchestrator) SetReflectionEngine(reflection *ReflectionEngine)
+
+SetReflectionEngine sets the reflection engine for auto\-fix loop. This is called by the daemon after the ReflectionEngine is created.
+
+<a name="Orchestrator.SetRepoMapGenerator"></a>
+### func \(\*Orchestrator\) SetRepoMapGenerator
+
+	func (o *Orchestrator) SetRepoMapGenerator(gen *repomap.RepoMapGenerator)
+
+SetRepoMapGenerator sets the repo map generator for context enrichment.
 
 <a name="Orchestrator.Start"></a>
 ### func \(\*Orchestrator\) Start
@@ -5836,6 +6105,7 @@ OrchestratorDeps holds dependencies for the orchestrator.
 	    RalphLoop           *RalphLoop           // optional: Ralph loop for auto-replanning
 	    Bus                 *bus.MessageBus
 	    Logger              *slog.Logger
+	    FenceChecker        *intsecurity.FenceChecker // path boundary enforcement
 	}
 
 <a name="OverrideResult"></a>
@@ -5860,7 +6130,6 @@ PPConversation holds the shared state for a pair programming session.
 	    LastDiff    string
 	    TurnManager *TurnManager
 	    Converged   bool
-	    // contains filtered or unexported fields
 	}
 
 <a name="PairContext"></a>
@@ -6087,14 +6356,14 @@ NewPairOrchestrator creates a new PairOrchestrator.
 
 	func (po *PairOrchestrator) ActiveSessionCount() int
 
-ActiveSessionCount returns the number of active pair sessions.
+ActiveSessionCount returns the number of active \(non\-terminal\) pair sessions.
 
 <a name="PairOrchestrator.GetSession"></a>
 ### func \(\*PairOrchestrator\) GetSession
 
-	func (po *PairOrchestrator) GetSession(sessionID string) *BusPairSessionState
+	func (po *PairOrchestrator) GetSession(sessionID string) (*BusPairSessionStateSnapshot, bool)
 
-GetSession returns the state of an active pair session \(nil if not found\).
+GetSession returns a snapshot of the state of an active pair session. Returns nil, false if the session is not found. The snapshot is mutex\-free for safe concurrent access.
 
 <a name="PairOrchestrator.Name"></a>
 ### func \(\*PairOrchestrator\) Name
@@ -6923,7 +7192,7 @@ RalphLoop manages self\-referential plan execution with automatic replanning.
 <a name="NewRalphLoop"></a>
 ### func NewRalphLoop
 
-	func NewRalphLoop(config RalphLoopConfig, orchestrator *Orchestrator, taskStore *task.Store, planManager *plan.PlanManager, bus *bus.MessageBus, logger *slog.Logger) *RalphLoop
+	func NewRalphLoop(config RalphLoopConfig, orchestrator *Orchestrator, taskStore *task.Store, stepStore *task.StepStore, planManager *plan.PlanManager, bus *bus.MessageBus, logger *slog.Logger) *RalphLoop
 
 NewRalphLoop creates a new Ralph loop manager.
 
@@ -6934,6 +7203,13 @@ NewRalphLoop creates a new Ralph loop manager.
 
 CheckCompletion verifies if a completed task actually achieved its goal. Returns \(isComplete bool, evidence \[\]string, needsReplan bool\).
 
+<a name="RalphLoop.Cleanup"></a>
+### func \(\*RalphLoop\) Cleanup
+
+	func (rl *RalphLoop) Cleanup(maxAge time.Duration, lastTouched func(string) time.Time)
+
+Cleanup removes iteration entries that haven't been touched within maxAge \(S1\-18\). This prevents unbounded growth of the iterations map from abandoned or long\-completed tasks. Callers should invoke this periodically \(e.g. from a scheduler job\); it is not auto\-scheduled.
+
 <a name="RalphLoop.GetIterationCount"></a>
 ### func \(\*RalphLoop\) GetIterationCount
 
@@ -6941,12 +7217,26 @@ CheckCompletion verifies if a completed task actually achieved its goal. Returns
 
 GetIterationCount returns the current iteration count for a task.
 
+<a name="RalphLoop.PlanManager"></a>
+### func \(\*RalphLoop\) PlanManager
+
+	func (rl *RalphLoop) PlanManager() *plan.PlanManager
+
+PlanManager returns the plan manager, if configured.
+
 <a name="RalphLoop.Reset"></a>
 ### func \(\*RalphLoop\) Reset
 
 	func (rl *RalphLoop) Reset(taskID string)
 
 Reset clears iteration tracking for a task.
+
+<a name="RalphLoop.SetPlanManager"></a>
+### func \(\*RalphLoop\) SetPlanManager
+
+	func (rl *RalphLoop) SetPlanManager(pm *plan.PlanManager)
+
+SetPlanManager sets the plan manager. This is called by the daemon after the PlanManager is created \(the plan system is initialized after agent components in NewComponents, so the value passed to NewRalphLoop is nil\).
 
 <a name="RalphLoop.TriggerReplan"></a>
 ### func \(\*RalphLoop\) TriggerReplan
@@ -6961,9 +7251,10 @@ TriggerReplan creates a new planning step for incomplete tasks.
 RalphLoopConfig holds configuration for the Ralph loop.
 
 	type RalphLoopConfig struct {
-	    Enabled          bool `json:"enabled"`
-	    MaxIterations    int  `json:"max_iterations"`    // Maximum replan cycles per task
-	    EvidenceRequired bool `json:"evidence_required"` // Require evidence for completion claims
+	    Enabled           bool `json:"enabled"`
+	    MaxIterations     int  `json:"max_iterations"`     // Maximum replan cycles per task
+	    EvidenceRequired  bool `json:"evidence_required"`  // Require evidence for completion claims
+	    ChecklistRequired bool `json:"checklist_required"` // Require checklist completion
 	}
 
 <a name="DefaultRalphLoopConfig"></a>
@@ -6972,6 +7263,78 @@ RalphLoopConfig holds configuration for the Ralph loop.
 	func DefaultRalphLoopConfig() RalphLoopConfig
 
 DefaultRalphLoopConfig returns default Ralph loop configuration.
+
+<a name="ReflectionConfig"></a>
+## type ReflectionConfig
+
+ReflectionConfig holds reflection parameters. Note: multi\-pass retry is handled externally by the orchestrator, not by the reflection engine itself.
+
+	type ReflectionConfig struct {
+	    AutoLint bool   // Enable auto-linting
+	    AutoTest bool   // Enable auto-testing
+	    LintCmd  string // Custom lint command (optional)
+	    TestCmd  string // Custom test command (optional)
+	    WorkDir  string // Working directory for lint/test commands
+	}
+
+<a name="DefaultReflectionConfig"></a>
+### func DefaultReflectionConfig
+
+	func DefaultReflectionConfig() ReflectionConfig
+
+DefaultReflectionConfig returns the default configuration.
+
+<a name="ReflectionEngine"></a>
+## type ReflectionEngine
+
+ReflectionEngine manages the auto\-fix loop
+
+	type ReflectionEngine struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewReflectionEngine"></a>
+### func NewReflectionEngine
+
+	func NewReflectionEngine(logger *slog.Logger, linter *lint.Registry, testRunner *lint.TestRunner, llmClient llm.Chatter) *ReflectionEngine
+
+NewReflectionEngine creates a new reflection engine with default config
+
+<a name="NewReflectionEngineWithConfig"></a>
+### func NewReflectionEngineWithConfig
+
+	func NewReflectionEngineWithConfig(logger *slog.Logger, linter *lint.Registry, testRunner *lint.TestRunner, llmClient llm.Chatter, config ReflectionConfig) *ReflectionEngine
+
+NewReflectionEngineWithConfig creates a new reflection engine with custom configuration. Multi\-pass retry is handled externally by the orchestrator \(see orchestrator.go:654\-744\).
+
+<a name="ReflectionEngine.RunReflection"></a>
+### func \(\*ReflectionEngine\) RunReflection
+
+	func (re *ReflectionEngine) RunReflection(ctx context.Context, editedFiles []string) (*ReflectionResult, error)
+
+RunReflection executes a single\-pass reflection check after code edits. Note: This function always executes one pass. Multi\-pass retry is handled by the orchestrator externally \(orchestrator.go:654\-744\).
+
+<a name="ReflectionEngine.SetEditAvailability"></a>
+### func \(\*ReflectionEngine\) SetEditAvailability
+
+	func (re *ReflectionEngine) SetEditAvailability(avail bool)
+
+SetEditAvailability sets whether file edit is available
+
+<a name="ReflectionResult"></a>
+## type ReflectionResult
+
+ReflectionResult holds the outcome of a reflection cycle
+
+	type ReflectionResult struct {
+	    Fixed        bool
+	    Iterations   int
+	    LintErrors   []lint.LinterResult
+	    TestFailures []lint.TestResult
+	    FinalMessage string
+	    GaveUp       bool        // True if max reflections reached without fix
+	    PendingFix   *FixAttempt // Non-nil if a fix was generated but needs application by the agent loop
+	}
 
 <a name="RegistryConfig"></a>
 ## type RegistryConfig
@@ -8162,6 +8525,41 @@ TacticalSchedulerConfig holds configuration for the tactical scheduler.
 	    AmendmentManager       AmendmentSubmitter // Optional: enables amendment-based step creation
 	}
 
+<a name="TaintBeforeToolCall"></a>
+## type TaintBeforeToolCall
+
+TaintBeforeToolCall implements BeforeToolCallHook. It checks tool arguments for taint violations before execution.
+
+	type TaintBeforeToolCall struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewTaintBeforeToolCall"></a>
+### func NewTaintBeforeToolCall
+
+	func NewTaintBeforeToolCall(tracker *taint.ExtendedTracker, logger *slog.Logger, config TaintHookConfig) *TaintBeforeToolCall
+
+NewTaintBeforeToolCall creates a new taint tracking hook for tool call interception.
+
+<a name="TaintBeforeToolCall.BeforeToolCall"></a>
+### func \(\*TaintBeforeToolCall\) BeforeToolCall
+
+	func (t *TaintBeforeToolCall) BeforeToolCall(ctx context.Context, toolCall llm.ToolCall) BlockResult
+
+
+
+<a name="TaintHookConfig"></a>
+## type TaintHookConfig
+
+TaintHookConfig holds configuration for taint tracking hooks.
+
+	type TaintHookConfig struct {
+	    BlockUserInputShell bool
+	    BlockSecretNetwork  bool
+	    BlockUntrustedAgent bool
+	    BlockExternalShell  bool
+	}
+
 <a name="TaskMessage"></a>
 ## type TaskMessage
 
@@ -8470,7 +8868,7 @@ NewTeamOrchestrator creates a new TeamOrchestrator.
 
 	func (to *TeamOrchestrator) ActiveTeamCount() int
 
-ActiveTeamCount returns the number of active team sessions.
+ActiveTeamCount returns the number of active \(non\-terminal\) team sessions.
 
 <a name="TeamOrchestrator.AssignSubtask"></a>
 ### func \(\*TeamOrchestrator\) AssignSubtask
@@ -8577,7 +8975,7 @@ ListTeamPresets returns all available team presets.
 <a name="TeamSessionState"></a>
 ## type TeamSessionState
 
-TeamSessionState holds the runtime state of an active team session.
+TeamSessionState holds the runtime state of an active team session. All fields must be accessed with mu held \(read or write\) when the state is concurrently accessible \(e.g. after it has been stored in to.teams\).
 
 	type TeamSessionState struct {
 	    SessionID     string                       `json:"session_id"`
@@ -8588,6 +8986,7 @@ TeamSessionState holds the runtime state of an active team session.
 	    MemberResults map[string]*TeamMemberResult `json:"member_results,omitempty"`
 	    FinalOutput   string                       `json:"final_output,omitempty"`
 	    StartTime     time.Time                    `json:"start_time"`
+	    // contains filtered or unexported fields
 	}
 
 <a name="TeamStartRequest"></a>

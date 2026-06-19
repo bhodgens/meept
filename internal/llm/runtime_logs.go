@@ -103,19 +103,6 @@ type rotatingWriter struct {
 	atLineEnd *bool  // shared line-state; true when the next byte starts a new line
 }
 
-func newRotatingWriter(file *os.File, path, prefix string) *rotatingWriter {
-	var written int64
-	if file != nil {
-		if info, err := file.Stat(); err == nil {
-			written = info.Size()
-		}
-	}
-	fp := &file
-	wp := &written
-	atLineEnd := true // a fresh file starts at a line boundary
-	return &rotatingWriter{mu: &sync.Mutex{}, file: fp, path: path, prefix: prefix, written: wp, atLineEnd: &atLineEnd}
-}
-
 // newSharedRotatingWriter creates a rotatingWriter that shares the same **os.File,
 // *int64 counter, *sync.Mutex, and *bool line-state as its partner. This ensures
 // that concurrent writes from stdout and stderr don't interleave, that rotation

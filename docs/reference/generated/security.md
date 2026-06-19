@@ -21,13 +21,12 @@ Package security provides the security engine with SQLite\-backed decision makin
 - [func InsecureSkipVerify\(\) \*tls.Config](<#InsecureSkipVerify>)
 - [func IsWithinBoundary\(fullText, target string\) bool](<#IsWithinBoundary>)
 - [func ServerTLSConfig\(cfg TLSConfig\) \(\*tls.Config, error\)](<#ServerTLSConfig>)
-- [func StripBoundaryMarkers\(text string\) string](<#StripBoundaryMarkers>)
 - [func ToolOutputStartTag\(name string\) string](<#ToolOutputStartTag>)
 - [func VersionString\(version uint16\) string](<#VersionString>)
 - [type AuditEntry](<#AuditEntry>)
 - [type AuditEvent](<#AuditEvent>)
 - [type AuditLog](<#AuditLog>)
-  - [func NewAuditLog\(db \*sql.DB\) \*AuditLog](<#NewAuditLog>)
+  - [func NewAuditLog\(db \*sqlx.DB\) \*AuditLog](<#NewAuditLog>)
   - [func \(a \*AuditLog\) CountEntries\(\) \(int64, error\)](<#AuditLog.CountEntries>)
   - [func \(a \*AuditLog\) CountEntriesByDecision\(\) \(map\[string\]int64, error\)](<#AuditLog.CountEntriesByDecision>)
   - [func \(a \*AuditLog\) GetDeniedEntries\(limit int\) \(\[\]AuditEntry, error\)](<#AuditLog.GetDeniedEntries>)
@@ -53,10 +52,11 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(e \*Engine\) RecordOverride\(action, pattern, decision, reason, conversationID string, maxUses, expiresDays int\) \(int64, error\)](<#Engine.RecordOverride>)
   - [func \(e \*Engine\) SetFenceChecker\(fc \*FenceChecker\)](<#Engine.SetFenceChecker>)
 - [type FenceChecker](<#FenceChecker>)
-  - [func NewFenceChecker\(cfg FenceConfig\) \*FenceChecker](<#NewFenceChecker>)
+  - [func NewFenceChecker\(cfg FenceConfig, logger \*slog.Logger\) \*FenceChecker](<#NewFenceChecker>)
   - [func \(fc \*FenceChecker\) CheckCommand\(cmd string, workDir string\) error](<#FenceChecker.CheckCommand>)
   - [func \(fc \*FenceChecker\) CheckPath\(path string, op string\) error](<#FenceChecker.CheckPath>)
   - [func \(fc \*FenceChecker\) IsNoFence\(\) bool](<#FenceChecker.IsNoFence>)
+  - [func \(fc \*FenceChecker\) Valid\(\) bool](<#FenceChecker.Valid>)
 - [type FenceConfig](<#FenceConfig>)
 - [type FinancialPattern](<#FinancialPattern>)
 - [type InjectionMatch](<#InjectionMatch>)
@@ -67,6 +67,8 @@ Package security provides the security engine with SQLite\-backed decision makin
 - [type Message](<#Message>)
 - [type Orchestrator](<#Orchestrator>)
   - [func NewOrchestrator\(cfg OrchestratorConfig, logger \*slog.Logger\) \*Orchestrator](<#NewOrchestrator>)
+  - [func \(o \*Orchestrator\) AuditDB\(\) \*sql.DB](<#Orchestrator.AuditDB>)
+  - [func \(o \*Orchestrator\) CheckWebFetch\(url string\) \(blocked bool, reason string\)](<#Orchestrator.CheckWebFetch>)
   - [func \(o \*Orchestrator\) Close\(\)](<#Orchestrator.Close>)
   - [func \(o \*Orchestrator\) Config\(\) OrchestratorConfig](<#Orchestrator.Config>)
   - [func \(o \*Orchestrator\) InputSanitizer\(\) \*InputSanitizer](<#Orchestrator.InputSanitizer>)
@@ -74,6 +76,7 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(o \*Orchestrator\) SanitizeInput\(text string\) \(sanitized string, ok bool, warnings \[\]Warning\)](<#Orchestrator.SanitizeInput>)
   - [func \(o \*Orchestrator\) ScanOutput\(text string\) \(sanitized string, ok bool, warnings \[\]Warning\)](<#Orchestrator.ScanOutput>)
   - [func \(o \*Orchestrator\) ScanShellCommand\(ctx context.Context, command string\) \(blocked, warning bool, reason string\)](<#Orchestrator.ScanShellCommand>)
+  - [func \(o \*Orchestrator\) SetTaintTracker\(tt \*TaintTracker\)](<#Orchestrator.SetTaintTracker>)
   - [func \(o \*Orchestrator\) Stats\(\) map\[string\]int64](<#Orchestrator.Stats>)
   - [func \(o \*Orchestrator\) WrapToolOutput\(toolName, output string\) string](<#Orchestrator.WrapToolOutput>)
   - [func \(o \*Orchestrator\) WrapUserInput\(text string\) string](<#Orchestrator.WrapUserInput>)
@@ -121,12 +124,14 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(s StrictnessLevel\) String\(\) string](<#StrictnessLevel.String>)
 - [type TLSConfig](<#TLSConfig>)
   - [func DefaultTLSConfig\(\) TLSConfig](<#DefaultTLSConfig>)
+- [type TaintTracker](<#TaintTracker>)
 - [type TirithResult](<#TirithResult>)
   - [func ScanCommand\(ctx context.Context, command, binary string\) \*TirithResult](<#ScanCommand>)
 - [type TirithScanner](<#TirithScanner>)
   - [func NewTirithScanner\(binary string\) \*TirithScanner](<#NewTirithScanner>)
   - [func \(t \*TirithScanner\) IsAvailable\(ctx context.Context\) bool](<#TirithScanner.IsAvailable>)
   - [func \(t \*TirithScanner\) Scan\(ctx context.Context, command string\) \*TirithResult](<#TirithScanner.Scan>)
+  - [func \(t \*TirithScanner\) SetFailOpen\(failOpen bool\)](<#TirithScanner.SetFailOpen>)
   - [func \(t \*TirithScanner\) ShouldBlock\(ctx context.Context, command string\) bool](<#TirithScanner.ShouldBlock>)
 - [type ToolRule](<#ToolRule>)
 - [type Warning](<#Warning>)
@@ -257,13 +262,6 @@ IsWithinBoundary checks if a piece of text is within boundary markers.
 
 ServerTLSConfig creates a tls.Config for server use.
 
-<a name="StripBoundaryMarkers"></a>
-## func StripBoundaryMarkers
-
-	func StripBoundaryMarkers(text string) string
-
-StripBoundaryMarkers removes all boundary markers from text.
-
 <a name="ToolOutputStartTag"></a>
 ## func ToolOutputStartTag
 
@@ -323,7 +321,7 @@ AuditLog provides access to the security decision audit log.
 <a name="NewAuditLog"></a>
 ### func NewAuditLog
 
-	func NewAuditLog(db *sql.DB) *AuditLog
+	func NewAuditLog(db *sqlx.DB) *AuditLog
 
 NewAuditLog creates a new audit log accessor using the engine's database.
 
@@ -529,7 +527,7 @@ FenceChecker validates paths against fence boundaries.
 <a name="NewFenceChecker"></a>
 ### func NewFenceChecker
 
-	func NewFenceChecker(cfg FenceConfig) *FenceChecker
+	func NewFenceChecker(cfg FenceConfig, logger *slog.Logger) *FenceChecker
 
 NewFenceChecker creates a new fence checker.
 
@@ -545,7 +543,7 @@ CheckCommand validates a shell command working directory.
 
 	func (fc *FenceChecker) CheckPath(path string, op string) error
 
-CheckPath validates a path against the fence. op is "read", "write", or "exec". Returns nil if allowed, error if blocked.
+CheckPath validates a path against the fence. op is "read", "write", or "exec". Returns nil if allowed, error if blocked or misconfigured.
 
 <a name="FenceChecker.IsNoFence"></a>
 ### func \(\*FenceChecker\) IsNoFence
@@ -553,6 +551,13 @@ CheckPath validates a path against the fence. op is "read", "write", or "exec". 
 	func (fc *FenceChecker) IsNoFence() bool
 
 IsNoFence returns true if fencing is disabled.
+
+<a name="FenceChecker.Valid"></a>
+### func \(\*FenceChecker\) Valid
+
+	func (fc *FenceChecker) Valid() bool
+
+Valid returns false if the FenceChecker is misconfigured \(invalid RootPath\). When invalid, CheckPath will return an error for all operations.
 
 <a name="FenceConfig"></a>
 ## type FenceConfig
@@ -648,6 +653,20 @@ Orchestrator coordinates all security components. It provides a unified interfac
 
 NewOrchestrator creates a new security orchestrator with the given configuration.
 
+<a name="Orchestrator.AuditDB"></a>
+### func \(\*Orchestrator\) AuditDB
+
+	func (o *Orchestrator) AuditDB() *sql.DB
+
+AuditDB returns the underlying audit database handle, or nil if audit logging is disabled. The caller should not close the returned DB.
+
+<a name="Orchestrator.CheckWebFetch"></a>
+### func \(\*Orchestrator\) CheckWebFetch
+
+	func (o *Orchestrator) CheckWebFetch(url string) (blocked bool, reason string)
+
+CheckWebFetch checks a URL for taint policy violations \(e.g., secret exfiltration\). Returns blocked=true and a reason if the URL should be denied.
+
 <a name="Orchestrator.Close"></a>
 ### func \(\*Orchestrator\) Close
 
@@ -695,7 +714,14 @@ ScanOutput processes LLM output for credential leakage. Returns the \(possibly r
 
 	func (o *Orchestrator) ScanShellCommand(ctx context.Context, command string) (blocked, warning bool, reason string)
 
-ScanShellCommand scans a shell command before execution using Tirith. Returns whether the command should be blocked, whether there's a warning, and the reason.
+ScanShellCommand scans a shell command before execution using taint tracking and Tirith. Returns whether the command should be blocked, whether there's a warning, and the reason.
+
+<a name="Orchestrator.SetTaintTracker"></a>
+### func \(\*Orchestrator\) SetTaintTracker
+
+	func (o *Orchestrator) SetTaintTracker(tt *TaintTracker)
+
+SetTaintTracker sets the taint tracker for information flow security.
 
 <a name="Orchestrator.Stats"></a>
 ### func \(\*Orchestrator\) Stats
@@ -1152,6 +1178,13 @@ TLSConfig represents TLS configuration options.
 
 DefaultTLSConfig returns a secure default TLS configuration.
 
+<a name="TaintTracker"></a>
+## type TaintTracker
+
+TaintTracker is the taint tracking interface used by the orchestrator.
+
+	type TaintTracker = taint.ExtendedTracker
+
 <a name="TirithResult"></a>
 ## type TirithResult
 
@@ -1201,6 +1234,13 @@ IsAvailable checks if tirith is available.
 	func (t *TirithScanner) Scan(ctx context.Context, command string) *TirithResult
 
 Scan scans a command for security issues.
+
+<a name="TirithScanner.SetFailOpen"></a>
+### func \(\*TirithScanner\) SetFailOpen
+
+	func (t *TirithScanner) SetFailOpen(failOpen bool)
+
+SetFailOpen configures whether scanner errors should fail open \(allow\) or fail closed \(block\). When failOpen is true, scanner errors \(timeout, crash, binary not found\) return allowed. When false \(default\), scanner errors return blocked \(fail\-closed security posture\). This method allows runtime configuration without changing config schema.
 
 <a name="TirithScanner.ShouldBlock"></a>
 ### func \(\*TirithScanner\) ShouldBlock

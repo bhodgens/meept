@@ -73,7 +73,52 @@ Each provider is configured with API settings and model definitions:
 }
 ```
 
+### Model Configuration
+
+Each model declares capabilities and limits:
+
+```json5
+"glm-4.7": {
+  "name": "glm-4.7",
+  "capabilities": ["completion", "code", "reasoning", "tool_use"],
+  "input_cost": 0.0,
+  "output_cost": 0.0,
+  "context_limit": 128000,
+  "max_output": 8192,
+  "temperature": 0.7,
+  "top_p": 0.9,
+  "max_concurrency": 2        // Max concurrent requests (0 = unlimited)
+}
+```
+
+**Model Fields:**
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `name` | Model identifier for the API | Required |
+| `capabilities` | Supported capabilities | Required |
+| `input_cost` | Cost per million input tokens | 0.0 |
+| `output_cost` | Cost per million output tokens | 0.0 |
+| `context_limit` | Maximum context window size | Required |
+| `max_output` | Maximum completion tokens | Required |
+| `temperature` | Sampling temperature | 0.7 |
+| `top_p` | Nucleus sampling parameter | - |
+| `max_concurrency` | Max concurrent requests to this model | 0 (unlimited) |
+
+**Use case for `max_concurrency`:** Set this limit to prevent overwhelming:
+- Local LLM servers (llama.cpp, MLX, Ollama) that have limited GPU memory
+- Rate-limited API providers without proper 429 handling
+- Shared model endpoints used by multiple agents simultaneously
+
 ### Model Capabilities
+
+Models declare capabilities that determine their suitability for different tasks:
+
+- **completion**: General text completion
+- **code**: Programming and code generation
+- **reasoning**: Complex problem solving
+- **tool_use**: Tool calling and function usage
+- **extended_thinking**: Chain-of-thought reasoning
 
 Models declare capabilities that determine their suitability for different tasks:
 

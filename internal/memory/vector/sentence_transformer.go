@@ -321,10 +321,7 @@ func normalizeL2(emb []float32) []float32 {
 type modelWeights struct {
 	tokenEmbeding    [][]float32
 	positionEmbeding [][]float32
-	linIn            []float32
 	linearOut        []float32
-	layerNormScale   []float32
-	layerNormBias    []float32
 	hiddenIn         int
 	hiddenOut        int
 	vocabSize        int
@@ -660,16 +657,6 @@ func appendUnknownToken(t *BPETokenizer, token string) []uint32 {
 	// Use a range beyond the main vocab
 	baseID := uint32(50000)
 	return []uint32{t.vocab[t.unkToken] + h.Sum32()%(baseID-t.vocab[t.unkToken])}
-}
-
-// decodeToken converts a token ID back to its text representation.
-func (t *BPETokenizer) decodeToken(id uint32) string {
-	for s, i := range t.vocab {
-		if i == id {
-			return s
-		}
-	}
-	return fmt.Sprintf("<unknown_%d>", id)
 }
 
 // --- Weight hashing ---

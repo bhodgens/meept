@@ -52,6 +52,7 @@ class WebSocketService {
   final Map<String, SessionSubscription> _progressSubscriptions = {};
   bool _jobsSubscribed = false;
   bool _metricsSubscribed = false;
+  bool _plansSubscribed = false;
 
   bool _disposed = false;
   int _retryCount = 0;
@@ -223,6 +224,9 @@ class WebSocketService {
     }
     if (_metricsSubscribed) {
       send({'type': 'subscribe', 'channel': 'metrics'});
+    }
+    if (_plansSubscribed) {
+      send({'type': 'subscribe', 'channel': 'plans'});
     }
   }
 
@@ -452,6 +456,7 @@ class WebSocketService {
     _chatSubscriptions.clear();
     _jobsSubscribed = false;
     _metricsSubscribed = false;
+    _plansSubscribed = false;
     _retryCount = 0;
     _connectionSubject.add(false);
 
@@ -547,6 +552,19 @@ class WebSocketService {
     }
     return _messageSubject.stream.where((m) {
       return m['type'] == 'metrics_update';
+    });
+  }
+
+  /// Subscribe to plan updates via WebSocket.
+  ///
+  /// Returns a stream emitting [Map] entries for all plan_update messages.
+  Stream<Map<String, dynamic>> subscribeToPlans() {
+    if (!_plansSubscribed) {
+      _plansSubscribed = true;
+      send({'type': 'subscribe', 'channel': 'plans'});
+    }
+    return _messageSubject.stream.where((m) {
+      return m['type'] == 'plan_update';
     });
   }
 

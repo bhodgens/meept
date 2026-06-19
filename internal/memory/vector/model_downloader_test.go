@@ -13,33 +13,6 @@ import (
 	"log/slog"
 )
 
-func setupTestServer(t *testing.T) (*httptest.Server, *testing.T) {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/models/nomic-ai/nomic-embed-text-v1.5":
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(HFModelInfo{
-				ModelID:      "nomic-ai/nomic-embed-text-v1.5",
-				CommitSHA:    "abc123def456",
-				LastModified: time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC),
-				Private:      false,
-			})
-		case "/api/models/all-MiniLM-L6-v2":
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(HFModelInfo{
-				ModelID:      "sentence-transformers/all-MiniLM-L6-v2",
-				CommitSHA:    "def789abc012",
-				LastModified: time.Date(2024, 2, 20, 0, 0, 0, 0, time.UTC),
-				Private:      false,
-			})
-		default:
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("not found"))
-		}
-	})), nil
-}
-
 func TestModelDownloader_CheckForUpdates(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

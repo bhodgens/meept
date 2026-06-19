@@ -8,12 +8,17 @@ Package skills provides skill discovery, parsing, and execution for meept.
 
 Package skills provides skill discovery, parsing, and execution for meept.
 
+This file implements Hermes\-Agent skill compatibility, enabling Meept to auto\-discover, parse, and execute skills from \~/.hermes/skills/ using the agentskills.io open standard.
+
+Package skills provides skill discovery, parsing, and execution for meept.
+
 Skills are SKILL.md files with YAML frontmatter describing capabilities, requirements, and instructions. The package supports a 3\-tier discovery hierarchy where higher\-priority tiers shadow lower ones.
 
 ## Index
 
 - Constants
 - Variables
+- [func CheckPrerequisites\(checker PrerequisiteChecker, prereqs \*HermesPrerequisites\) error](<#CheckPrerequisites>)
 - [func IsClaudeSkillPath\(path string\) bool](<#IsClaudeSkillPath>)
 - [type CapabilityIndex](<#CapabilityIndex>)
   - [func BuildCapabilityIndex\(skillIndex \*SkillIndex, opts ...CapabilityIndexOption\) \*CapabilityIndex](<#BuildCapabilityIndex>)
@@ -37,6 +42,12 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
   - [func \(s \*ClaudeSource\) Discover\(ctx context.Context\) \(\[\]\*Skill, error\)](<#ClaudeSource.Discover>)
   - [func \(s \*ClaudeSource\) Name\(\) string](<#ClaudeSource.Name>)
 - [type ClientToolPair](<#ClientToolPair>)
+- [type ConfigVar](<#ConfigVar>)
+- [type DefaultPrerequisiteChecker](<#DefaultPrerequisiteChecker>)
+  - [func NewDefaultPrerequisiteChecker\(logger \*slog.Logger\) \*DefaultPrerequisiteChecker](<#NewDefaultPrerequisiteChecker>)
+  - [func \(c \*DefaultPrerequisiteChecker\) CheckCommands\(cmds \[\]string\) error](<#DefaultPrerequisiteChecker.CheckCommands>)
+  - [func \(c \*DefaultPrerequisiteChecker\) CheckEnvVars\(vars \[\]string\) error](<#DefaultPrerequisiteChecker.CheckEnvVars>)
+  - [func \(c \*DefaultPrerequisiteChecker\) CheckPythonPackages\(pkgs \[\]string\) error](<#DefaultPrerequisiteChecker.CheckPythonPackages>)
 - [type Discovery](<#Discovery>)
   - [func NewDiscovery\(opts ...DiscoveryOption\) \*Discovery](<#NewDiscovery>)
   - [func \(d \*Discovery\) Count\(\) int](<#Discovery.Count>)
@@ -66,14 +77,27 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
   - [func \(e \*ExecutorError\) Unwrap\(\) error](<#ExecutorError.Unwrap>)
 - [type ExecutorOption](<#ExecutorOption>)
   - [func WithClient\(client llm.Chatter\) ExecutorOption](<#WithClient>)
+  - [func WithExecutorExtraHeaders\(headers map\[string\]string\) ExecutorOption](<#WithExecutorExtraHeaders>)
   - [func WithExecutorLogger\(logger \*slog.Logger\) ExecutorOption](<#WithExecutorLogger>)
+  - [func WithExecutorTokenResolver\(tr llm.TokenResolver\) ExecutorOption](<#WithExecutorTokenResolver>)
   - [func WithLazyLoader\(loader \*LazySkillLoader\) ExecutorOption](<#WithLazyLoader>)
+  - [func WithPrerequisiteChecker\(checker PrerequisiteChecker\) ExecutorOption](<#WithPrerequisiteChecker>)
+  - [func WithToolMapper\(mapper \*HermesToolMapper\) ExecutorOption](<#WithToolMapper>)
+  - [func WithValidatePrerequisites\(enabled bool\) ExecutorOption](<#WithValidatePrerequisites>)
 - [type ExtractedKeyword](<#ExtractedKeyword>)
 - [type FileSource](<#FileSource>)
   - [func NewFileSource\(tiers \[\]DiscoveryTier, logger \*slog.Logger\) \*FileSource](<#NewFileSource>)
   - [func \(s \*FileSource\) Discover\(ctx context.Context\) \(\[\]\*Skill, error\)](<#FileSource.Discover>)
   - [func \(s \*FileSource\) DiscoverMetadata\(ctx context.Context\) \(\[\]\*SkillIndexEntry, error\)](<#FileSource.DiscoverMetadata>)
   - [func \(s \*FileSource\) Name\(\) string](<#FileSource.Name>)
+- [type HermesExtended](<#HermesExtended>)
+- [type HermesMetadataExtended](<#HermesMetadataExtended>)
+- [type HermesPrerequisites](<#HermesPrerequisites>)
+- [type HermesSkillMetadata](<#HermesSkillMetadata>)
+- [type HermesToolMapper](<#HermesToolMapper>)
+  - [func NewHermesToolMapper\(logger \*slog.Logger\) \*HermesToolMapper](<#NewHermesToolMapper>)
+  - [func \(m \*HermesToolMapper\) Translate\(toolName string\) string](<#HermesToolMapper.Translate>)
+  - [func \(m \*HermesToolMapper\) TranslateToolReferences\(body string\) string](<#HermesToolMapper.TranslateToolReferences>)
 - [type KeywordExtractor](<#KeywordExtractor>)
   - [func NewKeywordExtractor\(\) \*KeywordExtractor](<#NewKeywordExtractor>)
   - [func \(ke \*KeywordExtractor\) AddStopWord\(word string\)](<#KeywordExtractor.AddStopWord>)
@@ -111,6 +135,7 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
 - [type ParseError](<#ParseError>)
   - [func \(e \*ParseError\) Error\(\) string](<#ParseError.Error>)
   - [func \(e \*ParseError\) Unwrap\(\) error](<#ParseError.Unwrap>)
+- [type PrerequisiteChecker](<#PrerequisiteChecker>)
 - [type Registry](<#Registry>)
   - [func NewRegistry\(opts ...RegistryOption\) \*Registry](<#NewRegistry>)
   - [func \(r \*Registry\) Clear\(\)](<#Registry.Clear>)
@@ -182,7 +207,8 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
 	    PriorityProject = 0 // .meept/skills/ (project-local)
 	    PriorityUser    = 1 // ~/.meept/skills/ (user-global)
 	    PriorityClaude  = 2 // ~/.claude/skills/ (Claude Code skills)
-	    PrioritySystem  = 3 // ~/.config/meept/skills/ (system-wide)
+	    PriorityHermes  = 3 // ~/.hermes/skills/ (Hermes-Agent skills)
+	    PrioritySystem  = 4 // ~/.config/meept/skills/ (system-wide)
 	)
 
 ## Variables
@@ -190,10 +216,11 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
 <a name="ErrNoSkill"></a>Executor errors.
 
 	var (
-	    ErrNoSkill       = errors.New("skill is nil")
-	    ErrNoLLMClient   = errors.New("LLM client is nil")
-	    ErrNoResolver    = errors.New("model resolver is nil")
-	    ErrModelNotFound = errors.New("no suitable model found for skill requirements")
+	    ErrNoSkill             = errors.New("skill is nil")
+	    ErrNoLLMClient         = errors.New("LLM client is nil")
+	    ErrNoResolver          = errors.New("model resolver is nil")
+	    ErrModelNotFound       = errors.New("no suitable model found for skill requirements")
+	    ErrPrerequisitesNotMet = errors.New("skill prerequisites not met")
 	)
 
 <a name="ErrNoFrontmatter"></a>Parser errors.
@@ -212,6 +239,13 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
 	    SourceExample:     0.8,
 	    SourceDescription: 0.5,
 	}
+
+<a name="CheckPrerequisites"></a>
+## func CheckPrerequisites
+
+	func CheckPrerequisites(checker PrerequisiteChecker, prereqs *HermesPrerequisites) error
+
+CheckPrerequisites is a convenience function that runs all prerequisite checks for the given HermesPrerequisites. It returns the first error encountered, or nil if all checks pass.
 
 <a name="IsClaudeSkillPath"></a>
 ## func IsClaudeSkillPath
@@ -398,6 +432,55 @@ ClientToolPair holds a tool definition and its owning MCP client.
 	    Client *mcp.Client
 	}
 
+<a name="ConfigVar"></a>
+## type ConfigVar
+
+ConfigVar describes a Hermes\-style configuration variable declaration.
+
+	type ConfigVar struct {
+	    Key         string `yaml:"key"         json:"key"`
+	    Description string `yaml:"description" json:"description,omitempty"`
+	    Default     string `yaml:"default"     json:"default,omitempty"`
+	    Prompt      string `yaml:"prompt"      json:"prompt,omitempty"`
+	}
+
+<a name="DefaultPrerequisiteChecker"></a>
+## type DefaultPrerequisiteChecker
+
+DefaultPrerequisiteChecker implements PrerequisiteChecker using standard os/exec and os.Getenv lookups.
+
+	type DefaultPrerequisiteChecker struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewDefaultPrerequisiteChecker"></a>
+### func NewDefaultPrerequisiteChecker
+
+	func NewDefaultPrerequisiteChecker(logger *slog.Logger) *DefaultPrerequisiteChecker
+
+NewDefaultPrerequisiteChecker creates a DefaultPrerequisiteChecker. Nil logger is replaced with slog.Default.
+
+<a name="DefaultPrerequisiteChecker.CheckCommands"></a>
+### func \(\*DefaultPrerequisiteChecker\) CheckCommands
+
+	func (c *DefaultPrerequisiteChecker) CheckCommands(cmds []string) error
+
+CheckCommands verifies that all required commands are available on PATH.
+
+<a name="DefaultPrerequisiteChecker.CheckEnvVars"></a>
+### func \(\*DefaultPrerequisiteChecker\) CheckEnvVars
+
+	func (c *DefaultPrerequisiteChecker) CheckEnvVars(vars []string) error
+
+CheckEnvVars verifies that all required environment variables are set and non\-empty.
+
+<a name="DefaultPrerequisiteChecker.CheckPythonPackages"></a>
+### func \(\*DefaultPrerequisiteChecker\) CheckPythonPackages
+
+	func (c *DefaultPrerequisiteChecker) CheckPythonPackages(pkgs []string) error
+
+CheckPythonPackages verifies that all required Python packages are installed. It checks using "pip show \<package\>".
+
 <a name="Discovery"></a>
 ## type Discovery
 
@@ -506,7 +589,7 @@ DiscoveryTier represents a directory tier for skill discovery.
 
 	func DefaultTiers() []DiscoveryTier
 
-DefaultTiers returns the standard 3\-tier filesystem discovery paths. Claude skills \(\~/.claude/skills/\) are handled by the dedicated ClaudeSource. Discovery priority \(highest to lowest\): project \> user \> system.
+DefaultTiers returns the standard filesystem discovery paths. Claude skills \(\~/.claude/skills/\) are handled by the dedicated ClaudeSource. Hermes skills \(\~/.hermes/skills/\) are auto\-discovered when the directory exists. Discovery priority \(highest to lowest\): project \> user \> claude \> hermes \> system.
 
 <a name="Executor"></a>
 ## type Executor
@@ -612,6 +695,13 @@ ExecutorOption is a functional option for configuring Executor.
 
 WithClient sets a specific LLM client for the executor. If not set, the executor will create a client based on resolved model. Accepts any Chatter \(e.g., \*llm.Client or \*llm.AnthropicClient\).
 
+<a name="WithExecutorExtraHeaders"></a>
+### func WithExecutorExtraHeaders
+
+	func WithExecutorExtraHeaders(headers map[string]string) ExecutorOption
+
+WithExecutorExtraHeaders sets additional HTTP headers for locally created LLM clients \(e.g. for providers that require custom headers like X\-GitHub\-Api\-Version\). Nil map is ignored.
+
 <a name="WithExecutorLogger"></a>
 ### func WithExecutorLogger
 
@@ -619,12 +709,40 @@ WithClient sets a specific LLM client for the executor. If not set, the executor
 
 WithExecutorLogger sets the logger for the executor.
 
+<a name="WithExecutorTokenResolver"></a>
+### func WithExecutorTokenResolver
+
+	func WithExecutorTokenResolver(tr llm.TokenResolver) ExecutorOption
+
+WithExecutorTokenResolver sets the OAuth token resolver for the executor. When set, locally created clients will use it to obtain fresh access tokens. Nil resolver is ignored.
+
 <a name="WithLazyLoader"></a>
 ### func WithLazyLoader
 
 	func WithLazyLoader(loader *LazySkillLoader) ExecutorOption
 
 WithLazyLoader sets a lazy loader for on\-demand skill body loading.
+
+<a name="WithPrerequisiteChecker"></a>
+### func WithPrerequisiteChecker
+
+	func WithPrerequisiteChecker(checker PrerequisiteChecker) ExecutorOption
+
+WithPrerequisiteChecker sets a prerequisite checker for Hermes skill validation. Nil checker is ignored \(no prerequisite validation\).
+
+<a name="WithToolMapper"></a>
+### func WithToolMapper
+
+	func WithToolMapper(mapper *HermesToolMapper) ExecutorOption
+
+WithToolMapper sets a Hermes tool mapper for translating tool references. Nil mapper is ignored.
+
+<a name="WithValidatePrerequisites"></a>
+### func WithValidatePrerequisites
+
+	func WithValidatePrerequisites(enabled bool) ExecutorOption
+
+WithValidatePrerequisites enables or disables prerequisite validation. Default is false \(no validation\).
 
 <a name="ExtractedKeyword"></a>
 ## type ExtractedKeyword
@@ -673,6 +791,99 @@ DiscoverMetadata scans all tiers and returns skill metadata entries \(no bodies\
 	func (s *FileSource) Name() string
 
 Name returns the human\-readable name of this source.
+
+<a name="HermesExtended"></a>
+## type HermesExtended
+
+HermesExtended holds Hermes\-specific metadata fields from the metadata.hermes section of a SKILL.md frontmatter.
+
+	type HermesExtended struct {
+	    // Config declares config variables for Config.yaml integration.
+	    Config []ConfigVar `yaml:"config" json:"config,omitempty"`
+	    // Triggers are keyword triggers (mapped to Meept tags).
+	    Triggers []string `yaml:"triggers" json:"triggers,omitempty"`
+	    // Toolsets are named tool groupings (informational only).
+	    Toolsets []string `yaml:"toolsets" json:"toolsets,omitempty"`
+	}
+
+<a name="HermesMetadataExtended"></a>
+## type HermesMetadataExtended
+
+HermesMetadataExtended wraps the nested metadata.hermes structure.
+
+	type HermesMetadataExtended struct {
+	    Hermes *HermesExtended `yaml:"hermes" json:"hermes,omitempty"`
+	}
+
+<a name="HermesPrerequisites"></a>
+## type HermesPrerequisites
+
+HermesPrerequisites describes runtime requirements for a Hermes skill.
+
+	type HermesPrerequisites struct {
+	    // EnvVars lists required environment variable names.
+	    EnvVars []string `yaml:"env_vars" json:"env_vars,omitempty"`
+	    // Commands lists required CLI commands (checked via exec.LookPath).
+	    Commands []string `yaml:"commands" json:"commands,omitempty"`
+	    // PythonPackages lists required Python packages (checked via pip show).
+	    PythonPackages []string `yaml:"python_packages" json:"python_packages,omitempty"`
+	}
+
+<a name="HermesSkillMetadata"></a>
+## type HermesSkillMetadata
+
+HermesSkillMetadata represents the full frontmatter of a Hermes SKILL.md. It embeds the base SkillMetadata for fields shared with Meept and adds Hermes\-specific fields.
+
+	type HermesSkillMetadata struct {
+	    SkillMetadata
+	
+	    // Version is the skill version (informational; Meept does not track versions).
+	    Version string `yaml:"version" json:"version,omitempty"`
+	    // License is the skill license (informational only).
+	    License string `yaml:"license" json:"license,omitempty"`
+	    // Platforms lists supported OS platforms (mapped to Meept tags).
+	    Platforms []string `yaml:"platforms" json:"platforms,omitempty"`
+	    // Prerequisites describes runtime requirements validated before execution.
+	    Prerequisites HermesPrerequisites `yaml:"prerequisites" json:"prerequisites,omitempty"`
+	    // Metadata holds nested Hermes-specific metadata.
+	    Metadata *HermesMetadataExtended `yaml:"metadata" json:"metadata,omitempty"`
+	}
+
+<a name="HermesToolMapper"></a>
+## type HermesToolMapper
+
+HermesToolMapper translates Hermes tool names to Meept equivalents. Unmapped tools are passed through as\-is. Tools with no Meept equivalent produce a warning log.
+
+	type HermesToolMapper struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewHermesToolMapper"></a>
+### func NewHermesToolMapper
+
+	func NewHermesToolMapper(logger *slog.Logger) *HermesToolMapper
+
+NewHermesToolMapper creates a HermesToolMapper with the standard tool mapping. Nil logger is replaced with slog.Default.
+
+<a name="HermesToolMapper.Translate"></a>
+### func \(\*HermesToolMapper\) Translate
+
+	func (m *HermesToolMapper) Translate(toolName string) string
+
+Translate maps a single Hermes tool name to its Meept equivalent. If no mapping exists, the original name is returned unchanged. If the mapping points to an empty string \(no equivalent\), the original name is returned and a warning is logged.
+
+<a name="HermesToolMapper.TranslateToolReferences"></a>
+### func \(\*HermesToolMapper\) TranslateToolReferences
+
+	func (m *HermesToolMapper) TranslateToolReferences(body string) string
+
+TranslateToolReferences rewrites Hermes tool name references in the skill body text. It handles common patterns:
+
+- tool\_name\( style calls \(where tool\_name is immediately followed by open paren\)
+- "tool\_name" or \`tool\_name\` quoted references
+- "\- tool\_name" list items at the start of a line
+
+Unmapped tools are left unchanged.
 
 <a name="KeywordExtractor"></a>
 ## type KeywordExtractor
@@ -973,6 +1184,20 @@ ParseError wraps a parsing error with file path context.
 
 
 
+<a name="PrerequisiteChecker"></a>
+## type PrerequisiteChecker
+
+PrerequisiteChecker validates Hermes skill prerequisites before execution.
+
+	type PrerequisiteChecker interface {
+	    // CheckEnvVars verifies that all required environment variables are set.
+	    CheckEnvVars(vars []string) error
+	    // CheckCommands verifies that all required commands are available on PATH.
+	    CheckCommands(cmds []string) error
+	    // CheckPythonPackages verifies that all required Python packages are installed.
+	    CheckPythonPackages(pkgs []string) error
+	}
+
 <a name="Registry"></a>
 ## type Registry
 
@@ -1147,7 +1372,7 @@ Skill represents a parsed skill definition from a SKILL.md file.
 	    // Path is the filesystem path the skill was loaded from.
 	    Path string `json:"path"`
 	
-	    // Priority indicates the discovery tier (0=project, 1=user, 2=claude, 3=system).
+	    // Priority indicates the discovery tier (0=project, 1=user, 2=claude, 3=hermes, 4=system).
 	    Priority int `json:"priority"`
 	
 	    // Source identifies where the skill was discovered from.
@@ -1176,6 +1401,14 @@ Skill represents a parsed skill definition from a SKILL.md file.
 	    // Values: "panel" (renders as a panel), "dialog" (opens a dialog), "external" (opens URL).
 	    // Empty means default behavior (description + execute button).
 	    UIType string `json:"ui_type,omitempty"`
+	
+	    // Prerequisites holds Hermes-Agent runtime requirements (env vars, commands, packages).
+	    // Nil for Meept-native skills.
+	    Prerequisites *HermesPrerequisites `json:"prerequisites,omitempty" yaml:"prerequisites,omitempty"`
+	
+	    // SourceOrigin tracks which skill system the skill originated from.
+	    // Values: "meept" (default), "claude", "hermes".
+	    SourceOrigin string `json:"source_origin,omitempty"`
 	}
 
 <a name="ParseSkillFile"></a>
@@ -1381,6 +1614,8 @@ SkillIndexEntry holds skill metadata only \(no body\) for fast lookup.
 	    AllowedTools []string `json:"allowed_tools,omitempty"`
 	    // Examples are sample prompts for trigger matching.
 	    Examples []string `json:"examples,omitempty"`
+	    // SourceOrigin tracks which skill system the skill originated from ("meept", "claude", "hermes").
+	    SourceOrigin string `json:"source_origin,omitempty"`
 	}
 
 <a name="ParseSkillMetadataOnly"></a>
@@ -1503,6 +1738,10 @@ SkillMetadata holds the parsed YAML frontmatter from a SKILL.md file.
 	
 	    // Claude-specific fields (parsed separately, merged into Tags).
 	    Trigger string `yaml:"trigger"`
+	
+	    // Hermes-specific fields (populated during 4th parse pass).
+	    HermesPrereqs *HermesPrerequisites `yaml:"-"`
+	    SourceOrigin  string               `yaml:"-"`
 	}
 
 <a name="DefaultMetadata"></a>
