@@ -1,5 +1,10 @@
 # golangci-lint configuration for meept
 # https://golangci-lint.run/usage/configuration/
+#
+# Curated 2026-06-19 after a full audit (see docs/20260618-checkreview.md).
+# The goal: enable linters that catch real bugs at acceptable noise; disable
+# linters whose findings were overwhelmingly stylistic/cosmetic or have
+# near-100% false-positive rates on this codebase. Run `make lint` to execute.
 
 version: "2"
 
@@ -30,22 +35,24 @@ linters:
     - gosec              # Security issues
 
     # Performance
-    - prealloc           # Slice preallocation hints
     - unconvert          # Unnecessary type conversions
 
-    # Style & readability
-    - goconst            # Repeated strings → constants
-    - gocritic           # Bug/performance/style diagnostics
+    # Style & readability (curated subset — disabled the noisy ones)
     - misspell           # Typos
-    - revive             # golint replacement
     - sloglint           # Consistent slog usage
-    - tagalign           # Struct tag alignment
-    - unparam            # Unused function params
-    - usestdlibvars      # Use stdlib constants
 
-    # Modernization
+    # Modernization (kept enabled as a gate after the 2026-06-19 bulk cleanup)
     - intrange           # Use integer range in for loops
     - modernize          # Modern Go idioms
+
+    # DISABLED 2026-06-19 (see docs/20260618-checkreview.md for rationale):
+    # - goconst     (712 findings, cosmetic; would force extracting every repeated string)
+    # - gocritic    (307 findings, mostly stylistic; subset curated into other linters)
+    # - prealloc    (15 findings, premature optimization; no measurable benefit)
+    # - revive      (46 findings, opinionated; overlaps with staticcheck + govet)
+    # - tagalign    (234 findings, pure formatting; not a real bug class)
+    # - unparam     (74 findings, often false-positive on interface implementations)
+    # - usestdlibvars (15 findings, cosmetic; replace with ad-hoc review)
 
   exclusions:
     generated: lax
@@ -58,6 +65,7 @@ linters:
       - "third_party/.*"
       - "testdata/.*"
       - "vendor/.*"
+      - ".worktrees/.*"  # git worktrees hold parallel feature branches; never lint
 
   settings:
     staticcheck:
@@ -65,43 +73,25 @@ linters:
         - "all"
         - "SA4023"  # Impossible comparison: interface cannot be concrete type
 
-    revive:
-      rules:
-        - name: blank-imports
-        - name: context-as-argument
-        - name: context-keys-type
-        - name: dot-imports
-        - name: error-return
-        - name: error-strings
-        - name: error-naming
-        - name: exported
-        - name: increment-decrement
-        - name: indent-error-flow
-        - name: package-comments
-        - name: range
-        - name: receiver-naming
-        - name: time-naming
-        - name: unexported-return
-        - name: var-declaration
-        - name: var-naming
-
     gosec:
       excludes:
-        - G104  # Audit errors not checked (errcheck handles this)
-
-    gocritic:
-      enabled-tags:
-        - diagnostic
-        - style
-        - performance
-      disabled-checks:
-        - hugeParam      # Often noisy for structs
-        - rangeValCopy   # Often intentional
-
-    goconst:
-      min-len: 3
-      min-occurrences: 4
-      ignore-tests: true
+        # G104 (errors unhandled) — overlaps with errcheck, and most findings
+        # are intentional deferred-Close / HTTP-writer patterns. See
+        # docs/20260618-checkreview.md for the policy rationale.
+        - G104
+        # G204 (subprocess launched with variable) — this is the project's
+        # core feature (agent executes shell commands). Real control is the
+        # Tirith pre-execution scanner + risk classifier + audit log.
+        - G204
+        # G304 (file path provided as taint input) — every config/skill/tool
+        # loader triggers this. Real control is the project worktree fence
+        # (pkg/security/permissions.go) and the security engine audit log.
+        - G304
+        # G301/G302/G306 (permission bits) — noisy; will be addressed in a
+        # separate focused pass.
+        - G301
+        - G302
+        - G306
 
     errorlint:
       errorf: true
@@ -111,9 +101,6 @@ linters:
     sloglint:
       key-naming-case: snake
       args-on-sep-lines: false
-
-    unparam:
-      check-exported: false
 
 issues:
   max-issues-per-linter: 50
@@ -127,3 +114,4 @@ formatters:
       - "third_party/.*"
       - "testdata/.*"
       - "vendor/.*"
+      - ".worktrees/.*"

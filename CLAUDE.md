@@ -810,15 +810,41 @@ All code changes to feature implementations must have corresponding documentatio
 
 ### Git Hooks
 
-The pre-commit hook system includes automated documentation checking:
+The pre-commit hook chain (`.git/hooks/pre-commit`) runs 11 checks in order. Each check has a dedicated hook script; the main `pre-commit` script sources them sequentially and exits 1 on the first failure. A separate `pre-push` hook runs slower tree-wide checks before pushing.
 
-| Hook | Purpose |
-|------|---------|
-| `.git/hooks/pre-commit` | Main entry point, runs all checks |
-| `.git/hooks/pre-commit-deferred` | Validates deferred item resolution |
-| `.git/hooks/pre-commit-mutexio` | Blocks commits with I/O-under-mutex violations (mutexio analyzer) |
-| `.git/hooks/pre-commit-u1000` | Staticcheck U1000 unused-code check |
-| `.git/hooks/pre-commit-feature-docs` | Validates feature documentation |
+Tier 1 — per-commit (fast, scoped to staged packages):
+
+| Hook | Purpose | Added |
+|------|---------|------|
+| `.git/hooks/pre-commit` | Main entry point, runs all 11 checks in order | — |
+| `.git/hooks/pre-commit-build` | `go build ./...` (catches downstream compile breaks) | 2026-06-19 |
+| `.git/hooks/pre-commit-deferred` | Validates deferred item resolution in findings docs; warns on stale govulncheck when go.mod/go.sum staged | — |
+| `.git/hooks/pre-commit-mutexio` | Blocks commits with I/O-under-mutex violations (mutexio analyzer) | — |
+| `.git/hooks/pre-commit-u1000` | Staticcheck U1000 unused-code check | — |
+| `.git/hooks/pre-commit-vet` | `go vet` on staged packages | — |
+| `.git/hooks/pre-commit-setters` | Verifies `Set*` methods have nil guards (typed-nil panic prevention) | — |
+| `.git/hooks/pre-commit-staticcheck` | Staticcheck real-bug rules (`SA*,U1000,S1008,S1009,S1021,S1034,-SA9003`) on staged packages | 2026-06-19 |
+| `.git/hooks/pre-commit-bodyclose` | `bodyclose` analyzer on staged packages (HTTP response body leaks) | 2026-06-19 |
+| `.git/hooks/pre-commit-gosec` | `gosec` security scan (if installed) | — |
+| `.git/hooks/pre-commit-errors` | Error handling anti-pattern detector | — |
+| `.git/hooks/pre-commit-feature-docs` | Validates feature documentation updates | — |
+
+Tier 2 — pre-push (whole-tree scans, slower):
+
+| Hook | Purpose | Added |
+|------|---------|------|
+| `.git/hooks/pre-push` | Runs `go vet ./...`, `staticcheck`, `govulncheck ./...`, `go build ./...` before push. Skips `go test -race` and full `golangci-lint` (those run in CI). | 2026-06-19 |
+
+Curated staticcheck check set (used by both pre-commit and pre-push):
+`SA*,U1000,S1008,S1009,S1021,S1034,-SA9003`
+- `SA*`: real bugs (nil-context, shadowed errors, ineffective break, unreachable code, deprecations)
+- `U1000`: unused symbols
+- `S1008/S1009/S1021/S1034`: simplifications (return bool directly, omit nil-before-len, etc.)
+- Excluded `ST*`: doc-comment style (hundreds of findings, low signal)
+- Excluded `SA9003`: empty branches (often intentional: deferred cleanup, ignored errors)
+- Excluded `S1039`: unnecessary `fmt.Sprintf` (cosmetic)
+
+Skip with `--no-verify` for emergencies only.
 
 ### pre-commit-feature-docs Hook
 
