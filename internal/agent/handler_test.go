@@ -814,3 +814,28 @@ func TestChatVisibilityEventTypes(t *testing.T) {
 		t.Errorf("AgentEventChatClientDisconnected = %q, want %q", AgentEventChatClientDisconnected, "chat_client_disconnected")
 	}
 }
+
+// TestRouteToAgent_NilIntentRegression verifies that RouteToAgent returns an
+// error instead of panicking when result.Intent is nil. This was the root
+// cause of a SIGSEGV when ClassifyAndRoute returned a DispatchResult with no
+// Intent (e.g., clarification results from ambiguous model directives).
+func TestRouteToAgent_NilIntentRegression(t *testing.T) {
+	d := &Dispatcher{
+		logger: slogDiscardLogger(),
+	}
+
+	// nil result
+	_, err := d.RouteToAgent(context.Background(), nil, "conv-test")
+	if err == nil {
+		t.Fatal("expected error for nil result, got nil")
+	}
+
+	// non-nil result but nil Intent
+	result := &DispatchResult{
+		AgentID: "chat",
+	}
+	_, err = d.RouteToAgent(context.Background(), result, "conv-test")
+	if err == nil {
+		t.Fatal("expected error for nil intent, got nil")
+	}
+}

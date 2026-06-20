@@ -528,6 +528,22 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		var dispatchErr error
 		result, dispatchErr = h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID, req.Parts)
 		switch {
+		case result != nil && result.ClarificationNeeded && result.ClarificationReply != "":
+			// Model directive or intent analysis determined the request is
+			// ambiguous and generated a clarification question. Return it
+			// directly to the user instead of routing to an agent (which
+			// would panic because Intent is nil on clarification results).
+			h.logger.Info("Returning clarification reply",
+				"conversation", conversationID,
+			)
+			reply = result.ClarificationReply
+		case result != nil && result.Response != "" && (result.Intent == nil || !h.dispatcher.ShouldDispatchAsync(result)):
+			// Skill execution or intent-analysis clarification produced a
+			// direct response with no task to dispatch. Return it as-is.
+			h.logger.Debug("Returning direct dispatch response",
+				"agent", result.AgentID,
+			)
+			reply = result.Response
 		case dispatchErr != nil:
 			h.logger.Error("Dispatch failed", "error", dispatchErr)
 			err = dispatchErr
@@ -631,12 +647,19 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 				h.publishPlanRequest(result, conversationID)
 			}
 		default:
-			h.logger.Debug("Dispatched to agent",
-				"agent", result.AgentID,
-				"intent", result.Intent.Type,
-				"confidence", result.Intent.Confidence,
-			)
-			reply, err = h.dispatcher.RouteToAgent(ctx, result, conversationID)
+			if result == nil || result.Intent == nil {
+				err = fmt.Errorf("dispatch returned no actionable result")
+				h.logger.Error("Dispatch returned nil result or intent",
+					"result_nil", result == nil,
+				)
+			} else {
+				h.logger.Debug("Dispatched to agent",
+					"agent", result.AgentID,
+					"intent", result.Intent.Type,
+					"confidence", result.Intent.Confidence,
+				)
+				reply, err = h.dispatcher.RouteToAgent(ctx, result, conversationID)
+			}
 		}
 	} else {
 		// Direct mode: send to standalone agent loop

@@ -1177,9 +1177,12 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	if d.registry == nil {
 		return "", fmt.Errorf("no agent registry configured")
 	}
+	if result == nil || result.Intent == nil {
+		return "", fmt.Errorf("dispatch result has no intent to route")
+	}
 
 	// Handle platform introspection directly without LLM
-	if result.Intent != nil && result.Intent.Type == string(IntentPlatform) {
+	if result.Intent.Type == string(IntentPlatform) {
 		return d.handlePlatformIntrospection(ctx, result.Intent.Summary)
 	}
 
