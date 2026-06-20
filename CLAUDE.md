@@ -175,7 +175,7 @@ All configuration uses **JSON5** format (JSON with comments and trailing commas)
 - **Main config**: `~/.meept/meept.json5` (see `config/meept.json5` for template)
 - **Models**: `config/models.json5` (JSON5 format with capability tags)
 - **Presets**: `config/presets.json5` (model presets), `~/.meept/presets.json5` (user overrides)
-- **MCP servers**: `~/.meept/mcp_servers.json5`
+- **MCP servers**: `~/.meept/mcp_servers.json5` — meept ships a default catalog of 21 preconfigured MCP servers in `config/mcp_servers.json5` (copied to the user path on `make install`). Only the 4 zero-config servers (`fetch`, `git`, `memory`, `sequential-thinking`) are `enabled: true` by default; the rest ship `enabled: false` pending API keys or external services. The per-server `enabled` field is a `*bool` (nil/absent = true). Toggle via: editing the JSON5 file, the TUI (`ctl-x o` or `/mcp`), the menubar tools tab, RPC (`mcp.list`, `mcp.set_enabled`), or HTTP (`GET /api/v1/mcp/servers`, `PUT /api/v1/mcp/servers/{name}/enabled`). See `docs/workflows/tool-routing.md#mcp-default-catalog` for the full catalog reference.
 - **Q Agent**: `~/.meept/q_agent.json5`
 - **Client**: `~/.meept/client.json5` (TUI keybindings/rendering)
 - **Menubar**: `~/.meept/menubar.json5` (menubar app settings)

@@ -723,6 +723,8 @@ When enabled, the WebSocket handler subscribes to the message bus and broadcasts
 |--------|------|-------------|--------|
 | POST | `/mcp` | MCP JSON-RPC requests | `mcp: true` |
 | GET | `/mcp/sse` | MCP Server-Sent Events stream | `mcp: true` |
+| GET | `/api/v1/mcp/servers` | List configured MCP client servers + runtime stats | — |
+| PUT | `/api/v1/mcp/servers/{name}/enabled` | Toggle a client server's enabled flag | — |
 
 The MCP endpoints allow AI agents (Claude Code, Cline, etc.) to interact with meept via the Model Context Protocol.
 
@@ -759,6 +761,54 @@ The `/mcp/sse` endpoint provides a stream of server-sent events for async notifi
 ```bash
 curl -N http://localhost:8081/mcp/sse
 ```
+
+### MCP Server Management
+
+These endpoints manage meept's own MCP *client* catalog (the servers meept launches as subprocesses). They are distinct from the `/mcp` JSON-RPC endpoint above, which exposes meept as an MCP *server* to external agents.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/mcp/servers` | List all configured MCP servers with runtime state and stats |
+| PUT | `/api/v1/mcp/servers/{name}/enabled` | Toggle a server's enabled flag (persists atomically + reloads manager) |
+
+**List Servers:**
+```bash
+curl http://localhost:8081/api/v1/mcp/servers
+```
+Response:
+```json
+{
+  "servers": [
+    {
+      "config": {
+        "name": "github",
+        "enabled": false,
+        "category": "vcs",
+        "description": "github repos, issues, prs",
+        "type": "stdio",
+        "command": ["npx", "-y", "@modelcontextprotocol/server-github"]
+      },
+      "stats": {
+        "state": "disabled",
+        "requests": 0,
+        "errors": 0
+      }
+    }
+  ]
+}
+```
+
+Each entry is a `ServerStatusEntry` pairing a `config` (the on-disk JSON5 entry) with a `stats` block. The `stats.state` field is one of `active`, `inactive`, `error`, `disabled`. Counters are in-memory only and reset on daemon restart.
+
+**Set Enabled:**
+```bash
+curl -X PUT http://localhost:8081/api/v1/mcp/servers/github/enabled \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true}'
+```
+Response: the updated `ServerStatusEntry` for that server.
+
+The handler reads the on-disk config fresh, mutates only the named entry's `Enabled` field, writes the file atomically (temp file + rename), then triggers `Manager.Reload`. Lost-update is avoided because the on-disk file — not a cached copy — is the source of truth for the write.
 
 ## Error Responses
 

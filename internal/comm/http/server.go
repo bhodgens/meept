@@ -1103,6 +1103,13 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	if s.ptyHandler != nil {
 		s.ptyHandler.RegisterRoutes(mux)
 	}
+
+	// MCP server management endpoints (mcp.list + mcp.set_enabled).
+	// Dispatched via rpcCall so the MCPManager has a single owner.
+	if s.rpcCall != nil {
+		mux.HandleFunc("GET /api/v1/mcp/servers", s.handleMCPServersList)
+		mux.HandleFunc("PUT /api/v1/mcp/servers/{name}/enabled", s.handleMCPServerSetEnabled)
+	}
 }
 
 // middleware applies common middleware (CORS, logging, auth).

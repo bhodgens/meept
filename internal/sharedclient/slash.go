@@ -71,6 +71,7 @@ var builtinCommands = map[string]struct{}{
 	"plan":      {},
 	"review":    {},
 	"project":   {},
+	"mcp":       {},
 }
 
 // CommandTasks is the "tasks" command name, exported for compatibility with tui/constants.go.

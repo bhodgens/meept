@@ -228,6 +228,12 @@ Runtime lifecycle events are recorded to the metrics subsystem:
 | `runtime.restart.success` | Count of successful restarts |
 | `runtime.restart.failure` | Count of failed restarts |
 
+## MCP Server Configuration
+
+MCP (Model Context Protocol) servers are configured separately from LLM runtimes, in `~/.meept/mcp_servers.json5`. Meept ships a default catalog of 21 preconfigured servers; see [tool routing: mcp default catalog](../workflows/tool-routing.md#mcp-default-catalog) for the full list and per-server enable/disable instructions.
+
+The same `${VAR}` expansion used by `spawn_command` here in `llm-lifecycle.md` also applies to MCP server `env` maps, with one difference: MCP `${VAR}` placeholders are passed through to the subprocess environment at transport-creation time inside `Manager.StartServer`, not expanded by meept itself. Use `${VAR:-default}` to provide a fallback for unset vars.
+
 ## Supported Runtimes
 
 ### llama.cpp

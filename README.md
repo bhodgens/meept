@@ -83,7 +83,9 @@ The agents operate independently to their task (workorder) and report results an
 
 #### MCP Server
 
-While also able to consume MCP servers via MCP clients, meept also has the ability to be an MCP server for another agent harness. 
+While also able to consume MCP servers via MCP clients, meept also has the ability to be an MCP server for another agent harness.
+
+Meept ships a default catalog of 21 preconfigured MCP client servers in `config/mcp_servers.json5` (4 enabled by default, the rest opt-in). Toggle per-server from the TUI (`ctl-x o`), menubar tools tab, or HTTP. See [tool routing: mcp default catalog](docs/workflows/tool-routing.md#mcp-default-catalog). 
 
 #### Aggressive Memory Retention and Recall 
 

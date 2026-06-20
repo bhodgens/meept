@@ -1,23 +1,274 @@
-// MCP server definitions. Disabled by default; enable by setting enabled: true.
-// Each server maps to a name used in the tool registry.
+// default mcp server catalog.
+//
+// this is the default mcp (model context protocol) server catalog shipped with
+// meept. each entry defines a stdio subprocess that meept can launch on demand.
+// most servers ship disabled (enabled: false) because they require api keys,
+// external daemons, or other setup. enable only the ones you want.
+//
+// how to enable a server:
+//   1. edit this file: set `enabled: true` on the entry, fill in env vars.
+//   2. or use the tui: press `ctl-x o` (mcp menu), select server, press `e`.
+//   3. or use the menubar app: settings → tools tab, toggle the switch.
+//
+// env vars use `${VAR}` placeholders. export them in your shell before starting
+// the daemon. example:
+//   export GITHUB_TOKEN="ghp_xxx"
+//   ./bin/meept-daemon -f
+//
+// ${VAR} placeholders are never expanded by meept in this file; they are passed
+// through to the subprocess environment at launch time.
+//
+// categories: vcs, search, data, automation, browser, infra, messaging, coding,
+//             network, reasoning
+//
+// runtimes:
+//   - npx (node):    requires node.js + npm installed.
+//   - uvx (python):  requires uv installed (https://docs.astral.sh/uv/).
 {
   "servers": [
-    // Example: local server via stdio subprocess
+    // ────────────────────────── npx-based (node) ──────────────────────────
+
+    // zero-config: pure reasoning, no api key, no external services.
+    {
+      "name": "sequential-thinking",
+      "enabled": true,
+      "category": "reasoning",
+      "description": "step-wise reasoning scratchpad, zero-config",
+      "type": "stdio",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"],
+    },
+
+    // zero-config: local knowledge graph on disk, no api key.
+    {
+      "name": "memory",
+      "enabled": true,
+      "category": "data",
+      "description": "local knowledge graph store, zero-config",
+      "type": "stdio",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-memory"],
+    },
+
+    // github: needs a personal access token.
     {
       "name": "github",
+      "enabled": false,
+      "category": "vcs",
+      "description": "github repos, issues, prs",
       "type": "stdio",
       "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
       "env": {
-        "GITHUB_TOKEN": "${GITHUB_TOKEN}",
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}",
       },
     },
-    // Example: remote server with API key auth
+
+    // slack: needs bot token + app token.
     {
-      "name": "example",
-      "type": "http",
-      "url": "https://mcp.example.com/mcp",
-      "headers": {
-        "Authorization": "Bearer ${MCP_TOKEN}",
+      "name": "slack",
+      "enabled": false,
+      "category": "messaging",
+      "description": "slack channels and messages, requires slack app tokens",
+      "type": "stdio",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-slack"],
+      "env": {
+        "SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}",
+        "SLACK_APP_TOKEN": "${SLACK_APP_TOKEN}",
+      },
+    },
+
+    // brave search: needs api key.
+    {
+      "name": "brave-search",
+      "enabled": false,
+      "category": "search",
+      "description": "brave web search, requires brave api key",
+      "type": "stdio",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}",
+      },
+    },
+
+    // firecrawl: needs api key (hosted) or self-hosted url.
+    {
+      "name": "firecrawl",
+      "enabled": false,
+      "category": "search",
+      "description": "firecrawl web scrape + search, requires api key",
+      "type": "stdio",
+      "command": ["npx", "-y", "firecrawl-mcp"],
+      "env": {
+        "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}",
+      },
+    },
+
+    // playwright: headless chrome via playwright. no api key but heavy deps.
+    {
+      "name": "playwright",
+      "enabled": false,
+      "category": "browser",
+      "description": "browser automation via playwright, requires browsers installed",
+      "type": "stdio",
+      "command": ["npx", "-y", "@executeautomation/playwright-mcp-server"],
+    },
+
+    // puppeteer: headless chrome via puppeteer. no api key but heavy deps.
+    {
+      "name": "puppeteer",
+      "enabled": false,
+      "category": "browser",
+      "description": "browser automation via puppeteer, downloads chromium on first run",
+      "type": "stdio",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-puppeteer"],
+    },
+
+    // postgres: needs database url.
+    {
+      "name": "postgres",
+      "enabled": false,
+      "category": "data",
+      "description": "postgresql query tool, requires database url",
+      "type": "stdio",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-postgres"],
+      "env": {
+        "POSTGRES_CONNECTION_STRING": "${POSTGRES_CONNECTION_STRING}",
+      },
+    },
+
+    // filesystem: needs allowed directories arg. zero-config-ish but requires
+    // explicit paths, so disabled by default.
+    {
+      "name": "filesystem",
+      "enabled": false,
+      "category": "data",
+      "description": "filesystem access for allowed directories, configure paths in command",
+      "type": "stdio",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "${HOME}"],
+    },
+
+    // google drive: needs oauth credentials. package name may vary by vendor;
+    // @modelcontextprotocol/server-google-drive is the canonical reference.
+    {
+      "name": "google-drive",
+      "enabled": false,
+      "category": "data",
+      "description": "google drive search + read, requires oauth credentials",
+      "type": "stdio",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-google-drive"],
+      "env": {
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+      },
+    },
+
+    // docker: requires docker daemon running.
+    {
+      "name": "docker",
+      "enabled": false,
+      "category": "infra",
+      "description": "docker container management, requires docker daemon",
+      "type": "stdio",
+      "command": ["npx", "-y", "mcp-server-docker"],
+      "env": {
+        "DOCKER_HOST": "${DOCKER_HOST:-}",
+      },
+    },
+
+    // terraform: community terraform-mcp-server. requires terraform installed.
+    {
+      "name": "terraform",
+      "enabled": false,
+      "category": "infra",
+      "description": "terraform plan/apply orchestration, requires terraform installed",
+      "type": "stdio",
+      "command": ["npx", "-y", "terraform-mcp-server"],
+    },
+
+    // ────────────────────────── uvx-based (python) ────────────────────────
+
+    // zero-config: general-purpose http fetch, no api key.
+    {
+      "name": "fetch",
+      "enabled": true,
+      "category": "network",
+      "description": "general-purpose http fetcher, zero-config, requires uv installed",
+      "type": "stdio",
+      "command": ["uvx", "mcp-server-fetch"],
+    },
+
+    // zero-config: local git operations, no api key.
+    {
+      "name": "git",
+      "enabled": true,
+      "category": "vcs",
+      "description": "local git repo operations (log, diff, blame), zero-config, requires uv installed",
+      "type": "stdio",
+      "command": ["uvx", "mcp-server-git"],
+    },
+
+    // crawl4ai: web scraper, no api key but heavy deps.
+    {
+      "name": "crawl4ai",
+      "enabled": false,
+      "category": "browser",
+      "description": "crawl4ai async web crawler, requires uv installed",
+      "type": "stdio",
+      "command": ["uvx", "crawl4ai"],
+    },
+
+    // crawlee: python port of crawlee, no api key.
+    {
+      "name": "crawlee",
+      "enabled": false,
+      "category": "browser",
+      "description": "crawlee-python web scraper, requires uv installed",
+      "type": "stdio",
+      "command": ["uvx", "crawlee"],
+    },
+
+    // scrapegraphai: ai-driven scraper, optional llm key.
+    {
+      "name": "scrapegraph",
+      "enabled": false,
+      "category": "browser",
+      "description": "scrapegraphai llm-driven scraper, requires uv installed",
+      "type": "stdio",
+      "command": ["uvx", "scrapegraphai"],
+      "env": {
+        "OPENAI_API_KEY": "${OPENAI_API_KEY:-}",
+      },
+    },
+
+    // open interpreter: local code interpreter. no api key if using local model.
+    {
+      "name": "open-interpreter",
+      "enabled": false,
+      "category": "coding",
+      "description": "open interpreter local code runner, requires uv installed",
+      "type": "stdio",
+      "command": ["uvx", "open-interpreter"],
+    },
+
+    // openhands: open-source coding agent runtime.
+    {
+      "name": "openhands",
+      "enabled": false,
+      "category": "coding",
+      "description": "openhands autonomous coding agent, requires uv + docker",
+      "type": "stdio",
+      "command": ["uvx", "openhands"],
+    },
+
+    // searxng: meta-search aggregator. disabled unless you run a local searxng.
+    // to enable: point SEARXNG_URL at your local instance (default localhost:8080).
+    {
+      "name": "searxng",
+      "enabled": false,
+      "category": "search",
+      "description": "searxng meta-search, requires local searxng instance at searxng_url",
+      "type": "stdio",
+      "command": ["uvx", "searxng-mcp"],
+      "env": {
+        "SEARXNG_URL": "${SEARXNG_URL:-http://localhost:8080}",
       },
     },
   ],

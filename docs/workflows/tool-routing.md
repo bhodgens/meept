@@ -28,6 +28,82 @@ Agent Request → Tool Registry → Security Check → Tool Execution → Result
 - Tools are discovered via MCP protocol
 - External tools integrate seamlessly with built-in tools
 
+## MCP Default Catalog
+
+Meept ships a default catalog of 21 preconfigured MCP (Model Context Protocol) servers in `config/mcp_servers.json5`. The template is copied to `~/.meept/mcp_servers.json5` on `make install` if no file exists there yet. Each entry is fully configured with the correct command (`npx` or `uvx` as appropriate), environment variables, category, and description.
+
+### Default Enabled Set
+
+Only the zero-config servers are enabled by default (no API keys or external services required):
+
+| server | runtime | category | purpose |
+|--------|---------|----------|---------|
+| `fetch` | uvx | network | general-purpose http fetcher |
+| `git` | uvx | vcs | local git repo operations (log, diff, blame) |
+| `memory` | npx | data | local knowledge graph store |
+| `sequential-thinking` | npx | reasoning | step-wise reasoning scratchpad |
+
+The remaining 17 servers ship `enabled: false` because they need API keys, OAuth credentials, or external daemons. Enable only the ones you want.
+
+### Enabling a Server
+
+Three surfaces toggle the `enabled` flag:
+
+1. **Edit the JSON5 file directly** — set `enabled: true` on the entry and fill in any required env vars, then restart the daemon (or trigger a config reload).
+2. **TUI** — press `ctl-x o` (or type `/mcp`) to open the mcp servers menu. Select a row and press `e` to toggle enabled. The toggle persists and reloads immediately.
+3. **Menubar app** — open settings, go to the "tools" tab, and flip the toggle on a row.
+
+Toggling via TUI or menubar writes the change atomically to `~/.meept/mcp_servers.json5` (via `SaveMCPConfig`'s temp-file + rename) and triggers `Manager.Reload`, which starts newly-enabled servers and stops newly-disabled ones without restarting the daemon.
+
+### Env Var Placeholders (`${VAR}`)
+
+Env values in the catalog use `${VAR}` placeholders. Meept does not expand these itself; they are passed through to the subprocess environment at transport-creation time inside `Manager.StartServer`. Export the env vars in your shell before starting the daemon:
+
+```bash
+export GITHUB_TOKEN="ghp_xxx"
+./bin/meept-daemon -f
+```
+
+The `${VAR:-default}` shell-default syntax is also supported. Unknown env vars expand to the empty string.
+
+### Runtime States
+
+Each configured server has a runtime state tracked in memory (resets on daemon restart):
+
+| state | meaning |
+|-------|---------|
+| `active` | connected and ready to serve tool calls |
+| `inactive` | enabled but not yet started |
+| `error` | enabled, but failed to start or not connected |
+| `disabled` | `enabled: false`; skipped at startup and on reload |
+
+`CallTool` invocations increment the per-server `requests` counter (success + failure). Failed invocations increment `errors` and populate `last_error` / `last_error_at`. The daemon's health monitor flips enabled-but-disconnected servers to `error` every 60 seconds.
+
+### Example Catalog Entry
+
+```json5
+{
+  "name": "github",
+  "enabled": false,
+  "category": "vcs",
+  "description": "github repos, issues, prs",
+  "type": "stdio",
+  "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+  "env": {
+    "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}",
+  },
+}
+```
+
+### Management APIs
+
+The catalog is reachable from several surfaces:
+
+- RPC: `mcp.list` returns all `ServerStatusEntry` items; `mcp.set_enabled` toggles one server.
+- HTTP: `GET /api/v1/mcp/servers` and `PUT /api/v1/mcp/servers/{name}/enabled` (see [http-api reference](../reference/http-api.md)).
+- TUI: `ctl-x o` keybinding or `/mcp` slash command.
+- Menubar: settings → tools tab.
+
 ### Agent-Tool Matching
 - Agents declare required capabilities
 - Tools declare provided capabilities

@@ -940,6 +940,92 @@ components:
           nullable: true
       required:
         - runtimes
+    MCPServerConfig:
+      type: object
+      properties:
+        name:
+          type: string
+        enabled:
+          type: boolean
+          nullable: true
+          description: nil/absent = true (backward compat)
+        command:
+          type: array
+          items:
+            type: string
+          nullable: true
+        url:
+          type: string
+          nullable: true
+        type:
+          type: string
+          nullable: true
+        env:
+          type: object
+          additionalProperties:
+            type: string
+          nullable: true
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+      required:
+        - name
+    MCPServerStats:
+      type: object
+      properties:
+        state:
+          type: string
+          enum: [active, inactive, error, disabled]
+        requests:
+          type: integer
+        errors:
+          type: integer
+        last_error:
+          type: string
+        last_error_at:
+          type: string
+          nullable: true
+        last_request_at:
+          type: string
+          nullable: true
+      required:
+        - state
+        - requests
+        - errors
+    MCPServerStatusEntry:
+      type: object
+      properties:
+        config:
+          $ref: '#/components/schemas/MCPServerConfig'
+        stats:
+          $ref: '#/components/schemas/MCPServerStats'
+      required:
+        - config
+        - stats
+    MCPServersListResponse:
+      type: object
+      properties:
+        servers:
+          type: array
+          items:
+            $ref: '#/components/schemas/MCPServerStatusEntry'
+      required:
+        - servers
+    MCPSetEnabledRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+      required:
+        - enabled
     SchedulerService:
       type: object
       properties:
@@ -2591,6 +2677,67 @@ paths:
           description: Unauthorized
         '500':
           description: Internal server error
+
+  /api/v1/mcp/servers:
+    get:
+      summary: s.handleMCPServersList
+      description: List all configured MCP client servers with their runtime state and stats.
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPServersListResponse'
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+        '503':
+          description: Service unavailable (mcp service not wired)
+
+  /api/v1/mcp/servers/{name}/enabled:
+    put:
+      summary: s.handleMCPServerSetEnabled
+      description: Toggle a configured MCP client server's enabled flag. Persists atomically to mcp_servers.json5 and triggers Manager.Reload.
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The MCP server name (the `name` field in mcp_servers.json5).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MCPSetEnabledRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPServerStatusEntry'
+        '400':
+          description: Bad request (missing name or malformed body)
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error (persist or reload failure)
+        '503':
+          description: Service unavailable (mcp service not wired)
 
   /api/v1/memory/export:
     post:

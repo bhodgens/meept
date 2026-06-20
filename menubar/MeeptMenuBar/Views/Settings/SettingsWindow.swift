@@ -10,6 +10,24 @@ struct SettingsWindow: View {
     @State private var selectedTab = 0
 
     @ObservedObject var configViewModel: ConfigViewModel
+    @StateObject private var mcpViewModel: MCPViewModel
+
+    init(configViewModel: ConfigViewModel, mcpViewModel: MCPViewModel? = nil) {
+        self.configViewModel = configViewModel
+        // Allow callers to inject an APIClient-backed MCPViewModel (the main
+        // AppDelegate path). Fall back to a fresh APIClient for previews /
+        // older call sites that don't supply one.
+        if let mcpViewModel {
+            self._mcpViewModel = StateObject(wrappedValue: mcpViewModel)
+        } else {
+            let config = MenubarConfigService()
+            let api = APIClient(
+                baseURL: config.daemonBaseURL,
+                apiToken: config.apiToken
+            )
+            self._mcpViewModel = StateObject(wrappedValue: MCPViewModel(api: api))
+        }
+    }
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -45,6 +63,12 @@ struct SettingsWindow: View {
                 Label("agents", systemImage: "person.crop.circle")
             }
             .tag(2)
+
+            MCPServersView(viewModel: mcpViewModel)
+            .tabItem {
+                Label("tools", systemImage: "wrench.and.screwdriver")
+            }
+            .tag(3)
         }
         .frame(width: 600, height: 450)
         .padding()

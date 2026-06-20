@@ -63,6 +63,31 @@ class APIClient {
         try await performVoid(request: request)
     }
 
+    // MARK: - MCP Servers (async/await)
+
+    /// Fetches the full list of configured MCP servers with runtime stats.
+    func getMCPServers() async throws -> [MCPServer] {
+        let request = try makeRequest(path: "/api/v1/mcp/servers", method: "GET")
+        let data = try await performData(request: request)
+        let decoder = JSONDecoder()
+        let resp = try decoder.decode(MCPServersResponse.self, from: data)
+        return resp.servers.map { MCPServer(from: $0) }
+    }
+
+    /// Toggles a single MCP server's `enabled` flag. Persists on the daemon
+    /// side (atomic write to `mcp_servers.json5` + manager reload) and returns
+    /// the updated entry.
+    func setMCPEnabled(name: String, enabled: Bool) async throws -> MCPServer {
+        var request = try makeRequest(path: "/api/v1/mcp/servers/\(name)/enabled", method: "PUT")
+        let body = try JSONEncoder().encode(["enabled": enabled])
+        request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let data = try await performData(request: request)
+        let decoder = JSONDecoder()
+        let status = try decoder.decode(MCPServerStatus.self, from: data)
+        return MCPServer(from: status)
+    }
+
     // MARK: - Backward-compatible completion handler wrappers
 
     func getDaemonStatus(completion: @escaping (Result<DaemonStatus, Error>) -> Void) {
@@ -81,6 +106,31 @@ class APIClient {
             do {
                 try await restartDaemon()
                 completion(.success(()))
+            } catch {
+                completion(.failure(error))
+            }
+        }
+    }
+
+    func getMCPServers(completion: @escaping (Result<[MCPServer], Error>) -> Void) {
+        Task {
+            do {
+                let servers = try await getMCPServers()
+                completion(.success(servers))
+            } catch {
+                completion(.failure(error))
+            }
+        }
+    }
+
+    func setMCPEnabled(
+        name: String, enabled: Bool,
+        completion: @escaping (Result<MCPServer, Error>) -> Void
+    ) {
+        Task {
+            do {
+                let server = try await setMCPEnabled(name: name, enabled: enabled)
+                completion(.success(server))
             } catch {
                 completion(.failure(error))
             }

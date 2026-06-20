@@ -1152,21 +1152,69 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		mcpCfg, err := config.LoadMCPConfig(cfg.MCP.ConfigFile)
 		switch {
 		case err != nil:
-			logger.Warn("Failed to load MCP config", "error", err, "path", cfg.MCP.ConfigFile)
+			logger.Warn("failed to load MCP config", "error", err, "path", cfg.MCP.ConfigFile)
 		case len(mcpCfg.Servers) > 0:
-			logger.Info("Starting MCP servers", "count", len(mcpCfg.Servers))
+			// Populate the configs map (including disabled entries) so
+			// AllServerStatuses can report on every configured server,
+			// even before any server has been started.
+			c.MCPManager.SetConfigs(mcpCfg.Servers)
+
+			logger.Info("starting MCP servers", "count", len(mcpCfg.Servers))
+			started := 0
 			for _, serverCfg := range mcpCfg.Servers {
-				if err := c.MCPManager.StartServer(context.Background(), serverCfg); err != nil {
-					logger.Error("Failed to start MCP server",
+				// Skip disabled servers before calling StartServer; the
+				// manager now rejects disabled configs and we do not
+				// want to log a noisy error for each one.
+				if !serverCfg.IsEnabled() {
+					logger.Debug("skipping disabled MCP server", "name", serverCfg.Name)
+					continue
+				}
+				if err := c.MCPManager.StartServer(ctx, serverCfg); err != nil {
+					logger.Error("failed to start MCP server",
 						"name", serverCfg.Name,
 						"error", err,
 					)
 					continue
 				}
+				started++
 			}
 
-			// Register MCP tools with the tool registry
-			registerMCPTools(c.ToolRegistry, c.MCPManager, logger)
+			// Register MCP tools with the tool registry whenever at least
+			// one server started. The registry is safe to call with zero
+			// active servers but we preserve the existing conditional
+			// behaviour to avoid noise.
+			if started > 0 {
+				registerMCPTools(c.ToolRegistry, c.MCPManager, logger)
+			}
+
+			// Launch the periodic health monitor using the daemon-lifetime
+			// context so it cancels on shutdown.
+			c.MCPManager.StartHealthMonitor(ctx)
+
+			// Emit a startup summary computed from the configured servers
+			// and the manager's current status snapshot.
+			var enabledCount, activeCount, errorCount, disabledCount int
+			for _, serverCfg := range mcpCfg.Servers {
+				if !serverCfg.IsEnabled() {
+					disabledCount++
+					continue
+				}
+				enabledCount++
+				_, stats, ok := c.MCPManager.ServerStatus(serverCfg.Name)
+				if !ok {
+					continue
+				}
+				switch stats.State {
+				case mcp.StateActive:
+					activeCount++
+				case mcp.StateError:
+					errorCount++
+				}
+			}
+			logger.Info("MCP servers: "+fmt.Sprintf(
+				"%d enabled, %d active, %d errors, %d disabled (configure at ~/.meept/mcp_servers.json5)",
+				enabledCount, activeCount, errorCount, disabledCount,
+			))
 		default:
 			logger.Info("MCP enabled but no servers configured")
 		}

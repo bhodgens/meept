@@ -227,6 +227,16 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			logger.Info("Queue RPC handlers registered")
 		}
 
+		// Register MCP management handlers (mcp.list, mcp.set_enabled).
+		// The handler reads on-disk config fresh, mutates Enabled, persists
+		// atomically via SaveMCPConfig, then calls Manager.Reload so newly
+		// enabled servers start and newly disabled servers stop.
+		if components.MCPManager != nil {
+			mcpRPCHandler := rpc.NewMCPHandler(components.MCPManager, fullCfg.MCP.ConfigFile)
+			mcpRPCHandler.RegisterMCPMethods(rpcServer)
+			logger.Info("MCP RPC handlers registered")
+		}
+
 		// Register scheduler RPC handlers (direct Go handlers override bus proxy)
 		if components.Scheduler != nil {
 			scheduler.RegisterRPCHandlers(rpcServer, components.Scheduler)

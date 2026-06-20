@@ -157,6 +157,23 @@ meept config set <keypath> <value>
 
 **Sections:** daemon, transport, llm, models, agents, memory, security, mcp, client/tui, scheduler, stt (primary), plus ~20 advanced sections.
 
+### `meept` TUI - Interactive Mode
+
+Running `meept chat` with no message argument opens the interactive TUI. In addition to typing messages, several keybindings and slash commands open management menus.
+
+**Keybindings:**
+
+- `ctl-x o` — open the mcp servers menu (same as the `/mcp` slash command).
+- `ctl-x m` — open the memory menu.
+- `esc` — close the active menu or overlay.
+
+**Slash Commands:**
+
+- `/mcp` — open the mcp servers menu. Columns shown: `en` (enabled toggle glyph), `server`, `status`, `reqs`, `errors`, `description`. Press `e` to toggle enabled on the selected row, `r` to force a refresh from the daemon, arrow keys to move selection, and `esc` to close.
+- `/memory` — open the memory menu.
+
+See [tool routing: mcp default catalog](../workflows/tool-routing.md#mcp-default-catalog) for details on the catalog the menu manages.
+
 **Examples:**
 ```bash
 # Open models section (replaces old `meept models`)

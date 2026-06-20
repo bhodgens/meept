@@ -42,6 +42,8 @@ func (h *CommandHandler) Handle(ctx context.Context, cmd *sharedclient.SlashComm
 		h.handleSession(ctx, cmd)
 	case "tasks":
 		h.handleTasks()
+	case "mcp":
+		h.handleMCP()
 	case "cancel":
 		h.handleCancel(ctx, cmd)
 	case "amend":
@@ -157,6 +159,9 @@ func (h *CommandHandler) handleHelp(cmd *sharedclient.SlashCommand) {
 	h.addScrollback("  /cancel <id>       cancel a task")
 	h.addScrollback("  /amend <id> <f> [v] amend a task field")
 	h.addScrollback("  /interrupt <id> [r] interrupt a task with a reason")
+	h.addScrollback("")
+	h.addScrollback("tools:")
+	h.addScrollback("  /mcp               open mcp servers menu (toggle enabled)")
 }
 
 func (h *CommandHandler) handleNew(ctx context.Context) {
@@ -469,4 +474,10 @@ func (h *CommandHandler) handleInterrupt(_ context.Context, cmd *sharedclient.Sl
 	} else {
 		h.addScrollback(fmt.Sprintf("task %s interrupted", taskID))
 	}
+}
+
+// handleMCP opens the MCP servers management menu.
+func (h *CommandHandler) handleMCP() {
+	h.tui.mcpMenu.Show()
+	h.tui.activeMenu = h.tui.mcpMenu
 }

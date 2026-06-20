@@ -33,6 +33,7 @@ type TUI struct {
 	memoryMenu  *menus.MemoryMenu
 	chatMenu    *menus.ChatMenu
 	cmdPalette  *menus.CommandPalette
+	mcpMenu     *menus.MCPMenu
 	activeMenu  interface {
 		IsVisible() bool
 		Hide()
@@ -84,6 +85,7 @@ func NewTUI(client transport.Client, sessionMgr *sharedclient.SessionManager) *T
 	t.memoryMenu = menus.NewMemoryMenu(client)
 	t.chatMenu = menus.NewChatMenu()
 	t.cmdPalette = menus.NewCommandPalette()
+	t.mcpMenu = menus.NewMCPMenu(client)
 
 	// Set up menu callbacks
 	t.setupMenuCallbacks()
@@ -177,6 +179,9 @@ func (t *TUI) setupMenuCallbacks() {
 		},
 		func() { t.activeMenu = nil },
 	)
+
+	// MCP menu callbacks
+	t.mcpMenu.SetCallbacks(func() { t.activeMenu = nil })
 }
 
 // executePaletteCommand executes a command from the command palette.
@@ -197,6 +202,9 @@ func (t *TUI) executePaletteCommand(cmd string) {
 	case "chat":
 		t.chatMenu.Show()
 		t.activeMenu = t.chatMenu
+	case "mcp":
+		t.mcpMenu.Show()
+		t.activeMenu = t.mcpMenu
 	case "help":
 		t.executeSlashCommand(&sharedclient.SlashCommand{Name: "help"})
 	case "status":
@@ -418,6 +426,11 @@ func (t *TUI) handleKeyEvent(ev termbox.Event) {
 				t.render()
 				return
 			}
+		case *menus.MCPMenu:
+			if menu.HandleKey(ev.Ch, ev.Key) {
+				t.render()
+				return
+			}
 		}
 	}
 
@@ -538,6 +551,9 @@ func (t *TUI) handleCommandModeKey(ev termbox.Event) {
 	case "ctrl+x":
 		t.cmdPalette.Show()
 		t.activeMenu = t.cmdPalette
+	case "o":
+		t.mcpMenu.Show()
+		t.activeMenu = t.mcpMenu
 	default:
 		t.addScrollback(fmt.Sprintf("[unknown command mode key: %s]", key))
 	}
@@ -769,7 +785,7 @@ func (t *TUI) render() {
 
 	// Render command mode indicator (only when no menu is active)
 	if t.commandMode {
-		indicator := "COMMAND MODE: s=session, t=tasks, q=queue, m=memory, c=chat, ^x=palette"
+		indicator := "COMMAND MODE: s=session, t=tasks, q=queue, m=memory, c=chat, o=mcp, ^x=palette"
 		y := height - 2
 		if t.scrollOffset > 0 {
 			y = height - 3

@@ -3195,3 +3195,51 @@ func (s *Server) handleWorkerList(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, result)
 }
+
+// handleMCPServersList handles GET /api/v1/mcp/servers.
+// Returns the full list of configured MCP servers with their runtime stats.
+// Dispatches through the RPC registry so the MCPManager lives in one place.
+func (s *Server) handleMCPServersList(w http.ResponseWriter, r *http.Request) {
+	if s.rpcCall == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "mcp service not available")
+		return
+	}
+	result, err := s.rpcCall(r.Context(), "mcp.list", json.RawMessage("{}"))
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleMCPServerSetEnabled handles PUT /api/v1/mcp/servers/{name}/enabled.
+// Body: {"enabled": bool}. Persists the change atomically to mcp_servers.json5
+// and triggers a manager reload, returning the updated ServerStatusEntry.
+func (s *Server) handleMCPServerSetEnabled(w http.ResponseWriter, r *http.Request) {
+	if s.rpcCall == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "mcp service not available")
+		return
+	}
+	name := r.PathValue("name")
+	if name == "" {
+		s.writeError(w, http.StatusBadRequest, "server name is required")
+		return
+	}
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	params, err := json.Marshal(map[string]any{"name": name, "enabled": body.Enabled})
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "failed to encode request")
+		return
+	}
+	result, err := s.rpcCall(r.Context(), "mcp.set_enabled", params)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, result)
+}
