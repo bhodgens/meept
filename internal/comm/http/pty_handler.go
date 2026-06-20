@@ -193,11 +193,17 @@ func (h *PTYHandler) streamSessionWS(w http.ResponseWriter, r *http.Request, ses
 func (h *PTYHandler) streamSessionOutput(sessionID string, sess pty.Session) {
 	outputChan := sess.Output()
 	for output := range outputChan {
+		// Hold RLock for the duration of the send loop. This excludes the
+		// exclusive Lock acquired by streamSessionWS's defer (which removes
+		// the channel from subs BEFORE releasing and then closes it), so a
+		// channel present in our snapshot cannot be closed before our send.
+		// Channels are buffered (100) and sends are non-blocking, so the
+		// lock is held only for bounded, fast work.
 		h.mu.RLock()
 		subs := h.subs[sessionID]
-		h.mu.RUnlock()
 
 		if len(subs) == 0 {
+			h.mu.RUnlock()
 			// No subscribers: discard output to avoid goroutine blocking
 			// on a full channel. The goroutine still runs (to drain the
 			// session output channel) but does negligible work.
@@ -211,6 +217,7 @@ func (h *PTYHandler) streamSessionOutput(sessionID string, sess pty.Session) {
 				// Channel full, skip
 			}
 		}
+		h.mu.RUnlock()
 	}
 }
 

@@ -145,6 +145,9 @@ type MessageQueue struct {
 // QueuePersisterOps is the subset of QueuePersister used by MessageQueue.
 type QueuePersisterOps interface {
 	PersistSync(msg QueuedMessage) error
+	// Stop halts any background goroutines/timers owned by the persister
+	// (e.g., the flush timer in QueuePersister). Called from MessageQueue.Close.
+	Stop()
 }
 
 // QueueRestorePayload is published to the bus when pending follow-ups are
@@ -410,6 +413,10 @@ func (q *MessageQueue) Close() {
 				q.logger.Warn("failed to persist follow-up on close", "id", msg.ID, "err", err)
 			}
 		}
+
+		// Stop the persister's background timer so it doesn't outlive the
+		// conversation and leak a goroutine per closed queue.
+		q.persister.Stop()
 	}
 
 	q.logger.Info("message queue closed")

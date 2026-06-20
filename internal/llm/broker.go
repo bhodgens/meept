@@ -297,21 +297,30 @@ func (b *ModelBroker) UpdateHealth(ctx context.Context) error {
 		return nil // Metrics not enabled
 	}
 
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
+	// Fetch stats BEFORE acquiring the lock — GetAllStats performs SQLite
+	// I/O and CLAUDE.md forbids holding the broker mutex across I/O.
 	allStats, err := b.config.MetricsStore.GetAllStats(ctx, 24)
 	if err != nil {
 		b.logger.Debug("UpdateHealth: GetAllStats failed", "error", err)
 		return err
 	}
 
-	statsMap := make(map[string]*metrics.ProviderStats)
+	statsMap := make(map[string]*metrics.ProviderStats, len(allStats))
 	for _, s := range allStats {
 		key := fmt.Sprintf("%s/%s", s.ProviderID, s.ModelID)
 		statsMap[key] = s
 	}
 
+	// Snapshot entries and thresholds under the lock, then apply mutations.
+	// Entries are pointers, so we mutate their fields directly after
+	// releasing the lock — but other callers (Chat, Config, GetStatus) only
+	// take RLock when reading entry state, so writes here must still be
+	// under Lock to avoid racing those readers.
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	maxErrorRate := b.config.MaxErrorRate
+	maxP95Latency := b.config.MaxP95LatencyMS
 	now := time.Now()
 	for key, entry := range b.entries {
 		stats, ok := statsMap[key]
@@ -323,7 +332,7 @@ func (b *ModelBroker) UpdateHealth(ctx context.Context) error {
 		}
 
 		// Check thresholds
-		if stats.ErrorRate > b.config.MaxErrorRate || stats.P95LatencyMs > b.config.MaxP95LatencyMS {
+		if stats.ErrorRate > maxErrorRate || stats.P95LatencyMs > maxP95Latency {
 			if entry.status == ProviderStatusHealthy {
 				entry.status = ProviderStatusDegraded
 				b.logger.Warn("provider degraded",
@@ -347,33 +356,53 @@ func (b *ModelBroker) UpdateHealth(ctx context.Context) error {
 
 // GetStatus returns a snapshot of broker health.
 func (b *ModelBroker) GetStatus() BrokerStatus {
+	// Snapshot entries + metrics handles under RLock, release, then perform
+	// SQLite/Calculate I/O outside the lock (CLAUDE.md mutex-scope rule).
 	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	var entries []ProviderStatusEntry
+	type entrySnapshot struct {
+		key    string
+		model  *ModelConfig
+		status ProviderStatus
+	}
+	snap := make([]entrySnapshot, 0, len(b.entryKeys))
 	for _, key := range b.entryKeys {
 		be := b.entries[key]
-		parts := strings.SplitN(key, "/", 2)
+		if be == nil || be.model == nil {
+			continue
+		}
+		snap = append(snap, entrySnapshot{
+			key:    key,
+			model:  be.model,
+			status: be.status,
+		})
+	}
+	timeoutCalc := b.config.TimeoutCalc
+	metricsStore := b.config.MetricsStore
+	b.mu.RUnlock()
+
+	providers := make([]ProviderStatusEntry, 0, len(snap))
+	for _, s := range snap {
+		parts := strings.SplitN(s.key, "/", 2)
 		if len(parts) != 2 {
 			continue
 		}
 
 		// Get current timeout estimate if available
 		var timeout time.Duration
-		if b.config.TimeoutCalc != nil {
-			timeout = b.config.TimeoutCalc.Calculate(context.Background(), be.model.ProviderID, be.model.ModelID, 4096, 120*time.Second)
+		if timeoutCalc != nil {
+			timeout = timeoutCalc.Calculate(context.Background(), s.model.ProviderID, s.model.ModelID, 4096, 120*time.Second)
 		}
 
 		entry := ProviderStatusEntry{
 			ProviderID:     parts[0],
 			ModelID:        parts[1],
-			Status:         be.status,
+			Status:         s.status,
 			CurrentTimeout: timeout,
 		}
 
 		// Populate metrics if available
-		if b.config.MetricsStore != nil {
-			stats, err := b.config.MetricsStore.GetStats(context.Background(), be.model.ProviderID, be.model.ModelID, 24)
+		if metricsStore != nil {
+			stats, err := metricsStore.GetStats(context.Background(), s.model.ProviderID, s.model.ModelID, 24)
 			if err == nil && stats != nil {
 				entry.ErrorRate = stats.ErrorRate
 				entry.P95LatencyMs = stats.P95LatencyMs
@@ -381,11 +410,11 @@ func (b *ModelBroker) GetStatus() BrokerStatus {
 			}
 		}
 
-		entries = append(entries, entry)
+		providers = append(providers, entry)
 	}
 
 	return BrokerStatus{
-		Providers: entries,
+		Providers: providers,
 	}
 }
 

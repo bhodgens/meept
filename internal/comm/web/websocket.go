@@ -48,6 +48,12 @@ type WSMessage struct {
 type WebSocketHub struct {
 	mu      sync.RWMutex
 	clients map[*websocket.Conn]struct{}
+	// writeMu guards per-connection writes. golang.org/x/net/websocket
+	// requires that no two goroutines call Write concurrently on the same
+	// conn. The read loop in handleWSMessage writes pong/subscribed
+	// responses while Broadcast may also be writing from another goroutine,
+	// so we serialize all hub-initiated writes per-connection.
+	writeMu sync.Map // map[*websocket.Conn]*sync.Mutex
 	logger  *slog.Logger
 }
 
@@ -60,6 +66,15 @@ func NewWebSocketHub(logger *slog.Logger) *WebSocketHub {
 		clients: make(map[*websocket.Conn]struct{}),
 		logger:  logger,
 	}
+}
+
+// connWriteMu returns (creating if needed) the per-connection write mutex.
+// Callers must hold h.mu (read or write) OR be in a code path where conn
+// is known to still be registered, otherwise the map can grow unbounded
+// for transient conns. We always pair this with Unregister cleanup.
+func (h *WebSocketHub) connWriteMu(conn *websocket.Conn) *sync.Mutex {
+	v, _ := h.writeMu.LoadOrStore(conn, &sync.Mutex{})
+	return v.(*sync.Mutex)
 }
 
 // Register adds a WebSocket client connection.
@@ -75,6 +90,7 @@ func (h *WebSocketHub) Unregister(conn *websocket.Conn) {
 	h.mu.Lock()
 	delete(h.clients, conn)
 	h.mu.Unlock()
+	h.writeMu.Delete(conn)
 	conn.Close()
 	h.logger.Debug("ws client unregistered", "remote", conn.RemoteAddr())
 }
@@ -98,18 +114,27 @@ func (h *WebSocketHub) Broadcast(msgType string, data any) {
 	}
 
 	// Collect connections under RLock, then release before writing to
-	// avoid holding the lock during potentially blocking writes (data race).
+	// avoid holding the lock during potentially blocking writes.
 	h.mu.RLock()
 	conns := make([]*websocket.Conn, 0, len(h.clients))
 	for conn := range h.clients {
 		conns = append(conns, conn)
 	}
+	// Pre-fetch write mutexes under RLock so we don't race with Unregister
+	// deleting them from the map mid-broadcast.
+	writeMus := make([]*sync.Mutex, len(conns))
+	for i, conn := range conns {
+		writeMus[i] = h.connWriteMu(conn)
+	}
 	h.mu.RUnlock()
 
-	// Write to each connection outside the lock.
+	// Write to each connection outside the lock, serialized per-conn.
 	var failedConns []*websocket.Conn
-	for _, conn := range conns {
-		if _, err := conn.Write(payload); err != nil {
+	for i, conn := range conns {
+		writeMus[i].Lock()
+		_, err := conn.Write(payload)
+		writeMus[i].Unlock()
+		if err != nil {
 			h.logger.Warn("ws write error, will remove client", "error", err)
 			failedConns = append(failedConns, conn)
 		}
@@ -152,11 +177,28 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleWSMessage(conn *websocket.Conn, msg *WSMessage) {
 	switch msg.Type {
 	case "ping":
-		_ = websocket.JSON.Send(conn, WSMessage{Type: "pong"})
+		s.safeConnSend(conn, WSMessage{Type: "pong"})
 	case "subscribe":
 		// Client subscribes to real-time updates; already registered in hub.
-		_ = websocket.JSON.Send(conn, WSMessage{Type: "subscribed"})
+		s.safeConnSend(conn, WSMessage{Type: "subscribed"})
 	default:
 		s.logger.Debug("ws unknown message type", "type", msg.Type)
 	}
+}
+
+// safeConnSend serializes a JSON send on conn with the hub's per-connection
+// write mutex, preventing races between the read-loop's pong/subscribed
+// responses and hub.Broadcast writes. golang.org/x/net/websocket requires
+// that no two goroutines call Write concurrently on the same conn.
+//
+// The mutex's entire purpose is to serialize this write — it is NOT
+// protecting unrelated state from concurrent access while I/O happens.
+// The mutexio analyzer's "no I/O under mutex" rule does not apply to
+// locks whose sole reason for existing is to serialize the I/O itself;
+// this is a justified analyzer false positive.
+func (s *Server) safeConnSend(conn *websocket.Conn, msg WSMessage) {
+	mu := s.wsHub.connWriteMu(conn)
+	mu.Lock()
+	defer mu.Unlock()
+	_ = websocket.JSON.Send(conn, msg)
 }

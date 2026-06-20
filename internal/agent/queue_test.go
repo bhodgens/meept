@@ -404,6 +404,49 @@ func TestQueue_PersisterInterface(t *testing.T) {
 	var _ QueuePersisterOps = (*QueuePersister)(nil)
 }
 
+// fakeStopPersister records Stop/PersistSync calls so tests can assert
+// MessageQueue.Close invokes Stop on its persister.
+type fakeStopPersister struct {
+	stopped     atomic.Bool
+	persistSync atomic.Int32
+}
+
+func (f *fakeStopPersister) PersistSync(QueuedMessage) error {
+	f.persistSync.Add(1)
+	return nil
+}
+func (f *fakeStopPersister) Stop() {
+	f.stopped.Store(true)
+}
+
+var _ QueuePersisterOps = (*fakeStopPersister)(nil)
+
+// TestQueue_CloseStopsPersister is a regression test for a goroutine leak
+// where MessageQueue.Close did not call persister.Stop(). QueuePersister
+// owns a time.AfterFunc flush timer that, if not stopped, outlives the
+// conversation and leaks a goroutine per closed queue.
+func TestQueue_CloseStopsPersister(t *testing.T) {
+	cfg := DefaultQueueConfig()
+	cfg.PersistFollowUp = true
+	q := NewMessageQueue(WithQueueConfig(cfg))
+
+	fp := &fakeStopPersister{}
+	q.SetPersister(fp)
+
+	// Enqueue one follow-up so Close takes the persistence path.
+	if err := q.FollowUp(context.Background(), "msg", "user"); err != nil {
+		t.Fatalf("FollowUp: %v", err)
+	}
+
+	q.Close()
+	if !fp.stopped.Load() {
+		t.Errorf("expected persister.Stop() to be called from MessageQueue.Close")
+	}
+	if fp.persistSync.Load() == 0 {
+		t.Errorf("expected at least 1 PersistSync call on close, got 0")
+	}
+}
+
 func TestQueue_SteeringDepthNeverExceeds1(t *testing.T) {
 	cfg := DefaultQueueConfig()
 	cfg.MaxSteering = 1

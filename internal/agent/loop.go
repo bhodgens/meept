@@ -1805,6 +1805,10 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			visionModels := l.resolver.FindByCapabilities([]string{llm.CapImages})
 			if len(visionModels) > 0 {
 				visionClient := llm.NewClient(visionModels[0], llm.WithUploadStore(l.uploadStore))
+				// Close idle HTTP connections after the pre-flight call so
+				// long-lived agent loops don't accumulate transports across
+				// many image-bearing turns.
+				defer visionClient.Close()
 				if err := runVisionPreflight(ctx, messages, visionClient, l.uploadStore, l.logger); err != nil {
 					l.logger.Warn("Vision pre-flight completed with errors", "error", err)
 				}

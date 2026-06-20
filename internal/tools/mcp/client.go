@@ -62,6 +62,12 @@ func (c *Client) Connect(ctx context.Context) error {
 		c.transport.Close()
 		return fmt.Errorf("initialize failed: %w", err)
 	}
+	if initResult == nil {
+		// "result": null unmarshals into a nil *InitializeResult; dereferencing
+		// initResult.ServerInfo/Capabilities below would panic.
+		c.transport.Close()
+		return fmt.Errorf("initialize failed: server returned null result")
+	}
 
 	c.mu.Lock()
 	c.serverInfo = initResult.ServerInfo
@@ -126,6 +132,11 @@ func (c *Client) refreshTools(ctx context.Context) error {
 	result, err := ExtractResult[*ListToolsResult](resp)
 	if err != nil {
 		return err
+	}
+	if result == nil {
+		// "result": null unmarshals into a nil *ListToolsResult; dereferencing
+		// result.Tools below would panic.
+		return fmt.Errorf("MCP server returned null tools/list result")
 	}
 
 	c.mu.Lock()
@@ -227,6 +238,12 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments map[st
 	result, err := ExtractResult[*CallToolResult](resp)
 	if err != nil {
 		return tools.NewErrorResultErr(err), err
+	}
+	if result == nil {
+		// A JSON-RPC response with "result": null unmarshals successfully
+		// into a *CallToolResult with a nil value (ExtractResult returns
+		// (nil, nil)). Dereferencing result.Content below would panic.
+		return tools.NewErrorResult("MCP server returned null result"), nil
 	}
 
 	// Convert content blocks to text

@@ -139,6 +139,9 @@ const (
 	MessageToolResultKey
 	// MessageReasoningStep is intermediate reasoning or exploration (lowest priority).
 	MessageReasoningStep
+	// MessageAnchor is a message exempt from truncation (validation instructions,
+	// escalation triggers, etc.). Always retained.
+	MessageAnchor
 )
 
 // MessageImportance is the priority level for message retention during truncation.
@@ -227,6 +230,12 @@ func (c *Conversation) AddAnchorMessage(role llm.Role, content string) {
 		Role:    role,
 		Content: content,
 	})
+
+	// Track the classification so c.messageTypes stays length-aligned with
+	// c.messages. Without this, downstream code that iterates both slices
+	// would see a length divergence, breaking importance-based retention
+	// (the anchored message becomes invisible to compaction).
+	c.messageTypes = append(c.messageTypes, MessageAnchor)
 
 	// Mark as anchor
 	if c.anchorMessages == nil {
@@ -370,6 +379,8 @@ func isReasoningContent(content string) bool {
 // getMessageImportance returns the importance level for a message type.
 func getMessageImportance(msgType MessageClassification) MessageImportance {
 	switch msgType {
+	case MessageAnchor:
+		return ImportanceCritical
 	case MessageUserInput:
 		return ImportanceCritical
 	case MessageAssistantConclusion:

@@ -184,6 +184,28 @@ func TestExtractResult(t *testing.T) {
 			t.Error("expected error for invalid result")
 		}
 	})
+
+	// Null result with pointer type parameter. This is a regression test
+	// documenting that ExtractResult returns a typed-nil pointer with no
+	// error when the server sends "result": null. Callers MUST nil-check
+	// the returned pointer before dereferencing (see client.go CallTool,
+	// initialize, refreshTools). Sending on a closed channel / nil-deref
+	// panic would otherwise occur.
+	t.Run("null result with pointer type", func(t *testing.T) {
+		resp := &Response{
+			JSONRPC: "2.0",
+			ID:      1,
+			Result:  json.RawMessage(`null`),
+		}
+
+		result, err := ExtractResult[*CallToolResult](resp)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result != nil {
+			t.Errorf("expected nil pointer for null result, got non-nil")
+		}
+	})
 }
 
 func TestInitializeParams(t *testing.T) {

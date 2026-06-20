@@ -1051,3 +1051,49 @@ func TestRemoveCompactedMessages(t *testing.T) {
 		}
 	})
 }
+
+// TestAddAnchorMessage_KeepsMessageTypesAligned is a regression test for a
+// bug where AddAnchorMessage appended to c.messages but not c.messageTypes,
+// causing length divergence. Downstream compaction/importance code iterates
+// the two slices in parallel and silently mistreats anchored messages when
+// they are unaligned.
+func TestAddAnchorMessage_KeepsMessageTypesAligned(t *testing.T) {
+	conv := NewConversation()
+
+	conv.AddAnchorMessage(llm.RoleSystem, "validation: do not skip tests")
+	conv.AddUserMessage("hello")
+
+	conv.mu.RLock()
+	msgLen := len(conv.messages)
+	typeLen := len(conv.messageTypes)
+	firstType := conv.messageTypes[0]
+	conv.mu.RUnlock()
+
+	if msgLen != typeLen {
+		t.Fatalf("messages/types length diverged: messages=%d types=%d", msgLen, typeLen)
+	}
+	if firstType != MessageAnchor {
+		t.Errorf("expected first classification to be MessageAnchor, got %v", firstType)
+	}
+	if got := getMessageImportance(firstType); got != ImportanceCritical {
+		t.Errorf("expected anchored message to have ImportanceCritical, got %v", got)
+	}
+}
+
+// TestAddAnchorMessage_DoesNotClaimFirstUserMessage verifies that adding an
+// anchor before the first user message does not cause the first user message
+// to be misclassified (the previous bug set len(messages) > 1 so the
+// isFirstUserMsg check in AddMessage was always false after an anchor).
+func TestAddAnchorMessage_DoesNotClaimFirstUserMessage(t *testing.T) {
+	conv := NewConversation()
+	conv.AddAnchorMessage(llm.RoleSystem, "anchor")
+	conv.AddUserMessage("first real user message")
+
+	conv.mu.RLock()
+	userType := conv.messageTypes[1]
+	conv.mu.RUnlock()
+
+	if userType != MessageUserInput {
+		t.Errorf("expected first user message after anchor to be MessageUserInput, got %v", userType)
+	}
+}
