@@ -1312,10 +1312,12 @@ func (h *ChatHandler) startCollaborationSession(ctx context.Context, result *Dis
 	}
 
 	// Run the session asynchronously so the chat handler returns immediately.
+	// Use context.Background() to detach from the request context - the session
+	// has its own lifecycle governed by cfg.TimeBudget, not the request deadline.
 	h.wg.Add(1)
 	go func() {
 		defer h.wg.Done()
-		runCtx, cancel := context.WithTimeout(ctx, cfg.TimeBudget)
+		runCtx, cancel := context.WithTimeout(context.Background(), cfg.TimeBudget)
 		defer cancel()
 
 		collabResult, runErr := h.collabEngine.RunSession(runCtx, sess.ID)
