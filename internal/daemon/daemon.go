@@ -230,9 +230,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		// Register MCP management handlers (mcp.list, mcp.set_enabled).
 		// The handler reads on-disk config fresh, mutates Enabled, persists
 		// atomically via SaveMCPConfig, then calls Manager.Reload so newly
-		// enabled servers start and newly disabled servers stop.
+		// enabled servers start and newly disabled servers stop. A
+		// tool-registry refresher is attached so toggled-on servers' tools
+		// become visible to agents without a daemon restart, and toggled-off
+		// servers' tools are unregistered.
 		if components.MCPManager != nil {
 			mcpRPCHandler := rpc.NewMCPHandler(components.MCPManager, fullCfg.MCP.ConfigFile)
+			if refresher := newMCPToolRefresher(components.ToolRegistry, components.MCPManager, logger); refresher != nil {
+				mcpRPCHandler.SetToolRefresher(refresher)
+			}
 			mcpRPCHandler.RegisterMCPMethods(rpcServer)
 			logger.Info("MCP RPC handlers registered")
 		}
@@ -394,6 +400,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	}
 	if metricsStore != nil && components != nil && components.ChatHandler != nil {
 		components.ChatHandler.SetMetricsStore(metricsStore)
+	}
+	if metricsStore != nil && components != nil && components.Dispatcher != nil {
+		components.Dispatcher.SetMetricsStore(metricsStore)
 	}
 
 	// Wire metrics recorder to runtime manager for lifecycle metrics

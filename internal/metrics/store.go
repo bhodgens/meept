@@ -41,6 +41,7 @@ type Store struct {
 	db            *sqlx.DB
 	batchSize     int
 	flushInterval time.Duration
+	retentionDays int
 	batch         []metricValue
 	lastFlush     time.Time
 	stopChan      chan struct{}
@@ -127,6 +128,7 @@ func NewStore(cfg *StoreConfig) (*Store, error) {
 		db:            db,
 		batchSize:     cfg.BatchSize,
 		flushInterval: cfg.FlushInterval,
+		retentionDays: cfg.RetentionDays,
 		batch:         make([]metricValue, 0, cfg.BatchSize),
 		lastFlush:     time.Now(),
 		stopChan:      make(chan struct{}),
@@ -266,6 +268,22 @@ CREATE TABLE IF NOT EXISTS test_runs (
     success BOOLEAN
 );
 
+-- Dispatch routing decisions (per-request audit trail)
+CREATE TABLE IF NOT EXISTS dispatch_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    session_id TEXT NOT NULL DEFAULT '',
+    input_summary TEXT NOT NULL DEFAULT '',
+    intent_type TEXT NOT NULL DEFAULT '',
+    agent_id TEXT NOT NULL DEFAULT '',
+    confidence REAL NOT NULL DEFAULT 0,
+    classifier_method TEXT NOT NULL DEFAULT '',
+    handler_case TEXT NOT NULL DEFAULT '',
+    task_id TEXT NOT NULL DEFAULT '',
+    has_parts INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT ''
+);
+
 -- Indexes for query performance
 CREATE INDEX IF NOT EXISTS idx_metrics_live_ts ON metrics_live(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_metrics_live_name ON metrics_live(metric_name);
@@ -280,6 +298,9 @@ CREATE INDEX IF NOT EXISTS idx_lint_runs_task ON lint_runs(task_id);
 CREATE INDEX IF NOT EXISTS idx_lint_runs_ts ON lint_runs(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_test_runs_task ON test_runs(task_id);
 CREATE INDEX IF NOT EXISTS idx_test_runs_ts ON test_runs(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_dispatch_log_ts ON dispatch_log(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_dispatch_log_session ON dispatch_log(session_id);
+CREATE INDEX IF NOT EXISTS idx_dispatch_log_intent ON dispatch_log(intent_type);
 `
 
 	_, err := s.db.Exec(schema)
@@ -414,8 +435,20 @@ func (s *Store) aggregateHourly() {
 		return
 	}
 
-	// Clean up old raw data (keep last 24 hours)
+	// Clean up old raw data (keep last 24 hours of time-series)
 	_, _ = s.db.Exec("DELETE FROM metrics_live WHERE timestamp < datetime('now', '-24 hours')")
+
+	// Apply retention policy to audit tables (default 30 days)
+	if s.retentionDays > 0 {
+		cutoff := fmt.Sprintf("-%d days", s.retentionDays)
+		retentionTables := []string{"events", "error_records", "dispatch_log", "response_quality", "lint_runs", "test_runs"}
+		for _, table := range retentionTables {
+			query := fmt.Sprintf("DELETE FROM %s WHERE timestamp < datetime('now', ?)", table)
+			if _, err := s.db.Exec(query, cutoff); err != nil {
+				s.logger.Warn("failed to prune retention table", "table", table, "error", err)
+			}
+		}
+	}
 }
 
 // Record records a metric value.
@@ -524,6 +557,63 @@ func (s *Store) RecordResponseQuality(_ context.Context, quality ResponseQuality
 			"task_id", taskID, "agent_id", agentID)
 	}
 	return err
+}
+
+// DispatchEntry captures a single dispatch routing decision for the audit log.
+type DispatchEntry struct {
+	SessionID         string  `json:"session_id" db:"session_id"`
+	InputSummary      string  `json:"input_summary" db:"input_summary"`
+	IntentType        string  `json:"intent_type" db:"intent_type"`
+	AgentID           string  `json:"agent_id" db:"agent_id"`
+	Confidence        float64 `json:"confidence" db:"confidence"`
+	ClassifierMethod  string  `json:"classifier_method" db:"classifier_method"`
+	HandlerCase       string  `json:"handler_case" db:"handler_case"`
+	TaskID            string  `json:"task_id" db:"task_id"`
+	HasParts          bool    `json:"has_parts" db:"-"`
+	HasPartsInt       int     `json:"-" db:"has_parts"`
+	Error             string  `json:"error" db:"error"`
+}
+
+// RecordDispatch inserts a dispatch routing decision into the audit log.
+func (s *Store) RecordDispatch(entry DispatchEntry) {
+	hasParts := 0
+	if entry.HasParts {
+		hasParts = 1
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO dispatch_log
+			(session_id, input_summary, intent_type, agent_id, confidence,
+			 classifier_method, handler_case, task_id, has_parts, error)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		entry.SessionID, entry.InputSummary, entry.IntentType, entry.AgentID,
+		entry.Confidence, entry.ClassifierMethod, entry.HandlerCase,
+		entry.TaskID, hasParts, entry.Error,
+	)
+	if err != nil {
+		s.logger.Error("failed to record dispatch", "error", err, "session", entry.SessionID)
+	}
+}
+
+// QueryDispatchLog returns recent dispatch entries, most recent first.
+// If limit <= 0, defaults to 100.
+func (s *Store) QueryDispatchLog(limit int) ([]DispatchEntry, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var entries []DispatchEntry
+	err := s.db.Select(&entries,
+		`SELECT session_id, input_summary, intent_type, agent_id, confidence,
+		        classifier_method, handler_case, task_id, has_parts, error
+		 FROM dispatch_log ORDER BY id DESC LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query dispatch log: %w", err)
+	}
+	for i := range entries {
+		entries[i].HasParts = entries[i].HasPartsInt != 0
+	}
+	return entries, nil
 }
 
 // GetLiveMetrics returns current live metrics snapshot.

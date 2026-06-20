@@ -527,24 +527,27 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		// Multi-agent mode: classify and route through dispatcher
 		var dispatchErr error
 		result, dispatchErr = h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID, req.Parts)
+
+		// handlerCase tracks which switch case was selected for audit logging.
+		handlerCase := "direct_mode"
+		inputSummary := extractSummary(req.Message)
+		hasParts := len(req.Parts) > 0
+
 		switch {
-		case result != nil && result.ClarificationNeeded && result.ClarificationReply != "":
-			// Model directive or intent analysis determined the request is
-			// ambiguous and generated a clarification question. Return it
-			// directly to the user instead of routing to an agent (which
-			// would panic because Intent is nil on clarification results).
+		case result != nil && result.ClarificationReply != "":
+			handlerCase = "clarification"
 			h.logger.Info("Returning clarification reply",
 				"conversation", conversationID,
 			)
 			reply = result.ClarificationReply
 		case result != nil && result.Response != "" && (result.Intent == nil || !h.dispatcher.ShouldDispatchAsync(result)):
-			// Skill execution or intent-analysis clarification produced a
-			// direct response with no task to dispatch. Return it as-is.
+			handlerCase = "direct_response"
 			h.logger.Debug("Returning direct dispatch response",
 				"agent", result.AgentID,
 			)
 			reply = result.Response
 		case dispatchErr != nil:
+			handlerCase = "dispatch_error"
 			h.logger.Error("Dispatch failed", "error", dispatchErr)
 			err = dispatchErr
 			// Include classification failure guidance for the user.
@@ -559,6 +562,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 				}
 			}
 		case h.dispatcher.ShouldRouteToPair(result):
+			handlerCase = "pair"
 			// Pair-channel mode is a text-only specialist workflow. If the
 			// user attached multimodal parts, log that they are being dropped
 			// rather than silently swallowing the content.
@@ -575,6 +579,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			)
 			reply = h.startPairSession(result, conversationID)
 		case h.dispatcher.ShouldRouteToCollaborate(result):
+			handlerCase = "collaborate"
 			// Collaboration engine is also a text-only specialist workflow.
 			if len(req.Parts) > 0 {
 				h.logger.Warn("Dropping multimodal parts for collaboration route",
@@ -589,6 +594,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			)
 			reply, err = h.startCollaborationSession(ctx, result, conversationID)
 		case h.dispatcher.ShouldDispatchAsync(result) && result.Task != nil:
+			handlerCase = "async_dispatch"
 			// Async dispatch goes through the orchestrator pipeline, which is
 			// currently text-only. Warn if parts are being dropped.
 			if len(req.Parts) > 0 {
@@ -615,11 +621,13 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 						Used:    budgetResult.Used,
 						Limit:   budgetResult.Limit,
 					}
+					handlerCase = "budget_blocked"
 					break
 				}
 			}
 
 			if h.syncMode {
+				handlerCase = "sync_dispatch"
 				// Issue 0022: synchronous mode -- wait for task completion
 				h.logger.Info("Sync dispatch: publishing plan request and waiting for completion",
 					"task_id", result.Task.ID,
@@ -647,7 +655,9 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 				h.publishPlanRequest(result, conversationID)
 			}
 		default:
+			handlerCase = "route_to_agent"
 			if result == nil || result.Intent == nil {
+				handlerCase = "nil_result_error"
 				err = fmt.Errorf("dispatch returned no actionable result")
 				h.logger.Error("Dispatch returned nil result or intent",
 					"result_nil", result == nil,
@@ -661,6 +671,9 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 				reply, err = h.dispatcher.RouteToAgent(ctx, result, conversationID)
 			}
 		}
+
+		// Record the routing decision for debugging and persistent audit trail.
+		h.dispatcher.RecordDispatch(conversationID, handlerCase, inputSummary, result, hasParts, dispatchErr)
 	} else {
 		// Direct mode: send to standalone agent loop
 		reply, err = h.loop.RunOnceWithParts(ctx, req.Message, req.Parts, conversationID)

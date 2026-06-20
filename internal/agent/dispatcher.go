@@ -17,6 +17,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
+	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
@@ -188,6 +189,11 @@ type Dispatcher struct {
 	router            *ReportRouter
 	modelParser       *ModelReassignmentParser
 	planManager       *plan.PlanManager
+	metricsStore      *metrics.Store
+
+	// lastClassifierMethod tracks the most recent classifier that succeeded,
+	// for audit logging. Updated by recordClassificationMethod under stats.mu.
+	lastClassifierMethod string
 
 	// Lifecycle management for background goroutines spawned by NewDispatcher.
 	// indexCtx is cancelled by Stop(); indexWG tracks the BuildIndex goroutine
@@ -404,11 +410,25 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 
 	// 2. Handle clarification if needed
 	if parseResult.Found && parseResult.Directive.ClarificationNeeded {
+		// Build intent for session tracking (so follow-up inputs are
+		// recognized as clarification responses)
+		intent := &Intent{
+			Type:         string(IntentClarify),
+			Confidence:   1.0,
+			AgentType:    config.AgentIDChat,
+			Summary:      extractSummary(input),
+			TrueAnalysis: nil, // Model directive clarification, not intent analysis
+		}
+		// Record intent for pending clarification detection
+		if d.sessionTracker != nil {
+			d.sessionTracker.RecordIntent(sessionID, intent, intent.AgentType)
+		}
 		return &DispatchResult{
 			ModelDirective:      parseResult.Directive,
+			Intent:              intent,
 			ClarificationReply:  d.buildClarificationQuestion(parseResult.Directive),
 			ClarificationNeeded: true,
-			AgentID:             config.AgentIDChat, // Use chat agent for clarification dialog
+			AgentID:             config.AgentIDChat,
 		}, nil
 	}
 
@@ -807,8 +827,8 @@ func (d *Dispatcher) buildClarificationResult(input string, analysis *TrueIntent
 	return &DispatchResult{
 		AgentID:            config.AgentIDChat,
 		Intent:             intent,
-		Response:           sb.String(),
 		ClarificationReply: sb.String(),
+		ClarificationNeeded: true,
 	}, nil
 }
 
@@ -932,10 +952,8 @@ func (d *Dispatcher) getPendingClarification(sessionID string) *pendingClarifica
 	if lastIntent == nil || lastIntent.Type != string(IntentClarify) {
 		return nil
 	}
-	if lastIntent.TrueAnalysis == nil {
-		return nil
-	}
 	// Reconstruct the original input from the intent summary (best-effort).
+	// TrueAnalysis may be nil for model directive clarifications.
 	return &pendingClarification{
 		OriginalInput: lastIntent.Summary,
 		Analysis:      lastIntent.TrueAnalysis,
@@ -1691,6 +1709,7 @@ func (d *Dispatcher) recordClassificationMethod(method string) {
 		d.stats.ByMethod = make(map[string]int)
 	}
 	d.stats.ByMethod[method]++
+	d.lastClassifierMethod = method
 }
 
 // recordAgent records which agent handled the request.
@@ -1997,6 +2016,79 @@ func (d *Dispatcher) GetCapabilityMatcher() *CapabilityMatcher {
 func (d *Dispatcher) SetCapabilityMatcher(matcher *CapabilityMatcher) {
 	if matcher != nil {
 		d.capabilityMatcher = matcher
+	}
+}
+
+// SetMetricsStore wires the metrics store for persistent dispatch logging.
+func (d *Dispatcher) SetMetricsStore(store *metrics.Store) {
+	if store != nil {
+		d.metricsStore = store
+	}
+}
+
+// RecordDispatch logs a dispatch routing decision from the handler switch for
+// debugging and persistent audit trail. This is the public entry point called
+// by ChatHandler after it determines which case handled the result.
+func (d *Dispatcher) RecordDispatch(sessionID, handlerCase, inputSummary string, result *DispatchResult, hasParts bool, dispatchErr error) {
+	d.recordDispatch(sessionID, handlerCase, inputSummary, result, hasParts, dispatchErr)
+}
+
+// recordDispatch logs a dispatch routing decision to both the structured logger
+// (debug level) and the persistent metrics store (if wired).
+func (d *Dispatcher) recordDispatch(sessionID, handlerCase, inputSummary string, result *DispatchResult, hasParts bool, dispatchErr error) {
+	intentType := ""
+	agentID := ""
+	confidence := 0.0
+	classifierMethod := ""
+	taskID := ""
+
+	if result != nil {
+		agentID = result.AgentID
+		if result.Intent != nil {
+			intentType = result.Intent.Type
+			confidence = result.Intent.Confidence
+		}
+		if result.Task != nil {
+			taskID = result.Task.ID
+		}
+	}
+	// Extract the classification method from the dispatcher's last-recorded method.
+	if d.stats != nil {
+		d.stats.mu.RLock()
+		classifierMethod = d.lastClassifierMethod
+		d.stats.mu.RUnlock()
+	}
+
+	errStr := ""
+	if dispatchErr != nil {
+		errStr = dispatchErr.Error()
+	}
+
+	d.logger.Debug("routing decision",
+		"case", handlerCase,
+		"session", sessionID,
+		"intent", intentType,
+		"agent", agentID,
+		"confidence", confidence,
+		"classifier", classifierMethod,
+		"has_task", taskID != "",
+		"has_parts", hasParts,
+		"error", errStr,
+	)
+
+	if d.metricsStore != nil {
+		d.metricsStore.RecordDispatch(metrics.DispatchEntry{
+			SessionID:        sessionID,
+			InputSummary:     inputSummary,
+			IntentType:       intentType,
+			AgentID:          agentID,
+			Confidence:       confidence,
+			ClassifierMethod: classifierMethod,
+			HandlerCase:      handlerCase,
+			TaskID:           taskID,
+			HasParts:         hasParts,
+			Error:            errStr,
+		})
 	}
 }
 
