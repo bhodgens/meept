@@ -3,6 +3,7 @@
 /meept
 /bin/meept
 /meept-lite
+/llmdoc
 
 # IDE
 .idea/
