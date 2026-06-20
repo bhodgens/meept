@@ -24,6 +24,11 @@
 // runtimes:
 //   - npx (node):    requires node.js + npm installed.
 //   - uvx (python):  requires uv installed (https://docs.astral.sh/uv/).
+//
+// deprecation note: the @modelcontextprotocol/server-* packages below marked
+// "archived" still function (the npm artifacts are stable). development has
+// moved to community forks or vendor-published replacements in some cases,
+// but the launch commands here keep working.
 {
   "servers": [
     // ────────────────────────── npx-based (node) ──────────────────────────
@@ -38,6 +43,17 @@
       "command": ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"],
     },
 
+    // zero-config: reference server exercising prompts, resources, tools,
+    // sampling, and roots. useful for diagnostics and demos.
+    {
+      "name": "everything",
+      "enabled": true,
+      "category": "reasoning",
+      "description": "mcp reference test server, exercises all features, zero-config",
+      "type": "stdio",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-everything"],
+    },
+
     // zero-config: local knowledge graph on disk, no api key.
     {
       "name": "memory",
@@ -49,11 +65,14 @@
     },
 
     // github: needs a personal access token.
+    // upstream note: archived in modelcontextprotocol/servers; development moved
+    // to github.com/github/github-mcp-server (official GitHub-hosted variant).
+    // this npm package still works against the public GitHub REST API.
     {
       "name": "github",
       "enabled": false,
       "category": "vcs",
-      "description": "github repos, issues, prs",
+      "description": "github repos, issues, prs (archived upstream, still functional)",
       "type": "stdio",
       "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
       "env": {
@@ -61,26 +80,29 @@
       },
     },
 
-    // slack: needs bot token + app token.
+    // slack: needs a bot token. requires slack app with chat:read and
+    // chat:write scopes. SLACK_TEAM_ID is optional but speeds lookups.
+    // upstream note: archived in modelcontextprotocol/servers; still functional.
     {
       "name": "slack",
       "enabled": false,
       "category": "messaging",
-      "description": "slack channels and messages, requires slack app tokens",
+      "description": "slack channels and messages, requires slack bot token (archived upstream)",
       "type": "stdio",
       "command": ["npx", "-y", "@modelcontextprotocol/server-slack"],
       "env": {
         "SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}",
-        "SLACK_APP_TOKEN": "${SLACK_APP_TOKEN}",
+        "SLACK_TEAM_ID": "${SLACK_TEAM_ID:-}",
       },
     },
 
-    // brave search: needs api key.
+    // brave search: needs api key. anonymous fallback is not supported.
+    // upstream note: archived in modelcontextprotocol/servers; still functional.
     {
       "name": "brave-search",
       "enabled": false,
       "category": "search",
-      "description": "brave web search, requires brave api key",
+      "description": "brave web + local search, requires brave api key (archived upstream)",
       "type": "stdio",
       "command": ["npx", "-y", "@modelcontextprotocol/server-brave-search"],
       "env": {
@@ -101,41 +123,57 @@
       },
     },
 
-    // playwright: headless chrome via playwright. no api key but heavy deps.
+    // context7: up-to-date library documentation lookup. zero-config works
+    // (anonymous tier); set UPSTASH_CONTEXT7_API_KEY for higher rate limits.
+    {
+      "name": "context7",
+      "enabled": false,
+      "category": "search",
+      "description": "context7 up-to-date library docs lookup, anonymous tier or api key",
+      "type": "stdio",
+      "command": ["npx", "-y", "@upstash/context7-mcp"],
+      "env": {
+        "UPSTASH_CONTEXT7_API_KEY": "${UPSTASH_CONTEXT7_API_KEY:-}",
+      },
+    },
+
+    // playwright: official microsoft mcp server for playwright browser
+    // automation. requires browsers installed (`npx playwright install`).
     {
       "name": "playwright",
       "enabled": false,
       "category": "browser",
-      "description": "browser automation via playwright, requires browsers installed",
+      "description": "browser automation via playwright (official microsoft mcp), requires browsers",
       "type": "stdio",
-      "command": ["npx", "-y", "@executeautomation/playwright-mcp-server"],
+      "command": ["npx", "-y", "@playwright/mcp"],
     },
 
-    // puppeteer: headless chrome via puppeteer. no api key but heavy deps.
+    // puppeteer: headless chrome via puppeteer. downloads chromium on first
+    // run. no api key but heavy deps.
+    // upstream note: archived in modelcontextprotocol/servers; still functional.
     {
       "name": "puppeteer",
       "enabled": false,
       "category": "browser",
-      "description": "browser automation via puppeteer, downloads chromium on first run",
+      "description": "browser automation via puppeteer, downloads chromium (archived upstream)",
       "type": "stdio",
       "command": ["npx", "-y", "@modelcontextprotocol/server-puppeteer"],
     },
 
-    // postgres: needs database url.
+    // postgres: read-only postgresql access. pass the connection string as a
+    // positional cli argument (the server does not read it from env).
+    // upstream note: archived in modelcontextprotocol/servers; still functional.
     {
       "name": "postgres",
       "enabled": false,
       "category": "data",
-      "description": "postgresql query tool, requires database url",
+      "description": "postgresql read-only query tool, requires connection string (archived upstream)",
       "type": "stdio",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-postgres"],
-      "env": {
-        "POSTGRES_CONNECTION_STRING": "${POSTGRES_CONNECTION_STRING}",
-      },
+      "command": ["npx", "-y", "@modelcontextprotocol/server-postgres", "${POSTGRES_CONNECTION_STRING}"],
     },
 
-    // filesystem: needs allowed directories arg. zero-config-ish but requires
-    // explicit paths, so disabled by default.
+    // filesystem: needs allowed directories as positional args. zero-config-ish
+    // but disabled by default since exposing $HOME is a broad surface.
     {
       "name": "filesystem",
       "enabled": false,
@@ -145,42 +183,33 @@
       "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "${HOME}"],
     },
 
-    // google drive: needs oauth credentials. package name may vary by vendor;
-    // @modelcontextprotocol/server-google-drive is the canonical reference.
+    // google drive: needs oauth credentials. package is server-gdrive (no
+    // "google").
+    // upstream note: archived in modelcontextprotocol/servers; still functional.
     {
       "name": "google-drive",
       "enabled": false,
       "category": "data",
-      "description": "google drive search + read, requires oauth credentials",
+      "description": "google drive search + read, requires oauth credentials (archived upstream)",
       "type": "stdio",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-google-drive"],
+      "command": ["npx", "-y", "@modelcontextprotocol/server-gdrive"],
       "env": {
         "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
         "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
       },
     },
 
-    // docker: requires docker daemon running.
+    // docker: run commands inside docker containers. requires docker daemon.
     {
       "name": "docker",
       "enabled": false,
       "category": "infra",
-      "description": "docker container management, requires docker daemon",
+      "description": "run commands in docker containers, requires docker daemon",
       "type": "stdio",
       "command": ["npx", "-y", "mcp-server-docker"],
       "env": {
         "DOCKER_HOST": "${DOCKER_HOST:-}",
       },
-    },
-
-    // terraform: community terraform-mcp-server. requires terraform installed.
-    {
-      "name": "terraform",
-      "enabled": false,
-      "category": "infra",
-      "description": "terraform plan/apply orchestration, requires terraform installed",
-      "type": "stdio",
-      "command": ["npx", "-y", "terraform-mcp-server"],
     },
 
     // ────────────────────────── uvx-based (python) ────────────────────────
@@ -205,57 +234,26 @@
       "command": ["uvx", "mcp-server-git"],
     },
 
-    // crawl4ai: web scraper, no api key but heavy deps.
+    // zero-config: time and timezone conversion via IANA names, no api key.
     {
-      "name": "crawl4ai",
-      "enabled": false,
-      "category": "browser",
-      "description": "crawl4ai async web crawler, requires uv installed",
+      "name": "time",
+      "enabled": true,
+      "category": "reasoning",
+      "description": "time and timezone conversion, zero-config, requires uv installed",
       "type": "stdio",
-      "command": ["uvx", "crawl4ai"],
+      "command": ["uvx", "mcp-server-time"],
     },
 
-    // crawlee: python port of crawlee, no api key.
+    // sqlite: zero-config with default db path. ad-hoc sqlite operations,
+    // schema introspection, and business-intelligence memos.
+    // upstream note: archived in modelcontextprotocol/servers; still functional.
     {
-      "name": "crawlee",
+      "name": "sqlite",
       "enabled": false,
-      "category": "browser",
-      "description": "crawlee-python web scraper, requires uv installed",
+      "category": "data",
+      "description": "sqlite operations and schema introspection, zero-config, requires uv installed",
       "type": "stdio",
-      "command": ["uvx", "crawlee"],
-    },
-
-    // scrapegraphai: ai-driven scraper, optional llm key.
-    {
-      "name": "scrapegraph",
-      "enabled": false,
-      "category": "browser",
-      "description": "scrapegraphai llm-driven scraper, requires uv installed",
-      "type": "stdio",
-      "command": ["uvx", "scrapegraphai"],
-      "env": {
-        "OPENAI_API_KEY": "${OPENAI_API_KEY:-}",
-      },
-    },
-
-    // open interpreter: local code interpreter. no api key if using local model.
-    {
-      "name": "open-interpreter",
-      "enabled": false,
-      "category": "coding",
-      "description": "open interpreter local code runner, requires uv installed",
-      "type": "stdio",
-      "command": ["uvx", "open-interpreter"],
-    },
-
-    // openhands: open-source coding agent runtime.
-    {
-      "name": "openhands",
-      "enabled": false,
-      "category": "coding",
-      "description": "openhands autonomous coding agent, requires uv + docker",
-      "type": "stdio",
-      "command": ["uvx", "openhands"],
+      "command": ["uvx", "mcp-server-sqlite", "--db-path", "~/.meept/mcp/sqlite.db"],
     },
 
     // searxng: meta-search aggregator. disabled unless you run a local searxng.

@@ -9,13 +9,24 @@ import (
 	"github.com/caimlas/meept/internal/tools/mcp"
 )
 
+// MCPToolRefresher re-syncs the daemon's ToolRegistry with the MCP
+// manager's current tool set. The daemon wires a concrete implementation
+// (in internal/daemon) that registers newly-available MCP tools and
+// unregisters tools from servers that are no longer active. The rpc
+// package depends only on this narrow interface to avoid an import
+// cycle with internal/tools.
+type MCPToolRefresher interface {
+	SyncMCPTools() error
+}
+
 // MCPHandler provides native RPC methods for MCP server management.
 // It calls Manager directly so that CLI, TUI, and HTTP clients can list
 // configured MCP servers and toggle their enabled state with persistence
 // and reload.
 type MCPHandler struct {
-	manager    *mcp.Manager
-	configPath string // path to mcp_servers.json5 for save/load
+	manager       *mcp.Manager
+	configPath    string             // path to mcp_servers.json5 for save/load
+	toolRefresher MCPToolRefresher   // optional; if set, invoked after Reload
 }
 
 // NewMCPHandler creates a new handler. If manager is nil the registered
@@ -26,6 +37,18 @@ func NewMCPHandler(manager *mcp.Manager, configPath string) *MCPHandler {
 		manager:    manager,
 		configPath: configPath,
 	}
+}
+
+// SetToolRefresher installs the tool-registry sync callback invoked after
+// a successful mcp.set_enabled reload. nil is accepted and clears any
+// previously-installed refresher. Per CLAUDE.md, all setters on
+// tool/service structs must nil-guard to avoid typed-nil panics at the
+// call site.
+func (h *MCPHandler) SetToolRefresher(r MCPToolRefresher) {
+	if r == nil {
+		return
+	}
+	h.toolRefresher = r
 }
 
 // RegisterMCPMethods registers MCP management RPC methods on the server.
@@ -124,13 +147,27 @@ func (h *MCPHandler) handleSetEnabled(ctx context.Context, params json.RawMessag
 		return nil, fmt.Errorf("mcp reload failed: %w", err)
 	}
 
+	// Step 5b: re-sync the daemon's ToolRegistry so agents see newly-enabled
+	// server tools immediately and disabled-server tools are unregistered.
+	// Failures here are best-effort: the toggle itself succeeded (config is
+	// persisted, manager is reloaded), so we surface a warning rather than
+	// rolling back. toolRefresher may be nil in deployments that don't wire
+	// a tool registry (e.g., minimal CLI builds).
+	var refreshWarning string
+	if h.toolRefresher != nil {
+		if err := h.toolRefresher.SyncMCPTools(); err != nil {
+			refreshWarning = fmt.Sprintf("tool registry sync failed: %v", err)
+		}
+	}
+
 	// Step 6: return the updated entry.
 	srvCfg, stats, ok := mgr.ServerStatus(req.Name)
 	if !ok {
 		return nil, fmt.Errorf("mcp server %q vanished after reload", req.Name)
 	}
 	return mcp.ServerStatusEntry{
-		Config: srvCfg,
-		Stats:  stats,
+		Config:         srvCfg,
+		Stats:          stats,
+		RefreshWarning: refreshWarning,
 	}, nil
 }

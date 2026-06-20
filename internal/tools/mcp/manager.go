@@ -61,6 +61,11 @@ type ServerStats struct {
 type ServerStatusEntry struct {
 	Config ServerConfig `json:"config"`
 	Stats  ServerStats  `json:"stats"`
+	// RefreshWarning is non-empty when the toggle persisted and the manager
+	// reloaded successfully, but the follow-up tool-registry sync failed.
+	// Callers can surface this as a soft warning without treating the
+	// overall toggle as failed.
+	RefreshWarning string `json:"refresh_warning,omitempty"`
 }
 
 // Manager manages multiple MCP client connections.
