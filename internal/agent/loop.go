@@ -25,6 +25,7 @@ import (
 	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/repomap"
 	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/shadow"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
@@ -523,6 +524,8 @@ type AgentLoop struct {
 type sessionStore interface {
 	Get(id string) interface{}
 	SaveMessages(sessionID string, messages interface{}) error
+	UpdateDesignation(sessionID string, status session.DesignationStatus, reason, priority string) error
+	ClearDesignation(sessionID string) error
 }
 
 // branchManager is an interface for branch navigation operations needed by AgentLoop.

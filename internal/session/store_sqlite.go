@@ -126,6 +126,14 @@ func (s *SQLiteStore) migrate() error {
 	// Add parts column for multimodal content (JSON array of ContentPart)
 	s.migrationAddColumn("ALTER TABLE session_messages ADD COLUMN parts TEXT", "parts")
 
+	// Add designation columns to sessions (Plan 4.1)
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN designation_status TEXT DEFAULT 'none'", "designation_status")
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN designation_reason TEXT DEFAULT ''", "designation_reason")
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN designation_created_at TEXT", "designation_created_at")
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN designation_updated_at TEXT", "designation_updated_at")
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN designation_acknowledged_at TEXT", "designation_acknowledged_at")
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN designation_priority TEXT DEFAULT 'normal'", "designation_priority")
+
 	// Add project association columns to sessions
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN project_id TEXT DEFAULT ''", "project_id")
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN project_path TEXT DEFAULT ''", "project_path")
@@ -876,6 +884,77 @@ func (s *SQLiteStore) UpdateName(sessionID, name string) error {
 	result, err := s.db.Exec("UPDATE sessions SET name = ? WHERE id = ?", name, sessionID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return fmt.Errorf("failed to update name: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
+
+// UpdateDesignation sets the session's designation status.
+func (s *SQLiteStore) UpdateDesignation(sessionID string, status DesignationStatus, reason, priority string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// First check if the session has an existing designation
+	var existingStatus string
+	err := s.db.QueryRow("SELECT designation_status FROM sessions WHERE id = ?", sessionID).Scan(&existingStatus) //nolint:mutexio
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("session not found: %s", sessionID)
+		}
+		return fmt.Errorf("failed to check existing designation: %w", err)
+	}
+
+	// Determine CreatedAt - use existing if updating, otherwise now
+	createdAt := now
+	if existingStatus != "" && existingStatus != "none" {
+		var existingCreatedAt sql.NullString
+		err := s.db.QueryRow("SELECT designation_created_at FROM sessions WHERE id = ?", sessionID).Scan(&existingCreatedAt) //nolint:mutexio
+		if err == nil && existingCreatedAt.Valid {
+			createdAt = existingCreatedAt.String
+		}
+	}
+
+	result, err := s.db.Exec(`
+		UPDATE sessions SET 
+			designation_status = ?, 
+			designation_reason = ?, 
+			designation_priority = ?, 
+			designation_updated_at = ?,
+			designation_created_at = ?
+		WHERE id = ?`, //nolint:mutexio
+		status, reason, priority, now, createdAt, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to update designation: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
+// ClearDesignation clears the session's designation.
+func (s *SQLiteStore) ClearDesignation(sessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec(`
+		UPDATE sessions SET 
+			designation_status = 'none', 
+			designation_reason = '', 
+			designation_priority = 'normal', 
+			designation_acknowledged_at = NULL
+		WHERE id = ?`, sessionID) //nolint:mutexio
+	if err != nil {
+		return fmt.Errorf("failed to clear designation: %w", err)
 	}
 
 	rows, _ := result.RowsAffected()
@@ -1969,6 +2048,47 @@ func (s *SQLiteStore) GetActiveThread(ctx context.Context, sessionID string) (*T
 // TODO: Implement thread persistence in SQLite when full thread feature is wired.
 func (s *SQLiteStore) ListThreadsBySession(ctx context.Context, sessionID string) ([]*Thread, error) {
 	return []*Thread{}, nil
+}
+
+// CreateThread persists a new thread via SQLiteThreadStore.
+// TODO: full thread persistence wiring — currently a stub returning nil so the
+// daemon compiles. Full implementation tracked under the thread-based context
+// partitioning feature (separate from the reasoning effort work).
+func (s *SQLiteStore) CreateThread(ctx context.Context, thread *Thread) error {
+	if thread == nil {
+		return fmt.Errorf("nil thread")
+	}
+	ts := NewSQLiteThreadStore(s.db, thread.SessionID, nil)
+	return ts.CreateThread(ctx, thread)
+}
+
+// GetThread retrieves a thread by ID.
+// TODO: full thread persistence wiring — returns not-found. Full implementation
+// tracked under the thread-based context partitioning feature.
+func (s *SQLiteStore) GetThread(ctx context.Context, threadID string) (*Thread, error) {
+	return nil, fmt.Errorf("thread not found: %s", threadID)
+}
+
+// UpdateThread updates an existing thread via SQLiteThreadStore.
+func (s *SQLiteStore) UpdateThread(ctx context.Context, thread *Thread) error {
+	if thread == nil {
+		return fmt.Errorf("nil thread")
+	}
+	ts := NewSQLiteThreadStore(s.db, thread.SessionID, nil)
+	return ts.UpdateThread(ctx, thread)
+}
+
+// DeleteThread removes a thread by ID.
+// TODO: full thread persistence wiring — returns not-found. Full implementation
+// tracked under the thread-based context partitioning feature.
+func (s *SQLiteStore) DeleteThread(ctx context.Context, threadID string) error {
+	return fmt.Errorf("thread not found: %s", threadID)
+}
+
+// SetActiveThread sets the active thread for a session via SQLiteThreadStore.
+func (s *SQLiteStore) SetActiveThread(ctx context.Context, sessionID, threadID string) error {
+	ts := NewSQLiteThreadStore(s.db, sessionID, nil)
+	return ts.SetActiveThread(ctx, sessionID, threadID)
 }
 
 // serializeVec0Embedding serializes a float32 vector into the JSON array

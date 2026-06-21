@@ -3,6 +3,7 @@ package types
 
 import (
 	"fmt"
+	"time"
 
 	"charm.land/lipgloss/v2"
 )
@@ -174,6 +175,36 @@ type Session struct {
 	AttachedClients []string `json:"attached_clients"`
 	WorkerIDs       []string `json:"worker_ids,omitempty"`
 	LeafMessageID   *int64   `json:"leaf_message_id,omitempty"`
+
+	// Thread-based context partitioning (NEW)
+	Threads        map[string]Thread `json:"threads,omitempty"`
+	ActiveThreadID string            `json:"active_thread_id,omitempty"`
+
+	// Session designation (Plan 4.1)
+	Designation    *SessionDesignation `json:"designation,omitempty"`
+}
+
+// SessionDesignation tracks a session's special status requiring attention (TUI type).
+type SessionDesignation struct {
+	Status         string     `json:"status"` // waiting_human, requires_approval, human_responded, bot_thinking, none
+	Reason         string     `json:"reason"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	AcknowledgedAt *time.Time `json:"acknowledged_at,omitempty"`
+	Priority       string     `json:"priority"` // low, normal, high, urgent
+}
+
+// Thread represents a topic-based conversation partition for TUI display.
+// Mirrors internal/session.Thread but as a value type for slice storage.
+type Thread struct {
+	ID             string    `json:"id"`
+	SessionID      string    `json:"session_id"`
+	TopicLabel     string    `json:"topic_label"`
+	ConversationID string    `json:"conversation_id"`
+	CreatedAt      time.Time `json:"created_at"`
+	LastActivityAt time.Time `json:"last_activity_at"`
+	Summary        string    `json:"summary,omitempty"`
+	IsActive       bool      `json:"is_active"`
 }
 
 // GenerateDescriptionResult is the result of LLM-based session description generation.

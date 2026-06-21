@@ -30,6 +30,27 @@ const (
 	KeySessionID = "session_id"
 )
 
+// DesignationStatus represents the status of a session designation.
+type DesignationStatus string
+
+const (
+	DesignationNone              DesignationStatus = "none"
+	DesignationWaitingHuman      DesignationStatus = "waiting_human"
+	DesignationHumanResponded    DesignationStatus = "human_responded"
+	DesignationBotThinking       DesignationStatus = "bot_thinking"
+	DesignationRequiresApproval  DesignationStatus = "requires_approval"
+)
+
+// SessionDesignation tracks a session's special status requiring attention.
+type SessionDesignation struct {
+	Status         DesignationStatus `json:"status"`
+	Reason         string            `json:"reason"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedAt      time.Time         `json:"updated_at"`
+	AcknowledgedAt *time.Time        `json:"acknowledged_at,omitempty"`
+	Priority       string            `json:"priority"` // low, normal, high, urgent
+}
+
 // Session represents an active conversation session that can be shared
 // by multiple clients.
 //
@@ -51,6 +72,9 @@ type Session struct {
 	// Thread-based context partitioning (NEW)
 	Threads        map[string]*Thread `json:"threads,omitempty"` // threadID -> Thread
 	ActiveThreadID string             `json:"active_thread_id,omitempty"`
+
+	// Session designation (Plan 4.1)
+	Designation    *SessionDesignation `json:"designation,omitempty"`
 }
 
 // GetActiveThread returns the currently active thread.
@@ -90,6 +114,35 @@ func (s *Session) GetOrCreateThread(threadID, topicLabel string) *Thread {
 	s.Threads[threadID] = thread
 
 	return thread
+}
+
+// SetDesignation sets the session's designation status.
+func (s *Session) SetDesignation(status DesignationStatus, reason, priority string) {
+	now := time.Now()
+	if s.Designation == nil {
+		s.Designation = &SessionDesignation{
+			Status:      status,
+			Reason:      reason,
+			Priority:    priority,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+	} else {
+		s.Designation.Status = status
+		s.Designation.Reason = reason
+		s.Designation.Priority = priority
+		s.Designation.UpdatedAt = now
+	}
+}
+
+// ClearDesignation clears the session's designation.
+func (s *Session) ClearDesignation() {
+	s.Designation = nil
+}
+
+// HasDesignation returns true if the session has an active designation.
+func (s *Session) HasDesignation() bool {
+	return s.Designation != nil && s.Designation.Status != DesignationNone
 }
 
 // MemoryStore manages sessions with thread-safe operations (in-memory, non-persistent).
@@ -389,6 +442,34 @@ func (s *MemoryStore) UpdateName(sessionID, name string) error {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 	session.Name = name
+	return nil
+}
+
+// UpdateDesignation sets the session's designation status.
+func (s *MemoryStore) UpdateDesignation(sessionID string, status DesignationStatus, reason, priority string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	session.SetDesignation(status, reason, priority)
+	return nil
+}
+
+// ClearDesignation clears the session's designation.
+func (s *MemoryStore) ClearDesignation(sessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	session.ClearDesignation()
 	return nil
 }
 
@@ -836,6 +917,101 @@ func (s *MemoryStore) ListThreadsBySession(ctx context.Context, sessionID string
 		threads = append(threads, t)
 	}
 	return threads, nil
+}
+
+// CreateThread persists a new thread on a session.
+func (s *MemoryStore) CreateThread(ctx context.Context, thread *Thread) error {
+	if thread == nil {
+		return fmt.Errorf("nil thread")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[thread.SessionID]
+	if !ok {
+		return fmt.Errorf("session not found: %s", thread.SessionID)
+	}
+	if sess.Threads == nil {
+		sess.Threads = make(map[string]*Thread)
+	}
+	sess.Threads[thread.ID] = thread
+	return nil
+}
+
+// GetThread retrieves a thread by ID across all sessions (thread IDs are globally unique).
+func (s *MemoryStore) GetThread(ctx context.Context, threadID string) (*Thread, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, sess := range s.sessions {
+		if sess.Threads != nil {
+			if t, ok := sess.Threads[threadID]; ok {
+				return t, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("thread not found: %s", threadID)
+}
+
+// UpdateThread updates an existing thread.
+func (s *MemoryStore) UpdateThread(ctx context.Context, thread *Thread) error {
+	if thread == nil {
+		return fmt.Errorf("nil thread")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[thread.SessionID]
+	if !ok {
+		return fmt.Errorf("session not found: %s", thread.SessionID)
+	}
+	if sess.Threads == nil {
+		return fmt.Errorf("thread not found: %s", thread.ID)
+	}
+	if _, ok := sess.Threads[thread.ID]; !ok {
+		return fmt.Errorf("thread not found: %s", thread.ID)
+	}
+	sess.Threads[thread.ID] = thread
+	return nil
+}
+
+// DeleteThread removes a thread by ID.
+func (s *MemoryStore) DeleteThread(ctx context.Context, threadID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sess := range s.sessions {
+		if sess.Threads != nil {
+			if _, ok := sess.Threads[threadID]; ok {
+				delete(sess.Threads, threadID)
+				if sess.ActiveThreadID == threadID {
+					sess.ActiveThreadID = ""
+				}
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("thread not found: %s", threadID)
+}
+
+// SetActiveThread marks threadID as active in its session and deactivates others.
+func (s *MemoryStore) SetActiveThread(ctx context.Context, sessionID, threadID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[sessionID]
+	if !ok {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	if sess.Threads == nil {
+		return fmt.Errorf("thread not found: %s", threadID)
+	}
+	target, ok := sess.Threads[threadID]
+	if !ok {
+		return fmt.Errorf("thread not found: %s", threadID)
+	}
+	for _, t := range sess.Threads {
+		t.IsActive = false
+	}
+	target.IsActive = true
+	target.LastActivityAt = time.Now().UTC()
+	sess.ActiveThreadID = threadID
+	return nil
 }
 
 // Ensure MemoryStore implements Store interface.
