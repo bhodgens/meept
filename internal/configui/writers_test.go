@@ -237,59 +237,6 @@ func TestSaveModelsConfigDrilldownNewProvider(t *testing.T) {
 	}
 }
 
-func TestSaveAgentsConfigDrilldown(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "agents.json5")
-
-	origLoader := loadAgentsConfig
-	origPath := ConfigFilePath
-	t.Cleanup(func() {
-		loadAgentsConfig = origLoader
-		ConfigFilePath = origPath
-	})
-
-	loadAgentsConfig = func(*config.AgentsConfig) (map[string]*config.AgentDefinition, error) {
-		return map[string]*config.AgentDefinition{
-			"coder": {ID: "coder", Name: "Code Agent", Role: "executor", Model: "gpt-4", Enabled: true, CanDelegate: true},
-		}, nil
-	}
-	ConfigFilePath = func(name string) string { return path }
-
-	// Create drilldown section for the coder agent
-	nameField := NewTextField("name", "name", "Code Agent")
-	modelField := NewTextField("model", "model", "gpt-4")
-
-	// Simulate user changing the model
-	modelField.Set("claude-3.5-sonnet")
-
-	sm := NewDrilldownSectionModel(
-		"agents > agent definitions > coder", "agents", "agents.json5",
-		"agents.coder",
-		[]Field{nameField, modelField},
-	)
-
-	if err := saveAgentsConfig(sm); err != nil {
-		t.Fatalf("saveAgentsConfig: %v", err)
-	}
-
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	var got map[string]any
-	if err := json.Unmarshal(raw, &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	agents := got["agents"].([]any)
-	agent := agents[0].(map[string]any)
-	if agent["model"] != "claude-3.5-sonnet" {
-		t.Errorf("expected model 'claude-3.5-sonnet', got %v", agent["model"])
-	}
-	if agent["name"] != "Code Agent" {
-		t.Errorf("expected name 'Code Agent' (unchanged), got %v", agent["name"])
-	}
-}
-
 func TestSaveMCPServersConfigDrilldown(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mcp_servers.json5")

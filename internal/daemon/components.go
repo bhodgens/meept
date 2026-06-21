@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/agents"
 	authpkg "github.com/caimlas/meept/internal/auth"
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/bus"
@@ -1211,7 +1212,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 					errorCount++
 				}
 			}
-			logger.Info("MCP servers: "+fmt.Sprintf(
+			logger.Info("MCP servers: " + fmt.Sprintf(
 				"%d enabled, %d active, %d errors, %d disabled (configure at ~/.meept/mcp_servers.json5)",
 				enabledCount, activeCount, errorCount, disabledCount,
 			))
@@ -1334,6 +1335,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			ShadowManager:         c.ShadowManager,
 			Logger:                logger,
 			BundledAgentsPath:     "config/agents",
+			BundledPromptsPath:    "config/prompts",
 			Watchdog:              c.Watchdog,
 			HallucinationDetector: c.HallucinationDetector,
 			ArtifactManager:       c.ArtifactManager,
@@ -4670,20 +4672,24 @@ func gitLsFiles(dir string) ([]string, error) {
 // of AgentModelRef values suitable for BuildModelsInUse. Best-effort: on
 // failure, returns nil (the in-use gate degrades to "start everything").
 func loadAgentModelRefs(cfg *config.Config, logger *slog.Logger) []llm.AgentModelRef {
-	agentsMap, err := config.LoadAgentDefinitionsDefault(&cfg.Agents)
+	discovery := agents.NewDiscovery(
+		agents.WithDiscoveryLogger(logger),
+		agents.WithBundledPath("config/agents"),
+	)
+	defs, err := discovery.Discover()
 	if err != nil {
-		logger.Debug("Failed to load agent definitions for in-use computation", "error", err)
+		logger.Debug("Failed to discover agent definitions for in-use computation", "error", err)
 		return nil
 	}
-	if len(agentsMap) == 0 {
+	if len(defs) == 0 {
 		return nil
 	}
-	out := make([]llm.AgentModelRef, 0, len(agentsMap))
-	for _, a := range agentsMap {
-		if a == nil {
+	out := make([]llm.AgentModelRef, 0, len(defs))
+	for _, def := range defs {
+		if def == nil {
 			continue
 		}
-		out = append(out, llm.AgentModelRef{Model: a.Model, Enabled: a.Enabled})
+		out = append(out, llm.AgentModelRef{Model: def.Model, Enabled: def.IsEnabled()})
 	}
 	return out
 }

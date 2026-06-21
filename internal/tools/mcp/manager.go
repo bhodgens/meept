@@ -68,13 +68,24 @@ type ServerStatusEntry struct {
 	RefreshWarning string `json:"refresh_warning,omitempty"`
 }
 
+// LocalToolkit is implemented by local tool handlers that register themselves
+// with the MCP manager. The interface lets the manager expose local tool
+// definitions and dispatch calls without introducing import cycles.
+type LocalToolkit interface {
+	// Tools returns the LLM tool definitions for this toolkit.
+	Tools() []llm.ToolDefinition
+	// Execute dispatches a call by tool name with args.
+	Execute(ctx context.Context, toolName string, args map[string]any) (any, error)
+}
+
 // Manager manages multiple MCP client connections.
 type Manager struct {
-	mu      sync.RWMutex
-	clients map[string]*Client
-	logger  *slog.Logger
-	stats   map[string]*ServerStats // in-memory runtime stats, guarded by mu
-	configs map[string]ServerConfig // snapshot of all configured servers (incl. disabled)
+	mu           sync.RWMutex
+	clients      map[string]*Client
+	logger       *slog.Logger
+	stats        map[string]*ServerStats // in-memory runtime stats, guarded by mu
+	configs      map[string]ServerConfig // snapshot of all configured servers (incl. disabled)
+	localTools   map[string]LocalToolkit  // keyed by toolkit name prefix
 }
 
 // NewManager creates a new MCP manager.
@@ -83,11 +94,35 @@ func NewManager(logger *slog.Logger) *Manager {
 		logger = slog.Default()
 	}
 	return &Manager{
-		clients: make(map[string]*Client),
-		stats:   make(map[string]*ServerStats),
-		configs: make(map[string]ServerConfig),
-		logger:  logger.With("component", "mcp-manager"),
+		clients:    make(map[string]*Client),
+		stats:      make(map[string]*ServerStats),
+		configs:    make(map[string]ServerConfig),
+		localTools: make(map[string]LocalToolkit),
+		logger:     logger.With("component", "mcp-manager"),
 	}
+}
+
+// RegisterLocal registers a local toolkit so its tools are exposed through
+// the manager's tool-dispatch surface. Toolkit names must be unique; a
+// warning is logged if a toolkit with the same name is already registered.
+func (m *Manager) RegisterLocal(name string, toolkit LocalToolkit) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing, ok := m.localTools[name]; ok && existing != nil {
+		m.logger.Warn("replacing local toolkit", "name", name)
+	}
+	m.localTools[name] = toolkit
+	m.logger.Info("registered local toolkit", "name", name)
+}
+
+// RegisterCompressionHandler sets up the compression toolkit in this manager.
+// If the handler is nil (compression disabled or misconfigured) nothing is
+// registered and no error is returned.
+func (m *Manager) RegisterCompressionHandler(handler *CompressionHandler) {
+	if handler == nil {
+		return
+	}
+	m.RegisterLocal("mcc", handler)
 }
 
 // SetConfigs records the full set of configured servers (including disabled
@@ -458,7 +493,8 @@ func (m *Manager) AllTools() []ToolInfo {
 	return allTools
 }
 
-// AllLLMDefinitions returns LLM tool definitions from all connected servers.
+// AllLLMDefinitions returns LLM tool definitions from all connected servers
+// and registered local toolkits.
 func (m *Manager) AllLLMDefinitions() []llm.ToolDefinition {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -466,6 +502,20 @@ func (m *Manager) AllLLMDefinitions() []llm.ToolDefinition {
 	var allDefs []llm.ToolDefinition
 	for _, client := range m.clients {
 		defs := client.ToLLMDefinitions()
+		allDefs = append(allDefs, defs...)
+	}
+	// Include local toolkit definitions, prefixed with "local."
+	for name, toolkit := range m.localTools {
+		defs := toolkit.Tools()
+		for i := range defs {
+			// Prefix the function name with toolkit name for routing
+			parts := strings.SplitN(defs[i].Function.Name, ".", 2)
+			if len(parts) == 1 {
+				defs[i].Function.Name = fmt.Sprintf("%s.%s", name, parts[0])
+			} else {
+				defs[i].Function.Name = fmt.Sprintf("%s.%s", name, parts[1])
+			}
+		}
 		allDefs = append(allDefs, defs...)
 	}
 	return allDefs
@@ -484,6 +534,11 @@ func (m *Manager) CallTool(ctx context.Context, fullName string, args map[string
 
 	serverName := parts[0]
 	toolName := parts[1]
+
+	// Check if this is a local toolkit tool first
+	if toolkit, ok := m.localToolkitLookup(serverName); ok {
+		return m.dispatchLocal(ctx, toolkit, toolName, args)
+	}
 
 	m.mu.RLock()
 	client, exists := m.clients[serverName]
@@ -533,6 +588,23 @@ func (m *Manager) CallTool(ctx context.Context, fullName string, args map[string
 		m.mu.Unlock()
 	}
 	return result, err
+}
+
+// localToolkitLookup finds a registered local toolkit by name.
+func (m *Manager) localToolkitLookup(name string) (LocalToolkit, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	toolkit, ok := m.localTools[name]
+	return toolkit, ok
+}
+
+// dispatchLocal dispatches a tool call to a local toolkit.
+func (m *Manager) dispatchLocal(ctx context.Context, toolkit LocalToolkit, toolName string, args map[string]any) (*tools.ToolResult, error) {
+	result, err := toolkit.Execute(ctx, toolName, args)
+	if err != nil {
+		return tools.NewErrorResultErr(err), nil
+	}
+	return tools.NewSuccessResult(result), nil
 }
 
 // ServerCount returns the number of connected servers.

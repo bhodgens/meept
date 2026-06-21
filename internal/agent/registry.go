@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"strings"
 	"sync"
 
 	"github.com/caimlas/meept/internal/agents"
@@ -70,6 +71,11 @@ type AgentRegistry struct {
 	// TT-SR stream rule enforcement (shared across all agent loops)
 	ttsrManager *TTSRManager
 
+	// components resolves prompt component IDs to their content. May be nil
+	// when BundledPromptsPath was not set; in that case the AGENT.md body
+	// alone becomes the Purpose.
+	components *agents.ComponentRegistry
+
 	// Queue tracking for conversation-scoped queue management
 	activeQueues   map[string]*QueueEntry
 	activeQueuesMu sync.RWMutex
@@ -108,6 +114,14 @@ type RegistryConfig struct {
 
 	// BundledAgentsPath is the path to bundled AGENT.md files (e.g., "config/agents").
 	BundledAgentsPath string
+
+	// BundledPromptsPath is the path to bundled prompt component markdown
+	// files (e.g., "config/prompts"). When set, a ComponentRegistry scans
+	// the standard 3-tier hierarchy plus this bundled tier and assembles
+	// each agent's Purpose from the components declared in its AGENT.md
+	// frontmatter. When unset, prompt component assembly is disabled and
+	// the AGENT.md body alone becomes the Purpose (backward compatible).
+	BundledPromptsPath string
 
 	// GlobalRules is the global rules content to inject into all agents.
 	// If empty, the registry will auto-discover rules using RulesDiscovery.
@@ -157,14 +171,14 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		r.globalRules = r.discoverGlobalRules()
 	}
 
-	// Register default specs
-	for _, spec := range DefaultSpecs() {
-		if err := r.RegisterSpec(spec); err != nil {
-			r.logger.Warn("failed to register default agent spec", "id", spec.ID, "error", err)
-		}
+	// Build a ComponentRegistry if a bundled prompts path is configured. The
+	// ComponentRegistry is used by definitionToSpec/mergeSpec to assemble
+	// each agent's Purpose from its declared prompt_components.
+	if cfg.BundledPromptsPath != "" {
+		r.components = agents.NewDefaultComponentRegistry(cfg.BundledPromptsPath, r.logger)
 	}
 
-	// Discover and merge AGENT.md definitions
+	// Discover and load AGENT.md definitions (the canonical source of truth).
 	r.loadAgentDefinitions(cfg.BundledAgentsPath)
 
 	return r
@@ -367,12 +381,16 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 // filterTools returns a filtered tool registry based on agent spec.
 // Each agent only gets its baseline tools plus its additional tools,
 // reducing the number of tool definitions sent per LLM call.
+// When CanDelegate is false, the delegate_task baseline tool is stripped.
 func (r *AgentRegistry) filterTools(spec *AgentSpec) ToolRegistry {
 	if r.tools == nil {
 		return nil
 	}
 
 	allowedTools := spec.AllTools()
+	if !spec.CanDelegate {
+		allowedTools = removeString(allowedTools, "delegate_task")
+	}
 	if len(allowedTools) == 0 {
 		return r.tools
 	}
@@ -405,6 +423,24 @@ func (r *AgentRegistry) GetByRole(role AgentRole) ([]*AgentLoop, error) {
 // GetExecutors returns all executor agent loops.
 func (r *AgentRegistry) GetExecutors() ([]*AgentLoop, error) {
 	return r.GetByRole(RoleExecutor)
+}
+
+// findReviewerByDomain returns the ID of the first reviewer-role agent whose
+// reviews_domain matches the given domain, or "" if none match. Used by
+// ReviewPolicy.SelectReviewer for dynamic reviewer routing.
+func (r *AgentRegistry) findReviewerByDomain(domain string) string {
+	if domain == "" {
+		return ""
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	// First pass: exact match on reviews_domain.
+	for _, spec := range r.specs {
+		if spec.Role == RoleReviewer && spec.ReviewsDomain == domain && spec.Enabled {
+			return spec.ID
+		}
+	}
+	return ""
 }
 
 // RunAgent runs a specific agent with a message and context.
@@ -494,7 +530,10 @@ func (r *AgentRegistry) discoverGlobalRules() string {
 	return content
 }
 
-// loadAgentDefinitions discovers AGENT.md files and merges with programmatic specs.
+// loadAgentDefinitions discovers AGENT.md files and loads them into the
+// registry. AGENT.md is the canonical source of truth for agent definitions;
+// there are no programmatic DefaultSpecs anymore. Definitions with
+// enabled: false in their frontmatter are filtered out at load time.
 func (r *AgentRegistry) loadAgentDefinitions(bundledPath string) {
 	// Build discovery options
 	opts := []agents.DiscoveryOption{
@@ -517,13 +556,28 @@ func (r *AgentRegistry) loadAgentDefinitions(bundledPath string) {
 		return
 	}
 
-	// Merge each discovered definition into existing specs
+	loaded := 0
+	disabled := 0
 	for _, def := range definitions {
+		// Filter disabled agents at load time. Agents with enabled absent
+		// or nil in frontmatter default to enabled.
+		if !def.IsEnabled() {
+			disabled++
+			r.logger.Info("Skipping disabled agent", "id", def.ID)
+			// Also remove any prior spec with the same ID (in case the agent
+			// was previously enabled and is now toggled off).
+			r.mu.Lock()
+			delete(r.specs, def.ID)
+			delete(r.loops, def.ID)
+			r.mu.Unlock()
+			continue
+		}
 		r.mergeAgentDefinition(def)
+		loaded++
 	}
 
 	r.logger.Info("Loaded agent definitions from AGENT.md files",
-		"count", len(definitions),
+		"count", loaded, "disabled", disabled,
 	)
 }
 
@@ -576,18 +630,45 @@ func (r *AgentRegistry) mergeSpec(base *AgentSpec, def *agents.AgentDefinition) 
 		merged.Role = base.Role
 	}
 
+	// Description: prefer AGENT.md if set
+	if def.Description != "" {
+		merged.Description = def.Description
+	} else {
+		merged.Description = base.Description
+	}
+
+	// Enabled: prefer AGENT.md explicit setting; default true.
+	if def.Enabled != nil {
+		merged.Enabled = *def.Enabled
+	} else {
+		merged.Enabled = true
+	}
+
+	// CanDelegate: AGENT.md boolean wins (default false in metadata).
+	merged.CanDelegate = def.CanDelegate || base.CanDelegate
+
+	// ReviewsDomain: prefer AGENT.md if set
+	if def.ReviewsDomain != "" {
+		merged.ReviewsDomain = def.ReviewsDomain
+	} else {
+		merged.ReviewsDomain = base.ReviewsDomain
+	}
+
 	// SystemPromptSections: carry from base (AGENT.md body replaces Purpose, not sections)
 	if len(base.SystemPromptSections) > 0 {
 		merged.SystemPromptSections = make([]string, len(base.SystemPromptSections))
 		copy(merged.SystemPromptSections, base.SystemPromptSections)
 	}
 
-	// Purpose: prefer AGENT.md body if non-empty
-	if def.Body != "" {
-		merged.Purpose = def.Body
-	} else {
-		merged.Purpose = base.Purpose
+	// Purpose: assemble from prompt_components (wrapping the body), or fall
+	// back to the AGENT.md body alone. The body is preferred over the base
+	// Purpose when present; when neither body nor components are set we keep
+	// the base Purpose to avoid wiping an existing prompt.
+	body := def.Body
+	if body == "" {
+		body = base.Purpose
 	}
+	merged.Purpose = r.assemblePurpose(def.PromptComponents, body)
 
 	// Model: prefer AGENT.md if set
 	if def.Model != "" {
@@ -647,7 +728,11 @@ func (r *AgentRegistry) definitionToSpec(def *agents.AgentDefinition) *AgentSpec
 	spec := &AgentSpec{
 		ID:              def.ID,
 		Name:            def.Name,
-		Purpose:         def.Body,
+		Description:     def.Description,
+		Enabled:         def.IsEnabled(),
+		CanDelegate:     def.CanDelegate,
+		ReviewsDomain:   def.ReviewsDomain,
+		Purpose:         r.assemblePurpose(def.PromptComponents, def.Body),
 		Model:           def.Model,
 		AdditionalTools: append([]string(nil), def.AdditionalTools...),
 		AvailableSkills: append([]string(nil), def.AvailableSkills...),
@@ -695,6 +780,51 @@ func (r *AgentRegistry) definitionToSpec(def *agents.AgentDefinition) *AgentSpec
 	}
 
 	return spec
+}
+
+// assemblePurpose builds the final Purpose string from prompt components and
+// the AGENT.md body. Layout:
+//
+//  1. Constitution (from the "base.constitution" component if declared, else
+//     the DefaultConstitution fallback is used ONLY when no components at
+//     all are declared).
+//  2. Restrictions (same rule with "base.restrictions" / DefaultRestrictions).
+//  3. All other declared components, in the order listed, each rendered as a
+//     titled section.
+//  4. The AGENT.md body, injected as the "Purpose & Task Principles" section.
+//
+// When components is empty or the ComponentRegistry is nil, the body alone
+// becomes the Purpose (backward compatible with body-only AGENT.md files).
+func (r *AgentRegistry) assemblePurpose(components []string, body string) string {
+	if r == nil || r.components == nil || len(components) == 0 {
+		return body
+	}
+	sections := r.components.Resolve(components)
+	if len(sections) == 0 {
+		return body
+	}
+
+	var b strings.Builder
+	for _, sec := range sections {
+		if sec.Content == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("# ")
+		b.WriteString(sec.Title)
+		b.WriteString("\n\n")
+		b.WriteString(sec.Content)
+	}
+	if body != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("# Purpose & Task Principles\n\n")
+		b.WriteString(body)
+	}
+	return b.String()
 }
 
 // Helper functions for merging

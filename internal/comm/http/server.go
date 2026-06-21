@@ -127,6 +127,10 @@ type Server struct {
 	// Used by the status handler to report actual token and cost usage.
 	BudgetStatusGetter func() (hourlyUsed int, hourlyRemaining int, dailyUsed int, dailyRemaining int, rpmCurrent int, rpmLimit int, dailyCostUsed float64, dailyCostLimit float64, hourlyCostUsed float64, hourlyCostLimit float64, perTaskCost float64, perSessionCost float64, perTaskBudget int, perSessionBudget int)
 
+	// CompressionStatsGetter is an optional callback that returns compression
+	// pipeline statistics. Used by the compression stats handler.
+	CompressionStatsGetter func() map[string]any
+
 	wsHub *WebSocketHub
 
 	// wsSubscribers holds bus subscribers created in WithWebSocket so they can be
@@ -1109,6 +1113,11 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	if s.rpcCall != nil {
 		mux.HandleFunc("GET /api/v1/mcp/servers", s.handleMCPServersList)
 		mux.HandleFunc("PUT /api/v1/mcp/servers/{name}/enabled", s.handleMCPServerSetEnabled)
+	}
+
+	// Compression endpoints
+	if s.CompressionStatsGetter != nil {
+		mux.HandleFunc("GET /api/v1/compression/stats", s.handleCompressionStats)
 	}
 }
 

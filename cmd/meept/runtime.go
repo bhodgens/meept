@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/agents"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/pathutil"
 	"github.com/spf13/cobra"
@@ -438,16 +438,17 @@ func runtimePIDConfig(pc *llm.ProviderConfig, pidFile string) *llm.RuntimeConfig
 // minimal AgentModelRef form used by BuildModelsInUse. Best-effort: returns
 // nil on any error.
 func loadAgentRefsCLI() []llm.AgentModelRef {
-	agents, err := config.LoadAgentDefinitionsDefault(nil)
-	if err != nil || len(agents) == 0 {
+	disc := agents.NewDiscovery(agents.WithBundledPath("config/agents"))
+	defs, err := disc.Discover()
+	if err != nil || len(defs) == 0 {
 		return nil
 	}
-	out := make([]llm.AgentModelRef, 0, len(agents))
-	for _, a := range agents {
-		if a == nil {
+	out := make([]llm.AgentModelRef, 0, len(defs))
+	for _, def := range defs {
+		if def == nil {
 			continue
 		}
-		out = append(out, llm.AgentModelRef{Model: a.Model, Enabled: a.Enabled})
+		out = append(out, llm.AgentModelRef{Model: def.Model, Enabled: def.IsEnabled()})
 	}
 	return out
 }

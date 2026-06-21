@@ -2,6 +2,9 @@
 id: committer
 name: Git Specialist
 role: executor
+description: Handles git operations including commits, branches, merges, and repository management
+enabled: true
+can_delegate: false
 additional_tools:
   - shell_execute
   - file_read
@@ -11,6 +14,10 @@ timeout_seconds: 120
 max_tokens_per_turn: 2048
 max_memory_refs: 5
 temperature: 0.2
+prompt_components:
+  - base.constitution
+  - base.restrictions
+  - capabilities.memory
 ---
 
 # Git Specialist

@@ -21,10 +21,13 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [func ClassificationUserGuidance\(err error\) string](<#ClassificationUserGuidance>)
 - [func ComputeEndpointKey\(runtime, baseURL string\) string](<#ComputeEndpointKey>)
 - [func ContainsSupportedRuntime\(runtimes \[\]string\) bool](<#ContainsSupportedRuntime>)
+- [func ContentFromParts\(parts \[\]ContentPart, useDescription bool\) string](<#ContentFromParts>)
 - [func CountToolDefinitionsTokens\(tools \[\]ToolDefinition, tokenizer Tokenizer\) int](<#CountToolDefinitionsTokens>)
 - [func DerefOr\[T any\]\(p \*T, def T\) T](<#DerefOr>)
 - [func EstimateTokenCountHeuristic\(content string\) int](<#EstimateTokenCountHeuristic>)
 - [func FormatPIDFilePath\(pidFile string\) \(string, error\)](<#FormatPIDFilePath>)
+- [func HasImageParts\(parts \[\]ContentPart\) bool](<#HasImageParts>)
+- [func HasUndescribedImages\(parts \[\]ContentPart\) bool](<#HasUndescribedImages>)
 - [func IsLoopbackBaseURL\(baseURL string\) bool](<#IsLoopbackBaseURL>)
 - [func IsNonRetryable\(err error\) bool](<#IsNonRetryable>)
 - [func IsRateLimitError\(err error\) bool](<#IsRateLimitError>)
@@ -53,6 +56,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func WithAnthropicTimeout\(timeout time.Duration\) AnthropicClientOption](<#WithAnthropicTimeout>)
   - [func WithAnthropicTimeoutCalculator\(calc \*metrics.Calculator\) AnthropicClientOption](<#WithAnthropicTimeoutCalculator>)
   - [func WithAnthropicTokenCache\(cache ResponseCache\) AnthropicClientOption](<#WithAnthropicTokenCache>)
+  - [func WithAnthropicUploadStore\(store UploadStore\) AnthropicClientOption](<#WithAnthropicUploadStore>)
 - [type AuthType](<#AuthType>)
 - [type BrokerConfig](<#BrokerConfig>)
 - [type BrokerStatus](<#BrokerStatus>)
@@ -100,6 +104,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(e \*CapabilityError\) Error\(\) string](<#CapabilityError.Error>)
 - [type ChatMessage](<#ChatMessage>)
   - [func \(m \*ChatMessage\) ToOpenAIDict\(\) map\[string\]any](<#ChatMessage.ToOpenAIDict>)
+  - [func \(m \*ChatMessage\) ToOpenAIDictWithStore\(store UploadStore\) map\[string\]any](<#ChatMessage.ToOpenAIDictWithStore>)
 - [type ChatOption](<#ChatOption>)
   - [func WithFrequencyPenalty\(p float64\) ChatOption](<#WithFrequencyPenalty>)
   - [func WithMaxTokens\(tokens int\) ChatOption](<#WithMaxTokens>)
@@ -139,6 +144,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func WithTimeoutCalculator\(calc \*metrics.Calculator\) ClientOption](<#WithTimeoutCalculator>)
   - [func WithTokenCache\(cache ResponseCache\) ClientOption](<#WithTokenCache>)
   - [func WithTokenResolver\(tr TokenResolver, provider string\) ClientOption](<#WithTokenResolver>)
+  - [func WithUploadStore\(store UploadStore\) ClientOption](<#WithUploadStore>)
 - [type CompactResult](<#CompactResult>)
 - [type CompactorConfig](<#CompactorConfig>)
   - [func DefaultCompactorConfig\(\) CompactorConfig](<#DefaultCompactorConfig>)
@@ -149,6 +155,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type CompressionStats](<#CompressionStats>)
   - [func \(s \*CompressionStats\) Snapshot\(\) CompressionStatsSnapshot](<#CompressionStats.Snapshot>)
 - [type CompressionStatsSnapshot](<#CompressionStatsSnapshot>)
+- [type ContentPart](<#ContentPart>)
 - [type ContextCompactor](<#ContextCompactor>)
   - [func NewContextCompactor\(cfg CompactorConfig, summarizer Chatter, tokenizer Tokenizer, logger \*slog.Logger\) \*ContextCompactor](<#NewContextCompactor>)
   - [func \(c \*ContextCompactor\) Compact\(ctx context.Context, messages \[\]ChatMessage\) CompactResult](<#ContextCompactor.Compact>)
@@ -205,6 +212,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(h \*HealthChecker\) WaitForHealthy\(ctx context.Context, timeout time.Duration\) error](<#HealthChecker.WaitForHealthy>)
 - [type HeuristicTokenizer](<#HeuristicTokenizer>)
   - [func \(h \*HeuristicTokenizer\) CountTokens\(text string\) int](<#HeuristicTokenizer.CountTokens>)
+- [type ImageRef](<#ImageRef>)
 - [type InspectResult](<#InspectResult>)
 - [type L1Cache](<#L1Cache>)
   - [func NewL1Cache\(config L1CacheConfig\) \*L1Cache](<#NewL1Cache>)
@@ -446,6 +454,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type ToolDefinition](<#ToolDefinition>)
   - [func NewToolDefinition\(name, description string, params FunctionParameters\) ToolDefinition](<#NewToolDefinition>)
   - [func \(t \*ToolDefinition\) CountTokens\(tokenizer Tokenizer\) int](<#ToolDefinition.CountTokens>)
+- [type UploadStore](<#UploadStore>)
 
 
 ## Constants
@@ -903,6 +912,13 @@ ComputeEndpointKey returns a deterministic key for the \(runtime, baseURL\) trip
 
 ContainsSupportedRuntime checks if any runtime in the list is supported.
 
+<a name="ContentFromParts"></a>
+## func ContentFromParts
+
+	func ContentFromParts(parts []ContentPart, useDescription bool) string
+
+ContentFromParts synthesizes a flat text string from a slice of content parts. When useDescription is true and an image part has a Description, the description is substituted as "\[image: \<description\>\]". Otherwise the URL is used. Used by FTS5 search, summarization, context compaction, memory injection, and the main agent turn after pre\-flight has cached the description.
+
 <a name="CountToolDefinitionsTokens"></a>
 ## func CountToolDefinitionsTokens
 
@@ -930,6 +946,20 @@ EstimateTokenCountHeuristic estimates tokens using the 3 chars/token heuristic. 
 	func FormatPIDFilePath(pidFile string) (string, error)
 
 FormatPIDFilePath validates and returns an absolute PID file path.
+
+<a name="HasImageParts"></a>
+## func HasImageParts
+
+	func HasImageParts(parts []ContentPart) bool
+
+HasImageParts returns true if any part in the slice is an image\_url type.
+
+<a name="HasUndescribedImages"></a>
+## func HasUndescribedImages
+
+	func HasUndescribedImages(parts []ContentPart) bool
+
+HasUndescribedImages returns true if any image part lacks a Description OR has its AnalysisFailed flag set \(meaning a prior vision pre\-flight attempt failed and should be retried on a subsequent turn\).
 
 <a name="IsLoopbackBaseURL"></a>
 ## func IsLoopbackBaseURL
@@ -1145,6 +1175,13 @@ WithAnthropicTimeoutCalculator sets the adaptive timeout calculator for the clie
 	func WithAnthropicTokenCache(cache ResponseCache) AnthropicClientOption
 
 WithAnthropicTokenCache sets the token cache for the Anthropic client.
+
+<a name="WithAnthropicUploadStore"></a>
+### func WithAnthropicUploadStore
+
+	func WithAnthropicUploadStore(store UploadStore) AnthropicClientOption
+
+WithAnthropicUploadStore sets the upload store for resolving image file references.
 
 <a name="AuthType"></a>
 ## type AuthType
@@ -1583,11 +1620,12 @@ CapabilityError is returned when no model satisfies a skill's requirements.
 ChatMessage represents a single message in a chat conversation.
 
 	type ChatMessage struct {
-	    Role       Role       `json:"role"`
-	    Content    string     `json:"content"`
-	    Name       string     `json:"name,omitempty"`
-	    ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	    ToolCallID string     `json:"tool_call_id,omitempty"`
+	    Role       Role          `json:"role"`
+	    Content    string        `json:"content"`
+	    Parts      []ContentPart `json:"parts,omitempty"` // Non-empty => takes precedence for LLM serialization
+	    Name       string        `json:"name,omitempty"`
+	    ToolCalls  []ToolCall    `json:"tool_calls,omitempty"`
+	    ToolCallID string        `json:"tool_call_id,omitempty"`
 	    // IsToolError indicates that this tool-role message represents a failed
 	    // tool execution. Used by the Anthropic client to set the IsError flag
 	    // on tool_result blocks. Not serialized to external APIs (set per-trip).
@@ -1607,7 +1645,14 @@ ChatMessage represents a single message in a chat conversation.
 
 	func (m *ChatMessage) ToOpenAIDict() map[string]any
 
-ToOpenAIDict converts the message to the format expected by OpenAI API.
+ToOpenAIDict converts the message to the format expected by OpenAI API. It is preserved for backward compatibility; callers with access to an UploadStore should use ToOpenAIDictWithStore so that file:// image URLs are resolved to data: URLs before serialization.
+
+<a name="ChatMessage.ToOpenAIDictWithStore"></a>
+### func \(\*ChatMessage\) ToOpenAIDictWithStore
+
+	func (m *ChatMessage) ToOpenAIDictWithStore(store UploadStore) map[string]any
+
+ToOpenAIDictWithStore is like ToOpenAIDict but resolves file:// image URLs to data: URLs using the provided upload store. A nil store preserves the legacy behavior \(URLs pass through verbatim\), matching the previous ToOpenAIDict semantics for callers that have not been wired up yet.
 
 <a name="ChatOption"></a>
 ## type ChatOption
@@ -1936,6 +1981,13 @@ WithTokenCache sets the token cache for the client.
 
 WithTokenResolver sets the OAuth token resolver and provider name for the client. When set, the client resolves a fresh access token from the resolver before each request and uses it as the Bearer token. A nil resolver is safely ignored.
 
+<a name="WithUploadStore"></a>
+### func WithUploadStore
+
+	func WithUploadStore(store UploadStore) ClientOption
+
+WithUploadStore sets the upload store for resolving image file references.
+
 <a name="CompactResult"></a>
 ## type CompactResult
 
@@ -2062,6 +2114,17 @@ Snapshot returns a point\-in\-time copy of the stats fields as plain values.
 	    TotalTokensSaved  uint64
 	    TotalCompressions uint64
 	    AvgQualityScore   float64 // Running average of quality scores (0.0-1.0)
+	}
+
+<a name="ContentPart"></a>
+## type ContentPart
+
+ContentPart is one block of a multimodal message. At least one of Text or ImageURL is non\-empty. When Description is populated on ImageURL, downstream code MAY substitute the description text for the image bytes \(see vision cache policy in the agent pre\-flight\).
+
+	type ContentPart struct {
+	    Type     string    `json:"type"` // "text" | "image_url"
+	    Text     string    `json:"text,omitempty"`
+	    ImageURL *ImageRef `json:"image_url,omitempty"`
 	}
 
 <a name="ContextCompactor"></a>
@@ -2546,6 +2609,22 @@ HeuristicTokenizer uses a simple character\-based heuristic \(3 chars/token\).
 	func (h *HeuristicTokenizer) CountTokens(text string) int
 
 CountTokens estimates tokens using 3 characters per token heuristic.
+
+<a name="ImageRef"></a>
+## type ImageRef
+
+ImageRef references a stored upload. URL is always populated; the daemon rewrites it to a data URL before sending to the LLM. Description is the cached vision\-model description \(populated lazily after first analysis\).
+
+AnalysisFailed is set to true when a vision pre\-flight attempt failed \(or returned empty\) so subsequent turns can retry. While true, HasUndescribedImages treats the ref as still needing analysis. It is cleared on a successful analysis or before a retry begins.
+
+	type ImageRef struct {
+	    URL            string `json:"url"`                       // "file://<sha256>.<ext>" or "data:..."
+	    Description    string `json:"description,omitempty"`     // Cached vision description
+	    AnalysisFailed bool   `json:"analysis_failed,omitempty"` // True if last vision pre-flight attempt failed (retryable)
+	    MIMEType       string `json:"mime_type,omitempty"`
+	    Width          int    `json:"width,omitempty"`
+	    Height         int    `json:"height,omitempty"`
+	}
 
 <a name="InspectResult"></a>
 ## type InspectResult
@@ -4716,5 +4795,14 @@ NewToolDefinition creates a new tool definition.
 	func (t *ToolDefinition) CountTokens(tokenizer Tokenizer) int
 
 CountTokens returns the approximate token count for a tool definition. Uses the provided tokenizer if available, otherwise falls back to character\-based heuristic.
+
+<a name="UploadStore"></a>
+## type UploadStore
+
+UploadStore provides access to uploaded file storage. The LLM client uses it to resolve file:// references into base64 data URLs for provider APIs.
+
+	type UploadStore interface {
+	    Load(ctx context.Context, id string) (data []byte, mimeType string, err error)
+	}
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

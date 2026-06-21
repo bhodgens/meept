@@ -36,8 +36,12 @@ type ReviewPolicy struct {
 	// Tool hints that NEVER require review (trusted operations)
 	SkipReview []string
 
-	// Agent-specific reviewer mappings
-	// e.g., coder → code-reviewer, debugger → debug-reviewer
+	// Agent-specific reviewer mappings.
+	//
+	// Deprecated: reviewer routing is now dynamic via ReviewPolicy.Registry
+	// and the reviews_domain field on reviewer-role agents. ReviewerMapping
+	// is kept as an override escape hatch — entries here take precedence
+	// over dynamic discovery so callers can pin specific reviewers.
 	ReviewerMapping map[string]string
 
 	// Maximum revision cycles before requiring human intervention
@@ -48,20 +52,24 @@ type ReviewPolicy struct {
 
 	// Whether review is enabled globally
 	Enabled bool
+
+	// Registry, when non-nil, is consulted by SelectReviewer to find
+	// reviewer-role agents dynamically by reviews_domain. When nil,
+	// SelectReviewer falls back to a tool-hint → domain mapping and
+	// looks up reviewers in the registry if available, else returns
+	// the test-reviewer fallback.
+	Registry *AgentRegistry
 }
 
 // DefaultReviewPolicy returns sensible defaults for review policy.
+//
+// ReviewerMapping is empty by default: reviewer routing is dynamic via
+// ReviewPolicy.Registry and the reviews_domain field on reviewer agents.
 func DefaultReviewPolicy() *ReviewPolicy {
 	return &ReviewPolicy{
 		RequireReview: []string{string(IntentCode), KeywordRefactor, string(IntentDebug), string(IntentGit), KeywordFix},
 		SkipReview:    []string{string(IntentChat), string(IntentReport), string(IntentRecall), string(IntentSearch), string(IntentAnalyze)},
-		ReviewerMapping: map[string]string{
-			config.AgentIDCoder:     SourceCodeReviewer,
-			config.AgentIDDebugger:  "debug-reviewer",
-			config.AgentIDPlanner:   "planner-reviewer",
-			config.AgentIDAnalyst:   "analyst-reviewer",
-			config.AgentIDCommitter: SourceCodeReviewer,
-		},
+		ReviewerMapping: map[string]string{},
 		MaxRevisionCycles: 3,
 		AutoApprovePatterns: []string{
 			"*.md",
@@ -95,30 +103,67 @@ func (p *ReviewPolicy) NeedsReview(step *task.TaskStep) bool {
 	return step.ToolHint != ""
 }
 
+// agentDomainMap maps originating agent IDs to their review domain. This is
+// the fallback used when ReviewPolicy.Registry is nil or has no matching
+// reviewer-role agent. Domains match the reviews_domain declared on the
+// bundled reviewer AGENT.md files.
+var agentDomainMap = map[string]string{
+	config.AgentIDCoder:     "code",
+	config.AgentIDDebugger:  "debug",
+	config.AgentIDPlanner:   "plan",
+	config.AgentIDAnalyst:   "analysis",
+	config.AgentIDCommitter: "code",
+	config.AgentIDResearcher: "analysis",
+	config.AgentIDChat:      "test",
+}
+
+// toolHintDomainMap maps tool hints / intent keywords to review domains.
+var toolHintDomainMap = map[string]string{
+	string(IntentCode):     "code",
+	KeywordRefactor:        "code",
+	string(IntentDebug):    "debug",
+	KeywordFix:             "debug",
+	string(IntentPlan):     "plan",
+	string(IntentAnalyze):  "analysis",
+	string(IntentResearch): "analysis",
+	string(IntentGit):      "code",
+	KeywordCommit:          "code",
+}
+
 // SelectReviewer selects the appropriate reviewer agent for a step.
+//
+// Resolution order:
+//  1. ReviewerMapping override (explicit pin)
+//  2. Dynamic lookup via Registry for a reviewer-role agent whose
+//     reviews_domain matches the originating agent's domain
+//  3. Tool-hint → domain → registry lookup
+//  4. "test-reviewer" fallback
 func (p *ReviewPolicy) SelectReviewer(step *task.TaskStep) string {
-	// If step has an agent assigned, map to reviewer
+	// 1. Explicit override wins.
 	if step.AgentID != "" {
-		if reviewer, ok := p.ReviewerMapping[step.AgentID]; ok {
+		if reviewer, ok := p.ReviewerMapping[step.AgentID]; ok && reviewer != "" {
 			return reviewer
 		}
 	}
 
-	// Map tool hint to reviewer
-	switch step.ToolHint {
-	case string(IntentCode), KeywordRefactor:
-		return SourceCodeReviewer
-	case string(IntentDebug), KeywordFix:
-		return "debug-reviewer"
-	case string(IntentPlan):
-		return "planner-reviewer"
-	case string(IntentAnalyze), string(IntentResearch):
-		return "analyst-reviewer"
-	case string(IntentGit), KeywordCommit:
-		return SourceCodeReviewer
-	default:
-		return "test-reviewer" // Default reviewer
+	// 2. Determine target domain from agent ID, then tool hint.
+	domain := ""
+	if step.AgentID != "" {
+		domain = agentDomainMap[step.AgentID]
 	}
+	if domain == "" && step.ToolHint != "" {
+		domain = toolHintDomainMap[step.ToolHint]
+	}
+
+	// 3. Dynamic lookup in the registry (if wired).
+	if p.Registry != nil && domain != "" {
+		if reviewer := p.Registry.findReviewerByDomain(domain); reviewer != "" {
+			return reviewer
+		}
+	}
+
+	// 4. Fallback to the generic test reviewer.
+	return "test-reviewer"
 }
 
 // ShouldAutoApprove checks if a step should auto-approve based on its description.

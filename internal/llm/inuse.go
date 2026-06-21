@@ -14,7 +14,7 @@ type ModelSlots struct {
 }
 
 // AgentModelRef is a minimal view of an agent definition used by
-// BuildModelsInUse. Callers adapt from config.AgentDefinition.
+// BuildModelsInUse. Callers adapt from agents.AgentMetadata.
 type AgentModelRef struct {
 	Model   string
 	Enabled bool

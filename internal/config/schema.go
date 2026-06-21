@@ -6,6 +6,32 @@ import (
 	"time"
 )
 
+// Agent ID constants used throughout the codebase as identifiers. These are
+// the canonical IDs referenced by routing tables, review policies, and
+// worker bootstrapping. The canonical definitions live in AGENT.md files
+// under config/agents/<id>/AGENT.md; these constants exist so Go callers
+// can reference agent IDs without string literals.
+const (
+	AgentIDDispatcher = "dispatcher"
+	AgentIDCoder      = "coder"
+	AgentIDDebugger   = "debugger"
+	AgentIDPlanner    = "planner"
+	AgentIDAnalyst    = "analyst"
+	AgentIDCommitter  = "committer"
+	AgentIDScheduler  = "scheduler"
+	AgentIDChat       = "chat"
+	AgentIDResearcher = "researcher"
+)
+
+// Agent role constants used for role validation and assignment.
+const (
+	AgentRoleDispatcher     = "dispatcher"
+	AgentRoleExecutor       = "executor"
+	AgentRoleConversational = "conversational"
+	AgentRoleReviewer       = "reviewer"
+	AgentRoleBot            = "bot"
+)
+
 // Config is the root configuration structure loaded from meept.toml.
 //
 //gendoc:section config
@@ -644,6 +670,8 @@ type AgentConfig struct {
 	Reflection AgentReflectionConfig `json:"reflection" toml:"reflection"`
 	// Lint holds linting and test runner settings
 	Lint AgentLintConfig `json:"lint" toml:"lint"`
+	// Compression holds prompt compression settings for tool outputs and conversation
+	Compression AgentCompressionConfig `json:"compression" toml:"compression"`
 }
 
 // AgentCompactionConfig holds context compaction settings for the agent.
@@ -684,6 +712,47 @@ type AgentLintConfig struct {
 	TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
 	// MaxOutputLines limits the number of output lines captured
 	MaxOutputLines int `json:"max_output_lines" toml:"max_output_lines"`
+}
+
+// AgentCompressionConfig holds prompt compression settings for tool outputs and conversation.
+// When enabled, large tool results and conversation messages are compressed before being
+// sent to the LLM, reducing token usage by 60-90% while maintaining reversibility via CCR.
+type AgentCompressionConfig struct {
+	// Enabled turns on prompt compression for tool outputs and conversation history.
+	// default: false (disabled until feature is stabilized)
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// MinTokensToCompress is the minimum token count for compression to be attempted.
+	// Messages smaller than this are passed through uncompressed to avoid overhead.
+	// default: 500
+	MinTokensToCompress int `json:"min_tokens_to_compress" toml:"min_tokens_to_compress"`
+	// Strategy is the compression strategy: "smart_crusher" (JSON), "code" (AST),
+	// "log" (log files), "search" (grep results), or "auto" (content-aware routing).
+	// default: "auto"
+	Strategy string `json:"strategy" toml:"strategy"`
+	// TTL is how long compressed originals are retained in the CCR store.
+	// default: 1h
+	TTL time.Duration `json:"ttl" toml:"ttl"`
+	// LogCompression enables compression for log tool outputs.
+	// default: true
+	LogCompression bool `json:"log_compression" toml:"log_compression"`
+	// CodeCompression enables AST-aware code compression for file reads and edits.
+	// default: true
+	CodeCompression bool `json:"code_compression" toml:"code_compression"`
+	// SearchCompression enables compression for grep/search result outputs.
+	// default: true
+	SearchCompression bool `json:"search_compression" toml:"search_compression"`
+	// JSONCompression enables SmartCrusher compression for JSON tool outputs.
+	// default: true
+	JSONCompression bool `json:"json_compression" toml:"json_compression"`
+	// CompressUserMessages enables compression of user messages (not just tool outputs).
+	// For coding agents, this is typically false (user messages are short queries).
+	// Set true for document compression or RAG pipelines.
+	// default: false
+	CompressUserMessages bool `json:"compress_user_messages" toml:"compress_user_messages"`
+	// TargetRatio is the target compression ratio (kept tokens / original tokens).
+	// Only applies to lossy compressors. 0.3 = keep 30%, discard 70%.
+	// default: 0.0 (use compressor defaults)
+	TargetRatio float64 `json:"target_ratio" toml:"target_ratio"`
 }
 
 // WatchdogConfig holds agent monitoring and timeout settings.
@@ -1375,6 +1444,18 @@ func DefaultConfig() *Config {
 				MaxFollowUp:     20,
 				PersistFollowUp: true,
 				FlushDelayMs:    5000,
+			},
+			Compression: AgentCompressionConfig{
+				Enabled:              false, // Disabled by default until feature is stabilized
+				MinTokensToCompress:  500,
+				Strategy:             "auto",
+				TTL:                  time.Hour,
+				LogCompression:       true,
+				CodeCompression:      true,
+				SearchCompression:    true,
+				JSONCompression:      true,
+				CompressUserMessages: false,
+				TargetRatio:          0.0, // Use compressor defaults
 			},
 		},
 		Security: SecurityConfig{

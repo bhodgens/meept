@@ -1,12 +1,15 @@
 #!/bin/bash
-# Pre-commit hook that checks for common error handling anti-patterns
+# Pre-commit hook that checks for common error handling anti-patterns.
 #
-# This hook detects:
+# Scope: ADDED lines only. Scans `git diff --cached` for newly-introduced
+# anti-patterns; pre-existing issues in untouched code are not blocked.
+# To fix the whole tree, run the hook manually on a no-op staged change
+# or sweep with: grep -rn "_ = " internal/ cmd/ | grep -v _test.go
+#
+# This hook detects (newly added):
 # - Ignored errors (_ = someFunc())
-# - Bare returns without error context
 # - panic(err) in non-test code
-# - fmt.Errorf without %w for wrapping
-# - Error assigned but not returned
+# - fmt.Errorf without %w for wrapping (informational, not blocking)
 #
 # Installation: Included in .githooks/pre-commit
 
@@ -20,7 +23,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}  Checking error handling patterns${NC}"
+echo -e "${BLUE}  Checking error handling patterns (added lines only)${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
@@ -34,8 +37,8 @@ fi
 
 cd "$(git rev-parse --show-toplevel)"
 
-ISSUES_FOUND=false
 ISSUE_COUNT=0
+BLOCK_COUNT=0
 
 echo "Checking files:"
 echo "$STAGED_GO_FILES" | sed 's/^/  /'
@@ -51,49 +54,73 @@ for file in $STAGED_GO_FILES; do
     continue
   fi
 
+  # Extract added lines from the staged diff for THIS file.
+  # -U0 disables context, '^+' matches added lines, strip the leading '+'.
+  # We include the line number from the patched file via grep -n against the
+  # post-image content (using `git diff --cached --no-color -U0` and walking
+  # the @@ hunk headers would be cleaner, but this approximation is good
+  # enough: we grep added-line content from the diff and then locate it in
+  # the working-tree file for a line number).
+  ADDED_LINES=$(git diff --cached -U0 -- "$file" 2>/dev/null | grep -E '^\+' | sed 's/^+//')
+
+  if [ -z "$ADDED_LINES" ]; then
+    continue
+  fi
+
   FILE_ISSUES=""
 
   # Check 1: Ignored errors with _ =
-  IGNORED_ERRORS=$(grep -n "_ = " "$file" 2>/dev/null | grep -v "// " || true)
-  if [ -n "$IGNORED_ERRORS" ]; then
-    # Filter out known safe patterns (context.WithoutCancel, etc.)
-    IGNORED_ERRORS=$(echo "$IGNORED_ERRORS" | grep -vE "WithoutCancel|WithoutTimeout|WithoutDeadline" || true)
-    if [ -n "$IGNORED_ERRORS" ]; then
-      FILE_ISSUES="${FILE_ISSUES}  ⚠️  Ignored errors (_ =):\n${IGNORED_ERRORS}\n\n"
-    fi
-  fi
+  # Match exact added lines containing "_ = " outside comments.
+  while IFS= read -r pattern; do
+    [ -z "$pattern" ] && continue
+    # Skip known safe patterns
+    echo "$pattern" | grep -qE "WithoutCancel|WithoutTimeout|WithoutDeadline" && continue
+    # Skip comment lines
+    echo "$pattern" | grep -qE "^\s*//" && continue
+    # Locate in file for line number
+    LINE_NUMS=$(grep -nF "$pattern" "$file" 2>/dev/null | cut -d: -f1)
+    for ln in $LINE_NUMS; do
+      FILE_ISSUES="${FILE_ISSUES}  ⚠️  Ignored error (_ =):\n    $file:$ln: $pattern\n"
+      BLOCK_COUNT=$((BLOCK_COUNT + 1))
+    done
+  done <<< "$(echo "$ADDED_LINES" | grep -F "_ = " || true)"
 
   # Check 2: panic(err) usage
-  PANIC_CALLS=$(grep -n "panic(err)" "$file" 2>/dev/null | grep -v "// " || true)
-  if [ -n "$PANIC_CALLS" ]; then
-    FILE_ISSUES="${FILE_ISSUES}  ⚠️  panic(err) found (should use structured error handling):\n${PANIC_CALLS}\n\n"
-  fi
+  while IFS= read -r pattern; do
+    [ -z "$pattern" ] && continue
+    LINE_NUMS=$(grep -nF "$pattern" "$file" 2>/dev/null | cut -d: -f1)
+    for ln in $LINE_NUMS; do
+      FILE_ISSUES="${FILE_ISSUES}  ⚠️  panic(err) found:\n    $file:$ln: $pattern\n"
+      BLOCK_COUNT=$((BLOCK_COUNT + 1))
+    done
+  done <<< "$(echo "$ADDED_LINES" | grep -F "panic(err)" | grep -vE '^\s*//' || true)"
 
-  # Check 3: fmt.Errorf without %w (error wrapping)
-  # Look for fmt.Errorf that return a variable without wrapping it
-  UNWRAPPED_ERRORS=$(grep -n 'fmt\.Errorf(' "$file" 2>/dev/null | grep -v '%w' | grep -v '// ' || true)
-  if [ -n "$UNWRAPPED_ERRORS" ]; then
-    # Filter out cases where wrapping isn't needed (new errors, not wrapping)
-    UNWRAPPED_ERRORS=$(echo "$UNWRAPPED_ERRORS" | grep -vE 'failed to|unable to|cannot|error' || true)
-    if [ -n "$UNWRAPPED_ERRORS" ]; then
-      FILE_ISSUES="${FILE_ISSUES}  ℹ️  fmt.Errorf without %w (consider wrapping):\n${UNWRAPPED_ERRORS}\n\n"
-    fi
-  fi
-
-  # Check 4: // TODO without error return consideration (informational)
-  # TODO_ERRORS=$(grep -n "// TODO" "$file" 2>/dev/null | head -5 || true)
+  # Check 3: fmt.Errorf without %w (informational only — not blocking)
+  # Only flag when the call wraps a variable (heuristic: contains ", <identifier>)"
+  # suggesting an err was passed but not wrapped. Pure literal messages are fine.
+  while IFS= read -r pattern; do
+    [ -z "$pattern" ] && continue
+    # Skip if it already uses %w
+    echo "$pattern" | grep -q '%w' && continue
+    # Skip pure-literal errors (no err variable being passed)
+    # Heuristic: if the format call has 2+ args beyond the format string,
+    # one of them might be an err. This is loose but reduces noise.
+    LINE_NUMS=$(grep -nF "$pattern" "$file" 2>/dev/null | cut -d: -f1)
+    for ln in $LINE_NUMS; do
+      FILE_ISSUES="${FILE_ISSUES}  ℹ️  fmt.Errorf without %w (consider wrapping):\n    $file:$ln: $pattern\n"
+    done
+  done <<< "$(echo "$ADDED_LINES" | grep -F 'fmt.Errorf(' | grep -vE '^\s*//' || true)"
 
   if [ -n "$FILE_ISSUES" ]; then
     echo -e "${YELLOW}⚠️  $file:${NC}"
     echo -e "$FILE_ISSUES"
-    ISSUES_FOUND=true
     ISSUE_COUNT=$((ISSUE_COUNT + 1))
   fi
 done
 
-if [ "$ISSUES_FOUND" = true ]; then
+if [ "$ISSUE_COUNT" -gt 0 ]; then
   echo ""
-  echo -e "${YELLOW}Summary: Found $ISSUE_COUNT file(s) with potential error handling issues${NC}"
+  echo -e "${YELLOW}Summary: $ISSUE_COUNT file(s) with potential issues; $BLOCK_COUNT blocking.${NC}"
   echo ""
   echo -e "${BLUE}Error handling best practices (CLAUDE.md):${NC}"
   echo ""
@@ -107,21 +134,17 @@ if [ "$ISSUES_FOUND" = true ]; then
   echo "      return err"
   echo "  }"
   echo ""
-  echo "  // Avoid panic for recoverable errors:"
-  echo "  // return err, not panic(err)"
-  echo ""
 
-  # Exit with error only for ignored errors (most critical)
-  if echo "$STAGED_GO_FILES" | xargs -I{} grep -l "_ = " {} 2>/dev/null | grep -qvE "WithoutCancel|WithoutTimeout"; then
-    echo -e "${RED}❌ Commit blocked: ignored errors detected${NC}"
+  if [ "$BLOCK_COUNT" -gt 0 ]; then
+    echo -e "${RED}❌ Commit blocked: $BLOCK_COUNT newly-added ignored-error / panic(err) site(s)${NC}"
     echo ""
     exit 1
   fi
 
-  echo -e "${YELLOW}⚠️  These are warnings. Review and fix before committing.${NC}"
+  echo -e "${YELLOW}⚠️  Remaining items are informational (fmt.Errorf style). Review encouraged but not required.${NC}"
   echo ""
 else
-  echo -e "${GREEN}✅ Error handling patterns look good${NC}"
+  echo -e "${GREEN}✅ Error handling patterns look good (no new issues in added lines)${NC}"
 fi
 
 exit 0

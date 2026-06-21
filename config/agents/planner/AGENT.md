@@ -2,6 +2,9 @@
 id: planner
 name: Planning Specialist
 role: executor
+description: Decomposes complex tasks into actionable plans and execution strategies
+enabled: true
+can_delegate: false
 capabilities:
   - reasoning
 max_iterations: 8
@@ -9,6 +12,11 @@ timeout_seconds: 300
 max_tokens_per_turn: 4096
 max_memory_refs: 15
 temperature: 0.4
+prompt_components:
+  - base.constitution
+  - base.restrictions
+  - capabilities.memory
+  - capabilities.tasks
 ---
 
 # Planning Specialist

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/agent/prompts"
+	"github.com/caimlas/meept/internal/compress"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
@@ -505,6 +506,9 @@ type AgentLoop struct {
 	// Metrics collection for analytics
 	taskCollector    *metrics.TaskCollector
 	responseAnalyzer *metrics.ResponseAnalyzer
+
+	// Compression pipeline for prompt compression (CCR-based)
+	compressionPipeline *compress.Pipeline
 }
 
 // sessionStore is an interface for session persistence operations needed by AgentLoop.
@@ -922,6 +926,25 @@ func WithResponseAnalyzer(ra *metrics.ResponseAnalyzer) LoopOption {
 func (l *AgentLoop) SetResponseAnalyzer(ra *metrics.ResponseAnalyzer) {
 	if ra != nil {
 		l.responseAnalyzer = ra
+	}
+}
+
+// WithCompressionPipeline sets the compression pipeline for prompt compression.
+// This enables CCR-based compression of tool results and messages.
+func WithCompressionPipeline(pipeline *compress.Pipeline) LoopOption {
+	return func(l *AgentLoop) {
+		if pipeline != nil {
+			l.compressionPipeline = pipeline
+		}
+	}
+}
+
+// SetCompressionPipeline sets the compression pipeline after agent loop creation.
+// This is used when the compression pipeline depends on components created
+// after the agent loop (e.g. in daemon wiring).
+func (l *AgentLoop) SetCompressionPipeline(pipeline *compress.Pipeline) {
+	if pipeline != nil {
+		l.compressionPipeline = pipeline
 	}
 }
 
@@ -2061,6 +2084,34 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					// minimum readable result size
 					600)
 			}
+			// Apply compression to tool results if enabled
+			if l.compressionPipeline != nil {
+				for i, result := range results {
+					// Get tool name from the corresponding tool call
+					var toolName string
+					var output string
+					if i < len(response.ToolCalls) {
+						toolName = response.ToolCalls[i].Function.Name
+					}
+					// Extract output from Result field (could be string or map)
+					if s, ok := result.Result.(string); ok {
+						output = s
+					} else if m, ok := result.Result.(map[string]any); ok {
+						if out, ok := m["output"].(string); ok {
+							output = out
+						}
+					}
+					if output != "" && len(output) > 500 {
+						compressedResult, err := l.compressionPipeline.CompressToolResult(ctx, toolName, output, dynamicToolBudget)
+						if err == nil {
+							result.Result = compressedResult
+						} else {
+							l.logger.Debug("Compression pipeline failed, using fallback", "error", err)
+						}
+					}
+				}
+			}
+			// Add tool results to conversation
 			for _, result := range results {
 				conv.AddToolResult(result.ToolCallID, result.ToCompressedJSON(dynamicToolBudget))
 			}

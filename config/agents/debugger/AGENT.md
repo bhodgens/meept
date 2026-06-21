@@ -2,6 +2,9 @@
 id: debugger
 name: Debug Specialist
 role: executor
+description: Investigates, diagnoses, and fixes bugs with systematic precision
+enabled: true
+can_delegate: false
 additional_tools:
   - file_read
   - file_write
@@ -15,6 +18,11 @@ timeout_seconds: 900
 max_tokens_per_turn: 4096
 max_memory_refs: 20
 temperature: 0.2
+prompt_components:
+  - base.constitution
+  - base.restrictions
+  - capabilities.memory
+  - capabilities.tasks
 ---
 
 # Debug Specialist

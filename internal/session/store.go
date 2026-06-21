@@ -118,4 +118,8 @@ type Store interface {
 	StoreEmbedding(ctx context.Context, messageID int64, embedding []float32) error
 	// UnembeddedMessages returns message IDs that have no embedding yet.
 	UnembeddedMessages(ctx context.Context, limit int) ([]MessageSearchResult, error)
+
+	// Thread operations (NEW)
+	GetActiveThread(ctx context.Context, sessionID string) (*Thread, error)
+	ListThreadsBySession(ctx context.Context, sessionID string) ([]*Thread, error)
 }

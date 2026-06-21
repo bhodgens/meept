@@ -34,8 +34,6 @@ func BuildSectionFields(keyPath string) []Field {
 		return buildSecurityFields()
 	case "client":
 		return buildClientFields()
-	case "agents":
-		return buildAgentsFields()
 	case "mcp_servers":
 		return buildMCPServersFields()
 	case "models":
@@ -94,6 +92,8 @@ func BuildSectionFields(keyPath string) []Field {
 		return buildSTTFields()
 	case "oauth":
 		return buildOAuthFields()
+	case "compression":
+		return buildCompressionFields()
 	default:
 		return []Field{
 			NewTextField("_stub", "(section not yet implemented)", ""),

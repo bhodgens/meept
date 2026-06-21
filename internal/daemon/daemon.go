@@ -21,10 +21,12 @@ import (
 	"github.com/caimlas/meept/internal/calendar"
 	"github.com/caimlas/meept/internal/cluster"
 	"github.com/caimlas/meept/internal/comm/http"
+	comprpkg "github.com/caimlas/meept/internal/compress"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/metrics"
+	mcp "github.com/caimlas/meept/internal/tools/mcp"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/queue"
@@ -54,9 +56,11 @@ type Daemon struct {
 	httpServer       *http.Server
 	components       *Components // Agent, tools, LLM, etc.
 	metricsStore     *metrics.Store
-	metricsCollector *metrics.Collector
-	taskCollector    *metrics.TaskCollector
-	logger           *slog.Logger
+	metricsCollector    *metrics.Collector
+	compressionStore    comprpkg.CCRStore
+	compressionPipeline *comprpkg.Pipeline
+	taskCollector       *metrics.TaskCollector
+	logger              *slog.Logger
 
 	// Plan system
 	planStore   *plan.SQLiteStore
@@ -734,6 +738,44 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		logger.Info("HTTP transport disabled")
 	}
 
+	// Create compression CCR store and pipeline (if compression is enabled in config)
+	var (
+		compPipeline *comprpkg.Pipeline
+		compStore    comprpkg.CCRStore
+	)
+	if fullCfg.Agent.Compression.Enabled {
+		ccrPath := filepath.Join(cfg.StateDir, "compression.db")
+		ccrStore, err := comprpkg.NewCCRStore(comprpkg.CCRStoreConfig{
+			DatabasePath: ccrPath,
+			DefaultTTL:   comprpkg.Duration{Duration: fullCfg.Agent.Compression.TTL},
+		})
+		if err != nil {
+			logger.Warn("Failed to create compression store, compression disabled at runtime", "error", err)
+		} else {
+			compStore = ccrStore
+			logger.Info("Compression CCR store created", "path", ccrPath)
+
+			pipelineCfg := comprpkg.PipelineConfig{
+				MinTokensToCompress:  fullCfg.Agent.Compression.MinTokensToCompress,
+				TTL:                  fullCfg.Agent.Compression.TTL,
+				EnableCCR:            true,
+				CompressUserMessages: fullCfg.Agent.Compression.CompressUserMessages,
+				TargetRatio:          fullCfg.Agent.Compression.TargetRatio,
+			}
+			compPipeline = comprpkg.NewPipelineWithConfig(ccrStore, pipelineCfg)
+
+			// Wire pipeline into components' AgentLoop
+			if components != nil && components.AgentLoop != nil {
+				components.AgentLoop.SetCompressionPipeline(compPipeline)
+				logger.Info("Compression pipeline wired into agent loop")
+			}
+			logger.Info("Compression pipeline created",
+				"strategy", fullCfg.Agent.Compression.Strategy,
+				"min_tokens", fullCfg.Agent.Compression.MinTokensToCompress,
+			)
+		}
+	}
+
 	// Ensure at least one transport is enabled
 	if rpcServer == nil && httpSrv == nil {
 		logger.Error("No transports enabled. Daemon cannot accept connections.")
@@ -747,10 +789,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		registry:         reg,
 		rpc:              rpcServer,
 		httpServer:       httpSrv,
-		components:       components,
-		metricsStore:     metricsStore,
-		metricsCollector: coll,
-		taskCollector:    taskColl,
+		components:          components,
+		metricsStore:        metricsStore,
+		metricsCollector:    coll,
+		compressionStore:    compStore,
+		compressionPipeline: compPipeline,
+		taskCollector:       taskColl,
 		planStore:        planStoreInst,
 		planManager:      planManagerInst,
 		planHandler:      planHandlerInst,
@@ -758,6 +802,21 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		pidFile:          cfg.PIDFile,
 	}
 	d.status.Store(models.StatusStopped)
+
+	// Register compression tools with the MCP manager so they appear in the
+	// tool registry (mcc_compress, mcc_retrieve, mcc_stats).
+	if d.components != nil && d.components.MCPManager != nil {
+		cfg := mcp.CompressionConfig{
+			Enabled:             fullCfg.Agent.Compression.Enabled,
+			MinTokensToCompress: fullCfg.Agent.Compression.MinTokensToCompress,
+			TTL:                 int64(fullCfg.Agent.Compression.TTL.Seconds()),
+		}
+		handler := mcp.NewCompressionHandler(compPipeline, compStore, cfg)
+		d.components.MCPManager.RegisterCompressionHandler(handler)
+		if handler != nil {
+			logger.Info("Compression tools registered with MCP manager")
+		}
+	}
 
 	// Wire PlanManager into Orchestrator for plan system integration.
 	// The PlanHandler subscribes to task events independently via the bus,

@@ -67,6 +67,11 @@ func NewReviewManager(cfg ReviewManagerConfig) *ReviewManager {
 		cfg.ValidationPolicy = DefaultValidationPolicy()
 	}
 
+	// Wire the registry into the policy so SelectReviewer can do dynamic
+	// reviewer-role lookup by reviews_domain. This replaces the hardcoded
+	// ReviewerMapping that lived in DefaultReviewPolicy historically.
+	cfg.Policy.Registry = cfg.Registry
+
 	return &ReviewManager{
 		registry:         cfg.Registry,
 		stepStore:        cfg.StepStore,

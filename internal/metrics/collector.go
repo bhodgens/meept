@@ -248,6 +248,8 @@ func (c *Collector) handleBusMessage(msg *models.BusMessage) {
 		})
 	case "step.review_completed":
 		c.recordReviewMetrics(msg)
+	case "compress.saved":
+		c.recordCompression(msg)
 	}
 }
 
@@ -288,6 +290,56 @@ func (c *Collector) RecordLLMCall(model string, inputTokens, outputTokens int, l
 	c.store.Record("llm.latency", latency.Seconds(), map[string]string{
 		DimModel: model,
 	})
+}
+
+// RecordCompression records a compression event.
+func (c *Collector) RecordCompression(tokensSaved int, strategy string) {
+	tags := map[string]string{
+		DimModel:   strategy,
+		"tool_name": "compress",
+	}
+	c.store.Record("compression.tokens_saved", float64(tokensSaved), tags)
+	c.store.Record("compression.calls", 1, tags)
+}
+
+// recordCompression extracts compression metrics from a bus message.
+func (c *Collector) recordCompression(msg *models.BusMessage) {
+	var payload struct {
+		Event       struct {
+			TokensBefore int    `json:"tokens_before"`
+			TokensAfter  int    `json:"tokens_after"`
+			Strategy     string `json:"strategy"`
+			ToolName     string `json:"tool_name"`
+			Hash         string `json:"hash"`
+		} `json:"event"`
+	}
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		c.logger.Error("failed to unmarshal compression payload", "error", err)
+		return
+	}
+
+	strategy := payload.Event.Strategy
+	if strategy == "" {
+		strategy = "unknown"
+	}
+	tokensSaved := payload.Event.TokensBefore - payload.Event.TokensAfter
+	if tokensSaved < 0 {
+		tokensSaved = 0
+	}
+
+	c.store.RecordEvent("compression.saved", "info",
+		fmt.Sprintf("Compressed content: %d tokens saved (%s)", tokensSaved, strategy),
+		map[string]any{
+			DimModel:        strategy,
+			"tool_name":     payload.Event.ToolName,
+			"tokens_before":  payload.Event.TokensBefore,
+			"tokens_after":   payload.Event.TokensAfter,
+			"tokens_saved":   tokensSaved,
+			"hash":           payload.Event.Hash,
+		},
+	)
+
+	c.RecordCompression(tokensSaved, strategy)
 }
 
 // RecordAgentIteration records an agent iteration.

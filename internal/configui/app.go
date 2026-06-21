@@ -90,7 +90,6 @@ func NewApp() *App {
 		{Title: "transport", Description: "RPC/HTTP toggles, addresses, endpoints", KeyPath: "transport", ConfigFile: "meept.json5"},
 		{Title: "llm", Description: "budget, broker, adaptive timeout, context firewall, cache", KeyPath: "llm", ConfigFile: "meept.json5"},
 		{Title: "models", Description: "default model, providers, credentials, runtime", KeyPath: "models", ConfigFile: "models.json5"},
-		{Title: "agents", Description: "agent definitions, tools, prompts", KeyPath: "agents", ConfigFile: "agents.json5"},
 		{Title: "memory", Description: "backend, episodic/task/personality, embeddings, limits", KeyPath: "memory", ConfigFile: "meept.json5"},
 		{Title: "security", Description: "sanitization, path restrictions, tirith, audit", KeyPath: "security", ConfigFile: "meept.json5"},
 		{Title: "projects", Description: "path fencing, worktrees, project registration", KeyPath: "projects", ConfigFile: "meept.json5"},
@@ -125,6 +124,7 @@ func NewApp() *App {
 		{Title: "calendar", Description: "Google OAuth, reminders", KeyPath: "calendar", ConfigFile: "meept.json5"},
 		{Title: "memvid", Description: "endpoint, data dir, timeout", KeyPath: "memvid", ConfigFile: "meept.json5"},
 		{Title: "presets", Description: "temperature/preset profiles", KeyPath: "presets", ConfigFile: "presets.json5"},
+		{Title: "compression", Description: "prompt compression for tool outputs and conversation", KeyPath: "agent.compression", ConfigFile: "meept.json5"},
 	}
 
 	all := append(primary, advanced...)
@@ -421,7 +421,7 @@ func (a *App) handleEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.phase = PhaseSection
 			a.editor = nil
 		}
-	case FieldText, FieldMasked, FieldNumber, FieldFloat:
+	case FieldText, FieldMasked, FieldNumber, FieldFloat, FieldDuration:
 		switch msg.String() {
 		case "enter":
 			a.editor.ConfirmInput()
@@ -688,7 +688,7 @@ func (a *App) viewEditor() string {
 			s += cursor + prefix + opt + "\n"
 		}
 		s += "\n" + a.styles.help.Render("up/down navigate  enter confirm  esc cancel")
-	case FieldText, FieldMasked, FieldNumber, FieldFloat:
+	case FieldText, FieldMasked, FieldNumber, FieldFloat, FieldDuration:
 		display := a.editor.InputValue()
 		if f.Type() == FieldMasked && display != "" {
 			display = "......"

@@ -87,8 +87,10 @@ func (t IntentType) DefaultAgent() string {
 		return config.AgentIDDebugger
 	case IntentPlan:
 		return config.AgentIDPlanner
-	case IntentAnalyze, IntentSearch, IntentResearch:
+	case IntentAnalyze, IntentSearch:
 		return config.AgentIDAnalyst
+	case IntentResearch:
+		return config.AgentIDResearcher
 	case IntentPair, IntentCollaborate:
 		return config.AgentIDAnalyst
 	case IntentGit:

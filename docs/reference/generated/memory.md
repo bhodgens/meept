@@ -88,6 +88,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) Consolidate\(ctx context.Context\) \(\*ConsolidationReport, error\)](<#Manager.Consolidate>)
   - [func \(m \*Manager\) Delete\(ctx context.Context, id string\) error](<#Manager.Delete>)
   - [func \(m \*Manager\) DistributedConfig\(\) config.DistributedMemoryConfig](<#Manager.DistributedConfig>)
+  - [func \(m \*Manager\) Embedder\(\) EmbeddingProvider](<#Manager.Embedder>)
   - [func \(m \*Manager\) Episodic\(\) \*EpisodicMemory](<#Manager.Episodic>)
   - [func \(m \*Manager\) GetByID\(ctx context.Context, id string\) \(\*Memory, error\)](<#Manager.GetByID>)
   - [func \(m \*Manager\) GetByIDs\(ctx context.Context, ids \[\]string\) \(\[\]Memory, error\)](<#Manager.GetByIDs>)
@@ -876,6 +877,13 @@ Delete removes a memory by ID from the appropriate backend.
 	func (m *Manager) DistributedConfig() config.DistributedMemoryConfig
 
 DistributedConfig returns the distributed memory configuration.
+
+<a name="Manager.Embedder"></a>
+### func \(\*Manager\) Embedder
+
+	func (m *Manager) Embedder() EmbeddingProvider
+
+Embedder returns the configured embedding provider, or nil if none is set. Callers should nil\-check before use.
 
 <a name="Manager.Episodic"></a>
 ### func \(\*Manager\) Episodic

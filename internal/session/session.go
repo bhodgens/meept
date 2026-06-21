@@ -35,18 +35,61 @@ const (
 //
 //nolint:revive // stutter with package name is intentional for API clarity
 type Session struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	Description     string    `json:"description,omitempty"`
-	ConversationID  string    `json:"conversation_id"`
-	CreatedAt       time.Time `json:"created_at"`
-	LastActivity    time.Time `json:"last_activity"`
-	AttachedClients []string  `json:"attached_clients"`
-	WorkerIDs       []string  `json:"worker_ids,omitempty"`
-	LeafMessageID   *int64    `json:"leaf_message_id,omitempty"`
-	ProjectID       string    `json:"project_id,omitempty"`
-	ProjectPath     string    `json:"project_path,omitempty"`
-	NoFence         bool      `json:"no_fence,omitempty"`
+	ID              string              `json:"id"`
+	Name            string              `json:"name"`
+	Description     string              `json:"description,omitempty"`
+	ConversationID  string              `json:"conversation_id"` // DEPRECATED: use thread.ConversationID
+	CreatedAt       time.Time           `json:"created_at"`
+	LastActivity    time.Time           `json:"last_activity"`
+	AttachedClients []string            `json:"attached_clients"`
+	WorkerIDs       []string            `json:"worker_ids,omitempty"`
+	LeafMessageID   *int64              `json:"leaf_message_id,omitempty"`
+	ProjectID       string              `json:"project_id,omitempty"`
+	ProjectPath     string              `json:"project_path,omitempty"`
+	NoFence         bool                `json:"no_fence,omitempty"`
+
+	// Thread-based context partitioning (NEW)
+	Threads        map[string]*Thread `json:"threads,omitempty"` // threadID -> Thread
+	ActiveThreadID string             `json:"active_thread_id,omitempty"`
+}
+
+// GetActiveThread returns the currently active thread.
+func (s *Session) GetActiveThread() *Thread {
+	if s.ActiveThreadID == "" || s.Threads == nil {
+		return nil
+	}
+	return s.Threads[s.ActiveThreadID]
+}
+
+// GetOrCreateThread returns existing thread or creates new one.
+func (s *Session) GetOrCreateThread(threadID, topicLabel string) *Thread {
+	if s.Threads == nil {
+		s.Threads = make(map[string]*Thread)
+	}
+
+	if thread, exists := s.Threads[threadID]; exists {
+		return thread
+	}
+
+	thread := &Thread{
+		ID:             threadID,
+		SessionID:      s.ID,
+		TopicLabel:     topicLabel,
+		ConversationID: s.ConversationID + "-" + threadID, // Unique per thread
+		CreatedAt:      time.Now().UTC(),
+		LastActivityAt: time.Now().UTC(),
+		IsActive:       true,
+	}
+
+	// Deactivate other threads
+	for _, t := range s.Threads {
+		t.IsActive = false
+	}
+	thread.IsActive = true
+	s.ActiveThreadID = threadID
+	s.Threads[threadID] = thread
+
+	return thread
 }
 
 // MemoryStore manages sessions with thread-safe operations (in-memory, non-persistent).
@@ -764,6 +807,35 @@ func (s *MemoryStore) StoreEmbedding(ctx context.Context, messageID int64, embed
 // UnembeddedMessages returns empty in MemoryStore (embeddings are not tracked).
 func (s *MemoryStore) UnembeddedMessages(ctx context.Context, limit int) ([]MessageSearchResult, error) {
 	return nil, nil
+}
+
+// GetActiveThread returns the active thread for a session.
+func (s *MemoryStore) GetActiveThread(ctx context.Context, sessionID string) (*Thread, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return nil, nil
+	}
+	return session.GetActiveThread(), nil
+}
+
+// ListThreadsBySession returns all threads for a session.
+func (s *MemoryStore) ListThreadsBySession(ctx context.Context, sessionID string) ([]*Thread, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists || session.Threads == nil {
+		return []*Thread{}, nil
+	}
+
+	threads := make([]*Thread, 0, len(session.Threads))
+	for _, t := range session.Threads {
+		threads = append(threads, t)
+	}
+	return threads, nil
 }
 
 // Ensure MemoryStore implements Store interface.

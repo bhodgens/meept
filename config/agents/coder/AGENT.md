@@ -2,6 +2,9 @@
 id: coder
 name: Code Specialist
 role: executor
+description: Implements, modifies, and maintains code with precision
+enabled: true
+can_delegate: false
 additional_tools:
   - file_read
   - file_write
@@ -16,6 +19,11 @@ timeout_seconds: 600
 max_tokens_per_turn: 4096
 max_memory_refs: 20
 temperature: 0.3
+prompt_components:
+  - base.constitution
+  - base.restrictions
+  - capabilities.memory
+  - capabilities.tasks
 ---
 
 # Code Specialist

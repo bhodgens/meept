@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/caimlas/meept/internal/config"
 )
@@ -23,6 +24,9 @@ func GetKeypath(cfg *config.Config, path string) (string, error) {
 	case reflect.Bool:
 		return fmt.Sprintf("%v", val.Bool()), nil
 	case reflect.Int, reflect.Int64:
+		if val.Type().Name() == "Duration" {
+			return fmt.Sprintf("%v", time.Duration(val.Int()).String()), nil
+		}
 		return fmt.Sprintf("%v", val.Int()), nil
 	case reflect.Float64:
 		return fmt.Sprintf("%v", val.Float()), nil
@@ -69,11 +73,20 @@ func SetKeypath(cfg *config.Config, path string, value any) error {
 					}
 					fv.SetBool(b)
 				case reflect.Int, reflect.Int64:
-					n, err := strconv.Atoi(val)
-					if err != nil {
-						return fmt.Errorf("invalid int %q: %w", val, err)
+					// Special-case time.Duration: parse human-readable string (e.g. "1h30m")
+					if fv.Type().Name() == "Duration" {
+						d, err := time.ParseDuration(val)
+						if err != nil {
+							return fmt.Errorf("invalid duration %q: %w", val, err)
+						}
+						fv.SetInt(int64(d))
+					} else {
+						n, err := strconv.Atoi(val)
+						if err != nil {
+							return fmt.Errorf("invalid int %q: %w", val, err)
+						}
+						fv.SetInt(int64(n))
 					}
-					fv.SetInt(int64(n))
 				case reflect.Float64:
 					f, err := strconv.ParseFloat(val, 64)
 					if err != nil {

@@ -2,6 +2,9 @@
 id: analyst
 name: Analysis Specialist
 role: executor
+description: Researches topics, analyzes information, and synthesizes insights
+enabled: true
+can_delegate: false
 additional_tools:
   - web_fetch
   - web_search
@@ -14,6 +17,11 @@ timeout_seconds: 600
 max_tokens_per_turn: 4096
 max_memory_refs: 20
 temperature: 0.5
+prompt_components:
+  - base.constitution
+  - base.restrictions
+  - capabilities.memory
+  - capabilities.tasks
 ---
 
 # Analysis Specialist

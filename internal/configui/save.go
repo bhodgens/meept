@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
@@ -21,7 +21,6 @@ var (
 	loadClientConfig    = tui.LoadClientConfig
 	loadProvidersConfig = llm.LoadProvidersConfigDefault
 	loadMCPConfig       = config.LoadMCPConfigDefault
-	loadAgentsConfig    = config.LoadAgentDefinitionsDefault
 	loadPresetsConfig   = config.LoadPresetsConfigDefault
 )
 
@@ -38,8 +37,6 @@ func SaveSection(sm *SectionModel) error {
 		return saveModelsConfig(sm)
 	case "mcp_servers.json5":
 		return saveMCPServersConfig(sm)
-	case "agents.json5":
-		return saveAgentsConfig(sm)
 	case "presets.json5":
 		return savePresetsConfig(sm)
 	default:
@@ -246,11 +243,20 @@ func setStructField(target any, path string, value string) error {
 				}
 				fv.SetBool(b)
 			case reflect.Int, reflect.Int64:
-				n, err := strconv.Atoi(value)
-				if err != nil {
-					return fmt.Errorf("invalid int %q: %w", value, err)
+				// Special-case time.Duration: parse human-readable string (e.g. "1h30m")
+				if fv.Type().Name() == "Duration" {
+					d, err := time.ParseDuration(value)
+					if err != nil {
+						return fmt.Errorf("invalid duration %q: %w", value, err)
+					}
+					fv.SetInt(int64(d))
+				} else {
+					n, err := strconv.Atoi(value)
+					if err != nil {
+						return fmt.Errorf("invalid int %q: %w", value, err)
+					}
+					fv.SetInt(int64(n))
 				}
-				fv.SetInt(int64(n))
 			case reflect.Float64:
 				f, err := strconv.ParseFloat(value, 64)
 				if err != nil {
@@ -508,79 +514,6 @@ func saveMCPServersConfig(sm *SectionModel) error {
 		}
 	}
 	return WriteConfigFile(ConfigFilePath("mcp_servers.json5"), cfg)
-}
-
-// --- agents.json5 ---
-
-// agentsFile is the JSON structure written to agents.json5.
-type agentsFile struct {
-	Agents []config.AgentDefinition `json:"agents"`
-}
-
-func saveAgentsConfig(sm *SectionModel) error {
-	agents, err := loadAgentsConfig(nil)
-	if err != nil {
-		return fmt.Errorf("load agents config: %w", err)
-	}
-
-	if sm.IsDrilldown() {
-		// Drilldown sub-section: prefix is like "agents.coder"
-		// Find the agent by ID (the DrilldownItem.Name) and apply field changes.
-		parts := strings.SplitN(sm.DrilldownPrefix(), ".", 2)
-		if len(parts) == 2 && parts[0] == "agents" {
-			agentID := parts[1]
-			agent, ok := agents[agentID]
-			if !ok {
-				// New agent: create it
-				agent = &config.AgentDefinition{ID: agentID}
-			}
-			for _, f := range sm.Fields() {
-				if !f.IsDirty() {
-					continue
-				}
-				switch f.Key() {
-				case "additional_tools":
-					val := f.Get()
-					if val == "" {
-						agent.AdditionalTools = nil
-					} else {
-						agent.AdditionalTools = strings.Split(val, ", ")
-					}
-				case "capabilities":
-					val := f.Get()
-					if val == "" {
-						agent.Capabilities = nil
-					} else {
-						agent.Capabilities = strings.Split(val, ", ")
-					}
-				case "prompt_components":
-					val := f.Get()
-					if val == "" {
-						agent.PromptComponents = nil
-					} else {
-						agent.PromptComponents = strings.Split(val, ", ")
-					}
-				default:
-					if err := setStructField(agent, f.Key(), f.Get()); err != nil {
-						return fmt.Errorf("set agents.%s.%s: %w", agentID, f.Key(), err)
-					}
-				}
-			}
-			agents[agentID] = agent
-		}
-	}
-
-	// Convert map to a deterministically ordered slice for stable output.
-	ids := make([]string, 0, len(agents))
-	for id := range agents {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	agentList := make([]config.AgentDefinition, 0, len(ids))
-	for _, id := range ids {
-		agentList = append(agentList, *agents[id])
-	}
-	return WriteConfigFile(ConfigFilePath("agents.json5"), &agentsFile{Agents: agentList})
 }
 
 // --- presets.json5 ---

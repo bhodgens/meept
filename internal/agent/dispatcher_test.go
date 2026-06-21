@@ -657,19 +657,30 @@ func TestGetPendingClarification_ValidState(t *testing.T) {
 }
 
 func TestGetPendingClarification_NoTrueAnalysis(t *testing.T) {
+	// This test verifies support for model directive clarifications,
+	// which don't have TrueAnalysis but still need clarification tracking.
 	d := &Dispatcher{sessionTracker: NewSessionTracker(30 * time.Minute)}
 	intent := &Intent{
 		Type:       string(IntentClarify),
 		Confidence: 0.8,
 		AgentType:  config.AgentIDChat,
-		Summary:    "something",
-		// No TrueAnalysis
+		Summary:    "model directive needs clarification",
+		// No TrueAnalysis - this is the case for model directive clarifications
 	}
 	d.sessionTracker.RecordIntent("session-1", intent, config.AgentIDChat)
 
 	pending := d.getPendingClarification("session-1")
-	if pending != nil {
-		t.Error("should return nil when last clarify intent has no TrueAnalysis")
+	if pending == nil {
+		t.Error("should return pending clarification even when TrueAnalysis is nil (model directive case)")
+	}
+	if pending.OriginalInput != "model directive needs clarification" {
+		t.Errorf("OriginalInput = %q, want %q", pending.OriginalInput, "model directive needs clarification")
+	}
+	if pending.Analysis != nil {
+		t.Error("Analysis should be nil when TrueAnalysis was not set")
+	}
+	if pending.SessionID != "session-1" {
+		t.Errorf("SessionID = %q, want %q", pending.SessionID, "session-1")
 	}
 }
 

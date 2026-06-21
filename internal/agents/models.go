@@ -32,8 +32,27 @@ type AgentMetadata struct {
 	// Role defines the agent's role: "dispatcher", "executor", "reviewer".
 	Role string `yaml:"role"`
 
+	// Description is a one-liner for UI/API display.
+	Description string `yaml:"description,omitempty"`
+
+	// Enabled controls whether the agent is loaded. Nil/absent = true (default on).
+	// Set explicitly to false in AGENT.md to disable an agent.
+	Enabled *bool `yaml:"enabled,omitempty"`
+
+	// CanDelegate controls whether delegate_task is added to the agent's tool set.
+	CanDelegate bool `yaml:"can_delegate"`
+
 	// Model can be an alias name or direct model reference.
 	Model string `yaml:"model,omitempty"`
+
+	// PromptComponents lists component IDs (e.g., "base.constitution") that wrap
+	// the AGENT.md body when assembling the system prompt.
+	PromptComponents []string `yaml:"prompt_components,omitempty"`
+
+	// ReviewsDomain declares the review domain (code|debug|plan|analysis|test)
+	// for reviewer agents. Used by ReviewPolicy.SelectReviewer for dynamic
+	// reviewer routing. Empty for non-reviewer agents.
+	ReviewsDomain string `yaml:"reviews_domain,omitempty"`
 
 	// AdditionalTools are tools beyond baseline that this agent can use.
 	AdditionalTools []string `yaml:"additional_tools,omitempty"`
@@ -67,6 +86,15 @@ type AgentMetadata struct {
 
 	// TopP controls nucleus sampling (nil = use default).
 	TopP *float64 `yaml:"top_p,omitempty"`
+}
+
+// IsEnabled reports whether the agent should be loaded. Nil (absent in
+// frontmatter) is treated as true per the AGENT.md schema contract.
+func (m *AgentMetadata) IsEnabled() bool {
+	if m == nil || m.Enabled == nil {
+		return true
+	}
+	return *m.Enabled
 }
 
 // AgentDefinition represents a fully parsed agent definition from AGENT.md.

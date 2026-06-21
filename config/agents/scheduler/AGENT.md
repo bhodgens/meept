@@ -2,6 +2,9 @@
 id: scheduler
 name: Scheduler Specialist
 role: executor
+description: Creates, manages, and cancels scheduled tasks and reminders
+enabled: true
+can_delegate: false
 additional_tools:
   - schedule_create
   - schedule_list
@@ -11,6 +14,10 @@ timeout_seconds: 60
 max_tokens_per_turn: 1024
 max_memory_refs: 5
 temperature: 0.3
+prompt_components:
+  - base.constitution
+  - base.restrictions
+  - capabilities.memory
 ---
 
 # Scheduler Specialist

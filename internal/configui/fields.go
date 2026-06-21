@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // FieldType identifies the kind of editor a field uses.
@@ -21,6 +22,7 @@ const (
 	FieldFloat
 	FieldDrilldown // opens a sub-screen (list of structs)
 	FieldAction    // action button (e.g. connect/disconnect)
+	FieldDuration  // human-readable duration (e.g. "1h30m")
 )
 
 // Field is the interface for all editable config fields.
@@ -484,6 +486,38 @@ func (f *ActionField) Activate() error {
 		return f.callback()
 	}
 	return nil
+}
+
+// --- DurationField ---
+
+// DurationField represents a time.Duration in human-readable format (e.g. "1h30m").
+type DurationField struct {
+	baseField
+}
+
+// NewDurationField creates a DurationField from a time.Duration value.
+func NewDurationField(key, label string, value time.Duration) *DurationField {
+	s := value.String()
+	return &DurationField{baseField{key: key, label: label, orig: s, current: s}}
+}
+
+func (f *DurationField) Type() FieldType { return FieldDuration }
+
+func (f *DurationField) Display() string { return f.current }
+
+func (f *DurationField) Set(v string) error {
+	_, err := time.ParseDuration(v)
+	if err != nil {
+		return fmt.Errorf("duration field %q: %w", f.key, err)
+	}
+	f.current = v
+	f.dirty = f.current != f.orig
+	return nil
+}
+
+func (f *DurationField) Reset() {
+	f.current = f.orig
+	f.dirty = false
 }
 
 // --- helpers ---

@@ -28,7 +28,7 @@ func TestAppSections(t *testing.T) {
 	for _, s := range sections {
 		names[s.Title] = true
 	}
-	for _, required := range []string{"daemon", "transport", "llm", "models", "agents", "memory", "security", "mcp servers", "client / tui", "scheduler"} {
+	for _, required := range []string{"daemon", "transport", "llm", "models", "memory", "security", "mcp servers", "client / tui", "scheduler"} {
 		if !names[required] {
 			t.Errorf("missing required section: %s", required)
 		}

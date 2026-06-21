@@ -3243,3 +3243,19 @@ func (s *Server) handleMCPServerSetEnabled(w http.ResponseWriter, r *http.Reques
 	}
 	s.writeJSON(w, http.StatusOK, result)
 }
+
+// handleCompressionStats handles GET /api/v1/compression/stats.
+// Returns: {entry_count, total_saved, retrieval_count, by_strategy}.
+func (s *Server) handleCompressionStats(w http.ResponseWriter, r *http.Request) {
+	if s.CompressionStatsGetter == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "compression service not available")
+		return
+	}
+
+	stats := s.CompressionStatsGetter()
+	if stats == nil {
+		stats = map[string]any{}
+	}
+
+	s.writeJSON(w, http.StatusOK, stats)
+}

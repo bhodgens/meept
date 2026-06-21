@@ -186,6 +186,12 @@ func (s *SQLiteStore) migrate() error {
 	if err := s.backfillFTS(); err != nil {
 		// Non-fatal: FTS may be unavailable on some SQLite builds.
 		s.logger.Warn("FTS backfill skipped", "error", err)
+
+	// Create session_threads table for thread-based context partitioning
+	if err := s.migrateThreadsTable(); err != nil {
+		return fmt.Errorf("failed to create session_threads table: %w", err)
+	}
+
 	}
 
 	// Embedding dimension is configurable via WithEmbeddingDim (defaults to
@@ -1951,6 +1957,18 @@ func (s *SQLiteStore) UnembeddedMessages(ctx context.Context, limit int) ([]Mess
 		return nil, fmt.Errorf("iterate UnembeddedMessages rows: %w", err)
 	}
 	return results, nil
+}
+
+// GetActiveThread returns the active thread for a session.
+// TODO: Implement thread persistence in SQLite when full thread feature is wired.
+func (s *SQLiteStore) GetActiveThread(ctx context.Context, sessionID string) (*Thread, error) {
+	return nil, nil
+}
+
+// ListThreadsBySession returns all threads for a session.
+// TODO: Implement thread persistence in SQLite when full thread feature is wired.
+func (s *SQLiteStore) ListThreadsBySession(ctx context.Context, sessionID string) ([]*Thread, error) {
+	return []*Thread{}, nil
 }
 
 // serializeVec0Embedding serializes a float32 vector into the JSON array

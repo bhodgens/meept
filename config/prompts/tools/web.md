@@ -1,11 +1,3 @@
-<!--
-name: 'Tool: Web'
-description: Web search and fetch tool descriptions for agent prompts
-version: 1.0.0
-agent_types: [researcher]
-conditional: true
--->
-
 # Web Operations
 
 You can search the web and fetch web content for research tasks.

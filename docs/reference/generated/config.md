@@ -23,6 +23,7 @@ Package config provides configuration loading and validation for meept.
 - [func LoadJSON5WithDefault\(path string, v any\) error](<#LoadJSON5WithDefault>)
 - [func MergeAgentDefaults\(agent \*AgentDefinition\)](<#MergeAgentDefaults>)
 - [func ParseLogLevel\(level string\) slog.Level](<#ParseLogLevel>)
+- [func SaveMCPConfig\(path string, cfg \*MCPServersConfig\) error](<#SaveMCPConfig>)
 - [func StripJSON5Comments\(s string\) string](<#StripJSON5Comments>)
 - [func UnmarshalJSON5\(data \[\]byte, v any\) error](<#UnmarshalJSON5>)
 - [func ValidateAgentDefinition\(agent \*AgentDefinition\) error](<#ValidateAgentDefinition>)
@@ -160,6 +161,7 @@ Package config provides configuration loading and validation for meept.
 - [type TestHarnessConfig](<#TestHarnessConfig>)
 - [type ToolingConfig](<#ToolingConfig>)
 - [type TransportConfig](<#TransportConfig>)
+- [type UploadsConfig](<#UploadsConfig>)
 - [type ValidationConfig](<#ValidationConfig>)
 - [type WatchdogConfig](<#WatchdogConfig>)
 - [type WebConfig](<#WebConfig>)
@@ -271,6 +273,13 @@ MergeAgentDefaults applies default values to an agent definition.
 	func ParseLogLevel(level string) slog.Level
 
 ParseLogLevel converts a string log level to slog.Level.
+
+<a name="SaveMCPConfig"></a>
+## func SaveMCPConfig
+
+	func SaveMCPConfig(path string, cfg *MCPServersConfig) error
+
+SaveMCPConfig writes the MCP server configuration atomically. Writes to path\+".tmp" then renames into place \(POSIX atomic\). $\{VAR\} placeholders in env values are preserved as\-is.
 
 <a name="StripJSON5Comments"></a>
 ## func StripJSON5Comments
@@ -797,12 +806,13 @@ ShutdownTimeout returns the configured shutdown timeout, falling back to 10s.
 DaemonConfig holds daemon\-specific settings.
 
 	type DaemonConfig struct {
-	    SocketPath         string `json:"socket_path"        toml:"socket_path"`
-	    PIDFile            string `json:"pid_file"            toml:"pid_file"`
-	    LogLevel           string `json:"log_level"           toml:"log_level"`
-	    DataDir            string `json:"data_dir"            toml:"data_dir"`
-	    ShutdownTimeout    string `json:"shutdown_timeout"    toml:"shutdown_timeout"`
-	    ChatTimeoutSeconds int    `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
+	    SocketPath         string        `json:"socket_path"        toml:"socket_path"`
+	    PIDFile            string        `json:"pid_file"            toml:"pid_file"`
+	    LogLevel           string        `json:"log_level"           toml:"log_level"`
+	    DataDir            string        `json:"data_dir"            toml:"data_dir"`
+	    ShutdownTimeout    string        `json:"shutdown_timeout"    toml:"shutdown_timeout"`
+	    ChatTimeoutSeconds int           `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
+	    Uploads            UploadsConfig `json:"uploads"             toml:"uploads"`
 	}
 
 <a name="DetectionConfig"></a>
@@ -2222,6 +2232,19 @@ TransportConfig controls which transports the daemon exposes. Clients can connec
 	type TransportConfig struct {
 	    RPC  RPCTransportConfig  `json:"rpc"  toml:"rpc"`
 	    HTTP HTTPTransportConfig `json:"http" toml:"http"`
+	}
+
+<a name="UploadsConfig"></a>
+## type UploadsConfig
+
+UploadsConfig configures the file upload service for multimodal content.
+
+	type UploadsConfig struct {
+	    Enabled         bool     `json:"enabled"          toml:"enabled"`
+	    MaxSizeMB       int      `json:"max_size_mb"      toml:"max_size_mb"`
+	    AllowedTypes    []string `json:"allowed_types"    toml:"allowed_types"`
+	    GCRetentionDays int      `json:"gc_retention_days" toml:"gc_retention_days"`
+	    GCIntervalHours int      `json:"gc_interval_hours" toml:"gc_interval_hours"`
 	}
 
 <a name="ValidationConfig"></a>

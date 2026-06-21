@@ -77,6 +77,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) HandleMessage\(ctx context.Context, message string\) \(string, error\)](<#AgentLoop.HandleMessage>)
   - [func \(l \*AgentLoop\) Run\(ctx context.Context, messages \<\-chan \*AgentMessage, responses chan\<\- \*AgentResponse\) error](<#AgentLoop.Run>)
   - [func \(l \*AgentLoop\) RunOnce\(ctx context.Context, userMessage, conversationID string\) \(response string, err error\)](<#AgentLoop.RunOnce>)
+  - [func \(l \*AgentLoop\) RunOnceWithParts\(ctx context.Context, userMessage string, parts \[\]llm.ContentPart, conversationID string\) \(response string, err error\)](<#AgentLoop.RunOnceWithParts>)
   - [func \(l \*AgentLoop\) RunWithSkill\(ctx context.Context, skill \*skills.Skill, input string, conversationID string\) \(string, error\)](<#AgentLoop.RunWithSkill>)
   - [func \(l \*AgentLoop\) RunWithTask\(ctx context.Context, t \*task.Task\) \(string, error\)](<#AgentLoop.RunWithTask>)
   - [func \(l \*AgentLoop\) SetBranchManager\(mgr any\)](<#AgentLoop.SetBranchManager>)
@@ -94,6 +95,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetSkillLoader\(loader \*skills.LazySkillLoader\)](<#AgentLoop.SetSkillLoader>)
   - [func \(l \*AgentLoop\) SetTaskCollector\(tc \*metrics.TaskCollector\)](<#AgentLoop.SetTaskCollector>)
   - [func \(l \*AgentLoop\) SetTaskStore\(store \*task.Store\)](<#AgentLoop.SetTaskStore>)
+  - [func \(l \*AgentLoop\) SetUploadStore\(store llm.UploadStore\)](<#AgentLoop.SetUploadStore>)
 - [type AgentMemoryConfig](<#AgentMemoryConfig>)
 - [type AgentMessage](<#AgentMessage>)
 - [type AgentRegistry](<#AgentRegistry>)
@@ -278,6 +280,7 @@ Package agent provides the agent loop and related components.
   - [func \(c \*Conversation\) AddSystemMessage\(content string\)](<#Conversation.AddSystemMessage>)
   - [func \(c \*Conversation\) AddToolResult\(toolCallID, content string\)](<#Conversation.AddToolResult>)
   - [func \(c \*Conversation\) AddUserMessage\(content string\)](<#Conversation.AddUserMessage>)
+  - [func \(c \*Conversation\) AddUserMessageWithParts\(content string, parts \[\]llm.ContentPart\)](<#Conversation.AddUserMessageWithParts>)
   - [func \(c \*Conversation\) BuildPromptWithSnapshot\(\) string](<#Conversation.BuildPromptWithSnapshot>)
   - [func \(c \*Conversation\) Clear\(\)](<#Conversation.Clear>)
   - [func \(c \*Conversation\) ClearAnchors\(\)](<#Conversation.ClearAnchors>)
@@ -338,7 +341,7 @@ Package agent provides the agent loop and related components.
 - [type DispatchResult](<#DispatchResult>)
 - [type Dispatcher](<#Dispatcher>)
   - [func NewDispatcher\(cfg DispatcherConfig\) \*Dispatcher](<#NewDispatcher>)
-  - [func \(d \*Dispatcher\) ClassifyAndRoute\(ctx context.Context, input, sessionID string\) \(\*DispatchResult, error\)](<#Dispatcher.ClassifyAndRoute>)
+  - [func \(d \*Dispatcher\) ClassifyAndRoute\(ctx context.Context, input, sessionID string, parts \[\]llm.ContentPart\) \(\*DispatchResult, error\)](<#Dispatcher.ClassifyAndRoute>)
   - [func \(d \*Dispatcher\) FollowUpActiveAgent\(ctx context.Context, conversationID, content, source string\) error](<#Dispatcher.FollowUpActiveAgent>)
   - [func \(d \*Dispatcher\) GetActiveTasks\(ctx context.Context\) \(\[\]\*task.Task, error\)](<#Dispatcher.GetActiveTasks>)
   - [func \(d \*Dispatcher\) GetCapabilityMatcher\(\) \*CapabilityMatcher](<#Dispatcher.GetCapabilityMatcher>)
@@ -1826,7 +1829,14 @@ Run starts the agent loop in a continuous mode, processing messages from a chann
 
 	func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID string) (response string, err error)
 
-RunOnce processes a single user turn through the full reasoning loop.
+RunOnce processes a single user turn through the full reasoning loop. This is a convenience wrapper for callers that have no multimodal parts.
+
+<a name="AgentLoop.RunOnceWithParts"></a>
+### func \(\*AgentLoop\) RunOnceWithParts
+
+	func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, parts []llm.ContentPart, conversationID string) (response string, err error)
+
+RunOnceWithParts processes a single user turn through the full reasoning loop, optionally carrying multimodal content parts \(e.g. image attachments\). When parts is non\-empty the underlying ChatMessage is created via Conversation.AddUserMessageWithParts so that provider serializers emit native image blocks.
 
 <a name="AgentLoop.RunWithSkill"></a>
 ### func \(\*AgentLoop\) RunWithSkill
@@ -1946,6 +1956,13 @@ SetTaskCollector sets the task collector after agent loop creation. This is used
 	func (l *AgentLoop) SetTaskStore(store *task.Store)
 
 SetTaskStore sets the task store after construction. This allows wiring the store after the loop is created when dependencies are initialized in a specific order.
+
+<a name="AgentLoop.SetUploadStore"></a>
+### func \(\*AgentLoop\) SetUploadStore
+
+	func (l *AgentLoop) SetUploadStore(store llm.UploadStore)
+
+SetUploadStore sets the upload store used to resolve image file references for the vision pre\-flight step. Nil is safely ignored.
 
 <a name="AgentMemoryConfig"></a>
 ## type AgentMemoryConfig
@@ -3136,9 +3153,10 @@ ChatMessageReceivedData is emitted when a client sends a message to a session. B
 ChatRequest is the expected payload for chat.request messages.
 
 	type ChatRequest struct {
-	    Message        string `json:"message"`
-	    ConversationID string `json:"conversation_id"`
-	    SourceClient   string `json:"source_client,omitempty"`
+	    Message        string            `json:"message"`
+	    ConversationID string            `json:"conversation_id"`
+	    SourceClient   string            `json:"source_client,omitempty"`
+	    Parts          []llm.ContentPart `json:"parts,omitempty"`
 	}
 
 <a name="ChatResponse"></a>
@@ -3552,6 +3570,13 @@ AddToolResult adds a tool result message.
 	func (c *Conversation) AddUserMessage(content string)
 
 AddUserMessage is a convenience method to add a user message.
+
+<a name="Conversation.AddUserMessageWithParts"></a>
+### func \(\*Conversation\) AddUserMessageWithParts
+
+	func (c *Conversation) AddUserMessageWithParts(content string, parts []llm.ContentPart)
+
+AddUserMessageWithParts adds a user message with multimodal content parts. When parts is non\-empty the LLM serializer uses Parts in place of Content. The text content is still stored for FTS indexing, summarization, and context compaction fallback.
 
 <a name="Conversation.BuildPromptWithSnapshot"></a>
 ### func \(\*Conversation\) BuildPromptWithSnapshot
@@ -4014,6 +4039,12 @@ DispatchResult is the result of dispatching a request.
 	    // (e.g., LLM classifier failed and fallback was used). Empty when classification
 	    // succeeded normally.
 	    ClassificationNotice string `json:"classification_notice,omitempty"`
+	
+	    // Parts carries multimodal content parts (e.g. image attachments) from the
+	    // original request through the dispatcher so that RouteToAgent can forward
+	    // them to the specialist agent's RunOnceWithParts. Text-only requests leave
+	    // this nil, preserving the existing RunOnce path.
+	    Parts []llm.ContentPart `json:"-"`
 	}
 
 <a name="Dispatcher"></a>
@@ -4035,9 +4066,11 @@ NewDispatcher creates a new dispatcher.
 <a name="Dispatcher.ClassifyAndRoute"></a>
 ### func \(\*Dispatcher\) ClassifyAndRoute
 
-	func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID string) (*DispatchResult, error)
+	func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID string, parts []llm.ContentPart) (*DispatchResult, error)
 
 ClassifyAndRoute is the main entry point for the dispatcher.
+
+parts carries optional multimodal content \(e.g. image attachments\). When non\-empty, the parts are attached to the returned DispatchResult so that RouteToAgent can forward them to the specialist agent's RunOnceWithParts. Text\-only callers may pass nil.
 
 <a name="Dispatcher.FollowUpActiveAgent"></a>
 ### func \(\*Dispatcher\) FollowUpActiveAgent
@@ -5640,6 +5673,9 @@ MessageClassification classifies the semantic type of a message for importance\-
 	    MessageToolResultKey
 	    // MessageReasoningStep is intermediate reasoning or exploration (lowest priority).
 	    MessageReasoningStep
+	    // MessageAnchor is a message exempt from truncation (validation instructions,
+	    // escalation triggers, etc.). Always retained.
+	    MessageAnchor
 	)
 
 <a name="MessageEndData"></a>

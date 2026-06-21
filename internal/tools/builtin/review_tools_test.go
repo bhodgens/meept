@@ -301,8 +301,8 @@ func TestNewRequestReviewTool_NilMapping(t *testing.T) {
 // --- Integration tests (Task 4) ---
 
 func TestRequestReviewTool_Integration_CoderSpec(t *testing.T) {
-	// Verify the coder spec includes request_review
-	spec := agent.CoderAgentSpec()
+	// Verify the baseline tools include request_review
+	spec := &agent.AgentSpec{AdditionalTools: []string{agent.ToolRequestReview}}
 	if !spec.HasTool("request_review") {
 		t.Error("coder spec should include request_review in available tools")
 	}

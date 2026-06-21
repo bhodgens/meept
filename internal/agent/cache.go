@@ -48,8 +48,7 @@ const (
 
 // Source identifiers for event attribution.
 const (
-	SourceChatHandler  = "chat-handler"
-	SourceCodeReviewer = "code-reviewer"
+	SourceChatHandler = "chat-handler"
 )
 
 // Default cached tools - read-only, idempotent operations safe for caching

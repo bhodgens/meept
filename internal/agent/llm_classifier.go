@@ -53,7 +53,7 @@ var agentMapping = map[string]string{
 	string(IntentAnalyze):     config.AgentIDAnalyst,
 	string(IntentSearch):      config.AgentIDAnalyst,
 	string(IntentChat):        config.AgentIDChat,
-	string(IntentResearch):    config.AgentIDAnalyst,
+	string(IntentResearch):    config.AgentIDResearcher,
 	string(IntentSecurity):    config.AgentIDChat,
 	string(IntentSkill):       config.AgentIDChat,
 	string(IntentCompound):    config.AgentIDDispatcher,
