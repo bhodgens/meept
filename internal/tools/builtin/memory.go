@@ -772,10 +772,31 @@ func importanceRank(level string) int {
 	}
 }
 
-// MemoryReflectTool performs meta-cognition on stored memories to generate insights.
+// MemoryReflectTool performs meta-cognition on stored memories to generate
+// insights. When a knowledge graph is attached via SetGraph, the tool also
+// surfaces epistemic signals: contradicts/superseded/potential_contradicts
+// edges, pending decision/prediction reviews, and auto claims awaiting
+// triage.
 type MemoryReflectTool struct {
 	manager   *memory.Manager
 	llmClient *llm.Client
+	graph     memoryGraphInspector
+}
+
+// memoryGraphInspector is the minimal graph interface MemoryReflectTool
+// needs to surface epistemic edges. Defined locally so the tool can accept
+// either *memory.KnowledgeGraph or a test double without a hard dep.
+type memoryGraphInspector interface {
+	GetEdgesForMemory(ctx context.Context, memoryID string) (out, in []memory.MemoryEdge, err error)
+}
+
+// SetGraph attaches a graph inspector used to surface epistemic edges in
+// the reflection output. Nil-safe per CLAUDE.md setter convention: callers
+// may pass nil to detach the graph.
+func (t *MemoryReflectTool) SetGraph(g memoryGraphInspector) {
+	if g != nil {
+		t.graph = g
+	}
 }
 
 // NewMemoryReflectTool creates a new memory reflect tool.
@@ -879,11 +900,32 @@ func (t *MemoryReflectTool) Execute(ctx context.Context, args map[string]any) (a
 		filteredMemories = append(filteredMemories, r.Memory)
 	}
 
-	if len(filteredMemories) == 0 {
-		return MemoryReflectResult{
-			Success:   false,
-			Message:   "No relevant memories found for reflection",
-			FactsUsed: 0,
+	// Gather epistemic signals. These are best-effort: any failure leaves
+	// the corresponding slice empty. The LLM synthesis below gets both the
+	// hindsight facts and the epistemic context.
+	claimResults := t.searchEpistemic(ctx, memory.MemoryTypeClaim, prompt, 20)
+	decisionResults := t.searchEpistemic(ctx, memory.MemoryTypeDecision, prompt, 10)
+	predictionResults := t.searchEpistemic(ctx, memory.MemoryTypePrediction, prompt, 10)
+	questionResults := t.searchEpistemic(ctx, memory.MemoryTypeQuestion, prompt, 10)
+
+	// Surface contradicts/superseded/potential_contradicts edges from the
+	// graph (when attached) for the top epistemic memories found above.
+	contradictions := t.collectContradictionEdges(ctx, claimResults)
+
+	// Pending reviews (decisions due, predictions past horizon) and auto
+	// claims awaiting triage. All best-effort.
+	pendingDecisions, pendingPredictions := t.collectPendingReviews(ctx)
+	autoCandidates := t.collectAutoClaims(ctx)
+
+	if len(filteredMemories) == 0 && len(claimResults) == 0 {
+		return map[string]any{
+			"success":               false,
+			"message":               "No relevant memories found for reflection",
+			"facts_used":            0,
+			"epistemic":             map[string]any{},
+			"contradictions":        contradictions,
+			"pending_reviews":       map[string]any{"decisions": pendingDecisions, "predictions": pendingPredictions},
+			"auto_claim_candidates": autoCandidates,
 		}, nil
 	}
 
@@ -906,6 +948,24 @@ func (t *MemoryReflectTool) Execute(ctx context.Context, args map[string]any) (a
 		factsContext.WriteString(fmt.Sprintf("[%d] (domain: %s, importance: %s) %s\n", i+1, dom, imp, mem.Content))
 	}
 
+	// Append epistemic context to the LLM prompt so the model can reason
+	// about contradictions and pending reviews alongside the facts.
+	if len(claimResults) > 0 || len(contradictions) > 0 || len(pendingDecisions) > 0 || len(pendingPredictions) > 0 {
+		factsContext.WriteString("\nEpistemic context:\n")
+		for _, r := range claimResults {
+			factsContext.WriteString(fmt.Sprintf("- [claim:%s] %s\n", r.Memory.ID, truncatePreview(r.Memory.Content, 100)))
+		}
+		for _, c := range contradictions {
+			factsContext.WriteString(fmt.Sprintf("- [contradiction] %s -> %s (%s)\n", c["source_id"], c["target_id"], c["edge_type"]))
+		}
+		for _, d := range pendingDecisions {
+			factsContext.WriteString(fmt.Sprintf("- [decision-due] %s\n", truncatePreview(d.Memory.Content, 100)))
+		}
+		for _, p := range pendingPredictions {
+			factsContext.WriteString(fmt.Sprintf("- [prediction-due] %s\n", truncatePreview(p.Memory.Content, 100)))
+		}
+	}
+
 	// Call LLM for reflection
 	messages := []llm.ChatMessage{
 		{
@@ -926,13 +986,109 @@ func (t *MemoryReflectTool) Execute(ctx context.Context, args map[string]any) (a
 	// Parse response into structured insights
 	insights := parseInsightsFromResponse(response.Content)
 
-	return MemoryReflectResult{
-		Success:   true,
-		Insights:  insights,
-		Summary:   response.Content,
-		FactsUsed: len(filteredMemories),
-		Message:   fmt.Sprintf("Generated reflection from %d facts", len(filteredMemories)),
+	return map[string]any{
+		"success":    true,
+		"insights":   insights,
+		"summary":    response.Content,
+		"facts_used": len(filteredMemories),
+		"message":    fmt.Sprintf("Generated reflection from %d facts and %d epistemic memories", len(filteredMemories), len(claimResults)),
+		"epistemic": map[string]any{
+			"claims":      claimResults,
+			"decisions":   decisionResults,
+			"predictions": predictionResults,
+			"questions":   questionResults,
+		},
+		"contradictions":        contradictions,
+		"pending_reviews":       map[string]any{"decisions": pendingDecisions, "predictions": pendingPredictions},
+		"auto_claim_candidates": autoCandidates,
 	}, nil
+}
+
+// searchEpistemic runs a best-effort search for epistemic memories of the
+// given type, swallowing errors so reflection continues on partial data.
+func (t *MemoryReflectTool) searchEpistemic(ctx context.Context, memType memory.MemoryType, prompt string, limit int) []memory.MemoryResult {
+	if t.manager == nil {
+		return nil
+	}
+	results, err := t.manager.Search(ctx, memory.MemoryQuery{
+		Type:  memType,
+		Query: prompt,
+		Limit: limit,
+	})
+	if err != nil {
+		return nil
+	}
+	return results
+}
+
+// collectContradictionEdges walks the graph edges for each claim and reports
+// contradicts/superseded/potential_contradicts relationships. Best-effort.
+func (t *MemoryReflectTool) collectContradictionEdges(ctx context.Context, claims []memory.MemoryResult) []map[string]any {
+	if t.graph == nil || len(claims) == 0 {
+		return nil
+	}
+	targetTypes := map[memory.EdgeType]struct{}{
+		memory.EdgeTypeContradicts:          {},
+		memory.EdgeTypeSuperseded:           {},
+		memory.EdgeTypePotentialContradicts: {},
+	}
+	var out []map[string]any
+	for _, r := range claims {
+		outEdges, inEdges, err := t.graph.GetEdgesForMemory(ctx, r.Memory.ID)
+		if err != nil {
+			continue
+		}
+		for _, e := range outEdges {
+			if _, ok := targetTypes[e.EdgeType]; ok {
+				out = append(out, map[string]any{
+					"source_id": e.SourceID,
+					"target_id": e.TargetID,
+					"edge_type": string(e.EdgeType),
+					"weight":    e.Weight,
+				})
+			}
+		}
+		for _, e := range inEdges {
+			if _, ok := targetTypes[e.EdgeType]; ok {
+				out = append(out, map[string]any{
+					"source_id": e.SourceID,
+					"target_id": e.TargetID,
+					"edge_type": string(e.EdgeType),
+					"weight":    e.Weight,
+				})
+			}
+		}
+	}
+	return out
+}
+
+// collectPendingReviews wraps Manager.ListPendingReviews and returns the
+// decision/prediction slices as-is on success. Best-effort: errors return
+// nil, nil.
+func (t *MemoryReflectTool) collectPendingReviews(ctx context.Context) (decisions, predictions []memory.MemoryResult) {
+	if t.manager == nil {
+		return nil, nil
+	}
+	decisions, predictions, err := t.manager.ListPendingReviews(ctx, time.Now())
+	if err != nil {
+		return nil, nil
+	}
+	return decisions, predictions
+}
+
+// collectAutoClaims wraps Manager.ListAutoClaims and returns recent auto
+// claims awaiting user triage. Best-effort: errors return nil.
+func (t *MemoryReflectTool) collectAutoClaims(ctx context.Context) []memory.MemoryResult {
+	if t.manager == nil {
+		return nil
+	}
+	// Surface all auto claims created in the past 30 days.
+	cutoff := time.Now().AddDate(0, 0, -30)
+	auto, err := t.manager.ListAutoClaims(ctx, cutoff, 20)
+	if err != nil {
+		return nil
+	}
+	return auto
 }
 
 // parseInsightsFromResponse extracts bullet-point insights from LLM response.
