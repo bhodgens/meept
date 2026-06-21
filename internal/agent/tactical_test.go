@@ -30,7 +30,7 @@ func TestSelectAgent(t *testing.T) {
 		{"debug", "debugger"},
 		{"fix", "debugger"},
 		{"analyze", "analyst"},
-		{"research", "analyst"},
+		{"research", "researcher"},
 		{"git", "committer"},
 		{"commit", "committer"},
 		{"schedule", "scheduler"},

@@ -5,4 +5,5 @@ const (
 	KeyCount     = "count"
 	KeyMessage   = "message"
 	RoleExecutor = "Executor"
+	RoleReviewer = "Reviewer"
 )

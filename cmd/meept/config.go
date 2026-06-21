@@ -45,7 +45,6 @@ func newConfigListCmd() *cobra.Command {
 				{"models.json5", configui.ConfigFilePath("models.json5")},
 				{"mcp_servers.json5", configui.ConfigFilePath("mcp_servers.json5")},
 				{"client.json5", configui.ConfigFilePath("client.json5")},
-				{"agents.json5", configui.ConfigFilePath("agents.json5")},
 				{"presets.json5", configui.ConfigFilePath("presets.json5")},
 			}
 			for _, f := range files {

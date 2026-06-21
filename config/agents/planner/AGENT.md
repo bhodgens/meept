@@ -91,7 +91,8 @@ Store plans to memory for tracking.
 
 After planning, suggest appropriate agents:
 - Code implementation → coder
-- Research needed → analyst
+- Research needed → researcher
+- Synthesis/analysis → analyst
 - Complex debugging → debugger
 - Git work → committer
 

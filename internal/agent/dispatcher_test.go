@@ -532,6 +532,41 @@ func TestClassifyAll(t *testing.T) {
 	}
 }
 
+// TestKeywordClassifier_ResearchRoutesToResearcher verifies that "research"
+// queries produce IntentResearch (not IntentAnalyze), so they route to the
+// dedicated researcher agent rather than the analyst.
+func TestKeywordClassifier_ResearchRoutesToResearcher(t *testing.T) {
+	c := &KeywordClassifier{}
+	ctx := context.Background()
+
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{"research literal", "research best practices for X"},
+		{"investigate", "investigate why the cluster is slow"},
+		{"deep dive", "do a deep dive on the auth flow"},
+		{"study", "study the existing patterns before coding"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			intents := c.ClassifyAll(ctx, tc.input, nil)
+			if len(intents) == 0 {
+				t.Fatalf("no intents returned for %q", tc.input)
+			}
+			top := intents[0]
+			if top.Type != string(IntentResearch) {
+				t.Errorf("ClassifyAll(%q) top intent = %q, want %q",
+					tc.input, top.Type, string(IntentResearch))
+			}
+			if top.AgentType != config.AgentIDResearcher {
+				t.Errorf("ClassifyAll(%q) top agent = %q, want %q",
+					tc.input, top.AgentType, config.AgentIDResearcher)
+			}
+		})
+	}
+}
+
 func TestRouteToAgentUsesReportRouter(t *testing.T) {
 	// Verify that RouteToAgent returns a response that incorporates
 	// report routing decisions, not just StripReport of the raw response

@@ -369,8 +369,8 @@ func TestAgentsList_Default(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	body := parseBody(t, w)
-	if body["count"].(float64) != 8 {
-		t.Fatalf("expected 8 agents, got %v", body["count"])
+	if body["count"].(float64) != 14 {
+		t.Fatalf("expected 14 agents (8 standard + researcher + 5 reviewers), got %v", body["count"])
 	}
 }
 

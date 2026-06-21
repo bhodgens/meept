@@ -1535,8 +1535,11 @@ var keywordPatterns = []keywordPattern{
 	{[]string{"collaborate", "pair program", "differential", "a/b test", "compare approaches", "work together", "collaborative"}, string(IntentCollaborate), config.AgentIDAnalyst, 0.8, true},
 
 	// Analysis/Research ("summarize" alone stays here for document summarization;
-	// "summarize what" and "summary of work" are captured by report intent above)
-	{[]string{"research", string(IntentAnalyze), "summarize", KeywordExplain, "what is", "how does"}, string(IntentAnalyze), config.AgentIDAnalyst, 0.7, false},
+	// "summarize what" and "summary of work" are captured by report intent above).
+	// Pure research/investigation intents route to the dedicated researcher agent;
+	// synthesis/explanation intents stay with the analyst.
+	{[]string{"research", "investigate", "deep dive", "study"}, string(IntentResearch), config.AgentIDResearcher, 0.7, false},
+	{[]string{string(IntentAnalyze), "summarize", KeywordExplain, "what is", "how does"}, string(IntentAnalyze), config.AgentIDAnalyst, 0.7, false},
 	{[]string{string(IntentSearch), "find", "look up", "google"}, string(IntentSearch), config.AgentIDAnalyst, 0.7, false},
 
 	// General chat (lower priority)

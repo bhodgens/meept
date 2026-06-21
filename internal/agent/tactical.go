@@ -1072,8 +1072,10 @@ func (ts *TacticalScheduler) selectAgent(step *task.TaskStep) string {
 		return config.AgentIDCoder
 	case string(IntentDebug), KeywordFix:
 		return config.AgentIDDebugger
-	case string(IntentAnalyze), string(IntentResearch):
+	case string(IntentAnalyze):
 		return config.AgentIDAnalyst
+	case string(IntentResearch):
+		return config.AgentIDResearcher
 	case string(IntentGit), KeywordCommit:
 		return config.AgentIDCommitter
 	case string(IntentSchedule):

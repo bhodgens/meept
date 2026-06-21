@@ -62,7 +62,9 @@ func (s *Server) handleAgentsDelegate(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, result)
 }
 
-// defaultAgentList returns the built-in agent definitions.
+// defaultAgentList returns the built-in agent definitions used only as a
+// fallback when the server has no agent lister wired. The canonical roster
+// lives in config/agents/*/AGENT.md and is reached via the lister path.
 func defaultAgentList() []AgentEntry {
 	return []AgentEntry{
 		{ID: config.AgentIDDispatcher, Name: config.AgentIDDispatcher, Role: "Dispatcher", Description: "Intake, classify, route to specialists", Enabled: true},
@@ -70,8 +72,14 @@ func defaultAgentList() []AgentEntry {
 		{ID: config.AgentIDCoder, Name: config.AgentIDCoder, Role: RoleExecutor, Description: "File ops, shell, coding tasks", Enabled: true},
 		{ID: config.AgentIDDebugger, Name: config.AgentIDDebugger, Role: RoleExecutor, Description: "Troubleshooting, bug fixing", Enabled: true},
 		{ID: config.AgentIDPlanner, Name: config.AgentIDPlanner, Role: RoleExecutor, Description: "Task decomposition, planning", Enabled: true},
-		{ID: config.AgentIDAnalyst, Name: config.AgentIDAnalyst, Role: RoleExecutor, Description: "Research, data analysis", Enabled: true},
+		{ID: config.AgentIDAnalyst, Name: config.AgentIDAnalyst, Role: RoleExecutor, Description: "Synthesizes information, draws insights, summarizes", Enabled: true},
+		{ID: config.AgentIDResearcher, Name: config.AgentIDResearcher, Role: RoleExecutor, Description: "Gathers information from web, documentation, and codebase", Enabled: true},
 		{ID: config.AgentIDCommitter, Name: config.AgentIDCommitter, Role: RoleExecutor, Description: "Git operations", Enabled: true},
 		{ID: config.AgentIDScheduler, Name: config.AgentIDScheduler, Role: RoleExecutor, Description: "Job scheduling", Enabled: true},
+		{ID: "code-reviewer", Name: "code-reviewer", Role: RoleReviewer, Description: "Reviews code changes for correctness and style", Enabled: true},
+		{ID: "test-reviewer", Name: "test-reviewer", Role: RoleReviewer, Description: "Reviews test coverage and correctness", Enabled: true},
+		{ID: "debug-reviewer", Name: "debug-reviewer", Role: RoleReviewer, Description: "Reviews debugging work for root-cause and side effects", Enabled: true},
+		{ID: "analyst-reviewer", Name: "analyst-reviewer", Role: RoleReviewer, Description: "Reviews analyses for accuracy and actionability", Enabled: true},
+		{ID: "planner-reviewer", Name: "planner-reviewer", Role: RoleReviewer, Description: "Reviews plans for feasibility and ordering", Enabled: true},
 	}
 }
