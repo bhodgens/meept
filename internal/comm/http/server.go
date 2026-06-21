@@ -164,10 +164,13 @@ type Server struct {
 
 // AgentInfo describes an agent for listing.
 type AgentInfo struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Enabled     bool   `json:"enabled"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Enabled       bool   `json:"enabled"`
+	Role          string `json:"role"`
+	CanDelegate   bool   `json:"can_delegate"`
+	ReviewsDomain string `json:"reviews_domain,omitempty"`
 }
 
 // Agent describes a full agent configuration.

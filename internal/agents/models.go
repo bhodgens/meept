@@ -86,6 +86,33 @@ type AgentMetadata struct {
 
 	// TopP controls nucleus sampling (nil = use default).
 	TopP *float64 `yaml:"top_p,omitempty"`
+
+	// Reasoning holds per-agent reasoning/thinking settings (effort tier,
+	// self-modulation bounds, budget override). Nil = defer to model default.
+	Reasoning *AgentReasoningMetadata `yaml:"reasoning,omitempty"`
+}
+
+// AgentReasoningMetadata is the AGENT.md frontmatter form of the per-agent
+// reasoning config. The registry converts it to llm.AgentReasoningConfig at
+// load time.
+type AgentReasoningMetadata struct {
+	// Effort is the initial reasoning tier (e.g. "high", "xhigh").
+	Effort string `yaml:"effort,omitempty"`
+
+	// AllowSelfModulation permits the agent loop to change effort between
+	// turns. Default false.
+	AllowSelfModulation bool `yaml:"allow_self_modulation"`
+
+	// MinEffort / MaxEffort bound self-modulation. Empty = no bound on
+	// that side.
+	MinEffort string `yaml:"min_effort,omitempty"`
+	MaxEffort string `yaml:"max_effort,omitempty"`
+
+	// BudgetTokens overrides the tier→budget mapping for this agent.
+	BudgetTokens *int `yaml:"budget_tokens,omitempty"`
+
+	// Force bypasses capability gating.
+	Force bool `yaml:"force"`
 }
 
 // IsEnabled reports whether the agent should be loaded. Nil (absent in
@@ -149,6 +176,11 @@ func (d *AgentDefinition) GetSkillForTrigger(keyword string) string {
 func DefaultMetadata() AgentMetadata {
 	return AgentMetadata{
 		Role:             config.AgentRoleExecutor,
+		Description:      "",  // empty default; AGENT.md should provide one
+		Enabled:          nil, // nil means true per IsEnabled() contract; explicit for clarity
+		CanDelegate:      false,
+		PromptComponents: nil, // no components → body-only system prompt
+		ReviewsDomain:    "",  // empty for non-reviewer agents
 		MaxIterations:    25,
 		TimeoutSeconds:   300,
 		MaxTokensPerTurn: 4096,

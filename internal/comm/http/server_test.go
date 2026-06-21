@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -1775,5 +1777,92 @@ func TestHandleWSProgress_RateLimiting(t *testing.T) {
 	time.Sleep(60 * time.Millisecond)
 	if !s.progressRateLimiter.shouldSend(mockConn) {
 		t.Error("Rate limiter should allow send after interval")
+	}
+}
+
+// TestConfigServiceListAgents_NewFields verifies that ListAgents parses the
+// role, can_delegate, reviews_domain, and enabled fields from AGENT.md
+// frontmatter into the corresponding AgentInfo fields added by the
+// agent-roster consolidation.
+func TestConfigServiceListAgents_NewFields(t *testing.T) {
+	// Build a temporary meept-like directory with two agents.
+	tmp := t.TempDir()
+	agentsDir := filepath.Join(tmp, "agents")
+	if err := os.MkdirAll(filepath.Join(agentsDir, "coder"), 0o750); err != nil {
+		t.Fatalf("mkdir coder: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(agentsDir, "code-reviewer"), 0o750); err != nil {
+		t.Fatalf("mkdir code-reviewer: %v", err)
+	}
+
+	coderBody := "---\n" +
+		"id: coder\n" +
+		"name: Coder\n" +
+		"role: executor\n" +
+		"description: writes code\n" +
+		"can_delegate: true\n" +
+		"enabled: true\n" +
+		"---\nbody\n"
+	if err := os.WriteFile(filepath.Join(agentsDir, "coder", "AGENT.md"), []byte(coderBody), 0o600); err != nil {
+		t.Fatalf("write coder AGENT.md: %v", err)
+	}
+
+	reviewerBody := "---\n" +
+		"id: code-reviewer\n" +
+		"name: Code Reviewer\n" +
+		"role: reviewer\n" +
+		"description: reviews code\n" +
+		"reviews_domain: code\n" +
+		"---\nbody\n"
+	if err := os.WriteFile(filepath.Join(agentsDir, "code-reviewer", "AGENT.md"), []byte(reviewerBody), 0o600); err != nil {
+		t.Fatalf("write reviewer AGENT.md: %v", err)
+	}
+
+	svc := &ConfigService{meeptDir: tmp}
+	got, err := svc.ListAgents()
+	if err != nil {
+		t.Fatalf("ListAgents: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 agents, got %d", len(got))
+	}
+
+	byID := make(map[string]AgentInfo, len(got))
+	for _, a := range got {
+		byID[a.ID] = a
+	}
+
+	coder, ok := byID["coder"]
+	if !ok {
+		t.Fatalf("coder not in result: %+v", got)
+	}
+	if coder.Role != "executor" {
+		t.Errorf("coder.Role = %q, want %q", coder.Role, "executor")
+	}
+	if !coder.CanDelegate {
+		t.Errorf("coder.CanDelegate = false, want true")
+	}
+	if !coder.Enabled {
+		t.Errorf("coder.Enabled = false, want true")
+	}
+	if coder.ReviewsDomain != "" {
+		t.Errorf("coder.ReviewsDomain = %q, want empty", coder.ReviewsDomain)
+	}
+
+	reviewer, ok := byID["code-reviewer"]
+	if !ok {
+		t.Fatalf("code-reviewer not in result: %+v", got)
+	}
+	if reviewer.Role != "reviewer" {
+		t.Errorf("reviewer.Role = %q, want %q", reviewer.Role, "reviewer")
+	}
+	if reviewer.CanDelegate {
+		t.Errorf("reviewer.CanDelegate = true, want false (absent in frontmatter)")
+	}
+	if !reviewer.Enabled {
+		t.Errorf("reviewer.Enabled = false, want true (absent = true)")
+	}
+	if reviewer.ReviewsDomain != "code" {
+		t.Errorf("reviewer.ReviewsDomain = %q, want %q", reviewer.ReviewsDomain, "code")
 	}
 }

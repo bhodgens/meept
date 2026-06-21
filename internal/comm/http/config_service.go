@@ -277,9 +277,11 @@ func (s *ConfigService) ListAgents() ([]AgentInfo, error) {
 				continue
 			}
 
-			name := entry.Name()
-			description := ""
-			enabled := true
+			info := AgentInfo{
+				ID:      entry.Name(),
+				Name:    entry.Name(),
+				Enabled: true, // absent/nil in frontmatter means true
+			}
 
 			// Simple frontmatter parsing
 			content := string(data)
@@ -290,21 +292,31 @@ func (s *ConfigService) ListAgents() ([]AgentInfo, error) {
 					lines := strings.SplitSeq(frontmatter, "\n")
 					for line := range lines {
 						if after, ok := strings.CutPrefix(line, "name:"); ok {
-							name = strings.TrimSpace(after)
+							info.Name = strings.TrimSpace(after)
 						}
 						if after, ok := strings.CutPrefix(line, "description:"); ok {
-							description = strings.TrimSpace(after)
+							info.Description = strings.TrimSpace(after)
+						}
+						if after, ok := strings.CutPrefix(line, "role:"); ok {
+							info.Role = strings.TrimSpace(after)
+						}
+						if after, ok := strings.CutPrefix(line, "can_delegate:"); ok {
+							val := strings.TrimSpace(after)
+							info.CanDelegate = val == "true"
+						}
+						if after, ok := strings.CutPrefix(line, "reviews_domain:"); ok {
+							info.ReviewsDomain = strings.TrimSpace(after)
+						}
+						if after, ok := strings.CutPrefix(line, "enabled:"); ok {
+							val := strings.TrimSpace(after)
+							// only "false" disables; nil/absent already defaults to true
+							info.Enabled = val != "false"
 						}
 					}
 				}
 			}
 
-			agents = append(agents, AgentInfo{
-				ID:          entry.Name(),
-				Name:        name,
-				Description: description,
-				Enabled:     enabled,
-			})
+			agents = append(agents, info)
 		}
 	}
 

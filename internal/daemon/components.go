@@ -1345,6 +1345,18 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		})
 		logger.Info("Agent registry initialized", "specs", len(c.AgentRegistry.ListSpecs()))
 
+		// Backward-compat notice: if a legacy ~/.meept/agents.json5 exists,
+		// warn the user that it is no longer read. One-time log per startup.
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			legacyPath := filepath.Join(homeDir, ".meept", "agents.json5")
+			if _, statErr := os.Stat(legacyPath); statErr == nil {
+				logger.Warn("legacy agents.json5 is no longer read; define agents via AGENT.md files",
+					"path", legacyPath,
+					"hint", "move definitions to ~/.meept/agents/*/AGENT.md",
+				)
+			}
+		}
+
 		// Wire skill discovery to registry so all specialist agents get it
 		if c.CapabilityIndex != nil {
 			c.AgentRegistry.SetCapabilityIndex(c.CapabilityIndex)
@@ -1792,12 +1804,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			webOpts = append(webOpts, web.WithJobsLister(&jobsListerAdapter{scheduler: c.Scheduler}))
 		}
 
+		// Wire agent lister when the multi-agent registry is available so
+		// /api/v1/agents reflects the live roster discovered from AGENT.md
+		// files instead of the static fallback in defaultAgentList().
+		if c.AgentRegistry != nil {
+			webOpts = append(webOpts, web.WithAgentLister(&agentListerAdapter{registry: c.AgentRegistry}))
+		}
+
 		c.WebServer = web.NewServer(webCfg, webHandler, auth, logger.With("component", "web"), webOpts...)
 		logger.Info("Web server configured",
 			"addr", webCfg.Addr,
 			"has_memory", c.MemoryManager != nil,
 			"has_skills", c.SkillRegistry != nil,
 			"has_jobs", c.Scheduler != nil,
+			"has_agent_lister", c.AgentRegistry != nil,
 		)
 	}
 
@@ -4572,11 +4592,70 @@ func (a *jobsListerAdapter) ListJobs() ([]web.JobInfo, error) {
 	return webJobs, nil
 }
 
+// agentListerAdapter wraps agent.AgentRegistry to implement web.AgentLister.
+// It exposes the live registry-driven agent roster to the web API so that
+// GET /api/v1/agents returns the same set that the dispatcher routes to,
+// instead of the static fallback in defaultAgentList().
+type agentListerAdapter struct {
+	registry *agent.AgentRegistry
+}
+
+// ListAgents implements web.AgentLister.
+func (a *agentListerAdapter) ListAgents(ctx context.Context) ([]web.AgentEntry, error) {
+	if a.registry == nil {
+		return nil, fmt.Errorf("agent registry not available")
+	}
+
+	specs := a.registry.ListSpecs()
+	out := make([]web.AgentEntry, 0, len(specs))
+	for _, spec := range specs {
+		if spec == nil {
+			continue
+		}
+		// Skip disabled specs — they are not part of the active roster.
+		if !spec.Enabled {
+			continue
+		}
+		out = append(out, web.AgentEntry{
+			ID:          spec.ID,
+			Name:        spec.Name,
+			Role:        string(spec.Role),
+			Description: spec.Description,
+			Enabled:     spec.Enabled,
+		})
+	}
+
+	// Stable order by agent ID for deterministic API output.
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// DelegateTask implements web.AgentLister by routing through the agent
+// registry's synchronous RunAgent path.
+func (a *agentListerAdapter) DelegateTask(ctx context.Context, agentID, message string) (web.DelegateResult, error) {
+	if a.registry == nil {
+		return web.DelegateResult{AgentID: agentID, Status: "error", Error: "agent registry not available"}, nil
+	}
+
+	if _, ok := a.registry.GetSpec(agentID); !ok {
+		return web.DelegateResult{AgentID: agentID, Status: "error", Error: "agent not found: " + agentID}, nil
+	}
+
+	conversationID := id.Generate("web-delegate-")
+	response, err := a.registry.RunAgent(ctx, agentID, message, conversationID)
+	if err != nil {
+		return web.DelegateResult{AgentID: agentID, Status: "error", Error: err.Error()}, nil
+	}
+
+	return web.DelegateResult{AgentID: agentID, Status: "ok", Response: response}, nil
+}
+
 // Ensure adapters implement their interfaces.
 var (
 	_ web.MemorySearcher = (*memorySearcherAdapter)(nil)
 	_ web.SkillsLister   = (*skillsListerAdapter)(nil)
 	_ web.JobsLister     = (*jobsListerAdapter)(nil)
+	_ web.AgentLister    = (*agentListerAdapter)(nil)
 	_ web.Handler        = (*webHandlerAdapter)(nil)
 )
 
