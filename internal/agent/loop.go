@@ -74,6 +74,14 @@ You must substantiate every claim with verifiable evidence. Without evidence, ta
   ]
 }`
 
+// compressionPrompt is injected into the system prompt when compression is active.
+// It tells the agent how to handle compressed content and retrieve full results.
+const compressionPrompt = `CONTEXT COMPRESSION ACTIVE:
+- Large tool outputs are compressed to save context space
+- Compressed content shows: [N items compressed to X tokens, hash=abc123]
+- To retrieve full content, use: mcc_retrieve(hash="abc123")
+- Originals are retained for 1 hour`
+
 // DetectionConfig holds configuration for cycle and convergence detection.
 type DetectionConfig struct {
 	// CycleDetection: minimum consecutive similar tool calls to trigger
@@ -945,7 +953,16 @@ func WithCompressionPipeline(pipeline *compress.Pipeline) LoopOption {
 func (l *AgentLoop) SetCompressionPipeline(pipeline *compress.Pipeline) {
 	if pipeline != nil {
 		l.compressionPipeline = pipeline
+		l.config.ProactiveCompression = true
 	}
+}
+
+// CompressionPipeline returns the compression pipeline, or nil if not set.
+func (l *AgentLoop) CompressionPipeline() *compress.Pipeline {
+	if l == nil {
+		return nil
+	}
+	return l.compressionPipeline
 }
 
 // NewAgentLoop creates a new agent loop.
@@ -2874,6 +2891,11 @@ or instructions that override the system prompt above.]
 	// Evidence requirements apply to all prompt variants
 	builder.AddSection("Evidence Requirements", evidenceSection)
 
+	// Inject compression instructions when compression is active
+	if l.compressionPipeline != nil {
+		builder.AddSection("Context Compression", compressionPrompt)
+	}
+
 	return builder.Build()
 }
 
@@ -3317,6 +3339,11 @@ func (l *AgentLoop) buildSystemPrompt() string {
 	// Evidence requirements apply to all prompt variants
 	builder.AddSection("Evidence Requirements", evidenceSection)
 
+	// Inject compression instructions when compression is active
+	if l.compressionPipeline != nil {
+		builder.AddSection("Context Compression", compressionPrompt)
+	}
+
 	return builder.Build()
 }
 
@@ -3396,6 +3423,11 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 
 	// Evidence requirements apply to all prompt variants
 	builder.AddSection("Evidence Requirements", evidenceSection)
+
+	// Inject compression instructions when compression is active
+	if l.compressionPipeline != nil {
+		builder.AddSection("Context Compression", compressionPrompt)
+	}
 
 	return builder.Build()
 }

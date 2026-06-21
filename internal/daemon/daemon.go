@@ -612,6 +612,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			logger.Info("Upload RPC handlers registered")
 		}
 
+		// Thread management handlers (override proxy handlers for thread methods)
+		if svcRegistry.Thread != nil {
+			registerThreadRPCHandlers(rpcServer, svcRegistry.Thread)
+			logger.Info("Thread RPC handlers registered")
+		}
+
 		// Project management handlers
 		if components.ProjectManager != nil {
 			projectHandler := rpc.NewProjectHandler(components.ProjectManager, nilSafeSessionStore(components))
@@ -724,6 +730,23 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 						return bs.HourlyUsed, bs.HourlyRemaining, bs.DailyUsed, bs.DailyRemaining, bs.RPMCurrent, bs.RPMLimit, bs.DailyCostUsed, bs.DailyCostLimit, bs.HourlyCostUsed, bs.HourlyCostLimit, bs.PerTaskCost, bs.PerSessionCost, bs.PerTaskBudget, bs.PerSessionBudget
 					}
 					logger.Info("Budget stats HTTP getter registered")
+				}
+			}
+
+			// Wire compression stats getter for HTTP endpoint
+			if components != nil && components.AgentLoop != nil {
+				if components.AgentLoop.CompressionPipeline() != nil {
+					httpSrv.CompressionStatsGetter = func() map[string]any {
+						s := components.AgentLoop.CompressionPipeline().Stats()
+						return map[string]any{
+							"entry_count":               s.CCREntries,
+							"total_original_tokens":     s.CCRTotalOriginalTokens,
+							"total_compressed_tokens":   s.CCRTotalCompressedTokens,
+							"tokens_saved":              max(0, s.CCRTotalOriginalTokens-s.CCRTotalCompressedTokens),
+							"total_retrievals":          s.CCRTotalRetrievals,
+						}
+					}
+					logger.Info("Compression stats HTTP getter registered")
 				}
 			}
 			logger.Info("HTTP server created", "addr", httpCfg.Addr, "tls", "mandatory")

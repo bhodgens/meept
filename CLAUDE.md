@@ -406,6 +406,49 @@ Triggered by `IntentPair` intent type. Default actor/reviewer mapping: analyst/p
 
 ## Coding Practices
 
+### Wiring/Integration Requirement (NON-NEGOTIABLE)
+
+**CRITICAL: Implementations MUST include wiring/integration — creating data structures without connecting them to user-facing features is INCOMPLETE.**
+
+This is the most common form of incomplete work. Every implementation must answer: **"How does a user actually use this?"**
+
+**Complete feature checklist:**
+- [ ] **Core logic** — data structures, interfaces, business logic (the "what")
+- [ ] **CLI wiring** — commands, flags, subcommands in `cmd/meept/` (how CLI users access it)
+- [ ] **TUI wiring** — bubbletea components, keybindings, display in `internal/tui/` (how TUI users see it)
+- [ ] **GUI wiring** — Flutter widgets, services, API calls in `ui/flutter_ui/` (how GUI users see it)
+- [ ] **HTTP API wiring** — REST endpoints, handlers, services in `internal/comm/http/` (how API clients access it)
+- [ ] **Agent wiring** — dispatcher routing, intent classification, tool exposure in `internal/agent/` (how agents use it)
+- [ ] **Tests** — unit tests, integration tests, verification commands
+
+**Example: Thread-based context partitioning**
+| Component | Status |
+|-----------|--------|
+| Thread struct + store | ✅ Created |
+| Migration | ✅ Created |
+| CLI `/thread` commands | ❌ NOT WIRED — users can't create/switch threads |
+| TUI thread indicator | ❌ NOT WIRED — TUI doesn't show active thread |
+| GUI thread selector | ❌ NOT WIRED — Flutter UI doesn't show threads |
+| HTTP API endpoints | ❌ NOT WIRED — menubar can't access threads |
+| Dispatcher routing | ❌ NOT WIRED — messages don't route by thread |
+
+**Red flags that indicate incomplete work:**
+- "The data structure is ready, we just need to wire it up" ← NO. This is incomplete.
+- "The CLI command is a separate task" ← NO. CLI wiring is part of the feature.
+- "The UI can be added later" ← NO. UI wiring is part of the feature.
+- Creating files in `internal/` with no changes to `cmd/`, `internal/tui/`, `ui/`, or `internal/comm/http/`
+
+**The rule:** If a user can't actually USE the feature through at least one interface (CLI, TUI, GUI, API), the implementation is NOT DONE.
+
+**Enforcement:** Before claiming any task complete, verify:
+1. Can a user trigger this via CLI? (`meept thread --help`)
+2. Can a user see this in the TUI? (thread indicator visible)
+3. Can a user see this in the GUI? (Flutter widget renders)
+4. Can an API client access this? (HTTP endpoint responds)
+5. Does the agent know how to route to this? (dispatcher integration)
+
+**If any answer is NO, the feature is incomplete. Wire it.**
+
 - Always implement complete wired features, do not leave stub code or partial implementations
 - Always check your work
 - **NEVER add `Co-Authored-By` trailers** to commit messages. Do not add any AI co-author attribution to any commit. A `commit-msg` hook strips them as a safety net, but do not generate them in the first place.
