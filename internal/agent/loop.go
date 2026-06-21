@@ -518,6 +518,19 @@ type AgentLoop struct {
 
 	// Compression pipeline for prompt compression (CCR-based)
 	compressionPipeline *compress.Pipeline
+
+	// agentReasoning is the per-agent reasoning config from AGENT.md
+	// frontmatter (spec §4.4 middle layer of precedence chain).
+	agentReasoning *llm.AgentReasoningConfig
+
+	// reasoningOverride is the highest-precedence reasoning directive,
+	// typically from a per-turn NL directive like "think hard". Cleared
+	// after the turn completes (see ClearReasoningOverride).
+	reasoningOverride *llm.ReasoningConfig
+
+	// reasoningForNextTurn is a transient effort suggestion from the
+	// dispatcher's intent classifier. Consumed once on the next turn.
+	reasoningForNextTurn string
 }
 
 // sessionStore is an interface for session persistence operations needed by AgentLoop.
@@ -904,6 +917,99 @@ func (l *AgentLoop) ClearModelOverride() {
 	l.modelOverride = ""
 }
 
+// SetReasoningOverride installs a per-turn reasoning directive (highest
+// precedence in the §10.1 chain). Nil-guarded and thread-safe.
+func (l *AgentLoop) SetReasoningOverride(rc *llm.ReasoningConfig) {
+	if l == nil || rc == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.reasoningOverride = rc
+}
+
+// ClearReasoningOverride removes any per-turn reasoning override. Called
+// after the turn completes so the next turn is unaffected. Thread-safe.
+func (l *AgentLoop) ClearReasoningOverride() {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.reasoningOverride = nil
+}
+
+// SetReasoningForNextTurn records a dispatcher-suggested effort tier
+// (e.g. "xhigh" for IntentPlan). Applied on the next reasoning cycle
+// subject to the agent's min/max bounds when AllowSelfModulation is true.
+// No-op when AllowSelfModulation is false. Nil-guarded and thread-safe.
+func (l *AgentLoop) SetReasoningForNextTurn(effort string) {
+	if l == nil || effort == "" {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.agentReasoning != nil && !l.agentReasoning.AllowSelfModulation {
+		return
+	}
+	clamped := effort
+	if l.agentReasoning != nil {
+		if l.agentReasoning.MinEffort != "" && reasoningEffortLess(clamped, l.agentReasoning.MinEffort) {
+			clamped = l.agentReasoning.MinEffort
+		}
+		if l.agentReasoning.MaxEffort != "" && reasoningEffortLess(l.agentReasoning.MaxEffort, clamped) {
+			clamped = l.agentReasoning.MaxEffort
+		}
+	}
+	l.reasoningForNextTurn = clamped
+}
+
+// CurrentReasoningEffort returns the effective reasoning effort tier for
+// the next turn, walking the precedence chain: per-turn override →
+// dispatcher-suggested next-turn effort → agent-configured default.
+// Returns ReasoningMedium when no agent config is set.
+func (l *AgentLoop) CurrentReasoningEffort() string {
+	if l == nil {
+		return llm.ReasoningMedium
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if l.reasoningOverride != nil && l.reasoningOverride.Effort != "" {
+		return l.reasoningOverride.Effort
+	}
+	if l.reasoningForNextTurn != "" {
+		return l.reasoningForNextTurn
+	}
+	if l.agentReasoning != nil && l.agentReasoning.Effort != "" {
+		return l.agentReasoning.Effort
+	}
+	return llm.ReasoningMedium
+}
+
+// reasoningEffortRank maps effort tier names to an ordinal for clamp
+// comparisons. Unknown tiers sort highest.
+var reasoningEffortRank = map[string]int{
+	"none":   0,
+	"low":    1,
+	"medium": 2,
+	"high":   3,
+	"xhigh":  4,
+	"max":    5,
+}
+
+// reasoningEffortLess returns true if a ranks strictly below b.
+func reasoningEffortLess(a, b string) bool {
+	ra, oka := reasoningEffortRank[a]
+	rb, okb := reasoningEffortRank[b]
+	if !oka {
+		ra = 99
+	}
+	if !okb {
+		rb = 99
+	}
+	return ra < rb
+}
+
 // WithTaskCollector sets the task collector for metrics recording.
 func WithTaskCollector(tc *metrics.TaskCollector) LoopOption {
 	return func(l *AgentLoop) {
@@ -946,6 +1052,16 @@ func WithCompressionPipeline(pipeline *compress.Pipeline) LoopOption {
 	return func(l *AgentLoop) {
 		if pipeline != nil {
 			l.compressionPipeline = pipeline
+		}
+	}
+}
+
+// WithAgentReasoning wires per-agent reasoning config from AGENT.md
+// frontmatter into the loop (spec §4.4 middle layer).
+func WithAgentReasoning(rc *llm.AgentReasoningConfig) LoopOption {
+	return func(l *AgentLoop) {
+		if rc != nil {
+			l.agentReasoning = rc
 		}
 	}
 }
