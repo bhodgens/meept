@@ -78,6 +78,14 @@ type Config struct {
 	Notifications     NotificationsConfig     `json:"notifications,omitempty" toml:"notifications"`
 	Runtime           RuntimeConfig           `json:"runtime"             toml:"runtime"`
 	PTY               PTYConfig               `json:"pty"                  toml:"pty"`
+	Reasoning         ReasoningGlobalConfig   `json:"reasoning"            toml:"reasoning"`
+}
+
+// ReasoningGlobalConfig holds global reasoning/thinking settings, currently
+// the tier→budget mapping that overrides the hardcoded defaults in
+// internal/llm.defaultBudgetTable.
+type ReasoningGlobalConfig struct {
+	Budgets map[string]int `json:"budgets,omitempty" toml:"budgets"`
 }
 
 // BotsConfig holds configuration for the persistent bot framework.
@@ -213,7 +221,7 @@ type CompactionConfig struct {
 type SessionConfig struct {
 	// Persistence enables session restore from SQLite on startup.
 	Persistence bool `json:"persistence" toml:"persistence"`
-	// Branching enables conversation branching.
+	// Branching enables conversation branching (legacy flag, superseded by BranchesEnabled).
 	Branching bool `json:"branching" toml:"branching"`
 	// BranchSummaryThreshold is the minimum abandoned messages before summarization.
 	BranchSummaryThreshold int `json:"branch_summary_threshold" toml:"branch_summary_threshold"`
@@ -230,6 +238,16 @@ type SessionConfig struct {
 	CompactionThreshold int `json:"compaction_threshold" toml:"compaction_threshold"`
 	// CompactionTargetRatio is the target context ratio after compaction.
 	CompactionTargetRatio float64 `json:"compaction_target_ratio" toml:"compaction_target_ratio"`
+
+	// BranchesEnabled controls whether the legacy branch feature is available.
+	// Default false (branches deprecated in favor of threads). When false,
+	// BranchManager.NavigateToBranch returns an error. Tests that exercise
+	// branching must opt in by setting this to true.
+	BranchesEnabled bool `json:"branches_enabled" toml:"branches_enabled"`
+
+	// ThreadsEnabled controls whether the thread feature is available.
+	// Default true (threads replace branches).
+	ThreadsEnabled bool `json:"threads_enabled" toml:"threads_enabled"`
 }
 
 // ASTConfig holds AST parsing settings.
@@ -282,13 +300,19 @@ type LSPServerConfig struct {
 //gendoc:desc Configuration for the daemon process including socket, logging, and data directory.
 //gendoc:example [daemon] socket_path = "~/.meept/meept.sock"
 type DaemonConfig struct {
-	SocketPath        string        `json:"socket_path"        toml:"socket_path"`
-	PIDFile           string        `json:"pid_file"            toml:"pid_file"`
-	LogLevel          string        `json:"log_level"           toml:"log_level"`
-	DataDir           string        `json:"data_dir"            toml:"data_dir"`
-	ShutdownTimeout   string        `json:"shutdown_timeout"    toml:"shutdown_timeout"`
-	ChatTimeoutSeconds int          `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
-	Uploads           UploadsConfig `json:"uploads"             toml:"uploads"`
+	SocketPath          string          `json:"socket_path"         toml:"socket_path"`
+	PIDFile             string          `json:"pid_file"             toml:"pid_file"`
+	LogLevel            string          `json:"log_level"             toml:"log_level"`
+	DataDir             string          `json:"data_dir"             toml:"data_dir"`
+	ShutdownTimeout     string          `json:"shutdown_timeout"     toml:"shutdown_timeout"`
+	ChatTimeoutSeconds  int             `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
+	Uploads             UploadsConfig   `json:"uploads"              toml:"uploads"`
+	UserInstructions    InstructionConfig `json:"user_instructions"    toml:"user_instructions"`
+}
+
+// InstructionConfig holds user instruction automation settings.
+type InstructionConfig struct {
+	Enabled       bool `json:"enabled"       toml:"enabled"`
 }
 
 // UploadsConfig configures the file upload service for multimodal content.
@@ -515,6 +539,29 @@ type MemoryConfig struct {
 	Versioning MemoryVersioningConfig `json:"versioning" toml:"versioning"`
 	// ProjectOverrides allows per-project character limit overrides
 	ProjectOverrides map[string]MemoryLimitsConfig `json:"project_overrides" toml:"project_overrides"`
+	// Epistemic holds epistemic memory settings (ambient extraction,
+	// auto-trust weight, review prompts). See EpistemicConfig.
+	Epistemic EpistemicConfig `json:"epistemic" toml:"epistemic"`
+}
+
+// EpistemicConfig holds epistemic memory platform settings.
+type EpistemicConfig struct {
+	AmbientExtraction     AmbientExtractionConfig `json:"ambient_extraction"      toml:"ambient_extraction"`
+	AutoTrustWeight       float64                 `json:"auto_trust_weight"       toml:"auto_trust_weight"`
+	DetectionThreshold    float64                 `json:"detection_threshold"     toml:"detection_threshold"`
+	ReviewPromptFrequency string                  `json:"review_prompt_frequency" toml:"review_prompt_frequency"`
+	MaxPendingReviews     int                     `json:"max_pending_reviews"     toml:"max_pending_reviews"`
+}
+
+// AmbientExtractionConfig holds settings for extracting epistemic claims
+// from conversation turns without explicit user action.
+type AmbientExtractionConfig struct {
+	Enabled             bool     `json:"enabled"              toml:"enabled"`
+	ConfidenceThreshold float64  `json:"confidence_threshold" toml:"confidence_threshold"`
+	MaxPerTurn          int      `json:"max_per_turn"         toml:"max_per_turn"`
+	ExcludeIntents      []string `json:"exclude_intents"      toml:"exclude_intents"`
+	ExcludeCategories   []string `json:"exclude_categories"   toml:"exclude_categories"`
+	ContextWindow       int      `json:"context_window"       toml:"context_window"`
 }
 
 // EpisodicConfig holds episodic memory settings.
@@ -1742,6 +1789,8 @@ func DefaultConfig() *Config {
 			Branching:              true,
 			BranchSummaryThreshold: 3,
 			RestoreMessageLimit:    0,
+			BranchesEnabled:        false, // Deprecated: use threads instead
+			ThreadsEnabled:         true,
 		},
 		Cluster: DefaultClusterConfig(),
 		Bots: BotsConfig{
