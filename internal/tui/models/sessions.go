@@ -1,6 +1,7 @@
 package models
 
 import (
+	"sort"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -186,6 +187,7 @@ func (m *SessionsModel) Update(msg tea.Msg) tea.Cmd {
 		}
 		m.err = nil
 		m.sessions = msg.Sessions
+		m.sortSessions()
 		m.updateSessionsTable()
 		// Fetch plans for the auto-selected session
 		if m.selected != nil {
@@ -760,4 +762,35 @@ func (m *SessionsModel) getPlanStateColor(state string) string {
 	default:
 		return ColorGray
 	}
+}
+
+// sortSessions sorts sessions by designation priority, then by last activity.
+func (m *SessionsModel) sortSessions() {
+	sort.Slice(m.sessions, func(i, j int) bool {
+		iDesig := m.sessions[i].Designation
+		jDesig := m.sessions[j].Designation
+
+		// Sessions with designation come first
+		if iDesig != nil && jDesig == nil {
+			return true
+		}
+		if iDesig == nil && jDesig != nil {
+			return false
+		}
+		if iDesig != nil && jDesig != nil {
+			// Both have designation, sort by priority
+			priorityOrder := map[string]int{"urgent": 0, "high": 1, "normal": 2, "low": 3}
+			iPriority := priorityOrder[iDesig.Priority]
+			jPriority := priorityOrder[jDesig.Priority]
+			if iPriority != jPriority {
+				return iPriority < jPriority
+			}
+			// Same priority, sort by status
+			statusOrder := map[string]int{"requires_approval": 0, "waiting_human": 1, "human_responded": 2, "bot_thinking": 3}
+			return statusOrder[iDesig.Status] < statusOrder[jDesig.Status]
+		}
+
+		// No designation, sort by last activity (most recent first)
+		return m.sessions[i].LastActivity > m.sessions[j].LastActivity
+	})
 }
