@@ -1,6 +1,6 @@
 # Agent Loop, Models, and Tool Architecture
 
-> **Related:** `internal/agent/`, `internal/llm/resolver.go`, `config/models.json5`, `config/agents.json5`
+> **Related:** `internal/agent/`, `internal/llm/resolver.go`, `config/models.json5`, `config/agents/*/AGENT.md`
 
 ## Top-Level Request Flow
 
@@ -144,7 +144,7 @@ The `LLMClassifier` (`internal/agent/llm_classifier.go`) uses the `classifier_mo
 | debug            | debugger                  | steer    |
 | plan             | planner                   | steer    |
 | analyze, search  | analyst                   | follow   |
-| research         | analyst                   | follow   |
+| research         | researcher                | follow   |
 | git              | committer                 | steer    |
 | schedule         | scheduler                 | follow   |
 | security         | chat                      | steer    |
@@ -228,7 +228,7 @@ Steering heuristics are defined in `SteeringHeuristicTable` (`internal/agent/dis
 
 Aliases are configured in `config/models.json5` under `model_aliases`. When an agent's `Model` field matches an alias name, the resolver uses failover rotation with cooldown-based backoff (`RecordAliasFailure` / `RecordAliasSuccess`).
 
-All default agent specs in `internal/agent/spec.go` set `Model: ""`, which means they use the default model (`zai/glm-4.7`). The `config/agents.json5` file can override this per-agent.
+All default agent specs in `internal/agent/spec.go` set `Model: ""`, which means they use the default model (`zai/glm-4.7`). Per-agent model overrides are configured in the agent's `AGENT.md` file under the `model` frontmatter field.
 
 ### Classification Model
 
@@ -347,7 +347,7 @@ delegate_task (baseline)|  X  |  X   |  X    |  X  |   X    |     X     |   X   
 
 ## Review Flow
 
-When enabled via `AgentConfig.ReviewEnabled`, the `ReviewManager` runs a reviewer agent after the executor finishes:
+The `ReviewManager` runs a reviewer agent after the executor finishes. Reviewer routing is dynamic via `ReviewPolicy.SelectReviewer()` which queries the `AgentRegistry` for a reviewer-role agent whose `reviews_domain` matches the originating agent's domain.
 
 ```
   Executor Agent finishes
@@ -358,11 +358,13 @@ When enabled via `AgentConfig.ReviewEnabled`, the `ReviewManager` runs a reviewe
        yes
         |
   +-----v-----------+
-  | Lookup reviewer  |  config/schema.go ReviewerAgentMap:
-  | for this agent   |    coder -> code-reviewer
-  |                  |    debugger -> debug-reviewer
-  |                  |    planner -> planner-reviewer
-  |                  |    analyst -> analyst-reviewer
+  | Lookup reviewer  |  ReviewPolicy.SelectReviewer queries
+  | for this agent   |  AgentRegistry for role=reviewer agent
+  |                  |  with matching reviews_domain:
+  |                  |    coder (code) -> code-reviewer
+  |                  |    debugger (debug) -> debug-reviewer
+  |                  |    planner (plan) -> planner-reviewer
+  |                  |    analyst (analysis) -> analyst-reviewer
   +-----+-----------+
         |
         v

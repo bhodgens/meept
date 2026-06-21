@@ -469,6 +469,37 @@ Returns counters for summarization failures, dropped messages, compaction events
 | POST | `/api/v1/config/agents/{id}` | Save agent |
 | DELETE | `/api/v1/config/agents/{id}` | Delete agent |
 
+### Agents
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/agents` | List agents known to the daemon |
+| POST | `/api/v1/agents/{id}/delegate` | Delegate a task to a specific agent |
+
+**List Agents:**
+```bash
+curl http://localhost:8081/api/v1/agents
+```
+Response: `{"agents": [...], "count": N}`
+
+Each agent entry contains:
+- `id` — agent ID (e.g., `coder`, `researcher`, `code-reviewer`)
+- `name` — display name
+- `role` — one of `Dispatcher`, `Executor`, `Reviewer`
+- `description` — short description
+- `enabled` — whether the agent is enabled
+- `capabilities` — optional capability tags (omitted when empty)
+
+When the daemon is running with a live agent registry (default), the list reflects the discovered AGENT.md files (8 standard executors plus `researcher` and 5 reviewers, plus any user-defined). Falls back to a static 14-entry list if the registry is unavailable.
+
+**Delegate Task:**
+```bash
+curl -X POST http://localhost:8081/api/v1/agents/coder/delegate \
+  -H "Content-Type: application/json" \
+  -d '{"message": "add a login form"}'
+```
+Returns 503 if agent delegation is not configured.
+
 **Menubar Config:**
 ```bash
 curl http://localhost:8081/api/v1/config/menubar

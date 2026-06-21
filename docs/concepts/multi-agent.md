@@ -20,19 +20,22 @@ Meept uses a multi-agent architecture where specialist agents handle different t
 | `coder` | File ops, shell, coding | `file_read`, `file_write`, `file_delete`, `list_directory`, `shell_execute`, `request_handoff` |
 | `debugger` | Troubleshooting, bug fixing | `file_read`, `file_write`, `shell_execute`, `request_handoff` |
 | `planner` | Task decomposition, planning | (baseline only) |
-| `analyst` | Research, data analysis | `web_fetch`, `web_search`, `request_handoff` |
+| `analyst` | Synthesizes information, draws insights, summarizes | `web_fetch`, `web_search`, `file_read`, `list_directory`, `request_handoff` |
+| `researcher` | Gathers information from web, documentation, codebase | `web_fetch`, `web_search`, `file_read`, `list_directory` |
 | `committer` | Git operations | `shell_execute` |
 | `scheduler` | Job scheduling | `schedule_create`, `schedule_list`, `schedule_delete` |
 
 ### Reviewer Agents
 
+Reviewers are first-class agents defined by `AGENT.md` files (same discovery hierarchy as executors). Each reviewer declares a `reviews_domain` (e.g., `code`, `test`, `debug`, `analysis`, `plan`) that the dispatcher uses to route review work.
+
 | Agent ID | Reviews |
 |----------|---------|
-| `code-reviewer` | Code changes from the coder agent |
-| `test-reviewer` | Test results and verification |
-| `debug-reviewer` | Debugging analysis and fixes |
-| `analyst-reviewer` | Research and analysis work |
-| `planner-reviewer` | Execution plans |
+| `code-reviewer` | Code changes from the coder agent (`reviews_domain: code`) |
+| `test-reviewer` | Test results and verification (`reviews_domain: test`) |
+| `debug-reviewer` | Debugging analysis and fixes (`reviews_domain: debug`) |
+| `analyst-reviewer` | Analysis work (`reviews_domain: analysis`) |
+| `planner-reviewer` | Execution plans (`reviews_domain: plan`) |
 
 ## Baseline Tools
 
@@ -166,7 +169,8 @@ flowchart TB
     Discover --> Match{Match intent to agent}
     Match -->|coding task| Coder
     Match -->|debug issue| Debugger
-    Match -->|research| Analyst
+    Match -->|research| Researcher
+    Match -->|analyze/summarize| Analyst
     Match -->|general| Chat
     Match -->|git ops| Committer
     Match -->|schedule| Scheduler
@@ -356,7 +360,8 @@ Model reassignment supports these scope keywords mapped to intent types:
 |-------|-------------|-------|
 | synthesis, planning, plan, design | `IntentPlan` | planner |
 | coding, code, implementation, refactor | `IntentCode` | coder |
-| research, analysis, analyze | `IntentResearch` / `IntentAnalyze` | analyst |
+| research, investigate, study | `IntentResearch` | researcher |
+| analysis, analyze, summarize | `IntentAnalyze` | analyst |
 | debugging, debug, fix | `IntentDebug` | debugger |
 
 ### Model Aliases
@@ -390,8 +395,9 @@ When instructions are ambiguous, the dispatcher asks clarifying questions:
 > 
 > Dispatcher: "I can use claude-opus for your task. What should this model handle?
 > - coding/implementation
-> - research/analysis
-> - planning/synthesis
+> - research
+> - analysis/synthesis
+> - planning
 > - debugging
 > - the entire task"
 

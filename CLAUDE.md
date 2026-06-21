@@ -360,9 +360,15 @@ Meept uses a multi-agent architecture where specialist agents handle different t
 | `coder` | Executor | File ops, shell, coding tasks |
 | `debugger` | Executor | Troubleshooting, bug fixing |
 | `planner` | Executor | Task decomposition, planning |
-| `analyst` | Executor | Research, data analysis |
+| `analyst` | Executor | Synthesizes information, draws insights, summarizes |
+| `researcher` | Executor | Gathers information from web, docs, codebase |
 | `committer` | Executor | Git operations |
 | `scheduler` | Executor | Job scheduling |
+| `code-reviewer` | Reviewer | Reviews code (`reviews_domain: code`) |
+| `test-reviewer` | Reviewer | Reviews tests (`reviews_domain: test`) |
+| `debug-reviewer` | Reviewer | Reviews debug work (`reviews_domain: debug`) |
+| `analyst-reviewer` | Reviewer | Reviews analyses (`reviews_domain: analysis`) |
+| `planner-reviewer` | Reviewer | Reviews plans (`reviews_domain: plan`) |
 
 ### Coworker Awareness
 
