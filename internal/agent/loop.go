@@ -2194,6 +2194,14 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// Execute tools
 			results := l.executeToolCalls(ctx, response.ToolCalls)
 
+			// Plan 4.2: Check for permission denied errors and set requires_approval designation
+			for _, result := range results {
+				if !result.Success && strings.Contains(result.Error, "permission denied") {
+					l.updateSessionDesignation(session.DesignationRequiresApproval, "Blocked: action requires approval", "high")
+					break
+				}
+			}
+
 			// Record tool calls for cycle detection
 			for _, tc := range response.ToolCalls {
 				if l.cycleDetector.recordCall(tc.Function.Name, tc.Function.Arguments) {
@@ -2759,8 +2767,12 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 			budget.RemoveTaskCost(context.Background(), taskID)
 			budget.RemoveSessionCost(context.Background(), sessionID)
 		}
+		// Plan 4.2: Clear session designation on task completion
+		l.clearSessionDesignation()
 	}()
 
+	// Plan 4.2: Set designation to bot_thinking at start of processing
+	l.updateSessionDesignation(session.DesignationBotThinking, "Processing...", "normal")
 	// Run reasoning cycle
 	taskIterations := 0 // Track iterations for metrics
 	startTime := time.Now()
@@ -4145,4 +4157,20 @@ func (l *AgentLoop) recordTaskMetrics(t *task.Task, modelID string, success bool
 	if err := l.taskCollector.RecordAgentTask(metrics); err != nil {
 		l.logger.Warn("Failed to record task metrics", "task_id", t.ID, "error", err)
 	}
+}
+
+// updateSessionDesignation updates the session's designation status (Plan 4.2).
+func (l *AgentLoop) updateSessionDesignation(status session.DesignationStatus, reason, priority string) {
+	if l.sessionStore == nil || l.currentSessionID == "" {
+		return
+	}
+	_ = l.sessionStore.UpdateDesignation(l.currentSessionID, status, reason, priority)
+}
+
+// clearSessionDesignation clears the session's designation (Plan 4.2).
+func (l *AgentLoop) clearSessionDesignation() {
+	if l.sessionStore == nil || l.currentSessionID == "" {
+		return
+	}
+	_ = l.sessionStore.ClearDesignation(l.currentSessionID)
 }
