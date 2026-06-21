@@ -33,6 +33,17 @@ const (
 	EdgeTypeCoAccessed EdgeType = "co_accessed"
 	// EdgeTypeCausal indicates causal relationship (one led to another).
 	EdgeTypeCausal EdgeType = "causal"
+	// Epistemic edges (Plan 1: epistemic memory platform)
+	EdgeTypeContradicts     EdgeType = "contradicts"
+	EdgeTypeSuperseded      EdgeType = "superseded"
+	EdgeTypeEvidenceFor     EdgeType = "evidence_for"
+	EdgeTypeEvidenceAgainst EdgeType = "evidence_against"
+	EdgeTypeDerivesFrom     EdgeType = "derives_from"
+	EdgeTypeSupports        EdgeType = "supports"
+	// EdgeTypePotentialContradicts is a low-confidence contradiction candidate
+	// surfaced for review. Does not propagate to search ranking or destructive
+	// actions.
+	EdgeTypePotentialContradicts EdgeType = "potential_contradicts"
 )
 
 // MemoryEdge represents a directed edge between two memories.

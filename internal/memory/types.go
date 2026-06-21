@@ -19,6 +19,14 @@ const (
 	MemoryTypeTask MemoryType = "task"
 	// MemoryTypePersonality is for personality and preference tracking.
 	MemoryTypePersonality MemoryType = "personality"
+	// MemoryTypeClaim is a structured assertion of belief.
+	MemoryTypeClaim MemoryType = "claim"
+	// MemoryTypeDecision is a recorded decision with expected outcome.
+	MemoryTypeDecision MemoryType = "decision"
+	// MemoryTypePrediction is a forecast with a horizon.
+	MemoryTypePrediction MemoryType = "prediction"
+	// MemoryTypeQuestion is an open tracked question.
+	MemoryTypeQuestion MemoryType = "question"
 )
 
 // Memory represents a stored memory item.
