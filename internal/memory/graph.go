@@ -379,6 +379,38 @@ func (g *KnowledgeGraph) GetEdges(ctx context.Context, memoryID string) ([]Memor
 	return edges, rows.Err()
 }
 
+// EdgeCountForMemory returns the number of edges that reference the given
+// memory as either source or target. Used by the mark_superseded preview to
+// report how many edges will be redirected.
+func (g *KnowledgeGraph) EdgeCountForMemory(ctx context.Context, memoryID string) (int, error) {
+	g.mu.RLock()
+	if !g.initialized {
+		g.mu.RUnlock()
+		return 0, errors.New("knowledge graph not initialized")
+	}
+	pool := g.pool
+	g.mu.RUnlock()
+
+	if pool == nil {
+		return 0, errors.New("database pool unavailable")
+	}
+
+	db, err := pool.Get(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("acquire connection: %w", err)
+	}
+	defer pool.Put(db)
+
+	var count int
+	err = db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM memory_edges WHERE source_id = ? OR target_id = ?`,
+		memoryID, memoryID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count edges: %w", err)
+	}
+	return count, nil
+}
+
 // GetRelatedMemoryIDs returns IDs of memories related to the given memory.
 func (g *KnowledgeGraph) GetRelatedMemoryIDs(ctx context.Context, memoryID string, limit int) ([]string, error) {
 	g.mu.RLock()
