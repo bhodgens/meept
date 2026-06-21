@@ -78,6 +78,11 @@ type Manager struct {
 	// Vector store for semantic search (optional; nil means semantic search unavailable)
 	vectorStore VectorSearcher
 
+	// Epistemic detector for post-Store relationship detection (optional).
+	// When non-nil and a stored memory has an epistemic type, DetectRelationships
+	// runs in a background goroutine. See SetEpistemicDetector.
+	detector *EpistemicDetector
+
 	// Prefetch cache and service for automatic context retrieval (Hermes pattern)
 	prefetchCache    sync.Map // map[string]string - query -> cached context
 	prefetchQueue    chan prefetchRequest
@@ -407,12 +412,46 @@ func (m *Manager) Store(ctx context.Context, mem Memory) (string, error) {
 	}
 
 	// Route through memvid when active
+	var id string
+	var storeErr error
 	if useMemvid && m.memvid != nil {
-		return m.storeViaMemvid(ctx, mem)
+		id, storeErr = m.storeViaMemvid(ctx, mem)
+	} else {
+		// SQLite fallback
+		id, storeErr = m.storeViaSQLite(ctx, mem)
+	}
+	if storeErr != nil {
+		return "", storeErr
 	}
 
-	// SQLite fallback
-	return m.storeViaSQLite(ctx, mem)
+	// Epistemic post-Store hook: run detection in a background goroutine.
+	// Uses context.Background() to avoid caller cancellation; detection is
+	// best-effort and must not block Store.
+	//
+	// TODO: Consolidator.Run should also run a full pass over epistemic
+	// memories added since the last consolidation to catch relationships
+	// missed by this per-store hook (see spec section "Wiring"). Future task.
+	m.mu.RLock()
+	detector := m.detector
+	m.mu.RUnlock()
+	if detector != nil && IsEpistemicType(mem.Type) && id != "" {
+		mem.ID = id
+		go func() {
+			edges, derr := detector.DetectRelationships(context.Background(), mem)
+			if derr != nil {
+				m.logger.Warn("epistemic detection failed", "memory_id", id, "error", derr)
+				return
+			}
+			if len(edges) == 0 {
+				return
+			}
+			if perr := detector.PersistCandidateEdges(context.Background(), edges); perr != nil {
+				m.logger.Warn("epistemic edge persist failed", "memory_id", id, "error", perr)
+			}
+		}()
+	}
+
+	return id, nil
 }
 
 // storeViaMemvid stores a memory through the memvid service.
@@ -1801,6 +1840,25 @@ func (m *Manager) GetVectorSearcher() VectorSearcher {
 // Callers should nil-check before use.
 func (m *Manager) Embedder() EmbeddingProvider {
 	return m.embedder
+}
+
+// SetEpistemicDetector configures the detector used by the post-Store hook
+// to run LLM-driven relationship detection for epistemic memories.
+// Pass nil to disable the hook (defence-in-depth: a nil detector is a no-op).
+func (m *Manager) SetEpistemicDetector(d *EpistemicDetector) {
+	if d == nil {
+		return
+	}
+	m.mu.Lock()
+	m.detector = d
+	m.mu.Unlock()
+}
+
+// EpistemicDetector returns the configured detector, or nil if none is set.
+func (m *Manager) EpistemicDetector() *EpistemicDetector {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.detector
 }
 
 // ScopedManager returns a ScopedMemoryManager that filters all operations
