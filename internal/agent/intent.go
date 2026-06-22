@@ -53,6 +53,13 @@ const (
 	// "remember to". Routes to the instruction parser/handler rather than
 	// the normal executor path.
 	IntentInstruction IntentType = "instruction"
+
+	// Knowledge work (Plan 2: Agent Roster Extension). Each routes to a
+	// specialist executor. CategoryDefer => async dispatch.
+	IntentWrite     IntentType = "write"
+	IntentArchitect IntentType = "architect"
+	IntentSkeptic   IntentType = "skeptic"
+	IntentLibrarian IntentType = "librarian"
 )
 
 // IntentCategory groups intents by routing behavior.
@@ -72,6 +79,8 @@ func (t IntentType) Category() IntentCategory {
 	case IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit, IntentSchedule, IntentPair, IntentCollaborate:
 		return CategoryDefer
 	case IntentCompound:
+		return CategoryDefer
+	case IntentWrite, IntentArchitect, IntentSkeptic, IntentLibrarian:
 		return CategoryDefer
 	case IntentSkill:
 		return CategoryInline
@@ -113,6 +122,14 @@ func (t IntentType) DefaultAgent() string {
 		return "orchestrator"
 	case IntentClarify:
 		return config.AgentIDChat
+	case IntentWrite:
+		return config.AgentIDWriter
+	case IntentArchitect:
+		return config.AgentIDArchitect
+	case IntentSkeptic:
+		return config.AgentIDSkeptic
+	case IntentLibrarian:
+		return config.AgentIDLibrarian
 	default:
 		return config.AgentIDChat
 	}
@@ -131,7 +148,7 @@ func (t IntentType) RequiresPlanning() bool {
 // ShouldCreateTask returns true if the intent should create a trackable task.
 func (t IntentType) ShouldCreateTask() bool {
 	switch t {
-	case IntentCode, IntentDebug, IntentPlan, IntentSchedule, IntentGit, IntentCompound, IntentCollaborate:
+	case IntentCode, IntentDebug, IntentPlan, IntentSchedule, IntentGit, IntentCompound, IntentCollaborate, IntentArchitect:
 		return true
 	case IntentPair:
 		return false // pair sessions don't create step-based tasks
@@ -143,7 +160,7 @@ func (t IntentType) ShouldCreateTask() bool {
 // ShouldDispatchAsync returns true if the intent should be dispatched asynchronously.
 func (t IntentType) ShouldDispatchAsync(requiresPlanning bool) bool {
 	switch t {
-	case IntentCode, IntentDebug, IntentPlan, IntentGit, IntentCompound, IntentPair, IntentCollaborate:
+	case IntentCode, IntentDebug, IntentPlan, IntentGit, IntentCompound, IntentPair, IntentCollaborate, IntentWrite, IntentArchitect, IntentSkeptic, IntentLibrarian:
 		return true
 	case IntentSchedule:
 		// Only dispatch async for schedule if it requires planning
@@ -160,7 +177,7 @@ func IsValidIntentType(s string) bool {
 		IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit,
 		IntentSchedule, IntentAnalyze, IntentSearch, IntentResearch,
 		IntentSecurity, IntentToolUse, IntentSkill, IntentPair, IntentCollaborate, IntentCompound, IntentClarify,
-		IntentInstruction:
+		IntentInstruction, IntentWrite, IntentArchitect, IntentSkeptic, IntentLibrarian:
 		return true
 	}
 	return false
@@ -215,6 +232,14 @@ func (t IntentType) Keywords() []string {
 		// phrases cover scheduled instructions ("every day at", "remind me to")
 		// and sticky preferences ("from now on", "remember to").
 		return []string{"always", "every day at", "remind me to", "from now on", "remember to"}
+	case IntentWrite:
+		return []string{"write essay", "draft", "long form", "long-form", "write doc", "write a brief", "blog post", "article"}
+	case IntentArchitect:
+		return []string{"design system", "architect", "tech stack", "trade-off", "tradeoff", "should we use", "evaluate technology"}
+	case IntentSkeptic:
+		return []string{"stress-test", "stress test", "steelman", "what's wrong with", "what is wrong with", "challenge this", "adversarial"}
+	case IntentLibrarian:
+		return []string{"review memory", "memory review", "clean up tags", "mine backlog", "what contradictions", "what have i been thinking"}
 	default:
 		return nil
 	}
