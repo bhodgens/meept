@@ -32,3 +32,16 @@ type MessagingBot interface {
 	// (e.g. push notifications, reminders) without a prior inbound message.
 	CanInitiate() bool
 }
+
+// PushNotifier provides push notification capability for bots.
+// Bots can use this to send proactive notifications to users.
+type PushNotifier interface {
+	// PushNotification sends a push notification to the user.
+	// The sessionID identifies the recipient session.
+	PushNotification(ctx context.Context, sessionID string, title, message string) error
+}
+
+// BotContext provides runtime context and services to executing bots.
+type BotContext interface {
+	PushNotifier
+}
