@@ -24,6 +24,10 @@ Meept uses a multi-agent architecture where specialist agents handle different t
 | `researcher` | Gathers information from web, documentation, codebase | `web_fetch`, `web_search`, `file_read`, `list_directory` |
 | `committer` | Git operations | `shell_execute` |
 | `scheduler` | Job scheduling | `schedule_create`, `schedule_list`, `schedule_delete` |
+| `writer` | Long-form writing (essays, docs, briefs) | `file_read`, `file_write`, `request_handoff` |
+| `architect` | System design, tech evaluation, trade-off analysis | `file_read`, `list_directory`, `request_handoff` |
+| `skeptic` | Stress-tests claims, surfaces contradictions | `memory_search`, `file_read`, `request_handoff` |
+| `librarian` | Memory steward — reflection, tag hygiene, epistemic integrity | `memory_store`, `memory_search`, `request_handoff` |
 
 ### Reviewer Agents
 
@@ -36,6 +40,15 @@ Reviewers are first-class agents defined by `AGENT.md` files (same discovery hie
 | `debug-reviewer` | Debugging analysis and fixes (`reviews_domain: debug`) |
 | `analyst-reviewer` | Analysis work (`reviews_domain: analysis`) |
 | `planner-reviewer` | Execution plans (`reviews_domain: plan`) |
+
+## Epistemic Memory Integration
+
+The `librarian` and `skeptic` agents are built on Plan 1's epistemic memory platform.
+
+- **librarian** drives the reflection, tag hygiene, backlog mining, and auto-claim promotion pipeline. It surfaces candidates to the user for action.
+- **skeptic** consumes `contradicts`, `superseded`, and `evidence_against` edges to stress-test user claims against stored knowledge.
+
+Both agents defer all destructive actions (supersede, reject, promote) to explicit user confirmation.
 
 ## Baseline Tools
 

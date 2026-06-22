@@ -23,6 +23,10 @@ Single-agent systems struggle with complex tasks requiring different expertise. 
 | `analyst` | Executor | Research, data analysis |
 | `committer` | Executor | Git operations |
 | `scheduler` | Executor | Job scheduling |
+| `writer` | Executor | Long-form writing (essays, docs, briefs) |
+| `architect` | Executor | System design, tech evaluation, trade-off analysis |
+| `skeptic` | Executor | Stress-tests claims, surfaces contradictions |
+| `librarian` | Executor | Memory steward — reflection, tag hygiene, epistemic integrity |
 
 ### Task Flow
 1. **Intake**: Dispatcher receives user request
@@ -170,6 +174,20 @@ max_revision_cycles = 3
 ### Agent Reports No Suggested Next Agent
 - `RouteActionRoute` requires `SuggestedNextAgent` in the report
 - Falls back to `RouteActionClose` if missing
+
+### New knowledge-work intents
+
+(Plan 2 — Agent Roster Extension.) The dispatcher recognizes four additional intent types that route to the new executor agents:
+
+| Intent | Constant | Default Agent | Example Trigger |
+|--------|----------|---------------|-----------------|
+| Write | `IntentWrite` | `writer` | "Write an essay about X" |
+| Architect | `IntentArchitect` | `architect` | "Design a system for X" |
+| Skeptic | `IntentSkeptic` | `skeptic` | "What's wrong with my reasoning?" |
+| Librarian | `IntentLibrarian` | `librarian` | "Review my memory" |
+
+These intents follow the same routing pipeline as the originals: dispatcher classification → memory search → agent discovery → delegation → execution → report routing. The `librarian` and `skeptic` agents additionally consume edges from the epistemic memory graph (see [Multi-Agent System — Epistemic Memory Integration](../concepts/multi-agent.md#epistemic-memory-integration)).
+
 ## Ralph Loop: Automatic Verification and Replanning
 
 Ralph Loop provides self-correcting task execution by verifying completion evidence and triggering automatic replanning when verification fails.

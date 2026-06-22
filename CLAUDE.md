@@ -369,6 +369,10 @@ Meept uses a multi-agent architecture where specialist agents handle different t
 | `debug-reviewer` | Reviewer | Reviews debug work (`reviews_domain: debug`) |
 | `analyst-reviewer` | Reviewer | Reviews analyses (`reviews_domain: analysis`) |
 | `planner-reviewer` | Reviewer | Reviews plans (`reviews_domain: plan`) |
+| `writer` | Executor | Long-form writing (essays, docs, briefs) |
+| `architect` | Executor | System design, tech evaluation, trade-off analysis |
+| `skeptic` | Executor | Stress-tests claims, surfaces contradictions |
+| `librarian` | Executor | Memory steward — reflection, tag hygiene, epistemic integrity |
 
 ### Coworker Awareness
 
