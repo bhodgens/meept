@@ -937,6 +937,18 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// Start prefetch service
 		c.MemoryManager.StartPrefetchService(context.Background())
 		logger.Info("Memory prefetch service started")
+
+		// Wire epistemic detector and ambient extraction hook. Both are
+		// no-ops when the LLM client is unavailable or ambient extraction
+		// is disabled in the user's config. The detector runs after every
+		// Store of an epistemic memory type; the hook runs after every
+		// agent turn. See internal/daemon/epistemic_wiring.go.
+		epistemicChatter := c.LLMProvider
+		if epistemicChatter == nil {
+			epistemicChatter = c.LLMClient
+		}
+		wireEpistemicDetector(c.MemoryManager, epistemicChatter, cfg.Memory, logger)
+		wireEpistemicHook(c.AgentLoop, c.MemoryManager, epistemicChatter, cfg.Memory, logger)
 	}
 
 	// Store the memvid client from memory manager if active, or create standalone
@@ -3060,6 +3072,17 @@ func registerBuiltinTools(
 		logger.Debug("Registered memory curation tools")
 
 		logger.Debug("Registered memory tools")
+
+		// Epistemic memory tools (Path A: explicit retention + destructive actions)
+		registry.Register(builtin.NewRetainClaimTool(memoryMgr))
+		registry.Register(builtin.NewRetainDecisionTool(memoryMgr))
+		registry.Register(builtin.NewRetainPredictionTool(memoryMgr))
+		registry.Register(builtin.NewMarkSupersededTool(memoryMgr, memoryMgr.Graph()))
+		registry.Register(builtin.NewMarkResolvedTool(memoryMgr))
+		registry.Register(builtin.NewRecordReviewTool(memoryMgr))
+		registry.Register(builtin.NewRejectClaimTool(memoryMgr))
+		registry.Register(builtin.NewPurgeAutoClaimsTool(memoryMgr))
+		logger.Debug("Registered epistemic memory tools")
 	} else if memoryMgr != nil {
 		logger.Warn("Memory tools not registered: memory manager not initialized")
 	}
@@ -4694,6 +4717,22 @@ func (a *notificationAdapter) PublishTaskNotification(taskID, agentID string, no
 		nType = NotificationTypeInfo
 	}
 	a.emitter.PublishTaskNotification(taskID, agentID, nType, title, message)
+}
+
+func (a *notificationAdapter) PublishSessionNotification(sessionID, agentID string, notifType string, title, message string) {
+	// Convert string to NotificationType
+	var nType NotificationType
+	switch notifType {
+	case "success":
+		nType = NotificationTypeSuccess
+	case "warning":
+		nType = NotificationTypeWarning
+	case "error":
+		nType = NotificationTypeError
+	default:
+		nType = NotificationTypeInfo
+	}
+	a.emitter.PublishNotification(sessionID, agentID, nType, title, message)
 }
 
 // discoverProjectFiles walks the base directory and returns a list of tracked source files.

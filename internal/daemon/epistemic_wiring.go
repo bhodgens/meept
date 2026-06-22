@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 
@@ -75,8 +74,8 @@ If no relationships, return [].`
 	user := fmt.Sprintf("New memory: id=%s type=%s content=%q\n\nCandidates:\n%s", newMem.ID, newMem.Type, newMem.Content, candStr)
 
 	return []llm.ChatMessage{
-		{Role: "system", Content: system},
-		{Role: "user", Content: user},
+		{Role: llm.RoleSystem, Content: system},
+		{Role: llm.RoleUser, Content: user},
 	}
 }
 
@@ -107,7 +106,7 @@ func newAmbientClassifierAdapter(chatter llm.Chatter) *ambientClassifierAdapter 
 // returns the raw response body bytes.
 func (a *ambientClassifierAdapter) ExtractCandidates(ctx context.Context, prompt string) ([]byte, error) {
 	resp, err := a.chatter.Chat(ctx, []llm.ChatMessage{
-		{Role: "user", Content: prompt},
+		{Role: llm.RoleUser, Content: prompt},
 	}, llm.WithTemperature(0.2))
 	if err != nil {
 		return nil, fmt.Errorf("ambient classifier chat: %w", err)
@@ -167,6 +166,3 @@ func wireEpistemicHook(agentLoop *agent.AgentLoop, memoryMgr *memory.Manager, ch
 		"max_per_turn", memCfg.Epistemic.AmbientExtraction.MaxPerTurn,
 	)
 }
-
-// Ensure unused imports are referenced.
-var _ = json.Marshal

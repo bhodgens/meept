@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/agent/prompts"
-	"github.com/caimlas/meept/internal/compress"
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/compress"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory/memvid"
@@ -609,10 +609,13 @@ type LearnedPattern struct {
 	Confidence  float64
 }
 
-// NotificationPublisher is an interface for publishing task notifications.
+// NotificationPublisher is an interface for publishing task and session notifications.
 // This allows the agent to publish notifications without depending on the daemon package.
 type NotificationPublisher interface {
 	PublishTaskNotification(taskID, agentID string, notifType string, title, message string)
+	// PublishSessionNotification publishes a session-scoped notification
+	// (e.g., waiting_human, bot_finished, requires_approval).
+	PublishSessionNotification(sessionID, agentID string, notifType string, title, message string)
 }
 
 // LoopOption is a functional option for configuring an AgentLoop.
@@ -4183,11 +4186,21 @@ func (l *AgentLoop) recordTaskMetrics(t *task.Task, modelID string, success bool
 }
 
 // updateSessionDesignation updates the session's designation status (Plan 4.2).
+// When the designation changes to waiting_human, a notification is published
+// to alert the user that the session needs their input.
 func (l *AgentLoop) updateSessionDesignation(status session.DesignationStatus, reason, priority string) {
 	if l.sessionStore == nil || l.currentSessionID == "" {
 		return
 	}
 	_ = l.sessionStore.UpdateDesignation(l.currentSessionID, status, reason, priority)
+
+	// Publish notification when session enters "waiting_human" state (Plan 4.3).
+	if status == session.DesignationWaitingHuman && l.notificationPublisher != nil {
+		l.notificationPublisher.PublishSessionNotification(
+			l.currentSessionID, l.agentID, "info",
+			"Awaiting Your Response", reason,
+		)
+	}
 }
 
 // clearSessionDesignation clears the session's designation (Plan 4.2).
