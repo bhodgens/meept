@@ -120,6 +120,18 @@ type AgentLifecyclePayload struct {
 	Reason         string `json:"reason,omitempty"`
 }
 
+// SessionLifecyclePayload is attached to bus events for session boundary tracking.
+type SessionLifecyclePayload struct {
+	Event        string  `json:"event"`          // "start" or "end"
+	SessionID    string  `json:"session_id"`
+	AgentID      string  `json:"agent_id"`
+	StartTimeSec float64 `json:"start_time_sec,omitempty"`
+	EndTimeSec   float64 `json:"end_time_sec,omitempty"`
+	DurationSec  float64 `json:"duration_sec,omitempty"`
+	Success      bool    `json:"success,omitempty"`
+	Metadata     string  `json:"metadata,omitempty"` // JSON-encoded arbitrary metadata
+}
+
 // MessageQueue is a thread-safe dual-queue for steering and follow-up messages.
 type MessageQueue struct {
 	mu            sync.Mutex

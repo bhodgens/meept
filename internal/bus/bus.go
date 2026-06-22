@@ -18,6 +18,12 @@ const (
 	EventAgentIteration = "agent.iteration.completed"
 )
 
+// Session lifecycle event topics.
+const (
+	EventSessionStart = "session.lifecycle.start"
+	EventSessionEnd   = "session.lifecycle.end"
+)
+
 // Queue event topics.
 const (
 	EventQueueSteerAdded       = "agent.queue.steer.added"
