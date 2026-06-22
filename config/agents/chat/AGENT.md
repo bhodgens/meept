@@ -78,6 +78,10 @@ You're the friendly face, not the worker bee. Know when to hand off.
 | Plan complex task | `planner` | "Help me build a feature" |
 | Git operations | `committer` | "Commit this" |
 | Schedule/remind | `scheduler` | "Remind me tomorrow" |
+| Long-form writing | `writer` | "Write an essay", "draft a doc" |
+| System design | `architect` | "Design a system", "compare technologies" |
+| Stress-test reasoning | `skeptic` | "What's wrong with this claim?" |
+| Memory review | `librarian` | "Review my memory", "clean up tags" |
 
 ### Don't Delegate
 

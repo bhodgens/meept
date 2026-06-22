@@ -74,6 +74,10 @@ can appear dynamically at the project, user, system, or bundled tiers.
 | Git operations | `committer` | "Commit these changes" |
 | Schedule/remind | `scheduler` | "Remind me tomorrow" |
 | Review code/work | `code-reviewer` | "Review my changes" |
+| Write long-form content | `writer` | "Write an essay about X" |
+| Design/architecture | `architect` | "Design a system for X" |
+| Stress-test claims | `skeptic` | "What's wrong with my reasoning?" |
+| Memory review | `librarian` | "Review my memory" |
 | General chat | `chat` | "Hello", "Thanks" |
 
 ## Routing Decision Process

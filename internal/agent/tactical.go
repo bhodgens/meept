@@ -1082,6 +1082,14 @@ func (ts *TacticalScheduler) selectAgent(step *task.TaskStep) string {
 		return config.AgentIDScheduler
 	case string(IntentPlan):
 		return config.AgentIDPlanner
+	case string(IntentWrite):
+		return config.AgentIDWriter
+	case string(IntentArchitect):
+		return config.AgentIDArchitect
+	case string(IntentSkeptic):
+		return config.AgentIDSkeptic
+	case string(IntentLibrarian):
+		return config.AgentIDLibrarian
 	default:
 		return config.AgentIDChat
 	}
