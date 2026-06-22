@@ -1116,6 +1116,19 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	if s.rpcCall != nil {
 		mux.HandleFunc("GET /api/v1/mcp/servers", s.handleMCPServersList)
 		mux.HandleFunc("PUT /api/v1/mcp/servers/{name}/enabled", s.handleMCPServerSetEnabled)
+
+		// Epistemic memory endpoints (dispatched via rpcCall to memory.* handlers)
+		mux.HandleFunc("POST /api/v1/memory/claims", s.handleEpistemicRetainClaim)
+		mux.HandleFunc("POST /api/v1/memory/claims/{id}/promote", s.handleEpistemicPromoteClaim)
+		mux.HandleFunc("POST /api/v1/memory/claims/{id}/reject", s.handleEpistemicRejectClaim)
+		mux.HandleFunc("POST /api/v1/memory/decisions", s.handleEpistemicRetainDecision)
+		mux.HandleFunc("POST /api/v1/memory/decisions/{id}/review", s.handleEpistemicRecordReview)
+		mux.HandleFunc("POST /api/v1/memory/predictions", s.handleEpistemicRetainPrediction)
+		mux.HandleFunc("POST /api/v1/memory/predictions/{id}/resolve", s.handleEpistemicMarkResolved)
+		mux.HandleFunc("POST /api/v1/memory/supersede", s.handleEpistemicMarkSuperseded)
+		mux.HandleFunc("GET /api/v1/memory/canonical", s.handleEpistemicFindCanonical)
+		mux.HandleFunc("GET /api/v1/memory/review-queue", s.handleEpistemicReviewQueue)
+		mux.HandleFunc("GET /api/v1/memory/auto-claims", s.handleEpistemicListAutoClaims)
 	}
 
 	// Compression endpoints

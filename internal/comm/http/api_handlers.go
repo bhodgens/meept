@@ -3259,3 +3259,174 @@ func (s *Server) handleCompressionStats(w http.ResponseWriter, r *http.Request) 
 
 	s.writeJSON(w, http.StatusOK, stats)
 }
+
+// --- Epistemic Memory Endpoints ---
+// All dispatch through s.rpcCall to the RPC handlers registered by
+// internal/rpc/epistemic.go.
+
+func (s *Server) epistemicRPC(w http.ResponseWriter, r *http.Request, method string, params any) {
+	if s.rpcCall == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "epistemic service not available")
+		return
+	}
+	var raw json.RawMessage
+	if params != nil {
+		b, err := json.Marshal(params)
+		if err != nil {
+			s.writeError(w, http.StatusInternalServerError, "failed to encode request")
+			return
+		}
+		raw = b
+	} else {
+		raw = json.RawMessage("{}")
+	}
+	result, err := s.rpcCall(r.Context(), method, raw)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleEpistemicRetainClaim(w http.ResponseWriter, r *http.Request) {
+	var body map[string]any
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	s.epistemicRPC(w, r, "memory.retainClaim", body)
+}
+
+func (s *Server) handleEpistemicRetainDecision(w http.ResponseWriter, r *http.Request) {
+	var body map[string]any
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	s.epistemicRPC(w, r, "memory.retainDecision", body)
+}
+
+func (s *Server) handleEpistemicRetainPrediction(w http.ResponseWriter, r *http.Request) {
+	var body map[string]any
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	s.epistemicRPC(w, r, "memory.retainPrediction", body)
+}
+
+func (s *Server) handleEpistemicPromoteClaim(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	s.epistemicRPC(w, r, "memory.promoteClaim", map[string]string{"id": id})
+}
+
+func (s *Server) handleEpistemicRejectClaim(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	s.epistemicRPC(w, r, "memory.rejectClaim", map[string]string{"id": id})
+}
+
+func (s *Server) handleEpistemicRecordReview(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body map[string]any
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	body["decision_id"] = id
+	s.epistemicRPC(w, r, "memory.recordReview", body)
+}
+
+func (s *Server) handleEpistemicMarkResolved(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body map[string]any
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	body["prediction_id"] = id
+	s.epistemicRPC(w, r, "memory.markResolved", body)
+}
+
+func (s *Server) handleEpistemicMarkSuperseded(w http.ResponseWriter, r *http.Request) {
+	var body map[string]any
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	s.epistemicRPC(w, r, "memory.markSuperseded", body)
+}
+
+func (s *Server) handleEpistemicFindCanonical(w http.ResponseWriter, r *http.Request) {
+	topic := r.URL.Query().Get("topic")
+	s.epistemicRPC(w, r, "memory.findCanonical", map[string]string{"topic": topic})
+}
+
+func (s *Server) handleEpistemicReviewQueue(w http.ResponseWriter, r *http.Request) {
+	s.epistemicRPC(w, r, "memory.reviewQueue", nil)
+}
+
+func (s *Server) handleEpistemicListAutoClaims(w http.ResponseWriter, r *http.Request) {
+	s.epistemicRPC(w, r, "memory.listAutoClaims", nil)
+}
+
+// MARK: - Reasoning HTTP endpoints
+
+// handleReasoningListTiers handles GET /api/v1/reasoning/tiers.
+func (s *Server) handleReasoningListTiers(w http.ResponseWriter, r *http.Request) {
+	if s.rpcCall == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "reasoning not available")
+		return
+	}
+	result, err := s.rpcCall(r.Context(), "reasoning.list_tiers", json.RawMessage("{}"))
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleReasoningGetBudgets handles GET /api/v1/reasoning/budgets.
+func (s *Server) handleReasoningGetBudgets(w http.ResponseWriter, r *http.Request) {
+	if s.rpcCall == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "reasoning not available")
+		return
+	}
+	result, err := s.rpcCall(r.Context(), "reasoning.get_budgets", json.RawMessage("{}"))
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleReasoningSetBudgets handles POST /api/v1/reasoning/budgets.
+func (s *Server) handleReasoningSetBudgets(w http.ResponseWriter, r *http.Request) {
+	var body map[string]int
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	if s.rpcCall == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "reasoning not available")
+		return
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "failed to encode request")
+		return
+	}
+	result, err := s.rpcCall(r.Context(), "reasoning.set_budgets", raw)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleReasoningListAgents handles GET /api/v1/reasoning/agents.
+func (s *Server) handleReasoningListAgents(w http.ResponseWriter, r *http.Request) {
+	if s.rpcCall == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "reasoning not available")
+		return
+	}
+	// Call reasoning.get for each registered agent to list them all.
+	result, err := s.rpcCall(r.Context(), "reasoning.list_agents", json.RawMessage("{}"))
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, result)
+}
