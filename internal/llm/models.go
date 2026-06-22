@@ -206,6 +206,10 @@ type ModelConfig struct {
 	// to this model/provider. When 0, no limit is enforced (unlimited).
 	// Use this to prevent overwhelming rate-limited APIs or local LLMs.
 	MaxConcurrency int
+	// DefaultReasoning is the model-level default reasoning effort/budget
+	// configuration. When non-nil, it is used if no per-request or agent-level
+	// reasoning override is present.
+	DefaultReasoning *ReasoningConfig
 }
 
 // HasCapability checks if the model has a specific capability.
