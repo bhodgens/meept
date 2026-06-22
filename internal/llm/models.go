@@ -168,6 +168,11 @@ type Response struct {
 	Usage        TokenUsage `json:"usage"`
 	Model        string     `json:"model"`
 	FinishReason string     `json:"finish_reason"`
+	// Reasoning holds the assistant's chain-of-thought text when the
+	// vendor exposes it as a separate channel (Anthropic thinking,
+	// OpenAI o1-style reasoning, DeepSeek reasons). Empty when not
+	// surfaced by the provider.
+	Reasoning string `json:"reasoning,omitempty"`
 }
 
 // HasToolCalls returns true if the response contains tool calls.
@@ -385,6 +390,9 @@ type ResponseMessage struct {
 	Role      string          `json:"role"`
 	Content   json.RawMessage `json:"content"`
 	ToolCalls []RawToolCall   `json:"tool_calls,omitempty"`
+	// ReasoningContent captures chain-of-thought text from OpenAI-compat
+	// providers that surface it as a sibling field to `content`.
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 // ContentString extracts the text content from the Content field,

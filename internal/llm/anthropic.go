@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -120,6 +121,46 @@ func NewAnthropicClient(config *ModelConfig, opts ...AnthropicClientOption) *Ant
 	}
 
 	return c
+}
+
+// isAnthropicRoute reports whether a model config targets an Anthropic-
+// compatible endpoint (direct, OpenRouter-claude, or Bedrock-claude).
+// Used to decide whether the Anthropic wire format applies.
+func isAnthropicRoute(cfg *ModelConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	if cfg.ProviderID == ProviderIDAnthropic {
+		return true
+	}
+	if strings.Contains(strings.ToLower(cfg.BaseURL), "anthropic") {
+		return true
+	}
+	// Bedrock and OpenRouter host Claude models; route by model-id prefix.
+	if cfg.ProviderID == ProviderIDBedrock || cfg.ProviderID == "openrouter" {
+		mid := strings.ToLower(cfg.ModelID)
+		if strings.Contains(mid, "claude") || strings.HasPrefix(mid, "anthropic/") || strings.HasPrefix(mid, "anthropic.") {
+			return true
+		}
+	}
+	return false
+}
+
+// anthropicRequestURL constructs the request URL honoring provider quirks.
+// Bedrock uses /model/{modelId}/invoke[_with_response_stream]; all others
+// use {baseURL}/v1/messages.
+func (c *AnthropicClient) anthropicRequestURL(streaming bool) string {
+	base := strings.TrimSuffix(c.config.BaseURL, "/")
+	if c.config.ProviderID == ProviderIDBedrock {
+		suffix := "invoke"
+		if streaming {
+			suffix = "invoke_with_response_stream"
+		}
+		// url.PathEscape preserves ':' (valid pchar per RFC 3986) so
+		// "anthropic.claude-sonnet-4-6-v2:0" round-trips correctly.
+		return base + "/model/" + url.PathEscape(c.config.ModelID) + "/" + suffix
+	}
+	return base + "/v1/messages"
 }
 
 // Chat sends a chat completion request to Anthropic's Messages API.

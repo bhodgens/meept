@@ -922,6 +922,7 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 		},
 		Model:        model,
 		FinishReason: choice.FinishReason,
+		Reasoning:    msg.ReasoningContent,
 	}, nil
 }
 
