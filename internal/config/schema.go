@@ -21,12 +21,6 @@ const (
 	AgentIDScheduler  = "scheduler"
 	AgentIDChat       = "chat"
 	AgentIDResearcher = "researcher"
-
-	// Knowledge-work specialists (Plan 2: Agent Roster Extension).
-	AgentIDWriter    = "writer"
-	AgentIDArchitect = "architect"
-	AgentIDSkeptic   = "skeptic"
-	AgentIDLibrarian = "librarian"
 )
 
 // Agent role constants used for role validation and assignment.
@@ -1886,8 +1880,10 @@ type AnalyticsConfig struct {
 
 // NotificationsConfig holds configuration for desktop notifications.
 type NotificationsConfig struct {
-	Enabled   bool `json:"enabled,omitempty"       toml:"enabled"`
-	Retention int  `json:"retention,omitempty"     toml:"retention"`
+	Enabled        bool            `json:"enabled,omitempty"        toml:"enabled"`
+	Retention      int             `json:"retention,omitempty"      toml:"retention"`
+	MaxPerMinute   int             `json:"max_per_minute,omitempty" toml:"max_per_minute"`
+	EnableTypes    map[string]bool `json:"enable_types,omitempty"   toml:"enable_types"`
 }
 
 // RuntimeConfig holds configuration for execution backends (local, Docker).

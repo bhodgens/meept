@@ -53,22 +53,60 @@ class SessionBadgeManager: ObservableObject {
             guard let self else { return }
             do {
                 let response = try await apiClient.getDesignatedSessions()
-                DispatchQueue.main.async {
-                    self.designatedCount = response.designatedCount
-                    self.urgentCount = 0
-                    self.highCount = 0
-                    for summary in response.sessions {
-                        switch summary.designation.priority {
-                        case .urgent:
-                            self.urgentCount += 1
-                        case .high:
-                            self.highCount += 1
-                        default:
-                            break
-                        }
+
+                // Snapshot new counts before dispatching to main queue
+                var newUrgentCount = 0
+                var newHighCount = 0
+                var newHasUrgent = false
+                var newHasHighOrMore = false
+                for summary in response.sessions {
+                    switch summary.designation.priority {
+                    case .urgent:
+                        newUrgentCount += 1
+                    case .high:
+                        newHighCount += 1
+                    default:
+                        break
                     }
-                    self.hasUrgentSessions = self.urgentCount > 0
-                    self.hasHighPrioritySessions = self.highCount > 0
+                }
+                newHasUrgent = newUrgentCount > 0
+                newHasHighOrMore = newHighCount > 0
+
+                DispatchQueue.main.async {
+                    let oldHasUrgent = self.hasUrgentSessions
+                    let oldHasHigh = self.hasHighPrioritySessions
+                    let oldCount = self.designatedCount
+
+                    self.designatedCount = response.designatedCount
+                    self.urgentCount = newUrgentCount
+                    self.highCount = newHighCount
+                    self.hasUrgentSessions = newHasUrgent
+                    self.hasHighPrioritySessions = newHasHighOrMore
+
+                    // Show a native notification when designated sessions
+                    // change (new sessions appear, or an existing one moves
+                    // to a more urgent state).
+                    let wasSilent = oldCount == 0 && self.designatedCount > 0
+                    let escalatedToUrgent = !oldHasUrgent && self.hasUrgentSessions
+                    let escalatedToHigh = !oldHasHigh && self.hasHighPrioritySessions
+
+                    if wasSilent || escalatedToUrgent || escalatedToHigh {
+                        let title = "Meept — \(self.designatedCount) session\(self.designatedCount == 1 ? "" : "s") waiting"
+                        var body = "\(self.urgentCount) urgent, \(self.highCount) high-priority"
+                        // Include the most urgent session name
+                        if let busiest = response.sessions.min(by: { $0.designation.priority.orderValue > $1.designation.priority.orderValue }) {
+                            body += ": \(busiest.name)"
+                        }
+                        let bestPriority = response.sessions
+                            .map { $0.designation.priority }
+                            .max() ?? .normal
+                        NotificationManager.shared.showSessionNotification(
+                            title: title,
+                            message: body,
+                            status: .waitingHuman,
+                            priority: bestPriority
+                        )
+                    }
                 }
             } catch {
                 self.logger.error(

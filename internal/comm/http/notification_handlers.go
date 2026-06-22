@@ -21,6 +21,10 @@ const (
 	NotificationTypeError        NotificationType = "error"
 	NotificationTypeTaskCompleted NotificationType = "task_completed"
 	NotificationTypeJobCompleted  NotificationType = "job_completed"
+	NotificationTypeSessionWaiting   NotificationType = "session_waiting"
+	NotificationTypeSessionCompleted NotificationType = "session_completed"
+	NotificationTypeBotFinished      NotificationType = "bot_finished"
+	NotificationTypeRequiresApproval NotificationType = "requires_approval"
 )
 
 // NotificationEvent represents a notification event sent to clients.

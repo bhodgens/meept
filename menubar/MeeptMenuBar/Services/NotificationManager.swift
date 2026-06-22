@@ -185,6 +185,62 @@ class NotificationManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Session Designation Notifications
+
+    /// Show a native macOS notification for session designation events.
+    func showSessionNotification(
+        title: String,
+        message: String,
+        status: DesignationStatus,
+        priority: Priority = .normal
+    ) {
+        // Check notification level filter
+        let level = configService.notificationsLevel
+        switch level {
+        case "none":
+            return
+        case "errors_only":
+            // Session notifications are never "errors", but still show
+            // urgent/high priority as they need attention
+            guard priority == .urgent || priority == .high else { return }
+        case "warnings_and_above":
+            // Show high/urgent priority session notifications
+            guard priority == .urgent || priority == .high else { return }
+        case "all":
+            break
+        default:
+            break
+        }
+
+        // Rate limit: don't show more than one session notification per 5 seconds
+        let now = Date()
+        guard now.timeIntervalSince(lastNotificationTime) > 5.0 else { return }
+        lastNotificationTime = now
+
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = message
+        content.sound = priority == .urgent ? UNNotificationSound.defaultCritical : .default
+
+        content.categoryIdentifier = "MEEPT_SESSION"
+        content.userInfo = [
+            "status": status.rawValue,
+            "priority": priority.rawValue
+        ]
+
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString,
+            content: content,
+            trigger: nil
+        )
+
+        notificationCenter.add(request) { [weak self] error in
+            if let error = error {
+                self?.logger.error("failed to show session notification: \(error.localizedDescription)")
+            }
+        }
+    }
+
     // MARK: - Notification Management
 
     func clearNotifications() {

@@ -24,6 +24,45 @@ const (
 // This is an alias to the http package's NotificationEvent type.
 type NotificationEvent = http.NotificationEvent
 
+// RateLimiter controls the maximum number of notifications sent per minute,
+// per type. It uses a sliding window: timestamps older than 1 minute are
+// pruned on every Allow() call. If the remaining count is below maxPerMinute,
+// the request is allowed and its timestamp is recorded.
+type RateLimiter struct {
+	mu           sync.Mutex
+	notifications map[string][]time.Time
+	maxPerMinute  int
+}
+
+// Allow reports whether a notification of the given type should be emitted
+// under the current rate limit. Returns false when the limit for that type
+// has been reached within the sliding one-minute window.
+func (r *RateLimiter) Allow(notifType string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	now := time.Now()
+	windowStart := now.Add(-time.Minute)
+
+	// Prune timestamps outside the sliding window.
+	times := r.notifications[notifType]
+	idx := 0
+	for idx < len(times) && times[idx].Before(windowStart) {
+		idx++
+	}
+	if idx > 0 {
+		r.notifications[notifType] = times[idx:]
+		times = r.notifications[notifType]
+	}
+
+	if len(times) >= r.maxPerMinute {
+		return false
+	}
+
+	r.notifications[notifType] = append(times, now)
+	return true
+}
+
 // EventEmitter manages notification subscriptions and event distribution.
 type EventEmitter struct {
 	mu          sync.RWMutex
@@ -31,6 +70,7 @@ type EventEmitter struct {
 	buffer      []*http.NotificationEvent
 	maxBuffer   int
 	logger      *slog.Logger
+	rateLimiter *RateLimiter
 }
 
 // subscriberSlot bundles a subscriber channel with a closed flag so that
@@ -42,8 +82,20 @@ type subscriberSlot struct {
 	closed bool
 }
 
-// NewEventEmitter creates a new event emitter with the specified buffer size.
-func NewEventEmitter(bufferSize int, logger *slog.Logger) *EventEmitter {
+// NewRateLimiter creates a rate limiter with the given per-type maximum
+// notifications per minute. A maxPerMinute of 0 or less disables rate limiting.
+func NewRateLimiter(maxPerMinute int) *RateLimiter {
+	if maxPerMinute <= 0 {
+		maxPerMinute = 60 // default: 60 per minute
+	}
+	return &RateLimiter{
+		notifications: make(map[string][]time.Time),
+		maxPerMinute:  maxPerMinute,
+	}
+}
+
+// NewEventEmitter creates a new event emitter with the specified buffer size and rate limit.
+func NewEventEmitter(bufferSize int, maxRatePerMinute int, logger *slog.Logger) *EventEmitter {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -52,6 +104,7 @@ func NewEventEmitter(bufferSize int, logger *slog.Logger) *EventEmitter {
 		buffer:      make([]*http.NotificationEvent, 0),
 		maxBuffer:   bufferSize,
 		logger:      logger,
+		rateLimiter: NewRateLimiter(maxRatePerMinute),
 	}
 }
 
@@ -108,8 +161,17 @@ func (e *EventEmitter) Unsubscribe(ch chan *http.NotificationEvent) {
 	}
 }
 
-// Publish sends a notification event to all subscribers.
+// Publish sends a notification event to all subscribers after rate limiting.
+// Rate-limited notifications are silently dropped with a debug log and also
+// excluded from the buffer so they do not accumulate.
 func (e *EventEmitter) Publish(event *http.NotificationEvent) {
+	// Rate limiting: check before acquiring any lock. RateLimiter uses
+	// its own internal mutex and never performs I/O under the EventEmitter's lock.
+	if e.rateLimiter != nil && !e.rateLimiter.Allow(string(event.Type)) {
+		e.logger.Debug("notification rate-limited", "type", event.Type)
+		return
+	}
+
 	e.mu.Lock()
 
 	// Add to buffer
@@ -183,6 +245,16 @@ func (e *EventEmitter) GetEventsSince(t time.Time) []*http.NotificationEvent {
 		}
 	}
 	return events
+}
+
+// SetRateLimit updates the rate limiter's per-type maximum notifications per minute.
+// Pass 0 to reset to the default (60). Pass -1 to disable rate limiting entirely.
+func (e *EventEmitter) SetRateLimit(maxPerMinute int) {
+	if maxPerMinute < 0 {
+		e.rateLimiter = nil
+	} else {
+		e.rateLimiter = NewRateLimiter(maxPerMinute)
+	}
 }
 
 // PublishNotification publishes a notification with full control over the event fields
