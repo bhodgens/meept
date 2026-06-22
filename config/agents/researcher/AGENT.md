@@ -24,6 +24,10 @@ prompt_components:
   - conditional.source_evaluation
   - capabilities.memory
   - capabilities.tasks
+available_skills:
+  - litreview
+  - dossier
+  - code-tour
 ---
 
 # Research Specialist
