@@ -46,6 +46,7 @@ _$SessionImpl _$$SessionImplFromJson(Map<String, dynamic> json) =>
       attachedClients: (json['attached_clients'] as List<dynamic>?)
           ?.map((e) => e as String)
           .toList(),
+      designation: _parseDesignation(json['designation']),
     );
 
 Map<String, dynamic> _$$SessionImplToJson(_$SessionImpl instance) =>
@@ -57,6 +58,7 @@ Map<String, dynamic> _$$SessionImplToJson(_$SessionImpl instance) =>
       'created_at': instance.createdAt.toIso8601String(),
       'last_activity': instance.lastActivity?.toIso8601String(),
       'attached_clients': instance.attachedClients,
+      'designation': _serializeDesignation(instance.designation),
     };
 
 _$TaskImpl _$$TaskImplFromJson(Map<String, dynamic> json) => _$TaskImpl(

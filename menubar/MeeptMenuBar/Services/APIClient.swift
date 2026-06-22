@@ -88,6 +88,25 @@ class APIClient {
         return MCPServer(from: status)
     }
 
+    // MARK: - Session Designation (async/await)
+
+    /// Fetches sessions that are designated (waiting for human input, etc.).
+    func getDesignatedSessions() async throws -> DesignatedSessionsResponse {
+        let request = try makeRequest(path: "/api/v1/sessions/designated", method: "GET")
+        let data = try await performData(request: request)
+        let decoder = JSONDecoder()
+        return try decoder.decode(DesignatedSessionsResponse.self, from: data)
+    }
+
+    /// Acknowledges a designated session, clearing its designation.
+    func acknowledgeSession(_ sessionID: String) async throws {
+        let request = try makeRequest(
+            path: "/api/v1/sessions/designated/\(sessionID)",
+            method: "PUT"
+        )
+        try await performVoid(request: request)
+    }
+
     // MARK: - Backward-compatible completion handler wrappers
 
     func getDaemonStatus(completion: @escaping (Result<DaemonStatus, Error>) -> Void) {

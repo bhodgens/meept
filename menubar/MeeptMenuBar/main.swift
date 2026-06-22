@@ -12,6 +12,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let daemonStatusVM: DaemonStatusViewModel
     private let configVM: ConfigViewModel
     private let metricsVM: MetricsViewModel
+    private let sessionBadgeVM: SessionBadgeManager
     private let logger = Logger(subsystem: "com.caimlas.meept.menubar", category: "Main")
 
     override init() {
@@ -24,6 +25,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         self.daemonStatusVM = DaemonStatusViewModel(apiClient: apiClient, daemonController: daemonController)
         self.configVM = ConfigViewModel(configService: ConfigService())
         self.metricsVM = MetricsViewModel(dashboardService: DashboardService())
+        self.sessionBadgeVM = SessionBadgeManager(apiClient: apiClient)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -67,10 +69,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         daemonStatusVM.startPolling()
+        sessionBadgeVM.startPolling()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         daemonStatusVM.stopPolling()
+        sessionBadgeVM.stopPolling()
     }
 
     private func showSettings() {

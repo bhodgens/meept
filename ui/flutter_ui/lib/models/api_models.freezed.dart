@@ -329,6 +329,11 @@ mixin _$Session {
   DateTime? get lastActivity => throw _privateConstructorUsedError;
   @JsonKey(name: 'attached_clients')
   List<String>? get attachedClients => throw _privateConstructorUsedError;
+  @JsonKey(
+      name: 'designation',
+      fromJson: _parseDesignation,
+      toJson: _serializeDesignation)
+  SessionDesignation? get designation => throw _privateConstructorUsedError;
 
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
   @JsonKey(ignore: true)
@@ -347,7 +352,12 @@ abstract class $SessionCopyWith<$Res> {
       @JsonKey(name: 'conversation_id') String? conversationId,
       @JsonKey(name: 'created_at') DateTime createdAt,
       @JsonKey(name: 'last_activity') DateTime? lastActivity,
-      @JsonKey(name: 'attached_clients') List<String>? attachedClients});
+      @JsonKey(name: 'attached_clients') List<String>? attachedClients,
+      @JsonKey(
+          name: 'designation',
+          fromJson: _parseDesignation,
+          toJson: _serializeDesignation)
+      SessionDesignation? designation});
 }
 
 /// @nodoc
@@ -370,6 +380,7 @@ class _$SessionCopyWithImpl<$Res, $Val extends Session>
     Object? createdAt = null,
     Object? lastActivity = freezed,
     Object? attachedClients = freezed,
+    Object? designation = freezed,
   }) {
     return _then(_value.copyWith(
       id: null == id
@@ -400,6 +411,10 @@ class _$SessionCopyWithImpl<$Res, $Val extends Session>
           ? _value.attachedClients
           : attachedClients // ignore: cast_nullable_to_non_nullable
               as List<String>?,
+      designation: freezed == designation
+          ? _value.designation
+          : designation // ignore: cast_nullable_to_non_nullable
+              as SessionDesignation?,
     ) as $Val);
   }
 }
@@ -418,7 +433,12 @@ abstract class _$$SessionImplCopyWith<$Res> implements $SessionCopyWith<$Res> {
       @JsonKey(name: 'conversation_id') String? conversationId,
       @JsonKey(name: 'created_at') DateTime createdAt,
       @JsonKey(name: 'last_activity') DateTime? lastActivity,
-      @JsonKey(name: 'attached_clients') List<String>? attachedClients});
+      @JsonKey(name: 'attached_clients') List<String>? attachedClients,
+      @JsonKey(
+          name: 'designation',
+          fromJson: _parseDesignation,
+          toJson: _serializeDesignation)
+      SessionDesignation? designation});
 }
 
 /// @nodoc
@@ -439,6 +459,7 @@ class __$$SessionImplCopyWithImpl<$Res>
     Object? createdAt = null,
     Object? lastActivity = freezed,
     Object? attachedClients = freezed,
+    Object? designation = freezed,
   }) {
     return _then(_$SessionImpl(
       id: null == id
@@ -469,6 +490,10 @@ class __$$SessionImplCopyWithImpl<$Res>
           ? _value._attachedClients
           : attachedClients // ignore: cast_nullable_to_non_nullable
               as List<String>?,
+      designation: freezed == designation
+          ? _value.designation
+          : designation // ignore: cast_nullable_to_non_nullable
+              as SessionDesignation?,
     ));
   }
 }
@@ -483,7 +508,12 @@ class _$SessionImpl extends _Session {
       @JsonKey(name: 'conversation_id') this.conversationId,
       @JsonKey(name: 'created_at') required this.createdAt,
       @JsonKey(name: 'last_activity') this.lastActivity,
-      @JsonKey(name: 'attached_clients') final List<String>? attachedClients})
+      @JsonKey(name: 'attached_clients') final List<String>? attachedClients,
+      @JsonKey(
+          name: 'designation',
+          fromJson: _parseDesignation,
+          toJson: _serializeDesignation)
+      this.designation})
       : _attachedClients = attachedClients,
         super._();
 
@@ -520,8 +550,15 @@ class _$SessionImpl extends _Session {
   }
 
   @override
+  @JsonKey(
+      name: 'designation',
+      fromJson: _parseDesignation,
+      toJson: _serializeDesignation)
+  final SessionDesignation? designation;
+
+  @override
   String toString() {
-    return 'Session(id: $id, title: $title, description: $description, conversationId: $conversationId, createdAt: $createdAt, lastActivity: $lastActivity, attachedClients: $attachedClients)';
+    return 'Session(id: $id, title: $title, description: $description, conversationId: $conversationId, createdAt: $createdAt, lastActivity: $lastActivity, attachedClients: $attachedClients, designation: $designation)';
   }
 
   @override
@@ -540,7 +577,9 @@ class _$SessionImpl extends _Session {
             (identical(other.lastActivity, lastActivity) ||
                 other.lastActivity == lastActivity) &&
             const DeepCollectionEquality()
-                .equals(other._attachedClients, _attachedClients));
+                .equals(other._attachedClients, _attachedClients) &&
+            (identical(other.designation, designation) ||
+                other.designation == designation));
   }
 
   @JsonKey(ignore: true)
@@ -553,7 +592,8 @@ class _$SessionImpl extends _Session {
       conversationId,
       createdAt,
       lastActivity,
-      const DeepCollectionEquality().hash(_attachedClients));
+      const DeepCollectionEquality().hash(_attachedClients),
+      designation);
 
   @JsonKey(ignore: true)
   @override
@@ -577,8 +617,12 @@ abstract class _Session extends Session {
       @JsonKey(name: 'conversation_id') final String? conversationId,
       @JsonKey(name: 'created_at') required final DateTime createdAt,
       @JsonKey(name: 'last_activity') final DateTime? lastActivity,
-      @JsonKey(name: 'attached_clients')
-      final List<String>? attachedClients}) = _$SessionImpl;
+      @JsonKey(name: 'attached_clients') final List<String>? attachedClients,
+      @JsonKey(
+          name: 'designation',
+          fromJson: _parseDesignation,
+          toJson: _serializeDesignation)
+      final SessionDesignation? designation}) = _$SessionImpl;
   const _Session._() : super._();
 
   factory _Session.fromJson(Map<String, dynamic> json) = _$SessionImpl.fromJson;
@@ -604,6 +648,12 @@ abstract class _Session extends Session {
   @override
   @JsonKey(name: 'attached_clients')
   List<String>? get attachedClients;
+  @override
+  @JsonKey(
+      name: 'designation',
+      fromJson: _parseDesignation,
+      toJson: _serializeDesignation)
+  SessionDesignation? get designation;
   @override
   @JsonKey(ignore: true)
   _$$SessionImplCopyWith<_$SessionImpl> get copyWith =>

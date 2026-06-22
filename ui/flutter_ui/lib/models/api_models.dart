@@ -324,7 +324,125 @@ class ChatMessage with _$ChatMessage {
   }
 }
 
+// ===== Session Designation Enums =====
+
+/// Session designation status, mirroring Go `DesignationStatus`.
+enum DesignationStatus {
+  none('none'),
+  waitingHuman('waiting_human'),
+  humanResponded('human_responded'),
+  botThinking('bot_thinking'),
+  requiresApproval('requires_approval');
+
+  final String value;
+  const DesignationStatus(this.value);
+
+  factory DesignationStatus.fromValue(String v) {
+    return DesignationStatus.values.firstWhere(
+      (e) => e.value == v,
+      orElse: () => DesignationStatus.none,
+    );
+  }
+}
+
+/// Designation priority, mirroring the Go `priority` field.
+enum SessionPriority { urgent, high, normal, low }
+
+/// Map a raw string from the backend to a [SessionPriority].
+SessionPriority _parsePriority(String v) {
+  return switch (v) {
+    'urgent' => SessionPriority.urgent,
+    'high' => SessionPriority.high,
+    'normal' => SessionPriority.normal,
+    'low' => SessionPriority.low,
+    _ => SessionPriority.normal,
+  };
+}
+
+extension SessionPriorityX on SessionPriority {
+  /// API parameter value for this priority level.
+  String get apiValue => switch (this) {
+        SessionPriority.urgent => 'urgent',
+        SessionPriority.high => 'high',
+        SessionPriority.normal => 'normal',
+        SessionPriority.low => 'low',
+      };
+}
+
+/// Priority ordering for sorting designated sessions.
+/// Lower value = higher priority (should appear first).
+int priorityOrder(SessionPriority p) {
+  return switch (p) {
+    SessionPriority.urgent => 0,
+    SessionPriority.high => 1,
+    SessionPriority.normal => 2,
+    SessionPriority.low => 3,
+  };
+}
+
+// Mirrors `internal/session/designation.go:SessionDesignation`.
+/// Hand-rolled (not freezed) because freezed doesn't handle nested
+/// polymorphic types well in the Flutter target.
+class SessionDesignation {
+  final DesignationStatus status;
+  final String reason;
+  final SessionPriority priority;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final DateTime? acknowledgedAt;
+
+  const SessionDesignation({
+    required this.status,
+    required this.reason,
+    required this.priority,
+    required this.createdAt,
+    required this.updatedAt,
+    this.acknowledgedAt,
+  });
+
+  factory SessionDesignation.fromJson(Map<String, dynamic> json) {
+    final statusRaw = json['status'] as String? ?? 'none';
+    final priorityRaw = json['priority'] as String? ?? 'normal';
+    return SessionDesignation(
+      status: DesignationStatus.fromValue(statusRaw),
+      reason: json['reason'] as String? ?? '',
+      priority: _parsePriority(priorityRaw),
+      createdAt:
+          DateTime.tryParse(json['created_at'] as String? ?? '') ?? DateTime.now(),
+      updatedAt:
+          DateTime.tryParse(json['updated_at'] as String? ?? '') ?? DateTime.now(),
+      acknowledgedAt: json['acknowledged_at'] != null
+          ? DateTime.tryParse(json['acknowledged_at'] as String)
+          : null,
+    );
+  }
+
+  bool get isAcknowledged => acknowledgedAt != null;
+  bool get hasReason => reason.isNotEmpty;
+}
+
 // ===== Session Models =====
+
+/// Parse a `designation` object from JSON.
+SessionDesignation? _parseDesignation(dynamic v) {
+  if (v == null) return null;
+  return SessionDesignation.fromJson(
+      v as Map<String, dynamic>);
+}
+
+/// Serialize a [SessionDesignation] to a plain JSON map.
+Map<String, dynamic>? _serializeDesignation(SessionDesignation? v) {
+  if (v == null) return null;
+  return {
+    'status': v.status.value,
+    'reason': v.reason,
+    'priority': v.priority.apiValue,
+    'created_at': v.createdAt.toIso8601String(),
+    'updated_at': v.updatedAt.toIso8601String(),
+    if (v.acknowledgedAt != null)
+      'acknowledged_at': v.acknowledgedAt!.toIso8601String(),
+  };
+}
 
 @freezed
 class Session with _$Session {
@@ -339,6 +457,12 @@ class Session with _$Session {
     @JsonKey(name: 'created_at') required DateTime createdAt,
     @JsonKey(name: 'last_activity') DateTime? lastActivity,
     @JsonKey(name: 'attached_clients') List<String>? attachedClients,
+    @JsonKey(
+      name: 'designation',
+      fromJson: _parseDesignation,
+      toJson: _serializeDesignation,
+    )
+    SessionDesignation? designation,
   }) = _Session;
 
   factory Session.fromJson(Map<String, dynamic> json) =>
