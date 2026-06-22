@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -29,17 +31,12 @@ const (
 	PushPriorityUrgent  PushPriority = "urgent"
 )
 
-// BusPublisher is the minimal interface PushService needs from the message bus.
-type BusPublisher interface {
-	Publish(topic string, msg *models.BusMessage) int
-}
-
 // PushService handles bot-to-user push notifications over the message bus.
 //
 // Messages are published as bus events on per-session topics so that any
 // subscriber (TUI, menubar, web, Telegram adapter, etc.) can pick them up.
 type PushService struct {
-	bus    BusPublisher
+	bus    *bus.MessageBus
 	logger *slog.Logger
 }
 
@@ -67,7 +64,8 @@ type PushResult struct {
 
 // NewPushService creates a push service.
 func NewPushService(
-	msgBus BusPublisher,
+	sessionMgr session.Store,
+	msgBus *bus.MessageBus,
 	logger *slog.Logger,
 	_ ...PushServiceOption,
 ) *PushService {

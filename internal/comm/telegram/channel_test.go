@@ -8,12 +8,8 @@ import (
 	"github.com/caimlas/meept/internal/session"
 )
 
-// compile-time interface checks
-var _ BotAdapter = (*TelegramChannel)(nil)
-var _ MessagingBotAdapter = (*TelegramChannel)(nil)
-
-func TestBaseBotAdapter_IDAndName(t *testing.T) {
-	b := NewBaseBotAdapter("test-bot", "Test Bot")
+func TestBaseBot_IDAndName(t *testing.T) {
+	b := newBaseBot("test-bot", "Test Bot")
 	if b.ID() != "test-bot" {
 		t.Errorf("expected id=test-bot, got %s", b.ID())
 	}

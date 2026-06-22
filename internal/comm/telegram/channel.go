@@ -39,12 +39,12 @@ func (c *TelegramChannelConfig) Validate() error {
 	return nil
 }
 
-// TelegramChannel implements MessagingBotAdapter for bidirectional
+// TelegramChannel implements bot.MessagingBot for bidirectional
 // Telegram messaging. It wraps the existing Bot and AgentHandler,
 // providing a clean interface that can be registered with the bot
 // framework and used as a generic channel.
 type TelegramChannel struct {
-	*BaseBotAdapter // embed base for BotAdapter interface
+	*baseBot // embed base for bot.Bot interface
 
 	botClient  *Bot
 	handler    *AgentHandler
@@ -65,7 +65,7 @@ func NewTelegramChannel(cfg TelegramChannelConfig, sessionMgr session.Store, age
 		return nil, fmt.Errorf("invalid telegram channel config: %w", err)
 	}
 
-	base := NewBaseBotAdapter(cfg.BotID, cfg.BotName)
+	base := newBaseBot(cfg.BotID, cfg.BotName)
 
 	tgHandler := NewAgentHandler(sessionMgr, agentLoop, cfg.DataDir, logger.With("channel", "telegram", "component", "handler"))
 
@@ -86,7 +86,7 @@ func NewTelegramChannel(cfg TelegramChannelConfig, sessionMgr session.Store, age
 	}
 
 	return &TelegramChannel{
-		BaseBotAdapter: base,
+		baseBot: base,
 		botClient:      botClient,
 		handler:        tgHandler,
 		config:         cfg,

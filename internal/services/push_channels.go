@@ -1,120 +1,355 @@
-// Package services provides push notification channel routing.
 package services
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
+	"time"
 
-	"github.com/caimlas/meept/internal/bus"
-	"github.com/caimlas/meept/pkg/models"
+	"github.com/caimlas/meept/internal/comm/telegram"
 )
 
-// PushMessage represents a formatted push notification.
+// pushNotification is a minimal abstraction for a notification event,
+// avoiding imports of daemon/ events.go or http/notification_handlers.go
+// which would create import cycles through services.
+type pushNotification struct {
+	ID        string
+	Timestamp string
+	Title     string
+	Message   string
+	SessionID string
+	AgentID   string
+}
+
+// notifier is the interface that event emitters from daemon must satisfy.
+// Daemon's EventEmitter has:
+//   - Publish(*http.NotificationEvent)
+//   - PublishNotification(sessionID, agentID string, notifType NotificationType, title, message string)
+// This local interface mirrors those signatures without importing daemon/http.
+type notifier interface {
+	Publish(event interface{})
+	PublishNotification(sessionID, agentID string, notifType interface{}, title, message string)
+}
+
+// PushMessage carries the data routed to channel subscribers.
 type PushMessage struct {
-	ID       string            `json:"id"`
-	Type     PushType          `json:"type"`
-	Priority PushPriority      `json:"priority"`
-	Source   string            `json:"source"`
-	Content  string            `json:"content"`
-	Meta     map[string]string `json:"meta,omitempty"`
+	SessionID  string                 `json:"session_id"`
+	Source     string                 `json:"source"`
+	ChannelID  string                 `json:"channel_id,omitempty"`
+	Type       PushType               `json:"type"`
+	Priority   PushPriority           `json:"priority"`
+	Content    string                 `json:"content"`
+	Timestamp  time.Time              `json:"timestamp"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
-// PushChannel defines the interface for notification delivery channels.
+// PushChannel defines the interface that all push delivery channels must
+// implement. Each channel decides whether it can deliver to a given session
+// (e.g. Telegram channel checks chat-ID mapping) and then pushes the
+// message through its transport.
 type PushChannel interface {
-	// Name returns the channel identifier
-	Name() string
-	// CanReceive checks if this channel can deliver to the given session
-	CanReceive(sessionID string) bool
-	// Push delivers a message to the channel
-	Push(ctx context.Context, sessionID string, msg *PushMessage) error
+	// CanReceive reports whether this channel can deliver to the given session.
+	CanReceive(ctx context.Context, sessionID string, msg *PushMessage) bool
+
+	// Push delivers the message to the channel's transport layer.
+	Push(ctx context.Context, msg *PushMessage) error
 }
 
-// ChannelRegistry manages push notification channels.
+// ChannelRegistry holds registered push channels and routes push messages
+// to each one that can receive them.
 type ChannelRegistry struct {
 	mu       sync.RWMutex
-	channels map[string]PushChannel
+	channels []PushChannel
+	logger   *slog.Logger
 }
 
-// NewChannelRegistry creates a new channel registry.
-func NewChannelRegistry() *ChannelRegistry {
+// NewChannelRegistry creates an empty channel registry.
+func NewChannelRegistry(logger *slog.Logger) *ChannelRegistry {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &ChannelRegistry{
-		channels: make(map[string]PushChannel),
+		channels: make([]PushChannel, 0),
+		logger:   logger,
 	}
 }
 
 // Register adds a channel to the registry.
-func (r *ChannelRegistry) Register(channel PushChannel) {
+func (r *ChannelRegistry) Register(ch PushChannel) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.channels[channel.Name()] = channel
+	r.channels = append(r.channels, ch)
+	r.logger.Debug("push channel registered", "type", chanID(ch))
 }
 
-// Unregister removes a channel from the registry.
-func (r *ChannelRegistry) Unregister(name string) {
+// Push routes a push message to all channels that can receive it.
+// It is best-effort: individual channel failures are logged but do not
+// prevent delivery through other channels. Returns the count of channels
+// that accepted the message.
+func (r *ChannelRegistry) Push(ctx context.Context, msg *PushMessage) int {
+	r.mu.RLock()
+	channels := make([]PushChannel, len(r.channels))
+	copy(channels, r.channels)
+	r.mu.RUnlock()
+
+	count := 0
+	for _, ch := range channels {
+		if !ch.CanReceive(ctx, msg.SessionID, msg) {
+			continue
+		}
+		if err := ch.Push(ctx, msg); err != nil {
+			r.logger.Warn("push channel delivery failed",
+				"channel", chanID(ch),
+				"session", msg.SessionID,
+				"error", err,
+			)
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+// Remove deletes the channel with the given ID from the registry.
+func (r *ChannelRegistry) Remove(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.channels, name)
-}
-
-// Get returns a channel by name.
-func (r *ChannelRegistry) Get(name string) PushChannel {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.channels[name]
-}
-
-// Broadcast sends a message to all applicable channels.
-func (r *ChannelRegistry) Broadcast(ctx context.Context, sessionID string, msg *PushMessage) error {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	var lastErr error
+	var kept []PushChannel
 	for _, ch := range r.channels {
-		if ch.CanReceive(sessionID) {
-			if err := ch.Push(ctx, sessionID, msg); err != nil {
-				lastErr = err
+		if chanID(ch) != id {
+			kept = append(kept, ch)
+		}
+	}
+	r.channels = kept
+}
+
+// len returns the number of registered channels (for testing).
+func (r *ChannelRegistry) len() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.channels)
+}
+
+// --- Channel Implementations ---
+
+// TelegramPushChannel delivers notifications to a Telegram bot via SendMessage.
+// It routes by resolving session ID to a Telegram chat ID.
+type TelegramPushChannel struct {
+	bot         *telegram.Bot
+	sidToChat   map[string]int64 // session_id -> chat_id
+	broadcastCh []int64          // if sidToChat is nil, broadcast to these chat IDs
+	logger      *slog.Logger
+}
+
+// NewTelegramPushChannel creates a Telegram push channel.
+// sidToChat maps session IDs to specific Telegram chat IDs for targeted delivery.
+// If nil, the channel broadcasts to broadcastCh (or all known chats).
+func NewTelegramPushChannel(
+	bot *telegram.Bot,
+	sidToChat map[string]int64,
+	broadcastCh []int64,
+	logger *slog.Logger,
+) (*TelegramPushChannel, error) {
+	if bot == nil {
+		return nil, fmt.Errorf("telegram bot is required for TelegramPushChannel")
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &TelegramPushChannel{
+		bot:         bot,
+		sidToChat:   sidToChat,
+		broadcastCh: broadcastCh,
+		logger:      logger,
+	}, nil
+}
+
+func (t *TelegramPushChannel) CanReceive(ctx context.Context, sessionID string, msg *PushMessage) bool {
+	if t.sidToChat != nil {
+		_, ok := t.sidToChat[sessionID]
+		return ok
+	}
+	return len(t.broadcastCh) > 0
+}
+
+func (t *TelegramPushChannel) Push(ctx context.Context, msg *PushMessage) error {
+	formatted := formatForTelegram(msg.Content)
+
+	if t.sidToChat != nil {
+		// Targeted delivery: send to the chat linked to this session
+		if chatID, ok := t.sidToChat[msg.SessionID]; ok {
+			if err := t.bot.SendMessage(ctx, chatID, formatted); err != nil {
+				return fmt.Errorf("send to chat %d: %w", chatID, err)
+			}
+		}
+		// Also broadcast if the session doesn't have a direct mapping
+		// (e.g. a global alert)
+		if _, ok := t.sidToChat[msg.SessionID]; !ok && len(t.broadcastCh) > 0 {
+			for _, chatID := range t.broadcastCh {
+				if err := t.bot.SendMessage(ctx, chatID, formatted); err != nil {
+					t.logger.Debug("telegram broadcast failed", "chat", chatID, "error", err)
+				}
+			}
+		}
+	} else {
+		// Broadcast mode: send to all registered chats
+		for _, chatID := range t.broadcastCh {
+			if err := t.bot.SendMessage(ctx, chatID, formatted); err != nil {
+				t.logger.Debug("telegram broadcast failed", "chat", chatID, "error", err)
 			}
 		}
 	}
-	return lastErr
+	return nil
 }
 
-// BusPushChannel publishes push notifications via the message bus.
-type BusPushChannel struct {
-	bus    *bus.MessageBus
+// CLIPushChannel delivers notifications by printing to stdout, mimicking
+// the CLI mode behavior. Useful for testing and terminal-based notification replay.
+type CLIPushChannel struct {
 	logger *slog.Logger
 }
 
-// NewBusPushChannel creates a bus-based push channel.
-func NewBusPushChannel(bus *bus.MessageBus, logger *slog.Logger) *BusPushChannel {
-	return &BusPushChannel{
-		bus:    bus,
-		logger: logger,
+// NewCLIPushChannel creates a CLI push channel.
+func NewCLIPushChannel(logger *slog.Logger) *CLIPushChannel {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &CLIPushChannel{logger: logger}
+}
+
+func (c *CLIPushChannel) CanReceive(ctx context.Context, _ string, msg *PushMessage) bool {
+	return true // CLI channel always accepts
+}
+
+func (c *CLIPushChannel) Push(ctx context.Context, msg *PushMessage) error {
+	prefix := ""
+	switch msg.Priority {
+	case PushPriorityHigh:
+		prefix = "[high] "
+	case PushPriorityUrgent:
+		prefix = "[urgent] "
+	}
+	fmt.Fprintf(os.Stdout, "%s%s\n", prefix, msg.Content)
+	return nil
+}
+
+// TUIPushChannel delivers notifications by emitting them through an event
+// emitter (daemon.EventEmitter). The TUI subscribes to this emitter for
+// real-time notification display.
+type TUIPushChannel struct {
+	notifier notifier
+	logger   *slog.Logger
+}
+
+// NewTUIPushChannel creates a TUI push channel.
+// The notifier argument is typically *daemon.EventEmitter.
+func NewTUIPushChannel(n notifier, logger *slog.Logger) (*TUIPushChannel, error) {
+	if n == nil {
+		return nil, fmt.Errorf("notifier is required for TUIPushChannel")
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &TUIPushChannel{notifier: n, logger: logger}, nil
+}
+
+func (t *TUIPushChannel) CanReceive(ctx context.Context, sessionID string, msg *PushMessage) bool {
+	return t.notifier != nil // TUI always shows if notifier is wired
+}
+
+func (t *TUIPushChannel) Push(ctx context.Context, msg *PushMessage) error {
+	t.notifier.PublishNotification(
+		msg.SessionID,
+		msg.Source,
+		nil, // notif type passed through as interface{}
+		"Meept",
+		msg.Content,
+	)
+	return nil
+}
+
+// HTTPPushChannel delivers notifications over the HTTP notification channel
+// (WebSocket broadcast). It converts push messages to the standard
+// pushNotification format that WebSocket clients consume.
+type HTTPPushChannel struct {
+	notifier notifier
+	logger   *slog.Logger
+}
+
+// NewHTTPPushChannel creates an HTTP push channel.
+// The notifier is the daemon's EventEmitter which publishes to HTTP WebSocket
+// subscribers via WithNotification(serverOpt).
+func NewHTTPPushChannel(n notifier, logger *slog.Logger) (*HTTPPushChannel, error) {
+	if n == nil {
+		return nil, fmt.Errorf("notifier is required for HTTPPushChannel")
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &HTTPPushChannel{notifier: n, logger: logger}, nil
+}
+
+func (h *HTTPPushChannel) CanReceive(ctx context.Context, sessionID string, msg *PushMessage) bool {
+	return h.notifier != nil
+}
+
+func (h *HTTPPushChannel) Push(ctx context.Context, msg *PushMessage) error {
+	// Build a notification payload matching http.NotificationEvent shape.
+	evt := map[string]interface{}{
+		"id":        generatePushNotificationID(),
+		"timestamp": msg.Timestamp.UTC().Format(time.RFC3339),
+		"title":     "Meept",
+		"message":   msg.Content,
+		"session_id": msg.SessionID,
+		"type":      "info",
+	}
+	h.notifier.Publish(evt)
+	return nil
+}
+
+// --- Helpers ---
+
+func chanID(ch PushChannel) string {
+	switch ch.(type) {
+	case *TelegramPushChannel:
+		return "telegram"
+	case *CLIPushChannel:
+		return "cli"
+	case *TUIPushChannel:
+		return "tui"
+	case *HTTPPushChannel:
+		return "http"
+	default:
+		return fmt.Sprintf("%T", ch)
 	}
 }
 
-// Name implements PushChannel.
-func (c *BusPushChannel) Name() string { return "bus" }
+// formatForTelegram escapes MarkdownV2-safe characters and truncates to 4096.
+func formatForTelegram(text string) string {
+	const maxLen = 4096
+	if len(text) > maxLen {
+		text = text[:maxLen] + "..."
+	}
+	// Escape MarkdownV2 special chars
+	esc := []byte{}
+	for _, r := range text {
+		switch r {
+		case '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!':
+			esc = append(esc, '\\')
+		}
+		esc = append(esc, byte(r))
+	}
+	return string(esc)
+}
 
-// CanReceive implements PushChannel - bus can always receive.
-func (c *BusPushChannel) CanReceive(sessionID string) bool { return true }
-
-// Push implements PushChannel - publishes to session-specific topic.
-func (c *BusPushChannel) Push(ctx context.Context, sessionID string, msg *PushMessage) error {
-	payload := map[string]any{
-		"session_id": sessionID,
-		"message":    msg,
+// generatePushNotificationID creates a hex string ID for push notifications.
+func generatePushNotificationID() string {
+	b := make([]byte, 16)
+	_ = b // seeded from time below
+	now := time.Now().UnixNano()
+	for i := range b {
+		b[i] = "0123456789abcdef"[byte(int(now>>((i*4)&63)) + i)&15]
 	}
-	busMsg, err := models.NewBusMessage(models.MessageType(fmt.Sprintf("push.%s", sessionID)), "push-service", payload)
-	if err != nil {
-		c.logger.Debug("failed to build push notification", "session", sessionID, "error", err)
-		return err
-	}
-	delivered := c.bus.Publish(fmt.Sprintf("push.%s", sessionID), busMsg)
-	if delivered == 0 {
-		c.logger.Debug("push notification had no subscribers", "session", sessionID)
-	}
-	return nil
+	return fmt.Sprintf("%x", b)
 }
