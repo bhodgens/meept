@@ -31,7 +31,10 @@ class _FakeThreadService implements ThreadService {
   }
 
   @override
-  Future<Thread?> setActiveThread(String sessionId, String threadId) async {
+  Future<Thread?> setActiveThread(
+    String sessionId,
+    String threadId,
+  ) async {
     for (final t in threadsToReturn) {
       if (t.id == threadId) {
         threadsToReturn = threadsToReturn
@@ -68,11 +71,14 @@ class _FakeThreadService implements ThreadService {
 void main() {
   group('ThreadSelector', () {
     testWidgets('renders "new thread" button when no threads exist', (tester) async {
+      final container = ProviderContainer(overrides: [
+        threadServiceProvider.overrideWithValue(_FakeThreadService(const [])),
+      ]);
+      addTearDown(container.dispose);
+
       await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            threadServiceProvider.overrideWithValue(_FakeThreadService(const [])),
-          ],
+        UncontrolledProviderScope(
+          container: container,
           child: const MaterialApp(
             home: Scaffold(body: ThreadSelector(sessionId: 's1')),
           ),
@@ -83,7 +89,7 @@ void main() {
       expect(find.text('new thread'), findsOneWidget);
     });
 
-    testWidgets('renders PopupMenuButton when threads exist', (tester) async {
+    testWidgets('renders PopupMenuButton when threads exist after load', (tester) async {
       final now = DateTime.now();
       final threads = [
         Thread(
@@ -96,23 +102,29 @@ void main() {
           lastActivityAt: now,
         ),
       ];
+      final container = ProviderContainer(overrides: [
+        threadServiceProvider.overrideWithValue(_FakeThreadService(threads)),
+      ]);
+      addTearDown(container.dispose);
+
       await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            threadServiceProvider.overrideWithValue(_FakeThreadService(threads)),
-          ],
+        UncontrolledProviderScope(
+          container: container,
           child: const MaterialApp(
             home: Scaffold(body: ThreadSelector(sessionId: 's1')),
           ),
         ),
       );
-      await tester.pump();
-      // With threads, shows the PopupMenuButton with the active thread's label
+      // Manually trigger load since the widget doesn't auto-load
+      container.read(threadSelectorProvider('s1').notifier).load();
+      await tester.pumpAndSettle();
+
+      // With threads loaded, shows the PopupMenuButton with the active thread's label
       expect(find.byType(PopupMenuButton<String>), findsOneWidget);
       expect(find.text('work'), findsOneWidget);
     });
 
-    testWidgets('shows multiple thread labels in popup menu', (tester) async {
+    testWidgets('shows multiple thread labels in popup menu after load', (tester) async {
       final now = DateTime.now();
       final threads = [
         Thread(
@@ -134,18 +146,21 @@ void main() {
           lastActivityAt: now,
         ),
       ];
+      final container = ProviderContainer(overrides: [
+        threadServiceProvider.overrideWithValue(_FakeThreadService(threads)),
+      ]);
+      addTearDown(container.dispose);
+
       await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            threadServiceProvider.overrideWithValue(_FakeThreadService(threads)),
-          ],
+        UncontrolledProviderScope(
+          container: container,
           child: const MaterialApp(
             home: Scaffold(body: ThreadSelector(sessionId: 's1')),
           ),
         ),
       );
-      await tester.pump();
-      await tester.pump();
+      container.read(threadSelectorProvider('s1').notifier).load();
+      await tester.pumpAndSettle();
 
       // Active thread label is shown on the closed popup trigger
       expect(find.text('work'), findsOneWidget);
