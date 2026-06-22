@@ -293,6 +293,16 @@ func (m *SessionsModel) updateSessionsTable() {
 	titleW := max(m.width*38/100-2, 15)
 
 	for i, sess := range m.sessions {
+		// Add designation indicator prefix
+		desigPrefix := ""
+		if sess.Designation != nil && sess.Designation.Status != "none" {
+			switch sess.Designation.Status {
+			case "requires_approval": desigPrefix = "! "
+			case "waiting_human": desigPrefix = "? "
+			case "human_responded": desigPrefix = "R "
+			case "bot_thinking": desigPrefix = "... "
+			}
+		}
 		title := sess.Description
 		if title == "" {
 			title = sess.Name
@@ -302,7 +312,7 @@ func (m *SessionsModel) updateSessionsTable() {
 		activity := m.formatTimeRelative(sess.LastActivity)
 
 		rows[i] = table.Row{
-			types.TruncateString(title, titleW),
+			desigPrefix + types.TruncateString(title, titleW),
 			created,
 			activity,
 		}
@@ -446,6 +456,7 @@ func (m *SessionsModel) renderSessionDetail() string {
 		displayTitle = sess.Name
 	}
 	content.WriteString(titleStyle.Render(types.TruncateString(displayTitle, 28)))
+	if badge := m.getDesignationBadge(sess); badge != "" { content.WriteString(" "); content.WriteString(badge) }
 	content.WriteString("\n\n")
 
 	// Session ID
@@ -793,4 +804,31 @@ func (m *SessionsModel) sortSessions() {
 		// No designation, sort by last activity (most recent first)
 		return m.sessions[i].LastActivity > m.sessions[j].LastActivity
 	})
+}
+
+// getDesignationBadge returns a styled badge for session designation.
+func (m *SessionsModel) getDesignationBadge(sess *types.Session) string {
+	if sess.Designation == nil || sess.Designation.Status == "none" {
+		return ""
+	}
+
+	statusInfo := map[string]struct{ icon, color string }{
+		"requires_approval": {"!", "#EF4444"},
+		"waiting_human":     {"?", "#F97316"},
+		"human_responded":   {"R", "#22C55E"},
+		"bot_thinking":      {"...", "#3B82F6"},
+	}
+
+	info := statusInfo[sess.Designation.Status]
+	if info.icon == "" {
+		info = statusInfo["waiting_human"]
+	}
+
+	priorityBadge := ""
+	if sess.Designation.Priority == "urgent" || sess.Designation.Priority == "high" {
+		priorityBadge = " [" + strings.ToUpper(sess.Designation.Priority) + "]"
+	}
+
+	badgeStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(info.color))
+	return badgeStyle.Render(" " + info.icon + " " + sess.Designation.Status + priorityBadge + " ")
 }
