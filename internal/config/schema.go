@@ -85,7 +85,7 @@ type Config struct {
 	Runtime           RuntimeConfig           `json:"runtime"             toml:"runtime"`
 	PTY               PTYConfig               `json:"pty"                  toml:"pty"`
 	Reasoning         ReasoningGlobalConfig   `json:"reasoning"            toml:"reasoning"`
-tHooks               HooksConfig            `json:"hooks"               toml:"hooks"`
+	Hooks             HooksConfig             `json:"hooks"                toml:"hooks"`
 }
 
 // ReasoningGlobalConfig holds global reasoning/thinking settings, currently

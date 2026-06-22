@@ -428,9 +428,9 @@ func (m *Manager) Store(ctx context.Context, mem Memory) (string, error) {
 	// Uses context.Background() to avoid caller cancellation; detection is
 	// best-effort and must not block Store.
 	//
-	// TODO: Consolidator.Run should also run a full pass over epistemic
-	// memories added since the last consolidation to catch relationships
-	// missed by this per-store hook (see spec section "Wiring"). Future task.
+	// The Consolidator also runs a full pass over epistemic memories added
+	// since the last consolidation to catch relationships that depend on
+	// the evolving comparison set. See Consolidator.runEpistemicDetectionPass.
 	m.mu.RLock()
 	detector := m.detector
 	m.mu.RUnlock()

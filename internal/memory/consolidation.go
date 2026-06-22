@@ -136,6 +136,14 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 		report.DuplicatesRemoved = removed
 	}
 
+	// Epistemic detection full pass. The per-Store hook runs detection on
+	// each new epistemic memory in isolation; this pass walks everything
+	// added since the last consolidation so relationships that depend on
+	// the comparison set (e.g. a claim that only becomes contradictory
+	// once a later claim arrives) are caught. Best-effort: failures are
+	// logged but do not abort consolidation.
+	report.EpistemicEdgesDetected = c.runEpistemicDetectionPass(ctx)
+
 	report.Duration = time.Since(start)
 
 	c.logger.Info("Consolidation complete",
@@ -143,10 +151,82 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 		"summaries_created", report.SummariesCreated,
 		"duplicates_removed", report.DuplicatesRemoved,
 		"expired", report.Expired,
+		"epistemic_edges_detected", report.EpistemicEdgesDetected,
 		"duration", report.Duration,
 	)
 
 	return report, nil
+}
+
+// runEpistemicDetectionPass walks epistemic memories (Claim, Decision,
+// Prediction, Question) added since the last consolidation and runs the
+// EpistemicDetector over each. Persists candidate edges via the detector.
+// Returns the total number of edges persisted. No-op when no detector is
+// attached or no manager is available.
+//
+// Per the epistemic memory spec section "Wiring": the per-Store hook
+// catches relationships visible at insert time; this pass catches
+// relationships that depend on the evolving comparison set.
+func (c *Consolidator) runEpistemicDetectionPass(ctx context.Context) int {
+	if c.manager == nil {
+		return 0
+	}
+	// Snapshot detector + lastRun under the consolidator's own mutex. We
+	// must NOT hold the mutex while calling DetectRelationships (the
+	// detector calls the LLM, which is I/O — see CLAUDE.md mutex scope).
+	c.mu.Lock()
+	detector := c.manager.EpistemicDetector()
+	since := c.lastRun
+	c.mu.Unlock()
+	if detector == nil {
+		return 0
+	}
+
+	cutoff := time.Now().Add(-30 * 24 * time.Hour) // bound the scan to last 30d
+	if since != nil {
+		cutoff = *since
+	}
+
+	epistemicTypes := []MemoryType{
+		MemoryTypeClaim,
+		MemoryTypeDecision,
+		MemoryTypePrediction,
+		MemoryTypeQuestion,
+	}
+	var persisted int
+	for _, t := range epistemicTypes {
+		results, err := c.manager.Search(ctx, MemoryQuery{
+			Type:  t,
+			Query: "", // empty query: backend returns recent matches
+			Limit: 200,
+		})
+		if err != nil {
+			c.logger.Warn("epistemic detection pass: search failed",
+				"type", t, "error", err)
+			continue
+		}
+		for _, r := range results {
+			if r.Memory.CreatedAt.Before(cutoff) {
+				continue
+			}
+			edges, derr := detector.DetectRelationships(ctx, r.Memory)
+			if derr != nil {
+				c.logger.Warn("epistemic detection pass: detect failed",
+					"memory_id", r.Memory.ID, "error", derr)
+				continue
+			}
+			if len(edges) == 0 {
+				continue
+			}
+			if perr := detector.PersistCandidateEdges(ctx, edges); perr != nil {
+				c.logger.Warn("epistemic detection pass: persist failed",
+					"memory_id", r.Memory.ID, "error", perr)
+				continue
+			}
+			persisted += len(edges)
+		}
+	}
+	return persisted
 }
 
 // runAccessBasedExpiration performs access-based memory expiration.

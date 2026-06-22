@@ -117,6 +117,11 @@ type ConsolidationReport struct {
 	DuplicatesRemoved int `json:"duplicates_removed"`
 	// Expired is the number of memories expired due to access-based expiration.
 	Expired int `json:"expired"`
+	// EpistemicEdgesDetected is the number of epistemic edges (contradicts,
+	// superseded, evidence_for/against, etc.) written by the consolidator's
+	// periodic detection pass over memories added since the last run.
+	// Catches relationships the per-Store hook missed.
+	EpistemicEdgesDetected int `json:"epistemic_edges_detected"`
 	// Duration is how long consolidation took.
 	Duration time.Duration `json:"duration"`
 	// Error is any error that occurred.
