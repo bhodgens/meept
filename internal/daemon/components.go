@@ -961,6 +961,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 
 	wireFileWatcherHook(c.AgentLoop, *cfg, logger)
+
+	// Wire session lifecycle hooks (publishes session_start/session_end bus events)
+	wireSessionLifecycleHooks(c.AgentLoop, logger, msgBus)
 	// Store the memvid client from memory manager if active, or create standalone
 	if c.MemoryManager.IsMemvidActive() {
 		c.MemvidClient = c.MemoryManager.MemvidClient()

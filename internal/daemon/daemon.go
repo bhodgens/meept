@@ -618,6 +618,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			logger.Info("Thread RPC handlers registered")
 		}
 
+		// Session designation RPC handlers (queries + acknowledge)
+		if svcRegistry.Session != nil {
+			registerSessionRPCHandlers(rpcServer, svcRegistry.Session)
+			logger.Info("Session designation RPC handlers registered")
+		}
+
 		// Epistemic memory RPC handlers
 		if memMgr := nilSafeMemoryManager(components); memMgr != nil && memMgr.IsInitialized() {
 			epistemicHandler := rpc.NewEpistemicHandler(memMgr)

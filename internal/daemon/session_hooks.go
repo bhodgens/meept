@@ -112,6 +112,8 @@ func metadataToJSON(m map[string]any) string {
 // end event publication in a background goroutine. This ensures that session
 // teardown latency is not affected by network I/O or message bus congestion.
 // The hook returns immediately and only logs errors asynchronously.
+//
+//nolint:U1000 // methods used via SessionEndHook interface indirection
 type asyncSessionEndHook struct {
 	bus    *bus.MessageBus
 	logger *slog.Logger

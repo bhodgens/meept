@@ -45,6 +45,7 @@ func (t *ThreadService) CreateThread(ctx context.Context, req CreateThreadReques
 		SessionID:      req.SessionID,
 		TopicLabel:     req.TopicLabel,
 		ConversationID: req.ConversationID,
+		Summary:        req.Summary,
 		CreatedAt:      now,
 		LastActivityAt: now,
 		IsActive:       req.IsActive,

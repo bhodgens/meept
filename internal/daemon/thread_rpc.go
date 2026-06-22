@@ -148,7 +148,9 @@ func handleThreadGetActive(svc *services.ThreadService) rpc.Handler {
 			return nil, fmt.Errorf("get active thread failed: %w", err)
 		}
 
-		return thread, nil
+		return map[string]any{
+			"thread": thread,
+		}, nil
 	}
 }
 
