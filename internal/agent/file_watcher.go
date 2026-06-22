@@ -46,23 +46,29 @@ func NewFileWatcherHook(pattern string, debounce time.Duration, ignore []string,
 // Start begins watching filesystem paths.
 func (f *FileWatcherHook) Start(ctx context.Context) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-
 	if f.running {
+		f.mu.Unlock()
 		return nil
 	}
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
+		f.mu.Unlock()
 		return fmt.Errorf("failed to create watcher: %w", err)
 	}
 
 	f.ctx, f.cancel = context.WithCancel(ctx)
 	f.watcher = watcher
 	f.running = true
+	f.mu.Unlock()
 
+	// I/O outside lock (CLAUDE.md mutex-scope rule)
 	if err := watcher.Add("."); err != nil {
 		watcher.Close()
+		f.mu.Lock()
+		f.watcher = nil
+		f.running = false
+		f.mu.Unlock()
 		return fmt.Errorf("failed to add watch: %w", err)
 	}
 
@@ -73,19 +79,23 @@ func (f *FileWatcherHook) Start(ctx context.Context) error {
 // Stop halts filesystem watching.
 func (f *FileWatcherHook) Stop() error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-
 	if !f.running {
+		f.mu.Unlock()
 		return nil
 	}
 
-	if f.cancel != nil {
-		f.cancel()
-	}
-	if f.watcher != nil {
-		f.watcher.Close()
-	}
+	cancel := f.cancel
+	watcher := f.watcher
 	f.running = false
+	f.mu.Unlock()
+
+	// I/O outside lock (CLAUDE.md mutex-scope rule)
+	if cancel != nil {
+		cancel()
+	}
+	if watcher != nil {
+		watcher.Close()
+	}
 	return nil
 }
 
