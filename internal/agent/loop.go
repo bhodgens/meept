@@ -2198,6 +2198,10 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			for _, result := range results {
 				if !result.Success && strings.Contains(result.Error, "permission denied") {
 					l.updateSessionDesignation(session.DesignationRequiresApproval, "Blocked: action requires approval", "high")
+					// Plan 4.3: Send notification for approval request
+					if l.notificationPublisher != nil {
+						l.notificationPublisher.PublishTaskNotification("", l.agentID, "warning", "Action Requires Approval", "A tool call was blocked and requires your approval")
+					}
 					break
 				}
 			}
