@@ -24,12 +24,14 @@ const PotentialContradictionThreshold = 0.4
 // memory pairs. Defined locally to avoid an import cycle on internal/llm.
 type ClassifierLLM interface {
 	// ClassifyRelationships inspects a new memory against each candidate and
-	// returns one edgeVerdict per relevant pair.
-	ClassifyRelationships(ctx context.Context, newMem Memory, candidates []Memory) ([]edgeVerdict, error)
+	// returns one EdgeVerdict per relevant pair.
+	ClassifyRelationships(ctx context.Context, newMem Memory, candidates []Memory) ([]EdgeVerdict, error)
 }
 
-// edgeVerdict is the classifier's verdict on one (newMem, candidate) pair.
-type edgeVerdict struct {
+// EdgeVerdict is the classifier's verdict on one (newMem, candidate) pair.
+// Exported so adapters in other packages (e.g., daemon classifierAdapter)
+// can implement ClassifierLLM.
+type EdgeVerdict struct {
 	Relation    string  // contradicts, superseded, evidence_for, evidence_against, derives_from, supports, unrelated
 	TargetID    string  // candidate memory ID
 	Confidence  float64 // 0.0-1.0
@@ -192,7 +194,7 @@ type classifierJSONResponse struct {
 
 // ParseClassifierJSON parses a JSON array of verdicts from a raw LLM body.
 // Useful for adapter implementations.
-func ParseClassifierJSON(raw []byte) ([]edgeVerdict, error) {
+func ParseClassifierJSON(raw []byte) ([]EdgeVerdict, error) {
 	trimmed := stripCodeFences(string(raw))
 	if strings.TrimSpace(trimmed) == "" {
 		return nil, errors.New("empty classifier response")
@@ -201,9 +203,9 @@ func ParseClassifierJSON(raw []byte) ([]edgeVerdict, error) {
 	if err := json.Unmarshal([]byte(trimmed), &out); err != nil {
 		return nil, fmt.Errorf("parse classifier json: %w", err)
 	}
-	verdicts := make([]edgeVerdict, len(out))
+	verdicts := make([]EdgeVerdict, len(out))
 	for i, r := range out {
-		verdicts[i] = edgeVerdict(r)
+		verdicts[i] = EdgeVerdict(r)
 	}
 	return verdicts, nil
 }

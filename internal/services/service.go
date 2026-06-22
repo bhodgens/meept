@@ -53,6 +53,7 @@ type ServiceRegistry struct {
 	Runtime      *RuntimeService
 	Search       *SearchService
 	Upload       *UploadService
+	Thread       *ThreadService
 }
 
 // Config holds dependencies for service instantiation.

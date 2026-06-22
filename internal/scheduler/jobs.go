@@ -70,6 +70,7 @@ type AgentJobConfig struct {
 	Prompt      string            `json:"prompt"`
 	Context     map[string]string `json:"context,omitempty"`
 	Model       string            `json:"model,omitempty"`
+	AgentID     string            `json:"agent_id,omitempty"`
 	MaxTokens   int               `json:"max_tokens,omitempty"`
 	Temperature float64           `json:"temperature,omitempty"`
 }

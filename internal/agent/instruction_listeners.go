@@ -40,14 +40,20 @@ func NewInstructionListener(
 func (l *InstructionListener) Start(ctx context.Context) {
 	handler := bus.NewSubscriptionHandler(l.bus, l.logger)
 
-	handler.Subscribe("tool.completed", func(msg *models.BusMessage) {
-		l.checkPostHookInstructions("tool_complete", msg)
+	handler.Subscribe("tool.completed", func(_ context.Context, _ string, msg any) {
+		if busMsg, ok := msg.(*models.BusMessage); ok {
+			l.checkPostHookInstructions("tool_complete", busMsg)
+		}
 	})
-	handler.Subscribe("file.written", func(msg *models.BusMessage) {
-		l.checkPostHookInstructions("write_file", msg)
+	handler.Subscribe("file.written", func(_ context.Context, _ string, msg any) {
+		if busMsg, ok := msg.(*models.BusMessage); ok {
+			l.checkPostHookInstructions("write_file", busMsg)
+		}
 	})
-	handler.Subscribe("session.started", func(msg *models.BusMessage) {
-		l.checkEventInstructions("session_start", msg)
+	handler.Subscribe("session.started", func(_ context.Context, _ string, msg any) {
+		if busMsg, ok := msg.(*models.BusMessage); ok {
+			l.checkEventInstructions("session_start", busMsg)
+		}
 	})
 
 	handler.Start(ctx)

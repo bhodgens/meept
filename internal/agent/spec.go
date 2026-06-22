@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/llm"
 )
 
 // AgentRole defines the role an agent plays in the system.
@@ -50,6 +51,11 @@ type AgentConstraints struct {
 	PresencePenalty *float64 `json:"presence_penalty,omitempty"`
 	// StopSequences are sequences where the model will stop generating.
 	StopSequences []string `json:"stop_sequences,omitempty"`
+
+	// Reasoning holds optional per-agent reasoning effort configuration.
+	// When non-nil, the agent loop uses this as the initial reasoning tier
+	// and (if AllowSelfModulation is true) the bounds for self-modulation.
+	Reasoning *llm.AgentReasoningConfig `json:"reasoning,omitempty"`
 }
 
 // DefaultConstraints returns sensible default constraints.

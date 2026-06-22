@@ -52,13 +52,13 @@ func (s *InstructionScheduler) instructionToJob(instr *preferences.UserInstructi
 	jobID := fmt.Sprintf("instruction_%s", instr.ID)
 
 	// Remove existing job if any
-	s.scheduler.RemoveJob(jobID)
+	_ = s.scheduler.Unschedule(jobID)
 
 	if instr.Action == "agent_trigger" {
 		agentID, _ := instr.ActionArgs["agent_id"].(string)
 		prompt := fmt.Sprintf("Execute instruction: %s", instr.Trigger)
 
-		return s.scheduler.CreateJobWithDeps(JobConfig{
+		_, err := s.scheduler.ScheduleConfig(JobConfig{
 			ID:       jobID,
 			Name:     fmt.Sprintf("Instruction: %s", instr.ID),
 			Schedule: cronExpr,
@@ -67,14 +67,15 @@ func (s *InstructionScheduler) instructionToJob(instr *preferences.UserInstructi
 				Prompt:  prompt,
 				AgentID: agentID,
 			},
-		}, []string{})
+		})
+		return err
 	} else if instr.Action == "shell_execute" {
 		command, _ := instr.ActionArgs["command"].(string)
 		if command == "" {
 			return fmt.Errorf("shell_execute has no command")
 		}
 
-		return s.scheduler.CreateJobWithDeps(JobConfig{
+		_, err := s.scheduler.ScheduleConfig(JobConfig{
 			ID:       jobID,
 			Name:     fmt.Sprintf("Instruction: %s", instr.ID),
 			Schedule: cronExpr,
@@ -82,7 +83,8 @@ func (s *InstructionScheduler) instructionToJob(instr *preferences.UserInstructi
 			ShellConfig: &ShellJobConfig{
 				Command: command,
 			},
-		}, []string{})
+		})
+		return err
 	}
 
 	return fmt.Errorf("unsupported action type: %s", instr.Action)

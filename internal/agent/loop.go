@@ -531,6 +531,12 @@ type AgentLoop struct {
 	// reasoningForNextTurn is a transient effort suggestion from the
 	// dispatcher's intent classifier. Consumed once on the next turn.
 	reasoningForNextTurn string
+
+	// epistemicHook is the optional post-turn ambient-extraction hook
+	// (Path B of the epistemic memory platform). When non-nil, AfterTurn
+	// is invoked after each turn with the conversation window so the
+	// extractor can mine claims/decisions/predictions.
+	epistemicHook *EpistemicHook
 }
 
 // sessionStore is an interface for session persistence operations needed by AgentLoop.
@@ -1222,6 +1228,19 @@ func (l *AgentLoop) SetPrefetchCallback(callback func(query string, maxItems int
 	}
 	l.mu.Lock()
 	l.prefetchCallback = callback
+	l.mu.Unlock()
+}
+
+// SetEpistemicHook wires the post-turn ambient-extraction hook. Nil-safe
+// per CLAUDE.md setter convention. When non-nil, the hook's AfterTurn
+// method is invoked after each agent turn so the extractor can mine
+// claims/decisions/predictions from the conversation window.
+func (l *AgentLoop) SetEpistemicHook(hook *EpistemicHook) {
+	if hook == nil {
+		return
+	}
+	l.mu.Lock()
+	l.epistemicHook = hook
 	l.mu.Unlock()
 }
 
