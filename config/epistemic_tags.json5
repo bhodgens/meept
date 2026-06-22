@@ -1,0 +1,7 @@
+{
+  // Curated tag taxonomy for epistemic memories.
+  // Users can extend via ~/.meept/epistemic_tags.json5.
+  domains: ["architecture", "business", "technical", "methodology", "opinion", "prediction"],
+  confidence_levels: ["speculative", "probable", "certain"],
+  scopes: ["project", "personal", "industry", "universal"],
+}
