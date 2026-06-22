@@ -31,13 +31,15 @@ const (
 	PushPriorityUrgent  PushPriority = "urgent"
 )
 
-// PushService handles bot-to-user push notifications over the message bus.
+// PushService handles bot-to-user push notifications over the message bus
+// and registered push channels (Telegram, CLI, TUI, HTTP).
 //
 // Messages are published as bus events on per-session topics so that any
 // subscriber (TUI, menubar, web, Telegram adapter, etc.) can pick them up.
 type PushService struct {
-	bus    *bus.MessageBus
-	logger *slog.Logger
+	bus      *bus.MessageBus
+	channels *ChannelRegistry
+	logger   *slog.Logger
 }
 
 // PushRequest describes a push notification to send.
@@ -62,7 +64,8 @@ type PushResult struct {
 	Skipped   int `json:"skipped"`
 }
 
-// NewPushService creates a push service.
+// NewPushService creates a push service with bus-only delivery.
+// For channel routing (Telegram, CLI, TUI, HTTP), use NewPushServiceWithChannels.
 func NewPushService(
 	sessionMgr session.Store,
 	msgBus *bus.MessageBus,
@@ -76,6 +79,59 @@ func NewPushService(
 		bus:    msgBus,
 		logger: logger,
 	}
+}
+
+// NewPushServiceWithChannels creates a push service with channel routing.
+func NewPushServiceWithChannels(
+	msgBus *bus.MessageBus,
+	channels *ChannelRegistry,
+	logger *slog.Logger,
+) *PushService {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &PushService{
+		bus:      msgBus,
+		channels: channels,
+		logger:   logger,
+	}
+}
+
+// PushToChannels sends a push notification through all registered channels.
+// This method bypasses the bus and delivers directly to channel transports.
+func (s *PushService) PushToChannels(ctx context.Context, req *PushRequest) (*PushResult, error) {
+	if req == nil {
+		return nil, wrapError("push", "PushToChannels", ErrInvalidInput)
+	}
+	if req.Content == "" {
+		return nil, wrapError("push", "PushToChannels", ErrInvalidInput)
+	}
+	if s.channels == nil {
+		return nil, wrapError("push", "PushToChannels", ErrUnavailable)
+	}
+
+	if req.Source == "" {
+		req.Source = "svc.push"
+	}
+	if req.Type == "" {
+		req.Type = PushTypeNotification
+	}
+	if req.Priority == "" {
+		req.Priority = PushPriorityNormal
+	}
+
+	msg := &PushMessage{
+		SessionID: req.SessionIDs[0],
+		Source:    req.Source,
+		Type:      req.Type,
+		Priority:  req.Priority,
+		Content:   req.Content,
+		Timestamp: time.Now(),
+		Metadata:  req.Extra,
+	}
+
+	delivered := s.channels.Push(ctx, msg)
+	return &PushResult{Delivered: delivered}, nil
 }
 
 // PushServiceOption configures a PushService.
