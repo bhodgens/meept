@@ -243,6 +243,11 @@ func TestLoadAgentDefinitions_AllBundled(t *testing.T) {
 		config.AgentIDScheduler,
 		"code-reviewer", "test-reviewer", "debug-reviewer",
 		"analyst-reviewer", "planner-reviewer",
+		// Plan 2: Agent Roster Extension knowledge-work specialists.
+		config.AgentIDWriter,
+		config.AgentIDArchitect,
+		config.AgentIDSkeptic,
+		config.AgentIDLibrarian,
 	}
 	for _, id := range expected {
 		spec, ok := r.GetSpec(id)
@@ -284,6 +289,28 @@ func TestLoadAgentDefinitions_AllBundled(t *testing.T) {
 		for _, want := range []string{"web_fetch", "web_search"} {
 			if !spec.HasTool(want) {
 				t.Errorf("researcher missing additional tool %q (has %v)", want, spec.AdditionalTools)
+			}
+		}
+	}
+
+	// Plan 2: verify researcher has litreview/dossier/code-tour skills,
+	// analyst has competitive-teardown, librarian has its three skills,
+	// and skeptic has grill-me.
+	skillChecks := map[string][]string{
+		config.AgentIDResearcher: {"litreview", "dossier", "code-tour"},
+		config.AgentIDAnalyst:    {"competitive-teardown"},
+		config.AgentIDSkeptic:    {"grill-me"},
+		config.AgentIDLibrarian:  {"librarian-backlog-mining", "librarian-reflection-surfacing", "librarian-tag-hygiene"},
+	}
+	for agentID, skills := range skillChecks {
+		spec, ok := r.GetSpec(agentID)
+		if !ok {
+			t.Errorf("expected bundled agent %q to load (skill check)", agentID)
+			continue
+		}
+		for _, want := range skills {
+			if !spec.HasSkill(want) {
+				t.Errorf("agent %q missing available_skill %q (has %v)", agentID, want, spec.AvailableSkills)
 			}
 		}
 	}
@@ -509,6 +536,11 @@ func TestDispatcherRoutingTableMatchesRoster(t *testing.T) {
 		config.AgentIDScheduler,
 		config.AgentIDChat,
 		"code-reviewer",
+		// Plan 2: new knowledge-work agents appear in the routing table.
+		config.AgentIDWriter,
+		config.AgentIDArchitect,
+		config.AgentIDSkeptic,
+		config.AgentIDLibrarian,
 	} {
 		// Search for the agent ID wrapped in backticks (the routing table format).
 		needle := "`" + want + "`"

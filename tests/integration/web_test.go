@@ -180,9 +180,12 @@ func TestIntegration_AgentsList(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	body := parseJSON(t, w)
-	// Should return default 8 agents
-	if count, ok := body["count"].(float64); !ok || count != 8 {
-		t.Fatalf("expected 8 agents, got %v", body["count"])
+	// Bundled roster ships with the default agents defined under
+	// config/agents/. The count grows as new agents are added; assert
+	// at least the canonical baseline (8) is present rather than an
+	// exact count that drifts with every roster extension.
+	if count, ok := body["count"].(float64); !ok || count < 8 {
+		t.Fatalf("expected at least 8 agents, got %v", body["count"])
 	}
 }
 
