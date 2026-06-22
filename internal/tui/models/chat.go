@@ -249,6 +249,7 @@ type RPCClient interface {
 	Steer(message, conversationID string) error
 	FollowUp(message, conversationID string) error
 	GetQueueStatus(conversationID string) (*types.QueueStatusResponse, error)
+	Call(method string, params any) (json.RawMessage, error)
 }
 
 // ChatConfig holds chat viewport behavior settings.
@@ -1452,6 +1453,53 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		content := m.renderPlanNotification(msg)
 		m.addMessage(RoleSystem, content)
 		return nil
+
+	case types.ThreadSwitchMsg:
+		// If Reply is set, this is an RPC response — handle it
+		if msg.Reply != nil {
+			if msg.Err != nil {
+				m.addMessage(RoleSystem, fmt.Sprintf("[thread] switch failed: %v", msg.Err))
+			} else {
+				m.addMessage(RoleSystem, "[thread] switched to thread: "+msg.ThreadID)
+				// Refresh thread list after successful switch
+				if m.rpc.IsConnected() {
+					rpc := m.rpc
+					sID := m.sessionID
+					return func() tea.Msg {
+						reply, err := rpc.Call("session.thread.list", map[string]string{
+							"session_id": sID,
+						})
+						if err != nil {
+							return ChatToastMsg{Title: "thread", Message: err.Error()}
+						}
+						return m.parseThreadListResponse(reply)
+					}
+				}
+			}
+			return nil
+		}
+		// First dispatch: no Reply yet, start the RPC call
+		return m.switchThread(msg.ThreadID)
+
+	case types.ThreadListChangedMsg:
+		// Update the compact thread indicator from refreshed data
+		if len(msg.Threads) > 0 {
+			m.threadIndicator.threads = msg.Threads
+			m.threadIndicator.activeIndex = -1
+			for i, t := range msg.Threads {
+				if t.ID == msg.ActiveID {
+					m.threadIndicator.activeIndex = i
+					break
+				}
+			}
+			if m.threadIndicator.activeIndex < 0 {
+				m.threadIndicator.activeIndex = 0
+			}
+		} else {
+			m.threadIndicator.threads = []types.Thread{}
+			m.threadIndicator.activeIndex = -1
+		}
+		return nil
 	}
 
 	// Update textarea if focused
@@ -2406,6 +2454,67 @@ func (m *ChatModel) SetSession(session *types.Session) tea.Cmd {
 	}
 
 	return flushCmd
+}
+
+// switchThread switches the active thread for the current session via RPC.
+func (m *ChatModel) switchThread(threadID string) tea.Cmd {
+	if threadID == "" || m.sessionID == "" || !m.rpc.IsConnected() {
+		m.addMessage(RoleSystem, "[thread] cannot switch: no session or connection")
+		return nil
+	}
+
+	rpc := m.rpc
+	sessionID := m.sessionID
+	tID := threadID
+	m.addMessage(RoleSystem, "[thread] switching to thread: "+threadID)
+
+	// Send the switch request
+	return func() tea.Msg {
+		reply, err := rpc.Call("session.thread.set_active", map[string]string{
+			"session_id": sessionID,
+			"thread_id":  tID,
+		})
+		if err != nil {
+			return types.ThreadSwitchMsg{ThreadID: tID, Err: err}
+		}
+		return types.ThreadSwitchMsg{ThreadID: tID, Reply: reply}
+	}
+}
+
+// parseThreadListResponse parses an RPC thread-list response into a
+// ThreadListChangedMsg that refreshes the UI thread indicator.
+func (m *ChatModel) parseThreadListResponse(data json.RawMessage) tea.Msg {
+	// Expected format: {"threads": [{...}, ...], "count": N}
+	var wrapper struct {
+		Threads []json.RawMessage `json:"threads"`
+		Count   int               `json:"count"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return ChatToastMsg{Title: "thread", Message: "failed to parse thread list"}
+	}
+
+	threads := make([]types.Thread, 0, len(wrapper.Threads))
+	for _, raw := range wrapper.Threads {
+		var t types.Thread
+		if err := json.Unmarshal(raw, &t); err != nil {
+			continue
+		}
+		threads = append(threads, t)
+	}
+
+	// Find active thread
+	activeID := ""
+	for _, t := range threads {
+		if t.IsActive {
+			activeID = t.ID
+			break
+		}
+	}
+
+	return types.ThreadListChangedMsg{
+		Threads:  threads,
+		ActiveID: activeID,
+	}
 }
 
 // VimState returns the vim state for external access.

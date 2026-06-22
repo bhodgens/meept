@@ -2,6 +2,7 @@
 package types
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -559,4 +560,19 @@ type PlanStateCounts struct {
 	Confirmed       int `json:"confirmed"`
 	Failed          int `json:"failed"`
 	Cancelled       int `json:"cancelled"`
+}
+
+// ThreadSwitchMsg signals a user-initiated thread switch in the chat view.
+// When sent from UI to server (Initiator): only ThreadID is set.
+// When returned from RPC call (Response): ThreadID, Err, or Reply are set.
+type ThreadSwitchMsg struct {
+	ThreadID string
+	Err      error
+	Reply    json.RawMessage
+}
+
+// ThreadListChangedMsg carries updated thread data after a switch or refresh.
+type ThreadListChangedMsg struct {
+	Threads  []Thread
+	ActiveID string
 }

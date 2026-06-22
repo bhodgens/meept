@@ -60,3 +60,34 @@ func (t *Thread) Touch() {
 	}
 	t.LastActivityAt = time.Now().UTC()
 }
+
+// Active returns true if this thread is the currently active thread
+// for its parent session.
+func (t *Thread) Active() bool {
+	if t == nil {
+		return false
+	}
+	return t.IsActive
+}
+
+// ThreadConfig holds configuration options for thread-based context
+// partitioning.
+type ThreadConfig struct {
+	// EnableTopicDetection enables automatic keyword-based topic
+	// detection for new incoming messages. When false, threads must be
+	// created explicitly.
+	EnableTopicDetection bool
+
+	// MinMessagesForSummary is the number of messages a thread must have
+	// before the system will attempt to generate an LLM summary of the
+	// thread's conversation context.
+	MinMessagesForSummary int
+}
+
+// DefaultThreadConfig returns a ThreadConfig with sensible defaults.
+func DefaultThreadConfig() ThreadConfig {
+	return ThreadConfig{
+		EnableTopicDetection:  false,
+		MinMessagesForSummary: 20,
+	}
+}

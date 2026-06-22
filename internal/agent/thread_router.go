@@ -142,6 +142,16 @@ func (tr *ThreadRouter) detectTopic(input string) string {
 	return tr.detector.Detect(input)
 }
 
+// RouteThread determines which thread (if any) should handle the given input
+// for a session. It returns the thread ID and the detected topic label.
+// If the session's active thread already matches the detected topic, it
+// returns the active thread's ID. Otherwise, it creates (or returns) a new
+// thread for the detected topic.
+func (tr *ThreadRouter) RouteThread(sessionID, input string) (threadID, topic string) {
+	topic = tr.detector.Detect(input)
+	return tr.generateThreadID(sessionID, topic), topic
+}
+
 // SetActiveThread marks the given thread as active for the session.
 func (tr *ThreadRouter) SetActiveThread(sessionID, threadID string) error {
 	tr.mu.RLock()

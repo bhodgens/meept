@@ -104,6 +104,37 @@ func TestSession_GetOrCreateThread(t *testing.T) {
 	}
 }
 
+func TestThread_Active(t *testing.T) {
+	t.Run("active thread", func(t *testing.T) {
+		thread := &Thread{ID: "t1", IsActive: true}
+		if !thread.Active() {
+			t.Error("expected true for active thread")
+		}
+	})
+	t.Run("inactive thread", func(t *testing.T) {
+		thread := &Thread{ID: "t2", IsActive: false}
+		if thread.Active() {
+			t.Error("expected false for inactive thread")
+		}
+	})
+	t.Run("nil thread", func(t *testing.T) {
+		var thread *Thread
+		if thread.Active() {
+			t.Error("expected false for nil thread")
+		}
+	})
+}
+
+func TestThreadConfig_Defaults(t *testing.T) {
+	cfg := DefaultThreadConfig()
+	if cfg.EnableTopicDetection {
+		t.Error("expected EnableTopicDetection to be false by default")
+	}
+	if cfg.MinMessagesForSummary != 20 {
+		t.Errorf("expected MinMessagesForSummary 20, got %d", cfg.MinMessagesForSummary)
+	}
+}
+
 func TestSession_GetOrCreateThread_DeactivatesOthers(t *testing.T) {
 	session := &Session{
 		ID:             "session-test",

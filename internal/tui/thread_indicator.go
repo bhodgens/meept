@@ -205,20 +205,8 @@ func (ti *ThreadIndicator) IsActive() bool {
 // switchThreadCmd returns a tea.Cmd that sends a thread switch message.
 func (ti *ThreadIndicator) switchThreadCmd(threadID string) tea.Cmd {
 	return func() tea.Msg {
-		return threadSwitchMsg{ThreadID: threadID}
+		return types.ThreadSwitchMsg{ThreadID: threadID}
 	}
-}
-
-// threadSwitchMsg is sent when the user switches threads.
-type threadSwitchMsg struct {
-	ThreadID string
-	Err      error
-}
-
-// ThreadListChangedMsg carries updated thread data from the session.
-type ThreadListChangedMsg struct {
-	Threads  []types.Thread
-	ActiveID string
 }
 
 // sortThreadsByActivity sorts threads in-place, most recently active first.

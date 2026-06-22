@@ -587,6 +587,23 @@ func TestGetBranches_SessionNotFound(t *testing.T) {
 	}
 }
 
+func TestGetBranches_DisabledByConfig(t *testing.T) {
+	store, _ := testHelper(t)
+	cfg := config.SessionConfig{
+		BranchesEnabled:        false,
+		BranchSummaryThreshold: 3,
+	}
+	bm := NewBranchManager(store, &testSummarizer{}, cfg, slog.Default())
+
+	_, err := bm.GetBranches(context.Background(), "any-session")
+	if err == nil {
+		t.Fatalf("expected error when BranchesEnabled=false, got nil")
+	}
+	if !strings.Contains(err.Error(), "disabled") {
+		t.Errorf("expected error mentioning 'disabled', got %q", err.Error())
+	}
+}
+
 func TestIntegration_NavigateAndSummaryPersistence(t *testing.T) {
 	ts := &testSummarizer{
 		result: &SummarizeBranchResult{

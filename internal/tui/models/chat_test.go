@@ -2,6 +2,7 @@ package models
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -154,6 +155,21 @@ func (m *MockChatRPCClient) GetQueueStatus(_ string) (*types.QueueStatusResponse
 		return nil, m.QueueStatusErr
 	}
 	return m.QueueStatus, nil
+}
+
+// Call implements the RPCClient interface for generic RPC calls.
+func (m *MockChatRPCClient) Call(method string, params any) (json.RawMessage, error) {
+	// For testing, return a minimal response based on method
+	switch method {
+	case "session.thread.list":
+		return json.RawMessage(`{"threads":[],"count":0}`), nil
+	case "session.thread.set_active":
+		return json.RawMessage(`{"success":true}`), nil
+	case "session.thread.new":
+		return json.RawMessage(`{"thread":{"id":"test-thread","topic_label":"test"}}`), nil
+	default:
+		return json.RawMessage(`{}`), nil
+	}
 }
 
 func newTestChatModel() *ChatModel {

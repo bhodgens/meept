@@ -34,6 +34,9 @@ func NewBranchManager(store Store, summarizer BranchSummarizer, cfg config.Sessi
 	if cfg.BranchSummaryThreshold == 0 {
 		cfg.BranchSummaryThreshold = 5
 	}
+	if !cfg.BranchesEnabled {
+		logger.Info("branches disabled: branch navigation is unavailable (threads are the recommended replacement)")
+	}
 	return &BranchManager{
 		store:      store,
 		summarizer: summarizer,
@@ -210,6 +213,9 @@ func (bm *BranchManager) NavigateToBranch(ctx context.Context, sessionID string,
 
 // GetBranches returns branch metadata for a session.
 func (bm *BranchManager) GetBranches(ctx context.Context, sessionID string) ([]Branch, error) {
+	if !bm.config.BranchesEnabled {
+		return nil, fmt.Errorf("branches are disabled (enable via session.branches_enabled in config)")
+	}
 	session := bm.store.Get(sessionID)
 	if session == nil {
 		return nil, fmt.Errorf("session not found: %s", sessionID)
