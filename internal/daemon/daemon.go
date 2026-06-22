@@ -67,7 +67,7 @@ type Daemon struct {
 	planManager *plan.PlanManager
 	planHandler *plan.PlanHandler
 
-	status       atomic.Value // stores models.DaemonStatus
+	status    atomic.Value // stores models.DaemonStatus
 	startTime    time.Time
 	pidFile      string
 	shutdownOnce atomic.Bool // DAE-H1: per-instance guard (was package-level, broke test isolation)
@@ -616,6 +616,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		if svcRegistry.Thread != nil {
 			registerThreadRPCHandlers(rpcServer, svcRegistry.Thread)
 			logger.Info("Thread RPC handlers registered")
+		}
+
+		// Epistemic memory RPC handlers
+		if memMgr := nilSafeMemoryManager(components); memMgr != nil && memMgr.IsInitialized() {
+			epistemicHandler := rpc.NewEpistemicHandler(memMgr)
+			epistemicHandler.RegisterEpistemicHandlers(rpcServer)
+			logger.Info("Epistemic memory RPC handlers registered")
 		}
 
 		// Project management handlers

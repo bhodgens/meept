@@ -241,7 +241,7 @@ func printParsedInstruction(parsed *ParsedInstructionCLI, needsConfirm bool) {
 }
 
 func newInstructionsCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "instructions",
 		Short: "Manage user instructions",
 		Long: `Manage user instructions (automation rules).
@@ -251,8 +251,10 @@ Examples:
   meept instructions add "always run tests"        # Add instruction
   meept instructions delete <id>                   # Remove instruction
   meept instructions preview "every day at 9am"    # Preview parsed instruction`,
+		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return instructionsCmd(args)
 		},
 	}
+	return cmd
 }

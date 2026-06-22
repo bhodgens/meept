@@ -131,6 +131,7 @@ Analytics:
 	rootCmd.AddCommand(newQueueCmd())
 	rootCmd.AddCommand(newWorkersCmd())
 	rootCmd.AddCommand(newSkillsCmd())
+	rootCmd.AddCommand(newInstructionsCmd())
 	rootCmd.AddCommand(newSessionCmd())
 	rootCmd.AddCommand(newTemplatesCmd())
 	rootCmd.AddCommand(newSelfImproveCmd())
