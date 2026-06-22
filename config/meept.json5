@@ -710,6 +710,8 @@
     "compaction_target_ratio": 0.6,     // Target compression ratio (0.0-1.0)
     "auto_fork": "ask",                 // Auto-fork behavior: "never" | "ask" | "always"
     "legacy_truncation": false,         // Revert to old message deletion behavior
+    "branches_enabled": false,          // Branch feature disabled by default (deprecated; use threads)
+    "threads_enabled": true,            // Thread-based context partitioning (recommended)
   },
 
   // Calendar integration

@@ -13,8 +13,15 @@ import (
 func newBranchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "branch",
-		Short: "Manage session branches",
+		Short: "Manage session branches (disabled by default)",
 		Long: `List, navigate, and fork conversation branches within sessions.
+
+Branches are DISABLED by default. Use threads (meept thread) instead —
+threads isolate different topics within a session without the complexity
+of git-style forking.
+
+To enable branches, add to ~/.meept/meept.json5:
+  { session: { branches_enabled: true } }
 
 Branches let you explore alternative responses or fork a conversation
 from a prior point without losing the original context.

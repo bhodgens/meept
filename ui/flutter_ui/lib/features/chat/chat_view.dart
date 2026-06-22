@@ -4,6 +4,7 @@ import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
 import '../../widgets/destructive_confirmation_dialog.dart';
+import '../../widgets/thread_selector.dart';
 import 'chat_message_list.dart';
 import 'chat_input.dart';
 

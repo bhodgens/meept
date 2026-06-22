@@ -652,3 +652,23 @@ func TestIntegration_NavigateAndSummaryPersistence(t *testing.T) {
 		t.Errorf("expected 9 total messages, got %d", len(allMsgs))
 	}
 }
+
+// TestNavigateToBranch_DisabledByConfig verifies that NavigateToBranch returns
+// an error when BranchesEnabled is false (the default config state).
+func TestNavigateToBranch_DisabledByConfig(t *testing.T) {
+	store, _ := testHelper(t)
+	cfg := config.SessionConfig{
+		BranchesEnabled:        false, // Explicitly disabled
+		BranchSummaryThreshold: 3,
+	}
+	bm := NewBranchManager(store, &testSummarizer{}, cfg, slog.Default())
+
+	ctx := context.Background()
+	result, err := bm.NavigateToBranch(ctx, "any-session", 1)
+	if err == nil {
+		t.Fatalf("expected error when BranchesEnabled=false, got nil (result=%+v)", result)
+	}
+	if !strings.Contains(err.Error(), "disabled") {
+		t.Errorf("expected error mentioning 'disabled', got %q", err.Error())
+	}
+}
