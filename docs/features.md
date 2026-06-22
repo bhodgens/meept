@@ -1347,6 +1347,22 @@ Bots are defined as JSON documents with prompt, triggers, tools, and constraints
 
 ---
 
+### Epistemic Memory Platform
+
+Meept's memory platform supports epistemic memory types — **claim**, **decision**, **prediction**, and **question** — distinct from conversational episodic logs. Each claim carries a trust-graded `status` (`confirmed`, `auto`, `promoted`, `rejected`) that propagates to search ranking, edge confidence, and destructive-action permissions. An LLM-driven relationship detector surfaces `contradicts`, `superseded`, `evidence_for`, `evidence_against`, `derives_from`, and `supports` edges between memories; detected candidates land as low-confidence `potential_contradicts` rather than auto-superseding. Destructive actions (e.g., `mark_superseded`) require a two-phase confirmation preview across CLI, TUI, and GUI. Four creation paths feed the pipeline: explicit tools write `confirmed`; ambient extraction, backlog mining, and reflection all write `auto` for later promotion.
+
+**Learn more:** [Epistemic Memory Configuration](configuration/epistemic-memory.md)
+
+---
+
+### Extended Agent Roster
+
+Four specialist agents expand Meept beyond coding/ops into knowledge work: `writer` (long-form writing — essays, docs, briefs), `architect` (system design, tech evaluation, trade-off analysis), `skeptic` (stress-tests claims, surfaces contradictions via `contradicts`/`superseded`/`evidence_against` edges), and `librarian` (memory steward — reflection, tag hygiene, backlog mining, auto-claim promotion). The `librarian` and `skeptic` are built on the epistemic memory platform.
+
+**Learn more:** [Multi-Agent System](concepts/multi-agent.md)
+
+---
+
 ## Feature Reference
 
 ### What Makes Meept Unique
