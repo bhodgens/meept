@@ -89,16 +89,24 @@ class _ChatViewState extends ConsumerState<ChatView> {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             color: const Color(0xFFF97316),
-            child: Text(
-              headerText.toLowerCase(),
-              style: CyberpunkTypography.bodyMedium.copyWith(
-                color: CyberpunkColors.black,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'SourceCodePro',
-                fontSize: 13,
-              ),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    headerText.toLowerCase(),
+                    style: CyberpunkTypography.bodyMedium.copyWith(
+                      color: CyberpunkColors.black,
+                      fontWeight: FontWeight.bold,
+                      fontFamily: 'SourceCodePro',
+                      fontSize: 13,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                ),
+                // Thread selector — context isolation per topic
+                ThreadSelector(sessionId: widget.sessionId),
+              ],
             ),
           ),
           // Message list

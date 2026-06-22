@@ -12,12 +12,16 @@ class _FakeThreadService implements ThreadService {
   Future<List<Thread>> listThreads(String sessionId) async => threadsToReturn;
 
   @override
-  Future<Thread?> createThread(String sessionId, {required String topicLabel}) async {
+  Future<Thread?> createThread(
+    String sessionId, {
+    String topicLabel = 'general',
+    String? conversationId,
+  }) async {
     final t = Thread(
       id: 'new-${topicLabel.hashCode}',
       sessionId: sessionId,
       topicLabel: topicLabel,
-      conversationId: '$sessionId-$topicLabel',
+      conversationId: conversationId ?? '$sessionId-$topicLabel',
       isActive: true,
       createdAt: DateTime.now(),
       lastActivityAt: DateTime.now(),
