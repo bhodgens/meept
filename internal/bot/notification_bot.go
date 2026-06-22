@@ -2,6 +2,8 @@ package bot
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -16,31 +18,33 @@ import (
 type NotificationTriggerType string
 
 const (
-	TriggerBudgetExhausted     NotificationTriggerType = "budget_exhausted"
-	TriggerSecurityAlert       NotificationTriggerType = "security_alert"
-	TriggerSessionDesignated   NotificationTriggerType = "session_designated"
+	TriggerBudgetExhausted   NotificationTriggerType = "budget_exhausted"
+	TriggerSecurityAlert     NotificationTriggerType = "security_alert"
+	TriggerSessionDesignated NotificationTriggerType = "session_designated"
 )
 
 // NotificationBotConfig holds configuration for the proactive notification bot.
 type NotificationBotConfig struct {
-	Enabled           bool     `json:"enabled"`
-	TelegramChatIDs   []string `json:"telegram_chat_ids"`
-	NotifyOn          []string `json:"notify_on"` // notification trigger types
-	RateLimitPerHour  int      `json:"rate_limit_per_hour"`
-	TelegramToken     string   `json:"telegram_token,omitempty"`
-	TelegramPollTimeout int    `json:"telegram_poll_timeout,omitempty"`
+	Enabled             bool                `json:"enabled"`
+	TelegramChatIDs     []string            `json:"telegram_chat_ids"`
+	NotifyOn            []string            `json:"notify_on"`              // notification trigger types
+	RateLimitPerHour    int                 `json:"rate_limit_per_hour"`    // max notifications per hour
+	ChannelAllowlists   map[string][]string `json:"channel_allowlists"`     // channel_type -> allowed IDs
+	Templates           map[string]string   `json:"templates"`              // trigger_type -> template
+	TelegramToken       string              `json:"telegram_token,omitempty"`
+	TelegramPollTimeout int                 `json:"telegram_poll_timeout,omitempty"`
 }
 
 // DefaultNotificationBotConfig returns a config with sensible defaults.
 func DefaultNotificationBotConfig() NotificationBotConfig {
 	return NotificationBotConfig{
 		Enabled:          false,
-		NotifyOn: []string{
-			string(TriggerBudgetExhausted),
-			string(TriggerSecurityAlert),
-			string(TriggerSessionDesignated),
-		},
+		NotifyOn:         []string{string(TriggerBudgetExhausted), string(TriggerSecurityAlert), string(TriggerSessionDesignated)},
 		RateLimitPerHour: 60,
+		ChannelAllowlists: map[string][]string{
+			"telegram": {}, // empty = allow all configured chat IDs
+		},
+		Templates: make(map[string]string),
 	}
 }
 
@@ -56,7 +60,6 @@ type NotificationBot struct {
 
 	telegram *telegram.Bot
 
-	mu     sync.Mutex
 	rateMu sync.Mutex
 	// rateWindow tracks timestamps of sent notifications for rate limiting.
 	rateWindow []time.Time
@@ -178,7 +181,19 @@ func (nb *NotificationBot) handleEvent(ctx context.Context, event *http.Notifica
 			if chatID == 0 {
 				continue
 			}
+
+			// Check channel allowlist
+			if !nb.isChannelAllowed("telegram", chatIDStr) {
+				nb.logger.Debug("notification blocked by channel allowlist",
+					"channel", "telegram", "target", chatIDStr)
+				continue
+			}
+
 			msg := nb.formatNotification(event, trigger)
+
+			// Audit log before sending
+			nb.auditLog("telegram", chatIDStr, msg, trigger)
+
 			go func(id int64, m string) {
 				if err := nb.telegram.SendMessage(ctx, id, m); err != nil {
 					nb.logger.Error("failed to send telegram notification",
@@ -263,6 +278,11 @@ func (nb *NotificationBot) allowRateLimit() bool {
 
 // formatNotification formats an event into a Telegram-friendly message.
 func (nb *NotificationBot) formatNotification(event *http.NotificationEvent, trigger NotificationTriggerType) string {
+	// Apply template if configured for this trigger
+	if tmpl, ok := nb.config.Templates[string(trigger)]; ok && tmpl != "" {
+		return applyTemplate(tmpl, event, trigger)
+	}
+
 	msg := "**Meept Notification**\n\n"
 	msg += fmt.Sprintf("*%s*\n", event.Title)
 	msg += fmt.Sprintf("%s\n\n", event.Message)
@@ -277,4 +297,54 @@ func (nb *NotificationBot) formatNotification(event *http.NotificationEvent, tri
 	}
 
 	return msg
+}
+
+// isChannelAllowed checks if the target channel ID is in the allowlist.
+// If the allowlist is empty for the channel type, all configured channels are allowed.
+func (nb *NotificationBot) isChannelAllowed(channelType, channelID string) bool {
+	if nb.config.ChannelAllowlists == nil {
+		return true // no allowlists configured = allow all
+	}
+
+	allowed, ok := nb.config.ChannelAllowlists[channelType]
+	if !ok {
+		return true // no allowlist for this type = allow
+	}
+
+	if len(allowed) == 0 {
+		return true // empty allowlist = allow all for this type
+	}
+
+	for _, id := range allowed {
+		if id == channelID {
+			return true
+		}
+	}
+	return false
+}
+
+// auditLog records a notification delivery for audit purposes.
+// Logs: timestamp, channel type, target ID, content hash, trigger type.
+func (nb *NotificationBot) auditLog(channelType, channelID, content string, trigger NotificationTriggerType) {
+	hash := sha256.Sum256([]byte(content))
+	nb.logger.Info("notification_audit",
+		"timestamp", time.Now().UTC().Format(time.RFC3339),
+		"channel", channelType,
+		"target", channelID,
+		"content_hash", hex.EncodeToString(hash[:]),
+		"trigger", string(trigger),
+	)
+}
+
+// applyTemplate applies a template string with event data placeholders.
+// Supported placeholders: {{Title}}, {{Message}}, {{Trigger}}, {{SessionID}}, {{AgentID}}, {{Timestamp}}
+func applyTemplate(tmpl string, event *http.NotificationEvent, trigger NotificationTriggerType) string {
+	result := tmpl
+	result = strings.ReplaceAll(result, "{{Title}}", event.Title)
+	result = strings.ReplaceAll(result, "{{Message}}", event.Message)
+	result = strings.ReplaceAll(result, "{{Trigger}}", string(trigger))
+	result = strings.ReplaceAll(result, "{{SessionID}}", event.SessionID)
+	result = strings.ReplaceAll(result, "{{AgentID}}", event.AgentID)
+	result = strings.ReplaceAll(result, "{{Timestamp}}", event.Timestamp)
+	return result
 }
