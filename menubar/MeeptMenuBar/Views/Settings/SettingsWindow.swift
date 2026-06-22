@@ -11,8 +11,13 @@ struct SettingsWindow: View {
 
     @ObservedObject var configViewModel: ConfigViewModel
     @StateObject private var mcpViewModel: MCPViewModel
+    @StateObject private var memoryReviewViewModel: MemoryReviewViewModel
 
-    init(configViewModel: ConfigViewModel, mcpViewModel: MCPViewModel? = nil) {
+    init(
+        configViewModel: ConfigViewModel,
+        mcpViewModel: MCPViewModel? = nil,
+        memoryReviewViewModel: MemoryReviewViewModel? = nil
+    ) {
         self.configViewModel = configViewModel
         // Allow callers to inject an APIClient-backed MCPViewModel (the main
         // AppDelegate path). Fall back to a fresh APIClient for previews /
@@ -26,6 +31,17 @@ struct SettingsWindow: View {
                 apiToken: config.apiToken
             )
             self._mcpViewModel = StateObject(wrappedValue: MCPViewModel(api: api))
+        }
+        // Same injected-or-default pattern for the memory review tab.
+        if let memoryReviewViewModel {
+            self._memoryReviewViewModel = StateObject(wrappedValue: memoryReviewViewModel)
+        } else {
+            let config = MenubarConfigService()
+            let api = APIClient(
+                baseURL: config.daemonBaseURL,
+                apiToken: config.apiToken
+            )
+            self._memoryReviewViewModel = StateObject(wrappedValue: MemoryReviewViewModel(api: api))
         }
     }
 
@@ -69,6 +85,12 @@ struct SettingsWindow: View {
                 Label("tools", systemImage: "wrench.and.screwdriver")
             }
             .tag(3)
+
+            MemoryReviewView(viewModel: memoryReviewViewModel)
+            .tabItem {
+                Label("memory", systemImage: "brain.head.profile")
+            }
+            .tag(4)
         }
         .frame(width: 600, height: 450)
         .padding()

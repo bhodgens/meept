@@ -107,6 +107,25 @@ class APIClient {
         try await performVoid(request: request)
     }
 
+    // MARK: - Epistemic Memory (async/await)
+
+    func getReviewQueue() async throws -> ReviewQueue {
+        let request = try makeRequest(path: "/api/v1/memory/review-queue", method: "GET")
+        let data = try await performData(request: request)
+        let decoder = JSONDecoder()
+        return try decoder.decode(ReviewQueue.self, from: data)
+    }
+
+    func promoteClaim(id: String) async throws {
+        let request = try makeRequest(path: "/api/v1/memory/claims/\(id)/promote", method: "POST")
+        try await performVoid(request: request)
+    }
+
+    func rejectClaim(id: String) async throws {
+        let request = try makeRequest(path: "/api/v1/memory/claims/\(id)/reject", method: "POST")
+        try await performVoid(request: request)
+    }
+
     // MARK: - Backward-compatible completion handler wrappers
 
     func getDaemonStatus(completion: @escaping (Result<DaemonStatus, Error>) -> Void) {
