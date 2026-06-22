@@ -19,6 +19,7 @@ import (
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/plan"
+	"github.com/caimlas/meept/internal/preferences"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/internal/templates"
@@ -181,6 +182,10 @@ type DispatchResult struct {
 	// json:"-" because it is operational metadata not meant for
 	// user-facing JSON serialization.
 	ReasoningOverride *llm.ReasoningConfig `json:"-"`
+
+	// Instruction is the parsed instruction when user provides automation request.
+	// Only populated when intent type is IntentInstruction.
+	Instruction *preferences.ParsedInstruction `json:"-"`
 }
 
 // Dispatcher handles intake classification and routing of requests.
@@ -225,6 +230,13 @@ type Dispatcher struct {
 	indexCtx    context.Context
 	indexCancel context.CancelFunc
 	indexWG     sync.WaitGroup
+
+	// instructionStore handles user instructions for automation (Phase 1).
+	// When nil, instruction-based automation is disabled.
+	instructionStore *preferences.Store
+
+	// instructionParser parses natural language into structured instructions.
+	instructionParser *InstructionParser
 }
 
 // IntentClassifier is an interface for classifying intents.
@@ -371,6 +383,22 @@ func (d *Dispatcher) SetThreadRouter(tr *ThreadRouter) {
 	}
 	d.threadRouter = tr
 }
+// SetInstructionStore wires the instruction store for intent-based action attachment.
+func (d *Dispatcher) SetInstructionStore(store *preferences.Store) {
+	if store == nil {
+		return
+	}
+	d.instructionStore = store
+}
+
+// SetInstructionParser wires the instruction parser for parsing NL automation requests.
+func (d *Dispatcher) SetInstructionParser(parser *InstructionParser) {
+	if parser == nil {
+		return
+	}
+	d.instructionParser = parser
+}
+
 
 // suggestReasoningForIntent returns the suggested reasoning tier for a given
 // intent type per LLM Reasoning Effort spec §7.5. Returns empty string when
@@ -517,7 +545,25 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// 4. Resolve anaphora (context references)
 	resolvedInput := d.resolveAnaphora(input, memCtx)
 
-	// 3. Check for compound (multi-intent) requests
+	// 4.5. Check for instruction input (user creating/defining automation)
+	// Per User Instructions spec Phase 2.4
+	if d.isInstructionInput(resolvedInput) && d.instructionParser != nil {
+		parsed, err := d.instructionParser.Parse(ctx, resolvedInput)
+		if err == nil && parsed.Confidence >= 0.5 {
+			return &DispatchResult{
+				Intent: &Intent{
+					Type:       string(IntentInstruction),
+					Confidence: parsed.Confidence,
+					AgentType:  config.AgentIDChat,
+					Summary:    extractSummary(input),
+				},
+				AgentID:     config.AgentIDChat,
+				Instruction: parsed,
+			}, nil
+		}
+	}
+
+	// 5. Check for compound (multi-intent) requests
 	multiIntent := d.classifyMultiIntent(ctx, resolvedInput, memCtx)
 	if multiIntent.IsCompound {
 		return d.routeCompoundWithModel(ctx, multiIntent, input, sessionID, parseResult.Directive)
@@ -613,6 +659,25 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 // 4. If LLM fails OR confidence < threshold → try Keyword classifier
 // 5. If Keyword fails AND no strong keyword signal → improved heuristic fallback (Issue 0036)
 // 6. Final fallback to Chat for clarification
+
+// isInstructionInput detects whether input is a user instruction (automation request).
+// Matches keywords like "always", "never", "every time", "whenever", etc.
+// Per User Instructions spec Phase 2.4.
+func (d *Dispatcher) isInstructionInput(input string) bool {
+	instructionKeywords := []string{
+		"always", "never", "every time", "whenever",
+		"from now on", "remember to", "make sure to",
+		"automatically", "auto-", "auto_",
+	}
+	lower := strings.ToLower(input)
+	for _, kw := range instructionKeywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *MemoryContext) (*Intent, error) {
 	d.recordTotalDispatch()
 	// --- Guard: short/simple messages skip the full classifier chain ---

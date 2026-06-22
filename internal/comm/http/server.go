@@ -160,6 +160,8 @@ type Server struct {
 	notifHandler *NotificationHandler
 	// PTY session handler (optional, set via WithPTY)
 	ptyHandler *PTYHandler
+	// Instructions handler (optional, set via WithInstructions)
+	instructionsHandler *InstructionsHandler
 }
 
 // AgentInfo describes an agent for listing.
@@ -665,6 +667,17 @@ func WithPTY(h *PTYHandler) ServerOption {
 		}
 	}
 }
+
+// WithInstructions enables user instructions endpoints under /api/v1/instructions/*.
+// Routes inherit the server's authentication middleware when RequireAuth is enabled.
+func WithInstructions(h *InstructionsHandler) ServerOption {
+	return func(s *Server) {
+		if h != nil {
+			s.instructionsHandler = h
+		}
+	}
+}
+
 // ServerOption is a functional option for configuring a Server.
 type ServerOption func(*Server)
 
@@ -1130,6 +1143,11 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	// PTY session endpoints (optional, depends on WithPTY option)
 	if s.ptyHandler != nil {
 		s.ptyHandler.RegisterRoutes(mux)
+	}
+
+	// User instructions endpoints (optional, depends on WithInstructions option)
+	if s.instructionsHandler != nil {
+		s.instructionsHandler.RegisterRoutes(mux)
 	}
 
 	// MCP server management endpoints (mcp.list + mcp.set_enabled).

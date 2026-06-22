@@ -1390,7 +1390,7 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 
 		// Stop file system hooks for this session
 		if l.fileWatcher != nil {
-			l.fileWatcher.Stop()
+			_ = l.fileWatcher.Stop()
 		}
 
 		}

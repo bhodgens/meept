@@ -682,3 +682,222 @@ func TestPatternDetectorDetectSkillOpportunity(t *testing.T) {
 		})
 	}
 }
+
+// ============== RecommendInstruction Tests ==============
+
+func TestRecommendInstruction_Basic(t *testing.T) {
+	tests := []struct {
+		name            string
+		analyses        []*SessionAnalysis
+		expectMinReports int
+	}{
+		{
+			name:            "no reports for fewer than 5 occurrences",
+			analyses:        makeTestAnalyses(4, "shell_execute", "code", true),
+			expectMinReports: 0,
+		},
+		{
+			name:            "no reports for low success rate",
+			analyses:        makeTestAnalyses(10, "shell_execute", "code", false),
+			expectMinReports: 0,
+		},
+		{
+			name:            "generates report for recurring successful pattern",
+			analyses:        makeTestAnalyses(10, "shell_execute", "code", true),
+			expectMinReports: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pd := NewPatternDetector(testLogger, PatternDetectorConfig{
+				MinSessionsForPattern: 3,
+			})
+
+			reports := pd.RecommendInstruction(tt.analyses)
+
+			if len(reports) < tt.expectMinReports {
+				t.Errorf("Expected at least %d reports, got %d", tt.expectMinReports, len(reports))
+			}
+
+			// Verify report structure
+			for _, r := range reports {
+				if r.RecommendedAction != "suggest_user_instruction" {
+					t.Errorf("Expected RecommendedAction=suggest_user_instruction, got %s", r.RecommendedAction)
+				}
+				if r.PatternType != "instruction_opportunity" {
+					t.Errorf("Expected PatternType=instruction_opportunity, got %s", r.PatternType)
+				}
+				if r.Confidence < 0 || r.Confidence > 1 {
+					t.Errorf("Confidence %.2f out of range [0, 1]", r.Confidence)
+				}
+			}
+		})
+	}
+}
+
+func TestRecommendInstruction_Sorting(t *testing.T) {
+	// Create analyses with different pattern frequencies
+	analyses := make([]*SessionAnalysis, 30)
+
+	// Pattern 1: 10 shell_execute occurrences
+	for i := 0; i < 10; i++ {
+		analyses[i] = &SessionAnalysis{
+			SessionID: string(rune(i)),
+			AgentID:   "test-agent",
+			Intents:   []string{"code"},
+			ToolCalls: []ToolCallRecord{{ToolName: "shell_execute", Success: true}},
+		}
+	}
+
+	// Pattern 2: 20 git_commit occurrences
+	for i := 10; i < 30; i++ {
+		analyses[i] = &SessionAnalysis{
+			SessionID: string(rune(i)),
+			AgentID:   "test-agent",
+			Intents:   []string{"git"},
+			ToolCalls: []ToolCallRecord{{ToolName: "git_commit", Success: true}},
+		}
+	}
+
+	pd := NewPatternDetector(testLogger, PatternDetectorConfig{
+		MinSessionsForPattern: 3,
+	})
+
+	reports := pd.RecommendInstruction(analyses)
+
+	if len(reports) < 2 {
+		t.Fatal("Expected at least 2 reports")
+	}
+
+	// Verify sorting (descending by confidence)
+	for i := 1; i < len(reports); i++ {
+		if reports[i].Confidence > reports[i-1].Confidence {
+			t.Errorf("Reports not sorted by confidence: %.2f > %.2f",
+				reports[i].Confidence, reports[i-1].Confidence)
+		}
+	}
+}
+
+func TestFormatAction(t *testing.T) {
+	tests := []struct {
+		action string
+		expect string
+	}{
+		{"shell_execute", "execute shell command"},
+		{"write_file", "write files"},
+		{"read_file", "read files"},
+		{"git_commit", "commit changes"},
+		{"agent_trigger", "trigger agent"},
+		{"unknown_tool", "run unknown_tool"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.action, func(t *testing.T) {
+			result := formatAction(tt.action)
+			if result != tt.expect {
+				t.Errorf("formatAction(%q) = %q, want %q", tt.action, result, tt.expect)
+			}
+		})
+	}
+}
+
+func TestFormatTrigger(t *testing.T) {
+	tests := []struct {
+		trigger string
+		expect  string
+	}{
+		{"code", "coding tasks"},
+		{"debug", "debugging"},
+		{"test", "testing"},
+		{"build", "building"},
+		{"git", "git operations"},
+		{"unknown", "unknown occurs"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.trigger, func(t *testing.T) {
+			result := formatTrigger(tt.trigger)
+			if result != tt.expect {
+				t.Errorf("formatTrigger(%q) = %q, want %q", tt.trigger, result, tt.expect)
+			}
+		})
+	}
+}
+
+func TestRecommendInstruction_Thresholds(t *testing.T) {
+	tests := []struct {
+		name          string
+		count         int
+		successRate   float64
+		expectReports bool
+	}{
+		{"exactly 5 occurrences, exactly 80% success", 5, 0.8, true},
+		{"4 occurrences (below threshold)", 4, 1.0, false},
+		{"5 occurrences, 79% success (below threshold)", 5, 0.79, false},
+		{"10 occurrences, 100% success", 10, 1.0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			analyses := makeTestAnalysesWithSuccessRate(tt.count, "test_tool", "test", tt.successRate)
+
+			pd := NewPatternDetector(testLogger, PatternDetectorConfig{
+				MinSessionsForPattern: 3,
+			})
+
+			reports := pd.RecommendInstruction(analyses)
+
+			hasReport := false
+			for _, r := range reports {
+				if r.PatternType == "instruction_opportunity" {
+					hasReport = true
+					break
+				}
+			}
+
+			if hasReport != tt.expectReports {
+				t.Errorf("Expected report=%v, got %d reports", tt.expectReports, len(reports))
+			}
+		})
+	}
+}
+
+// Helper functions
+
+func makeTestAnalyses(n int, toolName, intent string, success bool) []*SessionAnalysis {
+	analyses := make([]*SessionAnalysis, n)
+	for i := 0; i < n; i++ {
+		analyses[i] = &SessionAnalysis{
+			SessionID:   string(rune('a' + i)),
+			AgentID:     "test-agent",
+			Intents:     []string{intent},
+			ToolCalls:   []ToolCallRecord{{ToolName: toolName, Success: success}},
+			Duration:    time.Minute,
+			Outcome:     "completed",
+			StartTime:   time.Now().Add(-time.Minute),
+			EndTime:     time.Now(),
+		}
+	}
+	return analyses
+}
+
+func makeTestAnalysesWithSuccessRate(n int, toolName, intent string, successRate float64) []*SessionAnalysis {
+	analyses := make([]*SessionAnalysis, n)
+	successCount := int(float64(n) * successRate)
+
+	for i := 0; i < n; i++ {
+		success := i < successCount
+		analyses[i] = &SessionAnalysis{
+			SessionID:   string(rune('a' + i)),
+			AgentID:     "test-agent",
+			Intents:     []string{intent},
+			ToolCalls:   []ToolCallRecord{{ToolName: toolName, Success: success}},
+			Duration:    time.Minute,
+			Outcome:     "completed",
+			StartTime:   time.Now().Add(-time.Minute),
+			EndTime:     time.Now(),
+		}
+	}
+	return analyses
+}

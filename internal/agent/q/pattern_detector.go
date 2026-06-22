@@ -541,3 +541,126 @@ func extractToolNames(calls []ToolCallRecord) []string {
 	}
 	return names
 }
+
+// RecommendInstruction detects recurring patterns and suggests user instructions.
+// Per User Instructions spec Phase 4.1, this identifies opportunities for
+// "Always do X when Y happens" automation rules.
+func (d *PatternDetector) RecommendInstruction(analyses []*SessionAnalysis) []PatternReport {
+	reports := make([]PatternReport, 0)
+
+	// Track recurring action-trigger pairs
+	type actionTrigger struct {
+		action  string
+		trigger string
+		count   int
+		success int
+	}
+	patterns := make(map[string]*actionTrigger)
+
+	for _, a := range analyses {
+		for _, tc := range a.ToolCalls {
+			triggerContext := "unknown"
+			if len(a.Intents) > 0 {
+				triggerContext = a.Intents[0]
+			}
+
+			key := fmt.Sprintf("%s|%s", tc.ToolName, triggerContext)
+			p, exists := patterns[key]
+			if !exists {
+				p = &actionTrigger{
+					action:  tc.ToolName,
+					trigger: triggerContext,
+				}
+				patterns[key] = p
+			}
+			p.count++
+			if tc.Success {
+				p.success++
+			}
+		}
+	}
+
+	// Generate instruction recommendations for recurring patterns
+	for key, p := range patterns {
+		if p.count < 5 {
+			continue
+		}
+
+		successRate := float64(p.success) / float64(p.count)
+		if successRate < 0.8 {
+			continue
+		}
+
+		suggestedInstruction := fmt.Sprintf(
+			"Always run %s when %s",
+			formatAction(p.action),
+			formatTrigger(p.trigger),
+		)
+
+		reports = append(reports, PatternReport{
+			ID:                   fmt.Sprintf("instruction_opportunity_%s", key),
+			PatternType:          "instruction_opportunity",
+			Confidence:           min(1.0, float64(p.count)/10.0*successRate),
+			RecommendedAction:    "suggest_user_instruction",
+			MisconfigurationType: "automation_opportunity",
+			AffectedIntent:       p.trigger,
+			SessionCount:         p.count,
+			MetricBaseline:       0.8,
+			MetricObserved:       successRate,
+			Evidence: []PatternEvidence{
+				{
+					Metric:      "repetition_count",
+					Value:       float64(p.count),
+					Description: fmt.Sprintf("Action executed %d times with %.0f%% success rate", p.count, successRate*100),
+				},
+				{
+					Metric:      "suggested_instruction",
+					Description: suggestedInstruction,
+				},
+			},
+			CreatedAt: time.Now(),
+		})
+	}
+
+	sort.Slice(reports, func(i, j int) bool {
+		return reports[i].Confidence > reports[j].Confidence
+	})
+
+	return reports
+}
+
+// formatAction converts an action context to natural language.
+func formatAction(action string) string {
+	switch action {
+	case "shell_execute":
+		return "execute shell command"
+	case "write_file":
+		return "write files"
+	case "read_file":
+		return "read files"
+	case "git_commit":
+		return "commit changes"
+	case "agent_trigger":
+		return "trigger agent"
+	default:
+		return fmt.Sprintf("run %s", action)
+	}
+}
+
+// formatTrigger converts a trigger context to natural language.
+func formatTrigger(trigger string) string {
+	switch trigger {
+	case "code":
+		return "coding tasks"
+	case "debug":
+		return "debugging"
+	case "test":
+		return "testing"
+	case "build":
+		return "building"
+	case "git":
+		return "git operations"
+	default:
+		return fmt.Sprintf("%s occurs", trigger)
+	}
+}

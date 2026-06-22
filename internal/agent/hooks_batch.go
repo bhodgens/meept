@@ -68,14 +68,3 @@ func (e *HookBatchExecutor) ExecuteAll(ctx context.Context, payload HookPayload)
 	wg.Wait()
 }
 
-// FileWatcherHook is a placeholder for the file-watcher hook. Methods match
-// the call sites in loop.go (Start, Stop). The full implementation lives
-// in a separate file when the file-watcher feature is wired.
-type FileWatcherHook struct{}
-
-// Start begins watching. Accepts a context for future cancellation support.
-// Returns nil to keep the loop path no-op safe.
-func (fw *FileWatcherHook) Start(_ context.Context) error { return nil }
-
-// Stop ceases watching.
-func (fw *FileWatcherHook) Stop() {}

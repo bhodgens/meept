@@ -1,0 +1,11 @@
+id: instr_1782151724374117000
+name: post_hook:write_file:*.$2
+trigger: post_hook:write_file:*.$2
+action: shell_execute
+action_args:
+    command: go test ./...
+enabled: true
+scope: global
+priority: normal
+created_at: 2026-06-22T12:08:44.374117-06:00
+updated_at: 2026-06-22T18:08:44.374118Z
