@@ -1335,7 +1335,7 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 
 	// No active loop, or queue closed/full -- run normally
 	// Build context message with memory refs
-	contextMsg := d.buildContextMessage(result)
+	contextMsg := d.buildContextMessage(result, conversationID)
 
 	// Get the agent
 	agent, err := d.registry.Get(result.AgentID)
@@ -1492,8 +1492,17 @@ func (d *Dispatcher) handleStatsQuery(_ context.Context) (string, error) {
 // buildContextMessage builds a message with memory context injected.
 // The primary content is the full original user input (result.OriginalInput);
 // a brief summary is prepended only when it differs from the full input.
-func (d *Dispatcher) buildContextMessage(result *DispatchResult) string {
+func (d *Dispatcher) buildContextMessage(result *DispatchResult, conversationID string) string {
 	var parts []string
+
+	// Inject cross-thread context so the active thread has continuity with
+	// prior topics. Without this, switching threads loses all context from
+	// inactive threads.
+	if d.threadRouter != nil && conversationID != "" {
+		if crossCtx := d.threadRouter.CrossThreadContext(conversationID, ""); crossCtx != "" {
+			parts = append(parts, crossCtx)
+		}
+	}
 
 	// Add relevant memory context
 	if len(result.MemoryContext) > 0 {
@@ -1607,7 +1616,17 @@ var keywordPatterns = []keywordPattern{
 	{[]string{"remind", string(IntentSchedule), "alarm", "timer", "at ", "tomorrow", "next week"}, string(IntentSchedule), config.AgentIDScheduler, 0.8, false},
 
 	// Planning
-	{[]string{string(IntentPlan), KeywordDesign, "architect", "how should i", "break down", "decompose"}, string(IntentPlan), config.AgentIDPlanner, 0.8, true},
+	// Note: "architect" moved to the IntentArchitect pattern below so it
+	// no longer collides with system-design requests.
+	{[]string{string(IntentPlan), KeywordDesign, "how should i", "break down", "decompose"}, string(IntentPlan), config.AgentIDPlanner, 0.8, true},
+
+	// Plan 2: knowledge-work intents. Longer compound phrases are listed
+	// first so the best-score-wins classifier prefers them over the
+	// generic bare-word variants ("architect", "write").
+	{[]string{"write an essay", "write a brief", "write a blog post", "long-form writing", "long form", "write doc", "write article", "draft a", "draft an", "write a doc"}, string(IntentWrite), config.AgentIDWriter, 0.85, false},
+	{[]string{"design a system", "design system", "architect a", "architect the", "architect this", "tech stack", "trade-off", "tradeoff", "should we use", "evaluate technology", "compare technologies"}, string(IntentArchitect), config.AgentIDArchitect, 0.85, true},
+	{[]string{"stress-test", "stress test", "steelman", "what's wrong with", "what is wrong with", "challenge this", "adversarial review", "challenge my"}, string(IntentSkeptic), config.AgentIDSkeptic, 0.85, false},
+	{[]string{"review my memory", "review memory", "memory review", "clean up tags", "mine backlog", "what contradictions", "what have i been thinking", "clean up my tags"}, string(IntentLibrarian), config.AgentIDLibrarian, 0.85, false},
 
 	// Collaboration (pair programming, differential analysis)
 	{[]string{"collaborate", "pair program", "differential", "a/b test", "compare approaches", "work together", "collaborative"}, string(IntentCollaborate), config.AgentIDAnalyst, 0.8, true},
@@ -2381,7 +2400,12 @@ func hasKeywordMatch(input string) bool {
 		// Schedule
 		"remind", "alarm", "timer",
 		// Plan
-		"plan", "design", "architect",
+		"plan", "design", "break down", "decompose",
+		// Plan 2: knowledge-work intents
+		"write an essay", "write a brief", "long-form", "long form", "write doc", "draft a", "draft an",
+		"design system", "tech stack", "trade-off", "tradeoff", "should we use", "evaluate technology", "compare technologies",
+		"stress-test", "stress test", "steelman", "what's wrong with", "challenge this",
+		"review memory", "memory review", "clean up tags", "mine backlog",
 		// Research/Analysis
 		"research", "analyze", "explain",
 		// Search

@@ -207,7 +207,10 @@ func (t IntentType) Keywords() []string {
 	case IntentSchedule:
 		return []string{"remind", string(IntentSchedule), "alarm", "at "}
 	case IntentPlan:
-		return []string{string(IntentPlan), KeywordDesign, "architect", "how should i"}
+		// Note: "architect" was removed from this list when IntentArchitect
+		// became its own intent (Plan 2). Pure planning requests still hit
+		// "plan" / "design" / "how should i".
+		return []string{string(IntentPlan), KeywordDesign, "how should i", "break down", "decompose"}
 	case IntentAnalyze, IntentSearch:
 		return []string{"research", string(IntentAnalyze), KeywordExplain, "search"}
 	case IntentResearch:

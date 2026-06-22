@@ -21,6 +21,12 @@ const (
 	AgentIDScheduler  = "scheduler"
 	AgentIDChat       = "chat"
 	AgentIDResearcher = "researcher"
+
+	// Knowledge-work specialists (Plan 2: Agent Roster Extension).
+	AgentIDWriter    = "writer"
+	AgentIDArchitect = "architect"
+	AgentIDSkeptic   = "skeptic"
+	AgentIDLibrarian = "librarian"
 )
 
 // Agent role constants used for role validation and assignment.

@@ -567,6 +567,117 @@ func TestKeywordClassifier_ResearchRoutesToResearcher(t *testing.T) {
 	}
 }
 
+// TestKeywordClassifier_NewRosterIntents (Plan 2) verifies that trigger
+// phrases for the four new knowledge-work intents route to their specialist
+// agents rather than being captured by older patterns (notably
+// IntentPlan/"architect" used to swallow design requests).
+func TestKeywordClassifier_NewRosterIntents(t *testing.T) {
+	c := &KeywordClassifier{}
+	ctx := context.Background()
+
+	cases := []struct {
+		name      string
+		input     string
+		wantType  string
+		wantAgent string
+	}{
+		{
+			name:      "write essay → writer",
+			input:     "write an essay about distributed systems",
+			wantType:  string(IntentWrite),
+			wantAgent: config.AgentIDWriter,
+		},
+		{
+			name:      "draft a brief → writer",
+			input:     "draft a brief on the Q3 launch",
+			wantType:  string(IntentWrite),
+			wantAgent: config.AgentIDWriter,
+		},
+		{
+			name:      "design system → architect (not planner)",
+			input:     "design a system for real-time collaboration",
+			wantType:  string(IntentArchitect),
+			wantAgent: config.AgentIDArchitect,
+		},
+		{
+			name:      "tech stack tradeoff → architect",
+			input:     "evaluate the tech stack trade-off between Postgres and DynamoDB",
+			wantType:  string(IntentArchitect),
+			wantAgent: config.AgentIDArchitect,
+		},
+		{
+			name:      "stress-test claim → skeptic",
+			input:     "stress-test my claim that the cache layer is unnecessary",
+			wantType:  string(IntentSkeptic),
+			wantAgent: config.AgentIDSkeptic,
+		},
+		{
+			name:      "what's wrong with → skeptic",
+			input:     "what's wrong with my reasoning about the auth flow?",
+			wantType:  string(IntentSkeptic),
+			wantAgent: config.AgentIDSkeptic,
+		},
+		{
+			name:      "review memory → librarian",
+			input:     "review my memory and surface contradictions",
+			wantType:  string(IntentLibrarian),
+			wantAgent: config.AgentIDLibrarian,
+		},
+		{
+			name:      "clean up tags → librarian",
+			input:     "clean up tags on my epistemic memory",
+			wantType:  string(IntentLibrarian),
+			wantAgent: config.AgentIDLibrarian,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			intents := c.ClassifyAll(ctx, tc.input, nil)
+			if len(intents) == 0 {
+				t.Fatalf("no intents returned for %q", tc.input)
+			}
+			// ClassifyAll returns one match per pattern; the order is
+			// non-deterministic. Pick the highest-confidence intent to
+			// match what a real dispatcher would choose after ranking.
+			top := intents[0]
+			for _, in := range intents[1:] {
+				if in.Confidence > top.Confidence {
+					top = in
+				}
+			}
+			if top.Type != tc.wantType {
+				t.Errorf("ClassifyAll(%q) best intent = %q (conf %f), want %q\nall matches: %+v",
+					tc.input, top.Type, top.Confidence, tc.wantType, intents)
+			}
+			if top.AgentType != tc.wantAgent {
+				t.Errorf("ClassifyAll(%q) best agent = %q, want %q",
+					tc.input, top.AgentType, tc.wantAgent)
+			}
+		})
+	}
+}
+
+// TestKeywordClassifier_PlanNoLongerCapturesArchitect (Plan 2) verifies the
+// specific regression: a request that says "architect" without any of the
+// longer architect-intent compound phrases should not be misrouted to the
+// planner. It should hit IntentArchitect (bare-keyword match) or remain
+// unmatched — but never planner.
+func TestKeywordClassifier_PlanNoLongerCapturesArchitect(t *testing.T) {
+	c := &KeywordClassifier{}
+	ctx := context.Background()
+
+	// Input chosen to contain "architect" but none of the longer
+	// IntentArchitect compound phrases (so the test is robust to the
+	// classifier's best-score-wins ranking).
+	input := "architect a migration path"
+	intents := c.ClassifyAll(ctx, input, nil)
+	for _, in := range intents {
+		if in.Type == string(IntentPlan) {
+			t.Errorf("input %q matched IntentPlan; 'architect' should no longer route to planner. intents: %+v", input, intents)
+		}
+	}
+}
+
 func TestRouteToAgentUsesReportRouter(t *testing.T) {
 	// Verify that RouteToAgent returns a response that incorporates
 	// report routing decisions, not just StripReport of the raw response
