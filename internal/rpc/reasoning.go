@@ -74,6 +74,7 @@ func (h *ReasoningHandler) RegisterReasoningMethods(server *Server) {
 	server.RegisterHandler("reasoning.set_model_default", h.handleSetModelDefault)
 	server.RegisterHandler("reasoning.session_set", h.handleSessionSet)
 	server.RegisterHandler("reasoning.session_clear", h.handleSessionClear)
+	server.RegisterHandler("reasoning.list_agents", h.handleListAgents)
 }
 
 // handleListTiers returns the list of recognized effort tiers with their
@@ -527,6 +528,32 @@ func (h *ReasoningHandler) handleSessionClear(_ context.Context, params json.Raw
 		"session_id": req.SessionID,
 		"agent_id":   req.AgentID,
 	}, nil
+}
+
+// handleListAgents returns reasoning configs for all registered agents.
+func (h *ReasoningHandler) handleListAgents(_ context.Context, _ json.RawMessage) (any, error) {
+	if h.registry == nil {
+		return nil, fmt.Errorf("agent registry not available")
+	}
+	specs := h.registry.ListSpecs()
+	agents := make([]reasoningGetResult, 0, len(specs))
+	for _, spec := range specs {
+		result := reasoningGetResult{
+			AgentID: spec.ID,
+		}
+		if spec.Constraints.Reasoning != nil {
+			result.HasReasoning = true
+			result.Config = spec.Constraints.Reasoning
+			result.EffectiveEffort = spec.Constraints.Reasoning.Effort
+		}
+		if loop, err := h.registry.Get(spec.ID); err == nil && loop != nil {
+			if effort := loop.CurrentReasoningEffort(); effort != "" {
+				result.EffectiveEffort = effort
+			}
+		}
+		agents = append(agents, result)
+	}
+	return agents, nil
 }
 
 // saveConfigAtomic writes a *config.Config to path atomically (write .tmp,

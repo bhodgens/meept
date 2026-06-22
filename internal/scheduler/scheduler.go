@@ -11,8 +11,29 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/pkg/models"
+	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 )
+
+func generateUUID() string {
+	return uuid.New().String()
+}
+
+// NotificationEmitter is a minimal interface for publishing notification events.
+// Defined here to avoid an import cycle (internal/comm/http depends on packages
+// that transitively depend on internal/scheduler).
+type NotificationEmitter interface {
+	Publish(event *NotificationEvent)
+}
+
+// NotificationEvent represents a notification event sent to HTTP clients.
+type NotificationEvent struct {
+	ID        string
+	Timestamp string
+	Type      string
+	Title     string
+	Message   string
+}
 
 // Scheduler wraps robfig/cron with job management and persistence.
 //
@@ -32,6 +53,9 @@ type Scheduler struct {
 	runningJobs map[string]bool         // job ID -> is running
 	running     atomic.Bool
 	location    *time.Location
+
+	// Notification emitter for HTTP clients (e.g., menubar app).
+	notifEmitter NotificationEmitter
 
 	// RunNow tracking
 	runNowCtx    context.Context
@@ -63,6 +87,15 @@ func WithLogger(logger *slog.Logger) Option {
 func WithJobDependencies(deps *JobDependencies) Option {
 	return func(s *Scheduler) error {
 		s.jobDeps = deps
+		return nil
+	}
+}
+
+// WithNotificationEmitter sets the notification emitter for sending
+// job completion events to HTTP clients.
+func WithNotificationEmitter(emitter NotificationEmitter) Option {
+	return func(s *Scheduler) error {
+		s.notifEmitter = emitter
 		return nil
 	}
 }
@@ -559,6 +592,17 @@ func (s *Scheduler) executeJob(ctx context.Context, job Job) {
 
 		msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler."+jobID, result)
 		s.bus.Publish("scheduler.job.completed", msg)
+	}
+
+	// Notify HTTP clients on successful job completion
+	if s.notifEmitter != nil && err == nil {
+		s.notifEmitter.Publish(&NotificationEvent{
+			ID:        generateUUID(),
+			Timestamp: time.Now().Format(time.RFC3339),
+			Type:      "job_completed",
+			Title:     "Job completed",
+			Message:   fmt.Sprintf("Job %s completed", jobID),
+		})
 	}
 
 	if err != nil {

@@ -986,6 +986,41 @@ func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
+// GetDesignatedSessionIDs returns session IDs that have an active designation
+// (status is not "none"), ordered by priority (urgent first).
+func (s *SQLiteStore) GetDesignatedSessionIDs() ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT id FROM sessions
+		WHERE designation_status != 'none'
+		ORDER BY
+			CASE designation_priority
+				WHEN 'urgent' THEN 0
+				WHEN 'high' THEN 1
+				WHEN 'normal' THEN 2
+				WHEN 'low' THEN 3
+				ELSE 4
+			END
+	`) //nolint:mutexio // mutex serializes sqlite connection access
+	if err != nil {
+		return nil, fmt.Errorf("failed to query designated sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			s.logger.Error("Failed to scan designated session ID", "error", err)
+			continue
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 //nolint:unparam // column is intentionally generic for reuse across different query types
 func (s *SQLiteStore) getByColumnUnsafe(column, value string) *Session {
 	// #nosec G201 -- column name is hardcoded at call sites, not user input

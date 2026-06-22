@@ -459,6 +459,37 @@ func (s *MemoryStore) UpdateDesignation(sessionID string, status DesignationStat
 	return nil
 }
 
+// GetDesignatedSessionIDs returns session IDs with active designation, ordered by priority.
+func (s *MemoryStore) GetDesignatedSessionIDs() ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	type sessionPriority struct {
+		id     string
+		order int
+	}
+	prios := make([]*sessionPriority, 0)
+	for _, sess := range s.sessions {
+		if sess.HasDesignation() {
+			var order int
+			switch sess.Designation.Priority {
+			case "urgent": order = 0
+			case "high": order = 1
+			case "normal": order = 2
+			case "low": order = 3
+			default: order = 4
+			}
+			prios = append(prios, &sessionPriority{id: sess.ID, order: order})
+		}
+	}
+	sort.Slice(prios, func(i, j int) bool { return prios[i].order < prios[j].order })
+	ids := make([]string, len(prios))
+	for i, p := range prios {
+		ids[i] = p.id
+	}
+	return ids, nil
+}
+
 // ClearDesignation clears the session's designation.
 func (s *MemoryStore) ClearDesignation(sessionID string) error {
 	s.mu.Lock()

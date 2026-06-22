@@ -32,6 +32,10 @@ type ChatHandler struct {
 	stepStore    *task.StepStore // Optional: step store for fetching step summaries
 	taskStore    *task.Store     // Optional: task store for looking up linked sessions
 
+	// NotificationPublisher for desktop/notification-system events (Plan 4.3).
+	// When nil, task completion events still flow via the message bus.
+	notificationPublisher NotificationPublisher
+
 	// Budget tracking for async dispatch pre-check (Issue 0039)
 	budget *llm.Budget
 
@@ -906,6 +910,21 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 	}
 	reply := h.formatTaskCompletedMessage(payload.Name, steps, payload.ExecutionTime, payload.Result, payload.CompletedJobs, payload.TotalJobs, payload.TokenUsage)
 
+	// Publish success notification (Plan 4.3)
+	h.publishNotification("success", "Task Complete",
+		fmt.Sprintf("%s completed (%d/%d steps)", payload.Name, payload.CompletedJobs, payload.TotalJobs))
+
+	// Broadcast session-scoped notifications to linked sessions
+	for _, sessionID := range payload.LinkedSessions {
+		if h.notificationPublisher != nil {
+			h.notificationPublisher.PublishSessionNotification(
+				sessionID, "task-orchestrator", "success",
+				"Task Complete",
+				fmt.Sprintf("%s completed (%d/%d steps)", payload.Name, payload.CompletedJobs, payload.TotalJobs),
+			)
+		}
+	}
+
 	response := ChatResponse{
 		Reply: reply,
 	}
@@ -992,6 +1011,21 @@ func (h *ChatHandler) handleTaskFailed(msg *models.BusMessage) {
 
 	// Build human-readable error message
 	reply := h.formatTaskFailedMessage(payload.Name, payload.Error, payload.FailedStep, payload.FailedJobs, payload.CompletedJobs, payload.TotalJobs)
+
+	// Publish failure notification (Plan 4.3)
+	h.publishNotification("error", "Task Failed",
+		fmt.Sprintf("%s failed: %s (%d/%d steps completed)", payload.Name, payload.Error, payload.CompletedJobs, payload.TotalJobs))
+
+	// Broadcast session-scoped notifications to linked sessions
+	for _, sessionID := range payload.LinkedSessions {
+		if h.notificationPublisher != nil {
+			h.notificationPublisher.PublishSessionNotification(
+				sessionID, "task-orchestrator", "error",
+				"Task Failed",
+				fmt.Sprintf("%s failed: %s (%d/%d steps completed)", payload.Name, payload.Error, payload.CompletedJobs, payload.TotalJobs),
+			)
+		}
+	}
 
 	response := ChatResponse{
 		Reply: reply,
@@ -1180,6 +1214,19 @@ func (h *ChatHandler) SetBudget(budget *llm.Budget) {
 // instead of returning immediately.
 func (h *ChatHandler) SetSyncMode(enabled bool) {
 	h.syncMode = enabled
+}
+
+// SetNotificationPublisher provides the ChatHandler with a notification publisher
+// so it can emit task completion/failure events to the notification system.
+func (h *ChatHandler) SetNotificationPublisher(p NotificationPublisher) {
+	h.notificationPublisher = p
+}
+
+// publishNotification sends a session notification through the publisher if available.
+func (h *ChatHandler) publishNotification(typ, title, message string) {
+	if h.notificationPublisher != nil {
+		h.notificationPublisher.PublishSessionNotification("", "chat-handler", typ, title, message)
+	}
 }
 
 // waitForTaskCompletion waits for a task to reach a terminal state

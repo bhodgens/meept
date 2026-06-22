@@ -15,10 +15,12 @@ import (
 type NotificationType string
 
 const (
-	NotificationTypeInfo    NotificationType = "info"
-	NotificationTypeSuccess NotificationType = "success"
-	NotificationTypeWarning NotificationType = "warning"
-	NotificationTypeError   NotificationType = "error"
+	NotificationTypeInfo         NotificationType = "info"
+	NotificationTypeSuccess      NotificationType = "success"
+	NotificationTypeWarning      NotificationType = "warning"
+	NotificationTypeError        NotificationType = "error"
+	NotificationTypeTaskCompleted NotificationType = "task_completed"
+	NotificationTypeJobCompleted  NotificationType = "job_completed"
 )
 
 // NotificationEvent represents a notification event sent to clients.

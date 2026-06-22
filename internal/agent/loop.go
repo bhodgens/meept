@@ -1448,6 +1448,15 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		// Add error message to conversation
 		errorMsg := "I encountered an error during processing. Please try again."
 		conv.AddAssistantMessage(errorMsg)
+
+		// Publish failure notification (Plan 4.3)
+		if l.notificationPublisher != nil {
+			l.notificationPublisher.PublishSessionNotification(
+				conversationID, l.agentID, "error",
+				"Agent Error", fmt.Sprintf("Processing failed: %s", err),
+			)
+		}
+
 		return errorMsg, err
 	}
 
@@ -1462,6 +1471,14 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 			)
 			finalResponse = scannedText
 		}
+	}
+
+	// Publish success notification (Plan 4.3)
+	if l.notificationPublisher != nil {
+		l.notificationPublisher.PublishSessionNotification(
+			conversationID, l.agentID, "success",
+			"Agent Response Complete", "The agent has finished processing your request.",
+		)
 	}
 
 	// Trigger learning pipeline if available and response was successful.
@@ -2795,6 +2812,12 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 		}
 		// Plan 4.2: Clear session designation on task completion
 		l.clearSessionDesignation()
+
+		// Notify on task completion
+		if l.notificationPublisher != nil {
+			l.notificationPublisher.PublishTaskNotification(taskID, l.agentID, "success",
+				"Task Completed", fmt.Sprintf("Task %s finished", taskID))
+		}
 	}()
 
 	// Plan 4.2: Set designation to bot_thinking at start of processing
@@ -4204,9 +4227,18 @@ func (l *AgentLoop) updateSessionDesignation(status session.DesignationStatus, r
 }
 
 // clearSessionDesignation clears the session's designation (Plan 4.2).
+// Also publishes a "bot_finished" notification when the bot completes its wait.
 func (l *AgentLoop) clearSessionDesignation() {
 	if l.sessionStore == nil || l.currentSessionID == "" {
 		return
 	}
 	_ = l.sessionStore.ClearDesignation(l.currentSessionID)
+
+	// Publish bot finished notification to let clients know the bot is done (Plan 4.3)
+	if l.notificationPublisher != nil {
+		l.notificationPublisher.PublishSessionNotification(
+			l.currentSessionID, l.agentID, "success",
+			"Bot Finished", "The bot has finished processing. You can now interact again.",
+		)
+	}
 }

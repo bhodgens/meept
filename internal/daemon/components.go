@@ -25,6 +25,7 @@ import (
 	"github.com/caimlas/meept/internal/code/ast"
 	"github.com/caimlas/meept/internal/code/lsp"
 	codetools "github.com/caimlas/meept/internal/code/tools"
+	"github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/comm/telegram"
 	"github.com/caimlas/meept/internal/comm/web"
 	"github.com/caimlas/meept/internal/config"
@@ -1450,6 +1451,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			c.ChatHandler.SetBudget(budgetTracker)
 		}
 
+		// Wire notification publisher for task completion/failure events (Plan 4.3)
+		if c.NotificationEmitter != nil {
+			c.ChatHandler.SetNotificationPublisher(&notificationAdapter{emitter: c.NotificationEmitter})
+		}
+
 		logger.Info("ChatHandler initialized with dispatcher")
 
 		// Subscribe to dispatcher.stats requests
@@ -1657,6 +1663,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if budgetTracker != nil {
 			c.ChatHandler.SetBudget(budgetTracker)
 		}
+
+		// Wire notification publisher for task completion/failure events (Plan 4.3)
+		if c.NotificationEmitter != nil {
+			c.ChatHandler.SetNotificationPublisher(&notificationAdapter{emitter: c.NotificationEmitter})
+		}
 	}
 
 	// Initialize RepoMap generator for context enrichment
@@ -1722,11 +1733,19 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 	// Create scheduler with job dependencies for extended job types
 	if cfg.Scheduler.Enabled {
-		schedOpts := make([]scheduler.Option, 0, 3)
+		schedOpts := make([]scheduler.Option, 0, 4)
 		schedOpts = append(schedOpts,
 			scheduler.WithDataDir(cfg.Daemon.DataDir),
 			scheduler.WithLogger(logger.With("component", "scheduler")),
 		)
+
+		// Wire the scheduler's job completion notifications to the daemon's
+		// notification emitter so HTTP clients (menubar, Flutter) receive events.
+		if c.NotificationEmitter != nil {
+			schedOpts = append(schedOpts, scheduler.WithNotificationEmitter(&schedulerNotifAdapter{
+				emitter: c.NotificationEmitter,
+			}))
+		}
 
 		// Build job dependencies for optimization, security, and learning jobs
 		jobDeps := &scheduler.JobDependencies{
@@ -4733,6 +4752,37 @@ func (a *notificationAdapter) PublishSessionNotification(sessionID, agentID stri
 		nType = NotificationTypeInfo
 	}
 	a.emitter.PublishNotification(sessionID, agentID, nType, title, message)
+}
+
+// schedulerNotifAdapter wraps daemon EventEmitter to implement scheduler.NotificationEmitter.
+type schedulerNotifAdapter struct {
+	emitter *EventEmitter
+}
+
+func (a *schedulerNotifAdapter) Publish(event *scheduler.NotificationEvent) {
+	// Convert string type to NotificationType
+	var nType NotificationType
+	switch event.Type {
+	case "success":
+		nType = NotificationTypeSuccess
+	case "warning":
+		nType = NotificationTypeWarning
+	case "error":
+		nType = NotificationTypeError
+	case "task_completed":
+		nType = NotificationTypeSuccess
+	case "job_completed":
+		nType = NotificationTypeSuccess
+	default:
+		nType = NotificationTypeInfo
+	}
+	a.emitter.Publish(&http.NotificationEvent{
+		ID:        event.ID,
+		Timestamp: event.Timestamp,
+		Type:      http.NotificationType(nType),
+		Title:     event.Title,
+		Message:   event.Message,
+	})
 }
 
 // discoverProjectFiles walks the base directory and returns a list of tracked source files.
