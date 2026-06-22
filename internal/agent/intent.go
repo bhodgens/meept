@@ -47,6 +47,12 @@ const (
 
 	// Clarification (inline)
 	IntentClarify IntentType = "clarify"
+
+	// Instruction (inline) — user-instructions parsing per Phase 1 spec
+	// (§7.5). Triggered by phrases like "always", "every day at",
+	// "remember to". Routes to the instruction parser/handler rather than
+	// the normal executor path.
+	IntentInstruction IntentType = "instruction"
 )
 
 // IntentCategory groups intents by routing behavior.
@@ -61,7 +67,7 @@ const (
 func (t IntentType) Category() IntentCategory {
 	switch t {
 	case IntentChat, IntentReport, IntentRecall, IntentPlatform, IntentStatus,
-		IntentAnalyze, IntentSearch, IntentResearch, IntentClarify:
+		IntentAnalyze, IntentSearch, IntentResearch, IntentClarify, IntentInstruction:
 		return CategoryInline
 	case IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit, IntentSchedule, IntentPair, IntentCollaborate:
 		return CategoryDefer
@@ -79,7 +85,7 @@ func (t IntentType) Category() IntentCategory {
 // DefaultAgent returns the default agent for an intent.
 func (t IntentType) DefaultAgent() string {
 	switch t {
-	case IntentChat, IntentReport, IntentRecall, IntentPlatform, IntentStatus:
+	case IntentChat, IntentReport, IntentRecall, IntentPlatform, IntentStatus, IntentInstruction:
 		return config.AgentIDChat
 	case IntentCode, IntentReview:
 		return config.AgentIDCoder
@@ -153,7 +159,8 @@ func IsValidIntentType(s string) bool {
 	case IntentChat, IntentReport, IntentRecall, IntentPlatform, IntentStatus,
 		IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit,
 		IntentSchedule, IntentAnalyze, IntentSearch, IntentResearch,
-		IntentSecurity, IntentToolUse, IntentSkill, IntentPair, IntentCollaborate, IntentCompound, IntentClarify:
+		IntentSecurity, IntentToolUse, IntentSkill, IntentPair, IntentCollaborate, IntentCompound, IntentClarify,
+		IntentInstruction:
 		return true
 	}
 	return false
@@ -202,6 +209,12 @@ func (t IntentType) Keywords() []string {
 		return []string{"and also", "as well as", "plus"}
 	case IntentClarify:
 		return []string{"clarify", "unsure", "ambiguous"}
+	case IntentInstruction:
+		// Trigger phrases for user-instructions parsing (Phase 1 spec §3).
+		// "always" is the canonical always-on trigger word; the remaining
+		// phrases cover scheduled instructions ("every day at", "remind me to")
+		// and sticky preferences ("from now on", "remember to").
+		return []string{"always", "every day at", "remind me to", "from now on", "remember to"}
 	default:
 		return nil
 	}

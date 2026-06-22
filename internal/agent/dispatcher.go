@@ -165,6 +165,22 @@ type DispatchResult struct {
 	// them to the specialist agent's RunOnceWithParts. Text-only requests leave
 	// this nil, preserving the existing RunOnce path.
 	Parts []llm.ContentPart `json:"-"`
+
+	// SuggestedReasoningTier is populated by the intent-classifier hook per
+	// LLM Reasoning Effort spec §7.5. It is ONLY set when (a) no explicit
+	// user directive was parsed AND (b) the intent type has a defined
+	// mapping in suggestReasoningForIntent. Consumers should treat an empty
+	// value as "no suggestion". The agent's own AllowSelfModulation /
+	// MinEffort / MaxEffort bounds gate whether the suggestion is actually
+	// applied at the AgentLoop layer.
+	SuggestedReasoningTier string `json:"-"`
+
+	// ReasoningOverride carries the parsed user reasoning directive (if any)
+	// so downstream code can forward it to the agent loop. When non-nil, it
+	// takes precedence over SuggestedReasoningTier per spec §7.5. Tagged
+	// json:"-" because it is operational metadata not meant for
+	// user-facing JSON serialization.
+	ReasoningOverride *llm.ReasoningConfig `json:"-"`
 }
 
 // Dispatcher handles intake classification and routing of requests.
@@ -190,6 +206,14 @@ type Dispatcher struct {
 	modelParser       *ModelReassignmentParser
 	planManager       *plan.PlanManager
 	metricsStore      *metrics.Store
+
+	// threadRouter handles thread-aware routing of conversations per
+	// Thread-Based Context Partitioning spec. When nil, the dispatcher
+	// operates in legacy mode (single conversation per session). Wired via
+	// SetThreadRouter by daemon composition; not exposed in
+	// DispatcherConfig to avoid forcing all callers to construct a
+	// ThreadRouter.
+	threadRouter *ThreadRouter
 
 	// lastClassifierMethod tracks the most recent classifier that succeeded,
 	// for audit logging. Updated by recordClassificationMethod under stats.mu.
@@ -335,6 +359,43 @@ func (d *Dispatcher) Stop() {
 		d.indexCancel()
 	}
 	d.indexWG.Wait()
+}
+
+// SetThreadRouter wires a ThreadRouter onto the dispatcher, enabling
+// thread-aware routing. Pass nil to disable thread routing (legacy mode).
+// Nil guard at top of setter prevents typed-nil interface panics per
+// CLAUDE.md Setter methods rule.
+func (d *Dispatcher) SetThreadRouter(tr *ThreadRouter) {
+	if tr == nil {
+		return
+	}
+	d.threadRouter = tr
+}
+
+// suggestReasoningForIntent returns the suggested reasoning tier for a given
+// intent type per LLM Reasoning Effort spec §7.5. Returns empty string when
+// the intent has no defined mapping (meaning "no suggestion"), so callers
+// can distinguish "no suggestion" from a valid tier value.
+//
+// The suggestion is ONLY applied when:
+//   - no explicit user reasoning directive was parsed, AND
+//   - the agent's AllowSelfModulation flag is true (enforced at AgentLoop).
+//
+// Callers should stash the return value on DispatchResult.SuggestedReasoningTier
+// for downstream consumers.
+func suggestReasoningForIntent(intentType string) string {
+	switch IntentType(intentType) {
+	case IntentPlan:
+		return llm.ReasoningXHigh
+	case IntentDebug, IntentResearch, IntentAnalyze:
+		return llm.ReasoningHigh
+	case IntentCode:
+		return llm.ReasoningMedium
+	case IntentChat:
+		return llm.ReasoningLow
+	default:
+		return ""
+	}
 }
 
 // ClassifyAndRoute is the main entry point for the dispatcher.
@@ -1192,11 +1253,28 @@ func (d *Dispatcher) classifyMultiIntent(ctx context.Context, input string, memC
 // the message into the queue (steer or follow-up) based on the
 // SteeringHeuristicTable. Otherwise, it runs the agent synchronously.
 func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, conversationID string) (string, error) {
-	if d.registry == nil {
-		return "", fmt.Errorf("no agent registry configured")
-	}
 	if result == nil || result.Intent == nil {
 		return "", fmt.Errorf("dispatch result has no intent to route")
+	}
+
+	// Consult the thread router before any other routing logic so that the
+	// conversation ID is resolved to the active thread's conversation ID
+	// (performing silent migration of legacy sessions if needed). When no
+	// thread router is wired (legacy mode), this block is skipped and the
+	// original conversationID is used as-is.
+	if d.threadRouter != nil {
+		resolved, err := d.threadRouter.GetThreadConversationID(ctx, conversationID, result.Intent.Summary)
+		if err != nil {
+			d.logger.Warn("thread router lookup failed, falling back to conversation ID",
+				"conversation", conversationID,
+				"error", err)
+		} else if resolved != "" {
+			conversationID = resolved
+		}
+	}
+
+	if d.registry == nil {
+		return "", fmt.Errorf("no agent registry configured")
 	}
 
 	// Handle platform introspection directly without LLM
