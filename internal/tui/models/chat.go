@@ -218,6 +218,9 @@ type ChatModel struct {
 	// Text-to-speech state
 	ttsManager *tts.Manager // nil if TTS disabled or unavailable
 	ttsEnabled bool         // true if tts is enabled in config
+
+	// Thread indicator (compact header display, no interactive list at this layer)
+	threadIndicator *threadIndicatorState
 }
 
 // findMatch points to a span within a rendered message.
@@ -422,6 +425,8 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 		findInput:   findInput,
 		findMatches: nil,
 		findCursor:  -1,
+
+		threadIndicator: newThreadIndicatorState(),
 	}
 }
 
@@ -2127,6 +2132,12 @@ func (m *ChatModel) View() string {
 		b.WriteString("\n")
 	}
 
+	// Thread indicator (compact header line; "" when no threads)
+	if tiView := m.threadIndicator.View(); tiView != "" {
+		b.WriteString(tiView)
+		b.WriteString("\n")
+	}
+
 	// Chat history viewport with focus-dependent border
 	viewportBorder := m.unfocusedBorder
 	if m.focused == FocusViewport {
@@ -2154,8 +2165,13 @@ func (m *ChatModel) View() string {
 	}
 	// Account for find bar lines when visible (1 line, 2 with regex error).
 	findLines := m.findBarLines()
-	// viewportContentHeight = height - 2(viewport borders) - copyHintLines - inputLines - 2(input borders) - completionsLines - queueIndicatorLines - findLines - 1(statusbar)
-	viewportContentHeight := max(m.height-copyHintLines-inputLines-completionsLines-queueIndicatorLines-findLines-5, 1)
+	// Account for thread indicator line (shown only when threads exist).
+	threadIndicatorLines := 0
+	if m.threadIndicator.IsActive() {
+		threadIndicatorLines = 1
+	}
+	// viewportContentHeight = height - 2(viewport borders) - copyHintLines - inputLines - 2(input borders) - completionsLines - queueIndicatorLines - findLines - threadIndicatorLines - 1(statusbar)
+	viewportContentHeight := max(m.height-copyHintLines-inputLines-completionsLines-queueIndicatorLines-findLines-threadIndicatorLines-5, 1)
 
 	// Update viewport dimensions BEFORE rendering
 	m.viewport.SetWidth(m.width - 2)
@@ -2304,6 +2320,7 @@ func (m *ChatModel) Reset() {
 	m.conversationID = generateConversationID()
 	m.sessionID = ""
 	m.sessionDescription = ""
+	m.threadIndicator.SetSession(nil)
 	m.textarea.Reset()
 	m.pendingMsgIdx = -1
 	m.selectedMsgIdx = -1
@@ -2325,6 +2342,8 @@ func (m *ChatModel) Reset() {
 func (m *ChatModel) SetSession(session *types.Session) tea.Cmd {
 	// Always close the find bar on any session change (including nil).
 	m.closeFindBar()
+	// Refresh the thread indicator from the new (or nil) session.
+	m.threadIndicator.SetSession(session)
 	if session == nil {
 		m.sessionID = ""
 		m.sessionDescription = ""

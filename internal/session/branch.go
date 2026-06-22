@@ -60,6 +60,11 @@ type NavigationResult struct {
 //  6. Update leaf pointer to target
 //  7. Return NavigationResult
 func (bm *BranchManager) NavigateToBranch(ctx context.Context, sessionID string, targetMessageID int64) (*NavigationResult, error) {
+	// Check if branches are enabled in config
+	if !bm.config.BranchesEnabled {
+		return nil, fmt.Errorf("branches are disabled (enable via session.branches_enabled in config)")
+	}
+
 	// Validate session exists
 	session := bm.store.Get(sessionID)
 	if session == nil {

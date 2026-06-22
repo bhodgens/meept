@@ -19,6 +19,12 @@ Convention:
 
 Package agent provides the agent loop and related components.
 
+Package agent provides HTTP hook support for external integrations.
+
+Package agent provides the reasoning\-effort natural\-language parser.
+
+This file implements ParseReasoningDirective per spec §7 of the LLM Reasoning Effort design. It scans user input for directives that adjust the per\-request reasoning/thinking tier \(e.g. "use high reasoning", "\[/reasoning xhigh\]", "think hard", "use 8000 thinking tokens"\) and returns a ReasoningDirective describing the parsed configuration.
+
 Package agent provides utility functions for the agent package.
 
 Package agent provides the agent loop and related components.
@@ -70,11 +76,16 @@ Package agent provides the agent loop and related components.
   - [func NewAgentLoop\(opts ...LoopOption\) \*AgentLoop](<#NewAgentLoop>)
   - [func \(l \*AgentLoop\) ClearConversation\(id string\)](<#AgentLoop.ClearConversation>)
   - [func \(l \*AgentLoop\) ClearModelOverride\(\)](<#AgentLoop.ClearModelOverride>)
+  - [func \(l \*AgentLoop\) ClearReasoningOverride\(\)](<#AgentLoop.ClearReasoningOverride>)
+  - [func \(l \*AgentLoop\) CompressionPipeline\(\) \*compress.Pipeline](<#AgentLoop.CompressionPipeline>)
+  - [func \(l \*AgentLoop\) CurrentReasoningEffort\(\) string](<#AgentLoop.CurrentReasoningEffort>)
+  - [func \(l \*AgentLoop\) FireHTTPHooks\(ctx context.Context, event string, data map\[string\]interface\{\}\)](<#AgentLoop.FireHTTPHooks>)
   - [func \(l \*AgentLoop\) FirewallStats\(\) map\[string\]any](<#AgentLoop.FirewallStats>)
   - [func \(l \*AgentLoop\) GetConfig\(\) AgentConfig](<#AgentLoop.GetConfig>)
   - [func \(l \*AgentLoop\) GetConversation\(id string\) \*Conversation](<#AgentLoop.GetConversation>)
   - [func \(l \*AgentLoop\) GetModelOverride\(\) string](<#AgentLoop.GetModelOverride>)
   - [func \(l \*AgentLoop\) HandleMessage\(ctx context.Context, message string\) \(string, error\)](<#AgentLoop.HandleMessage>)
+  - [func \(l \*AgentLoop\) HookRegistry\(\) \*HookRegistry](<#AgentLoop.HookRegistry>)
   - [func \(l \*AgentLoop\) Run\(ctx context.Context, messages \<\-chan \*AgentMessage, responses chan\<\- \*AgentResponse\) error](<#AgentLoop.Run>)
   - [func \(l \*AgentLoop\) RunOnce\(ctx context.Context, userMessage, conversationID string\) \(response string, err error\)](<#AgentLoop.RunOnce>)
   - [func \(l \*AgentLoop\) RunOnceWithParts\(ctx context.Context, userMessage string, parts \[\]llm.ContentPart, conversationID string\) \(response string, err error\)](<#AgentLoop.RunOnceWithParts>)
@@ -82,13 +93,19 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) RunWithTask\(ctx context.Context, t \*task.Task\) \(string, error\)](<#AgentLoop.RunWithTask>)
   - [func \(l \*AgentLoop\) SetBranchManager\(mgr any\)](<#AgentLoop.SetBranchManager>)
   - [func \(l \*AgentLoop\) SetCapabilityIndex\(ci \*skills.CapabilityIndex\)](<#AgentLoop.SetCapabilityIndex>)
+  - [func \(l \*AgentLoop\) SetCompressionPipeline\(pipeline \*compress.Pipeline\)](<#AgentLoop.SetCompressionPipeline>)
   - [func \(l \*AgentLoop\) SetConfig\(config AgentConfig\)](<#AgentLoop.SetConfig>)
   - [func \(l \*AgentLoop\) SetContextFirewallConfig\(fw config.LLMContextFirewallConfig\)](<#AgentLoop.SetContextFirewallConfig>)
+  - [func \(l \*AgentLoop\) SetEpistemicHook\(hook \*EpistemicHook\)](<#AgentLoop.SetEpistemicHook>)
+  - [func \(l \*AgentLoop\) SetFileWatcher\(fw \*FileWatcherHook\)](<#AgentLoop.SetFileWatcher>)
+  - [func \(l \*AgentLoop\) SetHTTPHooks\(executor \*HookBatchExecutor\)](<#AgentLoop.SetHTTPHooks>)
   - [func \(l \*AgentLoop\) SetMCPServerLister\(lister func\(\) \[\]MCPServerInfo\)](<#AgentLoop.SetMCPServerLister>)
   - [func \(l \*AgentLoop\) SetMemvidClient\(client \*memvid.Client\)](<#AgentLoop.SetMemvidClient>)
   - [func \(l \*AgentLoop\) SetModelOverride\(modelRef string\)](<#AgentLoop.SetModelOverride>)
   - [func \(l \*AgentLoop\) SetNotificationPublisher\(publisher NotificationPublisher\)](<#AgentLoop.SetNotificationPublisher>)
   - [func \(l \*AgentLoop\) SetPrefetchCallback\(callback func\(query string, maxItems int\)\)](<#AgentLoop.SetPrefetchCallback>)
+  - [func \(l \*AgentLoop\) SetReasoningForNextTurn\(effort string\)](<#AgentLoop.SetReasoningForNextTurn>)
+  - [func \(l \*AgentLoop\) SetReasoningOverride\(rc \*llm.ReasoningConfig\)](<#AgentLoop.SetReasoningOverride>)
   - [func \(l \*AgentLoop\) SetRepoMapGenerator\(gen \*repomap.RepoMapGenerator\)](<#AgentLoop.SetRepoMapGenerator>)
   - [func \(l \*AgentLoop\) SetResponseAnalyzer\(ra \*metrics.ResponseAnalyzer\)](<#AgentLoop.SetResponseAnalyzer>)
   - [func \(l \*AgentLoop\) SetSessionStore\(store any, sessionCfg any\)](<#AgentLoop.SetSessionStore>)
@@ -133,26 +150,13 @@ Package agent provides the agent loop and related components.
 - [type AgentResponse](<#AgentResponse>)
 - [type AgentRole](<#AgentRole>)
 - [type AgentSpec](<#AgentSpec>)
-  - [func AnalystAgentSpec\(\) \*AgentSpec](<#AnalystAgentSpec>)
-  - [func AnalystReviewerSpec\(\) \*AgentSpec](<#AnalystReviewerSpec>)
-  - [func ChatAgentSpec\(\) \*AgentSpec](<#ChatAgentSpec>)
-  - [func CodeReviewerSpec\(\) \*AgentSpec](<#CodeReviewerSpec>)
-  - [func CoderAgentSpec\(\) \*AgentSpec](<#CoderAgentSpec>)
-  - [func CommitterAgentSpec\(\) \*AgentSpec](<#CommitterAgentSpec>)
-  - [func DebugReviewerSpec\(\) \*AgentSpec](<#DebugReviewerSpec>)
-  - [func DebuggerAgentSpec\(\) \*AgentSpec](<#DebuggerAgentSpec>)
-  - [func DefaultSpecs\(\) \[\]\*AgentSpec](<#DefaultSpecs>)
-  - [func DispatcherSpec\(\) \*AgentSpec](<#DispatcherSpec>)
-  - [func PlannerAgentSpec\(\) \*AgentSpec](<#PlannerAgentSpec>)
-  - [func PlannerReviewerSpec\(\) \*AgentSpec](<#PlannerReviewerSpec>)
-  - [func SchedulerAgentSpec\(\) \*AgentSpec](<#SchedulerAgentSpec>)
-  - [func TestReviewerSpec\(\) \*AgentSpec](<#TestReviewerSpec>)
   - [func \(s \*AgentSpec\) AllTools\(\) \[\]string](<#AgentSpec.AllTools>)
   - [func \(s \*AgentSpec\) GetSkillForTrigger\(keyword string\) string](<#AgentSpec.GetSkillForTrigger>)
   - [func \(s \*AgentSpec\) HasSkill\(skillName string\) bool](<#AgentSpec.HasSkill>)
   - [func \(s \*AgentSpec\) HasTool\(tool string\) bool](<#AgentSpec.HasTool>)
 - [type AgentStartData](<#AgentStartData>)
 - [type AggregatedTaskReport](<#AggregatedTaskReport>)
+- [type AmbientExtractorInterface](<#AmbientExtractorInterface>)
 - [type AmendmentSubmitter](<#AmendmentSubmitter>)
 - [type ArtifactManager](<#ArtifactManager>)
   - [func NewArtifactManager\(logger \*slog.Logger\) \*ArtifactManager](<#NewArtifactManager>)
@@ -228,6 +232,7 @@ Package agent provides the agent loop and related components.
   - [func \(h \*ChatHandler\) SetBudget\(budget \*llm.Budget\)](<#ChatHandler.SetBudget>)
   - [func \(h \*ChatHandler\) SetCollaborationEngine\(engine \*CollaborationEngine\)](<#ChatHandler.SetCollaborationEngine>)
   - [func \(h \*ChatHandler\) SetMetricsStore\(store \*metrics.Store\)](<#ChatHandler.SetMetricsStore>)
+  - [func \(h \*ChatHandler\) SetNotificationPublisher\(p NotificationPublisher\)](<#ChatHandler.SetNotificationPublisher>)
   - [func \(h \*ChatHandler\) SetStepStore\(store \*task.StepStore\)](<#ChatHandler.SetStepStore>)
   - [func \(h \*ChatHandler\) SetSyncMode\(enabled bool\)](<#ChatHandler.SetSyncMode>)
   - [func \(h \*ChatHandler\) SetTaskStore\(store \*task.Store\)](<#ChatHandler.SetTaskStore>)
@@ -353,9 +358,12 @@ Package agent provides the agent loop and related components.
   - [func \(d \*Dispatcher\) GetStats\(\) DispatcherStats](<#Dispatcher.GetStats>)
   - [func \(d \*Dispatcher\) GetTask\(ctx context.Context, taskID string\) \(\*task.Task, error\)](<#Dispatcher.GetTask>)
   - [func \(d \*Dispatcher\) ProcessAmendment\(ctx context.Context, requestID string\) \(\*task.AmendmentReply, error\)](<#Dispatcher.ProcessAmendment>)
+  - [func \(d \*Dispatcher\) RecordDispatch\(sessionID, handlerCase, inputSummary string, result \*DispatchResult, hasParts bool, dispatchErr error\)](<#Dispatcher.RecordDispatch>)
   - [func \(d \*Dispatcher\) ResumeAfterClarification\(ctx context.Context, originalInput, userResponse, sessionID string\) \(\*DispatchResult, error\)](<#Dispatcher.ResumeAfterClarification>)
   - [func \(d \*Dispatcher\) RouteToAgent\(ctx context.Context, result \*DispatchResult, conversationID string\) \(string, error\)](<#Dispatcher.RouteToAgent>)
   - [func \(d \*Dispatcher\) SetCapabilityMatcher\(matcher \*CapabilityMatcher\)](<#Dispatcher.SetCapabilityMatcher>)
+  - [func \(d \*Dispatcher\) SetMetricsStore\(store \*metrics.Store\)](<#Dispatcher.SetMetricsStore>)
+  - [func \(d \*Dispatcher\) SetThreadRouter\(tr \*ThreadRouter\)](<#Dispatcher.SetThreadRouter>)
   - [func \(d \*Dispatcher\) ShouldDispatchAsync\(result \*DispatchResult\) bool](<#Dispatcher.ShouldDispatchAsync>)
   - [func \(d \*Dispatcher\) ShouldRouteToCollaborate\(result \*DispatchResult\) bool](<#Dispatcher.ShouldRouteToCollaborate>)
   - [func \(d \*Dispatcher\) ShouldRouteToPair\(result \*DispatchResult\) bool](<#Dispatcher.ShouldRouteToPair>)
@@ -368,6 +376,10 @@ Package agent provides the agent loop and related components.
 - [type DrainMode](<#DrainMode>)
   - [func ParseDrainMode\(s string\) DrainMode](<#ParseDrainMode>)
 - [type EmbeddingClient](<#EmbeddingClient>)
+- [type EpistemicHook](<#EpistemicHook>)
+  - [func NewEpistemicHook\(cfg EpistemicHookConfig\) \*EpistemicHook](<#NewEpistemicHook>)
+  - [func \(h \*EpistemicHook\) AfterTurn\(ctx context.Context, intent string, messages \[\]string\) \(\[\]string, error\)](<#EpistemicHook.AfterTurn>)
+- [type EpistemicHookConfig](<#EpistemicHookConfig>)
 - [type ErrorBuilder](<#ErrorBuilder>)
   - [func NewErrorBuilder\(toolName string\) \*ErrorBuilder](<#NewErrorBuilder>)
   - [func \(b \*ErrorBuilder\) ExecutionError\(action string, err error\) \*ToolExecutionError](<#ErrorBuilder.ExecutionError>)
@@ -417,12 +429,21 @@ Package agent provides the agent loop and related components.
   - [func WithParallelism\(n int\) ExecutorOption](<#WithParallelism>)
 - [type FailureContext](<#FailureContext>)
 - [type FallbackEntry](<#FallbackEntry>)
+- [type FileWatcherHook](<#FileWatcherHook>)
+  - [func \(fw \*FileWatcherHook\) Start\(\_ context.Context\) error](<#FileWatcherHook.Start>)
+  - [func \(fw \*FileWatcherHook\) Stop\(\)](<#FileWatcherHook.Stop>)
 - [type FilteredToolRegistry](<#FilteredToolRegistry>)
   - [func NewFilteredToolRegistry\(parent ToolRegistry, allowedTools \[\]string\) \*FilteredToolRegistry](<#NewFilteredToolRegistry>)
   - [func \(r \*FilteredToolRegistry\) Get\(name string\) tools.Tool](<#FilteredToolRegistry.Get>)
   - [func \(r \*FilteredToolRegistry\) GetDefinitions\(\) \[\]llm.ToolDefinition](<#FilteredToolRegistry.GetDefinitions>)
   - [func \(r \*FilteredToolRegistry\) List\(\) \[\]tools.Tool](<#FilteredToolRegistry.List>)
 - [type FixAttempt](<#FixAttempt>)
+- [type HTTPHook](<#HTTPHook>)
+  - [func NewHTTPHook\(config HTTPHookConfig, allowedURLs \[\]string, logger \*slog.Logger\) \(\*HTTPHook, error\)](<#NewHTTPHook>)
+  - [func \(h \*HTTPHook\) Execute\(ctx context.Context, payload any\) error](<#HTTPHook.Execute>)
+  - [func \(h \*HTTPHook\) OnSessionEnd\(ctx context.Context, state SessionLifecycleState, result SessionLifecycleResult\) error](<#HTTPHook.OnSessionEnd>)
+  - [func \(h \*HTTPHook\) OnSessionStart\(ctx context.Context, state SessionLifecycleState\) \(ContextTransform, error\)](<#HTTPHook.OnSessionStart>)
+- [type HTTPHookConfig](<#HTTPHookConfig>)
 - [type HallucinationConfig](<#HallucinationConfig>)
   - [func DefaultHallucinationConfig\(\) HallucinationConfig](<#DefaultHallucinationConfig>)
 - [type HallucinationDetector](<#HallucinationDetector>)
@@ -435,6 +456,12 @@ Package agent provides the agent loop and related components.
 - [type HallucinationResult](<#HallucinationResult>)
 - [type HallucinationSensitivity](<#HallucinationSensitivity>)
 - [type HandoffRequest](<#HandoffRequest>)
+- [type HookBatchExecutor](<#HookBatchExecutor>)
+  - [func NewHookBatchExecutor\(\) \*HookBatchExecutor](<#NewHookBatchExecutor>)
+  - [func \(e \*HookBatchExecutor\) AddHook\(h \*HTTPHook\)](<#HookBatchExecutor.AddHook>)
+  - [func \(e \*HookBatchExecutor\) ExecuteAll\(ctx context.Context, payload HookPayload\)](<#HookBatchExecutor.ExecuteAll>)
+- [type HookPayload](<#HookPayload>)
+  - [func NewHookPayload\(event, agentID, sessionID string, data map\[string\]interface\{\}\) HookPayload](<#NewHookPayload>)
 - [type HookPriority](<#HookPriority>)
 - [type HookRegistration](<#HookRegistration>)
 - [type HookRegistry](<#HookRegistry>)
@@ -442,14 +469,30 @@ Package agent provides the agent loop and related components.
   - [func \(r \*HookRegistry\) RegisterAfterToolCall\(name string, priority HookPriority, hook AfterToolCallHook\)](<#HookRegistry.RegisterAfterToolCall>)
   - [func \(r \*HookRegistry\) RegisterBeforeToolCall\(name string, priority HookPriority, hook BeforeToolCallHook\)](<#HookRegistry.RegisterBeforeToolCall>)
   - [func \(r \*HookRegistry\) RegisterPrepareNextTurn\(name string, priority HookPriority, hook PrepareNextTurnHook\)](<#HookRegistry.RegisterPrepareNextTurn>)
+  - [func \(r \*HookRegistry\) RegisterSessionEndHook\(name string, priority HookPriority, hook SessionEndHook\)](<#HookRegistry.RegisterSessionEndHook>)
+  - [func \(r \*HookRegistry\) RegisterSessionStartHook\(name string, priority HookPriority, hook SessionStartHook\)](<#HookRegistry.RegisterSessionStartHook>)
   - [func \(r \*HookRegistry\) RegisterShouldStopAfterTurn\(name string, priority HookPriority, hook ShouldStopAfterTurnHook\)](<#HookRegistry.RegisterShouldStopAfterTurn>)
   - [func \(r \*HookRegistry\) RegisterTransformContext\(name string, priority HookPriority, hook TransformContextHook\)](<#HookRegistry.RegisterTransformContext>)
   - [func \(r \*HookRegistry\) RunAfterToolCalls\(ctx context.Context, toolCall llm.ToolCall, result \*ExecutionResult\) OverrideResult](<#HookRegistry.RunAfterToolCalls>)
   - [func \(r \*HookRegistry\) RunBeforeToolCalls\(ctx context.Context, toolCall llm.ToolCall\) BlockResult](<#HookRegistry.RunBeforeToolCalls>)
   - [func \(r \*HookRegistry\) RunPrepareNextTurn\(ctx context.Context, state TurnState\) TurnModification](<#HookRegistry.RunPrepareNextTurn>)
+  - [func \(r \*HookRegistry\) RunSessionEnd\(ctx context.Context, state SessionLifecycleState, result SessionLifecycleResult\)](<#HookRegistry.RunSessionEnd>)
+  - [func \(r \*HookRegistry\) RunSessionStart\(ctx context.Context, state SessionLifecycleState\) ContextTransform](<#HookRegistry.RunSessionStart>)
   - [func \(r \*HookRegistry\) RunShouldStopAfterTurn\(ctx context.Context, state TurnState\) StopDecision](<#HookRegistry.RunShouldStopAfterTurn>)
   - [func \(r \*HookRegistry\) RunTransformContext\(ctx context.Context, messages \[\]llm.ChatMessage, toolDefs \[\]llm.ToolDefinition\) ContextTransform](<#HookRegistry.RunTransformContext>)
   - [func \(r \*HookRegistry\) Unregister\(name string\)](<#HookRegistry.Unregister>)
+- [type InstructionHandler](<#InstructionHandler>)
+  - [func NewInstructionHandler\(store \*preferences.Store, msgBus \*bus.MessageBus, parser \*InstructionParser, verifier \*preferences.InstructionVerifier, logger \*slog.Logger\) \*InstructionHandler](<#NewInstructionHandler>)
+  - [func \(h \*InstructionHandler\) Start\(ctx context.Context\)](<#InstructionHandler.Start>)
+  - [func \(h \*InstructionHandler\) Stop\(\)](<#InstructionHandler.Stop>)
+- [type InstructionListener](<#InstructionListener>)
+  - [func NewInstructionListener\(store \*preferences.Store, msgBus \*bus.MessageBus, toolExec \*tools.Registry, logger \*slog.Logger\) \*InstructionListener](<#NewInstructionListener>)
+  - [func \(l \*InstructionListener\) Start\(ctx context.Context\)](<#InstructionListener.Start>)
+  - [func \(l \*InstructionListener\) Stop\(\)](<#InstructionListener.Stop>)
+- [type InstructionParser](<#InstructionParser>)
+  - [func NewInstructionParser\(\) \*InstructionParser](<#NewInstructionParser>)
+  - [func \(p \*InstructionParser\) Parse\(ctx context.Context, input string\) \(\*preferences.ParsedInstruction, error\)](<#InstructionParser.Parse>)
+- [type InstructionResponse](<#InstructionResponse>)
 - [type Intent](<#Intent>)
   - [func \(i \*Intent\) MarshalJSON\(\) \(\[\]byte, error\)](<#Intent.MarshalJSON>)
 - [type IntentAnalyzer](<#IntentAnalyzer>)
@@ -483,10 +526,12 @@ Package agent provides the agent loop and related components.
 - [type LoopOption](<#LoopOption>)
   - [func WithAgentConfig\(config AgentConfig\) LoopOption](<#WithAgentConfig>)
   - [func WithAgentID\(id string\) LoopOption](<#WithAgentID>)
+  - [func WithAgentReasoning\(rc \*llm.AgentReasoningConfig\) LoopOption](<#WithAgentReasoning>)
   - [func WithAgentRegistry\(r \*AgentRegistry\) LoopOption](<#WithAgentRegistry>)
   - [func WithAgentSpec\(spec \*AgentSpec\) LoopOption](<#WithAgentSpec>)
   - [func WithArtifactManager\(am \*ArtifactManager\) LoopOption](<#WithArtifactManager>)
   - [func WithCapabilityIndex\(ci \*skills.CapabilityIndex\) LoopOption](<#WithCapabilityIndex>)
+  - [func WithCompressionPipeline\(pipeline \*compress.Pipeline\) LoopOption](<#WithCompressionPipeline>)
   - [func WithEventEmitter\(em \*EventEmitter\) LoopOption](<#WithEventEmitter>)
   - [func WithGlobalRules\(rules string\) LoopOption](<#WithGlobalRules>)
   - [func WithHallucinationDetector\(hd \*HallucinationDetector\) LoopOption](<#WithHallucinationDetector>)
@@ -705,6 +750,8 @@ Package agent provides the agent loop and related components.
   - [func \(rl \*RalphLoop\) TriggerReplan\(ctx context.Context, taskID string, previousEvidence \[\]string\) error](<#RalphLoop.TriggerReplan>)
 - [type RalphLoopConfig](<#RalphLoopConfig>)
   - [func DefaultRalphLoopConfig\(\) RalphLoopConfig](<#DefaultRalphLoopConfig>)
+- [type ReasoningDirective](<#ReasoningDirective>)
+  - [func ParseReasoningDirective\(text string\) \(\*ReasoningDirective, error\)](<#ParseReasoningDirective>)
 - [type ReflectionConfig](<#ReflectionConfig>)
   - [func DefaultReflectionConfig\(\) ReflectionConfig](<#DefaultReflectionConfig>)
 - [type ReflectionEngine](<#ReflectionEngine>)
@@ -778,8 +825,13 @@ Package agent provides the agent loop and related components.
 - [type SessionConfig](<#SessionConfig>)
   - [func DefaultSessionConfig\(\) SessionConfig](<#DefaultSessionConfig>)
 - [type SessionEndData](<#SessionEndData>)
+- [type SessionEndHook](<#SessionEndHook>)
+- [type SessionLifecyclePayload](<#SessionLifecyclePayload>)
+- [type SessionLifecycleResult](<#SessionLifecycleResult>)
+- [type SessionLifecycleState](<#SessionLifecycleState>)
 - [type SessionMetrics](<#SessionMetrics>)
 - [type SessionStartData](<#SessionStartData>)
+- [type SessionStartHook](<#SessionStartHook>)
 - [type SessionState](<#SessionState>)
   - [func \(s SessionState\) IsTerminal\(\) bool](<#SessionState.IsTerminal>)
 - [type SessionTracker](<#SessionTracker>)
@@ -890,6 +942,16 @@ Package agent provides the agent loop and related components.
 - [type TeamStartRequest](<#TeamStartRequest>)
 - [type TeamStatus](<#TeamStatus>)
 - [type ThinkingLevelSelectData](<#ThinkingLevelSelectData>)
+- [type ThreadRoutable](<#ThreadRoutable>)
+- [type ThreadRouter](<#ThreadRouter>)
+  - [func NewThreadRouter\(opts ...ThreadRouterOption\) \*ThreadRouter](<#NewThreadRouter>)
+  - [func \(tr \*ThreadRouter\) CrossThreadContext\(sessionID, activeThreadID string\) string](<#ThreadRouter.CrossThreadContext>)
+  - [func \(tr \*ThreadRouter\) GetActiveThread\(sessionID string\) \(\*session.Thread, error\)](<#ThreadRouter.GetActiveThread>)
+  - [func \(tr \*ThreadRouter\) GetThreadConversationID\(ctx context.Context, sessionID, input string\) \(string, error\)](<#ThreadRouter.GetThreadConversationID>)
+  - [func \(tr \*ThreadRouter\) SetActiveThread\(sessionID, threadID string\) error](<#ThreadRouter.SetActiveThread>)
+- [type ThreadRouterOption](<#ThreadRouterOption>)
+  - [func WithThreadRouterLogger\(l \*slog.Logger\) ThreadRouterOption](<#WithThreadRouterLogger>)
+  - [func WithThreadRouterSessionStore\(store ThreadRoutable\) ThreadRouterOption](<#WithThreadRouterSessionStore>)
 - [type ToolDefinitionInfo](<#ToolDefinitionInfo>)
 - [type ToolDescription](<#ToolDescription>)
   - [func ToolsFromDefinitions\(definitions \[\]ToolDefinitionInfo\) \[\]ToolDescription](<#ToolsFromDefinitions>)
@@ -907,6 +969,14 @@ Package agent provides the agent loop and related components.
 - [type ToolParameterInfo](<#ToolParameterInfo>)
 - [type ToolRegistry](<#ToolRegistry>)
   - [func FilterToolsForSkill\(registry ToolRegistry, allowedTools \[\]string\) ToolRegistry](<#FilterToolsForSkill>)
+- [type TopicDetector](<#TopicDetector>)
+  - [func NewTopicDetector\(opts ...TopicDetectorOption\) \*TopicDetector](<#NewTopicDetector>)
+  - [func \(td \*TopicDetector\) Detect\(input string\) string](<#TopicDetector.Detect>)
+  - [func \(td \*TopicDetector\) GenerateThreadID\(sessionID, topic string\) string](<#TopicDetector.GenerateThreadID>)
+- [type TopicDetectorOption](<#TopicDetectorOption>)
+  - [func WithDefaultTopic\(topic string\) TopicDetectorOption](<#WithDefaultTopic>)
+  - [func WithLogger\(l \*slog.Logger\) TopicDetectorOption](<#WithLogger>)
+  - [func WithTopicKeywords\(topic string, keywords \[\]string\) TopicDetectorOption](<#WithTopicKeywords>)
 - [type TrackerSessionState](<#TrackerSessionState>)
 - [type Trajectory](<#Trajectory>)
 - [type TrajectoryOutcome](<#TrajectoryOutcome>)
@@ -1021,13 +1091,6 @@ Package agent provides the agent loop and related components.
 	    KeyCompletedJobs  = "completed_jobs"
 	    KeyTotalJobs      = "total_jobs"
 	    KeyCode           = "code"
-	)
-
-<a name="SourceChatHandler"></a>Source identifiers for event attribution.
-
-	const (
-	    SourceChatHandler  = "chat-handler"
-	    SourceCodeReviewer = "code-reviewer"
 	)
 
 <a name="TopicCollabSessionCreated"></a>Bus topic constants for collaboration events.
@@ -1182,6 +1245,12 @@ Package agent provides the agent loop and related components.
 <a name="MaxSkillContextTokens"></a>buildSkillContextSection creates the skill context section for the system prompt. MaxSkillContextTokens is the approximate token budget for injected skill bodies. Skills can be large markdown files; this prevents system prompt bloat.
 
 	const MaxSkillContextTokens = 4000
+
+<a name="SourceChatHandler"></a>Source identifiers for event attribution.
+
+	const (
+	    SourceChatHandler = "chat-handler"
+	)
 
 ## Variables
 
@@ -1636,6 +1705,11 @@ AgentConstraints defines operational limits for an agent.
 	    PresencePenalty *float64 `json:"presence_penalty,omitempty"`
 	    // StopSequences are sequences where the model will stop generating.
 	    StopSequences []string `json:"stop_sequences,omitempty"`
+	
+	    // Reasoning holds optional per-agent reasoning effort configuration.
+	    // When non-nil, the agent loop uses this as the initial reasoning tier
+	    // and (if AllowSelfModulation is true) the bounds for self-modulation.
+	    Reasoning *llm.AgentReasoningConfig `json:"reasoning,omitempty"`
 	}
 
 <a name="DefaultConstraints"></a>
@@ -1782,6 +1856,34 @@ ClearConversation removes a conversation.
 
 ClearModelOverride clears the model override after it has been applied.
 
+<a name="AgentLoop.ClearReasoningOverride"></a>
+### func \(\*AgentLoop\) ClearReasoningOverride
+
+	func (l *AgentLoop) ClearReasoningOverride()
+
+ClearReasoningOverride removes any per\-turn reasoning override. Called after the turn completes so the next turn is unaffected. Thread\-safe.
+
+<a name="AgentLoop.CompressionPipeline"></a>
+### func \(\*AgentLoop\) CompressionPipeline
+
+	func (l *AgentLoop) CompressionPipeline() *compress.Pipeline
+
+CompressionPipeline returns the compression pipeline, or nil if not set.
+
+<a name="AgentLoop.CurrentReasoningEffort"></a>
+### func \(\*AgentLoop\) CurrentReasoningEffort
+
+	func (l *AgentLoop) CurrentReasoningEffort() string
+
+CurrentReasoningEffort returns the effective reasoning effort tier for the next turn, walking the precedence chain: per\-turn override → dispatcher\-suggested next\-turn effort → agent\-configured default. Returns ReasoningMedium when no agent config is set.
+
+<a name="AgentLoop.FireHTTPHooks"></a>
+### func \(\*AgentLoop\) FireHTTPHooks
+
+	func (l *AgentLoop) FireHTTPHooks(ctx context.Context, event string, data map[string]interface{})
+
+FireHTTPHooks is an exported helper that agent code calls to signal HTTP hook events. It builds a HookPayload from the provided data and fires all registered hooks in parallel, respecting context lifetime.
+
 <a name="AgentLoop.FirewallStats"></a>
 ### func \(\*AgentLoop\) FirewallStats
 
@@ -1816,6 +1918,13 @@ GetModelOverride returns the current model override \(thread\-safe\).
 	func (l *AgentLoop) HandleMessage(ctx context.Context, message string) (string, error)
 
 HandleMessage processes a single message without conversation context.
+
+<a name="AgentLoop.HookRegistry"></a>
+### func \(\*AgentLoop\) HookRegistry
+
+	func (l *AgentLoop) HookRegistry() *HookRegistry
+
+HookRegistry returns the agent loop's hook registry. Returns nil if the hook registry was not wired via WithHookRegistry.
 
 <a name="AgentLoop.Run"></a>
 ### func \(\*AgentLoop\) Run
@@ -1866,6 +1975,13 @@ SetBranchManager wires a branch manager for in\-memory cache coordination. Stub 
 
 SetCapabilityIndex sets the capability index for skill discovery. This allows wiring the index after the loop is created when skills are initialized in a specific order.
 
+<a name="AgentLoop.SetCompressionPipeline"></a>
+### func \(\*AgentLoop\) SetCompressionPipeline
+
+	func (l *AgentLoop) SetCompressionPipeline(pipeline *compress.Pipeline)
+
+SetCompressionPipeline sets the compression pipeline after agent loop creation. This is used when the compression pipeline depends on components created after the agent loop \(e.g. in daemon wiring\).
+
 <a name="AgentLoop.SetConfig"></a>
 ### func \(\*AgentLoop\) SetConfig
 
@@ -1879,6 +1995,27 @@ SetConfig updates the agent configuration.
 	func (l *AgentLoop) SetContextFirewallConfig(fw config.LLMContextFirewallConfig)
 
 SetContextFirewallConfig wires context firewall settings from the user\-facing config schema into the agent loop config.
+
+<a name="AgentLoop.SetEpistemicHook"></a>
+### func \(\*AgentLoop\) SetEpistemicHook
+
+	func (l *AgentLoop) SetEpistemicHook(hook *EpistemicHook)
+
+SetEpistemicHook wires the post\-turn ambient\-extraction hook. Nil\-safe per CLAUDE.md setter convention. When non\-nil, the hook's AfterTurn method is invoked after each agent turn so the extractor can mine claims/decisions/predictions from the conversation window.
+
+<a name="AgentLoop.SetFileWatcher"></a>
+### func \(\*AgentLoop\) SetFileWatcher
+
+	func (l *AgentLoop) SetFileWatcher(fw *FileWatcherHook)
+
+SetFileWatcher wire a file watcher for filesystem\-level hooks. Nil is safely ignored.
+
+<a name="AgentLoop.SetHTTPHooks"></a>
+### func \(\*AgentLoop\) SetHTTPHooks
+
+	func (l *AgentLoop) SetHTTPHooks(executor *HookBatchExecutor)
+
+SetHTTPHooks registers a HookBatchExecutor for outbound HTTP notifications. Nil\-safe per CLAUDE.md setter convention. When non\-nil, the executor's ExecuteAll is invoked for lifecycle events \(turn complete, session start/end, errors\).
 
 <a name="AgentLoop.SetMCPServerLister"></a>
 ### func \(\*AgentLoop\) SetMCPServerLister
@@ -1914,6 +2051,20 @@ SetNotificationEmitter sets the notification emitter for desktop notifications.
 	func (l *AgentLoop) SetPrefetchCallback(callback func(query string, maxItems int))
 
 SetPrefetchCallback sets the callback for prefetching memory context. This is used to wire the memory manager's QueuePrefetch method after construction.
+
+<a name="AgentLoop.SetReasoningForNextTurn"></a>
+### func \(\*AgentLoop\) SetReasoningForNextTurn
+
+	func (l *AgentLoop) SetReasoningForNextTurn(effort string)
+
+SetReasoningForNextTurn records a dispatcher\-suggested effort tier \(e.g. "xhigh" for IntentPlan\). Applied on the next reasoning cycle subject to the agent's min/max bounds when AllowSelfModulation is true. No\-op when AllowSelfModulation is false. Nil\-guarded and thread\-safe.
+
+<a name="AgentLoop.SetReasoningOverride"></a>
+### func \(\*AgentLoop\) SetReasoningOverride
+
+	func (l *AgentLoop) SetReasoningOverride(rc *llm.ReasoningConfig)
+
+SetReasoningOverride installs a per\-turn reasoning directive \(highest precedence in the §10.1 chain\). Nil\-guarded and thread\-safe.
 
 <a name="AgentLoop.SetRepoMapGenerator"></a>
 ### func \(\*AgentLoop\) SetRepoMapGenerator
@@ -2283,6 +2434,18 @@ AgentSpec defines the specification for creating an agent.
 	    Name string `json:"name"`
 	    // Role defines the agent's role in the system.
 	    Role AgentRole `json:"role"`
+	    // Description is a one-liner surfaced in API/UI displays.
+	    Description string `json:"description,omitempty"`
+	    // Enabled reports whether the agent is active. Disabled agents are filtered
+	    // out at load time and never instantiated.
+	    Enabled bool `json:"enabled"`
+	    // CanDelegate controls whether the delegate_task tool is available to this
+	    // agent. When false, delegate_task is stripped from the filtered tool set.
+	    CanDelegate bool `json:"can_delegate"`
+	    // ReviewsDomain, set on reviewer-role agents, declares which review domain
+	    // (code|debug|plan|analysis|test) the reviewer covers. ReviewPolicy uses
+	    // this for dynamic reviewer selection.
+	    ReviewsDomain string `json:"reviews_domain,omitempty"`
 	    // Purpose is a description of what this agent does (used in system prompt).
 	    Purpose string `json:"purpose"`
 	    // Model can be an alias name (e.g., "coder"), a direct model reference (e.g., "zai/glm-4.7"),
@@ -2300,104 +2463,6 @@ AgentSpec defines the specification for creating an agent.
 	    // SkillTriggers maps keywords to skill names for automatic invocation.
 	    SkillTriggers map[string]string `json:"skill_triggers,omitempty"`
 	}
-
-<a name="AnalystAgentSpec"></a>
-### func AnalystAgentSpec
-
-	func AnalystAgentSpec() *AgentSpec
-
-AnalystAgentSpec returns the spec for the analysis specialist agent.
-
-<a name="AnalystReviewerSpec"></a>
-### func AnalystReviewerSpec
-
-	func AnalystReviewerSpec() *AgentSpec
-
-AnalystReviewerSpec returns the spec for the analyst reviewer agent.
-
-<a name="ChatAgentSpec"></a>
-### func ChatAgentSpec
-
-	func ChatAgentSpec() *AgentSpec
-
-ChatAgentSpec returns the spec for the general chat agent.
-
-<a name="CodeReviewerSpec"></a>
-### func CodeReviewerSpec
-
-	func CodeReviewerSpec() *AgentSpec
-
-CodeReviewerSpec returns the spec for the code reviewer agent.
-
-<a name="CoderAgentSpec"></a>
-### func CoderAgentSpec
-
-	func CoderAgentSpec() *AgentSpec
-
-CoderAgentSpec returns the spec for the coding specialist agent.
-
-<a name="CommitterAgentSpec"></a>
-### func CommitterAgentSpec
-
-	func CommitterAgentSpec() *AgentSpec
-
-CommitterAgentSpec returns the spec for the git operations agent.
-
-<a name="DebugReviewerSpec"></a>
-### func DebugReviewerSpec
-
-	func DebugReviewerSpec() *AgentSpec
-
-DebugReviewerSpec returns the spec for the debug reviewer agent.
-
-<a name="DebuggerAgentSpec"></a>
-### func DebuggerAgentSpec
-
-	func DebuggerAgentSpec() *AgentSpec
-
-DebuggerAgentSpec returns the spec for the debugging specialist agent.
-
-<a name="DefaultSpecs"></a>
-### func DefaultSpecs
-
-	func DefaultSpecs() []*AgentSpec
-
-DefaultSpecs returns all default agent specifications.
-
-<a name="DispatcherSpec"></a>
-### func DispatcherSpec
-
-	func DispatcherSpec() *AgentSpec
-
-DispatcherSpec returns the spec for the dispatcher agent.
-
-<a name="PlannerAgentSpec"></a>
-### func PlannerAgentSpec
-
-	func PlannerAgentSpec() *AgentSpec
-
-PlannerAgentSpec returns the spec for the planning specialist agent.
-
-<a name="PlannerReviewerSpec"></a>
-### func PlannerReviewerSpec
-
-	func PlannerReviewerSpec() *AgentSpec
-
-PlannerReviewerSpec returns the spec for the planner reviewer agent.
-
-<a name="SchedulerAgentSpec"></a>
-### func SchedulerAgentSpec
-
-	func SchedulerAgentSpec() *AgentSpec
-
-SchedulerAgentSpec returns the spec for the scheduling agent.
-
-<a name="TestReviewerSpec"></a>
-### func TestReviewerSpec
-
-	func TestReviewerSpec() *AgentSpec
-
-TestReviewerSpec returns the spec for the test reviewer agent.
 
 <a name="AgentSpec.AllTools"></a>
 ### func \(\*AgentSpec\) AllTools
@@ -2454,6 +2519,16 @@ AggregatedTaskReport represents the final report for a completed task.
 	    Recommendations []CategorizedRecommendation `json:"recommendations"`
 	    // ExecutionTime is the total execution time
 	    ExecutionTime string `json:"execution_time"`
+	}
+
+<a name="AmbientExtractorInterface"></a>
+## type AmbientExtractorInterface
+
+AmbientExtractorInterface is the subset of memory.AmbientExtractor used by the epistemic hook. Defined locally so tests can substitute a fake and so we don't import the concrete type by name in the public surface.
+
+	type AmbientExtractorInterface interface {
+	    Extract(ctx context.Context, messages []string) ([]memory.AmbientCandidate, error)
+	    WriteCandidates(ctx context.Context, candidates []memory.AmbientCandidate) ([]string, error)
 	}
 
 <a name="AmendmentSubmitter"></a>
@@ -3100,6 +3175,13 @@ SetCollaborationEngine sets the collaboration engine for starting collaboration 
 	func (h *ChatHandler) SetMetricsStore(store *metrics.Store)
 
 SetMetricsStore sets the metrics store for duration estimates.
+
+<a name="ChatHandler.SetNotificationPublisher"></a>
+### func \(\*ChatHandler\) SetNotificationPublisher
+
+	func (h *ChatHandler) SetNotificationPublisher(p NotificationPublisher)
+
+SetNotificationPublisher provides the ChatHandler with a notification publisher so it can emit task completion/failure events to the notification system.
 
 <a name="ChatHandler.SetStepStore"></a>
 ### func \(\*ChatHandler\) SetStepStore
@@ -4045,6 +4127,22 @@ DispatchResult is the result of dispatching a request.
 	    // them to the specialist agent's RunOnceWithParts. Text-only requests leave
 	    // this nil, preserving the existing RunOnce path.
 	    Parts []llm.ContentPart `json:"-"`
+	
+	    // SuggestedReasoningTier is populated by the intent-classifier hook per
+	    // LLM Reasoning Effort spec §7.5. It is ONLY set when (a) no explicit
+	    // user directive was parsed AND (b) the intent type has a defined
+	    // mapping in suggestReasoningForIntent. Consumers should treat an empty
+	    // value as "no suggestion". The agent's own AllowSelfModulation /
+	    // MinEffort / MaxEffort bounds gate whether the suggestion is actually
+	    // applied at the AgentLoop layer.
+	    SuggestedReasoningTier string `json:"-"`
+	
+	    // ReasoningOverride carries the parsed user reasoning directive (if any)
+	    // so downstream code can forward it to the agent loop. When non-nil, it
+	    // takes precedence over SuggestedReasoningTier per spec §7.5. Tagged
+	    // json:"-" because it is operational metadata not meant for
+	    // user-facing JSON serialization.
+	    ReasoningOverride *llm.ReasoningConfig `json:"-"`
 	}
 
 <a name="Dispatcher"></a>
@@ -4149,6 +4247,13 @@ GetTask returns a task by ID.
 
 ProcessAmendment processes a pending amendment request.
 
+<a name="Dispatcher.RecordDispatch"></a>
+### func \(\*Dispatcher\) RecordDispatch
+
+	func (d *Dispatcher) RecordDispatch(sessionID, handlerCase, inputSummary string, result *DispatchResult, hasParts bool, dispatchErr error)
+
+RecordDispatch logs a dispatch routing decision from the handler switch for debugging and persistent audit trail. This is the public entry point called by ChatHandler after it determines which case handled the result.
+
 <a name="Dispatcher.ResumeAfterClarification"></a>
 ### func \(\*Dispatcher\) ResumeAfterClarification
 
@@ -4169,6 +4274,20 @@ RouteToAgent routes a dispatch result to the appropriate agent. If an active age
 	func (d *Dispatcher) SetCapabilityMatcher(matcher *CapabilityMatcher)
 
 SetCapabilityMatcher sets the capability matcher for fast routing.
+
+<a name="Dispatcher.SetMetricsStore"></a>
+### func \(\*Dispatcher\) SetMetricsStore
+
+	func (d *Dispatcher) SetMetricsStore(store *metrics.Store)
+
+SetMetricsStore wires the metrics store for persistent dispatch logging.
+
+<a name="Dispatcher.SetThreadRouter"></a>
+### func \(\*Dispatcher\) SetThreadRouter
+
+	func (d *Dispatcher) SetThreadRouter(tr *ThreadRouter)
+
+SetThreadRouter wires a ThreadRouter onto the dispatcher, enabling thread\-aware routing. Pass nil to disable thread routing \(legacy mode\). Nil guard at top of setter prevents typed\-nil interface panics per CLAUDE.md Setter methods rule.
 
 <a name="Dispatcher.ShouldDispatchAsync"></a>
 ### func \(\*Dispatcher\) ShouldDispatchAsync
@@ -4294,6 +4413,42 @@ EmbeddingClient generates vector embeddings for text.
 	    Embed(ctx context.Context, text string) ([]float64, error)
 	    EmbedBatch(ctx context.Context, texts []string) ([][]float64, error)
 	    Dimension() int
+	}
+
+<a name="EpistemicHook"></a>
+## type EpistemicHook
+
+EpistemicHook is the post\-turn ambient\-extraction hook \(Path B\). It is gated entirely by EpistemicConfig.AmbientExtraction.Enabled and the ExcludeIntents filter.
+
+	type EpistemicHook struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewEpistemicHook"></a>
+### func NewEpistemicHook
+
+	func NewEpistemicHook(cfg EpistemicHookConfig) *EpistemicHook
+
+NewEpistemicHook constructs a hook from the given configuration.
+
+<a name="EpistemicHook.AfterTurn"></a>
+### func \(\*EpistemicHook\) AfterTurn
+
+	func (h *EpistemicHook) AfterTurn(ctx context.Context, intent string, messages []string) ([]string, error)
+
+AfterTurn is called by the agent loop after a turn completes. It extracts candidate claims from the conversation window, filters them, and writes them as auto claims. Returns the IDs of the written claims.
+
+The method is best\-effort: errors are logged but do not propagate unless the underlying extractor fails.
+
+<a name="EpistemicHookConfig"></a>
+## type EpistemicHookConfig
+
+EpistemicHookConfig holds construction parameters for EpistemicHook.
+
+	type EpistemicHookConfig struct {
+	    Cfg       config.EpistemicConfig
+	    Extractor AmbientExtractorInterface
+	    Logger    *slog.Logger
 	}
 
 <a name="ErrorBuilder"></a>
@@ -4705,6 +4860,27 @@ FallbackEntry captures details about a fallback routing decision.
 	    RoutedTo   string    `json:"routed_to"`
 	}
 
+<a name="FileWatcherHook"></a>
+## type FileWatcherHook
+
+FileWatcherHook is a placeholder for the file\-watcher hook. Methods match the call sites in loop.go \(Start, Stop\). The full implementation lives in a separate file when the file\-watcher feature is wired.
+
+	type FileWatcherHook struct{}
+
+<a name="FileWatcherHook.Start"></a>
+### func \(\*FileWatcherHook\) Start
+
+	func (fw *FileWatcherHook) Start(_ context.Context) error
+
+Start begins watching. Accepts a context for future cancellation support. Returns nil to keep the loop path no\-op safe.
+
+<a name="FileWatcherHook.Stop"></a>
+### func \(\*FileWatcherHook\) Stop
+
+	func (fw *FileWatcherHook) Stop()
+
+Stop ceases watching.
+
 <a name="FilteredToolRegistry"></a>
 ## type FilteredToolRegistry
 
@@ -4751,6 +4927,56 @@ FixAttempt records a pending fix for later application by the agent loop
 	    Prompt  string
 	    FixText string
 	    Files   []string // files that the LLM response references
+	}
+
+<a name="HTTPHook"></a>
+## type HTTPHook
+
+HTTPHook implements both SessionStartHook and SessionEndHook interfaces for HTTP\-based lifecycle integrations.
+
+	type HTTPHook struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewHTTPHook"></a>
+### func NewHTTPHook
+
+	func NewHTTPHook(config HTTPHookConfig, allowedURLs []string, logger *slog.Logger) (*HTTPHook, error)
+
+NewHTTPHook creates a new HTTP hook with the given config and URL allowlist.
+
+<a name="HTTPHook.Execute"></a>
+### func \(\*HTTPHook\) Execute
+
+	func (h *HTTPHook) Execute(ctx context.Context, payload any) error
+
+Execute sends the HTTP request with the given payload.
+
+<a name="HTTPHook.OnSessionEnd"></a>
+### func \(\*HTTPHook\) OnSessionEnd
+
+	func (h *HTTPHook) OnSessionEnd(ctx context.Context, state SessionLifecycleState, result SessionLifecycleResult) error
+
+OnSessionEnd implements SessionEndHook.
+
+<a name="HTTPHook.OnSessionStart"></a>
+### func \(\*HTTPHook\) OnSessionStart
+
+	func (h *HTTPHook) OnSessionStart(ctx context.Context, state SessionLifecycleState) (ContextTransform, error)
+
+OnSessionStart implements SessionStartHook.
+
+<a name="HTTPHookConfig"></a>
+## type HTTPHookConfig
+
+HTTPHookConfig serializes hook configuration.
+
+	type HTTPHookConfig struct {
+	    URL        string            `json:"url"`
+	    Method     string            `json:"method"`
+	    Headers    map[string]string `json:"headers"`
+	    Timeout    time.Duration     `json:"timeout"`
+	    RetryCount int               `json:"retry_count"`
 	}
 
 <a name="HallucinationConfig"></a>
@@ -4873,6 +5099,55 @@ HandoffRequest represents a handoff request payload from the request\_handoff to
 	    InjectAfter   bool   `json:"inject_after"`
 	}
 
+<a name="HookBatchExecutor"></a>
+## type HookBatchExecutor
+
+HookBatchExecutor fans out hook payloads to registered HTTP hooks in parallel. It is safe for concurrent use.
+
+	type HookBatchExecutor struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewHookBatchExecutor"></a>
+### func NewHookBatchExecutor
+
+	func NewHookBatchExecutor() *HookBatchExecutor
+
+NewHookBatchExecutor constructs an empty executor.
+
+<a name="HookBatchExecutor.AddHook"></a>
+### func \(\*HookBatchExecutor\) AddHook
+
+	func (e *HookBatchExecutor) AddHook(h *HTTPHook)
+
+AddHook registers an HTTP hook with the executor.
+
+<a name="HookBatchExecutor.ExecuteAll"></a>
+### func \(\*HookBatchExecutor\) ExecuteAll
+
+	func (e *HookBatchExecutor) ExecuteAll(ctx context.Context, payload HookPayload)
+
+ExecuteAll fires the payload at every registered hook in parallel.
+
+<a name="HookPayload"></a>
+## type HookPayload
+
+HookPayload is the data structure passed to HTTP hooks when events fire. It captures the event name, originating agent, session, and arbitrary event\-specific data.
+
+	type HookPayload struct {
+	    Event     string                 `json:"event"`
+	    AgentID   string                 `json:"agent_id,omitempty"`
+	    SessionID string                 `json:"session_id,omitempty"`
+	    Data      map[string]interface{} `json:"data,omitempty"`
+	}
+
+<a name="NewHookPayload"></a>
+### func NewHookPayload
+
+	func NewHookPayload(event, agentID, sessionID string, data map[string]interface{}) HookPayload
+
+NewHookPayload constructs a HookPayload from the provided fields.
+
 <a name="HookPriority"></a>
 ## type HookPriority
 
@@ -4938,6 +5213,20 @@ RegisterBeforeToolCall registers a BeforeToolCallHook.
 
 RegisterPrepareNextTurn registers a PrepareNextTurnHook.
 
+<a name="HookRegistry.RegisterSessionEndHook"></a>
+### func \(\*HookRegistry\) RegisterSessionEndHook
+
+	func (r *HookRegistry) RegisterSessionEndHook(name string, priority HookPriority, hook SessionEndHook)
+
+RegisterSessionEndHook registers a SessionEndHook.
+
+<a name="HookRegistry.RegisterSessionStartHook"></a>
+### func \(\*HookRegistry\) RegisterSessionStartHook
+
+	func (r *HookRegistry) RegisterSessionStartHook(name string, priority HookPriority, hook SessionStartHook)
+
+RegisterSessionStartHook registers a SessionStartHook.
+
 <a name="HookRegistry.RegisterShouldStopAfterTurn"></a>
 ### func \(\*HookRegistry\) RegisterShouldStopAfterTurn
 
@@ -4973,6 +5262,20 @@ RunBeforeToolCalls runs all BeforeToolCall hooks in priority order. Returns the 
 
 RunPrepareNextTurn runs all PrepareNextTurn hooks in priority order. Returns the first TurnModification with Modified=true \(short\-circuit\).
 
+<a name="HookRegistry.RunSessionEnd"></a>
+### func \(\*HookRegistry\) RunSessionEnd
+
+	func (r *HookRegistry) RunSessionEnd(ctx context.Context, state SessionLifecycleState, result SessionLifecycleResult)
+
+RunSessionEnd runs all SessionEnd hooks in priority order. Collects errors from all hooks and logs them; does NOT short\-circuit.
+
+<a name="HookRegistry.RunSessionStart"></a>
+### func \(\*HookRegistry\) RunSessionStart
+
+	func (r *HookRegistry) RunSessionStart(ctx context.Context, state SessionLifecycleState) ContextTransform
+
+RunSessionStart runs all SessionStart hooks in priority order. Returns the first ContextTransform with Modified=true \(short\-circuit\).
+
 <a name="HookRegistry.RunShouldStopAfterTurn"></a>
 ### func \(\*HookRegistry\) RunShouldStopAfterTurn
 
@@ -4993,6 +5296,103 @@ RunTransformContext runs all TransformContext hooks in priority order. Returns t
 	func (r *HookRegistry) Unregister(name string)
 
 Unregister removes all hooks with the given name.
+
+<a name="InstructionHandler"></a>
+## type InstructionHandler
+
+InstructionHandler manages bus subscriptions and message handling for user instructions.
+
+	type InstructionHandler struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewInstructionHandler"></a>
+### func NewInstructionHandler
+
+	func NewInstructionHandler(store *preferences.Store, msgBus *bus.MessageBus, parser *InstructionParser, verifier *preferences.InstructionVerifier, logger *slog.Logger) *InstructionHandler
+
+NewInstructionHandler creates a new handler with the given dependencies.
+
+<a name="InstructionHandler.Start"></a>
+### func \(\*InstructionHandler\) Start
+
+	func (h *InstructionHandler) Start(ctx context.Context)
+
+Start subscribes to all instruction bus topics and begins handling messages.
+
+<a name="InstructionHandler.Stop"></a>
+### func \(\*InstructionHandler\) Stop
+
+	func (h *InstructionHandler) Stop()
+
+Stop gracefully shuts down the handler.
+
+<a name="InstructionListener"></a>
+## type InstructionListener
+
+InstructionListener listens for bus events and triggers matching instructions.
+
+	type InstructionListener struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewInstructionListener"></a>
+### func NewInstructionListener
+
+	func NewInstructionListener(store *preferences.Store, msgBus *bus.MessageBus, toolExec *tools.Registry, logger *slog.Logger) *InstructionListener
+
+NewInstructionListener creates a new instruction listener.
+
+<a name="InstructionListener.Start"></a>
+### func \(\*InstructionListener\) Start
+
+	func (l *InstructionListener) Start(ctx context.Context)
+
+Start begins listening for trigger events.
+
+<a name="InstructionListener.Stop"></a>
+### func \(\*InstructionListener\) Stop
+
+	func (l *InstructionListener) Stop()
+
+Stop gracefully shuts down the listener.
+
+<a name="InstructionParser"></a>
+## type InstructionParser
+
+InstructionParser extracts structured instructions from natural language input.
+
+	type InstructionParser struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewInstructionParser"></a>
+### func NewInstructionParser
+
+	func NewInstructionParser() *InstructionParser
+
+NewInstructionParser creates a new parser with optional logging.
+
+<a name="InstructionParser.Parse"></a>
+### func \(\*InstructionParser\) Parse
+
+	func (p *InstructionParser) Parse(ctx context.Context, input string) (*preferences.ParsedInstruction, error)
+
+Parse extracts a structured instruction from natural language input.
+
+<a name="InstructionResponse"></a>
+## type InstructionResponse
+
+InstructionResponse is the standard response format for instruction operations.
+
+	type InstructionResponse struct {
+	    Success              bool                           `json:"success"`
+	    Instruction          *preferences.UserInstruction   `json:"instruction,omitempty"`
+	    Instructions         []*preferences.UserInstruction `json:"instructions,omitempty"`
+	    ParsedInstruction    *preferences.ParsedInstruction `json:"parsed,omitempty"`
+	    ConfirmationRequired bool                           `json:"confirmation_required"`
+	    Error                string                         `json:"error,omitempty"`
+	}
 
 <a name="Intent"></a>
 ## type Intent
@@ -5138,6 +5538,19 @@ IntentType represents a classified user intent.
 	
 	    // Clarification (inline)
 	    IntentClarify IntentType = "clarify"
+	
+	    // Instruction (inline) — user-instructions parsing per Phase 1 spec
+	    // (§7.5). Triggered by phrases like "always", "every day at",
+	    // "remember to". Routes to the instruction parser/handler rather than
+	    // the normal executor path.
+	    IntentInstruction IntentType = "instruction"
+	
+	    // Knowledge work (Plan 2: Agent Roster Extension). Each routes to a
+	    // specialist executor. CategoryDefer => async dispatch.
+	    IntentWrite     IntentType = "write"
+	    IntentArchitect IntentType = "architect"
+	    IntentSkeptic   IntentType = "skeptic"
+	    IntentLibrarian IntentType = "librarian"
 	)
 
 <a name="IntentType.Category"></a>
@@ -5329,6 +5742,13 @@ WithAgentConfig sets the agent configuration.
 
 WithAgentID sets the agent identifier.
 
+<a name="WithAgentReasoning"></a>
+### func WithAgentReasoning
+
+	func WithAgentReasoning(rc *llm.AgentReasoningConfig) LoopOption
+
+WithAgentReasoning wires per\-agent reasoning config from AGENT.md frontmatter into the loop \(spec §4.4 middle layer\).
+
 <a name="WithAgentRegistry"></a>
 ### func WithAgentRegistry
 
@@ -5356,6 +5776,13 @@ WithArtifactManager sets the Claude artifact manager for project context injecti
 	func WithCapabilityIndex(ci *skills.CapabilityIndex) LoopOption
 
 WithCapabilityIndex sets the capability index for skill discovery.
+
+<a name="WithCompressionPipeline"></a>
+### func WithCompressionPipeline
+
+	func WithCompressionPipeline(pipeline *compress.Pipeline) LoopOption
+
+WithCompressionPipeline sets the compression pipeline for prompt compression. This enables CCR\-based compression of tool results and messages.
 
 <a name="WithEventEmitter"></a>
 ### func WithEventEmitter
@@ -6041,10 +6468,13 @@ DetectCompound analyzes intents and determines if they're compound. Adds confide
 <a name="NotificationPublisher"></a>
 ## type NotificationPublisher
 
-NotificationPublisher is an interface for publishing task notifications. This allows the agent to publish notifications without depending on the daemon package.
+NotificationPublisher is an interface for publishing task and session notifications. This allows the agent to publish notifications without depending on the daemon package.
 
 	type NotificationPublisher interface {
 	    PublishTaskNotification(taskID, agentID string, notifType string, title, message string)
+	    // PublishSessionNotification publishes a session-scoped notification
+	    // (e.g., waiting_human, bot_finished, requires_approval).
+	    PublishSessionNotification(sessionID, agentID string, notifType string, title, message string)
 	}
 
 <a name="Orchestrator"></a>
@@ -7154,6 +7584,9 @@ QueuePersisterOps is the subset of QueuePersister used by MessageQueue.
 
 	type QueuePersisterOps interface {
 	    PersistSync(msg QueuedMessage) error
+	    // Stop halts any background goroutines/timers owned by the persister
+	    // (e.g., the flush timer in QueuePersister). Called from MessageQueue.Close.
+	    Stop()
 	}
 
 <a name="QueueRestorePayload"></a>
@@ -7300,6 +7733,50 @@ RalphLoopConfig holds configuration for the Ralph loop.
 
 DefaultRalphLoopConfig returns default Ralph loop configuration.
 
+<a name="ReasoningDirective"></a>
+## type ReasoningDirective
+
+ReasoningDirective captures a parsed reasoning\-effort directive from user text. Returned by ParseReasoningDirective.
+
+	type ReasoningDirective struct {
+	    // Config is the parsed ReasoningConfig. Nil when Ambiguous is true and
+	    // the parser couldn't determine a tier (caller decides fallback).
+	    Config *llm.ReasoningConfig
+	
+	    // Scope is one of "session" (default), "next-turn", or "task".
+	    Scope string
+	
+	    // Ambiguous is true when the user wrote "use reasoning" / "enable
+	    // reasoning" without specifying a tier. In that case Config is nil and
+	    // the caller is expected to either pick a sensible default or surface a
+	    // clarifying question.
+	    Ambiguous bool
+	
+	    // ReasoningReq is the substring of the user input that matched the
+	    // directive. Useful for logging and clarification prompts.
+	    ReasoningReq string
+	}
+
+<a name="ParseReasoningDirective"></a>
+### func ParseReasoningDirective
+
+	func ParseReasoningDirective(text string) (*ReasoningDirective, error)
+
+ParseReasoningDirective scans text for reasoning\-effort directives per spec §7.1. Returns \(nil, nil\) when no directive is found.
+
+The first matching pattern wins; the parser does not accumulate multiple directives in a single call. Recognized forms \(case\-insensitive\):
+
+- Tier word \+ "reasoning"/"thinking": "use high reasoning"
+- "reasoning\_effort: X": "reasoning\_effort: low"
+- "\[/reasoning X\]" slash directive
+- Aliases: "think hard" \-\> high, "deep think" \-\> xhigh, etc.
+- Token hints: "use 8000 thinking tokens" \-\> BudgetTokens=8000
+- Disable phrases: "stop thinking", "no reasoning"
+
+Ambiguous matches \("use reasoning" with no tier\) set Ambiguous=true and leave Config nil.
+
+Scope detection looks for "for this task" \(scope=task\), "for next turn" \(scope=next\-turn\); otherwise scope=session.
+
 <a name="ReflectionConfig"></a>
 ## type ReflectionConfig
 
@@ -7398,6 +7875,14 @@ RegistryConfig holds configuration for creating an AgentRegistry.
 	
 	    // BundledAgentsPath is the path to bundled AGENT.md files (e.g., "config/agents").
 	    BundledAgentsPath string
+	
+	    // BundledPromptsPath is the path to bundled prompt component markdown
+	    // files (e.g., "config/prompts"). When set, a ComponentRegistry scans
+	    // the standard 3-tier hierarchy plus this bundled tier and assembles
+	    // each agent's Purpose from the components declared in its AGENT.md
+	    // frontmatter. When unset, prompt component assembly is disabled and
+	    // the AGENT.md body alone becomes the Purpose (backward compatible).
+	    BundledPromptsPath string
 	
 	    // GlobalRules is the global rules content to inject into all agents.
 	    // If empty, the registry will auto-discover rules using RulesDiscovery.
@@ -7665,8 +8150,12 @@ ReviewPolicy determines which steps require review and how.
 	    // Tool hints that NEVER require review (trusted operations)
 	    SkipReview []string
 	
-	    // Agent-specific reviewer mappings
-	    // e.g., coder → code-reviewer, debugger → debug-reviewer
+	    // Agent-specific reviewer mappings.
+	    //
+	    // Deprecated: reviewer routing is now dynamic via ReviewPolicy.Registry
+	    // and the reviews_domain field on reviewer-role agents. ReviewerMapping
+	    // is kept as an override escape hatch — entries here take precedence
+	    // over dynamic discovery so callers can pin specific reviewers.
 	    ReviewerMapping map[string]string
 	
 	    // Maximum revision cycles before requiring human intervention
@@ -7677,6 +8166,13 @@ ReviewPolicy determines which steps require review and how.
 	
 	    // Whether review is enabled globally
 	    Enabled bool
+	
+	    // Registry, when non-nil, is consulted by SelectReviewer to find
+	    // reviewer-role agents dynamically by reviews_domain. When nil,
+	    // SelectReviewer falls back to a tool-hint → domain mapping and
+	    // looks up reviewers in the registry if available, else returns
+	    // the test-reviewer fallback.
+	    Registry *AgentRegistry
 	}
 
 <a name="DefaultReviewPolicy"></a>
@@ -7685,6 +8181,8 @@ ReviewPolicy determines which steps require review and how.
 	func DefaultReviewPolicy() *ReviewPolicy
 
 DefaultReviewPolicy returns sensible defaults for review policy.
+
+ReviewerMapping is empty by default: reviewer routing is dynamic via ReviewPolicy.Registry and the reviews\_domain field on reviewer agents.
 
 <a name="ReviewPolicy.ExceedsMaxRevisions"></a>
 ### func \(\*ReviewPolicy\) ExceedsMaxRevisions
@@ -7713,6 +8211,13 @@ RequiresHumanIntervention returns true if human intervention is needed.
 	func (p *ReviewPolicy) SelectReviewer(step *task.TaskStep) string
 
 SelectReviewer selects the appropriate reviewer agent for a step.
+
+Resolution order:
+
+1. ReviewerMapping override \(explicit pin\)
+2. Dynamic lookup via Registry for a reviewer\-role agent whose reviews\_domain matches the originating agent's domain
+3. Tool\-hint → domain → registry lookup
+4. "test\-reviewer" fallback
 
 <a name="ReviewPolicy.ShouldAutoApprove"></a>
 ### func \(\*ReviewPolicy\) ShouldAutoApprove
@@ -8016,6 +8521,55 @@ SessionEndData is emitted when an agent session ends.
 	    Error       string        `json:"error,omitempty"`
 	}
 
+<a name="SessionEndHook"></a>
+## type SessionEndHook
+
+SessionEndHook is called at the end of each RunOnce invocation \(via defer\). Useful for metrics, audit logging, and state cleanup.
+
+	type SessionEndHook interface {
+	    OnSessionEnd(ctx context.Context, state SessionLifecycleState, result SessionLifecycleResult) error
+	}
+
+<a name="SessionLifecyclePayload"></a>
+## type SessionLifecyclePayload
+
+SessionLifecyclePayload is attached to bus events for session boundary tracking.
+
+	type SessionLifecyclePayload struct {
+	    Event        string  `json:"event"` // "start" or "end"
+	    SessionID    string  `json:"session_id"`
+	    AgentID      string  `json:"agent_id"`
+	    StartTimeSec float64 `json:"start_time_sec,omitempty"`
+	    EndTimeSec   float64 `json:"end_time_sec,omitempty"`
+	    DurationSec  float64 `json:"duration_sec,omitempty"`
+	    Success      bool    `json:"success,omitempty"`
+	    Metadata     string  `json:"metadata,omitempty"` // JSON-encoded arbitrary metadata
+	}
+
+<a name="SessionLifecycleResult"></a>
+## type SessionLifecycleResult
+
+SessionLifecycleResult is returned to OnSessionEnd hooks after RunOnce completes.
+
+	type SessionLifecycleResult struct {
+	    Success bool
+	    Error   error
+	    EndTime time.Time
+	}
+
+<a name="SessionLifecycleState"></a>
+## type SessionLifecycleState
+
+SessionLifecycleState describes the state of a session at a lifecycle boundary.
+
+	type SessionLifecycleState struct {
+	    SessionID string
+	    AgentID   string
+	    UserID    string
+	    StartTime time.Time
+	    Metadata  map[string]any
+	}
+
 <a name="SessionMetrics"></a>
 ## type SessionMetrics
 
@@ -8040,6 +8594,15 @@ SessionStartData is emitted when an agent session begins.
 	    SessionID string `json:"session_id"`
 	    Input     string `json:"input"`
 	    AgentSpec string `json:"agent_spec"`
+	}
+
+<a name="SessionStartHook"></a>
+## type SessionStartHook
+
+SessionStartHook is called at the beginning of each RunOnce invocation. Return ContextTransform with Modified=true to inject/alter messages for the session.
+
+	type SessionStartHook interface {
+	    OnSessionStart(ctx context.Context, state SessionLifecycleState) ContextTransform
 	}
 
 <a name="SessionState"></a>
@@ -9069,6 +9632,82 @@ ThinkingLevelSelectData is emitted when a thinking level is chosen.
 	    Reason string `json:"reason"`
 	}
 
+<a name="ThreadRoutable"></a>
+## type ThreadRoutable
+
+ThreadRoutable is the minimal interface the ThreadRouter needs from a session store to perform migration and thread lookups.
+
+	type ThreadRoutable interface {
+	    Get(id string) *session.Session
+	    GetActiveThread(ctx context.Context, sessionID string) (*session.Thread, error)
+	    ListThreadsBySession(ctx context.Context, sessionID string) ([]*session.Thread, error)
+	}
+
+<a name="ThreadRouter"></a>
+## type ThreadRouter
+
+ThreadRouter manages thread creation, migration, and routing. It is safe for concurrent use.
+
+	type ThreadRouter struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewThreadRouter"></a>
+### func NewThreadRouter
+
+	func NewThreadRouter(opts ...ThreadRouterOption) *ThreadRouter
+
+NewThreadRouter creates a thread router with the default topic detector.
+
+<a name="ThreadRouter.CrossThreadContext"></a>
+### func \(\*ThreadRouter\) CrossThreadContext
+
+	func (tr *ThreadRouter) CrossThreadContext(sessionID, activeThreadID string) string
+
+CrossThreadContext returns a context string assembled from inactive thread summaries so the active thread has continuity with prior topics. Returns empty string when there are no threads or no session store.
+
+<a name="ThreadRouter.GetActiveThread"></a>
+### func \(\*ThreadRouter\) GetActiveThread
+
+	func (tr *ThreadRouter) GetActiveThread(sessionID string) (*session.Thread, error)
+
+GetActiveThread returns the active thread for the session.
+
+<a name="ThreadRouter.GetThreadConversationID"></a>
+### func \(\*ThreadRouter\) GetThreadConversationID
+
+	func (tr *ThreadRouter) GetThreadConversationID(ctx context.Context, sessionID, input string) (string, error)
+
+GetThreadConversationID returns the conversation ID for the thread that best matches the input. It performs silent migration \(creating a "general" thread from the session's existing conversation ID\) when needed. If no session store is available, it falls back to using the session ID directly \(no thread isolation\).
+
+<a name="ThreadRouter.SetActiveThread"></a>
+### func \(\*ThreadRouter\) SetActiveThread
+
+	func (tr *ThreadRouter) SetActiveThread(sessionID, threadID string) error
+
+SetActiveThread marks the given thread as active for the session.
+
+<a name="ThreadRouterOption"></a>
+## type ThreadRouterOption
+
+ThreadRouterOption configures a ThreadRouter.
+
+	type ThreadRouterOption func(*ThreadRouter)
+
+<a name="WithThreadRouterLogger"></a>
+### func WithThreadRouterLogger
+
+	func WithThreadRouterLogger(l *slog.Logger) ThreadRouterOption
+
+WithThreadRouterLogger sets the logger.
+
+<a name="WithThreadRouterSessionStore"></a>
+### func WithThreadRouterSessionStore
+
+	func WithThreadRouterSessionStore(store ThreadRoutable) ThreadRouterOption
+
+WithThreadRouterSessionStore sets the session store.
+
 <a name="ToolDefinitionInfo"></a>
 ## type ToolDefinitionInfo
 
@@ -9262,6 +9901,77 @@ The production \[tools.Registry\] satisfies this interface; see \[tools.Registry
 	func FilterToolsForSkill(registry ToolRegistry, allowedTools []string) ToolRegistry
 
 FilterToolsForSkill creates a filtered tool registry based on a skill's allowed\-tools. This is used when executing skills that have restricted tool access.
+
+<a name="TopicDetector"></a>
+## type TopicDetector
+
+TopicDetector identifies conversation topics from user input using keyword\-scoring heuristics. It is safe for concurrent use.
+
+	type TopicDetector struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewTopicDetector"></a>
+### func NewTopicDetector
+
+	func NewTopicDetector(opts ...TopicDetectorOption) *TopicDetector
+
+NewTopicDetector creates a TopicDetector with the default keyword categories used by the thread\-based context partitioning system.
+
+The default categories are:
+
+	"work"      – task, feature, bug, code, build, deploy, api
+	"code"      – debug, error, panic, compile, test
+	"food"      – lunch, dinner, food, eat, recipe, restaurant
+	"personal"  – weekend, vacation, hobby, shopping
+	"health"    – workout, gym, exercise, running, diet, sleep
+	
+
+The default fallback topic is "general".
+
+<a name="TopicDetector.Detect"></a>
+### func \(\*TopicDetector\) Detect
+
+	func (td *TopicDetector) Detect(input string) string
+
+Detect returns the topic label that best matches the given input. It scores every topic by the number of keyword matches \(after lower\-casing the input\) and returns the topic with the highest score. When two topics tie, the first encountered wins; the default topic is returned when all scores are zero.
+
+Detect is safe for concurrent use.
+
+<a name="TopicDetector.GenerateThreadID"></a>
+### func \(\*TopicDetector\) GenerateThreadID
+
+	func (td *TopicDetector) GenerateThreadID(sessionID, topic string) string
+
+GenerateThreadID creates a deterministic thread ID from a session ID and topic label, using the last 4 runes of sessionID \(or the full string if shorter than 4 characters\).
+
+<a name="TopicDetectorOption"></a>
+## type TopicDetectorOption
+
+TopicDetectorOption configures a TopicDetector.
+
+	type TopicDetectorOption func(*TopicDetector)
+
+<a name="WithDefaultTopic"></a>
+### func WithDefaultTopic
+
+	func WithDefaultTopic(topic string) TopicDetectorOption
+
+WithDefaultTopic sets the default topic returned when no keywords match.
+
+<a name="WithLogger"></a>
+### func WithLogger
+
+	func WithLogger(l *slog.Logger) TopicDetectorOption
+
+WithLogger sets the logger used for debug\-level topic scoring output.
+
+<a name="WithTopicKeywords"></a>
+### func WithTopicKeywords
+
+	func WithTopicKeywords(topic string, keywords []string) TopicDetectorOption
+
+WithTopicKeywords adds keywords for the given topic.
 
 <a name="TrackerSessionState"></a>
 ## type TrackerSessionState

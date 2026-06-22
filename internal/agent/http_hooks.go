@@ -150,12 +150,6 @@ func (h *HTTPHook) OnSessionStart(ctx context.Context, state SessionLifecycleSta
 
 // OnSessionEnd implements SessionEndHook.
 func (h *HTTPHook) OnSessionEnd(ctx context.Context, state SessionLifecycleState, result SessionLifecycleResult) error {
-// OnSessionEnd implements SessionEndHook.
-func (h *HTTPHook) OnSessionEnd(ctx context.Context, state SessionLifecycleState, result SessionLifecycleResult) error {
-	payload := map[string]any{
-
-// OnSessionEnd implements SessionEndHook.
-func (h *HTTPHook) OnSessionEnd(ctx context.Context, state SessionLifecycleState, result SessionLifecycleResult) error {
 	payload := map[string]any{
 		"event":      "session_end",
 		"session_id": state.SessionID,

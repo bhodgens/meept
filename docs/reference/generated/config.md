@@ -15,30 +15,22 @@ Package config provides configuration loading and validation for meept.
 - Constants
 - [func EnsureDataDir\(cfg \*Config\) error](<#EnsureDataDir>)
 - [func ExpandEnvVars\(s string\) string](<#ExpandEnvVars>)
-- [func FilterEnabledAgents\(agents map\[string\]\*AgentDefinition\) map\[string\]\*AgentDefinition](<#FilterEnabledAgents>)
-- [func LoadAgentDefinitions\(configDirs \[\]string\) \(map\[string\]\*AgentDefinition, error\)](<#LoadAgentDefinitions>)
-- [func LoadAgentDefinitionsDefault\(cfg \*AgentsConfig\) \(map\[string\]\*AgentDefinition, error\)](<#LoadAgentDefinitionsDefault>)
-- [func LoadAgentDefinitionsJSON5\(path string\) \(map\[string\]\*AgentDefinition, error\)](<#LoadAgentDefinitionsJSON5>)
 - [func LoadJSON5\(path string, v any\) error](<#LoadJSON5>)
 - [func LoadJSON5WithDefault\(path string, v any\) error](<#LoadJSON5WithDefault>)
-- [func MergeAgentDefaults\(agent \*AgentDefinition\)](<#MergeAgentDefaults>)
 - [func ParseLogLevel\(level string\) slog.Level](<#ParseLogLevel>)
 - [func SaveMCPConfig\(path string, cfg \*MCPServersConfig\) error](<#SaveMCPConfig>)
 - [func StripJSON5Comments\(s string\) string](<#StripJSON5Comments>)
 - [func UnmarshalJSON5\(data \[\]byte, v any\) error](<#UnmarshalJSON5>)
-- [func ValidateAgentDefinition\(agent \*AgentDefinition\) error](<#ValidateAgentDefinition>)
 - [type AIInfraConfig](<#AIInfraConfig>)
 - [type ASTConfig](<#ASTConfig>)
 - [type AgentCompactionConfig](<#AgentCompactionConfig>)
+- [type AgentCompressionConfig](<#AgentCompressionConfig>)
 - [type AgentConfig](<#AgentConfig>)
-- [type AgentConstraintsConfig](<#AgentConstraintsConfig>)
-  - [func \(c AgentConstraintsConfig\) ToTimeout\(\) time.Duration](<#AgentConstraintsConfig.ToTimeout>)
-- [type AgentDefinition](<#AgentDefinition>)
-  - [func GetAgentsByRole\(agents map\[string\]\*AgentDefinition, role string\) \[\]\*AgentDefinition](<#GetAgentsByRole>)
 - [type AgentLintConfig](<#AgentLintConfig>)
 - [type AgentQueuesConfig](<#AgentQueuesConfig>)
 - [type AgentReflectionConfig](<#AgentReflectionConfig>)
 - [type AgentsConfig](<#AgentsConfig>)
+- [type AmbientExtractionConfig](<#AmbientExtractionConfig>)
 - [type AnalyticsConfig](<#AnalyticsConfig>)
 - [type BotsConfig](<#BotsConfig>)
 - [type BudgetConfig](<#BudgetConfig>)
@@ -67,8 +59,12 @@ Package config provides configuration loading and validation for meept.
 - [type DockerRuntimeConfig](<#DockerRuntimeConfig>)
 - [type EmbeddingConfig](<#EmbeddingConfig>)
 - [type EpisodicConfig](<#EpisodicConfig>)
+- [type EpistemicConfig](<#EpistemicConfig>)
 - [type ErrorsConfig](<#ErrorsConfig>)
+- [type FileWatcherHookConfig](<#FileWatcherHookConfig>)
 - [type HTTPTransportConfig](<#HTTPTransportConfig>)
+- [type HooksConfig](<#HooksConfig>)
+- [type InstructionConfig](<#InstructionConfig>)
 - [type IsolationConfig](<#IsolationConfig>)
 - [type LLMAdaptiveTimeoutConfig](<#LLMAdaptiveTimeoutConfig>)
 - [type LLMBrokerConfig](<#LLMBrokerConfig>)
@@ -127,6 +123,7 @@ Package config provides configuration loading and validation for meept.
 - [type QAgentConfig](<#QAgentConfig>)
 - [type QueueConfig](<#QueueConfig>)
 - [type RPCTransportConfig](<#RPCTransportConfig>)
+- [type ReasoningGlobalConfig](<#ReasoningGlobalConfig>)
 - [type RecordingConfig](<#RecordingConfig>)
 - [type ReviewConfig](<#ReviewConfig>)
 - [type RuntimeConfig](<#RuntimeConfig>)
@@ -172,7 +169,17 @@ Package config provides configuration loading and validation for meept.
 
 ## Constants
 
-<a name="AgentIDDispatcher"></a>Agent ID constants used throughout the codebase as identifiers.
+<a name="PresetDevelopment"></a>Preset name constants used throughout the codebase.
+
+	const (
+	    PresetDevelopment = "development"
+	    PresetDebugging   = "debugging"
+	    PresetPlanning    = "planning"
+	    PresetCreative    = "creative"
+	    PresetResearch    = "research"
+	)
+
+<a name="AgentIDDispatcher"></a>Agent ID constants used throughout the codebase as identifiers. These are the canonical IDs referenced by routing tables, review policies, and worker bootstrapping. The canonical definitions live in AGENT.md files under config/agents/\<id\>/AGENT.md; these constants exist so Go callers can reference agent IDs without string literals.
 
 	const (
 	    AgentIDDispatcher = "dispatcher"
@@ -183,6 +190,13 @@ Package config provides configuration loading and validation for meept.
 	    AgentIDCommitter  = "committer"
 	    AgentIDScheduler  = "scheduler"
 	    AgentIDChat       = "chat"
+	    AgentIDResearcher = "researcher"
+	
+	    // Knowledge-work specialists (Plan 2: Agent Roster Extension).
+	    AgentIDWriter    = "writer"
+	    AgentIDArchitect = "architect"
+	    AgentIDSkeptic   = "skeptic"
+	    AgentIDLibrarian = "librarian"
 	)
 
 <a name="AgentRoleDispatcher"></a>Agent role constants used for role validation and assignment.
@@ -192,16 +206,7 @@ Package config provides configuration loading and validation for meept.
 	    AgentRoleExecutor       = "executor"
 	    AgentRoleConversational = "conversational"
 	    AgentRoleReviewer       = "reviewer"
-	)
-
-<a name="PresetDevelopment"></a>Preset name constants used throughout the codebase.
-
-	const (
-	    PresetDevelopment = "development"
-	    PresetDebugging   = "debugging"
-	    PresetPlanning    = "planning"
-	    PresetCreative    = "creative"
-	    PresetResearch    = "research"
+	    AgentRoleBot            = "bot"
 	)
 
 <a name="EnsureDataDir"></a>
@@ -218,34 +223,6 @@ EnsureDataDir creates the data directory if it doesn't exist.
 
 ExpandEnvVars expands environment variables in a string. Uses a regex rather than os.ExpandEnv because configs use both $VAR and $\{VAR\} syntax \(os.ExpandEnv only supports the former\). Implements recursion depth limiting to detect cyclic env var references.
 
-<a name="FilterEnabledAgents"></a>
-## func FilterEnabledAgents
-
-	func FilterEnabledAgents(agents map[string]*AgentDefinition) map[string]*AgentDefinition
-
-FilterEnabledAgents returns only enabled agent definitions.
-
-<a name="LoadAgentDefinitions"></a>
-## func LoadAgentDefinitions
-
-	func LoadAgentDefinitions(configDirs []string) (map[string]*AgentDefinition, error)
-
-LoadAgentDefinitions loads all agent definitions from the configured directories. Later directories in the list override earlier ones \(for the same agent ID\).
-
-<a name="LoadAgentDefinitionsDefault"></a>
-## func LoadAgentDefinitionsDefault
-
-	func LoadAgentDefinitionsDefault(cfg *AgentsConfig) (map[string]*AgentDefinition, error)
-
-LoadAgentDefinitionsDefault loads agents from default locations. Prefers JSON5 single file, falls back to TOML directory format.
-
-<a name="LoadAgentDefinitionsJSON5"></a>
-## func LoadAgentDefinitionsJSON5
-
-	func LoadAgentDefinitionsJSON5(path string) (map[string]*AgentDefinition, error)
-
-LoadAgentDefinitionsJSON5 loads all agent definitions from a JSON5 file.
-
 <a name="LoadJSON5"></a>
 ## func LoadJSON5
 
@@ -259,13 +236,6 @@ LoadJSON5 reads a JSON5 file, expands environment variables, standardizes to JSO
 	func LoadJSON5WithDefault(path string, v any) error
 
 LoadJSON5WithDefault loads JSON5 from path, or returns default if not found.
-
-<a name="MergeAgentDefaults"></a>
-## func MergeAgentDefaults
-
-	func MergeAgentDefaults(agent *AgentDefinition)
-
-MergeAgentDefaults applies default values to an agent definition.
 
 <a name="ParseLogLevel"></a>
 ## func ParseLogLevel
@@ -294,13 +264,6 @@ StripJSON5Comments converts JSON5 to strict JSON, handling comments, trailing co
 	func UnmarshalJSON5(data []byte, v any) error
 
 UnmarshalJSON5 parses JSON5\-formatted bytes into a struct. Unlike LoadJSON5, this does NOT expand environment variables. It also handles Go\-style duration literals \(e.g. 30s, 2m\) and Go duration string values \(e.g. "30s"\) in JSON.
-
-<a name="ValidateAgentDefinition"></a>
-## func ValidateAgentDefinition
-
-	func ValidateAgentDefinition(agent *AgentDefinition) error
-
-ValidateAgentDefinition validates an agent definition.
 
 <a name="AIInfraConfig"></a>
 ## type AIInfraConfig
@@ -347,6 +310,49 @@ AgentCompactionConfig holds context compaction settings for the agent.
 	    TimeoutSeconds    int    `json:"timeout_seconds"      toml:"timeout_seconds"`
 	}
 
+<a name="AgentCompressionConfig"></a>
+## type AgentCompressionConfig
+
+AgentCompressionConfig holds prompt compression settings for tool outputs and conversation. When enabled, large tool results and conversation messages are compressed before being sent to the LLM, reducing token usage by 60\-90% while maintaining reversibility via CCR.
+
+	type AgentCompressionConfig struct {
+	    // Enabled turns on prompt compression for tool outputs and conversation history.
+	    // default: false (disabled until feature is stabilized)
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // MinTokensToCompress is the minimum token count for compression to be attempted.
+	    // Messages smaller than this are passed through uncompressed to avoid overhead.
+	    // default: 500
+	    MinTokensToCompress int `json:"min_tokens_to_compress" toml:"min_tokens_to_compress"`
+	    // Strategy is the compression strategy: "smart_crusher" (JSON), "code" (AST),
+	    // "log" (log files), "search" (grep results), or "auto" (content-aware routing).
+	    // default: "auto"
+	    Strategy string `json:"strategy" toml:"strategy"`
+	    // TTL is how long compressed originals are retained in the CCR store.
+	    // default: 1h
+	    TTL time.Duration `json:"ttl" toml:"ttl"`
+	    // LogCompression enables compression for log tool outputs.
+	    // default: true
+	    LogCompression bool `json:"log_compression" toml:"log_compression"`
+	    // CodeCompression enables AST-aware code compression for file reads and edits.
+	    // default: true
+	    CodeCompression bool `json:"code_compression" toml:"code_compression"`
+	    // SearchCompression enables compression for grep/search result outputs.
+	    // default: true
+	    SearchCompression bool `json:"search_compression" toml:"search_compression"`
+	    // JSONCompression enables SmartCrusher compression for JSON tool outputs.
+	    // default: true
+	    JSONCompression bool `json:"json_compression" toml:"json_compression"`
+	    // CompressUserMessages enables compression of user messages (not just tool outputs).
+	    // For coding agents, this is typically false (user messages are short queries).
+	    // Set true for document compression or RAG pipelines.
+	    // default: false
+	    CompressUserMessages bool `json:"compress_user_messages" toml:"compress_user_messages"`
+	    // TargetRatio is the target compression ratio (kept tokens / original tokens).
+	    // Only applies to lossy compressors. 0.3 = keep 30%, discard 70%.
+	    // default: 0.0 (use compressor defaults)
+	    TargetRatio float64 `json:"target_ratio" toml:"target_ratio"`
+	}
+
 <a name="AgentConfig"></a>
 ## type AgentConfig
 
@@ -375,58 +381,9 @@ AgentConfig holds agent loop settings.
 	    Reflection AgentReflectionConfig `json:"reflection" toml:"reflection"`
 	    // Lint holds linting and test runner settings
 	    Lint AgentLintConfig `json:"lint" toml:"lint"`
+	    // Compression holds prompt compression settings for tool outputs and conversation
+	    Compression AgentCompressionConfig `json:"compression" toml:"compression"`
 	}
-
-<a name="AgentConstraintsConfig"></a>
-## type AgentConstraintsConfig
-
-AgentConstraintsConfig holds agent operational constraints.
-
-	type AgentConstraintsConfig struct {
-	    MaxIterations    int `json:"max_iterations"      toml:"max_iterations"`
-	    TimeoutSeconds   int `json:"timeout_seconds"     toml:"timeout_seconds"`
-	    MaxTokensPerTurn int `json:"max_tokens_per_turn" toml:"max_tokens_per_turn"`
-	    MaxMemoryRefs    int `json:"max_memory_refs"     toml:"max_memory_refs"`
-	}
-
-<a name="AgentConstraintsConfig.ToTimeout"></a>
-### func \(AgentConstraintsConfig\) ToTimeout
-
-	func (c AgentConstraintsConfig) ToTimeout() time.Duration
-
-ToTimeout converts TimeoutSeconds to time.Duration.
-
-<a name="AgentDefinition"></a>
-## type AgentDefinition
-
-AgentDefinition represents an agent definition from a TOML or JSON5 file.
-
-	type AgentDefinition struct {
-	    ID          string `json:"id"           toml:"id"`
-	    Name        string `json:"name"         toml:"name"`
-	    Role        string `json:"role"         toml:"role"` // "dispatcher", "executor", "conversational", "reviewer"
-	    Description string `json:"description"  toml:"description"`
-	    Model       string `json:"model"        toml:"model"`
-	    Enabled     bool   `json:"enabled"      toml:"enabled"`
-	    CanDelegate bool   `json:"can_delegate" toml:"can_delegate"`
-	
-	    // Tools and capabilities
-	    AdditionalTools []string `json:"additional_tools" toml:"additional_tools"`
-	    Capabilities    []string `json:"capabilities"     toml:"capabilities"`
-	
-	    // Prompt composition
-	    PromptComponents []string `json:"prompt_components" toml:"prompt_components"`
-	
-	    // Constraints
-	    Constraints AgentConstraintsConfig `json:"constraints" toml:"constraints"`
-	}
-
-<a name="GetAgentsByRole"></a>
-### func GetAgentsByRole
-
-	func GetAgentsByRole(agents map[string]*AgentDefinition, role string) []*AgentDefinition
-
-GetAgentsByRole returns agents with a specific role.
 
 <a name="AgentLintConfig"></a>
 ## type AgentLintConfig
@@ -514,6 +471,20 @@ AgentsConfig holds agent configuration settings.
 	
 	    // DispatcherID is the agent ID that handles intake/routing.
 	    DispatcherID string `json:"dispatcher_id" toml:"dispatcher_id"`
+	}
+
+<a name="AmbientExtractionConfig"></a>
+## type AmbientExtractionConfig
+
+AmbientExtractionConfig holds settings for extracting epistemic claims from conversation turns without explicit user action.
+
+	type AmbientExtractionConfig struct {
+	    Enabled             bool     `json:"enabled"              toml:"enabled"`
+	    ConfidenceThreshold float64  `json:"confidence_threshold" toml:"confidence_threshold"`
+	    MaxPerTurn          int      `json:"max_per_turn"         toml:"max_per_turn"`
+	    ExcludeIntents      []string `json:"exclude_intents"      toml:"exclude_intents"`
+	    ExcludeCategories   []string `json:"exclude_categories"   toml:"exclude_categories"`
+	    ContextWindow       int      `json:"context_window"       toml:"context_window"`
 	}
 
 <a name="AnalyticsConfig"></a>
@@ -756,6 +727,8 @@ Config is the root configuration structure loaded from meept.toml.
 	    Notifications     NotificationsConfig     `json:"notifications,omitempty" toml:"notifications"`
 	    Runtime           RuntimeConfig           `json:"runtime"             toml:"runtime"`
 	    PTY               PTYConfig               `json:"pty"                  toml:"pty"`
+	    Reasoning         ReasoningGlobalConfig   `json:"reasoning"            toml:"reasoning"`
+	    // contains filtered or unexported fields
 	}
 
 <a name="DefaultConfig"></a>
@@ -806,13 +779,14 @@ ShutdownTimeout returns the configured shutdown timeout, falling back to 10s.
 DaemonConfig holds daemon\-specific settings.
 
 	type DaemonConfig struct {
-	    SocketPath         string        `json:"socket_path"        toml:"socket_path"`
-	    PIDFile            string        `json:"pid_file"            toml:"pid_file"`
-	    LogLevel           string        `json:"log_level"           toml:"log_level"`
-	    DataDir            string        `json:"data_dir"            toml:"data_dir"`
-	    ShutdownTimeout    string        `json:"shutdown_timeout"    toml:"shutdown_timeout"`
-	    ChatTimeoutSeconds int           `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
-	    Uploads            UploadsConfig `json:"uploads"             toml:"uploads"`
+	    SocketPath         string            `json:"socket_path"         toml:"socket_path"`
+	    PIDFile            string            `json:"pid_file"             toml:"pid_file"`
+	    LogLevel           string            `json:"log_level"             toml:"log_level"`
+	    DataDir            string            `json:"data_dir"             toml:"data_dir"`
+	    ShutdownTimeout    string            `json:"shutdown_timeout"     toml:"shutdown_timeout"`
+	    ChatTimeoutSeconds int               `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
+	    Uploads            UploadsConfig     `json:"uploads"              toml:"uploads"`
+	    UserInstructions   InstructionConfig `json:"user_instructions"    toml:"user_instructions"`
 	}
 
 <a name="DetectionConfig"></a>
@@ -912,6 +886,19 @@ EpisodicConfig holds episodic memory settings.
 	    MaxContextItems int  `json:"max_context_items" toml:"max_context_items"`
 	}
 
+<a name="EpistemicConfig"></a>
+## type EpistemicConfig
+
+EpistemicConfig holds epistemic memory platform settings.
+
+	type EpistemicConfig struct {
+	    AmbientExtraction     AmbientExtractionConfig `json:"ambient_extraction"      toml:"ambient_extraction"`
+	    AutoTrustWeight       float64                 `json:"auto_trust_weight"       toml:"auto_trust_weight"`
+	    DetectionThreshold    float64                 `json:"detection_threshold"     toml:"detection_threshold"`
+	    ReviewPromptFrequency string                  `json:"review_prompt_frequency" toml:"review_prompt_frequency"`
+	    MaxPendingReviews     int                     `json:"max_pending_reviews"     toml:"max_pending_reviews"`
+	}
+
 <a name="ErrorsConfig"></a>
 ## type ErrorsConfig
 
@@ -924,6 +911,22 @@ ErrorsConfig holds error handling settings.
 	    IncludeExamples bool `json:"include_examples" toml:"include_examples"`
 	    // MaxSuggestionLength limits the length of error suggestions
 	    MaxSuggestionLength int `json:"max_suggestion_length" toml:"max_suggestion_length"`
+	}
+
+<a name="FileWatcherHookConfig"></a>
+## type FileWatcherHookConfig
+
+FileWatcherHookConfig controls the file watcher hook that monitors the filesystem for file changes and invokes a callback when matching files are created, modified, renamed, or deleted.
+
+	type FileWatcherHookConfig struct {
+	    // Enabled turns the file watcher hook on or off.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // Pattern is a filepath.Match-style glob applied to file names.
+	    // Empty string matches all files.
+	    Pattern    string        `json:"pattern" toml:"pattern"`
+	    Debounce   time.Duration `json:"debounce" toml:"debounce"`
+	    Ignore     []string      `json:"ignore" toml:"ignore"`
+	    WatchedDir string        `json:"watched_dir" toml:"watched_dir"`
 	}
 
 <a name="HTTPTransportConfig"></a>
@@ -946,6 +949,24 @@ HTTPTransportConfig configures the HTTP REST transport.
 	    WSPath        string   `json:"ws_path"       toml:"ws_path"`           // WebSocket endpoint path
 	    MCP           bool     `json:"mcp"           toml:"mcp"`               // Enable MCP over HTTP+SSE
 	    MCPPath       string   `json:"mcp_path"      toml:"mcp_path"`          // MCP endpoint path
+	}
+
+<a name="HooksConfig"></a>
+## type HooksConfig
+
+HooksConfig holds configuration for all agent hooks.
+
+	type HooksConfig struct {
+	    FileWatcher FileWatcherHookConfig `json:"file_watcher" toml:"file_watcher"`
+	}
+
+<a name="InstructionConfig"></a>
+## type InstructionConfig
+
+InstructionConfig holds user instruction automation settings.
+
+	type InstructionConfig struct {
+	    Enabled bool `json:"enabled"       toml:"enabled"`
 	}
 
 <a name="IsolationConfig"></a>
@@ -1201,6 +1222,9 @@ MemoryConfig holds memory subsystem settings.
 	    Versioning MemoryVersioningConfig `json:"versioning" toml:"versioning"`
 	    // ProjectOverrides allows per-project character limit overrides
 	    ProjectOverrides map[string]MemoryLimitsConfig `json:"project_overrides" toml:"project_overrides"`
+	    // Epistemic holds epistemic memory settings (ambient extraction,
+	    // auto-trust weight, review prompts). See EpistemicConfig.
+	    Epistemic EpistemicConfig `json:"epistemic" toml:"epistemic"`
 	}
 
 <a name="MemoryConfig.GetLimitsForProject"></a>
@@ -1374,8 +1398,10 @@ NativeConfig holds native \(OS\-level\) speech recognition settings.
 NotificationsConfig holds configuration for desktop notifications.
 
 	type NotificationsConfig struct {
-	    Enabled   bool `json:"enabled,omitempty"       toml:"enabled"`
-	    Retention int  `json:"retention,omitempty"     toml:"retention"`
+	    Enabled      bool            `json:"enabled,omitempty"        toml:"enabled"`
+	    Retention    int             `json:"retention,omitempty"      toml:"retention"`
+	    MaxPerMinute int             `json:"max_per_minute,omitempty" toml:"max_per_minute"`
+	    EnableTypes  map[string]bool `json:"enable_types,omitempty"   toml:"enable_types"`
 	}
 
 <a name="OAuthConfig"></a>
@@ -1675,6 +1701,15 @@ RPCTransportConfig configures the Unix socket RPC transport.
 	    SocketPath string `json:"socket_path" toml:"socket_path"` // Unix socket path (default: "~/.meept/meept.sock")
 	}
 
+<a name="ReasoningGlobalConfig"></a>
+## type ReasoningGlobalConfig
+
+ReasoningGlobalConfig holds global reasoning/thinking settings, currently the tier→budget mapping that overrides the hardcoded defaults in internal/llm.defaultBudgetTable.
+
+	type ReasoningGlobalConfig struct {
+	    Budgets map[string]int `json:"budgets,omitempty" toml:"budgets"`
+	}
+
 <a name="RecordingConfig"></a>
 ## type RecordingConfig
 
@@ -1842,7 +1877,7 @@ SessionConfig holds session persistence and branching settings.
 	type SessionConfig struct {
 	    // Persistence enables session restore from SQLite on startup.
 	    Persistence bool `json:"persistence" toml:"persistence"`
-	    // Branching enables conversation branching.
+	    // Branching enables conversation branching (legacy flag, superseded by BranchesEnabled).
 	    Branching bool `json:"branching" toml:"branching"`
 	    // BranchSummaryThreshold is the minimum abandoned messages before summarization.
 	    BranchSummaryThreshold int `json:"branch_summary_threshold" toml:"branch_summary_threshold"`
@@ -1859,6 +1894,16 @@ SessionConfig holds session persistence and branching settings.
 	    CompactionThreshold int `json:"compaction_threshold" toml:"compaction_threshold"`
 	    // CompactionTargetRatio is the target context ratio after compaction.
 	    CompactionTargetRatio float64 `json:"compaction_target_ratio" toml:"compaction_target_ratio"`
+	
+	    // BranchesEnabled controls whether the legacy branch feature is available.
+	    // Default false (branches deprecated in favor of threads). When false,
+	    // BranchManager.NavigateToBranch returns an error. Tests that exercise
+	    // branching must opt in by setting this to true.
+	    BranchesEnabled bool `json:"branches_enabled" toml:"branches_enabled"`
+	
+	    // ThreadsEnabled controls whether the thread feature is available.
+	    // Default true (threads replace branches).
+	    ThreadsEnabled bool `json:"threads_enabled" toml:"threads_enabled"`
 	}
 
 <a name="ShadowAdaptersConfig"></a>

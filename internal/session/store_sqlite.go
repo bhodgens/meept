@@ -194,12 +194,13 @@ func (s *SQLiteStore) migrate() error {
 	if err := s.backfillFTS(); err != nil {
 		// Non-fatal: FTS may be unavailable on some SQLite builds.
 		s.logger.Warn("FTS backfill skipped", "error", err)
-
-	// Create session_threads table for thread-based context partitioning
-	if err := s.migrateThreadsTable(); err != nil {
-		return fmt.Errorf("failed to create session_threads table: %w", err)
 	}
 
+	// Create session_threads table for thread-based context partitioning.
+	// This MUST be outside the FTS error branch — otherwise threads are
+	// only created when FTS fails, and the table is missing on fresh DBs.
+	if err := s.migrateThreadsTable(); err != nil {
+		return fmt.Errorf("failed to create session_threads table: %w", err)
 	}
 
 	// Embedding dimension is configurable via WithEmbeddingDim (defaults to

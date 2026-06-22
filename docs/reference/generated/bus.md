@@ -38,6 +38,13 @@ Package bus provides a channel\-based pub/sub message bus.
 	    EventAgentIteration = "agent.iteration.completed"
 	)
 
+<a name="EventSessionStart"></a>Session lifecycle event topics.
+
+	const (
+	    EventSessionStart = "session.lifecycle.start"
+	    EventSessionEnd   = "session.lifecycle.end"
+	)
+
 <a name="EventQueueSteerAdded"></a>Queue event topics.
 
 	const (

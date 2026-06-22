@@ -497,7 +497,7 @@ type AgentLoop struct {
 
 
 	// File system hooks
-	fileWatcher *FileWatcher
+	fileWatcher *FileWatcherHook
 	// Session persistence (wired after construction)
 	sessionStore sessionStore
 
@@ -1557,6 +1557,41 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 
 	// Add final response to conversation
 	conv.AddAssistantMessage(finalResponse)
+
+	// Invoke epistemic hook (Path B: ambient extraction) after the turn
+	// completes. Best-effort: runs asynchronously with panic recovery so
+	// extraction failures never affect the user-facing response.
+	if l.epistemicHook != nil {
+		// Snapshot the conversation messages under the conversation's read
+		// lock, then release before dispatching the goroutine to avoid
+		// holding the lock across the extractor's I/O.
+		msgs := conv.GetMessages()
+		window := make([]string, 0, len(msgs))
+		for _, m := range msgs {
+			if m.Content != "" {
+				window = append(window, m.Content)
+			}
+		}
+		intent := l.agentID
+		if intent == "" {
+			intent = "chat"
+		}
+		hook := l.epistemicHook // capture to avoid race on l.epistemicHook
+		l.wg.Add(1)
+		go func() {
+			defer l.wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					l.logger.Warn("epistemic hook panicked", "error", r)
+				}
+			}()
+			// Use context.Background() because the parent context may be
+			// cancelled before the extractor finishes its I/O.
+			if _, err := hook.AfterTurn(context.Background(), intent, window); err != nil {
+				l.logger.Debug("epistemic hook completed with error", "error", err)
+			}
+		}()
+	}
 
 	// Queue prefetch for next turn (Hermes pattern)
 	// Prefetch is triggered with the last user message as query
@@ -3990,7 +4025,7 @@ func (l *AgentLoop) SetUploadStore(store llm.UploadStore) {
 
 // SetFileWatcher wire a file watcher for filesystem-level hooks.
 // Nil is safely ignored.
-func (l *AgentLoop) SetFileWatcher(fw *FileWatcher) {
+func (l *AgentLoop) SetFileWatcher(fw *FileWatcherHook) {
 	if fw == nil {
 		return
 	}

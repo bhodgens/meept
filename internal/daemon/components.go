@@ -960,6 +960,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		wireEpistemicHook(c.AgentLoop, c.MemoryManager, epistemicChatter, cfg.Memory, logger)
 	}
 
+	wireFileWatcherHook(c.AgentLoop, *cfg, logger)
 	// Store the memvid client from memory manager if active, or create standalone
 	if c.MemoryManager.IsMemvidActive() {
 		c.MemvidClient = c.MemoryManager.MemvidClient()
@@ -1438,6 +1439,18 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			SessionMaxAge:     30 * time.Minute,
 		})
 		logger.Info("Dispatcher initialized", "has_capability_matcher", capMatcher != nil)
+
+		// Wire thread router for thread-based context partitioning.
+		// The ThreadRouter needs a ThreadRoutable (session.Store satisfies it)
+		// to perform silent migration and thread lookups.
+		if c.SessionStore != nil {
+			threadRouter := agent.NewThreadRouter(
+				agent.WithThreadRouterSessionStore(c.SessionStore),
+				agent.WithThreadRouterLogger(logger.With("component", "thread-router")),
+			)
+			c.Dispatcher.SetThreadRouter(threadRouter)
+			logger.Info("ThreadRouter wired to dispatcher")
+		}
 
 		// Register platform tools now that agent registry is available
 		registerPlatformTools(c.ToolRegistry, c.AgentRegistry, c.StatusHandler, c.MCPManager, msgBus, logger)
@@ -3075,7 +3088,13 @@ func registerBuiltinTools(
 		registry.Register(builtin.NewMemoryRecallTool(memoryMgr))
 		// Memory reflect tool requires LLM client
 		if llmClient != nil {
-			registry.Register(builtin.NewMemoryReflectTool(memoryMgr, llmClient))
+			reflectTool := builtin.NewMemoryReflectTool(memoryMgr, llmClient)
+			// Wire the knowledge graph so the reflect tool can surface
+			// contradiction/superseded epistemic edges in its output.
+			if g := memoryMgr.Graph(); g != nil {
+				reflectTool.SetGraph(g)
+			}
+			registry.Register(reflectTool)
 			logger.Debug("Registered memory_reflect tool")
 		}
 		logger.Debug("Registered memory curation tools")

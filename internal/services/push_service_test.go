@@ -5,8 +5,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/caimlas/meept/internal/bus"
-	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -19,23 +17,17 @@ func newFakeBus() *fakeBus {
 	return &fakeBus{topics: make(map[string][]*models.BusMessage)}
 }
 
-func (f *fakeBus) Publish(topic string, msg *models.BusMessage) {
+func (f *fakeBus) Publish(topic string, msg *models.BusMessage) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.topics[topic] = append(f.topics[topic], msg)
+	return 1
 }
-
-func (f *fakeBus) Subscribe(id, topic string) *bus.Subscriber {
-	return nil // push doesn't subscribe
-}
-
-func (f *fakeBus) Unsubscribe(*bus.Subscriber) {}
 
 func TestNewPushService(t *testing.T) {
 	b := newFakeBus()
-	store := &fakeStore{}
 
-	s := NewPushService(store, b, nil)
+	s := NewPushService(b, nil)
 	if s == nil {
 		t.Fatal("expected non-nil PushService")
 	}
@@ -46,9 +38,8 @@ func TestNewPushService(t *testing.T) {
 
 func TestPush_NilRequest(t *testing.T) {
 	b := newFakeBus()
-	store := &fakeStore{}
 
-	s := NewPushService(store, b, nil)
+	s := NewPushService(b, nil)
 	_, err := s.Push(context.Background(), nil)
 	if err == nil {
 		t.Error("expected error for nil request")
@@ -57,9 +48,8 @@ func TestPush_NilRequest(t *testing.T) {
 
 func TestPush_EmptyContent(t *testing.T) {
 	b := newFakeBus()
-	store := &fakeStore{}
 
-	s := NewPushService(store, b, nil)
+	s := NewPushService(b, nil)
 	_, err := s.Push(context.Background(), &PushRequest{
 		Content: "",
 	})
@@ -69,8 +59,7 @@ func TestPush_EmptyContent(t *testing.T) {
 }
 
 func TestPush_WithoutBus(t *testing.T) {
-	store := &fakeStore{}
-	s := NewPushService(store, nil, nil)
+	s := NewPushService(nil, nil)
 	_, err := s.Push(context.Background(), &PushRequest{
 		Content: "hello",
 	})
@@ -81,9 +70,8 @@ func TestPush_WithoutBus(t *testing.T) {
 
 func TestPush_PublishesMessage(t *testing.T) {
 	b := newFakeBus()
-	store := &fakeStore{}
 
-	s := NewPushService(store, b, nil)
+	s := NewPushService(b, nil)
 
 	result, err := s.Push(context.Background(), &PushRequest{
 		Content:    "test notification",
@@ -102,9 +90,8 @@ func TestPush_PublishesMessage(t *testing.T) {
 
 func TestPush_Defaults(t *testing.T) {
 	b := newFakeBus()
-	store := &fakeStore{}
 
-	s := NewPushService(store, b, nil)
+	s := NewPushService(b, nil)
 
 	result, err := s.Push(context.Background(), &PushRequest{
 		Content: "test",
@@ -117,9 +104,8 @@ func TestPush_Defaults(t *testing.T) {
 
 func TestPush_MultiSession(t *testing.T) {
 	b := newFakeBus()
-	store := &fakeStore{}
 
-	s := NewPushService(store, b, nil)
+	s := NewPushService(b, nil)
 
 	result, err := s.Push(context.Background(), &PushRequest{
 		Content:    "broadcast",
@@ -136,14 +122,13 @@ func TestPush_MultiSession(t *testing.T) {
 
 func TestPush_ContextCanceled(t *testing.T) {
 	b := newFakeBus()
-	store := &fakeStore{}
 
-	s := NewPushService(store, b, nil)
+	s := NewPushService(b, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 
-	result, err := s.Push(ctx, &PushRequest{
+	result, _ := s.Push(ctx, &PushRequest{
 		Content:    "should be skipped",
 		SessionIDs: []string{"sess-1"},
 	})
@@ -170,9 +155,8 @@ func TestPushPriority_Values(t *testing.T) {
 
 func TestPush_BusMessageFormat(t *testing.T) {
 	b := newFakeBus()
-	store := &fakeStore{}
 
-	s := NewPushService(store, b, nil)
+	s := NewPushService(b, nil)
 
 	_, err := s.Push(context.Background(), &PushRequest{
 		Content:    "format check",
@@ -213,9 +197,8 @@ func TestPush_BusMessageFormat(t *testing.T) {
 
 func TestPush_PerSessionTopic(t *testing.T) {
 	b := newFakeBus()
-	store := &fakeStore{}
 
-	s := NewPushService(store, b, nil)
+	s := NewPushService(b, nil)
 
 	_, err := s.Push(context.Background(), &PushRequest{
 		Content:    "per session test",
@@ -237,61 +220,4 @@ func TestPush_PerSessionTopic(t *testing.T) {
 			t.Errorf("expected message on topic %q", topic)
 		}
 	}
-}
-
-// --- test helpers ---
-
-type fakeStore struct{}
-
-func (f *fakeStore) Create(name string) (*session.Session, error)                    { return nil, nil }
-func (f *fakeStore) Get(string) *session.Session            { return nil }
-func (f *fakeStore) GetByConversationID(string) *session.Session  { return nil }
-func (f *fakeStore) GetMostRecent() *session.Session          { return nil }
-func (f *fakeStore) List() ([]*session.Session, error)        { return nil, nil }
-func (f *fakeStore) Delete(string) bool                       { return false }
-func (f *fakeStore) Attach(string, string) error            { return nil }
-func (f *fakeStore) Detach(string, string) error            { return nil }
-func (f *fakeStore) UpdateActivity(string) error            { return nil }
-func (f *fakeStore) AddWorker(string, string) error         { return nil }
-func (f *fakeStore) RemoveWorker(string, string) error      { return nil }
-func (f *fakeStore) SaveMessages(string, []session.Message) error   { return nil }
-func (f *fakeStore) GetMessages(string, int, int) ([]session.Message, error) {
-	return nil, nil
-}
-func (f *fakeStore) GetMessageCount(string) (int, error)     { return 0, nil }
-func (f *fakeStore) UpdateDescription(string, string) error  { return nil }
-func (f *fakeStore) UpdateName(string, string) error         { return nil }
-func (f *fakeStore) HasResponses(string) (bool, error)       { return false, nil }
-func (f *fakeStore) Close() error                            { return nil }
-
-func (f *fakeStore) GetLeafMessageID(string) (int64, error)           { return 0, nil }
-func (f *fakeStore) SetLeafMessageID(string, int64) error             { return nil }
-func (f *fakeStore) GetMessagePath(string, int64) ([]session.Message, error) {
-	return nil, nil
-}
-func (f *fakeStore) GetMessageBranches(string) ([]session.Branch, error) { return nil, nil }
-func (f *fakeStore) NavigateToBranch(string, int64) (int64, error)     { return 0, nil }
-func (f *fakeStore) CreateBranch(string, int64, int64, string) (*session.Branch, error) {
-	return nil, nil
-}
-func (f *fakeStore) GetBranch(string, string) (*session.Branch, error) { return nil, nil }
-func (f *fakeStore) DeleteBranch(string, string) error               { return nil }
-func (f *fakeStore) ListBranches(string) ([]session.Branch, error)   { return nil, nil }
-func (f *fakeStore) GetTree(string) ([]session.TreeNode, error)      { return nil, nil }
-func (f *fakeStore) Compact(string, map[string]any) (map[string]any, error) {
-	return map[string]any{}, nil
-}
-func (f *fakeStore) Search(string, int) ([]*session.Session, error) { return nil, nil }
-func (f *fakeStore) Save(context.Context, *session.Session) error { return nil }
-func (f *fakeStore) ListWithLimit(int, int) ([]*session.Session, error) {
-	return nil, nil
-}
-func (f *fakeStore) GetByClientID(string) (*session.Session, error) { return nil, nil }
-func (f *fakeStore) GetThreadList(string) ([]session.Thread, error) { return nil, nil }
-func (f *fakeStore) GetOrCreateThread(string, string) (*session.Thread, error) {
-	return nil, nil
-}
-func (f *fakeStore) ArchiveThread(string) error             { return nil }
-func (f *fakeStore) ListThreadSummary(context.Context) ([]session.ThreadSummary, error) {
-	return nil, nil
 }

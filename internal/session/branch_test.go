@@ -36,6 +36,7 @@ func helperBranchManager(t *testing.T, summarizer BranchSummarizer) (*BranchMana
 	t.Helper()
 	store, _ := testHelper(t)
 	cfg := config.SessionConfig{
+		BranchesEnabled:        true,
 		BranchSummaryThreshold: 3,
 	}
 	bm := NewBranchManager(store, summarizer, cfg, slog.Default())
@@ -246,6 +247,7 @@ func TestNavigateToBranch_ShortBranchNoSummary(t *testing.T) {
 		},
 	}
 	cfg := config.SessionConfig{
+		BranchesEnabled:        true,
 		BranchSummaryThreshold: 10, // High threshold so 2 messages won't trigger
 	}
 	store, _ := testHelper(t)

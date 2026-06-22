@@ -18,6 +18,10 @@ Package scheduler provides cron\-based job scheduling for the meept daemon.
   - [func \(j \*AgentJob\) Execute\(ctx context.Context\) error](<#AgentJob.Execute>)
 - [type AgentJobConfig](<#AgentJobConfig>)
 - [type GetJobParams](<#GetJobParams>)
+- [type InstructionScheduler](<#InstructionScheduler>)
+  - [func NewInstructionScheduler\(s \*Scheduler, store \*preferences.Store, logger \*slog.Logger\) \*InstructionScheduler](<#NewInstructionScheduler>)
+  - [func \(s \*InstructionScheduler\) Start\(ctx context.Context\) error](<#InstructionScheduler.Start>)
+  - [func \(s \*InstructionScheduler\) SyncCronInstructions\(\) error](<#InstructionScheduler.SyncCronInstructions>)
 - [type Job](<#Job>)
   - [func CreateJob\(cfg JobConfig, msgBus \*bus.MessageBus\) \(Job, error\)](<#CreateJob>)
   - [func CreateJobWithDeps\(cfg JobConfig, deps \*JobDependencies\) \(Job, error\)](<#CreateJobWithDeps>)
@@ -39,6 +43,8 @@ Package scheduler provides cron\-based job scheduling for the meept daemon.
 - [type MemoryOptimizerAdapter](<#MemoryOptimizerAdapter>)
   - [func \(a \*MemoryOptimizerAdapter\) ConsolidateMemory\(ctx context.Context\) error](<#MemoryOptimizerAdapter.ConsolidateMemory>)
   - [func \(a \*MemoryOptimizerAdapter\) UpdateGraphMetrics\(ctx context.Context\) error](<#MemoryOptimizerAdapter.UpdateGraphMetrics>)
+- [type NotificationEmitter](<#NotificationEmitter>)
+- [type NotificationEvent](<#NotificationEvent>)
 - [type OptimizationJob](<#OptimizationJob>)
   - [func NewOptimizationJob\(cfg JobConfig, deps \*JobDependencies\) \(\*OptimizationJob, error\)](<#NewOptimizationJob>)
   - [func \(j \*OptimizationJob\) Execute\(ctx context.Context\) error](<#OptimizationJob.Execute>)
@@ -47,6 +53,7 @@ Package scheduler provides cron\-based job scheduling for the meept daemon.
   - [func WithDataDir\(dir string\) Option](<#WithDataDir>)
   - [func WithJobDependencies\(deps \*JobDependencies\) Option](<#WithJobDependencies>)
   - [func WithLogger\(logger \*slog.Logger\) Option](<#WithLogger>)
+  - [func WithNotificationEmitter\(emitter NotificationEmitter\) Option](<#WithNotificationEmitter>)
 - [type PauseJobParams](<#PauseJobParams>)
 - [type RPCHandler](<#RPCHandler>)
   - [func NewRPCHandler\(scheduler \*Scheduler\) \*RPCHandler](<#NewRPCHandler>)
@@ -201,6 +208,7 @@ AgentJobConfig holds configuration for agent jobs.
 	    Prompt      string            `json:"prompt"`
 	    Context     map[string]string `json:"context,omitempty"`
 	    Model       string            `json:"model,omitempty"`
+	    AgentID     string            `json:"agent_id,omitempty"`
 	    MaxTokens   int               `json:"max_tokens,omitempty"`
 	    Temperature float64           `json:"temperature,omitempty"`
 	}
@@ -213,6 +221,36 @@ GetJobParams represents the parameters for getting a job.
 	type GetJobParams struct {
 	    JobID string `json:"job_id"`
 	}
+
+<a name="InstructionScheduler"></a>
+## type InstructionScheduler
+
+InstructionScheduler syncs user instructions with the scheduler.
+
+	type InstructionScheduler struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewInstructionScheduler"></a>
+### func NewInstructionScheduler
+
+	func NewInstructionScheduler(s *Scheduler, store *preferences.Store, logger *slog.Logger) *InstructionScheduler
+
+NewInstructionScheduler creates a new instruction scheduler.
+
+<a name="InstructionScheduler.Start"></a>
+### func \(\*InstructionScheduler\) Start
+
+	func (s *InstructionScheduler) Start(ctx context.Context) error
+
+Start begins syncing cron instructions.
+
+<a name="InstructionScheduler.SyncCronInstructions"></a>
+### func \(\*InstructionScheduler\) SyncCronInstructions
+
+	func (s *InstructionScheduler) SyncCronInstructions() error
+
+SyncCronInstructions loads cron\-type instructions and creates/removes jobs.
 
 <a name="Job"></a>
 ## type Job
@@ -447,6 +485,28 @@ MemoryOptimizerAdapter wraps separate functions to satisfy MemoryOptimizer.
 
 
 
+<a name="NotificationEmitter"></a>
+## type NotificationEmitter
+
+NotificationEmitter is a minimal interface for publishing notification events. Defined here to avoid an import cycle \(internal/comm/http depends on packages that transitively depend on internal/scheduler\).
+
+	type NotificationEmitter interface {
+	    Publish(event *NotificationEvent)
+	}
+
+<a name="NotificationEvent"></a>
+## type NotificationEvent
+
+NotificationEvent represents a notification event sent to HTTP clients.
+
+	type NotificationEvent struct {
+	    ID        string
+	    Timestamp string
+	    Type      string
+	    Title     string
+	    Message   string
+	}
+
 <a name="OptimizationJob"></a>
 ## type OptimizationJob
 
@@ -506,6 +566,13 @@ WithJobDependencies sets the job dependencies for extended job types \(optimizat
 	func WithLogger(logger *slog.Logger) Option
 
 WithLogger sets the logger for the scheduler.
+
+<a name="WithNotificationEmitter"></a>
+### func WithNotificationEmitter
+
+	func WithNotificationEmitter(emitter NotificationEmitter) Option
+
+WithNotificationEmitter sets the notification emitter for sending job completion events to HTTP clients.
 
 <a name="PauseJobParams"></a>
 ## type PauseJobParams

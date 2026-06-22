@@ -65,7 +65,6 @@ func NewThreadRouter(opts ...ThreadRouterOption) *ThreadRouter {
 // If the session has no threads (pre-upgrade), it performs silent migration
 // by creating a "general" thread using the existing ConversationID.
 // If the requested thread does not exist, it creates one.
-// Must be called with tr.mu held (write mode).
 func (tr *ThreadRouter) ensureThread(sess *session.Session, threadID, topicLabel string) (*session.Thread, error) {
 	// Silent migration: session exists but has no threads yet.
 	if sess.Threads == nil && sess.ConversationID != "" {
@@ -103,20 +102,22 @@ func (tr *ThreadRouter) generateThreadID(sessionID, topic string) string {
 	return tr.detector.GenerateThreadID(sessionID, topic)
 }
 
-// GetThreadConversationID returns the conversation ID for the thread that
+// GetThreadConversationID returns the conversation id for the thread that
 // best matches the input. It performs silent migration (creating a "general"
-// thread from the session's existing conversation ID) when needed.
-// If no session store is available, it falls back to using the session ID
+// thread from the session's existing conversation id) when needed.
+// If no session store is available, it falls back to using the session id
 // directly (no thread isolation).
 func (tr *ThreadRouter) GetThreadConversationID(ctx context.Context, sessionID, input string) (string, error) {
-	tr.mu.Lock()
-	defer tr.mu.Unlock()
+	tr.mu.RLock()
+	store := tr.sessionStore
+	logger := tr.logger
+	tr.mu.RUnlock()
 
-	if tr.sessionStore == nil {
+	if store == nil {
 		return sessionID, nil
 	}
 
-	sess := tr.sessionStore.Get(sessionID)
+	sess := store.Get(sessionID)
 	if sess == nil {
 		return sessionID, nil
 	}
@@ -126,8 +127,8 @@ func (tr *ThreadRouter) GetThreadConversationID(ctx context.Context, sessionID, 
 
 	thread, err := tr.ensureThread(sess, threadID, topic)
 	if err != nil {
-		if tr.logger != nil {
-			tr.logger.Warn("thread routing failed, falling back to session ID",
+		if logger != nil {
+			logger.Warn("thread routing failed, falling back to session id",
 				"session", sessionID, "error", err)
 		}
 		return sessionID, nil
@@ -143,14 +144,15 @@ func (tr *ThreadRouter) detectTopic(input string) string {
 
 // SetActiveThread marks the given thread as active for the session.
 func (tr *ThreadRouter) SetActiveThread(sessionID, threadID string) error {
-	tr.mu.Lock()
-	defer tr.mu.Unlock()
+	tr.mu.RLock()
+	store := tr.sessionStore
+	tr.mu.RUnlock()
 
-	if tr.sessionStore == nil {
+	if store == nil {
 		return fmt.Errorf("session store not configured")
 	}
 
-	sess := tr.sessionStore.Get(sessionID)
+	sess := store.Get(sessionID)
 	if sess == nil {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
@@ -176,16 +178,38 @@ func (tr *ThreadRouter) SetActiveThread(sessionID, threadID string) error {
 // GetActiveThread returns the active thread for the session.
 func (tr *ThreadRouter) GetActiveThread(sessionID string) (*session.Thread, error) {
 	tr.mu.RLock()
-	defer tr.mu.RUnlock()
+	store := tr.sessionStore
+	tr.mu.RUnlock()
 
-	if tr.sessionStore == nil {
+	if store == nil {
 		return nil, nil
 	}
 
-	sess := tr.sessionStore.Get(sessionID)
+	sess := store.Get(sessionID)
 	if sess == nil {
 		return nil, fmt.Errorf("session not found: %s", sessionID)
 	}
 
 	return sess.GetActiveThread(), nil
+}
+
+// CrossThreadContext returns a context string assembled from inactive
+// thread summaries so the active thread has continuity with prior topics.
+// Returns empty string when there are no threads or no session store.
+func (tr *ThreadRouter) CrossThreadContext(sessionID, activeThreadID string) string {
+	tr.mu.RLock()
+	store := tr.sessionStore
+	tr.mu.RUnlock()
+	if store == nil {
+		return ""
+	}
+	sess := store.Get(sessionID)
+	if sess == nil || len(sess.Threads) == 0 {
+		return ""
+	}
+	threads := make([]*session.Thread, 0, len(sess.Threads))
+	for _, t := range sess.Threads {
+		threads = append(threads, t)
+	}
+	return session.AssembleThreadContext(threads, activeThreadID)
 }

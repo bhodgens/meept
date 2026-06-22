@@ -78,6 +78,25 @@ func (s *ConfigService) getMenubarConfigPath() string {
 	return filepath.Join(s.meeptDir, "menubar.json5")
 }
 
+// getMeeptConfigPath returns the path to meept.json5 (the main config).
+func (s *ConfigService) getMeeptConfigPath() string {
+	return filepath.Join(s.meeptDir, "meept.json5")
+}
+
+// LoadMeeptConfig loads the meept.json5 content (raw JSON5 text).
+// Returns ("", nil) when the file does not exist, mirroring LoadMenubarConfig.
+func (s *ConfigService) LoadMeeptConfig() (string, error) {
+	path := s.getMeeptConfigPath()
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return "", nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read meept config: %w", err)
+	}
+	return string(data), nil
+}
+
 // NormalizeJSON5 converts JSON5 text (with comments, trailing commas, unquoted keys)
 // to strict JSON using hujson.Standardize.
 func (s *ConfigService) NormalizeJSON5(content string) (string, error) {

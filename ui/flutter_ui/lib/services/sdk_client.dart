@@ -682,6 +682,71 @@ class SdkApiClient {
         .toList();
   }
 
+  // ===== Epistemic Memory Destructive Actions =====
+  //
+  // These methods drive the two-phase confirmation protocol per the
+  // epistemic-memory spec: phase 1 returns a preview from the daemon-side
+  // tool, phase 2 performs the mutation when `confirmed: true`.  The Flutter
+  // UI renders DestructiveConfirmationDialog between phases.
+
+  /// mark_superseded — flip is_current=0 on oldId, redirect edges to newId.
+  Future<Map<String, dynamic>> markSuperseded({
+    required String oldId,
+    required String newId,
+    bool confirmed = false,
+  }) async {
+    return _post('/api/v1/memory/supersede', body: {
+      'old_id': oldId,
+      'new_id': newId,
+      'confirmed': confirmed,
+    });
+  }
+
+  /// mark_resolved — close a prediction with the given outcome.
+  Future<Map<String, dynamic>> markResolved({
+    required String predictionId,
+    required String outcome,
+    bool confirmed = false,
+  }) async {
+    return _post('/api/v1/memory/predictions/$predictionId/resolve', body: {
+      'outcome': outcome,
+      'confirmed': confirmed,
+    });
+  }
+
+  /// record_review — close a decision with the actual outcome.
+  Future<Map<String, dynamic>> recordDecisionReview({
+    required String decisionId,
+    required String actualOutcome,
+    bool confirmed = false,
+  }) async {
+    return _post('/api/v1/memory/decisions/$decisionId/review', body: {
+      'actual_outcome': actualOutcome,
+      'confirmed': confirmed,
+    });
+  }
+
+  /// reject_claim — mark an auto-claim as rejected.
+  Future<Map<String, dynamic>> rejectClaim({
+    required String id,
+    bool confirmed = false,
+  }) async {
+    return _post('/api/v1/memory/claims/$id/reject', body: {
+      'confirmed': confirmed,
+    });
+  }
+
+  /// purge_auto_claims — bulk delete auto claims matching the filter.  The
+  /// filter body is the confirmation payload's `details` map, forwarded
+  /// verbatim along with the confirmed flag.
+  Future<Map<String, dynamic>> purgeAutoClaims({
+    required Map<String, dynamic> body,
+  }) async {
+    final enriched = Map<String, dynamic>.from(body);
+    enriched['action'] = 'purge_auto_claims';
+    return _post('/api/v1/memory/auto-claims/purge', body: enriched);
+  }
+
   // ===== Skills =====
 
   Future<List<sdk.SkillInfo>> getSkills({String? category}) async {

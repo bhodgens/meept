@@ -85,6 +85,7 @@ type Config struct {
 	Runtime           RuntimeConfig           `json:"runtime"             toml:"runtime"`
 	PTY               PTYConfig               `json:"pty"                  toml:"pty"`
 	Reasoning         ReasoningGlobalConfig   `json:"reasoning"            toml:"reasoning"`
+tHooks               HooksConfig            `json:"hooks"               toml:"hooks"`
 }
 
 // ReasoningGlobalConfig holds global reasoning/thinking settings, currently
@@ -2012,4 +2013,23 @@ type TTSBehaviorConfig struct {
 	InterruptOnNewMsg bool `json:"interrupt_on_new_msg" toml:"interrupt_on_new_msg"`
 	QueueMessages     bool `json:"queue_messages"      toml:"queue_messages"`
 	MaxQueueSize      int  `json:"max_queue_size"      toml:"max_queue_size"`
+}
+
+// HooksConfig holds configuration for all agent hooks.
+type HooksConfig struct {
+	FileWatcher FileWatcherHookConfig `json:"file_watcher" toml:"file_watcher"`
+}
+
+// FileWatcherHookConfig controls the file watcher hook that monitors the
+// filesystem for file changes and invokes a callback when matching files
+// are created, modified, renamed, or deleted.
+type FileWatcherHookConfig struct {
+	// Enabled turns the file watcher hook on or off.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// Pattern is a filepath.Match-style glob applied to file names.
+	// Empty string matches all files.
+	Pattern             string `json:"pattern" toml:"pattern"`
+	Debounce            time.Duration `json:"debounce" toml:"debounce"`
+	Ignore              []string `json:"ignore" toml:"ignore"`
+	WatchedDir          string `json:"watched_dir" toml:"watched_dir"`
 }

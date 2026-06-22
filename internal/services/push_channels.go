@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // PushMessage represents a formatted push notification.
@@ -106,9 +107,14 @@ func (c *BusPushChannel) Push(ctx context.Context, sessionID string, msg *PushMe
 		"session_id": sessionID,
 		"message":    msg,
 	}
-	_, err := c.bus.PublishSync(fmt.Sprintf("push.%s", sessionID), payload)
+	busMsg, err := models.NewBusMessage(models.MessageType(fmt.Sprintf("push.%s", sessionID)), "push-service", payload)
 	if err != nil {
-		c.logger.Debug("failed to publish push notification", "session", sessionID, "error", err)
+		c.logger.Debug("failed to build push notification", "session", sessionID, "error", err)
+		return err
 	}
-	return err
+	delivered := c.bus.Publish(fmt.Sprintf("push.%s", sessionID), busMsg)
+	if delivered == 0 {
+		c.logger.Debug("push notification had no subscribers", "session", sessionID)
+	}
+	return nil
 }

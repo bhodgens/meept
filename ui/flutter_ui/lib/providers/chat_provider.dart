@@ -1,19 +1,130 @@
 import 'dart:async';
+import 'dart:convert';
 
 /// Timeout for _isSending flag to prevent permanent lockout
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
 import '../services/sdk_client.dart';
 import '../services/websocket_service.dart';
 import 'providers.dart'; // exports tts_provider.dart
 
+/// Detect a phase-1 destructive-action confirmation request in a WebSocket
+/// message map.  Returns the confirmation payload (a Map with
+/// requires_confirmation/action/summary/details) or null when the message is
+/// not a confirmation request.
+///
+/// The daemon-side agent loop normally auto-declines phase-1 responses when
+/// no interactive UI is available, but when a WS-connected client is present
+/// the raw tool result (with requires_confirmation: true) may be forwarded
+/// through agent_progress or chat_message events.  We also detect the
+/// declined form so the UI can optionally re-prompt the user.
+Map<String, dynamic>? _extractConfirmationRequest(Map<String, dynamic> data) {
+  // Direct phase-1 confirmation request.
+  if (data['requires_confirmation'] == true) {
+    return data;
+  }
+
+  // Some daemon configurations embed the tool result JSON inside the
+  // agent_progress message field or the chat message content.  Try to
+  // parse it out.
+  final message = data['message'];
+  if (message is String) {
+    final extracted = _tryParseConfirmationJson(message);
+    if (extracted != null) return extracted;
+  }
+
+  final content = data['content'];
+  if (content is String) {
+    final extracted = _tryParseConfirmationJson(content);
+    if (extracted != null) return extracted;
+  }
+
+  // Check nested result/data fields.
+  final result = data['result'];
+  if (result is Map<String, dynamic> && result['requires_confirmation'] == true) {
+    return result;
+  }
+
+  final dataField = data['data'];
+  if (dataField is Map<String, dynamic>) {
+    if (dataField['requires_confirmation'] == true) {
+      return dataField;
+    }
+    final nestedResult = dataField['result'];
+    if (nestedResult is Map<String, dynamic> &&
+        nestedResult['requires_confirmation'] == true) {
+      return nestedResult;
+    }
+  }
+
+  return null;
+}
+
+/// Try to extract a JSON object containing requires_confirmation from a
+/// string that may be a JSON blob or contain embedded JSON.
+Map<String, dynamic>? _tryParseConfirmationJson(String text) {
+  // Fast path: direct JSON.
+  try {
+    final decoded = jsonDecode(text);
+    if (decoded is Map<String, dynamic> &&
+        decoded['requires_confirmation'] == true) {
+      return decoded;
+    }
+  } catch (_) {
+    // Not pure JSON — try to find an embedded JSON object.
+  }
+
+  // Slow path: look for an embedded JSON blob containing
+  // requires_confirmation.  This handles cases where the daemon wraps the
+  // tool result inside a larger message.
+  final idx = text.indexOf('"requires_confirmation"');
+  if (idx < 0) return null;
+
+  // Walk backwards to find the opening brace.
+  var braceIdx = idx;
+  while (braceIdx > 0 && text[braceIdx] != '{') {
+    braceIdx--;
+  }
+  if (text[braceIdx] != '{') return null;
+
+  // Walk forwards to find the matching closing brace.
+  var depth = 0;
+  var endIdx = braceIdx;
+  for (var i = braceIdx; i < text.length; i++) {
+    if (text[i] == '{') {
+      depth++;
+    } else if (text[i] == '}') {
+      depth--;
+      if (depth == 0) {
+        endIdx = i;
+        break;
+      }
+    }
+  }
+  if (depth != 0) return null;
+
+  try {
+    final decoded = jsonDecode(text.substring(braceIdx, endIdx + 1));
+    if (decoded is Map<String, dynamic> &&
+        decoded['requires_confirmation'] == true) {
+      return decoded;
+    }
+  } catch (_) {
+    // Malformed JSON — give up.
+  }
+
+  return null;
+}
+
 /// Maximum number of messages to keep in memory
 const int _maxMessages = 500;
 
 const _unset = Object();
 const _progressUnset = Object();
+const _confirmUnset = Object();
 
 /// Send endpoint type — distinct route for normal, steer, and follow-up messages.
 enum _SendEndpoint { normal, steer, followUp }
@@ -31,12 +142,19 @@ class ChatState {
   final String? error;
   final AgentProgress? currentProgress;
 
+  /// When non-null, a destructive tool returned a phase-1 confirmation
+  /// request and the UI must prompt the user.  The value is the confirmation
+  /// payload (action, summary, details, ...) returned by the tool.  The UI
+  /// calls [ChatNotifier.resolveConfirmation] to confirm or decline.
+  final Map<String, dynamic>? pendingConfirmation;
+
   const ChatState({
     this.messages = const [],
     this.isLoading = false,
     this.isAgentProcessing = false,
     this.error,
     this.currentProgress,
+    this.pendingConfirmation,
   });
 
   ChatState copyWith({
@@ -45,6 +163,7 @@ class ChatState {
     bool? isAgentProcessing,
     Object? error = _unset,
     Object? currentProgress = _progressUnset,
+    Object? pendingConfirmation = _confirmUnset,
   }) {
     // Limit messages to prevent memory leaks
     List<ChatMessage> limitedMessages = messages ?? this.messages;
@@ -60,6 +179,9 @@ class ChatState {
       currentProgress: identical(currentProgress, _progressUnset)
           ? this.currentProgress
           : currentProgress as AgentProgress?,
+      pendingConfirmation: identical(pendingConfirmation, _confirmUnset)
+          ? this.pendingConfirmation
+          : pendingConfirmation as Map<String, dynamic>?,
     );
   }
 }
@@ -160,6 +282,14 @@ class ChatNotifier extends StateNotifier<ChatState> {
     _progressSubscription?.cancel();
     _progressSubscription = websocket.subscribeToAgentProgress(sessionId).listen((message) {
       if (_disposed) return;
+      // Destructive tools may surface their phase-1 confirmation request
+      // via agent_progress events.  Detect and stash in state so the UI
+      // can show DestructiveConfirmationDialog.
+      final confirmation = _extractConfirmationRequest(message);
+      if (confirmation != null) {
+        state = state.copyWith(pendingConfirmation: confirmation);
+        return;
+      }
       final progress = AgentProgress.fromJson(message);
       state = state.copyWith(currentProgress: progress);
     });
@@ -367,6 +497,16 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// Add a chat message from websocket stream
   void addStreamMessage(Map<String, dynamic> data) {
     try {
+      // Destructive-tool confirmation requests are detected before the
+      // normal chat-message handling so the UI can render
+      // DestructiveConfirmationDialog instead of treating the payload as a
+      // regular assistant message.
+      final confirmation = _extractConfirmationRequest(data);
+      if (confirmation != null) {
+        state = state.copyWith(pendingConfirmation: confirmation);
+        return;
+      }
+
       // Handle system/non-chat messages (token budget, errors, etc.)
       final messageType = data['type'] as String?;
       if (messageType == 'non-chat' || messageType == 'system' || messageType == 'error') {
@@ -434,6 +574,78 @@ class ChatNotifier extends StateNotifier<ChatState> {
         isAgentProcessing: false,
         error: e.toString(),
       );
+    }
+  }
+
+  /// Resolve the current pending confirmation request by re-invoking the
+  /// destructive tool with confirmed=true or declined=true.  Routes to the
+  /// HTTP endpoint matching the confirmation's `action` field.
+  ///
+  /// Called by the UI after the user taps confirm/cancel in
+  /// DestructiveConfirmationDialog.  Clears `pendingConfirmation`
+  /// regardless of outcome so the dialog closes.
+  Future<void> resolveConfirmation(bool confirmed) async {
+    final payload = state.pendingConfirmation;
+    if (payload == null) return;
+
+    // Clear the dialog first so repeated taps don't fire duplicate calls.
+    state = state.copyWith(pendingConfirmation: null);
+
+    final action = payload['action'] as String? ?? '';
+    final details = (payload['details'] as Map<String, dynamic>?) ?? const {};
+    try {
+      switch (action) {
+        case 'mark_superseded':
+          final oldId = details['old_id'] as String? ?? '';
+          final newId = details['new_id'] as String? ?? '';
+          if (confirmed && oldId.isNotEmpty && newId.isNotEmpty) {
+            await sdkClient.markSuperseded(
+              oldId: oldId,
+              newId: newId,
+              confirmed: true,
+            );
+          } else {
+            await sdkClient.markSuperseded(
+              oldId: oldId,
+              newId: newId,
+              confirmed: false,
+            );
+          }
+        case 'mark_resolved':
+          final id = details['prediction_id'] as String? ?? '';
+          final outcome = details['outcome'] as String? ?? '';
+          if (id.isNotEmpty) {
+            await sdkClient.markResolved(
+              predictionId: id,
+              outcome: outcome,
+              confirmed: confirmed,
+            );
+          }
+        case 'record_review':
+          final id = details['decision_id'] as String? ?? '';
+          final outcome = details['actual_outcome'] as String? ?? '';
+          if (id.isNotEmpty) {
+            await sdkClient.recordDecisionReview(
+              decisionId: id,
+              actualOutcome: outcome,
+              confirmed: confirmed,
+            );
+          }
+        case 'reject_claim':
+          final id = details['claim_id'] as String? ?? details['id'] as String? ?? '';
+          if (id.isNotEmpty) {
+            await sdkClient.rejectClaim(id: id, confirmed: confirmed);
+          }
+        case 'purge_auto_claims':
+          // Bulk destructive action — pass through the filter args.
+          final body = Map<String, dynamic>.from(details);
+          body['confirmed'] = confirmed;
+          await sdkClient.purgeAutoClaims(body: body);
+        default:
+          debugPrint('resolveConfirmation: unknown action "$action"');
+      }
+    } catch (e) {
+      state = state.copyWith(error: 'confirmation $action failed: $e');
     }
   }
 

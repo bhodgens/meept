@@ -23,6 +23,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [func ContainsSupportedRuntime\(runtimes \[\]string\) bool](<#ContainsSupportedRuntime>)
 - [func ContentFromParts\(parts \[\]ContentPart, useDescription bool\) string](<#ContentFromParts>)
 - [func CountToolDefinitionsTokens\(tools \[\]ToolDefinition, tokenizer Tokenizer\) int](<#CountToolDefinitionsTokens>)
+- [func DefaultBudgetTable\(\) map\[string\]int](<#DefaultBudgetTable>)
 - [func DerefOr\[T any\]\(p \*T, def T\) T](<#DerefOr>)
 - [func EstimateTokenCountHeuristic\(content string\) int](<#EstimateTokenCountHeuristic>)
 - [func FormatPIDFilePath\(pidFile string\) \(string, error\)](<#FormatPIDFilePath>)
@@ -33,7 +34,9 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [func IsRateLimitError\(err error\) bool](<#IsRateLimitError>)
 - [func IsRateLimitErrorMessage\(errMsg string\) bool](<#IsRateLimitErrorMessage>)
 - [func IsSupportedRuntime\(rt string\) bool](<#IsSupportedRuntime>)
+- [func IsValidEffort\(s string\) bool](<#IsValidEffort>)
 - [func Ptr\[T any\]\(v T\) \*T](<#Ptr>)
+- [func ResolveBudget\(rc \*ReasoningConfig, agent \*AgentReasoningConfig, modelDefault \*ReasoningConfig, globalBudgets map\[string\]int\) \*int](<#ResolveBudget>)
 - [func RunModelPicker\(config ModelPickerConfig\) \(\*ProviderDef, \*ModelCatalogEntry, error\)](<#RunModelPicker>)
 - [func SupportedRuntimes\(\) \[\]string](<#SupportedRuntimes>)
 - [func UserMessage\(err error\) string](<#UserMessage>)
@@ -41,6 +44,9 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(e \*APIError\) Error\(\) string](<#APIError.Error>)
   - [func \(e \*APIError\) UserMessage\(\) string](<#APIError.UserMessage>)
 - [type AgentModelRef](<#AgentModelRef>)
+- [type AgentReasoningConfig](<#AgentReasoningConfig>)
+  - [func \(a \*AgentReasoningConfig\) ClampEffort\(effort string\) string](<#AgentReasoningConfig.ClampEffort>)
+  - [func \(a \*AgentReasoningConfig\) ToReasoningConfig\(effort string\) \*ReasoningConfig](<#AgentReasoningConfig.ToReasoningConfig>)
 - [type AliasEntry](<#AliasEntry>)
 - [type AliasHealth](<#AliasHealth>)
 - [type AnthropicClient](<#AnthropicClient>)
@@ -364,6 +370,11 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(e \*RateLimitError\) UserMessage\(\) string](<#RateLimitError.UserMessage>)
 - [type RawToolCall](<#RawToolCall>)
   - [func \(rtc \*RawToolCall\) ToToolCall\(\) ToolCall](<#RawToolCall.ToToolCall>)
+- [type ReasoningConfig](<#ReasoningConfig>)
+  - [func ResolveReasoning\(perRequest, agentSpec, modelDefault \*ReasoningConfig\) \*ReasoningConfig](<#ResolveReasoning>)
+  - [func \(r \*ReasoningConfig\) IsZero\(\) bool](<#ReasoningConfig.IsZero>)
+  - [func \(r \*ReasoningConfig\) ResolveEnabled\(\) bool](<#ReasoningConfig.ResolveEnabled>)
+  - [func \(r \*ReasoningConfig\) Validate\(\) error](<#ReasoningConfig.Validate>)
 - [type Resolver](<#Resolver>)
   - [func NewResolver\(cfg \*ProvidersConfig, logger \*slog.Logger\) \*Resolver](<#NewResolver>)
   - [func \(r \*Resolver\) AllModels\(\) \[\]\*ModelConfig](<#Resolver.AllModels>)
@@ -500,6 +511,17 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 	
 	    // Metrics dimension keys.
 	    KeyLevel = "level"
+	)
+
+<a name="ReasoningNone"></a>Reasoning effort tier constants. The zero value \(empty string\) means "do not send any reasoning field" — the model uses its provider default.
+
+	const (
+	    ReasoningNone   = "none"   // explicitly disable thinking
+	    ReasoningLow    = "low"    // minimal thinking budget
+	    ReasoningMedium = "medium" // balanced thinking
+	    ReasoningHigh   = "high"   // deep thinking
+	    ReasoningXHigh  = "xhigh"  // extra-deep thinking
+	    ReasoningMax    = "max"    // maximum thinking budget
 	)
 
 ## Variables
@@ -926,6 +948,13 @@ ContentFromParts synthesizes a flat text string from a slice of content parts. W
 
 CountToolDefinitionsTokens counts tokens for multiple tool definitions.
 
+<a name="DefaultBudgetTable"></a>
+## func DefaultBudgetTable
+
+	func DefaultBudgetTable() map[string]int
+
+DefaultBudgetTable returns a copy of the hardcoded tier→budget defaults. Callers may mutate the returned map without affecting the package\-level table.
+
 <a name="DerefOr"></a>
 ## func DerefOr
 
@@ -998,12 +1027,36 @@ Deprecated: Use errcls.IsRateLimit\(err\) with a structured error value. This fu
 
 IsSupportedRuntime checks if the given runtime string is supported.
 
+<a name="IsValidEffort"></a>
+## func IsValidEffort
+
+	func IsValidEffort(s string) bool
+
+IsValidEffort reports whether s is a recognized effort tier \(including the empty string and "none"\).
+
 <a name="Ptr"></a>
 ## func Ptr
 
 	func Ptr[T any](v T) *T
 
 Ptr returns a pointer to the given value.
+
+<a name="ResolveBudget"></a>
+## func ResolveBudget
+
+	func ResolveBudget(rc *ReasoningConfig, agent *AgentReasoningConfig, modelDefault *ReasoningConfig, globalBudgets map[string]int) *int
+
+ResolveBudget resolves the thinking token budget for a request.
+
+Precedence \(highest to lowest\):
+
+1. perRequest.BudgetTokens
+2. agent.BudgetTokens
+3. modelDefault.BudgetTokens
+4. globalBudgets\[effort\]
+5. hardcoded default table \(see defaultBudgetTable\)
+
+Returns nil when rc is nil/zero so callers can omit the budget from wire payloads entirely.
 
 <a name="RunModelPicker"></a>
 ## func RunModelPicker
@@ -1053,12 +1106,52 @@ APIError is returned when the remote API returns an error response.
 <a name="AgentModelRef"></a>
 ## type AgentModelRef
 
-AgentModelRef is a minimal view of an agent definition used by BuildModelsInUse. Callers adapt from config.AgentDefinition.
+AgentModelRef is a minimal view of an agent definition used by BuildModelsInUse. Callers adapt from agents.AgentMetadata.
 
 	type AgentModelRef struct {
 	    Model   string
 	    Enabled bool
 	}
+
+<a name="AgentReasoningConfig"></a>
+## type AgentReasoningConfig
+
+AgentReasoningConfig is the per\-agent config form. It adds admin\-defined bounds for self\-modulation. Convert to a per\-request ReasoningConfig with ToReasoningConfig.
+
+	type AgentReasoningConfig struct {
+	    // Effort is the initial tier used at agent startup and as the fallback
+	    // when the loop hasn't self-modulated.
+	    Effort string `json:"effort,omitempty"`
+	
+	    // AllowSelfModulation permits the agent loop to change effort between
+	    // turns. Default false.
+	    AllowSelfModulation bool `json:"allow_self_modulation,omitempty"`
+	
+	    // MinEffort / MaxEffort bound self-modulation. Empty = no bound on
+	    // that side.
+	    MinEffort string `json:"min_effort,omitempty"`
+	    MaxEffort string `json:"max_effort,omitempty"`
+	
+	    // BudgetTokens is passed through to ReasoningConfig.
+	    BudgetTokens *int `json:"budget_tokens,omitempty"`
+	
+	    // Force bypasses capability gating (forwarded to ReasoningConfig).
+	    Force bool `json:"force,omitempty"`
+	}
+
+<a name="AgentReasoningConfig.ClampEffort"></a>
+### func \(\*AgentReasoningConfig\) ClampEffort
+
+	func (a *AgentReasoningConfig) ClampEffort(effort string) string
+
+ClampEffort returns effort bounded by \[MinEffort, MaxEffort\] using effortOrder for rank comparison. Empty bounds mean unbounded on that side. When both bounds are empty AND the requested effort is empty, the result defaults to ReasoningMedium \(per spec: "treat ” requested as ReasoningMedium default for clamping when both bounds empty"\). When only the requested effort is empty \(but bounds are set\), it defaults to MinEffort \(or ReasoningMedium when MinEffort is empty\).
+
+<a name="AgentReasoningConfig.ToReasoningConfig"></a>
+### func \(\*AgentReasoningConfig\) ToReasoningConfig
+
+	func (a *AgentReasoningConfig) ToReasoningConfig(effort string) *ReasoningConfig
+
+ToReasoningConfig converts the agent config into a request\-level ReasoningConfig at the given effective tier. The resulting config carries the agent's BudgetTokens and Force values; Enabled is derived from the tier \(any non\-empty, non\-"none" value → true\).
 
 <a name="AliasEntry"></a>
 ## type AliasEntry
@@ -3072,6 +3165,10 @@ ModelConfig holds configuration for a specific LLM model endpoint.
 	    // to this model/provider. When 0, no limit is enforced (unlimited).
 	    // Use this to prevent overwhelming rate-limited APIs or local LLMs.
 	    MaxConcurrency int
+	    // DefaultReasoning is the model-level default reasoning effort/budget
+	    // configuration. When non-nil, it is used if no per-request or agent-level
+	    // reasoning override is present.
+	    DefaultReasoning *ReasoningConfig
 	}
 
 <a name="GetAllModels"></a>
@@ -3981,6 +4078,68 @@ RawToolCall represents the raw tool call from the API.
 
 ToToolCall converts a RawToolCall to a ToolCall.
 
+<a name="ReasoningConfig"></a>
+## type ReasoningConfig
+
+ReasoningConfig captures LLM reasoning/thinking configuration across vendors. A nil pointer or zero\-value struct means "do not send" — defer to provider default. Vendors translate this into their native wire format via applyOpenAICompatReasoning / applyAnthropicReasoning.
+
+	type ReasoningConfig struct {
+	    // Effort is the named tier. Empty = don't send (use provider default).
+	    // "none" = send explicit disable when the vendor supports it.
+	    Effort string `json:"effort,omitempty"`
+	
+	    // BudgetTokens overrides tier→budget mapping. When non-nil, used as the
+	    // raw thinking budget for vendors that accept token counts (Anthropic,
+	    // GLM, Kimi, Qwen). Ignored by vendors that only accept named tiers
+	    // (OpenAI, xAI, Gemini-compat).
+	    BudgetTokens *int `json:"budget_tokens,omitempty"`
+	
+	    // Enabled explicitly toggles thinking on/off for vendors with a boolean
+	    // toggle (Qwen enable_thinking, GLM thinking.enabled). When nil, derived
+	    // from Effort (nil or any tier other than "none" → true).
+	    Enabled *bool `json:"enabled,omitempty"`
+	
+	    // Force bypasses capability gating. Use when a model supports thinking
+	    // but lacks the "reasoning"/"extended_thinking" capability tag. Logs a
+	    // warning when invoked.
+	    Force bool `json:"force,omitempty"`
+	}
+
+<a name="ResolveReasoning"></a>
+### func ResolveReasoning
+
+	func ResolveReasoning(perRequest, agentSpec, modelDefault *ReasoningConfig) *ReasoningConfig
+
+ResolveReasoning walks the precedence chain and returns the effective ReasoningConfig for a single LLM call.
+
+Order \(highest to lowest\):
+
+1. perRequest — from CLI flag / HTTP body / RPC param / NL parse
+2. agentSpec — AgentReasoningConfig.Effort converted to ReasoningConfig
+3. modelDefault — ModelConfig.DefaultReasoning
+4. nil — defer to provider \(current behavior\)
+
+<a name="ReasoningConfig.IsZero"></a>
+### func \(\*ReasoningConfig\) IsZero
+
+	func (r *ReasoningConfig) IsZero() bool
+
+IsZero reports whether the config carries no meaningful fields. A nil pointer is considered zero.
+
+<a name="ReasoningConfig.ResolveEnabled"></a>
+### func \(\*ReasoningConfig\) ResolveEnabled
+
+	func (r *ReasoningConfig) ResolveEnabled() bool
+
+ResolveEnabled returns the effective on/off state. When Enabled is nil it is derived from Effort \(any non\-empty, non\-"none" tier → true\).
+
+<a name="ReasoningConfig.Validate"></a>
+### func \(\*ReasoningConfig\) Validate
+
+	func (r *ReasoningConfig) Validate() error
+
+Validate returns an error if the config's fields conflict — currently the only check is Enabled=false while Effort is a non\-none, non\-empty tier.
+
 <a name="Resolver"></a>
 ## type Resolver
 
@@ -4132,6 +4291,11 @@ Response represents a parsed response from the LLM API.
 	    Usage        TokenUsage `json:"usage"`
 	    Model        string     `json:"model"`
 	    FinishReason string     `json:"finish_reason"`
+	    // Reasoning holds the assistant's chain-of-thought text when the
+	    // vendor exposes it as a separate channel (Anthropic thinking,
+	    // OpenAI o1-style reasoning, DeepSeek reasons). Empty when not
+	    // surfaced by the provider.
+	    Reasoning string `json:"reasoning,omitempty"`
 	}
 
 <a name="Response.HasToolCalls"></a>
@@ -4172,6 +4336,9 @@ ResponseMessage represents the message in a response choice. Content may be a st
 	    Role      string          `json:"role"`
 	    Content   json.RawMessage `json:"content"`
 	    ToolCalls []RawToolCall   `json:"tool_calls,omitempty"`
+	    // ReasoningContent captures chain-of-thought text from OpenAI-compat
+	    // providers that surface it as a sibling field to `content`.
+	    ReasoningContent string `json:"reasoning_content,omitempty"`
 	}
 
 <a name="ResponseMessage.ContentString"></a>

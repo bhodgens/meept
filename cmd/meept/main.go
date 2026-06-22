@@ -145,6 +145,7 @@ Analytics:
 	rootCmd.AddCommand(newRuntimeCmd())
 	rootCmd.AddCommand(newProjectsCmd())
 	rootCmd.AddCommand(newPlansCmd())
+	rootCmd.AddCommand(newThreadCmd())
 	rootCmd.SetHelpCommand(newHelpCmd(rootCmd))
 	rootCmd.AddCommand(newMCPChatServerCmd())
 	rootCmd.AddCommand(newTokenCmd())

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 )
@@ -114,6 +115,8 @@ type HookRegistry struct {
 	prepareNextTurns  []HookRegistration
 	shouldStopAfter   []HookRegistration
 	transformContexts []HookRegistration
+	sessionStarts     []HookRegistration
+	sessionEnds       []HookRegistration
 	logger            *slog.Logger
 }
 
@@ -197,6 +200,8 @@ func (r *HookRegistry) Unregister(name string) {
 	r.prepareNextTurns = filterHooks(r.prepareNextTurns, name)
 	r.shouldStopAfter = filterHooks(r.shouldStopAfter, name)
 	r.transformContexts = filterHooks(r.transformContexts, name)
+	r.sessionStarts = filterHooks(r.sessionStarts, name)
+	r.sessionEnds = filterHooks(r.sessionEnds, name)
 }
 
 // RunBeforeToolCalls runs all BeforeToolCall hooks in priority order.
@@ -331,6 +336,110 @@ func (r *HookRegistry) RunTransformContext(ctx context.Context, messages []llm.C
 		}
 	}
 	return ContextTransform{}
+}
+
+// SessionLifecycleState describes the state of a session at a lifecycle boundary.
+type SessionLifecycleState struct {
+	SessionID string
+	AgentID   string
+	UserID    string
+	StartTime time.Time
+	Metadata  map[string]any
+}
+
+// SessionLifecycleResult is returned to OnSessionEnd hooks after RunOnce completes.
+type SessionLifecycleResult struct {
+	Success bool
+	Error   error
+	EndTime time.Time
+}
+
+// SessionStartHook is called at the beginning of each RunOnce invocation.
+// Return ContextTransform with Modified=true to inject/alter messages for the session.
+type SessionStartHook interface {
+	OnSessionStart(ctx context.Context, state SessionLifecycleState) ContextTransform
+}
+
+// SessionEndHook is called at the end of each RunOnce invocation (via defer).
+// Useful for metrics, audit logging, and state cleanup.
+type SessionEndHook interface {
+	OnSessionEnd(ctx context.Context, state SessionLifecycleState, result SessionLifecycleResult) error
+}
+
+// RegisterSessionStartHook registers a SessionStartHook.
+func (r *HookRegistry) RegisterSessionStartHook(name string, priority HookPriority, hook SessionStartHook) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sessionStarts = append(r.sessionStarts, HookRegistration{
+		Name: name, Priority: priority, Hook: hook,
+	})
+	sort.Slice(r.sessionStarts, func(i, j int) bool {
+		return r.sessionStarts[i].Priority < r.sessionStarts[j].Priority
+	})
+}
+
+// RegisterSessionEndHook registers a SessionEndHook.
+func (r *HookRegistry) RegisterSessionEndHook(name string, priority HookPriority, hook SessionEndHook) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sessionEnds = append(r.sessionEnds, HookRegistration{
+		Name: name, Priority: priority, Hook: hook,
+	})
+	sort.Slice(r.sessionEnds, func(i, j int) bool {
+		return r.sessionEnds[i].Priority < r.sessionEnds[j].Priority
+	})
+}
+
+// RunSessionStart runs all SessionStart hooks in priority order.
+// Returns the first ContextTransform with Modified=true (short-circuit).
+func (r *HookRegistry) RunSessionStart(ctx context.Context, state SessionLifecycleState) ContextTransform {
+	r.mu.RLock()
+	hooks := make([]HookRegistration, len(r.sessionStarts))
+	copy(hooks, r.sessionStarts)
+	r.mu.RUnlock()
+
+	for _, reg := range hooks {
+		hook, ok := reg.Hook.(SessionStartHook)
+		if !ok {
+			r.logger.Warn("hook does not implement SessionStartHook",
+				"name", reg.Name,
+			)
+			continue
+		}
+		transform := hook.OnSessionStart(ctx, state)
+		if transform.Modified {
+			r.logger.Info("session start hook transformed context",
+				"hook", reg.Name,
+			)
+			return transform
+		}
+	}
+	return ContextTransform{}
+}
+
+// RunSessionEnd runs all SessionEnd hooks in priority order.
+// Collects errors from all hooks and logs them; does NOT short-circuit.
+func (r *HookRegistry) RunSessionEnd(ctx context.Context, state SessionLifecycleState, result SessionLifecycleResult) {
+	r.mu.RLock()
+	hooks := make([]HookRegistration, len(r.sessionEnds))
+	copy(hooks, r.sessionEnds)
+	r.mu.RUnlock()
+
+	for _, reg := range hooks {
+		hook, ok := reg.Hook.(SessionEndHook)
+		if !ok {
+			r.logger.Warn("hook does not implement SessionEndHook",
+				"name", reg.Name,
+			)
+			continue
+		}
+		if err := hook.OnSessionEnd(ctx, state, result); err != nil {
+			r.logger.Error("session end hook failed",
+				"hook", reg.Name,
+				"error", err,
+			)
+		}
+	}
 }
 
 // filterHooks returns a new slice excluding hooks with the given name.

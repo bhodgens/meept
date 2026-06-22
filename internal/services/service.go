@@ -120,6 +120,7 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 	if cfg.SessionStore != nil {
 		reg.Session = NewSessionService(cfg.SessionStore)
 		reg.SessionStore = cfg.SessionStore
+		reg.Thread = NewThreadService(cfg.SessionStore)
 	}
 	if cfg.WorkerPool != nil {
 		reg.Worker = NewWorkerService(cfg.WorkerPool)

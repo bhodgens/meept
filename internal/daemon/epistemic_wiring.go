@@ -11,15 +11,12 @@ import (
 	"github.com/caimlas/meept/internal/memory"
 )
 
-// classifierAdapter wraps llm.Chatter to satisfy memory.ClassifierLLM
-// without creating an import cycle between memory and llm.
+// classifierAdapter wraps llm.Chatter to satisfy memory.ClassifierLLM.
 type classifierAdapter struct {
 	chatter llm.Chatter
 	logger  *slog.Logger
 }
 
-// newClassifierAdapter constructs a ClassifierLLM adapter. Returns nil if
-// chatter is nil so callers can pass a zero LLMClient safely.
 func newClassifierAdapter(chatter llm.Chatter) *classifierAdapter {
 	if chatter == nil {
 		return nil
@@ -30,8 +27,6 @@ func newClassifierAdapter(chatter llm.Chatter) *classifierAdapter {
 	}
 }
 
-// ClassifyRelationships calls the underlying LLM with the detector's
-// classification prompt and parses the JSON verdict array.
 func (a *classifierAdapter) ClassifyRelationships(ctx context.Context, newMem memory.Memory, candidates []memory.Memory) ([]memory.EdgeVerdict, error) {
 	prompt := buildClassificationPrompt(newMem, candidates)
 	resp, err := a.chatter.Chat(ctx, prompt, llm.WithTemperature(0.1))
@@ -48,10 +43,8 @@ func (a *classifierAdapter) ClassifyRelationships(ctx context.Context, newMem me
 	return verdicts, nil
 }
 
-// Compile-time assertion that classifierAdapter satisfies the interface.
 var _ memory.ClassifierLLM = (*classifierAdapter)(nil)
 
-// buildClassificationPrompt constructs the chat prompt for the classifier LLM.
 func buildClassificationPrompt(newMem memory.Memory, candidates []memory.Memory) []llm.ChatMessage {
 	system := `You are an epistemic relationship classifier. Read the new memory and each candidate, then decide if a meaningful relationship exists.
 
@@ -79,19 +72,13 @@ If no relationships, return [].`
 	}
 }
 
-// ambientClassifierAdapter wraps llm.Chatter to satisfy
-// memory.AmbientClassifierLLM. It calls Chat with the extractor's prompt
-// and returns the raw response body.
 type ambientClassifierAdapter struct {
 	chatter llm.Chatter
 	logger  *slog.Logger
 }
 
-// ensure ambientClassifierAdapter satisfies memory.AmbientClassifierLLM.
 var _ memory.AmbientClassifierLLM = (*ambientClassifierAdapter)(nil)
 
-// newAmbientClassifierAdapter constructs an AmbientClassifierLLM adapter.
-// Returns nil if chatter is nil.
 func newAmbientClassifierAdapter(chatter llm.Chatter) *ambientClassifierAdapter {
 	if chatter == nil {
 		return nil
@@ -102,8 +89,6 @@ func newAmbientClassifierAdapter(chatter llm.Chatter) *ambientClassifierAdapter 
 	}
 }
 
-// ExtractCandidates calls the LLM with the given extraction prompt and
-// returns the raw response body bytes.
 func (a *ambientClassifierAdapter) ExtractCandidates(ctx context.Context, prompt string) ([]byte, error) {
 	resp, err := a.chatter.Chat(ctx, []llm.ChatMessage{
 		{Role: llm.RoleUser, Content: prompt},
@@ -117,8 +102,6 @@ func (a *ambientClassifierAdapter) ExtractCandidates(ctx context.Context, prompt
 	return []byte(resp.Content), nil
 }
 
-// wireEpistemicDetector constructs and wires an EpistemicDetector on the
-// memory manager. No-op when graph, manager, or chatter is nil.
 func wireEpistemicDetector(memoryMgr *memory.Manager, chatter llm.Chatter, memCfg config.MemoryConfig, logger *slog.Logger) {
 	if memoryMgr == nil || chatter == nil {
 		return
@@ -140,9 +123,6 @@ func wireEpistemicDetector(memoryMgr *memory.Manager, chatter llm.Chatter, memCf
 	logger.Info("epistemic detector wired")
 }
 
-// wireEpistemicHook constructs the AmbientExtractor + EpistemicHook and
-// attaches the hook to the agent loop. No-op when ambient extraction is
-// disabled, manager is nil, or chatter is nil.
 func wireEpistemicHook(agentLoop *agent.AgentLoop, memoryMgr *memory.Manager, chatter llm.Chatter, memCfg config.MemoryConfig, logger *slog.Logger) {
 	if agentLoop == nil || memoryMgr == nil || chatter == nil {
 		return
@@ -165,4 +145,18 @@ func wireEpistemicHook(agentLoop *agent.AgentLoop, memoryMgr *memory.Manager, ch
 		"ambient_extraction", true,
 		"max_per_turn", memCfg.Epistemic.AmbientExtraction.MaxPerTurn,
 	)
+}
+
+// wireFileWatcherHook creates a FileWatcherHook from the daemon config and
+// attaches it to the agent loop via SetFileWatcher. No-op when agentLoop is
+// nil, the hook is disabled in hooks config, or FileWatcher config is missing.
+//
+// TODO: FileWatcher subsystem (pattern matching, FileEvent, NewFileWatcherHook,
+// SortIgnoreOrder) is not yet implemented. Wiring is stubbed to no-op until
+// the implementation lands. Tracked as a follow-up gap.
+func wireFileWatcherHook(agentLoop *agent.AgentLoop, cfg config.Config, logger *slog.Logger) {
+	// No-op stub: FileWatcherHook types not yet defined.
+	_ = agentLoop
+	_ = cfg
+	_ = logger
 }

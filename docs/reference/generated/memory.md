@@ -16,7 +16,23 @@ Package memory provides memory storage and retrieval for meept.
 - Variables
 - [func ClusterBySimilarity\(ctx context.Context, memories \[\]Memory, threshold float64, embedder EmbeddingProvider\) \(\[\]\[\]Memory, error\)](<#ClusterBySimilarity>)
 - [func ClusterBySimilarityFromResults\(ctx context.Context, results \[\]MemoryResult, threshold float64, embedder EmbeddingProvider, logger \*slog.Logger\) \(\[\]\[\]Memory, error\)](<#ClusterBySimilarityFromResults>)
+- [func EffectiveAutoTrustWeight\(configured float64\) float64](<#EffectiveAutoTrustWeight>)
+- [func IsEpistemicType\(t MemoryType\) bool](<#IsEpistemicType>)
 - [func ParseMetadata\(jsonStr string\) map\[string\]any](<#ParseMetadata>)
+- [type AmbientCandidate](<#AmbientCandidate>)
+  - [func ParseAmbientCandidates\(raw \[\]byte\) \(\[\]AmbientCandidate, error\)](<#ParseAmbientCandidates>)
+- [type AmbientClassifierLLM](<#AmbientClassifierLLM>)
+- [type AmbientExtractor](<#AmbientExtractor>)
+  - [func NewAmbientExtractor\(cfg AmbientExtractorConfig\) \*AmbientExtractor](<#NewAmbientExtractor>)
+  - [func \(ex \*AmbientExtractor\) Extract\(ctx context.Context, messages \[\]string\) \(\[\]AmbientCandidate, error\)](<#AmbientExtractor.Extract>)
+  - [func \(ex \*AmbientExtractor\) WriteCandidates\(ctx context.Context, candidates \[\]AmbientCandidate\) \(\[\]string, error\)](<#AmbientExtractor.WriteCandidates>)
+- [type AmbientExtractorConfig](<#AmbientExtractorConfig>)
+- [type Claim](<#Claim>)
+- [type ClaimStatus](<#ClaimStatus>)
+  - [func \(s ClaimStatus\) IsEligibleCanonical\(\) bool](<#ClaimStatus.IsEligibleCanonical>)
+  - [func \(s ClaimStatus\) IsRejected\(\) bool](<#ClaimStatus.IsRejected>)
+  - [func \(s ClaimStatus\) TrustWeight\(autoWeight float64\) float64](<#ClaimStatus.TrustWeight>)
+- [type ClassifierLLM](<#ClassifierLLM>)
 - [type ConsolidationBackend](<#ConsolidationBackend>)
 - [type ConsolidationReport](<#ConsolidationReport>)
 - [type Consolidator](<#Consolidator>)
@@ -28,7 +44,10 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(c \*Consolidator\) StartPeriodicConsolidation\(ctx context.Context, interval time.Duration, olderThanHours int\)](<#Consolidator.StartPeriodicConsolidation>)
   - [func \(c \*Consolidator\) Stop\(\)](<#Consolidator.Stop>)
 - [type ConsolidatorConfig](<#ConsolidatorConfig>)
+- [type Decision](<#Decision>)
 - [type EdgeType](<#EdgeType>)
+- [type EdgeVerdict](<#EdgeVerdict>)
+  - [func ParseClassifierJSON\(raw \[\]byte\) \(\[\]EdgeVerdict, error\)](<#ParseClassifierJSON>)
 - [type EmbeddingProvider](<#EmbeddingProvider>)
 - [type EpisodicConfig](<#EpisodicConfig>)
 - [type EpisodicMemory](<#EpisodicMemory>)
@@ -48,6 +67,11 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(e \*EpisodicMemory\) Initialize\(ctx context.Context\) error](<#EpisodicMemory.Initialize>)
   - [func \(e \*EpisodicMemory\) Search\(ctx context.Context, query string, limit int\) \(\[\]MemoryResult, error\)](<#EpisodicMemory.Search>)
   - [func \(e \*EpisodicMemory\) Store\(ctx context.Context, content, category string, metadata map\[string\]any\) \(string, error\)](<#EpisodicMemory.Store>)
+- [type EpistemicDetector](<#EpistemicDetector>)
+  - [func NewEpistemicDetector\(cfg EpistemicDetectorConfig\) \*EpistemicDetector](<#NewEpistemicDetector>)
+  - [func \(d \*EpistemicDetector\) DetectRelationships\(ctx context.Context, newMem Memory\) \(\[\]MemoryEdge, error\)](<#EpistemicDetector.DetectRelationships>)
+  - [func \(d \*EpistemicDetector\) PersistCandidateEdges\(ctx context.Context, edges \[\]MemoryEdge\) error](<#EpistemicDetector.PersistCandidateEdges>)
+- [type EpistemicDetectorConfig](<#EpistemicDetectorConfig>)
 - [type FTSConfig](<#FTSConfig>)
 - [type GraphStats](<#GraphStats>)
 - [type Handler](<#Handler>)
@@ -64,6 +88,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(g \*KnowledgeGraph\) CreateTemporalEdges\(ctx context.Context, sessionID string, memoryIDs \[\]string\) error](<#KnowledgeGraph.CreateTemporalEdges>)
   - [func \(g \*KnowledgeGraph\) DeleteMemoryEdges\(ctx context.Context, memoryID string\) error](<#KnowledgeGraph.DeleteMemoryEdges>)
   - [func \(g \*KnowledgeGraph\) DetectCommunities\(ctx context.Context\) \(map\[string\]string, error\)](<#KnowledgeGraph.DetectCommunities>)
+  - [func \(g \*KnowledgeGraph\) EdgeCountForMemory\(ctx context.Context, memoryID string\) \(int, error\)](<#KnowledgeGraph.EdgeCountForMemory>)
   - [func \(g \*KnowledgeGraph\) EnsureNode\(ctx context.Context, memoryID string\) error](<#KnowledgeGraph.EnsureNode>)
   - [func \(g \*KnowledgeGraph\) ExpandResults\(ctx context.Context, results \[\]MemoryResult, expansionLimit int\) \(\[\]string, error\)](<#KnowledgeGraph.ExpandResults>)
   - [func \(g \*KnowledgeGraph\) GetCommunity\(ctx context.Context, memoryID string\) \(string, error\)](<#KnowledgeGraph.GetCommunity>)
@@ -90,6 +115,8 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) DistributedConfig\(\) config.DistributedMemoryConfig](<#Manager.DistributedConfig>)
   - [func \(m \*Manager\) Embedder\(\) EmbeddingProvider](<#Manager.Embedder>)
   - [func \(m \*Manager\) Episodic\(\) \*EpisodicMemory](<#Manager.Episodic>)
+  - [func \(m \*Manager\) EpistemicDetector\(\) \*EpistemicDetector](<#Manager.EpistemicDetector>)
+  - [func \(m \*Manager\) FindCanonicalFor\(ctx context.Context, topic string\) \(\*Memory, error\)](<#Manager.FindCanonicalFor>)
   - [func \(m \*Manager\) GetByID\(ctx context.Context, id string\) \(\*Memory, error\)](<#Manager.GetByID>)
   - [func \(m \*Manager\) GetByIDs\(ctx context.Context, ids \[\]string\) \(\[\]Memory, error\)](<#Manager.GetByIDs>)
   - [func \(m \*Manager\) GetCachedPrefetch\(query string, maxItems int\) \(string, bool\)](<#Manager.GetCachedPrefetch>)
@@ -106,20 +133,32 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) IsDistributed\(\) bool](<#Manager.IsDistributed>)
   - [func \(m \*Manager\) IsInitialized\(\) bool](<#Manager.IsInitialized>)
   - [func \(m \*Manager\) IsMemvidActive\(\) bool](<#Manager.IsMemvidActive>)
+  - [func \(m \*Manager\) ListAutoClaims\(ctx context.Context, createdAfter time.Time, limit int\) \(\[\]MemoryResult, error\)](<#Manager.ListAutoClaims>)
+  - [func \(m \*Manager\) ListPendingReviews\(ctx context.Context, before time.Time\) \(decisions, predictions \[\]MemoryResult, err error\)](<#Manager.ListPendingReviews>)
+  - [func \(m \*Manager\) MarkResolved\(ctx context.Context, predictionID, outcome string\) \(string, error\)](<#Manager.MarkResolved>)
+  - [func \(m \*Manager\) MarkSuperseded\(ctx context.Context, oldID, newID string\) \(redirectedEdges int, auditID string, err error\)](<#Manager.MarkSuperseded>)
   - [func \(m \*Manager\) MemvidClient\(\) \*memvid.Client](<#Manager.MemvidClient>)
   - [func \(m \*Manager\) Personality\(\) \*PersonalityMemory](<#Manager.Personality>)
+  - [func \(m \*Manager\) PromoteClaim\(ctx context.Context, claimID string\) error](<#Manager.PromoteClaim>)
   - [func \(m \*Manager\) QueuePrefetch\(query string, maxItems int\)](<#Manager.QueuePrefetch>)
+  - [func \(m \*Manager\) RecordReview\(ctx context.Context, decisionID, actualOutcome string\) \(float64, string, error\)](<#Manager.RecordReview>)
   - [func \(m \*Manager\) RecordSessionMemories\(ctx context.Context, sessionID string, memoryIDs \[\]string\) error](<#Manager.RecordSessionMemories>)
+  - [func \(m \*Manager\) RejectClaim\(ctx context.Context, claimID string\) error](<#Manager.RejectClaim>)
   - [func \(m \*Manager\) ScopedManager\(botID string\) \*ScopedMemoryManager](<#Manager.ScopedManager>)
   - [func \(m \*Manager\) Search\(ctx context.Context, query MemoryQuery\) \(\[\]MemoryResult, error\)](<#Manager.Search>)
   - [func \(m \*Manager\) SearchHybrid\(ctx context.Context, query string, limit int\) \(\[\]MemoryResult, error\)](<#Manager.SearchHybrid>)
   - [func \(m \*Manager\) SearchSemantic\(ctx context.Context, query string, limit int\) \(\[\]MemoryResult, error\)](<#Manager.SearchSemantic>)
   - [func \(m \*Manager\) SearchWithGraph\(ctx context.Context, query MemoryQuery, alpha float64\) \(\[\]MemoryResult, error\)](<#Manager.SearchWithGraph>)
+  - [func \(m \*Manager\) SetEpistemicDetector\(d \*EpistemicDetector\)](<#Manager.SetEpistemicDetector>)
   - [func \(m \*Manager\) StartPeriodicConsolidation\(ctx context.Context\)](<#Manager.StartPeriodicConsolidation>)
   - [func \(m \*Manager\) StartPrefetchService\(ctx context.Context\)](<#Manager.StartPrefetchService>)
   - [func \(m \*Manager\) Stats\(\) \*MemoryStats](<#Manager.Stats>)
   - [func \(m \*Manager\) StopPrefetchService\(\)](<#Manager.StopPrefetchService>)
   - [func \(m \*Manager\) Store\(ctx context.Context, mem Memory\) \(string, error\)](<#Manager.Store>)
+  - [func \(m \*Manager\) StoreClaim\(ctx context.Context, c Claim\) \(string, error\)](<#Manager.StoreClaim>)
+  - [func \(m \*Manager\) StoreDecision\(ctx context.Context, d Decision\) \(string, error\)](<#Manager.StoreDecision>)
+  - [func \(m \*Manager\) StorePrediction\(ctx context.Context, p Prediction\) \(string, error\)](<#Manager.StorePrediction>)
+  - [func \(m \*Manager\) StoreQuestion\(ctx context.Context, q Question\) \(string, error\)](<#Manager.StoreQuestion>)
   - [func \(m \*Manager\) StoreVersioned\(ctx context.Context, mem Memory, opts StoreOptions\) \(string, error\)](<#Manager.StoreVersioned>)
   - [func \(m \*Manager\) Task\(\) \*TaskMemory](<#Manager.Task>)
   - [func \(m \*Manager\) UpdateGraphMetrics\(ctx context.Context\) error](<#Manager.UpdateGraphMetrics>)
@@ -158,6 +197,8 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(s \*PersonalityStore\) Get\(ctx context.Context, key string\) \(string, error\)](<#PersonalityStore.Get>)
   - [func \(s \*PersonalityStore\) GetAll\(ctx context.Context\) \(map\[string\]\[\]string, error\)](<#PersonalityStore.GetAll>)
   - [func \(s \*PersonalityStore\) Set\(ctx context.Context, key, value string\) error](<#PersonalityStore.Set>)
+- [type Prediction](<#Prediction>)
+- [type Question](<#Question>)
 - [type SQLiteConsolidationBackend](<#SQLiteConsolidationBackend>)
   - [func NewSQLiteConsolidationBackend\(episodic \*EpisodicMemory, task \*TaskMemory, manager \*Manager\) \*SQLiteConsolidationBackend](<#NewSQLiteConsolidationBackend>)
   - [func \(b \*SQLiteConsolidationBackend\) DeleteByIDs\(ctx context.Context, ids \[\]string\) \(int, error\)](<#SQLiteConsolidationBackend.DeleteByIDs>)
@@ -240,7 +281,28 @@ Package memory provides memory storage and retrieval for meept.
 	    DomainCommands = "commands"
 	)
 
+<a name="DefaultAutoClaimTrustWeight"></a>DefaultAutoClaimTrustWeight is the default trust weight applied to ambient\-extracted claims. Configurable via EpistemicConfig.AutoTrustWeight.
+
+	const DefaultAutoClaimTrustWeight = 0.5
+
+<a name="DefaultDetectionThreshold"></a>DefaultDetectionThreshold is the minimum LLM confidence for an epistemic edge to be persisted as a confirmed relationship \(contradicts, superseded, etc.\).
+
+	const DefaultDetectionThreshold = 0.7
+
+<a name="PotentialContradictionThreshold"></a>PotentialContradictionThreshold is the lower bound below DefaultDetectionThreshold. Candidates in \[PotentialContradictionThreshold, DefaultDetectionThreshold\) are written as potential\_contradicts edges with low weight for review surfacing.
+
+	const PotentialContradictionThreshold = 0.4
+
 ## Variables
+
+<a name="EpistemicMemTypes"></a>EpistemicMemTypes lists all memory types treated as epistemic by the detection pipeline and helper methods.
+
+	var EpistemicMemTypes = []MemoryType{
+	    MemoryTypeClaim,
+	    MemoryTypeDecision,
+	    MemoryTypePrediction,
+	    MemoryTypeQuestion,
+	}
 
 <a name="ErrNotFound"></a>ErrNotFound is returned when a memory is not found.
 
@@ -260,12 +322,171 @@ ClusterBySimilarity groups memories by semantic similarity using embeddings. Whe
 
 ClusterBySimilarityFromResults is a convenience wrapper that extracts the underlying Memory values from MemoryResult slices before clustering.
 
+<a name="EffectiveAutoTrustWeight"></a>
+## func EffectiveAutoTrustWeight
+
+	func EffectiveAutoTrustWeight(configured float64) float64
+
+EffectiveAutoTrustWeight returns the configured auto\-trust weight or the default when the configured value is zero, negative, or greater than 1.
+
+<a name="IsEpistemicType"></a>
+## func IsEpistemicType
+
+	func IsEpistemicType(t MemoryType) bool
+
+IsEpistemicType reports whether a MemoryType is one of the epistemic types \(claim, decision, prediction, question\).
+
 <a name="ParseMetadata"></a>
 ## func ParseMetadata
 
 	func ParseMetadata(jsonStr string) map[string]any
 
 ParseMetadata parses a JSON string into metadata.
+
+<a name="AmbientCandidate"></a>
+## type AmbientCandidate
+
+AmbientCandidate is a single claim/decision/prediction extracted from conversation by the ambient extractor.
+
+	type AmbientCandidate struct {
+	    Type       string   // "claim", "decision", "prediction"
+	    Text       string   // the extracted assertion
+	    Source     string   // origin tag, typically "conversation"
+	    Confidence float64  // 0.0-1.0
+	    Premises   []string // supporting premises
+	    Category   string   // classifier-detected category
+	}
+
+<a name="ParseAmbientCandidates"></a>
+### func ParseAmbientCandidates
+
+	func ParseAmbientCandidates(raw []byte) ([]AmbientCandidate, error)
+
+ParseAmbientCandidates parses the raw JSON body returned by the LLM into AmbientCandidate values.
+
+<a name="AmbientClassifierLLM"></a>
+## type AmbientClassifierLLM
+
+AmbientClassifierLLM is the interface the ambient extractor uses to run its extraction prompt. Defined locally to avoid an import cycle on internal/llm.
+
+	type AmbientClassifierLLM interface {
+	    // ExtractCandidates calls the LLM with the configured prompt and returns
+	    // the raw JSON body.
+	    ExtractCandidates(ctx context.Context, prompt string) ([]byte, error)
+	}
+
+<a name="AmbientExtractor"></a>
+## type AmbientExtractor
+
+AmbientExtractor runs the ambient\-extraction LLM prompt over a conversation window and persists the resulting claim candidates as auto claims.
+
+	type AmbientExtractor struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewAmbientExtractor"></a>
+### func NewAmbientExtractor
+
+	func NewAmbientExtractor(cfg AmbientExtractorConfig) *AmbientExtractor
+
+NewAmbientExtractor constructs an extractor from the given configuration.
+
+<a name="AmbientExtractor.Extract"></a>
+### func \(\*AmbientExtractor\) Extract
+
+	func (ex *AmbientExtractor) Extract(ctx context.Context, messages []string) ([]AmbientCandidate, error)
+
+Extract runs the ambient extraction prompt over the given messages and returns filtered candidates. Returns nil, nil when the classifier is nil \(graceful zero\-value behaviour\).
+
+<a name="AmbientExtractor.WriteCandidates"></a>
+### func \(\*AmbientExtractor\) WriteCandidates
+
+	func (ex *AmbientExtractor) WriteCandidates(ctx context.Context, candidates []AmbientCandidate) ([]string, error)
+
+WriteCandidates persists each candidate as an auto\-claim and returns the resulting memory IDs.
+
+<a name="AmbientExtractorConfig"></a>
+## type AmbientExtractorConfig
+
+AmbientExtractorConfig holds construction parameters for AmbientExtractor.
+
+	type AmbientExtractorConfig struct {
+	    Manager    *Manager
+	    Classifier AmbientClassifierLLM
+	    Logger     *slog.Logger
+	}
+
+<a name="Claim"></a>
+## type Claim
+
+Claim is a structured assertion of belief.
+
+	type Claim struct {
+	    Text       string      // the claim itself
+	    Premises   []string    // supporting claim IDs or text snippets
+	    Source     string      // URL, citation, or "user"
+	    Confidence float64     // 0.0-1.0, user-asserted
+	    Tags       []string    // controlled-vocabulary tags
+	    Status     ClaimStatus // lifecycle status
+	}
+
+<a name="ClaimStatus"></a>
+## type ClaimStatus
+
+ClaimStatus represents the lifecycle state of a claim.
+
+	type ClaimStatus string
+
+<a name="ClaimStatusConfirmed"></a>
+
+	const (
+	    // ClaimStatusConfirmed is a user-asserted claim with full trust (weight 1.0).
+	    ClaimStatusConfirmed ClaimStatus = "confirmed"
+	    // ClaimStatusAuto is a claim extracted by the ambient classifier with
+	    // configurable trust weight (default 0.5).
+	    ClaimStatusAuto ClaimStatus = "auto"
+	    // ClaimStatusPromoted is a former auto-claim that the user promoted to
+	    // full trust (weight 1.0).
+	    ClaimStatusPromoted ClaimStatus = "promoted"
+	    // ClaimStatusRejected is a claim the user rejected; excluded from queries.
+	    ClaimStatusRejected ClaimStatus = "rejected"
+	)
+
+<a name="ClaimStatus.IsEligibleCanonical"></a>
+### func \(ClaimStatus\) IsEligibleCanonical
+
+	func (s ClaimStatus) IsEligibleCanonical() bool
+
+IsEligibleCanonical reports whether a claim with this status may serve as a canonical source. Only confirmed and promoted claims qualify.
+
+<a name="ClaimStatus.IsRejected"></a>
+### func \(ClaimStatus\) IsRejected
+
+	func (s ClaimStatus) IsRejected() bool
+
+IsRejected reports whether the status is ClaimStatusRejected.
+
+<a name="ClaimStatus.TrustWeight"></a>
+### func \(ClaimStatus\) TrustWeight
+
+	func (s ClaimStatus) TrustWeight(autoWeight float64) float64
+
+TrustWeight returns the trust weight for a claim status.
+
+- confirmed, promoted → 1.0
+- auto → configurable \(default 0.5\)
+- rejected → 0.0
+
+<a name="ClassifierLLM"></a>
+## type ClassifierLLM
+
+ClassifierLLM is the interface the detector uses to classify candidate memory pairs. Defined locally to avoid an import cycle on internal/llm.
+
+	type ClassifierLLM interface {
+	    // ClassifyRelationships inspects a new memory against each candidate and
+	    // returns one EdgeVerdict per relevant pair.
+	    ClassifyRelationships(ctx context.Context, newMem Memory, candidates []Memory) ([]EdgeVerdict, error)
+	}
 
 <a name="ConsolidationBackend"></a>
 ## type ConsolidationBackend
@@ -402,6 +623,20 @@ ConsolidatorConfig holds configuration for the consolidator.
 	    Embedder EmbeddingProvider
 	}
 
+<a name="Decision"></a>
+## type Decision
+
+Decision is a recorded call with expected outcome and review schedule.
+
+	type Decision struct {
+	    Call            string     // the decision made
+	    Alternatives    []string   // alternatives considered
+	    ExpectedOutcome string     // what the user expects to happen
+	    ReviewAt        *time.Time // when to revisit; nil = no auto-review
+	    Premises        []string   // claim IDs this decision rests on
+	    Status          string     // "open", "reviewed", "superseded"
+	}
+
 <a name="EdgeType"></a>
 ## type EdgeType
 
@@ -422,7 +657,37 @@ EdgeType represents the type of relationship between memories.
 	    EdgeTypeCoAccessed EdgeType = "co_accessed"
 	    // EdgeTypeCausal indicates causal relationship (one led to another).
 	    EdgeTypeCausal EdgeType = "causal"
+	    // Epistemic edges (Plan 1: epistemic memory platform)
+	    EdgeTypeContradicts     EdgeType = "contradicts"
+	    EdgeTypeSuperseded      EdgeType = "superseded"
+	    EdgeTypeEvidenceFor     EdgeType = "evidence_for"
+	    EdgeTypeEvidenceAgainst EdgeType = "evidence_against"
+	    EdgeTypeDerivesFrom     EdgeType = "derives_from"
+	    EdgeTypeSupports        EdgeType = "supports"
+	    // EdgeTypePotentialContradicts is a low-confidence contradiction candidate
+	    // surfaced for review. Does not propagate to search ranking or destructive
+	    // actions.
+	    EdgeTypePotentialContradicts EdgeType = "potential_contradicts"
 	)
+
+<a name="EdgeVerdict"></a>
+## type EdgeVerdict
+
+EdgeVerdict is the classifier's verdict on one \(newMem, candidate\) pair. Exported so adapters in other packages \(e.g., daemon classifierAdapter\) can implement ClassifierLLM.
+
+	type EdgeVerdict struct {
+	    Relation    string  // contradicts, superseded, evidence_for, evidence_against, derives_from, supports, unrelated
+	    TargetID    string  // candidate memory ID
+	    Confidence  float64 // 0.0-1.0
+	    Explanation string  // human-readable rationale
+	}
+
+<a name="ParseClassifierJSON"></a>
+### func ParseClassifierJSON
+
+	func ParseClassifierJSON(raw []byte) ([]EdgeVerdict, error)
+
+ParseClassifierJSON parses a JSON array of verdicts from a raw LLM body. Useful for adapter implementations.
 
 <a name="EmbeddingProvider"></a>
 ## type EmbeddingProvider
@@ -566,6 +831,60 @@ Search finds episodic memories matching the query. Uses FTS5 when available, fal
 
 Store persists a new episodic memory. Returns the unique ID of the stored item.
 
+<a name="EpistemicDetector"></a>
+## type EpistemicDetector
+
+EpistemicDetector identifies relationships between memories using embedding similarity and LLM classification.
+
+	type EpistemicDetector struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewEpistemicDetector"></a>
+### func NewEpistemicDetector
+
+	func NewEpistemicDetector(cfg EpistemicDetectorConfig) *EpistemicDetector
+
+NewEpistemicDetector constructs a detector from the given configuration. Zero\-value fields yield safe defaults.
+
+<a name="EpistemicDetector.DetectRelationships"></a>
+### func \(\*EpistemicDetector\) DetectRelationships
+
+	func (d *EpistemicDetector) DetectRelationships(ctx context.Context, newMem Memory) ([]MemoryEdge, error)
+
+DetectRelationships examines a new memory against existing memories and returns candidate edges. Does not write edges; caller decides.
+
+Pipeline:
+
+1. Gate: classifier/manager nil → return nil
+2. Gate: non\-epistemic type → return nil
+3. Search top\-K similar memories via the manager
+4. Filter out rejected claims
+5. Call classifier
+6. Build edges with threshold/potential routing
+
+<a name="EpistemicDetector.PersistCandidateEdges"></a>
+### func \(\*EpistemicDetector\) PersistCandidateEdges
+
+	func (d *EpistemicDetector) PersistCandidateEdges(ctx context.Context, edges []MemoryEdge) error
+
+PersistCandidateEdges writes edges via the detector's graph reference. No\-op when graph is nil.
+
+<a name="EpistemicDetectorConfig"></a>
+## type EpistemicDetectorConfig
+
+EpistemicDetectorConfig holds construction parameters for EpistemicDetector.
+
+	type EpistemicDetectorConfig struct {
+	    Graph      *KnowledgeGraph
+	    Manager    *Manager
+	    Classifier ClassifierLLM
+	    Embedder   EmbeddingProvider
+	    Threshold  float64
+	    AutoWeight float64
+	    Logger     *slog.Logger
+	}
+
 <a name="FTSConfig"></a>
 ## type FTSConfig
 
@@ -700,6 +1019,13 @@ DeleteMemoryEdges removes all edges involving a memory.
 	func (g *KnowledgeGraph) DetectCommunities(ctx context.Context) (map[string]string, error)
 
 DetectCommunities performs community detection using label propagation. Returns a map of memory\_id \-\> community\_id.
+
+<a name="KnowledgeGraph.EdgeCountForMemory"></a>
+### func \(\*KnowledgeGraph\) EdgeCountForMemory
+
+	func (g *KnowledgeGraph) EdgeCountForMemory(ctx context.Context, memoryID string) (int, error)
+
+EdgeCountForMemory returns the number of edges that reference the given memory as either source or target. Used by the mark\_superseded preview to report how many edges will be redirected.
 
 <a name="KnowledgeGraph.EnsureNode"></a>
 ### func \(\*KnowledgeGraph\) EnsureNode
@@ -892,6 +1218,20 @@ Embedder returns the configured embedding provider, or nil if none is set. Calle
 
 Episodic returns the episodic memory subsystem \(SQLite backend only\).
 
+<a name="Manager.EpistemicDetector"></a>
+### func \(\*Manager\) EpistemicDetector
+
+	func (m *Manager) EpistemicDetector() *EpistemicDetector
+
+EpistemicDetector returns the configured detector, or nil if none is set.
+
+<a name="Manager.FindCanonicalFor"></a>
+### func \(\*Manager\) FindCanonicalFor
+
+	func (m *Manager) FindCanonicalFor(ctx context.Context, topic string) (*Memory, error)
+
+FindCanonicalFor returns the canonical claim for a topic. Walks canonical\_for metadata first, falls back to the first eligible \(confirmed/promoted\) claim matching the topic. Never returns auto or rejected claims.
+
 <a name="Manager.GetByID"></a>
 ### func \(\*Manager\) GetByID
 
@@ -1004,6 +1344,36 @@ IsInitialized returns true if the memory manager was successfully initialized. T
 
 IsMemvidActive returns true if memvid is the active backend.
 
+<a name="Manager.ListAutoClaims"></a>
+### func \(\*Manager\) ListAutoClaims
+
+	func (m *Manager) ListAutoClaims(ctx context.Context, createdAfter time.Time, limit int) ([]MemoryResult, error)
+
+ListAutoClaims returns claims with status=auto, optionally filtered by created\_after for incremental review prompts.
+
+<a name="Manager.ListPendingReviews"></a>
+### func \(\*Manager\) ListPendingReviews
+
+	func (m *Manager) ListPendingReviews(ctx context.Context, before time.Time) (decisions, predictions []MemoryResult, err error)
+
+ListPendingReviews returns decisions whose ReviewAt is before the given time, and predictions whose Horizon is before the given time.
+
+<a name="Manager.MarkResolved"></a>
+### func \(\*Manager\) MarkResolved
+
+	func (m *Manager) MarkResolved(ctx context.Context, predictionID, outcome string) (string, error)
+
+MarkResolved closes a prediction with the given outcome.
+
+<a name="Manager.MarkSuperseded"></a>
+### func \(\*Manager\) MarkSuperseded
+
+	func (m *Manager) MarkSuperseded(ctx context.Context, oldID, newID string) (redirectedEdges int, auditID string, err error)
+
+MarkSuperseded flips is\_current=0 on oldID, writes a superseded edge from oldID to newID, and redirects incoming evidence\_for/evidence\_against edges from oldID to newID. Returns the count of redirected edges and an audit ID.
+
+auto claims cannot supersede confirmed/promoted claims.
+
 <a name="Manager.MemvidClient"></a>
 ### func \(\*Manager\) MemvidClient
 
@@ -1018,6 +1388,13 @@ MemvidClient returns the memvid client if active.
 
 Personality returns the personality memory subsystem.
 
+<a name="Manager.PromoteClaim"></a>
+### func \(\*Manager\) PromoteClaim
+
+	func (m *Manager) PromoteClaim(ctx context.Context, claimID string) error
+
+PromoteClaim transitions an auto claim to promoted status.
+
 <a name="Manager.QueuePrefetch"></a>
 ### func \(\*Manager\) QueuePrefetch
 
@@ -1025,12 +1402,26 @@ Personality returns the personality memory subsystem.
 
 QueuePrefetch queues a query for background prefetching.
 
+<a name="Manager.RecordReview"></a>
+### func \(\*Manager\) RecordReview
+
+	func (m *Manager) RecordReview(ctx context.Context, decisionID, actualOutcome string) (float64, string, error)
+
+RecordReview closes a decision with the actual outcome and scores the expected\-vs\-actual overlap. Returns the score and an audit ID.
+
 <a name="Manager.RecordSessionMemories"></a>
 ### func \(\*Manager\) RecordSessionMemories
 
 	func (m *Manager) RecordSessionMemories(ctx context.Context, sessionID string, memoryIDs []string) error
 
 RecordSessionMemories creates temporal edges between memories from a session.
+
+<a name="Manager.RejectClaim"></a>
+### func \(\*Manager\) RejectClaim
+
+	func (m *Manager) RejectClaim(ctx context.Context, claimID string) error
+
+RejectClaim transitions a claim to rejected status.
 
 <a name="Manager.ScopedManager"></a>
 ### func \(\*Manager\) ScopedManager
@@ -1066,6 +1457,13 @@ SearchSemantic performs vector similarity search for memories. If the vector sto
 	func (m *Manager) SearchWithGraph(ctx context.Context, query MemoryQuery, alpha float64) ([]MemoryResult, error)
 
 SearchWithGraph searches memories and applies graph\-aware ranking. The alpha parameter controls PageRank influence: 0 = pure relevance, 1 = pure PageRank.
+
+<a name="Manager.SetEpistemicDetector"></a>
+### func \(\*Manager\) SetEpistemicDetector
+
+	func (m *Manager) SetEpistemicDetector(d *EpistemicDetector)
+
+SetEpistemicDetector configures the detector used by the post\-Store hook to run LLM\-driven relationship detection for epistemic memories. Pass nil to disable the hook \(defence\-in\-depth: a nil detector is a no\-op\).
 
 <a name="Manager.StartPeriodicConsolidation"></a>
 ### func \(\*Manager\) StartPeriodicConsolidation
@@ -1103,6 +1501,34 @@ StopPrefetchService stops the prefetch service.
 	func (m *Manager) Store(ctx context.Context, mem Memory) (string, error)
 
 Store persists content in the appropriate memory subsystem.
+
+<a name="Manager.StoreClaim"></a>
+### func \(\*Manager\) StoreClaim
+
+	func (m *Manager) StoreClaim(ctx context.Context, c Claim) (string, error)
+
+StoreClaim writes a claim as a typed memory and returns its ID.
+
+<a name="Manager.StoreDecision"></a>
+### func \(\*Manager\) StoreDecision
+
+	func (m *Manager) StoreDecision(ctx context.Context, d Decision) (string, error)
+
+StoreDecision writes a decision as a typed memory and returns its ID.
+
+<a name="Manager.StorePrediction"></a>
+### func \(\*Manager\) StorePrediction
+
+	func (m *Manager) StorePrediction(ctx context.Context, p Prediction) (string, error)
+
+StorePrediction writes a prediction as a typed memory and returns its ID.
+
+<a name="Manager.StoreQuestion"></a>
+### func \(\*Manager\) StoreQuestion
+
+	func (m *Manager) StoreQuestion(ctx context.Context, q Question) (string, error)
+
+StoreQuestion writes an open question as a typed memory and returns its ID.
 
 <a name="Manager.StoreVersioned"></a>
 ### func \(\*Manager\) StoreVersioned
@@ -1293,6 +1719,14 @@ MemoryType classifies memory storage subsystems.
 	    MemoryTypeTask MemoryType = "task"
 	    // MemoryTypePersonality is for personality and preference tracking.
 	    MemoryTypePersonality MemoryType = "personality"
+	    // MemoryTypeClaim is a structured assertion of belief.
+	    MemoryTypeClaim MemoryType = "claim"
+	    // MemoryTypeDecision is a recorded decision with expected outcome.
+	    MemoryTypeDecision MemoryType = "decision"
+	    // MemoryTypePrediction is a forecast with a horizon.
+	    MemoryTypePrediction MemoryType = "prediction"
+	    // MemoryTypeQuestion is an open tracked question.
+	    MemoryTypeQuestion MemoryType = "question"
 	)
 
 <a name="MemvidConsolidationBackend"></a>
@@ -1487,6 +1921,31 @@ GetAll returns all personality data as a map.
 	func (s *PersonalityStore) Set(ctx context.Context, key, value string) error
 
 Set stores a preference value.
+
+<a name="Prediction"></a>
+## type Prediction
+
+Prediction is a forecast with horizon and resolution tracking.
+
+	type Prediction struct {
+	    Forecast        string     // the prediction
+	    Horizon         time.Time  // when it should resolve
+	    RelatedDecision string     // decision ID (optional)
+	    Outcome         string     // filled in on resolution
+	    ResolvedAt      *time.Time // when the prediction was resolved
+	}
+
+<a name="Question"></a>
+## type Question
+
+Question is an open question the user is tracking.
+
+	type Question struct {
+	    Text          string   // the question
+	    RelatedClaims []string // claim IDs that bear on this question
+	    Status        string   // "open", "answered"
+	    AnswerClaim   string   // claim ID that answers it (if answered)
+	}
 
 <a name="SQLiteConsolidationBackend"></a>
 ## type SQLiteConsolidationBackend
