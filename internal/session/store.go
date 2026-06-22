@@ -127,4 +127,9 @@ type Store interface {
 	UpdateThread(ctx context.Context, thread *Thread) error
 	DeleteThread(ctx context.Context, threadID string) error
 	SetActiveThread(ctx context.Context, sessionID, threadID string) error
+
+	// Designation operations
+	GetDesignatedSessionIDs() ([]string, error)
+	UpdateDesignation(sessionID string, status DesignationStatus, reason, priority string) error
+	ClearDesignation(sessionID string) error
 }
