@@ -100,7 +100,8 @@ func (s *SessionService) DeleteSession(ctx context.Context, req DeleteSessionReq
 
 // ListSessionsRequest contains list parameters.
 type ListSessionsRequest struct {
-	Limit int `json:"limit,omitempty"`
+	Limit       int `json:"limit,omitempty"`
+	Designation *string `json:"designation,omitempty"`
 }
 
 // GetMostRecent returns the most recently active session, or nil if none exist.
@@ -119,7 +120,7 @@ func (s *SessionService) GetMostRecent(ctx context.Context) (*session.Session, e
 	return sessions[0], nil
 }
 
-// List returns all sessions.
+// List returns all sessions, optionally filtered by designation status.
 func (s *SessionService) List(ctx context.Context, req ListSessionsRequest) ([]*session.Session, error) {
 	if s.store == nil {
 		return nil, wrapError("session", "List", ErrUnavailable)
@@ -128,6 +129,26 @@ func (s *SessionService) List(ctx context.Context, req ListSessionsRequest) ([]*
 	if err != nil {
 		return nil, wrapError("session", "List", err)
 	}
+
+	// Apply optional designation filter
+	if req.Designation != nil && *req.Designation != "" {
+		targetStatus := session.DesignationStatus(*req.Designation)
+		filtered := make([]*session.Session, 0, len(sessions))
+		for _, sess := range sessions {
+			if sess.Designation == nil {
+				continue
+			}
+			if sess.Designation.Status == targetStatus {
+				filtered = append(filtered, sess)
+			} else if targetStatus == session.DesignationWaitingHuman &&
+				sess.Designation.Status != session.DesignationNone {
+				// "waiting_human" filter also accepts "human_responded" and "requires_approval"
+				filtered = append(filtered, sess)
+			}
+		}
+		sessions = filtered
+	}
+
 	// Apply limit if specified
 	if req.Limit > 0 && len(sessions) > req.Limit {
 		sessions = sessions[:req.Limit]
@@ -398,6 +419,21 @@ func (s *SessionService) CompactSession(ctx context.Context, req CompactSessionR
 		"session_id":    sess.ID,
 		"message_count": len(path),
 	}, nil
+}
+
+// GetDesignation retrieves the designation of a specific session.
+func (s *SessionService) GetDesignation(ctx context.Context, sessionID string) (*session.Session, *session.SessionDesignation, error) {
+	if sessionID == "" {
+		return nil, nil, wrapError("session", "GetDesignation", ErrInvalidInput)
+	}
+	if s.store == nil {
+		return nil, nil, wrapError("session", "GetDesignation", ErrUnavailable)
+	}
+	sess := s.store.Get(sessionID)
+	if sess == nil {
+		return nil, nil, wrapError("session", "GetDesignation", ErrNotFound)
+	}
+	return sess, sess.Designation, nil
 }
 
 // AcknowledgeDesignation clears a session's designation and marks it as acknowledged.

@@ -901,6 +901,7 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/config/models", s.handleSaveModelsConfig)
 	mux.HandleFunc("GET /api/v1/config/menubar", s.handleGetMenubarConfig)
 	mux.HandleFunc("POST /api/v1/config/menubar", s.handleSaveMenubarConfig)
+	mux.HandleFunc("GET /api/v1/config/memory", s.handleGetMemoryConfig)
 	mux.HandleFunc("POST /api/v1/config/normalize", s.handleNormalizeConfig)
 	mux.HandleFunc("GET /api/v1/config/agents", s.handleListAgents)
 	mux.HandleFunc("GET /api/v1/config/agents/{id}", s.handleGetAgent)
@@ -1004,6 +1005,16 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/sessions/{id}/tree", s.handleSessionTree)
 	mux.HandleFunc("GET /api/v1/sessions/{id}/messages", s.handleSessionMessages)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/compact", s.handleSessionCompact)
+	mux.HandleFunc("GET /api/v1/sessions/{id}/designation", s.handleSessionDesignationGet)
+	mux.HandleFunc("POST /api/v1/sessions/{id}/acknowledge", s.handleSessionAcknowledge)
+
+	// Thread endpoints (thread-based context partitioning)
+	mux.HandleFunc("GET /api/v1/sessions/{id}/threads", s.handleThreadList)
+	mux.HandleFunc("POST /api/v1/sessions/{id}/threads", s.handleThreadCreate)
+	mux.HandleFunc("GET /api/v1/sessions/{id}/threads/active", s.handleThreadGetActive)
+	mux.HandleFunc("PUT /api/v1/sessions/{id}/threads/active", s.handleThreadSetActive)
+	mux.HandleFunc("GET /api/v1/sessions/{id}/threads/{threadID}", s.handleThreadGet)
+	mux.HandleFunc("DELETE /api/v1/sessions/{id}/threads/{threadID}", s.handleThreadDelete)
 
 	// Worker endpoints
 	mux.HandleFunc("GET /api/v1/workers", s.handleWorkerList)

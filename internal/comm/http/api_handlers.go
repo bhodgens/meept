@@ -531,8 +531,15 @@ func (s *Server) handleSessionList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse optional designation filter
+	var designation *string
+	if d := r.URL.Query().Get("designation"); d != "" {
+		designation = &d
+	}
+
 	sessions, err := s.services.Session.List(r.Context(), services.ListSessionsRequest{
-		Limit: limit,
+		Limit:       limit,
+		Designation: designation,
 	})
 	if err != nil {
 		s.handleServiceError(w, err)
@@ -3471,4 +3478,96 @@ func (s *Server) handleSessionDesignatedAcknowledge(w http.ResponseWriter, r *ht
 
 	s.logger.Debug("session designation acknowledged", "session_id", id)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleSessionDesignationGet handles GET /api/v1/sessions/{id}/designation.
+func (s *Server) handleSessionDesignationGet(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Session == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "session service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "session id is required")
+		return
+	}
+
+	_, designation, err := s.services.Session.GetDesignation(r.Context(), id)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"session_id":  id,
+		"designation": designation,
+	})
+}
+
+// handleSessionAcknowledge handles POST /api/v1/sessions/{id}/acknowledge.
+// Acknowledges a designated session, clearing its designation status.
+func (s *Server) handleSessionAcknowledge(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Session == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "session service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "session id is required")
+		return
+	}
+
+	if err := s.services.Session.AcknowledgeDesignation(r.Context(), id); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// sessionFilterOptions contains optional filters for session listing.
+type sessionFilterOptions struct {
+	Designation *string
+	Limit       int
+}
+
+// parseSessionListQuery parses query parameters for session list filtering.
+func parseSessionListQuery(r *http.Request) sessionFilterOptions {
+	opts := sessionFilterOptions{}
+
+	// Optional designation filter
+	if d := r.URL.Query().Get("designation"); d != "" {
+		opts.Designation = &d
+	}
+
+	opts.Limit = 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 1000 {
+			opts.Limit = v
+		}
+	}
+
+	return opts
+}
+
+// handleGetMemoryConfig handles GET /api/v1/config/memory.
+// It returns the raw meept.json5 content (JSON5 passthrough) so clients
+// such as the menubar app or web UI can render the memory/epistemic
+// configuration editor. The caller is responsible for standardizing the
+// JSON5 via POST /api/v1/config/normalize before parsing.
+func (s *Server) handleGetMemoryConfig(w http.ResponseWriter, _ *http.Request) {
+	if s.configService == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "config service not available")
+		return
+	}
+
+	content, err := s.configService.LoadMeeptConfig()
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"content": content})
 }

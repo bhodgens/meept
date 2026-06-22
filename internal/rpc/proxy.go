@@ -95,6 +95,7 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	server.RegisterHandler("session.messages.get", p.makeProxy("session.messages.get", "session.result", 10*time.Second))
 	server.RegisterHandler("session.update_description", p.makeProxy("session.update_description", "session.result", 10*time.Second))
 	server.RegisterHandler("session.generate_description", p.makeProxy("session.generate_description", "session.result", 20*time.Second))
+	server.RegisterHandler("sessions.designated", p.makeProxy("sessions.designated", "session.result", 10*time.Second))
 
 	// Task methods
 	server.RegisterHandler("task.create", p.makeProxy("task.create", "task.result", 10*time.Second))

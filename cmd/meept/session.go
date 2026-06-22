@@ -25,6 +25,7 @@ func newSessionCmd() *cobra.Command {
 	cmd.AddCommand(newSessionAttachCmd())
 	cmd.AddCommand(newSessionDetachCmd())
 	cmd.AddCommand(newSessionMessagesCmd())
+	cmd.AddCommand(newSessionNeedsAttentionCmd())
 
 	return cmd
 }
@@ -462,6 +463,108 @@ func newSessionMessagesCmd() *cobra.Command {
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 50, "Maximum number of messages to return")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+
+	return cmd
+}
+
+// newSessionNeedsAttentionCmd returns a command that lists designated sessions
+// requiring attention from the operator.  It calls sessions.designated over RPC
+// and pretty-prints a table or JSON output.
+func newSessionNeedsAttentionCmd() *cobra.Command {
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "--needs-attention",
+		Short: "List sessions requiring attention",
+		Long:  "List sessions whose designation is non-trivial (e.g. waiting_human, requires_approval).",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer client.Close()
+
+			rawResult, err := client.Call("sessions.designated", nil)
+			if err != nil {
+				return fmt.Errorf("failed to query designated sessions: %w", err)
+			}
+
+			var resultMap map[string]any
+			if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+				return fmt.Errorf("failed to parse response: %w", err)
+			}
+
+			if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
+				return fmt.Errorf("%s", errMsg)
+			}
+
+			if outputJSON {
+				output, err := json.MarshalIndent(resultMap, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal JSON: %w", err)
+				}
+				_ = output
+				fmt.Println(string(output))
+				return nil
+			}
+
+			sessionsList, ok := resultMap["sessions"].([]any)
+			if !ok || len(sessionsList) == 0 {
+				fmt.Println("No sessions need attention.")
+				return nil
+			}
+
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "ID\tNAME\tSTATUS\tREASON\tPRIORITY\tUPDATED")
+
+			for _, s := range sessionsList {
+				designated, ok := s.(map[string]any)
+				if !ok {
+					continue
+				}
+
+				id := getStringOr(designated, "id", "")
+				name := getStringOr(designated, "name", "")
+				lastActivity := getStringOr(designated, "last_activity", "")
+				designation := designated["designation"]
+
+				status := ""
+				reason := ""
+				priority := ""
+
+				if dig, ok := designation.(map[string]any); ok {
+					status = getStringOr(dig, "status", "")
+					reason = getStringOr(dig, "reason", "")
+					priority = getStringOr(dig, "priority", "")
+				}
+
+				// Truncate reason
+				if len([]rune(reason)) > 50 {
+					reason = string([]rune(reason)[:47]) + "..."
+				}
+				// Truncate last_activity
+				if len(lastActivity) > 20 {
+					lastActivity = lastActivity[:20]
+				}
+
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+					id, name, status, reason, priority, lastActivity)
+			}
+
+			if err := w.Flush(); err != nil {
+				return err
+			}
+			fmt.Printf("\n%d session(s) need attention\n\n", len(sessionsList))
+
+			// Show acknowledgment hint
+			fmt.Printf("To acknowledge a session, call:\n")
+			fmt.Printf("  PUT /api/v1/sessions/designated/<session-id>\n")
+
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&outputJSON, "json", true, "Output as JSON")
 
 	return cmd
 }
