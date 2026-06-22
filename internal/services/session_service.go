@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"time"
 
 	"github.com/caimlas/meept/internal/session"
 )
@@ -308,6 +309,56 @@ type CompactSessionRequest struct {
 
 // CompactSession triggers compaction on a session by inserting a compaction entry.
 // This is a manual trigger; normally compaction happens automatically via maybeCompact.
+// DesignatedSessionSummary is a minimal view of a session with active designation.
+type DesignatedSessionSummary struct {
+	ID           string                 `json:"id"`
+	Name         string                 `json:"name"`
+	LastActivity string                 `json:"last_activity"`
+	Designation  *session.SessionDesignation `json:"designation"`
+}
+
+// GetDesignated returns sessions whose designation is non-trivial (not "none").
+func (s *SessionService) GetDesignated(ctx context.Context) (int, []DesignatedSessionSummary, error) {
+	if s.store == nil {
+		return 0, nil, wrapError("session", "GetDesignated", ErrUnavailable)
+	}
+
+	designatedIDs, err := s.store.GetDesignatedSessionIDs()
+	if err != nil {
+		return 0, nil, wrapError("session", "GetDesignated", err)
+	}
+
+	// Build map of designated IDs for quick lookup
+	designatedMap := make(map[string]bool, len(designatedIDs))
+	for _, id := range designatedIDs {
+		designatedMap[id] = true
+	}
+
+	sessions, err := s.store.List()
+	if err != nil {
+		return 0, nil, wrapError("session", "GetDesignated", err)
+	}
+
+	designatedCount := 0
+	result := make([]DesignatedSessionSummary, 0)
+	for _, sess := range sessions {
+		if !designatedMap[sess.ID] {
+			continue
+		}
+		designation := sess.Designation
+		if designation != nil && designation.Status != session.DesignationNone {
+			designatedCount++
+			result = append(result, DesignatedSessionSummary{
+				ID:           sess.ID,
+				Name:         sess.Name,
+				LastActivity: sess.LastActivity.Format(time.RFC3339),
+				Designation:  designation,
+			})
+		}
+	}
+	return designatedCount, result, nil
+}
+
 func (s *SessionService) CompactSession(ctx context.Context, req CompactSessionRequest) (map[string]any, error) {
 	if req.ID == "" {
 		return nil, wrapError("session", "CompactSession", ErrInvalidInput)
@@ -347,4 +398,20 @@ func (s *SessionService) CompactSession(ctx context.Context, req CompactSessionR
 		"session_id":    sess.ID,
 		"message_count": len(path),
 	}, nil
+}
+
+// AcknowledgeDesignation clears a session's designation and marks it as acknowledged.
+func (s *SessionService) AcknowledgeDesignation(ctx context.Context, sessionID string) error {
+	if sessionID == "" {
+		return wrapError("session", "AcknowledgeDesignation", ErrInvalidInput)
+	}
+	if s.store == nil {
+		return wrapError("session", "AcknowledgeDesignation", ErrUnavailable)
+	}
+
+	if err := s.store.ClearDesignation(sessionID); err != nil {
+		return wrapError("session", "AcknowledgeDesignation", err)
+	}
+
+	return nil
 }

@@ -184,3 +184,19 @@ func (e *EventEmitter) GetEventsSince(t time.Time) []*http.NotificationEvent {
 	}
 	return events
 }
+
+// PublishNotification publishes a notification with full control over the event fields
+// (e.g., session ID, custom data). This is the primary method for session-designation
+// notifications such as "waiting_human", "bot_finished", etc.
+func (e *EventEmitter) PublishNotification(sessionID string, agentID string, notifType NotificationType, title, message string) {
+	event := &http.NotificationEvent{
+		ID:        uuid.New().String(),
+		Timestamp: time.Now().Format(time.RFC3339),
+		Type:      notifType,
+		Title:     title,
+		Message:   message,
+		SessionID: sessionID,
+		AgentID:   agentID,
+	}
+	e.Publish(event)
+}

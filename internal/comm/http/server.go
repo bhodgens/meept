@@ -991,6 +991,8 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/sessions", s.handleSessionCreate)
 	mux.HandleFunc("GET /api/v1/sessions", s.handleSessionList)
 	mux.HandleFunc("GET /api/v1/sessions/most-recent", s.handleSessionMostRecent)
+	mux.HandleFunc("GET /api/v1/sessions/designated", s.handleSessionsDesignated)
+	mux.HandleFunc("PUT /api/v1/sessions/designated/{id}", s.handleSessionDesignatedAcknowledge)
 	mux.HandleFunc("GET /api/v1/sessions/{id}", s.handleSessionGet)
 	mux.HandleFunc("DELETE /api/v1/sessions/{id}", s.handleSessionDelete)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/attach", s.handleSessionAttach)
@@ -1062,6 +1064,14 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/terminal/exec", s.handleTerminalExec)
 	mux.HandleFunc("GET /api/v1/terminal/sessions", s.handleTerminalSessions)
 	mux.HandleFunc("POST /api/v1/terminal/clear", s.handleTerminalClear)
+
+	// Reasoning endpoints (require RPC wiring)
+	if s.rpcCall != nil {
+		mux.HandleFunc("GET /api/v1/reasoning/tiers", s.handleReasoningListTiers)
+		mux.HandleFunc("GET /api/v1/reasoning/budgets", s.handleReasoningGetBudgets)
+		mux.HandleFunc("POST /api/v1/reasoning/budgets", s.handleReasoningSetBudgets)
+		mux.HandleFunc("GET /api/v1/reasoning/agents", s.handleReasoningListAgents)
+	}
 
 	// Bus endpoints
 	if s.rpcCall != nil {

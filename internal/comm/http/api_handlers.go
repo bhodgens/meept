@@ -3422,11 +3422,53 @@ func (s *Server) handleReasoningListAgents(w http.ResponseWriter, r *http.Reques
 		s.writeError(w, http.StatusServiceUnavailable, "reasoning not available")
 		return
 	}
-	// Call reasoning.get for each registered agent to list them all.
+	// Call reasoning.list_agents RPC to get all agents' reasoning config.
 	result, err := s.rpcCall(r.Context(), "reasoning.list_agents", json.RawMessage("{}"))
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleSessionsDesignated handles GET /api/v1/sessions/designated.
+func (s *Server) handleSessionsDesignated(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Session == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "session service not available")
+		return
+	}
+	count, sessions, err := s.services.Session.GetDesignated(r.Context())
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"designated_count": count,
+		"sessions":         sessions,
+	})
+}
+
+// handleSessionDesignatedAcknowledge handles PUT /api/v1/sessions/designated/{id}.
+// Acknowledges a designated session, clearing its designation status.
+func (s *Server) handleSessionDesignatedAcknowledge(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Session == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "session service not available")
+		return
+	}
+
+	// Extract session ID from URL path
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "session id is required")
+		return
+	}
+
+	// Acknowledge the session designation
+	if err := s.services.Session.AcknowledgeDesignation(r.Context(), id); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.logger.Debug("session designation acknowledged", "session_id", id)
+	w.WriteHeader(http.StatusNoContent)
 }
