@@ -1,6 +1,8 @@
 package sharedclient
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 )
@@ -172,6 +174,157 @@ func TestSortStrings(t *testing.T) {
 				if i < len(tt.want) && got != tt.want[i] {
 					t.Errorf("slices.Sort() [%d] = %q, want %q", i, got, tt.want[i])
 				}
+			}
+		})
+	}
+}
+
+// TestDiscoverCustomCommands_WithClaudeCommands verifies that
+// DiscoverCustomCommands() picks up files from the ~/.claude/commands/ tier
+// (in addition to ~/.meept/commands/) and that project-local commands override
+// user-global ones. The HOME environment variable is redirected to a temp dir
+// so the test does not touch the real user home.
+func TestDiscoverCustomCommands_WithClaudeCommands(t *testing.T) {
+	// Redirect HOME to a temp dir so os.UserHomeDir resolves there.
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	// ~/.claude/commands/claude-only.md — only in the Claude tier.
+	claudeDir := filepath.Join(tmpHome, ".claude", "commands")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	claudeOnly := `---
+name: claude-only
+description: Claude-only command
+---
+Claude body with $ARGUMENTS
+`
+	if err := os.WriteFile(filepath.Join(claudeDir, "claude-only.md"), []byte(claudeOnly), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// ~/.meept/commands/meept-only.md — only in the meept user-global tier.
+	meeptDir := filepath.Join(tmpHome, ".meept", "commands")
+	if err := os.MkdirAll(meeptDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	meeptOnly := `---
+name: meept-only
+description: Meept-only command
+---
+Meept body
+`
+	if err := os.WriteFile(filepath.Join(meeptDir, "meept-only.md"), []byte(meeptOnly), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// ~/.meept/commands/shared.md — should be overridden by the project-local
+	// command of the same name below. Also drop a shared.md into the Claude
+	// tier to confirm both user tiers can be shadowed by project-local.
+	sharedMeept := `---
+name: shared
+description: meept user-global version
+---
+meept user body
+`
+	if err := os.WriteFile(filepath.Join(meeptDir, "shared.md"), []byte(sharedMeept), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sharedClaude := `---
+name: shared-claude
+description: claude user-global version
+---
+claude user body
+`
+	if err := os.WriteFile(filepath.Join(claudeDir, "shared-claude.md"), []byte(sharedClaude), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Restore cache after test so we don't leak state into other tests.
+	defer SetCustomCommands(nil)
+
+	cmds := DiscoverCustomCommands()
+
+	// Claude-only command should be discovered.
+	c, ok := cmds["claude-only"]
+	if !ok {
+		t.Fatal("expected 'claude-only' command from ~/.claude/commands/ to be discovered")
+	}
+	if c.Description != "Claude-only command" {
+		t.Errorf("claude-only description = %q, want %q", c.Description, "Claude-only command")
+	}
+	if c.Template != "Claude body with $ARGUMENTS" {
+		t.Errorf("claude-only template = %q, want %q", c.Template, "Claude body with $ARGUMENTS")
+	}
+
+	// Meept-only command should be discovered.
+	if _, ok := cmds["meept-only"]; !ok {
+		t.Error("expected 'meept-only' command from ~/.meept/commands/ to be discovered")
+	}
+
+	// Both tiers should contribute commands; verify cache is populated too.
+	cacheNames := CustomCommandNames()
+	if len(cacheNames) < 3 {
+		t.Errorf("expected at least 3 cached commands, got %d (%v)", len(cacheNames), cacheNames)
+	}
+
+	// Verify cache lookup works for the Claude-discovered command.
+	if !IsCustomCommand("claude-only") {
+		t.Error("IsCustomCommand(claude-only) = false, want true (cache should be populated by DiscoverCustomCommands)")
+	}
+}
+
+// TestRenderTemplate_Arguments verifies $ARGUMENTS and $N positional
+// substitution in command templates. This is a pure function test and safe to
+// run in parallel.
+func TestRenderTemplate_Arguments(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		template string
+		args     []string
+		want     string
+	}{
+		{
+			name:     "all arguments",
+			template: "Do this: $ARGUMENTS",
+			args:     []string{"on", "friday", "at", "12pm"},
+			want:     "Do this: on friday at 12pm",
+		},
+		{
+			name:     "positional",
+			template: "Research $1 and summarize in $2 sentences",
+			args:     []string{"quantum computing", "5"},
+			want:     "Research quantum computing and summarize in 5 sentences",
+		},
+		{
+			name:     "mixed $1 and $ARGUMENTS",
+			template: "Task: $1 - Details: $ARGUMENTS",
+			args:     []string{"urgent", "by EOD", "for client"},
+			want:     "Task: urgent - Details: urgent by EOD for client",
+		},
+		{
+			name:     "no arguments keeps template verbatim",
+			template: "Static template",
+			args:     []string{},
+			want:     "Static template",
+		},
+		{
+			name:     "$ARGUMENTS with no args collapses to empty",
+			template: "deploy to $ARGUMENTS now",
+			args:     nil,
+			want:     "deploy to  now",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := RenderTemplate(tt.template, tt.args)
+			if got != tt.want {
+				t.Errorf("RenderTemplate(%q, %v) = %q, want %q", tt.template, tt.args, got, tt.want)
 			}
 		})
 	}

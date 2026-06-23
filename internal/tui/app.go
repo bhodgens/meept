@@ -274,9 +274,16 @@ func NewApp(socketPath string) *App {
 	app.slashAutocomplete = NewSlashAutocomplete(styles)
 
 	// Initialize command handler for slash commands
-	app.commandHandler = NewCommandHandler(rpc, WithChatModelGetter(func() *models.ChatModel {
-		return app.chat
-	}))
+	handlerOpts := []CommandHandlerOption{
+		WithChatModelGetter(func() *models.ChatModel {
+			return app.chat
+		}),
+	}
+	// Wire /skill command via RPC-backed lister (nil-guard for defense in depth).
+	if rpc != nil {
+		handlerOpts = append(handlerOpts, WithSkillLister(rpc))
+	}
+	app.commandHandler = NewCommandHandler(rpc, handlerOpts...)
 
 	// Initialize notification manager
 	app.notifications = components.NewNotificationManager()

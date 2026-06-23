@@ -3031,6 +3031,7 @@ func builtinCommands() []string {
 		"vim",
 		"session",
 		"task",
+		"skill",
 	}
 }
 

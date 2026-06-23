@@ -2,6 +2,7 @@ nav:
   - index.md
   - features.md
   - Getting Started: getting-started/
+  - User Guide: user-guide/
   - Concepts: concepts/
   - Configuration: configuration/
   - Workflows: workflows/

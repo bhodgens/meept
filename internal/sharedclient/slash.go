@@ -72,6 +72,12 @@ var builtinCommands = map[string]struct{}{
 	"review":    {},
 	"project":   {},
 	"mcp":       {},
+	// "skill" is a built-in that dispatches to the skill command handler at
+	// runtime (resolved via RPC). Autocomplete only shows the static command
+	// name "/skill"; subcommand autocomplete (specific skill names) would
+	// require an eager RPC fetch at startup which would block the TUI, so it
+	// is a future enhancement.
+	"skill": {},
 }
 
 // CommandTasks is the "tasks" command name, exported for compatibility with tui/constants.go.

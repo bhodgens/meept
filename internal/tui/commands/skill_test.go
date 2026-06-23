@@ -1,24 +1,36 @@
 package commands
 
 import (
+	"context"
 	"strings"
 	"testing"
-
-	"github.com/caimlas/meept/internal/skills"
 )
 
-func TestSkillCommand_List(t *testing.T) {
-	registry := skills.NewRegistry()
-	registry.Register(&skills.Skill{
-		Name:        "code-review",
-		Description: "Review code changes",
-	})
-	registry.Register(&skills.Skill{
-		Name:        "debugger",
-		Description: "Debug issues",
-	})
+// fakeSkillLister is a test double for SkillLister that returns canned data.
+type fakeSkillLister struct {
+	skills []SkillInfo
+	err    error
+}
 
-	handler := NewSkillCommand(registry)
+func (f *fakeSkillLister) ListSkills(_ context.Context) ([]SkillInfo, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	// Return a defensive copy so tests mutating the slice don't bleed state.
+	out := make([]SkillInfo, len(f.skills))
+	copy(out, f.skills)
+	return out, nil
+}
+
+func TestSkillCommand_List(t *testing.T) {
+	lister := &fakeSkillLister{
+		skills: []SkillInfo{
+			{Name: "code-review", Description: "Review code changes"},
+			{Name: "debugger", Description: "Debug issues"},
+		},
+	}
+
+	handler := NewSkillCommand(lister)
 	result := handler.Execute([]string{})
 
 	if result.Output == "" {
@@ -35,15 +47,18 @@ func TestSkillCommand_List(t *testing.T) {
 }
 
 func TestSkillCommand_Show(t *testing.T) {
-	registry := skills.NewRegistry()
-	registry.Register(&skills.Skill{
-		Name:        "test-skill",
-		Description: "A test skill",
-		Tags:        []string{"test", "example"},
-		RiskLevel:   "low",
-	})
+	lister := &fakeSkillLister{
+		skills: []SkillInfo{
+			{
+				Name:        "test-skill",
+				Description: "A test skill",
+				Tags:        []string{"test", "example"},
+				RiskLevel:   "low",
+			},
+		},
+	}
 
-	handler := NewSkillCommand(registry)
+	handler := NewSkillCommand(lister)
 	result := handler.Execute([]string{"test-skill"})
 
 	if result.Output == "" {
@@ -56,8 +71,8 @@ func TestSkillCommand_Show(t *testing.T) {
 }
 
 func TestSkillCommand_NotFound(t *testing.T) {
-	registry := skills.NewRegistry()
-	handler := NewSkillCommand(registry)
+	lister := &fakeSkillLister{skills: nil}
+	handler := NewSkillCommand(lister)
 	result := handler.Execute([]string{"nonexistent"})
 
 	if !result.IsError {
@@ -66,13 +81,13 @@ func TestSkillCommand_NotFound(t *testing.T) {
 }
 
 func TestSkillCommand_Search(t *testing.T) {
-	registry := skills.NewRegistry()
-	registry.Register(&skills.Skill{
-		Name:        "code-review",
-		Description: "Review code changes",
-	})
+	lister := &fakeSkillLister{
+		skills: []SkillInfo{
+			{Name: "code-review", Description: "Review code changes"},
+		},
+	}
 
-	handler := NewSkillCommand(registry)
+	handler := NewSkillCommand(lister)
 	result := handler.Execute([]string{"search", "code"})
 
 	if result.IsError {
@@ -85,8 +100,8 @@ func TestSkillCommand_Search(t *testing.T) {
 }
 
 func TestSkillCommand_SearchNotFound(t *testing.T) {
-	registry := skills.NewRegistry()
-	handler := NewSkillCommand(registry)
+	lister := &fakeSkillLister{skills: nil}
+	handler := NewSkillCommand(lister)
 	result := handler.Execute([]string{"search", "nonexistent"})
 
 	if !result.IsError {
@@ -95,13 +110,13 @@ func TestSkillCommand_SearchNotFound(t *testing.T) {
 }
 
 func TestSkillCommand_EmptyArgs(t *testing.T) {
-	registry := skills.NewRegistry()
-	registry.Register(&skills.Skill{
-		Name:        "test",
-		Description: "Test skill",
-	})
+	lister := &fakeSkillLister{
+		skills: []SkillInfo{
+			{Name: "test", Description: "Test skill"},
+		},
+	}
 
-	handler := NewSkillCommand(registry)
+	handler := NewSkillCommand(lister)
 	result := handler.Execute([]string{})
 
 	if result.IsError {
@@ -110,17 +125,14 @@ func TestSkillCommand_EmptyArgs(t *testing.T) {
 }
 
 func TestGetSkillNames(t *testing.T) {
-	registry := skills.NewRegistry()
-	registry.Register(&skills.Skill{
-		Name:        "alpha",
-		Description: "First",
-	})
-	registry.Register(&skills.Skill{
-		Name:        "beta",
-		Description: "Second",
-	})
+	lister := &fakeSkillLister{
+		skills: []SkillInfo{
+			{Name: "alpha", Description: "First"},
+			{Name: "beta", Description: "Second"},
+		},
+	}
 
-	handler := NewSkillCommand(registry)
+	handler := NewSkillCommand(lister)
 	names := handler.GetSkillNames()
 
 	if len(names) != 2 {

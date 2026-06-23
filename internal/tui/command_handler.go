@@ -7,7 +7,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/tui/commands"
 	"github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
@@ -40,9 +39,7 @@ type CommandResultMsg struct {
 type CommandHandler struct {
 	rpc          *RPCClient
 	getChatModel func() *models.ChatModel
-	// skillRegistry holds discovered skills for /skill command.
-	skillRegistry  *skills.Registry
-	skillCommand   *commands.SkillCommand
+	skillCommand *commands.SkillCommand
 }
 
 // CommandHandlerOption configures a CommandHandler.
@@ -55,11 +52,15 @@ func WithChatModelGetter(fn func() *models.ChatModel) CommandHandlerOption {
 	}
 }
 
-// WithSkillRegistry sets the skill registry for /skill command.
-func WithSkillRegistry(reg *skills.Registry) CommandHandlerOption {
+// WithSkillLister enables the /skill slash command by wiring an RPC-backed
+// lister. The lister is only meaningful when an RPC client is present;
+// passing a non-nil lister with no RPC has no effect.
+func WithSkillLister(lister commands.SkillLister) CommandHandlerOption {
 	return func(h *CommandHandler) {
-		h.skillRegistry = reg
-		h.skillCommand = commands.NewSkillCommand(reg)
+		if h.rpc == nil || lister == nil {
+			return
+		}
+		h.skillCommand = commands.NewSkillCommand(lister)
 	}
 }
 
@@ -70,10 +71,6 @@ func NewCommandHandler(rpc *RPCClient, opts ...CommandHandlerOption) *CommandHan
 	}
 	for _, opt := range opts {
 		opt(h)
-	}
-	// Initialize skill command if registry available
-	if h.skillRegistry != nil && h.skillCommand == nil {
-		h.skillCommand = commands.NewSkillCommand(h.skillRegistry)
 	}
 	return h
 }
@@ -95,16 +92,12 @@ func (h *CommandHandler) executeSync(cmd *SlashCommand) *CommandResult {
 		}
 	}
 
-	// Check if this is a built-in command
-	if IsBuiltin(cmd.Name) {
-		return h.executeBuiltin(cmd)
-	}
-
-	// Check if this is the /skill command
+	// Check if this is the /skill command first (it uses a dedicated handler
+	// with RPC-backed skill listing, separate from the other builtins).
 	if cmd.Name == "skill" {
 		if h.skillCommand == nil {
 			return &CommandResult{
-				Output:  "skill system not initialized",
+				Output:  "skill system not available (daemon not connected)",
 				IsError: true,
 			}
 		}
@@ -113,6 +106,11 @@ func (h *CommandHandler) executeSync(cmd *SlashCommand) *CommandResult {
 			Output:  result.Output,
 			IsError: result.IsError,
 		}
+	}
+
+	// Check if this is a built-in command
+	if IsBuiltin(cmd.Name) {
+		return h.executeBuiltin(cmd)
 	}
 
 	// Try template invocation via RPC
@@ -131,7 +129,7 @@ func (h *CommandHandler) executeSync(cmd *SlashCommand) *CommandResult {
 		}
 	}
 
-	// Not a built-in, skill, or template
+	// Not a builtin, skill, or template
 	return &CommandResult{
 		Output:  fmt.Sprintf("unknown command: /%s", cmd.Name),
 		IsError: true,
@@ -214,6 +212,7 @@ func (h *CommandHandler) executeHelp(args []string) *CommandResult {
 	sb.WriteString("  /plan               enter planning mode\n")
 	sb.WriteString("  /review             review current changes\n")
 	sb.WriteString("  /project [subcmd]   manage projects (list, set, add, sync, status)\n")
+	sb.WriteString("  /skill [name|search <q>] list, show, or search skills\n")
 
 	return &CommandResult{Output: sb.String()}
 }
@@ -369,6 +368,19 @@ examples:
   /project add https://github.com/org/repo.git
   /project sync                   sync current project
   /project status                 show project git status`,
+
+		"skill": `usage: /skill [name|search <query>]
+
+list available skills, show details for a specific skill, or search.
+
+without arguments, lists all installed skills.
+with a name, shows details (description, requires, tags, risk level).
+with "search <query>", finds skills matching the query in name or description.
+
+examples:
+  /skill                          list all skills
+  /skill code-review              show details for the "code-review" skill
+  /skill search code              search for skills matching "code"`,
 	}
 
 	if text, ok := helpTexts[name]; ok {

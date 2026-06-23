@@ -21,6 +21,7 @@ import (
 
 	"github.com/caimlas/meept/internal/errcls"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/tui/commands"
 	tuimodels "github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/pkg/models"
@@ -1253,4 +1254,29 @@ func (c *RPCClient) SearchSemantic(query, scope string, limit int) (*tuimodels.S
 	}
 
 	return &resp, nil
+}
+
+// ============================================================================
+// Skill Methods
+// ============================================================================
+
+// ListSkills fetches the skill list from the daemon via the skills.list RPC
+// method. Implements commands.SkillLister so the TUI slash-command handler can
+// call it without a direct dependency on the daemon's skills.Registry.
+func (c *RPCClient) ListSkills(ctx context.Context) ([]commands.SkillInfo, error) {
+	result, err := c.Call("skills.list", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Response shape from skills.list: {"skills": [...], "count": N}
+	var resp struct {
+		Skills []commands.SkillInfo `json:"skills"`
+		Count  int                  `json:"count"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse skills list response: %w", err)
+	}
+
+	return resp.Skills, nil
 }
