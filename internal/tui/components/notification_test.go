@@ -149,3 +149,56 @@ func TestNotificationTTL(t *testing.T) {
 		t.Errorf("expected TTL 100ms, got %v", n.TTL)
 	}
 }
+
+func TestNotificationManager_DoNotDisturb_DefaultsOff(t *testing.T) {
+	nm := NewNotificationManager()
+	if nm.IsDoNotDisturb() {
+		t.Fatal("new manager should not start in DND mode")
+	}
+}
+
+func TestNotificationManager_DoNotDisturb_SuppressesPush(t *testing.T) {
+	nm := NewNotificationManager()
+	nm.SetDoNotDisturb(true)
+	if !nm.IsDoNotDisturb() {
+		t.Fatal("SetDoNotDisturb(true) did not flip state")
+	}
+	n, cmd := nm.Push(NotifyInfo, "should not appear", "nope")
+	if cmd != nil {
+		t.Errorf("expected nil cmd under DND, got %T", cmd)
+	}
+	if n.ID != 0 || n.Title != "" {
+		t.Errorf("expected zero notification under DND, got %+v", n)
+	}
+	if nm.HasActive() {
+		t.Fatal("DND push should not enqueue a notification")
+	}
+}
+
+func TestNotificationManager_DoNotDisturb_ToggleRestores(t *testing.T) {
+	nm := NewNotificationManager()
+	nm.SetDoNotDisturb(true)
+	nm.SetDoNotDisturb(false)
+	if nm.IsDoNotDisturb() {
+		t.Fatal("SetDoNotDisturb(false) did not restore state")
+	}
+	n, _ := nm.Push(NotifyInfo, "back online", "hello")
+	if n.Title != "back online" {
+		t.Errorf("expected push to work after DND cleared, got %q", n.Title)
+	}
+	if !nm.HasActive() {
+		t.Fatal("expected an active notification after post-DND push")
+	}
+}
+
+func TestNotificationManager_DoNotDisturb_PushWithAction(t *testing.T) {
+	nm := NewNotificationManager()
+	nm.SetDoNotDisturb(true)
+	n, cmd := nm.PushWithAction(NotifyWarning, "x", "y", "open")
+	if cmd != nil {
+		t.Errorf("expected nil cmd under DND, got %T", cmd)
+	}
+	if n.Title != "" {
+		t.Errorf("expected zero notification under DND, got %+v", n)
+	}
+}

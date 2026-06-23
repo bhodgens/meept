@@ -126,6 +126,41 @@ class APIClient {
         try await performVoid(request: request)
     }
 
+    // MARK: - Reasoning Configuration (async/await)
+
+    /// Fetches the supported reasoning effort tiers and their default budgets.
+    /// Backed by `GET /api/v1/reasoning/tiers` (RPC: `reasoning.list_tiers`).
+    func getReasoningTiers() async throws -> Data {
+        let request = try makeRequest(path: "/api/v1/reasoning/tiers", method: "GET")
+        return try await performData(request: request)
+    }
+
+    /// Fetches the global per-tier token budgets.
+    /// Backed by `GET /api/v1/reasoning/budgets` (RPC: `reasoning.get_budgets`).
+    func getReasoningBudgets() async throws -> Data {
+        let request = try makeRequest(path: "/api/v1/reasoning/budgets", method: "GET")
+        return try await performData(request: request)
+    }
+
+    /// Updates the global per-tier token budgets. Passes the body through to
+    /// `POST /api/v1/reasoning/budgets` (RPC: `reasoning.set_budgets`).
+    /// Returns the resulting decoded budgets payload for UI refresh.
+    func setReasoningBudgets(_ budgets: [String: Int]) async throws -> Data {
+        var request = try makeRequest(path: "/api/v1/reasoning/budgets", method: "POST")
+        request.httpBody = try JSONEncoder().encode(budgets)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        return try await performData(request: request)
+    }
+
+    /// Fetches per-agent reasoning configuration. Backed by
+    /// `GET /api/v1/reasoning/agents` (RPC: `reasoning.list_agents`).
+    /// Note: the response is a single-agent payload when filtered, or an
+    /// array envelope otherwise. The caller decodes per-shape.
+    func getReasoningAgents() async throws -> Data {
+        let request = try makeRequest(path: "/api/v1/reasoning/agents", method: "GET")
+        return try await performData(request: request)
+    }
+
     // MARK: - Backward-compatible completion handler wrappers
 
     func getDaemonStatus(completion: @escaping (Result<DaemonStatus, Error>) -> Void) {

@@ -40,6 +40,15 @@ type CommandHandler struct {
 	rpc          *RPCClient
 	getChatModel func() *models.ChatModel
 	skillCommand *commands.SkillCommand
+	notifier     NotificationToggler
+}
+
+// NotificationToggler lets slash commands toggle Do-Not-Disturb mode on the
+// TUI's NotificationManager without taking a direct dependency on the
+// components package.
+type NotificationToggler interface {
+	IsDoNotDisturb() bool
+	SetDoNotDisturb(bool)
 }
 
 // CommandHandlerOption configures a CommandHandler.
@@ -49,6 +58,16 @@ type CommandHandlerOption func(*CommandHandler)
 func WithChatModelGetter(fn func() *models.ChatModel) CommandHandlerOption {
 	return func(h *CommandHandler) {
 		h.getChatModel = fn
+	}
+}
+
+// WithNotificationToggler wires a DND toggle target (typically the TUI's
+// NotificationManager) so the /dnd command can flip suppression at runtime.
+func WithNotificationToggler(t NotificationToggler) CommandHandlerOption {
+	return func(h *CommandHandler) {
+		if t != nil {
+			h.notifier = t
+		}
 	}
 }
 
@@ -177,6 +196,8 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 		return h.executeReview()
 	case "project":
 		return h.executeProject(cmd.Args)
+	case "dnd":
+		return h.executeDnd(cmd.Args)
 	default:
 		return &CommandResult{
 			Output:  fmt.Sprintf("unknown command: %s", cmd.Name),
@@ -213,6 +234,7 @@ func (h *CommandHandler) executeHelp(args []string) *CommandResult {
 	sb.WriteString("  /review             review current changes\n")
 	sb.WriteString("  /project [subcmd]   manage projects (list, set, add, sync, status)\n")
 	sb.WriteString("  /skill [name|search <q>] list, show, or search skills\n")
+	sb.WriteString("  /dnd [on|off]       toggle or set do-not-disturb (suppresses toasts)\n")
 
 	return &CommandResult{Output: sb.String()}
 }
@@ -654,6 +676,39 @@ func (h *CommandHandler) executeVim() *CommandResult {
 	return &CommandResult{
 		Output:        fmt.Sprintf("vim mode %s", mode),
 		ToggleVimMode: true,
+	}
+}
+
+// executeDnd toggles or sets do-not-disturb mode for TUI notifications.
+// With no args it toggles; with "on"/"off" it sets the state explicitly.
+func (h *CommandHandler) executeDnd(args []string) *CommandResult {
+	if h.notifier == nil {
+		return &CommandResult{
+			Output:  "notification toggle unavailable",
+			IsError: true,
+		}
+	}
+	next := !h.notifier.IsDoNotDisturb()
+	if len(args) > 0 {
+		switch strings.ToLower(strings.TrimSpace(args[0])) {
+		case "on", "true", "1", "yes":
+			next = true
+		case "off", "false", "0", "no":
+			next = false
+		default:
+			return &CommandResult{
+				Output:  fmt.Sprintf("invalid argument: %s (expected on|off)", args[0]),
+				IsError: true,
+			}
+		}
+	}
+	h.notifier.SetDoNotDisturb(next)
+	state := "off"
+	if next {
+		state = "on"
+	}
+	return &CommandResult{
+		Output: fmt.Sprintf("do not disturb: %s", state),
 	}
 }
 

@@ -283,10 +283,16 @@ func NewApp(socketPath string) *App {
 	if rpc != nil {
 		handlerOpts = append(handlerOpts, WithSkillLister(rpc))
 	}
-	app.commandHandler = NewCommandHandler(rpc, handlerOpts...)
-
-	// Initialize notification manager
+	// Initialize notification manager before constructing the command handler
+	// so /dnd can wire the toggler.
 	app.notifications = components.NewNotificationManager()
+	// Apply TUI-local DoNotDisturb from client config (independent of
+	// daemon-wide DND: this only gates local toast rendering).
+	if clientConfig.Notifications.DoNotDisturb {
+		app.notifications.SetDoNotDisturb(true)
+	}
+	handlerOpts = append(handlerOpts, WithNotificationToggler(app.notifications))
+	app.commandHandler = NewCommandHandler(rpc, handlerOpts...)
 
 	// Initialize STT (speech-to-text) from client config
 	if clientConfig.STT.Enabled {

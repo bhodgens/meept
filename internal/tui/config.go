@@ -12,15 +12,23 @@ import (
 
 // ClientConfig holds TUI client configuration.
 type ClientConfig struct {
-	Keybindings KeybindingsConfig `json:"keybindings"`
-	Session     SessionConfig     `json:"session"`
-	Vim         VimConfig         `json:"vim"`
-	Rendering   RenderingConfig   `json:"rendering"`
-	Input       InputConfig       `json:"input"`
-	Chat        ChatConfig        `json:"chat"`
-	STT         STTConfig         `json:"stt"`
-	TTS         TTSConfig         `json:"tts"`
+	Keybindings   KeybindingsConfig        `json:"keybindings"`
+	Session       SessionConfig            `json:"session"`
+	Vim           VimConfig                `json:"vim"`
+	Rendering     RenderingConfig          `json:"rendering"`
+	Input         InputConfig              `json:"input"`
+	Chat          ChatConfig               `json:"chat"`
+	STT           STTConfig                `json:"stt"`
+	TTS           TTSConfig                `json:"tts"`
+	Notifications NotificationsClientConfig `json:"notifications"`
+}
 
+// NotificationsClientConfig controls TUI-side notification behavior. This is
+// independent of the daemon-wide NotificationsConfig (which gates server-side
+// event emission). The TUI field governs only local toast suppression.
+type NotificationsClientConfig struct {
+	// DoNotDisturb suppresses all TUI toast notifications when true.
+	DoNotDisturb bool `json:"do_not_disturb"` // default: false
 }
 
 // VimConfig defines vim mode settings.

@@ -607,6 +607,7 @@ func (d *PatternDetector) RecommendInstruction(analyses []*SessionAnalysis) []Pa
 			SessionCount:         p.count,
 			MetricBaseline:       0.8,
 			MetricObserved:       successRate,
+			SuggestedInstruction: suggestedInstruction,
 			Evidence: []PatternEvidence{
 				{
 					Metric:      "repetition_count",

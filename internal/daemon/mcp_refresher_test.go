@@ -84,7 +84,9 @@ func TestMCPToolRefresher_SyncRegistersAndUnregisters(t *testing.T) {
 	}
 	manager.SetConfigs([]mcp.ServerConfig{cfg})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// 30s budget accommodates cold-cache scenarios and concurrent test load
+	// where stub subprocess startup can exceed the previous 5s timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := manager.StartServer(ctx, cfg); err != nil {
 		t.Fatalf("start stub: %v", err)

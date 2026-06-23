@@ -47,6 +47,7 @@ type NotificationManager struct {
 	mu            sync.Mutex
 	maxVisible    int
 	defaultTTL    time.Duration
+	doNotDisturb bool
 }
 
 // NewNotificationManager creates a new notification manager.
@@ -59,6 +60,22 @@ func NewNotificationManager() *NotificationManager {
 	}
 }
 
+// SetDoNotDisturb toggles suppression of all notifications. When true, Push and
+// PushWithAction become no-ops returning a zero Notification and nil command.
+// The setter is safe for concurrent use.
+func (nm *NotificationManager) SetDoNotDisturb(enabled bool) {
+	nm.mu.Lock()
+	defer nm.mu.Unlock()
+	nm.doNotDisturb = enabled
+}
+
+// IsDoNotDisturb reports whether DND mode is currently active.
+func (nm *NotificationManager) IsDoNotDisturb() bool {
+	nm.mu.Lock()
+	defer nm.mu.Unlock()
+	return nm.doNotDisturb
+}
+
 // Push adds a new notification and returns an expiry command.
 func (nm *NotificationManager) Push(level NotificationLevel, title, message string) (Notification, tea.Cmd) {
 	return nm.PushWithAction(level, title, message, "")
@@ -67,6 +84,10 @@ func (nm *NotificationManager) Push(level NotificationLevel, title, message stri
 // PushWithAction adds a notification with an optional action.
 func (nm *NotificationManager) PushWithAction(level NotificationLevel, title, message, action string) (Notification, tea.Cmd) {
 	nm.mu.Lock()
+	if nm.doNotDisturb {
+		nm.mu.Unlock()
+		return Notification{}, nil
+	}
 	defer nm.mu.Unlock()
 
 	id := nm.nextID

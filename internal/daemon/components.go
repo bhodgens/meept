@@ -36,6 +36,7 @@ import (
 	memsync "github.com/caimlas/meept/internal/memory/sync"
 	"github.com/caimlas/meept/internal/memory/vector"
 	"github.com/caimlas/meept/internal/plan"
+	"github.com/caimlas/meept/internal/preferences"
 	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/pty"
 	"github.com/caimlas/meept/internal/queue"
@@ -231,6 +232,13 @@ type Components struct {
 
 	// Agent typed event emitter (for metrics and visualization wiring)
 	AgentEventEmitter *agent.EventEmitter
+
+	// User instruction system (preferences, handler, listener, scheduler, injector)
+	InstructionStore       *preferences.Store
+	InstructionHandler     *agent.InstructionHandler
+	InstructionListener    *agent.InstructionListener
+	InstructionScheduler   *scheduler.InstructionScheduler
+	InstructionContextInjector *agent.ContextInjector
 
 	Logger *slog.Logger
 }
@@ -971,6 +979,25 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 	// Wire session lifecycle hooks (publishes session_start/session_end bus events)
 	wireSessionLifecycleHooks(c.AgentLoop, logger, msgBus)
+
+	// Wire the user-instruction subsystem: store, handler, listener,
+	// scheduler, and context injector. Components are constructed but NOT
+	// started here; Start is called during the daemon Start lifecycle so
+	// that the rollback mechanism can clean them up on failure.
+	// See internal/daemon/instruction_wiring.go.
+	instrResult := wireInstructions(msgBus, c.Scheduler, c.ToolRegistry, c.LearningPipeline, logger)
+	c.InstructionStore = instrResult.Store
+	c.InstructionHandler = instrResult.Handler
+	c.InstructionListener = instrResult.Listener
+	c.InstructionScheduler = instrResult.Scheduler
+	c.InstructionContextInjector = instrResult.ContextInjector
+
+	// Attach the ContextInjector to the agent loop so the system prompt is
+	// enriched with standing instructions and learned patterns.
+	if c.AgentLoop != nil && instrResult.ContextInjector != nil {
+		c.AgentLoop.SetContextInjector(instrResult.ContextInjector)
+		logger.Info("context injector wired to agent loop")
+	}
 	// Store the memvid client from memory manager if active, or create standalone
 	if c.MemoryManager.IsMemvidActive() {
 		c.MemvidClient = c.MemoryManager.MemvidClient()
@@ -1981,6 +2008,10 @@ func (c *Components) Start(ctx context.Context) error {
 				if c.MemoryHandler != nil {
 					c.MemoryHandler.Stop(ctx)
 				}
+			case "instructions":
+				if c.InstructionHandler != nil {
+					c.InstructionHandler.Stop()
+				}
 			case "cache":
 				if c.ResultCache != nil {
 					c.ResultCache.Stop()
@@ -2083,6 +2114,33 @@ func (c *Components) Start(ctx context.Context) error {
 			c.Logger.Error("Failed to start memory handler", "error", err)
 		} else {
 			startedHandlers = append(startedHandlers, "memory")
+		}
+	}
+
+	// Start instruction handler (bus subscriptions for instruction.add,
+	// instruction.list, instruction.delete, instruction.execute,
+	// instruction.preview). Lifecycle is context-bound via SubscriptionHandler.
+	if c.InstructionHandler != nil {
+		c.InstructionHandler.Start(ctx)
+		c.Logger.Info("Instruction handler started")
+		startedHandlers = append(startedHandlers, "instructions")
+	}
+
+	// Start instruction listener (post_hook + event trigger matching).
+	// Lifecycle is context-bound via SubscriptionHandler.
+	if c.InstructionListener != nil {
+		c.InstructionListener.Start(ctx)
+		c.Logger.Info("Instruction listener started")
+	}
+
+	// Start instruction scheduler (syncs cron-type instructions to the job
+	// scheduler). Only started if both the instruction scheduler and the
+	// daemon scheduler are available.
+	if c.InstructionScheduler != nil {
+		if err := c.InstructionScheduler.Start(ctx); err != nil {
+			c.Logger.Warn("Failed to start instruction scheduler", "error", err)
+		} else {
+			c.Logger.Info("Instruction scheduler started")
 		}
 	}
 
@@ -2471,6 +2529,16 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		if err := c.MemoryHandler.Stop(ctx); err != nil {
 			lastErr = err
 		}
+	}
+
+	// Stop instruction handler and listener (bus subscriptions).
+	if c.InstructionHandler != nil {
+		c.InstructionHandler.Stop()
+		c.Logger.Info("Instruction handler stopped")
+	}
+	if c.InstructionListener != nil {
+		c.InstructionListener.Stop()
+		c.Logger.Info("Instruction listener stopped")
 	}
 
 	// Stop dispatcher background goroutines (e.g. semantic index BuildIndex).

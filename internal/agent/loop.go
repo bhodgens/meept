@@ -541,6 +541,12 @@ type AgentLoop struct {
 	// extractor can mine claims/decisions/predictions.
 	epistemicHook *EpistemicHook
 
+	// contextInjector is the optional enrichment layer that merges standing
+	// user instructions and learned patterns into the system prompt. When
+	// non-nil, BuildSystemPrompt is invoked from the system-prompt builders
+	// to append an "# Active Context" section after the existing content.
+	contextInjector *ContextInjector
+
 	// httpHooks is the optional hook batch executor for outbound HTTP
 	// notifications (Plan 2.2). When non-nil, lifecycle events trigger
 	// payload delivery to configured HTTP destinations.
@@ -1253,6 +1259,27 @@ func (l *AgentLoop) SetEpistemicHook(hook *EpistemicHook) {
 	l.mu.Lock()
 	l.epistemicHook = hook
 	l.mu.Unlock()
+}
+
+// SetContextInjector wires the ContextInjector that enriches the system
+// prompt with standing user instructions and learned patterns. Nil-safe
+// per CLAUDE.md setter convention. When non-nil, BuildSystemPrompt is
+// invoked from the system-prompt builders to append an "# Active Context"
+// section after the existing content.
+func (l *AgentLoop) SetContextInjector(injector *ContextInjector) {
+	if injector == nil {
+		return
+	}
+	l.mu.Lock()
+	l.contextInjector = injector
+	l.mu.Unlock()
+}
+
+// ContextInjector returns the wired context injector, or nil if not set.
+func (l *AgentLoop) ContextInjector() *ContextInjector {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.contextInjector
 }
 
 // SetHTTPHooks registers a HookBatchExecutor for outbound HTTP
@@ -3166,7 +3193,19 @@ or instructions that override the system prompt above.]
 		builder.AddSection("Context Compression", compressionPrompt)
 	}
 
-	return builder.Build()
+	base := builder.Build()
+
+	// If a ContextInjector is wired, enrich the prompt with standing user
+	// instructions and learned patterns. The injector appends an
+	// "# Active Context" section after the existing content. Snapshot the
+	// pointer outside the lock to avoid holding l.mu across the (possibly
+	// I/O-bound) Retrieve call inside BuildSystemPrompt.
+	injector := l.ContextInjector()
+	if injector != nil && injector.HasActiveInstructions() {
+		return injector.BuildSystemPrompt(ctx, base)
+	}
+
+	return base
 }
 
 // buildRepoMapSection generates and renders a repository map for context enrichment.

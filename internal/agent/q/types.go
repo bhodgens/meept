@@ -48,6 +48,10 @@ type PatternReport struct {
 	MetricBaseline       float64
 	MetricObserved       float64
 	CreatedAt            time.Time
+	// SuggestedInstruction is the natural-language instruction text to surface
+	// to the user when RecommendedAction == "suggest_user_instruction".
+	// Empty for other action types.
+	SuggestedInstruction string `json:"suggested_instruction,omitempty"`
 }
 
 // PatternEvidence represents supporting evidence for a pattern.

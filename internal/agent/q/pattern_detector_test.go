@@ -2,6 +2,7 @@ package q
 
 import (
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
@@ -731,6 +732,10 @@ func TestRecommendInstruction_Basic(t *testing.T) {
 				if r.Confidence < 0 || r.Confidence > 1 {
 					t.Errorf("Confidence %.2f out of range [0, 1]", r.Confidence)
 				}
+				// SuggestedInstruction must be non-empty when action is suggest_user_instruction
+				if r.SuggestedInstruction == "" {
+					t.Errorf("SuggestedInstruction must be non-empty when RecommendedAction=suggest_user_instruction (ID=%s)", r.ID)
+				}
 			}
 		})
 	}
@@ -860,6 +865,36 @@ func TestRecommendInstruction_Thresholds(t *testing.T) {
 				t.Errorf("Expected report=%v, got %d reports", tt.expectReports, len(reports))
 			}
 		})
+	}
+}
+
+// TestRecommendInstruction_SuggestedInstructionContent verifies that the
+// SuggestedInstruction field is populated with a readable NL instruction derived
+// from the detected pattern.
+func TestRecommendInstruction_SuggestedInstructionContent(t *testing.T) {
+	analyses := makeTestAnalyses(10, "shell_execute", "code", true)
+
+	pd := NewPatternDetector(testLogger, PatternDetectorConfig{
+		MinSessionsForPattern: 3,
+	})
+
+	reports := pd.RecommendInstruction(analyses)
+	if len(reports) == 0 {
+		t.Fatal("Expected at least 1 report")
+	}
+
+	for _, r := range reports {
+		if r.SuggestedInstruction == "" {
+			t.Errorf("SuggestedInstruction must be non-empty (ID=%s)", r.ID)
+		}
+		// The instruction should mention the action (formatAction("shell_execute") = "execute shell command")
+		// and the trigger (formatTrigger("code") = "coding tasks")
+		if !strings.Contains(r.SuggestedInstruction, "execute shell command") {
+			t.Errorf("SuggestedInstruction %q should mention action 'execute shell command'", r.SuggestedInstruction)
+		}
+		if !strings.Contains(r.SuggestedInstruction, "coding tasks") {
+			t.Errorf("SuggestedInstruction %q should mention trigger 'coding tasks'", r.SuggestedInstruction)
+		}
 	}
 }
 
