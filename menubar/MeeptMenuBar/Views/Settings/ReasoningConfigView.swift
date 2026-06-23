@@ -183,8 +183,10 @@ struct ReasoningConfigView: View {
         struct ConfigInfo: Codable {
             let effort: String?
         }
-        let resp = try JSONDecoder().decode(AgentResponse.self, from: data)
-        agents = [ReasoningAgent(id: resp.agent_id, agentId: resp.agent_id, hasReasoning: resp.has_reasoning, effort: resp.config?.effort, effectiveEffort: resp.effective_effort)]
+        let resp = try JSONDecoder().decode([AgentResponse].self, from: data)
+        agents = resp.map {
+            ReasoningAgent(id: $0.agent_id, agentId: $0.agent_id, hasReasoning: $0.has_reasoning, effort: $0.config?.effort, effectiveEffort: $0.effective_effort)
+        }
     }
 
     private func saveBudgets() {
