@@ -1,29 +1,27 @@
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import '../models/skill.dart';
-import '../core/slash_commands.dart';
+import '../services/sdk_client.dart';
 
-/// Service for fetching and managing skills.
+/// Service for fetching and managing skills for autocomplete.
+///
+/// Wraps [SdkApiClient.getSkillsRaw] and caches the result so that repeated
+/// slash-command autocompletion queries don't re-hit the daemon.
 class SkillsService {
-  final http.Client _client;
-  final String _baseUrl;
+  final SdkApiClient _client;
 
-  SkillsService({http.Client? client, String baseUrl = 'http://localhost:8081'})
-      : _client = client ?? http.Client(),
-        _baseUrl = baseUrl;
+  /// Cached skill summaries; null until the first successful fetch.
+  List<SkillSummary>? _cache;
 
-  /// Fetch all installed skills.
+  SkillsService(this._client);
+
+  /// Fetch all installed skills (returns cached value if still valid).
   Future<List<SkillSummary>> fetchSkills() async {
+    final cached = _cache;
+    if (cached != null) return cached;
     try {
-      final response = await _client.get(
-        Uri.parse('$_baseUrl/api/v1/skills'),
-      );
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as List;
-        return data.map((s) => SkillSummary.fromJson(s)).toList();
-      }
-      throw Exception('Failed to fetch skills: ${response.statusCode}');
-    } catch (e) {
+      final raw = await _client.getSkillsRaw();
+      final skills = raw.map(SkillSummary.fromJson).toList();
+      _cache = skills;
+      return skills;
+    } catch (_) {
       // Fallback: return empty list on error
       return [];
     }
@@ -33,9 +31,11 @@ class SkillsService {
   Future<List<SkillSummary>> searchSkills(String query) async {
     final all = await fetchSkills();
     final lowerQuery = query.toLowerCase();
-    return all.where((s) =>
-        s.name.toLowerCase().contains(lowerQuery) ||
-        s.description.toLowerCase().contains(lowerQuery)).toList();
+    return all
+        .where((s) =>
+            s.name.toLowerCase().contains(lowerQuery) ||
+            s.description.toLowerCase().contains(lowerQuery))
+        .toList();
   }
 
   /// Get skill names for autocomplete.

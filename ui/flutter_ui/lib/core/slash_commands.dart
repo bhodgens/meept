@@ -73,4 +73,8 @@ const _defaultCommands = <SlashCommand>[
   SlashCommand(name: '/plan', description: 'manage plans', usage: '/plan [list|show|approve]'),
   SlashCommand(name: '/review', description: 'start code review'),
   SlashCommand(name: '/project', description: 'manage projects', usage: '/project [list|add]'),
+  SlashCommand(
+      name: '/skill',
+      description: 'list, search, or show skill details',
+      usage: '/skill [name|search <query>]'),
 ];

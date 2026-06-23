@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/slash_commands.dart';
 import '../../models/api_models.dart' show Attachment;
 import '../../services/sdk_client.dart' show SdkApiClient;
+import '../../services/skills_service.dart' show SkillsService;
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
@@ -139,6 +140,9 @@ class _ChatInputState extends ConsumerState<ChatInput>
   // Slash command registry
   static final _slashRegistry = SlashCommandRegistry();
 
+  // Cached skill names for /skill autocomplete (populated async on init).
+  List<String> _skillNames = const [];
+
   // File path attachments — typed [Attachment] entries once uploaded,
   // plus raw path strings pending async upload.
   final List<Attachment> _attachments = [];
@@ -169,6 +173,25 @@ class _ChatInputState extends ConsumerState<ChatInput>
       _focusNode.requestFocus();
       _hasFocused = true;
     });
+    // Fire-and-forget skill fetch for /skill autocomplete.  Does not block
+    // input rendering; if it fails, we silently fall back to no suggestions.
+    unawaited(_loadSkillNames());
+  }
+
+  /// Fetch skill names via [SkillsService] (backed by [SdkApiClient]) so the
+  /// autocomplete popup can offer them after `/skill `.
+  Future<void> _loadSkillNames() async {
+    try {
+      final sdk = ref.read(sdkClientProvider);
+      final service = SkillsService(sdk);
+      final names = await service.getSkillNames();
+      if (!mounted) return;
+      setState(() {
+        _skillNames = names;
+      });
+    } catch (e) {
+      debugPrint('[chat_input] skill fetch failed: $e');
+    }
   }
 
   void _onFocusChange() {
@@ -328,7 +351,12 @@ class _ChatInputState extends ConsumerState<ChatInput>
   void _detectSlashCommand(String text) {
     if (text.startsWith('/')) {
       final spaceIdx = text.indexOf(' ');
-      final query = spaceIdx == -1 ? text : text.substring(0, spaceIdx);
+      // For `/skill <name>` we keep the full text as the query so the
+      // autocomplete can filter skill names by the argument prefix.
+      final isSkillArgs = spaceIdx != -1 && text.substring(0, spaceIdx) == '/skill';
+      final query = isSkillArgs
+          ? text
+          : (spaceIdx == -1 ? text : text.substring(0, spaceIdx));
       setState(() {
         _showSlashAutocomplete = true;
         _slashQuery = query;
@@ -352,6 +380,20 @@ class _ChatInputState extends ConsumerState<ChatInput>
       _controller.selection = TextSelection.collapsed(
         offset: cmdText.length,
       );
+      _showSlashAutocomplete = false;
+      _slashQuery = '';
+    });
+    _focusNode.requestFocus();
+  }
+
+  /// Called when the user accepts a skill-name suggestion in the
+  /// `/skill <name>` autocomplete.  Inserts `/skill <name> ` and dismisses
+  /// the popup.
+  void _onSkillNameSelected(String name) {
+    final text = '/skill $name ';
+    setState(() {
+      _controller.text = text;
+      _controller.selection = TextSelection.collapsed(offset: text.length);
       _showSlashAutocomplete = false;
       _slashQuery = '';
     });
@@ -568,6 +610,19 @@ class _ChatInputState extends ConsumerState<ChatInput>
 
         // If slash autocomplete is showing, accept the selected match
         if (_showSlashAutocomplete) {
+          if (_slashQuery.startsWith('/skill ')) {
+            // Skill-name mode: dispatch to the skill handler.
+            final arg = _slashQuery.substring('/skill '.length).trim();
+            final matches = _skillNames
+                .where((n) => n.toLowerCase().startsWith(arg.toLowerCase()))
+                .take(8)
+                .toList();
+            if (matches.isNotEmpty) {
+              final idx = _slashSelectedIndex.clamp(0, matches.length - 1);
+              _onSkillNameSelected(matches[idx]);
+            }
+            return KeyEventResult.handled;
+          }
           final matches = _slashRegistry.match(_slashQuery);
           if (matches.isNotEmpty) {
             final idx = _slashSelectedIndex.clamp(0, matches.length - 1);
@@ -602,8 +657,20 @@ class _ChatInputState extends ConsumerState<ChatInput>
 
       // Arrow up/down navigates slash autocomplete when visible
       if (_showSlashAutocomplete) {
-        final matches = _slashRegistry.match(_slashQuery);
-        final maxIdx = (matches.length > 8 ? 8 : matches.length) - 1;
+        // Compute the visible item count based on the current mode.
+        final int visibleCount;
+        if (_slashQuery.startsWith('/skill ')) {
+          final arg = _slashQuery.substring('/skill '.length).trim();
+          final sm = _skillNames
+              .where((n) => n.toLowerCase().startsWith(arg.toLowerCase()))
+              .take(8)
+              .toList();
+          visibleCount = sm.length;
+        } else {
+          final matches = _slashRegistry.match(_slashQuery);
+          visibleCount = matches.length > 8 ? 8 : matches.length;
+        }
+        final maxIdx = visibleCount - 1;
         if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
           setState(() {
             _slashSelectedIndex =
@@ -697,6 +764,8 @@ class _ChatInputState extends ConsumerState<ChatInput>
               SlashAutocomplete(
                 query: _slashQuery,
                 selectedIndex: _slashSelectedIndex,
+                skillNames: _skillNames,
+                onSkillSelected: _onSkillNameSelected,
                 onSelected: _onSlashSelected,
                 onDismiss: () {
                   setState(() {
