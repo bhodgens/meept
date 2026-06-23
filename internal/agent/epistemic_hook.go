@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/memory"
@@ -108,16 +109,7 @@ func intentExcluded(intent string, exclude []string) bool {
 
 // normalizeIntentName lowercases and trims for comparison.
 func normalizeIntentName(s string) string {
-	out := make([]byte, 0, len(s))
-	for _, r := range s {
-		switch {
-		case r >= 'A' && r <= 'Z':
-			out = append(out, byte(r-'A'+'a'))
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_' || r == '-':
-			out = append(out, byte(r))
-		}
-	}
-	return string(out)
+	return strings.ToLower(s)
 }
 
 // filterAmbientCandidates applies the ConfidenceThreshold, ExcludeCategories,
