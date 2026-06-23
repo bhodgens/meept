@@ -68,5 +68,5 @@ func (t *ActivityTracker) HasRecentActivity(sessionID string, window time.Durati
 	if state == nil {
 		return false
 	}
-	return time.Now().Sub(state.LastActivity) <= window
+	return time.Since(state.LastActivity) <= window
 }

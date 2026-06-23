@@ -14,6 +14,7 @@ import (
 // pushNotification is a minimal abstraction for a notification event,
 // avoiding imports of daemon/ events.go or http/notification_handlers.go
 // which would create import cycles through services.
+//nolint:unused -- reserved for future notification event type
 type pushNotification struct {
 	ID        string
 	Timestamp string
@@ -125,12 +126,6 @@ func (r *ChannelRegistry) Remove(id string) {
 	r.channels = kept
 }
 
-// len returns the number of registered channels (for testing).
-func (r *ChannelRegistry) len() int {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return len(r.channels)
-}
 
 // --- Channel Implementations ---
 

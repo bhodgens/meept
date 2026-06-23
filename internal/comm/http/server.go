@@ -721,7 +721,8 @@ func (s *Server) Start(ctx context.Context) error {
 	// Build hardened TLS config
 	tlsConfig := BuildTLSConfig(s.config.TLSMinVersion, s.config.TLSClientAuth)
 
-	s.server = &http.Server{
+	// Build server object outside lock (I/O and initialization), then assign under lock
+	server := &http.Server{
 		Addr:           s.config.Addr,
 		Handler:        handler,
 		ReadTimeout:    s.config.ReadTimeout,
@@ -741,7 +742,13 @@ func (s *Server) Start(ctx context.Context) error {
 	// support HTTP/2 and Flutter's dart:io WebSocket expects HTTP/1.1
 	// upgrade.  Without this, TLS-enabled servers get PROTOCOL_ERROR on
 	// every request because Go enables HTTP/2 automatically with TLS.
-	s.server.TLSNextProto = make(map[string]func(*http.Server, *tls.Conn, http.Handler))
+	server.TLSNextProto = make(map[string]func(*http.Server, *tls.Conn, http.Handler))
+
+	// Assign under lock to prevent race with Shutdown() reading s.server
+	s.mu.Lock()
+	s.server = server
+	s.running = true
+	s.mu.Unlock()
 
 	s.logger.Info("unified HTTP server starting with TLS",
 		"addr", s.config.Addr,

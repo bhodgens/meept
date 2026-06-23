@@ -47,7 +47,7 @@ func DefaultNotificationPreferences() NotificationPreferences {
 // IsTypeEnabled checks if a notification type is allowed.
 // Returns true if not configured (default allow).
 func (p *NotificationPreferences) IsTypeEnabled(notifType string) bool {
-	if p.PerType == nil || len(p.PerType) == 0 {
+	if len(p.PerType) == 0 {
 		return true // no filters = all allowed
 	}
 	enabled, ok := p.PerType[notifType]
@@ -60,7 +60,7 @@ func (p *NotificationPreferences) IsTypeEnabled(notifType string) bool {
 // IsChannelEnabled checks if a channel is allowed.
 // Returns true if not configured (default allow).
 func (p *NotificationPreferences) IsChannelEnabled(channel string) bool {
-	if p.PerChannel == nil || len(p.PerChannel) == 0 {
+	if len(p.PerChannel) == 0 {
 		return true // no filters = all allowed
 	}
 	enabled, ok := p.PerChannel[channel]

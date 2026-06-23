@@ -3528,12 +3528,14 @@ func (s *Server) handleSessionAcknowledge(w http.ResponseWriter, r *http.Request
 }
 
 // sessionFilterOptions contains optional filters for session listing.
+//nolint:unused -- reserved for future session filtering API
 type sessionFilterOptions struct {
 	Designation *string
 	Limit       int
 }
 
 // parseSessionListQuery parses query parameters for session list filtering.
+//nolint:unused -- reserved for future enhanced session listing
 func parseSessionListQuery(r *http.Request) sessionFilterOptions {
 	opts := sessionFilterOptions{}
 
