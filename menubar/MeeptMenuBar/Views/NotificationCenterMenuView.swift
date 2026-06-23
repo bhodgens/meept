@@ -8,6 +8,7 @@ import SwiftUI
 struct NotificationCenterMenuView: View {
     @StateObject private var notificationManager = NotificationManager.shared
     @State private var expanded = false
+    @State private var doNotDisturb = MenubarConfigService().doNotDisturb
 
     var body: some View {
         Menu {
@@ -25,10 +26,17 @@ struct NotificationCenterMenuView: View {
             }
             Divider()
             Toggle("enable notifications", isOn: $notificationManager.isEnabled)
+            Toggle("do not disturb", isOn: Binding(
+                get: { doNotDisturb },
+                set: { newValue in
+                    doNotDisturb = newValue
+                    MenubarConfigService().setDoNotDisturb(newValue)
+                }
+            ))
         } label: {
             ZStack {
-                Image(systemName: "bell")
-                if !notificationManager.notifications.isEmpty {
+                Image(systemName: doNotDisturb ? "bell.slash" : "bell")
+                if !doNotDisturb && !notificationManager.notifications.isEmpty {
                     Circle()
                         .fill(.red)
                         .frame(width: 8, height: 8)

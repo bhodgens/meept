@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+
+	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // FileWatcherHook watches filesystem paths matching patterns.
@@ -21,13 +24,31 @@ type FileWatcherHook struct {
 	Callback func(path string)
 	Debounce time.Duration `json:"debounce"`
 	Ignore   []string      `json:"ignore"`
-	
-	watcher  *fsnotify.Watcher
-	logger   *slog.Logger
-	mu       sync.RWMutex
-	running  bool
-	ctx      context.Context
-	cancel   context.CancelFunc
+
+	// Async, when true, runs the callback in a background goroutine so
+	// the watcher loop never blocks on callback I/O. Failures are logged.
+	Async bool `json:"async,omitempty"`
+
+	// AsyncRewake, when true (and Async must also be true), publishes a
+	// hook.async_rewake bus signal after the async callback finishes so
+	// the agent loop wakes up. Requires SetBus to have been called.
+	AsyncRewake bool `json:"async_rewake,omitempty"`
+
+	watcher *fsnotify.Watcher
+	logger  *slog.Logger
+	mu      sync.RWMutex
+	running bool
+	ctx     context.Context
+	cancel  context.CancelFunc
+
+	// bus is used for the async-rewake signal. Optional.
+	bus *bus.MessageBus
+
+	// sessionID is included in the rewake payload.
+	sessionID string
+
+	// wg tracks in-flight async callbacks for graceful shutdown.
+	wg sync.WaitGroup
 }
 
 // NewFileWatcherHook creates a new file watcher hook.
@@ -41,6 +62,24 @@ func NewFileWatcherHook(pattern string, debounce time.Duration, ignore []string,
 		Ignore:   ignore,
 		logger:   logger,
 	}
+}
+
+// SetBus wires a MessageBus reference for async-rewake signals.
+// Nil is safely ignored (defensive nil guard per CLAUDE.md rule).
+func (f *FileWatcherHook) SetBus(b *bus.MessageBus) {
+	if b == nil {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.bus = b
+}
+
+// SetSessionID records the active session ID for inclusion in rewake payloads.
+func (f *FileWatcherHook) SetSessionID(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sessionID = id
 }
 
 // Start begins watching filesystem paths.
@@ -76,7 +115,8 @@ func (f *FileWatcherHook) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop halts filesystem watching.
+// Stop halts filesystem watching. It waits for in-flight async callbacks
+// to complete before returning.
 func (f *FileWatcherHook) Stop() error {
 	f.mu.Lock()
 	if !f.running {
@@ -96,6 +136,9 @@ func (f *FileWatcherHook) Stop() error {
 	if watcher != nil {
 		watcher.Close()
 	}
+
+	// Drain any in-flight async callbacks.
+	f.wg.Wait()
 	return nil
 }
 
@@ -120,6 +163,59 @@ func (f *FileWatcherHook) IsRunning() bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.running
+}
+
+// invokeCallback runs the user-provided callback, synchronously or
+// asynchronously depending on the Async flag. When AsyncRewake is true
+// (and a bus is wired), a hook.async_rewake signal is published after
+// successful async completion.
+func (f *FileWatcherHook) invokeCallback(path string) {
+	if f.Callback == nil {
+		return
+	}
+
+	if !f.Async {
+		f.Callback(path)
+		return
+	}
+
+	// Snapshot rewake inputs under lock.
+	f.mu.RLock()
+	busRef := f.bus
+	sid := f.sessionID
+	f.mu.RUnlock()
+
+	f.wg.Add(1)
+	go func() {
+		defer f.wg.Done()
+		f.Callback(path)
+
+		if f.AsyncRewake && busRef != nil {
+			rewakePayload := map[string]any{
+				"session_id": sid,
+				"hook_type":  "file_watcher",
+				"hook_name":  "file:" + f.Pattern,
+				"path":       path,
+			}
+			msg, err := models.NewBusMessage(models.MessageTypeEvent, "hook", rewakePayload)
+			if err == nil {
+				busRef.Publish(HookAsyncRewakeTopic, msg)
+				if f.logger != nil {
+					f.logger.Debug("file watcher async rewake published",
+						"topic", HookAsyncRewakeTopic,
+						"path", path,
+						"session_id", sid,
+					)
+				}
+			} else if f.logger != nil {
+				f.logger.Warn("file watcher rewake: failed to marshal payload", "error", err)
+			}
+		} else if f.AsyncRewake && busRef == nil && f.logger != nil {
+			f.logger.Warn("async rewake requested but bus is nil",
+				"pattern", f.Pattern,
+			)
+		}
+	}()
 }
 
 // watchLoop processes filesystem events with debouncing.
@@ -150,12 +246,10 @@ func (f *FileWatcherHook) watchLoop() {
 				mu.Lock()
 				path := pendingPath
 				mu.Unlock()
-				if f.Callback != nil {
-					if f.logger != nil {
-						f.logger.Debug("file watcher triggered", "path", path)
-					}
-					f.Callback(path)
+				if f.logger != nil {
+					f.logger.Debug("file watcher triggered", "path", path)
 				}
+				f.invokeCallback(path)
 			})
 			mu.Unlock()
 

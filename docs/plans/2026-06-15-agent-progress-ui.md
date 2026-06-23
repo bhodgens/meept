@@ -232,8 +232,10 @@ Before marking complete:
 - [x] Flutter receives and displays progress for all agent types: Manual integration complete
 - [x] Tier-based filtering works correctly: Tier logic verified in `AgentProgressIndicator` (0=light gray normal, 1=mid gray normal, 2=light gray italic); `handleWSProgress` passes tier as `int(event.Tier)` over WebSocket
 - [x] No regression in chat message delivery latency: Progress path decoupled from chat message delivery (separate bus topics and subscriptions), all tests pass
-- [x] Rate limiting implemented: Not implemented -- rate limiting is optional and out of scope for this plan
+- [x] Rate limiting implemented: Yes — interval-based throttling (100ms per connection) at line 140 above. Originally deemed out of scope but added during implementation.
 - [x] Documentation updated: `docs/reference/http-api.md` WebSocket section expanded (2026-06-15) with SSE vs WebSocket schema difference; `docs/concepts/multi-agent.md` not updated (no agent-level changes needed)
+
+> **Note: Dual `agent_progress` event streams.** SSE emits two `agent_progress` event streams — one from the legacy `agent.progress` bus topic, one from `agent.progress.synthesized`. This is intentional for backward compatibility: clients without the synthesizer still get raw events, clients with synthesizer get enriched events. Consumers should deduplicate by `session_id + timestamp window` if both are subscribed. See `internal/comm/http/api_handlers.go:176-198`.
 
 ---
 

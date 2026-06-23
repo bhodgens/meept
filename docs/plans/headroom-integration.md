@@ -613,8 +613,10 @@ func (s *Server) handleCompressionStats(w http.ResponseWriter, r *http.Request) 
 - [ ] `internal/agent/compression_integration_test.go`
 
 ### Phase 7 (Observability)
-- [ ] `internal/metrics/compression_metrics.go`
-- [ ] `internal/comm/http/compression_handlers.go`
+- [x] `internal/metrics/collector.go` (`RecordCompression`, `recordCompression`) — compression metrics recorded inline
+- [x] `internal/comm/http/compression_handlers.go`
+
+> **Implementation note:** Compression metrics are recorded inline in `collector.go` (`RecordCompression`, `recordCompression` methods at lines 296 and 306) rather than a dedicated `internal/metrics/compression_metrics.go` file. This is intentional — compression events flow through the same collector pipeline as other metrics (LLM calls, tool calls, reviews), and the bus message handler at line 252 dispatches `compress.saved` topics to `recordCompression`. Splitting them into a separate file would add import churn without functional benefit since the `Collector` struct owns the `store` and `logger` dependencies that compression recording requires. The `CompressionMetrics` struct shown in §7.1 is illustrative of the metric dimensions tracked; the actual implementation records per-event tags (`strategy`, `tool_name`, `tokens_before/after/saved`, `hash`) directly via `store.Record` and `store.RecordEvent`.
 
 ---
 

@@ -75,6 +75,10 @@ type Session struct {
 
 	// Session designation (Plan 4.1)
 	Designation    *SessionDesignation `json:"designation,omitempty"`
+
+	// designationHistory is an optional store for recording designation transitions.
+	// When nil, SetDesignation skips history recording (nil-safe).
+	designationHistory DesignationHistoryStore `json:"-"`
 }
 
 // GetActiveThread returns the currently active thread.
@@ -117,8 +121,16 @@ func (s *Session) GetOrCreateThread(threadID, topicLabel string) *Thread {
 }
 
 // SetDesignation sets the session's designation status.
+// If a DesignationHistoryStore is attached, the transition is recorded.
 func (s *Session) SetDesignation(status DesignationStatus, reason, priority string) {
 	now := time.Now()
+	var fromStatus DesignationStatus
+	if s.Designation != nil {
+		fromStatus = s.Designation.Status
+	} else {
+		fromStatus = DesignationNone
+	}
+
 	if s.Designation == nil {
 		s.Designation = &SessionDesignation{
 			Status:      status,
@@ -132,6 +144,28 @@ func (s *Session) SetDesignation(status DesignationStatus, reason, priority stri
 		s.Designation.Reason = reason
 		s.Designation.Priority = priority
 		s.Designation.UpdatedAt = now
+	}
+
+	// Record the transition if a history store is attached.
+	// Skip recording if the status did not actually change.
+	if s.designationHistory != nil && fromStatus != status {
+		ctx := context.Background()
+		if err := s.designationHistory.Record(ctx, s.ID, fromStatus, status, reason); err != nil {
+			// History recording is best-effort; don't fail the designation.
+			slog.Warn("failed to record designation history",
+				"session_id", s.ID,
+				"from", string(fromStatus),
+				"to", string(status),
+				"error", err)
+		}
+	}
+}
+
+// SetDesignationHistoryStore attaches a store for recording designation transitions.
+// Pass nil to disable history recording. Nil-guarded per CLAUDE.md rules.
+func (s *Session) SetDesignationHistoryStore(store DesignationHistoryStore) {
+	if s != nil {
+		s.designationHistory = store
 	}
 }
 

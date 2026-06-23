@@ -1882,6 +1882,11 @@ type NotificationsConfig struct {
 	Retention      int             `json:"retention,omitempty"      toml:"retention"`
 	MaxPerMinute   int             `json:"max_per_minute,omitempty" toml:"max_per_minute"`
 	EnableTypes    map[string]bool `json:"enable_types,omitempty"   toml:"enable_types"`
+	// DoNotDisturb globally suppresses all desktop notifications when true.
+	// Unlike the per-type/per-channel filters in NotificationPreferences,
+	// this flag is checked at the EventEmitter dispatch layer and blocks
+	// every notification regardless of type, priority, or source.
+	DoNotDisturb bool `json:"do_not_disturb,omitempty" toml:"do_not_disturb"`
 }
 
 // RuntimeConfig holds configuration for execution backends (local, Docker).
@@ -2009,6 +2014,9 @@ type TTSBehaviorConfig struct {
 // HooksConfig holds configuration for all agent hooks.
 type HooksConfig struct {
 	FileWatcher FileWatcherHookConfig `json:"file_watcher" toml:"file_watcher"`
+	// HTTP holds zero or more HTTP hook configurations. Each entry is
+	// wired as a session-start/session-end hook at daemon startup.
+	HTTP []HTTPHookConfig `json:"http,omitempty" toml:"http,omitempty"`
 }
 
 // FileWatcherHookConfig controls the file watcher hook that monitors the
@@ -2019,8 +2027,35 @@ type FileWatcherHookConfig struct {
 	Enabled bool `json:"enabled" toml:"enabled"`
 	// Pattern is a filepath.Match-style glob applied to file names.
 	// Empty string matches all files.
-	Pattern             string `json:"pattern" toml:"pattern"`
-	Debounce            time.Duration `json:"debounce" toml:"debounce"`
-	Ignore              []string `json:"ignore" toml:"ignore"`
-	WatchedDir          string `json:"watched_dir" toml:"watched_dir"`
+	Pattern    string        `json:"pattern" toml:"pattern"`
+	Debounce   time.Duration `json:"debounce" toml:"debounce"`
+	Ignore     []string      `json:"ignore" toml:"ignore"`
+	WatchedDir string        `json:"watched_dir" toml:"watched_dir"`
+
+	// Async, when true, runs the file-changed callback in a background
+	// goroutine so the watcher never blocks on callback I/O.
+	Async bool `json:"async,omitempty"`
+
+	// AsyncRewake, when true (Async must also be true), publishes a
+	// hook.async_rewake bus signal after the async callback finishes so
+	// the agent loop wakes up and can react to the file change.
+	AsyncRewake bool `json:"async_rewake,omitempty"`
+}
+
+// HTTPHookConfig mirrors agent.HTTPHookConfig for JSON-based config loading.
+// On daemon startup the entries are converted to agent.HTTPHookConfig values
+// and wired as session lifecycle hooks. Keeping a parallel struct avoids an
+// import cycle between internal/config and internal/agent.
+type HTTPHookConfig struct {
+	URL        string            `json:"url"`
+	Method     string            `json:"method"`
+	Headers    map[string]string `json:"headers"`
+	Timeout    time.Duration     `json:"timeout"`
+	RetryCount int               `json:"retry_count"`
+
+	// Async runs the HTTP request in a background goroutine.
+	Async bool `json:"async,omitempty"`
+	// AsyncRewake publishes a hook.async_rewake bus signal after successful
+	// async completion.
+	AsyncRewake bool `json:"async_rewake,omitempty"`
 }

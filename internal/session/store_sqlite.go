@@ -30,6 +30,7 @@ type SQLiteStore struct {
 	mu          sync.RWMutex
 	logger      *slog.Logger
 	embeddingDim int
+	designationHistory DesignationHistoryStore
 }
 
 // Option configures a SQLiteStore at construction time.
@@ -224,6 +225,14 @@ func (s *SQLiteStore) migrate() error {
 	if err := s.migrationBackfillParentID(); err != nil {
 		return fmt.Errorf("failed to backfill parent_id: %w", err)
 	}
+
+	// Create designation_history table for designation audit trail.
+	if err := migrateDesignationHistory(s.db); err != nil {
+		return fmt.Errorf("failed to migrate designation_history: %w", err)
+	}
+
+	// Initialize the designation history store backed by the same database.
+	s.designationHistory = NewSQLiteDesignationHistoryStore(s.db, s.logger)
 
 	return nil
 }
@@ -898,7 +907,6 @@ func (s *SQLiteStore) UpdateName(sessionID, name string) error {
 // UpdateDesignation sets the session's designation status.
 func (s *SQLiteStore) UpdateDesignation(sessionID string, status DesignationStatus, reason, priority string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -906,6 +914,7 @@ func (s *SQLiteStore) UpdateDesignation(sessionID string, status DesignationStat
 	var existingStatus string
 	err := s.db.QueryRow("SELECT designation_status FROM sessions WHERE id = ?", sessionID).Scan(&existingStatus) //nolint:mutexio
 	if err != nil {
+		s.mu.Unlock()
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("session not found: %s", sessionID)
 		}
@@ -923,14 +932,15 @@ func (s *SQLiteStore) UpdateDesignation(sessionID string, status DesignationStat
 	}
 
 	result, err := s.db.Exec(`
-		UPDATE sessions SET 
-			designation_status = ?, 
-			designation_reason = ?, 
-			designation_priority = ?, 
+		UPDATE sessions SET
+			designation_status = ?,
+			designation_reason = ?,
+			designation_priority = ?,
 			designation_updated_at = ?,
 			designation_created_at = ?
 		WHERE id = ?`, //nolint:mutexio
 		status, reason, priority, now, createdAt, sessionID)
+	s.mu.Unlock()
 	if err != nil {
 		return fmt.Errorf("failed to update designation: %w", err)
 	}
@@ -939,6 +949,23 @@ func (s *SQLiteStore) UpdateDesignation(sessionID string, status DesignationStat
 	if rows == 0 {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
+
+	// Record the transition in the designation history (best-effort).
+	// Done outside the store lock to avoid holding it during a second SQL exec.
+	if s.designationHistory != nil {
+		fromStatus := DesignationStatus(existingStatus)
+		if fromStatus != status {
+			ctx := context.Background()
+			if err := s.designationHistory.Record(ctx, sessionID, fromStatus, status, reason); err != nil {
+				s.logger.Warn("failed to record designation history",
+					"session_id", sessionID,
+					"from", string(fromStatus),
+					"to", string(status),
+					"error", err)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -948,10 +975,10 @@ func (s *SQLiteStore) ClearDesignation(sessionID string) error {
 	defer s.mu.Unlock()
 
 	result, err := s.db.Exec(`
-		UPDATE sessions SET 
-			designation_status = 'none', 
-			designation_reason = '', 
-			designation_priority = 'normal', 
+		UPDATE sessions SET
+			designation_status = 'none',
+			designation_reason = '',
+			designation_priority = 'normal',
 			designation_acknowledged_at = NULL
 		WHERE id = ?`, sessionID) //nolint:mutexio
 	if err != nil {
@@ -963,6 +990,19 @@ func (s *SQLiteStore) ClearDesignation(sessionID string) error {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 	return nil
+}
+
+// SetDesignationHistoryStore attaches a designation history store.
+// Pass nil to disable history recording. Nil-guarded per CLAUDE.md rules.
+func (s *SQLiteStore) SetDesignationHistoryStore(store DesignationHistoryStore) {
+	if s != nil {
+		s.designationHistory = store
+	}
+}
+
+// GetDesignationHistory returns the designation history store for external access.
+func (s *SQLiteStore) GetDesignationHistory() DesignationHistoryStore {
+	return s.designationHistory
 }
 
 // HasResponses checks if a session has any assistant messages.

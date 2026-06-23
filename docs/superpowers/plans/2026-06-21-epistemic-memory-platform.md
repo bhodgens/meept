@@ -1216,6 +1216,8 @@ Create `ui/flutter_ui/lib/widgets/destructive_confirmation_dialog.dart` — a `S
 
 In `ui/flutter_ui/lib/services/tool_runner.dart`, add the interceptor per spec section "GUI (Flutter)":
 
+> Implementation note: confirmation was wired in `chat_provider.dart` rather than `tool_runner.dart` — functionally equivalent location.
+
 ```dart
 final result = await toolRunner.execute(toolName, args);
 if (result['requires_confirmation'] == true) {
@@ -1306,6 +1308,9 @@ if memCfg.Epistemic.AmbientExtraction.Enabled && llmClient != nil {
         Cfg:        memCfg.Epistemic.AmbientExtraction,
         Logger:     logger,
     })
+    // Implementation note: ambient filtering was implemented in the hook layer
+    // (internal/agent/epistemic_hook.go) rather than a dedicated
+    // AmbientExtractorConfig field — architecturally equivalent.
     hook := agent.NewEpistemicHook(agent.EpistemicHookConfig{
         Cfg:       memCfg.Epistemic,
         Extractor: extractor,
@@ -1413,6 +1418,8 @@ In the HTTP server setup (wherever routes are registered), add the new routes.
 - [ ] **Step 3: Expose epistemic config**
 
 In `internal/comm/http/config_service.go`, add the `Epistemic` sub-config to the memory config response so the menubar app can read ambient extraction status.
+
+> Implementation note: epistemic config is exposed via the unified `/api/v1/config/memory` endpoint rather than a separate `/epistemic` subpath. A dedicated endpoint can be added if the menubar app needs it.
 
 - [ ] **Step 4: Verify build**
 

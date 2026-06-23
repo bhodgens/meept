@@ -296,6 +296,22 @@
       "timeout_seconds": 300,
       "max_output_lines": 500,
     },
+    // Prompt compression for tool outputs and conversation history.
+    // Disabled by default — enable to reduce token usage 60-90%.
+    "compression": {
+      "enabled": false,                    // Master toggle (opt-in feature)
+      "min_tokens_to_compress": 500,       // Messages smaller than this pass through uncompressed
+      "strategy": "auto",                  // "smart_crusher", "code", "log", "search", or "auto" (content-aware routing)
+      "ttl": 3600000000000,                // CCR store retention for compressed originals (nanoseconds; 1h = 3600000000000)
+      "log_compression": true,             // Compress log tool outputs
+      "code_compression": true,            // AST-aware code compression for file reads/edits
+      "search_compression": true,          // Compress grep/search result outputs
+      "json_compression": true,            // SmartCrusher compression for JSON tool outputs
+      "compress_user_messages": false,     // Compress user messages (typically false for coding agents)
+      "target_ratio": 0.0,                 // Target compression ratio for lossy compressors (0.0 = use defaults, 0.3 = keep 30%)
+      // Note: when compression is enabled, originals are stored in the CCR store
+      // and can be retrieved via hash markers for full reversibility.
+    },
   },
 
   // Security configuration

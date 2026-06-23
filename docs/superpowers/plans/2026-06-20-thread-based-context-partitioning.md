@@ -183,6 +183,9 @@ func DefaultThreadConfig() ThreadConfig {
         MinMessagesForSummary:   5,
     }
 }
+// Note: production defaults are conservative (EnableTopicDetection: false,
+// MinMessagesForSummary: 20) to avoid unexpected thread creation on existing
+// deployments. Operators can opt in via config (`session.threads.enable_topic_detection: true`).
 ```
 
 - [ ] **Step 4: Extend Session struct with thread fields**

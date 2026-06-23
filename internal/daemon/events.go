@@ -65,12 +65,13 @@ func (r *RateLimiter) Allow(notifType string) bool {
 
 // EventEmitter manages notification subscriptions and event distribution.
 type EventEmitter struct {
-	mu          sync.RWMutex
-	subscribers []*subscriberSlot
-	buffer      []*http.NotificationEvent
-	maxBuffer   int
-	logger      *slog.Logger
-	rateLimiter *RateLimiter
+	mu            sync.RWMutex
+	subscribers   []*subscriberSlot
+	buffer        []*http.NotificationEvent
+	maxBuffer     int
+	logger        *slog.Logger
+	rateLimiter   *RateLimiter
+	doNotDisturb  bool
 }
 
 // subscriberSlot bundles a subscriber channel with a closed flag so that
@@ -165,6 +166,14 @@ func (e *EventEmitter) Unsubscribe(ch chan *http.NotificationEvent) {
 // Rate-limited notifications are silently dropped with a debug log and also
 // excluded from the buffer so they do not accumulate.
 func (e *EventEmitter) Publish(event *http.NotificationEvent) {
+	// Do Not Disturb: short-circuit all notifications. Read the flag
+	// without taking the lock — it is a plain bool written only by
+	// SetDoNotDisturb from the daemon config path.
+	if e.doNotDisturb {
+		e.logger.Debug("notification suppressed (do not disturb)", "type", event.Type)
+		return
+	}
+
 	// Rate limiting: check before acquiring any lock. RateLimiter uses
 	// its own internal mutex and never performs I/O under the EventEmitter's lock.
 	if e.rateLimiter != nil && !e.rateLimiter.Allow(string(event.Type)) {
@@ -255,6 +264,28 @@ func (e *EventEmitter) SetRateLimit(maxPerMinute int) {
 	} else {
 		e.rateLimiter = NewRateLimiter(maxPerMinute)
 	}
+}
+
+// SetDoNotDisturb toggles global notification suppression. When true, all
+// notifications are silently dropped at the dispatch layer regardless of type,
+// priority, or source. The flag is read without locking in Publish because it
+// is only written from the daemon config path (single-writer).
+func (e *EventEmitter) SetDoNotDisturb(dnd bool) {
+	e.mu.Lock()
+	e.doNotDisturb = dnd
+	e.mu.Unlock()
+	if dnd {
+		e.logger.Info("do not disturb mode enabled — all notifications suppressed")
+	} else {
+		e.logger.Info("do not disturb mode disabled — notifications resumed")
+	}
+}
+
+// IsDoNotDisturb returns the current DND state.
+func (e *EventEmitter) IsDoNotDisturb() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.doNotDisturb
 }
 
 // PublishNotification publishes a notification with full control over the event fields

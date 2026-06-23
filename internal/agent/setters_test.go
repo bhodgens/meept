@@ -3,6 +3,7 @@ package agent
 import (
 	"testing"
 
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/metrics"
@@ -95,6 +96,15 @@ func TestAllSetters_NilSafe(t *testing.T) {
 		// ReviewManager setters (internal/agent/review_manager.go)
 		{"ReviewManager.SetPolicy", func() { reviewMgr.SetPolicy((*ReviewPolicy)(nil)) }},
 		{"ReviewManager.SetValidationPolicy", func() { reviewMgr.SetValidationPolicy((*ValidationPolicy)(nil)) }},
+
+		// HTTPHook setters (internal/agent/http_hooks.go)
+		{"HTTPHook.SetBus", func() { (&HTTPHook{}).SetBus((*bus.MessageBus)(nil)) }},
+		{"HTTPHook.SetSessionID", func() { (&HTTPHook{}).SetSessionID("") }},
+		{"HTTPHook.SetHookType", func() { (&HTTPHook{}).SetHookType("") }},
+
+		// FileWatcherHook setters (internal/agent/file_watcher.go)
+		{"FileWatcherHook.SetBus", func() { (&FileWatcherHook{}).SetBus((*bus.MessageBus)(nil)) }},
+		{"FileWatcherHook.SetSessionID", func() { (&FileWatcherHook{}).SetSessionID("") }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

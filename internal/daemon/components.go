@@ -808,6 +808,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		notificationEmitter.SetRateLimit(cfg.Notifications.MaxPerMinute)
 	}
 
+	// Apply Do Not Disturb mode from config
+	if cfg.Notifications.DoNotDisturb {
+		notificationEmitter.SetDoNotDisturb(true)
+	}
+
 	c.NotificationEmitter = notificationEmitter
 	c.AgentLoop.SetNotificationPublisher(&notificationAdapter{emitter: c.NotificationEmitter})
 
@@ -960,7 +965,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		wireEpistemicHook(c.AgentLoop, c.MemoryManager, epistemicChatter, cfg.Memory, logger)
 	}
 
-	wireFileWatcherHook(c.AgentLoop, *cfg, logger)
+	wireFileWatcherHook(c.AgentLoop, *cfg, msgBus, logger)
+	// Wire HTTP hooks from config (each entry becomes a session lifecycle hook)
+	wireHTTPHooks(c.AgentLoop, *cfg, msgBus, logger)
 
 	// Wire session lifecycle hooks (publishes session_start/session_end bus events)
 	wireSessionLifecycleHooks(c.AgentLoop, logger, msgBus)

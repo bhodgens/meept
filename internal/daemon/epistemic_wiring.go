@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
@@ -154,9 +155,65 @@ func wireEpistemicHook(agentLoop *agent.AgentLoop, memoryMgr *memory.Manager, ch
 // TODO: FileWatcher subsystem (pattern matching, FileEvent, NewFileWatcherHook,
 // SortIgnoreOrder) is not yet implemented. Wiring is stubbed to no-op until
 // the implementation lands. Tracked as a follow-up gap.
-func wireFileWatcherHook(agentLoop *agent.AgentLoop, cfg config.Config, logger *slog.Logger) {
+func wireFileWatcherHook(agentLoop *agent.AgentLoop, cfg config.Config, bus *bus.MessageBus, logger *slog.Logger) {
 	// No-op stub: FileWatcherHook types not yet defined.
 	_ = agentLoop
 	_ = cfg
+	_ = bus
 	_ = logger
+}
+
+// wireHTTPHooks converts each HTTP hook entry from the daemon config into an
+// agent.HTTPHook and registers it as a session-start/session-end hook on the
+// agent loop's hook registry. Each hook also gets the message bus reference
+// (for async-rewake signals) when Async+AsyncRewake are enabled.
+//
+// No-op when agentLoop is nil, the hook registry is nil, or no HTTP hooks are
+// configured.
+func wireHTTPHooks(agentLoop *agent.AgentLoop, cfg config.Config, bus *bus.MessageBus, logger *slog.Logger) {
+	if agentLoop == nil {
+		return
+	}
+	hr := agentLoop.HookRegistry()
+	if hr == nil {
+		return
+	}
+	if len(cfg.Hooks.HTTP) == 0 {
+		return
+	}
+
+	wired := 0
+	for i, hc := range cfg.Hooks.HTTP {
+		agentCfg := agent.HTTPHookConfig{
+			URL:         hc.URL,
+			Method:      hc.Method,
+			Headers:     hc.Headers,
+			Timeout:     hc.Timeout,
+			RetryCount:  hc.RetryCount,
+			Async:       hc.Async,
+			AsyncRewake: hc.AsyncRewake,
+		}
+		hook, err := agent.NewHTTPHook(agentCfg, nil, logger.With("hook", "http", "index", i))
+		if err != nil {
+			logger.Warn("failed to wire HTTP hook",
+				"url", hc.URL,
+				"error", err,
+			)
+			continue
+		}
+		if hc.Async && hc.AsyncRewake && bus != nil {
+			hook.SetBus(bus)
+		}
+		// Register for both session-start and session-end events so HTTP
+		// hooks fire on both boundaries. The hook type is set dynamically
+		// by OnSessionStart/OnSessionEnd.
+		hr.RegisterSessionStartHook("http_start_"+hc.URL, agent.HookPriorityNormal, hook)
+		hr.RegisterSessionEndHook("http_end_"+hc.URL, agent.HookPriorityNormal, hook)
+		wired++
+	}
+
+	logger.Info("HTTP hooks wired",
+		"count", wired,
+		"total_configured", len(cfg.Hooks.HTTP),
+	)
 }

@@ -255,6 +255,58 @@ func TestEventEmitter_RateLimitedNotInBuffer(t *testing.T) {
 	assert.Equal(t, 1, count, "rate-limited events should not be in buffer")
 }
 
+func TestEventEmitter_DoNotDisturb(t *testing.T) {
+	logger := slog.New(&testHandler{})
+	emitter := NewEventEmitter(100, 1000, logger)
+
+	// Enable DND.
+	emitter.SetDoNotDisturb(true)
+	assert.True(t, emitter.IsDoNotDisturb(), "DND should be enabled")
+
+	// Publish several events — all should be suppressed.
+	for i := 0; i < 5; i++ {
+		emitter.Publish(&http.NotificationEvent{
+			Type: http.NotificationTypeInfo,
+			ID:   "dnd-suppressed",
+		})
+	}
+
+	// Subscribe and verify no events got through.
+	ch := emitter.Subscribe()
+	time.Sleep(10 * time.Millisecond)
+	count := 0
+	for len(ch) > 0 {
+		<-ch
+		count++
+	}
+	assert.Equal(t, 0, count, "no events should be delivered when DND is enabled")
+
+	// Disable DND and verify events flow again.
+	emitter.SetDoNotDisturb(false)
+	assert.False(t, emitter.IsDoNotDisturb(), "DND should be disabled")
+
+	emitter.Publish(&http.NotificationEvent{
+		Type: http.NotificationTypeInfo,
+		ID:   "after-dnd",
+	})
+
+	ch2 := emitter.Subscribe()
+	time.Sleep(10 * time.Millisecond)
+	count2 := 0
+	for len(ch2) > 0 {
+		<-ch2
+		count2++
+	}
+	assert.True(t, count2 >= 1, "events should flow after DND is disabled")
+}
+
+func TestEventEmitter_DoNotDisturbDefault(t *testing.T) {
+	logger := slog.New(&testHandler{})
+	emitter := NewEventEmitter(100, 1000, logger)
+
+	assert.False(t, emitter.IsDoNotDisturb(), "DND should default to false")
+}
+
 // --- minimal test slog handler ---
 
 type testHandler struct{}

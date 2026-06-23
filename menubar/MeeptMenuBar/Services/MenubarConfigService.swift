@@ -41,6 +41,13 @@ struct MenubarConfig: Codable {
     struct NotificationsConfig: Codable {
         var enabled: Bool
         var level: String
+        var doNotDisturb: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case enabled
+            case level
+            case doNotDisturb = "do_not_disturb"
+        }
     }
 }
 
@@ -48,7 +55,7 @@ extension MenubarConfig {
     static let `default` = MenubarConfig(
         daemon: DaemonConfig(httpURL: "https://localhost:8081", apiToken: nil),
         ui: UIConfig(iconStyle: "icon"),
-        notifications: NotificationsConfig(enabled: true, level: "errors_only")
+        notifications: NotificationsConfig(enabled: true, level: "errors_only", doNotDisturb: nil)
     )
 }
 
@@ -89,6 +96,15 @@ class MenubarConfigService {
         return config.notifications.level
     }
 
+    var doNotDisturb: Bool {
+        return config.notifications.doNotDisturb ?? false
+    }
+
+    func setDoNotDisturb(_ enabled: Bool) {
+        config.notifications.doNotDisturb = enabled
+        saveConfig()
+    }
+
     private func loadConfig() {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             // No config file, use defaults
@@ -110,6 +126,18 @@ class MenubarConfigService {
         } catch {
             // On parse error, keep defaults
             logger.error("failed to load menubar config: \(error.localizedDescription)")
+        }
+    }
+
+    private func saveConfig() {
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .prettyPrinted
+            let data = try encoder.encode(config)
+            try data.write(to: fileURL, options: .atomic)
+            logger.info("menubar config saved")
+        } catch {
+            logger.error("failed to save menubar config: \(error.localizedDescription)")
         }
     }
 
