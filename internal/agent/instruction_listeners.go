@@ -18,7 +18,7 @@ type InstructionListener struct {
 	bus          *bus.MessageBus
 	toolExecutor *tools.Registry
 	logger       *slog.Logger
-	handler      *bus.SubscriptionHandler
+	handler      *bus.SubscriptionHandler //nolint:unused -- reserved for future listener dispatch
 }
 
 // NewInstructionListener creates a new instruction listener.

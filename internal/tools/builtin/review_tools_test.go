@@ -314,7 +314,7 @@ func TestRequestReviewTool_Integration_ReviewPolicyMapping(t *testing.T) {
 	policy := agent.DefaultReviewPolicy()
 
 	for callerID, expectedReviewer := range toolMapping {
-		policyReviewer := policy.ReviewerMapping[callerID]
+		policyReviewer := policy.ReviewerMapping[callerID] //nolint:SA1019 -- intentional: override escape hatch for pinning specific reviewers
 		if policyReviewer != "" && policyReviewer != expectedReviewer {
 			t.Errorf("mapping mismatch for %q: tool=%q policy=%q",
 				callerID, expectedReviewer, policyReviewer)

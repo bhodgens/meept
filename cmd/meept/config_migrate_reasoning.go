@@ -37,6 +37,7 @@ var roleHeuristic = map[string]string{
 // blocks based on the agent role heuristic. The user confirms each write
 // unless --dry-run is set (print only). The --force flag allows overwriting
 // agents that already have a reasoning block.
+//nolint:unused -- reserved for future config migration CLI command
 func newConfigMigrateReasoningCmd() *cobra.Command {
 	var (
 		dryRun  bool
@@ -72,6 +73,7 @@ Examples:
 // files, applies the role heuristic, and either prints suggestions (dry-run)
 // or prompts the user to apply each one. Returns nil if zero agents were
 // found — callers should print a contextual message.
+//nolint:unused -- reserved for future config migration logic
 func runConfigMigrateReasoning(dryRun, force bool, agentIDs []string) error {
 	files, err := discoverAgentFiles()
 	if err != nil {

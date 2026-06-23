@@ -148,6 +148,7 @@ func clampXAIEffort(effort string) string {
 //   - When effort=="" but rc.Force or CapThinking/CapReasoning/extended_thinking
 //     is present, thinking is enabled without a budget (matches legacy wire
 //     format for capability-only requests).
+//nolint:unused -- reserved for future Anthropic vendor support
 func applyAnthropicReasoning(req *anthropicRequest, cfg *ModelConfig, rc *ReasoningConfig, globalBudgets map[string]int) {
 	if rc.IsZero() || !shouldSendReasoning(cfg, rc) {
 		return

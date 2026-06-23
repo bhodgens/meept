@@ -57,6 +57,7 @@ type logger interface {
 }
 
 // storeLogger bridges the standard library logger interface expected by Store.
+//nolint:unused -- reserved for future dynamic logger updates
 func (s *Store) setLogger(l logger) {
 	s.logger = l
 }

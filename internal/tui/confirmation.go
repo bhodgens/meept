@@ -104,11 +104,9 @@ func (m ConfirmationModel) View() tea.View {
 			}
 			b.WriteString(fmt.Sprintf("  %s: %v\n", k, v))
 		}
-		if details != nil {
-			for k, v := range details {
+		for k, v := range details {
 				b.WriteString(fmt.Sprintf("  %s: %v\n", k, v))
 			}
-		}
 		b.WriteString("\n")
 	}
 

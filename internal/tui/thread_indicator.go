@@ -225,6 +225,7 @@ func sortThreadsByActivity(threads []types.Thread) {
 // updateFromData updates the thread indicator from a thread slice and active ID.
 // Called when thread data is refreshed after a thread switch.
 //nolint:unused -- reserved for future data-driven thread updates
+//nolint:unused -- reserved for future data-driven thread updates
 func (ti *ThreadIndicator) updateFromData(threads []types.Thread, activeID string) {
 	ti.threads = make([]types.Thread, 0, len(threads))
 	ti.threads = append(ti.threads, threads...)

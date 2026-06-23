@@ -817,7 +817,7 @@ func TestGetPendingClarification_NoTrueAnalysis(t *testing.T) {
 
 	pending := d.getPendingClarification("session-1")
 	if pending == nil {
-		t.Error("should return pending clarification even when TrueAnalysis is nil (model directive case)")
+		t.Fatal("should return pending clarification even when TrueAnalysis is nil (model directive case)")
 	}
 	if pending.OriginalInput != "model directive needs clarification" {
 		t.Errorf("OriginalInput = %q, want %q", pending.OriginalInput, "model directive needs clarification")

@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+//nolint:unused -- disabled test reserved for future tier discovery validation
 func _TestStore_TierDiscovery(t *testing.T) {
 	tmpDir := t.TempDir()
 	tier1 := filepath.Join(tmpDir, "tier1")
@@ -103,6 +104,7 @@ func TestStore_Delete(t *testing.T) {
 	}
 }
 
+//nolint:unused -- test helper reserved for future use
 func saveToTier(dir string, instr *UserInstruction) {
 	// Simple save for testing
 	store := NewUserInstructionStore([]string{dir})

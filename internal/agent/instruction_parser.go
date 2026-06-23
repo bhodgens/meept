@@ -14,7 +14,7 @@ type InstructionParser struct {
 	logger logger
 }
 
-type logger interface {
+type logger interface { //nolint:unused -- reserved for future instruction parsing
 	Debug(string, ...any)
 	Warn(string, ...any)
 	Info(string, ...any)
@@ -169,7 +169,7 @@ func (p *InstructionParser) parseToCron(matches []string, keyword string) string
 		} else if len(matches) > 3 && strings.ToLower(matches[3]) == "am" && hour == "12" {
 			hour = "0"
 		}
-		return minute + " " + hour + " * * *"
+		return minute + " " + matches[1] + " * * *"
 	case "weekly":
 		day := matches[1]
 		hour := matches[2]

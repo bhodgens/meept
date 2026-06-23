@@ -155,7 +155,7 @@ func (sc *SearchCompressor) parseGrepOutput(lines []string) []fileResult {
 func (sc *SearchCompressor) compressSearchResults(results []fileResult, query string) []string {
 	var output []string
 
-	output = append(output, fmt.Sprintf("=== Search Results Summary ==="))
+	output = append(output, "=== Search Results Summary ===")
 	output = append(output, fmt.Sprintf("Files searched: %d", len(results)))
 
 	totalMatches := 0

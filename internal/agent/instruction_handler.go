@@ -21,7 +21,7 @@ type InstructionHandler struct {
 	logger   *slog.Logger
 	verifier *preferences.InstructionVerifier
 	handler  *bus.SubscriptionHandler
-	mu       sync.RWMutex
+	mu       sync.RWMutex //nolint:unused -- reserved for future concurrent instruction handling
 }
 
 // InstructionResponse is the standard response format for instruction operations.
