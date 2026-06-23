@@ -36,13 +36,8 @@ type ReviewPolicy struct {
 	// Tool hints that NEVER require review (trusted operations)
 	SkipReview []string
 
-	// Agent-specific reviewer mappings.
-	//
-	// Deprecated: reviewer routing is now dynamic via ReviewPolicy.Registry
-	// and the reviews_domain field on reviewer-role agents. ReviewerMapping
-	// is kept as an override escape hatch — entries here take precedence
-	// over dynamic discovery so callers can pin specific reviewers.
-	ReviewerMapping map[string]string
+	// Registry, when non-nil, is consulted by SelectReviewer to find
+	// reviewer-role agents dynamically by reviews_domain.
 
 	// Maximum revision cycles before requiring human intervention
 	MaxRevisionCycles int
@@ -63,13 +58,12 @@ type ReviewPolicy struct {
 
 // DefaultReviewPolicy returns sensible defaults for review policy.
 //
-// ReviewerMapping is empty by default: reviewer routing is dynamic via
-// ReviewPolicy.Registry and the reviews_domain field on reviewer agents.
+// Reviewer routing is dynamic via ReviewPolicy.Registry and the
+// reviews_domain field on reviewer-role agents.
 func DefaultReviewPolicy() *ReviewPolicy {
 	return &ReviewPolicy{
-		RequireReview: []string{string(IntentCode), KeywordRefactor, string(IntentDebug), string(IntentGit), KeywordFix},
-		SkipReview:    []string{string(IntentChat), string(IntentReport), string(IntentRecall), string(IntentSearch), string(IntentAnalyze)},
-		ReviewerMapping: map[string]string{},
+		RequireReview:     []string{string(IntentCode), KeywordRefactor, string(IntentDebug), string(IntentGit), KeywordFix},
+		SkipReview:        []string{string(IntentChat), string(IntentReport), string(IntentRecall), string(IntentSearch), string(IntentAnalyze)},
 		MaxRevisionCycles: 3,
 		AutoApprovePatterns: []string{
 			"*.md",
@@ -133,20 +127,12 @@ var toolHintDomainMap = map[string]string{
 // SelectReviewer selects the appropriate reviewer agent for a step.
 //
 // Resolution order:
-//  1. ReviewerMapping override (explicit pin)
-//  2. Dynamic lookup via Registry for a reviewer-role agent whose
+// Dynamic lookup via Registry for a reviewer-role agent
 //     reviews_domain matches the originating agent's domain
 //  3. Tool-hint → domain → registry lookup
 //  4. "test-reviewer" fallback
 func (p *ReviewPolicy) SelectReviewer(step *task.TaskStep) string {
-	// 1. Explicit override wins.
-	if step.AgentID != "" {
-		if reviewer, ok := p.ReviewerMapping[step.AgentID]; ok && reviewer != "" {
-			return reviewer
-		}
-	}
-
-	// 2. Determine target domain from agent ID, then tool hint.
+	// Determine target domain from agent ID, then tool hint.
 	domain := ""
 	if step.AgentID != "" {
 		domain = agentDomainMap[step.AgentID]

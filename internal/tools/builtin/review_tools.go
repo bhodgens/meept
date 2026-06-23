@@ -27,10 +27,10 @@ type RequestReviewTool struct {
 // NewRequestReviewTool creates a new request review tool.
 // The registry is the same AgentRegistry used by DelegateTaskTool.
 // reviewMapping maps caller agent IDs to default reviewer agent IDs
-// (e.g., "coder" -> "code-reviewer"). If nil, DefaultReviewerMapping is used.
+// (e.g., "coder" -> "code-reviewer"). If nil, uses built-in defaults.
 func NewRequestReviewTool(registry delegateRegistry, reviewMapping map[string]string) *RequestReviewTool {
 	if reviewMapping == nil {
-		reviewMapping = DefaultReviewerMapping()
+		reviewMapping = defaultReviewerMapping()
 	}
 	return &RequestReviewTool{
 		registry:      registry,
@@ -38,9 +38,10 @@ func NewRequestReviewTool(registry delegateRegistry, reviewMapping map[string]st
 	}
 }
 
-// DefaultReviewerMapping returns the standard mapping from actor agent IDs to
-// their paired reviewer agent IDs.
-func DefaultReviewerMapping() map[string]string {
+// defaultReviewerMapping returns the standard mapping from actor agent IDs to
+// their paired reviewer agent IDs. This is used as the default when no
+// explicit mapping is provided.
+func defaultReviewerMapping() map[string]string {
 	return map[string]string{
 		"coder":     "code-reviewer",
 		"debugger":  "debug-reviewer",

@@ -55,7 +55,7 @@ func TestRequestReviewTool_Execute_Approved(t *testing.T) {
 	}
 	tool := &RequestReviewTool{
 		registry:      reg,
-		reviewMapping: DefaultReviewerMapping(),
+		reviewMapping: defaultReviewerMapping(),
 	}
 
 	result, err := tool.Execute(context.Background(), map[string]any{
@@ -88,7 +88,7 @@ func TestRequestReviewTool_Execute_Rejected(t *testing.T) {
 	}
 	tool := &RequestReviewTool{
 		registry:      reg,
-		reviewMapping: DefaultReviewerMapping(),
+		reviewMapping: defaultReviewerMapping(),
 	}
 
 	result, err := tool.Execute(context.Background(), map[string]any{
@@ -118,7 +118,7 @@ func TestRequestReviewTool_Execute_Rejected(t *testing.T) {
 func TestRequestReviewTool_Execute_NilRegistry(t *testing.T) {
 	tool := &RequestReviewTool{
 		registry:      nil,
-		reviewMapping: DefaultReviewerMapping(),
+		reviewMapping: defaultReviewerMapping(),
 	}
 
 	result, err := tool.Execute(context.Background(), map[string]any{
@@ -140,7 +140,7 @@ func TestRequestReviewTool_Execute_NilRegistry(t *testing.T) {
 func TestRequestReviewTool_Execute_MissingMessage(t *testing.T) {
 	tool := &RequestReviewTool{
 		registry:      &mockReviewRegistry{},
-		reviewMapping: DefaultReviewerMapping(),
+		reviewMapping: defaultReviewerMapping(),
 	}
 
 	result, err := tool.Execute(context.Background(), map[string]any{})
@@ -163,7 +163,7 @@ func TestRequestReviewTool_Execute_UnknownReviewer(t *testing.T) {
 	}
 	tool := &RequestReviewTool{
 		registry:      reg,
-		reviewMapping: DefaultReviewerMapping(),
+		reviewMapping: defaultReviewerMapping(),
 	}
 
 	result, err := tool.Execute(context.Background(), map[string]any{
@@ -190,7 +190,7 @@ func TestRequestReviewTool_Execute_ExplicitReviewerID(t *testing.T) {
 	}
 	tool := &RequestReviewTool{
 		registry:      reg,
-		reviewMapping: DefaultReviewerMapping(),
+		reviewMapping: defaultReviewerMapping(),
 	}
 
 	result, err := tool.Execute(context.Background(), map[string]any{
@@ -217,7 +217,7 @@ func TestRequestReviewTool_Execute_NonJSONResponse(t *testing.T) {
 	}
 	tool := &RequestReviewTool{
 		registry:      reg,
-		reviewMapping: DefaultReviewerMapping(),
+		reviewMapping: defaultReviewerMapping(),
 	}
 
 	result, err := tool.Execute(context.Background(), map[string]any{
@@ -247,7 +247,7 @@ func TestRequestReviewTool_Execute_DefaultReviewerFallback(t *testing.T) {
 	}
 	tool := &RequestReviewTool{
 		registry:      reg,
-		reviewMapping: DefaultReviewerMapping(),
+		reviewMapping: defaultReviewerMapping(),
 	}
 
 	result, err := tool.Execute(context.Background(), map[string]any{
@@ -267,7 +267,7 @@ func TestRequestReviewTool_Execute_DefaultReviewerFallback(t *testing.T) {
 }
 
 func TestRequestReviewTool_DefaultReviewerMapping(t *testing.T) {
-	m := DefaultReviewerMapping()
+	m := defaultReviewerMapping()
 	expected := map[string]string{
 		"coder":     "code-reviewer",
 		"debugger":  "debug-reviewer",
@@ -308,20 +308,6 @@ func TestRequestReviewTool_Integration_CoderSpec(t *testing.T) {
 	}
 }
 
-func TestRequestReviewTool_Integration_ReviewPolicyMapping(t *testing.T) {
-	// Verify the tool's default mapping matches the ReviewPolicy reviewer mapping
-	toolMapping := DefaultReviewerMapping()
-	policy := agent.DefaultReviewPolicy()
-
-	for callerID, expectedReviewer := range toolMapping {
-		policyReviewer := policy.ReviewerMapping[callerID] //nolint:SA1019 -- intentional: override escape hatch for pinning specific reviewers
-		if policyReviewer != "" && policyReviewer != expectedReviewer {
-			t.Errorf("mapping mismatch for %q: tool=%q policy=%q",
-				callerID, expectedReviewer, policyReviewer)
-		}
-	}
-}
-
 func TestRequestReviewTool_Integration_FullFlow(t *testing.T) {
 	reg := &mockReviewRegistry{
 		specs: testReviewSpecs(),
@@ -334,7 +320,7 @@ func TestRequestReviewTool_Integration_FullFlow(t *testing.T) {
 	}
 	tool := &RequestReviewTool{
 		registry:      reg,
-		reviewMapping: DefaultReviewerMapping(),
+		reviewMapping: defaultReviewerMapping(),
 	}
 
 	result, err := tool.Execute(context.Background(), map[string]any{
@@ -380,7 +366,7 @@ func TestRequestReviewTool_Integration_DebuggerToDebugReviewer(t *testing.T) {
 	}
 	tool := &RequestReviewTool{
 		registry:      reg,
-		reviewMapping: DefaultReviewerMapping(),
+		reviewMapping: defaultReviewerMapping(),
 	}
 
 	result, err := tool.Execute(context.Background(), map[string]any{

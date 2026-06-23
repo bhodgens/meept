@@ -866,8 +866,6 @@ type ReviewConfig struct {
 	RequireReview []string `json:"require_review" toml:"require_review"`
 	// SkipReview lists intent types that skip review
 	SkipReview []string `json:"skip_review" toml:"skip_review"`
-	// ReviewerMapping maps agent IDs to reviewer agent IDs
-	ReviewerMapping map[string]string `json:"reviewer_mapping" toml:"reviewer_mapping"`
 	// MaxRevisionCycles is the maximum revision cycles before auto-approval
 	MaxRevisionCycles int `json:"max_revision_cycles" toml:"max_revision_cycles"`
 	// AutoApprovePatterns lists glob patterns that are auto-approved
@@ -1463,16 +1461,9 @@ func DefaultConfig() *Config {
 				MaxSuggestionLength: 500,
 			},
 			Review: ReviewConfig{
-				Enabled:       true,
-				RequireReview: []string{"code", "refactor", "debug", "git"},
-				SkipReview:    []string{"chat", "report", "recall", "search"},
-				ReviewerMapping: map[string]string{
-					"coder":     "code-reviewer",
-					"debugger":  "debug-reviewer",
-					"planner":   "planner-reviewer",
-					"analyst":   "analyst-reviewer",
-					"committer": "code-reviewer",
-				},
+				Enabled:             true,
+				RequireReview:       []string{"code", "refactor", "debug", "git"},
+				SkipReview:          []string{"chat", "report", "recall", "search"},
 				MaxRevisionCycles:   3,
 				AutoApprovePatterns: []string{"*.md", "LICENSE"},
 			},

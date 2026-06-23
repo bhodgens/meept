@@ -346,8 +346,7 @@ func TestSelectReviewer_DynamicByDomain(t *testing.T) {
 	}
 
 	policy := &ReviewPolicy{
-		ReviewerMapping: map[string]string{},
-		Registry:        r,
+		Registry: r,
 	}
 
 	cases := []struct {
@@ -382,8 +381,7 @@ func TestSelectReviewer_FallsBackToTestReviewer(t *testing.T) {
 		sharedConvStore: NewConversationStore(100),
 	}
 	policy := &ReviewPolicy{
-		ReviewerMapping: map[string]string{},
-		Registry:        r,
+		Registry: r,
 	}
 	step := &task.TaskStep{AgentID: config.AgentIDCoder}
 	got := policy.SelectReviewer(step)
