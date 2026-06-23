@@ -295,11 +295,11 @@ instructionHandler.Start(ctx)
 
 | ID | Priority | Gap | Impact | Remediation |
 |----|----------|-----|--------|-------------|
-| 1.7 | High | Daemon integration missing | Instruction bus handler/listener/scheduler not started by daemon | Wire instruction components into `internal/daemon/components.go` |
-| 3.2 | Medium | TUI confirmation dialog missing | No interactive TUI dialog for high-risk instruction confirmation | Create `internal/tui/instructions.go` with bubbletea dialog |
-| 4.1 | Medium | `PatternReport` lacks `SuggestedInstruction` field | Q Agent recommends "suggest_user_instruction" but doesn't include the NL text | Add field to `internal/agent/q/types.go` and populate in `RecommendInstruction()` |
-| 4.3 | Medium | Cross-phase integration tests missing | No end-to-end verification of full trigger execution pipeline | Add `phase2_e2e_test.go`, `phase3_e2e_test.go`, `phase4_e2e_test.go`, and `instruction_validator_test.go` |
-| 4.4 | Low | Tutorial doc missing | `docs/tutorial/automate-tasks.md` not created | Create tutorial document with examples |
+| 1.7 | High | ~~Daemon integration missing~~ ✅ Fixed | Instruction bus handler/listener/scheduler not started by daemon | Wired in `internal/daemon/instruction_wiring.go` (commit 98fb867c) |
+| 3.2 | Medium | ~~TUI confirmation dialog missing~~ ✅ Fixed | No interactive TUI dialog for high-risk instruction confirmation | `internal/tui/instructions.go` with bubbletea dialog + 12 tests (commit 98fb867c) |
+| 4.1 | Medium | ~~`PatternReport` lacks `SuggestedInstruction` field~~ ✅ Fixed | Q Agent recommends "suggest_user_instruction" but doesn't include the NL text | Field added to `internal/agent/q/types.go:54`, populated in `pattern_detector.go:610` (commit 98fb867c) |
+| 4.3 | Medium | ~~Cross-phase integration tests missing~~ ✅ Fixed | No end-to-end verification of full trigger execution pipeline | Added `phase2_listener_test.go`, `phase3_instructions_e2e_test.go`, `phase4_e2e_test.go`, `instruction_validator_test.go` — 24 new tests (commit 98fb867c) |
+| 4.4 | Low | ~~Tutorial doc missing~~ ✅ Fixed | `docs/tutorial/automate-tasks.md` not created | Created with CLI examples, trigger/action reference, storage tiers (commit 98fb867c) |
 
 ---
 
