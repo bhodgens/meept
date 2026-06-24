@@ -41,6 +41,59 @@ func TestPromptGuardWrapToolOutput(t *testing.T) {
 	}
 }
 
+func TestPromptGuardWrapSkillOutput(t *testing.T) {
+	pg := NewPromptGuard()
+
+	skillName := "code-review"
+	output := "Skill execution result text"
+	wrapped := pg.WrapSkillOutput(skillName, output)
+
+	// Should use the "skill:" prefix in the boundary tag
+	expectedStart := ToolOutputStartTag("skill:" + skillName)
+	if !strings.HasPrefix(wrapped, expectedStart) {
+		t.Errorf("Wrapped skill output should start with %s, got prefix %q", expectedStart, wrapped[:min(len(wrapped), len(expectedStart))])
+	}
+	if !strings.HasSuffix(wrapped, ToolOutputEndTag) {
+		t.Errorf("Wrapped skill output should end with %s", ToolOutputEndTag)
+	}
+	if !strings.Contains(wrapped, output) {
+		t.Error("Wrapped skill output should contain original output")
+	}
+
+	// IsWithinBoundary should detect content inside skill boundary markers
+	if !IsWithinBoundary(wrapped, output) {
+		t.Error("IsWithinBoundary should return true for content inside skill output markers")
+	}
+}
+
+func TestPromptGuardWrapSkillOutput_SanitizesName(t *testing.T) {
+	pg := NewPromptGuard()
+
+	// A skill name containing '>' could break the boundary marker regex.
+	// The sanitizer should strip it.
+	wrapped := pg.WrapSkillOutput("evi>>l", "content")
+	// The opening tag must not contain raw '>' from the name.
+	// <<<TOOL_OUTPUT:skill:evil>>> (both '>' stripped)
+	if strings.Contains(wrapped, ">>>") && strings.Contains(wrapped[:strings.Index(wrapped, "\n")], ">>") {
+		// The start tag line should be <<<TOOL_OUTPUT:skill:evil>>> not <<<TOOL_OUTPUT:skill:evi>>l>>>
+		startTagLine := wrapped[:strings.Index(wrapped, "\n")]
+		if strings.Contains(startTagLine, "evi>>l") {
+			t.Errorf("skill name '>' should be sanitized, got start tag: %q", startTagLine)
+		}
+	}
+}
+
+func TestPromptGuardWrapSkillOutput_DetectableByRegex(t *testing.T) {
+	pg := NewPromptGuard()
+
+	wrapped := pg.WrapSkillOutput("summarize", "The summary output")
+	// The existing toolOutputStartRE should match the skill boundary start tag.
+	startTag := wrapped[:strings.Index(wrapped, "\n")]
+	if !toolOutputStartRE.MatchString(startTag) {
+		t.Errorf("toolOutputStartRE should match skill output start tag %q", startTag)
+	}
+}
+
 func TestPromptGuardBuildSystemPrompt(t *testing.T) {
 	pg := NewPromptGuard()
 

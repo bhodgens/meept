@@ -337,8 +337,15 @@ func (e *Executor) Execute(ctx context.Context, skill *Skill, input string) (*Sk
 		taintLabel = taint.TaintUntrusted
 	}
 
+	// Wrap content in boundary markers so downstream consumers (dispatcher,
+	// handler) and the LLM can distinguish skill output from trusted context.
+	wrappedContent := content
+	if e.secOrch != nil {
+		wrappedContent = e.secOrch.WrapSkillOutput(skill.Name, content)
+	}
+
 	result := &SkillExecutionResult{
-		Content:        content,
+		Content:        wrappedContent,
 		Model:          resp.Model,
 		PromptTokens:   resp.Usage.PromptTokens,
 		CompletionTokens: resp.Usage.CompletionTokens,
@@ -521,8 +528,14 @@ func (e *Executor) ExecuteWithMessages(
 		taintLabel = taint.TaintUntrusted
 	}
 
+	// Wrap content in boundary markers (same as Execute path).
+	wrappedContent := content
+	if e.secOrch != nil {
+		wrappedContent = e.secOrch.WrapSkillOutput(skill.Name, content)
+	}
+
 	result := &SkillExecutionResult{
-		Content:          content,
+		Content:          wrappedContent,
 		Model:            resp.Model,
 		PromptTokens:     resp.Usage.PromptTokens,
 		CompletionTokens: resp.Usage.CompletionTokens,

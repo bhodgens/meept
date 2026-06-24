@@ -1,6 +1,16 @@
 // Package agent provides file system watcher hooks.
 package agent
 
+// SECURITY: File contents passed to callbacks should be treated as untrusted.
+// Callbacks are responsible for:
+//  1. Wrapping content in boundary markers (<<<USER_INPUT>>>, <<<TOOL_OUTPUT:*>>>)
+//  2. Sanitizing content via InputSanitizer before injecting into agent context
+//  3. Applying appropriate taint labels (TaintUserInput for local files,
+//     TaintExternal for remote)
+//
+// The file watcher only monitors filesystem events; security processing occurs
+// in the agent loop when content is added to the conversation.
+
 import (
 	"context"
 	"fmt"
@@ -18,6 +28,10 @@ import (
 )
 
 // FileWatcherHook watches filesystem paths matching patterns.
+//
+// The Callback function receives a filesystem path; it is the callback's
+// responsibility to read, sanitize, and taint any content before injecting
+// it into agent context (see SECURITY note above).
 type FileWatcherHook struct {
 	os.FileInfo
 	Pattern  string        `json:"pattern"`

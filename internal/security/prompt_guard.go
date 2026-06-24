@@ -93,6 +93,23 @@ func (pg *PromptGuard) WrapToolOutput(toolName, output string) string {
 	return fmt.Sprintf("%s\n%s\n%s", ToolOutputStartTag(toolName), output, ToolOutputEndTag)
 }
 
+// WrapSkillOutput wraps output from a skill execution in boundary markers.
+// It uses the same TOOL_OUTPUT markers with a "skill:" prefix so that existing
+// boundary detection (IsWithinBoundary, injection scanning) covers skill results
+// without requiring a separate marker type. The skill name is sanitized to
+// remove characters that could confuse boundary parsing.
+func (pg *PromptGuard) WrapSkillOutput(skillName, output string) string {
+	safeName := sanitizeBoundaryName(skillName)
+	return fmt.Sprintf("%s\n%s\n%s", ToolOutputStartTag("skill:"+safeName), output, ToolOutputEndTag)
+}
+
+// sanitizeBoundaryName strips characters from a name that could interfere with
+// boundary marker parsing. The TOOL_OUTPUT start tag regex is
+// <<<TOOL_OUTPUT:[^>]+>>>, so '>' must be removed.
+func sanitizeBoundaryName(name string) string {
+	return strings.ReplaceAll(name, ">", "")
+}
+
 // BuildSystemPrompt assembles a complete system prompt from discrete sections.
 func (pg *PromptGuard) BuildSystemPrompt(constitution, restrictions, purpose, personality string) string {
 	var sections []string

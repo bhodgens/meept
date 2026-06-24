@@ -389,6 +389,23 @@ func (o *Orchestrator) RecordToolTaint(toolCallID, toolName string, value string
 	)
 }
 
+// RecordUserInput records direct user input as carrying TaintUserInput so that
+// downstream policy checks (e.g., shell_exec sink) can distinguish user-originated
+// data from trusted system messages. The call is a no-op when taint tracking is
+// disabled (no tracker configured).
+func (o *Orchestrator) RecordUserInput(conversationID, input string) {
+	if o.taintTracker == nil {
+		return
+	}
+	key := fmt.Sprintf("user_input:%s", conversationID)
+	tv := taint.NewTaintedValue(input, []taint.TaintLabel{taint.TaintUserInput}, "user_input")
+	o.taintTracker.Store(key, tv)
+	o.logger.Debug("recorded user input taint",
+		"conversation", conversationID,
+		"label", taint.TaintUserInput.String(),
+	)
+}
+
 // WrapUserInput wraps text in user-input boundary markers for prompt injection defense.
 func (o *Orchestrator) WrapUserInput(text string) string {
 	if o.promptGuard == nil {
@@ -403,6 +420,18 @@ func (o *Orchestrator) WrapToolOutput(toolName, output string) string {
 		return output
 	}
 	return o.promptGuard.WrapToolOutput(toolName, output)
+}
+
+// WrapSkillOutput wraps output from a skill execution in boundary markers.
+// Skill results use the same boundary marker scheme as tool outputs so that
+// existing injection-detection (IsWithinBoundary, safety reminders) covers
+// them automatically. The skill name is prefixed with "skill:" to distinguish
+// skill-sourced output from tool-sourced output in logs and boundary scans.
+func (o *Orchestrator) WrapSkillOutput(skillName, output string) string {
+	if o.promptGuard == nil {
+		return output
+	}
+	return o.promptGuard.WrapSkillOutput(skillName, output)
 }
 
 // Stats returns security metrics as a map.

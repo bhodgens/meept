@@ -1,10 +1,14 @@
 package skills
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 
+	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/llm"
 )
 
@@ -293,6 +297,84 @@ func TestExecutor_ExecuteWithMCPServers_SkillHasNoServers(t *testing.T) {
 	}
 	if len(result.MCPTools) != 0 {
 		t.Errorf("MCPTools should be empty, got %d tools", len(result.MCPTools))
+	}
+}
+
+// TestExecutor_Execute_BoundaryWrapping verifies that skill output is wrapped
+// in boundary markers when a security orchestrator is configured.
+func TestExecutor_Execute_BoundaryWrapping(t *testing.T) {
+	resolver := testResolver()
+
+	// Create security orchestrator with SanitizeInputs enabled (enables promptGuard)
+	orchCfg := intsecurity.DefaultOrchestratorConfig()
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	orch := intsecurity.NewOrchestrator(orchCfg, logger)
+	defer orch.Close()
+
+	originalContent := "The skill produced this output"
+	mock := &mockChatter{
+		response: &llm.Response{
+			Content: originalContent,
+			Model:   "provider1/model-a",
+			Usage:   llm.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		},
+	}
+	exec := NewExecutor(resolver, WithClient(mock), WithSecurityOrchestrator(orch))
+
+	skill := &Skill{
+		Name:     "boundary-test-skill",
+		Requires: []string{"code"},
+		Body:     "Do something.",
+	}
+
+	result, err := exec.Execute(context.Background(), skill, "test input")
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// Result content should be wrapped in boundary markers
+	if result.Content == originalContent {
+		t.Error("result content should be wrapped, not equal to original")
+	}
+	if !strings.Contains(result.Content, originalContent) {
+		t.Errorf("result content should contain original output, got: %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "<<<TOOL_OUTPUT:skill:boundary-test-skill>>>") {
+		t.Errorf("result content should contain skill boundary start tag, got: %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "<<<END_TOOL_OUTPUT>>>") {
+		t.Errorf("result content should contain boundary end tag, got: %q", result.Content)
+	}
+}
+
+// TestExecutor_Execute_NoBoundaryWrappingWithoutOrchestrator verifies that
+// when no security orchestrator is configured, output is NOT wrapped.
+func TestExecutor_Execute_NoBoundaryWrappingWithoutOrchestrator(t *testing.T) {
+	resolver := testResolver()
+
+	originalContent := "plain output"
+	mock := &mockChatter{
+		response: &llm.Response{
+			Content: originalContent,
+			Model:   "provider1/model-a",
+			Usage:   llm.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		},
+	}
+	exec := NewExecutor(resolver, WithClient(mock))
+
+	skill := &Skill{
+		Name:     "no-orch-skill",
+		Requires: []string{"code"},
+		Body:     "Do something.",
+	}
+
+	result, err := exec.Execute(context.Background(), skill, "test input")
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if result.Content != originalContent {
+		t.Errorf("without orchestrator, content should be unwrapped, got: %q", result.Content)
 	}
 }
 

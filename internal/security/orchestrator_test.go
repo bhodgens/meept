@@ -460,6 +460,26 @@ func TestWrapToolOutput(t *testing.T) {
 	}
 }
 
+func TestWrapSkillOutput(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	cfg := DefaultOrchestratorConfig()
+	orch := NewOrchestrator(cfg, logger)
+
+	output := "Skill result content"
+	wrapped := orch.WrapSkillOutput("code-review", output)
+
+	if wrapped == output {
+		t.Error("Wrapped skill output should be different from original")
+	}
+	if !orchContainsString(wrapped, output) {
+		t.Errorf("Wrapped skill output should contain original content: %q not in %q", output, wrapped)
+	}
+	// Verify it uses the skill: prefix in boundary markers
+	if !orchContainsString(wrapped, "skill:code-review") {
+		t.Error("Wrapped skill output should contain 'skill:code-review' in boundary tag")
+	}
+}
+
 // Helper function to check if a string contains another string
 func orchContainsString(haystack, needle string) bool {
 	return len(haystack) >= len(needle) && (haystack == needle ||
@@ -753,3 +773,43 @@ func TestRecordToolTaint_WithTracker(t *testing.T) {
 		t.Error("expected nil for TaintNone (no storage)")
 	}
 }
+
+// TestRecordUserInput_NoTracker verifies the method is a safe no-op when
+// the orchestrator has no taint tracker configured.
+func TestRecordUserInput_NoTracker(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	orch := NewOrchestrator(DefaultOrchestratorConfig(), logger)
+
+	// No taint tracker set — must not panic.
+	orch.RecordUserInput("conv_1", "hello world")
+}
+
+// TestRecordUserInput_WithTracker verifies that user input is stored under
+// the "user_input:<conversationID>" key with TaintUserInput label.
+func TestRecordUserInput_WithTracker(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	orch := NewOrchestrator(DefaultOrchestratorConfig(), logger)
+
+	tracker := taint.NewExtendedTracker(logger)
+	orch.SetTaintTracker(tracker)
+
+	convID := "conv_test_123"
+	input := "delete all files"
+	orch.RecordUserInput(convID, input)
+
+	key := "user_input:" + convID
+	tv := tracker.Retrieve(key)
+	if tv == nil {
+		t.Fatalf("expected stored taint value at key %q, got nil", key)
+	}
+	if !tv.HasLabel(taint.TaintUserInput) {
+		t.Errorf("expected TaintUserInput label, got %v", tv.Taints)
+	}
+	if tv.Value != input {
+		t.Errorf("expected value %q, got %q", input, tv.Value)
+	}
+	if !strings.Contains(tv.Source, "user_input") {
+		t.Errorf("expected source to contain 'user_input', got %q", tv.Source)
+	}
+}
+
