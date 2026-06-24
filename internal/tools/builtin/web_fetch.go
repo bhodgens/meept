@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
 
+	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/models"
 	"golang.org/x/net/html"
@@ -35,16 +38,11 @@ type WebFetchTool struct {
 	timeout   time.Duration
 	maxLength int
 	client    *http.Client
-	secOrch   SecurityChecker
+	secOrch   *intsecurity.Orchestrator
 	// allowPrivateRanges disables the SSRF private/loopback IP filter.
 	// Production code never sets this; it exists for unit tests that run
 	// against httptest.NewServer (which binds to 127.0.0.1).
 	allowPrivateRanges bool
-}
-
-// SecurityChecker is an interface for pre-fetch security checks.
-type SecurityChecker interface {
-	CheckWebFetch(url string) (blocked bool, reason string)
 }
 
 // NewWebFetchTool creates a new web fetch tool.
@@ -85,8 +83,9 @@ func (t *WebFetchTool) checkRedirect(req *http.Request, via []*http.Request) err
 
 func (t *WebFetchTool) Name() string { return "web_fetch" }
 
-// SetSecurityOrchestrator sets the security orchestrator for taint/exfil checks.
-func (t *WebFetchTool) SetSecurityOrchestrator(orch SecurityChecker) {
+// SetSecurityOrchestrator sets the security orchestrator for taint/exfil checks and output sanitization.
+// Follows the typed-nil interface guard pattern mandated by CLAUDE.md.
+func (t *WebFetchTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
 	if orch != nil {
 		t.secOrch = orch
 	}
@@ -206,6 +205,19 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) (any, e
 		text = stripHTML(text)
 	}
 
+	// Sanitize output for injection patterns if security orchestrator is available
+	if t.secOrch != nil && t.secOrch.InputSanitizer() != nil {
+		sanitizeResult := t.secOrch.InputSanitizer().Sanitize(text)
+		if sanitizeResult.WasModified || len(sanitizeResult.ThreatsDetected) > 0 {
+			// Log the sanitization for audit trail
+			slog.Debug("Web content sanitized",
+				"url", url,
+				"threats", len(sanitizeResult.ThreatsDetected),
+				"modified", sanitizeResult.WasModified)
+		}
+		text = sanitizeResult.CleanText
+	}
+
 	// Truncate to max length
 	truncated := false
 	if len(text) > maxLength {
@@ -232,9 +244,10 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) (any, e
 	}
 
 	return tools.ToolResult{
-		Success:  true,
-		Result:   result,
-		Evidence: evidence,
+		Success:    true,
+		Result:     result,
+		Evidence:   evidence,
+		TaintLabel: taint.TaintExternal, // web-sourced content is externally tainted
 	}, nil
 }
 
@@ -370,6 +383,18 @@ func (t *WebFetchTool) ExecuteStreaming(ctx context.Context, args map[string]any
 		text = stripHTML(text)
 	}
 
+	// Sanitize output for injection patterns if security orchestrator is available
+	if t.secOrch != nil && t.secOrch.InputSanitizer() != nil {
+		sanitizeResult := t.secOrch.InputSanitizer().Sanitize(text)
+		if sanitizeResult.WasModified || len(sanitizeResult.ThreatsDetected) > 0 {
+			slog.Debug("Web content sanitized (streaming)",
+				"url", url,
+				"threats", len(sanitizeResult.ThreatsDetected),
+				"modified", sanitizeResult.WasModified)
+		}
+		text = sanitizeResult.CleanText
+	}
+
 	truncated := false
 	if len(text) > maxLength {
 		text = text[:maxLength]
@@ -397,9 +422,10 @@ func (t *WebFetchTool) ExecuteStreaming(ctx context.Context, args map[string]any
 	onUpdate(tools.ProgressUpdate{Message: "complete", Percent: 100, PartialResult: partialJSON})
 
 	return tools.ToolResult{
-		Success:  true,
-		Result:   result,
-		Evidence: evidence,
+		Success:    true,
+		Result:     result,
+		Evidence:   evidence,
+		TaintLabel: taint.TaintExternal, // web-sourced content is externally tainted
 	}, nil
 }
 

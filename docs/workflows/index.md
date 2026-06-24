@@ -10,6 +10,7 @@ Feature specifications describing how each Meept subsystem works, with configura
 | [Multi-Agent Orchestration](agent-orchestration.md) | Task decomposition, delegation, and review |
 | [Skill System](skills.md) | Skill discovery, loading, and execution |
 | [Security Engine](security.md) | Input sanitization, taint tracking, shell scanning |
+| [Adversarial Input Defense](adversarial-input-defense.md) | Defense-in-depth protection for web fetches, file reads, MCP tools |
 | [Memory System](memory.md) | Storage, retrieval, consolidation, and search |
 | [LLM Provider Management](llm-management.md) | Multi-provider support, failover, budget |
 | [Models CLI](models-cli.md) | Interactive provider/model management |

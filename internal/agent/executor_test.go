@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/security"
 )
@@ -1018,4 +1020,53 @@ func TestWithExecutorBusNilGuard(t *testing.T) {
 	if executor2.bus != nil {
 		t.Error("expected nil bus")
 	}
+}
+
+// TestExecutionResult_TaintLabel_Propagation verifies that the TaintLabel
+// field set on an ExecutionResult is preserved through ToCompressedJSON
+// for both the uncompressed and compressed paths.
+func TestExecutionResult_TaintLabel_Propagation(t *testing.T) {
+	t.Run("uncompressed preserves taint", func(t *testing.T) {
+		result := &ExecutionResult{
+			ToolCallID: "call_ext",
+			Success:    true,
+			Result:     "ok",
+			TaintLabel: taint.TaintExternal,
+		}
+		full := result.ToJSON()
+		if !strings.Contains(full, string(taint.TaintExternal)) {
+			t.Errorf("uncompressed JSON missing taint label: %s", full)
+		}
+	})
+
+	t.Run("compressed preserves taint", func(t *testing.T) {
+		// Large result triggers compression; taint label must survive.
+		large := make([]byte, 50000)
+		for i := range large {
+			large[i] = byte('a' + (i % 26))
+		}
+		result := &ExecutionResult{
+			ToolCallID: "call_big",
+			Success:    true,
+			Result:     string(large),
+			TaintLabel: taint.TaintExternal,
+		}
+		compressed := result.ToCompressedJSON(100)
+		if !strings.Contains(compressed, string(taint.TaintExternal)) {
+			t.Errorf("compressed JSON missing taint label: %s", compressed[:min(len(compressed), 200)])
+		}
+	})
+
+	t.Run("no taint label by default", func(t *testing.T) {
+		result := &ExecutionResult{
+			ToolCallID: "call_clean",
+			Success:    true,
+			Result:     "ok",
+		}
+		full := result.ToJSON()
+		// TaintNone is "" and omitempty, so the JSON should not contain taint_label.
+		if strings.Contains(full, "taint_label") {
+			t.Errorf("expected no taint_label in JSON when unset, got: %s", full)
+		}
+	})
 }

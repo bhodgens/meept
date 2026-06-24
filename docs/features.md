@@ -787,6 +787,23 @@ Meept implements multiple layers of security.
 - `NetFetchSink`: Blocks secrets from URLs
 - `AgentMessageSink`: Blocks secrets from cross-agent messages
 
+#### Adversarial Input Defense (NEW - 2026-06-23)
+- **Boundary Markers**: `<<<USER_INPUT>>>`, `<<<TOOL_OUTPUT:{name}>>>` wrappers tell LLM "data, not commands"
+- **Output Sanitization**: Web fetches and file reads scanned for injection patterns before reaching agent
+- **Taint Propagation**: Tool results carry provenance labels (`TaintExternal`, `TaintUserInput`)
+- **Defense in Depth**: 4 overlapping layers ensure protection even if one fails
+
+**Protected Sources:**
+| Source | Boundary | Sanitized | Tainted |
+|--------|----------|-----------|---------|
+| User input | ✅ | ✅ | ⚠️ Future |
+| Web fetch | ✅ | ✅ | ✅ |
+| File read | ✅ | ✅ | ✅ |
+| MCP tools | ⚠️ Phase 5 | ⚠️ Phase 5 | ⚠️ Phase 5 |
+| Memory retrieval | ⚠️ Phase 5 | ⚠️ Phase 5 | ⚠️ Phase 5 |
+
+**Full Documentation:** [Adversarial Input Defense](workflows/adversarial-input-defense.md)
+
 **Configuration:**
 ```toml
 [security]

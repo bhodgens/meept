@@ -6,8 +6,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/caimlas/meept/internal/security/taint"
 
 	_ "modernc.org/sqlite"
 )
@@ -709,5 +712,44 @@ func TestOrchestratorAuditLog_InitDBBadPath(t *testing.T) {
 	}
 	if orch.auditDB != nil {
 		t.Error("auditDB should be nil when init fails")
+	}
+}
+
+// TestRecordToolTaint_NoTracker verifies the method is a safe no-op when
+// the orchestrator has no taint tracker configured.
+func TestRecordToolTaint_NoTracker(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	orch := NewOrchestrator(DefaultOrchestratorConfig(), logger)
+
+	// No taint tracker set — must not panic.
+	orch.RecordToolTaint("call_1", "web_fetch", "payload", taint.TaintExternal)
+}
+
+// TestRecordToolTaint_WithTracker verifies tainted values are stored
+// under the tool-call ID when a tracker is configured.
+func TestRecordToolTaint_WithTracker(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	orch := NewOrchestrator(DefaultOrchestratorConfig(), logger)
+
+	tracker := taint.NewExtendedTracker(logger)
+	orch.SetTaintTracker(tracker)
+
+	orch.RecordToolTaint("call_abc", "web_fetch", "fetched body", taint.TaintExternal)
+
+	tv := tracker.Retrieve("call_abc")
+	if tv == nil {
+		t.Fatal("expected stored taint value, got nil")
+	}
+	if !tv.HasLabel(taint.TaintExternal) {
+		t.Errorf("expected TaintExternal label, got %v", tv.Taints)
+	}
+	if !strings.Contains(tv.Source, "web_fetch") {
+		t.Errorf("expected source to mention tool name, got %q", tv.Source)
+	}
+
+	// TaintNone label should be a no-op.
+	orch.RecordToolTaint("call_none", "file_read", "ignored", taint.TaintNone)
+	if tracker.Retrieve("call_none") != nil {
+		t.Error("expected nil for TaintNone (no storage)")
 	}
 }

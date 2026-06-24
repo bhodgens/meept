@@ -368,6 +368,27 @@ func (o *Orchestrator) CheckWebFetch(url string) (blocked bool, reason string) {
 	return false, ""
 }
 
+// RecordToolTaint stores a tainted tool result value in the taint tracker so
+// that subsequent policy checks (e.g., shell_exec sink) can detect tainted
+// data flowing through the agent loop. The call is a no-op when taint
+// tracking is disabled (no tracker configured) or when the label is empty.
+func (o *Orchestrator) RecordToolTaint(toolCallID, toolName string, value string, label taint.TaintLabel) {
+	if o.taintTracker == nil || label == taint.TaintNone {
+		return
+	}
+	source := toolName
+	if toolCallID != "" {
+		source = toolName + ":" + toolCallID
+	}
+	tv := taint.NewTaintedValue(value, []taint.TaintLabel{label}, source)
+	o.taintTracker.Store(toolCallID, tv)
+	o.logger.Debug("recorded tool taint",
+		"tool", toolName,
+		"tool_call_id", toolCallID,
+		"label", label.String(),
+	)
+}
+
 // WrapUserInput wraps text in user-input boundary markers for prompt injection defense.
 func (o *Orchestrator) WrapUserInput(text string) string {
 	if o.promptGuard == nil {

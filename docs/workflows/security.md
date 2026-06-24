@@ -1,7 +1,11 @@
 # Security Engine
 
 ## Overview
-Meept implements multiple security layers including input sanitization, permission-based tool access, shell command scanning, and audit logging. The security engine protects against prompt injection, data exfiltration, and unauthorized access.
+Meept implements multiple security layers including input sanitization, permission-based tool access, shell command scanning, audit logging, and adversarial input defense. The security engine protects against prompt injection, data exfiltration, and unauthorized access.
+
+**See Also:**
+- [Adversarial Input Defense](adversarial-input-defense.md) - Defense-in-depth protection for web fetches, file reads, MCP tools, and memory retrieval
+- [Taint Tracking](taint-tracking.md) - Lattice-based information flow security
 
 ## Problem
 Autonomous agents require robust security to prevent misuse and protect sensitive data. The security engine addresses:
@@ -32,15 +36,23 @@ Autonomous agents require robust security to prevent misuse and protect sensitiv
 - **Dangerous Pattern Blocking**: Blocks known malicious patterns
 - **Configurable Binary**: Custom tirith binary path support
 
-### Taint Tracking (NEW)
+### Taint Tracking
 - **Lattice-based Propagation**: Tracks data provenance through operations
 - **Taint Labels**: `UserInput`, `Secret`, `Untrusted`, `External`, `Shell`
 - **Sink Enforcement**: Blocks tainted data at sensitive operations
+- **Implementation**: `internal/security/taint/taint.go`
 
-### Evidence-Based Validation (NEW)
+### Evidence-Based Validation
 - **Claim-Evidence Matching**: Verifies claims match evidence types
 - **Ground-Truth Verification**: Filesystem, API, database validation
 - **Validator Coverage**: 14 tool hints with type-specific validators
+
+### Adversarial Input Defense (NEW)
+- **Boundary Markers**: `<<<USER_INPUT>>>`, `<<<TOOL_OUTPUT:{name}>>>` wrappers
+- **Output Sanitization**: Scans tool results for injection patterns
+- **Taint Propagation**: Marks web fetches, file reads with provenance labels
+- **Implementation**: `internal/agent/loop.go`, `internal/tools/builtin/*.go`
+- **Full Documentation**: [Adversarial Input Defense](adversarial-input-defense.md)
 
 ## Configuration
 

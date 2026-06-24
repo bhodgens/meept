@@ -1,7 +1,11 @@
 # Taint Tracking
 
 ## Overview
-Taint tracking implements lattice-based information flow security, tracking data provenance through operations and preventing sensitive data leakage. The system uses taint labels and sink enforcement to protect against data exfiltration.
+Taint tracking implements lattice-based information flow security, tracking data provenance through operations and preventing sensitive data leakage. The system uses taint labels and sink enforcement to protect against data exfiltration and prompt injection.
+
+**See Also:**
+- [Adversarial Input Defense](adversarial-input-defense.md) - How taint tracking integrates with boundary markers and sanitization
+- [Security Engine](security.md) - Overall security architecture
 
 ## Problem
 Unauthorized data flow can lead to security breaches. Taint tracking addresses:

@@ -32,6 +32,20 @@ Agent Request → Tool Registry → Security Check → Tool Execution → Result
 
 Meept ships a default catalog of 21 preconfigured MCP (Model Context Protocol) servers in `config/mcp_servers.json5`. The template is copied to `~/.meept/mcp_servers.json5` on `make install` if no file exists there yet. Each entry is fully configured with the correct command (`npx` or `uvx` as appropriate), environment variables, category, and description.
 
+### MCP Security Considerations
+
+> **Important:** MCP tools are external servers that return arbitrary content. As of 2026-06-23:
+>
+> | Protection | Status | Tracking |
+> |------------|--------|----------|
+> | Boundary marker wrapping | Gap (Phase 5) | `docs/plans/agent-security-gap-closure.md` |
+> | Output sanitization | Gap (Phase 5) | Same as above |
+> | Taint label propagation | Gap (Phase 5) | Same as above |
+>
+> **Until Phase 5 is complete:** Only enable MCP servers you trust. External MCP servers could potentially inject prompts that bypass agent constraints.
+>
+> See [Adversarial Input Defense](adversarial-input-defense.md) for the full security architecture.
+
 ### Default Enabled Set
 
 Only the zero-config servers are enabled by default (no API keys or external services required):

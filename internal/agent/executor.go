@@ -11,6 +11,7 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/code/ast"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
@@ -96,6 +97,10 @@ type ExecutionResult struct {
 	Cached     bool              `json:"cached,omitempty"`    // True if result came from cache
 	Evidence   []models.Evidence `json:"evidence,omitempty"`  // Evidence of tool side-effects
 	Terminate  bool              `json:"terminate,omitempty"` // Advisory: hint that result is final and needs no LLM follow-up
+	// TaintLabel is the provenance taint propagated from ToolResult.
+	// When non-empty, downstream policy checks can apply stricter rules
+	// (e.g., blocking the tainted value from reaching shell_exec).
+	TaintLabel taint.TaintLabel `json:"taint_label,omitempty"`
 }
 
 // ToJSON converts the result to a JSON string.
@@ -124,6 +129,7 @@ func (r *ExecutionResult) ToCompressedJSON(maxTokens int) string {
 		Success:    r.Success,
 		Error:      r.Error,
 		Cached:     r.Cached,
+		TaintLabel: r.TaintLabel,
 	}
 
 	// Handle the result based on type
@@ -580,6 +586,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	// Extract evidence from ToolResult if present
 	var evidence []models.Evidence
 	var terminate bool
+	var label taint.TaintLabel
 	if tr, ok := toolResult.(*tools.ToolResult); ok && tr != nil {
 		if len(tr.Evidence) > 0 {
 			evidence = tr.Evidence
@@ -593,6 +600,8 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 		if tr.Terminate {
 			terminate = true
 		}
+		// Propagate the taint label so downstream policy checks apply.
+		label = tr.TaintLabel
 		// Use the actual result from ToolResult
 		toolResult = tr.Result
 	}
@@ -620,6 +629,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 		Cached:     false, // Fresh result, not from cache
 		Evidence:   evidence,
 		Terminate:  terminate,
+		TaintLabel: label,
 	}
 
 	// Publish tool.execution.complete event after successful execution

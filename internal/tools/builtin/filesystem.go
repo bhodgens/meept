@@ -15,6 +15,7 @@ import (
 
 	"github.com/caimlas/meept/internal/llm"
 	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
@@ -152,6 +153,18 @@ func (t *ReadFileTool) executeRead(args map[string]any, progress func(tools.Prog
 
 	text := string(content)
 
+	// Sanitize output for injection patterns if security orchestrator is available
+	if t.secOrch != nil && t.secOrch.InputSanitizer() != nil {
+		sanitizeResult := t.secOrch.InputSanitizer().Sanitize(text)
+		if sanitizeResult.WasModified || len(sanitizeResult.ThreatsDetected) > 0 {
+			slog.Debug("File content sanitized",
+				"path", resolved,
+				"threats", len(sanitizeResult.ThreatsDetected),
+				"modified", sanitizeResult.WasModified)
+		}
+		text = sanitizeResult.CleanText
+	}
+
 	// Apply line range if requested
 	offset, _ := args["offset"].(float64)
 	limit, _ := args["limit"].(float64)
@@ -273,9 +286,10 @@ func (t *ReadFileTool) executeRead(args map[string]any, progress func(tools.Prog
 	}
 
 	return tools.ToolResult{
-		Success:  true,
-		Result:   text,
-		Evidence: evidence,
+		Success:    true,
+		Result:     text,
+		Evidence:   evidence,
+		TaintLabel: taint.TaintUserInput, // file content carries user-data provenance for tracking
 	}, nil
 }
 

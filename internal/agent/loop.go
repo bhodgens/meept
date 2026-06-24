@@ -1522,12 +1522,17 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	systemPrompt := l.buildSystemPromptWithSkills(ctx, discovered)
 	conv.SetSystemPrompt(systemPrompt)
 
-	// Add user message (sanitized). When multimodal parts are present, attach
-	// them to the ChatMessage so provider serializers emit native image blocks.
+	// Add user message (sanitized + boundary-wrapped). When multimodal parts
+	// are present, attach them to the ChatMessage so provider serializers emit
+	// native image blocks.
+	wrappedMessage := sanitizedMessage
+	if l.securityOrch != nil {
+		wrappedMessage = l.securityOrch.WrapUserInput(sanitizedMessage)
+	}
 	if len(parts) > 0 {
-		conv.AddUserMessageWithParts(sanitizedMessage, parts)
+		conv.AddUserMessageWithParts(wrappedMessage, parts)
 	} else {
-		conv.AddUserMessage(sanitizedMessage)
+		conv.AddUserMessage(wrappedMessage)
 	}
 
 	// Truncate if needed
@@ -1690,8 +1695,12 @@ func (l *AgentLoop) RunWithSkill(ctx context.Context, skill *skills.Skill, input
 	// Set skill body as system prompt
 	conv.SetSystemPrompt(skill.Body)
 
-	// Add user message
-	conv.AddUserMessage(strings.TrimSpace(input))
+	// Add user message (boundary-wrapped for prompt injection defense)
+	skillInput := strings.TrimSpace(input)
+	if l.securityOrch != nil {
+		skillInput = l.securityOrch.WrapUserInput(skillInput)
+	}
+	conv.AddUserMessage(skillInput)
 
 	// Truncate if needed
 	conv.Truncate()
@@ -2421,9 +2430,24 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					}
 				}
 			}
-			// Add tool results to conversation
-			for _, result := range results {
-				conv.AddToolResult(result.ToolCallID, result.ToCompressedJSON(dynamicToolBudget))
+			// Add tool results to conversation with security boundary markers.
+			// Each result corresponds positionally to response.ToolCalls[i].
+			for i, result := range results {
+				output := result.ToCompressedJSON(dynamicToolBudget)
+				toolName := "unknown"
+				if i < len(response.ToolCalls) {
+					toolName = response.ToolCalls[i].Function.Name
+				}
+				if l.securityOrch != nil {
+					output = l.securityOrch.WrapToolOutput(toolName, output)
+					// Propagate taint label into the tracker so downstream
+					// policy checks (e.g., shell_exec sink) can detect tainted
+					// data flowing through the conversation.
+					if result.TaintLabel != "" {
+						l.securityOrch.RecordToolTaint(result.ToolCallID, toolName, output, result.TaintLabel)
+					}
+				}
+				conv.AddToolResult(result.ToolCallID, output)
 			}
 
 			// Publish agent result event
@@ -2885,8 +2909,11 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 		conv.AddAnchorMessage(llm.RoleSystem, "[step-context] Current task execution context - preserve during summarization")
 	}
 
-	// Build user message from task
+	// Build user message from task (boundary-wrapped for prompt injection defense)
 	userMessage := l.buildTaskMessage(t)
+	if l.securityOrch != nil {
+		userMessage = l.securityOrch.WrapUserInput(userMessage)
+	}
 	conv.AddUserMessage(userMessage)
 
 	// Truncate if needed

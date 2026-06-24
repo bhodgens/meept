@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -49,6 +50,12 @@ type ToolResult struct {
 	Err       error             `json:"-"` // Original typed error (when available) so callers can use errors.Is/As
 	Evidence  []models.Evidence `json:"evidence,omitempty"`
 	Terminate bool              `json:"terminate,omitempty"` // Advisory: hint that result is final and needs no LLM follow-up
+	// TaintLabel records the provenance taint of the result payload.
+	// Tools that return data from untrusted sources (web fetches, shell
+	// output, etc.) set this so downstream policy checks can apply
+	// stricter rules. TaintNone (the zero value) means "no taint" and is
+	// the default for tools that don't opt in. See internal/security/taint.
+	TaintLabel taint.TaintLabel `json:"taint_label,omitempty"`
 }
 
 // NewSuccessResult creates a successful tool result.
