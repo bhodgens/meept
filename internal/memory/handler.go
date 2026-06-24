@@ -10,6 +10,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -218,11 +219,25 @@ func (h *Handler) handleRecent(ctx context.Context, msg *models.BusMessage) {
 // sendResults publishes memory results.
 // Each result's content is passed through protectContent before publication
 // so that downstream consumers receive boundary-wrapped, re-sanitized text.
+// When a security orchestrator with taint tracking is wired, each retrieved
+// memory is also recorded in the taint tracker so downstream policy checks
+// (e.g., shell_exec sink) can detect memory-sourced data flowing into
+// sensitive sinks.
 func (h *Handler) sendResults(replyTo string, results []MemoryResult) {
 	// Convert to a simpler format for the response
 	items := make([]map[string]any, len(results))
 	for i, r := range results {
 		protectedContent := h.protectContent(r.Memory.Content, r.Memory.Type)
+
+		// Layer 3: Record taint for downstream policy enforcement.
+		// Retrievable memories are treated as TaintUserInput by default: they
+		// may have been poisoned by past prompt-injection attempts, and policy
+		// checks (shell_exec sink, etc.) should treat them as untrusted until
+		// explicitly declassified.
+		if h.secOrch != nil {
+			h.secOrch.RecordMemoryTaint(r.Memory.ID, string(r.Memory.Type), r.Memory.Content, taint.TaintUserInput)
+		}
+
 		items[i] = map[string]any{
 			"id":              r.Memory.ID,
 			"content":         protectedContent,

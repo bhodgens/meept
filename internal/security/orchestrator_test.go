@@ -813,3 +813,51 @@ func TestRecordUserInput_WithTracker(t *testing.T) {
 	}
 }
 
+// TestRecordMemoryTaint_NoTracker verifies the method is a safe no-op when
+// the orchestrator has no taint tracker configured.
+func TestRecordMemoryTaint_NoTracker(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	orch := NewOrchestrator(DefaultOrchestratorConfig(), logger)
+
+	// No taint tracker set — must not panic.
+	orch.RecordMemoryTaint("mem_1", "episodic", "payload", taint.TaintUserInput)
+}
+
+// TestRecordMemoryTaint_WithTracker verifies tainted values are stored
+// under the memory ID when a tracker is configured.
+func TestRecordMemoryTaint_WithTracker(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	orch := NewOrchestrator(DefaultOrchestratorConfig(), logger)
+
+	tracker := taint.NewExtendedTracker(logger)
+	orch.SetTaintTracker(tracker)
+
+	orch.RecordMemoryTaint("mem_abc", "episodic", "remembered content", taint.TaintUserInput)
+
+	tv := tracker.Retrieve("mem_abc")
+	if tv == nil {
+		t.Fatal("expected stored taint value, got nil")
+	}
+	if !tv.HasLabel(taint.TaintUserInput) {
+		t.Errorf("expected TaintUserInput label, got %v", tv.Taints)
+	}
+	if !strings.Contains(tv.Source, "memory:episodic") {
+		t.Errorf("expected source to contain 'memory:episodic', got %q", tv.Source)
+	}
+	if tv.Value != "remembered content" {
+		t.Errorf("expected value %q, got %q", "remembered content", tv.Value)
+	}
+
+	// TaintNone label should be a no-op.
+	orch.RecordMemoryTaint("mem_none", "task", "ignored", taint.TaintNone)
+	if tracker.Retrieve("mem_none") != nil {
+		t.Error("expected nil for TaintNone (no storage)")
+	}
+
+	// Empty memory ID should fall back to "memory:<type>" key.
+	orch.RecordMemoryTaint("", "task", "fallback key", taint.TaintUserInput)
+	if tracker.Retrieve("memory:task") == nil {
+		t.Error("expected taint stored under fallback key 'memory:task'")
+	}
+}
+

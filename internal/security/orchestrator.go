@@ -406,6 +406,35 @@ func (o *Orchestrator) RecordUserInput(conversationID, input string) {
 	)
 }
 
+// RecordMemoryTaint stores a retrieved memory value in the taint tracker so
+// that subsequent policy checks (e.g., shell_exec sink) can detect
+// memory-sourced data flowing through the agent loop. The memoryID disambiguates
+// individual entries; the memoryType label identifies the subsystem (episodic,
+// task, etc.) and is included in the taint source description. The call is a
+// no-op when taint tracking is disabled (no tracker configured) or when the
+// label is TaintNone.
+//
+// The default label for retrieved memory is TaintUserInput: stored memories may
+// have been poisoned by past prompt-injection attempts and should not flow into
+// sensitive sinks without explicit declassification.
+func (o *Orchestrator) RecordMemoryTaint(memoryID, memoryType, value string, label taint.TaintLabel) {
+	if o.taintTracker == nil || label == taint.TaintNone {
+		return
+	}
+	key := memoryID
+	if key == "" {
+		key = fmt.Sprintf("memory:%s", memoryType)
+	}
+	source := "memory:" + memoryType
+	tv := taint.NewTaintedValue(value, []taint.TaintLabel{label}, source)
+	o.taintTracker.Store(key, tv)
+	o.logger.Debug("recorded memory taint",
+		"memory_id", memoryID,
+		"memory_type", memoryType,
+		"label", label.String(),
+	)
+}
+
 // WrapUserInput wraps text in user-input boundary markers for prompt injection defense.
 func (o *Orchestrator) WrapUserInput(text string) string {
 	if o.promptGuard == nil {

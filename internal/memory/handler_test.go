@@ -9,6 +9,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -384,4 +385,172 @@ func suffix(s string, n int) string {
 		return s
 	}
 	return s[len(s)-n:]
+}
+
+// --- Taint tracking tests -----------------------------------------------
+
+// newTestOrchestratorWithTaint returns a security Orchestrator with a taint
+// tracker wired, so tests can verify taint propagation through memory retrieval.
+func newTestOrchestratorWithTaint(t *testing.T) *intsecurity.Orchestrator {
+	t.Helper()
+	cfg := intsecurity.DefaultOrchestratorConfig()
+	cfg.SanitizeInputs = false
+	cfg.MonitorOutput = false
+	cfg.ScanShellCommands = false
+	cfg.EnableAuditLog = false
+	secOrch := intsecurity.NewOrchestrator(cfg, nil)
+	tracker := taint.NewExtendedTracker(nil)
+	secOrch.SetTaintTracker(tracker)
+	t.Cleanup(secOrch.Close)
+	return secOrch
+}
+
+// TestSendResults_RecordsTaintE2E verifies end-to-end that retrieving a memory
+// records a taint entry that a taint sink check can detect.
+func TestSendResults_RecordsTaintE2E(t *testing.T) {
+	mgr := mustNewManager(t)
+	msgBus := bus.New(nil, testLogger())
+
+	cfg := intsecurity.DefaultOrchestratorConfig()
+	cfg.SanitizeInputs = false
+	cfg.MonitorOutput = false
+	cfg.ScanShellCommands = false
+	cfg.EnableAuditLog = false
+	secOrch := intsecurity.NewOrchestrator(cfg, nil)
+	tracker := taint.NewExtendedTracker(nil)
+	secOrch.SetTaintTracker(tracker)
+	t.Cleanup(secOrch.Close)
+
+	ctx := context.Background()
+	mem := Memory{
+		Content:  "sensitive system configuration",
+		Type:     MemoryTypeTask,
+		Category: "code",
+	}
+	memID, err := mgr.Store(ctx, mem)
+	if err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+
+	h := NewHandlerWithSecurity(mgr, msgBus, secOrch, testLogger())
+	if err := h.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = h.Stop(ctx) }()
+
+	// Query for the stored memory.
+	queryPayload, _ := json.Marshal(map[string]any{
+		"query": "sensitive",
+		"limit": 5,
+	})
+	reqMsg := &models.BusMessage{
+		ID:        "test-taint-e2e-1",
+		Type:      models.MessageTypeRequest,
+		Topic:     "memory.query",
+		Source:    "test",
+		Timestamp: time.Now().UTC(),
+		Payload:   queryPayload,
+	}
+
+	msgBus.Publish("memory.query", reqMsg)
+	resp := subscribeForResult(t, msgBus, "test-taint-e2e-1")
+
+	var body struct {
+		Results []struct {
+			Content string `json:"content"`
+		} `json:"results"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(resp.Payload, &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.Error != "" {
+		t.Fatalf("unexpected error: %s", body.Error)
+	}
+	if len(body.Results) == 0 {
+		t.Fatal("expected at least one result")
+	}
+
+	// Verify the taint tracker has an entry for the memory ID.
+	tv := tracker.Retrieve(memID)
+	if tv == nil {
+		t.Fatalf("expected taint entry for memory ID %q, got nil", memID)
+	}
+	if !tv.HasLabel(taint.TaintUserInput) {
+		t.Errorf("expected TaintUserInput label, got %v", tv.Taints)
+	}
+	if !strings.Contains(tv.Source, "memory:") {
+		t.Errorf("expected source to contain 'memory:', got %q", tv.Source)
+	}
+	if !strings.Contains(tv.Source, string(MemoryTypeTask)) {
+		t.Errorf("expected source to contain memory type %q, got %q", MemoryTypeTask, tv.Source)
+	}
+	if tv.Value != mem.Content {
+		t.Errorf("expected value %q, got %q", mem.Content, tv.Value)
+	}
+
+	// Verify a shell_exec sink check would flag the memory content.
+	violation := tracker.CheckShellCommand(mem.Content)
+	if violation == nil {
+		// CheckShellCommand only flags on suspicious patterns or stored var
+		// references; the memory content itself is benign text. Verify via
+		// CheckSink directly instead.
+		sink := taint.ShellExecSink()
+		v := taint.NewTaintedValue(mem.Content, tv.Taints, tv.Source)
+		violation = tracker.CheckSink(v, sink)
+	}
+	if violation == nil {
+		t.Error("expected shell_exec sink violation for memory-tainted value")
+	}
+}
+
+// TestSendResults_NoTaintWithoutOrchestrator verifies that taint recording is
+// skipped (no panic, no side effects) when no security orchestrator is wired.
+func TestSendResults_NoTaintWithoutOrchestrator(t *testing.T) {
+	mgr := mustNewManager(t)
+	msgBus := bus.New(nil, testLogger())
+
+	ctx := context.Background()
+	mem := Memory{
+		Content:  "benign content",
+		Type:     MemoryTypeEpisodic,
+		Category: "conversation",
+	}
+	if _, err := mgr.Store(ctx, mem); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+
+	h := NewHandler(mgr, msgBus, testLogger())
+	if err := h.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = h.Stop(ctx) }()
+
+	queryPayload, _ := json.Marshal(map[string]any{
+		"query": "benign",
+		"limit": 5,
+	})
+	reqMsg := &models.BusMessage{
+		ID:        "test-no-taint-1",
+		Type:      models.MessageTypeRequest,
+		Topic:     "memory.query",
+		Source:    "test",
+		Timestamp: time.Now().UTC(),
+		Payload:   queryPayload,
+	}
+
+	msgBus.Publish("memory.query", reqMsg)
+
+	resp := subscribeForResult(t, msgBus, "test-no-taint-1")
+
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(resp.Payload, &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.Error != "" {
+		t.Fatalf("unexpected error: %s", body.Error)
+	}
+	// Success: no panic means the nil orchestrator path is safe.
 }
