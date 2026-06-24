@@ -240,7 +240,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		// servers' tools are unregistered.
 		if components.MCPManager != nil {
 			mcpRPCHandler := rpc.NewMCPHandler(components.MCPManager, fullCfg.MCP.ConfigFile)
-			if refresher := newMCPToolRefresher(components.ToolRegistry, components.MCPManager, logger); refresher != nil {
+			if refresher := newMCPToolRefresher(components.ToolRegistry, components.MCPManager, newMCPSanitizer(components.SecurityOrchestrator), logger); refresher != nil {
 				mcpRPCHandler.SetToolRefresher(refresher)
 			}
 			mcpRPCHandler.RegisterMCPMethods(rpcServer)
@@ -1364,7 +1364,7 @@ func (d *Daemon) reloadConfig(ctx context.Context) error {
 		}
 
 		// Register new MCP tools
-		registerMCPTools(d.components.ToolRegistry, d.components.MCPManager, d.logger)
+		registerMCPTools(d.components.ToolRegistry, d.components.MCPManager, newMCPSanitizer(d.components.SecurityOrchestrator), d.logger)
 	}
 
 	// Publish reload event

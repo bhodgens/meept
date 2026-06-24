@@ -249,10 +249,18 @@ func TestHierarchicalSummarization_LevelMetadata(t *testing.T) {
 		t.Errorf("expected summary level 2, got %d", summary.SummaryLevel)
 	}
 
-	// Verify the content contains the level indicator
+	// Verify the content contains the level indicator (now wrapped in
+	// <<<CONTEXT_SUMMARY>>> boundary markers).
 	expectedPrefix := "[Conversation summary level 2]:"
-	if !strings.HasPrefix(summary.Content, expectedPrefix) {
-		t.Errorf("expected summary content to start with %q, got %q", expectedPrefix, summary.Content[:len(expectedPrefix)+20])
+	if !strings.Contains(summary.Content, expectedPrefix) {
+		t.Errorf("expected summary content to contain %q, got %q", expectedPrefix, summary.Content[:min(120, len(summary.Content))])
+	}
+	// Verify boundary markers are present
+	if !strings.HasPrefix(summary.Content, "<<<CONTEXT_SUMMARY") {
+		t.Errorf("expected summary content to start with boundary marker, got %q", summary.Content[:min(60, len(summary.Content))])
+	}
+	if !strings.HasSuffix(summary.Content, "<<<END_CONTEXT_SUMMARY>>>") {
+		t.Errorf("expected summary content to end with end boundary marker, got %q", summary.Content[max(0, len(summary.Content)-40):])
 	}
 }
 
@@ -420,8 +428,15 @@ func TestHierarchicalSummarization_ContentFormat(t *testing.T) {
 	}
 
 	expectedPrefix := "[Conversation summary level 1]:"
-	if !strings.HasPrefix(summary.Content, expectedPrefix) {
-		t.Errorf("expected content to start with %q, got %q", expectedPrefix, summary.Content[:min(50, len(summary.Content))])
+	if !strings.Contains(summary.Content, expectedPrefix) {
+		t.Errorf("expected content to contain %q, got %q", expectedPrefix, summary.Content[:min(100, len(summary.Content))])
+	}
+	// Verify boundary markers wrap the summary
+	if !strings.HasPrefix(summary.Content, "<<<CONTEXT_SUMMARY") {
+		t.Errorf("expected content to start with boundary marker, got %q", summary.Content[:min(60, len(summary.Content))])
+	}
+	if !strings.HasSuffix(summary.Content, "<<<END_CONTEXT_SUMMARY>>>") {
+		t.Errorf("expected content to end with boundary marker, got %q", summary.Content[max(0, len(summary.Content)-40):])
 	}
 
 }

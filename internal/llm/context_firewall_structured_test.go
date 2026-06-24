@@ -412,9 +412,12 @@ func TestStructuredSummarization_IntegrationWithFirewall(t *testing.T) {
 		t.Fatal("expected to find a summary message with SummaryLevel > 0")
 	}
 
-	// The summary content should contain structured data
-	if !strings.HasPrefix(summary.Content, "[Conversation summary level 1]:") {
-		t.Errorf("expected structured level prefix with colon, got: %s", summary.Content[:min(60, len(summary.Content))])
+	// The summary content should contain structured data wrapped in boundary markers
+	if !strings.HasPrefix(summary.Content, "<<<CONTEXT_SUMMARY") {
+		t.Errorf("expected summary to start with boundary marker, got: %s", summary.Content[:min(60, len(summary.Content))])
+	}
+	if !strings.Contains(summary.Content, "[Conversation summary level 1]:") {
+		t.Errorf("expected structured level prefix inside boundary, got: %s", summary.Content[:min(100, len(summary.Content))])
 	}
 	// Should contain file paths from the structured response
 	if !strings.Contains(summary.Content, "internal/storage/sqlite.go") {
@@ -536,8 +539,11 @@ func TestStructuredSummarization_FallbackOnUnstructuredResponse(t *testing.T) {
 		t.Fatal("expected a summary message even with unstructured response")
 	}
 
-	// The content should still have the level prefix
-	if !strings.HasPrefix(summary.Content, "[Conversation summary level 1]") {
-		t.Errorf("expected level prefix even on fallback, got: %s", summary.Content[:min(50, len(summary.Content))])
+	// The content should still have the level prefix, now wrapped in boundary markers
+	if !strings.HasPrefix(summary.Content, "<<<CONTEXT_SUMMARY") {
+		t.Errorf("expected boundary marker prefix even on fallback, got: %s", summary.Content[:min(60, len(summary.Content))])
+	}
+	if !strings.Contains(summary.Content, "[Conversation summary level 1]") {
+		t.Errorf("expected level prefix inside boundary even on fallback, got: %s", summary.Content[:min(100, len(summary.Content))])
 	}
 }

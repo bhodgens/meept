@@ -5,7 +5,11 @@
 // hierarchy where higher-priority tiers shadow lower ones.
 package skills
 
-import "slices"
+import (
+	"slices"
+
+	"github.com/caimlas/meept/internal/security/taint"
+)
 
 // Priority levels for skill discovery (lower is higher priority).
 const (
@@ -101,6 +105,17 @@ func (s *Skill) MatchesTags(tags []string) bool {
 	return true
 }
 
+// UsesExternalLLM returns true if the skill uses an external LLM for inference.
+// Skills always use LLMs for inference, so this returns true for all skills.
+func (s *Skill) UsesExternalLLM() bool {
+	return true // All skills invoke LLMs for inference
+}
+
+// UsesMCP returns true if the skill is configured to use MCP servers.
+func (s *Skill) UsesMCP() bool {
+	return len(s.MCPServers) > 0
+}
+
 // MCPServerConfig describes an MCP server embedded in a skill.
 type MCPServerConfig struct {
 	// Name is a unique identifier for this MCP server within the skill.
@@ -172,4 +187,11 @@ type SkillExecutionResult struct {
 	// MCPServersStarted is true when at least one MCP server was
 	// successfully started for this execution.
 	MCPServersStarted bool `json:"mcp_servers_started"`
+
+	// TaintLabel indicates the trust level of the skill output.
+	// Values: "none" (clean), "untrusted" (external LLM/MCP), "external" (web fetch), etc.
+	TaintLabel taint.TaintLabel `json:"taint_label,omitempty"`
+
+	// WasSanitized is true when the skill output was modified by security sanitization.
+	WasSanitized bool `json:"was_sanitized"`
 }

@@ -61,7 +61,7 @@ func TestMCPToolRefresher_SyncRegistersAndUnregisters(t *testing.T) {
 	manager := mcp.NewManager(quietLogger())
 	t.Cleanup(manager.StopAll)
 
-	refresher := newMCPToolRefresher(registry, manager, quietLogger())
+	refresher := newMCPToolRefresher(registry, manager, nil, quietLogger())
 	if refresher == nil {
 		t.Fatal("expected non-nil refresher")
 	}
@@ -117,12 +117,12 @@ func TestMCPToolRefresher_SyncRegistersAndUnregisters(t *testing.T) {
 // when required dependencies are nil, so callers can pass the result
 // unconditionally to rpc.MCPHandler.SetToolRefresher.
 func TestMCPToolRefresher_NilGuards(t *testing.T) {
-	if newMCPToolRefresher(nil, nil, nil) != nil {
+	if newMCPToolRefresher(nil, nil, nil, nil) != nil {
 		t.Error("expected nil refresher for nil inputs")
 	}
 	// Non-nil manager but nil registry should also return nil.
 	mgr := mcp.NewManager(quietLogger())
-	if newMCPToolRefresher(nil, mgr, nil) != nil {
+	if newMCPToolRefresher(nil, mgr, nil, nil) != nil {
 		t.Error("expected nil refresher for nil registry")
 	}
 }
@@ -133,7 +133,7 @@ func TestMCPToolRefresher_NilGuards(t *testing.T) {
 func TestNewMCPToolRefresher_InternalFieldInit(t *testing.T) {
 	registry := tools.NewRegistry(quietLogger())
 	mgr := mcp.NewManager(quietLogger())
-	r := newMCPToolRefresher(registry, mgr, quietLogger())
+	r := newMCPToolRefresher(registry, mgr, nil, quietLogger())
 	if r == nil {
 		t.Fatal("expected non-nil refresher")
 	}

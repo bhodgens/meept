@@ -20,18 +20,19 @@ import (
 // tools.Registry is mutex-protected; we additionally hold mu to protect
 // the registeredNames set.
 type mcpToolRefresher struct {
-	mu             sync.Mutex
-	registry       *tools.Registry
-	manager        *mcp.Manager
-	logger         *slog.Logger
+	mu              sync.Mutex
+	registry        *tools.Registry
+	manager         *mcp.Manager
+	sanitizer       mcp.Sanitizer
+	logger          *slog.Logger
 	registeredNames map[string]struct{} // tool names we previously registered
 }
 
 // newMCPToolRefresher constructs a refresher. registry and manager must
 // be non-nil; the constructor returns nil otherwise so callers can pass
 // the result unconditionally to rpc.MCPHandler.SetToolRefresher (which
-// nil-guards).
-func newMCPToolRefresher(registry *tools.Registry, manager *mcp.Manager, logger *slog.Logger) *mcpToolRefresher {
+// nil-guards). sanitizer may be nil.
+func newMCPToolRefresher(registry *tools.Registry, manager *mcp.Manager, sanitizer mcp.Sanitizer, logger *slog.Logger) *mcpToolRefresher {
 	if registry == nil || manager == nil {
 		return nil
 	}
@@ -41,6 +42,7 @@ func newMCPToolRefresher(registry *tools.Registry, manager *mcp.Manager, logger 
 	return &mcpToolRefresher{
 		registry:        registry,
 		manager:         manager,
+		sanitizer:       sanitizer,
 		logger:          logger,
 		registeredNames: make(map[string]struct{}),
 	}
@@ -72,6 +74,9 @@ func (r *mcpToolRefresher) SyncMCPTools() error {
 			serverName = name[:idx]
 		}
 		tool := mcp.NewMCPTool(def, r.manager, serverName)
+		if r.sanitizer != nil {
+			tool.SetSanitizer(r.sanitizer)
+		}
 		r.registry.Register(tool)
 		current[name] = struct{}{}
 	}

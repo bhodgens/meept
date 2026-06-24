@@ -956,8 +956,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			"backend", c.MemoryManager.Backend(),
 			"distributed", c.MemoryManager.IsDistributed(),
 		)
-		// Create memory handler to respond to memory.query and memory.recent bus messages
-		c.MemoryHandler = memory.NewHandler(c.MemoryManager, msgBus, logger.With("component", "memory-handler"))
+		// Create memory handler to respond to memory.query and memory.recent bus messages.
+		// Wire security orchestrator for retrieval-time re-sanitization and boundary
+		// marker wrapping (Phase 5 memory retrieval protection).
+		c.MemoryHandler = memory.NewHandlerWithSecurity(c.MemoryManager, msgBus, c.SecurityOrchestrator, logger.With("component", "memory-handler"))
 
 		// Wire prefetch callback to agent loop (Hermes pattern)
 		// This enables background prefetching of memory context at turn completion
@@ -1255,7 +1257,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// active servers but we preserve the existing conditional
 			// behaviour to avoid noise.
 			if started > 0 {
-				registerMCPTools(c.ToolRegistry, c.MCPManager, logger)
+				registerMCPTools(c.ToolRegistry, c.MCPManager, newMCPSanitizer(c.SecurityOrchestrator), logger)
 			}
 
 			// Launch the periodic health monitor using the daemon-lifetime
@@ -3561,9 +3563,12 @@ func registerTeamTools(
 }
 
 // registerMCPTools registers all tools from MCP servers with the tool registry.
+// When sanitizer is non-nil, each MCPTool is configured to scrub result content
+// for injection patterns before it reaches the LLM.
 func registerMCPTools(
 	registry *tools.Registry,
 	mcpManager *mcp.Manager,
+	sanitizer mcp.Sanitizer,
 	logger *slog.Logger,
 ) {
 	if mcpManager == nil {
@@ -3586,10 +3591,31 @@ func registerMCPTools(
 		}
 
 		tool := mcp.NewMCPTool(def, mcpManager, serverName)
+		if sanitizer != nil {
+			tool.SetSanitizer(sanitizer)
+		}
 		registry.Register(tool)
 	}
 
 	logger.Info("Registered MCP tools", "count", len(defs))
+}
+
+// newMCPSanitizer adapts a *intsecurity.Orchestrator to the mcp.Sanitizer
+// interface. Returns nil when orch is nil or has no InputSanitizer, so the
+// caller can pass the result directly to registerMCPTools / SetSanitizer
+// without an additional nil-guard.
+func newMCPSanitizer(orch *intsecurity.Orchestrator) mcp.Sanitizer {
+	if orch == nil || orch.InputSanitizer() == nil {
+		return nil
+	}
+	return mcp.NewSecuritySanitizer(func(text string) mcp.SanitizeResult {
+		r := orch.InputSanitizer().Sanitize(text)
+		return mcp.SanitizeResult{
+			CleanText:       r.CleanText,
+			WasModified:     r.WasModified,
+			ThreatsDetected: len(r.ThreatsDetected),
+		}
+	})
 }
 
 // findDot finds the index of the first dot in a string.

@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/caimlas/meept/internal/llm"
+	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/security/taint"
 )
 
 // isAnthropic checks whether the given ModelConfig points to an Anthropic endpoint.
@@ -76,6 +78,7 @@ type Executor struct {
 	toolMapper            *HermesToolMapper
 	tokenResolver         llm.TokenResolver
 	extraHeaders          map[string]string
+	secOrch               *intsecurity.Orchestrator
 }
 
 // ExecutorOption is a functional option for configuring Executor.
@@ -152,6 +155,18 @@ func WithExecutorExtraHeaders(headers map[string]string) ExecutorOption {
 	return func(e *Executor) {
 		if headers != nil {
 			e.extraHeaders = headers
+		}
+	}
+}
+
+// WithSecurityOrchestrator sets the security orchestrator for the executor.
+// When set, skill outputs are sanitized for credential leakage and other
+// security threats, and taint labels are propagated to execution results.
+// Nil orchestrator is ignored (no security scanning).
+func WithSecurityOrchestrator(orch *intsecurity.Orchestrator) ExecutorOption {
+	return func(e *Executor) {
+		if orch != nil {
+			e.secOrch = orch
 		}
 	}
 }
@@ -299,12 +314,37 @@ func (e *Executor) Execute(ctx context.Context, skill *Skill, input string) (*Sk
 		"tokens", resp.Usage.TotalTokens,
 	)
 
+	// Apply output sanitization and taint labeling
+	content := resp.Content
+	wasSanitized := false
+
+	if e.secOrch != nil && e.secOrch.InputSanitizer() != nil {
+		// Scan output for credential leakage and other threats
+		sanitizeResult := e.secOrch.InputSanitizer().Sanitize(content)
+		wasSanitized = sanitizeResult.WasModified || len(sanitizeResult.ThreatsDetected) > 0
+		if wasSanitized {
+			e.logger.Info("Skill output sanitized",
+				"skill", skill.Name,
+				"threats", len(sanitizeResult.ThreatsDetected),
+			)
+		}
+		content = sanitizeResult.CleanText
+	}
+
+	// Determine taint label based on skill type and execution context
+	taintLabel := taint.TaintNone
+	if skill.UsesExternalLLM() || skill.UsesMCP() {
+		taintLabel = taint.TaintUntrusted
+	}
+
 	result := &SkillExecutionResult{
-		Content:          resp.Content,
-		Model:            resp.Model,
-		PromptTokens:     resp.Usage.PromptTokens,
+		Content:        content,
+		Model:          resp.Model,
+		PromptTokens:   resp.Usage.PromptTokens,
 		CompletionTokens: resp.Usage.CompletionTokens,
-		TotalTokens:      resp.Usage.TotalTokens,
+		TotalTokens:    resp.Usage.TotalTokens,
+		TaintLabel:     taintLabel,
+		WasSanitized:   wasSanitized,
 	}
 
 	if mcpRuntime != nil && mcpRuntime.Started() {
@@ -459,12 +499,36 @@ func (e *Executor) ExecuteWithMessages(
 		}
 	}
 
+	// Apply output sanitization and taint labeling
+	content := resp.Content
+	wasSanitized := false
+
+	if e.secOrch != nil && e.secOrch.InputSanitizer() != nil {
+		sanitizeResult := e.secOrch.InputSanitizer().Sanitize(content)
+		wasSanitized = sanitizeResult.WasModified || len(sanitizeResult.ThreatsDetected) > 0
+		if wasSanitized {
+			e.logger.Info("Skill output sanitized (ExecuteWithMessages)",
+				"skill", skill.Name,
+				"threats", len(sanitizeResult.ThreatsDetected),
+			)
+		}
+		content = sanitizeResult.CleanText
+	}
+
+	// Determine taint label based on skill type and execution context
+	taintLabel := taint.TaintNone
+	if skill.UsesExternalLLM() || skill.UsesMCP() {
+		taintLabel = taint.TaintUntrusted
+	}
+
 	result := &SkillExecutionResult{
-		Content:          resp.Content,
+		Content:          content,
 		Model:            resp.Model,
 		PromptTokens:     resp.Usage.PromptTokens,
 		CompletionTokens: resp.Usage.CompletionTokens,
 		TotalTokens:      resp.Usage.TotalTokens,
+		TaintLabel:       taintLabel,
+		WasSanitized:     wasSanitized,
 	}
 
 	if mcpRuntime != nil && mcpRuntime.Started() {

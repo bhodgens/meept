@@ -464,14 +464,22 @@ done
 		t.Errorf("Expected server 'wrapper', got '%s'", server)
 	}
 
-	// Test execution
+	// Test execution. Execute now returns a *tools.ToolResult carrying
+	// the sanitized content and TaintExternal label.
 	result, err := mcpTool.Execute(ctx, map[string]any{"input": "test"})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	if result != "tool executed" {
-		t.Errorf("Expected 'tool executed', got '%v'", result)
+	tr, ok := result.(*tools.ToolResult)
+	if !ok {
+		t.Fatalf("Expected *tools.ToolResult, got %T", result)
+	}
+	if !tr.Success {
+		t.Errorf("Expected success; got error=%q", tr.Error)
+	}
+	if content, _ := tr.Result.(string); content != "tool executed" {
+		t.Errorf("Expected result 'tool executed', got '%v'", tr.Result)
 	}
 }
 

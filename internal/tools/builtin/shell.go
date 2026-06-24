@@ -311,6 +311,13 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 		truncated = true
 	}
 
+	// Sanitize output for prompt-injection patterns if the security
+	// orchestrator is configured. An attacker who can influence command
+	// output (environment variables, injected files, etc.) could otherwise
+	// smuggle instructions into the agent context.
+	stdoutStr = t.sanitizeOutput(command, stdoutStr)
+	stderrStr = t.sanitizeOutput(command, stderrStr)
+
 	// Build evidence: exit code and output hash
 	evidence := make([]models.Evidence, 0, 2)
 	evidence = append(evidence, models.NewEvidence(
@@ -344,6 +351,27 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 		},
 		Evidence: evidence,
 	}, nil
+}
+
+// sanitizeOutput runs the shell output through the InputSanitizer when a
+// security orchestrator is wired. It returns the (possibly modified) text
+// with prompt-injection patterns neutralised.
+func (t *ShellExecuteTool) sanitizeOutput(command, output string) string {
+	if t.securityOrch == nil {
+		return output
+	}
+	sanitizer := t.securityOrch.InputSanitizer()
+	if sanitizer == nil {
+		return output
+	}
+	result := sanitizer.Sanitize(output)
+	if result.WasModified || len(result.ThreatsDetected) > 0 {
+		slog.Debug("shell output sanitized",
+			"command", command,
+			"threats", len(result.ThreatsDetected),
+			"modified", result.WasModified)
+	}
+	return result.CleanText
 }
 
 // ExecuteStreaming implements tools.StreamingTool. It runs the shell command
@@ -473,6 +501,10 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 		stderrStr = stderrStr[:MaxOutputSize] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(stderrStr))
 		truncated = true
 	}
+
+	// Sanitize output for prompt-injection patterns (same as Execute).
+	stdoutStr = t.sanitizeOutput(command, stdoutStr)
+	stderrStr = t.sanitizeOutput(command, stderrStr)
 
 	// Emit completion progress with output summary
 	outputSummary := ""
