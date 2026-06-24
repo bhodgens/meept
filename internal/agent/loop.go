@@ -355,6 +355,10 @@ type AgentConfig struct {
 	SummaryLevelThreshold int
 	// Compaction holds context compaction settings for the agent loop.
 	Compaction CompactionAgentConfig
+	// OverflowStrategy controls what happens when context hits the hard limit.
+	// Valid values: "drop", "summarize", "restart". Default: "restart".
+	// Threaded into ContextFirewallConfig at firewall construction time.
+	OverflowStrategy string
 }
 
 // CompactionAgentConfig holds per-agent compaction settings.
@@ -1196,6 +1200,7 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 				HierarchicalSummarization: loop.config.HierarchicalSummarization,
 				MaxSummaryLevel:           loop.config.MaxSummaryLevel,
 				SummaryLevelThreshold:     loop.config.SummaryLevelThreshold,
+				OverflowStrategy:          loop.config.OverflowStrategy,
 			},
 			nil, // summaryModel - uses inner by default
 			loop.logger,
@@ -1217,7 +1222,7 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 			}
 			if compactorModel != nil {
 				compactor := llm.NewContextCompactor(compactorCfg, compactorModel, tokenizer, loop.logger)
-				firewall.SetCompactor(compactor)
+				firewall.SetCompactor(compactor, loop.config.Compaction.TriggerRatio)
 				loop.logger.Info("context compaction enabled",
 					"summary_format", loop.config.Compaction.SummaryFormat,
 					"trigger_ratio", loop.config.Compaction.TriggerRatio,
@@ -1323,6 +1328,26 @@ func (l *AgentLoop) SetContextFirewallConfig(fw config.LLMContextFirewallConfig)
 	l.config.HierarchicalSummarization = fw.HierarchicalSummarization
 	l.config.MaxSummaryLevel = fw.MaxSummaryLevel
 	l.config.SummaryLevelThreshold = fw.SummaryLevelThreshold
+	l.config.OverflowStrategy = fw.OverflowStrategy
+}
+
+// SetCompactionConfig wires compaction settings from the user-facing config
+// schema into the agent loop config. This bridges the top-level `compaction`
+// config block to the agent loop so the ContextCompactor actually gets
+// created during firewall construction.
+func (l *AgentLoop) SetCompactionConfig(cfg config.CompactionConfig) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.config.Compaction = CompactionAgentConfig{
+		Enabled:           cfg.Enabled,
+		ReserveTokens:     cfg.ReserveTokens,
+		KeepRecentTokens:  cfg.KeepRecentTokens,
+		MaxResponseTokens: cfg.MaxResponseTokens,
+		SummaryFormat:     cfg.SummaryFormat,
+		TrackFileOps:      cfg.TrackFileOps,
+		TimeoutSeconds:    cfg.TimeoutSeconds,
+		TriggerRatio:      cfg.TriggerRatio,
+	}
 }
 
 // FirewallStats returns a map snapshot of the context firewall counters.

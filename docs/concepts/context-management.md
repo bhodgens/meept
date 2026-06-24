@@ -16,7 +16,7 @@ Meept uses three layers of context management, triggered at increasing utilizati
 |-------|----------|---------|---------|
 | 1 | LLM-based compaction | ~60% utilization | Primary: summarize old messages into structured summary |
 | 2 | Proactive compressor | ~70% utilization | Safety net: multi-stage truncation by importance |
-| 3 | Hard limit drop | ~80% utilization | Last resort: keep only system prompt + last messages |
+| 3 | Overflow strategy | ~80% utilization | Final safety valve: restart, drop, or summarize |
 
 Each layer runs only if the previous layer failed to bring utilization below its threshold. This means most context pressure is handled by compaction (which preserves knowledge), with fallback strategies available if compaction fails or is insufficient.
 
@@ -121,9 +121,38 @@ The `ContextCompressor` implements multi-stage compression based on utilization 
 
 When a compactor is available, stage 2 delegates to it. Otherwise it falls back to the legacy `summarizeWithLLM` or tail-keep truncation.
 
-## Layer 3: Hard Limit Drop
+## Layer 3: Overflow Strategy
 
-When utilization exceeds the hard limit (default 80%), the firewall drops all old context, keeping only system messages and the last 2 non-system messages. This is a safety valve that ensures the LLM call can proceed even if compaction and compression both failed.
+When utilization exceeds the hard limit (default 80%), the firewall applies the configured overflow strategy. Three strategies are available:
+
+### Overflow Strategies
+
+| Strategy | Behavior | Use case |
+|----------|----------|----------|
+| `"restart"` (default) | Summarize the full conversation into a single handoff document, then replace context with `[system_msgs, summary_msg, last_user_msg]`. The agent gets a clean restart with accumulated knowledge preserved. | Long-running sessions where context must be preserved coherently |
+| `"drop"` | Keep system messages + last N non-system messages, discarding everything else. Fast but loses knowledge. | Emergency fallback; maximum speed |
+| `"summarize"` | Use the legacy `summarizeOldHistory` path (partial summarization of old messages). | Backward-compatible behavior |
+
+#### Restart Flow
+
+When `overflow_strategy == "restart"` and utilization >= hard limit:
+
+1. Separate system messages from conversation messages
+2. Serialize all non-system messages into conversation text (including tool calls and tool results)
+3. Call the summary model with the `handoffCompactionPrompt` (structured handoff format)
+4. Build restart context: `[system_msgs..., summary_system_msg, last_user_msg]`
+5. If summarization fails, fall back to `dropOldContext` (graceful degradation)
+6. Log the restart event with token counts before/after
+
+The summary message uses `RoleSystem` with a `[Context Restart]` prefix. The last user message is preserved verbatim so the agent can continue the current turn.
+
+The restart counter (`restart_events` in `FirewallStats`) tracks how many times the restart strategy has been applied.
+
+`drop_context_on_hard_limit` only applies when `overflow_strategy` is `"drop"`. When `"restart"`, the context is always replaced. When `"summarize"`, the existing `summarizeOldHistory` path runs regardless of `drop_context_on_hard_limit`.
+
+### Hard Limit Drop (legacy)
+
+When `overflow_strategy == "drop"`, the firewall drops all old context, keeping only system messages and the last few non-system messages (preserving tool-call/tool-result pairing). This is the original behavior before the overflow strategy selector was introduced.
 
 ## Configuration
 
@@ -132,7 +161,7 @@ Compaction is configured in `meept.json5` under the `compaction` section:
 ```json5
 {
   compaction: {
-    enabled: false,                  // Master switch (disabled by default)
+    enabled: true,                   // Master switch (enabled by default)
     model: "",                       // Compaction model ref (empty = small_model or working model)
     reserve_tokens: 16384,           // Tokens reserved for response after compaction
     keep_recent_tokens: 20000,       // Recent tokens to keep verbatim (not summarized)
@@ -156,7 +185,20 @@ Compaction is configured in `meept.json5` under the `compaction` section:
 - **`track_file_ops`**: When true, maintains cumulative file operation sets across compaction events.
 - **`timeout_seconds`**: If the compaction LLM call exceeds this duration, it is skipped and fallback truncation runs instead.
 
-The context firewall configuration (under `llm.context_firewall`) controls layers 2 and 3, including the proactive compression stages and hard limit behavior.
+The context firewall configuration (under `llm.context_firewall`) controls layers 2 and 3, including the proactive compression stages, overflow strategy, and hard limit behavior. The `overflow_strategy` field selects between `"restart"` (default), `"drop"`, and `"summarize"`.
+
+```json5
+{
+  llm: {
+    context_firewall: {
+      enabled: true,
+      hard_limit: 0.80,              // Trigger overflow strategy at 80% utilization
+      overflow_strategy: "restart",  // "drop" | "summarize" | "restart"
+      // ... other fields ...
+    },
+  },
+}
+```
 
 ## Observability
 
@@ -187,7 +229,7 @@ The proactive compressor tracks its own statistics via `CompressionStats`:
 |------|---------|
 | `internal/llm/context_compactor.go` | `ContextCompactor` -- cut point algorithm, serialization, structured summarization, iterative updates, file tracking |
 | `internal/llm/context_compressor.go` | `ContextCompressor` -- multi-stage compression pipeline (layer 2) |
-| `internal/llm/context_firewall.go` | `ContextFirewall` -- orchestrates all three layers, budget enforcement |
+| `internal/llm/context_firewall.go` | `ContextFirewall` -- orchestrates all three layers, overflow strategy (restart/drop/summarize), budget enforcement |
 | `internal/config/schema.go` | `CompactionConfig` -- configuration structure |
 | `config/meept.json5` | Configuration template with compaction section |
 | `internal/agent/loop.go` | Wires compactor into the agent loop, resolves compaction model |

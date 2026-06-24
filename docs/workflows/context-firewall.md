@@ -21,7 +21,10 @@ The firewall applies context reduction in order of increasing severity:
 
 2. **Proactive compression** (~70% utilization): Multi-stage compression with importance-based message prioritization. Stage 2 delegates to the compactor when available; otherwise uses legacy LLM summarization or tail-keep truncation.
 
-3. **Hard limit drop** (~80% utilization): Last resort that keeps only system messages and the last 2 non-system messages.
+3. **Overflow strategy** (~80% utilization): Final safety valve. The configured `overflow_strategy` determines behavior:
+   - `"restart"` (default): Summarize the full conversation into a handoff document, replace context with `[system_msgs, summary, last_user_msg]`
+   - `"drop"`: Keep only system messages and last few non-system messages (legacy behavior)
+   - `"summarize"`: Use legacy partial summarization path
 
 ### Compaction (Layer 1)
 
@@ -62,7 +65,7 @@ When `compaction.enabled` is true and utilization exceeds `trigger_ratio`, the `
 ```json5
 {
   compaction: {
-    enabled: false,                  // Master switch
+    enabled: true,                   // Master switch (enabled by default)
     model: "",                       // Compaction model (empty = small_model or working model)
     reserve_tokens: 16384,           // Tokens reserved for response
     keep_recent_tokens: 20000,       // Recent tokens to keep verbatim
@@ -86,7 +89,8 @@ When `compaction.enabled` is true and utilization exceeds `trigger_ratio`, the `
       summarize_history: true,
       drop_context_on_hard_limit: true,
       wrap_up_threshold: 0.50,       // Warn at 50% utilization
-      hard_limit: 0.80,              // Drop at 80% utilization
+      hard_limit: 0.80,              // Trigger overflow strategy at 80% utilization
+      overflow_strategy: "restart",  // "drop" | "summarize" | "restart" (default: "restart")
       proactive_compression: true,   // Enable multi-stage compressor
       hierarchical_summarization: true,
       max_summary_level: 3,

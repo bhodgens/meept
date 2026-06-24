@@ -813,6 +813,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	c.AgentLoop = agent.NewAgentLoop(agentOpts...)
 	// Wire context firewall settings from LLM config
 	c.AgentLoop.SetContextFirewallConfig(cfg.LLM.ContextFirewall)
+	c.AgentLoop.SetCompactionConfig(cfg.Compaction)
 
 	// Note: RepoMap generator wiring to AgentLoop is deferred to after
 	// RepoMapGen creation (see below). The scheduler is also wired there.

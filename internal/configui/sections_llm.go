@@ -39,6 +39,7 @@ func buildLLMFields() []Field {
 				NewFloatField("llm.context_firewall.wrap_up_threshold", "wrap up threshold", cf.WrapUpThreshold),
 				NewFloatField("llm.context_firewall.hard_limit", "hard limit", cf.HardLimit),
 				NewToggleField("llm.context_firewall.drop_context_on_hard_limit", "drop on hard limit", cf.DropContextOnHardLimit),
+			NewTextField("llm.context_firewall.overflow_strategy", "overflow strategy (drop|summarize|restart)", cf.OverflowStrategy),
 				NewToggleField("llm.context_firewall.proactive_compression", "proactive compression", cf.ProactiveCompression),
 				NewNumberField("llm.context_firewall.model_context_limit", "model context limit", cf.ModelContextLimit),
 				NewToggleField("llm.context_firewall.hierarchical_summarization", "hierarchical summarization", cf.HierarchicalSummarization),

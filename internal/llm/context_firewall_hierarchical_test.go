@@ -71,6 +71,7 @@ func TestHierarchicalSummarization_Disabled(t *testing.T) {
 	cfg := ContextFirewallConfig{
 		Enabled:                   true,
 		SummarizeHistory:          true,
+		OverflowStrategy:        "summarize",
 		DropContextOnHardLimit:    false,
 		HardLimit:                 0.30,
 		WrapUpThreshold:           0.10,
@@ -113,6 +114,7 @@ func TestHierarchicalSummarization_RecursesWhenSummaryExceedsThreshold(t *testin
 	cfg := ContextFirewallConfig{
 		Enabled:                   true,
 		SummarizeHistory:          true,
+		OverflowStrategy:        "summarize",
 		DropContextOnHardLimit:    false,
 		HardLimit:                 0.30,
 		WrapUpThreshold:           0.10,
@@ -157,6 +159,7 @@ func TestHierarchicalSummarization_MaxLevelRespected(t *testing.T) {
 	cfg := ContextFirewallConfig{
 		Enabled:                   true,
 		SummarizeHistory:          true,
+		OverflowStrategy:        "summarize",
 		DropContextOnHardLimit:    false,
 		HardLimit:                 0.30,
 		WrapUpThreshold:           0.10,
@@ -199,6 +202,7 @@ func TestHierarchicalSummarization_LevelMetadata(t *testing.T) {
 	cfg := ContextFirewallConfig{
 		Enabled:                   true,
 		SummarizeHistory:          true,
+		OverflowStrategy:        "summarize",
 		DropContextOnHardLimit:    false,
 		HardLimit:                 0.30,
 		WrapUpThreshold:           0.10,
@@ -270,6 +274,7 @@ func TestHierarchicalSummarization_SummaryBelowThresholdNoRecursion(t *testing.T
 	cfg := ContextFirewallConfig{
 		Enabled:                   true,
 		SummarizeHistory:          true,
+		OverflowStrategy:        "summarize",
 		DropContextOnHardLimit:    false,
 		HardLimit:                 0.30,
 		WrapUpThreshold:           0.10,
@@ -331,6 +336,7 @@ func TestHierarchicalSummarization_SummaryLevelOnDirectSummarizeWithLevel(t *tes
 	cfg := ContextFirewallConfig{
 		Enabled:                   true,
 		SummarizeHistory:          true,
+		OverflowStrategy:        "summarize",
 		DropContextOnHardLimit:    false,
 		HierarchicalSummarization: true,
 		MaxSummaryLevel:           3,
@@ -385,6 +391,7 @@ func TestHierarchicalSummarization_ContentFormat(t *testing.T) {
 	cfg := ContextFirewallConfig{
 		Enabled:                   true,
 		SummarizeHistory:          true,
+		OverflowStrategy:        "summarize",
 		DropContextOnHardLimit:    false,
 		HierarchicalSummarization: false, // disabled -- single level
 		MaxSummaryLevel:           3,

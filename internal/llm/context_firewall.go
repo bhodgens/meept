@@ -250,6 +250,10 @@ type ContextFirewallConfig struct {
 	// SummaryLevelThreshold is the token count at which a summary is
 	// re-summarized at the next level (default 500).
 	SummaryLevelThreshold int
+	// OverflowStrategy controls what happens when context hits the hard limit.
+	// Valid values: "drop" (keep system + last N), "summarize" (legacy partial),
+	// "restart" (summarize full conversation, fresh context). Default: "restart".
+	OverflowStrategy string
 }
 
 // ContextFirewall wraps a Chatter and enforces context budgets.
@@ -277,6 +281,7 @@ type ContextFirewall struct {
 	compactionEvents      atomic.Uint64
 	compactionFallbacks   atomic.Uint64
 	compactionTokensSaved atomic.Uint64
+	restartEvents         atomic.Uint64
 }
 
 // FirewallStats is a snapshot of firewall counters including compression stats.
@@ -297,6 +302,8 @@ type FirewallStats struct {
 	CompactionEvents      uint64
 	CompactionFallbacks   uint64
 	CompactionTokensSaved uint64
+	// Restart stats (overflow strategy: restart)
+	RestartEvents uint64
 }
 
 // Stats returns a snapshot of firewall counters. When proactive compression
@@ -309,6 +316,7 @@ func (f *ContextFirewall) Stats() FirewallStats {
 		CompactionEvents:      f.compactionEvents.Load(),
 		CompactionFallbacks:   f.compactionFallbacks.Load(),
 		CompactionTokensSaved: f.compactionTokensSaved.Load(),
+		RestartEvents:         f.restartEvents.Load(),
 	}
 
 	if f.compressor != nil {
@@ -386,6 +394,9 @@ func NewContextFirewall(
 	}
 	if cfg.SummaryLevelThreshold <= 0 {
 		cfg.SummaryLevelThreshold = 500
+	}
+	if cfg.OverflowStrategy == "" {
+		cfg.OverflowStrategy = "restart"
 	}
 
 	if summaryModel == nil {
@@ -614,21 +625,48 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 		}
 	}
 
-	// Check Hard Limit first - may force context drop
+	// Check Hard Limit first - dispatch on overflow strategy.
 	if utilization >= f.config.HardLimit {
-		if f.config.DropContextOnHardLimit {
-			f.logger.Warn("context exceeded hard limit, dropping old context",
+		switch f.config.OverflowStrategy {
+		case "restart":
+			f.logger.Info("context exceeded hard limit, applying restart strategy",
 				"utilization", utilization,
 				"hard_limit", f.config.HardLimit,
 			)
-			result = f.dropOldContext(result)
+			result = f.summarizeAndRestart(ctx, result)
 			currentTokens = f.countTokens(result)
 			utilization = float64(currentTokens) / float64(f.model.ContextLimit)
-		} else {
-			f.logger.Warn("context exceeded hard limit but DropContextOnHardLimit is disabled",
+		case "summarize":
+			f.logger.Info("context exceeded hard limit, summarize strategy active",
 				"utilization", utilization,
 				"hard_limit", f.config.HardLimit,
 			)
+			// The summarizeOldHistory block below will handle it if
+			// SummarizeHistory is true. If not, fall through to drop.
+			if !f.config.SummarizeHistory && f.config.DropContextOnHardLimit {
+				result = f.dropOldContext(result)
+				currentTokens = f.countTokens(result)
+				utilization = float64(currentTokens) / float64(f.model.ContextLimit)
+			}
+		case "drop":
+			fallthrough
+		default:
+			// "drop" or unknown values: existing dropOldContext behavior.
+			if f.config.DropContextOnHardLimit {
+				f.logger.Warn("context exceeded hard limit, dropping old context",
+					"utilization", utilization,
+					"hard_limit", f.config.HardLimit,
+					"overflow_strategy", f.config.OverflowStrategy,
+				)
+				result = f.dropOldContext(result)
+				currentTokens = f.countTokens(result)
+				utilization = float64(currentTokens) / float64(f.model.ContextLimit)
+			} else {
+				f.logger.Warn("context exceeded hard limit but DropContextOnHardLimit is disabled",
+					"utilization", utilization,
+					"hard_limit", f.config.HardLimit,
+				)
+			}
 		}
 	}
 
@@ -691,6 +729,103 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 	}
 
 	return result
+}
+
+// serializeForRestart flattens non-system messages into conversation text for
+// the restart summary LLM call. The format mirrors ContextCompactor.serializeMessages
+// but is inlined here to keep the firewall self-contained.
+func (f *ContextFirewall) serializeForRestart(messages []ChatMessage) string {
+	if len(messages) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for _, msg := range messages {
+		switch msg.Role {
+		case RoleUser:
+			fmt.Fprintf(&sb, "[User]: %s\n", msg.Content)
+		case RoleAssistant:
+			fmt.Fprintf(&sb, "[Assistant]: %s\n", msg.Content)
+			for _, tc := range msg.ToolCalls {
+				fmt.Fprintf(&sb, "  [Tool Call]: %s(%s)\n", tc.Function.Name, tc.Function.Arguments)
+			}
+		case RoleTool:
+			content := msg.Content
+			if len(content) > 500 {
+				content = content[:500] + "..."
+			}
+			fmt.Fprintf(&sb, "  [Tool Result]: %s\n", content)
+		}
+	}
+	return sb.String()
+}
+
+// summarizeAndRestart produces a fresh context by summarizing the full
+// conversation and replacing it with [system_msgs, summary_msg, last_user_msg].
+// On LLM failure it falls back to dropOldContext.
+func (f *ContextFirewall) summarizeAndRestart(ctx context.Context, messages []ChatMessage) []ChatMessage {
+	// Separate system and non-system messages.
+	var systemMsgs, nonSystem []ChatMessage
+	for _, msg := range messages {
+		if msg.Role == RoleSystem {
+			systemMsgs = append(systemMsgs, msg)
+		} else {
+			nonSystem = append(nonSystem, msg)
+		}
+	}
+
+	// Not enough conversation to warrant a restart.
+	if len(nonSystem) < 3 {
+		return messages
+	}
+
+	tokensBefore := f.countTokens(messages)
+
+	// Serialize the full conversation for the summary model.
+	conversationText := f.serializeForRestart(nonSystem)
+	if conversationText == "" {
+		return messages
+	}
+
+	// Call the summary model with the handoff compaction prompt.
+	resp, err := f.summaryModel.Chat(ctx, []ChatMessage{
+		{Role: RoleUser, Content: fmt.Sprintf(handoffCompactionPrompt, conversationText)},
+	})
+	if err != nil {
+		f.summarizationFailures.Add(1)
+		f.logger.Warn("restart summarization failed, falling back to dropOldContext",
+			"error", err,
+			"summarization_failures_total", f.summarizationFailures.Load(),
+		)
+		return f.dropOldContext(messages)
+	}
+
+	// Build the restart context: [system_msgs..., summary_system_msg, last_user_msg].
+	summaryMsg := ChatMessage{
+		Role:    RoleSystem,
+		Content: "[Context Restart] " + resp.Content,
+	}
+
+	restart := make([]ChatMessage, 0, len(systemMsgs)+2)
+	restart = append(restart, systemMsgs...)
+	restart = append(restart, summaryMsg)
+
+	// Find the last user message by walking backward.
+	for i := len(nonSystem) - 1; i >= 0; i-- {
+		if nonSystem[i].Role == RoleUser {
+			restart = append(restart, nonSystem[i])
+			break
+		}
+	}
+
+	tokensAfter := f.countTokens(restart)
+	f.restartEvents.Add(1)
+	f.logger.Info("context restart applied",
+		"tokens_before", tokensBefore,
+		"tokens_after", tokensAfter,
+		"restart_events_total", f.restartEvents.Load(),
+	)
+
+	return restart
 }
 
 // dropOldContext removes old messages, keeping only system prompt and last 2 messages.

@@ -98,6 +98,7 @@
       "hierarchical_summarization": false,
       "max_summary_level": 3,           // Max recursion depth for re-summarization
       "summary_level_threshold": 500,   // Token threshold to trigger re-summarization
+      "overflow_strategy": "restart",   // "drop" | "summarize" | "restart" (default: "restart")
     },
     // HTTP-level metrics collection
     "metrics": {
@@ -702,7 +703,7 @@
 
   // LLM-based context compaction (preserves knowledge instead of discarding messages)
   "compaction": {
-    "enabled": false,                  // Master switch (disabled by default)
+    "enabled": true,                   // Master switch (enabled by default)
     "model": "",                      // Compaction model ref (empty = small_model, then working model)
     "reserve_tokens": 16384,           // Tokens reserved for response after compaction
     "keep_recent_tokens": 20000,       // Recent tokens to keep verbatim

@@ -506,6 +506,10 @@ type LLMContextFirewallConfig struct {
 	// SummaryLevelThreshold is the token count at which a summary is
 	// re-summarized at the next level (default 500).
 	SummaryLevelThreshold int `json:"summary_level_threshold" toml:"summary_level_threshold"`
+	// OverflowStrategy controls what happens when context hits the hard limit.
+	// Valid values: "drop" (keep system + last N), "summarize" (legacy partial),
+	// "restart" (summarize full conversation, fresh context). Default: "restart".
+	OverflowStrategy string `json:"overflow_strategy" toml:"overflow_strategy"`
 }
 
 // LLMMetricsConfig configures HTTP-level metrics collection.
@@ -1420,6 +1424,7 @@ func DefaultConfig() *Config {
 				ProactiveCompression:       false,
 				MaxSummaryLevel:            3,
 				SummaryLevelThreshold:      500,
+				OverflowStrategy:           "restart",
 			},
 			Metrics: LLMMetricsConfig{
 				Enabled:             true,
