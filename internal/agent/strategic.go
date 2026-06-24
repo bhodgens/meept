@@ -3,18 +3,30 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
+)
+
+// Sentinel errors for ConductInterview failure paths. Callers use errors.Is
+// to distinguish "no interview needed" from infrastructure failures.
+var (
+	ErrInterviewNotNeeded      = errors.New("interview not needed: ambiguity below threshold or no analysis")
+	ErrInterviewNoRegistry     = errors.New("interview skipped: agent registry not available")
+	ErrInterviewPlannerMissing = errors.New("interview skipped: planner agent not available")
+	ErrInterviewGenerationFail = errors.New("interview skipped: LLM question generation failed")
 )
 
 // PlanRequest is the input to the strategic planner.
@@ -100,7 +112,7 @@ Output ONLY valid JSON in this exact format (no markdown, no explanation):
 }
 
 The "depends_on" field uses 0-based step indices. Steps with empty depends_on can run in parallel.
-Keep the plan to %d steps maximum. Be specific and actionable.
+HARD CONSTRAINT: You MUST output AT MOST %d steps. Do not exceed this limit. Outputting more than %d steps is a failure. Be specific and actionable.
 
 %s
 
@@ -115,9 +127,15 @@ type StrategicPlanner struct {
 	bus         *bus.MessageBus
 	logger      *slog.Logger
 	pairManager *PairManager
+	routing     *RoutingTable
 
-	maxPlanSteps   int
-	plannerTimeout time.Duration
+	maxPlanSteps          int
+	plannerTimeout        time.Duration
+	approvalStepThreshold int
+	simpleInputMaxChars   int
+	pairInputMinChars     int
+	interviewAmbiguity    float64
+	metricsStore          *metrics.Store
 }
 
 // StrategicPlannerConfig holds configuration for the strategic planner.
@@ -128,8 +146,20 @@ type StrategicPlannerConfig struct {
 	Bus            *bus.MessageBus
 	Logger         *slog.Logger
 	PairManager    *PairManager
+	Routing        *RoutingTable
 	MaxPlanSteps   int
 	PlannerTimeout time.Duration
+	// ApprovalStepThreshold is the minimum number of planned steps that
+	// triggers the approval gate (even without an interview). Defaults to 5.
+	ApprovalStepThreshold int
+	// SimpleInputMaxChars is the threshold below which a request is
+	// considered "simple" and may skip LLM decomposition. Defaults to 100.
+	SimpleInputMaxChars int
+	// PairInputMinChars is the threshold above which code/debug requests
+	// are routed to pair sessions. Defaults to 200.
+	PairInputMinChars int
+	// MetricsStore, when non-nil, receives planner outcome metrics.
+	MetricsStore *metrics.Store
 }
 
 // NewStrategicPlanner creates a new strategic planner.
@@ -143,16 +173,34 @@ func NewStrategicPlanner(cfg StrategicPlannerConfig) *StrategicPlanner {
 	if cfg.PlannerTimeout <= 0 {
 		cfg.PlannerTimeout = 120 * time.Second
 	}
+	if cfg.ApprovalStepThreshold <= 0 {
+		cfg.ApprovalStepThreshold = 5
+	}
+	if cfg.SimpleInputMaxChars <= 0 {
+		cfg.SimpleInputMaxChars = 100
+	}
+	if cfg.PairInputMinChars <= 0 {
+		cfg.PairInputMinChars = 200
+	}
+	if cfg.Routing == nil {
+		cfg.Routing = NewDefaultRoutingTable()
+	}
 
 	return &StrategicPlanner{
-		registry:       cfg.Registry,
-		taskStore:      cfg.TaskStore,
-		stepStore:      cfg.StepStore,
-		bus:            cfg.Bus,
-		logger:         cfg.Logger,
-		pairManager:    cfg.PairManager,
-		maxPlanSteps:   cfg.MaxPlanSteps,
-		plannerTimeout: cfg.PlannerTimeout,
+		registry:              cfg.Registry,
+		taskStore:             cfg.TaskStore,
+		stepStore:             cfg.StepStore,
+		bus:                   cfg.Bus,
+		logger:                cfg.Logger,
+		pairManager:           cfg.PairManager,
+		routing:               cfg.Routing,
+		maxPlanSteps:          cfg.MaxPlanSteps,
+		plannerTimeout:        cfg.PlannerTimeout,
+		approvalStepThreshold: cfg.ApprovalStepThreshold,
+		simpleInputMaxChars:   cfg.SimpleInputMaxChars,
+		pairInputMinChars:     cfg.PairInputMinChars,
+		interviewAmbiguity:    interviewAmbiguityThreshold,
+		metricsStore:          cfg.MetricsStore,
 	}
 }
 
@@ -177,15 +225,19 @@ func (sp *StrategicPlanner) ConductInterview(ctx context.Context, req PlanReques
 
 	// Skip interview if no true analysis or ambiguity is below threshold.
 	if req.TrueAnalysis == nil {
-		return nil, nil
+		return nil, ErrInterviewNotNeeded
 	}
-	if req.TrueAnalysis.Ambiguity < interviewAmbiguityThreshold && req.TrueAnalysis.Scope != "broad" {
+	ambiguityThreshold := sp.interviewAmbiguity
+	if ambiguityThreshold == 0 {
+		ambiguityThreshold = interviewAmbiguityThreshold
+	}
+	if req.TrueAnalysis.Ambiguity < ambiguityThreshold && req.TrueAnalysis.Scope != "broad" {
 		sp.logger.Debug("Skipping interview: low ambiguity",
 			"task_id", req.TaskID,
 			"ambiguity", req.TrueAnalysis.Ambiguity,
 			"scope", req.TrueAnalysis.Scope,
 		)
-		return nil, nil
+		return nil, ErrInterviewNotNeeded
 	}
 
 	// Need to generate interview questions. Get the planner agent.
@@ -193,7 +245,7 @@ func (sp *StrategicPlanner) ConductInterview(ctx context.Context, req PlanReques
 		sp.logger.Warn("Agent registry not available for interview, skipping",
 			"task_id", req.TaskID,
 		)
-		return nil, nil
+		return nil, ErrInterviewNoRegistry
 	}
 	plannerLoop, err := sp.registry.Get(config.AgentIDPlanner)
 	if err != nil {
@@ -201,7 +253,7 @@ func (sp *StrategicPlanner) ConductInterview(ctx context.Context, req PlanReques
 			"task_id", req.TaskID,
 			"error", err,
 		)
-		return nil, nil
+		return nil, ErrInterviewPlannerMissing
 	}
 
 	// Build the list of identified ambiguities.
@@ -230,7 +282,7 @@ func (sp *StrategicPlanner) ConductInterview(ctx context.Context, req PlanReques
 			"task_id", req.TaskID,
 			"error", err,
 		)
-		return nil, nil
+		return nil, ErrInterviewGenerationFail
 	}
 
 	questions := sp.parseInterviewQuestions(output)
@@ -261,12 +313,14 @@ func (sp *StrategicPlanner) ConductInterview(ctx context.Context, req PlanReques
 		"ambiguity", req.TrueAnalysis.Ambiguity,
 	)
 
+	sp.recordMetric("strategic_planner.interview_triggered", 1, nil)
+
 	return pctx, nil
 }
 
 // parseInterviewQuestions extracts question strings from the LLM interview output.
 func (sp *StrategicPlanner) parseInterviewQuestions(output string) []string {
-	jsonStr := extractJSON(output)
+	jsonStr := ExtractJSON(output)
 	if jsonStr == "" {
 		return nil
 	}
@@ -359,10 +413,19 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 	if sp.registry != nil {
 		pctx, interviewErr := sp.ConductInterview(ctx, req)
 		if interviewErr != nil {
-			sp.logger.Warn("Interview failed, proceeding with planning",
-				"task_id", req.TaskID,
-				"error", interviewErr,
-			)
+			// ErrInterviewNotNeeded is a normal "nothing to do" signal — not
+			// worth warning about. Other errors indicate infrastructure issues.
+			if errors.Is(interviewErr, ErrInterviewNotNeeded) {
+				sp.logger.Debug("Interview not needed, proceeding with planning",
+					"task_id", req.TaskID,
+					"reason", interviewErr.Error(),
+				)
+			} else {
+				sp.logger.Warn("Interview failed, proceeding with planning",
+					"task_id", req.TaskID,
+					"error", interviewErr,
+				)
+			}
 		} else if pctx != nil && !pctx.InterviewCompleted {
 			// Interview incomplete: publish event with questions and return early.
 			// The task stays in planning state until answers are provided.
@@ -412,6 +475,7 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 				"task_id", req.TaskID,
 				"error", err,
 			)
+			sp.recordMetric("strategic_planner.fallback", 1, map[string]string{"intent": req.Intent, "reason": "generation_failed"})
 			steps = sp.createFallbackSteps(req, parentMemoryRefs)
 		}
 	}
@@ -427,9 +491,10 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		)
 	}
 
-	// Approval gate: if the task went through an interview and user has not
-	// yet approved, pause here and present the plan for sign-off.
-	if req.PlanningCtx != nil && req.PlanningCtx.InterviewCompleted && !req.PlanningCtx.UserApproved {
+	// Approval gate: tasks that went through an interview (but are not yet
+	// approved) OR plans that exceed the complexity threshold must be
+	// presented to the user for sign-off before execution.
+	if sp.requiresApproval(req, steps) {
 		return sp.awaitUserApproval(ctx, t, steps, req)
 	}
 
@@ -533,7 +598,15 @@ func (sp *StrategicPlanner) generatePlan(ctx context.Context, req PlanRequest) (
 	}
 
 	// Build prompt
-	prompt := fmt.Sprintf(plannerPromptTemplate, sp.maxPlanSteps, contextSection, req.Input)
+	prompt := fmt.Sprintf(plannerPromptTemplate, sp.maxPlanSteps, sp.maxPlanSteps, contextSection, req.Input)
+
+	// When a registry is available, append dynamic agent availability hints
+	// so the planner LLM knows which specialist agents are actually enabled.
+	if sp.registry != nil {
+		if hintSection := BuildPlannerPromptHint(sp.registry); hintSection != "" {
+			prompt += "\n\n## Dynamic Agent Availability\n" + hintSection
+		}
+	}
 
 	// Run with timeout
 	planCtx, cancel := context.WithTimeout(ctx, sp.plannerTimeout)
@@ -542,17 +615,26 @@ func (sp *StrategicPlanner) generatePlan(ctx context.Context, req PlanRequest) (
 	conversationID := fmt.Sprintf("plan-%s-%s", req.TaskID, id.Generate(""))
 	output, err := plannerLoop.RunOnce(planCtx, prompt, conversationID)
 	if err != nil {
+		sp.recordMetric("strategic_planner.plan_generated", 1, map[string]string{"intent": req.Intent, "outcome": "failure"})
 		return nil, fmt.Errorf("planner failed: %w", err)
 	}
 
+	sp.recordMetric("strategic_planner.plan_generated", 1, map[string]string{"intent": req.Intent, "outcome": "success"})
+
 	// Parse JSON output
-	return sp.parsePlanOutput(req.TaskID, output)
+	steps, parseErr := sp.parsePlanOutput(req.TaskID, output)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+
+	sp.recordMetric("strategic_planner.plan_steps", float64(len(steps)), map[string]string{"intent": req.Intent})
+	return steps, nil
 }
 
 // parsePlanOutput extracts steps from the planner LLM output.
 func (sp *StrategicPlanner) parsePlanOutput(taskID, output string) ([]*task.TaskStep, error) {
 	// Try to find JSON in the output (LLM might wrap it in markdown)
-	jsonStr := extractJSON(output)
+	jsonStr := ExtractJSON(output)
 	if jsonStr == "" {
 		return nil, fmt.Errorf("no JSON found in planner output")
 	}
@@ -590,6 +672,13 @@ func (sp *StrategicPlanner) parsePlanOutput(taskID, output string) ([]*task.Task
 			for _, depIdx := range ps.DependsOn {
 				if depIdx >= 0 && depIdx < len(stepIDs) && depIdx != i {
 					deps = append(deps, stepIDs[depIdx])
+				} else {
+					sp.logger.Debug("filtering invalid dependency index",
+						"task_id", taskID,
+						"step_index", i,
+						"invalid_dep_index", depIdx,
+						"valid_range", fmt.Sprintf("[0,%d)", len(stepIDs)),
+					)
 				}
 			}
 			steps[i].DependsOn = deps
@@ -604,9 +693,44 @@ func (sp *StrategicPlanner) parsePlanOutput(taskID, output string) ([]*task.Task
 	return steps, nil
 }
 
-// createFallbackSteps creates a single step when planning fails.
+// createFallbackSteps creates a single step when planning fails. When a
+// verified PlanningContext is present, the interview's distilled requirements
+// and constraints are prepended to the step description so the executing agent
+// has the verified context that was collected during the interview phase.
 func (sp *StrategicPlanner) createFallbackSteps(req PlanRequest, parentRefs []string) []*task.TaskStep {
-	step := task.NewTaskStep(req.TaskID, req.Input, 0)
+	description := req.Input
+
+	// If a verified PlanningContext with substantive content exists, prepend
+	// a "## Verified Context" section so the executing agent doesn't lose the
+	// interview results.
+	if req.PlanningCtx != nil && req.PlanningCtx.InterviewCompleted {
+		pctx := req.PlanningCtx
+		hasContent := pctx.TrueGoal != "" || len(pctx.Requirements) > 0 || len(pctx.Constraints) > 0
+		if hasContent {
+			var sb strings.Builder
+			sb.WriteString("## Verified Context\n")
+			if pctx.TrueGoal != "" {
+				sb.WriteString(fmt.Sprintf("True goal: %s\n", pctx.TrueGoal))
+			}
+			if len(pctx.Requirements) > 0 {
+				sb.WriteString("Requirements:\n")
+				for _, r := range pctx.Requirements {
+					sb.WriteString(fmt.Sprintf("- %s\n", r))
+				}
+			}
+			if len(pctx.Constraints) > 0 {
+				sb.WriteString("Constraints:\n")
+				for k, v := range pctx.Constraints {
+					sb.WriteString(fmt.Sprintf("- %s: %s\n", k, v))
+				}
+			}
+			sb.WriteString("\n")
+			sb.WriteString(description)
+			description = sb.String()
+		}
+	}
+
+	step := task.NewTaskStep(req.TaskID, description, 0)
 	step.ToolHint = req.Intent
 	// Copy parent refs
 	for _, ref := range parentRefs {
@@ -627,8 +751,12 @@ func (sp *StrategicPlanner) shouldDecompose(req PlanRequest) bool {
 		return true
 	}
 
-	// Short requests (<100 chars) without complex action verbs are likely simple
-	if len(req.Input) < 100 {
+	// Short requests without complex action verbs are likely simple
+	simpleMax := sp.simpleInputMaxChars
+	if simpleMax <= 0 {
+		simpleMax = 100
+	}
+	if len(req.Input) < simpleMax {
 		lower := strings.ToLower(req.Input)
 
 		// Check for complexity indicators that warrant decomposition
@@ -682,16 +810,15 @@ func (sp *StrategicPlanner) shouldUsePairSession(req PlanRequest) bool {
 	// Code and debug intents with complex descriptions
 	switch req.Intent {
 	case string(IntentCode), string(IntentDebug):
-		if len(req.Input) > 200 {
+		pairMin := sp.pairInputMinChars
+		if pairMin <= 0 {
+			pairMin = 200
+		}
+		if len(req.Input) > pairMin {
 			return true
 		}
 		lower := strings.ToLower(req.Input)
-		securityIndicators := []string{
-			"security", "authentication", "authorization",
-			"encryption", "credential", "password", "token",
-			"vulnerable", "vulnerability", "cve",
-		}
-		for _, indicator := range securityIndicators {
+		for _, indicator := range SecurityKeywords() {
 			if strings.Contains(lower, indicator) {
 				return true
 			}
@@ -744,6 +871,8 @@ func (sp *StrategicPlanner) createPairSessionPlan(ctx context.Context, req PlanR
 		"criteria", len(criteria),
 	)
 
+	sp.recordMetric("strategic_planner.pair_session", 1, map[string]string{"intent": req.Intent})
+
 	// Publish pair session created event
 	sp.publishEvent("pair.session_created", map[string]any{
 		KeyTaskID:    req.TaskID,
@@ -759,41 +888,73 @@ func (sp *StrategicPlanner) createPairSessionPlan(ctx context.Context, req PlanR
 
 // selectActorAgent chooses the actor agent for a pair session based on intent.
 func (sp *StrategicPlanner) selectActorAgent(intent string) string {
-	switch intent {
-	case string(IntentCode), string(IntentCompound):
-		return config.AgentIDCoder
-	case string(IntentDebug):
-		return config.AgentIDDebugger
-	default:
-		return config.AgentIDCoder
+	rt := sp.routing
+	if rt == nil {
+		rt = NewDefaultRoutingTable()
 	}
+	return rt.ActorFor(intent)
 }
 
 // selectReviewerAgent chooses the reviewer agent for a pair session based on intent.
 func (sp *StrategicPlanner) selectReviewerAgent(intent string) string {
-	switch intent {
-	case string(IntentCode), string(IntentCompound):
-		return config.AgentIDPlanner
-	case string(IntentDebug):
-		return config.AgentIDAnalyst
-	default:
-		return config.AgentIDPlanner
+	rt := sp.routing
+	if rt == nil {
+		rt = NewDefaultRoutingTable()
 	}
+	return rt.ReviewerFor(intent)
+}
+
+// abbrevRe matches common abbreviations that end with "." but should not be
+// treated as sentence boundaries when followed by another sentence. Also
+// matches decimal-number prefixes (digit followed by ".").
+var abbrevRe = regexp.MustCompile(`(?i)\b(?:e\.g|i\.e|etc|vs|mr|mrs|ms|dr|prof|sr|jr|st|approx|fig|cf|al)\.\s+\S`)
+
+// decimalPointRe matches a digit-prefixed decimal point followed by a digit,
+// e.g. "3.14" — should not be treated as a sentence boundary.
+var decimalPointRe = regexp.MustCompile(`\d\.\d`)
+
+// sentenceSplitRe matches sentence-ending punctuation followed by whitespace,
+// pipe, or newline. This is the primary split pattern used after protecting
+// abbreviations and decimal points.
+var sentenceSplitRe = regexp.MustCompile(`[.!?]\s+|\||\n`)
+
+// splitSentenceBoundaries splits input on sentence boundaries. It avoids
+// splitting on common abbreviations such as "e.g.", "i.e.", "Mr.", "etc." and
+// on decimal numbers like "3.14". Pipe and newline always split.
+func splitSentenceBoundaries(input string) []string {
+	// Protect abbreviations and decimals by replacing their internal ". " with
+	// a placeholder before splitting. This is the simplest RE2-compatible way
+	// to exclude these patterns without lookahead support.
+	protected := input
+	protected = abbrevRe.ReplaceAllStringFunc(protected, func(match string) string {
+		// Replace the ". " between abbreviation and next word with ".\u00A0"
+		// (non-breaking space) so the sentence-split regex won't match it.
+		return strings.Replace(match, ". ", ".\u00A0", 1)
+	})
+	protected = decimalPointRe.ReplaceAllStringFunc(protected, func(match string) string {
+		return strings.Replace(match, ".", "\u2009", 1) // thin space as decimal sep
+	})
+
+	pieces := sentenceSplitRe.Split(protected, -1)
+
+	// Restore protected characters.
+	for i, p := range pieces {
+		pieces[i] = strings.ReplaceAll(p, "\u00A0", " ")
+		pieces[i] = strings.ReplaceAll(pieces[i], "\u2009", ".")
+	}
+	return pieces
 }
 
 // extractCriteria extracts simple criteria from a task description.
-// Splits on sentence boundaries and filters trivially short items.
+// Splits on sentence boundaries (avoiding common abbreviations) and filters
+// trivially short items.
 func (sp *StrategicPlanner) extractCriteria(input string) []string {
-	// Split on common sentence delimiters
-	replacements := []string{". ", "|", "\n"}
-	working := input
-	for _, r := range replacements {
-		working = strings.ReplaceAll(working, r, "\n")
-	}
+	// Split on regex sentence boundaries instead of naive ". " which breaks on
+	// abbreviations such as "e.g.", "i.e.", and decimals like "3.14".
+	pieces := splitSentenceBoundaries(input)
 
-	lines := strings.Split(working, "\n")
 	var criteria []string
-	for _, line := range lines {
+	for _, line := range pieces {
 		trimmed := strings.TrimSpace(line)
 		// Skip headers, empty lines, and trivially short items
 		if len(trimmed) < 10 || strings.HasPrefix(trimmed, "#") {
@@ -838,20 +999,45 @@ func (sp *StrategicPlanner) ReplanFailedTask(ctx context.Context, taskID, failur
 		}
 	}
 
-	// Build remaining work description
-	var completedDescs []string
+	// Build remaining work description. Classify the existing steps into
+	// completed (successfully terminal) vs. uncompleted so the planner knows
+	// what's left to retry or finish.
+	var completedDescs, remainingDescs []string
 	for _, s := range completedSteps {
 		if s.State.IsSuccessfullyTerminal() {
 			completedDescs = append(completedDescs, s.Description)
+		} else {
+			remainingDescs = append(remainingDescs, s.Description)
 		}
 	}
 
+	// Format completed steps as "do not redo" context.
+	completedList := "none"
+	if len(completedDescs) > 0 {
+		var sb strings.Builder
+		for _, d := range completedDescs {
+			sb.WriteString(fmt.Sprintf("\n  - %s", d))
+		}
+		completedList = sb.String()
+	}
+
+	// Format remaining (uncompleted) work for the planner. Fall back to the
+	// original task objective if no uncompleted steps were recorded.
+	remainingList := "re-attempt the original task objective"
+	if len(remainingDescs) > 0 {
+		var sb strings.Builder
+		for _, d := range remainingDescs {
+			sb.WriteString(fmt.Sprintf("\n  - %s", d))
+		}
+		remainingList = sb.String()
+	}
+
 	replanDesc := fmt.Sprintf(
-		"RE-PLAN: Task '%s' failed with error: %s.\nCompleted steps (do not redo): %s\nRemaining work: %s",
+		"RE-PLAN: Task '%s' failed with error: %s.\nCompleted steps (do not redo): %s\nRemaining (uncompleted) steps to retry or finish: %s",
 		t.Description,
 		failureReason,
-		fmt.Sprintf("%v", completedDescs),
-		t.Description,
+		completedList,
+		remainingList,
 	)
 
 	req := PlanRequest{
@@ -861,6 +1047,21 @@ func (sp *StrategicPlanner) ReplanFailedTask(ctx context.Context, taskID, failur
 	}
 
 	return sp.Plan(ctx, req)
+}
+
+// requiresApproval returns true when the plan must be paused for user sign-off
+// before execution. Triggers on either an un-approved completed interview OR a
+// plan whose step count exceeds the configured complexity threshold.
+func (sp *StrategicPlanner) requiresApproval(req PlanRequest, steps []*task.TaskStep) bool {
+	// Interview-completed but not yet user-approved.
+	if req.PlanningCtx != nil && req.PlanningCtx.InterviewCompleted && !req.PlanningCtx.UserApproved {
+		return true
+	}
+	// Complexity-based gate: many-step plans need review even without interview.
+	if sp.approvalStepThreshold > 0 && len(steps) >= sp.approvalStepThreshold {
+		return true
+	}
+	return false
 }
 
 // awaitUserApproval stores the generated plan steps in the task metadata,
@@ -894,6 +1095,8 @@ func (sp *StrategicPlanner) awaitUserApproval(ctx context.Context, t *task.Task,
 		"task_id", req.TaskID,
 		"steps", len(steps),
 	)
+
+	sp.recordMetric("strategic_planner.approval_gate", 1, nil)
 
 	sp.publishEvent("task.pending_approval", map[string]any{
 		KeyTaskID:    req.TaskID,
@@ -1116,52 +1319,11 @@ func (sp *StrategicPlanner) publishEvent(topic string, data map[string]any) {
 	sp.bus.Publish(topic, msg)
 }
 
-// extractJSON finds and extracts a JSON object from text that might contain
-// markdown code fences or other wrapping.
-func extractJSON(s string) string {
-	// Try direct parse first
-	s = strings.TrimSpace(s)
-	if json.Valid([]byte(s)) {
-		return s
+// recordMetric emits a planner metric when a metrics store is configured.
+// All calls are nil-guarded so the planner works without metrics.
+func (sp *StrategicPlanner) recordMetric(name string, value float64, tags map[string]string) {
+	if sp.metricsStore != nil {
+		sp.metricsStore.Record(name, value, tags)
 	}
-
-	// Try to extract from markdown code fence
-	if idx := strings.Index(s, "```json"); idx >= 0 {
-		start := idx + 7
-		end := strings.Index(s[start:], "```")
-		if end > 0 {
-			candidate := strings.TrimSpace(s[start : start+end])
-			if json.Valid([]byte(candidate)) {
-				return candidate
-			}
-		}
-	}
-
-	// Try to extract from generic code fence
-	if idx := strings.Index(s, "```"); idx >= 0 {
-		start := idx + 3
-		// Skip language identifier on the same line
-		if nl := strings.Index(s[start:], "\n"); nl >= 0 {
-			start += nl + 1
-		}
-		end := strings.Index(s[start:], "```")
-		if end > 0 {
-			candidate := strings.TrimSpace(s[start : start+end])
-			if json.Valid([]byte(candidate)) {
-				return candidate
-			}
-		}
-	}
-
-	// Try to find a JSON object by braces
-	braceStart := strings.Index(s, "{")
-	braceEnd := strings.LastIndex(s, "}")
-	if braceStart >= 0 && braceEnd > braceStart {
-		candidate := s[braceStart : braceEnd+1]
-		if json.Valid([]byte(candidate)) {
-			return candidate
-		}
-	}
-
-	return ""
 }
+

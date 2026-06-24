@@ -440,7 +440,7 @@ func (pm *PairManager) publishEvent(topic string, data map[string]any) {
 
 // parseReviewJSON attempts to unmarshal a JSON ReviewResult from output.
 func parseReviewJSON(output string, result *ReviewResult) error {
-	jsonStr := extractJSON(output)
+	jsonStr := ExtractJSON(output)
 	if jsonStr == "" {
 		return fmt.Errorf("no JSON in review output")
 	}

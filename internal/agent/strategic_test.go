@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -18,7 +20,7 @@ import (
 
 func TestExtractJSON_DirectJSON(t *testing.T) {
 	input := `{"steps": [{"description": "do something", "tool_hint": "code"}]}`
-	got := extractJSON(input)
+	got := ExtractJSON(input)
 	if got != input {
 		t.Errorf("expected direct JSON, got %q", got)
 	}
@@ -26,7 +28,7 @@ func TestExtractJSON_DirectJSON(t *testing.T) {
 
 func TestExtractJSON_MarkdownFence(t *testing.T) {
 	input := "Here is the plan:\n```json\n{\"steps\": [{\"description\": \"do something\"}]}\n```\nDone."
-	got := extractJSON(input)
+	got := ExtractJSON(input)
 	if got != `{"steps": [{"description": "do something"}]}` {
 		t.Errorf("unexpected result: %q", got)
 	}
@@ -34,7 +36,7 @@ func TestExtractJSON_MarkdownFence(t *testing.T) {
 
 func TestExtractJSON_GenericFence(t *testing.T) {
 	input := "Plan:\n```\n{\"steps\": [{\"description\": \"x\"}]}\n```"
-	got := extractJSON(input)
+	got := ExtractJSON(input)
 	if got != `{"steps": [{"description": "x"}]}` {
 		t.Errorf("unexpected result: %q", got)
 	}
@@ -42,14 +44,14 @@ func TestExtractJSON_GenericFence(t *testing.T) {
 
 func TestExtractJSON_BraceExtraction(t *testing.T) {
 	input := "Sure, here is your plan: {\"steps\": [{\"description\": \"test\"}]} I hope this helps!"
-	got := extractJSON(input)
+	got := ExtractJSON(input)
 	if got != `{"steps": [{"description": "test"}]}` {
 		t.Errorf("unexpected result: %q", got)
 	}
 }
 
 func TestExtractJSON_NoJSON(t *testing.T) {
-	got := extractJSON("This is just plain text with no JSON.")
+	got := ExtractJSON("This is just plain text with no JSON.")
 	if got != "" {
 		t.Errorf("expected empty string, got %q", got)
 	}
@@ -148,25 +150,84 @@ func TestParsePlanOutput_SelfDependency(t *testing.T) {
 
 func TestCreateFallbackSteps(t *testing.T) {
 	sp := &StrategicPlanner{}
-	req := PlanRequest{
-		TaskID: "task-1",
-		Input:  "do the thing",
-		Intent: "code",
-	}
 
-	steps := sp.createFallbackSteps(req, nil)
-	if len(steps) != 1 {
-		t.Fatalf("expected 1 fallback step, got %d", len(steps))
-	}
-	if steps[0].Description != "do the thing" {
-		t.Errorf("expected description %q, got %q", "do the thing", steps[0].Description)
-	}
-	if steps[0].ToolHint != "code" {
-		t.Errorf("expected tool_hint %q, got %q", "code", steps[0].ToolHint)
-	}
-	if steps[0].TaskID != "task-1" {
-		t.Errorf("expected task_id %q, got %q", "task-1", steps[0].TaskID)
-	}
+	t.Run("no_planning_ctx_preserves_input", func(t *testing.T) {
+		req := PlanRequest{
+			TaskID: "task-1",
+			Input:  "do the thing",
+			Intent: "code",
+		}
+
+		steps := sp.createFallbackSteps(req, nil)
+		if len(steps) != 1 {
+			t.Fatalf("expected 1 fallback step, got %d", len(steps))
+		}
+		if steps[0].Description != "do the thing" {
+			t.Errorf("expected description %q, got %q", "do the thing", steps[0].Description)
+		}
+		if steps[0].ToolHint != "code" {
+			t.Errorf("expected tool_hint %q, got %q", "code", steps[0].ToolHint)
+		}
+		if steps[0].TaskID != "task-1" {
+			t.Errorf("expected task_id %q, got %q", "task-1", steps[0].TaskID)
+		}
+	})
+
+	t.Run("planning_ctx_prepends_verified_context", func(t *testing.T) {
+		req := PlanRequest{
+			TaskID: "task-ctx",
+			Input:  "implement the feature",
+			Intent: "code",
+			PlanningCtx: &plan.PlanningContext{
+				InterviewCompleted: true,
+				TrueGoal:           "ship login page",
+				Requirements:        []string{"OAuth2 flow", "session persistence"},
+				Constraints:         map[string]string{"timeline": "this week"},
+			},
+		}
+
+		steps := sp.createFallbackSteps(req, nil)
+		if len(steps) != 1 {
+			t.Fatalf("expected 1 fallback step, got %d", len(steps))
+		}
+		desc := steps[0].Description
+		if !strings.HasPrefix(desc, "## Verified Context") {
+			t.Errorf("expected Verified Context header, got: %s", desc)
+		}
+		if !strings.Contains(desc, "True goal: ship login page") {
+			t.Errorf("expected true goal in description, got: %s", desc)
+		}
+		if !strings.Contains(desc, "- OAuth2 flow") {
+			t.Errorf("expected requirement bullet, got: %s", desc)
+		}
+		if !strings.Contains(desc, "- timeline: this week") {
+			t.Errorf("expected constraint bullet, got: %s", desc)
+		}
+		if !strings.Contains(desc, "implement the feature") {
+			t.Errorf("expected original input preserved, got: %s", desc)
+		}
+	})
+
+	t.Run("empty_planning_ctx_keeps_behavior", func(t *testing.T) {
+		// InterviewCompleted but no actual content — should keep current
+		// behavior (no verified-context section prepended).
+		req := PlanRequest{
+			TaskID: "task-empty-ctx",
+			Input:  "do the thing",
+			Intent: "code",
+			PlanningCtx: &plan.PlanningContext{
+				InterviewCompleted: true,
+			},
+		}
+
+		steps := sp.createFallbackSteps(req, nil)
+		if len(steps) != 1 {
+			t.Fatalf("expected 1 fallback step, got %d", len(steps))
+		}
+		if steps[0].Description != "do the thing" {
+			t.Errorf("expected description %q (no context section), got %q", "do the thing", steps[0].Description)
+		}
+	})
 }
 
 // TestStrategicPlanner_PublishesEvents verifies that Plan() publishes both
@@ -435,9 +496,10 @@ func TestExtractCriteria(t *testing.T) {
 	sp := &StrategicPlanner{logger: slog.Default()}
 
 	tests := []struct {
-		name    string
-		input   string
-		wantMin int
+		name      string
+		input     string
+		wantMin   int
+		wantExact []string // when set, require these exact substrings to be present
 	}{
 		{
 			name:    "single sentence",
@@ -459,6 +521,28 @@ func TestExtractCriteria(t *testing.T) {
 			input:   "fix bug",
 			wantMin: 1,
 		},
+		{
+			// "e.g." must NOT cause a split. The sentence boundary detector
+			// only splits on punctuation followed by whitespace+capital/digit.
+			name:      "abbreviation_e.g._no_split",
+			input:     "Use OAuth e.g. Auth0 for the login flow.",
+			wantMin:   1,
+			wantExact: []string{"Use OAuth e.g. Auth0 for the login flow."},
+		},
+		{
+			// "i.e." must NOT cause a split.
+			name:      "abbreviation_i.e._no_split",
+			input:     "See docs i.e. the spec for more details on this",
+			wantMin:   1,
+			wantExact: []string{"See docs i.e. the spec for more details on this"},
+		},
+		{
+			// Decimal numbers must NOT cause a split.
+			name:      "decimal_no_split",
+			input:     "Configurable in 3.14 seconds or less total runtime",
+			wantMin:   1,
+			wantExact: []string{"Configurable in 3.14 seconds or less total runtime"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -466,6 +550,18 @@ func TestExtractCriteria(t *testing.T) {
 			got := sp.extractCriteria(tt.input)
 			if len(got) < tt.wantMin {
 				t.Errorf("extractCriteria() returned %d criteria, want at least %d", len(got), tt.wantMin)
+			}
+			for _, want := range tt.wantExact {
+				found := false
+				for _, c := range got {
+					if c == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("extractCriteria() expected criterion %q to be present exactly, got %v", want, got)
+				}
 			}
 		})
 	}
@@ -522,8 +618,8 @@ func TestConductInterview_SkipWhenNoAnalysis(t *testing.T) {
 	req := PlanRequest{TaskID: "task-1", Input: "do something"}
 
 	pctx, err := sp.ConductInterview(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, ErrInterviewNotNeeded) {
+		t.Fatalf("expected ErrInterviewNotNeeded, got %v", err)
 	}
 	if pctx != nil {
 		t.Error("expected nil PlanningContext when no TrueAnalysis")
@@ -545,8 +641,8 @@ func TestConductInterview_SkipWhenLowAmbiguity(t *testing.T) {
 	}
 
 	pctx, err := sp.ConductInterview(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, ErrInterviewNotNeeded) {
+		t.Fatalf("expected ErrInterviewNotNeeded, got %v", err)
 	}
 	if pctx != nil {
 		t.Error("expected nil PlanningContext when ambiguity is low")
@@ -594,8 +690,8 @@ func TestConductInterview_SkipWhenNoRegistry(t *testing.T) {
 	}
 
 	pctx, err := sp.ConductInterview(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, ErrInterviewNoRegistry) {
+		t.Fatalf("expected ErrInterviewNoRegistry, got %v", err)
 	}
 	// When registry is nil, interview is skipped gracefully
 	if pctx != nil {
@@ -1145,5 +1241,320 @@ func TestPlan_ApprovalGate(t *testing.T) {
 	}
 	if len(finalSteps) != 1 {
 		t.Errorf("expected 1 persisted step after approval, got %d", len(finalSteps))
+	}
+}
+
+func TestRequiresApproval(t *testing.T) {
+	tests := []struct {
+		name              string
+		approvalThreshold int
+		req               PlanRequest
+		numSteps          int
+		want              bool
+	}{
+		{
+			name:              "interview_completed_not_approved",
+			approvalThreshold: 5,
+			req: PlanRequest{
+				PlanningCtx: &plan.PlanningContext{
+					InterviewCompleted: true,
+					UserApproved:       false,
+				},
+			},
+			numSteps: 1,
+			want:     true,
+		},
+		{
+			name:              "interview_completed_and_approved",
+			approvalThreshold: 5,
+			req: PlanRequest{
+				PlanningCtx: &plan.PlanningContext{
+					InterviewCompleted: true,
+					UserApproved:       true,
+				},
+			},
+			numSteps: 2,
+			want:     false,
+		},
+		{
+			name:              "no_interview_below_threshold",
+			approvalThreshold: 5,
+			req:               PlanRequest{},
+			numSteps:          3,
+			want:              false,
+		},
+		{
+			name:              "no_interview_meets_threshold",
+			approvalThreshold: 5,
+			req:               PlanRequest{},
+			numSteps:          5,
+			want:              true,
+		},
+		{
+			name:              "no_interview_above_threshold",
+			approvalThreshold: 5,
+			req:               PlanRequest{},
+			numSteps:          10,
+			want:              true,
+		},
+		{
+			name:              "threshold_zero_disables_complexity_gate",
+			approvalThreshold: 0,
+			req:               PlanRequest{},
+			numSteps:          100,
+			want:              false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sp := &StrategicPlanner{
+				logger:                slogDiscardLogger(),
+				approvalStepThreshold: tt.approvalThreshold,
+			}
+			steps := make([]*task.TaskStep, tt.numSteps)
+			for i := range steps {
+				steps[i] = task.NewTaskStep("t-1", "step", i)
+			}
+			got := sp.requiresApproval(tt.req, steps)
+			if got != tt.want {
+				t.Errorf("requiresApproval() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReplanFailedTask_RemainingWork(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
+
+	tmpDir := t.TempDir()
+	taskStore, err := newTestTaskStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create task store: %v", err)
+	}
+	defer taskStore.Close()
+
+	stepStore := taskStore.StepStore()
+
+	// Capture the replan input by subscribing to the bus. The replan flows
+	// through Plan() which (with nil registry) takes the fallback path and
+	// creates a single step whose description contains the replan text.
+	plannedSub := msgBus.Subscribe("test-observer", "task.planned")
+	defer msgBus.Unsubscribe(plannedSub)
+
+	sp := NewStrategicPlanner(StrategicPlannerConfig{
+		// Empty registry: Get("planner") returns an error, so generatePlan
+		// fails and Plan() falls through to the single-step fallback path —
+		// whose description is the replan text we want to verify.
+		Registry:       NewAgentRegistry(RegistryConfig{Logger: slogDiscardLogger()}),
+		TaskStore:      taskStore,
+		StepStore:      stepStore,
+		Bus:            msgBus,
+		MaxPlanSteps:   5,
+		PlannerTimeout: 10 * time.Second,
+		Logger:         slogDiscardLogger(),
+	})
+
+	tsk := newTestTask("task-replan-test", "build the auth module")
+	if err := taskStore.Create(tsk); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	// Create three steps: one completed, one failed (uncompleted), one pending.
+	completedStep := task.NewTaskStep(tsk.ID, "Research OAuth2 providers", 0)
+	completedStep.State = task.StepCompleted
+	if err := stepStore.Create(completedStep); err != nil {
+		t.Fatalf("failed to create completed step: %v", err)
+	}
+
+	failedStep := task.NewTaskStep(tsk.ID, "Implement login endpoint", 1)
+	failedStep.State = task.StepFailed
+	if err := stepStore.Create(failedStep); err != nil {
+		t.Fatalf("failed to create failed step: %v", err)
+	}
+
+	pendingStep := task.NewTaskStep(tsk.ID, "Write integration tests", 2)
+	pendingStep.State = task.StepPending
+	if err := stepStore.Create(pendingStep); err != nil {
+		t.Fatalf("failed to create pending step: %v", err)
+	}
+
+	// Call ReplanFailedTask. With nil registry, Plan() takes the fallback
+	// path and persists a single step whose description is the replan text.
+	err = sp.ReplanFailedTask(context.Background(), tsk.ID, "coder agent panicked")
+	if err != nil {
+		t.Fatalf("ReplanFailedTask failed: %v", err)
+	}
+
+	// The persisted fallback step description should contain the remaining
+	// (uncompleted) work, not just the original task description.
+	steps, err := stepStore.ListByTaskID(tsk.ID)
+	if err != nil {
+		t.Fatalf("failed to list steps: %v", err)
+	}
+
+	// Find the fallback step (the most recently created one with sequence 0
+	// from the fallback path — its description contains "RE-PLAN").
+	var fallbackDesc string
+	for _, s := range steps {
+		if strings.Contains(s.Description, "RE-PLAN") {
+			fallbackDesc = s.Description
+			break
+		}
+	}
+	if fallbackDesc == "" {
+		t.Fatalf("no RE-PLAN fallback step found; steps: %+v", steps)
+	}
+
+	// Completed step should appear in the "do not redo" section.
+	if !strings.Contains(fallbackDesc, "Research OAuth2 providers") {
+		t.Errorf("expected completed step description in replan, got: %s", fallbackDesc)
+	}
+	// Uncompleted steps should appear in the remaining section.
+	if !strings.Contains(fallbackDesc, "Implement login endpoint") {
+		t.Errorf("expected failed step description in remaining work, got: %s", fallbackDesc)
+	}
+	if !strings.Contains(fallbackDesc, "Write integration tests") {
+		t.Errorf("expected pending step description in remaining work, got: %s", fallbackDesc)
+	}
+	// The remaining-work section should be labeled distinctly.
+	if !strings.Contains(fallbackDesc, "Remaining (uncompleted) steps to retry or finish:") {
+		t.Errorf("expected remaining-steps header in replan, got: %s", fallbackDesc)
+	}
+	// Sanity: the original description should also be referenced in the header.
+	if !strings.Contains(fallbackDesc, "build the auth module") {
+		t.Errorf("expected original task description in replan header, got: %s", fallbackDesc)
+	}
+
+	// Verify the task.planned event fired (proves the replan flowed through Plan).
+	select {
+	case <-plannedSub.Channel:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timeout waiting for task.planned event from replan")
+	}
+}
+
+func TestConductInterview_ErrorTypes(t *testing.T) {
+	t.Run("no_analysis_returns_not_needed", func(t *testing.T) {
+		sp := &StrategicPlanner{logger: slogDiscardLogger()}
+		req := PlanRequest{TaskID: "t-1", Input: "do something"}
+		_, err := sp.ConductInterview(context.Background(), req)
+		if !errors.Is(err, ErrInterviewNotNeeded) {
+			t.Errorf("expected ErrInterviewNotNeeded, got %v", err)
+		}
+	})
+
+	t.Run("low_ambiguity_returns_not_needed", func(t *testing.T) {
+		sp := &StrategicPlanner{logger: slogDiscardLogger()}
+		req := PlanRequest{
+			TaskID: "t-1",
+			TrueAnalysis: &TrueIntentAnalysis{
+				Ambiguity: 0.1,
+				Scope:      "narrow",
+			},
+		}
+		_, err := sp.ConductInterview(context.Background(), req)
+		if !errors.Is(err, ErrInterviewNotNeeded) {
+			t.Errorf("expected ErrInterviewNotNeeded, got %v", err)
+		}
+	})
+
+	t.Run("nil_registry_returns_no_registry", func(t *testing.T) {
+		sp := &StrategicPlanner{registry: nil, logger: slogDiscardLogger()}
+		req := PlanRequest{
+			TaskID: "t-1",
+			TrueAnalysis: &TrueIntentAnalysis{
+				Ambiguity: 0.9,
+				Scope:      "broad",
+			},
+		}
+		_, err := sp.ConductInterview(context.Background(), req)
+		if !errors.Is(err, ErrInterviewNoRegistry) {
+			t.Errorf("expected ErrInterviewNoRegistry, got %v", err)
+		}
+	})
+
+	t.Run("missing_planner_returns_planner_missing", func(t *testing.T) {
+		// Construct an empty registry directly (bypassing NewAgentRegistry,
+		// which calls loadAgentDefinitions and may pick up AGENT.md files
+		// from the developer's home directory, polluting the test). With no
+		// "planner" spec, Get returns an error.
+		reg := &AgentRegistry{
+			specs:           make(map[string]*AgentSpec),
+			loops:           make(map[string]*AgentLoop),
+			activeQueues:    make(map[string]*QueueEntry),
+			logger:          slogDiscardLogger(),
+			sharedConvStore: NewConversationStore(10),
+		}
+		sp := &StrategicPlanner{registry: reg, logger: slogDiscardLogger()}
+		req := PlanRequest{
+			TaskID: "t-1",
+			TrueAnalysis: &TrueIntentAnalysis{
+				Ambiguity: 0.9,
+				Scope:      "broad",
+			},
+		}
+		_, err := sp.ConductInterview(context.Background(), req)
+		if !errors.Is(err, ErrInterviewPlannerMissing) {
+			t.Errorf("expected ErrInterviewPlannerMissing, got %v", err)
+		}
+	})
+
+	t.Run("already_has_answers_returns_nil_error", func(t *testing.T) {
+		sp := &StrategicPlanner{logger: slogDiscardLogger()}
+		req := PlanRequest{
+			TaskID: "t-1",
+			PlanningCtx: &plan.PlanningContext{
+				InterviewAnswers: []string{"yes"},
+			},
+		}
+		pctx, err := sp.ConductInterview(context.Background(), req)
+		if err != nil {
+			t.Errorf("expected nil error for already-answered interview, got %v", err)
+		}
+		if pctx == nil || !pctx.InterviewCompleted {
+			t.Error("expected non-nil completed PlanningContext")
+		}
+	})
+}
+
+func TestParsePlanOutput_InvalidDeps(t *testing.T) {
+	// Use a buffering handler to verify the invalid-dep debug log fires.
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	sp := &StrategicPlanner{maxPlanSteps: 10, logger: logger}
+	input := `{"steps": [
+		{"description": "step 0"},
+		{"description": "step 1", "depends_on": [0, 5, -1, 1]},
+		{"description": "step 2", "depends_on": [0]}
+	]}`
+
+	steps, err := sp.parsePlanOutput("task-deps-test", input)
+	if err != nil {
+		t.Fatalf("parsePlanOutput failed: %v", err)
+	}
+	if len(steps) != 3 {
+		t.Fatalf("expected 3 steps, got %d", len(steps))
+	}
+
+	// Step 1 should depend only on step 0 — the out-of-range (5, -1) and
+	// self-reference (1) indices must be filtered out.
+	if len(steps[1].DependsOn) != 1 {
+		t.Errorf("step 1 should have 1 valid dep, got %d (%v)", len(steps[1].DependsOn), steps[1].DependsOn)
+	}
+	if steps[1].DependsOn[0] != steps[0].ID {
+		t.Errorf("step 1 dep = %q, want %q", steps[1].DependsOn[0], steps[0].ID)
+	}
+
+	// The debug log should mention "filtering invalid dependency index" for
+	// each of the three invalid indices.
+	logOutput := buf.String()
+	if !strings.Contains(logOutput, "filtering invalid dependency index") {
+		t.Errorf("expected debug log for invalid deps, got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "task-deps-test") {
+		t.Errorf("expected task_id in debug log, got: %s", logOutput)
 	}
 }
