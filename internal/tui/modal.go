@@ -196,6 +196,7 @@ func CommandPaletteModal(styles *Styles, config *ClientConfig) *Modal {
 		{Key: keys.ViewQueue, Label: "queue", Description: "switch to queue view"},
 		{Key: keys.ViewMemory, Label: "memory", Description: "switch to memory view"},
 		{Key: keys.ViewPlans, Label: "plans", Description: "switch to plans view"},
+		{Key: keys.ViewAgents, Label: "agents", Description: "switch to employees view"},
 		{Key: keys.Sidebar, Label: "toggle sidebar", Description: "show/hide sidebar"},
 		{Key: keys.Projects, Label: "projects", Description: "manage projects"},
 		{Key: keys.NewSession, Label: "new session", Description: "create a new session"},

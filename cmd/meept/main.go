@@ -151,6 +151,7 @@ Analytics:
 	rootCmd.AddCommand(newTokenCmd())
 	rootCmd.AddCommand(newClusterCmd())
 	rootCmd.AddCommand(newBotsCmd())
+	rootCmd.AddCommand(newAgentsCmd())
 	rootCmd.AddCommand(newInitCmd())
 	rootCmd.AddCommand(newAnalyticsCmd())
 	rootCmd.AddCommand(newTTSCmd())

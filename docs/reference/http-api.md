@@ -691,18 +691,45 @@ curl -X POST http://localhost:8081/api/v1/plans \
   -d '{"title": "refactor auth module", "description": "break auth into separate services", "project_id": "my-project"}'
 ```
 
-### Bot Webhook
+### Agents (AI Employees)
+
+Endpoints under `/api/v1/agents/*` manage AI employees — persistent, constitution-bound autonomous agents. These replace the legacy `/api/v1/bot/{id}/trigger` endpoint (hard cutover). See [AI Employees](../workflows/employees.md) for the full feature spec.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/v1/bot/{botID}/trigger` | Trigger a bot via webhook |
+| GET | `/api/v1/agents` | List employees |
+| POST | `/api/v1/agents` | Create employee (validates constitution) |
+| GET | `/api/v1/agents/{id}` | Show employee detail |
+| PATCH | `/api/v1/agents/{id}` | Update employee definition |
+| DELETE | `/api/v1/agents/{id}` | Delete employee (stops if running) |
+| POST | `/api/v1/agents/{id}/trigger` | Webhook trigger (existing semantics, moved from `/api/v1/bot/{id}/trigger`) |
+| POST | `/api/v1/agents/{id}/pause` | Operator pause |
+| POST | `/api/v1/agents/{id}/resume` | Operator resume (only un-pause path) |
+| GET | `/api/v1/agents/{id}/constitution` | View constitution |
+| PATCH | `/api/v1/agents/{id}/constitution` | Propose amendment (routes to Plan signoff) |
+| GET | `/api/v1/agents/{id}/goals` | List goals with health |
+| GET | `/api/v1/agents/{id}/goals/{gid}` | Goal detail |
+| POST | `/api/v1/agents/{id}/goals/{gid}/plans/{pid}/approve` | Approve plan |
+| POST | `/api/v1/agents/{id}/goals/{gid}/plans/{pid}/reject` | Reject plan |
+| GET | `/api/v1/agents/{id}/audit` | Audit findings (filter: `?since=&severity=`) |
+| POST | `/api/v1/agents/{id}/audit/{fid}/resolve` | Resolve finding |
+| POST | `/api/v1/agents/migrate` | Run migration scan, returns proposed constitutions |
 
-Available when the `WithBotWebhook` server option is configured. The `botID` path parameter identifies the target bot.
+Authenticated via the existing API key mechanism when `require_auth: true`.
+
+**Webhook trigger example:**
 
 ```bash
-curl -X POST http://localhost:8081/api/v1/bot/my-bot/trigger \
+curl -X POST http://localhost:8081/api/v1/agents/ci-monitor/trigger \
   -H "Content-Type: application/json" \
-  -d '{"event": "deployment_complete", "data": {"service": "api"}}'
+  -d '{"event": "push", "ref": "refs/heads/main", "head_commit": {"id": "abc123"}}'
+```
+
+**List employees example:**
+
+```bash
+curl http://localhost:8081/api/v1/agents \
+  -H "Authorization: Bearer $MEEPT_API_KEY"
 ```
 
 ### WebSocket

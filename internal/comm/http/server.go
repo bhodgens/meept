@@ -143,8 +143,11 @@ type Server struct {
 	// progressRateLimiter prevents spamming WebSocket clients with rapid progress updates.
 	progressRateLimiter *progressRateLimiter
 
-	// Bot webhook handler (optional, set via WithBotWebhook)
-	botWebhookHandler http.Handler
+	// Agent API handler (optional, set via WithAgentHandlers).
+	// Replaces the former botWebhookHandler; the webhook trigger endpoint
+	// now lives under /api/v1/agents/{id}/trigger (spec line 506).
+	// Uses an interface to avoid an import cycle (employee -> bot -> comm/http).
+	agentAPIHandler RouteRegistrar
 
 	// MCP over HTTP+SSE support
 	mcpServices *services.ServiceRegistry
@@ -613,11 +616,26 @@ type SSEEvent struct {
 	Data []byte
 }
 
-// WithBotWebhook registers an HTTP handler for bot webhook triggers.
-func WithBotWebhook(h http.Handler) ServerOption {
+// RouteRegistrar is the interface for HTTP handlers that register their own
+// routes on the server's mux. Used by WithAgentHandlers to avoid an import
+// cycle (internal/comm/http cannot import internal/employee because employee
+// -> bot -> comm/http would create a cycle).
+type RouteRegistrar interface {
+	RegisterRoutes(mux *http.ServeMux)
+}
+
+// WithAgentHandlers registers the AI Employee HTTP handlers for
+// /api/v1/agents/*. The handler dispatches through the RPC callback (set via
+// WithRPCCall) so the employee.Manager has a single owner. When rpcCall is
+// nil, the routes return 503.
+//
+// This option replaces the former WithBotWebhook: the webhook trigger
+// endpoint moves from /api/v1/bot/{id}/trigger to
+// /api/v1/agents/{id}/trigger (spec line 506).
+func WithAgentHandlers(h RouteRegistrar) ServerOption {
 	return func(s *Server) {
 		if h != nil {
-			s.botWebhookHandler = h
+			s.agentAPIHandler = h
 		}
 	}
 }
@@ -1142,9 +1160,12 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	// Skill UI endpoint
 	mux.HandleFunc("GET /api/v1/skills/{slug}/ui", s.handleSkillUI)
 
-	// Bot webhook endpoint (optional, depends on WithBotWebhook option)
-	if s.botWebhookHandler != nil {
-		mux.Handle("POST /api/v1/bot/{botID}/trigger", s.botWebhookHandler)
+	// AI Employee (agents) endpoints under /api/v1/agents/*.
+	// Routes inherit the server's auth middleware. All dispatch through
+	// rpcCall to the agents.* RPC handlers registered by the employee
+	// package (spec lines 508-524).
+	if s.agentAPIHandler != nil {
+		s.agentAPIHandler.RegisterRoutes(mux)
 	}
 
 	// PTY session endpoints (optional, depends on WithPTY option)

@@ -89,6 +89,18 @@ make menubar-clean             # Clean menubar build artifacts
 ./bin/meept plans approve <id>            # Approve a pending plan
 ./bin/meept plans reject <id>             # Reject a pending plan
 ./bin/meept plans confirm <id>            # Confirm a completed plan
+
+# Agent (AI Employee) commands — replaces `meept bots`
+./bin/meept agents list                   # List all employees, status, tier, drift score
+./bin/meept agents show <id>              # Full definition: constitution, state, goals, findings
+./bin/meept agents create <def.json5>     # Validate constitution and register employee
+./bin/meept agents pause <id>             # Operator pause
+./bin/meept agents resume <id>            # Operator resume (only un-pause path)
+./bin/meept agents amend <id> --field=<k> <v>  # Propose constitution amendment (Plan signoff)
+./bin/meept agents goals [--employee=<id>]# List goals with health (red/yellow/green)
+./bin/meept agents goal <gid> --approve <pid>
+./bin/meept agents audit <id> [--since=6h]# Recent findings, severity, resolution
+./bin/meept agents migrate                # Scan legacy bots, propose constitutions
 ```
 
 ## Architecture Overview
@@ -134,6 +146,7 @@ User Input (CLI/Telegram/Web/MenuBar)
 | **MenuBar** | `menubar/` (SwiftUI app), `internal/comm/http` (REST API) |
 | **Metrics** | `internal/metrics` (store, collector) |
 | **Plans** | `internal/plan` (plan, store, manager, parser, writer, handler) |
+| **Employee** | `internal/employee` (constitution, goal, goal_loop, enforcement, authority, manager) |
 
 ### Skill/Model Resolution
 

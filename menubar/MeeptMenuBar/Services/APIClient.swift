@@ -161,6 +161,36 @@ class APIClient {
         return try await performData(request: request)
     }
 
+    // MARK: - Agents / Employees (async/await)
+
+    /// Lists all AI employees. Backed by `GET /api/v1/agents` (RPC: `agents.list`).
+    func listAgents() async throws -> [Employee] {
+        let request = try makeRequest(path: "/api/v1/agents", method: "GET")
+        let data = try await performData(request: request)
+        let decoder = JSONDecoder()
+        let resp = try decoder.decode(EmployeeListResponse.self, from: data)
+        return resp.agents.map { Employee(from: $0) }
+    }
+
+    /// Pauses the given employee. Backed by `POST /api/v1/agents/{id}/pause`.
+    func pauseAgent(id: String) async throws {
+        let request = try makeRequest(path: "/api/v1/agents/\(id)/pause", method: "POST")
+        try await performVoid(request: request)
+    }
+
+    /// Resumes the given employee. Backed by `POST /api/v1/agents/{id}/resume`.
+    func resumeAgent(id: String) async throws {
+        let request = try makeRequest(path: "/api/v1/agents/\(id)/resume", method: "POST")
+        try await performVoid(request: request)
+    }
+
+    /// Triggers a single invocation of the given employee. Backed by
+    /// `POST /api/v1/agents/{id}/trigger`.
+    func triggerAgent(id: String) async throws {
+        let request = try makeRequest(path: "/api/v1/agents/\(id)/trigger", method: "POST")
+        try await performVoid(request: request)
+    }
+
     // MARK: - Backward-compatible completion handler wrappers
 
     func getDaemonStatus(completion: @escaping (Result<DaemonStatus, Error>) -> Void) {

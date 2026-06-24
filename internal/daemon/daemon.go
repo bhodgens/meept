@@ -16,17 +16,16 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
-	botpkg "github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/calendar"
 	"github.com/caimlas/meept/internal/cluster"
 	"github.com/caimlas/meept/internal/comm/http"
 	comprpkg "github.com/caimlas/meept/internal/compress"
 	"github.com/caimlas/meept/internal/config"
+	employeepkg "github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/metrics"
-	mcp "github.com/caimlas/meept/internal/tools/mcp"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/queue"
@@ -39,6 +38,7 @@ import (
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/internal/templates"
+	mcp "github.com/caimlas/meept/internal/tools/mcp"
 	"github.com/caimlas/meept/internal/worker"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
@@ -48,14 +48,14 @@ import (
 //
 //nolint:revive // stutter with package name is intentional for API clarity
 type Daemon struct {
-	config           *Config
-	fullConfig       *config.Config // Full configuration loaded from file
-	bus              *bus.MessageBus
-	registry         *registry.Registry
-	rpc              *rpc.Server
-	httpServer       *http.Server
-	components       *Components // Agent, tools, LLM, etc.
-	metricsStore     *metrics.Store
+	config              *Config
+	fullConfig          *config.Config // Full configuration loaded from file
+	bus                 *bus.MessageBus
+	registry            *registry.Registry
+	rpc                 *rpc.Server
+	httpServer          *http.Server
+	components          *Components // Agent, tools, LLM, etc.
+	metricsStore        *metrics.Store
 	metricsCollector    *metrics.Collector
 	compressionStore    comprpkg.CCRStore
 	compressionPipeline *comprpkg.Pipeline
@@ -67,7 +67,7 @@ type Daemon struct {
 	planManager *plan.PlanManager
 	planHandler *plan.PlanHandler
 
-	status    atomic.Value // stores models.DaemonStatus
+	status       atomic.Value // stores models.DaemonStatus
 	startTime    time.Time
 	pidFile      string
 	shutdownOnce atomic.Bool // DAE-H1: per-instance guard (was package-level, broke test isolation)
@@ -641,13 +641,22 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			logger.Info("Project RPC handlers registered")
 		}
 
-		// Bot management handlers
-		if components.BotManager != nil {
-			botRPCHandler := botpkg.NewRPCHandler(components.BotManager)
-			for method, handler := range botRPCHandler.Handlers() {
+		// Employee (AI Employee) management handlers.
+		//
+		// Per spec line 529 ("Existing bot.* methods removed — hard
+		// cutover"), the legacy bot.* RPC namespace is replaced by
+		// agents.*. The underlying bot.Manager is still used as the
+		// execution/storage layer; only the RPC surface changes.
+		if components.EmployeeManager != nil {
+			agentRPCHandler := employeepkg.NewRPCHandler(components.EmployeeManager)
+			agentHandlers := agentRPCHandler.Handlers()
+			for method, handler := range agentHandlers {
 				rpcServer.RegisterHandler(method, handler)
 			}
-			logger.Info("Bot RPC handlers registered")
+			logger.Info("employee (agents.*) RPC handlers registered",
+				"methods", len(agentHandlers))
+		} else {
+			logger.Warn("employee manager not configured; agents.* RPC methods unavailable")
 		}
 	}
 
@@ -692,17 +701,24 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				logger.Info("MCP over HTTP+SSE enabled", "path", mcpPath)
 			}
 
-			// Bot webhook support (if bot manager is available)
-			if components.BotManager != nil {
-				httpOpts = append(httpOpts, http.WithBotWebhook(botpkg.NewWebhookHandler(components.BotManager)))
-				logger.Info("Bot webhook endpoint enabled", "path", "/api/v1/bot/{botID}/trigger")
-			}
-
 			// RPC call bridge: enables /api/v1/bus/call so HTTP clients can
-			// dispatch any RPC method registered on the RPC server.
+			// dispatch any RPC method registered on the RPC server. Also used
+			// by the agents.* HTTP handlers below.
 			if rpcServer != nil {
 				httpOpts = append(httpOpts, http.WithRPCCall(rpcServer.CallMethod))
 				logger.Info("RPC call bridge enabled", "endpoint", "/api/v1/bus/call")
+			}
+
+			// AI Employee HTTP endpoints under /api/v1/agents/* (Phase 7).
+			// Replaces the legacy /api/v1/bot/{id}/trigger endpoint (spec
+			// line 506). The handler dispatches through rpcCall to the
+			// agents.* RPC methods, so rpcServer must be non-nil.
+			if rpcServer != nil && components.EmployeeManager != nil {
+				agentHandler := employeepkg.NewAgentAPIHandler(employeepkg.RPCCallback(rpcServer.CallMethod))
+				httpOpts = append(httpOpts, http.WithAgentHandlers(agentHandler))
+				logger.Info("agent (employee) HTTP endpoints enabled", "path", "/api/v1/agents/*")
+			} else if components.EmployeeManager != nil {
+				logger.Warn("employee manager configured but RPC server is nil; agents.* HTTP endpoints disabled")
 			}
 
 			// Notification event system for real-time push to clients
@@ -752,11 +768,11 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 					httpSrv.CompressionStatsGetter = func() map[string]any {
 						s := components.AgentLoop.CompressionPipeline().Stats()
 						return map[string]any{
-							"entry_count":               s.CCREntries,
-							"total_original_tokens":     s.CCRTotalOriginalTokens,
-							"total_compressed_tokens":   s.CCRTotalCompressedTokens,
-							"tokens_saved":              max(0, s.CCRTotalOriginalTokens-s.CCRTotalCompressedTokens),
-							"total_retrievals":          s.CCRTotalRetrievals,
+							"entry_count":             s.CCREntries,
+							"total_original_tokens":   s.CCRTotalOriginalTokens,
+							"total_compressed_tokens": s.CCRTotalCompressedTokens,
+							"tokens_saved":            max(0, s.CCRTotalOriginalTokens-s.CCRTotalCompressedTokens),
+							"total_retrievals":        s.CCRTotalRetrievals,
 						}
 					}
 					logger.Info("Compression stats HTTP getter registered")
@@ -819,23 +835,23 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	}
 
 	d := &Daemon{
-		config:           cfg,
-		fullConfig:       fullCfg,
-		bus:              msgBus,
-		registry:         reg,
-		rpc:              rpcServer,
-		httpServer:       httpSrv,
+		config:              cfg,
+		fullConfig:          fullCfg,
+		bus:                 msgBus,
+		registry:            reg,
+		rpc:                 rpcServer,
+		httpServer:          httpSrv,
 		components:          components,
 		metricsStore:        metricsStore,
 		metricsCollector:    coll,
 		compressionStore:    compStore,
 		compressionPipeline: compPipeline,
 		taskCollector:       taskColl,
-		planStore:        planStoreInst,
-		planManager:      planManagerInst,
-		planHandler:      planHandlerInst,
-		logger:           logger,
-		pidFile:          cfg.PIDFile,
+		planStore:           planStoreInst,
+		planManager:         planManagerInst,
+		planHandler:         planHandlerInst,
+		logger:              logger,
+		pidFile:             cfg.PIDFile,
 	}
 	d.status.Store(models.StatusStopped)
 

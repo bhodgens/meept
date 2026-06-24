@@ -42,6 +42,12 @@ flowchart TB
         PlanParser["Plan Parser/Writer<br/>plan.md"]
     end
 
+    subgraph Employees["Employee Layer"]
+        GoalLoop["GoalLoop<br/>internal/employee"]
+        Constitution["Constitution<br/>internal/employee"]
+        Enforcement["Constitution Engine<br/>pre-exec / post-turn / periodic"]
+    end
+
     subgraph LLM["LLM Layer"]
         LLMClient["LLM Client<br/>internal/llm"]
         Resolver["Model Resolver<br/>internal/llm"]
@@ -113,7 +119,16 @@ flowchart TB
 
     SecEngine --> Sanitizer
     SecEngine --> Tirith
+
+    GoalLoop --> Constitution
+    GoalLoop --> Enforcement
+    GoalLoop --> PlanMgr
+    Enforcement -.-> SecEngine
+    GoalLoop -.-> Executor
 ```
+
+The Employee Layer is an optional overlay on the bot runtime. When `employees.enabled` is true in config, bots loaded from `~/.meept/bots/` must carry a constitution or the loader refuses to start them. The GoalLoop drives the assess-plan-execute-reflect cycle; the Constitution Engine gates every tool call through the existing SecurityEngine and audits each turn via a small-model classifier.
+
 
 ## Component Layers
 
@@ -164,6 +179,7 @@ flowchart TB
 |-----------|---------|-------------|
 | LLM Client | `internal/llm` | Multi-provider LLM integration |
 | Plan System | `internal/plan` | Plan lifecycle, synthesis into tasks, progress tracking |
+| Employee Layer | `internal/employee` | Constitution, GoalLoop, Constitution Engine (wraps `internal/bot`) |
 | Context Compactor | `internal/llm` | LLM-based context compaction (knowledge-preserving summarization) |
 | Context Firewall | `internal/llm` | Three-layer context management (compaction, compression, hard limit) |
 | Token Cache | `internal/llm` | L1+L2 response caching with file-aware invalidation |
@@ -231,6 +247,8 @@ flowchart LR
 5. **OpenAI-compatible API** — LLM providers all use the OpenAI chat completion format, making it easy to add new providers.
 
 6. **Client-side STT** — Speech-to-text runs entirely in the client (TUI or Flutter), not through the daemon. The `internal/stt` package provides a `Transcriber` interface with pluggable engines (whisper, parakeet, native). Recording and transcription happen locally; only the resulting text is sent to the daemon as a normal chat message.
+
+7. **Employee layer wraps, not duplicates** — The `internal/employee/` package layers constitution, goal loop, and enforcement engine on top of the existing bot runtime (`internal/bot/`). Storage, triggers, and the runner stay shared. Non-employee agents (chat, coder, etc.) skip the employee enforcement stages entirely — no behavior change for existing agents. See [AI Employees](../workflows/employees.md) for the full feature spec.
 
 ## Dual-Path Progress Event Architecture
 

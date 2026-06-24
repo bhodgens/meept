@@ -551,3 +551,35 @@ type RalphLoopConfig struct {
 - `internal/agent/strategic.go` — Complexity analysis
 
 See [Ralph Loop: Self-Referential Task Verification](ralph-loop.md) for full documentation.
+
+## Employees
+
+Employees are persistent, constitution-bound autonomous agents that layer on top of the existing bot framework (`internal/bot/`). While the agents above handle interactive, user-driven tasks routed by the dispatcher, employees handle **persistent, autonomous** work triggered by cron, webhooks, or bus events.
+
+Each employee carries a **constitution** (structured metadata: purpose, autonomy tier, hard constraints, amendment policy), runs a **GoalLoop** that decides what to do next based on its tier (reactive, propose, autonomous), and is gated by a **Constitution Engine** at three checkpoints (pre-exec, post-turn, periodic).
+
+### Relationship to dispatcher agents
+
+- Employees use the same `AgentLoop.RunOnce()` and the same tools as any other agent.
+- The dispatcher does **not** route user requests to employees. Employees are triggered externally.
+- Employees appear in `platform_agents` output so dispatcher agents can discover them.
+- Employees can delegate to specialist agents via `delegate_task` and `request_handoff`. The reverse is also true: a specialist agent can delegate to an employee if the task fits the employee's charter.
+- An employee's `escalates_to` list names who signs off on its Plans. Entries are agent IDs or `"user"`. This integrates with the existing Plan signoff flow.
+
+### Autonomy tiers
+
+| Tier | Behavior |
+|------|----------|
+| 1 (reactive) | Trigger-only. No self-enqueued work. |
+| 2 (propose) | Scheduled ASSESS produces Plans; routes to `escalates_to` for signoff. |
+| 3 (autonomous) | Phase 2. Plans execute immediately; constitution gates only. |
+
+Tier is a property of the constitution, not the agent binary. The same underlying agent can be hired as different tiers in different employees.
+
+### CLI surface
+
+Employees are managed via `meept agents` (replaces the legacy `meept bots` namespace). See [AI Employees](../workflows/employees.md) for the full feature spec and the [AI Employee Design](../superpowers/specs/2026-06-23-ai-employee-design.md) for the design rationale.
+
+### Package
+
+Employee logic lives in `internal/employee/`, wrapping `internal/bot/`. The bot package remains the storage and execution layer; the employee package adds the constitution, goal loop, and enforcement engine on top.

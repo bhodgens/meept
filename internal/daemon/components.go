@@ -29,6 +29,7 @@ import (
 	"github.com/caimlas/meept/internal/comm/web"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/debug"
+	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/lint"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
@@ -207,6 +208,16 @@ type Components struct {
 	BotManager *bot.Manager
 	BotStore   *bot.Store
 
+	// Employee framework (AI Employee Design spec). Wraps BotManager with
+	// constitution enforcement, goal loops, and audit semantics. The
+	// underlying bot.Manager is reused as the execution/storage layer.
+	// May be nil when the employee subsystem is not configured; the RPC
+	// handler layer handles nil gracefully (returns errNotConfigured).
+	EmployeeManager    *employee.Manager
+	ConstitutionStore  *employee.ConstitutionStore
+	EmployeeGoalStore  *employee.GoalStore
+	EmployeeAuditStore *employee.AuditStore
+
 	// OAuth token management (shared across calendar, LLM providers, etc.)
 	TokenStore     *authpkg.TokenStore
 	RefreshManager *authpkg.RefreshManager
@@ -234,10 +245,10 @@ type Components struct {
 	AgentEventEmitter *agent.EventEmitter
 
 	// User instruction system (preferences, handler, listener, scheduler, injector)
-	InstructionStore       *preferences.Store
-	InstructionHandler     *agent.InstructionHandler
-	InstructionListener    *agent.InstructionListener
-	InstructionScheduler   *scheduler.InstructionScheduler
+	InstructionStore           *preferences.Store
+	InstructionHandler         *agent.InstructionHandler
+	InstructionListener        *agent.InstructionListener
+	InstructionScheduler       *scheduler.InstructionScheduler
 	InstructionContextInjector *agent.ContextInjector
 
 	Logger *slog.Logger
@@ -1951,6 +1962,45 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// Initialize employee framework (AI Employee Design spec). The
+	// employee layer is additive to the bot framework: it reuses the
+	// bot.Manager and bot.Store for persistence/execution and layers
+	// constitution, goal, and audit semantics on top. We initialize
+	// when either employees or bots are enabled (spec: "employees layer
+	// over bots").
+	if cfg.Employees.Enabled || cfg.Bots.Enabled {
+		// Inject the classifier or small-model client as the migrator LLM
+		// so Migrate can propose richer constitutions from bot prompts.
+		// Prefer ClassifierClient (already falls back to small_model
+		// internally). Nil is fine — the conservative path runs.
+		var migratorOpt employee.WiringOption
+		if c.ClassifierClient != nil {
+			migratorOpt = employee.WithMigratorLLM(c.ClassifierClient)
+		} else if c.LLMClient != nil {
+			migratorOpt = employee.WithMigratorLLM(c.LLMClient)
+		}
+		wiring, err := employee.NewManagerFromConfig(
+			ctx, cfg, c.BotManager, c.BotStore,
+			logger.With("component", "employee-wiring"),
+			migratorOpt,
+		)
+		if err != nil {
+			logger.Error("failed to initialize employee framework", "error", err)
+		} else {
+			c.EmployeeManager = wiring.Manager
+			c.ConstitutionStore = wiring.ConstitutionStore
+			c.EmployeeGoalStore = wiring.GoalStore
+			c.EmployeeAuditStore = wiring.AuditStore
+			logger.Info("Employee framework initialized",
+				"data_dir", wiring.EmployeesDataDir,
+				"shared_db", wiring.SharedDBPath != "",
+				"constitution_store", wiring.ConstitutionStore != nil,
+				"goal_store", wiring.GoalStore != nil,
+				"audit_store", wiring.AuditStore != nil,
+			)
+		}
+	}
+
 	return c, nil
 }
 
@@ -2073,6 +2123,10 @@ func (c *Components) Start(ctx context.Context) error {
 			case "bot":
 				if c.BotManager != nil {
 					c.BotManager.StopAll()
+				}
+			case "employee":
+				if c.EmployeeManager != nil {
+					c.EmployeeManager.StopAll()
 				}
 			case "cluster":
 				if c.ClusterEngine != nil {
@@ -2351,6 +2405,19 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 	}
 
+	// Start employee framework (AI Employee Design spec). Prime the
+	// constitution cache and prepare the manager for runtime. The
+	// underlying bot manager is started above; this method only primes
+	// employee-specific state.
+	if c.EmployeeManager != nil {
+		if err := c.EmployeeManager.StartAll(ctx); err != nil {
+			c.Logger.Error("Failed to start employee framework", "error", err)
+		} else {
+			c.Logger.Info("Employee framework started")
+			startedHandlers = append(startedHandlers, "employee")
+		}
+	}
+
 	// Start gossip engine (cluster mode)
 	if c.ClusterEngine != nil {
 		if err := c.ClusterEngine.Start(ctx); err != nil {
@@ -2458,6 +2525,32 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	// Stop watchdog monitor
 	if c.Watchdog != nil {
 		c.Watchdog.Stop()
+	}
+
+	// Stop employee framework before bot framework (the employee layer
+	// wraps the bot layer). Stores are closed here; the manager's
+	// in-flight invocations drain via the bot manager's StopAll below.
+	if c.EmployeeManager != nil {
+		c.EmployeeManager.StopAll()
+		c.Logger.Info("Employee framework stopped")
+	}
+	if c.ConstitutionStore != nil {
+		if err := c.ConstitutionStore.Close(); err != nil {
+			c.Logger.Error("Failed to close constitution store", "error", err)
+			lastErr = err
+		}
+	}
+	if c.EmployeeGoalStore != nil {
+		if err := c.EmployeeGoalStore.Close(); err != nil {
+			c.Logger.Error("Failed to close employee goal store", "error", err)
+			lastErr = err
+		}
+	}
+	if c.EmployeeAuditStore != nil {
+		if err := c.EmployeeAuditStore.Close(); err != nil {
+			c.Logger.Error("Failed to close employee audit store", "error", err)
+			lastErr = err
+		}
 	}
 
 	// Stop bot framework before scheduler

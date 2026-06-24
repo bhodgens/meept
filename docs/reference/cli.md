@@ -198,19 +198,47 @@ meept config get stt.enabled
 meept config set stt.engine "native"
 ```
 
-### `meept agents` - Agent Management
+### `meept agents` - AI Employee Management
 
-List available agents and their capabilities.
+The unified `meept agents` namespace manages AI employees — persistent, constitution-bound autonomous agents. This replaces the legacy `meept bots` commands (hard cutover). See [AI Employees](../workflows/employees.md) for the full feature spec.
+
+#### Lifecycle
 
 ```bash
-meept agents
+meept agents list                              # all employees, status, tier, drift score
+meept agents show <id>                         # full definition: constitution, state, goals, recent findings
+meept agents create <definition.json5>         # validates constitution; refuses without one
+meept agents update <id> <definition.json5>
+meept agents delete <id>                       # stops + deletes; confirms unless --force
+meept agents pause <id>                        # operator pause
+meept agents resume <id>                       # operator resume (only un-pause path)
+meept agents amend <id> --field=<key> <value>  # propose constitution amendment (routes to Plan signoff)
 ```
 
-**Shows:**
-- Agent IDs and names
-- Roles and purposes
-- Available tools
-- Model assignments
+#### Migration
+
+```bash
+meept agents migrate                           # scans ~/.meept/bots/*.json
+meept agents migrate --apply <id>              # write proposed constitution to disk
+```
+
+#### Goals
+
+```bash
+meept agents goals [--employee=<id>]           # list goals with health (red/yellow/green)
+meept agents goal <goal-id>                    # goal detail + active plan + history
+meept agents goal <goal-id> --approve <plan-id>
+meept agents goal <goal-id> --reject <plan-id> --reason="..."
+```
+
+#### Audit
+
+```bash
+meept agents audit <id> [--since=<dur>]        # recent findings, severity, resolution
+meept agents audit <id> --resolve <finding-id> --as=false_positive
+```
+
+Legacy `meept bots` commands are removed. Scripts that call `meept bots` get an error pointing to `meept agents --help` and [AI Employees](../workflows/employees.md).
 
 ### `meept plans` - Plan Management
 

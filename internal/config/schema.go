@@ -75,6 +75,7 @@ type Config struct {
 	Session           SessionConfig           `json:"session"            toml:"session"`
 	Cluster           ClusterConfig           `json:"cluster"             toml:"cluster"`
 	Bots              BotsConfig              `json:"bots"                toml:"bots"`
+	Employees         EmployeesConfig         `json:"employees"           toml:"employees"`
 	Plans             PlansConfig             `json:"plans"               toml:"plans"`
 	Projects          ProjectsConfig          `json:"projects"            toml:"projects"`
 	STT               STTConfig               `json:"stt"                 toml:"stt"`
@@ -103,6 +104,76 @@ type BotsConfig struct {
 	DefaultDailyBudgetCents     int    `json:"default_daily_budget_cents" toml:"default_daily_budget_cents"`
 	AutoPauseOnConsecutiveFails int    `json:"auto_pause_on_consecutive_failures" toml:"auto_pause_on_consecutive_failures"`
 	WebhookEnabled              bool   `json:"webhook_enabled" toml:"webhook_enabled"`
+}
+
+// EmployeesConfig configures the AI Employee framework. The employee layer
+// wraps the existing bot persistence/runtime with a constitution, goal loop,
+// and enforcement engine. See docs/workflows/employees.md for the full
+// feature spec and docs/superpowers/specs/2026-06-23-ai-employee-design.md
+// for the design rationale.
+type EmployeesConfig struct {
+	// Enabled turns on the employee layer. When true, bots loaded from
+	// ~/.meept/bots/ must carry a constitution or the loader refuses to
+	// start them. When false, the legacy bot runtime is used as-is.
+	Enabled bool `json:"enabled" toml:"enabled"`
+
+	// Audit configures the constitution enforcement engine.
+	Audit EmployeesAuditConfig `json:"audit" toml:"audit"`
+
+	// AutoPause controls when an employee is automatically paused by the
+	// enforcement engine. A paused employee cannot self-resume; only an
+	// operator can call `meept agents resume <id>`.
+	AutoPause EmployeesAutoPauseConfig `json:"auto_pause" toml:"auto_pause"`
+}
+
+// EmployeesAuditConfig configures the constitution audit checkpoints
+// (post-turn and periodic). The pre-exec gate is always on when the
+// employee layer is enabled; these settings only affect the LLM-based
+// audit checkpoints.
+type EmployeesAuditConfig struct {
+	// Model is the alias (from config/models.json5) used for the post-turn
+	// and periodic audits. Small models are recommended to keep audit cost
+	// low relative to the employee's working model.
+	Model string `json:"model" toml:"model"`
+
+	// PeriodicInterval is the global default cadence for the periodic
+	// bulk audit (Checkpoint 3). Per-employee AssessmentInterval overrides
+	// this for the GoalLoop; this value is used when the employee doesn't
+	// declare its own interval.
+	PeriodicInterval string `json:"periodic_interval" toml:"periodic_interval"`
+
+	// DriftPauseThreshold is the drift score (0.0-1.0) above which the
+	// periodic auditor auto-pauses the employee. Drift measures slow
+	// divergence from the constitution across many turns; a single
+	// turn can't trigger it.
+	DriftPauseThreshold float64 `json:"drift_pause_threshold" toml:"drift_pause_threshold"`
+
+	// FindingsRetentionDays controls how long audit findings are kept in
+	// SQLite before being archived. Older findings are pruned by a
+	// scheduler job.
+	FindingsRetentionDays int `json:"findings_retention_days" toml:"findings_retention_days"`
+}
+
+// EmployeesAutoPauseConfig controls the auto-pause policy. When any of
+// these conditions fire and the corresponding flag is true, the employee
+// is paused and an audit finding is written at the critical severity.
+type EmployeesAutoPauseConfig struct {
+	// OnCriticalFinding pauses when the post-turn or periodic auditor
+	// emits a finding at "critical" severity.
+	OnCriticalFinding bool `json:"on_critical_finding" toml:"on_critical_finding"`
+
+	// OnDrift pauses when the periodic auditor's drift score exceeds
+	// Audit.DriftPauseThreshold.
+	OnDrift bool `json:"on_drift" toml:"on_drift"`
+
+	// OnNeverViolation pauses when the pre-exec gate or post-turn auditor
+	// detects a violation of a constitution's "never" rules.
+	OnNeverViolation bool `json:"on_never_violation" toml:"on_never_violation"`
+
+	// RequireOperatorResume prevents an employee from resuming itself
+	// after an auto-pause. Only an explicit `meept agents resume <id>`
+	// from an operator clears the pause.
+	RequireOperatorResume bool `json:"require_operator_resume" toml:"require_operator_resume"`
 }
 
 // PlansConfig holds configuration for the plan system.
@@ -1798,6 +1869,21 @@ func DefaultConfig() *Config {
 			DefaultDailyBudgetCents:     500, // $5.00
 			AutoPauseOnConsecutiveFails: 5,
 			WebhookEnabled:              false,
+		},
+		Employees: EmployeesConfig{
+			Enabled: true,
+			Audit: EmployeesAuditConfig{
+				Model:                "small",
+				PeriodicInterval:     "6h",
+				DriftPauseThreshold:  0.3,
+				FindingsRetentionDays: 90,
+			},
+			AutoPause: EmployeesAutoPauseConfig{
+				OnCriticalFinding:    true,
+				OnDrift:              true,
+				OnNeverViolation:     true,
+				RequireOperatorResume: true,
+			},
 		},
 		STT: STTConfig{
 			Enabled:   false,

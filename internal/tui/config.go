@@ -94,6 +94,7 @@ type CommandPaletteKeys struct {
 	ViewQueue     string `json:"view_queue"`     // Switch to queue view (default: "q")
 	ViewMemory    string `json:"view_memory"`    // Switch to memory view (default: "m")
 	ViewPlans     string `json:"view_plans"`     // Switch to plans view (default: "p")
+	ViewAgents    string `json:"view_agents"`    // Switch to agents/employees view (default: "e")
 	Sidebar       string `json:"sidebar"`        // Toggle sidebar (default: "y")
 	Sessions      string `json:"sessions"`       // Open session picker (default: "shift+s")
 	NewSession    string `json:"new_session"`    // Create new session (default: "n")
@@ -153,6 +154,7 @@ func DefaultClientConfig() *ClientConfig {
 				ViewQueue:     "q",
 				ViewMemory:    "m",
 				ViewPlans:     "p",
+				ViewAgents:    "e",
 				Sidebar:       "y",
 				Sessions:      "S",
 				NewSession:    "n",

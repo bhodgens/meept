@@ -46,6 +46,7 @@ const (
 	ViewMemory
 	ViewPlans
 	ViewSearch
+	ViewAgents
 )
 
 // VerbosityLevel controls how much progress detail to show in the TUI.
@@ -108,6 +109,7 @@ type App struct {
 	memory   *models.MemoryModel
 	plans    *models.PlansModel
 	search   *models.SearchModel
+	agents   *AgentsPanel
 
 	// Sidebar
 	sidebar *SidebarModel
@@ -253,6 +255,7 @@ func NewApp(socketPath string) *App {
 		memory:         models.NewMemoryModel(rpc),
 		plans:          models.NewPlansModel(rpc),
 		search:         models.NewSearchModel(rpc, slog.Default()),
+		agents:         NewAgentsPanel(rpc),
 		sidebar:        NewSidebarModel(rpc, eventRPC, styles, clientConfig.Rendering.SidebarAnimation),
 		keys:           DefaultKeyMap(),
 		clientConfig:   clientConfig,
@@ -605,6 +608,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.plans.SetSize(mainWidth, msg.Height-chromeHeight)
 		if a.search != nil {
 			a.search.SetSize(mainWidth, msg.Height-chromeHeight)
+		}
+		if a.agents != nil {
+			a.agents.SetSize(mainWidth, msg.Height-chromeHeight)
 		}
 
 		return a, nil
@@ -1719,6 +1725,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.search != nil {
 			cmd = a.search.Update(msg)
 		}
+	case ViewAgents:
+		if a.agents != nil {
+			cmd = a.agents.Update(msg)
+		}
 	}
 	if cmd != nil {
 		cmds = append(cmds, cmd)
@@ -1763,6 +1773,10 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, cmd
 		case keys.ViewPlans:
 			a.currentView = ViewPlans
+			cmd := a.initCurrentView()
+			return a, cmd
+		case keys.ViewAgents:
+			a.currentView = ViewAgents
 			cmd := a.initCurrentView()
 			return a, cmd
 		case keys.Sidebar:
@@ -1965,6 +1979,10 @@ func (a *App) initCurrentView() tea.Cmd {
 		if a.search != nil {
 			return a.search.Init()
 		}
+	case ViewAgents:
+		if a.agents != nil {
+			return a.agents.Init()
+		}
 	}
 	return nil
 }
@@ -2015,6 +2033,12 @@ func (a *App) View() tea.View {
 				mainView = a.search.View()
 			} else {
 				mainView = "search unavailable"
+			}
+		case ViewAgents:
+			if a.agents != nil {
+				mainView = a.agents.View()
+			} else {
+				mainView = "agents unavailable"
 			}
 		}
 	}
@@ -2338,6 +2362,14 @@ func (a *App) getQuickActions() []string {
 			a.styles.HelpKey.Render(KeyEnter)+" "+a.styles.HelpValue.Render("details"),
 			a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"),
 			a.styles.HelpKey.Render("/")+" "+a.styles.HelpValue.Render("filter"),
+		)
+
+	case ViewAgents:
+		actions = append(actions,
+			a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"),
+			a.styles.HelpKey.Render(KeyEnter)+" "+a.styles.HelpValue.Render("details"),
+			a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"),
+			a.styles.HelpKey.Render("1/2/3")+" "+a.styles.HelpValue.Render("list/approvals/audit"),
 		)
 
 	case ViewSearch:
