@@ -41,6 +41,12 @@ type Orchestrator struct {
 	templateReg *plannerTemplateLoader  // template loader for split.md rendering
 	stepStore  *task.StepStore          // step store for listing + replacing steps
 
+	// Per-task artifact store for phase transition artifact tracking.
+	// One store per active task; cleared on task completion.
+	// Wired by daemon (Task 6). Nil-gated in startNextPhase.
+	artifacts         *artifactStore
+	phaseSpecOverride map[string]*PlanPhaseSpec // test override for phase specs
+
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 }

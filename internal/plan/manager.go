@@ -586,6 +586,31 @@ func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID string) error 
 	return nil
 }
 
+// GetPhasesByTask returns the phases for the plan associated with the given
+// taskID. If the task is not plan-tracked, returns nil without error.
+// The phases are returned ordered by sequence (as stored).
+func (m *PlanManager) GetPhasesByTask(ctx context.Context, taskID string) ([]*PlanPhase, error) {
+	m.mu.RLock()
+	planID, ok := m.taskPlanMap[taskID]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, nil
+	}
+	phases, err := m.store.GetPhases(ctx, planID)
+	if err != nil {
+		return nil, fmt.Errorf("get phases for plan %s: %w", planID, err)
+	}
+	return phases, nil
+}
+
+// RegisterTaskPlan records a taskID -> planID mapping. This is used by tests
+// and by the Synthesize flow to link child tasks to their parent plan.
+func (m *PlanManager) RegisterTaskPlan(taskID, planID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.taskPlanMap[taskID] = planID
+}
+
 // ---------------------------------------------------------------------------
 // Plan creation threshold
 // ---------------------------------------------------------------------------
