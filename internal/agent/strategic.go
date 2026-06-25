@@ -61,64 +61,6 @@ type plannerOutput struct {
 
 const interviewAmbiguityThreshold = 0.6
 
-// interviewPromptTemplate is the system prompt for generating interview questions
-// based on true intent analysis. The LLM generates 2-4 targeted questions about
-// scope, constraints, requirements, and ambiguities.
-const interviewPromptTemplate = `You are a project planning interviewer. Based on the user's request and intent analysis below, generate 2-4 targeted interview questions to resolve ambiguities before task decomposition.
-
-Your questions should cover:
-1. Specific scope boundaries (what is in vs. out of scope)
-2. Constraints and preferences (technology, performance, timeline)
-3. Priority or ordering of requirements
-4. Specific ambiguities identified in the analysis
-
-Rules:
-- Generate ONLY valid JSON, no markdown, no explanation
-- Keep questions concise and actionable
-- Each question should have a clear, specific focus
-- Maximum 4 questions, minimum 2
-
-Output format:
-{"questions": ["question 1", "question 2", ...]}
-
-Request: %s
-
-Intent analysis:
-- Goal: %s
-- Ambiguity: %.1f
-- Scope: %s
-- Category: %s
-- Confidence: %.1f
-- Identified ambiguities: %s`
-
-const plannerPromptTemplate = `You are a task planner. Decompose the following request into discrete, executable steps.
-Each step should be a single unit of work that can be assigned to a specialist agent.
-
-Available tool hints (use these to indicate what kind of agent should handle each step):
-- "code" or "refactor" → coding specialist
-- "debug" or "fix" → debugging specialist
-- "analyze" or "research" → analysis specialist
-- "git" or "commit" → git operations specialist
-- "plan" → further planning/decomposition
-- "chat" → general conversation
-
-Output ONLY valid JSON in this exact format (no markdown, no explanation):
-{
-  "steps": [
-    {"description": "step description", "tool_hint": "code", "depends_on": []},
-    {"description": "step description", "tool_hint": "code", "depends_on": [0]},
-    {"description": "step description", "tool_hint": "git", "depends_on": [0, 1]}
-  ]
-}
-
-The "depends_on" field uses 0-based step indices. Steps with empty depends_on can run in parallel.
-HARD CONSTRAINT: You MUST output AT MOST %d steps. Do not exceed this limit. Outputting more than %d steps is a failure. Be specific and actionable.
-
-%s
-
-Request to decompose:
-%s`
-
 // StrategicPlanner decomposes tasks into steps using an LLM planner agent.
 type StrategicPlanner struct {
 	registry    *AgentRegistry
@@ -136,6 +78,7 @@ type StrategicPlanner struct {
 	pairInputMinChars     int
 	interviewAmbiguity    float64
 	metricsStore          *metrics.Store
+	templateLoader        *plannerTemplateLoader
 }
 
 // StrategicPlannerConfig holds configuration for the strategic planner.
@@ -160,6 +103,9 @@ type StrategicPlannerConfig struct {
 	PairInputMinChars int
 	// MetricsStore, when non-nil, receives planner outcome metrics.
 	MetricsStore *metrics.Store
+	// TemplateLoader, if non-nil, supplies markdown-overridable planner
+	// prompts. If nil, the planner constructs a default loader.
+	TemplateLoader *plannerTemplateLoader
 }
 
 // NewStrategicPlanner creates a new strategic planner.
@@ -186,7 +132,7 @@ func NewStrategicPlanner(cfg StrategicPlannerConfig) *StrategicPlanner {
 		cfg.Routing = NewDefaultRoutingTable()
 	}
 
-	return &StrategicPlanner{
+	sp := &StrategicPlanner{
 		registry:              cfg.Registry,
 		taskStore:             cfg.TaskStore,
 		stepStore:             cfg.StepStore,
@@ -201,7 +147,14 @@ func NewStrategicPlanner(cfg StrategicPlannerConfig) *StrategicPlanner {
 		pairInputMinChars:     cfg.PairInputMinChars,
 		interviewAmbiguity:    interviewAmbiguityThreshold,
 		metricsStore:          cfg.MetricsStore,
+		templateLoader:        cfg.TemplateLoader,
 	}
+	if sp.templateLoader == nil {
+		sp.templateLoader = newPlannerTemplateLoader()
+		sp.templateLoader.fallbacks["planner/decompose.md"] = defaultDecomposeFallback()
+		sp.templateLoader.fallbacks["planner/interview.md"] = defaultInterviewFallback()
+	}
+	return sp
 }
 
 // ConductInterview determines whether an interview is needed for the given plan
@@ -262,15 +215,18 @@ func (sp *StrategicPlanner) ConductInterview(ctx context.Context, req PlanReques
 		ambiguityList = strings.Join(req.TrueAnalysis.SuggestedQuestions, "; ")
 	}
 
-	prompt := fmt.Sprintf(interviewPromptTemplate,
-		req.Input,
-		req.TrueAnalysis.Goal,
-		req.TrueAnalysis.Ambiguity,
-		req.TrueAnalysis.Scope,
-		req.TrueAnalysis.Category,
-		req.TrueAnalysis.Confidence,
-		ambiguityList,
-	)
+	prompt, renderErr := sp.templateLoader.render("planner/interview.md", map[string]any{
+		"Request":     req.Input,
+		"Goal":        req.TrueAnalysis.Goal,
+		"Ambiguity":   req.TrueAnalysis.Ambiguity,
+		"Scope":       req.TrueAnalysis.Scope,
+		"Category":    req.TrueAnalysis.Category,
+		"Confidence":  req.TrueAnalysis.Confidence,
+		"Ambiguities": ambiguityList,
+	})
+	if renderErr != nil {
+		return nil, fmt.Errorf("render interview template: %w", renderErr)
+	}
 
 	interviewCtx, cancel := context.WithTimeout(ctx, sp.plannerTimeout)
 	defer cancel()
@@ -598,7 +554,14 @@ func (sp *StrategicPlanner) generatePlan(ctx context.Context, req PlanRequest) (
 	}
 
 	// Build prompt
-	prompt := fmt.Sprintf(plannerPromptTemplate, sp.maxPlanSteps, sp.maxPlanSteps, contextSection, req.Input)
+	prompt, renderErr := sp.templateLoader.render("planner/decompose.md", map[string]any{
+		"MaxSteps":       sp.maxPlanSteps,
+		"ContextSection": contextSection,
+		"Input":          req.Input,
+	})
+	if renderErr != nil {
+		return nil, fmt.Errorf("render decompose template: %w", renderErr)
+	}
 
 	// When a registry is available, append dynamic agent availability hints
 	// so the planner LLM knows which specialist agents are actually enabled.

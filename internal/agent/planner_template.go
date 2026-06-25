@@ -110,6 +110,27 @@ func defaultInterviewFallback() string {
 	return plannerPromptTemplateLegacyInterview
 }
 
+// NewDaemonPlannerTemplateLoader constructs a loader with the standard 4 tiers
+// and pre-registers fallbacks for the planner templates. The bundledPromptsPath
+// is used as the lowest-priority tier (typically "config/prompts" relative to
+// the daemon working directory).
+func NewDaemonPlannerTemplateLoader(bundledPromptsPath string) *plannerTemplateLoader {
+	home, _ := os.UserHomeDir()
+	l := &plannerTemplateLoader{
+		tiers: []string{
+			".meept/prompts",
+			filepath.Join(home, ".meept", "prompts"),
+			filepath.Join(home, ".config", "meept", "prompts"),
+			bundledPromptsPath,
+		},
+		fallbacks: make(map[string]string),
+		logger:    slog.Default(),
+	}
+	l.fallbacks["planner/decompose.md"] = defaultDecomposeFallback()
+	l.fallbacks["planner/interview.md"] = defaultInterviewFallback()
+	return l
+}
+
 // Legacy const bodies preserved verbatim for fallback. These are duplicated
 // from the original consts in strategic.go before deletion; kept here so
 // fallback behavior is testable without the bundled markdown files.

@@ -127,10 +127,10 @@ func NewDefaultThresholds() *PlannerThresholds {
 const maxHintDescriptionLen = 80
 
 // BuildPlannerPromptHint generates the "Available tool hints" section of the
-// planner prompt from the agent registry, replacing the hardcoded list in
-// plannerPromptTemplate (strategic.go:85-91). The hint lists each enabled
-// executor agent (excluding the planner itself) with its description or
-// purpose truncated to 80 characters.
+// planner prompt from the agent registry, replacing the hardcoded list that
+// previously lived in the plannerPromptTemplate const. The hint lists each
+// enabled executor agent (excluding the planner itself) with its description
+// or purpose truncated to 80 characters.
 //
 // Returns an empty string if registry is nil, so the caller can omit the
 // section entirely when no registry is available.

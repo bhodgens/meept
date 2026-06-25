@@ -1602,6 +1602,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				Logger:         logger.With("component", "strategic"),
 				MaxPlanSteps:   cfg.Orchestrator.MaxPlanSteps,
 				PlannerTimeout: time.Duration(cfg.Orchestrator.PlannerTimeout) * time.Second,
+				TemplateLoader: agent.NewDaemonPlannerTemplateLoader("config/prompts"),
 			})
 
 			reviewManager := agent.NewReviewManager(agent.ReviewManagerConfig{
