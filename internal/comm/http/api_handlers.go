@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	configCli "github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/services"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
@@ -3572,6 +3573,48 @@ func (s *Server) handleGetMemoryConfig(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]string{"content": content})
+}
+
+// handleGetOrchestratorConfig handles GET /api/v1/config/orchestrator.
+// Returns the orchestrator block of meept.json5 as structured JSON. Thresholds
+// default to zero values when the file or block is absent; downstream consumers
+// layer legacy defaults on top (see config.DefaultConfig).
+func (s *Server) handleGetOrchestratorConfig(w http.ResponseWriter, _ *http.Request) {
+	if s.configService == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "config service not available")
+		return
+	}
+
+	oc, err := s.configService.LoadOrchestratorConfig()
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, oc)
+}
+
+// handlePutOrchestratorConfig handles PUT /api/v1/config/orchestrator.
+// Body: the JSON-serialized OrchestratorConfig. The orchestrator key in
+// meept.json5 is replaced atomically; other top-level keys are preserved.
+// Returns the persisted OrchestratorConfig.
+func (s *Server) handlePutOrchestratorConfig(w http.ResponseWriter, r *http.Request) {
+	if s.configService == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "config service not available")
+		return
+	}
+
+	var oc configCli.OrchestratorConfig
+	if !s.readJSON(w, r, &oc) {
+		return
+	}
+
+	if err := s.configService.SaveOrchestratorConfig(oc); err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, oc)
 }
 
 // handleSkillsStats handles GET /api/v1/skills/stats?name=<skill-name>.

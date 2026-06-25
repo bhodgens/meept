@@ -2,6 +2,7 @@
 package http
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	configCli "github.com/caimlas/meept/internal/config"
 	"github.com/tailscale/hujson"
 )
 
@@ -467,5 +469,93 @@ func (s *ConfigService) DeleteAgent(id string) error {
 		return fmt.Errorf("failed to delete agent directory: %w", err)
 	}
 
+	return nil
+}
+
+// LoadOrchestratorConfig reads the orchestrator block from meept.json5.
+// Returns the zero-value OrchestratorConfig when the file or block is absent,
+// mirroring the backward-compat behavior of config.LoadJSON5Config.
+func (s *ConfigService) LoadOrchestratorConfig() (configCli.OrchestratorConfig, error) {
+	path := s.getMeeptConfigPath()
+	var zero configCli.OrchestratorConfig
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return zero, nil
+		}
+		return zero, fmt.Errorf("failed to read meept config: %w", err)
+	}
+
+	stdJSON, err := hujson.Standardize(raw)
+	if err != nil {
+		return zero, fmt.Errorf("failed to parse meept.json5: %w", err)
+	}
+
+	// Parse into a partial struct so unknown / remaining keys are tolerated.
+	var partial struct {
+		Orchestrator configCli.OrchestratorConfig `json:"orchestrator"`
+	}
+	if err := json.Unmarshal(stdJSON, &partial); err != nil {
+		return zero, fmt.Errorf("failed to unmarshal orchestrator config: %w", err)
+	}
+	return partial.Orchestrator, nil
+}
+
+// SaveOrchestratorConfig writes the orchestrator block back to meept.json5,
+// preserving all other top-level keys. The file is written atomically via a
+// tmp-then-rename to avoid torn writes. If meept.json5 does not exist, it is
+// created with just the orchestrator block.
+func (s *ConfigService) SaveOrchestratorConfig(oc configCli.OrchestratorConfig) error {
+	path := s.getMeeptConfigPath()
+
+	// Read existing content if present, otherwise start from an empty object.
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read meept config: %w", err)
+	}
+	if os.IsNotExist(err) {
+		existing = []byte("{}")
+	}
+
+	stdJSON, err := hujson.Standardize(existing)
+	if err != nil {
+		return fmt.Errorf("failed to parse existing meept.json5: %w", err)
+	}
+
+	var root map[string]any
+	if err := json.Unmarshal(stdJSON, &root); err != nil {
+		return fmt.Errorf("failed to unmarshal existing meept.json5: %w", err)
+	}
+	if root == nil {
+		root = map[string]any{}
+	}
+
+	ocBytes, err := json.Marshal(oc)
+	if err != nil {
+		return fmt.Errorf("failed to marshal orchestrator config: %w", err)
+	}
+	var ocMap map[string]any
+	if err := json.Unmarshal(ocBytes, &ocMap); err != nil {
+		return fmt.Errorf("failed to re-marshal orchestrator config: %w", err)
+	}
+	root["orchestrator"] = ocMap
+
+	out, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal updated meept config: %w", err)
+	}
+
+	tmpPath := path + ".tmp"
+	//nolint:gosec // user config file; restrictive perms intended
+	if err := os.WriteFile(tmpPath, out, 0o600); err != nil {
+		return fmt.Errorf("failed to write meept config temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		if removeErr := os.Remove(tmpPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			return fmt.Errorf("failed to rename meept config into place (cleanup also failed: %v): %w", removeErr, err)
+		}
+		return fmt.Errorf("failed to rename meept config into place: %w", err)
+	}
 	return nil
 }

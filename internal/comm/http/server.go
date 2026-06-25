@@ -941,6 +941,8 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/config/menubar", s.handleSaveMenubarConfig)
 	mux.HandleFunc("GET /api/v1/config/memory", s.handleGetMemoryConfig)
 	mux.HandleFunc("POST /api/v1/config/normalize", s.handleNormalizeConfig)
+	mux.HandleFunc("GET /api/v1/config/orchestrator", s.handleGetOrchestratorConfig)
+	mux.HandleFunc("PUT /api/v1/config/orchestrator", s.handlePutOrchestratorConfig)
 	mux.HandleFunc("GET /api/v1/config/agents", s.handleListAgents)
 	mux.HandleFunc("GET /api/v1/config/agents/{id}", s.handleGetAgent)
 	mux.HandleFunc("POST /api/v1/config/agents/{id}", s.handleSaveAgent)
