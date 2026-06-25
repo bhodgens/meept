@@ -1154,13 +1154,28 @@ type WorkspaceConfig struct {
 
 // SkillsConfig holds skills settings.
 type SkillsConfig struct {
-	Enabled               bool     `json:"enabled"                 toml:"enabled"`
-	SearchPaths           []string `json:"search_paths"            toml:"search_paths"`           // Additional skill directories beyond defaults
-	AutoReload            bool     `json:"auto_reload"             toml:"auto_reload"`            // Watch for skill file changes
-	CacheSize             int      `json:"max_cached_skills"       toml:"max_cached_skills"`      // Max skills to cache in lazy loader (default: 50)
-	AutoDiscoverHermes    bool     `json:"auto_discover_hermes"    toml:"auto_discover_hermes"`   // Auto-discover ~/.hermes/skills (default: true)
-	HermesSkillsDir       string   `json:"hermes_skills_dir"       toml:"hermes_skills_dir"`      // Path to Hermes skills directory (default: ~/.hermes/skills)
-	ValidatePrerequisites bool     `json:"validate_prerequisites"  toml:"validate_prerequisites"` // Validate Hermes skill prerequisites before execution (default: true)
+	Enabled               bool               `json:"enabled"                 toml:"enabled"`
+	SearchPaths           []string           `json:"search_paths"            toml:"search_paths"`           // Additional skill directories beyond defaults
+	AutoReload            bool               `json:"auto_reload"             toml:"auto_reload"`            // Watch for skill file changes
+	CacheSize             int                `json:"max_cached_skills"       toml:"max_cached_skills"`      // Max skills to cache in lazy loader (default: 50)
+	AutoDiscoverHermes    bool               `json:"auto_discover_hermes"    toml:"auto_discover_hermes"`   // Auto-discover ~/.hermes/skills (default: true)
+	HermesSkillsDir       string             `json:"hermes_skills_dir"       toml:"hermes_skills_dir"`      // Path to Hermes skills directory (default: ~/.hermes/skills)
+	ValidatePrerequisites bool               `json:"validate_prerequisites"  toml:"validate_prerequisites"` // Validate Hermes skill prerequisites before execution (default: true)
+	Evolver               SkillsEvolverConfig `json:"evolver"                 toml:"evolver"`                // Closed-loop skill evolution settings
+}
+
+// SkillsEvolverConfig configures the skill evolver — the scheduled process
+// that reads usage stats and learned patterns, decides skill improvements,
+// and applies them gated by the verifier.
+type SkillsEvolverConfig struct {
+	Enabled                      bool          `json:"enabled"                        toml:"enabled"`
+	Interval                     time.Duration `json:"interval"                       toml:"interval"`                         // Default 6h
+	MinInjections                int           `json:"min_injections"                 toml:"min_injections"`                   // Default 5
+	MinEffectiveness             float64       `json:"min_effectiveness"              toml:"min_effectiveness"`                // Prune threshold; default 0.2
+	PatternPromotionConfidence   float64       `json:"pattern_promotion_confidence"   toml:"pattern_promotion_confidence"`     // Default 0.7
+	PatternPromotionUseCount     int           `json:"pattern_promotion_use_count"    toml:"pattern_promotion_use_count"`      // Default 5
+	AutoApply                    bool          `json:"auto_apply"                     toml:"auto_apply"`                       // Default false (requires plan approval)
+	RunOnStart                   bool          `json:"run_on_start"                   toml:"run_on_start"`                     // Default false; when true, scheduler runs one cycle immediately on Start (noisy on daemon startup)
 }
 
 // SelfImproveConfig holds self-improvement settings.
@@ -1649,6 +1664,16 @@ func DefaultConfig() *Config {
 			AutoDiscoverHermes:    true,
 			HermesSkillsDir:       "~/.hermes/skills",
 			ValidatePrerequisites: true,
+			Evolver: SkillsEvolverConfig{
+				Enabled:                    false,
+				Interval:                   6 * time.Hour,
+				MinInjections:              5,
+				MinEffectiveness:           0.2,
+				PatternPromotionConfidence: 0.7,
+				PatternPromotionUseCount:   5,
+				AutoApply:                  false,
+				RunOnStart:                 false,
+			},
 		},
 		SelfImprove: SelfImproveConfig{
 			Enabled:               false,

@@ -479,6 +479,15 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 	    DefaultHardLimitRatio  = 0.80
 	)
 
+<a name="ContextSummaryStart"></a>Context summary boundary markers.
+
+Summaries produced by summarizeWithLevel are wrapped in these markers to indicate they contain processed untrusted content. Original messages may have included \<\<\<USER\_INPUT\>\>\> or \<\<\<TOOL\_OUTPUT:\*\>\>\> markers; although the summarizer is instructed to preserve the trust/untrust distinction, the summary itself is untrusted output that condensed untrusted input. Downstream consumers should treat content inside these markers as data.
+
+	const (
+	    ContextSummaryStart = "<<<CONTEXT_SUMMARY"
+	    ContextSummaryEnd   = "<<<END_CONTEXT_SUMMARY>>>"
+	)
+
 <a name="ProviderIDAnthropic"></a>Provider ID constants used across catalog, registry, and broker.
 
 	const (
@@ -2423,6 +2432,10 @@ ContextFirewallConfig configures context budget and summarization behavior.
 	    // SummaryLevelThreshold is the token count at which a summary is
 	    // re-summarized at the next level (default 500).
 	    SummaryLevelThreshold int
+	    // OverflowStrategy controls what happens when context hits the hard limit.
+	    // Valid values: "drop" (keep system + last N), "summarize" (legacy partial),
+	    // "restart" (summarize full conversation, fresh context). Default: "restart".
+	    OverflowStrategy string
 	}
 
 <a name="ContextSizeExceededError"></a>
@@ -2595,6 +2608,8 @@ FirewallStats is a snapshot of firewall counters including compression stats.
 	    CompactionEvents      uint64
 	    CompactionFallbacks   uint64
 	    CompactionTokensSaved uint64
+	    // Restart stats (overflow strategy: restart)
+	    RestartEvents uint64
 	}
 
 <a name="FunctionDef"></a>

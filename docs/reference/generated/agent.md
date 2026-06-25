@@ -17,6 +17,8 @@ Convention:
 - Bus topics: "agent.progress", "agent.action", etc. \(system\-wide\)
 - Agent events: AgentEventType enum \(agent\-internal, bridged to bus via EventEmitter\)
 
+Package agent provides file system watcher hooks.
+
 Package agent provides the agent loop and related components.
 
 Package agent provides HTTP hook support for external integrations.
@@ -33,6 +35,7 @@ Package agent provides the agent loop and related components.
 
 - Constants
 - Variables
+- [func BuildPlannerPromptHint\(registry \*AgentRegistry\) string](<#BuildPlannerPromptHint>)
 - [func BuildRevisionContext\(result \*ReviewResult, spec \*TaskSpec\) string](<#BuildRevisionContext>)
 - [func BuildSystemPrompt\(cfg PromptConfig, tools \[\]ToolDescription, memoryContext string\) string](<#BuildSystemPrompt>)
 - [func BuildSystemPromptWithOverride\(override string, tools \[\]ToolDescription\) string](<#BuildSystemPromptWithOverride>)
@@ -40,6 +43,7 @@ Package agent provides the agent loop and related components.
 - [func CosineSimilarity\(a, b \[\]float64\) float64](<#CosineSimilarity>)
 - [func DefaultCoworkerAwareness\(\) string](<#DefaultCoworkerAwareness>)
 - [func ExecutorAgentIDs\(\) \[\]string](<#ExecutorAgentIDs>)
+- [func ExtractJSON\(s string\) string](<#ExtractJSON>)
 - [func FormatExampleArgs\(args map\[string\]any\) string](<#FormatExampleArgs>)
 - [func GetThresholdForIntent\(intentType string\) float64](<#GetThresholdForIntent>)
 - [func IsValidIntentType\(s string\) bool](<#IsValidIntentType>)
@@ -47,6 +51,7 @@ Package agent provides the agent loop and related components.
 - [func PresetPrompt\(presetName string, taskDescription string\) \(string, error\)](<#PresetPrompt>)
 - [func RecoverPendingFollowUps\(db \*sql.DB, msgBus \*bus.MessageBus, logger \*slog.Logger\)](<#RecoverPendingFollowUps>)
 - [func ResultsToChatMessages\(results \[\]\*ExecutionResult\) \[\]llm.ChatMessage](<#ResultsToChatMessages>)
+- [func SecurityKeywords\(\) \[\]string](<#SecurityKeywords>)
 - [func SerializeError\(toolName string, err error\) map\[string\]any](<#SerializeError>)
 - [func ShouldTerminate\(results \[\]\*ExecutionResult\) bool](<#ShouldTerminate>)
 - [func ShouldUseLLMResult\(intent \*Intent\) bool](<#ShouldUseLLMResult>)
@@ -78,6 +83,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) ClearModelOverride\(\)](<#AgentLoop.ClearModelOverride>)
   - [func \(l \*AgentLoop\) ClearReasoningOverride\(\)](<#AgentLoop.ClearReasoningOverride>)
   - [func \(l \*AgentLoop\) CompressionPipeline\(\) \*compress.Pipeline](<#AgentLoop.CompressionPipeline>)
+  - [func \(l \*AgentLoop\) ContextInjector\(\) \*ContextInjector](<#AgentLoop.ContextInjector>)
   - [func \(l \*AgentLoop\) CurrentReasoningEffort\(\) string](<#AgentLoop.CurrentReasoningEffort>)
   - [func \(l \*AgentLoop\) FireHTTPHooks\(ctx context.Context, event string, data map\[string\]interface\{\}\)](<#AgentLoop.FireHTTPHooks>)
   - [func \(l \*AgentLoop\) FirewallStats\(\) map\[string\]any](<#AgentLoop.FirewallStats>)
@@ -93,9 +99,11 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) RunWithTask\(ctx context.Context, t \*task.Task\) \(string, error\)](<#AgentLoop.RunWithTask>)
   - [func \(l \*AgentLoop\) SetBranchManager\(mgr any\)](<#AgentLoop.SetBranchManager>)
   - [func \(l \*AgentLoop\) SetCapabilityIndex\(ci \*skills.CapabilityIndex\)](<#AgentLoop.SetCapabilityIndex>)
+  - [func \(l \*AgentLoop\) SetCompactionConfig\(cfg config.CompactionConfig\)](<#AgentLoop.SetCompactionConfig>)
   - [func \(l \*AgentLoop\) SetCompressionPipeline\(pipeline \*compress.Pipeline\)](<#AgentLoop.SetCompressionPipeline>)
   - [func \(l \*AgentLoop\) SetConfig\(config AgentConfig\)](<#AgentLoop.SetConfig>)
   - [func \(l \*AgentLoop\) SetContextFirewallConfig\(fw config.LLMContextFirewallConfig\)](<#AgentLoop.SetContextFirewallConfig>)
+  - [func \(l \*AgentLoop\) SetContextInjector\(injector \*ContextInjector\)](<#AgentLoop.SetContextInjector>)
   - [func \(l \*AgentLoop\) SetEpistemicHook\(hook \*EpistemicHook\)](<#AgentLoop.SetEpistemicHook>)
   - [func \(l \*AgentLoop\) SetFileWatcher\(fw \*FileWatcherHook\)](<#AgentLoop.SetFileWatcher>)
   - [func \(l \*AgentLoop\) SetHTTPHooks\(executor \*HookBatchExecutor\)](<#AgentLoop.SetHTTPHooks>)
@@ -275,6 +283,12 @@ Package agent provides the agent loop and related components.
 - [type CompactionAgentConfig](<#CompactionAgentConfig>)
 - [type CompletionStatus](<#CompletionStatus>)
 - [type CompressionReport](<#CompressionReport>)
+- [type ContextInjector](<#ContextInjector>)
+  - [func NewContextInjector\(learning \*selfimprove.LearningPipeline, instructions \*preferences.Store\) \*ContextInjector](<#NewContextInjector>)
+  - [func \(c \*ContextInjector\) BuildSystemPrompt\(ctx context.Context, base string\) string](<#ContextInjector.BuildSystemPrompt>)
+  - [func \(c \*ContextInjector\) GetActiveInstructions\(\) \[\]\*preferences.UserInstruction](<#ContextInjector.GetActiveInstructions>)
+  - [func \(c \*ContextInjector\) HasActiveInstructions\(\) bool](<#ContextInjector.HasActiveInstructions>)
+  - [func \(c \*ContextInjector\) HasLearnedPatterns\(ctx context.Context\) bool](<#ContextInjector.HasLearnedPatterns>)
 - [type ContextTransform](<#ContextTransform>)
 - [type Conversation](<#Conversation>)
   - [func NewConversation\(opts ...ConversationOption\) \*Conversation](<#NewConversation>)
@@ -362,6 +376,8 @@ Package agent provides the agent loop and related components.
   - [func \(d \*Dispatcher\) ResumeAfterClarification\(ctx context.Context, originalInput, userResponse, sessionID string\) \(\*DispatchResult, error\)](<#Dispatcher.ResumeAfterClarification>)
   - [func \(d \*Dispatcher\) RouteToAgent\(ctx context.Context, result \*DispatchResult, conversationID string\) \(string, error\)](<#Dispatcher.RouteToAgent>)
   - [func \(d \*Dispatcher\) SetCapabilityMatcher\(matcher \*CapabilityMatcher\)](<#Dispatcher.SetCapabilityMatcher>)
+  - [func \(d \*Dispatcher\) SetInstructionParser\(parser \*InstructionParser\)](<#Dispatcher.SetInstructionParser>)
+  - [func \(d \*Dispatcher\) SetInstructionStore\(store \*preferences.Store\)](<#Dispatcher.SetInstructionStore>)
   - [func \(d \*Dispatcher\) SetMetricsStore\(store \*metrics.Store\)](<#Dispatcher.SetMetricsStore>)
   - [func \(d \*Dispatcher\) SetThreadRouter\(tr \*ThreadRouter\)](<#Dispatcher.SetThreadRouter>)
   - [func \(d \*Dispatcher\) ShouldDispatchAsync\(result \*DispatchResult\) bool](<#Dispatcher.ShouldDispatchAsync>)
@@ -430,8 +446,12 @@ Package agent provides the agent loop and related components.
 - [type FailureContext](<#FailureContext>)
 - [type FallbackEntry](<#FallbackEntry>)
 - [type FileWatcherHook](<#FileWatcherHook>)
-  - [func \(fw \*FileWatcherHook\) Start\(\_ context.Context\) error](<#FileWatcherHook.Start>)
-  - [func \(fw \*FileWatcherHook\) Stop\(\)](<#FileWatcherHook.Stop>)
+  - [func NewFileWatcherHook\(pattern string, debounce time.Duration, ignore \[\]string, logger \*slog.Logger\) \*FileWatcherHook](<#NewFileWatcherHook>)
+  - [func \(f \*FileWatcherHook\) IsRunning\(\) bool](<#FileWatcherHook.IsRunning>)
+  - [func \(f \*FileWatcherHook\) SetBus\(b \*bus.MessageBus\)](<#FileWatcherHook.SetBus>)
+  - [func \(f \*FileWatcherHook\) SetSessionID\(id string\)](<#FileWatcherHook.SetSessionID>)
+  - [func \(f \*FileWatcherHook\) Start\(ctx context.Context\) error](<#FileWatcherHook.Start>)
+  - [func \(f \*FileWatcherHook\) Stop\(\) error](<#FileWatcherHook.Stop>)
 - [type FilteredToolRegistry](<#FilteredToolRegistry>)
   - [func NewFilteredToolRegistry\(parent ToolRegistry, allowedTools \[\]string\) \*FilteredToolRegistry](<#NewFilteredToolRegistry>)
   - [func \(r \*FilteredToolRegistry\) Get\(name string\) tools.Tool](<#FilteredToolRegistry.Get>)
@@ -442,7 +462,11 @@ Package agent provides the agent loop and related components.
   - [func NewHTTPHook\(config HTTPHookConfig, allowedURLs \[\]string, logger \*slog.Logger\) \(\*HTTPHook, error\)](<#NewHTTPHook>)
   - [func \(h \*HTTPHook\) Execute\(ctx context.Context, payload any\) error](<#HTTPHook.Execute>)
   - [func \(h \*HTTPHook\) OnSessionEnd\(ctx context.Context, state SessionLifecycleState, result SessionLifecycleResult\) error](<#HTTPHook.OnSessionEnd>)
-  - [func \(h \*HTTPHook\) OnSessionStart\(ctx context.Context, state SessionLifecycleState\) \(ContextTransform, error\)](<#HTTPHook.OnSessionStart>)
+  - [func \(h \*HTTPHook\) OnSessionStart\(ctx context.Context, state SessionLifecycleState\) ContextTransform](<#HTTPHook.OnSessionStart>)
+  - [func \(h \*HTTPHook\) SetBus\(b \*bus.MessageBus\)](<#HTTPHook.SetBus>)
+  - [func \(h \*HTTPHook\) SetHookType\(t string\)](<#HTTPHook.SetHookType>)
+  - [func \(h \*HTTPHook\) SetSessionID\(id string\)](<#HTTPHook.SetSessionID>)
+  - [func \(h \*HTTPHook\) Wait\(\)](<#HTTPHook.Wait>)
 - [type HTTPHookConfig](<#HTTPHookConfig>)
 - [type HallucinationConfig](<#HallucinationConfig>)
   - [func DefaultHallucinationConfig\(\) HallucinationConfig](<#DefaultHallucinationConfig>)
@@ -522,6 +546,7 @@ Package agent provides the agent loop and related components.
 - [type LLMClassifierConfig](<#LLMClassifierConfig>)
 - [type LearnedPattern](<#LearnedPattern>)
 - [type LearningPipeline](<#LearningPipeline>)
+- [type LifecycleOutcome](<#LifecycleOutcome>)
 - [type Logger](<#Logger>)
 - [type LoopOption](<#LoopOption>)
   - [func WithAgentConfig\(config AgentConfig\) LoopOption](<#WithAgentConfig>)
@@ -562,6 +587,7 @@ Package agent provides the agent loop and related components.
   - [func WithTaskCollector\(tc \*metrics.TaskCollector\) LoopOption](<#WithTaskCollector>)
   - [func WithTaskStore\(store \*task.Store\) LoopOption](<#WithTaskStore>)
   - [func WithToolRegistry\(registry ToolRegistry\) LoopOption](<#WithToolRegistry>)
+  - [func WithUsageTracker\(ut lifecycleUsageTracker\) LoopOption](<#WithUsageTracker>)
   - [func WithWatchdog\(w \*Watchdog\) LoopOption](<#WithWatchdog>)
 - [type MCPServerInfo](<#MCPServerInfo>)
 - [type MatchResult](<#MatchResult>)
@@ -694,6 +720,8 @@ Package agent provides the agent loop and related components.
   - [func \(r \*PlaceholderToolRegistry\) List\(\) \[\]tools.Tool](<#PlaceholderToolRegistry.List>)
   - [func \(r \*PlaceholderToolRegistry\) Register\(tool tools.Tool\)](<#PlaceholderToolRegistry.Register>)
 - [type PlanRequest](<#PlanRequest>)
+- [type PlannerThresholds](<#PlannerThresholds>)
+  - [func NewDefaultThresholds\(\) \*PlannerThresholds](<#NewDefaultThresholds>)
 - [type PrepareNextTurnHook](<#PrepareNextTurnHook>)
 - [type ProgressSynthesizer](<#ProgressSynthesizer>)
   - [func NewProgressSynthesizer\(b \*bus.MessageBus, client \*llm.Client, logger \*slog.Logger\) \*ProgressSynthesizer](<#NewProgressSynthesizer>)
@@ -802,6 +830,11 @@ Package agent provides the agent loop and related components.
   - [func \(a RouteAction\) String\(\) string](<#RouteAction.String>)
 - [type RouteParams](<#RouteParams>)
 - [type RouteResult](<#RouteResult>)
+- [type RoutingTable](<#RoutingTable>)
+  - [func NewDefaultRoutingTable\(\) \*RoutingTable](<#NewDefaultRoutingTable>)
+  - [func \(rt \*RoutingTable\) ActorFor\(intent string\) string](<#RoutingTable.ActorFor>)
+  - [func \(rt \*RoutingTable\) ReviewerFor\(intent string\) string](<#RoutingTable.ReviewerFor>)
+  - [func \(rt \*RoutingTable\) SetRoute\(intent, actorID, reviewerID string\)](<#RoutingTable.SetRoute>)
 - [type RoutingValidation](<#RoutingValidation>)
 - [type SavePointData](<#SavePointData>)
 - [type SecretObfuscationHook](<#SecretObfuscationHook>)
@@ -948,6 +981,7 @@ Package agent provides the agent loop and related components.
   - [func \(tr \*ThreadRouter\) CrossThreadContext\(sessionID, activeThreadID string\) string](<#ThreadRouter.CrossThreadContext>)
   - [func \(tr \*ThreadRouter\) GetActiveThread\(sessionID string\) \(\*session.Thread, error\)](<#ThreadRouter.GetActiveThread>)
   - [func \(tr \*ThreadRouter\) GetThreadConversationID\(ctx context.Context, sessionID, input string\) \(string, error\)](<#ThreadRouter.GetThreadConversationID>)
+  - [func \(tr \*ThreadRouter\) RouteThread\(sessionID, input string\) \(threadID, topic string\)](<#ThreadRouter.RouteThread>)
   - [func \(tr \*ThreadRouter\) SetActiveThread\(sessionID, threadID string\) error](<#ThreadRouter.SetActiveThread>)
 - [type ThreadRouterOption](<#ThreadRouterOption>)
   - [func WithThreadRouterLogger\(l \*slog.Logger\) ThreadRouterOption](<#WithThreadRouterLogger>)
@@ -1231,6 +1265,10 @@ Package agent provides the agent loop and related components.
 	    DefaultPairMaxRounds = 3
 	)
 
+<a name="HookAsyncRewakeTopic"></a>HookAsyncRewakeTopic is the bus topic used when an async hook with AsyncRewake=true finishes successfully. Subscribers \(typically the agent loop\) can wake up and react to the completion.
+
+	const HookAsyncRewakeTopic = "hook.async_rewake"
+
 <a name="MaxCollaborationDepth"></a>MaxCollaborationDepth is the default max nesting depth for agent\-initiated collaboration.
 
 	const MaxCollaborationDepth = 1
@@ -1273,6 +1311,15 @@ Package agent provides the agent loop and related components.
 	    ErrQueueFull          = errors.New("queue is full")
 	    ErrQueueNotFound      = errors.New("queue not found")
 	    ErrGenerationMismatch = errors.New("generation mismatch")
+	)
+
+<a name="ErrInterviewNotNeeded"></a>Sentinel errors for ConductInterview failure paths. Callers use errors.Is to distinguish "no interview needed" from infrastructure failures.
+
+	var (
+	    ErrInterviewNotNeeded      = errors.New("interview not needed: ambiguity below threshold or no analysis")
+	    ErrInterviewNoRegistry     = errors.New("interview skipped: agent registry not available")
+	    ErrInterviewPlannerMissing = errors.New("interview skipped: planner agent not available")
+	    ErrInterviewGenerationFail = errors.New("interview skipped: LLM question generation failed")
 	)
 
 <a name="BaselineTools"></a>BaselineTools are the tools available to all agents.
@@ -1372,6 +1419,15 @@ Package agent provides the agent loop and related components.
 	    "lsp_diagnostics":       ToolCodeRead,
 	}
 
+<a name="BuildPlannerPromptHint"></a>
+## func BuildPlannerPromptHint
+
+	func BuildPlannerPromptHint(registry *AgentRegistry) string
+
+BuildPlannerPromptHint generates the "Available tool hints" section of the planner prompt from the agent registry, replacing the hardcoded list in plannerPromptTemplate \(strategic.go:85\-91\). The hint lists each enabled executor agent \(excluding the planner itself\) with its description or purpose truncated to 80 characters.
+
+Returns an empty string if registry is nil, so the caller can omit the section entirely when no registry is available.
+
 <a name="BuildRevisionContext"></a>
 ## func BuildRevisionContext
 
@@ -1420,6 +1476,23 @@ DefaultCoworkerAwareness returns the standard coworker awareness prompt.
 	func ExecutorAgentIDs() []string
 
 ExecutorAgentIDs returns the canonical list of executor agent IDs \(excluding the dispatcher, which routes but does not execute jobs\). The IDs are returned in a stable order suitable for deterministic worker bootstrapping.
+
+<a name="ExtractJSON"></a>
+## func ExtractJSON
+
+	func ExtractJSON(s string) string
+
+ExtractJSON extracts the first complete JSON object from text that may contain markdown fences, prose, or other wrapping. It uses balanced brace matching with string\-literal awareness to correctly handle:
+
+- JSON embedded in markdown code fences \(\`\`\`json ... \`\`\`\)
+- Multiple JSON objects \(returns the first valid one\)
+- Braces inside string literals \(e.g., \{"desc": "use \{ for init"\}\)
+- Escaped quotes inside strings \(e.g., \{"desc": "say \\"hi\\""\}\)
+- Nested objects and arrays
+
+Returns empty string if no valid JSON object is found.
+
+Note: This function only looks for JSON objects \(starting with '\{'\). A bare JSON array like '\[1,2,3\]' will not be matched; this matches the behavior of the legacy extractJSON function and is intentional since the strategic planner always emits object\-shaped JSON.
 
 <a name="FormatExampleArgs"></a>
 ## func FormatExampleArgs
@@ -1471,6 +1544,13 @@ This is called once on daemon startup so that any TUI clients listening for agen
 	func ResultsToChatMessages(results []*ExecutionResult) []llm.ChatMessage
 
 ResultsToChatMessages converts execution results to chat messages.
+
+<a name="SecurityKeywords"></a>
+## func SecurityKeywords
+
+	func SecurityKeywords() []string
+
+SecurityKeywords returns the list of keywords that trigger pair\-session routing for code/debug intents. This centralizes the list hardcoded at strategic.go:689\-697 so it can be reused and kept in sync.
 
 <a name="SerializeError"></a>
 ## func SerializeError
@@ -1667,6 +1747,10 @@ AgentConfig holds configuration for the agent loop.
 	    SummaryLevelThreshold int
 	    // Compaction holds context compaction settings for the agent loop.
 	    Compaction CompactionAgentConfig
+	    // OverflowStrategy controls what happens when context hits the hard limit.
+	    // Valid values: "drop", "summarize", "restart". Default: "restart".
+	    // Threaded into ContextFirewallConfig at firewall construction time.
+	    OverflowStrategy string
 	}
 
 <a name="DefaultAgentConfig"></a>
@@ -1870,6 +1954,13 @@ ClearReasoningOverride removes any per\-turn reasoning override. Called after th
 
 CompressionPipeline returns the compression pipeline, or nil if not set.
 
+<a name="AgentLoop.ContextInjector"></a>
+### func \(\*AgentLoop\) ContextInjector
+
+	func (l *AgentLoop) ContextInjector() *ContextInjector
+
+ContextInjector returns the wired context injector, or nil if not set.
+
 <a name="AgentLoop.CurrentReasoningEffort"></a>
 ### func \(\*AgentLoop\) CurrentReasoningEffort
 
@@ -1975,6 +2066,13 @@ SetBranchManager wires a branch manager for in\-memory cache coordination. Stub 
 
 SetCapabilityIndex sets the capability index for skill discovery. This allows wiring the index after the loop is created when skills are initialized in a specific order.
 
+<a name="AgentLoop.SetCompactionConfig"></a>
+### func \(\*AgentLoop\) SetCompactionConfig
+
+	func (l *AgentLoop) SetCompactionConfig(cfg config.CompactionConfig)
+
+SetCompactionConfig wires compaction settings from the user\-facing config schema into the agent loop config. This bridges the top\-level \`compaction\` config block to the agent loop so the ContextCompactor actually gets created during firewall construction.
+
 <a name="AgentLoop.SetCompressionPipeline"></a>
 ### func \(\*AgentLoop\) SetCompressionPipeline
 
@@ -1995,6 +2093,13 @@ SetConfig updates the agent configuration.
 	func (l *AgentLoop) SetContextFirewallConfig(fw config.LLMContextFirewallConfig)
 
 SetContextFirewallConfig wires context firewall settings from the user\-facing config schema into the agent loop config.
+
+<a name="AgentLoop.SetContextInjector"></a>
+### func \(\*AgentLoop\) SetContextInjector
+
+	func (l *AgentLoop) SetContextInjector(injector *ContextInjector)
+
+SetContextInjector wires the ContextInjector that enriches the system prompt with standing user instructions and learned patterns. Nil\-safe per CLAUDE.md setter convention. When non\-nil, BuildSystemPrompt is invoked from the system\-prompt builders to append an "\# Active Context" section after the existing content.
 
 <a name="AgentLoop.SetEpistemicHook"></a>
 ### func \(\*AgentLoop\) SetEpistemicHook
@@ -3576,6 +3681,52 @@ CompressionReport contains statistics about a compression operation.
 	    MessagesAfter  int
 	}
 
+<a name="ContextInjector"></a>
+## type ContextInjector
+
+ContextInjector merges learning patterns and user instructions into system prompts for context enrichment.
+
+	type ContextInjector struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewContextInjector"></a>
+### func NewContextInjector
+
+	func NewContextInjector(learning *selfimprove.LearningPipeline, instructions *preferences.Store) *ContextInjector
+
+NewContextInjector creates a new context injector.
+
+<a name="ContextInjector.BuildSystemPrompt"></a>
+### func \(\*ContextInjector\) BuildSystemPrompt
+
+	func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) string
+
+BuildSystemPrompt builds a system prompt with both learned patterns and active user instructions injected.
+
+Per Phase 4 spec 4.2: \- Merges Learning patterns AND User Instructions \- Format: "\#\# Standing Instructions" \+ "\#\# Learned Patterns" \- Queries instructionStore.GetActive\(\) for active instructions
+
+<a name="ContextInjector.GetActiveInstructions"></a>
+### func \(\*ContextInjector\) GetActiveInstructions
+
+	func (c *ContextInjector) GetActiveInstructions() []*preferences.UserInstruction
+
+GetActiveInstructions returns all active user instructions.
+
+<a name="ContextInjector.HasActiveInstructions"></a>
+### func \(\*ContextInjector\) HasActiveInstructions
+
+	func (c *ContextInjector) HasActiveInstructions() bool
+
+HasActiveInstructions returns true if there are active user instructions.
+
+<a name="ContextInjector.HasLearnedPatterns"></a>
+### func \(\*ContextInjector\) HasLearnedPatterns
+
+	func (c *ContextInjector) HasLearnedPatterns(ctx context.Context) bool
+
+HasLearnedPatterns returns true if there are learned patterns available.
+
 <a name="ContextTransform"></a>
 ## type ContextTransform
 
@@ -4143,6 +4294,10 @@ DispatchResult is the result of dispatching a request.
 	    // json:"-" because it is operational metadata not meant for
 	    // user-facing JSON serialization.
 	    ReasoningOverride *llm.ReasoningConfig `json:"-"`
+	
+	    // Instruction is the parsed instruction when user provides automation request.
+	    // Only populated when intent type is IntentInstruction.
+	    Instruction *preferences.ParsedInstruction `json:"-"`
 	}
 
 <a name="Dispatcher"></a>
@@ -4274,6 +4429,20 @@ RouteToAgent routes a dispatch result to the appropriate agent. If an active age
 	func (d *Dispatcher) SetCapabilityMatcher(matcher *CapabilityMatcher)
 
 SetCapabilityMatcher sets the capability matcher for fast routing.
+
+<a name="Dispatcher.SetInstructionParser"></a>
+### func \(\*Dispatcher\) SetInstructionParser
+
+	func (d *Dispatcher) SetInstructionParser(parser *InstructionParser)
+
+SetInstructionParser wires the instruction parser for parsing NL automation requests.
+
+<a name="Dispatcher.SetInstructionStore"></a>
+### func \(\*Dispatcher\) SetInstructionStore
+
+	func (d *Dispatcher) SetInstructionStore(store *preferences.Store)
+
+SetInstructionStore wires the instruction store for intent\-based action attachment.
 
 <a name="Dispatcher.SetMetricsStore"></a>
 ### func \(\*Dispatcher\) SetMetricsStore
@@ -4722,6 +4891,10 @@ ExecutionResult represents the result of a tool execution.
 	    Cached     bool              `json:"cached,omitempty"`    // True if result came from cache
 	    Evidence   []models.Evidence `json:"evidence,omitempty"`  // Evidence of tool side-effects
 	    Terminate  bool              `json:"terminate,omitempty"` // Advisory: hint that result is final and needs no LLM follow-up
+	    // TaintLabel is the provenance taint propagated from ToolResult.
+	    // When non-empty, downstream policy checks can apply stricter rules
+	    // (e.g., blocking the tainted value from reaching shell_exec).
+	    TaintLabel taint.TaintLabel `json:"taint_label,omitempty"`
 	}
 
 <a name="ExecutionResult.ToChatMessage"></a>
@@ -4863,23 +5036,69 @@ FallbackEntry captures details about a fallback routing decision.
 <a name="FileWatcherHook"></a>
 ## type FileWatcherHook
 
-FileWatcherHook is a placeholder for the file\-watcher hook. Methods match the call sites in loop.go \(Start, Stop\). The full implementation lives in a separate file when the file\-watcher feature is wired.
+FileWatcherHook watches filesystem paths matching patterns.
 
-	type FileWatcherHook struct{}
+The Callback function receives a filesystem path; it is the callback's responsibility to read, sanitize, and taint any content before injecting it into agent context \(see SECURITY note above\).
+
+	type FileWatcherHook struct {
+	    os.FileInfo
+	    Pattern  string `json:"pattern"`
+	    Callback func(path string)
+	    Debounce time.Duration `json:"debounce"`
+	    Ignore   []string      `json:"ignore"`
+	
+	    // Async, when true, runs the callback in a background goroutine so
+	    // the watcher loop never blocks on callback I/O. Failures are logged.
+	    Async bool `json:"async,omitempty"`
+	
+	    // AsyncRewake, when true (and Async must also be true), publishes a
+	    // hook.async_rewake bus signal after the async callback finishes so
+	    // the agent loop wakes up. Requires SetBus to have been called.
+	    AsyncRewake bool `json:"async_rewake,omitempty"`
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewFileWatcherHook"></a>
+### func NewFileWatcherHook
+
+	func NewFileWatcherHook(pattern string, debounce time.Duration, ignore []string, logger *slog.Logger) *FileWatcherHook
+
+NewFileWatcherHook creates a new file watcher hook.
+
+<a name="FileWatcherHook.IsRunning"></a>
+### func \(\*FileWatcherHook\) IsRunning
+
+	func (f *FileWatcherHook) IsRunning() bool
+
+IsRunning returns true if the watcher is active.
+
+<a name="FileWatcherHook.SetBus"></a>
+### func \(\*FileWatcherHook\) SetBus
+
+	func (f *FileWatcherHook) SetBus(b *bus.MessageBus)
+
+SetBus wires a MessageBus reference for async\-rewake signals. Nil is safely ignored \(defensive nil guard per CLAUDE.md rule\).
+
+<a name="FileWatcherHook.SetSessionID"></a>
+### func \(\*FileWatcherHook\) SetSessionID
+
+	func (f *FileWatcherHook) SetSessionID(id string)
+
+SetSessionID records the active session ID for inclusion in rewake payloads.
 
 <a name="FileWatcherHook.Start"></a>
 ### func \(\*FileWatcherHook\) Start
 
-	func (fw *FileWatcherHook) Start(_ context.Context) error
+	func (f *FileWatcherHook) Start(ctx context.Context) error
 
-Start begins watching. Accepts a context for future cancellation support. Returns nil to keep the loop path no\-op safe.
+Start begins watching filesystem paths.
 
 <a name="FileWatcherHook.Stop"></a>
 ### func \(\*FileWatcherHook\) Stop
 
-	func (fw *FileWatcherHook) Stop()
+	func (f *FileWatcherHook) Stop() error
 
-Stop ceases watching.
+Stop halts filesystem watching. It waits for in\-flight async callbacks to complete before returning.
 
 <a name="FilteredToolRegistry"></a>
 ## type FilteredToolRegistry
@@ -4952,6 +5171,8 @@ NewHTTPHook creates a new HTTP hook with the given config and URL allowlist.
 
 Execute sends the HTTP request with the given payload.
 
+When config.Async is true, the request runs in a background goroutine and this method returns nil immediately. The caller cannot observe async errors; they are logged. When config.AsyncRewake is also true, a hook.async\_rewake bus signal is published after successful completion.
+
 <a name="HTTPHook.OnSessionEnd"></a>
 ### func \(\*HTTPHook\) OnSessionEnd
 
@@ -4962,9 +5183,37 @@ OnSessionEnd implements SessionEndHook.
 <a name="HTTPHook.OnSessionStart"></a>
 ### func \(\*HTTPHook\) OnSessionStart
 
-	func (h *HTTPHook) OnSessionStart(ctx context.Context, state SessionLifecycleState) (ContextTransform, error)
+	func (h *HTTPHook) OnSessionStart(ctx context.Context, state SessionLifecycleState) ContextTransform
 
 OnSessionStart implements SessionStartHook.
+
+<a name="HTTPHook.SetBus"></a>
+### func \(\*HTTPHook\) SetBus
+
+	func (h *HTTPHook) SetBus(b *bus.MessageBus)
+
+SetBus wires a MessageBus reference for async\-rewake signals. Nil is safely ignored \(defensive nil guard per CLAUDE.md rule\).
+
+<a name="HTTPHook.SetHookType"></a>
+### func \(\*HTTPHook\) SetHookType
+
+	func (h *HTTPHook) SetHookType(t string)
+
+SetHookType labels the hook type for rewake payloads \(e.g. "session\_start"\).
+
+<a name="HTTPHook.SetSessionID"></a>
+### func \(\*HTTPHook\) SetSessionID
+
+	func (h *HTTPHook) SetSessionID(id string)
+
+SetSessionID records the active session ID so it can be included in async\-rewake bus payloads. Nil\-safe \(empty string is a valid no\-op\).
+
+<a name="HTTPHook.Wait"></a>
+### func \(\*HTTPHook\) Wait
+
+	func (h *HTTPHook) Wait()
+
+Wait blocks until all in\-flight async executions complete. This is primarily intended for graceful shutdown and tests.
 
 <a name="HTTPHookConfig"></a>
 ## type HTTPHookConfig
@@ -4977,6 +5226,18 @@ HTTPHookConfig serializes hook configuration.
 	    Headers    map[string]string `json:"headers"`
 	    Timeout    time.Duration     `json:"timeout"`
 	    RetryCount int               `json:"retry_count"`
+	
+	    // Async, when true, causes Execute to run in a background goroutine
+	    // and return immediately. The caller never sees the result error —
+	    // failures are logged asynchronously. Useful for fire-and-forget
+	    // integrations where blocking the agent loop would be unacceptable.
+	    Async bool `json:"async,omitempty"`
+	
+	    // AsyncRewake, when true (and Async must also be true), publishes a
+	    // hook.async_rewake bus signal after the async execution completes
+	    // successfully so the agent loop can wake up and react. Requires
+	    // SetBus to have been called with a non-nil MessageBus.
+	    AsyncRewake bool `json:"async_rewake,omitempty"`
 	}
 
 <a name="HallucinationConfig"></a>
@@ -5709,6 +5970,24 @@ LearningPipeline is the interface for the learning pipeline.
 	    Retrieve(ctx context.Context, query string, domain string, k int) ([]*LearnedPattern, error)
 	}
 
+<a name="LifecycleOutcome"></a>
+## type LifecycleOutcome
+
+LifecycleOutcome mirrors lifecycle.Outcome. Defined locally so the agent package does not import skills/lifecycle directly. Exported so the daemon adapter can translate between LifecycleOutcome and lifecycle.Outcome.
+
+	type LifecycleOutcome int
+
+<a name="LifecycleOutcomePositive"></a>
+
+	const (
+	    // LifecycleOutcomePositive mirrors lifecycle.OutcomePositive.
+	    LifecycleOutcomePositive LifecycleOutcome = iota
+	    // LifecycleOutcomeNegative mirrors lifecycle.OutcomeNegative.
+	    LifecycleOutcomeNegative
+	    // LifecycleOutcomeNeutral mirrors lifecycle.OutcomeNeutral.
+	    LifecycleOutcomeNeutral
+	)
+
 <a name="Logger"></a>
 ## type Logger
 
@@ -5993,6 +6272,13 @@ WithTaskStore sets the task store for inherited memory fetching.
 	func WithToolRegistry(registry ToolRegistry) LoopOption
 
 WithToolRegistry sets the tool registry.
+
+<a name="WithUsageTracker"></a>
+### func WithUsageTracker
+
+	func WithUsageTracker(ut lifecycleUsageTracker) LoopOption
+
+WithUsageTracker sets the skill usage tracker for closed\-loop skill evolution. The tracker records per\-skill injection counts and outcomes so the evolver can identify low performers. Nil guard prevents typed\-nil panic.
 
 <a name="WithWatchdog"></a>
 ### func WithWatchdog
@@ -7259,6 +7545,49 @@ PlanRequest is the input to the strategic planner.
 	    TrueAnalysis *TrueIntentAnalysis `json:"true_analysis,omitempty"`
 	}
 
+<a name="PlannerThresholds"></a>
+## type PlannerThresholds
+
+PlannerThresholds centralizes all tunable StrategicPlanner parameters that were previously magic numbers scattered across strategic.go.
+
+	type PlannerThresholds struct {
+	    // InterviewAmbiguityThreshold controls when ConductInterview triggers.
+	    // Requests with ambiguity below this skip the interview phase.
+	    // (replaces interviewAmbiguityThreshold const in strategic.go:50)
+	    InterviewAmbiguity float64
+	
+	    // MaxPlanSteps caps the number of steps in a generated plan.
+	    // (replaces StrategicPlanner.maxPlanSteps default in strategic.go:141)
+	    MaxPlanSteps int
+	
+	    // PlannerTimeout is the max duration for a single planner LLM call.
+	    // (replaces StrategicPlanner.plannerTimeout default in strategic.go:144)
+	    PlannerTimeout time.Duration
+	
+	    // SimpleInputMaxChars is the threshold below which a request is
+	    // considered "simple" and may skip LLM decomposition.
+	    // (replaces hardcoded 100 in strategic.go:631)
+	    SimpleInputMaxChars int
+	
+	    // PairInputMinChars is the threshold above which code/debug requests
+	    // are routed to pair sessions.
+	    // (replaces hardcoded 200 in strategic.go:685)
+	    PairInputMinChars int
+	
+	    // ApprovalStepThreshold is the minimum plan size that triggers the
+	    // user approval gate (independent of the interview gate). This is a
+	    // new configurable knob; the current code only gates on
+	    // InterviewCompleted.
+	    ApprovalStepThreshold int
+	}
+
+<a name="NewDefaultThresholds"></a>
+### func NewDefaultThresholds
+
+	func NewDefaultThresholds() *PlannerThresholds
+
+NewDefaultThresholds returns thresholds matching current hardcoded defaults.
+
 <a name="PrepareNextTurnHook"></a>
 ## type PrepareNextTurnHook
 
@@ -8150,14 +8479,6 @@ ReviewPolicy determines which steps require review and how.
 	    // Tool hints that NEVER require review (trusted operations)
 	    SkipReview []string
 	
-	    // Agent-specific reviewer mappings.
-	    //
-	    // Deprecated: reviewer routing is now dynamic via ReviewPolicy.Registry
-	    // and the reviews_domain field on reviewer-role agents. ReviewerMapping
-	    // is kept as an override escape hatch — entries here take precedence
-	    // over dynamic discovery so callers can pin specific reviewers.
-	    ReviewerMapping map[string]string
-	
 	    // Maximum revision cycles before requiring human intervention
 	    MaxRevisionCycles int
 	
@@ -8182,7 +8503,7 @@ ReviewPolicy determines which steps require review and how.
 
 DefaultReviewPolicy returns sensible defaults for review policy.
 
-ReviewerMapping is empty by default: reviewer routing is dynamic via ReviewPolicy.Registry and the reviews\_domain field on reviewer agents.
+Reviewer routing is dynamic via ReviewPolicy.Registry and the reviews\_domain field on reviewer\-role agents.
 
 <a name="ReviewPolicy.ExceedsMaxRevisions"></a>
 ### func \(\*ReviewPolicy\) ExceedsMaxRevisions
@@ -8212,12 +8533,12 @@ RequiresHumanIntervention returns true if human intervention is needed.
 
 SelectReviewer selects the appropriate reviewer agent for a step.
 
-Resolution order:
+Resolution order: Dynamic lookup via Registry for a reviewer\-role agent
 
-1. ReviewerMapping override \(explicit pin\)
-2. Dynamic lookup via Registry for a reviewer\-role agent whose reviews\_domain matches the originating agent's domain
-3. Tool\-hint → domain → registry lookup
-4. "test\-reviewer" fallback
+	   reviews_domain matches the originating agent's domain
+	3. Tool-hint → domain → registry lookup
+	4. "test-reviewer" fallback
+	
 
 <a name="ReviewPolicy.ShouldAutoApprove"></a>
 ### func \(\*ReviewPolicy\) ShouldAutoApprove
@@ -8314,6 +8635,43 @@ RouteResult holds the result of routing a completed agent's work.
 	    ForceNotify   bool
 	    Depth         int
 	}
+
+<a name="RoutingTable"></a>
+## type RoutingTable
+
+RoutingTable maps intent types to actor/reviewer agent IDs. It replaces the hardcoded selectActorAgent/selectReviewerAgent switch statements in strategic.go.
+
+	type RoutingTable struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewDefaultRoutingTable"></a>
+### func NewDefaultRoutingTable
+
+	func NewDefaultRoutingTable() *RoutingTable
+
+NewDefaultRoutingTable returns the routing table matching current hardcoded behavior in selectActorAgent/selectReviewerAgent \(strategic.go:761\-782\).
+
+<a name="RoutingTable.ActorFor"></a>
+### func \(\*RoutingTable\) ActorFor
+
+	func (rt *RoutingTable) ActorFor(intent string) string
+
+ActorFor returns the actor agent ID for the given intent, or the fallback actor when no explicit route exists.
+
+<a name="RoutingTable.ReviewerFor"></a>
+### func \(\*RoutingTable\) ReviewerFor
+
+	func (rt *RoutingTable) ReviewerFor(intent string) string
+
+ReviewerFor returns the reviewer agent ID for the given intent, or the fallback reviewer when no explicit route exists.
+
+<a name="RoutingTable.SetRoute"></a>
+### func \(\*RoutingTable\) SetRoute
+
+	func (rt *RoutingTable) SetRoute(intent, actorID, reviewerID string)
+
+SetRoute allows overriding \(or adding\) a route for a specific intent. Pass empty strings for actorID or reviewerID to leave that side unchanged.
 
 <a name="RoutingValidation"></a>
 ## type RoutingValidation
@@ -8932,8 +9290,20 @@ StrategicPlannerConfig holds configuration for the strategic planner.
 	    Bus            *bus.MessageBus
 	    Logger         *slog.Logger
 	    PairManager    *PairManager
+	    Routing        *RoutingTable
 	    MaxPlanSteps   int
 	    PlannerTimeout time.Duration
+	    // ApprovalStepThreshold is the minimum number of planned steps that
+	    // triggers the approval gate (even without an interview). Defaults to 5.
+	    ApprovalStepThreshold int
+	    // SimpleInputMaxChars is the threshold below which a request is
+	    // considered "simple" and may skip LLM decomposition. Defaults to 100.
+	    SimpleInputMaxChars int
+	    // PairInputMinChars is the threshold above which code/debug requests
+	    // are routed to pair sessions. Defaults to 200.
+	    PairInputMinChars int
+	    // MetricsStore, when non-nil, receives planner outcome metrics.
+	    MetricsStore *metrics.Store
 	}
 
 <a name="SubtaskAssignment"></a>
@@ -9678,7 +10048,14 @@ GetActiveThread returns the active thread for the session.
 
 	func (tr *ThreadRouter) GetThreadConversationID(ctx context.Context, sessionID, input string) (string, error)
 
-GetThreadConversationID returns the conversation ID for the thread that best matches the input. It performs silent migration \(creating a "general" thread from the session's existing conversation ID\) when needed. If no session store is available, it falls back to using the session ID directly \(no thread isolation\).
+GetThreadConversationID returns the conversation id for the thread that best matches the input. It performs silent migration \(creating a "general" thread from the session's existing conversation id\) when needed. If no session store is available, it falls back to using the session id directly \(no thread isolation\).
+
+<a name="ThreadRouter.RouteThread"></a>
+### func \(\*ThreadRouter\) RouteThread
+
+	func (tr *ThreadRouter) RouteThread(sessionID, input string) (threadID, topic string)
+
+RouteThread determines which thread \(if any\) should handle the given input for a session. It returns the thread ID and the detected topic label. If the session's active thread already matches the detected topic, it returns the active thread's ID. Otherwise, it creates \(or returns\) a new thread for the detected topic.
 
 <a name="ThreadRouter.SetActiveThread"></a>
 ### func \(\*ThreadRouter\) SetActiveThread

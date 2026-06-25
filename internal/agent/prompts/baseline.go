@@ -215,6 +215,54 @@ func BuildSkillsPromptSection(skills []SkillInfo) string {
 	return sb.String()
 }
 
+// BuildSkillsPromptSectionTracked builds the same prompt section as
+// BuildSkillsPromptSection, but also returns the list of skill names that
+// were included in the prompt. The returned injected slice is used by the
+// caller to record skill injections in the usage tracker for closed-loop
+// skill evolution.
+// BuildSkillsPromptSection (the untracked variant) is retained for backward
+// compatibility with callers that do not need tracking.
+func BuildSkillsPromptSectionTracked(skills []SkillInfo) (prompt string, injected []string) {
+	if len(skills) == 0 {
+		return "", nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# Available Skills\n\n")
+	sb.WriteString("You can invoke the following skills using the /skill-name format:\n\n")
+
+	for _, skill := range skills {
+		fmt.Fprintf(&sb, "## /%s\n", skill.Name)
+		if skill.Description != "" {
+			fmt.Fprintf(&sb, "%s\n", skill.Description)
+		}
+
+		if len(skill.Requires) > 0 {
+			fmt.Fprintf(&sb, "Requires: %s\n", strings.Join(skill.Requires, ", "))
+		}
+
+		if len(skill.Tags) > 0 {
+			fmt.Fprintf(&sb, "Tags: %s\n", strings.Join(skill.Tags, ", "))
+		}
+
+		if len(skill.Examples) > 0 {
+			sb.WriteString("\nExamples:\n")
+			for _, ex := range skill.Examples {
+				fmt.Fprintf(&sb, "  - %s\n", ex)
+			}
+		}
+
+		sb.WriteString("\n")
+
+		injected = append(injected, skill.Name)
+	}
+
+	sb.WriteString("To invoke a skill, use: /<skill-name> <input>\n")
+	sb.WriteString("Example: /code-review Check my Python function for bugs\n")
+
+	return sb.String(), injected
+}
+
 // SkillsInstructions provides instructions for skill usage.
 const SkillsInstructions = `# Skill Usage
 

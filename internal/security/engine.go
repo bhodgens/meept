@@ -39,6 +39,12 @@ type Engine struct {
 	compiledFinancial []*regexp.Regexp
 	logger            *slog.Logger
 	fenceChecker      *FenceChecker
+
+	// preExecCheckers maps employee/agent IDs to their PreExecChecker.
+	// Guarded by mu. The checker's Check method is invoked while mu is
+	// held as RLock, so implementations MUST NOT call back into Engine
+	// methods that acquire mu. See PreExecChecker interface doc.
+	preExecCheckers map[string]PreExecChecker
 }
 
 // NewEngine creates a new security engine with the given database path.
@@ -79,10 +85,11 @@ func NewEngine(dbPath string, cfg *config.SecurityConfig, logger *slog.Logger) (
 	}
 
 	e := &Engine{
-		db:      db,
-		config:  cfg,
-		homeDir: homeDir,
-		logger:  logger,
+		db:              db,
+		config:          cfg,
+		homeDir:         homeDir,
+		logger:          logger,
+		preExecCheckers: make(map[string]PreExecChecker),
 	}
 
 	if err := e.initialize(); err != nil {
@@ -121,6 +128,41 @@ func (e *Engine) SetFenceChecker(fc *FenceChecker) {
 		e.fenceChecker = fc
 	} else {
 		e.fenceChecker = nil
+	}
+}
+
+// SetPreExecChecker registers a PreExecChecker for the given agent/employee
+// ID. The checker is called between Stage 3 (context analysis) and Stage 4
+// (override check) during CheckForAgent. An empty agentID is a no-op.
+//
+// IMPORTANT: The checker's Check method is invoked while Engine.mu is held
+// as an RLock. Implementations MUST NOT call any Engine methods that acquire
+// mu (Check, RecordOverride, etc.) — see PreExecChecker interface doc.
+func (e *Engine) SetPreExecChecker(agentID string, checker PreExecChecker) {
+	if agentID == "" {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.preExecCheckers == nil {
+		e.preExecCheckers = make(map[string]PreExecChecker)
+	}
+	if checker != nil {
+		e.preExecCheckers[agentID] = checker
+	}
+}
+
+// RemovePreExecChecker unregisters the PreExecChecker for the given agent
+// ID. An empty agentID is a no-op. Safe to call when no checker is
+// registered (idempotent).
+func (e *Engine) RemovePreExecChecker(agentID string) {
+	if agentID == "" {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.preExecCheckers != nil {
+		delete(e.preExecCheckers, agentID)
 	}
 }
 
@@ -258,8 +300,22 @@ func (e *Engine) compilePatterns() error {
 	return nil
 }
 
-// Check performs a full permission check pipeline.
+// Check performs a full permission check pipeline. It is equivalent to
+// CheckForAgent with an empty agentID (non-employee path; skips the
+// employee pre-exec stage).
 func (e *Engine) Check(action, toolName string, details map[string]string, conversationID string) Decision {
+	return e.CheckForAgent(action, toolName, details, conversationID, "")
+}
+
+// CheckForAgent performs a full permission check pipeline with an optional
+// agent/employee ID. When agentID is non-empty and a PreExecChecker is
+// registered for that ID, the checker runs as an additional stage between
+// Stage 3 (context analysis) and Stage 4 (override check). This is the
+// employee enforcement gate (spec lines 443-448).
+//
+// The PreExecChecker.Check call happens while Engine.mu is held as RLock.
+// Implementations must not call back into Engine methods that acquire mu.
+func (e *Engine) CheckForAgent(action, toolName string, details map[string]string, conversationID, agentID string) Decision {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -341,6 +397,46 @@ func (e *Engine) Check(action, toolName string, details map[string]string, conve
 			}
 			e.logDecision(decision, action, toolName, details, conversationID)
 			return decision
+		}
+	}
+
+	// Stage 3.5: Employee pre-exec check (Checkpoint 1). Only runs when
+	// agentID is non-empty and a PreExecChecker is registered for that ID.
+	// Non-employee agents (empty agentID or no registered checker) skip
+	// this stage entirely — no behavior change for existing agents.
+	if agentID != "" && len(e.preExecCheckers) > 0 {
+		if checker, ok := e.preExecCheckers[agentID]; ok {
+			// Populate risk_level in details so the checker can compare
+			// against the constitution's risk ceiling.
+			checkDetails := details
+			if checkDetails == nil {
+				checkDetails = make(map[string]string)
+			}
+			if _, hasRL := checkDetails["risk_level"]; !hasRL {
+				checkDetails["risk_level"] = effectiveRisk.String()
+			}
+			preDecision := checker.Check(action, toolName, checkDetails)
+			if !preDecision.Allowed {
+				reason := preDecision.Reason
+				riskLvl := preDecision.RiskLevel
+				if riskLvl == 0 {
+					riskLvl = effectiveRisk
+				}
+				requiresConfirm := false
+				if preDecision.RequiresPlan {
+					requiresConfirm = true
+					reason = "action requires plan signoff per employee constitution: " + reason
+				}
+				decision := Decision{
+					Allowed:              false,
+					Reason:               reason,
+					RiskLevel:            riskLvl,
+					RuleSource:           "employee_pre_exec",
+					RequiresConfirmation: requiresConfirm,
+				}
+				e.logDecision(decision, action, toolName, details, conversationID)
+				return decision
+			}
 		}
 	}
 

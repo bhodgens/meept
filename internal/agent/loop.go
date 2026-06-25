@@ -431,6 +431,13 @@ type AgentLoop struct {
 	// Learning pipeline for JUDGE/DISTILL/CONSOLIDATE
 	learningPipeline LearningPipeline
 
+	// Skill usage tracker for closed-loop skill evolution.
+	usageTracker lifecycleUsageTracker
+	// lastInjectedSkills holds skill names surfaced into the system prompt
+	// for the current turn. Set synchronously in recordSkillInjections;
+	// consumed by triggerLearning.
+	lastInjectedSkills []string
+
 	// Result cache for tool outputs
 	cache *ResultCache
 
@@ -585,6 +592,27 @@ type LearningPipeline interface {
 	Retrieve(ctx context.Context, query string, domain string, k int) ([]*LearnedPattern, error)
 }
 
+// lifecycleUsageTracker is the local interface for skill usage tracking.
+// The lifecycle.UsageTrackerImpl satisfies this interface structurally.
+type lifecycleUsageTracker interface {
+	RecordInjection(skillName string) error
+	RecordOutcome(skillName string, outcome LifecycleOutcome, sessionID string) error
+}
+
+// LifecycleOutcome mirrors lifecycle.Outcome. Defined locally so the agent
+// package does not import skills/lifecycle directly. Exported so the daemon
+// adapter can translate between LifecycleOutcome and lifecycle.Outcome.
+type LifecycleOutcome int
+
+const (
+	// LifecycleOutcomePositive mirrors lifecycle.OutcomePositive.
+	LifecycleOutcomePositive LifecycleOutcome = iota
+	// LifecycleOutcomeNegative mirrors lifecycle.OutcomeNegative.
+	LifecycleOutcomeNegative
+	// LifecycleOutcomeNeutral mirrors lifecycle.OutcomeNeutral.
+	LifecycleOutcomeNeutral
+)
+
 // Trajectory represents a sequence of actions and their outcome (for learning).
 type Trajectory struct {
 	ID        string
@@ -692,6 +720,17 @@ func WithLearningPipeline(lp LearningPipeline) LoopOption {
 	return func(l *AgentLoop) {
 		if lp != nil {
 			l.learningPipeline = lp
+		}
+	}
+}
+
+// WithUsageTracker sets the skill usage tracker for closed-loop skill
+// evolution. The tracker records per-skill injection counts and outcomes so
+// the evolver can identify low performers. Nil guard prevents typed-nil panic.
+func WithUsageTracker(ut lifecycleUsageTracker) LoopOption {
+	return func(l *AgentLoop) {
+		if ut != nil {
+			l.usageTracker = ut
 		}
 	}
 }
@@ -1605,10 +1644,17 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// operation whose LLM calls (Judge/Distill/StorePattern) must outlive
 	// the request that triggered them.
 	if l.learningPipeline != nil && err == nil {
+		// Snapshot the injected skill names before launching the goroutine.
+		// lastInjectedSkills is set synchronously above (in
+		// buildSkillContextSection -> recordSkillInjections) but the goroutine
+		// may execute after the next turn's prompt has overwritten it.
+		injectedSkillsSnapshot := make([]string, len(l.lastInjectedSkills))
+		copy(injectedSkillsSnapshot, l.lastInjectedSkills)
+
 		l.wg.Add(1)
 		go func() {
 			defer l.wg.Done()
-			l.triggerLearning(context.Background(), conv, conversationID, finalResponse)
+			l.triggerLearning(context.Background(), conv, conversationID, finalResponse, injectedSkillsSnapshot)
 		}()
 	}
 
@@ -1749,7 +1795,10 @@ func (l *AgentLoop) RunWithSkill(ctx context.Context, skill *skills.Skill, input
 }
 
 // triggerLearning runs the JUDGE/DISTILL learning pipeline asynchronously.
-func (l *AgentLoop) triggerLearning(ctx context.Context, conv *Conversation, conversationID string, response string) {
+// The injectedSkills parameter is a snapshot of the skills surfaced into the
+// prompt for this turn; outcomes are recorded against each after the judgment
+// is obtained.
+func (l *AgentLoop) triggerLearning(ctx context.Context, conv *Conversation, conversationID string, response string, injectedSkills []string) {
 	// Build trajectory from conversation
 	trajectory := l.buildTrajectory(conv, conversationID, response)
 	if len(trajectory.Steps) == 0 {
@@ -1760,8 +1809,16 @@ func (l *AgentLoop) triggerLearning(ctx context.Context, conv *Conversation, con
 	judgment, err := l.learningPipeline.Judge(ctx, trajectory)
 	if err != nil {
 		l.logger.Debug("Learning judgment failed", "error", err)
+		// Still record outcomes with a nil judgment (neutral) so that
+		// injection counts are not inflated without outcome data.
+		l.recordSkillOutcomes(injectedSkills, nil, conversationID)
 		return
 	}
+
+	// Record skill outcomes now that we have a judgment. This happens before
+	// the ShouldLearn early-return so outcomes are recorded regardless of
+	// whether patterns are distilled.
+	l.recordSkillOutcomes(injectedSkills, judgment, conversationID)
 
 	// Only distill if the judgment indicates we should learn
 	if !judgment.ShouldLearn {
@@ -1954,10 +2011,17 @@ func (l *AgentLoop) buildSkillContextSection(ctx context.Context, discovered []*
 	sb.WriteString("## Relevant Skills\n\n")
 	sb.WriteString("The following skills are available and relevant to this request:\n\n")
 
+	// Collect the names of all surfaced skills for usage tracking.
+	injectedNames := make([]string, 0, len(discovered))
+
 	// Track approximate token usage (rough estimate: 1 token ≈ 4 chars)
 	tokenEstimate := 0
 
 	for _, d := range discovered {
+		// Track this skill as injected (surfaced to the prompt) regardless of
+		// whether the full body or only metadata is included.
+		injectedNames = append(injectedNames, d.Entry.Name)
+
 		// Load skill body
 		skillContent, err := l.loadSkillContext(ctx, d.Entry.Name)
 		if err != nil {
@@ -1989,7 +2053,65 @@ func (l *AgentLoop) buildSkillContextSection(ctx context.Context, discovered []*
 		tokenEstimate += contentTokens
 	}
 
+	// Record skill injections for usage tracking (closed-loop).
+	l.recordSkillInjections(injectedNames)
+
 	return sb.String()
+}
+
+// recordSkillInjections stores the injected skill names on the loop for
+// outcome tracking and records each injection in the usage tracker. Called
+// synchronously from buildSkillContextSection (same goroutine that builds
+// the prompt and makes the LLM call).
+func (l *AgentLoop) recordSkillInjections(names []string) {
+	l.lastInjectedSkills = names
+	if l.usageTracker == nil {
+		return
+	}
+	for _, name := range names {
+		if err := l.usageTracker.RecordInjection(name); err != nil {
+			l.logger.Debug("Failed to record skill injection",
+				"skill", name,
+				"error", err,
+			)
+		}
+	}
+}
+
+// recordSkillOutcomes records the outcome for each skill in the provided list.
+// Called from triggerLearning after the learning judgment is obtained. The
+// outcome is derived from the judgment quality and ShouldLearn flag:
+//   - ShouldLearn && quality >= 0.7 -> positive
+//   - !ShouldLearn                 -> negative
+//   - otherwise                    -> neutral
+func (l *AgentLoop) recordSkillOutcomes(names []string, judgment *JudgmentResult, conversationID string) {
+	if l.usageTracker == nil || len(names) == 0 {
+		return
+	}
+
+	var outcome LifecycleOutcome
+	if judgment != nil {
+		switch {
+		case judgment.ShouldLearn && judgment.Quality >= 0.7:
+			outcome = LifecycleOutcomePositive
+		case !judgment.ShouldLearn:
+			outcome = LifecycleOutcomeNegative
+		default:
+			outcome = LifecycleOutcomeNeutral
+		}
+	} else {
+		outcome = LifecycleOutcomeNeutral
+	}
+
+	for _, name := range names {
+		if err := l.usageTracker.RecordOutcome(name, outcome, conversationID); err != nil {
+			l.logger.Debug("Failed to record skill outcome",
+				"skill", name,
+				"outcome", outcome,
+				"error", err,
+			)
+		}
+	}
 }
 
 // Token budget constants for context management

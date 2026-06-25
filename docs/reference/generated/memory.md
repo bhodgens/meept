@@ -76,6 +76,8 @@ Package memory provides memory storage and retrieval for meept.
 - [type GraphStats](<#GraphStats>)
 - [type Handler](<#Handler>)
   - [func NewHandler\(manager \*Manager, msgBus \*bus.MessageBus, logger \*slog.Logger\) \*Handler](<#NewHandler>)
+  - [func NewHandlerWithSecurity\(manager \*Manager, msgBus \*bus.MessageBus, secOrch \*intsecurity.Orchestrator, logger \*slog.Logger\) \*Handler](<#NewHandlerWithSecurity>)
+  - [func \(h \*Handler\) SetSecurityOrchestrator\(secOrch \*intsecurity.Orchestrator\)](<#Handler.SetSecurityOrchestrator>)
   - [func \(h \*Handler\) Start\(ctx context.Context\) error](<#Handler.Start>)
   - [func \(h \*Handler\) Stop\(ctx context.Context\) error](<#Handler.Stop>)
 - [type KnowledgeGraph](<#KnowledgeGraph>)
@@ -534,6 +536,11 @@ ConsolidationReport summarizes a consolidation run.
 	    DuplicatesRemoved int `json:"duplicates_removed"`
 	    // Expired is the number of memories expired due to access-based expiration.
 	    Expired int `json:"expired"`
+	    // EpistemicEdgesDetected is the number of epistemic edges (contradicts,
+	    // superseded, evidence_for/against, etc.) written by the consolidator's
+	    // periodic detection pass over memories added since the last run.
+	    // Catches relationships the per-Store hook missed.
+	    EpistemicEdgesDetected int `json:"epistemic_edges_detected"`
 	    // Duration is how long consolidation took.
 	    Duration time.Duration `json:"duration"`
 	    // Error is any error that occurred.
@@ -923,6 +930,11 @@ GraphStats holds statistics about the knowledge graph.
 
 Handler bridges the message bus to the MemoryManager. It subscribes to memory.query and memory.recent, responding with memory.result.
 
+When a SecurityOrchestrator is wired \(via SetSecurityOrchestrator or NewHandlerWithSecurity\), retrieved memory content is:
+
+1. Re\-sanitized through InputSanitizer to catch patterns added after the memory was originally stored.
+2. Wrapped in boundary markers so downstream LLM context can distinguish stored memory from live user/system instructions.
+
 	type Handler struct {
 	    // contains filtered or unexported fields
 	}
@@ -933,6 +945,20 @@ Handler bridges the message bus to the MemoryManager. It subscribes to memory.qu
 	func NewHandler(manager *Manager, msgBus *bus.MessageBus, logger *slog.Logger) *Handler
 
 NewHandler creates a new memory handler.
+
+<a name="NewHandlerWithSecurity"></a>
+### func NewHandlerWithSecurity
+
+	func NewHandlerWithSecurity(manager *Manager, msgBus *bus.MessageBus, secOrch *intsecurity.Orchestrator, logger *slog.Logger) *Handler
+
+NewHandlerWithSecurity creates a new memory handler with security protection \(re\-sanitization and boundary wrapping\) enabled.
+
+<a name="Handler.SetSecurityOrchestrator"></a>
+### func \(\*Handler\) SetSecurityOrchestrator
+
+	func (h *Handler) SetSecurityOrchestrator(secOrch *intsecurity.Orchestrator)
+
+SetSecurityOrchestrator wires a security orchestrator for retrieval\-time re\-sanitization. Nil is accepted and simply disables protection.
 
 <a name="Handler.Start"></a>
 ### func \(\*Handler\) Start

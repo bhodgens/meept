@@ -46,11 +46,14 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(e \*Engine\) AllowOnce\(action, pattern, reason string, maxUses, expiresDays int\) \(int64, error\)](<#Engine.AllowOnce>)
   - [func \(e \*Engine\) BlockAction\(action, pattern, reason string\) \(int64, error\)](<#Engine.BlockAction>)
   - [func \(e \*Engine\) Check\(action, toolName string, details map\[string\]string, conversationID string\) Decision](<#Engine.Check>)
+  - [func \(e \*Engine\) CheckForAgent\(action, toolName string, details map\[string\]string, conversationID, agentID string\) Decision](<#Engine.CheckForAgent>)
   - [func \(e \*Engine\) Close\(\) error](<#Engine.Close>)
   - [func \(e \*Engine\) GetContextForLLM\(decision Decision, action string, details map\[string\]string\) string](<#Engine.GetContextForLLM>)
   - [func \(e \*Engine\) GetDecision\(action string\) Decision](<#Engine.GetDecision>)
   - [func \(e \*Engine\) RecordOverride\(action, pattern, decision, reason, conversationID string, maxUses, expiresDays int\) \(int64, error\)](<#Engine.RecordOverride>)
+  - [func \(e \*Engine\) RemovePreExecChecker\(agentID string\)](<#Engine.RemovePreExecChecker>)
   - [func \(e \*Engine\) SetFenceChecker\(fc \*FenceChecker\)](<#Engine.SetFenceChecker>)
+  - [func \(e \*Engine\) SetPreExecChecker\(agentID string, checker PreExecChecker\)](<#Engine.SetPreExecChecker>)
 - [type FenceChecker](<#FenceChecker>)
   - [func NewFenceChecker\(cfg FenceConfig, logger \*slog.Logger\) \*FenceChecker](<#NewFenceChecker>)
   - [func \(fc \*FenceChecker\) CheckCommand\(cmd string, workDir string\) error](<#FenceChecker.CheckCommand>)
@@ -64,6 +67,11 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func NewInputSanitizer\(strictness StrictnessLevel\) \*InputSanitizer](<#NewInputSanitizer>)
   - [func \(s \*InputSanitizer\) IsSafe\(text string\) bool](<#InputSanitizer.IsSafe>)
   - [func \(s \*InputSanitizer\) Sanitize\(text string\) SanitizationResult](<#InputSanitizer.Sanitize>)
+- [type InstructionValidator](<#InstructionValidator>)
+  - [func NewInstructionValidator\(engine \*Engine\) \*InstructionValidator](<#NewInstructionValidator>)
+  - [func \(v \*InstructionValidator\) IsHighRiskCommand\(cmd string\) bool](<#InstructionValidator.IsHighRiskCommand>)
+  - [func \(v \*InstructionValidator\) IsKnownSafeCommand\(cmd string\) bool](<#InstructionValidator.IsKnownSafeCommand>)
+  - [func \(v \*InstructionValidator\) Validate\(instr \*preferences.ParsedInstruction\) ValidationResult](<#InstructionValidator.Validate>)
 - [type Message](<#Message>)
 - [type Orchestrator](<#Orchestrator>)
   - [func NewOrchestrator\(cfg OrchestratorConfig, logger \*slog.Logger\) \*Orchestrator](<#NewOrchestrator>)
@@ -73,11 +81,15 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(o \*Orchestrator\) Config\(\) OrchestratorConfig](<#Orchestrator.Config>)
   - [func \(o \*Orchestrator\) InputSanitizer\(\) \*InputSanitizer](<#Orchestrator.InputSanitizer>)
   - [func \(o \*Orchestrator\) IsEnabled\(\) bool](<#Orchestrator.IsEnabled>)
+  - [func \(o \*Orchestrator\) RecordMemoryTaint\(memoryID, memoryType, value string, label taint.TaintLabel\)](<#Orchestrator.RecordMemoryTaint>)
+  - [func \(o \*Orchestrator\) RecordToolTaint\(toolCallID, toolName string, value string, label taint.TaintLabel\)](<#Orchestrator.RecordToolTaint>)
+  - [func \(o \*Orchestrator\) RecordUserInput\(conversationID, input string\)](<#Orchestrator.RecordUserInput>)
   - [func \(o \*Orchestrator\) SanitizeInput\(text string\) \(sanitized string, ok bool, warnings \[\]Warning\)](<#Orchestrator.SanitizeInput>)
   - [func \(o \*Orchestrator\) ScanOutput\(text string\) \(sanitized string, ok bool, warnings \[\]Warning\)](<#Orchestrator.ScanOutput>)
   - [func \(o \*Orchestrator\) ScanShellCommand\(ctx context.Context, command string\) \(blocked, warning bool, reason string\)](<#Orchestrator.ScanShellCommand>)
   - [func \(o \*Orchestrator\) SetTaintTracker\(tt \*TaintTracker\)](<#Orchestrator.SetTaintTracker>)
   - [func \(o \*Orchestrator\) Stats\(\) map\[string\]int64](<#Orchestrator.Stats>)
+  - [func \(o \*Orchestrator\) WrapSkillOutput\(skillName, output string\) string](<#Orchestrator.WrapSkillOutput>)
   - [func \(o \*Orchestrator\) WrapToolOutput\(toolName, output string\) string](<#Orchestrator.WrapToolOutput>)
   - [func \(o \*Orchestrator\) WrapUserInput\(text string\) string](<#Orchestrator.WrapUserInput>)
 - [type OrchestratorConfig](<#OrchestratorConfig>)
@@ -90,6 +102,8 @@ Package security provides the security engine with SQLite\-backed decision makin
 - [type OutputScanResult](<#OutputScanResult>)
 - [type Override](<#Override>)
 - [type PathRule](<#PathRule>)
+- [type PreExecChecker](<#PreExecChecker>)
+- [type PreExecDecision](<#PreExecDecision>)
 - [type PromptGuard](<#PromptGuard>)
   - [func NewPromptGuard\(\) \*PromptGuard](<#NewPromptGuard>)
   - [func NewPromptGuardWithInterval\(interval int\) \*PromptGuard](<#NewPromptGuardWithInterval>)
@@ -97,6 +111,7 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(pg \*PromptGuard\) DetectInjection\(text string\) \(bool, \[\]InjectionMatch\)](<#PromptGuard.DetectInjection>)
   - [func \(pg \*PromptGuard\) GuardedPrompt\(userInput string\) \(prompt string, hasInjections bool, matches \[\]InjectionMatch\)](<#PromptGuard.GuardedPrompt>)
   - [func \(pg \*PromptGuard\) InjectSafetyReminders\(messages \[\]Message\) \[\]Message](<#PromptGuard.InjectSafetyReminders>)
+  - [func \(pg \*PromptGuard\) WrapSkillOutput\(skillName, output string\) string](<#PromptGuard.WrapSkillOutput>)
   - [func \(pg \*PromptGuard\) WrapToolOutput\(toolName, output string\) string](<#PromptGuard.WrapToolOutput>)
   - [func \(pg \*PromptGuard\) WrapUserInput\(text string\) string](<#PromptGuard.WrapUserInput>)
 - [type QueryFilters](<#QueryFilters>)
@@ -134,6 +149,7 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(t \*TirithScanner\) SetFailOpen\(failOpen bool\)](<#TirithScanner.SetFailOpen>)
   - [func \(t \*TirithScanner\) ShouldBlock\(ctx context.Context, command string\) bool](<#TirithScanner.ShouldBlock>)
 - [type ToolRule](<#ToolRule>)
+- [type ValidationResult](<#ValidationResult>)
 - [type Warning](<#Warning>)
 
 
@@ -478,7 +494,16 @@ BlockAction records a permanent block for an action.
 
 	func (e *Engine) Check(action, toolName string, details map[string]string, conversationID string) Decision
 
-Check performs a full permission check pipeline.
+Check performs a full permission check pipeline. It is equivalent to CheckForAgent with an empty agentID \(non\-employee path; skips the employee pre\-exec stage\).
+
+<a name="Engine.CheckForAgent"></a>
+### func \(\*Engine\) CheckForAgent
+
+	func (e *Engine) CheckForAgent(action, toolName string, details map[string]string, conversationID, agentID string) Decision
+
+CheckForAgent performs a full permission check pipeline with an optional agent/employee ID. When agentID is non\-empty and a PreExecChecker is registered for that ID, the checker runs as an additional stage between Stage 3 \(context analysis\) and Stage 4 \(override check\). This is the employee enforcement gate \(spec lines 443\-448\).
+
+The PreExecChecker.Check call happens while Engine.mu is held as RLock. Implementations must not call back into Engine methods that acquire mu.
 
 <a name="Engine.Close"></a>
 ### func \(\*Engine\) Close
@@ -508,12 +533,28 @@ GetDecision retrieves a cached decision lookup \(for action\-only checks\).
 
 RecordOverride records a creator permission override.
 
+<a name="Engine.RemovePreExecChecker"></a>
+### func \(\*Engine\) RemovePreExecChecker
+
+	func (e *Engine) RemovePreExecChecker(agentID string)
+
+RemovePreExecChecker unregisters the PreExecChecker for the given agent ID. An empty agentID is a no\-op. Safe to call when no checker is registered \(idempotent\).
+
 <a name="Engine.SetFenceChecker"></a>
 ### func \(\*Engine\) SetFenceChecker
 
 	func (e *Engine) SetFenceChecker(fc *FenceChecker)
 
 SetFenceChecker sets the fence checker for path boundary enforcement. Pass nil to disable fencing for this session. The typed\-nil guard prevents accidental interface\-nil assignment.
+
+<a name="Engine.SetPreExecChecker"></a>
+### func \(\*Engine\) SetPreExecChecker
+
+	func (e *Engine) SetPreExecChecker(agentID string, checker PreExecChecker)
+
+SetPreExecChecker registers a PreExecChecker for the given agent/employee ID. The checker is called between Stage 3 \(context analysis\) and Stage 4 \(override check\) during CheckForAgent. An empty agentID is a no\-op.
+
+IMPORTANT: The checker's Check method is invoked while Engine.mu is held as an RLock. Implementations MUST NOT call any Engine methods that acquire mu \(Check, RecordOverride, etc.\) — see PreExecChecker interface doc.
 
 <a name="FenceChecker"></a>
 ## type FenceChecker
@@ -627,6 +668,43 @@ IsSafe performs a quick safety check without modifying the text.
 
 Sanitize runs the full sanitization pipeline on the input text.
 
+<a name="InstructionValidator"></a>
+## type InstructionValidator
+
+InstructionValidator validates user instructions for security risks.
+
+	type InstructionValidator struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewInstructionValidator"></a>
+### func NewInstructionValidator
+
+	func NewInstructionValidator(engine *Engine) *InstructionValidator
+
+NewInstructionValidator creates a new instruction validator.
+
+<a name="InstructionValidator.IsHighRiskCommand"></a>
+### func \(\*InstructionValidator\) IsHighRiskCommand
+
+	func (v *InstructionValidator) IsHighRiskCommand(cmd string) bool
+
+IsHighRiskCommand checks if a command matches high\-risk patterns.
+
+<a name="InstructionValidator.IsKnownSafeCommand"></a>
+### func \(\*InstructionValidator\) IsKnownSafeCommand
+
+	func (v *InstructionValidator) IsKnownSafeCommand(cmd string) bool
+
+IsKnownSafeCommand checks if a command is in the known\-safe allowlist.
+
+<a name="InstructionValidator.Validate"></a>
+### func \(\*InstructionValidator\) Validate
+
+	func (v *InstructionValidator) Validate(instr *preferences.ParsedInstruction) ValidationResult
+
+Validate validates a parsed instruction and returns the result.
+
 <a name="Message"></a>
 ## type Message
 
@@ -695,6 +773,29 @@ InputSanitizer returns the input sanitizer component. Returns nil if input sanit
 
 IsEnabled returns whether the orchestrator has any security features enabled.
 
+<a name="Orchestrator.RecordMemoryTaint"></a>
+### func \(\*Orchestrator\) RecordMemoryTaint
+
+	func (o *Orchestrator) RecordMemoryTaint(memoryID, memoryType, value string, label taint.TaintLabel)
+
+RecordMemoryTaint stores a retrieved memory value in the taint tracker so that subsequent policy checks \(e.g., shell\_exec sink\) can detect memory\-sourced data flowing through the agent loop. The memoryID disambiguates individual entries; the memoryType label identifies the subsystem \(episodic, task, etc.\) and is included in the taint source description. The call is a no\-op when taint tracking is disabled \(no tracker configured\) or when the label is TaintNone.
+
+The default label for retrieved memory is TaintUserInput: stored memories may have been poisoned by past prompt\-injection attempts and should not flow into sensitive sinks without explicit declassification.
+
+<a name="Orchestrator.RecordToolTaint"></a>
+### func \(\*Orchestrator\) RecordToolTaint
+
+	func (o *Orchestrator) RecordToolTaint(toolCallID, toolName string, value string, label taint.TaintLabel)
+
+RecordToolTaint stores a tainted tool result value in the taint tracker so that subsequent policy checks \(e.g., shell\_exec sink\) can detect tainted data flowing through the agent loop. The call is a no\-op when taint tracking is disabled \(no tracker configured\) or when the label is empty.
+
+<a name="Orchestrator.RecordUserInput"></a>
+### func \(\*Orchestrator\) RecordUserInput
+
+	func (o *Orchestrator) RecordUserInput(conversationID, input string)
+
+RecordUserInput records direct user input as carrying TaintUserInput so that downstream policy checks \(e.g., shell\_exec sink\) can distinguish user\-originated data from trusted system messages. The call is a no\-op when taint tracking is disabled \(no tracker configured\).
+
 <a name="Orchestrator.SanitizeInput"></a>
 ### func \(\*Orchestrator\) SanitizeInput
 
@@ -729,6 +830,13 @@ SetTaintTracker sets the taint tracker for information flow security.
 	func (o *Orchestrator) Stats() map[string]int64
 
 Stats returns security metrics as a map.
+
+<a name="Orchestrator.WrapSkillOutput"></a>
+### func \(\*Orchestrator\) WrapSkillOutput
+
+	func (o *Orchestrator) WrapSkillOutput(skillName, output string) string
+
+WrapSkillOutput wraps output from a skill execution in boundary markers. Skill results use the same boundary marker scheme as tool outputs so that existing injection\-detection \(IsWithinBoundary, safety reminders\) covers them automatically. The skill name is prefixed with "skill:" to distinguish skill\-sourced output from tool\-sourced output in logs and boundary scans.
 
 <a name="Orchestrator.WrapToolOutput"></a>
 ### func \(\*Orchestrator\) WrapToolOutput
@@ -854,6 +962,33 @@ PathRule defines a rule for filesystem path access.
 	    Enabled     bool      `json:"enabled"`
 	}
 
+<a name="PreExecChecker"></a>
+## type PreExecChecker
+
+PreExecChecker is the interface implemented by the employee enforcement engine's pre\-execution gate \(internal/employee.PreExecChecker\). The security engine calls Check between Stage 3 \(context analysis\) and Stage 4 \(override check\) for agents that have a registered checker.
+
+IMPORTANT: Check is invoked while the security Engine holds its mu as an RLock. Therefore implementations MUST NOT call any Engine methods that acquire the Engine lock \(Check, RecordOverride, AllowOnce, etc.\). The employee PreExecChecker performs only in\-memory constitution comparisons — no I/O, no lock acquisition — so this contract is satisfied. See engine.go CheckForAgent for the call site.
+
+	type PreExecChecker interface {
+	    // Check evaluates a single tool call against the employee's
+	    // constitution. Returns a PreExecDecision describing whether the
+	    // call is allowed, denied, or escalated to plan signoff.
+	    Check(action, toolName string, details map[string]string) PreExecDecision
+	}
+
+<a name="PreExecDecision"></a>
+## type PreExecDecision
+
+PreExecDecision is the result of PreExecChecker.Check. When Allowed is false the security engine blocks the action. RequiresPlan triggers plan signoff for an escalation. EscalateTo lists the agent IDs \(or role sentinels like "role:user"\) that must approve an escalated action.
+
+	type PreExecDecision struct {
+	    Allowed      bool
+	    Reason       string
+	    RiskLevel    RiskLevel
+	    RequiresPlan bool
+	    EscalateTo   []string
+	}
+
 <a name="PromptGuard"></a>
 ## type PromptGuard
 
@@ -905,6 +1040,13 @@ GuardedPrompt wraps user input with detection and boundary markers.
 	func (pg *PromptGuard) InjectSafetyReminders(messages []Message) []Message
 
 InjectSafetyReminders returns a copy of messages with periodic safety reminders.
+
+<a name="PromptGuard.WrapSkillOutput"></a>
+### func \(\*PromptGuard\) WrapSkillOutput
+
+	func (pg *PromptGuard) WrapSkillOutput(skillName, output string) string
+
+WrapSkillOutput wraps output from a skill execution in boundary markers. It uses the same TOOL\_OUTPUT markers with a "skill:" prefix so that existing boundary detection \(IsWithinBoundary, injection scanning\) covers skill results without requiring a separate marker type. The skill name is sanitized to remove characters that could confuse boundary parsing.
 
 <a name="PromptGuard.WrapToolOutput"></a>
 ### func \(\*PromptGuard\) WrapToolOutput
@@ -1263,6 +1405,19 @@ ToolRule defines permissions for a tool/action combination.
 	    RequiresConfirmation bool      `json:"requires_confirmation"`
 	    Immutable            bool      `json:"immutable"`
 	    Enabled              bool      `json:"enabled"`
+	}
+
+<a name="ValidationResult"></a>
+## type ValidationResult
+
+ValidationResult holds the result of instruction validation.
+
+	type ValidationResult struct {
+	    Valid              bool
+	    RiskLevel          string // "low", "medium", "high"
+	    ConfirmationNeeded bool
+	    Errors             []string
+	    Warnings           []string
 	}
 
 <a name="Warning"></a>

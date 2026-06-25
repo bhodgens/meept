@@ -53,28 +53,32 @@ Instead of massive context due to plan files and SKILLS.md, everything gets load
 
 | Platform | Model | Meept's Advantage |
 |----------|-------|-------------------|
-| **Hermes / OpenCode** | Terminal-only, ephemeral | **Daemon architecture** with persistent memory, job scheduling, and continuous learning |
-| **Claude Code** | Single-session CLI | **Multi-agent orchestration** -  8+ configurable specialist agents that discover and delegate to each other |
-| **Cursor** | IDE-integrated copilot | **Background operation** - runs independently, works across any editor or no editor at all |
-| **General agents** | Trust LLM claims | **Evidence-based validation** - every claim is checked against verifiable tool output |
-| **Most agents** | Token-heavy first response | **Classification routing** - utilizes a fast first-pass local classifer agent | 
-| **Most agents** | written in Python | **Golang** - faster and smaller, with a proper thread (goroutine) model for modern CPUs |
-| **Most agents** | Single agent or naive delegation | **Agentic pairs** - 4 collaboration modalities: spec-driven review, shared-context pair sessions, bus-channel debates, and inline review tools |
+| **Claude Code / OpenClaw** | Single-session CLI | **Daemon architecture** with persistent memory, job scheduling, and multi-transport (RPC + HTTP + WebSocket) |
+| **Hermes / OpenCode** | Terminal-only, ephemeral | **Constitution-bound AI Employees** with autonomy tiers, enforcement engines, and goal loops |
+| **Cursor** | IDE-integrated copilot | **Evidence-based execution** - every tool produces verifiable evidence (file hashes, exit codes, API responses) |
+| **OpenAgent (Rust)** | Single agent (ReAct) | **18 specialist agents + 5 reviewers** with intent classification and capability-based routing |
+| **OpenAgent (Python)** | Team coordination | **Seven-layer safety stack** - watchdog, cycle/convergence detection, budget tracking, hallucination recovery, model failover, context firewall |
+| **oh-my-pi** | Single-agent harness | **Five-tier memory system** - episodic (FTS5), task, knowledge graph, semantic (vector), distributed (memvid) |
+| **Most agents** | Written in Python | **Go implementation** - native threading (goroutines), compiled performance, single binary deployment |
+| **Most agents** | Manual model selection | **Model reassignment via natural language** - "use GLM for coding" triggers capability-based resolution |
+| **Most agents** | Skill learning only | **Full self-improvement cycle** - detect → analyze → generate → validate → apply (code fixing, not just patterns) |
 
-I've also borrowed  ideas implemented in agentic harnesses like the venerable [oh-my-pi](https://github.com/can1357/oh-my-pi) and [Hermes Agent](https://github.com/nousresearch/hermes-agent), as well as other projects, when I find a feature which I think would improve things.
+See [docs/analysis/agent-framework-comparison.md](docs/analysis/agent-framework-comparison.md) for the complete 12-category comparison.
 
 ## Where Meept is Clearly Better
 
 | Capability | Meept | Other Harnesses |
 |---|---|---|
-| **Architecture** | Go daemon with HTTP/RPC/WebSocket/MCP transports | TypeScript in-process harnesses |
-| **Security** | Tirith, InputSanitizer, SecurityEngine, TLS, path fencing | Minimal security layers |
-| **Observability** | Metrics store, historical charts, REST API | Basic |
-| **Context management** | ContextFirewall with compaction, summarization, token tracking | Basic truncation |
-| **Scheduling** | Cron-based job scheduler with worker pool | None |
-| **Self-improvement** | Q Agent analyzing sessions for optimization | None |
-| **Cross-platform** | Go binary + Flutter GUI + SwiftUI macOS MenuBar + MCP | Terminal-only or IDE-bound |
-| **Model resolution** | Capability-based cheapest-match resolver | Manual or category-based |
+| **Architecture** | Go daemon with HTTP/RPC/WebSocket/MCP transports | TypeScript in-process (OpenCode), Python (Hermes, oh-my-pi) |
+| **Security** | SecurityEngine (SQLite permissions) + InputSanitizer + Tirith + TLS + path fencing | Heuristic-only (Hermes), Guard whitelist (OpenAgent-Rust) |
+| **Observability** | SQLite metrics store, Prometheus-compatible, structured logging (slog) | OTEL JSONL (OpenAgent-Rust), Usage DB (Hermes), None (others) |
+| **Context management** | ContextFirewall + compaction + thread partitioning | Truncation (OpenCode), LLM summarization (Hermes) |
+| **Scheduling** | Cron + job queue with agent targeting | Cron only (Hermes, OpenAgent), None (others) |
+| **Self-improvement** | Full cycle (detect→analyze→generate→validate→apply) | Skill learning only (Hermes), None (others) |
+| **Cross-platform** | Go binary + Flutter GUI + SwiftUI MenuBar + MCP | Terminal-only (most), Electron (OpenAgent-Python) |
+| **Model resolution** | Capability-based resolver + natural language reassignment | Manual selection, Team-as-router (OpenAgent-Python) |
+| **Memory** | 5-tier (episodic/task/KG/semantic/distributed) | 1-2 tiers (Hermes, OpenAgent), None (OpenCode) |
+| **Agent architecture** | 18 specialists + 5 reviewers + Employees | Single agent (Hermes, oh-my-pi), Dynamic teams (OpenAgent-Python) |
 
 ## Other Key Differentiators
 #### Autonomous Agent Workcycle 
@@ -151,7 +155,13 @@ Learn more: [Memory System](docs/workflows/memory.md)
 
 ### 4. Multi-Agent Collaboration
 
-Eight specialist agents (`dispatcher`, `chat`, `coder`, `debugger`, `planner`, `analyst`, `committer`, `scheduler`) discover each other via platform tools and delegate work. The dispatcher supports **model reassignment** via natural language instructions like "use GLM models for coding" or "research with local models, synthesize with glm-4.7".
+**18 specialist agents** discover each other via platform tools and delegate work:
+
+**Executor Agents (13):** `dispatcher`, `chat`, `coder`, `debugger`, `planner`, `analyst`, `committer`, `scheduler`, `researcher`, `writer`, `architect`, `skeptic`, `librarian`
+
+**Reviewer Agents (5):** `code-reviewer`, `test-reviewer`, `debug-reviewer`, `planner-reviewer`, `analyst-reviewer`
+
+The dispatcher supports **model reassignment** via natural language instructions like "use GLM models for coding" or "research with local models, synthesize with glm-4.7".
 
 ```
  User: "Fix the auth bug and deploy it"
@@ -188,6 +198,24 @@ The Q Agent (Quartermaster) is a meta-agent that analyzes completed sessions, de
 6. **Validate** proposals before applying
 
 Learn more: [Q Agent](docs/workflows/q-agent.md)
+
+### 6. AI Employees (Constitution-Bound Autonomous Agents)
+
+Meept's AI Employee framework adds structured autonomy on top of the agent runtime. An employee is an agent with a **constitution**, **goal loop**, and **enforcement engine**:
+
+| Component | Purpose |
+|-----------|---------|
+| **Constitution** | 4-section document: Identity (purpose/role), Autonomy (tier), Authority (escalation), Constraints (machine-enforceable rules) |
+| **Goal Loop** | ASSESS → PLAN → EXECUTE → REFLECT cycle with tier-aware behavior (reactive/propose/autonomous) |
+| **Enforcement Engine** | 3 checkpoints: pre-execution gate (blocks forbidden tools), post-turn audit (LLM classifier), periodic drift detection |
+| **Audit Findings** | SQLite-backed findings with severity (info/warning/critical), resolution workflows, drift scoring |
+
+**Autonomy Tiers:**
+- **Tier 1 (reactive):** Trigger-only execution, no self-enqueued work
+- **Tier 2 (propose):** Plans route to `escalates_to` for human signoff before execution
+- **Tier 3 (autonomous):** Full cycle execution gated only by constitution constraints
+
+Learn more: [AI Employees](docs/workflows/employees.md)
 
 ## Quick Start
 
@@ -242,24 +270,24 @@ For complete feature details, see [Features](./docs/features.md).
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Daemon core | ✅ Stable | Lifecycle, RPC, config, HTTP REST |
-| **Agent loop** | ✅ Working | Full safety stack (watchdog, cycle/convergence detection, budget) |
-| **Model reassignment** | ✅ Complete | Natural language model override ("use GLM for coding"), clarification dialogs, task/step-level overrides |
-| **Context firewall** | ✅ Working | Hierarchical compression, structured summarization |
-| **Evidence pipeline** | ✅ Working | Tool evidence &rarr; validator &rarr; claim checking |
-| Multi-agent system | ✅ Working | 8 agents, routing, delegation via platform tools |
-| Memory system | ✅ Working | 5-tier: episodic, task, knowledge graph, semantic, distributed |
-| Code intelligence | ✅ Working | Tree-sitter AST + LSP client tools |
-| LLM management | ✅ Working | Multi-provider, alias resolution, failover, budgeting |
-| Job scheduling | ✅ Working | Cron, reminders, SQLite queue |
-| **AI employees** | ✅ Working | Constitution-bound autonomous agents with tiered autonomy, goal loop, and enforcement engine |
-| **Skills system** | ✅ Complete | Discovery, execution, CLI commands (`meept skills list/run/show`) |
-| Security engine | ✅ Complete | Input sanitization, Tirith scanning, audit logging, security hooks for all tools |
-| Collaborative planning | ✅ Complete | Programming task detection, plan review/approval workflow wired into chat handler |
-| Self-improvement | 🔄 Partial | Detection works, full cycle in progress |
-| Shadow training | 🔄 Partial | Infrastructure ready, data collection not active |
-| **External integrations** | 🔄 Partial | macOS MenuBar working, Telegram planned, web UI in progress |
-| **Analytics** | Working | Agent performance analytics, model performance tracking, error records |
-| **Notifications** | Working | Desktop notifications via WebSocket and UNUserNotificationCenter |
+| **Agent loop** | ✅ Complete | Full safety stack (watchdog, cycle/convergence detection, budget, hallucination recovery, model failover) |
+| **Model reassignment** | ✅ Complete | Natural language model override, capability-based resolution, vendor-specific reasoning effort translation |
+| **Context firewall** | ✅ Complete | Hierarchical compression, structured summarization, token-aware truncation, thread partitioning |
+| **Evidence pipeline** | ✅ Complete | Tool evidence (hashes, exit codes, API responses) → validator → claim checking |
+| Multi-agent system | ✅ Complete | 18 specialists + 5 reviewers with intent classification, delegation, handoff |
+| Memory system | ✅ Complete | 5-tier: episodic (FTS5), task, knowledge graph, semantic (vector), distributed (memvid) |
+| Code intelligence | ✅ Complete | Tree-sitter AST + LSP client tools |
+| LLM management | ✅ Complete | Multi-provider, alias resolution, failover, budgeting, reasoning effort control |
+| Job scheduling | ✅ Complete | Cron, reminders, SQLite queue with agent targeting |
+| **AI employees** | ✅ Complete | Constitution-bound agents with 3 autonomy tiers, enforcement engine (3 checkpoints), goal loop |
+| **Skills system** | ✅ Complete | Three-tier discovery, YAML frontmatter, priority shadowing |
+| Security engine | ✅ Complete | InputSanitizer, Tirith scanning, SecurityEngine, TLS, path fencing |
+| Collaborative planning | ✅ Complete | Programming detection, plan review/approval workflow, workspace tracking |
+| Self-improvement | ✅ Complete | Full cycle: detect → analyze → generate → validate → apply (pytest/logs/lint/type-check) |
+| Shadow training | 🔄 Partial | Infrastructure complete (parallel execution, quality filtering, export); continuous learning in progress |
+| **External integrations** | 🔄 Partial | macOS MenuBar ✅, MCP server ✅, Telegram ⏳ planned, Web UI ⏳ in progress |
+| **Analytics** | ✅ Complete | Agent performance, model metrics, error records, historical charts |
+| **Notifications** | ✅ Complete | Desktop notifications via WebSocket and platform-native (macOS UNUserNotificationCenter) |
 
 ## CLI Quick Reference
 

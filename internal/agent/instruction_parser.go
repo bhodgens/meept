@@ -169,6 +169,7 @@ func (p *InstructionParser) parseToCron(matches []string, keyword string) string
 		} else if len(matches) > 3 && strings.ToLower(matches[3]) == "am" && hour == "12" {
 			hour = "0"
 		}
+		_ = h // WIP: user-instructions feature, cron formatting incomplete
 		return minute + " " + matches[1] + " * * *"
 	case "weekly":
 		day := matches[1]

@@ -21,6 +21,11 @@ func newSkillsCmd() *cobra.Command {
 	cmd.AddCommand(newSkillsListCmd())
 	cmd.AddCommand(newSkillsShowCmd())
 	cmd.AddCommand(newSkillsRunCmd())
+	cmd.AddCommand(newSkillsStatsCmd())
+	cmd.AddCommand(newSkillsArchiveCmd())
+	cmd.AddCommand(newSkillsRestoreCmd())
+	cmd.AddCommand(newSkillsHistoryCmd())
+	cmd.AddCommand(newSkillsEvolveCmd())
 
 	return cmd
 }
@@ -331,4 +336,346 @@ func getStringOr(m map[string]any, key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+func newSkillsStatsCmd() *cobra.Command {
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "stats [skill-name]",
+		Short: "show skill usage statistics",
+		Long: `Show usage statistics for a specific skill or all skills.
+
+Without an argument, shows statistics for all tracked skills.
+With a skill name, shows detailed statistics for that skill.
+
+Examples:
+  meept skills stats
+  meept skills stats debug-systematically
+`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer c.Close()
+
+			skillName := ""
+			if len(args) > 0 {
+				skillName = args[0]
+			}
+
+			params := map[string]string{"name": skillName}
+			rawResult, err := c.Call("skills.stats", params)
+			if err != nil {
+				return fmt.Errorf("failed to get skill stats: %w", err)
+			}
+
+			var resultMap map[string]any
+			if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+				return fmt.Errorf("failed to parse response: %w", err)
+			}
+
+			if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
+				return fmt.Errorf("%s", errMsg)
+			}
+
+			if outputJSON {
+				output, err := json.MarshalIndent(resultMap, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal JSON: %w", err)
+				}
+				fmt.Println(string(output))
+				return nil
+			}
+
+			// Pretty print single skill
+			if skillName != "" {
+				fmt.Printf("skill: %s\n", getStringOr(resultMap, "skill_name", skillName))
+				fmt.Printf("inject count:    %v\n", resultMap["inject_count"])
+				fmt.Printf("positive count:  %v\n", resultMap["positive_count"])
+				fmt.Printf("negative count:  %v\n", resultMap["negative_count"])
+				fmt.Printf("neutral count:   %v\n", resultMap["neutral_count"])
+				fmt.Printf("effectiveness:   %v\n", resultMap["effectiveness"])
+				return nil
+			}
+
+			// Pretty print all skills
+			statsMap, ok := resultMap["stats"].(map[string]any)
+			if !ok || len(statsMap) == 0 {
+				fmt.Println("no skill usage data available.")
+				return nil
+			}
+
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "SKILL\tINJECTS\tPOSITIVE\tNEGATIVE\tEFFECTIVENESS")
+
+			for _, v := range statsMap {
+				s, ok := v.(map[string]any)
+				if !ok {
+					continue
+				}
+				fmt.Fprintf(w, "%s\t%v\t%v\t%v\t%v\n",
+					getStringOr(s, "skill_name", "?"),
+					s["inject_count"],
+					s["positive_count"],
+					s["negative_count"],
+					s["effectiveness"],
+				)
+			}
+			w.Flush()
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "output as JSON")
+	return cmd
+}
+
+func newSkillsArchiveCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "archive <skill-name>",
+		Short: "archive a skill (move to archived directory)",
+		Long: `Archive a skill by moving it from the skills directory to the
+archived directory. The skill is unregistered from the live registry.
+
+Examples:
+  meept skills archive debug-systematically
+`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			skillName := args[0]
+
+			c, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer c.Close()
+
+			params := map[string]string{"name": skillName}
+			_, err = c.Call("skills.archive", params)
+			if err != nil {
+				return fmt.Errorf("failed to archive skill: %w", err)
+			}
+
+			fmt.Printf("archived skill: %s\n", skillName)
+			return nil
+		},
+	}
+	return cmd
+}
+
+func newSkillsRestoreCmd() *cobra.Command {
+	var version int
+
+	cmd := &cobra.Command{
+		Use:   "restore <skill-name>",
+		Short: "restore an archived skill or a prior version",
+		Long: `Restore a skill from the archived directory back to the live
+skills directory. The skill is re-registered in the live registry.
+
+With --version=N, instead restores the skill content from version bundle
+v<N> (recorded by the Versioner), overwriting the live SKILL.md.
+
+Examples:
+  meept skills restore debug-systematically
+  meept skills restore debug-systematically --version=3
+`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			skillName := args[0]
+
+			c, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer c.Close()
+
+			params := map[string]any{"name": skillName}
+			if version > 0 {
+				params["version"] = version
+			}
+
+			rawResult, err := c.Call("skills.restore", params)
+			if err != nil {
+				return fmt.Errorf("failed to restore skill: %w", err)
+			}
+
+			// Parse result to differentiate archive-restore vs version-restore.
+			var resultMap map[string]any
+			_ = json.Unmarshal(rawResult, &resultMap)
+
+			if version > 0 {
+				fmt.Printf("restored skill %s to version %d\n", skillName, version)
+			} else {
+				fmt.Printf("restored skill: %s\n", skillName)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().IntVar(&version, "version", 0, "restore a specific version (from version bundles) instead of un-archiving")
+	return cmd
+}
+
+func newSkillsHistoryCmd() *cobra.Command {
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "history <skill-name>",
+		Short: "show version history for a skill",
+		Long: `Show the versioned snapshot history for a skill.
+
+Each entry shows the version number, content SHA-256, timestamp, and action.
+Versioned snapshots are captured automatically before each overwrite when a
+Versioner is wired into the Writer.
+
+Examples:
+  meept skills history debug-systematically
+  meept skills history debug-systematically --json
+`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			skillName := args[0]
+
+			c, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer c.Close()
+
+			params := map[string]string{"name": skillName}
+			rawResult, err := c.Call("skills.history", params)
+			if err != nil {
+				return fmt.Errorf("failed to get skill history: %w", err)
+			}
+
+			var resultMap map[string]any
+			if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+				return fmt.Errorf("failed to parse response: %w", err)
+			}
+
+			if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
+				return fmt.Errorf("%s", errMsg)
+			}
+
+			if outputJSON {
+				output, err := json.MarshalIndent(resultMap, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal JSON: %w", err)
+				}
+				fmt.Println(string(output))
+				return nil
+			}
+
+			entries, ok := resultMap["entries"].([]any)
+			if !ok || len(entries) == 0 {
+				fmt.Printf("no version history for skill: %s\n", skillName)
+				return nil
+			}
+
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "VERSION\tCONTENT_SHA\tTIMESTAMP\tACTION")
+
+			for _, e := range entries {
+				entry, ok := e.(map[string]any)
+				if !ok {
+					continue
+				}
+				version := entry["version"]
+				sha := getStringOr(entry, "content_sha", "")
+				if len(sha) > 12 {
+					sha = sha[:12]
+				}
+				ts := getStringOr(entry, "timestamp", "")
+				action := getStringOr(entry, "action", "")
+				fmt.Fprintf(w, "v%v\t%s\t%s\t%s\n", version, sha, ts, action)
+			}
+			w.Flush()
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "output as JSON")
+	return cmd
+}
+
+func newSkillsEvolveCmd() *cobra.Command {
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "evolve",
+		Short: "run a skill evolution cycle",
+		Long: `Run one full skill-evolution cycle (refine, promote, prune) synchronously.
+
+The cycle respects the configured skills.evolver.auto_apply flag:
+when false, proposals are emitted as plans for operator approval
+rather than applied directly.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer c.Close()
+
+			fmt.Println("Running skill evolution cycle...")
+
+			rawResult, err := c.Call("skills.evolve", nil)
+			if err != nil {
+				return fmt.Errorf("skills.evolve failed: %w", err)
+			}
+
+			var resultMap map[string]any
+			if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+				return fmt.Errorf("failed to parse response: %w", err)
+			}
+
+			if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
+				return fmt.Errorf("%s", errMsg)
+			}
+
+			if outputJSON {
+				output, err := json.MarshalIndent(resultMap, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal JSON: %w", err)
+				}
+				fmt.Println(string(output))
+				return nil
+			}
+
+			fmt.Println("\n--- Evolution Report ---")
+			fmt.Printf("Refined:  %v\n", resultMap["refined"])
+			fmt.Printf("Promoted: %v\n", resultMap["promoted"])
+			fmt.Printf("Pruned:   %v\n", resultMap["pruned"])
+			fmt.Printf("Skipped:  %v\n", resultMap["skipped"])
+			fmt.Printf("Rejected: %v\n", resultMap["rejected"])
+			fmt.Printf("Planned:  %v\n", resultMap["planned"])
+
+			if details, ok := resultMap["details"].([]any); ok && len(details) > 0 {
+				fmt.Println("\nProposals:")
+				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+				fmt.Fprintln(w, "ACTION\tSKILL\tRATIONALE")
+				for _, d := range details {
+					detail, ok := d.(map[string]any)
+					if !ok {
+						continue
+					}
+					action := getStringOr(detail, "action", "?")
+					skill := getStringOr(detail, "skill_name", "?")
+					rationale := getStringOr(detail, "rationale", "")
+					if len([]rune(rationale)) > 60 {
+						rationale = string([]rune(rationale)[:57]) + "..."
+					}
+					fmt.Fprintf(w, "%s\t%s\t%s\n", action, skill, rationale)
+				}
+				w.Flush()
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "output as JSON")
+	return cmd
 }

@@ -1066,6 +1066,15 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/skills/{slug}", s.handleSkillsGet)
 	mux.HandleFunc("POST /api/v1/skills/{slug}/execute", s.handleSkillsExecute)
 
+	// Skills lifecycle endpoints (dispatched via rpcCall to skills.* handlers)
+	if s.rpcCall != nil {
+		mux.HandleFunc("GET /api/v1/skills/stats", s.handleSkillsStats)
+		mux.HandleFunc("GET /api/v1/skills/{slug}/history", s.handleSkillsHistory)
+		mux.HandleFunc("POST /api/v1/skills/{slug}/archive", s.handleSkillsArchive)
+		mux.HandleFunc("POST /api/v1/skills/{slug}/restore", s.handleSkillsRestore)
+		mux.HandleFunc("POST /api/v1/skills/evolve", s.handleSkillsEvolve)
+	}
+
 	// Template endpoints
 	mux.HandleFunc("GET /api/v1/templates", s.handleTemplatesList)
 	mux.HandleFunc("GET /api/v1/templates/{name}", s.handleTemplatesGet)

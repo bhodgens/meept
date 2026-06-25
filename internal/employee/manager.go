@@ -26,6 +26,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/metrics"
 	idpkg "github.com/caimlas/meept/pkg/id"
 
 	_ "modernc.org/sqlite" // sqlite driver registration
@@ -382,6 +383,13 @@ type Manager struct {
 	// the small model and proposes a constitution". Guarded by mu so the
 	// nil-check + dereference is safe under concurrent SetMigratorLLM calls.
 	migratorLLM llm.Chatter
+
+	// metricsStore is the telemetry sink for the six employee metrics
+	// (spec lines 668-674). Nil means telemetry is disabled. Snapshot
+	// under mu at emission sites via emitMetric. Wired via
+	// SetMetricsStore from daemon.go after both the manager and the
+	// store are constructed.
+	metricsStore *metrics.Store
 
 	mu            sync.RWMutex
 	constitutions map[string]Constitution // employeeID -> cached
@@ -809,17 +817,49 @@ func (m *Manager) Trigger(ctx context.Context, id string, payload map[string]any
 		return nil, ErrEmployeeNotFound
 	}
 	if !def.Enabled {
+		// Paused employees emit a "paused" outcome metric.
+		m.emitMetric("employee.invocations", 1, map[string]string{
+			"employee_id": id,
+			"tier":        "",
+			"outcome":     "paused",
+		})
 		return nil, errors.New("employee is paused")
 	}
 	// The bot framework currently exposes no direct "TriggerNow" hook;
 	// when integrated with the GoalLoop, this method will enqueue an
 	// invocation. For now, record the trigger attempt and return a
 	// synthesized TriggerResult. This keeps the RPC surface functional.
-	return &TriggerResult{
+	result := &TriggerResult{
 		InvocationID: idpkg.Generate("trig_"),
 		StartedAt:    time.Now().UTC(),
 		Status:       "triggered",
-	}, nil
+	}
+
+	// Telemetry: employee.invocations counter + employee.budget.burn gauge.
+	// The tier tag is best-effort (looked up from the cached constitution);
+	// an empty tier tag is valid for employees whose constitution failed
+	// to load.
+	tierTag := ""
+	if c, ok := m.cachedConstitution(id); ok {
+		tierTag = c.AutonomyTier.String()
+	}
+	m.emitMetric("employee.invocations", 1, map[string]string{
+		"employee_id": id,
+		"tier":        tierTag,
+		"outcome":     "success",
+	})
+
+	// Budget burn: emit today's spend in cents. Best-effort — if the bot
+	// state lookup fails, skip the gauge (do not emit a zero).
+	if m.botManager != nil {
+		if state, err := m.botManager.GetBotStatus(ctx, id); err == nil && state != nil {
+			m.emitMetric("employee.budget.burn", float64(state.TodayCostCents), map[string]string{
+				"employee_id": id,
+				"unit":        "cents",
+			})
+		}
+	}
+	return result, nil
 }
 
 // AmendConstitution proposes a constitution amendment. The patch is checked
@@ -854,6 +894,24 @@ func (m *Manager) AmendConstitution(ctx context.Context, req AmendRequest) (stri
 	// frozen list; the dotted form ("constraints.risk_ceiling") is also
 	// honored.
 	if violated := findFrozenViolation(req.Fields, existing.Constitution.AmendmentPolicy.FrozenFields); violated != "" {
+		// Persist an info-level audit finding before returning the error
+		// (spec: frozen-field rejection is auditable). Best-effort; if
+		// the audit store is nil, skip silently.
+		m.mu.RLock()
+		auditStore := m.auditStore
+		m.mu.RUnlock()
+		if auditStore != nil {
+			finding := AuditFinding{
+				ID:           idpkg.Generate("audit_"),
+				EmployeeID:   req.EmployeeID,
+				Severity:     SeverityInfo,
+				Checkpoint:   CheckpointPreExec,
+				ViolatedRule: "frozen_field:" + violated,
+				Evidence:     fmt.Sprintf("amendment attempted to modify frozen field %q", violated),
+				DetectedAt:   time.Now().UTC(),
+			}
+			_ = auditStore.Create(context.Background(), finding)
+		}
 		return "", fmt.Errorf("%w: %s", ErrFrozenField, violated)
 	}
 	// Compute the patched constitution so we can validate it before
@@ -1030,6 +1088,10 @@ func (m *Manager) ApprovePlan(ctx context.Context, goalID, planID, reason string
 	}
 	m.logger.Info("plan approved",
 		"goal_id", goalID, "plan_id", planID)
+	m.emitMetric("employee.plan.approvals", 1, map[string]string{
+		"employee_id": "",
+		"outcome":     "approved",
+	})
 	return nil
 }
 
@@ -1047,6 +1109,10 @@ func (m *Manager) RejectPlan(ctx context.Context, goalID, planID, reason string)
 	}
 	m.logger.Info("plan rejected",
 		"goal_id", goalID, "plan_id", planID)
+	m.emitMetric("employee.plan.approvals", 1, map[string]string{
+		"employee_id": "",
+		"outcome":     "rejected",
+	})
 	return nil
 }
 

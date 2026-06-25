@@ -194,7 +194,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 
 	// Register skills handlers (both direct and bus-based)
 	if rpcServer != nil && fullCfg.Skills.Enabled && components.SkillRegistry != nil {
-		rpc.RegisterSkillsHandlers(rpcServer, components.SkillRegistry, components.SkillExecutor)
+		rpc.RegisterSkillsHandlers(rpcServer, components.SkillRegistry, components.SkillExecutor, components.SkillUsageTracker, components.SkillWriter, components.SkillVersioner, components.SkillEvolver)
 		logger.Info("Skills RPC handlers registered",
 			"skill_count", components.SkillRegistry.Count(),
 			"executor_available", components.SkillExecutor != nil,

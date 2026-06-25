@@ -58,10 +58,14 @@ Package config provides configuration loading and validation for meept.
 - [type DistributedMemoryConfig](<#DistributedMemoryConfig>)
 - [type DockerRuntimeConfig](<#DockerRuntimeConfig>)
 - [type EmbeddingConfig](<#EmbeddingConfig>)
+- [type EmployeesAuditConfig](<#EmployeesAuditConfig>)
+- [type EmployeesAutoPauseConfig](<#EmployeesAutoPauseConfig>)
+- [type EmployeesConfig](<#EmployeesConfig>)
 - [type EpisodicConfig](<#EpisodicConfig>)
 - [type EpistemicConfig](<#EpistemicConfig>)
 - [type ErrorsConfig](<#ErrorsConfig>)
 - [type FileWatcherHookConfig](<#FileWatcherHookConfig>)
+- [type HTTPHookConfig](<#HTTPHookConfig>)
 - [type HTTPTransportConfig](<#HTTPTransportConfig>)
 - [type HooksConfig](<#HooksConfig>)
 - [type InstructionConfig](<#InstructionConfig>)
@@ -145,6 +149,7 @@ Package config provides configuration loading and validation for meept.
 - [type ShadowShadowingConfig](<#ShadowShadowingConfig>)
 - [type ShadowTeacherConfig](<#ShadowTeacherConfig>)
 - [type SkillsConfig](<#SkillsConfig>)
+- [type SkillsEvolverConfig](<#SkillsEvolverConfig>)
 - [type SyncConfig](<#SyncConfig>)
 - [type TTSBehaviorConfig](<#TTSBehaviorConfig>)
 - [type TTSConfig](<#TTSConfig>)
@@ -718,6 +723,7 @@ Config is the root configuration structure loaded from meept.toml.
 	    Session           SessionConfig           `json:"session"            toml:"session"`
 	    Cluster           ClusterConfig           `json:"cluster"             toml:"cluster"`
 	    Bots              BotsConfig              `json:"bots"                toml:"bots"`
+	    Employees         EmployeesConfig         `json:"employees"           toml:"employees"`
 	    Plans             PlansConfig             `json:"plans"               toml:"plans"`
 	    Projects          ProjectsConfig          `json:"projects"            toml:"projects"`
 	    STT               STTConfig               `json:"stt"                 toml:"stt"`
@@ -728,7 +734,7 @@ Config is the root configuration structure loaded from meept.toml.
 	    Runtime           RuntimeConfig           `json:"runtime"             toml:"runtime"`
 	    PTY               PTYConfig               `json:"pty"                  toml:"pty"`
 	    Reasoning         ReasoningGlobalConfig   `json:"reasoning"            toml:"reasoning"`
-	    // contains filtered or unexported fields
+	    Hooks             HooksConfig             `json:"hooks"                toml:"hooks"`
 	}
 
 <a name="DefaultConfig"></a>
@@ -876,6 +882,79 @@ EmbeddingConfig holds vector embedding settings for semantic memory search.
 	    ShardTypes    []string `json:"shard_types"     toml:"shard_types"`     // Enabled shard types
 	}
 
+<a name="EmployeesAuditConfig"></a>
+## type EmployeesAuditConfig
+
+EmployeesAuditConfig configures the constitution audit checkpoints \(post\-turn and periodic\). The pre\-exec gate is always on when the employee layer is enabled; these settings only affect the LLM\-based audit checkpoints.
+
+	type EmployeesAuditConfig struct {
+	    // Model is the alias (from config/models.json5) used for the post-turn
+	    // and periodic audits. Small models are recommended to keep audit cost
+	    // low relative to the employee's working model.
+	    Model string `json:"model" toml:"model"`
+	
+	    // PeriodicInterval is the global default cadence for the periodic
+	    // bulk audit (Checkpoint 3). Per-employee AssessmentInterval overrides
+	    // this for the GoalLoop; this value is used when the employee doesn't
+	    // declare its own interval.
+	    PeriodicInterval string `json:"periodic_interval" toml:"periodic_interval"`
+	
+	    // DriftPauseThreshold is the drift score (0.0-1.0) above which the
+	    // periodic auditor auto-pauses the employee. Drift measures slow
+	    // divergence from the constitution across many turns; a single
+	    // turn can't trigger it.
+	    DriftPauseThreshold float64 `json:"drift_pause_threshold" toml:"drift_pause_threshold"`
+	
+	    // FindingsRetentionDays controls how long audit findings are kept in
+	    // SQLite before being archived. Older findings are pruned by a
+	    // scheduler job.
+	    FindingsRetentionDays int `json:"findings_retention_days" toml:"findings_retention_days"`
+	}
+
+<a name="EmployeesAutoPauseConfig"></a>
+## type EmployeesAutoPauseConfig
+
+EmployeesAutoPauseConfig controls the auto\-pause policy. When any of these conditions fire and the corresponding flag is true, the employee is paused and an audit finding is written at the critical severity.
+
+	type EmployeesAutoPauseConfig struct {
+	    // OnCriticalFinding pauses when the post-turn or periodic auditor
+	    // emits a finding at "critical" severity.
+	    OnCriticalFinding bool `json:"on_critical_finding" toml:"on_critical_finding"`
+	
+	    // OnDrift pauses when the periodic auditor's drift score exceeds
+	    // Audit.DriftPauseThreshold.
+	    OnDrift bool `json:"on_drift" toml:"on_drift"`
+	
+	    // OnNeverViolation pauses when the pre-exec gate or post-turn auditor
+	    // detects a violation of a constitution's "never" rules.
+	    OnNeverViolation bool `json:"on_never_violation" toml:"on_never_violation"`
+	
+	    // RequireOperatorResume prevents an employee from resuming itself
+	    // after an auto-pause. Only an explicit `meept agents resume <id>`
+	    // from an operator clears the pause.
+	    RequireOperatorResume bool `json:"require_operator_resume" toml:"require_operator_resume"`
+	}
+
+<a name="EmployeesConfig"></a>
+## type EmployeesConfig
+
+EmployeesConfig configures the AI Employee framework. The employee layer wraps the existing bot persistence/runtime with a constitution, goal loop, and enforcement engine. See docs/workflows/employees.md for the full feature spec and docs/superpowers/specs/2026\-06\-23\-ai\-employee\-design.md for the design rationale.
+
+	type EmployeesConfig struct {
+	    // Enabled turns on the employee layer. When true, bots loaded from
+	    // ~/.meept/bots/ must carry a constitution or the loader refuses to
+	    // start them. When false, the legacy bot runtime is used as-is.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	
+	    // Audit configures the constitution enforcement engine.
+	    Audit EmployeesAuditConfig `json:"audit" toml:"audit"`
+	
+	    // AutoPause controls when an employee is automatically paused by the
+	    // enforcement engine. A paused employee cannot self-resume; only an
+	    // operator can call `meept agents resume <id>`.
+	    AutoPause EmployeesAutoPauseConfig `json:"auto_pause" toml:"auto_pause"`
+	}
+
 <a name="EpisodicConfig"></a>
 ## type EpisodicConfig
 
@@ -927,6 +1006,34 @@ FileWatcherHookConfig controls the file watcher hook that monitors the filesyste
 	    Debounce   time.Duration `json:"debounce" toml:"debounce"`
 	    Ignore     []string      `json:"ignore" toml:"ignore"`
 	    WatchedDir string        `json:"watched_dir" toml:"watched_dir"`
+	
+	    // Async, when true, runs the file-changed callback in a background
+	    // goroutine so the watcher never blocks on callback I/O.
+	    Async bool `json:"async,omitempty"`
+	
+	    // AsyncRewake, when true (Async must also be true), publishes a
+	    // hook.async_rewake bus signal after the async callback finishes so
+	    // the agent loop wakes up and can react to the file change.
+	    AsyncRewake bool `json:"async_rewake,omitempty"`
+	}
+
+<a name="HTTPHookConfig"></a>
+## type HTTPHookConfig
+
+HTTPHookConfig mirrors agent.HTTPHookConfig for JSON\-based config loading. On daemon startup the entries are converted to agent.HTTPHookConfig values and wired as session lifecycle hooks. Keeping a parallel struct avoids an import cycle between internal/config and internal/agent.
+
+	type HTTPHookConfig struct {
+	    URL        string            `json:"url"`
+	    Method     string            `json:"method"`
+	    Headers    map[string]string `json:"headers"`
+	    Timeout    time.Duration     `json:"timeout"`
+	    RetryCount int               `json:"retry_count"`
+	
+	    // Async runs the HTTP request in a background goroutine.
+	    Async bool `json:"async,omitempty"`
+	    // AsyncRewake publishes a hook.async_rewake bus signal after successful
+	    // async completion.
+	    AsyncRewake bool `json:"async_rewake,omitempty"`
 	}
 
 <a name="HTTPTransportConfig"></a>
@@ -958,6 +1065,9 @@ HooksConfig holds configuration for all agent hooks.
 
 	type HooksConfig struct {
 	    FileWatcher FileWatcherHookConfig `json:"file_watcher" toml:"file_watcher"`
+	    // HTTP holds zero or more HTTP hook configurations. Each entry is
+	    // wired as a session-start/session-end hook at daemon startup.
+	    HTTP []HTTPHookConfig `json:"http,omitempty" toml:"http,omitempty"`
 	}
 
 <a name="InstructionConfig"></a>
@@ -1056,6 +1166,10 @@ LLMContextFirewallConfig configures context budget management.
 	    // SummaryLevelThreshold is the token count at which a summary is
 	    // re-summarized at the next level (default 500).
 	    SummaryLevelThreshold int `json:"summary_level_threshold" toml:"summary_level_threshold"`
+	    // OverflowStrategy controls what happens when context hits the hard limit.
+	    // Valid values: "drop" (keep system + last N), "summarize" (legacy partial),
+	    // "restart" (summarize full conversation, fresh context). Default: "restart".
+	    OverflowStrategy string `json:"overflow_strategy" toml:"overflow_strategy"`
 	}
 
 <a name="LLMMetricsConfig"></a>
@@ -1402,6 +1516,11 @@ NotificationsConfig holds configuration for desktop notifications.
 	    Retention    int             `json:"retention,omitempty"      toml:"retention"`
 	    MaxPerMinute int             `json:"max_per_minute,omitempty" toml:"max_per_minute"`
 	    EnableTypes  map[string]bool `json:"enable_types,omitempty"   toml:"enable_types"`
+	    // DoNotDisturb globally suppresses all desktop notifications when true.
+	    // Unlike the per-type/per-channel filters in NotificationPreferences,
+	    // this flag is checked at the EventEmitter dispatch layer and blocks
+	    // every notification regardless of type, priority, or source.
+	    DoNotDisturb bool `json:"do_not_disturb,omitempty" toml:"do_not_disturb"`
 	}
 
 <a name="OAuthConfig"></a>
@@ -1734,8 +1853,6 @@ ReviewConfig holds code review settings for the multi\-agent system.
 	    RequireReview []string `json:"require_review" toml:"require_review"`
 	    // SkipReview lists intent types that skip review
 	    SkipReview []string `json:"skip_review" toml:"skip_review"`
-	    // ReviewerMapping maps agent IDs to reviewer agent IDs
-	    ReviewerMapping map[string]string `json:"reviewer_mapping" toml:"reviewer_mapping"`
 	    // MaxRevisionCycles is the maximum revision cycles before auto-approval
 	    MaxRevisionCycles int `json:"max_revision_cycles" toml:"max_revision_cycles"`
 	    // AutoApprovePatterns lists glob patterns that are auto-approved
@@ -2060,13 +2177,30 @@ ShadowTeacherConfig configures the teacher model.
 SkillsConfig holds skills settings.
 
 	type SkillsConfig struct {
-	    Enabled               bool     `json:"enabled"                 toml:"enabled"`
-	    SearchPaths           []string `json:"search_paths"            toml:"search_paths"`           // Additional skill directories beyond defaults
-	    AutoReload            bool     `json:"auto_reload"             toml:"auto_reload"`            // Watch for skill file changes
-	    CacheSize             int      `json:"max_cached_skills"       toml:"max_cached_skills"`      // Max skills to cache in lazy loader (default: 50)
-	    AutoDiscoverHermes    bool     `json:"auto_discover_hermes"    toml:"auto_discover_hermes"`   // Auto-discover ~/.hermes/skills (default: true)
-	    HermesSkillsDir       string   `json:"hermes_skills_dir"       toml:"hermes_skills_dir"`      // Path to Hermes skills directory (default: ~/.hermes/skills)
-	    ValidatePrerequisites bool     `json:"validate_prerequisites"  toml:"validate_prerequisites"` // Validate Hermes skill prerequisites before execution (default: true)
+	    Enabled               bool                `json:"enabled"                 toml:"enabled"`
+	    SearchPaths           []string            `json:"search_paths"            toml:"search_paths"`           // Additional skill directories beyond defaults
+	    AutoReload            bool                `json:"auto_reload"             toml:"auto_reload"`            // Watch for skill file changes
+	    CacheSize             int                 `json:"max_cached_skills"       toml:"max_cached_skills"`      // Max skills to cache in lazy loader (default: 50)
+	    AutoDiscoverHermes    bool                `json:"auto_discover_hermes"    toml:"auto_discover_hermes"`   // Auto-discover ~/.hermes/skills (default: true)
+	    HermesSkillsDir       string              `json:"hermes_skills_dir"       toml:"hermes_skills_dir"`      // Path to Hermes skills directory (default: ~/.hermes/skills)
+	    ValidatePrerequisites bool                `json:"validate_prerequisites"  toml:"validate_prerequisites"` // Validate Hermes skill prerequisites before execution (default: true)
+	    Evolver               SkillsEvolverConfig `json:"evolver"                 toml:"evolver"`                // Closed-loop skill evolution settings
+	}
+
+<a name="SkillsEvolverConfig"></a>
+## type SkillsEvolverConfig
+
+SkillsEvolverConfig configures the skill evolver — the scheduled process that reads usage stats and learned patterns, decides skill improvements, and applies them gated by the verifier.
+
+	type SkillsEvolverConfig struct {
+	    Enabled                    bool          `json:"enabled"                        toml:"enabled"`
+	    Interval                   time.Duration `json:"interval"                       toml:"interval"`                     // Default 6h
+	    MinInjections              int           `json:"min_injections"                 toml:"min_injections"`               // Default 5
+	    MinEffectiveness           float64       `json:"min_effectiveness"              toml:"min_effectiveness"`            // Prune threshold; default 0.2
+	    PatternPromotionConfidence float64       `json:"pattern_promotion_confidence"   toml:"pattern_promotion_confidence"` // Default 0.7
+	    PatternPromotionUseCount   int           `json:"pattern_promotion_use_count"    toml:"pattern_promotion_use_count"`  // Default 5
+	    AutoApply                  bool          `json:"auto_apply"                     toml:"auto_apply"`                   // Default false (requires plan approval)
+	    RunOnStart                 bool          `json:"run_on_start"                   toml:"run_on_start"`                 // Default false; when true, scheduler runs one cycle immediately on Start (noisy on daemon startup)
 	}
 
 <a name="SyncConfig"></a>

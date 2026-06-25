@@ -82,6 +82,7 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
   - [func WithExecutorTokenResolver\(tr llm.TokenResolver\) ExecutorOption](<#WithExecutorTokenResolver>)
   - [func WithLazyLoader\(loader \*LazySkillLoader\) ExecutorOption](<#WithLazyLoader>)
   - [func WithPrerequisiteChecker\(checker PrerequisiteChecker\) ExecutorOption](<#WithPrerequisiteChecker>)
+  - [func WithSecurityOrchestrator\(orch \*intsecurity.Orchestrator\) ExecutorOption](<#WithSecurityOrchestrator>)
   - [func WithToolMapper\(mapper \*HermesToolMapper\) ExecutorOption](<#WithToolMapper>)
   - [func WithValidatePrerequisites\(enabled bool\) ExecutorOption](<#WithValidatePrerequisites>)
 - [type ExtractedKeyword](<#ExtractedKeyword>)
@@ -162,6 +163,8 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
   - [func \(s \*Skill\) HasCapability\(capability string\) bool](<#Skill.HasCapability>)
   - [func \(s \*Skill\) HasTag\(tag string\) bool](<#Skill.HasTag>)
   - [func \(s \*Skill\) MatchesTags\(tags \[\]string\) bool](<#Skill.MatchesTags>)
+  - [func \(s \*Skill\) UsesExternalLLM\(\) bool](<#Skill.UsesExternalLLM>)
+  - [func \(s \*Skill\) UsesMCP\(\) bool](<#Skill.UsesMCP>)
 - [type SkillExecutionResult](<#SkillExecutionResult>)
 - [type SkillIndex](<#SkillIndex>)
   - [func NewSkillIndex\(\) \*SkillIndex](<#NewSkillIndex>)
@@ -729,6 +732,13 @@ WithLazyLoader sets a lazy loader for on\-demand skill body loading.
 	func WithPrerequisiteChecker(checker PrerequisiteChecker) ExecutorOption
 
 WithPrerequisiteChecker sets a prerequisite checker for Hermes skill validation. Nil checker is ignored \(no prerequisite validation\).
+
+<a name="WithSecurityOrchestrator"></a>
+### func WithSecurityOrchestrator
+
+	func WithSecurityOrchestrator(orch *intsecurity.Orchestrator) ExecutorOption
+
+WithSecurityOrchestrator sets the security orchestrator for the executor. When set, skill outputs are sanitized for credential leakage and other security threats, and taint labels are propagated to execution results. Nil orchestrator is ignored \(no security scanning\).
 
 <a name="WithToolMapper"></a>
 ### func WithToolMapper
@@ -1446,6 +1456,20 @@ HasTag checks if the skill has a specific tag.
 
 MatchesTags returns true if the skill has all specified tags.
 
+<a name="Skill.UsesExternalLLM"></a>
+### func \(\*Skill\) UsesExternalLLM
+
+	func (s *Skill) UsesExternalLLM() bool
+
+UsesExternalLLM returns true if the skill uses an external LLM for inference. Skills always use LLMs for inference, so this returns true for all skills.
+
+<a name="Skill.UsesMCP"></a>
+### func \(\*Skill\) UsesMCP
+
+	func (s *Skill) UsesMCP() bool
+
+UsesMCP returns true if the skill is configured to use MCP servers.
+
 <a name="SkillExecutionResult"></a>
 ## type SkillExecutionResult
 
@@ -1474,6 +1498,13 @@ SkillExecutionResult holds the result of executing a skill.
 	    // MCPServersStarted is true when at least one MCP server was
 	    // successfully started for this execution.
 	    MCPServersStarted bool `json:"mcp_servers_started"`
+	
+	    // TaintLabel indicates the trust level of the skill output.
+	    // Values: "none" (clean), "untrusted" (external LLM/MCP), "external" (web fetch), etc.
+	    TaintLabel taint.TaintLabel `json:"taint_label,omitempty"`
+	
+	    // WasSanitized is true when the skill output was modified by security sanitization.
+	    WasSanitized bool `json:"was_sanitized"`
 	}
 
 <a name="SkillIndex"></a>

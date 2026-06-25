@@ -3573,3 +3573,116 @@ func (s *Server) handleGetMemoryConfig(w http.ResponseWriter, _ *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]string{"content": content})
 }
+
+// handleSkillsStats handles GET /api/v1/skills/stats?name=<skill-name>.
+// Dispatches through rpcCall to skills.stats.
+func (s *Server) handleSkillsStats(w http.ResponseWriter, r *http.Request) {
+	if s.rpcCall == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "skills service not available")
+		return
+	}
+	name := r.URL.Query().Get("name")
+	params, err := json.Marshal(map[string]string{"name": name})
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "failed to encode request")
+		return
+	}
+	result, err := s.rpcCall(r.Context(), "skills.stats", params)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleSkillsArchive handles POST /api/v1/skills/{slug}/archive.
+// Dispatches through rpcCall to skills.archive.
+func (s *Server) handleSkillsArchive(w http.ResponseWriter, r *http.Request) {
+	if s.rpcCall == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "skills service not available")
+		return
+	}
+	slug := r.PathValue("slug")
+	if slug == "" {
+		s.writeError(w, http.StatusBadRequest, "skill slug is required")
+		return
+	}
+	params, err := json.Marshal(map[string]string{"name": slug})
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "failed to encode request")
+		return
+	}
+	result, err := s.rpcCall(r.Context(), "skills.archive", params)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleSkillsRestore handles POST /api/v1/skills/{slug}/restore.
+// Dispatches through rpcCall to skills.restore.
+func (s *Server) handleSkillsRestore(w http.ResponseWriter, r *http.Request) {
+	if s.rpcCall == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "skills service not available")
+		return
+	}
+	slug := r.PathValue("slug")
+	if slug == "" {
+		s.writeError(w, http.StatusBadRequest, "skill slug is required")
+		return
+	}
+	params, err := json.Marshal(map[string]string{"name": slug})
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "failed to encode request")
+		return
+	}
+	result, err := s.rpcCall(r.Context(), "skills.restore", params)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleSkillsHistory handles GET /api/v1/skills/{slug}/history.
+// Dispatches through rpcCall to skills.history. Returns the version history
+// (bundle entries with version, timestamp, action, content SHA) for the skill.
+func (s *Server) handleSkillsHistory(w http.ResponseWriter, r *http.Request) {
+	if s.rpcCall == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "skills service not available")
+		return
+	}
+	slug := r.PathValue("slug")
+	if slug == "" {
+		s.writeError(w, http.StatusBadRequest, "skill slug is required")
+		return
+	}
+	params, err := json.Marshal(map[string]string{"name": slug})
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "failed to encode request")
+		return
+	}
+	result, err := s.rpcCall(r.Context(), "skills.history", params)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleSkillsEvolve handles POST /api/v1/skills/evolve.
+// Dispatches through rpcCall to skills.evolve. Triggers one full
+// refine+promote+prune cycle synchronously and returns the EvolutionReport.
+func (s *Server) handleSkillsEvolve(w http.ResponseWriter, r *http.Request) {
+	if s.rpcCall == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "skills service not available")
+		return
+	}
+	result, err := s.rpcCall(r.Context(), "skills.evolve", nil)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, result)
+}

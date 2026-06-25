@@ -50,6 +50,7 @@ import (
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/shadow"
 	"github.com/caimlas/meept/internal/skills"
+	"github.com/caimlas/meept/internal/skills/lifecycle"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/internal/templates"
 	"github.com/caimlas/meept/internal/tools"
@@ -133,6 +134,13 @@ type Components struct {
 
 	// Learning pipeline
 	LearningPipeline *selfimprove.LearningPipeline
+
+	// Skill lifecycle (usage tracker + writer + versioner for closed-loop skill evolution)
+	SkillUsageTracker *lifecycle.UsageTrackerImpl
+	SkillWriter       *lifecycle.Writer
+	SkillVersioner    *lifecycle.Versioner
+	SkillEvolver      *lifecycle.Evolver
+	SkillEvolverSched *lifecycle.EvolverScheduler
 
 	// Self-improvement controller (full 5-phase cycle)
 	SelfImproveCtrl  *selfimprove.Controller
@@ -659,6 +667,28 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// Create skill usage tracker and writer (closed-loop skill evolution).
+	// Gated on cfg.Skills.Enabled (not cfg.SelfImprove.Enabled) so skill
+	// tracking works even when self-improve is off.
+	if cfg.Skills.Enabled {
+		skillsDBPath := filepath.Join(cfg.Daemon.DataDir, "skills.db")
+		tracker, err := lifecycle.NewUsageTracker(skillsDBPath, logger.With("component", "skill-usage"))
+		if err != nil {
+			logger.Error("Failed to create skill usage tracker", "error", err)
+		} else {
+			c.SkillUsageTracker = tracker
+			logger.Info("Skill usage tracker initialized", "db", skillsDBPath)
+		}
+
+		skillsDir := filepath.Join(cfg.Daemon.DataDir, "skills")
+		c.SkillWriter = lifecycle.NewWriter(skillsDir, logger.With("component", "skill-writer"))
+		c.SkillVersioner = lifecycle.NewVersioner(skillsDir, logger.With("component", "skill-versioner"))
+		if c.SkillVersioner != nil {
+			c.SkillWriter.SetVersioner(c.SkillVersioner)
+		}
+		logger.Info("Skill writer + versioner initialized", "dir", skillsDir)
+	}
+
 	// Create result cache if enabled in config
 	if cfg.Agent.Cache.Enabled {
 		cacheConfig := agent.DefaultCacheConfig()
@@ -741,6 +771,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		lpAdapter := &learningPipelineAdapter{pipeline: c.LearningPipeline}
 		agentOpts = append(agentOpts, agent.WithLearningPipeline(lpAdapter))
 		logger.Info("Agent loop configured with learning pipeline")
+	}
+	// Wire skill usage tracker for closed-loop skill evolution
+	if c.SkillUsageTracker != nil {
+		utAdapter := &skillUsageTrackerAdapter{tracker: c.SkillUsageTracker}
+		agentOpts = append(agentOpts, agent.WithUsageTracker(utAdapter))
+		logger.Info("Agent loop configured with skill usage tracker")
 	}
 	// Wire result cache
 	if c.ResultCache != nil {
@@ -2097,6 +2133,10 @@ func (c *Components) Start(ctx context.Context) error {
 				if c.SelfImproveSched != nil {
 					c.SelfImproveSched.Stop()
 				}
+			case "skillevolver":
+				if c.SkillEvolverSched != nil {
+					c.SkillEvolverSched.Stop()
+				}
 			case "calendar":
 				if c.CalendarReminder != nil {
 					c.CalendarReminder.Stop()
@@ -2323,6 +2363,13 @@ func (c *Components) Start(ctx context.Context) error {
 		go c.SelfImproveSched.Start(ctx)
 		c.Logger.Info("Self-improve scheduler started")
 		startedHandlers = append(startedHandlers, "selfimprove")
+	}
+
+	// Start skill evolver scheduler (if configured)
+	if c.SkillEvolverSched != nil {
+		go c.SkillEvolverSched.Start(ctx)
+		c.Logger.Info("Skill evolver scheduler started")
+		startedHandlers = append(startedHandlers, "skillevolver")
 	}
 
 	// Start calendar reminder watcher (if configured)
@@ -2707,6 +2754,20 @@ func (c *Components) stopComponents(ctx context.Context) error {
 			c.Logger.Error("Failed to close learning pipeline", "error", err)
 			lastErr = err
 		}
+	}
+
+	// Close skill usage tracker
+	if c.SkillUsageTracker != nil {
+		if err := c.SkillUsageTracker.Close(); err != nil {
+			c.Logger.Error("Failed to close skill usage tracker", "error", err)
+			lastErr = err
+		}
+	}
+
+	// Stop skill evolver scheduler
+	if c.SkillEvolverSched != nil {
+		c.SkillEvolverSched.Stop()
+		c.Logger.Info("Skill evolver scheduler stopped")
 	}
 
 	// Stop self-improve scheduler and controller
@@ -3689,6 +3750,31 @@ func buildProviderConfigs(cfg *config.ModelsConfig, logger *slog.Logger) []*llm.
 	return configs
 }
 
+// skillUsageTrackerAdapter wraps lifecycle.UsageTrackerImpl to implement the
+// agent package's local lifecycleUsageTracker interface. The adapter translates
+// between agent.lifecycleOutcome (local int) and lifecycle.Outcome (lifecycle
+// package's int) since they are structurally incompatible named types.
+type skillUsageTrackerAdapter struct {
+	tracker *lifecycle.UsageTrackerImpl
+}
+
+func (a *skillUsageTrackerAdapter) RecordInjection(skillName string) error {
+	return a.tracker.RecordInjection(skillName)
+}
+
+func (a *skillUsageTrackerAdapter) RecordOutcome(skillName string, outcome agent.LifecycleOutcome, sessionID string) error {
+	var lcOutcome lifecycle.Outcome
+	switch outcome {
+	case agent.LifecycleOutcomePositive:
+		lcOutcome = lifecycle.OutcomePositive
+	case agent.LifecycleOutcomeNegative:
+		lcOutcome = lifecycle.OutcomeNegative
+	default:
+		lcOutcome = lifecycle.OutcomeNeutral
+	}
+	return a.tracker.RecordOutcome(skillName, lcOutcome, sessionID)
+}
+
 // learningPipelineAdapter wraps selfimprove.LearningPipeline to implement agent.LearningPipeline.
 type learningPipelineAdapter struct {
 	pipeline *selfimprove.LearningPipeline
@@ -4347,6 +4433,42 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 	} else {
 		c.SkillRegistry.RegisterAll(discovered)
 		logger.Info("Skills loaded into registry", "count", len(discovered))
+	}
+
+	// Wire registry into skill writer so archive/restore keeps registry in sync.
+	if c.SkillWriter != nil {
+		c.SkillWriter.SetRegistry(c.SkillRegistry)
+	}
+
+	// Construct skill evolver + scheduler (closed-loop skill evolution).
+	// Requires: usage tracker, writer, registry, capability index, verifier,
+	// learning pipeline — all constructed above. Gated on cfg.Skills.Evolver.Enabled.
+	if cfg.Skills.Evolver.Enabled && c.SkillUsageTracker != nil && c.SkillWriter != nil {
+		verifier := lifecycle.NewVerifier(
+			c.LLMClient,
+			logger.With("component", "skill-verifier"),
+		)
+		c.SkillEvolver = lifecycle.NewEvolver(
+			c.SkillUsageTracker,
+			c.LearningPipeline,
+			c.SkillWriter,
+			c.SkillRegistry,
+			c.CapabilityIndex,
+			verifier,
+			c.LLMClient,
+			c.PlanManager,
+			cfg.Skills.Evolver,
+			logger,
+		)
+		c.SkillEvolverSched = lifecycle.NewEvolverScheduler(
+			c.SkillEvolver,
+			cfg.Skills.Evolver.Interval,
+			logger.With("component", "skill-evolver-scheduler"),
+		)
+		logger.Info("Skill evolver + scheduler initialized",
+			"interval", cfg.Skills.Evolver.Interval,
+			"auto_apply", cfg.Skills.Evolver.AutoApply,
+		)
 	}
 
 	// Create executor if we have a resolver

@@ -138,12 +138,12 @@ func TestExecCompress_MissingContent(t *testing.T) {
 	cfg := DefaultCompressionConfig()
 	h := &CompressionHandler{config: cfg}
 
-	_, err := h.execCompress(nil, map[string]any{})
+	_, err := h.execCompress(context.Background(), map[string]any{})
 	if err == nil {
 		t.Error("expected error for missing content")
 	}
 
-	_, err = h.execCompress(nil, map[string]any{"content": ""})
+	_, err = h.execCompress(context.Background(), map[string]any{"content": ""})
 	if err == nil {
 		t.Error("expected error for empty content")
 	}
@@ -155,7 +155,7 @@ func TestExecCompress_NilPipeline(t *testing.T) {
 	cfg.Enabled = true
 	h := &CompressionHandler{config: cfg, ccrStore: store}
 
-	_, err := h.execCompress(nil, map[string]any{"content": "test"})
+	_, err := h.execCompress(context.Background(), map[string]any{"content": "test"})
 	if err == nil {
 		t.Error("expected error for nil pipeline")
 	}
@@ -165,7 +165,7 @@ func TestExecRetrieve_MissingHash(t *testing.T) {
 	cfg := DefaultCompressionConfig()
 	h := &CompressionHandler{config: cfg}
 
-	_, err := h.execRetrieve(nil, map[string]any{})
+	_, err := h.execRetrieve(context.Background(), map[string]any{})
 	if err == nil {
 		t.Error("expected error for missing hash")
 	}
@@ -175,7 +175,7 @@ func TestExecRetrieve_NilStore(t *testing.T) {
 	cfg := DefaultCompressionConfig()
 	h := &CompressionHandler{config: cfg}
 
-	_, err := h.execRetrieve(nil, map[string]any{"hash": "abc123"})
+	_, err := h.execRetrieve(context.Background(), map[string]any{"hash": "abc123"})
 	if err == nil {
 		t.Error("expected error for nil store")
 	}
@@ -187,7 +187,7 @@ func TestExecRetrieve_NotFound(t *testing.T) {
 	cfg.Enabled = true
 	h := &CompressionHandler{config: cfg, ccrStore: nstore}
 
-	result, err := h.execRetrieve(nil, map[string]any{"hash": "nonexistent"})
+	result, err := h.execRetrieve(context.Background(), map[string]any{"hash": "nonexistent"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestExecute_UnknownTool(t *testing.T) {
 	cfg := DefaultCompressionConfig()
 	h := &CompressionHandler{config: cfg}
 
-	_, err := h.Execute(nil, "unknown_tool", map[string]any{})
+	_, err := h.Execute(context.Background(), "unknown_tool", map[string]any{})
 	if err == nil {
 		t.Error("expected error for unknown tool")
 	}
