@@ -209,6 +209,7 @@ func NewStrategicPlanner(cfg StrategicPlannerConfig) *StrategicPlanner {
 		sp.templateLoader = newPlannerTemplateLoader()
 		sp.templateLoader.fallbacks["planner/decompose.md"] = defaultDecomposeFallback()
 		sp.templateLoader.fallbacks["planner/interview.md"] = defaultInterviewFallback()
+		sp.templateLoader.fallbacks["planner/decompose_spec.md"] = defaultDecomposeSpecFallback()
 	}
 	return sp
 }

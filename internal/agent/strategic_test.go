@@ -1597,3 +1597,40 @@ func TestStrategicPlanner_PairSessionNilManagerNoPanic(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+// TestStrategicPlanner_DefaultTemplateLoaderRegistersSpecFallback verifies that
+// NewStrategicPlanner, when constructed without an explicit TemplateLoader,
+// registers all three planner fallbacks — including decompose_spec.md. Without
+// the spec fallback, spec-plan rendering silently degrades to planSinglePhase.
+func TestStrategicPlanner_DefaultTemplateLoaderRegistersSpecFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	taskStore, err := newTestTaskStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create task store: %v", err)
+	}
+	defer taskStore.Close()
+
+	sp := NewStrategicPlanner(StrategicPlannerConfig{
+		TaskStore:      taskStore,
+		StepStore:      taskStore.StepStore(),
+		Bus:            bus.New(nil, slogDiscardLogger()),
+		Logger:         slogDiscardLogger(),
+		PlannerTimeout: 10 * time.Second,
+	})
+
+	if sp.templateLoader == nil {
+		t.Fatalf("templateLoader is nil; want *plannerTemplateLoader")
+	}
+	loader := sp.templateLoader
+
+	want := []string{
+		"planner/decompose.md",
+		"planner/interview.md",
+		"planner/decompose_spec.md",
+	}
+	for _, name := range want {
+		if _, ok := loader.fallbacks[name]; !ok {
+			t.Errorf("default templateLoader missing fallback for %q", name)
+		}
+	}
+}
