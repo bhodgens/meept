@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ const (
 	PanelAgentActivity
 	PanelWorkers
 	PanelTasks
+	PanelPlan
 	PanelMemory
 	PanelMetrics
 	PanelActivityFeed
@@ -48,6 +50,9 @@ type SidebarModel struct {
 	tasksData         []SidebarTaskItem
 	memoryData        []SidebarMemoryItem
 	workersData       []SidebarWorkerItem
+
+	// Plan phase panel data
+	planView *components.PlanView
 
 	// Metrics data for sparklines
 	metricsCollector *MetricsCollector
@@ -149,6 +154,7 @@ func NewSidebarModel(rpc, eventRPC *RPCClient, styles *Styles, animationEnabled 
 			PanelStatus:        true,
 			PanelAgentActivity: true,
 			PanelTasks:         true,
+			PanelPlan:          false, // collapsed by default; expands when plan data arrives
 			PanelMemory:        true,
 			PanelMetrics:       true,
 			PanelActivityFeed:  true,
@@ -165,6 +171,13 @@ func NewSidebarModel(rpc, eventRPC *RPCClient, styles *Styles, animationEnabled 
 	s.queueSparkline = components.NewSparkline("queue", 20)
 	s.workersSparkline = components.NewSparkline("workers", 20)
 	s.agentsSparkline = components.NewSparkline("agents", 20)
+
+	// Initialize plan view widget (rendered in the Plan sidebar panel;
+	// populated by refreshData from plan.list and updated on task.planned
+	// events so users can see active plan phases alongside tasks).
+	s.planView = components.NewPlanView(components.PlanViewConfig{
+		Title: "active plan",
+	})
 
 	// Initialize metrics collector
 	s.metricsCollector = NewMetricsCollector(rpc, 30)
@@ -297,6 +310,8 @@ type SidebarDataMsg struct {
 	Workers       []SidebarWorkerItem
 	Tasks         []SidebarTaskItem
 	Memory        []SidebarMemoryItem
+	PlanPhases    []components.PhaseRow
+	PlanTitle     string
 	Err           error
 }
 
@@ -425,12 +440,49 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 			}
 		}
 
+		// Fetch the most recent plan with phases so the sidebar's Plan panel
+		// can render its phase breakdown. We fetch up to 10 recent plans and
+		// pick the first one that has phases populated. This runs every
+		// refresh tick (2s) which is cheap because plan.list is a SQLite read.
+		var planPhases []components.PhaseRow
+		var planTitle string
+		if s.rpc.IsConnected() {
+			if raw, err := s.rpc.Call("plan.list", map[string]any{"limit": 10}); err == nil {
+				var resp struct {
+					Plans []types.PlanExtended `json:"plans"`
+				}
+				if json.Unmarshal(raw, &resp) == nil {
+					for _, p := range resp.Plans {
+						if len(p.Phases) == 0 {
+							continue
+						}
+						planTitle = p.Title
+						if planTitle == "" {
+							planTitle = p.ID
+						}
+						for _, ph := range p.Phases {
+							planPhases = append(planPhases, components.PhaseRow{
+								Name:           ph.Name,
+								State:          ph.State,
+								Sequence:       ph.Sequence,
+								TotalSteps:     ph.TotalSteps,
+								CompletedSteps: ph.CompletedSteps,
+							})
+						}
+						break
+					}
+				}
+			}
+		}
+
 		return SidebarDataMsg{
 			Status:        status,
 			AgentActivity: agentActivity,
 			Workers:       workers,
 			Tasks:         tasks,
 			Memory:        memories,
+			PlanPhases:    planPhases,
+			PlanTitle:     planTitle,
 		}
 	}
 }
@@ -460,6 +512,16 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 		s.workersData = msg.Workers
 		s.tasksData = msg.Tasks
 		s.memoryData = msg.Memory
+		// Update the plan panel: replace phases and auto-expand if non-empty.
+		if s.planView != nil {
+			if msg.PlanTitle != "" {
+				s.planView.SetTitle(msg.PlanTitle)
+			}
+			s.planView.SetPhases(msg.PlanPhases)
+			if len(msg.PlanPhases) > 0 {
+				s.expandedPanels[PanelPlan] = true
+			}
+		}
 
 		// Sync visualization with data
 		s.syncVizWithData()
@@ -1027,6 +1089,7 @@ func (s *SidebarModel) View() string {
 	panelContent.WriteString(s.renderAgentActivityPanel())
 	panelContent.WriteString(s.renderWorkersPanel())
 	panelContent.WriteString(s.renderTasksPanel())
+	panelContent.WriteString(s.renderPlanPanel())
 	panelContent.WriteString(s.renderMemoryPanel())
 	panelContent.WriteString(s.renderMetricsPanel())
 	panelContent.WriteString(s.renderActivityFeedPanel())
@@ -1052,6 +1115,7 @@ func (s *SidebarModel) View() string {
 		"Status":         PanelStatus,
 		"Agent Activity": PanelAgentActivity,
 		"Tasks":          PanelTasks,
+		"Plan":           PanelPlan,
 		"Recent Memory":  PanelMemory,
 		"Metrics":        PanelMetrics,
 		"Activity":       PanelActivityFeed,
@@ -1459,6 +1523,49 @@ func (s *SidebarModel) renderTasksPanel() string {
 	}
 
 	return b.String()
+}
+
+// renderPlanPanel renders the active plan's phases via the PlanView widget.
+// The panel appears between Tasks and Recent Memory; it auto-expands when a
+// non-empty phase list arrives (via SidebarDataMsg or SetPlanPhases) and shows
+// "no active plan" when there is nothing to display.
+func (s *SidebarModel) renderPlanPanel() string {
+	var b strings.Builder
+
+	b.WriteString(s.renderPanelHeader("Plan", PanelPlan))
+	b.WriteString("\n")
+
+	if s.expandedPanels[PanelPlan] {
+		if s.planView == nil {
+			b.WriteString(s.styles.Muted.Render("  no active plan"))
+			b.WriteString("\n")
+			return b.String()
+		}
+		// Indent each rendered line by two spaces so the widget aligns with
+		// the other sidebar panels. PlanView.Render returns a string with no
+		// leading indentation; we add it here to keep the widget itself
+		// layout-agnostic.
+		rendered := s.planView.Render()
+		for _, line := range strings.Split(rendered, "\n") {
+			b.WriteString("  ")
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+	}
+
+	return b.String()
+}
+
+// SetPlanPhases replaces the phase data shown in the Plan panel and expands
+// the panel so the new data is visible. Pass nil/empty to clear it.
+func (s *SidebarModel) SetPlanPhases(phases []components.PhaseRow) {
+	if s.planView == nil {
+		return
+	}
+	s.planView.SetPhases(phases)
+	if len(phases) > 0 {
+		s.expandedPanels[PanelPlan] = true
+	}
 }
 
 func (s *SidebarModel) renderMemoryPanel() string {
