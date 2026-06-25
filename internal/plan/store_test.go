@@ -493,3 +493,163 @@ func TestDeletePlan(t *testing.T) {
 		t.Errorf("DeletePlan(nonexistent): got err=%v, want ErrPlanNotFound", err)
 	}
 }
+
+// TestCreateAndGetPhases_Artifacts verifies that Produces/Consumes artifacts
+// survive a write→read round-trip through SQLite.
+func TestCreateAndGetPhases_Artifacts(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	p := newTestPlan("artifact round-trip test")
+	if err := store.CreatePlan(ctx, p); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	produces := []Artifact{
+		{Name: "auth.go", Kind: "file", Description: "JWT auth implementation"},
+		{Name: "auth-schema", Kind: "schema", Description: "Auth API schema"},
+	}
+	consumes := []Artifact{
+		{Name: "user-model", Kind: "interface", Description: "User model interface", Required: true},
+	}
+
+	phase := NewPlanPhase(p.ID, "Build Auth", 1, 3)
+	phase.Produces = produces
+	phase.Consumes = consumes
+	if err := store.CreatePhase(ctx, phase); err != nil {
+		t.Fatalf("CreatePhase: %v", err)
+	}
+
+	got, err := store.GetPhases(ctx, p.ID)
+	if err != nil {
+		t.Fatalf("GetPhases: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d phases, want 1", len(got))
+	}
+
+	ph := got[0]
+	if len(ph.Produces) != 2 {
+		t.Fatalf("Produces len: got %d, want 2", len(ph.Produces))
+	}
+	if ph.Produces[0].Name != "auth.go" {
+		t.Errorf("Produces[0].Name: got %q, want %q", ph.Produces[0].Name, "auth.go")
+	}
+	if ph.Produces[0].Kind != "file" {
+		t.Errorf("Produces[0].Kind: got %q, want %q", ph.Produces[0].Kind, "file")
+	}
+	if ph.Produces[0].Description != "JWT auth implementation" {
+		t.Errorf("Produces[0].Description: got %q", ph.Produces[0].Description)
+	}
+	if ph.Produces[1].Kind != "schema" {
+		t.Errorf("Produces[1].Kind: got %q, want %q", ph.Produces[1].Kind, "schema")
+	}
+
+	if len(ph.Consumes) != 1 {
+		t.Fatalf("Consumes len: got %d, want 1", len(ph.Consumes))
+	}
+	if ph.Consumes[0].Name != "user-model" {
+		t.Errorf("Consumes[0].Name: got %q, want %q", ph.Consumes[0].Name, "user-model")
+	}
+	if !ph.Consumes[0].Required {
+		t.Errorf("Consumes[0].Required: got false, want true")
+	}
+}
+
+// TestCreateAndGetPhases_NoArtifacts verifies that phases with no artifacts
+// round-trip cleanly (NULL JSON columns → nil slices).
+func TestCreateAndGetPhases_NoArtifacts(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	p := newTestPlan("no-artifacts test")
+	if err := store.CreatePlan(ctx, p); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	phase := NewPlanPhase(p.ID, "Plain Phase", 1, 2)
+	if err := store.CreatePhase(ctx, phase); err != nil {
+		t.Fatalf("CreatePhase: %v", err)
+	}
+
+	got, err := store.GetPhases(ctx, p.ID)
+	if err != nil {
+		t.Fatalf("GetPhases: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d phases, want 1", len(got))
+	}
+	if got[0].Produces != nil {
+		t.Errorf("Produces: got %v, want nil", got[0].Produces)
+	}
+	if got[0].Consumes != nil {
+		t.Errorf("Consumes: got %v, want nil", got[0].Consumes)
+	}
+}
+
+// TestUpdatePhase_Artifacts verifies that UpdatePhase persists artifact changes.
+func TestUpdatePhase_Artifacts(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	p := newTestPlan("update-artifact test")
+	if err := store.CreatePlan(ctx, p); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	phase := NewPlanPhase(p.ID, "Evolving Phase", 1, 1)
+	phase.Produces = []Artifact{{Name: "v1.go", Kind: "file"}}
+	if err := store.CreatePhase(ctx, phase); err != nil {
+		t.Fatalf("CreatePhase: %v", err)
+	}
+
+	// Update with new artifacts.
+	phase.Produces = []Artifact{
+		{Name: "v2.go", Kind: "file", Description: "revised"},
+		{Name: "v2_test.go", Kind: "test_suite"},
+	}
+	phase.Consumes = []Artifact{{Name: "api-spec", Kind: "schema", Required: true}}
+	if err := store.UpdatePhase(ctx, phase); err != nil {
+		t.Fatalf("UpdatePhase: %v", err)
+	}
+
+	got, err := store.GetPhases(ctx, p.ID)
+	if err != nil {
+		t.Fatalf("GetPhases: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d phases, want 1", len(got))
+	}
+	if len(got[0].Produces) != 2 {
+		t.Fatalf("Produces len: got %d, want 2", len(got[0].Produces))
+	}
+	if got[0].Produces[0].Name != "v2.go" {
+		t.Errorf("Produces[0].Name: got %q, want %q", got[0].Produces[0].Name, "v2.go")
+	}
+	if len(got[0].Consumes) != 1 {
+		t.Fatalf("Consumes len: got %d, want 1", len(got[0].Consumes))
+	}
+}
+
+// TestStore_ArtifactIsValidKind verifies the moved Artifact.IsValidKind method
+// works from the plan package.
+func TestStore_ArtifactIsValidKind(t *testing.T) {
+	cases := []struct {
+		kind string
+		want bool
+	}{
+		{"file", true},
+		{"interface", true},
+		{"schema", true},
+		{"decision", true},
+		{"test_suite", true},
+		{"unknown", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		a := Artifact{Kind: c.kind}
+		if got := a.IsValidKind(); got != c.want {
+			t.Errorf("IsValidKind(%q) = %v, want %v", c.kind, got, c.want)
+		}
+	}
+}

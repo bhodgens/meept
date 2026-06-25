@@ -26,6 +26,10 @@ type ParsedPhase struct {
 	Sequence int
 	State    PhaseState
 	Steps    []ParsedStep
+	// Produces/Consumes are optional artifact declarations rendered by the
+	// writer when non-empty. They are not parsed from markdown (write-only).
+	Produces []Artifact
+	Consumes []Artifact
 }
 
 // ParsedStep holds a single step from a plan.

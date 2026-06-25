@@ -1727,8 +1727,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				strategicPlanner.SetPlanPhaseSink(func(taskID string, phases []agent.PlanPhaseSpec) {
 					for i, p := range phases {
 						phaseRecord := plan.NewPlanPhase(taskID, p.Name, i, len(p.Steps))
-						// Produces/Consumes fields on PlanPhase are added by Task 7.
-						// For now, only Name/Sequence/TotalSteps are persisted.
+						// Populate produces/consumes artifacts. agent.Artifact
+						// is a type alias for plan.Artifact, so this assignment
+						// is zero-cost.
+						phaseRecord.Produces = p.Produces
+						phaseRecord.Consumes = p.Consumes
 						if err := c.PlanManager.CreatePhase(context.Background(), phaseRecord); err != nil {
 							logger.Warn("planPhaseSink: failed to persist phase",
 								"task_id", taskID,

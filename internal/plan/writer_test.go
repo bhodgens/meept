@@ -420,3 +420,70 @@ func TestUpdatePlanStatus_PreservesOutOfOrderCompletion(t *testing.T) {
 		t.Errorf("Step 3 State = %q, want %q (preserved out-of-order completion)", ph1.Steps[2].State, StepStatusCompleted)
 	}
 }
+
+// TestWritePlanMarkdown_RendersArtifacts verifies that produces/consumes
+// artifact declarations on a ParsedPhase are rendered as markdown subsections
+// within their phase block. Empty slices must omit the section entirely.
+func TestWritePlanMarkdown_RendersArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "art-plan.md")
+
+	plan := newTestPlanForWriter()
+	phases := []ParsedPhase{
+		{
+			Name:     "Build",
+			Sequence: 1,
+			State:    PhasePending,
+			Produces: []Artifact{
+				{Name: "auth.go", Kind: "file", Description: "JWT auth"},
+			},
+			Consumes: []Artifact{
+				{Name: "user-model", Kind: "interface", Description: "user interface", Required: true},
+			},
+			Steps: []ParsedStep{
+				{Number: 1, Description: "write auth", State: StepStatusPending},
+			},
+		},
+		{
+			Name:     "Empty",
+			Sequence: 2,
+			State:    PhasePending,
+			Steps: []ParsedStep{
+				{Number: 2, Description: "noop", State: StepStatusPending},
+			},
+		},
+	}
+
+	if err := WritePlanMarkdown(path, plan, phases); err != nil {
+		t.Fatalf("WritePlanMarkdown: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	content := string(data)
+
+	// Phase 1 should have produces/consumes blocks.
+	if !strings.Contains(content, "**Produces:**") {
+		t.Error("missing Produces block")
+	}
+	if !strings.Contains(content, "- `auth.go` (file) — JWT auth") {
+		t.Error("missing produces entry")
+	}
+	if !strings.Contains(content, "**Consumes:**") {
+		t.Error("missing Consumes block")
+	}
+	if !strings.Contains(content, "- `user-model` (interface, required) — user interface") {
+		t.Error("missing consumes entry with required marker")
+	}
+
+	// Phase 2 should NOT have produces/consumes blocks (empty slices).
+	// Count occurrences of "**Produces:**" — should be exactly 1.
+	if got := strings.Count(content, "**Produces:**"); got != 1 {
+		t.Errorf("Produces block count: got %d, want 1 (phase 2 should have none)", got)
+	}
+	if got := strings.Count(content, "**Consumes:**"); got != 1 {
+		t.Errorf("Consumes block count: got %d, want 1 (phase 2 should have none)", got)
+	}
+}
