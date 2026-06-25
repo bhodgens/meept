@@ -2675,6 +2675,28 @@ func (s *Server) handlePlanGet(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, plan)
 }
 
+// handlePlanPhases handles GET /api/v1/plans/{id}/phases.
+func (s *Server) handlePlanPhases(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Plan == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "plan service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "plan id is required")
+		return
+	}
+
+	phases, err := s.services.Plan.Phases(r.Context(), id)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{"phases": phases})
+}
+
 // handlePlanApprove handles POST /api/v1/plans/{id}/approve.
 func (s *Server) handlePlanApprove(w http.ResponseWriter, r *http.Request) {
 	if s.services == nil || s.services.Plan == nil {

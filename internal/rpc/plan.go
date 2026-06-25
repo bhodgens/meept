@@ -34,6 +34,7 @@ func (h *PlanHandler) RegisterPlanMethods(server *Server) {
 	server.RegisterHandler("plan.revise", h.handleRevise)
 	server.RegisterHandler("plan.list_by_session", h.handleListBySession)
 	server.RegisterHandler("plan.count_by_session", h.handleCountBySession)
+	server.RegisterHandler("plan.get_phases", h.handleGetPhases)
 }
 
 // avail returns an error if the plan subsystem is not wired.
@@ -212,4 +213,26 @@ func (h *PlanHandler) handleCountBySession(ctx context.Context, params json.RawM
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 	return h.store.CountPlansBySessionAndState(ctx, req.SessionID)
+}
+
+func (h *PlanHandler) handleGetPhases(ctx context.Context, params json.RawMessage) (any, error) {
+	if err := h.avail(); err != nil {
+		return nil, err
+	}
+	var req struct {
+		PlanID string `json:"plan_id"`
+	}
+	if err := json.Unmarshal(params, &req); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	if req.PlanID == "" {
+		return nil, fmt.Errorf("plan_id is required")
+	}
+	phases, err := h.store.GetPhases(ctx, req.PlanID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"phases": phases,
+	}, nil
 }

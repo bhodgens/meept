@@ -187,6 +187,21 @@ func (s *PlanService) CountBySession(ctx context.Context, sessionID string) (map
 	return counts, nil
 }
 
+// Phases returns the phases (with produces/consumes artifacts) for a plan.
+func (s *PlanService) Phases(ctx context.Context, planID string) ([]*plan.PlanPhase, error) {
+	if planID == "" {
+		return nil, wrapError("plan", "Phases", ErrInvalidInput)
+	}
+	if s.store == nil {
+		return nil, wrapError("plan", "Phases", ErrUnavailable)
+	}
+	phases, err := s.store.GetPhases(ctx, planID)
+	if err != nil {
+		return nil, wrapError("plan", "Phases", err)
+	}
+	return phases, nil
+}
+
 // Revise requests revision of a plan.
 func (s *PlanService) Revise(ctx context.Context, req RevisePlanRequest) (*plan.Plan, error) {
 	if req.PlanID == "" || req.Feedback == "" {
