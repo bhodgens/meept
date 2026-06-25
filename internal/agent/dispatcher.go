@@ -828,6 +828,59 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 
 }
 
+// validModes is the set of accepted SuggestedMode values.
+var validModes = map[string]struct{}{
+	"direct":    {},
+	"plan":      {},
+	"spec_plan": {},
+	"spec_pair": {},
+}
+
+// validateMode returns the mode if valid, empty string otherwise.
+func validateMode(s string) string {
+	if _, ok := validModes[s]; ok {
+		return s
+	}
+	return ""
+}
+
+// suggestMode synthesizes the planning mode from intent type, optional
+// analyzer suggestion, and input length. Pure function — unit-testable
+// without a dispatcher.
+//
+// Priority:
+//  1. IntentCompound → "spec_pair" (forced)
+//  2. analysis.SuggestedMode (if valid)
+//  3. intentType.SuggestedMode() (rule-based fallback)
+//  4. Short-input downgrade: if input < 50 chars, mode is "direct"
+//     (unless analysis explicitly overrode to spec_plan)
+func suggestMode(intentType IntentType, analysis *TrueIntentAnalysis, input string) string {
+	if intentType == IntentCompound {
+		return "spec_pair"
+	}
+	analysisMode := ""
+	if analysis != nil {
+		analysisMode = validateMode(analysis.SuggestedMode)
+	}
+	if analysisMode != "" {
+		// Short-input downgrade does NOT override an explicit spec_plan
+		// suggestion from the analyzer.
+		if analysisMode == "spec_plan" {
+			return "spec_plan"
+		}
+		// For other analyzer-suggested modes, apply short-input downgrade.
+		if len(input) < 50 {
+			return "direct"
+		}
+		return analysisMode
+	}
+	mode := intentType.SuggestedMode()
+	if mode != "spec_plan" && len(input) < 50 {
+		return "direct"
+	}
+	return mode
+}
+
 // buildMemoryContext builds memory context with session history.
 func (d *Dispatcher) buildMemoryContext(ctx context.Context, input, sessionID string) *MemoryContext {
 	if d.memoryMgr == nil {

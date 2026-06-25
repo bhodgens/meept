@@ -20,6 +20,7 @@ type TrueIntentAnalysis struct {
 	Category           string   `json:"category"`
 	SuggestedQuestions []string `json:"suggested_questions"`
 	Confidence         float64  `json:"confidence"`
+	SuggestedMode      string   `json:"suggested_mode,omitempty"`
 }
 
 // IsAmbiguous returns true if the ambiguity score meets or exceeds the threshold.

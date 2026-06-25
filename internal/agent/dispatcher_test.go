@@ -845,3 +845,50 @@ func TestGetPendingClarification_WrongIntentType(t *testing.T) {
 		t.Error("should return nil when last intent is not clarify")
 	}
 }
+
+func TestSuggestMode(t *testing.T) {
+	cases := []struct {
+		name       string
+		intentType IntentType
+		analysis   *TrueIntentAnalysis
+		input      string
+		want       string
+	}{
+		{name: "compound forces spec_pair", intentType: IntentCompound, analysis: nil, input: "x", want: "spec_pair"},
+		{name: "analysis spec_plan wins", intentType: IntentCode, analysis: &TrueIntentAnalysis{SuggestedMode: "spec_plan"}, input: "refactor the auth subsystem", want: "spec_plan"},
+		{name: "analysis invalid falls back", intentType: IntentCode, analysis: &TrueIntentAnalysis{SuggestedMode: "garbage"}, input: "refactor the auth subsystem to use oauth2 with pkce flow", want: "plan"},
+		{name: "short input downgrades plan→direct", intentType: IntentCode, analysis: &TrueIntentAnalysis{SuggestedMode: ""}, input: "fix typo", want: "direct"},
+		{name: "short input does not downgrade spec_plan", intentType: IntentCode, analysis: &TrueIntentAnalysis{SuggestedMode: "spec_plan"}, input: "fix", want: "spec_plan"},
+		{name: "default fallback for unknown", intentType: IntentUnknown, analysis: nil, input: "something longer than fifty characters total please advise", want: "plan"},
+		{name: "empty analysis + long input uses rule", intentType: IntentDebug, analysis: nil, input: "investigate the production outage that happened yesterday at 3am", want: "plan"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := suggestMode(c.intentType, c.analysis, c.input)
+			if got != c.want {
+				t.Errorf("got %q want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestValidateMode(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string // normalized, "" if invalid
+	}{
+		{"direct", "direct"},
+		{"plan", "plan"},
+		{"spec_plan", "spec_plan"},
+		{"spec_pair", "spec_pair"},
+		{"SPEC_PLAN", ""}, // case-sensitive
+		{"", ""},
+		{"garbage", ""},
+	}
+	for _, c := range cases {
+		got := validateMode(c.in)
+		if got != c.want {
+			t.Errorf("validateMode(%q) = %q; want %q", c.in, got, c.want)
+		}
+	}
+}
