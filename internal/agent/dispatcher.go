@@ -91,6 +91,9 @@ type Intent struct {
 	Summary string `json:"summary,omitempty"`
 	// TrueAnalysis holds the IntentGate-style pre-classification analysis if available.
 	TrueAnalysis *TrueIntentAnalysis `json:"true_analysis,omitempty"`
+	// SuggestedMode is the synthesized planning mode (Thread D complexity routing).
+	// Populated by suggestMode in ClassifyAndRoute. Empty means no suggestion.
+	SuggestedMode string `json:"suggested_mode,omitempty"`
 }
 
 // MemoryContext wraps memory results with conversation metadata.
@@ -175,6 +178,11 @@ type DispatchResult struct {
 	// MinEffort / MaxEffort bounds gate whether the suggestion is actually
 	// applied at the AgentLoop layer.
 	SuggestedReasoningTier string `json:"-"`
+
+	// SuggestedMode is the complexity-routing mode from Thread D (direct/plan/
+	// spec_plan/spec_pair). Forwarded to PlanRequest.Mode for the strategic
+	// planner. Empty means no suggestion (planner uses its own heuristics).
+	SuggestedMode string `json:"suggested_mode,omitempty"`
 
 	// ReasoningOverride carries the parsed user reasoning directive (if any)
 	// so downstream code can forward it to the agent loop. When non-nil, it
@@ -575,6 +583,16 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// 5. Extract memory refs for context continuity
 	intent.MemoryRefs = d.extractMemoryRefs(memCtx.Results)
 
+	// 5.1. Propagate TrueAnalysis from IntentGate (if classifyIntent didn't
+	// already carry it through). classifyIntent constructs fresh Intent
+	// structs via classifiers that don't read memCtx.LastIntent.TrueAnalysis.
+	if intent.TrueAnalysis == nil && memCtx.LastIntent != nil {
+		intent.TrueAnalysis = memCtx.LastIntent.TrueAnalysis
+	}
+
+	// 5.2. Synthesize planning mode (Thread D complexity routing).
+	intent.SuggestedMode = suggestMode(IntentType(intent.Type), intent.TrueAnalysis, input)
+
 	// 5.5. Check if plan creation is warranted (before task creation)
 	if d.planManager != nil && d.planManager.ShouldCreatePlan(intent.Type, 0) {
 		return d.routeToPlan(ctx, input, intent, sessionID)
@@ -595,6 +613,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		ModelDirective: parseResult.Directive,
 		OriginalInput:  input,
 		Parts:          parts,
+		SuggestedMode:  intent.SuggestedMode,
 	}
 
 	// Attach model override to task metadata if task was created

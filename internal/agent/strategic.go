@@ -45,6 +45,11 @@ type PlanRequest struct {
 
 	// TrueAnalysis carries IntentGate-style pre-classification analysis.
 	TrueAnalysis *TrueIntentAnalysis `json:"true_analysis,omitempty"`
+
+	// Mode is the complexity-routing mode from Thread D (direct/plan/spec_plan/
+	// spec_pair). The strategic planner uses this to short-circuit planning for
+	// "direct" mode or select the spec-plan template for "spec_plan".
+	Mode string `json:"mode,omitempty"`
 }
 
 // plannerStep is the JSON structure expected from the planner LLM output.

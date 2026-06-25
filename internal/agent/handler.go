@@ -732,10 +732,12 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 // publishPlanRequest sends a plan request to the orchestrator via the bus.
 func (h *ChatHandler) publishPlanRequest(result *DispatchResult, sessionID string) {
 	req := PlanRequest{
-		TaskID:    result.Task.ID,
-		SessionID: sessionID,
-		Input:     result.Task.Description,
-		Intent:    result.Intent.Type,
+		TaskID:       result.Task.ID,
+		SessionID:    sessionID,
+		Input:        result.Task.Description,
+		Intent:       result.Intent.Type,
+		Mode:         result.SuggestedMode,
+		TrueAnalysis: result.Intent.TrueAnalysis,
 	}
 
 	if result.Intent.Type == string(IntentCompound) {

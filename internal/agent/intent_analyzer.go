@@ -66,10 +66,16 @@ func (ia *IntentAnalyzer) AnalyzeTrueIntent(ctx context.Context, input string) (
 - category (string): One of "research", "implementation", "investigation", "fix", "clarification", "other"
 - suggested_questions (array of strings): If ambiguity >= 0.6, list clarifying questions to ask the user; otherwise empty array
 - confidence (number 0.0-1.0): Your confidence in this analysis
+- suggested_mode (string): One of "direct", "plan", "spec_plan", "spec_pair"
+  - "direct" for trivial/lookup questions
+  - "plan" for single-component work
+  - "spec_plan" for multi-file or multi-phase work
+  - "spec_pair" for compound requests
 
 Rules:
 - scope must be exactly "narrow", "medium", or "broad"
 - category must be exactly one of the allowed values
+- suggested_mode must be exactly one of the allowed values
 - Keep the response concise.`
 
 	messages := []llm.ChatMessage{
@@ -123,6 +129,10 @@ func (ia *IntentAnalyzer) parseAnalysis(content string) (*TrueIntentAnalysis, er
 
 	analysis.Ambiguity = clampFloat(analysis.Ambiguity, 0.0, 1.0)
 	analysis.Confidence = clampFloat(analysis.Confidence, 0.0, 1.0)
+
+	// Validate suggested_mode (Thread D complexity routing). Invalid/empty
+	// values are zeroed — the rule-based fallback in suggestMode handles it.
+	analysis.SuggestedMode = validateMode(strings.ToLower(strings.TrimSpace(analysis.SuggestedMode)))
 
 	return &analysis, nil
 }
