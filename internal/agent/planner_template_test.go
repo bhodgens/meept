@@ -152,6 +152,31 @@ func TestPlannerTemplateLoader_LegacyFallbacksExecutable(t *testing.T) {
 			t.Errorf("Goal not interpolated: %q", got)
 		}
 	})
+	t.Run("decompose_spec", func(t *testing.T) {
+		l := newPlannerTemplateLoader(t.TempDir())
+		l.fallbacks["planner/decompose_spec.md"] = defaultDecomposeSpecFallback()
+		got, err := l.render("planner/decompose_spec.md", map[string]any{
+			"MaxStepsPerPhase": 8,
+			"MaxPhases":        5,
+			"ContextSection":   "CTX-SPEC",
+			"Input":            "build feature X",
+		})
+		if err != nil {
+			t.Fatalf("render decompose_spec fallback: %v", err)
+		}
+		if !strings.Contains(got, "1 and 8 steps") {
+			t.Errorf("MaxStepsPerPhase not interpolated: %q", got)
+		}
+		if !strings.Contains(got, "Maximum 5 phases") {
+			t.Errorf("MaxPhases not interpolated: %q", got)
+		}
+		if !strings.Contains(got, "CTX-SPEC") {
+			t.Errorf("ContextSection not interpolated: %q", got)
+		}
+		if !strings.Contains(got, "build feature X") {
+			t.Errorf("Input not interpolated: %q", got)
+		}
+	})
 }
 
 func writeFile(t *testing.T, path, content string) {

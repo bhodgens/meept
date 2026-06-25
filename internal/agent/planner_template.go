@@ -110,6 +110,11 @@ func defaultInterviewFallback() string {
 	return plannerPromptTemplateLegacyInterview
 }
 
+// defaultDecomposeSpecFallback mirrors config/prompts/planner/decompose_spec.md
+// so the spec_plan fallback path works without the bundled markdown file on
+// disk (e.g., tests running in a temp dir). Kept in sync with the bundled file.
+func defaultDecomposeSpecFallback() string { return decomposeSpecFallbackBody }
+
 // NewDaemonPlannerTemplateLoader constructs a loader with the standard 4 tiers
 // and pre-registers fallbacks for the planner templates. The bundledPromptsPath
 // is used as the lowest-priority tier (typically "config/prompts" relative to
@@ -128,6 +133,7 @@ func NewDaemonPlannerTemplateLoader(bundledPromptsPath string) *plannerTemplateL
 	}
 	l.fallbacks["planner/decompose.md"] = defaultDecomposeFallback()
 	l.fallbacks["planner/interview.md"] = defaultInterviewFallback()
+	l.fallbacks["planner/decompose_spec.md"] = defaultDecomposeSpecFallback()
 	return l
 }
 
@@ -189,3 +195,37 @@ Intent analysis:
 - Category: {{.Category}}
 - Confidence: {{.Confidence}}
 - Identified ambiguities: {{.Ambiguities}}`
+
+// decomposeSpecFallbackBody mirrors config/prompts/planner/decompose_spec.md.
+// It uses {{.MaxStepsPerPhase}}, {{.MaxPhases}}, {{.ContextSection}}, and
+// {{.Input}} placeholders.
+const decomposeSpecFallbackBody = `You are a task planner producing a multi-phase plan for substantive work.
+Each phase is a coherent unit of work with explicit input/output contracts.
+
+Output ONLY valid JSON in this exact format:
+{
+  "phases": [
+    {
+      "name": "Phase 1: <short name>",
+      "description": "<what this phase accomplishes>",
+      "steps": [
+        {"description": "...", "tool_hint": "code", "depends_on": []}
+      ],
+      "produces": [
+        {"name": "<artifact-name>", "kind": "file", "description": "...", "required": true}
+      ],
+      "consumes": [],
+      "depends_on": []
+    }
+  ]
+}
+
+Rules:
+- produces.kind must be one of: file, interface, schema, decision, test_suite
+- Each phase should have between 1 and {{.MaxStepsPerPhase}} steps
+- Maximum {{.MaxPhases}} phases
+
+{{.ContextSection}}
+
+Request to decompose:
+{{.Input}}`
