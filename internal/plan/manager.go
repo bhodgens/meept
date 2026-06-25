@@ -611,6 +611,16 @@ func (m *PlanManager) RegisterTaskPlan(taskID, planID string) {
 	m.taskPlanMap[taskID] = planID
 }
 
+// CreatePhase persists a phase record to the underlying store. This is the
+// public entry point for callers (e.g., the orchestrator's planPhaseSink)
+// that need to persist phase declarations produced by the planner.
+func (m *PlanManager) CreatePhase(ctx context.Context, phase *PlanPhase) error {
+	if phase == nil {
+		return nil
+	}
+	return m.store.CreatePhase(ctx, phase)
+}
+
 // ---------------------------------------------------------------------------
 // Plan creation threshold
 // ---------------------------------------------------------------------------

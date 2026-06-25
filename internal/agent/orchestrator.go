@@ -63,6 +63,12 @@ type OrchestratorDeps struct {
 	Bus                 *bus.MessageBus
 	Logger              *slog.Logger
 	FenceChecker        *intsecurity.FenceChecker // path boundary enforcement
+
+	// Proactive chunking dependencies (Task 6 of Plan C+F).
+	// When non-nil, these enable chunkToExecutorCapacity and phase-context isolation.
+	Registry    *AgentRegistry         // agent registry for model config + LLM access
+	TemplateReg *plannerTemplateLoader // template loader for split.md rendering
+	StepStore   *task.StepStore        // step store for listing + replacing steps
 }
 
 // SetRepoMapGenerator sets the repo map generator for context enrichment.
@@ -89,6 +95,14 @@ func NewOrchestrator(deps OrchestratorDeps) *Orchestrator {
 		bus:                 deps.Bus,
 		logger:              deps.Logger,
 		fenceChecker:        deps.FenceChecker,
+
+		// Proactive chunking deps (Task 6).
+		registry:   deps.Registry,
+		templateReg: deps.TemplateReg,
+		stepStore:  deps.StepStore,
+
+		// Per-task artifact store; reset on task completion.
+		artifacts: newArtifactStore(),
 	}
 }
 
@@ -304,6 +318,8 @@ func (o *Orchestrator) handleJobCompleted(ctx context.Context, msg *models.BusMe
 			if isComplete {
 				// Reset iteration counter on successful completion
 				o.ralphLoop.Reset(taskID)
+				// Reset per-task artifact store for the next task (MVP: single-task).
+				o.artifacts = newArtifactStore()
 			}
 		}
 	}

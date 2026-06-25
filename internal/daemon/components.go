@@ -1715,7 +1715,30 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				Bus:                 msgBus,
 				Logger:              logger.With("component", "orchestrator"),
 				FenceChecker:        c.FenceChecker,
+				Registry:            c.AgentRegistry,
+				TemplateReg:         agent.NewDaemonPlannerTemplateLoader("config/prompts"),
+				StepStore:           stepStore,
 			})
+
+			// Wire planPhaseSink: persists phase declarations produced by the
+			// multi-phase planner into the plan store. Converts PlanPhaseSpec
+			// → plan.PlanPhase and calls CreatePhase for each.
+			if c.PlanManager != nil {
+				strategicPlanner.SetPlanPhaseSink(func(taskID string, phases []agent.PlanPhaseSpec) {
+					for i, p := range phases {
+						phaseRecord := plan.NewPlanPhase(taskID, p.Name, i, len(p.Steps))
+						// Produces/Consumes fields on PlanPhase are added by Task 7.
+						// For now, only Name/Sequence/TotalSteps are persisted.
+						if err := c.PlanManager.CreatePhase(context.Background(), phaseRecord); err != nil {
+							logger.Warn("planPhaseSink: failed to persist phase",
+								"task_id", taskID,
+								"phase", p.Name,
+								"error", err,
+							)
+						}
+					}
+				})
+			}
 
 			logger.Info("Orchestrator initialized with strategic and tactical layers")
 

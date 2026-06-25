@@ -749,6 +749,16 @@ func (sp *StrategicPlanner) planMultiPhase(ctx context.Context, req PlanRequest)
 	return steps, nil
 }
 
+// SetPlanPhaseSink registers a callback invoked after multi-phase plan
+// generation. The callback receives the planner's phase declarations for
+// persistence (e.g., writing to plan.Store). Nil-guarded per CLAUDE.md.
+func (sp *StrategicPlanner) SetPlanPhaseSink(fn func(taskID string, phases []PlanPhaseSpec)) {
+	if fn == nil {
+		return
+	}
+	sp.planPhaseSink = fn
+}
+
 // buildContextSection produces the verified-context block used in planner
 // prompts. It incorporates both TrueAnalysis and PlanningContext (interview)
 // data.
