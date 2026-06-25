@@ -61,7 +61,7 @@ Instead of massive context due to plan files and SKILLS.md, everything gets load
 | **oh-my-pi** | Single-agent harness | **Five-tier memory system** - episodic (FTS5), task, knowledge graph, semantic (vector), distributed (memvid) |
 | **Most agents** | Written in Python | **Go implementation** - native threading (goroutines), compiled performance, single binary deployment |
 | **Most agents** | Manual model selection | **Model reassignment via natural language** - "use GLM for coding" triggers capability-based resolution |
-| **Most agents** | Skill learning only | **Full self-improvement cycle** - detect → analyze → generate → validate → apply (code fixing, not just patterns) |
+| **Most agents** | Skill learning only | **Full self-improvement cycle** - detect → analyze → generate → validate → apply (code fixing, not just patterns) + **skill evolution** (usage tracking, evidence-based refinement, pattern promotion, versioning) |
 
 See [docs/analysis/agent-framework-comparison.md](docs/analysis/agent-framework-comparison.md) for the complete 12-category comparison.
 
@@ -74,7 +74,7 @@ See [docs/analysis/agent-framework-comparison.md](docs/analysis/agent-framework-
 | **Observability** | SQLite metrics store, Prometheus-compatible, structured logging (slog) | OTEL JSONL (OpenAgent-Rust), Usage DB (Hermes), None (others) |
 | **Context management** | ContextFirewall + compaction + thread partitioning | Truncation (OpenCode), LLM summarization (Hermes) |
 | **Scheduling** | Cron + job queue with agent targeting | Cron only (Hermes, OpenAgent), None (others) |
-| **Self-improvement** | Full cycle (detect→analyze→generate→validate→apply) | Skill learning only (Hermes), None (others) |
+| **Self-improvement** | Full cycle (detect→analyze→generate→validate→apply) + skill evolution (usage tracking, evidence-based refinement, pattern promotion) | Skill learning only (Hermes), None (others) |
 | **Cross-platform** | Go binary + Flutter GUI + SwiftUI MenuBar + MCP | Terminal-only (most), Electron (OpenAgent-Python) |
 | **Model resolution** | Capability-based resolver + natural language reassignment | Manual selection, Team-as-router (OpenAgent-Python) |
 | **Memory** | 5-tier (episodic/task/KG/semantic/distributed) | 1-2 tiers (Hermes, OpenAgent), None (OpenCode) |
@@ -199,7 +199,27 @@ The Q Agent (Quartermaster) is a meta-agent that analyzes completed sessions, de
 
 Learn more: [Q Agent](docs/workflows/q-agent.md)
 
-### 6. AI Employees (Constitution-Bound Autonomous Agents)
+### 6. Skill Evolution (Closed-Loop)
+
+Skills are not static. Meept tracks how effective each skill is in practice and evolves them automatically:
+
+- **Usage tracking:** Every skill injection and outcome is recorded in SQLite (`~/.meept/skills.db`)
+- **Evidence-based refinement:** An LLM-driven evolver refines existing skills based on usage data (every 6h by default)
+- **Pattern promotion:** High-performing learned patterns (UseCount >= 5, Confidence >= 0.7) get promoted to skill files
+- **Pruning:** Skills with effectiveness < 0.2 after 10+ injections are archived
+- **Verifier gate:** 4-dimension rubric (grounded/preserves/specific/safe) — no change goes live without passing
+- **Versioning:** Every write is snapshotted; restore to any prior version
+
+```bash
+./bin/meept skills stats debug-systematically   # Check effectiveness
+./bin/meept skills evolve                       # Trigger cycle manually
+./bin/meept skills history code-review          # See version history
+./bin/meept skills restore code-review --version=2  # Roll back
+```
+
+Learn more: [Skill System](docs/workflows/skills.md)
+
+### 7. AI Employees (Constitution-Bound Autonomous Agents)
 
 Meept's AI Employee framework adds structured autonomy on top of the agent runtime. An employee is an agent with a **constitution**, **goal loop**, and **enforcement engine**:
 
@@ -280,10 +300,10 @@ For complete feature details, see [Features](./docs/features.md).
 | LLM management | ✅ Complete | Multi-provider, alias resolution, failover, budgeting, reasoning effort control |
 | Job scheduling | ✅ Complete | Cron, reminders, SQLite queue with agent targeting |
 | **AI employees** | ✅ Complete | Constitution-bound agents with 3 autonomy tiers, enforcement engine (3 checkpoints), goal loop |
-| **Skills system** | ✅ Complete | Three-tier discovery, YAML frontmatter, priority shadowing |
+| **Skills system** | ✅ Complete | Three-tier discovery, YAML frontmatter, priority shadowing, **closed-loop evolution** (usage tracking, evidence-based refinement, pattern promotion, versioning) |
 | Security engine | ✅ Complete | InputSanitizer, Tirith scanning, SecurityEngine, TLS, path fencing |
 | Collaborative planning | ✅ Complete | Programming detection, plan review/approval workflow, workspace tracking |
-| Self-improvement | ✅ Complete | Full cycle: detect → analyze → generate → validate → apply (pytest/logs/lint/type-check) |
+| Self-improvement | ✅ Complete | Full cycle: detect → analyze → generate → validate → apply + skill evolution (usage tracking, LLM-driven refinement, pattern promotion, versioning) |
 | Shadow training | 🔄 Partial | Infrastructure complete (parallel execution, quality filtering, export); continuous learning in progress |
 | **External integrations** | 🔄 Partial | macOS MenuBar ✅, MCP server ✅, Telegram ⏳ planned, Web UI ⏳ in progress |
 | **Analytics** | ✅ Complete | Agent performance, model metrics, error records, historical charts |
@@ -311,6 +331,13 @@ For complete feature details, see [Features](./docs/features.md).
 ./bin/meept q analyze                      # Analyze sessions
 
 # Skills
+./bin/meept skills list                    # Available skills
+./bin/meept skills stats [name]            # Usage/effectiveness per skill
+./bin/meept skills archive <name>          # Archive a skill
+./bin/meept skills restore <name>          # Restore archived skill
+./bin/meept skills restore <name> --version=N  # Restore specific version
+./bin/meept skills history <name>          # Version history
+./bin/meept skills evolve                  # Trigger evolver cycle
 ./bin/meept clawskills list                # Installed skills
 ./bin/meept clawskills search "kubernetes" # Search marketplace
 

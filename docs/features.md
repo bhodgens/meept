@@ -1259,6 +1259,50 @@ search_paths = []
 auto_reload = false
 ```
 
+#### Skill Evolution (Closed-Loop)
+
+Meept continuously measures skill effectiveness and evolves skills based on real usage data. The closed loop: every skill injected into the agent prompt gets its effectiveness tracked; high-performing learned patterns get promoted to skills; existing skills get refined based on evidence; every change is versioned and reversible.
+
+**Four components** (package: `internal/skills/lifecycle/`):
+
+| Component | Purpose |
+|-----------|---------|
+| **UsageTracker** | SQLite at `~/.meept/skills.db`. Records inject_count, positive/negative/neutral outcomes per skill. `effectiveness = positive_count / inject_count` |
+| **Evolver** | Scheduled cycle (default 6h) with three passes: refine existing skills, promote learned patterns, prune low performers |
+| **Verifier** | 4-dimension LLM rubric gate (grounded_in_evidence, preserves_existing_value, specificity_and_reusability, safe_to_publish). Rejects if any dimension < 0.5 or average < 0.75 |
+| **Versioner** | Version bundles at `versions/v<N>/SKILL.md` + `bundle.json` (content_sha + tree_sha256). 20-entry prune cap. Restore reverts content |
+
+**Evolver passes:**
+- **Pass A (Refine):** For skills with inject_count >= 5, gathers usage evidence + learned patterns, asks LLM to improve or optimize the description
+- **Pass B (Promote):** Queries learned patterns with UseCount >= 5, Confidence >= 0.7, stable >= 14 days. Checks TF-IDF similarity against existing skills to avoid duplicates
+- **Pass C (Prune):** Skills with inject_count >= 10 and effectiveness < 0.2 are candidates for archiving
+
+**AutoApply mode:** When `false` (default), proposals go through the plan approval system. When `true`, verified changes are applied directly.
+
+**CLI commands:**
+```bash
+./bin/meept skills stats [name]              # Usage/effectiveness per skill
+./bin/meept skills stats                     # All skills summary
+./bin/meept skills archive <name>            # Archive a skill
+./bin/meept skills restore <name>            # Restore archived skill
+./bin/meept skills restore <name> --version=3  # Restore specific version
+./bin/meept skills history <name>            # Version history
+./bin/meept skills evolve                    # Trigger evolver cycle manually
+```
+
+**Configuration:**
+```toml
+[skills.evolver]
+enabled = false
+interval = "6h"
+min_injections = 5              # Pass A threshold
+min_effectiveness = 0.2         # Pass C prune threshold
+pattern_promotion_confidence = 0.7
+pattern_promotion_use_count = 5
+auto_apply = false              # false = proposals go to plan system
+run_on_start = false            # Skip immediate cycle on daemon startup
+```
+
 ---
 
 ### Q Agent (Meta-Optimization)
