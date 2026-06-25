@@ -9,6 +9,7 @@ import (
 
 	"github.com/caimlas/meept/internal/agents"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/task"
 )
 
@@ -566,4 +567,74 @@ func isAgentIDLike(s string) bool {
 		}
 	}
 	return hasLetter
+}
+
+// --- GetModelConfig tests ---
+
+// newTestRegistryWithResolver builds a minimal AgentRegistry wired to a
+// Resolver whose default model carries a non-zero ContextLimit. It mirrors
+// the direct-struct-literal pattern used by other tests in this file.
+func newTestRegistryWithResolver(t *testing.T) *AgentRegistry {
+	t.Helper()
+	cfg := &llm.ProvidersConfig{
+		Model: "testprov/default-m",
+		Providers: map[string]llm.ProviderConfig{
+			"testprov": {
+				API: "openai",
+				Models: map[string]llm.ModelDef{
+					"default-m": {Name: "default-m", ContextLimit: 8192},
+					"coder-m":   {Name: "coder-m", ContextLimit: 16384},
+				},
+			},
+		},
+	}
+	resolver := llm.NewResolver(cfg, silentLogger())
+	r := &AgentRegistry{
+		specs:           make(map[string]*AgentSpec),
+		loops:           make(map[string]*AgentLoop),
+		activeQueues:    make(map[string]*QueueEntry),
+		resolver:        resolver,
+		logger:          silentLogger(),
+		sharedConvStore: NewConversationStore(100),
+	}
+	// "coder" has an explicit model ref; "chat" falls back to default.
+	r.specs["coder"] = &AgentSpec{ID: "coder", Model: "testprov/coder-m", Enabled: true}
+	r.specs["chat"] = &AgentSpec{ID: "chat", Model: "", Enabled: true}
+	return r
+}
+
+func TestAgentRegistry_GetModelConfig(t *testing.T) {
+	r := newTestRegistryWithResolver(t)
+
+	// Agent with explicit model ref.
+	cfg, err := r.GetModelConfig("coder")
+	if err != nil {
+		t.Fatalf("GetModelConfig(coder): %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("GetModelConfig(coder) returned nil cfg")
+	}
+	if cfg.ContextLimit != 16384 {
+		t.Errorf("coder ContextLimit = %d, want 16384", cfg.ContextLimit)
+	}
+
+	// Agent with empty Model → resolver default.
+	cfgDefault, err := r.GetModelConfig("chat")
+	if err != nil {
+		t.Fatalf("GetModelConfig(chat): %v", err)
+	}
+	if cfgDefault == nil {
+		t.Fatal("GetModelConfig(chat) returned nil cfg")
+	}
+	if cfgDefault.ContextLimit != 8192 {
+		t.Errorf("chat (default) ContextLimit = %d, want 8192", cfgDefault.ContextLimit)
+	}
+}
+
+func TestAgentRegistry_GetModelConfig_UnknownAgent(t *testing.T) {
+	r := newTestRegistryWithResolver(t)
+	_, err := r.GetModelConfig("nonexistent")
+	if err == nil {
+		t.Fatal("want error for unknown agent, got nil")
+	}
 }

@@ -1007,3 +1007,32 @@ func (r *AgentRegistry) DB() *sql.DB {
 	defer r.mu.RUnlock()
 	return r.db
 }
+
+// GetModelConfig returns the model configuration for the given agent, or the
+// resolver's default model when the agent has no explicit Model ref. Returns
+// an error if the agent ID is unknown or if the resolver has no default and
+// the agent has no Model. Exposed so the tactical orchestrator can size task
+// steps against the executor's ContextLimit without reaching into registry
+// internals.
+func (r *AgentRegistry) GetModelConfig(agentID string) (*llm.ModelConfig, error) {
+	r.mu.RLock()
+	spec, ok := r.specs[agentID]
+	r.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("agent %q not found", agentID)
+	}
+	if spec.Model == "" {
+		// No explicit model on the spec — fall back to resolver default.
+		if r.resolver == nil {
+			return nil, fmt.Errorf("agent %q has no model and registry has no resolver", agentID)
+		}
+		if cfg := r.resolver.DefaultModel(); cfg != nil {
+			return cfg, nil
+		}
+		return nil, fmt.Errorf("agent %q has no model and resolver has no default", agentID)
+	}
+	if r.resolver == nil {
+		return nil, fmt.Errorf("agent %q has model %q but registry has no resolver", agentID, spec.Model)
+	}
+	return r.resolver.ResolveRef(spec.Model), nil
+}

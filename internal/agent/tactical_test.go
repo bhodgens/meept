@@ -49,6 +49,23 @@ func TestSelectAgent(t *testing.T) {
 	}
 }
 
+func TestTacticalScheduler_SelectAgentForHint(t *testing.T) {
+	ts := &TacticalScheduler{}
+
+	// Known hint → coder.
+	if got := ts.SelectAgentForHint("code"); got != "coder" {
+		t.Errorf("SelectAgentForHint(code) = %q, want coder", got)
+	}
+	// Unknown hint → chat fallback.
+	if got := ts.SelectAgentForHint("nonexistent-hint"); got != "chat" {
+		t.Errorf("SelectAgentForHint(nonexistent-hint) = %q, want chat", got)
+	}
+	// Empty hint → chat fallback.
+	if got := ts.SelectAgentForHint(""); got != "chat" {
+		t.Errorf("SelectAgentForHint(empty) = %q, want chat", got)
+	}
+}
+
 func TestTacticalScheduler_IsRateLimitError(t *testing.T) {
 	ts := &TacticalScheduler{}
 

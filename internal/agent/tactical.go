@@ -1095,6 +1095,13 @@ func (ts *TacticalScheduler) selectAgent(step *task.TaskStep) string {
 	}
 }
 
+// SelectAgentForHint exports selectAgent so the tactical orchestrator (and
+// other callers outside the agent package) can pick an executor agent ID for
+// a tool hint without constructing a full TaskStep.
+func (ts *TacticalScheduler) SelectAgentForHint(toolHint string) string {
+	return ts.selectAgent(&task.TaskStep{ToolHint: toolHint})
+}
+
 func (ts *TacticalScheduler) publishEvent(topic string, data map[string]any) {
 	if ts.bus == nil {
 		return
