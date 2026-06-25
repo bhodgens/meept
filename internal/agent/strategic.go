@@ -64,6 +64,25 @@ type plannerOutput struct {
 	Steps []plannerStep `json:"steps"`
 }
 
+// PlanPhaseSpec is a planner-declared phase. Distinct from plan.PlanPhase
+// (the persisted record) — this is the LLM's output shape before
+// validation/persistence.
+type PlanPhaseSpec struct {
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Steps       []plannerStep `json:"steps"`
+	Produces    []Artifact    `json:"produces"`
+	Consumes    []Artifact    `json:"consumes"`
+	DependsOn   []int         `json:"depends_on,omitempty"`
+}
+
+// plannerPhaseOutput is the JSON envelope returned by the multi-phase planner
+// LLM call. parsePhaseOutput unmarshals into this, then runs validation and
+// repair passes.
+type plannerPhaseOutput struct {
+	Phases []PlanPhaseSpec `json:"phases"`
+}
+
 const interviewAmbiguityThreshold = 0.6
 
 // StrategicPlanner decomposes tasks into steps using an LLM planner agent.
@@ -84,6 +103,9 @@ type StrategicPlanner struct {
 	interviewAmbiguity    float64
 	metricsStore          *metrics.Store
 	templateLoader        *plannerTemplateLoader
+	maxPhases             int
+	maxStepsPerPhase      int
+	planPhaseSink         func(taskID string, phases []PlanPhaseSpec)
 }
 
 // StrategicPlannerConfig holds configuration for the strategic planner.
@@ -114,6 +136,16 @@ type StrategicPlannerConfig struct {
 	// TemplateLoader, if non-nil, supplies markdown-overridable planner
 	// prompts. If nil, the planner constructs a default loader.
 	TemplateLoader *plannerTemplateLoader
+	// MaxPhases caps the number of phases the multi-phase planner may
+	// produce. Defaults to 12 when <= 0.
+	MaxPhases int
+	// MaxStepsPerPhase caps the number of steps per phase in multi-phase
+	// planning. Defaults to 8 when <= 0.
+	MaxStepsPerPhase int
+	// PlanPhaseSink, when non-nil, receives the planner's phase declarations
+	// for persistence (e.g., writing to plan.Store). Called after a
+	// successful planMultiPhase decomposition.
+	PlanPhaseSink func(taskID string, phases []PlanPhaseSpec)
 }
 
 // NewStrategicPlanner creates a new strategic planner.
@@ -135,6 +167,12 @@ func NewStrategicPlanner(cfg StrategicPlannerConfig) *StrategicPlanner {
 	}
 	if cfg.PairInputMinChars <= 0 {
 		cfg.PairInputMinChars = 200
+	}
+	if cfg.MaxPhases <= 0 {
+		cfg.MaxPhases = 12
+	}
+	if cfg.MaxStepsPerPhase <= 0 {
+		cfg.MaxStepsPerPhase = 8
 	}
 	if cfg.Routing == nil {
 		cfg.Routing = NewDefaultRoutingTable()
@@ -163,6 +201,9 @@ func NewStrategicPlanner(cfg StrategicPlannerConfig) *StrategicPlanner {
 		interviewAmbiguity:    interviewAmb,
 		metricsStore:          cfg.MetricsStore,
 		templateLoader:        cfg.TemplateLoader,
+		maxPhases:             cfg.MaxPhases,
+		maxStepsPerPhase:      cfg.MaxStepsPerPhase,
+		planPhaseSink:         cfg.PlanPhaseSink,
 	}
 	if sp.templateLoader == nil {
 		sp.templateLoader = newPlannerTemplateLoader()
@@ -583,14 +624,174 @@ func (sp *StrategicPlanner) awaitInterviewAnswers(ctx context.Context, t *task.T
 	return nil
 }
 
-// planMultiPhase is the multi-phase decomposition entry point. Full
-// implementation lands in Thread C+F; for now we delegate to
-// planSinglePhase so spec_plan mode degrades gracefully.
+// planMultiPhase is the multi-phase decomposition entry point. It renders
+// the decompose_spec template, calls the planner LLM, parses the output with
+// a 4-layer malformed-output defense (ExtractJSON → unmarshal → repair →
+// cap), retries once on parse failure, and flattens phases into TaskSteps
+// with inter-phase dependencies. On success, the planPhaseSink callback (if
+// wired) receives the phase declarations for persistence.
 func (sp *StrategicPlanner) planMultiPhase(ctx context.Context, req PlanRequest) ([]*task.TaskStep, error) {
-	sp.logger.Warn("planMultiPhase not yet implemented (Thread C+F); falling back to planSinglePhase",
+	plannerLoop, err := sp.registry.Get(config.AgentIDPlanner)
+	if err != nil {
+		return nil, fmt.Errorf("planner agent not available: %w", err)
+	}
+
+	// Build context section (same logic as planSinglePhase).
+	contextSection := sp.buildContextSection(req)
+
+	prompt, err := sp.templateLoader.render("planner/decompose_spec.md", map[string]any{
+		"MaxStepsPerPhase": sp.maxStepsPerPhase,
+		"MaxPhases":        sp.maxPhases,
+		"ContextSection":   contextSection,
+		"Input":            req.Input,
+	})
+	if err != nil {
+		// Template not found on disk and no fallback registered.
+		sp.logger.Warn("decompose_spec template not available, falling back to planSinglePhase",
+			"task_id", req.TaskID, "error", err,
+		)
+		return sp.planSinglePhase(ctx, req)
+	}
+
+	// Append dynamic agent availability hints (same as planSinglePhase).
+	if sp.registry != nil {
+		if hintSection := BuildPlannerPromptHint(sp.registry); hintSection != "" {
+			prompt += "\n\n## Dynamic Agent Availability\n" + hintSection
+		}
+	}
+
+	planCtx, cancel := context.WithTimeout(ctx, sp.plannerTimeout)
+	defer cancel()
+
+	conversationID := fmt.Sprintf("plan-%s-%s", req.TaskID, id.Generate(""))
+	output, err := plannerLoop.RunOnce(planCtx, prompt, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("planner failed: %w", err)
+	}
+
+	parsed, err := parsePhaseOutput(output, sp.maxPhases)
+	if err != nil {
+		// Layer C: one retry with feedback.
+		sp.logger.Warn("phase parse failed, retrying with feedback",
+			"task_id", req.TaskID, "error", err)
+		retryPrompt := prompt + "\n\nPrevious attempt failed:\n" + err.Error()
+		output2, retryErr := plannerLoop.RunOnce(planCtx, retryPrompt, conversationID+"-retry")
+		if retryErr != nil {
+			return nil, fmt.Errorf("planner retry failed: %w (original: %v)", retryErr, err)
+		}
+		parsed, err = parsePhaseOutput(output2, sp.maxPhases)
+		if err != nil {
+			return nil, fmt.Errorf("planner produced malformed phases after retry: %w", err)
+		}
+	}
+
+	sp.recordMetric("strategic_planner.plan_generated", 1, map[string]string{
+		"intent":  req.Intent,
+		"outcome": "success",
+		"mode":    "spec_plan",
+	})
+
+	// Flatten phases into TaskSteps. Each step gets Phase = phase.Name.
+	// Inter-phase dependencies: first step of phase N+1 depends on last
+	// step of phase N (unless the step already has explicit deps).
+	var steps []*task.TaskStep
+	var prevPhaseLastStepID string
+	for phaseIdx, phase := range parsed.Phases {
+		var stepIDsInPhase []string
+		for stepIdx, ps := range phase.Steps {
+			// Cap per-phase steps.
+			if sp.maxStepsPerPhase > 0 && len(stepIDsInPhase) >= sp.maxStepsPerPhase {
+				break
+			}
+			seq := phaseIdx*1000 + stepIdx // stable sequence across phases
+			step := task.NewTaskStep(req.TaskID, ps.Description, seq)
+			step.ToolHint = ps.ToolHint
+			step.Phase = phase.Name
+			// Within-phase dependencies (0-indexed → step IDs).
+			for _, depIdx := range ps.DependsOn {
+				if depIdx >= 0 && depIdx < len(stepIDsInPhase) {
+					step.DependsOn = append(step.DependsOn, stepIDsInPhase[depIdx])
+				}
+			}
+			// Inter-phase dependency: first step of phase N+1 depends on
+			// last step of phase N (unless this is phase 0 or already has deps).
+			if stepIdx == 0 && prevPhaseLastStepID != "" && len(step.DependsOn) == 0 {
+				step.DependsOn = append(step.DependsOn, prevPhaseLastStepID)
+			}
+			steps = append(steps, step)
+			stepIDsInPhase = append(stepIDsInPhase, step.ID)
+		}
+		if len(stepIDsInPhase) > 0 {
+			prevPhaseLastStepID = stepIDsInPhase[len(stepIDsInPhase)-1]
+		}
+	}
+
+	if len(steps) == 0 {
+		return nil, fmt.Errorf("planner produced no executable steps")
+	}
+
+	sp.recordMetric("strategic_planner.plan_steps", float64(len(steps)), map[string]string{
+		"intent": req.Intent, "mode": "spec_plan",
+	})
+
+	// Persist phase metadata via sink (if wired).
+	if sp.planPhaseSink != nil {
+		sp.planPhaseSink(req.TaskID, parsed.Phases)
+	}
+
+	sp.logger.Info("Multi-phase plan generated",
 		"task_id", req.TaskID,
+		"phases", len(parsed.Phases),
+		"steps", len(steps),
 	)
-	return sp.planSinglePhase(ctx, req)
+
+	return steps, nil
+}
+
+// buildContextSection produces the verified-context block used in planner
+// prompts. It incorporates both TrueAnalysis and PlanningContext (interview)
+// data.
+func (sp *StrategicPlanner) buildContextSection(req PlanRequest) string {
+	var contextSection string
+	if req.TrueAnalysis != nil {
+		var sb strings.Builder
+		sb.WriteString("## Verified Context\n")
+		if req.TrueAnalysis.Goal != "" {
+			sb.WriteString(fmt.Sprintf("True goal: %s\n", req.TrueAnalysis.Goal))
+		}
+		if req.TrueAnalysis.Scope != "" {
+			sb.WriteString(fmt.Sprintf("Scope: %s\n", req.TrueAnalysis.Scope))
+		}
+		if req.TrueAnalysis.Category != "" {
+			sb.WriteString(fmt.Sprintf("Category: %s\n", req.TrueAnalysis.Category))
+		}
+		contextSection = sb.String()
+	}
+	if req.PlanningCtx != nil && req.PlanningCtx.InterviewCompleted {
+		var sb strings.Builder
+		if contextSection != "" {
+			sb.WriteString(contextSection)
+		} else {
+			sb.WriteString("## Verified Context\n")
+		}
+		if req.PlanningCtx.TrueGoal != "" {
+			sb.WriteString(fmt.Sprintf("True goal: %s\n", req.PlanningCtx.TrueGoal))
+		}
+		if len(req.PlanningCtx.Requirements) > 0 {
+			sb.WriteString("Requirements:\n")
+			for _, r := range req.PlanningCtx.Requirements {
+				sb.WriteString(fmt.Sprintf("- %s\n", r))
+			}
+		}
+		if len(req.PlanningCtx.Constraints) > 0 {
+			sb.WriteString("Constraints:\n")
+			for k, v := range req.PlanningCtx.Constraints {
+				sb.WriteString(fmt.Sprintf("- %s: %s\n", k, v))
+			}
+		}
+		contextSection = sb.String()
+	}
+	return contextSection
 }
 
 // planSinglePhase uses the planner agent to decompose the request.
@@ -1293,5 +1494,97 @@ func (sp *StrategicPlanner) recordMetric(name string, value float64, tags map[st
 	if sp.metricsStore != nil {
 		sp.metricsStore.Record(name, value, tags)
 	}
+}
+
+// parsePhaseOutput extracts phases from planner LLM output and runs a
+// validate-and-repair pass: drop empty phases, cap count, repair invalid
+// enum kinds to "file", drop dangling depends_on indices, downgrade dangling
+// consumes (references to nothing any phase produces) to optional.
+//
+// This is the core of the 4-layer malformed-output defense:
+//   1. ExtractJSON — strips markdown fences / surrounding prose.
+//   2. json.Unmarshal — structural validation.
+//   3. Repair pass — normalizes or drops invalid entries.
+//   4. Cap — enforces maxPhases ceiling.
+//
+// Returns an error if no phases survive the repair pass.
+func parsePhaseOutput(raw string, maxPhases int) (*plannerPhaseOutput, error) {
+	jsonStr := ExtractJSON(raw)
+	if jsonStr == "" {
+		return nil, fmt.Errorf("no JSON found in phase planner output")
+	}
+	var out plannerPhaseOutput
+	if err := json.Unmarshal([]byte(jsonStr), &out); err != nil {
+		return nil, fmt.Errorf("parse phase JSON: %w", err)
+	}
+
+	// Repair pass: drop empty phases, repair invalid kinds, drop dangling deps.
+	filtered := make([]PlanPhaseSpec, 0, len(out.Phases))
+	for _, p := range out.Phases {
+		// Drop phases with no name AND no steps (LLM cruft).
+		if p.Name == "" && len(p.Steps) == 0 {
+			continue
+		}
+		// Repair invalid kinds on produces.
+		for i := range p.Produces {
+			if !p.Produces[i].IsValidKind() {
+				p.Produces[i].Kind = "file"
+			}
+		}
+		// Repair invalid kinds on consumes.
+		for i := range p.Consumes {
+			if !p.Consumes[i].IsValidKind() {
+				p.Consumes[i].Kind = "file"
+			}
+		}
+		// Drop out-of-range depends_on indices.
+		validDeps := make([]int, 0, len(p.DependsOn))
+		for _, idx := range p.DependsOn {
+			if idx >= 0 && idx < len(out.Phases) {
+				validDeps = append(validDeps, idx)
+			}
+		}
+		p.DependsOn = validDeps
+		filtered = append(filtered, p)
+	}
+	out.Phases = filtered
+
+	// Cap phase count.
+	if maxPhases > 0 && len(out.Phases) > maxPhases {
+		out.Phases = out.Phases[:maxPhases]
+	}
+
+	// Repair dangling consumes: if a consume references a name that no phase
+	// produces, downgrade it to optional so checkPhaseReady won't block.
+	producedNames := make(map[string]struct{})
+	for _, p := range out.Phases {
+		for _, a := range p.Produces {
+			producedNames[a.Name] = struct{}{}
+		}
+	}
+	for i := range out.Phases {
+		for j := range out.Phases[i].Consumes {
+			if _, ok := producedNames[out.Phases[i].Consumes[j].Name]; !ok {
+				out.Phases[i].Consumes[j].Required = false
+			}
+		}
+	}
+
+	if len(out.Phases) == 0 {
+		return nil, fmt.Errorf("planner produced no valid phases")
+	}
+	return &out, nil
+}
+
+// checkPhaseReady returns an error if any required consume is missing from
+// the store. Optional consumes are best-effort and never block.
+func checkPhaseReady(phase *PlanPhaseSpec, store *artifactStore) error {
+	for _, c := range phase.Consumes {
+		if c.Required && !store.Has(c.Name) {
+			return fmt.Errorf("phase %q requires %q but it wasn't produced",
+				phase.Name, c.Name)
+		}
+	}
+	return nil
 }
 
