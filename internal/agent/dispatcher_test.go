@@ -244,64 +244,6 @@ func TestShouldCreateTask(t *testing.T) {
 	}
 }
 
-func TestShouldDecompose(t *testing.T) {
-	sp := &StrategicPlanner{}
-
-	tests := []struct {
-		name string
-		req  PlanRequest
-		want bool
-	}{
-		{
-			name: "chat intent never decomposes",
-			req:  PlanRequest{Intent: "chat", Input: "hello there"},
-			want: false,
-		},
-		{
-			name: "report intent never decomposes",
-			req:  PlanRequest{Intent: "report", Input: "give me a report"},
-			want: false,
-		},
-		{
-			name: "recall intent never decomposes",
-			req:  PlanRequest{Intent: "recall", Input: "what do you remember"},
-			want: false,
-		},
-		{
-			name: "search intent never decomposes",
-			req:  PlanRequest{Intent: "search", Input: "find something for me"},
-			want: false,
-		},
-		{
-			name: "short code request without complexity",
-			req:  PlanRequest{Intent: "code", Input: "fix the login bug"},
-			want: false,
-		},
-		{
-			name: "short code request with complexity indicator",
-			req:  PlanRequest{Intent: "code", Input: "fix the login bug and then update the tests"},
-			want: true,
-		},
-		{
-			name: "long code request decomposes",
-			req: PlanRequest{
-				Intent: "code",
-				Input:  "I need you to refactor the authentication module to use JWT tokens instead of session cookies. This involves updating the login handler, creating a token generation service, modifying the middleware to validate tokens, and updating all API endpoints that currently check session state.",
-			},
-			want: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := sp.shouldDecompose(tt.req)
-			if got != tt.want {
-				t.Errorf("shouldDecompose() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestRecordMethods(t *testing.T) {
 	d := &Dispatcher{
 		stats: &DispatcherStats{

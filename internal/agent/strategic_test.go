@@ -435,65 +435,6 @@ func TestStrategicPlanner_PublishesEvents(t *testing.T) {
 	}
 }
 
-func TestShouldUsePairSession(t *testing.T) {
-	pm := NewPairManager(PairManagerConfig{Logger: slog.Default()})
-	sp := &StrategicPlanner{pairManager: pm, logger: slog.Default()}
-
-	tests := []struct {
-		name string
-		req  PlanRequest
-		want bool
-	}{
-		{
-			name: "compound intent always pairs",
-			req:  PlanRequest{Intent: string(IntentCompound), Input: "do stuff"},
-			want: true,
-		},
-		{
-			name: "short code input no pair",
-			req:  PlanRequest{Intent: string(IntentCode), Input: "fix typo in readme"},
-			want: false,
-		},
-		{
-			name: "long code input pairs",
-			req:  PlanRequest{Intent: string(IntentCode), Input: strings.Repeat("implement the full authentication system with OAuth2 support ", 5)},
-			want: true,
-		},
-		{
-			name: "security keyword triggers pair",
-			req:  PlanRequest{Intent: string(IntentCode), Input: "add security headers to API responses"},
-			want: true,
-		},
-		{
-			name: "chat intent no pair",
-			req:  PlanRequest{Intent: string(IntentChat), Input: "how are you"},
-			want: false,
-		},
-		{
-			name: "nil pair manager no pair",
-			req:  PlanRequest{Intent: string(IntentCompound), Input: "complex task"},
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.name == "nil pair manager no pair" {
-				spNoPM := &StrategicPlanner{pairManager: nil, logger: slog.Default()}
-				got := spNoPM.shouldUsePairSession(tt.req)
-				if got != tt.want {
-					t.Errorf("shouldUsePairSession() = %v, want %v", got, tt.want)
-				}
-				return
-			}
-			got := sp.shouldUsePairSession(tt.req)
-			if got != tt.want {
-				t.Errorf("shouldUsePairSession() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestExtractCriteria(t *testing.T) {
 	sp := &StrategicPlanner{logger: slog.Default()}
 
@@ -1583,5 +1524,49 @@ func TestStrategicPlanner_TemplateOverrideProjectLocal(t *testing.T) {
 	}
 	if !strings.Contains(got, "OVERRIDE_MARKER x") {
 		t.Errorf("override did not apply; got %q", got)
+	}
+}
+
+func TestStrategicPlanner_inferLegacyMode(t *testing.T) {
+	cases := []struct {
+		name string
+		req  PlanRequest
+		want string
+	}{
+		{name: "compound -> spec_pair", req: PlanRequest{Intent: string(IntentCompound), IsCompound: true}, want: "spec_pair"},
+		{name: "chat intent -> direct", req: PlanRequest{Intent: string(IntentChat), Input: "what's the weather"}, want: "direct"},
+		{name: "code intent + long input -> plan", req: PlanRequest{Intent: string(IntentCode), Input: strings.Repeat("a", 150)}, want: "plan"},
+		{name: "plan intent -> spec_plan", req: PlanRequest{Intent: string(IntentPlan)}, want: "spec_plan"},
+		{name: "empty intent + short input -> direct", req: PlanRequest{Intent: "", Input: "hi"}, want: "direct"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sp := &StrategicPlanner{simpleInputMaxChars: 100, pairInputMinChars: 200}
+			got := sp.inferLegacyMode(c.req)
+			if got != c.want {
+				t.Errorf("got %q want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestStrategicPlanner_shouldInterview(t *testing.T) {
+	sp := &StrategicPlanner{interviewAmbiguity: 0.6}
+	cases := []struct {
+		mode string
+		req  PlanRequest
+		want bool
+	}{
+		{mode: "direct", req: PlanRequest{}, want: false},
+		{mode: "spec_plan", req: PlanRequest{}, want: true},
+		{mode: "plan", req: PlanRequest{TrueAnalysis: &TrueIntentAnalysis{Ambiguity: 0.3}}, want: false},
+		{mode: "plan", req: PlanRequest{TrueAnalysis: &TrueIntentAnalysis{Ambiguity: 0.7}}, want: true},
+		{mode: "spec_pair", req: PlanRequest{}, want: false},
+	}
+	for _, c := range cases {
+		got := sp.shouldInterview(c.req, c.mode)
+		if got != c.want {
+			t.Errorf("mode=%s got %v want %v", c.mode, got, c.want)
+		}
 	}
 }

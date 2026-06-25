@@ -302,6 +302,7 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		"task_id", req.TaskID,
 		"session_id", req.SessionID,
 		"intent", req.Intent,
+		"mode", req.Mode,
 	)
 
 	// Set task state to planning
@@ -317,128 +318,72 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 	// Copy parent MemoryRefs for context inheritance
 	parentMemoryRefs := t.MemoryRefs
 
-	// Check if this task should use pair sessions instead of normal steps
-	if sp.shouldUsePairSession(req) {
-		sp.logger.Info("Using pair session for task",
-			"task_id", req.TaskID,
-			"intent", req.Intent,
-		)
-		pairSteps, pairErr := sp.createPairSessionPlan(ctx, req, parentMemoryRefs)
-		if pairErr != nil {
-			sp.logger.Error("Failed to create pair session plan, falling back",
-				"task_id", req.TaskID,
-				"error", pairErr,
-			)
-			// Fall through to normal planning
-		} else {
-			// Persist steps
-			for _, step := range pairSteps {
-				if err := sp.stepStore.Create(step); err != nil {
-					sp.logger.Error("Failed to persist step", "step_id", step.ID, "error", err)
-					return fmt.Errorf("failed to persist steps: %w", err)
-				}
-			}
-
-			t.TotalJobs = len(pairSteps)
-			t.SetState(task.StateExecuting)
-			if err := sp.taskStore.Update(t); err != nil {
-				sp.logger.Error("Failed to update task after pair planning", "error", err)
-			}
-
-			// Promote actor step to ready (reviewer depends on it)
-			promoted, err := sp.stepStore.PromoteReadySteps(req.TaskID)
-			if err != nil {
-				sp.logger.Error("Failed to promote pair steps", "error", err)
-			}
-
-			sp.publishEvent("task.planned", map[string]any{
-				KeyTaskID:      req.TaskID,
-				"session_id":   req.SessionID,
-				"total_steps":  len(pairSteps),
-				"ready_steps":  len(promoted),
-				"pair_session": true,
-			})
-
-			sp.publishEvent("orchestrator.schedule", map[string]any{
-				KeyTaskID: req.TaskID,
-			})
-
-			return nil
-		}
+	mode := req.Mode
+	if mode == "" {
+		mode = sp.inferLegacyMode(req)
 	}
 
 	var steps []*task.TaskStep
 
-	// Interview phase: if the request has TrueAnalysis with high ambiguity,
-	// conduct an interview before decomposition.
-	if sp.registry != nil {
-		pctx, interviewErr := sp.ConductInterview(ctx, req)
-		if interviewErr != nil {
-			// ErrInterviewNotNeeded is a normal "nothing to do" signal — not
-			// worth warning about. Other errors indicate infrastructure issues.
-			if errors.Is(interviewErr, ErrInterviewNotNeeded) {
-				sp.logger.Debug("Interview not needed, proceeding with planning",
-					"task_id", req.TaskID,
-					"reason", interviewErr.Error(),
-				)
-			} else {
-				sp.logger.Warn("Interview failed, proceeding with planning",
-					"task_id", req.TaskID,
-					"error", interviewErr,
-				)
-			}
-		} else if pctx != nil && !pctx.InterviewCompleted {
-			// Interview incomplete: publish event with questions and return early.
-			// The task stays in planning state until answers are provided.
-			sp.publishEvent("task.interview", map[string]any{
-				KeyTaskID:     req.TaskID,
-				"session_id":  req.SessionID,
-				"questions":   pctx.InterviewQuestions,
-				"ambiguities": pctx.Ambiguities,
-			})
-
-			// Store planning context on the task metadata so it persists.
-			if pctxJSON, err := json.Marshal(pctx); err == nil {
-				t.Metadata = json.RawMessage(pctxJSON)
-				if err := sp.taskStore.Update(t); err != nil {
-					sp.logger.Warn("Failed to update task with planning context", "error", err)
-				}
-			}
-
-			sp.logger.Info("Interview questions sent, awaiting user answers",
-				"task_id", req.TaskID,
-				"question_count", len(pctx.InterviewQuestions),
-			)
+	switch mode {
+	case "spec_pair":
+		// spec_pair has its own persistence path: the actor step is promoted
+		// immediately (reviewer depends on it), no approval gate is applied,
+		// and the task.planned event carries pair_session: true. For these
+		// reasons it short-circuits the shared tail below.
+		if _, pairErr := sp.handlePairSession(ctx, t, req, parentMemoryRefs); pairErr != nil {
+			sp.logger.Error("Pair-session handling failed, falling back to direct", "error", pairErr)
+			steps = sp.createFallbackSteps(req, parentMemoryRefs)
+			// Fall through to shared tail with fallback steps.
+		} else {
+			// Pair-session path already persisted steps, updated task, and
+			// published task.planned + orchestrator.schedule. Return now.
 			return nil
-		} else if pctx != nil {
-			// Interview completed: inject the planning context into the request
-			// so that generatePlan uses verified context.
-			req.PlanningCtx = pctx
-			sp.logger.Info("Interview completed, proceeding with verified context",
-				"task_id", req.TaskID,
-			)
 		}
-	}
-
-	// Fast-path: simple requests don't need LLM decomposition
-	if !sp.shouldDecompose(req) {
-		sp.logger.Info("Fast-path: skipping decomposition for simple request",
-			"task_id", req.TaskID,
-			"intent", req.Intent,
-		)
+	case "direct":
 		steps = sp.createFallbackSteps(req, parentMemoryRefs)
-	} else {
-		// Use planner agent to generate plan
-		var err error
-		steps, err = sp.generatePlan(ctx, req)
+	case "plan":
+		if sp.shouldInterview(req, mode) && sp.registry != nil {
+			pctx, interviewErr := sp.ConductInterview(ctx, req)
+			if interviewErr == nil && pctx != nil && !pctx.InterviewCompleted {
+				return sp.awaitInterviewAnswers(ctx, t, req, pctx)
+			}
+			if pctx != nil && pctx.InterviewCompleted {
+				req.PlanningCtx = pctx
+			}
+		}
+		steps, err = sp.planSinglePhase(ctx, req)
 		if err != nil {
-			sp.logger.Warn("Plan generation failed, creating single-step fallback",
-				"task_id", req.TaskID,
-				"error", err,
-			)
-			sp.recordMetric("strategic_planner.fallback", 1, map[string]string{"intent": req.Intent, "reason": "generation_failed"})
+			sp.logger.Warn("Single-phase plan failed, using fallback steps",
+				"task_id", req.TaskID, "error", err)
+			sp.recordMetric("strategic_planner.fallback", 1, map[string]string{"intent": req.Intent, "reason": "plan_failed"})
 			steps = sp.createFallbackSteps(req, parentMemoryRefs)
 		}
+	case "spec_plan":
+		// spec_plan always interviews when a registry is available.
+		if sp.registry != nil {
+			pctx, interviewErr := sp.ConductInterview(ctx, req)
+			if interviewErr == nil && pctx != nil && !pctx.InterviewCompleted {
+				return sp.awaitInterviewAnswers(ctx, t, req, pctx)
+			}
+			if pctx != nil && pctx.InterviewCompleted {
+				req.PlanningCtx = pctx
+			}
+		}
+		steps, err = sp.planMultiPhase(ctx, req)
+		if err != nil {
+			sp.logger.Warn("Multi-phase plan failed, falling back to single-phase",
+				"task_id", req.TaskID, "error", err)
+			steps, err = sp.planSinglePhase(ctx, req)
+			if err != nil {
+				sp.logger.Warn("Single-phase fallback failed, using generic fallback",
+					"task_id", req.TaskID, "error", err)
+				steps = sp.createFallbackSteps(req, parentMemoryRefs)
+			}
+		}
+	default:
+		// Unknown mode: degrade to direct-style fallback.
+		steps = sp.createFallbackSteps(req, parentMemoryRefs)
 	}
 
 	// Inject parent MemoryRefs to first step (if any exist and steps were created)
@@ -500,6 +445,7 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		"session_id":  req.SessionID,
 		"total_steps": len(steps),
 		"ready_steps": len(promoted),
+		"mode":        mode,
 	})
 
 	// Publish orchestrator.schedule to trigger tactical scheduling
@@ -510,8 +456,137 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 	return nil
 }
 
-// generatePlan uses the planner agent to decompose the request.
-func (sp *StrategicPlanner) generatePlan(ctx context.Context, req PlanRequest) ([]*task.TaskStep, error) {
+// handlePairSession wraps the spec_pair flow: create the pair steps,
+// persist them, update task state, and publish events. It returns nil steps
+// with nil error to signal "already handled" (the caller returns immediately).
+// On error the caller falls back to the shared tail using fallback steps.
+func (sp *StrategicPlanner) handlePairSession(ctx context.Context, t *task.Task, req PlanRequest, parentMemoryRefs []string) ([]*task.TaskStep, error) {
+	sp.logger.Info("Using pair session for task",
+		"task_id", req.TaskID,
+		"intent", req.Intent,
+	)
+	pairSteps, pairErr := sp.planPairSession(ctx, req, parentMemoryRefs)
+	if pairErr != nil {
+		return nil, pairErr
+	}
+
+	// Persist steps
+	for _, step := range pairSteps {
+		if err := sp.stepStore.Create(step); err != nil {
+			sp.logger.Error("Failed to persist step", "step_id", step.ID, "error", err)
+			return nil, fmt.Errorf("failed to persist steps: %w", err)
+		}
+	}
+
+	t.TotalJobs = len(pairSteps)
+	t.SetState(task.StateExecuting)
+	if err := sp.taskStore.Update(t); err != nil {
+		sp.logger.Error("Failed to update task after pair planning", "error", err)
+	}
+
+	// Promote actor step to ready (reviewer depends on it)
+	promoted, err := sp.stepStore.PromoteReadySteps(req.TaskID)
+	if err != nil {
+		sp.logger.Error("Failed to promote pair steps", "error", err)
+	}
+
+	sp.publishEvent("task.planned", map[string]any{
+		KeyTaskID:      req.TaskID,
+		"session_id":   req.SessionID,
+		"total_steps":  len(pairSteps),
+		"ready_steps":  len(promoted),
+		"pair_session": true,
+		"mode":         "spec_pair",
+	})
+
+	sp.publishEvent("orchestrator.schedule", map[string]any{
+		KeyTaskID: req.TaskID,
+	})
+
+	return pairSteps, nil
+}
+
+// inferLegacyMode reconstructs a mode for empty-Mode requests, preserving
+// the pre-Thread-D heuristics during rollout. Once all callers populate
+// Mode, this becomes dead code.
+func (sp *StrategicPlanner) inferLegacyMode(req PlanRequest) string {
+	// Compound intents always used pair sessions pre-Thread-D. Both the
+	// IsCompound flag (set by handler.publishPlanRequest) and the raw
+	// intent string (set by legacy/test callers) trigger spec_pair, matching
+	// the old shouldUsePairSession behavior.
+	if req.IsCompound || req.Intent == string(IntentCompound) {
+		return "spec_pair"
+	}
+	it := IntentType(req.Intent)
+	switch it {
+	case IntentChat, IntentRecall, IntentStatus, IntentReport, IntentPlatform, IntentSearch:
+		return "direct"
+	case IntentPlan, IntentArchitect:
+		return "spec_plan"
+	default:
+		if len(req.Input) < sp.simpleInputMaxChars {
+			return "direct"
+		}
+		return "plan"
+	}
+}
+
+// shouldInterview decides whether to conduct a design interview before
+// decomposition, based on the planning mode. spec_plan always interviews;
+// plan interviews only when TrueAnalysis indicates ambiguity above the
+// configured threshold; direct/spec_pair never do.
+func (sp *StrategicPlanner) shouldInterview(req PlanRequest, mode string) bool {
+	switch mode {
+	case "spec_plan":
+		return true
+	case "plan":
+		return req.TrueAnalysis != nil &&
+			req.TrueAnalysis.Ambiguity >= sp.interviewAmbiguity
+	default:
+		return false
+	}
+}
+
+// awaitInterviewAnswers publishes the interview-questions event, stores the
+// planning context on the task metadata, and returns nil so Plan returns
+// without proceeding to decomposition. The task remains in StatePlanning
+// until the caller (TUI/HTTP) re-invokes Plan with answers.
+func (sp *StrategicPlanner) awaitInterviewAnswers(ctx context.Context, t *task.Task, req PlanRequest, pctx *plan.PlanningContext) error {
+	sp.publishEvent("task.interview", map[string]any{
+		KeyTaskID:     req.TaskID,
+		"session_id":  req.SessionID,
+		"questions":   pctx.InterviewQuestions,
+		"ambiguities": pctx.Ambiguities,
+	})
+
+	if pctxJSON, err := json.Marshal(pctx); err == nil {
+		t.Metadata = json.RawMessage(pctxJSON)
+		if err := sp.taskStore.Update(t); err != nil {
+			sp.logger.Warn("Failed to update task with planning context", "error", err)
+		}
+	}
+
+	sp.logger.Info("Interview questions sent, awaiting user answers",
+		"task_id", req.TaskID,
+		"question_count", len(pctx.InterviewQuestions),
+	)
+	return nil
+}
+
+// planMultiPhase is the multi-phase decomposition entry point. Full
+// implementation lands in Thread C+F; for now we delegate to
+// planSinglePhase so spec_plan mode degrades gracefully.
+func (sp *StrategicPlanner) planMultiPhase(ctx context.Context, req PlanRequest) ([]*task.TaskStep, error) {
+	sp.logger.Warn("planMultiPhase not yet implemented (Thread C+F); falling back to planSinglePhase",
+		"task_id", req.TaskID,
+	)
+	return sp.planSinglePhase(ctx, req)
+}
+
+// planSinglePhase uses the planner agent to decompose the request.
+// Renamed from generatePlan in Thread D Task 5 to fit the mode-switch nomenclature
+// (direct/plan/spec_plan/spec_pair → createFallbackSteps/planSinglePhase/planMultiPhase/planPairSession).
+func (sp *StrategicPlanner) planSinglePhase(ctx context.Context, req PlanRequest) ([]*task.TaskStep, error) {
 	plannerLoop, err := sp.registry.Get(config.AgentIDPlanner)
 	if err != nil {
 		return nil, fmt.Errorf("planner agent not available: %w", err)
@@ -707,99 +782,11 @@ func (sp *StrategicPlanner) createFallbackSteps(req PlanRequest, parentRefs []st
 	return []*task.TaskStep{step}
 }
 
-// shouldDecompose returns true if the request warrants LLM-based task decomposition.
-// Simple intents and short requests are handled as single-step tasks to avoid
-// over-decomposition and unnecessary LLM calls.
-func (sp *StrategicPlanner) shouldDecompose(req PlanRequest) bool {
-	switch req.Intent {
-	case string(IntentChat), string(IntentReport), string(IntentRecall), string(IntentPlatform), string(IntentSearch), string(IntentAnalyze):
-		return false
-	case string(IntentCompound):
-		// Compound intents always need decomposition into sub-tasks
-		return true
-	}
-
-	// Short requests without complex action verbs are likely simple
-	simpleMax := sp.simpleInputMaxChars
-	if simpleMax <= 0 {
-		simpleMax = 100
-	}
-	if len(req.Input) < simpleMax {
-		lower := strings.ToLower(req.Input)
-
-		// Check for complexity indicators that warrant decomposition
-		complexityIndicators := []string{
-			"and then", "after that", "followed by", "multiple",
-			"several", "all of", "each of", "for every",
-			"step by step", "steps", "phases",
-		}
-		for _, indicator := range complexityIndicators {
-			if strings.Contains(lower, indicator) {
-				return true
-			}
-		}
-
-		// Simple requests don't need decomposition
-		return false
-	}
-
-	// If the request was ambiguous enough to need interviewing, probably decompose
-	if req.TrueAnalysis != nil && req.TrueAnalysis.Ambiguity >= 0.5 {
-		return true
-	}
-
-	// If interview context says this is broad scope, decompose
-	if req.PlanningCtx != nil && req.PlanningCtx.InterviewCompleted {
-		return true
-	}
-
-	// Longer requests may benefit from decomposition
-	return true
-}
-
-// shouldUsePairSession returns true when a task should use the pair session
-// model instead of independent step scheduling.
-//
-// Criteria:
-//   - Intent is "code" or "debug" AND the input is complex (>200 chars or
-//     contains complexity indicators)
-//   - Intent is "compound" (multi-intent tasks always benefit from pairing)
-//   - The task name/description contains security-sensitive keywords
-func (sp *StrategicPlanner) shouldUsePairSession(req PlanRequest) bool {
-	if sp.pairManager == nil {
-		return false
-	}
-
-	// Compound tasks always use pair sessions
-	if req.Intent == string(IntentCompound) {
-		return true
-	}
-
-	// Code and debug intents with complex descriptions
-	switch req.Intent {
-	case string(IntentCode), string(IntentDebug):
-		pairMin := sp.pairInputMinChars
-		if pairMin <= 0 {
-			pairMin = 200
-		}
-		if len(req.Input) > pairMin {
-			return true
-		}
-		lower := strings.ToLower(req.Input)
-		for _, indicator := range SecurityKeywords() {
-			if strings.Contains(lower, indicator) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-// createPairSessionPlan creates a pair session for the task instead of
+// planPairSession creates a pair session for the task instead of
 // independent steps. It creates two placeholder steps (actor + reviewer)
 // and publishes a pair session creation event.
-func (sp *StrategicPlanner) createPairSessionPlan(ctx context.Context, req PlanRequest, parentMemoryRefs []string) ([]*task.TaskStep, error) {
+// Renamed from createPairSessionPlan in Thread D Task 5.
+func (sp *StrategicPlanner) planPairSession(ctx context.Context, req PlanRequest, parentMemoryRefs []string) ([]*task.TaskStep, error) {
 	session := sp.pairManager.CreateSession(
 		req.TaskID,
 		req.Input,
