@@ -115,6 +115,11 @@ func defaultInterviewFallback() string {
 // disk (e.g., tests running in a temp dir). Kept in sync with the bundled file.
 func defaultDecomposeSpecFallback() string { return decomposeSpecFallbackBody }
 
+// defaultSplitFallback mirrors config/prompts/orchestrator/split.md so the
+// chunkToExecutorCapacity fallback path works without the bundled markdown
+// file on disk. Kept in sync with the bundled file.
+func defaultSplitFallback() string { return splitFallbackBody }
+
 // NewDaemonPlannerTemplateLoader constructs a loader with the standard 4 tiers
 // and pre-registers fallbacks for the planner templates. The bundledPromptsPath
 // is used as the lowest-priority tier (typically "config/prompts" relative to
@@ -134,6 +139,7 @@ func NewDaemonPlannerTemplateLoader(bundledPromptsPath string) *plannerTemplateL
 	l.fallbacks["planner/decompose.md"] = defaultDecomposeFallback()
 	l.fallbacks["planner/interview.md"] = defaultInterviewFallback()
 	l.fallbacks["planner/decompose_spec.md"] = defaultDecomposeSpecFallback()
+	l.fallbacks["orchestrator/split.md"] = defaultSplitFallback()
 	return l
 }
 
@@ -229,3 +235,27 @@ Rules:
 
 Request to decompose:
 {{.Input}}`
+
+// splitFallbackBody mirrors config/prompts/orchestrator/split.md.
+const splitFallbackBody = `You are an execution orchestrator. The following step is too large for one agent invocation.
+Split it into sub-steps that each fit within {{.BudgetTokens}} tokens of executor context.
+
+Original step:
+- Description: {{.StepDescription}}
+- Tool hint: {{.ToolHint}}
+- Executor agent: {{.ExecutorID}}
+- Executor model context limit: {{.ContextLimit}}
+
+Output ONLY valid JSON:
+{
+  "sub_steps": [
+    {"description": "...", "tool_hint": "code", "depends_on": []},
+    {"description": "...", "tool_hint": "code", "depends_on": [0]}
+  ]
+}
+
+Rules:
+- Sub-steps must collectively accomplish the original step's intent
+- Each sub-step should fit in {{.BudgetTokens}} tokens including tool output
+- Preserve the original step's tool hint unless a sub-step genuinely needs a different agent
+- Maximum 5 sub-steps per split`

@@ -15,6 +15,7 @@ import (
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/repomap"
 	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -32,6 +33,13 @@ type Orchestrator struct {
 	reflectionEngine    *ReflectionEngine         // optional: auto-fix reflection loop
 	repoMapGen          *repomap.RepoMapGenerator // optional: repository map for context enrichment
 	fenceChecker        *intsecurity.FenceChecker // path boundary enforcement
+
+	// Proactive chunking dependencies (Task 4 of Plan C+F).
+	// These are nil until wired by the daemon (Task 6).
+	// chunkToExecutorCapacity nil-guards all of these and skips chunking when unwired.
+	registry   *AgentRegistry          // agent registry for model config + LLM access
+	templateReg *plannerTemplateLoader  // template loader for split.md rendering
+	stepStore  *task.StepStore          // step store for listing + replacing steps
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -161,6 +169,22 @@ func (o *Orchestrator) Name() string {
 func (o *Orchestrator) SetPlanManager(pm *plan.PlanManager) {
 	if pm != nil {
 		o.planManager = pm
+	}
+}
+
+// SetChunkingDeps wires the dependencies for proactive chunking
+// (chunkToExecutorCapacity). Any nil argument leaves chunking disabled.
+//
+//nolint:U1000 // wired by Task 6 of Plan C+F (daemon wiring)
+func (o *Orchestrator) SetChunkingDeps(registry *AgentRegistry, templateReg *plannerTemplateLoader, stepStore *task.StepStore) {
+	if registry != nil {
+		o.registry = registry
+	}
+	if templateReg != nil {
+		o.templateReg = templateReg
+	}
+	if stepStore != nil {
+		o.stepStore = stepStore
 	}
 }
 

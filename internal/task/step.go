@@ -848,6 +848,78 @@ func (s *StepStore) DeleteByTaskID(taskID string) error {
 	return nil
 }
 
+// ReplaceWithSubSteps deletes the step identified by stepID and inserts the
+// provided sub-steps in its place. This is used by the orchestrator's
+// chunkToExecutorCapacity to atomically swap an oversized step for its
+// sub-step decomposition.
+func (s *StepStore) ReplaceWithSubSteps(stepID string, subSteps []*TaskStep) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin replace transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec("DELETE FROM task_steps WHERE id = ?", stepID); err != nil {
+		return fmt.Errorf("delete original step %s: %w", stepID, err)
+	}
+
+	for _, ss := range subSteps {
+		depsJSON := encodeStringSlice(ss.DependsOn)
+		recsJSON := encodeRecommendations(ss.Recommendations)
+		evidenceJSON := encodeEvidenceSlice(ss.Evidence)
+		claimsJSON := encodeStringSlice(ss.Claims)
+		memoryRefsJSON := encodeStringSlice(ss.MemoryRefs)
+		checklistJSON := encodeChecklist(ss.Checklist)
+
+		_, err := tx.Exec(`
+			INSERT INTO task_steps (id, task_id, description, depends_on, tool_hint, agent_id,
+			                        job_id, state, result, sequence, revision_count,
+			                        recommendations, evidence, claims, validated, validation_error,
+			                        token_usage, memory_refs, accumulated_context, model_override,
+			                        checklist, phase, checkpoint_gate, is_handoff,
+			                        created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			ss.ID,
+			ss.TaskID,
+			ss.Description,
+			nullableString(depsJSON),
+			nullableString(ss.ToolHint),
+			nullableString(ss.AgentID),
+			nullableString(ss.JobID),
+			string(ss.State),
+			nullableString(ss.Result),
+			ss.Sequence,
+			ss.RevisionCount,
+			nullableString(recsJSON),
+			nullableString(evidenceJSON),
+			nullableString(claimsJSON),
+			ss.Validated,
+			nullableString(ss.ValidationError),
+			ss.TokenUsage,
+			nullableString(memoryRefsJSON),
+			nullableString(ss.AccumulatedContext),
+			nullableString(ss.ModelOverride),
+			nullableString(checklistJSON),
+			nullableString(ss.Phase),
+			ss.CheckpointGate,
+			ss.IsHandoff,
+			ss.CreatedAt.Format(time.RFC3339),
+			ss.UpdatedAt.Format(time.RFC3339),
+		)
+		if err != nil {
+			return fmt.Errorf("insert sub-step %s: %w", ss.ID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit replace transaction: %w", err)
+	}
+	s.logger.Debug("Replaced step with sub-steps",
+		"original_step_id", stepID,
+		"sub_step_count", len(subSteps))
+	return nil
+}
+
 func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 	var (
 		id, taskID, description, state      string
