@@ -1034,5 +1034,9 @@ func (r *AgentRegistry) GetModelConfig(agentID string) (*llm.ModelConfig, error)
 	if r.resolver == nil {
 		return nil, fmt.Errorf("agent %q has model %q but registry has no resolver", agentID, spec.Model)
 	}
-	return r.resolver.ResolveRef(spec.Model), nil
+	cfg := r.resolver.ResolveRef(spec.Model)
+	if cfg == nil {
+		return nil, fmt.Errorf("agent %q model %q could not be resolved (provider disabled or model missing)", agentID, spec.Model)
+	}
+	return cfg, nil
 }

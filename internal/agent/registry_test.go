@@ -638,3 +638,23 @@ func TestAgentRegistry_GetModelConfig_UnknownAgent(t *testing.T) {
 		t.Fatal("want error for unknown agent, got nil")
 	}
 }
+
+// TestAgentRegistry_GetModelConfig_UnresolvableModel verifies that an agent
+// whose Model ref points to a provider/model that the resolver cannot resolve
+// returns (nil, error) instead of (nil, nil). Without the nil guard in
+// GetModelConfig, callers would deref the nil cfg and panic — the same
+// nil/nil anti-pattern documented in mcp/client.go:227.
+func TestAgentRegistry_GetModelConfig_UnresolvableModel(t *testing.T) {
+	r := newTestRegistryWithResolver(t)
+	// "ghostprov" does not exist in newTestRegistryWithResolver's ProvidersConfig,
+	// so ResolveRef returns nil. The test registry's resolver is non-nil, which
+	// isolates this test from the resolver-nil branch.
+	r.specs["ghost"] = &AgentSpec{ID: "ghost", Model: "ghostprov/missing-m", Enabled: true}
+	cfg, err := r.GetModelConfig("ghost")
+	if err == nil {
+		t.Fatal("want error for unresolvable model ref; got nil")
+	}
+	if cfg != nil {
+		t.Errorf("want nil cfg; got %+v", cfg)
+	}
+}
