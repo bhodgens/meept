@@ -4576,6 +4576,481 @@ paths:
         '500':
           description: Internal server error
 
+  /api/v1/agents:
+    get:
+      summary: List all AI employees
+      operationId: listAgents
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+    post:
+      summary: Create a new AI employee
+      operationId: createAgent
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /api/v1/agents/migrate:
+    post:
+      summary: Scan legacy bot definitions and propose constitutions
+      operationId: migrateAgents
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /api/v1/agents/{id}:
+    get:
+      summary: Get a single AI employee by ID
+      operationId: getAgent
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The employee ID.
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+    patch:
+      summary: Update an existing AI employee
+      operationId: updateAgent
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The employee ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+    delete:
+      summary: Delete an AI employee
+      operationId: deleteAgent
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The employee ID.
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /api/v1/agents/{id}/trigger:
+    post:
+      summary: Trigger a single invocation of an employee
+      operationId: triggerAgent
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The employee ID.
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /api/v1/agents/{id}/pause:
+    post:
+      summary: Pause an employee
+      operationId: pauseAgent
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The employee ID.
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /api/v1/agents/{id}/resume:
+    post:
+      summary: Resume a paused employee
+      operationId: resumeAgent
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The employee ID.
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /api/v1/agents/{id}/constitution:
+    get:
+      summary: Get an employee's constitution
+      operationId: getAgentConstitution
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The employee ID.
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+    patch:
+      summary: Amend an employee's constitution
+      operationId: amendAgentConstitution
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The employee ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /api/v1/agents/{id}/goals:
+    get:
+      summary: List goals for an employee
+      operationId: listAgentGoals
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The employee ID.
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /api/v1/agents/{id}/goals/{gid}:
+    get:
+      summary: Get a specific goal for an employee
+      operationId: getAgentGoal
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The employee ID.
+        - name: gid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The goal ID.
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /api/v1/agents/{id}/goals/{gid}/plans/{pid}/approve:
+    post:
+      summary: Approve a pending plan for a goal
+      operationId: approveAgentPlan
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The employee ID.
+        - name: gid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The goal ID.
+        - name: pid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The plan ID.
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /api/v1/agents/{id}/goals/{gid}/plans/{pid}/reject:
+    post:
+      summary: Reject a pending plan for a goal
+      operationId: rejectAgentPlan
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The employee ID.
+        - name: gid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The goal ID.
+        - name: pid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The plan ID.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /api/v1/agents/{id}/audit:
+    get:
+      summary: List recent audit findings for an employee
+      operationId: listAgentAudit
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The employee ID.
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Duration filter (e.g. "24h", "7d").
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /api/v1/agents/{id}/audit/{fid}/resolve:
+    post:
+      summary: Resolve an audit finding
+      operationId: resolveAgentFinding
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The employee ID.
+        - name: fid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The finding ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                resolution:
+                  type: string
+                  description: Resolution type (e.g. "false_positive", "acknowledged", "fixed").
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
   /health:
     get:
       summary: s.handleHealth

@@ -11,6 +11,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -126,6 +127,21 @@ func truncateID(id string) string {
 		return id[:37] + "..."
 	}
 	return id
+}
+
+// readDefinitionFile reads a JSON5 employee definition file and unmarshals it
+// into v. This supports the same JSON5 syntax (comments, trailing commas,
+// unquoted keys) used everywhere else in the project. Falls back to raw JSON
+// if hujson standardization fails so strict-JSON definitions still work.
+func readDefinitionFile(path string, v any) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to read definition file: %w", err)
+	}
+	if err := config.UnmarshalJSON5(data, v); err != nil {
+		return fmt.Errorf("invalid JSON5 in definition file: %w", err)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -360,14 +376,9 @@ Example definition:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defPath := args[0]
 
-			data, err := os.ReadFile(defPath)
-			if err != nil {
-				return fmt.Errorf("failed to read definition file: %w", err)
-			}
-
 			var def map[string]any
-			if err := json.Unmarshal(data, &def); err != nil {
-				return fmt.Errorf("invalid JSON in definition file: %w", err)
+			if err := readDefinitionFile(defPath, &def); err != nil {
+				return err
 			}
 
 			client, err := connectDaemon()
@@ -415,14 +426,9 @@ validation is performed before the update is applied.`,
 			agentID := args[0]
 			defPath := args[1]
 
-			data, err := os.ReadFile(defPath)
-			if err != nil {
-				return fmt.Errorf("failed to read definition file: %w", err)
-			}
-
 			var def map[string]any
-			if err := json.Unmarshal(data, &def); err != nil {
-				return fmt.Errorf("invalid JSON in definition file: %w", err)
+			if err := readDefinitionFile(defPath, &def); err != nil {
+				return err
 			}
 
 			def["id"] = agentID

@@ -122,3 +122,46 @@ extension Employee {
         }
     }
 }
+
+// MARK: - Goal types
+
+/// Wrapper for the `GET /api/v1/agents/{id}/goals` response: `{"goals": [...]}`.
+struct GoalListResponse: Codable {
+    let goals: [GoalWire]
+}
+
+/// Single goal entry returned by the daemon.
+struct GoalWire: Codable {
+    let id: String
+    let employeeID: String?
+    let title: String?
+    let state: String?
+    let health: String?
+    let activePlanID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case employeeID = "employee_id"
+        case title, state, health
+        case activePlanID = "active_plan_id"
+    }
+}
+
+/// Flattened goal row model used by AgentsView.
+struct Goal: Identifiable {
+    let id: String
+    let employeeID: String
+    var title: String
+    var state: String
+    var health: String
+    var activePlanID: String
+
+    init(from wire: GoalWire) {
+        self.id = wire.id
+        self.employeeID = wire.employeeID ?? ""
+        self.title = wire.title ?? ""
+        self.state = wire.state ?? "unknown"
+        self.health = wire.health ?? "unknown"
+        self.activePlanID = wire.activePlanID ?? ""
+    }
+}

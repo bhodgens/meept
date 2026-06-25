@@ -54,6 +54,7 @@ type ServiceRegistry struct {
 	Search       *SearchService
 	Upload       *UploadService
 	Thread       *ThreadService
+	Employee     *EmployeeService
 }
 
 // Config holds dependencies for service instantiation.
@@ -87,6 +88,7 @@ type Config struct {
 	UploadsDir       string
 	UploadsMaxMB     int
 	UploadsTypes     []string
+	EmployeeManager  EmployeeManager
 }
 
 // NewRegistry creates all services with their dependencies.
@@ -193,6 +195,11 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 			types = []string{"image/png", "image/jpeg", "image/gif", "image/webp"}
 		}
 		reg.Upload = NewUploadService(cfg.UploadsDir, maxMB, types)
+	}
+
+	// EmployeeService is created when an EmployeeManager is configured.
+	if cfg.EmployeeManager != nil {
+		reg.Employee = NewEmployeeService(cfg.EmployeeManager)
 	}
 
 	return reg, nil

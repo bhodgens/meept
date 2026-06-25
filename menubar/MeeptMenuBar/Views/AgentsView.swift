@@ -74,6 +74,7 @@ struct AgentsView: View {
         .sheet(item: $viewModel.selectedAgent) { agent in
             AgentDetailSheet(
                 agent: agent,
+                api: viewModel.api,
                 isPending: viewModel.isPending(agent.id),
                 onPause: { Task { await viewModel.pause(id: agent.id) } },
                 onResume: { Task { await viewModel.resume(id: agent.id) } },
@@ -171,11 +172,16 @@ struct AgentCard: View {
 
 struct AgentDetailSheet: View {
     let agent: Employee
+    let api: APIClient
     let isPending: Bool
     let onPause: () -> Void
     let onResume: () -> Void
     let onTrigger: () -> Void
     @Environment(\.dismiss) private var dismiss
+
+    @State private var goals: [Goal] = []
+    @State private var goalsError: String?
+    @State private var pendingGoal: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -228,6 +234,64 @@ struct AgentDetailSheet: View {
                 }
             }
 
+            // Goals section
+            VStack(alignment: .leading, spacing: 4) {
+                Text("goals")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.secondary)
+                if let err = goalsError {
+                    Text(err)
+                        .font(.system(size: 11))
+                        .foregroundColor(.red)
+                } else if goals.isEmpty {
+                    Text("no active goals")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(goals) { goal in
+                        GoalRow(
+                            goal: goal,
+                            isPending: pendingGoal == goal.id,
+                            onApprove: {
+                                guard !goal.activePlanID.isEmpty else { return }
+                                pendingGoal = goal.id
+                                Task {
+                                    do {
+                                        try await api.approvePlan(
+                                            employeeID: agent.id,
+                                            goalID: goal.id,
+                                            planID: goal.activePlanID
+                                        )
+                                        await loadGoals()
+                                    } catch {
+                                        goalsError = error.localizedDescription
+                                    }
+                                    pendingGoal = nil
+                                }
+                            },
+                            onReject: {
+                                guard !goal.activePlanID.isEmpty else { return }
+                                pendingGoal = goal.id
+                                Task {
+                                    do {
+                                        try await api.rejectPlan(
+                                            employeeID: agent.id,
+                                            goalID: goal.id,
+                                            planID: goal.activePlanID,
+                                            reason: "rejected via menubar"
+                                        )
+                                        await loadGoals()
+                                    } catch {
+                                        goalsError = error.localizedDescription
+                                    }
+                                    pendingGoal = nil
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+
             Spacer()
 
             // Action row
@@ -247,7 +311,19 @@ struct AgentDetailSheet: View {
             }
         }
         .padding()
-        .frame(width: 420, height: 480)
+        .frame(width: 420, height: 520)
+        .task {
+            await loadGoals()
+        }
+    }
+
+    private func loadGoals() async {
+        do {
+            goals = try await api.listGoals(employeeID: agent.id)
+            goalsError = nil
+        } catch {
+            goalsError = error.localizedDescription
+        }
     }
 }
 
@@ -260,7 +336,7 @@ class AgentsViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var selectedAgent: Employee?
 
-    private let api: APIClient
+    let api: APIClient
     private var pollTimer: Timer?
     private let updateInterval: TimeInterval = 5.0
     private var pendingIDs: Set<String> = []
@@ -347,5 +423,51 @@ class AgentsViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+// MARK: - Goal row
+
+struct GoalRow: View {
+    let goal: Goal
+    let isPending: Bool
+    let onApprove: () -> Void
+    let onReject: () -> Void
+
+    private var healthColor: Color {
+        switch goal.health {
+        case "healthy": return .green
+        case "at_risk": return .yellow
+        case "broken": return .red
+        default: return .gray
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(healthColor)
+                .frame(width: 8, height: 8)
+
+            Text(goal.title.isEmpty ? goal.id : goal.title)
+                .font(.system(size: 11))
+                .lineLimit(1)
+
+            Spacer()
+
+            if !goal.activePlanID.isEmpty {
+                Button("approve", action: onApprove)
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 10))
+                    .disabled(isPending)
+
+                Button("reject", action: onReject)
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 10))
+                    .foregroundColor(.red)
+                    .disabled(isPending)
+            }
+        }
+        .padding(.vertical, 2)
     }
 }

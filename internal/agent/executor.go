@@ -440,6 +440,17 @@ func (e *Executor) SetRegistry(registry ToolRegistry) {
 	e.mu.Unlock()
 }
 
+// SetAgentID updates the agent/employee identifier used by this executor.
+// The agentID is injected into the permission check details map so the
+// PermissionChecker can route to the registered PreExecChecker (employee
+// constitution gate). This is safe to call per-invocation from the agent
+// loop; the value is snapshotted under a read lock in checkPermission.
+func (e *Executor) SetAgentID(id string) {
+	e.mu.Lock()
+	e.agentID = id
+	e.mu.Unlock()
+}
+
 // Execute runs a single tool call with security checks.
 func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *ExecutionResult {
 	toolName := toolCall.Function.Name
@@ -720,6 +731,16 @@ func (e *Executor) checkPermission(toolName string, args map[string]any) securit
 				details[k] = string(data)
 			}
 		}
+	}
+
+	// Inject agent ID so the PermissionChecker can route to the
+	// registered PreExecChecker (employee constitution gate). The agentID
+	// is set via the WithExecutorAgentID option or the SetAgentID method.
+	e.mu.RLock()
+	agentID := e.agentID
+	e.mu.RUnlock()
+	if agentID != "" {
+		details["agent_id"] = agentID
 	}
 
 	return e.security.CheckPermission(action, details)

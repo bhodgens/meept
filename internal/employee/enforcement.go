@@ -216,6 +216,7 @@ type PreExecChecker struct {
 	employeeID    string
 	budgetChecker BudgetChecker
 	autoPause     AutoPauseFunc
+	auditStore    *AuditStore
 }
 
 // NewPreExecChecker constructs a PreExecChecker for the given employee. The
@@ -260,6 +261,17 @@ func (p *PreExecChecker) SetAutoPause(fn AutoPauseFunc) {
 	p.mu.Unlock()
 }
 
+// SetAuditStore wires the AuditStore used to persist findings on hard-deny
+// paths. Nil is ignored (typed-nil guard per CLAUDE.md).
+func (p *PreExecChecker) SetAuditStore(as *AuditStore) {
+	if as == nil {
+		return
+	}
+	p.mu.Lock()
+	p.auditStore = as
+	p.mu.Unlock()
+}
+
 // Check evaluates a single tool call against the constitution. Returns a
 // Decision describing whether the call is allowed, denied, or escalated.
 //
@@ -281,6 +293,7 @@ func (p *PreExecChecker) SetAutoPause(fn AutoPauseFunc) {
 // routes to signoff instead of being shadowed by the generic ceiling deny.
 func (p *PreExecChecker) Check(action, toolName string, details map[string]string) (dec Decision) {
 	// Fail-safe: if the checker panics, deny + auto-pause (spec lines 601-602).
+	// Also record an audit finding at SeverityCritical.
 	defer func() {
 		if r := recover(); r != nil {
 			dec = Decision{
@@ -288,6 +301,8 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 				Reason:   fmt.Sprintf("pre-exec checker panic: %v", r),
 				Severity: string(SeverityCritical),
 			}
+			p.recordDenial(context.Background(), p.employeeID, action, toolName,
+				fmt.Sprintf("pre-exec checker panic: %v", r), SeverityCritical)
 			p.triggerAutoPause("pre-exec checker panic")
 		}
 	}()
@@ -310,6 +325,8 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 	if len(constraints.ToolsForbidden) > 0 {
 		for _, forbidden := range constraints.ToolsForbidden {
 			if toolName == forbidden {
+				p.recordDenial(context.Background(), p.employeeID, action, toolName,
+					"tools_forbidden", SeverityWarning)
 				return Decision{
 					Allowed:  false,
 					Reason:   fmt.Sprintf("tool %q is forbidden by constitution", toolName),
@@ -329,6 +346,8 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 			}
 		}
 		if !allowed {
+			p.recordDenial(context.Background(), p.employeeID, action, toolName,
+				"tools_allowed", SeverityWarning)
 			return Decision{
 				Allowed:  false,
 				Reason:   fmt.Sprintf("tool %q is not in tools_allowed list", toolName),
@@ -345,6 +364,8 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 	//    (Spec line 355: "Never pattern match → hard deny, audit event
 	//    at RiskCritical, employee auto-pause.")
 	if hit, rule := matchesNever(constraints.Never, action, toolName, details); hit {
+		p.recordDenial(context.Background(), p.employeeID, action, toolName,
+			"never: "+rule, SeverityCritical)
 		if autoPause != nil {
 			_ = autoPause(p.employeeID, "never-rule violation: "+rule)
 		}
@@ -379,6 +400,8 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 		callRisk := parseRiskCeiling(rlRaw)
 		ceiling := parseRiskCeiling(string(constraints.RiskCeiling))
 		if callRisk > ceiling {
+			p.recordDenial(context.Background(), p.employeeID, action, toolName,
+				"risk_ceiling", SeverityWarning)
 			return Decision{
 				Allowed:      false,
 				Reason:       fmt.Sprintf("risk %s exceeds ceiling %s", riskLabel(callRisk), riskLabel(ceiling)),
@@ -393,6 +416,8 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 	if bc != nil {
 		tokens, cents, invocations := bc.SpentToday(p.employeeID)
 		if constraints.DailyBudgetCents > 0 && cents >= constraints.DailyBudgetCents {
+			p.recordDenial(context.Background(), p.employeeID, action, toolName,
+				"daily budget exhausted", SeverityCritical)
 			if autoPause != nil {
 				_ = autoPause(p.employeeID, "daily budget exhausted")
 			}
@@ -403,6 +428,8 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 			}
 		}
 		if constraints.MaxInvocationsPerDay > 0 && invocations >= constraints.MaxInvocationsPerDay {
+			p.recordDenial(context.Background(), p.employeeID, action, toolName,
+				"max invocations reached", SeverityCritical)
 			if autoPause != nil {
 				_ = autoPause(p.employeeID, "max invocations reached")
 			}
@@ -430,6 +457,35 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 	}
 
 	return Decision{Allowed: true, Severity: string(SeverityInfo)}
+}
+
+// recordDenial persists an audit finding for a hard-deny decision. It is
+// best-effort: the auditStore is nil-checked and the write is wrapped in
+// recover so an audit-write failure never causes a panic in the checker.
+func (p *PreExecChecker) recordDenial(ctx context.Context, employeeID, action, toolName, reason string, severity AuditSeverity) {
+	defer func() {
+		// Never let an audit-write failure propagate into the checker.
+		_ = recover()
+	}()
+
+	p.mu.RLock()
+	store := p.auditStore
+	p.mu.RUnlock()
+
+	if store == nil {
+		return
+	}
+
+	finding := AuditFinding{
+		ID:           id.Generate("audit_"),
+		EmployeeID:   employeeID,
+		Severity:     severity,
+		Checkpoint:   CheckpointPreExec,
+		ViolatedRule: reason,
+		Evidence:     action + "/" + toolName,
+		DetectedAt:   time.Now().UTC(),
+	}
+	_ = store.Create(ctx, finding)
 }
 
 // triggerAutoPause is a best-effort auto-pause invocation used by the
@@ -654,6 +710,12 @@ func (a *PostTurnAuditor) Audit(ctx context.Context, turn TurnRecord) (*AuditFin
 		return nil, nil // clean turn
 	}
 
+	// Spec line 625: if the audit model reports a critical finding but the
+	// constitution's tools_allowed explicitly permits the tool referenced in
+	// the evidence, downgrade to info. We trust the structured rules over the
+	// LLM's read of the charter.
+	a.downgradeIfPermitted(finding, turn.Constitution)
+
 	// Critical finding → auto-pause + persist.
 	if finding.Severity == SeverityCritical && autoPause != nil {
 		_ = autoPause(turn.EmployeeID, "critical audit finding: "+finding.ViolatedRule)
@@ -662,6 +724,36 @@ func (a *PostTurnAuditor) Audit(ctx context.Context, turn TurnRecord) (*AuditFin
 		_ = store.Create(context.Background(), *finding) // best-effort persist
 	}
 	return finding, nil
+}
+
+// downgradeIfPermitted checks whether a critical finding's evidence references
+// a tool that the constitution's tools_allowed list explicitly permits. If so,
+// the severity is downgraded to info and a note is appended to the evidence
+// (spec line 625). Never[] violations are never downgraded — the Never list
+// expresses absolute prohibitions that override tools_allowed.
+func (a *PostTurnAuditor) downgradeIfPermitted(finding *AuditFinding, constitution *Constitution) {
+	if finding == nil || constitution == nil {
+		return
+	}
+	if finding.Severity != SeverityCritical {
+		return
+	}
+	// Only applies when tools_allowed is non-empty.
+	allowed := constitution.Constraints.ToolsAllowed
+	if len(allowed) == 0 {
+		return
+	}
+	// Check whether any permitted tool name appears as a substring in the
+	// finding's evidence. This is conservative: we only downgrade when the
+	// evidence explicitly references a tool the charter sanctioned.
+	evidenceLower := strings.ToLower(finding.Evidence)
+	for _, tool := range allowed {
+		if tool != "" && strings.Contains(evidenceLower, strings.ToLower(tool)) {
+			finding.Severity = SeverityInfo
+			finding.Evidence += " (downgraded: action explicitly permitted by tools_allowed)"
+			return
+		}
+	}
 }
 
 const postTurnSystemPrompt = `You are a constitution compliance auditor. Review the employee's turn for violations of their constitution. Respond as JSON: {"severity":"info|warning|critical","violated_rule":"","evidence":""}. If no violation, respond with {"severity":"info","violated_rule":"","evidence":""}.`
@@ -753,6 +845,11 @@ type PeriodicAuditor struct {
 	store           *AuditStore
 	autoPause       AutoPauseFunc
 	driftThreshold  float64 // auto-pause above this score (default 0.3)
+
+	// 3-strike failure tracking (spec lines 603-604). Guarded by failMu.
+	failMu               sync.Mutex
+	consecutiveFailures  int
+	lastFailureAt        time.Time
 }
 
 // NewPeriodicAuditor constructs a PeriodicAuditor with the given drift
@@ -781,6 +878,13 @@ func (a *PeriodicAuditor) SetAutoPause(fn AutoPauseFunc) {
 // AuditReview reviews the last N turns and returns any findings plus a drift
 // score (0.0-1.0). If the drift score exceeds the threshold, the employee is
 // auto-paused (spec lines 393-396).
+//
+// 3-strike failure tracking (spec lines 603-604): if the LLM call or parse
+// fails three times in a row, a critical finding is persisted with
+// checkpoint=periodic and violated_rule=auditor_unavailable. The counter
+// resets after the finding is written so the next 3 failures produce a new
+// finding rather than spamming every call. Backoff: if the last failure was
+// less than 30 seconds ago, the call returns early without hitting the LLM.
 func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]AuditFinding, float64, error) {
 	a.mu.Lock()
 	model := a.model
@@ -796,6 +900,14 @@ func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]Audi
 		return nil, 0, nil
 	}
 
+	// Backoff: if the last failure was recent, skip this call.
+	a.failMu.Lock()
+	sinceLast := time.Since(a.lastFailureAt)
+	a.failMu.Unlock()
+	if a.consecutiveFailures > 0 && sinceLast < 30*time.Second {
+		return nil, 0, nil
+	}
+
 	userMsg := buildPeriodicPrompt(turns)
 	messages := []llm.ChatMessage{
 		{Role: llm.RoleSystem, Content: periodicSystemPrompt},
@@ -804,22 +916,30 @@ func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]Audi
 
 	resp, err := model.Chat(ctx, messages, llm.WithTemperature(0.1), llm.WithMaxTokens(2048))
 	if err != nil {
+		a.recordPeriodicFailure(store, turns)
 		return nil, 0, fmt.Errorf("periodic audit LLM call failed: %w", err)
 	}
 
-	findings, driftScore, err := parsePeriodicResponse(resp.Content, turns)
-	if err != nil {
+	findings, driftScore, parseErr := parsePeriodicResponse(resp.Content, turns)
+	if parseErr != nil {
 		// Retry once with stricter prompt (spec line 605).
 		messages[0] = llm.ChatMessage{Role: llm.RoleSystem, Content: periodicSystemPromptStrict}
 		resp2, err2 := model.Chat(ctx, messages, llm.WithTemperature(0.0), llm.WithMaxTokens(2048))
 		if err2 != nil {
+			a.recordPeriodicFailure(store, turns)
 			return nil, 0, fmt.Errorf("periodic audit retry failed: %w", err2)
 		}
-		findings, driftScore, err = parsePeriodicResponse(resp2.Content, turns)
-		if err != nil {
+		findings, driftScore, parseErr = parsePeriodicResponse(resp2.Content, turns)
+		if parseErr != nil {
+			a.recordPeriodicFailure(store, turns)
 			return nil, 0, nil // skip, log warning
 		}
 	}
+
+	// Success (clean or with findings): reset the failure counter.
+	a.failMu.Lock()
+	a.consecutiveFailures = 0
+	a.failMu.Unlock()
 
 	// Persist findings + check critical/drift auto-pause.
 	employeeID := ""
@@ -840,6 +960,37 @@ func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]Audi
 	}
 
 	return findings, driftScore, nil
+}
+
+// recordPeriodicFailure increments the consecutive-failure counter and, when
+// the 3-strike threshold is reached, persists a critical finding with
+// checkpoint=periodic and resets the counter (spec lines 603-604).
+func (a *PeriodicAuditor) recordPeriodicFailure(store *AuditStore, turns []TurnRecord) {
+	a.failMu.Lock()
+	a.consecutiveFailures++
+	a.lastFailureAt = time.Now()
+	count := a.consecutiveFailures
+	if count >= 3 {
+		a.consecutiveFailures = 0
+	}
+	a.failMu.Unlock()
+
+	if count >= 3 && store != nil {
+		employeeID := ""
+		if len(turns) > 0 {
+			employeeID = turns[0].EmployeeID
+		}
+		finding := AuditFinding{
+			ID:           id.Generate("audit_"),
+			EmployeeID:   employeeID,
+			Severity:     SeverityCritical,
+			Checkpoint:   CheckpointPeriodic,
+			ViolatedRule: "auditor_unavailable",
+			Evidence:     "periodic auditor failed 3 consecutive times",
+			DetectedAt:   time.Now().UTC(),
+		}
+		_ = store.Create(context.Background(), finding)
+	}
 }
 
 const periodicSystemPrompt = `You are a periodic constitution drift auditor. Review the employee's recent turns for patterns of drift from their constitution. Respond as JSON: {"drift_score":0.0,"findings":[{"severity":"info|warning|critical","violated_rule":"","evidence":""}]}. drift_score is 0.0 (fully aligned) to 1.0 (severe drift).`

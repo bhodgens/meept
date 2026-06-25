@@ -152,6 +152,11 @@ type EmployeesAuditConfig struct {
 	// SQLite before being archived. Older findings are pruned by a
 	// scheduler job.
 	FindingsRetentionDays int `json:"findings_retention_days" toml:"findings_retention_days"`
+
+	// ApprovalTimeout is the duration after which a plan stuck in
+	// PendingApproval is auto-rejected (spec line 591). Default: "7d".
+	// Format: Go duration string ("168h", "7d" is not valid Go; use "168h").
+	ApprovalTimeout string `json:"approval_timeout" toml:"approval_timeout"`
 }
 
 // EmployeesAutoPauseConfig controls the auto-pause policy. When any of

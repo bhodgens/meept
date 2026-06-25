@@ -80,8 +80,9 @@ type CandidatePlan struct {
 // from internal/plan.Plan (avoiding a direct import cycle) while carrying the
 // fields the loop needs for execution and reflection.
 type PlanRef struct {
-	ID    string `json:"id"`
-	State string `json:"state"`
+	ID     string `json:"id"`
+	State  string `json:"state"`
+	Prompt string `json:"prompt,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +150,7 @@ type GoalLoop struct {
 	// External callbacks.
 	pauseFn PauseFunc
 	goalLookup GoalLookup
+	statusFn func() string // returns "running"|"paused"|"error"|"" (empty=unknown)
 
 	// Mutable state (guarded by mu).
 	mu                   sync.Mutex
@@ -236,6 +238,19 @@ func (l *GoalLoop) WithPauseFunc(fn PauseFunc) *GoalLoop {
 		l.pauseFn = fn
 	}
 	return l
+}
+
+// SetStatusFunc wires the status-checking callback used by Reflect to detect
+// operator pauses mid-flight (spec line 615). The callback must return the
+// employee's current status string ("running", "paused", "error", or "" for
+// unknown). Nil is ignored (typed-nil guard per CLAUDE.md).
+func (l *GoalLoop) SetStatusFunc(fn func() string) {
+	if fn == nil {
+		return
+	}
+	l.mu.Lock()
+	l.statusFn = fn
+	l.mu.Unlock()
 }
 
 // SetConstitution atomically replaces the constitution. Safe to call
@@ -356,6 +371,16 @@ func (l *GoalLoop) Plan(ctx context.Context, candidate CandidatePlan) (PlanRef, 
 		return PlanRef{}, fmt.Errorf("create plan: %w", err)
 	}
 
+	// Thread the candidate's prompt through the PlanRef so Execute can use it
+	// as the user message to the BotExecutor.
+	if candidate.Prompt != "" {
+		ref.Prompt = candidate.Prompt
+	} else {
+		// Fall back to the title as a synthetic prompt if the candidate has no
+		// explicit prompt field.
+		ref.Prompt = candidate.Title
+	}
+
 	logger.Info("plan created",
 		"plan_id", ref.ID,
 		"plan_state", ref.State,
@@ -382,7 +407,12 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 	}
 
 	systemPrompt := SynthesizedPrompt(constitution, "")
-	userMessage := fmt.Sprintf("[plan %s] execute per your mandate", plan.ID)
+	// Use the plan's prompt as the user message if available; fall back to the
+	// generic mandate instruction.
+	userMessage := plan.Prompt
+	if userMessage == "" {
+		userMessage = fmt.Sprintf("[plan %s] execute per your mandate", plan.ID)
+	}
 
 	start := time.Now()
 	output, tokens, err := runner.ExecuteBot(ctx, systemPrompt, userMessage)
@@ -426,7 +456,28 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 	logger := l.logger
 	threshold := l.maxConsecutiveFailures
 	pauseFn := l.pauseFn
+	statusFn := l.statusFn
 	l.mu.Unlock()
+
+	// Spec line 615: operator pauses while invocation in flight → in-flight
+	// invocation completes, but the post-turn REFLECT step is skipped and no
+	// new invocations start until resumed.
+	if statusFn != nil {
+		if strings.EqualFold(statusFn(), "paused") {
+			logger.Debug("skipping reflect: employee paused mid-flight")
+			// Set goal health to unknown via best-effort persistence.
+			if store != nil {
+				if goal, err := l.lookupActiveGoal(ctx); err == nil && goal != nil {
+					goal.Assess(GoalUnknown, time.Now().UTC())
+					if updateErr := store.Update(ctx, goal); updateErr != nil {
+						logger.Warn("failed to persist goal health during pause",
+							"goal_id", goal.ID, "error", updateErr)
+					}
+				}
+			}
+			return GoalUnknown, nil
+		}
+	}
 
 	// Update consecutive failure counter (spec lines 588-591).
 	if result != nil && !result.Success {
@@ -607,8 +658,9 @@ func (l *GoalLoop) decideTier1(ctx context.Context, trigger TriggerEvent, logger
 	// Execute the first candidate directly. Tier-1 is reactive: single-step.
 	candidate := candidates[0]
 	planRef := PlanRef{
-		ID:    id.Generate(goalLoopIDPrefix),
-		State: "executing",
+		ID:     id.Generate(goalLoopIDPrefix),
+		State:  "executing",
+		Prompt: candidate.Prompt,
 	}
 	result, execErr := l.Execute(ctx, planRef)
 	if execErr != nil {
@@ -619,8 +671,6 @@ func (l *GoalLoop) decideTier1(ctx context.Context, trigger TriggerEvent, logger
 			Error:   execErr.Error(),
 		}
 	}
-	// Store the candidate's prompt on the plan ref for the reflect step.
-	_ = candidate // candidate.Prompt would be passed to Execute in a richer impl
 
 	if _, reflectErr := l.Reflect(ctx, planRef, result); reflectErr != nil {
 		logger.Warn("tier1 reflect failed (non-fatal)", "error", reflectErr)
@@ -681,6 +731,19 @@ func (l *GoalLoop) ApproveAndExecute(ctx context.Context, planRef PlanRef) (*bot
 	store := l.goalStore
 	l.mu.Unlock()
 
+	// Set the active plan ID BEFORE execution so concurrent observers see the
+	// correct in-flight plan (spec: record ActivePlanID during execution, not
+	// after).
+	if store != nil {
+		if goal, lookupErr := l.lookupActiveGoal(ctx); lookupErr == nil && goal != nil {
+			goal.SetActivePlan(planRef.ID)
+			if updateErr := store.Update(ctx, goal); updateErr != nil {
+				logger.Warn("failed to set active plan on goal",
+					"goal_id", goal.ID, "plan_id", planRef.ID, "error", updateErr)
+			}
+		}
+	}
+
 	result, err := l.Execute(ctx, planRef)
 	if err != nil {
 		// Build a synthetic failure result so Reflect can track the counter.
@@ -696,7 +759,8 @@ func (l *GoalLoop) ApproveAndExecute(ctx context.Context, planRef PlanRef) (*bot
 		logger.Warn("approve-and-execute reflect failed (non-fatal)", "error", reflectErr)
 	}
 
-	// Update goal: clear active plan, append to history.
+	// After Reflect completes (success OR failure), clear the active plan and
+	// append to history.
 	if store != nil {
 		if goal, lookupErr := l.lookupActiveGoal(ctx); lookupErr == nil && goal != nil {
 			goal.SetActivePlan("")

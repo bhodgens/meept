@@ -599,6 +599,12 @@ func (p *AgentsPanel) View() string {
 	if p.subView == agentsViewDetail {
 		return p.renderDetail()
 	}
+	if p.subView == agentsViewApprovals {
+		return p.renderApprovals()
+	}
+	if p.subView == agentsViewAudit {
+		return p.renderAudit()
+	}
 
 	if p.loading && len(p.agents) == 0 {
 		return p.renderLoading()
@@ -825,6 +831,143 @@ func (p *AgentsPanel) renderDetail() string {
 		Render("p: pause | u: resume | a: approve | x: reject | f: resolve finding | esc: back"))
 
 	return modalStyle.Render(b.String())
+}
+
+// renderApprovals renders the tier-2 approval queue view. If the selected
+// agent has pending plans (goals with active_plan_id), they are listed in a
+// table with approve/reject hints. When no plans are pending, a centered
+// empty-state message is shown.
+func (p *AgentsPanel) renderApprovals() string {
+	var b strings.Builder
+	b.WriteString(p.renderHeader())
+	b.WriteString("\n\n")
+
+	sectionStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorAmber)).
+		Bold(true)
+
+	b.WriteString(sectionStyle.Render("--- pending plan approvals ---"))
+	b.WriteString("\n\n")
+
+	// Collect pending plans from the loaded detail (if any).
+	var pending []AgentGoal
+	if p.detail != nil {
+		for _, g := range p.detail.ActiveGoals {
+			if g.ActivePlanID != "" {
+				pending = append(pending, g)
+			}
+		}
+	}
+
+	if len(pending) == 0 {
+		empty := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorGray)).
+			Italic(true).
+			Width(max(p.width-4, 20)).
+			Align(lipgloss.Center).
+			Padding(2, 0)
+		b.WriteString(empty.Render("no pending approvals"))
+		b.WriteString("\n")
+	} else {
+		// Render a simple table.
+		labelStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorGray)).
+			Width(16)
+		valueStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#E5E7EB"))
+
+		for _, g := range pending {
+			b.WriteString(labelStyle.Render("employee:"))
+			b.WriteString(valueStyle.Render(p.selectedID))
+			b.WriteString("\n")
+			b.WriteString(labelStyle.Render("goal:"))
+			b.WriteString(valueStyle.Render(g.Title))
+			b.WriteString("\n")
+			b.WriteString(labelStyle.Render("plan id:"))
+			b.WriteString(valueStyle.Render(truncate(g.ActivePlanID, 32)))
+			b.WriteString("\n")
+			b.WriteString(labelStyle.Render("health:"))
+			b.WriteString(valueStyle.Render(g.Health))
+			b.WriteString("\n\n")
+		}
+
+		hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray))
+		b.WriteString(hint.Render("a: approve | x: reject | esc: back to list"))
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+// renderAudit renders the audit findings sub-view. Shows findings from the
+// selected agent (or all agents if none selected) with severity coloring.
+func (p *AgentsPanel) renderAudit() string {
+	var b strings.Builder
+	b.WriteString(p.renderHeader())
+	b.WriteString("\n\n")
+
+	sectionStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorAmber)).
+		Bold(true)
+
+	b.WriteString(sectionStyle.Render("--- recent audit findings ---"))
+	b.WriteString("\n\n")
+
+	// Collect findings from the loaded detail.
+	var findings []AgentFinding
+	if p.detail != nil {
+		for _, f := range p.detail.RecentFindings {
+			if f.ResolvedAt == nil {
+				findings = append(findings, f)
+			}
+		}
+	}
+
+	if len(findings) == 0 {
+		empty := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorGray)).
+			Italic(true).
+			Width(max(p.width-4, 20)).
+			Align(lipgloss.Center).
+			Padding(2, 0)
+		b.WriteString(empty.Render("no recent findings"))
+		b.WriteString("\n")
+	} else {
+		sevStyle := lipgloss.NewStyle().Bold(true)
+		ruleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB"))
+
+		for _, f := range findings {
+			color := ColorGray
+			switch f.Severity {
+			case "critical":
+				color = ColorRed
+			case "warning":
+				color = ColorAmber
+			case "info":
+				color = "#3B82F6"
+			}
+			dot := sevStyle.Foreground(lipgloss.Color(color)).Render("●")
+
+			rule := f.ViolatedRule
+			if rule == "" {
+				rule = f.Checkpoint
+			}
+			b.WriteString(fmt.Sprintf("%s %s  %s  %s\n",
+				dot,
+				ruleStyle.Render(truncate(rule, 40)),
+				lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).
+					Render(f.Severity),
+				formatTimeAgoTime(f.DetectedAt),
+			))
+		}
+
+		b.WriteString("\n")
+		hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray))
+		b.WriteString(hint.Render("f: resolve as false positive | esc: back to list"))
+		b.WriteString("\n")
+	}
+
+	return b.String()
 }
 
 func (p *AgentsPanel) renderGoalLine(g AgentGoal) string {

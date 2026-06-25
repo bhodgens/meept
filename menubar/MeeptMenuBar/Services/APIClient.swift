@@ -191,6 +191,43 @@ class APIClient {
         try await performVoid(request: request)
     }
 
+    /// Fetches a single employee by ID. Backed by `GET /api/v1/agents/{id}`.
+    func getAgent(id: String) async throws -> Employee {
+        let request = try makeRequest(path: "/api/v1/agents/\(id)", method: "GET")
+        let data = try await performData(request: request)
+        let decoder = JSONDecoder()
+        let wire = try decoder.decode(EmployeeWire.self, from: data)
+        return Employee(from: wire)
+    }
+
+    /// Fetches goals for an employee. Backed by `GET /api/v1/agents/{id}/goals`.
+    func listGoals(employeeID: String) async throws -> [Goal] {
+        let request = try makeRequest(path: "/api/v1/agents/\(employeeID)/goals", method: "GET")
+        let data = try await performData(request: request)
+        let decoder = JSONDecoder()
+        let resp = try decoder.decode(GoalListResponse.self, from: data)
+        return resp.goals.map { Goal(from: $0) }
+    }
+
+    /// Approves a pending plan for an employee's goal. Backed by
+    /// `POST /api/v1/agents/{id}/goals/{gid}/plans/{pid}/approve`.
+    func approvePlan(employeeID: String, goalID: String, planID: String) async throws {
+        let path = "/api/v1/agents/\(employeeID)/goals/\(goalID)/plans/\(planID)/approve"
+        let request = try makeRequest(path: path, method: "POST")
+        try await performVoid(request: request)
+    }
+
+    /// Rejects a pending plan for an employee's goal. Backed by
+    /// `POST /api/v1/agents/{id}/goals/{gid}/plans/{pid}/reject`.
+    func rejectPlan(employeeID: String, goalID: String, planID: String, reason: String) async throws {
+        let path = "/api/v1/agents/\(employeeID)/goals/\(goalID)/plans/\(planID)/reject"
+        var request = try makeRequest(path: path, method: "POST")
+        let body = try JSONEncoder().encode(["reason": reason])
+        request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try await performVoid(request: request)
+    }
+
     // MARK: - Backward-compatible completion handler wrappers
 
     func getDaemonStatus(completion: @escaping (Result<DaemonStatus, Error>) -> Void) {

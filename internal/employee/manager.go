@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/metrics"
+	"github.com/caimlas/meept/pkg/security"
 	idpkg "github.com/caimlas/meept/pkg/id"
 
 	_ "modernc.org/sqlite" // sqlite driver registration
@@ -391,6 +393,23 @@ type Manager struct {
 	// store are constructed.
 	metricsStore *metrics.Store
 
+	// knownAgentIDs and knownToolNames are the registries used for
+	// hire-time validation (spec lines 596-597, 621). They are set once
+	// by the daemon wiring before any Hire calls. Nil/empty means
+	// "no validation" — useful for tests and single-user setups.
+	knownAgentIDs  map[string]struct{}
+	knownToolNames map[string]struct{}
+
+	// periodicAuditor is wired by the daemon via SetPeriodicAuditor. When
+	// non-nil, the scheduled periodic audit job (SchedulePeriodicAudit)
+	// delegates to it. Nil means periodic audit is a no-op.
+	periodicAuditor *PeriodicAuditor
+
+	// turnCollector is an optional callback injected by the daemon wiring
+	// to supply TurnRecords to the periodic audit job. When nil, the
+	// periodic audit runs but produces no findings (no turns to audit).
+	turnCollector TurnCollectorFunc
+
 	mu            sync.RWMutex
 	constitutions map[string]Constitution // employeeID -> cached
 	driftScores   map[string]float64      // employeeID -> last computed
@@ -519,6 +538,33 @@ func (m *Manager) StartAll(ctx context.Context) error {
 // daemon's Components.Stop to keep ownership clear.
 func (m *Manager) StopAll() {
 	m.logger.Info("employee manager stopped")
+}
+
+// RegisterPreExecCheckers builds a PreExecChecker (wrapped via
+// NewPreExecAdapter) for each employee with a constitution and registers
+// it with the given PermissionChecker. This is the wiring point that makes
+// Checkpoint 1 fire on the active permission-check path (Gap A).
+//
+// Call this after StartAll has primed the constitution cache. Safe to call
+// multiple times (each call replaces the registration). Employees without a
+// constitution are skipped (they have no constraints to enforce).
+func (m *Manager) RegisterPreExecCheckers(pc *security.PermissionChecker) {
+	if pc == nil {
+		return
+	}
+	m.mu.RLock()
+	snapshot := make(map[string]Constitution, len(m.constitutions))
+	for k, v := range m.constitutions {
+		snapshot[k] = v
+	}
+	m.mu.RUnlock()
+	for id, c := range snapshot {
+		constCopy := c
+		checker := NewPreExecChecker(id, &constCopy)
+		pc.SetPreExecChecker(id, NewPreExecAdapter(checker))
+	}
+	m.logger.Info("registered pre-exec checkers with permission checker",
+		"employee_count", len(snapshot))
 }
 
 // primeCache loads every persisted constitution into the in-memory map.
@@ -677,6 +723,46 @@ func (m *Manager) Hire(ctx context.Context, req HireRequest) (*Employee, error) 
 	if err := c.Validate(req.ID); err != nil {
 		return nil, fmt.Errorf("hire: constitution validate: %w", err)
 	}
+
+	// Spec lines 597, 621: validate escalation references and detect
+	// cycles. Spec line 596: validate tool references. These checks need
+	// the full agent/tool registries, so they're performed here (after
+	// the structural Validate) using sets injected by the daemon wiring.
+	m.mu.RLock()
+	knownAgents := m.knownAgentIDs
+	knownTools := m.knownToolNames
+	m.mu.RUnlock()
+
+	if len(knownAgents) > 0 {
+		if unknown, err := c.CheckEscalationReferences(knownAgents); err != nil {
+			return nil, fmt.Errorf("hire: escalation references: %w (unknown IDs: %v)", err, unknown)
+		}
+		// Build escalation graph for cycle detection. Include the new
+		// employee being hired plus cached constitutions so we catch
+		// self-referential and transitive cycles.
+		graph := m.buildEscalationGraphForHire(req.ID, c, knownAgents)
+		agentIDs := allAgentIDs(req.ID, knownAgents)
+		if cycles, err := DetectEscalationCycles(graph, agentIDs); err != nil {
+			return nil, fmt.Errorf("hire: cycle detection: %w", err)
+		} else if len(cycles) > 0 {
+			return nil, fmt.Errorf("hire: escalation cycle detected: %s", cycles[0].String())
+		}
+	}
+
+	if len(knownTools) > 0 {
+		unknownAllowed, unknownForbidden := c.CheckToolReferences(knownTools)
+		if len(unknownAllowed) > 0 {
+			m.logger.Warn("hire: constitution references unknown tools in tools_allowed; removing",
+				"employee_id", req.ID, "tools", unknownAllowed)
+			c.removeUnknownTools(unknownAllowed, true)
+		}
+		if len(unknownForbidden) > 0 {
+			m.logger.Warn("hire: constitution references unknown tools in tools_forbidden; removing",
+				"employee_id", req.ID, "tools", unknownForbidden)
+			c.removeUnknownTools(unknownForbidden, false)
+		}
+	}
+
 	// Provenance: a freshly-hired constitution is version 1, authored by
 	// "user" (the only caller of Hire), approved now.
 	if c.Version == 0 {
@@ -1015,6 +1101,78 @@ func (m *Manager) SetMigratorLLM(c llm.Chatter) {
 	m.mu.Lock()
 	m.migratorLLM = c
 	m.mu.Unlock()
+}
+
+// SetKnownAgentIDs sets the set of known agent IDs for hire-time validation
+// (spec line 597, 621). When non-empty, Hire checks that every ID in the
+// new employee's escalates_to is known and that no escalation cycle is
+// introduced. Nil or empty map disables the check (useful for tests).
+// Thread-safe: callers can invoke before or between Hire calls.
+func (m *Manager) SetKnownAgentIDs(ids map[string]struct{}) {
+	if len(ids) == 0 {
+		return
+	}
+	m.mu.Lock()
+	m.knownAgentIDs = ids
+	m.mu.Unlock()
+}
+
+// SetKnownToolNames sets the set of known tool names for hire-time validation
+// (spec line 596). When non-empty, Hire checks that every tool name in the
+// new employee's tools_allowed and tools_forbidden is known. Unknown tools
+// are logged and stripped (warning, not fatal). Nil or empty map disables
+// the check.
+func (m *Manager) SetKnownToolNames(names map[string]struct{}) {
+	if len(names) == 0 {
+		return
+	}
+	m.mu.Lock()
+	m.knownToolNames = names
+	m.mu.Unlock()
+}
+
+// buildEscalationGraphForHire constructs an EscalationGraph from the new
+// employee's constitution plus existing employees' constitutions (from the
+// in-memory cache). The new employee is included so self-referential and
+// transitive cycles are caught before persistence.
+func (m *Manager) buildEscalationGraphForHire(newID string, c Constitution, knownAgents map[string]struct{}) EscalationGraph {
+	// Snapshot the cached constitutions under lock to build the graph.
+	m.mu.RLock()
+	cached := make(map[string]Constitution, len(m.constitutions)+1)
+	for id, cc := range m.constitutions {
+		cached[id] = cc
+	}
+	m.mu.RUnlock()
+
+	// Add the new employee's constitution. A shallow copy is fine — we
+	// only read EscalatesTo which is not mutated during this call.
+	copied := c
+	copied.EscalatesTo = append([]string(nil), c.EscalatesTo...)
+	cached[newID] = copied
+
+	// For known agent IDs without a cached constitution, add a leaf
+	// entry (empty EscalatesTo) so they're recognised as valid nodes.
+	for id := range knownAgents {
+		if _, ok := cached[id]; !ok {
+			cached[id] = Constitution{}
+		}
+	}
+	return StaticEscalationGraph(cached)
+}
+
+// allAgentIDs returns a sorted slice of all agent IDs: the new employee
+// plus every key in the known set. Used as the seed list for cycle
+// detection.
+func allAgentIDs(newID string, known map[string]struct{}) []string {
+	out := make([]string, 0, len(known)+1)
+	out = append(out, newID)
+	for id := range known {
+		if id != newID {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // --------------------------------------------------------------------------

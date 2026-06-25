@@ -2466,6 +2466,74 @@ func (c *Components) Start(ctx context.Context) error {
 			c.Logger.Info("Employee framework started")
 			startedHandlers = append(startedHandlers, "employee")
 		}
+		// Register each employee's PreExecChecker with the PermissionChecker
+		// so Checkpoint 1 (constitution gate) fires on the active path.
+		// See docs/superpowers/specs/2026-06-23-ai-employee-design.md (Gap A).
+		if c.SecurityChecker != nil {
+			c.EmployeeManager.RegisterPreExecCheckers(c.SecurityChecker)
+			c.Logger.Info("Employee pre-exec checkers registered with permission checker")
+		}
+
+		// Wire known agent IDs for hire-time validation (spec line 597,
+		// 621). The agent registry and existing employees form the set
+		// of valid escalation targets.
+		if c.AgentRegistry != nil {
+			ids := make(map[string]struct{})
+			for _, spec := range c.AgentRegistry.ListSpecs() {
+				ids[spec.ID] = struct{}{}
+			}
+			if emps, err := c.EmployeeManager.ListEmployees(ctx, ""); err == nil {
+				for _, e := range emps {
+					ids[e.ID] = struct{}{}
+				}
+			}
+			c.EmployeeManager.SetKnownAgentIDs(ids)
+		}
+
+		// Wire known tool names for hire-time validation (spec line 596).
+		if c.ToolRegistry != nil {
+			names := make(map[string]struct{})
+			for _, name := range c.ToolRegistry.Names() {
+				names[name] = struct{}{}
+			}
+			c.EmployeeManager.SetKnownToolNames(names)
+		}
+
+		// Schedule employee background jobs: per-employee assess,
+		// global periodic audit, and plan approval timeout sweeper.
+		// Spec lines 40, 430, 591.
+		if c.Scheduler != nil {
+			schedAdapter := employeeSchedulerAdapter{sched: c.Scheduler}
+			if n, err := c.EmployeeManager.ScheduleAssessJobs(ctx, schedAdapter, 15*time.Minute); err != nil {
+				c.Logger.Warn("Failed to schedule employee assess jobs", "error", err)
+			} else if n > 0 {
+				c.Logger.Info("Employee assess jobs scheduled", "count", n)
+			}
+
+			auditInterval := 6 * time.Hour
+			if c.Config != nil {
+				if s := c.Config.Employees.Audit.PeriodicInterval; s != "" {
+					if d, err := time.ParseDuration(s); err == nil && d > 0 {
+						auditInterval = d
+					}
+				}
+			}
+			if err := c.EmployeeManager.SchedulePeriodicAudit(ctx, schedAdapter, auditInterval); err != nil {
+				c.Logger.Warn("Failed to schedule periodic audit", "error", err)
+			}
+
+			approvalTimeout := 7 * 24 * time.Hour
+			if c.Config != nil {
+				if s := c.Config.Employees.Audit.ApprovalTimeout; s != "" {
+					if d, err := time.ParseDuration(s); err == nil && d > 0 {
+						approvalTimeout = d
+					}
+				}
+			}
+			if err := c.EmployeeManager.ScheduleApprovalTimeoutSweeper(ctx, schedAdapter, approvalTimeout); err != nil {
+				c.Logger.Warn("Failed to schedule approval timeout sweeper", "error", err)
+			}
+		}
 	}
 
 	// Start gossip engine (cluster mode)

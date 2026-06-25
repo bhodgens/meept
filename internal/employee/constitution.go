@@ -472,6 +472,39 @@ func (c *Constitution) CheckToolReferences(knownToolNames map[string]struct{}) (
 	return unknownAllowed, unknownForbidden
 }
 
+// removeUnknownTools filters the tools_allowed (allowed=true) or
+// tools_forbidden (allowed=false) slice in place, removing every tool name
+// in unknown. This is called after CheckToolReferences at hire time when
+// the constitution references tools that are not in the registry. The
+// employee starts with a warning and the unknown tools are stripped so
+// enforcement doesn't silently pass them through.
+func (c *Constitution) removeUnknownTools(unknown []string, allowed bool) {
+	if c == nil || len(unknown) == 0 {
+		return
+	}
+	unknownSet := make(map[string]struct{}, len(unknown))
+	for _, name := range unknown {
+		unknownSet[name] = struct{}{}
+	}
+	if allowed {
+		filtered := c.Constraints.ToolsAllowed[:0]
+		for _, name := range c.Constraints.ToolsAllowed {
+			if _, bad := unknownSet[name]; !bad {
+				filtered = append(filtered, name)
+			}
+		}
+		c.Constraints.ToolsAllowed = filtered
+	} else {
+		filtered := c.Constraints.ToolsForbidden[:0]
+		for _, name := range c.Constraints.ToolsForbidden {
+			if _, bad := unknownSet[name]; !bad {
+				filtered = append(filtered, name)
+			}
+		}
+		c.Constraints.ToolsForbidden = filtered
+	}
+}
+
 // LogWarnings writes human-readable warnings for soft validation
 // findings (unknown tools, tier 2 with empty EscalatesTo, etc.) to the
 // given logger. Pass slog.Default() if you don't have one handy. Nil

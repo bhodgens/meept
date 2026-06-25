@@ -565,6 +565,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		UploadsDir:       uploadDataDir,
 		UploadsMaxMB:     uploadCfg.MaxSizeMB,
 		UploadsTypes:     uploadCfg.AllowedTypes,
+		EmployeeManager:  nilSafeEmployeeManagerAdapter(components),
 	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create service registry: %w", err)
@@ -1600,6 +1601,16 @@ func nilSafeCalendarClient(c *Components) *calendar.Client {
 		return nil
 	}
 	return c.CalendarClient
+}
+
+// nilSafeEmployeeManagerAdapter wraps the Components.EmployeeManager in an
+// employeeServiceAdapter that satisfies services.EmployeeManager. Returns nil
+// when Components or EmployeeManager is nil so NewRegistry skips EmployeeService.
+func nilSafeEmployeeManagerAdapter(c *Components) services.EmployeeManager {
+	if c == nil || c.EmployeeManager == nil {
+		return nil
+	}
+	return employeeServiceAdapter{m: c.EmployeeManager}
 }
 
 // taskCreatorAdapter adapts task.Registry to implement plan.TaskCreator.

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // RiskLevel represents the severity of an action.
@@ -90,6 +91,14 @@ type PermissionChecker struct {
 	allowedGlobs []string
 	blockedGlobs []string
 	homeDir      string
+
+	// preExecMu guards preExecCheckers. Separate from the main config
+	// fields (which are immutable after construction) so registration
+	// can happen concurrently with reads. Per CLAUDE.md mutex-scope:
+	// the lock is held only to snapshot the map, not during the
+	// checker's Check call (which is in-memory and lock-free).
+	preExecMu       sync.RWMutex
+	preExecCheckers map[string]PreExecChecker
 }
 
 // NewPermissionChecker creates a new permission checker.
@@ -148,6 +157,59 @@ func (pc *PermissionChecker) expandPath(path string) string {
 		return filepath.Join(resolvedParent, filepath.Base(cleaned))
 	}
 	return cleaned
+}
+
+// SetPreExecChecker registers a PreExecChecker for the given agent/employee
+// ID. The checker's Check method is invoked at the top of CheckPermission
+// (before the financial/path/risk pipeline) whenever details["agent_id"]
+// matches agentID. An empty agentID is a no-op (nil guard). Passing a nil
+// checker clears the registration.
+//
+// Safe for concurrent use. The checker's Check call happens outside the
+// preExecMu lock (collect-under-lock, release, then operate pattern per
+// CLAUDE.md mutex-scope rule).
+func (pc *PermissionChecker) SetPreExecChecker(agentID string, checker PreExecChecker) {
+	if agentID == "" {
+		return
+	}
+	pc.preExecMu.Lock()
+	defer pc.preExecMu.Unlock()
+	if pc.preExecCheckers == nil {
+		pc.preExecCheckers = make(map[string]PreExecChecker)
+	}
+	if checker != nil {
+		pc.preExecCheckers[agentID] = checker
+	}
+}
+
+// RemovePreExecChecker unregisters the PreExecChecker for the given agent
+// ID. An empty agentID is a no-op. Safe to call when no checker is
+// registered (idempotent).
+func (pc *PermissionChecker) RemovePreExecChecker(agentID string) {
+	if agentID == "" {
+		return
+	}
+	pc.preExecMu.Lock()
+	defer pc.preExecMu.Unlock()
+	if pc.preExecCheckers != nil {
+		delete(pc.preExecCheckers, agentID)
+	}
+}
+
+// snapshotPreExecCheckers returns the current checker map under a read lock.
+// The returned map is a shallow copy so callers can iterate without holding
+// the lock. Returns nil when no checkers are registered.
+func (pc *PermissionChecker) snapshotPreExecCheckers() map[string]PreExecChecker {
+	pc.preExecMu.RLock()
+	defer pc.preExecMu.RUnlock()
+	if len(pc.preExecCheckers) == 0 {
+		return nil
+	}
+	cp := make(map[string]PreExecChecker, len(pc.preExecCheckers))
+	for k, v := range pc.preExecCheckers {
+		cp[k] = v
+	}
+	return cp
 }
 
 // CheckPath returns true if the path is allowed.
@@ -244,6 +306,35 @@ type CheckResult struct {
 
 // CheckPermission checks if an action is permitted.
 func (pc *PermissionChecker) CheckPermission(action string, details map[string]string) CheckResult {
+	// Stage 0: Employee pre-exec check (Checkpoint 1). Runs BEFORE the
+	// financial/path/risk pipeline so the constitution gate has the
+	// first say. Only fires when details["agent_id"] is non-empty and
+	// a checker is registered for that ID. Non-employee agents (empty
+	// agent_id or no registered checker) skip this stage entirely — no
+	// behavior change for existing agents.
+	if details != nil {
+		if agentID := details["agent_id"]; agentID != "" {
+			if checkers := pc.snapshotPreExecCheckers(); checkers != nil {
+				if checker, ok := checkers[agentID]; ok {
+					preDecision := checker.Check(action, "", details)
+					if !preDecision.Allowed {
+						reason := preDecision.Reason
+						needsConfirm := false
+						if preDecision.RequiresPlan {
+							needsConfirm = true
+							reason = "requires plan signoff: " + reason
+						}
+						return CheckResult{
+							Allowed:      false,
+							Reason:       reason,
+							NeedsConfirm: needsConfirm,
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Look up base rule
 	rule, ok := BuiltinRules[action]
 	if !ok {
