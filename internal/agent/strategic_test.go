@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1556,5 +1558,30 @@ func TestParsePlanOutput_InvalidDeps(t *testing.T) {
 	}
 	if !strings.Contains(logOutput, "task-deps-test") {
 		t.Errorf("expected task_id in debug log, got: %s", logOutput)
+	}
+}
+
+// TestStrategicPlanner_TemplateOverrideProjectLocal verifies that a
+// project-local template (the highest-precedence tier) is picked up by the
+// loader and actually changes the rendered prompt. This closes the loop on
+// the 4-tier discovery: bundled → system → user → project-local.
+func TestStrategicPlanner_TemplateOverrideProjectLocal(t *testing.T) {
+	// Create a project-local override that produces obviously-distinct output.
+	tmp := t.TempDir()
+	override := "---\nname: planner.decompose\n---\nOVERRIDE_MARKER {{.Input}}"
+	if err := os.MkdirAll(filepath.Join(tmp, "planner"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "planner", "decompose.md"), []byte(override), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loader := newPlannerTemplateLoader(tmp)
+	got, err := loader.render("planner/decompose.md", map[string]any{"Input": "x"})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(got, "OVERRIDE_MARKER x") {
+		t.Errorf("override did not apply; got %q", got)
 	}
 }
