@@ -88,7 +88,7 @@ func stripYAMLFrontmatter(body string) string {
 		if idx < 0 {
 			return body // malformed; return as-is
 		}
-		return rest[idx+5:] // skip "\r\n---\r\n"
+		return rest[idx+len("\r\n"+marker+"\r\n"):] // skip "\r\n---\r\n"
 	}
 	// Skip the closing marker line entirely.
 	return rest[idx+len("\n"+marker+"\n"):]

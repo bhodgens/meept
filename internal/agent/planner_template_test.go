@@ -76,6 +76,24 @@ func TestPlannerTemplateLoader_StripsYAMLFrontmatter(t *testing.T) {
 	}
 }
 
+func TestPlannerTemplateLoader_StripsYAMLFrontmatterCRLF(t *testing.T) {
+	tmp := t.TempDir()
+	body := "---\r\nname: planner.decompose\r\ndescription: x\r\n---\r\nHELLO {{.Input}}"
+	writeFile(t, filepath.Join(tmp, "planner", "decompose.md"), body)
+
+	l := newPlannerTemplateLoader(tmp)
+	got, err := l.render("planner/decompose.md", map[string]any{"Input": "world"})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if strings.Contains(got, "name: planner.decompose") {
+		t.Errorf("frontmatter leaked into body: %q", got)
+	}
+	if !strings.HasPrefix(got, "HELLO world") {
+		t.Errorf("body has stray bytes or did not render: %q", got)
+	}
+}
+
 func TestPlannerTemplateLoader_MalformedTemplateErrors(t *testing.T) {
 	tmp := t.TempDir()
 	writeFile(t, filepath.Join(tmp, "planner", "decompose.md"), "{{ .Broken")
