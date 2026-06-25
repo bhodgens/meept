@@ -123,6 +123,12 @@ class ChatMessageBubble extends StatelessWidget {
             // stay visible. MarkdownBody keeps selectable text intact, but
             // highlighting inside MarkdownBody requires a custom builder
             // delegate which is out of scope for the MVP.
+            //
+            // TODO: surface mode in ACK bubble when structured ACK fields are
+            // available. The backend includes a `**mode:**` markdown line for
+            // v1 (see handler.go FormatEnhancedAsyncTaskAck + modeToLabel).
+            // When ChatMessage carries a typed `suggestedMode` field, render a
+            // dedicated mode chip here instead of relying on markdown.
             MarkdownBody(
               data: message.content,
               styleSheet: buildCyberpunkMarkdownStyle(context).copyWith(

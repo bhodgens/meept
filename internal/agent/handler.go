@@ -1070,6 +1070,24 @@ func (h *ChatHandler) FormatAsyncTaskAck(result *DispatchResult) string {
 	return h.FormatEnhancedAsyncTaskAck(result, nil, 0, result.Task.ID)
 }
 
+// modeToLabel translates a SuggestedMode value into a human-readable label
+// for display in the async task ACK. The labels are lowercase per the
+// project UI convention (see CLAUDE.md "UI Conventions").
+func modeToLabel(mode string) string {
+	switch mode {
+	case "direct":
+		return "executing directly"
+	case "plan":
+		return "planned"
+	case "spec_plan":
+		return "spec-planned (multi-phase)"
+	case "spec_pair":
+		return "pair session"
+	default:
+		return "planned"
+	}
+}
+
 // FormatEnhancedAsyncTaskAck builds an enhanced acknowledgment for async task
 // dispatch that includes subtask count, bulleted summary, estimated duration,
 // and plan reference.
@@ -1083,6 +1101,7 @@ func (h *ChatHandler) FormatEnhancedAsyncTaskAck(
 	sb.WriteString("## starting task\n\n")
 	fmt.Fprintf(&sb, "**task:** %s\n", strings.ToLower(result.Task.Name))
 	fmt.Fprintf(&sb, "**id:** `%s`\n", result.Task.ID)
+	fmt.Fprintf(&sb, "**mode:** %s\n", modeToLabel(result.SuggestedMode))
 
 	// Plan line: plan reference | subtask count | optional duration
 	planLine := fmt.Sprintf("**plan:** `%s` | %d subtasks", planRef, len(steps))
