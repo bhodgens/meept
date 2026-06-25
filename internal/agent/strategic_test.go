@@ -1570,3 +1570,30 @@ func TestStrategicPlanner_shouldInterview(t *testing.T) {
 		}
 	}
 }
+
+// TestStrategicPlanner_PairSessionNilManagerNoPanic verifies that a nil
+// pairManager (misconfigured env or test) does not cause a panic in
+// planPairSession. Regression test for Plan D Task 5 (commit f1c08c8b):
+// the refactor deleted shouldUsePairSession's nil guard, which would
+// panic on sp.pairManager.CreateSession when pairManager is nil.
+func TestStrategicPlanner_PairSessionNilManagerNoPanic(t *testing.T) {
+	sp := &StrategicPlanner{
+		// pairManager intentionally nil
+		logger:             slogDiscardLogger(),
+		simpleInputMaxChars: 100,
+	}
+	req := PlanRequest{
+		Intent:     string(IntentCompound),
+		IsCompound: true,
+		Input:      "do two things",
+	}
+
+	// Should return error, not panic.
+	_, err := sp.planPairSession(context.Background(), req, nil)
+	if err == nil {
+		t.Fatal("want error when pairManager is nil")
+	}
+	if !strings.Contains(err.Error(), "pair manager") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}

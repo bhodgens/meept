@@ -787,6 +787,9 @@ func (sp *StrategicPlanner) createFallbackSteps(req PlanRequest, parentRefs []st
 // and publishes a pair session creation event.
 // Renamed from createPairSessionPlan in Thread D Task 5.
 func (sp *StrategicPlanner) planPairSession(ctx context.Context, req PlanRequest, parentMemoryRefs []string) ([]*task.TaskStep, error) {
+	if sp.pairManager == nil {
+		return nil, fmt.Errorf("pair manager not configured")
+	}
 	session := sp.pairManager.CreateSession(
 		req.TaskID,
 		req.Input,
