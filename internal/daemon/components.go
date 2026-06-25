@@ -1508,22 +1508,23 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 		// Create dispatcher with capability matcher
 		c.Dispatcher = agent.NewDispatcher(agent.DispatcherConfig{
-			Registry:          c.AgentRegistry,
-			MemvidClient:      c.MemvidClient,
-			MemoryMgr:         c.MemoryManager,
-			TaskStore:         taskStore,
-			TaskRegistry:      c.TaskRegistry,
-			AmendmentManager:  c.AmendmentMgr,
-			SkillRegistry:     c.SkillRegistry,
-			SkillExecutor:     c.SkillExecutor,
-			TemplateRegistry:  c.TemplateRegistry,
-			Logger:            logger.With("component", "dispatcher"),
-			CapabilityMatcher: capMatcher,
-			LLMClient:         c.LLMClient,
-			ClassifierClient:  c.ClassifierClient,
-			ClassifierModel:   c.ModelsConfig.ClassifierModel,
-			ClassifierTimeout: 15 * time.Second, // Generous timeout for classifier; avoids cascade to weak keyword fallback.
-			SessionMaxAge:     30 * time.Minute,
+			Registry:           c.AgentRegistry,
+			MemvidClient:       c.MemvidClient,
+			MemoryMgr:          c.MemoryManager,
+			TaskStore:          taskStore,
+			TaskRegistry:       c.TaskRegistry,
+			AmendmentManager:   c.AmendmentMgr,
+			SkillRegistry:      c.SkillRegistry,
+			SkillExecutor:      c.SkillExecutor,
+			TemplateRegistry:   c.TemplateRegistry,
+			Logger:             logger.With("component", "dispatcher"),
+			CapabilityMatcher:  capMatcher,
+			LLMClient:          c.LLMClient,
+			ClassifierClient:   c.ClassifierClient,
+			ClassifierModel:    c.ModelsConfig.ClassifierModel,
+			ClassifierTimeout:  15 * time.Second, // Generous timeout for classifier; avoids cascade to weak keyword fallback.
+			SessionMaxAge:      30 * time.Minute,
+			AmbiguityThreshold: cfg.Orchestrator.AmbiguityThreshold,
 		})
 		logger.Info("Dispatcher initialized", "has_capability_matcher", capMatcher != nil)
 
@@ -1595,14 +1596,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			orchTaskStore := c.TaskRegistry.Store()
 
 			strategicPlanner := agent.NewStrategicPlanner(agent.StrategicPlannerConfig{
-				Registry:       c.AgentRegistry,
-				TaskStore:      orchTaskStore,
-				StepStore:      stepStore,
-				Bus:            msgBus,
-				Logger:         logger.With("component", "strategic"),
-				MaxPlanSteps:   cfg.Orchestrator.MaxPlanSteps,
-				PlannerTimeout: time.Duration(cfg.Orchestrator.PlannerTimeout) * time.Second,
-				TemplateLoader: agent.NewDaemonPlannerTemplateLoader("config/prompts"),
+				Registry:           c.AgentRegistry,
+				TaskStore:          orchTaskStore,
+				StepStore:          stepStore,
+				Bus:                msgBus,
+				Logger:             logger.With("component", "strategic"),
+				MaxPlanSteps:       cfg.Orchestrator.MaxPlanSteps,
+				PlannerTimeout:     time.Duration(cfg.Orchestrator.PlannerTimeout) * time.Second,
+				InterviewAmbiguity: cfg.Orchestrator.InterviewAmbiguityThreshold,
+				TemplateLoader:     agent.NewDaemonPlannerTemplateLoader("config/prompts"),
 			})
 
 			reviewManager := agent.NewReviewManager(agent.ReviewManagerConfig{

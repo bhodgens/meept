@@ -1247,12 +1247,16 @@ type DetectionConfig struct {
 
 // OrchestratorConfig holds hierarchical orchestrator settings.
 type OrchestratorConfig struct {
-	MaxPlanSteps        int  `json:"max_plan_steps"        toml:"max_plan_steps"`
-	MaxResearchSteps    int  `json:"max_research_steps"    toml:"max_research_steps"`
-	PlannerTimeout      int  `json:"planner_timeout"       toml:"planner_timeout"`
-	TokenBudgetAlert    int  `json:"token_budget_alert"    toml:"token_budget_alert"`
-	MaxHandoffSteps     int  `json:"max_handoff_steps"     toml:"max_handoff_steps"`
-	HandoffUseAmendment bool `json:"handoff_use_amendment" toml:"handoff_use_amendment"`
+	MaxPlanSteps                int     `json:"max_plan_steps"                toml:"max_plan_steps"`
+	MaxResearchSteps            int     `json:"max_research_steps"            toml:"max_research_steps"`
+	PlannerTimeout              int     `json:"planner_timeout"               toml:"planner_timeout"`
+	TokenBudgetAlert            int     `json:"token_budget_alert"            toml:"token_budget_alert"`
+	MaxHandoffSteps             int     `json:"max_handoff_steps"             toml:"max_handoff_steps"`
+	HandoffUseAmendment         bool    `json:"handoff_use_amendment"         toml:"handoff_use_amendment"`
+	AmbiguityThreshold          float64 `json:"ambiguity_threshold"           toml:"ambiguity_threshold"`           // dispatcher: blocks routing when analyzer ambiguity >= this
+	InterviewAmbiguityThreshold float64 `json:"interview_ambiguity_threshold" toml:"interview_ambiguity_threshold"` // planner: conducts interview for plan-mode when >= this
+	MaxStepsPerPhase            int     `json:"max_steps_per_phase"           toml:"max_steps_per_phase"`           // Thread C+F: per-phase step cap
+	MaxPhases                   int     `json:"max_phases"                    toml:"max_phases"`                    // Thread C+F: phase count soft cap
 }
 
 // ShadowConfig holds shadow training settings.
@@ -1726,10 +1730,14 @@ func DefaultConfig() *Config {
 			},
 		},
 		Orchestrator: OrchestratorConfig{
-			MaxPlanSteps:     10,
-			MaxResearchSteps: 3,
-			PlannerTimeout:   120,
-			TokenBudgetAlert: 5000,
+			MaxPlanSteps:                10,
+			MaxResearchSteps:            3,
+			PlannerTimeout:              120,
+			TokenBudgetAlert:            5000,
+			AmbiguityThreshold:          0.6,
+			InterviewAmbiguityThreshold: 0.6,
+			MaxStepsPerPhase:            8,
+			MaxPhases:                   12,
 		},
 		Shadow: ShadowConfig{
 			Enabled: false,

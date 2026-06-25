@@ -272,6 +272,10 @@ type DispatcherConfig struct {
 	EmbeddingClient   EmbeddingClient
 	SessionMaxAge     time.Duration
 	PlanManager       *plan.PlanManager
+	// AmbiguityThreshold configures the IntentAnalyzer's gate for blocking
+	// routing on high-ambiguity inputs. 0 means use the legacy const
+	// (defaultAmbiguityThreshold = 0.6 in intent_analyzer.go).
+	AmbiguityThreshold float64
 }
 
 // NewDispatcher creates a new dispatcher.
@@ -316,8 +320,14 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 			},
 			cfg.Logger,
 		)
-		// Initialize intent analyzer using same classifier client
-		d.intentAnalyzer = NewIntentAnalyzer(classifierClient, cfg.Logger)
+		// Initialize intent analyzer using same classifier client.
+		// Apply the configured ambiguity threshold when non-zero;
+		// otherwise NewIntentAnalyzer uses its built-in default.
+		ia := NewIntentAnalyzer(classifierClient, cfg.Logger)
+		if cfg.AmbiguityThreshold > 0 {
+			ia = ia.WithAmbiguityThreshold(cfg.AmbiguityThreshold)
+		}
+		d.intentAnalyzer = ia
 	}
 
 	// Initialize semantic index if embedding client is provided

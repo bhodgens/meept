@@ -520,13 +520,18 @@
 
   // Hierarchical orchestrator settings
   "orchestrator": {
-    "max_plan_steps": 10,
+    "max_plan_steps": 10,                  // deprecated (Thread C+F removes)
     "max_research_steps": 3,
     "planner_timeout": 120,
     "token_budget_alert": 5000,
     // Handoff configuration
     "max_handoff_steps": 5,           // Max handoff-injected steps per task (0 = unlimited)
     "handoff_use_amendment": true,    // Route handoffs through amendment system for audit trail
+    // Complexity routing thresholds (Thread D)
+    "ambiguity_threshold": 0.6,            // dispatcher: blocks routing when analyzer ambiguity >= this
+    "interview_ambiguity_threshold": 0.6,  // planner: conducts interview for plan-mode when >= this
+    "max_steps_per_phase": 8,              // Thread C+F: per-phase step cap
+    "max_phases": 12,                      // Thread C+F: phase count soft cap
   },
 
   // Shadow training system (response shadowing for model improvement)

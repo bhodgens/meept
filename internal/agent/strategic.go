@@ -106,6 +106,9 @@ type StrategicPlannerConfig struct {
 	// PairInputMinChars is the threshold above which code/debug requests
 	// are routed to pair sessions. Defaults to 200.
 	PairInputMinChars int
+	// InterviewAmbiguity overrides the hardcoded threshold (default 0.6).
+	// 0 means use the default.
+	InterviewAmbiguity float64
 	// MetricsStore, when non-nil, receives planner outcome metrics.
 	MetricsStore *metrics.Store
 	// TemplateLoader, if non-nil, supplies markdown-overridable planner
@@ -137,6 +140,13 @@ func NewStrategicPlanner(cfg StrategicPlannerConfig) *StrategicPlanner {
 		cfg.Routing = NewDefaultRoutingTable()
 	}
 
+	// InterviewAmbiguity: 0 falls back to the legacy const (backward compat
+	// for callers that don't pass the value via config).
+	interviewAmb := cfg.InterviewAmbiguity
+	if interviewAmb == 0 {
+		interviewAmb = interviewAmbiguityThreshold
+	}
+
 	sp := &StrategicPlanner{
 		registry:              cfg.Registry,
 		taskStore:             cfg.TaskStore,
@@ -150,7 +160,7 @@ func NewStrategicPlanner(cfg StrategicPlannerConfig) *StrategicPlanner {
 		approvalStepThreshold: cfg.ApprovalStepThreshold,
 		simpleInputMaxChars:   cfg.SimpleInputMaxChars,
 		pairInputMinChars:     cfg.PairInputMinChars,
-		interviewAmbiguity:    interviewAmbiguityThreshold,
+		interviewAmbiguity:    interviewAmb,
 		metricsStore:          cfg.MetricsStore,
 		templateLoader:        cfg.TemplateLoader,
 	}

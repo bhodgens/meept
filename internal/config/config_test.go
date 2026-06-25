@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -315,5 +316,102 @@ func TestParseLogLevel(t *testing.T) {
 		if level.String() != tt.expected {
 			t.Errorf("ParseLogLevel(%q) = %q, want %q", tt.input, level.String(), tt.expected)
 		}
+	}
+}
+
+// TestDefaultConfigOrchestrator validates the Thread D complexity-routing
+// thresholds and Thread C+F forward-compat fields are populated correctly.
+func TestDefaultConfigOrchestrator(t *testing.T) {
+	cfg := DefaultConfig()
+
+	if cfg.Orchestrator.AmbiguityThreshold != 0.6 {
+		t.Errorf("AmbiguityThreshold = %v, want 0.6", cfg.Orchestrator.AmbiguityThreshold)
+	}
+	if cfg.Orchestrator.InterviewAmbiguityThreshold != 0.6 {
+		t.Errorf("InterviewAmbiguityThreshold = %v, want 0.6", cfg.Orchestrator.InterviewAmbiguityThreshold)
+	}
+	if cfg.Orchestrator.MaxStepsPerPhase != 8 {
+		t.Errorf("MaxStepsPerPhase = %d, want 8", cfg.Orchestrator.MaxStepsPerPhase)
+	}
+	if cfg.Orchestrator.MaxPhases != 12 {
+		t.Errorf("MaxPhases = %d, want 12", cfg.Orchestrator.MaxPhases)
+	}
+}
+
+// TestOrchestratorConfigJSONRoundTrip verifies the new fields survive
+// JSON marshal/unmarshal so config files with these keys load correctly.
+func TestOrchestratorConfigJSONRoundTrip(t *testing.T) {
+	original := OrchestratorConfig{
+		MaxPlanSteps:                7,
+		MaxResearchSteps:            2,
+		PlannerTimeout:              90,
+		TokenBudgetAlert:            4000,
+		MaxHandoffSteps:             3,
+		HandoffUseAmendment:         true,
+		AmbiguityThreshold:          0.75,
+		InterviewAmbiguityThreshold: 0.8,
+		MaxStepsPerPhase:            10,
+		MaxPhases:                   15,
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var decoded OrchestratorConfig
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if decoded.AmbiguityThreshold != original.AmbiguityThreshold {
+		t.Errorf("AmbiguityThreshold round-trip = %v, want %v",
+			decoded.AmbiguityThreshold, original.AmbiguityThreshold)
+	}
+	if decoded.InterviewAmbiguityThreshold != original.InterviewAmbiguityThreshold {
+		t.Errorf("InterviewAmbiguityThreshold round-trip = %v, want %v",
+			decoded.InterviewAmbiguityThreshold, original.InterviewAmbiguityThreshold)
+	}
+	if decoded.MaxStepsPerPhase != original.MaxStepsPerPhase {
+		t.Errorf("MaxStepsPerPhase round-trip = %d, want %d",
+			decoded.MaxStepsPerPhase, original.MaxStepsPerPhase)
+	}
+	if decoded.MaxPhases != original.MaxPhases {
+		t.Errorf("MaxPhases round-trip = %d, want %d",
+			decoded.MaxPhases, original.MaxPhases)
+	}
+}
+
+// TestOrchestratorConfigZeroValueFallback verifies the backward-compat
+// behavior: an empty OrchestratorConfig (user config without the new keys)
+// yields zero values, which the constructor layers guard with legacy defaults.
+func TestOrchestratorConfigZeroValueFallback(t *testing.T) {
+	empty := OrchestratorConfig{}
+
+	if empty.AmbiguityThreshold != 0 {
+		t.Errorf("zero-value AmbiguityThreshold = %v, want 0", empty.AmbiguityThreshold)
+	}
+	if empty.InterviewAmbiguityThreshold != 0 {
+		t.Errorf("zero-value InterviewAmbiguityThreshold = %v, want 0", empty.InterviewAmbiguityThreshold)
+	}
+	if empty.MaxStepsPerPhase != 0 {
+		t.Errorf("zero-value MaxStepsPerPhase = %d, want 0", empty.MaxStepsPerPhase)
+	}
+	if empty.MaxPhases != 0 {
+		t.Errorf("zero-value MaxPhases = %d, want 0", empty.MaxPhases)
+	}
+
+	// Verify JSON with missing keys also yields zero values (real-world scenario:
+	// existing user config files do not have the new keys).
+	jsonStr := `{"max_plan_steps": 10}`
+	var fromJSON OrchestratorConfig
+	if err := json.Unmarshal([]byte(jsonStr), &fromJSON); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if fromJSON.AmbiguityThreshold != 0 {
+		t.Errorf("missing-key AmbiguityThreshold = %v, want 0", fromJSON.AmbiguityThreshold)
+	}
+	if fromJSON.InterviewAmbiguityThreshold != 0 {
+		t.Errorf("missing-key InterviewAmbiguityThreshold = %v, want 0", fromJSON.InterviewAmbiguityThreshold)
 	}
 }
