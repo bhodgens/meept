@@ -312,11 +312,17 @@ func (pc *PermissionChecker) CheckPermission(action string, details map[string]s
 	// a checker is registered for that ID. Non-employee agents (empty
 	// agent_id or no registered checker) skip this stage entirely — no
 	// behavior change for existing agents.
+	//
+	// The tool name is read from details["tool_name"] (populated by
+	// Executor.checkPermission) so that tools_allowed / tools_forbidden
+	// entries that use tool names (e.g. "git_push", "file_delete") match
+	// correctly rather than silently missing.
 	if details != nil {
 		if agentID := details["agent_id"]; agentID != "" {
 			if checkers := pc.snapshotPreExecCheckers(); checkers != nil {
 				if checker, ok := checkers[agentID]; ok {
-					preDecision := checker.Check(action, "", details)
+					toolName := details["tool_name"]
+					preDecision := checker.Check(action, toolName, details)
 					if !preDecision.Allowed {
 						reason := preDecision.Reason
 						needsConfirm := false

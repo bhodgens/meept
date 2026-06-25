@@ -634,6 +634,12 @@ type PostTurnAuditor struct {
 	// retryWithStricter controls the spec line 605 behaviour: on unparseable
 	// LLM output, retry once with a stricter prompt before giving up.
 	retryWithStricter bool
+
+	// onFindingAttached is the callback invoked after a finding with a
+	// non-empty GoalID is persisted (spec line 382: "attach to owning
+	// Goal"). The callback receives (goalID, findingID). Nil means
+	// findings are not attached to goals (G7 passive linking only).
+	onFindingAttached func(goalID, findingID string)
 }
 
 // NewPostTurnAuditor constructs a PostTurnAuditor. The model must be non-nil
@@ -658,6 +664,19 @@ func (a *PostTurnAuditor) SetAutoPause(fn AutoPauseFunc) {
 	a.mu.Unlock()
 }
 
+// SetOnFindingAttached wires the callback invoked when a finding with a
+// non-empty GoalID is persisted. The callback receives (goalID, findingID)
+// and should attach the finding to the goal via Goal.AttachFinding. Nil is
+// ignored (typed-nil guard per CLAUDE.md).
+func (a *PostTurnAuditor) SetOnFindingAttached(fn func(goalID, findingID string)) {
+	if fn == nil {
+		return
+	}
+	a.mu.Lock()
+	a.onFindingAttached = fn
+	a.mu.Unlock()
+}
+
 // Audit runs the post-turn classifier. Returns a finding if one was detected,
 // or nil if the turn is clean. On LLM failure it retries once with a stricter
 // prompt, then returns nil with a logged warning (spec lines 603-605).
@@ -668,6 +687,7 @@ func (a *PostTurnAuditor) Audit(ctx context.Context, turn TurnRecord) (*AuditFin
 	autoPause := a.autoPause
 	store := a.store
 	retry := a.retryWithStricter
+	onFinding := a.onFindingAttached
 	a.mu.Unlock()
 
 	if model == nil {
@@ -722,6 +742,12 @@ func (a *PostTurnAuditor) Audit(ctx context.Context, turn TurnRecord) (*AuditFin
 	}
 	if store != nil {
 		_ = store.Create(context.Background(), *finding) // best-effort persist
+	}
+	// G7: explicit goal attachment for findings (spec line 382: "attach to
+	// owning Goal"). When the finding carries a GoalID and a callback is
+	// wired, invoke it so the GoalStore can link the finding to the goal.
+	if finding.GoalID != "" && onFinding != nil {
+		onFinding(finding.GoalID, finding.ID)
 	}
 	return finding, nil
 }
@@ -1254,6 +1280,29 @@ func (s *AuditStore) Resolve(ctx context.Context, findingID, resolution string) 
 // Close closes the underlying database connection.
 func (s *AuditStore) Close() error {
 	return s.db.Close()
+}
+
+// PruneOlderThan deletes all audit findings whose detected_at is older than
+// the given number of days. Both resolved and unresolved findings are pruned
+// (spec line 154: "findings_retention_days: 90" with no qualifier — retention
+// applies equally to all findings). Returns the number of rows deleted.
+//
+// This method is called by the ScheduleFindingsRetention job
+// (scheduler_jobs.go). It is safe for concurrent use: database/sql serializes
+// writes internally.
+func (s *AuditStore) PruneOlderThan(ctx context.Context, retentionDays int) (int64, error) {
+	if retentionDays <= 0 {
+		return 0, nil // no retention configured → no pruning
+	}
+	cutoff := time.Now().UTC().Add(-time.Duration(retentionDays) * 24 * time.Hour)
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM employee_audit_findings
+		WHERE detected_at < ?`, cutoff.Format(time.RFC3339Nano))
+	if err != nil {
+		return 0, fmt.Errorf("prune audit findings: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
 func nullableString(s string) any {

@@ -152,12 +152,24 @@ type GoalLoop struct {
 	goalLookup GoalLookup
 	statusFn func() string // returns "running"|"paused"|"error"|"" (empty=unknown)
 
+	// emitMetricFn is the telemetry callback injected by the Manager
+	// (same pattern as pauseFn). When non-nil, Reflect emits the
+	// employee.goal.health gauge (spec line 673) tagged by goal_id and
+	// employee_id. Nil means telemetry is disabled — the loop runs fine
+	// without it.
+	emitMetricFn EmitMetricFunc
+
 	// Mutable state (guarded by mu).
 	mu                   sync.Mutex
 	consecutiveFailures  int
 	lastResult           *bot.BotExecutionResult
 	lastAssessmentTime   time.Time
 }
+
+// EmitMetricFunc is the callback signature for emitting telemetry from the
+// GoalLoop. It mirrors Manager.emitMetric so the loop can delegate without
+// holding a direct Manager reference.
+type EmitMetricFunc func(name string, value float64, tags map[string]string)
 
 // NewGoalLoop constructs a GoalLoop for the given employee. The constitution
 // may be nil during pre-wiring; Decide will return an error until one is set.
@@ -250,6 +262,18 @@ func (l *GoalLoop) SetStatusFunc(fn func() string) {
 	}
 	l.mu.Lock()
 	l.statusFn = fn
+	l.mu.Unlock()
+}
+
+// SetEmitMetricFunc wires the telemetry callback used by Reflect to emit
+// employee.goal.health (spec line 673). Nil is ignored (typed-nil guard per
+// CLAUDE.md). The callback is invoked outside the loop's mutex.
+func (l *GoalLoop) SetEmitMetricFunc(fn EmitMetricFunc) {
+	if fn == nil {
+		return
+	}
+	l.mu.Lock()
+	l.emitMetricFn = fn
 	l.mu.Unlock()
 }
 
@@ -457,6 +481,7 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 	threshold := l.maxConsecutiveFailures
 	pauseFn := l.pauseFn
 	statusFn := l.statusFn
+	emitMetricFn := l.emitMetricFn
 	l.mu.Unlock()
 
 	// Spec line 615: operator pauses while invocation in flight → in-flight
@@ -472,6 +497,13 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 					if updateErr := store.Update(ctx, goal); updateErr != nil {
 						logger.Warn("failed to persist goal health during pause",
 							"goal_id", goal.ID, "error", updateErr)
+					}
+					// Emit goal.health metric (spec line 673).
+					if emitMetricFn != nil {
+						emitMetricFn("employee.goal.health", float64(GoalUnknown), map[string]string{
+							"goal_id":     goal.ID,
+							"employee_id": l.employeeID,
+						})
 					}
 				}
 			}
@@ -546,6 +578,13 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 			goal.Assess(health, now)
 			if updateErr := store.Update(ctx, goal); updateErr != nil {
 				logger.Warn("failed to persist goal health update", "goal_id", goal.ID, "error", updateErr)
+			}
+			// Emit goal.health metric (spec line 673).
+			if emitMetricFn != nil {
+				emitMetricFn("employee.goal.health", float64(health), map[string]string{
+					"goal_id":     goal.ID,
+					"employee_id": l.employeeID,
+				})
 			}
 		}
 	}

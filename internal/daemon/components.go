@@ -2030,6 +2030,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			c.ConstitutionStore = wiring.ConstitutionStore
 			c.EmployeeGoalStore = wiring.GoalStore
 			c.EmployeeAuditStore = wiring.AuditStore
+
+			// Wire the bus publisher so Pause publishes employee.paused
+			// events (spec line 383). The bus is available here but not
+			// stored in Components; inject it as an adapter now.
+			c.EmployeeManager.SetBusPublisher(employeeBusPublisher{
+				bus:    msgBus,
+				logger: logger.With("component", "employee-bus"),
+			})
+
 			logger.Info("Employee framework initialized",
 				"data_dir", wiring.EmployeesDataDir,
 				"shared_db", wiring.SharedDBPath != "",
@@ -2474,6 +2483,49 @@ func (c *Components) Start(ctx context.Context) error {
 			c.Logger.Info("Employee pre-exec checkers registered with permission checker")
 		}
 
+		// Construct PostTurnAuditor + PeriodicAuditor from config (spec
+		// lines 358-441, Gap G1). Both use the small model resolved from
+		// employees.audit.model (default "small"). The auditors are wired
+		// to the Manager and to each other's auto-pause callbacks.
+		if c.LLMResolver != nil && c.EmployeeAuditStore != nil {
+			modelAlias := "small"
+			if c.Config != nil && c.Config.Employees.Audit.Model != "" {
+				modelAlias = c.Config.Employees.Audit.Model
+			}
+			driftThreshold := 0.3
+			if c.Config != nil && c.Config.Employees.Audit.DriftPauseThreshold > 0 {
+				driftThreshold = c.Config.Employees.Audit.DriftPauseThreshold
+			}
+			if modelCfg, err := c.LLMResolver.ResolveForAlias(modelAlias); err == nil && modelCfg != nil {
+				auditChatter := llm.NewClient(modelCfg, llm.WithLogger(
+					c.Logger.With("component", "employee-audit-llm")))
+				auditStore := c.EmployeeManager.AuditStore()
+				postTurn := employee.NewPostTurnAuditor(auditChatter, auditStore, "")
+				periodic := employee.NewPeriodicAuditor(auditChatter, auditStore, driftThreshold)
+
+				// Wire auto-pause callbacks to Manager.PauseWithReason so
+				// critical findings + drift both auto-pause and publish
+				// the employee.paused bus event (spec line 383).
+				autoPauseFn := employee.AutoPauseFunc(func(employeeID, reason string) error {
+					return c.EmployeeManager.PauseWithReason(context.Background(), employeeID, reason, "auto_pause")
+				})
+				postTurn.SetAutoPause(autoPauseFn)
+				periodic.SetAutoPause(autoPauseFn)
+
+				c.EmployeeManager.SetPostTurnAuditor(postTurn)
+				c.EmployeeManager.SetPeriodicAuditor(periodic)
+				c.Logger.Info("Employee audit checkpoints wired",
+					"model_alias", modelAlias,
+					"drift_threshold", driftThreshold,
+					"post_turn", true,
+					"periodic", true,
+				)
+			} else if err != nil {
+				c.Logger.Warn("Employee audit: failed to resolve audit model; Checkpoints 2 and 3 dormant",
+					"alias", modelAlias, "error", err)
+			}
+		}
+
 		// Wire known agent IDs for hire-time validation (spec line 597,
 		// 621). The agent registry and existing employees form the set
 		// of valid escalation targets.
@@ -2532,6 +2584,138 @@ func (c *Components) Start(ctx context.Context) error {
 			}
 			if err := c.EmployeeManager.ScheduleApprovalTimeoutSweeper(ctx, schedAdapter, approvalTimeout); err != nil {
 				c.Logger.Warn("Failed to schedule approval timeout sweeper", "error", err)
+			}
+
+			// Schedule findings retention pruning (spec line 154: default 90 days).
+			retentionDays := 90
+			if c.Config != nil {
+				if d := c.Config.Employees.Audit.FindingsRetentionDays; d > 0 {
+					retentionDays = d
+				}
+			}
+			if err := c.EmployeeManager.ScheduleFindingsRetention(ctx, schedAdapter, retentionDays); err != nil {
+				c.Logger.Warn("Failed to schedule findings retention", "error", err)
+			}
+		}
+
+		// Construct and register GoalLoops for each employee that has a
+		// constitution (spec lines 277-323, Gap G3+G4). This wires the
+		// scheduler/webhook Trigger → GoalLoop.Decide bridge so that
+		// scheduled assessments and webhook triggers run the full
+		// ASSESS → PLAN → EXECUTE → REFLECT cycle instead of returning
+		// a synthesized placeholder.
+		//
+		// Placement: AFTER auditor wiring (so PostTurnAuditor is available
+		// for loop.WithAuditor) and AFTER scheduler wiring (so the
+		// ScheduleAssessJobs callbacks fire into a registered loop).
+		// Coordinate with Gap G1 agent: both edit this EmployeeManager
+		// block; this GoalLoop block is at the end to avoid diff conflicts.
+		{
+			goalStore := c.EmployeeGoalStore
+			postTurn := c.EmployeeManager.PostTurnAuditor()
+
+			// Resolve the small-model chatter for the Reflector.
+			var reflector llm.Chatter
+			if c.LLMResolver != nil {
+				reflectorAlias := "small"
+				if modelCfg, err := c.LLMResolver.ResolveForAlias(reflectorAlias); err == nil && modelCfg != nil {
+					reflector = llm.NewClient(modelCfg, llm.WithLogger(
+						c.Logger.With("component", "employee-goal-loop-llm")))
+				} else if err != nil {
+					c.Logger.Warn("Employee GoalLoop: failed to resolve small model; Reflector unavailable",
+						"alias", reflectorAlias, "error", err)
+				}
+			}
+
+			// Build a BotExecutor adapter. The bot.Manager doesn't expose
+			// its BotExecutor directly; we wrap the manager's RunOnce-style
+			// path via an adapter that calls into the agent loop. When no
+			// executor can be wired (e.g. no AgentLoop), GoalLoop.Execute
+			// returns a clear "no executor" error and tier-1 employees
+			// surface that at Decide time.
+			var executor bot.BotExecutor
+			if c.AgentLoop != nil {
+				executor = &agentLoopBotExecutorAdapter{
+					agentLoop: c.AgentLoop,
+					botMgr:    c.BotManager,
+					logger:    c.Logger.With("component", "employee-executor"),
+				}
+			}
+
+			// Build the PlanCreator adapter from the existing plan
+			// manager wiring. When no plan manager is available, tier-2+
+			// employees will error at Decide time (documented behaviour).
+			var planner employee.PlanCreator
+			if c.PlanManager != nil {
+				planner = &planCreatorAdapter{
+					planMgr: c.PlanManager,
+				}
+			}
+
+			// Enumerate employees with constitutions and register a loop
+			// for each. Uses a fresh context (not the boot context) so
+			// lookups don't race with Start cancellation.
+			registerCtx := context.Background()
+			if emps, err := c.EmployeeManager.ListEmployees(registerCtx, ""); err == nil {
+				registered := 0
+				for _, emp := range emps {
+					if !emp.HasConstitution() {
+						continue
+					}
+					loop := employee.NewGoalLoop(
+						emp.ID, &emp.Constitution, goalStore,
+						c.Logger.With("component", "goal-loop", "employee_id", emp.ID),
+					)
+					if executor != nil {
+						loop = loop.WithExecutor(executor)
+					}
+					if planner != nil {
+						loop = loop.WithPlanner(planner)
+					}
+					if reflector != nil {
+						loop = loop.WithReflector(reflector)
+					}
+					if postTurn != nil {
+						loop = loop.WithAuditor(postTurn)
+					}
+					if goalStore != nil {
+						loop = loop.WithGoalLookup(&storeBackedGoalLookup{store: goalStore})
+					}
+					loop = loop.WithMaxConsecutiveFailures(employee.DefaultMaxConsecutiveFailures)
+					// PauseFunc delegates to EmployeeManager.PauseWithReason
+					// so auto-pause also publishes the employee.paused bus
+					// event (spec line 383).
+					loop = loop.WithPauseFunc(func(employeeID, reason string) error {
+						return c.EmployeeManager.PauseWithReason(
+							context.Background(), employeeID, reason, "auto_pause")
+					})
+					// StatusFunc backed by botManager.GetBotStatus so
+					// Reflect can detect mid-flight operator pauses
+					// (spec line 615).
+					if c.BotManager != nil {
+						bm := c.BotManager
+						loop.SetStatusFunc(func() string {
+							st, err := bm.GetBotStatus(context.Background(), emp.ID)
+							if err != nil || st == nil {
+								return ""
+							}
+							return string(st.Status)
+						})
+					}
+					c.EmployeeManager.RegisterGoalLoop(emp.ID, loop)
+					registered++
+				}
+				if registered > 0 {
+					c.Logger.Info("Employee GoalLoops registered",
+						"count", registered,
+						"executor", executor != nil,
+						"planner", planner != nil,
+						"reflector", reflector != nil,
+						"auditor", postTurn != nil,
+					)
+				}
+			} else if err != nil {
+				c.Logger.Warn("Employee GoalLoop wiring: failed to list employees", "error", err)
 			}
 		}
 	}

@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -186,6 +187,45 @@ type Goal struct {
 	// perform SQL I/O outside the critical section (per CLAUDE.md mutex
 	// guidance).
 	mu sync.RWMutex `json:"-"`
+
+	// recentFindingsMax is the cap on the RecentFindings slice. Exported
+	// as a const so tests and callers can reference it.
+	// RecentFindings holds the finding IDs linked to this goal, newest first
+	// (capped at recentFindingsMax entries). Maintained by AttachFinding.
+	RecentFindings []string `json:"recent_findings,omitempty"`
+}
+
+// recentFindingsMax is the maximum number of finding IDs retained on the
+// Goal's RecentFindings list. Older entries are evicted when the cap is
+// reached. This keeps the in-memory and persisted goal representation
+// bounded.
+const recentFindingsMax = 50
+
+// AttachFinding appends a finding ID to the goal's RecentFindings list. If
+// the list exceeds recentFindingsMax entries, the oldest entries are
+// evicted. This is the explicit goal-side bookkeeping for G7 (spec line
+// 382: "attach to owning Goal"). Safe for concurrent use.
+func (g *Goal) AttachFinding(findingID string) {
+	if findingID == "" {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.RecentFindings = append(g.RecentFindings, findingID)
+	// Evict oldest entries beyond the cap.
+	if len(g.RecentFindings) > recentFindingsMax {
+		g.RecentFindings = g.RecentFindings[len(g.RecentFindings)-recentFindingsMax:]
+	}
+}
+
+// RecentFindingsList returns a defensive copy of the recent findings list.
+func (g *Goal) RecentFindingsList() []string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	if len(g.RecentFindings) == 0 {
+		return nil
+	}
+	return append([]string(nil), g.RecentFindings...)
 }
 
 // Lock acquires the goal's write lock. Callers must call Unlock.
@@ -199,7 +239,7 @@ func (g *Goal) Unlock() { g.mu.Unlock() }
 // snapshot copies the concurrency-sensitive fields under a read lock and
 // returns their values. It must be called without holding any other lock on
 // g.
-func (g *Goal) snapshot() (activePlanID string, history []string, lastAssessed time.Time, retiredAt time.Time) {
+func (g *Goal) snapshot() (activePlanID string, history []string, lastAssessed time.Time, retiredAt time.Time, recentFindings []string) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	activePlanID = g.ActivePlanID
@@ -208,6 +248,9 @@ func (g *Goal) snapshot() (activePlanID string, history []string, lastAssessed t
 	}
 	lastAssessed = g.LastAssessed
 	retiredAt = g.RetiredAt
+	if len(g.RecentFindings) > 0 {
+		recentFindings = append([]string(nil), g.RecentFindings...)
+	}
 	return
 }
 
@@ -317,7 +360,19 @@ func (s *GoalStore) migrate() error {
 		}
 	}
 	_, err := s.db.Exec(schema)
-	return err
+	if err != nil {
+		return fmt.Errorf("schema: %w", err)
+	}
+	// Migration: add recent_findings column if it doesn't exist (added for
+	// G7 goal-finding attachment). SQLite's ALTER TABLE ADD COLUMN is
+	// idempotent-safe when guarded by a pragma_table_info check.
+	if _, err := s.db.Exec(`ALTER TABLE employee_goals ADD COLUMN recent_findings TEXT`); err != nil {
+		// "duplicate column name" means the column already exists — not an error.
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate recent_findings: %w", err)
+		}
+	}
+	return nil
 }
 
 const schema = `
@@ -335,6 +390,7 @@ CREATE TABLE IF NOT EXISTS employee_goals (
     plan_history  TEXT,
     created_at    TEXT NOT NULL,
     retired_at    TEXT,
+    recent_findings TEXT,
     FOREIGN KEY (employee_id) REFERENCES bot_definitions(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_goals_employee ON employee_goals(employee_id);
@@ -381,6 +437,8 @@ func (s *GoalStore) Create(ctx context.Context, g *Goal) error {
 		return fmt.Errorf("marshal: %w", err)
 	}
 
+	recentFindings := marshalFindings(g.RecentFindingsList())
+
 	lastAssessed := goalNullableTime(g.LastAssessed)
 	retiredAt := goalNullableTime(g.RetiredAt)
 	triggerRef := goalNullableString(g.TriggerRef)
@@ -390,12 +448,12 @@ func (s *GoalStore) Create(ctx context.Context, g *Goal) error {
 INSERT INTO employee_goals
     (id, employee_id, title, mandate, state, source, trigger_ref,
      health, last_assessed, active_plan_id, plan_history,
-     created_at, retired_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     created_at, retired_at, recent_findings)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		g.ID, g.EmployeeID, g.Title, g.Mandate,
 		g.State.String(), string(g.Source), triggerRef,
 		g.Health.String(), lastAssessed, activePlan, history,
-		g.CreatedAt.Format(time.RFC3339), retiredAt,
+		g.CreatedAt.Format(time.RFC3339), retiredAt, recentFindings,
 	)
 	if err != nil {
 		return fmt.Errorf("insert: %w", err)
@@ -452,12 +510,13 @@ func (s *GoalStore) Update(ctx context.Context, g *Goal) error {
 	if g == nil {
 		return errors.New("update: nil goal")
 	}
-	activePlanID, history, lastAssessed, retiredAt := g.snapshot()
+	activePlanID, history, lastAssessed, retiredAt, recentFindings := g.snapshot()
 
 	historyJSON, err := marshalHistory(history)
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
+	findingsJSON := marshalFindings(recentFindings)
 
 	res, err := s.db.ExecContext(ctx, `
 UPDATE employee_goals SET
@@ -470,12 +529,13 @@ UPDATE employee_goals SET
     last_assessed = ?,
     active_plan_id = ?,
     plan_history = ?,
-    retired_at = ?
+    retired_at = ?,
+    recent_findings = ?
 WHERE id = ?`,
 		g.Title, g.Mandate, g.State.String(), string(g.Source),
 		goalNullableString(g.TriggerRef), g.Health.String(),
 		goalNullableTime(lastAssessed), goalNullableString(activePlanID),
-		historyJSON, goalNullableTime(retiredAt), g.ID,
+		historyJSON, goalNullableTime(retiredAt), findingsJSON, g.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update: %w", err)
@@ -528,25 +588,25 @@ const (
 	selectByID = `
 SELECT id, employee_id, title, mandate, state, source, trigger_ref,
        health, last_assessed, active_plan_id, plan_history,
-       created_at, retired_at
+       created_at, retired_at, recent_findings
 FROM employee_goals WHERE id = ?`
 
 	selectByEmployee = `
 SELECT id, employee_id, title, mandate, state, source, trigger_ref,
        health, last_assessed, active_plan_id, plan_history,
-       created_at, retired_at
+       created_at, retired_at, recent_findings
 FROM employee_goals WHERE employee_id = ? ORDER BY created_at`
 
 	selectActiveAll = `
 SELECT id, employee_id, title, mandate, state, source, trigger_ref,
        health, last_assessed, active_plan_id, plan_history,
-       created_at, retired_at
+       created_at, retired_at, recent_findings
 FROM employee_goals WHERE state != 'retired' ORDER BY created_at`
 
 	selectActiveByEmployee = `
 SELECT id, employee_id, title, mandate, state, source, trigger_ref,
        health, last_assessed, active_plan_id, plan_history,
-       created_at, retired_at
+       created_at, retired_at, recent_findings
 FROM employee_goals WHERE employee_id = ? AND state != 'retired'
 ORDER BY created_at`
 
@@ -562,13 +622,14 @@ func scanGoal(sc rowScanner) (*Goal, error) {
 		triggerRef, activePlanID   sql.NullString
 		lastAssessed, retiredAt    sql.NullString
 		planHistoryJSON            sql.NullString
+		recentFindingsJSON         sql.NullString
 		createdAt                  string
 	)
 	if err := sc.Scan(
 		&g.ID, &g.EmployeeID, &g.Title, &g.Mandate,
 		&stateStr, &sourceStr, &triggerRef,
 		&healthStr, &lastAssessed, &activePlanID, &planHistoryJSON,
-		&createdAt, &retiredAt,
+		&createdAt, &retiredAt, &recentFindingsJSON,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrGoalNotFound
@@ -618,6 +679,11 @@ func scanGoal(sc rowScanner) (*Goal, error) {
 			return nil, fmt.Errorf("unmarshal plan_history: %w", err)
 		}
 	}
+	if recentFindingsJSON.Valid && recentFindingsJSON.String != "" {
+		if err := json.Unmarshal([]byte(recentFindingsJSON.String), &g.RecentFindings); err != nil {
+			return nil, fmt.Errorf("unmarshal recent_findings: %w", err)
+		}
+	}
 
 	t, err := time.Parse(time.RFC3339, createdAt)
 	if err != nil {
@@ -661,6 +727,22 @@ func marshalHistory(history []string) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// marshalFindings serializes a recent-findings slice to the storage form (a
+// JSON array). Returns nil for empty/nil slices so the column is NULL when
+// no findings are attached (the common case). This differs from
+// marshalHistory because findings are only present on goals that have been
+// audited.
+func marshalFindings(findings []string) any {
+	if len(findings) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(findings)
+	if err != nil {
+		return nil
+	}
+	return string(b)
 }
 
 // goalNullableString and goalNullableTime are goal-local variants of the

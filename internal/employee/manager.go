@@ -327,6 +327,25 @@ type PlanCreatorFunc func(
 ) (planID string, err error)
 
 // PlanDisposer abstracts plan approval/rejection so the Manager can route
+// BusPublisher publishes messages to the internal message bus. The daemon
+// injects a concrete adapter (wrapping *bus.MessageBus) via SetBusPublisher.
+// When unset, no bus events are published. Using a local interface avoids
+// importing internal/bus (cycle risk via internal/agent → internal/bus → ...).
+type BusPublisher interface {
+	// PublishEmployeePaused publishes an employee.paused bus event.
+	// employeeID is the paused employee, reason is a human-readable
+	// explanation, source is "operator" or "auto_pause".
+	PublishEmployeePaused(employeeID, reason, source string)
+}
+
+// EmployeePausedEvent is the payload for the employee.paused bus event
+// (spec line 383).
+type EmployeePausedEvent struct {
+	EmployeeID string `json:"employee_id"`
+	Reason     string `json:"reason"`
+	Source     string `json:"source"` // "operator" | "auto_pause"
+}
+
 // goal plan signoffs through internal/plan.PlanManager without importing
 // internal/plan (cycle risk via internal/agent → internal/bus → ...).
 // The daemon wiring injects the concrete adapter via SetPlanDisposer
@@ -405,10 +424,36 @@ type Manager struct {
 	// delegates to it. Nil means periodic audit is a no-op.
 	periodicAuditor *PeriodicAuditor
 
+	// postTurnAuditor is wired by the daemon via SetPostTurnAuditor. When
+	// non-nil, the post-turn audit job delegates to it. Nil means post-turn
+	// audit is a no-op (Checkpoint 2 is dormant).
+	postTurnAuditor *PostTurnAuditor
+
 	// turnCollector is an optional callback injected by the daemon wiring
 	// to supply TurnRecords to the periodic audit job. When nil, the
 	// periodic audit runs but produces no findings (no turns to audit).
 	turnCollector TurnCollectorFunc
+
+	// busPublisher is an optional callback injected by the daemon wiring
+	// to publish bus events (e.g. employee.paused). Nil means no bus events
+	// are published. Guarded by mu so the nil-check + dereference is safe.
+	busPublisher BusPublisher
+
+	// goalLoops holds the per-employee GoalLoop registry. When a loop is
+	// registered for an employee, Trigger delegates to loop.Decide instead
+	// of synthesizing a placeholder TriggerResult. Keyed by employee ID.
+	// Guarded by goalLoopsMu (separate from mu to avoid contention with
+	// the constitution cache on the Trigger hot path).
+	goalLoops   map[string]*GoalLoop
+	goalLoopsMu sync.RWMutex
+
+	// invokeMuMap provides a per-employee serialization mutex so two
+	// concurrent Trigger() calls for the same employee queue rather than
+	// overlap (spec line 614: "Goal loop uses the same pattern" as the
+	// per-bot invocation mutex). The map is populated lazily on first
+	// Trigger for a given employee ID. Guarded by invokeMuMapGuard.
+	invokeMuMap      map[string]*sync.Mutex
+	invokeMuMapGuard sync.Mutex
 
 	mu            sync.RWMutex
 	constitutions map[string]Constitution // employeeID -> cached
@@ -425,6 +470,8 @@ func NewManager(bm *bot.Manager) *Manager {
 		botManager:    bm,
 		constitutions: make(map[string]Constitution),
 		driftScores:   make(map[string]float64),
+		goalLoops:     make(map[string]*GoalLoop),
+		invokeMuMap:   make(map[string]*sync.Mutex),
 		logger:        slog.Default(),
 	}
 }
@@ -452,6 +499,8 @@ func NewManagerWithStores(
 		auditStore:        as,
 		constitutions:     make(map[string]Constitution),
 		driftScores:       make(map[string]float64),
+		goalLoops:         make(map[string]*GoalLoop),
+		invokeMuMap:       make(map[string]*sync.Mutex),
 		logger:            logger.With("component", "employee-manager"),
 	}
 	// Best-effort: prime the in-memory constitution cache from the store
@@ -510,6 +559,44 @@ func (m *Manager) SetAuditStore(as *AuditStore) {
 	m.mu.Unlock()
 }
 
+// AuditStore returns the audit store. May be nil when not configured.
+// Callers must nil-check the result.
+func (m *Manager) AuditStore() *AuditStore {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.auditStore
+}
+
+// SetPostTurnAuditor wires the PostTurnAuditor used by the post-turn audit
+// path (Checkpoint 2). Nil is ignored (typed-nil guard per CLAUDE.md
+// setter convention). Thread-safe.
+func (m *Manager) SetPostTurnAuditor(a *PostTurnAuditor) {
+	if a == nil {
+		return
+	}
+	m.mu.Lock()
+	m.postTurnAuditor = a
+	m.mu.Unlock()
+}
+
+// PostTurnAuditor returns the wired PostTurnAuditor, or nil when not wired.
+func (m *Manager) PostTurnAuditor() *PostTurnAuditor {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.postTurnAuditor
+}
+
+// SetBusPublisher wires the bus publisher used to emit employee events
+// (e.g. employee.paused). Nil is ignored (typed-nil guard). Thread-safe.
+func (m *Manager) SetBusPublisher(p BusPublisher) {
+	if p == nil {
+		return
+	}
+	m.mu.Lock()
+	m.busPublisher = p
+	m.mu.Unlock()
+}
+
 // SetBotStore attaches the bot store post-construction. Nil is ignored.
 func (m *Manager) SetBotStore(bs *bot.Store) {
 	if bs == nil {
@@ -518,6 +605,48 @@ func (m *Manager) SetBotStore(bs *bot.Store) {
 	m.mu.Lock()
 	m.botStore = bs
 	m.mu.Unlock()
+}
+
+// RegisterGoalLoop registers a GoalLoop for an employee. Once registered,
+// Trigger delegates to loop.Decide instead of returning a synthesized
+// TriggerResult. Nil loop is ignored (typed-nil guard per CLAUDE.md).
+// Thread-safe: callers can invoke before or between Trigger calls.
+func (m *Manager) RegisterGoalLoop(employeeID string, loop *GoalLoop) {
+	if loop == nil || employeeID == "" {
+		return
+	}
+	m.goalLoopsMu.Lock()
+	m.goalLoops[employeeID] = loop
+	m.goalLoopsMu.Unlock()
+}
+
+// GetGoalLoop returns the registered GoalLoop for the given employee, or
+// nil when no loop is registered. Thread-safe.
+func (m *Manager) GetGoalLoop(employeeID string) *GoalLoop {
+	m.goalLoopsMu.RLock()
+	loop := m.goalLoops[employeeID]
+	m.goalLoopsMu.RUnlock()
+	return loop
+}
+
+// acquireInvokeMutex returns the per-employee serialization mutex for the
+// given employee ID, creating it lazily on first use. The returned mutex
+// is shared across all callers for the same employee, ensuring that two
+// concurrent Trigger() calls for the same employee queue rather than overlap
+// (spec line 614).
+//
+// The lazy-create happens under invokeMuMapGuard (a short-lived lock that
+// is released before any I/O). The returned *sync.Mutex is then Lock()'d
+// by the caller around the Decide call — no I/O under the guard lock.
+func (m *Manager) acquireInvokeMutex(employeeID string) *sync.Mutex {
+	m.invokeMuMapGuard.Lock()
+	mu, ok := m.invokeMuMap[employeeID]
+	if !ok {
+		mu = &sync.Mutex{}
+		m.invokeMuMap[employeeID] = mu
+	}
+	m.invokeMuMapGuard.Unlock()
+	return mu
 }
 
 // StartAll prepares the employee layer for runtime. It primes the
@@ -870,12 +999,44 @@ func (m *Manager) Retire(ctx context.Context, id string) error {
 }
 
 // Pause is the operator-initiated pause path. Also used by the enforcement
-// engine when auto-pausing on critical findings. Idempotent.
+// engine when auto-pausing on critical findings. Idempotent. Publishes an
+// employee.paused bus event when a BusPublisher is wired (spec line 383).
 func (m *Manager) Pause(ctx context.Context, id string) error {
+	return m.pauseWithSource(ctx, id, "", "operator")
+}
+
+// pauseWithSource pauses the employee and publishes a bus event with the
+// given source and reason. source is "operator" or "auto_pause". reason
+// is a human-readable explanation (may be empty for operator pauses).
+// The bus publisher is snapshotted under a read lock and called outside
+// the lock (per CLAUDE.md mutex-scope rule — publishing may do I/O).
+func (m *Manager) pauseWithSource(ctx context.Context, id, reason, source string) error {
 	if m.botManager == nil {
 		return errNotConfigured
 	}
-	return m.botManager.PauseBot(ctx, id)
+	if err := m.botManager.PauseBot(ctx, id); err != nil {
+		return err
+	}
+	// Snapshot publisher under read lock, publish outside lock.
+	m.mu.RLock()
+	pub := m.busPublisher
+	m.mu.RUnlock()
+	if pub != nil {
+		if reason == "" {
+			reason = "operator pause"
+		}
+		pub.PublishEmployeePaused(id, reason, source)
+		m.logger.Info("employee paused", "employee_id", id, "source", source, "reason", reason)
+	}
+	return nil
+}
+
+// PauseWithReason pauses the employee with a specific reason and source.
+// Used by the enforcement engine (source="auto_pause") and by the RPC
+// handler (source="operator"). Idempotent. Publishes an employee.paused
+// bus event when a BusPublisher is wired (spec line 383).
+func (m *Manager) PauseWithReason(ctx context.Context, id, reason, source string) error {
+	return m.pauseWithSource(ctx, id, reason, source)
 }
 
 // Resume is the only un-pause path (spec: "only un-pause path"). Employees
@@ -891,8 +1052,17 @@ func (m *Manager) Resume(ctx context.Context, id string) error {
 // Trigger programmatically invokes an employee. Used by the webhook handler,
 // scheduler, and the agents.trigger RPC method.
 //
-// Phase 5 wires this to the bot framework's BotRunner path. Full GoalLoop
-// integration lands in a later phase.
+// When a GoalLoop is registered for the employee (via RegisterGoalLoop),
+// Trigger acquires a per-employee serialization mutex (spec line 614: two
+// triggers fire simultaneously → queue rather than overlap) and delegates to
+// loop.Decide. The Decide call runs the full ASSESS → PLAN → EXECUTE →
+// REFLECT cycle (tier-dependent) and the returned TriggerResult reflects the
+// actual outcome.
+//
+// When no GoalLoop is registered, Trigger falls back to the legacy path:
+// record the trigger attempt and return a synthesized "triggered"
+// TriggerResult. This keeps backward compatibility for employees without a
+// constitution/loop.
 func (m *Manager) Trigger(ctx context.Context, id string, payload map[string]any) (*TriggerResult, error) {
 	if m.botManager == nil {
 		return nil, errNotConfigured
@@ -911,41 +1081,108 @@ func (m *Manager) Trigger(ctx context.Context, id string, payload map[string]any
 		})
 		return nil, errors.New("employee is paused")
 	}
-	// The bot framework currently exposes no direct "TriggerNow" hook;
-	// when integrated with the GoalLoop, this method will enqueue an
-	// invocation. For now, record the trigger attempt and return a
-	// synthesized TriggerResult. This keeps the RPC surface functional.
+
+	// Telemetry helpers: tier tag is best-effort from the cached constitution.
+	tierTag := ""
+	if c, ok := m.cachedConstitution(id); ok {
+		tierTag = c.AutonomyTier.String()
+	}
+
+	// GoalLoop path: when a loop is registered, delegate to Decide under
+	// per-employee serialization.
+	loop := m.GetGoalLoop(id)
+	if loop != nil {
+		return m.triggerViaGoalLoop(ctx, id, payload, tierTag, loop)
+	}
+
+	// Legacy fallback: no GoalLoop registered. Record the trigger attempt
+	// and return a synthesized TriggerResult (keeps the RPC surface
+	// functional for employees without a loop).
 	result := &TriggerResult{
 		InvocationID: idpkg.Generate("trig_"),
 		StartedAt:    time.Now().UTC(),
 		Status:       "triggered",
-	}
-
-	// Telemetry: employee.invocations counter + employee.budget.burn gauge.
-	// The tier tag is best-effort (looked up from the cached constitution);
-	// an empty tier tag is valid for employees whose constitution failed
-	// to load.
-	tierTag := ""
-	if c, ok := m.cachedConstitution(id); ok {
-		tierTag = c.AutonomyTier.String()
 	}
 	m.emitMetric("employee.invocations", 1, map[string]string{
 		"employee_id": id,
 		"tier":        tierTag,
 		"outcome":     "success",
 	})
+	m.emitBudgetMetric(ctx, id)
+	return result, nil
+}
 
-	// Budget burn: emit today's spend in cents. Best-effort — if the bot
-	// state lookup fails, skip the gauge (do not emit a zero).
-	if m.botManager != nil {
-		if state, err := m.botManager.GetBotStatus(ctx, id); err == nil && state != nil {
-			m.emitMetric("employee.budget.burn", float64(state.TodayCostCents), map[string]string{
-				"employee_id": id,
-				"unit":        "cents",
-			})
+// triggerViaGoalLoop is the GoalLoop-backed Trigger path. It acquires the
+// per-employee serialization mutex (spec line 614), then calls loop.Decide.
+// The mutex ensures that two concurrent Trigger calls for the same employee
+// queue rather than overlap. All I/O (LLM calls, plan creation, bot
+// execution) happens inside Decide — outside this method's own lock scope.
+func (m *Manager) triggerViaGoalLoop(ctx context.Context, id string, payload map[string]any, tierTag string, loop *GoalLoop) (*TriggerResult, error) {
+	// Build the TriggerEvent from the payload.
+	source, _ := payload["source"].(string)
+	if source == "" {
+		source = "manual"
+	}
+	var payloadBytes []byte
+	if payload != nil {
+		if raw, err := json.Marshal(payload); err == nil {
+			payloadBytes = raw
 		}
 	}
+	trigger := TriggerEvent{
+		Source:  source,
+		Payload: payloadBytes,
+		FiredAt: time.Now().UTC(),
+	}
+
+	// Acquire per-employee serialization mutex (spec line 614). The mutex
+	// is created lazily on first use. We hold it only across Decide — no
+	// other I/O happens under this lock.
+	invokeMu := m.acquireInvokeMutex(id)
+	invokeMu.Lock()
+	decideErr := loop.Decide(ctx, trigger)
+	invokeMu.Unlock()
+
+	result := &TriggerResult{
+		InvocationID: idpkg.Generate("trig_"),
+		StartedAt:    trigger.FiredAt,
+	}
+	if decideErr != nil {
+		result.Status = "error"
+		m.emitMetric("employee.invocations", 1, map[string]string{
+			"employee_id": id,
+			"tier":        tierTag,
+			"outcome":     "error",
+		})
+		m.emitBudgetMetric(ctx, id)
+		return result, fmt.Errorf("goal-loop decide: %w", decideErr)
+	}
+	result.Status = "completed"
+	m.emitMetric("employee.invocations", 1, map[string]string{
+		"employee_id": id,
+		"tier":        tierTag,
+		"outcome":     "success",
+	})
+	m.emitBudgetMetric(ctx, id)
 	return result, nil
+}
+
+// emitBudgetMetric is a best-effort helper that emits the employee.budget.burn
+// gauge from the bot manager's state. If the lookup fails, the gauge is
+// skipped (do not emit a zero). Extracted to avoid duplication between the
+// GoalLoop and legacy Trigger paths.
+func (m *Manager) emitBudgetMetric(ctx context.Context, id string) {
+	if m.botManager == nil {
+		return
+	}
+	state, err := m.botManager.GetBotStatus(ctx, id)
+	if err != nil || state == nil {
+		return
+	}
+	m.emitMetric("employee.budget.burn", float64(state.TodayCostCents), map[string]string{
+		"employee_id": id,
+		"unit":        "cents",
+	})
 }
 
 // AmendConstitution proposes a constitution amendment. The patch is checked

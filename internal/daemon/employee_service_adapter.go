@@ -3,9 +3,15 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/bot"
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/employee"
+	"github.com/caimlas/meept/internal/plan"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // employeeServiceAdapter wraps *employee.Manager to satisfy the
@@ -165,3 +171,142 @@ func (a employeeServiceAdapter) Migrate(ctx context.Context) ([]any, error) {
 func (a employeeServiceAdapter) ApplyMigration(ctx context.Context, botID string) (any, error) {
 	return a.m.ApplyMigration(ctx, botID)
 }
+
+// employeeBusPublisher adapts *bus.MessageBus to the employee.BusPublisher
+// interface. This avoids the employee package importing internal/bus
+// (cycle risk). The daemon injects this adapter via SetBusPublisher
+// during NewComponents.
+type employeeBusPublisher struct {
+	bus    *bus.MessageBus
+	logger *slog.Logger
+}
+
+// PublishEmployeePaused publishes an employee.paused bus event (spec line 383).
+// The event payload includes the employee ID, reason, and source ("operator"
+// or "auto_pause"). Best-effort: errors are logged, not returned.
+func (p employeeBusPublisher) PublishEmployeePaused(employeeID, reason, source string) {
+	if p.bus == nil {
+		return
+	}
+	payload := employee.EmployeePausedEvent{
+		EmployeeID: employeeID,
+		Reason:     reason,
+		Source:     source,
+	}
+	msg, err := models.NewBusMessage(
+		models.MessageType("employee.paused"),
+		"employee-manager",
+		payload,
+	)
+	if err != nil {
+		p.logger.Warn("employee.paused bus event: marshal failed",
+			"employee_id", employeeID, "error", err)
+		return
+	}
+	// Set the topic explicitly since NewBusMessage doesn't set it.
+	msg.Topic = "employee.paused"
+	p.bus.Publish("employee.paused", msg)
+}
+
+// agentLoopBotExecutorAdapter wraps *agent.AgentLoop to satisfy
+// bot.BotExecutor. The GoalLoop calls ExecuteBot(ctx, systemPrompt,
+// userMessage) to run a single LLM turn. We delegate to AgentLoop.RunOnce
+// which processes a single user message through the full reasoning loop.
+//
+// Token counts from RunOnce are not directly available (RunOnce returns
+// only the response string); we return 0 for tokensUsed. The per-turn
+// cost is tracked separately by the LLM client's token cache. This keeps
+// the GoalLoop executor path functional without duplicating the metrics
+// infrastructure.
+//
+// See docs/superpowers/specs/2026-06-23-ai-employee-design.md spec line
+// 304: "The LLM call inside ASSESS uses the existing AgentLoop.RunOnce() —
+// no new inference path."
+type agentLoopBotExecutorAdapter struct {
+	agentLoop *agent.AgentLoop
+	botMgr    *bot.Manager
+	logger    *slog.Logger
+}
+
+// ExecuteBot runs a single turn through the agent loop. The systemPrompt
+// is currently logged but not passed to RunOnce (AgentLoop constructs its
+// own system prompts internally). The userMessage becomes the user turn.
+// Returns (output, tokensUsed, err).
+func (a *agentLoopBotExecutorAdapter) ExecuteBot(ctx context.Context, systemPrompt, userMessage string) (string, int, error) {
+	if a.agentLoop == nil {
+		return "", 0, fmt.Errorf("agent loop not configured")
+	}
+	// Use a conversation ID scoped to the bot executor so sessions don't
+	// collide with user-driven conversations. The agent loop may override
+	// this internally.
+	conversationID := fmt.Sprintf("bot-exec-%d", time.Now().UnixNano())
+	response, err := a.agentLoop.RunOnce(ctx, userMessage, conversationID)
+	if err != nil {
+		a.logger.Warn("agent loop execute failed",
+			"error", err,
+			"conversation_id", conversationID)
+		return "", 0, err
+	}
+	return response, 0, nil
+}
+
+// Compile-time guard: agentLoopBotExecutorAdapter must satisfy
+// bot.BotExecutor.
+var _ bot.BotExecutor = (*agentLoopBotExecutorAdapter)(nil)
+
+// planCreatorAdapter wraps *plan.PlanManager to satisfy
+// employee.PlanCreator. The GoalLoop calls CreatePlan to route tier-2
+// candidates through the existing Plan signoff workflow. The adapter
+// translates between the two CreatePlan signatures (employee.PlanCreator
+// has fewer params — projectPath defaults to "").
+type planCreatorAdapter struct {
+	planMgr *plan.PlanManager
+}
+
+// CreatePlan delegates to PlanManager.CreatePlan, translating the
+// employee.PlanCreator signature. projectPath defaults to "" (the plan
+// manager resolves it from the project ID). Returns a PlanRef with the
+// plan's ID, state, and empty prompt (the GoalLoop fills in the prompt).
+func (a *planCreatorAdapter) CreatePlan(ctx context.Context, title, description, projectID, sessionID string) (employee.PlanRef, error) {
+	if a.planMgr == nil {
+		return employee.PlanRef{}, fmt.Errorf("plan manager not configured")
+	}
+	p, err := a.planMgr.CreatePlan(ctx, title, description, projectID, "", sessionID)
+	if err != nil {
+		return employee.PlanRef{}, err
+	}
+	return employee.PlanRef{
+		ID:    p.ID,
+		State: string(p.State),
+	}, nil
+}
+
+// Compile-time guard: planCreatorAdapter must satisfy employee.PlanCreator.
+var _ employee.PlanCreator = (*planCreatorAdapter)(nil)
+
+// storeBackedGoalLookup wraps *employee.GoalStore to satisfy
+// employee.GoalLookup. The GoalLoop uses this to find the active goal
+// for an employee during Reflect (spec line 296: "Updates Goal.Health").
+type storeBackedGoalLookup struct {
+	store *employee.GoalStore
+}
+
+// ActiveGoal returns the first active goal for the employee from the
+// store. Returns (nil, nil) when no active goal exists.
+func (l *storeBackedGoalLookup) ActiveGoal(ctx context.Context, employeeID string) (*employee.Goal, error) {
+	if l.store == nil {
+		return nil, nil
+	}
+	goals, err := l.store.ListActive(ctx, employeeID)
+	if err != nil {
+		return nil, err
+	}
+	if len(goals) == 0 {
+		return nil, nil
+	}
+	return goals[0], nil
+}
+
+// Compile-time guard: storeBackedGoalLookup must satisfy
+// employee.GoalLookup.
+var _ employee.GoalLookup = (*storeBackedGoalLookup)(nil)

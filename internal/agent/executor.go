@@ -733,6 +733,12 @@ func (e *Executor) checkPermission(toolName string, args map[string]any) securit
 		}
 	}
 
+	// Inject the tool name so the pre-exec checker (employee constitution
+	// gate) can match against tools_allowed / tools_forbidden entries that
+	// use tool names rather than action categories. The PreExecChecker
+	// receives this via details["tool_name"].
+	details["tool_name"] = toolName
+
 	// Inject agent ID so the PermissionChecker can route to the
 	// registered PreExecChecker (employee constitution gate). The agentID
 	// is set via the WithExecutorAgentID option or the SetAgentID method.

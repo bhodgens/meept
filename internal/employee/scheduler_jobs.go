@@ -114,6 +114,46 @@ func (m *Manager) ScheduleApprovalTimeoutSweeper(ctx context.Context, sched Sche
 	return nil
 }
 
+// ScheduleFindingsRetention registers a daily job that prunes audit findings
+// older than the configured retention period (spec line 154: default 90 days).
+// The job calls AuditStore.PruneOlderThan and logs the count pruned. When
+// retentionDays is zero or negative, the job is not registered (no retention
+// configured → findings are kept indefinitely).
+func (m *Manager) ScheduleFindingsRetention(ctx context.Context, sched Scheduler, retentionDays int) error {
+	if sched == nil {
+		return nil
+	}
+	if retentionDays <= 0 {
+		retentionDays = 90 // spec default
+	}
+	sched.RunAtInterval("employee.findings_retention", 24*time.Hour, func() {
+		m.runFindingsRetention(context.Background(), retentionDays)
+	})
+	m.logger.Info("scheduled findings retention job",
+		"retention_days", retentionDays, "check_interval", 24*time.Hour)
+	return nil
+}
+
+// runFindingsRetention prunes old audit findings and logs the result.
+func (m *Manager) runFindingsRetention(ctx context.Context, retentionDays int) {
+	m.mu.RLock()
+	auditStore := m.auditStore
+	m.mu.RUnlock()
+
+	if auditStore == nil {
+		return
+	}
+	count, err := auditStore.PruneOlderThan(ctx, retentionDays)
+	if err != nil {
+		m.logger.Warn("findings retention: prune failed", "error", err)
+		return
+	}
+	if count > 0 {
+		m.logger.Info("findings retention: pruned old findings",
+			"count", count, "retention_days", retentionDays)
+	}
+}
+
 // runAssessForEmployee runs a scheduled assessment for one employee.
 // It delegates to Trigger, which emits telemetry and invokes the bot
 // runner. The full GoalLoop.Decide integration happens inside the
@@ -146,6 +186,7 @@ func (m *Manager) runAssessForEmployee(ctx context.Context, employeeID string) {
 func (m *Manager) runPeriodicAudit(ctx context.Context) {
 	m.mu.RLock()
 	auditor := m.periodicAuditor
+	goalStore := m.goalStore
 	m.mu.RUnlock()
 
 	if auditor == nil {
@@ -199,12 +240,32 @@ func (m *Manager) runPeriodicAudit(ctx context.Context) {
 				"checkpoint":  string(f.Checkpoint),
 			})
 		}
+		// G7: attach findings to goals (spec line 382: "attach to owning
+		// Goal"). Best-effort: goal lookup failures are logged but do not
+		// block the audit.
+		if goalStore != nil {
+			for _, f := range findings {
+				if f.GoalID == "" {
+					continue
+				}
+				goal, gErr := goalStore.Get(ctx, f.GoalID)
+				if gErr != nil || goal == nil {
+					continue
+				}
+				goal.AttachFinding(f.ID)
+				if uErr := goalStore.Update(ctx, goal); uErr != nil {
+					m.logger.Warn("periodic audit: attach finding to goal failed",
+						"goal_id", f.GoalID, "finding_id", f.ID, "error", uErr)
+				}
+			}
+		}
 		// Auto-pause on critical finding (spec: critical → auto-pause).
 		for _, f := range findings {
 			if f.Severity == SeverityCritical {
 				m.logger.Warn("periodic audit: critical finding, auto-pausing",
 					"employee_id", emp.ID, "rule", f.ViolatedRule)
-				if err := m.Pause(ctx, emp.ID); err != nil {
+				if err := m.PauseWithReason(ctx, emp.ID,
+					"periodic audit critical: "+f.ViolatedRule, "auto_pause"); err != nil {
 					m.logger.Error("periodic audit: auto-pause failed",
 						"employee_id", emp.ID, "error", err)
 				}

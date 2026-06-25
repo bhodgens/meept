@@ -121,6 +121,62 @@ func TestCheckPermission(t *testing.T) {
 	}
 }
 
+// stubPreExecChecker is a test double for PreExecChecker that denies when
+// the tool name matches the forbidden entry.
+type stubPreExecChecker struct {
+	forbiddenTool string
+}
+
+func (s stubPreExecChecker) Check(action, toolName string, details map[string]string) PreExecDecision {
+	if toolName == s.forbiddenTool {
+		return PreExecDecision{
+			Allowed: false,
+			Reason:  "tool " + toolName + " is forbidden",
+		}
+	}
+	return PreExecDecision{Allowed: true}
+}
+
+func TestCheckPermission_PreExecChecker_ToolName(t *testing.T) {
+	pc := NewPermissionChecker(Config{})
+	pc.SetPreExecChecker("emp-1", stubPreExecChecker{forbiddenTool: "git_push"})
+
+	tests := []struct {
+		name     string
+		action   string
+		details  map[string]string
+		allowed  bool
+	}{
+		{
+			name:    "forbidden by tool name — denied",
+			action:  "shell_execute",
+			details: map[string]string{"agent_id": "emp-1", "tool_name": "git_push", "command": "git push origin main"},
+			allowed: false,
+		},
+		{
+			name:    "different tool — allowed",
+			action:  "shell_execute",
+			details: map[string]string{"agent_id": "emp-1", "tool_name": "git_status", "command": "git status"},
+			allowed: true,
+		},
+		{
+			name:    "no agent_id — checker skipped",
+			action:  "shell_execute",
+			details: map[string]string{"tool_name": "git_push", "command": "git push"},
+			allowed: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := pc.CheckPermission(tt.action, tt.details)
+			if result.Allowed != tt.allowed {
+				t.Errorf("allowed = %v, want %v (reason: %s)", result.Allowed, tt.allowed, result.Reason)
+			}
+		})
+	}
+}
+
 // Benchmarks
 
 func BenchmarkCheckPath(b *testing.B) {
