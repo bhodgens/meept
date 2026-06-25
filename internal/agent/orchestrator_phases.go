@@ -41,7 +41,7 @@ func (o *Orchestrator) startNextPhase(ctx context.Context, taskID, completedPhas
 	}
 
 	// 2. Find the phase spec to get consumes/produces declarations.
-	phaseSpec, err := o.getPlanPhaseSpec(taskID, nextPhase.Name)
+	phaseSpec, err := o.getPlanPhaseSpec(ctx, taskID, nextPhase.Name)
 	if err != nil {
 		o.logger.Warn("could not load phase spec for context injection",
 			"phase", nextPhase.Name, "error", err)
@@ -69,9 +69,9 @@ func (o *Orchestrator) startNextPhase(ctx context.Context, taskID, completedPhas
 	for _, step := range steps {
 		step.ConversationID = fmt.Sprintf("phase-%s-%s", nextPhase.ID, step.ID)
 		step.AccumulatedContext = startupCtx
-		if err := o.stepStore.Update(step); err != nil {
-			return fmt.Errorf("update step %s: %w", step.ID, err)
-		}
+	}
+	if err := o.stepStore.UpdatePhaseSteps(steps); err != nil {
+		return fmt.Errorf("update phase steps: %w", err)
 	}
 
 	o.logger.Info("Phase transition",
@@ -90,7 +90,7 @@ func (o *Orchestrator) startNextPhase(ctx context.Context, taskID, completedPhas
 // a synthetic spec containing only the Name. The artifact gating still works
 // because phaseSpecOverride (set by tests or by the planPhaseSink) can inject
 // full specs.
-func (o *Orchestrator) getPlanPhaseSpec(taskID, phaseName string) (*PlanPhaseSpec, error) {
+func (o *Orchestrator) getPlanPhaseSpec(ctx context.Context, taskID, phaseName string) (*PlanPhaseSpec, error) {
 	// Test override takes precedence.
 	if o.phaseSpecOverride != nil {
 		if spec, ok := o.phaseSpecOverride[phaseName]; ok {
@@ -101,7 +101,7 @@ func (o *Orchestrator) getPlanPhaseSpec(taskID, phaseName string) (*PlanPhaseSpe
 	// Return synthetic spec from PlanPhase fields.
 	// After Task 7, produces/consumes will be persisted on PlanPhase and
 	// populated here.
-	phases, err := o.planManager.GetPhasesByTask(context.Background(), taskID)
+	phases, err := o.planManager.GetPhasesByTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("get phases for spec: %w", err)
 	}

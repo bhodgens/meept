@@ -541,6 +541,75 @@ func (s *StepStore) Update(step *TaskStep) error {
 	return nil
 }
 
+// UpdatePhaseSteps updates multiple steps atomically in a single transaction.
+// Used for phase transitions where all steps must be updated together or none.
+// Unlike Update, this method does not record state transitions — it is intended
+// for bulk field updates (ConversationID, AccumulatedContext, etc.) where the
+// State field is not changing. If individual state transitions are needed,
+// call Update per step.
+func (s *StepStore) UpdatePhaseSteps(steps []*TaskStep) error {
+	ctx := context.Background()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx for phase step update: %w", err)
+	}
+	// Safe to call after Commit; a no-op on a committed transaction.
+	defer tx.Rollback()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, step := range steps {
+		depsJSON := encodeStringSlice(step.DependsOn)
+		recsJSON := encodeRecommendations(step.Recommendations)
+		evidenceJSON := encodeEvidenceSlice(step.Evidence)
+		claimsJSON := encodeStringSlice(step.Claims)
+		memoryRefsJSON := encodeStringSlice(step.MemoryRefs)
+		checklistJSON := encodeChecklist(step.Checklist)
+
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE task_steps
+			SET description = ?, depends_on = ?, tool_hint = ?, agent_id = ?,
+			    job_id = ?, state = ?, result = ?, sequence = ?, revision_count = ?,
+			    recommendations = ?, evidence = ?, claims = ?, validated = ?,
+			    validation_error = ?, token_usage = ?, memory_refs = ?, accumulated_context = ?,
+			    model_override = ?, checklist = ?, phase = ?, checkpoint_gate = ?, is_handoff = ?,
+			    conversation_id = ?, updated_at = ?
+			WHERE id = ?`,
+			step.Description,
+			nullableString(depsJSON),
+			nullableString(step.ToolHint),
+			nullableString(step.AgentID),
+			nullableString(step.JobID),
+			string(step.State),
+			nullableString(step.Result),
+			step.Sequence,
+			step.RevisionCount,
+			nullableString(recsJSON),
+			nullableString(evidenceJSON),
+			nullableString(claimsJSON),
+			step.Validated,
+			nullableString(step.ValidationError),
+			step.TokenUsage,
+			nullableString(memoryRefsJSON),
+			nullableString(step.AccumulatedContext),
+			nullableString(step.ModelOverride),
+			nullableString(checklistJSON),
+			nullableString(step.Phase),
+			step.CheckpointGate,
+			step.IsHandoff,
+			nullableString(step.ConversationID),
+			now,
+			step.ID,
+		); err != nil {
+			return fmt.Errorf("update step %s in phase batch: %w", step.ID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit phase step updates: %w", err)
+	}
+	return nil
+}
+
 // GetByID retrieves a step by ID.
 func (s *StepStore) GetByID(id string) (*TaskStep, error) {
 	row := s.db.QueryRow(`
