@@ -91,6 +91,25 @@ func (t IntentType) Category() IntentCategory {
 	}
 }
 
+// SuggestedMode returns the default planning mode for this intent type.
+// Modes: "direct" (no LLM decomposition), "plan" (single-phase LLM plan),
+// "spec_plan" (multi-phase LLM plan with Produces/Consumes), "spec_pair"
+// (pair session).
+func (t IntentType) SuggestedMode() string {
+	switch t {
+	case IntentChat, IntentRecall, IntentStatus, IntentReport, IntentPlatform, IntentSearch:
+		return "direct"
+	case IntentCode, IntentDebug, IntentGit, IntentToolUse, IntentSecurity:
+		return "plan"
+	case IntentCompound:
+		return "spec_pair"
+	case IntentPlan, IntentArchitect:
+		return "spec_plan"
+	default:
+		return "plan"
+	}
+}
+
 // DefaultAgent returns the default agent for an intent.
 func (t IntentType) DefaultAgent() string {
 	switch t {

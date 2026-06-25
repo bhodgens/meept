@@ -182,3 +182,32 @@ func TestIntentKeywords(t *testing.T) {
 		t.Errorf("nonexistent.Keywords() = %v, want nil", kw)
 	}
 }
+
+func TestIntentType_SuggestedMode(t *testing.T) {
+	cases := []struct {
+		in   IntentType
+		want string
+	}{
+		{IntentChat, "direct"},
+		{IntentRecall, "direct"},
+		{IntentStatus, "direct"},
+		{IntentReport, "direct"},
+		{IntentPlatform, "direct"},
+		{IntentSearch, "direct"},
+		{IntentCode, "plan"},
+		{IntentDebug, "plan"},
+		{IntentGit, "plan"},
+		{IntentToolUse, "plan"},
+		{IntentSecurity, "plan"},
+		{IntentCompound, "spec_pair"},
+		{IntentPlan, "spec_plan"},
+		{IntentArchitect, "spec_plan"},
+		{IntentUnknown, "plan"}, // default
+	}
+	for _, c := range cases {
+		got := c.in.SuggestedMode()
+		if got != c.want {
+			t.Errorf("%s.SuggestedMode() = %q; want %q", c.in, got, c.want)
+		}
+	}
+}
