@@ -409,6 +409,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		components.Dispatcher.SetMetricsStore(metricsStore)
 	}
 
+	// Wire metrics store to EmployeeManager for the six employee.* metrics
+	// (spec lines 668-674). SetMetricsStore is a nil-safe setter.
+	if metricsStore != nil && components != nil && components.EmployeeManager != nil {
+		components.EmployeeManager.SetMetricsStore(metricsStore)
+		logger.Info("EmployeeManager wired to metrics store")
+	}
+
 	// Wire metrics recorder to runtime manager for lifecycle metrics
 	if metricsStore != nil && components != nil && components.ContainerManager != nil {
 		components.ContainerManager.SetMetricsRecorder(&runtimeMetricsAdapter{store: metricsStore})

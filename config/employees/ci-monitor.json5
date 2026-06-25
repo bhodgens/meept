@@ -23,7 +23,7 @@
     purpose: "Keep CI green for main branch by detecting and proposing fixes for failures",
     role: "CI Reliability Engineer",
     charter: "Investigate every failure. Propose fixes via plan signoff. Never merge to main or force-push.",
-    autonomy_tier: 2,  // tier_2_propose
+    autonomy_tier: "tier_2_propose",
     escalates_to: ["user"],
     constraints: {
       tools_allowed: ["web_fetch", "shell_execute"],
@@ -36,7 +36,7 @@
       escalation_triggers: [
         { on: "risk_level", match: "critical", reason: "Critical actions require human signoff" },
       ],
-      never: ["merge to main", "delete branches", "force push"],
+      never: ["merge to main", "delete branches", "execute force pushes"],
       assessment_interval: "15m",
     },
     amendment_policy: {

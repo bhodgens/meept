@@ -808,4 +808,22 @@
     "enabled": true,
     "retention": 30,
   },
+
+  // AI Employee configuration. See docs/workflows/employees.md.
+  // All sub-keys have defaults; uncomment to override.
+  "employees": {
+    "enabled": true,
+    // "audit": {
+    //   "model": "small",
+    //   "periodic_interval": "6h",
+    //   "drift_pause_threshold": 0.3,
+    //   "findings_retention_days": 90,
+    // },
+    // "auto_pause": {
+    //   "on_critical_finding": true,
+    //   "on_drift": true,
+    //   "on_never_violation": true,
+    //   "require_operator_resume": true,
+    // },
+  },
 }

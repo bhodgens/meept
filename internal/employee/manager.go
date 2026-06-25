@@ -49,7 +49,7 @@ var ErrEmployeeNotFound = errors.New("employee not found")
 // ErrConstitutionRequired is returned when an employee is loaded or hired
 // without a constitution. Spec line 222: "A constitution is required at
 // load time."
-var ErrConstitutionRequired = errors.New("employee: constitution required")
+var ErrConstitutionRequired = errors.New("employee: constitution required; see docs/workflows/employees.md")
 
 // ErrFrozenField is returned by AmendConstitution when the amendment patch
 // touches a field listed in the existing constitution's
