@@ -520,7 +520,8 @@
 
   // Hierarchical orchestrator settings
   "orchestrator": {
-    "max_plan_steps": 10,                  // deprecated (Thread C+F removes)
+    // max_plan_steps removed (Thread C+F): use max_steps_per_phase * max_phases instead.
+    // If max_plan_steps is set in user config, it triggers a deprecation warning and is ignored.
     "max_research_steps": 3,
     "planner_timeout": 120,
     "token_budget_alert": 5000,

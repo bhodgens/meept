@@ -131,6 +131,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		"team.result":                     o.handleTeamResult,
 		"team.error":                      o.handleTeamError,
 		"tool.execution.complete":         o.handleToolExecutionComplete,
+		"llm.context_compressed":          o.handleContextCompressed,
 	}
 
 	for topic, handler := range topics {
@@ -797,6 +798,41 @@ func (o *Orchestrator) handleToolExecutionComplete(ctx context.Context, msg *mod
 			)
 		}
 	}()
+}
+
+// handleContextCompressed handles llm.context_compressed bus events.
+//
+// This is the reactive re-chunking hook (Plan C+F Task 8, Piece 5). When the
+// ContextFirewall compresses a step's context, this handler logs the event so
+// that future iterations can use it as a signal to pre-split similar steps via
+// chunkToExecutorCapacity.
+//
+// MVP behavior: log only. Actual re-chunking is deferred — the proactive
+// chunking implemented in Task 4 covers the common case. The subscription is
+// forward-looking: no component currently publishes to "llm.context_compressed"
+// (ContextFirewall.Stats exposes counters but does not emit bus events yet).
+// When a publisher is added, this handler will activate automatically.
+//
+// The handler is nil-safe against malformed payloads and missing fields.
+func (o *Orchestrator) handleContextCompressed(_ context.Context, msg *models.BusMessage) {
+	var data struct {
+		TaskID string `json:"task_id"`
+		StepID string `json:"step_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &data); err != nil {
+		o.logger.Debug("Failed to parse context_compressed event", "error", err)
+		return
+	}
+	if data.TaskID == "" {
+		// No task context — nothing actionable.
+		return
+	}
+	o.logger.Info("Context compressed for step; flagging for potential re-chunking",
+		"task_id", data.TaskID,
+		"step_id", data.StepID,
+	)
+	// Future: re-run chunkToExecutorCapacity for subsequent steps.
+	// For now: log only — chunking is proactive in Task 4.
 }
 
 // applyFix writes the LLM's proposed fix text to the target files.

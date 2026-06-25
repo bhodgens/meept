@@ -44,6 +44,8 @@ func Load(path string) (*Config, error) {
 	// Expand tilde paths in the loaded config
 	expandConfigPaths(cfg)
 
+	warnDeprecatedConfig(cfg)
+
 	return cfg, nil
 }
 
@@ -130,7 +132,24 @@ func LoadJSON5Config(path string) (*Config, error) {
 	}
 
 	expandConfigPaths(cfg)
+	warnDeprecatedConfig(cfg)
 	return cfg, nil
+}
+
+// warnDeprecatedConfig keys emits slog warnings for deprecated config keys
+// that the user has explicitly set. Each check compares the current value
+// against the known default; non-default values trigger a warning.
+//
+// This is called from Load and LoadJSON5Config after user config is merged
+// onto defaults, so any value differing from the default was set by the user.
+func warnDeprecatedConfig(cfg *Config) {
+	// orchestrator.max_plan_steps: replaced by max_steps_per_phase * max_phases
+	// (Thread C+F). Default is 10 (set in DefaultConfig). Any other value means
+	// the user explicitly set it in their config file.
+	if cfg.Orchestrator.MaxPlanSteps != 0 && cfg.Orchestrator.MaxPlanSteps != 10 {
+		slog.Warn("orchestrator.max_plan_steps is deprecated; use max_steps_per_phase + max_phases. Ignoring value.",
+			"value", cfg.Orchestrator.MaxPlanSteps)
+	}
 }
 
 // ExpandEnvVars expands environment variables in a string.
