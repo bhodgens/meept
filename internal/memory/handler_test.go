@@ -391,6 +391,7 @@ func suffix(s string, n int) string {
 
 // newTestOrchestratorWithTaint returns a security Orchestrator with a taint
 // tracker wired, so tests can verify taint propagation through memory retrieval.
+//nolint:unused // test helper
 func newTestOrchestratorWithTaint(t *testing.T) *intsecurity.Orchestrator {
 	t.Helper()
 	cfg := intsecurity.DefaultOrchestratorConfig()

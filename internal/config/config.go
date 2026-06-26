@@ -238,6 +238,11 @@ func expandConfigPaths(cfg *Config) {
 	cfg.SelfImprove.Sandbox.WorktreeDir = expandPath(cfg.SelfImprove.Sandbox.WorktreeDir)
 	cfg.SelfImprove.Detection.LogFile = expandPath(cfg.SelfImprove.Detection.LogFile)
 
+	// Expand backup paths
+	if cfg.Backup.CheckoutDir != "" {
+		cfg.Backup.CheckoutDir = expandPath(cfg.Backup.CheckoutDir)
+	}
+
 	// Expand shadow paths
 	cfg.Shadow.DataDir = expandPath(cfg.Shadow.DataDir)
 	cfg.Shadow.Export.OutputDir = expandPath(cfg.Shadow.Export.OutputDir)

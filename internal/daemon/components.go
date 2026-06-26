@@ -17,6 +17,7 @@ import (
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/agents"
+	bkpkg "github.com/caimlas/meept/internal/backup"
 	authpkg "github.com/caimlas/meept/internal/auth"
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/bus"
@@ -250,6 +251,9 @@ type Components struct {
 	ClusterQueue     *queue.ClusterQueue
 	ClusterConfig    *cluster.Config
 	ClusterWireGuard *cluster.WireGuardManager
+
+	// Git backup scheduler
+	BackupScheduler *bkpkg.GitBackupScheduler
 
 	// PTY sessions for interactive tool streaming
 	PTYManager *pty.Manager
@@ -2152,6 +2156,21 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// Initialize backup scheduler (if configured and enabled)
+	if cfg.Backup.IsValidated() {
+		sched, err := bkpkg.NewGitBackupScheduler(cfg.Backup, logger)
+		if err != nil {
+			logger.Warn("Failed to create backup scheduler", "error", err)
+		} else {
+			c.BackupScheduler = sched
+			logger.Info("Backup scheduler configured",
+				"enabled", true,
+				"schedule", cfg.Backup.Schedule,
+				"retention_days", cfg.Backup.RetentionDays,
+				"repo", cfg.Backup.RepoURL)
+		}
+	}
+
 	return c, nil
 }
 
@@ -2294,6 +2313,10 @@ func (c *Components) Start(ctx context.Context) error {
 					if err := c.ClusterGitSync.Stop(); err != nil {
 						slog.Warn("cluster git sync stop error", "error", err)
 					}
+				}
+			case "backup":
+				if c.BackupScheduler != nil {
+					c.BackupScheduler.Stop()
 				}
 			}
 		}
@@ -2882,6 +2905,16 @@ func (c *Components) Start(ctx context.Context) error {
 		c.Logger.Info("Reflection collector timer started",
 			"interval_minutes", c.Config.ReflectionCollector.TimerIntervalMinutes,
 		)
+	}
+
+	// Start backup scheduler if enabled and configured
+	if c.BackupScheduler != nil {
+		go c.BackupScheduler.Start(c.ctx)
+		c.Logger.Info("Backup scheduler started",
+			"schedule", c.Config.Backup.Schedule,
+			"retention_days", c.Config.Backup.RetentionDays,
+			"repo", c.Config.Backup.RepoURL)
+		startedHandlers = append(startedHandlers, "backup")
 	}
 
 	started = true // signal success so the deferred rollback does not fire

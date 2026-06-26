@@ -156,6 +156,8 @@ Analytics:
 	rootCmd.AddCommand(newAnalyticsCmd())
 	rootCmd.AddCommand(newTTSCmd())
 	rootCmd.AddCommand(newImprovementsCmd())
+	rootCmd.AddCommand(newBackupCmd())
+	rootCmd.AddCommand(newMigrateCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "\nError: %v\n\n", err)
