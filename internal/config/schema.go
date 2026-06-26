@@ -87,6 +87,7 @@ type Config struct {
 	PTY               PTYConfig               `json:"pty"                  toml:"pty"`
 	Reasoning         ReasoningGlobalConfig   `json:"reasoning"            toml:"reasoning"`
 	Hooks             HooksConfig             `json:"hooks"                toml:"hooks"`
+	ReflectionCollector ReflectionCollectorConfig `json:"reflection_collector" toml:"reflection_collector"`
 }
 
 // ReasoningGlobalConfig holds global reasoning/thinking settings, currently
@@ -832,6 +833,23 @@ type AgentReflectionConfig struct {
 	LintCmd string `json:"lint_cmd" toml:"lint_cmd"`
 	// TestCmd is a custom test command (empty uses built-in test runners)
 	TestCmd string `json:"test_cmd" toml:"test_cmd"`
+}
+
+// ReflectionCollectorConfig configures Turbo Thread E immediate self-reflection.
+// Distinct from AgentReflectionConfig (which controls auto-fix lint/test retry
+// loops). This controls per-turn lesson extraction and the .meept/improvements.md
+// proposal queue.
+type ReflectionCollectorConfig struct {
+	Enabled              bool    `json:"enabled"                        toml:"enabled"`
+	AutoQueue            bool    `json:"auto_queue"                     toml:"auto_queue"`
+	AutoSkillUnder       string  `json:"auto_skill_under"               toml:"auto_skill_under"`
+	SkillProposalsOnly   bool    `json:"skill_proposals_only"           toml:"skill_proposals_only"`
+	AutoApplyAll         bool    `json:"auto_apply_all"                 toml:"auto_apply_all"`
+	InactivityMinutes    int     `json:"inactivity_minutes"             toml:"inactivity_minutes"`
+	TimerIntervalMinutes int     `json:"timer_interval_minutes"         toml:"timer_interval_minutes"`
+	TurnConfidenceMin    float64 `json:"turn_confidence_min"            toml:"turn_confidence_min"`
+	SessionConfidenceMin float64 `json:"session_confidence_min"         toml:"session_confidence_min"`
+	MaxSessionProposals  int     `json:"max_session_proposals"          toml:"max_session_proposals"`
 }
 
 // AgentLintConfig holds linting and test runner settings.
@@ -1945,6 +1963,18 @@ func DefaultConfig() *Config {
 			Piper:     PiperTTSConfig{BinPath: "piper", ModelPath: "", ConfigPath: "", Speaker: ""},
 			Playback:  TTSPlaybackConfig{Volume: 1.0, Rate: 1.0, AudioDevice: ""},
 			Behavior:  TTSBehaviorConfig{ReadOwnMessages: false, InterruptOnNewMsg: true, QueueMessages: false, MaxQueueSize: 5},
+		},
+		ReflectionCollector: ReflectionCollectorConfig{
+			Enabled:              true,
+			AutoQueue:            true,
+			AutoSkillUnder:       ".meept/skills/auto/",
+			SkillProposalsOnly:   true,
+			AutoApplyAll:         false,
+			InactivityMinutes:    15,
+			TimerIntervalMinutes: 30,
+			TurnConfidenceMin:    0.6,
+			SessionConfidenceMin: 0.7,
+			MaxSessionProposals:  3,
 		},
 	}
 }
