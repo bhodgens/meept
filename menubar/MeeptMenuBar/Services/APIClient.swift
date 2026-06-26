@@ -209,20 +209,31 @@ class APIClient {
         return resp.goals.map { Goal(from: $0) }
     }
 
-    /// Approves a pending plan for an employee's goal. Backed by
-    /// `POST /api/v1/agents/{id}/goals/{gid}/plans/{pid}/approve`.
+    /// Approves a pending plan. Backed by
+    /// `POST /api/v1/plans/{pid}/approve` with body {approver_id, employee_id}.
+    /// S6: migrated from the deprecated agent-scoped endpoint.
     func approvePlan(employeeID: String, goalID: String, planID: String) async throws {
-        let path = "/api/v1/agents/\(employeeID)/goals/\(goalID)/plans/\(planID)/approve"
-        let request = try makeRequest(path: path, method: "POST")
+        let path = "/api/v1/plans/\(planID)/approve"
+        var request = try makeRequest(path: path, method: "POST")
+        let body = try JSONEncoder().encode([
+            "approver_id": employeeID,
+            "employee_id": employeeID
+        ])
+        request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try await performVoid(request: request)
     }
 
-    /// Rejects a pending plan for an employee's goal. Backed by
-    /// `POST /api/v1/agents/{id}/goals/{gid}/plans/{pid}/reject`.
+    /// Rejects a pending plan. Backed by
+    /// `POST /api/v1/plans/{pid}/reject` with body {by, reason}.
+    /// S6: migrated from the deprecated agent-scoped endpoint.
     func rejectPlan(employeeID: String, goalID: String, planID: String, reason: String) async throws {
-        let path = "/api/v1/agents/\(employeeID)/goals/\(goalID)/plans/\(planID)/reject"
+        let path = "/api/v1/plans/\(planID)/reject"
         var request = try makeRequest(path: path, method: "POST")
-        let body = try JSONEncoder().encode(["reason": reason])
+        let body = try JSONEncoder().encode([
+            "by": employeeID,
+            "reason": reason
+        ])
         request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try await performVoid(request: request)
