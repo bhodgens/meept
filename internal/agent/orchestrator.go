@@ -1123,12 +1123,23 @@ func buildConversationExcerpt(messages []llm.ChatMessage) string {
 	return sb.String()
 }
 
+// HandoffPropagator returns the callback that the TacticalScheduler invokes
+// on step completion. When non-nil, it replaces the legacy 500-char
+// truncation path with structured handoff propagation. Exposed so the daemon
+// can wire it via `tactical.SetHandoffPropagator(orchestrator.HandoffPropagator())`.
+// Returns nil if the orchestrator was not constructed with the handoff
+// dependencies (templateReg, registry) — callers should nil-check.
+func (o *Orchestrator) HandoffPropagator() func(ctx context.Context, completedStep *task.TaskStep) error {
+	if o.templateReg == nil || o.registry == nil {
+		return nil
+	}
+	return o.propagateHandoffToDependents
+}
+
 // propagateHandoffToDependents generates a structured StepHandoff for the
 // completed step and injects its markdown rendering into dependent (ready)
 // steps' AccumulatedContext. Falls back to the legacy truncation path when
 // the handoff LLM call fails or required deps are missing.
-//
-//nolint:U1000 // wired by Task 5 of Plan B (daemon wiring)
 func (o *Orchestrator) propagateHandoffToDependents(ctx context.Context, completedStep *task.TaskStep) error {
 	if o.stepStore == nil {
 		return nil

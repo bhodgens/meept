@@ -1720,6 +1720,19 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				StepStore:           stepStore,
 			})
 
+			// Wire the structured handoff path: when the orchestrator has its
+			// handoff dependencies (templateReg + registry), install the callback
+			// that replaces the tactical scheduler's legacy 500-char truncation.
+			// HandoffPropagator() returns nil when deps are missing; the tactical
+			// scheduler then falls back to its built-in legacy path.
+			if handoffFn := c.Orchestrator.HandoffPropagator(); handoffFn != nil {
+				tacticalScheduler.SetHandoffPropagator(handoffFn)
+				logger.Info("Structured handoff propagation enabled")
+			} else {
+				logger.Warn("Structured handoff disabled; using legacy 500-char truncation",
+					"reason", "orchestrator handoff deps not wired (templateReg or registry is nil)")
+			}
+
 			// Wire planPhaseSink: persists phase declarations produced by the
 			// multi-phase planner into the plan store. Converts PlanPhaseSpec
 			// → plan.PlanPhase and calls CreatePhase for each.
