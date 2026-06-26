@@ -120,6 +120,11 @@ func defaultDecomposeSpecFallback() string { return decomposeSpecFallbackBody }
 // file on disk. Kept in sync with the bundled file.
 func defaultSplitFallback() string { return splitFallbackBody }
 
+// defaultHandoffFallback mirrors config/prompts/orchestrator/handoff.md so the
+// generateHandoff fallback path works without the bundled markdown file on disk.
+// Kept in sync with the bundled file.
+func defaultHandoffFallback() string { return handoffFallbackBody }
+
 // NewDaemonPlannerTemplateLoader constructs a loader with the standard 4 tiers
 // and pre-registers fallbacks for the planner templates. The bundledPromptsPath
 // is used as the lowest-priority tier (typically "config/prompts" relative to
@@ -140,6 +145,7 @@ func NewDaemonPlannerTemplateLoader(bundledPromptsPath string) *plannerTemplateL
 	l.fallbacks["planner/interview.md"] = defaultInterviewFallback()
 	l.fallbacks["planner/decompose_spec.md"] = defaultDecomposeSpecFallback()
 	l.fallbacks["orchestrator/split.md"] = defaultSplitFallback()
+	l.fallbacks["orchestrator/handoff.md"] = defaultHandoffFallback()
 	return l
 }
 
@@ -259,3 +265,44 @@ Rules:
 - Each sub-step should fit in {{.BudgetTokens}} tokens including tool output
 - Preserve the original step's tool hint unless a sub-step genuinely needs a different agent
 - Maximum 5 sub-steps per split`
+
+// handoffFallbackBody mirrors config/prompts/orchestrator/handoff.md.
+// Template placeholders: {{.StepDescription}}, {{.ToolHint}}, {{.ConversationExcerpt}}.
+const handoffFallbackBody = `---
+name: orchestrator.handoff
+description: Summarizes a completed step's tool calls and outputs into a structured handoff for downstream steps
+---
+
+You are a step-completion summarizer. Produce a structured handoff document so downstream
+steps can continue the work without seeing the full conversation history.
+
+Step that just completed:
+- Description: {{.StepDescription}}
+- Tool hint: {{.ToolHint}}
+
+Conversation excerpt (tool calls + results from this step):
+{{.ConversationExcerpt}}
+
+Output ONLY valid JSON:
+{
+  "summary": "<2-4 sentence natural-language summary of what was accomplished>",
+  "files_modified": [
+    {"path": "<file>", "change": "created|modified|deleted", "summary": "<one-line description>"}
+  ],
+  "decisions": [
+    {"name": "<decision-name>", "rationale": "<why>"}
+  ],
+  "artifacts": [
+    {"name": "<artifact-name>", "kind": "file|interface|schema|decision|test_suite", "description": "..."}
+  ],
+  "follow_up_hints": ["<watch out for X>", "<consider Y for next step>"],
+  "tool_highlights": [
+    {"tool": "<tool-name>", "summary": "<one-line summary of call + result>"}
+  ],
+  "error_code": ""
+}
+
+Rules:
+- Leave error_code empty unless the step failed; on failure, set error_code and skip other fields
+- Truncate per-entry text: paths full, summaries 200 chars, descriptions 300 chars
+- Maximum 10 files_modified, 5 decisions, 5 artifacts, 5 follow_up_hints, 10 tool_highlights`

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/repomap"
 	intsecurity "github.com/caimlas/meept/internal/security"
@@ -1012,4 +1015,71 @@ func (o *Orchestrator) GenerateRepoMap(ctx context.Context, chatFiles, mentioned
 		return nil, nil
 	}
 	return o.repoMapGen.Generate(ctx, chatFiles, mentionedIdentifiers)
+}
+
+// generateHandoff calls the classifier LLM with the handoff.md template,
+// passing a conversation excerpt from the completed step. Returns a structured
+// StepHandoff that downstream steps can consume without seeing the full
+// conversation history.
+func (o *Orchestrator) generateHandoff(ctx context.Context, step *task.TaskStep, conv *Conversation) (*StepHandoff, error) {
+	if o.templateReg == nil {
+		return nil, fmt.Errorf("template registry not wired")
+	}
+	var messages []llm.ChatMessage
+	if conv != nil {
+		messages = conv.GetMessages()
+	}
+	excerpt := buildConversationExcerpt(messages)
+	prompt, err := o.templateReg.render("orchestrator/handoff.md", map[string]any{
+		"StepDescription":     step.Description,
+		"ToolHint":            step.ToolHint,
+		"ConversationExcerpt": excerpt,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("render handoff template: %w", err)
+	}
+	if o.registry == nil {
+		return nil, fmt.Errorf("agent registry not wired")
+	}
+	classifier, err := o.registry.Get(config.AgentIDChat)
+	if err != nil {
+		return nil, fmt.Errorf("classifier agent unavailable: %w", err)
+	}
+	handoffCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	conversationID := fmt.Sprintf("handoff-%s-%s", step.TaskID, step.ID)
+	output, err := classifier.RunOnce(handoffCtx, prompt, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("handoff LLM call failed: %w", err)
+	}
+	return parseHandoffJSON(output)
+}
+
+// buildConversationExcerpt extracts assistant + tool messages and returns a
+// markdown-formatted string suitable for the handoff LLM prompt. User and
+// system messages are excluded — they don't contribute to the step-completion
+// summary.
+func buildConversationExcerpt(messages []llm.ChatMessage) string {
+	if len(messages) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	const maxMsgLen = 500
+	for _, m := range messages {
+		content := m.Content
+		if len(content) > maxMsgLen {
+			content = content[:maxMsgLen] + "..."
+		}
+		switch m.Role {
+		case llm.RoleAssistant:
+			sb.WriteString("ASSISTANT: " + content + "\n")
+		case llm.RoleTool:
+			toolName := m.Name
+			if toolName == "" {
+				toolName = "unknown"
+			}
+			sb.WriteString(fmt.Sprintf("TOOL[%s]: %s\n", toolName, content))
+		}
+	}
+	return sb.String()
 }
