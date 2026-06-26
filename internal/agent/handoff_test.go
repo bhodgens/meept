@@ -11,6 +11,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
@@ -1038,5 +1039,91 @@ func TestTacticalScheduler_HandleHandoff_AmendmentFallbackToDirect(t *testing.T)
 	}
 	if created.AccumulatedContext == "" {
 		t.Error("expected accumulated context to be set")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// StepHandoff tests (Plan B Task 1: structured plan-step handoff types).
+// ---------------------------------------------------------------------------
+
+func TestStepHandoff_RenderMarkdown(t *testing.T) {
+	h := &StepHandoff{
+		StepID:          "s1",
+		StepDescription: "Refactor auth middleware",
+		Summary:         "Extracted JWT validation into separate function",
+		FilesModified: []FileChange{
+			{Path: "internal/auth/middleware.go", Change: "modified", Summary: "Extracted JWT validation"},
+		},
+		Decisions: []Decision{
+			{Name: "jwt-package", Rationale: "Standard library support"},
+		},
+		Artifacts: []plan.Artifact{
+			{Name: "auth-middleware", Kind: "file", Description: "JWT validation function"},
+		},
+		FollowUpHints: []string{"run tests"},
+		ToolHighlights: []ToolHighlight{
+			{Tool: "file_edit", Summary: "Modified middleware.go"},
+		},
+	}
+	md := h.RenderMarkdown()
+	if !strings.Contains(md, "Refactor auth middleware") {
+		t.Errorf("missing step description")
+	}
+	if !strings.Contains(md, "internal/auth/middleware.go") {
+		t.Errorf("missing file")
+	}
+	if !strings.Contains(md, "jwt-package") {
+		t.Errorf("missing decision")
+	}
+}
+
+func TestStepHandoff_ParseJSON(t *testing.T) {
+	raw := `{
+		"step_id": "s1",
+		"step_description": "x",
+		"summary": "done",
+		"files_modified": [{"path": "a.go", "change": "modified", "summary": "y"}],
+		"decisions": [],
+		"artifacts": [],
+		"follow_up_hints": [],
+		"tool_highlights": [],
+		"error_code": ""
+	}`
+	h, err := parseHandoffJSON(raw)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if h.Summary != "done" {
+		t.Errorf("summary = %q", h.Summary)
+	}
+}
+
+func TestStepHandoff_ErrorOnErrorCode(t *testing.T) {
+	raw := `{"error_code": "E_FAILED", "summary": ""}`
+	h, err := parseHandoffJSON(raw)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if h.ErrorCode != "E_FAILED" {
+		t.Errorf("ErrorCode = %q", h.ErrorCode)
+	}
+	if !h.Failed() {
+		t.Errorf("Failed() should be true")
+	}
+}
+
+func TestStepHandoff_Truncation(t *testing.T) {
+	h := &StepHandoff{
+		Summary: strings.Repeat("x", 500),
+		FilesModified: []FileChange{
+			{Summary: strings.Repeat("y", 500)},
+		},
+	}
+	h.Truncate()
+	if len(h.Summary) > 200 {
+		t.Errorf("summary not truncated: %d", len(h.Summary))
+	}
+	if len(h.FilesModified[0].Summary) > 200 {
+		t.Errorf("file summary not truncated")
 	}
 }
