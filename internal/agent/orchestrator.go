@@ -1083,3 +1083,83 @@ func buildConversationExcerpt(messages []llm.ChatMessage) string {
 	}
 	return sb.String()
 }
+
+// propagateHandoffToDependents generates a structured StepHandoff for the
+// completed step and injects its markdown rendering into dependent (ready)
+// steps' AccumulatedContext. Falls back to the legacy truncation path when
+// the handoff LLM call fails or required deps are missing.
+//
+//nolint:U1000 // wired by Task 5 of Plan B (daemon wiring)
+func (o *Orchestrator) propagateHandoffToDependents(ctx context.Context, completedStep *task.TaskStep) error {
+	if o.stepStore == nil {
+		return nil
+	}
+	readySteps, err := o.stepStore.GetReadySteps(completedStep.TaskID)
+	if err != nil {
+		return fmt.Errorf("get ready steps: %w", err)
+	}
+	if len(readySteps) == 0 {
+		return nil
+	}
+
+	// If handoff dependencies are not wired, fall back to legacy.
+	if o.templateReg == nil || o.registry == nil || o.tactical == nil {
+		return o.legacyPropagate(ctx, completedStep)
+	}
+
+	// Look up the conversation from the loop that ran the step.
+	loop, err := o.registry.Get(completedStep.AgentID)
+	if err != nil {
+		o.logger.Warn("Handoff: agent loop unavailable; falling back to legacy",
+			"step_id", completedStep.ID, "agent_id", completedStep.AgentID, "error", err)
+		return o.legacyPropagate(ctx, completedStep)
+	}
+	var conv *Conversation
+	if completedStep.ConversationID != "" {
+		conv = loop.GetConversation(completedStep.ConversationID)
+	}
+
+	// Generate handoff
+	h, err := o.generateHandoff(ctx, completedStep, conv)
+	if err != nil {
+		o.logger.Warn("Handoff generation failed; falling back to legacy truncation",
+			"step_id", completedStep.ID, "error", err)
+		return o.legacyPropagate(ctx, completedStep)
+	}
+
+	// Render as markdown and inject into each ready step
+	handoffMD := h.RenderMarkdown()
+	for _, dep := range readySteps {
+		dep.AppendToContext(handoffMD)
+		for _, ref := range completedStep.MemoryRefs {
+			dep.AddMemoryRef(ref)
+		}
+		if err := o.stepStore.Update(dep); err != nil {
+			o.logger.Error("Failed to update dependent step",
+				"step_id", dep.ID, "error", err)
+		}
+	}
+
+	// Record produced artifacts (phase-level gating comes from
+	// Plan C+F's checkPhaseReady).
+	if o.artifacts != nil {
+		for _, a := range h.Artifacts {
+			o.artifacts.Add(a, completedStep.ID)
+		}
+	}
+
+	o.logger.Info("Propagated structured handoff to ready steps",
+		"step_id", completedStep.ID,
+		"ready_steps", len(readySteps),
+	)
+	return nil
+}
+
+// legacyPropagate delegates to the deprecated legacy truncation path on the
+// tactical scheduler. It is a no-op (returns nil) when tactical is nil.
+func (o *Orchestrator) legacyPropagate(ctx context.Context, completedStep *task.TaskStep) error {
+	if o.tactical == nil {
+		return nil
+	}
+	return o.tactical.propagateContextToNextStepsLegacy(ctx, completedStep)
+}

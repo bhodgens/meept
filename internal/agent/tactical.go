@@ -60,6 +60,20 @@ type TacticalScheduler struct {
 	maxHandoffSteps        int                      // Max handoff steps per task (0 = unlimited)
 	handoffUseAmendment    bool                     // Route handoffs through amendment system
 	amendmentMgr           AmendmentSubmitter       // Optional: enables amendment-based step creation
+
+	// handoffPropagator, when set, replaces propagateContextToNextStepsLegacy.
+	// Set by the daemon when the orchestrator is wired with handoff deps
+	// (templateReg + registry + LLM). Nil falls back to the legacy 500-char
+	// truncation path.
+	handoffPropagator func(ctx context.Context, completedStep *task.TaskStep) error
+}
+
+// SetHandoffPropagator installs a callback that replaces the legacy
+// 500-char truncation propagation. nil is ignored (leaves the legacy path active).
+func (ts *TacticalScheduler) SetHandoffPropagator(fn func(ctx context.Context, completedStep *task.TaskStep) error) {
+	if fn != nil {
+		ts.handoffPropagator = fn
+	}
 }
 
 // AmendmentSubmitter is the interface for submitting amendment requests.
@@ -627,12 +641,19 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		}
 	}
 
-	// Propagate context to next ready steps
-	if err := ts.propagateContextToNextSteps(ctx, step); err != nil {
-		ts.logger.Error("Failed to propagate context to next steps",
-			"step_id", step.ID,
-			"error", err,
-		)
+	// Propagate context to next ready steps (handoff if wired, legacy fallback otherwise)
+	if ts.handoffPropagator != nil {
+		if err := ts.handoffPropagator(ctx, step); err != nil {
+			ts.logger.Error("Handoff propagation failed",
+				"step_id", step.ID, "error", err)
+		}
+	} else {
+		if err := ts.propagateContextToNextStepsLegacy(ctx, step); err != nil {
+			ts.logger.Error("Failed to propagate context to next steps",
+				"step_id", step.ID,
+				"error", err,
+			)
+		}
 	}
 
 	// NEW: Run validation gate if interval reached
@@ -1321,8 +1342,11 @@ func (ts *TacticalScheduler) buildResultSummary(steps []map[string]any) string {
 	return sb.String()
 }
 
-// propagateContextToNextSteps copies completed step's result and MemoryRefs to next ready steps.
-func (ts *TacticalScheduler) propagateContextToNextSteps(_ context.Context, completedStep *task.TaskStep) error {
+// propagateContextToNextStepsLegacy is the legacy 500-char truncation path.
+// Deprecated: kept as fallback for when generateHandoff fails or handoff
+// dependencies (templateReg, registry) are not wired. New code should ensure
+// handoff deps are set so this is never reached in production.
+func (ts *TacticalScheduler) propagateContextToNextStepsLegacy(_ context.Context, completedStep *task.TaskStep) error {
 	// Get next ready steps
 	readySteps, err := ts.stepStore.GetReadySteps(completedStep.TaskID)
 	if err != nil {
