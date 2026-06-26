@@ -284,6 +284,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         context.goToolSkills();
       case 'memory':
         context.goToolMemory();
+      case 'reflection':
+        context.goToolReflection();
       case 'settings':
         context.goSettings();
       // Other tools (files, terminal, calendar, metrics) don't have
@@ -294,7 +296,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   /// Returns true if [toolName] has a dedicated full-screen route.
   bool _hasRoute(String toolName) {
-    const routedTools = {'search', 'branches', 'skills', 'memory', 'settings'};
+    const routedTools = {'search', 'branches', 'skills', 'memory', 'reflection', 'settings'};
     return routedTools.contains(toolName);
   }
 

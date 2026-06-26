@@ -826,6 +826,45 @@ class SdkApiClient {
     return _post('/api/v1/skills/$slug/execute', body: params);
   }
 
+  // ===== Reflection =====
+
+  /// Returns the raw `proposals` array from
+  /// `GET /api/v1/reflection/proposals`.
+  Future<List<Map<String, dynamic>>> getReflectionProposalsRaw() async {
+    final raw = await _get('/api/v1/reflection/proposals');
+    final proposalsRaw = raw['proposals'] as List? ?? [];
+    return proposalsRaw
+        .whereType<Map>()
+        .map((p) => Map<String, dynamic>.from(p))
+        .toList();
+  }
+
+  /// Applies a reflection proposal via
+  /// `POST /api/v1/reflection/proposals/{id}/apply`.
+  Future<Map<String, dynamic>> applyReflectionProposal(String id) async {
+    return _post('/api/v1/reflection/proposals/$id/apply');
+  }
+
+  /// Skips a reflection proposal via
+  /// `POST /api/v1/reflection/proposals/{id}/skip`.
+  Future<Map<String, dynamic>> skipReflectionProposal(String id) async {
+    return _post('/api/v1/reflection/proposals/$id/skip');
+  }
+
+  /// Queues a manual reflection via
+  /// `POST /api/v1/reflection/remember`.
+  Future<Map<String, dynamic>> rememberReflection({
+    required String target,
+    required String change,
+    required String justification,
+  }) async {
+    return _post('/api/v1/reflection/remember', body: {
+      'target': target,
+      'change': change,
+      'justification': justification,
+    });
+  }
+
   // ===== Search =====
 
   /// Returns the raw search-response JSON.  The SDK only models the

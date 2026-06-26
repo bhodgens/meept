@@ -8,6 +8,7 @@ import '../features/search/search_panel.dart';
 import '../features/projects/branches_panel.dart';
 import '../features/skills/skill_panel.dart';
 import '../features/memory/memory_panel.dart';
+import '../features/reflection/reflection_panel.dart';
 import '../theme/colors.dart';
 import '../theme/typography.dart';
 
@@ -22,6 +23,7 @@ import '../theme/typography.dart';
 ///   /tools/branches -> BranchesPanel
 ///   /tools/skills   -> SkillPanel
 ///   /tools/memory   -> MemoryPanel
+///   /tools/reflection -> ReflectionPanel
 final GoRouter router = GoRouter(
   initialLocation: '/',
   debugLogDiagnostics: true,
@@ -110,6 +112,13 @@ final GoRouter router = GoRouter(
       name: 'toolsMemory',
       builder: (context, state) {
         return const MemoryPanel();
+      },
+    ),
+    GoRoute(
+      path: '/tools/reflection',
+      name: 'toolsReflection',
+      builder: (context, state) {
+        return const ReflectionPanel();
       },
     ),
   ],
@@ -265,4 +274,7 @@ extension AppRouterExtension on BuildContext {
 
   /// Navigate to the memory tool panel (replace current entry).
   void goToolMemory() => go('/tools/memory');
+
+  /// Navigate to the reflection tool panel (replace current entry).
+  void goToolReflection() => go('/tools/reflection');
 }
