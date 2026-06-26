@@ -1,0 +1,208 @@
+package agent
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+)
+
+// ReflectionProposal represents a single proposed improvement surfaced by the
+// reflection system (or by a manual /remember invocation).
+type ReflectionProposal struct {
+	ID            string    `json:"id"`
+	Type          string    `json:"type"` // skill_create|skill_update|agent_prompt|project_instruction|prompt_component
+	Target        string    `json:"target"`
+	Change        string    `json:"change"`
+	Justification string    `json:"justification"`
+	Confidence    float64   `json:"confidence"`
+	Source        string    `json:"source"` // turn:sessionID | session:sessionID | manual:/remember
+	Status        string    `json:"status"` // pending|applied|skipped
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// proposalQueue appends ReflectionProposals to a markdown file and parses
+// pending entries back out. The file format is human-readable and append-only:
+//
+//	## [pending] 2026-06-25 — <id>
+//	- **Type:** <type>
+//	- **Target:** <target>
+//	- **Confidence:** 0.80
+//	- **Source:** <source>
+//	- **Justification:** <text>
+//	- **Proposed change:** <text>
+//
+// MarkApplied / MarkSkipped rewrite the header in place.
+type proposalQueue struct {
+	mu   sync.Mutex
+	path string
+}
+
+func newProposalQueue(path string) *proposalQueue {
+	return &proposalQueue{path: path}
+}
+
+// Append writes a new proposal to the queue file. ID, Status, and CreatedAt
+// are filled in if zero.
+func (q *proposalQueue) Append(p ReflectionProposal) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if p.ID == "" {
+		p.ID = generateProposalID()
+	}
+	if p.Status == "" {
+		p.Status = "pending"
+	}
+	if p.CreatedAt.IsZero() {
+		p.CreatedAt = time.Now().UTC()
+	}
+	return q.appendToFile(p)
+}
+
+func (q *proposalQueue) appendToFile(p ReflectionProposal) error {
+	if err := os.MkdirAll(filepath.Dir(q.path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(q.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "\n## [%s] %s — %s\n", p.Status, p.CreatedAt.Format("2006-01-02"), p.ID)
+	fmt.Fprintf(f, "- **Type:** %s\n", p.Type)
+	fmt.Fprintf(f, "- **Target:** %s\n", p.Target)
+	fmt.Fprintf(f, "- **Confidence:** %.2f\n", p.Confidence)
+	fmt.Fprintf(f, "- **Source:** %s\n", p.Source)
+	fmt.Fprintf(f, "- **Justification:** %s\n", p.Justification)
+	fmt.Fprintf(f, "- **Proposed change:** %s\n", strings.ReplaceAll(p.Change, "\n", "\n  "))
+	return nil
+}
+
+// ListPending reads the queue file and returns all proposals with status "pending".
+func (q *proposalQueue) ListPending() ([]ReflectionProposal, error) {
+	data, err := os.ReadFile(q.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	all := parseProposals(string(data))
+	var pending []ReflectionProposal
+	for _, p := range all {
+		if p.Status == "pending" || p.Status == "" {
+			pending = append(pending, p)
+		}
+	}
+	return pending, nil
+}
+
+// MarkApplied updates a proposal's status from "pending" to "applied" with timestamp.
+func (q *proposalQueue) MarkApplied(id string) error {
+	return q.markStatus(id, "applied")
+}
+
+// MarkSkipped updates a proposal's status from "pending" to "skipped" with timestamp.
+func (q *proposalQueue) MarkSkipped(id string) error {
+	return q.markStatus(id, "skipped")
+}
+
+func (q *proposalQueue) markStatus(id, newStatus string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	data, err := os.ReadFile(q.path)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(data), "\n")
+	stamp := time.Now().UTC().Format("2006-01-02")
+	// The ID lives in the ## [pending] header line itself. Find the header
+	// that contains the ID and rewrite its status marker in place.
+	for i, line := range lines {
+		if strings.HasPrefix(line, "## [pending]") && strings.Contains(line, id) {
+			lines[i] = strings.Replace(
+				line,
+				"[pending]",
+				fmt.Sprintf("[%s %s]", newStatus, stamp),
+				1,
+			)
+			break
+		}
+	}
+	return os.WriteFile(q.path, []byte(strings.Join(lines, "\n")), 0o644)
+}
+
+// isAlwaysProposeOnly returns true for files that must never be auto-applied
+// regardless of reflection.auto_apply_all config. CLAUDE.md, AGENT.md, and
+// anything under config/prompts/ are always propose-only.
+func isAlwaysProposeOnly(target string) bool {
+	clean := filepath.Clean(target)
+	if clean == "CLAUDE.md" {
+		return true
+	}
+	if strings.HasPrefix(clean, "config/agents/") && strings.HasSuffix(clean, "AGENT.md") {
+		return true
+	}
+	if strings.HasPrefix(clean, "config/prompts/") {
+		return true
+	}
+	return false
+}
+
+func generateProposalID() string {
+	b := make([]byte, 6)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp if rand fails (shouldn't happen in practice)
+		return fmt.Sprintf("p%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
+// parseProposals does a lenient scan of the queue markdown and extracts
+// proposals. Status and ID are pulled from the ## [<status>] <date> — <id> header.
+func parseProposals(content string) []ReflectionProposal {
+	var out []ReflectionProposal
+	lines := strings.Split(content, "\n")
+	var cur *ReflectionProposal
+	for _, line := range lines {
+		if strings.HasPrefix(line, "## [") {
+			if cur != nil {
+				out = append(out, *cur)
+			}
+			cur = &ReflectionProposal{}
+			// Parse: "## [pending] 2026-06-25 — abc123"
+			rest := strings.TrimPrefix(line, "## [")
+			// rest = "pending] 2026-06-25 — abc123"
+			closeBracket := strings.Index(rest, "]")
+			if closeBracket > 0 {
+				cur.Status = strings.TrimSpace(rest[:closeBracket])
+				// drop the trailing "applied <date>" or "skipped <date>" if present
+				cur.Status = strings.Fields(cur.Status)[0]
+				afterBracket := rest[closeBracket+1:]
+				// afterBracket = " 2026-06-25 — abc123"
+				emIdx := strings.Index(afterBracket, "—")
+				if emIdx >= 0 {
+					cur.ID = strings.TrimSpace(afterBracket[emIdx+len("—"):])
+				}
+			}
+		} else if cur != nil && strings.HasPrefix(line, "- **Type:**") {
+			cur.Type = strings.TrimSpace(strings.TrimPrefix(line, "- **Type:**"))
+		} else if cur != nil && strings.HasPrefix(line, "- **Target:**") {
+			cur.Target = strings.TrimSpace(strings.TrimPrefix(line, "- **Target:**"))
+		} else if cur != nil && strings.HasPrefix(line, "- **Confidence:**") {
+			fmt.Sscanf(line, "- **Confidence:** %f", &cur.Confidence)
+		} else if cur != nil && strings.HasPrefix(line, "- **Source:**") {
+			cur.Source = strings.TrimSpace(strings.TrimPrefix(line, "- **Source:**"))
+		} else if cur != nil && strings.HasPrefix(line, "- **Justification:**") {
+			cur.Justification = strings.TrimSpace(strings.TrimPrefix(line, "- **Justification:**"))
+		}
+	}
+	if cur != nil {
+		out = append(out, *cur)
+	}
+	return out
+}
