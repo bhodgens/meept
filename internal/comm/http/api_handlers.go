@@ -2697,6 +2697,31 @@ func (s *Server) handlePlanPhases(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]any{"phases": phases})
 }
 
+// handlePlanHandoffs handles GET /api/v1/plans/{id}/handoffs.
+// MVP: returns the list of structured step handoffs. Currently returns null
+// because handoff content lives in step.AccumulatedContext, not a separate
+// persistence layer.
+func (s *Server) handlePlanHandoffs(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Plan == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "plan service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "plan id is required")
+		return
+	}
+
+	handoffs, err := s.services.Plan.Handoffs(r.Context(), id)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{"handoffs": handoffs})
+}
+
 // handlePlanApprove handles POST /api/v1/plans/{id}/approve.
 func (s *Server) handlePlanApprove(w http.ResponseWriter, r *http.Request) {
 	if s.services == nil || s.services.Plan == nil {

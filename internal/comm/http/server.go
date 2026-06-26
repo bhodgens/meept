@@ -1163,6 +1163,7 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/plans", s.handlePlanCreate)
 	mux.HandleFunc("GET /api/v1/plans/{id}", s.handlePlanGet)
 	mux.HandleFunc("GET /api/v1/plans/{id}/phases", s.handlePlanPhases)
+	mux.HandleFunc("GET /api/v1/plans/{id}/handoffs", s.handlePlanHandoffs)
 	mux.HandleFunc("POST /api/v1/plans/{id}/approve", s.handlePlanApprove)
 	mux.HandleFunc("POST /api/v1/plans/{id}/reject", s.handlePlanReject)
 	mux.HandleFunc("POST /api/v1/plans/{id}/confirm", s.handlePlanConfirm)

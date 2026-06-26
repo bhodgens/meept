@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/plan"
 )
 
@@ -200,6 +201,18 @@ func (s *PlanService) Phases(ctx context.Context, planID string) ([]*plan.PlanPh
 		return nil, wrapError("plan", "Phases", err)
 	}
 	return phases, nil
+}
+
+// Handoffs returns structured handoffs associated with a plan's steps.
+// MVP: returns nil — handoff content is currently embedded in step.AccumulatedContext,
+// not persisted as separate records. Full handoff persistence is a follow-up.
+// This method exists for API parity with the plans surface.
+func (s *PlanService) Handoffs(ctx context.Context, planID string) ([]*agent.StepHandoff, error) {
+	_ = ctx
+	_ = planID
+	// TODO(follow-up): query steps for planID, parse handoff markdown from
+	// AccumulatedContext, return structured records. For now, return nil.
+	return nil, nil
 }
 
 // Revise requests revision of a plan.
