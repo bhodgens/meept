@@ -246,6 +246,8 @@ func parseProposals(content string) []ReflectionProposal {
 			cur.Source = strings.TrimSpace(strings.TrimPrefix(line, "- **Source:**"))
 		} else if cur != nil && strings.HasPrefix(line, "- **Justification:**") {
 			cur.Justification = strings.TrimSpace(strings.TrimPrefix(line, "- **Justification:**"))
+		} else if cur != nil && strings.HasPrefix(line, "- **Proposed change:**") {
+			cur.Change = strings.TrimSpace(strings.TrimPrefix(line, "- **Proposed change:**"))
 		}
 	}
 	if cur != nil {
