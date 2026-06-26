@@ -46,7 +46,7 @@ func newRegistryFromTempBundled(t *testing.T, bundledPath string) *AgentRegistry
 	// we manually run loadAgentDefinitions with a custom Discovery.
 	r := &AgentRegistry{
 		specs:           make(map[string]*AgentSpec),
-		loops:           make(map[string]*AgentLoop),
+		loops:           make(map[string]map[string]*AgentLoop),
 		activeQueues:    make(map[string]*QueueEntry),
 		logger:          silentLogger(),
 		sharedConvStore: NewConversationStore(100),
@@ -211,7 +211,7 @@ func TestLoadAgentDefinitions_AllBundled(t *testing.T) {
 
 	r := &AgentRegistry{
 		specs:           make(map[string]*AgentSpec),
-		loops:           make(map[string]*AgentLoop),
+		loops:           make(map[string]map[string]*AgentLoop),
 		activeQueues:    make(map[string]*QueueEntry),
 		logger:          silentLogger(),
 		sharedConvStore: NewConversationStore(100),
@@ -323,7 +323,7 @@ func TestSelectReviewer_DynamicByDomain(t *testing.T) {
 	// Build a registry with reviewer specs covering each domain.
 	r := &AgentRegistry{
 		specs:           make(map[string]*AgentSpec),
-		loops:           make(map[string]*AgentLoop),
+		loops:           make(map[string]map[string]*AgentLoop),
 		activeQueues:    make(map[string]*QueueEntry),
 		logger:          silentLogger(),
 		sharedConvStore: NewConversationStore(100),
@@ -376,7 +376,7 @@ func TestSelectReviewer_FallsBackToTestReviewer(t *testing.T) {
 	// Empty registry → no domain match → falls back to "test-reviewer".
 	r := &AgentRegistry{
 		specs:           make(map[string]*AgentSpec),
-		loops:           make(map[string]*AgentLoop),
+		loops:           make(map[string]map[string]*AgentLoop),
 		activeQueues:    make(map[string]*QueueEntry),
 		logger:          silentLogger(),
 		sharedConvStore: NewConversationStore(100),
@@ -591,7 +591,7 @@ func newTestRegistryWithResolver(t *testing.T) *AgentRegistry {
 	resolver := llm.NewResolver(cfg, silentLogger())
 	r := &AgentRegistry{
 		specs:           make(map[string]*AgentSpec),
-		loops:           make(map[string]*AgentLoop),
+		loops:           make(map[string]map[string]*AgentLoop),
 		activeQueues:    make(map[string]*QueueEntry),
 		resolver:        resolver,
 		logger:          silentLogger(),
@@ -656,5 +656,95 @@ func TestAgentRegistry_GetModelConfig_UnresolvableModel(t *testing.T) {
 	}
 	if cfg != nil {
 		t.Errorf("want nil cfg; got %+v", cfg)
+	}
+}
+
+// --- per-task-per-agent loop keying tests (Plan B Task 4) ---
+//
+// newTestRegistryForTask builds a minimal AgentRegistry with a few executor
+// specs so GetForTask has something to lazy-create loops from. Loops created
+// here have no LLM/bus/tools wired, but that's fine — we only test identity
+// and bucketing, not loop execution.
+//
+// Named with the ForTask suffix to avoid colliding with the pre-existing
+// no-arg newTestRegistry() in registry_queue_test.go.
+func newTestRegistryForTask(t *testing.T) *AgentRegistry {
+	t.Helper()
+	r := &AgentRegistry{
+		specs:           make(map[string]*AgentSpec),
+		loops:           make(map[string]map[string]*AgentLoop),
+		activeQueues:    make(map[string]*QueueEntry),
+		logger:          silentLogger(),
+		sharedConvStore: NewConversationStore(100),
+	}
+	r.specs["coder"] = &AgentSpec{ID: "coder", Name: "coder", Role: RoleExecutor, Enabled: true}
+	r.specs["debugger"] = &AgentSpec{ID: "debugger", Name: "debugger", Role: RoleExecutor, Enabled: true}
+	return r
+}
+
+func TestAgentRegistry_GetForTask_DistinctLoops(t *testing.T) {
+	reg := newTestRegistryForTask(t)
+	loop1, err := reg.GetForTask("coder", "task-1")
+	if err != nil {
+		t.Fatalf("GetForTask task-1: %v", err)
+	}
+	loop2, err := reg.GetForTask("coder", "task-2")
+	if err != nil {
+		t.Fatalf("GetForTask task-2: %v", err)
+	}
+	if loop1 == loop2 {
+		t.Error("same agentID + different taskIDs returned same loop")
+	}
+}
+
+func TestAgentRegistry_GetForTask_SameTaskReturnsSameLoop(t *testing.T) {
+	reg := newTestRegistryForTask(t)
+	loop1, _ := reg.GetForTask("coder", "task-1")
+	loop2, _ := reg.GetForTask("coder", "task-1")
+	if loop1 != loop2 {
+		t.Error("same (agent, task) returned different loops")
+	}
+}
+
+func TestAgentRegistry_GetForTask_EmptyTaskIDDefaults(t *testing.T) {
+	reg := newTestRegistryForTask(t)
+	loop1, _ := reg.GetForTask("coder", "")
+	loop2, _ := reg.GetForTask("coder", "_default")
+	if loop1 != loop2 {
+		t.Error("empty taskID should default to _default")
+	}
+}
+
+func TestAgentRegistry_ReleaseTaskLoops(t *testing.T) {
+	reg := newTestRegistryForTask(t)
+	reg.GetForTask("coder", "task-1")
+	reg.GetForTask("debugger", "task-1")
+	reg.ReleaseTaskLoops("task-1")
+	// After release, new GetForTask should create a fresh loop.
+	loop1, _ := reg.GetForTask("coder", "task-1")
+	if loop1 == nil {
+		t.Error("GetForTask returned nil after release")
+	}
+}
+
+func TestAgentRegistry_Get_BackwardCompat(t *testing.T) {
+	reg := newTestRegistryForTask(t)
+	loop, err := reg.Get("coder")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if loop == nil {
+		t.Error("Get returned nil")
+	}
+}
+
+func TestAgentRegistry_ReleaseTaskLoops_EmptyTaskID_Noop(t *testing.T) {
+	reg := newTestRegistryForTask(t)
+	reg.GetForTask("coder", "task-1")
+	// Empty taskID should be a no-op (doesn't delete anything).
+	reg.ReleaseTaskLoops("")
+	loop, _ := reg.GetForTask("coder", "task-1")
+	if loop == nil {
+		t.Error("empty taskID release should not delete existing loops")
 	}
 }

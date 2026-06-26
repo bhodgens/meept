@@ -180,7 +180,7 @@ func TestPlannerThresholds_Defaults(t *testing.T) {
 func newTestRegistryWithSpecs(specs ...*AgentSpec) *AgentRegistry {
 	r := &AgentRegistry{
 		specs:           make(map[string]*AgentSpec),
-		loops:           make(map[string]*AgentLoop),
+		loops:           make(map[string]map[string]*AgentLoop),
 		activeQueues:    make(map[string]*QueueEntry),
 		logger:          silentLogger(),
 		sharedConvStore: NewConversationStore(100),

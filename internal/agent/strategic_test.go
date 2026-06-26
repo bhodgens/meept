@@ -1425,7 +1425,7 @@ func TestConductInterview_ErrorTypes(t *testing.T) {
 		// "planner" spec, Get returns an error.
 		reg := &AgentRegistry{
 			specs:           make(map[string]*AgentSpec),
-			loops:           make(map[string]*AgentLoop),
+			loops:           make(map[string]map[string]*AgentLoop),
 			activeQueues:    make(map[string]*QueueEntry),
 			logger:          slogDiscardLogger(),
 			sharedConvStore: NewConversationStore(10),

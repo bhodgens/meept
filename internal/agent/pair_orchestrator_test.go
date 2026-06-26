@@ -16,7 +16,7 @@ func TestPairOrchestrator_SubscriptionSetup(t *testing.T) {
 	defer msgBus.Close()
 
 	registry := &AgentRegistry{
-		loops: make(map[string]*AgentLoop),
+		loops: make(map[string]map[string]*AgentLoop),
 	}
 
 	po := NewPairOrchestrator(PairOrchestratorDeps{
@@ -49,7 +49,7 @@ func TestPairOrchestrator_InvalidPayload(t *testing.T) {
 	defer msgBus.Close()
 
 	registry := &AgentRegistry{
-		loops: make(map[string]*AgentLoop),
+		loops: make(map[string]map[string]*AgentLoop),
 	}
 
 	po := NewPairOrchestrator(PairOrchestratorDeps{
@@ -101,7 +101,7 @@ func TestPairOrchestrator_StartRequestValidation(t *testing.T) {
 	defer msgBus.Close()
 
 	registry := &AgentRegistry{
-		loops: make(map[string]*AgentLoop),
+		loops: make(map[string]map[string]*AgentLoop),
 	}
 
 	po := NewPairOrchestrator(PairOrchestratorDeps{
