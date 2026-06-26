@@ -1,9 +1,0 @@
-id: test-instr-update
-name: intent:code
-trigger: intent:code
-action: shell
-enabled: true
-scope: ""
-priority: ""
-created_at: 2026-06-24T18:45:41.177537Z
-updated_at: 2026-06-24T18:45:41.177537Z
