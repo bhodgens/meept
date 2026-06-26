@@ -55,6 +55,7 @@ type ServiceRegistry struct {
 	Upload       *UploadService
 	Thread       *ThreadService
 	Employee     *EmployeeService
+	Reflection   *ReflectionService
 }
 
 // Config holds dependencies for service instantiation.
@@ -89,6 +90,7 @@ type Config struct {
 	UploadsMaxMB     int
 	UploadsTypes     []string
 	EmployeeManager  EmployeeManager
+	ReflectionQueuePath string
 }
 
 // NewRegistry creates all services with their dependencies.
@@ -201,6 +203,10 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 	if cfg.EmployeeManager != nil {
 		reg.Employee = NewEmployeeService(cfg.EmployeeManager)
 	}
+
+	// ReflectionService is always available — it just needs a queue path
+	// (defaults to ".meept/improvements.md" when empty).
+	reg.Reflection = NewReflectionService(cfg.ReflectionQueuePath)
 
 	return reg, nil
 }

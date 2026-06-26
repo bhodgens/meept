@@ -1215,6 +1215,12 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	if s.CompressionStatsGetter != nil {
 		mux.HandleFunc("GET /api/v1/compression/stats", s.handleCompressionStats)
 	}
+
+	// Reflection proposal endpoints
+	mux.HandleFunc("GET /api/v1/reflection/proposals", s.handleReflectionList)
+	mux.HandleFunc("POST /api/v1/reflection/proposals/{id}/apply", s.handleReflectionApply)
+	mux.HandleFunc("POST /api/v1/reflection/proposals/{id}/skip", s.handleReflectionSkip)
+	mux.HandleFunc("POST /api/v1/reflection/remember", s.handleReflectionRemember)
 }
 
 // middleware applies common middleware (CORS, logging, auth).

@@ -3776,3 +3776,84 @@ func (s *Server) handleSkillsEvolve(w http.ResponseWriter, r *http.Request) {
 	}
 	s.writeJSON(w, http.StatusOK, result)
 }
+
+// ===== Reflection Endpoints =====
+
+// handleReflectionList handles GET /api/v1/reflection/proposals.
+// Returns all pending reflection proposals.
+func (s *Server) handleReflectionList(w http.ResponseWriter, _ *http.Request) {
+	if s.services == nil || s.services.Reflection == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "reflection service not available")
+		return
+	}
+	pending, err := s.services.Reflection.ListPending()
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{"proposals": pending})
+}
+
+// handleReflectionApply handles POST /api/v1/reflection/proposals/{id}/apply.
+// Marks a proposal as applied.
+func (s *Server) handleReflectionApply(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Reflection == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "reflection service not available")
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "missing proposal id")
+		return
+	}
+	if err := s.services.Reflection.Apply(id); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{KeyStatus: "applied", "id": id})
+}
+
+// handleReflectionSkip handles POST /api/v1/reflection/proposals/{id}/skip.
+// Marks a proposal as skipped.
+func (s *Server) handleReflectionSkip(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Reflection == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "reflection service not available")
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "missing proposal id")
+		return
+	}
+	if err := s.services.Reflection.Skip(id); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{KeyStatus: "skipped", "id": id})
+}
+
+// handleReflectionRemember handles POST /api/v1/reflection/remember.
+// Creates a manual proposal and appends it to the queue.
+func (s *Server) handleReflectionRemember(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Reflection == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "reflection service not available")
+		return
+	}
+	var body struct {
+		Target        string `json:"target"`
+		Change        string `json:"change"`
+		Justification string `json:"justification"`
+	}
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	if body.Target == "" || body.Change == "" {
+		s.writeError(w, http.StatusBadRequest, "target and change are required")
+		return
+	}
+	if err := s.services.Reflection.Remember(body.Target, body.Change, body.Justification); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+	s.writeJSON(w, http.StatusCreated, map[string]any{KeyStatus: KeyQueued, "target": body.Target})
+}
