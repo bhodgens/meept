@@ -10,6 +10,10 @@ import (
 	"github.com/caimlas/meept/internal/skills"
 )
 
+// maxRelevantSkills limits how many relevance-matched skills appear in the
+// system prompt to avoid context bloat.
+const maxRelevantSkills = 5
+
 // ContextInjector merges learning patterns and user instructions
 // into system prompts for context enrichment.
 type ContextInjector struct {
@@ -37,13 +41,16 @@ func (c *ContextInjector) SetSkillLoader(loader *skills.LazySkillLoader) {
 	}
 }
 
-// BuildSystemPrompt builds a system prompt with both learned patterns
-// and active user instructions injected.
+// BuildSystemPrompt builds a system prompt with active user instructions
+// and skills injected. The base prompt is used as the relevance query for
+// skill filtering: skills whose name, description, tags, or examples match
+// the task context in base are prioritized. If no relevance matches are
+// found (or the base is empty), all cached skills are included as fallback.
 //
-// Per Phase 4 spec 4.2:
-// - Merges Learning patterns AND User Instructions
-// - Format: "## Standing Instructions" + "## Learned Patterns"
-// - Queries instructionStore.GetActive() for active instructions
+// Per Phase 4 spec 4.2 + turbo Thread E self-reflection:
+// - Standing instructions from preferences.Store
+// - Active skills filtered by relevance to base
+// - Learned patterns section removed (patterns deprecated; skills replace)
 func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) string {
 	var sb strings.Builder
 	sb.WriteString(base)
@@ -54,27 +61,15 @@ func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) st
 		instructions = c.instructions.GetActive()
 	}
 
-	// Get learned patterns (if learning pipeline is available).
-	// NOTE: patterns.json is deprecated; patterns may still be present
-	// from prior versions (loadPatterns remains active for backward-compat
-	// reads). The Learned Patterns section below is retained for that
-	// transitional data; new learning flows through skills (see Active
-	// Skills section below).
-	var patterns []*selfimprove.LearnedPattern
-	if c.learning != nil {
-		// Retrieve top patterns for general context
-		patterns, _ = c.learning.Retrieve(ctx, "general", "all", 10)
-	}
-
-	// Compute cached skill names once; skills section is injected when
-	// the skillLoader has any cached skills.
+	// Compute relevant skill names: use relevance filtering when possible,
+	// fall back to all cached skills when no query signal or no matches.
 	var skillNames []string
 	if c.skillLoader != nil {
-		skillNames = c.skillLoader.CachedNames()
+		skillNames = c.relevantSkillNames(base)
 	}
 
-	// Inject context if we have instructions, patterns, or active skills.
-	if len(instructions) > 0 || len(patterns) > 0 || len(skillNames) > 0 {
+	// Inject context if we have instructions or active skills.
+	if len(instructions) > 0 || len(skillNames) > 0 {
 		sb.WriteString("\n\n# Active Context\n")
 
 		// Standing instructions section
@@ -90,18 +85,7 @@ func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) st
 			}
 		}
 
-		// Learned patterns section (deprecated; transitional only).
-		if len(patterns) > 0 {
-			sb.WriteString("\n## Learned Patterns\n")
-			sb.WriteString("The following patterns have been learned from past interactions:\n\n")
-			for i, p := range patterns {
-				sb.WriteString(fmt.Sprintf("%d. %s (confidence: %.2f, type: %s)\n",
-					i+1, p.Description, p.Confidence, p.Type))
-			}
-		}
-
-		// Active skills section (replaces Learned Patterns long-term;
-		// patterns.json writes are disabled — see LearningPipeline.StorePattern).
+		// Active skills section: relevance-filtered subset of cached skills.
 		if len(skillNames) > 0 {
 			sb.WriteString("\n## Active Skills\n")
 			sb.WriteString("The following skills are loaded and may be relevant to this task:\n\n")
@@ -120,6 +104,58 @@ func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) st
 	}
 
 	return sb.String()
+}
+
+// relevantSkillNames returns a relevance-filtered list of cached skill names.
+// When base is non-empty and the skill index is available, MatchAll ranks
+// skills by fuzzy match score. Only skills with score > 0 that are also in
+// cache are returned, capped at maxRelevantSkills. If no relevance matches
+// are found (or base is empty, or no index), all cached names are returned
+// as fallback so skills are never silently dropped.
+func (c *ContextInjector) relevantSkillNames(base string) []string {
+	cached := c.skillLoader.CachedNames()
+	if len(cached) == 0 {
+		return nil
+	}
+
+	if base == "" {
+		return cached
+	}
+
+	idx := c.skillLoader.Index()
+	if idx == nil {
+		return cached
+	}
+
+	matches := idx.MatchAll(base)
+	if len(matches) == 0 {
+		return cached
+	}
+
+	// Build a set of cached skill names for O(1) lookup.
+	cachedSet := make(map[string]bool, len(cached))
+	for _, name := range cached {
+		cachedSet[strings.ToLower(name)] = true
+	}
+
+	// Collect matched skills that are also cached, up to maxRelevantSkills.
+	var result []string
+	for _, m := range matches {
+		if len(result) >= maxRelevantSkills {
+			break
+		}
+		nameLower := strings.ToLower(m.Entry.Name)
+		if cachedSet[nameLower] {
+			result = append(result, m.Entry.Name)
+		}
+	}
+
+	// If no matched skills are cached, fall back to all cached skills.
+	if len(result) == 0 {
+		return cached
+	}
+
+	return result
 }
 
 // HasActiveInstructions returns true if there are active user instructions.
