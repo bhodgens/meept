@@ -208,7 +208,62 @@ func (p employeeBusPublisher) PublishEmployeePaused(employeeID, reason, source s
 	p.bus.Publish("employee.paused", msg)
 }
 
-// agentLoopBotExecutorAdapter wraps *agent.AgentLoop to satisfy
+// PublishCriticalFinding publishes an employee.critical_finding bus event (E4).
+// PostTurnAuditor emits this when it finds a critical finding. The Manager
+// subscribes and calls Pause on receipt, decoupling the auditor from the
+// lifecycle. Best-effort: errors are logged, not returned.
+func (p employeeBusPublisher) PublishCriticalFinding(employeeID, findingID, violatedRule, evidence string) {
+	if p.bus == nil {
+		return
+	}
+	payload := employee.CriticalFindingEvent{
+		EmployeeID:   employeeID,
+		FindingID:    findingID,
+		ViolatedRule: violatedRule,
+		Evidence:     evidence,
+	}
+	msg, err := models.NewBusMessage(
+		models.MessageType("employee.critical_finding"),
+		"employee-auditor",
+		payload,
+	)
+	if err != nil {
+		p.logger.Warn("employee.critical_finding bus event: marshal failed",
+			"employee_id", employeeID, "error", err)
+		return
+	}
+	msg.Topic = "employee.critical_finding"
+	p.bus.Publish("employee.critical_finding", msg)
+}
+
+// PublishConstitutionValidationError publishes an
+// employee.constitution_validation_error bus event (H5). Emitted when a
+// constitution fails validation at hire or load time. The event carries the
+// employee ID, the validation error, and a summary of the invalid
+// constitution for diagnostic purposes. Best-effort: errors are logged, not
+// returned.
+func (p employeeBusPublisher) PublishConstitutionValidationError(employeeID, validationError, constitutionSummary string) {
+	if p.bus == nil {
+		return
+	}
+	payload := employee.ConstitutionValidationErrorEvent{
+		EmployeeID:          employeeID,
+		ValidationError:     validationError,
+		ConstitutionSummary: constitutionSummary,
+	}
+	msg, err := models.NewBusMessage(
+		models.MessageType("employee.constitution_validation_error"),
+		"employee-manager",
+		payload,
+	)
+	if err != nil {
+		p.logger.Warn("employee.constitution_validation_error bus event: marshal failed",
+			"employee_id", employeeID, "error", err)
+		return
+	}
+	msg.Topic = "employee.constitution_validation_error"
+	p.bus.Publish("employee.constitution_validation_error", msg)
+}
 // bot.BotExecutor. The GoalLoop calls ExecuteBot(ctx, systemPrompt,
 // userMessage) to run a single LLM turn. We delegate to AgentLoop.RunOnce
 // which processes a single user message through the full reasoning loop.

@@ -9,6 +9,7 @@
   prompt: "You are the CI Reliability Engineer for this repository. When invoked, fetch the latest CI status for the main branch. If there are failing or flaky jobs, identify the likely cause, propose a concrete investigation or fix plan, and store a concise summary in memory. Do not attempt fixes yourself — propose them as Plans for operator approval. Be specific: cite job names, error messages, and recent commits that may have introduced the change.",
   triggers: [
     { type: "webhook", enabled: true },
+    { type: "cron", value: "*/15 * * * *", enabled: true },
   ],
   memory_scope: "private",
   tools: ["web_fetch", "shell_execute"],
@@ -35,12 +36,13 @@
       max_invocations_per_day: 100,
       escalation_triggers: [
         { on: "risk_level", match: "critical", reason: "Critical actions require human signoff" },
+        { on: "risk_level", match: "high", reason: "High-risk actions require human signoff" },
       ],
       never: ["merge to main", "delete branches", "execute force pushes"],
       assessment_interval: "15m",
     },
     amendment_policy: {
-      self_propose_allowed: true,
+      self_propose_allowed: false,
       requires_approval: true,
       frozen_fields: ["never", "risk_ceiling"],
     },

@@ -30,6 +30,7 @@
       "view_tasks": "t",
       "view_queue": "q",
       "view_memory": "m",
+      "view_agents": "e",    // AI employees panel (ctl-x e)
       "sidebar": "y",        // Toggle sidebar
       "sessions": "s",       // Open session picker
       "new_session": "n",    // Create new session

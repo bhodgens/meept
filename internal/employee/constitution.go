@@ -145,6 +145,61 @@ func (r RiskLevelCeiling) Valid() bool {
 	}
 }
 
+// MatchType defines the pattern matching strategy used by a NeverRule.
+//
+// C4: The spec says "machine-checked where possible" but provides no
+// semantics. This enum defines four strategies ordered from cheapest to
+// most expensive:
+//
+//   - MatchSubstring: case-insensitive substring + token-set containment
+//     (the existing matchesNever behavior). Default for backward compat.
+//   - MatchRegex: Go regexp compiled at load time. Faster than llm_only,
+//     precise, but requires the operator to know the exact pattern.
+//   - MatchGlob: Go path.Match patterns. Useful for path-based rules
+//     (e.g. "*.env", "/etc/passwd").
+//   - MatchLLMOnly: not checked at pre-exec; only by the post-turn
+//     auditor's LLM scan. Used for semantic rules that can't be
+//     pattern-matched (e.g. "never be dismissive").
+type MatchType string
+
+const (
+	MatchSubstring MatchType = "substring"
+	MatchRegex     MatchType = "regex"
+	MatchGlob      MatchType = "glob"
+	MatchLLMOnly   MatchType = "llm_only"
+)
+
+// Valid reports whether the MatchType is one of the recognized values.
+func (m MatchType) Valid() bool {
+	switch m {
+	case MatchSubstring, MatchRegex, MatchGlob, MatchLLMOnly:
+		return true
+	default:
+		return false
+	}
+}
+
+// NeverRule is a structured "never do this" rule with explicit matching
+// semantics. See MatchType for the available strategies.
+//
+// C4: This struct replaces the ambiguous Never []string for operators
+// who need more control over matching. The legacy Never []string is kept
+// for backward compatibility; both lists are checked by the enforcement
+// engine.
+type NeverRule struct {
+	// Pattern is the match pattern. Semantics depend on MatchType:
+	//   substring: a plain string, matched case-insensitively
+	//   regex:     a Go regexp pattern (RE2 syntax)
+	//   glob:      a path.Match pattern (shell glob)
+	//   llm_only:  a natural-language description (not machine-checked)
+	Pattern string `json:"pattern"`
+	// MatchType is the matching strategy. Empty defaults to "substring".
+	MatchType MatchType `json:"match_type"`
+	// Reason is a human/LLM-readable explanation of why this rule exists.
+	// Surfaced in audit findings and the synthesized prompt.
+	Reason string `json:"reason"`
+}
+
 // Constitution binds one employee to a structured set of purpose,
 // authority, hard constraints, and self-modification rules.
 //
@@ -174,6 +229,13 @@ type Constitution struct {
 
 	// Self-modification
 	AmendmentPolicy AmendmentPolicy `json:"amendment_policy"`
+
+	// MaxActivePlans is the maximum number of concurrently active plans
+	// per goal for this employee (G2: multi-plan concurrency). Zero or
+	// negative means DefaultMaxActivePlans (1). Tier 1 employees
+	// typically have 1; tier 2+ could have more if the operator allows
+	// concurrent plan execution.
+	MaxActivePlans int `json:"max_active_plans,omitempty"`
 
 	// Provenance
 	Version    int       `json:"version"`     // bumped on each approved amendment
@@ -211,7 +273,21 @@ type ConstitutionalConstraints struct {
 	// engine pattern-matches these where possible (shell command scan,
 	// path scan); the post-turn audit always scans for Never violations
 	// in LLM output.
+	//
+	// C4: The Never list accepts both legacy string entries (treated as
+	// substring matches for backward compatibility) and structured
+	// NeverRule entries (via NeverRules). SynthesizedPrompt renders both
+	// lists into the prompt. The PreExecChecker uses matchesNever for
+	// string rules and matchesNeverRules for structured rules.
 	Never []string `json:"never"`
+
+	// NeverRules is the structured form of Never rules, supporting
+	// multiple match types: substring, regex, glob, and llm_only.
+	// Entries here are checked in addition to the legacy Never []string
+	// entries. When both forms contain overlapping patterns, the match
+	// is idempotent (first hit wins). Empty slice = no structured never
+	// rules.
+	NeverRules []NeverRule `json:"never_rules"`
 
 	// AssessmentInterval is the cadence at which the GoalLoop ASSESS
 	// step runs for tier 2+ employees. Accepts a Go duration ("15m",
@@ -307,6 +383,20 @@ func (c *Constitution) Validate(selfID string) error {
 		}
 	}
 
+	// Never rules (structured form, C4). Validate match types and patterns.
+	for i, nr := range c.Constraints.NeverRules {
+		mt := nr.MatchType
+		if mt == "" {
+			mt = MatchSubstring // default
+		}
+		if !mt.Valid() {
+			errs = append(errs, fmt.Errorf("constraints.never_rules[%d].match_type: unknown value %q", i, nr.MatchType))
+		}
+		if nr.Pattern == "" {
+			errs = append(errs, fmt.Errorf("constraints.never_rules[%d].pattern: required", i))
+		}
+	}
+
 	// Direct self-escalation: the employee's own ID must not appear in
 	// its EscalatesTo list. Transitive cycles (X→Y→X) require the full
 	// graph and are handled by DetectEscalationCycles in authority.go.
@@ -367,6 +457,7 @@ var constraintsFieldNames = map[string]struct{}{
 	"max_invocations_per_day": {},
 	"escalation_triggers":    {},
 	"never":                  {},
+	"never_rules":            {},
 	"assessment_interval":    {},
 }
 
@@ -451,6 +542,11 @@ func (c *Constitution) CheckEscalationReferences(knownAgentIDs map[string]struct
 // error for unknown tools — only for structural problems like a nil
 // knownTools map passed by the caller.
 //
+// C3: Tool names are normalized (lowercase, trimmed) before lookup so
+// that constitution references with inconsistent casing match canonical
+// names from the tool registry. The caller should build knownToolNames
+// using tools.Registry.CanonicalNames() (or equivalent lowercased keys).
+//
 // knownToolNames is treated as a set; pass nil to skip the check.
 func (c *Constitution) CheckToolReferences(knownToolNames map[string]struct{}) (unknownAllowed, unknownForbidden []string) {
 	if c == nil {
@@ -460,16 +556,28 @@ func (c *Constitution) CheckToolReferences(knownToolNames map[string]struct{}) (
 		return nil, nil
 	}
 	for _, name := range c.Constraints.ToolsAllowed {
-		if _, ok := knownToolNames[name]; !ok {
+		canonical := canonicalToolName(name)
+		if _, ok := knownToolNames[canonical]; !ok {
 			unknownAllowed = append(unknownAllowed, name)
 		}
 	}
 	for _, name := range c.Constraints.ToolsForbidden {
-		if _, ok := knownToolNames[name]; !ok {
+		canonical := canonicalToolName(name)
+		if _, ok := knownToolNames[canonical]; !ok {
 			unknownForbidden = append(unknownForbidden, name)
 		}
 	}
 	return unknownAllowed, unknownForbidden
+}
+
+// canonicalToolName normalizes a tool name string so that constitution
+// references (which may have inconsistent casing or whitespace) match
+// against the canonical registry key. This mirrors
+// tools.normalizeToolName but is duplicated here to avoid importing
+// internal/tools (which would create an import cycle: tools → llm → ...
+// while employee must remain independent of tools).
+func canonicalToolName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
 }
 
 // removeUnknownTools filters the tools_allowed (allowed=true) or
@@ -531,3 +639,64 @@ func (c *Constitution) LogWarnings(logger *slog.Logger, employeeID string, known
 // Ensure Constitution satisfies the validator interface used elsewhere
 // (defensive: catches signature drift at compile time).
 var _ interface{ Validate(string) error } = (*Constitution)(nil)
+
+// DefaultConservativeConstitution returns a Constitution with explicit
+// conservative defaults for every field. This is the canonical "minimal
+// safe constitution" used by the migration path (MigrateLegacyBot,
+// ApplyMigration) and as a fallback when the migrator LLM fails to
+// produce a valid constitution.
+//
+// C6: This function exists so that migration produces consistent
+// constitutions every time — the prior synthesizeConservativeConstitution
+// was private and coupled to bot.BotDefinition. This public function is
+// the single source of truth for default values.
+//
+// Defaults:
+//   - Purpose: derived from the provided id/name (or a generic fallback)
+//   - Role: "conservative default"
+//   - AutonomyTier: Tier1Reactive (most conservative)
+//   - EscalatesTo: ["role:user"] (human operator)
+//   - RiskCeiling: RiskCeilingLow
+//   - ToolsAllowed: nil (inherit default toolset)
+//   - ToolsForbidden: empty
+//   - Never: ["execute financial transactions"]
+//   - AssessmentInterval: empty (tier 1 is trigger-driven)
+//   - AmendmentPolicy: SelfProposeAllowed=false, RequiresApproval=true,
+//     FrozenFields=["constraints.never", "constraints.risk_ceiling"]
+//   - Version: 1
+//   - AuthoredBy: "default"
+func DefaultConservativeConstitution(purpose string) Constitution {
+	// We use the constructor-style closure to set defaults first,
+	// then work on them to make it clear each field is intentional.
+	c := Constitution{
+		Purpose:      purpose,
+		Role:         "conservative default",
+		Charter:      "",
+		AutonomyTier: Tier1Reactive,
+		EscalatesTo:  []string{UserEscalationID},
+		Constraints: ConstitutionalConstraints{
+			ToolsAllowed:   nil,
+			ToolsForbidden: []string{},
+			RiskCeiling:    RiskCeilingLow,
+			Never:          []string{"execute financial transactions"},
+			NeverRules:     nil,
+			// Zero values for resource envelope = no limit.
+			MaxTokensPerTurn:      0,
+			MaxConversationTokens: 0,
+			DailyBudgetCents:      0,
+			MaxInvocationsPerDay:  0,
+			// No escalation triggers by default.
+			EscalationTriggers:   nil,
+			AssessmentInterval:   "", // tier 1: trigger-driven
+		},
+		AmendmentPolicy: AmendmentPolicy{
+			SelfProposeAllowed: false,
+			RequiresApproval:   true,
+			FrozenFields:       []string{"constraints.never", "constraints.risk_ceiling"},
+		},
+		Version:    1,
+		AuthoredBy: "default",
+		ApprovedAt: time.Now().UTC(),
+	}
+	return c
+}

@@ -2736,17 +2736,25 @@ func (s *Server) handlePlanApprove(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		SessionID string `json:"session_id"`
-		By        string `json:"by"`
+		SessionID  string `json:"session_id"`
+		By         string `json:"by"`
+		ApproverID string `json:"approver_id"` // S6: preferred over "by"
+		EmployeeID string `json:"employee_id"`  // S6: identifies the agent context
 	}
 	if !s.readJSON(w, r, &req) {
 		return
 	}
 
+	// S6: approver_id is preferred (explicit naming); fall back to "by" for
+	// backward compatibility.
+	approver := req.ApproverID
+	if approver == "" {
+		approver = req.By
+	}
 	plan, err := s.services.Plan.Approve(r.Context(), services.ApprovePlanRequest{
 		PlanID:    id,
 		SessionID: req.SessionID,
-		By:        req.By,
+		By:        approver,
 	})
 	if err != nil {
 		s.handleServiceError(w, err)

@@ -306,6 +306,23 @@ type CheckResult struct {
 
 // CheckPermission checks if an action is permitted.
 func (pc *PermissionChecker) CheckPermission(action string, details map[string]string) CheckResult {
+	return pc.CheckPermissionForAgent(action, details, "")
+}
+
+// CheckPermissionForAgent checks if an action is permitted for a specific
+// agent/employee. When agentID is non-empty and a PreExecChecker is registered
+// for that ID, the constitution gate runs before the financial/path/risk
+// pipeline.
+//
+// E6: This new method provides backward-compatible agentID support. The
+// existing CheckPermission delegates to this with agentID="" which skips
+// the employee pre-exec stage entirely (no behavior change for existing
+// callers). Callers that have an agentID should use this method directly.
+//
+// When details["agent_id"] is already set, it takes precedence over the
+// agentID parameter — this allows the existing details-based path to work
+// unchanged while new callers can pass agentID explicitly.
+func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[string]string, agentID string) CheckResult {
 	// Stage 0: Employee pre-exec check (Checkpoint 1). Runs BEFORE the
 	// financial/path/risk pipeline so the constitution gate has the
 	// first say. Only fires when details["agent_id"] is non-empty and
@@ -317,10 +334,19 @@ func (pc *PermissionChecker) CheckPermission(action string, details map[string]s
 	// Executor.checkPermission) so that tools_allowed / tools_forbidden
 	// entries that use tool names (e.g. "git_push", "file_delete") match
 	// correctly rather than silently missing.
+	//
+	// E6: agentID from the parameter is used as fallback when
+	// details["agent_id"] is empty. This preserves backward compat
+	// (CheckPermission passes "" → skips) while allowing new callers
+	// to pass agentID explicitly.
 	if details != nil {
-		if agentID := details["agent_id"]; agentID != "" {
+		effectiveAgentID := details["agent_id"]
+		if effectiveAgentID == "" {
+			effectiveAgentID = agentID
+		}
+		if effectiveAgentID != "" {
 			if checkers := pc.snapshotPreExecCheckers(); checkers != nil {
-				if checker, ok := checkers[agentID]; ok {
+				if checker, ok := checkers[effectiveAgentID]; ok {
 					toolName := details["tool_name"]
 					preDecision := checker.Check(action, toolName, details)
 					if !preDecision.Allowed {

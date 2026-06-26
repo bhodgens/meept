@@ -459,3 +459,425 @@ func validBotDefinition() bot.BotDefinition {
 func contains(haystack, needle string) bool {
 	return strings.Contains(haystack, needle)
 }
+
+// ---------------------------------------------------------------------------
+// C1: Constitution version race condition (optimistic locking) tests.
+// ---------------------------------------------------------------------------
+
+func TestAmendRequest_ExpectedVersion(t *testing.T) {
+	// Verify that ExpectedVersion=0 skips the check (backward compat).
+	req := AmendRequest{EmployeeID: "emp-a", ExpectedVersion: 0}
+	if req.ExpectedVersion != 0 {
+		t.Error("zero ExpectedVersion should be the default")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// C2: RiskCeiling mapping tests.
+// ---------------------------------------------------------------------------
+
+func TestSecurityEngineRiskToCeiling(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    int
+		want     riskLevel
+	}{
+		{"safe=0", 0, riskSafe},
+		{"low=1", 1, riskLow},
+		{"medium=2", 2, riskMedium},
+		{"high=3", 3, riskHigh},
+		{"critical=4", 4, riskCritical},
+		{"unknown=-1 defaults medium", -1, riskMedium},
+		{"unknown=99 defaults medium", 99, riskMedium},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SecurityEngineRiskToCeiling(tt.input)
+			if got != tt.want {
+				t.Errorf("SecurityEngineRiskToCeiling(%d) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRiskCeilingToSecurityLevel(t *testing.T) {
+	tests := []struct {
+		input riskLevel
+		want  int
+	}{
+		{riskSafe, 0},
+		{riskLow, 1},
+		{riskMedium, 2},
+		{riskHigh, 3},
+		{riskCritical, 4},
+	}
+	for _, tt := range tests {
+		t.Run(riskLabel(tt.input), func(t *testing.T) {
+			got := RiskCeilingToSecurityLevel(tt.input)
+			if got != tt.want {
+				t.Errorf("RiskCeilingToSecurityLevel(%d) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRiskCeilingRoundTrip(t *testing.T) {
+	// Verify the mapping is bidirectional: string → riskLevel → int → riskLevel.
+	for _, ceiling := range []RiskLevelCeiling{RiskCeilingSafe, RiskCeilingLow, RiskCeilingMedium, RiskCeilingHigh, RiskCeilingCritical} {
+		rl := parseRiskCeiling(string(ceiling))
+		secInt := RiskCeilingToSecurityLevel(rl)
+		rl2 := SecurityEngineRiskToCeiling(secInt)
+		if rl != rl2 {
+			t.Errorf("round-trip failed for %s: %d → %d → %d", ceiling, rl, secInt, rl2)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// C3: Tool name canonicalization tests.
+// ---------------------------------------------------------------------------
+
+func TestCanonicalToolName(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"already canonical", "shell_execute", "shell_execute"},
+		{"uppercase normalized", "SHELL_EXECUTE", "shell_execute"},
+		{"whitespace trimmed", "  web_fetch  ", "web_fetch"},
+		{"mixed case", "WebFetch", "webfetch"},
+		{"empty string", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := canonicalToolName(tt.input)
+			if got != tt.want {
+				t.Errorf("canonicalToolName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckToolReferences_CaseInsensitive(t *testing.T) {
+	// C3: Tool references with wrong casing should still match when
+	// knownToolNames uses canonical (lowercase) keys.
+	known := map[string]struct{}{
+		"shell_execute": {},
+		"web_fetch":     {},
+	}
+	c := Constitution{
+		Constraints: ConstitutionalConstraints{
+			ToolsAllowed:   []string{"Shell_Execute", "WEB_FETCH"},
+			ToolsForbidden: []string{"SHELL_EXECUTE"},
+		},
+	}
+	unknownA, unknownF := c.CheckToolReferences(known)
+	if len(unknownA) != 0 {
+		t.Errorf("expected 0 unknown allowed (case-insensitive), got %v", unknownA)
+	}
+	if len(unknownF) != 0 {
+		t.Errorf("expected 0 unknown forbidden (case-insensitive), got %v", unknownF)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// C4: NeverRule pattern matching tests.
+// ---------------------------------------------------------------------------
+
+func TestMatchType_Valid(t *testing.T) {
+	tests := []struct {
+		mt    MatchType
+		valid bool
+	}{
+		{MatchSubstring, true},
+		{MatchRegex, true},
+		{MatchGlob, true},
+		{MatchLLMOnly, true},
+		{MatchType("bogus"), false},
+		{MatchType(""), false},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.mt), func(t *testing.T) {
+			if got := tt.mt.Valid(); got != tt.valid {
+				t.Errorf("MatchType(%q).Valid() = %v, want %v", tt.mt, got, tt.valid)
+			}
+		})
+	}
+}
+
+func TestNeverRule_InConstitution(t *testing.T) {
+	// Verify NeverRules field exists and is validated.
+	t.Run("valid never rules", func(t *testing.T) {
+		c := validConstitution()
+		c.Constraints.NeverRules = []NeverRule{
+			{Pattern: "rm -rf /", MatchType: MatchSubstring, Reason: "dangerous delete"},
+			{Pattern: "^curl.*|.*pipe.*bash", MatchType: MatchRegex, Reason: "pipe to shell"},
+		}
+		if err := c.Validate("emp-a"); err != nil {
+			t.Fatalf("valid never rules rejected: %v", err)
+		}
+	})
+
+	t.Run("empty pattern rejected", func(t *testing.T) {
+		c := validConstitution()
+		c.Constraints.NeverRules = []NeverRule{
+			{Pattern: "", MatchType: MatchSubstring},
+		}
+		err := c.Validate("emp-a")
+		if err == nil {
+			t.Fatal("expected error for empty pattern")
+		}
+		if !contains(err.Error(), "pattern") {
+			t.Errorf("error should mention pattern: %v", err)
+		}
+	})
+
+	t.Run("unknown match type rejected", func(t *testing.T) {
+		c := validConstitution()
+		c.Constraints.NeverRules = []NeverRule{
+			{Pattern: "test", MatchType: MatchType("bogus")},
+		}
+		err := c.Validate("emp-a")
+		if err == nil {
+			t.Fatal("expected error for unknown match type")
+		}
+		if !contains(err.Error(), "match_type") {
+			t.Errorf("error should mention match_type: %v", err)
+		}
+	})
+
+	t.Run("empty match type defaults to substring", func(t *testing.T) {
+		c := validConstitution()
+		c.Constraints.NeverRules = []NeverRule{
+			{Pattern: "merge to main", MatchType: ""},
+		}
+		if err := c.Validate("emp-a"); err != nil {
+			t.Fatalf("empty match_type should default to substring: %v", err)
+		}
+	})
+}
+
+func TestMatchesNeverRules(t *testing.T) {
+	defaultRules := []NeverRule{
+		{Pattern: "merge to main", MatchType: MatchSubstring},
+		{Pattern: "^rm\\s+-rf", MatchType: MatchRegex},
+		{Pattern: "*.env", MatchType: MatchGlob},
+		{Pattern: "be dismissive", MatchType: MatchLLMOnly, Reason: "semantic rule"},
+	}
+
+	tests := []struct {
+		name     string
+		action   string
+		tool     string
+		details  map[string]string
+		rules    []NeverRule
+		wantHit  bool
+		wantRule string
+	}{
+		{
+			name:     "substring match in action",
+			action:   "merge to main",
+			tool:     "git",
+			wantHit:  true,
+			wantRule: "merge to main",
+		},
+		{
+			name:     "regex match in details",
+			action:   "execute",
+			tool:     "shell_execute",
+			details:  map[string]string{"command": "rm -rf /tmp"},
+			wantHit:  true,
+			wantRule: "^rm\\s+-rf",
+		},
+		{
+			name:     "glob match in details path",
+			action:   "read",
+			tool:     "file_read",
+			details:  map[string]string{"path": ".env"},
+			wantHit:  true,
+			wantRule: "*.env",
+		},
+		{
+			name:    "llm_only not checked at pre-exec",
+			action:  "be dismissive to the user",
+			tool:    "chat",
+			wantHit: false,
+		},
+		{
+			name:    "no match clean",
+			action:  "fetch",
+			tool:    "web_fetch",
+			details: map[string]string{"url": "https://example.com"},
+			wantHit: false,
+		},
+		{
+			name:    "empty rules no hit",
+			action:  "anything",
+			tool:    "any",
+			rules:   []NeverRule{},
+			wantHit: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := tt.rules
+			if r == nil {
+				r = defaultRules
+			}
+			hit, rule := matchesNeverRules(r, tt.action, tt.tool, tt.details)
+			if hit != tt.wantHit {
+				t.Errorf("hit = %v, want %v (rule=%s)", hit, tt.wantHit, rule)
+			}
+			if hit && tt.wantRule != "" && rule != tt.wantRule {
+				t.Errorf("rule = %q, want %q", rule, tt.wantRule)
+			}
+		})
+	}
+}
+
+func TestMatchesNeverRules_MalformedRegex(t *testing.T) {
+	// Malformed regex should fail-open (no match, no panic).
+	rules := []NeverRule{
+		{Pattern: "[invalid", MatchType: MatchRegex},
+	}
+	hit, _ := matchesNeverRules(rules, "test", "tool", nil)
+	if hit {
+		t.Error("malformed regex should not match (fail-open)")
+	}
+}
+
+func TestSynthesizedPrompt_NeverRules(t *testing.T) {
+	c := validConstitution()
+	c.Constraints.NeverRules = []NeverRule{
+		{Pattern: "rm -rf /", MatchType: MatchSubstring, Reason: "dangerous delete"},
+		{Pattern: "be rude", MatchType: MatchLLMOnly, Reason: "tone guideline"},
+	}
+	got := SynthesizedPrompt(&c, "")
+	lower := strings.ToLower(got)
+	if !contains(lower, "rm -rf /") {
+		t.Error("synthesized prompt should contain NeverRule pattern")
+	}
+	if !contains(lower, "dangerous delete") {
+		t.Error("synthesized prompt should contain NeverRule reason")
+	}
+	if !contains(lower, "be rude") {
+		t.Error("synthesized prompt should contain llm_only rule")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// C5: SynthesizedPrompt truncation tests.
+// ---------------------------------------------------------------------------
+
+func TestSynthesizedPrompt_Truncation(t *testing.T) {
+	t.Run("no truncation when under limit", func(t *testing.T) {
+		c := validConstitution()
+		got := SynthesizedPromptWithMax(&c, "existing", 10000)
+		if len(got) > 10000 {
+			t.Errorf("prompt length %d exceeds max 10000", len(got))
+		}
+		if !contains(got, "existing") {
+			t.Error("existing prompt should be preserved when under limit")
+		}
+	})
+
+	t.Run("truncation when charter is large", func(t *testing.T) {
+		c := validConstitution()
+		// Make charter very large.
+		c.Charter = strings.Repeat("This is a very long charter line. ", 500)
+		got := SynthesizedPromptWithMax(&c, "", 2000)
+		if len(got) > 2100 { // allow small overshoot for "..."
+			t.Errorf("prompt length %d should be approximately under 2000", len(got))
+		}
+		// Header and constraints should survive truncation.
+		lower := strings.ToLower(got)
+		if !contains(lower, "# employee profile") {
+			t.Error("header should survive truncation")
+		}
+		if !contains(lower, "merge to main") {
+			t.Error("never rules should survive truncation")
+		}
+	})
+
+	t.Run("truncation preserves existing prompt partially", func(t *testing.T) {
+		c := validConstitution()
+		longExisting := strings.Repeat("context line\n", 500)
+		got := SynthesizedPromptWithMax(&c, longExisting, 2000)
+		if len(got) > 2100 {
+			t.Errorf("prompt length %d should be approximately under 2000", len(got))
+		}
+	})
+
+	t.Run("zero max disables truncation", func(t *testing.T) {
+		c := validConstitution()
+		c.Charter = strings.Repeat("long ", 10000)
+		got := SynthesizedPromptWithMax(&c, "", 0)
+		if len(got) < 50000 {
+			t.Errorf("with maxLen=0, no truncation expected; got %d", len(got))
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// C6: DefaultConservativeConstitution tests.
+// ---------------------------------------------------------------------------
+
+func TestDefaultConservativeConstitution(t *testing.T) {
+	c := DefaultConservativeConstitution("test purpose")
+
+	// Verify all fields have explicit defaults.
+	if c.Purpose != "test purpose" {
+		t.Errorf("Purpose = %q, want %q", c.Purpose, "test purpose")
+	}
+	if c.Role != "conservative default" {
+		t.Errorf("Role = %q, want %q", c.Role, "conservative default")
+	}
+	if c.AutonomyTier != Tier1Reactive {
+		t.Errorf("AutonomyTier = %v, want %v", c.AutonomyTier, Tier1Reactive)
+	}
+	if len(c.EscalatesTo) != 1 || c.EscalatesTo[0] != UserEscalationID {
+		t.Errorf("EscalatesTo = %v, want [%s]", c.EscalatesTo, UserEscalationID)
+	}
+	if c.Constraints.RiskCeiling != RiskCeilingLow {
+		t.Errorf("RiskCeiling = %v, want %v", c.Constraints.RiskCeiling, RiskCeilingLow)
+	}
+	if c.Constraints.ToolsAllowed != nil {
+		t.Errorf("ToolsAllowed should be nil (inherit default)")
+	}
+	if len(c.Constraints.ToolsForbidden) != 0 {
+		t.Errorf("ToolsForbidden should be empty, got %v", c.Constraints.ToolsForbidden)
+	}
+	if len(c.Constraints.Never) == 0 {
+		t.Error("Never should have at least one default rule")
+	}
+	if c.Constraints.AssessmentInterval != "" {
+		t.Errorf("AssessmentInterval should be empty for tier 1, got %q", c.Constraints.AssessmentInterval)
+	}
+	if !c.AmendmentPolicy.RequiresApproval {
+		t.Error("RequiresApproval should be true")
+	}
+	if c.AmendmentPolicy.SelfProposeAllowed {
+		t.Error("SelfProposeAllowed should be false")
+	}
+	if len(c.AmendmentPolicy.FrozenFields) == 0 {
+		t.Error("FrozenFields should not be empty")
+	}
+	if c.Version != 1 {
+		t.Errorf("Version = %d, want 1", c.Version)
+	}
+	if c.AuthoredBy != "default" {
+		t.Errorf("AuthoredBy = %q, want %q", c.AuthoredBy, "default")
+	}
+	if c.ApprovedAt.IsZero() {
+		t.Error("ApprovedAt should not be zero")
+	}
+}
+
+func TestDefaultConservativeConstitution_Validates(t *testing.T) {
+	c := DefaultConservativeConstitution("test employee")
+	if err := c.Validate("emp-test"); err != nil {
+		t.Fatalf("DefaultConservativeConstitution should pass Validate: %v", err)
+	}
+}

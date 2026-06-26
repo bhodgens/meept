@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -97,6 +98,63 @@ func (r *Registry) Names() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// CanonicalName returns the canonical registration name for a tool.
+// The canonical name is the value returned by Tool.Name(), normalized to
+// lowercase with surrounding whitespace trimmed. This is the single source
+// of truth for how tool names appear in constitution tool references
+// (tools_allowed / tools_forbidden) and in the tool registry's lookup key.
+//
+// C3: This function exists so that constitution tool references can be
+// validated against canonical names at load time. Callers should use this
+// function when comparing user-provided or constitution-declared tool
+// names to the registry — never compare raw strings directly.
+func CanonicalName(tool Tool) string {
+	if tool == nil {
+		return ""
+	}
+	return normalizeToolName(tool.Name())
+}
+
+// normalizeToolName lowercases and trims a tool name string so that
+// constitution references (which may have inconsistent casing or
+// whitespace) match against the canonical registry key. Non-nil tool
+// objects already return canonical-cased names from Name(), but
+// user-supplied strings in constitution JSON may not.
+func normalizeToolName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+// CanonicalNames returns a sorted list of all canonical tool names
+// currently registered. This is the set against which constitution
+// tool references should be validated.
+func (r *Registry) CanonicalNames() map[string]struct{} {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	out := make(map[string]struct{}, len(r.tools))
+	for name := range r.tools {
+		out[normalizeToolName(name)] = struct{}{}
+	}
+	return out
+}
+
+// IsCanonicalName reports whether the given name matches a registered
+// tool after normalization. Returns false for empty strings.
+func (r *Registry) IsCanonicalName(name string) bool {
+	key := normalizeToolName(name)
+	if key == "" {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for registered := range r.tools {
+		if normalizeToolName(registered) == key {
+			return true
+		}
+	}
+	return false
 }
 
 // Count returns the number of registered tools.

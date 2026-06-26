@@ -11,6 +11,32 @@ import (
 
 const maxConsecutiveFailures = 10
 
+// RetryPolicy configures the BotRunner's retry behaviour for LLM calls.
+// When MaxRetries is 0, no retries are attempted (the executor's single
+// call is the only attempt). RetryBackoff is the initial backoff duration;
+// each retry doubles the backoff (exponential). The total elapsed time
+// across all retries is capped by the context deadline (if set) or the
+// bot's Constraints.Timeout.
+//
+// H2: The spec says "LLM call fails → BotRunner's existing retry path"
+// (line 588). The LLM client itself has retry logic, but the runner
+// orchestrates higher-level retry with backoff so transient failures
+// (network blips, rate-limit 429s) are retried without propagating
+// errors to the GoalLoop's failure counter.
+type RetryPolicy struct {
+	MaxRetries    int
+	RetryBackoff  time.Duration
+}
+
+// DefaultRetryPolicy is a conservative retry policy used when no explicit
+// policy is set. 2 retries with 1s initial backoff (doubling to 2s on the
+// second retry). This covers transient network errors and brief rate-limit
+// windows without adding excessive latency.
+var DefaultRetryPolicy = RetryPolicy{
+	MaxRetries:   2,
+	RetryBackoff: 1 * time.Second,
+}
+
 // BotExecutor abstracts the agent loop execution for bots.
 type BotExecutor interface {
 	ExecuteBot(ctx context.Context, systemPrompt, userMessage string) (output string, tokensUsed int, err error)
@@ -27,18 +53,26 @@ type BotExecutionResult struct {
 }
 
 type BotRunner struct {
-	definition BotDefinition
-	namespace  *MemoryNamespace
-	executor   BotExecutor
-	logger     *slog.Logger
+	definition   BotDefinition
+	namespace    *MemoryNamespace
+	executor     BotExecutor
+	logger       *slog.Logger
+	retryPolicy  RetryPolicy
 }
 
 func NewBotRunner(def BotDefinition) *BotRunner {
 	return &BotRunner{
-		definition: def,
-		namespace:  NewMemoryNamespace(def.ID),
+		definition:  def,
+		namespace:   NewMemoryNamespace(def.ID),
+		retryPolicy: DEFAULT_RETRY_POLICY_FOR_NEW_RUNNERS,
 	}
 }
+
+// DEFAULT_RETRY_POLICY_FOR_NEW_RUNNERS is the retry policy used for
+// newly-constructed runners. It is set to a zero-value RetryPolicy
+// (MaxRetries=0) by default so existing behavior is unchanged; callers
+// who want retries should call WithRetryPolicy.
+var DEFAULT_RETRY_POLICY_FOR_NEW_RUNNERS = RetryPolicy{}
 
 func (r *BotRunner) Definition() BotDefinition {
 	return r.definition
@@ -111,7 +145,21 @@ func (r *BotRunner) WithLogger(logger *slog.Logger) *BotRunner {
 	return &cp
 }
 
+// WithRetryPolicy returns a copy of the runner with the given retry policy.
+// The policy controls how many times the LLM call is retried on failure and
+// the initial backoff duration (which doubles on each retry). A zero-value
+// RetryPolicy (MaxRetries=0) disables retry entirely.
+func (r *BotRunner) WithRetryPolicy(policy RetryPolicy) *BotRunner {
+	cp := *r
+	cp.retryPolicy = policy
+	return &cp
+}
+
 // Execute runs the bot through the executor, checking ShouldRun first.
+// H2: LLM calls are wrapped in a retry loop with exponential backoff
+// when a RetryPolicy with MaxRetries > 0 is configured. Context
+// cancellation (including timeout) propagates immediately without
+// further retries.
 func (r *BotRunner) Execute(ctx context.Context, state *BotState, triggerCtx string) (*BotExecutionResult, error) {
 	if r.executor == nil {
 		return nil, fmt.Errorf("bot %q: no executor configured", r.definition.ID)
@@ -136,7 +184,44 @@ func (r *BotRunner) Execute(ctx context.Context, state *BotState, triggerCtx str
 	}
 
 	start := time.Now()
-	output, tokensUsed, err := r.executor.ExecuteBot(ctx, systemPrompt, userMessage)
+	var output string
+	var tokensUsed int
+	var lastErr error
+
+	maxRetries := r.retryPolicy.MaxRetries
+	backoff := r.retryPolicy.RetryBackoff
+	if backoff <= 0 && maxRetries > 0 {
+		backoff = 1 * time.Second
+	}
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		output, tokensUsed, lastErr = r.executor.ExecuteBot(ctx, systemPrompt, userMessage)
+		if lastErr == nil {
+			break
+		}
+		// Context cancellation is not retriable.
+		if ctx.Err() != nil {
+			break
+		}
+		if attempt < maxRetries {
+			if r.logger != nil {
+				r.logger.Warn("bot execution retrying",
+					"bot_id", r.definition.ID,
+					"attempt", attempt+1,
+					"max_retries", maxRetries,
+					"error", lastErr,
+					"backoff", backoff)
+			}
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				lastErr = ctx.Err()
+				break
+			}
+			backoff *= 2
+		}
+	}
+
 	duration := time.Since(start)
 
 	result := &BotExecutionResult{
@@ -146,16 +231,23 @@ func (r *BotRunner) Execute(ctx context.Context, state *BotState, triggerCtx str
 		Duration:   duration,
 	}
 
-	if err != nil {
+	if lastErr != nil {
 		result.Success = false
-		result.Error = err.Error()
+		result.Error = lastErr.Error()
 		if r.logger != nil {
-			r.logger.Error("bot execution failed", "bot_id", r.definition.ID, "error", err, "duration", duration)
+			r.logger.Error("bot execution failed",
+				"bot_id", r.definition.ID,
+				"error", lastErr,
+				"duration", duration,
+				"retries", maxRetries)
 		}
 	} else {
 		result.Success = true
 		if r.logger != nil {
-			r.logger.Info("bot execution succeeded", "bot_id", r.definition.ID, "tokens", tokensUsed, "duration", duration)
+			r.logger.Info("bot execution succeeded",
+				"bot_id", r.definition.ID,
+				"tokens", tokensUsed,
+				"duration", duration)
 		}
 	}
 

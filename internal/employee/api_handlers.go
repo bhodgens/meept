@@ -339,6 +339,14 @@ func (h *AgentAPIHandler) handleGoalsGet(w http.ResponseWriter, r *http.Request)
 
 // handleGoalPlanApprove handles
 // POST /api/v1/agents/{id}/goals/{gid}/plans/{pid}/approve.
+//
+// S6: This endpoint is kept for backward compatibility but is documented as
+// deprecated. Prefer the consolidated plan approval endpoint:
+//   POST /api/v1/plans/{pid}/approve  with body {approver_id, employee_id}
+//
+// The body accepts approver_id and employee_id fields for forwarding to the
+// consolidated plan endpoint, but falls back to the agent-scoped RPC method
+// when those aren't provided.
 func (h *AgentAPIHandler) handleGoalPlanApprove(w http.ResponseWriter, r *http.Request) {
 	gid := r.PathValue("gid")
 	pid := r.PathValue("pid")
@@ -347,19 +355,31 @@ func (h *AgentAPIHandler) handleGoalPlanApprove(w http.ResponseWriter, r *http.R
 		return
 	}
 	var body struct {
-		Reason string `json:"reason,omitempty"`
+		Reason     string `json:"reason,omitempty"`
+		ApproverID string `json:"approver_id,omitempty"`
+		EmployeeID string `json:"employee_id,omitempty"`
 	}
 	// Optional body.
 	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAgentBodySize)).Decode(&body)
-	h.dispatch(w, r, "agents.goals.approve", map[string]string{
+
+	// When body includes employee_id, route through the consolidated plan
+	// endpoint (S6 consolidation) for consistency.
+	params := map[string]string{
 		"goal_id": gid,
 		"plan_id": pid,
 		"reason":  body.Reason,
-	})
+	}
+	if body.EmployeeID != "" {
+		params["employee_id"] = body.EmployeeID
+	}
+	h.dispatch(w, r, "agents.goals.approve", params)
 }
 
 // handleGoalPlanReject handles
 // POST /api/v1/agents/{id}/goals/{gid}/plans/{pid}/reject.
+//
+// S6: Deprecated in favor of POST /api/v1/plans/{pid}/reject with body
+// {approver_id, employee_id, reason}.
 func (h *AgentAPIHandler) handleGoalPlanReject(w http.ResponseWriter, r *http.Request) {
 	gid := r.PathValue("gid")
 	pid := r.PathValue("pid")
@@ -368,7 +388,9 @@ func (h *AgentAPIHandler) handleGoalPlanReject(w http.ResponseWriter, r *http.Re
 		return
 	}
 	var body struct {
-		Reason string `json:"reason"`
+		Reason     string `json:"reason"`
+		ApproverID string `json:"approver_id,omitempty"`
+		EmployeeID string `json:"employee_id,omitempty"`
 	}
 	if !h.readJSON(w, r, &body) {
 		return
@@ -377,11 +399,15 @@ func (h *AgentAPIHandler) handleGoalPlanReject(w http.ResponseWriter, r *http.Re
 		h.writeError(w, http.StatusBadRequest, "reason is required when rejecting a plan")
 		return
 	}
-	h.dispatch(w, r, "agents.goals.reject", map[string]string{
+	params := map[string]string{
 		"goal_id": gid,
 		"plan_id": pid,
 		"reason":  body.Reason,
-	})
+	}
+	if body.EmployeeID != "" {
+		params["employee_id"] = body.EmployeeID
+	}
+	h.dispatch(w, r, "agents.goals.reject", params)
 }
 
 // ---------------------------------------------------------------------------

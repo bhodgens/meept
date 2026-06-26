@@ -102,7 +102,20 @@ type AmendRequest struct {
 	// ID). The manager consults the existing constitution's
 	// AmendmentPolicy.SelfProposeAllowed when By is not "user".
 	By string
+	// ExpectedVersion is the optimistic-locking guard (C1). The caller
+	// sets this to the version they observed when reading the constitution.
+	// AmendConstitution rejects with ErrVersionMismatch if the current
+	// version differs, preventing concurrent amendments from silently
+	// overwriting each other. Set to 0 to skip the check (legacy/test
+	// path).
+	ExpectedVersion int
 }
+
+// ErrVersionMismatch is returned by AmendConstitution when the caller's
+// ExpectedVersion does not match the current constitution version. This
+// prevents concurrent amendment approvals from silently overwriting each
+// other (spec gap C1: optimistic locking for constitution versioning).
+var ErrVersionMismatch = errors.New("employee: constitution version mismatch")
 
 // AuditQuery filters audit findings for listing.
 type AuditQuery struct {
@@ -336,6 +349,20 @@ type BusPublisher interface {
 	// employeeID is the paused employee, reason is a human-readable
 	// explanation, source is "operator" or "auto_pause".
 	PublishEmployeePaused(employeeID, reason, source string)
+
+	// PublishCriticalFinding publishes an employee.critical_finding bus
+	// event (E4). PostTurnAuditor emits this when it finds a critical
+	// finding. The Manager subscribes and calls Pause on receipt, which
+	// decouples the auditor from the lifecycle (avoids Manager → GoalLoop
+	// → BotRunner → PostTurnAuditor → Manager circular dependency).
+	PublishCriticalFinding(employeeID, findingID, violatedRule, evidence string)
+
+	// PublishConstitutionValidationError publishes an
+	// employee.constitution_validation_error bus event (H5). Emitted when
+	// a constitution fails validation at hire or load time. The
+	// BotDefinition is stored with status = constitution_invalid so the
+	// operator can see and fix the invalid employee in the agents list.
+	PublishConstitutionValidationError(employeeID, validationError, constitutionSummary string)
 }
 
 // EmployeePausedEvent is the payload for the employee.paused bus event
@@ -344,6 +371,27 @@ type EmployeePausedEvent struct {
 	EmployeeID string `json:"employee_id"`
 	Reason     string `json:"reason"`
 	Source     string `json:"source"` // "operator" | "auto_pause"
+}
+
+// CriticalFindingEvent is the payload for the employee.critical_finding
+// bus event (E4). Emitted by PostTurnAuditor when a critical finding is
+// detected. The Manager subscribes and auto-pauses the employee.
+type CriticalFindingEvent struct {
+	EmployeeID   string `json:"employee_id"`
+	FindingID    string `json:"finding_id"`
+	ViolatedRule string `json:"violated_rule"`
+	Evidence     string `json:"evidence"`
+}
+
+// ConstitutionValidationErrorEvent is the payload for the
+// employee.constitution_validation_error bus event (H5). Emitted when a
+// constitution fails validation at hire or load time. The BotDefinition
+// is persisted with status = constitution_invalid so the operator can
+// identify and fix the invalid employee via the agents list.
+type ConstitutionValidationErrorEvent struct {
+	EmployeeID          string `json:"employee_id"`
+	ValidationError     string `json:"validation_error"`
+	ConstitutionSummary string `json:"constitution_summary"`
 }
 
 // goal plan signoffs through internal/plan.PlanManager without importing
@@ -455,6 +503,13 @@ type Manager struct {
 	invokeMuMap      map[string]*sync.Mutex
 	invokeMuMapGuard sync.Mutex
 
+	// G5: assessment semaphores prevent overlapping scheduled assessments.
+	// When a scheduler tick fires for an employee whose previous assessment
+	// is still running, the non-blocking send fails and the tick is skipped
+	// with a debug log. Keyed by employee ID, guarded by invokeMuMapGuard
+	// (shared with the invoke mutex map for simplicity).
+	assessmentSems map[string]chan struct{}
+
 	mu            sync.RWMutex
 	constitutions map[string]Constitution // employeeID -> cached
 	driftScores   map[string]float64      // employeeID -> last computed
@@ -467,12 +522,13 @@ type Manager struct {
 // calling methods (the RPCHandler handles this via errNotConfigured).
 func NewManager(bm *bot.Manager) *Manager {
 	return &Manager{
-		botManager:    bm,
-		constitutions: make(map[string]Constitution),
-		driftScores:   make(map[string]float64),
-		goalLoops:     make(map[string]*GoalLoop),
-		invokeMuMap:   make(map[string]*sync.Mutex),
-		logger:        slog.Default(),
+		botManager:     bm,
+		constitutions:  make(map[string]Constitution),
+		driftScores:    make(map[string]float64),
+		goalLoops:      make(map[string]*GoalLoop),
+		invokeMuMap:    make(map[string]*sync.Mutex),
+		assessmentSems: make(map[string]chan struct{}),
+		logger:         slog.Default(),
 	}
 }
 
@@ -501,6 +557,7 @@ func NewManagerWithStores(
 		driftScores:       make(map[string]float64),
 		goalLoops:         make(map[string]*GoalLoop),
 		invokeMuMap:       make(map[string]*sync.Mutex),
+		assessmentSems:    make(map[string]chan struct{}),
 		logger:            logger.With("component", "employee-manager"),
 	}
 	// Best-effort: prime the in-memory constitution cache from the store
@@ -839,6 +896,11 @@ func (m *Manager) GetEmployee(ctx context.Context, id string) (*Employee, error)
 // to Manager.Hire)". The constitution map is decoded into a Constitution
 // struct, validated, then persisted via the ConstitutionStore. The
 // underlying bot.BotDefinition is created via botManager.CreateBot.
+//
+// H5: When constitution validation fails, the bot definition is still
+// persisted with Enabled=false so the operator can see the invalid employee
+// in the agents list. A ConstitutionValidationError event is emitted to the
+// bus and an audit finding is written at SeverityCritical.
 func (m *Manager) Hire(ctx context.Context, req HireRequest) (*Employee, error) {
 	if m.botManager == nil {
 		return nil, errNotConfigured
@@ -847,9 +909,18 @@ func (m *Manager) Hire(ctx context.Context, req HireRequest) (*Employee, error) 
 	// constitution is rejected per spec line 222.
 	c, err := decodeConstitution(req.Constitution)
 	if err != nil {
+		// H5: Persist the bot definition as disabled with
+		// constitution_invalid status so the operator can see it in
+		// the agents list and fix the constitution. Best-effort — if
+		// the bot store is unavailable, just return the error.
+		m.recordConstitutionValidationError(ctx, req, err.Error(),
+			"decode failed: "+err.Error())
 		return nil, fmt.Errorf("hire: constitution: %w", err)
 	}
 	if err := c.Validate(req.ID); err != nil {
+		// H5: Same pattern — persist disabled, emit event, write finding.
+		m.recordConstitutionValidationError(ctx, req, err.Error(),
+			"validation failed: "+err.Error())
 		return nil, fmt.Errorf("hire: constitution validate: %w", err)
 	}
 
@@ -1039,6 +1110,67 @@ func (m *Manager) PauseWithReason(ctx context.Context, id, reason, source string
 	return m.pauseWithSource(ctx, id, reason, source)
 }
 
+// recordConstitutionValidationError is the H5 helper that persists the bot
+// definition as disabled (status = constitution_invalid), writes an audit
+// finding at SeverityCritical, and emits a ConstitutionValidationError bus
+// event. Best-effort: failures are logged but do not change the returned
+// error from the caller (the validation error itself is the real error).
+func (m *Manager) recordConstitutionValidationError(ctx context.Context, req HireRequest, validationError, summary string) {
+	// Persist the bot definition as disabled so it appears in the agents
+	// list with a clear invalid status. Best-effort — if the store is
+	// unavailable, just log.
+	def := bot.BotDefinition{
+		ID:          req.ID,
+		Name:        req.Name,
+		Description: req.Description,
+		Prompt:      req.Prompt,
+		Model:       req.Model,
+		Triggers:    req.Triggers,
+		MemoryScope: req.MemoryScope,
+		Tools:       req.Tools,
+		Enabled:     false,
+	}
+	if err := m.botManager.CreateBot(ctx, def); err != nil {
+		// If the bot already exists (e.g. re-hire attempt), try UpdateBot.
+		if updateErr := m.botManager.UpdateBot(ctx, def); updateErr != nil {
+			m.logger.Warn("hire: failed to persist invalid bot definition",
+				"employee_id", req.ID, "error", updateErr)
+		}
+	}
+
+	// Snapshot stores and publisher under read lock, operate outside lock.
+	m.mu.RLock()
+	auditStore := m.auditStore
+	pub := m.busPublisher
+	m.mu.RUnlock()
+
+	// Write audit finding.
+	if auditStore != nil {
+		finding := AuditFinding{
+			ID:            idpkg.Generate("audit_"),
+			EmployeeID:    req.ID,
+			Severity:      SeverityCritical,
+			Checkpoint:    CheckpointPreExec,
+			ViolatedRule:  "constitution_validation_error",
+			Evidence:      validationError,
+			DetectedAt:    time.Now().UTC(),
+		}
+		if err := auditStore.Create(ctx, finding); err != nil {
+			m.logger.Warn("hire: failed to write constitution validation audit finding",
+				"employee_id", req.ID, "error", err)
+		}
+	}
+
+	// Emit bus event.
+	if pub != nil {
+		pub.PublishConstitutionValidationError(req.ID, validationError, summary)
+	}
+
+	m.logger.Error("hire: constitution validation error",
+		"employee_id", req.ID,
+		"error", validationError)
+}
+
 // Resume is the only un-pause path (spec: "only un-pause path"). Employees
 // cannot self-resume when auto_pause.require_operator_resume is true
 // (the default).
@@ -1208,6 +1340,14 @@ func (m *Manager) AmendConstitution(ctx context.Context, req AmendRequest) (stri
 	}
 	if !existing.HasConstitution() {
 		return "", ErrConstitutionRequired
+	}
+	// C1: Optimistic version lock. If the caller specifies ExpectedVersion
+	// > 0, it must match the current constitution version. A mismatch means
+	// the constitution was amended concurrently while this proposal was
+	// in-flight (e.g. operator approved v2 while employee loaded v3).
+	if req.ExpectedVersion > 0 && req.ExpectedVersion != existing.Constitution.Version {
+		return "", fmt.Errorf("%w: expected %d, got %d",
+			ErrVersionMismatch, req.ExpectedVersion, existing.Constitution.Version)
 	}
 	// Self-propose gate.
 	if req.By != "" && req.By != "user" && !existing.Constitution.AmendmentPolicy.SelfProposeAllowed {
@@ -2004,28 +2144,14 @@ func extractJSON(s string) string {
 // This function never fails — it always returns a usable Constitution.
 func synthesizeConservativeConstitution(def bot.BotDefinition) Constitution {
 	purpose := derivePurpose(def)
-	return Constitution{
-		Purpose:       purpose,
-		Role:          "migrated legacy bot",
-		Charter:       def.Prompt,
-		AutonomyTier:  Tier1Reactive,
-		EscalatesTo:   []string{UserEscalationID},
-		Constraints:   ConstitutionalConstraints{
-			ToolsAllowed:   nil, // inherit default toolset
-			ToolsForbidden: []string{},
-			RiskCeiling:    RiskCeilingLow,
-			Never:          []string{"execute financial transactions"},
-			// AssessmentInterval empty: tier 1 is trigger-driven only.
-		},
-		AmendmentPolicy: AmendmentPolicy{
-			SelfProposeAllowed: false,
-			RequiresApproval:   true,
-			FrozenFields:       []string{"constraints.never", "constraints.risk_ceiling"},
-		},
-		Version:    1,
-		AuthoredBy: "migrate",
-		ApprovedAt: time.Now().UTC(),
-	}
+	// C6: Delegate to DefaultConservativeConstitution for all defaults,
+	// then override the migration-specific fields (Charter from bot
+	// prompt, Role and AuthoredBy).
+	c := DefaultConservativeConstitution(purpose)
+	c.Role = "migrated legacy bot"
+	c.Charter = def.Prompt
+	c.AuthoredBy = "migrate"
+	return c
 }
 
 // derivePurpose extracts the first sentence of the bot description, or

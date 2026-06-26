@@ -9,10 +9,13 @@ import (
 	"github.com/caimlas/meept/internal/bot"
 )
 
-// mockBusPublisher captures PublishEmployeePaused calls for testing.
+// mockBusPublisher captures PublishEmployeePaused and PublishCriticalFinding
+// and PublishConstitutionValidationError calls for testing.
 type mockBusPublisher struct {
-	mu       sync.Mutex
-	events   []EmployeePausedEvent
+	mu            sync.Mutex
+	events        []EmployeePausedEvent
+	criticalEvts  []CriticalFindingEvent
+	constErrors   []ConstitutionValidationErrorEvent
 }
 
 func (m *mockBusPublisher) PublishEmployeePaused(employeeID, reason, source string) {
@@ -22,6 +25,27 @@ func (m *mockBusPublisher) PublishEmployeePaused(employeeID, reason, source stri
 		EmployeeID: employeeID,
 		Reason:     reason,
 		Source:     source,
+	})
+}
+
+func (m *mockBusPublisher) PublishCriticalFinding(employeeID, findingID, violatedRule, evidence string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.criticalEvts = append(m.criticalEvts, CriticalFindingEvent{
+		EmployeeID:   employeeID,
+		FindingID:    findingID,
+		ViolatedRule: violatedRule,
+		Evidence:     evidence,
+	})
+}
+
+func (m *mockBusPublisher) PublishConstitutionValidationError(employeeID, validationError, constitutionSummary string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.constErrors = append(m.constErrors, ConstitutionValidationErrorEvent{
+		EmployeeID:          employeeID,
+		ValidationError:     validationError,
+		ConstitutionSummary: constitutionSummary,
 	})
 }
 

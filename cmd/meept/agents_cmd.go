@@ -416,11 +416,19 @@ Example definition:
 func newAgentsUpdateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "update <id> <definition.json>",
-		Short: "update an employee from a definition file",
-		Long: `Update an existing AI employee from a JSON definition file.
+		Short: "update non-constitution employee fields",
+		Long: `Update an existing AI employee's NON-CONSTITUTION fields from a JSON
+definition file.
 
-The definition replaces the employee's configuration. Constitution
-validation is performed before the update is applied.`,
+The update command modifies fields like triggers, model, prompt, tools,
+and enabled status. Constitution changes (purpose, charter, constraints,
+frozen fields, escalates_to, etc.) are REJECTED here — use
+` + "`meept agents amend`" + ` to propose constitution amendments through
+the plan signoff workflow.
+
+The definition replaces the employee's non-constitution configuration.
+If the definition includes a constitution block, the update fails with a
+message directing you to the amend command.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentID := args[0]
@@ -597,11 +605,15 @@ func newAgentsAmendCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "amend <id> --field=<key> <value>",
 		Short: "propose a constitution amendment",
-		Long: `Propose an amendment to an employee's constitution.
+		Long: `Propose an amendment to an employee's CONSTITUTION.
 
 The amendment is routed through the Plan signoff workflow. The field
 path supports dotted notation for nested keys (e.g.
---field=constraints.risk_ceiling high).
+--field=constraints.risk_ceiling high). This is the ONLY way to modify
+constitution fields (purpose, charter, constraints, frozen fields, etc.).
+
+For non-constitution changes (triggers, model, prompt, tools), use
+` + "`meept agents update`" + ` instead.
 
 Examples:
   meept agents amend researcher --field=constraints.risk_ceiling high
@@ -659,6 +671,8 @@ Examples:
 
 func newAgentsMigrateCmd() *cobra.Command {
 	var applyID string
+	var showID string
+	var listOnly bool
 
 	cmd := &cobra.Command{
 		Use:   "migrate",
@@ -666,9 +680,18 @@ func newAgentsMigrateCmd() *cobra.Command {
 		Long: `Scan ~/.meept/bots/*.json for legacy bot definitions and propose
 AI employee constitutions for each.
 
-Without --apply, prints a table of proposed constitutions. With
---apply <id>, writes the proposed constitution for the given bot ID
-to disk.`,
+Without flags, prints a table of all proposed constitutions.
+  --list             Show all proposals (same as no flags, explicit).
+  --show <bot-id>    Show a single proposal in detail (full constitution).
+  --apply <bot-id>   Write the proposed constitution for the given bot ID.
+  --apply (no arg)   Apply all proposals. Use --apply=* to apply all.
+
+Examples:
+  meept agents migrate                       # list all proposals
+  meept agents migrate --list                 # same as above (explicit)
+  meept agents migrate --show researcher      # view single proposal detail
+  meept agents migrate --apply researcher     # apply one
+  meept agents migrate --apply="*"            # apply all`,
 		Args: cobra.MaximumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := connectDaemon()
@@ -677,11 +700,142 @@ to disk.`,
 			}
 			defer client.Close()
 
-			params := map[string]any{}
-			if applyID != "" {
-				params["apply"] = applyID
+			// --show <id>: fetch all proposals, find the one, print in detail.
+			if showID != "" {
+				rawResult, err := client.Call("agents.migrate", map[string]any{})
+				if err != nil {
+					return fmt.Errorf("failed to run migration: %w", err)
+				}
+				var resultMap map[string]any
+				if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+					return fmt.Errorf("failed to parse response: %w", err)
+				}
+				if errMsg := rpcError(resultMap); errMsg != "" {
+					return fmt.Errorf("%s", errMsg)
+				}
+				proposals, ok := resultMap["proposals"].([]any)
+				if !ok {
+					return fmt.Errorf("no proposals returned")
+				}
+				for _, p := range proposals {
+					prop, ok := p.(map[string]any)
+					if !ok {
+						continue
+					}
+					if getStringOr(prop, "bot_id", "") != showID {
+						continue
+					}
+					// Print full detail.
+					fmt.Printf("bot id:         %s\n", getStringOr(prop, "bot_id", ""))
+					fmt.Printf("role:           %s\n", getStringOr(prop, "role", ""))
+					fmt.Printf("proposed tier:  %s\n", getStringOr(prop, "proposed_tier", ""))
+					fmt.Printf("source:         %s\n", getStringOr(prop, "source", ""))
+					if goals, ok := prop["goals"].([]any); ok {
+						fmt.Printf("goals (%d):\n", len(goals))
+						for _, g := range goals {
+							fmt.Printf("  - %v\n", g)
+						}
+					}
+					if constraints, ok := prop["constraints"].([]any); ok {
+						fmt.Printf("constraints (%d):\n", len(constraints))
+						for _, c := range constraints {
+							fmt.Printf("  - %v\n", c)
+						}
+					}
+					if warnings, ok := prop["warnings"].([]any); ok && len(warnings) > 0 {
+						fmt.Printf("warnings (%d):\n", len(warnings))
+						for _, w := range warnings {
+							fmt.Printf("  - %v\n", w)
+						}
+					}
+					if constJSON, err := json.MarshalIndent(prop["constitution"], "", "  "); err == nil && len(constJSON) > 2 {
+						fmt.Printf("\nproposed constitution:\n%s\n", constJSON)
+					}
+					fmt.Println("\nto apply: meept agents migrate --apply " + showID)
+					return nil
+				}
+				return fmt.Errorf("no proposal found for bot id %q", showID)
 			}
 
+			// --apply <id>: apply for specific bot.
+			if applyID != "" && applyID != "*" {
+				rawResult, err := client.Call("agents.migrate", map[string]any{"apply": applyID})
+				if err != nil {
+					return fmt.Errorf("failed to run migration: %w", err)
+				}
+				var resultMap map[string]any
+				if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+					return fmt.Errorf("failed to parse response: %w", err)
+				}
+				if errMsg := rpcError(resultMap); errMsg != "" {
+					return fmt.Errorf("%s", errMsg)
+				}
+				path := getStringOr(resultMap, "path", "")
+				fmt.Printf("constitution written for %s\n", applyID)
+				if path != "" {
+					fmt.Printf("file: %s\n", path)
+				}
+				return nil
+			}
+
+			// --apply=*: apply ALL proposals.
+			if applyID == "*" {
+				// First fetch all proposals (dry-run).
+				rawResult, err := client.Call("agents.migrate", map[string]any{})
+				if err != nil {
+					return fmt.Errorf("failed to fetch proposals: %w", err)
+				}
+				var resultMap map[string]any
+				if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+					return fmt.Errorf("failed to parse response: %w", err)
+				}
+				if errMsg := rpcError(resultMap); errMsg != "" {
+					return fmt.Errorf("%s", errMsg)
+				}
+				proposals, ok := resultMap["proposals"].([]any)
+				if !ok || len(proposals) == 0 {
+					fmt.Println("no legacy bot definitions found to migrate.")
+					return nil
+				}
+				applied := 0
+				for _, p := range proposals {
+					prop, ok := p.(map[string]any)
+					if !ok {
+						continue
+					}
+					botID := getStringOr(prop, "bot_id", "")
+					if botID == "" {
+						continue
+					}
+					applyRaw, err := client.Call("agents.migrate", map[string]any{"apply": botID})
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "warning: failed to apply %s: %v\n", botID, err)
+						continue
+					}
+					var applyResult map[string]any
+					if err := json.Unmarshal(applyRaw, &applyResult); err != nil {
+						fmt.Fprintf(os.Stderr, "warning: failed to parse result for %s: %v\n", botID, err)
+						continue
+					}
+					if errMsg := rpcError(applyResult); errMsg != "" {
+						fmt.Fprintf(os.Stderr, "warning: failed to apply %s: %s\n", botID, errMsg)
+						continue
+					}
+					path := getStringOr(applyResult, "path", "")
+					fmt.Printf("constitution written for %s\n", botID)
+					if path != "" {
+						fmt.Printf("  file: %s\n", path)
+					}
+					applied++
+				}
+				fmt.Printf("\napplied: %d of %d proposals\n", applied, len(proposals))
+				return nil
+			}
+
+			// No flags or --list: dry-run scan for all.
+			// --list is explicitly acknowledged; same code path as no-flags.
+			_ = listOnly
+			params := map[string]any{}
 			rawResult, err := client.Call("agents.migrate", params)
 			if err != nil {
 				return fmt.Errorf("failed to run migration: %w", err)
@@ -694,15 +848,6 @@ to disk.`,
 
 			if errMsg := rpcError(resultMap); errMsg != "" {
 				return fmt.Errorf("%s", errMsg)
-			}
-
-			if applyID != "" {
-				path := getStringOr(resultMap, "path", "")
-				fmt.Printf("constitution written for %s\n", applyID)
-				if path != "" {
-					fmt.Printf("file: %s\n", path)
-				}
-				return nil
 			}
 
 			proposals, ok := resultMap["proposals"].([]any)
@@ -741,11 +886,14 @@ to disk.`,
 			w.Flush()
 			fmt.Printf("\ntotal: %d proposals\n", len(proposals))
 			fmt.Println("\nto apply: meept agents migrate --apply <bot-id>")
+			fmt.Println("to view:  meept agents migrate --show <bot-id>")
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVar(&applyID, "apply", "", "write proposed constitution for the given bot ID")
+	cmd.Flags().StringVar(&applyID, "apply", "", "write proposed constitution for the given bot ID (use * for all)")
+	cmd.Flags().StringVar(&showID, "show", "", "show a single proposal in detail")
+	cmd.Flags().BoolVar(&listOnly, "list", false, "list all proposals (explicit form of no-flags)")
 	return cmd
 }
 

@@ -158,7 +158,25 @@ func (m *Manager) runFindingsRetention(ctx context.Context, retentionDays int) {
 // It delegates to Trigger, which emits telemetry and invokes the bot
 // runner. The full GoalLoop.Decide integration happens inside the
 // trigger path when the GoalLoop is configured.
+//
+// G5: Uses a per-employee assessment semaphore (buffer=1) to prevent
+// overlapping assessments. If the previous assessment for this employee
+// is still running, the non-blocking send fails and this tick is skipped
+// with a debug log.
 func (m *Manager) runAssessForEmployee(ctx context.Context, employeeID string) {
+	// G5: Acquire (non-blocking) the assessment semaphore.
+	sem := m.acquireAssessmentSemaphore(employeeID)
+	select {
+	case sem <- struct{}{}:
+		// Acquired; proceed with assessment.
+	default:
+		// Channel is full — previous assessment still running. Skip.
+		m.logger.Debug("scheduled assess: previous assessment still running, skipping",
+			"employee_id", employeeID)
+		return
+	}
+	defer func() { <-sem }() // release
+
 	emp, err := m.GetEmployee(ctx, employeeID)
 	if err != nil {
 		m.logger.Warn("scheduled assess: employee not found",
@@ -175,6 +193,20 @@ func (m *Manager) runAssessForEmployee(ctx context.Context, employeeID string) {
 		m.logger.Warn("scheduled assess: trigger failed",
 			"employee_id", employeeID, "error", err)
 	}
+}
+
+// acquireAssessmentSemaphore returns the per-employee assessment semaphore
+// (buffer=1). Created lazily on first access, guarded by invokeMuMapGuard
+// (shared with the invoke mutex map since the lifecycle is the same).
+func (m *Manager) acquireAssessmentSemaphore(employeeID string) chan struct{} {
+	m.invokeMuMapGuard.Lock()
+	defer m.invokeMuMapGuard.Unlock()
+	sem, ok := m.assessmentSems[employeeID]
+	if !ok {
+		sem = make(chan struct{}, 1)
+		m.assessmentSems[employeeID] = sem
+	}
+	return sem
 }
 
 // runPeriodicAudit is the periodic audit callback. It iterates employees
@@ -210,15 +242,32 @@ func (m *Manager) runPeriodicAudit(ctx context.Context) {
 		if !emp.HasConstitution() {
 			continue
 		}
-		// The auditor reads its own turns from its store reference.
-		// We pass an empty slice; the auditor will backfill from its
-		// store. This is the pattern used by the existing test suite.
-		// The PeriodicAuditor requires TurnRecords which are collected by
-		// the enforcement engine's runtime observer. When no turn
-		// collector is wired, the periodic audit is a no-op for that
-		// employee. The daemon injects the collector via
-		// SetTurnCollector.
-	turns := m.collectTurns(emp.ID, 50, 24*time.Hour)
+		// G8: Filter turns whose goal has been retired. Findings for retired
+		// goals do not contribute to the DriftScore (audit trail preserved
+		// but excluded from active drift calculation).
+		rawTurns := m.collectTurns(emp.ID, 50, 24*time.Hour)
+		if len(rawTurns) == 0 {
+			continue
+		}
+		// Skip turns whose GoalID references a retired goal. When the
+		// GoalStore is nil, we can't check retirement status so we
+		// include all turns (best-effort).
+		var turns []TurnRecord
+		if m.goalStore != nil {
+			for _, t := range rawTurns {
+				if t.GoalID == "" {
+					turns = append(turns, t)
+					continue
+				}
+				goal, gErr := m.goalStore.Get(ctx, t.GoalID)
+				if gErr != nil || goal.IsRetired() {
+					continue // skip retired-goal turns
+				}
+				turns = append(turns, t)
+			}
+		} else {
+			turns = rawTurns
+		}
 		if len(turns) == 0 {
 			continue
 		}

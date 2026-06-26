@@ -40,10 +40,6 @@ import (
 	"github.com/caimlas/meept/pkg/id"
 )
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 // DefaultMaxConsecutiveFailures is the spec default for the consecutive-failure
 // threshold that triggers goal at_risk/broken marking and employee auto-pause
 // (spec lines 588-591).
@@ -51,6 +47,95 @@ const DefaultMaxConsecutiveFailures = 3
 
 // goalLoopIDPrefix is the prefix for goal-loop run IDs (used in audit trails).
 const goalLoopIDPrefix = "gloop_"
+
+// ---------------------------------------------------------------------------
+// G3: Plan ownership and execution authority
+// ---------------------------------------------------------------------------
+
+// CanExecutePlan reports whether the employee has authority to execute the
+// given plan (G3). The employee may execute when:
+//   - planRef.ApproverID is "system" (auto-approved tier-1 plans)
+//   - planRef.ApproverID matches one of the employee's escalates_to entries
+//   - planRef.ApproverID matches the employee's own ID (self-approved tier-3)
+//   - planRef.ApproverID is empty (no approver recorded — backward compat)
+func (l *GoalLoop) CanExecutePlan(planRef PlanRef) bool {
+	l.mu.Lock()
+	c := l.constitution
+	l.mu.Unlock()
+
+	if planRef.ApproverID == "" || planRef.ApproverID == "system" {
+		return true
+	}
+	if c == nil {
+		return false
+	}
+	// Check if the approver is the employee itself (tier-3 self-approval).
+	if planRef.ApproverID == l.employeeID {
+		return true
+	}
+	// Check if the approver matches one of the escalates_to entries.
+	for _, approver := range c.EscalatesTo {
+		if approver == planRef.ApproverID {
+			return true
+		}
+	}
+	return false
+}
+
+// ---------------------------------------------------------------------------
+// G7: Implicit Plan prompt and parser
+// ---------------------------------------------------------------------------
+
+// ImplicitPlanPrompt is the template used for tier-1 ASSESS→EXECUTE where the
+// LLM's response becomes an implicit single-step plan (spec line 288).
+// The placeholders are filled by buildImplicitPlanPrompt.
+const ImplicitPlanPrompt = `Given trigger: %s
+Current state: %s
+
+You are a tier-1 reactive employee. Propose a single action in the following JSON format:
+` + "```json" + `
+{"action": "the single action to take", "reasoning": "why this action"}
+` + "```" + `
+
+Keep the action concise and specific. If no action is needed, return:
+` + "```json" + `
+{"action": "", "reasoning": "no action needed"}
+` + "```"
+
+// implicitPlanResponse is the JSON schema expected from the implicit plan
+// prompt.
+type implicitPlanResponse struct {
+	Action    string `json:"action"`
+	Reasoning string `json:"reasoning"`
+}
+
+// parseImplicitPlanResponse parses the LLM's JSON response from the implicit
+// plan prompt. Returns the action string and reasoning, or an error if the
+// response is unparseable.
+func parseImplicitPlanResponse(content string) (action, reasoning string, err error) {
+	content = strings.TrimSpace(content)
+	// Strip markdown code fences if present.
+	content = strings.TrimPrefix(content, "```json")
+	content = strings.TrimPrefix(content, "```")
+	content = strings.TrimSuffix(content, "```")
+	content = strings.TrimSpace(content)
+
+	var parsed implicitPlanResponse
+	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+		return "", "", fmt.Errorf("parse implicit plan response: %w", err)
+	}
+	return parsed.Action, parsed.Reasoning, nil
+}
+
+// buildImplicitPlanPrompt fills the ImplicitPlanPrompt template with the
+// trigger description and current state summary.
+func buildImplicitPlanPrompt(trigger TriggerEvent, stateSummary string) string {
+	triggerDesc := trigger.Source
+	if trigger.Topic != "" {
+		triggerDesc += "/" + trigger.Topic
+	}
+	return fmt.Sprintf(ImplicitPlanPrompt, triggerDesc, stateSummary)
+}
 
 // ---------------------------------------------------------------------------
 // Trigger + candidate types
@@ -83,6 +168,11 @@ type PlanRef struct {
 	ID     string `json:"id"`
 	State  string `json:"state"`
 	Prompt string `json:"prompt,omitempty"`
+	// ApproverID records who approved this plan (G3: plan ownership and
+	// execution authority). The GoalLoop only executes plans where
+	// ApproverID matches the employee's escalates_to OR ApproverID is
+	// "system" (for auto-approved tier-1 plans).
+	ApproverID string `json:"approver_id,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -159,9 +249,14 @@ type GoalLoop struct {
 	// without it.
 	emitMetricFn EmitMetricFunc
 
+	// G1: recovery threshold — consecutive successes required for
+	// broken→at_risk→healthy transitions.
+	consecutiveSuccessesForRecovery int
+
 	// Mutable state (guarded by mu).
 	mu                   sync.Mutex
 	consecutiveFailures  int
+	consecutiveSuccesses int // G1: tracks consecutive successful turns for recovery
 	lastResult           *bot.BotExecutionResult
 	lastAssessmentTime   time.Time
 }
@@ -180,11 +275,12 @@ func NewGoalLoop(employeeID string, c *Constitution, store *GoalStore, logger *s
 		logger = slog.Default()
 	}
 	return &GoalLoop{
-		employeeID:             employeeID,
-		constitution:           c,
-		goalStore:              store,
-		logger:                 logger.With("component", "goal-loop", "employee_id", employeeID),
-		maxConsecutiveFailures: DefaultMaxConsecutiveFailures,
+		employeeID:                      employeeID,
+		constitution:                    c,
+		goalStore:                       store,
+		logger:                          logger.With("component", "goal-loop", "employee_id", employeeID),
+		maxConsecutiveFailures:          DefaultMaxConsecutiveFailures,
+		consecutiveSuccessesForRecovery: DefaultConsecutiveSuccessesForRecovery,
 	}
 }
 
@@ -238,6 +334,15 @@ func (l *GoalLoop) WithGoalLookup(gl GoalLookup) *GoalLoop {
 func (l *GoalLoop) WithMaxConsecutiveFailures(n int) *GoalLoop {
 	if n > 0 {
 		l.maxConsecutiveFailures = n
+	}
+	return l
+}
+
+// WithConsecutiveSuccessesForRecovery overrides the default recovery threshold
+// (G1: spec default 3 consecutive successes for broken→at_risk→healthy).
+func (l *GoalLoop) WithConsecutiveSuccessesForRecovery(n int) *GoalLoop {
+	if n > 0 {
+		l.consecutiveSuccessesForRecovery = n
 	}
 	return l
 }
@@ -416,6 +521,9 @@ func (l *GoalLoop) Plan(ctx context.Context, candidate CandidatePlan) (PlanRef, 
 // comes directly from the ASSESS candidate. For tier-2+, the prompt is the
 // approved plan's instruction.
 //
+// G3: Execute checks that the employee has authority to execute the plan
+// via CanExecutePlan. If the approver does not match, execution is refused.
+//
 // The runner.BuildSystemPrompt path is not used here; the GoalLoop constructs
 // the system prompt from the constitution via SynthesizedPrompt so that
 // constraints and charter are injected.
@@ -428,6 +536,12 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 
 	if runner == nil {
 		return nil, errors.New("execute: no BotExecutor configured")
+	}
+
+	// G3: Plan ownership check.
+	if !l.CanExecutePlan(plan) {
+		return nil, fmt.Errorf("execute: plan %s has approver %q; employee %q is not authorized to execute",
+			plan.ID, plan.ApproverID, l.employeeID)
 	}
 
 	systemPrompt := SynthesizedPrompt(constitution, "")
@@ -511,10 +625,11 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 		}
 	}
 
-	// Update consecutive failure counter (spec lines 588-591).
+	// Update consecutive failure/success counters (spec lines 588-591, G1).
 	if result != nil && !result.Success {
 		l.mu.Lock()
 		l.consecutiveFailures++
+		l.consecutiveSuccesses = 0 // reset success streak on failure
 		count := l.consecutiveFailures
 		l.mu.Unlock()
 		logger.Warn("execution failed",
@@ -522,10 +637,17 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 			"consecutive_failures", count,
 			"threshold", threshold)
 	} else {
-		// Reset counter on success.
+		// G1: Track consecutive successes for health recovery.
 		l.mu.Lock()
 		l.consecutiveFailures = 0
+		l.consecutiveSuccesses++
+		successCount := l.consecutiveSuccesses
+		recoveryThreshold := l.consecutiveSuccessesForRecovery
 		l.mu.Unlock()
+		logger.Debug("execution succeeded",
+			"plan_id", plan.ID,
+			"consecutive_successes", successCount,
+			"recovery_threshold", recoveryThreshold)
 	}
 
 	// Run the post-turn auditor if configured (Checkpoint 2).
@@ -541,15 +663,15 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 		}
 	}
 
-	// Determine goal health.
+	// Determine goal health using the G1 state machine.
 	health := GoalHealthy
 	if result == nil || !result.Success {
-		// Failure path: determine at_risk vs broken based on consecutive count.
+		// Failure path: use HealthDecayFunc for broken/at_risk.
 		l.mu.Lock()
 		count := l.consecutiveFailures
 		l.mu.Unlock()
-		if threshold > 0 && count >= threshold {
-			health = GoalBroken
+		health = HealthDecayFunc(count, threshold)
+		if health == GoalBroken {
 			// Auto-pause the employee (spec line 588).
 			if pauseFn != nil {
 				reason := fmt.Sprintf("consecutive failures: %d (threshold %d)", count, threshold)
@@ -557,17 +679,31 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 					logger.Error("auto-pause failed", "error", pauseErr)
 				}
 			}
-		} else {
-			health = GoalAtRisk
 		}
-	} else if reflector != nil {
-		// Success path: ask the LLM "did this help?".
-		assessed, err := l.reflectViaLLM(ctx, reflector, constitution, result)
-		if err != nil {
-			logger.Warn("reflect LLM call failed, defaulting to healthy", "error", err)
-			health = GoalHealthy
-		} else {
-			health = assessed
+	} else {
+		// Success path: ask the LLM "did this help?" if available.
+		// G1: Apply the recovery state machine for non-healthy goals.
+		l.mu.Lock()
+		successCount := l.consecutiveSuccesses
+		recoveryThreshold := l.consecutiveSuccessesForRecovery
+		l.mu.Unlock()
+
+		if reflector != nil {
+			assessed, err := l.reflectViaLLM(ctx, reflector, constitution, result)
+			if err != nil {
+				logger.Warn("reflect LLM call failed, defaulting to healthy", "error", err)
+				health = GoalHealthy
+			} else {
+				health = assessed
+			}
+		}
+
+		// G1: If the goal is currently not healthy, apply the recovery
+		// transition based on consecutive successes. The LLM's assessment
+		// is the starting point, but the recovery is gated by the success
+		// count.
+		if health != GoalHealthy && health != GoalUnknown {
+			health = HealthRecoveryFunc(successCount, recoveryThreshold, health)
 		}
 	}
 
@@ -684,6 +820,7 @@ func (l *GoalLoop) Decide(ctx context.Context, trigger TriggerEvent) error {
 }
 
 // decideTier1 implements tier-1 reactive behaviour: Assess → Execute (no Plan).
+// G7: Tier-1 uses the implicit plan prompt → parser to produce a single action.
 func (l *GoalLoop) decideTier1(ctx context.Context, trigger TriggerEvent, logger *slog.Logger) error {
 	candidates, err := l.Assess(ctx, trigger)
 	if err != nil {
@@ -695,11 +832,15 @@ func (l *GoalLoop) decideTier1(ctx context.Context, trigger TriggerEvent, logger
 	}
 
 	// Execute the first candidate directly. Tier-1 is reactive: single-step.
+	// G3: tier-1 plans are auto-approved, so ApproverID is "system".
+	// G7: The candidate prompt is derived from the implicit plan template
+	// already (Assess uses the implicit plan prompt for tier-1).
 	candidate := candidates[0]
 	planRef := PlanRef{
-		ID:     id.Generate(goalLoopIDPrefix),
-		State:  "executing",
-		Prompt: candidate.Prompt,
+		ID:         id.Generate(goalLoopIDPrefix),
+		State:      "executing",
+		Prompt:     candidate.Prompt,
+		ApproverID: "system",
 	}
 	result, execErr := l.Execute(ctx, planRef)
 	if execErr != nil {
@@ -719,7 +860,31 @@ func (l *GoalLoop) decideTier1(ctx context.Context, trigger TriggerEvent, logger
 
 // decideTier2 implements tier-2 propose behaviour: Assess → Plan (pending).
 // Execute is deferred until ApproveAndExecute is called after signoff.
+// G2: GoalLoop blocks ASSESS if the number of active plans is already at
+// MaxActivePlans.
 func (l *GoalLoop) decideTier2(ctx context.Context, trigger TriggerEvent, logger *slog.Logger) error {
+	// G2: Multi-plan concurrency check.
+	l.mu.Lock()
+	constitution := l.constitution
+	l.mu.Unlock()
+	if constitution == nil {
+		return errors.New("tier2: no constitution configured")
+	}
+
+	maxActive := constitution.MaxActivePlans
+	if maxActive <= 0 {
+		maxActive = DefaultMaxActivePlans
+	}
+	// Check if the active goal already has too many concurrent plans.
+	if goal, err := l.lookupActiveGoal(ctx); err == nil && goal != nil {
+		if !goal.CanAddActivePlan(maxActive) {
+			logger.Debug("tier2 assess skipped: too many active plans",
+				"max", maxActive,
+				"active_count", len(goal.ActivePlans()))
+			return nil
+		}
+	}
+
 	candidates, err := l.Assess(ctx, trigger)
 	if err != nil {
 		return fmt.Errorf("tier2 assess: %w", err)
@@ -734,9 +899,6 @@ func (l *GoalLoop) decideTier2(ctx context.Context, trigger TriggerEvent, logger
 	}
 
 	// Warn if escalates_to is empty (spec edge case, line 620).
-	l.mu.Lock()
-	constitution := l.constitution
-	l.mu.Unlock()
 	if len(constitution.EscalatesTo) == 0 {
 		logger.Warn("tier2 employee has empty escalates_to; plans will sit in pending_approval",
 			"employee_id", l.employeeID)
@@ -762,8 +924,14 @@ func (l *GoalLoop) decideTier2(ctx context.Context, trigger TriggerEvent, logger
 // ApproveAndExecute is called when a plan is approved via signoff. It runs
 // Execute + Reflect and updates the active Goal's health (spec line 295).
 //
+// G3: The planRef.ApproverID must match the employee's escalates_to or be
+// "system". Execute refuses to run otherwise.
+//
+// G2: The plan is added to ActivePlanIDs during execution and removed after
+// Reflect completes.
+//
 // The planRef must carry the ID of the approved plan. After execution, the
-// goal's ActivePlanID is cleared and the plan ID is appended to PlanHistory.
+// plan ID is appended to PlanHistory (G4: ring-buffer capped).
 func (l *GoalLoop) ApproveAndExecute(ctx context.Context, planRef PlanRef) (*bot.BotExecutionResult, GoalHealth, error) {
 	l.mu.Lock()
 	logger := l.logger
@@ -772,12 +940,12 @@ func (l *GoalLoop) ApproveAndExecute(ctx context.Context, planRef PlanRef) (*bot
 
 	// Set the active plan ID BEFORE execution so concurrent observers see the
 	// correct in-flight plan (spec: record ActivePlanID during execution, not
-	// after).
+	// after). G2: add to ActivePlanIDs.
 	if store != nil {
 		if goal, lookupErr := l.lookupActiveGoal(ctx); lookupErr == nil && goal != nil {
-			goal.SetActivePlan(planRef.ID)
+			goal.AddActivePlan(planRef.ID)
 			if updateErr := store.Update(ctx, goal); updateErr != nil {
-				logger.Warn("failed to set active plan on goal",
+				logger.Warn("failed to add active plan on goal",
 					"goal_id", goal.ID, "plan_id", planRef.ID, "error", updateErr)
 			}
 		}
@@ -798,14 +966,14 @@ func (l *GoalLoop) ApproveAndExecute(ctx context.Context, planRef PlanRef) (*bot
 		logger.Warn("approve-and-execute reflect failed (non-fatal)", "error", reflectErr)
 	}
 
-	// After Reflect completes (success OR failure), clear the active plan and
-	// append to history.
+	// After Reflect completes (success OR failure), remove the plan from
+	// active list and append to history (G2 + G4).
 	if store != nil {
 		if goal, lookupErr := l.lookupActiveGoal(ctx); lookupErr == nil && goal != nil {
-			goal.SetActivePlan("")
+			goal.RemoveActivePlan(planRef.ID)
 			goal.AppendHistory(planRef.ID)
 			if updateErr := store.Update(ctx, goal); updateErr != nil {
-				logger.Warn("failed to clear active plan on goal",
+				logger.Warn("failed to remove active plan on goal",
 					"goal_id", goal.ID, "error", updateErr)
 			}
 		}

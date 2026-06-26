@@ -305,3 +305,76 @@ func TestExecuteWithRetry_ExponentialShiftCap(t *testing.T) {
 	_, _ = r.ExecuteWithRetry(ctx, "web_fetch", nil)
 	// The test passes if it doesn't panic or hang.
 }
+
+// ---------------------------------------------------------------------------
+// C3: CanonicalName + tool name canonicalization tests.
+// ---------------------------------------------------------------------------
+
+func TestCanonicalName(t *testing.T) {
+	t.Run("valid tool", func(t *testing.T) {
+		tool := &mockTool{name: "shell_execute"}
+		got := CanonicalName(tool)
+		if got != "shell_execute" {
+			t.Errorf("CanonicalName() = %q, want %q", got, "shell_execute")
+		}
+	})
+
+	t.Run("nil tool returns empty", func(t *testing.T) {
+		got := CanonicalName(nil)
+		if got != "" {
+			t.Errorf("CanonicalName(nil) = %q, want empty", got)
+		}
+	})
+
+	t.Run("normalizes whitespace and case", func(t *testing.T) {
+		tool := &mockTool{name: "  WebFetch  "}
+		got := CanonicalName(tool)
+		if got != "webfetch" {
+			t.Errorf("CanonicalName() = %q, want %q", got, "webfetch")
+		}
+	})
+}
+
+func TestRegistry_CanonicalNames(t *testing.T) {
+	r := NewRegistry(nil)
+	r.Register(&mockTool{name: "shell_execute"})
+	r.Register(&mockTool{name: "web_fetch"})
+	r.Register(&mockTool{name: "file_read"})
+
+	names := r.CanonicalNames()
+	if len(names) != 3 {
+		t.Fatalf("expected 3 canonical names, got %d", len(names))
+	}
+	for _, expected := range []string{"shell_execute", "web_fetch", "file_read"} {
+		if _, ok := names[expected]; !ok {
+			t.Errorf("missing canonical name %q", expected)
+		}
+	}
+}
+
+func TestRegistry_IsCanonicalName(t *testing.T) {
+	r := NewRegistry(nil)
+	r.Register(&mockTool{name: "shell_execute"})
+	r.Register(&mockTool{name: "web_fetch"})
+
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"exact match", "shell_execute", true},
+		{"case insensitive", "SHELL_EXECUTE", true},
+		{"whitespace trimmed", "  web_fetch  ", true},
+		{"no match", "nonexistent", false},
+		{"empty string", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := r.IsCanonicalName(tt.input)
+			if got != tt.want {
+				t.Errorf("IsCanonicalName(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}

@@ -177,6 +177,64 @@ func TestCheckPermission_PreExecChecker_ToolName(t *testing.T) {
 	}
 }
 
+// TestCheckPermissionForAgent_BackwardCompat verifies that CheckPermission
+// delegates to CheckPermissionForAgent with empty agentID, preserving
+// existing behavior (E6).
+func TestCheckPermissionForAgent_BackwardCompat(t *testing.T) {
+	pc := NewPermissionChecker(Config{})
+	result := pc.CheckPermission("file_read", map[string]string{"path": "/tmp/test"})
+	if !result.Allowed {
+		t.Errorf("CheckPermission should allow file_read, got: %s", result.Reason)
+	}
+}
+
+// TestCheckPermissionForAgent_WithAgentID verifies that CheckPermissionForAgent
+// uses the agentID parameter for PreExecChecker lookup when details["agent_id"]
+// is not set (E6).
+func TestCheckPermissionForAgent_WithAgentID(t *testing.T) {
+	pc := NewPermissionChecker(Config{})
+	pc.SetPreExecChecker("emp-1", stubPreExecChecker{forbiddenTool: "git_push"})
+
+	t.Run("agentID triggers pre-exec check", func(t *testing.T) {
+		result := pc.CheckPermissionForAgent("shell_execute", map[string]string{
+			"tool_name": "git_push",
+		}, "emp-1")
+		if result.Allowed {
+			t.Error("expected denied for forbidden tool")
+		}
+	})
+
+	t.Run("empty agentID skips pre-exec check", func(t *testing.T) {
+		result := pc.CheckPermissionForAgent("shell_execute", map[string]string{
+			"tool_name": "git_push",
+		}, "")
+		if !result.Allowed {
+			t.Errorf("expected allowed with empty agentID, got: %s", result.Reason)
+		}
+	})
+
+	t.Run("details agent_id takes precedence over parameter", func(t *testing.T) {
+		// When details["agent_id"] is set, it takes precedence over the agentID parameter.
+		// This preserves backward compat for callers that use the details-based path.
+		result := pc.CheckPermissionForAgent("shell_execute", map[string]string{
+			"tool_name": "git_push",
+			"agent_id":  "emp-1",
+		}, "") // empty agentID, but details has agent_id
+		if result.Allowed {
+			t.Error("expected denied when agent_id in details maps to registered checker")
+		}
+	})
+
+	t.Run("different agentID skips unregistered checker", func(t *testing.T) {
+		result := pc.CheckPermissionForAgent("shell_execute", map[string]string{
+			"tool_name": "git_push",
+		}, "emp-2") // no checker registered for emp-2
+		if !result.Allowed {
+			t.Errorf("expected allowed for unregistered agentID, got: %s", result.Reason)
+		}
+	})
+}
+
 // Benchmarks
 
 func BenchmarkCheckPath(b *testing.B) {

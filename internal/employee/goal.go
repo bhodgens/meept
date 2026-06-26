@@ -172,11 +172,23 @@ type Goal struct {
 	// "never assessed".
 	LastAssessed time.Time `json:"last_assessed"`
 	// ActivePlanID is the currently-executing Plan pursuing this goal, if
-	// any. Empty when no plan is active.
+	// any. Empty when no plan is active. Kept for backward compatibility;
+	// ActivePlanIDs is the authoritative multi-plan field (G2). When
+	// ActivePlanIDs is non-empty, ActivePlanID mirrors its first element.
 	ActivePlanID string `json:"active_plan_id,omitempty"`
+	// ActivePlanIDs holds the IDs of all concurrently-executing plans
+	// pursuing this goal (G2: multi-plan concurrency). The first element
+	// mirrors ActivePlanID for backward compatibility. Empty when no plans
+	// are active.
+	ActivePlanIDs []string `json:"active_plan_ids,omitempty"`
 	// PlanHistory is the ordered list of completed plan IDs (oldest first).
-	// Stored as JSON in SQLite.
+	// Stored as JSON in SQLite. Capped at MaxPlanHistory entries (G4: ring
+	// buffer); the oldest entry is dropped when the cap is exceeded.
 	PlanHistory []string `json:"plan_history"`
+	// MaxPlanHistory is the maximum number of plan IDs retained in
+	// PlanHistory (G4). Zero means use the default (DefaultMaxPlanHistory).
+	// Attempts to append beyond this cap evict the oldest entry.
+	MaxPlanHistory int `json:"max_plan_history,omitempty"`
 	// CreatedAt is when the goal was first persisted.
 	CreatedAt time.Time `json:"created_at"`
 	// RetiredAt is when the goal was soft-deleted. Zero for active goals.
@@ -200,6 +212,64 @@ type Goal struct {
 // reached. This keeps the in-memory and persisted goal representation
 // bounded.
 const recentFindingsMax = 50
+
+// DefaultMaxPlanHistory is the default cap on PlanHistory entries (G4).
+// When Goal.MaxPlanHistory is zero, this value is used.
+const DefaultMaxPlanHistory = 100
+
+// DefaultMaxActivePlans is the default cap on concurrently active plans
+// (G2). When Constitution.MaxActivePlans is zero, this value is used.
+const DefaultMaxActivePlans = 1
+
+// DefaultConsecutiveSuccessesForRecovery is the default number of
+// consecutive successful assessments required for a goal to transition
+// from broken/at_risk back to healthy (G1).
+const DefaultConsecutiveSuccessesForRecovery = 3
+
+// ---------------------------------------------------------------------------
+// G1: Health state machine with recovery transitions
+// ---------------------------------------------------------------------------
+
+// HealthDecayFunc maps a count of consecutive failures to the appropriate
+// GoalHealth. At 0 failures → GoalHealthy; 1..N-1 → GoalAtRisk; >=N →
+// GoalBroken. N is the provided threshold.
+func HealthDecayFunc(failures, threshold int) GoalHealth {
+	if failures <= 0 {
+		return GoalHealthy
+	}
+	if threshold > 0 && failures >= threshold {
+		return GoalBroken
+	}
+	return GoalAtRisk
+}
+
+// HealthRecoveryFunc maps a count of consecutive successes to the
+// appropriate GoalHealth, given the goal's current health. The recovery
+// state machine is:
+//
+//	broken → at_risk after M consecutive successes
+//	at_risk → healthy after M consecutive successes
+//	healthy stays healthy
+//
+// M is the recovery threshold (default
+// DefaultConsecutiveSuccessesForRecovery). A goal that is already healthy
+// stays healthy regardless of the success count.
+func HealthRecoveryFunc(successes, recoveryThreshold int, current GoalHealth) GoalHealth {
+	if current == GoalHealthy || current == GoalUnknown {
+		if current == GoalUnknown && successes >= recoveryThreshold {
+			return GoalHealthy
+		}
+		return current
+	}
+	if successes >= recoveryThreshold {
+		// broken → at_risk; at_risk → healthy.
+		if current == GoalBroken {
+			return GoalAtRisk
+		}
+		return GoalHealthy
+	}
+	return current
+}
 
 // AttachFinding appends a finding ID to the goal's RecentFindings list. If
 // the list exceeds recentFindingsMax entries, the oldest entries are
@@ -239,10 +309,13 @@ func (g *Goal) Unlock() { g.mu.Unlock() }
 // snapshot copies the concurrency-sensitive fields under a read lock and
 // returns their values. It must be called without holding any other lock on
 // g.
-func (g *Goal) snapshot() (activePlanID string, history []string, lastAssessed time.Time, retiredAt time.Time, recentFindings []string) {
+func (g *Goal) snapshot() (activePlanID string, activePlanIDs []string, history []string, lastAssessed time.Time, retiredAt time.Time, recentFindings []string) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	activePlanID = g.ActivePlanID
+	if len(g.ActivePlanIDs) > 0 {
+		activePlanIDs = append([]string(nil), g.ActivePlanIDs...)
+	}
 	if len(g.PlanHistory) > 0 {
 		history = append([]string(nil), g.PlanHistory...) // defensive copy
 	}
@@ -273,19 +346,110 @@ func (g *Goal) History() []string {
 }
 
 // AppendHistory appends a plan ID to the history and returns the new length.
-// The caller must hold no other lock on g.
+// G4: When the history exceeds MaxPlanHistory (or DefaultMaxPlanHistory when
+// unset), the oldest entry is dropped (ring-buffer semantics). The caller
+// must hold no other lock on g.
 func (g *Goal) AppendHistory(planID string) int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.PlanHistory = append(g.PlanHistory, planID)
+	cap := g.MaxPlanHistory
+	if cap <= 0 {
+		cap = DefaultMaxPlanHistory
+	}
+	if len(g.PlanHistory) > cap {
+		g.PlanHistory = g.PlanHistory[len(g.PlanHistory)-cap:]
+	}
 	return len(g.PlanHistory)
 }
 
-// SetActivePlan records the currently-executing plan ID.
+// SetActivePlan records the currently-executing plan ID and mirrors it
+// into ActivePlanIDs[0] (G2 backward-compat).
 func (g *Goal) SetActivePlan(planID string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.ActivePlanID = planID
+	if planID == "" {
+		g.ActivePlanIDs = nil
+	} else if len(g.ActivePlanIDs) == 0 {
+		g.ActivePlanIDs = []string{planID}
+	} else {
+		g.ActivePlanIDs[0] = planID
+	}
+}
+
+// AddActivePlan adds a plan ID to the active plans list (G2). Returns the
+// new count. Does NOT enforce MaxActivePlans; the caller (GoalLoop) is
+// responsible for checking CanAddActivePlan before calling this.
+func (g *Goal) AddActivePlan(planID string) int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if planID == "" {
+		return len(g.ActivePlanIDs)
+	}
+	// Check for duplicates.
+	for _, id := range g.ActivePlanIDs {
+		if id == planID {
+			return len(g.ActivePlanIDs)
+		}
+	}
+	g.ActivePlanIDs = append(g.ActivePlanIDs, planID)
+	if len(g.ActivePlanIDs) > 0 {
+		g.ActivePlanID = g.ActivePlanIDs[0]
+	}
+	return len(g.ActivePlanIDs)
+}
+
+// RemoveActivePlan removes a plan ID from the active plans list (G2).
+// Returns the new count. Updates ActivePlanID to mirror the first
+// remaining element (or empty when no plans remain).
+func (g *Goal) RemoveActivePlan(planID string) int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	filtered := g.ActivePlanIDs[:0]
+	for _, id := range g.ActivePlanIDs {
+		if id != planID {
+			filtered = append(filtered, id)
+		}
+	}
+	g.ActivePlanIDs = filtered
+	if len(g.ActivePlanIDs) > 0 {
+		g.ActivePlanID = g.ActivePlanIDs[0]
+	} else {
+		g.ActivePlanID = ""
+	}
+	return len(g.ActivePlanIDs)
+}
+
+// ActivePlans returns a defensive copy of the active plan IDs (G2).
+func (g *Goal) ActivePlans() []string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	if len(g.ActivePlanIDs) == 0 {
+		if g.ActivePlanID != "" {
+			return []string{g.ActivePlanID}
+		}
+		return nil
+	}
+	return append([]string(nil), g.ActivePlanIDs...)
+}
+
+// CanAddActivePlan reports whether the goal can accept another active plan,
+// given the maxActivePlans limit (G2). When maxActivePlans is zero,
+// DefaultMaxActivePlans is used.
+func (g *Goal) CanAddActivePlan(maxActivePlans int) bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	cap := maxActivePlans
+	if cap <= 0 {
+		cap = DefaultMaxActivePlans
+	}
+	// Count: use ActivePlanIDs if non-empty, else fall back to ActivePlanID.
+	count := len(g.ActivePlanIDs)
+	if count == 0 && g.ActivePlanID != "" {
+		count = 1
+	}
+	return count < cap
 }
 
 // Assess marks the goal as assessed at now with the given health verdict.
@@ -372,6 +536,18 @@ func (s *GoalStore) migrate() error {
 			return fmt.Errorf("migrate recent_findings: %w", err)
 		}
 	}
+	// G2: add active_plan_ids column for multi-plan concurrency.
+	if _, err := s.db.Exec(`ALTER TABLE employee_goals ADD COLUMN active_plan_ids TEXT`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate active_plan_ids: %w", err)
+		}
+	}
+	// G4: add max_plan_history column for ring-buffer config.
+	if _, err := s.db.Exec(`ALTER TABLE employee_goals ADD COLUMN max_plan_history INTEGER DEFAULT 0`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate max_plan_history: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -443,17 +619,20 @@ func (s *GoalStore) Create(ctx context.Context, g *Goal) error {
 	retiredAt := goalNullableTime(g.RetiredAt)
 	triggerRef := goalNullableString(g.TriggerRef)
 	activePlan := goalNullableString(g.ActivePlanID)
+	activePlanIDsJSON := marshalPlanIDs(g.ActivePlans())
+	maxPlanHistory := g.MaxPlanHistory
 
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO employee_goals
     (id, employee_id, title, mandate, state, source, trigger_ref,
      health, last_assessed, active_plan_id, plan_history,
-     created_at, retired_at, recent_findings)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     created_at, retired_at, recent_findings, active_plan_ids, max_plan_history)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		g.ID, g.EmployeeID, g.Title, g.Mandate,
 		g.State.String(), string(g.Source), triggerRef,
 		g.Health.String(), lastAssessed, activePlan, history,
 		g.CreatedAt.Format(time.RFC3339), retiredAt, recentFindings,
+		activePlanIDsJSON, maxPlanHistory,
 	)
 	if err != nil {
 		return fmt.Errorf("insert: %w", err)
@@ -510,13 +689,14 @@ func (s *GoalStore) Update(ctx context.Context, g *Goal) error {
 	if g == nil {
 		return errors.New("update: nil goal")
 	}
-	activePlanID, history, lastAssessed, retiredAt, recentFindings := g.snapshot()
+	activePlanID, activePlanIDs, history, lastAssessed, retiredAt, recentFindings := g.snapshot()
 
 	historyJSON, err := marshalHistory(history)
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
 	findingsJSON := marshalFindings(recentFindings)
+	activePlanIDsJSON := marshalPlanIDs(activePlanIDs)
 
 	res, err := s.db.ExecContext(ctx, `
 UPDATE employee_goals SET
@@ -530,12 +710,15 @@ UPDATE employee_goals SET
     active_plan_id = ?,
     plan_history = ?,
     retired_at = ?,
-    recent_findings = ?
+    recent_findings = ?,
+    active_plan_ids = ?,
+    max_plan_history = ?
 WHERE id = ?`,
 		g.Title, g.Mandate, g.State.String(), string(g.Source),
 		goalNullableString(g.TriggerRef), g.Health.String(),
 		goalNullableTime(lastAssessed), goalNullableString(activePlanID),
-		historyJSON, goalNullableTime(retiredAt), findingsJSON, g.ID,
+		historyJSON, goalNullableTime(retiredAt), findingsJSON,
+		activePlanIDsJSON, g.MaxPlanHistory, g.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update: %w", err)
@@ -588,25 +771,25 @@ const (
 	selectByID = `
 SELECT id, employee_id, title, mandate, state, source, trigger_ref,
        health, last_assessed, active_plan_id, plan_history,
-       created_at, retired_at, recent_findings
+       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history
 FROM employee_goals WHERE id = ?`
 
 	selectByEmployee = `
 SELECT id, employee_id, title, mandate, state, source, trigger_ref,
        health, last_assessed, active_plan_id, plan_history,
-       created_at, retired_at, recent_findings
+       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history
 FROM employee_goals WHERE employee_id = ? ORDER BY created_at`
 
 	selectActiveAll = `
 SELECT id, employee_id, title, mandate, state, source, trigger_ref,
        health, last_assessed, active_plan_id, plan_history,
-       created_at, retired_at, recent_findings
+       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history
 FROM employee_goals WHERE state != 'retired' ORDER BY created_at`
 
 	selectActiveByEmployee = `
 SELECT id, employee_id, title, mandate, state, source, trigger_ref,
        health, last_assessed, active_plan_id, plan_history,
-       created_at, retired_at, recent_findings
+       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history
 FROM employee_goals WHERE employee_id = ? AND state != 'retired'
 ORDER BY created_at`
 
@@ -623,6 +806,8 @@ func scanGoal(sc rowScanner) (*Goal, error) {
 		lastAssessed, retiredAt    sql.NullString
 		planHistoryJSON            sql.NullString
 		recentFindingsJSON         sql.NullString
+		activePlanIDsJSON          sql.NullString
+		maxPlanHistory             sql.NullInt64
 		createdAt                  string
 	)
 	if err := sc.Scan(
@@ -630,6 +815,7 @@ func scanGoal(sc rowScanner) (*Goal, error) {
 		&stateStr, &sourceStr, &triggerRef,
 		&healthStr, &lastAssessed, &activePlanID, &planHistoryJSON,
 		&createdAt, &retiredAt, &recentFindingsJSON,
+		&activePlanIDsJSON, &maxPlanHistory,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrGoalNotFound
@@ -683,6 +869,14 @@ func scanGoal(sc rowScanner) (*Goal, error) {
 		if err := json.Unmarshal([]byte(recentFindingsJSON.String), &g.RecentFindings); err != nil {
 			return nil, fmt.Errorf("unmarshal recent_findings: %w", err)
 		}
+	}
+	if activePlanIDsJSON.Valid && activePlanIDsJSON.String != "" {
+		if err := json.Unmarshal([]byte(activePlanIDsJSON.String), &g.ActivePlanIDs); err != nil {
+			return nil, fmt.Errorf("unmarshal active_plan_ids: %w", err)
+		}
+	}
+	if maxPlanHistory.Valid {
+		g.MaxPlanHistory = int(maxPlanHistory.Int64)
 	}
 
 	t, err := time.Parse(time.RFC3339, createdAt)
@@ -739,6 +933,20 @@ func marshalFindings(findings []string) any {
 		return nil
 	}
 	b, err := json.Marshal(findings)
+	if err != nil {
+		return nil
+	}
+	return string(b)
+}
+
+// marshalPlanIDs serializes an active-plan-IDs slice to the storage form
+// (a JSON array). Returns nil for empty/nil slices so the column is NULL
+// when no plans are active (the common case).
+func marshalPlanIDs(planIDs []string) any {
+	if len(planIDs) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(planIDs)
 	if err != nil {
 		return nil
 	}

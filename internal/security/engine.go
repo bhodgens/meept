@@ -415,6 +415,13 @@ func (e *Engine) CheckForAgent(action, toolName string, details map[string]strin
 			if _, hasRL := checkDetails["risk_level"]; !hasRL {
 				checkDetails["risk_level"] = effectiveRisk.String()
 			}
+			// E3: Wire conversationID into details so the employee PreExecChecker
+			// can access it for MaxConversationTokens enforcement.
+			if conversationID != "" {
+				if _, hasCID := checkDetails["conversation_id"]; !hasCID {
+					checkDetails["conversation_id"] = conversationID
+				}
+			}
 			preDecision := checker.Check(action, toolName, checkDetails)
 			if !preDecision.Allowed {
 				reason := preDecision.Reason

@@ -6,7 +6,18 @@ import '../../theme/typography.dart';
 import '../../providers/providers.dart';
 import '../../models/api_models.dart';
 
-/// Agents tab - displays all available agents
+/// Agents tab - displays all available agents.
+///
+/// S3: This is the Flutter full-window agents view. The menubar app
+/// (menubar/MeeptMenuBar/Views/AgentsView.swift) is a separate native
+/// Swift implementation for the macOS menu bar. Both surfaces query
+/// the same REST API (/api/v1/agents/*) but serve different UX roles:
+/// - Swift menubar tab: quick status, pause/resume, approve plans
+/// - Flutter full window: detailed constitution editing, audit review
+///
+/// Currently this widget shows the basic agent grid. Full employee detail
+/// (constitution, goals, audit findings) is handled via the agents API and
+/// can be extended with additional views.
 class AgentsTab extends ConsumerStatefulWidget {
   const AgentsTab({super.key});
 

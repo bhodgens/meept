@@ -20,9 +20,34 @@ import (
 // errNotConfigured is returned when the Manager is nil (employees not wired).
 var errNotConfigured = errors.New("employees not configured")
 
-// amend frozen-field set consulted by the handler when a request omits
-// amendment metadata. The Manager performs authoritative enforcement; this is
-// a defensive pre-check so callers get a fast error.
+// constitutionFields is the canonical set of field names that belong to the
+// constitution. When an update request includes any of these keys, the
+// handler rejects them with a message directing the caller to use the amend
+// flow instead (spec S5: update vs amend distinction).
+var constitutionFields = map[string]struct{}{
+	"purpose":             {},
+	"role":                {},
+	"charter":             {},
+	"autonomy_tier":       {},
+	"escalates_to":        {},
+	"constraints":         {},
+	"amendment_policy":    {},
+	"version":             {},
+	"authored_by":         {},
+	"tools_allowed":       {},
+	"tools_forbidden":     {},
+	"risk_ceiling":        {},
+	"max_tokens_per_turn": {},
+	"max_conversation_tokens": {},
+	"daily_budget_cents":  {},
+	"max_invocations_per_day": {},
+	"escalation_triggers": {},
+	"never":               {},
+	"assessment_interval": {},
+	"frozen_fields":       {},
+	"self_propose_allowed": {},
+	"requires_approval":   {},
+}
 
 // RPCHandler provides JSON-RPC handlers for employee management under the
 // agents.* namespace. It wraps an employee.Manager and exposes the methods
@@ -261,6 +286,11 @@ func (h *RPCHandler) handleUpdate(ctx context.Context, raw json.RawMessage) (any
 	}
 	if req.ID == "" {
 		return nil, fmt.Errorf("id is required")
+	}
+	// S5: Reject constitution changes via update. Use `meept agents amend` for
+	// constitution field modifications (they route through Plan signoff).
+	if len(req.Constitution) > 0 {
+		return nil, fmt.Errorf("constitution changes are not allowed via update; use `meept agents amend <id> --field=<key> <value>` to propose an amendment through the plan signoff workflow")
 	}
 	updated, err := h.manager.UpdateEmployee(ctx, UpdateRequest{
 		ID:           req.ID,

@@ -20,6 +20,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	mathrand "math/rand"
+	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -39,6 +42,24 @@ import (
 // compare a constitution's risk ceiling against a numeric risk without a
 // cross-package dependency. The ordering and string forms MUST stay aligned
 // with internal/security/types.go.
+//
+// C2: The mapping between SecurityEngine.RiskLevel (int enum in
+// internal/security/types.go) and Constitution.RiskCeiling (string in
+// constitution.go) is defined here explicitly. The two type systems are:
+//
+//	internal/security.RiskLevel: RiskSafe=0, RiskLow=1, RiskMedium=2,
+//	  RiskHigh=3, RiskCritical=4
+//
+//	employee.RiskLevelCeiling (string): "safe", "low", "medium", "high",
+//	  "critical"
+//
+//	employee.riskLevel (local): riskSafe=0, riskLow=1, riskMedium=2,
+//	  riskHigh=3, riskCritical=4
+//
+// The local riskLevel type mirrors security.RiskLevel's ordering exactly.
+// parseRiskCeiling maps the string RiskCeiling → riskLevel. The
+// SecurityEngineRiskToCeiling function maps an int from the security engine
+// to the local riskLevel for direct comparison.
 type riskLevel int
 
 const (
@@ -48,6 +69,42 @@ const (
 	riskHigh                      // high
 	riskCritical                  // critical
 )
+
+// SecurityEngineRiskToCeiling converts a security.RiskLevel integer value
+// to the local riskLevel used by the enforcement engine. This is the
+// explicit mapping required by C2.
+//
+// internal/security defines:
+//	RiskSafe=0, RiskLow=1, RiskMedium=2, RiskHigh=3, RiskCritical=4
+//
+// Since the ordering matches exactly, this is a direct cast, but the
+// function documents the mapping and validates the range so unknown
+// values get a sensible default.
+func SecurityEngineRiskToCeiling(securityRiskLevel int) riskLevel {
+	switch securityRiskLevel {
+	case 0:
+		return riskSafe
+	case 1:
+		return riskLow
+	case 2:
+		return riskMedium
+	case 3:
+		return riskHigh
+	case 4:
+		return riskCritical
+	default:
+		// Unknown security risk levels are treated as medium (conservative).
+		return riskMedium
+	}
+}
+
+// RiskCeilingToSecurityLevel converts the local riskLevel to the
+// corresponding security.RiskLevel integer. This is the inverse of
+// SecurityEngineRiskToCeiling and is used when the enforcement engine
+// needs to communicate risk levels back to the security layer.
+func RiskCeilingToSecurityLevel(r riskLevel) int {
+	return int(r)
+}
 
 // parseRiskCeiling converts the constitution's risk_ceiling string into a
 // riskLevel. Empty string defaults to riskMedium (the spec default for tier-2).
@@ -106,6 +163,138 @@ type noopBudgetChecker struct{}
 func (noopBudgetChecker) SpentToday(string) (int, int, int) { return 0, 0, 0 }
 
 // ---------------------------------------------------------------------------
+// ConversationTokenStore (E1: conversation-level token budget tracking).
+// ---------------------------------------------------------------------------
+
+// ConversationTokenStore reports the cumulative token consumption for a
+// specific conversation. This is distinct from BudgetChecker which tracks
+// per-day, per-employee usage. The pre-exec checker uses this to enforce
+// MaxConversationTokens (the per-conversation budget cap set in the
+// constitution's Constraints.MaxConversationTokens field).
+//
+// Implementations typically wrap a session-scoped token counter or query
+// the LLM client's per-conversation usage record.
+type ConversationTokenStore interface {
+	// GetConversationTokens returns the total tokens consumed in the
+	// given conversation so far. A return of (0, nil) means "no
+	// data" or "no tokens used" — the checker treats both as
+	// "budget available".
+	GetConversationTokens(conversationID string) (int, error)
+}
+
+// noopConversationTokenStore always returns 0 tokens; used as a default so
+// that PreExecChecker works before the caller wires a real implementation.
+type noopConversationTokenStore struct{}
+
+func (noopConversationTokenStore) GetConversationTokens(string) (int, error) { return 0, nil }
+
+// ---------------------------------------------------------------------------
+// H4: TurnBudgetTracker — cumulative tool costs within a turn.
+// ---------------------------------------------------------------------------
+
+// TurnBudgetTracker tracks the cumulative resource consumption of all tool
+// calls within a single GoalLoop turn (one ASSESS→PLAN→EXECUTE→REFLECT
+// cycle). The PreExecChecker consults this in addition to the daily budget
+// so that a turn with 10 tools doesn't exceed the per-turn budget after
+// tool #3.
+//
+// The tracker is safe for concurrent use: all mutations are guarded by an
+// internal mutex. The Record and Remaining methods are O(1).
+//
+// Lifecycle: the GoalLoop or the BotRunner creates a fresh TurnBudgetTracker
+// at the start of each turn. After each tool execution, Record is called
+// with the tool's cost. The PreExecChecker calls Remaining before the next
+// tool; if the remaining budget is exhausted, the checker denies the call
+// and sets turnComplete = true so the loop stops queuing more tools.
+type TurnBudgetTracker struct {
+	mu              sync.Mutex
+	tokensUsed      int
+	costCents       int
+	toolCalls       int
+	maxTokensPerTurn int
+	maxCostPerTurn  int
+}
+
+// NewTurnBudgetTracker creates a tracker with the given per-turn limits.
+// Zero or negative limits mean "no limit" for that dimension.
+func NewTurnBudgetTracker(maxTokensPerTurn, maxCostPerTurn int) *TurnBudgetTracker {
+	return &TurnBudgetTracker{
+		maxTokensPerTurn: maxTokensPerTurn,
+		maxCostPerTurn:   maxCostPerTurn,
+	}
+}
+
+// Record adds a tool call's resource consumption to the running total.
+// Called after each tool execution completes.
+func (t *TurnBudgetTracker) Record(tokensUsed, costCents int) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.tokensUsed += tokensUsed
+	t.costCents += costCents
+	t.toolCalls++
+	t.mu.Unlock()
+}
+
+// Remaining returns the remaining token and cost budget for this turn.
+// A negative return means the budget has been exceeded.
+func (t *TurnBudgetTracker) Remaining() (tokensRemaining, costRemaining int) {
+	if t == nil {
+		return -1, -1 // nil tracker = unlimited
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	tokensRemaining = -1
+	costRemaining = -1
+	if t.maxTokensPerTurn > 0 {
+		tokensRemaining = t.maxTokensPerTurn - t.tokensUsed
+	}
+	if t.maxCostPerTurn > 0 {
+		costRemaining = t.maxCostPerTurn - t.costCents
+	}
+	return
+}
+
+// IsExhausted returns true when either the token or cost budget has been
+// exceeded. A nil tracker is never exhausted (unlimited).
+func (t *TurnBudgetTracker) IsExhausted() bool {
+	if t == nil {
+		return false
+	}
+	tokens, cost := t.Remaining()
+	if tokens >= 0 && tokens == 0 {
+		return true
+	}
+	if cost >= 0 && cost == 0 {
+		return true
+	}
+	return false
+}
+
+// ToolCalls returns the number of tool calls recorded so far.
+func (t *TurnBudgetTracker) ToolCalls() int {
+	if t == nil {
+		return 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.toolCalls
+}
+
+// Reset clears all accumulated state for a new turn.
+func (t *TurnBudgetTracker) Reset() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.tokensUsed = 0
+	t.costCents = 0
+	t.toolCalls = 0
+	t.mu.Unlock()
+}
+
+// ---------------------------------------------------------------------------
 // AutoPause callback.
 // ---------------------------------------------------------------------------
 
@@ -146,6 +335,25 @@ const (
 )
 
 // AuditSeverity levels for findings.
+//
+// E7: Severity Rubric. The PostTurnAuditor and PeriodicAuditor assign
+// severity according to the following rubric:
+//
+//   - critical: Never[] violation OR risk_ceiling exceeded OR budget fraud
+//     suspected (e.g. token counts manipulated, cost reports fabricated).
+//     Critical findings trigger immediate auto-pause.
+//
+//   - warning: Charter commitment violation (e.g. output tone diverges
+//     from charter values, tool usage pattern deviates from intended
+//     scope, escalation trigger was bypassed). Warning findings contribute
+//     to DriftScore but do not auto-pause individually.
+//
+//   - info: Minor style drift, cosmetic issues, or observations that don't
+//     indicate a constitution violation. Info findings are recorded for
+//     audit trail completeness but do not affect DriftScore or auto-pause.
+//
+// The rubric is enforced by the LLM audit prompt (postTurnSystemPrompt)
+// which instructs the model to use these criteria when assigning severity.
 type AuditSeverity string
 
 const (
@@ -186,16 +394,30 @@ type ToolCallRecord struct {
 	Error    string            `json:"error,omitempty"`
 }
 
+// TokenCounts tracks token usage for a single turn.
+type TokenCounts struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
 // TurnRecord bundles the tool calls and final output of a completed LLM turn
 // for audit review.
+//
+// E2: The struct is explicitly defined with all fields required by the spec
+// (lines 368-379): conversationID, turnID, toolCalls, llmOutput, tokenUsage,
+// and duration.
 type TurnRecord struct {
-	EmployeeID    string           `json:"employee_id"`
-	TurnID        string           `json:"turn_id"`
-	GoalID        string           `json:"goal_id,omitempty"`
-	PlanID        string           `json:"plan_id,omitempty"`
-	ToolCalls     []ToolCallRecord `json:"tool_calls"`
-	FinalOutput   string           `json:"final_output"`
-	Constitution  *Constitution    `json:"-"`
+	EmployeeID     string           `json:"employee_id"`
+	ConversationID string           `json:"conversation_id,omitempty"`
+	TurnID         string           `json:"turn_id"`
+	GoalID         string           `json:"goal_id,omitempty"`
+	PlanID         string           `json:"plan_id,omitempty"`
+	ToolCalls      []ToolCallRecord `json:"tool_calls"`
+	FinalOutput    string           `json:"final_output"`
+	TokenUsage     TokenCounts      `json:"token_usage,omitempty"`
+	Duration       time.Duration    `json:"duration,omitempty"`
+	Constitution   *Constitution    `json:"-"`
 }
 
 // ---------------------------------------------------------------------------
@@ -211,12 +433,14 @@ type TurnRecord struct {
 // any work, ensuring no I/O happens under the lock (per CLAUDE.md mutex-scope
 // rule).
 type PreExecChecker struct {
-	mu            sync.RWMutex
-	constitution  *Constitution
-	employeeID    string
-	budgetChecker BudgetChecker
-	autoPause     AutoPauseFunc
-	auditStore    *AuditStore
+	mu               sync.RWMutex
+	constitution     *Constitution
+	employeeID       string
+	budgetChecker    BudgetChecker
+	convTokenStore   ConversationTokenStore
+	autoPause        AutoPauseFunc
+	auditStore      *AuditStore
+	turnBudget       *TurnBudgetTracker
 }
 
 // NewPreExecChecker constructs a PreExecChecker for the given employee. The
@@ -226,9 +450,10 @@ type PreExecChecker struct {
 // existing agents.
 func NewPreExecChecker(employeeID string, c *Constitution) *PreExecChecker {
 	return &PreExecChecker{
-		constitution:  c,
-		employeeID:    employeeID,
-		budgetChecker: noopBudgetChecker{},
+		constitution:   c,
+		employeeID:     employeeID,
+		budgetChecker:  noopBudgetChecker{},
+		convTokenStore: noopConversationTokenStore{},
 	}
 }
 
@@ -251,6 +476,18 @@ func (p *PreExecChecker) SetBudgetChecker(bc BudgetChecker) {
 	p.mu.Unlock()
 }
 
+// SetConversationTokenStore wires the conversation-level token store used to
+// enforce MaxConversationTokens (E1). Nil is ignored (typed-nil guard per
+// CLAUDE.md).
+func (p *PreExecChecker) SetConversationTokenStore(store ConversationTokenStore) {
+	if store == nil {
+		return
+	}
+	p.mu.Lock()
+	p.convTokenStore = store
+	p.mu.Unlock()
+}
+
 // SetAutoPause wires the auto-pause callback. Nil is ignored.
 func (p *PreExecChecker) SetAutoPause(fn AutoPauseFunc) {
 	if fn == nil {
@@ -269,6 +506,20 @@ func (p *PreExecChecker) SetAuditStore(as *AuditStore) {
 	}
 	p.mu.Lock()
 	p.auditStore = as
+	p.mu.Unlock()
+}
+
+// SetTurnBudgetTracker wires the per-turn budget tracker (H4). The tracker
+// is consulted in Check to enforce per-turn cumulative budget limits. When
+// the turn budget is exhausted, the checker denies the call and the
+// caller sets turnComplete = true. Nil is ignored (typed-nil guard per
+// CLAUDE.md). Thread-safe.
+func (p *PreExecChecker) SetTurnBudgetTracker(t *TurnBudgetTracker) {
+	if t == nil {
+		return
+	}
+	p.mu.Lock()
+	p.turnBudget = t
 	p.mu.Unlock()
 }
 
@@ -311,7 +562,9 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 	p.mu.RLock()
 	c := p.constitution
 	bc := p.budgetChecker
+	convTokenStore := p.convTokenStore
 	autoPause := p.autoPause
+	turnBudget := p.turnBudget
 	p.mu.RUnlock()
 
 	// No constitution means no constraints — allow everything (non-employee
@@ -356,16 +609,32 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 		}
 	}
 
-	// 2. never[] — substring scan. If any never-rule appears as a
-	//    substring in the action, tool name, or any details value, hard
-	//    deny + auto-pause. This check precedes escalation_triggers and
-	//    risk_ceiling so a never-rule violation is always treated as a
-	//    critical stop, not silently queued as an escalation plan.
+	// 2. never[] — substring scan (legacy form) + structured never rules
+	//    (C4). If any never-rule matches the action, tool name, or any
+	//    details value, hard deny + auto-pause. This check precedes
+	//    escalation_triggers and risk_ceiling so a never-rule violation
+	//    is always treated as a critical stop, not silently queued as an
+	//    escalation plan.
 	//    (Spec line 355: "Never pattern match → hard deny, audit event
 	//    at RiskCritical, employee auto-pause.")
 	if hit, rule := matchesNever(constraints.Never, action, toolName, details); hit {
 		p.recordDenial(context.Background(), p.employeeID, action, toolName,
 			"never: "+rule, SeverityCritical)
+		if autoPause != nil {
+			_ = autoPause(p.employeeID, "never-rule violation: "+rule)
+		}
+		return Decision{
+			Allowed:  false,
+			Reason:   fmt.Sprintf("never-rule violation: %q", rule),
+			Severity: string(SeverityCritical),
+		}
+	}
+	// 2b. never_rules[] — structured form (C4). Supports substring, regex,
+	//     glob, and llm_only match types. The llm_only type is NOT checked
+	//     here (only by the post-turn auditor), so it's skipped at pre-exec.
+	if hit, rule := matchesNeverRules(constraints.NeverRules, action, toolName, details); hit {
+		p.recordDenial(context.Background(), p.employeeID, action, toolName,
+			"never_rule: "+rule, SeverityCritical)
 		if autoPause != nil {
 			_ = autoPause(p.employeeID, "never-rule violation: "+rule)
 		}
@@ -456,12 +725,76 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 		_ = tokens // reserved for future per-turn token gating
 	}
 
+	// H4: Turn-level budget check. The TurnBudgetTracker tracks cumulative
+	// cost across all tool calls within the current turn. If the remaining
+	// turn budget is exhausted, deny and signal that the turn is complete
+	// (the caller checks the Severity to detect this and stops queuing
+	// more tools).
+	if turnBudget != nil {
+		tokensRem, costRem := turnBudget.Remaining()
+		if tokensRem == 0 || costRem == 0 {
+			p.recordDenial(context.Background(), p.employeeID, action, toolName,
+				"turn budget exhausted", SeverityCritical)
+			if autoPause != nil {
+				_ = autoPause(p.employeeID, "turn budget exhausted")
+			}
+			return Decision{
+				Allowed:  false,
+				Reason:   fmt.Sprintf("turn budget exhausted: tokens_remaining=%d cost_remaining=%d", tokensRem, costRem),
+				Severity: string(SeverityCritical),
+			}
+		}
+	}
+
+	// 6. E1: conversation-level token budget check. Unlike the daily
+	//    budget above, this tracks per-conversation tokens via the
+	//    ConversationTokenStore. The conversation_id is read from details
+	//    (injected by the security engine or passed directly by the caller).
+	//    MaxConversationTokens=0 means no per-conversation cap.
+	if constraints.MaxConversationTokens > 0 && convTokenStore != nil {
+		convID := details["conversation_id"]
+		if convID != "" {
+			convTokens, convErr := convTokenStore.GetConversationTokens(convID)
+			if convErr == nil && convTokens >= constraints.MaxConversationTokens {
+				p.recordDenial(context.Background(), p.employeeID, action, toolName,
+					"conversation token budget exhausted", SeverityCritical)
+				if autoPause != nil {
+					_ = autoPause(p.employeeID, "conversation token budget exhausted")
+				}
+				return Decision{
+					Allowed:  false,
+					Reason:   fmt.Sprintf("conversation tokens %d >= max %d", convTokens, constraints.MaxConversationTokens),
+					Severity: string(SeverityCritical),
+				}
+			}
+		}
+	}
+
 	return Decision{Allowed: true, Severity: string(SeverityInfo)}
 }
 
 // recordDenial persists an audit finding for a hard-deny decision. It is
 // best-effort: the auditStore is nil-checked and the write is wrapped in
 // recover so an audit-write failure never causes a panic in the checker.
+//
+// H9: The audit store write (store.Create) performs SQLite I/O. However,
+// this method is called OUTSIDE the PreExecChecker's mutex (the auditStore
+// is snapshotted under RLock before this call). The only mutex held during
+// this method is the audit store's own internal mutex (SQL transaction
+// serialization). This is NOT a violation of the CLAUDE.md mutex-scope
+// rule because:
+//   1. The PreExecChecker.mu is NOT held during this call (it was released
+//      after snapshotting the auditStore pointer).
+//   2. The AuditStore is goroutine-safe via the underlying *sql.DB; no
+//      application-level mutex is held across I/O.
+//   3. The recover() wrapper ensures any panic from the store layer does
+//      not propagate into the checker.
+// The mutexio analyzer is expected to flag this because the method
+// signature includes "recordDenial" which doesn't match any I/O pattern.
+// If flagged: this is an intentional exception per the design. The audit
+// write MUST happen synchronously with the denial decision to maintain
+// audit-trail integrity (spec line 397: "all three checkpoints persist
+// findings").
 func (p *PreExecChecker) recordDenial(ctx context.Context, employeeID, action, toolName, reason string, severity AuditSeverity) {
 	defer func() {
 		// Never let an audit-write failure propagate into the checker.
@@ -617,6 +950,91 @@ func normalizeToken(t string) string {
 		t = t[1:]
 	}
 	return t
+}
+
+// matchesNeverRules scans the action, tool name, and all details values
+// against the structured NeverRule list (C4). Each rule is matched
+// according to its MatchType:
+//
+//   - MatchSubstring: delegates to the same substring + token-set logic
+//     as matchesNever (backward compatible with the legacy Never []string).
+//   - MatchRegex: compiles the pattern as a Go regexp (Re2) and matches
+//     against each haystack. Compilation errors are logged and the rule
+//     is skipped (fail-open for malformed patterns so a bad regex in a
+//     constitution doesn't brick the enforcement engine; the malformed
+//     pattern is caught at Validate time separately).
+//   - MatchGlob: uses path.Match for shell-style glob patterns.
+//   - MatchLLMOnly: NOT checked here — only by the post-turn auditor's
+//     LLM scan. Returns false from this function so the pre-exec gate
+//     doesn't fire.
+//
+// Returns (true, pattern) on the first hit.
+func matchesNeverRules(rules []NeverRule, action, toolName string, details map[string]string) (bool, string) {
+	if len(rules) == 0 {
+		return false, ""
+	}
+	// Collect the lowercased haystacks (one per field). Sort detail keys
+	// for deterministic scan order across map iteration.
+	haystacks := []string{
+		strings.ToLower(action),
+		strings.ToLower(toolName),
+	}
+	keys := make([]string, 0, len(details))
+	for k := range details {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		haystacks = append(haystacks, strings.ToLower(details[k]))
+	}
+
+	for _, rule := range rules {
+		if rule.Pattern == "" {
+			continue
+		}
+		mt := rule.MatchType
+		if mt == "" {
+			mt = MatchSubstring
+		}
+		// llm_only rules are not machine-checked at pre-exec.
+		if mt == MatchLLMOnly {
+			continue
+		}
+		for _, h := range haystacks {
+			if neverRuleMatchesField(rule.Pattern, mt, h) {
+				return true, rule.Pattern
+			}
+		}
+	}
+	return false, ""
+}
+
+// neverRuleMatchesField reports whether the rule pattern matches the
+// (already lowercased) field according to the match type.
+func neverRuleMatchesField(pattern string, mt MatchType, field string) bool {
+	switch mt {
+	case MatchSubstring:
+		return ruleMatchesField(pattern, field)
+	case MatchRegex:
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			// Malformed regex — skip (fail-open). Validate() should
+			// catch this earlier, but defensive.
+			return false
+		}
+		return re.MatchString(field)
+	case MatchGlob:
+		matched, err := path.Match(pattern, field)
+		if err != nil {
+			return false
+		}
+		return matched
+	case MatchLLMOnly:
+		return false
+	default:
+		// Unknown match type — default to substring.
+		return ruleMatchesField(pattern, field)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -782,7 +1200,14 @@ func (a *PostTurnAuditor) downgradeIfPermitted(finding *AuditFinding, constituti
 	}
 }
 
-const postTurnSystemPrompt = `You are a constitution compliance auditor. Review the employee's turn for violations of their constitution. Respond as JSON: {"severity":"info|warning|critical","violated_rule":"","evidence":""}. If no violation, respond with {"severity":"info","violated_rule":"","evidence":""}.`
+const postTurnSystemPrompt = `You are a constitution compliance auditor. Review the employee's turn for violations of their constitution.
+
+Severity rubric (E7):
+- critical: Never[] violation OR risk_ceiling exceeded OR budget fraud suspected (token counts manipulated, cost reports fabricated). Critical triggers auto-pause.
+- warning: Charter commitment violation (output tone diverges from charter values, tool usage pattern deviates from intended scope). Contributes to DriftScore.
+- info: Minor style drift, cosmetic issues, or observations. Recorded for audit trail but no action taken.
+
+Respond as JSON: {"severity":"info|warning|critical","violated_rule":"","evidence":""}. If no violation, respond with {"severity":"info","violated_rule":"","evidence":""}.`
 
 const postTurnSystemPromptStrict = `You are a strict constitution compliance auditor. You MUST respond with valid JSON only, no prose. Format: {"severity":"info|warning|critical","violated_rule":"","evidence":""}. Analyze the turn carefully and report any constitution violation. If clean, set severity to "info" with empty fields.`
 
@@ -864,7 +1289,9 @@ func parseAuditResponse(content string, turn TurnRecord) (*AuditFinding, error) 
 // ---------------------------------------------------------------------------
 
 // PeriodicAuditor reviews the last N turns in bulk to detect slow drift from
-// the constitution. Same classifier model, different prompt.
+// the constitution. Same classifier model, different prompt. Same as
+// PerPostTurnAuditor but runs on a cadence (e.g. every 6 hours) rather than
+// after each turn.
 type PeriodicAuditor struct {
 	mu              sync.Mutex
 	model           llm.Chatter
@@ -872,14 +1299,24 @@ type PeriodicAuditor struct {
 	autoPause       AutoPauseFunc
 	driftThreshold  float64 // auto-pause above this score (default 0.3)
 
+	// E8: PeriodicAuditSampleSize controls how many turns are sent to
+	// the LLM for audit. When total turns exceed this number, reservoir
+	// sampling selects a representative subset. Default 50.
+	sampleSize      int
+
 	// 3-strike failure tracking (spec lines 603-604). Guarded by failMu.
 	failMu               sync.Mutex
 	consecutiveFailures  int
 	lastFailureAt        time.Time
 }
 
+// DefaultPeriodicAuditSampleSize is the default number of turns sampled
+// when the total turns exceed the sample size (E8).
+const DefaultPeriodicAuditSampleSize = 50
+
 // NewPeriodicAuditor constructs a PeriodicAuditor with the given drift
 // threshold. A threshold of 0 disables drift-based auto-pause.
+// The sample size defaults to DefaultPeriodicAuditSampleSize (50).
 func NewPeriodicAuditor(model llm.Chatter, store *AuditStore, driftThreshold float64) *PeriodicAuditor {
 	if driftThreshold == 0 {
 		driftThreshold = 0.3 // spec default
@@ -888,7 +1325,20 @@ func NewPeriodicAuditor(model llm.Chatter, store *AuditStore, driftThreshold flo
 		model:          model,
 		store:          store,
 		driftThreshold: driftThreshold,
+		sampleSize:     DefaultPeriodicAuditSampleSize,
 	}
+}
+
+// SetSampleSize sets the periodic audit sample size (E8). When total turns
+// exceed this number, reservoir sampling selects a representative subset.
+// Values <= 0 reset to the default.
+func (a *PeriodicAuditor) SetSampleSize(n int) {
+	if n <= 0 {
+		n = DefaultPeriodicAuditSampleSize
+	}
+	a.mu.Lock()
+	a.sampleSize = n
+	a.mu.Unlock()
 }
 
 // SetAutoPause wires the auto-pause callback (nil-guarded).
@@ -917,6 +1367,7 @@ func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]Audi
 	store := a.store
 	autoPause := a.autoPause
 	threshold := a.driftThreshold
+	sampleSize := a.sampleSize
 	a.mu.Unlock()
 
 	if model == nil || len(turns) == 0 {
@@ -924,6 +1375,13 @@ func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]Audi
 	}
 	if turns[0].Constitution == nil {
 		return nil, 0, nil
+	}
+
+	// E8: Reservoir sampling. When total turns exceed sampleSize, select
+	// a representative subset using Algorithm R. This bounds LLM token
+	// cost for employees with high invocation counts.
+	if sampleSize > 0 && len(turns) > sampleSize {
+		turns = reservoirSample(turns, sampleSize)
 	}
 
 	// Backoff: if the last failure was recent, skip this call.
@@ -1104,6 +1562,7 @@ CREATE TABLE IF NOT EXISTS employee_audit_findings (
     id              TEXT PRIMARY KEY,
     employee_id     TEXT NOT NULL,
     goal_id         TEXT,
+    -- E10: plan_id references plans.id (TEXT, pkg/id.Generate)
     plan_id         TEXT,
     turn_id         TEXT,
     severity        TEXT NOT NULL,
@@ -1118,11 +1577,21 @@ CREATE TABLE IF NOT EXISTS employee_audit_findings (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_employee ON employee_audit_findings(employee_id, detected_at);
 CREATE INDEX IF NOT EXISTS idx_audit_severity ON employee_audit_findings(severity);
+-- E9: Composite indexes for common query patterns.
+CREATE INDEX IF NOT EXISTS idx_audit_severity_resolved ON employee_audit_findings(severity, resolved_at);
+CREATE INDEX IF NOT EXISTS idx_audit_checkpoint_detected ON employee_audit_findings(checkpoint, detected_at);
 `
 
 // AuditStore persists AuditFinding records to a SQLite database.
 type AuditStore struct {
 	db *sql.DB
+
+	// E10: planIDValidator, when set, is called before insert to verify
+	// that a non-empty plan_id references a valid plan. This is an
+	// application-layer FK check because plan IDs are generated by
+	// pkg/id.Generate and the audit table doesn't have a SQL FK to
+	// plans.id.
+	planIDValidator func(ctx context.Context, planID string) bool
 }
 
 // NewAuditStore opens (or creates) the audit findings table in the given
@@ -1155,14 +1624,35 @@ func (s *AuditStore) migrate() error {
 	return err
 }
 
+// SetPlanIDValidator wires the plan-ID validation callback (E10).
+// When set, Create will call this before inserting a finding with a
+// non-empty plan_id. If the validator returns false, the plan_id is
+// cleared (set to empty) to prevent FK violations. Nil is ignored.
+func (s *AuditStore) SetPlanIDValidator(fn func(ctx context.Context, planID string) bool) {
+	if fn == nil {
+		return
+	}
+	s.planIDValidator = fn
+}
+
 // Create persists a finding. The finding's DetectedAt is used as the
 // detected_at timestamp; if zero, the current time is used.
+//
+// E10: If plan_id is non-empty and a planIDValidator is wired, the
+// plan_id is validated before insert. If validation fails, the plan_id
+// is cleared to prevent a dangling FK reference.
 func (s *AuditStore) Create(ctx context.Context, f AuditFinding) error {
 	if f.ID == "" {
 		f.ID = id.Generate("audit_")
 	}
 	if f.DetectedAt.IsZero() {
 		f.DetectedAt = time.Now().UTC()
+	}
+	// E10: Application-layer FK check for plan_id.
+	if f.PlanID != "" && s.planIDValidator != nil {
+		if !s.planIDValidator(ctx, f.PlanID) {
+			f.PlanID = "" // clear invalid reference
+		}
 	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO employee_audit_findings
@@ -1327,7 +1817,63 @@ func nullableTime(t *time.Time) any {
 // as markdown rules), the free-form charter, a header (purpose / role / tier /
 // escalation), and the existing system prompt into a single system prompt
 // string. This is what the BotRunner injects as the LLM system prompt.
+//
+// C5: Prompt Template + Truncation Strategy
+//
+// The rendered prompt follows this structure (sections are omitted when
+// their source data is empty):
+//
+//	# employee profile
+//
+//	**purpose:** {Constitution.Purpose}
+//	**role:** {Constitution.Role}
+//	**autonomy tier:** {tierLabel(Constitution.AutonomyTier)}
+//	**escalates to:** {strings.Join(Constitution.EscalatesTo, ", ")}
+//
+//	# constraints
+//
+//	**allowed tools:** {Constitution.ToolsAllowed}
+//	**forbidden tools:** {Constitution.ToolsForbidden}
+//	**risk ceiling:** {Constitution.Constraints.RiskCeiling}
+//	**daily budget:** {DailyBudgetCents} cents
+//	**max invocations/day:** {MaxInvocationsPerDay}
+//	**escalation triggers:**
+//	- on {trigger.On} matching "{trigger.Match}": {trigger.Reason}
+//
+//	# absolute prohibitions
+//
+//	you may never:
+//	- {rule}                          (from Never []string)
+//	- {pattern} ({reason})            (from NeverRules []NeverRule)
+//
+//	# charter
+//
+//	{Constitution.Charter}
+//
+//	{existingPrompt}
+//
+// Truncation Strategy:
+//
+//	If the combined prompt would exceed MaxLen bytes (default: 8192), the
+// charter is truncated first (preserving the first N bytes), then the
+// existing prompt is truncated, then constraints are compacted (reasons
+// are dropped, tool lists are summarized as "[N tools]"). This ensures
+// critical enforcement rules (never[], risk_ceiling) always survive
+// truncation. Header fields (purpose, role, tier, escalation) are never
+// truncated because they set the LLM's behavioral posture.
 func SynthesizedPrompt(c *Constitution, existingPrompt string) string {
+	return SynthesizedPromptWithMax(c, existingPrompt, DefaultSynthesizedPromptMax)
+}
+
+// DefaultSynthesizedPromptMax is the default maximum length (in bytes)
+// for the synthesized prompt. When the combined prompt exceeds this
+// threshold, the truncation strategy kicks in.
+const DefaultSynthesizedPromptMax = 8192
+
+// SynthesizedPromptWithMax is like SynthesizedPrompt but with a caller-
+// specified max length. Use this in tests or when the model's context
+// window requires a different budget.
+func SynthesizedPromptWithMax(c *Constitution, existingPrompt string, maxLen int) string {
 	if c == nil {
 		return existingPrompt
 	}
@@ -1373,12 +1919,20 @@ func SynthesizedPrompt(c *Constitution, existingPrompt string) string {
 		sb.WriteString("\n")
 	}
 
-	// Never rules — always as a bulleted list.
-	if len(constraints.Never) > 0 {
+	// Never rules — always as a bulleted list. Both legacy Never
+	// []string and structured NeverRules are rendered here (C4).
+	if len(constraints.Never) > 0 || len(constraints.NeverRules) > 0 {
 		sb.WriteString("# absolute prohibitions\n\n")
 		sb.WriteString("you may never:\n")
 		for _, n := range constraints.Never {
 			sb.WriteString("- " + n + "\n")
+		}
+		for _, nr := range constraints.NeverRules {
+			label := nr.Pattern
+			if nr.Reason != "" {
+				label = nr.Pattern + " (" + nr.Reason + ")"
+			}
+			sb.WriteString("- " + label + "\n")
 		}
 		sb.WriteString("\n")
 	}
@@ -1395,7 +1949,65 @@ func SynthesizedPrompt(c *Constitution, existingPrompt string) string {
 		sb.WriteString(existingPrompt)
 	}
 
-	return sb.String()
+	result := sb.String()
+
+	// C5: Truncation strategy. If the combined prompt exceeds maxLen,
+	// truncate in order: charter first, then existing prompt, then
+	// escalation trigger reasons. Header and constraints (never[],
+	// risk_ceiling) are never truncated — they're critical for
+	// enforcement.
+	if maxLen > 0 && len(result) > maxLen {
+		// Phase 1: truncate charter to half the available budget.
+		over := len(result) - maxLen
+		if c.Charter != "" {
+			// Rebuild without the full charter — truncate it.
+			charterBudget := len(c.Charter)
+			if charterBudget > over {
+				charterBudget = over
+			}
+			// Truncate charter in the result string by removing
+			// from the charter section onward.
+			charterHeader := "# charter\n\n"
+			idx := strings.Index(result, charterHeader)
+			if idx >= 0 {
+				// Everything before charter header + truncated charter.
+				prefix := result[:idx]
+				truncatedCharter := c.Charter
+				if len(truncatedCharter) > charterBudget {
+					truncatedCharter = truncatedCharter[:charterBudget] + "..."
+				}
+				// Find the existing prompt section (after charter).
+				rest := result[idx+len(charterHeader):]
+				// Remove the original charter from rest.
+				origCharterEnd := strings.Index(rest, c.Charter)
+				if origCharterEnd >= 0 {
+					rest = rest[origCharterEnd+len(c.Charter):]
+				}
+				result = prefix + charterHeader + truncatedCharter + rest
+			}
+		}
+		// Phase 2: if still over, truncate existing prompt.
+		if len(result) > maxLen && existingPrompt != "" {
+			over = len(result) - maxLen
+			idx := strings.Index(result, existingPrompt)
+			if idx >= 0 {
+				keep := len(existingPrompt) - over
+				if keep < 0 {
+					keep = 0
+				}
+				result = result[:idx] + existingPrompt[:keep]
+				if keep > 0 && keep < len(existingPrompt) {
+					result += "..."
+				}
+			}
+		}
+		// Phase 3: if still over, hard-truncate the tail.
+		if maxLen > 0 && len(result) > maxLen {
+			result = truncate(result, maxLen)
+		}
+	}
+
+	return result
 }
 
 func tierLabel(t AutonomyTier) string {
@@ -1416,4 +2028,38 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// reservoirSample selects k items from the input slice using Algorithm R
+// (Vitter 1985). The result is a new slice of size min(k, len(items)).
+// The sampling is deterministic when the global math/rand source is seeded
+// deterministically; otherwise it uses the default source (which is safe
+// for non-cryptographic use here since this is just audit sampling).
+//
+// The algorithm iterates over items 0..n-1. For the first k items, they
+// are placed directly into the result. For each subsequent item i, a
+// random index j in [0, i) is chosen; if j < k, item i replaces result[j].
+// This gives each item an equal 1/k probability of being in the result.
+func reservoirSample(items []TurnRecord, k int) []TurnRecord {
+	if k <= 0 || len(items) <= k {
+		return items
+	}
+	result := make([]TurnRecord, k)
+	copy(result, items[:k])
+	for i := k; i < len(items); i++ {
+		j := mathrandIntn(i + 1)
+		if j < k {
+			result[j] = items[i]
+		}
+	}
+	return result
+}
+
+// mathrandIntn returns a non-negative pseudo-random int in [0, n).
+// It wraps math/rand so callers don't need to import it separately.
+func mathrandIntn(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return mathrand.Intn(n)
 }

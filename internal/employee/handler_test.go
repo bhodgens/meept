@@ -121,3 +121,74 @@ func TestRPCHandler_AuditResolve_InvalidResolution(t *testing.T) {
 		t.Fatal("expected error for invalid resolution")
 	}
 }
+
+// TestRPCHandler_Update_RejectsConstitution verifies S5: update rejects
+// constitution fields with a message directing to `meept agents amend`.
+func TestRPCHandler_Update_RejectsConstitution(t *testing.T) {
+	t.Parallel()
+	m := NewManager(nil)
+	h := NewRPCHandler(m)
+
+	cases := []struct {
+		name    string
+		payload string
+	}{
+		{
+			name:    "with_constitution_block",
+			payload: `{"id":"x","name":"n","constitution":{"purpose":"new"}}`,
+		},
+		{
+			name:    "with_constraints_block",
+			payload: `{"id":"x","constitution":{"constraints":{"risk_ceiling":"high"}}}`,
+		},
+		{
+			name:    "with_escalates_to",
+			payload: `{"id":"x","constitution":{"escalates_to":"user"}}`,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := h.handleUpdate(context.Background(), json.RawMessage(tc.payload))
+			if err == nil {
+				t.Fatal("expected error for constitution field in update, got nil")
+			}
+			// Verify the error message references amend.
+			if !containsSubstring(err.Error(), "amend") {
+				t.Errorf("error should mention 'amend', got: %v", err)
+			}
+		})
+	}
+}
+
+// containsSubstring is a simple string contains check for test assertions.
+func containsSubstring(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
+// TestConstitutionFields_CoversCoreFields verifies the canonical constitution
+// field set includes all spec-required fields.
+func TestConstitutionFields_CoversCoreFields(t *testing.T) {
+	t.Parallel()
+	required := []string{
+		"purpose", "role", "charter", "autonomy_tier", "escalates_to",
+		"constraints", "amendment_policy", "version", "authored_by",
+		"tools_allowed", "tools_forbidden", "risk_ceiling",
+		"max_tokens_per_turn", "max_conversation_tokens",
+		"daily_budget_cents", "max_invocations_per_day",
+		"escalation_triggers", "never", "assessment_interval",
+		"frozen_fields", "self_propose_allowed", "requires_approval",
+	}
+	for _, f := range required {
+		if _, ok := constitutionFields[f]; !ok {
+			t.Errorf("constitutionFields missing %q", f)
+		}
+	}
+}
