@@ -102,3 +102,66 @@ func TestProposalQueue_EmptyListPending(t *testing.T) {
 		t.Errorf("got %v; want nil", pending)
 	}
 }
+
+// TestProposalQueue_MarkStatus_MissingID verifies that MarkApplied/MarkSkipped
+// return an error (rather than silently succeeding) when the given proposal ID
+// is not found in the queue.
+func TestProposalQueue_MarkStatus_MissingID(t *testing.T) {
+	tmp := t.TempDir()
+	q := newProposalQueue(filepath.Join(tmp, "improvements.md"))
+	// Empty queue — no proposals appended.
+	if err := q.MarkApplied("nonexistent-id"); err == nil {
+		t.Errorf("MarkApplied on empty queue returned nil error; want error")
+	}
+	if err := q.MarkSkipped("nonexistent-id"); err == nil {
+		t.Errorf("MarkSkipped on empty queue returned nil error; want error")
+	}
+
+	// Populate one proposal, then try to mark a different ID that doesn't exist.
+	p := ReflectionProposal{Type: "agent_prompt", Target: "x", Change: "y", Confidence: 0.7, Source: "test"}
+	if err := q.Append(p); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if err := q.MarkApplied("wrong-id"); err == nil {
+		t.Errorf("MarkApplied with wrong ID returned nil error; want error")
+	}
+	// Verify the existing proposal is still pending (file was rewritten unchanged).
+	pending, _ := q.ListPending()
+	if len(pending) != 1 {
+		t.Errorf("after wrong-ID mark, pending = %d; want 1 (unchanged)", len(pending))
+	}
+}
+
+// TestProposalQueue_AppendAtomicity verifies that concurrent Append calls
+// don't corrupt the markdown file. The single-Write + O_APPEND pattern
+// is atomic on POSIX, so the file should remain parsable.
+func TestProposalQueue_AppendConcurrency(t *testing.T) {
+	tmp := t.TempDir()
+	q := newProposalQueue(filepath.Join(tmp, "improvements.md"))
+	done := make(chan error, 10)
+	for i := 0; i < 10; i++ {
+		go func(n int) {
+			p := ReflectionProposal{
+				Type:          "skill_create",
+				Target:        "x",
+				Change:        "y",
+				Justification: "z",
+				Confidence:    0.5,
+				Source:        "test",
+			}
+			done <- q.Append(p)
+		}(i)
+	}
+	for i := 0; i < 10; i++ {
+		if err := <-done; err != nil {
+			t.Fatalf("Append %d: %v", i, err)
+		}
+	}
+	pending, err := q.ListPending()
+	if err != nil {
+		t.Fatalf("ListPending: %v", err)
+	}
+	if len(pending) != 10 {
+		t.Errorf("after 10 concurrent Appends, pending = %d; want 10", len(pending))
+	}
+}

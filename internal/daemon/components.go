@@ -3067,6 +3067,13 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		}
 	}
 
+	// Wait for in-flight reflection/learning goroutines to finish before
+	// closing the LLM client. Without this, a reflection goroutine could
+	// call Chat() on a closed client and panic (use-after-close).
+	if c.AgentLoop != nil {
+		c.AgentLoop.Stop()
+	}
+
 	if c.LLMClient != nil {
 		c.LLMClient.Close()
 	}

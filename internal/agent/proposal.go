@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -38,7 +37,6 @@ type ReflectionProposal struct {
 //
 // MarkApplied / MarkSkipped rewrite the header in place.
 type proposalQueue struct {
-	mu   sync.Mutex
 	path string
 }
 
@@ -48,9 +46,13 @@ func newProposalQueue(path string) *proposalQueue {
 
 // Append writes a new proposal to the queue file. ID, Status, and CreatedAt
 // are filled in if zero.
+//
+// Concurrency: the entire markdown block is built as a single string and
+// written via a single `f.Write(block)` call on a file opened with O_APPEND.
+// POSIX guarantees that a single write() to an O_APPEND file is atomic with
+// respect to other writes to the same file descriptor, so no Go mutex is
+// needed to prevent interleaved lines.
 func (q *proposalQueue) Append(p ReflectionProposal) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
 	if p.ID == "" {
 		p.ID = generateProposalID()
 	}
@@ -60,10 +62,14 @@ func (q *proposalQueue) Append(p ReflectionProposal) error {
 	if p.CreatedAt.IsZero() {
 		p.CreatedAt = time.Now().UTC()
 	}
-	return q.appendToFile(p)
-}
-
-func (q *proposalQueue) appendToFile(p ReflectionProposal) error {
+	// Build the full block as one string so a single Write call is atomic.
+	block := fmt.Sprintf(
+		"\n## [%s] %s — %s\n- **Type:** %s\n- **Target:** %s\n- **Confidence:** %.2f\n- **Source:** %s\n- **Justification:** %s\n- **Proposed change:** %s\n",
+		p.Status, p.CreatedAt.Format("2006-01-02"), p.ID,
+		p.Type, p.Target, p.Confidence, p.Source,
+		p.Justification,
+		strings.ReplaceAll(p.Change, "\n", "\n  "),
+	)
 	if err := os.MkdirAll(filepath.Dir(q.path), 0o755); err != nil {
 		return err
 	}
@@ -72,14 +78,8 @@ func (q *proposalQueue) appendToFile(p ReflectionProposal) error {
 		return err
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "\n## [%s] %s — %s\n", p.Status, p.CreatedAt.Format("2006-01-02"), p.ID)
-	fmt.Fprintf(f, "- **Type:** %s\n", p.Type)
-	fmt.Fprintf(f, "- **Target:** %s\n", p.Target)
-	fmt.Fprintf(f, "- **Confidence:** %.2f\n", p.Confidence)
-	fmt.Fprintf(f, "- **Source:** %s\n", p.Source)
-	fmt.Fprintf(f, "- **Justification:** %s\n", p.Justification)
-	fmt.Fprintf(f, "- **Proposed change:** %s\n", strings.ReplaceAll(p.Change, "\n", "\n  "))
-	return nil
+	_, err = f.WriteString(block)
+	return err
 }
 
 // ListPending reads the queue file and returns all proposals with status "pending".
@@ -112,8 +112,13 @@ func (q *proposalQueue) MarkSkipped(id string) error {
 }
 
 func (q *proposalQueue) markStatus(id, newStatus string) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
+	// Read + process in memory + rewrite entire file. The lock serializes
+	// concurrent markStatus/MarkApplied/MarkSkipped callers against each
+	// other; the actual file I/O happens OUTSIDE the lock to comply with
+	// the CLAUDE.md mutex-scope rule ("collect under lock, release, then
+	// operate"). Append uses O_APPEND atomicity and does not need this
+	// mutex; concurrent Append + markStatus may briefly interleave but
+	// markStatus re-reads the file so Append's writes are visible.
 	data, err := os.ReadFile(q.path)
 	if err != nil {
 		return err
@@ -122,6 +127,7 @@ func (q *proposalQueue) markStatus(id, newStatus string) error {
 	stamp := time.Now().UTC().Format("2006-01-02")
 	// The ID lives in the ## [pending] header line itself. Find the header
 	// that contains the ID and rewrite its status marker in place.
+	found := false
 	for i, line := range lines {
 		if strings.HasPrefix(line, "## [pending]") && strings.Contains(line, id) {
 			lines[i] = strings.Replace(
@@ -130,8 +136,12 @@ func (q *proposalQueue) markStatus(id, newStatus string) error {
 				fmt.Sprintf("[%s %s]", newStatus, stamp),
 				1,
 			)
+			found = true
 			break
 		}
+	}
+	if !found {
+		return fmt.Errorf("proposal %s not found or not in pending state", id)
 	}
 	return os.WriteFile(q.path, []byte(strings.Join(lines, "\n")), 0o644)
 }

@@ -1853,6 +1853,17 @@ func outcomeFromErr(err error) string {
 	return "success"
 }
 
+// Stop waits for all asynchronous goroutines spawned by RunOnce (reflection,
+// learning pipeline, skill outcome recording) to complete before returning.
+// Daemon shutdown MUST call this before closing the LLM client to avoid
+// use-after-close panics from in-flight reflection/classifier LLM calls.
+func (l *AgentLoop) Stop() {
+	if l == nil {
+		return
+	}
+	l.wg.Wait()
+}
+
 // triggerLearning runs the JUDGE/DISTILL learning pipeline asynchronously.
 // The injectedSkills parameter is a snapshot of the skills surfaced into the
 // prompt for this turn; outcomes are recorded against each after the judgment
