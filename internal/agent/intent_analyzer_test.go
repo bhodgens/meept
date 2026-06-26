@@ -76,6 +76,62 @@ func TestIntentAnalyzer_ParseAnalysis(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "suggested_mode spec_plan parsed",
+			content: `{"goal":"refactor multi-file module","ambiguity":0.2,"scope":"broad","category":"implementation","suggested_questions":[],"confidence":0.9,"suggested_mode":"spec_plan"}`,
+			want: &TrueIntentAnalysis{
+				Goal:               "refactor multi-file module",
+				Ambiguity:          0.2,
+				Scope:              "broad",
+				Category:           "implementation",
+				SuggestedQuestions: []string{},
+				Confidence:         0.9,
+				SuggestedMode:      "spec_plan",
+			},
+			wantErr: false,
+		},
+		{
+			name:    "suggested_mode direct parsed",
+			content: `{"goal":"what time is it","ambiguity":0.1,"scope":"narrow","category":"clarification","suggested_questions":[],"confidence":0.95,"suggested_mode":"direct"}`,
+			want: &TrueIntentAnalysis{
+				Goal:               "what time is it",
+				Ambiguity:          0.1,
+				Scope:              "narrow",
+				Category:           "clarification",
+				SuggestedQuestions: []string{},
+				Confidence:         0.95,
+				SuggestedMode:      "direct",
+			},
+			wantErr: false,
+		},
+		{
+			name:    "invalid suggested_mode zeroed",
+			content: `{"goal":"test","ambiguity":0.3,"scope":"narrow","category":"research","suggested_questions":[],"confidence":0.8,"suggested_mode":"ultra_mode"}`,
+			want: &TrueIntentAnalysis{
+				Goal:               "test",
+				Ambiguity:          0.3,
+				Scope:              "narrow",
+				Category:           "research",
+				SuggestedQuestions: []string{},
+				Confidence:         0.8,
+				SuggestedMode:      "",
+			},
+			wantErr: false,
+		},
+		{
+			name:    "missing suggested_mode empty",
+			content: `{"goal":"test","ambiguity":0.3,"scope":"narrow","category":"research","suggested_questions":[],"confidence":0.8}`,
+			want: &TrueIntentAnalysis{
+				Goal:               "test",
+				Ambiguity:          0.3,
+				Scope:              "narrow",
+				Category:           "research",
+				SuggestedQuestions: []string{},
+				Confidence:         0.8,
+				SuggestedMode:      "",
+			},
+			wantErr: false,
+		},
+		{
 			name:    "JSON wrapped in markdown",
 			content: "```json\n{\"goal\":\"research topic\",\"ambiguity\":0.5,\"scope\":\"medium\",\"category\":\"research\",\"suggested_questions\":[],\"confidence\":0.85}\n```",
 			want: &TrueIntentAnalysis{
@@ -207,6 +263,9 @@ func TestIntentAnalyzer_ParseAnalysis(t *testing.T) {
 			}
 			if got.Confidence != tt.want.Confidence {
 				t.Errorf("Confidence = %v, want %v", got.Confidence, tt.want.Confidence)
+			}
+			if got.SuggestedMode != tt.want.SuggestedMode {
+				t.Errorf("SuggestedMode = %q, want %q", got.SuggestedMode, tt.want.SuggestedMode)
 			}
 		})
 	}

@@ -941,6 +941,8 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/config/menubar", s.handleSaveMenubarConfig)
 	mux.HandleFunc("GET /api/v1/config/memory", s.handleGetMemoryConfig)
 	mux.HandleFunc("POST /api/v1/config/normalize", s.handleNormalizeConfig)
+	mux.HandleFunc("GET /api/v1/config/orchestrator", s.handleGetOrchestratorConfig)
+	mux.HandleFunc("PUT /api/v1/config/orchestrator", s.handlePutOrchestratorConfig)
 	mux.HandleFunc("GET /api/v1/config/agents", s.handleListAgents)
 	mux.HandleFunc("GET /api/v1/config/agents/{id}", s.handleGetAgent)
 	mux.HandleFunc("POST /api/v1/config/agents/{id}", s.handleSaveAgent)
@@ -1160,6 +1162,8 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/plans", s.handlePlanList)
 	mux.HandleFunc("POST /api/v1/plans", s.handlePlanCreate)
 	mux.HandleFunc("GET /api/v1/plans/{id}", s.handlePlanGet)
+	mux.HandleFunc("GET /api/v1/plans/{id}/phases", s.handlePlanPhases)
+	mux.HandleFunc("GET /api/v1/plans/{id}/handoffs", s.handlePlanHandoffs)
 	mux.HandleFunc("POST /api/v1/plans/{id}/approve", s.handlePlanApprove)
 	mux.HandleFunc("POST /api/v1/plans/{id}/reject", s.handlePlanReject)
 	mux.HandleFunc("POST /api/v1/plans/{id}/confirm", s.handlePlanConfirm)
@@ -1211,6 +1215,12 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	if s.CompressionStatsGetter != nil {
 		mux.HandleFunc("GET /api/v1/compression/stats", s.handleCompressionStats)
 	}
+
+	// Reflection proposal endpoints
+	mux.HandleFunc("GET /api/v1/reflection/proposals", s.handleReflectionList)
+	mux.HandleFunc("POST /api/v1/reflection/proposals/{id}/apply", s.handleReflectionApply)
+	mux.HandleFunc("POST /api/v1/reflection/proposals/{id}/skip", s.handleReflectionSkip)
+	mux.HandleFunc("POST /api/v1/reflection/remember", s.handleReflectionRemember)
 }
 
 // middleware applies common middleware (CORS, logging, auth).

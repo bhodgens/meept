@@ -87,6 +87,7 @@ type Config struct {
 	PTY               PTYConfig               `json:"pty"                  toml:"pty"`
 	Reasoning         ReasoningGlobalConfig   `json:"reasoning"            toml:"reasoning"`
 	Hooks             HooksConfig             `json:"hooks"                toml:"hooks"`
+	ReflectionCollector ReflectionCollectorConfig `json:"reflection_collector" toml:"reflection_collector"`
 }
 
 // ReasoningGlobalConfig holds global reasoning/thinking settings, currently
@@ -834,6 +835,23 @@ type AgentReflectionConfig struct {
 	TestCmd string `json:"test_cmd" toml:"test_cmd"`
 }
 
+// ReflectionCollectorConfig configures Turbo Thread E immediate self-reflection.
+// Distinct from AgentReflectionConfig (which controls auto-fix lint/test retry
+// loops). This controls per-turn lesson extraction and the .meept/improvements.md
+// proposal queue.
+type ReflectionCollectorConfig struct {
+	Enabled              bool    `json:"enabled"                        toml:"enabled"`
+	AutoQueue            bool    `json:"auto_queue"                     toml:"auto_queue"`
+	AutoSkillUnder       string  `json:"auto_skill_under"               toml:"auto_skill_under"`
+	SkillProposalsOnly   bool    `json:"skill_proposals_only"           toml:"skill_proposals_only"`
+	AutoApplyAll         bool    `json:"auto_apply_all"                 toml:"auto_apply_all"`
+	InactivityMinutes    int     `json:"inactivity_minutes"             toml:"inactivity_minutes"`
+	TimerIntervalMinutes int     `json:"timer_interval_minutes"         toml:"timer_interval_minutes"`
+	TurnConfidenceMin    float64 `json:"turn_confidence_min"            toml:"turn_confidence_min"`
+	SessionConfidenceMin float64 `json:"session_confidence_min"         toml:"session_confidence_min"`
+	MaxSessionProposals  int     `json:"max_session_proposals"          toml:"max_session_proposals"`
+}
+
 // AgentLintConfig holds linting and test runner settings.
 type AgentLintConfig struct {
 	// GoFlags are flags passed to go test
@@ -1247,12 +1265,16 @@ type DetectionConfig struct {
 
 // OrchestratorConfig holds hierarchical orchestrator settings.
 type OrchestratorConfig struct {
-	MaxPlanSteps        int  `json:"max_plan_steps"        toml:"max_plan_steps"`
-	MaxResearchSteps    int  `json:"max_research_steps"    toml:"max_research_steps"`
-	PlannerTimeout      int  `json:"planner_timeout"       toml:"planner_timeout"`
-	TokenBudgetAlert    int  `json:"token_budget_alert"    toml:"token_budget_alert"`
-	MaxHandoffSteps     int  `json:"max_handoff_steps"     toml:"max_handoff_steps"`
-	HandoffUseAmendment bool `json:"handoff_use_amendment" toml:"handoff_use_amendment"`
+	MaxPlanSteps                int     `json:"max_plan_steps"                toml:"max_plan_steps"`
+	MaxResearchSteps            int     `json:"max_research_steps"            toml:"max_research_steps"`
+	PlannerTimeout              int     `json:"planner_timeout"               toml:"planner_timeout"`
+	TokenBudgetAlert            int     `json:"token_budget_alert"            toml:"token_budget_alert"`
+	MaxHandoffSteps             int     `json:"max_handoff_steps"             toml:"max_handoff_steps"`
+	HandoffUseAmendment         bool    `json:"handoff_use_amendment"         toml:"handoff_use_amendment"`
+	AmbiguityThreshold          float64 `json:"ambiguity_threshold"           toml:"ambiguity_threshold"`           // dispatcher: blocks routing when analyzer ambiguity >= this
+	InterviewAmbiguityThreshold float64 `json:"interview_ambiguity_threshold" toml:"interview_ambiguity_threshold"` // planner: conducts interview for plan-mode when >= this
+	MaxStepsPerPhase            int     `json:"max_steps_per_phase"           toml:"max_steps_per_phase"`           // Thread C+F: per-phase step cap
+	MaxPhases                   int     `json:"max_phases"                    toml:"max_phases"`                    // Thread C+F: phase count soft cap
 }
 
 // ShadowConfig holds shadow training settings.
@@ -1726,10 +1748,14 @@ func DefaultConfig() *Config {
 			},
 		},
 		Orchestrator: OrchestratorConfig{
-			MaxPlanSteps:     10,
-			MaxResearchSteps: 3,
-			PlannerTimeout:   120,
-			TokenBudgetAlert: 5000,
+			MaxPlanSteps:                10,
+			MaxResearchSteps:            3,
+			PlannerTimeout:              120,
+			TokenBudgetAlert:            5000,
+			AmbiguityThreshold:          0.6,
+			InterviewAmbiguityThreshold: 0.6,
+			MaxStepsPerPhase:            8,
+			MaxPhases:                   12,
 		},
 		Shadow: ShadowConfig{
 			Enabled: false,
@@ -1937,6 +1963,18 @@ func DefaultConfig() *Config {
 			Piper:     PiperTTSConfig{BinPath: "piper", ModelPath: "", ConfigPath: "", Speaker: ""},
 			Playback:  TTSPlaybackConfig{Volume: 1.0, Rate: 1.0, AudioDevice: ""},
 			Behavior:  TTSBehaviorConfig{ReadOwnMessages: false, InterruptOnNewMsg: true, QueueMessages: false, MaxQueueSize: 5},
+		},
+		ReflectionCollector: ReflectionCollectorConfig{
+			Enabled:              true,
+			AutoQueue:            true,
+			AutoSkillUnder:       ".meept/skills/auto/",
+			SkillProposalsOnly:   true,
+			AutoApplyAll:         false,
+			InactivityMinutes:    15,
+			TimerIntervalMinutes: 30,
+			TurnConfidenceMin:    0.6,
+			SessionConfidenceMin: 0.7,
+			MaxSessionProposals:  3,
 		},
 	}
 }

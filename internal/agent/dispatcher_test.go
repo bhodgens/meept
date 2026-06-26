@@ -244,64 +244,6 @@ func TestShouldCreateTask(t *testing.T) {
 	}
 }
 
-func TestShouldDecompose(t *testing.T) {
-	sp := &StrategicPlanner{}
-
-	tests := []struct {
-		name string
-		req  PlanRequest
-		want bool
-	}{
-		{
-			name: "chat intent never decomposes",
-			req:  PlanRequest{Intent: "chat", Input: "hello there"},
-			want: false,
-		},
-		{
-			name: "report intent never decomposes",
-			req:  PlanRequest{Intent: "report", Input: "give me a report"},
-			want: false,
-		},
-		{
-			name: "recall intent never decomposes",
-			req:  PlanRequest{Intent: "recall", Input: "what do you remember"},
-			want: false,
-		},
-		{
-			name: "search intent never decomposes",
-			req:  PlanRequest{Intent: "search", Input: "find something for me"},
-			want: false,
-		},
-		{
-			name: "short code request without complexity",
-			req:  PlanRequest{Intent: "code", Input: "fix the login bug"},
-			want: false,
-		},
-		{
-			name: "short code request with complexity indicator",
-			req:  PlanRequest{Intent: "code", Input: "fix the login bug and then update the tests"},
-			want: true,
-		},
-		{
-			name: "long code request decomposes",
-			req: PlanRequest{
-				Intent: "code",
-				Input:  "I need you to refactor the authentication module to use JWT tokens instead of session cookies. This involves updating the login handler, creating a token generation service, modifying the middleware to validate tokens, and updating all API endpoints that currently check session state.",
-			},
-			want: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := sp.shouldDecompose(tt.req)
-			if got != tt.want {
-				t.Errorf("shouldDecompose() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestRecordMethods(t *testing.T) {
 	d := &Dispatcher{
 		stats: &DispatcherStats{
@@ -843,5 +785,52 @@ func TestGetPendingClarification_WrongIntentType(t *testing.T) {
 	pending := d.getPendingClarification("session-1")
 	if pending != nil {
 		t.Error("should return nil when last intent is not clarify")
+	}
+}
+
+func TestSuggestMode(t *testing.T) {
+	cases := []struct {
+		name       string
+		intentType IntentType
+		analysis   *TrueIntentAnalysis
+		input      string
+		want       string
+	}{
+		{name: "compound forces spec_pair", intentType: IntentCompound, analysis: nil, input: "x", want: "spec_pair"},
+		{name: "analysis spec_plan wins", intentType: IntentCode, analysis: &TrueIntentAnalysis{SuggestedMode: "spec_plan"}, input: "refactor the auth subsystem", want: "spec_plan"},
+		{name: "analysis invalid falls back", intentType: IntentCode, analysis: &TrueIntentAnalysis{SuggestedMode: "garbage"}, input: "refactor the auth subsystem to use oauth2 with pkce flow", want: "plan"},
+		{name: "short input downgrades plan→direct", intentType: IntentCode, analysis: &TrueIntentAnalysis{SuggestedMode: ""}, input: "fix typo", want: "direct"},
+		{name: "short input does not downgrade spec_plan", intentType: IntentCode, analysis: &TrueIntentAnalysis{SuggestedMode: "spec_plan"}, input: "fix", want: "spec_plan"},
+		{name: "default fallback for unknown", intentType: IntentUnknown, analysis: nil, input: "something longer than fifty characters total please advise", want: "plan"},
+		{name: "empty analysis + long input uses rule", intentType: IntentDebug, analysis: nil, input: "investigate the production outage that happened yesterday at 3am", want: "plan"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := suggestMode(c.intentType, c.analysis, c.input)
+			if got != c.want {
+				t.Errorf("got %q want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestValidateMode(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string // normalized, "" if invalid
+	}{
+		{"direct", "direct"},
+		{"plan", "plan"},
+		{"spec_plan", "spec_plan"},
+		{"spec_pair", "spec_pair"},
+		{"SPEC_PLAN", ""}, // case-sensitive
+		{"", ""},
+		{"garbage", ""},
+	}
+	for _, c := range cases {
+		got := validateMode(c.in)
+		if got != c.want {
+			t.Errorf("validateMode(%q) = %q; want %q", c.in, got, c.want)
+		}
 	}
 }

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/plan"
 )
 
@@ -185,6 +186,33 @@ func (s *PlanService) CountBySession(ctx context.Context, sessionID string) (map
 		return nil, wrapError("plan", "CountBySession", err)
 	}
 	return counts, nil
+}
+
+// Phases returns the phases (with produces/consumes artifacts) for a plan.
+func (s *PlanService) Phases(ctx context.Context, planID string) ([]*plan.PlanPhase, error) {
+	if planID == "" {
+		return nil, wrapError("plan", "Phases", ErrInvalidInput)
+	}
+	if s.store == nil {
+		return nil, wrapError("plan", "Phases", ErrUnavailable)
+	}
+	phases, err := s.store.GetPhases(ctx, planID)
+	if err != nil {
+		return nil, wrapError("plan", "Phases", err)
+	}
+	return phases, nil
+}
+
+// Handoffs returns structured handoffs associated with a plan's steps.
+// MVP: returns nil — handoff content is currently embedded in step.AccumulatedContext,
+// not persisted as separate records. Full handoff persistence is a follow-up.
+// This method exists for API parity with the plans surface.
+func (s *PlanService) Handoffs(ctx context.Context, planID string) ([]*agent.StepHandoff, error) {
+	_ = ctx
+	_ = planID
+	// TODO(follow-up): query steps for planID, parse handoff markdown from
+	// AccumulatedContext, return structured records. For now, return nil.
+	return nil, nil
 }
 
 // Revise requests revision of a plan.

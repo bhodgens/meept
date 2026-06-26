@@ -671,10 +671,25 @@ class PlanPhase with _$PlanPhase {
     @JsonKey(name: 'completed_steps') @Default(0) int completedSteps,
     @JsonKey(name: 'failed_steps') @Default(0) int failedSteps,
     required String state,
+    @Default([]) List<PlanArtifact> produces,
+    @Default([]) List<PlanArtifact> consumes,
   }) = _PlanPhase;
 
   factory PlanPhase.fromJson(Map<String, dynamic> json) =>
       _$$PlanPhaseImplFromJson(json);
+}
+
+@freezed
+class PlanArtifact with _$PlanArtifact {
+  const factory PlanArtifact({
+    required String name,
+    required String kind,
+    @Default('') String description,
+    @Default(false) bool required,
+  }) = _PlanArtifact;
+
+  factory PlanArtifact.fromJson(Map<String, dynamic> json) =>
+      _$$PlanArtifactImplFromJson(json);
 }
 
 // ===== Search Models =====

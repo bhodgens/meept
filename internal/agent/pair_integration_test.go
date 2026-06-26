@@ -311,7 +311,7 @@ func TestPairOrchestrator_FullConversation(t *testing.T) {
 	defer msgBus.Close()
 
 	registry := &AgentRegistry{
-		loops: make(map[string]*AgentLoop),
+		loops: make(map[string]map[string]*AgentLoop),
 	}
 
 	po := NewPairOrchestrator(PairOrchestratorDeps{

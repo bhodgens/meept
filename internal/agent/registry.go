@@ -35,8 +35,12 @@ type AgentRegistry struct {
 	// Agent specifications
 	specs map[string]*AgentSpec
 
-	// Instantiated agent loops (lazy creation)
-	loops map[string]*AgentLoop
+	// loops is keyed by agentID → taskID → loop. The taskID "_default" is
+	// used for non-task-scoped callers via the backward-compat Get() shim.
+	// Nested-map structure allows per-task isolation of AgentLoop state
+	// (conversation history, PromptBuilder, FilteredToolRegistry) without
+	// cross-task bleed.
+	loops map[string]map[string]*AgentLoop
 
 	// Capabilities map for fast routing
 	capabilitiesMap *CapabilitiesMap
@@ -144,7 +148,7 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 
 	r := &AgentRegistry{
 		specs:                 make(map[string]*AgentSpec),
-		loops:                 make(map[string]*AgentLoop),
+		loops:                 make(map[string]map[string]*AgentLoop),
 		activeQueues:          make(map[string]*QueueEntry),
 		memvid:                cfg.MemvidClient,
 		taskStore:             cfg.TaskStore,
@@ -229,28 +233,66 @@ func (r *AgentRegistry) ListSpecs() []*AgentSpec {
 	return specs
 }
 
-// Get returns an agent loop for the given spec ID, creating it if needed.
+// Get returns the AgentLoop for the given agent, keyed by the synthetic
+// "_default" task ID. Preserved for non-task callers (CLI one-shots, manual
+// RPCs, dispatcher). New callers should use GetForTask to get per-task
+// isolation.
 func (r *AgentRegistry) Get(id string) (*AgentLoop, error) {
+	return r.GetForTask(id, "_default")
+}
+
+// GetForTask returns the AgentLoop for (agentID, taskID). Lazy-creates:
+//  1. The task bucket for this agentID on first access
+//  2. The loop on first access for this (agentID, taskID)
+//
+// Empty taskID defaults to "_default" (matches the Get shim's namespace).
+// createLoop is pure struct construction (no I/O — no disk reads, no network
+// calls), so holding the write lock through lazy-create is safe per CLAUDE.md
+// mutex-scope rule.
+func (r *AgentRegistry) GetForTask(agentID, taskID string) (*AgentLoop, error) {
+	if taskID == "" {
+		taskID = "_default"
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Return existing loop if available
-	if loop, ok := r.loops[id]; ok {
+	taskLoops, ok := r.loops[agentID]
+	if !ok {
+		taskLoops = make(map[string]*AgentLoop)
+		r.loops[agentID] = taskLoops
+	}
+
+	if loop, ok := taskLoops[taskID]; ok {
 		return loop, nil
 	}
 
-	// Get spec
-	spec, ok := r.specs[id]
+	spec, ok := r.specs[agentID]
 	if !ok {
-		return nil, fmt.Errorf("agent spec not found: %s", id)
+		return nil, fmt.Errorf("agent spec not found: %s", agentID)
 	}
 
-	// Create new loop
 	loop := r.createLoop(spec)
-
-	r.loops[id] = loop
-	r.logger.Info("Created agent loop", "id", id, "name", spec.Name)
+	taskLoops[taskID] = loop
+	r.logger.Info("Created task-scoped agent loop", "agent_id", agentID, "task_id", taskID, "name", spec.Name)
 	return loop, nil
+}
+
+// ReleaseTaskLoops removes all loops for the given taskID across all agents.
+// Called by the orchestrator on task completion to free memory and reset
+// per-task conversation state. Empty taskID is a no-op (never releases the
+// "_default" bucket via this path, preserving backward-compat Get callers).
+func (r *AgentRegistry) ReleaseTaskLoops(taskID string) {
+	if taskID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for agentID, taskLoops := range r.loops {
+		delete(taskLoops, taskID)
+		if len(taskLoops) == 0 {
+			delete(r.loops, agentID)
+		}
+	}
 }
 
 // GetDispatcher returns the dispatcher agent loop.
@@ -470,7 +512,7 @@ func (r *AgentRegistry) Close() error {
 
 	// Clear all loops (AgentLoop has no explicit Stop/Close method,
 	// but dropping references allows GC to reclaim resources).
-	r.loops = make(map[string]*AgentLoop)
+	r.loops = make(map[string]map[string]*AgentLoop)
 
 	// Close the database connection used for queue persistence.
 	var firstErr error
@@ -496,8 +538,18 @@ func (r *AgentRegistry) Stats() map[string]int {
 
 	return map[string]int{
 		"specs":        len(r.specs),
-		"active_loops": len(r.loops),
+		"active_loops": r.loopCount(),
 	}
+}
+
+// loopCount returns the total number of loops across all agents and tasks.
+// Caller must hold r.mu.
+func (r *AgentRegistry) loopCount() int {
+	n := 0
+	for _, taskLoops := range r.loops {
+		n += len(taskLoops)
+	}
+	return n
 }
 
 // CapabilitiesMap returns the capabilities map (may be nil).
@@ -880,7 +932,7 @@ func (r *AgentRegistry) SetCapabilityIndex(ci *skills.CapabilityIndex) {
 	defer r.mu.Unlock()
 	r.capabilityIndex = ci
 	// Invalidate all loops so they get recreated with skill discovery
-	r.loops = make(map[string]*AgentLoop)
+	r.loops = make(map[string]map[string]*AgentLoop)
 	r.logger.Debug("Capability index set, agent loops invalidated")
 }
 
@@ -894,7 +946,7 @@ func (r *AgentRegistry) SetSkillLoader(loader *skills.LazySkillLoader) {
 	defer r.mu.Unlock()
 	r.skillLoader = loader
 	// Invalidate all loops so they get recreated with skill loading
-	r.loops = make(map[string]*AgentLoop)
+	r.loops = make(map[string]map[string]*AgentLoop)
 	r.logger.Debug("Skill loader set, agent loops invalidated")
 }
 
@@ -908,7 +960,7 @@ func (r *AgentRegistry) SetTTSRManager(mgr *TTSRManager) {
 	defer r.mu.Unlock()
 	r.ttsrManager = mgr
 	// Invalidate all loops so they get recreated with TT-SR enforcement
-	r.loops = make(map[string]*AgentLoop)
+	r.loops = make(map[string]map[string]*AgentLoop)
 	r.logger.Debug("TT-SR manager set, agent loops invalidated")
 }
 
@@ -926,7 +978,7 @@ func (r *AgentRegistry) SetGlobalRules(rules string) {
 	r.globalRules = rules
 
 	// Invalidate all loops so they get recreated with new rules
-	r.loops = make(map[string]*AgentLoop)
+	r.loops = make(map[string]map[string]*AgentLoop)
 	r.logger.Info("Global rules updated, agent loops invalidated")
 }
 
@@ -1006,4 +1058,37 @@ func (r *AgentRegistry) DB() *sql.DB {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.db
+}
+
+// GetModelConfig returns the model configuration for the given agent, or the
+// resolver's default model when the agent has no explicit Model ref. Returns
+// an error if the agent ID is unknown or if the resolver has no default and
+// the agent has no Model. Exposed so the tactical orchestrator can size task
+// steps against the executor's ContextLimit without reaching into registry
+// internals.
+func (r *AgentRegistry) GetModelConfig(agentID string) (*llm.ModelConfig, error) {
+	r.mu.RLock()
+	spec, ok := r.specs[agentID]
+	r.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("agent %q not found", agentID)
+	}
+	if spec.Model == "" {
+		// No explicit model on the spec — fall back to resolver default.
+		if r.resolver == nil {
+			return nil, fmt.Errorf("agent %q has no model and registry has no resolver", agentID)
+		}
+		if cfg := r.resolver.DefaultModel(); cfg != nil {
+			return cfg, nil
+		}
+		return nil, fmt.Errorf("agent %q has no model and resolver has no default", agentID)
+	}
+	if r.resolver == nil {
+		return nil, fmt.Errorf("agent %q has model %q but registry has no resolver", agentID, spec.Model)
+	}
+	cfg := r.resolver.ResolveRef(spec.Model)
+	if cfg == nil {
+		return nil, fmt.Errorf("agent %q model %q could not be resolved (provider disabled or model missing)", agentID, spec.Model)
+	}
+	return cfg, nil
 }

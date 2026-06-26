@@ -16,6 +16,7 @@ import (
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
+	configCli "github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/services"
 	"github.com/caimlas/meept/pkg/models"
@@ -646,6 +647,156 @@ func TestHandleDeleteAgent_NoConfigService(t *testing.T) {
 	resp := w.Result()
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+func TestHandleGetOrchestratorConfig_NoConfigService(t *testing.T) {
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/config/orchestrator", http.NoBody)
+	w := httptest.NewRecorder()
+
+	server.handleGetOrchestratorConfig(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+func TestHandlePutOrchestratorConfig_NoConfigService(t *testing.T) {
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/config/orchestrator",
+		strings.NewReader(`{"max_plan_steps":5}`))
+	w := httptest.NewRecorder()
+
+	server.handlePutOrchestratorConfig(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+// TestHandleOrchestratorConfigGetPut exercises the full round-trip:
+// a GET on an empty dir returns zero values; a PUT persists new thresholds;
+// a subsequent GET returns the updated values; other top-level meept.json5
+// keys are preserved across the PUT.
+func TestHandleOrchestratorConfigGetPut(t *testing.T) {
+	cs := &ConfigService{meeptDir: t.TempDir()}
+	server := NewServer(ServerConfig{}, cs, nil, nil, nil, nil)
+
+	// Pre-seed meept.json5 with an unrelated top-level key to verify preservation.
+	seed := `{
+		// comment: daemon port
+		"daemon": {"port": 8081},
+		"orchestrator": {
+			"max_plan_steps": 6,
+			"ambiguity_threshold": 0.5
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(cs.meeptDir, "meept.json5"), []byte(seed), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// GET returns the seeded values.
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/config/orchestrator", http.NoBody)
+	getW := httptest.NewRecorder()
+	server.handleGetOrchestratorConfig(getW, getReq)
+	if getW.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want %d", getW.Code, http.StatusOK)
+	}
+	var got configCli.OrchestratorConfig
+	if err := json.NewDecoder(getW.Result().Body).Decode(&got); err != nil {
+		t.Fatalf("decode GET: %v", err)
+	}
+	if got.MaxPlanSteps != 6 || got.AmbiguityThreshold != 0.5 {
+		t.Errorf("GET seeded values = %+v, want MaxPlanSteps=6 AmbiguityThreshold=0.5", got)
+	}
+
+	// PUT with updated thresholds.
+	newOC := configCli.OrchestratorConfig{
+		MaxPlanSteps:                9,
+		MaxResearchSteps:            4,
+		PlannerTimeout:              120,
+		TokenBudgetAlert:            6000,
+		MaxHandoffSteps:             5,
+		HandoffUseAmendment:         true,
+		AmbiguityThreshold:          0.75,
+		InterviewAmbiguityThreshold: 0.8,
+		MaxStepsPerPhase:            10,
+		MaxPhases:                   15,
+	}
+	body, _ := json.Marshal(newOC)
+	putReq := httptest.NewRequest(http.MethodPut, "/api/v1/config/orchestrator", strings.NewReader(string(body)))
+	putW := httptest.NewRecorder()
+	server.handlePutOrchestratorConfig(putW, putReq)
+	if putW.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, want %d", putW.Code, http.StatusOK)
+	}
+
+	// GET returns the PUT values.
+	getReq2 := httptest.NewRequest(http.MethodGet, "/api/v1/config/orchestrator", http.NoBody)
+	getW2 := httptest.NewRecorder()
+	server.handleGetOrchestratorConfig(getW2, getReq2)
+	if getW2.Code != http.StatusOK {
+		t.Fatalf("GET-after-PUT status = %d, want %d", getW2.Code, http.StatusOK)
+	}
+	var got2 configCli.OrchestratorConfig
+	if err := json.NewDecoder(getW2.Result().Body).Decode(&got2); err != nil {
+		t.Fatalf("decode GET-after-PUT: %v", err)
+	}
+	if got2.MaxPlanSteps != 9 {
+		t.Errorf("MaxPlanSteps = %d, want 9", got2.MaxPlanSteps)
+	}
+	if got2.AmbiguityThreshold != 0.75 {
+		t.Errorf("AmbiguityThreshold = %v, want 0.75", got2.AmbiguityThreshold)
+	}
+	if got2.InterviewAmbiguityThreshold != 0.8 {
+		t.Errorf("InterviewAmbiguityThreshold = %v, want 0.8", got2.InterviewAmbiguityThreshold)
+	}
+	if got2.MaxStepsPerPhase != 10 {
+		t.Errorf("MaxStepsPerPhase = %d, want 10", got2.MaxStepsPerPhase)
+	}
+	if got2.MaxPhases != 15 {
+		t.Errorf("MaxPhases = %d, want 15", got2.MaxPhases)
+	}
+	if !got2.HandoffUseAmendment {
+		t.Error("HandoffUseAmendment = false, want true")
+	}
+
+	// Verify unrelated top-level key preserved.
+	persisted, err := os.ReadFile(filepath.Join(cs.meeptDir, "meept.json5"))
+	if err != nil {
+		t.Fatalf("read persisted meept.json5: %v", err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(persisted, &root); err != nil {
+		t.Fatalf("parse persisted meept.json5: %v", err)
+	}
+	daemonBlock, ok := root["daemon"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected 'daemon' key to be preserved, got %v", root["daemon"])
+	}
+	// JSON unmarshal gives float64 for numbers.
+	if port, _ := daemonBlock["port"].(float64); port != 8081 {
+		t.Errorf("daemon.port = %v, want 8081", daemonBlock["port"])
+	}
+}
+
+func TestHandleOrchestratorConfigPut_InvalidBody(t *testing.T) {
+	cs := &ConfigService{meeptDir: t.TempDir()}
+	server := NewServer(ServerConfig{}, cs, nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/config/orchestrator", strings.NewReader("not json"))
+	w := httptest.NewRecorder()
+
+	server.handlePutOrchestratorConfig(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
 	}
 }
 

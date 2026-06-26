@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/tui/commands"
 	"github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
@@ -198,6 +199,8 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 		return h.executeProject(cmd.Args)
 	case "dnd":
 		return h.executeDnd(cmd.Args)
+	case "remember":
+		return h.executeRemember(cmd.Args)
 	default:
 		return &CommandResult{
 			Output:  fmt.Sprintf("unknown command: %s", cmd.Name),
@@ -235,6 +238,7 @@ func (h *CommandHandler) executeHelp(args []string) *CommandResult {
 	sb.WriteString("  /project [subcmd]   manage projects (list, set, add, sync, status)\n")
 	sb.WriteString("  /skill [name|search <q>] list, show, or search skills\n")
 	sb.WriteString("  /dnd [on|off]       toggle or set do-not-disturb (suppresses toasts)\n")
+	sb.WriteString("  /remember <rule>    save a proposed improvement to the queue\n")
 
 	return &CommandResult{Output: sb.String()}
 }
@@ -391,7 +395,7 @@ examples:
   /project sync                   sync current project
   /project status                 show project git status`,
 
-		"skill": `usage: /skill [name|search <query>]
+	"skill": `usage: /skill [name|search <query>]
 
 list available skills, show details for a specific skill, or search.
 
@@ -403,6 +407,20 @@ examples:
   /skill                          list all skills
   /skill code-review              show details for the "code-review" skill
   /skill search code              search for skills matching "code"`,
+
+	"remember": `usage: /remember <rule or description>
+
+queues a proposed improvement to .meept/improvements.md for later review.
+proposals are not applied immediately. use /implement-improvements or
+'meept improvements list' to review and apply queued proposals.
+
+the text you provide becomes the proposed change against CLAUDE.md.
+the justification is tagged "user-invoked /remember" and the proposal
+gets confidence 0.9 so it surfaces prominently in the queue.
+
+examples:
+  /remember always run gofmt before committing go code
+  /remember prefer table-driven tests for new validators`,
 	}
 
 	if text, ok := helpTexts[name]; ok {
@@ -709,6 +727,52 @@ func (h *CommandHandler) executeDnd(args []string) *CommandResult {
 	}
 	return &CommandResult{
 		Output: fmt.Sprintf("do not disturb: %s", state),
+	}
+}
+
+// defaultRememberQueuePath is the MVP fallback path for /remember proposals
+// when no reflection collector config is available on the TUI side. It matches
+// the conventional .meept/ layout used elsewhere in the project.
+const defaultRememberQueuePath = ".meept/improvements.md"
+
+// executeRemember queues a user-typed improvement proposal. MVP: the proposal
+// always targets CLAUDE.md with type project_instruction, since the user is
+// supplying free-form rule text rather than a structured skill or prompt blob.
+// The proposal is appended to the queue file at defaultRememberQueuePath.
+// Review/application happens via /implement-improvements or
+// `meept improvements list`.
+func (h *CommandHandler) executeRemember(args []string) *CommandResult {
+	input := strings.TrimSpace(strings.Join(args, " "))
+	if input == "" {
+		return &CommandResult{
+			Output:  "usage: /remember <rule or description>",
+			IsError: true,
+		}
+	}
+
+	proposal := agent.ReflectionProposal{
+		ID:            agent.GenerateProposalID(),
+		Type:          "project_instruction",
+		Target:        "CLAUDE.md",
+		Change:        input,
+		Justification: "user-invoked /remember",
+		Confidence:    0.9,
+		Source:        "manual:/remember",
+	}
+
+	queue := agent.NewExternalProposalQueue(defaultRememberQueuePath)
+	if err := queue.Append(proposal); err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to queue improvement: %v", err),
+			IsError: true,
+		}
+	}
+
+	return &CommandResult{
+		Output: fmt.Sprintf(
+			"saved to %s (id: %s). use /implement-improvements or 'meept improvements list' to review.",
+			defaultRememberQueuePath, proposal.ID,
+		),
 	}
 }
 

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -430,65 +432,6 @@ func TestStrategicPlanner_PublishesEvents(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Timeout waiting for orchestrator.schedule event")
-	}
-}
-
-func TestShouldUsePairSession(t *testing.T) {
-	pm := NewPairManager(PairManagerConfig{Logger: slog.Default()})
-	sp := &StrategicPlanner{pairManager: pm, logger: slog.Default()}
-
-	tests := []struct {
-		name string
-		req  PlanRequest
-		want bool
-	}{
-		{
-			name: "compound intent always pairs",
-			req:  PlanRequest{Intent: string(IntentCompound), Input: "do stuff"},
-			want: true,
-		},
-		{
-			name: "short code input no pair",
-			req:  PlanRequest{Intent: string(IntentCode), Input: "fix typo in readme"},
-			want: false,
-		},
-		{
-			name: "long code input pairs",
-			req:  PlanRequest{Intent: string(IntentCode), Input: strings.Repeat("implement the full authentication system with OAuth2 support ", 5)},
-			want: true,
-		},
-		{
-			name: "security keyword triggers pair",
-			req:  PlanRequest{Intent: string(IntentCode), Input: "add security headers to API responses"},
-			want: true,
-		},
-		{
-			name: "chat intent no pair",
-			req:  PlanRequest{Intent: string(IntentChat), Input: "how are you"},
-			want: false,
-		},
-		{
-			name: "nil pair manager no pair",
-			req:  PlanRequest{Intent: string(IntentCompound), Input: "complex task"},
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.name == "nil pair manager no pair" {
-				spNoPM := &StrategicPlanner{pairManager: nil, logger: slog.Default()}
-				got := spNoPM.shouldUsePairSession(tt.req)
-				if got != tt.want {
-					t.Errorf("shouldUsePairSession() = %v, want %v", got, tt.want)
-				}
-				return
-			}
-			got := sp.shouldUsePairSession(tt.req)
-			if got != tt.want {
-				t.Errorf("shouldUsePairSession() = %v, want %v", got, tt.want)
-			}
-		})
 	}
 }
 
@@ -1482,7 +1425,7 @@ func TestConductInterview_ErrorTypes(t *testing.T) {
 		// "planner" spec, Get returns an error.
 		reg := &AgentRegistry{
 			specs:           make(map[string]*AgentSpec),
-			loops:           make(map[string]*AgentLoop),
+			loops:           make(map[string]map[string]*AgentLoop),
 			activeQueues:    make(map[string]*QueueEntry),
 			logger:          slogDiscardLogger(),
 			sharedConvStore: NewConversationStore(10),
@@ -1556,5 +1499,138 @@ func TestParsePlanOutput_InvalidDeps(t *testing.T) {
 	}
 	if !strings.Contains(logOutput, "task-deps-test") {
 		t.Errorf("expected task_id in debug log, got: %s", logOutput)
+	}
+}
+
+// TestStrategicPlanner_TemplateOverrideProjectLocal verifies that a
+// project-local template (the highest-precedence tier) is picked up by the
+// loader and actually changes the rendered prompt. This closes the loop on
+// the 4-tier discovery: bundled → system → user → project-local.
+func TestStrategicPlanner_TemplateOverrideProjectLocal(t *testing.T) {
+	// Create a project-local override that produces obviously-distinct output.
+	tmp := t.TempDir()
+	override := "---\nname: planner.decompose\n---\nOVERRIDE_MARKER {{.Input}}"
+	if err := os.MkdirAll(filepath.Join(tmp, "planner"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "planner", "decompose.md"), []byte(override), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loader := newPlannerTemplateLoader(tmp)
+	got, err := loader.render("planner/decompose.md", map[string]any{"Input": "x"})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(got, "OVERRIDE_MARKER x") {
+		t.Errorf("override did not apply; got %q", got)
+	}
+}
+
+func TestStrategicPlanner_inferLegacyMode(t *testing.T) {
+	cases := []struct {
+		name string
+		req  PlanRequest
+		want string
+	}{
+		{name: "compound -> spec_pair", req: PlanRequest{Intent: string(IntentCompound), IsCompound: true}, want: "spec_pair"},
+		{name: "chat intent -> direct", req: PlanRequest{Intent: string(IntentChat), Input: "what's the weather"}, want: "direct"},
+		{name: "code intent + long input -> plan", req: PlanRequest{Intent: string(IntentCode), Input: strings.Repeat("a", 150)}, want: "plan"},
+		{name: "plan intent -> spec_plan", req: PlanRequest{Intent: string(IntentPlan)}, want: "spec_plan"},
+		{name: "empty intent + short input -> direct", req: PlanRequest{Intent: "", Input: "hi"}, want: "direct"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sp := &StrategicPlanner{simpleInputMaxChars: 100, pairInputMinChars: 200}
+			got := sp.inferLegacyMode(c.req)
+			if got != c.want {
+				t.Errorf("got %q want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestStrategicPlanner_shouldInterview(t *testing.T) {
+	sp := &StrategicPlanner{interviewAmbiguity: 0.6}
+	cases := []struct {
+		mode string
+		req  PlanRequest
+		want bool
+	}{
+		{mode: "direct", req: PlanRequest{}, want: false},
+		{mode: "spec_plan", req: PlanRequest{}, want: true},
+		{mode: "plan", req: PlanRequest{TrueAnalysis: &TrueIntentAnalysis{Ambiguity: 0.3}}, want: false},
+		{mode: "plan", req: PlanRequest{TrueAnalysis: &TrueIntentAnalysis{Ambiguity: 0.7}}, want: true},
+		{mode: "spec_pair", req: PlanRequest{}, want: false},
+	}
+	for _, c := range cases {
+		got := sp.shouldInterview(c.req, c.mode)
+		if got != c.want {
+			t.Errorf("mode=%s got %v want %v", c.mode, got, c.want)
+		}
+	}
+}
+
+// TestStrategicPlanner_PairSessionNilManagerNoPanic verifies that a nil
+// pairManager (misconfigured env or test) does not cause a panic in
+// planPairSession. Regression test for Plan D Task 5 (commit f1c08c8b):
+// the refactor deleted shouldUsePairSession's nil guard, which would
+// panic on sp.pairManager.CreateSession when pairManager is nil.
+func TestStrategicPlanner_PairSessionNilManagerNoPanic(t *testing.T) {
+	sp := &StrategicPlanner{
+		// pairManager intentionally nil
+		logger:             slogDiscardLogger(),
+		simpleInputMaxChars: 100,
+	}
+	req := PlanRequest{
+		Intent:     string(IntentCompound),
+		IsCompound: true,
+		Input:      "do two things",
+	}
+
+	// Should return error, not panic.
+	_, err := sp.planPairSession(context.Background(), req, nil)
+	if err == nil {
+		t.Fatal("want error when pairManager is nil")
+	}
+	if !strings.Contains(err.Error(), "pair manager") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestStrategicPlanner_DefaultTemplateLoaderRegistersSpecFallback verifies that
+// NewStrategicPlanner, when constructed without an explicit TemplateLoader,
+// registers all three planner fallbacks — including decompose_spec.md. Without
+// the spec fallback, spec-plan rendering silently degrades to planSinglePhase.
+func TestStrategicPlanner_DefaultTemplateLoaderRegistersSpecFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	taskStore, err := newTestTaskStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create task store: %v", err)
+	}
+	defer taskStore.Close()
+
+	sp := NewStrategicPlanner(StrategicPlannerConfig{
+		TaskStore:      taskStore,
+		StepStore:      taskStore.StepStore(),
+		Bus:            bus.New(nil, slogDiscardLogger()),
+		Logger:         slogDiscardLogger(),
+		PlannerTimeout: 10 * time.Second,
+	})
+
+	if sp.templateLoader == nil {
+		t.Fatalf("templateLoader is nil; want *plannerTemplateLoader")
+	}
+	loader := sp.templateLoader
+
+	want := []string{
+		"planner/decompose.md",
+		"planner/interview.md",
+		"planner/decompose_spec.md",
+	}
+	for _, name := range want {
+		if _, ok := loader.fallbacks[name]; !ok {
+			t.Errorf("default templateLoader missing fallback for %q", name)
+		}
 	}
 }

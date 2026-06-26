@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,9 +13,12 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/repomap"
 	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -33,6 +37,19 @@ type Orchestrator struct {
 	repoMapGen          *repomap.RepoMapGenerator // optional: repository map for context enrichment
 	fenceChecker        *intsecurity.FenceChecker // path boundary enforcement
 
+	// Proactive chunking dependencies (Task 4 of Plan C+F).
+	// These are nil until wired by the daemon (Task 6).
+	// chunkToExecutorCapacity nil-guards all of these and skips chunking when unwired.
+	registry   *AgentRegistry          // agent registry for model config + LLM access
+	templateReg *plannerTemplateLoader  // template loader for split.md rendering
+	stepStore  *task.StepStore          // step store for listing + replacing steps
+
+	// Per-task artifact store for phase transition artifact tracking.
+	// One store per active task; cleared on task completion.
+	// Wired by daemon (Task 6). Nil-gated in startNextPhase.
+	artifacts         *artifactStore
+	phaseSpecOverride map[string]*PlanPhaseSpec // test override for phase specs
+
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 }
@@ -49,6 +66,12 @@ type OrchestratorDeps struct {
 	Bus                 *bus.MessageBus
 	Logger              *slog.Logger
 	FenceChecker        *intsecurity.FenceChecker // path boundary enforcement
+
+	// Proactive chunking dependencies (Task 6 of Plan C+F).
+	// When non-nil, these enable chunkToExecutorCapacity and phase-context isolation.
+	Registry    *AgentRegistry         // agent registry for model config + LLM access
+	TemplateReg *plannerTemplateLoader // template loader for split.md rendering
+	StepStore   *task.StepStore        // step store for listing + replacing steps
 }
 
 // SetRepoMapGenerator sets the repo map generator for context enrichment.
@@ -75,6 +98,14 @@ func NewOrchestrator(deps OrchestratorDeps) *Orchestrator {
 		bus:                 deps.Bus,
 		logger:              deps.Logger,
 		fenceChecker:        deps.FenceChecker,
+
+		// Proactive chunking deps (Task 6).
+		registry:   deps.Registry,
+		templateReg: deps.TemplateReg,
+		stepStore:  deps.StepStore,
+
+		// Per-task artifact store; reset on task completion.
+		artifacts: newArtifactStore(),
 	}
 }
 
@@ -103,6 +134,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		"team.result":                     o.handleTeamResult,
 		"team.error":                      o.handleTeamError,
 		"tool.execution.complete":         o.handleToolExecutionComplete,
+		"llm.context_compressed":          o.handleContextCompressed,
 	}
 
 	for topic, handler := range topics {
@@ -161,6 +193,22 @@ func (o *Orchestrator) Name() string {
 func (o *Orchestrator) SetPlanManager(pm *plan.PlanManager) {
 	if pm != nil {
 		o.planManager = pm
+	}
+}
+
+// SetChunkingDeps wires the dependencies for proactive chunking
+// (chunkToExecutorCapacity). Any nil argument leaves chunking disabled.
+//
+//nolint:U1000 // wired by Task 6 of Plan C+F (daemon wiring)
+func (o *Orchestrator) SetChunkingDeps(registry *AgentRegistry, templateReg *plannerTemplateLoader, stepStore *task.StepStore) {
+	if registry != nil {
+		o.registry = registry
+	}
+	if templateReg != nil {
+		o.templateReg = templateReg
+	}
+	if stepStore != nil {
+		o.stepStore = stepStore
 	}
 }
 
@@ -274,6 +322,8 @@ func (o *Orchestrator) handleJobCompleted(ctx context.Context, msg *models.BusMe
 			if isComplete {
 				// Reset iteration counter on successful completion
 				o.ralphLoop.Reset(taskID)
+				// Reset per-task artifact store for the next task (MVP: single-task).
+				o.artifacts = newArtifactStore()
 			}
 		}
 	}
@@ -283,6 +333,12 @@ func (o *Orchestrator) handleJobCompleted(ctx context.Context, msg *models.BusMe
 			"job_id", event.JobID,
 			"error", err,
 		)
+	}
+
+	// Check if this was the last active step for the task; if so, release
+	// per-task agent loops to free conversation state.
+	if _, taskID := o.extractTaskIDFromJob(ctx, event.JobID); taskID != "" {
+		o.releaseTaskLoopsIfComplete(taskID)
 	}
 }
 
@@ -336,6 +392,39 @@ func (o *Orchestrator) handleJobFailed(ctx context.Context, msg *models.BusMessa
 			"error", err,
 		)
 	}
+
+	// A job failure may have been the last active step for the task; if so,
+	// release per-task agent loops to free conversation state.
+	if _, taskID := o.extractTaskIDFromJob(ctx, event.JobID); taskID != "" {
+		o.releaseTaskLoopsIfComplete(taskID)
+	}
+}
+
+// releaseTaskLoopsIfComplete checks whether all steps for the given taskID
+// are in a terminal state (completed, approved, failed, skipped, or rejected).
+// If so, it calls registry.ReleaseTaskLoops(taskID) to free per-task agent
+// loops and their conversation state.
+func (o *Orchestrator) releaseTaskLoopsIfComplete(taskID string) {
+	if taskID == "" || o.registry == nil || o.stepStore == nil {
+		return
+	}
+	steps, err := o.stepStore.ListByTaskID(taskID)
+	if err != nil {
+		o.logger.Warn("releaseTaskLoopsIfComplete: ListByTaskID failed",
+			"task_id", taskID, "error", err)
+		return
+	}
+	if len(steps) == 0 {
+		return
+	}
+	for _, s := range steps {
+		if !s.State.IsTerminal() {
+			return // at least one step still active
+		}
+	}
+	o.registry.ReleaseTaskLoops(taskID)
+	o.logger.Info("Released per-task agent loops after task completion",
+		"task_id", taskID, "step_count", len(steps))
 }
 
 // handleAmendmentApplied handles events when an amendment is successfully applied.
@@ -753,6 +842,41 @@ func (o *Orchestrator) handleToolExecutionComplete(ctx context.Context, msg *mod
 	}()
 }
 
+// handleContextCompressed handles llm.context_compressed bus events.
+//
+// This is the reactive re-chunking hook (Plan C+F Task 8, Piece 5). When the
+// ContextFirewall compresses a step's context, this handler logs the event so
+// that future iterations can use it as a signal to pre-split similar steps via
+// chunkToExecutorCapacity.
+//
+// MVP behavior: log only. Actual re-chunking is deferred — the proactive
+// chunking implemented in Task 4 covers the common case. The subscription is
+// forward-looking: no component currently publishes to "llm.context_compressed"
+// (ContextFirewall.Stats exposes counters but does not emit bus events yet).
+// When a publisher is added, this handler will activate automatically.
+//
+// The handler is nil-safe against malformed payloads and missing fields.
+func (o *Orchestrator) handleContextCompressed(_ context.Context, msg *models.BusMessage) {
+	var data struct {
+		TaskID string `json:"task_id"`
+		StepID string `json:"step_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &data); err != nil {
+		o.logger.Debug("Failed to parse context_compressed event", "error", err)
+		return
+	}
+	if data.TaskID == "" {
+		// No task context — nothing actionable.
+		return
+	}
+	o.logger.Info("Context compressed for step; flagging for potential re-chunking",
+		"task_id", data.TaskID,
+		"step_id", data.StepID,
+	)
+	// Future: re-run chunkToExecutorCapacity for subsequent steps.
+	// For now: log only — chunking is proactive in Task 4.
+}
+
 // applyFix writes the LLM's proposed fix text to the target files.
 // It extracts code from markdown code blocks if present, or writes the
 // raw content. Returns the list of files that were successfully written.
@@ -930,4 +1054,162 @@ func (o *Orchestrator) GenerateRepoMap(ctx context.Context, chatFiles, mentioned
 		return nil, nil
 	}
 	return o.repoMapGen.Generate(ctx, chatFiles, mentionedIdentifiers)
+}
+
+// generateHandoff calls the classifier LLM with the handoff.md template,
+// passing a conversation excerpt from the completed step. Returns a structured
+// StepHandoff that downstream steps can consume without seeing the full
+// conversation history.
+func (o *Orchestrator) generateHandoff(ctx context.Context, step *task.TaskStep, conv *Conversation) (*StepHandoff, error) {
+	if o.templateReg == nil {
+		return nil, fmt.Errorf("template registry not wired")
+	}
+	var messages []llm.ChatMessage
+	if conv != nil {
+		messages = conv.GetMessages()
+	}
+	excerpt := buildConversationExcerpt(messages)
+	prompt, err := o.templateReg.render("orchestrator/handoff.md", map[string]any{
+		"StepDescription":     step.Description,
+		"ToolHint":            step.ToolHint,
+		"ConversationExcerpt": excerpt,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("render handoff template: %w", err)
+	}
+	if o.registry == nil {
+		return nil, fmt.Errorf("agent registry not wired")
+	}
+	classifier, err := o.registry.Get(config.AgentIDChat)
+	if err != nil {
+		return nil, fmt.Errorf("classifier agent unavailable: %w", err)
+	}
+	handoffCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	conversationID := fmt.Sprintf("handoff-%s-%s", step.TaskID, step.ID)
+	output, err := classifier.RunOnce(handoffCtx, prompt, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("handoff LLM call failed: %w", err)
+	}
+	return parseHandoffJSON(output)
+}
+
+// buildConversationExcerpt extracts assistant + tool messages and returns a
+// markdown-formatted string suitable for the handoff LLM prompt. User and
+// system messages are excluded — they don't contribute to the step-completion
+// summary.
+func buildConversationExcerpt(messages []llm.ChatMessage) string {
+	if len(messages) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	const maxMsgLen = 500
+	for _, m := range messages {
+		content := m.Content
+		if len(content) > maxMsgLen {
+			content = content[:maxMsgLen] + "..."
+		}
+		switch m.Role {
+		case llm.RoleAssistant:
+			sb.WriteString("ASSISTANT: " + content + "\n")
+		case llm.RoleTool:
+			toolName := m.Name
+			if toolName == "" {
+				toolName = "unknown"
+			}
+			sb.WriteString(fmt.Sprintf("TOOL[%s]: %s\n", toolName, content))
+		}
+	}
+	return sb.String()
+}
+
+// HandoffPropagator returns the callback that the TacticalScheduler invokes
+// on step completion. When non-nil, it replaces the legacy 500-char
+// truncation path with structured handoff propagation. Exposed so the daemon
+// can wire it via `tactical.SetHandoffPropagator(orchestrator.HandoffPropagator())`.
+// Returns nil if the orchestrator was not constructed with the handoff
+// dependencies (templateReg, registry) — callers should nil-check.
+func (o *Orchestrator) HandoffPropagator() func(ctx context.Context, completedStep *task.TaskStep) error {
+	if o.templateReg == nil || o.registry == nil {
+		return nil
+	}
+	return o.propagateHandoffToDependents
+}
+
+// propagateHandoffToDependents generates a structured StepHandoff for the
+// completed step and injects its markdown rendering into dependent (ready)
+// steps' AccumulatedContext. Falls back to the legacy truncation path when
+// the handoff LLM call fails or required deps are missing.
+func (o *Orchestrator) propagateHandoffToDependents(ctx context.Context, completedStep *task.TaskStep) error {
+	if o.stepStore == nil {
+		return nil
+	}
+	readySteps, err := o.stepStore.GetReadySteps(completedStep.TaskID)
+	if err != nil {
+		return fmt.Errorf("get ready steps: %w", err)
+	}
+	if len(readySteps) == 0 {
+		return nil
+	}
+
+	// If handoff dependencies are not wired, fall back to legacy.
+	if o.templateReg == nil || o.registry == nil || o.tactical == nil {
+		return o.legacyPropagate(ctx, completedStep)
+	}
+
+	// Look up the conversation from the loop that ran the step.
+	loop, err := o.registry.Get(completedStep.AgentID)
+	if err != nil {
+		o.logger.Warn("Handoff: agent loop unavailable; falling back to legacy",
+			"step_id", completedStep.ID, "agent_id", completedStep.AgentID, "error", err)
+		return o.legacyPropagate(ctx, completedStep)
+	}
+	var conv *Conversation
+	if completedStep.ConversationID != "" {
+		conv = loop.GetConversation(completedStep.ConversationID)
+	}
+
+	// Generate handoff
+	h, err := o.generateHandoff(ctx, completedStep, conv)
+	if err != nil {
+		o.logger.Warn("Handoff generation failed; falling back to legacy truncation",
+			"step_id", completedStep.ID, "error", err)
+		return o.legacyPropagate(ctx, completedStep)
+	}
+
+	// Render as markdown and inject into each ready step
+	handoffMD := h.RenderMarkdown()
+	for _, dep := range readySteps {
+		dep.AppendToContext(handoffMD)
+		for _, ref := range completedStep.MemoryRefs {
+			dep.AddMemoryRef(ref)
+		}
+		if err := o.stepStore.Update(dep); err != nil {
+			o.logger.Error("Failed to update dependent step",
+				"step_id", dep.ID, "error", err)
+		}
+	}
+
+	// Record produced artifacts (phase-level gating comes from
+	// Plan C+F's checkPhaseReady).
+	if o.artifacts != nil {
+		for _, a := range h.Artifacts {
+			o.artifacts.Add(a, completedStep.ID)
+		}
+	}
+
+	o.logger.Info("Propagated structured handoff to ready steps",
+		"step_id", completedStep.ID,
+		"ready_steps", len(readySteps),
+	)
+	return nil
+}
+
+// legacyPropagate delegates to the deprecated legacy truncation path on the
+// tactical scheduler. It is a no-op (returns nil) when tactical is nil.
+func (o *Orchestrator) legacyPropagate(ctx context.Context, completedStep *task.TaskStep) error {
+	if o.tactical == nil {
+		return nil
+	}
+	return o.tactical.propagateContextToNextStepsLegacy(ctx, completedStep)
 }

@@ -3,9 +3,11 @@ package plan
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -112,6 +114,58 @@ func (s *SQLiteStore) migrate() error {
 	_, err := s.db.Exec(schema)
 	if err != nil {
 		return fmt.Errorf("failed to create schema: %w", err)
+	}
+
+	// Idempotent column migrations for plan_phases. SQLite returns an error
+	// if the column already exists; we swallow that specific error.
+	if err := s.addColumnIfMissing("plan_phases", "produces", "TEXT"); err != nil {
+		return fmt.Errorf("failed to add produces column: %w", err)
+	}
+	if err := s.addColumnIfMissing("plan_phases", "consumes", "TEXT"); err != nil {
+		return fmt.Errorf("failed to add consumes column: %w", err)
+	}
+
+	return nil
+}
+
+// addColumnIfMissing adds a column to a table if it does not already exist.
+// SQLite doesn't support IF NOT EXISTS for ALTER TABLE ADD COLUMN prior to
+// 3.35, so we probe pragma table_info and ignore the duplicate-column error.
+func (s *SQLiteStore) addColumnIfMissing(table, column, colType string) error {
+	// Fast path: check if column exists via pragma.
+	rows, err := s.db.QueryxContext(context.Background(),
+		"PRAGMA table_info("+table+")")
+	if err != nil {
+		return fmt.Errorf("pragma table_info(%s): %w", table, err)
+	}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan table_info: %w", err)
+		}
+		if name == column {
+			rows.Close()
+			return nil // already exists
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate table_info: %w", err)
+	}
+
+	alter := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, colType)
+	if _, err := s.db.Exec(alter); err != nil {
+		// Guard against the race where another connection added the column
+		// between our probe and the ALTER. SQLite reports "duplicate column
+		// name" in that case.
+		if strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return nil
+		}
+		return fmt.Errorf("alter table %s add column %s: %w", table, column, err)
 	}
 	return nil
 }
@@ -262,13 +316,23 @@ func (s *SQLiteStore) SetPlanState(ctx context.Context, id string, state PlanSta
 
 // ---------- Phase operations ----------
 
-const phaseColumns = `id, plan_id, name, sequence, total_steps, completed_steps, failed_steps, state`
+const phaseColumns = `id, plan_id, name, sequence, total_steps, completed_steps, failed_steps, state, produces, consumes`
 
 func (s *SQLiteStore) CreatePhase(ctx context.Context, p *PlanPhase) error {
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO plan_phases (id, plan_id, name, sequence, total_steps, completed_steps, failed_steps, state)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.PlanID, p.Name, p.Sequence, p.TotalSteps, p.CompletedSteps, p.FailedSteps, string(p.State))
+	producesJSON, err := artifactsToJSON(p.Produces)
+	if err != nil {
+		return fmt.Errorf("marshal produces for phase %s: %w", p.ID, err)
+	}
+	consumesJSON, err := artifactsToJSON(p.Consumes)
+	if err != nil {
+		return fmt.Errorf("marshal consumes for phase %s: %w", p.ID, err)
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO plan_phases (id, plan_id, name, sequence, total_steps, completed_steps, failed_steps, state, produces, consumes)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.PlanID, p.Name, p.Sequence, p.TotalSteps, p.CompletedSteps, p.FailedSteps, string(p.State),
+		producesJSON, consumesJSON)
 	if err != nil {
 		s.logger.Error("Failed to create phase", "id", p.ID, "error", err)
 		return fmt.Errorf("failed to create phase: %w", err)
@@ -289,12 +353,43 @@ func (s *SQLiteStore) GetPhases(ctx context.Context, planID string) ([]*PlanPhas
 
 	var phases []*PlanPhase
 	for rows.Next() {
-		var p PlanPhase
-		if err := rows.StructScan(&p); err != nil {
+		var (
+			id           string
+			planID       string
+			name         string
+			sequence     int
+			totalSteps   int
+			completed    int
+			failed       int
+			stateStr     string
+			producesRaw  sql.NullString
+			consumesRaw  sql.NullString
+		)
+		if err := rows.Scan(
+			&id, &planID, &name, &sequence,
+			&totalSteps, &completed, &failed,
+			&stateStr, &producesRaw, &consumesRaw,
+		); err != nil {
 			s.logger.Error("Failed to scan phase", "error", err)
 			continue
 		}
-		phases = append(phases, &p)
+		p := &PlanPhase{
+			ID:             id,
+			PlanID:         planID,
+			Name:           name,
+			Sequence:       sequence,
+			TotalSteps:     totalSteps,
+			CompletedSteps: completed,
+			FailedSteps:    failed,
+			State:          PhaseState(stateStr),
+		}
+		if producesRaw.Valid {
+			p.Produces = artifactsFromJSON(producesRaw.String)
+		}
+		if consumesRaw.Valid {
+			p.Consumes = artifactsFromJSON(consumesRaw.String)
+		}
+		phases = append(phases, p)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to iterate phases: %w", err)
@@ -303,11 +398,22 @@ func (s *SQLiteStore) GetPhases(ctx context.Context, planID string) ([]*PlanPhas
 }
 
 func (s *SQLiteStore) UpdatePhase(ctx context.Context, p *PlanPhase) error {
-	_, err := s.db.ExecContext(ctx, `
+	producesJSON, err := artifactsToJSON(p.Produces)
+	if err != nil {
+		return fmt.Errorf("marshal produces for phase %s: %w", p.ID, err)
+	}
+	consumesJSON, err := artifactsToJSON(p.Consumes)
+	if err != nil {
+		return fmt.Errorf("marshal consumes for phase %s: %w", p.ID, err)
+	}
+
+	_, err = s.db.ExecContext(ctx, `
 		UPDATE plan_phases
-		SET name = ?, sequence = ?, total_steps = ?, completed_steps = ?, failed_steps = ?, state = ?
+		SET name = ?, sequence = ?, total_steps = ?, completed_steps = ?, failed_steps = ?, state = ?,
+		    produces = ?, consumes = ?
 		WHERE id = ?`,
-		p.Name, p.Sequence, p.TotalSteps, p.CompletedSteps, p.FailedSteps, string(p.State), p.ID)
+		p.Name, p.Sequence, p.TotalSteps, p.CompletedSteps, p.FailedSteps, string(p.State),
+		producesJSON, consumesJSON, p.ID)
 	if err != nil {
 		s.logger.Error("Failed to update phase", "id", p.ID, "error", err)
 		return fmt.Errorf("failed to update phase: %w", err)
@@ -606,4 +712,36 @@ func nullableTime(t *time.Time) any {
 		return nil
 	}
 	return t.Format(time.RFC3339)
+}
+
+// artifactsToJSON serializes an artifact slice to a JSON string suitable for
+// SQLite TEXT storage. Returns nil (SQL NULL) for empty slices so queries can
+// distinguish "no artifacts" from "empty array".
+func artifactsToJSON(arts []Artifact) (any, error) {
+	if len(arts) == 0 {
+		return nil, nil
+	}
+	b, err := json.Marshal(arts)
+	if err != nil {
+		// Should never happen for Artifact (only primitive fields); fall back
+		// to NULL so the row is still writable.
+		return nil, nil
+	}
+	return string(b), nil
+}
+
+// artifactsFromJSON deserializes an artifact slice from a JSON TEXT column.
+// Returns nil for empty/invalid data (graceful degradation).
+func artifactsFromJSON(s string) []Artifact {
+	if s == "" {
+		return nil
+	}
+	var arts []Artifact
+	if err := json.Unmarshal([]byte(s), &arts); err != nil {
+		return nil
+	}
+	if len(arts) == 0 {
+		return nil
+	}
+	return arts
 }

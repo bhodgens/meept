@@ -135,6 +135,9 @@ type Components struct {
 	// Learning pipeline
 	LearningPipeline *selfimprove.LearningPipeline
 
+	// Self-reflection (Turbo Thread E)
+	ReflectionCollector *agent.ReflectionCollector
+
 	// Skill lifecycle (usage tracker + writer + versioner for closed-loop skill evolution)
 	SkillUsageTracker *lifecycle.UsageTrackerImpl
 	SkillWriter       *lifecycle.Writer
@@ -810,6 +813,24 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			"rules", len(c.TTSRManager.Rules()),
 		)
 	}
+	// Wire immediate self-reflection (Turbo Thread E)
+	if cfg.ReflectionCollector.Enabled && c.LLMClient != nil {
+		reflectionLoader := agent.NewDaemonPlannerTemplateLoader("config/prompts")
+		reflectionCollector := agent.NewReflectionCollector(
+			cfg.ReflectionCollector,
+			c.LLMClient,
+			"", // classifierModel — empty = use Client's configured model
+			reflectionLoader,
+			".meept/improvements.md",
+			logger.With("component", "reflection-collector"),
+		)
+		agentOpts = append(agentOpts, agent.WithReflectionCollector(reflectionCollector))
+		c.ReflectionCollector = reflectionCollector
+		logger.Info("Agent loop configured with reflection collector",
+			"inactivity_minutes", cfg.ReflectionCollector.InactivityMinutes,
+			"timer_interval_minutes", cfg.ReflectionCollector.TimerIntervalMinutes,
+		)
+	}
 	// Always set an agent ID for security checks - use "default" when multi-agent is disabled
 	agentOpts = append(agentOpts, agent.WithAgentID("default"))
 
@@ -1370,6 +1391,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, containerMgr, c.PTYManager, c.LLMClient, c.FenceChecker, logger)
 
+	// Register /remember tool for agents to propose improvements (Thread E)
+	c.ToolRegistry.Register(builtin.NewRememberTool(".meept/improvements.md"))
+	logger.Info("Registered /remember tool")
+
 	// Initialize code intelligence if enabled
 	if cfg.CodeIntel.Enabled {
 		c.initializeCodeIntel(cfg, pendingChangesRegistry, logger)
@@ -1508,22 +1533,23 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 		// Create dispatcher with capability matcher
 		c.Dispatcher = agent.NewDispatcher(agent.DispatcherConfig{
-			Registry:          c.AgentRegistry,
-			MemvidClient:      c.MemvidClient,
-			MemoryMgr:         c.MemoryManager,
-			TaskStore:         taskStore,
-			TaskRegistry:      c.TaskRegistry,
-			AmendmentManager:  c.AmendmentMgr,
-			SkillRegistry:     c.SkillRegistry,
-			SkillExecutor:     c.SkillExecutor,
-			TemplateRegistry:  c.TemplateRegistry,
-			Logger:            logger.With("component", "dispatcher"),
-			CapabilityMatcher: capMatcher,
-			LLMClient:         c.LLMClient,
-			ClassifierClient:  c.ClassifierClient,
-			ClassifierModel:   c.ModelsConfig.ClassifierModel,
-			ClassifierTimeout: 15 * time.Second, // Generous timeout for classifier; avoids cascade to weak keyword fallback.
-			SessionMaxAge:     30 * time.Minute,
+			Registry:           c.AgentRegistry,
+			MemvidClient:       c.MemvidClient,
+			MemoryMgr:          c.MemoryManager,
+			TaskStore:          taskStore,
+			TaskRegistry:       c.TaskRegistry,
+			AmendmentManager:   c.AmendmentMgr,
+			SkillRegistry:      c.SkillRegistry,
+			SkillExecutor:      c.SkillExecutor,
+			TemplateRegistry:   c.TemplateRegistry,
+			Logger:             logger.With("component", "dispatcher"),
+			CapabilityMatcher:  capMatcher,
+			LLMClient:          c.LLMClient,
+			ClassifierClient:   c.ClassifierClient,
+			ClassifierModel:    c.ModelsConfig.ClassifierModel,
+			ClassifierTimeout:  15 * time.Second, // Generous timeout for classifier; avoids cascade to weak keyword fallback.
+			SessionMaxAge:      30 * time.Minute,
+			AmbiguityThreshold: cfg.Orchestrator.AmbiguityThreshold,
 		})
 		logger.Info("Dispatcher initialized", "has_capability_matcher", capMatcher != nil)
 
@@ -1595,13 +1621,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			orchTaskStore := c.TaskRegistry.Store()
 
 			strategicPlanner := agent.NewStrategicPlanner(agent.StrategicPlannerConfig{
-				Registry:       c.AgentRegistry,
-				TaskStore:      orchTaskStore,
-				StepStore:      stepStore,
-				Bus:            msgBus,
-				Logger:         logger.With("component", "strategic"),
-				MaxPlanSteps:   cfg.Orchestrator.MaxPlanSteps,
-				PlannerTimeout: time.Duration(cfg.Orchestrator.PlannerTimeout) * time.Second,
+				Registry:           c.AgentRegistry,
+				TaskStore:          orchTaskStore,
+				StepStore:          stepStore,
+				Bus:                msgBus,
+				Logger:             logger.With("component", "strategic"),
+				MaxPlanSteps:       cfg.Orchestrator.MaxPlanSteps,
+				PlannerTimeout:     time.Duration(cfg.Orchestrator.PlannerTimeout) * time.Second,
+				InterviewAmbiguity: cfg.Orchestrator.InterviewAmbiguityThreshold,
+				TemplateLoader:     agent.NewDaemonPlannerTemplateLoader("config/prompts"),
 			})
 
 			reviewManager := agent.NewReviewManager(agent.ReviewManagerConfig{
@@ -1712,7 +1740,46 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				Bus:                 msgBus,
 				Logger:              logger.With("component", "orchestrator"),
 				FenceChecker:        c.FenceChecker,
+				Registry:            c.AgentRegistry,
+				TemplateReg:         agent.NewDaemonPlannerTemplateLoader("config/prompts"),
+				StepStore:           stepStore,
 			})
+
+			// Wire the structured handoff path: when the orchestrator has its
+			// handoff dependencies (templateReg + registry), install the callback
+			// that replaces the tactical scheduler's legacy 500-char truncation.
+			// HandoffPropagator() returns nil when deps are missing; the tactical
+			// scheduler then falls back to its built-in legacy path.
+			if handoffFn := c.Orchestrator.HandoffPropagator(); handoffFn != nil {
+				tacticalScheduler.SetHandoffPropagator(handoffFn)
+				logger.Info("Structured handoff propagation enabled")
+			} else {
+				logger.Warn("Structured handoff disabled; using legacy 500-char truncation",
+					"reason", "orchestrator handoff deps not wired (templateReg or registry is nil)")
+			}
+
+			// Wire planPhaseSink: persists phase declarations produced by the
+			// multi-phase planner into the plan store. Converts PlanPhaseSpec
+			// → plan.PlanPhase and calls CreatePhase for each.
+			if c.PlanManager != nil {
+				strategicPlanner.SetPlanPhaseSink(func(taskID string, phases []agent.PlanPhaseSpec) {
+					for i, p := range phases {
+						phaseRecord := plan.NewPlanPhase(taskID, p.Name, i, len(p.Steps))
+						// Populate produces/consumes artifacts. agent.Artifact
+						// is a type alias for plan.Artifact, so this assignment
+						// is zero-cost.
+						phaseRecord.Produces = p.Produces
+						phaseRecord.Consumes = p.Consumes
+						if err := c.PlanManager.CreatePhase(context.Background(), phaseRecord); err != nil {
+							logger.Warn("planPhaseSink: failed to persist phase",
+								"task_id", taskID,
+								"phase", p.Name,
+								"error", err,
+							)
+						}
+					}
+				})
+			}
 
 			logger.Info("Orchestrator initialized with strategic and tactical layers")
 
@@ -2750,6 +2817,31 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 	}
 
+	// Start reflection collector periodic timer (Thread E)
+	if c.ReflectionCollector != nil && c.Config.ReflectionCollector.Enabled {
+		interval := time.Duration(c.Config.ReflectionCollector.TimerIntervalMinutes) * time.Minute
+		if interval <= 0 {
+			interval = 30 * time.Minute
+		}
+		reflectionTicker := time.NewTicker(interval)
+		go func() {
+			defer reflectionTicker.Stop()
+			for {
+				select {
+				case <-reflectionTicker.C:
+					tickCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+					c.ReflectionCollector.ReflectInactiveSessions(tickCtx)
+					cancel()
+				case <-c.ctx.Done():
+					return
+				}
+			}
+		}()
+		c.Logger.Info("Reflection collector timer started",
+			"interval_minutes", c.Config.ReflectionCollector.TimerIntervalMinutes,
+		)
+	}
+
 	started = true // signal success so the deferred rollback does not fire
 	return nil
 }
@@ -2973,6 +3065,13 @@ func (c *Components) stopComponents(ctx context.Context) error {
 			c.Logger.Error("Failed to close memory manager", "error", err)
 			lastErr = err
 		}
+	}
+
+	// Wait for in-flight reflection/learning goroutines to finish before
+	// closing the LLM client. Without this, a reflection goroutine could
+	// call Chat() on a closed client and panic (use-after-close).
+	if c.AgentLoop != nil {
+		c.AgentLoop.Stop()
 	}
 
 	if c.LLMClient != nil {
@@ -4946,13 +5045,17 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 		}
 	}
 
-	// Determine which agent loop to use
+	// Determine which agent loop to use. Use GetForTask so two concurrent
+	// task-scoped jobs for the same agent get distinct loops with isolated
+	// conversation state. Empty taskID defaults to "_default" inside GetForTask,
+	// preserving the previous single-loop behavior for non-task jobs.
 	var agentLoop *agent.AgentLoop
 	if job.AgentID != "" && p.registry != nil {
-		loop, err := p.registry.Get(job.AgentID)
+		loop, err := p.registry.GetForTask(job.AgentID, job.TaskID)
 		if err != nil {
 			p.logger.Warn("Agent not found, falling back to main loop",
 				"agent_id", job.AgentID,
+				"task_id", job.TaskID,
 				"job_id", job.ID,
 				"error", err,
 			)

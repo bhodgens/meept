@@ -339,7 +339,8 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck(t *testing.T) {
 			ID:   "task-123",
 			Name: "build new feature",
 		},
-		AgentID: "orchestrator",
+		AgentID:      "orchestrator",
+		SuggestedMode: "plan",
 	}
 
 	ack := h.FormatEnhancedAsyncTaskAck(result, steps, 5, "plan-456")
@@ -356,6 +357,9 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck(t *testing.T) {
 	}
 	if !strings.Contains(ack, "est.") {
 		t.Error("missing estimated duration")
+	}
+	if !strings.Contains(ack, "**mode:**") || !strings.Contains(ack, "planned") {
+		t.Errorf("missing or incorrect mode line in ACK:\n%s", ack)
 	}
 	// Verify line count (should be under 15)
 	lines := strings.Split(ack, "\n")
@@ -472,6 +476,44 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck_SingleAgent(t *testing.T) {
 
 	if strings.Contains(ack, "agents:") {
 		t.Error("agents line should not appear for single-agent task")
+	}
+}
+
+// TestChatHandler_FormatEnhancedAsyncTaskAck_IncludesMode verifies that the
+// **mode:** line appears in the ACK and reflects result.SuggestedMode for each
+// of the four defined modes plus the empty/default fallback.
+func TestChatHandler_FormatEnhancedAsyncTaskAck_IncludesMode(t *testing.T) {
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+
+	cases := []struct {
+		mode     string
+		wantLabel string
+	}{
+		{"direct", "executing directly"},
+		{"plan", "planned"},
+		{"spec_plan", "spec-planned (multi-phase)"},
+		{"spec_pair", "pair session"},
+		{"", "planned"},       // empty falls back to default
+		{"bogus", "planned"},  // unknown falls back to default
+	}
+
+	for _, c := range cases {
+		result := &DispatchResult{
+			Task: &task.Task{
+				ID:   "task-mode-" + c.mode,
+				Name: "mode test",
+			},
+			AgentID:      "orchestrator",
+			SuggestedMode: c.mode,
+		}
+
+		ack := h.FormatEnhancedAsyncTaskAck(result, nil, 0, "plan-mode")
+		if !strings.Contains(ack, "**mode:**") {
+			t.Errorf("mode %q: missing **mode:** line in ACK:\n%s", c.mode, ack)
+		}
+		if !strings.Contains(ack, c.wantLabel) {
+			t.Errorf("mode %q: ACK missing label %q;\ngot: %s", c.mode, c.wantLabel, ack)
+		}
 	}
 }
 

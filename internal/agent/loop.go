@@ -430,6 +430,9 @@ type AgentLoop struct {
 
 	// Learning pipeline for JUDGE/DISTILL/CONSOLIDATE
 	learningPipeline LearningPipeline
+	// reflectionCollector drives immediate per-turn self-reflection
+	// (Turbo Thread E). Optional; when nil, no reflection runs.
+	reflectionCollector *ReflectionCollector
 
 	// Skill usage tracker for closed-loop skill evolution.
 	usageTracker lifecycleUsageTracker
@@ -720,6 +723,17 @@ func WithLearningPipeline(lp LearningPipeline) LoopOption {
 	return func(l *AgentLoop) {
 		if lp != nil {
 			l.learningPipeline = lp
+		}
+	}
+}
+
+// WithReflectionCollector wires the immediate self-reflection collector
+// (Turbo Thread E). When set, the loop calls ReflectTurn after each
+// successful turn. Nil guard prevents typed-nil panic.
+func WithReflectionCollector(rc *ReflectionCollector) LoopOption {
+	return func(l *AgentLoop) {
+		if rc != nil {
+			l.reflectionCollector = rc
 		}
 	}
 }
@@ -1426,6 +1440,11 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		return "", ErrNoLLMClient
 	}
 
+	// begin marks the start of the turn for duration tracking. Used by
+	// the immediate self-reflection goroutine (Turbo Thread E) to attach
+	// wall-clock latency to the trajectory.
+	begin := time.Now()
+
 	// Session start hooks (memory prefetch, context injection, etc.)
 	sessionStartState := SessionLifecycleState{
 		SessionID: conversationID,
@@ -1638,11 +1657,42 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		}
 	}
 
-	// Trigger learning pipeline if available and response was successful.
-	// Use context.Background() rather than loopCtx: loopCancel() fires as
-	// soon as RunOnce returns, but learning is an asynchronous best-effort
-	// operation whose LLM calls (Judge/Distill/StorePattern) must outlive
-	// the request that triggered them.
+	// Immediate self-reflection (Turbo Thread E). Runs alongside (not
+	// instead of) the legacy learning pipeline below. Use
+	// context.Background() because loopCtx cancels as soon as RunOnce
+	// returns but reflection's LLM call must outlive the request that
+	// triggered it.
+	if l.reflectionCollector != nil && err == nil {
+		// Snapshot the inputs the goroutine needs before launching, since
+		// the next turn may overwrite loop fields.
+		rc := l.reflectionCollector
+		convSnapshot := conv
+		convID := conversationID
+		response := finalResponse
+		agentID := l.agentID
+		userMsg := userMessage
+		duration := time.Since(begin)
+
+		l.wg.Add(1)
+		go func() {
+			defer l.wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					l.logger.Warn("reflection panicked", "error", r)
+				}
+			}()
+			traj := buildTrajectory(convSnapshot, convID, agentID, userMsg, outcomeFromErr(nil), duration)
+			traj.FinalResponse = response
+			if err := rc.ReflectTurn(context.Background(), traj); err != nil {
+				l.logger.Warn("reflection failed", "error", err)
+			}
+		}()
+	}
+
+	// Keep the legacy learning pipeline goroutine for skill success/fail
+	// accounting. The triggerLearning path is deprecated for *pattern*
+	// extraction (ReflectionCollector supersedes it) but still handles
+	// skill outcome recording.
 	if l.learningPipeline != nil && err == nil {
 		// Snapshot the injected skill names before launching the goroutine.
 		// lastInjectedSkills is set synchronously above (in
@@ -1792,6 +1842,26 @@ func (l *AgentLoop) RunWithSkill(ctx context.Context, skill *skills.Skill, input
 	// Add response to conversation
 	conv.AddAssistantMessage(response)
 	return response, nil
+}
+
+// outcomeFromErr returns "failure" for non-nil errors, "success" otherwise.
+// Used by the reflection trajectory builder to label turn outcomes.
+func outcomeFromErr(err error) string {
+	if err != nil {
+		return "failure"
+	}
+	return "success"
+}
+
+// Stop waits for all asynchronous goroutines spawned by RunOnce (reflection,
+// learning pipeline, skill outcome recording) to complete before returning.
+// Daemon shutdown MUST call this before closing the LLM client to avoid
+// use-after-close panics from in-flight reflection/classifier LLM calls.
+func (l *AgentLoop) Stop() {
+	if l == nil {
+		return
+	}
+	l.wg.Wait()
 }
 
 // triggerLearning runs the JUDGE/DISTILL learning pipeline asynchronously.

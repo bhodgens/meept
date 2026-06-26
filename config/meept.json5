@@ -520,13 +520,19 @@
 
   // Hierarchical orchestrator settings
   "orchestrator": {
-    "max_plan_steps": 10,
+    // max_plan_steps removed (Thread C+F): use max_steps_per_phase * max_phases instead.
+    // If max_plan_steps is set in user config, it triggers a deprecation warning and is ignored.
     "max_research_steps": 3,
     "planner_timeout": 120,
     "token_budget_alert": 5000,
     // Handoff configuration
     "max_handoff_steps": 5,           // Max handoff-injected steps per task (0 = unlimited)
     "handoff_use_amendment": true,    // Route handoffs through amendment system for audit trail
+    // Complexity routing thresholds (Thread D)
+    "ambiguity_threshold": 0.6,            // dispatcher: blocks routing when analyzer ambiguity >= this
+    "interview_ambiguity_threshold": 0.6,  // planner: conducts interview for plan-mode when >= this
+    "max_steps_per_phase": 8,              // Thread C+F: per-phase step cap
+    "max_phases": 12,                      // Thread C+F: phase count soft cap
   },
 
   // Shadow training system (response shadowing for model improvement)
@@ -825,5 +831,18 @@
     //   "on_never_violation": true,
     //   "require_operator_resume": true,
     // },
+  },
+  // Turbo Thread E — immediate self-reflection (per-turn lesson extraction)
+  "reflection_collector": {
+    "enabled": true,
+    "auto_queue": true,
+    "auto_skill_under": ".meept/skills/auto/",
+    "skill_proposals_only": true,
+    "auto_apply_all": false,
+    "inactivity_minutes": 15,
+    "timer_interval_minutes": 30,
+    "turn_confidence_min": 0.6,
+    "session_confidence_min": 0.7,
+    "max_session_proposals": 3,
   },
 }

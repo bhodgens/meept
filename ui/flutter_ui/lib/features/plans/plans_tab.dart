@@ -310,12 +310,81 @@ class _PhaseCard extends StatelessWidget {
                   '${phase.completedSteps}/${phase.totalSteps} steps',
                   style: CyberpunkTypography.bodySmall,
                 ),
+                // Produces artifacts
+                if (phase.produces.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  _ArtifactList(
+                    label: 'produces',
+                    artifacts: phase.produces,
+                    color: CyberpunkColors.greenSuccess,
+                  ),
+                ],
+                // Consumes artifacts
+                if (phase.consumes.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  _ArtifactList(
+                    label: 'consumes',
+                    artifacts: phase.consumes,
+                    color: CyberpunkColors.orangeBright,
+                  ),
+                ],
               ],
             ),
           ),
           _StateBadge(state: phase.state),
         ],
       ),
+    );
+  }
+}
+
+class _ArtifactList extends StatelessWidget {
+  final String label;
+  final List<PlanArtifact> artifacts;
+  final Color color;
+
+  const _ArtifactList({required this.label, required this.artifacts, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    final labelStyle = CyberpunkTypography.bodySmall.copyWith(
+      color: color,
+      fontWeight: FontWeight.bold,
+    );
+    final itemStyle = CyberpunkTypography.bodySmall.copyWith(
+      color: CyberpunkColors.lightGray,
+      fontFamily: 'SourceCodePro',
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: labelStyle),
+        for (final a in artifacts)
+          Padding(
+            padding: const EdgeInsets.only(left: 8),
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(text: '${a.name} ', style: itemStyle),
+                  TextSpan(
+                    text: '(${a.kind}',
+                    style: itemStyle.copyWith(color: CyberpunkColors.midGray),
+                  ),
+                  if (a.required)
+                    TextSpan(
+                      text: ', required',
+                      style: itemStyle.copyWith(color: CyberpunkColors.orangeBright),
+                    ),
+                  TextSpan(
+                    text: ')',
+                    style: itemStyle.copyWith(color: CyberpunkColors.midGray),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

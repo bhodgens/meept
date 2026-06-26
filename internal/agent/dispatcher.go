@@ -91,6 +91,9 @@ type Intent struct {
 	Summary string `json:"summary,omitempty"`
 	// TrueAnalysis holds the IntentGate-style pre-classification analysis if available.
 	TrueAnalysis *TrueIntentAnalysis `json:"true_analysis,omitempty"`
+	// SuggestedMode is the synthesized planning mode (Thread D complexity routing).
+	// Populated by suggestMode in ClassifyAndRoute. Empty means no suggestion.
+	SuggestedMode string `json:"suggested_mode,omitempty"`
 }
 
 // MemoryContext wraps memory results with conversation metadata.
@@ -175,6 +178,11 @@ type DispatchResult struct {
 	// MinEffort / MaxEffort bounds gate whether the suggestion is actually
 	// applied at the AgentLoop layer.
 	SuggestedReasoningTier string `json:"-"`
+
+	// SuggestedMode is the complexity-routing mode from Thread D (direct/plan/
+	// spec_plan/spec_pair). Forwarded to PlanRequest.Mode for the strategic
+	// planner. Empty means no suggestion (planner uses its own heuristics).
+	SuggestedMode string `json:"suggested_mode,omitempty"`
 
 	// ReasoningOverride carries the parsed user reasoning directive (if any)
 	// so downstream code can forward it to the agent loop. When non-nil, it
@@ -264,6 +272,10 @@ type DispatcherConfig struct {
 	EmbeddingClient   EmbeddingClient
 	SessionMaxAge     time.Duration
 	PlanManager       *plan.PlanManager
+	// AmbiguityThreshold configures the IntentAnalyzer's gate for blocking
+	// routing on high-ambiguity inputs. 0 means use the legacy const
+	// (defaultAmbiguityThreshold = 0.6 in intent_analyzer.go).
+	AmbiguityThreshold float64
 }
 
 // NewDispatcher creates a new dispatcher.
@@ -308,8 +320,14 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 			},
 			cfg.Logger,
 		)
-		// Initialize intent analyzer using same classifier client
-		d.intentAnalyzer = NewIntentAnalyzer(classifierClient, cfg.Logger)
+		// Initialize intent analyzer using same classifier client.
+		// Apply the configured ambiguity threshold when non-zero;
+		// otherwise NewIntentAnalyzer uses its built-in default.
+		ia := NewIntentAnalyzer(classifierClient, cfg.Logger)
+		if cfg.AmbiguityThreshold > 0 {
+			ia = ia.WithAmbiguityThreshold(cfg.AmbiguityThreshold)
+		}
+		d.intentAnalyzer = ia
 	}
 
 	// Initialize semantic index if embedding client is provided
@@ -575,6 +593,16 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// 5. Extract memory refs for context continuity
 	intent.MemoryRefs = d.extractMemoryRefs(memCtx.Results)
 
+	// 5.1. Propagate TrueAnalysis from IntentGate (if classifyIntent didn't
+	// already carry it through). classifyIntent constructs fresh Intent
+	// structs via classifiers that don't read memCtx.LastIntent.TrueAnalysis.
+	if intent.TrueAnalysis == nil && memCtx.LastIntent != nil {
+		intent.TrueAnalysis = memCtx.LastIntent.TrueAnalysis
+	}
+
+	// 5.2. Synthesize planning mode (Thread D complexity routing).
+	intent.SuggestedMode = suggestMode(IntentType(intent.Type), intent.TrueAnalysis, input)
+
 	// 5.5. Check if plan creation is warranted (before task creation)
 	if d.planManager != nil && d.planManager.ShouldCreatePlan(intent.Type, 0) {
 		return d.routeToPlan(ctx, input, intent, sessionID)
@@ -595,6 +623,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		ModelDirective: parseResult.Directive,
 		OriginalInput:  input,
 		Parts:          parts,
+		SuggestedMode:  intent.SuggestedMode,
 	}
 
 	// Attach model override to task metadata if task was created
@@ -826,6 +855,59 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 		Summary:    "Could not determine intent, clarifying with user",
 	}, nil
 
+}
+
+// validModes is the set of accepted SuggestedMode values.
+var validModes = map[string]struct{}{
+	"direct":    {},
+	"plan":      {},
+	"spec_plan": {},
+	"spec_pair": {},
+}
+
+// validateMode returns the mode if valid, empty string otherwise.
+func validateMode(s string) string {
+	if _, ok := validModes[s]; ok {
+		return s
+	}
+	return ""
+}
+
+// suggestMode synthesizes the planning mode from intent type, optional
+// analyzer suggestion, and input length. Pure function — unit-testable
+// without a dispatcher.
+//
+// Priority:
+//  1. IntentCompound → "spec_pair" (forced)
+//  2. analysis.SuggestedMode (if valid)
+//  3. intentType.SuggestedMode() (rule-based fallback)
+//  4. Short-input downgrade: if input < 50 chars, mode is "direct"
+//     (unless analysis explicitly overrode to spec_plan)
+func suggestMode(intentType IntentType, analysis *TrueIntentAnalysis, input string) string {
+	if intentType == IntentCompound {
+		return "spec_pair"
+	}
+	analysisMode := ""
+	if analysis != nil {
+		analysisMode = validateMode(analysis.SuggestedMode)
+	}
+	if analysisMode != "" {
+		// Short-input downgrade does NOT override an explicit spec_plan
+		// suggestion from the analyzer.
+		if analysisMode == "spec_plan" {
+			return "spec_plan"
+		}
+		// For other analyzer-suggested modes, apply short-input downgrade.
+		if len(input) < 50 {
+			return "direct"
+		}
+		return analysisMode
+	}
+	mode := intentType.SuggestedMode()
+	if mode != "spec_plan" && len(input) < 50 {
+		return "direct"
+	}
+	return mode
 }
 
 // buildMemoryContext builds memory context with session history.

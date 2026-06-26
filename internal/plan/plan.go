@@ -71,6 +71,11 @@ type PlanPhase struct {
 	CompletedSteps int        `json:"completed_steps" db:"completed_steps"`
 	FailedSteps    int        `json:"failed_steps" db:"failed_steps"`
 	State          PhaseState `json:"state" db:"state"`
+	// Produces/Consumes declare phase artifacts. Serialized as JSON in SQLite
+	// (db:"-" because sqlx StructScan cannot bind JSON columns directly; the
+	// store layer handles these via explicit marshal/unmarshal).
+	Produces []Artifact `json:"produces,omitempty" db:"-"`
+	Consumes []Artifact `json:"consumes,omitempty" db:"-"`
 }
 
 // PlanSignoff records an approval, rejection, or confirmation action.

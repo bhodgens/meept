@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	configCli "github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/services"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
@@ -2674,6 +2675,53 @@ func (s *Server) handlePlanGet(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, plan)
 }
 
+// handlePlanPhases handles GET /api/v1/plans/{id}/phases.
+func (s *Server) handlePlanPhases(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Plan == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "plan service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "plan id is required")
+		return
+	}
+
+	phases, err := s.services.Plan.Phases(r.Context(), id)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{"phases": phases})
+}
+
+// handlePlanHandoffs handles GET /api/v1/plans/{id}/handoffs.
+// MVP: returns the list of structured step handoffs. Currently returns null
+// because handoff content lives in step.AccumulatedContext, not a separate
+// persistence layer.
+func (s *Server) handlePlanHandoffs(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Plan == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "plan service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "plan id is required")
+		return
+	}
+
+	handoffs, err := s.services.Plan.Handoffs(r.Context(), id)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{"handoffs": handoffs})
+}
+
 // handlePlanApprove handles POST /api/v1/plans/{id}/approve.
 func (s *Server) handlePlanApprove(w http.ResponseWriter, r *http.Request) {
 	if s.services == nil || s.services.Plan == nil {
@@ -3574,6 +3622,48 @@ func (s *Server) handleGetMemoryConfig(w http.ResponseWriter, _ *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]string{"content": content})
 }
 
+// handleGetOrchestratorConfig handles GET /api/v1/config/orchestrator.
+// Returns the orchestrator block of meept.json5 as structured JSON. Thresholds
+// default to zero values when the file or block is absent; downstream consumers
+// layer legacy defaults on top (see config.DefaultConfig).
+func (s *Server) handleGetOrchestratorConfig(w http.ResponseWriter, _ *http.Request) {
+	if s.configService == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "config service not available")
+		return
+	}
+
+	oc, err := s.configService.LoadOrchestratorConfig()
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, oc)
+}
+
+// handlePutOrchestratorConfig handles PUT /api/v1/config/orchestrator.
+// Body: the JSON-serialized OrchestratorConfig. The orchestrator key in
+// meept.json5 is replaced atomically; other top-level keys are preserved.
+// Returns the persisted OrchestratorConfig.
+func (s *Server) handlePutOrchestratorConfig(w http.ResponseWriter, r *http.Request) {
+	if s.configService == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "config service not available")
+		return
+	}
+
+	var oc configCli.OrchestratorConfig
+	if !s.readJSON(w, r, &oc) {
+		return
+	}
+
+	if err := s.configService.SaveOrchestratorConfig(oc); err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, oc)
+}
+
 // handleSkillsStats handles GET /api/v1/skills/stats?name=<skill-name>.
 // Dispatches through rpcCall to skills.stats.
 func (s *Server) handleSkillsStats(w http.ResponseWriter, r *http.Request) {
@@ -3685,4 +3775,85 @@ func (s *Server) handleSkillsEvolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSON(w, http.StatusOK, result)
+}
+
+// ===== Reflection Endpoints =====
+
+// handleReflectionList handles GET /api/v1/reflection/proposals.
+// Returns all pending reflection proposals.
+func (s *Server) handleReflectionList(w http.ResponseWriter, _ *http.Request) {
+	if s.services == nil || s.services.Reflection == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "reflection service not available")
+		return
+	}
+	pending, err := s.services.Reflection.ListPending()
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{"proposals": pending})
+}
+
+// handleReflectionApply handles POST /api/v1/reflection/proposals/{id}/apply.
+// Marks a proposal as applied.
+func (s *Server) handleReflectionApply(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Reflection == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "reflection service not available")
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "missing proposal id")
+		return
+	}
+	if err := s.services.Reflection.Apply(id); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{KeyStatus: "applied", "id": id})
+}
+
+// handleReflectionSkip handles POST /api/v1/reflection/proposals/{id}/skip.
+// Marks a proposal as skipped.
+func (s *Server) handleReflectionSkip(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Reflection == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "reflection service not available")
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "missing proposal id")
+		return
+	}
+	if err := s.services.Reflection.Skip(id); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{KeyStatus: "skipped", "id": id})
+}
+
+// handleReflectionRemember handles POST /api/v1/reflection/remember.
+// Creates a manual proposal and appends it to the queue.
+func (s *Server) handleReflectionRemember(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Reflection == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "reflection service not available")
+		return
+	}
+	var body struct {
+		Target        string `json:"target"`
+		Change        string `json:"change"`
+		Justification string `json:"justification"`
+	}
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	if body.Target == "" || body.Change == "" {
+		s.writeError(w, http.StatusBadRequest, "target and change are required")
+		return
+	}
+	if err := s.services.Reflection.Remember(body.Target, body.Change, body.Justification); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+	s.writeJSON(w, http.StatusCreated, map[string]any{KeyStatus: KeyQueued, "target": body.Target})
 }

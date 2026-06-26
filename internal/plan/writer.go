@@ -37,6 +37,9 @@ func WritePlanMarkdown(filePath string, plan *Plan, phases []ParsedPhase) error 
 	for _, phase := range phases {
 		fmt.Fprintf(&b, "## Phase %d: %s [%s]\n\n", phase.Sequence, phase.Name, phase.State)
 
+		writeArtifactsBlock(&b, "Produces", phase.Produces)
+		writeArtifactsBlock(&b, "Consumes", phase.Consumes)
+
 		for _, step := range phase.Steps {
 			desc := step.Description
 			status := step.State
@@ -184,6 +187,9 @@ func WritePlanFromParsed(filePath string, parsed *ParsedPlan) error {
 		}
 		fmt.Fprintf(&b, "## Phase %d: %s [%s]\n\n", phase.Sequence, phase.Name, state)
 
+		writeArtifactsBlock(&b, "Produces", phase.Produces)
+		writeArtifactsBlock(&b, "Consumes", phase.Consumes)
+
 		for _, step := range phase.Steps {
 			desc := step.Description
 			status := step.State
@@ -237,4 +243,27 @@ func mkdirAndWrite(filePath, content string) error {
 		return fmt.Errorf("write file: %w", err)
 	}
 	return nil
+}
+
+// writeArtifactsBlock emits a "Produces:" or "Consumes:" subsection within a
+// phase when the slice is non-empty. The label should be "Produces" or
+// "Consumes". Format:
+//
+//	**Produces:**
+//	- `name` (kind) — description
+//
+// For required consumes, the kind shows "(kind, required)".
+func writeArtifactsBlock(b *strings.Builder, label string, arts []Artifact) {
+	if len(arts) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "**%s:**\n", label)
+	for _, a := range arts {
+		if a.Required {
+			fmt.Fprintf(b, "- `%s` (%s, required) — %s\n", a.Name, a.Kind, a.Description)
+		} else {
+			fmt.Fprintf(b, "- `%s` (%s) — %s\n", a.Name, a.Kind, a.Description)
+		}
+	}
+	b.WriteString("\n")
 }

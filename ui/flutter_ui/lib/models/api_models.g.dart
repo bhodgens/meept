@@ -283,6 +283,14 @@ _$PlanPhaseImpl _$$PlanPhaseImplFromJson(Map<String, dynamic> json) =>
       completedSteps: (json['completed_steps'] as num?)?.toInt() ?? 0,
       failedSteps: (json['failed_steps'] as num?)?.toInt() ?? 0,
       state: json['state'] as String,
+      produces: (json['produces'] as List<dynamic>?)
+              ?.map((e) => PlanArtifact.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
+      consumes: (json['consumes'] as List<dynamic>?)
+              ?.map((e) => PlanArtifact.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
     );
 
 Map<String, dynamic> _$$PlanPhaseImplToJson(_$PlanPhaseImpl instance) =>
@@ -295,6 +303,24 @@ Map<String, dynamic> _$$PlanPhaseImplToJson(_$PlanPhaseImpl instance) =>
       'completed_steps': instance.completedSteps,
       'failed_steps': instance.failedSteps,
       'state': instance.state,
+      'produces': instance.produces,
+      'consumes': instance.consumes,
+    };
+
+_$PlanArtifactImpl _$$PlanArtifactImplFromJson(Map<String, dynamic> json) =>
+    _$PlanArtifactImpl(
+      name: json['name'] as String,
+      kind: json['kind'] as String,
+      description: json['description'] as String? ?? '',
+      required: json['required'] as bool? ?? false,
+    );
+
+Map<String, dynamic> _$$PlanArtifactImplToJson(_$PlanArtifactImpl instance) =>
+    <String, dynamic>{
+      'name': instance.name,
+      'kind': instance.kind,
+      'description': instance.description,
+      'required': instance.required,
     };
 
 _$SearchResultsImpl _$$SearchResultsImplFromJson(Map<String, dynamic> json) =>

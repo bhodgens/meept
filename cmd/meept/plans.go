@@ -180,15 +180,38 @@ func newPlansShowCmd() *cobra.Command {
 			fmt.Printf("Created:     %s\n", getStringOr(plan, "created_at", ""))
 			fmt.Printf("Updated:     %s\n", getStringOr(plan, "updated_at", ""))
 
-			// Show phases with progress
-			if phases, ok := plan["phases"].([]any); ok && len(phases) > 0 {
-				fmt.Printf("\nPhases (%d):\n", len(phases))
-				for i, ph := range phases {
-					phase, ok := ph.(map[string]any)
-					if !ok {
-						continue
+			// Show phases with progress and produces/consumes artifacts.
+			// The plan object may include phases inline but without artifacts
+			// (they are db:"-"). Fetch full phase data (with produces/consumes)
+			// via a dedicated RPC call.
+			var phasesList []map[string]any
+			phasesRaw, phasesErr := client.Call("plan.get_phases", map[string]any{"plan_id": planID})
+			if phasesErr == nil {
+				var phasesResult map[string]any
+				if err := json.Unmarshal(phasesRaw, &phasesResult); err == nil {
+					if arr, ok := phasesResult["phases"].([]any); ok {
+						for _, ph := range arr {
+							if m, ok := ph.(map[string]any); ok {
+								phasesList = append(phasesList, m)
+							}
+						}
 					}
+				}
+			}
+			// Fall back to inline phases from plan.get if dedicated call failed.
+			if len(phasesList) == 0 {
+				if inlinePhases, ok := plan["phases"].([]any); ok {
+					for _, ph := range inlinePhases {
+						if m, ok := ph.(map[string]any); ok {
+							phasesList = append(phasesList, m)
+						}
+					}
+				}
+			}
 
+			if len(phasesList) > 0 {
+				fmt.Printf("\nPhases (%d):\n", len(phasesList))
+				for i, phase := range phasesList {
 					phaseName := getStringOr(phase, "name", fmt.Sprintf("Phase %d", i+1))
 					phaseState := getStringOr(phase, "state", "")
 					totalSteps := 0
@@ -202,6 +225,18 @@ func newPlansShowCmd() *cobra.Command {
 									completedSteps++
 								}
 							}
+						}
+					}
+					// Some plan representations embed total_steps / completed_steps
+					// directly on the phase object (no inline step array).
+					if totalSteps == 0 {
+						if v, ok := phase["total_steps"].(float64); ok {
+							totalSteps = int(v)
+						}
+					}
+					if completedSteps == 0 {
+						if v, ok := phase["completed_steps"].(float64); ok {
+							completedSteps = int(v)
 						}
 					}
 
@@ -222,6 +257,46 @@ func newPlansShowCmd() *cobra.Command {
 
 					fmt.Printf("  %d. [%s] %s  [%s] %d/%d steps\n",
 						i+1, phaseState, phaseName, bar, completedSteps, totalSteps)
+
+					// Produces artifacts
+					if produces, ok := phase["produces"].([]any); ok {
+						for _, a := range produces {
+							art, ok := a.(map[string]any)
+							if !ok {
+								continue
+							}
+							name := getStringOr(art, "name", "")
+							kind := getStringOr(art, "kind", "")
+							desc := getStringOr(art, "description", "")
+							line := fmt.Sprintf("    produces: %s (%s)", name, kind)
+							if desc != "" {
+								line += fmt.Sprintf(" - %s", desc)
+							}
+							fmt.Println(line)
+						}
+					}
+
+					// Consumes artifacts
+					if consumes, ok := phase["consumes"].([]any); ok {
+						for _, a := range consumes {
+							art, ok := a.(map[string]any)
+							if !ok {
+								continue
+							}
+							name := getStringOr(art, "name", "")
+							kind := getStringOr(art, "kind", "")
+							desc := getStringOr(art, "description", "")
+							required := ""
+							if req, ok := art["required"].(bool); ok && req {
+								required = ", required"
+							}
+							line := fmt.Sprintf("    consumes: %s (%s%s)", name, kind, required)
+							if desc != "" {
+								line += fmt.Sprintf(" - %s", desc)
+							}
+							fmt.Println(line)
+						}
+					}
 				}
 			}
 

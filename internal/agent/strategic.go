@@ -45,6 +45,11 @@ type PlanRequest struct {
 
 	// TrueAnalysis carries IntentGate-style pre-classification analysis.
 	TrueAnalysis *TrueIntentAnalysis `json:"true_analysis,omitempty"`
+
+	// Mode is the complexity-routing mode from Thread D (direct/plan/spec_plan/
+	// spec_pair). The strategic planner uses this to short-circuit planning for
+	// "direct" mode or select the spec-plan template for "spec_plan".
+	Mode string `json:"mode,omitempty"`
 }
 
 // plannerStep is the JSON structure expected from the planner LLM output.
@@ -59,65 +64,26 @@ type plannerOutput struct {
 	Steps []plannerStep `json:"steps"`
 }
 
-const interviewAmbiguityThreshold = 0.6
-
-// interviewPromptTemplate is the system prompt for generating interview questions
-// based on true intent analysis. The LLM generates 2-4 targeted questions about
-// scope, constraints, requirements, and ambiguities.
-const interviewPromptTemplate = `You are a project planning interviewer. Based on the user's request and intent analysis below, generate 2-4 targeted interview questions to resolve ambiguities before task decomposition.
-
-Your questions should cover:
-1. Specific scope boundaries (what is in vs. out of scope)
-2. Constraints and preferences (technology, performance, timeline)
-3. Priority or ordering of requirements
-4. Specific ambiguities identified in the analysis
-
-Rules:
-- Generate ONLY valid JSON, no markdown, no explanation
-- Keep questions concise and actionable
-- Each question should have a clear, specific focus
-- Maximum 4 questions, minimum 2
-
-Output format:
-{"questions": ["question 1", "question 2", ...]}
-
-Request: %s
-
-Intent analysis:
-- Goal: %s
-- Ambiguity: %.1f
-- Scope: %s
-- Category: %s
-- Confidence: %.1f
-- Identified ambiguities: %s`
-
-const plannerPromptTemplate = `You are a task planner. Decompose the following request into discrete, executable steps.
-Each step should be a single unit of work that can be assigned to a specialist agent.
-
-Available tool hints (use these to indicate what kind of agent should handle each step):
-- "code" or "refactor" → coding specialist
-- "debug" or "fix" → debugging specialist
-- "analyze" or "research" → analysis specialist
-- "git" or "commit" → git operations specialist
-- "plan" → further planning/decomposition
-- "chat" → general conversation
-
-Output ONLY valid JSON in this exact format (no markdown, no explanation):
-{
-  "steps": [
-    {"description": "step description", "tool_hint": "code", "depends_on": []},
-    {"description": "step description", "tool_hint": "code", "depends_on": [0]},
-    {"description": "step description", "tool_hint": "git", "depends_on": [0, 1]}
-  ]
+// PlanPhaseSpec is a planner-declared phase. Distinct from plan.PlanPhase
+// (the persisted record) — this is the LLM's output shape before
+// validation/persistence.
+type PlanPhaseSpec struct {
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Steps       []plannerStep `json:"steps"`
+	Produces    []Artifact    `json:"produces"`
+	Consumes    []Artifact    `json:"consumes"`
+	DependsOn   []int         `json:"depends_on,omitempty"`
 }
 
-The "depends_on" field uses 0-based step indices. Steps with empty depends_on can run in parallel.
-HARD CONSTRAINT: You MUST output AT MOST %d steps. Do not exceed this limit. Outputting more than %d steps is a failure. Be specific and actionable.
+// plannerPhaseOutput is the JSON envelope returned by the multi-phase planner
+// LLM call. parsePhaseOutput unmarshals into this, then runs validation and
+// repair passes.
+type plannerPhaseOutput struct {
+	Phases []PlanPhaseSpec `json:"phases"`
+}
 
-%s
-
-Request to decompose:
-%s`
+const interviewAmbiguityThreshold = 0.6
 
 // StrategicPlanner decomposes tasks into steps using an LLM planner agent.
 type StrategicPlanner struct {
@@ -136,6 +102,10 @@ type StrategicPlanner struct {
 	pairInputMinChars     int
 	interviewAmbiguity    float64
 	metricsStore          *metrics.Store
+	templateLoader        *plannerTemplateLoader
+	maxPhases             int
+	maxStepsPerPhase      int
+	planPhaseSink         func(taskID string, phases []PlanPhaseSpec)
 }
 
 // StrategicPlannerConfig holds configuration for the strategic planner.
@@ -158,8 +128,24 @@ type StrategicPlannerConfig struct {
 	// PairInputMinChars is the threshold above which code/debug requests
 	// are routed to pair sessions. Defaults to 200.
 	PairInputMinChars int
+	// InterviewAmbiguity overrides the hardcoded threshold (default 0.6).
+	// 0 means use the default.
+	InterviewAmbiguity float64
 	// MetricsStore, when non-nil, receives planner outcome metrics.
 	MetricsStore *metrics.Store
+	// TemplateLoader, if non-nil, supplies markdown-overridable planner
+	// prompts. If nil, the planner constructs a default loader.
+	TemplateLoader *plannerTemplateLoader
+	// MaxPhases caps the number of phases the multi-phase planner may
+	// produce. Defaults to 12 when <= 0.
+	MaxPhases int
+	// MaxStepsPerPhase caps the number of steps per phase in multi-phase
+	// planning. Defaults to 8 when <= 0.
+	MaxStepsPerPhase int
+	// PlanPhaseSink, when non-nil, receives the planner's phase declarations
+	// for persistence (e.g., writing to plan.Store). Called after a
+	// successful planMultiPhase decomposition.
+	PlanPhaseSink func(taskID string, phases []PlanPhaseSpec)
 }
 
 // NewStrategicPlanner creates a new strategic planner.
@@ -182,11 +168,24 @@ func NewStrategicPlanner(cfg StrategicPlannerConfig) *StrategicPlanner {
 	if cfg.PairInputMinChars <= 0 {
 		cfg.PairInputMinChars = 200
 	}
+	if cfg.MaxPhases <= 0 {
+		cfg.MaxPhases = 12
+	}
+	if cfg.MaxStepsPerPhase <= 0 {
+		cfg.MaxStepsPerPhase = 8
+	}
 	if cfg.Routing == nil {
 		cfg.Routing = NewDefaultRoutingTable()
 	}
 
-	return &StrategicPlanner{
+	// InterviewAmbiguity: 0 falls back to the legacy const (backward compat
+	// for callers that don't pass the value via config).
+	interviewAmb := cfg.InterviewAmbiguity
+	if interviewAmb == 0 {
+		interviewAmb = interviewAmbiguityThreshold
+	}
+
+	sp := &StrategicPlanner{
 		registry:              cfg.Registry,
 		taskStore:             cfg.TaskStore,
 		stepStore:             cfg.StepStore,
@@ -199,9 +198,20 @@ func NewStrategicPlanner(cfg StrategicPlannerConfig) *StrategicPlanner {
 		approvalStepThreshold: cfg.ApprovalStepThreshold,
 		simpleInputMaxChars:   cfg.SimpleInputMaxChars,
 		pairInputMinChars:     cfg.PairInputMinChars,
-		interviewAmbiguity:    interviewAmbiguityThreshold,
+		interviewAmbiguity:    interviewAmb,
 		metricsStore:          cfg.MetricsStore,
+		templateLoader:        cfg.TemplateLoader,
+		maxPhases:             cfg.MaxPhases,
+		maxStepsPerPhase:      cfg.MaxStepsPerPhase,
+		planPhaseSink:         cfg.PlanPhaseSink,
 	}
+	if sp.templateLoader == nil {
+		sp.templateLoader = newPlannerTemplateLoader()
+		sp.templateLoader.fallbacks["planner/decompose.md"] = defaultDecomposeFallback()
+		sp.templateLoader.fallbacks["planner/interview.md"] = defaultInterviewFallback()
+		sp.templateLoader.fallbacks["planner/decompose_spec.md"] = defaultDecomposeSpecFallback()
+	}
+	return sp
 }
 
 // ConductInterview determines whether an interview is needed for the given plan
@@ -262,15 +272,18 @@ func (sp *StrategicPlanner) ConductInterview(ctx context.Context, req PlanReques
 		ambiguityList = strings.Join(req.TrueAnalysis.SuggestedQuestions, "; ")
 	}
 
-	prompt := fmt.Sprintf(interviewPromptTemplate,
-		req.Input,
-		req.TrueAnalysis.Goal,
-		req.TrueAnalysis.Ambiguity,
-		req.TrueAnalysis.Scope,
-		req.TrueAnalysis.Category,
-		req.TrueAnalysis.Confidence,
-		ambiguityList,
-	)
+	prompt, renderErr := sp.templateLoader.render("planner/interview.md", map[string]any{
+		"Request":     req.Input,
+		"Goal":        req.TrueAnalysis.Goal,
+		"Ambiguity":   req.TrueAnalysis.Ambiguity,
+		"Scope":       req.TrueAnalysis.Scope,
+		"Category":    req.TrueAnalysis.Category,
+		"Confidence":  req.TrueAnalysis.Confidence,
+		"Ambiguities": ambiguityList,
+	})
+	if renderErr != nil {
+		return nil, fmt.Errorf("render interview template: %w", renderErr)
+	}
 
 	interviewCtx, cancel := context.WithTimeout(ctx, sp.plannerTimeout)
 	defer cancel()
@@ -341,6 +354,7 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		"task_id", req.TaskID,
 		"session_id", req.SessionID,
 		"intent", req.Intent,
+		"mode", req.Mode,
 	)
 
 	// Set task state to planning
@@ -356,128 +370,72 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 	// Copy parent MemoryRefs for context inheritance
 	parentMemoryRefs := t.MemoryRefs
 
-	// Check if this task should use pair sessions instead of normal steps
-	if sp.shouldUsePairSession(req) {
-		sp.logger.Info("Using pair session for task",
-			"task_id", req.TaskID,
-			"intent", req.Intent,
-		)
-		pairSteps, pairErr := sp.createPairSessionPlan(ctx, req, parentMemoryRefs)
-		if pairErr != nil {
-			sp.logger.Error("Failed to create pair session plan, falling back",
-				"task_id", req.TaskID,
-				"error", pairErr,
-			)
-			// Fall through to normal planning
-		} else {
-			// Persist steps
-			for _, step := range pairSteps {
-				if err := sp.stepStore.Create(step); err != nil {
-					sp.logger.Error("Failed to persist step", "step_id", step.ID, "error", err)
-					return fmt.Errorf("failed to persist steps: %w", err)
-				}
-			}
-
-			t.TotalJobs = len(pairSteps)
-			t.SetState(task.StateExecuting)
-			if err := sp.taskStore.Update(t); err != nil {
-				sp.logger.Error("Failed to update task after pair planning", "error", err)
-			}
-
-			// Promote actor step to ready (reviewer depends on it)
-			promoted, err := sp.stepStore.PromoteReadySteps(req.TaskID)
-			if err != nil {
-				sp.logger.Error("Failed to promote pair steps", "error", err)
-			}
-
-			sp.publishEvent("task.planned", map[string]any{
-				KeyTaskID:      req.TaskID,
-				"session_id":   req.SessionID,
-				"total_steps":  len(pairSteps),
-				"ready_steps":  len(promoted),
-				"pair_session": true,
-			})
-
-			sp.publishEvent("orchestrator.schedule", map[string]any{
-				KeyTaskID: req.TaskID,
-			})
-
-			return nil
-		}
+	mode := req.Mode
+	if mode == "" {
+		mode = sp.inferLegacyMode(req)
 	}
 
 	var steps []*task.TaskStep
 
-	// Interview phase: if the request has TrueAnalysis with high ambiguity,
-	// conduct an interview before decomposition.
-	if sp.registry != nil {
-		pctx, interviewErr := sp.ConductInterview(ctx, req)
-		if interviewErr != nil {
-			// ErrInterviewNotNeeded is a normal "nothing to do" signal — not
-			// worth warning about. Other errors indicate infrastructure issues.
-			if errors.Is(interviewErr, ErrInterviewNotNeeded) {
-				sp.logger.Debug("Interview not needed, proceeding with planning",
-					"task_id", req.TaskID,
-					"reason", interviewErr.Error(),
-				)
-			} else {
-				sp.logger.Warn("Interview failed, proceeding with planning",
-					"task_id", req.TaskID,
-					"error", interviewErr,
-				)
-			}
-		} else if pctx != nil && !pctx.InterviewCompleted {
-			// Interview incomplete: publish event with questions and return early.
-			// The task stays in planning state until answers are provided.
-			sp.publishEvent("task.interview", map[string]any{
-				KeyTaskID:     req.TaskID,
-				"session_id":  req.SessionID,
-				"questions":   pctx.InterviewQuestions,
-				"ambiguities": pctx.Ambiguities,
-			})
-
-			// Store planning context on the task metadata so it persists.
-			if pctxJSON, err := json.Marshal(pctx); err == nil {
-				t.Metadata = json.RawMessage(pctxJSON)
-				if err := sp.taskStore.Update(t); err != nil {
-					sp.logger.Warn("Failed to update task with planning context", "error", err)
-				}
-			}
-
-			sp.logger.Info("Interview questions sent, awaiting user answers",
-				"task_id", req.TaskID,
-				"question_count", len(pctx.InterviewQuestions),
-			)
+	switch mode {
+	case "spec_pair":
+		// spec_pair has its own persistence path: the actor step is promoted
+		// immediately (reviewer depends on it), no approval gate is applied,
+		// and the task.planned event carries pair_session: true. For these
+		// reasons it short-circuits the shared tail below.
+		if _, pairErr := sp.handlePairSession(ctx, t, req, parentMemoryRefs); pairErr != nil {
+			sp.logger.Error("Pair-session handling failed, falling back to direct", "error", pairErr)
+			steps = sp.createFallbackSteps(req, parentMemoryRefs)
+			// Fall through to shared tail with fallback steps.
+		} else {
+			// Pair-session path already persisted steps, updated task, and
+			// published task.planned + orchestrator.schedule. Return now.
 			return nil
-		} else if pctx != nil {
-			// Interview completed: inject the planning context into the request
-			// so that generatePlan uses verified context.
-			req.PlanningCtx = pctx
-			sp.logger.Info("Interview completed, proceeding with verified context",
-				"task_id", req.TaskID,
-			)
 		}
-	}
-
-	// Fast-path: simple requests don't need LLM decomposition
-	if !sp.shouldDecompose(req) {
-		sp.logger.Info("Fast-path: skipping decomposition for simple request",
-			"task_id", req.TaskID,
-			"intent", req.Intent,
-		)
+	case "direct":
 		steps = sp.createFallbackSteps(req, parentMemoryRefs)
-	} else {
-		// Use planner agent to generate plan
-		var err error
-		steps, err = sp.generatePlan(ctx, req)
+	case "plan":
+		if sp.shouldInterview(req, mode) && sp.registry != nil {
+			pctx, interviewErr := sp.ConductInterview(ctx, req)
+			if interviewErr == nil && pctx != nil && !pctx.InterviewCompleted {
+				return sp.awaitInterviewAnswers(ctx, t, req, pctx)
+			}
+			if pctx != nil && pctx.InterviewCompleted {
+				req.PlanningCtx = pctx
+			}
+		}
+		steps, err = sp.planSinglePhase(ctx, req)
 		if err != nil {
-			sp.logger.Warn("Plan generation failed, creating single-step fallback",
-				"task_id", req.TaskID,
-				"error", err,
-			)
-			sp.recordMetric("strategic_planner.fallback", 1, map[string]string{"intent": req.Intent, "reason": "generation_failed"})
+			sp.logger.Warn("Single-phase plan failed, using fallback steps",
+				"task_id", req.TaskID, "error", err)
+			sp.recordMetric("strategic_planner.fallback", 1, map[string]string{"intent": req.Intent, "reason": "plan_failed"})
 			steps = sp.createFallbackSteps(req, parentMemoryRefs)
 		}
+	case "spec_plan":
+		// spec_plan always interviews when a registry is available.
+		if sp.registry != nil {
+			pctx, interviewErr := sp.ConductInterview(ctx, req)
+			if interviewErr == nil && pctx != nil && !pctx.InterviewCompleted {
+				return sp.awaitInterviewAnswers(ctx, t, req, pctx)
+			}
+			if pctx != nil && pctx.InterviewCompleted {
+				req.PlanningCtx = pctx
+			}
+		}
+		steps, err = sp.planMultiPhase(ctx, req)
+		if err != nil {
+			sp.logger.Warn("Multi-phase plan failed, falling back to single-phase",
+				"task_id", req.TaskID, "error", err)
+			steps, err = sp.planSinglePhase(ctx, req)
+			if err != nil {
+				sp.logger.Warn("Single-phase fallback failed, using generic fallback",
+					"task_id", req.TaskID, "error", err)
+				steps = sp.createFallbackSteps(req, parentMemoryRefs)
+			}
+		}
+	default:
+		// Unknown mode: degrade to direct-style fallback.
+		steps = sp.createFallbackSteps(req, parentMemoryRefs)
 	}
 
 	// Inject parent MemoryRefs to first step (if any exist and steps were created)
@@ -539,6 +497,7 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		"session_id":  req.SessionID,
 		"total_steps": len(steps),
 		"ready_steps": len(promoted),
+		"mode":        mode,
 	})
 
 	// Publish orchestrator.schedule to trigger tactical scheduling
@@ -549,8 +508,307 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 	return nil
 }
 
-// generatePlan uses the planner agent to decompose the request.
-func (sp *StrategicPlanner) generatePlan(ctx context.Context, req PlanRequest) ([]*task.TaskStep, error) {
+// handlePairSession wraps the spec_pair flow: create the pair steps,
+// persist them, update task state, and publish events. It returns nil steps
+// with nil error to signal "already handled" (the caller returns immediately).
+// On error the caller falls back to the shared tail using fallback steps.
+func (sp *StrategicPlanner) handlePairSession(ctx context.Context, t *task.Task, req PlanRequest, parentMemoryRefs []string) ([]*task.TaskStep, error) {
+	sp.logger.Info("Using pair session for task",
+		"task_id", req.TaskID,
+		"intent", req.Intent,
+	)
+	pairSteps, pairErr := sp.planPairSession(ctx, req, parentMemoryRefs)
+	if pairErr != nil {
+		return nil, pairErr
+	}
+
+	// Persist steps
+	for _, step := range pairSteps {
+		if err := sp.stepStore.Create(step); err != nil {
+			sp.logger.Error("Failed to persist step", "step_id", step.ID, "error", err)
+			return nil, fmt.Errorf("failed to persist steps: %w", err)
+		}
+	}
+
+	t.TotalJobs = len(pairSteps)
+	t.SetState(task.StateExecuting)
+	if err := sp.taskStore.Update(t); err != nil {
+		sp.logger.Error("Failed to update task after pair planning", "error", err)
+	}
+
+	// Promote actor step to ready (reviewer depends on it)
+	promoted, err := sp.stepStore.PromoteReadySteps(req.TaskID)
+	if err != nil {
+		sp.logger.Error("Failed to promote pair steps", "error", err)
+	}
+
+	sp.publishEvent("task.planned", map[string]any{
+		KeyTaskID:      req.TaskID,
+		"session_id":   req.SessionID,
+		"total_steps":  len(pairSteps),
+		"ready_steps":  len(promoted),
+		"pair_session": true,
+		"mode":         "spec_pair",
+	})
+
+	sp.publishEvent("orchestrator.schedule", map[string]any{
+		KeyTaskID: req.TaskID,
+	})
+
+	return pairSteps, nil
+}
+
+// inferLegacyMode reconstructs a mode for empty-Mode requests, preserving
+// the pre-Thread-D heuristics during rollout. Once all callers populate
+// Mode, this becomes dead code.
+func (sp *StrategicPlanner) inferLegacyMode(req PlanRequest) string {
+	// Compound intents always used pair sessions pre-Thread-D. Both the
+	// IsCompound flag (set by handler.publishPlanRequest) and the raw
+	// intent string (set by legacy/test callers) trigger spec_pair, matching
+	// the old shouldUsePairSession behavior.
+	if req.IsCompound || req.Intent == string(IntentCompound) {
+		return "spec_pair"
+	}
+	it := IntentType(req.Intent)
+	switch it {
+	case IntentChat, IntentRecall, IntentStatus, IntentReport, IntentPlatform, IntentSearch:
+		return "direct"
+	case IntentPlan, IntentArchitect:
+		return "spec_plan"
+	default:
+		if len(req.Input) < sp.simpleInputMaxChars {
+			return "direct"
+		}
+		return "plan"
+	}
+}
+
+// shouldInterview decides whether to conduct a design interview before
+// decomposition, based on the planning mode. spec_plan always interviews;
+// plan interviews only when TrueAnalysis indicates ambiguity above the
+// configured threshold; direct/spec_pair never do.
+func (sp *StrategicPlanner) shouldInterview(req PlanRequest, mode string) bool {
+	switch mode {
+	case "spec_plan":
+		return true
+	case "plan":
+		return req.TrueAnalysis != nil &&
+			req.TrueAnalysis.Ambiguity >= sp.interviewAmbiguity
+	default:
+		return false
+	}
+}
+
+// awaitInterviewAnswers publishes the interview-questions event, stores the
+// planning context on the task metadata, and returns nil so Plan returns
+// without proceeding to decomposition. The task remains in StatePlanning
+// until the caller (TUI/HTTP) re-invokes Plan with answers.
+func (sp *StrategicPlanner) awaitInterviewAnswers(ctx context.Context, t *task.Task, req PlanRequest, pctx *plan.PlanningContext) error {
+	sp.publishEvent("task.interview", map[string]any{
+		KeyTaskID:     req.TaskID,
+		"session_id":  req.SessionID,
+		"questions":   pctx.InterviewQuestions,
+		"ambiguities": pctx.Ambiguities,
+	})
+
+	if pctxJSON, err := json.Marshal(pctx); err == nil {
+		t.Metadata = json.RawMessage(pctxJSON)
+		if err := sp.taskStore.Update(t); err != nil {
+			sp.logger.Warn("Failed to update task with planning context", "error", err)
+		}
+	}
+
+	sp.logger.Info("Interview questions sent, awaiting user answers",
+		"task_id", req.TaskID,
+		"question_count", len(pctx.InterviewQuestions),
+	)
+	return nil
+}
+
+// planMultiPhase is the multi-phase decomposition entry point. It renders
+// the decompose_spec template, calls the planner LLM, parses the output with
+// a 4-layer malformed-output defense (ExtractJSON → unmarshal → repair →
+// cap), retries once on parse failure, and flattens phases into TaskSteps
+// with inter-phase dependencies. On success, the planPhaseSink callback (if
+// wired) receives the phase declarations for persistence.
+func (sp *StrategicPlanner) planMultiPhase(ctx context.Context, req PlanRequest) ([]*task.TaskStep, error) {
+	plannerLoop, err := sp.registry.Get(config.AgentIDPlanner)
+	if err != nil {
+		return nil, fmt.Errorf("planner agent not available: %w", err)
+	}
+
+	// Build context section (same logic as planSinglePhase).
+	contextSection := sp.buildContextSection(req)
+
+	prompt, err := sp.templateLoader.render("planner/decompose_spec.md", map[string]any{
+		"MaxStepsPerPhase": sp.maxStepsPerPhase,
+		"MaxPhases":        sp.maxPhases,
+		"ContextSection":   contextSection,
+		"Input":            req.Input,
+	})
+	if err != nil {
+		// Template not found on disk and no fallback registered.
+		sp.logger.Warn("decompose_spec template not available, falling back to planSinglePhase",
+			"task_id", req.TaskID, "error", err,
+		)
+		return sp.planSinglePhase(ctx, req)
+	}
+
+	// Append dynamic agent availability hints (same as planSinglePhase).
+	if sp.registry != nil {
+		if hintSection := BuildPlannerPromptHint(sp.registry); hintSection != "" {
+			prompt += "\n\n## Dynamic Agent Availability\n" + hintSection
+		}
+	}
+
+	planCtx, cancel := context.WithTimeout(ctx, sp.plannerTimeout)
+	defer cancel()
+
+	conversationID := fmt.Sprintf("plan-%s-%s", req.TaskID, id.Generate(""))
+	output, err := plannerLoop.RunOnce(planCtx, prompt, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("planner failed: %w", err)
+	}
+
+	parsed, err := parsePhaseOutput(output, sp.maxPhases)
+	if err != nil {
+		// Layer C: one retry with feedback.
+		sp.logger.Warn("phase parse failed, retrying with feedback",
+			"task_id", req.TaskID, "error", err)
+		retryPrompt := prompt + "\n\nPrevious attempt failed:\n" + err.Error()
+		output2, retryErr := plannerLoop.RunOnce(planCtx, retryPrompt, conversationID+"-retry")
+		if retryErr != nil {
+			return nil, fmt.Errorf("planner retry failed: %w (original: %v)", retryErr, err)
+		}
+		parsed, err = parsePhaseOutput(output2, sp.maxPhases)
+		if err != nil {
+			return nil, fmt.Errorf("planner produced malformed phases after retry: %w", err)
+		}
+	}
+
+	sp.recordMetric("strategic_planner.plan_generated", 1, map[string]string{
+		"intent":  req.Intent,
+		"outcome": "success",
+		"mode":    "spec_plan",
+	})
+
+	// Flatten phases into TaskSteps. Each step gets Phase = phase.Name.
+	// Inter-phase dependencies: first step of phase N+1 depends on last
+	// step of phase N (unless the step already has explicit deps).
+	var steps []*task.TaskStep
+	var prevPhaseLastStepID string
+	for phaseIdx, phase := range parsed.Phases {
+		var stepIDsInPhase []string
+		for stepIdx, ps := range phase.Steps {
+			// Cap per-phase steps.
+			if sp.maxStepsPerPhase > 0 && len(stepIDsInPhase) >= sp.maxStepsPerPhase {
+				break
+			}
+			seq := phaseIdx*1000 + stepIdx // stable sequence across phases
+			step := task.NewTaskStep(req.TaskID, ps.Description, seq)
+			step.ToolHint = ps.ToolHint
+			step.Phase = phase.Name
+			// Within-phase dependencies (0-indexed → step IDs).
+			for _, depIdx := range ps.DependsOn {
+				if depIdx >= 0 && depIdx < len(stepIDsInPhase) {
+					step.DependsOn = append(step.DependsOn, stepIDsInPhase[depIdx])
+				}
+			}
+			// Inter-phase dependency: first step of phase N+1 depends on
+			// last step of phase N (unless this is phase 0 or already has deps).
+			if stepIdx == 0 && prevPhaseLastStepID != "" && len(step.DependsOn) == 0 {
+				step.DependsOn = append(step.DependsOn, prevPhaseLastStepID)
+			}
+			steps = append(steps, step)
+			stepIDsInPhase = append(stepIDsInPhase, step.ID)
+		}
+		if len(stepIDsInPhase) > 0 {
+			prevPhaseLastStepID = stepIDsInPhase[len(stepIDsInPhase)-1]
+		}
+	}
+
+	if len(steps) == 0 {
+		return nil, fmt.Errorf("planner produced no executable steps")
+	}
+
+	sp.recordMetric("strategic_planner.plan_steps", float64(len(steps)), map[string]string{
+		"intent": req.Intent, "mode": "spec_plan",
+	})
+
+	// Persist phase metadata via sink (if wired).
+	if sp.planPhaseSink != nil {
+		sp.planPhaseSink(req.TaskID, parsed.Phases)
+	}
+
+	sp.logger.Info("Multi-phase plan generated",
+		"task_id", req.TaskID,
+		"phases", len(parsed.Phases),
+		"steps", len(steps),
+	)
+
+	return steps, nil
+}
+
+// SetPlanPhaseSink registers a callback invoked after multi-phase plan
+// generation. The callback receives the planner's phase declarations for
+// persistence (e.g., writing to plan.Store). Nil-guarded per CLAUDE.md.
+func (sp *StrategicPlanner) SetPlanPhaseSink(fn func(taskID string, phases []PlanPhaseSpec)) {
+	if fn == nil {
+		return
+	}
+	sp.planPhaseSink = fn
+}
+
+// buildContextSection produces the verified-context block used in planner
+// prompts. It incorporates both TrueAnalysis and PlanningContext (interview)
+// data.
+func (sp *StrategicPlanner) buildContextSection(req PlanRequest) string {
+	var contextSection string
+	if req.TrueAnalysis != nil {
+		var sb strings.Builder
+		sb.WriteString("## Verified Context\n")
+		if req.TrueAnalysis.Goal != "" {
+			sb.WriteString(fmt.Sprintf("True goal: %s\n", req.TrueAnalysis.Goal))
+		}
+		if req.TrueAnalysis.Scope != "" {
+			sb.WriteString(fmt.Sprintf("Scope: %s\n", req.TrueAnalysis.Scope))
+		}
+		if req.TrueAnalysis.Category != "" {
+			sb.WriteString(fmt.Sprintf("Category: %s\n", req.TrueAnalysis.Category))
+		}
+		contextSection = sb.String()
+	}
+	if req.PlanningCtx != nil && req.PlanningCtx.InterviewCompleted {
+		var sb strings.Builder
+		if contextSection != "" {
+			sb.WriteString(contextSection)
+		} else {
+			sb.WriteString("## Verified Context\n")
+		}
+		if req.PlanningCtx.TrueGoal != "" {
+			sb.WriteString(fmt.Sprintf("True goal: %s\n", req.PlanningCtx.TrueGoal))
+		}
+		if len(req.PlanningCtx.Requirements) > 0 {
+			sb.WriteString("Requirements:\n")
+			for _, r := range req.PlanningCtx.Requirements {
+				sb.WriteString(fmt.Sprintf("- %s\n", r))
+			}
+		}
+		if len(req.PlanningCtx.Constraints) > 0 {
+			sb.WriteString("Constraints:\n")
+			for k, v := range req.PlanningCtx.Constraints {
+				sb.WriteString(fmt.Sprintf("- %s: %s\n", k, v))
+			}
+		}
+		contextSection = sb.String()
+	}
+	return contextSection
+}
+
+// planSinglePhase uses the planner agent to decompose the request.
+// Renamed from generatePlan in Thread D Task 5 to fit the mode-switch nomenclature
+// (direct/plan/spec_plan/spec_pair → createFallbackSteps/planSinglePhase/planMultiPhase/planPairSession).
+func (sp *StrategicPlanner) planSinglePhase(ctx context.Context, req PlanRequest) ([]*task.TaskStep, error) {
 	plannerLoop, err := sp.registry.Get(config.AgentIDPlanner)
 	if err != nil {
 		return nil, fmt.Errorf("planner agent not available: %w", err)
@@ -598,7 +856,14 @@ func (sp *StrategicPlanner) generatePlan(ctx context.Context, req PlanRequest) (
 	}
 
 	// Build prompt
-	prompt := fmt.Sprintf(plannerPromptTemplate, sp.maxPlanSteps, sp.maxPlanSteps, contextSection, req.Input)
+	prompt, renderErr := sp.templateLoader.render("planner/decompose.md", map[string]any{
+		"MaxSteps":       sp.maxPlanSteps,
+		"ContextSection": contextSection,
+		"Input":          req.Input,
+	})
+	if renderErr != nil {
+		return nil, fmt.Errorf("render decompose template: %w", renderErr)
+	}
 
 	// When a registry is available, append dynamic agent availability hints
 	// so the planner LLM knows which specialist agents are actually enabled.
@@ -739,99 +1004,14 @@ func (sp *StrategicPlanner) createFallbackSteps(req PlanRequest, parentRefs []st
 	return []*task.TaskStep{step}
 }
 
-// shouldDecompose returns true if the request warrants LLM-based task decomposition.
-// Simple intents and short requests are handled as single-step tasks to avoid
-// over-decomposition and unnecessary LLM calls.
-func (sp *StrategicPlanner) shouldDecompose(req PlanRequest) bool {
-	switch req.Intent {
-	case string(IntentChat), string(IntentReport), string(IntentRecall), string(IntentPlatform), string(IntentSearch), string(IntentAnalyze):
-		return false
-	case string(IntentCompound):
-		// Compound intents always need decomposition into sub-tasks
-		return true
-	}
-
-	// Short requests without complex action verbs are likely simple
-	simpleMax := sp.simpleInputMaxChars
-	if simpleMax <= 0 {
-		simpleMax = 100
-	}
-	if len(req.Input) < simpleMax {
-		lower := strings.ToLower(req.Input)
-
-		// Check for complexity indicators that warrant decomposition
-		complexityIndicators := []string{
-			"and then", "after that", "followed by", "multiple",
-			"several", "all of", "each of", "for every",
-			"step by step", "steps", "phases",
-		}
-		for _, indicator := range complexityIndicators {
-			if strings.Contains(lower, indicator) {
-				return true
-			}
-		}
-
-		// Simple requests don't need decomposition
-		return false
-	}
-
-	// If the request was ambiguous enough to need interviewing, probably decompose
-	if req.TrueAnalysis != nil && req.TrueAnalysis.Ambiguity >= 0.5 {
-		return true
-	}
-
-	// If interview context says this is broad scope, decompose
-	if req.PlanningCtx != nil && req.PlanningCtx.InterviewCompleted {
-		return true
-	}
-
-	// Longer requests may benefit from decomposition
-	return true
-}
-
-// shouldUsePairSession returns true when a task should use the pair session
-// model instead of independent step scheduling.
-//
-// Criteria:
-//   - Intent is "code" or "debug" AND the input is complex (>200 chars or
-//     contains complexity indicators)
-//   - Intent is "compound" (multi-intent tasks always benefit from pairing)
-//   - The task name/description contains security-sensitive keywords
-func (sp *StrategicPlanner) shouldUsePairSession(req PlanRequest) bool {
-	if sp.pairManager == nil {
-		return false
-	}
-
-	// Compound tasks always use pair sessions
-	if req.Intent == string(IntentCompound) {
-		return true
-	}
-
-	// Code and debug intents with complex descriptions
-	switch req.Intent {
-	case string(IntentCode), string(IntentDebug):
-		pairMin := sp.pairInputMinChars
-		if pairMin <= 0 {
-			pairMin = 200
-		}
-		if len(req.Input) > pairMin {
-			return true
-		}
-		lower := strings.ToLower(req.Input)
-		for _, indicator := range SecurityKeywords() {
-			if strings.Contains(lower, indicator) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-// createPairSessionPlan creates a pair session for the task instead of
+// planPairSession creates a pair session for the task instead of
 // independent steps. It creates two placeholder steps (actor + reviewer)
 // and publishes a pair session creation event.
-func (sp *StrategicPlanner) createPairSessionPlan(ctx context.Context, req PlanRequest, parentMemoryRefs []string) ([]*task.TaskStep, error) {
+// Renamed from createPairSessionPlan in Thread D Task 5.
+func (sp *StrategicPlanner) planPairSession(ctx context.Context, req PlanRequest, parentMemoryRefs []string) ([]*task.TaskStep, error) {
+	if sp.pairManager == nil {
+		return nil, fmt.Errorf("pair manager not configured")
+	}
 	session := sp.pairManager.CreateSession(
 		req.TaskID,
 		req.Input,
@@ -1325,5 +1505,97 @@ func (sp *StrategicPlanner) recordMetric(name string, value float64, tags map[st
 	if sp.metricsStore != nil {
 		sp.metricsStore.Record(name, value, tags)
 	}
+}
+
+// parsePhaseOutput extracts phases from planner LLM output and runs a
+// validate-and-repair pass: drop empty phases, cap count, repair invalid
+// enum kinds to "file", drop dangling depends_on indices, downgrade dangling
+// consumes (references to nothing any phase produces) to optional.
+//
+// This is the core of the 4-layer malformed-output defense:
+//   1. ExtractJSON — strips markdown fences / surrounding prose.
+//   2. json.Unmarshal — structural validation.
+//   3. Repair pass — normalizes or drops invalid entries.
+//   4. Cap — enforces maxPhases ceiling.
+//
+// Returns an error if no phases survive the repair pass.
+func parsePhaseOutput(raw string, maxPhases int) (*plannerPhaseOutput, error) {
+	jsonStr := ExtractJSON(raw)
+	if jsonStr == "" {
+		return nil, fmt.Errorf("no JSON found in phase planner output")
+	}
+	var out plannerPhaseOutput
+	if err := json.Unmarshal([]byte(jsonStr), &out); err != nil {
+		return nil, fmt.Errorf("parse phase JSON: %w", err)
+	}
+
+	// Repair pass: drop empty phases, repair invalid kinds, drop dangling deps.
+	filtered := make([]PlanPhaseSpec, 0, len(out.Phases))
+	for _, p := range out.Phases {
+		// Drop phases with no name AND no steps (LLM cruft).
+		if p.Name == "" && len(p.Steps) == 0 {
+			continue
+		}
+		// Repair invalid kinds on produces.
+		for i := range p.Produces {
+			if !p.Produces[i].IsValidKind() {
+				p.Produces[i].Kind = "file"
+			}
+		}
+		// Repair invalid kinds on consumes.
+		for i := range p.Consumes {
+			if !p.Consumes[i].IsValidKind() {
+				p.Consumes[i].Kind = "file"
+			}
+		}
+		// Drop out-of-range depends_on indices.
+		validDeps := make([]int, 0, len(p.DependsOn))
+		for _, idx := range p.DependsOn {
+			if idx >= 0 && idx < len(out.Phases) {
+				validDeps = append(validDeps, idx)
+			}
+		}
+		p.DependsOn = validDeps
+		filtered = append(filtered, p)
+	}
+	out.Phases = filtered
+
+	// Cap phase count.
+	if maxPhases > 0 && len(out.Phases) > maxPhases {
+		out.Phases = out.Phases[:maxPhases]
+	}
+
+	// Repair dangling consumes: if a consume references a name that no phase
+	// produces, downgrade it to optional so checkPhaseReady won't block.
+	producedNames := make(map[string]struct{})
+	for _, p := range out.Phases {
+		for _, a := range p.Produces {
+			producedNames[a.Name] = struct{}{}
+		}
+	}
+	for i := range out.Phases {
+		for j := range out.Phases[i].Consumes {
+			if _, ok := producedNames[out.Phases[i].Consumes[j].Name]; !ok {
+				out.Phases[i].Consumes[j].Required = false
+			}
+		}
+	}
+
+	if len(out.Phases) == 0 {
+		return nil, fmt.Errorf("planner produced no valid phases")
+	}
+	return &out, nil
+}
+
+// checkPhaseReady returns an error if any required consume is missing from
+// the store. Optional consumes are best-effort and never block.
+func checkPhaseReady(phase *PlanPhaseSpec, store *artifactStore) error {
+	for _, c := range phase.Consumes {
+		if c.Required && !store.Has(c.Name) {
+			return fmt.Errorf("phase %q requires %q but it wasn't produced",
+				phase.Name, c.Name)
+		}
+	}
+	return nil
 }
 

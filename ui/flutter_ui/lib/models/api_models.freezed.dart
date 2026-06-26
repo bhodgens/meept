@@ -3179,6 +3179,8 @@ mixin _$PlanPhase {
   @JsonKey(name: 'failed_steps')
   int get failedSteps => throw _privateConstructorUsedError;
   String get state => throw _privateConstructorUsedError;
+  List<PlanArtifact> get produces => throw _privateConstructorUsedError;
+  List<PlanArtifact> get consumes => throw _privateConstructorUsedError;
 
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
   @JsonKey(ignore: true)
@@ -3199,7 +3201,9 @@ abstract class $PlanPhaseCopyWith<$Res> {
       @JsonKey(name: 'total_steps') int totalSteps,
       @JsonKey(name: 'completed_steps') int completedSteps,
       @JsonKey(name: 'failed_steps') int failedSteps,
-      String state});
+      String state,
+      List<PlanArtifact> produces,
+      List<PlanArtifact> consumes});
 }
 
 /// @nodoc
@@ -3223,6 +3227,8 @@ class _$PlanPhaseCopyWithImpl<$Res, $Val extends PlanPhase>
     Object? completedSteps = null,
     Object? failedSteps = null,
     Object? state = null,
+    Object? produces = null,
+    Object? consumes = null,
   }) {
     return _then(_value.copyWith(
       id: null == id
@@ -3257,6 +3263,14 @@ class _$PlanPhaseCopyWithImpl<$Res, $Val extends PlanPhase>
           ? _value.state
           : state // ignore: cast_nullable_to_non_nullable
               as String,
+      produces: null == produces
+          ? _value.produces
+          : produces // ignore: cast_nullable_to_non_nullable
+              as List<PlanArtifact>,
+      consumes: null == consumes
+          ? _value.consumes
+          : consumes // ignore: cast_nullable_to_non_nullable
+              as List<PlanArtifact>,
     ) as $Val);
   }
 }
@@ -3277,7 +3291,9 @@ abstract class _$$PlanPhaseImplCopyWith<$Res>
       @JsonKey(name: 'total_steps') int totalSteps,
       @JsonKey(name: 'completed_steps') int completedSteps,
       @JsonKey(name: 'failed_steps') int failedSteps,
-      String state});
+      String state,
+      List<PlanArtifact> produces,
+      List<PlanArtifact> consumes});
 }
 
 /// @nodoc
@@ -3299,6 +3315,8 @@ class __$$PlanPhaseImplCopyWithImpl<$Res>
     Object? completedSteps = null,
     Object? failedSteps = null,
     Object? state = null,
+    Object? produces = null,
+    Object? consumes = null,
   }) {
     return _then(_$PlanPhaseImpl(
       id: null == id
@@ -3333,6 +3351,14 @@ class __$$PlanPhaseImplCopyWithImpl<$Res>
           ? _value.state
           : state // ignore: cast_nullable_to_non_nullable
               as String,
+      produces: null == produces
+          ? _value._produces
+          : produces // ignore: cast_nullable_to_non_nullable
+              as List<PlanArtifact>,
+      consumes: null == consumes
+          ? _value._consumes
+          : consumes // ignore: cast_nullable_to_non_nullable
+              as List<PlanArtifact>,
     ));
   }
 }
@@ -3348,7 +3374,11 @@ class _$PlanPhaseImpl implements _PlanPhase {
       @JsonKey(name: 'total_steps') this.totalSteps = 0,
       @JsonKey(name: 'completed_steps') this.completedSteps = 0,
       @JsonKey(name: 'failed_steps') this.failedSteps = 0,
-      required this.state});
+      required this.state,
+      final List<PlanArtifact> produces = const [],
+      final List<PlanArtifact> consumes = const []})
+      : _produces = produces,
+        _consumes = consumes;
 
   factory _$PlanPhaseImpl.fromJson(Map<String, dynamic> json) =>
       _$$PlanPhaseImplFromJson(json);
@@ -3373,10 +3403,27 @@ class _$PlanPhaseImpl implements _PlanPhase {
   final int failedSteps;
   @override
   final String state;
+  final List<PlanArtifact> _produces;
+  @override
+  @JsonKey()
+  List<PlanArtifact> get produces {
+    if (_produces is EqualUnmodifiableListView) return _produces;
+    // ignore: implicit_dynamic_type
+    return EqualUnmodifiableListView(_produces);
+  }
+
+  final List<PlanArtifact> _consumes;
+  @override
+  @JsonKey()
+  List<PlanArtifact> get consumes {
+    if (_consumes is EqualUnmodifiableListView) return _consumes;
+    // ignore: implicit_dynamic_type
+    return EqualUnmodifiableListView(_consumes);
+  }
 
   @override
   String toString() {
-    return 'PlanPhase(id: $id, planID: $planID, name: $name, sequence: $sequence, totalSteps: $totalSteps, completedSteps: $completedSteps, failedSteps: $failedSteps, state: $state)';
+    return 'PlanPhase(id: $id, planID: $planID, name: $name, sequence: $sequence, totalSteps: $totalSteps, completedSteps: $completedSteps, failedSteps: $failedSteps, state: $state, produces: $produces, consumes: $consumes)';
   }
 
   @override
@@ -3395,13 +3442,25 @@ class _$PlanPhaseImpl implements _PlanPhase {
                 other.completedSteps == completedSteps) &&
             (identical(other.failedSteps, failedSteps) ||
                 other.failedSteps == failedSteps) &&
-            (identical(other.state, state) || other.state == state));
+            (identical(other.state, state) || other.state == state) &&
+            const DeepCollectionEquality().equals(other._produces, _produces) &&
+            const DeepCollectionEquality().equals(other._consumes, _consumes));
   }
 
   @JsonKey(ignore: true)
   @override
-  int get hashCode => Object.hash(runtimeType, id, planID, name, sequence,
-      totalSteps, completedSteps, failedSteps, state);
+  int get hashCode => Object.hash(
+      runtimeType,
+      id,
+      planID,
+      name,
+      sequence,
+      totalSteps,
+      completedSteps,
+      failedSteps,
+      state,
+      const DeepCollectionEquality().hash(_produces),
+      const DeepCollectionEquality().hash(_consumes));
 
   @JsonKey(ignore: true)
   @override
@@ -3426,7 +3485,9 @@ abstract class _PlanPhase implements PlanPhase {
       @JsonKey(name: 'total_steps') final int totalSteps,
       @JsonKey(name: 'completed_steps') final int completedSteps,
       @JsonKey(name: 'failed_steps') final int failedSteps,
-      required final String state}) = _$PlanPhaseImpl;
+      required final String state,
+      final List<PlanArtifact> produces,
+      final List<PlanArtifact> consumes}) = _$PlanPhaseImpl;
 
   factory _PlanPhase.fromJson(Map<String, dynamic> json) =
       _$PlanPhaseImpl.fromJson;
@@ -3452,8 +3513,209 @@ abstract class _PlanPhase implements PlanPhase {
   @override
   String get state;
   @override
+  List<PlanArtifact> get produces;
+  @override
+  List<PlanArtifact> get consumes;
+  @override
   @JsonKey(ignore: true)
   _$$PlanPhaseImplCopyWith<_$PlanPhaseImpl> get copyWith =>
+      throw _privateConstructorUsedError;
+}
+
+PlanArtifact _$PlanArtifactFromJson(Map<String, dynamic> json) {
+  return _PlanArtifact.fromJson(json);
+}
+
+/// @nodoc
+mixin _$PlanArtifact {
+  String get name => throw _privateConstructorUsedError;
+  String get kind => throw _privateConstructorUsedError;
+  String get description => throw _privateConstructorUsedError;
+  bool get required => throw _privateConstructorUsedError;
+
+  Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
+  @JsonKey(ignore: true)
+  $PlanArtifactCopyWith<PlanArtifact> get copyWith =>
+      throw _privateConstructorUsedError;
+}
+
+/// @nodoc
+abstract class $PlanArtifactCopyWith<$Res> {
+  factory $PlanArtifactCopyWith(
+          PlanArtifact value, $Res Function(PlanArtifact) then) =
+      _$PlanArtifactCopyWithImpl<$Res, PlanArtifact>;
+  @useResult
+  $Res call({String name, String kind, String description, bool required});
+}
+
+/// @nodoc
+class _$PlanArtifactCopyWithImpl<$Res, $Val extends PlanArtifact>
+    implements $PlanArtifactCopyWith<$Res> {
+  _$PlanArtifactCopyWithImpl(this._value, this._then);
+
+  // ignore: unused_field
+  final $Val _value;
+  // ignore: unused_field
+  final $Res Function($Val) _then;
+
+  @pragma('vm:prefer-inline')
+  @override
+  $Res call({
+    Object? name = null,
+    Object? kind = null,
+    Object? description = null,
+    Object? required = null,
+  }) {
+    return _then(_value.copyWith(
+      name: null == name
+          ? _value.name
+          : name // ignore: cast_nullable_to_non_nullable
+              as String,
+      kind: null == kind
+          ? _value.kind
+          : kind // ignore: cast_nullable_to_non_nullable
+              as String,
+      description: null == description
+          ? _value.description
+          : description // ignore: cast_nullable_to_non_nullable
+              as String,
+      required: null == required
+          ? _value.required
+          : required // ignore: cast_nullable_to_non_nullable
+              as bool,
+    ) as $Val);
+  }
+}
+
+/// @nodoc
+abstract class _$$PlanArtifactImplCopyWith<$Res>
+    implements $PlanArtifactCopyWith<$Res> {
+  factory _$$PlanArtifactImplCopyWith(
+          _$PlanArtifactImpl value, $Res Function(_$PlanArtifactImpl) then) =
+      __$$PlanArtifactImplCopyWithImpl<$Res>;
+  @override
+  @useResult
+  $Res call({String name, String kind, String description, bool required});
+}
+
+/// @nodoc
+class __$$PlanArtifactImplCopyWithImpl<$Res>
+    extends _$PlanArtifactCopyWithImpl<$Res, _$PlanArtifactImpl>
+    implements _$$PlanArtifactImplCopyWith<$Res> {
+  __$$PlanArtifactImplCopyWithImpl(
+      _$PlanArtifactImpl _value, $Res Function(_$PlanArtifactImpl) _then)
+      : super(_value, _then);
+
+  @pragma('vm:prefer-inline')
+  @override
+  $Res call({
+    Object? name = null,
+    Object? kind = null,
+    Object? description = null,
+    Object? required = null,
+  }) {
+    return _then(_$PlanArtifactImpl(
+      name: null == name
+          ? _value.name
+          : name // ignore: cast_nullable_to_non_nullable
+              as String,
+      kind: null == kind
+          ? _value.kind
+          : kind // ignore: cast_nullable_to_non_nullable
+              as String,
+      description: null == description
+          ? _value.description
+          : description // ignore: cast_nullable_to_non_nullable
+              as String,
+      required: null == required
+          ? _value.required
+          : required // ignore: cast_nullable_to_non_nullable
+              as bool,
+    ));
+  }
+}
+
+/// @nodoc
+@JsonSerializable()
+class _$PlanArtifactImpl implements _PlanArtifact {
+  const _$PlanArtifactImpl(
+      {required this.name,
+      required this.kind,
+      this.description = '',
+      this.required = false});
+
+  factory _$PlanArtifactImpl.fromJson(Map<String, dynamic> json) =>
+      _$$PlanArtifactImplFromJson(json);
+
+  @override
+  final String name;
+  @override
+  final String kind;
+  @override
+  @JsonKey()
+  final String description;
+  @override
+  @JsonKey()
+  final bool required;
+
+  @override
+  String toString() {
+    return 'PlanArtifact(name: $name, kind: $kind, description: $description, required: $required)';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        (other.runtimeType == runtimeType &&
+            other is _$PlanArtifactImpl &&
+            (identical(other.name, name) || other.name == name) &&
+            (identical(other.kind, kind) || other.kind == kind) &&
+            (identical(other.description, description) ||
+                other.description == description) &&
+            (identical(other.required, required) ||
+                other.required == required));
+  }
+
+  @JsonKey(ignore: true)
+  @override
+  int get hashCode =>
+      Object.hash(runtimeType, name, kind, description, required);
+
+  @JsonKey(ignore: true)
+  @override
+  @pragma('vm:prefer-inline')
+  _$$PlanArtifactImplCopyWith<_$PlanArtifactImpl> get copyWith =>
+      __$$PlanArtifactImplCopyWithImpl<_$PlanArtifactImpl>(this, _$identity);
+
+  @override
+  Map<String, dynamic> toJson() {
+    return _$$PlanArtifactImplToJson(
+      this,
+    );
+  }
+}
+
+abstract class _PlanArtifact implements PlanArtifact {
+  const factory _PlanArtifact(
+      {required final String name,
+      required final String kind,
+      final String description,
+      final bool required}) = _$PlanArtifactImpl;
+
+  factory _PlanArtifact.fromJson(Map<String, dynamic> json) =
+      _$PlanArtifactImpl.fromJson;
+
+  @override
+  String get name;
+  @override
+  String get kind;
+  @override
+  String get description;
+  @override
+  bool get required;
+  @override
+  @JsonKey(ignore: true)
+  _$$PlanArtifactImplCopyWith<_$PlanArtifactImpl> get copyWith =>
       throw _privateConstructorUsedError;
 }
 
