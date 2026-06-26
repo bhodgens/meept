@@ -125,6 +125,16 @@ func defaultSplitFallback() string { return splitFallbackBody }
 // Kept in sync with the bundled file.
 func defaultHandoffFallback() string { return handoffFallbackBody }
 
+// defaultReflectionTurnFallback mirrors config/prompts/reflection/turn.md so the
+// ReflectTurn fallback path works without the bundled markdown file on disk.
+// Kept in sync with the bundled file.
+func defaultReflectionTurnFallback() string { return reflectionTurnFallbackBody }
+
+// defaultReflectionSessionFallback mirrors config/prompts/reflection/session.md so the
+// ReflectInactiveSessions fallback path works without the bundled markdown file on disk.
+// Kept in sync with the bundled file.
+func defaultReflectionSessionFallback() string { return reflectionSessionFallbackBody }
+
 // NewDaemonPlannerTemplateLoader constructs a loader with the standard 4 tiers
 // and pre-registers fallbacks for the planner templates. The bundledPromptsPath
 // is used as the lowest-priority tier (typically "config/prompts" relative to
@@ -146,6 +156,8 @@ func NewDaemonPlannerTemplateLoader(bundledPromptsPath string) *plannerTemplateL
 	l.fallbacks["planner/decompose_spec.md"] = defaultDecomposeSpecFallback()
 	l.fallbacks["orchestrator/split.md"] = defaultSplitFallback()
 	l.fallbacks["orchestrator/handoff.md"] = defaultHandoffFallback()
+	l.fallbacks["reflection/turn.md"] = defaultReflectionTurnFallback()
+	l.fallbacks["reflection/session.md"] = defaultReflectionSessionFallback()
 	return l
 }
 
@@ -306,3 +318,84 @@ Rules:
 - Leave error_code empty unless the step failed; on failure, set error_code and skip other fields
 - Truncate per-entry text: paths full, summaries 200 chars, descriptions 300 chars
 - Maximum 10 files_modified, 5 decisions, 5 artifacts, 5 follow_up_hints, 10 tool_highlights`
+
+// reflectionTurnFallbackBody mirrors config/prompts/reflection/turn.md.
+// Template placeholders: {{.AgentID}}, {{.UserInput}}, {{.Outcome}}, {{.TrajectoryJSON}}.
+const reflectionTurnFallbackBody = `---
+name: reflection.turn
+description: Per-turn reflection that extracts operational lessons from a single agent turn
+---
+
+You are a self-reflection assistant. Examine this agent turn and extract 0 or 1 concrete
+operational lessons that would help future agent invocations.
+
+A good lesson is:
+- Specific and actionable ("always run go vet after editing .go files"), not abstract
+- Generalizable beyond this specific task
+- Based on something that worked OR something that failed
+
+Agent: {{.AgentID}}
+User input: {{.UserInput}}
+Outcome: {{.Outcome}}
+
+Trajectory:
+{{.TrajectoryJSON}}
+
+Output ONLY valid JSON. If no clear lesson, output {"proposal": null}.
+Otherwise:
+{
+  "proposal": {
+    "type": "skill_create|skill_update|agent_prompt|project_instruction|prompt_component",
+    "target": "<file path or skill name>",
+    "change": "<proposed modification — full markdown for skills, rule text for instructions>",
+    "justification": "<one sentence why>",
+    "confidence": 0.0
+  }
+}
+
+Rules:
+- type=skill_create: target is a path like .meept/skills/<name>/SKILL.md, change is full markdown
+- type=agent_prompt: target is config/agents/<id>/AGENT.md, change is the new restriction text
+- type=project_instruction: target is CLAUDE.md, change is the rule to add
+- confidence < 0.6 → output null instead (don't waste review queue)
+`
+
+// reflectionSessionFallbackBody mirrors config/prompts/reflection/session.md.
+// Template placeholders: {{.SessionID}}, {{.AgentID}}, {{.TurnCount}}, {{.LastActivity}}, {{.TurnsJSON}}.
+const reflectionSessionFallbackBody = `---
+name: reflection.session
+description: Periodic reflection that examines multiple turns from an inactive session to extract deeper lessons
+---
+
+You are a self-reflection assistant performing deeper analysis on a recently-inactive session.
+
+Examine the turns below and extract 0-3 higher-quality lessons about agent behavior, prompt
+quality, or workflow patterns.
+
+Session: {{.SessionID}}
+Agent: {{.AgentID}}
+Total turns: {{.TurnCount}}
+Last activity: {{.LastActivity}}
+
+Turns (oldest first):
+{{.TurnsJSON}}
+
+Output ONLY valid JSON:
+{
+  "proposals": [
+    {
+      "type": "skill_create|skill_update|agent_prompt|project_instruction|prompt_component",
+      "target": "<file path or skill name>",
+      "change": "<proposed modification>",
+      "justification": "<one sentence why>",
+      "confidence": 0.0
+    }
+  ]
+}
+
+Rules:
+- Maximum 3 proposals (highest-quality only)
+- Confidence < 0.7 → drop the proposal
+- Prefer cross-turn patterns over single-turn observations
+- type=skill_create proposals should describe the trigger condition in the skill description
+`
