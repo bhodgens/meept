@@ -554,15 +554,45 @@ func (lp *LearningPipeline) distillHeuristic(trajectory Trajectory, judgment *Ju
 	return []*LearnedPattern{pattern}
 }
 
-// StorePattern is deprecated: patterns.json is no longer written.
-// Skill creation is handled by ReflectionCollector (Thread E) and Q Agent.
-// Kept as a no-op so existing callers don't break; logging at debug level.
+// StorePattern adds a pattern to the in-memory store. The disk write to
+// patterns.json is deprecated (skills are the new learning format), but
+// in-memory storage is retained so Retrieve() and the skill evolver can
+// still access patterns during the session.
 func (lp *LearningPipeline) StorePattern(ctx context.Context, pattern *LearnedPattern) error {
-	if lp.logger != nil {
-		lp.logger.Debug("StorePattern called; patterns.json deprecated, no-op",
-			"pattern_type", pattern.Type,
-		)
+	lp.mu.Lock()
+
+	if !lp.initialized {
+		lp.mu.Unlock()
+		return errors.New("learning pipeline not initialized")
 	}
+
+	// Check for duplicates
+	for _, existing := range lp.patterns {
+		if existing.ContentHash != pattern.ContentHash {
+			continue
+		}
+		// Update existing pattern instead
+		existing.UseCount++
+		existing.SuccessCount++
+		existing.UpdatedAt = time.Now()
+		// Boost confidence
+		if existing.Confidence < 1.0 {
+			existing.Confidence = existing.Confidence * 1.1
+			if existing.Confidence > 1.0 {
+				existing.Confidence = 1.0
+			}
+		}
+		lp.mu.Unlock()
+		return nil
+	}
+
+	// Activate if confidence is high enough
+	if pattern.Confidence >= lp.config.MinQualityThreshold {
+		pattern.Status = PatternStatusActive
+	}
+
+	lp.patterns[pattern.ID] = pattern
+	lp.mu.Unlock()
 	return nil
 }
 

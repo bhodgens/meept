@@ -625,10 +625,11 @@ func TestLearningPipeline_FullPipeline(t *testing.T) {
 	}
 }
 
-// TestStorePattern_NoOp verifies that the deprecated StorePattern is a no-op:
-// it returns nil without writing patterns.json to disk.
-func TestStorePattern_NoOp(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "learning_noop_test")
+// TestStorePattern_NoDiskWrite verifies that StorePattern adds patterns to
+// the in-memory store but does NOT write patterns.json to disk (disk writes
+// are deprecated; skills are the new learning format).
+func TestStorePattern_NoDiskWrite(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "learning_nodisk_test")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -642,14 +643,14 @@ func TestStorePattern_NoOp(t *testing.T) {
 	}
 
 	pattern := &LearnedPattern{
-		ID:          "pat-noop",
+		ID:          "pat-nodisk",
 		Type:        PatternTypeStrategy,
 		Status:      PatternStatusActive,
 		Domain:      "code",
-		Description: "should not be written",
-		Pattern:     "noop",
+		Description: "in-memory only",
+		Pattern:     "test",
 		Confidence:  0.9,
-		ContentHash: "hash-noop",
+		ContentHash: "hash-nodisk",
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -663,12 +664,16 @@ func TestStorePattern_NoOp(t *testing.T) {
 		t.Fatalf("expected patterns.json to not exist after StorePattern; err=%v", err)
 	}
 
-	// Verify the pattern was not added to the in-memory map either.
-	if got := lp.GetPatterns(); len(got) != 0 {
-		t.Errorf("expected 0 in-memory patterns, got %d", len(got))
+	// Verify the pattern WAS added to the in-memory map.
+	got := lp.GetPatterns()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 in-memory pattern, got %d", len(got))
+	}
+	if got[0].ID != "pat-nodisk" {
+		t.Errorf("expected pattern ID pat-nodisk, got %s", got[0].ID)
 	}
 
-	// Verify Close is also a no-op (no disk write).
+	// Verify Close does not write to disk.
 	if err := lp.Close(); err != nil {
 		t.Fatalf("Close returned error: %v", err)
 	}
