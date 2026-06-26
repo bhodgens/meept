@@ -1058,6 +1058,12 @@ type PostTurnAuditor struct {
 	// Goal"). The callback receives (goalID, findingID). Nil means
 	// findings are not attached to goals (G7 passive linking only).
 	onFindingAttached func(goalID, findingID string)
+
+	// busPublisher publishes employee.critical_finding bus events (E4).
+	// When a critical finding is detected, the auditor publishes the event
+	// in addition to the existing autoPause callback. Nil means no bus
+	// event is published. Guarded by mu.
+	busPublisher BusPublisher
 }
 
 // NewPostTurnAuditor constructs a PostTurnAuditor. The model must be non-nil
@@ -1095,6 +1101,18 @@ func (a *PostTurnAuditor) SetOnFindingAttached(fn func(goalID, findingID string)
 	a.mu.Unlock()
 }
 
+// SetBusPublisher wires the bus publisher used to emit
+// employee.critical_finding events when the auditor detects a critical
+// finding (E4). Nil is ignored (typed-nil guard per CLAUDE.md).
+func (a *PostTurnAuditor) SetBusPublisher(p BusPublisher) {
+	if p == nil {
+		return
+	}
+	a.mu.Lock()
+	a.busPublisher = p
+	a.mu.Unlock()
+}
+
 // Audit runs the post-turn classifier. Returns a finding if one was detected,
 // or nil if the turn is clean. On LLM failure it retries once with a stricter
 // prompt, then returns nil with a logged warning (spec lines 603-605).
@@ -1106,6 +1124,7 @@ func (a *PostTurnAuditor) Audit(ctx context.Context, turn TurnRecord) (*AuditFin
 	store := a.store
 	retry := a.retryWithStricter
 	onFinding := a.onFindingAttached
+	busPub := a.busPublisher
 	a.mu.Unlock()
 
 	if model == nil {
@@ -1154,9 +1173,23 @@ func (a *PostTurnAuditor) Audit(ctx context.Context, turn TurnRecord) (*AuditFin
 	// LLM's read of the charter.
 	a.downgradeIfPermitted(finding, turn.Constitution)
 
-	// Critical finding → auto-pause + persist.
-	if finding.Severity == SeverityCritical && autoPause != nil {
-		_ = autoPause(turn.EmployeeID, "critical audit finding: "+finding.ViolatedRule)
+	// Critical finding → auto-pause + persist + bus event (E4).
+	if finding.Severity == SeverityCritical {
+		if autoPause != nil {
+			_ = autoPause(turn.EmployeeID, "critical audit finding: "+finding.ViolatedRule)
+		}
+		// E4: publish critical finding bus event so the Manager can
+		// auto-pause via the subscriber (decouples auditor from
+		// lifecycle, avoiding Manager → GoalLoop → BotRunner →
+		// PostTurnAuditor → Manager circular dependency).
+		if busPub != nil {
+			busPub.PublishCriticalFinding(
+				turn.EmployeeID,
+				finding.ID,
+				finding.ViolatedRule,
+				finding.Evidence,
+			)
+		}
 	}
 	if store != nil {
 		_ = store.Create(context.Background(), *finding) // best-effort persist

@@ -1110,6 +1110,26 @@ func (m *Manager) PauseWithReason(ctx context.Context, id, reason, source string
 	return m.pauseWithSource(ctx, id, reason, source)
 }
 
+// HandleCriticalFinding is the subscriber-side handler for
+// employee.critical_finding bus events (E4). Called by the daemon wiring
+// when the bus delivers a CriticalFindingEvent. Pauses the employee with
+// source="auto_pause". Best-effort: errors are logged, not returned, so
+// a failure to pause doesn't block the bus consumer goroutine.
+func (m *Manager) HandleCriticalFinding(ctx context.Context, ev CriticalFindingEvent) {
+	reason := "critical audit finding: " + ev.ViolatedRule
+	if err := m.PauseWithReason(ctx, ev.EmployeeID, reason, "auto_pause"); err != nil {
+		m.mu.RLock()
+		logger := m.logger
+		m.mu.RUnlock()
+		if logger != nil {
+			logger.Warn("critical finding: auto-pause failed",
+				"employee_id", ev.EmployeeID,
+				"finding_id", ev.FindingID,
+				"error", err)
+		}
+	}
+}
+
 // recordConstitutionValidationError is the H5 helper that persists the bot
 // definition as disabled (status = constitution_invalid), writes an audit
 // finding at SeverityCritical, and emits a ConstitutionValidationError bus

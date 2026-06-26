@@ -57,6 +57,14 @@ func (m *mockBusPublisher) getEvents() []EmployeePausedEvent {
 	return cp
 }
 
+func (m *mockBusPublisher) getCriticalEvents() []CriticalFindingEvent {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]CriticalFindingEvent, len(m.criticalEvts))
+	copy(cp, m.criticalEvts)
+	return cp
+}
+
 // newTestManagerWithBot creates a Manager backed by a temp SQLite bot store
 // with a single bot registered, so Pause/Resume can be tested end-to-end.
 func newTestManagerWithBot(t *testing.T, botID string) (*Manager, func()) {

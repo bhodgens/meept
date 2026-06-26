@@ -229,6 +229,11 @@ type Components struct {
 	EmployeeGoalStore  *employee.GoalStore
 	EmployeeAuditStore *employee.AuditStore
 
+	// empBusPub is the bus publisher adapter for the employee framework
+	// (E4). Set in NewComponents so it's available in Start for wiring
+	// to PostTurnAuditor.SetBusPublisher.
+	empBusPub employee.BusPublisher
+
 	// OAuth token management (shared across calendar, LLM providers, etc.)
 	TokenStore     *authpkg.TokenStore
 	RefreshManager *authpkg.RefreshManager
@@ -2101,10 +2106,41 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// Wire the bus publisher so Pause publishes employee.paused
 			// events (spec line 383). The bus is available here but not
 			// stored in Components; inject it as an adapter now.
-			c.EmployeeManager.SetBusPublisher(employeeBusPublisher{
+			// E4: also stored on Components so PostTurnAuditor can be
+			// wired in Start (where msgBus is not in scope).
+			empBusPub := employeeBusPublisher{
 				bus:    msgBus,
 				logger: logger.With("component", "employee-bus"),
-			})
+			}
+			c.EmployeeManager.SetBusPublisher(empBusPub)
+			c.empBusPub = empBusPub
+
+			// E4: subscribe to employee.critical_finding bus events.
+			// PostTurnAuditor publishes these when it detects a critical
+			// finding; the subscriber calls Manager.HandleCriticalFinding
+			// which auto-pauses the employee. This decouples the auditor
+			// from the lifecycle (avoids Manager → GoalLoop → BotRunner →
+			// PostTurnAuditor → Manager circular dependency).
+			critSub := msgBus.Subscribe("employee-critical-finding", "employee.critical_finding")
+			go func() {
+				for {
+					select {
+					case <-c.ctx.Done():
+						msgBus.Unsubscribe(critSub)
+						return
+					case msg, ok := <-critSub.Channel:
+						if !ok {
+							return
+						}
+						var ev employee.CriticalFindingEvent
+						if err := json.Unmarshal(msg.Payload, &ev); err != nil {
+							logger.Warn("employee.critical_finding: unmarshal failed", "error", err)
+							continue
+						}
+						c.EmployeeManager.HandleCriticalFinding(c.ctx, ev)
+					}
+				}
+			}()
 
 			logger.Info("Employee framework initialized",
 				"data_dir", wiring.EmployeesDataDir,
@@ -2578,6 +2614,12 @@ func (c *Components) Start(ctx context.Context) error {
 				})
 				postTurn.SetAutoPause(autoPauseFn)
 				periodic.SetAutoPause(autoPauseFn)
+
+				// E4: wire the bus publisher to PostTurnAuditor so it
+				// publishes employee.critical_finding events (in addition
+				// to the autoPause callback). The subscriber wired in
+				// NewComponents listens and calls HandleCriticalFinding.
+				postTurn.SetBusPublisher(c.empBusPub)
 
 				c.EmployeeManager.SetPostTurnAuditor(postTurn)
 				c.EmployeeManager.SetPeriodicAuditor(periodic)
