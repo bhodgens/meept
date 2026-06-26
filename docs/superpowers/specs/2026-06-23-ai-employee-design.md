@@ -516,8 +516,10 @@ New endpoints under `/api/v1/agents/*`. The existing `/api/v1/bot/{id}/trigger` 
 | `/api/v1/agents/{id}/constitution` | GET, PATCH | view / propose amendment |
 | `/api/v1/agents/{id}/goals` | GET | list goals with health |
 | `/api/v1/agents/{id}/goals/{gid}` | GET | goal detail |
-| `/api/v1/agents/{id}/goals/{gid}/plans/{pid}/approve` | POST | approve plan |
-| `/api/v1/agents/{id}/goals/{gid}/plans/{pid}/reject` | POST | reject plan |
+> **Note (S6, 2026-06-26):** The agent-specific plan approval endpoints below are deprecated and removed. Use `POST /api/v1/plans/{pid}/approve` and `POST /api/v1/plans/{pid}/reject` with body `{approver_id, employee_id}` instead.
+
+| `/api/v1/agents/{id}/goals/{gid}/plans/{pid}/approve` | POST | approve plan (deprecated — use `POST /api/v1/plans/{pid}/approve`) |
+| `/api/v1/agents/{id}/goals/{gid}/plans/{pid}/reject` | POST | reject plan (deprecated — use `POST /api/v1/plans/{pid}/reject`) |
 | `/api/v1/agents/{id}/audit` | GET | findings, filterable by `?since=&severity=` |
 | `/api/v1/agents/{id}/audit/{fid}/resolve` | POST | resolve finding |
 | `/api/v1/agents/migrate` | POST | run migration scan, returns proposed constitutions |

@@ -2778,18 +2778,25 @@ func (s *Server) handlePlanReject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		SessionID string `json:"session_id"`
-		By        string `json:"by"`
-		Reason    string `json:"reason"`
+		SessionID  string `json:"session_id"`
+		By         string `json:"by"`
+		ApproverID string `json:"approver_id"` // S6: preferred over "by"
+		Reason     string `json:"reason"`
 	}
 	if !s.readJSON(w, r, &req) {
 		return
 	}
 
+	// S6: approver_id is preferred (explicit naming); fall back to "by" for
+	// backward compatibility, mirroring handlePlanApprove.
+	approver := req.ApproverID
+	if approver == "" {
+		approver = req.By
+	}
 	plan, err := s.services.Plan.Reject(r.Context(), services.RejectPlanRequest{
 		PlanID:    id,
 		SessionID: req.SessionID,
-		By:        req.By,
+		By:        approver,
 		Reason:    req.Reason,
 	})
 	if err != nil {
