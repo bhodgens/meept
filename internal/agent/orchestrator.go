@@ -334,6 +334,12 @@ func (o *Orchestrator) handleJobCompleted(ctx context.Context, msg *models.BusMe
 			"error", err,
 		)
 	}
+
+	// Check if this was the last active step for the task; if so, release
+	// per-task agent loops to free conversation state.
+	if _, taskID := o.extractTaskIDFromJob(ctx, event.JobID); taskID != "" {
+		o.releaseTaskLoopsIfComplete(taskID)
+	}
 }
 
 // extractTaskIDFromJob extracts the task ID from a job ID by looking up the job.
@@ -386,6 +392,39 @@ func (o *Orchestrator) handleJobFailed(ctx context.Context, msg *models.BusMessa
 			"error", err,
 		)
 	}
+
+	// A job failure may have been the last active step for the task; if so,
+	// release per-task agent loops to free conversation state.
+	if _, taskID := o.extractTaskIDFromJob(ctx, event.JobID); taskID != "" {
+		o.releaseTaskLoopsIfComplete(taskID)
+	}
+}
+
+// releaseTaskLoopsIfComplete checks whether all steps for the given taskID
+// are in a terminal state (completed, approved, failed, skipped, or rejected).
+// If so, it calls registry.ReleaseTaskLoops(taskID) to free per-task agent
+// loops and their conversation state.
+func (o *Orchestrator) releaseTaskLoopsIfComplete(taskID string) {
+	if taskID == "" || o.registry == nil || o.stepStore == nil {
+		return
+	}
+	steps, err := o.stepStore.ListByTaskID(taskID)
+	if err != nil {
+		o.logger.Warn("releaseTaskLoopsIfComplete: ListByTaskID failed",
+			"task_id", taskID, "error", err)
+		return
+	}
+	if len(steps) == 0 {
+		return
+	}
+	for _, s := range steps {
+		if !s.State.IsTerminal() {
+			return // at least one step still active
+		}
+	}
+	o.registry.ReleaseTaskLoops(taskID)
+	o.logger.Info("Released per-task agent loops after task completion",
+		"task_id", taskID, "step_count", len(steps))
 }
 
 // handleAmendmentApplied handles events when an amendment is successfully applied.

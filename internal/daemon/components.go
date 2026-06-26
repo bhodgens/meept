@@ -4975,13 +4975,17 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 		}
 	}
 
-	// Determine which agent loop to use
+	// Determine which agent loop to use. Use GetForTask so two concurrent
+	// task-scoped jobs for the same agent get distinct loops with isolated
+	// conversation state. Empty taskID defaults to "_default" inside GetForTask,
+	// preserving the previous single-loop behavior for non-task jobs.
 	var agentLoop *agent.AgentLoop
 	if job.AgentID != "" && p.registry != nil {
-		loop, err := p.registry.Get(job.AgentID)
+		loop, err := p.registry.GetForTask(job.AgentID, job.TaskID)
 		if err != nil {
 			p.logger.Warn("Agent not found, falling back to main loop",
 				"agent_id", job.AgentID,
+				"task_id", job.TaskID,
 				"job_id", job.ID,
 				"error", err,
 			)

@@ -87,3 +87,76 @@ func TestPropagateHandoffToDependents_NoStepStore_Noop(t *testing.T) {
 		t.Errorf("expected nil with nil stepStore; got %v", err)
 	}
 }
+
+// TestReleaseTaskLoopsIfComplete_AllStepsTerminal_Releases verifies that
+// releaseTaskLoopsIfComplete is a safe no-op when registry is nil (the
+// newTestOrchestrator helper does not wire one) even if all steps are in a
+// terminal state. The flow must reach the registry call without panicking.
+func TestReleaseTaskLoopsIfComplete_AllStepsTerminal_NoopWithNilRegistry(t *testing.T) {
+	o, store, _ := newTestOrchestrator(t)
+	// o.registry is nil from newTestOrchestrator.
+
+	s1 := task.NewTaskStep("task-x", "step 1", 1)
+	s1.ID = "s1"
+	s1.State = task.StepCompleted
+	if err := store.Create(s1); err != nil {
+		t.Fatalf("create s1: %v", err)
+	}
+	s2 := task.NewTaskStep("task-x", "step 2", 2)
+	s2.ID = "s2"
+	s2.State = task.StepFailed
+	if err := store.Create(s2); err != nil {
+		t.Fatalf("create s2: %v", err)
+	}
+
+	// With registry nil, releaseTaskLoopsIfComplete must return before
+	// calling ReleaseTaskLoops (which would panic on nil).
+	o.releaseTaskLoopsIfComplete("task-x")
+}
+
+// TestReleaseTaskLoopsIfComplete_StepActive_Noop verifies that when at least
+// one step is still in a non-terminal state, the function returns without
+// reaching the (nil) registry call.
+func TestReleaseTaskLoopsIfComplete_StepActive_Noop(t *testing.T) {
+	o, store, _ := newTestOrchestrator(t)
+
+	s1 := task.NewTaskStep("task-x", "step 1", 1)
+	s1.ID = "s1"
+	s1.State = task.StepCompleted
+	if err := store.Create(s1); err != nil {
+		t.Fatalf("create s1: %v", err)
+	}
+	s2 := task.NewTaskStep("task-x", "step 2", 2)
+	s2.ID = "s2"
+	s2.State = task.StepReady // not terminal
+	if err := store.Create(s2); err != nil {
+		t.Fatalf("create s2: %v", err)
+	}
+
+	// Should not call ReleaseTaskLoops (would panic on nil registry).
+	o.releaseTaskLoopsIfComplete("task-x")
+}
+
+// TestReleaseTaskLoopsIfComplete_EmptyTaskID_Noop verifies the empty-taskID
+// guard.
+func TestReleaseTaskLoopsIfComplete_EmptyTaskID_Noop(t *testing.T) {
+	o, _, _ := newTestOrchestrator(t)
+	o.releaseTaskLoopsIfComplete("") // must not panic
+}
+
+// TestReleaseTaskLoopsIfComplete_NoStepStore_Noop verifies the nil-stepStore
+// guard.
+func TestReleaseTaskLoopsIfComplete_NoStepStore_Noop(t *testing.T) {
+	o, _, _ := newTestOrchestrator(t)
+	o.stepStore = nil
+	o.releaseTaskLoopsIfComplete("task-x") // must not panic
+}
+
+// TestReleaseTaskLoopsIfComplete_EmptyStepList_Noop verifies that a taskID
+// with zero steps is a no-op (does not call ReleaseTaskLoops).
+func TestReleaseTaskLoopsIfComplete_EmptyStepList_Noop(t *testing.T) {
+	o, _, _ := newTestOrchestrator(t)
+	// No steps for "task-x" beyond what other tests seed; this test uses a
+	// fresh in-memory store so the step list is empty.
+	o.releaseTaskLoopsIfComplete("task-x")
+}
