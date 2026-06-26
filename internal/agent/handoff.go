@@ -10,7 +10,7 @@ import (
 
 // StepHandoff is the structured handoff document produced after a step
 // completes. Replaces the legacy 500-char truncation in
-// propagateContextToNextSteps.
+// propagateContextToNextStepsLegacy.
 type StepHandoff struct {
 	StepID          string          `json:"step_id"`
 	StepDescription string          `json:"step_description"`
