@@ -162,6 +162,53 @@ func generateProposalID() string {
 	return hex.EncodeToString(b)
 }
 
+// ProposalQueueExternal is the exported wrapper around proposalQueue for
+// cross-package use (CLI, HTTP handlers, RememberTool, TUI /remember). It
+// exposes only the operations external callers need while keeping the
+// internal queue type sealed.
+type ProposalQueueExternal struct {
+	inner *proposalQueue
+}
+
+// NewExternalProposalQueue creates an external wrapper around the queue at the
+// given path. The path's parent directories are created on first Append.
+func NewExternalProposalQueue(path string) *ProposalQueueExternal {
+	return &ProposalQueueExternal{inner: newProposalQueue(path)}
+}
+
+// Append writes a new proposal to the queue. ID, Status, and CreatedAt are
+// filled in if zero (same semantics as the internal queue).
+func (q *ProposalQueueExternal) Append(p ReflectionProposal) error {
+	return q.inner.Append(p)
+}
+
+// ListPending returns all proposals with status "pending".
+func (q *ProposalQueueExternal) ListPending() ([]ReflectionProposal, error) {
+	return q.inner.ListPending()
+}
+
+// MarkApplied marks the proposal with the given ID as applied.
+func (q *ProposalQueueExternal) MarkApplied(id string) error {
+	return q.inner.MarkApplied(id)
+}
+
+// MarkSkipped marks the proposal with the given ID as skipped.
+func (q *ProposalQueueExternal) MarkSkipped(id string) error {
+	return q.inner.MarkSkipped(id)
+}
+
+// GenerateProposalID returns a random hex-encoded proposal ID. Exposed so
+// cross-package callers (RememberTool, CLI improvements commands) can
+// pre-assign an ID before calling ProposalQueueExternal.Append, allowing them
+// to reference the proposal ID after queuing without parsing the file back.
+// The internal proposalQueue.Append would assign an ID itself if handed an
+// empty one, but since it takes ReflectionProposal by value, the assignment
+// is not visible to the caller. Pre-generating via this helper closes that
+// gap without changing the internal Append signature.
+func GenerateProposalID() string {
+	return generateProposalID()
+}
+
 // parseProposals does a lenient scan of the queue markdown and extracts
 // proposals. Status and ID are pulled from the ## [<status>] <date> — <id> header.
 func parseProposals(content string) []ReflectionProposal {
