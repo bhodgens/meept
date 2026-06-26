@@ -135,6 +135,9 @@ type Components struct {
 	// Learning pipeline
 	LearningPipeline *selfimprove.LearningPipeline
 
+	// Self-reflection (Turbo Thread E)
+	ReflectionCollector *agent.ReflectionCollector
+
 	// Skill lifecycle (usage tracker + writer + versioner for closed-loop skill evolution)
 	SkillUsageTracker *lifecycle.UsageTrackerImpl
 	SkillWriter       *lifecycle.Writer
@@ -810,6 +813,24 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			"rules", len(c.TTSRManager.Rules()),
 		)
 	}
+	// Wire immediate self-reflection (Turbo Thread E)
+	if cfg.ReflectionCollector.Enabled && c.LLMClient != nil {
+		reflectionLoader := agent.NewDaemonPlannerTemplateLoader("config/prompts")
+		reflectionCollector := agent.NewReflectionCollector(
+			cfg.ReflectionCollector,
+			c.LLMClient,
+			"", // classifierModel — empty = use Client's configured model
+			reflectionLoader,
+			".meept/improvements.md",
+			logger.With("component", "reflection-collector"),
+		)
+		agentOpts = append(agentOpts, agent.WithReflectionCollector(reflectionCollector))
+		c.ReflectionCollector = reflectionCollector
+		logger.Info("Agent loop configured with reflection collector",
+			"inactivity_minutes", cfg.ReflectionCollector.InactivityMinutes,
+			"timer_interval_minutes", cfg.ReflectionCollector.TimerIntervalMinutes,
+		)
+	}
 	// Always set an agent ID for security checks - use "default" when multi-agent is disabled
 	agentOpts = append(agentOpts, agent.WithAgentID("default"))
 
@@ -1369,6 +1390,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		taskStore = c.TaskRegistry.Store()
 	}
 	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, containerMgr, c.PTYManager, c.LLMClient, c.FenceChecker, logger)
+
+	// Register /remember tool for agents to propose improvements (Thread E)
+	c.ToolRegistry.Register(builtin.NewRememberTool(".meept/improvements.md"))
+	logger.Info("Registered /remember tool")
 
 	// Initialize code intelligence if enabled
 	if cfg.CodeIntel.Enabled {
@@ -2790,6 +2815,31 @@ func (c *Components) Start(ctx context.Context) error {
 			c.Logger.Info("Git sync loop started")
 			startedHandlers = append(startedHandlers, "clustergit")
 		}
+	}
+
+	// Start reflection collector periodic timer (Thread E)
+	if c.ReflectionCollector != nil && c.Config.ReflectionCollector.Enabled {
+		interval := time.Duration(c.Config.ReflectionCollector.TimerIntervalMinutes) * time.Minute
+		if interval <= 0 {
+			interval = 30 * time.Minute
+		}
+		reflectionTicker := time.NewTicker(interval)
+		go func() {
+			defer reflectionTicker.Stop()
+			for {
+				select {
+				case <-reflectionTicker.C:
+					tickCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+					c.ReflectionCollector.ReflectInactiveSessions(tickCtx)
+					cancel()
+				case <-c.ctx.Done():
+					return
+				}
+			}
+		}()
+		c.Logger.Info("Reflection collector timer started",
+			"interval_minutes", c.Config.ReflectionCollector.TimerIntervalMinutes,
+		)
 	}
 
 	started = true // signal success so the deferred rollback does not fire
