@@ -3,6 +3,7 @@ package selfimprove
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -198,9 +199,11 @@ func TestLearningPipeline_StoreAndRetrieve(t *testing.T) {
 		ContentHash:  "test-hash",
 	}
 
-	if err := lp.StorePattern(ctx, pattern); err != nil {
-		t.Fatalf("StorePattern failed: %v", err)
-	}
+	// StorePattern is a no-op now (patterns.json deprecated); write directly
+	// to the in-memory map to exercise the Retrieve path.
+	lp.mu.Lock()
+	lp.patterns[pattern.ID] = pattern
+	lp.mu.Unlock()
 
 	// Retrieve patterns
 	results, err := lp.Retrieve(ctx, "testing development approach", "code", 5)
@@ -330,7 +333,11 @@ func TestLearningPipeline_RecordPatternUse(t *testing.T) {
 		ContentHash:  "hash-001",
 	}
 
-	_ = lp.StorePattern(ctx, pattern)
+	// StorePattern is a no-op now (patterns.json deprecated); write directly
+	// to the in-memory map so RecordPatternUse can find the pattern.
+	lp.mu.Lock()
+	lp.patterns[pattern.ID] = pattern
+	lp.mu.Unlock()
 
 	// Record some uses
 	lp.RecordPatternUse("pat-001", true)
@@ -408,9 +415,13 @@ func TestLearningPipeline_DomainFiltering(t *testing.T) {
 		},
 	}
 
+	// StorePattern is a no-op now (patterns.json deprecated); write directly
+	// to the in-memory map.
+	lp.mu.Lock()
 	for _, p := range patterns {
-		_ = lp.StorePattern(ctx, p)
+		lp.patterns[p.ID] = p
 	}
+	lp.mu.Unlock()
 
 	// Retrieve for code domain - should get code + general
 	results, err := lp.Retrieve(ctx, "approach", "code", 10)
@@ -468,20 +479,27 @@ func TestLearningPipeline_Persistence(t *testing.T) {
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
-	_ = lp1.StorePattern(ctx, pattern)
-	lp1.Close()
+	// patterns.json writes are deprecated (skills replace patterns.json).
+	// StorePattern is a no-op; verify it doesn't error and doesn't write disk.
+	if err := lp1.StorePattern(ctx, pattern); err != nil {
+		t.Fatalf("StorePattern failed: %v", err)
+	}
+	if err := lp1.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
 
-	// Second instance - should load persisted patterns
+	// Verify no patterns.json was written.
+	if _, err := os.Stat(filepath.Join(tmpDir, "patterns.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected patterns.json to not exist; err=%v", err)
+	}
+
+	// Second instance - should have no patterns loaded.
 	lp2 := NewLearningPipeline(DefaultLearningConfig(), nil, tmpDir, nil)
 	_ = lp2.Initialize(ctx)
 
 	patterns := lp2.GetPatterns()
-	if len(patterns) != 1 {
-		t.Errorf("expected 1 persisted pattern, got %d", len(patterns))
-	}
-
-	if len(patterns) > 0 && patterns[0].ID != "pat-001" {
-		t.Errorf("expected pattern ID 'pat-001', got '%s'", patterns[0].ID)
+	if len(patterns) != 0 {
+		t.Errorf("expected 0 persisted patterns, got %d", len(patterns))
 	}
 }
 
@@ -574,12 +592,21 @@ func TestLearningPipeline_FullPipeline(t *testing.T) {
 		t.Fatal("expected patterns to be extracted")
 	}
 
-	// Step 3: Store
+	// Step 3: Store (patterns.json is deprecated; StorePattern is a no-op).
+	// Verify StorePattern doesn't error, then write directly to the in-memory
+	// map so consolidation has something to consolidate.
 	for _, p := range patterns {
 		if err := lp.StorePattern(ctx, p); err != nil {
 			t.Fatalf("StorePattern failed: %v", err)
 		}
 	}
+
+	// Direct in-memory insertion (bypasses the no-op StorePattern).
+	lp.mu.Lock()
+	for _, p := range patterns {
+		lp.patterns[p.ID] = p
+	}
+	lp.mu.Unlock()
 
 	// Verify storage
 	stored := lp.GetPatterns()
@@ -595,5 +622,57 @@ func TestLearningPipeline_FullPipeline(t *testing.T) {
 
 	if result.PatternsReviewed == 0 {
 		t.Error("expected patterns to be reviewed during consolidation")
+	}
+}
+
+// TestStorePattern_NoOp verifies that the deprecated StorePattern is a no-op:
+// it returns nil without writing patterns.json to disk.
+func TestStorePattern_NoOp(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "learning_noop_test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	lp := NewLearningPipeline(DefaultLearningConfig(), nil, tmpDir, nil)
+
+	ctx := context.Background()
+	if err := lp.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+
+	pattern := &LearnedPattern{
+		ID:          "pat-noop",
+		Type:        PatternTypeStrategy,
+		Status:      PatternStatusActive,
+		Domain:      "code",
+		Description: "should not be written",
+		Pattern:     "noop",
+		Confidence:  0.9,
+		ContentHash: "hash-noop",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	if err := lp.StorePattern(ctx, pattern); err != nil {
+		t.Fatalf("StorePattern returned error: %v", err)
+	}
+
+	// Verify no patterns.json exists on disk.
+	if _, err := os.Stat(filepath.Join(tmpDir, "patterns.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected patterns.json to not exist after StorePattern; err=%v", err)
+	}
+
+	// Verify the pattern was not added to the in-memory map either.
+	if got := lp.GetPatterns(); len(got) != 0 {
+		t.Errorf("expected 0 in-memory patterns, got %d", len(got))
+	}
+
+	// Verify Close is also a no-op (no disk write).
+	if err := lp.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, "patterns.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected patterns.json to not exist after Close; err=%v", err)
 	}
 }

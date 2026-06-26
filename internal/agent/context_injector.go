@@ -7,6 +7,7 @@ import (
 
 	"github.com/caimlas/meept/internal/preferences"
 	"github.com/caimlas/meept/internal/selfimprove"
+	"github.com/caimlas/meept/internal/skills"
 )
 
 // ContextInjector merges learning patterns and user instructions
@@ -14,6 +15,7 @@ import (
 type ContextInjector struct {
 	learning     *selfimprove.LearningPipeline
 	instructions *preferences.Store
+	skillLoader  *skills.LazySkillLoader
 }
 
 // NewContextInjector creates a new context injector.
@@ -24,6 +26,14 @@ func NewContextInjector(
 	return &ContextInjector{
 		learning:     learning,
 		instructions: instructions,
+	}
+}
+
+// SetSkillLoader wires the lazy skill loader for system-prompt skill injection.
+// Nil-safe: passing nil is a no-op.
+func (c *ContextInjector) SetSkillLoader(loader *skills.LazySkillLoader) {
+	if loader != nil {
+		c.skillLoader = loader
 	}
 }
 
@@ -44,15 +54,27 @@ func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) st
 		instructions = c.instructions.GetActive()
 	}
 
-	// Get learned patterns (if learning pipeline is available)
+	// Get learned patterns (if learning pipeline is available).
+	// NOTE: patterns.json is deprecated; patterns may still be present
+	// from prior versions (loadPatterns remains active for backward-compat
+	// reads). The Learned Patterns section below is retained for that
+	// transitional data; new learning flows through skills (see Active
+	// Skills section below).
 	var patterns []*selfimprove.LearnedPattern
 	if c.learning != nil {
 		// Retrieve top patterns for general context
 		patterns, _ = c.learning.Retrieve(ctx, "general", "all", 10)
 	}
 
-	// Inject context if we have either instructions or patterns
-	if len(instructions) > 0 || len(patterns) > 0 {
+	// Compute cached skill names once; skills section is injected when
+	// the skillLoader has any cached skills.
+	var skillNames []string
+	if c.skillLoader != nil {
+		skillNames = c.skillLoader.CachedNames()
+	}
+
+	// Inject context if we have instructions, patterns, or active skills.
+	if len(instructions) > 0 || len(patterns) > 0 || len(skillNames) > 0 {
 		sb.WriteString("\n\n# Active Context\n")
 
 		// Standing instructions section
@@ -68,13 +90,29 @@ func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) st
 			}
 		}
 
-		// Learned patterns section
+		// Learned patterns section (deprecated; transitional only).
 		if len(patterns) > 0 {
 			sb.WriteString("\n## Learned Patterns\n")
 			sb.WriteString("The following patterns have been learned from past interactions:\n\n")
 			for i, p := range patterns {
 				sb.WriteString(fmt.Sprintf("%d. %s (confidence: %.2f, type: %s)\n",
 					i+1, p.Description, p.Confidence, p.Type))
+			}
+		}
+
+		// Active skills section (replaces Learned Patterns long-term;
+		// patterns.json writes are disabled — see LearningPipeline.StorePattern).
+		if len(skillNames) > 0 {
+			sb.WriteString("\n## Active Skills\n")
+			sb.WriteString("The following skills are loaded and may be relevant to this task:\n\n")
+			for _, name := range skillNames {
+				if s := c.skillLoader.Get(name); s != nil {
+					desc := s.Description
+					if desc == "" {
+						desc = "(no description)"
+					}
+					sb.WriteString(fmt.Sprintf("- **%s**: %s\n", s.Name, desc))
+				}
 			}
 		}
 

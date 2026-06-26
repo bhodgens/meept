@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -555,40 +554,16 @@ func (lp *LearningPipeline) distillHeuristic(trajectory Trajectory, judgment *Ju
 	return []*LearnedPattern{pattern}
 }
 
-// StorePattern stores a pattern after judgment.
+// StorePattern is deprecated: patterns.json is no longer written.
+// Skill creation is handled by ReflectionCollector (Thread E) and Q Agent.
+// Kept as a no-op so existing callers don't break; logging at debug level.
 func (lp *LearningPipeline) StorePattern(ctx context.Context, pattern *LearnedPattern) error {
-	lp.mu.Lock()
-
-	if !lp.initialized {
-		lp.mu.Unlock()
-		return errors.New("learning pipeline not initialized")
+	if lp.logger != nil {
+		lp.logger.Debug("StorePattern called; patterns.json deprecated, no-op",
+			"pattern_type", pattern.Type,
+		)
 	}
-
-	// Check for duplicates
-	for _, existing := range lp.patterns {
-		if existing.ContentHash != pattern.ContentHash {
-			continue
-		}
-		// Update existing pattern instead
-		existing.UseCount++
-		existing.SuccessCount++
-		existing.UpdatedAt = time.Now()
-		// Boost confidence
-		existing.Confidence = minFloat(1.0, existing.Confidence*1.1)
-		snapshot := deepCopyPatterns(lp.patterns)
-		lp.mu.Unlock()
-		return lp.savePatternsFromSnapshot(snapshot)
-	}
-
-	// Activate if confidence is high enough
-	if pattern.Confidence >= lp.config.MinQualityThreshold {
-		pattern.Status = PatternStatusActive
-	}
-
-	lp.patterns[pattern.ID] = pattern
-	snapshot := deepCopyPatterns(lp.patterns)
-	lp.mu.Unlock()
-	return lp.savePatternsFromSnapshot(snapshot)
+	return nil
 }
 
 // Consolidate performs deduplication, contradiction detection, and pruning.
@@ -687,18 +662,11 @@ func (lp *LearningPipeline) Consolidate(ctx context.Context) (*ConsolidationResu
 	result.ConsolidatedAt = time.Now()
 	result.Duration = time.Since(start)
 	lp.lastConsolidation = result.ConsolidatedAt
-	snapshot := deepCopyPatterns(lp.patterns)
 	lp.mu.Unlock()
 
-	patternsPath := filepath.Join(lp.dataDir, "patterns.json")
-	data, err := json.MarshalIndent(snapshot, "", "  ")
-	if err != nil {
-		return result, fmt.Errorf("failed to marshal patterns: %w", err)
-	}
-	//nolint:gosec // user config directory/file permissions
-	if err := os.WriteFile(patternsPath, data, 0o644); err != nil {
-		return result, fmt.Errorf("failed to save patterns: %w", err)
-	}
+	// patterns.json writes are deprecated (skills replace patterns.json).
+	// In-memory consolidation still runs so that concurrent Retrieve() callers
+	// see deduplicated/pruned results; we simply skip the disk write.
 
 	lp.logger.Info("Consolidation complete",
 		"reviewed", result.PatternsReviewed,
@@ -835,22 +803,11 @@ func (lp *LearningPipeline) GetPatterns() []*LearnedPattern {
 	return result
 }
 
-// Close stops the pipeline and saves state.
+// Close stops the pipeline. patterns.json writes are deprecated (skills
+// are the new learning format), so this is now a no-op. The in-memory
+// patterns map is discarded with the pipeline.
 func (lp *LearningPipeline) Close() error {
-	// Deep-copy patterns under the lock, then marshal and write to disk
-	// outside the lock to avoid holding the mutex during CPU-bound work.
-	lp.mu.Lock()
-	snapshot := deepCopyPatterns(lp.patterns)
-	lp.mu.Unlock()
-
-	data, err := json.MarshalIndent(snapshot, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	path := filepath.Join(lp.dataDir, "patterns.json")
-	//nolint:gosec // user config directory/file permissions
-	return os.WriteFile(path, data, 0o644)
+	return nil
 }
 
 // Helper functions
@@ -902,45 +859,11 @@ func (lp *LearningPipeline) similarity(a, b string) float64 {
 	return float64(intersection) / float64(union)
 }
 
-// savePatternsFromSnapshot writes the given patterns to disk without holding
-// any lock. Callers must ensure no concurrent mutation of the patterns
-// (e.g., by providing deep copies or holding the lock during marshal).
+// savePatternsFromSnapshot is deprecated: patterns.json is no longer written.
+// Skills are the new format. Kept as a no-op so the LearningPipeline doesn't
+// error when callers invoke the consolidation path.
 func (lp *LearningPipeline) savePatternsFromSnapshot(patterns map[string]*LearnedPattern) error {
-	path := filepath.Join(lp.dataDir, "patterns.json")
-
-	data, err := json.MarshalIndent(patterns, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	//nolint:gosec // user config directory/file permissions
-	return os.WriteFile(path, data, 0o644)
-}
-
-// deepCopyPatterns creates a deep copy of the patterns map so the caller can
-// safely marshal or iterate the snapshot without holding the mutex.
-// Must be called with lp.mu held.
-func deepCopyPatterns(src map[string]*LearnedPattern) map[string]*LearnedPattern {
-	dst := make(map[string]*LearnedPattern, len(src))
-	for k, p := range src {
-		if p == nil {
-			dst[k] = nil
-			continue
-		}
-		cp := *p // shallow copy of value types
-		if p.Examples != nil {
-			cp.Examples = append([]string(nil), p.Examples...)
-		}
-		if p.Tags != nil {
-			cp.Tags = append([]string(nil), p.Tags...)
-		}
-		if p.Metadata != nil {
-			cp.Metadata = make(map[string]any, len(p.Metadata))
-			maps.Copy(cp.Metadata, p.Metadata)
-		}
-		dst[k] = &cp
-	}
-	return dst
+	return nil
 }
 
 func (lp *LearningPipeline) loadPatterns() error {
@@ -955,11 +878,4 @@ func (lp *LearningPipeline) loadPatterns() error {
 	}
 
 	return json.Unmarshal(data, &lp.patterns)
-}
-
-func minFloat(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
 }
