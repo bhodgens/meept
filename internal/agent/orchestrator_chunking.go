@@ -53,7 +53,8 @@ func estimateStepTokens(step *task.TaskStep, modelCfg *llm.ModelConfig) int {
 // Chunking is advisory: if any dependency (tactical, registry, stepStore,
 // templateReg) is not wired, the method returns nil immediately.
 //
-//nolint:U1000 // wired by Task 5/6 of Plan C+F (startNextPhase + daemon wiring)
+// Invoked from handlePlanRequest after StrategicPlanner.Plan produces steps
+// so oversized steps are split before tactical scheduling kicks in.
 func (o *Orchestrator) chunkToExecutorCapacity(ctx context.Context, taskID string) error {
 	if o.tactical == nil || o.registry == nil || o.stepStore == nil || o.templateReg == nil {
 		o.logger.Debug("chunkToExecutorCapacity skipped: dependencies not wired",
@@ -104,7 +105,8 @@ func (o *Orchestrator) chunkToExecutorCapacity(ctx context.Context, taskID strin
 // decompose an oversized step into sub-steps that each fit within the
 // executor's budget.
 //
-//nolint:U1000 // called by chunkToExecutorCapacity, wired in Task 5/6 of Plan C+F
+// Called by chunkToExecutorCapacity when an individual step's estimated
+// token cost exceeds the executor's budget.
 func (o *Orchestrator) splitStep(ctx context.Context, step *task.TaskStep, budget int, modelCfg *llm.ModelConfig) ([]*task.TaskStep, error) {
 	if o.templateReg == nil {
 		return nil, fmt.Errorf("template registry not wired")

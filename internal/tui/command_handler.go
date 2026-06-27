@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -201,6 +202,8 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 		return h.executeDnd(cmd.Args)
 	case "remember":
 		return h.executeRemember(cmd.Args)
+	case "implement-improvements", "improvements":
+		return h.executeImplementImprovements(cmd.Args)
 	default:
 		return &CommandResult{
 			Output:  fmt.Sprintf("unknown command: %s", cmd.Name),
@@ -239,6 +242,8 @@ func (h *CommandHandler) executeHelp(args []string) *CommandResult {
 	sb.WriteString("  /skill [name|search <q>] list, show, or search skills\n")
 	sb.WriteString("  /dnd [on|off]       toggle or set do-not-disturb (suppresses toasts)\n")
 	sb.WriteString("  /remember <rule>    save a proposed improvement to the queue\n")
+	sb.WriteString("  /implement-improvements [list|apply <id>|skip <id>]\n")
+	sb.WriteString("                      review and apply or skip pending proposals\n")
 
 	return &CommandResult{Output: sb.String()}
 }
@@ -421,6 +426,24 @@ gets confidence 0.9 so it surfaces prominently in the queue.
 examples:
   /remember always run gofmt before committing go code
   /remember prefer table-driven tests for new validators`,
+
+	"implement-improvements": `usage: /implement-improvements [list|apply <id>|skip <id>]
+
+reviews queued improvement proposals in .meept/improvements.md.
+
+without arguments (or with "list"): lists pending proposals with ids,
+types, targets, confidence, and justification.
+
+"apply <id>" writes the proposed change to its target file and marks the
+proposal applied. propose-only targets (CLAUDE.md, AGENT.md, config/prompts)
+are never auto-applied; the proposed change is echoed for manual review.
+
+"skip <id>" marks a proposal as skipped without applying it.
+
+examples:
+  /implement-improvements              list pending proposals
+  /implement-improvements apply ab12cd3 apply proposal with id ab12cd3
+  /implement-improvements skip ab12cd3  skip proposal with id ab12cd3`,
 	}
 
 	if text, ok := helpTexts[name]; ok {
@@ -774,6 +797,93 @@ func (h *CommandHandler) executeRemember(args []string) *CommandResult {
 			defaultRememberQueuePath, proposal.ID,
 		),
 	}
+}
+
+// executeImplementImprovements reviews pending improvement proposals from
+// .meept/improvements.md. Subcommands: list (default), apply <id>, skip <id>.
+// Mirrors the `meept improvements` CLI subcommands so the TUI is self-contained
+// for proposal review without shelling out.
+func (h *CommandHandler) executeImplementImprovements(args []string) *CommandResult {
+	sub := "list"
+	if len(args) > 0 {
+		sub = strings.ToLower(strings.TrimSpace(args[0]))
+	}
+	queue := agent.NewExternalProposalQueue(defaultRememberQueuePath)
+
+	switch sub {
+	case "list", "":
+		return h.improvementsList(queue)
+	case "apply":
+		if len(args) < 2 {
+			return &CommandResult{Output: "usage: /implement-improvements apply <id>", IsError: true}
+		}
+		return h.improvementsApply(queue, strings.TrimSpace(args[1]))
+	case "skip":
+		if len(args) < 2 {
+			return &CommandResult{Output: "usage: /implement-improvements skip <id>", IsError: true}
+		}
+		return h.improvementsSkip(queue, strings.TrimSpace(args[1]))
+	default:
+		return &CommandResult{
+			Output:  fmt.Sprintf("unknown subcommand: %s (expected list|apply <id>|skip <id>)", sub),
+			IsError: true,
+		}
+	}
+}
+
+func (h *CommandHandler) improvementsList(queue *agent.ProposalQueueExternal) *CommandResult {
+	pending, err := queue.ListPending()
+	if err != nil {
+		return &CommandResult{Output: fmt.Sprintf("failed to list proposals: %v", err), IsError: true}
+	}
+	if len(pending) == 0 {
+		return &CommandResult{Output: "no pending proposals"}
+	}
+	var sb strings.Builder
+	for _, p := range pending {
+		fmt.Fprintf(&sb, "[%s] %s -> %s\n", p.ID, p.Type, p.Target)
+		fmt.Fprintf(&sb, "  confidence: %.2f  source: %s\n", p.Confidence, p.Source)
+		fmt.Fprintf(&sb, "  %s\n\n", p.Justification)
+	}
+	return &CommandResult{Output: strings.TrimRight(sb.String(), "\n")}
+}
+
+func (h *CommandHandler) improvementsApply(queue *agent.ProposalQueueExternal, id string) *CommandResult {
+	pending, err := queue.ListPending()
+	if err != nil {
+		return &CommandResult{Output: fmt.Sprintf("list: %v", err), IsError: true}
+	}
+	var target *agent.ReflectionProposal
+	for i := range pending {
+		if pending[i].ID == id {
+			target = &pending[i]
+			break
+		}
+	}
+	if target == nil {
+		return &CommandResult{Output: fmt.Sprintf("proposal %s not found", id), IsError: true}
+	}
+	if agent.IsAlwaysProposeOnly(target.Target) {
+		// Mirror CLI: propose-only targets reviewed manually; just echo the change.
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "warning: %s is always propose-only; apply manually.\n", target.Target)
+		fmt.Fprintf(&sb, "proposed change:\n%s\n", target.Change)
+		return &CommandResult{Output: sb.String()}
+	}
+	if err := os.WriteFile(target.Target, []byte(target.Change), 0o644); err != nil {
+		return &CommandResult{Output: fmt.Sprintf("apply: %v", err), IsError: true}
+	}
+	if err := queue.MarkApplied(target.ID); err != nil {
+		return &CommandResult{Output: fmt.Sprintf("mark applied: %v", err), IsError: true}
+	}
+	return &CommandResult{Output: fmt.Sprintf("applied: %s", target.Target)}
+}
+
+func (h *CommandHandler) improvementsSkip(queue *agent.ProposalQueueExternal, id string) *CommandResult {
+	if err := queue.MarkSkipped(id); err != nil {
+		return &CommandResult{Output: fmt.Sprintf("skip: %v", err), IsError: true}
+	}
+	return &CommandResult{Output: fmt.Sprintf("skipped: %s", id)}
 }
 
 // executeTasks lists tasks with their status.

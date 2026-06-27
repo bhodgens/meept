@@ -196,22 +196,6 @@ func (o *Orchestrator) SetPlanManager(pm *plan.PlanManager) {
 	}
 }
 
-// SetChunkingDeps wires the dependencies for proactive chunking
-// (chunkToExecutorCapacity). Any nil argument leaves chunking disabled.
-//
-//nolint:U1000 // wired by Task 6 of Plan C+F (daemon wiring)
-func (o *Orchestrator) SetChunkingDeps(registry *AgentRegistry, templateReg *plannerTemplateLoader, stepStore *task.StepStore) {
-	if registry != nil {
-		o.registry = registry
-	}
-	if templateReg != nil {
-		o.templateReg = templateReg
-	}
-	if stepStore != nil {
-		o.stepStore = stepStore
-	}
-}
-
 // PlanManager returns the plan manager, if configured.
 func (o *Orchestrator) PlanManager() *plan.PlanManager {
 	return o.planManager
@@ -263,6 +247,18 @@ func (o *Orchestrator) handlePlanRequest(ctx context.Context, msg *models.BusMes
 			"task_id", req.TaskID,
 			"error", err,
 		)
+		return
+	}
+
+	// Proactively chunk oversized steps to fit executor context budgets
+	// before tactical scheduling kicks in. Advisory: nil-guards all
+	// dependencies (tactical/registry/stepStore/templateReg) and skips
+	// silently when unwired. Caps at 5 splits per task.
+	if req.TaskID != "" {
+		if err := o.chunkToExecutorCapacity(ctx, req.TaskID); err != nil {
+			o.logger.Warn("chunkToExecutorCapacity failed; steps remain unsplitted",
+				"task_id", req.TaskID, "error", err)
+		}
 	}
 }
 
@@ -336,9 +332,50 @@ func (o *Orchestrator) handleJobCompleted(ctx context.Context, msg *models.BusMe
 	}
 
 	// Check if this was the last active step for the task; if so, release
-	// per-task agent loops to free conversation state.
-	if _, taskID := o.extractTaskIDFromJob(ctx, event.JobID); taskID != "" {
+	// per-task agent loops to free conversation state. Also, if the step
+	// belonged to a phase and that phase is now fully complete (all steps
+	// successful), transition to the next phase via startNextPhase so the
+	// next phase's steps get fresh conversationIDs + structured startup
+	// context (produces/consumes gating + artifact injection).
+	stepID, taskID := o.extractTaskIDFromJob(ctx, event.JobID)
+	if taskID != "" {
 		o.releaseTaskLoopsIfComplete(taskID)
+		o.maybeTransitionPhase(ctx, stepID, taskID)
+	}
+}
+
+// maybeTransitionPhase checks whether the just-completed step's phase is now
+// complete, and if so kicks off startNextPhase to advance to the next phase.
+// Errors are logged, not propagated — phase transitions are best-effort and
+// must not break the bus event flow. Tasks without phase decomposition (single
+// phase, or step.Phase == "") short-circuit.
+func (o *Orchestrator) maybeTransitionPhase(ctx context.Context, stepID, taskID string) {
+	if o.planManager == nil || o.stepStore == nil || stepID == "" {
+		return
+	}
+	step, err := o.stepStore.GetByID(stepID)
+	if err != nil || step == nil {
+		if err != nil {
+			o.logger.Debug("maybeTransitionPhase: step lookup failed",
+				"step_id", stepID, "error", err)
+		}
+		return
+	}
+	if step.Phase == "" {
+		return // single-phase plan or no phase assigned
+	}
+	complete, err := o.stepStore.IsPhaseComplete(taskID, step.Phase)
+	if err != nil {
+		o.logger.Warn("maybeTransitionPhase: IsPhaseComplete failed",
+			"task_id", taskID, "phase", step.Phase, "error", err)
+		return
+	}
+	if !complete {
+		return // more steps remain in the current phase
+	}
+	if err := o.startNextPhase(ctx, taskID, step.Phase); err != nil {
+		o.logger.Warn("phase transition failed",
+			"task_id", taskID, "from_phase", step.Phase, "error", err)
 	}
 }
 

@@ -86,10 +86,10 @@ func (o *Orchestrator) startNextPhase(ctx context.Context, taskID, completedPhas
 // getPlanPhaseSpec reads the phase spec (produces/consumes declarations) for
 // a given phase. If a test override is present, it takes precedence.
 //
-// Until Task 7 persists produces/consumes on PlanPhase records, this returns
-// a synthetic spec containing only the Name. The artifact gating still works
-// because phaseSpecOverride (set by tests or by the planPhaseSink) can inject
-// full specs.
+// Task 7 persists produces/consumes on PlanPhase records (internal/plan/plan.go
+// Produces/Consumes fields, stored as JSON columns in plan_phases). We read
+// them back here so artifact gating and phase-startup context injection work
+// at runtime — not just under test overrides.
 func (o *Orchestrator) getPlanPhaseSpec(ctx context.Context, taskID, phaseName string) (*PlanPhaseSpec, error) {
 	// Test override takes precedence.
 	if o.phaseSpecOverride != nil {
@@ -98,9 +98,8 @@ func (o *Orchestrator) getPlanPhaseSpec(ctx context.Context, taskID, phaseName s
 		}
 	}
 
-	// Return synthetic spec from PlanPhase fields.
-	// After Task 7, produces/consumes will be persisted on PlanPhase and
-	// populated here.
+	// Read the persisted PlanPhase record (produces/consumes populated by
+	// plan store, Task 7).
 	phases, err := o.planManager.GetPhasesByTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("get phases for spec: %w", err)
@@ -108,7 +107,9 @@ func (o *Orchestrator) getPlanPhaseSpec(ctx context.Context, taskID, phaseName s
 	for _, p := range phases {
 		if p.Name == phaseName {
 			return &PlanPhaseSpec{
-				Name: p.Name,
+				Name:     p.Name,
+				Produces: p.Produces,
+				Consumes: p.Consumes,
 			}, nil
 		}
 	}
