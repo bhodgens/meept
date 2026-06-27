@@ -266,3 +266,4 @@ func createTestSchemaAndData(t *testing.T, db *sql.DB) {
 		}
 	}
 }
+

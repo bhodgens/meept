@@ -58,7 +58,6 @@ func MergePeerDB(ctx context.Context, gossipDB *sql.DB, peerDBPath, peerID strin
 	if _, err := tx.ExecContext(ctx, "ATTACH ? AS peer", peerDBPath); err != nil {
 		return stats, SyncWrap("merge_attach_peer", err)
 	}
-	defer tx.ExecContext(ctx, "DETACH peer")
 
 	// Merge sessions
 	sessionErr := mergeSessions(ctx, tx, peerDB, peerID)
@@ -86,18 +85,19 @@ func MergePeerDB(ctx context.Context, gossipDB *sql.DB, peerDBPath, peerID strin
 	}
 
 	if sessionErr != nil && turnErr != nil && memErr != nil {
+		if _, detErr := tx.ExecContext(ctx, "DETACH peer"); detErr != nil { slog.Debug("backup: cleanup detach failed", "error", detErr) }
 		err = fmt.Errorf("all merge operations failed for peer %s: sessions: %w, turns: %w, memories: %w",
 			peerID, sessionErr, turnErr, memErr)
 		return stats, err
 	}
 
-	if err := tx.Commit(); err != nil {
-		return stats, SyncWrap("merge_commit", err)
+	// Detach peer DB BEFORE commit to avoid lock issues on re-attach
+	if _, detErr := tx.ExecContext(ctx, "DETACH peer"); detErr != nil {
+		slog.Debug("backup: detach peer failed", "error", detErr)
 	}
 
-	// Explicitly detach before closing connection
-	if _, detErr := tx.ExecContext(ctx, "DETACH IF EXISTS peer"); detErr != nil {
-		slog.Debug("backup: detach peer failed", "error", detErr)
+	if err := tx.Commit(); err != nil {
+		return stats, SyncWrap("merge_commit", err)
 	}
 
 	return stats, nil
