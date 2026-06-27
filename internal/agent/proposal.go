@@ -284,7 +284,9 @@ func parseProposals(content string) []ReflectionProposal {
 			if closeBracket > 0 {
 				cur.Status = strings.TrimSpace(rest[:closeBracket])
 				// drop the trailing "applied <date>" or "skipped <date>" if present
-				cur.Status = strings.Fields(cur.Status)[0]
+				if fields := strings.Fields(cur.Status); len(fields) > 0 {
+					cur.Status = fields[0]
+				}
 				afterBracket := rest[closeBracket+1:]
 				// afterBracket = " 2026-06-25 — abc123"
 				emIdx := strings.Index(afterBracket, "—")
