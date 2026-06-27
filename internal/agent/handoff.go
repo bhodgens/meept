@@ -50,6 +50,7 @@ func (h *StepHandoff) Failed() bool {
 // Truncate enforces per-field length limits to keep the handoff compact.
 // Paths are preserved full length; summaries capped at 200 chars; descriptions at 300.
 func (h *StepHandoff) Truncate() {
+	h.StepDescription = truncStr(h.StepDescription, 300)
 	h.Summary = truncStr(h.Summary, 200)
 	for i := range h.FilesModified {
 		h.FilesModified[i].Summary = truncStr(h.FilesModified[i].Summary, 200)
@@ -62,6 +63,9 @@ func (h *StepHandoff) Truncate() {
 	}
 	for i := range h.ToolHighlights {
 		h.ToolHighlights[i].Summary = truncStr(h.ToolHighlights[i].Summary, 200)
+	}
+	for i := range h.FollowUpHints {
+		h.FollowUpHints[i] = truncStr(h.FollowUpHints[i], 200)
 	}
 	if len(h.FilesModified) > 10 {
 		h.FilesModified = h.FilesModified[:10]
@@ -84,7 +88,15 @@ func truncStr(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	return s[:max-3] + "..."
+	if max <= 3 {
+		return "..."
+	}
+	// Use rune-aware slicing to avoid splitting multi-byte UTF-8 sequences.
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max-3]) + "..."
 }
 
 // RenderMarkdown renders the handoff as markdown for injection into

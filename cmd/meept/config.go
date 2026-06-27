@@ -21,6 +21,7 @@ func newConfigCmd() *cobra.Command {
 	cmd.AddCommand(newConfigGetCmd())
 	cmd.AddCommand(newConfigSetCmd())
 	cmd.AddCommand(newOAuthCmd())
+	cmd.AddCommand(newConfigSyncCmd())
 
 	return cmd
 }

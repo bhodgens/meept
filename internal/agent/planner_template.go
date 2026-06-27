@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -41,6 +42,11 @@ func newPlannerTemplateLoader(tiers ...string) *plannerTemplateLoader {
 // first tier that contains it, strips YAML frontmatter, and executes it
 // as a text/template against data. If no tier has the file and a fallback
 // is registered, the fallback is used. Returns an error if neither.
+// ErrTemplateNotFound is returned by render when no tier contains the named
+// template file AND no fallback is registered. Callers can use errors.Is to
+// distinguish "missing" from "malformed template" (parse/execute errors).
+var ErrTemplateNotFound = errors.New("planner template not found and no fallback registered")
+
 func (l *plannerTemplateLoader) render(name string, data any) (string, error) {
 	for _, tier := range l.tiers {
 		path := filepath.Join(tier, name)
@@ -52,7 +58,7 @@ func (l *plannerTemplateLoader) render(name string, data any) (string, error) {
 	if fb, ok := l.fallbacks[name]; ok {
 		return l.execute(fb, data)
 	}
-	return "", fmt.Errorf("planner template %q not found in any tier and no fallback registered", name)
+	return "", fmt.Errorf("%w: %s", ErrTemplateNotFound, name)
 }
 
 func (l *plannerTemplateLoader) execute(body string, data any) (string, error) {
@@ -70,28 +76,48 @@ func (l *plannerTemplateLoader) execute(body string, data any) (string, error) {
 
 // stripYAMLFrontmatter removes a leading "---\n...\n---\n" block from body.
 // If no frontmatter is present, body is returned unchanged.
+//
+// Handles LF, CRLF, and mixed line endings robustly, including the case
+// where the closing "---" marker is at the end of file without a trailing
+// newline.
 func stripYAMLFrontmatter(body string) string {
 	const marker = "---"
 	if !strings.HasPrefix(body, marker+"\n") && !strings.HasPrefix(body, marker+"\r\n") {
 		return body
 	}
-	// Find the closing marker on its own line.
+	// Find the closing marker on its own line. We search for the marker
+	// delimited by either LF or CRLF on each side, or at the start of the
+	// remaining content (opening already consumed) / end of content (closing
+	// at EOF without trailing newline).
 	rest := body[len(marker):]
 	if strings.HasPrefix(rest, "\r\n") {
 		rest = rest[2:]
 	} else {
 		rest = rest[1:]
 	}
-	idx := strings.Index(rest, "\n"+marker+"\n")
-	if idx < 0 {
-		idx = strings.Index(rest, "\r\n"+marker+"\r\n")
-		if idx < 0 {
-			return body // malformed; return as-is
-		}
-		return rest[idx+len("\r\n"+marker+"\r\n"):] // skip "\r\n---\r\n"
+
+	// Try all four combinations of line endings around the closing marker.
+	searches := []string{
+		"\n" + marker + "\n",
+		"\r\n" + marker + "\r\n",
+		"\n" + marker + "\r\n",
+		"\r\n" + marker + "\n",
 	}
-	// Skip the closing marker line entirely.
-	return rest[idx+len("\n"+marker+"\n"):]
+	for _, s := range searches {
+		if idx := strings.Index(rest, s); idx >= 0 {
+			return rest[idx+len(s):]
+		}
+	}
+
+	// Closing marker at EOF without trailing newline.
+	if strings.HasSuffix(rest, "\n"+marker) {
+		return ""
+	}
+	if strings.HasSuffix(rest, "\r\n"+marker) {
+		return ""
+	}
+
+	return body // malformed; return as-is
 }
 
 // defaultDecomposeFallback and defaultInterviewFallback mirror the legacy

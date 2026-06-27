@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,6 +60,9 @@ func TestPlannerTemplateLoader_ErrorWhenMissingAndNoFallback(t *testing.T) {
 	if err == nil {
 		t.Fatal("want error, got nil")
 	}
+	if !errors.Is(err, ErrTemplateNotFound) {
+		t.Errorf("want ErrTemplateNotFound, got %v", err)
+	}
 }
 
 func TestPlannerTemplateLoader_StripsYAMLFrontmatter(t *testing.T) {
@@ -101,6 +105,187 @@ func TestPlannerTemplateLoader_MalformedTemplateErrors(t *testing.T) {
 	_, err := l.render("planner/decompose.md", nil)
 	if err == nil {
 		t.Fatal("want parse error, got nil")
+	}
+	// Malformed template errors must NOT be ErrTemplateNotFound.
+	if errors.Is(err, ErrTemplateNotFound) {
+		t.Error("malformed template should return a parse error, not ErrTemplateNotFound")
+	}
+}
+
+func TestPlannerTemplateLoader_FrontmatterStripsClosingAtEOF(t *testing.T) {
+	// Closing marker at EOF without trailing newline — this is a realistic
+	// edge case for user-created template files that don't end with a newline.
+	tmp := t.TempDir()
+	body := "---\nname: test\n---\nBODY {{.Input}}"
+	writeFile(t, filepath.Join(tmp, "planner", "decompose.md"), body)
+
+	l := newPlannerTemplateLoader(tmp)
+	got, err := l.render("planner/decompose.md", map[string]any{"Input": "x"})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if strings.Contains(got, "name: test") {
+		t.Errorf("frontmatter leaked: %q", got)
+	}
+	if !strings.Contains(got, "BODY x") {
+		t.Errorf("body not rendered: %q", got)
+	}
+}
+
+func TestPlannerTemplateLoader_FrontmatterStripsClosingAtEOFCRLF(t *testing.T) {
+	// Same as above but with CRLF line endings and no trailing newline.
+	tmp := t.TempDir()
+	body := "---\r\nname: test\r\n---\r\nBODY {{.Input}}"
+	writeFile(t, filepath.Join(tmp, "planner", "decompose.md"), body)
+
+	l := newPlannerTemplateLoader(tmp)
+	got, err := l.render("planner/decompose.md", map[string]any{"Input": "x"})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if strings.Contains(got, "name: test") {
+		t.Errorf("frontmatter leaked: %q", got)
+	}
+	if !strings.Contains(got, "BODY x") {
+		t.Errorf("body not rendered: %q", got)
+	}
+}
+
+func TestPlannerTemplateLoader_FrontmatterStripsMixedLineEndings(t *testing.T) {
+	// Mixed line endings: LF opening, CRLF closing marker. Git auto-conversion
+	// on Windows can produce this.
+	tmp := t.TempDir()
+	body := "---\nname: test\n---\r\nBODY {{.Input}}"
+	writeFile(t, filepath.Join(tmp, "planner", "decompose.md"), body)
+
+	l := newPlannerTemplateLoader(tmp)
+	got, err := l.render("planner/decompose.md", map[string]any{"Input": "x"})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if strings.Contains(got, "name: test") {
+		t.Errorf("frontmatter leaked: %q", got)
+	}
+	if !strings.Contains(got, "BODY x") {
+		t.Errorf("body not rendered: %q", got)
+	}
+}
+
+func TestPlannerTemplateLoader_FrontmatterStripsMixedLineEndingsReverse(t *testing.T) {
+	// Mixed line endings: CRLF opening, LF closing marker.
+	tmp := t.TempDir()
+	body := "---\r\nname: test\r\n---\nBODY {{.Input}}"
+	writeFile(t, filepath.Join(tmp, "planner", "decompose.md"), body)
+
+	l := newPlannerTemplateLoader(tmp)
+	got, err := l.render("planner/decompose.md", map[string]any{"Input": "x"})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if strings.Contains(got, "name: test") {
+		t.Errorf("frontmatter leaked: %q", got)
+	}
+	if !strings.Contains(got, "BODY x") {
+		t.Errorf("body not rendered: %q", got)
+	}
+}
+
+func TestPlannerTemplateLoader_RenderAllBundledTemplates(t *testing.T) {
+	// Type-narrowing test: render every fallback template with the production
+	// data shape and verify no panic or missing-field error.
+	l := newPlannerTemplateLoader(t.TempDir())
+
+	cases := []struct {
+		name     string
+		key      string
+		fallback string
+		data     map[string]any
+	}{{
+		name:     "decompose",
+		key:      "planner/decompose.md",
+		fallback: defaultDecomposeFallback(),
+		data: map[string]any{
+			"MaxSteps":       6,
+			"ContextSection": "ctx",
+			"Input":          "build x",
+		},
+	}, {
+		name:     "interview",
+		key:      "planner/interview.md",
+		fallback: defaultInterviewFallback(),
+		data: map[string]any{
+			"Request":     "build x",
+			"Goal":        "ship",
+			"Ambiguity":   0.4,
+			"Scope":       "v1",
+			"Category":    "feat",
+			"Confidence":  0.8,
+			"Ambiguities": "none",
+		},
+	}, {
+		name:     "decompose_spec",
+		key:      "planner/decompose_spec.md",
+		fallback: defaultDecomposeSpecFallback(),
+		data: map[string]any{
+			"MaxStepsPerPhase": 8,
+			"MaxPhases":        5,
+			"ContextSection":   "ctx-spec",
+			"Input":            "build feature X",
+		},
+	}, {
+		name:     "split",
+		key:      "orchestrator/split.md",
+		fallback: defaultSplitFallback(),
+		data: map[string]any{
+			"BudgetTokens":    12000,
+			"StepDescription": "step desc",
+			"ToolHint":        "code",
+			"ExecutorID":      "coder",
+			"ContextLimit":    32000,
+		},
+	}, {
+		name:     "handoff",
+		key:      "orchestrator/handoff.md",
+		fallback: defaultHandoffFallback(),
+		data: map[string]any{
+			"StepDescription":     "step desc",
+			"ToolHint":            "code",
+			"ConversationExcerpt": "excerpt",
+		},
+	}, {
+		name:     "reflection_turn",
+		key:      "reflection/turn.md",
+		fallback: defaultReflectionTurnFallback(),
+		data: map[string]any{
+			"AgentID":        "coder",
+			"UserInput":      "do x",
+			"Outcome":        "success",
+			"TrajectoryJSON": "[]",
+		},
+	}, {
+		name:     "reflection_session",
+		key:      "reflection/session.md",
+		fallback: defaultReflectionSessionFallback(),
+		data: map[string]any{
+			"SessionID":   "s1",
+			"AgentID":     "coder",
+			"TurnCount":   5,
+			"LastActivity": "2026-06-27",
+			"TurnsJSON":   "[]",
+		},
+	}}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			l.fallbacks[tc.key] = tc.fallback
+			got, err := l.render(tc.key, tc.data)
+			if err != nil {
+				t.Fatalf("render %s: %v", tc.name, err)
+			}
+			if got == "" {
+				t.Errorf("rendered output is empty for %s", tc.name)
+			}
+		})
 	}
 }
 

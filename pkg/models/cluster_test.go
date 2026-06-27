@@ -164,6 +164,11 @@ func TestClusterEventType_Constants(t *testing.T) {
 		EventNodeJoin,
 		EventNodeLeave,
 		EventNodeHeartbeat,
+		EventTypeSessionCreated,
+		EventTypeSessionTurn,
+		EventTypeMemoryStored,
+		EventTypeMemoryExpired,
+		EventTypeMemoryEdge,
 	}
 
 	for _, et := range expected {
@@ -174,6 +179,108 @@ func TestClusterEventType_Constants(t *testing.T) {
 		if et[0] < 'A' || et[0] > 'Z' {
 			t.Errorf("event type %q does not start with an uppercase letter", et)
 		}
+	}
+}
+
+func TestPhase4Payloads_MarshalUnmarshal(t *testing.T) {
+	ts := time.Now().UnixNano()
+
+	// SessionTurnPayload
+	stp := SessionTurnPayload{
+		SessionID: "sess-1",
+		TurnID:    "turn-42",
+		Role:      "user",
+		Content:   "hello world",
+		Timestamp: ts,
+	}
+	data, err := json.Marshal(stp)
+	if err != nil {
+		t.Fatalf("SessionTurnPayload marshal failed: %v", err)
+	}
+	var decodedSTP SessionTurnPayload
+	if err := json.Unmarshal(data, &decodedSTP); err != nil {
+		t.Fatalf("SessionTurnPayload unmarshal failed: %v", err)
+	}
+	if decodedSTP.SessionID != "sess-1" || decodedSTP.TurnID != "turn-42" {
+		t.Errorf("SessionTurnPayload mismatch")
+	}
+
+	// SessionCreatedPayload
+	scp := SessionCreatedPayload{
+		SessionID: "sess-2",
+		Title:     "Test Session",
+		CreatedAt: ts,
+		Metadata:  map[string]any{"key": "val"},
+	}
+	data, err = json.Marshal(scp)
+	if err != nil {
+		t.Fatalf("SessionCreatedPayload marshal failed: %v", err)
+	}
+	var decodedSCP SessionCreatedPayload
+	if err := json.Unmarshal(data, &decodedSCP); err != nil {
+		t.Fatalf("SessionCreatedPayload unmarshal failed: %v", err)
+	}
+	if decodedSCP.SessionID != "sess-2" || decodedSCP.Title != "Test Session" {
+		t.Errorf("SessionCreatedPayload mismatch")
+	}
+
+	// MemoryStoredPayload
+	msp := MemoryStoredPayload{
+		ID:        "mem-1",
+		Type:      "episodic",
+		Category:  "conversation",
+		Content:   "user prefers low latency",
+		CreatedAt: ts,
+		AgentID:   "coder",
+		Metadata:  map[string]any{"priority": 3},
+	}
+	data, err = json.Marshal(msp)
+	if err != nil {
+		t.Fatalf("MemoryStoredPayload marshal failed: %v", err)
+	}
+	var decodedMSP MemoryStoredPayload
+	if err := json.Unmarshal(data, &decodedMSP); err != nil {
+		t.Fatalf("MemoryStoredPayload unmarshal failed: %v", err)
+	}
+	if decodedMSP.ID != "mem-1" || decodedMSP.Type != "episodic" {
+		t.Errorf("MemoryStoredPayload mismatch")
+	}
+
+	// MemoryEdgePayload
+	mep := MemoryEdgePayload{
+		FromID:      "mem-1",
+		ToID:        "mem-2",
+		EdgeType:    "contradicts",
+		Established: ts,
+	}
+	data, err = json.Marshal(mep)
+	if err != nil {
+		t.Fatalf("MemoryEdgePayload marshal failed: %v", err)
+	}
+	var decodedMEP MemoryEdgePayload
+	if err := json.Unmarshal(data, &decodedMEP); err != nil {
+		t.Fatalf("MemoryEdgePayload unmarshal failed: %v", err)
+	}
+	if decodedMEP.EdgeType != "contradicts" {
+		t.Errorf("MemoryEdgePayload mismatch")
+	}
+
+	// MemoryExpiredPayload
+	meep := MemoryExpiredPayload{
+		ID:        "mem-3",
+		Type:      "task",
+		ExpiredAt: ts,
+	}
+	data, err = json.Marshal(meep)
+	if err != nil {
+		t.Fatalf("MemoryExpiredPayload marshal failed: %v", err)
+	}
+	var decodedMEep MemoryExpiredPayload
+	if err := json.Unmarshal(data, &decodedMEep); err != nil {
+		t.Fatalf("MemoryExpiredPayload unmarshal failed: %v", err)
+	}
+	if decodedMEep.ID != "mem-3" {
+		t.Errorf("MemoryExpiredPayload mismatch")
 	}
 }
 

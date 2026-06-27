@@ -1127,3 +1127,42 @@ func TestStepHandoff_Truncation(t *testing.T) {
 		t.Errorf("file summary not truncated")
 	}
 }
+
+func TestStepHandoff_Truncation_StepDescription(t *testing.T) {
+	h := &StepHandoff{
+		StepDescription: strings.Repeat("d", 500),
+	}
+	h.Truncate()
+	if len(h.StepDescription) > 300 {
+		t.Errorf("step_description not truncated: %d", len(h.StepDescription))
+	}
+}
+
+func TestStepHandoff_Truncation_FollowUpHints(t *testing.T) {
+	h := &StepHandoff{
+		FollowUpHints: []string{
+			strings.Repeat("a", 500),
+			strings.Repeat("b", 500),
+		},
+	}
+	h.Truncate()
+	for i, hint := range h.FollowUpHints {
+		if len(hint) > 200 {
+			t.Errorf("follow_up_hints[%d] not truncated: %d", i, len(hint))
+		}
+	}
+}
+
+func TestStepHandoff_Truncation_FollowUpHintsCount(t *testing.T) {
+	hints := make([]string, 20)
+	for i := range hints {
+		hints[i] = "hint"
+	}
+	h := &StepHandoff{
+		FollowUpHints: hints,
+	}
+	h.Truncate()
+	if len(h.FollowUpHints) > 5 {
+		t.Errorf("follow_up_hints count not capped: got %d, want <= 5", len(h.FollowUpHints))
+	}
+}

@@ -1,7 +1,10 @@
 package agent
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -129,6 +132,141 @@ func TestProposalQueue_MarkStatus_MissingID(t *testing.T) {
 	pending, _ := q.ListPending()
 	if len(pending) != 1 {
 		t.Errorf("after wrong-ID mark, pending = %d; want 1 (unchanged)", len(pending))
+	}
+}
+
+// TestProposalQueue_AppendMarkStatusConcurrency verifies that concurrent
+// Append + MarkApplied calls do not lose data. Before the mutex fix,
+// markStatus's os.WriteFile could truncate a proposal that Append just wrote
+// (TOCTOU race). This test fires Append and MarkApplied concurrently and
+// verifies no proposals are lost.
+func TestProposalQueue_AppendMarkStatusConcurrency(t *testing.T) {
+	tmp := t.TempDir()
+	q := newProposalQueue(filepath.Join(tmp, "improvements.md"))
+
+	// Pre-populate with 5 proposals so MarkApplied has something to mark.
+	var preIDs []string
+	for i := 0; i < 5; i++ {
+		p := ReflectionProposal{
+			Type: "skill_create", Target: "x",
+			Change: "y", Justification: "z", Confidence: 0.5, Source: "pre",
+		}
+		if err := q.Append(p); err != nil {
+			t.Fatalf("pre-Append %d: %v", i, err)
+		}
+		pending, _ := q.ListPending()
+		preIDs = append(preIDs, pending[i].ID)
+	}
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 20)
+
+	// Half the goroutines append new proposals; half mark existing ones applied.
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p := ReflectionProposal{
+				Type: "skill_create", Target: "x",
+				Change: "y", Justification: "z", Confidence: 0.5, Source: "concurrent",
+			}
+			if err := q.Append(p); err != nil {
+				errCh <- fmt.Errorf("Append: %w", err)
+			}
+		}()
+	}
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			id := preIDs[idx%len(preIDs)]
+			// Ignore error — proposal may already be marked by another goroutine.
+			_ = q.MarkApplied(id)
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Errorf("concurrent error: %v", err)
+	}
+
+	// Re-read all proposals (pending + non-pending) and count total.
+	// We expect 5 pre-populated + 10 concurrent = 15 total. Data loss
+	// from the race would result in fewer than 15.
+	data, err := os.ReadFile(filepath.Join(tmp, "improvements.md"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	all := parseProposals(string(data))
+	// Count all entries that appear in the file with a valid ID.
+	totalWithID := 0
+	for _, p := range all {
+		if p.ID != "" {
+			totalWithID++
+		}
+	}
+	if totalWithID < 15 {
+		t.Errorf("data loss detected: expected at least 15 proposals with IDs, got %d", totalWithID)
+	}
+}
+
+// TestProposalQueue_ParseMultiLineChange verifies that parseProposals
+// correctly reconstructs multi-line Proposed change content. The Append method
+// indents continuation lines with 2 spaces; parseProposals must un-indent
+// and rejoin with newlines.
+func TestProposalQueue_ParseMultiLineChange(t *testing.T) {
+	tmp := t.TempDir()
+	q := newProposalQueue(filepath.Join(tmp, "improvements.md"))
+
+	multiLineChange := "# my skill\nbody line 1\nbody line 2"
+	p := ReflectionProposal{
+		Type:          "skill_create",
+		Target:        ".meept/skills/x/SKILL.md",
+		Change:        multiLineChange,
+		Justification: "because",
+		Confidence:    0.8,
+		Source:        "turn:s1",
+	}
+	if err := q.Append(p); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	pending, err := q.ListPending()
+	if err != nil {
+		t.Fatalf("ListPending: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("got %d pending; want 1", len(pending))
+	}
+	if pending[0].Change != multiLineChange {
+		t.Errorf("Change mismatch:\n  got:  %q\n  want: %q", pending[0].Change, multiLineChange)
+	}
+}
+
+// TestIsSafeTargetPath verifies that path traversal and absolute paths are
+// rejected by isSafeTargetPath.
+func TestIsSafeTargetPath(t *testing.T) {
+	cases := []struct {
+		target string
+		safe   bool
+	}{
+		{".meept/skills/x/SKILL.md", true},
+		{"config/prompts/test.md", true},
+		{"CLAUDE.md", true},
+		{"relative/path/file.md", true},
+
+		{"/etc/passwd", false},
+		{"/absolute/path.md", false},
+		{"..", false},
+		{"../etc/passwd", false},
+		{"../../.ssh/authorized_keys", false},
+		{"foo/../../bar", false},
+	}
+	for _, c := range cases {
+		got := isSafeTargetPath(c.target)
+		if got != c.safe {
+			t.Errorf("isSafeTargetPath(%q) = %v; want %v", c.target, got, c.safe)
+		}
 	}
 }
 

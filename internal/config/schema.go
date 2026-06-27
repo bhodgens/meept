@@ -89,6 +89,8 @@ type Config struct {
 	Hooks             HooksConfig             `json:"hooks"                toml:"hooks"`
 	ReflectionCollector ReflectionCollectorConfig `json:"reflection_collector" toml:"reflection_collector"`
 	Backup              BackupConfig            `json:"backup"              toml:"backup"`
+	PeerSync            PeerSyncConfig          `json:"peer_sync"           toml:"peer_sync"`
+	ConfigSync          ConfigSyncConfig        `json:"config_sync"         toml:"config_sync"`
 }
 
 // ReasoningGlobalConfig holds global reasoning/thinking settings, currently

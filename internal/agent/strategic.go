@@ -647,11 +647,20 @@ func (sp *StrategicPlanner) planMultiPhase(ctx context.Context, req PlanRequest)
 		"Input":            req.Input,
 	})
 	if err != nil {
-		// Template not found on disk and no fallback registered.
-		sp.logger.Warn("decompose_spec template not available, falling back to planSinglePhase",
+		if errors.Is(err, ErrTemplateNotFound) {
+			// Template not found on disk and no fallback registered.
+			sp.logger.Warn("decompose_spec template not available, falling back to planSinglePhase",
+				"task_id", req.TaskID, "error", err,
+			)
+			return sp.planSinglePhase(ctx, req)
+		}
+		// Template was found but is malformed (parse error) or has a data
+		// mismatch (execute error). This is a configuration error that should
+		// not be silently masked by falling back to single-phase.
+		sp.logger.Error("decompose_spec template is malformed, aborting multi-phase plan",
 			"task_id", req.TaskID, "error", err,
 		)
-		return sp.planSinglePhase(ctx, req)
+		return nil, fmt.Errorf("render decompose_spec template: %w", err)
 	}
 
 	// Append dynamic agent availability hints (same as planSinglePhase).
@@ -1529,13 +1538,17 @@ func parsePhaseOutput(raw string, maxPhases int) (*plannerPhaseOutput, error) {
 		return nil, fmt.Errorf("parse phase JSON: %w", err)
 	}
 
-	// Repair pass: drop empty phases, repair invalid kinds, drop dangling deps.
+	// Repair pass: drop empty phases, repair invalid kinds, remap depends_on.
+	// We build an oldIndex→newIndex mapping so that depends_on indices stay
+	// valid after phases are dropped.
 	filtered := make([]PlanPhaseSpec, 0, len(out.Phases))
-	for _, p := range out.Phases {
+	oldToNew := make(map[int]int, len(out.Phases))
+	for origIdx, p := range out.Phases {
 		// Drop phases with no name AND no steps (LLM cruft).
 		if p.Name == "" && len(p.Steps) == 0 {
 			continue
 		}
+		oldToNew[origIdx] = len(filtered)
 		// Repair invalid kinds on produces.
 		for i := range p.Produces {
 			if !p.Produces[i].IsValidKind() {
@@ -1548,14 +1561,15 @@ func parsePhaseOutput(raw string, maxPhases int) (*plannerPhaseOutput, error) {
 				p.Consumes[i].Kind = "file"
 			}
 		}
-		// Drop out-of-range depends_on indices.
-		validDeps := make([]int, 0, len(p.DependsOn))
+		// Remap depends_on indices: only keep deps that survived filtering,
+		// and translate them to the new (filtered) index space.
+		remappedDeps := make([]int, 0, len(p.DependsOn))
 		for _, idx := range p.DependsOn {
-			if idx >= 0 && idx < len(out.Phases) {
-				validDeps = append(validDeps, idx)
+			if newIdx, ok := oldToNew[idx]; ok {
+				remappedDeps = append(remappedDeps, newIdx)
 			}
 		}
-		p.DependsOn = validDeps
+		p.DependsOn = remappedDeps
 		filtered = append(filtered, p)
 	}
 	out.Phases = filtered
@@ -1563,6 +1577,17 @@ func parsePhaseOutput(raw string, maxPhases int) (*plannerPhaseOutput, error) {
 	// Cap phase count.
 	if maxPhases > 0 && len(out.Phases) > maxPhases {
 		out.Phases = out.Phases[:maxPhases]
+		// Re-validate depends_on after truncation: drop indices that point
+		// past the truncated list.
+		for i := range out.Phases {
+			validDeps := make([]int, 0, len(out.Phases[i].DependsOn))
+			for _, idx := range out.Phases[i].DependsOn {
+				if idx >= 0 && idx < len(out.Phases) {
+					validDeps = append(validDeps, idx)
+				}
+			}
+			out.Phases[i].DependsOn = validDeps
+		}
 	}
 
 	// Repair dangling consumes: if a consume references a name that no phase

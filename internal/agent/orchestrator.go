@@ -1194,8 +1194,11 @@ func (o *Orchestrator) propagateHandoffToDependents(ctx context.Context, complet
 		return o.legacyPropagate(ctx, completedStep)
 	}
 
-	// Look up the conversation from the loop that ran the step.
-	loop, err := o.registry.Get(completedStep.AgentID)
+	// Look up the conversation from the task-scoped loop that ran the step.
+	// Must use GetForTask with the step's TaskID, not the default Get()
+	// shim, because the step was executed by a per-task agent loop created
+	// via GetForTask(agentID, step.TaskID).
+	loop, err := o.registry.GetForTask(completedStep.AgentID, completedStep.TaskID)
 	if err != nil {
 		o.logger.Warn("Handoff: agent loop unavailable; falling back to legacy",
 			"step_id", completedStep.ID, "agent_id", completedStep.AgentID, "error", err)

@@ -870,6 +870,12 @@ func (h *CommandHandler) improvementsApply(queue *agent.ProposalQueueExternal, i
 		fmt.Fprintf(&sb, "proposed change:\n%s\n", target.Change)
 		return &CommandResult{Output: sb.String()}
 	}
+	if !agent.IsSafeTargetPath(target.Target) {
+		return &CommandResult{
+			Output:  fmt.Sprintf("refusing to apply: target path %q is unsafe (absolute or traverses above working directory)", target.Target),
+			IsError: true,
+		}
+	}
 	if err := os.WriteFile(target.Target, []byte(target.Change), 0o644); err != nil {
 		return &CommandResult{Output: fmt.Sprintf("apply: %v", err), IsError: true}
 	}

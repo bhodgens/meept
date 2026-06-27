@@ -80,19 +80,25 @@ func TestImprovementsList_ShowsPendingProposals(t *testing.T) {
 func TestImprovementsApply_WritesTargetAndMarksApplied(t *testing.T) {
 	h, queuePath := newTestCommandHandler(t)
 
-	// Write an existing target file so the apply overwrites it.
-	targetPath := filepath.Join(t.TempDir(), "subdir", "auto-skill.md")
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+	// Use a relative target path within a temp subdir under the test CWD
+	// so isSafeTargetPath does not reject it for being absolute.
+	targetDir := filepath.Join(t.TempDir(), "subdir")
+	targetRel := filepath.Join("testdata_apply_tmp", "subdir", "auto-skill.md")
+	if err := os.MkdirAll(filepath.Dir(targetRel), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(targetPath, []byte("# old content\n"), 0o644); err != nil {
+	t.Cleanup(func() {
+		_ = os.RemoveAll("testdata_apply_tmp")
+	})
+	_ = targetDir //Unused after refactor to relative path
+	if err := os.WriteFile(targetRel, []byte("# old content\n"), 0o644); err != nil {
 		t.Fatalf("write target: %v", err)
 	}
 
 	seedProposals(t, queuePath, agent.ReflectionProposal{
 		ID:            "abc123",
 		Type:          "skill",
-		Target:        targetPath,
+		Target:        targetRel,
 		Change:        "# new content via /implement-improvements apply\n",
 		Justification: "auto-extracted pattern",
 		Confidence:    0.8,
@@ -108,7 +114,7 @@ func TestImprovementsApply_WritesTargetAndMarksApplied(t *testing.T) {
 	}
 
 	// Verify the file was overwritten with the proposed content.
-	got, err := os.ReadFile(targetPath)
+	got, err := os.ReadFile(targetRel)
 	if err != nil {
 		t.Fatalf("read target: %v", err)
 	}
@@ -242,5 +248,45 @@ func TestExecuteImplementImprovements_SkipMissingID(t *testing.T) {
 	}
 	if !strings.Contains(res.Output, "usage:") {
 		t.Errorf("expected usage hint; got: %s", res.Output)
+	}
+}
+
+// TestImprovementsApply_RefusesUnsafeTargetPath verifies that proposals with
+// absolute paths or ".." traversal in their Target field are rejected.
+// Without the isSafeTargetPath guard, a malicious proposal could write
+// to arbitrary filesystem locations (e.g., /etc/cron.d/backdoor).
+func TestImprovementsApply_RefusesUnsafeTargetPath(t *testing.T) {
+	cases := []struct {
+		name   string
+		target string
+	}{
+		{"absolute path", "/tmp/evil.md"},
+		{"dot-dot traversal", "../../etc/passwd"},
+		{"dot-dot in middle", "foo/../../bar.md"},
+		{"bare dot-dot", ".."},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			h, queuePath := newTestCommandHandler(t)
+			seedProposals(t, queuePath, agent.ReflectionProposal{
+				ID:            "evil1",
+				Type:          "skill_create",
+				Target:        c.target,
+				Change:        "# malicious content",
+				Justification: "pwned",
+				Confidence:    0.9,
+				Source:        "test",
+			})
+			queue := agent.NewExternalProposalQueue(queuePath)
+			res := h.improvementsApply(queue, "evil1")
+			if !res.IsError {
+				t.Errorf("expected error for unsafe target %q; got: %s", c.target, res.Output)
+			}
+			if !strings.Contains(res.Output, "unsafe") {
+				t.Errorf("error should mention 'unsafe'; got: %s", res.Output)
+			}
+		})
 	}
 }

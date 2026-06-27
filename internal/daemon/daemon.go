@@ -362,6 +362,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		}
 	}
 
+	// Phase 4 gossip wiring: register domain handler, wire publisher.
+	if components != nil && components.DualStore != nil && clusterEngine != nil {
+		components.GossipHandler = cluster.NewGossipHandler(components.DualStore, clusterCfg.NodeID, logger)
+		components.DualStore.SetGossipPublisher(clusterEngine)
+		clusterEngine.RegisterHandler(components.GossipHandler)
+		logger.Info("gossip handler registered with cluster engine")
+	}
+
+
 	// Wire cluster config into components
 	if clusterCfg != nil {
 		if components != nil {
@@ -1643,3 +1652,4 @@ func (a *taskCreatorAdapter) UpdateTaskStep(_ context.Context, step *task.TaskSt
 func (a *taskCreatorAdapter) LinkSession(ctx context.Context, taskID, sessionID string) error {
 	return a.registry.LinkSession(ctx, taskID, sessionID)
 }
+

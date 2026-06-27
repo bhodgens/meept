@@ -189,6 +189,12 @@ type Components struct {
 	SyncManager *memsync.SyncManager
 	SyncHandler *memsync.Handler
 
+	// DualStore routes memory between local.db and gossip.db for
+	// cluster-wide replicated memory queries.
+	DualStore *memory.DualStore
+	// GossipHandler processes incoming cluster gossip events.
+	GossipHandler cluster.GossipHandler
+
 	// Result cache for tool outputs
 	ResultCache *agent.ResultCache
 
@@ -254,6 +260,9 @@ type Components struct {
 
 	// Git backup scheduler
 	BackupScheduler *bkpkg.GitBackupScheduler
+
+	// Config syncer for git-based config distribution
+	ConfigSyncer *config.ConfigSyncer
 
 	// PTY sessions for interactive tool streaming
 	PTYManager *pty.Manager
@@ -1110,6 +1119,23 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				"hydrate_on_claim", cfg.DistributedMemory.Sync.HydrateOnClaim,
 				"distill_on_complete", cfg.DistributedMemory.Sync.DistillOnComplete,
 			)
+		}
+	}
+
+	// Create dual store (local.db + gossip.db) for cluster-aware memory routing.
+	// This powers merged local/gossip memory queries via memory.GossipPublisher.
+	if cfg.Cluster.Enabled {
+		gossipDataDir := filepath.Join(cfg.Daemon.DataDir, "gossip")
+		nodeID := cfg.Cluster.NodeID
+		if nodeID == "" {
+			nodeID = "local"
+		}
+		ds, err := memory.NewDualStore(gossipDataDir, nodeID, logger.With("component", "dualstore"))
+		if err != nil {
+			logger.Warn("Failed to create dual store (cluster features may be limited)", "error", err)
+		} else {
+			c.DualStore = ds
+			logger.Info("Dual store initialized", "data_dir", gossipDataDir)
 		}
 	}
 
@@ -2171,6 +2197,26 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// Initialize config syncer (Phase 5: Config Sync)
+	if cfg.ConfigSync.IsValidated() {
+		dataDir := cfg.Daemon.DataDir
+		if dataDir == "" {
+			home, _ := os.UserHomeDir()
+			dataDir = filepath.Join(home, ".meept")
+		}
+
+		syncer, err := config.NewConfigSyncer(cfg.ConfigSync, cfg.Backup.NodeID, dataDir, logger)
+		if err != nil {
+			logger.Warn("Failed to create config syncer", "error", err)
+		} else {
+			c.ConfigSyncer = syncer
+			logger.Info("Config syncer configured",
+				"enabled", true,
+				"repo", cfg.ConfigSync.RepoURL,
+				"pull_schedule", cfg.ConfigSync.PullSchedule.String())
+		}
+	}
+
 	return c, nil
 }
 
@@ -2313,6 +2359,10 @@ func (c *Components) Start(ctx context.Context) error {
 					if err := c.ClusterGitSync.Stop(); err != nil {
 						slog.Warn("cluster git sync stop error", "error", err)
 					}
+				}
+			case "config_sync":
+				if c.ConfigSyncer != nil {
+					c.ConfigSyncer.Stop()
 				}
 			case "backup":
 				if c.BackupScheduler != nil {
@@ -2917,6 +2967,15 @@ func (c *Components) Start(ctx context.Context) error {
 		startedHandlers = append(startedHandlers, "backup")
 	}
 
+	// Start config syncer if enabled (Phase 5: Config Sync)
+	if c.ConfigSyncer != nil {
+		c.ConfigSyncer.Start(c.ctx)
+		c.Logger.Info("Config syncer started",
+			"repo", c.ConfigSyncer.RepoURL(),
+			"pull_schedule", c.ConfigSyncer.PullSchedule().String())
+		startedHandlers = append(startedHandlers, "config_sync")
+	}
+
 	started = true // signal success so the deferred rollback does not fire
 	return nil
 }
@@ -2972,6 +3031,16 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		if err := c.SyncManager.Stop(); err != nil {
 			c.Logger.Error("Failed to stop sync manager", "error", err)
 			lastErr = err
+		}
+	}
+
+	// Close dual store (closes local.db and gossip.db connections).
+	if c.DualStore != nil {
+		if err := c.DualStore.Close(); err != nil {
+			c.Logger.Error("Failed to close dual store", "error", err)
+			lastErr = err
+		} else {
+			c.Logger.Info("Dual store closed")
 		}
 	}
 

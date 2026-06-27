@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/caimlas/meept/internal/llm"
 )
@@ -116,5 +117,38 @@ func TestTrajectory_JSON(t *testing.T) {
 	}
 	if !strings.Contains(string(j), "fix bug") {
 		t.Errorf("JSON missing input")
+	}
+}
+
+// TestTruncStr_MultiByteUTF8 verifies that truncStr does not split multi-byte
+// UTF-8 sequences. The old byte-slice implementation would produce invalid
+// UTF-8 when truncating near a multi-byte rune boundary.
+func TestTruncStr_MultiByteUTF8(t *testing.T) {
+	// Each emoji is 4 bytes in UTF-8. A string of 10 emoji = 40 bytes.
+	emoji := "🎉" // U+1F389, 4 bytes
+	s := strings.Repeat(emoji, 10)
+	// Truncate to 5 "chars" worth of space. With rune-aware truncation,
+	// we get 2 emoji + "..." (each emoji is 4 bytes, so 8 bytes + 3 = 11 bytes).
+	got := truncStr(s, 5)
+	if !utf8.ValidString(got) {
+		t.Errorf("truncStr produced invalid UTF-8: %q (len=%d)", got, len(got))
+	}
+	// Must end with "..."
+	if !strings.HasSuffix(got, "...") {
+		t.Errorf("expected truncation suffix '...'; got: %q", got)
+	}
+}
+
+// TestTruncStr_ShortMax verifies edge cases where max is very small.
+func TestTruncStr_ShortMax(t *testing.T) {
+	if got := truncStr("hello world", 3); got != "..." {
+		t.Errorf("truncStr(s, 3) = %q; want '...'", got)
+	}
+	if got := truncStr("hello world", 0); got != "..." {
+		t.Errorf("truncStr(s, 0) = %q; want '...'", got)
+	}
+	// When input is already short enough, return it unchanged.
+	if got := truncStr("hi", 10); got != "hi" {
+		t.Errorf("truncStr('hi', 10) = %q; want 'hi'", got)
 	}
 }

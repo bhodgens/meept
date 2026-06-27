@@ -22,6 +22,15 @@ const (
 	EventNodeJoin      ClusterEventType = "NODE_JOIN"
 	EventNodeLeave     ClusterEventType = "NODE_LEAVE"
 	EventNodeHeartbeat ClusterEventType = "NODE_HEARTBEAT"
+
+	// Session events (Phase 4).
+	EventTypeSessionCreated ClusterEventType = "SESSION_CREATED"
+	EventTypeSessionTurn    ClusterEventType = "SESSION_TURN"
+
+	// Memory events (Phase 4).
+	EventTypeMemoryStored ClusterEventType = "MEMORY_STORED"
+	EventTypeMemoryExpired ClusterEventType = "MEMORY_EXPIRED"
+	EventTypeMemoryEdge   ClusterEventType = "MEMORY_EDGE"
 )
 
 // ClusterEvent represents a signed, replicated cluster event.
@@ -147,4 +156,51 @@ type NodePayload struct {
 	Capabilities []string  `json:"capabilities"`
 	ClusterIP    string    `json:"cluster_ip"`
 	JoinedAt     time.Time `json:"joined_at"`
+}
+
+// ---------- Phase 4: Session and Memory event payloads ----------
+
+// SessionTurnPayload defines the payload for SESSION_TURN events.
+type SessionTurnPayload struct {
+	SessionID   string `json:"session_id"`
+	TurnID      string `json:"turn_id"`
+	Role        string `json:"role"`
+	Content     string `json:"content"`
+	Timestamp   int64  `json:"timestamp"`
+	SessionMeta []byte `json:"session_meta,omitempty"` // If session is new
+}
+
+// SessionCreatedPayload defines the payload for SESSION_CREATED events.
+type SessionCreatedPayload struct {
+	SessionID string         `json:"session_id"`
+	Title     string         `json:"title"`
+	CreatedAt int64          `json:"created_at"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+}
+
+// MemoryStoredPayload defines the payload for MEMORY_STORED events.
+type MemoryStoredPayload struct {
+	ID        string         `json:"id"`
+	Type      string         `json:"type"`
+	Category  string         `json:"category"`
+	Content   string         `json:"content"`
+	CreatedAt int64          `json:"created_at"`
+	AgentID   string         `json:"agent_id,omitempty"`
+	SessionID string         `json:"session_id,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+}
+
+// MemoryExpiredPayload defines the payload for MEMORY_EXPIRED events.
+type MemoryExpiredPayload struct {
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	ExpiredAt int64  `json:"expired_at"`
+}
+
+// MemoryEdgePayload defines the payload for MEMORY_EDGE events (epistemic links).
+type MemoryEdgePayload struct {
+	FromID      string `json:"from_id"`
+	ToID        string `json:"to_id"`
+	EdgeType    string `json:"edge_type"` // contradicts, supports, supersedes, etc.
+	Established int64  `json:"established"`
 }

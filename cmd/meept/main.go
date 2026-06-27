@@ -157,6 +157,7 @@ Analytics:
 	rootCmd.AddCommand(newTTSCmd())
 	rootCmd.AddCommand(newImprovementsCmd())
 	rootCmd.AddCommand(newBackupCmd())
+	rootCmd.AddCommand(newSyncCmd())
 	rootCmd.AddCommand(newMigrateCmd())
 
 	if err := rootCmd.Execute(); err != nil {

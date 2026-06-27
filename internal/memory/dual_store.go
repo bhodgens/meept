@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/sqlite"
 
 	_ "modernc.org/sqlite"
@@ -36,6 +37,13 @@ const (
 	defaultMemoryLimit = 100
 )
 
+// GossipPublisher is the interface for publishing cluster gossip events.
+// Implemented by cluster.GossipEngine to avoid importing internal/cluster
+// from the memory package.
+type GossipPublisher interface {
+	PublishClusterEvent(eventType models.ClusterEventType, payload any) error
+}
+
 // DualStore routes memory operations between local.db (own data) and
 // sync-gossip.db (replicated data from peers). Local reads take precedence;
 // gossip data fills in gaps for merged queries.
@@ -43,11 +51,10 @@ type DualStore struct {
 	localDB     *sql.DB
 	gossipDB    *sql.DB
 	localNodeID string
+	gossipPub   GossipPublisher
 	logger      *slog.Logger
 	mu          sync.RWMutex
 }
-
-// NewDualStore opens or creates both local.db and sync-gossip.db in dataDir,
 // runs their schemas, and returns a DualStore. The caller should call Close()
 // when done.
 func NewDualStore(dataDir string, nodeID string, logger *slog.Logger) (*DualStore, error) {
@@ -142,6 +149,14 @@ func (s *DualStore) Close() error {
 	return nil
 }
 
+// SetGossipPublisher configures the gossip publisher for cluster sync
+// so that local memory writes are automatically broadcast to peers.
+func (s *DualStore) SetGossipPublisher(pub GossipPublisher) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gossipPub = pub
+}
+
 // IsLocal returns true if nodeID matches the local node's ID.
 func (s *DualStore) IsLocal(nodeID string) bool {
 	return nodeID == s.localNodeID
@@ -223,17 +238,50 @@ func (s *DualStore) setSyncMetaGossip(ctx context.Context, key, value string) er
 // StoreMemory persists a memory record to the appropriate database based on
 // ownership. If the memory is from this node (source_node absent or equal to
 // localNodeID) it goes to local.db; otherwise to gossip.db.
+// Local writes are also broadcast to gossip peers (non-blocking).
 func (s *DualStore) StoreMemory(ctx context.Context, mem *Memory) error {
 	sourceNode := memorySourceNode(mem)
 	if sourceNode == s.localNodeID || sourceNode == "" {
 		s.mu.Lock()
-		defer s.mu.Unlock()
-		return s.storeMemoryLocal(ctx, mem)
+		if err := s.storeMemoryLocal(ctx, mem); err != nil {
+			s.mu.Unlock()
+			return err
+		}
+		// Snapshot publisher under lock, release, then publish outside.
+		pub := s.gossipPub
+		s.mu.Unlock()
+
+		if pub != nil {
+			s.publishMemoryGossip(pub, mem)
+		}
+		return nil
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.storeMemoryGossip(ctx, mem, sourceNode)
+	err := s.storeMemoryGossip(ctx, mem, sourceNode)
+	s.mu.Unlock()
+	return err
+}
+
+// publishMemoryGossip broadcasts a locally-written memory to gossip peers
+// non-blocking. The publish happens outside the DualStore mutex to avoid
+// holding the lock during I/O (CLAUDE.md mutex-scope rule).
+func (s *DualStore) publishMemoryGossip(pub GossipPublisher, mem *Memory) {
+	payload := models.MemoryStoredPayload{
+		ID:        mem.ID,
+		Type:      string(mem.Type),
+		Category:  mem.Category,
+		Content:   mem.Content,
+		CreatedAt: mem.CreatedAt.UnixNano(),
+		AgentID:   mem.AgentID,
+		SessionID: mem.SessionID,
+		Metadata:  mem.Metadata,
+	}
+	go func() {
+		if err := pub.PublishClusterEvent(models.EventTypeMemoryStored, payload); err != nil {
+			s.logger.Warn("dual store: gossip publish failed", "mem_id", mem.ID, "error", err)
+		}
+	}()
 }
 
 // StoreRemoteMemory writes a memory from a peer node to gossip.db.

@@ -62,6 +62,48 @@ type GossipEngine struct {
 	// Vector clock (local state)
 	vectorClock map[string]int64
 	vcMu        sync.RWMutex
+
+	// Handler dispatch (Phase 4). Registered handlers are called after
+	// an event is persisted and verified. Errors from handlers are logged
+	// but do not stop the gossip pipeline.
+	handlers   []GossipHandler
+	handlersMu sync.RWMutex
+}
+
+// GossipHandler is implemented by types that want to dispatch incoming
+// cluster events for domain-specific handling (sessions, memories, etc.).
+//
+//nolint:revive // GossipHandler matches the naming convention for interface
+type GossipHandler interface {
+	OnEvent(event *models.ClusterEvent) error
+}
+
+// RegisterHandler registers a GossipHandler on the engine. Handlers are
+// called in registration order after an event passes signature verification
+// and persistence. Handler panics are recovered and logged.
+func (g *GossipEngine) RegisterHandler(h GossipHandler) {
+	g.handlersMu.Lock()
+	defer g.handlersMu.Unlock()
+	g.handlers = append(g.handlers, h)
+}
+
+// PublishClusterEvent serializes an event type and payload into a ClusterEvent,
+// signs it, and publishes it to the gossip network. This method satisfies the
+// memory.GossipPublisher interface so the dual store can broadcast local writes.
+func (g *GossipEngine) PublishClusterEvent(eventType models.ClusterEventType, payload any) error {
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("gossip: marshal payload: %w", err)
+	}
+
+	event := &models.ClusterEvent{
+		EventType: eventType,
+		// VectorClock and NodeID will be populated by Publish.
+		Payload: json.RawMessage(payloadJSON),
+	}
+
+	g.Publish(event)
+	return nil
 }
 
 // PeerInfo describes a connected cluster peer.
@@ -142,6 +184,11 @@ func WithMembersProvider(mp MembersProvider) GossipOption {
 	return func(g *GossipEngine) {
 		g.membersProvider = mp
 	}
+}
+
+// NodeID returns the gossip engine's local node identifier.
+func (g *GossipEngine) NodeID() string {
+	return g.localNode
 }
 
 // SigningPrivate returns the gossip engine's ed25519 private signing key, or nil if none was set.
@@ -357,6 +404,20 @@ func (g *GossipEngine) handleClusterEvent(msg *models.BusMessage) {
 	// Persist (INSERT OR IGNORE prevents duplicates)
 	if g.db != nil {
 		g.persistEvent(&event)
+	}
+
+	// Dispatch to registered domain handlers (Phase 4).
+	g.emitToHandlers(&event, event.NodeID)
+
+	// Update vector clock with source node's clock (Phase 4).
+	if len(event.VectorClock) > 0 {
+		g.vcMu.Lock()
+		for node, count := range event.VectorClock {
+			if g.vectorClock[node] < count {
+				g.vectorClock[node] = count
+			}
+		}
+		g.vcMu.Unlock()
 	}
 
 	// Update peer LastSeen timestamp
@@ -602,5 +663,33 @@ func (g *GossipEngine) pruneStalePeers() {
 			g.logger.Info("gossip: peer timeout", "node_id", nodeID)
 			delete(g.peers, nodeID)
 		}
+	}
+}
+
+// emitToHandlers dispatches the event to all registered domain handlers.
+// Handler errors are logged; panics are recovered to protect the gossip pipeline.
+func (g *GossipEngine) emitToHandlers(event *models.ClusterEvent, sourceNode string) {
+	g.handlersMu.RLock()
+	handlers := make([]GossipHandler, len(g.handlers))
+	copy(handlers, g.handlers)
+	g.handlersMu.RUnlock()
+
+	for _, h := range handlers {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					g.logger.Error("gossip: handler panic recovered",
+						"panic", r, "event_id", event.EventID)
+				}
+			}()
+			// Ensure payload is not nil for handler unmarshalling
+			if event.Payload == nil {
+				event.Payload = json.RawMessage("{}")
+			}
+			if err := h.OnEvent(event); err != nil {
+				g.logger.Debug("gossip: handler returned error",
+					"event_id", event.EventID, "err", err)
+			}
+		}()
 	}
 }
