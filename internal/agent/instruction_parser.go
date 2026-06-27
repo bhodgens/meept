@@ -11,14 +11,8 @@ import (
 
 // InstructionParser extracts structured instructions from natural language input.
 type InstructionParser struct {
-	logger logger
 }
 
-type logger interface { //nolint:unused -- reserved for future instruction parsing
-	Debug(string, ...any)
-	Warn(string, ...any)
-	Info(string, ...any)
-}
 
 // NewInstructionParser creates a new parser with optional logging.
 func NewInstructionParser() *InstructionParser {

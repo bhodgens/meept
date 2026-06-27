@@ -38,7 +38,6 @@ type sessionReasoningHTTPTestCase struct {
 	body        string
 	rpcCall     rpcCallFunc
 	wantStatus  int
-	wantInBody  string // substring that should appear in response body (empty skips)
 	wantMethod  string // expected RPC method name (empty skips check)
 }
 

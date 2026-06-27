@@ -86,7 +86,7 @@ func MergePeerDB(ctx context.Context, gossipDB *sql.DB, peerDBPath, peerID strin
 	}
 
 	if sessionErr != nil && turnErr != nil && memErr != nil {
-		err = fmt.Errorf("all merge operations failed for peer %s: sessions: %v, turns: %v, memories: %v",
+		err = fmt.Errorf("all merge operations failed for peer %s: sessions: %w, turns: %w, memories: %w",
 			peerID, sessionErr, turnErr, memErr)
 		return stats, err
 	}
@@ -96,7 +96,9 @@ func MergePeerDB(ctx context.Context, gossipDB *sql.DB, peerDBPath, peerID strin
 	}
 
 	// Explicitly detach before closing connection
-	_, _ = tx.ExecContext(ctx, "DETACH IF EXISTS peer")
+	if _, detErr := tx.ExecContext(ctx, "DETACH IF EXISTS peer"); detErr != nil {
+		slog.Debug("backup: detach peer failed", "error", detErr)
+	}
 
 	return stats, nil
 }

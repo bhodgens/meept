@@ -31,28 +31,33 @@ func (e *SyncError) Unwrap() error {
 // Sentinel errors for sync operations.
 var (
 	ErrPeerNotFound = &SyncError{
-		Op:    "find",
+		Op:      "find",
 		Message: "peer backup not found in repo",
 	}
 
 	ErrPeerDBCorrupt = &SyncError{
-		Op:    "decompress",
+		Op:      "decompress",
 		Message: "peer database appears corrupt after decompression",
 	}
 
 	ErrSchemaMismatch = &SyncError{
-		Op:    "merge",
+		Op:      "merge",
 		Message: "schema mismatch (peer version incompatible)",
 	}
 
 	ErrMergeTimeout = &SyncError{
-		Op:    "merge",
+		Op:      "merge",
 		Message: "merge operation timed out",
 	}
 
 	ErrBackupNotCompressed = &SyncError{
-		Op:    "find",
+		Op:      "find",
 		Message: "peer backup is not in expected .db.zst format",
+	}
+
+	ErrGossipDBRequired = &SyncError{
+		Op:      "init",
+		Message: "gossipDB is required for sync puller",
 	}
 )
 

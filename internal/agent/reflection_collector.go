@@ -81,8 +81,12 @@ func (rc *ReflectionCollector) ReflectTurn(ctx context.Context, traj ReflectionT
 	convID := fmt.Sprintf("reflect-%s-%s", traj.SessionID, id.Generate(""))
 
 	var output string
+	var runErr error
 	if rc.classifierRunOnce != nil {
-		output, err = rc.classifierRunOnce(ctx, prompt, convID)
+		output, runErr = rc.classifierRunOnce(ctx, prompt, convID)
+		if runErr != nil {
+			return fmt.Errorf("classifier run once failed: %w", runErr)
+		}
 	} else if rc.classifier != nil {
 		// Call classifier via the Chat interface.
 		opts := []llm.ChatOption{

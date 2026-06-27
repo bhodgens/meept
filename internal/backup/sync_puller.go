@@ -37,7 +37,7 @@ func NewSyncPuller(cfg config.PeerSyncConfig, localDB, gossipDB *sql.DB) (*SyncP
 	}
 
 	if gossipDB == nil {
-		return nil, fmt.Errorf("backup: gossipDB is required for sync puller")
+		return nil, fmt.Errorf("backup: gossipDB is required for sync puller: %w", ErrGossipDBRequired)
 	}
 
 	home, _ := os.UserHomeDir()
@@ -47,7 +47,7 @@ func NewSyncPuller(cfg config.PeerSyncConfig, localDB, gossipDB *sql.DB) (*SyncP
 		// (we need to retrieve it from the backup config separately)
 	}
 
-	_ = localDB // currently unused (gossipDB is the target for merge)
+	// localDB is kept for future use; currently only gossipDB is used for merge
 
 	nodeID, _ := os.Hostname()
 	if len(nodeID) > 20 {
@@ -151,7 +151,9 @@ func (p *SyncPuller) pullOnce(ctx context.Context) error {
 				"error", err)
 
 			// Record the error in metadata
-			_ = p.metaStore.SetLastError(peerID, err.Error())
+			if err := p.metaStore.SetLastError(peerID, err.Error()); err != nil {
+			p.logger.Warn("sync: failed to record error", "peer_id", peerID, "error", err)
+		}
 
 			// Don't fail the whole cycle for one peer
 			continue
@@ -201,7 +203,9 @@ func (p *SyncPuller) mergePeer(ctx context.Context, peerID string) error {
 		p.logger.Warn("sync: failed to record merge stats", "peer_id", peerID, "error", err)
 	}
 	// Clear error if we succeeded
-	_ = p.metaStore.SetLastError(peerID, "")
+	if err := p.metaStore.SetLastError(peerID, ""); err != nil {
+		p.logger.Warn("sync: failed to clear error", "peer_id", peerID, "error", err)
+	}
 
 	p.logger.Info("sync: merge complete",
 		"peer_id", peerID,

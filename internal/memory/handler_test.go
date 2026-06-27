@@ -389,23 +389,6 @@ func suffix(s string, n int) string {
 
 // --- Taint tracking tests -----------------------------------------------
 
-// newTestOrchestratorWithTaint returns a security Orchestrator with a taint
-// tracker wired, so tests can verify taint propagation through memory retrieval.
-//nolint:unused // test helper
-func newTestOrchestratorWithTaint(t *testing.T) *intsecurity.Orchestrator {
-	t.Helper()
-	cfg := intsecurity.DefaultOrchestratorConfig()
-	cfg.SanitizeInputs = false
-	cfg.MonitorOutput = false
-	cfg.ScanShellCommands = false
-	cfg.EnableAuditLog = false
-	secOrch := intsecurity.NewOrchestrator(cfg, nil)
-	tracker := taint.NewExtendedTracker(nil)
-	secOrch.SetTaintTracker(tracker)
-	t.Cleanup(secOrch.Close)
-	return secOrch
-}
-
 // TestSendResults_RecordsTaintE2E verifies end-to-end that retrieving a memory
 // records a taint entry that a taint sink check can detect.
 func TestSendResults_RecordsTaintE2E(t *testing.T) {
