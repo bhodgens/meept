@@ -90,4 +90,52 @@ class SessionNotifier extends StateNotifier<SessionState> {
       );
     }
   }
+
+  /// Archive a session. Mutates local state to flip the flag and re-sorts
+  /// the list so archived sessions move to the bottom.
+  Future<void> archiveSession(String sessionId) async {
+    try {
+      await sdkClient.archiveSession(sessionId, archived: true);
+      state = _withArchiveFlag(state, sessionId, archived: true);
+    } catch (e) {
+      state = state.copyWith(error: e.toString());
+    }
+  }
+
+  /// Unarchive a session. Mutates local state to flip the flag and re-sorts.
+  Future<void> unarchiveSession(String sessionId) async {
+    try {
+      await sdkClient.archiveSession(sessionId, archived: false);
+      state = _withArchiveFlag(state, sessionId, archived: false);
+    } catch (e) {
+      state = state.copyWith(error: e.toString());
+    }
+  }
+}
+
+/// Returns a new SessionState with the given session's archived flag
+/// flipped, and the list re-sorted (non-archived first, then by
+/// lastActivity descending — mirroring the backend's ORDER BY).
+SessionState _withArchiveFlag(
+  SessionState current,
+  String sessionId, {
+  required bool archived,
+}) {
+  final updated = current.sessions.map((s) {
+    if (s.id == sessionId) return s.copyWith(archived: archived);
+    return s;
+  }).toList();
+  updated.sort(_sessionSort);
+  return current.copyWith(sessions: updated);
+}
+
+/// Comparator: non-archived first, then by lastActivity descending
+/// (falls back to createdAt when lastActivity is null).
+int _sessionSort(Session a, Session b) {
+  if (a.archived != b.archived) {
+    return a.archived ? 1 : -1;
+  }
+  final aTime = a.lastActivity ?? a.createdAt;
+  final bTime = b.lastActivity ?? b.createdAt;
+  return bTime.compareTo(aTime);
 }
