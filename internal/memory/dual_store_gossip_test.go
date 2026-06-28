@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 type mockGossipPublisher struct {
 	mu      sync.Mutex
 	events  []publishedEvent
+	eventCount int64 // atomic counter for non-locking reads
 }
 
 type publishedEvent struct {
@@ -23,8 +25,9 @@ type publishedEvent struct {
 
 func (m *mockGossipPublisher) PublishClusterEvent(eventType models.ClusterEventType, payload any) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.events = append(m.events, publishedEvent{eventType, payload})
+	m.mu.Unlock()
+	atomic.AddInt64(&m.eventCount, 1)
 	return nil
 }
 

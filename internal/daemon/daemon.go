@@ -253,6 +253,17 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			logger.Info("Scheduler RPC handlers registered")
 		}
 
+		// Register backup/config-sync/peer-sync RPC handlers. Each method
+		// nil-guards its dependency, so it is safe to register the handler
+		// even when individual components are not configured; callers get
+		// a "service not available" error instead of "method not found".
+		backupSyncHandler := rpc.NewBackupSyncHandler(components.BackupScheduler, components.ConfigSyncer, components.SyncPuller)
+		backupSyncHandler.RegisterBackupSyncMethods(rpcServer)
+		logger.Info("Backup/sync RPC handlers registered",
+			"backup", components.BackupScheduler != nil,
+			"config_sync", components.ConfigSyncer != nil,
+			"peer_sync", components.SyncPuller != nil)
+
 		// Wire firewall stats getter (exposes context firewall metrics via RPC)
 		if rpcServer != nil && components.AgentLoop != nil {
 			rpcServer.FirewallStatsGetter = func() map[string]any {
@@ -363,10 +374,20 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	}
 
 	// Phase 4 gossip wiring: register domain handler, wire publisher.
+	// Conflict resolver arbitrates entity-level conflicts (same memory ID
+	// from different peer nodes) using last-write-wins semantics.
+	// Task 4.8: construct a shared Metrics struct for both engine and
+	// handler so publish-side and receive-side counters land together.
 	if components != nil && components.DualStore != nil && clusterEngine != nil {
-		components.GossipHandler = cluster.NewGossipHandler(components.DualStore, clusterCfg.NodeID, logger)
+		conflictResolver := cluster.NewConflictResolver(logger)
+		clusterMetrics := cluster.NewMetrics()
+		gossipHandler := cluster.NewGossipHandler(components.DualStore, clusterCfg.NodeID, logger, conflictResolver)
+		gossipHandler.SetMetrics(clusterMetrics)
+		components.GossipHandler = gossipHandler
 		components.DualStore.SetGossipPublisher(clusterEngine)
-		clusterEngine.RegisterHandler(components.GossipHandler)
+		clusterEngine.SetConflictResolver(conflictResolver)
+		clusterEngine.SetMetrics(clusterMetrics)
+		clusterEngine.RegisterHandler(gossipHandler)
 		logger.Info("gossip handler registered with cluster engine")
 	}
 
@@ -794,6 +815,29 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 					}
 					logger.Info("Compression stats HTTP getter registered")
 				}
+			}
+
+			// Task 4.8: wire cluster gossip metrics getter for HTTP endpoint.
+			// Captures clusterEngine by reference so a late-constructed
+			// engine (set after httpSrv) is still observed.
+			if clusterEngine != nil {
+				httpSrv.ClusterMetricsGetter = func() map[string]any {
+					m := clusterEngine.Metrics()
+					if m == nil {
+						return map[string]any{}
+					}
+					snap := m.Snapshot()
+					return map[string]any{
+						"session_turns_published_total":     snap.SessionTurnsPublished,
+						"memories_published_total":          snap.MemoriesPublished,
+						"merge_conflicts_total":             snap.MergeConflicts,
+						"events_received_total":             snap.EventsReceived,
+						"events_deduped_total":              snap.EventsDeduped,
+						"conflict_resolutions_local_total":  snap.ConflictResolutionsLocal,
+						"conflict_resolutions_remote_total": snap.ConflictResolutionsRemote,
+					}
+				}
+				logger.Info("Cluster metrics HTTP getter registered")
 			}
 			logger.Info("HTTP server created", "addr", httpCfg.Addr, "tls", "mandatory")
 			logger.Info("TLS always enabled for HTTP server", "cert", httpCfg.TLSCertFile)

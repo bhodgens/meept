@@ -31,6 +31,10 @@ type SQLiteStore struct {
 	logger      *slog.Logger
 	embeddingDim int
 	designationHistory DesignationHistoryStore
+	// turnGossip, when set, receives a PublishTurn call for each message
+	// written by SaveMessages. The publisher is responsible for any
+	// cluster broadcast; the session store's contract is purely local.
+	turnGossip TurnGossipPublisher
 }
 
 // Option configures a SQLiteStore at construction time.
@@ -44,6 +48,18 @@ func WithEmbeddingDim(dim int) Option {
 	return func(s *SQLiteStore) {
 		if dim > 0 {
 			s.embeddingDim = dim
+		}
+	}
+}
+
+// WithTurnGossipPublisher wires a cluster publisher so that SaveMessages
+// emits one PublishTurn call per message. Pass nil to explicitly disable
+// (equivalent to not calling the option). The publisher is expected to be
+// non-blocking; see TurnGossipPublisher contract.
+func WithTurnGossipPublisher(pub TurnGossipPublisher) Option {
+	return func(s *SQLiteStore) {
+		if pub != nil {
+			s.turnGossip = pub
 		}
 	}
 }
@@ -63,6 +79,7 @@ func NewSQLiteStore(dbPath string, logger *slog.Logger, opts ...Option) (*SQLite
 		db:           db,
 		logger:       logger,
 		embeddingDim: defaultEmbeddingDim,
+		turnGossip:   nopTurnGossipPublisher{},
 	}
 	for _, o := range opts {
 		if o != nil {
@@ -728,12 +745,16 @@ func (s *SQLiteStore) RemoveWorker(sessionID, workerID string) error {
 }
 
 // SaveMessages batch-inserts messages for a session in a transaction.
+// When a TurnGossipPublisher is wired (cluster sync), each successfully
+// committed message is also broadcast to peers via PublishTurn. Publication
+// is non-blocking and happens after the mutex is released so the session
+// store never holds its lock on cluster I/O (CLAUDE.md mutex-scope rule).
 func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	tx, err := s.db.Begin()
 	if err != nil {
+		s.mu.Unlock()
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() {
@@ -746,10 +767,14 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 		INSERT INTO session_messages (session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, name, tool_call_id, parts)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
+		s.mu.Unlock()
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
 	defer stmt.Close()
 
+	// Track the content actually written so gossip publication mirrors
+	// what's in the local DB (search-content for multimodal messages).
+	written := make([]Message, 0, len(messages))
 	for _, msg := range messages {
 		var entryType, branchID string
 		if msg.EntryType != "" {
@@ -775,6 +800,7 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 		if len(msg.Parts) > 0 {
 			partsJSON, err = json.Marshal(msg.Parts)
 			if err != nil {
+				s.mu.Unlock()
 				return fmt.Errorf("failed to marshal message parts: %w", err)
 			}
 			partsText := llm.ContentFromParts(msg.Parts, true)
@@ -788,11 +814,41 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 		_, err := stmt.Exec(sessionID, msg.Role, searchContent, msg.Timestamp.Format(time.RFC3339),
 			msg.ParentID, entryType, branchID, msg.Model, msg.Name, msg.ToolCallID, partsJSON) //nolint:mutexio // mutex serializes sqlite connection access
 		if err != nil {
+			s.mu.Unlock()
 			return fmt.Errorf("failed to insert message: %w", err)
 		}
+		written = append(written, Message{
+			Role:      msg.Role,
+			Content:   searchContent,
+			Timestamp: msg.Timestamp,
+		})
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("failed to commit message batch: %w", err)
+	}
+
+	// Snapshot the publisher under the lock, release, then publish.
+	pub := s.turnGossip
+	s.mu.Unlock()
+
+	if pub == nil {
+		return nil
+	}
+	for _, msg := range written {
+		// Generate a stable-enough turn ID from sessionID + role +
+		// timestamp. The session_messages row has an autoincrement ID
+		// but it isn't available here without a lastInsertRow capture
+		// per message — gossip consumers treat TurnID as idempotency
+		// key, so session+role+ns precision suffices.
+		turnID := sessionID + ":" + msg.Role + ":" + msg.Timestamp.UTC().Format(time.RFC3339Nano)
+		if perr := pub.PublishTurn(sessionID, turnID, msg.Role, msg.Content, msg.Timestamp); perr != nil {
+			slog.Debug("session store: turn gossip publish failed (non-fatal)",
+				"session_id", sessionID, "role", msg.Role, "error", perr)
+		}
+	}
+	return nil
 }
 
 // GetMessages retrieves messages for a session with pagination, ordered by id.
@@ -997,6 +1053,16 @@ func (s *SQLiteStore) ClearDesignation(sessionID string) error {
 func (s *SQLiteStore) SetDesignationHistoryStore(store DesignationHistoryStore) {
 	if s != nil {
 		s.designationHistory = store
+	}
+}
+
+// SetTurnGossipPublisher wires (or replaces) the cluster turn publisher.
+// Nil values are ignored per CLAUDE.md nil-guard convention so that callers
+// can opportunistically pass a maybe-nil implementation without panicking.
+// To detach an existing publisher pass nopTurnGossipPublisher{} instead.
+func (s *SQLiteStore) SetTurnGossipPublisher(pub TurnGossipPublisher) {
+	if s != nil && pub != nil {
+		s.turnGossip = pub
 	}
 }
 

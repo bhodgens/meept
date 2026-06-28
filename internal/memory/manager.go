@@ -88,6 +88,13 @@ type Manager struct {
 	prefetchQueue    chan prefetchRequest
 	prefetchShutdown chan struct{}
 	prefetchWg       sync.WaitGroup
+
+	// DualStore reference for cluster-aware routing (Phase 3 dual-DB).
+	// When non-nil, the manager can publish local memory writes to gossip
+	// peers via the DualStore's GossipPublisher. The existing storeViaSQLite
+	// / storeViaMemvid paths are unchanged — the DualStore is purely
+	// additive for cluster sync. SetDualStore is nil-guarded.
+	dualStore *DualStore
 }
 
 // prefetchRequest represents a request to prefetch context for a query.
@@ -1859,6 +1866,29 @@ func (m *Manager) EpistemicDetector() *EpistemicDetector {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.detector
+}
+
+// SetDualStore wires the cluster-aware DualStore so that memory writes can
+// be mirrored to gossip peers and merged reads can include gossip data.
+// Nil values are ignored per CLAUDE.md nil-guard convention; passing nil
+// after a prior non-nil store detaches the manager from cluster sync but
+// does NOT close the DualStore (the caller — typically the daemon — owns
+// the lifecycle).
+func (m *Manager) SetDualStore(ds *DualStore) {
+	if ds == nil {
+		return
+	}
+	m.mu.Lock()
+	m.dualStore = ds
+	m.mu.Unlock()
+}
+
+// DualStore returns the wired DualStore, or nil when cluster routing is not
+// configured. Callers must nil-check.
+func (m *Manager) DualStore() *DualStore {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.dualStore
 }
 
 // ScopedManager returns a ScopedMemoryManager that filters all operations

@@ -264,6 +264,10 @@ type Components struct {
 	// Config syncer for git-based config distribution
 	ConfigSyncer *config.ConfigSyncer
 
+	// Peer sync puller merges backups from peer nodes into the local
+	// gossip DB on a schedule. Constructed only when PeerSync is enabled.
+	SyncPuller *bkpkg.SyncPuller
+
 	// PTY sessions for interactive tool streaming
 	PTYManager *pty.Manager
 
@@ -1135,6 +1139,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			logger.Warn("Failed to create dual store (cluster features may be limited)", "error", err)
 		} else {
 			c.DualStore = ds
+			if c.MemoryManager != nil {
+				c.MemoryManager.SetDualStore(ds)
+			}
 			logger.Info("Dual store initialized", "data_dir", gossipDataDir)
 		}
 	}
@@ -1160,6 +1167,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		logger.Warn("Failed to create SQLite session store, using in-memory", "error", err)
 		c.SessionStore = session.NewMemoryStore(logger)
 	} else {
+		if c.DualStore != nil {
+			sessionStore.SetTurnGossipPublisher(c.DualStore)
+		}
 		c.SessionStore = sessionStore
 	}
 
@@ -2210,6 +2220,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			logger.Warn("Failed to create config syncer", "error", err)
 		} else {
 			c.ConfigSyncer = syncer
+			registerConfigSyncReloadHooks(c, syncer, dataDir, logger)
 			logger.Info("Config syncer configured",
 				"enabled", true,
 				"repo", cfg.ConfigSync.RepoURL,
@@ -2217,7 +2228,88 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// Initialize peer sync puller (merges peer backups into gossip DB).
+	// Requires PeerSync to be enabled AND the DualStore to be available
+	// (the gossip DB lives there). When PeerSync.RepoURL is empty we
+	// inherit from the backup config so operators only set repo_url once.
+	if cfg.PeerSync.IsValidated() && c.DualStore != nil {
+		syncCfg := cfg.PeerSync
+		if syncCfg.RepoURL == "" {
+			syncCfg.RepoURL = cfg.Backup.RepoURL
+		}
+		puller, err := bkpkg.NewSyncPuller(syncCfg, c.DualStore.LocalDB(), c.DualStore.GossipDB())
+		if err != nil {
+			logger.Warn("Failed to create peer sync puller", "error", err)
+		} else {
+			c.SyncPuller = puller
+			logger.Info("Peer sync puller configured",
+				"enabled", true,
+				"peers", len(syncCfg.Peers),
+				"pull_schedule", syncCfg.PullSchedule.String())
+		}
+	} else if cfg.PeerSync.IsValidated() && c.DualStore == nil {
+		logger.Warn("Peer sync enabled but DualStore unavailable (cluster.enabled=false); sync puller not constructed")
+	}
+
 	return c, nil
+}
+
+// registerConfigSyncReloadHooks wires reload hooks on the ConfigSyncer so
+// that runtime components react to config changes pulled from the git repo.
+//
+// Hooks fire asynchronously in the ConfigSyncer's pull goroutine after a
+// successful merge. Each hook receives the commit hash that introduced the
+// change. Hooks are nil-guarded at the component level: if a component was
+// never constructed (e.g. MCP disabled), the hook logs and returns nil.
+//
+// Scope: full hot-reload of every component is out of scope for T5.7. The
+// hooks registered here cover the high-value, low-risk cases:
+//   - mcp_servers.json5: re-read from disk and call MCPManager.Reload
+//   - meept.json5:      log a warning (full daemon reconfiguration requires restart)
+//   - models.json5:     log a warning (LLMResolver has no Reload method)
+//   - backup.json5:     log a warning (BackupScheduler reads config at start)
+func registerConfigSyncReloadHooks(c *Components, syncer *config.ConfigSyncer, dataDir string, logger *slog.Logger) {
+	// MCP servers: full reload via MCPManager.Reload.
+	syncer.RegisterReloadHook("mcp_servers.json5", func(commitHash string) error {
+		if c.MCPManager == nil {
+			logger.Debug("config sync: mcp_servers.json5 changed but MCPManager is nil; skipping reload")
+			return nil
+		}
+		mcpPath := filepath.Join(dataDir, "mcp_servers.json5")
+		mcpCfg, err := config.LoadMCPConfig(mcpPath)
+		if err != nil {
+			return fmt.Errorf("reload mcp_servers.json5: %w", err)
+		}
+		if err := c.MCPManager.Reload(context.Background(), mcpCfg.Servers); err != nil {
+			return fmt.Errorf("reload mcp_servers.json5: manager reload failed: %w", err)
+		}
+		logger.Info("config sync: hot-reloaded MCP servers",
+			"commit", commitHash, "servers", len(mcpCfg.Servers))
+		return nil
+	})
+
+	// meept.json5 (main daemon config): full hot-reload is out of scope.
+	// Surface a prominent warning so the operator knows a restart is needed.
+	syncer.RegisterReloadHook("meept.json5", func(commitHash string) error {
+		logger.Warn("config sync: meept.json5 changed on disk; daemon restart required for full effect",
+			"commit", commitHash)
+		return nil
+	})
+
+	// models.json5: LLMResolver has no Reload method. Surface a warning.
+	syncer.RegisterReloadHook("models.json5", func(commitHash string) error {
+		logger.Warn("config sync: models.json5 changed on disk; daemon restart required for LLM resolver to pick up changes",
+			"commit", commitHash)
+		return nil
+	})
+
+	// backup.json5: BackupScheduler reads config at construction time.
+	// Surface a warning.
+	syncer.RegisterReloadHook("backup.json5", func(commitHash string) error {
+		logger.Warn("config sync: backup config changed on disk; daemon restart required for backup scheduler to pick up changes",
+			"commit", commitHash)
+		return nil
+	})
 }
 
 // Start starts all components that need background processing.
@@ -2367,6 +2459,10 @@ func (c *Components) Start(ctx context.Context) error {
 			case "backup":
 				if c.BackupScheduler != nil {
 					c.BackupScheduler.Stop()
+				}
+			case "sync_puller":
+				if c.SyncPuller != nil {
+					c.SyncPuller.Stop()
 				}
 			}
 		}
@@ -2976,6 +3072,14 @@ func (c *Components) Start(ctx context.Context) error {
 		startedHandlers = append(startedHandlers, "config_sync")
 	}
 
+	// Start peer sync puller if enabled (merges peer backups into gossip DB)
+	if c.SyncPuller != nil {
+		go c.SyncPuller.Start(c.ctx)
+		c.Logger.Info("Peer sync puller started",
+			"pull_schedule", c.Config.PeerSync.PullSchedule.String())
+		startedHandlers = append(startedHandlers, "sync_puller")
+	}
+
 	started = true // signal success so the deferred rollback does not fire
 	return nil
 }
@@ -3018,6 +3122,26 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	if c.TelegramBot != nil {
 		c.TelegramBot.Stop()
 		c.Logger.Info("Telegram bot stopped")
+	}
+
+	// Stop peer sync puller before closing its gossip DB handle (which
+	// happens when the DualStore closes below). Stop() also cleans up
+	// temp files used during merge operations.
+	if c.SyncPuller != nil {
+		c.SyncPuller.Stop()
+		c.Logger.Info("Peer sync puller stopped")
+	}
+
+	// Stop backup scheduler and config syncer. The scheduler's Start loop
+	// is context-bound, but Stop() also closes its stopCh for a clean
+	// shutdown without relying solely on context cancellation.
+	if c.BackupScheduler != nil {
+		c.BackupScheduler.Stop()
+		c.Logger.Info("Backup scheduler stopped")
+	}
+	if c.ConfigSyncer != nil {
+		c.ConfigSyncer.Stop()
+		c.Logger.Info("Config syncer stopped")
 	}
 
 	// Stop sync handler and manager first (depends on queue events)

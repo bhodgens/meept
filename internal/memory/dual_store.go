@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -610,4 +612,519 @@ func memorySourceNode(mem *Memory) string {
 		}
 	}
 	return ""
+}
+
+// ---------- session / turn routing (T3.2 / T3.3) ----------
+
+// Session is the dual-store's session representation. It mirrors the
+// columns of the sessions table in schema_local.sql / schema_gossip.sql.
+// The fields are intentionally a subset of internal/session.Session that
+// are meaningful for cross-node replication; presentation-layer concerns
+// (workers, designation, etc.) stay in the session package.
+type Session struct {
+	ID             string                 `json:"id"`
+	Name           string                 `json:"name"`
+	ConversationID string                 `json:"conversation_id"`
+	CreatedAt      time.Time              `json:"created_at"`
+	LastActivity   time.Time              `json:"last_activity"`
+	Description    string                 `json:"description,omitempty"`
+	ProjectID      string                 `json:"project_id,omitempty"`
+	ProjectPath    string                 `json:"project_path,omitempty"`
+	NoFence        bool                   `json:"no_fence,omitempty"`
+	Metadata       map[string]any         `json:"metadata,omitempty"`
+	SourceNode     string                 `json:"source_node,omitempty"` // only set for gossip-sourced sessions
+}
+
+// Turn is the dual-store's turn representation, mirroring the turns table.
+type Turn struct {
+	TurnID      string         `json:"turn_id"`
+	SessionID   string         `json:"session_id"`
+	Role        string         `json:"role"`
+	Content     string         `json:"content"`
+	Timestamp   time.Time      `json:"timestamp"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	SourceNode  string         `json:"source_node,omitempty"` // only set for gossip-sourced turns
+}
+
+// sessionMetadataJSON serializes a session's metadata for SQL storage.
+func sessionMetadataJSON(m map[string]any) string {
+	if len(m) == 0 {
+		return "{}"
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+// StoreSession writes a session to local.db (this node owns it) and
+// publishes a SESSION_CREATED gossip event when a publisher is configured.
+// The caller must populate Session.ID; if it is empty the write is rejected
+// rather than silently generating one (sessions are created upstream by the
+// session store, which has its own ID generation contract).
+func (s *DualStore) StoreSession(ctx context.Context, sess *Session) error {
+	if sess == nil || sess.ID == "" {
+		return fmt.Errorf("dual store: StoreSession requires a non-empty session ID")
+	}
+
+	s.mu.Lock()
+	if err := s.storeSessionLocal(ctx, sess); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	pub := s.gossipPub
+	s.mu.Unlock()
+
+	if pub != nil {
+		s.publishSessionCreatedGossip(pub, sess)
+	}
+	return nil
+}
+
+// publishSessionCreatedGossip non-blocking broadcasts a SESSION_CREATED
+// event. Runs outside the DualStore mutex per CLAUDE.md mutex-scope rule.
+func (s *DualStore) publishSessionCreatedGossip(pub GossipPublisher, sess *Session) {
+	payload := models.SessionCreatedPayload{
+		SessionID: sess.ID,
+		Title:     sess.Name,
+		CreatedAt: sess.CreatedAt.UnixNano(),
+		Metadata:  sess.Metadata,
+	}
+	go func() {
+		if err := pub.PublishClusterEvent(models.EventTypeSessionCreated, payload); err != nil {
+			s.logger.Warn("dual store: session gossip publish failed", "session_id", sess.ID, "error", err)
+		}
+	}()
+}
+
+// StoreRemoteSession writes a session received from a peer to gossip.db.
+// Used by the gossip handler to record sessions observed from other nodes.
+func (s *DualStore) StoreRemoteSession(ctx context.Context, sess *Session, sourceNode string) error {
+	if sourceNode == "" {
+		return fmt.Errorf("dual store: StoreRemoteSession requires non-empty sourceNode")
+	}
+	if sess == nil || sess.ID == "" {
+		return fmt.Errorf("dual store: StoreRemoteSession requires a non-empty session")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.storeSessionGossip(ctx, sess, sourceNode)
+}
+
+func (s *DualStore) storeSessionLocal(ctx context.Context, sess *Session) error {
+	_, err := s.localDB.ExecContext(ctx,
+		`INSERT OR REPLACE INTO sessions
+		 (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, metadata_json)
+		 VALUES (?, ?, ?, ?, ?, '[]', '[]', ?, NULL, ?, ?, ?, ?)`,
+		sess.ID, sess.Name, sess.ConversationID,
+		sess.CreatedAt.UTC().Format(time.RFC3339Nano),
+		sess.LastActivity.UTC().Format(time.RFC3339Nano),
+		sess.Description,
+		sess.ProjectID, sess.ProjectPath,
+		boolToInt(sess.NoFence),
+		sessionMetadataJSON(sess.Metadata),
+	)
+	return err
+}
+
+func (s *DualStore) storeSessionGossip(ctx context.Context, sess *Session, sourceNode string) error {
+	_, err := s.gossipDB.ExecContext(ctx,
+		`INSERT OR REPLACE INTO sessions
+		 (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, metadata_json, source_node)
+		 VALUES (?, ?, ?, ?, ?, '[]', '[]', ?, NULL, ?, ?, ?, ?, ?)`,
+		sess.ID, sess.Name, sess.ConversationID,
+		sess.CreatedAt.UTC().Format(time.RFC3339Nano),
+		sess.LastActivity.UTC().Format(time.RFC3339Nano),
+		sess.Description,
+		sess.ProjectID, sess.ProjectPath,
+		boolToInt(sess.NoFence),
+		sessionMetadataJSON(sess.Metadata),
+		sourceNode,
+	)
+	return err
+}
+
+// boolToInt converts a bool to the integer representation used by SQLite.
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// StoreTurn writes a turn to local.db (this node created it) and publishes
+// a SESSION_TURN gossip event when a publisher is configured. Caller must
+// populate Turn.TurnID; the production path (session SQLiteStore) generates
+// IDs via pkg/id and passes them in.
+func (s *DualStore) StoreTurn(ctx context.Context, turn *Turn) error {
+	if turn == nil || turn.TurnID == "" {
+		return fmt.Errorf("dual store: StoreTurn requires a non-empty turn ID")
+	}
+
+	s.mu.Lock()
+	if err := s.storeTurnLocal(ctx, turn); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	pub := s.gossipPub
+	s.mu.Unlock()
+
+	if pub != nil {
+		s.publishTurnGossip(pub, turn)
+	}
+	return nil
+}
+
+// publishTurnGossip non-blocking broadcasts a SESSION_TURN event.
+// Runs outside the DualStore mutex per CLAUDE.md mutex-scope rule.
+func (s *DualStore) publishTurnGossip(pub GossipPublisher, turn *Turn) {
+	payload := models.SessionTurnPayload{
+		SessionID: turn.SessionID,
+		TurnID:    turn.TurnID,
+		Role:      turn.Role,
+		Content:   turn.Content,
+		Timestamp: turn.Timestamp.UnixNano(),
+	}
+	go func() {
+		if err := pub.PublishClusterEvent(models.EventTypeSessionTurn, payload); err != nil {
+			s.logger.Warn("dual store: turn gossip publish failed", "turn_id", turn.TurnID, "error", err)
+		}
+	}()
+}
+
+// StoreRemoteTurn writes a turn received from a peer to gossip.db. Used by
+// the gossip handler for SESSION_TURN events from other nodes.
+func (s *DualStore) StoreRemoteTurn(ctx context.Context, turn *Turn, sourceNode string) error {
+	if sourceNode == "" {
+		return fmt.Errorf("dual store: StoreRemoteTurn requires non-empty sourceNode")
+	}
+	if turn == nil || turn.TurnID == "" {
+		return fmt.Errorf("dual store: StoreRemoteTurn requires a non-empty turn")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.storeTurnGossip(ctx, turn, sourceNode)
+}
+
+func (s *DualStore) storeTurnLocal(ctx context.Context, turn *Turn) error {
+	_, err := s.localDB.ExecContext(ctx,
+		`INSERT OR REPLACE INTO turns
+		 (turn_id, session_id, role, content, timestamp, metadata_json)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		turn.TurnID, turn.SessionID, turn.Role, turn.Content,
+		turn.Timestamp.UTC().UnixNano(),
+		sessionMetadataJSON(turn.Metadata),
+	)
+	return err
+}
+
+func (s *DualStore) storeTurnGossip(ctx context.Context, turn *Turn, sourceNode string) error {
+	_, err := s.gossipDB.ExecContext(ctx,
+		`INSERT OR REPLACE INTO turns
+		 (turn_id, session_id, role, content, timestamp, metadata_json, source_node)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		turn.TurnID, turn.SessionID, turn.Role, turn.Content,
+		turn.Timestamp.UTC().UnixNano(),
+		sessionMetadataJSON(turn.Metadata),
+		sourceNode,
+	)
+	return err
+}
+
+// ---------- session / turn merged reads ----------
+
+// GetSession retrieves a session by ID, checking local.db first and then
+// gossip.db. Returns nil, nil when the session does not exist in either DB.
+func (s *DualStore) GetSession(ctx context.Context, sessionID string) (*Session, error) {
+	if sessionID == "" {
+		return nil, nil
+	}
+
+	if s.localDB != nil {
+		if ok, _ := s.tableExists(ctx, s.localDB, "sessions"); ok {
+			sess, err := scanSessionRow(s.localDB.QueryRowContext(ctx,
+				selectSessionColsLocal+" FROM sessions WHERE id = ?", sessionID), false)
+			if err != nil {
+				return nil, fmt.Errorf("dual store: query local session: %w", err)
+			}
+			if sess != nil {
+				return sess, nil
+			}
+		}
+	}
+
+	if s.gossipDB != nil {
+		if ok, _ := s.tableExists(ctx, s.gossipDB, "sessions"); ok {
+			sess, err := scanSessionRow(s.gossipDB.QueryRowContext(ctx,
+				selectSessionColsGossip+" FROM sessions WHERE id = ?", sessionID), true)
+			if err != nil {
+				return nil, fmt.Errorf("dual store: query gossip session: %w", err)
+			}
+			return sess, nil
+		}
+	}
+	return nil, nil
+}
+
+// GetSessions returns every session across both DBs (local first, then
+// gossip). Duplicate IDs are deduplicated: local wins.
+func (s *DualStore) GetSessions(ctx context.Context) ([]*Session, error) {
+	var out []*Session
+	seen := make(map[string]bool)
+
+	if s.localDB != nil {
+		if ok, _ := s.tableExists(ctx, s.localDB, "sessions"); ok {
+			rows, err := s.localDB.QueryContext(ctx, selectSessionColsLocal+" FROM sessions ORDER BY last_activity DESC")
+			if err != nil {
+				return nil, fmt.Errorf("dual store: query local sessions: %w", err)
+			}
+			sessions, err := scanSessionRows(rows, false)
+			rows.Close()
+			if err != nil {
+				return nil, err
+			}
+			for _, sess := range sessions {
+				seen[sess.ID] = true
+				out = append(out, sess)
+			}
+		}
+	}
+
+	if s.gossipDB != nil {
+		if ok, _ := s.tableExists(ctx, s.gossipDB, "sessions"); ok {
+			rows, err := s.gossipDB.QueryContext(ctx, selectSessionColsGossip+" FROM sessions ORDER BY last_activity DESC")
+			if err != nil {
+				return nil, fmt.Errorf("dual store: query gossip sessions: %w", err)
+			}
+			sessions, err := scanSessionRows(rows, true)
+			rows.Close()
+			if err != nil {
+				return nil, err
+			}
+			for _, sess := range sessions {
+				if !seen[sess.ID] {
+					out = append(out, sess)
+				}
+			}
+		}
+	}
+
+	return out, nil
+}
+
+// GetTurnsForSession returns all turns for a session (local first, then
+// gossip), ordered by timestamp ascending within each shard.
+func (s *DualStore) GetTurnsForSession(ctx context.Context, sessionID string) ([]*Turn, error) {
+	if sessionID == "" {
+		return nil, nil
+	}
+	var out []*Turn
+
+	if s.localDB != nil {
+		if ok, _ := s.tableExists(ctx, s.localDB, "turns"); ok {
+			rows, err := s.localDB.QueryContext(ctx,
+				selectTurnColsLocal+" FROM turns WHERE session_id = ? ORDER BY timestamp ASC", sessionID)
+			if err != nil {
+				return nil, fmt.Errorf("dual store: query local turns: %w", err)
+			}
+			turns, err := scanTurnRows(rows, false)
+			rows.Close()
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, turns...)
+		}
+	}
+
+	if s.gossipDB != nil {
+		if ok, _ := s.tableExists(ctx, s.gossipDB, "turns"); ok {
+			rows, err := s.gossipDB.QueryContext(ctx,
+				selectTurnColsGossip+" FROM turns WHERE session_id = ? ORDER BY timestamp ASC", sessionID)
+			if err != nil {
+				return nil, fmt.Errorf("dual store: query gossip turns: %w", err)
+			}
+			turns, err := scanTurnRows(rows, true)
+			rows.Close()
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, turns...)
+		}
+	}
+	return out, nil
+}
+
+// Column lists kept in one place so local/gossip reads stay in sync.
+const (
+	selectSessionColsLocal  = "SELECT id, name, conversation_id, created_at, last_activity, description, project_id, project_path, no_fence, metadata_json"
+	selectSessionColsGossip = selectSessionColsLocal + ", source_node"
+	selectTurnColsLocal     = "SELECT turn_id, session_id, role, content, timestamp, metadata_json"
+	selectTurnColsGossip    = selectTurnColsLocal + ", source_node"
+)
+
+// scanSessionRow scans a single session row. When fromGossip is true the
+// row is expected to include a trailing source_node column.
+func scanSessionRow(row *sql.Row, fromGossip bool) (*Session, error) {
+	var (
+		sess                Session
+		createdAt, lastAct  string
+		desc                sql.NullString
+		projID, projPath    sql.NullString
+		noFence             int
+		metaJSON            string
+		sourceNode          sql.NullString
+	)
+	var err error
+	if fromGossip {
+		err = row.Scan(&sess.ID, &sess.Name, &sess.ConversationID,
+			&createdAt, &lastAct, &desc, &projID, &projPath,
+			&noFence, &metaJSON, &sourceNode)
+	} else {
+		err = row.Scan(&sess.ID, &sess.Name, &sess.ConversationID,
+			&createdAt, &lastAct, &desc, &projID, &projPath,
+			&noFence, &metaJSON)
+	}
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	sess.Description = desc.String
+	sess.ProjectID = projID.String
+	sess.ProjectPath = projPath.String
+	sess.NoFence = noFence != 0
+	if sourceNode.Valid {
+		sess.SourceNode = sourceNode.String
+	}
+	if t := parseTimeRFC(createdAt); !t.IsZero() {
+		sess.CreatedAt = t
+	}
+	if t := parseTimeRFC(lastAct); !t.IsZero() {
+		sess.LastActivity = t
+	}
+	sess.Metadata = ParseMetadata(metaJSON)
+	return &sess, nil
+}
+
+// scanSessionRows scans a session rows iterator.
+func scanSessionRows(rows *sql.Rows, fromGossip bool) ([]*Session, error) {
+	var out []*Session
+	for rows.Next() {
+		var (
+			sess                Session
+			createdAt, lastAct  string
+			desc                sql.NullString
+			projID, projPath    sql.NullString
+			noFence             int
+			metaJSON            string
+			sourceNode          sql.NullString
+		)
+		var err error
+		if fromGossip {
+			err = rows.Scan(&sess.ID, &sess.Name, &sess.ConversationID,
+				&createdAt, &lastAct, &desc, &projID, &projPath,
+				&noFence, &metaJSON, &sourceNode)
+		} else {
+			err = rows.Scan(&sess.ID, &sess.Name, &sess.ConversationID,
+				&createdAt, &lastAct, &desc, &projID, &projPath,
+				&noFence, &metaJSON)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("dual store: scan session row: %w", err)
+		}
+		sess.Description = desc.String
+		sess.ProjectID = projID.String
+		sess.ProjectPath = projPath.String
+		sess.NoFence = noFence != 0
+		if sourceNode.Valid {
+			sess.SourceNode = sourceNode.String
+		}
+		if t := parseTimeRFC(createdAt); !t.IsZero() {
+			sess.CreatedAt = t
+		}
+		if t := parseTimeRFC(lastAct); !t.IsZero() {
+			sess.LastActivity = t
+		}
+		sess.Metadata = ParseMetadata(metaJSON)
+		out = append(out, &sess)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("dual store: session rows iteration: %w", err)
+	}
+	return out, nil
+}
+
+// scanTurnRows scans a turn rows iterator. When fromGossip is true the
+// row includes a trailing source_node column.
+func scanTurnRows(rows *sql.Rows, fromGossip bool) ([]*Turn, error) {
+	var out []*Turn
+	for rows.Next() {
+		var (
+			turn       Turn
+			tsUnix     int64
+			metaJSON   string
+			sourceNode sql.NullString
+		)
+		var err error
+		if fromGossip {
+			err = rows.Scan(&turn.TurnID, &turn.SessionID, &turn.Role,
+				&turn.Content, &tsUnix, &metaJSON, &sourceNode)
+		} else {
+			err = rows.Scan(&turn.TurnID, &turn.SessionID, &turn.Role,
+				&turn.Content, &tsUnix, &metaJSON)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("dual store: scan turn row: %w", err)
+		}
+		turn.Timestamp = time.Unix(0, tsUnix).UTC()
+		if sourceNode.Valid {
+			turn.SourceNode = sourceNode.String
+		}
+		turn.Metadata = ParseMetadata(metaJSON)
+		out = append(out, &turn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("dual store: turn rows iteration: %w", err)
+	}
+	return out, nil
+}
+
+// GetSessionTurnCountByOwner returns how many turns are stored locally vs
+// gossip. Useful for diagnostics and tests.
+func (s *DualStore) GetSessionTurnCountByOwner(ctx context.Context) (local int, gossip int, err error) {
+	if s.localDB != nil {
+		if exists, e := s.tableExists(ctx, s.localDB, "turns"); e == nil && exists {
+			s.localDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM turns").Scan(&local)
+		}
+	}
+	if s.gossipDB != nil {
+		if exists, e := s.tableExists(ctx, s.gossipDB, "turns"); e == nil && exists {
+			s.gossipDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM turns").Scan(&gossip)
+		}
+	}
+	return local, gossip, nil
+}
+
+// PublishTurn adapts the DualStore to the session package's
+// TurnGossipPublisher interface. It writes the turn to local.db and then
+// publishes a SESSION_TURN gossip event. The session package calls this
+// method (via the interface) after a successful SaveMessages commit so
+// that peers see the turn via gossip.
+//
+// The method is non-blocking: gossip publication runs in a goroutine.
+// The TurnID is caller-supplied and used as the primary key for
+// idempotency (INSERT OR REPLACE).
+func (s *DualStore) PublishTurn(sessionID, turnID, role, content string, ts time.Time) error {
+	turn := &Turn{
+		TurnID:    turnID,
+		SessionID: sessionID,
+		Role:      role,
+		Content:   content,
+		Timestamp: ts,
+	}
+	return s.StoreTurn(context.Background(), turn)
 }
