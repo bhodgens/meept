@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -240,4 +241,83 @@ func TestInvokeCallback_NilCallback(t *testing.T) {
 	// Invoke with nil callback should not panic
 	s.invokeCallback(nil, nil)
 	s.invokeCallback(&BackupManifest{}, nil)
+}
+
+// TestRunBackup_SHA256MatchesCompressedFile verifies that runBackup computes
+// the SHA256 hash on the actual compressed file path (regression test for the
+// path-suffix mismatch bug where CompressFile used to append ".zst" internally).
+//
+// The test exercises the compress + SHA256 portion of runBackup. The final git
+// commit step may fail in this minimal test environment (no remote configured,
+// absolute-path worktree edge cases) but the callback fires with the manifest
+// before that matters. The assertion is that the manifest's SHA256 matches a
+// fresh ComputeSHA256 on the CompressedPath.
+func TestRunBackup_SHA256MatchesCompressedFile(t *testing.T) {
+	tmp := t.TempDir()
+
+	cfg := config.BackupConfig{
+		Enabled:       true,
+		RepoURL:       tmp,
+		Schedule:      time.Hour,
+		RetentionDays: 7,
+		NodeID:        "test-node",
+		CheckoutDir:   tmp,
+	}
+
+	s, err := NewGitBackupScheduler(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewGitBackupScheduler: %v", err)
+	}
+
+	// Create a local.db so GetLocalDBPaths finds something to back up.
+	dbPath := filepath.Join(s.dataDir, "local.db")
+	dbContent := []byte("SQLite format 3\x00test backup sha verification")
+	if err := os.WriteFile(dbPath, dbContent, 0o644); err != nil {
+		t.Fatalf("WriteFile local.db: %v", err)
+	}
+
+	// Capture the manifest via callback.
+	var mu sync.Mutex
+	var gotManifest *BackupManifest
+	s.SetOnBackupDone(func(m *BackupManifest, e error) {
+		mu.Lock()
+		defer mu.Unlock()
+		gotManifest = m
+	})
+
+	if err := s.initRepo(); err != nil {
+		t.Fatalf("initRepo: %v", err)
+	}
+
+	// runBackup may fail at the git-commit step; that's OK — the compress and
+	// SHA256 steps run before git and the manifest is delivered via callback.
+	_ = s.runBackup(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if gotManifest == nil || len(gotManifest.Databases) == 0 {
+		t.Fatal("expected non-empty manifest with databases from callback")
+	}
+
+	dbInfo := gotManifest.Databases[0]
+
+	// The CompressedPath must exist on disk.
+	if _, err := os.Stat(dbInfo.CompressedPath); err != nil {
+		t.Fatalf("compressed file does not exist at %s: %v", dbInfo.CompressedPath, err)
+	}
+
+	// The SHA256 must match a fresh ComputeSHA256 on the CompressedPath.
+	actualSHA, err := ComputeSHA256(dbInfo.CompressedPath)
+	if err != nil {
+		t.Fatalf("ComputeSHA256(%s): %v", dbInfo.CompressedPath, err)
+	}
+	if actualSHA != dbInfo.SHA256 {
+		t.Errorf("SHA256 mismatch: manifest=%s, actual=%s (path=%s)",
+			dbInfo.SHA256, actualSHA, dbInfo.CompressedPath)
+	}
+
+	// No double-suffixed file should exist.
+	if _, err := os.Stat(dbInfo.CompressedPath + ".zst"); err == nil {
+		t.Errorf("unexpected double-suffixed file exists at %s.zst", dbInfo.CompressedPath)
+	}
 }

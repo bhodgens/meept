@@ -11,19 +11,16 @@ import (
 	"github.com/caimlas/meept/pkg/id"
 )
 
-// NOTE: The production GitBackupScheduler.runBackup has a latent bug where
-// CompressFile is called with a path ending in ".zst" (CompressFile appends
-// another ".zst"), then ComputeSHA256 is called on the non-suffixed path
-// (which doesn't exist). This is a pre-existing issue in internal/backup.
-//
-// These integration tests exercise the multi-machine backup flow using the
-// lower-level building blocks (CompressFile, BackupManifest, git operations)
-// to avoid the buggy RunNow code path. When the bug is fixed in the
-// production code, these tests can be upgraded to use RunNow directly.
+// NOTE: CompressFile previously appended ".zst" to the destination path
+// internally, which caused a path-suffix mismatch in runBackup. This has
+// been fixed: CompressFile now writes to exactly the path provided. These
+// tests exercise the multi-machine backup flow using lower-level building
+// blocks (CompressFile, BackupManifest, git operations) for focused
+// integration coverage.
 
 // backupOneDB compresses a single database file, computes its SHA256, and
 // writes a manifest. Returns the manifest. This mirrors what runBackup does
-// but with correct path handling (no double .zst suffix).
+// with correct path handling (CompressFile writes to the exact dst path).
 func backupOneDB(t *testing.T, dbPath, backupSubdir, nodeID string) *backup.BackupManifest {
 	t.Helper()
 
@@ -32,17 +29,14 @@ func backupOneDB(t *testing.T, dbPath, backupSubdir, nodeID string) *backup.Back
 	}
 
 	name := filepath.Base(dbPath)
-	// CompressFile appends ".zst" to dst, so pass the base name without .zst.
-	compressDst := filepath.Join(backupSubdir, name)
-	compressedSize, err := backup.CompressFile(dbPath, compressDst)
+	compressedPath := filepath.Join(backupSubdir, name+".zst")
+	compressedSize, err := backup.CompressFile(dbPath, compressedPath)
 	if err != nil {
 		t.Fatalf("CompressFile: %v", err)
 	}
-	// The actual compressed file is at compressDst + ".zst".
-	actualCompressedPath := compressDst + ".zst"
 
 	info, _ := os.Stat(dbPath)
-	sha, err := backup.ComputeSHA256(actualCompressedPath)
+	sha, err := backup.ComputeSHA256(compressedPath)
 	if err != nil {
 		t.Fatalf("ComputeSHA256: %v", err)
 	}
@@ -55,7 +49,7 @@ func backupOneDB(t *testing.T, dbPath, backupSubdir, nodeID string) *backup.Back
 				CompressedSize:   compressedSize,
 				UncompressedSize: info.Size(),
 				SHA256:           sha,
-				CompressedPath:   actualCompressedPath,
+				CompressedPath:   compressedPath,
 			},
 		},
 	}

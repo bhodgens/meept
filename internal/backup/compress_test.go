@@ -12,7 +12,7 @@ func TestCompressFile(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	dst := t.TempDir() + "/compressed"
+	dst := t.TempDir() + "/compressed.zst"
 	compressedSize, err := CompressFile(src, dst)
 	if err != nil {
 		t.Fatalf("CompressFile: %v", err)
@@ -21,15 +21,19 @@ func TestCompressFile(t *testing.T) {
 		t.Errorf("expected positive compressed size, got %d", compressedSize)
 	}
 
-	// Verify the .zst file exists
-	zstPath := dst + ".zst"
-	if _, err := os.Stat(zstPath); os.IsNotExist(err) {
-		t.Fatal("expected .zst file to exist")
+	// Verify the file exists at exactly the path we specified.
+	if _, err := os.Stat(dst); os.IsNotExist(err) {
+		t.Fatalf("expected compressed file to exist at %s", dst)
+	}
+
+	// Verify no double-suffixed file was created.
+	if _, err := os.Stat(dst + ".zst"); err == nil {
+		t.Errorf("unexpected double-suffixed file %s.zst was created", dst)
 	}
 }
 
 func TestCompressFile_NonExistentSrc(t *testing.T) {
-	dst := t.TempDir() + "/out"
+	dst := t.TempDir() + "/out.zst"
 	_, err := CompressFile("/nonexistent/file", dst)
 	if err == nil {
 		t.Fatal("expected error for nonexistent source")
@@ -49,7 +53,8 @@ func TestDecompressFile(t *testing.T) {
 
 	// Compress it
 	compressorDir := t.TempDir()
-	compressedSize, err := CompressFile(src, compressorDir+"/out")
+	compressedPath := compressorDir + "/out.zst"
+	compressedSize, err := CompressFile(src, compressedPath)
 	if err != nil {
 		t.Fatalf("CompressFile: %v", err)
 	}
@@ -60,7 +65,7 @@ func TestDecompressFile(t *testing.T) {
 	// Decompress
 	decompressDir := t.TempDir()
 	decPath := decompressDir + "/test.txt"
-	if err := DecompressFile(compressorDir+"/out.zst", decPath); err != nil {
+	if err := DecompressFile(compressedPath, decPath); err != nil {
 		t.Fatalf("DecompressFile: %v", err)
 	}
 

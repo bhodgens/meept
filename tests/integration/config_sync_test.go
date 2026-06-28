@@ -117,10 +117,11 @@ func runOnePullCycle(syncer *config.ConfigSyncer) {
 	syncer.Stop()
 }
 
-// TestConfigSyncer_PullAndMerge_ApplySharedConfig sets up a bare git repo,
-// creates a ConfigSyncer (which does the initial shallow clone), then pushes
-// a second commit with a shared config file. The first pull cycle detects the
-// change, triggers the merger, and writes the file to the base directory.
+// TestConfigSyncer_PullAndMerge_ApplySharedConfig sets up a bare git repo with
+// a shared config file, creates a ConfigSyncer (which does the initial shallow
+// clone), and verifies the first pull cycle applies the config to the target
+// directory. This exercises the "first pull forces merge" fix: a fresh clone
+// whose HEAD already matches origin/main must still trigger the merge step.
 func TestConfigSyncer_PullAndMerge_ApplySharedConfig(t *testing.T) {
 	t.Parallel()
 	requireGit(t)
@@ -133,16 +134,9 @@ func TestConfigSyncer_PullAndMerge_ApplySharedConfig(t *testing.T) {
 	initBareRepo(t, bareRepo)
 	initWorkRepo(t, workDir, bareRepo)
 
-	// Initial commit (so ConfigSyncer's shallow clone has something to fetch).
-	writeFiles(t, workDir, map[string]string{
-		"README.md": "# config repo\n",
-	})
-	commitAndPush(t, workDir, "initial")
-
-	// Create the syncer — this triggers a shallow clone of commit 1.
-	syncer := newConfigSyncer(t, bareRepo, baseDir, "node-test")
-
-	// Push a second commit with the shared config.
+	// Push a single commit containing the shared config. The ConfigSyncer
+	// will shallow-clone this commit, and the first pull cycle must detect
+	// that configs need to be applied even though HEAD didn't change.
 	sharedContent := `{
   // shared setting
   "name": "shared-config",
@@ -153,7 +147,11 @@ func TestConfigSyncer_PullAndMerge_ApplySharedConfig(t *testing.T) {
 	})
 	commitAndPush(t, workDir, "add shared config")
 
-	// Now the pull cycle should detect the new commit and merge.
+	// Create the syncer — this triggers a shallow clone of the only commit.
+	syncer := newConfigSyncer(t, bareRepo, baseDir, "node-test")
+
+	// The first pull cycle should apply the config even though HEAD is
+	// already at origin/main (changed=false from Pull).
 	runOnePullCycle(syncer)
 
 	appliedPath := filepath.Join(baseDir, "app.json5")

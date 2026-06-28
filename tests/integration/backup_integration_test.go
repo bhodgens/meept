@@ -96,11 +96,10 @@ func TestTempManagerIntegration(t *testing.T) {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	compressedFile := filepath.Join(tmpDir, "compressed.db")
+	compressedFile := filepath.Join(tmpDir, "compressed.db.zst")
 	if _, err := backup.CompressFile(tempFile, compressedFile); err != nil {
 		t.Fatalf("CompressFile failed: %v", err)
 	}
-	compressedFile += ".zst" // CompressFile adds .zst suffix
 
 	// Test: ReservePeerDB (decompress)
 	tempPath, err := tempMgr.ReservePeerDB(compressedFile)

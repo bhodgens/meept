@@ -18,11 +18,11 @@ func makeCompressedPeerBackup(t *testing.T, dir, baseName string, payload []byte
 		t.Fatalf("WriteFile %s: %v", srcPath, err)
 	}
 
-	dstStem := filepath.Join(dir, baseName+".compressed")
-	if _, err := CompressFile(srcPath, dstStem); err != nil {
+	dstPath := filepath.Join(dir, baseName+".zst")
+	if _, err := CompressFile(srcPath, dstPath); err != nil {
 		t.Fatalf("CompressFile: %v", err)
 	}
-	return dstStem + ".zst"
+	return dstPath
 }
 
 // TestTempManager_ReservePeerDB_CreatesUniquePath verifies that ReservePeerDB

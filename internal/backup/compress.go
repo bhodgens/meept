@@ -11,7 +11,9 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-// CompressFile compresses src to dst.zst using zstd and returns the compressed size.
+// CompressFile compresses src to dst using zstd and returns the compressed size.
+// The caller is responsible for including any desired suffix (e.g. ".zst") in dst;
+// the function writes to exactly the path given.
 func CompressFile(src, dst string) (compressedSize int64, err error) {
 	// Read source file
 	srcData, err := os.ReadFile(src)
@@ -25,7 +27,7 @@ func CompressFile(src, dst string) (compressedSize int64, err error) {
 	}
 
 	// Compress with zstd (default level for speed)
-	dstFile, err := os.Create(dst + ".zst")
+	dstFile, err := os.Create(dst)
 	if err != nil {
 		return 0, Wrap("compress_write", err)
 	}
@@ -53,7 +55,7 @@ func CompressFile(src, dst string) (compressedSize int64, err error) {
 	return int64(n), nil
 }
 
-// DecompressFile decompresses src.zst to dst.
+// DecompressFile decompresses src (a zstd-compressed file) to dst.
 func DecompressFile(src, dst string) error {
 	// Open compressed file
 	srcFile, err := os.Open(src)

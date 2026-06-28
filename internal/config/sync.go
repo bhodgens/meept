@@ -36,8 +36,9 @@ type ConfigSyncer struct {
 	baseDir string
 
 	// State
-	lastCommitHash string
-	mu             sync.Mutex
+	lastCommitHash    string
+	lastAppliedCommit string // empty until first successful merge; forces merge on first pull
+	mu                sync.Mutex
 
 	// Background ticker control
 	ticker      *time.Ticker
@@ -114,6 +115,9 @@ func (s *ConfigSyncer) run(ctx context.Context) {
 }
 
 // pullOnce fetches from the git repo, merges configs, and triggers reload hooks.
+// On the very first pull (when lastAppliedCommit is empty), the merge is forced
+// even if HEAD did not change, so that a fresh shallow clone's configs are
+// applied on the first cycle rather than silently skipped.
 func (s *ConfigSyncer) pullOnce(ctx context.Context) error {
 	newCommit, changed, err := s.checkout.Pull(ctx)
 	if err != nil {
@@ -122,9 +126,12 @@ func (s *ConfigSyncer) pullOnce(ctx context.Context) error {
 
 	s.mu.Lock()
 	s.lastCommitHash = newCommit
+	// firstPull is true when no commit has ever been successfully applied.
+	firstPull := s.lastAppliedCommit == ""
 	s.mu.Unlock()
 
-	if !changed {
+	// Skip merge only when this isn't the first pull AND nothing changed.
+	if !changed && !firstPull {
 		return nil
 	}
 
@@ -133,6 +140,12 @@ func (s *ConfigSyncer) pullOnce(ctx context.Context) error {
 	if err != nil {
 		return &ConfigSyncError{Op: "merge", Path: s.baseDir, Err: err}
 	}
+
+	// Record that we have now applied a commit, so subsequent no-change pulls
+	// skip the merge as expected.
+	s.mu.Lock()
+	s.lastAppliedCommit = newCommit
+	s.mu.Unlock()
 
 	if len(result.Errors) > 0 {
 		for _, e := range result.Errors {
@@ -169,18 +182,27 @@ func (s *ConfigSyncer) LastCommitHash() string {
 	return s.lastCommitHash
 }
 
+// LastAppliedCommit returns the commit hash of the most recent successfully
+// merged pull. Returns empty string if no merge has ever completed.
+func (s *ConfigSyncer) LastAppliedCommit() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastAppliedCommit
+}
+
 // Status returns current sync status information.
 func (s *ConfigSyncer) Status() SyncStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	status := SyncStatus{
-		Enabled:    s.cfg.Enabled,
-		RepoURL:    s.cfg.RepoURL,
-		PullRate:   s.cfg.PullSchedule.String(),
-		NodeID:     s.nodeID,
-		LastCommit: s.lastCommitHash,
-		Checkout:   s.checkout.Path(),
+		Enabled:         s.cfg.Enabled,
+		RepoURL:         s.cfg.RepoURL,
+		PullRate:        s.cfg.PullSchedule.String(),
+		NodeID:          s.nodeID,
+		LastCommit:      s.lastCommitHash,
+		LastAppliedCommit: s.lastAppliedCommit,
+		Checkout:        s.checkout.Path(),
 	}
 
 	if dirty, err := s.checkout.IsDirty(); err == nil {
@@ -220,13 +242,14 @@ func (s *ConfigSyncer) RegisterReloadHook(path string, fn ReloadFunc) {
 
 // SyncStatus carries snapshot data about sync state.
 type SyncStatus struct {
-	Enabled    bool   `json:"enabled"`
-	RepoURL    string `json:"repo_url"`
-	PullRate   string `json:"pull_rate"`
-	NodeID     string `json:"node_id"`
-	LastCommit string `json:"last_commit"`
-	Checkout   string `json:"checkout"`
-	Dirty      bool   `json:"dirty"`
+	Enabled           bool   `json:"enabled"`
+	RepoURL           string `json:"repo_url"`
+	PullRate          string `json:"pull_rate"`
+	NodeID            string `json:"node_id"`
+	LastCommit        string `json:"last_commit"`
+	LastAppliedCommit string `json:"last_applied_commit,omitempty"`
+	Checkout          string `json:"checkout"`
+	Dirty             bool   `json:"dirty"`
 }
 
 // ReloadRegistry is exported for use in daemon wiring.
