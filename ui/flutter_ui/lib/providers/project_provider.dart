@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/api_models.dart' show Project;
 import '../services/sdk_client.dart';
 import 'providers.dart';
 
@@ -54,9 +56,16 @@ class CurrentProjectNotifier extends StateNotifier<CurrentProject> {
         state = CurrentProject.empty;
         return;
       }
-      final id = active['id'] as String? ?? '';
-      final name = active['name'] as String? ?? '';
-      final mode = active['mode'] as String? ?? '';
+
+      // Delegate parsing to the typed Project model so defaults match
+      // other surfaces (branches_panel, resolveActiveProjectProvider, etc.):
+      //   - name defaults to id when omitted
+      //   - mode defaults to 'git' when omitted
+      // Hand-rolled casts here previously diverged on both fields.
+      final project = Project.fromJson(active);
+      final id = project.id;
+      final name = project.name;
+      final mode = project.mode;
 
       String branch = '';
       bool dirty = false;
@@ -65,8 +74,9 @@ class CurrentProjectNotifier extends StateNotifier<CurrentProject> {
           final status = await _client.getProjectStatus(id);
           branch = status['branch'] as String? ?? '';
           dirty = status['dirty'] as bool? ?? false;
-        } catch (_) {
+        } catch (e) {
           // Status fetch is best-effort; indicator degrades to name-only.
+          debugPrint('[warn] currentProjectProvider status fetch: $e');
         }
       }
       state = CurrentProject(
@@ -76,7 +86,8 @@ class CurrentProjectNotifier extends StateNotifier<CurrentProject> {
         branch: branch,
         dirty: dirty,
       );
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[warn] currentProjectProvider refresh: $e');
       state = CurrentProject.empty;
     }
   }

@@ -70,6 +70,34 @@ class _StatusFailsSdkClient extends SdkApiClient {
   }
 }
 
+/// Stub returning an active local-mode (non-git) project. Calling
+/// [getProjectStatus] fails the test — the provider must skip the status
+/// fetch for non-git projects.
+class _LocalModeSdkClient extends SdkApiClient {
+  _LocalModeSdkClient() : super(host: 'localhost', port: 8081);
+
+  @override
+  Future<List<Map<String, dynamic>>> listProjects() async {
+    return [
+      {
+        'id': 'p1',
+        'name': 'local-proj',
+        'mode': 'local',
+        'status': 'active',
+      },
+    ];
+  }
+
+  @override
+  Future<Map<String, dynamic>> getProjectStatus(String projectId) {
+    // Provider must NOT call this for non-git mode — fail loudly.
+    fail(
+      'getProjectStatus should NOT be called for non-git mode '
+      '(projectId=$projectId)',
+    );
+  }
+}
+
 // ===== Tests =====
 
 void main() {
@@ -156,6 +184,28 @@ void main() {
       final state = container.read(currentProjectProvider);
       expect(state.isActive, isTrue);
       expect(state.id, 'p1');
+      expect(state.branch, isEmpty);
+      expect(state.dirty, isFalse);
+    });
+
+    test('local-mode project: no status fetch, branch/dirty stay empty',
+        () async {
+      final container = ProviderContainer(
+        overrides: [
+          sdkClientProvider.overrideWithValue(_LocalModeSdkClient()),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(currentProjectProvider.notifier).refresh();
+
+      // Project resolves with the typed-model defaults; no status call
+      // was made (would have failed the test via the stub above).
+      final state = container.read(currentProjectProvider);
+      expect(state.isActive, isTrue);
+      expect(state.id, 'p1');
+      expect(state.name, 'local-proj');
+      expect(state.mode, 'local');
       expect(state.branch, isEmpty);
       expect(state.dirty, isFalse);
     });
