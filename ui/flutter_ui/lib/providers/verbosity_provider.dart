@@ -23,16 +23,19 @@ class VerbosityLevel {
   }
 }
 
-/// Current verbosity level. Persisted to client config on change (see
-/// the save path in HomeScreen._cycleVerbosity).
-final verbosityProvider = StateProvider<int>((ref) => VerbosityLevel.normal);
+/// Current verbosity level. Cycle via VerbosityNotifier.cycle().
+/// Wiring (Ctrl+V + persistence) lands in HomeScreen per Task 3.3 of the plan.
+class VerbosityNotifier extends StateNotifier<int> {
+  VerbosityNotifier() : super(VerbosityLevel.normal);
 
-/// Cycle 0 -> 1 -> 2 -> 0. Matches TUI Ctrl+V (app.go:727).
-extension VerbosityCycle on StateController<int> {
-  void cycleVerbosity() {
+  /// Cycle 0 -> 1 -> 2 -> 0. Matches TUI Ctrl+V (app.go:727).
+  void cycle() {
     state = (state + 1) % 3;
   }
 }
+
+final verbosityProvider =
+    StateNotifierProvider<VerbosityNotifier, int>((ref) => VerbosityNotifier());
 
 /// Pure predicate used by ChatNotifier to filter agent events by tier.
 /// Mirrors TUI app.go:1347: `if tier <= a.verbosity`.

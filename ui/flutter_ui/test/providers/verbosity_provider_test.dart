@@ -10,18 +10,24 @@ void main() {
       expect(container.read(verbosityProvider), 1);
     });
 
-    test('cycleVerbosity rotates 1 -> 2 -> 0 -> 1', () {
+    test('cycle rotates 1 -> 2 -> 0 -> 1', () {
       final container = ProviderContainer();
       addTearDown(container.dispose);
 
-      container.read(verbosityProvider.notifier).cycleVerbosity();
+      container.read(verbosityProvider.notifier).cycle();
       expect(container.read(verbosityProvider), 2);
 
-      container.read(verbosityProvider.notifier).cycleVerbosity();
+      container.read(verbosityProvider.notifier).cycle();
       expect(container.read(verbosityProvider), 0);
 
-      container.read(verbosityProvider.notifier).cycleVerbosity();
+      container.read(verbosityProvider.notifier).cycle();
       expect(container.read(verbosityProvider), 1);
+    });
+
+    test('VerbosityLevel.name returns correct strings', () {
+      expect(VerbosityLevel.name(VerbosityLevel.quiet), 'quiet');
+      expect(VerbosityLevel.name(VerbosityLevel.normal), 'normal');
+      expect(VerbosityLevel.name(VerbosityLevel.verbose), 'verbose');
     });
 
     test('shouldEmitAgentEvent drops events with tier > current verbosity', () {
