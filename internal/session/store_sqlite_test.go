@@ -1555,3 +1555,105 @@ func TestSQLiteStore_GetCompactionEntries_MultipleEntries(t *testing.T) {
 		t.Errorf("second entry: expected 2 compressed IDs, got %d", len(entries[1].CompressedIDs))
 	}
 }
+
+func TestArchiveSession(t *testing.T) {
+	store, _ := testHelper(t)
+	defer store.Close()
+
+	session, err := store.Create("test-archive")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := store.Archive(session.ID, true); err != nil {
+		t.Fatalf("Archive: %v", err)
+	}
+
+	got := store.Get(session.ID)
+	if got == nil {
+		t.Fatalf("Get returned nil")
+	}
+	if !got.Archived {
+		t.Fatalf("expected Archived=true, got false")
+	}
+
+	if err := store.Archive(session.ID, false); err != nil {
+		t.Fatalf("Archive(false): %v", err)
+	}
+	got = store.Get(session.ID)
+	if got == nil {
+		t.Fatalf("Get after unarchive returned nil")
+	}
+	if got.Archived {
+		t.Fatalf("expected Archived=false after unarchive, got true")
+	}
+}
+
+func TestListSortsArchivedToBottom(t *testing.T) {
+	store, _ := testHelper(t)
+	defer store.Close()
+
+	now := time.Now().UTC()
+	older := now.Add(-2 * time.Hour)
+	newer := now.Add(-1 * time.Hour)
+
+	// old-active has older LastActivity than new-archived, but new-archived
+	// must still sort BELOW old-active because archived sorts to bottom
+	// regardless of activity. List() requires at least one assistant message
+	// per session, so seed each with one.
+	mustCreate := func(id string, name string, last time.Time, archived bool) {
+		s, err := store.Create(name)
+		if err != nil {
+			t.Fatalf("Create %s: %v", id, err)
+		}
+		// Override last_activity to control ordering.
+		if err := store.setLastActivityForTest(s.ID, last); err != nil {
+			t.Fatalf("setLastActivityForTest %s: %v", id, err)
+		}
+		// Seed an assistant message so List() returns this session.
+		if err := store.SaveMessages(s.ID, []Message{
+			{SessionID: s.ID, Role: "assistant", Content: "seed", Timestamp: last, EntryType: "message", BranchID: "main"},
+		}); err != nil {
+			t.Fatalf("SaveMessages %s: %v", id, err)
+		}
+		if archived {
+			if err := store.Archive(s.ID, true); err != nil {
+				t.Fatalf("Archive %s: %v", id, err)
+			}
+		}
+	}
+
+	mustCreate("old-active", "old active", older, false)
+	mustCreate("new-archived", "new archived", newer, true)
+
+	sessions, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	var oldActiveIdx, newArchivedIdx int = -1, -1
+	for i, s := range sessions {
+		switch s.Name {
+		case "old active":
+			oldActiveIdx = i
+		case "new archived":
+			newArchivedIdx = i
+		}
+	}
+	if oldActiveIdx < 0 || newArchivedIdx < 0 {
+		t.Fatalf("expected both sessions in List result, got %d sessions: %+v", len(sessions), sessions)
+	}
+	if oldActiveIdx > newArchivedIdx {
+		t.Fatalf("expected old-active (idx %d) BEFORE new-archived (idx %d); archived must sort to bottom",
+			oldActiveIdx, newArchivedIdx)
+	}
+}
+
+// setLastActivityForTest is a test-only helper that directly updates
+// last_activity for a session, allowing deterministic ordering in List tests.
+func (s *SQLiteStore) setLastActivityForTest(sessionID string, ts time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec("UPDATE sessions SET last_activity = ? WHERE id = ?", ts.Format(time.RFC3339), sessionID) //nolint:mutexio,gosec // test-only
+	return err
+}

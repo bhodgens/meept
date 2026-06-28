@@ -157,6 +157,9 @@ func (s *SQLiteStore) migrate() error {
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN project_path TEXT DEFAULT ''", "project_path")
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN no_fence BOOLEAN DEFAULT 0", "no_fence")
 
+	// Add archived column (soft-archive flag; default 0 = not archived).
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN archived BOOLEAN DEFAULT 0", "archived")
+
 	// Create session_tool_calls table
 	toolCallsSchema := `
 	CREATE TABLE IF NOT EXISTS session_tool_calls (
@@ -469,7 +472,7 @@ func (s *SQLiteStore) GetMostRecent() *Session {
 	defer s.mu.RUnlock()
 
 	row := s.db.QueryRow(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived
 		FROM sessions
 		ORDER BY last_activity DESC
 		LIMIT 1`) //nolint:mutexio // mutex serializes sqlite connection access
@@ -481,7 +484,7 @@ func (s *SQLiteStore) getByColumn(column, value string) *Session {
 	// #nosec G201 -- column name is hardcoded at call sites, not user input
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived
 		FROM sessions
 		WHERE %s = ?`, column)
 
@@ -498,9 +501,10 @@ func (s *SQLiteStore) scanSession(row *sql.Row) *Session {
 		leafMessageID             sql.NullInt64
 		projectID, projectPath    sql.NullString
 		noFence                   bool
+		archived                  bool
 	)
 
-	err := row.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence)
+	err := row.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived)
 	if err != nil {
 		if err != sql.ErrNoRows {
 			s.logger.Error("Failed to scan session", "error", err)
@@ -513,6 +517,7 @@ func (s *SQLiteStore) scanSession(row *sql.Row) *Session {
 		Name:           name,
 		ConversationID: convID,
 		NoFence:        noFence,
+		Archived:       archived,
 	}
 
 	if description.Valid {
@@ -551,13 +556,13 @@ func (s *SQLiteStore) List() ([]*Session, error) {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description, s.leaf_message_id, s.project_id, s.project_path, s.no_fence
+		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description, s.leaf_message_id, s.project_id, s.project_path, s.no_fence, s.archived
 		FROM sessions s
 		WHERE EXISTS (
 			SELECT 1 FROM session_messages sm
 			WHERE sm.session_id = s.id AND sm.role = 'assistant'
 		)
-		ORDER BY s.last_activity DESC`) //nolint:mutexio // mutex serializes sqlite connection access
+		ORDER BY s.archived ASC, s.last_activity DESC`) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		s.logger.Error("Failed to list sessions", "error", err)
 		return nil, fmt.Errorf("failed to list sessions: %w", err)
@@ -582,9 +587,10 @@ func (s *SQLiteStore) scanSessionRows(rows *sql.Rows) []*Session {
 			leafMessageID             sql.NullInt64
 			projectID, projectPath    sql.NullString
 			noFence                   bool
+			archived                  bool
 		)
 
-		if err := rows.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence); err != nil {
+		if err := rows.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived); err != nil {
 			s.logger.Error("Failed to scan session row", "error", err)
 			continue
 		}
@@ -594,6 +600,7 @@ func (s *SQLiteStore) scanSessionRows(rows *sql.Rows) []*Session {
 			Name:           name,
 			ConversationID: convID,
 			NoFence:        noFence,
+			Archived:       archived,
 		}
 
 		if description.Valid {
@@ -959,6 +966,25 @@ func (s *SQLiteStore) UpdateName(sessionID, name string) error {
 	return nil
 }
 
+// Archive sets the archived flag on a session. Pass archived=true to archive,
+// false to unarchive. Returns an error if the session doesn't exist or the
+// update fails. Error message contains "not found" when no row matches.
+func (s *SQLiteStore) Archive(sessionID string, archived bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec("UPDATE sessions SET archived = ? WHERE id = ?", archived, sessionID) //nolint:mutexio // mutex serializes sqlite connection access
+	if err != nil {
+		return fmt.Errorf("failed to update archived flag: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
 
 // UpdateDesignation sets the session's designation status.
 func (s *SQLiteStore) UpdateDesignation(sessionID string, status DesignationStatus, reason, priority string) error {
@@ -1133,7 +1159,7 @@ func (s *SQLiteStore) getByColumnUnsafe(column, value string) *Session {
 	// #nosec G201 -- column name is hardcoded at call sites, not user input
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived
 		FROM sessions
 		WHERE %s = ?`, column)
 

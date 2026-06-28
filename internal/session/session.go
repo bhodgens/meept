@@ -484,6 +484,20 @@ func (s *MemoryStore) UpdateName(sessionID, name string) error {
 	return nil
 }
 
+// Archive sets the archived flag on a session. Pass archived=true to archive,
+// false to unarchive. Returns an error if the session doesn't exist.
+func (s *MemoryStore) Archive(sessionID string, archived bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.Archived = archived
+	return nil
+}
+
 // UpdateDesignation sets the session's designation status.
 func (s *MemoryStore) UpdateDesignation(sessionID string, status DesignationStatus, reason, priority string) error {
 	s.mu.Lock()
