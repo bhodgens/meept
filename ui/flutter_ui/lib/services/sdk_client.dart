@@ -238,6 +238,28 @@ class SdkApiClient {
     }
   }
 
+  /// PATCH helper. Some endpoints (e.g. session archive) return 204
+  /// No Content with an empty body; Dio's default JSON decoder raises
+  /// on an empty body, so we coerce null/empty responses to `{}`.
+  Future<Map<String, dynamic>> _patch(String path,
+      {Map<String, dynamic>? body, Map<String, dynamic>? query}) async {
+    try {
+      final response = await _dio.patch(
+        path,
+        data: body,
+        queryParameters: query,
+      );
+      final data = response.data;
+      if (data == null) return {};
+      if (data is Map<String, dynamic>) return data;
+      // Dio may return the raw body for non-JSON responses (204).
+      if (data is String && data.isEmpty) return {};
+      return data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
   Future<void> _delete(String path) async {
     try {
       await _dio.delete(path);
@@ -465,6 +487,16 @@ class SdkApiClient {
 
   Future<void> deleteSession(String id) async {
     await _delete('/api/v1/sessions/$id');
+  }
+
+  /// PATCH /api/v1/sessions/{id} -- set the archived flag.
+  ///
+  /// Backend returns 204 No Content on success; the [_patch] helper
+  /// coerces the empty response to `{}` so callers can treat this
+  /// as `Future<void>`.
+  Future<void> archiveSession(String sessionId,
+      {required bool archived}) async {
+    await _patch('/api/v1/sessions/$sessionId', body: {'archived': archived});
   }
 
   /// Returns the raw `plans` array for `/api/v1/sessions/{sessionId}/plans`.
@@ -1012,6 +1044,14 @@ class SdkApiClient {
     }
   }
 
+  /// GET /api/v1/projects/{id}/status -- current branch + dirty state.
+  ///
+  /// Returns the raw status payload from the backend (shape defined by
+  /// services.Project.GetProjectStatus).
+  Future<Map<String, dynamic>> getProjectStatus(String projectId) async {
+    return _get('/api/v1/projects/$projectId/status');
+  }
+
   /// Returns the raw `branches` array.  Callers deserialize via `BranchInfo.fromJson`.
   Future<List<Map<String, dynamic>>> listBranches(String projectId) async {
     try {
@@ -1122,6 +1162,25 @@ class SdkApiClient {
 
   Future<void> saveClientConfig(String content) async {
     await _post('/api/v1/config/client', body: {'content': content});
+  }
+
+  /// POST /api/v1/config/client -- merge-patch a single field into the
+  /// client config.
+  ///
+  /// Example: `setClientConfig({'chat': {'verbosity': 'verbose'}})`.
+  ///
+  /// NOTE: as of 2026-06-28, the backend `handleSaveClientConfig`
+  /// handler expects the body shape `{"content": <full-file-string>}` --
+  /// i.e. a full-file replacement, NOT a JSON merge-patch. This method
+  /// will currently 400 against that handler. Tracked as a backend gap
+  /// to either (a) add a dedicated PATCH /api/v1/config/client route or
+  /// (b) extend the existing handler to accept a structured patch.
+  /// The Dart-side API is added now so UI work can proceed against the
+  /// intended contract; callers should prefer [saveClientConfig] until
+  /// the backend lands.
+  // ignore: unused_element
+  Future<void> setClientConfig(Map<String, dynamic> patch) async {
+    await _post('/api/v1/config/client', body: patch);
   }
 
   Future<String> getModelsConfig() async {
