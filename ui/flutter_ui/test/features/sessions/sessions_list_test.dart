@@ -233,6 +233,48 @@ void main() {
       await notifier.deleteSession(firstId);
       expect(notifier.state.sessions, hasLength(_testSessions.length - 1));
     });
+
+    // Regression: stale error must be cleared on every success path.
+    // SessionState.copyWith uses an _unset sentinel, so omitting `error:`
+    // preserves any prior error — once a banner shows it stays stuck.
+    test('deleteSession clears prior error on success', () async {
+      final client = _TestSdkClient(_testSessions);
+      final notifier = SessionNotifier(sdkClient: client);
+      // Seed an error via a failing load.
+      final throwing = SessionNotifier(sdkClient: _ThrowingSdkClient());
+      await throwing.loadSessions();
+      expect(throwing.state.error, isNotNull);
+      // Simulate error carrying over by copying state into `notifier`.
+      notifier.state = notifier.state.copyWith(error: throwing.state.error);
+      expect(notifier.state.error, isNotNull);
+
+      await notifier.deleteSession(_testSessions[0].id);
+      expect(notifier.state.error, isNull);
+    });
+
+    test('archiveSession clears prior error on success', () async {
+      final client = _TestSdkClient(_testSessions);
+      final notifier = SessionNotifier(sdkClient: client);
+      await notifier.loadSessions();
+      // Seed an error.
+      notifier.state = notifier.state.copyWith(error: 'prior failure');
+      expect(notifier.state.error, isNotNull);
+
+      await notifier.archiveSession(_testSessions[0].id);
+      expect(notifier.state.error, isNull);
+    });
+
+    test('unarchiveSession clears prior error on success', () async {
+      final client = _TestSdkClient(_testSessions);
+      final notifier = SessionNotifier(sdkClient: client);
+      await notifier.loadSessions();
+      // Seed an error.
+      notifier.state = notifier.state.copyWith(error: 'prior failure');
+      expect(notifier.state.error, isNotNull);
+
+      await notifier.unarchiveSession(_testSessions[0].id);
+      expect(notifier.state.error, isNull);
+    });
   });
 }
 
@@ -288,6 +330,11 @@ class _TestSdkClient extends SdkApiClient {
     // No-op for seed list here because _sessions is final; tests that need
     // delete-from-seed semantics build a client with the seed and rely on
     // the notifier filtering locally.
+  }
+
+  @override
+  Future<void> archiveSession(String sessionId, {required bool archived}) async {
+    // No-op: the notifier flips the flag locally. Tests only assert state.
   }
 }
 

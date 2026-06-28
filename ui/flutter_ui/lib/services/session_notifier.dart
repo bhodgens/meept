@@ -82,6 +82,7 @@ class SessionNotifier extends StateNotifier<SessionState> {
       await sdkClient.deleteSession(id);
       state = state.copyWith(
         sessions: state.sessions.where((s) => s.id != id).toList(),
+        error: null,
       );
     } catch (e) {
       state = state.copyWith(
@@ -126,7 +127,7 @@ SessionState _withArchiveFlag(
     return s;
   }).toList();
   updated.sort(_sessionSort);
-  return current.copyWith(sessions: updated);
+  return current.copyWith(sessions: updated, error: null);
 }
 
 /// Comparator: non-archived first, then by lastActivity descending
