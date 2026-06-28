@@ -463,6 +463,9 @@ class Session with _$Session {
       toJson: _serializeDesignation,
     )
     SessionDesignation? designation,
+    @Default(false)
+    @JsonKey(name: 'archived')
+    bool archived,
   }) = _Session;
 
   factory Session.fromJson(Map<String, dynamic> json) =>
