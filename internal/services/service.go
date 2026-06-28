@@ -56,6 +56,7 @@ type ServiceRegistry struct {
 	Thread       *ThreadService
 	Employee     *EmployeeService
 	Reflection   *ReflectionService
+	Prompt       *PromptService
 }
 
 // Config holds dependencies for service instantiation.
@@ -207,6 +208,10 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 	// ReflectionService is always available — it just needs a queue path
 	// (defaults to ".meept/improvements.md" when empty).
 	reg.Reflection = NewReflectionService(cfg.ReflectionQueuePath)
+
+	// PromptService is always available — it reads from the standard 4-tier
+	// prompts hierarchy on disk and has no external dependencies.
+	reg.Prompt = NewDefaultPromptService()
 
 	return reg, nil
 }

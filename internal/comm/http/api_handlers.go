@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -1265,6 +1266,24 @@ func (s *Server) handleFirewallStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stats := s.FirewallStatsGetter()
+	if stats == nil {
+		stats = map[string]any{}
+	}
+
+	s.writeJSON(w, http.StatusOK, stats)
+}
+
+// handleClusterMetrics handles GET /api/v1/cluster/metrics (Task 4.8).
+// Returns gossip-engine observability counters. When no cluster is
+// configured or the daemon hasn't wired metrics, the endpoint returns an
+// empty object so clients can rely on a stable shape.
+func (s *Server) handleClusterMetrics(w http.ResponseWriter, _ *http.Request) {
+	if s.ClusterMetricsGetter == nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{})
+		return
+	}
+
+	stats := s.ClusterMetricsGetter()
 	if stats == nil {
 		stats = map[string]any{}
 	}
@@ -3871,4 +3890,159 @@ func (s *Server) handleReflectionRemember(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s.writeJSON(w, http.StatusCreated, map[string]any{KeyStatus: KeyQueued, "target": body.Target})
+}
+
+// --- Prompt template handlers ---
+
+// handlePromptsList handles GET /api/v1/prompts.
+// Returns all discoverable templates with their tier and source path.
+func (s *Server) handlePromptsList(w http.ResponseWriter, _ *http.Request) {
+	if s.services == nil || s.services.Prompt == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "prompt service not available")
+		return
+	}
+	entries, err := s.services.Prompt.List()
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{"prompts": entries})
+}
+
+// handlePromptsGet handles GET /api/v1/prompts/{path}.
+// Returns the content and metadata for one template. The {path} wildcard
+// captures slash-separated names (Go 1.22 ServeMux {path} matches a single
+// segment; we use r.PathValue and fall back to URL decoding).
+func (s *Server) handlePromptsGet(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Prompt == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "prompt service not available")
+		return
+	}
+	name := r.PathValue("path")
+	if name == "" {
+		// Fall back to URL decoding the remainder for clients that send
+		// encoded slashes.
+		name = strings.TrimPrefix(r.URL.EscapedPath(), "/api/v1/prompts/")
+		dec, err := url.QueryUnescape(name)
+		if err == nil {
+			name = dec
+		}
+	}
+	if name == "" {
+		s.writeError(w, http.StatusBadRequest, "missing template name")
+		return
+	}
+	detail, err := s.services.Prompt.Get(name)
+	if err != nil {
+		s.writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, detail)
+}
+
+// handlePromptsPut handles PUT /api/v1/prompts/{path}.
+// Writes content to the user-local override path after validation.
+func (s *Server) handlePromptsPut(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Prompt == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "prompt service not available")
+		return
+	}
+	name := r.PathValue("path")
+	if name == "" {
+		name = strings.TrimPrefix(r.URL.EscapedPath(), "/api/v1/prompts/")
+		dec, err := url.QueryUnescape(name)
+		if err == nil {
+			name = dec
+		}
+	}
+	if name == "" {
+		s.writeError(w, http.StatusBadRequest, "missing template name")
+		return
+	}
+	var body struct {
+		Content string `json:"content"`
+	}
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	if err := s.services.Prompt.Put(name, body.Content); err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		KeyStatus: "saved",
+		"path":    s.services.Prompt.UserOverridePath(name),
+	})
+}
+
+// handlePromptsDelete handles DELETE /api/v1/prompts/{path}.
+// Removes the user-local override (bundled templates are never deleted).
+func (s *Server) handlePromptsDelete(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Prompt == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "prompt service not available")
+		return
+	}
+	name := r.PathValue("path")
+	if name == "" {
+		name = strings.TrimPrefix(r.URL.EscapedPath(), "/api/v1/prompts/")
+		dec, err := url.QueryUnescape(name)
+		if err == nil {
+			name = dec
+		}
+	}
+	if name == "" {
+		s.writeError(w, http.StatusBadRequest, "missing template name")
+		return
+	}
+	if err := s.services.Prompt.Delete(name); err != nil {
+		s.writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{KeyStatus: "deleted"})
+}
+
+// handlePromptsValidate handles POST /api/v1/prompts/validate.
+// Body: {"name": "<optional>"} — without name, validates all templates.
+func (s *Server) handlePromptsValidate(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Prompt == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "prompt service not available")
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	_ = s.readJSON(w, r, &body) // body is optional; empty body = validate all
+
+	if body.Name != "" {
+		if err := s.services.Prompt.ValidateOne(body.Name); err != nil {
+			s.writeJSON(w, http.StatusOK, map[string]any{
+				"name":   body.Name,
+				"valid":  false,
+				"error":  err.Error(),
+			})
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]any{
+			"name":  body.Name,
+			"valid": true,
+		})
+		return
+	}
+	errs := s.services.Prompt.ValidateAll()
+	results := make([]map[string]string, 0, len(errs))
+	for _, e := range errs {
+		msg := e.Err.Error()
+		if msg == "" {
+			msg = e.Msg
+		}
+		results = append(results, map[string]string{
+			"name":  e.Name,
+			"error": msg,
+		})
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"valid":    len(errs) == 0,
+		"errors":   results,
+		"checked":  len(errs),
+	})
 }

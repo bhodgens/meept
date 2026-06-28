@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"text/template"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -204,6 +206,8 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 		return h.executeRemember(cmd.Args)
 	case "implement-improvements", "improvements":
 		return h.executeImplementImprovements(cmd.Args)
+	case "prompts":
+		return h.executePrompts(cmd.Args)
 	default:
 		return &CommandResult{
 			Output:  fmt.Sprintf("unknown command: %s", cmd.Name),
@@ -244,6 +248,8 @@ func (h *CommandHandler) executeHelp(args []string) *CommandResult {
 	sb.WriteString("  /remember <rule>    save a proposed improvement to the queue\n")
 	sb.WriteString("  /implement-improvements [list|apply <id>|skip <id>]\n")
 	sb.WriteString("                      review and apply or skip pending proposals\n")
+	sb.WriteString("  /prompts [list|show <name>|validate]\n")
+	sb.WriteString("                      browse prompt templates (planner, orchestrator, reflection)\n")
 
 	return &CommandResult{Output: sb.String()}
 }
@@ -444,6 +450,28 @@ examples:
   /implement-improvements              list pending proposals
   /implement-improvements apply ab12cd3 apply proposal with id ab12cd3
   /implement-improvements skip ab12cd3  skip proposal with id ab12cd3`,
+
+		"prompts": `usage: /prompts [list|show <name>|validate]
+
+browse and inspect the markdown prompt templates used by the planner,
+orchestrator, and reflection subsystems. templates are discovered from a
+4-tier hierarchy: project (.meept/prompts/) > user (~/.meept/prompts/)
+> system (~/.config/meept/prompts/) > bundled (config/prompts/).
+
+subcommands:
+  list              list all discoverable templates (default)
+  show <name>       show the content of one template
+  validate          validate all templates parse as text/template
+
+name can be a full path (planner/interview.md) or shorthand (interview).
+
+to edit a template, use the CLI:
+  meept prompts edit <name>
+
+examples:
+  /prompts                          list all templates
+  /prompts show planner/decompose   show the decompose template
+  /prompts validate                 validate all templates`,
 	}
 
 	if text, ok := helpTexts[name]; ok {
@@ -890,6 +918,227 @@ func (h *CommandHandler) improvementsSkip(queue *agent.ProposalQueueExternal, id
 		return &CommandResult{Output: fmt.Sprintf("skip: %v", err), IsError: true}
 	}
 	return &CommandResult{Output: fmt.Sprintf("skipped: %s", id)}
+}
+
+// executePrompts provides a read-only browser for the 4-tier prompt template
+// hierarchy. Subcommands: list (default), show <name>, validate.
+// Edit is done via the CLI (`meept prompts edit <name>`).
+func (h *CommandHandler) executePrompts(args []string) *CommandResult {
+	sub := "list"
+	if len(args) > 0 {
+		sub = strings.ToLower(strings.TrimSpace(args[0]))
+	}
+	switch sub {
+	case "list", "":
+		return h.promptsList()
+	case "show":
+		if len(args) < 2 {
+			return &CommandResult{Output: "usage: /prompts show <name>", IsError: true}
+		}
+		return h.promptsShow(strings.TrimSpace(args[1]))
+	case "validate":
+		return h.promptsValidate()
+	default:
+		return &CommandResult{
+			Output:  fmt.Sprintf("unknown subcommand: %s (expected list|show <name>|validate)", sub),
+			IsError: true,
+		}
+	}
+}
+
+// promptsList lists all discoverable prompt templates using the local 4-tier
+// hierarchy (no daemon connection required — templates are files on disk).
+func (h *CommandHandler) promptsList() *CommandResult {
+	entries := discoverPromptTemplates()
+	if len(entries) == 0 {
+		return &CommandResult{Output: "no prompt templates found"}
+	}
+	var sb strings.Builder
+	for _, e := range entries {
+		fmt.Fprintf(&sb, "  %-40s  [%s]  %s\n", e.name, e.tier, e.source)
+	}
+	fmt.Fprintf(&sb, "\ntotal: %d templates\n", len(entries))
+	fmt.Fprintf(&sb, "(use /prompts show <name> to inspect; meept prompts edit <name> to edit)\n")
+	return &CommandResult{Output: strings.TrimRight(sb.String(), "\n")}
+}
+
+// promptsShow shows the content of one template.
+func (h *CommandHandler) promptsShow(name string) *CommandResult {
+	tier, full, content, ok := findPromptTemplate(name)
+	if !ok {
+		return &CommandResult{Output: fmt.Sprintf("template %q not found", name), IsError: true}
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "# source: %s (tier: %s)\n", full, tier)
+	sb.Write(content)
+	return &CommandResult{Output: strings.TrimRight(sb.String(), "\n")}
+}
+
+// promptsValidate validates all templates parse as text/template.
+func (h *CommandHandler) promptsValidate() *CommandResult {
+	entries := discoverPromptTemplates()
+	if len(entries) == 0 {
+		return &CommandResult{Output: "no prompt templates found"}
+	}
+	var sb strings.Builder
+	failures := 0
+	for _, e := range entries {
+		if err := validatePromptFile(e.source); err != nil {
+			fmt.Fprintf(&sb, "FAIL  %s  %v\n", e.name, err)
+			failures++
+			continue
+		}
+		fmt.Fprintf(&sb, "ok    %s\n", e.name)
+	}
+	if failures > 0 {
+		fmt.Fprintf(&sb, "\n%d/%d templates failed validation\n", failures, len(entries))
+		return &CommandResult{Output: strings.TrimRight(sb.String(), "\n"), IsError: true}
+	}
+	fmt.Fprintf(&sb, "\nall %d templates valid\n", len(entries))
+	return &CommandResult{Output: strings.TrimRight(sb.String(), "\n")}
+}
+
+// promptEntry is a local discovery result for the TUI prompt browser.
+type promptEntry struct {
+	name   string
+	tier   string
+	source string
+}
+
+// discoverPromptTemplates walks the 4-tier hierarchy and returns
+// de-duplicated entries (highest-priority tier wins). No daemon connection
+// required.
+func discoverPromptTemplates() []promptEntry {
+	home, _ := os.UserHomeDir()
+	tiers := []struct {
+		label string
+		dir   string
+	}{
+		{"project", ".meept/prompts"},
+		{"user", filepath.Join(home, ".meept", "prompts")},
+		{"system", filepath.Join(home, ".config", "meept", "prompts")},
+		{"bundled", "config/prompts"},
+	}
+	seen := make(map[string]promptEntry)
+	for _, tier := range tiers {
+		var files []string
+		_ = filepath.Walk(tier.dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return nil
+			}
+			if !strings.HasSuffix(strings.ToLower(path), ".md") {
+				return nil
+			}
+			rel, _ := filepath.Rel(tier.dir, path)
+			rel = filepath.ToSlash(rel)
+			files = append(files, rel)
+			return nil
+		})
+		for _, rel := range files {
+			if _, ok := seen[rel]; ok {
+				continue
+			}
+			full := filepath.Join(tier.dir, rel)
+			seen[rel] = promptEntry{name: rel, tier: tier.label, source: full}
+		}
+	}
+	result := make([]promptEntry, 0, len(seen))
+	for _, v := range seen {
+		result = append(result, v)
+	}
+	for i := 1; i < len(result); i++ {
+		for j := i; j > 0 && result[j-1].name > result[j].name; j-- {
+			result[j], result[j-1] = result[j-1], result[j]
+		}
+	}
+	return result
+}
+
+// findPromptTemplate walks tiers and returns the first match for name.
+func findPromptTemplate(name string) (tier, fullPath string, content []byte, ok bool) {
+	name = normalizePromptNameTUI(name)
+	home, _ := os.UserHomeDir()
+	tiers := []struct {
+		label string
+		dir   string
+	}{
+		{"project", ".meept/prompts"},
+		{"user", filepath.Join(home, ".meept", "prompts")},
+		{"system", filepath.Join(home, ".config", "meept", "prompts")},
+		{"bundled", "config/prompts"},
+	}
+	for _, t := range tiers {
+		full := filepath.Join(t.dir, name)
+		body, err := os.ReadFile(full)
+		if err == nil {
+			return t.label, full, body, true
+		}
+	}
+	return "", "", nil, false
+}
+
+// validatePromptFile reads and validates a template file.
+func validatePromptFile(path string) error {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	body := strings.TrimSpace(string(content))
+	if body == "" {
+		return fmt.Errorf("template is empty")
+	}
+	stripped := stripFrontmatterTUI(body)
+	if _, err := template.New("validate").Parse(stripped); err != nil {
+		return fmt.Errorf("parse error: %w", err)
+	}
+	return nil
+}
+
+// normalizePromptNameTUI converts shorthand to full relative path.
+func normalizePromptNameTUI(name string) string {
+	name = strings.TrimSpace(name)
+	name = strings.ReplaceAll(name, "\\", "/")
+	name = strings.TrimPrefix(name, "/")
+	if !strings.Contains(name, "/") {
+		base := strings.TrimSuffix(name, ".md")
+		return "planner/" + base + ".md"
+	}
+	if !strings.HasSuffix(strings.ToLower(name), ".md") {
+		name += ".md"
+	}
+	return name
+}
+
+// stripFrontmatterTUI removes YAML frontmatter from body.
+func stripFrontmatterTUI(body string) string {
+	const marker = "---"
+	if !strings.HasPrefix(body, marker+"\n") && !strings.HasPrefix(body, marker+"\r\n") {
+		return body
+	}
+	rest := body[len(marker):]
+	if strings.HasPrefix(rest, "\r\n") {
+		rest = rest[2:]
+	} else {
+		rest = rest[1:]
+	}
+	searches := []string{
+		"\n" + marker + "\n",
+		"\r\n" + marker + "\r\n",
+		"\n" + marker + "\r\n",
+		"\r\n" + marker + "\n",
+	}
+	for _, s := range searches {
+		if idx := strings.Index(rest, s); idx >= 0 {
+			return rest[idx+len(s):]
+		}
+	}
+	if strings.HasSuffix(rest, "\n"+marker) {
+		return ""
+	}
+	if strings.HasSuffix(rest, "\r\n"+marker) {
+		return ""
+	}
+	return body
 }
 
 // executeTasks lists tasks with their status.

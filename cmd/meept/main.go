@@ -156,6 +156,7 @@ Analytics:
 	rootCmd.AddCommand(newAnalyticsCmd())
 	rootCmd.AddCommand(newTTSCmd())
 	rootCmd.AddCommand(newImprovementsCmd())
+	rootCmd.AddCommand(newPromptsCmd())
 	rootCmd.AddCommand(newBackupCmd())
 	rootCmd.AddCommand(newSyncCmd())
 	rootCmd.AddCommand(newMigrateCmd())

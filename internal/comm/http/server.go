@@ -131,6 +131,11 @@ type Server struct {
 	// pipeline statistics. Used by the compression stats handler.
 	CompressionStatsGetter func() map[string]any
 
+	// ClusterMetricsGetter is an optional callback that returns a snapshot
+	// of gossip-engine observability counters (Task 4.8). Renders nil/empty
+	// when cluster is disabled or metrics aren't wired.
+	ClusterMetricsGetter func() map[string]any
+
 	wsHub *WebSocketHub
 
 	// wsSubscribers holds bus subscribers created in WithWebSocket so they can be
@@ -969,6 +974,7 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/metrics/historical", s.handleHistoricalMetrics)
 	mux.HandleFunc("GET /api/v1/metrics/stream", s.handleMetricsStream)
 	mux.HandleFunc("GET /api/v1/metrics/rate-limits", s.handleRateLimitSummary)
+	mux.HandleFunc("GET /api/v1/cluster/metrics", s.handleClusterMetrics)
 
 	// Runtime management endpoints
 	mux.HandleFunc("GET /api/v1/runtime/status", s.handleRuntimeStatus)
@@ -1221,6 +1227,13 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/reflection/proposals/{id}/apply", s.handleReflectionApply)
 	mux.HandleFunc("POST /api/v1/reflection/proposals/{id}/skip", s.handleReflectionSkip)
 	mux.HandleFunc("POST /api/v1/reflection/remember", s.handleReflectionRemember)
+
+	// Prompt template endpoints (4-tier discovery: list, get, put, delete)
+	mux.HandleFunc("GET /api/v1/prompts", s.handlePromptsList)
+	mux.HandleFunc("GET /api/v1/prompts/{path}", s.handlePromptsGet)
+	mux.HandleFunc("PUT /api/v1/prompts/{path}", s.handlePromptsPut)
+	mux.HandleFunc("DELETE /api/v1/prompts/{path}", s.handlePromptsDelete)
+	mux.HandleFunc("POST /api/v1/prompts/validate", s.handlePromptsValidate)
 }
 
 // middleware applies common middleware (CORS, logging, auth).

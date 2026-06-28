@@ -29,9 +29,11 @@ func (r *ReloadRegistry) Register(path string, fn ReloadFunc) {
 
 // Trigger calls all hooks registered for the given path.
 // Errors from individual hooks are logged but don't stop subsequent hooks.
+// The commitHash is forwarded to each hook so it can log or correlate the
+// change with the git commit that introduced it.
 func (r *ReloadRegistry) Trigger(path string, commitHash string) {
 	r.mu.RLock()
-	fns := r.hooks[path]
+	fns := append([]ReloadFunc(nil), r.hooks[path]...)
 	r.mu.RUnlock()
 
 	for i, fn := range fns {
@@ -46,7 +48,7 @@ func (r *ReloadRegistry) Trigger(path string, commitHash string) {
 						"hook", i, "path", path, "recovered", rec)
 				}
 			}()
-			if err := fn(nil, nil); err != nil {
+			if err := fn(commitHash); err != nil {
 				r.logger.Warn("config sync: reload hook returned error",
 					"hook", i, "path", path, "error", err, "commit", commitHash)
 			}

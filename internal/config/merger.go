@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -99,7 +100,14 @@ func (m *Merger) mergeSharedConfigs(result *MergeResult) error {
 	return nil
 }
 
-// mergeNodeOverrides copies nodes/<node_id>/*.json5 from checkout dir into ~/.meept/ (overwriting shared).
+// mergeNodeOverrides deep-merges nodes/<node_id>/*.json5 from the checkout dir
+// into ~/.meept/ on top of the shared configs already written there.
+//
+// Unlike shared configs (which are copied wholesale), node overrides are
+// merged key-by-key so that operators can override individual nested fields
+// without having to republish the entire file. TOML node overrides fall back
+// to wholesale replacement because deep-merge semantics across TOML's typed
+// tables are not well-defined for this use case.
 func (m *Merger) mergeNodeOverrides(result *MergeResult) error {
 	if m.nodeID == "" {
 		return nil
@@ -128,12 +136,129 @@ func (m *Merger) mergeNodeOverrides(result *MergeResult) error {
 		src := filepath.Join(nodeDir, name)
 		dst := filepath.Join(m.baseDir, name)
 
-		if err := m.applyConfigFile(src, dst, result); err != nil {
-			result.Errors = append(result.Errors, err)
+		if strings.HasSuffix(name, ".json5") {
+			if err := m.applyMergedConfigFile(src, dst, result); err != nil {
+				result.Errors = append(result.Errors, err)
+			}
+		} else {
+			// TOML: no deep merge — overwrite wholesale.
+			if err := m.applyConfigFile(src, dst, result); err != nil {
+				result.Errors = append(result.Errors, err)
+			}
 		}
 	}
 
 	return nil
+}
+
+// applyMergedConfigFile deep-merges the JSON5 src file on top of the JSON5
+// file at dst (which was previously written by mergeSharedConfigs). If dst
+// does not exist or cannot be parsed, src is applied wholesale as a fallback.
+func (m *Merger) applyMergedConfigFile(src, dst string, result *MergeResult) error {
+	srcData, err := os.ReadFile(src)
+	if err != nil {
+		return &ConfigSyncError{Op: "read_src", Path: src, Err: err}
+	}
+
+	// Standardize src to plain JSON for parsing.
+	srcStd, err := hujson.Standardize(srcData)
+	if err != nil {
+		// Defer to applyConfigFile's validation/error handling.
+		return m.applyConfigFile(src, dst, result)
+	}
+
+	var srcObj map[string]any
+	if err := json.Unmarshal(srcStd, &srcObj); err != nil {
+		// Not an object (e.g. top-level array) — fall back to wholesale copy.
+		return m.applyConfigFile(src, dst, result)
+	}
+
+	// Read current dst contents (written by mergeSharedConfigs earlier in
+	// the same Merge pass, or carried over from a prior pass). If dst is
+	// missing or unparseable, fall back to wholesale copy via applyConfigFile.
+	var merged map[string]any
+	if dstData, readErr := os.ReadFile(dst); readErr == nil {
+		if dstStd, stdErr := hujson.Standardize(dstData); stdErr == nil {
+			_ = json.Unmarshal(dstStd, &merged) // best-effort; merged may remain nil
+		}
+	}
+
+	if merged == nil {
+		// No base to merge into — wholesale copy is correct.
+		return m.applyConfigFile(src, dst, result)
+	}
+
+	merged = deepMerge(merged, srcObj)
+
+	// Marshal back to JSON5-compatible JSON. We don't try to preserve
+	// comments or formatting because hujson.Standardize on input already
+	// discarded them when the shared file was applied. Keeping formatting
+	// stable across merges isn't worth a JSON5 serializer dep.
+	outData, err := json.MarshalIndent(merged, "", "  ")
+	if err != nil {
+		return &ConfigSyncError{Op: "merge_marshal", Path: dst, Err: err}
+	}
+	// Append trailing newline for POSIX friendliness.
+	outData = append(outData, '\n')
+
+	hash := stringHash(outData)
+	if existing, ok := m.fileHashes[dst]; ok && existing == hash {
+		result.FilesSkipped = append(result.FilesSkipped, filepath.Base(src))
+		return nil
+	}
+
+	dstDir := filepath.Dir(dst)
+	if err := os.MkdirAll(dstDir, 0o700); err != nil {
+		return &ConfigSyncError{Op: "write_dst", Path: dst, Err: err}
+	}
+
+	tmpFile := dst + ".tmp"
+	if err := os.WriteFile(tmpFile, outData, 0o600); err != nil {
+		return &ConfigSyncError{Op: "write_tmp", Path: tmpFile, Err: err}
+	}
+	if err := os.Rename(tmpFile, dst); err != nil {
+		_ = os.Remove(tmpFile)
+		return &ConfigSyncError{Op: "rename_dst", Path: dst, Err: err}
+	}
+
+	m.fileHashes[dst] = hash
+	result.FilesApplied = append(result.FilesApplied, filepath.Base(src))
+
+	m.logger.Info("config sync: deep-merged node override",
+		"file", filepath.Base(src), "node", m.nodeID)
+
+	return nil
+}
+
+// deepMerge returns a new map that merges src on top of dst:
+//   - Object values are recursively merged.
+//   - Array and scalar values from src replace the corresponding dst value.
+//   - A JSON null in src deletes the corresponding key from dst.
+//
+// dst is not mutated; the returned map shares sub-maps only at unmodified keys.
+func deepMerge(dst, src map[string]any) map[string]any {
+	out := make(map[string]any, len(dst))
+	for k, v := range dst {
+		out[k] = v
+	}
+	for k, sv := range src {
+		if sv == nil {
+			// null in src → delete key.
+			delete(out, k)
+			continue
+		}
+		if dv, ok := out[k]; ok {
+			if dvMap, dOk := dv.(map[string]any); dOk {
+				if svMap, sOk := sv.(map[string]any); sOk {
+					out[k] = deepMerge(dvMap, svMap)
+					continue
+				}
+			}
+		}
+		// Arrays and scalars: src overrides dst.
+		out[k] = sv
+	}
+	return out
 }
 
 // applyConfigFile validates and applies a single config file from src → dst atomically.

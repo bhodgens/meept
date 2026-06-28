@@ -9,7 +9,11 @@ import (
 )
 
 // ReloadFunc is called when a config file changes and needs to be reloaded.
-type ReloadFunc func(oldCfg, newCfg *Config) error
+// The commitHash identifies the git commit that introduced the change.
+// Hooks are responsible for re-reading the file from disk if they need the
+// new contents; the registry does not parse configs (they may be any format:
+// JSON5, TOML, etc.) and therefore cannot hand the hook parsed old/new pairs.
+type ReloadFunc func(commitHash string) error
 
 // ConfigSyncer manages periodic config pulling from a git repo, merging,
 // and triggering reload hooks when configs change.

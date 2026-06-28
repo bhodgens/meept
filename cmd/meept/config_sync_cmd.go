@@ -20,6 +20,7 @@ func newConfigSyncCmd() *cobra.Command {
 
 	cmd.AddCommand(newConfigSyncStatusCmd())
 	cmd.AddCommand(newConfigSyncPullCmd())
+	cmd.AddCommand(newConfigSyncPushCmd())
 
 	return cmd
 }
@@ -90,4 +91,41 @@ func newConfigSyncPullCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// newConfigSyncPushCmd creates the "meept config sync push" subcommand.
+// It commits any local config changes and pushes them to the remote
+// config repo via the config_sync.push RPC method.
+func newConfigSyncPushCmd() *cobra.Command {
+	var message string
+	cmd := &cobra.Command{
+		Use:   "push",
+		Short: "push local config changes",
+		Long:  "Commit any local configuration changes and push them to the shared config git repo.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer client.Close()
+
+			// Build params. We always send a JSON object so the daemon
+			// can default the message server-side when empty.
+			params := []byte("{}")
+			if message != "" {
+				params = []byte(fmt.Sprintf(`{"message":%q}`, message))
+			}
+
+			result, err := client.Call("config_sync.push", params)
+			if err != nil {
+				return fmt.Errorf("config sync push failed: %w", err)
+			}
+
+			fmt.Fprintln(os.Stdout, string(result))
+			return nil
+		},
+	}
+	// Lowercase flag description per CLAUDE.md UI convention.
+	cmd.Flags().StringVar(&message, "message", "", "commit message override")
+	return cmd
 }

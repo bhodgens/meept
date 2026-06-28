@@ -78,6 +78,9 @@ var builtinCommands = map[string]struct{}{
 	// require an eager RPC fetch at startup which would block the TUI, so it
 	// is a future enhancement.
 	"skill": {},
+
+	// Prompt template browser (read-only via TUI; editing via CLI).
+	"prompts": {},
 }
 
 // CommandTasks is the "tasks" command name, exported for compatibility with tui/constants.go.

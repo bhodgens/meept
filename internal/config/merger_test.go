@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -83,6 +85,27 @@ func TestMergeNodeOverrides(t *testing.T) {
 
 	if len(result.FilesApplied) == 0 {
 		t.Error("expected at least one file to be applied")
+	}
+
+	// Verify deep-merge semantics: the merged file should contain BOTH
+	// the shared socket_path and the node-only log_level.
+	dstPath := filepath.Join(tmpDir, "meept.json5")
+	data, err := os.ReadFile(dstPath)
+	if err != nil {
+		t.Fatalf("merged config not written: %v", err)
+	}
+	body := string(data)
+	if !strings.Contains(body, "socket_path") {
+		t.Errorf("deep-merge dropped shared key 'socket_path': %s", body)
+	}
+	if !strings.Contains(body, "log_level") {
+		t.Errorf("deep-merge dropped node override key 'log_level': %s", body)
+	}
+	if !strings.Contains(body, "/tmp/meept.sock") {
+		t.Errorf("deep-merge dropped shared value for socket_path: %s", body)
+	}
+	if !strings.Contains(body, "debug") {
+		t.Errorf("deep-merge dropped node override value 'debug': %s", body)
 	}
 }
 
@@ -234,3 +257,226 @@ type testLogger struct{}
 func (l *testLogger) Info(msg string, keysAndValues ...interface{}) {}
 func (l *testLogger) Warn(msg string, keysAndValues ...interface{}) {}
 func (l *testLogger) Debug(msg string, keysAndValues ...interface{}) {}
+
+// ---- deepMerge unit tests ----
+
+func TestDeepMerge_NestedKeyMerge(t *testing.T) {
+	dst := map[string]any{
+		"daemon": map[string]any{
+			"socket_path": "/tmp/meept.sock",
+			"log_level":   "info",
+		},
+		"unchanged": "kept",
+	}
+	src := map[string]any{
+		"daemon": map[string]any{
+			"log_level": "debug",
+		},
+		"added": "new",
+	}
+
+	out := deepMerge(dst, src)
+
+	daemon, ok := out["daemon"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected daemon map, got %T", out["daemon"])
+	}
+	if daemon["socket_path"] != "/tmp/meept.sock" {
+		t.Errorf("expected shared nested key preserved, got %v", daemon["socket_path"])
+	}
+	if daemon["log_level"] != "debug" {
+		t.Errorf("expected src nested override applied, got %v", daemon["log_level"])
+	}
+	if out["unchanged"] != "kept" {
+		t.Errorf("expected top-level dst key preserved, got %v", out["unchanged"])
+	}
+	if out["added"] != "new" {
+		t.Errorf("expected top-level src key added, got %v", out["added"])
+	}
+}
+
+func TestDeepMerge_ArrayReplaceNotConcat(t *testing.T) {
+	dst := map[string]any{
+		"plugins": []any{"a", "b", "c"},
+	}
+	src := map[string]any{
+		"plugins": []any{"x"},
+	}
+
+	out := deepMerge(dst, src)
+
+	got, ok := out["plugins"].([]any)
+	if !ok {
+		t.Fatalf("expected []any, got %T", out["plugins"])
+	}
+	if len(got) != 1 || got[0] != "x" {
+		t.Errorf("expected array replaced with ['x'], got %v", got)
+	}
+}
+
+func TestDeepMerge_NullDeletesKey(t *testing.T) {
+	dst := map[string]any{
+		"keep":   1,
+		"delete": "value",
+	}
+	src := map[string]any{
+		"delete": nil,
+	}
+
+	out := deepMerge(dst, src)
+
+	if _, ok := out["delete"]; ok {
+		t.Error("expected 'delete' key removed by null in src")
+	}
+	if out["keep"] != 1 {
+		t.Errorf("expected 'keep' preserved, got %v", out["keep"])
+	}
+}
+
+func TestDeepMerge_ScalarOverride(t *testing.T) {
+	dst := map[string]any{
+		"port":   float64(8080),
+		"debug":  false,
+		"title":  "old",
+	}
+	src := map[string]any{
+		"port":  float64(9090),
+		"debug": true,
+	}
+
+	out := deepMerge(dst, src)
+
+	if out["port"] != float64(9090) {
+		t.Errorf("expected port overridden to 9090, got %v", out["port"])
+	}
+	if out["debug"] != true {
+		t.Errorf("expected debug overridden to true, got %v", out["debug"])
+	}
+	if out["title"] != "old" {
+		t.Errorf("expected title preserved, got %v", out["title"])
+	}
+}
+
+func TestDeepMerge_DstNotMutated(t *testing.T) {
+	dst := map[string]any{
+		"daemon": map[string]any{"log_level": "info"},
+	}
+	src := map[string]any{
+		"daemon": map[string]any{"log_level": "debug"},
+	}
+
+	_ = deepMerge(dst, src)
+
+	daemon, ok := dst["daemon"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected dst daemon map intact, got %T", dst["daemon"])
+	}
+	if daemon["log_level"] != "info" {
+		t.Errorf("deepMerge should not mutate dst; got log_level=%v want info", daemon["log_level"])
+	}
+}
+
+func TestDeepMerge_DeepNested(t *testing.T) {
+	dst := map[string]any{
+		"a": map[string]any{
+			"b": map[string]any{
+				"c": 1,
+				"d": 2,
+			},
+			"e": 3,
+		},
+	}
+	src := map[string]any{
+		"a": map[string]any{
+			"b": map[string]any{
+				"d": 20,
+			},
+		},
+	}
+
+	out := deepMerge(dst, src)
+	a, _ := out["a"].(map[string]any)
+	b, _ := a["b"].(map[string]any)
+	if b["c"] != 1 {
+		t.Errorf("expected deep nested key c preserved, got %v", b["c"])
+	}
+	if b["d"] != 20 {
+		t.Errorf("expected deep nested key d overridden, got %v", b["d"])
+	}
+	if a["e"] != 3 {
+		t.Errorf("expected mid-level key e preserved, got %v", a["e"])
+	}
+}
+
+// TestMerge_NodeOverrideDeepMergeViaJSON verifies the end-to-end deep-merge
+// pipeline by reading back the merged file and parsing it.
+func TestMerge_NodeOverrideDeepMergeViaJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	checkoutDir := filepath.Join(tmpDir, "checkout")
+	nodeID := "node-deep"
+
+	sharedDir := filepath.Join(checkoutDir, "config", "shared")
+	if err := os.MkdirAll(sharedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sharedConfig := `{
+		"daemon": {
+			"socket_path": "/tmp/a.sock",
+			"log_level": "info",
+			"features": ["x", "y"]
+		},
+		"retain": true
+	}`
+	if err := os.WriteFile(filepath.Join(sharedDir, "meept.json5"), []byte(sharedConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	nodeDir := filepath.Join(checkoutDir, "config", "nodes", nodeID)
+	if err := os.MkdirAll(nodeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	overrideConfig := `{
+		"daemon": {
+			"log_level": "warn",
+			"features": ["z"]
+		},
+		"retain": null
+	}`
+	if err := os.WriteFile(filepath.Join(nodeDir, "meept.json5"), []byte(overrideConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewMerger(tmpDir, checkoutDir, nodeID, &testLogger{})
+	if _, err := m.Merge("deep1"); err != nil {
+		t.Fatal(err)
+	}
+
+	dstPath := filepath.Join(tmpDir, "meept.json5")
+	data, err := os.ReadFile(dstPath)
+	if err != nil {
+		t.Fatalf("merged config not written: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("merged config is not valid JSON: %v\n%s", err, string(data))
+	}
+
+	daemon, ok := got["daemon"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected daemon map, got %T", got["daemon"])
+	}
+	if daemon["socket_path"] != "/tmp/a.sock" {
+		t.Errorf("expected shared socket_path preserved by deep merge, got %v", daemon["socket_path"])
+	}
+	if daemon["log_level"] != "warn" {
+		t.Errorf("expected log_level overridden to warn, got %v", daemon["log_level"])
+	}
+	features, ok := daemon["features"].([]any)
+	if !ok || len(features) != 1 || features[0] != "z" {
+		t.Errorf("expected features array replaced (not concat), got %v", daemon["features"])
+	}
+	if _, ok := got["retain"]; ok {
+		t.Error("expected 'retain' deleted by null override")
+	}
+}

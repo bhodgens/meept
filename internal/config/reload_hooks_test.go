@@ -7,14 +7,24 @@ import (
 	"testing"
 )
 
+// hookSink is a helper that records the arguments passed to a ReloadFunc.
+type hookSink struct {
+	called      atomic.Bool
+	commitHash  string
+	returnedErr error
+}
+
+func (s *hookSink) fn(commitHash string) error {
+	s.called.Store(true)
+	s.commitHash = commitHash
+	return s.returnedErr
+}
+
 func TestReloadRegistry_RegisterAndTrigger(t *testing.T) {
 	rr := NewReloadRegistry()
 
-	var called atomic.Bool
-	rr.Register("test.json5", func(old, newCfg *Config) error {
-		called.Store(true)
-		return nil
-	})
+	var sink hookSink
+	rr.Register("test.json5", sink.fn)
 
 	if rr.Len("test.json5") != 1 {
 		t.Errorf("expected 1 hook, got %d", rr.Len("test.json5"))
@@ -22,8 +32,11 @@ func TestReloadRegistry_RegisterAndTrigger(t *testing.T) {
 
 	rr.Trigger("test.json5", "abc123")
 
-	if !called.Load() {
+	if !sink.called.Load() {
 		t.Error("expected hook to be called")
+	}
+	if sink.commitHash != "abc123" {
+		t.Errorf("expected commit hash %q forwarded to hook, got %q", "abc123", sink.commitHash)
 	}
 }
 
@@ -31,11 +44,11 @@ func TestReloadRegistry_MultipleHooks(t *testing.T) {
 	rr := NewReloadRegistry()
 
 	var count atomic.Int32
-	rr.Register("foo.json", func(old, newCfg *Config) error {
+	rr.Register("foo.json", func(commit string) error {
 		count.Add(1)
 		return nil
 	})
-	rr.Register("foo.json", func(old, newCfg *Config) error {
+	rr.Register("foo.json", func(commit string) error {
 		count.Add(1)
 		return nil
 	})
@@ -53,11 +66,11 @@ func TestReloadRegistry_HookReturnError(t *testing.T) {
 	errExpected := errors.New("test error")
 	calledCount := 0
 
-	rr.Register("err.json", func(old, newCfg *Config) error {
+	rr.Register("err.json", func(commit string) error {
 		calledCount++
 		return errExpected
 	})
-	rr.Register("err.json", func(old, newCfg *Config) error {
+	rr.Register("err.json", func(commit string) error {
 		calledCount++
 		return nil
 	})
@@ -74,11 +87,11 @@ func TestReloadRegistry_PanickingHookRecovery(t *testing.T) {
 
 	calledCount := 0
 
-	rr.Register("panic.json", func(old, newCfg *Config) error {
+	rr.Register("panic.json", func(commit string) error {
 		calledCount++
 		panic("intentional panic")
 	})
-	rr.Register("panic.json", func(old, newCfg *Config) error {
+	rr.Register("panic.json", func(commit string) error {
 		calledCount++
 		return nil
 	})
@@ -107,7 +120,7 @@ func TestReloadRegistry_RegisteredHooks(t *testing.T) {
 
 	rr.Register("a.json", nil)
 	rr.Register("b.json", nil)
-	rr.Register("c.json", func(old, newCfg *Config) error { return nil })
+	rr.Register("c.json", func(commit string) error { return nil })
 
 	hooks := rr.RegisteredHooks()
 	if len(hooks) != 3 {
@@ -147,7 +160,7 @@ func TestReloadRegistry_NilReloadFuncPanics(t *testing.T) {
 	rr := NewReloadRegistry()
 
 	// Register a nil function (which is valid — users might unregister by nil-ing)
-	fn := func(old, newCfg *Config) error {
+	fn := func(commit string) error {
 		return fmt.Errorf("should not be called")
 	}
 	rr.Register("safe.json", fn)
