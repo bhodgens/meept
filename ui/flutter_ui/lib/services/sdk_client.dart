@@ -865,6 +865,92 @@ class SdkApiClient {
     });
   }
 
+  // ===== Prompt Templates =====
+  //
+  // Mirrors the daemon's PromptService HTTP surface:
+  //   GET    /api/v1/prompts           — list metadata
+  //   GET    /api/v1/prompts/{path}    — read one with content
+  //   PUT    /api/v1/prompts/{path}    — write user-local override
+  //   DELETE /api/v1/prompts/{path}    — remove user-local override
+  //   POST   /api/v1/prompts/validate  — validate one or all templates
+  //
+  // The {path} segment captures slash-separated template names
+  // (e.g. "planner/decompose.md"). The daemon accepts URL-encoded
+  // slashes, so callers should pass the encoded form via
+  // [Uri.encodeComponent] on each segment-joined name. We URL-encode
+  // the full name here to preserve any embedded `/`.
+
+  /// Returns the raw `prompts` array from `GET /api/v1/prompts`.
+  ///
+  /// Each entry should be passed to `PromptSummary.fromJson`.
+  Future<List<Map<String, dynamic>>> listPromptsRaw() async {
+    try {
+      final raw = await _get('/api/v1/prompts');
+      final promptsRaw = raw['prompts'] as List? ?? [];
+      return promptsRaw
+          .whereType<Map>()
+          .map((p) => Map<String, dynamic>.from(p))
+          .toList();
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Returns the raw template JSON (with `content`) from
+  /// `GET /api/v1/prompts/{path}`.
+  Future<Map<String, dynamic>> getPromptRaw(String path) async {
+    final encoded = Uri.encodeComponent(path);
+    try {
+      return await _get('/api/v1/prompts/$encoded');
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Writes a user-local override via `PUT /api/v1/prompts/{path}`.
+  ///
+  /// Returns the daemon's confirmation map, which includes the absolute
+  /// path the override was written to.
+  Future<Map<String, dynamic>> putPromptRaw(
+      String path, String content) async {
+    final encoded = Uri.encodeComponent(path);
+    try {
+      return await _put(
+        '/api/v1/prompts/$encoded',
+        body: {'content': content},
+      );
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Removes the user-local override via `DELETE /api/v1/prompts/{path}`.
+  /// Bundled, system, and project templates are never deleted.
+  Future<void> deletePromptRaw(String path) async {
+    final encoded = Uri.encodeComponent(path);
+    try {
+      await _delete('/api/v1/prompts/$encoded');
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Validates one ([name] non-empty) or all ([name] null/empty) templates
+  /// via `POST /api/v1/prompts/validate`.
+  ///
+  /// The response shape differs between single-template and bulk modes;
+  /// callers deserialize via `PromptValidateResult.fromJson`, which
+  /// normalises both.
+  Future<Map<String, dynamic>> validatePromptRaw(String? name) async {
+    final body = <String, dynamic>{};
+    if (name != null && name.isNotEmpty) body['name'] = name;
+    try {
+      return await _post('/api/v1/prompts/validate', body: body);
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
   // ===== Search =====
 
   /// Returns the raw search-response JSON.  The SDK only models the

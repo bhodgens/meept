@@ -72,6 +72,7 @@ class _ToolsDropdownState extends ConsumerState<ToolsDropdown> {
           'terminal': Icons.terminal,
           'calendar': Icons.calendar_today,
           'metrics': Icons.insights,
+          'prompts': Icons.edit_note,
           'settings': Icons.settings,
         };
 

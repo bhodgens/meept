@@ -9,6 +9,7 @@ import '../features/projects/branches_panel.dart';
 import '../features/skills/skill_panel.dart';
 import '../features/memory/memory_panel.dart';
 import '../features/reflection/reflection_panel.dart';
+import '../features/prompts/prompt_panel.dart';
 import '../theme/colors.dart';
 import '../theme/typography.dart';
 
@@ -24,6 +25,7 @@ import '../theme/typography.dart';
 ///   /tools/skills   -> SkillPanel
 ///   /tools/memory   -> MemoryPanel
 ///   /tools/reflection -> ReflectionPanel
+///   /tools/prompts    -> PromptPanel
 final GoRouter router = GoRouter(
   initialLocation: '/',
   debugLogDiagnostics: true,
@@ -119,6 +121,13 @@ final GoRouter router = GoRouter(
       name: 'toolsReflection',
       builder: (context, state) {
         return const ReflectionPanel();
+      },
+    ),
+    GoRoute(
+      path: '/tools/prompts',
+      name: 'toolsPrompts',
+      builder: (context, state) {
+        return const PromptPanel();
       },
     ),
   ],
@@ -277,4 +286,7 @@ extension AppRouterExtension on BuildContext {
 
   /// Navigate to the reflection tool panel (replace current entry).
   void goToolReflection() => go('/tools/reflection');
+
+  /// Navigate to the prompt-editor tool panel (replace current entry).
+  void goToolPrompts() => go('/tools/prompts');
 }
