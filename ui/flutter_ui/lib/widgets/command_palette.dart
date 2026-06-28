@@ -86,12 +86,24 @@ class _CommandPaletteState extends State<CommandPalette> {
   }
 
   @override
+  void didUpdateWidget(covariant CommandPalette oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_selected >= widget.items.length) {
+      _selected = widget.items.length - 1;
+    }
+    if (_selected < 0 && widget.items.isNotEmpty) {
+      _selected = 0;
+    }
+  }
+
+  @override
   void dispose() {
     _focusNode.dispose();
     super.dispose();
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (widget.items.isEmpty) return KeyEventResult.ignored;
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.arrowDown) {
@@ -128,7 +140,9 @@ class _CommandPaletteState extends State<CommandPalette> {
             final isSel = index == _selected;
             return InkWell(
               onTap: () => widget.onSelected(item),
-              onHover: (h) => h ? setState(() => _selected = index) : null,
+              onHover: (h) {
+                if (h && mounted) setState(() => _selected = index);
+              },
               child: Container(
                 color: isSel
                     ? CyberpunkColors.orangePrimary.withValues(alpha: 0.15)

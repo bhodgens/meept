@@ -56,4 +56,56 @@ void main() {
     await tester.pump();
     expect(selected?.label, 'tasks');
   });
+
+  testWidgets('empty items does not crash on key events', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: CommandPalette(
+          items: const [],
+          onSelected: (_) {},
+        ),
+      ),
+    ));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    // No exception thrown — test passes if we reach here.
+  });
+
+  testWidgets('shrinking items list clamps selection without crashing',
+      (tester) async {
+    CommandPaletteItem? selected;
+    late StateSetter setStateOuter;
+    List<CommandPaletteItem> items = CommandPalette.defaultItems;
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: StatefulBuilder(
+          builder: (context, setState) {
+            setStateOuter = setState;
+            return CommandPalette(
+              items: items,
+              onSelected: (item) => selected = item,
+            );
+          },
+        ),
+      ),
+    ));
+    await tester.pump();
+    // Move selection down a few times to reach index 5.
+    for (int i = 0; i < 5; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+    }
+    // Shrink the list to 3 items.
+    setStateOuter(() {
+      items = CommandPalette.defaultItems.take(3).toList();
+    });
+    await tester.pump();
+    // Now press enter — should not RangeError.
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(selected, isNotNull);
+  });
 }
