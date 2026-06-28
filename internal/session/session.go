@@ -69,6 +69,11 @@ type Session struct {
 	ProjectPath     string              `json:"project_path,omitempty"`
 	NoFence         bool                `json:"no_fence,omitempty"`
 
+	// Archived indicates the session has been soft-archived. Archived sessions
+	// are excluded from the default visible set and sort to the bottom of
+	// listings; their data is preserved.
+	Archived bool `json:"archived,omitempty"`
+
 	// Thread-based context partitioning (NEW)
 	Threads        map[string]*Thread `json:"threads,omitempty"` // threadID -> Thread
 	ActiveThreadID string             `json:"active_thread_id,omitempty"`
