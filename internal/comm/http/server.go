@@ -1041,6 +1041,7 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/sessions/designated", s.handleSessionsDesignated)
 	mux.HandleFunc("PUT /api/v1/sessions/designated/{id}", s.handleSessionDesignatedAcknowledge)
 	mux.HandleFunc("GET /api/v1/sessions/{id}", s.handleSessionGet)
+	mux.HandleFunc("PATCH /api/v1/sessions/{id}", s.handleSessionArchive)
 	mux.HandleFunc("DELETE /api/v1/sessions/{id}", s.handleSessionDelete)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/attach", s.handleSessionAttach)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/detach", s.handleSessionDetach)

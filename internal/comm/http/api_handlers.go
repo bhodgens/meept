@@ -597,6 +597,47 @@ func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "deleted"})
 }
 
+// handleSessionArchive handles PATCH /api/v1/sessions/{id}.
+//
+// Body: {"archived": true|false}
+// Response: 204 No Content on success, 400 on malformed body or unknown
+// fields, 404 if the session doesn't exist.
+func (s *Server) handleSessionArchive(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "session id is required")
+		return
+	}
+	if s.services == nil || s.services.Session == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "session service not available")
+		return
+	}
+
+	// Strict decoding: reject any field that isn't "archived".
+	var body struct {
+		Archived *bool `json:"archived"`
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	if body.Archived == nil {
+		s.writeError(w, http.StatusBadRequest, `"archived" field is required`)
+		return
+	}
+
+	// ArchiveSession maps store "not found" to services.ErrNotFound already;
+	// handleServiceError translates ErrNotFound -> 404.
+	if err := s.services.Session.ArchiveSession(r.Context(), services.ArchiveSessionRequest{ID: id, Archived: *body.Archived}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleSessionMessages handles GET /api/v1/sessions/{id}/messages.
 func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
 	if s.services == nil || s.services.Session == nil {

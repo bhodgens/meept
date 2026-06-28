@@ -19,6 +19,7 @@ import (
 	configCli "github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/services"
+	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/models"
 
 	"golang.org/x/net/websocket"
@@ -2015,5 +2016,97 @@ func TestConfigServiceListAgents_NewFields(t *testing.T) {
 	}
 	if reviewer.ReviewsDomain != "code" {
 		t.Errorf("reviewer.ReviewsDomain = %q, want %q", reviewer.ReviewsDomain, "code")
+	}
+}
+
+// newArchiveTestServer builds a Server wired with an in-memory backed
+// SessionService for archive handler tests.
+func newArchiveTestServer(t *testing.T) *Server {
+	t.Helper()
+	store := session.NewMemoryStore(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svcReg := &services.ServiceRegistry{
+		Session:      services.NewSessionService(store),
+		SessionStore: store,
+	}
+	return NewServer(ServerConfig{}, nil, nil, nil, svcReg, nil)
+}
+
+func TestHandleSessionArchive(t *testing.T) {
+	srv := newArchiveTestServer(t)
+
+	// Create a session via the existing POST /api/v1/sessions endpoint.
+	body := strings.NewReader(`{"name":"archive-test"}`)
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", body)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRR := httptest.NewRecorder()
+	srv.handleSessionCreate(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d: %s", createRR.Code, createRR.Body.String())
+	}
+	var createResp struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(createRR.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("unmarshal create resp: %v", err)
+	}
+	if createResp.ID == "" {
+		t.Fatal("no id in create response")
+	}
+
+	// Archive it.
+	archReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/v1/sessions/"+createResp.ID,
+		strings.NewReader(`{"archived":true}`),
+	)
+	archReq.Header.Set("Content-Type", "application/json")
+	archReq.SetPathValue("id", createResp.ID)
+	archRR := httptest.NewRecorder()
+	srv.handleSessionArchive(archRR, archReq)
+	if archRR.Code != http.StatusNoContent {
+		t.Fatalf("archive: expected 204, got %d: %s", archRR.Code, archRR.Body.String())
+	}
+
+	// Verify via GET that the flag persisted.
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/"+createResp.ID, nil)
+	getReq.SetPathValue("id", createResp.ID)
+	getRR := httptest.NewRecorder()
+	srv.handleSessionGet(getRR, getReq)
+	if getRR.Code != http.StatusOK {
+		t.Fatalf("get: expected 200, got %d", getRR.Code)
+	}
+	var getResp map[string]any
+	if err := json.Unmarshal(getRR.Body.Bytes(), &getResp); err != nil {
+		t.Fatalf("unmarshal get resp: %v", err)
+	}
+	if got, _ := getResp["archived"].(bool); !got {
+		t.Fatalf("expected archived=true in GET response, got %v", getResp["archived"])
+	}
+}
+
+func TestHandleSessionArchiveRejectsUnknownFields(t *testing.T) {
+	srv := newArchiveTestServer(t)
+
+	body := strings.NewReader(`{"name":"reject-test"}`)
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", body)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRR := httptest.NewRecorder()
+	srv.handleSessionCreate(createRR, createReq)
+	var createResp struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(createRR.Body.Bytes(), &createResp)
+
+	badReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/v1/sessions/"+createResp.ID,
+		strings.NewReader(`{"title":"evil"}`),
+	)
+	badReq.Header.Set("Content-Type", "application/json")
+	badReq.SetPathValue("id", createResp.ID)
+	badRR := httptest.NewRecorder()
+	srv.handleSessionArchive(badRR, badReq)
+	if badRR.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown field, got %d: %s", badRR.Code, badRR.Body.String())
 	}
 }
