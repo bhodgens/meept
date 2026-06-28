@@ -431,6 +431,15 @@ func (m *Manager) Store(ctx context.Context, mem Memory) (string, error) {
 		return "", storeErr
 	}
 
+	// DualStore mirror: if a DualStore is wired, replicate the memory so that
+	// cluster gossip peers receive it. Skipped for memories that originated
+	// from a remote node (metadata["source_node"] set to a non-local value),
+	// which prevents echo loops when consuming gossip events.
+	//
+	// The DualStore has its own separate local.db; this is a mirror write,
+	// not a duplicate of the local episodic_memories.db / task.db write.
+	m.maybeMirrorToDualStore(ctx, mem, id)
+
 	// Epistemic post-Store hook: run detection in a background goroutine.
 	// Uses context.Background() to avoid caller cancellation; detection is
 	// best-effort and must not block Store.
@@ -518,6 +527,98 @@ func (m *Manager) storeViaSQLite(ctx context.Context, mem Memory) (string, error
 	default:
 		return "", fmt.Errorf("unknown memory type: %s", mem.Type)
 	}
+}
+
+// maybeMirrorToDualStore replicates a locally-written memory to the DualStore
+// (when wired) so that cluster gossip peers receive it via the
+// GossipPublisher. It is best-effort: failures are logged at warn level and
+// do not propagate to the caller, because the local write has already
+// succeeded and the DualStore is a parallel sync log, not the source of truth.
+//
+// Echo-loop prevention: if the memory's metadata carries a "source_node"
+// key referring to a remote node, the mirror is skipped. Such memories
+// entered this node via gossip ingestion (DualStore.StoreRemoteMemory) and
+// re-publishing them would echo back to the origin.
+//
+// Mutex scope: snapshots the dualStore pointer under RLock, releases, then
+// performs the DualStore write (which has its own internal mutex) outside
+// the Manager lock — per CLAUDE.md mutex-scope rule.
+func (m *Manager) maybeMirrorToDualStore(ctx context.Context, mem Memory, id string) {
+	if id == "" {
+		return
+	}
+	m.mu.RLock()
+	ds := m.dualStore
+	m.mu.RUnlock()
+	if ds == nil {
+		return
+	}
+
+	// Skip memories that arrived from a peer (echo-loop prevention).
+	if mem.Metadata != nil {
+		if sn, ok := mem.Metadata["source_node"].(string); ok && sn != "" {
+			return
+		}
+	}
+
+	// Build a *Memory with the ID assigned by the local backend so the
+	// DualStore row is queryable by the same identifier.
+	mirror := mem
+	mirror.ID = id
+	if mirror.CreatedAt.IsZero() {
+		mirror.CreatedAt = time.Now().UTC()
+	}
+
+	if err := ds.StoreMemory(ctx, &mirror); err != nil {
+		m.logger.Warn("dual store mirror failed",
+			"memory_id", id,
+			"error", err,
+		)
+	}
+}
+
+// mergeDualStoreRecent merges gossip-only memories from the DualStore into
+// the given local results. Local entries win on duplicate IDs; the gossip
+// rows add remote-only memories to give consumers of the Manager API a
+// unified view without requiring them to call DualStore directly.
+//
+// Mutex scope: snapshots the dualStore pointer under RLock, releases, then
+// queries the DualStore (which has its own internal mutex) outside the lock.
+func (m *Manager) mergeDualStoreRecent(ctx context.Context, local []MemoryResult, limit int) []MemoryResult {
+	m.mu.RLock()
+	ds := m.dualStore
+	m.mu.RUnlock()
+	if ds == nil {
+		return local
+	}
+
+	// Use a budget slightly larger than limit to allow useful merge even
+	// when some local slots are filled. The final trim happens upstream.
+	budget := limit
+	if budget <= 0 {
+		budget = 50
+	}
+
+	gossip, err := ds.GetRecentMemories(ctx, budget)
+	if err != nil {
+		m.logger.Warn("dual store recent merge failed", "error", err)
+		return local
+	}
+	if len(gossip) == 0 {
+		return local
+	}
+
+	seen := make(map[string]bool, len(local))
+	for _, r := range local {
+		seen[r.Memory.ID] = true
+	}
+	for _, r := range gossip {
+		if !seen[r.Memory.ID] {
+			local = append(local, r)
+			seen[r.Memory.ID] = true
+		}
+	}
+	return local
 }
 
 // Search finds memories matching the query.
@@ -729,6 +830,10 @@ func (m *Manager) GetRecent(ctx context.Context, limit int) ([]MemoryResult, err
 			results = append(results, taskResults...)
 		}
 	}
+
+	// Merge in remote-only memories from the DualStore (gossip.db).
+	// Local memories (above) win on duplicate IDs.
+	results = m.mergeDualStoreRecent(ctx, results, limit)
 
 	// Sort by created_at descending
 	sort.Slice(results, func(i, j int) bool {
