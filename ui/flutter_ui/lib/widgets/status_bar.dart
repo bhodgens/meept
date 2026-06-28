@@ -89,7 +89,11 @@ class StatusBar extends ConsumerWidget {
   String? _projectPart(WidgetRef ref) {
     final p = ref.watch(currentProjectProvider);
     if (!p.isActive) return null;
-    final name = p.name.length > 16 ? '${p.name.substring(0, 13)}...' : p.name;
+    // Use grapheme-cluster-aware truncation: String.substring is UTF-16
+    // code-unit based and can split surrogate pairs for emoji/astral-plane
+    // chars (e.g. "🛠" in project names), producing lone surrogates.
+    final chars = p.name.characters;
+    final name = chars.length > 16 ? '${chars.take(13).toString()}...' : p.name;
     if (p.mode == 'git') {
       final branch = p.branch.isNotEmpty ? ' ${p.branch}' : '';
       final dirty = p.dirty ? '*' : '';

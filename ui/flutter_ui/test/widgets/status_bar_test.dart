@@ -63,6 +63,9 @@ void main() {
       (tester) async {
     await tester.pumpWidget(_wrap(tab: 1));
     await tester.pump();
+    // Two assertions guard against a session title like "archive-test"
+    // leaking into the session-part and false-matching the keybind hint.
+    expect(find.textContaining('dbl-click'), findsOneWidget);
     expect(find.textContaining('archive'), findsOneWidget);
   });
 
@@ -71,5 +74,6 @@ void main() {
     await tester.pumpWidget(_wrap(tab: 0));
     await tester.pump();
     expect(find.textContaining('focus'), findsOneWidget);
+    expect(find.textContaining('verbosity'), findsOneWidget);
   });
 }
