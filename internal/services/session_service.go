@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/session"
@@ -449,5 +450,32 @@ func (s *SessionService) AcknowledgeDesignation(ctx context.Context, sessionID s
 		return wrapError("session", "AcknowledgeDesignation", err)
 	}
 
+	return nil
+}
+
+// ArchiveSessionRequest contains archive parameters.
+type ArchiveSessionRequest struct {
+	ID       string `json:"id"`
+	Archived bool   `json:"archived"`
+}
+
+// ArchiveSession sets or clears the archived flag on a session. Archived
+// sessions are preserved but sorted to the bottom of the list.
+func (s *SessionService) ArchiveSession(ctx context.Context, req ArchiveSessionRequest) error {
+	if req.ID == "" {
+		return wrapError("session", "ArchiveSession", ErrInvalidInput)
+	}
+	if s.store == nil {
+		return wrapError("session", "ArchiveSession", ErrUnavailable)
+	}
+	if err := s.store.Archive(req.ID, req.Archived); err != nil {
+		// store.Archive returns an error whose message contains "not found"
+		// when the session ID does not exist; map to ErrNotFound for
+		// consistent HTTP 404 mapping via handleServiceError.
+		if strings.Contains(err.Error(), "not found") {
+			return wrapError("session", "ArchiveSession", ErrNotFound)
+		}
+		return wrapError("session", "ArchiveSession", err)
+	}
 	return nil
 }

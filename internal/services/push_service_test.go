@@ -230,3 +230,4 @@ func (f *fakeStore) UpdateDesignation(string, session.DesignationStatus, string,
 	return nil
 }
 func (f *fakeStore) ClearDesignation(string) error { return nil }
+func (f *fakeStore) Archive(string, bool) error { return nil }
