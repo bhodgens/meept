@@ -23,6 +23,39 @@ func registerSessionRPCHandlers(server *rpc.Server, sessionSvc *services.Session
 
 	// sessions.designated_acknowledge - acknowledge a designated session
 	server.RegisterHandler("sessions.designated_acknowledge", handleSessionDesignatedAcknowledge(sessionSvc))
+
+	// sessions.archive - set or clear the archived flag on a session
+	server.RegisterHandler("sessions.archive", handleSessionArchive(sessionSvc))
+}
+
+// handleSessionArchive sets or clears the archived flag on a session.
+// Mirrors handleSessionDesignatedAcknowledge's closure pattern.
+func handleSessionArchive(svc *services.SessionService) rpc.Handler {
+	return func(ctx context.Context, params json.RawMessage) (any, error) {
+		var req struct {
+			ID       string `json:"id"`
+			Archived bool   `json:"archived"`
+		}
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, fmt.Errorf("invalid parameters: %w", err)
+		}
+		if req.ID == "" {
+			return nil, fmt.Errorf("id is required")
+		}
+
+		if err := svc.ArchiveSession(ctx, services.ArchiveSessionRequest{ID: req.ID, Archived: req.Archived}); err != nil {
+			return nil, fmt.Errorf("failed to archive session: %w", err)
+		}
+
+		status := "archived"
+		if !req.Archived {
+			status = "unarchived"
+		}
+		return map[string]any{
+			"status": status,
+			"id":     req.ID,
+		}, nil
+	}
 }
 
 // handleSessionsDesignated returns sessions whose designation is non-trivial.
