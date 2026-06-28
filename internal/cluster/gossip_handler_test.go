@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"testing"
@@ -18,7 +19,7 @@ func TestGossipHandler_OnEvent_SessionTurn(t *testing.T) {
 	}
 	defer ds.Close()
 
-	handler := NewGossipHandler(ds, "local-node", slog.Default())
+	handler := NewGossipHandler(ds, "local-node", slog.Default(), nil)
 
 	payload := models.SessionTurnPayload{
 		SessionID: "sess-test",
@@ -62,7 +63,7 @@ func TestGossipHandler_OnEvent_SessionTurnLocalNode(t *testing.T) {
 	}
 	defer ds.Close()
 
-	handler := NewGossipHandler(ds, "local-node", slog.Default())
+	handler := NewGossipHandler(ds, "local-node", slog.Default(), nil)
 
 	payload := models.SessionTurnPayload{
 		SessionID: "sess-test",
@@ -104,7 +105,7 @@ func TestGossipHandler_OnEvent_MemoryStored(t *testing.T) {
 	}
 	defer ds.Close()
 
-	handler := NewGossipHandler(ds, "local-node", slog.Default())
+	handler := NewGossipHandler(ds, "local-node", slog.Default(), nil)
 
 	ts := time.Now().UnixNano()
 	payload := models.MemoryStoredPayload{
@@ -161,7 +162,7 @@ func TestGossipHandler_OnEvent_MemoryExpired(t *testing.T) {
 	}
 	defer ds.Close()
 
-	handler := NewGossipHandler(ds, "local-node", slog.Default())
+	handler := NewGossipHandler(ds, "local-node", slog.Default(), nil)
 
 	payload := models.MemoryExpiredPayload{
 		ID:        "mem-003",
@@ -192,7 +193,7 @@ func TestGossipHandler_OnEvent_MemoryEdge(t *testing.T) {
 	}
 	defer ds.Close()
 
-	handler := NewGossipHandler(ds, "local-node", slog.Default())
+	handler := NewGossipHandler(ds, "local-node", slog.Default(), nil)
 
 	payload := models.MemoryEdgePayload{
 		FromID:      "mem-a",
@@ -223,7 +224,7 @@ func TestGossipHandler_OnEvent_UnknownType(t *testing.T) {
 	}
 	defer ds.Close()
 
-	handler := NewGossipHandler(ds, "local-node", slog.Default())
+	handler := NewGossipHandler(ds, "local-node", slog.Default(), nil)
 
 	event := &models.ClusterEvent{
 		EventID:   evtID(t),
@@ -247,7 +248,7 @@ func TestGossipHandler_OnEvent_BadPayload(t *testing.T) {
 	}
 	defer ds.Close()
 
-	handler := NewGossipHandler(ds, "local-node", slog.Default())
+	handler := NewGossipHandler(ds, "local-node", slog.Default(), nil)
 
 	event := &models.ClusterEvent{
 		EventID:   evtID(t),
@@ -261,6 +262,149 @@ func TestGossipHandler_OnEvent_BadPayload(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for bad payload")
 	}
+}
+
+// TestGossipHandler_MemoryStored_ConflictResolution_Wiring verifies the
+// dormant ConflictResolver is actually consulted when a MEMORY_STORED
+// event arrives for an already-known memory ID. The older existing event
+// should win when the incoming event has an earlier timestamp.
+func TestGossipHandler_MemoryStored_ConflictResolution_Wiring(t *testing.T) {
+	dir := t.TempDir()
+	ds, err := memory.NewDualStore(dir, "local-node", slog.Default())
+	if err != nil {
+		t.Fatalf("NewDualStore: %v", err)
+	}
+	defer ds.Close()
+
+	resolver := NewConflictResolver(slog.Default())
+	handler := NewGossipHandler(ds, "local-node", slog.Default(), resolver)
+
+	// Seed: a "newer" event arrives first from node-b at t=10:00.
+	mid := "mem-conflict-001"
+	seedPayload := models.MemoryStoredPayload{
+		ID:        mid,
+		Type:      "episodic",
+		Category:  "test",
+		Content:   "newer from node-b",
+		CreatedAt: time.Date(2026, 6, 27, 10, 0, 0, 0, time.UTC).UnixNano(),
+		AgentID:   "agent-b",
+	}
+	seedEvent := &models.ClusterEvent{
+		EventID:   "seed-evt",
+		NodeID:    "node-b",
+		EventType: models.EventTypeMemoryStored,
+		Timestamp: time.Date(2026, 6, 27, 10, 0, 0, 0, time.UTC),
+		Payload:   toJSON(seedPayload),
+	}
+	if err := handler.OnEvent(seedEvent); err != nil {
+		t.Fatalf("seed OnEvent: %v", err)
+	}
+
+	// Now send an "older" event from node-a at t=09:00 for the same memory.
+	// ConflictResolver.Resolve should pick the existing (newer) event.
+	olderPayload := models.MemoryStoredPayload{
+		ID:        mid,
+		Type:      "episodic",
+		Category:  "test",
+		Content:   "older from node-a",
+		CreatedAt: time.Date(2026, 6, 27, 9, 0, 0, 0, time.UTC).UnixNano(),
+		AgentID:   "agent-a",
+	}
+	olderEvent := &models.ClusterEvent{
+		EventID:   "older-evt",
+		NodeID:    "node-a",
+		EventType: models.EventTypeMemoryStored,
+		Timestamp: time.Date(2026, 6, 27, 9, 0, 0, 0, time.UTC),
+		Payload:   toJSON(olderPayload),
+	}
+	if err := handler.OnEvent(olderEvent); err != nil {
+		t.Fatalf("older OnEvent: %v", err)
+	}
+
+	// The gossip DB should still contain the newer payload from node-b
+	// because the existing event won the conflict resolution.
+	ctx := context.Background()
+	results, err := ds.GetMemories(ctx, &memory.MemoryQuery{Limit: 50})
+	if err != nil {
+		t.Fatalf("GetMemories: %v", err)
+	}
+	for _, r := range results {
+		if r.Memory.ID == mid {
+			if r.Memory.Content != "newer from node-b" {
+				t.Errorf("expected newer content preserved, got %q", r.Memory.Content)
+			}
+			return
+		}
+	}
+	t.Errorf("memory %q not found in gossip store", mid)
+}
+
+// TestGossipHandler_MemoryStored_ConflictResolution_NewerWins verifies
+// the inverse: an incoming newer event replaces an existing older one.
+func TestGossipHandler_MemoryStored_ConflictResolution_NewerWins(t *testing.T) {
+	dir := t.TempDir()
+	ds, err := memory.NewDualStore(dir, "local-node", slog.Default())
+	if err != nil {
+		t.Fatalf("NewDualStore: %v", err)
+	}
+	defer ds.Close()
+
+	resolver := NewConflictResolver(slog.Default())
+	handler := NewGossipHandler(ds, "local-node", slog.Default(), resolver)
+
+	mid := "mem-conflict-002"
+	// Seed older event from node-a at t=09:00.
+	olderPayload := models.MemoryStoredPayload{
+		ID:        mid,
+		Type:      "episodic",
+		Category:  "test",
+		Content:   "older from node-a",
+		CreatedAt: time.Date(2026, 6, 27, 9, 0, 0, 0, time.UTC).UnixNano(),
+	}
+	olderEvent := &models.ClusterEvent{
+		EventID:   "older-evt-2",
+		NodeID:    "node-a",
+		EventType: models.EventTypeMemoryStored,
+		Timestamp: time.Date(2026, 6, 27, 9, 0, 0, 0, time.UTC),
+		Payload:   toJSON(olderPayload),
+	}
+	if err := handler.OnEvent(olderEvent); err != nil {
+		t.Fatalf("seed older OnEvent: %v", err)
+	}
+
+	// Now send a newer event from node-b at t=10:00 for the same memory.
+	newerPayload := models.MemoryStoredPayload{
+		ID:        mid,
+		Type:      "episodic",
+		Category:  "test",
+		Content:   "newer from node-b",
+		CreatedAt: time.Date(2026, 6, 27, 10, 0, 0, 0, time.UTC).UnixNano(),
+	}
+	newerEvent := &models.ClusterEvent{
+		EventID:   "newer-evt-2",
+		NodeID:    "node-b",
+		EventType: models.EventTypeMemoryStored,
+		Timestamp: time.Date(2026, 6, 27, 10, 0, 0, 0, time.UTC),
+		Payload:   toJSON(newerPayload),
+	}
+	if err := handler.OnEvent(newerEvent); err != nil {
+		t.Fatalf("newer OnEvent: %v", err)
+	}
+
+	ctx := context.Background()
+	results, err := ds.GetMemories(ctx, &memory.MemoryQuery{Limit: 50})
+	if err != nil {
+		t.Fatalf("GetMemories: %v", err)
+	}
+	for _, r := range results {
+		if r.Memory.ID == mid {
+			if r.Memory.Content != "newer from node-b" {
+				t.Errorf("expected newer content to win, got %q", r.Memory.Content)
+			}
+			return
+		}
+	}
+	t.Errorf("memory %q not found in gossip store", mid)
 }
 
 // -- helpers --

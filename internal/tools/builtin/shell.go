@@ -18,6 +18,7 @@ import (
 	"github.com/caimlas/meept/internal/pty"
 	"github.com/caimlas/meept/internal/runtime"
 	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
@@ -349,7 +350,8 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 			ReturnCode: returnCode,
 			Truncated:  truncated,
 		},
-		Evidence: evidence,
+		Evidence:   evidence,
+		TaintLabel: taint.TaintExternal, // shell-sourced content is externally tainted (arbitrary user-commanded processes)
 	}, nil
 }
 
@@ -551,7 +553,8 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 			ReturnCode: returnCode,
 			Truncated:  truncated,
 		},
-		Evidence: evidence,
+		Evidence:   evidence,
+		TaintLabel: taint.TaintExternal, // shell-sourced content is externally tainted (arbitrary user-commanded processes)
 	}, nil
 }
 

@@ -68,6 +68,16 @@ type GossipEngine struct {
 	// but do not stop the gossip pipeline.
 	handlers   []GossipHandler
 	handlersMu sync.RWMutex
+
+	// conflictResolver arbitrates between two events targeting the same
+	// resource (e.g. same memory ID from different nodes). When nil the
+	// engine falls back to first-writer-wins via INSERT OR IGNORE / REPLACE.
+	conflictResolver *ConflictResolver
+
+	// metrics exposes gossip-engine observability counters (Task 4.8).
+	// Nil-safe: every call site nil-guards dereferences, so a daemon that
+	// never wires metrics pays no cost.
+	metrics *Metrics
 }
 
 // GossipHandler is implemented by types that want to dispatch incoming
@@ -184,6 +194,70 @@ func WithMembersProvider(mp MembersProvider) GossipOption {
 	return func(g *GossipEngine) {
 		g.membersProvider = mp
 	}
+}
+
+// WithMetrics attaches a Metrics counters struct to the engine for
+// observability (Task 4.8). Every metric call is nil-safe, so callers may
+// pass a freshly-constructed NewMetrics() without further setup.
+func WithMetrics(m *Metrics) GossipOption {
+	return func(g *GossipEngine) {
+		if m != nil {
+			g.metrics = m
+		}
+	}
+}
+
+// SetMetrics sets the gossip-engine observability counters on an
+// already-constructed engine. Nil values are ignored per CLAUDE.md
+// nil-guard convention.
+func (g *GossipEngine) SetMetrics(m *Metrics) {
+	if m == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.metrics = m
+}
+
+// Metrics returns the engine's observability counters, or nil if none has
+// been wired. Exposed so HTTP/RPC handlers can render a snapshot.
+func (g *GossipEngine) Metrics() *Metrics {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.metrics
+}
+
+// WithConflictResolver attaches a ConflictResolver to the engine. The
+// resolver is consulted by registered GossipHandlers when an incoming
+// event targets a resource that already exists locally (e.g. same memory
+// ID arriving from two different peer nodes). If not set, the engine
+// falls back to first-writer-wins via INSERT OR IGNORE / REPLACE.
+func WithConflictResolver(r *ConflictResolver) GossipOption {
+	return func(g *GossipEngine) {
+		if r != nil {
+			g.conflictResolver = r
+		}
+	}
+}
+
+// SetConflictResolver sets the conflict resolver on an already-constructed
+// engine. Nil values are ignored to preserve the nil-guard guarantee.
+func (g *GossipEngine) SetConflictResolver(r *ConflictResolver) {
+	if r == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.conflictResolver = r
+}
+
+// ConflictResolver returns the engine's attached conflict resolver, or
+// nil if none has been wired. Exposed so registered GossipHandlers can
+// access the resolver without holding a separate reference.
+func (g *GossipEngine) ConflictResolver() *ConflictResolver {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.conflictResolver
 }
 
 // NodeID returns the gossip engine's local node identifier.
@@ -336,6 +410,18 @@ func (g *GossipEngine) Publish(event *models.ClusterEvent) {
 		g.transport.SendEvent(event)
 	}
 
+	// Observability counters (Task 4.8). Nil-safe via IncX helpers.
+	switch event.EventType {
+	case models.EventTypeSessionTurn:
+		if g.metrics != nil {
+			g.metrics.IncSessionTurnPublished()
+		}
+	case models.EventTypeMemoryStored:
+		if g.metrics != nil {
+			g.metrics.IncMemoryPublished()
+		}
+	}
+
 	g.logger.Debug("gossip: published event",
 		"event_id", event.EventID,
 		"event_type", event.EventType,
@@ -377,11 +463,19 @@ func (g *GossipEngine) handleClusterEvent(msg *models.BusMessage) {
 	if expiry, seen := g.dedupCache[checksum]; seen {
 		if time.Now().Before(expiry) {
 			g.dedupMu.Unlock()
+			if g.metrics != nil {
+				g.metrics.IncEventDeduped()
+			}
 			return // duplicate, skip
 		}
 	}
 	g.dedupCache[checksum] = time.Now().Add(g.cfg.Gossip.EventRetention)
 	g.dedupMu.Unlock()
+
+	// Event passed dedup — count as a genuine peer receipt.
+	if g.metrics != nil {
+		g.metrics.IncEventReceived()
+	}
 
 	// Verify signature if node signature requirement is enabled
 	if g.cfg.Security.RequireNodeSignatures {
