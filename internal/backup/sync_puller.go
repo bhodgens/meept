@@ -152,8 +152,8 @@ func (p *SyncPuller) pullOnce(ctx context.Context) error {
 
 			// Record the error in metadata
 			if err := p.metaStore.SetLastError(peerID, err.Error()); err != nil {
-			p.logger.Warn("sync: failed to record error", "peer_id", peerID, "error", err)
-		}
+				p.logger.Warn("sync: failed to record error", "peer_id", peerID, "error", err)
+			}
 
 			// Don't fail the whole cycle for one peer
 			continue

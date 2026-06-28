@@ -13,11 +13,11 @@ import (
 
 // MergeStats holds counters for a peer database merge.
 type MergeStats struct {
-	SessionsMerged int
-	TurnsMerged    int
-	MemoriesMerged int
-	Skipped        int // duplicate IDs skipped
-	Errors         int
+	SessionsMerged int `json:"sessions"`
+	TurnsMerged    int `json:"turns"`
+	MemoriesMerged int `json:"memories"`
+	Skipped        int `json:"skipped"` // duplicate IDs skipped
+	Errors         int `json:"errors"`
 }
 
 // MergePeerDB merges data from a peer's backup database into the local gossip database.
@@ -60,20 +60,24 @@ func MergePeerDB(ctx context.Context, gossipDB *sql.DB, peerDBPath, peerID strin
 	}
 
 	// Merge sessions
-	sessionErr := mergeSessions(ctx, tx, peerDB, peerID)
+	sessionMerged, sessionSkipped, sessionErr := mergeSessions(ctx, tx, peerDB, peerID)
+	stats.SessionsMerged = sessionMerged
+	stats.Skipped += sessionSkipped
 
 	// Merge turns
-	turnErr := mergeTurns(ctx, tx, peerDB, peerID)
+	turnMerged, turnSkipped, turnErr := mergeTurns(ctx, tx, peerDB, peerID)
+	stats.TurnsMerged = turnMerged
+	stats.Skipped += turnSkipped
 
 	// Merge memories
-	memErr := mergeMemories(ctx, tx, peerDB, peerID)
+	memMerged, memSkipped, memErr := mergeMemories(ctx, tx, peerDB, peerID)
+	stats.MemoriesMerged = memMerged
+	stats.Skipped += memSkipped
 
 	// Count errors
 	if sessionErr != nil {
 		stats.Errors++
 		slog.Warn("backup: merge sessions failed for peer", "peer_id", peerID, "error", sessionErr)
-	} else {
-		// skip count from session merge
 	}
 	if turnErr != nil {
 		stats.Errors++
@@ -121,90 +125,90 @@ func runMergeOp(ctx context.Context, tx *sql.Tx, query string, args ...interface
 	return int(rows), 0, nil
 }
 
-func mergeSessions(ctx context.Context, tx *sql.Tx, peerDB *sql.DB, peerID string) error {
+func mergeSessions(ctx context.Context, tx *sql.Tx, peerDB *sql.DB, peerID string) (merged, skipped int, err error) {
 	// Check if peer has sessions table
 	hasTable, err := tableExists(ctx, peerDB, "sessions")
 	if err != nil {
-		return SyncWrap("merge_peer_sessions_table", err)
+		return 0, 0, SyncWrap("merge_peer_sessions_table", err)
 	}
 	if !hasTable {
 		slog.Debug("backup: peer has no sessions table, skipping", "peer_id", peerID)
-		return nil
+		return 0, 0, nil
 	}
 
 	query := `INSERT OR IGNORE INTO sessions (id, created_at, updated_at, metadata, source_node)
 SELECT id, created_at, updated_at, metadata, ? FROM peer.sessions`
 
-	merged, _, err := runMergeOp(ctx, tx, query, peerID)
+	merged, skipped, err = runMergeOp(ctx, tx, query, peerID)
 	if err != nil {
 		if strings.Contains(err.Error(), "no such table") || strings.Contains(err.Error(), "not exist") {
 			// Local sessions table doesn't exist yet
 			slog.Debug("backup: local sessions table not found, skipping merge", "peer_id", peerID)
-			return nil
+			return 0, 0, nil
 		}
-		return err
+		return 0, 0, err
 	}
 
 	if merged > 0 {
 		slog.Info("backup: merged sessions", "peer_id", peerID, "count", merged)
 	}
-	return nil
+	return merged, skipped, nil
 }
 
-func mergeTurns(ctx context.Context, tx *sql.Tx, peerDB *sql.DB, peerID string) error {
+func mergeTurns(ctx context.Context, tx *sql.Tx, peerDB *sql.DB, peerID string) (merged, skipped int, err error) {
 	hasTable, err := tableExists(ctx, peerDB, "turns")
 	if err != nil {
-		return SyncWrap("merge_peer_turns_table", err)
+		return 0, 0, SyncWrap("merge_peer_turns_table", err)
 	}
 	if !hasTable {
 		slog.Debug("backup: peer has no turns table, skipping", "peer_id", peerID)
-		return nil
+		return 0, 0, nil
 	}
 
 	query := `INSERT OR IGNORE INTO turns (turn_id, session_id, role, content, timestamp, source_node)
 SELECT turn_id, session_id, role, content, timestamp, ? FROM peer.turns`
 
-	merged, _, err := runMergeOp(ctx, tx, query, peerID)
+	merged, skipped, err = runMergeOp(ctx, tx, query, peerID)
 	if err != nil {
 		if strings.Contains(err.Error(), "no such table") || strings.Contains(err.Error(), "not exist") {
 			slog.Debug("backup: local turns table not found, skipping merge", "peer_id", peerID)
-			return nil
+			return 0, 0, nil
 		}
-		return err
+		return 0, 0, err
 	}
 
 	if merged > 0 {
 		slog.Info("backup: merged turns", "peer_id", peerID, "count", merged)
 	}
-	return nil
+	return merged, skipped, nil
 }
 
-func mergeMemories(ctx context.Context, tx *sql.Tx, peerDB *sql.DB, peerID string) error {
+func mergeMemories(ctx context.Context, tx *sql.Tx, peerDB *sql.DB, peerID string) (merged, skipped int, err error) {
 	hasTable, err := tableExists(ctx, peerDB, "memories")
 	if err != nil {
-		return SyncWrap("merge_peer_memories_table", err)
+		return 0, 0, SyncWrap("merge_peer_memories_table", err)
 	}
 	if !hasTable {
 		slog.Debug("backup: peer has no memories table, skipping", "peer_id", peerID)
-		return nil
+		return 0, 0, nil
 	}
 
 	query := `INSERT OR IGNORE INTO memories (id, type, category, content, created_at, agent_id, session_id, source_node)
 SELECT id, type, category, content, created_at, agent_id, session_id, ? FROM peer.memories`
 
-	merged, _, err := runMergeOp(ctx, tx, query, peerID)
+	merged, skipped, err = runMergeOp(ctx, tx, query, peerID)
 	if err != nil {
 		if strings.Contains(err.Error(), "no such table") || strings.Contains(err.Error(), "not exist") {
 			slog.Debug("backup: local memories table not found, skipping merge", "peer_id", peerID)
-			return nil
+			return 0, 0, nil
 		}
-		return err
+		return 0, 0, err
 	}
 
 	if merged > 0 {
 		slog.Info("backup: merged memories", "peer_id", peerID, "count", merged)
 	}
-	return nil
+	return merged, skipped, nil
 }
 
 // tableExists checks if a table exists in the database.

@@ -16,16 +16,16 @@ import (
 
 // GitBackupScheduler performs periodic git-backed backups of local SQLite databases.
 type GitBackupScheduler struct {
-	cfg           config.BackupConfig
-	dataDir       string
-	logger        *slog.Logger
-	mu            sync.Mutex
-	backupDir     string // local checkout directory
-	repo          *git.Repository
-	nodeID        string
-	running       bool
-	stopCh        chan struct{}
-	onBackupDone  func(*BackupManifest, error)
+	cfg          config.BackupConfig
+	dataDir      string
+	logger       *slog.Logger
+	mu           sync.Mutex
+	backupDir    string // local checkout directory
+	repo         *git.Repository
+	nodeID       string
+	running      bool
+	stopCh       chan struct{}
+	onBackupDone func(*BackupManifest, error)
 }
 
 // NewGitBackupScheduler creates a new scheduler from config.
@@ -135,6 +135,81 @@ func (s *GitBackupScheduler) RunNow() error {
 	}
 
 	return s.runBackup(context.TODO())
+}
+
+// BackupEntry is a single backup's manifest data, returned by ListBackups.
+type BackupEntry struct {
+	Date      string         `json:"date"`
+	NodeID    string         `json:"node_id"`
+	Timestamp string         `json:"timestamp,omitempty"`
+	Databases []DatabaseInfo `json:"databases,omitempty"`
+}
+
+// ListBackups returns metadata about each backup for this node, sorted
+// newest-first by date. Reads the scheduler's on-disk checkout directly so
+// it works regardless of whether the scheduler loop is currently running.
+// Each entry's date is the YYYY-MM-DD directory name.
+func (s *GitBackupScheduler) ListBackups() ([]BackupEntry, error) {
+	s.mu.Lock()
+	repo := s.repo
+	backupDir := s.backupDir
+	nodeID := s.nodeID
+	s.mu.Unlock()
+
+	// List date directories from the local checkout/worktree. Prefer git
+	// worktree listing when a repo is initialized; fall back to the
+	// filesystem so this works pre-initRepo (e.g., first run).
+	var dateDirs []string
+	if repo != nil {
+		dates, err := GitListBackups(repo, nodeID)
+		if err != nil {
+			s.logger.Debug("backup: ListBackups via git failed; falling back to filesystem", "error", err)
+		} else {
+			dateDirs = dates
+		}
+	}
+	if len(dateDirs) == 0 {
+		// Filesystem fallback: scan backupDir/backups/<date>/<nodeID>/manifest.json
+		backupsRoot := filepath.Join(backupDir, "backups")
+		entries, err := os.ReadDir(backupsRoot)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, nil
+			}
+			return nil, Wrap("list_backups_read", err)
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			nodeDir := filepath.Join(backupsRoot, e.Name(), nodeID)
+			if nodeEntries, derr := os.ReadDir(nodeDir); derr == nil && len(nodeEntries) > 0 {
+				dateDirs = append(dateDirs, e.Name())
+			}
+		}
+		sortDesc(dateDirs)
+	}
+
+	results := make([]BackupEntry, 0, len(dateDirs))
+	for _, date := range dateDirs {
+		manifestPath := filepath.Join(backupDir, "backups", date, nodeID, "manifest.json")
+		entry := BackupEntry{Date: date, NodeID: nodeID}
+		if m, err := LoadManifest(manifestPath); err == nil && m != nil {
+			entry.Databases = m.Databases
+			entry.Timestamp = m.Timestamp.UTC().Format("2006-01-02T15:04:05Z")
+		}
+		results = append(results, entry)
+	}
+	return results, nil
+}
+
+// sortDesc sorts a string slice in descending order in-place.
+func sortDesc(s []string) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j-1] < s[j]; j-- {
+			s[j-1], s[j] = s[j], s[j-1]
+		}
+	}
 }
 
 func (s *GitBackupScheduler) initRepo() error {

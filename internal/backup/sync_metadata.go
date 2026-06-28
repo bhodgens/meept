@@ -84,9 +84,11 @@ func (s *SyncMetadataStore) SetLastSync(peerID string, t time.Time) error {
 // SetLastMergeStats records the merge statistics from the last sync.
 func (s *SyncMetadataStore) SetLastMergeStats(peerID string, stats *MergeStats) error {
 	key := s.keyMergeStats(peerID)
-	data := fmt.Sprintf("{\"sessions\":%d,\"turns\":%d,\"memories\":%d,\"skipped\":%d,\"errors\":%d}",
-		stats.SessionsMerged, stats.TurnsMerged, stats.MemoriesMerged, stats.Skipped, stats.Errors)
-	_, err := s.db.Exec("INSERT OR REPLACE INTO sync_metadata (key, value) VALUES (?, ?)",
+	data, err := json.Marshal(stats)
+	if err != nil {
+		return fmt.Errorf("sync_metadata marshal merge stats: %w", err)
+	}
+	_, err = s.db.Exec("INSERT OR REPLACE INTO sync_metadata (key, value) VALUES (?, ?)",
 		key, data)
 	if err != nil {
 		slog.Warn("sync: failed to persist merge stats", "peer_id", peerID, "error", err)

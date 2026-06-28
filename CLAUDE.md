@@ -134,6 +134,7 @@ result, err := doNetworkCall(ctx, cfg)  // I/O outside lock
 - **All UI text must be lowercase** (e.g., "switch" not "Switch", "ok" not "OK")
 - For TUI, use bubblezone for positioning
 - Default to clickable elements for context switching
+- **TUI and Flutter GUI features must be kept at parity.** When a feature is added or changed in one surface, the other surface gets the same capability. This includes: status bar elements, command palette items, keyboard shortcuts (prefer identical keys across surfaces — e.g., `Ctrl+V` for verbosity on all platforms, not `Cmd+V` on mac), session/agent/tab semantics (e.g., archive vs delete), and tab affordances. Document surface-specific deviations explicitly with a justification.
 
 ## Configuration
 

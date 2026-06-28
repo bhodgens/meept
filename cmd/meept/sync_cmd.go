@@ -119,11 +119,15 @@ func newSyncStatusCmd() *cobra.Command {
 				}
 				if db != nil {
 					store := backup.NewSyncMetadataStore(db)
-					peerStatus, serr := store.GetAllSyncStatus()
-					if serr != nil {
-						status["status_error"] = serr.Error()
+					if err := store.EnsureTable(); err != nil {
+						status["status_error"] = fmt.Sprintf("ensure sync_metadata table: %v", err)
 					} else {
-						status["peers"] = peerStatus
+						peerStatus, serr := store.GetAllSyncStatus()
+						if serr != nil {
+							status["status_error"] = serr.Error()
+						} else {
+							status["peers"] = peerStatus
+						}
 					}
 				}
 				data, _ := json.MarshalIndent(status, "", "  ")
@@ -141,6 +145,10 @@ func newSyncStatusCmd() *cobra.Command {
 
 				if db != nil {
 					store := backup.NewSyncMetadataStore(db)
+					if err := store.EnsureTable(); err != nil {
+						fmt.Printf("\nerror initializing sync metadata: %v\n", err)
+						return nil
+					}
 					peerStatus, serr := store.GetAllSyncStatus()
 					if serr != nil {
 						fmt.Printf("\nerror reading sync status: %v\n", serr)
