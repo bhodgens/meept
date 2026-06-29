@@ -10,8 +10,9 @@ import '../../theme/typography.dart';
 import '../../widgets/command_palette.dart';
 import '../../widgets/status_bar.dart';
 import '../../widgets/tab_bar.dart';
-import '../../providers/providers.dart';
 import '../../providers/project_provider.dart';
+import '../../providers/providers.dart';
+import '../../providers/session_detail.dart';
 import '../../providers/status_message_provider.dart';
 import '../../providers/tab_activation_provider.dart';
 import '../../providers/verbosity_provider.dart';
@@ -281,6 +282,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       // Best-effort refresh of the active-project indicator. The
       // notifier swallows errors and degrades to CurrentProject.empty.
       ref.read(currentProjectProvider.notifier).refresh();
+      // Warm the default session detail so the first chat-tab paint is
+      // instant. Fire-and-forget: Riverpod caches the result keyed by
+      // 'default', and any later `ref.watch(sessionDetailFamily('default'))`
+      // resolves from cache without re-fetching.
+      ref.read(sessionDetailFamily('default'));
     }
   }
 
