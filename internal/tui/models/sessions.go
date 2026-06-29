@@ -285,6 +285,11 @@ func (m *SessionsModel) Update(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
+// archivedRowStyle dims archived session rows. Applied per-cell since
+// bubbles/table has no per-row style API. Foreground matches ColorGray
+// for a consistent "muted" look alongside other secondary text.
+var archivedRowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray))
+
 func (m *SessionsModel) updateSessionsTable() {
 	rows := make([]table.Row, len(m.sessions))
 
@@ -303,6 +308,13 @@ func (m *SessionsModel) updateSessionsTable() {
 			case "bot_thinking": desigPrefix = "... "
 			}
 		}
+		// Archived sessions get a visual marker so the dim styling is
+		// discoverable even on terminals that ignore foreground color
+		// (e.g. when color is disabled or the theme overrides it).
+		archPrefix := ""
+		if sess.Archived {
+			archPrefix = "(archived) "
+		}
 		title := sess.Description
 		if title == "" {
 			title = sess.Name
@@ -311,11 +323,19 @@ func (m *SessionsModel) updateSessionsTable() {
 		created := m.formatTime(sess.CreatedAt)
 		activity := m.formatTimeRelative(sess.LastActivity)
 
-		rows[i] = table.Row{
-			desigPrefix + types.TruncateString(title, titleW),
-			created,
-			activity,
+		titleCell := desigPrefix + archPrefix + types.TruncateString(title, titleW)
+		createdCell := created
+		activityCell := activity
+
+		// Apply dim styling to archived rows. Each cell is rendered with
+		// the archived style so the entire row reads as muted.
+		if sess.Archived {
+			titleCell = archivedRowStyle.Render(titleCell)
+			createdCell = archivedRowStyle.Render(createdCell)
+			activityCell = archivedRowStyle.Render(activityCell)
 		}
+
+		rows[i] = table.Row{titleCell, createdCell, activityCell}
 	}
 
 	m.table.SetRows(rows)
@@ -412,7 +432,7 @@ func (m *SessionsModel) View() string {
 		Foreground(lipgloss.Color(ColorGray)).
 		MarginTop(1)
 
-	b.WriteString(hintStyle.Render("n: new | r: refresh | enter: details | up/down: navigate | f: search | ?: help"))
+	b.WriteString(hintStyle.Render("n: new | d: archive | D: delete | r: refresh | enter: details | up/down: navigate | f: search | ?: help"))
 
 	return b.String()
 }
@@ -687,6 +707,8 @@ func (m *SessionsModel) renderHelp() string {
 	content += keyStyle.Render("up/k") + descStyle.Render("move cursor up") + "\n"
 	content += keyStyle.Render("down/j") + descStyle.Render("move cursor down") + "\n"
 	content += keyStyle.Render("enter") + descStyle.Render("open session detail") + "\n"
+	content += keyStyle.Render("d") + descStyle.Render("archive session (soft-delete)") + "\n"
+	content += keyStyle.Render("D") + descStyle.Render("delete session permanently") + "\n"
 	content += keyStyle.Render("esc") + descStyle.Render("close detail") + "\n"
 	content += keyStyle.Render("r") + descStyle.Render("refresh sessions") + "\n"
 	content += keyStyle.Render("f") + descStyle.Render("global search") + "\n"
@@ -776,8 +798,17 @@ func (m *SessionsModel) getPlanStateColor(state string) string {
 }
 
 // sortSessions sorts sessions by designation priority, then by last activity.
+// Archived sessions always sort to the bottom of their respective group
+// (designated vs. non-designated), mirroring the Flutter _sessionSort.
 func (m *SessionsModel) sortSessions() {
-	sort.Slice(m.sessions, func(i, j int) bool {
+	sort.SliceStable(m.sessions, func(i, j int) bool {
+		// Archived sessions sink to the bottom regardless of other fields.
+		iArchived := m.sessions[i].Archived
+		jArchived := m.sessions[j].Archived
+		if iArchived != jArchived {
+			return !iArchived
+		}
+
 		iDesig := m.sessions[i].Designation
 		jDesig := m.sessions[j].Designation
 
