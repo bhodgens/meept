@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+import 'package:meept_ui/features/home/home_screen.dart' show HomeTab;
 import 'package:meept_ui/features/sessions/sessions_list.dart';
 import 'package:meept_ui/providers/providers.dart';
+import 'package:meept_ui/providers/tab_activation_provider.dart';
 import 'package:meept_ui/services/session_notifier.dart';
 import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/services/sdk_client.dart';
@@ -127,6 +130,59 @@ void main() {
 
       // Now shows session id '1'
       expect(find.text('active: 1'), findsOneWidget);
+    });
+
+    testWidgets(
+        'double-tap sets tabActivationProvider to chat and active session',
+        (tester) async {
+      final session = Session(
+        id: 'dbl1',
+        title: 'double tap me',
+        createdAt: DateTime.now(),
+      );
+
+      // Use a ProviderContainer so we can read providers directly after the
+      // widget tree is torn down.
+      final container = ProviderContainer(
+        overrides: [
+          sessionProvider.overrideWith((ref) =>
+              SessionNotifier(sdkClient: _TestSdkClient([session]))),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      // GoRouter so `context.go('/')` in onDoubleTap doesn't throw.
+      final router = GoRouter(
+        initialLocation: '/sessions',
+        routes: [
+          GoRoute(
+            path: '/sessions',
+            builder: (_, __) =>
+                const Scaffold(body: SizedBox(width: 400, child: SessionsList())),
+          ),
+          GoRoute(
+            path: '/',
+            builder: (_, __) => const Scaffold(body: SizedBox.shrink()),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Double-tap the session title
+      await tester.tap(find.text('double tap me'));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(find.text('double tap me'));
+      await tester.pumpAndSettle();
+
+      expect(container.read(tabActivationProvider), HomeTab.chat);
+      expect(container.read(activeSessionProvider)?.id, 'dbl1');
     });
 
     testWidgets('shows create session dialog when + button is pressed',

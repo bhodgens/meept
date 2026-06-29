@@ -4,8 +4,10 @@ import 'package:go_router/go_router.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
-import '../../providers/providers.dart';
+import '../../features/home/home_screen.dart' show HomeTab;
 import '../../models/api_models.dart';
+import '../../providers/providers.dart';
+import '../../providers/tab_activation_provider.dart';
 
 /// Sessions list widget - displays all sessions with selection
 class SessionsList extends ConsumerStatefulWidget {
@@ -192,9 +194,11 @@ class _SessionsListState extends ConsumerState<SessionsList> {
 
   Widget _buildSessionTile(Session session, bool isSelected) {
     return InkWell(
+      key: ValueKey('session-tile-${session.id}'),
       onTap: () => ref.read(activeSessionProvider.notifier).state = session,
       onDoubleTap: () {
         ref.read(activeSessionProvider.notifier).state = session;
+        ref.read(tabActivationProvider.notifier).state = HomeTab.chat;
         context.go('/');
       },
       child: Container(
