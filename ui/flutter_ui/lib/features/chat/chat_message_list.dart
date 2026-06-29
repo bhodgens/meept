@@ -130,7 +130,9 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
         children: [
           Positioned.fill(
             child: chatState.messages.isEmpty
-                ? const MessagePlaceholder()
+                ? (chatState.isLoading
+                    ? const _SessionLoadingPlaceholder()
+                    : const MessagePlaceholder())
                 : ListView.builder(
                     controller: _scrollController,
                     padding: EdgeInsets.fromLTRB(
@@ -301,6 +303,34 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
       clamped,
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeOut,
+    );
+  }
+}
+
+/// Placeholder widget shown while session messages are being fetched.
+///
+/// Distinguishes the transient "loading empty" state (during a session swap
+/// or initial fetch) from the genuine "no messages yet" state rendered by
+/// [MessagePlaceholder].  Without this distinction the UI would briefly
+/// flash "no messages yet / start the conversation" while the new session's
+/// history is still being fetched from the daemon, making the chat look
+/// empty rather than in-flight.
+class _SessionLoadingPlaceholder extends StatelessWidget {
+  const _SessionLoadingPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: SizedBox(
+        width: 24,
+        height: 24,
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          valueColor: AlwaysStoppedAnimation<Color>(
+            CyberpunkColors.orangePrimary,
+          ),
+        ),
+      ),
     );
   }
 }
