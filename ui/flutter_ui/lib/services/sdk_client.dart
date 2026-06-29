@@ -531,6 +531,19 @@ class SdkApiClient {
     }
   }
 
+  /// Fetches a single agent by id.
+  ///
+  /// Mirrors [getTask]/[getPlan]: a thin wrapper around the per-id REST
+  /// endpoint that callers pair with `Agent.fromJson`. Endpoint follows the
+  /// agents collection at `/api/v1/config/agents` (see [listAgents]).
+  Future<Map<String, dynamic>> getAgent(String id) async {
+    try {
+      return await _get('/api/v1/config/agents/$id');
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
   /// Updates an agent and returns the raw JSON.
   Future<Map<String, dynamic>> updateAgent(
       String id, Map<String, dynamic> config) async {
