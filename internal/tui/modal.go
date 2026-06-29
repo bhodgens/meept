@@ -539,6 +539,16 @@ type SessionArchivedMsg struct {
 	SessionName string
 }
 
+// SessionDeletedMsg indicates the result of a delete RPC call. App.Update reads
+// this to update the status message (success or failure) and trigger a
+// session-list refresh. Mirrors SessionArchivedMsg so the delete flow has the
+// same async-status-pattern as archive.
+type SessionDeletedMsg struct {
+	Err         error
+	SessionID   string
+	SessionName string
+}
+
 // OpenRenameModalMsg indicates the rename modal should be opened.
 type OpenRenameModalMsg struct {
 	SessionID   string

@@ -974,8 +974,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 
 	case SessionDeleteMsg:
-		// Delete a session
-		cmd := a.deleteSession(msg.SessionID)
+		// Delete a session (legacy non-shift path). Name is unknown here, so
+		// fall back to the ID for the status message.
+		cmd := a.deleteSession(msg.SessionID, msg.SessionID)
 		return a, cmd
 
 	case models.ArchiveSessionRequestedMsg:
@@ -1015,13 +1016,33 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, clearCmd
 
 	case models.DeleteSessionRequestedMsg:
-		// Permanent delete (shift+D from sessions view). Reuses the
-		// existing deleteSession path but prefixes the status message
-		// with the session name for clearer user feedback.
-		cmd := a.deleteSession(msg.SessionID)
-		a.statusMessage = fmt.Sprintf("deleted: %s", msg.SessionName)
+		// Permanent delete (shift+D from sessions view). Dispatches the RPC
+		// via deleteSession; the returned SessionDeletedMsg updates the status
+		// message (success or failure) and triggers a session-list refresh —
+		// mirrors the ArchiveSessionRequestedMsg flow. Do NOT set the status
+		// message here; that would mislead the user if the RPC fails.
+		return a, a.deleteSession(msg.SessionID, msg.SessionName)
+
+	case SessionDeletedMsg:
+		// Result of the delete RPC. Set the status message based on Err so
+		// failures are surfaced to the user (the prior implementation silently
+		// swallowed errors and set the success message prematurely).
+		if msg.Err != nil {
+			slog.Warn("delete session failed", "error", msg.Err, "session_id", msg.SessionID)
+			a.statusMessage = fmt.Sprintf("delete failed: %v", msg.Err)
+		} else {
+			a.statusMessage = fmt.Sprintf("deleted: %s", msg.SessionName)
+		}
 		a.statusMessageTime = time.Now()
-		return a, cmd
+		// Trigger a status-message auto-clear.
+		clearCmd := tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
+			return StatusMessageClearMsg{}
+		})
+		// Refresh the sessions view so the deleted session disappears.
+		if a.sessions != nil {
+			return a, tea.Batch(clearCmd, a.sessions.Init())
+		}
+		return a, clearCmd
 
 	case models.OpenCreateSessionModalMsg:
 		// Open rename modal for creating a new session (uses default name)
@@ -1968,19 +1989,16 @@ func (a *App) switchToSessionByID(sessionID string, messageID int64) tea.Cmd {
 	}
 }
 
-// deleteSession deletes a session via SessionManager.
-func (a *App) deleteSession(sessionID string) tea.Cmd {
+// deleteSession deletes a session via the RPC client.
+// The returned tea.Cmd emits a SessionDeletedMsg carrying any RPC error so the
+// caller (DeleteSessionRequestedMsg handler) can surface success/failure to the
+// user — mirroring the archive flow. The session-list refresh is dispatched by
+// the SessionDeletedMsg handler once the RPC completes.
+func (a *App) deleteSession(sessionID, sessionName string) tea.Cmd {
+	rpc := a.rpc
 	return func() tea.Msg {
-		err := a.sessionMgr.DeleteSession(context.TODO(), sessionID)
-		if err != nil {
-			// Just refresh the list to show current state
-		}
-		// Refresh session list
-		sessions, _ := a.sessionMgr.ListSessions(context.TODO())
-		if len(sessions) > 0 {
-			return SessionListMsg{Sessions: sessions}
-		}
-		return SessionListMsg{Sessions: nil}
+		err := rpc.DeleteSession(sessionID)
+		return SessionDeletedMsg{Err: err, SessionID: sessionID, SessionName: sessionName}
 	}
 }
 
