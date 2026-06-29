@@ -79,8 +79,8 @@ class StatusBar extends ConsumerWidget {
         // Chat tab — focus hint, slash command, find, verbosity cycle.
         return '^k focus · / cmd · ^f find · ^v verbosity';
       case 1:
-        // Sessions tab — double-click to open, backspace to archive.
-        return 'dbl-click open · ⌫ archive';
+        // Sessions tab — double-click to open, archive icon to archive.
+        return 'dbl-click open · tap archive icon';
       default:
         return 'j/k navigate · enter select';
     }
