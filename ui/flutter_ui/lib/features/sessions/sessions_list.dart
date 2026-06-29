@@ -79,8 +79,8 @@ class _SessionsListState extends ConsumerState<SessionsList> {
     controller.dispose();
   }
 
-  void _showArchiveConfirmation(String sessionId, String title) {
-    showDialog(
+  Future<void> _showArchiveConfirmation(String sessionId, String title) async {
+    await showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: CyberpunkColors.darkGray,
@@ -105,10 +105,20 @@ class _SessionsListState extends ConsumerState<SessionsList> {
             ),
           ),
           FilledButton(
-            onPressed: () {
-              ref.read(sessionProvider.notifier).archiveSession(sessionId);
-              showStatusMessage(ref, 'archived: ${title.toLowerCase()}');
-              Navigator.pop(context);
+            onPressed: () async {
+              final notifier = ref.read(sessionProvider.notifier);
+              await notifier.archiveSession(sessionId);
+              // Reflect outcome: notifier sets state.error on failure, clears
+              // it on success. Show status AFTER the async resolves so we
+              // never report success prematurely (parity with TUI).
+              final error = ref.read(sessionProvider).error;
+              if (error == null) {
+                showStatusMessage(ref, 'archived: ${title.toLowerCase()}');
+                if (context.mounted) Navigator.pop(context);
+              } else {
+                showStatusMessage(ref, 'archive failed: $error');
+                // Keep dialog open so user can retry / see the failure.
+              }
             },
             child: const Text(
               'archive',
@@ -134,8 +144,8 @@ class _SessionsListState extends ConsumerState<SessionsList> {
     });
   }
 
-  void _showDeleteConfirmation(String sessionId, String title) {
-    showDialog(
+  Future<void> _showDeleteConfirmation(String sessionId, String title) async {
+    await showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: CyberpunkColors.darkGray,
@@ -149,16 +159,25 @@ class _SessionsListState extends ConsumerState<SessionsList> {
           FilledButton(
             style: FilledButton.styleFrom(
                 backgroundColor: CyberpunkColors.redAlert),
-            onPressed: () {
+            onPressed: () async {
               final activeSession = ref.read(activeSessionProvider);
               final isActive = activeSession?.id == sessionId;
-              ref
-                  .read(sessionProvider.notifier)
-                  .deleteSession(sessionId);
-              if (isActive) {
-                ref.read(activeSessionProvider.notifier).state = null;
+              final notifier = ref.read(sessionProvider.notifier);
+              await notifier.deleteSession(sessionId);
+              // Reflect outcome: notifier sets state.error on failure. Show
+              // status AFTER the async resolves — parity with TUI delete
+              // (which uses SessionDeletedMsg to set status from RPC result).
+              final error = ref.read(sessionProvider).error;
+              if (error == null) {
+                showStatusMessage(ref, 'deleted: ${title.toLowerCase()}');
+                if (isActive) {
+                  ref.read(activeSessionProvider.notifier).state = null;
+                }
+                if (context.mounted) Navigator.pop(context);
+              } else {
+                showStatusMessage(ref, 'delete failed: $error');
+                // Keep dialog open so user can see the failure.
               }
-              Navigator.pop(context);
             },
             child: const Text('delete', style: CyberpunkTypography.bodyMedium),
           ),

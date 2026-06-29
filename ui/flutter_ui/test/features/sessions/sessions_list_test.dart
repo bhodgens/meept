@@ -6,6 +6,7 @@ import 'package:meept_ui/features/home/home_screen.dart' show HomeTab;
 import 'package:meept_ui/features/sessions/sessions_list.dart';
 import 'package:meept_ui/providers/providers.dart';
 import 'package:meept_ui/providers/tab_activation_provider.dart';
+import 'package:meept_ui/providers/status_message_provider.dart';
 import 'package:meept_ui/services/session_notifier.dart';
 import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/services/sdk_client.dart';
@@ -242,6 +243,97 @@ void main() {
       expect(find.byType(AlertDialog), findsOneWidget);
       expect(find.text('archive session?'), findsOneWidget);
     });
+
+    // Regression: archive status message must NOT fire synchronously before
+    // the RPC resolves. If the RPC fails, the user should see an error
+    // status, never a premature "archived: X". Parity with TUI's
+    // SessionArchivedMsg-based async-status pattern.
+    testWidgets('archive failure does not show premature success status',
+        (tester) async {
+      final container = ProviderContainer(
+        overrides: [
+          sessionProvider.overrideWith((ref) => SessionNotifier(
+              sdkClient: _ArchiveThrowingSdkClient())),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: Scaffold(body: SessionsList()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Open archive dialog and tap "archive".
+      await tester.tap(find.byIcon(Icons.archive_outlined));
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+
+      // Before tapping, no status message should be set.
+      expect(container.read(statusMessageProvider), isNull);
+
+      await tester.tap(find.widgetWithText(FilledButton, 'archive'));
+      await tester.pumpAndSettle();
+
+      // After RPC fails, status must reflect failure, NOT "archived: ...".
+      final status = container.read(statusMessageProvider);
+      expect(status, isNotNull);
+      expect(status!.startsWith('archived:'), isFalse,
+          reason: 'status must not report success when RPC failed');
+      expect(status.contains('failed'), isTrue);
+
+      // Advance past the 2.5s auto-clear Timer so the test framework's
+      // "no pending timers" assertion doesn't fire.
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    // Regression: delete status message must NOT fire synchronously before
+    // the RPC resolves. Parity with TUI SessionDeletedMsg fix.
+    testWidgets('delete failure does not show premature success status',
+        (tester) async {
+      // Use a client that succeeds on listSessions but throws on delete.
+      final container = ProviderContainer(
+        overrides: [
+          sessionProvider.overrideWith((ref) => SessionNotifier(
+              sdkClient: _DeleteThrowingSdkClient())),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: Scaffold(body: SessionsList()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Long-press to open context menu, then tap "delete permanently".
+      await tester.longPress(find.text('archive me'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('delete permanently'));
+      await tester.pumpAndSettle();
+
+      expect(container.read(statusMessageProvider), isNull);
+
+      await tester.tap(find.widgetWithText(FilledButton, 'delete'));
+      await tester.pumpAndSettle();
+
+      final status = container.read(statusMessageProvider);
+      expect(status, isNotNull);
+      expect(status!.startsWith('deleted:'), isFalse,
+          reason: 'status must not report success when RPC failed');
+      expect(status.contains('failed'), isTrue);
+
+      // Advance past the 2.5s auto-clear Timer.
+      await tester.pump(const Duration(seconds: 3));
+    });
   });
 
   group('SessionNotifier', () {
@@ -413,5 +505,45 @@ class _ThrowingSdkClient extends SdkApiClient {
   @override
   Future<List<Map<String, dynamic>>> listSessions({int? limit}) async {
     throw Exception('connection refused');
+  }
+}
+
+/// Client that throws on archiveSession — used to verify the UI does NOT
+/// report success prematurely when the RPC fails (parity with TUI).
+class _ArchiveThrowingSdkClient extends SdkApiClient {
+  _ArchiveThrowingSdkClient()
+      : super(host: 'localhost', port: 65434);
+
+  @override
+  Future<List<Map<String, dynamic>>> listSessions({int? limit}) async {
+    return [
+      Session(id: '1', title: 'archive me', createdAt: DateTime(2025, 1, 1))
+          .toJson(),
+    ];
+  }
+
+  @override
+  Future<void> archiveSession(String sessionId, {required bool archived}) async {
+    throw Exception('archive rpc failed');
+  }
+}
+
+/// Client that throws on deleteSession — used to verify the UI does NOT
+/// report success prematurely when the RPC fails (parity with TUI).
+class _DeleteThrowingSdkClient extends SdkApiClient {
+  _DeleteThrowingSdkClient()
+      : super(host: 'localhost', port: 65435);
+
+  @override
+  Future<List<Map<String, dynamic>>> listSessions({int? limit}) async {
+    return [
+      Session(id: '1', title: 'archive me', createdAt: DateTime(2025, 1, 1))
+          .toJson(),
+    ];
+  }
+
+  @override
+  Future<void> deleteSession(String id) async {
+    throw Exception('delete rpc failed');
   }
 }
