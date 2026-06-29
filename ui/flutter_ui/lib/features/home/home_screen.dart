@@ -7,8 +7,14 @@ import '../../core/shortcuts.dart';
 import '../../theme/colors.dart';
 import '../../theme/effects.dart';
 import '../../theme/typography.dart';
+import '../../widgets/command_palette.dart';
+import '../../widgets/status_bar.dart';
 import '../../widgets/tab_bar.dart';
 import '../../providers/providers.dart';
+import '../../providers/project_provider.dart';
+import '../../providers/status_message_provider.dart';
+import '../../providers/tab_activation_provider.dart';
+import '../../providers/verbosity_provider.dart';
 import 'tab_content.dart';
 import 'tools_dropdown.dart';
 
@@ -207,7 +213,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _leaderController.onTabSelected = _onLeaderTabSelected;
     _leaderController.onNavigate = _onLeaderNavigate;
     _leaderController.onShowHelp = _showHelpDialog;
-    _leaderController.onFocusInput = ({slashPrefix = false}) {
+    _leaderController.onFocusInput = () {
       if (_selectedTab != HomeTab.chat) {
         setState(() => _selectedTab = HomeTab.chat);
       }
@@ -233,6 +239,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _leaderController.onBranches = () {
       context.goToolBranches();
     };
+    _leaderController.onShowCommandPalette = _showCommandPalette;
+    _leaderController.onCycleVerbosity = _cycleVerbosity;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(chatProvider);
       _onConnectionChanged(ref.read(connectionStateProvider));
@@ -270,6 +278,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ref.read(sessionProvider.notifier).loadSessions();
       ref.read(taskProvider.notifier).loadTasks();
       ref.read(agentProvider.notifier).loadAgents();
+      // Best-effort refresh of the active-project indicator. The
+      // notifier swallows errors and degrades to CurrentProject.empty.
+      ref.read(currentProjectProvider.notifier).refresh();
     }
   }
 
@@ -302,6 +313,81 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return routedTools.contains(toolName);
   }
 
+  /// Open the command palette modal. Replaces the former leader-key
+  /// two-stage input. Items mirror the TUI modal.go command list.
+  void _showCommandPalette() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: CyberpunkColors.darkGray,
+        title: Text(
+          'command palette',
+          style: CyberpunkTypography.bodyMedium.copyWith(
+            color: CyberpunkColors.orangePrimary,
+          ),
+        ),
+        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+        content: SizedBox(
+          width: 480,
+          child: CommandPalette(
+            items: CommandPalette.defaultItems,
+            onSelected: (item) {
+              Navigator.of(context).pop();
+              _handlePaletteSelection(item);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Dispatch a palette selection to the appropriate action. Tab
+  /// switches route through [_onLeaderTabSelected] for DRY (it handles
+  /// both setState and router sync). The find/projects items reuse the
+  /// existing shortcut callbacks.
+  void _handlePaletteSelection(CommandPaletteItem item) {
+    switch (item.label) {
+      case 'chat':
+        _onLeaderTabSelected(HomeTab.chat.index);
+        break;
+      case 'sessions':
+        _onLeaderTabSelected(HomeTab.sessions.index);
+        break;
+      case 'plans':
+        _onLeaderTabSelected(HomeTab.plans.index);
+        break;
+      case 'tasks':
+        _onLeaderTabSelected(HomeTab.tasks.index);
+        break;
+      case 'agents':
+        _onLeaderTabSelected(HomeTab.agents.index);
+        break;
+      case 'find…':
+        _leaderController.onFind?.call();
+        break;
+      case 'new session':
+        _onLeaderTabSelected(HomeTab.sessions.index);
+        // TODO: trigger new-session flow once session tab exposes it
+        break;
+      case 'edit description':
+        _onLeaderTabSelected(HomeTab.sessions.index);
+        // TODO: trigger edit-description flow once session tab exposes it
+        break;
+      case 'projects':
+        _leaderController.onBranches?.call();
+        break;
+    }
+  }
+
+  /// Cycle the verbosity level (Ctrl+V, all platforms, TUI parity).
+  /// UI state only — backend persistence is tracked as task #23
+  /// (deferred: PATCH /api/v1/config/client merge-patch route).
+  void _cycleVerbosity() {
+    ref.read(verbosityProvider.notifier).cycle();
+    final level = ref.read(verbosityProvider);
+    showStatusMessage(ref, 'verbosity: ${VerbosityLevel.name(level)}');
+  }
+
   void _showHelpDialog() {
     showDialog(
       context: context,
@@ -318,16 +404,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildHelpRow('leader s', 'sessions tab'),
-              _buildHelpRow('leader c', 'chat tab'),
-              _buildHelpRow('leader p', 'find / search'),
-              _buildHelpRow('leader b', 'branches'),
-              _buildHelpRow('leader ?', 'this help'),
-              _buildHelpRow('cmd+k', 'focus input (/)'),
+              _buildHelpRow('cmd+x / ctrl+x', 'command palette'),
+              _buildHelpRow('ctrl+v', 'cycle verbosity'),
+              _buildHelpRow('cmd+k / ctrl+k', 'focus input (/)'),
+              _buildHelpRow('cmd+f / ctrl+f', 'find in session'),
+              _buildHelpRow('f', 'global search (sessions tab)'),
               _buildHelpRow('esc', 'close / dismiss / blur'),
               const SizedBox(height: 8),
               Text(
-                'leader = cmd+x (mac) / ctrl+x (linux/win)',
+                'ctrl = cmd on mac; ctrl+v matches TUI on all platforms',
                 style: CyberpunkTypography.bodySmall.copyWith(
                   color: CyberpunkColors.midGray,
                   fontSize: 10,
@@ -385,6 +470,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _onConnectionChanged(connected);
     });
 
+    // Child widgets request tab switches via tabActivationProvider.
+    // Apply the switch and clear the request back to null.
+    ref.listen<HomeTab?>(tabActivationProvider, (prev, next) {
+      if (next != null && next != _selectedTab) {
+        setState(() => _selectedTab = next);
+      }
+      if (next != null) {
+        ref.read(tabActivationProvider.notifier).state = null;
+      }
+    });
+
     return AppShortcuts(
       controller: _leaderController,
       child: Scaffold(
@@ -394,72 +490,50 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             gradient: CyberpunkEffects.angularGradient,
           ),
           child: SafeArea(
-            child: Stack(
+            child: Column(
               children: [
-                Column(
-                  children: [
-                    // Top tab bar
-                    OrangeVoidTabBar(
-                      tabs: _tabLabels,
-                      selectedIndex: _selectedTab.index,
-                      onTabSelected: (index) {
-                        setState(() => _selectedTab = HomeTab.values[index]);
-                        context.go(_tabRoutes[index]);
-                      },
-                    ),
-                    // Toolbar with tools dropdown + connection indicator
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      color: CyberpunkColors.blackTransparent(0.7),
-                      child: Row(
-                        children: [
-                          const Spacer(),
-                          ToolsDropdown(
-                            onToolSelected: (route) {
-                              if (_hasRoute(route)) {
-                                // Full-screen route — don't set activeTool
-                                // to avoid orphaned state (bug F7).
-                                _navigateTool(route);
-                              } else {
-                                ref.read(activeToolProvider.notifier).state = route;
-                                if (_selectedTab != HomeTab.chat) {
-                                  setState(() => _selectedTab = HomeTab.chat);
-                                }
-                              }
-                            },
-                          ),
-                          const SizedBox(width: 12),
-                          const _ConnectionDot(),
-                        ],
-                      ),
-                    ),
-                    const Divider(height: 1, color: CyberpunkColors.midGray),
-                    // Main content area
-                    Expanded(
-                      child: _buildTabContent(),
-                    ),
-                  ],
+                // Top tab bar
+                OrangeVoidTabBar(
+                  tabs: _tabLabels,
+                  selectedIndex: _selectedTab.index,
+                  onTabSelected: (index) {
+                    setState(() => _selectedTab = HomeTab.values[index]);
+                    context.go(_tabRoutes[index]);
+                  },
                 ),
-                // Leader key waiting indicator
-                if (_leaderController.isWaiting)
-                  Positioned(
-                    top: 80,
-                    left: 16,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: CyberpunkColors.orangePrimary.withValues(alpha: 0.9),
-                        borderRadius: BorderRadius.circular(4),
+                // Toolbar with tools dropdown + connection indicator
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  color: CyberpunkColors.blackTransparent(0.7),
+                  child: Row(
+                    children: [
+                      const Spacer(),
+                      ToolsDropdown(
+                        onToolSelected: (route) {
+                          if (_hasRoute(route)) {
+                            // Full-screen route — don't set activeTool
+                            // to avoid orphaned state (bug F7).
+                            _navigateTool(route);
+                          } else {
+                            ref.read(activeToolProvider.notifier).state = route;
+                            if (_selectedTab != HomeTab.chat) {
+                              setState(() => _selectedTab = HomeTab.chat);
+                            }
+                          }
+                        },
                       ),
-                      child: Text(
-                        'leader key — waiting...',
-                        style: CyberpunkTypography.bodySmall.copyWith(
-                          color: CyberpunkColors.black,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
+                      const SizedBox(width: 12),
+                      const _ConnectionDot(),
+                    ],
                   ),
+                ),
+                const Divider(height: 1, color: CyberpunkColors.midGray),
+                // Main content area
+                Expanded(
+                  child: _buildTabContent(),
+                ),
+                // Status bar (TUI parity)
+                StatusBar(selectedTabIndex: _selectedTab.index),
               ],
             ),
           ),

@@ -5,12 +5,11 @@ import 'package:meept_ui/widgets/command_palette.dart';
 
 void main() {
   testWidgets('shows all 9 items with labels', (tester) async {
-    CommandPaletteItem? selected;
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
         body: CommandPalette(
           items: CommandPalette.defaultItems,
-          onSelected: (item) => selected = item,
+          onSelected: (_) {},
         ),
       ),
     ));
