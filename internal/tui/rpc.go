@@ -559,6 +559,14 @@ func (c *RPCClient) DeleteSession(sessionID string) error {
 	return err
 }
 
+// ArchiveSession sets or clears the archived flag on a session via the
+// "sessions.archive" RPC method (registered in internal/daemon/session_rpc.go).
+func (c *RPCClient) ArchiveSession(sessionID string, archived bool) error {
+	params := map[string]any{"id": sessionID, "archived": archived}
+	_, err := c.Call("sessions.archive", params)
+	return err
+}
+
 // SaveSessionMessages saves messages for a session.
 func (c *RPCClient) SaveSessionMessages(sessionID string, messages []types.SessionMessage) error {
 	params := map[string]any{

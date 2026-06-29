@@ -19,6 +19,22 @@ type SessionSwitchToChatMsg struct {
 	Session *types.Session
 }
 
+// ArchiveSessionRequestedMsg signals a request to archive (or unarchive) a session.
+// When Archived is true the session is soft-archived; when false it is restored.
+// Handled by App.Update which dispatches the RPC call via RPCClient.ArchiveSession.
+type ArchiveSessionRequestedMsg struct {
+	SessionID   string
+	SessionName string
+	Archived    bool
+}
+
+// DeleteSessionRequestedMsg signals a permanent delete request (shift+D).
+// Handled by App.Update which dispatches the existing SessionDeleteMsg flow.
+type DeleteSessionRequestedMsg struct {
+	SessionID   string
+	SessionName string
+}
+
 // SessionsModel is a full-screen model for browsing sessions with a detail pane.
 type SessionsModel struct {
 	rpc          SessionsRPCClient
@@ -238,6 +254,39 @@ func (m *SessionsModel) Update(msg tea.Msg) tea.Cmd {
 		case "r":
 			m.loading = true
 			return m.fetchSessions
+
+		case "d":
+			// Archive (or unarchive) the selected session. Default trash
+			// action mirrors the Flutter UI where archive is the primary
+			// swipe action and permanent delete requires a long-press.
+			if s := m.selectedSession(); s != nil {
+				next := !s.Archived // toggle: archived → unarchive, active → archive
+				name := s.Description
+				if name == "" {
+					name = s.Name
+				}
+				sessID := s.ID
+				return func() tea.Msg {
+					return ArchiveSessionRequestedMsg{SessionID: sessID, SessionName: name, Archived: next}
+				}
+			}
+			return nil
+
+		case "D":
+			// Permanent delete (shift+d). Requires explicit capital to
+			// avoid accidental data loss, mirroring the Flutter long-press
+			// confirmation flow.
+			if s := m.selectedSession(); s != nil {
+				name := s.Description
+				if name == "" {
+					name = s.Name
+				}
+				sessID := s.ID
+				return func() tea.Msg {
+					return DeleteSessionRequestedMsg{SessionID: sessID, SessionName: name}
+				}
+			}
+			return nil
 
 		case "?":
 			m.showingHelp = true
@@ -795,6 +844,21 @@ func (m *SessionsModel) getPlanStateColor(state string) string {
 	default:
 		return ColorGray
 	}
+}
+
+// selectedSession returns the session under the table cursor, or nil if the
+// list is empty or the cursor is out of range. This is preferred over reading
+// m.selected directly because sorting can leave m.selected pointing at the
+// wrong session (the pointer is not re-derived after a re-sort).
+func (m *SessionsModel) selectedSession() *types.Session {
+	if len(m.sessions) == 0 {
+		return nil
+	}
+	idx := m.table.Cursor()
+	if idx < 0 || idx >= len(m.sessions) {
+		return nil
+	}
+	return &m.sessions[idx]
 }
 
 // sortSessions sorts sessions by designation priority, then by last activity.

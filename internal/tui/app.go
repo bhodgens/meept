@@ -714,7 +714,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Navigate to sessions tab
 			a.currentView = ViewSessions
-			a.statusMessage = "sessions tab (create: n, delete: d)"
+			a.statusMessage = "sessions tab (create: n, archive: d, delete: shift+d)"
 			a.statusMessageTime = time.Now()
 			clearCmd := tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
 				return StatusMessageClearMsg{}
@@ -976,6 +976,51 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SessionDeleteMsg:
 		// Delete a session
 		cmd := a.deleteSession(msg.SessionID)
+		return a, cmd
+
+	case models.ArchiveSessionRequestedMsg:
+		// Soft-archive (or unarchive) a session via the sessions.archive RPC.
+		// Returns a tea.Cmd so the RPC round-trip doesn't block Update; the
+		// returned SessionArchivedMsg updates the status message and triggers
+		// a session-list refresh so the dimming/sort takes effect immediately.
+		sessionID := msg.SessionID
+		sessionName := msg.SessionName
+		archived := msg.Archived
+		rpc := a.rpc
+		return a, func() tea.Msg {
+			err := rpc.ArchiveSession(sessionID, archived)
+			return SessionArchivedMsg{Err: err, Archived: archived, SessionName: sessionName}
+		}
+
+	case SessionArchivedMsg:
+		verb := "archived"
+		if !msg.Archived {
+			verb = "unarchived"
+		}
+		if msg.Err != nil {
+			slog.Warn("archive session failed", "error", msg.Err)
+			a.statusMessage = fmt.Sprintf("archive failed: %v", msg.Err)
+		} else {
+			a.statusMessage = fmt.Sprintf("%s: %s", verb, msg.SessionName)
+		}
+		a.statusMessageTime = time.Now()
+		// Trigger a status-message auto-clear.
+		clearCmd := tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
+			return StatusMessageClearMsg{}
+		})
+		// Refresh the sessions view so the new archived state shows.
+		if a.sessions != nil {
+			return a, tea.Batch(clearCmd, a.sessions.Init())
+		}
+		return a, clearCmd
+
+	case models.DeleteSessionRequestedMsg:
+		// Permanent delete (shift+D from sessions view). Reuses the
+		// existing deleteSession path but prefixes the status message
+		// with the session name for clearer user feedback.
+		cmd := a.deleteSession(msg.SessionID)
+		a.statusMessage = fmt.Sprintf("deleted: %s", msg.SessionName)
+		a.statusMessageTime = time.Now()
 		return a, cmd
 
 	case models.OpenCreateSessionModalMsg:
@@ -1787,7 +1832,7 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case keys.Sessions:
 			// Navigate to sessions tab (Issue 9: replaces deprecated ModalSessionPicker).
 			a.currentView = ViewSessions
-			a.statusMessage = "sessions tab (create: n, delete: d)"
+			a.statusMessage = "sessions tab (create: n, archive: d, delete: shift+d)"
 			a.statusMessageTime = time.Now()
 			return a, tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
 				return StatusMessageClearMsg{}
