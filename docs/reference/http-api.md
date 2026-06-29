@@ -231,6 +231,7 @@ Response: `{"status": "queued"}`
 | POST | `/api/v1/sessions` | Create session |
 | GET | `/api/v1/sessions/most-recent` | Get the most recent session |
 | GET | `/api/v1/sessions/{id}` | Get session |
+| PATCH | `/api/v1/sessions/{id}` | Update session (e.g., toggle `archived`) |
 | DELETE | `/api/v1/sessions/{id}` | Delete session |
 | POST | `/api/v1/sessions/{id}/attach` | Attach to session |
 | POST | `/api/v1/sessions/{id}/detach` | Detach from session |
@@ -277,6 +278,27 @@ Response: `{"messages": [...], "total": N}`
 ```bash
 curl -X POST http://localhost:8081/api/v1/sessions/sess-123/compact
 ```
+
+**Archive (soft):**
+```bash
+curl -X PATCH http://localhost:8081/api/v1/sessions/sess-123 \
+  -H "Content-Type: application/json" \
+  -d '{"archived": true}'
+```
+
+Request body (`archived` is **required**; the decoder uses `DisallowUnknownFields()`, so unknown keys return `400`):
+
+```json
+{"archived": true}
+```
+
+| field | type | behavior |
+|-------|------|----------|
+| `archived` | `*bool` | **required**. `true` soft-archives; `false` restores. Omitting returns `400 Bad Request` with `{"error":"\"archived\" field is required"}`. |
+
+Response: `204 No Content` with an empty body. The handler does not return the updated session JSON — re-fetch via `GET /api/v1/sessions/{id}` if you need the updated record. `404 Not Found` if the session id does not exist.
+
+Archived sessions are preserved (no row deletion): messages, branches, embeddings, and FTS rows all remain. They continue to appear in `GET /api/v1/sessions` with `"archived": true` so clients can grey or sort them to the bottom. Hard delete via `DELETE /api/v1/sessions/{id}` removes all data regardless of archive state.
 
 ### Workers
 
