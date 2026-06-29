@@ -183,6 +183,10 @@ type Session struct {
 
 	// Session designation (Plan 4.1)
 	Designation    *SessionDesignation `json:"designation,omitempty"`
+
+	// Archived controls soft-archive (sort-to-bottom, dimmed rendering).
+	// Mirror of internal/session.Session.Archived.
+	Archived bool `json:"archived,omitempty"`
 }
 
 // SessionDesignation tracks a session's special status requiring attention (TUI type).
