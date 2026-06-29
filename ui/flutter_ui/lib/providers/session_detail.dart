@@ -14,11 +14,9 @@ import 'providers.dart' show sdkClientProvider;
 /// without awaiting — Riverpod kicks off the future immediately and the
 /// result is cached for subsequent `ref.watch` calls.
 ///
-/// Implemented as a direct `FutureProvider.family` rather than via
-/// [cachedDetailFamily] because the fetcher needs `ref.read(sdkClientProvider)`
-/// and `DetailFetcher<T>` is `(String id) -> Future<T>` with no ref param.
-/// Riverpod's family already provides per-id caching, so wrapping it adds no
-/// benefit here.
+/// Implemented as a direct `FutureProvider.family` because Riverpod's family
+/// already provides per-id caching, so an additional wrapper would add no
+/// benefit.
 final sessionDetailFamily =
     FutureProvider.family<Session, String>((ref, id) async {
   final client = ref.read(sdkClientProvider);

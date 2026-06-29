@@ -90,16 +90,9 @@ Mirrors the TUI's `d` / `shift+d` keys with pointer affordances. See [session.md
 
 ### Cached detail providers
 
-Riverpod `FutureProvider.family<T, String>` instances provide per-id caching for detail panes:
+A `FutureProvider.family<Session, String>` (`sessionDetailFamily` in `ui/flutter_ui/lib/providers/session_detail.dart`) provides per-id caching for the sessions detail pane.
 
-| provider | file | type |
-|----------|------|------|
-| `sessionDetailFamily` | `ui/flutter_ui/lib/features/sessions/sessions_detail.dart` | `Session` |
-| `agentDetailFamily` | `ui/flutter_ui/lib/providers/agent_detail.dart` | `Agent` |
-| `planDetailFamily` | `ui/flutter_ui/lib/providers/plan_detail.dart` | `Plan` |
-| `taskDetailFamily` | `ui/flutter_ui/lib/providers/task_detail.dart` | `Task` |
-
-`SessionsDetailPane` accepts an optional `sessionId`; when provided it consumes `sessionDetailFamily(sessionId)` instead of re-fetching, so navigation from the sessions list into a detail view reuses the cached row data.
+`SessionsDetailPane` accepts an optional `sessionId`; when provided it consumes `sessionDetailFamily(sessionId)` instead of re-fetching, so navigation from the sessions list into a detail view reuses the cached row data. `HomeScreen` also warms the cache for the `default` session on connect.
 
 ## Edge cases
 
