@@ -210,7 +210,7 @@ void main() {
       expect(find.widgetWithText(FilledButton, 'create'), findsOneWidget);
     });
 
-    testWidgets('delete confirmation shows when delete icon pressed',
+    testWidgets('archive confirmation shows when archive icon pressed',
         (tester) async {
       await tester.pumpWidget(
         ProviderScope(
@@ -219,7 +219,7 @@ void main() {
               final notifier = SessionNotifier(sdkClient: _TestSdkClient([
                 Session(
                   id: '1',
-                  title: 'Delete Me',
+                  title: 'Archive Me',
                   createdAt: DateTime.now(),
                 ),
               ]));
@@ -234,13 +234,13 @@ void main() {
 
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.delete_outline));
+      await tester.tap(find.byIcon(Icons.archive_outlined));
       // InkWell delays onTap when onDoubleTap is present; pump past the double-tap window
       await tester.pump(const Duration(milliseconds: 350));
       await tester.pumpAndSettle();
 
       expect(find.byType(AlertDialog), findsOneWidget);
-      expect(find.text('delete session?'), findsOneWidget);
+      expect(find.text('archive session?'), findsOneWidget);
     });
   });
 

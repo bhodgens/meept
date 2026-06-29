@@ -7,6 +7,7 @@ import '../../theme/typography.dart';
 import '../../features/home/home_screen.dart' show HomeTab;
 import '../../models/api_models.dart';
 import '../../providers/providers.dart';
+import '../../providers/status_message_provider.dart';
 import '../../providers/tab_activation_provider.dart';
 
 /// Sessions list widget - displays all sessions with selection
@@ -78,12 +79,67 @@ class _SessionsListState extends ConsumerState<SessionsList> {
     controller.dispose();
   }
 
+  void _showArchiveConfirmation(String sessionId, String title) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: CyberpunkColors.darkGray,
+        title: Text(
+          'archive session?',
+          style: CyberpunkTypography.bodyMedium.copyWith(
+            color: CyberpunkColors.orangePrimary,
+          ),
+        ),
+        content: Text(
+          '"${title.toLowerCase()}"',
+          style: CyberpunkTypography.bodyMedium,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'cancel',
+              style: CyberpunkTypography.bodyMedium.copyWith(
+                color: CyberpunkColors.midGray,
+              ),
+            ),
+          ),
+          FilledButton(
+            onPressed: () {
+              ref.read(sessionProvider.notifier).archiveSession(sessionId);
+              showStatusMessage(ref, 'archived: ${title.toLowerCase()}');
+              Navigator.pop(context);
+            },
+            child: const Text(
+              'archive',
+              style: CyberpunkTypography.bodyMedium,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showContextMenu(BuildContext context, Session session) {
+    showMenu<String>(
+      context: context,
+      position: const RelativeRect.fromLTRB(0, 0, 0, 0),
+      items: const [
+        PopupMenuItem(value: 'delete', child: Text('delete permanently')),
+      ],
+    ).then((value) {
+      if (value == 'delete') {
+        _showDeleteConfirmation(session.id, session.title);
+      }
+    });
+  }
+
   void _showDeleteConfirmation(String sessionId, String title) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: CyberpunkColors.darkGray,
-        title: const Text('delete session?', style: CyberpunkTypography.headlineMedium),
+        title: const Text('delete permanently?', style: CyberpunkTypography.headlineMedium),
         content: Text('"$title"', style: CyberpunkTypography.bodyMedium),
         actions: [
           TextButton(
@@ -193,58 +249,62 @@ class _SessionsListState extends ConsumerState<SessionsList> {
   }
 
   Widget _buildSessionTile(Session session, bool isSelected) {
-    return InkWell(
-      key: ValueKey('session-tile-${session.id}'),
-      onTap: () => ref.read(activeSessionProvider.notifier).state = session,
-      onDoubleTap: () {
-        ref.read(activeSessionProvider.notifier).state = session;
-        ref.read(tabActivationProvider.notifier).state = HomeTab.chat;
-        context.go('/');
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? CyberpunkColors.orangePrimary.withValues(alpha: 0.1)
-              : null,
-          border: Border(
-            left: BorderSide(
-              color: isSelected
-                  ? CyberpunkColors.orangePrimary
-                  : Colors.transparent,
-              width: 2,
-            ),
-          ),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    session.title.toLowerCase(),
-                    style: CyberpunkTypography.bodyMedium.copyWith(
-                      color: isSelected
-                          ? CyberpunkColors.orangePrimary
-                          : CyberpunkColors.greenSuccess,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    timeago.format(session.lastActivity ?? session.createdAt),
-                    style: CyberpunkTypography.bodySmall,
-                  ),
-                ],
+    return Opacity(
+      opacity: session.archived ? 0.5 : 1.0,
+      child: InkWell(
+        key: ValueKey('session-tile-${session.id}'),
+        onTap: () => ref.read(activeSessionProvider.notifier).state = session,
+        onDoubleTap: () {
+          ref.read(activeSessionProvider.notifier).state = session;
+          ref.read(tabActivationProvider.notifier).state = HomeTab.chat;
+          context.go('/');
+        },
+        onLongPress: () => _showContextMenu(context, session),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? CyberpunkColors.orangePrimary.withValues(alpha: 0.1)
+                : null,
+            border: Border(
+              left: BorderSide(
+                color: isSelected
+                    ? CyberpunkColors.orangePrimary
+                    : Colors.transparent,
+                width: 2,
               ),
             ),
-            IconButton(
-              icon: const Icon(Icons.delete_outline, size: 16),
-              color: CyberpunkColors.orangeDark,
-              onPressed: () =>
-                  _showDeleteConfirmation(session.id, session.title),
-            ),
-          ],
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      session.title.toLowerCase(),
+                      style: CyberpunkTypography.bodyMedium.copyWith(
+                        color: isSelected
+                            ? CyberpunkColors.orangePrimary
+                            : CyberpunkColors.greenSuccess,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      timeago.format(session.lastActivity ?? session.createdAt),
+                      style: CyberpunkTypography.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.archive_outlined, size: 16),
+                color: CyberpunkColors.orangeDark,
+                onPressed: () =>
+                    _showArchiveConfirmation(session.id, session.title),
+              ),
+            ],
+          ),
         ),
       ),
     );
