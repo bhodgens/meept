@@ -6,9 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:meept_ui/features/chat/chat_message_list.dart';
 import 'package:meept_ui/features/chat/chat_message_bubble.dart';
 import 'package:meept_ui/models/api_models.dart';
-import 'package:meept_ui/providers/chat_provider.dart';
 import 'package:meept_ui/providers/providers.dart';
-import 'package:meept_ui/providers/tts_provider.dart';
 import 'package:meept_ui/services/sdk_client.dart';
 import 'package:meept_ui/services/websocket_service.dart';
 
