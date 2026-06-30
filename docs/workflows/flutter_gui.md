@@ -66,6 +66,8 @@ Cycles through three levels (`ui/flutter_ui/lib/providers/verbosity_provider.dar
 
 Cycled by **`Ctrl+V` on every platform** — deliberately not `Cmd+V` on macOS so the shortcut matches the TUI verbatim (`CLAUDE.md` UI conventions). The active level is shown in the status bar and gates which `agent_progress` WebSocket events the UI surfaces: events with `tier` greater than the current level are dropped client-side.
 
+**Persistence:** each cycle fire-and-forgets a `PATCH /api/v1/config/client` with `{"chat": {"verbosity": "<name>"}}` so the choice survives app restarts (RFC 7396 merge-patch — unrelated keys in `client.json5` are preserved). The TUI does the equivalent via a direct disk write in its own Ctrl+V handler. UI state updates immediately; persistence failures are swallowed (best-effort — see `verbosity_provider.dart`).
+
 ### Agent tiles
 
 The agents tab (`ui/flutter_ui/lib/features/agents/agents_tab.dart`) renders one tile per registered employee using a `SliverGridDelegateWithMaxCrossAxisExtent`:

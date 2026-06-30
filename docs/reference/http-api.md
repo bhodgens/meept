@@ -480,7 +480,8 @@ Returns counters for summarization failures, dropped messages, compaction events
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/config/client` | Get client config |
-| POST | `/api/v1/config/client` | Save client config |
+| POST | `/api/v1/config/client` | Save client config (full replace) |
+| PATCH | `/api/v1/config/client` | Merge-patch client config (RFC 7396) |
 | GET | `/api/v1/config/models` | Get models config |
 | POST | `/api/v1/config/models` | Save models config |
 | GET | `/api/v1/config/menubar` | Get menubar config |
@@ -535,6 +536,40 @@ curl -X POST http://localhost:8081/api/v1/config/normalize \
   -d '{"content": "// my config\n{ key: value }"}'
 ```
 Response: `{"normalized": "{\n  \"key\": \"value\"\n}"}`
+
+**Merge-Patch Client Config (RFC 7396):**
+
+Atomically merge a partial update into `~/.meept/client.json5`. Semantics:
+- Object values are recursively merged.
+- Scalar/array values from the request replace the existing value.
+- `null` deletes the corresponding key.
+
+The merged result is written atomically (temp file + rename) and returned
+in the response body. JSON5 comments are not preserved on round-trip
+(`hujson.Standardize` discards them, same as the `meept config` editor).
+
+```bash
+curl -X PATCH http://localhost:8081/api/v1/config/client \
+  -H "Content-Type: application/json" \
+  -d '{"chat": {"verbosity": "quiet"}}'
+```
+
+| Field | Type | Behavior |
+|-------|------|----------|
+| (any top-level key) | any | Merged into existing config per RFC 7396. `null` deletes. |
+
+Request body must be a JSON object (empty body returns `400`). Unknown
+fields are allowed (forward-compatible) — this is intentional, unlike the
+strict `PATCH /api/v1/sessions/{id}` which rejects unknown fields.
+
+Response: `200 OK` with the merged config as JSON (not JSON5).
+```json
+{
+  "chat": { "verbosity": "quiet", "scroll_speed": 3 },
+  "keybindings": { "...": "..." },
+  "session": { "...": "..." }
+}
+```
 
 ### Calendar
 
