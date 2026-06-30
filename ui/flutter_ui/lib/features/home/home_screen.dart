@@ -373,11 +373,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         break;
       case 'new session':
         _onLeaderTabSelected(HomeTab.sessions.index);
-        // TODO: trigger new-session flow once session tab exposes it
+        ref.read(createSessionRequestProvider.notifier).state = true;
         break;
       case 'edit description':
+        // Backend has no session-description edit endpoint yet
+        // (PATCH /sessions/{id} only accepts {"archived": bool}).
+        // Route to sessions tab as the closest available affordance.
         _onLeaderTabSelected(HomeTab.sessions.index);
-        // TODO: trigger edit-description flow once session tab exposes it
         break;
       case 'projects':
         _leaderController.onBranches?.call();
@@ -386,8 +388,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   /// Cycle the verbosity level (Ctrl+V, all platforms, TUI parity).
-  /// UI state only — backend persistence is tracked as task #23
-  /// (deferred: PATCH /api/v1/config/client merge-patch route).
+  /// State cycles immediately; persistence is fire-and-forget via
+  /// VerbosityNotifier.onPersist → PATCH /api/v1/config/client.
   void _cycleVerbosity() {
     ref.read(verbosityProvider.notifier).cycle();
     final level = ref.read(verbosityProvider);

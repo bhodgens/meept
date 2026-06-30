@@ -105,6 +105,10 @@ final shortcutHelpProvider = StateProvider<bool>((ref) => false);
 // Focus input with slash prefix request
 final focusInputRequestProvider = StateProvider<bool>((ref) => false);
 
+// Command-palette "new session" signal. The palette sets this to true;
+// SessionsList listens and opens its create dialog, then resets to false.
+final createSessionRequestProvider = StateProvider<bool>((ref) => false);
+
 /// Connection detail row data.
 class ConnDataRow {
   final String label;

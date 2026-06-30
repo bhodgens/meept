@@ -191,6 +191,15 @@ class _SessionsListState extends ConsumerState<SessionsList> {
     final sessionState = ref.watch(sessionProvider);
     final activeSession = ref.watch(activeSessionProvider);
 
+    // Listen for command-palette "new session" requests. Mirrors the
+    // focusInputRequestProvider pattern used by the chat input.
+    ref.listen<bool>(createSessionRequestProvider, (previous, next) {
+      if (next) {
+        _showCreateSessionDialog();
+        ref.read(createSessionRequestProvider.notifier).state = false;
+      }
+    });
+
     return Container(
       width: 280,
       decoration: BoxDecoration(
