@@ -3,6 +3,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -307,4 +308,59 @@ func checkClientConfigDefaults(path string, cfg *ClientConfig) {
 		slog.Warn("client config: using default for missing field", "field", "keybindings.escape_behavior", "default", "once", "path", path)
 		cfg.Keybindings.EscapeBehavior = "once"
 	}
+}
+
+// persistVerbosity writes chat.verbosity=<level> into the client.json5
+// at path. The file is read, standardized (JSON5 → JSON via hujson),
+// unmarshaled, mutated at chat.verbosity, and written back atomically.
+// If path does not exist, a minimal file is created.
+//
+// This helper is invoked on the TUI's Ctrl+V verbosity cycle so the
+// value survives restarts, mirroring the Flutter PATCH /api/v1/config/
+// client path. Failure is non-fatal — callers should log and continue.
+func persistVerbosity(path, level string) error {
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read client config: %w", err)
+	}
+	if os.IsNotExist(err) {
+		existing = []byte("{}")
+	}
+
+	stdJSON, err := hujson.Standardize(existing)
+	if err != nil {
+		return fmt.Errorf("parse client.json5: %w", err)
+	}
+
+	var root map[string]any
+	if err := json.Unmarshal(stdJSON, &root); err != nil {
+		return fmt.Errorf("unmarshal client.json5: %w", err)
+	}
+	if root == nil {
+		root = map[string]any{}
+	}
+
+	chat, _ := root["chat"].(map[string]any)
+	if chat == nil {
+		chat = map[string]any{}
+	}
+	chat["verbosity"] = level
+	root["chat"] = chat
+
+	out, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal client config: %w", err)
+	}
+	out = append(out, '\n')
+
+	tmpPath := path + ".tmp"
+	//nolint:gosec // user config file; restrictive perms intended
+	if err := os.WriteFile(tmpPath, out, 0o600); err != nil {
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
 }
