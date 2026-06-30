@@ -275,7 +275,7 @@ func TestDeepMerge_NestedKeyMerge(t *testing.T) {
 		"added": "new",
 	}
 
-	out := deepMerge(dst, src)
+	out := DeepMerge(dst, src)
 
 	daemon, ok := out["daemon"].(map[string]any)
 	if !ok {
@@ -303,7 +303,7 @@ func TestDeepMerge_ArrayReplaceNotConcat(t *testing.T) {
 		"plugins": []any{"x"},
 	}
 
-	out := deepMerge(dst, src)
+	out := DeepMerge(dst, src)
 
 	got, ok := out["plugins"].([]any)
 	if !ok {
@@ -323,7 +323,7 @@ func TestDeepMerge_NullDeletesKey(t *testing.T) {
 		"delete": nil,
 	}
 
-	out := deepMerge(dst, src)
+	out := DeepMerge(dst, src)
 
 	if _, ok := out["delete"]; ok {
 		t.Error("expected 'delete' key removed by null in src")
@@ -344,7 +344,7 @@ func TestDeepMerge_ScalarOverride(t *testing.T) {
 		"debug": true,
 	}
 
-	out := deepMerge(dst, src)
+	out := DeepMerge(dst, src)
 
 	if out["port"] != float64(9090) {
 		t.Errorf("expected port overridden to 9090, got %v", out["port"])
@@ -365,7 +365,7 @@ func TestDeepMerge_DstNotMutated(t *testing.T) {
 		"daemon": map[string]any{"log_level": "debug"},
 	}
 
-	_ = deepMerge(dst, src)
+	_ = DeepMerge(dst, src)
 
 	daemon, ok := dst["daemon"].(map[string]any)
 	if !ok {
@@ -394,7 +394,7 @@ func TestDeepMerge_DeepNested(t *testing.T) {
 		},
 	}
 
-	out := deepMerge(dst, src)
+	out := DeepMerge(dst, src)
 	a, _ := out["a"].(map[string]any)
 	b, _ := a["b"].(map[string]any)
 	if b["c"] != 1 {

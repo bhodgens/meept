@@ -188,7 +188,7 @@ func (m *Merger) applyMergedConfigFile(src, dst string, result *MergeResult) err
 		return m.applyConfigFile(src, dst, result)
 	}
 
-	merged = deepMerge(merged, srcObj)
+	merged = DeepMerge(merged, srcObj)
 
 	// Marshal back to JSON5-compatible JSON. We don't try to preserve
 	// comments or formatting because hujson.Standardize on input already
@@ -230,13 +230,15 @@ func (m *Merger) applyMergedConfigFile(src, dst string, result *MergeResult) err
 	return nil
 }
 
-// deepMerge returns a new map that merges src on top of dst:
+// DeepMerge returns a new map that merges src on top of dst:
 //   - Object values are recursively merged.
 //   - Array and scalar values from src replace the corresponding dst value.
 //   - A JSON null in src deletes the corresponding key from dst.
 //
 // dst is not mutated; the returned map shares sub-maps only at unmodified keys.
-func deepMerge(dst, src map[string]any) map[string]any {
+//
+// Implements RFC 7396 JSON Merge Patch semantics.
+func DeepMerge(dst, src map[string]any) map[string]any {
 	out := make(map[string]any, len(dst))
 	for k, v := range dst {
 		out[k] = v
@@ -250,7 +252,7 @@ func deepMerge(dst, src map[string]any) map[string]any {
 		if dv, ok := out[k]; ok {
 			if dvMap, dOk := dv.(map[string]any); dOk {
 				if svMap, sOk := sv.(map[string]any); sOk {
-					out[k] = deepMerge(dvMap, svMap)
+					out[k] = DeepMerge(dvMap, svMap)
 					continue
 				}
 			}
