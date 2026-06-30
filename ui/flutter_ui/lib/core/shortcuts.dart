@@ -1,17 +1,15 @@
-import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'router.dart';
 
 /// App-wide intent types for keyboard shortcuts.
 abstract class AppIntent extends Intent {
   const AppIntent();
 }
 
-/// Leader key trigger — waits for a follow-up character.
+/// Leader key trigger — opens the command palette.
 class LeaderIntent extends AppIntent {
   const LeaderIntent();
 }
@@ -56,25 +54,17 @@ class GlobalSearchIntent extends AppIntent {
   const GlobalSearchIntent();
 }
 
-/// Leader key state machine.
+/// Controller for app-wide keyboard shortcuts.
 ///
-/// Two-stage input: on leader key, enter "waiting" state. Next
-/// character dispatches the corresponding action. Times out after
-/// 0.5s if no follow-up key is pressed.
-///
-/// Navigation can be handled in two ways:
-/// 1. Wire [onNavigate] to call `context.go(path)` — preferred for
-///    widgets that have a BuildContext.
-/// 2. Leave [onNavigate] unset and the controller will use the global
-///    [router] directly via `router.go(path)`.
+/// Previously this class hosted a two-stage "leader key" state machine
+/// (leader + follow-up character). It has been replaced by a command
+/// palette: pressing the leader combo (Cmd+X mac / Ctrl+X other) now
+/// invokes [onShowCommandPalette] which opens a modal palette dialog.
+/// All former `onTabSelected` / `onNavigate` / etc. callbacks are
+/// retained because they are still used by direct shortcuts and by
+/// the palette's selection handler in `HomeScreen`.
 class LeaderKeyController extends ChangeNotifier {
   static bool get _isMacOS => !kIsWeb && Platform.isMacOS;
-
-  /// Whether the leader key is currently in "waiting for sequence" mode.
-  bool get isWaiting => _waiting;
-  bool _waiting = false;
-
-  Timer? _timeout;
 
   /// Set this callback to route tab switches from the shortcut layer
   /// up to the containing widget. Index maps to [HomeTab.values].
@@ -90,25 +80,24 @@ class LeaderKeyController extends ChangeNotifier {
   VoidCallback? onBranches;
 
   /// Set this callback to handle find/search.
-  ///
-  /// For global semantic search (leader+p). In-session find (cmd+f/ctrl+f)
-  /// uses [onInSessionFind].
   VoidCallback? onFind;
 
   /// Set this callback to open the in-session find bar (Cmd+F / Ctrl+F).
   VoidCallback? onInSessionFind;
 
   /// Set this callback to open global search (single `f` key from
-  /// sessions tab).  The callback should check the current tab/route
+  /// sessions tab). The callback should check the current tab/route
   /// before navigating — the controller fires on every unmodified `f`
   /// press, leaving route-gating to the widget layer.
   VoidCallback? onGlobalSearch;
 
+  /// Open the command palette dialog (replaces the former leader mode).
+  VoidCallback? onShowCommandPalette;
+
+  /// Cycle the verbosity level (Ctrl+V on all platforms, TUI parity).
+  VoidCallback? onCycleVerbosity;
+
   /// Optional callback for go_router navigation.
-  ///
-  /// When set, leader sequences that trigger navigation will call
-  /// this with the target route path (e.g. `/sessions`, `/tools/search`).
-  /// When unset, the controller falls back to the global [router].
   void Function(String path)? onNavigate;
 
   static LogicalKeySet get leaderKeySet {
@@ -130,16 +119,19 @@ class LeaderKeyController extends ChangeNotifier {
         : LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyF);
   }
 
-  /// Handle a raw key event directly (used when not using Flutter's
-  /// Actions system, e.g. for sequential leader keys).
+  /// Handle a raw key event directly (Focus widget dispatch path).
   KeyEventResult handleKeyEvent(KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
-    final key = event.logicalKey;
-
-    // --- Leader trigger ---
+    // --- Leader trigger → open command palette ---
     if (_isLeaderTrigger(event)) {
-      _enterLeaderMode();
+      onShowCommandPalette?.call();
+      return KeyEventResult.handled;
+    }
+
+    // --- Ctrl+V verbosity (all platforms, TUI parity) ---
+    if (_isVerbosityTrigger(event)) {
+      onCycleVerbosity?.call();
       return KeyEventResult.handled;
     }
 
@@ -159,86 +151,9 @@ class LeaderKeyController extends ChangeNotifier {
       return KeyEventResult.handled;
     }
 
-    if (key == LogicalKeyboardKey.escape) {
-      if (_waiting) {
-        _exitLeaderMode();
-        return KeyEventResult.handled;
-      }
-      return KeyEventResult.ignored;
-    }
-
-    // Nothing recognized
+    // Escape is intentionally ignored here — the Focus system handles
+    // dismissal of dialogs/popups via EscapeIntent.
     return KeyEventResult.ignored;
-  }
-
-  /// Handle the second keystroke while in leader mode.
-  KeyEventResult handleLeaderSequence(KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
-
-    final ch = _logicalKeyToChar(event.logicalKey);
-    if (ch == null) {
-      _exitLeaderMode();
-      return KeyEventResult.ignored;
-    }
-
-    switch (ch) {
-      case 's':
-        _navigate('/sessions');
-        onTabSelected?.call(1); // sessions
-        break;
-      case 'p':
-        _navigate('/tools/search');
-        onFind?.call();
-        break;
-      case 'b':
-        _navigate('/tools/branches');
-        onBranches?.call();
-        break;
-      case 'c':
-        _navigate('/');
-        onTabSelected?.call(0); // chat
-        break;
-      case '?':
-        onShowHelp?.call();
-        break;
-      default:
-        break;
-    }
-    _exitLeaderMode();
-    return KeyEventResult.handled;
-  }
-
-  /// Navigate using go_router.
-  ///
-  /// Prefers [onNavigate] callback (for BuildContext-based navigation);
-  /// falls back to the global [router] instance.
-  void _navigate(String path) {
-    if (onNavigate != null) {
-      onNavigate!(path);
-    } else {
-      router.go(path);
-    }
-  }
-
-  void _enterLeaderMode() {
-    _timeout?.cancel();
-    _waiting = true;
-    notifyListeners();
-    _timeout = Timer(const Duration(milliseconds: 500), _exitLeaderMode);
-  }
-
-  void _exitLeaderMode() {
-    _timeout?.cancel();
-    if (_waiting) {
-      _waiting = false;
-      notifyListeners();
-    }
-  }
-
-  @override
-  void dispose() {
-    _timeout?.cancel();
-    super.dispose();
   }
 
   static bool _isLeaderTrigger(KeyEvent event) {
@@ -247,6 +162,15 @@ class LeaderKeyController extends ChangeNotifier {
     if (_isMacOS) {
       return HardwareKeyboard.instance.isMetaPressed;
     }
+    return HardwareKeyboard.instance.isControlPressed;
+  }
+
+  /// Detect Ctrl+V on ALL platforms (parity with TUI per CLAUDE.md UI
+  /// conventions — Ctrl+V on macOS is intentionally the same as
+  /// Linux/Windows; we do NOT use Cmd+V here).
+  static bool _isVerbosityTrigger(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    if (event.logicalKey != LogicalKeyboardKey.keyV) return false;
     return HardwareKeyboard.instance.isControlPressed;
   }
 
@@ -270,37 +194,23 @@ class LeaderKeyController extends ChangeNotifier {
   }
 
   /// Detect a single `f` key press with no modifiers for global search.
-  ///
-  /// Route-gating (only fire when on the sessions tab) is the
-  /// responsibility of the [onGlobalSearch] callback — the controller
-  /// itself is route-agnostic.
   static bool _isGlobalSearchTrigger(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
     if (event.logicalKey != LogicalKeyboardKey.keyF) return false;
-    // No modifiers must be held.
     if (HardwareKeyboard.instance.isMetaPressed) return false;
     if (HardwareKeyboard.instance.isControlPressed) return false;
     if (HardwareKeyboard.instance.isAltPressed) return false;
     if (HardwareKeyboard.instance.isShiftPressed) return false;
     return true;
   }
-
-  /// Convert common logical keys to their character representation.
-  static String? _logicalKeyToChar(LogicalKeyboardKey key) {
-    if (key == LogicalKeyboardKey.keyS) return 's';
-    if (key == LogicalKeyboardKey.keyP) return 'p';
-    if (key == LogicalKeyboardKey.keyB) return 'b';
-    if (key == LogicalKeyboardKey.keyC) return 'c';
-    if (key == LogicalKeyboardKey.slash) return '?';
-    if (key == LogicalKeyboardKey.digit1) return '1';
-    return null;
-  }
 }
 
-/// Wraps a child with app-wide shortcuts using Flutter's Shortcuts + Actions.
+/// Wraps a child with app-wide shortcuts via a Focus node.
 ///
-/// The leader key is handled natively through a Focus node with raw
-/// key events (required because leader sequences are multi-keystroke).
+/// Dispatch happens in [LeaderKeyController.handleKeyEvent] through a
+/// raw-key-event Focus node. The legacy Shortcuts+Actions widgets were
+/// removed when the leader-key state machine was replaced by the
+/// command palette.
 class AppShortcuts extends StatefulWidget {
   final Widget child;
   final LeaderKeyController controller;
@@ -318,61 +228,14 @@ class AppShortcuts extends StatefulWidget {
 class _AppShortcutsState extends State<AppShortcuts> {
   @override
   Widget build(BuildContext context) {
-    return Shortcuts(
-      shortcuts: <LogicalKeySet, Intent>{
-        // These shortcuts are registered but the actual dispatch is handled
-        // by the Focus widget below for leader sequences.
-        LeaderKeyController.leaderKeySet: const LeaderIntent(),
-        LeaderKeyController.focusInputKeySet: const FocusInputIntent(),
-        LeaderKeyController.findKeySet: const FindIntent(),
-      },
-      child: Actions(
-        actions: <Type, Action<Intent>>{
-          LeaderIntent: CallbackAction<LeaderIntent>(
-            onInvoke: (_) {
-              widget.controller._enterLeaderMode();
-              return null;
-            },
-          ),
-          FocusInputIntent: CallbackAction<FocusInputIntent>(
-            onInvoke: (_) {
-              widget.controller.onFocusInput?.call();
-              return null;
-            },
-          ),
-          FindIntent: CallbackAction<FindIntent>(
-            onInvoke: (_) {
-              widget.controller.onFind?.call();
-              return null;
-            },
-          ),
-          EscapeIntent: CallbackAction<EscapeIntent>(
-            onInvoke: (_) {
-              if (widget.controller.isWaiting) {
-                widget.controller._exitLeaderMode();
-                return null;
-              }
-              return null;
-            },
-          ),
-        },
-        child: Focus(
-          autofocus: true,
-          onKeyEvent: _handleKeyEvent,
-          child: widget.child,
-        ),
-      ),
+    return Focus(
+      autofocus: true,
+      onKeyEvent: _handleKeyEvent,
+      child: widget.child,
     );
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    final ctrl = widget.controller;
-
-    // If in leader mode, try to consume the next keystroke as a sequence.
-    if (ctrl.isWaiting) {
-      return ctrl.handleLeaderSequence(event);
-    }
-
-    return ctrl.handleKeyEvent(event);
+    return widget.controller.handleKeyEvent(event);
   }
 }

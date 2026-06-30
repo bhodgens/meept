@@ -69,6 +69,11 @@ type Session struct {
 	ProjectPath     string              `json:"project_path,omitempty"`
 	NoFence         bool                `json:"no_fence,omitempty"`
 
+	// Archived indicates the session has been soft-archived. Archived sessions
+	// are excluded from the default visible set and sort to the bottom of
+	// listings; their data is preserved.
+	Archived bool `json:"archived,omitempty"`
+
 	// Thread-based context partitioning (NEW)
 	Threads        map[string]*Thread `json:"threads,omitempty"` // threadID -> Thread
 	ActiveThreadID string             `json:"active_thread_id,omitempty"`
@@ -476,6 +481,20 @@ func (s *MemoryStore) UpdateName(sessionID, name string) error {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 	session.Name = name
+	return nil
+}
+
+// Archive sets the archived flag on a session. Pass archived=true to archive,
+// false to unarchive. Returns an error if the session doesn't exist.
+func (s *MemoryStore) Archive(sessionID string, archived bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.Archived = archived
 	return nil
 }
 

@@ -3,6 +3,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -210,25 +211,40 @@ func DefaultClientConfig() *ClientConfig {
 // 1. .meept/client.json5 (project-local)
 // 2. ~/.meept/client.json5 (user-global)
 // Falls back to defaults if no config file is found.
+//
+// Preserved for backward compatibility with existing call sites that
+// don't need the resolved on-disk path. New callers should prefer
+// LoadClientConfigPath.
 func LoadClientConfig() (*ClientConfig, error) {
+	cfg, _ := LoadClientConfigPath()
+	return cfg, nil
+}
+
+// LoadClientConfigPath mirrors LoadClientConfig but also returns the
+// resolved on-disk path of the loaded config (project-local or user-global).
+// When no file exists, the returned path is the user-global target
+// (~/.meept/client.json5) so persistVerbosity has somewhere to write.
+func LoadClientConfigPath() (*ClientConfig, string) {
 	// Try project-local first
 	localPath := ".meept/client.json5"
 	if cfg, err := loadConfigFile(localPath); err == nil {
-		return cfg, nil
+		return cfg, localPath
 	}
 
 	// Try user home directory
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
+	if homeDir, err := os.UserHomeDir(); err == nil {
 		homePath := filepath.Join(homeDir, ".meept", "client.json5")
 		if cfg, err := loadConfigFile(homePath); err == nil {
-			return cfg, nil
+			return cfg, homePath
 		}
+		// No file found — return the home path so persists have a target.
+		slog.Warn("client config: no config file found, using all defaults")
+		return DefaultClientConfig(), homePath
 	}
 
-	// Return defaults
-	slog.Warn("client config: no config file found, using all defaults")
-	return DefaultClientConfig(), nil
+	// UserHomeDir failed — fall back to a relative path so callers still work.
+	slog.Warn("client config: os.UserHomeDir failed, using all defaults")
+	return DefaultClientConfig(), localPath
 }
 
 // loadConfigFile loads and parses a JSON5 config file.
@@ -307,4 +323,59 @@ func checkClientConfigDefaults(path string, cfg *ClientConfig) {
 		slog.Warn("client config: using default for missing field", "field", "keybindings.escape_behavior", "default", "once", "path", path)
 		cfg.Keybindings.EscapeBehavior = "once"
 	}
+}
+
+// persistVerbosity writes chat.verbosity=<level> into the client.json5
+// at path. The file is read, standardized (JSON5 → JSON via hujson),
+// unmarshaled, mutated at chat.verbosity, and written back atomically.
+// If path does not exist, a minimal file is created.
+//
+// This helper is invoked on the TUI's Ctrl+V verbosity cycle so the
+// value survives restarts, mirroring the Flutter PATCH /api/v1/config/
+// client path. Failure is non-fatal — callers should log and continue.
+func persistVerbosity(path, level string) error {
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read client config: %w", err)
+	}
+	if os.IsNotExist(err) {
+		existing = []byte("{}")
+	}
+
+	stdJSON, err := hujson.Standardize(existing)
+	if err != nil {
+		return fmt.Errorf("parse client.json5: %w", err)
+	}
+
+	var root map[string]any
+	if err := json.Unmarshal(stdJSON, &root); err != nil {
+		return fmt.Errorf("unmarshal client.json5: %w", err)
+	}
+	if root == nil {
+		root = map[string]any{}
+	}
+
+	chat, _ := root["chat"].(map[string]any)
+	if chat == nil {
+		chat = map[string]any{}
+	}
+	chat["verbosity"] = level
+	root["chat"] = chat
+
+	out, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal client config: %w", err)
+	}
+	out = append(out, '\n')
+
+	tmpPath := path + ".tmp"
+	//nolint:gosec // user config file; restrictive perms intended
+	if err := os.WriteFile(tmpPath, out, 0o600); err != nil {
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
 }

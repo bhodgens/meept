@@ -96,11 +96,11 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
           else
             Expanded(
               child: GridView.builder(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
-                  childAspectRatio: 1.5,
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 150,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                  childAspectRatio: 2.6,
                 ),
                 itemCount: agentState.agents.length,
                 itemBuilder: (context, index) {
@@ -117,11 +117,12 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
 
   Widget _buildAgentCard(Agent agent, bool isSelected) {
     return InkWell(
+      key: ValueKey('agent-tile-${agent.id}'),
       onTap: () {
         ref.read(activeAgentProvider.notifier).state = agent;
       },
       child: Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
           color: isSelected
               ? CyberpunkColors.orangePrimary.withValues(alpha: 0.1)
@@ -134,40 +135,27 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
           ),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           children: [
-            Row(
-              children: [
-                Icon(
-                  getAgentIcon(agent.id),
+            Icon(
+              getAgentIcon(agent.id),
+              color: isSelected
+                  ? CyberpunkColors.orangePrimary
+                  : CyberpunkColors.greenSuccess,
+              size: 20,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                agent.name.toLowerCase(),
+                style: CyberpunkTypography.bodySmall.copyWith(
                   color: isSelected
                       ? CyberpunkColors.orangePrimary
                       : CyberpunkColors.greenSuccess,
-                  size: 24,
+                  fontFamily: 'SourceCodePro',
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    agent.name.toLowerCase(),
-                    style: CyberpunkTypography.bodyMedium.copyWith(
-                      color: isSelected
-                          ? CyberpunkColors.orangePrimary
-                          : CyberpunkColors.greenSuccess,
-                      fontFamily: 'SourceCodePro',
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              agent.id.toLowerCase(),
-              style: CyberpunkTypography.bodySmall.copyWith(
-                color: CyberpunkColors.lightGray,
-                fontFamily: 'SourceCodePro',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],

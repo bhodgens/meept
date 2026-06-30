@@ -282,91 +282,132 @@ git commit -m "feat(session): add archived column, Archive method, sort-to-botto
 
 ---
 
-### Task 1.3: Add `Manager.ArchiveSession`
+### Task 1.3: Add `SessionService.ArchiveSession`
+
+**Correction note:** The original plan referenced a `Manager` type in `internal/session/manager.go`. That type does not exist in this codebase. The intermediate between HTTP/RPC and `session.Store` is `services.SessionService` in `internal/services/session_service.go`. This task is rewritten to add `ArchiveSession` to that service, mirroring `SessionService.DeleteSession` (lines 87-99 of `session_service.go`).
 
 **Files:**
-- Modify: `internal/session/manager.go`
-- Modify: `internal/session/manager_test.go` (or create if missing)
+- Modify: `internal/services/session_service.go`
+- Modify: `internal/services/session_service_test.go` (or create if missing — check first)
 
-- [ ] **Step 1: Locate the existing manager-test helper**
+- [ ] **Step 1: Locate the existing session-service tests**
 
-Run: `grep -n "func newTestManager\|func setupTestManager\|func mustNewManager" internal/session/manager_test.go`
+Run: `ls internal/services/session_service_test.go 2>&1; grep -n "func Test.*Delete\|func newTestSessionService\|func setupTestSession" internal/services/session_service_test.go 2>&1`
 
-Use whatever helper the existing tests use. If none, find how existing manager tests construct `Manager` + `Store` and mirror that pattern.
+If a test file exists, mirror its setup pattern. If not, look at `internal/services/session_service_test.go` neighbors (e.g., `push_service_test.go` has `fakeStore`) or `internal/session/store_sqlite_test.go` for store construction patterns. The pattern in this codebase is to use the real SQLite store with `:memory:` for service tests, OR to use a `fakeStore` that implements `session.Store`. Prefer whichever existing tests already do.
 
 - [ ] **Step 2: Write the failing test**
 
 ```go
-func TestManagerArchiveSession(t *testing.T) {
-	mgr, store := newTestManager(t) // REPLACE with real helper
-	defer mgr.Close()
+func TestSessionServiceArchiveSession(t *testing.T) {
+	store := session.NewMemoryStore(slog.Default())
+	svc := NewSessionService(store)
 
-	s := &session.Session{
-		ID:             "mgr-archive-1",
-		Name:           "mgr archive",
-		ConversationID: "conv-mgr-archive-1",
-		CreatedAt:      time.Now().UTC(),
-		LastActivity:   time.Now().UTC(),
-	}
-	if err := store.Create(s); err != nil {
-		t.Fatalf("Create: %v", err)
+	sess, err := svc.CreateSession(context.Background(), CreateSessionRequest{Name: "to-archive"})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
 	}
 
-	if err := mgr.ArchiveSession(context.Background(), "mgr-archive-1", true); err != nil {
+	if err := svc.ArchiveSession(context.Background(), ArchiveSessionRequest{ID: sess.ID, Archived: true}); err != nil {
 		t.Fatalf("ArchiveSession: %v", err)
 	}
 
-	got, err := store.Get("mgr-archive-1")
+	got, err := svc.GetSession(context.Background(), GetSessionRequest{ID: sess.ID})
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf("GetSession: %v", err)
 	}
 	if !got.Archived {
 		t.Fatalf("expected Archived=true, got false")
 	}
+
+	// Unarchive round-trip
+	if err := svc.ArchiveSession(context.Background(), ArchiveSessionRequest{ID: sess.ID, Archived: false}); err != nil {
+		t.Fatalf("ArchiveSession unarchive: %v", err)
+	}
+	got, _ = svc.GetSession(context.Background(), GetSessionRequest{ID: sess.ID})
+	if got.Archived {
+		t.Fatalf("expected Archived=false after unarchive, got true")
+	}
+}
+
+func TestSessionServiceArchiveSession_NotFound(t *testing.T) {
+	store := session.NewMemoryStore(slog.Default())
+	svc := NewSessionService(store)
+
+	err := svc.ArchiveSession(context.Background(), ArchiveSessionRequest{ID: "nonexistent", Archived: true})
+	if err == nil {
+		t.Fatalf("expected error for nonexistent session, got nil")
+	}
+}
+
+func TestSessionServiceArchiveSession_InvalidInput(t *testing.T) {
+	store := session.NewMemoryStore(slog.Default())
+	svc := NewSessionService(store)
+
+	err := svc.ArchiveSession(context.Background(), ArchiveSessionRequest{ID: "", Archived: true})
+	if err == nil {
+		t.Fatalf("expected error for empty ID, got nil")
+	}
 }
 ```
+
+Adjust to match the real test-file setup conventions (e.g., if existing tests use a fixture helper).
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `go test ./internal/session/ -run TestManagerArchiveSession -v`
-Expected: FAIL — `mgr.ArchiveSession undefined`.
+Run: `go test ./internal/services/ -run TestSessionServiceArchiveSession -v`
+Expected: FAIL — `svc.ArchiveSession undefined`.
 
-- [ ] **Step 4: Implement `Manager.ArchiveSession`**
+- [ ] **Step 4: Implement `SessionService.ArchiveSession`**
 
-Find `Manager.DeleteSession` in `internal/session/manager.go` and mirror its locking pattern (CLAUDE.md "Mutex scope" rule: collect under lock, release, then operate):
+Mirror `DeleteSession` at `internal/services/session_service.go:87-99`:
 
 ```go
-// ArchiveSession sets the archived flag on a session. Archived sessions
-// are preserved but hidden from the default session list.
-func (m *Manager) ArchiveSession(ctx context.Context, id string, archived bool) error {
-	m.mu.Lock()
-	store := m.store
-	m.mu.Unlock()
+// ArchiveSessionRequest contains archive parameters.
+type ArchiveSessionRequest struct {
+	ID       string `json:"id"`
+	Archived bool   `json:"archived"`
+}
 
-	if store == nil {
-		return fmt.Errorf("session store not initialized")
+// ArchiveSession sets or clears the archived flag on a session. Archived
+// sessions are preserved but sorted to the bottom of the list.
+func (s *SessionService) ArchiveSession(ctx context.Context, req ArchiveSessionRequest) error {
+	if req.ID == "" {
+		return wrapError("session", "ArchiveSession", ErrInvalidInput)
 	}
-	return store.Archive(id, archived)
+	if s.store == nil {
+		return wrapError("session", "ArchiveSession", ErrUnavailable)
+	}
+	if err := s.store.Archive(req.ID, req.Archived); err != nil {
+		// store.Archive returns an error whose message contains "not found"
+		// when the session ID does not exist; map to ErrNotFound for
+		// consistent HTTP 404 mapping via handleServiceError.
+		if strings.Contains(err.Error(), "not found") {
+			return wrapError("session", "ArchiveSession", ErrNotFound)
+		}
+		return wrapError("session", "ArchiveSession", err)
+	}
+	return nil
 }
 ```
 
-Adjust lock variable name and store-access pattern to match what surrounding methods use.
+Add `"strings"` to the import block if not already present. Match `wrapError`/`ErrInvalidInput`/`ErrUnavailable`/`ErrNotFound` usage exactly as `DeleteSession` does.
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `go test ./internal/session/ -run TestManagerArchiveSession -v`
+Run: `go test ./internal/services/ -run TestSessionServiceArchiveSession -v`
 Expected: PASS.
 
-- [ ] **Step 6: Run full session package test suite**
+- [ ] **Step 6: Run full services test suite**
 
-Run: `go test ./internal/session/ -v -race`
+Run: `go test ./internal/services/ -v -race`
 Expected: all PASS, no race warnings.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add internal/session/manager.go internal/session/manager_test.go
-git commit -m "feat(session): add Manager.ArchiveSession"
+git add internal/services/session_service.go internal/services/session_service_test.go
+git commit -m "feat(services): add SessionService.ArchiveSession"
 ```
 
 ---
@@ -521,12 +562,11 @@ func (s *Server) handleSessionArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.services.Session.ArchiveSession(r.Context(), id, *body.Archived); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			s.writeError(w, http.StatusNotFound, "session not found")
-			return
-		}
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+	if err := s.services.Session.ArchiveSession(r.Context(), services.ArchiveSessionRequest{ID: id, Archived: *body.Archived}); err != nil {
+		// ArchiveSession maps store "not found" to services.ErrNotFound already;
+		// handleServiceError translates ErrNotFound → 404. Fall back to a
+		// substring check only for unexpected error shapes.
+		s.handleServiceError(w, err)
 		return
 	}
 
@@ -557,89 +597,164 @@ git commit -m "feat(http): add PATCH /api/v1/sessions/{id} for archive"
 
 ### Task 1.5: Add `sessions.archive` RPC method (for TUI)
 
+**Correction note:** The original plan assumed session RPC handlers live in `internal/rpc/` and consume a `Manager`. Reality: session RPC handlers live in `internal/daemon/session_rpc.go` and consume `*services.SessionService` via closure-based handlers (`handleSessionsDesignated`, `handleSessionDesignatedAcknowledge`). Mirror those exactly.
+
 **Files:**
-- Modify: the session RPC handler file in `internal/rpc/` (verify exact filename in Step 1)
+- Modify: `internal/daemon/session_rpc.go`
+- Create or extend: `internal/daemon/session_rpc_test.go` (this file does not exist yet — create it)
 
-- [ ] **Step 1: Locate the existing session RPC handlers**
+- [ ] **Step 1: Read the existing pattern**
 
-Run: `grep -rn "sessions.delete\|sessions.list\|DeleteSession" internal/rpc/`
-
-Note the file that contains the session RPC dispatcher (likely `internal/rpc/session.go` or similar).
+Read `internal/daemon/session_rpc.go` in full. Note how `handleSessionDesignatedAcknowledge` works:
+- Closure: `func(svc *services.SessionService) rpc.Handler { return func(ctx, params json.RawMessage) (any, error) { ... } }`
+- Unmarshal params from `json.RawMessage` into an anonymous struct
+- Validate required fields, return `fmt.Errorf("... is required")` for missing
+- Call the service method
+- Return a `map[string]any` response
 
 - [ ] **Step 2: Write the failing test**
 
-In the corresponding `_test.go` file, mirror the test pattern used by the existing `sessions.delete` test. Use the same RPC test harness helper:
+Create `internal/daemon/session_rpc_test.go`. Mirror the closure-based registration pattern. Use `rpc.New` to construct a server, `services.NewSessionService(session.NewMemoryStore(...))` to construct the service:
 
 ```go
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"testing"
+
+	"github.com/caimlas/meept/internal/rpc"
+	"github.com/caimlas/meept/internal/services"
+	"github.com/caimlas/meept/internal/session"
+)
+
+func newArchiveRPCTestServer(t *testing.T) (*rpc.Server, *services.SessionService) {
+	t.Helper()
+	store := session.NewMemoryStore(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := services.NewSessionService(store)
+	srv := rpc.New(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	registerSessionRPCHandlers(srv, svc)
+	return srv, svc
+}
+
 func TestRPC_SessionsArchive(t *testing.T) {
-	helper := newRPCTestHarness(t) // REPLACE with the real helper name
-	defer helper.Close()
+	srv, svc := newArchiveRPCTestServer(t)
 
-	sid := helper.CreateTestSession(t, "rpc-archive-test")
+	created, err := svc.CreateSession(context.Background(), services.CreateSessionRequest{Name: "rpc-archive-test"})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
 
-	resp, err := helper.CallMethod(context.Background(), "sessions.archive",
-		map[string]any{"id": sid, "archived": true})
+	params, _ := json.Marshal(map[string]any{"id": created.ID, "archived": true})
+	resp, err := srv.CallMethod(context.Background(), "sessions.archive", params)
 	if err != nil {
 		t.Fatalf("sessions.archive: %v", err)
 	}
-	_ = resp
-
-	getResp, err := helper.CallMethod(context.Background(), "sessions.get",
-		map[string]any{"id": sid})
-	if err != nil {
-		t.Fatalf("sessions.get: %v", err)
-	}
-	getMap, ok := getResp.(map[string]any)
+	respMap, ok := resp.(map[string]any)
 	if !ok {
-		t.Fatalf("sessions.get returned %T, want map", getResp)
+		t.Fatalf("expected map response, got %T", resp)
 	}
-	if got, _ := getMap["archived"].(bool); !got {
-		t.Fatalf("expected archived=true after RPC, got %v", getMap["archived"])
+	if got, _ := respMap["status"].(string); got != "archived" {
+		t.Fatalf("expected status=archived, got %v", respMap["status"])
+	}
+
+	// Verify via the service that the flag persisted.
+	got, err := svc.GetSession(context.Background(), services.GetSessionRequest{ID: created.ID})
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if !got.Archived {
+		t.Fatalf("expected Archived=true, got false")
+	}
+}
+
+func TestRPC_SessionsArchive_MissingID(t *testing.T) {
+	srv, _ := newArchiveRPCTestServer(t)
+
+	params, _ := json.Marshal(map[string]any{"archived": true})
+	_, err := srv.CallMethod(context.Background(), "sessions.archive", params)
+	if err == nil {
+		t.Fatal("expected error for missing id, got nil")
+	}
+}
+
+func TestRPC_SessionsArchive_NotFound(t *testing.T) {
+	srv, _ := newArchiveRPCTestServer(t)
+
+	params, _ := json.Marshal(map[string]any{"id": "nonexistent", "archived": true})
+	_, err := srv.CallMethod(context.Background(), "sessions.archive", params)
+	if err == nil {
+		t.Fatal("expected error for nonexistent session, got nil")
 	}
 }
 ```
+
+Adapt the `rpc.New` signature to its real constructor args (verify in `internal/rpc/server.go:81`).
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `go test ./internal/rpc/ -run TestRPC_SessionsArchive -v`
-Expected: FAIL — method not registered.
+Run: `go test ./internal/daemon/ -run TestRPC_SessionsArchive -v`
+Expected: FAIL — no `sessions.archive` handler registered (likely `method not found` error).
 
-- [ ] **Step 4: Register the RPC method**
+- [ ] **Step 4: Add the handler**
 
-In the file located in Step 1, find where `sessions.delete` is registered. Mirror that registration for `sessions.archive`:
+Append to `internal/daemon/session_rpc.go`:
 
 ```go
-// sessions.archive sets the archived flag on a session.
-// Request: {"id": "<session-id>", "archived": true|false}
-// Response: {"ok": true}
-func (h *SessionHandler) HandleArchive(ctx context.Context, req map[string]any) (any, error) {
-	id, _ := req["id"].(string)
-	if id == "" {
-		return nil, errors.New("id is required")
-	}
-	archived, _ := req["archived"].(bool)
+// handleSessionArchive sets or clears the archived flag on a session.
+// Mirrors handleSessionDesignatedAcknowledge's closure pattern.
+func handleSessionArchive(svc *services.SessionService) rpc.Handler {
+	return func(ctx context.Context, params json.RawMessage) (any, error) {
+		var req struct {
+			ID       string `json:"id"`
+			Archived bool   `json:"archived"`
+		}
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, fmt.Errorf("invalid parameters: %w", err)
+		}
+		if req.ID == "" {
+			return nil, fmt.Errorf("id is required")
+		}
 
-	if h.manager == nil {
-		return nil, errors.New("session manager not available")
+		if err := svc.ArchiveSession(ctx, services.ArchiveSessionRequest{ID: req.ID, Archived: req.Archived}); err != nil {
+			return nil, fmt.Errorf("failed to archive session: %w", err)
+		}
+
+		status := "archived"
+		if !req.Archived {
+			status = "unarchived"
+		}
+		return map[string]any{
+			"status": status,
+			"id":     req.ID,
+		}, nil
 	}
-	if err := h.manager.ArchiveSession(ctx, id, archived); err != nil {
-		return nil, err
-	}
-	return map[string]any{"ok": true}, nil
 }
 ```
 
-Register it in whatever dispatcher table the existing handlers use (look for `"sessions.delete":` and add `"sessions.archive":` adjacent). Adapt the method receiver name (`h *SessionHandler`) and the manager field name (`h.manager`) to match what existing handlers use.
+Then register it inside `registerSessionRPCHandlers`:
+
+```go
+server.RegisterHandler("sessions.archive", handleSessionArchive(sessionSvc))
+```
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `go test ./internal/rpc/ -run TestRPC_SessionsArchive -v`
-Expected: PASS.
+Run: `go test ./internal/daemon/ -run TestRPC_SessionsArchive -v`
+Expected: PASS for all 3 tests.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Run full daemon test suite (regression)**
+
+Run: `go test ./internal/daemon/ -v -race`
+Expected: all PASS.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add internal/rpc/
+git add internal/daemon/session_rpc.go internal/daemon/session_rpc_test.go
 git commit -m "feat(rpc): add sessions.archive method"
 ```
 

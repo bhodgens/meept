@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -940,6 +941,7 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	// Config endpoints
 	mux.HandleFunc("GET /api/v1/config/client", s.handleGetClientConfig)
 	mux.HandleFunc("POST /api/v1/config/client", s.handleSaveClientConfig)
+	mux.HandleFunc("PATCH /api/v1/config/client", s.handleClientConfigPatch)
 	mux.HandleFunc("GET /api/v1/config/models", s.handleGetModelsConfig)
 	mux.HandleFunc("POST /api/v1/config/models", s.handleSaveModelsConfig)
 	mux.HandleFunc("GET /api/v1/config/menubar", s.handleGetMenubarConfig)
@@ -1041,6 +1043,7 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/sessions/designated", s.handleSessionsDesignated)
 	mux.HandleFunc("PUT /api/v1/sessions/designated/{id}", s.handleSessionDesignatedAcknowledge)
 	mux.HandleFunc("GET /api/v1/sessions/{id}", s.handleSessionGet)
+	mux.HandleFunc("PATCH /api/v1/sessions/{id}", s.handleSessionArchive)
 	mux.HandleFunc("DELETE /api/v1/sessions/{id}", s.handleSessionDelete)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/attach", s.handleSessionAttach)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/detach", s.handleSessionDetach)
@@ -1445,6 +1448,50 @@ func (s *Server) handleSaveClientConfig(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: KeySaved})
+}
+
+// handleClientConfigPatch handles PATCH /api/v1/config/client.
+//
+// Body: any JSON object — merged into client.json5 per RFC 7396
+// (null deletes key, objects recurse, scalars/arrays replace).
+// Response: 200 with the merged config as JSON.
+//
+// Unlike strict-field PATCH handlers, merge-patch intentionally accepts
+// arbitrary keys — DisallowUnknownFields is NOT set. The whole point is
+// forward-compatible partial updates.
+func (s *Server) handleClientConfigPatch(w http.ResponseWriter, r *http.Request) {
+	if s.configService == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "config service not available")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+	var patch map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		// Distinguish "empty body" (io.EOF) from "malformed JSON" so the
+		// client can tell the difference between "forgot to send a body"
+		// and "sent garbage".
+		if errors.Is(err, io.EOF) {
+			s.writeError(w, http.StatusBadRequest, "empty body")
+			return
+		}
+		s.writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	// Reject non-object payloads. json.Decode into a map succeeds for some
+	// edge cases but the resulting map is nil for `null`, `[]`, scalars.
+	if patch == nil {
+		s.writeError(w, http.StatusBadRequest, "request body must be a JSON object")
+		return
+	}
+
+	merged, err := s.configService.PatchClientConfig(patch)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, merged)
 }
 
 // handleGetModelsConfig handles GET /api/v1/config/models.

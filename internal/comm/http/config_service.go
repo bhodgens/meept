@@ -15,6 +15,25 @@ import (
 	"github.com/tailscale/hujson"
 )
 
+// defaultClientConfigJSON5 is the default content used to seed client.json5
+// when the file does not yet exist. Both LoadClientConfig and PatchClientConfig
+// reference this constant so they cannot drift apart.
+const defaultClientConfigJSON5 = `{
+  // Meept Client Configuration
+  // This file configures the CLI and menubar app behavior
+
+  "theme": "system",
+  "language": "en",
+  "notifications": {
+    "enabled": true,
+    "sound": true
+  },
+  "menubar": {
+    "show_status": true,
+    "refresh_interval": 5
+  }
+}`
+
 // validAgentID matches safe agent identifiers used as directory names.
 // Disallows path separators, dots, and other shell/path metacharacters
 // to prevent path traversal in GetAgent/SaveAgent/DeleteAgent.
@@ -140,26 +159,11 @@ func (s *ConfigService) LoadClientConfig() (string, error) {
 
 	// If client.json5 doesn't exist, create a default one
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		defaultContent := `{
-  // Meept Client Configuration
-  // This file configures the CLI and menubar app behavior
-
-  "theme": "system",
-  "language": "en",
-  "notifications": {
-    "enabled": true,
-    "sound": true
-  },
-  "menubar": {
-    "show_status": true,
-    "refresh_interval": 5
-  }
-}`
 		//nolint:gosec // user config directory/file permissions
-		if err := os.WriteFile(path, []byte(defaultContent), 0o600); err != nil {
+		if err := os.WriteFile(path, []byte(defaultClientConfigJSON5), 0o600); err != nil {
 			return "", fmt.Errorf("failed to create default client config: %w", err)
 		}
-		return defaultContent, nil
+		return defaultClientConfigJSON5, nil
 	}
 
 	data, err := os.ReadFile(path)
@@ -558,4 +562,68 @@ func (s *ConfigService) SaveOrchestratorConfig(oc configCli.OrchestratorConfig) 
 		return fmt.Errorf("failed to rename meept config into place: %w", err)
 	}
 	return nil
+}
+
+// PatchClientConfig applies an RFC 7396 JSON merge-patch to the on-disk
+// client.json5. It reads the file fresh, standardizes JSON5 → JSON via
+// hujson, unmarshals into map[string]any, deep-merges the patch, and
+// writes back atomically (temp file + rename). The merged map is
+// returned (as plain JSON data — comments from the source file are
+// stripped by Standardize). If client.json5 does not exist, it is seeded
+// from the same default content block used by LoadClientConfig before
+// the patch is applied.
+//
+// Merge semantics (RFC 7396):
+//   - A null value in patch deletes the corresponding key in the target.
+//   - Object values are merged recursively.
+//   - Arrays and scalars from patch replace the target value.
+func (s *ConfigService) PatchClientConfig(patch map[string]any) (map[string]any, error) {
+	path := s.getClientConfigPath()
+
+	// Read existing content if present; otherwise seed from the same default
+	// block that LoadClientConfig uses (keeps the two paths byte-identical).
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("failed to read client config: %w", err)
+		}
+		existing = []byte(defaultClientConfigJSON5)
+	}
+
+	// Standardize JSON5 (strip comments, trailing commas, quote keys).
+	stdJSON, err := hujson.Standardize(existing)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse client.json5: %w", err)
+	}
+
+	var root map[string]any
+	if err := json.Unmarshal(stdJSON, &root); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal client.json5: %w", err)
+	}
+	if root == nil {
+		root = map[string]any{}
+	}
+
+	merged := configCli.DeepMerge(root, patch)
+
+	out, err := json.MarshalIndent(merged, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal merged client config: %w", err)
+	}
+	out = append(out, '\n')
+
+	// Atomic write: temp file + rename. Mirrors SaveOrchestratorConfig.
+	tmpPath := path + ".tmp"
+	//nolint:gosec // user config file; restrictive perms intended
+	if err := os.WriteFile(tmpPath, out, 0o600); err != nil {
+		return nil, fmt.Errorf("failed to write client config temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		if removeErr := os.Remove(tmpPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			return nil, fmt.Errorf("failed to rename client config into place (cleanup also failed: %v): %w", removeErr, err)
+		}
+		return nil, fmt.Errorf("failed to rename client config into place: %w", err)
+	}
+
+	return merged, nil
 }

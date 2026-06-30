@@ -88,6 +88,7 @@ type Store interface {
 	GetMessageCount(sessionID string) (int, error)
 	UpdateDescription(sessionID, description string) error
 	UpdateName(sessionID, name string) error
+	Archive(sessionID string, archived bool) error
 	HasResponses(sessionID string) (bool, error)
 	Close() error
 

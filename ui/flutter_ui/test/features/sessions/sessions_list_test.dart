@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+import 'package:meept_ui/features/home/home_screen.dart' show HomeTab;
 import 'package:meept_ui/features/sessions/sessions_list.dart';
 import 'package:meept_ui/providers/providers.dart';
+import 'package:meept_ui/providers/tab_activation_provider.dart';
+import 'package:meept_ui/providers/status_message_provider.dart';
 import 'package:meept_ui/services/session_notifier.dart';
 import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/services/sdk_client.dart';
@@ -129,6 +133,59 @@ void main() {
       expect(find.text('active: 1'), findsOneWidget);
     });
 
+    testWidgets(
+        'double-tap sets tabActivationProvider to chat and active session',
+        (tester) async {
+      final session = Session(
+        id: 'dbl1',
+        title: 'double tap me',
+        createdAt: DateTime.now(),
+      );
+
+      // Use a ProviderContainer so we can read providers directly after the
+      // widget tree is torn down.
+      final container = ProviderContainer(
+        overrides: [
+          sessionProvider.overrideWith((ref) =>
+              SessionNotifier(sdkClient: _TestSdkClient([session]))),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      // GoRouter so `context.go('/')` in onDoubleTap doesn't throw.
+      final router = GoRouter(
+        initialLocation: '/sessions',
+        routes: [
+          GoRoute(
+            path: '/sessions',
+            builder: (_, __) =>
+                const Scaffold(body: SizedBox(width: 400, child: SessionsList())),
+          ),
+          GoRoute(
+            path: '/',
+            builder: (_, __) => const Scaffold(body: SizedBox.shrink()),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Double-tap the session title
+      await tester.tap(find.text('double tap me'));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(find.text('double tap me'));
+      await tester.pumpAndSettle();
+
+      expect(container.read(tabActivationProvider), HomeTab.chat);
+      expect(container.read(activeSessionProvider)?.id, 'dbl1');
+    });
+
     testWidgets('shows create session dialog when + button is pressed',
         (tester) async {
       await tester.pumpWidget(
@@ -154,7 +211,7 @@ void main() {
       expect(find.widgetWithText(FilledButton, 'create'), findsOneWidget);
     });
 
-    testWidgets('delete confirmation shows when delete icon pressed',
+    testWidgets('archive confirmation shows when archive icon pressed',
         (tester) async {
       await tester.pumpWidget(
         ProviderScope(
@@ -163,7 +220,7 @@ void main() {
               final notifier = SessionNotifier(sdkClient: _TestSdkClient([
                 Session(
                   id: '1',
-                  title: 'Delete Me',
+                  title: 'Archive Me',
                   createdAt: DateTime.now(),
                 ),
               ]));
@@ -178,13 +235,104 @@ void main() {
 
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.delete_outline));
+      await tester.tap(find.byIcon(Icons.archive_outlined));
       // InkWell delays onTap when onDoubleTap is present; pump past the double-tap window
       await tester.pump(const Duration(milliseconds: 350));
       await tester.pumpAndSettle();
 
       expect(find.byType(AlertDialog), findsOneWidget);
-      expect(find.text('delete session?'), findsOneWidget);
+      expect(find.text('archive session?'), findsOneWidget);
+    });
+
+    // Regression: archive status message must NOT fire synchronously before
+    // the RPC resolves. If the RPC fails, the user should see an error
+    // status, never a premature "archived: X". Parity with TUI's
+    // SessionArchivedMsg-based async-status pattern.
+    testWidgets('archive failure does not show premature success status',
+        (tester) async {
+      final container = ProviderContainer(
+        overrides: [
+          sessionProvider.overrideWith((ref) => SessionNotifier(
+              sdkClient: _ArchiveThrowingSdkClient())),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: Scaffold(body: SessionsList()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Open archive dialog and tap "archive".
+      await tester.tap(find.byIcon(Icons.archive_outlined));
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+
+      // Before tapping, no status message should be set.
+      expect(container.read(statusMessageProvider), isNull);
+
+      await tester.tap(find.widgetWithText(FilledButton, 'archive'));
+      await tester.pumpAndSettle();
+
+      // After RPC fails, status must reflect failure, NOT "archived: ...".
+      final status = container.read(statusMessageProvider);
+      expect(status, isNotNull);
+      expect(status!.startsWith('archived:'), isFalse,
+          reason: 'status must not report success when RPC failed');
+      expect(status.contains('failed'), isTrue);
+
+      // Advance past the 2.5s auto-clear Timer so the test framework's
+      // "no pending timers" assertion doesn't fire.
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    // Regression: delete status message must NOT fire synchronously before
+    // the RPC resolves. Parity with TUI SessionDeletedMsg fix.
+    testWidgets('delete failure does not show premature success status',
+        (tester) async {
+      // Use a client that succeeds on listSessions but throws on delete.
+      final container = ProviderContainer(
+        overrides: [
+          sessionProvider.overrideWith((ref) => SessionNotifier(
+              sdkClient: _DeleteThrowingSdkClient())),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: Scaffold(body: SessionsList()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Long-press to open context menu, then tap "delete permanently".
+      await tester.longPress(find.text('archive me'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('delete permanently'));
+      await tester.pumpAndSettle();
+
+      expect(container.read(statusMessageProvider), isNull);
+
+      await tester.tap(find.widgetWithText(FilledButton, 'delete'));
+      await tester.pumpAndSettle();
+
+      final status = container.read(statusMessageProvider);
+      expect(status, isNotNull);
+      expect(status!.startsWith('deleted:'), isFalse,
+          reason: 'status must not report success when RPC failed');
+      expect(status.contains('failed'), isTrue);
+
+      // Advance past the 2.5s auto-clear Timer.
+      await tester.pump(const Duration(seconds: 3));
     });
   });
 
@@ -232,6 +380,48 @@ void main() {
       final firstId = _testSessions[0].id;
       await notifier.deleteSession(firstId);
       expect(notifier.state.sessions, hasLength(_testSessions.length - 1));
+    });
+
+    // Regression: stale error must be cleared on every success path.
+    // SessionState.copyWith uses an _unset sentinel, so omitting `error:`
+    // preserves any prior error — once a banner shows it stays stuck.
+    test('deleteSession clears prior error on success', () async {
+      final client = _TestSdkClient(_testSessions);
+      final notifier = SessionNotifier(sdkClient: client);
+      // Seed an error via a failing load.
+      final throwing = SessionNotifier(sdkClient: _ThrowingSdkClient());
+      await throwing.loadSessions();
+      expect(throwing.state.error, isNotNull);
+      // Simulate error carrying over by copying state into `notifier`.
+      notifier.state = notifier.state.copyWith(error: throwing.state.error);
+      expect(notifier.state.error, isNotNull);
+
+      await notifier.deleteSession(_testSessions[0].id);
+      expect(notifier.state.error, isNull);
+    });
+
+    test('archiveSession clears prior error on success', () async {
+      final client = _TestSdkClient(_testSessions);
+      final notifier = SessionNotifier(sdkClient: client);
+      await notifier.loadSessions();
+      // Seed an error.
+      notifier.state = notifier.state.copyWith(error: 'prior failure');
+      expect(notifier.state.error, isNotNull);
+
+      await notifier.archiveSession(_testSessions[0].id);
+      expect(notifier.state.error, isNull);
+    });
+
+    test('unarchiveSession clears prior error on success', () async {
+      final client = _TestSdkClient(_testSessions);
+      final notifier = SessionNotifier(sdkClient: client);
+      await notifier.loadSessions();
+      // Seed an error.
+      notifier.state = notifier.state.copyWith(error: 'prior failure');
+      expect(notifier.state.error, isNotNull);
+
+      await notifier.unarchiveSession(_testSessions[0].id);
+      expect(notifier.state.error, isNull);
     });
   });
 }
@@ -289,6 +479,11 @@ class _TestSdkClient extends SdkApiClient {
     // delete-from-seed semantics build a client with the seed and rely on
     // the notifier filtering locally.
   }
+
+  @override
+  Future<void> archiveSession(String sessionId, {required bool archived}) async {
+    // No-op: the notifier flips the flag locally. Tests only assert state.
+  }
 }
 
 /// Client with a short delay to simulate async load.
@@ -310,5 +505,45 @@ class _ThrowingSdkClient extends SdkApiClient {
   @override
   Future<List<Map<String, dynamic>>> listSessions({int? limit}) async {
     throw Exception('connection refused');
+  }
+}
+
+/// Client that throws on archiveSession — used to verify the UI does NOT
+/// report success prematurely when the RPC fails (parity with TUI).
+class _ArchiveThrowingSdkClient extends SdkApiClient {
+  _ArchiveThrowingSdkClient()
+      : super(host: 'localhost', port: 65434);
+
+  @override
+  Future<List<Map<String, dynamic>>> listSessions({int? limit}) async {
+    return [
+      Session(id: '1', title: 'archive me', createdAt: DateTime(2025, 1, 1))
+          .toJson(),
+    ];
+  }
+
+  @override
+  Future<void> archiveSession(String sessionId, {required bool archived}) async {
+    throw Exception('archive rpc failed');
+  }
+}
+
+/// Client that throws on deleteSession — used to verify the UI does NOT
+/// report success prematurely when the RPC fails (parity with TUI).
+class _DeleteThrowingSdkClient extends SdkApiClient {
+  _DeleteThrowingSdkClient()
+      : super(host: 'localhost', port: 65435);
+
+  @override
+  Future<List<Map<String, dynamic>>> listSessions({int? limit}) async {
+    return [
+      Session(id: '1', title: 'archive me', createdAt: DateTime(2025, 1, 1))
+          .toJson(),
+    ];
+  }
+
+  @override
+  Future<void> deleteSession(String id) async {
+    throw Exception('delete rpc failed');
   }
 }

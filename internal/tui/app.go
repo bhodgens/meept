@@ -121,7 +121,8 @@ type App struct {
 	keys KeyMap
 
 	// Client configuration
-	clientConfig *ClientConfig
+	clientConfig     *ClientConfig
+	clientConfigPath string // resolved path to client.json5 (home or project-local)
 
 	// Text-to-speech manager
 	ttsManager *tts.Manager
@@ -140,10 +141,10 @@ type App struct {
 	currentSession *types.Session
 
 	// Current project
-	currentProjectID    string
-	currentProjectName  string
-	currentProjectMode  string
-	currentProjectDirty bool
+	currentProjectID     string
+	currentProjectName   string
+	currentProjectMode   string
+	currentProjectDirty  bool
 	currentProjectBranch string
 
 	// SessionManager is the shared session manager used by both TUI and meept-lite
@@ -228,7 +229,7 @@ func NewApp(socketPath string) *App {
 	styles := DefaultStyles()
 
 	// Load client configuration
-	clientConfig, _ := LoadClientConfig()
+	clientConfig, clientConfigPath := LoadClientConfigPath()
 
 	// Get current working directory for display
 	projectDir, _ := os.Getwd()
@@ -249,20 +250,21 @@ func NewApp(socketPath string) *App {
 			AutoCopyOnRelease: clientConfig.Chat.AutoCopyOnRelease,
 			ScrollSpeed:       clientConfig.Chat.ScrollSpeed,
 		}),
-		tasks:          models.NewTasksModel(rpc),
-		sessions:       models.NewSessionsModel(rpc),
-		queue:          models.NewQueueModel(rpc),
-		memory:         models.NewMemoryModel(rpc),
-		plans:          models.NewPlansModel(rpc),
-		search:         models.NewSearchModel(rpc, slog.Default()),
-		agents:         NewAgentsPanel(rpc),
-		sidebar:        NewSidebarModel(rpc, eventRPC, styles, clientConfig.Rendering.SidebarAnimation),
-		keys:           DefaultKeyMap(),
-		clientConfig:   clientConfig,
-		projectDir:     projectDir,
-		activeModal:    ModalNone,
-		doublePressTTL: 500 * time.Millisecond,
-		tabFlash:       make(map[ViewType]bool),
+		tasks:            models.NewTasksModel(rpc),
+		sessions:         models.NewSessionsModel(rpc),
+		queue:            models.NewQueueModel(rpc),
+		memory:           models.NewMemoryModel(rpc),
+		plans:            models.NewPlansModel(rpc),
+		search:           models.NewSearchModel(rpc, slog.Default()),
+		agents:           NewAgentsPanel(rpc),
+		sidebar:          NewSidebarModel(rpc, eventRPC, styles, clientConfig.Rendering.SidebarAnimation),
+		keys:             DefaultKeyMap(),
+		clientConfig:     clientConfig,
+		clientConfigPath: clientConfigPath,
+		projectDir:       projectDir,
+		activeModal:      ModalNone,
+		doublePressTTL:   500 * time.Millisecond,
+		tabFlash:         make(map[ViewType]bool),
 	}
 
 	// Create modals
@@ -714,7 +716,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Navigate to sessions tab
 			a.currentView = ViewSessions
-			a.statusMessage = "sessions tab (create: n, delete: d)"
+			a.statusMessage = "sessions tab (create: n, archive: d, delete: shift+d)"
 			a.statusMessageTime = time.Now()
 			clearCmd := tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
 				return StatusMessageClearMsg{}
@@ -727,6 +729,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.verbosity = (a.verbosity + 1) % 3
 			a.statusMessage = fmt.Sprintf("verbosity: %s", a.verbosity)
 			a.statusMessageTime = time.Now()
+			// Update in-memory config so subsequent saves are consistent
+			// (the goroutine below reads from disk, not from a.clientConfig,
+			// so this synchronous update is race-safe).
+			if a.clientConfig != nil {
+				a.clientConfig.Chat.Verbosity = a.verbosity.String()
+			}
+			// Persist the new verbosity to client.json5 (best-effort, non-blocking).
+			// UI state is already updated; if persistence fails we log but don't revert.
+			level := a.verbosity.String()
+			path := a.clientConfigPath
+			if path != "" {
+				go func(level, path string) {
+					if err := persistVerbosity(path, level); err != nil {
+						slog.Warn("verbosity persist: write failed", "err", err, "path", path)
+					}
+				}(level, path)
+			}
 			return a, nil
 		}
 
@@ -974,9 +993,75 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 
 	case SessionDeleteMsg:
-		// Delete a session
-		cmd := a.deleteSession(msg.SessionID)
+		// Delete a session (legacy non-shift path). Name is unknown here, so
+		// fall back to the ID for the status message.
+		cmd := a.deleteSession(msg.SessionID, msg.SessionID)
 		return a, cmd
+
+	case models.ArchiveSessionRequestedMsg:
+		// Soft-archive (or unarchive) a session via the sessions.archive RPC.
+		// Returns a tea.Cmd so the RPC round-trip doesn't block Update; the
+		// returned SessionArchivedMsg updates the status message and triggers
+		// a session-list refresh so the dimming/sort takes effect immediately.
+		sessionID := msg.SessionID
+		sessionName := msg.SessionName
+		archived := msg.Archived
+		rpc := a.rpc
+		return a, func() tea.Msg {
+			err := rpc.ArchiveSession(sessionID, archived)
+			return SessionArchivedMsg{Err: err, Archived: archived, SessionName: sessionName}
+		}
+
+	case SessionArchivedMsg:
+		verb := "archived"
+		if !msg.Archived {
+			verb = "unarchived"
+		}
+		if msg.Err != nil {
+			slog.Warn("archive session failed", "error", msg.Err)
+			a.statusMessage = fmt.Sprintf("archive failed: %v", msg.Err)
+		} else {
+			a.statusMessage = fmt.Sprintf("%s: %s", verb, msg.SessionName)
+		}
+		a.statusMessageTime = time.Now()
+		// Trigger a status-message auto-clear.
+		clearCmd := tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
+			return StatusMessageClearMsg{}
+		})
+		// Refresh the sessions view so the new archived state shows.
+		if a.sessions != nil {
+			return a, tea.Batch(clearCmd, a.sessions.Init())
+		}
+		return a, clearCmd
+
+	case models.DeleteSessionRequestedMsg:
+		// Permanent delete (shift+D from sessions view). Dispatches the RPC
+		// via deleteSession; the returned SessionDeletedMsg updates the status
+		// message (success or failure) and triggers a session-list refresh —
+		// mirrors the ArchiveSessionRequestedMsg flow. Do NOT set the status
+		// message here; that would mislead the user if the RPC fails.
+		return a, a.deleteSession(msg.SessionID, msg.SessionName)
+
+	case SessionDeletedMsg:
+		// Result of the delete RPC. Set the status message based on Err so
+		// failures are surfaced to the user (the prior implementation silently
+		// swallowed errors and set the success message prematurely).
+		if msg.Err != nil {
+			slog.Warn("delete session failed", "error", msg.Err, "session_id", msg.SessionID)
+			a.statusMessage = fmt.Sprintf("delete failed: %v", msg.Err)
+		} else {
+			a.statusMessage = fmt.Sprintf("deleted: %s", msg.SessionName)
+		}
+		a.statusMessageTime = time.Now()
+		// Trigger a status-message auto-clear.
+		clearCmd := tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
+			return StatusMessageClearMsg{}
+		})
+		// Refresh the sessions view so the deleted session disappears.
+		if a.sessions != nil {
+			return a, tea.Batch(clearCmd, a.sessions.Init())
+		}
+		return a, clearCmd
 
 	case models.OpenCreateSessionModalMsg:
 		// Open rename modal for creating a new session (uses default name)
@@ -1787,7 +1872,7 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case keys.Sessions:
 			// Navigate to sessions tab (Issue 9: replaces deprecated ModalSessionPicker).
 			a.currentView = ViewSessions
-			a.statusMessage = "sessions tab (create: n, delete: d)"
+			a.statusMessage = "sessions tab (create: n, archive: d, delete: shift+d)"
 			a.statusMessageTime = time.Now()
 			return a, tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
 				return StatusMessageClearMsg{}
@@ -1923,19 +2008,16 @@ func (a *App) switchToSessionByID(sessionID string, messageID int64) tea.Cmd {
 	}
 }
 
-// deleteSession deletes a session via SessionManager.
-func (a *App) deleteSession(sessionID string) tea.Cmd {
+// deleteSession deletes a session via the RPC client.
+// The returned tea.Cmd emits a SessionDeletedMsg carrying any RPC error so the
+// caller (DeleteSessionRequestedMsg handler) can surface success/failure to the
+// user — mirroring the archive flow. The session-list refresh is dispatched by
+// the SessionDeletedMsg handler once the RPC completes.
+func (a *App) deleteSession(sessionID, sessionName string) tea.Cmd {
+	rpc := a.rpc
 	return func() tea.Msg {
-		err := a.sessionMgr.DeleteSession(context.TODO(), sessionID)
-		if err != nil {
-			// Just refresh the list to show current state
-		}
-		// Refresh session list
-		sessions, _ := a.sessionMgr.ListSessions(context.TODO())
-		if len(sessions) > 0 {
-			return SessionListMsg{Sessions: sessions}
-		}
-		return SessionListMsg{Sessions: nil}
+		err := rpc.DeleteSession(sessionID)
+		return SessionDeletedMsg{Err: err, SessionID: sessionID, SessionName: sessionName}
 	}
 }
 
@@ -2548,6 +2630,6 @@ type SetProjectResultMsg struct {
 
 // StopWorkChildTasksMsg carries the child task count for async stop-work flow.
 type StopWorkChildTasksMsg struct {
-	SessionID     string
+	SessionID      string
 	ChildTaskCount int
 }

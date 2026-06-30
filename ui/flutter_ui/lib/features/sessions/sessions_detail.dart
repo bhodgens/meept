@@ -4,12 +4,20 @@ import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../models/api_models.dart';
 import '../../providers/providers.dart';
+import '../../providers/session_detail.dart';
 
 /// Session detail pane - displays in-depth session information with tasks and plans
 class SessionsDetailPane extends ConsumerStatefulWidget {
   final Session session;
+  /// Optional: when provided, the pane refreshes from [sessionDetailFamily].
+  /// Falls back to [session] while loading or on error.
+  final String? sessionId;
 
-  const SessionsDetailPane({super.key, required this.session});
+  const SessionsDetailPane({
+    super.key,
+    required this.session,
+    this.sessionId,
+  });
 
   @override
   ConsumerState<SessionsDetailPane> createState() => _SessionsDetailPaneState();
@@ -22,7 +30,13 @@ class _SessionsDetailPaneState extends ConsumerState<SessionsDetailPane> {
   @override
   void initState() {
     super.initState();
-    _fetchRelatedItems();
+    // Defer to next frame so we don't modify providers during the build
+    // phase (initState runs inside the build lifecycle). Without this,
+    // tests and strict mode throw "Tried to modify a provider while the
+    // widget tree was building."
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _fetchRelatedItems();
+    });
   }
 
   @override
@@ -30,7 +44,10 @@ class _SessionsDetailPaneState extends ConsumerState<SessionsDetailPane> {
     super.didUpdateWidget(oldWidget);
     // Re-fetch related items when the session changes so the detail pane
     // doesn't show stale tasks/plans from the previously-selected session.
-    if (oldWidget.session.id != widget.session.id) {
+    // Check both the passed-in session and the sessionId (if any).
+    final oldId = oldWidget.sessionId ?? oldWidget.session.id;
+    final newId = widget.sessionId ?? widget.session.id;
+    if (oldId != newId) {
       _fetchRelatedItems();
     }
   }
@@ -40,7 +57,9 @@ class _SessionsDetailPaneState extends ConsumerState<SessionsDetailPane> {
     try {
       // Fetch tasks and plans for this session
       await ref.read(taskProvider.notifier).loadTasks();
-      await ref.read(planProvider.notifier).loadPlans(sessionID: widget.session.id);
+      await ref.read(planProvider.notifier).loadPlans(
+            sessionID: widget.sessionId ?? widget.session.id,
+          );
       if (mounted) {
         setState(() {
           _loading = false;
@@ -61,15 +80,25 @@ class _SessionsDetailPaneState extends ConsumerState<SessionsDetailPane> {
 
   @override
   Widget build(BuildContext context) {
+    // If a sessionId is provided, prefer the cached detail family's value
+    // (falls back to the passed-in session while loading or on error).
+    Session session = widget.session;
+    if (widget.sessionId != null) {
+      final cached = ref.watch(sessionDetailFamily(widget.sessionId!));
+      if (cached.hasValue) {
+        session = cached.value!;
+      }
+    }
+
     final taskState = ref.watch(taskProvider);
     final planState = ref.watch(planProvider);
 
     // Filter tasks and plans for this session
     final sessionTasks = taskState.tasks
-        .where((t) => t.sessionId == widget.session.id)
+        .where((t) => t.sessionId == session.id)
         .toList();
     final sessionPlans = planState.plans
-        .where((p) => p.sourceSession == widget.session.id || p.taskID == widget.session.id)
+        .where((p) => p.sourceSession == session.id || p.taskID == session.id)
         .toList();
 
     return Expanded(
@@ -87,16 +116,16 @@ class _SessionsDetailPaneState extends ConsumerState<SessionsDetailPane> {
             const SizedBox(height: 24),
             _buildDetailRow(
               'title',
-              widget.session.title.toLowerCase(),
+              session.title.toLowerCase(),
             ),
             _buildDetailRow(
               'created',
-              _formatDateTime(widget.session.createdAt),
+              _formatDateTime(session.createdAt),
             ),
-            if (widget.session.lastActivity != null)
+            if (session.lastActivity != null)
               _buildDetailRow(
                 'last activity',
-                _formatDateTime(widget.session.lastActivity!),
+                _formatDateTime(session.lastActivity!),
               ),
             const SizedBox(height: 24),
 

@@ -238,6 +238,28 @@ class SdkApiClient {
     }
   }
 
+  /// PATCH helper. Some endpoints (e.g. session archive) return 204
+  /// No Content with an empty body; Dio's default JSON decoder raises
+  /// on an empty body, so we coerce null/empty responses to `{}`.
+  Future<Map<String, dynamic>> _patch(String path,
+      {Map<String, dynamic>? body, Map<String, dynamic>? query}) async {
+    try {
+      final response = await _dio.patch(
+        path,
+        data: body,
+        queryParameters: query,
+      );
+      final data = response.data;
+      if (data == null) return {};
+      if (data is Map<String, dynamic>) return data;
+      // Dio may return the raw body for non-JSON responses (204).
+      if (data is String && data.isEmpty) return {};
+      return data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
   Future<void> _delete(String path) async {
     try {
       await _dio.delete(path);
@@ -467,6 +489,16 @@ class SdkApiClient {
     await _delete('/api/v1/sessions/$id');
   }
 
+  /// PATCH /api/v1/sessions/{id} -- set the archived flag.
+  ///
+  /// Backend returns 204 No Content on success; the [_patch] helper
+  /// coerces the empty response to `{}` so callers can treat this
+  /// as `Future<void>`.
+  Future<void> archiveSession(String sessionId,
+      {required bool archived}) async {
+    await _patch('/api/v1/sessions/$sessionId', body: {'archived': archived});
+  }
+
   /// Returns the raw `plans` array for `/api/v1/sessions/{sessionId}/plans`.
   Future<List<Map<String, dynamic>>> listPlansBySession(String sessionId) async {
     try {
@@ -494,6 +526,19 @@ class SdkApiClient {
           .whereType<Map>()
           .map((a) => Map<String, dynamic>.from(a))
           .toList();
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Fetches a single agent by id.
+  ///
+  /// Mirrors [getTask]/[getPlan]: a thin wrapper around the per-id REST
+  /// endpoint that callers pair with `Agent.fromJson`. Endpoint follows the
+  /// agents collection at `/api/v1/config/agents` (see [listAgents]).
+  Future<Map<String, dynamic>> getAgent(String id) async {
+    try {
+      return await _get('/api/v1/config/agents/$id');
     } on DioException catch (e) {
       throw _handleError(e);
     }
@@ -1012,6 +1057,14 @@ class SdkApiClient {
     }
   }
 
+  /// GET /api/v1/projects/{id}/status -- current branch + dirty state.
+  ///
+  /// Returns the raw status payload from the backend (shape defined by
+  /// services.Project.GetProjectStatus).
+  Future<Map<String, dynamic>> getProjectStatus(String projectId) async {
+    return _get('/api/v1/projects/$projectId/status');
+  }
+
   /// Returns the raw `branches` array.  Callers deserialize via `BranchInfo.fromJson`.
   Future<List<Map<String, dynamic>>> listBranches(String projectId) async {
     try {
@@ -1122,6 +1175,15 @@ class SdkApiClient {
 
   Future<void> saveClientConfig(String content) async {
     await _post('/api/v1/config/client', body: {'content': content});
+  }
+
+  /// PATCH /api/v1/config/client -- merge-patch a partial update into the
+  /// client config. Follows RFC 7396: null deletes a key, objects recurse,
+  /// scalars/arrays replace. Returns the merged config as JSON.
+  ///
+  /// Example: `setClientConfig({'chat': {'verbosity': 'verbose'}})`.
+  Future<void> setClientConfig(Map<String, dynamic> patch) async {
+    await _patch('/api/v1/config/client', body: patch);
   }
 
   Future<String> getModelsConfig() async {

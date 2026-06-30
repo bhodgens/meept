@@ -231,6 +231,7 @@ Response: `{"status": "queued"}`
 | POST | `/api/v1/sessions` | Create session |
 | GET | `/api/v1/sessions/most-recent` | Get the most recent session |
 | GET | `/api/v1/sessions/{id}` | Get session |
+| PATCH | `/api/v1/sessions/{id}` | Update session (e.g., toggle `archived`) |
 | DELETE | `/api/v1/sessions/{id}` | Delete session |
 | POST | `/api/v1/sessions/{id}/attach` | Attach to session |
 | POST | `/api/v1/sessions/{id}/detach` | Detach from session |
@@ -277,6 +278,27 @@ Response: `{"messages": [...], "total": N}`
 ```bash
 curl -X POST http://localhost:8081/api/v1/sessions/sess-123/compact
 ```
+
+**Archive (soft):**
+```bash
+curl -X PATCH http://localhost:8081/api/v1/sessions/sess-123 \
+  -H "Content-Type: application/json" \
+  -d '{"archived": true}'
+```
+
+Request body (`archived` is **required**; the decoder uses `DisallowUnknownFields()`, so unknown keys return `400`):
+
+```json
+{"archived": true}
+```
+
+| field | type | behavior |
+|-------|------|----------|
+| `archived` | `*bool` | **required**. `true` soft-archives; `false` restores. Omitting returns `400 Bad Request` with `{"error":"\"archived\" field is required"}`. |
+
+Response: `204 No Content` with an empty body. The handler does not return the updated session JSON — re-fetch via `GET /api/v1/sessions/{id}` if you need the updated record. `404 Not Found` if the session id does not exist.
+
+Archived sessions are preserved (no row deletion): messages, branches, embeddings, and FTS rows all remain. They continue to appear in `GET /api/v1/sessions` with `"archived": true` so clients can grey or sort them to the bottom. Hard delete via `DELETE /api/v1/sessions/{id}` removes all data regardless of archive state.
 
 ### Workers
 
@@ -458,7 +480,8 @@ Returns counters for summarization failures, dropped messages, compaction events
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/config/client` | Get client config |
-| POST | `/api/v1/config/client` | Save client config |
+| POST | `/api/v1/config/client` | Save client config (full replace) |
+| PATCH | `/api/v1/config/client` | Merge-patch client config (RFC 7396) |
 | GET | `/api/v1/config/models` | Get models config |
 | POST | `/api/v1/config/models` | Save models config |
 | GET | `/api/v1/config/menubar` | Get menubar config |
@@ -513,6 +536,40 @@ curl -X POST http://localhost:8081/api/v1/config/normalize \
   -d '{"content": "// my config\n{ key: value }"}'
 ```
 Response: `{"normalized": "{\n  \"key\": \"value\"\n}"}`
+
+**Merge-Patch Client Config (RFC 7396):**
+
+Atomically merge a partial update into `~/.meept/client.json5`. Semantics:
+- Object values are recursively merged.
+- Scalar/array values from the request replace the existing value.
+- `null` deletes the corresponding key.
+
+The merged result is written atomically (temp file + rename) and returned
+in the response body. JSON5 comments are not preserved on round-trip
+(`hujson.Standardize` discards them, same as the `meept config` editor).
+
+```bash
+curl -X PATCH http://localhost:8081/api/v1/config/client \
+  -H "Content-Type: application/json" \
+  -d '{"chat": {"verbosity": "quiet"}}'
+```
+
+| Field | Type | Behavior |
+|-------|------|----------|
+| (any top-level key) | any | Merged into existing config per RFC 7396. `null` deletes. |
+
+Request body must be a JSON object (empty body returns `400`). Unknown
+fields are allowed (forward-compatible) — this is intentional, unlike the
+strict `PATCH /api/v1/sessions/{id}` which rejects unknown fields.
+
+Response: `200 OK` with the merged config as JSON (not JSON5).
+```json
+{
+  "chat": { "verbosity": "quiet", "scroll_speed": 3 },
+  "keybindings": { "...": "..." },
+  "session": { "...": "..." }
+}
+```
 
 ### Calendar
 
