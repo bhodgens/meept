@@ -2110,3 +2110,211 @@ func TestHandleSessionArchiveRejectsUnknownFields(t *testing.T) {
 		t.Fatalf("expected 400 for unknown field, got %d: %s", badRR.Code, badRR.Body.String())
 	}
 }
+
+// TestHandleClientConfigPatch_MergesAndReturnsMerged seeds client.json5 with
+// a nested map, sends a PATCH that overrides one nested value, and asserts
+// the response reflects the merge AND the file on disk is updated.
+func TestHandleClientConfigPatch_MergesAndReturnsMerged(t *testing.T) {
+	dir := t.TempDir()
+	cs := &ConfigService{meeptDir: dir}
+	server := NewServer(ServerConfig{}, cs, nil, nil, nil, nil)
+
+	seed := `{"chat":{"verbosity":"normal"}}`
+	if err := os.WriteFile(filepath.Join(dir, "client.json5"), []byte(seed), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	body := `{"chat":{"verbosity":"quiet"}}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/config/client", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleClientConfigPatch(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body=%s)", resp.StatusCode, http.StatusOK, w.Body.String())
+	}
+
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	chat, ok := result["chat"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected chat map, got %T", result["chat"])
+	}
+	if chat["verbosity"] != "quiet" {
+		t.Errorf("verbosity = %v, want quiet", chat["verbosity"])
+	}
+
+	// Verify file on disk has merged content.
+	onDisk, err := os.ReadFile(filepath.Join(dir, "client.json5"))
+	if err != nil {
+		t.Fatalf("read disk: %v", err)
+	}
+	var disk map[string]any
+	if err := json.Unmarshal(onDisk, &disk); err != nil {
+		t.Fatalf("unmarshal disk: %v", err)
+	}
+	diskChat, ok := disk["chat"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected chat map on disk, got %T", disk["chat"])
+	}
+	if diskChat["verbosity"] != "quiet" {
+		t.Errorf("on-disk verbosity = %v, want quiet", diskChat["verbosity"])
+	}
+}
+
+// TestHandleClientConfigPatch_NullDeletesKey verifies RFC 7396 null-deletes
+// semantics: a patch with `{"foo":null}` removes the foo key from the target.
+func TestHandleClientConfigPatch_NullDeletesKey(t *testing.T) {
+	dir := t.TempDir()
+	cs := &ConfigService{meeptDir: dir}
+	server := NewServer(ServerConfig{}, cs, nil, nil, nil, nil)
+
+	seed := `{"foo":"bar","baz":1}`
+	if err := os.WriteFile(filepath.Join(dir, "client.json5"), []byte(seed), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	body := `{"foo":null}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/config/client", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleClientConfigPatch(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body=%s)", resp.StatusCode, http.StatusOK, w.Body.String())
+	}
+
+	onDisk, err := os.ReadFile(filepath.Join(dir, "client.json5"))
+	if err != nil {
+		t.Fatalf("read disk: %v", err)
+	}
+	var disk map[string]any
+	if err := json.Unmarshal(onDisk, &disk); err != nil {
+		t.Fatalf("unmarshal disk: %v", err)
+	}
+	if _, exists := disk["foo"]; exists {
+		t.Errorf("expected foo to be deleted, got %v", disk["foo"])
+	}
+	if disk["baz"] != float64(1) {
+		t.Errorf("expected baz=1 to be preserved, got %v", disk["baz"])
+	}
+}
+
+// TestHandleClientConfigPatch_EmptyBody_Returns400 verifies an empty body
+// is rejected with 400 (distinct from invalid JSON).
+func TestHandleClientConfigPatch_EmptyBody_Returns400(t *testing.T) {
+	dir := t.TempDir()
+	cs := &ConfigService{meeptDir: dir}
+	server := NewServer(ServerConfig{}, cs, nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/config/client", strings.NewReader(""))
+	w := httptest.NewRecorder()
+
+	server.handleClientConfigPatch(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+// TestHandleClientConfigPatch_InvalidJSON_Returns400 verifies malformed JSON
+// is rejected with 400.
+func TestHandleClientConfigPatch_InvalidJSON_Returns400(t *testing.T) {
+	dir := t.TempDir()
+	cs := &ConfigService{meeptDir: dir}
+	server := NewServer(ServerConfig{}, cs, nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/config/client", strings.NewReader("{not json"))
+	w := httptest.NewRecorder()
+
+	server.handleClientConfigPatch(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+// TestHandleClientConfigPatch_NonObjectBody_Returns400 verifies a JSON
+// non-object (array, string, null) is rejected with 400.
+func TestHandleClientConfigPatch_NonObjectBody_Returns400(t *testing.T) {
+	dir := t.TempDir()
+	cs := &ConfigService{meeptDir: dir}
+	server := NewServer(ServerConfig{}, cs, nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/config/client", strings.NewReader(`["not","an","object"]`))
+	w := httptest.NewRecorder()
+
+	server.handleClientConfigPatch(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d (non-object body)", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+// TestHandleClientConfigPatch_NoConfigService_Returns503 verifies the 503
+// path when the Server has no configService wired.
+func TestHandleClientConfigPatch_NoConfigService_Returns503(t *testing.T) {
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/config/client", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+
+	server.handleClientConfigPatch(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+// TestHandleClientConfigPatch_PreservesUnrelatedKeys seeds client.json5
+// with the full default config and patches only one nested value. All
+// other top-level keys must survive in the response.
+func TestHandleClientConfigPatch_PreservesUnrelatedKeys(t *testing.T) {
+	dir := t.TempDir()
+	cs := &ConfigService{meeptDir: dir}
+	server := NewServer(ServerConfig{}, cs, nil, nil, nil, nil)
+
+	// Seed with the same default block used by LoadClientConfig so the
+	// test reflects real-world shape.
+	if err := os.WriteFile(filepath.Join(dir, "client.json5"), []byte(defaultClientConfigJSON5), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	body := `{"chat":{"verbosity":"verbose"}}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/config/client", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleClientConfigPatch(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body=%s)", resp.StatusCode, http.StatusOK, w.Body.String())
+	}
+
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	// All default top-level keys must still be present.
+	for _, key := range []string{"theme", "language", "notifications", "menubar"} {
+		if _, exists := result[key]; !exists {
+			t.Errorf("expected top-level key %q to be preserved, but it is missing", key)
+		}
+	}
+	// And the patched nested value must be set.
+	chat, ok := result["chat"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected chat map, got %T", result["chat"])
+	}
+	if chat["verbosity"] != "verbose" {
+		t.Errorf("verbosity = %v, want verbose", chat["verbosity"])
+	}
+}
