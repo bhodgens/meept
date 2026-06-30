@@ -211,25 +211,40 @@ func DefaultClientConfig() *ClientConfig {
 // 1. .meept/client.json5 (project-local)
 // 2. ~/.meept/client.json5 (user-global)
 // Falls back to defaults if no config file is found.
+//
+// Preserved for backward compatibility with existing call sites that
+// don't need the resolved on-disk path. New callers should prefer
+// LoadClientConfigPath.
 func LoadClientConfig() (*ClientConfig, error) {
+	cfg, _ := LoadClientConfigPath()
+	return cfg, nil
+}
+
+// LoadClientConfigPath mirrors LoadClientConfig but also returns the
+// resolved on-disk path of the loaded config (project-local or user-global).
+// When no file exists, the returned path is the user-global target
+// (~/.meept/client.json5) so persistVerbosity has somewhere to write.
+func LoadClientConfigPath() (*ClientConfig, string) {
 	// Try project-local first
 	localPath := ".meept/client.json5"
 	if cfg, err := loadConfigFile(localPath); err == nil {
-		return cfg, nil
+		return cfg, localPath
 	}
 
 	// Try user home directory
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
+	if homeDir, err := os.UserHomeDir(); err == nil {
 		homePath := filepath.Join(homeDir, ".meept", "client.json5")
 		if cfg, err := loadConfigFile(homePath); err == nil {
-			return cfg, nil
+			return cfg, homePath
 		}
+		// No file found — return the home path so persists have a target.
+		slog.Warn("client config: no config file found, using all defaults")
+		return DefaultClientConfig(), homePath
 	}
 
-	// Return defaults
-	slog.Warn("client config: no config file found, using all defaults")
-	return DefaultClientConfig(), nil
+	// UserHomeDir failed — fall back to a relative path so callers still work.
+	slog.Warn("client config: os.UserHomeDir failed, using all defaults")
+	return DefaultClientConfig(), localPath
 }
 
 // loadConfigFile loads and parses a JSON5 config file.

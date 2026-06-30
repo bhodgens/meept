@@ -121,7 +121,8 @@ type App struct {
 	keys KeyMap
 
 	// Client configuration
-	clientConfig *ClientConfig
+	clientConfig     *ClientConfig
+	clientConfigPath string // resolved path to client.json5 (home or project-local)
 
 	// Text-to-speech manager
 	ttsManager *tts.Manager
@@ -140,10 +141,10 @@ type App struct {
 	currentSession *types.Session
 
 	// Current project
-	currentProjectID    string
-	currentProjectName  string
-	currentProjectMode  string
-	currentProjectDirty bool
+	currentProjectID     string
+	currentProjectName   string
+	currentProjectMode   string
+	currentProjectDirty  bool
 	currentProjectBranch string
 
 	// SessionManager is the shared session manager used by both TUI and meept-lite
@@ -228,7 +229,7 @@ func NewApp(socketPath string) *App {
 	styles := DefaultStyles()
 
 	// Load client configuration
-	clientConfig, _ := LoadClientConfig()
+	clientConfig, clientConfigPath := LoadClientConfigPath()
 
 	// Get current working directory for display
 	projectDir, _ := os.Getwd()
@@ -249,20 +250,21 @@ func NewApp(socketPath string) *App {
 			AutoCopyOnRelease: clientConfig.Chat.AutoCopyOnRelease,
 			ScrollSpeed:       clientConfig.Chat.ScrollSpeed,
 		}),
-		tasks:          models.NewTasksModel(rpc),
-		sessions:       models.NewSessionsModel(rpc),
-		queue:          models.NewQueueModel(rpc),
-		memory:         models.NewMemoryModel(rpc),
-		plans:          models.NewPlansModel(rpc),
-		search:         models.NewSearchModel(rpc, slog.Default()),
-		agents:         NewAgentsPanel(rpc),
-		sidebar:        NewSidebarModel(rpc, eventRPC, styles, clientConfig.Rendering.SidebarAnimation),
-		keys:           DefaultKeyMap(),
-		clientConfig:   clientConfig,
-		projectDir:     projectDir,
-		activeModal:    ModalNone,
-		doublePressTTL: 500 * time.Millisecond,
-		tabFlash:       make(map[ViewType]bool),
+		tasks:            models.NewTasksModel(rpc),
+		sessions:         models.NewSessionsModel(rpc),
+		queue:            models.NewQueueModel(rpc),
+		memory:           models.NewMemoryModel(rpc),
+		plans:            models.NewPlansModel(rpc),
+		search:           models.NewSearchModel(rpc, slog.Default()),
+		agents:           NewAgentsPanel(rpc),
+		sidebar:          NewSidebarModel(rpc, eventRPC, styles, clientConfig.Rendering.SidebarAnimation),
+		keys:             DefaultKeyMap(),
+		clientConfig:     clientConfig,
+		clientConfigPath: clientConfigPath,
+		projectDir:       projectDir,
+		activeModal:      ModalNone,
+		doublePressTTL:   500 * time.Millisecond,
+		tabFlash:         make(map[ViewType]bool),
 	}
 
 	// Create modals
@@ -727,6 +729,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.verbosity = (a.verbosity + 1) % 3
 			a.statusMessage = fmt.Sprintf("verbosity: %s", a.verbosity)
 			a.statusMessageTime = time.Now()
+			// Update in-memory config so subsequent saves are consistent
+			// (the goroutine below reads from disk, not from a.clientConfig,
+			// so this synchronous update is race-safe).
+			if a.clientConfig != nil {
+				a.clientConfig.Chat.Verbosity = a.verbosity.String()
+			}
+			// Persist the new verbosity to client.json5 (best-effort, non-blocking).
+			// UI state is already updated; if persistence fails we log but don't revert.
+			level := a.verbosity.String()
+			path := a.clientConfigPath
+			if path != "" {
+				go func(level, path string) {
+					if err := persistVerbosity(path, level); err != nil {
+						slog.Warn("verbosity persist: write failed", "err", err, "path", path)
+					}
+				}(level, path)
+			}
 			return a, nil
 		}
 
@@ -2611,6 +2630,6 @@ type SetProjectResultMsg struct {
 
 // StopWorkChildTasksMsg carries the child task count for async stop-work flow.
 type StopWorkChildTasksMsg struct {
-	SessionID     string
+	SessionID      string
 	ChildTaskCount int
 }
