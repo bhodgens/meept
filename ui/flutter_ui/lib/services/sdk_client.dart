@@ -1177,26 +1177,13 @@ class SdkApiClient {
     await _post('/api/v1/config/client', body: {'content': content});
   }
 
-  /// POST /api/v1/config/client -- merge-patch a single field into the
-  /// client config.
+  /// PATCH /api/v1/config/client -- merge-patch a partial update into the
+  /// client config. Follows RFC 7396: null deletes a key, objects recurse,
+  /// scalars/arrays replace. Returns the merged config as JSON.
   ///
   /// Example: `setClientConfig({'chat': {'verbosity': 'verbose'}})`.
-  ///
-  /// **WARNING**: as of 2026-06-28, the backend `handleSaveClientConfig`
-  /// handler expects `{"content": <full-file-string>}`. Sending a
-  /// structured merge-patch like `{'chat': {'verbosity': 'verbose'}}`
-  /// would currently cause silent data loss -- the backend parses it as
-  /// valid JSON (extra fields ignored), `body.Content` is `""`, and
-  /// `SaveClientConfig("")` overwrites the entire client config with an
-  /// empty string. Do NOT call this method until a PATCH
-  /// /api/v1/config/client route is added on the backend (tracked as a
-  /// follow-up task). The Dart-side API is added now so UI work can
-  /// proceed against the intended contract; callers should prefer
-  /// [saveClientConfig] (which sends the full-file shape) until the
-  /// backend lands.
-  // ignore: unused_element
   Future<void> setClientConfig(Map<String, dynamic> patch) async {
-    await _post('/api/v1/config/client', body: patch);
+    await _patch('/api/v1/config/client', body: patch);
   }
 
   Future<String> getModelsConfig() async {
