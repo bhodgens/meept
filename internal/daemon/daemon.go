@@ -675,6 +675,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			if components.ArtifactManager != nil {
 				projectHandler.SetArtifactInvalidator(components.ArtifactManager)
 			}
+			projectHandler.SetMessageBus(msgBus)
 			projectHandler.RegisterProjectMethods(rpcServer)
 			logger.Info("Project RPC handlers registered")
 		}
