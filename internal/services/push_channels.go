@@ -11,19 +11,6 @@ import (
 	"github.com/caimlas/meept/internal/comm/telegram"
 )
 
-// pushNotification is a minimal abstraction for a notification event,
-// avoiding imports of daemon/ events.go or http/notification_handlers.go
-// which would create import cycles through services.
-//nolint:unused -- reserved for future notification event type
-type pushNotification struct {
-	ID        string
-	Timestamp string
-	Title     string
-	Message   string
-	SessionID string
-	AgentID   string
-}
-
 // notifier is the interface that event emitters from daemon must satisfy.
 // Daemon's EventEmitter has:
 //   - Publish(*http.NotificationEvent)
@@ -265,8 +252,8 @@ func (t *TUIPushChannel) Push(ctx context.Context, msg *PushMessage) error {
 }
 
 // HTTPPushChannel delivers notifications over the HTTP notification channel
-// (WebSocket broadcast). It converts push messages to the standard
-// pushNotification format that WebSocket clients consume.
+// (WebSocket broadcast). It converts push messages to the notification
+// event format that WebSocket clients consume.
 type HTTPPushChannel struct {
 	notifier notifier
 	logger   *slog.Logger

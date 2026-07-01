@@ -56,12 +56,6 @@ type logger interface {
 	Info(string, ...any)
 }
 
-// storeLogger bridges the standard library logger interface expected by Store.
-//nolint:unused -- reserved for future dynamic logger updates
-func (s *Store) setLogger(l logger) {
-	s.logger = l
-}
-
 // nopLogger is a no-op logger used when none is provided.
 type nopLogger struct{}
 

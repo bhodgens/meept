@@ -150,17 +150,34 @@ func wireEpistemicHook(agentLoop *agent.AgentLoop, memoryMgr *memory.Manager, ch
 
 // wireFileWatcherHook creates a FileWatcherHook from the daemon config and
 // attaches it to the agent loop via SetFileWatcher. No-op when agentLoop is
-// nil, the hook is disabled in hooks config, or FileWatcher config is missing.
-//
-// TODO: FileWatcher subsystem (pattern matching, FileEvent, NewFileWatcherHook,
-// SortIgnoreOrder) is not yet implemented. Wiring is stubbed to no-op until
-// the implementation lands. Tracked as a follow-up gap.
+// nil, the hook is disabled in hooks config, or FileWatcher pattern is empty.
 func wireFileWatcherHook(agentLoop *agent.AgentLoop, cfg config.Config, bus *bus.MessageBus, logger *slog.Logger) {
-	// No-op stub: FileWatcherHook types not yet defined.
-	_ = agentLoop
-	_ = cfg
-	_ = bus
-	_ = logger
+	if agentLoop == nil {
+		return
+	}
+
+	fwCfg := cfg.Hooks.FileWatcher
+	if !fwCfg.Enabled || fwCfg.Pattern == "" {
+		return
+	}
+
+	hook := agent.NewFileWatcherHook(
+		fwCfg.Pattern,
+		fwCfg.Debounce,
+		fwCfg.Ignore,
+		logger.With("component", "file-watcher"),
+	)
+	hook.Async = fwCfg.Async
+	hook.AsyncRewake = fwCfg.AsyncRewake
+	hook.SetBus(bus)
+
+	agentLoop.SetFileWatcher(hook)
+	logger.Info("file watcher hook wired",
+		"pattern", fwCfg.Pattern,
+		"debounce", fwCfg.Debounce,
+		"async", fwCfg.Async,
+		"async_rewake", fwCfg.AsyncRewake,
+	)
 }
 
 // wireHTTPHooks converts each HTTP hook entry from the daemon config into an

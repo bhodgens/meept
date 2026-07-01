@@ -570,20 +570,6 @@ func saveConfigAtomic(path string, cfg *config.Config) error {
 	return atomicWrite(path, data)
 }
 
-// saveModelsConfigAtomic writes a *config.ModelsConfig to path atomically.
-//nolint:unused -- reserved for future atomic model config updates
-//lint:ignore U1000 Reserved for future atomic config writes.
-func saveModelsConfigAtomic(path string, cfg *config.ModelsConfig) error {
-	if path == "" {
-		return fmt.Errorf("empty models config path")
-	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal models config: %w", err)
-	}
-	return atomicWrite(path, data)
-}
-
 // atomicWrite writes data to path via a temp file then rename. The temp
 // file is created in the same directory to guarantee the rename is atomic
 // on POSIX filesystems.

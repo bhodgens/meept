@@ -2455,6 +2455,20 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			l.ClearModelOverride()
 		}
 
+		// Resolve effective reasoning config and pass to LLM.
+		// Precedence: override > per-turn self-modulated > agent default.
+		var reasoningCfg *llm.ReasoningConfig
+		if l.reasoningOverride != nil {
+			reasoningCfg = l.reasoningOverride
+		} else if l.reasoningForNextTurn != "" {
+			reasoningCfg = &llm.ReasoningConfig{Effort: l.reasoningForNextTurn}
+		} else if l.agentReasoning != nil {
+			reasoningCfg = l.agentReasoning.ToReasoningConfig(l.agentReasoning.Effort)
+		}
+		if reasoningCfg != nil {
+			chatOpts = append(chatOpts, llm.WithReasoning(reasoningCfg))
+		}
+
 		response, err := l.chatWithFailover(ctx, messages, chatOpts...)
 		if err != nil {
 			// Check for TTSR abort — retry with rule content injected.
@@ -2519,6 +2533,8 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				return "", fmt.Errorf("LLM call failed: %w", err)
 			}
 		}
+		// Clear per-turn reasoning after the LLM call consumes it.
+		l.reasoningForNextTurn = ""
 		// Track token usage
 		totalTokens += response.Usage.TotalTokens
 		cachedTokens += response.Usage.CachedTokens
@@ -2851,19 +2867,6 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 // 3. After max attempts, return the error.
 func (l *AgentLoop) chatWithFailover(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error) {
 	return l.chatWithFailoverRaw(ctx, messages, nil, opts...)
-}
-
-// chatWithFailoverStream wraps LLM Chat calls with streaming delta support and
-// TTSR mid-stream abortion. If onDelta is non-nil and the underlying Chatter
-// supports StreamingChatter, the stream is used; otherwise it falls back to
-// non-streaming behavior.
-//
-// Reserved for enabling streaming in agentic workflows per
-// docs/plans/2026-06-12-review-gaps-research-design.md
-//
-//lint:ignore U1000 reserved for future streaming per docs/plans/2026-06-12-review-gaps-research-design.md
-func (l *AgentLoop) chatWithFailoverStream(ctx context.Context, messages []llm.ChatMessage, onDelta llm.DeltaCallback, opts ...llm.ChatOption) (*llm.Response, error) {
-	return l.chatWithFailoverRaw(ctx, messages, onDelta, opts...)
 }
 
 // chatWithFailoverRaw is the shared implementation for failover with optional

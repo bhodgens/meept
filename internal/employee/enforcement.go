@@ -1041,6 +1041,10 @@ func neverRuleMatchesField(pattern string, mt MatchType, field string) bool {
 // Post-turn audit (Checkpoint 2).
 // ---------------------------------------------------------------------------
 
+// maxCachedTurns is the per-employee cap on cached TurnRecords for the
+// periodic auditor's bulk review (spec line 389).
+const maxCachedTurns = 50
+
 // PostTurnAuditor runs a small-model classifier after each LLM turn to scan
 // for constitution violations in the tool calls and final output.
 type PostTurnAuditor struct {
@@ -1064,6 +1068,12 @@ type PostTurnAuditor struct {
 	// in addition to the existing autoPause callback. Nil means no bus
 	// event is published. Guarded by mu.
 	busPublisher BusPublisher
+
+	// turnCache stores recent TurnRecords per employee for the periodic
+	// auditor to bulk-review (spec line 389). Capped at maxCachedTurns
+	// per employee. Guarded by turnCacheMu.
+	turnCache   map[string][]TurnRecord
+	turnCacheMu sync.RWMutex
 }
 
 // NewPostTurnAuditor constructs a PostTurnAuditor. The model must be non-nil
@@ -1075,6 +1085,7 @@ func NewPostTurnAuditor(model llm.Chatter, store *AuditStore, prompt string) *Po
 		store:             store,
 		prompt:            prompt,
 		retryWithStricter: true,
+		turnCache:         make(map[string][]TurnRecord),
 	}
 }
 
@@ -1113,6 +1124,31 @@ func (a *PostTurnAuditor) SetBusPublisher(p BusPublisher) {
 	a.mu.Unlock()
 }
 
+// RecentTurns returns cached turns for an employee, most recent last.
+// Called by the periodic audit job via TurnCollectorFunc (spec line 389).
+// limit <= 0 means no limit. lookback is advisory; the cache is already
+// bounded by maxCachedTurns so the filter is a no-op when turns lack
+// timestamps.
+func (a *PostTurnAuditor) RecentTurns(employeeID string, limit int, lookback time.Duration) []TurnRecord {
+	a.turnCacheMu.RLock()
+	defer a.turnCacheMu.RUnlock()
+
+	turns := a.turnCache[employeeID]
+	if len(turns) == 0 {
+		return nil
+	}
+	// lookback is advisory; TurnRecord has no timestamp field. The cache
+	// is already bounded so we return the last N entries.
+	_ = lookback
+	if limit > 0 && len(turns) > limit {
+		turns = turns[len(turns)-limit:]
+	}
+	// Return a defensive copy to avoid external mutation.
+	out := make([]TurnRecord, len(turns))
+	copy(out, turns)
+	return out
+}
+
 // Audit runs the post-turn classifier. Returns a finding if one was detected,
 // or nil if the turn is clean. On LLM failure it retries once with a stricter
 // prompt, then returns nil with a logged warning (spec lines 603-605).
@@ -1126,6 +1162,20 @@ func (a *PostTurnAuditor) Audit(ctx context.Context, turn TurnRecord) (*AuditFin
 	onFinding := a.onFindingAttached
 	busPub := a.busPublisher
 	a.mu.Unlock()
+
+	// Cache the turn for the periodic auditor's bulk review (spec line
+	// 389). The cache is bounded at maxCachedTurns per employee.
+	a.turnCacheMu.Lock()
+	if a.turnCache == nil {
+		a.turnCache = make(map[string][]TurnRecord)
+	}
+	empTurns := a.turnCache[turn.EmployeeID]
+	empTurns = append(empTurns, turn)
+	if len(empTurns) > maxCachedTurns {
+		empTurns = empTurns[len(empTurns)-maxCachedTurns:]
+	}
+	a.turnCache[turn.EmployeeID] = empTurns
+	a.turnCacheMu.Unlock()
 
 	if model == nil {
 		// No audit model configured — skip silently.

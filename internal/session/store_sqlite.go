@@ -2206,22 +2206,19 @@ func (s *SQLiteStore) UnembeddedMessages(ctx context.Context, limit int) ([]Mess
 	return results, nil
 }
 
-// GetActiveThread returns the active thread for a session.
-// TODO: Implement thread persistence in SQLite when full thread feature is wired.
+// GetActiveThread returns the active thread for a session via SQLiteThreadStore.
 func (s *SQLiteStore) GetActiveThread(ctx context.Context, sessionID string) (*Thread, error) {
-	return nil, nil
+	ts := NewSQLiteThreadStore(s.db, sessionID, nil)
+	return ts.GetActiveThread(ctx, sessionID)
 }
 
-// ListThreadsBySession returns all threads for a session.
-// TODO: Implement thread persistence in SQLite when full thread feature is wired.
+// ListThreadsBySession returns all threads for a session via SQLiteThreadStore.
 func (s *SQLiteStore) ListThreadsBySession(ctx context.Context, sessionID string) ([]*Thread, error) {
-	return []*Thread{}, nil
+	ts := NewSQLiteThreadStore(s.db, sessionID, nil)
+	return ts.ListThreadsBySession(ctx, sessionID)
 }
 
 // CreateThread persists a new thread via SQLiteThreadStore.
-// TODO: full thread persistence wiring — currently a stub returning nil so the
-// daemon compiles. Full implementation tracked under the thread-based context
-// partitioning feature (separate from the reasoning effort work).
 func (s *SQLiteStore) CreateThread(ctx context.Context, thread *Thread) error {
 	if thread == nil {
 		return fmt.Errorf("nil thread")
@@ -2230,11 +2227,11 @@ func (s *SQLiteStore) CreateThread(ctx context.Context, thread *Thread) error {
 	return ts.CreateThread(ctx, thread)
 }
 
-// GetThread retrieves a thread by ID.
-// TODO: full thread persistence wiring — returns not-found. Full implementation
-// tracked under the thread-based context partitioning feature.
+// GetThread retrieves a thread by ID via SQLiteThreadStore. The thread ID is
+// globally unique (UUID-derived), so no session scoping is needed.
 func (s *SQLiteStore) GetThread(ctx context.Context, threadID string) (*Thread, error) {
-	return nil, fmt.Errorf("thread not found: %s", threadID)
+	ts := NewSQLiteThreadStore(s.db, "", nil)
+	return ts.GetThreadByID(ctx, threadID)
 }
 
 // UpdateThread updates an existing thread via SQLiteThreadStore.
@@ -2246,11 +2243,11 @@ func (s *SQLiteStore) UpdateThread(ctx context.Context, thread *Thread) error {
 	return ts.UpdateThread(ctx, thread)
 }
 
-// DeleteThread removes a thread by ID.
-// TODO: full thread persistence wiring — returns not-found. Full implementation
-// tracked under the thread-based context partitioning feature.
+// DeleteThread removes a thread by ID via SQLiteThreadStore. The thread ID is
+// globally unique (UUID-derived), so no session scoping is needed.
 func (s *SQLiteStore) DeleteThread(ctx context.Context, threadID string) error {
-	return fmt.Errorf("thread not found: %s", threadID)
+	ts := NewSQLiteThreadStore(s.db, "", nil)
+	return ts.DeleteThreadByID(ctx, threadID)
 }
 
 // SetActiveThread sets the active thread for a session via SQLiteThreadStore.

@@ -527,21 +527,11 @@ func (s *Server) handleSessionList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit, err := parseIntParam(r, "limit", 50, 1, 1000)
-	if err != nil {
-		s.writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	// Parse optional designation filter
-	var designation *string
-	if d := r.URL.Query().Get("designation"); d != "" {
-		designation = &d
-	}
+	opts := parseSessionListQuery(r)
 
 	sessions, err := s.services.Session.List(r.Context(), services.ListSessionsRequest{
-		Limit:       limit,
-		Designation: designation,
+		Limit:       opts.Limit,
+		Designation: opts.Designation,
 	})
 	if err != nil {
 		s.handleServiceError(w, err)
@@ -3651,14 +3641,12 @@ func (s *Server) handleSessionAcknowledge(w http.ResponseWriter, r *http.Request
 }
 
 // sessionFilterOptions contains optional filters for session listing.
-//nolint:unused -- reserved for future session filtering API
 type sessionFilterOptions struct {
 	Designation *string
 	Limit       int
 }
 
 // parseSessionListQuery parses query parameters for session list filtering.
-//nolint:unused -- reserved for future enhanced session listing
 func parseSessionListQuery(r *http.Request) sessionFilterOptions {
 	opts := sessionFilterOptions{}
 

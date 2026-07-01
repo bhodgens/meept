@@ -9,6 +9,7 @@ import (
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/pkg/models"
@@ -365,3 +366,64 @@ func (l *storeBackedGoalLookup) ActiveGoal(ctx context.Context, employeeID strin
 // Compile-time guard: storeBackedGoalLookup must satisfy
 // employee.GoalLookup.
 var _ employee.GoalLookup = (*storeBackedGoalLookup)(nil)
+
+// planDisposerAdapter wraps *plan.PlanManager to satisfy
+// employee.PlanDisposer without creating an import cycle. The employee
+// Manager calls ApprovePlan/RejectPlan on this adapter, which delegates
+// to the existing plan.PlanManager signoff workflow.
+type planDisposerAdapter struct {
+	pm *plan.PlanManager
+}
+
+// ApprovePlan delegates to PlanManager.ApprovePlan (spec lines 294-306).
+func (a *planDisposerAdapter) ApprovePlan(ctx context.Context, planID, sessionID, by string) error {
+	return a.pm.ApprovePlan(ctx, planID, sessionID, by)
+}
+
+// RejectPlan delegates to PlanManager.RejectPlan (spec lines 294-306).
+func (a *planDisposerAdapter) RejectPlan(ctx context.Context, planID, sessionID, by, reason string) error {
+	return a.pm.RejectPlan(ctx, planID, sessionID, by, reason)
+}
+
+// Compile-time guard: planDisposerAdapter must satisfy
+// employee.PlanDisposer.
+var _ employee.PlanDisposer = (*planDisposerAdapter)(nil)
+
+// pushNotifierAdapter bridges *EventEmitter to the services.notifier
+// interface. The services package defines notifier with interface{} params
+// to avoid importing comm/http or daemon. EventEmitter.Publish takes a
+// concrete *http.NotificationEvent and PublishNotification takes a concrete
+// NotificationType, so *EventEmitter does not satisfy notifier directly.
+// This adapter performs the type translation.
+type pushNotifierAdapter struct {
+	emitter *EventEmitter
+}
+
+// Publish forwards an arbitrary event to the emitter. The event must be
+// *http.NotificationEvent or a type convertible to it; other types are
+// dropped with a warning log.
+func (a pushNotifierAdapter) Publish(event interface{}) {
+	ne, ok := event.(*http.NotificationEvent)
+	if !ok {
+		// Best-effort: drop unknown types silently rather than panicking.
+		return
+	}
+	a.emitter.Publish(ne)
+}
+
+// PublishNotification forwards the arguments to EventEmitter.PublishNotification,
+// translating the interface{} notifType to NotificationType.
+func (a pushNotifierAdapter) PublishNotification(sessionID, agentID string, notifType interface{}, title, message string) {
+	var nt NotificationType
+	switch v := notifType.(type) {
+	case NotificationType:
+		nt = v
+	case string:
+		nt = NotificationType(v)
+	case nil:
+		nt = NotificationTypeInfo
+	default:
+		nt = NotificationTypeInfo
+	}
+	a.emitter.PublishNotification(sessionID, agentID, nt, title, message)
+}

@@ -709,8 +709,12 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 		}
 	}
 
-	// Enable extended thinking if supported
-	if c.config.HasCapability("extended_thinking") {
+	// Apply reasoning effort from chatOptions (spec §2, line 737).
+	// When no ReasoningConfig is provided, fall back to capability-based
+	// detection (legacy behavior).
+	if opts.reasoning != nil {
+		applyAnthropicReasoning(req, c.config, opts.reasoning, nil)
+	} else if c.config.HasCapability("extended_thinking") {
 		req.Thinking = &anthropicThinkingConfig{
 			Type: "enabled",
 			// BudgetTokens is optional - let Anthropic use default

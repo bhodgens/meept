@@ -23,7 +23,6 @@ type classifierClient interface {
 type ReflectionCollector struct {
 	cfg              config.ReflectionCollectorConfig
 	classifier       classifierClient
-	classifierModel  string // model override; empty = use classifier default
 	templateReg      *plannerTemplateLoader
 	queue            *proposalQueue
 	logger           *slog.Logger
@@ -46,13 +45,13 @@ func NewReflectionCollector(
 	if logger == nil {
 		logger = slog.Default()
 	}
+	_ = classifierModel // accepted for API stability; model override not yet supported
 	return &ReflectionCollector{
-		cfg:              cfg,
-		classifier:       classifier,
-		classifierModel:  classifierModel,
-		templateReg:      templateReg,
-		queue:            newProposalQueue(queuePath),
-		logger:           logger.With("component", "reflection"),
+		cfg:         cfg,
+		classifier:  classifier,
+		templateReg: templateReg,
+		queue:       newProposalQueue(queuePath),
+		logger:      logger.With("component", "reflection"),
 	}
 }
 
@@ -93,10 +92,6 @@ func (rc *ReflectionCollector) ReflectTurn(ctx context.Context, traj ReflectionT
 			llm.WithMaxTokens(500),
 			llm.WithTemperature(0.2),
 		}
-		// classifierModel override is documented but not wired here because
-		// llm.WithModel does not exist in the current llm package. Model
-		// selection happens via the Client's configured ModelID at construction
-		// time; a future ChatOption addition could plumb this through.
 		messages := []llm.ChatMessage{
 			{Role: llm.RoleSystem, Content: "You are a self-reflection assistant. Output ONLY valid JSON."},
 			{Role: llm.RoleUser, Content: prompt},

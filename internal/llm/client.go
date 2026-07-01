@@ -306,6 +306,14 @@ func (c *Client) buildChatRequest(messages []ChatMessage, cfg *ModelConfig, opts
 		payload["stream"] = true
 	}
 
+	// Apply reasoning effort translation for OpenAI-compatible vendors
+	// (spec §2). This covers OpenAI, Gemini, GLM, Kimi, Qwen, DeepSeek,
+	// OpenRouter, etc. The Anthropic path is handled separately in
+	// anthropic.go buildRequest via applyAnthropicReasoning.
+	if chatOpts.reasoning != nil {
+		applyOpenAICompatReasoning(payload, cfg, chatOpts.reasoning, nil)
+	}
+
 	return chatOpts, payload, nil
 }
 
@@ -614,6 +622,7 @@ type chatOptions struct {
 	stopSequences    []string
 	taskID           string
 	sessionID        string
+	reasoning        *ReasoningConfig
 }
 
 // ChatOption is a functional option for configuring a chat request.
@@ -673,6 +682,16 @@ func WithTaskScope(taskID, sessionID string) ChatOption {
 	return func(o *chatOptions) {
 		o.taskID = taskID
 		o.sessionID = sessionID
+	}
+}
+
+// WithReasoning sets the reasoning/thinking effort for the chat request.
+// The config is translated to vendor-specific wire formats via
+// applyOpenAICompatReasoning (OpenAI-compatible path) or
+// applyAnthropicReasoning (Anthropic path).
+func WithReasoning(rc *ReasoningConfig) ChatOption {
+	return func(o *chatOptions) {
+		o.reasoning = rc
 	}
 }
 

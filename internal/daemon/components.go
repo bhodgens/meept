@@ -48,6 +48,7 @@ import (
 	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/internal/selfimprove"
+	"github.com/caimlas/meept/internal/services"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/shadow"
 	"github.com/caimlas/meept/internal/skills"
@@ -273,6 +274,9 @@ type Components struct {
 
 	// Notification event emitter (shared between agent loop and HTTP server)
 	NotificationEmitter *EventEmitter
+
+	// Push notification service (bot-to-user push over bus + channels)
+	PushService *services.PushService
 
 	// Agent typed event emitter (for metrics and visualization wiring)
 	AgentEventEmitter *agent.EventEmitter
@@ -914,6 +918,25 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 	c.NotificationEmitter = notificationEmitter
 	c.AgentLoop.SetNotificationPublisher(&notificationAdapter{emitter: c.NotificationEmitter})
+
+	// Wire push notification service (bot-to-user push over bus + channels).
+	// The ChannelRegistry routes push messages to registered delivery
+	// channels (HTTP WebSocket, TUI, Telegram, CLI). The HTTPPushChannel
+	// uses the EventEmitter as its notifier bridge.
+	pushRegistry := services.NewChannelRegistry(logger.With("component", "push-channels"))
+	if c.NotificationEmitter != nil {
+		httpCh, err := services.NewHTTPPushChannel(
+			pushNotifierAdapter{emitter: c.NotificationEmitter},
+			logger.With("component", "push-channel-http"),
+		)
+		if err != nil {
+			logger.Warn("failed to create HTTP push channel", "error", err)
+		} else {
+			pushRegistry.Register(httpCh)
+		}
+	}
+	c.PushService = services.NewPushServiceWithChannels(msgBus, pushRegistry,
+		logger.With("component", "push-service"))
 
 	// Start progress synthesizer for tiered agent activity summaries.
 	// Subscribes to all agent events via wildcard and republishes condensed
@@ -2800,6 +2823,31 @@ func (c *Components) Start(ctx context.Context) error {
 				// NewComponents listens and calls HandleCriticalFinding.
 				postTurn.SetBusPublisher(c.empBusPub)
 
+				// Wire TurnCollector so the periodic audit job has turns
+				// to review (spec line 389). The collector reads from
+				// PostTurnAuditor's in-memory turn cache.
+				c.EmployeeManager.SetTurnCollector(func(employeeID string, limit int, lookback time.Duration) []employee.TurnRecord {
+					return postTurn.RecentTurns(employeeID, limit, lookback)
+				})
+
+				// Wire OnFindingAttached so findings are linked to goals
+				// via Goal.AttachFinding (spec line 382). The callback
+				// loads the goal, attaches the finding, and persists.
+				if c.EmployeeGoalStore != nil {
+					gs := c.EmployeeGoalStore
+					postTurn.SetOnFindingAttached(func(goalID, findingID string) {
+						goal, err := gs.Get(context.Background(), goalID)
+						if err != nil || goal == nil {
+							return // goal not found; finding unlinked
+						}
+						goal.AttachFinding(findingID)
+						if err := gs.Update(context.Background(), goal); err != nil {
+							c.Logger.Warn("failed to persist finding attachment",
+								"goal_id", goalID, "finding_id", findingID, "error", err)
+						}
+					})
+				}
+
 				c.EmployeeManager.SetPostTurnAuditor(postTurn)
 				c.EmployeeManager.SetPeriodicAuditor(periodic)
 				c.Logger.Info("Employee audit checkpoints wired",
@@ -2812,6 +2860,14 @@ func (c *Components) Start(ctx context.Context) error {
 				c.Logger.Warn("Employee audit: failed to resolve audit model; Checkpoints 2 and 3 dormant",
 					"alias", modelAlias, "error", err)
 			}
+		}
+
+		// Wire PlanDisposer so ApprovePlan/RejectPlan route to the existing
+		// plan.PlanManager signoff path (spec lines 294-306). This is
+		// outside the auditor block since PlanManager availability is
+		// independent of the audit LLM.
+		if c.PlanManager != nil {
+			c.EmployeeManager.SetPlanDisposer(&planDisposerAdapter{pm: c.PlanManager})
 		}
 
 		// Wire known agent IDs for hire-time validation (spec line 597,
@@ -3004,6 +3060,30 @@ func (c *Components) Start(ctx context.Context) error {
 							return string(st.Status)
 						})
 					}
+					// Wire EmitMetricFunc to publish metrics via the message
+					// bus (spec line 675: employee.goal.health gauge). The
+					// bus reference is extracted from the empBusPub adapter.
+					if pub, ok := c.empBusPub.(employeeBusPublisher); ok && pub.bus != nil {
+						mb := pub.bus
+						loop.SetEmitMetricFunc(func(name string, value float64, tags map[string]string) {
+							payload := map[string]any{
+								"name": name, "value": value, "tags": tags,
+							}
+							msg, err := models.NewBusMessage(
+								models.MessageType("employee.metric"),
+								"employee-goal-loop",
+								payload,
+							)
+							if err != nil {
+								c.Logger.Warn("employee.metric bus event: marshal failed",
+									"name", name, "error", err)
+								return
+							}
+							msg.Topic = "employee.metric"
+							mb.Publish("employee.metric", msg)
+						})
+					}
+
 					c.EmployeeManager.RegisterGoalLoop(emp.ID, loop)
 					registered++
 				}
