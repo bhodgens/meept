@@ -89,6 +89,20 @@ func (s *Store) initSchema(ctx context.Context) error {
 		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_worktrees_session ON project_worktrees(session_id)`); err != nil {
 			return fmt.Errorf("create worktrees session index: %w", err)
 		}
+		// project_recents table for /project typeahead recents
+		if _, err := db.ExecContext(ctx, `
+			CREATE TABLE IF NOT EXISTS project_recents (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				project_path TEXT UNIQUE NOT NULL,
+				last_used_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+			)`); err != nil {
+			return fmt.Errorf("create project_recents table: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `
+			CREATE INDEX IF NOT EXISTS idx_recents_last_used
+			ON project_recents(last_used_at DESC)`); err != nil {
+			return fmt.Errorf("create project_recents index: %w", err)
+		}
 		return nil
 	})
 }
