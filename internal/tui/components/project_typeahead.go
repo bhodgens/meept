@@ -6,7 +6,6 @@ import (
 	teacmd "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
-	"github.com/caimlas/meept/internal/tui"
 )
 
 // ProjectTypeaheadModel is the typeahead state for project path selection.
