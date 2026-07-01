@@ -392,7 +392,7 @@ manage registered projects.
 subcommands:
   (none)              show current project info
   list                list all registered projects
-  set <name|id>       switch to a different project
+  set <path|name|id>  switch to a different project
   add <path|url>      register a new project
   sync                synchronize the current project (git pull)
   status              show git status of current project
@@ -1627,7 +1627,7 @@ func isTemplateNotFoundError(err error) bool {
 //
 //	/project             - show current project info
 //	/project list        - list all registered projects
-//	/project set <name>  - switch to a different project
+//	/project set <path|name|id> - switch to a different project
 //	/project add <path>  - register a new project
 //	/project sync        - sync current project
 //	/project status      - show current project status
@@ -1739,6 +1739,8 @@ func (h *CommandHandler) executeProjectList() *CommandResult {
 }
 
 // executeProjectSet switches the current session to a different project.
+// Accepts a project path, name, or ID. Path is tried first via DetectProject
+// RPC, falling back to name/ID matching against known projects.
 func (h *CommandHandler) executeProjectSet(args []string) *CommandResult {
 	if h.rpc == nil || !h.rpc.IsConnected() {
 		return &CommandResult{
@@ -1749,13 +1751,25 @@ func (h *CommandHandler) executeProjectSet(args []string) *CommandResult {
 
 	if len(args) == 0 || args[0] == "" {
 		return &CommandResult{
-			Output:  "usage: /project set <name|id>",
+			Output:  "usage: /project set <path|name|id>",
 			IsError: true,
 		}
 	}
 
 	query := args[0]
 
+	// Try path-based detection first.
+	if detected, err := h.rpc.DetectProject(query); err == nil && detected != nil && detected.ID != "" {
+		if detected.Name == "" {
+			detected.Name = query
+		}
+		return &CommandResult{
+			Output:       fmt.Sprintf("switching to project '%s'...", detected.Name),
+			SetProjectID: detected.ID,
+		}
+	}
+
+	// Fall back to name/ID matching.
 	projects, err := h.rpc.ListProjects()
 	if err != nil {
 		return &CommandResult{

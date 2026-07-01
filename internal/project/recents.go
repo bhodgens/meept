@@ -91,3 +91,48 @@ func (s *RecentsStore) CapToN(ctx context.Context, max int) (int64, error) {
 	}
 	return result.RowsAffected()
 }
+
+// SchedulePruneJob registers a daily job that prunes stale project recents
+// and caps the total entry count. When cfg.TTLDays <= 0, TTL pruning is
+// skipped. When cfg.MaxEntries <= 0, capping is skipped. No-op when sched
+// or recents is nil.
+func SchedulePruneJob(sched Scheduler, recents *RecentsStore, cfg config.ProjectRecentConfig) {
+	if sched == nil || recents == nil {
+		return
+	}
+
+	maxEntries := cfg.MaxEntries
+	if maxEntries <= 0 {
+		maxEntries = 50 // default cap
+	}
+	ttlDays := cfg.TTLDays
+	if ttlDays <= 0 {
+		ttlDays = 30 // default TTL
+	}
+	ttl := time.Duration(ttlDays) * 24 * time.Hour
+
+	sched.RunAtInterval("project.recents_prune", 24*time.Hour, func() {
+		pruneCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		var deleted int64
+		if cfg.TTLDays > 0 {
+			d, err := recents.PruneOlderThan(pruneCtx, ttl)
+			if err != nil {
+				slog.Default().Warn("recents prune: TTL prune failed", "error", err)
+			} else {
+				deleted = d
+			}
+		}
+
+		c, err := recents.CapToN(pruneCtx, maxEntries)
+		if err != nil {
+			slog.Default().Warn("recents prune: cap failed", "error", err)
+			return
+		}
+
+		slog.Default().Info("recents prune completed",
+			"ttl_truncated", deleted, "capped", c,
+			"max_entries", maxEntries, "ttl_days", ttlDays)
+	})
+}

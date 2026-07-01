@@ -2889,11 +2889,13 @@ func (c *Components) Start(ctx context.Context) error {
 			if c.ProjectManager != nil {
 				recentsStore := c.ProjectManager.RecentsStore()
 				if recentsStore != nil {
-					project.SchedulePruneJob(schedAdapter, recentsStore, cfg.ProjectsRecent)
-					c.Logger.Info("Scheduled project recents prune job",
-						"ttl_days", cfg.ProjectsRecent.TTLDays,
-						"max_entries", cfg.ProjectsRecent.MaxEntries,
-					)
+					if c.Config != nil {
+						project.SchedulePruneJob(schedAdapter, recentsStore, c.Config.ProjectsRecent)
+						c.Logger.Info("Scheduled project recents prune job",
+							"ttl_days", c.Config.ProjectsRecent.TTLDays,
+							"max_entries", c.Config.ProjectsRecent.MaxEntries,
+						)
+					}
 				}
 			}
 		}
