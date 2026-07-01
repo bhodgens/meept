@@ -507,6 +507,7 @@ type AgentLoop struct {
 
 	// Subscription for project.set events (working directory updates)
 	projectSub       *bus.Subscriber
+	projectSubCtx    context.Context
 	projectSubCancel context.CancelFunc
 
 	// Event system
@@ -1864,6 +1865,10 @@ func outcomeFromErr(err error) string {
 func (l *AgentLoop) Stop() {
 	if l == nil {
 		return
+	}
+	// Cancel project.set subscription goroutine so it exits unblockingly.
+	if l.projectSubCancel != nil {
+		l.projectSubCancel()
 	}
 	l.wg.Wait()
 }
@@ -4361,6 +4366,44 @@ func (l *AgentLoop) SetWorkingDir(path string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.workingDir = path
+}
+
+// StartProjectSub creates a subscription to project.set events and starts a
+// background goroutine that calls SetWorkingDir when the AgentLoop receives
+// one. Safe to call once after construction.
+func (l *AgentLoop) StartProjectSub(ctx context.Context) {
+	if l.bus == nil {
+		return
+	}
+	if l.projectSub != nil {
+		return // already started
+	}
+
+	l.projectSub = l.bus.Subscribe("agent."+l.agentID, "project.set")
+
+	l.projectSubCtx, l.projectSubCancel = context.WithCancel(ctx)
+
+	go func() {
+		defer l.bus.Unsubscribe(l.projectSub)
+		for {
+			select {
+			case <-l.projectSubCtx.Done():
+				return
+			case msg, ok := <-l.projectSub.Channel:
+				if !ok {
+					return
+				}
+				var data map[string]string
+				if err := json.Unmarshal(msg.Payload, &data); err != nil {
+					l.logger.Debug("project.set: malformed payload", "error", err)
+					continue
+				}
+				if path := data["path"]; path != "" {
+					l.SetWorkingDir(path)
+				}
+			}
+		}
+	}()
 }
 
 // GetWorkingDir returns the current working directory.
