@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/session"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // ArtifactInvalidator is called when a session's project binding changes.
@@ -35,16 +38,23 @@ type ProjectHandler struct {
 	pm           *project.ProjectManager
 	sessionStore session.Store
 	artifactInv  ArtifactInvalidator
+	msgBus       *bus.MessageBus
+	logger       *slog.Logger
 }
 
 // NewProjectHandler creates a new project handler.
 func NewProjectHandler(pm *project.ProjectManager, store session.Store) *ProjectHandler {
-	return &ProjectHandler{pm: pm, sessionStore: store}
+	return &ProjectHandler{pm: pm, sessionStore: store, logger: slog.Default()}
 }
 
 // SetArtifactInvalidator sets the artifact invalidator called when a session's project changes.
 func (h *ProjectHandler) SetArtifactInvalidator(inv ArtifactInvalidator) {
 	h.artifactInv = inv
+}
+
+// SetMessageBus wires the message bus for project lifecycle events.
+func (h *ProjectHandler) SetMessageBus(b *bus.MessageBus) {
+	h.msgBus = b
 }
 
 // pm returns the ProjectManager or an error if not available.
@@ -181,18 +191,28 @@ func (h *ProjectHandler) handleSet(ctx context.Context, params json.RawMessage) 
 	var req struct {
 		SessionID string `json:"session_id"`
 		ProjectID string `json:"project_id"`
+		Path      string `json:"path"`
 	}
 	if err := json.Unmarshal(params, &req); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
-	if req.SessionID == "" || req.ProjectID == "" {
-		return nil, fmt.Errorf("session_id and project_id are required")
-	}
 
-	// Verify project exists
-	p, err := pm.Get(ctx, req.ProjectID)
-	if err != nil {
-		return nil, fmt.Errorf("get project: %w", err)
+	var p *project.Project
+
+	if req.Path != "" {
+		// Path-only invocation: detect and upsert project from path.
+		p, err = pm.DetectFromPath(ctx, req.Path)
+		if err != nil {
+			return nil, fmt.Errorf("detect project: %w", err)
+		}
+	} else if req.SessionID == "" || req.ProjectID == "" {
+		return nil, fmt.Errorf("session_id and project_id, or path, are required")
+	} else {
+		// Verify project exists
+		p, err = pm.Get(ctx, req.ProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("get project: %w", err)
+		}
 	}
 
 	// Bind to session
@@ -215,10 +235,28 @@ func (h *ProjectHandler) handleSet(ctx context.Context, params json.RawMessage) 
 		h.artifactInv.InvalidateCache(oldProjectPath)
 	}
 
+	// Touch recents so the /project typeahead surface remembers this path.
+	if err := pm.TouchRecent(ctx, p.LocalPath); err != nil {
+		h.logger.Warn("project.set: TouchRecent failed", "error", err, "path", p.LocalPath)
+	}
+
+	// Publish a lifecycle event so AgentLoop subscribers (workingDir sync)
+	// can react to project changes.
+	if h.msgBus != nil {
+		busMsg, err := models.NewBusMessage("project.set", "rpc.project.set", map[string]string{
+			"session_id": req.SessionID,
+			"path":       p.LocalPath,
+		})
+		if err == nil {
+			h.msgBus.Publish("project.set", busMsg)
+		}
+	}
+
 	return map[string]any{
 		RPCKeyStatus: "bound",
 		"session_id": req.SessionID,
 		"project_id": req.ProjectID,
+		"path":       p.LocalPath,
 	}, nil
 }
 
@@ -308,16 +346,20 @@ func (h *ProjectHandler) handleReadDir(ctx context.Context, params json.RawMessa
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 
-	// Get top 5 recents
-	// recentsStore is wired in Task 6 (not yet on ProjectManager).
-	// Placeholder: return empty recents until wiring lands.
+	// Get top 5 recents and filter by prefix.
 	var filteredRecents []string
-	_ = pm
-	// TODO(Task 6): h.pm.recentsStore.ListRecents(ctx, 5) and filter by Req.Prefix
+	recents, err := pm.ListRecents(ctx, 5)
+	if err == nil {
+		for _, r := range recents {
+			if req.Prefix == "" || strings.Contains(r, req.Prefix) {
+				filteredRecents = append(filteredRecents, r)
+			}
+		}
+	}
 
-	// Filesystem fallback when no prefix or no recent matches
+	// Filesystem fallback when recents have no matches and prefix is non-empty.
 	var matches, gitRoots []string
-	if req.Prefix != "" {
+	if len(filteredRecents) == 0 && req.Prefix != "" {
 		expanded := expandTilde(req.Prefix)
 		entries, err := os.ReadDir(expanded)
 		if err == nil {

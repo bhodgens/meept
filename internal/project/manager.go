@@ -16,20 +16,22 @@ import (
 
 // ProjectManager manages project registration, detection, and git operations.
 type ProjectManager struct {
-	store  *Store
-	cfg    config.ProjectsConfig
-	logger *slog.Logger
+	store        *Store
+	recentsStore *RecentsStore
+	cfg          config.ProjectsConfig
+	logger       *slog.Logger
 }
 
 // NewProjectManager creates a new ProjectManager.
-func NewProjectManager(store *Store, cfg config.ProjectsConfig, logger *slog.Logger) *ProjectManager {
+func NewProjectManager(store *Store, recents *RecentsStore, cfg config.ProjectsConfig, logger *slog.Logger) *ProjectManager {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &ProjectManager{
-		store:  store,
-		cfg:    cfg,
-		logger: logger,
+		store:        store,
+		recentsStore: recents,
+		cfg:          cfg,
+		logger:       logger,
 	}
 }
 
@@ -270,6 +272,22 @@ func (pm *ProjectManager) gitOutput(ctx context.Context, dir string, args ...str
 	}
 	out, err := cmd.Output()
 	return string(out), err
+}
+
+// TouchRecent updates the recents table for a project path.
+func (pm *ProjectManager) TouchRecent(ctx context.Context, path string) error {
+	if pm.recentsStore == nil {
+		return nil // recents not wired, silently ignore
+	}
+	return pm.recentsStore.TouchRecent(ctx, path)
+}
+
+// ListRecents returns the top N recent project paths.
+func (pm *ProjectManager) ListRecents(ctx context.Context, limit int) ([]string, error) {
+	if pm.recentsStore == nil {
+		return nil, nil
+	}
+	return pm.recentsStore.ListRecents(ctx, limit)
 }
 
 // Branch operations are in manager_branches.go
