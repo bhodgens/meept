@@ -78,6 +78,7 @@ type Config struct {
 	Employees         EmployeesConfig         `json:"employees"           toml:"employees"`
 	Plans             PlansConfig             `json:"plans"               toml:"plans"`
 	Projects          ProjectsConfig          `json:"projects"            toml:"projects"`
+	ProjectsRecent    ProjectRecentConfig     `json:"projects_recent"     toml:"projects_recent"`
 	STT               STTConfig               `json:"stt"                 toml:"stt"`
 	TTS               TTSConfig               `json:"tts"                 toml:"tts"`
 	OAuth             OAuthConfig             `json:"oauth"               toml:"oauth"`
@@ -233,6 +234,18 @@ type ProjectsConfig struct {
 	FenceEnabled               bool     `json:"fence_enabled"                  toml:"fence_enabled"`
 	AllowReadSystemPaths       []string `json:"allow_read_system_paths"      toml:"allow_read_system_paths"`
 	AutoSyncOnAttach           bool     `json:"auto_sync_on_attach"            toml:"auto_sync_on_attach"`
+}
+
+// ProjectRecentConfig controls the retention policy for recent project paths.
+// Recents are stored in the project_recents table and pruned periodically
+// via a scheduled daemon job (SchedulePruneJob).
+type ProjectRecentConfig struct {
+	// MaxEntries caps the number of recent paths retained (default 50).
+	// Older entries beyond this cap are removed first.
+	MaxEntries int `json:"max_entries" toml:"max_entries"`
+	// TTLDays removes entries whose last_used_at predates now-TTLDays
+	// (default 30). Set to 0 to disable TTL pruning.
+	TTLDays int `json:"ttl_days" toml:"ttl_days"`
 }
 
 // CalendarConfig holds Google Calendar integration settings.
