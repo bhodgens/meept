@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/session"
@@ -13,6 +16,18 @@ import (
 // Implementations should invalidate cached artifacts for the old project path.
 type ArtifactInvalidator interface {
 	InvalidateCache(dir string)
+}
+
+// ReadDirRequest is the request for project.readdir RPC.
+type ReadDirRequest struct {
+	Prefix string `json:"prefix"`
+}
+
+// ReadDirResponse is the response for project.readdir RPC.
+type ReadDirResponse struct {
+	Recents  []string `json:"recents"`
+	Matches  []string `json:"matches"`
+	GitRoots []string `json:"git_roots"`
 }
 
 // ProjectHandler provides native RPC methods for project management.
@@ -50,6 +65,7 @@ func (h *ProjectHandler) RegisterProjectMethods(server *Server) {
 	server.RegisterHandler("project.sync", h.handleSync)
 	server.RegisterHandler("project.status", h.handleStatus)
 	server.RegisterHandler("project.detect", h.handleDetect)
+	server.RegisterHandler("project.readdir", h.handleReadDir)
 }
 
 // handleList handles project.list RPC calls.
@@ -278,4 +294,74 @@ func (h *ProjectHandler) handleDetect(ctx context.Context, params json.RawMessag
 		return nil, fmt.Errorf("detect project: %w", err)
 	}
 	return p, nil
+}
+
+// handleReadDir handles project.readdir RPC calls.
+func (h *ProjectHandler) handleReadDir(ctx context.Context, params json.RawMessage) (any, error) {
+	pm, err := h.pmOrErr()
+	if err != nil {
+		return nil, err
+	}
+
+	var req ReadDirRequest
+	if err := json.Unmarshal(params, &req); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+
+	// Get top 5 recents
+	// recentsStore is wired in Task 6 (not yet on ProjectManager).
+	// Placeholder: return empty recents until wiring lands.
+	var filteredRecents []string
+	_ = pm
+	// TODO(Task 6): h.pm.recentsStore.ListRecents(ctx, 5) and filter by Req.Prefix
+
+	// Filesystem fallback when no prefix or no recent matches
+	var matches, gitRoots []string
+	if req.Prefix != "" {
+		expanded := expandTilde(req.Prefix)
+		entries, err := os.ReadDir(expanded)
+		if err == nil {
+			for i, entry := range entries {
+				if i >= 50 {
+					break
+				}
+				if !entry.IsDir() {
+					continue
+				}
+				path := filepath.Join(expanded, entry.Name())
+				matches = append(matches, path)
+				gitRoot, _ := findGitRoot(path)
+				gitRoots = append(gitRoots, gitRoot)
+			}
+		}
+	}
+
+	return &ReadDirResponse{
+		Recents:  filteredRecents,
+		Matches:  matches,
+		GitRoots: gitRoots,
+	}, nil
+}
+
+// expandTilde expands ~ to user home directory.
+func expandTilde(path string) string {
+	if strings.HasPrefix(path, "~") {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, strings.TrimPrefix(path[1:], "/"))
+	}
+	return path
+}
+
+// findGitRoot walks up from path looking for .git.
+func findGitRoot(path string) (string, error) {
+	for {
+		if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
+			return path, nil
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return "", fmt.Errorf("no git root found")
+		}
+		path = parent
+	}
 }
