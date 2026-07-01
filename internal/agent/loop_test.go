@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -1178,4 +1179,48 @@ func TestAgentLoop_TerminatePathSkipsLLMFollowUp(t *testing.T) {
 	// 1) initial call that produced the tool call
 	// Terminate skips the synthesis follow-up.
 	assert.Equal(t, 1, chatter.callCount)
+}
+
+func TestAgentLoop_SetWorkingDir(t *testing.T) {
+	loop := &AgentLoop{workingDir: "/old/path"}
+
+	// Verify initial value
+	if got := loop.GetWorkingDir(); got != "/old/path" {
+		t.Fatalf("expected /old/path, got %s", got)
+	}
+
+	// Set a new path
+	loop.SetWorkingDir("/new/path")
+
+	if got := loop.GetWorkingDir(); got != "/new/path" {
+		t.Fatalf("expected /new/path, got %s", got)
+	}
+
+	// Clear the working dir
+	loop.SetWorkingDir("")
+	if got := loop.GetWorkingDir(); got != "" {
+		t.Fatalf("expected empty string, got %s", got)
+	}
+}
+
+func TestAgentLoop_SetWorkingDir_Concurrent(t *testing.T) {
+	l := &AgentLoop{}
+
+	done := make(chan struct{})
+	// Writer goroutine
+	go func() {
+		for i := 0; i < 100; i++ {
+			l.SetWorkingDir(fmt.Sprintf("/path/%d", i))
+		}
+		close(done)
+	}()
+
+	// Reader goroutine
+	go func() {
+		for i := 0; i < 100; i++ {
+			_ = l.GetWorkingDir()
+		}
+	}()
+
+	<-done
 }

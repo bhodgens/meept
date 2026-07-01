@@ -505,6 +505,10 @@ type AgentLoop struct {
 	// TT-SR stream rule enforcement (shared with agent registry)
 	ttsrManager *TTSRManager
 
+	// Subscription for project.set events (working directory updates)
+	projectSub       *bus.Subscriber
+	projectSubCancel context.CancelFunc
+
 	// Event system
 	eventEmitter *EventEmitter
 	hookRegistry *HookRegistry
@@ -4349,6 +4353,22 @@ func (l *AgentLoop) SetMCPServerLister(lister func() []MCPServerInfo) {
 	if lister != nil {
 		l.mcpServerLister = lister
 	}
+}
+
+// SetWorkingDir updates the working directory for artifact scanning.
+// Safe to call concurrently.
+func (l *AgentLoop) SetWorkingDir(path string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.workingDir = path
+}
+
+// GetWorkingDir returns the current working directory.
+// Safe to call concurrently.
+func (l *AgentLoop) GetWorkingDir() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.workingDir
 }
 
 // HookRegistry returns the agent loop's hook registry.
