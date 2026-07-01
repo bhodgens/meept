@@ -418,6 +418,12 @@
     "default_branch": "main",                 // Default branch for new checkouts
   },
 
+  // Recents tracking for /project typeahead (project paths recently used).
+  "projects_recent": {
+    "max_entries": 50,                          // Max recent paths to retain
+    "ttl_days": 30,                             // Prune entries older than this
+  },
+
   // Plan system configuration
   "plans": {
     // Plan creation mode: "threshold" (default), "always", "off"

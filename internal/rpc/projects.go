@@ -226,7 +226,7 @@ func (h *ProjectHandler) handleSet(ctx context.Context, params json.RawMessage) 
 		oldProjectPath = existing.ProjectPath
 	}
 
-	if err := h.sessionStore.SetProject(req.SessionID, req.ProjectID, p.LocalPath); err != nil {
+	if err := h.sessionStore.SetProject(req.SessionID, p.ID, p.LocalPath); err != nil {
 		return nil, fmt.Errorf("set project: %w", err)
 	}
 
@@ -255,7 +255,7 @@ func (h *ProjectHandler) handleSet(ctx context.Context, params json.RawMessage) 
 	return map[string]any{
 		RPCKeyStatus: "bound",
 		"session_id": req.SessionID,
-		"project_id": req.ProjectID,
+		"project_id": p.ID,
 		"path":       p.LocalPath,
 	}, nil
 }

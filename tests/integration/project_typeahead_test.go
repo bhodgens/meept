@@ -161,6 +161,10 @@ func TestProjectTypeaheadFlow(t *testing.T) {
 	if status, ok := resultMap["status"].(string); !ok || status != "bound" {
 		t.Errorf("expected status='bound', got %v", resultMap["status"])
 	}
+	// project_id must be non-empty (path-based detection auto-registers).
+	if pid, ok := resultMap["project_id"].(string); !ok || pid == "" {
+		t.Errorf("expected non-empty project_id, got %v", resultMap["project_id"])
+	}
 }
 
 // TestProjectTypeaheadEmptyPrefix verifies that empty prefix returns all recents.

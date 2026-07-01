@@ -13,6 +13,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1223,4 +1224,37 @@ func TestAgentLoop_SetWorkingDir_Concurrent(t *testing.T) {
 	}()
 
 	<-done
+}
+
+func TestAgentLoop_StartProjectSub_UpdatesWorkingDir(t *testing.T) {
+	testBus := bus.New(nil, slogDiscardLogger())
+	defer testBus.Close()
+
+	loop := NewAgentLoop(
+		WithMessageBus(testBus),
+		WithAgentID("test-agent"),
+	)
+	loop.StartProjectSub(context.Background())
+	defer loop.Stop()
+
+	// Publish a project.set event on the bus.
+	busMsg, err := models.NewBusMessage("project.set", "test", map[string]string{
+		"path": "/new/project/path",
+	})
+	require.NoError(t, err)
+
+	testBus.Publish("project.set", busMsg)
+
+	// Wait for the subscription goroutine to update workingDir.
+	deadline := time.After(2 * time.Second)
+	for {
+		if loop.GetWorkingDir() == "/new/project/path" {
+			return // success
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("StartProjectSub did not update workingDir; got %q", loop.GetWorkingDir())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
 }

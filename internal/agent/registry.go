@@ -272,6 +272,9 @@ func (r *AgentRegistry) GetForTask(agentID, taskID string) (*AgentLoop, error) {
 	}
 
 	loop := r.createLoop(spec)
+	// Wire project.set bus subscription so AgentLoop.workingDir stays in sync
+	// with /project set commands. Safe to call — no-op when bus is nil.
+	loop.StartProjectSub(context.Background())
 	taskLoops[taskID] = loop
 	r.logger.Info("Created task-scoped agent loop", "agent_id", agentID, "task_id", taskID, "name", spec.Name)
 	return loop, nil
