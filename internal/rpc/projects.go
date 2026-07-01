@@ -407,3 +407,18 @@ func findGitRoot(path string) (string, error) {
 		path = parent
 	}
 }
+
+// HandleReadDirForTest is an exported wrapper for handleReadDir used in integration tests.
+func (h *ProjectHandler) HandleReadDirForTest(ctx context.Context, params json.RawMessage) (any, error) {
+	return h.handleReadDir(ctx, params)
+}
+
+// HandleSetForTest is an exported wrapper for handleSet used in integration tests.
+func (h *ProjectHandler) HandleSetForTest(ctx context.Context, params json.RawMessage) (any, error) {
+	return h.handleSet(ctx, params)
+}
+
+// ProjectManagerForTest returns the ProjectManager for use in integration tests.
+func (h *ProjectHandler) ProjectManagerForTest() *project.ProjectManager {
+	return h.pm
+}

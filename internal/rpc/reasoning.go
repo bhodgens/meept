@@ -572,6 +572,7 @@ func saveConfigAtomic(path string, cfg *config.Config) error {
 
 // saveModelsConfigAtomic writes a *config.ModelsConfig to path atomically.
 //nolint:unused -- reserved for future atomic model config updates
+//lint:ignore U1000 Reserved for future atomic config writes.
 func saveModelsConfigAtomic(path string, cfg *config.ModelsConfig) error {
 	if path == "" {
 		return fmt.Errorf("empty models config path")
