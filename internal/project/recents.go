@@ -30,11 +30,12 @@ func NewRecentsStore(db *sql.DB) *RecentsStore {
 
 // TouchRecent updates or inserts a project path in recents.
 func (s *RecentsStore) TouchRecent(ctx context.Context, path string) error {
+	ts := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO project_recents (project_path, last_used_at)
-		VALUES (?, datetime('now'))
-		ON CONFLICT(project_path) DO UPDATE SET last_used_at = datetime('now')
-	`, path)
+		VALUES (?, ?)
+		ON CONFLICT(project_path) DO UPDATE SET last_used_at = ?
+	`, path, ts, ts)
 	return err
 }
 
@@ -66,8 +67,8 @@ func (s *RecentsStore) PruneOlderThan(ctx context.Context, ttl time.Duration) (i
 	cutoff := time.Now().Add(-ttl)
 	result, err := s.db.ExecContext(ctx, `
 		DELETE FROM project_recents
-		WHERE last_used_at < datetime(?)
-	`, cutoff.Format("2006-01-02 15:04:05"))
+		WHERE last_used_at < ?
+	`, cutoff.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return 0, err
 	}
