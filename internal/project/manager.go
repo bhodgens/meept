@@ -290,4 +290,10 @@ func (pm *ProjectManager) ListRecents(ctx context.Context, limit int) ([]string,
 	return pm.recentsStore.ListRecents(ctx, limit)
 }
 
+// RecentsStore returns the internal recents store for scheduled maintenance.
+// Returns nil if recents was not wired during construction.
+func (pm *ProjectManager) RecentsStore() *RecentsStore {
+	return pm.recentsStore
+}
+
 // Branch operations are in manager_branches.go

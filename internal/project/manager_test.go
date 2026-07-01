@@ -27,7 +27,7 @@ func newTestManager(t *testing.T) (*ProjectManager, *Store) {
 	}
 	os.MkdirAll(cfg.BaseDir, 0o755)
 
-	pm := NewProjectManager(store, cfg, nil)
+	pm := NewProjectManager(store, nil, cfg, nil)
 	return pm, store
 }
 

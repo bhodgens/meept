@@ -3,8 +3,20 @@ package project
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"time"
+
+	"github.com/caimlas/meept/internal/config"
 )
+
+// Scheduler is the minimal scheduler surface the project package needs.
+// The daemon adapts *scheduler.Scheduler to this interface using the same
+// simpleIntervalJob pattern as employeeSchedulerAdapter.
+type Scheduler interface {
+	// RunAtInterval registers fn to fire every interval. name is used
+	// for logging and deduplication (same name replaces prior registration).
+	RunAtInterval(name string, interval time.Duration, fn func())
+}
 
 // RecentsStore provides recents tracking for projects.
 type RecentsStore struct {

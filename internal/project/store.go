@@ -115,6 +115,13 @@ func (s *Store) Close() error {
 	return nil
 }
 
+// Pool returns the underlying SQLite connection pool.
+// Callers should use pool.Get(ctx) to obtain a *sql.DB,
+// pass it to the desired operation, then pool.Put(db) to return it.
+func (s *Store) Pool() *sqlite.Pool {
+	return s.pool
+}
+
 // ---------- Project CRUD ----------
 
 // CreateProject inserts a new project record.

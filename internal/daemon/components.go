@@ -1261,7 +1261,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if projErr != nil {
 			logger.Warn("Failed to create project store", "error", projErr)
 		} else {
-			pm := project.NewProjectManager(projStore, cfg.Projects, logger.With("component", "project-manager"))
+			// Create a direct connection for recents queries
+			var recents *project.RecentsStore
+			{
+				recentsDB, rerr := sql.Open("sqlite", projDBPath+"?_fk=1&cache=shared")
+				if rerr == nil {
+					recentsDB.SetMaxOpenConns(1)
+					recents = project.NewRecentsStore(recentsDB)
+				}
+			}
+
+			pm := project.NewProjectManager(projStore, recents, cfg.Projects, logger.With("component", "project-manager"))
 			c.ProjectManager = pm
 			logger.Info("Project manager initialized",
 				"base_dir", cfg.Projects.BaseDir,
@@ -2873,6 +2883,18 @@ func (c *Components) Start(ctx context.Context) error {
 			}
 			if err := c.EmployeeManager.ScheduleFindingsRetention(ctx, schedAdapter, retentionDays); err != nil {
 				c.Logger.Warn("Failed to schedule findings retention", "error", err)
+			}
+
+			// Schedule daily recents pruning (TTL + cap).
+			if c.ProjectManager != nil {
+				recentsStore := c.ProjectManager.RecentsStore()
+				if recentsStore != nil {
+					project.SchedulePruneJob(schedAdapter, recentsStore, cfg.ProjectsRecent)
+					c.Logger.Info("Scheduled project recents prune job",
+						"ttl_days", cfg.ProjectsRecent.TTLDays,
+						"max_entries", cfg.ProjectsRecent.MaxEntries,
+					)
+				}
 			}
 		}
 

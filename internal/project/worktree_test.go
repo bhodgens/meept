@@ -29,7 +29,7 @@ func newWorktreeTestManager(t *testing.T) (*ProjectManager, string) {
 		MaxWorktreesPerProject:     10,
 	}
 
-	pm := NewProjectManager(store, cfg, nil)
+	pm := NewProjectManager(store, nil, cfg, nil)
 
 	// Create a git repo for testing
 	repoDir := filepath.Join(dir, "repo")
@@ -209,7 +209,7 @@ func TestShouldIsolatePlanAlways(t *testing.T) {
 		BaseDir:         filepath.Join(dir, "projects"),
 		WorktreePerPlan: "always",
 	}
-	pm := NewProjectManager(store, cfg, nil)
+	pm := NewProjectManager(store, nil, cfg, nil)
 
 	if !pm.ShouldIsolatePlan(0, "edit") {
 		t.Error("ShouldIsolatePlan(0) with 'always' = false, want true")
@@ -226,7 +226,7 @@ func TestShouldIsolatePlanNever(t *testing.T) {
 		BaseDir:         filepath.Join(dir, "projects"),
 		WorktreePerPlan: "never",
 	}
-	pm := NewProjectManager(store, cfg, nil)
+	pm := NewProjectManager(store, nil, cfg, nil)
 
 	if pm.ShouldIsolatePlan(100, "edit") {
 		t.Error("ShouldIsolatePlan(100) with 'never' = true, want false")
@@ -260,7 +260,7 @@ func TestCreateWorktreeNonGitProject(t *testing.T) {
 	defer store.Close()
 
 	cfg := config.ProjectsConfig{BaseDir: filepath.Join(dir, "projects")}
-	pm := NewProjectManager(store, cfg, nil)
+	pm := NewProjectManager(store, nil, cfg, nil)
 
 	// Register a local (non-git) project
 	pm.RegisterLocal(ctx(), "local-1", "local-proj", "/tmp/local")
