@@ -297,6 +297,9 @@ type Components struct {
 	// Push notification service (bot-to-user push over bus + channels)
 	PushService *services.PushService
 
+	// Bot context for push notifications (bot-to-user delivery)
+	BotContext *services.BotContextImpl
+
 	// Agent typed event emitter (for metrics and visualization wiring)
 	AgentEventEmitter *agent.EventEmitter
 
@@ -956,6 +959,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 	c.PushService = services.NewPushServiceWithChannels(msgBus, pushRegistry,
 		logger.With("component", "push-service"))
+
+	// Wire BotContext for bot-to-user push notifications (Task 8, dormant wiring closure)
+	// BotContextImpl implements bot.BotContext interface, exposing PushNotification
+	c.BotContext = services.NewBotContext(c.PushService,
+		logger.With("component", "bot-context"))
 
 	// Start progress synthesizer for tiered agent activity summaries.
 	// Subscribes to all agent events via wildcard and republishes condensed
