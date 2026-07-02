@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,137 @@ import (
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
+
+// DispatchSubmitter is the interface for cross-daemon task dispatch.
+// Defined locally to avoid an import cycle (rpc -> http would be problematic).
+// The daemon writes an adapter that satisfies both the rpc and http interfaces
+// from the same concrete type.
+type DispatchSubmitter interface {
+	// DispatchSubmit dispatches a job to a remote node.
+	DispatchSubmit(ctx context.Context, req DispatchJobRequest) (DispatchJobAck, error)
+	// DispatchStatus queries the state of a previously submitted job.
+	DispatchStatus(ctx context.Context, jobID string) (DispatchJobResponse, error)
+	// DispatchResults fetches completed results for a finished job.
+	DispatchResults(ctx context.Context, jobID string) ([]DispatchResultEntry, error)
+}
+
+// DispatchJobRequest mirrors rpc.DispatchJobRequest for HTTP API use.
+type DispatchJobRequest struct {
+	TargetNode        string                 `json:"target_node"`
+	AgentID           string                 `json:"agent_id"`
+	TaskDescription   string                 `json:"task_description"`
+	RequiredResources []string               `json:"required_resources,omitempty"`
+	Workspace         map[string]interface{} `json:"workspace,omitempty"`
+	Priority          int                    `json:"priority,omitempty"`
+}
+
+// DispatchJobAck mirrors rpc.DispatchJobAck for HTTP API use.
+type DispatchJobAck struct {
+	JobID    string `json:"job_id"`
+	Accepted bool   `json:"accepted"`
+	Message  string `json:"message,omitempty"`
+}
+
+// DispatchJobResponse mirrors rpc.JobStatus for HTTP API use.
+type DispatchJobResponse struct {
+	JobID     string `json:"job_id"`
+	State     string `json:"state"`
+	StartedAt int64  `json:"started_at,omitempty"`
+	UpdatedAt int64  `json:"updated_at,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// DispatchResultEntry mirrors rpc.DispatchResult for HTTP API use.
+type DispatchResultEntry struct {
+	JobID       string                 `json:"job_id"`
+	OutputRef   string                 `json:"output_ref,omitempty"`
+	Workspace   map[string]interface{} `json:"workspace,omitempty"`
+	Error       string                 `json:"error,omitempty"`
+	CompletedAt int64                  `json:"completed_at,omitempty"`
+}
+
+// ===== Dispatch Endpoints =====
+
+// handleDispatchSubmit handles POST /api/v1/dispatch.
+func (s *Server) handleDispatchSubmit(w http.ResponseWriter, r *http.Request) {
+	if s.dispatchSubmitter == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "dispatch feature not enabled")
+		return
+	}
+
+	var req DispatchJobRequest
+	if !s.readJSON(w, r, &req) {
+		return
+	}
+	if req.TargetNode == "" {
+		s.writeError(w, http.StatusBadRequest, "target_node is required")
+		return
+	}
+	if req.AgentID == "" {
+		s.writeError(w, http.StatusBadRequest, "agent_id is required")
+		return
+	}
+	if req.TaskDescription == "" {
+		s.writeError(w, http.StatusBadRequest, "task_description is required")
+		return
+	}
+
+	ack, err := s.dispatchSubmitter.DispatchSubmit(r.Context(), req)
+	if err != nil {
+		s.logger.Error("dispatch submit failed",
+			"target_node", req.TargetNode,
+			"agent_id", req.AgentID,
+			"error", err)
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, ack)
+}
+
+// handleDispatchStatus handles GET /api/v1/dispatch/{id}/status.
+func (s *Server) handleDispatchStatus(w http.ResponseWriter, r *http.Request) {
+	if s.dispatchSubmitter == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "dispatch feature not enabled")
+		return
+	}
+
+	jobID := r.PathValue("id")
+	if jobID == "" {
+		s.writeError(w, http.StatusBadRequest, "job id is required")
+		return
+	}
+
+	status, err := s.dispatchSubmitter.DispatchStatus(r.Context(), jobID)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, status)
+}
+
+// handleDispatchResults handles GET /api/v1/dispatch/{id}/results.
+func (s *Server) handleDispatchResults(w http.ResponseWriter, r *http.Request) {
+	if s.dispatchSubmitter == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "dispatch feature not enabled")
+		return
+	}
+
+	jobID := r.PathValue("id")
+	if jobID == "" {
+		s.writeError(w, http.StatusBadRequest, "job id is required")
+		return
+	}
+
+	results, err := s.dispatchSubmitter.DispatchResults(r.Context(), jobID)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if results == nil {
+		results = []DispatchResultEntry{}
+	}
+	s.writeJSON(w, http.StatusOK, results)
+}
 
 // Response payload key constants.
 const (

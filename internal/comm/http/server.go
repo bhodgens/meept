@@ -171,6 +171,9 @@ type Server struct {
 	ptyHandler *PTYHandler
 	// Instructions handler (optional, set via WithInstructions)
 	instructionsHandler *InstructionsHandler
+	// dispatchSubmitter handles cross-daemon task dispatch (optional).
+	// When nil, dispatch endpoints return 503.
+	dispatchSubmitter DispatchSubmitter
 }
 
 // AgentInfo describes an agent for listing.
@@ -699,6 +702,25 @@ func WithInstructions(h *InstructionsHandler) ServerOption {
 		if h != nil {
 			s.instructionsHandler = h
 		}
+	}
+}
+
+// WithDispatchSubmitter enables cross-daemon dispatch endpoints under
+// /api/v1/dispatch/*. The submitter is typically wired by the daemon as
+// an adapter around the RPC DispatchSubmitter interface.
+func WithDispatchSubmitter(ds DispatchSubmitter) ServerOption {
+	return func(s *Server) {
+		if ds != nil {
+			s.dispatchSubmitter = ds
+		}
+	}
+}
+
+// SetDispatchSubmitter sets the dispatch submitter at runtime. Nil-guarded
+// per CLAUDE.md setter convention.
+func (s *Server) SetDispatchSubmitter(ds DispatchSubmitter) {
+	if ds != nil {
+		s.dispatchSubmitter = ds
 	}
 }
 
@@ -1237,6 +1259,11 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/prompts/{path}", s.handlePromptsPut)
 	mux.HandleFunc("DELETE /api/v1/prompts/{path}", s.handlePromptsDelete)
 	mux.HandleFunc("POST /api/v1/prompts/validate", s.handlePromptsValidate)
+
+	// Dispatch endpoints (cross-daemon task dispatch)
+	mux.HandleFunc("POST /api/v1/dispatch", s.handleDispatchSubmit)
+	mux.HandleFunc("GET /api/v1/dispatch/{id}/status", s.handleDispatchStatus)
+	mux.HandleFunc("GET /api/v1/dispatch/{id}/results", s.handleDispatchResults)
 }
 
 // middleware applies common middleware (CORS, logging, auth).

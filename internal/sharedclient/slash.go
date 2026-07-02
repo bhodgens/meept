@@ -81,6 +81,9 @@ var builtinCommands = map[string]struct{}{
 
 	// Prompt template browser (read-only via TUI; editing via CLI).
 	"prompts": {},
+
+	// Cluster dispatch (submit/status/results for cross-daemon tasks).
+	"dispatch": {},
 }
 
 // CommandTasks is the "tasks" command name, exported for compatibility with tui/constants.go.

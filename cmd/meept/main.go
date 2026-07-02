@@ -150,6 +150,7 @@ Analytics:
 	rootCmd.AddCommand(newMCPChatServerCmd())
 	rootCmd.AddCommand(newTokenCmd())
 	rootCmd.AddCommand(newClusterCmd())
+	rootCmd.AddCommand(newDispatchCmd())
 	rootCmd.AddCommand(newBotsCmd())
 	rootCmd.AddCommand(newAgentsCmd())
 	rootCmd.AddCommand(newInitCmd())

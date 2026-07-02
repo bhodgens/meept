@@ -384,6 +384,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		gossipHandler := cluster.NewGossipHandler(components.DualStore, clusterCfg.NodeID, logger, conflictResolver)
 		gossipHandler.SetMetrics(clusterMetrics)
 		components.GossipHandler = gossipHandler
+		components.ClusterMetrics = clusterMetrics
 		components.DualStore.SetGossipPublisher(clusterEngine)
 		clusterEngine.SetConflictResolver(conflictResolver)
 		clusterEngine.SetMetrics(clusterMetrics)
@@ -404,6 +405,19 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		if components != nil {
 			components.ClusterWireGuard = clusterWireGuard
 		}
+	}
+
+	// Wire cluster resource model components (spec 2026-07-01 §3.2, Phase 6)
+	if components != nil {
+		if err := components.wireClusterResources(context.Background()); err != nil {
+			logger.Warn("cluster resource wiring failed", "error", err)
+		}
+	}
+
+	// Register dispatch RPC methods if the dispatch handler is wired
+	if components != nil && components.DispatchHandler != nil && rpcServer != nil {
+		components.DispatchHandler.RegisterDispatchMethods(rpcServer)
+		logger.Info("dispatch RPC methods registered")
 	}
 
 	// Create config service for HTTP server

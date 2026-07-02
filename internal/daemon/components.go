@@ -37,7 +37,10 @@ import (
 	"github.com/caimlas/meept/internal/memory/memvid"
 	memsync "github.com/caimlas/meept/internal/memory/sync"
 	"github.com/caimlas/meept/internal/memory/vector"
+	"github.com/caimlas/meept/internal/placement"
 	"github.com/caimlas/meept/internal/plan"
+	"github.com/caimlas/meept/internal/resources"
+	"github.com/caimlas/meept/internal/rpc"
 	"github.com/caimlas/meept/internal/preferences"
 	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/pty"
@@ -59,6 +62,7 @@ import (
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/internal/tools/mcp"
 	"github.com/caimlas/meept/internal/worker"
+	"github.com/caimlas/meept/internal/workspace"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
@@ -258,6 +262,21 @@ type Components struct {
 	ClusterQueue     *queue.ClusterQueue
 	ClusterConfig    *cluster.Config
 	ClusterWireGuard *cluster.WireGuardManager
+
+	// Cluster resource model (spec 2026-07-01)
+	ResourceManager    *resources.Manager
+	WorkspaceManager   *workspace.Manager
+	ExecutorBridge     *cluster.ExecutorBridge
+	GRPCTransport      *cluster.GRPCTransport
+	PlacementScheduler *placement.PlacementScheduler
+	DispatchHandler    *rpc.DispatchHandler
+	ClusterMetrics     *cluster.Metrics
+
+	// dispatchSubmitterMu guards dispatchSubmitter for the team.assign
+	// node-prefix routing (spec §2.3 α). The submitter is wired after
+	// construction by wireClusterResources.
+	dispatchSubmitterMu sync.RWMutex
+	dispatchSubmitter   rpc.DispatchSubmitter
 
 	// Git backup scheduler
 	BackupScheduler *bkpkg.GitBackupScheduler
@@ -1865,7 +1884,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			registerCollaborationTools(c.ToolRegistry, collabEngine, logger)
 
 			// Register team tools with preset support
-			registerTeamTools(c.ToolRegistry, teamOrch, msgBus, logger)
+			registerTeamTools(c.ToolRegistry, teamOrch, msgBus, logger, c.getDispatchSubmitter)
 		}
 	}
 
@@ -3132,6 +3151,24 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 	}
 
+	// Start cluster resource model gRPC transport (spec 2026-07-01 §3.2)
+	if c.GRPCTransport != nil {
+		grpcPort := 0
+		if c.ClusterConfig != nil {
+			grpcPort = c.ClusterConfig.Network.WireGuardPort + 2
+		}
+		if grpcPort == 0 {
+			grpcPort = 51822 // WireGuard default + 2
+		}
+		grpcAddr := fmt.Sprintf(":%d", grpcPort)
+		if err := c.GRPCTransport.Start(ctx, grpcAddr); err != nil {
+			c.Logger.Error("Failed to start cluster gRPC transport", "addr", grpcAddr, "error", err)
+		} else {
+			c.Logger.Info("Cluster gRPC transport started", "addr", grpcAddr)
+			startedHandlers = append(startedHandlers, "clustercrm")
+		}
+	}
+
 	// Start reflection collector periodic timer (Thread E)
 	if c.ReflectionCollector != nil && c.Config.ReflectionCollector.Enabled {
 		interval := time.Duration(c.Config.ReflectionCollector.TimerIntervalMinutes) * time.Minute
@@ -3561,6 +3598,20 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	if c.ClusterWireGuard != nil {
 		if err := c.ClusterWireGuard.Stop(); err != nil {
 			c.Logger.Error("Failed to stop WireGuard manager", "error", err)
+			lastErr = err
+		}
+	}
+	// Stop cluster resource model gRPC transport
+	if c.GRPCTransport != nil {
+		if err := c.GRPCTransport.Stop(); err != nil {
+			c.Logger.Error("Failed to stop cluster gRPC transport", "error", err)
+			lastErr = err
+		}
+	}
+	// Close CAS store (resources manager)
+	if c.ResourceManager != nil && c.ResourceManager.Store() != nil {
+		if err := c.ResourceManager.Store().Close(); err != nil {
+			c.Logger.Error("Failed to close CAS store", "error", err)
 			lastErr = err
 		}
 	}
@@ -4213,13 +4264,32 @@ func registerCollaborationTools(
 	logger.Debug("Registered collaboration tools", "tools", "workspace_yield,initiate_collaboration")
 }
 
+// setDispatchSubmitter sets the dispatch submitter used by the team.assign
+// node-prefix routing. Thread-safe; called by wireClusterResources.
+func (c *Components) setDispatchSubmitter(ds rpc.DispatchSubmitter) {
+	c.dispatchSubmitterMu.Lock()
+	defer c.dispatchSubmitterMu.Unlock()
+	c.dispatchSubmitter = ds
+}
+
+// getDispatchSubmitter returns the current dispatch submitter. Thread-safe.
+func (c *Components) getDispatchSubmitter() rpc.DispatchSubmitter {
+	c.dispatchSubmitterMu.RLock()
+	defer c.dispatchSubmitterMu.RUnlock()
+	return c.dispatchSubmitter
+}
+
 // registerTeamTools registers all team tools (including preset teams) with the
 // tool registry, wiring their callbacks into the TeamOrchestrator.
+// dispatchSubmitterFn is an optional callback that returns the current
+// dispatch submitter; when non-nil and an agent ID has the "node:" prefix,
+// the task is routed via gRPC dispatch (spec §2.3 α).
 func registerTeamTools(
 	registry *tools.Registry,
 	teamOrch *agent.TeamOrchestrator,
 	msgBus *bus.MessageBus,
 	logger *slog.Logger,
+	dispatchSubmitterFn func() rpc.DispatchSubmitter,
 ) {
 	if teamOrch == nil {
 		logger.Debug("Team tools not registered: no team orchestrator")
@@ -4294,6 +4364,22 @@ func registerTeamTools(
 			return req.SessionID, nil
 		},
 		AssignTask: func(ctx context.Context, teamID string, assignment builtin.TaskAssignment) error {
+			// Cluster dispatch: detect "node:<nodeID>:<agentID>" prefix
+			// and route to the remote daemon via gRPC dispatch (spec §2.3 α).
+			if strings.HasPrefix(assignment.AgentID, "node:") {
+				nodeID, remainingAgentID, ok := rpc.SplitNodePrefixedAgentID(assignment.AgentID)
+				if ok && nodeID != "" && remainingAgentID != "" {
+					if dispatchSubmitterFn != nil {
+						ds := dispatchSubmitterFn()
+						if ds != nil {
+							_, err := rpc.DispatchTaskViaNode(ctx, ds, nodeID, remainingAgentID, assignment.Subtask)
+							return err
+						}
+					}
+					return fmt.Errorf("dispatch feature not enabled: cannot route to node %s", nodeID)
+				}
+				return fmt.Errorf("invalid node-prefixed agent ID: %s", assignment.AgentID)
+			}
 			return teamOrch.AssignSubtask(ctx, teamID, agent.SubtaskAssignment{
 				AgentID:  assignment.AgentID,
 				Subtask:  assignment.Subtask,

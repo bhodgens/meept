@@ -1,0 +1,177 @@
+// proto/cluster.proto — gRPC service definitions for the cluster resource model.
+//
+// Spec reference: docs/superpowers/specs/2026-07-01-cluster-resource-model-design.md §4.3
+//
+// This .proto file documents the canonical service definitions. The Go
+// implementation in internal/cluster/ uses a manual JSON codec (see
+// grpc_transport.go) rather than protoc-generated code, so the structs in
+// grpc_types.go mirror these messages. When a protoc toolchain is introduced,
+// this file becomes the single source of truth and the Go structs can be
+// generated from it.
+//
+// Transport security: mTLS over WireGuard (spec §6). WireGuard provides
+// confidentiality; mTLS provides node identity verification.
+
+syntax = "proto3";
+
+package meept.cluster.v1;
+
+option go_package = "github.com/caimlas/meept/internal/cluster;cluster";
+
+import "google/protobuf/timestamp.proto";
+
+// ---------- Shared types ----------
+
+// ClusterEvent mirrors pkg/models.ClusterEvent. Re-declared here for proto
+// completeness; the Go implementation reuses the models type directly.
+message ClusterEvent {
+  string event_id = 1;
+  string node_id = 2;
+  string event_type = 3;
+  google.protobuf.Timestamp timestamp = 4;
+  map<string, int64> vector_clock = 5;
+  bytes payload = 6;
+  bytes signature = 7;
+}
+
+message Ack {
+  bool accepted = 1;
+  string message = 2;
+}
+
+// ---------- ResourceService ----------
+
+message HasRequest {
+  string hash = 1;
+}
+
+message HasResponse {
+  bool has = 1;
+}
+
+message FetchRequest {
+  string hash = 1;
+  int64 offset = 2; // byte offset for resumable transfers
+}
+
+message FetchChunk {
+  bytes data = 1;
+  int64 offset = 2;
+  int64 total_size = 3;
+  string hash = 4;
+}
+
+message StatRequest {
+  string hash = 1;
+}
+
+message StatResponse {
+  int64 size = 1;
+  int64 added_at = 2;
+  string source = 3;
+  bool pinned = 4;
+  int32 refcount = 5;
+}
+
+// ---------- WorkspaceService ----------
+
+message WorkspaceRef {
+  string repo_url = 1;
+  string commit_sha = 2;
+  string diff_blob_hash = 3; // CAS ref to uncommitted-edit diff; empty if clean
+  bool dirty = 4;
+}
+
+message WorkspaceReady {
+  string worktree_path = 1;
+  bool ready = 2;
+  string error = 3;
+}
+
+message GitObjectRequest {
+  string repo_url = 1;
+  string commit_sha = 2;
+  string object_type = 3;
+}
+
+message GitObject {
+  string type = 1;
+  bytes data = 2;
+  string hash = 3;
+}
+
+// ---------- DispatchService ----------
+
+message DispatchJob {
+  string job_id = 1;
+  string origin_node = 2;
+  string target_node = 3;
+  string agent_id = 4;
+  string task_description = 5;
+  repeated string required_resources = 6;
+  WorkspaceRef workspace = 7;
+  int32 priority = 8;
+  int64 created_at = 9;
+  bytes signature = 10;
+}
+
+message DispatchJobAck {
+  string job_id = 1;
+  bool accepted = 2;
+  string message = 3;
+}
+
+message JobID {
+  string id = 1;
+}
+
+message JobStatus {
+  string job_id = 1;
+  string state = 2; // "queued" | "running" | "completed" | "failed"
+  int64 started_at = 3;
+  int64 updated_at = 4;
+  string error = 5;
+}
+
+message DispatchResult {
+  string job_id = 1;
+  string output_ref = 2;
+  WorkspaceRef workspace = 3;
+  string error = 4;
+  int64 completed_at = 5;
+}
+
+// ---------- Services ----------
+
+service EventService {
+  // Publish sends a single cluster event to the peer.
+  rpc Publish(ClusterEvent) returns (Ack);
+  // Broadcast opens a bidirectional stream for continuous event exchange.
+  rpc Broadcast(stream ClusterEvent) returns (stream Ack);
+}
+
+service ResourceService {
+  // Has checks whether the peer has a blob in its local CAS store.
+  rpc Has(HasRequest) returns (HasResponse);
+  // Fetch streams blob content from the peer, starting at the given offset
+  // for resumable transfers. Chunk size is 1-4 MiB.
+  rpc Fetch(FetchRequest) returns (stream FetchChunk);
+  // Stat returns metadata about a blob in the CAS store.
+  rpc Stat(StatRequest) returns (StatResponse);
+}
+
+service WorkspaceService {
+  // Prepare materializes a workspace (clone/fetch + checkout + patch).
+  rpc Prepare(WorkspaceRef) returns (WorkspaceReady);
+  // GitFetch streams git objects peer-to-peer (only from registry-listed peers).
+  rpc GitFetch(stream GitObjectRequest) returns (stream GitObject);
+}
+
+service DispatchService {
+  // Submit sends a dispatch job to a peer daemon.
+  rpc Submit(DispatchJob) returns (DispatchJobAck);
+  // Status queries the current state of a dispatch job.
+  rpc Status(JobID) returns (JobStatus);
+  // Results streams the completion results of a dispatch job.
+  rpc Results(JobID) returns (stream DispatchResult);
+}

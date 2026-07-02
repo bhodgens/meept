@@ -15,6 +15,44 @@ type ClusterConfig struct {
 	Queue       ClusterQueueConfig    `json:"queue" toml:"queue"`
 	Git         ClusterGitConfig      `json:"git" toml:"git"`
 	Security    ClusterSecurityConfig `json:"security" toml:"security"`
+
+	// Cluster resource model (spec 2026-07-01-cluster-resource-model-design.md).
+	// CAS store, ephemeral workspaces, and dispatch defaults. Nil-safe zero
+	// values disable resource-model features.
+	Resources  ClusterResourcesConfig  `json:"resources" toml:"resources"`
+	Workspace  ClusterWorkspaceConfig  `json:"workspace" toml:"workspace"`
+	Dispatch   ClusterDispatchConfig   `json:"dispatch" toml:"dispatch"`
+}
+
+// ClusterResourcesConfig configures the CAS transit cache. Files enter only
+// when referenced by an in-flight dispatched task; refcount-driven eviction
+// removes them once no task references them. Local-only files never enter
+// CAS. See spec §4.1, §2.4, §7, §9.
+type ClusterResourcesConfig struct {
+	CASStoreDir            string        `json:"cas_store_dir" toml:"cas_store_dir"`
+	CASCapacityBytes       int64         `json:"cas_capacity_bytes" toml:"cas_capacity_bytes"`
+	EvictionSweepInterval  time.Duration `json:"eviction_sweep_interval" toml:"eviction_sweep_interval"`
+	PinnedHashes           []string      `json:"pinned_hashes" toml:"pinned_hashes"`
+	HashAlgorithm          string        `json:"hash_algorithm" toml:"hash_algorithm"`
+}
+
+// ClusterWorkspaceConfig configures ephemeral per-job working trees.
+// See spec §4.2, §9.
+type ClusterWorkspaceConfig struct {
+	WorktreeRoot       string `json:"worktree_root" toml:"worktree_root"`
+	GitFallbackToPeer  bool   `json:"git_fallback_to_peer" toml:"git_fallback_to_peer"`
+}
+
+// ClusterDispatchConfig configures cross-daemon dispatch behavior including
+// peer fallback and scheduler capacity policies. See spec §2.5, §9.
+type ClusterDispatchConfig struct {
+	DefaultClaimTimeout        time.Duration `json:"default_claim_timeout" toml:"default_claim_timeout"`
+	ResultDeliveryTimeout      time.Duration `json:"result_delivery_timeout" toml:"result_delivery_timeout"`
+	PeerFallbackPolicy         string        `json:"peer_fallback_policy" toml:"peer_fallback_policy"`                   // always | never | if_capacity
+	SchedulerNoCapacityPolicy  string        `json:"scheduler_no_capacity_policy" toml:"scheduler_no_capacity_policy"`   // queue | run_local
+	PeerDropCooldown           time.Duration `json:"peer_drop_cooldown" toml:"peer_drop_cooldown"`
+	QuarantinePeriod           time.Duration `json:"quarantine_period" toml:"quarantine_period"`
+	QuarantineThreshold        int           `json:"quarantine_threshold" toml:"quarantine_threshold"`
 }
 
 // ClusterNetworkConfig holds WireGuard network settings.
@@ -84,6 +122,26 @@ func DefaultClusterConfig() ClusterConfig {
 		Security: ClusterSecurityConfig{
 			RequireNodeSignatures:  true,
 			Ed25519KeyRotationDays: 90,
+		},
+		Resources: ClusterResourcesConfig{
+			CASStoreDir:           "~/.meept/resources",
+			CASCapacityBytes:      10 * 1024 * 1024 * 1024, // 10 GB default (spec §7)
+			EvictionSweepInterval: 5 * time.Minute,
+			PinnedHashes:          nil,
+			HashAlgorithm:         "blake3",
+		},
+		Workspace: ClusterWorkspaceConfig{
+			WorktreeRoot:      "~/.meept/worktrees",
+			GitFallbackToPeer: true,
+		},
+		Dispatch: ClusterDispatchConfig{
+			DefaultClaimTimeout:       5 * time.Minute,
+			ResultDeliveryTimeout:     1 * time.Hour,
+			PeerFallbackPolicy:        "if_capacity",
+			SchedulerNoCapacityPolicy: "queue",
+			PeerDropCooldown:          30 * time.Second,
+			QuarantinePeriod:          1 * time.Hour,
+			QuarantineThreshold:       3,
 		},
 	}
 }

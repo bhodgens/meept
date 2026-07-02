@@ -30,6 +30,11 @@ type eventGossipHandler struct {
 	// metrics receives conflict-counter increments (Task 4.8). Nil-safe:
 	// every IncX helper nil-guards dereferences.
 	metrics *Metrics
+
+	// executorBridge handles TASK_CREATE events (spec §3.2
+	// gossip_handler.go routing). When nil, TASK_CREATE falls through to
+	// the default (no-op) case.
+	executorBridge *ExecutorBridge
 }
 
 // NewGossipHandler creates a handler that writes gossip-received events
@@ -63,6 +68,17 @@ func (h *eventGossipHandler) SetConflictResolver(r *ConflictResolver) {
 	}
 }
 
+// SetExecutorBridge attaches the ExecutorBridge for TASK_CREATE event
+// routing (spec §3.2). Nil values are ignored per CLAUDE.md nil-guard
+// convention. When unset, TASK_CREATE events fall through to the default
+// (no-op) case — preserving backward compatibility with pre-bridge
+// callers.
+func (h *eventGossipHandler) SetExecutorBridge(b *ExecutorBridge) {
+	if b != nil {
+		h.executorBridge = b
+	}
+}
+
 // OnEvent routes a cluster event based on its type.
 func (h *eventGossipHandler) OnEvent(event *models.ClusterEvent) error {
 	if event == nil {
@@ -70,6 +86,15 @@ func (h *eventGossipHandler) OnEvent(event *models.ClusterEvent) error {
 	}
 
 	switch event.EventType {
+	case models.EventTaskCreate:
+		// Spec §3.2: route TASK_CREATE to the ExecutorBridge when wired.
+		// When the bridge is not set, fall through to the default
+		// (no-op) case — this preserves backward compatibility for
+		// callers that haven't wired the dispatch lifecycle yet.
+		if h.executorBridge != nil {
+			return h.executorBridge.HandleTaskCreate(event)
+		}
+		return nil
 	case models.EventTypeSessionTurn:
 		return h.handleSessionTurn(event)
 	case models.EventTypeSessionCreated:

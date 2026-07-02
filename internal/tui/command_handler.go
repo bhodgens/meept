@@ -208,6 +208,8 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 		return h.executeImplementImprovements(cmd.Args)
 	case "prompts":
 		return h.executePrompts(cmd.Args)
+	case "dispatch":
+		return h.handleDispatchCommand(cmd.Args)
 	default:
 		return &CommandResult{
 			Output:  fmt.Sprintf("unknown command: %s", cmd.Name),
@@ -250,6 +252,12 @@ func (h *CommandHandler) executeHelp(args []string) *CommandResult {
 	sb.WriteString("                      review and apply or skip pending proposals\n")
 	sb.WriteString("  /prompts [list|show <name>|validate]\n")
 	sb.WriteString("                      browse prompt templates (planner, orchestrator, reflection)\n")
+	sb.WriteString("  /dispatch <node> <agent> <task>\n")
+	sb.WriteString("                      submit a task to a remote cluster node\n")
+	sb.WriteString("  /dispatch status <jobID>\n")
+	sb.WriteString("                      query dispatch job status\n")
+	sb.WriteString("  /dispatch results <jobID>\n")
+	sb.WriteString("                      fetch dispatch job results\n")
 
 	return &CommandResult{Output: sb.String()}
 }
