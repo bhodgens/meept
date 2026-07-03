@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../models/api_models.dart';
 import '../../providers/providers.dart';
+import '../../providers/tab_activation_provider.dart' show keyboardFocusProvider;
 
 class PlansTab extends ConsumerStatefulWidget {
   const PlansTab({super.key});
@@ -14,6 +16,7 @@ class PlansTab extends ConsumerStatefulWidget {
 
 class _PlansTabState extends ConsumerState<PlansTab> {
   int _selectedIndex = 0;
+  final _listFocusNode = FocusNode();
 
   @override
   void initState() {
@@ -22,6 +25,35 @@ class _PlansTabState extends ConsumerState<PlansTab> {
       final session = ref.read(activeSessionProvider);
       ref.read(planProvider.notifier).loadPlans(sessionID: session?.id);
     });
+  }
+
+  @override
+  void dispose() {
+    _listFocusNode.dispose();
+    super.dispose();
+  }
+
+  /// Handle keyboard navigation for the plans list.
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent && node.hasFocus) {
+      final planState = ref.read(planProvider);
+      final maxIndex = planState.plans.length - 1;
+      if (maxIndex < 0) return KeyEventResult.ignored;
+
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        setState(() {
+          _selectedIndex = (_selectedIndex + 1).clamp(0, maxIndex);
+        });
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        setState(() {
+          _selectedIndex = (_selectedIndex - 1).clamp(0, maxIndex);
+        });
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
   }
 
   @override
@@ -95,12 +127,20 @@ class _PlansTabState extends ConsumerState<PlansTab> {
           const Expanded(child: Center(child: Text('no plans')))
         else
           Expanded(
-            child: ListView.builder(
-              itemCount: planState.plans.length,
-              itemBuilder: (context, index) => _PlanTile(
-                plan: planState.plans[index],
-                selected: _selectedIndex == index,
-                onTap: () => setState(() => _selectedIndex = index),
+            child: Focus(
+              onFocusChange: (hasFocus) {
+                if (hasFocus) {
+                  ref.read(keyboardFocusProvider.notifier).setFocusedPane(0);
+                }
+              },
+              onKeyEvent: _handleKey,
+              child: ListView.builder(
+                itemCount: planState.plans.length,
+                itemBuilder: (context, index) => _PlanTile(
+                  plan: planState.plans[index],
+                  selected: _selectedIndex == index,
+                  onTap: () => setState(() => _selectedIndex = index),
+                ),
               ),
             ),
           ),

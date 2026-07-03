@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
+import '../../providers/tab_activation_provider.dart' show keyboardFocusProvider;
 import '../../models/api_models.dart';
 
 /// Tasks list widget - displays all tasks for the active session
@@ -18,6 +20,8 @@ class TasksList extends ConsumerStatefulWidget {
 
 class _TasksListState extends ConsumerState<TasksList> {
   final _textController = TextEditingController();
+  int _selectedIndex = 0;
+  final _listFocusNode = FocusNode();
 
   @override
   void initState() {
@@ -30,7 +34,31 @@ class _TasksListState extends ConsumerState<TasksList> {
   @override
   void dispose() {
     _textController.dispose();
+    _listFocusNode.dispose();
     super.dispose();
+  }
+
+  /// Handle keyboard navigation for the tasks list.
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent && node.hasFocus) {
+      final taskState = ref.read(taskProvider);
+      final maxIndex = taskState.tasks.length - 1;
+      if (maxIndex < 0) return KeyEventResult.ignored;
+
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        setState(() {
+          _selectedIndex = (_selectedIndex + 1).clamp(0, maxIndex);
+        });
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        setState(() {
+          _selectedIndex = (_selectedIndex - 1).clamp(0, maxIndex);
+        });
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
   }
 
   @override
@@ -99,12 +127,21 @@ class _TasksListState extends ConsumerState<TasksList> {
             )
           else
             Expanded(
-              child: ListView.builder(
-                itemCount: taskState.tasks.length,
-                itemBuilder: (context, index) {
-                  final task = taskState.tasks[index];
-                  return _buildTaskTile(task);
+              child: Focus(
+                onFocusChange: (hasFocus) {
+                  if (hasFocus) {
+                    ref.read(keyboardFocusProvider.notifier).setFocusedPane(0);
+                  }
                 },
+                onKeyEvent: _handleKey,
+                child: ListView.builder(
+                  itemCount: taskState.tasks.length,
+                  itemBuilder: (context, index) {
+                    final task = taskState.tasks[index];
+                    final isKeyboardSelected = _selectedIndex == index;
+                    return _buildTaskTile(task, isKeyboardSelected);
+                  },
+                ),
               ),
             ),
         ],
@@ -112,7 +149,7 @@ class _TasksListState extends ConsumerState<TasksList> {
     );
   }
 
-  Widget _buildTaskTile(Task task) {
+  Widget _buildTaskTile(Task task, bool isKeyboardSelected) {
     final statusColor = _getStatusColor(task.status);
     return InkWell(
       onTap: () {
@@ -121,10 +158,15 @@ class _TasksListState extends ConsumerState<TasksList> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
+          color: isKeyboardSelected 
+              ? CyberpunkColors.orangeDark.withValues(alpha: 0.3)
+              : null,
           border: Border(
             left: BorderSide(
-              color: statusColor,
-              width: 2,
+              color: isKeyboardSelected 
+                  ? CyberpunkColors.orangeDark 
+                  : statusColor,
+              width: isKeyboardSelected ? 3 : 2,
             ),
           ),
         ),

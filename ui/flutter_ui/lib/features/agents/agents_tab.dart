@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
+import '../../providers/tab_activation_provider.dart' show keyboardFocusProvider;
 import '../../models/api_models.dart';
 
 /// Agents tab - displays all available agents.
@@ -26,12 +28,60 @@ class AgentsTab extends ConsumerStatefulWidget {
 }
 
 class _AgentsTabState extends ConsumerState<AgentsTab> {
+  int _selectedIndex = 0;
+  final _gridFocusNode = FocusNode();
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(agentProvider.notifier).loadAgents();
     });
+  }
+
+  @override
+  void dispose() {
+    _gridFocusNode.dispose();
+    super.dispose();
+  }
+
+  /// Handle keyboard navigation for the agents grid.
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent && node.hasFocus) {
+      final agentState = ref.read(agentProvider);
+      final count = agentState.agents.length;
+      if (count == 0) return KeyEventResult.ignored;
+
+      // Calculate columns based on grid delegate (maxCrossAxisExtent: 225)
+      final screenWidth = MediaQuery.of(node.context!).size.width;
+      final cols = (screenWidth / 225).floor().clamp(1, 4);
+
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        setState(() {
+          _selectedIndex = (_selectedIndex + cols).clamp(0, count - 1);
+        });
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        setState(() {
+          _selectedIndex = (_selectedIndex - cols).clamp(0, count - 1);
+        });
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        setState(() {
+          _selectedIndex = (_selectedIndex + 1).clamp(0, count - 1);
+        });
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+        setState(() {
+          _selectedIndex = (_selectedIndex - 1).clamp(0, count - 1);
+        });
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
   }
 
   @override
@@ -95,19 +145,28 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             )
           else
             Expanded(
-              child: GridView.builder(
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 225, // 1.5x wider (was 150)
-                  crossAxisSpacing: 8,
-                  mainAxisSpacing: 8,
-                  childAspectRatio: 0.87, // 3x taller (was 2.6)
-                ),
-                itemCount: agentState.agents.length,
-                itemBuilder: (context, index) {
-                  final agent = agentState.agents[index];
-                  final isSelected = activeAgent?.id == agent.id;
-                  return _buildAgentCard(agent, isSelected);
+              child: Focus(
+                onFocusChange: (hasFocus) {
+                  if (hasFocus) {
+                    ref.read(keyboardFocusProvider.notifier).setFocusedPane(0);
+                  }
                 },
+                onKeyEvent: _handleKey,
+                child: GridView.builder(
+                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 225,
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                    childAspectRatio: 0.87,
+                  ),
+                  itemCount: agentState.agents.length,
+                  itemBuilder: (context, index) {
+                    final agent = agentState.agents[index];
+                    final isSelected = activeAgent?.id == agent.id;
+                    final isKeyboardSelected = _selectedIndex == index;
+                    return _buildAgentCard(agent, isSelected, isKeyboardSelected);
+                  },
+                ),
               ),
             ),
         ],
@@ -115,7 +174,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     );
   }
 
-  Widget _buildAgentCard(Agent agent, bool isSelected) {
+  Widget _buildAgentCard(Agent agent, bool isSelected, bool isKeyboardSelected) {
     return InkWell(
       key: ValueKey('agent-tile-${agent.id}'),
       onTap: () {
@@ -124,14 +183,18 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected
-              ? CyberpunkColors.orangePrimary.withValues(alpha: 0.1)
-              : CyberpunkColors.black,
+          color: isKeyboardSelected
+              ? CyberpunkColors.orangeDark.withValues(alpha: 0.3)
+              : (isSelected
+                  ? CyberpunkColors.orangePrimary.withValues(alpha: 0.1)
+                  : CyberpunkColors.black),
           border: Border.all(
-            color: isSelected
-                ? CyberpunkColors.orangePrimary
-                : CyberpunkColors.midGray,
-            width: 1,
+            color: isKeyboardSelected
+                ? CyberpunkColors.orangeDark
+                : (isSelected
+                    ? CyberpunkColors.orangePrimary
+                    : CyberpunkColors.midGray),
+            width: isKeyboardSelected ? 3 : 1,
           ),
           borderRadius: BorderRadius.circular(8),
         ),
