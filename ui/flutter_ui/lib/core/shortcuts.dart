@@ -73,6 +73,10 @@ class LeaderKeyController extends ChangeNotifier {
     return const bool.fromEnvironment('os.macos');
   }
 
+  /// Whether branches are enabled (from session.branches_enabled config).
+  /// Defaults to false (branches disabled, use threads instead).
+  bool branchesEnabled = false;
+
   /// Set this callback to route tab switches from the shortcut layer
   /// up to the containing widget. Index maps to [HomeTab.values].
   void Function(int index)? onTabSelected;
@@ -84,6 +88,7 @@ class LeaderKeyController extends ChangeNotifier {
   VoidCallback? onShowHelp;
 
   /// Set this callback to handle branches/projects.
+  /// Only called if [branchesEnabled] is true.
   VoidCallback? onBranches;
 
   /// Set this callback to handle find/search.
