@@ -15,6 +15,9 @@ import '../../theme/typography.dart';
 /// When the query starts with `/skill ` (trailing space), the popup switches
 /// to skill-name mode and shows matching entries from [skillNames] instead of
 /// the command list.
+///
+/// When the query starts with `/project ` (trailing space), the popup shows
+/// matching project paths from [projectPaths].
 class SlashAutocomplete extends StatefulWidget {
   final String query;
   /// Parent-owned selection index (0-based within the visible 8-item window).
@@ -30,6 +33,12 @@ class SlashAutocomplete extends StatefulWidget {
   /// typically inserts `/skill <name> ` into the input.
   final void Function(String skillName)? onSkillSelected;
 
+  /// Project paths for `/project ` autocomplete.
+  final List<String> projectPaths;
+
+  /// Called when the user accepts a project path suggestion.
+  final void Function(String path)? onProjectSelected;
+
   const SlashAutocomplete({
     super.key,
     required this.query,
@@ -38,6 +47,8 @@ class SlashAutocomplete extends StatefulWidget {
     this.onDismiss,
     this.skillNames = const [],
     this.onSkillSelected,
+    this.projectPaths = const [],
+    this.onProjectSelected,
   });
 
   @override
@@ -49,7 +60,9 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
 
   late List<SlashCommand> _matches;
   late List<String> _skillMatches;
+  late List<String> _projectMatches;
   late bool _skillMode;
+  late bool _projectMode;
 
   @override
   void initState() {
@@ -62,7 +75,8 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
   void didUpdateWidget(covariant SlashAutocomplete oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.query != widget.query ||
-        oldWidget.skillNames != widget.skillNames) {
+        oldWidget.skillNames != widget.skillNames ||
+        oldWidget.projectPaths != widget.projectPaths) {
       _updateMatches();
     }
   }
@@ -74,23 +88,49 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
     return query.substring('/skill '.length);
   }
 
+  /// Returns the argument portion after `/project ` (or `null` if the query
+  /// is not in project-path mode).
+  static String? _projectArg(String query) {
+    if (!query.startsWith('/project ')) return null;
+    return query.substring('/project '.length);
+  }
+
   void _updateMatches() {
-    final arg = _skillArg(widget.query);
-    _skillMode = arg != null;
+    final skillArg = _skillArg(widget.query);
+    final projectArg = _projectArg(widget.query);
+    
+    _skillMode = skillArg != null;
+    _projectMode = projectArg != null;
+    
     if (_skillMode) {
       // In skill-name mode, filter skill names by the argument prefix.
-      final lowerArg = arg!.toLowerCase();
+      final lowerArg = skillArg!.toLowerCase();
       _skillMatches = widget.skillNames
           .where((n) => n.toLowerCase().startsWith(lowerArg))
           .take(8)
           .toList();
       _matches = const [];
+      _projectMatches = const [];
+    } else if (_projectMode) {
+      // In project-path mode, filter project paths by the argument prefix.
+      final lowerArg = projectArg!.toLowerCase();
+      _projectMatches = widget.projectPaths
+          .where((p) => p.toLowerCase().contains(lowerArg))
+          .take(8)
+          .toList();
+      _matches = const [];
+      _skillMatches = const [];
     } else {
       _skillMatches = const [];
+      _projectMatches = const [];
       _matches = _registry.match(widget.query);
     }
 
-    final empty = _skillMode ? _skillMatches.isEmpty : _matches.isEmpty;
+    final empty = _skillMode 
+        ? _skillMatches.isEmpty 
+        : _projectMode 
+            ? _projectMatches.isEmpty 
+            : _matches.isEmpty;
     if (empty) {
       // Defer dismiss to avoid calling parent setState during child build
       // (bug F8: onDismiss during initState/didUpdateWidget triggers parent
@@ -114,6 +154,13 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
       final visible = _skillMatches.take(8).toList();
       final idx = widget.selectedIndex.clamp(0, visible.length - 1);
       widget.onSkillSelected?.call(visible[idx]);
+      return;
+    }
+    if (_projectMode) {
+      if (_projectMatches.isEmpty) return;
+      final visible = _projectMatches.take(8).toList();
+      final idx = widget.selectedIndex.clamp(0, visible.length - 1);
+      widget.onProjectSelected?.call(visible[idx]);
       return;
     }
     if (_matches.isEmpty) return;
@@ -154,6 +201,19 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
       );
     }
 
+    if (_projectMode) {
+      if (_projectMatches.isEmpty) return const SizedBox.shrink();
+      final visible = _projectMatches.take(8).toList();
+      return _buildPopup(
+        itemCount: visible.length,
+        itemBuilder: (context, index) {
+          final path = visible[index];
+          final isSelected = index == widget.selectedIndex;
+          return _buildProjectItem(path, isSelected);
+        },
+      );
+    }
+
     if (_matches.isEmpty) return const SizedBox.shrink();
     final visible = _matches.take(8).toList();
     return _buildPopup(
@@ -166,7 +226,7 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
     );
   }
 
-  /// Shared popup container for both command and skill-name modes.
+  /// Shared popup container for command, skill-name, and project-path modes.
   Widget _buildPopup({
     required int itemCount,
     required IndexedWidgetBuilder itemBuilder,
@@ -211,6 +271,42 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
                 color: CyberpunkColors.greenSuccess,
                 fontWeight: FontWeight.bold,
                 fontFamily: 'SourceCodePro',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Build a project-path autocomplete row.
+  Widget _buildProjectItem(String path, bool isSelected) {
+    return InkWell(
+      onTap: _accept,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        color: isSelected
+            ? CyberpunkColors.orangePrimary.withValues(alpha: 0.15)
+            : null,
+        child: Row(
+          children: [
+            const Icon(
+              Icons.folder,
+              size: 16,
+              color: CyberpunkColors.orangePrimary,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                path,
+                style: CyberpunkTypography.bodySmall.copyWith(
+                  color: CyberpunkColors.orangeGlow,
+                  fontFamily: 'SourceCodePro',
+                  fontSize: 11,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],

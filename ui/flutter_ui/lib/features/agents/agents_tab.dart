@@ -97,10 +97,10 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             Expanded(
               child: GridView.builder(
                 gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 150,
+                  maxCrossAxisExtent: 225, // 1.5x wider (was 150)
                   crossAxisSpacing: 8,
                   mainAxisSpacing: 8,
-                  childAspectRatio: 2.6,
+                  childAspectRatio: 0.87, // 3x taller (was 2.6)
                 ),
                 itemCount: agentState.agents.length,
                 itemBuilder: (context, index) {

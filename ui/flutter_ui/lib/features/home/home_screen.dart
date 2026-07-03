@@ -17,7 +17,7 @@ import '../../providers/status_message_provider.dart';
 import '../../providers/tab_activation_provider.dart';
 import '../../providers/verbosity_provider.dart';
 import 'tab_content.dart';
-import 'tools_dropdown.dart';
+import 'tools_dropdown.dart' show HamburgerMenu;
 
 /// Dialog showing connection details (host, port, cert, uptime, version).
 class _ConnectionDetailsDialog extends ConsumerWidget {
@@ -509,14 +509,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     context.go(_tabRoutes[index]);
                   },
                 ),
-                // Toolbar with tools dropdown + connection indicator
+                // Toolbar with hamburger menu (left) + connection indicator (right)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   color: CyberpunkColors.blackTransparent(0.7),
                   child: Row(
                     children: [
-                      const Spacer(),
-                      ToolsDropdown(
+                      HamburgerMenu(
                         onToolSelected: (route) {
                           if (_hasRoute(route)) {
                             // Full-screen route — don't set activeTool
@@ -532,6 +531,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                       const SizedBox(width: 12),
                       const _ConnectionDot(),
+                      const Spacer(),
                     ],
                   ),
                 ),

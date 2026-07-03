@@ -9,6 +9,13 @@ import '../providers/project_provider.dart';
 
 /// Single-line status bar pinned at the bottom of the HomeScreen.
 /// Mirrors TUI renderStatusBar (internal/tui/app.go:2236-2289).
+///
+/// Styling:
+/// - Connection status: green (connected), red (disconnected), orange (connecting)
+/// - Session: orange
+/// - Keybind hints: very light gray (almost white)
+/// - Project path: orange
+/// - Verbosity: very light gray
 class StatusBar extends ConsumerWidget {
   final int selectedTabIndex;
   const StatusBar({super.key, required this.selectedTabIndex});
@@ -19,22 +26,43 @@ class StatusBar extends ConsumerWidget {
     // over the multi-part bar and hide all other parts.
     final transient = ref.watch(statusMessageProvider);
     if (transient != null) {
-      return _bar(child: Text(transient, style: _mutedStyle));
+      return _bar(child: Text(transient, style: _baseStyle));
     }
 
-    final parts = <String>[];
-    parts.add(_connectionPart(ref));
+    // Build rich text with contextual colors for each part
+    final spans = <InlineSpan>[];
+
+    // Connection part (contextual color)
+    spans.add(_connectionSpan(ref));
+
+    // Session part (orange)
     final sessionPart = _sessionPart(ref);
-    if (sessionPart.isNotEmpty) parts.add(sessionPart);
-    parts.add(_keybindHint(selectedTabIndex));
+    if (sessionPart.isNotEmpty) {
+      spans.add(_separator());
+      spans.add(TextSpan(text: sessionPart, style: _orangeStyle));
+    }
+
+    // Keybind hint (very light gray)
+    spans.add(_separator());
+    spans.add(TextSpan(text: _keybindHint(selectedTabIndex), style: _lightStyle));
+
+    // Project part (orange)
     final projectPart = _projectPart(ref);
-    if (projectPart != null) parts.add(projectPart);
-    parts.add('verbosity: ${VerbosityLevel.name(ref.watch(verbosityProvider))}');
+    if (projectPart != null) {
+      spans.add(_separator());
+      spans.add(TextSpan(text: projectPart, style: _orangeStyle));
+    }
+
+    // Verbosity (very light gray)
+    spans.add(_separator());
+    spans.add(TextSpan(
+      text: 'verbosity: ${VerbosityLevel.name(ref.watch(verbosityProvider))}',
+      style: _lightStyle,
+    ));
 
     return _bar(
-      child: Text(
-        parts.join(' · '),
-        style: _mutedStyle,
+      child: RichText(
+        text: TextSpan(children: spans),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
@@ -42,7 +70,7 @@ class StatusBar extends ConsumerWidget {
   }
 
   Widget _bar({required Widget child}) => Container(
-        height: 22,
+        height: 28, // Increased from 22 for better readability
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: CyberpunkColors.blackTransparent(0.7),
@@ -53,17 +81,42 @@ class StatusBar extends ConsumerWidget {
         child: child,
       );
 
-  TextStyle get _mutedStyle => CyberpunkTypography.bodySmall.copyWith(
-        color: CyberpunkColors.midGray,
+  // Base style - increased font size from 10 to 12
+  TextStyle get _baseStyle => CyberpunkTypography.bodySmall.copyWith(
+        color: CyberpunkColors.veryLightGray,
         fontFamily: 'SourceCodePro',
-        fontSize: 10,
+        fontSize: 12,
       );
 
-  String _connectionPart(WidgetRef ref) {
+  // Orange style for session and project
+  TextStyle get _orangeStyle => _baseStyle.copyWith(
+        color: CyberpunkColors.orangePrimary,
+      );
+
+  // Very light gray for keybind hints and verbosity
+  TextStyle get _lightStyle => _baseStyle.copyWith(
+        color: CyberpunkColors.veryLightGray,
+      );
+
+  InlineSpan _separator() => const TextSpan(text: ' · ', style: TextStyle(color: CyberpunkColors.midGray));
+
+  InlineSpan _connectionSpan(WidgetRef ref) {
     final connected = ref.watch(connectionStateProvider);
-    final status = ref.watch(connectionStatusProvider);
+    final isConnecting = ref.watch(isConnectingProvider);
+    final statusText = ref.watch(connectionStatusProvider);
+
+    // Contextual color: green (connected), red (disconnected), orange (connecting)
+    final color = isConnecting
+        ? CyberpunkColors.orangePrimary
+        : connected
+            ? CyberpunkColors.greenSuccess
+            : CyberpunkColors.redAlert;
+
     final dot = connected ? '●' : '○';
-    return '$dot $status';
+    return TextSpan(
+      text: '$dot $statusText',
+      style: _baseStyle.copyWith(color: color),
+    );
   }
 
   String _sessionPart(WidgetRef ref) {

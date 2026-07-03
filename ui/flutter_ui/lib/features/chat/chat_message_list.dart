@@ -138,6 +138,8 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                     padding: EdgeInsets.fromLTRB(
                         16, findVisible ? 56 : 16, 16, chatState.error != null ? 100 : 16),
                     reverse: false,
+                    dragStartBehavior: DragStartBehavior.down,
+                    physics: const ClampingScrollPhysics(),
                     itemCount:
                         chatState.messages.length + (chatState.isLoading || chatState.isAgentProcessing ? 1 : 0),
                     itemBuilder: (context, index) {

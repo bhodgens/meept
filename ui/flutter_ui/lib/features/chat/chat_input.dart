@@ -144,6 +144,9 @@ class _ChatInputState extends ConsumerState<ChatInput>
   // Cached skill names for /skill autocomplete (populated async on init).
   List<String> _skillNames = const [];
 
+  // Project paths for /project autocomplete (populated async on init).
+  List<String> _projectPaths = const [];
+
   // File path attachments — typed [Attachment] entries once uploaded,
   // plus raw path strings pending async upload.
   final List<Attachment> _attachments = [];
@@ -177,6 +180,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
     // Fire-and-forget skill fetch for /skill autocomplete.  Does not block
     // input rendering; if it fails, we silently fall back to no suggestions.
     unawaited(_loadSkillNames());
+    unawaited(_loadProjectPaths());
   }
 
   /// Fetch skill names via [SkillsService] (backed by [SdkApiClient]) so the
@@ -193,6 +197,39 @@ class _ChatInputState extends ConsumerState<ChatInput>
     } catch (e) {
       debugPrint('[chat_input] skill fetch failed: $e');
     }
+  }
+
+  
+  /// Fetch project paths via [SdkApiClient] so the autocomplete popup
+  /// can offer them after `/project `.
+  Future<void> _loadProjectPaths() async {
+    try {
+      final sdk = ref.read(sdkClientProvider);
+      final projects = await sdk.listProjects();
+      if (!mounted) return;
+      setState(() {
+        _projectPaths = projects
+            .map((p) => p['localPath'] as String? ?? p['name'] as String? ?? '')
+            .where((p) => p.isNotEmpty)
+            .toList();
+      });
+    } catch (e) {
+      debugPrint('[chat_input] project paths fetch failed: $e');
+    }
+  }
+
+  /// Called when the user accepts a project path suggestion in the
+  /// `/project <path>` autocomplete.  Inserts `/project <path> ` and dismisses
+  /// the popup.
+  void _onProjectSelected(String path) {
+    final text = '/project $path ';
+    setState(() {
+      _controller.text = text;
+      _controller.selection = TextSelection.collapsed(offset: text.length);
+      _showSlashAutocomplete = false;
+      _slashQuery = '';
+    });
+    _focusNode.requestFocus();
   }
 
   void _onFocusChange() {
@@ -507,6 +544,20 @@ class _ChatInputState extends ConsumerState<ChatInput>
     }
   }
 
+  /// Handle /project file picker trigger.
+  /// 
+  /// On native platforms, opens OS file picker for directory selection.
+  /// On web, this would need a daemon-side file browser API.
+  void _handleProjectFilePicker() {
+    if (kIsWeb) {
+      // Web: TODO - implement daemon-side file browser API
+      debugPrint('[chat_input] /project file picker not yet implemented for web');
+      return;
+    }
+    // Native: TODO - implement using file_picker package
+    debugPrint('[chat_input] /project file picker not yet implemented for native');
+  }
+
   /// Try to handle a slash command locally.
   ///
   /// Returns true if the command was consumed and should NOT be sent
@@ -529,6 +580,13 @@ class _ChatInputState extends ConsumerState<ChatInput>
               text: '/stop',
             );
         return true;
+      case '/project':
+        // /project without arguments triggers file picker
+        if (spaceIdx == -1) {
+          ref.read(filePickerTriggerProvider.notifier).trigger();
+          return true;
+        }
+        return false;
       default:
         return false;
     }
@@ -744,6 +802,16 @@ class _ChatInputState extends ConsumerState<ChatInput>
       },
     );
 
+    // Listen for /project file picker trigger
+    ref.listen<bool>(
+      filePickerTriggerProvider,
+      (previous, next) {
+        if (next) {
+          _handleProjectFilePicker();
+        }
+      },
+    );
+
     final hasFocus = _focusNode.hasFocus;
 
     return Focus(
@@ -765,18 +833,23 @@ class _ChatInputState extends ConsumerState<ChatInput>
           mainAxisSize: MainAxisSize.min,
           children: [
             if (_showSlashAutocomplete)
-              SlashAutocomplete(
-                query: _slashQuery,
-                selectedIndex: _slashSelectedIndex,
-                skillNames: _skillNames,
-                onSkillSelected: _onSkillNameSelected,
-                onSelected: _onSlashSelected,
-                onDismiss: () {
-                  setState(() {
-                    _showSlashAutocomplete = false;
-                    _slashQuery = '';
-                  });
-                },
+              Align(
+                alignment: Alignment.centerLeft,
+                child: SlashAutocomplete(
+                  query: _slashQuery,
+                  selectedIndex: _slashSelectedIndex,
+                  skillNames: _skillNames,
+                  onSkillSelected: _onSkillNameSelected,
+                  projectPaths: _projectPaths,
+                  onProjectSelected: _onProjectSelected,
+                  onSelected: _onSlashSelected,
+                  onDismiss: () {
+                    setState(() {
+                      _showSlashAutocomplete = false;
+                      _slashQuery = '';
+                    });
+                  },
+                ),
               ),
             // Attachment chips — image uploads (typed Attachment) plus
             // pending file paths that haven't finished uploading yet.

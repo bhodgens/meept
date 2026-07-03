@@ -102,3 +102,20 @@ final currentProjectProvider =
     StateNotifierProvider<CurrentProjectNotifier, CurrentProject>((ref) {
   return CurrentProjectNotifier(ref.watch(sdkClientProvider));
 });
+
+/// Signal to trigger file picker from /project command
+class FilePickerTriggerNotifier extends StateNotifier<bool> {
+  FilePickerTriggerNotifier() : super(false);
+  
+  void trigger() {
+    state = true;
+    // Reset after a short delay to allow re-triggering
+    Future.delayed(const Duration(milliseconds: 100), () {
+      state = false;
+    });
+  }
+}
+
+final filePickerTriggerProvider = StateNotifierProvider<FilePickerTriggerNotifier, bool>((ref) {
+  return FilePickerTriggerNotifier();
+});

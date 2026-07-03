@@ -7,6 +7,7 @@ abstract class CyberpunkColors {
   static const Color darkGray = Color(0xFF1A1A1A);
   static const Color midGray = Color(0xFF2A2A2A);
   static const Color lightGray = Color(0xFF333333);
+  static const Color veryLightGray = Color(0xFFE0E0E0); // For verbosity text
 
   // Primary - Orange spectrum
   static const Color orangePrimary = Color(0xFFFF6600);

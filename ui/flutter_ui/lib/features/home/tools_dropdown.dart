@@ -2,51 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
-import '../../providers/providers.dart';
-import '../../models/api_models.dart';
 
-/// Tools dropdown button for the toolbar.
-/// Fetches available skills/tools from the daemon API.
-class ToolsDropdown extends ConsumerStatefulWidget {
+/// Hamburger menu button for the top-left toolbar.
+/// Shows known tools only (no skills section at bottom).
+class HamburgerMenu extends StatelessWidget {
   final ValueChanged<String>? onToolSelected;
 
-  const ToolsDropdown({super.key, this.onToolSelected});
-
-  @override
-  ConsumerState<ToolsDropdown> createState() => _ToolsDropdownState();
-}
-
-class _ToolsDropdownState extends ConsumerState<ToolsDropdown> {
-  List<Skill> _skills = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _loadSkills();
-  }
-
-  Future<void> _loadSkills() async {
-    try {
-      // SdkApiClient.getSkillsRaw returns the raw `skills` array; we
-      // deserialize via the local Skill.fromJson because the local model
-      // carries `tags`/`capabilities` arrays not modeled by sdk.SkillInfo.
-      final raw = await ref.read(sdkClientProvider).getSkillsRaw();
-      if (!mounted) return;
-      final skills = raw.map(Skill.fromJson).toList();
-      setState(() {
-        _skills = skills.where((s) => s.enabled).toList();
-      });
-    } catch (e) {
-      debugPrint('[warn] skills load failed: $e');
-    }
-  }
+  const HamburgerMenu({super.key, this.onToolSelected});
 
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<String>(
       tooltip: 'tools',
+      // Remove animation by using 0ms duration convention
+      // PopupMenuButton doesn't have explicit animation control,
+      // but using immediate trigger via onSelected
       onSelected: (route) {
-        widget.onToolSelected?.call(route);
+        onToolSelected?.call(route);
       },
       itemBuilder: (context) {
         final items = <PopupMenuEntry<String>>[
@@ -95,63 +67,19 @@ class _ToolsDropdownState extends ConsumerState<ToolsDropdown> {
           );
         }
 
-        if (_skills.isNotEmpty) {
-          items.add(const PopupMenuDivider(height: 1));
-          for (final skill in _skills) {
-            items.add(
-              PopupMenuItem<String>(
-                value: skill.slug,
-                height: 36,
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.tune,
-                      size: 16,
-                      color: CyberpunkColors.orangeBright,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      skill.slug.toLowerCase(),
-                      style: CyberpunkTypography.bodySmall,
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-        }
-
         return items;
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: CyberpunkColors.blackTransparent(0.3),
           border: Border.all(color: CyberpunkColors.midGray, width: 1),
           borderRadius: BorderRadius.circular(4),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(
-              Icons.build,
-              size: 14,
-              color: CyberpunkColors.orangePrimary,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              'tools',
-              style: CyberpunkTypography.label.copyWith(
-                fontSize: 11,
-                color: CyberpunkColors.orangePrimary,
-              ),
-            ),
-            const Icon(
-              Icons.arrow_drop_down,
-              size: 14,
-              color: CyberpunkColors.orangePrimary,
-            ),
-          ],
+        child: const Icon(
+          Icons.menu, // Hamburger icon
+          size: 20,
+          color: CyberpunkColors.orangePrimary,
         ),
       ),
     );
