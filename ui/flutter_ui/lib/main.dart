@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+// Platform checks removed for web compatibility
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,7 +23,7 @@ void main() async {
 
   // Restore saved window size/position on desktop platforms
   await WindowGeometryService.initialize();
-  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+  if (!kIsWeb) {  // Desktop-only: window management
     // Intercept the native close button so we can persist geometry
     await windowManager.setPreventClose(true);
     windowManager.addListener(_WindowCloseHandler());
@@ -32,7 +33,8 @@ void main() async {
   await SdkApiClient.initCertPinning();
 
   // Initialize Sentry for crash reporting (only when a real DSN is configured)
-  final sentryDsn = Platform.environment['SENTRY_DSN'];
+  // Environment variables not available on web
+    final sentryDsn = null;  // Platform.environment['SENTRY_DSN'];
   if (sentryDsn != null && sentryDsn.isNotEmpty) {
     await SentryFlutter.init(
       (options) {
