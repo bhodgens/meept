@@ -29,8 +29,10 @@ void main() async {
     windowManager.addListener(_WindowCloseHandler());
   }
 
-  // Initialize certificate pinning before any HTTP/WebSocket connections
-  await SdkApiClient.initCertPinning();
+  // Initialize certificate pinning (desktop only - web uses browser TLS)
+  if (!kIsWeb) {
+    await SdkApiClient.initCertPinning();
+  }
 
   // Initialize Sentry for crash reporting (only when a real DSN is configured)
   // Environment variables not available on web

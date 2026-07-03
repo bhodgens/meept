@@ -41,8 +41,10 @@ class DaemonCertPinner {
   /// Synchronously load the fingerprint from disk.
   static void _loadFingerprintSync() {
     if (_cachedFingerprint != null) return;
+    if (kIsWeb) return;  // No filesystem access on web
 
-    final homeDir = Platform.environment['HOME'];
+    // ignore: unused_local_variable
+    final homeDir = null;  // Platform.environment['HOME'];
     if (homeDir == null) return;
 
     final certPath = '$homeDir/.meept/tls/cert.pem';
