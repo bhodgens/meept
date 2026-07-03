@@ -1,4 +1,4 @@
-.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server
+.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui
 
 help:
 	@echo "Usage: make [target]"
@@ -42,6 +42,7 @@ help:
 	@echo "  gui-deps         Install Flutter/CocoaPods dependencies (macOS)"
 	@echo "  gui-web          Build Flutter web app (release)"
 	@echo "  gui-web-run      Run Flutter web dev server with hot reload (Chrome)"
+	@echo "  webui            Alias for gui-web-run - run Flutter web dev server (Chrome)"
 	@echo "  gui-dev-server   Run Flutter web dev server (web-server backend)"
 	@echo ""
 	@echo "Daemon:"
@@ -738,7 +739,12 @@ gui-web-run:
 gui-dev-server:
 	@echo "Starting Flutter web dev server (web-server target)..."
 	@echo "Open http://localhost:59714 in your browser"
-	cd $(FLUTTER_UI_DIR) && flutter run -d web-server --web-port=59714 
+	cd $(FLUTTER_UI_DIR) && flutter run -d web-server --web-port=59714
+
+# webui: Alias for gui-web-run - Flutter web development with hot reload
+# Opens Chrome at http://localhost:59714 for fast UI iteration without recompilation.
+.PHONY: webui
+webui: gui-web-run 
 
 # =============================================================================
 # Full Uninstall - Remove all binaries, apps, and configurations

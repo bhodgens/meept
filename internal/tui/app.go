@@ -170,6 +170,9 @@ type App struct {
 	commandHandler    *CommandHandler
 	slashAutocomplete *SlashAutocomplete
 
+	// Feature flags
+	branchesEnabled bool // from session.branches_enabled in meept.json5
+
 	// Error state
 	err error
 
@@ -240,12 +243,16 @@ func NewApp(socketPath string) *App {
 		AutoExpand:    clientConfig.Input.AutoExpand,
 	}
 
+	// Load branches_enabled from main config (defaults to false)
+	branchesEnabled := loadBranchesEnabled()
+
 	app := &App{
-		styles:      styles,
-		rpc:         rpc,
-		sessionMgr:  sharedclient.NewSessionManager(rpc, clientConfig.Session.DefaultName),
-		eventRPC:    eventRPC,
-		currentView: ViewChat,
+		styles:          styles,
+		rpc:             rpc,
+		sessionMgr:      sharedclient.NewSessionManager(rpc, clientConfig.Session.DefaultName),
+		eventRPC:        eventRPC,
+		currentView:     ViewChat,
+		branchesEnabled: branchesEnabled,
 		chat: models.NewChatModelWithConfig(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, clientConfig.Keybindings.EscapeBehavior, inputConfig, models.ChatConfig{
 			AutoCopyOnRelease: clientConfig.Chat.AutoCopyOnRelease,
 			ScrollSpeed:       clientConfig.Chat.ScrollSpeed,
@@ -272,7 +279,9 @@ func NewApp(socketPath string) *App {
 	app.sessionPicker = NewSessionPickerModal(styles, rpc, clientConfig)
 	app.sessionRename = NewSessionRenameModal(styles)
 	app.fuzzyFinder = NewFuzzyFinderModal(styles, rpc)
-	app.branchPicker = NewBranchPickerModal(styles, rpc)
+	if branchesEnabled {
+		app.branchPicker = NewBranchPickerModal(styles, rpc)
+	}
 	app.projectPicker = NewProjectPickerModal(styles, rpc)
 
 	// Initialize slash autocomplete
@@ -394,7 +403,6 @@ func loadMainConfigForTTS() tts.Config {
 }
 
 // loadMainConfigFile loads TTS config from main meept.json5 file.
-// loadMainConfigFile loads TTS config from main meept.json5 file.
 func loadMainConfigFile(path string) *tts.Config {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -428,6 +436,48 @@ func loadMainConfigFile(path string) *tts.Config {
 			MaxQueueSize:      mainCfg.TTS.Behavior.MaxQueueSize,
 		},
 	}
+}
+
+// loadBranchesEnabled loads the session.branches_enabled flag from the main config.
+// Returns false if config file is missing or parse fails (branches disabled by default).
+func loadBranchesEnabled() bool {
+	// Try project-local first
+	mainPath := ".meept/meept.json5"
+	if enabled, ok := loadBranchesEnabledFromFile(mainPath); ok {
+		return enabled
+	}
+
+	// Try user home directory
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		homePath := filepath.Join(homeDir, ".meept", "meept.json5")
+		if enabled, ok := loadBranchesEnabledFromFile(homePath); ok {
+			return enabled
+		}
+	}
+
+	// Default: branches disabled (threads are the recommended replacement)
+	return false
+}
+
+// loadBranchesEnabledFromFile reads branches_enabled from a specific config file.
+func loadBranchesEnabledFromFile(path string) (bool, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, false
+	}
+
+	standardJSON, err := hujson.Standardize(data)
+	if err != nil {
+		return false, false
+	}
+
+	var mainCfg config.Config
+	if err := json.Unmarshal(standardJSON, &mainCfg); err != nil {
+		return false, false
+	}
+
+	return mainCfg.Session.BranchesEnabled, true
 }
 
 // Init initializes the application.
@@ -761,8 +811,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Batch(a.fuzzyFinder.FetchSessions(), a.fuzzyFinder.FetchTasks())
 		}
 
-		// Check for Ctrl+B to show branch picker
+		// Check for Ctrl+B to show branch picker (only if branches are enabled)
 		if msg.String() == "ctrl+b" {
+			if !a.branchesEnabled {
+				a.statusMessage = "branches disabled (use threads instead)"
+				a.statusMessageTime = time.Now()
+				return a, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+					return StatusMessageClearMsg{}
+				})
+			}
 			if a.currentSession == nil {
 				a.statusMessage = "no active session"
 				a.statusMessageTime = time.Now()
@@ -1625,7 +1682,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.handleStopWorkChildTasks(msg)
 
 	case BranchInfoMsg:
-		if a.activeModal == ModalBranchPicker {
+		if a.activeModal == ModalBranchPicker && a.branchPicker != nil {
 			// Populate the branch picker modal
 			if msg.Err != nil {
 				a.branchPicker.SetBranches(nil)
@@ -1679,7 +1736,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case BranchNavigateResultMsg:
-		a.branchPicker.SetActiveBranchID(msg.BranchID)
+		if a.branchPicker != nil {
+			a.branchPicker.SetActiveBranchID(msg.BranchID)
+		}
 		a.statusMessage = fmt.Sprintf("switched to branch: %s", msg.BranchID)
 		a.statusMessageTime = time.Now()
 		return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
@@ -1954,11 +2013,15 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case ModalBranchPicker:
-		cmd := a.branchPicker.HandleKey(keyStr)
-		if !a.branchPicker.IsVisible() {
-			a.activeModal = ModalNone
+		if a.branchPicker != nil {
+			cmd := a.branchPicker.HandleKey(keyStr)
+			if !a.branchPicker.IsVisible() {
+				a.activeModal = ModalNone
+			}
+			return a, cmd
 		}
-		return a, cmd
+		a.activeModal = ModalNone // branches disabled
+		return a, nil
 
 	case ModalProjectPicker:
 		cmd := a.projectPicker.HandleKey(keyStr)
@@ -2170,6 +2233,9 @@ func (a *App) renderModalOverlay() string {
 	case ModalFuzzyFinder:
 		return a.fuzzyFinder.View(a.width, a.height)
 	case ModalBranchPicker:
+		if a.branchPicker == nil {
+			return "" // branches disabled
+		}
 		return a.branchPicker.View(a.width, a.height)
 	case ModalProjectPicker:
 		return a.projectPicker.View(a.width, a.height)
@@ -2339,8 +2405,8 @@ func (a *App) renderStatusBar() string {
 	} else {
 		parts = append(parts, statusStyle.Render(connectionStatus))
 
-		// Show branch indicator if session has a leaf message set
-		if a.currentSession != nil && a.currentSession.LeafMessageID != nil {
+		// Show branch indicator if session has a leaf message set and branches are enabled
+		if a.branchesEnabled && a.currentSession != nil && a.currentSession.LeafMessageID != nil {
 			parts = append(parts, a.styles.Muted.Render("branch: "+a.currentSession.Name))
 		}
 
@@ -2374,12 +2440,21 @@ func (a *App) renderStatusBar() string {
 func (a *App) getQuickActions() []string {
 	var actions []string
 
-	// Always show menu, sessions, find, branches, and quit
+	// Always show menu, sessions, find, and quit
 	actions = append(actions,
 		a.styles.HelpKey.Render("^X")+" "+a.styles.HelpValue.Render("menu"),
 		a.styles.HelpKey.Render("^S")+" "+a.styles.HelpValue.Render("sessions"),
 		a.styles.HelpKey.Render("^P")+" "+a.styles.HelpValue.Render("find"),
-		a.styles.HelpKey.Render("^B")+" "+a.styles.HelpValue.Render("branches"),
+	)
+
+	// Show branches command only if enabled in config
+	if a.branchesEnabled {
+		actions = append(actions,
+			a.styles.HelpKey.Render("^B")+" "+a.styles.HelpValue.Render("branches"),
+		)
+	}
+
+	actions = append(actions,
 		a.styles.HelpKey.Render("^C")+" "+a.styles.HelpValue.Render("quit"),
 	)
 
