@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'dart:io' show File;
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show File; // Used only in !kIsWeb guarded paths
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -304,6 +305,9 @@ class _ChatInputState extends ConsumerState<ChatInput>
   /// and a typed [Attachment] is added.  On failure the path remains in
   /// [_pendingFilePaths] so it can be sent as a plain-text reference.
   Future<void> _uploadDetectedImage(String path) async {
+    // Skip on web - web uses file pickers, not direct filesystem paths
+    if (kIsWeb) return;
+    
     try {
       final file = File(path);
       if (!await file.exists()) return;

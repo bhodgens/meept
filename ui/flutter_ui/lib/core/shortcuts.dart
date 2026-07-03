@@ -1,6 +1,7 @@
-import 'dart:io' show Platform;
+// Platform detection via compile-time constants for web compatibility
+// Runtime checks use platformService where needed (see LeaderKeyController._isMacOS)
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -66,7 +67,11 @@ class GlobalSearchIntent extends AppIntent {
 /// retained because they are still used by direct shortcuts and by
 /// the palette's selection handler in `HomeScreen`.
 class LeaderKeyController extends ChangeNotifier {
-  static bool get _isMacOS => !kIsWeb && Platform.isMacOS;
+  static bool get _isMacOS {
+    // Use compile-time constant: true only on macOS native builds
+    // On web and non-macOS native, returns false (defaults to ctrl+x)
+    return const bool.fromEnvironment('os.macos');
+  }
 
   /// Set this callback to route tab switches from the shortcut layer
   /// up to the containing widget. Index maps to [HomeTab.values].

@@ -1,9 +1,8 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../core/constants.dart';
+import '../core/platform/platform_service.dart' show platformService, initPlatformService;
 
 /// Centralized persistent storage backed by [SharedPreferences] and
 /// macOS Keychain (via [FlutterSecureStorage]) for sensitive data.
@@ -34,6 +33,9 @@ class StorageService {
   /// null storage (all getters return null). This prevents crashes
   /// on misconfigured platforms while allowing the UI to render.
   Future<void> init() async {
+    // Ensure platform service is initialized first
+    await initPlatformService();
+
     try {
       _prefs ??= await SharedPreferences.getInstance();
     } catch (e) {
@@ -63,9 +65,9 @@ class StorageService {
     }
 
     // If no key was found in keychain/prefs, try reading the daemon's
-    // per-installation dev key from ~/.meept/dev_key. Under macOS App
-    // Sandbox, Platform.environment['HOME'] points to the container
-    // directory, so we also try the real home via getpwuid.
+    // per-installation dev key from ~/.meept/dev_key. The platform service
+    // gracefully returns null on web, and on native platforms returns the
+    // correct home directory.
     if (_cachedApiKey == null || _cachedApiKey!.isEmpty) {
       _cachedApiKey = await _tryReadDevKeyFile();
     }
@@ -75,48 +77,17 @@ class StorageService {
   /// `~/.meept/dev_key`. Returns null if the file doesn't exist or
   /// can't be read.
   ///
-  /// Under macOS App Sandbox, `$HOME` is the container path. We try
-  /// multiple strategies to find the real home directory:
-  /// 1. `$HOME/.meept/dev_key` (works outside sandbox)
-  /// 2. Resolve real home via `sh -c 'echo ~$USER'` (works in sandbox
-  ///    with temporary-exception file access entitlement)
+  /// On web, [platformService] returns null for the home directory,
+  /// so this method returns null immediately without filesystem access.
   Future<String?> _tryReadDevKeyFile() async {
-    final candidates = <String>[];
+    final home = await platformService?.getHomeDirectory();
+    if (home == null) return null;
 
-    // Strategy 1: direct $HOME (works outside App Sandbox)
-    final home = Platform.environment['HOME'];
-    if (home != null) {
-      candidates.add('$home/.meept/dev_key');
-    }
-
-    // Strategy 2: resolve real home via shell (works in sandbox with
-    // temporary-exception entitlement for /Users/)
-    try {
-      final result = await Process.run(
-        'sh', ['-c', 'eval echo ~\$(id -un)'],
-        runInShell: false,
-      );
-      final realHome = (result.stdout as String).trim();
-      if (realHome.isNotEmpty && realHome != home) {
-        candidates.add('$realHome/.meept/dev_key');
-      }
-    } catch (_) {
-      // Shell not available or command failed — skip this strategy.
-    }
-
-    for (final path in candidates) {
-      try {
-        final file = File(path);
-        if (file.existsSync()) {
-          final key = file.readAsStringSync().trim();
-          if (key.isNotEmpty) {
-            debugPrint('[storage] Loaded dev key from $path');
-            return key;
-          }
-        }
-      } catch (_) {
-        // File not readable — try next candidate.
-      }
+    final path = '$home/.meept/dev_key';
+    final key = await platformService?.readDevKeyFile(path);
+    if (key != null && key.isNotEmpty) {
+      debugPrint('[storage] Loaded dev key from $path');
+      return key;
     }
     return null;
   }
@@ -249,9 +220,8 @@ class StorageService {
   String getLeaderKey() {
     final stored = _prefs?.getString(_leaderKeyPref);
     if (stored != null) return stored;
-    // Platform default
-    if (Platform.isMacOS) return 'cmd+x';
-    return 'ctrl+x';
+    // Platform default from platform service
+    return platformService?.defaultLeaderKey ?? 'ctrl+x';
   }
 
   Future<void> setLeaderKey(String value) async {

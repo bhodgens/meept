@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'dart:io';
+// Platform checks removed - using isWeb check instead
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:ui' show Rect, Size;
 
 import 'package:flutter/foundation.dart' show debugPrint;
@@ -25,8 +26,8 @@ class WindowGeometryService with WindowListener {
   /// Ensures [windowManager] is initialized and restores saved geometry.
   /// Call once at startup, before [runApp].
   static Future<void> initialize() async {
-    if (!Platform.isWindows && !Platform.isMacOS && !Platform.isLinux) {
-      return;
+    if (kIsWeb) {
+      return; // No-op on web - desktop only
     }
 
     try {
@@ -50,8 +51,8 @@ class WindowGeometryService with WindowListener {
   /// Saves the current window position, size, and maximized state.
   /// Call on app close or detach window events.
   static Future<void> save() async {
-    if (!Platform.isWindows && !Platform.isMacOS && !Platform.isLinux) {
-      return;
+    if (kIsWeb) {
+      return; // No-op on web - desktop only
     }
 
     instance._debounce?.cancel();
