@@ -1,3 +1,5 @@
+// NATIVE-ONLY FILE: Reads TLS certificate fingerprints from filesystem.
+// Web has no filesystem access; certificate pinning is handled by the browser.
 import 'dart:convert';
 import 'dart:io';
 import 'package:crypto/crypto.dart';

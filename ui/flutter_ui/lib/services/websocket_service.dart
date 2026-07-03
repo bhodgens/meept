@@ -1,6 +1,9 @@
+// NATIVE-ONLY FILE: Uses dart:io for WebSocket connections with custom headers.
+// Browsers don't support custom WebSocket headers, so this code path is only
+// used on desktop platforms. The web build tree-shakes this unused code.
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' as io;
+import 'dart:io' as io; // ignore: web_unsafe_import - guarded by kIsWeb checks
 import 'dart:math';
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb, kReleaseMode;
 import 'package:rxdart/rxdart.dart';

@@ -1,4 +1,7 @@
-import 'dart:io' show HttpClient, X509Certificate;
+// NATIVE-ONLY FILE: Uses dart:io HttpClient for certificate pinning.
+// Web uses the browser's built-in HTTP client without custom cert handling.
+// The web build tree-shakes this unused code.
+import 'dart:io' show HttpClient, X509Certificate; // ignore: web_unsafe_import - native only
 import 'package:built_value/serializer.dart';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';

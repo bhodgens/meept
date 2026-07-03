@@ -321,6 +321,8 @@ ifeq ($(GUI_PLATFORM),macos)
 		~/Applications/Meept\ Client\ GUI.app
 	@touch ~/Applications/Meept\ Client\ GUI.app/.metadata_never_index
 endif
+	@echo "==> Building Flutter web app (incremental)..."
+	@cd $(FLUTTER_UI_DIR) && flutter build web --release 2>&1 | tail -1
 	@echo "==> devbuild complete."
 	@echo "    binaries:  $$(go env GOPATH)/bin/meept{,-daemon}"
 ifeq ($(GUI_PLATFORM),macos)
