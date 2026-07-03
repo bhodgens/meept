@@ -21,6 +21,7 @@ class SettingsFields {
   static const String sttEngine = 'stt_engine';
   static const String sttLanguage = 'stt_language';
   static const String sttAutoSend = 'stt_auto_send';
+  static const String modifierKey = 'modifier_key';
 }
 
 /// Settings panel - edit configuration files and connection settings.
@@ -158,10 +159,12 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
       final host = _formKey.currentState!.value[SettingsFields.daemonHost] as String?;
       final port = _formKey.currentState!.value[SettingsFields.daemonPort] as int?;
       final theme = _formKey.currentState!.value[SettingsFields.theme] as String?;
+      final modifierKey = _formKey.currentState!.value[SettingsFields.modifierKey] as String?;
 
       if (host != null && host.isNotEmpty) await storage.setApiHost(host);
       if (port != null) await storage.setApiPort(port);
       if (theme != null) await storage.setTheme(theme);
+      if (modifierKey != null) await storage.setModifierKey(modifierKey);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -392,6 +395,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
         SettingsFields.sttEngine: 'native',
         SettingsFields.sttLanguage: 'en',
         SettingsFields.sttAutoSend: false,
+        SettingsFields.modifierKey: storage.getModifierKey(),
       },
       child: _FormSections(
         apiKeyObscured: _apiKeyObscured,
@@ -703,6 +707,47 @@ class _FormSections extends StatelessWidget {
                       ),
                     ))
                 .toList(),
+          ),
+          const SizedBox(height: 10),
+          // Modifier key preference (ctrl vs cmd for leader shortcut)
+          FormBuilderDropdown<String>(
+            name: SettingsFields.modifierKey,
+            decoration: InputDecoration(
+              labelText: 'modifier key for shortcuts',
+              labelStyle: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.lightGray,
+              ),
+              helperText: 'ctrl (default) or cmd for cmd+x, cmd+k, cmd+f shortcuts',
+              helperStyle: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.midGray,
+                fontSize: 9,
+              ),
+              prefixIcon: const Icon(Icons.keyboard, color: CyberpunkColors.orangePrimary, size: 18),
+              isDense: true,
+              filled: true,
+              fillColor: CyberpunkColors.black,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: const BorderSide(color: CyberpunkColors.midGray),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: const BorderSide(color: CyberpunkColors.midGray),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: const BorderSide(color: CyberpunkColors.orangePrimary, width: 1.5),
+              ),
+            ),
+            style: CyberpunkTypography.bodySmall.copyWith(
+              fontFamily: 'SourceCodePro',
+              color: CyberpunkColors.lightGray,
+            ),
+            dropdownColor: CyberpunkColors.darkGray,
+            items: [
+              const DropdownMenuItem(value: 'ctrl', child: Text('ctrl (all platforms)')),
+              const DropdownMenuItem(value: 'cmd', child: Text('cmd (macOS only)')),
+            ],
           ),
         ],
       ),

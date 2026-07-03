@@ -40,18 +40,46 @@ void main() async {
         options.tracesSampleRate = 1.0;
       },
       appRunner: () => runApp(
-        const ProviderScope(
-          child: CyberpunkApp(),
+        ProviderScope(
+          child: _ModifierKeyInitializer(
+            child: const CyberpunkApp(),
+          ),
         ),
       ),
     );
   } else {
     runApp(
-      const ProviderScope(
-        child: CyberpunkApp(),
+      ProviderScope(
+        child: _ModifierKeyInitializer(
+          child: const CyberpunkApp(),
+        ),
       ),
     );
   }
+}
+
+/// Initializes the modifier key preference at app startup.
+/// Must be wrapped in ProviderScope.
+class _ModifierKeyInitializer extends ConsumerStatefulWidget {
+  final Widget child;
+  const _ModifierKeyInitializer({required this.child});
+
+  @override
+  ConsumerState<_ModifierKeyInitializer> createState() => _ModifierKeyInitializerState();
+}
+
+class _ModifierKeyInitializerState extends ConsumerState<_ModifierKeyInitializer> {
+  @override
+  void initState() {
+    super.initState();
+    // Load the modifier key preference from storage
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(modifierKeyProvider.notifier).load();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 /// Listens for the native close event, saves window geometry, then

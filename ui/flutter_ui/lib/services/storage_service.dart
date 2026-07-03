@@ -258,6 +258,16 @@ class StorageService {
     await _prefs?.setString(_leaderKeyPref, value);
   }
 
+  /// Modifier key preference for leader shortcut: "ctrl" or "cmd".
+  /// Defaults to "ctrl" on all platforms (user requested).
+  String getModifierKey() {
+    return _prefs?.getString(_modifierKeyPref) ?? 'ctrl';
+  }
+
+  Future<void> setModifierKey(String value) async {
+    await _prefs?.setString(_modifierKeyPref, value);
+  }
+
   /// Double-enter behavior: "steer", "interrupt", or "preempt".
   String getDoubleEnter() {
     return _prefs?.getString(_doubleEnterPref) ?? 'steer';
@@ -293,5 +303,6 @@ class StorageService {
   static const String _hostPref = 'api_host';
   static const String _portPref = 'api_port';
   static const String _leaderKeyPref = 'leader_key';
+  static const String _modifierKeyPref = 'modifier_key';
   static const String _doubleEnterPref = 'double_enter';
 }

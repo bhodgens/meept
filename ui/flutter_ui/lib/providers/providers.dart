@@ -8,6 +8,7 @@ export 'job_provider.dart';
 export 'plan_provider.dart';
 export 'stt_provider.dart';
 export 'tts_provider.dart';
+export 'preferences_provider.dart';
 
 import 'dart:async';
 

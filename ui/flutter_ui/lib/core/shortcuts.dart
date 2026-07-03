@@ -3,6 +3,8 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/preferences_provider.dart';
 
 /// App-wide intent types for keyboard shortcuts.
 abstract class AppIntent extends Intent {
@@ -211,7 +213,15 @@ class LeaderKeyController extends ChangeNotifier {
 /// raw-key-event Focus node. The legacy Shortcuts+Actions widgets were
 /// removed when the leader-key state machine was replaced by the
 /// command palette.
-class AppShortcuts extends StatefulWidget {
+///
+/// Uses CallbackShortcuts to intercept system-reserved key combinations
+/// (Cmd+X/Ctrl+X for command palette, Cmd+K/Ctrl+K for focus input, etc.)
+/// before Flutter's default text editing shortcuts consume them.
+///
+/// The modifier key (ctrl vs cmd) for leader, focus input, and find
+/// shortcuts is configurable via [modifierKeyProvider] ("ctrl" or "cmd").
+/// Defaults to "ctrl" on all platforms.
+class AppShortcuts extends ConsumerStatefulWidget {
   final Widget child;
   final LeaderKeyController controller;
 
@@ -222,16 +232,67 @@ class AppShortcuts extends StatefulWidget {
   });
 
   @override
-  State<AppShortcuts> createState() => _AppShortcutsState();
+  ConsumerState<AppShortcuts> createState() => _AppShortcutsState();
 }
 
-class _AppShortcutsState extends State<AppShortcuts> {
+class _AppShortcutsState extends ConsumerState<AppShortcuts> {
+  /// Get the current modifier preference ("ctrl" or "cmd").
+  String get _modifier => ref.read(modifierKeyProvider);
+
+  /// Check if the user prefers cmd as the modifier.
+  bool get _useCmd => _modifier == 'cmd';
+
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      autofocus: true,
-      onKeyEvent: _handleKeyEvent,
-      child: widget.child,
+    // Use CallbackShortcuts to intercept system-reserved key combos
+    // before Flutter's default text editing shortcuts consume them.
+    // This is necessary because Cmd+X (Cut), Cmd+K, Cmd+F, etc. are
+    // handled by Flutter's EditableText widgets by default.
+    //
+    // We register BOTH ctrl and cmd variants, but only fire the callback
+    // if the pressed modifier matches the user's preference. This ensures
+    // the shortcut works regardless of which modifier is actually pressed,
+    // while respecting the user's configured preference.
+    return CallbackShortcuts(
+      bindings: {
+        // Leader key → command palette
+        // Register both variants, but check preference in callback
+        const SingleActivator(LogicalKeyboardKey.keyX, meta: true, control: false):
+            () {
+              if (_useCmd) widget.controller.onShowCommandPalette?.call();
+            },
+        const SingleActivator(LogicalKeyboardKey.keyX, meta: false, control: true):
+            () {
+              if (!_useCmd) widget.controller.onShowCommandPalette?.call();
+            },
+        // Ctrl+V → cycle verbosity (all platforms, TUI parity)
+        // Always uses Ctrl, never Cmd
+        const SingleActivator(LogicalKeyboardKey.keyV, control: true):
+            () => widget.controller.onCycleVerbosity?.call(),
+        // Cmd+K / Ctrl+K → focus input (follows modifier preference)
+        const SingleActivator(LogicalKeyboardKey.keyK, meta: true, control: false):
+            () {
+              if (_useCmd) widget.controller.onFocusInput?.call();
+            },
+        const SingleActivator(LogicalKeyboardKey.keyK, meta: false, control: true):
+            () {
+              if (!_useCmd) widget.controller.onFocusInput?.call();
+            },
+        // Cmd+F / Ctrl+F → in-session find (follows modifier preference)
+        const SingleActivator(LogicalKeyboardKey.keyF, meta: true, control: false):
+            () {
+              if (_useCmd) widget.controller.onInSessionFind?.call();
+            },
+        const SingleActivator(LogicalKeyboardKey.keyF, meta: false, control: true):
+            () {
+              if (!_useCmd) widget.controller.onInSessionFind?.call();
+            },
+      },
+      child: Focus(
+        autofocus: true,
+        onKeyEvent: _handleKeyEvent,
+        child: widget.child,
+      ),
     );
   }
 
