@@ -20,36 +20,34 @@ class ChatView extends ConsumerStatefulWidget {
 }
 
 class _ChatViewState extends ConsumerState<ChatView> {
-  @override
-  void initState() {
-    super.initState();
-    // Listen for destructive-tool confirmation requests surfaced by the
-    // ChatNotifier.  When one arrives, show DestructiveConfirmationDialog
-    // and forward the user's decision back via resolveConfirmation.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _listenForConfirmation();
-    });
-  }
+  bool _dialogShown = false;
 
-  void _listenForConfirmation() {
+  @override
+  Widget build(BuildContext context) {
+    // Listen for destructive-tool confirmation requests surfaced by the
+    // ChatNotifier. When one arrives, show DestructiveConfirmationDialog
+    // and forward the user's decision back via resolveConfirmation.
     ref.listen<ChatState?>(chatProvider, (previous, next) {
       final pending = next?.pendingConfirmation;
       if (pending == null) return;
       if (!mounted) return;
+      if (_dialogShown) return; // Prevent duplicate dialogs
+      
       // Coalesce: if a dialog is already visible, skip duplicate events for
       // the same action until the user resolves it.
+      _dialogShown = true;
       showDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (_) => DestructiveConfirmationDialog(response: pending),
       ).then((confirmed) {
-        ref.read(chatProvider.notifier).resolveConfirmation(confirmed ?? false);
+        _dialogShown = false;
+        if (mounted) {
+          ref.read(chatProvider.notifier).resolveConfirmation(confirmed ?? false);
+        }
       });
     });
-  }
 
-  @override
-  Widget build(BuildContext context) {
     final session = ref.watch(activeSessionProvider);
 
     // Build header text matching TUI logic:
@@ -89,9 +87,8 @@ class _ChatViewState extends ConsumerState<ChatView> {
         children: [
           // Orange header bar
           Container(
-            width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            color: const Color(0xFFF97316),
+            color: CyberpunkColors.orangePrimary,
             child: Row(
               children: [
                 Expanded(

@@ -77,16 +77,19 @@ class SdkApiClient {
             },
           ),
         ) {
-    // Configure TLS with certificate pinning (reuse existing DaemonCertPinner).
-    _dio.httpClientAdapter = IOHttpClientAdapter(
-      createHttpClient: () {
-        final client = HttpClient();
-        client.badCertificateCallback =
-            (X509Certificate cert, String host, int port) =>
-                DaemonCertPinner.validateCert(cert, host);
-        return client;
-      },
-    );
+    // Configure TLS with certificate pinning on native platforms.
+    // Web uses the browser's default HTTP client with browser TLS handling.
+    if (!kIsWeb) {
+      _dio.httpClientAdapter = IOHttpClientAdapter(
+        createHttpClient: () {
+          final client = HttpClient();
+          client.badCertificateCallback =
+              (X509Certificate cert, String host, int port) =>
+                  DaemonCertPinner.validateCert(cert, host);
+          return client;
+        },
+      );
+    }
 
     // Log all errors for debugging.
     _dio.interceptors.add(LogInterceptor(
