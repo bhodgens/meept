@@ -119,6 +119,10 @@ class _SessionsDetailPaneState extends ConsumerState<SessionsDetailPane> {
               session.title.toLowerCase(),
             ),
             _buildDetailRow(
+              'id',
+              session.id,
+            ),
+            _buildDetailRow(
               'created',
               _formatDateTime(session.createdAt),
             ),
