@@ -21,17 +21,34 @@ class SessionsList extends ConsumerStatefulWidget {
 
 class _SessionsListState extends ConsumerState<SessionsList> {
   int _selectedIndex = 0;
+  final FocusNode _focusNode = FocusNode();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(sessionProvider.notifier).loadSessions();
+      // Request focus for keyboard navigation when the list is first shown
+      _focusNode.requestFocus();
     });
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Re-request focus when dependencies change (e.g., when tab becomes active)
+    if (!_focusNode.hasFocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_focusNode.hasFocus) {
+          _focusNode.requestFocus();
+        }
+      });
+    }
+  }
+
+  @override
   void dispose() {
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -303,7 +320,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
           else
             Expanded(
               child: Focus(
-                autofocus: true,
+                focusNode: _focusNode,
                 onFocusChange: (hasFocus) {
                   if (hasFocus) {
                     ref.read(keyboardFocusProvider.notifier).setFocusedPane(0);

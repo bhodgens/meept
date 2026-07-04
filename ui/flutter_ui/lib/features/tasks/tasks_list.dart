@@ -28,7 +28,22 @@ class _TasksListState extends ConsumerState<TasksList> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(taskProvider.notifier).loadTasks();
+      // Request focus for keyboard navigation when the list is first shown
+      _listFocusNode.requestFocus();
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Re-request focus when dependencies change (e.g., when tab becomes active)
+    if (!_listFocusNode.hasFocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_listFocusNode.hasFocus) {
+          _listFocusNode.requestFocus();
+        }
+      });
+    }
   }
 
   @override
@@ -128,6 +143,7 @@ class _TasksListState extends ConsumerState<TasksList> {
           else
             Expanded(
               child: Focus(
+                focusNode: _listFocusNode,
                 onFocusChange: (hasFocus) {
                   if (hasFocus) {
                     ref.read(keyboardFocusProvider.notifier).setFocusedPane(0);
