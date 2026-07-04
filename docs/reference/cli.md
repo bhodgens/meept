@@ -23,20 +23,35 @@ All commands support these global flags:
 Launch interactive chat interface or send a single message.
 
 ```bash
-# Interactive mode
+# Interactive mode (opens to most recent session)
 meept chat
 
-# Single message
+# Single message (uses oneshot_responses session)
 meept chat "What's the weather like?"
 
+# Send to specific session
+meept chat --session session-abc123 "continue implementing that feature"
+
+# Shorthand for --session
+meept chat -s session-abc123 "msg"
+
+# Open TUI to specific session
+meept chat --session session-abc123
+
 # From stdin
-echo "Hello world" | meept chat
+echo "Hello world" | meept chat -
 ```
 
 **Options:**
-- `--stdin` - Read message from stdin
-- `--session-id` - Use specific session ID
-- `--agent-id` - Target specific agent (e.g., coder, planner)
+- `--session, -s` - Target specific session by ID (canonical format: `session-XXXXXXXXXXXXXXXX`)
+- `--project` - Bind session to named project
+- `--nofence` - Disable path fencing for this session
+
+**Behavior:**
+- `meept chat` (no args) - Opens TUI to most recent session
+- `meept chat "msg"` (no --session) - Sends to `oneshot_responses` session, prints response, exits
+- `meept chat --session <id> "msg"` - Sends to existing session, prints response, exits (errors if session not found)
+- `meept chat --session <id>` (no message) - Opens TUI targeted to that session
 
 ### `meept status` - Daemon Status
 
