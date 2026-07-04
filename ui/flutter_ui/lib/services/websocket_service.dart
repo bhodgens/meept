@@ -307,14 +307,19 @@ class WebSocketService {
         }
         _channel = channel;
       } else {
-        // Web platform: use token query parameter (browser WebSocket API
-        // doesn't support custom headers)
-        var webUri = uri;
+        // Web platform: browsers cannot set custom WebSocket headers, so
+        // we authenticate via the Sec-WebSocket-Protocol subprotocol,
+        // which the daemon's middleware extracts as bearer.<key>. This
+        // keeps the credential out of server access logs (unlike the
+        // legacy ?token= query param).
+        final protocols = <String>[];
         if (_apiKey != null && _apiKey.isNotEmpty) {
-          webUri = uri.replace(
-              queryParameters: {...uri.queryParameters, 'token': _apiKey});
+          protocols.add('bearer.$_apiKey');
         }
-        _channel = WebSocketChannel.connect(webUri);
+        _channel = WebSocketChannel.connect(
+          uri,
+          protocols: protocols.isNotEmpty ? protocols : null,
+        );
       }
 
       // Completer that resolves once the connection is confirmed.
