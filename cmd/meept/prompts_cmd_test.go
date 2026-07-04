@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -190,20 +189,4 @@ func TestPromptsCmd(t *testing.T) {
 	if len(cmd.Commands()) < 4 {
 		t.Errorf("expected at least 4 subcommands, got %d", len(cmd.Commands()))
 	}
-}
-
-// captureStdout captures fmt.Println output during fn.
-func captureStdout(t *testing.T, fn func()) string {
-	t.Helper()
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	fn()
-
-	w.Close()
-	os.Stdout = old
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(r)
-	return buf.String()
 }

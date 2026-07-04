@@ -1,7 +1,6 @@
 package services
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -330,22 +329,3 @@ func stripFrontmatter(body string) string {
 	return body
 }
 
-// renderForValidation executes the stripped template body with sample data.
-// Used by callers that want to catch execution errors (e.g., HTTP PUT
-// validation) in addition to parse errors. Callers that only need parse
-// validation should use ValidateTemplate instead.
-func renderForValidation(content string) error {
-	body := stripFrontmatter(content)
-	tmpl, err := template.New("validate").Parse(body)
-	if err != nil {
-		return fmt.Errorf("parse: %w", err)
-	}
-	// Execute with a permissive data map containing common placeholder
-	// values. Missing fields will NOT error because template.Option(missing=zero)
-	// is not set; however, the typical planner/reflection templates reference
-	// dot-notation fields that we cannot predict. We parse-only-validate by
-	// default; this helper is provided for callers that want deeper checks.
-	var buf bytes.Buffer
-	_ = tmpl.Execute(&buf, nil) // best-effort; parse errors already caught
-	return nil
-}

@@ -27,20 +27,8 @@ func newPromptsCmd() *cobra.Command {
 	return cmd
 }
 
-// promptServiceForCLI constructs a local PromptService for CLI use. The CLI
-// operates directly on the 4-tier hierarchy without requiring a daemon
-// connection — templates are static files on disk.
-func promptServiceForCLI() *localPromptService {
-	return &localPromptService{base: newLocalPromptBase()}
-}
-
-// localPromptService is a thin CLI-local wrapper that avoids importing the
-// services package directly (keeps the CLI binary lean). It mirrors the
-// 4-tier discovery order.
-type localPromptService struct {
-	base *localPromptBase
-}
-
+// localPromptBase is the base for CLI-local prompt operations.
+// Mirrors the services.localPromptBase 4-tier discovery order.
 type localPromptBase struct {
 	tiers []localTier
 }

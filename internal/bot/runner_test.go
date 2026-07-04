@@ -137,7 +137,6 @@ type countingExecutor struct {
 	failN    int32 // fail the first N calls, then succeed
 	output   string
 	tokens   int
-	lastErr  error
 	execFunc func(ctx context.Context, systemPrompt, userMessage string) (string, int, error)
 }
 
