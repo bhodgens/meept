@@ -286,12 +286,14 @@ class SdkApiClient {
 
   // ===== Health =====
 
-  Future<sdk.DaemonStatus?> healthCheck() async {
+  /// Returns the raw `/health` JSON `{status: ok}`.
+  ///
+  /// Do NOT deserialize into `sdk.DaemonStatus` — the OpenAPI schema for
+  /// that model does not match what `/health` actually returns. The
+  /// caller can check `result['status'] == 'ok'` directly.
+  Future<Map<String, dynamic>> healthCheck() async {
     try {
-      final response = await _dio.get('/health');
-      final raw = response.data as Map<String, dynamic>?;
-      if (raw == null) return null;
-      return _fromJson<sdk.DaemonStatus>(raw);
+      return await _get('/health');
     } on DioException catch (e) {
       throw _handleError(e);
     }
@@ -299,10 +301,16 @@ class SdkApiClient {
 
   // ===== Daemon =====
 
-  Future<sdk.DaemonStatus?> getDaemonStatus() async {
+  /// Returns the raw `/api/v1/daemon/status` JSON.
+  ///
+  /// The daemon returns `{running, pid, uptime, state, budget, runtimes}`
+  /// which does NOT match the OpenAPI-generated `sdk.DaemonStatus` model
+  /// (that model expects `{status, tokens_used, budget_used, ...}`).
+  /// Callers should access fields directly off the map. Existing callers
+  /// already use [getDaemonStatusRaw] for this reason.
+  Future<Map<String, dynamic>> getDaemonStatus() async {
     try {
-      final raw = await _get('/api/v1/daemon/status');
-      return _fromJson<sdk.DaemonStatus>(raw);
+      return await _get('/api/v1/daemon/status');
     } on DioException catch (e) {
       throw _handleError(e);
     }
