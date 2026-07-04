@@ -209,7 +209,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
       if (!mounted) return;
       setState(() {
         _projectPaths = projects
-            .map((p) => p['localPath'] as String? ?? p['name'] as String? ?? '')
+            .map((p) => p['local_path'] as String? ?? p['name'] as String? ?? '')
             .where((p) => p.isNotEmpty)
             .toList();
       });
@@ -545,14 +545,19 @@ class _ChatInputState extends ConsumerState<ChatInput>
   }
 
   /// Handle /project file picker trigger.
-  /// 
+  ///
   /// Shows a dialog with available project paths for selection.
-  void _handleProjectFilePicker() {
+  /// If project paths haven't been loaded yet, fetches them first.
+  Future<void> _handleProjectFilePicker() async {
+    if (_projectPaths.isEmpty) {
+      await _loadProjectPaths();
+      if (!mounted) return;
+    }
     if (_projectPaths.isEmpty) {
       debugPrint('[chat_input] no projects available');
       return;
     }
-    
+
     // Show dialog with project path options
     showDialog<String>(
       context: context,

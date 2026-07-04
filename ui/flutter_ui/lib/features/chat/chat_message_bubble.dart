@@ -138,7 +138,6 @@ class ChatMessageBubble extends StatelessWidget {
                       )
                     : null,
               ),
-              selectable: true,
               syntaxHighlighter: CyberpunkSyntaxHighlighter(),
               softLineBreak: true,
             ),

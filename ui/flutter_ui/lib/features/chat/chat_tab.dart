@@ -31,9 +31,7 @@ class _ChatTabState extends ConsumerState<ChatTab> {
     final activeTool = ref.watch(activeToolProvider);
 
     return BackgroundImage(
-      child: SelectionArea(
-        child: activeTool.isNotEmpty ? _buildToolView(activeTool) : ChatView(sessionId: widget.sessionId),
-      ),
+      child: activeTool.isNotEmpty ? _buildToolView(activeTool) : ChatView(sessionId: widget.sessionId),
     );
   }
 

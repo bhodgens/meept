@@ -101,9 +101,8 @@ class _SessionsDetailPaneState extends ConsumerState<SessionsDetailPane> {
         .where((p) => p.sourceSession == session.id || p.taskID == session.id)
         .toList();
 
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(24),
+    return Container(
+      padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -192,8 +191,7 @@ class _SessionsDetailPaneState extends ConsumerState<SessionsDetailPane> {
             const Spacer(),
           ],
         ),
-      ),
-    );
+      );
   }
 
   Widget _buildDetailRow(String label, String value) {

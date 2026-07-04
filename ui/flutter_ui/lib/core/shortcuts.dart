@@ -158,7 +158,13 @@ class LeaderKeyController extends ChangeNotifier {
       return KeyEventResult.handled;
     }
 
+    // Don't intercept single-key shortcuts (like 'f' for global search)
+    // when the user is typing in a text field. Let the character go through.
     if (_isGlobalSearchTrigger(event)) {
+      final primaryFocus = FocusManager.instance.primaryFocus;
+      if (primaryFocus != null && _focusIsTextInput(primaryFocus)) {
+        return KeyEventResult.ignored;
+      }
       onGlobalSearch?.call();
       return KeyEventResult.handled;
     }
@@ -166,6 +172,26 @@ class LeaderKeyController extends ChangeNotifier {
     // Escape is intentionally ignored here — the Focus system handles
     // dismissal of dialogs/popups via EscapeIntent.
     return KeyEventResult.ignored;
+  }
+
+  /// Returns true if the given focus node is (or descends from) an
+  /// EditableText field. Used to suppress single-key shortcuts while
+  /// the user is typing.
+  static bool _focusIsTextInput(FocusNode node) {
+    // Walk up the focus tree looking for an EditableText ancestor.
+    var current = node;
+    while (current != null) {
+      if (current.context?.widget is EditableText) {
+        return true;
+      }
+      // Check if the focused widget is a TextField or EditableText
+      final widget = current.context?.widget;
+      if (widget is TextField || widget is EditableText) {
+        return true;
+      }
+      current = current.parent;
+    }
+    return false;
   }
 
   static bool _isLeaderTrigger(KeyEvent event) {
