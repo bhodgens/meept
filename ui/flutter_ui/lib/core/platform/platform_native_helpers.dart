@@ -1,19 +1,22 @@
-/// Native-only platform helpers.
-///
-/// This file is ONLY imported by [platform_service.dart] and only
-/// executed on native platforms (not web). It contains dart:io
-/// imports that would crash on web if imported directly.
-///
-/// The web build compiler excludes this file entirely since it
-/// checks `kIsWeb` before calling these functions.
+// Native-only platform helpers.
+//
+// This file is ONLY imported by platform_service.dart and only
+// executed on native platforms (not web). It contains dart:io
+// imports that would crash on web if imported directly.
+//
+// The web build compiler should exclude this file entirely since it
+// checks kIsWeb before calling these functions.
+//
+// IMPORTANT: If you see Platform.* errors on web, it means this file
+// is being imported despite the kIsWeb guard. The fix is to use
+// conditional imports (export_web.dart / export_native.dart).
 library platform_native_helpers;
 
-import 'dart:io' show Platform, File, FileSystemException;
+import 'dart:io' show Platform, File, FileSystemException, X509Certificate;
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'dart:typed_data' show Uint8List;
 
 /// Detect if running on macOS.
-///
-/// Safe to call - returns false on any error.
 bool nativeIsMacOS() {
   try {
     return Platform.isMacOS;
@@ -41,8 +44,6 @@ bool nativeIsWindows() {
 }
 
 /// Get the home directory path on native platforms.
-///
-/// Returns null on web or if HOME environment variable is not set.
 Future<String?> getHomeDirectoryNative() async {
   try {
     return Platform.environment['HOME'] ??
@@ -53,8 +54,6 @@ Future<String?> getHomeDirectoryNative() async {
 }
 
 /// Read a file's contents on native platforms.
-///
-/// Returns null if the file doesn't exist, isn't readable, or on web.
 Future<String?> readFileNative(String path) async {
   try {
     final file = File(path);
