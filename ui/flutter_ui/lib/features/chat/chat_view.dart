@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
+import '../../theme/effects.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
 import '../../widgets/destructive_confirmation_dialog.dart';
@@ -81,7 +82,9 @@ class _ChatViewState extends ConsumerState<ChatView> {
     }
 
     return Container(
-      color: CyberpunkColors.black,
+      decoration: const BoxDecoration(
+        gradient: CyberpunkEffects.angularGradient,
+      ),
       child: Column(
         children: [
           // Orange header bar

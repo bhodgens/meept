@@ -5,7 +5,6 @@ import '../theme/typography.dart';
 import '../providers/providers.dart';
 import '../providers/verbosity_provider.dart';
 import '../providers/status_message_provider.dart';
-import '../providers/project_provider.dart';
 
 /// Single-line status bar pinned at the bottom of the HomeScreen.
 /// Mirrors TUI renderStatusBar (internal/tui/app.go:2236-2289).
@@ -142,16 +141,16 @@ class StatusBar extends ConsumerWidget {
   String? _projectPart(WidgetRef ref) {
     final p = ref.watch(currentProjectProvider);
     if (!p.isActive) return null;
-    // Use grapheme-cluster-aware truncation: String.substring is UTF-16
-    // code-unit based and can split surrogate pairs for emoji/astral-plane
-    // chars (e.g. "🛠" in project names), producing lone surrogates.
-    final chars = p.name.characters;
-    final name = chars.length > 16 ? '${chars.take(13).toString()}...' : p.name;
+    // Show localPath if available, otherwise fall back to name
+    final pathToShow = p.localPath.isNotEmpty ? p.localPath : p.name;
+    // Use grapheme-cluster-aware truncation for long paths
+    final chars = pathToShow.characters;
+    final displayPath = chars.length > 30 ? '...${chars.takeLast(27).toString()}' : pathToShow;
     if (p.mode == 'git') {
       final branch = p.branch.isNotEmpty ? ' ${p.branch}' : '';
       final dirty = p.dirty ? '*' : '';
-      return '[$name$branch$dirty]';
+      return '[$displayPath$branch$dirty]';
     }
-    return '[local:$name]';
+    return '[local:$displayPath]';
   }
 }

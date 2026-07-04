@@ -5,7 +5,6 @@ import 'package:go_router/go_router.dart';
 import '../../core/router.dart';
 import '../../core/shortcuts.dart';
 import '../../theme/colors.dart';
-import '../../theme/effects.dart';
 import '../../theme/typography.dart';
 import '../../widgets/command_palette.dart';
 import '../../widgets/status_bar.dart';
@@ -493,11 +492,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       controller: _leaderController,
       child: Scaffold(
         backgroundColor: CyberpunkColors.black,
-        body: Container(
-          decoration: const BoxDecoration(
-            gradient: CyberpunkEffects.angularGradient,
-          ),
-          child: SafeArea(
+        body: SafeArea(
             child: Column(
               children: [
                 // Top tab bar

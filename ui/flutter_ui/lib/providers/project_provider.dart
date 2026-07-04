@@ -16,6 +16,7 @@ class CurrentProject {
   final String mode; // "git" | "local" | ""
   final String branch; // git only
   final bool dirty; // git only
+  final String localPath; // project directory path
 
   const CurrentProject({
     required this.id,
@@ -23,10 +24,11 @@ class CurrentProject {
     required this.mode,
     required this.branch,
     required this.dirty,
+    this.localPath = '',
   });
 
   static const empty =
-      CurrentProject(id: '', name: '', mode: '', branch: '', dirty: false);
+      CurrentProject(id: '', name: '', mode: '', branch: '', dirty: false, localPath: '');
 
   bool get isActive => id.isNotEmpty;
 }
@@ -79,12 +81,14 @@ class CurrentProjectNotifier extends StateNotifier<CurrentProject> {
           debugPrint('[warn] currentProjectProvider status fetch: $e');
         }
       }
+      final localPathVal = (active['localPath'] as String?) ?? '';
       state = CurrentProject(
         id: id,
         name: name,
         mode: mode,
         branch: branch,
         dirty: dirty,
+        localPath: localPathVal,
       );
     } catch (e) {
       debugPrint('[warn] currentProjectProvider refresh: $e');

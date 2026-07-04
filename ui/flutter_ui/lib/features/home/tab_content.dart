@@ -29,11 +29,11 @@ class TabContent extends ConsumerWidget {
       case HomeTab.sessions:
         return const SessionsOverviewTab();
       case HomeTab.plans:
-        return const PlansTab();
+        return PlansTab();
       case HomeTab.tasks:
-        return const TasksTab();
+        return TasksTab();
       case HomeTab.agents:
-        return const AgentsTab();
+        return AgentsTab();
     }
   }
 }

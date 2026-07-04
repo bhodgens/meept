@@ -136,6 +136,17 @@ result, err := doNetworkCall(ctx, cfg)  // I/O outside lock
 - Default to clickable elements for context switching
 - **TUI and Flutter GUI features must be kept at parity.** When a feature is added or changed in one surface, the other surface gets the same capability. This includes: status bar elements, command palette items, keyboard shortcuts (prefer identical keys across surfaces — e.g., `Ctrl+V` for verbosity on all platforms, not `Cmd+V` on mac), session/agent/tab semantics (e.g., archive vs delete), and tab affordances. Document surface-specific deviations explicitly with a justification.
 
+## Flutter Multi-Platform (Web + Desktop)
+
+When modifying Flutter UI code, ensure web compatibility alongside desktop (macOS/Linux/Windows):
+
+- **Avoid top-level `dart:io` imports in shared code** — use `kIsWeb` guards or conditional imports
+- **Platform detection:** use `bool.fromEnvironment('dart.library.io')` for compile-time checks, `Platform.isMacOS` only in `!kIsWeb` guarded code
+- **File I/O:** wrap in `if (kIsWeb) return;` guards; web uses file pickers, not direct paths
+- **Platform abstraction:** for shared platform abstractions, use a singleton service pattern (e.g., `PlatformService`) that provides safe null/default returns on web
+
+**See also:** `ui/flutter_ui/lib/core/platform/platform_service.dart` and `platform_native_helpers.dart` for the platform abstraction layer pattern.
+
 ## Configuration
 
 All config uses **JSON5** format. Templates in `config/`, copied on `make install`.

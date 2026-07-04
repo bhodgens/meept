@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../theme/colors.dart';
 import '../../widgets/background_image.dart';
+import '../../theme/colors.dart';
 import 'tasks_list.dart';
 import 'tasks_detail.dart';
 import '../../models/api_models.dart';
@@ -17,29 +17,34 @@ class TasksTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final selectedTask = ref.watch(activeTaskProvider);
 
-    return BackgroundImage(
-      child: Row(
-        children: [
-          TasksList(
+    return Row(
+      children: [
+        SizedBox(
+          width: 280,
+          child: TasksList(
             onTaskSelected: (task) {
               ref.read(activeTaskProvider.notifier).state = task;
             },
           ),
-          if (selectedTask != null)
-            const Expanded(child: TasksDetail()),
-          if (selectedTask == null)
-            const Expanded(
-              child: Center(
-                child: Text(
-                  'select a task',
-                  style: TextStyle(
-                    color: CyberpunkColors.orangePrimary,
-                  ),
+        ),
+        if (selectedTask != null)
+          Expanded(
+            child: BackgroundImage(
+              child: const TasksDetail(),
+            ),
+          ),
+        if (selectedTask == null)
+          Expanded(
+            child: Center(
+              child: Text(
+                'select a task',
+                style: TextStyle(
+                  color: CyberpunkColors.orangePrimary,
                 ),
               ),
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 }

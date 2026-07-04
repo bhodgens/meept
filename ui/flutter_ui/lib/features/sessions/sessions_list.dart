@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:timeago/timeago.dart' as timeago;
@@ -19,12 +20,51 @@ class SessionsList extends ConsumerStatefulWidget {
 }
 
 class _SessionsListState extends ConsumerState<SessionsList> {
+  int _selectedIndex = 0;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(sessionProvider.notifier).loadSessions();
     });
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
+  /// Handle keyboard navigation for the sessions list.
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent && node.hasFocus) {
+      final sessionState = ref.read(sessionProvider);
+      final maxIndex = sessionState.sessions.length - 1;
+      if (maxIndex < 0) return KeyEventResult.ignored;
+
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        setState(() {
+          _selectedIndex = (_selectedIndex + 1).clamp(0, maxIndex);
+        });
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        setState(() {
+          _selectedIndex = (_selectedIndex - 1).clamp(0, maxIndex);
+        });
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.enter) {
+        final sessions = sessionState.sessions;
+        if (_selectedIndex >= 0 && _selectedIndex < sessions.length) {
+          ref.read(activeSessionProvider.notifier).state = sessions[_selectedIndex];
+          ref.read(tabActivationProvider.notifier).state = HomeTab.chat;
+          context.go('/');
+        }
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
   }
 
   Future<void> _showCreateSessionDialog() async {
@@ -262,13 +302,23 @@ class _SessionsListState extends ConsumerState<SessionsList> {
             )
           else
             Expanded(
-              child: ListView.builder(
-                itemCount: sessionState.sessions.length,
-                itemBuilder: (context, index) {
-                  final session = sessionState.sessions[index];
-                  final isSelected = activeSession?.id == session.id;
-                  return _buildSessionTile(session, isSelected);
+              child: Focus(
+                autofocus: true,
+                onFocusChange: (hasFocus) {
+                  if (hasFocus) {
+                    ref.read(keyboardFocusProvider.notifier).setFocusedPane(0);
+                  }
                 },
+                onKeyEvent: _handleKey,
+                child: ListView.builder(
+                  itemCount: sessionState.sessions.length,
+                  itemBuilder: (context, index) {
+                    final session = sessionState.sessions[index];
+                    final isSelected = activeSession?.id == session.id;
+                    final isKeyboardSelected = _selectedIndex == index;
+                    return _buildSessionTile(session, isSelected || isKeyboardSelected, isKeyboardSelected);
+                  },
+                ),
               ),
             ),
         ],
@@ -276,7 +326,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
     );
   }
 
-  Widget _buildSessionTile(Session session, bool isSelected) {
+  Widget _buildSessionTile(Session session, bool isSelected, bool isKeyboardSelected) {
     return Opacity(
       opacity: session.archived ? 0.5 : 1.0,
       child: InkWell(
