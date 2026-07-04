@@ -179,7 +179,7 @@ class LeaderKeyController extends ChangeNotifier {
   /// the user is typing.
   static bool _focusIsTextInput(FocusNode node) {
     // Walk up the focus tree looking for an EditableText ancestor.
-    var current = node;
+    FocusNode? current = node;
     while (current != null) {
       if (current.context?.widget is EditableText) {
         return true;
