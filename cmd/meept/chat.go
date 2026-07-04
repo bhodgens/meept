@@ -135,8 +135,8 @@ func getOrCreateOneshotSession(client transport.Client) (string, error) {
 		for _, s := range sessions {
 			if sess, ok := s.(map[string]any); ok {
 				if name, ok := sess["name"].(string); ok && name == "oneshot_responses" {
-					if id, ok := sess["id"].(string); ok {
-						return id, nil
+					if sessID, ok := sess["id"].(string); ok {
+						return sessID, nil
 					}
 				}
 			}
@@ -156,8 +156,8 @@ func getOrCreateOneshotSession(client transport.Client) (string, error) {
 		return "", fmt.Errorf("failed to parse create response: %w", err)
 	}
 
-	if id, ok := createMap["id"].(string); ok && id != "" {
-		return id, nil
+	if sessID, ok := createMap["id"].(string); ok && sessID != "" {
+		return sessID, nil
 	}
 
 	return "", fmt.Errorf("failed to get session ID from create response")
