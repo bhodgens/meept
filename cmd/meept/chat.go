@@ -12,6 +12,7 @@ import (
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tui"
+	"github.com/caimlas/meept/internal/transport"
 	"github.com/caimlas/meept/pkg/id"
 )
 
@@ -52,16 +53,13 @@ Examples:
 }
 
 func runChat(cmd *cobra.Command, args []string) error {
-	// Check if we have a message argument
-	if len(args) == 0 {
-		// No arguments - launch TUI
-		// TUI always uses RPC directly (it needs streaming/event RPC)
-		return runTUI()
+	// Extract message from args (may be empty for TUI launch)
+	var message string
+	if len(args) > 0 {
+		message = args[0]
 	}
 
-	message := args[0]
-
-	// Check for stdin input
+	// Handle stdin input
 	if message == "-" {
 		var sb strings.Builder
 		scanner := bufio.NewScanner(os.Stdin)
@@ -77,63 +75,128 @@ func runChat(cmd *cobra.Command, args []string) error {
 		message = sb.String()
 	}
 
-	if strings.TrimSpace(message) == "" {
-		return fmt.Errorf("empty message")
-	}
-
-	// Single message mode - uses transport.Client for --transport flag support
+	// Connect to daemon
 	client, err := connectDaemon()
 	if err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept daemon start", err)
 	}
 	defer client.Close()
 
-	// Generate a conversation ID for this single message.
-	// Include a nanosecond timestamp so multiple `meept "msg"` invocations
-	// from the same shell do not collide in the session store.
-	conversationID := id.Generate("cli-")
-
-	// If --project or --nofence are set, create a managed session and bind project
-	if chatProject != "" || chatNoFence {
-		sessParams := map[string]any{
-			"name":     "cli-single",
-			"no_fence": chatNoFence,
+	// CASE 1: --session with message - append to session, print response, exit
+	if chatSessionID != "" && message != "" {
+		if strings.TrimSpace(message) == "" {
+			return fmt.Errorf("empty message")
 		}
-		if chatProject != "" {
-			sessParams["project_id"] = chatProject
-		} else {
-			// No project specified; let daemon auto-detect from cwd
-			cwd, _ := os.Getwd()
-			sessParams["detect_path"] = cwd
-		}
+		return chatWithSession(client, chatSessionID, message)
+	}
 
-		rawResult, err := client.Call("session.create", sessParams)
+	// CASE 2: --session without message - open TUI to that session
+	if chatSessionID != "" && message == "" {
+		return openTUIToSession(chatSessionID)
+	}
+
+	// CASE 3: No --session with message - use oneshot_responses
+	if chatSessionID == "" && message != "" {
+		if strings.TrimSpace(message) == "" {
+			return fmt.Errorf("empty message")
+		}
+		sessionID, err := getOrCreateOneshotSession(client)
 		if err != nil {
-			return fmt.Errorf("failed to create session: %w", err)
+			// Fallback to ephemeral session
+			sessionID = id.Generate("cli-")
 		}
-
-		var sessResult map[string]any
-		if err := json.Unmarshal(rawResult, &sessResult); err != nil {
-			return fmt.Errorf("failed to parse session response: %w", err)
+		reply, err := client.Chat(message, sessionID)
+		if err != nil {
+			return fmt.Errorf("%s", llm.UserMessage(err))
 		}
+		fmt.Println(reply)
+		return nil
+	}
 
-		if errMsg, ok := sessResult["error"].(string); ok && errMsg != "" {
-			return fmt.Errorf("session create error: %s", errMsg)
-		}
+	// CASE 4: No args, no --session - open TUI to most recent
+	return runTUI()
+}
 
-		// Use the created session's conversation ID
-		if sid, ok := sessResult["id"].(string); ok && sid != "" {
-			conversationID = sid
+// getOrCreateOneshotSession finds the oneshot_responses session or creates it.
+func getOrCreateOneshotSession(client transport.Client) (string, error) {
+	// Try to find existing oneshot_responses session
+	rawResult, err := client.Call("session.list", map[string]int{"limit": 100})
+	if err != nil {
+		return "", fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	var resultMap map[string]any
+	if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+		return "", fmt.Errorf("failed to parse sessions: %w", err)
+	}
+
+	sessions, ok := resultMap["sessions"].([]any)
+	if ok {
+		for _, s := range sessions {
+			if sess, ok := s.(map[string]any); ok {
+				if name, ok := sess["name"].(string); ok && name == "oneshot_responses" {
+					if id, ok := sess["id"].(string); ok {
+						return id, nil
+					}
+				}
+			}
 		}
 	}
 
-	reply, err := client.Chat(message, conversationID)
+	// Create oneshot_responses session if not found
+	createResult, err := client.Call("session.create", map[string]string{
+		"name": "oneshot_responses",
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create oneshot session: %w", err)
+	}
+
+	var createMap map[string]any
+	if err := json.Unmarshal(createResult, &createMap); err != nil {
+		return "", fmt.Errorf("failed to parse create response: %w", err)
+	}
+
+	if id, ok := createMap["id"].(string); ok && id != "" {
+		return id, nil
+	}
+
+	return "", fmt.Errorf("failed to get session ID from create response")
+}
+
+// chatWithSession sends a message to an existing session after validating it exists.
+func chatWithSession(client transport.Client, sessionID, message string) error {
+	// Verify session exists
+	getParams := map[string]string{"session_id": sessionID}
+	rawResult, err := client.Call("session.get", getParams)
+	if err != nil {
+		return fmt.Errorf("failed to get session %s: %w", sessionID, err)
+	}
+
+	var resultMap map[string]any
+	if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+		return fmt.Errorf("failed to parse session response: %w", err)
+	}
+
+	if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
+		return fmt.Errorf("session %q not found", sessionID)
+	}
+
+	// Session exists - send message
+	reply, err := client.Chat(message, sessionID)
 	if err != nil {
 		return fmt.Errorf("%s", llm.UserMessage(err))
 	}
 
 	fmt.Println(reply)
 	return nil
+}
+
+// openTUIToSession opens the TUI targeted to a specific session.
+// Currently stubbed - opens TUI to most recent session.
+func openTUIToSession(sessionID string) error {
+	// TODO: Extend TUI to accept target session ID
+	fmt.Fprintf(os.Stderr, "Note: TUI session targeting not yet implemented, opening to most recent\n")
+	return runTUI()
 }
 
 func runTUI() error {
