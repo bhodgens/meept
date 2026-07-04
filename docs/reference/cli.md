@@ -33,7 +33,7 @@ meept chat "What's the weather like?"
 meept chat --session session-abc123 "continue implementing that feature"
 
 # Shorthand for --session
-meept chat -s session-abc123 "msg"
+
 
 # Open TUI to specific session
 meept chat --session session-abc123
@@ -43,7 +43,7 @@ echo "Hello world" | meept chat -
 ```
 
 **Options:**
-- `--session, -s` - Target specific session by ID (canonical format: `session-XXXXXXXXXXXXXXXX`)
+- `--session` - Target specific session by ID (canonical format: `session-XXXXXXXXXXXXXXXX`)
 - `--project` - Bind session to named project
 - `--nofence` - Disable path fencing for this session
 
