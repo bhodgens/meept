@@ -19,15 +19,19 @@ class TasksTab extends ConsumerWidget {
 
     return Row(
       children: [
-        SizedBox(
+        const SizedBox(
           width: 300,
-          child: const TasksList(),
+          child: TasksList(),
         ),
         const VerticalDivider(width: 1),
         if (selectedTask != null)
-          const Expanded(child: TasksDetail())
-        else
           Expanded(
+            child: BackgroundImage(
+              child: const TasksDetail(),
+            ),
+          )
+        else
+          const Expanded(
             child: Center(
               child: Text(
                 'select a task',

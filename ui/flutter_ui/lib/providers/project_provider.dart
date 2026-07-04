@@ -81,7 +81,7 @@ class CurrentProjectNotifier extends StateNotifier<CurrentProject> {
           debugPrint('[warn] currentProjectProvider status fetch: $e');
         }
       }
-      final localPathVal = (active['localPath'] as String?) ?? '';
+      final localPathVal = (active['local_path'] as String?) ?? '';
       state = CurrentProject(
         id: id,
         name: name,

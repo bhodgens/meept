@@ -118,15 +118,16 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
       });
     }
 
-    return NotificationListener<ScrollNotification>(
-      onNotification: (notification) {
-        if (notification is ScrollEndNotification) {
-          final metrics = notification.metrics;
-          _isAtBottom = metrics.pixels >= metrics.maxScrollExtent - 100;
-        }
-        return false;
-      },
-      child: Stack(
+    return SelectionArea(
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          if (notification is ScrollEndNotification) {
+            final metrics = notification.metrics;
+            _isAtBottom = metrics.pixels >= metrics.maxScrollExtent - 100;
+          }
+          return false;
+        },
+        child: Stack(
         children: [
           Positioned.fill(
             child: chatState.messages.isEmpty
@@ -241,7 +242,8 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
             ),
         ],
       ),
-    );
+    ),  // NotificationListener
+  );  // SelectionArea
   }
 
   /// Scrolls so the current find match is visible.

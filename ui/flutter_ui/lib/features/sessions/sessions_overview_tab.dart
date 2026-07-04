@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/providers.dart';
 import '../../widgets/background_image.dart';
 import 'sessions_list.dart';

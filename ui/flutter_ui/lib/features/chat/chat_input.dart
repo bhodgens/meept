@@ -546,16 +546,47 @@ class _ChatInputState extends ConsumerState<ChatInput>
 
   /// Handle /project file picker trigger.
   /// 
-  /// On native platforms, opens OS file picker for directory selection.
-  /// On web, this would need a daemon-side file browser API.
+  /// Shows a dialog with available project paths for selection.
   void _handleProjectFilePicker() {
-    if (kIsWeb) {
-      // Web: TODO - implement daemon-side file browser API
-      debugPrint('[chat_input] /project file picker not yet implemented for web');
+    if (_projectPaths.isEmpty) {
+      debugPrint('[chat_input] no projects available');
       return;
     }
-    // Native: TODO - implement using file_picker package
-    debugPrint('[chat_input] /project file picker not yet implemented for native');
+    
+    // Show dialog with project path options
+    showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: CyberpunkColors.darkGray,
+        title: const Text('select project', style: CyberpunkTypography.headlineMedium),
+        contentPadding: EdgeInsets.zero,
+        content: SizedBox(
+          width: 400,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _projectPaths.length,
+            itemBuilder: (context, index) {
+              final path = _projectPaths[index];
+              return ListTile(
+                title: Text(
+                  path,
+                  style: CyberpunkTypography.bodyMedium,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () {
+                  Navigator.pop(context, path);
+                },
+              );
+            },
+          ),
+        ),
+      ),
+    ).then((selectedPath) {
+      if (selectedPath != null) {
+        _onProjectSelected(selectedPath);
+      }
+    });
   }
 
   /// Try to handle a slash command locally.

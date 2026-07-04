@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
-import '../../theme/effects.dart';
+import '../../widgets/background_image.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
 import '../../widgets/destructive_confirmation_dialog.dart';
@@ -79,10 +79,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
       headerText = 'meept';
     }
 
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: CyberpunkEffects.angularGradient,
-      ),
+    return BackgroundImage(
       child: Column(
         children: [
           // Orange header bar

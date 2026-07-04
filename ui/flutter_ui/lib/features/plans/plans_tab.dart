@@ -62,8 +62,7 @@ class _PlansTabState extends ConsumerState<PlansTab> {
     final planState = ref.watch(planProvider);
     final activeSession = ref.watch(activeSessionProvider);
 
-    return BackgroundImage(
-      child: Row(
+    return Row(
         children: [
           // Plan list
           SizedBox(
@@ -73,17 +72,18 @@ class _PlansTabState extends ConsumerState<PlansTab> {
           Container(width: 1, color: CyberpunkColors.orangeDark.withValues(alpha: 0.3)),
           // Plan detail
           Expanded(
-            child: planState.plans.isEmpty
-                ? _buildEmptyState()
-                : _PlanDetailPane(
-                    plans: planState.plans,
-                    sessionId: activeSession?.id,
-                    selectedIndex: _selectedIndex,
-                  ),
+            child: BackgroundImage(
+              child: planState.plans.isEmpty
+                  ? _buildEmptyState()
+                  : _PlanDetailPane(
+                      plans: planState.plans,
+                      sessionId: activeSession?.id,
+                      selectedIndex: _selectedIndex,
+                    ),
+              ),
           ),
         ],
-      ),
-    );
+      );
   }
 
   Widget _buildPlanList(PlanState planState) {
