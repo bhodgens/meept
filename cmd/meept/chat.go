@@ -36,7 +36,6 @@ Examples:
   meept chat                           # Interactive TUI
   meept chat "What time is it?"        # Single message (uses oneshot_responses)
   meept chat --session session-abc "msg"  # Send to specific session
-  meept chat -s session-abc "msg"      # Shorthand for --session
   meept chat --session session-abc     # Open TUI to specific session
   echo "Hello" | meept chat -          # Read from stdin
   meept chat --project myapp           # Bind session to project
@@ -47,7 +46,7 @@ Examples:
 
 	cmd.Flags().StringVar(&chatProject, "project", "", "bind session to named project")
 	cmd.Flags().BoolVar(&chatNoFence, "nofence", false, "disable path fencing for this session")
-	cmd.Flags().StringVarP(&chatSessionID, "session", "s", "", "target specific session by ID")
+	cmd.Flags().StringVar(&chatSessionID, "session", "", "target specific session by ID")
 
 	return cmd
 }
