@@ -217,7 +217,7 @@ func (ps *PricingSyncer) StartPeriodicSync(ctx context.Context) chan struct{} {
 		for {
 			select {
 			case <-ticker.C:
-				if err := ps.Sync(context.Background()); err != nil {
+				if err := ps.Sync(ctx); err != nil {
 					ps.logger.Warn("Periodic pricing sync failed", "error", err)
 				}
 			case <-stop:

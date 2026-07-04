@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -453,7 +454,7 @@ func TestHTTPTransport_Chat(t *testing.T) {
 	}
 	defer client.Close()
 
-	reply, err := client.Chat("Hello", "conv-1")
+	reply, err := client.Chat(context.Background(), "Hello", "conv-1")
 	if err != nil {
 		t.Fatalf("Chat failed: %v", err)
 	}
@@ -640,7 +641,7 @@ func TestRPCTransport_Chat(t *testing.T) {
 	}
 	defer client.Close()
 
-	reply, err := client.Chat("Hello", "conv-1")
+	reply, err := client.Chat(context.Background(), "Hello", "conv-1")
 	if err != nil {
 		t.Fatalf("Chat failed: %v", err)
 	}

@@ -3,6 +3,7 @@ package transport
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -114,7 +115,7 @@ func (c *SDKClient) Call(method string, params any) (json.RawMessage, error) {
 }
 
 // Chat sends a chat message and returns the response.
-func (c *SDKClient) Chat(message, conversationID string) (string, error) {
+func (c *SDKClient) Chat(ctx context.Context, message, conversationID string) (string, error) {
 	req := meeptclient.NewChatRequest(message, conversationID)
 
 	reqBody, err := json.Marshal(req)
@@ -122,11 +123,14 @@ func (c *SDKClient) Chat(message, conversationID string) (string, error) {
 		return "", fmt.Errorf("marshal chat request: %w", err)
 	}
 
-	resp, err := c.cfg.HTTPClient.Post(
-		c.baseURL+"/api/v1/chat",
-		"application/json",
-		bytes.NewReader(reqBody),
-	)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.baseURL+"/api/v1/chat", bytes.NewReader(reqBody))
+	if err != nil {
+		return "", fmt.Errorf("build chat request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.cfg.HTTPClient.Do(httpReq)
 	if err != nil {
 		return "", err
 	}

@@ -307,7 +307,7 @@ func (t *StdioTransport) Close() error {
 	// Give the process a chance to exit gracefully
 	done := make(chan error, 1)
 	go func() {
-		done <- t.cmd.Wait()
+		done <- t.cmd.Wait() //nolint:mutexio // mutex serializes subprocess teardown; Wait reaps the process under the same lock that owns the cmd
 	}()
 
 	select {

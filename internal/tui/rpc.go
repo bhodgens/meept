@@ -278,7 +278,10 @@ func (c *RPCClient) SetTimeout(d time.Duration) {
 }
 
 // Chat sends a chat message and returns the response.
-func (c *RPCClient) Chat(message, conversationID string) (string, error) {
+func (c *RPCClient) Chat(ctx context.Context, message, conversationID string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	params := map[string]string{
 		ParamMessage:        message,
 		ParamConversationID: conversationID,
@@ -307,12 +310,15 @@ func (c *RPCClient) Chat(message, conversationID string) (string, error) {
 // ChatWithParts sends a chat message with multimodal content parts (e.g.
 // image_url references to uploaded files) and returns the response. When
 // parts is empty this behaves identically to Chat.
-func (c *RPCClient) ChatWithParts(message, conversationID string, parts []llm.ContentPart) (string, error) {
+func (c *RPCClient) ChatWithParts(ctx context.Context, message, conversationID string, parts []llm.ContentPart) (string, error) {
 	// Fast path: no parts, delegate to plain Chat to avoid touching params shape.
 	if len(parts) == 0 {
-		return c.Chat(message, conversationID)
+		return c.Chat(ctx, message, conversationID)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	params := map[string]any{
 		ParamMessage:        message,
 		ParamConversationID: conversationID,

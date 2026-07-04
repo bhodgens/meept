@@ -211,7 +211,7 @@ func (c *httpClient) SetTimeout(d time.Duration) {
 }
 
 // callAPI sends a JSON POST to the daemon bus proxy endpoint.
-func (c *httpClient) callAPI(method string, params any) (json.RawMessage, error) {
+func (c *httpClient) callAPI(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	payload := map[string]any{
 		"method": method,
 		"params": params,
@@ -220,7 +220,7 @@ func (c *httpClient) callAPI(method string, params any) (json.RawMessage, error)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.baseURL+"/api/v1/bus/call", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -259,11 +259,11 @@ func (c *httpClient) callAPI(method string, params any) (json.RawMessage, error)
 
 // Call makes a generic API call via the bus proxy.
 func (c *httpClient) Call(method string, params any) (json.RawMessage, error) {
-	return c.callAPI(method, params)
+	return c.callAPI(context.Background(), method, params)
 }
 
 // Chat sends a chat message via HTTP and returns the response.
-func (c *httpClient) Chat(message, conversationID string) (string, error) {
+func (c *httpClient) Chat(ctx context.Context, message, conversationID string) (string, error) {
 	params := map[string]string{
 		"message":         message,
 		"conversation_id": conversationID,
@@ -272,7 +272,7 @@ func (c *httpClient) Chat(message, conversationID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.baseURL+"/api/v1/chat", bytes.NewReader(body))
 	if err != nil {
 		return "", err
@@ -304,7 +304,7 @@ func (c *httpClient) Chat(message, conversationID string) (string, error) {
 
 // Status gets daemon status via the bus proxy.
 func (c *httpClient) Status() (*types.DaemonStatusResponse, error) {
-	result, err := c.callAPI("status", nil)
+	result, err := c.callAPI(context.Background(), "status", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +317,7 @@ func (c *httpClient) Status() (*types.DaemonStatusResponse, error) {
 
 // ListJobs lists scheduled jobs.
 func (c *httpClient) ListJobs() (*types.JobListResponse, error) {
-	result, err := c.callAPI("scheduler.list_jobs", nil)
+	result, err := c.callAPI(context.Background(), "scheduler.list_jobs", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +330,7 @@ func (c *httpClient) ListJobs() (*types.JobListResponse, error) {
 
 // QueryMemory queries the memory store.
 func (c *httpClient) QueryMemory(query string, limit int) (*types.MemoryQueryResponse, error) {
-	result, err := c.callAPI("memory.query", map[string]any{"query": query, "limit": limit})
+	result, err := c.callAPI(context.Background(), "memory.query", map[string]any{"query": query, "limit": limit})
 	if err != nil {
 		return nil, err
 	}
@@ -343,7 +343,7 @@ func (c *httpClient) QueryMemory(query string, limit int) (*types.MemoryQueryRes
 
 // GetRecentMemories retrieves recent memories.
 func (c *httpClient) GetRecentMemories(limit int) (*types.MemoryQueryResponse, error) {
-	result, err := c.callAPI("memory.recent", map[string]any{"limit": limit})
+	result, err := c.callAPI(context.Background(), "memory.recent", map[string]any{"limit": limit})
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +356,7 @@ func (c *httpClient) GetRecentMemories(limit int) (*types.MemoryQueryResponse, e
 
 // ListWorkers lists active workers.
 func (c *httpClient) ListWorkers() (*types.WorkerListResponse, error) {
-	result, err := c.callAPI("agent.workers.list", nil)
+	result, err := c.callAPI(context.Background(), "agent.workers.list", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -369,7 +369,7 @@ func (c *httpClient) ListWorkers() (*types.WorkerListResponse, error) {
 
 // GetQueueStats returns queue statistics.
 func (c *httpClient) GetQueueStats() (*types.QueueStatsResponse, error) {
-	result, err := c.callAPI("queue.stats", nil)
+	result, err := c.callAPI(context.Background(), "queue.stats", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -382,7 +382,7 @@ func (c *httpClient) GetQueueStats() (*types.QueueStatsResponse, error) {
 
 // ListQueueJobs lists queue jobs.
 func (c *httpClient) ListQueueJobs(state string, limit int) (*types.QueueJobListResponse, error) {
-	result, err := c.callAPI("queue.list", map[string]any{"state": state, "limit": limit})
+	result, err := c.callAPI(context.Background(), "queue.list", map[string]any{"state": state, "limit": limit})
 	if err != nil {
 		return nil, err
 	}
@@ -395,7 +395,7 @@ func (c *httpClient) ListQueueJobs(state string, limit int) (*types.QueueJobList
 
 // ListTasks lists tasks.
 func (c *httpClient) ListTasks(state string, limit int) (*types.TaskListResponse, error) {
-	result, err := c.callAPI("task.list", map[string]any{"state": state, "limit": limit})
+	result, err := c.callAPI(context.Background(), "task.list", map[string]any{"state": state, "limit": limit})
 	if err != nil {
 		return nil, err
 	}
@@ -408,7 +408,7 @@ func (c *httpClient) ListTasks(state string, limit int) (*types.TaskListResponse
 
 // CreateTask creates a new task.
 func (c *httpClient) CreateTask(name, description string) (*types.Task, error) {
-	result, err := c.callAPI("task.create", map[string]string{"name": name, "description": description})
+	result, err := c.callAPI(context.Background(), "task.create", map[string]string{"name": name, "description": description})
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +421,7 @@ func (c *httpClient) CreateTask(name, description string) (*types.Task, error) {
 
 // GetTask retrieves a task by ID.
 func (c *httpClient) GetTask(taskID string) (*types.Task, error) {
-	result, err := c.callAPI("task.get", map[string]string{"id": taskID})
+	result, err := c.callAPI(context.Background(), "task.get", map[string]string{"id": taskID})
 	if err != nil {
 		return nil, err
 	}
@@ -434,7 +434,7 @@ func (c *httpClient) GetTask(taskID string) (*types.Task, error) {
 
 // CacheStats returns cache statistics.
 func (c *httpClient) CacheStats() (*types.CacheStatsResponse, error) {
-	result, err := c.callAPI("cache.stats", nil)
+	result, err := c.callAPI(context.Background(), "cache.stats", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -447,19 +447,19 @@ func (c *httpClient) CacheStats() (*types.CacheStatsResponse, error) {
 
 // CacheClear clears the token cache.
 func (c *httpClient) CacheClear() error {
-	_, err := c.callAPI("cache.clear", nil)
+	_, err := c.callAPI(context.Background(), "cache.clear", nil)
 	return err
 }
 
 // CacheInvalidate invalidates cache entries for a file.
 func (c *httpClient) CacheInvalidate(filePath string) error {
-	_, err := c.callAPI("cache.invalidate", map[string]string{"file_path": filePath})
+	_, err := c.callAPI(context.Background(), "cache.invalidate", map[string]string{"file_path": filePath})
 	return err
 }
 
 // CacheInspect inspects cache entries matching a prompt hash.
 func (c *httpClient) CacheInspect(promptHash string) (*types.CacheInspectResponse, error) {
-	result, err := c.callAPI("cache.inspect", map[string]string{"prompt_hash": promptHash})
+	result, err := c.callAPI(context.Background(), "cache.inspect", map[string]string{"prompt_hash": promptHash})
 	if err != nil {
 		return nil, err
 	}
@@ -474,7 +474,7 @@ func (c *httpClient) CacheInspect(promptHash string) (*types.CacheInspectRespons
 
 // ListSessions lists all sessions.
 func (c *httpClient) ListSessions() (*types.SessionListResponse, error) {
-	result, err := c.callAPI("session.list", nil)
+	result, err := c.callAPI(context.Background(), "session.list", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -487,7 +487,7 @@ func (c *httpClient) ListSessions() (*types.SessionListResponse, error) {
 
 // CreateSession creates a new session.
 func (c *httpClient) CreateSession(name string) (*types.Session, error) {
-	result, err := c.callAPI("session.create", map[string]string{"name": name})
+	result, err := c.callAPI(context.Background(), "session.create", map[string]string{"name": name})
 	if err != nil {
 		return nil, err
 	}
@@ -500,19 +500,19 @@ func (c *httpClient) CreateSession(name string) (*types.Session, error) {
 
 // AttachSession attaches a client to a session.
 func (c *httpClient) AttachSession(sessionID, clientID string) error {
-	_, err := c.callAPI("session.attach", map[string]string{"session_id": sessionID, "client_id": clientID})
+	_, err := c.callAPI(context.Background(), "session.attach", map[string]string{"session_id": sessionID, "client_id": clientID})
 	return err
 }
 
 // DetachSession detaches a client from a session.
 func (c *httpClient) DetachSession(sessionID, clientID string) error {
-	_, err := c.callAPI("session.detach", map[string]string{"session_id": sessionID, "client_id": clientID})
+	_, err := c.callAPI(context.Background(), "session.detach", map[string]string{"session_id": sessionID, "client_id": clientID})
 	return err
 }
 
 // GetMostRecentSession returns the most recent session.
 func (c *httpClient) GetMostRecentSession() (*types.Session, error) {
-	result, err := c.callAPI("session.get_most_recent", nil)
+	result, err := c.callAPI(context.Background(), "session.get_most_recent", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -525,7 +525,7 @@ func (c *httpClient) GetMostRecentSession() (*types.Session, error) {
 
 // GetSessionMessages retrieves session messages.
 func (c *httpClient) GetSessionMessages(sessionID string, offset, limit int) (*types.SessionMessagesResponse, error) {
-	result, err := c.callAPI("session.messages.get", map[string]any{"session_id": sessionID, "offset": offset, "limit": limit})
+	result, err := c.callAPI(context.Background(), "session.messages.get", map[string]any{"session_id": sessionID, "offset": offset, "limit": limit})
 	if err != nil {
 		return nil, err
 	}
@@ -538,19 +538,19 @@ func (c *httpClient) GetSessionMessages(sessionID string, offset, limit int) (*t
 
 // SaveSessionMessages saves messages to a session.
 func (c *httpClient) SaveSessionMessages(sessionID string, messages []types.SessionMessage) error {
-	_, err := c.callAPI("session.messages.save", map[string]any{"session_id": sessionID, "messages": messages})
+	_, err := c.callAPI(context.Background(), "session.messages.save", map[string]any{"session_id": sessionID, "messages": messages})
 	return err
 }
 
 // UpdateSessionDescription updates a session description.
 func (c *httpClient) UpdateSessionDescription(sessionID, description string) error {
-	_, err := c.callAPI("session.update_description", map[string]string{"session_id": sessionID, "description": description})
+	_, err := c.callAPI(context.Background(), "session.update_description", map[string]string{"session_id": sessionID, "description": description})
 	return err
 }
 
 // GenerateSessionDescription generates a session description.
 func (c *httpClient) GenerateSessionDescription(sessionID, firstMessage, projectName string) (*types.GenerateDescriptionResult, error) {
-	result, err := c.callAPI("session.generate_description", map[string]string{
+	result, err := c.callAPI(context.Background(), "session.generate_description", map[string]string{
 		"session_id":    sessionID,
 		"first_message": firstMessage,
 		"project_name":  projectName,
@@ -567,13 +567,13 @@ func (c *httpClient) GenerateSessionDescription(sessionID, firstMessage, project
 
 // DeleteSession deletes a session.
 func (c *httpClient) DeleteSession(sessionID string) error {
-	_, err := c.callAPI("session.delete", map[string]string{"id": sessionID})
+	_, err := c.callAPI(context.Background(), "session.delete", map[string]string{"id": sessionID})
 	return err
 }
 
 // StopSession stops a session.
 func (c *httpClient) StopSession(sessionID string) (*types.StopSessionResponse, error) {
-	result, err := c.callAPI("session.stop", map[string]string{"session_id": sessionID})
+	result, err := c.callAPI(context.Background(), "session.stop", map[string]string{"session_id": sessionID})
 	if err != nil {
 		return nil, err
 	}
@@ -586,7 +586,7 @@ func (c *httpClient) StopSession(sessionID string) (*types.StopSessionResponse, 
 
 // GetSessionChildTasks returns child task IDs for a session.
 func (c *httpClient) GetSessionChildTasks(sessionID string) ([]string, error) {
-	result, err := c.callAPI("session.get_child_tasks", map[string]string{"session_id": sessionID})
+	result, err := c.callAPI(context.Background(), "session.get_child_tasks", map[string]string{"session_id": sessionID})
 	if err != nil {
 		return nil, err
 	}
@@ -603,7 +603,7 @@ func (c *httpClient) GetSessionChildTasks(sessionID string) ([]string, error) {
 
 // ListTasksExtended lists tasks with extended fields.
 func (c *httpClient) ListTasksExtended() (*types.TaskExtendedListResponse, error) {
-	result, err := c.callAPI("task.list_extended", nil)
+	result, err := c.callAPI(context.Background(), "task.list_extended", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -616,7 +616,7 @@ func (c *httpClient) ListTasksExtended() (*types.TaskExtendedListResponse, error
 
 // ListTaskSteps returns steps for a task.
 func (c *httpClient) ListTaskSteps(taskID string) (*types.TaskStepsResponse, error) {
-	result, err := c.callAPI("task.steps", map[string]string{"task_id": taskID})
+	result, err := c.callAPI(context.Background(), "task.steps", map[string]string{"task_id": taskID})
 	if err != nil {
 		return nil, err
 	}
@@ -629,25 +629,25 @@ func (c *httpClient) ListTaskSteps(taskID string) (*types.TaskStepsResponse, err
 
 // DeleteTask deletes a task.
 func (c *httpClient) DeleteTask(taskID string) error {
-	_, err := c.callAPI("task.delete", map[string]string{"id": taskID})
+	_, err := c.callAPI(context.Background(), "task.delete", map[string]string{"id": taskID})
 	return err
 }
 
 // CancelTask cancels a task.
 func (c *httpClient) CancelTask(taskID string) error {
-	_, err := c.callAPI("task.cancel", map[string]string{"id": taskID})
+	_, err := c.callAPI(context.Background(), "task.cancel", map[string]string{"id": taskID})
 	return err
 }
 
 // LinkTaskSession links a session to a task.
 func (c *httpClient) LinkTaskSession(taskID, sessionID string) error {
-	_, err := c.callAPI("task.link", map[string]string{"task_id": taskID, "session_id": sessionID})
+	_, err := c.callAPI(context.Background(), "task.link", map[string]string{"task_id": taskID, "session_id": sessionID})
 	return err
 }
 
 // UnlinkTaskSession removes a session link from a task.
 func (c *httpClient) UnlinkTaskSession(taskID, sessionID string) error {
-	_, err := c.callAPI("task.unlink", map[string]string{"task_id": taskID, "session_id": sessionID})
+	_, err := c.callAPI(context.Background(), "task.unlink", map[string]string{"task_id": taskID, "session_id": sessionID})
 	return err
 }
 
@@ -655,7 +655,7 @@ func (c *httpClient) UnlinkTaskSession(taskID, sessionID string) error {
 
 // RetryQueueJob retries a failed job.
 func (c *httpClient) RetryQueueJob(jobID string) error {
-	_, err := c.callAPI("queue.retry", map[string]string{"job_id": jobID})
+	_, err := c.callAPI(context.Background(), "queue.retry", map[string]string{"job_id": jobID})
 	return err
 }
 
@@ -663,7 +663,7 @@ func (c *httpClient) RetryQueueJob(jobID string) error {
 
 // ListPoolWorkers lists worker pool workers.
 func (c *httpClient) ListPoolWorkers() (*types.WorkerPoolResponse, error) {
-	result, err := c.callAPI("worker.list", nil)
+	result, err := c.callAPI(context.Background(), "worker.list", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -676,7 +676,7 @@ func (c *httpClient) ListPoolWorkers() (*types.WorkerPoolResponse, error) {
 
 // GetWorkerPoolStats returns worker pool statistics.
 func (c *httpClient) GetWorkerPoolStats() (*types.WorkerPoolStats, error) {
-	result, err := c.callAPI("worker.stats", nil)
+	result, err := c.callAPI(context.Background(), "worker.stats", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -689,6 +689,6 @@ func (c *httpClient) GetWorkerPoolStats() (*types.WorkerPoolStats, error) {
 
 // ScaleWorkerPool scales the worker pool to the given size.
 func (c *httpClient) ScaleWorkerPool(targetCount int) error {
-	_, err := c.callAPI("worker.scale", map[string]int{"target_count": targetCount})
+	_, err := c.callAPI(context.Background(), "worker.scale", map[string]int{"target_count": targetCount})
 	return err
 }

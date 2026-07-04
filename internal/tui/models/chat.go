@@ -238,8 +238,8 @@ const findMaxMatches = 1000
 
 // RPCClient interface for the chat model.
 type RPCClient interface {
-	Chat(message, conversationID string) (string, error)
-	ChatWithParts(message, conversationID string, parts []llm.ContentPart) (string, error)
+	Chat(ctx context.Context, message, conversationID string) (string, error)
+	ChatWithParts(ctx context.Context, message, conversationID string, parts []llm.ContentPart) (string, error)
 	UploadFile(ctx context.Context, filePath string) (string, error)
 	IsConnected() bool
 	SaveSessionMessages(sessionID string, msgs []types.SessionMessage) error
@@ -1636,7 +1636,7 @@ func (m *ChatModel) getMessageContent(msg ChatMessage) string {
 
 func (m *ChatModel) sendMessage(text string) tea.Cmd {
 	return func() tea.Msg {
-		reply, err := m.rpc.Chat(text, m.conversationID)
+		reply, err := m.rpc.Chat(context.Background(), text, m.conversationID)
 		return ChatResponseMsg{Reply: reply, Err: err}
 	}
 }
@@ -1648,7 +1648,7 @@ func (m *ChatModel) sendMessageWithParts(text string, parts []llm.ContentPart) t
 		return m.sendMessage(text)
 	}
 	return func() tea.Msg {
-		reply, err := m.rpc.ChatWithParts(text, m.conversationID, parts)
+		reply, err := m.rpc.ChatWithParts(context.Background(), text, m.conversationID, parts)
 		return ChatResponseMsg{Reply: reply, Err: err}
 	}
 }

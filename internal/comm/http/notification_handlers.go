@@ -6,10 +6,28 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
 )
+
+// pickBearerSubprotocol returns the bearer.<key> subprotocol offered by the
+// client in its Sec-WebSocket-Protocol request header, or nil if no bearer.*
+// subprotocol was offered. Per RFC 6455 §4.2.2, the server MUST echo an
+// offered subprotocol back in the handshake response, otherwise browser
+// WebSocket clients abort the upgrade. Browser WebSocket APIs cannot set
+// custom headers, so auth is carried via Sec-WebSocket-Protocol: bearer.<key>.
+func pickBearerSubprotocol(r *http.Request) []string {
+	raw := r.Header.Get("Sec-WebSocket-Protocol")
+	for _, p := range strings.Split(raw, ",") {
+		p = strings.TrimSpace(p)
+		if strings.HasPrefix(p, "bearer.") {
+			return []string{p}
+		}
+	}
+	return nil
+}
 
 // NotificationType represents the type of notification.
 type NotificationType string
@@ -69,6 +87,7 @@ func (h *NotificationHandler) ServeWebSocket(w http.ResponseWriter, req *http.Re
 	// Auth is enforced by middleware.
 
 	conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
+		Subprotocols:    pickBearerSubprotocol(req),
 		CompressionMode: websocket.CompressionContextTakeover,
 		OriginPatterns:  defaultWSOrigins,
 	})

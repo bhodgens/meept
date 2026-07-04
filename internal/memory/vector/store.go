@@ -117,17 +117,17 @@ func (s *Store) Store(ctx context.Context, memoryID, content string, metadata ma
 	defer s.mu.Unlock()
 
 	// Begin transaction to ensure atomicity
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTx(ctx, nil) //nolint:mutexio // mutex serializes sqlite connection access; tx methods are bound to the protected connection
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() { _ = tx.Rollback() }() //nolint:mutexio // mutex serializes sqlite connection access; rollback is bound to the protected connection
 
 	// Store embedding
 	_, err = tx.ExecContext(ctx, `
 		INSERT OR REPLACE INTO embeddings (id, vector)
 		VALUES (?, ?)
-	`, memoryID, vectorBlob)
+	`, memoryID, vectorBlob) //nolint:mutexio // mutex serializes sqlite connection access; tx methods are bound to the protected connection
 	if err != nil {
 		return fmt.Errorf("failed to store embedding: %w", err)
 	}
@@ -138,14 +138,14 @@ func (s *Store) Store(ctx context.Context, memoryID, content string, metadata ma
 		_, err = tx.ExecContext(ctx, `
 			INSERT OR REPLACE INTO metadata (memory_id, key, value)
 			VALUES (?, ?, ?)
-		`, memoryID, key, string(valueJSON))
+		`, memoryID, key, string(valueJSON)) //nolint:mutexio // mutex serializes sqlite connection access; tx methods are bound to the protected connection
 		if err != nil {
 			return fmt.Errorf("failed to store metadata: %w", err)
 		}
 	}
 
 	// Commit transaction
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(); err != nil { //nolint:mutexio // mutex serializes sqlite connection access; tx methods are bound to the protected connection
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 

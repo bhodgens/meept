@@ -2,6 +2,7 @@
 package vector
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -115,14 +116,13 @@ func (p *OpenAIProvider) GenerateEmbeddings(ctx context.Context, texts []string)
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/embeddings", http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/embeddings", bytes.NewReader(reqJSON))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	req.Body = io.NopCloser(stringsReader(string(reqJSON)))
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -231,13 +231,12 @@ func (p *OllamaProvider) GenerateEmbedding(ctx context.Context, text string) ([]
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/api/embeddings", http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/api/embeddings", bytes.NewReader(reqJSON))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Body = io.NopCloser(stringsReader(string(reqJSON)))
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -326,20 +325,5 @@ func NewProviderFromConfig(cfg config.EmbeddingConfig) (Provider, error) {
 	}
 }
 
-// stringsReader is a helper to avoid importing strings.
-func stringsReader(s string) io.Reader {
-	return &stringReader{s}
-}
-
-type stringReader struct {
-	s string
-}
-
-func (r *stringReader) Read(p []byte) (int, error) {
-	if r.s == "" {
-		return 0, io.EOF
-	}
-	n := copy(p, r.s)
-	r.s = r.s[n:]
-	return n, nil
-}
+// stringsReader and stringReader removed: use bytes.NewReader directly
+// as the request body argument to http.NewRequestWithContext.

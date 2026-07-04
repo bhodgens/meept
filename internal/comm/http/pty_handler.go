@@ -16,12 +16,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return isLocalOrigin(r.Header.Get("Origin"))
-	},
-}
-
 // PTYHandler handles PTY session HTTP requests.
 type PTYHandler struct {
 	ptyMgr *pty.Manager
@@ -137,7 +131,17 @@ func (h *PTYHandler) handleSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PTYHandler) streamSessionWS(w http.ResponseWriter, r *http.Request, sessionID string) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+	// Use a per-request upgrader so we can echo the bearer.<key>
+	// Sec-WebSocket-Protocol offered by the client (RFC 6455 §4.2.2).
+	// Browser WebSocket APIs cannot set Authorization headers, so auth
+	// rides on Sec-WebSocket-Protocol instead.
+	u := websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			return isLocalOrigin(r.Header.Get("Origin"))
+		},
+		Subprotocols: pickBearerSubprotocol(r),
+	}
+	conn, err := u.Upgrade(w, r, nil)
 	if err != nil {
 		h.logger.Error("WebSocket upgrade failed", "error", err)
 		return
@@ -193,24 +197,15 @@ func (h *PTYHandler) streamSessionWS(w http.ResponseWriter, r *http.Request, ses
 func (h *PTYHandler) streamSessionOutput(sessionID string, sess pty.Session) {
 	outputChan := sess.Output()
 	for output := range outputChan {
-		// Hold RLock for the duration of the send loop. This excludes the
-		// exclusive Lock acquired by streamSessionWS's defer (which removes
-		// the channel from subs BEFORE releasing and then closes it), so a
-		// channel present in our snapshot cannot be closed before our send.
-		// Channels are buffered (100) and sends are non-blocking, so the
-		// lock is held only for bounded, fast work.
+		// Hold the RLock during the send loop. The non-blocking select
+		// makes each iteration bounded (no I/O wait), so this does not
+		// violate the mutexio rule (which targets network/file/subprocess
+		// I/O, not in-memory channel operations). The lock is required
+		// because streamSessionWS's defer removes the channel from subs
+		// and closes it — without the lock, a concurrent close would
+		// race with the send here and panic (send on closed channel).
 		h.mu.RLock()
-		subs := h.subs[sessionID]
-
-		if len(subs) == 0 {
-			h.mu.RUnlock()
-			// No subscribers: discard output to avoid goroutine blocking
-			// on a full channel. The goroutine still runs (to drain the
-			// session output channel) but does negligible work.
-			continue
-		}
-
-		for _, ch := range subs {
+		for _, ch := range h.subs[sessionID] {
 			select {
 			case ch <- output:
 			default:

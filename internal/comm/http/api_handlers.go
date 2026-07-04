@@ -1374,9 +1374,7 @@ func (s *Server) handleBusCall(w http.ResponseWriter, r *http.Request) {
 
 	result, err := s.rpcCall(r.Context(), req.Method, req.Params)
 	if err != nil {
-		s.writeJSON(w, http.StatusOK, map[string]any{
-			"error": err.Error(),
-		})
+		s.handleServiceError(w, err)
 		return
 	}
 
@@ -2921,7 +2919,6 @@ func (s *Server) handlePlanApprove(w http.ResponseWriter, r *http.Request) {
 		SessionID  string `json:"session_id"`
 		By         string `json:"by"`
 		ApproverID string `json:"approver_id"` // S6: preferred over "by"
-		EmployeeID string `json:"employee_id"`  // S6: identifies the agent context
 	}
 	if !s.readJSON(w, r, &req) {
 		return

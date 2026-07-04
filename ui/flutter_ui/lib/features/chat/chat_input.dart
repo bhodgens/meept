@@ -1,6 +1,7 @@
 import 'dart:async';
+import 'dart:typed_data' show Uint8List;
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'dart:io' show File; // Used only in !kIsWeb guarded paths
+import 'dart:io' show File; // ignore: web_unsafe_import
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';

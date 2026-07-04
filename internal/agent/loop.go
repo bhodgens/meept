@@ -4674,7 +4674,10 @@ func (l *AgentLoop) updateSessionDesignation(status session.DesignationStatus, r
 	if l.sessionStore == nil || l.currentSessionID == "" {
 		return
 	}
-	_ = l.sessionStore.UpdateDesignation(l.currentSessionID, status, reason, priority)
+	if err := l.sessionStore.UpdateDesignation(l.currentSessionID, status, reason, priority); err != nil {
+		l.logger.Warn("failed to update session designation",
+			"session_id", l.currentSessionID, "status", status, "error", err)
+	}
 
 	// Publish notification when session enters "waiting_human" state (Plan 4.3).
 	if status == session.DesignationWaitingHuman && l.notificationPublisher != nil {
@@ -4690,5 +4693,8 @@ func (l *AgentLoop) clearSessionDesignation() {
 	if l.sessionStore == nil || l.currentSessionID == "" {
 		return
 	}
-	_ = l.sessionStore.ClearDesignation(l.currentSessionID)
+	if err := l.sessionStore.ClearDesignation(l.currentSessionID); err != nil {
+		l.logger.Warn("failed to clear session designation",
+			"session_id", l.currentSessionID, "error", err)
+	}
 }

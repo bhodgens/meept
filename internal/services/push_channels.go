@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/comm/telegram"
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // notifier is the interface that event emitters from daemon must satisfy.
@@ -326,12 +327,8 @@ func formatForTelegram(text string) string {
 }
 
 // generatePushNotificationID creates a hex string ID for push notifications.
+// Uses crypto/rand via id.Generate so concurrent pushes within the same
+// nanosecond cannot collide (unlike time.Now().UnixNano()).
 func generatePushNotificationID() string {
-	b := make([]byte, 16)
-	_ = b // seeded from time below
-	now := time.Now().UnixNano()
-	for i := range b {
-		b[i] = "0123456789abcdef"[byte(int(now>>((i*4)&63)) + i)&15]
-	}
-	return fmt.Sprintf("%x", b)
+	return id.Generate("")
 }

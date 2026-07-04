@@ -148,7 +148,8 @@ func isAnthropicRoute(cfg *ModelConfig) bool {
 
 // anthropicRequestURL constructs the request URL honoring provider quirks.
 // Bedrock uses /model/{modelId}/invoke[_with_response_stream]; all others
-// use {baseURL}/v1/messages.
+// use {baseURL}/v1/messages. OpenRouter and similar providers whose BaseURL
+// already ends in /v1 have that suffix stripped to avoid a doubled /v1/v1/.
 func (c *AnthropicClient) anthropicRequestURL(streaming bool) string {
 	base := strings.TrimSuffix(c.config.BaseURL, "/")
 	if c.config.ProviderID == ProviderIDBedrock {
@@ -159,6 +160,12 @@ func (c *AnthropicClient) anthropicRequestURL(streaming bool) string {
 		// url.PathEscape preserves ':' (valid pchar per RFC 3986) so
 		// "anthropic.claude-sonnet-4-6-v2:0" round-trips correctly.
 		return base + "/model/" + url.PathEscape(c.config.ModelID) + "/" + suffix
+	}
+	// OpenRouter and other OpenAI-compatible gateways expose Anthropic
+	// behind /api/v1; strip a trailing /v1 so appending /v1/messages
+	// doesn't yield /v1/v1/messages.
+	if strings.HasSuffix(base, "/v1") {
+		base = strings.TrimSuffix(base, "/v1")
 	}
 	return base + "/v1/messages"
 }
@@ -778,8 +785,7 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 		return nil, &ClientError{Message: "failed to marshal request", Cause: err}
 	}
 
-	baseURL := strings.TrimSuffix(c.config.BaseURL, "/")
-	url := baseURL + "/v1/messages"
+	url := c.anthropicRequestURL(false)
 
 	c.logger.Debug("Making Anthropic request", "url", url, "model", c.config.ModelID)
 
@@ -922,8 +928,7 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 		return nil, &ClientError{Message: "failed to marshal request", Cause: err}
 	}
 
-	baseURL := strings.TrimSuffix(c.config.BaseURL, "/")
-	url := baseURL + "/v1/messages"
+	url := c.anthropicRequestURL(true)
 
 	c.logger.Debug("Making Anthropic streaming request", "url", url, "model", c.config.ModelID)
 

@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 
@@ -17,7 +18,7 @@ type DaemonClient interface {
 	IsConnected() bool
 
 	// Core methods used by CLI commands
-	Chat(message, conversationID string) (string, error)
+	Chat(ctx context.Context, message, conversationID string) (string, error)
 	Status() (*types.DaemonStatusResponse, error)
 	ListJobs() (*types.JobListResponse, error)
 	QueryMemory(query string, limit int) (*types.MemoryQueryResponse, error)

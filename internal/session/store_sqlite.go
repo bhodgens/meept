@@ -1478,7 +1478,7 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() {
-		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone {
+		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone { //nolint:mutexio // mutex serializes sqlite connection access; rollback bound to protected conn
 			slog.Debug("transaction rollback error", "error", rErr)
 		}
 	}()
@@ -1695,7 +1695,7 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 	}
 
 	// 8. Commit
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(); err != nil { //nolint:mutexio // mutex serializes sqlite connection access; commit bound to protected conn
 		return nil, fmt.Errorf("failed to commit fork: %w", err)
 	}
 
@@ -1874,7 +1874,7 @@ func (s *SQLiteStore) SaveToolCalls(messageID int64, toolCalls []ToolCall) error
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() {
-		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone {
+		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone { //nolint:mutexio // mutex serializes sqlite connection access; rollback bound to protected conn
 			slog.Debug("transaction rollback error", "error", rErr)
 		}
 	}()
@@ -1894,7 +1894,7 @@ func (s *SQLiteStore) SaveToolCalls(messageID int64, toolCalls []ToolCall) error
 		}
 	}
 
-	return tx.Commit()
+	return tx.Commit() //nolint:mutexio // mutex serializes sqlite connection access; commit bound to protected conn
 }
 
 // GetToolCalls retrieves all tool calls for a single message.

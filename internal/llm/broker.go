@@ -104,8 +104,10 @@ func NewModelBroker(cfg BrokerConfig) *ModelBroker {
 // newChatterFor creates a Chatter for a ModelConfig.
 // Detects Anthropic vs OpenAI-compat and injects metrics/timeout options.
 func (b *ModelBroker) newChatterFor(cfg *ModelConfig) Chatter {
-	// Detect Anthropic
-	if cfg.ProviderID == ProviderIDAnthropic || strings.Contains(strings.ToLower(cfg.BaseURL), ProviderIDAnthropic) {
+	// Detect Anthropic-native route (direct, OpenRouter-claude, Bedrock-claude).
+	// Use isAnthropicRoute so Bedrock+Claude and OpenRouter+Claude route to
+	// the AnthropicClient, which speaks the Messages API wire format.
+	if isAnthropicRoute(cfg) {
 		opts := []AnthropicClientOption{
 			WithAnthropicLogger(b.logger),
 		}

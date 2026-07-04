@@ -139,7 +139,8 @@ func (cq *ClusterQueue) Fail(ctx context.Context, jobID string, err error) error
 }
 
 // reclaimJobUnlocked reclaims a claimed job back to pending state.
-// The caller must already hold cq.mu (write lock).
+// The caller must NOT hold cq.mu — all I/O (store writes, bus publishes) is
+// performed outside the lock to avoid serializing concurrent reclaimers.
 func (cq *ClusterQueue) reclaimJobUnlocked(ctx context.Context, jobID, reason string) error {
 	// 1. Record TASK_RECLAIM event in cluster_events table
 	if cq.store != nil {
@@ -161,8 +162,10 @@ func (cq *ClusterQueue) reclaimJobUnlocked(ctx context.Context, jobID, reason st
 			"job_id", jobID, "reason", reason)
 	}
 
-	// 3. Remove local claim record (caller holds the lock, no need to acquire)
+	// 3. Remove local claim record
+	cq.mu.Lock()
 	delete(cq.claimed, jobID)
+	cq.mu.Unlock()
 
 	// 4. Publish bus event so subscribers across the cluster are notified
 	if cq.bus != nil {
@@ -190,8 +193,6 @@ func (cq *ClusterQueue) reclaimJobUnlocked(ctx context.Context, jobID, reason st
 // store, removes the local claim record, and publishes a bus event so other
 // nodes are aware the job needs to be re-handled.
 func (cq *ClusterQueue) ReclaimJob(ctx context.Context, jobID, reason string) error {
-	cq.mu.Lock()
-	defer cq.mu.Unlock()
 	return cq.reclaimJobUnlocked(ctx, jobID, reason)
 }
 

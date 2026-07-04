@@ -231,15 +231,42 @@ func NewServer(cfg ServerConfig, configSvc *ConfigService, daemonCtrl DaemonCont
 	return s
 }
 
+// wsConn wraps a *websocket.Conn with a per-connection mutex serializing
+// writes. golang.org/x/net/websocket.Conn.Write is NOT safe for concurrent
+// use, so all sends must go through write/sendJSON. This is the documented
+// "safeConnSend" exception to the CLAUDE.md mutex-scope rule: the lock's
+// purpose IS to serialize I/O.
+type wsConn struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+}
+
+// write writes a pre-marshaled payload under the per-connection mutex.
+func (w *wsConn) write(payload []byte) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_, err := w.conn.Write(payload)
+	return err
+}
+
+// sendJSON marshals v and writes it under the per-connection mutex.
+func (w *wsConn) sendJSON(v any) error {
+	payload, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return w.write(payload)
+}
+
 // WebSocketHub manages WebSocket client connections and broadcasts messages.
 type WebSocketHub struct {
 	mu      sync.RWMutex
-	clients map[*websocket.Conn]struct{}
+	clients map[*wsConn]struct{}
 	logger  *slog.Logger
 
 	// sessionSubs tracks which sessions each connection subscribes to,
 	// used for session-scoped progress event filtering.
-	sessionSubs map[*websocket.Conn]map[string]struct{}
+	sessionSubs map[*wsConn]map[string]struct{}
 	sessMu      sync.RWMutex
 }
 
@@ -248,8 +275,8 @@ type WebSocketHub struct {
 // per interval is sent; excess events are dropped.
 type progressRateLimiter struct {
 	mu       sync.RWMutex
-	lastSent map[*websocket.Conn]time.Time // last send time per connection
-	interval time.Duration                  // minimum interval between sends
+	lastSent map[*wsConn]time.Time // last send time per connection
+	interval time.Duration         // minimum interval between sends
 }
 
 // newProgressRateLimiter creates a rate limiter with the specified interval.
@@ -258,15 +285,15 @@ func newProgressRateLimiter(interval time.Duration) *progressRateLimiter {
 		interval = 100 * time.Millisecond // default: 100ms
 	}
 	return &progressRateLimiter{
-		lastSent: make(map[*websocket.Conn]time.Time),
+		lastSent: make(map[*wsConn]time.Time),
 		interval: interval,
 	}
 }
 
 // shouldSend reports whether enough time has passed since the last send for this connection.
-func (r *progressRateLimiter) shouldSend(conn *websocket.Conn) bool {
+func (r *progressRateLimiter) shouldSend(wc *wsConn) bool {
 	r.mu.RLock()
-	last, ok := r.lastSent[conn]
+	last, ok := r.lastSent[wc]
 	r.mu.RUnlock()
 	if !ok {
 		return true // no previous send, allow
@@ -275,19 +302,19 @@ func (r *progressRateLimiter) shouldSend(conn *websocket.Conn) bool {
 }
 
 // recordSend updates the last send time for this connection.
-func (r *progressRateLimiter) recordSend(conn *websocket.Conn) {
+func (r *progressRateLimiter) recordSend(wc *wsConn) {
 	r.mu.Lock()
-	r.lastSent[conn] = time.Now()
+	r.lastSent[wc] = time.Now()
 	r.mu.Unlock()
 }
 
 // cleanup removes stale entries for disconnected connections.
-func (r *progressRateLimiter) cleanup(conns map[*websocket.Conn]struct{}) {
+func (r *progressRateLimiter) cleanup(conns map[*wsConn]struct{}) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for conn := range r.lastSent {
-		if _, ok := conns[conn]; !ok {
-			delete(r.lastSent, conn)
+	for wc := range r.lastSent {
+		if _, ok := conns[wc]; !ok {
+			delete(r.lastSent, wc)
 		}
 	}
 }
@@ -298,32 +325,32 @@ func NewWebSocketHub(logger *slog.Logger) *WebSocketHub {
 		logger = slog.Default()
 	}
 	return &WebSocketHub{
-		clients:     make(map[*websocket.Conn]struct{}),
-		sessionSubs: make(map[*websocket.Conn]map[string]struct{}),
+		clients:     make(map[*wsConn]struct{}),
+		sessionSubs: make(map[*wsConn]map[string]struct{}),
 		logger:      logger,
 	}
 }
 
 // Register adds a WebSocket client connection.
-func (h *WebSocketHub) Register(conn *websocket.Conn) {
+func (h *WebSocketHub) Register(wc *wsConn) {
 	h.mu.Lock()
-	h.clients[conn] = struct{}{}
+	h.clients[wc] = struct{}{}
 	h.mu.Unlock()
-	h.logger.Debug("ws client registered", "remote", conn.RemoteAddr())
+	h.logger.Debug("ws client registered", "remote", wc.conn.RemoteAddr())
 }
 
 // Unregister removes a WebSocket client connection and closes it.
-func (h *WebSocketHub) Unregister(conn *websocket.Conn) {
+func (h *WebSocketHub) Unregister(wc *wsConn) {
 	h.mu.Lock()
-	delete(h.clients, conn)
+	delete(h.clients, wc)
 	h.mu.Unlock()
 
 	h.sessMu.Lock()
-	delete(h.sessionSubs, conn)
+	delete(h.sessionSubs, wc)
 	h.sessMu.Unlock()
 
-	conn.Close()
-	h.logger.Debug("ws client unregistered", "remote", conn.RemoteAddr())
+	wc.conn.Close()
+	h.logger.Debug("ws client unregistered", "remote", wc.conn.RemoteAddr())
 }
 
 // ClientCount returns the number of connected clients.
@@ -335,20 +362,20 @@ func (h *WebSocketHub) ClientCount() int {
 
 // SubscribeSession records that this websocket connection is interested
 // in progress events for the given session ID.
-func (h *WebSocketHub) SubscribeSession(conn *websocket.Conn, sessionID string) {
+func (h *WebSocketHub) SubscribeSession(wc *wsConn, sessionID string) {
 	h.sessMu.Lock()
 	defer h.sessMu.Unlock()
-	if h.sessionSubs[conn] == nil {
-		h.sessionSubs[conn] = make(map[string]struct{})
+	if h.sessionSubs[wc] == nil {
+		h.sessionSubs[wc] = make(map[string]struct{})
 	}
-	h.sessionSubs[conn][sessionID] = struct{}{}
+	h.sessionSubs[wc][sessionID] = struct{}{}
 }
 
 // UnsubscribeSession removes a session filter for the given connection.
-func (h *WebSocketHub) UnsubscribeSession(conn *websocket.Conn, sessionID string) {
+func (h *WebSocketHub) UnsubscribeSession(wc *wsConn, sessionID string) {
 	h.sessMu.Lock()
 	defer h.sessMu.Unlock()
-	if subs := h.sessionSubs[conn]; subs != nil {
+	if subs := h.sessionSubs[wc]; subs != nil {
 		delete(subs, sessionID)
 	}
 }
@@ -356,10 +383,10 @@ func (h *WebSocketHub) UnsubscribeSession(conn *websocket.Conn, sessionID string
 // ShouldSendProgress reports whether this connection should receive a progress
 // event for the given session ID. Returns true when the connection has no
 // session filters (broadcast mode) or explicitly subscribed to this session.
-func (h *WebSocketHub) ShouldSendProgress(conn *websocket.Conn, sessionID string) bool {
+func (h *WebSocketHub) ShouldSendProgress(wc *wsConn, sessionID string) bool {
 	h.sessMu.RLock()
 	defer h.sessMu.RUnlock()
-	subs := h.sessionSubs[conn]
+	subs := h.sessionSubs[wc]
 	if subs == nil {
 		return true // no filters = broadcast to all
 	}
@@ -378,24 +405,24 @@ func (h *WebSocketHub) Broadcast(msgType string, data any) {
 		return
 	}
 
-	var failedConns []*websocket.Conn
+	var failedConns []*wsConn
 
 	h.mu.RLock()
-	conns := make([]*websocket.Conn, 0, len(h.clients))
-	for conn := range h.clients {
-		conns = append(conns, conn)
+	conns := make([]*wsConn, 0, len(h.clients))
+	for wc := range h.clients {
+		conns = append(conns, wc)
 	}
 	h.mu.RUnlock()
 
-	for _, conn := range conns {
-		if _, err := conn.Write(payload); err != nil {
+	for _, wc := range conns {
+		if err := wc.write(payload); err != nil {
 			h.logger.Warn("ws write error, will remove client", "error", err)
-			failedConns = append(failedConns, conn)
+			failedConns = append(failedConns, wc)
 		}
 	}
 
-	for _, conn := range failedConns {
-		h.Unregister(conn)
+	for _, wc := range failedConns {
+		h.Unregister(wc)
 	}
 }
 
@@ -511,24 +538,24 @@ func (s *Server) handleWSProgress(msg *models.BusMessage) {
 
 	h := s.wsHub
 	h.mu.RLock()
-	conns := make([]*websocket.Conn, 0, len(h.clients))
-	for conn := range h.clients {
-		if h.ShouldSendProgress(conn, event.SessionID) {
-			conns = append(conns, conn)
+	conns := make([]*wsConn, 0, len(h.clients))
+	for wc := range h.clients {
+		if h.ShouldSendProgress(wc, event.SessionID) {
+			conns = append(conns, wc)
 		}
 	}
 	h.mu.RUnlock()
 
-	for _, conn := range conns {
+	for _, wc := range conns {
 		// Apply rate limiting to prevent UI spam
-		if s.progressRateLimiter != nil && !s.progressRateLimiter.shouldSend(conn) {
+		if s.progressRateLimiter != nil && !s.progressRateLimiter.shouldSend(wc) {
 			continue // skip this event for this connection
 		}
-		if _, err := conn.Write(payload); err != nil {
+		if err := wc.write(payload); err != nil {
 			s.logger.Warn("ws progress write error, removing client", "error", err)
-			h.Unregister(conn)
+			h.Unregister(wc)
 		} else if s.progressRateLimiter != nil {
-			s.progressRateLimiter.recordSend(conn)
+			s.progressRateLimiter.recordSend(wc)
 		}
 	}
 }
@@ -2081,18 +2108,19 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	wsServer := &websocket.Server{
 		Handler: websocket.Handler(func(conn *websocket.Conn) {
-			s.wsHub.Register(conn)
+			wc := &wsConn{conn: conn}
+			s.wsHub.Register(wc)
 			// Use r.RemoteAddr instead of conn.RemoteAddr() because x/net/websocket's
 			// RemoteAddr() returns config.Origin which is nil for server-side conns
 			// when the client doesn't send an Origin header, causing a nil pointer
 			// panic in url.URL.String().
 			s.logger.Info("WebSocket client connected", "remote", r.RemoteAddr)
 			welcome := WSMessage{Type: "status", Data: []byte(`{"connected":true}`)}
-			if err := websocket.JSON.Send(conn, welcome); err != nil {
+			if err := wc.sendJSON(welcome); err != nil {
 				s.logger.Debug("ws welcome send failed", "remote", r.RemoteAddr, "error", err)
 			}
 			defer func() {
-				s.wsHub.Unregister(conn)
+				s.wsHub.Unregister(wc)
 				s.logger.Info("WebSocket client disconnected", "remote", r.RemoteAddr)
 			}()
 
@@ -2101,7 +2129,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				if err := websocket.JSON.Receive(conn, &msg); err != nil {
 					return
 				}
-				s.handleWSMessage(conn, &msg)
+				s.handleWSMessage(wc, &msg)
 			}
 		}),
 		Handshake: func(config *websocket.Config, request *http.Request) error {
@@ -2148,16 +2176,16 @@ type WSMessage struct {
 }
 
 // handleWSMessage processes incoming WebSocket messages.
-func (s *Server) handleWSMessage(conn *websocket.Conn, msg *WSMessage) {
+func (s *Server) handleWSMessage(wc *wsConn, msg *WSMessage) {
 	switch msg.Type {
 	case "ping":
-		if err := websocket.JSON.Send(conn, WSMessage{Type: "pong"}); err != nil {
+		if err := wc.sendJSON(WSMessage{Type: "pong"}); err != nil {
 			s.logger.Debug("ws pong send failed", "error", err)
 		}
 	case "subscribe":
-		s.handleWSSubscribe(conn, msg)
+		s.handleWSSubscribe(wc, msg)
 	case "unsubscribe":
-		s.handleWSUnsubscribe(conn, msg)
+		s.handleWSUnsubscribe(wc, msg)
 	default:
 		s.logger.Debug("ws unknown message type", "type", msg.Type)
 	}
@@ -2165,9 +2193,9 @@ func (s *Server) handleWSMessage(conn *websocket.Conn, msg *WSMessage) {
 
 // handleWSSubscribe handles subscribe messages from WebSocket clients.
 // Clients can subscribe to channels: chat, jobs, metrics.
-func (s *Server) handleWSSubscribe(conn *websocket.Conn, msg *WSMessage) {
+func (s *Server) handleWSSubscribe(wc *wsConn, msg *WSMessage) {
 	if s.wsHub == nil {
-		if err := websocket.JSON.Send(conn, WSMessage{Type: "error", Data: json.RawMessage(`{"message":"WebSocket not enabled"}`)}); err != nil {
+		if err := wc.sendJSON(WSMessage{Type: "error", Data: json.RawMessage(`{"message":"WebSocket not enabled"}`)}); err != nil {
 			s.logger.Debug("ws error send failed", "error", err)
 		}
 		return
@@ -2193,7 +2221,7 @@ func (s *Server) handleWSSubscribe(conn *websocket.Conn, msg *WSMessage) {
 	}
 
 	subscribeData, _ := json.Marshal(map[string]string{"channel": channel})
-	if err := websocket.JSON.Send(conn, WSMessage{
+	if err := wc.sendJSON(WSMessage{
 		Type: "subscribed",
 		Data: subscribeData,
 	}); err != nil {
@@ -2202,18 +2230,18 @@ func (s *Server) handleWSSubscribe(conn *websocket.Conn, msg *WSMessage) {
 
 	// Register session filter for progress event filtering.
 	if sessionID != "" {
-		s.wsHub.SubscribeSession(conn, sessionID)
+		s.wsHub.SubscribeSession(wc, sessionID)
 	}
 
-	s.logger.Debug("ws client subscribed", "remote", conn.RemoteAddr(), "channel", channel, "session", sessionID)
+	s.logger.Debug("ws client subscribed", "remote", wc.conn.RemoteAddr(), "channel", channel, "session", sessionID)
 }
 
 // handleWSUnsubscribe handles unsubscribe messages from WebSocket clients.
 // Clients send this to remove session filters so they no longer receive
 // progress events for a specific session.
-func (s *Server) handleWSUnsubscribe(conn *websocket.Conn, msg *WSMessage) {
+func (s *Server) handleWSUnsubscribe(wc *wsConn, msg *WSMessage) {
 	if s.wsHub == nil {
-		if err := websocket.JSON.Send(conn, WSMessage{Type: "error", Data: json.RawMessage(`{"message":"WebSocket not enabled"}`)}); err != nil {
+		if err := wc.sendJSON(WSMessage{Type: "error", Data: json.RawMessage(`{"message":"WebSocket not enabled"}`)}); err != nil {
 			s.logger.Debug("ws error send failed", "error", err)
 		}
 		return
@@ -2235,17 +2263,17 @@ func (s *Server) handleWSUnsubscribe(conn *websocket.Conn, msg *WSMessage) {
 	}
 
 	if sessionID != "" {
-		s.wsHub.UnsubscribeSession(conn, sessionID)
-		s.logger.Debug("ws client unsubscribed", "remote", conn.RemoteAddr(), "channel", channel, "session", sessionID)
+		s.wsHub.UnsubscribeSession(wc, sessionID)
+		s.logger.Debug("ws client unsubscribed", "remote", wc.conn.RemoteAddr(), "channel", channel, "session", sessionID)
 	} else if channel != "" {
 		// Unsubscribe all sessions for this channel:
 		// remove all session filters on this connection since the channel is gone.
 		s.wsHub.sessMu.Lock()
-		if subs, ok := s.wsHub.sessionSubs[conn]; ok {
+		if subs, ok := s.wsHub.sessionSubs[wc]; ok {
 			for sid := range subs {
-				s.logger.Debug("ws auto-unsubscribed all sessions", "remote", conn.RemoteAddr(), "channel", channel, "session", sid)
+				s.logger.Debug("ws auto-unsubscribed all sessions", "remote", wc.conn.RemoteAddr(), "channel", channel, "session", sid)
 			}
-			delete(s.wsHub.sessionSubs, conn)
+			delete(s.wsHub.sessionSubs, wc)
 		}
 		s.wsHub.sessMu.Unlock()
 	}

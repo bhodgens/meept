@@ -186,7 +186,7 @@ func (s *DualStore) initLocalSchema(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, err := s.localDB.ExecContext(ctx, string(schema)); err != nil {
+	if _, err := s.localDB.ExecContext(ctx, string(schema)); err != nil { //nolint:mutexio // mutex serializes sqlite connection access during one-time schema init
 		return fmt.Errorf("exec local schema: %w", err)
 	}
 
@@ -206,7 +206,7 @@ func (s *DualStore) initGossipSchema(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, err := s.gossipDB.ExecContext(ctx, string(schema)); err != nil {
+	if _, err := s.gossipDB.ExecContext(ctx, string(schema)); err != nil { //nolint:mutexio // mutex serializes sqlite connection access during one-time schema init
 		return fmt.Errorf("exec gossip schema: %w", err)
 	}
 

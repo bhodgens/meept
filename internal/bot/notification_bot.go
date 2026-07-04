@@ -63,6 +63,10 @@ type NotificationBot struct {
 	rateMu sync.Mutex
 	// rateWindow tracks timestamps of sent notifications for rate limiting.
 	rateWindow []time.Time
+
+	// wg tracks in-flight Telegram send goroutines so teardown can wait
+	// for them to finish rather than leaking on shutdown.
+	wg sync.WaitGroup
 }
 
 // EventEmitterAdapter abstracts the notification emitter so the bot can
@@ -147,8 +151,10 @@ func (nb *NotificationBot) Stop() {
 
 // teardown releases resources held by the notification bot.
 func (nb *NotificationBot) teardown() {
-	// The emitter cleanup is handled by the goroutine exiting when ctx
-	// is cancelled or the channel closes.
+	// Wait for any in-flight Telegram send goroutines to finish so we
+	// don't leak goroutines on shutdown. The caller's ctx (captured by
+	// handleEvent) bounds how long those sends can take.
+	nb.wg.Wait()
 }
 
 // handleEvent dispatches a notification event to configured channels.
@@ -194,7 +200,9 @@ func (nb *NotificationBot) handleEvent(ctx context.Context, event *http.Notifica
 			// Audit log before sending
 			nb.auditLog("telegram", chatIDStr, msg, trigger)
 
+			nb.wg.Add(1)
 			go func(id int64, m string) {
+				defer nb.wg.Done()
 				if err := nb.telegram.SendMessage(ctx, id, m); err != nil {
 					nb.logger.Error("failed to send telegram notification",
 						"chat_id", id, "error", err)

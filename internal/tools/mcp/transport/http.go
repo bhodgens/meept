@@ -38,7 +38,7 @@ func isBlockedAddress(addr string) bool {
 		ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()
 }
 
-func checkRedirectURL(rawURL string) error {
+func checkRedirectURL(ctx context.Context, rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid redirect URL: %w", err)
@@ -53,7 +53,13 @@ func checkRedirectURL(rawURL string) error {
 	if isBlockedAddress(host) {
 		return fmt.Errorf("redirect host %q is blocked", host)
 	}
-	ips, err := net.DefaultResolver.LookupIPAddr(context.Background(), host)
+	// Use the request's context so that DNS resolution is cancelled when
+	// the upstream caller cancels or the deadline expires. Falls back to
+	// the background context if req ctx is nil (defensive).
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		return fmt.Errorf("resolve redirect %s: %w", host, err)
 	}
@@ -63,6 +69,18 @@ func checkRedirectURL(rawURL string) error {
 		}
 	}
 	return nil
+}
+
+// redirectChecker returns a CheckRedirect policy that threads the request
+// context through to checkRedirectURL's DNS lookup. Installed on t.client in
+// NewHTTPTransport and SetAllowPrivateRanges.
+func redirectChecker() func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return fmt.Errorf("too many redirects")
+		}
+		return checkRedirectURL(req.Context(), req.URL.String())
+	}
 }
 
 // HTTPTransport implements MCP transport over HTTP.
@@ -96,15 +114,7 @@ func NewHTTPTransport(url string, headers map[string]string, config Config) *HTT
 			Transport: &http.Transport{
 				DialContext: ssrfDialContext(false),
 			},
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				if len(via) >= 5 {
-					return fmt.Errorf("too many redirects")
-				}
-				if err := checkRedirectURL(req.URL.String()); err != nil {
-					return err
-				}
-				return nil
-			},
+			CheckRedirect: redirectChecker(),
 		},
 	}
 }
@@ -121,15 +131,7 @@ func (t *HTTPTransport) SetAllowPrivateRanges(allow bool) {
 		Transport: &http.Transport{
 			DialContext: ssrfDialContext(allow),
 		},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return fmt.Errorf("too many redirects")
-			}
-			if err := checkRedirectURL(req.URL.String()); err != nil {
-				return err
-			}
-			return nil
-		},
+		CheckRedirect: redirectChecker(),
 	}
 }
 

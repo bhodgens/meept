@@ -44,7 +44,8 @@ Entry point that runs all checks sequentially (8 total):
 | 5 | pre-commit-setters | Nil-safe setter methods |
 | 6 | pre-commit-gosec | Security vulnerabilities |
 | 7 | pre-commit-errors | Error handling anti-patterns |
-| 8 | pre-commit-feature-docs | Documentation updates |
+| 8 | pre-commit-predictable-ids | Use pkg/id.Generate (not time.Now().UnixNano()) |
+| 9 | pre-commit-feature-docs | Documentation updates |
 
 ---
 
@@ -180,6 +181,34 @@ _ = file.Close()
 if err := file.Close(); err != nil {
     return fmt.Errorf("close file: %w", err)
 }
+```
+
+---
+
+### pre-commit-predictable-ids
+
+Flags ID-generation code that uses `time.Now().UnixNano()` (or `Unix()`) instead of the crypto/rand-backed `pkg/id.Generate()` helper. Nanosecond timestamps can collide under concurrency or clock drift, producing duplicate persistent keys.
+
+**Triggers on:** Added lines in staged Go source files (excludes `_test.go`)
+
+**Detects:**
+- `fmt.Sprintf("prefix-%d", time.Now().UnixNano())` — most common pattern
+- Direct assignment: `id = time.Now().UnixNano()` where the variable name suggests an ID
+- Byte/hex manipulation seeded from `time.Now().UnixNano()`
+
+**Example:**
+```go
+// WRONG: nanosecond timestamps can collide under concurrency
+jobID := fmt.Sprintf("dispatch-%d", time.Now().UnixNano())
+
+// RIGHT: crypto/rand-backed, no collisions
+import "github.com/caimlas/meept/pkg/id"
+jobID := id.Generate("dispatch-")
+```
+
+Suppress false positives (e.g., genuine timestamps that aren't IDs) with:
+```go
+createdAt = time.Now().UnixNano() //nolint:predictableids // genuine timestamp, not an ID
 ```
 
 ---

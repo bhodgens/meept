@@ -209,18 +209,18 @@ func (s *VectorShard) Insert(ctx context.Context, memoryID string, embedding []f
 		return fmt.Errorf("embedding dimension mismatch: expected %d, got %d", s.dimension, len(embedding))
 	}
 
-	s.mu.Lock()
+	s.mu.Lock() //nolint:mutexio // mutex serializes sqlite connection access across goroutines; tx methods are bound to the protected connection
 	defer s.mu.Unlock()
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTx(ctx, nil) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() { _ = tx.Rollback() }() //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 
 	vecJSON := JSONFloat32Slice(embedding)
 
-	result, err := tx.ExecContext(ctx, `INSERT INTO embeddings (embedding) VALUES (?)`, vecJSON)
+	result, err := tx.ExecContext(ctx, `INSERT INTO embeddings (embedding) VALUES (?)`, vecJSON) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 	if err != nil {
 		return fmt.Errorf("failed to insert vector: %w", err)
 	}
@@ -233,19 +233,19 @@ func (s *VectorShard) Insert(ctx context.Context, memoryID string, embedding []f
 	_, err = tx.ExecContext(ctx, `
 		INSERT OR REPLACE INTO metadata (memory_id, content, shard_id, created_at)
 		VALUES (?, ?, ?, datetime('now'))
-	`, memoryID, content, s.shardID)
+	`, memoryID, content, s.shardID) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 	if err != nil {
 		return fmt.Errorf("failed to insert metadata: %w", err)
 	}
 
 	_, err = tx.ExecContext(ctx, `
 		INSERT OR REPLACE INTO embedding_rowids (memory_id, rowid) VALUES (?, ?)
-	`, memoryID, rowID)
+	`, memoryID, rowID) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 	if err != nil {
 		return fmt.Errorf("failed to track rowid: %w", err)
 	}
 
-	return tx.Commit()
+	return tx.Commit() //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 }
 
 // InsertBatch adds multiple vectors in a single transaction.
@@ -258,28 +258,28 @@ func (s *VectorShard) InsertBatch(ctx context.Context, memoryIDs []string, embed
 		return nil
 	}
 
-	s.mu.Lock()
+	s.mu.Lock() //nolint:mutexio // mutex serializes sqlite connection access across goroutines; tx methods are bound to the protected connection
 	defer s.mu.Unlock()
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTx(ctx, nil) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() { _ = tx.Rollback() }() //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 
-	vecStmt, err := tx.PrepareContext(ctx, `INSERT INTO embeddings (embedding) VALUES (?)`)
+	vecStmt, err := tx.PrepareContext(ctx, `INSERT INTO embeddings (embedding) VALUES (?)`) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 	if err != nil {
 		return fmt.Errorf("prepare vector stmt: %w", err)
 	}
 	defer vecStmt.Close()
 
-	rowidStmt, err := tx.PrepareContext(ctx, `INSERT OR REPLACE INTO embedding_rowids (memory_id, rowid) VALUES (?, ?)`)
+	rowidStmt, err := tx.PrepareContext(ctx, `INSERT OR REPLACE INTO embedding_rowids (memory_id, rowid) VALUES (?, ?)`) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 	if err != nil {
 		return fmt.Errorf("prepare rowid stmt: %w", err)
 	}
 	defer rowidStmt.Close()
 
-	metaStmt, err := tx.PrepareContext(ctx, `INSERT OR REPLACE INTO metadata (memory_id, content, shard_id, created_at) VALUES (?, ?, ?, datetime('now'))`)
+	metaStmt, err := tx.PrepareContext(ctx, `INSERT OR REPLACE INTO metadata (memory_id, content, shard_id, created_at) VALUES (?, ?, ?, datetime('now'))`) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 	if err != nil {
 		return fmt.Errorf("prepare metadata stmt: %w", err)
 	}
@@ -290,7 +290,7 @@ func (s *VectorShard) InsertBatch(ctx context.Context, memoryIDs []string, embed
 			return fmt.Errorf("embedding dimension mismatch at index %d: expected %d, got %d", i, s.dimension, len(embeddings[i]))
 		}
 
-		if _, err := vecStmt.ExecContext(ctx, JSONFloat32Slice(embeddings[i])); err != nil {
+		if _, err := vecStmt.ExecContext(ctx, JSONFloat32Slice(embeddings[i])); err != nil { //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 			return fmt.Errorf("insert vector at %d: %w", i, err)
 		}
 
@@ -300,16 +300,16 @@ func (s *VectorShard) InsertBatch(ctx context.Context, memoryIDs []string, embed
 			return fmt.Errorf("get rowid at %d: %w", i, err)
 		}
 
-		if _, err := rowidStmt.ExecContext(ctx, memoryIDs[i], rowID); err != nil {
+		if _, err := rowidStmt.ExecContext(ctx, memoryIDs[i], rowID); err != nil { //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 			return fmt.Errorf("track rowid at %d: %w", i, err)
 		}
 
-		if _, err := metaStmt.ExecContext(ctx, memoryIDs[i], contents[i], s.shardID); err != nil {
+		if _, err := metaStmt.ExecContext(ctx, memoryIDs[i], contents[i], s.shardID); err != nil { //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 			return fmt.Errorf("insert metadata at %d: %w", i, err)
 		}
 	}
 
-	return tx.Commit()
+	return tx.Commit() //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 }
 
 // Search performs KNN search using the HNSW index.
@@ -321,7 +321,7 @@ func (s *VectorShard) Search(ctx context.Context, queryEmbedding []float32, K in
 		K = 10
 	}
 
-	s.mu.RLock()
+	s.mu.RLock() //nolint:mutexio // mutex serializes sqlite connection access across goroutines; read query bound to the protected connection
 	defer s.mu.RUnlock()
 
 	queryJSON := JSONFloat32Slice(queryEmbedding)
@@ -335,7 +335,7 @@ func (s *VectorShard) Search(ctx context.Context, queryEmbedding []float32, K in
 		ORDER BY e.distance
 	`
 
-	rows, err := s.db.QueryContext(ctx, query, queryJSON, K)
+	rows, err := s.db.QueryContext(ctx, query, queryJSON, K) //nolint:mutexio // mutex serializes sqlite connection access; read query bound to protected conn
 	if err != nil {
 		return nil, fmt.Errorf("KNN query failed: %w", err)
 	}
@@ -373,27 +373,27 @@ func (s *VectorShard) Search(ctx context.Context, queryEmbedding []float32, K in
 
 // Delete removes a vector from the shard by memory_id.
 func (s *VectorShard) Delete(ctx context.Context, memoryID string) error {
-	s.mu.Lock()
+	s.mu.Lock() //nolint:mutexio // mutex serializes sqlite connection access across goroutines; tx methods are bound to the protected connection
 	defer s.mu.Unlock()
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTx(ctx, nil) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 	if err != nil {
 		return fmt.Errorf("failed to begin tx: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() { _ = tx.Rollback() }() //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 
 	var rowID int64
-	err = tx.QueryRowContext(ctx, `SELECT rowid FROM embedding_rowids WHERE memory_id = ?`, memoryID).Scan(&rowID)
+	err = tx.QueryRowContext(ctx, `SELECT rowid FROM embedding_rowids WHERE memory_id = ?`, memoryID).Scan(&rowID) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 	if err != nil {
-		_ = tx.Commit()
+		_ = tx.Commit() //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 		return nil
 	}
 
-	_, _ = tx.ExecContext(ctx, `DELETE FROM embeddings WHERE rowid = ?`, rowID)
-	_, _ = tx.ExecContext(ctx, `DELETE FROM embedding_rowids WHERE memory_id = ?`, memoryID)
-	_, _ = tx.ExecContext(ctx, `DELETE FROM metadata WHERE memory_id = ?`, memoryID)
+	_, _ = tx.ExecContext(ctx, `DELETE FROM embeddings WHERE rowid = ?`, rowID) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
+	_, _ = tx.ExecContext(ctx, `DELETE FROM embedding_rowids WHERE memory_id = ?`, memoryID) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
+	_, _ = tx.ExecContext(ctx, `DELETE FROM metadata WHERE memory_id = ?`, memoryID) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 
-	return tx.Commit()
+	return tx.Commit() //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 }
 
 // Close closes the underlying database connection.

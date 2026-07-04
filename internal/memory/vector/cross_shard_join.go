@@ -40,7 +40,7 @@ func (c *CrossShardJoin) AttachDatabase(alias, path string) error {
 	}
 
 	query := fmt.Sprintf("ATTACH DATABASE '%s' AS %s", path, alias)
-	if _, err := c.baseDB.ExecContext(context.Background(), query); err != nil {
+	if _, err := c.baseDB.ExecContext(context.Background(), query); err != nil { //nolint:mutexio // mutex serializes sqlite ATTACH/DETACH which mutate connection-level attach state
 		return fmt.Errorf("attach database %s at %s: %w", path, alias, err)
 	}
 

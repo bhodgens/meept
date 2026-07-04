@@ -320,7 +320,7 @@ func (s *sqliteStore) Exists(ctx context.Context, hash string) bool {
 			SELECT 1 FROM ccr_entries
 			WHERE hash = ? AND expires_at > ?
 		)
-	`, hash, time.Now().Format(time.RFC3339)).Scan(&exists)
+	`, hash, time.Now().Format(time.RFC3339)).Scan(&exists) //nolint:mutexio // mutex serializes sqlite connection access; concurrent reads on same handle can interleave
 
 	return err == nil && exists
 }

@@ -116,6 +116,20 @@ var ioMethods = map[string]bool{
 	"PersistSync":    true,
 	"Save":           true,
 	"Load":           true,
+	// database/sql *Context-suffixed methods and transaction lifecycle.
+	// These perform real I/O against the database connection and must
+	// not be held under a mutex (CLAUDE.md "Mutex scope" rule) unless
+	// the lock's explicit purpose is to serialize connection access,
+	// in which case the call site should carry //nolint:mutexio.
+	"BeginTx":         true,
+	"ExecContext":     true,
+	"QueryContext":    true,
+	"QueryRowContext": true,
+	"PrepareContext":  true,
+	"Commit":          true,
+	"Rollback":        true,
+	"Run":             true, // exec.Cmd.Run() — subprocess invocation
+	"Wait":            true, // exec.Cmd.Wait() / process wait
 }
 
 func run(pass *analysis.Pass) (interface{}, error) {

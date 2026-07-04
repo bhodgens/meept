@@ -9,10 +9,23 @@ import (
 	"github.com/google/uuid"
 )
 
+// subscriber wraps a notification channel with a close-once guard.
+// Using sync.Once here makes Unsubscribe idempotent: a channel that
+// Subscribe returned on a closed emitter (and was therefore already
+// closed at issue time) will not panic on the second close attempt.
+type subscriber struct {
+	ch       chan *NotificationEvent
+	closeOnce sync.Once
+}
+
+func (s *subscriber) close() {
+	s.closeOnce.Do(func() { close(s.ch) })
+}
+
 // EventEmitter broadcasts notification events to connected clients.
 type EventEmitter struct {
 	mu          sync.RWMutex
-	subscribers []chan *NotificationEvent
+	subscribers []*subscriber
 	buffer      []*NotificationEvent
 	maxBuffer   int
 	logger      *slog.Logger
@@ -25,7 +38,7 @@ func NewEventEmitter(bufferSize int, logger *slog.Logger) *EventEmitter {
 		logger = slog.Default()
 	}
 	return &EventEmitter{
-		subscribers: make([]chan *NotificationEvent, 0),
+		subscribers: make([]*subscriber, 0),
 		buffer:      make([]*NotificationEvent, 0, bufferSize),
 		maxBuffer:   bufferSize,
 		logger:      logger,
@@ -34,19 +47,27 @@ func NewEventEmitter(bufferSize int, logger *slog.Logger) *EventEmitter {
 
 // Subscribe adds a new subscriber channel and immediately sends buffered
 // events. The returned channel is buffered to prevent blocking the emitter.
+//
+// If the emitter is already closed, Subscribe returns an already-closed
+// channel. That matches the downstream consumer's expected semantics for a
+// dead emitter (range loop terminates immediately) and the channel is still
+// safe to pass to Unsubscribe, which uses sync.Once to make close idempotent.
 func (e *EventEmitter) Subscribe() chan *NotificationEvent {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	ch := make(chan *NotificationEvent, 100)
-	// If the emitter has already been closed, return a closed channel so
-	// the caller's range loop terminates immediately without attempting
-	// to publish. We cannot add to subscribers (slice is nil after Close).
+	// Wrap in a *subscriber so Unsubscribe's close is idempotent even when
+	// Subscribe ran on a closed emitter (we pre-close the channel below).
+	sub := &subscriber{ch: ch}
+
 	if e.closed {
-		close(ch)
+		// Pre-close so the consumer's range terminates. sync.Once in
+		// sub.close() guarantees Unsubscribe won't double-close.
+		sub.close()
 		return ch
 	}
-	e.subscribers = append(e.subscribers, ch)
+	e.subscribers = append(e.subscribers, sub)
 
 	// Replay buffered events while still holding the lock. This closes the
 	// race where Close() ran between releasing the lock and sending on ch
@@ -72,20 +93,24 @@ func (e *EventEmitter) Subscribe() chan *NotificationEvent {
 
 // Unsubscribe removes a subscriber channel and closes it.
 // Removes from the slice BEFORE closing to prevent concurrent write races.
+//
+// If the channel is not in the active subscriber slice (because Close() or a
+// prior Unsubscribe already removed it), Unsubscribe is a no-op — Close()
+// will have already closed the channel via the subscriber wrapper, so we
+// must not attempt a second close.
 func (e *EventEmitter) Unsubscribe(ch chan *NotificationEvent) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	// Remove from slice FIRST
 	for i, sub := range e.subscribers {
-		if sub == ch {
+		if sub.ch == ch {
 			e.subscribers = append(e.subscribers[:i], e.subscribers[i+1:]...)
-			break
+			sub.close()
+			return
 		}
 	}
-
-	// Close AFTER removing to prevent concurrent write to closed channel
-	close(ch)
+	// Not found: Close() already drained and closed the channel, or
+	// Unsubscribe was called twice. Either way, nothing to do.
 }
 
 // Publish sends a notification event to all subscribers and retains it
@@ -108,7 +133,7 @@ func (e *EventEmitter) Publish(event *NotificationEvent) {
 	// Broadcast to subscribers (non-blocking)
 	for _, sub := range e.subscribers {
 		select {
-		case sub <- event:
+		case sub.ch <- event:
 		default:
 			e.logger.Warn("notification subscriber not consuming", "event", event.Title)
 		}
@@ -125,7 +150,7 @@ func (e *EventEmitter) Close() {
 
 	e.closed = true
 	for _, sub := range e.subscribers {
-		close(sub)
+		sub.close()
 	}
 	e.subscribers = nil
 }

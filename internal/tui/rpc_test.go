@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -315,7 +316,7 @@ func TestRPCClientChat(t *testing.T) {
 	}
 	defer client.Close()
 
-	reply, err := client.Chat("Hello", "test-conv")
+	reply, err := client.Chat(context.Background(), "Hello", "test-conv")
 	if err != nil {
 		t.Fatalf("failed to chat: %v", err)
 	}

@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -23,7 +24,7 @@ type Client interface {
 	IsConnected() bool
 
 	// Core methods used by both CLI and TUI
-	Chat(message, conversationID string) (string, error)
+	Chat(ctx context.Context, message, conversationID string) (string, error)
 	Status() (*types.DaemonStatusResponse, error)
 	ListJobs() (*types.JobListResponse, error)
 	QueryMemory(query string, limit int) (*types.MemoryQueryResponse, error)

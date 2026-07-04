@@ -200,5 +200,5 @@ func (s *Server) safeConnSend(conn *websocket.Conn, msg WSMessage) {
 	mu := s.wsHub.connWriteMu(conn)
 	mu.Lock()
 	defer mu.Unlock()
-	_ = websocket.JSON.Send(conn, msg)
+	_ = websocket.JSON.Send(conn, msg) //nolint:mutexio // mutex serializes websocket conn writes (safeConnSend pattern); *websocket.Conn is not concurrency-safe
 }

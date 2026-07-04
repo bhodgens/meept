@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -104,7 +105,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 			// Fallback to ephemeral session
 			sessionID = id.Generate("cli-")
 		}
-		reply, err := client.Chat(message, sessionID)
+		reply, err := client.Chat(context.Background(), message, sessionID)
 		if err != nil {
 			return fmt.Errorf("%s", llm.UserMessage(err))
 		}
@@ -181,7 +182,7 @@ func chatWithSession(client transport.Client, sessionID, message string) error {
 	}
 
 	// Session exists - send message
-	reply, err := client.Chat(message, sessionID)
+	reply, err := client.Chat(context.Background(), message, sessionID)
 	if err != nil {
 		return fmt.Errorf("%s", llm.UserMessage(err))
 	}

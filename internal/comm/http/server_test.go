@@ -21,8 +21,6 @@ import (
 	"github.com/caimlas/meept/internal/services"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/models"
-
-	"golang.org/x/net/websocket"
 )
 
 // mockDaemonController implements DaemonController for testing.
@@ -1498,10 +1496,11 @@ func TestHandleChatStream_SSEToolCompleteEvent(t *testing.T) {
 	}
 }
 
-// nilConn is a nil *websocket.Conn used as a reusable map key for testing.
-// Since websocket.Conn from golang.org/x/net/websocket is a struct, we use
-// nil pointer values as test keys; the hub methods only care about map lookups.
-var nilConn = (*websocket.Conn)(nil)
+// nilWSConn is a nil *wsConn used as a reusable map key for testing.
+// Since wsConn is a pointer, nil values serve as test keys; the hub methods
+// only care about map lookups (they do not dereference the pointer in
+// ShouldSendProgress / SubscribeSession / UnsubscribeSession).
+var nilWSConn = (*wsConn)(nil)
 
 // --- ShouldSendProgress tests ---
 
@@ -1509,86 +1508,86 @@ func TestShouldSendProgress_BroadcastMode(t *testing.T) {
 	hub := NewWebSocketHub(nil)
 
 	// No subscription = broadcast mode = always true
-	if !hub.ShouldSendProgress(nilConn, "any-session") {
+	if !hub.ShouldSendProgress(nilWSConn, "any-session") {
 		t.Error("broadcast mode should always return true")
 	}
 }
 
 func TestShouldSendProgress_SingleSessionMatch(t *testing.T) {
 	hub := NewWebSocketHub(nil)
-	hub.SubscribeSession(nilConn, "sess1")
+	hub.SubscribeSession(nilWSConn, "sess1")
 
-	if !hub.ShouldSendProgress(nilConn, "sess1") {
+	if !hub.ShouldSendProgress(nilWSConn, "sess1") {
 		t.Error("should send when session matches")
 	}
 }
 
 func TestShouldSendProgress_SingleSessionNoMatch(t *testing.T) {
 	hub := NewWebSocketHub(nil)
-	hub.SubscribeSession(nilConn, "sess1")
+	hub.SubscribeSession(nilWSConn, "sess1")
 
-	if hub.ShouldSendProgress(nilConn, "sess2") {
+	if hub.ShouldSendProgress(nilWSConn, "sess2") {
 		t.Error("should not send when session does not match")
 	}
 }
 
 func TestShouldSendProgress_MultiSessionAllMatch(t *testing.T) {
 	hub := NewWebSocketHub(nil)
-	hub.SubscribeSession(nilConn, "sess1")
-	hub.SubscribeSession(nilConn, "sess2")
+	hub.SubscribeSession(nilWSConn, "sess1")
+	hub.SubscribeSession(nilWSConn, "sess2")
 
-	if !hub.ShouldSendProgress(nilConn, "sess1") || !hub.ShouldSendProgress(nilConn, "sess2") {
+	if !hub.ShouldSendProgress(nilWSConn, "sess1") || !hub.ShouldSendProgress(nilWSConn, "sess2") {
 		t.Error("should send for all subscribed sessions")
 	}
 }
 
 func TestShouldSendProgress_MultiSessionPartialMatch(t *testing.T) {
 	hub := NewWebSocketHub(nil)
-	hub.SubscribeSession(nilConn, "sess1")
+	hub.SubscribeSession(nilWSConn, "sess1")
 
-	if hub.ShouldSendProgress(nilConn, "sess3") {
+	if hub.ShouldSendProgress(nilWSConn, "sess3") {
 		t.Error("should not send to non-subscribed session")
 	}
-	if !hub.ShouldSendProgress(nilConn, "sess1") {
+	if !hub.ShouldSendProgress(nilWSConn, "sess1") {
 		t.Error("should send for subscribed session")
 	}
 }
 
 func TestShouldSendProgress_AfterUnsubscribe(t *testing.T) {
 	hub := NewWebSocketHub(nil)
-	hub.SubscribeSession(nilConn, "sess1")
-	hub.SubscribeSession(nilConn, "sess2")
+	hub.SubscribeSession(nilWSConn, "sess1")
+	hub.SubscribeSession(nilWSConn, "sess2")
 
 	// Should match before unsubscribe
-	if !hub.ShouldSendProgress(nilConn, "sess1") {
+	if !hub.ShouldSendProgress(nilWSConn, "sess1") {
 		t.Error("should send before unsubscribe")
 	}
-	if !hub.ShouldSendProgress(nilConn, "sess2") {
+	if !hub.ShouldSendProgress(nilWSConn, "sess2") {
 		t.Error("should send for sess2 before unsubscribe")
 	}
 
-	hub.UnsubscribeSession(nilConn, "sess1")
+	hub.UnsubscribeSession(nilWSConn, "sess1")
 
 	// sess1 removed, sess2 should still match
-	if hub.ShouldSendProgress(nilConn, "sess1") {
+	if hub.ShouldSendProgress(nilWSConn, "sess1") {
 		t.Error("should not send for unsubscribed sess1")
 	}
-	if !hub.ShouldSendProgress(nilConn, "sess2") {
+	if !hub.ShouldSendProgress(nilWSConn, "sess2") {
 		t.Error("should still send for non-unsubscribed sess2")
 	}
 }
 
 func TestShouldSendProgress_Concurrent(t *testing.T) {
 	hub := NewWebSocketHub(nil)
-	hub.SubscribeSession(nilConn, "sess-a")
+	hub.SubscribeSession(nilWSConn, "sess-a")
 
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = hub.ShouldSendProgress(nilConn, "sess-a")
-			_ = hub.ShouldSendProgress(nilConn, "sess-b")
+			_ = hub.ShouldSendProgress(nilWSConn, "sess-a")
+			_ = hub.ShouldSendProgress(nilWSConn, "sess-b")
 		}()
 	}
 	wg.Wait()
@@ -1596,8 +1595,8 @@ func TestShouldSendProgress_Concurrent(t *testing.T) {
 
 func TestShouldSendProgress_MultipleConns(t *testing.T) {
 	hub := NewWebSocketHub(nil)
-	conn1 := (*websocket.Conn)(nil)
-	conn2 := (*websocket.Conn)(nil)
+	conn1 := (*wsConn)(nil)
+	conn2 := (*wsConn)(nil)
 	_ = conn1
 
 	hub.SubscribeSession(conn1, "sess-x")
@@ -1696,7 +1695,7 @@ func TestHandleWSProgress_SessionFiltering_Broadcast(t *testing.T) {
 	msg := &models.BusMessage{Topic: "agent.progress.synthesized", Payload: payload}
 	s.handleWSProgress(msg)
 
-	if !hub.ShouldSendProgress(nilConn, "broadcast-sess") {
+	if !hub.ShouldSendProgress(nilWSConn, "broadcast-sess") {
 		t.Error("broadcast mode should send to all")
 	}
 }
@@ -1712,12 +1711,12 @@ func TestHandleWSProgress_SessionFiltering_Scoped(t *testing.T) {
 		Timestamp: time.Now(),
 	}
 
-	hub.SubscribeSession(nilConn, "scoped-123")
+	hub.SubscribeSession(nilWSConn, "scoped-123")
 
-	if !hub.ShouldSendProgress(nilConn, "scoped-123") {
+	if !hub.ShouldSendProgress(nilWSConn, "scoped-123") {
 		t.Error("subscribe to scoped-123 => should send")
 	}
-	if hub.ShouldSendProgress(nilConn, "other-sess") {
+	if hub.ShouldSendProgress(nilWSConn, "other-sess") {
 		t.Error("NOT subscribed to other-sess => should NOT send")
 	}
 
@@ -1850,7 +1849,7 @@ func TestProgressRateLimiter(t *testing.T) {
 	limiter := newProgressRateLimiter(interval)
 
 	// Create a mock connection (nil conn for unit testing)
-	var mockConn *websocket.Conn
+	var mockConn *wsConn
 
 	// First send should be allowed (no previous send recorded)
 	if !limiter.shouldSend(mockConn) {
@@ -1880,7 +1879,7 @@ func TestProgressRateLimiter_Cleanup(t *testing.T) {
 	// Note: nil pointers all map to same key, so we test the cleanup mechanism
 
 	// Verify initial state: no entries, shouldSend returns true
-	var mockConn *websocket.Conn
+	var mockConn *wsConn
 	if !limiter.shouldSend(mockConn) {
 		t.Error("Initial state should allow send")
 	}
@@ -1894,7 +1893,7 @@ func TestProgressRateLimiter_Cleanup(t *testing.T) {
 	}
 
 	// Cleanup with empty active set should remove the entry
-	limiter.cleanup(map[*websocket.Conn]struct{}{})
+	limiter.cleanup(map[*wsConn]struct{}{})
 
 	// After cleanup, should allow sends again
 	if !limiter.shouldSend(mockConn) {
@@ -1910,7 +1909,7 @@ func TestHandleWSProgress_RateLimiting(t *testing.T) {
 	}
 
 	// Use nil conn for unit testing (all nil conns map to same key)
-	var mockConn *websocket.Conn
+	var mockConn *wsConn
 
 	// First send should be allowed
 	if !s.progressRateLimiter.shouldSend(mockConn) {

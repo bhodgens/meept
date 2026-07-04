@@ -665,7 +665,7 @@ func (t *TUI) sendChatMessage(message string) {
 
 	// Send to daemon (in goroutine to avoid blocking UI)
 	go func() {
-		reply, err := t.client.Chat(message, t.sessionMgr.GetSessionName())
+		reply, err := t.client.Chat(context.Background(), message, t.sessionMgr.GetSessionName())
 		if err != nil {
 			// Use structured network error detection. Also check for
 			// syscall.ENOENT which occurs when the Unix socket file doesn't

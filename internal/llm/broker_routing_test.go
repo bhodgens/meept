@@ -87,7 +87,7 @@ func TestAnthropicRequestURL(t *testing.T) {
 			name:      "openrouter anthropic claude (non-streaming)",
 			cfg:       &ModelConfig{ProviderID: "openrouter", BaseURL: "https://openrouter.ai/api/v1", ModelID: "anthropic/claude-sonnet-4-6"},
 			streaming: false,
-			want:      "https://openrouter.ai/api/v1/v1/messages",
+			want:      "https://openrouter.ai/api/v1/messages",
 		},
 		{
 			name:      "bedrock claude non-streaming",

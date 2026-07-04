@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -117,7 +118,7 @@ func TestHTTPClient_Chat(t *testing.T) {
 	client := NewHTTPClient(server.URL, 5*time.Second)
 	defer client.Close()
 
-	reply, err := client.Chat("hi", "conv-123")
+	reply, err := client.Chat(context.Background(), "hi", "conv-123")
 	if err != nil {
 		t.Fatalf("Chat() failed: %v", err)
 	}

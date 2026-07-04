@@ -133,7 +133,7 @@ func (h *InstructionHandler) handleAdd(ctx context.Context, msg *models.BusMessa
 	}
 
 	instr := &preferences.UserInstruction{
-		ID:         fmt.Sprintf("instr_%d", time.Now().UnixNano()),
+		ID:         idpkg.Generate("instr_"),
 		Trigger:    parsed.Trigger.Type + ":" + parsed.Trigger.Pattern,
 		Action:     parsed.Action.Tool,
 		ActionArgs: parsed.Action.Args,
@@ -290,7 +290,7 @@ func (h *InstructionHandler) handleAddRPC(ctx context.Context, raw json.RawMessa
 	}
 
 	instr := &preferences.UserInstruction{
-		ID:         fmt.Sprintf("instr_%d", time.Now().UnixNano()),
+		ID:         idpkg.Generate("instr_"),
 		Trigger:    parsed.Trigger.Type + ":" + parsed.Trigger.Pattern,
 		Action:     parsed.Action.Tool,
 		ActionArgs: parsed.Action.Args,

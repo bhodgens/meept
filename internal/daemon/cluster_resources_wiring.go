@@ -26,6 +26,7 @@ import (
 	"github.com/caimlas/meept/internal/resources"
 	"github.com/caimlas/meept/internal/rpc"
 	"github.com/caimlas/meept/internal/workspace"
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // wireClusterResources constructs and wires the cluster resource model
@@ -371,7 +372,7 @@ func (d *dispatchSubmitterAdapter) Submit(ctx context.Context, req rpc.DispatchJ
 	}
 
 	job := cluster.DispatchJob{
-		JobID:             fmt.Sprintf("dispatch-%d", time.Now().UnixNano()),
+		JobID:             id.Generate("dispatch-"),
 		OriginNode:        d.localNodeID,
 		TargetNode:        req.TargetNode,
 		AgentID:           req.AgentID,

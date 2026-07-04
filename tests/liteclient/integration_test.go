@@ -128,7 +128,7 @@ func TestIntegration_SessionAndChat(t *testing.T) {
 	sm := sharedclient.NewSessionManager(client, "default")
 	sm.SetSession(sess)
 
-	reply, err := client.Chat("hello world", sm.GetSessionName())
+	reply, err := client.Chat(context.Background(), "hello world", sm.GetSessionName())
 	if err != nil {
 		t.Fatalf("Chat failed: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestIntegration_SlashCommandFlow(t *testing.T) {
 
 	// Regular command goes through chat
 	regularMsg := "hello world"
-	result, err := client.Chat(regularMsg, "e2e-session")
+	result, err := client.Chat(context.Background(), regularMsg, "e2e-session")
 	if err != nil {
 		t.Fatalf("Chat failed: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestIntegration_MultipleChatRoundTrips(t *testing.T) {
 	}
 
 	for i, msg := range messages {
-		reply, err := client.Chat(msg, sessionName(sm))
+		reply, err := client.Chat(context.Background(), msg, sessionName(sm))
 		if err != nil {
 			t.Fatalf("chat #%d failed: %v", i+1, err)
 		}

@@ -49,21 +49,24 @@ func CheckTirithAvailable(ctx context.Context, binary string) bool {
 		return available
 	}
 
-	// Check availability and cache with write lock
-	tirithCacheMu.Lock()
-	defer tirithCacheMu.Unlock()
-
 	// Double-check after acquiring write lock
+	tirithCacheMu.Lock()
 	if available, cached = tirithCacheMap[binary]; cached {
+		tirithCacheMu.Unlock()
 		return available
 	}
+	tirithCacheMu.Unlock()
 
+	// Run subprocess OUTSIDE the lock to avoid serializing concurrent scans.
 	ctx, cancel := context.WithTimeout(ctx, tirithTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, binary, "--version")
 	available = cmd.Run() == nil
+
+	tirithCacheMu.Lock()
 	tirithCacheMap[binary] = available
+	tirithCacheMu.Unlock()
 
 	return available
 }

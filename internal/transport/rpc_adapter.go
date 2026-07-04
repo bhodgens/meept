@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 
@@ -25,7 +26,9 @@ func NewRPCClient(socketPath string, timeout time.Duration) Client {
 func (a *rpcAdapter) Connect() error                               { return a.client.Connect() }
 func (a *rpcAdapter) Close() error                                 { return a.client.Close() }
 func (a *rpcAdapter) IsConnected() bool                            { return a.client.IsConnected() }
-func (a *rpcAdapter) Chat(message, conversationID string) (string, error) { return a.client.Chat(message, conversationID) }
+func (a *rpcAdapter) Chat(ctx context.Context, message, conversationID string) (string, error) {
+	return a.client.Chat(ctx, message, conversationID)
+}
 func (a *rpcAdapter) Status() (*types.DaemonStatusResponse, error) { return a.client.Status() }
 func (a *rpcAdapter) ListJobs() (*types.JobListResponse, error)    { return a.client.ListJobs() }
 func (a *rpcAdapter) QueryMemory(query string, limit int) (*types.MemoryQueryResponse, error) {

@@ -147,7 +147,7 @@ class _ConnectionDot extends ConsumerWidget {
             builder: (_) => _ConnectionDetailsDialog(details: details),
           );
         } else if (value == 'disconnect') {
-          ref.read(websocketProvider).disconnect();
+          ref.read(websocketProvider).pause();
         } else if (value == 'reconnect') {
           ref.read(websocketProvider).connect();
         }

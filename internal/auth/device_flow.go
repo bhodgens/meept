@@ -75,6 +75,12 @@ const (
 	errAccessDenied         = "access_denied"
 )
 
+// deviceFlowHTTPClient is the HTTP client used for device-flow requests.
+// It carries a timeout so that hung TCP connections don't block forever;
+// the per-request context (NewRequestWithContext) still applies for
+// cancellation/deadline semantics on top of this client-level cap.
+var deviceFlowHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 // DeviceFlowError represents an error returned during the device code flow.
 type DeviceFlowError struct {
 	Code        string
@@ -110,7 +116,7 @@ func StartDeviceFlow(ctx context.Context, cfg DeviceFlowConfig) (*DeviceCodeResu
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := deviceFlowHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("device code request failed: %w", err)
 	}
@@ -226,7 +232,7 @@ func pollOnce(ctx context.Context, cfg DeviceFlowConfig, deviceCode string) (*To
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := deviceFlowHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("token request failed: %w", err)
 	}
@@ -292,7 +298,7 @@ func RefreshTokenRequest(ctx context.Context, cfg DeviceFlowConfig, refreshToken
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := deviceFlowHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("refresh request failed: %w", err)
 	}

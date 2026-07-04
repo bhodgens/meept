@@ -94,7 +94,7 @@ final threadSelectorProvider = StateNotifierProvider.family<
 );
 
 /// A compact dropdown widget for selecting the active thread.
-class ThreadSelector extends ConsumerWidget {
+class ThreadSelector extends ConsumerStatefulWidget {
   final String sessionId;
 
   const ThreadSelector({
@@ -103,8 +103,21 @@ class ThreadSelector extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(threadSelectorProvider(sessionId));
+  ConsumerState<ThreadSelector> createState() => _ThreadSelectorState();
+}
+
+class _ThreadSelectorState extends ConsumerState<ThreadSelector> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(threadSelectorProvider(widget.sessionId).notifier).load();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = ref.watch(threadSelectorProvider(widget.sessionId));
 
     if (state.isLoading) {
       return const SizedBox(
@@ -116,7 +129,7 @@ class ThreadSelector extends ConsumerWidget {
 
     if (state.threads.isEmpty) {
       return TextButton.icon(
-        onPressed: () => _showCreateDialog(context, ref),
+        onPressed: () => _showCreateDialog(context),
         icon: const Icon(Icons.add, size: 16),
         label: const Text('new thread'),
       );
@@ -125,7 +138,7 @@ class ThreadSelector extends ConsumerWidget {
     return PopupMenuButton<String>(
       onSelected: (threadId) {
         ref
-            .read(threadSelectorProvider(sessionId).notifier)
+            .read(threadSelectorProvider(widget.sessionId).notifier)
             .switchThread(threadId);
       },
       itemBuilder: (context) {
@@ -184,7 +197,7 @@ class ThreadSelector extends ConsumerWidget {
     );
   }
 
-  void _showCreateDialog(BuildContext context, WidgetRef ref) {
+  void _showCreateDialog(BuildContext context) {
     final controller = TextEditingController();
     showDialog(
       context: context,
@@ -207,7 +220,7 @@ class ThreadSelector extends ConsumerWidget {
             onPressed: () {
               final topic = controller.text.trim();
               ref
-                  .read(threadSelectorProvider(sessionId).notifier)
+                  .read(threadSelectorProvider(widget.sessionId).notifier)
                   .createThread(topic.isEmpty ? 'general' : topic);
               Navigator.of(context).pop();
             },

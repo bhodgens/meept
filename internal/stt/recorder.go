@@ -93,14 +93,14 @@ func (r *Recorder) Stop() error {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- r.cmd.Wait()
+		done <- r.cmd.Wait() //nolint:mutexio // mutex serializes recorder subprocess lifecycle; Wait reaps the process under the same lock that owns the cmd
 	}()
 
 	// Send SIGTERM for graceful stop.
 	if runtime.GOOS == "windows" {
 		// Windows: use taskkill for graceful termination.
 		killCmd := exec.Command("taskkill", "/PID", fmt.Sprintf("%d", r.cmd.Process.Pid), "/T", "/F")
-		_ = killCmd.Run()
+		_ = killCmd.Run() //nolint:mutexio // mutex serializes recorder subprocess lifecycle; taskkill is part of teardown under the owning lock
 	} else {
 		_ = r.cmd.Process.Signal(syscall.SIGTERM)
 	}

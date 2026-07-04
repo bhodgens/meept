@@ -9,6 +9,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/preferences"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -111,7 +112,7 @@ func (h *InstructionHandler) handleAdd(ctx context.Context, msg *models.BusMessa
 	}
 
 	instr := &preferences.UserInstruction{
-		ID:         fmt.Sprintf("instr_%d", time.Now().UnixNano()),
+		ID:         id.Generate("instr_"),
 		Trigger:    parsed.Trigger.Type + ":" + parsed.Trigger.Pattern,
 		Action:     parsed.Action.Tool,
 		ActionArgs: parsed.Action.Args,
@@ -167,10 +168,10 @@ func (h *InstructionHandler) handleExecute(ctx context.Context, msg *models.BusM
 		return
 	}
 
-	id, _ := req["id"].(string)
-	instr := h.store.Get(id)
+	instrID, _ := req["id"].(string)
+	instr := h.store.Get(instrID)
 	if instr == nil {
-		h.sendError(msg.ReplyTo, "instruction not found: "+id)
+		h.sendError(msg.ReplyTo, "instruction not found: "+instrID)
 		return
 	}
 
@@ -180,7 +181,7 @@ func (h *InstructionHandler) handleExecute(ctx context.Context, msg *models.BusM
 		"args":           instr.ActionArgs,
 	})
 	h.bus.Publish("instruction.executing", &models.BusMessage{
-		ID:        fmt.Sprintf("exec_%d", time.Now().UnixNano()),
+		ID:        id.Generate("exec_"),
 		Topic:     "instruction.executing",
 		Timestamp: time.Now().UTC(),
 		Payload:   payload,
@@ -217,7 +218,7 @@ func (h *InstructionHandler) handlePreview(ctx context.Context, msg *models.BusM
 func (h *InstructionHandler) sendResponse(replyTo string, resp InstructionResponse) {
 	payload, _ := json.Marshal(resp)
 	h.bus.Publish(replyTo, &models.BusMessage{
-		ID:        fmt.Sprintf("resp_%d", time.Now().UnixNano()),
+		ID:        id.Generate("resp_"),
 		Timestamp: time.Now().UTC(),
 		Payload:   payload,
 	})

@@ -56,7 +56,7 @@ func NewMockChatRPCClient() *MockChatRPCClient {
 	}
 }
 
-func (m *MockChatRPCClient) Chat(message, _ string) (string, error) {
+func (m *MockChatRPCClient) Chat(_ context.Context, message, _ string) (string, error) {
 	m.ChatCalls = append(m.ChatCalls, message)
 	if m.ChatError != nil {
 		return "", m.ChatError
@@ -68,7 +68,7 @@ func (m *MockChatRPCClient) Chat(message, _ string) (string, error) {
 }
 
 // ChatWithParts records the call and delegates to Chat for response logic.
-func (m *MockChatRPCClient) ChatWithParts(message, _ string, parts []llm.ContentPart) (string, error) {
+func (m *MockChatRPCClient) ChatWithParts(_ context.Context, message, _ string, parts []llm.ContentPart) (string, error) {
 	m.ChatWithPartsCalls = append(m.ChatWithPartsCalls, message)
 	// Copy parts slice so callers can safely inspect the recorded state even
 	// after the test's source slice is reused.
