@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../widgets/background_image.dart';
 import '../../theme/colors.dart';
+import '../../widgets/background_image.dart';
 import 'tasks_list.dart';
 import 'tasks_detail.dart';
 import '../../models/api_models.dart';
@@ -9,7 +9,7 @@ import '../../models/api_models.dart';
 /// Provider for the currently selected task
 final activeTaskProvider = StateProvider<Task?>((ref) => null);
 
-/// Tasks tab - master-detail view with task list and detail
+/// Tasks tab - master-detail view with task list and detail panes
 class TasksTab extends ConsumerWidget {
   const TasksTab({super.key});
 
@@ -20,20 +20,13 @@ class TasksTab extends ConsumerWidget {
     return Row(
       children: [
         SizedBox(
-          width: 280,
-          child: TasksList(
-            onTaskSelected: (task) {
-              ref.read(activeTaskProvider.notifier).state = task;
-            },
-          ),
+          width: 300,
+          child: const TasksList(),
         ),
+        const VerticalDivider(width: 1),
         if (selectedTask != null)
-          Expanded(
-            child: BackgroundImage(
-              child: const TasksDetail(),
-            ),
-          ),
-        if (selectedTask == null)
+          const Expanded(child: TasksDetail())
+        else
           Expanded(
             child: Center(
               child: Text(
