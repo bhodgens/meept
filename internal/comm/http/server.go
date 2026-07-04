@@ -7,7 +7,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -2034,48 +2033,14 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate API token if auth is required
+	// Auth is enforced by the APIKeyAuth middleware (registered via
+	// s.middleware). The middleware extracts the key from Authorization,
+	// Sec-WebSocket-Protocol: bearer.<key>, or the legacy ?token= query
+	// param, validates it, and stashes it in the request context. We only
+	// need to confirm it ran.
 	if s.config.RequireAuth {
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			// Legacy fallback for WebSocket clients that cannot set headers
-			// (e.g. browser APIs). Credentials in query params are visible in
-			// server access logs and should be migrated to the
-			// Sec-WebSocket-Protocol: bearer.<key> convention (D1-1).
-			token := r.URL.Query().Get("token")
-			if token == "" {
-				s.writeError(w, http.StatusUnauthorized, "unauthorized: missing API token")
-				return
-			}
-			if s.logger != nil {
-				s.logger.Warn("websocket auth via query param (credentials visible in access logs)",
-					"remote", r.RemoteAddr,
-					"hint", "use Authorization header or Sec-WebSocket-Protocol: bearer.<key>",
-				)
-			}
-			authHeader = "Bearer " + token
-		} else {
-			// Case-insensitive prefix match per RFC 7235. A non-Bearer
-			// header leaves authHeader empty so the constant-time compare
-			// fails below.
-			const bearerPrefix = "Bearer "
-			if len(authHeader) > len(bearerPrefix) && strings.EqualFold(authHeader[:len(bearerPrefix)], bearerPrefix) {
-				authHeader = authHeader[len(bearerPrefix):]
-			} else {
-				authHeader = ""
-			}
-		}
-
-		// Validate token against configured API keys using constant-time compare
-		valid := false
-		for _, key := range s.config.APIKeys {
-			if subtle.ConstantTimeCompare([]byte(authHeader), []byte(key)) == 1 {
-				valid = true
-				break
-			}
-		}
-		if !valid {
-			s.writeError(w, http.StatusUnauthorized, "unauthorized: invalid API token")
+		if _, ok := r.Context().Value(apiKeyContextKey).(string); !ok {
+			s.writeError(w, http.StatusUnauthorized, "unauthorized: missing API token")
 			return
 		}
 	}
