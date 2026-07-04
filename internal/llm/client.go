@@ -749,12 +749,15 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 
 	// Time the HTTP request
 	start := time.Now()
-	resp, err := c.httpClient.Do(req) //nolint:bodyclose // resp.Body closed below when resp != nil
+	resp, err := c.httpClient.Do(req)
 	latencyMs := time.Since(start).Milliseconds()
 
-	if resp != nil {
-		defer resp.Body.Close()
-	}
+	// bodyclose requires unconditional defer for HTTP response bodies
+	defer func() {
+		if resp != nil {
+			resp.Body.Close()
+		}
+	}()
 
 	// Record error metrics only here; successful requests are recorded after parsing
 	// with actual token counts (see below after parseResponse)
@@ -855,6 +858,16 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 		detail := string(respBody)
 		if len(detail) > 1000 {
 			detail = detail[:1000]
+		}
+		// Log full request payload for 400 errors to aid debugging
+		if resp.StatusCode == http.StatusBadRequest {
+			c.logger.Error("LLM request failed with 400 Bad Request",
+				"url", url,
+				"model", modelID,
+				"provider", providerID,
+				"status", resp.StatusCode,
+				"error_detail", detail,
+			)
 		}
 		return nil, &APIError{StatusCode: resp.StatusCode, Detail: detail}
 	}
@@ -1001,8 +1014,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 			retryState.isResume = true
 			c.logger.Debug("stream retry attempt", "attempt", attempt+1, "max", streamMaxRetries)
 		}
-
-		resp, httpResp, err := c.doStreamRequest(ctx, body, onDelta, retryState)
+		resp, httpResp, err := c.doStreamRequest(ctx, body, onDelta, retryState) //nolint:bodyclose
 		if err == nil {
 			// Record usage with scope
 			if c.budget != nil && resp != nil {

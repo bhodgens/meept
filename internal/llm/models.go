@@ -106,7 +106,11 @@ func (m *ChatMessage) ToOpenAIDictWithStore(store UploadStore) map[string]any {
 	if m.Name != "" {
 		msg["name"] = m.Name
 	}
-	if len(m.ToolCalls) > 0 {
+	// Tool calls are only valid on assistant messages (calling a tool).
+	// Tool response messages (role="tool") should NOT include tool_calls -
+	// they include tool_call_id to match the original call.
+	// See: https://platform.openai.com/docs/api-reference/chat/create
+	if len(m.ToolCalls) > 0 && m.Role == RoleAssistant {
 		calls := make([]map[string]any, len(m.ToolCalls))
 		for i, tc := range m.ToolCalls {
 			calls[i] = tc.ToOpenAIDict()
