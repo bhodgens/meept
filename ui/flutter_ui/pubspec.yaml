@@ -97,5 +97,4 @@ flutter:
       fonts:
         - asset: assets/fonts/ShareTechMono-Regular.ttf
   assets:
-    - assets/images/
-    - assets/shaders/
+    - assets/images/gui-bg.png
