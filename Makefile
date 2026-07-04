@@ -717,13 +717,13 @@ gui-web-run:
 	@echo "============================================"
 	@echo ""
 	@echo "  Dev URL: http://localhost:59714"
-	@echo "  API:     http://localhost:8081/api/v1"
+	@echo "  API:     https://localhost:8081/api/v1"
 	@echo ""
 	@echo "  Hot reload: press 'r'"
 	@echo "  Hot restart: press 'R'"
 	@echo "  Quit: press 'q'"
 	@echo ""
-	@if ! curl -s http://localhost:8081/health > /dev/null 2>&1; then \
+	@if ! curl -sk https://localhost:8081/health > /dev/null 2>&1; then \
 		echo "  [!] WARNING: Daemon not detected on port 8081"; \
 		echo "  The app will not work without the daemon running."; \
 		echo ""; \
@@ -740,14 +740,14 @@ gui-web-run:
 		echo "  [OK] Daemon detected on port 8081"; \
 		echo ""; \
 	fi
-	cd $(FLUTTER_UI_DIR) && flutter run -d chrome --web-port=59714 
+	cd $(FLUTTER_UI_DIR) && flutter run -d chrome --web-port=59714 $(FLUTTER_DART_DEFINES)
 
 gui-dev-server:
 	@echo "  localcert        Generate trusted SSL cert for localhost (requires mkcert)"
 	@echo "  localcert-install Install mkcert and local CA (one-time setup)"
 	@echo "Starting Flutter web dev server (web-server target)..."
 	@echo "Open http://localhost:59714 in your browser"
-	cd $(FLUTTER_UI_DIR) && flutter run -d web-server --web-port=59714
+	cd $(FLUTTER_UI_DIR) && flutter run -d web-server --web-port=59714 $(FLUTTER_DART_DEFINES)
 
 # webui: Alias for gui-web-run - Flutter web development with hot reload
 # Opens Chrome at http://localhost:59714 for fast UI iteration without recompilation.
