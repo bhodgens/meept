@@ -2108,10 +2108,31 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			origin := request.Header.Get("Origin")
 			// Non-browser clients (Dart io.WebSocket, curl, CLI tools) may not
 			// send an Origin header. Allow empty/absent Origin since auth is
-			// already enforced above. For browser clients, enforce the
-			// configured allowlist.
+			// already enforced by the middleware. For browser clients, enforce
+			// the configured allowlist.
 			if origin != "" && !originAllowed(origin) {
 				return fmt.Errorf("origin not allowed: %s", origin)
+			}
+			// RFC 6455 §4.2.2: if the client offered subprotocols, echo one
+			// back. Browser WebSocket APIs cannot set custom headers, so auth
+			// is carried via Sec-WebSocket-Protocol: bearer.<key>. We must
+			// echo the offered protocol verbatim or the browser will abort
+			// the upgrade.
+			if proto := request.Header.Get("Sec-WebSocket-Protocol"); proto != "" {
+				picked := ""
+				for _, p := range strings.Split(proto, ",") {
+					p = strings.TrimSpace(p)
+					if strings.HasPrefix(p, "bearer.") {
+						picked = p
+						break
+					}
+					if picked == "" {
+						picked = p
+					}
+				}
+				if picked != "" {
+					config.Protocol = []string{picked}
+				}
 			}
 			return nil
 		},
