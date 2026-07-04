@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
+import '../../widgets/background_image.dart';
 import 'tasks_list.dart';
 import 'tasks_detail.dart';
 import '../../models/api_models.dart';
@@ -16,8 +17,7 @@ class TasksTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final selectedTask = ref.watch(activeTaskProvider);
 
-    return Container(
-      color: CyberpunkColors.black,
+    return BackgroundImage(
       child: Row(
         children: [
           TasksList(

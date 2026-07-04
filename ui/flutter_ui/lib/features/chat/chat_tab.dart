@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
+import '../../widgets/background_image.dart';
 import '../../providers/providers.dart';
 import 'chat_view.dart';
 import '../memory/memory_panel.dart';
@@ -29,8 +30,7 @@ class _ChatTabState extends ConsumerState<ChatTab> {
   Widget build(BuildContext context) {
     final activeTool = ref.watch(activeToolProvider);
 
-    return Container(
-      color: CyberpunkColors.black,
+    return BackgroundImage(
       child: activeTool.isNotEmpty ? _buildToolView(activeTool) : ChatView(sessionId: widget.sessionId),
     );
   }

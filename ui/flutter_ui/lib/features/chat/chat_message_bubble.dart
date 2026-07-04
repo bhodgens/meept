@@ -101,8 +101,8 @@ class ChatMessageBubble extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: isUser
-              ? CyberpunkColors.orangePrimary.withValues(alpha: 0.2)
-              : CyberpunkColors.midGray,
+              ? CyberpunkColors.orangePrimary.withValues(alpha: 0.6)
+              : CyberpunkColors.midGray.withValues(alpha: 0.6),
           border: Border.all(
             color:
                 isUser ? CyberpunkColors.orangePrimary : CyberpunkColors.lightGray,

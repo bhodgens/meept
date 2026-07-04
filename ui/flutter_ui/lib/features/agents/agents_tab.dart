@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../widgets/background_image.dart';
 import '../../providers/providers.dart';
 import '../../providers/tab_activation_provider.dart' show keyboardFocusProvider;
 import '../../models/api_models.dart';
@@ -89,87 +90,89 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     final agentState = ref.watch(agentProvider);
     final activeAgent = ref.watch(activeAgentProvider);
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                'agents',
-                style: CyberpunkTypography.headlineMedium.copyWith(
-                  color: CyberpunkColors.orangePrimary,
-                ),
-              ),
-              const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.refresh, size: 18),
-                color: CyberpunkColors.orangePrimary,
-                onPressed: () {
-                  ref.read(agentProvider.notifier).loadAgents();
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          if (agentState.isLoading)
-            const Expanded(
-              child: Center(
-                child: CircularProgressIndicator(),
-              ),
-            )
-          else if (agentState.error != null)
-            Expanded(
-              child: Center(
-                child: Column(
-                  children: [
-                    SizedBox(
-                      width: 280,
-                      child: _AgentErrorBanner(message: agentState.error!),
-                    ),
-                    const SizedBox(height: 12),
-                    FilledButton.tonal(
-                      onPressed: () => ref.read(agentProvider.notifier).loadAgents(),
-                      child: const Text('retry', style: CyberpunkTypography.bodySmall),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          else if (agentState.agents.isEmpty)
-            const Expanded(
-              child: Center(
-                child: Text('no agents available'),
-              ),
-            )
-          else
-            Expanded(
-              child: Focus(
-                onFocusChange: (hasFocus) {
-                  if (hasFocus) {
-                    ref.read(keyboardFocusProvider.notifier).setFocusedPane(0);
-                  }
-                },
-                onKeyEvent: _handleKey,
-                child: GridView.builder(
-                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 225,
-                    crossAxisSpacing: 8,
-                    mainAxisSpacing: 8,
-                    childAspectRatio: 0.87,
+    return BackgroundImage(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'agents',
+                  style: CyberpunkTypography.headlineMedium.copyWith(
+                    color: CyberpunkColors.orangePrimary,
                   ),
-                  itemCount: agentState.agents.length,
-                  itemBuilder: (context, index) {
-                    final agent = agentState.agents[index];
-                    final isSelected = activeAgent?.id == agent.id;
-                    final isKeyboardSelected = _selectedIndex == index;
-                    return _buildAgentCard(agent, isSelected, isKeyboardSelected);
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.refresh, size: 18),
+                  color: CyberpunkColors.orangePrimary,
+                  onPressed: () {
+                    ref.read(agentProvider.notifier).loadAgents();
                   },
                 ),
-              ),
+              ],
             ),
-        ],
+            const SizedBox(height: 16),
+            if (agentState.isLoading)
+              const Expanded(
+                child: Center(
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else if (agentState.error != null)
+              Expanded(
+                child: Center(
+                  child: Column(
+                    children: [
+                      SizedBox(
+                        width: 280,
+                        child: _AgentErrorBanner(message: agentState.error!),
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton.tonal(
+                        onPressed: () => ref.read(agentProvider.notifier).loadAgents(),
+                        child: const Text('retry', style: CyberpunkTypography.bodySmall),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else if (agentState.agents.isEmpty)
+              const Expanded(
+                child: Center(
+                  child: Text('no agents available'),
+                ),
+              )
+            else
+              Expanded(
+                child: Focus(
+                  onFocusChange: (hasFocus) {
+                    if (hasFocus) {
+                      ref.read(keyboardFocusProvider.notifier).setFocusedPane(0);
+                    }
+                  },
+                  onKeyEvent: _handleKey,
+                  child: GridView.builder(
+                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: 225,
+                      crossAxisSpacing: 8,
+                      mainAxisSpacing: 8,
+                      childAspectRatio: 0.87,
+                    ),
+                    itemCount: agentState.agents.length,
+                    itemBuilder: (context, index) {
+                      final agent = agentState.agents[index];
+                      final isSelected = activeAgent?.id == agent.id;
+                      final isKeyboardSelected = _selectedIndex == index;
+                      return _buildAgentCard(agent, isSelected, isKeyboardSelected);
+                    },
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

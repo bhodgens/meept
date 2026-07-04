@@ -217,7 +217,7 @@ void main() {
       expect(border.left.color, CyberpunkColors.lightGray);
     });
 
-    testWidgets('user message background uses orange glow with alpha',
+    testWidgets('user message background uses orange glow with 60% alpha',
         (tester) async {
       await tester.pumpWidget(_buildApp(
         ChatMessageBubble(message: _userMessage()),
@@ -233,11 +233,11 @@ void main() {
       final decoration = container.decoration as BoxDecoration;
       expect(
         decoration.color,
-        CyberpunkColors.orangePrimary.withValues(alpha: 0.2),
+        CyberpunkColors.orangePrimary.withValues(alpha: 0.6),
       );
     });
 
-    testWidgets('assistant message background is midGray', (tester) async {
+    testWidgets('assistant message background is midGray with 60% alpha', (tester) async {
       await tester.pumpWidget(_buildApp(
         ChatMessageBubble(message: _assistantMessage()),
       ));
@@ -250,9 +250,8 @@ void main() {
         ).first,
       );
       final decoration = container.decoration as BoxDecoration;
-      expect(decoration.color, CyberpunkColors.midGray);
+      expect(decoration.color, CyberpunkColors.midGray.withValues(alpha: 0.6));
     });
-
 
 
     testWidgets('timestamp text is 10px', (tester) async {

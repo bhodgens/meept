@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/providers.dart';
 import '../../theme/colors.dart';
+import '../../widgets/background_image.dart';
 import 'sessions_list.dart';
 import 'sessions_detail.dart';
 
@@ -14,8 +15,7 @@ class SessionsOverviewTab extends StatelessWidget {
     return Consumer(
       builder: (context, ref, _) {
         final activeSession = ref.watch(activeSessionProvider);
-        return Container(
-          color: CyberpunkColors.black,
+        return BackgroundImage(
           child: Row(
             children: [
               const SessionsList(),

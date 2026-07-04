@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../widgets/background_image.dart';
 import '../../models/api_models.dart';
 import '../../providers/providers.dart';
 import '../../providers/tab_activation_provider.dart' show keyboardFocusProvider;
@@ -61,8 +62,7 @@ class _PlansTabState extends ConsumerState<PlansTab> {
     final planState = ref.watch(planProvider);
     final activeSession = ref.watch(activeSessionProvider);
 
-    return Container(
-      color: CyberpunkColors.black,
+    return BackgroundImage(
       child: Row(
         children: [
           // Plan list
