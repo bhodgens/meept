@@ -1,4 +1,6 @@
-.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui
+.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui
+	@echo "  localcert        Generate trusted SSL cert for localhost (requires mkcert)"
+	@echo "  localcert-install Install mkcert and local CA (one-time setup)"
 
 help:
 	@echo "Usage: make [target]"
@@ -44,6 +46,8 @@ help:
 	@echo "  gui-web-run      Run Flutter web dev server with hot reload (Chrome)"
 	@echo "  webui            Alias for gui-web-run - run Flutter web dev server (Chrome)"
 	@echo "  gui-dev-server   Run Flutter web dev server (web-server backend)"
+	@echo "  localcert        Generate trusted SSL cert for localhost (requires mkcert)"
+	@echo "  localcert-install Install mkcert and local CA (one-time setup)"
 	@echo ""
 	@echo "Daemon:"
 	@echo "  daemon           Build and run daemon (foreground)"
@@ -739,6 +743,8 @@ gui-web-run:
 	cd $(FLUTTER_UI_DIR) && flutter run -d chrome --web-port=59714 
 
 gui-dev-server:
+	@echo "  localcert        Generate trusted SSL cert for localhost (requires mkcert)"
+	@echo "  localcert-install Install mkcert and local CA (one-time setup)"
 	@echo "Starting Flutter web dev server (web-server target)..."
 	@echo "Open http://localhost:59714 in your browser"
 	cd $(FLUTTER_UI_DIR) && flutter run -d web-server --web-port=59714
@@ -880,3 +886,45 @@ commands-clean:
 	@echo "Removing installed command templates..."
 	@rm -rf $(MEEPT_HOME)/commands
 	@echo "Commands removed. To reinstall: make install-commands"
+
+# =============================================================================
+# Local SSL Certificates (mkcert)
+# =============================================================================
+
+.PHONY: localcert localcert-check localcert-install
+
+localcert-check:
+	@echo "Checking for mkcert..."
+	@command -v mkcert >/dev/null 2>&1 || { \
+		echo "mkcert not found. Install with: brew install mkcert nss"; \
+		exit 1; \
+	}
+	@echo "mkcert found: $$(mkcert --version)"
+
+localcert-install:
+	@echo "Installing mkcert local CA..."
+	@command -v mkcert >/dev/null 2>&1 || { \
+		echo "Installing mkcert..."; \
+		brew install mkcert nss; \
+	}
+	@mkcert -install
+	@echo "Local CA installed. You can now generate trusted certs."
+
+# localcert: Generate locally-trusted SSL certificate for localhost
+# This eliminates browser certificate warnings when running the Flutter web UI.
+# Requires mkcert: brew install mkcert nss
+localcert: localcert-check
+	@echo "Generating trusted SSL certificate for localhost..."
+	@mkdir -p $(MEEPT_HOME)/tls
+	@mkcert -cert-file $(MEEPT_HOME)/tls/cert.pem \
+		-key-file $(MEEPT_HOME)/tls/key.pem \
+		localhost 127.0.0.1 ::1
+	@echo ""
+	@echo "Certificate generated:"
+	@echo "  Cert: $(MEEPT_HOME)/tls/cert.pem"
+	@echo "  Key:  $(MEEPT_HOME)/tls/key.pem"
+	@echo ""
+	@echo "Restart the daemon to use the new certificate:"
+	@echo "  meept-daemon -f"
+	@echo ""
+	@echo "Your browser will now trust the certificate without warnings."
