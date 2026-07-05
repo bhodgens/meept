@@ -426,7 +426,7 @@ func (s *CASStore) VerifyBlob(hashHex, algo string) error {
 		return err
 	}
 	if actual != hashHex {
-		return &ResourceCorrupt{Hash: hashHex, SourceNode: "self"}
+		return &ResourceCorruptError{Hash: hashHex, SourceNode: "self"}
 	}
 	return nil
 }

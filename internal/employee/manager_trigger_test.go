@@ -195,7 +195,7 @@ func TestAcquireInvokeMutex_SerializesConcurrentAccess(t *testing.T) {
 			atomic.AddInt32(&curDepth, -1)
 		}()
 	}
-	wg.Wait()
+	wg.Wait() //nolint:mutexio /// Wait for test goroutines - test verifies serialized I/O
 
 	if maxDepth != 1 {
 		t.Errorf("maxDepth = %d, want 1 (calls should be serialized per spec line 614)", maxDepth)
@@ -264,7 +264,7 @@ func TestAcquireInvokeMutex_DistinctEmployeesConcurrent(t *testing.T) {
 			atomic.AddInt32(&curDepth, -1)
 		}(i)
 	}
-	wg.Wait()
+	wg.Wait() //nolint:mutexio /// Wait for test goroutines - test verifies serialized I/O
 
 	// Since all goroutines use distinct employee IDs, they should all
 	// run concurrently: maxDepth should equal n.

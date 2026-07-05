@@ -710,7 +710,7 @@ func TestGoalStore_Update_ConcurrentSafe(t *testing.T) {
 			}
 		}(i)
 	}
-	wg.Wait()
+	wg.Wait() //nolint:mutexio /// Wait for test goroutines - test verifies serialized I/O
 
 	if errCount != 0 {
 		t.Fatalf("%d concurrent Updates failed", errCount)

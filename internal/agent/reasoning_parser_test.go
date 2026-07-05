@@ -31,7 +31,6 @@ func TestParseReasoningDirective_TierWords(t *testing.T) {
 		{"case insensitive", "Use High Reasoning Please", llm.ReasoningHigh, "session"},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			rd, err := ParseReasoningDirective(tc.input)
@@ -71,7 +70,6 @@ func TestParseReasoningDirective_SlashDirective(t *testing.T) {
 		{"ok [/reasoning medium] now", llm.ReasoningMedium},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.input, func(t *testing.T) {
 			t.Parallel()
 			rd, err := ParseReasoningDirective(tc.input)
@@ -110,7 +108,6 @@ func TestParseReasoningDirective_Aliases(t *testing.T) {
 		{"brief thinking please", llm.ReasoningLow},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.input, func(t *testing.T) {
 			t.Parallel()
 			rd, err := ParseReasoningDirective(tc.input)
@@ -144,7 +141,6 @@ func TestParseReasoningDirective_TokenHints(t *testing.T) {
 		{"thinking budget=8000", "thinking budget=8000", 8000, llm.ReasoningMedium},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			rd, err := ParseReasoningDirective(tc.input)
@@ -180,7 +176,6 @@ func TestParseReasoningDirective_Disable(t *testing.T) {
 		"thinking off for now",
 	}
 	for _, input := range cases {
-		input := input
 		t.Run(input, func(t *testing.T) {
 			t.Parallel()
 			rd, err := ParseReasoningDirective(input)
@@ -206,7 +201,6 @@ func TestParseReasoningDirective_Ambiguous(t *testing.T) {
 		"turn on thinking",
 	}
 	for _, input := range cases {
-		input := input
 		t.Run(input, func(t *testing.T) {
 			t.Parallel()
 			rd, err := ParseReasoningDirective(input)
@@ -243,7 +237,6 @@ func TestParseReasoningDirective_Scope(t *testing.T) {
 		{"[/reasoning high] for this task", "task", "slash with task"},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.description, func(t *testing.T) {
 			t.Parallel()
 			rd, err := ParseReasoningDirective(tc.input)
@@ -280,7 +273,6 @@ func TestParseReasoningDirective_Negative(t *testing.T) {
 		"use the reasoning endpoint",   // "use reasoning-ish" but "endpoint"
 	}
 	for _, input := range cases {
-		input := input
 		t.Run(input, func(t *testing.T) {
 			t.Parallel()
 			rd, err := ParseReasoningDirective(input)

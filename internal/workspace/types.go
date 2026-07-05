@@ -116,13 +116,13 @@ var (
 // materialized. Caller can errors.As to extract. Implements Is so that
 // errors.Is(err, ErrWorkspaceUnavailable) returns true for any
 // *WorkspaceUnavailable without requiring the Manager to double-wrap.
-type WorkspaceUnavailable struct {
+type WorkspaceUnavailableError struct {
 	Commit  string // the SHA that couldn't be fetched
 	RepoURL string // the remote that was tried
 	Err     error  // underlying cause (network, git exit code, etc.)
 }
 
-func (e *WorkspaceUnavailable) Error() string {
+func (e *WorkspaceUnavailableError) Error() string {
 	if e.Err != nil {
 		return fmt.Sprintf("workspace unavailable: commit %s from %s: %v", e.Commit, e.RepoURL, e.Err)
 	}
@@ -133,23 +133,23 @@ func (e *WorkspaceUnavailable) Error() string {
 // write errors.Is(err, ErrWorkspaceUnavailable) against any
 // *WorkspaceUnavailable returned by the Manager without needing the Manager
 // to wrap the sentinel explicitly.
-func (e *WorkspaceUnavailable) Is(target error) bool {
+func (e *WorkspaceUnavailableError) Is(target error) bool {
 	return target == ErrWorkspaceUnavailable
 }
 
 // Unwrap returns the underlying cause (if any).
-func (e *WorkspaceUnavailable) Unwrap() error { return e.Err }
+func (e *WorkspaceUnavailableError) Unwrap() error { return e.Err }
 
 // PatchConflict carries detail about why a diff patch failed to apply.
 // Like WorkspaceUnavailable, implements Is so errors.Is(err, ErrPatchConflict)
 // works against any *PatchConflict.
-type PatchConflict struct {
+type PatchConflictError struct {
 	Commit string // the base commit the patch was generated against
 	Reason string // human-readable reason (e.g. "file deleted", "context mismatch")
 	Err    error  // underlying git apply error
 }
 
-func (e *PatchConflict) Error() string {
+func (e *PatchConflictError) Error() string {
 	if e.Err != nil {
 		return fmt.Sprintf("patch conflict on commit %s: %s: %v", e.Commit, e.Reason, e.Err)
 	}
@@ -157,8 +157,8 @@ func (e *PatchConflict) Error() string {
 }
 
 // Is reports true if target is ErrPatchConflict.
-func (e *PatchConflict) Is(target error) bool {
+func (e *PatchConflictError) Is(target error) bool {
 	return target == ErrPatchConflict
 }
 
-func (e *PatchConflict) Unwrap() error { return e.Err }
+func (e *PatchConflictError) Unwrap() error { return e.Err }

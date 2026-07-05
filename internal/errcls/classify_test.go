@@ -66,8 +66,8 @@ func TestIsRetryable(t *testing.T) {
 		{"context size exceeded (non-retryable)", &llm.ContextSizeExceededError{}, false},
 		{"context deadline", context.DeadlineExceeded, true},
 		{"context canceled", context.Canceled, true},
-		{"net temp error", tempNetErr{}, true},
-		{"net timeout error", timeoutNetErr{}, true},
+		{"net temp error", tempNetError{}, true},
+		{"net timeout error", timeoutNetError{}, true},
 		{"ECONNREFUSED", syscall.ECONNREFUSED, true},
 		{"ECONNRESET", syscall.ECONNRESET, true},
 		{"EPIPE", syscall.EPIPE, true},
@@ -185,14 +185,14 @@ func TestIsNetworkError(t *testing.T) {
 	}
 }
 
-type tempNetErr struct{}
+type tempNetError struct{}
 
-func (tempNetErr) Error() string   { return "temp net error" }
-func (tempNetErr) Timeout() bool   { return true }
-func (tempNetErr) Temporary() bool { return true }
+func (tempNetError) Error() string   { return "temp net error" }
+func (tempNetError) Timeout() bool   { return true }
+func (tempNetError) Temporary() bool { return true }
 
-type timeoutNetErr struct{}
+type timeoutNetError struct{}
 
-func (timeoutNetErr) Error() string   { return "timeout net error" }
-func (timeoutNetErr) Timeout() bool   { return true }
-func (timeoutNetErr) Temporary() bool { return false }
+func (timeoutNetError) Error() string   { return "timeout net error" }
+func (timeoutNetError) Timeout() bool   { return true }
+func (timeoutNetError) Temporary() bool { return false }

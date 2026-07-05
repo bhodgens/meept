@@ -511,20 +511,20 @@ func TestParseRateLimitBody(t *testing.T) {
 	})
 }
 
-func TestProviderErrorDetail_Error(t *testing.T) {
+func TestProviderError_Error(t *testing.T) {
 	tests := []struct {
 		name string
-		d    *ProviderErrorDetail
+		d    *ProviderError
 		want string
 	}{
 		{
 			name: "with message",
-			d:    &ProviderErrorDetail{Type: "rate_limit_error", Message: "TPM exceeded"},
+			d:    &ProviderError{Type: "rate_limit_error", Message: "TPM exceeded"},
 			want: "rate_limit_error: TPM exceeded",
 		},
 		{
 			name: "type only",
-			d:    &ProviderErrorDetail{Type: "authentication_error"},
+			d:    &ProviderError{Type: "authentication_error"},
 			want: "authentication_error",
 		},
 	}

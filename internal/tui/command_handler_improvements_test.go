@@ -266,7 +266,6 @@ func TestImprovementsApply_RefusesUnsafeTargetPath(t *testing.T) {
 		{"bare dot-dot", ".."},
 	}
 	for _, c := range cases {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			h, queuePath := newTestCommandHandler(t)

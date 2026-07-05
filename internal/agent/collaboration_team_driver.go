@@ -285,7 +285,6 @@ func (d *ParallelTeamDriver) fanOut(ctx context.Context, sess *CollaborationSess
 	var eg errgroup.Group
 
 	for _, memberID := range cfg.Roster {
-		memberID := memberID // capture loop variable
 
 		eg.Go(func() error {
 			// Acquire semaphore slot

@@ -1048,7 +1048,7 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 func (c *AnthropicClient) buildRateLimitError(respBody []byte, statusCode int, retryAfterHeader string) *RateLimitError {
 	retryAfter := parseRetryAfter(retryAfterHeader)
 
-	detail := &ProviderErrorDetail{}
+	detail := &ProviderError{}
 	var anthErr anthropicErrorResponse
 	if err := json.Unmarshal(respBody, &anthErr); err == nil && anthErr.Error.Type != "" {
 		detail.Type = anthErr.Error.Type

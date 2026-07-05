@@ -403,7 +403,6 @@ func TestDualStore_StoreRemoteTurn_RejectsBadInputs(t *testing.T) {
 		{"nil turn", nil, "node-x"},
 	}
 	for _, c := range cases {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			err := ds.StoreRemoteTurn(context.Background(), c.turn, c.node)
 			if err == nil {

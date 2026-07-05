@@ -201,7 +201,7 @@ func TestSessionReasoningHTTP_NoLoop(t *testing.T) {
 		wantStatus: http.StatusNotFound,
 		wantMethod: "reasoning.session_set",
 		rpcCall: func(_ context.Context, _ string, _ json.RawMessage) (any, error) {
-			return nil, errStr("session \"sess-x\" has no bound agent loop")
+			return nil, mockError("session \"sess-x\" has no bound agent loop")
 		},
 	}
 	runSessionReasoningHTTPTest(t, tc)
@@ -219,7 +219,7 @@ func TestSessionReasoningHTTP_AgentNotFound(t *testing.T) {
 		wantStatus: http.StatusNotFound,
 		wantMethod: "reasoning.session_set",
 		rpcCall: func(_ context.Context, _ string, _ json.RawMessage) (any, error) {
-			return nil, errStr("agent not found: nonexistent")
+			return nil, mockError("agent not found: nonexistent")
 		},
 	}
 	runSessionReasoningHTTPTest(t, tc)
@@ -237,13 +237,13 @@ func TestSessionReasoningHTTP_InternalError(t *testing.T) {
 		wantStatus: http.StatusInternalServerError,
 		wantMethod: "reasoning.session_set",
 		rpcCall: func(_ context.Context, _ string, _ json.RawMessage) (any, error) {
-			return nil, errStr("database is locked")
+			return nil, mockError("database is locked")
 		},
 	}
 	runSessionReasoningHTTPTest(t, tc)
 }
 
 // errStr is a convenience error type for the test stubs.
-type errStr string
+type mockError string
 
-func (e errStr) Error() string { return string(e) }
+func (e mockError) Error() string { return string(e) }

@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -73,7 +74,7 @@ func TestGetLocalDBPaths_MultipleDBs(t *testing.T) {
 func TestGetLocalDBPaths_NoDBs(t *testing.T) {
 	dir := t.TempDir()
 	_, err := GetLocalDBPaths(dir)
-	if err != ErrNoDatabases {
+	if !errors.Is(err, ErrNoDatabases) {
 		t.Errorf("expected ErrNoDatabases, got %v", err)
 	}
 }

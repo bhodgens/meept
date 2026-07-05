@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -24,7 +25,7 @@ func GitInit(repoPath string) (*git.Repository, string, error) {
 		return repo, repoPath, nil
 	}
 
-	if err != git.ErrRepositoryNotExists {
+	if !errors.Is(err, git.ErrRepositoryNotExists) {
 		return nil, "", Wrap("git_open", err)
 	}
 
@@ -70,7 +71,7 @@ func GitPullRebase(repo *git.Repository) error {
 	}
 
 	// Fetch
-	if err := repo.Fetch(&git.FetchOptions{}); err != nil && err != git.NoErrAlreadyUpToDate {
+	if err := repo.Fetch(&git.FetchOptions{}); err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
 		return Wrap("git_pull_fetch", err)
 	}
 
@@ -167,7 +168,7 @@ func gitPushWithRetry(repo *git.Repository) error {
 		if err == nil {
 			return nil
 		}
-		if err == git.NoErrAlreadyUpToDate {
+		if errors.Is(err, git.NoErrAlreadyUpToDate) {
 			return nil
 		}
 

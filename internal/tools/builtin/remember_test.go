@@ -82,7 +82,6 @@ func TestRememberTool_Execute_MissingFields(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			queuePath := filepath.Join(t.TempDir(), "improvements.md")
@@ -168,7 +167,6 @@ func TestInferProposalType(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		c := c
 		t.Run(c.target, func(t *testing.T) {
 			t.Parallel()
 			got := inferProposalType(c.target)

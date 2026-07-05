@@ -334,7 +334,7 @@ func TestManager_Ensure_PatchConflict(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrPatchConflict)
 
-	var pc *PatchConflict
+	var pc *PatchConflictError
 	assert.ErrorAs(t, err, &pc)
 	if pc != nil {
 		assert.Equal(t, newSHA, pc.Commit)
@@ -452,7 +452,7 @@ func TestManager_MetricsEmitter_Wired(t *testing.T) {
 }
 
 func TestWorkspaceUnavailable_Error(t *testing.T) {
-	err := &WorkspaceUnavailable{
+	err := &WorkspaceUnavailableError{
 		Commit:  "abc123",
 		RepoURL: "https://example.com/repo.git",
 	}
@@ -465,7 +465,7 @@ func TestWorkspaceUnavailable_Error(t *testing.T) {
 }
 
 func TestPatchConflict_Error(t *testing.T) {
-	err := &PatchConflict{
+	err := &PatchConflictError{
 		Commit: "abc123",
 		Reason: "context mismatch",
 	}

@@ -83,28 +83,28 @@ var (
 )
 
 // ResourceUnavailable carries diagnostic context for ErrResourceUnavailable.
-type ResourceUnavailable struct {
+type ResourceUnavailableError struct {
 	Hash       string
 	SourceNode string
 }
 
-func (e *ResourceUnavailable) Error() string {
+func (e *ResourceUnavailableError) Error() string {
 	return fmt.Sprintf("resources: unavailable (hash=%s, source=%s)", e.Hash, e.SourceNode)
 }
 
-func (e *ResourceUnavailable) Unwrap() error { return ErrResourceUnavailable }
+func (e *ResourceUnavailableError) Unwrap() error { return ErrResourceUnavailable }
 
 // ResourceCorrupt carries diagnostic context for ErrResourceCorrupt.
-type ResourceCorrupt struct {
+type ResourceCorruptError struct {
 	Hash       string
 	SourceNode string
 }
 
-func (e *ResourceCorrupt) Error() string {
+func (e *ResourceCorruptError) Error() string {
 	return fmt.Sprintf("resources: corrupt (hash=%s, source=%s)", e.Hash, e.SourceNode)
 }
 
-func (e *ResourceCorrupt) Unwrap() error { return ErrResourceCorrupt }
+func (e *ResourceCorruptError) Unwrap() error { return ErrResourceCorrupt }
 
 // ParseRef splits a ResourceRef.Raw into algorithm and hash body.
 // Returns the algorithm string (without colon), the hash body, and true if

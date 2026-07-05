@@ -180,7 +180,7 @@ func (m *Manager) Ensure(ctx context.Context, ref WorkspaceRef) (string, error) 
 	// Clone. We use clone-then-checkout (rather than worktree add) because
 	// the receiver may not have the origin repo locally at all.
 	if err := gitClone(ctx, ref.RepoURL, worktreePath); err != nil {
-		return "", &WorkspaceUnavailable{
+		return "", &WorkspaceUnavailableError{
 			Commit:  ref.CommitSHA,
 			RepoURL: ref.RepoURL,
 			Err:     fmt.Errorf("clone: %w", err),
@@ -192,7 +192,7 @@ func (m *Manager) Ensure(ctx context.Context, ref WorkspaceRef) (string, error) 
 	if err := gitFetchAndCheckout(ctx, worktreePath, branchName, ref.CommitSHA); err != nil {
 		// Cleanup partial clone before returning.
 		_ = os.RemoveAll(worktreePath)
-		return "", &WorkspaceUnavailable{
+		return "", &WorkspaceUnavailableError{
 			Commit:  ref.CommitSHA,
 			RepoURL: ref.RepoURL,
 			Err:     fmt.Errorf("checkout: %w", err),
@@ -238,7 +238,7 @@ func (m *Manager) applyDirtyPatch(ctx context.Context, worktreePath string, ref 
 		m.incPatchConflicts()
 		// Enrich the conflict with the commit SHA for caller introspection.
 		// applyPatch wraps *PatchConflict via fmt.Errorf, so use errors.As.
-		var pc *PatchConflict
+		var pc *PatchConflictError
 		if errors.As(err, &pc) {
 			pc.Commit = ref.CommitSHA
 		}

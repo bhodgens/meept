@@ -815,7 +815,7 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
 
 		// Try to parse structured error metadata from the response body.
-		var providerDetail *ProviderErrorDetail
+		var providerDetail *ProviderError
 		if len(respBody) > 0 {
 			providerDetail = ParseRateLimitBody(respBody)
 		}

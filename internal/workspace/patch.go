@@ -42,14 +42,14 @@ func writePatchFile(dir string, diffBytes []byte) (string, error) {
 func applyPatch(ctx context.Context, dir, patchPath string) error {
 	// Dry-run first: detects conflicts without mutating the tree.
 	if err := gitApplyCheck(ctx, dir, patchPath); err != nil {
-		return &PatchConflict{
+		return &PatchConflictError{
 			Commit: "", // caller fills in if it has the SHA
 			Reason: "git apply --check failed: patch does not apply cleanly",
 			Err:    err,
 		}
 	}
 	if err := gitApply(ctx, dir, patchPath); err != nil {
-		return &PatchConflict{
+		return &PatchConflictError{
 			Commit: "",
 			Reason: "git apply failed after successful --check (concurrent modification?)",
 			Err:    err,

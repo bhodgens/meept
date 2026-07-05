@@ -293,7 +293,7 @@ func TestManager_StoreAccessor(t *testing.T) {
 
 func TestManager_ErrorTypes(t *testing.T) {
 	t.Run("ResourceUnavailable", func(t *testing.T) {
-		ru := &ResourceUnavailable{Hash: "abc", SourceNode: "node-1"}
+		ru := &ResourceUnavailableError{Hash: "abc", SourceNode: "node-1"}
 		if !errors.Is(ru, ErrResourceUnavailable) {
 			t.Error("ResourceUnavailable should unwrap to ErrResourceUnavailable")
 		}
@@ -303,7 +303,7 @@ func TestManager_ErrorTypes(t *testing.T) {
 	})
 
 	t.Run("ResourceCorrupt", func(t *testing.T) {
-		rc := &ResourceCorrupt{Hash: "xyz", SourceNode: "node-2"}
+		rc := &ResourceCorruptError{Hash: "xyz", SourceNode: "node-2"}
 		if !errors.Is(rc, ErrResourceCorrupt) {
 			t.Error("ResourceCorrupt should unwrap to ErrResourceCorrupt")
 		}

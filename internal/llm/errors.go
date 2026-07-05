@@ -246,8 +246,8 @@ type LimitBudget struct {
 	Window string // e.g., "per_minute", "per_day"
 }
 
-// ProviderErrorDetail is a provider-agnostic structured error.
-type ProviderErrorDetail struct {
+// ProviderError is a provider-agnostic structured error.
+type ProviderError struct {
 	Type          string        // "rate_limit_error", "authentication_error", etc.
 	Code          string        // "tpm_uncached_exceeded", "insufficient_quota", etc.
 	Message       string        // Human-readable message
@@ -257,7 +257,7 @@ type ProviderErrorDetail struct {
 	LimitBudget   *LimitBudget
 }
 
-func (d *ProviderErrorDetail) Error() string {
+func (d *ProviderError) Error() string {
 	if d.Message != "" {
 		return fmt.Sprintf("%s: %s", d.Type, d.Message)
 	}
@@ -322,7 +322,7 @@ type genericProviderInner struct {
 
 // ParseOpenRouterError extracts structured error info from OpenRouter-style JSON bodies.
 // Returns nil if the body does not match the expected OpenRouter format.
-func ParseOpenRouterError(body []byte) *ProviderErrorDetail {
+func ParseOpenRouterError(body []byte) *ProviderError {
 	// Try parsing outer envelope
 	var outer openRouterOuter
 	if err := json.Unmarshal(body, &outer); err != nil || outer.Error == nil || outer.Error.Message == "" {
@@ -342,7 +342,7 @@ func ParseOpenRouterError(body []byte) *ProviderErrorDetail {
 		return nil
 	}
 
-	detail := &ProviderErrorDetail{
+	detail := &ProviderError{
 		Type:       inner.Error.Type,
 		Code:       inner.Error.Code,
 		Message:    inner.Error.Message,
@@ -378,7 +378,7 @@ func ParseOpenRouterError(body []byte) *ProviderErrorDetail {
 
 // ParseGenericProviderError tries to parse a generic {error:{type,message,code}} JSON body.
 // Returns nil if the body does not match this format.
-func ParseGenericProviderError(body []byte) *ProviderErrorDetail {
+func ParseGenericProviderError(body []byte) *ProviderError {
 	var parsed genericProviderError
 	if err := json.Unmarshal(body, &parsed); err != nil || parsed.Error == nil {
 		return nil
@@ -388,16 +388,16 @@ func ParseGenericProviderError(body []byte) *ProviderErrorDetail {
 		return nil
 	}
 
-	return &ProviderErrorDetail{
+	return &ProviderError{
 		Type:    parsed.Error.Type,
 		Code:    parsed.Error.Code,
 		Message: parsed.Error.Message,
 	}
 }
 
-// ParseRateLimitBody attempts to parse a 429 response body into a ProviderErrorDetail.
+// ParseRateLimitBody attempts to parse a 429 response body into a ProviderError.
 // It tries OpenRouter format first, then generic JSON, and falls back to nil.
-func ParseRateLimitBody(body []byte) *ProviderErrorDetail {
+func ParseRateLimitBody(body []byte) *ProviderError {
 	if detail := ParseOpenRouterError(body); detail != nil {
 		return detail
 	}

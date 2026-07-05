@@ -39,7 +39,6 @@ func TestRPCHandler_NilManager(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			fn, ok := handlers[tc.method]
@@ -148,7 +147,6 @@ func TestRPCHandler_Update_RejectsConstitution(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			_, err := h.handleUpdate(context.Background(), json.RawMessage(tc.payload))
