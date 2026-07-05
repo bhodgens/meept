@@ -591,9 +591,9 @@ func (b *ExecutorBridge) SubmitJob(ctx context.Context, job DispatchJob) (Dispat
 // "unknown".
 func (b *ExecutorBridge) JobStatus(ctx context.Context, jobID string) (JobStatus, error) {
 	b.mu.Lock()
-	aj, ok := b.active[jobID]
-	b.mu.Unlock()
+	defer b.mu.Unlock()
 
+	aj, ok := b.active[jobID]
 	if !ok {
 		return JobStatus{
 			JobID: jobID,
