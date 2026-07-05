@@ -4,6 +4,7 @@
 package preferences
 
 import (
+	"crypto/rand"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/pkg/id"
 	"gopkg.in/yaml.v3"
 )
 
@@ -205,7 +207,7 @@ func parseInstructionFile(path string, tierPriority int) (*UserInstruction, erro
 	}
 
 	instr := &UserInstruction{
-		ID:           fmt.Sprintf("%d", time.Now().UnixNano()),
+		ID:           id.Generate("instr_"),
 		Name:         sanitizeName(fmt.Sprintf("%v", name)),
 		Trigger:      getString(frontmatter, "trigger", ""),
 		Action:       getString(frontmatter, "action", ""),
@@ -481,14 +483,17 @@ func generateSaveID() string {
 	return fmt.Sprintf("%x", hexBytes)
 }
 
-// randBytes generates random bytes for ID generation.
+// randBytes generates random bytes for ID generation using crypto/rand.
 func randBytes(b []byte) (int, error) {
-	// Simple non-crypto random for save IDs; deterministic for tests.
-	r := uint64(time.Now().UnixNano())
-	for i := range b {
-		r *= 6364136223846793005
-		r += 1
-		b[i] = byte(r)
+	_, err := rand.Read(b)
+	if err != nil {
+		// Fallback to pseudo-random if crypto/rand fails
+		r := uint64(time.Now().UnixNano())
+		for i := range b {
+			r *= 6364136223846793005
+			r += 1
+			b[i] = byte(r)
+		}
 	}
 	return len(b), nil
 }

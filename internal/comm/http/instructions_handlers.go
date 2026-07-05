@@ -3,13 +3,13 @@ package http
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/preferences"
 	"github.com/caimlas/meept/internal/rpc"
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // InstructionsHandler handles HTTP requests for user instructions.
@@ -347,5 +347,5 @@ func (h *InstructionsHandler) handlePreview(w http.ResponseWriter, r *http.Reque
 
 // generateInstructionID generates a unique ID for an instruction.
 func generateInstructionID() string {
-	return "instr_" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	return id.Generate("instr_")
 }
