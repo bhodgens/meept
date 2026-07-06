@@ -33,8 +33,11 @@ class SlashAutocomplete extends StatefulWidget {
   /// typically inserts `/skill <name> ` into the input.
   final void Function(String skillName)? onSkillSelected;
 
-  /// Project paths for `/project ` autocomplete.
+  /// Project paths for `/project ` autocomplete (registered projects).
   final List<String> projectPaths;
+
+  /// Filesystem readdir paths for `/project ` typeahead fallback.
+  final List<String> readdirPaths;
 
   /// Called when the user accepts a project path suggestion.
   final void Function(String path)? onProjectSelected;
@@ -48,6 +51,7 @@ class SlashAutocomplete extends StatefulWidget {
     this.skillNames = const [],
     this.onSkillSelected,
     this.projectPaths = const [],
+    this.readdirPaths = const [],
     this.onProjectSelected,
   });
 
@@ -76,7 +80,8 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.query != widget.query ||
         oldWidget.skillNames != widget.skillNames ||
-        oldWidget.projectPaths != widget.projectPaths) {
+        oldWidget.projectPaths != widget.projectPaths ||
+        oldWidget.readdirPaths != widget.readdirPaths) {
       _updateMatches();
     }
   }
@@ -113,8 +118,10 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
       _projectMatches = const [];
     } else if (_projectMode) {
       // In project-path mode, filter project paths by the argument prefix.
+      // Merge registered projects with filesystem readdir results.
       final lowerArg = projectArg!.toLowerCase();
-      _projectMatches = widget.projectPaths
+      final allPaths = [...widget.projectPaths, ...widget.readdirPaths];
+      _projectMatches = allPaths
           .where((p) => p.toLowerCase().contains(lowerArg))
           .take(8)
           .toList();

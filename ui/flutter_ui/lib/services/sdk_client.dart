@@ -488,15 +488,21 @@ class SdkApiClient {
   }
 
   /// Creates a session and returns the raw JSON.
+  ///
+  /// Sends `{"name": title}` directly rather than going through the
+  /// generated `CreateSessionRequest` model. The OpenAPI spec at
+  /// `sdk/go/api/openapi.yaml` currently emits the property name as
+  /// the literal `name,omitempty` (a Go struct-tag artifact), which
+  /// silently drops the title on the daemon side and forces the
+  /// server-defaulted name "default". Inline JSON sidesteps the
+  /// bug regardless of spec regeneration.
   Future<Map<String, dynamic>> createSession({
     required String title,
     String? agentId,
   }) async {
-    final req = sdk.CreateSessionRequest((b) => b
-      ..nameCommaOmitempty = title);
-
-    final raw = await _post('/api/v1/sessions', body: _toJson(req));
-    return raw;
+    final body = <String, dynamic>{'name': title};
+    if (agentId != null) body['agent_id'] = agentId;
+    return _post('/api/v1/sessions', body: body);
   }
 
   Future<void> deleteSession(String id) async {
@@ -641,15 +647,17 @@ class SdkApiClient {
   }
 
   /// Updates a task and returns the raw JSON.
+  ///
+  /// Inline JSON avoids the same `name,omitempty`/`state,omitempty`
+  /// OpenAPI-generator bug that affects [createSession] — the
+  /// generated wireName would silently drop the field on the daemon
+  /// side. Only fields that are explicitly non-null are sent.
   Future<Map<String, dynamic>> updateTask(String id,
       {String? name, String? state}) async {
-    final req = sdk.UpdateTaskRequest((b) => b
-      ..id = id
-      ..nameCommaOmitempty = name
-      ..stateCommaOmitempty = state);
-
-    final raw = await _put('/api/v1/tasks/$id', body: _toJson(req));
-    return raw;
+    final body = <String, dynamic>{};
+    if (name != null) body['name'] = name;
+    if (state != null) body['state'] = state;
+    return _put('/api/v1/tasks/$id', body: body);
   }
 
   Future<void> deleteTask(String id) async {
@@ -1168,6 +1176,20 @@ class SdkApiClient {
     }
     throw StateError(
         'setProject: unexpected envelope shape: $envelope');
+  }
+
+  /// Calls `project.readdir` via the bus/call RPC bridge.  Returns
+  /// recents (top N), filesystem matches (under the expanded prefix), and
+  /// discovered git roots — for `/project ` typeahead popups.
+  Future<Map<String, dynamic>> readdirProject({String? prefix}) async {
+    final params = <String, dynamic>{'prefix': prefix};
+    final envelope = await _post('/api/v1/bus/call', body: {
+      'method': 'project.readdir',
+      'params': params,
+    });
+    final inner = envelope['result'];
+    if (inner is Map<String, dynamic>) return inner;
+    return envelope;
   }
 
   // ===== Plans =====

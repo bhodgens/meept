@@ -1243,6 +1243,25 @@ func (c *RPCClient) DetectProject(path string) (*types.ProjectInfo, error) {
 	return &resp, nil
 }
 
+// ReadDirProjects calls project.readdir RPC and returns recent paths plus filesystem matches.
+func (c *RPCClient) ReadDirProjects(prefix string) ([]string, []string, error) {
+	params := map[string]string{"prefix": prefix}
+	result, err := c.Call("project.readdir", params)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var resp struct {
+		Recents []string `json:"recents"`
+		Matches []string `json:"matches"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, nil, fmt.Errorf("failed to parse project readdir response: %w", err)
+	}
+
+	return resp.Recents, resp.Matches, nil
+}
+
 // ============================================================================
 // Search Methods
 // ============================================================================

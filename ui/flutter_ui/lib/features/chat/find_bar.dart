@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
@@ -41,7 +42,7 @@ class _FindBarState extends ConsumerState<FindBar> {
           .state = _controller.text;
       ref.read(findCursorProvider(widget.sessionId).notifier).state = 0;
     });
-    _focusNode = FocusNode();
+    _focusNode = FocusNode(onKeyEvent: _onKey);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _focusNode.requestFocus();
@@ -198,6 +199,19 @@ class _FindBarState extends ConsumerState<FindBar> {
     if (count == 0) return;
     final cur = ref.read(findCursorProvider(sessionId));
     ref.read(findCursorProvider(sessionId).notifier).state = (cur + 1) % count;
+  }
+
+  /// Handle Escape on the find bar's own FocusNode. Returning
+  /// [KeyEventResult.handled] prevents the key event from bubbling to
+  /// [ChatInput]'s handler (which would otherwise unfocus the input
+  /// without clearing the find bar).
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event.logicalKey != LogicalKeyboardKey.escape) {
+      return KeyEventResult.ignored;
+    }
+    _close(widget.sessionId);
+    return KeyEventResult.handled;
   }
 
   void _close(String sessionId) {

@@ -149,6 +149,10 @@ class _ChatInputState extends ConsumerState<ChatInput>
   // Project paths for /project autocomplete (populated async on init).
   List<String> _projectPaths = const [];
 
+  // Filesystem readdir paths for /project typeahead fallback.
+  List<String> _readdirPaths = const [];
+  Timer? _readdirDebounceTimer;
+
   // File path attachments — typed [Attachment] entries once uploaded,
   // plus raw path strings pending async upload.
   final List<Attachment> _attachments = [];
@@ -220,6 +224,35 @@ class _ChatInputState extends ConsumerState<ChatInput>
     }
   }
 
+  /// Debounced filesystem readdir for /project typeahead.
+  ///
+  /// When the user types a path prefix in project-mode that doesn't match any
+  /// registered projects, this queries [SdkApiClient.readdirProject] to get
+  /// recents (from SQLite) and live filesystem directory matches.  Results are
+  /// merged into [_readdirPaths] so the popup picks them up.
+  void _fetchReaddirPaths(String prefix) {
+    _readdirDebounceTimer?.cancel();
+    _readdirDebounceTimer = Timer(const Duration(milliseconds: 150), () async {
+      if (prefix.isEmpty) {
+        if (!mounted) return;
+        setState(() => _readdirPaths = const []);
+        return;
+      }
+      try {
+        final sdk = ref.read(sdkClientProvider);
+        final result = await sdk.readdirProject(prefix: prefix);
+        if (!mounted) return;
+        final matches = (result['matches'] as List<dynamic>?)
+                ?.cast<String>()
+                .toList() ??
+            const [];
+        setState(() => _readdirPaths = matches);
+      } catch (e) {
+        debugPrint('[chat_input] readdir failed: $e');
+      }
+    });
+  }
+
   /// Called when the user accepts a project path suggestion in the
   /// `/project <path>` autocomplete.  Inserts `/project <path> ` and dismisses
   /// the popup.
@@ -260,6 +293,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
   @override
   void dispose() {
     _enterDebounceTimer?.cancel();
+    _readdirDebounceTimer?.cancel();
     _blinkController.dispose();
     _controller.removeListener(_onTextChanged);
     _controller.dispose();
@@ -397,6 +431,9 @@ class _ChatInputState extends ConsumerState<ChatInput>
       // For `/skill <name>` we keep the full text as the query so the
       // autocomplete can filter skill names by the argument prefix.
       final isSkillArgs = spaceIdx != -1 && text.substring(0, spaceIdx) == '/skill';
+      // For `/project <path>` keep the full text as the query so the
+      // autocomplete can filter by the path prefix (project-mode).
+      final isProjectArgs = spaceIdx != -1 && text.substring(0, spaceIdx) == '/project';
       final query = isSkillArgs
           ? text
           : (spaceIdx == -1 ? text : text.substring(0, spaceIdx));
@@ -405,6 +442,11 @@ class _ChatInputState extends ConsumerState<ChatInput>
         _slashQuery = query;
         _slashSelectedIndex = 0;
       });
+      // Debounced filesystem readdir for `/project ` typeahead.
+      if (isProjectArgs) {
+        final prefix = spaceIdx == -1 ? '' : text.substring(spaceIdx).trim();
+        _fetchReaddirPaths(prefix);
+      }
     } else {
       if (_showSlashAutocomplete) {
         setState(() {
@@ -532,6 +574,8 @@ class _ChatInputState extends ConsumerState<ChatInput>
     _ghostText = null;
     _showSlashAutocomplete = false;
     _slashQuery = '';
+    _readdirPaths = const [];
+    _readdirDebounceTimer?.cancel();
   }
 
   /// Create a new chat session and switch to it.
@@ -627,9 +671,9 @@ class _ChatInputState extends ConsumerState<ChatInput>
             );
         return true;
       case '/project':
-        // /project without args opens the typeahead popup so the user can
-        // pick from known project paths.  With args, dispatch immediately
-        // to the daemon via the project.set RPC.
+        // /project without args (or with only whitespace) opens the typeahead
+        // popup so the user can pick from known project paths.  With a
+        // non-empty arg, dispatch immediately to the daemon via project.set.
         if (spaceIdx == -1) {
           setState(() {
             _controller.text = '/project ';
@@ -643,6 +687,20 @@ class _ChatInputState extends ConsumerState<ChatInput>
           return true;
         }
         final arg = text.substring(spaceIdx).trim();
+        if (arg.isEmpty) {
+          // User typed "/project " with trailing space but no path — open
+          // the typeahead popup so they can pick from known paths.
+          setState(() {
+            _controller.text = '/project ';
+            _controller.selection =
+                const TextSelection.collapsed(offset: '/project '.length);
+            _showSlashAutocomplete = true;
+            _slashQuery = '/project ';
+            _slashSelectedIndex = 0;
+          });
+          _focusNode.requestFocus();
+          return true;
+        }
         // Fire-and-forget; _handleProjectSetCommand manages its own error UI.
         unawaited(_handleProjectSetCommand(arg));
         return true;
@@ -877,6 +935,18 @@ class _ChatInputState extends ConsumerState<ChatInput>
       }
 
       if (event.logicalKey == LogicalKeyboardKey.escape) {
+        // Escape dismisses the find bar first (defensive path — the
+        // primary close path is on the FindBar's own FocusNode, but
+        // this catches the case where focus remained on ChatInput).
+        final findVisible =
+            ref.read(findBarVisibleProvider(widget.sessionId));
+        if (findVisible) {
+          ref.read(findBarVisibleProvider(widget.sessionId).notifier).state =
+              false;
+          ref.read(findQueryProvider(widget.sessionId).notifier).state = '';
+          ref.read(findCursorProvider(widget.sessionId).notifier).state = 0;
+          return KeyEventResult.handled;
+        }
         if (_showSlashAutocomplete) {
           setState(() {
             _showSlashAutocomplete = false;
@@ -958,6 +1028,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
                   skillNames: _skillNames,
                   onSkillSelected: _onSkillNameSelected,
                   projectPaths: _projectPaths,
+                  readdirPaths: _readdirPaths,
                   onProjectSelected: _onProjectSelected,
                   onSelected: _onSlashSelected,
                   onDismiss: () {

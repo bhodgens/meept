@@ -1673,44 +1673,71 @@ func (h *CommandHandler) executeProject(args []string) *CommandResult {
 	}
 }
 
-// executeProjectInfo shows the current project info.
+// executeProjectInfo shows the current project info and available project paths.
 func (h *CommandHandler) executeProjectInfo() *CommandResult {
-	// List projects and show summary
-	projects, err := h.rpc.ListProjects()
-	if err != nil {
+	if h.rpc == nil || !h.rpc.IsConnected() {
 		return &CommandResult{
-			Output:  fmt.Sprintf("failed to get projects: %v", err),
+			Output:  ErrNotConnected,
 			IsError: true,
 		}
 	}
 
-	if len(projects.Projects) == 0 {
-		return &CommandResult{Output: "no projects registered\nuse /project add <path|url> to add one"}
-	}
-
 	var sb strings.Builder
-	sb.WriteString("registered projects:\n\n")
-	for _, p := range projects.Projects {
-		dirty := ""
-		if p.Mode == "git" {
-			// Try to get status for git projects
-			status, err := h.rpc.ProjectStatus(p.ID)
-			if err == nil && status.Dirty {
-				dirty = " (dirty)"
+
+	// Fetch recents + filesystem matches via project.readdir.
+	recents, matches, readdirErr := h.rpc.ReadDirProjects("")
+
+	// List registered projects and show summary alongside recents/filesystem paths.
+	projects, err := h.rpc.ListProjects()
+	if err == nil && len(projects.Projects) > 0 {
+		sb.WriteString("registered projects:\n\n")
+		for _, p := range projects.Projects {
+			dirty := ""
+			if p.Mode == "git" {
+				// Try to get status for git projects
+				status, err := h.rpc.ProjectStatus(p.ID)
+				if err == nil && status.Dirty {
+					dirty = " (dirty)"
+				}
+			}
+			branch := ""
+			if p.Branch != "" {
+				branch = fmt.Sprintf(" branch:%s", p.Branch)
+			}
+			sb.WriteString(fmt.Sprintf("  %s  [%s]%s%s\n", p.Name, p.Mode, branch, dirty))
+			if p.LocalPath != "" {
+				sb.WriteString(fmt.Sprintf("    path: %s\n", p.LocalPath))
+			}
+			if p.GitURL != "" {
+				sb.WriteString(fmt.Sprintf("    url:  %s\n", p.GitURL))
 			}
 		}
-		branch := ""
-		if p.Branch != "" {
-			branch = fmt.Sprintf(" branch:%s", p.Branch)
+
+		sb.WriteString(fmt.Sprintf("\nuse /project set <path|name> to switch the current session's project\n"))
+		sb.WriteString(fmt.Sprintf("registered %d project(s). base_dir: ~/.meept/projects\n\n", len(projects.Projects)))
+	} else if len(recents) > 0 || len(matches) > 0 {
+		// No registered projects but recents or filesystem matches available.
+		sb.WriteString("recent project paths:\n\n")
+		for _, r := range recents {
+			sb.WriteString(fmt.Sprintf("  ~ %s\n", r))
 		}
-		sb.WriteString(fmt.Sprintf("  %s  [%s]%s%s\n", p.Name, p.Mode, branch, dirty))
-		if p.LocalPath != "" {
-			sb.WriteString(fmt.Sprintf("    path: %s\n", p.LocalPath))
+		if len(matches) > 0 {
+			sb.WriteString("\nmatching directories:\n\n")
+			for _, m := range matches {
+				sb.WriteString(fmt.Sprintf("  %s\n", m))
+			}
 		}
-		if p.GitURL != "" {
-			sb.WriteString(fmt.Sprintf("    url:  %s\n", p.GitURL))
-		}
+		sb.WriteString("\nuse /project set <path> to switch the current session's project\n")
+	} else {
+		sb.WriteString("no projects registered and no recent project paths found\n")
+		sb.WriteString("use /project add <path|url> to add one, or /project set <path> to bind by path\n")
+		sb.WriteString("hint: projects are git repositories — the daemon looks for .git directories\n")
 	}
+
+	if readdirErr != nil {
+		sb.WriteString(fmt.Sprintf("\n(note: could not fetch recent paths: %v)\n", readdirErr))
+	}
+
 	return &CommandResult{Output: sb.String()}
 }
 
