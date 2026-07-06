@@ -14,7 +14,12 @@ class CyberpunkSyntaxHighlighter extends SyntaxHighlighter {
 
   @override
   TextSpan format(String source) {
-    final nodes = highlight.parse(source, language: language).nodes;
+    // highlight.parse requires a non-null language. Fall back to 'plaintext'
+    // when the caller didn't specify one (e.g. code blocks without a language
+    // tag in markdown). Without this, clicking messages with untagged code
+    // blocks throws "Invalid argument(s) (language): Must not be null".
+    final lang = language?.isNotEmpty == true ? language! : 'plaintext';
+    final nodes = highlight.parse(source, language: lang).nodes;
     if (nodes == null) {
       return TextSpan(
         text: source,

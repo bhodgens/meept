@@ -48,7 +48,13 @@ class _SessionsDetailPaneState extends ConsumerState<SessionsDetailPane> {
     final oldId = oldWidget.sessionId ?? oldWidget.session.id;
     final newId = widget.sessionId ?? widget.session.id;
     if (oldId != newId) {
-      _fetchRelatedItems();
+      // Defer to next frame so we don't modify providers during the build
+      // phase (didUpdateWidget runs inside the build lifecycle). Without
+      // this, Riverpod throws _debugCanModifyProviders because loadTasks()
+      // sets state synchronously.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _fetchRelatedItems();
+      });
     }
   }
 
