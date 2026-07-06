@@ -3,10 +3,13 @@ package bus
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -42,6 +45,13 @@ type Subscriber struct {
 	Channel chan *models.BusMessage
 }
 
+// SubMetadata tracks subscription metadata for debugging dead subscriptions.
+type SubMetadata struct {
+	Topic     string
+	CreatedAt time.Time
+	Caller    string // runtime.Caller(2) - where Subscribe was called
+}
+
 // MessageBus implements a channel-based publish/subscribe message bus.
 type MessageBus struct {
 	mu          sync.RWMutex
@@ -50,6 +60,19 @@ type MessageBus struct {
 	closed      bool
 	logger      *slog.Logger
 	messagesSent atomic.Int64
+
+	// Subscription tracking for debugging dead subscriptions (Phase 1)
+	subMeta map[string]SubMetadata // key = channel address (%p format)
+}
+
+// panicOnUndrainedSubscription enables panic mode for tests.
+// When true, Publish() will panic if called on a topic with no subscribers.
+var panicOnUndrainedSubscription = false
+
+// SetPanicOnUndrainedSubscription enables/disables panic mode for testing.
+// When enabled, Publish() panics if no subscribers exist for the topic.
+func SetPanicOnUndrainedSubscription(enabled bool) {
+	panicOnUndrainedSubscription = enabled
 }
 
 // Config holds MessageBus configuration.
@@ -76,6 +99,7 @@ func New(cfg *Config, logger *slog.Logger) *MessageBus {
 		subscribers: make(map[string][]*Subscriber),
 		bufferSize:  cfg.BufferSize,
 		logger:      logger,
+		subMeta:     make(map[string]SubMetadata),
 	}
 }
 
@@ -145,8 +169,30 @@ func (b *MessageBus) Subscribe(id, topic string) *Subscriber {
 	}
 
 	b.subscribers[topic] = append(b.subscribers[topic], sub)
+
+	// Track subscription metadata for debugging
+	chAddr := fmt.Sprintf("%p", sub.Channel)
+	b.subMeta[chAddr] = SubMetadata{
+		Topic:     topic,
+		CreatedAt: time.Now(),
+		Caller:    callerName(2),
+	}
+
 	b.logger.Debug("bus: new subscriber", "id", id, "topic", topic)
 	return sub
+}
+
+// callerName returns the function name from runtime.Caller at the given depth.
+func callerName(depth int) string {
+	pc, _, _, ok := runtime.Caller(depth)
+	if !ok {
+		return "unknown"
+	}
+	fn := runtime.FuncForPC(pc)
+	if fn == nil {
+		return "unknown"
+	}
+	return fn.Name()
 }
 
 // Unsubscribe removes a subscription.
