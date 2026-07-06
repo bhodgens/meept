@@ -52,6 +52,7 @@ func DefaultEventStreamConfig() *EventStreamConfig {
 			"queue.*",
 			"memory.*",
 			"worker.*",
+			"chat.worker.*",
 			"llm.*",
 			"chat.*",
 			"conversation.*",

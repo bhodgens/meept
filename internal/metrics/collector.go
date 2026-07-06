@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -221,6 +222,21 @@ func (c *Collector) subscribeToBus() {
 			c.handleBusMessage(msg)
 		}
 	}()
+
+	// Subscribe to worker lifecycle events (worker.started, worker.completed,
+	// worker.stopped, worker.state_changed, worker.status, etc.). These are
+	// published by internal/worker/pool.go (source "worker-pool") and
+	// internal/agent/handler.go (source "chat-handler"). Without a subscriber
+	// every publish trips the "bus: Publish with no subscribers" warning.
+	workerSub := c.bus.Subscribe("metrics-collector-worker", "worker.*")
+	c.subs = append(c.subs, workerSub)
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		for msg := range workerSub.Channel {
+			c.handleBusMessage(msg)
+		}
+	}()
 }
 
 // handleBusMessage processes bus messages for metrics collection.
@@ -250,6 +266,10 @@ func (c *Collector) handleBusMessage(msg *models.BusMessage) {
 		c.recordReviewMetrics(msg)
 	case "compress.saved":
 		c.recordCompression(msg)
+	case "worker.started", "worker.completed", "worker.stopped",
+		"worker.state_changed", "worker.status",
+		"worker.pool.started", "worker.pool.stopped":
+		c.recordWorkerMetrics(msg)
 	}
 }
 
@@ -419,6 +439,78 @@ func (c *Collector) recordReviewMetrics(msg *models.BusMessage) {
 			"revision_count": payload.RevisionCount,
 		},
 	)
+}
+
+// recordWorkerMetrics records basic counters for worker lifecycle events.
+// It is defensive — malformed payloads are logged and dropped rather than
+// panicking. The "source" tag distinguishes events from the worker pool
+// (source "worker-pool") vs the chat handler (source "chat-handler").
+//
+// The event_type tag is derived from the topic suffix:
+//   - worker.started        → "started"
+//   - worker.completed      → "completed"
+//   - worker.stopped        → "stopped"
+//   - worker.state_changed  → "state_changed"
+//   - worker.status         → "status"
+//   - worker.pool.started   → "pool_started"
+//   - worker.pool.stopped   → "pool_stopped"
+func (c *Collector) recordWorkerMetrics(msg *models.BusMessage) {
+	eventType := msg.Topic
+	if strings.HasPrefix(eventType, "worker.") {
+		eventType = strings.TrimPrefix(eventType, "worker.")
+	}
+
+	source := msg.Source
+	if source == "" {
+		source = "unknown"
+	}
+
+	tags := map[string]string{
+		"event_type": eventType,
+		"source":     source,
+	}
+
+	c.store.Record("worker.events_total", 1, tags)
+
+	// Record an event log entry with payload context for observability. Keep
+	// the context lightweight — extract a worker ID if present so operators
+	// can correlate events to specific workers, but do not attempt full
+	// payload parsing (shapes differ between pool and chat handler).
+	eventContext := map[string]any{
+		"topic":  msg.Topic,
+		"source": source,
+	}
+	if workerID := extractWorkerID(msg.Payload); workerID != "" {
+		eventContext["worker_id"] = workerID
+	}
+
+	c.store.RecordEvent("worker.event", "info",
+		fmt.Sprintf("worker %s (%s)", eventType, source),
+		eventContext,
+	)
+}
+
+// extractWorkerID attempts to read a worker ID from a JSON payload using
+// multiple known key names. It returns "" if no key is found or the payload
+// is not valid JSON.
+func extractWorkerID(payload []byte) string {
+	if len(payload) == 0 {
+		return ""
+	}
+
+	var generic map[string]any
+	if err := json.Unmarshal(payload, &generic); err != nil {
+		return ""
+	}
+
+	for _, key := range []string{"worker_id", "id"} {
+		if v, ok := generic[key]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 // RegisterEventListeners subscribes the collector to typed agent events via an

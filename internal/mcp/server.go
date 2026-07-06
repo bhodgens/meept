@@ -367,6 +367,7 @@ func (s *Server) ConnectAndSubscribe(socketPath string) (string, error) {
 		"chat.response",
 		"agent.event.*",
 		"worker.*",
+		"chat.worker.*",
 	}
 	result, err := s.client.Call("bus.subscribe", map[string]any{"topics": topics})
 	if err != nil {

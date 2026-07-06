@@ -108,6 +108,22 @@ func New(cfg *Config, logger *slog.Logger) *MessageBus {
 // A nil msg is silently dropped to protect subscriber goroutines from
 // nil-pointer dereferences when reading the message.
 func (b *MessageBus) Publish(topic string, msg *models.BusMessage) int {
+	return b.publish(topic, msg, false)
+}
+
+// PublishExternalOnly is like Publish but downgrades the "no subscribers" log
+// from WARN to DEBUG. Use this for fire-and-forget event topics that are
+// informational and expected to have no subscriber when no TUI/MCP client is
+// connected (e.g., worker.*, chat.message.received).
+// The panicOnUndrainedSubscription behavior is unchanged — tests still catch bugs.
+func (b *MessageBus) PublishExternalOnly(topic string, msg *models.BusMessage) int {
+	return b.publish(topic, msg, true)
+}
+
+// publish is the shared core for Publish and PublishExternalOnly.
+// When suppressWarning is true, the "no subscribers" log is downgraded from
+// WARN to DEBUG.
+func (b *MessageBus) publish(topic string, msg *models.BusMessage, suppressWarning bool) int {
 	if msg == nil {
 		return 0
 	}
@@ -130,11 +146,19 @@ func (b *MessageBus) Publish(topic string, msg *models.BusMessage) int {
 
 		if !hasWildcardSubs {
 			b.mu.RUnlock()
-			b.logger.Warn("bus: Publish with no subscribers",
-				"topic", topic,
-				"source", msg.Source,
-				"msg_id", msg.ID,
-			)
+			if suppressWarning {
+				b.logger.Debug("bus: Publish with no subscribers (external-only topic)",
+					"topic", topic,
+					"source", msg.Source,
+					"msg_id", msg.ID,
+				)
+			} else {
+				b.logger.Warn("bus: Publish with no subscribers",
+					"topic", topic,
+					"source", msg.Source,
+					"msg_id", msg.ID,
+				)
+			}
 			if panicOnUndrainedSubscription {
 				panic(fmt.Sprintf("bus: Publish(%q) with no subscribers", topic))
 			}

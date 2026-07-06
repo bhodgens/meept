@@ -573,7 +573,8 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 				cmds = append(cmds, s.handleTokenEvent(e))
 			case "conversation.reset":
 				cmds = append(cmds, s.handleContextResetEvent(e))
-			case "worker.started", "worker.completed", "worker.error", "worker.state_changed":
+			case "worker.started", "worker.completed", "worker.error", "worker.state_changed",
+				"chat.worker.started", "chat.worker.completed", "chat.worker.error", "chat.worker.state_changed":
 				// Worker lifecycle + progress events: refresh data so the viz
 				// picks up the new worker state immediately instead of
 				// waiting for the next periodic poll tick.

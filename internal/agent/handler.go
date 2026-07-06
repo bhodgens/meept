@@ -310,7 +310,7 @@ func (h *ChatHandler) handleAgentProgress(msg *models.BusMessage) {
 			// Snapshot before releasing the lock so the publish goroutine
 			// doesn't race with future mutations of w.
 			snapshot := *w
-			go h.publishWorkerEvent("worker.state_changed", &snapshot)
+			go h.publishWorkerEvent("chat.worker.state_changed", &snapshot)
 		}
 	}
 }
@@ -496,7 +496,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			Timestamp: time.Now().UTC(),
 			Payload:   broadcastPayload,
 		}
-		h.bus.Publish("chat.message.received", broadcastMsg)
+		h.bus.PublishExternalOnly("chat.message.received", broadcastMsg)
 	}
 
 	// Create worker to track this request
@@ -513,7 +513,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	defer h.unregisterWorker(workerID)
 
 	// Publish worker started event
-	h.publishWorkerEvent("worker.started", worker)
+	h.publishWorkerEvent("chat.worker.started", worker)
 
 	// Process the message
 	h.logger.Info("Processing chat message",
@@ -700,10 +700,10 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			"worker", workerID,
 			"error", err,
 		)
-		h.publishWorkerEvent("worker.error", worker)
+		h.publishWorkerEvent("chat.worker.error", worker)
 	} else {
 		worker.State = "completed"
-		h.publishWorkerEvent("worker.completed", worker)
+		h.publishWorkerEvent("chat.worker.completed", worker)
 	}
 
 	// Build response
@@ -864,7 +864,7 @@ func (h *ChatHandler) publishWorkerEvent(topic string, w *Worker) {
 		Timestamp: time.Now().UTC(),
 		Payload:   payload,
 	}
-	h.bus.Publish(topic, msg)
+	h.bus.PublishExternalOnly(topic, msg)
 }
 
 // TaskStepSummary represents a step in a task completion payload.

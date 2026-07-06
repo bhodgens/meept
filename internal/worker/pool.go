@@ -361,7 +361,7 @@ func (p *Pool) publishEvent(topic string, data map[string]any) {
 		return
 	}
 
-	p.bus.Publish(topic, msg)
+	p.bus.PublishExternalOnly(topic, msg)
 }
 
 // PoolStats holds pool statistics.

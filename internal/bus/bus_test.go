@@ -253,3 +253,101 @@ func TestMessageBus_Mutation(t *testing.T) {
 		_ = bus.Subscribe("test-sub", "test.topic")
 	})
 }
+
+// TestPublishExternalOnly_NoWarnOnNoSubscribers verifies that PublishExternalOnly
+// does not log a WARN-level "no subscribers" message when there are no subscribers.
+// It should log at DEBUG instead.
+func TestPublishExternalOnly_NoWarnOnNoSubscribers(t *testing.T) {
+	var buf bytes.Buffer
+	// LevelInfo so WARN would show but DEBUG would not
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	bus := New(DefaultConfig(), logger)
+	defer bus.Close()
+
+	msg, _ := models.NewBusMessage(models.MessageTypeEvent, "test", map[string]any{"v": 1})
+	delivered := bus.PublishExternalOnly("external.topic", msg)
+
+	assert.Equal(t, 0, delivered, "expected 0 delivered with no subscribers")
+	output := buf.String()
+	assert.False(t, strings.Contains(output, "no subscribers"),
+		"PublishExternalOnly should not log 'no subscribers' at WARN level (INFO threshold):\n%s", output)
+}
+
+// TestPublishExternalOnly_DebugLogWithVerboseHandler verifies that the DEBUG-level
+// message IS emitted when the handler captures DEBUG.
+func TestPublishExternalOnly_DebugLogWithVerboseHandler(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	bus := New(DefaultConfig(), logger)
+	defer bus.Close()
+
+	msg, _ := models.NewBusMessage(models.MessageTypeEvent, "test", map[string]any{"v": 1})
+	bus.PublishExternalOnly("external.topic", msg)
+
+	output := buf.String()
+	assert.True(t, strings.Contains(output, "no subscribers"),
+		"PublishExternalOnly should log 'no subscribers' at DEBUG level:\n%s", output)
+	assert.True(t, strings.Contains(output, "external-only"),
+		"PublishExternalOnly log should indicate external-only topic:\n%s", output)
+}
+
+// TestPublishExternalOnly_DeliversToSubscribers verifies that PublishExternalOnly
+// still delivers messages to subscribers when they exist.
+func TestPublishExternalOnly_DeliversToSubscribers(t *testing.T) {
+	bus := New(nil, nil)
+	defer bus.Close()
+
+	sub := bus.Subscribe("test-sub", "external.topic")
+	msg := &models.BusMessage{
+		ID:      "msg-ext-1",
+		Type:    models.MessageTypeEvent,
+		Source:  "test",
+		Payload: []byte(`{"data":"hello"}`),
+	}
+	delivered := bus.PublishExternalOnly("external.topic", msg)
+	assert.Equal(t, 1, delivered, "expected 1 delivered")
+
+	select {
+	case received := <-sub.Channel:
+		assert.Equal(t, "msg-ext-1", received.ID)
+		assert.Equal(t, "external.topic", received.Topic)
+	case <-time.After(100 * time.Millisecond):
+		t.Error("timeout waiting for message")
+	}
+}
+
+// TestPublish_WarnsOnNoSubscribers verifies that the regular Publish still
+// emits a WARN-level "no subscribers" message (regression guard for refactor).
+func TestPublish_WarnsOnNoSubscribers(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	bus := New(DefaultConfig(), logger)
+	defer bus.Close()
+
+	msg, _ := models.NewBusMessage(models.MessageTypeEvent, "test", map[string]any{"v": 1})
+	bus.Publish("regular.topic", msg)
+
+	output := buf.String()
+	assert.True(t, strings.Contains(output, "no subscribers"),
+		"Publish should log 'no subscribers' at WARN level:\n%s", output)
+}
+
+// TestPublishExternalOnly_PanicsInTestMode verifies that PublishExternalOnly
+// still respects panicOnUndrainedSubscription so tests catch missing wiring.
+func TestPublishExternalOnly_PanicsInTestMode(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	bus := New(DefaultConfig(), logger)
+	defer bus.Close()
+
+	SetPanicOnUndrainedSubscription(true)
+	t.Cleanup(func() { SetPanicOnUndrainedSubscription(false) })
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic when PublishExternalOnly called with no subscribers in panic mode")
+		}
+	}()
+
+	msg, _ := models.NewBusMessage(models.MessageTypeEvent, "test", map[string]any{"v": 1})
+	bus.PublishExternalOnly("external.panic.topic", msg)
+}

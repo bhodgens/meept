@@ -206,7 +206,8 @@ The MCP server is stateless — it translates between MCP protocol and meept's e
 | `chat.message.received` | Any client sends a message | `[source_client] message content` |
 | `chat.response` | Agent completes | Full agent response text |
 | `agent.event.*` | Agent lifecycle events | Tool calls, turns, progress |
-| `worker.*` | Worker state changes | `worker.started`, `worker.completed` |
+| `worker.*` | Pool worker lifecycle | `worker.started`, `worker.stopped` |
+| `chat.worker.*` | Per-request chat worker state | `chat.worker.started`, `chat.worker.completed` |
 
 ## Tips
 
