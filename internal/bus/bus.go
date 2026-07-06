@@ -130,7 +130,11 @@ func (b *MessageBus) Publish(topic string, msg *models.BusMessage) int {
 
 		if !hasWildcardSubs {
 			b.mu.RUnlock()
-			b.logger.Warn("bus: Publish with no subscribers", "topic", topic)
+			b.logger.Warn("bus: Publish with no subscribers",
+				"topic", topic,
+				"source", msg.Source,
+				"msg_id", msg.ID,
+			)
 			if panicOnUndrainedSubscription {
 				panic(fmt.Sprintf("bus: Publish(%q) with no subscribers", topic))
 			}

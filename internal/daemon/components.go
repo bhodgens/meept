@@ -2859,7 +2859,22 @@ func (c *Components) Start(ctx context.Context) error {
 			if c.Config != nil && c.Config.Employees.Audit.DriftPauseThreshold > 0 {
 				driftThreshold = c.Config.Employees.Audit.DriftPauseThreshold
 			}
-			if modelCfg, err := c.LLMResolver.ResolveForAlias(modelAlias); err == nil && modelCfg != nil {
+			// Resolve the audit model. employees.audit.model historically
+			// defaults to "small", but "small" is not registered as a
+			// real alias in models.json5 — it's the conceptual name for
+			// the small/fast model configured via the top-level
+			// `small_model` key. Try the alias first (for users who do
+			// define it), then fall back to SmallModel(), then
+			// DefaultModel() so the auditor works in the common case.
+			var modelCfg *llm.ModelConfig
+			if resolved, err := c.LLMResolver.ResolveForAlias(modelAlias); err == nil && resolved != nil {
+				modelCfg = resolved
+			} else if small := c.LLMResolver.SmallModel(); small != nil {
+				modelCfg = small
+			} else if def := c.LLMResolver.DefaultModel(); def != nil {
+				modelCfg = def
+			}
+			if modelCfg != nil {
 				auditChatter := llm.NewClient(modelCfg, llm.WithLogger(
 					c.Logger.With("component", "employee-audit-llm")))
 				auditStore := c.EmployeeManager.AuditStore()
@@ -2914,9 +2929,9 @@ func (c *Components) Start(ctx context.Context) error {
 					"post_turn", true,
 					"periodic", true,
 				)
-			} else if err != nil {
-				c.Logger.Warn("Employee audit: failed to resolve audit model; Checkpoints 2 and 3 dormant",
-					"alias", modelAlias, "error", err)
+			} else {
+				c.Logger.Warn("Employee audit: no model resolved; Checkpoints 2 and 3 dormant",
+					"alias", modelAlias)
 			}
 		}
 
@@ -3031,16 +3046,24 @@ func (c *Components) Start(ctx context.Context) error {
 			goalStore := c.EmployeeGoalStore
 			postTurn := c.EmployeeManager.PostTurnAuditor()
 
-			// Resolve the small-model chatter for the Reflector.
+			// Resolve the small-model chatter for the Reflector. Uses
+			// the same fallback chain as the auditor wiring above: alias
+			// first (for users who define "small" in model_aliases),
+			// then SmallModel() (the small_model config key), then
+			// DefaultModel() as a last resort.
 			var reflector llm.Chatter
 			if c.LLMResolver != nil {
-				reflectorAlias := "small"
-				if modelCfg, err := c.LLMResolver.ResolveForAlias(reflectorAlias); err == nil && modelCfg != nil {
+				var modelCfg *llm.ModelConfig
+				if resolved, err := c.LLMResolver.ResolveForAlias("small"); err == nil && resolved != nil {
+					modelCfg = resolved
+				} else if small := c.LLMResolver.SmallModel(); small != nil {
+					modelCfg = small
+				} else if def := c.LLMResolver.DefaultModel(); def != nil {
+					modelCfg = def
+				}
+				if modelCfg != nil {
 					reflector = llm.NewClient(modelCfg, llm.WithLogger(
 						c.Logger.With("component", "employee-goal-loop-llm")))
-				} else if err != nil {
-					c.Logger.Warn("Employee GoalLoop: failed to resolve small model; Reflector unavailable",
-						"alias", reflectorAlias, "error", err)
 				}
 			}
 
@@ -3072,8 +3095,19 @@ func (c *Components) Start(ctx context.Context) error {
 			// Enumerate employees with constitutions and register a loop
 			// for each. Uses a fresh context (not the boot context) so
 			// lookups don't race with Start cancellation.
+			//
+			// Skip silently when no bot manager is wired. With the default
+			// config (employees.enabled=true, bots.enabled=false), the
+			// employee Manager is constructed with a nil botManager and
+			// every ListEmployees call returns errNotConfigured. That's
+			// the expected state when the user hasn't set up bots yet —
+			// logging WARN here is noise. Once bots are enabled and
+			// employees are configured via `meept agents create`, this
+			// block runs for real.
 			registerCtx := context.Background()
-			if emps, err := c.EmployeeManager.ListEmployees(registerCtx, ""); err == nil {
+			if c.BotManager == nil {
+				c.Logger.Debug("Employee GoalLoop wiring: skipped (bots not configured)")
+			} else if emps, err := c.EmployeeManager.ListEmployees(registerCtx, ""); err == nil {
 				registered := 0
 				for _, emp := range emps {
 					if !emp.HasConstitution() {
