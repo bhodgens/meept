@@ -455,13 +455,31 @@ class ChatNotifier extends StateNotifier<ChatState> {
           isAgentProcessing: false,
           error: errorMsg,
         );
+      } else if (chatResp != null &&
+          chatResp['reply'] != null &&
+          (chatResp['reply'] as String).isNotEmpty) {
+        // Synchronous response: the daemon returned a reply in the HTTP
+        // body (e.g. platform introspection, direct response). Add it to
+        // the message list immediately — don't wait for a WebSocket event
+        // that will never arrive.
+        final replyContent = chatResp['reply'] as String;
+        final assistantMessage = ChatMessage(
+          id: 'agent_${DateTime.now().millisecondsSinceEpoch}',
+          role: 'assistant',
+          content: replyContent,
+          timestamp: DateTime.now(),
+          sessionId: sessionId,
+        );
+        state = ChatState(
+          messages: [...state.messages, assistantMessage],
+          isLoading: false,
+          isAgentProcessing: false,
+        );
       } else {
-        // HTTP call succeeded but the agent may still be processing —
-        // keep isAgentProcessing=true so the progress indicator stays
-        // visible.  We clear isLoading here because the HTTP fetch is
-        // done; the agent's final chat_message will clear
-        // isAgentProcessing.  Preserve currentProgress so the
-        // AgentProgressIndicator keeps rendering until the first WS event.
+        // HTTP call succeeded but no reply in the body — the agent is
+        // still processing asynchronously. Keep isAgentProcessing=true
+        // so the progress indicator stays visible. The agent's final
+        // chat_message will arrive via WebSocket.
         state = ChatState(
           messages: state.messages,
           isLoading: false,

@@ -866,6 +866,26 @@ class _ChatInputState extends ConsumerState<ChatInput>
             }
             return KeyEventResult.handled;
           }
+          if (_slashQuery.startsWith('/project ')) {
+            // Project-path mode: dispatch the current path to the daemon.
+            // This works whether the user selected a path from the typeahead
+            // popup (which inserts the path into the controller) or typed it
+            // manually — the controller text contains "/project <path>".
+            // Don't call _onSlashSelected here — it would reset the input to
+            // "/project " and lose the typed path.
+            final text = _controller.text;
+            final spaceIdx = text.indexOf(' ');
+            if (spaceIdx != -1) {
+              final path = text.substring(spaceIdx).trim();
+              if (path.isNotEmpty) {
+                unawaited(_handleProjectSetCommand(path));
+                return KeyEventResult.handled;
+              }
+            }
+            // Path was empty (e.g. user typed "/project " then Enter) —
+            // just dismiss the popup, don't fire setProject.
+            return KeyEventResult.handled;
+          }
           final matches = _slashRegistry.match(_slashQuery);
           if (matches.isNotEmpty) {
             final idx = _slashSelectedIndex.clamp(0, matches.length - 1);
