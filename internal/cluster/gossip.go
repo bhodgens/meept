@@ -621,11 +621,13 @@ func (g *GossipEngine) Start(ctx context.Context) error {
 
 	g.logger.Info("gossip: starting engine", "node_id", g.localNode)
 
-	// Subscribe to cluster events on the message bus
-	if g.msgBus != nil {
-		g.eventID = fmt.Sprintf("gossip-%s", g.localNode)
-		g.sub = g.msgBus.Subscribe(g.eventID, "cluster.event.*")
-	}
+	// Note: previously the engine subscribed to "cluster.event.*" on the
+	// message bus but never drained the subscriber channel. The buffer
+	// filled (cap 100) and the bus started dropping every subsequent
+	// publish to cluster.event.* topics — including the engine's own
+	// sendHeartbeat publishes. Subscription removed pending a real
+	// consumer; the heartbeat publisher at sendHeartbeat() writes to the
+	// bus directly without consuming, which is fine.
 
 	// Start background retry loop
 	g.startRetryLoop(ctx)
@@ -675,9 +677,11 @@ func (g *GossipEngine) Stop() error {
 		}
 	}
 
-	// Unsubscribe from bus if applicable
+	// Unsubscribe from bus if applicable (defensive: subscription was
+	// removed from Start, but keep the cleanup in case it is re-added).
 	if g.msgBus != nil && g.sub != nil {
 		g.msgBus.Unsubscribe(g.sub)
+		g.sub = nil
 	}
 
 	g.mu.Lock()

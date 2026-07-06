@@ -228,7 +228,9 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]SearchRe
 		results = results[:limit]
 	}
 
-	// Fetch metadata for results
+	// Fetch metadata for results. The metadata table is small and the
+	// RLock serializes DB access per the package convention; see the
+	// sibling nolint:mutexio comments elsewhere in this file.
 	for i := range results {
 		metadata, content, err := s.getMemoryMetadata(results[i].MemoryID)
 		if err == nil {

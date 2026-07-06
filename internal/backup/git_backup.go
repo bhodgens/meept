@@ -25,6 +25,7 @@ type GitBackupScheduler struct {
 	nodeID       string
 	running      bool
 	stopCh       chan struct{}
+	stopOnce     sync.Once
 	onBackupDone func(*BackupManifest, error)
 }
 
@@ -111,14 +112,14 @@ func (s *GitBackupScheduler) Start(ctx context.Context) {
 	}
 }
 
-// Stop gracefully stops the scheduler.
+// Stop gracefully stops the scheduler. Safe to call multiple times.
 func (s *GitBackupScheduler) Stop() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.stopCh != nil {
+	s.stopOnce.Do(func() {
 		close(s.stopCh)
-	}
+	})
+	s.mu.Lock()
 	s.running = false
+	s.mu.Unlock()
 }
 
 // RunNow triggers an immediate backup and push.

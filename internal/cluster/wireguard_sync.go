@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	texttemplate "text/template"
 )
 
@@ -73,6 +74,11 @@ type WireGuardManager struct {
 	configPath string
 	iface      string
 	tmpl       *texttemplate.Template
+
+	// mu serializes config-modifying operations (ApplyConfig, AddPeer,
+	// RemovePeer, UpdatePeers) to prevent races on the shared cfg.Peers
+	// slice and the wg syncconf file write.
+	mu sync.Mutex
 }
 
 // NewWireGuardManager creates a new WireGuard config manager.
@@ -129,6 +135,9 @@ func (m *WireGuardManager) WriteConfig(cfg *WireGuardConfig) error {
 // This method does not tear down the existing interface, so established
 // connections are preserved.
 func (m *WireGuardManager) ApplyConfig(cfg *WireGuardConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// Write the full config file (for diagnostics / persistence).
 	if err := m.WriteConfig(cfg); err != nil {
 		return err
@@ -182,6 +191,8 @@ func (m *WireGuardManager) ApplyConfig(cfg *WireGuardConfig) error {
 // AddPeer adds a single peer to the WireGuard interface by re-applying the
 // full config with the peer appended to the list.
 func (m *WireGuardManager) AddPeer(peer Member, cfg *WireGuardConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	// Copy the config to avoid mutating the caller's peer slice.
 	cfgCopy := *cfg
 	peers := make([]Member, len(cfg.Peers)+1)
@@ -194,6 +205,8 @@ func (m *WireGuardManager) AddPeer(peer Member, cfg *WireGuardConfig) error {
 // RemovePeer removes a peer from the WireGuard interface by filtering it out
 // and re-applying the config.
 func (m *WireGuardManager) RemovePeer(nodeID string, cfg *WireGuardConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	// Build a new peer slice and copy the config to avoid mutating caller.
 	peers := make([]Member, 0, len(cfg.Peers))
 	for _, p := range cfg.Peers {
@@ -209,6 +222,8 @@ func (m *WireGuardManager) RemovePeer(nodeID string, cfg *WireGuardConfig) error
 // UpdatePeers replaces the entire peer list with the provided members and
 // applies the new configuration.
 func (m *WireGuardManager) UpdatePeers(peers []Member, cfg *WireGuardConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	// Copy the config to avoid mutating the caller's peer slice.
 	cfgCopy := *cfg
 	cfgCopy.Peers = peers

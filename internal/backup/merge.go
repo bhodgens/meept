@@ -88,10 +88,23 @@ func MergePeerDB(ctx context.Context, gossipDB *sql.DB, peerDBPath, peerID strin
 		slog.Warn("backup: merge memories failed for peer", "peer_id", peerID, "error", memErr)
 	}
 
-	if sessionErr != nil && turnErr != nil && memErr != nil {
-		if _, detErr := tx.ExecContext(ctx, "DETACH peer"); detErr != nil { slog.Debug("backup: cleanup detach failed", "error", detErr) }
-		err = fmt.Errorf("all merge operations failed for peer %s: sessions: %w, turns: %w, memories: %w",
-			peerID, sessionErr, turnErr, memErr)
+	if sessionErr != nil || turnErr != nil || memErr != nil {
+		if _, detErr := tx.ExecContext(ctx, "DETACH peer"); detErr != nil {
+			slog.Debug("backup: cleanup detach failed", "error", detErr)
+		}
+		// Abort the merge: any partial success would corrupt gossip DB integrity,
+		// so roll back via the deferred rollback (setting err triggers it).
+		parts := []string{"partial merge aborted for peer " + peerID}
+		if sessionErr != nil {
+			parts = append(parts, "sessions: "+sessionErr.Error())
+		}
+		if turnErr != nil {
+			parts = append(parts, "turns: "+turnErr.Error())
+		}
+		if memErr != nil {
+			parts = append(parts, "memories: "+memErr.Error())
+		}
+		err = fmt.Errorf("%s", strings.Join(parts, "; "))
 		return stats, err
 	}
 

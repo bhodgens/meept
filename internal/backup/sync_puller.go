@@ -88,7 +88,7 @@ func (p *SyncPuller) Start(ctx context.Context) {
 
 	// Initial pull
 	go func() {
-		if err := p.pullOnce(context.Background()); err != nil {
+		if err := p.pullOnce(ctx); err != nil {
 			p.logger.Error("sync: initial pull failed", "error", err)
 		}
 	}()
@@ -107,7 +107,7 @@ func (p *SyncPuller) Start(ctx context.Context) {
 			p.logger.Info("sync puller stopping")
 			return
 		case <-ticker.C:
-			if err := p.pullOnce(context.Background()); err != nil {
+			if err := p.pullOnce(ctx); err != nil {
 				p.logger.Error("sync: scheduled pull failed", "error", err)
 			}
 		}

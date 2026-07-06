@@ -43,8 +43,7 @@ class DaemonCertPinner {
     if (_cachedFingerprint != null) return;
     if (kIsWeb) return;  // No filesystem access on web
 
-    // ignore: unused_local_variable
-    final homeDir = null;  // Platform.environment['HOME'];
+    final homeDir = Platform.environment['HOME'];
     if (homeDir == null) return;
 
     final certPath = '$homeDir/.meept/tls/cert.pem';

@@ -59,6 +59,11 @@ func NewPlanManager(store PlanStore, bus *bus.MessageBus, cfg config.PlansConfig
 // Lifecycle methods
 // ---------------------------------------------------------------------------
 
+// GetPlan returns the plan with the given ID from the store.
+func (m *PlanManager) GetPlan(ctx context.Context, planID string) (*Plan, error) {
+	return m.store.GetPlan(ctx, planID)
+}
+
 // CreatePlan creates a new plan, stores it, writes the initial plan.md, and
 // publishes a plan.created event.
 func (m *PlanManager) CreatePlan(ctx context.Context, title, description, projectID, projectPath, sessionID string) (*Plan, error) {

@@ -269,6 +269,12 @@ func (t *HTTPTransport) SendNotification(ctx context.Context, message []byte) er
 		return fmt.Errorf("transport not running")
 	}
 
+	// Enforce the same size cap as Send to prevent memory-exhaustion via
+	// oversized notifications.
+	if len(message) > MaxResponseSize {
+		return fmt.Errorf("notification body exceeds maximum size (%d bytes)", MaxResponseSize)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(message))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)

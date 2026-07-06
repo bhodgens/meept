@@ -33,7 +33,7 @@ chmod +x .githooks/*
 
 ### pre-commit (Main Hook)
 
-Entry point that runs all checks sequentially (8 total):
+Entry point that runs all checks sequentially (11 total):
 
 | # | Hook | Purpose |
 |---|------|---------|
@@ -45,7 +45,9 @@ Entry point that runs all checks sequentially (8 total):
 | 6 | pre-commit-gosec | Security vulnerabilities |
 | 7 | pre-commit-errors | Error handling anti-patterns |
 | 8 | pre-commit-predictable-ids | Use pkg/id.Generate (not time.Now().UnixNano()) |
-| 9 | pre-commit-feature-docs | Documentation updates |
+| 9 | pre-commit-sqlite-pragmas | SQLite WAL + busy_timeout required |
+| 10 | pre-commit-channel-nilafterclose | Use sync.Once (not close+nil) |
+| 11 | pre-commit-feature-docs | Documentation updates |
 
 ---
 
@@ -210,6 +212,58 @@ Suppress false positives (e.g., genuine timestamps that aren't IDs) with:
 ```go
 createdAt = time.Now().UnixNano() //nolint:predictableids // genuine timestamp, not an ID
 ```
+
+---
+
+### pre-commit-sqlite-pragmas
+
+Ensures all `sql.Open("sqlite3", ...)` calls include WAL mode and busy_timeout in the DSN.
+
+**Triggers on:** Added lines in staged Go source files (excludes `_test.go`)
+
+**Checks:**
+- Flags any `sql.Open("sqlite3", <dsn>)` where `<dsn>` doesn't contain `_journal_mode=WAL` and `_busy_timeout`
+- Prevents "database is locked" errors under concurrent SQLite access
+
+**Example:**
+```go
+// WRONG: default journal mode causes lock contention
+db, err := sql.Open("sqlite3", path)
+
+// RIGHT: WAL + busy_timeout prevents concurrent-access issues
+dsn := path + "?_journal_mode=WAL&_busy_timeout=5000"
+db, err := sql.Open("sqlite3", dsn)
+```
+
+**Suppress:** `//nolint:sqlitepragmas` when PRAGMAs are managed via `PRAGMA` statements on an already-open connection.
+
+---
+
+### pre-commit-channel-nilafterclose
+
+Detects the `close(ch); ch = nil` pattern on struct fields, which causes data races when the channel is read from the struct field in a `select` statement.
+
+**Triggers on:** Added lines in staged Go source files (excludes `_test.go`)
+
+**Checks:**
+- Flags `close(s.field)` followed by `s.field = nil` within 3 lines
+- The nil'd field causes `select { case <-s.field: }` to block forever (nil channels never complete)
+
+**Example:**
+```go
+// WRONG: select reads nil'd field, blocks forever
+func (s *Scheduler) Stop() {
+    close(s.stopCh)
+    s.stopCh = nil  // Start()'s select now sees nil, blocks forever
+}
+
+// RIGHT: sync.Once for safe idempotent close
+func (s *Scheduler) Stop() {
+    s.stopOnce.Do(func() { close(s.stopCh) })
+}
+```
+
+**Suppress:** `//nolint:channil` when the nil check is a deliberate sentinel (e.g., checked via `!= nil` before entering the select).
 
 ---
 

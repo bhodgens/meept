@@ -194,6 +194,7 @@ func (r *BotRunner) Execute(ctx context.Context, state *BotState, triggerCtx str
 		backoff = 1 * time.Second
 	}
 
+retryLoop:
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		output, tokensUsed, lastErr = r.executor.ExecuteBot(ctx, systemPrompt, userMessage)
 		if lastErr == nil {
@@ -216,7 +217,7 @@ func (r *BotRunner) Execute(ctx context.Context, state *BotState, triggerCtx str
 			case <-time.After(backoff):
 			case <-ctx.Done():
 				lastErr = ctx.Err()
-				break
+				break retryLoop
 			}
 			backoff *= 2
 		}

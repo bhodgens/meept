@@ -81,7 +81,13 @@ func New(cfg *Config, logger *slog.Logger) *MessageBus {
 
 // Publish sends a message to all subscribers of the topic.
 // It also publishes to wildcard subscribers (e.g., "agent.*" matches "agent.status").
+// A nil msg is silently dropped to protect subscriber goroutines from
+// nil-pointer dereferences when reading the message.
 func (b *MessageBus) Publish(topic string, msg *models.BusMessage) int {
+	if msg == nil {
+		return 0
+	}
+
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 

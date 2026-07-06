@@ -109,7 +109,10 @@ func TestShellExecuteTool_ClassifyRisk(t *testing.T) {
 		{"cat file.txt", RiskMedium},
 		{"grep pattern file", RiskMedium},
 		{"git status", RiskMedium},
-		{"python3 script.py", RiskMedium},
+
+		// Interpreters/build tools are not read-only — they execute
+		// arbitrary code, write files, or run lifecycle hooks. HIGH.
+		{"python3 script.py", RiskHigh},
 
 		// Blocked commands (CRITICAL)
 		{"rm file", RiskCritical},

@@ -251,6 +251,13 @@ func (s *ConstitutionStore) Close() error {
 // is replaced (INSERT OR REPLACE). The version, approved_at, and
 // authored_by columns are populated from the Constitution struct so
 // administrative queries can read them without parsing the JSON blob.
+//
+// For optimistic-concurrency cases (e.g. AmendConstitution), prefer
+// PutIfVersion, which atomically checks the existing version inside the
+// same statement and returns ErrVersionMismatch if a concurrent writer
+// landed first. Plain Put is unsafe under concurrent amendments — two
+// writers that both pass the in-memory version check can both succeed,
+// and only the second writer's data persists.
 func (s *ConstitutionStore) Put(ctx context.Context, employeeID string, c Constitution) error {
 	if employeeID == "" {
 		return errors.New("constitution put: empty employee id")
@@ -272,6 +279,60 @@ func (s *ConstitutionStore) Put(ctx context.Context, employeeID string, c Consti
 	)
 	if err != nil {
 		return fmt.Errorf("constitution put: insert: %w", err)
+	}
+	return nil
+}
+
+// PutIfVersion persists the constitution only if the existing row's
+// version matches expectedVersion. Returns ErrVersionMismatch if the row
+// is missing or its version differs. This is the atomic version of Put
+// for optimistic-concurrency flows: a single UPDATE statement performs
+// the check-and-set, so concurrent amendments cannot collide.
+//
+// When inserting a brand-new constitution (no existing row), pass
+// expectedVersion == 0 — PutIfVersion will INSERT only if no row exists.
+func (s *ConstitutionStore) PutIfVersion(ctx context.Context, employeeID string, c Constitution, expectedVersion int) error {
+	if employeeID == "" {
+		return errors.New("constitution put: empty employee id")
+	}
+	data, err := json.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("constitution put: marshal: %w", err)
+	}
+	approvedAt := c.ApprovedAt
+	if approvedAt.IsZero() {
+		approvedAt = time.Now().UTC()
+	}
+	if expectedVersion == 0 {
+		// Insert-only path: refuse if a row already exists.
+		res, err := s.db.ExecContext(ctx, `
+			INSERT OR IGNORE INTO employee_constitutions
+				(employee_id, data, version, approved_at, authored_by)
+			VALUES (?, ?, ?, ?, ?)`,
+			employeeID, string(data), c.Version,
+			approvedAt.Format(time.RFC3339Nano), c.AuthoredBy,
+		)
+		if err != nil {
+			return fmt.Errorf("constitution put: insert: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("%w: constitution already exists for %s", ErrVersionMismatch, employeeID)
+		}
+		return nil
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE employee_constitutions
+		   SET data = ?, version = ?, approved_at = ?, authored_by = ?
+		 WHERE employee_id = ? AND version = ?`,
+		string(data), c.Version,
+		approvedAt.Format(time.RFC3339Nano), c.AuthoredBy,
+		employeeID, expectedVersion,
+	)
+	if err != nil {
+		return fmt.Errorf("constitution put: update: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: constitution for %s is not at version %d", ErrVersionMismatch, employeeID, expectedVersion)
 	}
 	return nil
 }
@@ -407,6 +468,12 @@ type PlanDisposer interface {
 	RejectPlan(ctx context.Context, planID, sessionID, by, reason string) error
 }
 
+// PlanLookup provides read-only access to plan metadata. Used by the
+// approval-timeout sweeper to determine when a plan was submitted.
+type PlanLookup interface {
+	PlanCreatedAt(ctx context.Context, planID string) (time.Time, error)
+}
+
 // Manager orchestrates the employee lifecycle: hiring, retiring, pause/resume,
 // triggering, constitution amendment (via Plan signoff), goal management,
 // audit findings, and legacy bot migration.
@@ -437,6 +504,12 @@ type Manager struct {
 	// PlanManager. Nil means ApprovePlan/RejectPlan return a "not
 	// configured" error. Written via SetPlanDisposer during daemon init.
 	planDisposer PlanDisposer
+
+	// planLookup is an optional read-only plan accessor injected by the
+	// daemon wiring. Used by the approval-timeout sweeper to determine
+	// when a plan was created (spec line 591). Nil means the sweeper
+	// falls back to LastAssessed.
+	planLookup PlanLookup
 
 	// botsDir overrides the default ~/.meept/bots/ scan path used by
 	// Migrate. When empty, Migrate falls back to the default. Set via
@@ -1476,6 +1549,15 @@ func (m *Manager) SetPlanDisposer(d PlanDisposer) {
 		return
 	}
 	m.planDisposer = d
+}
+
+// SetPlanLookup wires the read-only plan accessor used by the
+// approval-timeout sweeper. Nil is ignored.
+func (m *Manager) SetPlanLookup(l PlanLookup) {
+	if l == nil {
+		return
+	}
+	m.planLookup = l
 }
 
 // SetBotsDir overrides the directory Migrate scans for legacy

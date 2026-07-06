@@ -502,6 +502,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   onTabSelected: (index) {
                     setState(() => _selectedTab = HomeTab.values[index]);
                     context.go(_tabRoutes[index]);
+                    // Refresh active-project indicator on tab switch so a
+                    // project change made on the projects panel propagates
+                    // to the status bar without a reconnect (TUI parity).
+                    ref.read(currentProjectProvider.notifier).refresh();
                   },
                 ),
                 // Toolbar with hamburger menu (left) + connection indicator (right)

@@ -333,6 +333,7 @@ func (m *Manager) runApprovalTimeoutSweep(ctx context.Context, timeout time.Dura
 	m.mu.RLock()
 	goalStore := m.goalStore
 	auditStore := m.auditStore
+	planLookup := m.planLookup
 	m.mu.RUnlock()
 
 	if goalStore == nil {
@@ -350,10 +351,22 @@ func (m *Manager) runApprovalTimeoutSweep(ctx context.Context, timeout time.Dura
 		if g.ActivePlanID == "" {
 			continue
 		}
-		// The plan age is determined by the goal's LastAssessed time.
-		// When LastAssessed is before the cutoff, the plan has been
-		// pending too long.
-		if g.LastAssessed.IsZero() || g.LastAssessed.After(cutoff) {
+
+		// Determine the plan's age. Prefer the plan store's CreatedAt
+		// (accurate plan submission time); fall back to the goal's
+		// LastAssessed when no plan lookup is wired.
+		var planAge time.Time
+		if planLookup != nil {
+			t, err := planLookup.PlanCreatedAt(ctx, g.ActivePlanID)
+			if err == nil && !t.IsZero() {
+				planAge = t
+			}
+		}
+		if planAge.IsZero() {
+			// Fallback: use LastAssessed (imperfect proxy for plan age).
+			planAge = g.LastAssessed
+		}
+		if planAge.IsZero() || planAge.After(cutoff) {
 			continue
 		}
 		m.logger.Info("approval timeout: rejecting stale plan",

@@ -230,8 +230,9 @@ func (cq *ClusterQueue) IsClaimed(ctx context.Context, jobID string) (string, bo
 
 // ReclaimIfStale checks all locally tracked claims and reclaims any whose
 // timeout has expired. It collects stale job IDs under a brief RLock, releases
-// the lock, then reclaims each job individually under its own Lock to avoid
-// holding the write lock across slow I/O (store, bus publish).
+// the lock, then reclaims each job individually. Each reclaim re-checks
+// staleness under a write lock (CAS-style) to prevent double-reclaim when
+// multiple nodes sweep concurrently.
 func (cq *ClusterQueue) ReclaimIfStale(ctx context.Context) []*Job {
 	now := time.Now()
 
@@ -245,11 +246,26 @@ func (cq *ClusterQueue) ReclaimIfStale(ctx context.Context) []*Job {
 	}
 	cq.mu.RUnlock()
 
-	// Reclaim each job individually under its own Lock
+	// Reclaim each job individually with CAS-style re-check
 	var reclaiming []*Job
 	for _, jobID := range staleIDs {
+		// Re-verify staleness under write lock to avoid double-reclaim
+		// (another node or the original claimer may have completed/reclaimed
+		// this job between our snapshot and now).
+		cq.mu.Lock()
+		record, ok := cq.claimed[jobID]
+		if !ok || now.Before(record.TimeoutAt) {
+			// Already reclaimed/completed, or no longer stale.
+			cq.mu.Unlock()
+			continue
+		}
+		// Remove the claim record now while holding the lock; the I/O
+		// below (store, bus) proceeds without the lock.
+		delete(cq.claimed, jobID)
+		cq.mu.Unlock()
+
 		reclaiming = append(reclaiming, &Job{ID: jobID})
-		if err := cq.ReclaimJob(ctx, jobID, "claim_stale"); err != nil {
+		if err := cq.reclaimJobUnlocked(ctx, jobID, "claim_stale"); err != nil {
 			cq.logger.Warn("cluster_queue: reclaim_if_stale: reclaim failed",
 				"job_id", jobID, "error", err)
 		}

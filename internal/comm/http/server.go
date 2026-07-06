@@ -319,6 +319,14 @@ func (r *progressRateLimiter) cleanup(conns map[*wsConn]struct{}) {
 	}
 }
 
+// remove drops the entry for a single connection. Intended to be called
+// from WebSocketHub.Unregister so the map does not grow unbounded.
+func (r *progressRateLimiter) remove(wc *wsConn) {
+	r.mu.Lock()
+	delete(r.lastSent, wc)
+	r.mu.Unlock()
+}
+
 // NewWebSocketHub creates a new WebSocket hub.
 func NewWebSocketHub(logger *slog.Logger) *WebSocketHub {
 	if logger == nil {
@@ -554,6 +562,10 @@ func (s *Server) handleWSProgress(msg *models.BusMessage) {
 		if err := wc.write(payload); err != nil {
 			s.logger.Warn("ws progress write error, removing client", "error", err)
 			h.Unregister(wc)
+			// Drop the rate-limiter entry too so the map doesn't leak.
+			if s.progressRateLimiter != nil {
+				s.progressRateLimiter.remove(wc)
+			}
 		} else if s.progressRateLimiter != nil {
 			s.progressRateLimiter.recordSend(wc)
 		}
@@ -896,7 +908,7 @@ func (l *tlsDetectListener) Accept() (net.Conn, error) {
 				"remote", conn.RemoteAddr(),
 				"first_byte", string(rune(b)),
 				"hint", "client must use HTTPS")
-			resp := []byte("HTTP/1.1 426 Upgrade Required\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 77\r\n\r\n{\"error\":\"upgrade required\",\"message\":\"use HTTPS for this endpoint\"}")
+			resp := []byte("HTTP/1.1 426 Upgrade Required\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 68\r\n\r\n{\"error\":\"upgrade required\",\"message\":\"use HTTPS for this endpoint\"}")
 			conn.Write(resp)
 			conn.Close()
 			continue
@@ -2720,6 +2732,12 @@ func (s *Server) mcpToolSessionHistory(args map[string]any) (any, error) {
 	limit := 50
 	if l, ok := args["limit"].(float64); ok {
 		limit = int(l)
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	if limit > 1000 {
+		limit = 1000
 	}
 	return s.mcpServices.SessionStore.GetMessages(sessionID, 0, limit)
 }

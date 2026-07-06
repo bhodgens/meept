@@ -24,6 +24,11 @@ type GitSync struct {
 	stopCh  chan struct{}
 	doneCh  chan struct{}
 
+	// gitMu serializes all git CLI operations (pull, push, commit, add,
+	// status). Without it, the sync loop's pull/push could race with
+	// external RegisterNode/Leave calls, corrupting the git index.
+	gitMu sync.Mutex
+
 	// runCtx is stored from Start so that git/hasStagedChanges/cloneRepo
 	// can pass a cancellable context to exec.CommandContext, enabling
 	// shutdown-time process termination (S6-8). Guarded by mu.
@@ -122,11 +127,17 @@ func (g *GitSync) run(ctx context.Context) {
 			case <-g.stopCh:
 				return
 			case <-ticker.C:
-				if err := g.pullRemote(); err != nil {
+				g.gitMu.Lock()
+				err := g.pullRemote()
+				g.gitMu.Unlock()
+				if err != nil {
 					g.logger.Warn("git_sync: sync failed", "error", err)
 				}
 			case <-hbTicker.C:
-				if err := g.pushHeartbeat(); err != nil {
+				g.gitMu.Lock()
+				err := g.pushHeartbeat()
+				g.gitMu.Unlock()
+				if err != nil {
 					g.logger.Warn("git_sync: heartbeat push failed", "error", err)
 				}
 			}
@@ -140,7 +151,10 @@ func (g *GitSync) run(ctx context.Context) {
 			case <-g.stopCh:
 				return
 			case <-ticker.C:
-				if err := g.pullRemote(); err != nil {
+				g.gitMu.Lock()
+				err := g.pullRemote()
+				g.gitMu.Unlock()
+				if err != nil {
 					g.logger.Warn("git_sync: sync failed", "error", err)
 				}
 			}
@@ -163,6 +177,9 @@ func (g *GitSync) RegisterNode(member *Member) error {
 	if member.LastHeartbeat.IsZero() {
 		UpdateHeartbeat(member)
 	}
+
+	g.gitMu.Lock()
+	defer g.gitMu.Unlock()
 
 	if err := SaveMember(g.gitRepoPath, member); err != nil {
 		return fmt.Errorf("git_sync: register: save member: %w", err)
@@ -191,6 +208,9 @@ func (g *GitSync) Leave() error {
 		return fmt.Errorf("git_sync: leave: no node identity configured")
 	}
 
+	g.gitMu.Lock()
+	defer g.gitMu.Unlock()
+
 	if err := DeleteMember(g.gitRepoPath, g.localCfg.NodeID); err != nil {
 		return fmt.Errorf("git_sync: leave: delete member: %w", err)
 	}
@@ -214,9 +234,11 @@ func (g *GitSync) Leave() error {
 // GetMembers returns all active members found in the local git repo.
 // It does a pull first to ensure fresh state, then parses nodes/*.json5.
 func (g *GitSync) GetMembers() (map[string]*Member, error) {
+	g.gitMu.Lock()
 	if err := g.pullRemote(); err != nil {
 		g.logger.Warn("git_sync: get_members: pull failed, returning cached", "error", err)
 	}
+	g.gitMu.Unlock()
 
 	members, err := ListLocalMembers(g.gitRepoPath)
 	if err != nil {

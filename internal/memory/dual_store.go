@@ -112,10 +112,18 @@ func NewDualStore(dataDir string, nodeID string, logger *slog.Logger) (*DualStor
 
 
 // openWithRetries opens a SQLite database with a couple of retry attempts.
+// WAL and busy_timeout are set via DSN params so every pooled connection
+// inherits them (PRAGMAs are connection-scoped in SQLite).
 func openWithRetries(path string, logger *slog.Logger, retries int) (*sql.DB, error) {
+	dsn := path
+	if !strings.Contains(dsn, "?") {
+		dsn += "?_journal_mode=WAL&_busy_timeout=5000"
+	} else if !strings.Contains(dsn, "_busy_timeout") {
+		dsn += "&_busy_timeout=5000"
+	}
 	var lastErr error
 	for i := 0; i < retries; i++ {
-		db, err := sql.Open("sqlite", path)
+		db, err := sql.Open("sqlite", dsn)
 		if err != nil {
 			lastErr = err
 			continue

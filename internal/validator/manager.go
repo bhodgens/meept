@@ -5,14 +5,20 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/caimlas/meept/internal/task"
 )
 
 // ValidatorManager orchestrates validators for different tool types.
 //
+// All map access is serialized by mu. ValidateStep snapshots the validator
+// under the read lock and runs validator.Validate outside the lock so a slow
+// validator does not block concurrent RegisterValidator calls.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type ValidatorManager struct {
+	mu         sync.RWMutex
 	validators map[string]Validator // tool_hint -> validator
 	logger     *slog.Logger
 }
@@ -50,6 +56,8 @@ func NewValidatorManagerWithLogger(logger *slog.Logger) *ValidatorManager {
 
 // RegisterValidator registers a validator for a specific tool hint.
 func (m *ValidatorManager) RegisterValidator(toolHint string, validator Validator) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.validators[toolHint] = validator
 }
 
@@ -61,7 +69,9 @@ func (m *ValidatorManager) ValidateStep(ctx context.Context, step *task.TaskStep
 		return nil
 	}
 
+	m.mu.RLock()
 	validator, ok := m.validators[step.ToolHint]
+	m.mu.RUnlock()
 	if !ok {
 		m.logger.Debug("No validator for tool hint", "hint", step.ToolHint)
 		return nil // No validator registered, pass through
@@ -83,6 +93,8 @@ func (m *ValidatorManager) ValidateStep(ctx context.Context, step *task.TaskStep
 
 // HasValidator returns true if a validator is registered for the given tool hint.
 func (m *ValidatorManager) HasValidator(toolHint string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	_, ok := m.validators[toolHint]
 	return ok
 }

@@ -1,0 +1,100 @@
+#!/bin/bash
+# Pre-commit hook: detects close(ch); ch = nil pattern.
+#
+# This pattern was the root cause of a regression where Start()'s select
+# read the struct field after Stop() nil'd it, blocking forever on a
+# nil channel. The safe alternative is sync.Once for idempotent close.
+#
+# The hook flags any newly-added sequence of:
+#   close(s.<field>)  followed within 3 lines by  s.<field> = nil
+#
+# Suppress with //nolint:channil on the close line.
+
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+STAGED_GO_FILES=$(git diff --cached --name-only --diff-filter=d 2>/dev/null | grep '\.go$' | grep -v '_test\.go$' || true)
+
+if [ -z "$STAGED_GO_FILES" ]; then
+  exit 0
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+
+ISSUE_COUNT=0
+
+for file in $STAGED_GO_FILES; do
+  [ ! -f "$file" ] && continue
+  grep -q "^// Code generated" "$file" 2>/dev/null && continue
+
+  # Get added lines with line numbers from the diff hunks.
+  # We need context around close() calls, so use -U3.
+  ADDED_WITH_CONTEXT=$(git diff --cached -U3 -- "$file" 2>/dev/null | grep -E '^\+' | sed 's/^+//')
+  [ -z "$ADDED_WITH_CONTEXT" ] && continue
+
+  # Look for the pattern: close(<expr>) followed by <expr> = nil
+  # within the added lines. We check the full added-lines blob.
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    echo "$line" | grep -qE '^\s*//' && continue
+    echo "$line" | grep -q 'nolint:channil' && continue
+
+    # Match: close(s.someChannel) — extract the channel expression
+    chan_expr=$(echo "$line" | sed -nE 's/.*close\(([^)]+)\).*/\1/p')
+    [ -z "$chan_expr" ] && continue
+
+    # Skip non-struct channels (local variables) — the nil-after-close
+    # pattern is only dangerous when the select reads from the struct field.
+    echo "$chan_expr" | grep -qE '^\w+\.' || continue
+
+    # Check if the next few added lines contain "<chan_expr> = nil"
+    # Build a grep pattern that escapes special chars in chan_expr.
+    nil_pattern=$(echo "$chan_expr" | sed 's/\./\\./g')
+    has_nil=$(echo "$ADDED_WITH_CONTEXT" | grep -c "${nil_pattern}[[:space:]]*=[[:space:]]*nil" || true)
+
+    if [ "$has_nil" -gt 0 ]; then
+      LINE_NUMS=$(grep -nF "$line" "$file" 2>/dev/null | cut -d: -f1)
+      for ln in $LINE_NUMS; do
+        echo -e "${YELLOW}⚠️  $file:$ln:${NC}"
+        echo -e "    close(${chan_expr}) followed by ${chan_expr} = nil"
+        echo -e "    > $line"
+        echo ""
+        ISSUE_COUNT=$((ISSUE_COUNT + 1))
+      done
+    fi
+  done <<< "$(echo "$ADDED_WITH_CONTEXT" | grep -E 'close\(' || true)"
+done
+
+if [ "$ISSUE_COUNT" -gt 0 ]; then
+  echo -e "${YELLOW}Summary: $ISSUE_COUNT close-then-nil pattern(s) detected.${NC}"
+  echo ""
+  echo -e "${BLUE}The close(ch); ch = nil pattern causes data races:${NC}"
+  echo ""
+  echo "  When Start() reads s.stopCh in a select statement and Stop()"
+  echo "  has already nil'd the field, the select sees a nil channel"
+  echo "  and blocks forever (receiving from nil channels never completes)."
+  echo ""
+  echo -e "${BLUE}Use sync.Once for safe idempotent close:${NC}"
+  echo ""
+  echo "  type Scheduler struct {"
+  echo "      stopCh   chan struct{}"
+  echo "      stopOnce sync.Once"
+  echo "  }"
+  echo ""
+  echo "  func (s *Scheduler) Stop() {"
+  echo "      s.stopOnce.Do(func() { close(s.stopCh) })"
+  echo "  }"
+  echo ""
+  echo -e "${BLUE}Suppress with //nolint:channil if the nil is required for a sentinel check:${NC}"
+  echo "  close(s.stopCh) //nolint:channil // checked via != nil before select"
+  echo ""
+  echo -e "${RED}❌ Commit blocked: $ISSUE_COUNT close-then-nil site(s)${NC}"
+  exit 1
+fi
+
+exit 0

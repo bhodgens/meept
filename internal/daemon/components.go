@@ -2512,6 +2512,12 @@ func (c *Components) Start(ctx context.Context) error {
 						slog.Warn("cluster git sync stop error", "error", err)
 					}
 				}
+			case "clustercrm":
+				if c.GRPCTransport != nil {
+					if err := c.GRPCTransport.Stop(); err != nil {
+						slog.Warn("cluster gRPC transport stop error", "error", err)
+					}
+				}
 			case "config_sync":
 				if c.ConfigSyncer != nil {
 					c.ConfigSyncer.Stop()
@@ -2895,6 +2901,7 @@ func (c *Components) Start(ctx context.Context) error {
 		// independent of the audit LLM.
 		if c.PlanManager != nil {
 			c.EmployeeManager.SetPlanDisposer(&planDisposerAdapter{pm: c.PlanManager})
+			c.EmployeeManager.SetPlanLookup(&planLookupAdapter{pm: c.PlanManager})
 		}
 
 		// Wire known agent IDs for hire-time validation (spec line 597,

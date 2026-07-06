@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -22,12 +23,16 @@ const maxVersionEntries = 20
 // skill file plus a bundle.json manifest. Restore reverts a skill to a prior
 // version atomically.
 //
-// Versioner holds no mutex. All operations are stateless filesystem actions.
-// Concurrent calls to Snapshot for the same skill are serialized by the
-// filesystem rename(2) syscall used for atomic manifest writes.
+// Snapshot serializes per-skill via per-name locks so concurrent callers
+// pick distinct version numbers; without this lock, two concurrent Snapshots
+// would both read the same history, both pick nextVersion=N, and the second
+// writer would silently overwrite the first's manifest.
 type Versioner struct {
 	skillsDir string
 	logger    *slog.Logger
+
+	locksMu sync.Mutex
+	locks   map[string]*sync.Mutex
 }
 
 // NewVersioner creates a Versioner rooted at skillsDir. The layout is:
@@ -42,7 +47,22 @@ func NewVersioner(skillsDir string, logger *slog.Logger) *Versioner {
 	return &Versioner{
 		skillsDir: skillsDir,
 		logger:    logger,
+		locks:     make(map[string]*sync.Mutex),
 	}
+}
+
+// lockFor returns a per-name mutex, creating it lazily. The lazy creation is
+// itself serialized by locksMu. The per-name lock serializes Snapshot/Restore
+// for a given skill so version numbers are assigned without TOCTOU races.
+func (v *Versioner) lockFor(name string) *sync.Mutex {
+	v.locksMu.Lock()
+	defer v.locksMu.Unlock()
+	mu, ok := v.locks[name]
+	if !ok {
+		mu = &sync.Mutex{}
+		v.locks[name] = mu
+	}
+	return mu
 }
 
 // skillFilePath returns <skillsDir>/<name>/SKILL.md.
@@ -70,6 +90,10 @@ func (v *Versioner) versionDir(name string, version int) string {
 // If the skill does not exist on disk yet (first write), Snapshot returns an
 // empty string and a nil error — there is nothing to version.
 func (v *Versioner) Snapshot(name string) (string, error) {
+	mu := v.lockFor(name)
+	mu.Lock()
+	defer mu.Unlock()
+
 	skillPath := v.skillFilePath(name)
 	content, err := os.ReadFile(skillPath)
 	if err != nil {
@@ -228,6 +252,10 @@ func (v *Versioner) Restore(name string, version int) error {
 	if version <= 0 {
 		return fmt.Errorf("versioner: version must be a positive integer, got %d", version)
 	}
+
+	mu := v.lockFor(name)
+	mu.Lock()
+	defer mu.Unlock()
 
 	versionedSkillPath := filepath.Join(v.versionDir(name, version), "SKILL.md")
 	content, err := os.ReadFile(versionedSkillPath)

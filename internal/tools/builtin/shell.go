@@ -43,6 +43,11 @@ const (
 )
 
 // readOnlyCommands are considered low-risk read operations.
+//
+// Note: interpreters (python/node/java/...), package managers (pip/npm/cargo),
+// compilers (rustc/javac/cmake), and build runners (make/go) are intentionally
+// excluded — they can execute arbitrary code, write files, or run lifecycle
+// hooks. Treat them as RiskModerate or higher so callers gate them.
 var readOnlyCommands = map[string]bool{
 	"ls": true, "cat": true, "head": true, "tail": true, "grep": true, "find": true,
 	"wc": true, "du": true, "df": true, "file": true, "stat": true, "which": true,
@@ -53,9 +58,7 @@ var readOnlyCommands = map[string]bool{
 	"sed": true, "rg": true, "fd": true, "bat": true, "less": true, "more": true,
 	"realpath": true, "basename": true, "dirname": true, "ps": true, "top": true,
 	"htop": true, "free": true, "lsof": true, "netstat": true, "ss": true,
-	"git": true, "python3": true, "python": true, "pip": true, "npm": true,
-	"node": true, "cargo": true, "rustc": true, "go": true, "java": true,
-	"javac": true, "make": true, "cmake": true,
+	"git": true,
 }
 
 // blockedCommands are always denied.

@@ -1502,12 +1502,11 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	defer func() {
 		if queueRegistered {
 			l.agentRegistry.UnregisterActiveQueue(conversationID)
-
-		// Stop file system hooks for this session
-		if l.fileWatcher != nil {
-			_ = l.fileWatcher.Stop()
 		}
 
+		// Stop file system hooks for this session (independent of queue registration)
+		if l.fileWatcher != nil {
+			_ = l.fileWatcher.Stop()
 		}
 
 		// Session end hooks (metrics, audit, cleanup)

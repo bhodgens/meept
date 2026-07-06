@@ -12,6 +12,7 @@ import (
 	"github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/plan"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -295,7 +296,7 @@ func (a *agentLoopBotExecutorAdapter) ExecuteBot(ctx context.Context, systemProm
 	// Use a conversation ID scoped to the bot executor so sessions don't
 	// collide with user-driven conversations. The agent loop may override
 	// this internally.
-	conversationID := fmt.Sprintf("bot-exec-%d", time.Now().UnixNano())
+	conversationID := id.Generate("bot-exec")
 	response, err := a.agentLoop.RunOnce(ctx, userMessage, conversationID)
 	if err != nil {
 		a.logger.Warn("agent loop execute failed",
@@ -388,6 +389,24 @@ func (a *planDisposerAdapter) RejectPlan(ctx context.Context, planID, sessionID,
 // Compile-time guard: planDisposerAdapter must satisfy
 // employee.PlanDisposer.
 var _ employee.PlanDisposer = (*planDisposerAdapter)(nil)
+
+// planLookupAdapter wraps *plan.PlanManager to satisfy employee.PlanLookup.
+// Used by the approval-timeout sweeper to determine when a plan was created.
+type planLookupAdapter struct {
+	pm *plan.PlanManager
+}
+
+// PlanCreatedAt returns the creation timestamp of the plan with the given ID.
+func (a *planLookupAdapter) PlanCreatedAt(ctx context.Context, planID string) (time.Time, error) {
+	p, err := a.pm.GetPlan(ctx, planID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return p.CreatedAt, nil
+}
+
+// Compile-time guard: planLookupAdapter must satisfy employee.PlanLookup.
+var _ employee.PlanLookup = (*planLookupAdapter)(nil)
 
 // pushNotifierAdapter bridges *EventEmitter to the services.notifier
 // interface. The services package defines notifier with interface{} params

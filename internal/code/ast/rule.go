@@ -151,13 +151,16 @@ func (e *RuleExecutor) ExecuteRule(source []byte, lang Language, rule *Rule) (*R
 
 		match = cursor.FilterPredicates(match, source)
 
-		// Extract captures
+		// Extract captures — keep both text (for output/regex) and node
+		// references (for HasField structural checks).
 		captures := make(map[string]string)
+		captureNodes := make(map[string]*sitter.Node)
 		var targetNode *sitter.Node
 		for _, capture := range match.Captures {
 			captureName := query.CaptureNameForId(capture.Index)
 			nodeText := string(source[capture.Node.StartByte():capture.Node.EndByte()])
 			captures[captureName] = nodeText
+			captureNodes[captureName] = capture.Node
 
 			if targetNode == nil {
 				targetNode = capture.Node
@@ -169,7 +172,7 @@ func (e *RuleExecutor) ExecuteRule(source []byte, lang Language, rule *Rule) (*R
 		}
 
 		// Apply constraints
-		if !e.checkConstraints(captures, targetNode, source, rule.Constraints) {
+		if !e.checkConstraints(captures, captureNodes, targetNode, source, rule.Constraints) {
 			continue
 		}
 
@@ -199,9 +202,9 @@ func (e *RuleExecutor) ExecuteRule(source []byte, lang Language, rule *Rule) (*R
 }
 
 // checkConstraints checks if all constraints are satisfied.
-func (e *RuleExecutor) checkConstraints(captures map[string]string, node *sitter.Node, source []byte, constraints []Constraint) bool {
+func (e *RuleExecutor) checkConstraints(captures map[string]string, captureNodes map[string]*sitter.Node, node *sitter.Node, source []byte, constraints []Constraint) bool {
 	for _, c := range constraints {
-		if !e.checkConstraint(c, captures, node, source) {
+		if !e.checkConstraint(c, captures, captureNodes, node, source) {
 			return false
 		}
 	}
@@ -209,7 +212,7 @@ func (e *RuleExecutor) checkConstraints(captures map[string]string, node *sitter
 }
 
 // checkConstraint checks if a single constraint is satisfied.
-func (e *RuleExecutor) checkConstraint(c Constraint, captures map[string]string, node *sitter.Node, source []byte) bool {
+func (e *RuleExecutor) checkConstraint(c Constraint, captures map[string]string, captureNodes map[string]*sitter.Node, node *sitter.Node, source []byte) bool {
 	// Kind constraint: check if the captured node has the expected kind
 	if c.Kind != nil {
 		nodeText, ok := captures[c.Kind.Node]
@@ -236,13 +239,13 @@ func (e *RuleExecutor) checkConstraint(c Constraint, captures map[string]string,
 
 	// HasField constraint: check if the captured node has a specific field
 	if c.HasField != nil {
-		_, ok := captures[c.HasField.Node]
+		fieldHost, ok := captureNodes[c.HasField.Node]
 		if !ok {
 			return false
 		}
 		// Field check - verify the node actually has the field
 		if c.HasField.Field != "" {
-			fieldNode := node.ChildByFieldName(c.HasField.Field)
+			fieldNode := fieldHost.ChildByFieldName(c.HasField.Field)
 			if fieldNode == nil {
 				return false
 			}
