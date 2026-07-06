@@ -382,3 +382,76 @@ func TestTransformTypes(t *testing.T) {
 		}
 	})
 }
+
+// TestRuleExecutor_HasField_MultiCapture tests multi-capture constraint handling
+// as specified in Phase 3 of code-quality-detection-gaps.md
+func TestRuleExecutor_HasField_MultiCapture(t *testing.T) {
+	parser := NewParserManager(DefaultParserConfig())
+	executor := NewRuleExecutor(parser)
+
+	t.Run("multi-capture with kind constraint", func(t *testing.T) {
+		// Rule with captures and constraint on specific capture node
+		rule, err := ParseRule(`
+id: multi-capture-test
+language: go
+pattern: "(function_declaration name: (identifier) @name)"
+constraints:
+  - kind:
+      node: name
+`)
+		if err != nil {
+			t.Fatalf("ParseRule failed: %v", err)
+		}
+
+		source := []byte(`func hello() {}`)
+		result, err := executor.ExecuteRule(source, LangGo, rule)
+		if err != nil {
+			t.Fatalf("ExecuteRule failed: %v", err)
+		}
+
+		if len(result.Matches) != 1 {
+			t.Errorf("Expected 1 match, got %d", len(result.Matches))
+		}
+
+		// Verify constraint checks the right capture
+		for _, match := range result.Matches {
+			if match.Captures["name"] != "hello" {
+				t.Errorf("Expected capture 'hello', got '%s'", match.Captures["name"])
+			}
+		}
+	})
+
+	t.Run("multi-capture verifies correct node selection", func(t *testing.T) {
+		// Test that constraints on specific named captures work correctly
+		rule, err := ParseRule(`
+id: select-capture-test
+language: go
+pattern: "(function_declaration name: (identifier) @funcName)"
+constraints:
+  - regex:
+      node: funcName
+      pattern: "^Test"
+`)
+		if err != nil {
+			t.Fatalf("ParseRule failed: %v", err)
+		}
+
+		source := []byte(`
+func TestSomething(t *testing.T) {}
+func RegularFunc() {}
+`)
+		result, err := executor.ExecuteRule(source, LangGo, rule)
+		if err != nil {
+			t.Fatalf("ExecuteRule failed: %v", err)
+		}
+
+		// Should only match TestSomething, not RegularFunc
+		if len(result.Matches) != 1 {
+			t.Errorf("Expected 1 match (only TestSomething), got %d", len(result.Matches))
+		}
+
+		if len(result.Matches) > 0 && result.Matches[0].Captures["funcName"] != "TestSomething" {
+			t.Errorf("Expected 'TestSomething', got '%s'", result.Matches[0].Captures["funcName"])
+		}
+	})
+}

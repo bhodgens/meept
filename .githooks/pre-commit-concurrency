@@ -1,0 +1,65 @@
+#!/bin/bash
+# Pre-commit hook: concurrency annotation check (INFORMATIONAL)
+# Checks for "// guarded by" annotations on shared structs.
+# Does NOT block commit — generates a report only.
+#
+# This hook encourages documentation of concurrency patterns but does not
+# enforce it, allowing incremental adoption of the annotation standard.
+
+# Color helpers (disabled if output is not a terminal)
+if [ -t 1 ]; then
+    YELLOW='\033[0;33m'
+    NC='\033[0m'
+else
+    YELLOW=''
+    NC=''
+fi
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Concurrency Annotation Check (Informational)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Collect staged Go files (added, copied, modified).
+staged_go_files=$(git -c color.ui=false -c core.quotepath=false diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
+
+# Fast path: no Go files staged.
+if [ -z "$staged_go_files" ]; then
+    echo "(no Go files staged)"
+    exit 0
+fi
+
+# Count structs with mutex fields but no "// guarded by" annotations
+missing_annotations=0
+checked_files=0
+
+echo "$staged_go_files" | while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    checked_files=$((checked_files + 1))
+
+    # Look for struct definitions with sync.Mutex or sync.RWMutex
+    if grep -q "sync\.\(Mutex\|RWMutex\)" "$f" 2>/dev/null; then
+        # Check if file has any "// guarded by" annotations
+        if ! grep -q "// guarded by" "$f" 2>/dev/null; then
+            echo "  $f: contains mutex but no '// guarded by' annotations"
+            missing_annotations=$((missing_annotations + 1))
+        fi
+    fi
+done
+
+echo ""
+if [ "$missing_annotations" -gt 0 ]; then
+    printf '%b%s%b\n' "$YELLOW" "  Note: $missing_annotations file(s) with mutex but no annotations" "$NC"
+    echo "  Consider adding '// guarded by <mutex>' to document field ownership."
+    echo "  See docs/concepts/concurrency.md for annotation format."
+else
+    echo "  All checked files have appropriate concurrency annotations."
+fi
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Always exit 0 - this is informational only
+exit 0

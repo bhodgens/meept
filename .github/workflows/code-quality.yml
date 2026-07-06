@@ -1,0 +1,127 @@
+name: Code Quality Detection
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  hooks:
+    runs-on: ubuntu-latest
+    name: Pre-commit Hooks
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Run pre-commit hooks
+        run: |
+          git config core.hooksPath .githooks
+          .githooks/pre-commit
+
+  analyzers:
+    runs-on: ubuntu-latest
+    name: Static Analyzers
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install analyzers
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+      - name: Build mutexio analyzer
+        run: go build -o bin/mutexio ./tools/analyzers/mutexio/
+
+      - name: Build fieldguard analyzer
+        run: go build -o bin/fieldguard ./tools/analyzers/fieldguard/
+
+      - name: Run mutexio
+        run: ./bin/mutexio ./...
+
+      - name: Run fieldguard (non-blocking)
+        run: ./bin/fieldguard ./... || true
+
+      - name: Run staticcheck
+        run: staticcheck ./...
+
+      - name: Run gosec
+        run: gosec -quiet ./...
+
+  race-detector:
+    runs-on: ubuntu-latest
+    name: Race Detector
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Test with race detector
+        run: go test -race -count=1 ./internal/cluster/ ./internal/queue/ ./internal/bus/
+
+  runtime-instrumentation:
+    runs-on: ubuntu-latest
+    name: Runtime Instrumentation
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Test with bus panic mode
+        run: go test -run TestGossip_SubscriptionDrained ./internal/cluster/
+
+  build:
+    runs-on: ubuntu-latest
+    name: Build Verification
+    needs: [hooks, analyzers]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Build daemon
+        run: go build -o bin/meept-daemon ./cmd/meept-daemon
+
+      - name: Build CLI
+        run: go build -o bin/meept ./cmd/meept
+
+  test:
+    runs-on: ubuntu-latest
+    name: Unit Tests
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Run tests
+        run: go test ./... -v -coverprofile=coverage.out
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.out
+          fail_ci_if_error: false

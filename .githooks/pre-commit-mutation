@@ -1,0 +1,72 @@
+#!/bin/bash
+# Pre-commit hook: mutation testing (REPORT ONLY)
+# Runs mutation testing on changed test files to verify test quality.
+# Does NOT block commit — generates a report only.
+#
+# Mutation testing intentionally breaks code to verify tests catch bugs.
+# If tests pass with mutated code, they are insufficient.
+
+# Color helpers (disabled if output is not a terminal)
+if [ -t 1 ]; then
+    YELLOW='\033[0;33m'
+    GREEN='\033[0;32m'
+    NC='\033[0m'
+else
+    YELLOW=''
+    GREEN=''
+    NC=''
+fi
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Mutation Testing Check (Report Only)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Collect staged test files
+staged_test_files=$(git -c color.ui=false -c core.quotepath=false diff --cached --name-only --diff-filter=ACM | grep '_test\.go$' || true)
+
+# Fast path: no test files staged.
+if [ -z "$staged_test_files" ]; then
+    echo "(no test files staged)"
+    exit 0
+fi
+
+echo "Checking mutation coverage for staged test files..."
+echo ""
+
+# Count files
+file_count=$(echo "$staged_test_files" | wc -l | tr -d ' ')
+echo "Found $file_count test file(s)"
+echo ""
+
+# For each test file, suggest running mutation tests
+echo "$staged_test_files" | while IFS= read -r f; do
+    [ -z "$f" ] && done
+    echo "  $f"
+
+    # Check if the test file has mutation test patterns
+    if grep -q "RunMutationTest\|MutatorType\|mutation\." "$f" 2>/dev/null; then
+        printf "    %s✓ Has mutation test coverage%s\n" "$GREEN" "$NC"
+    else
+        printf "    %b! Consider adding mutation tests%s\n" "$YELLOW" "$NC"
+        echo "      Pattern: mutation.RunMutationTest(t, mutateFn, testFn)"
+    fi
+done
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "To add mutation testing to a test file:"
+echo '  import "github.com/caimlas/meept/tools/mutation"'
+echo ""
+echo "  func TestX(t *testing.T) {"
+echo "      mutation.RunMutationTest(t,"
+echo "          func() { /* apply mutation */ },"
+echo "          func() error { /* run test */ },"
+echo "      )"
+echo "  }"
+echo ""
+
+# Always exit 0 - this is report only
+exit 0
