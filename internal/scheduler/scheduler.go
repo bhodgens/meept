@@ -654,10 +654,18 @@ func (s *Scheduler) loadPersistedJobs() error {
 
 		job, err := s.createJob(cfg)
 		if err != nil {
-			s.logger.Warn("scheduler: failed to create job from config",
+			// Auto-cleanup jobs that can't be built (stale types, missing
+			// configs, etc.) so they don't keep causing warnings on restart.
+			s.logger.Warn("scheduler: failed to create job from config, removing stale entry",
 				"job_id", cfg.ID,
 				"error", err,
 			)
+			if err2 := s.store.Remove(cfg.ID); err2 != nil {
+				s.logger.Debug("scheduler: failed to remove stale job config",
+					"job_id", cfg.ID,
+					"error", err2,
+				)
+			}
 			continue
 		}
 
