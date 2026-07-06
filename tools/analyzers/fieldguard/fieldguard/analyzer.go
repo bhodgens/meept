@@ -318,8 +318,8 @@ func getReceiverVar(fn *ast.FuncDecl) string {
 		return ""
 	}
 	for _, field := range fn.Recv.List {
-		if len(field.Names) > 0 {
-			return field.Names[0].Name
+		for _, name := range field.Names {
+			return name.Name
 		}
 	}
 	return ""
