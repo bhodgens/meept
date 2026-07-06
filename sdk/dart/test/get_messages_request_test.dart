@@ -12,13 +12,13 @@ void main() {
       // TODO
     });
 
-    // int offsetCommaOmitempty
-    test('to test the property `offsetCommaOmitempty`', () async {
+    // int offset
+    test('to test the property `offset`', () async {
       // TODO
     });
 
-    // int limitCommaOmitempty
-    test('to test the property `limitCommaOmitempty`', () async {
+    // int limit
+    test('to test the property `limit`', () async {
       // TODO
     });
 

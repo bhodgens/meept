@@ -12,9 +12,9 @@ Name | Type | Description | Notes
 **name** | **String** |  | 
 **schedule** | **String** |  | 
 **enabled** | **bool** |  | 
-**lastRunCommaOmitempty** | **String** |  | [optional] 
-**nextRunCommaOmitempty** | **String** |  | [optional] 
-**lastErrorCommaOmitempty** | **String** |  | [optional] 
+**lastRun** | **String** |  | [optional] 
+**nextRun** | **String** |  | [optional] 
+**lastError** | **String** |  | [optional] 
 **runCount** | **int** |  | 
 **isRunning** | **bool** |  | 
 

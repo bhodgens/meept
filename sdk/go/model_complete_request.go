@@ -22,7 +22,7 @@ var _ MappedNullable = &CompleteRequest{}
 // CompleteRequest struct for CompleteRequest
 type CompleteRequest struct {
 	JobId string `json:"job_id"`
-	Resultomitempty map[string]interface{} `json:"result,omitempty,omitempty"`
+	Result map[string]interface{} `json:"result,omitempty"`
 }
 
 type _CompleteRequest CompleteRequest
@@ -69,36 +69,36 @@ func (o *CompleteRequest) SetJobId(v string) {
 	o.JobId = v
 }
 
-// GetResultomitempty returns the Resultomitempty field value if set, zero value otherwise.
-func (o *CompleteRequest) GetResultomitempty() map[string]interface{} {
-	if o == nil || IsNil(o.Resultomitempty) {
+// GetResult returns the Result field value if set, zero value otherwise.
+func (o *CompleteRequest) GetResult() map[string]interface{} {
+	if o == nil || IsNil(o.Result) {
 		var ret map[string]interface{}
 		return ret
 	}
-	return o.Resultomitempty
+	return o.Result
 }
 
-// GetResultomitemptyOk returns a tuple with the Resultomitempty field value if set, nil otherwise
+// GetResultOk returns a tuple with the Result field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CompleteRequest) GetResultomitemptyOk() (map[string]interface{}, bool) {
-	if o == nil || IsNil(o.Resultomitempty) {
+func (o *CompleteRequest) GetResultOk() (map[string]interface{}, bool) {
+	if o == nil || IsNil(o.Result) {
 		return map[string]interface{}{}, false
 	}
-	return o.Resultomitempty, true
+	return o.Result, true
 }
 
-// HasResultomitempty returns a boolean if a field has been set.
-func (o *CompleteRequest) HasResultomitempty() bool {
-	if o != nil && !IsNil(o.Resultomitempty) {
+// HasResult returns a boolean if a field has been set.
+func (o *CompleteRequest) HasResult() bool {
+	if o != nil && !IsNil(o.Result) {
 		return true
 	}
 
 	return false
 }
 
-// SetResultomitempty gets a reference to the given map[string]interface{} and assigns it to the Resultomitempty field.
-func (o *CompleteRequest) SetResultomitempty(v map[string]interface{}) {
-	o.Resultomitempty = v
+// SetResult gets a reference to the given map[string]interface{} and assigns it to the Result field.
+func (o *CompleteRequest) SetResult(v map[string]interface{}) {
+	o.Result = v
 }
 
 func (o CompleteRequest) MarshalJSON() ([]byte, error) {
@@ -112,8 +112,8 @@ func (o CompleteRequest) MarshalJSON() ([]byte, error) {
 func (o CompleteRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["job_id"] = o.JobId
-	if !IsNil(o.Resultomitempty) {
-		toSerialize["result,omitempty"] = o.Resultomitempty
+	if !IsNil(o.Result) {
+		toSerialize["result"] = o.Result
 	}
 	return toSerialize, nil
 }

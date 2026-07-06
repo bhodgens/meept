@@ -11,11 +11,11 @@ part 'templates_list_request.g.dart';
 /// TemplatesListRequest
 ///
 /// Properties:
-/// * [limitCommaOmitempty] 
+/// * [limit] 
 @BuiltValue()
 abstract class TemplatesListRequest implements Built<TemplatesListRequest, TemplatesListRequestBuilder> {
-  @BuiltValueField(wireName: r'limit,omitempty')
-  int? get limitCommaOmitempty;
+  @BuiltValueField(wireName: r'limit')
+  int? get limit;
 
   TemplatesListRequest._();
 
@@ -40,10 +40,10 @@ class _$TemplatesListRequestSerializer implements PrimitiveSerializer<TemplatesL
     TemplatesListRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
-    if (object.limitCommaOmitempty != null) {
-      yield r'limit,omitempty';
+    if (object.limit != null) {
+      yield r'limit';
       yield serializers.serialize(
-        object.limitCommaOmitempty,
+        object.limit,
         specifiedType: const FullType(int),
       );
     }
@@ -70,12 +70,12 @@ class _$TemplatesListRequestSerializer implements PrimitiveSerializer<TemplatesL
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
-        case r'limit,omitempty':
+        case r'limit':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.limitCommaOmitempty = valueDes;
+          result.limit = valueDes;
           break;
         default:
           unhandled.add(key);

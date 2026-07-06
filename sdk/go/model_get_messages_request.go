@@ -22,8 +22,8 @@ var _ MappedNullable = &GetMessagesRequest{}
 // GetMessagesRequest struct for GetMessagesRequest
 type GetMessagesRequest struct {
 	Id string `json:"id"`
-	Offsetomitempty *int32 `json:"offset,omitempty,omitempty"`
-	Limitomitempty *int32 `json:"limit,omitempty,omitempty"`
+	Offset *int32 `json:"offset,omitempty"`
+	Limit *int32 `json:"limit,omitempty"`
 }
 
 type _GetMessagesRequest GetMessagesRequest
@@ -70,68 +70,68 @@ func (o *GetMessagesRequest) SetId(v string) {
 	o.Id = v
 }
 
-// GetOffsetomitempty returns the Offsetomitempty field value if set, zero value otherwise.
-func (o *GetMessagesRequest) GetOffsetomitempty() int32 {
-	if o == nil || IsNil(o.Offsetomitempty) {
+// GetOffset returns the Offset field value if set, zero value otherwise.
+func (o *GetMessagesRequest) GetOffset() int32 {
+	if o == nil || IsNil(o.Offset) {
 		var ret int32
 		return ret
 	}
-	return *o.Offsetomitempty
+	return *o.Offset
 }
 
-// GetOffsetomitemptyOk returns a tuple with the Offsetomitempty field value if set, nil otherwise
+// GetOffsetOk returns a tuple with the Offset field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *GetMessagesRequest) GetOffsetomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.Offsetomitempty) {
+func (o *GetMessagesRequest) GetOffsetOk() (*int32, bool) {
+	if o == nil || IsNil(o.Offset) {
 		return nil, false
 	}
-	return o.Offsetomitempty, true
+	return o.Offset, true
 }
 
-// HasOffsetomitempty returns a boolean if a field has been set.
-func (o *GetMessagesRequest) HasOffsetomitempty() bool {
-	if o != nil && !IsNil(o.Offsetomitempty) {
+// HasOffset returns a boolean if a field has been set.
+func (o *GetMessagesRequest) HasOffset() bool {
+	if o != nil && !IsNil(o.Offset) {
 		return true
 	}
 
 	return false
 }
 
-// SetOffsetomitempty gets a reference to the given int32 and assigns it to the Offsetomitempty field.
-func (o *GetMessagesRequest) SetOffsetomitempty(v int32) {
-	o.Offsetomitempty = &v
+// SetOffset gets a reference to the given int32 and assigns it to the Offset field.
+func (o *GetMessagesRequest) SetOffset(v int32) {
+	o.Offset = &v
 }
 
-// GetLimitomitempty returns the Limitomitempty field value if set, zero value otherwise.
-func (o *GetMessagesRequest) GetLimitomitempty() int32 {
-	if o == nil || IsNil(o.Limitomitempty) {
+// GetLimit returns the Limit field value if set, zero value otherwise.
+func (o *GetMessagesRequest) GetLimit() int32 {
+	if o == nil || IsNil(o.Limit) {
 		var ret int32
 		return ret
 	}
-	return *o.Limitomitempty
+	return *o.Limit
 }
 
-// GetLimitomitemptyOk returns a tuple with the Limitomitempty field value if set, nil otherwise
+// GetLimitOk returns a tuple with the Limit field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *GetMessagesRequest) GetLimitomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.Limitomitempty) {
+func (o *GetMessagesRequest) GetLimitOk() (*int32, bool) {
+	if o == nil || IsNil(o.Limit) {
 		return nil, false
 	}
-	return o.Limitomitempty, true
+	return o.Limit, true
 }
 
-// HasLimitomitempty returns a boolean if a field has been set.
-func (o *GetMessagesRequest) HasLimitomitempty() bool {
-	if o != nil && !IsNil(o.Limitomitempty) {
+// HasLimit returns a boolean if a field has been set.
+func (o *GetMessagesRequest) HasLimit() bool {
+	if o != nil && !IsNil(o.Limit) {
 		return true
 	}
 
 	return false
 }
 
-// SetLimitomitempty gets a reference to the given int32 and assigns it to the Limitomitempty field.
-func (o *GetMessagesRequest) SetLimitomitempty(v int32) {
-	o.Limitomitempty = &v
+// SetLimit gets a reference to the given int32 and assigns it to the Limit field.
+func (o *GetMessagesRequest) SetLimit(v int32) {
+	o.Limit = &v
 }
 
 func (o GetMessagesRequest) MarshalJSON() ([]byte, error) {
@@ -145,11 +145,11 @@ func (o GetMessagesRequest) MarshalJSON() ([]byte, error) {
 func (o GetMessagesRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["id"] = o.Id
-	if !IsNil(o.Offsetomitempty) {
-		toSerialize["offset,omitempty"] = o.Offsetomitempty
+	if !IsNil(o.Offset) {
+		toSerialize["offset"] = o.Offset
 	}
-	if !IsNil(o.Limitomitempty) {
-		toSerialize["limit,omitempty"] = o.Limitomitempty
+	if !IsNil(o.Limit) {
+		toSerialize["limit"] = o.Limit
 	}
 	return toSerialize, nil
 }

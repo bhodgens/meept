@@ -12,8 +12,8 @@ void main() {
       // TODO
     });
 
-    // String lastCycleCommaOmitempty
-    test('to test the property `lastCycleCommaOmitempty`', () async {
+    // String lastCycle
+    test('to test the property `lastCycle`', () async {
       // TODO
     });
 

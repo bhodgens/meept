@@ -14,11 +14,11 @@ void main() {
   testWidgets('FindBar renders query field, count, toggles, close',
       (tester) async {
     final container = makeContainer();
-    final sessionId = 's1';
+    const sessionId = 's1';
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: MaterialApp(
+        child: const MaterialApp(
           home: Scaffold(
             body: FindBar(
               sessionId: sessionId,
@@ -47,7 +47,7 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: MaterialApp(
+        child: const MaterialApp(
           home: Scaffold(
             body: FindBar(sessionId: sessionId, matchCount: 0),
           ),
@@ -69,7 +69,7 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: MaterialApp(
+        child: const MaterialApp(
           home: Scaffold(
             body: FindBar(sessionId: sessionId, matchCount: 0),
           ),
@@ -90,7 +90,7 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: MaterialApp(
+        child: const MaterialApp(
           home: Scaffold(
             body: FindBar(sessionId: sessionId, matchCount: 0),
           ),
@@ -116,7 +116,7 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: MaterialApp(
+        child: const MaterialApp(
           home: Scaffold(
             body: FindBar(sessionId: sessionId, matchCount: 5),
           ),

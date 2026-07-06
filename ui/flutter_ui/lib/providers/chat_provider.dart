@@ -258,16 +258,16 @@ class ChatNotifier extends StateNotifier<ChatState> {
       );
     } catch (e) {
       if (_disposed) return;
-      // Don't show error for default session (no session selected)
-      if (sessionId == 'default') {
-        state = const ChatState(messages: [], isLoading: false);
-      } else {
-        state = ChatState(
-          messages: [],
-          isLoading: false,
-          error: e.toString(),
-        );
-      }
+      // Surface load failures via chatState.error so the UI can render the
+      // standard ErrorBanner.  Previously a fabricated 'default' session ID
+      // was special-cased here to swallow the inevitable 404, but ChatTab is
+      // now only ever created with a real session ID (see TabContent), so
+      // the special-case is no longer needed.
+      state = ChatState(
+        messages: [],
+        isLoading: false,
+        error: e.toString(),
+      );
     }
 
     if (_disposed || generation != _loadGeneration) return;

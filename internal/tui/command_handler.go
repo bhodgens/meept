@@ -1823,8 +1823,37 @@ func (h *CommandHandler) executeProjectSet(args []string) *CommandResult {
 		}
 	}
 
+	// Build a helpful error message explaining why both attempts failed.
+	var msg strings.Builder
+	msg.WriteString(fmt.Sprintf("project '%s' not found\n", query))
+
+	// Explain DetectProject result if it failed.
+	if detected, detectErr := h.rpc.DetectProject(query); detectErr != nil {
+		detectMsg := strings.ToLower(detectErr.Error())
+		if strings.Contains(detectMsg, "no git repository") || strings.Contains(detectMsg, "not a git") {
+			msg.WriteString("  - path does not appear to be inside a git repository")
+		} else if strings.Contains(detectMsg, "resolve path") {
+			msg.WriteString(fmt.Sprintf("  - could not resolve path '%s'", query))
+		} else if strings.Contains(detectMsg, "auto-register") {
+			msg.WriteString(fmt.Sprintf("  - encountered an error while auto-registering: %v", detectErr))
+		} else {
+			msg.WriteString(fmt.Sprintf("  - path detection failed: %v", detectErr))
+		}
+		detected = nil // avoid confusion below (would-be detected project)
+	} else if detected != nil && detected.ID != "" {
+		// Detection succeeded and found a project, but somehow the name/ID fallback didn't
+		// pick it up — shouldn't normally happen, but if the detected project name doesn't
+		// match the query verbatim, explain that.
+		msg.WriteString(fmt.Sprintf("  - detected project '%s' (ID: %s), but query '%s' did not match by name or ID", detected.Name, detected.ID, query))
+	} else {
+		msg.WriteString("  - path detection did not return a valid project")
+	}
+
+	msg.WriteString("\n  - no registered project matched by name or ID")
+	msg.WriteString("\n\nhint: use /project list to see registered projects, or ensure the path is inside a git repository")
+
 	return &CommandResult{
-		Output:  fmt.Sprintf("project '%s' not found", query),
+		Output:  msg.String(),
 		IsError: true,
 	}
 }

@@ -10,12 +10,12 @@ class _$CompleteRequest extends CompleteRequest {
   @override
   final String jobId;
   @override
-  final JsonObject? resultCommaOmitempty;
+  final JsonObject? result;
 
   factory _$CompleteRequest([void Function(CompleteRequestBuilder)? updates]) =>
       (CompleteRequestBuilder()..update(updates))._build();
 
-  _$CompleteRequest._({required this.jobId, this.resultCommaOmitempty})
+  _$CompleteRequest._({required this.jobId, this.result})
       : super._();
   @override
   CompleteRequest rebuild(void Function(CompleteRequestBuilder) updates) =>
@@ -29,14 +29,14 @@ class _$CompleteRequest extends CompleteRequest {
     if (identical(other, this)) return true;
     return other is CompleteRequest &&
         jobId == other.jobId &&
-        resultCommaOmitempty == other.resultCommaOmitempty;
+        result == other.result;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, jobId.hashCode);
-    _$hash = $jc(_$hash, resultCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, result.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -45,7 +45,7 @@ class _$CompleteRequest extends CompleteRequest {
   String toString() {
     return (newBuiltValueToStringHelper(r'CompleteRequest')
           ..add('jobId', jobId)
-          ..add('resultCommaOmitempty', resultCommaOmitempty))
+          ..add('result', result))
         .toString();
   }
 }
@@ -58,10 +58,10 @@ class CompleteRequestBuilder
   String? get jobId => _$this._jobId;
   set jobId(String? jobId) => _$this._jobId = jobId;
 
-  JsonObject? _resultCommaOmitempty;
-  JsonObject? get resultCommaOmitempty => _$this._resultCommaOmitempty;
-  set resultCommaOmitempty(JsonObject? resultCommaOmitempty) =>
-      _$this._resultCommaOmitempty = resultCommaOmitempty;
+  JsonObject? _result;
+  JsonObject? get result => _$this._result;
+  set result(JsonObject? result) =>
+      _$this._result = result;
 
   CompleteRequestBuilder() {
     CompleteRequest._defaults(this);
@@ -71,7 +71,7 @@ class CompleteRequestBuilder
     final $v = _$v;
     if ($v != null) {
       _jobId = $v.jobId;
-      _resultCommaOmitempty = $v.resultCommaOmitempty;
+      _result = $v.result;
       _$v = null;
     }
     return this;
@@ -95,7 +95,7 @@ class CompleteRequestBuilder
         _$CompleteRequest._(
           jobId: BuiltValueNullFieldError.checkNotNull(
               jobId, r'CompleteRequest', 'jobId'),
-          resultCommaOmitempty: resultCommaOmitempty,
+          result: result,
         );
     replace(_$result);
     return _$result;

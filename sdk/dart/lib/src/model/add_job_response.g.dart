@@ -16,11 +16,11 @@ class _$AddJobResponse extends AddJobResponse {
   @override
   final bool enabled;
   @override
-  final String? lastRunCommaOmitempty;
+  final String? lastRun;
   @override
-  final String? nextRunCommaOmitempty;
+  final String? nextRun;
   @override
-  final String? lastErrorCommaOmitempty;
+  final String? lastError;
   @override
   final int runCount;
   @override
@@ -34,9 +34,9 @@ class _$AddJobResponse extends AddJobResponse {
       required this.name,
       required this.schedule,
       required this.enabled,
-      this.lastRunCommaOmitempty,
-      this.nextRunCommaOmitempty,
-      this.lastErrorCommaOmitempty,
+      this.lastRun,
+      this.nextRun,
+      this.lastError,
       required this.runCount,
       required this.isRunning})
       : super._();
@@ -55,9 +55,9 @@ class _$AddJobResponse extends AddJobResponse {
         name == other.name &&
         schedule == other.schedule &&
         enabled == other.enabled &&
-        lastRunCommaOmitempty == other.lastRunCommaOmitempty &&
-        nextRunCommaOmitempty == other.nextRunCommaOmitempty &&
-        lastErrorCommaOmitempty == other.lastErrorCommaOmitempty &&
+        lastRun == other.lastRun &&
+        nextRun == other.nextRun &&
+        lastError == other.lastError &&
         runCount == other.runCount &&
         isRunning == other.isRunning;
   }
@@ -69,9 +69,9 @@ class _$AddJobResponse extends AddJobResponse {
     _$hash = $jc(_$hash, name.hashCode);
     _$hash = $jc(_$hash, schedule.hashCode);
     _$hash = $jc(_$hash, enabled.hashCode);
-    _$hash = $jc(_$hash, lastRunCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, nextRunCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, lastErrorCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, lastRun.hashCode);
+    _$hash = $jc(_$hash, nextRun.hashCode);
+    _$hash = $jc(_$hash, lastError.hashCode);
     _$hash = $jc(_$hash, runCount.hashCode);
     _$hash = $jc(_$hash, isRunning.hashCode);
     _$hash = $jf(_$hash);
@@ -85,9 +85,9 @@ class _$AddJobResponse extends AddJobResponse {
           ..add('name', name)
           ..add('schedule', schedule)
           ..add('enabled', enabled)
-          ..add('lastRunCommaOmitempty', lastRunCommaOmitempty)
-          ..add('nextRunCommaOmitempty', nextRunCommaOmitempty)
-          ..add('lastErrorCommaOmitempty', lastErrorCommaOmitempty)
+          ..add('lastRun', lastRun)
+          ..add('nextRun', nextRun)
+          ..add('lastError', lastError)
           ..add('runCount', runCount)
           ..add('isRunning', isRunning))
         .toString();
@@ -114,20 +114,20 @@ class AddJobResponseBuilder
   bool? get enabled => _$this._enabled;
   set enabled(bool? enabled) => _$this._enabled = enabled;
 
-  String? _lastRunCommaOmitempty;
-  String? get lastRunCommaOmitempty => _$this._lastRunCommaOmitempty;
-  set lastRunCommaOmitempty(String? lastRunCommaOmitempty) =>
-      _$this._lastRunCommaOmitempty = lastRunCommaOmitempty;
+  String? _lastRun;
+  String? get lastRun => _$this._lastRun;
+  set lastRun(String? lastRun) =>
+      _$this._lastRun = lastRun;
 
-  String? _nextRunCommaOmitempty;
-  String? get nextRunCommaOmitempty => _$this._nextRunCommaOmitempty;
-  set nextRunCommaOmitempty(String? nextRunCommaOmitempty) =>
-      _$this._nextRunCommaOmitempty = nextRunCommaOmitempty;
+  String? _nextRun;
+  String? get nextRun => _$this._nextRun;
+  set nextRun(String? nextRun) =>
+      _$this._nextRun = nextRun;
 
-  String? _lastErrorCommaOmitempty;
-  String? get lastErrorCommaOmitempty => _$this._lastErrorCommaOmitempty;
-  set lastErrorCommaOmitempty(String? lastErrorCommaOmitempty) =>
-      _$this._lastErrorCommaOmitempty = lastErrorCommaOmitempty;
+  String? _lastError;
+  String? get lastError => _$this._lastError;
+  set lastError(String? lastError) =>
+      _$this._lastError = lastError;
 
   int? _runCount;
   int? get runCount => _$this._runCount;
@@ -148,9 +148,9 @@ class AddJobResponseBuilder
       _name = $v.name;
       _schedule = $v.schedule;
       _enabled = $v.enabled;
-      _lastRunCommaOmitempty = $v.lastRunCommaOmitempty;
-      _nextRunCommaOmitempty = $v.nextRunCommaOmitempty;
-      _lastErrorCommaOmitempty = $v.lastErrorCommaOmitempty;
+      _lastRun = $v.lastRun;
+      _nextRun = $v.nextRun;
+      _lastError = $v.lastError;
       _runCount = $v.runCount;
       _isRunning = $v.isRunning;
       _$v = null;
@@ -182,9 +182,9 @@ class AddJobResponseBuilder
               schedule, r'AddJobResponse', 'schedule'),
           enabled: BuiltValueNullFieldError.checkNotNull(
               enabled, r'AddJobResponse', 'enabled'),
-          lastRunCommaOmitempty: lastRunCommaOmitempty,
-          nextRunCommaOmitempty: nextRunCommaOmitempty,
-          lastErrorCommaOmitempty: lastErrorCommaOmitempty,
+          lastRun: lastRun,
+          nextRun: nextRun,
+          lastError: lastError,
           runCount: BuiltValueNullFieldError.checkNotNull(
               runCount, r'AddJobResponse', 'runCount'),
           isRunning: BuiltValueNullFieldError.checkNotNull(

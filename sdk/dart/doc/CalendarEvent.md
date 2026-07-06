@@ -10,14 +10,14 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **id** | **String** |  | 
 **summary** | **String** |  | 
-**descriptionCommaOmitempty** | **String** |  | [optional] 
-**locationCommaOmitempty** | **String** |  | [optional] 
+**description** | **String** |  | [optional] 
+**location** | **String** |  | [optional] 
 **start** | **String** |  | 
 **end** | **String** |  | 
 **allDay** | **bool** |  | 
-**statusCommaOmitempty** | **String** |  | [optional] 
-**htmlLinkCommaOmitempty** | **String** |  | [optional] 
-**attendeesCommaOmitempty** | **BuiltList&lt;String&gt;** |  | [optional] 
+**status** | **String** |  | [optional] 
+**htmlLink** | **String** |  | [optional] 
+**attendees** | **BuiltList&lt;String&gt;** |  | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

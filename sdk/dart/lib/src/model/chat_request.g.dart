@@ -12,7 +12,7 @@ class _$ChatRequest extends ChatRequest {
   @override
   final String conversationId;
   @override
-  final String? agentIdCommaOmitempty;
+  final String? agentId;
 
   factory _$ChatRequest([void Function(ChatRequestBuilder)? updates]) =>
       (ChatRequestBuilder()..update(updates))._build();
@@ -20,7 +20,7 @@ class _$ChatRequest extends ChatRequest {
   _$ChatRequest._(
       {required this.message,
       required this.conversationId,
-      this.agentIdCommaOmitempty})
+      this.agentId})
       : super._();
   @override
   ChatRequest rebuild(void Function(ChatRequestBuilder) updates) =>
@@ -35,7 +35,7 @@ class _$ChatRequest extends ChatRequest {
     return other is ChatRequest &&
         message == other.message &&
         conversationId == other.conversationId &&
-        agentIdCommaOmitempty == other.agentIdCommaOmitempty;
+        agentId == other.agentId;
   }
 
   @override
@@ -43,7 +43,7 @@ class _$ChatRequest extends ChatRequest {
     var _$hash = 0;
     _$hash = $jc(_$hash, message.hashCode);
     _$hash = $jc(_$hash, conversationId.hashCode);
-    _$hash = $jc(_$hash, agentIdCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, agentId.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -53,7 +53,7 @@ class _$ChatRequest extends ChatRequest {
     return (newBuiltValueToStringHelper(r'ChatRequest')
           ..add('message', message)
           ..add('conversationId', conversationId)
-          ..add('agentIdCommaOmitempty', agentIdCommaOmitempty))
+          ..add('agentId', agentId))
         .toString();
   }
 }
@@ -70,10 +70,10 @@ class ChatRequestBuilder implements Builder<ChatRequest, ChatRequestBuilder> {
   set conversationId(String? conversationId) =>
       _$this._conversationId = conversationId;
 
-  String? _agentIdCommaOmitempty;
-  String? get agentIdCommaOmitempty => _$this._agentIdCommaOmitempty;
-  set agentIdCommaOmitempty(String? agentIdCommaOmitempty) =>
-      _$this._agentIdCommaOmitempty = agentIdCommaOmitempty;
+  String? _agentId;
+  String? get agentId => _$this._agentId;
+  set agentId(String? agentId) =>
+      _$this._agentId = agentId;
 
   ChatRequestBuilder() {
     ChatRequest._defaults(this);
@@ -84,7 +84,7 @@ class ChatRequestBuilder implements Builder<ChatRequest, ChatRequestBuilder> {
     if ($v != null) {
       _message = $v.message;
       _conversationId = $v.conversationId;
-      _agentIdCommaOmitempty = $v.agentIdCommaOmitempty;
+      _agentId = $v.agentId;
       _$v = null;
     }
     return this;
@@ -110,7 +110,7 @@ class ChatRequestBuilder implements Builder<ChatRequest, ChatRequestBuilder> {
               message, r'ChatRequest', 'message'),
           conversationId: BuiltValueNullFieldError.checkNotNull(
               conversationId, r'ChatRequest', 'conversationId'),
-          agentIdCommaOmitempty: agentIdCommaOmitempty,
+          agentId: agentId,
         );
     replace(_$result);
     return _$result;

@@ -10,8 +10,8 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **topic** | **String** |  | 
 **type** | **String** |  | 
-**sourceCommaOmitempty** | **String** |  | [optional] 
-**payloadCommaOmitempty** | **String** |  | [optional] 
+**source** | **String** |  | [optional] 
+**payload** | **String** |  | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

@@ -22,8 +22,8 @@ var _ MappedNullable = &ChatResponse{}
 // ChatResponse struct for ChatResponse
 type ChatResponse struct {
 	Reply string `json:"reply"`
-	Modelomitempty *string `json:"model,omitempty,omitempty"`
-	TokensUsedomitempty *int32 `json:"tokens_used,omitempty,omitempty"`
+	Model *string `json:"model,omitempty"`
+	TokensUsed *int32 `json:"tokens_used,omitempty"`
 }
 
 type _ChatResponse ChatResponse
@@ -70,68 +70,68 @@ func (o *ChatResponse) SetReply(v string) {
 	o.Reply = v
 }
 
-// GetModelomitempty returns the Modelomitempty field value if set, zero value otherwise.
-func (o *ChatResponse) GetModelomitempty() string {
-	if o == nil || IsNil(o.Modelomitempty) {
+// GetModel returns the Model field value if set, zero value otherwise.
+func (o *ChatResponse) GetModel() string {
+	if o == nil || IsNil(o.Model) {
 		var ret string
 		return ret
 	}
-	return *o.Modelomitempty
+	return *o.Model
 }
 
-// GetModelomitemptyOk returns a tuple with the Modelomitempty field value if set, nil otherwise
+// GetModelOk returns a tuple with the Model field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ChatResponse) GetModelomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Modelomitempty) {
+func (o *ChatResponse) GetModelOk() (*string, bool) {
+	if o == nil || IsNil(o.Model) {
 		return nil, false
 	}
-	return o.Modelomitempty, true
+	return o.Model, true
 }
 
-// HasModelomitempty returns a boolean if a field has been set.
-func (o *ChatResponse) HasModelomitempty() bool {
-	if o != nil && !IsNil(o.Modelomitempty) {
+// HasModel returns a boolean if a field has been set.
+func (o *ChatResponse) HasModel() bool {
+	if o != nil && !IsNil(o.Model) {
 		return true
 	}
 
 	return false
 }
 
-// SetModelomitempty gets a reference to the given string and assigns it to the Modelomitempty field.
-func (o *ChatResponse) SetModelomitempty(v string) {
-	o.Modelomitempty = &v
+// SetModel gets a reference to the given string and assigns it to the Model field.
+func (o *ChatResponse) SetModel(v string) {
+	o.Model = &v
 }
 
-// GetTokensUsedomitempty returns the TokensUsedomitempty field value if set, zero value otherwise.
-func (o *ChatResponse) GetTokensUsedomitempty() int32 {
-	if o == nil || IsNil(o.TokensUsedomitempty) {
+// GetTokensUsed returns the TokensUsed field value if set, zero value otherwise.
+func (o *ChatResponse) GetTokensUsed() int32 {
+	if o == nil || IsNil(o.TokensUsed) {
 		var ret int32
 		return ret
 	}
-	return *o.TokensUsedomitempty
+	return *o.TokensUsed
 }
 
-// GetTokensUsedomitemptyOk returns a tuple with the TokensUsedomitempty field value if set, nil otherwise
+// GetTokensUsedOk returns a tuple with the TokensUsed field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ChatResponse) GetTokensUsedomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.TokensUsedomitempty) {
+func (o *ChatResponse) GetTokensUsedOk() (*int32, bool) {
+	if o == nil || IsNil(o.TokensUsed) {
 		return nil, false
 	}
-	return o.TokensUsedomitempty, true
+	return o.TokensUsed, true
 }
 
-// HasTokensUsedomitempty returns a boolean if a field has been set.
-func (o *ChatResponse) HasTokensUsedomitempty() bool {
-	if o != nil && !IsNil(o.TokensUsedomitempty) {
+// HasTokensUsed returns a boolean if a field has been set.
+func (o *ChatResponse) HasTokensUsed() bool {
+	if o != nil && !IsNil(o.TokensUsed) {
 		return true
 	}
 
 	return false
 }
 
-// SetTokensUsedomitempty gets a reference to the given int32 and assigns it to the TokensUsedomitempty field.
-func (o *ChatResponse) SetTokensUsedomitempty(v int32) {
-	o.TokensUsedomitempty = &v
+// SetTokensUsed gets a reference to the given int32 and assigns it to the TokensUsed field.
+func (o *ChatResponse) SetTokensUsed(v int32) {
+	o.TokensUsed = &v
 }
 
 func (o ChatResponse) MarshalJSON() ([]byte, error) {
@@ -145,11 +145,11 @@ func (o ChatResponse) MarshalJSON() ([]byte, error) {
 func (o ChatResponse) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["reply"] = o.Reply
-	if !IsNil(o.Modelomitempty) {
-		toSerialize["model,omitempty"] = o.Modelomitempty
+	if !IsNil(o.Model) {
+		toSerialize["model"] = o.Model
 	}
-	if !IsNil(o.TokensUsedomitempty) {
-		toSerialize["tokens_used,omitempty"] = o.TokensUsedomitempty
+	if !IsNil(o.TokensUsed) {
+		toSerialize["tokens_used"] = o.TokensUsed
 	}
 	return toSerialize, nil
 }

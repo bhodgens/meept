@@ -12,18 +12,18 @@ part 'vector_search_request.g.dart';
 ///
 /// Properties:
 /// * [query] 
-/// * [limitCommaOmitempty] 
-/// * [shardTypesCommaOmitempty] 
+/// * [limit] 
+/// * [shardTypes] 
 @BuiltValue()
 abstract class VectorSearchRequest implements Built<VectorSearchRequest, VectorSearchRequestBuilder> {
   @BuiltValueField(wireName: r'query')
   String get query;
 
-  @BuiltValueField(wireName: r'limit,omitempty')
-  int? get limitCommaOmitempty;
+  @BuiltValueField(wireName: r'limit')
+  int? get limit;
 
-  @BuiltValueField(wireName: r'shard_types,omitempty')
-  String? get shardTypesCommaOmitempty;
+  @BuiltValueField(wireName: r'shard_types')
+  String? get shardTypes;
 
   VectorSearchRequest._();
 
@@ -53,17 +53,17 @@ class _$VectorSearchRequestSerializer implements PrimitiveSerializer<VectorSearc
       object.query,
       specifiedType: const FullType(String),
     );
-    if (object.limitCommaOmitempty != null) {
-      yield r'limit,omitempty';
+    if (object.limit != null) {
+      yield r'limit';
       yield serializers.serialize(
-        object.limitCommaOmitempty,
+        object.limit,
         specifiedType: const FullType(int),
       );
     }
-    if (object.shardTypesCommaOmitempty != null) {
-      yield r'shard_types,omitempty';
+    if (object.shardTypes != null) {
+      yield r'shard_types';
       yield serializers.serialize(
-        object.shardTypesCommaOmitempty,
+        object.shardTypes,
         specifiedType: const FullType.nullable(String),
       );
     }
@@ -97,20 +97,20 @@ class _$VectorSearchRequestSerializer implements PrimitiveSerializer<VectorSearc
           ) as String;
           result.query = valueDes;
           break;
-        case r'limit,omitempty':
+        case r'limit':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.limitCommaOmitempty = valueDes;
+          result.limit = valueDes;
           break;
-        case r'shard_types,omitempty':
+        case r'shard_types':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.shardTypesCommaOmitempty = valueDes;
+          result.shardTypes = valueDes;
           break;
         default:
           unhandled.add(key);

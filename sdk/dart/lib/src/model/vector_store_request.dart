@@ -13,7 +13,7 @@ part 'vector_store_request.g.dart';
 /// Properties:
 /// * [memoryId] 
 /// * [content] 
-/// * [metadataCommaOmitempty] 
+/// * [metadata] 
 @BuiltValue()
 abstract class VectorStoreRequest implements Built<VectorStoreRequest, VectorStoreRequestBuilder> {
   @BuiltValueField(wireName: r'memory_id')
@@ -22,8 +22,8 @@ abstract class VectorStoreRequest implements Built<VectorStoreRequest, VectorSto
   @BuiltValueField(wireName: r'content')
   String get content;
 
-  @BuiltValueField(wireName: r'metadata,omitempty')
-  String? get metadataCommaOmitempty;
+  @BuiltValueField(wireName: r'metadata')
+  String? get metadata;
 
   VectorStoreRequest._();
 
@@ -58,10 +58,10 @@ class _$VectorStoreRequestSerializer implements PrimitiveSerializer<VectorStoreR
       object.content,
       specifiedType: const FullType(String),
     );
-    if (object.metadataCommaOmitempty != null) {
-      yield r'metadata,omitempty';
+    if (object.metadata != null) {
+      yield r'metadata';
       yield serializers.serialize(
-        object.metadataCommaOmitempty,
+        object.metadata,
         specifiedType: const FullType.nullable(String),
       );
     }
@@ -102,13 +102,13 @@ class _$VectorStoreRequestSerializer implements PrimitiveSerializer<VectorStoreR
           ) as String;
           result.content = valueDes;
           break;
-        case r'metadata,omitempty':
+        case r'metadata':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.metadataCommaOmitempty = valueDes;
+          result.metadata = valueDes;
           break;
         default:
           unhandled.add(key);

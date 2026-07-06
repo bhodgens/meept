@@ -12,13 +12,13 @@ void main() {
       // TODO
     });
 
-    // int limitCommaOmitempty
-    test('to test the property `limitCommaOmitempty`', () async {
+    // int limit
+    test('to test the property `limit`', () async {
       // TODO
     });
 
-    // String shardTypesCommaOmitempty
-    test('to test the property `shardTypesCommaOmitempty`', () async {
+    // String shardTypes
+    test('to test the property `shardTypes`', () async {
       // TODO
     });
 

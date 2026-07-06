@@ -9,12 +9,12 @@ import 'package:meept_client/api.dart';
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **type** | **String** |  | 
-**priorityCommaOmitempty** | **int** |  | [optional] 
-**taskIdCommaOmitempty** | **String** |  | [optional] 
+**priority** | **int** |  | [optional] 
+**taskId** | **String** |  | [optional] 
 **prompt** | **String** |  | 
-**sessionIdCommaOmitempty** | **String** |  | [optional] 
-**requiredCapsCommaOmitempty** | **String** |  | [optional] 
-**payloadCommaOmitempty** | **String** |  | [optional] 
+**sessionId** | **String** |  | [optional] 
+**requiredCaps** | **String** |  | [optional] 
+**payload** | **String** |  | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

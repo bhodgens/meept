@@ -22,8 +22,8 @@ var _ MappedNullable = &UpdateTaskRequest{}
 // UpdateTaskRequest struct for UpdateTaskRequest
 type UpdateTaskRequest struct {
 	Id string `json:"id"`
-	Stateomitempty *string `json:"state,omitempty,omitempty"`
-	Nameomitempty *string `json:"name,omitempty,omitempty"`
+	State *string `json:"state,omitempty"`
+	Name *string `json:"name,omitempty"`
 }
 
 type _UpdateTaskRequest UpdateTaskRequest
@@ -70,68 +70,68 @@ func (o *UpdateTaskRequest) SetId(v string) {
 	o.Id = v
 }
 
-// GetStateomitempty returns the Stateomitempty field value if set, zero value otherwise.
-func (o *UpdateTaskRequest) GetStateomitempty() string {
-	if o == nil || IsNil(o.Stateomitempty) {
+// GetState returns the State field value if set, zero value otherwise.
+func (o *UpdateTaskRequest) GetState() string {
+	if o == nil || IsNil(o.State) {
 		var ret string
 		return ret
 	}
-	return *o.Stateomitempty
+	return *o.State
 }
 
-// GetStateomitemptyOk returns a tuple with the Stateomitempty field value if set, nil otherwise
+// GetStateOk returns a tuple with the State field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *UpdateTaskRequest) GetStateomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Stateomitempty) {
+func (o *UpdateTaskRequest) GetStateOk() (*string, bool) {
+	if o == nil || IsNil(o.State) {
 		return nil, false
 	}
-	return o.Stateomitempty, true
+	return o.State, true
 }
 
-// HasStateomitempty returns a boolean if a field has been set.
-func (o *UpdateTaskRequest) HasStateomitempty() bool {
-	if o != nil && !IsNil(o.Stateomitempty) {
+// HasState returns a boolean if a field has been set.
+func (o *UpdateTaskRequest) HasState() bool {
+	if o != nil && !IsNil(o.State) {
 		return true
 	}
 
 	return false
 }
 
-// SetStateomitempty gets a reference to the given string and assigns it to the Stateomitempty field.
-func (o *UpdateTaskRequest) SetStateomitempty(v string) {
-	o.Stateomitempty = &v
+// SetState gets a reference to the given string and assigns it to the State field.
+func (o *UpdateTaskRequest) SetState(v string) {
+	o.State = &v
 }
 
-// GetNameomitempty returns the Nameomitempty field value if set, zero value otherwise.
-func (o *UpdateTaskRequest) GetNameomitempty() string {
-	if o == nil || IsNil(o.Nameomitempty) {
+// GetName returns the Name field value if set, zero value otherwise.
+func (o *UpdateTaskRequest) GetName() string {
+	if o == nil || IsNil(o.Name) {
 		var ret string
 		return ret
 	}
-	return *o.Nameomitempty
+	return *o.Name
 }
 
-// GetNameomitemptyOk returns a tuple with the Nameomitempty field value if set, nil otherwise
+// GetNameOk returns a tuple with the Name field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *UpdateTaskRequest) GetNameomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Nameomitempty) {
+func (o *UpdateTaskRequest) GetNameOk() (*string, bool) {
+	if o == nil || IsNil(o.Name) {
 		return nil, false
 	}
-	return o.Nameomitempty, true
+	return o.Name, true
 }
 
-// HasNameomitempty returns a boolean if a field has been set.
-func (o *UpdateTaskRequest) HasNameomitempty() bool {
-	if o != nil && !IsNil(o.Nameomitempty) {
+// HasName returns a boolean if a field has been set.
+func (o *UpdateTaskRequest) HasName() bool {
+	if o != nil && !IsNil(o.Name) {
 		return true
 	}
 
 	return false
 }
 
-// SetNameomitempty gets a reference to the given string and assigns it to the Nameomitempty field.
-func (o *UpdateTaskRequest) SetNameomitempty(v string) {
-	o.Nameomitempty = &v
+// SetName gets a reference to the given string and assigns it to the Name field.
+func (o *UpdateTaskRequest) SetName(v string) {
+	o.Name = &v
 }
 
 func (o UpdateTaskRequest) MarshalJSON() ([]byte, error) {
@@ -145,11 +145,11 @@ func (o UpdateTaskRequest) MarshalJSON() ([]byte, error) {
 func (o UpdateTaskRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["id"] = o.Id
-	if !IsNil(o.Stateomitempty) {
-		toSerialize["state,omitempty"] = o.Stateomitempty
+	if !IsNil(o.State) {
+		toSerialize["state"] = o.State
 	}
-	if !IsNil(o.Nameomitempty) {
-		toSerialize["name,omitempty"] = o.Nameomitempty
+	if !IsNil(o.Name) {
+		toSerialize["name"] = o.Name
 	}
 	return toSerialize, nil
 }

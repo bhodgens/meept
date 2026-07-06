@@ -12,14 +12,14 @@ part 'claim_request.g.dart';
 ///
 /// Properties:
 /// * [workerId] 
-/// * [capabilitiesCommaOmitempty] 
+/// * [capabilities] 
 @BuiltValue()
 abstract class ClaimRequest implements Built<ClaimRequest, ClaimRequestBuilder> {
   @BuiltValueField(wireName: r'worker_id')
   String get workerId;
 
-  @BuiltValueField(wireName: r'capabilities,omitempty')
-  String? get capabilitiesCommaOmitempty;
+  @BuiltValueField(wireName: r'capabilities')
+  String? get capabilities;
 
   ClaimRequest._();
 
@@ -49,10 +49,10 @@ class _$ClaimRequestSerializer implements PrimitiveSerializer<ClaimRequest> {
       object.workerId,
       specifiedType: const FullType(String),
     );
-    if (object.capabilitiesCommaOmitempty != null) {
-      yield r'capabilities,omitempty';
+    if (object.capabilities != null) {
+      yield r'capabilities';
       yield serializers.serialize(
-        object.capabilitiesCommaOmitempty,
+        object.capabilities,
         specifiedType: const FullType.nullable(String),
       );
     }
@@ -86,13 +86,13 @@ class _$ClaimRequestSerializer implements PrimitiveSerializer<ClaimRequest> {
           ) as String;
           result.workerId = valueDes;
           break;
-        case r'capabilities,omitempty':
+        case r'capabilities':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.capabilitiesCommaOmitempty = valueDes;
+          result.capabilities = valueDes;
           break;
         default:
           unhandled.add(key);

@@ -17,13 +17,13 @@ void main() {
       // TODO
     });
 
-    // String descriptionCommaOmitempty
-    test('to test the property `descriptionCommaOmitempty`', () async {
+    // String description
+    test('to test the property `description`', () async {
       // TODO
     });
 
-    // String locationCommaOmitempty
-    test('to test the property `locationCommaOmitempty`', () async {
+    // String location
+    test('to test the property `location`', () async {
       // TODO
     });
 
@@ -42,18 +42,18 @@ void main() {
       // TODO
     });
 
-    // String statusCommaOmitempty
-    test('to test the property `statusCommaOmitempty`', () async {
+    // String status
+    test('to test the property `status`', () async {
       // TODO
     });
 
-    // String htmlLinkCommaOmitempty
-    test('to test the property `htmlLinkCommaOmitempty`', () async {
+    // String htmlLink
+    test('to test the property `htmlLink`', () async {
       // TODO
     });
 
-    // BuiltList<String> attendeesCommaOmitempty
-    test('to test the property `attendeesCommaOmitempty`', () async {
+    // BuiltList<String> attendees
+    test('to test the property `attendees`', () async {
       // TODO
     });
 

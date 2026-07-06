@@ -11,11 +11,11 @@ part 'list_sessions_request.g.dart';
 /// ListSessionsRequest
 ///
 /// Properties:
-/// * [limitCommaOmitempty] 
+/// * [limit] 
 @BuiltValue()
 abstract class ListSessionsRequest implements Built<ListSessionsRequest, ListSessionsRequestBuilder> {
-  @BuiltValueField(wireName: r'limit,omitempty')
-  int? get limitCommaOmitempty;
+  @BuiltValueField(wireName: r'limit')
+  int? get limit;
 
   ListSessionsRequest._();
 
@@ -40,10 +40,10 @@ class _$ListSessionsRequestSerializer implements PrimitiveSerializer<ListSession
     ListSessionsRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
-    if (object.limitCommaOmitempty != null) {
-      yield r'limit,omitempty';
+    if (object.limit != null) {
+      yield r'limit';
       yield serializers.serialize(
-        object.limitCommaOmitempty,
+        object.limit,
         specifiedType: const FullType(int),
       );
     }
@@ -70,12 +70,12 @@ class _$ListSessionsRequestSerializer implements PrimitiveSerializer<ListSession
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
-        case r'limit,omitempty':
+        case r'limit':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.limitCommaOmitempty = valueDes;
+          result.limit = valueDes;
           break;
         default:
           unhandled.add(key);

@@ -22,12 +22,12 @@ var _ MappedNullable = &EnqueueRequest{}
 // EnqueueRequest struct for EnqueueRequest
 type EnqueueRequest struct {
 	Type string `json:"type"`
-	Priorityomitempty *int32 `json:"priority,omitempty,omitempty"`
-	TaskIdomitempty *string `json:"task_id,omitempty,omitempty"`
+	Priority *int32 `json:"priority,omitempty"`
+	TaskId *string `json:"task_id,omitempty"`
 	Prompt string `json:"prompt"`
-	SessionIdomitempty *string `json:"session_id,omitempty,omitempty"`
-	RequiredCapsomitempty NullableString `json:"required_caps,omitempty,omitempty"`
-	Payloadomitempty NullableString `json:"payload,omitempty,omitempty"`
+	SessionId *string `json:"session_id,omitempty"`
+	RequiredCaps NullableString `json:"required_caps,omitempty"`
+	Payload NullableString `json:"payload,omitempty"`
 }
 
 type _EnqueueRequest EnqueueRequest
@@ -75,68 +75,68 @@ func (o *EnqueueRequest) SetType(v string) {
 	o.Type = v
 }
 
-// GetPriorityomitempty returns the Priorityomitempty field value if set, zero value otherwise.
-func (o *EnqueueRequest) GetPriorityomitempty() int32 {
-	if o == nil || IsNil(o.Priorityomitempty) {
+// GetPriority returns the Priority field value if set, zero value otherwise.
+func (o *EnqueueRequest) GetPriority() int32 {
+	if o == nil || IsNil(o.Priority) {
 		var ret int32
 		return ret
 	}
-	return *o.Priorityomitempty
+	return *o.Priority
 }
 
-// GetPriorityomitemptyOk returns a tuple with the Priorityomitempty field value if set, nil otherwise
+// GetPriorityOk returns a tuple with the Priority field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *EnqueueRequest) GetPriorityomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.Priorityomitempty) {
+func (o *EnqueueRequest) GetPriorityOk() (*int32, bool) {
+	if o == nil || IsNil(o.Priority) {
 		return nil, false
 	}
-	return o.Priorityomitempty, true
+	return o.Priority, true
 }
 
-// HasPriorityomitempty returns a boolean if a field has been set.
-func (o *EnqueueRequest) HasPriorityomitempty() bool {
-	if o != nil && !IsNil(o.Priorityomitempty) {
+// HasPriority returns a boolean if a field has been set.
+func (o *EnqueueRequest) HasPriority() bool {
+	if o != nil && !IsNil(o.Priority) {
 		return true
 	}
 
 	return false
 }
 
-// SetPriorityomitempty gets a reference to the given int32 and assigns it to the Priorityomitempty field.
-func (o *EnqueueRequest) SetPriorityomitempty(v int32) {
-	o.Priorityomitempty = &v
+// SetPriority gets a reference to the given int32 and assigns it to the Priority field.
+func (o *EnqueueRequest) SetPriority(v int32) {
+	o.Priority = &v
 }
 
-// GetTaskIdomitempty returns the TaskIdomitempty field value if set, zero value otherwise.
-func (o *EnqueueRequest) GetTaskIdomitempty() string {
-	if o == nil || IsNil(o.TaskIdomitempty) {
+// GetTaskId returns the TaskId field value if set, zero value otherwise.
+func (o *EnqueueRequest) GetTaskId() string {
+	if o == nil || IsNil(o.TaskId) {
 		var ret string
 		return ret
 	}
-	return *o.TaskIdomitempty
+	return *o.TaskId
 }
 
-// GetTaskIdomitemptyOk returns a tuple with the TaskIdomitempty field value if set, nil otherwise
+// GetTaskIdOk returns a tuple with the TaskId field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *EnqueueRequest) GetTaskIdomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.TaskIdomitempty) {
+func (o *EnqueueRequest) GetTaskIdOk() (*string, bool) {
+	if o == nil || IsNil(o.TaskId) {
 		return nil, false
 	}
-	return o.TaskIdomitempty, true
+	return o.TaskId, true
 }
 
-// HasTaskIdomitempty returns a boolean if a field has been set.
-func (o *EnqueueRequest) HasTaskIdomitempty() bool {
-	if o != nil && !IsNil(o.TaskIdomitempty) {
+// HasTaskId returns a boolean if a field has been set.
+func (o *EnqueueRequest) HasTaskId() bool {
+	if o != nil && !IsNil(o.TaskId) {
 		return true
 	}
 
 	return false
 }
 
-// SetTaskIdomitempty gets a reference to the given string and assigns it to the TaskIdomitempty field.
-func (o *EnqueueRequest) SetTaskIdomitempty(v string) {
-	o.TaskIdomitempty = &v
+// SetTaskId gets a reference to the given string and assigns it to the TaskId field.
+func (o *EnqueueRequest) SetTaskId(v string) {
+	o.TaskId = &v
 }
 
 // GetPrompt returns the Prompt field value
@@ -163,120 +163,120 @@ func (o *EnqueueRequest) SetPrompt(v string) {
 	o.Prompt = v
 }
 
-// GetSessionIdomitempty returns the SessionIdomitempty field value if set, zero value otherwise.
-func (o *EnqueueRequest) GetSessionIdomitempty() string {
-	if o == nil || IsNil(o.SessionIdomitempty) {
+// GetSessionId returns the SessionId field value if set, zero value otherwise.
+func (o *EnqueueRequest) GetSessionId() string {
+	if o == nil || IsNil(o.SessionId) {
 		var ret string
 		return ret
 	}
-	return *o.SessionIdomitempty
+	return *o.SessionId
 }
 
-// GetSessionIdomitemptyOk returns a tuple with the SessionIdomitempty field value if set, nil otherwise
+// GetSessionIdOk returns a tuple with the SessionId field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *EnqueueRequest) GetSessionIdomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.SessionIdomitempty) {
+func (o *EnqueueRequest) GetSessionIdOk() (*string, bool) {
+	if o == nil || IsNil(o.SessionId) {
 		return nil, false
 	}
-	return o.SessionIdomitempty, true
+	return o.SessionId, true
 }
 
-// HasSessionIdomitempty returns a boolean if a field has been set.
-func (o *EnqueueRequest) HasSessionIdomitempty() bool {
-	if o != nil && !IsNil(o.SessionIdomitempty) {
+// HasSessionId returns a boolean if a field has been set.
+func (o *EnqueueRequest) HasSessionId() bool {
+	if o != nil && !IsNil(o.SessionId) {
 		return true
 	}
 
 	return false
 }
 
-// SetSessionIdomitempty gets a reference to the given string and assigns it to the SessionIdomitempty field.
-func (o *EnqueueRequest) SetSessionIdomitempty(v string) {
-	o.SessionIdomitempty = &v
+// SetSessionId gets a reference to the given string and assigns it to the SessionId field.
+func (o *EnqueueRequest) SetSessionId(v string) {
+	o.SessionId = &v
 }
 
-// GetRequiredCapsomitempty returns the RequiredCapsomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *EnqueueRequest) GetRequiredCapsomitempty() string {
-	if o == nil || IsNil(o.RequiredCapsomitempty.Get()) {
+// GetRequiredCaps returns the RequiredCaps field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *EnqueueRequest) GetRequiredCaps() string {
+	if o == nil || IsNil(o.RequiredCaps.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.RequiredCapsomitempty.Get()
+	return *o.RequiredCaps.Get()
 }
 
-// GetRequiredCapsomitemptyOk returns a tuple with the RequiredCapsomitempty field value if set, nil otherwise
+// GetRequiredCapsOk returns a tuple with the RequiredCaps field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *EnqueueRequest) GetRequiredCapsomitemptyOk() (*string, bool) {
+func (o *EnqueueRequest) GetRequiredCapsOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.RequiredCapsomitempty.Get(), o.RequiredCapsomitempty.IsSet()
+	return o.RequiredCaps.Get(), o.RequiredCaps.IsSet()
 }
 
-// HasRequiredCapsomitempty returns a boolean if a field has been set.
-func (o *EnqueueRequest) HasRequiredCapsomitempty() bool {
-	if o != nil && o.RequiredCapsomitempty.IsSet() {
+// HasRequiredCaps returns a boolean if a field has been set.
+func (o *EnqueueRequest) HasRequiredCaps() bool {
+	if o != nil && o.RequiredCaps.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetRequiredCapsomitempty gets a reference to the given NullableString and assigns it to the RequiredCapsomitempty field.
-func (o *EnqueueRequest) SetRequiredCapsomitempty(v string) {
-	o.RequiredCapsomitempty.Set(&v)
+// SetRequiredCaps gets a reference to the given NullableString and assigns it to the RequiredCaps field.
+func (o *EnqueueRequest) SetRequiredCaps(v string) {
+	o.RequiredCaps.Set(&v)
 }
-// SetRequiredCapsomitemptyNil sets the value for RequiredCapsomitempty to be an explicit nil
-func (o *EnqueueRequest) SetRequiredCapsomitemptyNil() {
-	o.RequiredCapsomitempty.Set(nil)
-}
-
-// UnsetRequiredCapsomitempty ensures that no value is present for RequiredCapsomitempty, not even an explicit nil
-func (o *EnqueueRequest) UnsetRequiredCapsomitempty() {
-	o.RequiredCapsomitempty.Unset()
+// SetRequiredCapsNil sets the value for RequiredCaps to be an explicit nil
+func (o *EnqueueRequest) SetRequiredCapsNil() {
+	o.RequiredCaps.Set(nil)
 }
 
-// GetPayloadomitempty returns the Payloadomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *EnqueueRequest) GetPayloadomitempty() string {
-	if o == nil || IsNil(o.Payloadomitempty.Get()) {
+// UnsetRequiredCaps ensures that no value is present for RequiredCaps, not even an explicit nil
+func (o *EnqueueRequest) UnsetRequiredCaps() {
+	o.RequiredCaps.Unset()
+}
+
+// GetPayload returns the Payload field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *EnqueueRequest) GetPayload() string {
+	if o == nil || IsNil(o.Payload.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.Payloadomitempty.Get()
+	return *o.Payload.Get()
 }
 
-// GetPayloadomitemptyOk returns a tuple with the Payloadomitempty field value if set, nil otherwise
+// GetPayloadOk returns a tuple with the Payload field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *EnqueueRequest) GetPayloadomitemptyOk() (*string, bool) {
+func (o *EnqueueRequest) GetPayloadOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.Payloadomitempty.Get(), o.Payloadomitempty.IsSet()
+	return o.Payload.Get(), o.Payload.IsSet()
 }
 
-// HasPayloadomitempty returns a boolean if a field has been set.
-func (o *EnqueueRequest) HasPayloadomitempty() bool {
-	if o != nil && o.Payloadomitempty.IsSet() {
+// HasPayload returns a boolean if a field has been set.
+func (o *EnqueueRequest) HasPayload() bool {
+	if o != nil && o.Payload.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetPayloadomitempty gets a reference to the given NullableString and assigns it to the Payloadomitempty field.
-func (o *EnqueueRequest) SetPayloadomitempty(v string) {
-	o.Payloadomitempty.Set(&v)
+// SetPayload gets a reference to the given NullableString and assigns it to the Payload field.
+func (o *EnqueueRequest) SetPayload(v string) {
+	o.Payload.Set(&v)
 }
-// SetPayloadomitemptyNil sets the value for Payloadomitempty to be an explicit nil
-func (o *EnqueueRequest) SetPayloadomitemptyNil() {
-	o.Payloadomitempty.Set(nil)
+// SetPayloadNil sets the value for Payload to be an explicit nil
+func (o *EnqueueRequest) SetPayloadNil() {
+	o.Payload.Set(nil)
 }
 
-// UnsetPayloadomitempty ensures that no value is present for Payloadomitempty, not even an explicit nil
-func (o *EnqueueRequest) UnsetPayloadomitempty() {
-	o.Payloadomitempty.Unset()
+// UnsetPayload ensures that no value is present for Payload, not even an explicit nil
+func (o *EnqueueRequest) UnsetPayload() {
+	o.Payload.Unset()
 }
 
 func (o EnqueueRequest) MarshalJSON() ([]byte, error) {
@@ -290,21 +290,21 @@ func (o EnqueueRequest) MarshalJSON() ([]byte, error) {
 func (o EnqueueRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["type"] = o.Type
-	if !IsNil(o.Priorityomitempty) {
-		toSerialize["priority,omitempty"] = o.Priorityomitempty
+	if !IsNil(o.Priority) {
+		toSerialize["priority"] = o.Priority
 	}
-	if !IsNil(o.TaskIdomitempty) {
-		toSerialize["task_id,omitempty"] = o.TaskIdomitempty
+	if !IsNil(o.TaskId) {
+		toSerialize["task_id"] = o.TaskId
 	}
 	toSerialize["prompt"] = o.Prompt
-	if !IsNil(o.SessionIdomitempty) {
-		toSerialize["session_id,omitempty"] = o.SessionIdomitempty
+	if !IsNil(o.SessionId) {
+		toSerialize["session_id"] = o.SessionId
 	}
-	if o.RequiredCapsomitempty.IsSet() {
-		toSerialize["required_caps,omitempty"] = o.RequiredCapsomitempty.Get()
+	if o.RequiredCaps.IsSet() {
+		toSerialize["required_caps"] = o.RequiredCaps.Get()
 	}
-	if o.Payloadomitempty.IsSet() {
-		toSerialize["payload,omitempty"] = o.Payloadomitempty.Get()
+	if o.Payload.IsSet() {
+		toSerialize["payload"] = o.Payload.Get()
 	}
 	return toSerialize, nil
 }

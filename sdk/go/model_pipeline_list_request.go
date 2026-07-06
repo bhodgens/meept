@@ -19,7 +19,7 @@ var _ MappedNullable = &PipelineListRequest{}
 
 // PipelineListRequest struct for PipelineListRequest
 type PipelineListRequest struct {
-	Limitomitempty *int32 `json:"limit,omitempty,omitempty"`
+	Limit *int32 `json:"limit,omitempty"`
 }
 
 // NewPipelineListRequest instantiates a new PipelineListRequest object
@@ -39,36 +39,36 @@ func NewPipelineListRequestWithDefaults() *PipelineListRequest {
 	return &this
 }
 
-// GetLimitomitempty returns the Limitomitempty field value if set, zero value otherwise.
-func (o *PipelineListRequest) GetLimitomitempty() int32 {
-	if o == nil || IsNil(o.Limitomitempty) {
+// GetLimit returns the Limit field value if set, zero value otherwise.
+func (o *PipelineListRequest) GetLimit() int32 {
+	if o == nil || IsNil(o.Limit) {
 		var ret int32
 		return ret
 	}
-	return *o.Limitomitempty
+	return *o.Limit
 }
 
-// GetLimitomitemptyOk returns a tuple with the Limitomitempty field value if set, nil otherwise
+// GetLimitOk returns a tuple with the Limit field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *PipelineListRequest) GetLimitomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.Limitomitempty) {
+func (o *PipelineListRequest) GetLimitOk() (*int32, bool) {
+	if o == nil || IsNil(o.Limit) {
 		return nil, false
 	}
-	return o.Limitomitempty, true
+	return o.Limit, true
 }
 
-// HasLimitomitempty returns a boolean if a field has been set.
-func (o *PipelineListRequest) HasLimitomitempty() bool {
-	if o != nil && !IsNil(o.Limitomitempty) {
+// HasLimit returns a boolean if a field has been set.
+func (o *PipelineListRequest) HasLimit() bool {
+	if o != nil && !IsNil(o.Limit) {
 		return true
 	}
 
 	return false
 }
 
-// SetLimitomitempty gets a reference to the given int32 and assigns it to the Limitomitempty field.
-func (o *PipelineListRequest) SetLimitomitempty(v int32) {
-	o.Limitomitempty = &v
+// SetLimit gets a reference to the given int32 and assigns it to the Limit field.
+func (o *PipelineListRequest) SetLimit(v int32) {
+	o.Limit = &v
 }
 
 func (o PipelineListRequest) MarshalJSON() ([]byte, error) {
@@ -81,8 +81,8 @@ func (o PipelineListRequest) MarshalJSON() ([]byte, error) {
 
 func (o PipelineListRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	if !IsNil(o.Limitomitempty) {
-		toSerialize["limit,omitempty"] = o.Limitomitempty
+	if !IsNil(o.Limit) {
+		toSerialize["limit"] = o.Limit
 	}
 	return toSerialize, nil
 }

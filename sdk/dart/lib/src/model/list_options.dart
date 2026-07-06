@@ -11,19 +11,19 @@ part 'list_options.g.dart';
 /// ListOptions
 ///
 /// Properties:
-/// * [limitCommaOmitempty] 
-/// * [offsetCommaOmitempty] 
-/// * [filterCommaOmitempty] 
+/// * [limit] 
+/// * [offset] 
+/// * [filter] 
 @BuiltValue()
 abstract class ListOptions implements Built<ListOptions, ListOptionsBuilder> {
-  @BuiltValueField(wireName: r'limit,omitempty')
-  int? get limitCommaOmitempty;
+  @BuiltValueField(wireName: r'limit')
+  int? get limit;
 
-  @BuiltValueField(wireName: r'offset,omitempty')
-  int? get offsetCommaOmitempty;
+  @BuiltValueField(wireName: r'offset')
+  int? get offset;
 
-  @BuiltValueField(wireName: r'filter,omitempty')
-  String? get filterCommaOmitempty;
+  @BuiltValueField(wireName: r'filter')
+  String? get filter;
 
   ListOptions._();
 
@@ -48,24 +48,24 @@ class _$ListOptionsSerializer implements PrimitiveSerializer<ListOptions> {
     ListOptions object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
-    if (object.limitCommaOmitempty != null) {
-      yield r'limit,omitempty';
+    if (object.limit != null) {
+      yield r'limit';
       yield serializers.serialize(
-        object.limitCommaOmitempty,
+        object.limit,
         specifiedType: const FullType(int),
       );
     }
-    if (object.offsetCommaOmitempty != null) {
-      yield r'offset,omitempty';
+    if (object.offset != null) {
+      yield r'offset';
       yield serializers.serialize(
-        object.offsetCommaOmitempty,
+        object.offset,
         specifiedType: const FullType(int),
       );
     }
-    if (object.filterCommaOmitempty != null) {
-      yield r'filter,omitempty';
+    if (object.filter != null) {
+      yield r'filter';
       yield serializers.serialize(
-        object.filterCommaOmitempty,
+        object.filter,
         specifiedType: const FullType(String),
       );
     }
@@ -92,26 +92,26 @@ class _$ListOptionsSerializer implements PrimitiveSerializer<ListOptions> {
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
-        case r'limit,omitempty':
+        case r'limit':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.limitCommaOmitempty = valueDes;
+          result.limit = valueDes;
           break;
-        case r'offset,omitempty':
+        case r'offset':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.offsetCommaOmitempty = valueDes;
+          result.offset = valueDes;
           break;
-        case r'filter,omitempty':
+        case r'filter':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.filterCommaOmitempty = valueDes;
+          result.filter = valueDes;
           break;
         default:
           unhandled.add(key);

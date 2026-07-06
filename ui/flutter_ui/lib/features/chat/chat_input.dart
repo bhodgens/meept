@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data' show Uint8List;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show File; // ignore: web_unsafe_import
 
@@ -431,10 +430,11 @@ class _ChatInputState extends ConsumerState<ChatInput>
       // For `/skill <name>` we keep the full text as the query so the
       // autocomplete can filter skill names by the argument prefix.
       final isSkillArgs = spaceIdx != -1 && text.substring(0, spaceIdx) == '/skill';
-      // For `/project <path>` keep the full text as the query so the
-      // autocomplete can filter by the path prefix (project-mode).
+      // Sync with SlashAutocomplete._projectArg() — mode detected by trailing space.
       final isProjectArgs = spaceIdx != -1 && text.substring(0, spaceIdx) == '/project';
-      final query = isSkillArgs
+      // `/skill <name>` and `/project <path>` pass full text as query so
+      // `SlashAutocomplete._skillArg()` / `_projectArg()` can detect mode.
+      final query = (isSkillArgs || isProjectArgs)
           ? text
           : (spaceIdx == -1 ? text : text.substring(0, spaceIdx));
       setState(() {
@@ -683,6 +683,8 @@ class _ChatInputState extends ConsumerState<ChatInput>
             _slashQuery = '/project ';
             _slashSelectedIndex = 0;
           });
+          // Ensure project paths are loaded before the popup tries to show.
+          unawaited(_loadProjectPaths());
           _focusNode.requestFocus();
           return true;
         }
@@ -698,6 +700,8 @@ class _ChatInputState extends ConsumerState<ChatInput>
             _slashQuery = '/project ';
             _slashSelectedIndex = 0;
           });
+          // Ensure project paths are loaded before the popup tries to show.
+          unawaited(_loadProjectPaths());
           _focusNode.requestFocus();
           return true;
         }

@@ -22,8 +22,8 @@ var _ MappedNullable = &SearchRequest{}
 // SearchRequest struct for SearchRequest
 type SearchRequest struct {
 	Query string `json:"query"`
-	Scopeomitempty *string `json:"scope,omitempty,omitempty"`
-	Limitomitempty *int32 `json:"limit,omitempty,omitempty"`
+	Scope *string `json:"scope,omitempty"`
+	Limit *int32 `json:"limit,omitempty"`
 }
 
 type _SearchRequest SearchRequest
@@ -70,68 +70,68 @@ func (o *SearchRequest) SetQuery(v string) {
 	o.Query = v
 }
 
-// GetScopeomitempty returns the Scopeomitempty field value if set, zero value otherwise.
-func (o *SearchRequest) GetScopeomitempty() string {
-	if o == nil || IsNil(o.Scopeomitempty) {
+// GetScope returns the Scope field value if set, zero value otherwise.
+func (o *SearchRequest) GetScope() string {
+	if o == nil || IsNil(o.Scope) {
 		var ret string
 		return ret
 	}
-	return *o.Scopeomitempty
+	return *o.Scope
 }
 
-// GetScopeomitemptyOk returns a tuple with the Scopeomitempty field value if set, nil otherwise
+// GetScopeOk returns a tuple with the Scope field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *SearchRequest) GetScopeomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Scopeomitempty) {
+func (o *SearchRequest) GetScopeOk() (*string, bool) {
+	if o == nil || IsNil(o.Scope) {
 		return nil, false
 	}
-	return o.Scopeomitempty, true
+	return o.Scope, true
 }
 
-// HasScopeomitempty returns a boolean if a field has been set.
-func (o *SearchRequest) HasScopeomitempty() bool {
-	if o != nil && !IsNil(o.Scopeomitempty) {
+// HasScope returns a boolean if a field has been set.
+func (o *SearchRequest) HasScope() bool {
+	if o != nil && !IsNil(o.Scope) {
 		return true
 	}
 
 	return false
 }
 
-// SetScopeomitempty gets a reference to the given string and assigns it to the Scopeomitempty field.
-func (o *SearchRequest) SetScopeomitempty(v string) {
-	o.Scopeomitempty = &v
+// SetScope gets a reference to the given string and assigns it to the Scope field.
+func (o *SearchRequest) SetScope(v string) {
+	o.Scope = &v
 }
 
-// GetLimitomitempty returns the Limitomitempty field value if set, zero value otherwise.
-func (o *SearchRequest) GetLimitomitempty() int32 {
-	if o == nil || IsNil(o.Limitomitempty) {
+// GetLimit returns the Limit field value if set, zero value otherwise.
+func (o *SearchRequest) GetLimit() int32 {
+	if o == nil || IsNil(o.Limit) {
 		var ret int32
 		return ret
 	}
-	return *o.Limitomitempty
+	return *o.Limit
 }
 
-// GetLimitomitemptyOk returns a tuple with the Limitomitempty field value if set, nil otherwise
+// GetLimitOk returns a tuple with the Limit field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *SearchRequest) GetLimitomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.Limitomitempty) {
+func (o *SearchRequest) GetLimitOk() (*int32, bool) {
+	if o == nil || IsNil(o.Limit) {
 		return nil, false
 	}
-	return o.Limitomitempty, true
+	return o.Limit, true
 }
 
-// HasLimitomitempty returns a boolean if a field has been set.
-func (o *SearchRequest) HasLimitomitempty() bool {
-	if o != nil && !IsNil(o.Limitomitempty) {
+// HasLimit returns a boolean if a field has been set.
+func (o *SearchRequest) HasLimit() bool {
+	if o != nil && !IsNil(o.Limit) {
 		return true
 	}
 
 	return false
 }
 
-// SetLimitomitempty gets a reference to the given int32 and assigns it to the Limitomitempty field.
-func (o *SearchRequest) SetLimitomitempty(v int32) {
-	o.Limitomitempty = &v
+// SetLimit gets a reference to the given int32 and assigns it to the Limit field.
+func (o *SearchRequest) SetLimit(v int32) {
+	o.Limit = &v
 }
 
 func (o SearchRequest) MarshalJSON() ([]byte, error) {
@@ -145,11 +145,11 @@ func (o SearchRequest) MarshalJSON() ([]byte, error) {
 func (o SearchRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["query"] = o.Query
-	if !IsNil(o.Scopeomitempty) {
-		toSerialize["scope,omitempty"] = o.Scopeomitempty
+	if !IsNil(o.Scope) {
+		toSerialize["scope"] = o.Scope
 	}
-	if !IsNil(o.Limitomitempty) {
-		toSerialize["limit,omitempty"] = o.Limitomitempty
+	if !IsNil(o.Limit) {
+		toSerialize["limit"] = o.Limit
 	}
 	return toSerialize, nil
 }

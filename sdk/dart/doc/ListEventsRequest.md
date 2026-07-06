@@ -8,9 +8,9 @@ import 'package:meept_client/api.dart';
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**timeMinCommaOmitempty** | **String** |  | [optional] 
-**timeMaxCommaOmitempty** | **String** |  | [optional] 
-**maxResultsCommaOmitempty** | **int** |  | [optional] 
+**timeMin** | **String** |  | [optional] 
+**timeMax** | **String** |  | [optional] 
+**maxResults** | **int** |  | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

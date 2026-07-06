@@ -22,9 +22,9 @@ var _ MappedNullable = &DaemonStatus{}
 // DaemonStatus struct for DaemonStatus
 type DaemonStatus struct {
 	Status string `json:"status"`
-	Pidomitempty *int32 `json:"pid,omitempty,omitempty"`
-	UptimeSecondsomitempty *float32 `json:"uptime_seconds,omitempty,omitempty"`
-	Modelomitempty *string `json:"model,omitempty,omitempty"`
+	Pid *int32 `json:"pid,omitempty"`
+	UptimeSeconds *float32 `json:"uptime_seconds,omitempty"`
+	Model *string `json:"model,omitempty"`
 	TokensUsed int32 `json:"tokens_used"`
 	TokensRemaining int32 `json:"tokens_remaining"`
 	BudgetUsed float32 `json:"budget_used"`
@@ -97,100 +97,100 @@ func (o *DaemonStatus) SetStatus(v string) {
 	o.Status = v
 }
 
-// GetPidomitempty returns the Pidomitempty field value if set, zero value otherwise.
-func (o *DaemonStatus) GetPidomitempty() int32 {
-	if o == nil || IsNil(o.Pidomitempty) {
+// GetPid returns the Pid field value if set, zero value otherwise.
+func (o *DaemonStatus) GetPid() int32 {
+	if o == nil || IsNil(o.Pid) {
 		var ret int32
 		return ret
 	}
-	return *o.Pidomitempty
+	return *o.Pid
 }
 
-// GetPidomitemptyOk returns a tuple with the Pidomitempty field value if set, nil otherwise
+// GetPidOk returns a tuple with the Pid field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *DaemonStatus) GetPidomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.Pidomitempty) {
+func (o *DaemonStatus) GetPidOk() (*int32, bool) {
+	if o == nil || IsNil(o.Pid) {
 		return nil, false
 	}
-	return o.Pidomitempty, true
+	return o.Pid, true
 }
 
-// HasPidomitempty returns a boolean if a field has been set.
-func (o *DaemonStatus) HasPidomitempty() bool {
-	if o != nil && !IsNil(o.Pidomitempty) {
+// HasPid returns a boolean if a field has been set.
+func (o *DaemonStatus) HasPid() bool {
+	if o != nil && !IsNil(o.Pid) {
 		return true
 	}
 
 	return false
 }
 
-// SetPidomitempty gets a reference to the given int32 and assigns it to the Pidomitempty field.
-func (o *DaemonStatus) SetPidomitempty(v int32) {
-	o.Pidomitempty = &v
+// SetPid gets a reference to the given int32 and assigns it to the Pid field.
+func (o *DaemonStatus) SetPid(v int32) {
+	o.Pid = &v
 }
 
-// GetUptimeSecondsomitempty returns the UptimeSecondsomitempty field value if set, zero value otherwise.
-func (o *DaemonStatus) GetUptimeSecondsomitempty() float32 {
-	if o == nil || IsNil(o.UptimeSecondsomitempty) {
+// GetUptimeSeconds returns the UptimeSeconds field value if set, zero value otherwise.
+func (o *DaemonStatus) GetUptimeSeconds() float32 {
+	if o == nil || IsNil(o.UptimeSeconds) {
 		var ret float32
 		return ret
 	}
-	return *o.UptimeSecondsomitempty
+	return *o.UptimeSeconds
 }
 
-// GetUptimeSecondsomitemptyOk returns a tuple with the UptimeSecondsomitempty field value if set, nil otherwise
+// GetUptimeSecondsOk returns a tuple with the UptimeSeconds field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *DaemonStatus) GetUptimeSecondsomitemptyOk() (*float32, bool) {
-	if o == nil || IsNil(o.UptimeSecondsomitempty) {
+func (o *DaemonStatus) GetUptimeSecondsOk() (*float32, bool) {
+	if o == nil || IsNil(o.UptimeSeconds) {
 		return nil, false
 	}
-	return o.UptimeSecondsomitempty, true
+	return o.UptimeSeconds, true
 }
 
-// HasUptimeSecondsomitempty returns a boolean if a field has been set.
-func (o *DaemonStatus) HasUptimeSecondsomitempty() bool {
-	if o != nil && !IsNil(o.UptimeSecondsomitempty) {
+// HasUptimeSeconds returns a boolean if a field has been set.
+func (o *DaemonStatus) HasUptimeSeconds() bool {
+	if o != nil && !IsNil(o.UptimeSeconds) {
 		return true
 	}
 
 	return false
 }
 
-// SetUptimeSecondsomitempty gets a reference to the given float32 and assigns it to the UptimeSecondsomitempty field.
-func (o *DaemonStatus) SetUptimeSecondsomitempty(v float32) {
-	o.UptimeSecondsomitempty = &v
+// SetUptimeSeconds gets a reference to the given float32 and assigns it to the UptimeSeconds field.
+func (o *DaemonStatus) SetUptimeSeconds(v float32) {
+	o.UptimeSeconds = &v
 }
 
-// GetModelomitempty returns the Modelomitempty field value if set, zero value otherwise.
-func (o *DaemonStatus) GetModelomitempty() string {
-	if o == nil || IsNil(o.Modelomitempty) {
+// GetModel returns the Model field value if set, zero value otherwise.
+func (o *DaemonStatus) GetModel() string {
+	if o == nil || IsNil(o.Model) {
 		var ret string
 		return ret
 	}
-	return *o.Modelomitempty
+	return *o.Model
 }
 
-// GetModelomitemptyOk returns a tuple with the Modelomitempty field value if set, nil otherwise
+// GetModelOk returns a tuple with the Model field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *DaemonStatus) GetModelomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Modelomitempty) {
+func (o *DaemonStatus) GetModelOk() (*string, bool) {
+	if o == nil || IsNil(o.Model) {
 		return nil, false
 	}
-	return o.Modelomitempty, true
+	return o.Model, true
 }
 
-// HasModelomitempty returns a boolean if a field has been set.
-func (o *DaemonStatus) HasModelomitempty() bool {
-	if o != nil && !IsNil(o.Modelomitempty) {
+// HasModel returns a boolean if a field has been set.
+func (o *DaemonStatus) HasModel() bool {
+	if o != nil && !IsNil(o.Model) {
 		return true
 	}
 
 	return false
 }
 
-// SetModelomitempty gets a reference to the given string and assigns it to the Modelomitempty field.
-func (o *DaemonStatus) SetModelomitempty(v string) {
-	o.Modelomitempty = &v
+// SetModel gets a reference to the given string and assigns it to the Model field.
+func (o *DaemonStatus) SetModel(v string) {
+	o.Model = &v
 }
 
 // GetTokensUsed returns the TokensUsed field value
@@ -796,14 +796,14 @@ func (o DaemonStatus) MarshalJSON() ([]byte, error) {
 func (o DaemonStatus) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["status"] = o.Status
-	if !IsNil(o.Pidomitempty) {
-		toSerialize["pid,omitempty"] = o.Pidomitempty
+	if !IsNil(o.Pid) {
+		toSerialize["pid"] = o.Pid
 	}
-	if !IsNil(o.UptimeSecondsomitempty) {
-		toSerialize["uptime_seconds,omitempty"] = o.UptimeSecondsomitempty
+	if !IsNil(o.UptimeSeconds) {
+		toSerialize["uptime_seconds"] = o.UptimeSeconds
 	}
-	if !IsNil(o.Modelomitempty) {
-		toSerialize["model,omitempty"] = o.Modelomitempty
+	if !IsNil(o.Model) {
+		toSerialize["model"] = o.Model
 	}
 	toSerialize["tokens_used"] = o.TokensUsed
 	toSerialize["tokens_remaining"] = o.TokensRemaining

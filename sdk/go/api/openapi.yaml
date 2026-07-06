@@ -1871,9 +1871,9 @@ components:
           type: string
         type:
           type: string
-        source,omitempty:
+        source:
           type: string
-        payload,omitempty:
+        payload:
           nullable: true
           type: string
       required:
@@ -1914,12 +1914,12 @@ components:
       type: object
     ClearCacheRequest:
       properties:
-        prefix,omitempty:
+        prefix:
           type: string
       type: object
     InvalidateRequest:
       properties:
-        path,omitempty:
+        path:
           type: string
       type: object
     CacheInspectResult:
@@ -1934,7 +1934,7 @@ components:
           type: string
         hit_count:
           type: integer
-        file_hashes,omitempty:
+        file_hashes:
           nullable: true
           type: string
         source:
@@ -1959,9 +1959,9 @@ components:
           type: string
         summary:
           type: string
-        description,omitempty:
+        description:
           type: string
-        location,omitempty:
+        location:
           type: string
         start:
           type: string
@@ -1969,11 +1969,11 @@ components:
           type: string
         all_day:
           type: boolean
-        status,omitempty:
+        status:
           type: string
-        html_link,omitempty:
+        html_link:
           type: string
-        attendees,omitempty:
+        attendees:
           items:
             description: TODO default missing array inner type to string
             type: string
@@ -1990,20 +1990,20 @@ components:
       properties:
         email:
           type: string
-        display_name,omitempty:
+        display_name:
           type: string
-        response,omitempty:
+        response:
           type: string
       required:
       - email
       type: object
     ListEventsRequest:
       properties:
-        time_min,omitempty:
+        time_min:
           type: string
-        time_max,omitempty:
+        time_max:
           type: string
-        max_results,omitempty:
+        max_results:
           type: integer
       type: object
     ListEventsResponse:
@@ -2024,15 +2024,15 @@ components:
       properties:
         summary:
           type: string
-        description,omitempty:
+        description:
           type: string
-        location,omitempty:
+        location:
           type: string
         start:
           type: string
         end:
           type: string
-        attendees,omitempty:
+        attendees:
           nullable: true
           type: string
       required:
@@ -2044,16 +2044,16 @@ components:
       properties:
         id:
           type: string
-        summary,omitempty:
+        summary:
           type: string
-        description,omitempty:
+        description:
           type: string
-        location,omitempty:
+        location:
           type: string
-        start,omitempty:
+        start:
           nullable: true
           type: string
-        end,omitempty:
+        end:
           nullable: true
           type: string
       required:
@@ -2079,7 +2079,7 @@ components:
           type: string
         conversation_id:
           type: string
-        agent_id,omitempty:
+        agent_id:
           type: string
       required:
       - conversation_id
@@ -2089,9 +2089,9 @@ components:
       properties:
         reply:
           type: string
-        model,omitempty:
+        model:
           type: string
-        tokens_used,omitempty:
+        tokens_used:
           type: integer
       required:
       - reply
@@ -2102,7 +2102,7 @@ components:
           type: string
         conversation_id:
           type: string
-        source,omitempty:
+        source:
           type: string
       required:
       - conversation_id
@@ -2114,7 +2114,7 @@ components:
           type: string
         conversation_id:
           type: string
-        source,omitempty:
+        source:
           type: string
       required:
       - conversation_id
@@ -2147,11 +2147,11 @@ components:
       properties:
         status:
           type: string
-        pid,omitempty:
+        pid:
           type: integer
-        uptime_seconds,omitempty:
+        uptime_seconds:
           type: number
-        model,omitempty:
+        model:
           type: string
         tokens_used:
           type: integer
@@ -2232,9 +2232,9 @@ components:
       properties:
         query:
           type: string
-        limit,omitempty:
+        limit:
           type: integer
-        category,omitempty:
+        category:
           type: string
       required:
       - query
@@ -2256,9 +2256,9 @@ components:
       properties:
         query:
           type: string
-        limit,omitempty:
+        limit:
           type: integer
-        shard_types,omitempty:
+        shard_types:
           nullable: true
           type: string
       required:
@@ -2270,7 +2270,7 @@ components:
           type: string
         content:
           type: string
-        metadata,omitempty:
+        metadata:
           nullable: true
           type: string
         relevance_score:
@@ -2289,7 +2289,7 @@ components:
           type: string
         content:
           type: string
-        metadata,omitempty:
+        metadata:
           nullable: true
           type: string
       required:
@@ -2453,12 +2453,12 @@ components:
           type: string
         status:
           type: string
-        error,omitempty:
+        error:
           type: string
-        started_at,omitempty:
+        started_at:
           nullable: true
           type: string
-        ended_at,omitempty:
+        ended_at:
           nullable: true
           type: string
       required:
@@ -2515,12 +2515,12 @@ components:
           type: string
         status:
           type: string
-        error,omitempty:
+        error:
           type: string
-        started_at,omitempty:
+        started_at:
           nullable: true
           type: string
-        ended_at,omitempty:
+        ended_at:
           nullable: true
           type: string
       required:
@@ -2530,7 +2530,7 @@ components:
       type: object
     PipelineListRequest:
       properties:
-        limit,omitempty:
+        limit:
           type: integer
       type: object
     PipelineInfo:
@@ -2551,19 +2551,19 @@ components:
       type: object
     CreatePipelineRequest:
       properties:
-        id,omitempty:
+        id:
           type: string
         name:
           type: string
-        description,omitempty:
+        description:
           type: string
-        steps,omitempty:
+        steps:
           items:
             description: TODO default missing array inner type to string
             type: string
           nullable: true
           type: array
-        metadata,omitempty:
+        metadata:
           nullable: true
           type: string
       required:
@@ -2598,11 +2598,11 @@ components:
       properties:
         title:
           type: string
-        description,omitempty:
+        description:
           type: string
-        project_id,omitempty:
+        project_id:
           type: string
-        project_path,omitempty:
+        project_path:
           type: string
         session_id:
           type: string
@@ -2631,7 +2631,7 @@ components:
           type: string
         by:
           type: string
-        reason,omitempty:
+        reason:
           type: string
       required:
       - by
@@ -2674,13 +2674,13 @@ components:
       type: object
     RegisterProjectRequest:
       properties:
-        id,omitempty:
+        id:
           type: string
         name:
           type: string
-        git_url,omitempty:
+        git_url:
           type: string
-        local_path,omitempty:
+        local_path:
           type: string
       required:
       - name
@@ -2704,18 +2704,18 @@ components:
       properties:
         type:
           type: string
-        priority,omitempty:
+        priority:
           type: integer
-        task_id,omitempty:
+        task_id:
           type: string
         prompt:
           type: string
-        session_id,omitempty:
+        session_id:
           type: string
-        required_caps,omitempty:
+        required_caps:
           nullable: true
           type: string
-        payload,omitempty:
+        payload:
           nullable: true
           type: string
       required:
@@ -2726,7 +2726,7 @@ components:
       properties:
         worker_id:
           type: string
-        capabilities,omitempty:
+        capabilities:
           nullable: true
           type: string
       required:
@@ -2736,7 +2736,7 @@ components:
       properties:
         job_id:
           type: string
-        result,omitempty:
+        result:
           type: object
       required:
       - job_id
@@ -2767,9 +2767,9 @@ components:
       type: object
     ListRequest:
       properties:
-        state,omitempty:
+        state:
           type: string
-        limit,omitempty:
+        limit:
           type: integer
       type: object
     RuntimeService:
@@ -2805,13 +2805,13 @@ components:
           type: string
         enabled:
           type: boolean
-        last_run,omitempty:
+        last_run:
           nullable: true
           type: string
-        next_run,omitempty:
+        next_run:
           nullable: true
           type: string
-        last_error,omitempty:
+        last_error:
           type: string
         run_count:
           type: integer
@@ -2835,13 +2835,13 @@ components:
           type: string
         type:
           type: string
-        agent_config,omitempty:
+        agent_config:
           nullable: true
           type: object
-        shell_config,omitempty:
+        shell_config:
           nullable: true
           type: object
-        enabled,omitempty:
+        enabled:
           type: boolean
       required:
       - id
@@ -2853,14 +2853,14 @@ components:
       properties:
         prompt:
           type: string
-        context,omitempty:
+        context:
           nullable: true
           type: string
-        model,omitempty:
+        model:
           type: string
-        max_tokens,omitempty:
+        max_tokens:
           type: integer
-        temperature,omitempty:
+        temperature:
           type: number
       required:
       - prompt
@@ -2869,15 +2869,15 @@ components:
       properties:
         command:
           type: string
-        args,omitempty:
+        args:
           nullable: true
           type: string
-        work_dir,omitempty:
+        work_dir:
           type: string
-        env,omitempty:
+        env:
           nullable: true
           type: string
-        timeout_secs,omitempty:
+        timeout_secs:
           type: integer
         capture_output:
           type: boolean
@@ -2895,13 +2895,13 @@ components:
           type: string
         enabled:
           type: boolean
-        last_run,omitempty:
+        last_run:
           nullable: true
           type: string
-        next_run,omitempty:
+        next_run:
           nullable: true
           type: string
-        last_error,omitempty:
+        last_error:
           type: string
         run_count:
           type: integer
@@ -2969,9 +2969,9 @@ components:
       properties:
         query:
           type: string
-        scope,omitempty:
+        scope:
           type: string
-        limit,omitempty:
+        limit:
           type: integer
       required:
       - query
@@ -3009,7 +3009,7 @@ components:
       properties:
         allowed:
           type: boolean
-        reason,omitempty:
+        reason:
           type: string
       required:
       - allowed
@@ -3032,7 +3032,7 @@ components:
       type: object
     AuditRequest:
       properties:
-        limit,omitempty:
+        limit:
           type: integer
       type: object
     SelfImproveService:
@@ -3045,7 +3045,7 @@ components:
       properties:
         enabled:
           type: boolean
-        last_cycle,omitempty:
+        last_cycle:
           type: string
         skills_learned:
           type: integer
@@ -3058,7 +3058,7 @@ components:
       type: object
     TriggerRequest:
       properties:
-        force,omitempty:
+        force:
           type: boolean
       type: object
     CancelRequest:
@@ -3244,7 +3244,7 @@ components:
       type: object
     CreateSessionRequest:
       properties:
-        name,omitempty:
+        name:
           type: string
       type: object
     GetSessionRequest:
@@ -3258,9 +3258,9 @@ components:
       properties:
         id:
           type: string
-        offset,omitempty:
+        offset:
           type: integer
-        limit,omitempty:
+        limit:
           type: integer
       required:
       - id
@@ -3274,7 +3274,7 @@ components:
       type: object
     ListSessionsRequest:
       properties:
-        limit,omitempty:
+        limit:
           type: integer
       type: object
     AttachSessionRequest:
@@ -3303,7 +3303,7 @@ components:
           type: string
         from_message_id:
           type: integer
-        name,omitempty:
+        name:
           type: string
       required:
       - from_message_id
@@ -3358,9 +3358,9 @@ components:
       type: object
     SkillsListRequest:
       properties:
-        category,omitempty:
+        category:
           type: string
-        limit,omitempty:
+        limit:
           type: integer
       type: object
     SkillInfo:
@@ -3371,14 +3371,14 @@ components:
           type: string
         description:
           type: string
-        category,omitempty:
+        category:
           type: string
-        capabilities,omitempty:
+        capabilities:
           nullable: true
           type: string
         enabled:
           type: boolean
-        ui_type,omitempty:
+        ui_type:
           type: string
       required:
       - description
@@ -3396,25 +3396,25 @@ components:
           type: string
         ui_type:
           type: string
-        category,omitempty:
+        category:
           type: string
-        tags,omitempty:
+        tags:
           nullable: true
           type: string
-        examples,omitempty:
+        examples:
           nullable: true
           type: string
-        risk_level,omitempty:
+        risk_level:
           type: string
-        body,omitempty:
+        body:
           type: string
-        fields,omitempty:
+        fields:
           items:
             description: TODO default missing array inner type to string
             type: string
           nullable: true
           type: array
-        actions,omitempty:
+        actions:
           items:
             description: TODO default missing array inner type to string
             type: string
@@ -3434,16 +3434,16 @@ components:
           type: string
         type:
           type: string
-        required,omitempty:
+        required:
           type: boolean
-        default,omitempty:
+        default:
           type: object
-        options,omitempty:
+        options:
           nullable: true
           type: string
-        placeholder,omitempty:
+        placeholder:
           type: string
-        help,omitempty:
+        help:
           type: string
       required:
       - label
@@ -3458,7 +3458,7 @@ components:
           type: string
         type:
           type: string
-        style,omitempty:
+        style:
           type: string
       required:
       - id
@@ -3488,7 +3488,7 @@ components:
           type: string
         success:
           type: boolean
-        error,omitempty:
+        error:
           type: string
       required:
       - output
@@ -3504,9 +3504,9 @@ components:
       properties:
         name:
           type: string
-        description,omitempty:
+        description:
           type: string
-        session_id,omitempty:
+        session_id:
           type: string
       required:
       - name
@@ -3520,18 +3520,18 @@ components:
       type: object
     TaskListRequest:
       properties:
-        limit,omitempty:
+        limit:
           type: integer
-        session_id,omitempty:
+        session_id:
           type: string
       type: object
     UpdateTaskRequest:
       properties:
         id:
           type: string
-        state,omitempty:
+        state:
           type: string
-        name,omitempty:
+        name:
           type: string
       required:
       - id
@@ -3568,7 +3568,7 @@ components:
       type: object
     TemplatesListRequest:
       properties:
-        limit,omitempty:
+        limit:
           type: integer
       type: object
     TemplateInfo:
@@ -3579,11 +3579,11 @@ components:
           type: string
         scope:
           type: object
-        path,omitempty:
+        path:
           type: string
         priority:
           type: integer
-        body,omitempty:
+        body:
           type: string
       required:
       - description
@@ -3602,7 +3602,7 @@ components:
       properties:
         name:
           type: string
-        args,omitempty:
+        args:
           nullable: true
           type: string
       required:
@@ -3612,11 +3612,11 @@ components:
       properties:
         prompt:
           type: string
-        output,omitempty:
+        output:
           type: string
         success:
           type: boolean
-        error,omitempty:
+        error:
           type: string
       required:
       - prompt
@@ -3626,7 +3626,7 @@ components:
       properties:
         conversation_id:
           type: string
-        name,omitempty:
+        name:
           type: string
       required:
       - conversation_id
@@ -3645,9 +3645,9 @@ components:
           type: string
         command:
           type: string
-        output,omitempty:
+        output:
           type: string
-        stderr,omitempty:
+        stderr:
           type: string
         exit_code:
           type: integer
@@ -3715,11 +3715,11 @@ components:
       type: object
     ListOptions:
       properties:
-        limit,omitempty:
+        limit:
           type: integer
-        offset,omitempty:
+        offset:
           type: integer
-        filter,omitempty:
+        filter:
           type: string
       type: object
     PaginatedResponse:
@@ -3734,7 +3734,7 @@ components:
           type: integer
         has_more:
           type: boolean
-        next_offset,omitempty:
+        next_offset:
           type: integer
       required:
       - has_more

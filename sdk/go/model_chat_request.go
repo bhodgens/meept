@@ -23,7 +23,7 @@ var _ MappedNullable = &ChatRequest{}
 type ChatRequest struct {
 	Message string `json:"message"`
 	ConversationId string `json:"conversation_id"`
-	AgentIdomitempty *string `json:"agent_id,omitempty,omitempty"`
+	AgentId *string `json:"agent_id,omitempty"`
 }
 
 type _ChatRequest ChatRequest
@@ -95,36 +95,36 @@ func (o *ChatRequest) SetConversationId(v string) {
 	o.ConversationId = v
 }
 
-// GetAgentIdomitempty returns the AgentIdomitempty field value if set, zero value otherwise.
-func (o *ChatRequest) GetAgentIdomitempty() string {
-	if o == nil || IsNil(o.AgentIdomitempty) {
+// GetAgentId returns the AgentId field value if set, zero value otherwise.
+func (o *ChatRequest) GetAgentId() string {
+	if o == nil || IsNil(o.AgentId) {
 		var ret string
 		return ret
 	}
-	return *o.AgentIdomitempty
+	return *o.AgentId
 }
 
-// GetAgentIdomitemptyOk returns a tuple with the AgentIdomitempty field value if set, nil otherwise
+// GetAgentIdOk returns a tuple with the AgentId field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ChatRequest) GetAgentIdomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.AgentIdomitempty) {
+func (o *ChatRequest) GetAgentIdOk() (*string, bool) {
+	if o == nil || IsNil(o.AgentId) {
 		return nil, false
 	}
-	return o.AgentIdomitempty, true
+	return o.AgentId, true
 }
 
-// HasAgentIdomitempty returns a boolean if a field has been set.
-func (o *ChatRequest) HasAgentIdomitempty() bool {
-	if o != nil && !IsNil(o.AgentIdomitempty) {
+// HasAgentId returns a boolean if a field has been set.
+func (o *ChatRequest) HasAgentId() bool {
+	if o != nil && !IsNil(o.AgentId) {
 		return true
 	}
 
 	return false
 }
 
-// SetAgentIdomitempty gets a reference to the given string and assigns it to the AgentIdomitempty field.
-func (o *ChatRequest) SetAgentIdomitempty(v string) {
-	o.AgentIdomitempty = &v
+// SetAgentId gets a reference to the given string and assigns it to the AgentId field.
+func (o *ChatRequest) SetAgentId(v string) {
+	o.AgentId = &v
 }
 
 func (o ChatRequest) MarshalJSON() ([]byte, error) {
@@ -139,8 +139,8 @@ func (o ChatRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["message"] = o.Message
 	toSerialize["conversation_id"] = o.ConversationId
-	if !IsNil(o.AgentIdomitempty) {
-		toSerialize["agent_id,omitempty"] = o.AgentIdomitempty
+	if !IsNil(o.AgentId) {
+		toSerialize["agent_id"] = o.AgentId
 	}
 	return toSerialize, nil
 }

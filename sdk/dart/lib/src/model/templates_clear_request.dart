@@ -12,14 +12,14 @@ part 'templates_clear_request.g.dart';
 ///
 /// Properties:
 /// * [conversationId] 
-/// * [nameCommaOmitempty] 
+/// * [name] 
 @BuiltValue()
 abstract class TemplatesClearRequest implements Built<TemplatesClearRequest, TemplatesClearRequestBuilder> {
   @BuiltValueField(wireName: r'conversation_id')
   String get conversationId;
 
-  @BuiltValueField(wireName: r'name,omitempty')
-  String? get nameCommaOmitempty;
+  @BuiltValueField(wireName: r'name')
+  String? get name;
 
   TemplatesClearRequest._();
 
@@ -49,10 +49,10 @@ class _$TemplatesClearRequestSerializer implements PrimitiveSerializer<Templates
       object.conversationId,
       specifiedType: const FullType(String),
     );
-    if (object.nameCommaOmitempty != null) {
-      yield r'name,omitempty';
+    if (object.name != null) {
+      yield r'name';
       yield serializers.serialize(
-        object.nameCommaOmitempty,
+        object.name,
         specifiedType: const FullType(String),
       );
     }
@@ -86,12 +86,12 @@ class _$TemplatesClearRequestSerializer implements PrimitiveSerializer<Templates
           ) as String;
           result.conversationId = valueDes;
           break;
-        case r'name,omitempty':
+        case r'name':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.nameCommaOmitempty = valueDes;
+          result.name = valueDes;
           break;
         default:
           unhandled.add(key);

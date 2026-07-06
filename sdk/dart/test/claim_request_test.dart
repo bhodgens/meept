@@ -12,8 +12,8 @@ void main() {
       // TODO
     });
 
-    // String capabilitiesCommaOmitempty
-    test('to test the property `capabilitiesCommaOmitempty`', () async {
+    // String capabilities
+    test('to test the property `capabilities`', () async {
       // TODO
     });
 

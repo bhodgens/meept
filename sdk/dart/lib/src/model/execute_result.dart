@@ -13,7 +13,7 @@ part 'execute_result.g.dart';
 /// Properties:
 /// * [output] 
 /// * [success] 
-/// * [errorCommaOmitempty] 
+/// * [error] 
 @BuiltValue()
 abstract class ExecuteResult implements Built<ExecuteResult, ExecuteResultBuilder> {
   @BuiltValueField(wireName: r'output')
@@ -22,8 +22,8 @@ abstract class ExecuteResult implements Built<ExecuteResult, ExecuteResultBuilde
   @BuiltValueField(wireName: r'success')
   bool get success;
 
-  @BuiltValueField(wireName: r'error,omitempty')
-  String? get errorCommaOmitempty;
+  @BuiltValueField(wireName: r'error')
+  String? get error;
 
   ExecuteResult._();
 
@@ -58,10 +58,10 @@ class _$ExecuteResultSerializer implements PrimitiveSerializer<ExecuteResult> {
       object.success,
       specifiedType: const FullType(bool),
     );
-    if (object.errorCommaOmitempty != null) {
-      yield r'error,omitempty';
+    if (object.error != null) {
+      yield r'error';
       yield serializers.serialize(
-        object.errorCommaOmitempty,
+        object.error,
         specifiedType: const FullType(String),
       );
     }
@@ -102,12 +102,12 @@ class _$ExecuteResultSerializer implements PrimitiveSerializer<ExecuteResult> {
           ) as bool;
           result.success = valueDes;
           break;
-        case r'error,omitempty':
+        case r'error':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.errorCommaOmitempty = valueDes;
+          result.error = valueDes;
           break;
         default:
           unhandled.add(key);

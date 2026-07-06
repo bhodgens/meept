@@ -8,23 +8,23 @@ part of 'register_project_request.dart';
 
 class _$RegisterProjectRequest extends RegisterProjectRequest {
   @override
-  final String? idCommaOmitempty;
+  final String? id;
   @override
   final String name;
   @override
-  final String? gitUrlCommaOmitempty;
+  final String? gitUrl;
   @override
-  final String? localPathCommaOmitempty;
+  final String? localPath;
 
   factory _$RegisterProjectRequest(
           [void Function(RegisterProjectRequestBuilder)? updates]) =>
       (RegisterProjectRequestBuilder()..update(updates))._build();
 
   _$RegisterProjectRequest._(
-      {this.idCommaOmitempty,
+      {this.id,
       required this.name,
-      this.gitUrlCommaOmitempty,
-      this.localPathCommaOmitempty})
+      this.gitUrl,
+      this.localPath})
       : super._();
   @override
   RegisterProjectRequest rebuild(
@@ -39,19 +39,19 @@ class _$RegisterProjectRequest extends RegisterProjectRequest {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is RegisterProjectRequest &&
-        idCommaOmitempty == other.idCommaOmitempty &&
+        id == other.id &&
         name == other.name &&
-        gitUrlCommaOmitempty == other.gitUrlCommaOmitempty &&
-        localPathCommaOmitempty == other.localPathCommaOmitempty;
+        gitUrl == other.gitUrl &&
+        localPath == other.localPath;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
-    _$hash = $jc(_$hash, idCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, id.hashCode);
     _$hash = $jc(_$hash, name.hashCode);
-    _$hash = $jc(_$hash, gitUrlCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, localPathCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, gitUrl.hashCode);
+    _$hash = $jc(_$hash, localPath.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -59,10 +59,10 @@ class _$RegisterProjectRequest extends RegisterProjectRequest {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'RegisterProjectRequest')
-          ..add('idCommaOmitempty', idCommaOmitempty)
+          ..add('id', id)
           ..add('name', name)
-          ..add('gitUrlCommaOmitempty', gitUrlCommaOmitempty)
-          ..add('localPathCommaOmitempty', localPathCommaOmitempty))
+          ..add('gitUrl', gitUrl)
+          ..add('localPath', localPath))
         .toString();
   }
 }
@@ -71,24 +71,24 @@ class RegisterProjectRequestBuilder
     implements Builder<RegisterProjectRequest, RegisterProjectRequestBuilder> {
   _$RegisterProjectRequest? _$v;
 
-  String? _idCommaOmitempty;
-  String? get idCommaOmitempty => _$this._idCommaOmitempty;
-  set idCommaOmitempty(String? idCommaOmitempty) =>
-      _$this._idCommaOmitempty = idCommaOmitempty;
+  String? _id;
+  String? get id => _$this._id;
+  set id(String? id) =>
+      _$this._id = id;
 
   String? _name;
   String? get name => _$this._name;
   set name(String? name) => _$this._name = name;
 
-  String? _gitUrlCommaOmitempty;
-  String? get gitUrlCommaOmitempty => _$this._gitUrlCommaOmitempty;
-  set gitUrlCommaOmitempty(String? gitUrlCommaOmitempty) =>
-      _$this._gitUrlCommaOmitempty = gitUrlCommaOmitempty;
+  String? _gitUrl;
+  String? get gitUrl => _$this._gitUrl;
+  set gitUrl(String? gitUrl) =>
+      _$this._gitUrl = gitUrl;
 
-  String? _localPathCommaOmitempty;
-  String? get localPathCommaOmitempty => _$this._localPathCommaOmitempty;
-  set localPathCommaOmitempty(String? localPathCommaOmitempty) =>
-      _$this._localPathCommaOmitempty = localPathCommaOmitempty;
+  String? _localPath;
+  String? get localPath => _$this._localPath;
+  set localPath(String? localPath) =>
+      _$this._localPath = localPath;
 
   RegisterProjectRequestBuilder() {
     RegisterProjectRequest._defaults(this);
@@ -97,10 +97,10 @@ class RegisterProjectRequestBuilder
   RegisterProjectRequestBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
-      _idCommaOmitempty = $v.idCommaOmitempty;
+      _id = $v.id;
       _name = $v.name;
-      _gitUrlCommaOmitempty = $v.gitUrlCommaOmitempty;
-      _localPathCommaOmitempty = $v.localPathCommaOmitempty;
+      _gitUrl = $v.gitUrl;
+      _localPath = $v.localPath;
       _$v = null;
     }
     return this;
@@ -122,11 +122,11 @@ class RegisterProjectRequestBuilder
   _$RegisterProjectRequest _build() {
     final _$result = _$v ??
         _$RegisterProjectRequest._(
-          idCommaOmitempty: idCommaOmitempty,
+          id: id,
           name: BuiltValueNullFieldError.checkNotNull(
               name, r'RegisterProjectRequest', 'name'),
-          gitUrlCommaOmitempty: gitUrlCommaOmitempty,
-          localPathCommaOmitempty: localPathCommaOmitempty,
+          gitUrl: gitUrl,
+          localPath: localPath,
         );
     replace(_$result);
     return _$result;

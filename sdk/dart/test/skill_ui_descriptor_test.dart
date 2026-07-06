@@ -27,38 +27,38 @@ void main() {
       // TODO
     });
 
-    // String categoryCommaOmitempty
-    test('to test the property `categoryCommaOmitempty`', () async {
+    // String category
+    test('to test the property `category`', () async {
       // TODO
     });
 
-    // String tagsCommaOmitempty
-    test('to test the property `tagsCommaOmitempty`', () async {
+    // String tags
+    test('to test the property `tags`', () async {
       // TODO
     });
 
-    // String examplesCommaOmitempty
-    test('to test the property `examplesCommaOmitempty`', () async {
+    // String examples
+    test('to test the property `examples`', () async {
       // TODO
     });
 
-    // String riskLevelCommaOmitempty
-    test('to test the property `riskLevelCommaOmitempty`', () async {
+    // String riskLevel
+    test('to test the property `riskLevel`', () async {
       // TODO
     });
 
-    // String bodyCommaOmitempty
-    test('to test the property `bodyCommaOmitempty`', () async {
+    // String body
+    test('to test the property `body`', () async {
       // TODO
     });
 
-    // BuiltList<String> fieldsCommaOmitempty
-    test('to test the property `fieldsCommaOmitempty`', () async {
+    // BuiltList<String> fields
+    test('to test the property `fields`', () async {
       // TODO
     });
 
-    // BuiltList<String> actionsCommaOmitempty
-    test('to test the property `actionsCommaOmitempty`', () async {
+    // BuiltList<String> actions
+    test('to test the property `actions`', () async {
       // TODO
     });
 

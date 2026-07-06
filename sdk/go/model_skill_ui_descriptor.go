@@ -25,13 +25,13 @@ type SkillUIDescriptor struct {
 	Name string `json:"name"`
 	Description string `json:"description"`
 	UiType string `json:"ui_type"`
-	Categoryomitempty *string `json:"category,omitempty,omitempty"`
-	Tagsomitempty NullableString `json:"tags,omitempty,omitempty"`
-	Examplesomitempty NullableString `json:"examples,omitempty,omitempty"`
-	RiskLevelomitempty *string `json:"risk_level,omitempty,omitempty"`
-	Bodyomitempty *string `json:"body,omitempty,omitempty"`
-	Fieldsomitempty []string `json:"fields,omitempty,omitempty"`
-	Actionsomitempty []string `json:"actions,omitempty,omitempty"`
+	Category *string `json:"category,omitempty"`
+	Tags NullableString `json:"tags,omitempty"`
+	Examples NullableString `json:"examples,omitempty"`
+	RiskLevel *string `json:"risk_level,omitempty"`
+	Body *string `json:"body,omitempty"`
+	Fields []string `json:"fields,omitempty"`
+	Actions []string `json:"actions,omitempty"`
 }
 
 type _SkillUIDescriptor SkillUIDescriptor
@@ -153,250 +153,250 @@ func (o *SkillUIDescriptor) SetUiType(v string) {
 	o.UiType = v
 }
 
-// GetCategoryomitempty returns the Categoryomitempty field value if set, zero value otherwise.
-func (o *SkillUIDescriptor) GetCategoryomitempty() string {
-	if o == nil || IsNil(o.Categoryomitempty) {
+// GetCategory returns the Category field value if set, zero value otherwise.
+func (o *SkillUIDescriptor) GetCategory() string {
+	if o == nil || IsNil(o.Category) {
 		var ret string
 		return ret
 	}
-	return *o.Categoryomitempty
+	return *o.Category
 }
 
-// GetCategoryomitemptyOk returns a tuple with the Categoryomitempty field value if set, nil otherwise
+// GetCategoryOk returns a tuple with the Category field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *SkillUIDescriptor) GetCategoryomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Categoryomitempty) {
+func (o *SkillUIDescriptor) GetCategoryOk() (*string, bool) {
+	if o == nil || IsNil(o.Category) {
 		return nil, false
 	}
-	return o.Categoryomitempty, true
+	return o.Category, true
 }
 
-// HasCategoryomitempty returns a boolean if a field has been set.
-func (o *SkillUIDescriptor) HasCategoryomitempty() bool {
-	if o != nil && !IsNil(o.Categoryomitempty) {
+// HasCategory returns a boolean if a field has been set.
+func (o *SkillUIDescriptor) HasCategory() bool {
+	if o != nil && !IsNil(o.Category) {
 		return true
 	}
 
 	return false
 }
 
-// SetCategoryomitempty gets a reference to the given string and assigns it to the Categoryomitempty field.
-func (o *SkillUIDescriptor) SetCategoryomitempty(v string) {
-	o.Categoryomitempty = &v
+// SetCategory gets a reference to the given string and assigns it to the Category field.
+func (o *SkillUIDescriptor) SetCategory(v string) {
+	o.Category = &v
 }
 
-// GetTagsomitempty returns the Tagsomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *SkillUIDescriptor) GetTagsomitempty() string {
-	if o == nil || IsNil(o.Tagsomitempty.Get()) {
+// GetTags returns the Tags field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *SkillUIDescriptor) GetTags() string {
+	if o == nil || IsNil(o.Tags.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.Tagsomitempty.Get()
+	return *o.Tags.Get()
 }
 
-// GetTagsomitemptyOk returns a tuple with the Tagsomitempty field value if set, nil otherwise
+// GetTagsOk returns a tuple with the Tags field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *SkillUIDescriptor) GetTagsomitemptyOk() (*string, bool) {
+func (o *SkillUIDescriptor) GetTagsOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.Tagsomitempty.Get(), o.Tagsomitempty.IsSet()
+	return o.Tags.Get(), o.Tags.IsSet()
 }
 
-// HasTagsomitempty returns a boolean if a field has been set.
-func (o *SkillUIDescriptor) HasTagsomitempty() bool {
-	if o != nil && o.Tagsomitempty.IsSet() {
+// HasTags returns a boolean if a field has been set.
+func (o *SkillUIDescriptor) HasTags() bool {
+	if o != nil && o.Tags.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetTagsomitempty gets a reference to the given NullableString and assigns it to the Tagsomitempty field.
-func (o *SkillUIDescriptor) SetTagsomitempty(v string) {
-	o.Tagsomitempty.Set(&v)
+// SetTags gets a reference to the given NullableString and assigns it to the Tags field.
+func (o *SkillUIDescriptor) SetTags(v string) {
+	o.Tags.Set(&v)
 }
-// SetTagsomitemptyNil sets the value for Tagsomitempty to be an explicit nil
-func (o *SkillUIDescriptor) SetTagsomitemptyNil() {
-	o.Tagsomitempty.Set(nil)
-}
-
-// UnsetTagsomitempty ensures that no value is present for Tagsomitempty, not even an explicit nil
-func (o *SkillUIDescriptor) UnsetTagsomitempty() {
-	o.Tagsomitempty.Unset()
+// SetTagsNil sets the value for Tags to be an explicit nil
+func (o *SkillUIDescriptor) SetTagsNil() {
+	o.Tags.Set(nil)
 }
 
-// GetExamplesomitempty returns the Examplesomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *SkillUIDescriptor) GetExamplesomitempty() string {
-	if o == nil || IsNil(o.Examplesomitempty.Get()) {
+// UnsetTags ensures that no value is present for Tags, not even an explicit nil
+func (o *SkillUIDescriptor) UnsetTags() {
+	o.Tags.Unset()
+}
+
+// GetExamples returns the Examples field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *SkillUIDescriptor) GetExamples() string {
+	if o == nil || IsNil(o.Examples.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.Examplesomitempty.Get()
+	return *o.Examples.Get()
 }
 
-// GetExamplesomitemptyOk returns a tuple with the Examplesomitempty field value if set, nil otherwise
+// GetExamplesOk returns a tuple with the Examples field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *SkillUIDescriptor) GetExamplesomitemptyOk() (*string, bool) {
+func (o *SkillUIDescriptor) GetExamplesOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.Examplesomitempty.Get(), o.Examplesomitempty.IsSet()
+	return o.Examples.Get(), o.Examples.IsSet()
 }
 
-// HasExamplesomitempty returns a boolean if a field has been set.
-func (o *SkillUIDescriptor) HasExamplesomitempty() bool {
-	if o != nil && o.Examplesomitempty.IsSet() {
+// HasExamples returns a boolean if a field has been set.
+func (o *SkillUIDescriptor) HasExamples() bool {
+	if o != nil && o.Examples.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetExamplesomitempty gets a reference to the given NullableString and assigns it to the Examplesomitempty field.
-func (o *SkillUIDescriptor) SetExamplesomitempty(v string) {
-	o.Examplesomitempty.Set(&v)
+// SetExamples gets a reference to the given NullableString and assigns it to the Examples field.
+func (o *SkillUIDescriptor) SetExamples(v string) {
+	o.Examples.Set(&v)
 }
-// SetExamplesomitemptyNil sets the value for Examplesomitempty to be an explicit nil
-func (o *SkillUIDescriptor) SetExamplesomitemptyNil() {
-	o.Examplesomitempty.Set(nil)
-}
-
-// UnsetExamplesomitempty ensures that no value is present for Examplesomitempty, not even an explicit nil
-func (o *SkillUIDescriptor) UnsetExamplesomitempty() {
-	o.Examplesomitempty.Unset()
+// SetExamplesNil sets the value for Examples to be an explicit nil
+func (o *SkillUIDescriptor) SetExamplesNil() {
+	o.Examples.Set(nil)
 }
 
-// GetRiskLevelomitempty returns the RiskLevelomitempty field value if set, zero value otherwise.
-func (o *SkillUIDescriptor) GetRiskLevelomitempty() string {
-	if o == nil || IsNil(o.RiskLevelomitempty) {
+// UnsetExamples ensures that no value is present for Examples, not even an explicit nil
+func (o *SkillUIDescriptor) UnsetExamples() {
+	o.Examples.Unset()
+}
+
+// GetRiskLevel returns the RiskLevel field value if set, zero value otherwise.
+func (o *SkillUIDescriptor) GetRiskLevel() string {
+	if o == nil || IsNil(o.RiskLevel) {
 		var ret string
 		return ret
 	}
-	return *o.RiskLevelomitempty
+	return *o.RiskLevel
 }
 
-// GetRiskLevelomitemptyOk returns a tuple with the RiskLevelomitempty field value if set, nil otherwise
+// GetRiskLevelOk returns a tuple with the RiskLevel field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *SkillUIDescriptor) GetRiskLevelomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.RiskLevelomitempty) {
+func (o *SkillUIDescriptor) GetRiskLevelOk() (*string, bool) {
+	if o == nil || IsNil(o.RiskLevel) {
 		return nil, false
 	}
-	return o.RiskLevelomitempty, true
+	return o.RiskLevel, true
 }
 
-// HasRiskLevelomitempty returns a boolean if a field has been set.
-func (o *SkillUIDescriptor) HasRiskLevelomitempty() bool {
-	if o != nil && !IsNil(o.RiskLevelomitempty) {
+// HasRiskLevel returns a boolean if a field has been set.
+func (o *SkillUIDescriptor) HasRiskLevel() bool {
+	if o != nil && !IsNil(o.RiskLevel) {
 		return true
 	}
 
 	return false
 }
 
-// SetRiskLevelomitempty gets a reference to the given string and assigns it to the RiskLevelomitempty field.
-func (o *SkillUIDescriptor) SetRiskLevelomitempty(v string) {
-	o.RiskLevelomitempty = &v
+// SetRiskLevel gets a reference to the given string and assigns it to the RiskLevel field.
+func (o *SkillUIDescriptor) SetRiskLevel(v string) {
+	o.RiskLevel = &v
 }
 
-// GetBodyomitempty returns the Bodyomitempty field value if set, zero value otherwise.
-func (o *SkillUIDescriptor) GetBodyomitempty() string {
-	if o == nil || IsNil(o.Bodyomitempty) {
+// GetBody returns the Body field value if set, zero value otherwise.
+func (o *SkillUIDescriptor) GetBody() string {
+	if o == nil || IsNil(o.Body) {
 		var ret string
 		return ret
 	}
-	return *o.Bodyomitempty
+	return *o.Body
 }
 
-// GetBodyomitemptyOk returns a tuple with the Bodyomitempty field value if set, nil otherwise
+// GetBodyOk returns a tuple with the Body field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *SkillUIDescriptor) GetBodyomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Bodyomitempty) {
+func (o *SkillUIDescriptor) GetBodyOk() (*string, bool) {
+	if o == nil || IsNil(o.Body) {
 		return nil, false
 	}
-	return o.Bodyomitempty, true
+	return o.Body, true
 }
 
-// HasBodyomitempty returns a boolean if a field has been set.
-func (o *SkillUIDescriptor) HasBodyomitempty() bool {
-	if o != nil && !IsNil(o.Bodyomitempty) {
+// HasBody returns a boolean if a field has been set.
+func (o *SkillUIDescriptor) HasBody() bool {
+	if o != nil && !IsNil(o.Body) {
 		return true
 	}
 
 	return false
 }
 
-// SetBodyomitempty gets a reference to the given string and assigns it to the Bodyomitempty field.
-func (o *SkillUIDescriptor) SetBodyomitempty(v string) {
-	o.Bodyomitempty = &v
+// SetBody gets a reference to the given string and assigns it to the Body field.
+func (o *SkillUIDescriptor) SetBody(v string) {
+	o.Body = &v
 }
 
-// GetFieldsomitempty returns the Fieldsomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *SkillUIDescriptor) GetFieldsomitempty() []string {
-	if o == nil {
-		var ret []string
-		return ret
-	}
-	return o.Fieldsomitempty
-}
-
-// GetFieldsomitemptyOk returns a tuple with the Fieldsomitempty field value if set, nil otherwise
-// and a boolean to check if the value has been set.
-// NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *SkillUIDescriptor) GetFieldsomitemptyOk() ([]string, bool) {
-	if o == nil || IsNil(o.Fieldsomitempty) {
-		return nil, false
-	}
-	return o.Fieldsomitempty, true
-}
-
-// HasFieldsomitempty returns a boolean if a field has been set.
-func (o *SkillUIDescriptor) HasFieldsomitempty() bool {
-	if o != nil && !IsNil(o.Fieldsomitempty) {
-		return true
-	}
-
-	return false
-}
-
-// SetFieldsomitempty gets a reference to the given []string and assigns it to the Fieldsomitempty field.
-func (o *SkillUIDescriptor) SetFieldsomitempty(v []string) {
-	o.Fieldsomitempty = v
-}
-
-// GetActionsomitempty returns the Actionsomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *SkillUIDescriptor) GetActionsomitempty() []string {
+// GetFields returns the Fields field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *SkillUIDescriptor) GetFields() []string {
 	if o == nil {
 		var ret []string
 		return ret
 	}
-	return o.Actionsomitempty
+	return o.Fields
 }
 
-// GetActionsomitemptyOk returns a tuple with the Actionsomitempty field value if set, nil otherwise
+// GetFieldsOk returns a tuple with the Fields field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *SkillUIDescriptor) GetActionsomitemptyOk() ([]string, bool) {
-	if o == nil || IsNil(o.Actionsomitempty) {
+func (o *SkillUIDescriptor) GetFieldsOk() ([]string, bool) {
+	if o == nil || IsNil(o.Fields) {
 		return nil, false
 	}
-	return o.Actionsomitempty, true
+	return o.Fields, true
 }
 
-// HasActionsomitempty returns a boolean if a field has been set.
-func (o *SkillUIDescriptor) HasActionsomitempty() bool {
-	if o != nil && !IsNil(o.Actionsomitempty) {
+// HasFields returns a boolean if a field has been set.
+func (o *SkillUIDescriptor) HasFields() bool {
+	if o != nil && !IsNil(o.Fields) {
 		return true
 	}
 
 	return false
 }
 
-// SetActionsomitempty gets a reference to the given []string and assigns it to the Actionsomitempty field.
-func (o *SkillUIDescriptor) SetActionsomitempty(v []string) {
-	o.Actionsomitempty = v
+// SetFields gets a reference to the given []string and assigns it to the Fields field.
+func (o *SkillUIDescriptor) SetFields(v []string) {
+	o.Fields = v
+}
+
+// GetActions returns the Actions field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *SkillUIDescriptor) GetActions() []string {
+	if o == nil {
+		var ret []string
+		return ret
+	}
+	return o.Actions
+}
+
+// GetActionsOk returns a tuple with the Actions field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *SkillUIDescriptor) GetActionsOk() ([]string, bool) {
+	if o == nil || IsNil(o.Actions) {
+		return nil, false
+	}
+	return o.Actions, true
+}
+
+// HasActions returns a boolean if a field has been set.
+func (o *SkillUIDescriptor) HasActions() bool {
+	if o != nil && !IsNil(o.Actions) {
+		return true
+	}
+
+	return false
+}
+
+// SetActions gets a reference to the given []string and assigns it to the Actions field.
+func (o *SkillUIDescriptor) SetActions(v []string) {
+	o.Actions = v
 }
 
 func (o SkillUIDescriptor) MarshalJSON() ([]byte, error) {
@@ -413,26 +413,26 @@ func (o SkillUIDescriptor) ToMap() (map[string]interface{}, error) {
 	toSerialize["name"] = o.Name
 	toSerialize["description"] = o.Description
 	toSerialize["ui_type"] = o.UiType
-	if !IsNil(o.Categoryomitempty) {
-		toSerialize["category,omitempty"] = o.Categoryomitempty
+	if !IsNil(o.Category) {
+		toSerialize["category"] = o.Category
 	}
-	if o.Tagsomitempty.IsSet() {
-		toSerialize["tags,omitempty"] = o.Tagsomitempty.Get()
+	if o.Tags.IsSet() {
+		toSerialize["tags"] = o.Tags.Get()
 	}
-	if o.Examplesomitempty.IsSet() {
-		toSerialize["examples,omitempty"] = o.Examplesomitempty.Get()
+	if o.Examples.IsSet() {
+		toSerialize["examples"] = o.Examples.Get()
 	}
-	if !IsNil(o.RiskLevelomitempty) {
-		toSerialize["risk_level,omitempty"] = o.RiskLevelomitempty
+	if !IsNil(o.RiskLevel) {
+		toSerialize["risk_level"] = o.RiskLevel
 	}
-	if !IsNil(o.Bodyomitempty) {
-		toSerialize["body,omitempty"] = o.Bodyomitempty
+	if !IsNil(o.Body) {
+		toSerialize["body"] = o.Body
 	}
-	if o.Fieldsomitempty != nil {
-		toSerialize["fields,omitempty"] = o.Fieldsomitempty
+	if o.Fields != nil {
+		toSerialize["fields"] = o.Fields
 	}
-	if o.Actionsomitempty != nil {
-		toSerialize["actions,omitempty"] = o.Actionsomitempty
+	if o.Actions != nil {
+		toSerialize["actions"] = o.Actions
 	}
 	return toSerialize, nil
 }

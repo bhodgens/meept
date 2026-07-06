@@ -24,9 +24,9 @@ type TemplateInfo struct {
 	Name string `json:"name"`
 	Description string `json:"description"`
 	Scope map[string]interface{} `json:"scope"`
-	Pathomitempty *string `json:"path,omitempty,omitempty"`
+	Path *string `json:"path,omitempty"`
 	Priority int32 `json:"priority"`
-	Bodyomitempty *string `json:"body,omitempty,omitempty"`
+	Body *string `json:"body,omitempty"`
 }
 
 type _TemplateInfo TemplateInfo
@@ -124,36 +124,36 @@ func (o *TemplateInfo) SetScope(v map[string]interface{}) {
 	o.Scope = v
 }
 
-// GetPathomitempty returns the Pathomitempty field value if set, zero value otherwise.
-func (o *TemplateInfo) GetPathomitempty() string {
-	if o == nil || IsNil(o.Pathomitempty) {
+// GetPath returns the Path field value if set, zero value otherwise.
+func (o *TemplateInfo) GetPath() string {
+	if o == nil || IsNil(o.Path) {
 		var ret string
 		return ret
 	}
-	return *o.Pathomitempty
+	return *o.Path
 }
 
-// GetPathomitemptyOk returns a tuple with the Pathomitempty field value if set, nil otherwise
+// GetPathOk returns a tuple with the Path field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *TemplateInfo) GetPathomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Pathomitempty) {
+func (o *TemplateInfo) GetPathOk() (*string, bool) {
+	if o == nil || IsNil(o.Path) {
 		return nil, false
 	}
-	return o.Pathomitempty, true
+	return o.Path, true
 }
 
-// HasPathomitempty returns a boolean if a field has been set.
-func (o *TemplateInfo) HasPathomitempty() bool {
-	if o != nil && !IsNil(o.Pathomitempty) {
+// HasPath returns a boolean if a field has been set.
+func (o *TemplateInfo) HasPath() bool {
+	if o != nil && !IsNil(o.Path) {
 		return true
 	}
 
 	return false
 }
 
-// SetPathomitempty gets a reference to the given string and assigns it to the Pathomitempty field.
-func (o *TemplateInfo) SetPathomitempty(v string) {
-	o.Pathomitempty = &v
+// SetPath gets a reference to the given string and assigns it to the Path field.
+func (o *TemplateInfo) SetPath(v string) {
+	o.Path = &v
 }
 
 // GetPriority returns the Priority field value
@@ -180,36 +180,36 @@ func (o *TemplateInfo) SetPriority(v int32) {
 	o.Priority = v
 }
 
-// GetBodyomitempty returns the Bodyomitempty field value if set, zero value otherwise.
-func (o *TemplateInfo) GetBodyomitempty() string {
-	if o == nil || IsNil(o.Bodyomitempty) {
+// GetBody returns the Body field value if set, zero value otherwise.
+func (o *TemplateInfo) GetBody() string {
+	if o == nil || IsNil(o.Body) {
 		var ret string
 		return ret
 	}
-	return *o.Bodyomitempty
+	return *o.Body
 }
 
-// GetBodyomitemptyOk returns a tuple with the Bodyomitempty field value if set, nil otherwise
+// GetBodyOk returns a tuple with the Body field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *TemplateInfo) GetBodyomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Bodyomitempty) {
+func (o *TemplateInfo) GetBodyOk() (*string, bool) {
+	if o == nil || IsNil(o.Body) {
 		return nil, false
 	}
-	return o.Bodyomitempty, true
+	return o.Body, true
 }
 
-// HasBodyomitempty returns a boolean if a field has been set.
-func (o *TemplateInfo) HasBodyomitempty() bool {
-	if o != nil && !IsNil(o.Bodyomitempty) {
+// HasBody returns a boolean if a field has been set.
+func (o *TemplateInfo) HasBody() bool {
+	if o != nil && !IsNil(o.Body) {
 		return true
 	}
 
 	return false
 }
 
-// SetBodyomitempty gets a reference to the given string and assigns it to the Bodyomitempty field.
-func (o *TemplateInfo) SetBodyomitempty(v string) {
-	o.Bodyomitempty = &v
+// SetBody gets a reference to the given string and assigns it to the Body field.
+func (o *TemplateInfo) SetBody(v string) {
+	o.Body = &v
 }
 
 func (o TemplateInfo) MarshalJSON() ([]byte, error) {
@@ -225,12 +225,12 @@ func (o TemplateInfo) ToMap() (map[string]interface{}, error) {
 	toSerialize["name"] = o.Name
 	toSerialize["description"] = o.Description
 	toSerialize["scope"] = o.Scope
-	if !IsNil(o.Pathomitempty) {
-		toSerialize["path,omitempty"] = o.Pathomitempty
+	if !IsNil(o.Path) {
+		toSerialize["path"] = o.Path
 	}
 	toSerialize["priority"] = o.Priority
-	if !IsNil(o.Bodyomitempty) {
-		toSerialize["body,omitempty"] = o.Bodyomitempty
+	if !IsNil(o.Body) {
+		toSerialize["body"] = o.Body
 	}
 	return toSerialize, nil
 }

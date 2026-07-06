@@ -22,8 +22,8 @@ void main() {
       // TODO
     });
 
-    // String reasonCommaOmitempty
-    test('to test the property `reasonCommaOmitempty`', () async {
+    // String reason
+    test('to test the property `reason`', () async {
       // TODO
     });
 

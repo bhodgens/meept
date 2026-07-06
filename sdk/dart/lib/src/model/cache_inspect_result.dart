@@ -16,7 +16,7 @@ part 'cache_inspect_result.g.dart';
 /// * [createdAt] 
 /// * [expiresAt] 
 /// * [hitCount] 
-/// * [fileHashesCommaOmitempty] 
+/// * [fileHashes] 
 /// * [source_] 
 @BuiltValue()
 abstract class CacheInspectResult implements Built<CacheInspectResult, CacheInspectResultBuilder> {
@@ -35,8 +35,8 @@ abstract class CacheInspectResult implements Built<CacheInspectResult, CacheInsp
   @BuiltValueField(wireName: r'hit_count')
   int get hitCount;
 
-  @BuiltValueField(wireName: r'file_hashes,omitempty')
-  String? get fileHashesCommaOmitempty;
+  @BuiltValueField(wireName: r'file_hashes')
+  String? get fileHashes;
 
   @BuiltValueField(wireName: r'source')
   String get source_;
@@ -89,10 +89,10 @@ class _$CacheInspectResultSerializer implements PrimitiveSerializer<CacheInspect
       object.hitCount,
       specifiedType: const FullType(int),
     );
-    if (object.fileHashesCommaOmitempty != null) {
-      yield r'file_hashes,omitempty';
+    if (object.fileHashes != null) {
+      yield r'file_hashes';
       yield serializers.serialize(
-        object.fileHashesCommaOmitempty,
+        object.fileHashes,
         specifiedType: const FullType.nullable(String),
       );
     }
@@ -159,13 +159,13 @@ class _$CacheInspectResultSerializer implements PrimitiveSerializer<CacheInspect
           ) as int;
           result.hitCount = valueDes;
           break;
-        case r'file_hashes,omitempty':
+        case r'file_hashes':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.fileHashesCommaOmitempty = valueDes;
+          result.fileHashes = valueDes;
           break;
         case r'source':
           final valueDes = serializers.deserialize(

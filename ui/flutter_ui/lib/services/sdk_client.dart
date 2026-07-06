@@ -339,7 +339,7 @@ class SdkApiClient {
     final req = sdk.ChatRequest((b) => b
       ..message = message
       ..conversationId = conversationId ?? ''
-      ..agentIdCommaOmitempty = agentId);
+      ..agentId = agentId);
 
     return _post('/api/v1/chat', body: _toJson(req));
   }
@@ -418,7 +418,7 @@ class SdkApiClient {
     final req = sdk.SteerRequest((b) => b
       ..message = message
       ..conversationId = conversationId
-      ..sourceCommaOmitempty = source);
+      ..source = source);
 
     return _post('/api/v1/chat/steer', body: _toJson(req));
   }
@@ -432,7 +432,7 @@ class SdkApiClient {
     final req = sdk.FollowUpRequest((b) => b
       ..message = message
       ..conversationId = conversationId
-      ..sourceCommaOmitempty = source);
+      ..source = source);
 
     return _post('/api/v1/chat/followup', body: _toJson(req));
   }
@@ -489,13 +489,13 @@ class SdkApiClient {
 
   /// Creates a session and returns the raw JSON.
   ///
-  /// Sends `{"name": title}` directly rather than going through the
-  /// generated `CreateSessionRequest` model. The OpenAPI spec at
-  /// `sdk/go/api/openapi.yaml` currently emits the property name as
-  /// the literal `name,omitempty` (a Go struct-tag artifact), which
-  /// silently drops the title on the daemon side and forces the
-  /// server-defaulted name "default". Inline JSON sidesteps the
-  /// bug regardless of spec regeneration.
+  /// Sends `{"name": title}` directly. The OpenAPI spec previously
+  /// emitted the property name as the literal `name,omitempty` (a Go
+  /// struct-tag artifact), which silently dropped the title on the
+  /// daemon side and forced the server-defaulted name "default".
+  /// The spec has since been corrected, but inline JSON is kept as a
+  /// defensive measure against any future regression in the generated
+  /// model.
   Future<Map<String, dynamic>> createSession({
     required String title,
     String? agentId,
@@ -640,7 +640,7 @@ class SdkApiClient {
   }) async {
     final req = sdk.CreateTaskRequest((b) => b
       ..name = title
-      ..sessionIdCommaOmitempty = sessionId);
+      ..sessionId = sessionId);
 
     final raw = await _post('/api/v1/tasks', body: _toJson(req));
     return raw;
@@ -648,10 +648,10 @@ class SdkApiClient {
 
   /// Updates a task and returns the raw JSON.
   ///
-  /// Inline JSON avoids the same `name,omitempty`/`state,omitempty`
-  /// OpenAPI-generator bug that affects [createSession] — the
-  /// generated wireName would silently drop the field on the daemon
-  /// side. Only fields that are explicitly non-null are sent.
+  /// Inline JSON avoids the historical `name,omitempty` /
+  /// `state,omitempty` OpenAPI-generator bug that affected
+  /// [createSession]. Only fields that are explicitly non-null are
+  /// sent, which matches PATCH semantics anyway.
   Future<Map<String, dynamic>> updateTask(String id,
       {String? name, String? state}) async {
     final body = <String, dynamic>{};
@@ -713,8 +713,8 @@ class SdkApiClient {
   }) async {
     final req = sdk.MemoryQueryRequest((b) => b
       ..query = query
-      ..limitCommaOmitempty = limit
-      ..categoryCommaOmitempty = category);
+      ..limit = limit
+      ..category = category);
 
     final raw = await _post('/api/v1/memory/query', body: _toJson(req));
     final memoriesRaw = raw['memories'] as List?;
@@ -1061,7 +1061,7 @@ class SdkApiClient {
       {required String query, String? scope}) async {
     final req = sdk.SearchRequest((b) => b
       ..query = query
-      ..scopeCommaOmitempty = scope);
+      ..scope = scope);
 
     final raw = await _post('/api/v1/search', body: _toJson(req));
     return raw;
@@ -1240,7 +1240,7 @@ class SdkApiClient {
       ..planId = id
       ..sessionId = sessionID ?? ''
       ..by = by ?? ''
-      ..reasonCommaOmitempty = reason);
+      ..reason = reason);
     try {
       return await _post('/api/v1/plans/$id/reject', body: _toJson(req));
     } on DioException catch (e) {

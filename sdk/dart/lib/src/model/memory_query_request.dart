@@ -12,18 +12,18 @@ part 'memory_query_request.g.dart';
 ///
 /// Properties:
 /// * [query] 
-/// * [limitCommaOmitempty] 
-/// * [categoryCommaOmitempty] 
+/// * [limit] 
+/// * [category] 
 @BuiltValue()
 abstract class MemoryQueryRequest implements Built<MemoryQueryRequest, MemoryQueryRequestBuilder> {
   @BuiltValueField(wireName: r'query')
   String get query;
 
-  @BuiltValueField(wireName: r'limit,omitempty')
-  int? get limitCommaOmitempty;
+  @BuiltValueField(wireName: r'limit')
+  int? get limit;
 
-  @BuiltValueField(wireName: r'category,omitempty')
-  String? get categoryCommaOmitempty;
+  @BuiltValueField(wireName: r'category')
+  String? get category;
 
   MemoryQueryRequest._();
 
@@ -53,17 +53,17 @@ class _$MemoryQueryRequestSerializer implements PrimitiveSerializer<MemoryQueryR
       object.query,
       specifiedType: const FullType(String),
     );
-    if (object.limitCommaOmitempty != null) {
-      yield r'limit,omitempty';
+    if (object.limit != null) {
+      yield r'limit';
       yield serializers.serialize(
-        object.limitCommaOmitempty,
+        object.limit,
         specifiedType: const FullType(int),
       );
     }
-    if (object.categoryCommaOmitempty != null) {
-      yield r'category,omitempty';
+    if (object.category != null) {
+      yield r'category';
       yield serializers.serialize(
-        object.categoryCommaOmitempty,
+        object.category,
         specifiedType: const FullType(String),
       );
     }
@@ -97,19 +97,19 @@ class _$MemoryQueryRequestSerializer implements PrimitiveSerializer<MemoryQueryR
           ) as String;
           result.query = valueDes;
           break;
-        case r'limit,omitempty':
+        case r'limit':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.limitCommaOmitempty = valueDes;
+          result.limit = valueDes;
           break;
-        case r'category,omitempty':
+        case r'category':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.categoryCommaOmitempty = valueDes;
+          result.category = valueDes;
           break;
         default:
           unhandled.add(key);

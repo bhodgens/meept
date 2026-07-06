@@ -16,11 +16,11 @@ class _$AddJobRequest extends AddJobRequest {
   @override
   final String type;
   @override
-  final JsonObject? agentConfigCommaOmitempty;
+  final JsonObject? agentConfig;
   @override
-  final JsonObject? shellConfigCommaOmitempty;
+  final JsonObject? shellConfig;
   @override
-  final bool? enabledCommaOmitempty;
+  final bool? enabled;
 
   factory _$AddJobRequest([void Function(AddJobRequestBuilder)? updates]) =>
       (AddJobRequestBuilder()..update(updates))._build();
@@ -30,9 +30,9 @@ class _$AddJobRequest extends AddJobRequest {
       required this.name,
       required this.schedule,
       required this.type,
-      this.agentConfigCommaOmitempty,
-      this.shellConfigCommaOmitempty,
-      this.enabledCommaOmitempty})
+      this.agentConfig,
+      this.shellConfig,
+      this.enabled})
       : super._();
   @override
   AddJobRequest rebuild(void Function(AddJobRequestBuilder) updates) =>
@@ -49,9 +49,9 @@ class _$AddJobRequest extends AddJobRequest {
         name == other.name &&
         schedule == other.schedule &&
         type == other.type &&
-        agentConfigCommaOmitempty == other.agentConfigCommaOmitempty &&
-        shellConfigCommaOmitempty == other.shellConfigCommaOmitempty &&
-        enabledCommaOmitempty == other.enabledCommaOmitempty;
+        agentConfig == other.agentConfig &&
+        shellConfig == other.shellConfig &&
+        enabled == other.enabled;
   }
 
   @override
@@ -61,9 +61,9 @@ class _$AddJobRequest extends AddJobRequest {
     _$hash = $jc(_$hash, name.hashCode);
     _$hash = $jc(_$hash, schedule.hashCode);
     _$hash = $jc(_$hash, type.hashCode);
-    _$hash = $jc(_$hash, agentConfigCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, shellConfigCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, enabledCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, agentConfig.hashCode);
+    _$hash = $jc(_$hash, shellConfig.hashCode);
+    _$hash = $jc(_$hash, enabled.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -75,9 +75,9 @@ class _$AddJobRequest extends AddJobRequest {
           ..add('name', name)
           ..add('schedule', schedule)
           ..add('type', type)
-          ..add('agentConfigCommaOmitempty', agentConfigCommaOmitempty)
-          ..add('shellConfigCommaOmitempty', shellConfigCommaOmitempty)
-          ..add('enabledCommaOmitempty', enabledCommaOmitempty))
+          ..add('agentConfig', agentConfig)
+          ..add('shellConfig', shellConfig)
+          ..add('enabled', enabled))
         .toString();
   }
 }
@@ -102,22 +102,22 @@ class AddJobRequestBuilder
   String? get type => _$this._type;
   set type(String? type) => _$this._type = type;
 
-  JsonObject? _agentConfigCommaOmitempty;
-  JsonObject? get agentConfigCommaOmitempty =>
-      _$this._agentConfigCommaOmitempty;
-  set agentConfigCommaOmitempty(JsonObject? agentConfigCommaOmitempty) =>
-      _$this._agentConfigCommaOmitempty = agentConfigCommaOmitempty;
+  JsonObject? _agentConfig;
+  JsonObject? get agentConfig =>
+      _$this._agentConfig;
+  set agentConfig(JsonObject? agentConfig) =>
+      _$this._agentConfig = agentConfig;
 
-  JsonObject? _shellConfigCommaOmitempty;
-  JsonObject? get shellConfigCommaOmitempty =>
-      _$this._shellConfigCommaOmitempty;
-  set shellConfigCommaOmitempty(JsonObject? shellConfigCommaOmitempty) =>
-      _$this._shellConfigCommaOmitempty = shellConfigCommaOmitempty;
+  JsonObject? _shellConfig;
+  JsonObject? get shellConfig =>
+      _$this._shellConfig;
+  set shellConfig(JsonObject? shellConfig) =>
+      _$this._shellConfig = shellConfig;
 
-  bool? _enabledCommaOmitempty;
-  bool? get enabledCommaOmitempty => _$this._enabledCommaOmitempty;
-  set enabledCommaOmitempty(bool? enabledCommaOmitempty) =>
-      _$this._enabledCommaOmitempty = enabledCommaOmitempty;
+  bool? _enabled;
+  bool? get enabled => _$this._enabled;
+  set enabled(bool? enabled) =>
+      _$this._enabled = enabled;
 
   AddJobRequestBuilder() {
     AddJobRequest._defaults(this);
@@ -130,9 +130,9 @@ class AddJobRequestBuilder
       _name = $v.name;
       _schedule = $v.schedule;
       _type = $v.type;
-      _agentConfigCommaOmitempty = $v.agentConfigCommaOmitempty;
-      _shellConfigCommaOmitempty = $v.shellConfigCommaOmitempty;
-      _enabledCommaOmitempty = $v.enabledCommaOmitempty;
+      _agentConfig = $v.agentConfig;
+      _shellConfig = $v.shellConfig;
+      _enabled = $v.enabled;
       _$v = null;
     }
     return this;
@@ -161,9 +161,9 @@ class AddJobRequestBuilder
               schedule, r'AddJobRequest', 'schedule'),
           type: BuiltValueNullFieldError.checkNotNull(
               type, r'AddJobRequest', 'type'),
-          agentConfigCommaOmitempty: agentConfigCommaOmitempty,
-          shellConfigCommaOmitempty: shellConfigCommaOmitempty,
-          enabledCommaOmitempty: enabledCommaOmitempty,
+          agentConfig: agentConfig,
+          shellConfig: shellConfig,
+          enabled: enabled,
         );
     replace(_$result);
     return _$result;

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../theme/colors.dart';
 import '../../widgets/background_image.dart';
 import '../../providers/providers.dart';
 import 'chat_view.dart';
@@ -16,6 +15,10 @@ import '../search/search_panel.dart';
 
 /// Chat tab - full-width layout with main chat area only.
 /// Tools open in the main content area (replaces chat view).
+///
+/// [sessionId] MUST be a real server-side session ID — never a fabricated
+/// fallback like `'default'`.  Callers without an active session should
+/// render a placeholder instead (see [TabContent]).
 class ChatTab extends ConsumerStatefulWidget {
   final String sessionId;
 

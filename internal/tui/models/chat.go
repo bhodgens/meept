@@ -3032,6 +3032,7 @@ func builtinCommands() []string {
 		"session",
 		"task",
 		"skill",
+		"project",
 	}
 }
 

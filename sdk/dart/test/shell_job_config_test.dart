@@ -12,23 +12,23 @@ void main() {
       // TODO
     });
 
-    // String argsCommaOmitempty
-    test('to test the property `argsCommaOmitempty`', () async {
+    // String args
+    test('to test the property `args`', () async {
       // TODO
     });
 
-    // String workDirCommaOmitempty
-    test('to test the property `workDirCommaOmitempty`', () async {
+    // String workDir
+    test('to test the property `workDir`', () async {
       // TODO
     });
 
-    // String envCommaOmitempty
-    test('to test the property `envCommaOmitempty`', () async {
+    // String env
+    test('to test the property `env`', () async {
       // TODO
     });
 
-    // int timeoutSecsCommaOmitempty
-    test('to test the property `timeoutSecsCommaOmitempty`', () async {
+    // int timeoutSecs
+    test('to test the property `timeoutSecs`', () async {
       // TODO
     });
 

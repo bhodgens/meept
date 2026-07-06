@@ -8,13 +8,13 @@ part of 'pipeline_list_request.dart';
 
 class _$PipelineListRequest extends PipelineListRequest {
   @override
-  final int? limitCommaOmitempty;
+  final int? limit;
 
   factory _$PipelineListRequest(
           [void Function(PipelineListRequestBuilder)? updates]) =>
       (PipelineListRequestBuilder()..update(updates))._build();
 
-  _$PipelineListRequest._({this.limitCommaOmitempty}) : super._();
+  _$PipelineListRequest._({this.limit}) : super._();
   @override
   PipelineListRequest rebuild(
           void Function(PipelineListRequestBuilder) updates) =>
@@ -28,13 +28,13 @@ class _$PipelineListRequest extends PipelineListRequest {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is PipelineListRequest &&
-        limitCommaOmitempty == other.limitCommaOmitempty;
+        limit == other.limit;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
-    _$hash = $jc(_$hash, limitCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, limit.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -42,7 +42,7 @@ class _$PipelineListRequest extends PipelineListRequest {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'PipelineListRequest')
-          ..add('limitCommaOmitempty', limitCommaOmitempty))
+          ..add('limit', limit))
         .toString();
   }
 }
@@ -51,10 +51,10 @@ class PipelineListRequestBuilder
     implements Builder<PipelineListRequest, PipelineListRequestBuilder> {
   _$PipelineListRequest? _$v;
 
-  int? _limitCommaOmitempty;
-  int? get limitCommaOmitempty => _$this._limitCommaOmitempty;
-  set limitCommaOmitempty(int? limitCommaOmitempty) =>
-      _$this._limitCommaOmitempty = limitCommaOmitempty;
+  int? _limit;
+  int? get limit => _$this._limit;
+  set limit(int? limit) =>
+      _$this._limit = limit;
 
   PipelineListRequestBuilder() {
     PipelineListRequest._defaults(this);
@@ -63,7 +63,7 @@ class PipelineListRequestBuilder
   PipelineListRequestBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
-      _limitCommaOmitempty = $v.limitCommaOmitempty;
+      _limit = $v.limit;
       _$v = null;
     }
     return this;
@@ -85,7 +85,7 @@ class PipelineListRequestBuilder
   _$PipelineListRequest _build() {
     final _$result = _$v ??
         _$PipelineListRequest._(
-          limitCommaOmitempty: limitCommaOmitempty,
+          limit: limit,
         );
     replace(_$result);
     return _$result;

@@ -22,8 +22,8 @@ void main() {
       // TODO
     });
 
-    // String pathCommaOmitempty
-    test('to test the property `pathCommaOmitempty`', () async {
+    // String path
+    test('to test the property `path`', () async {
       // TODO
     });
 
@@ -32,8 +32,8 @@ void main() {
       // TODO
     });
 
-    // String bodyCommaOmitempty
-    test('to test the property `bodyCommaOmitempty`', () async {
+    // String body
+    test('to test the property `body`', () async {
       // TODO
     });
 

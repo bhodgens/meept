@@ -26,7 +26,7 @@ type CacheInspectResult struct {
 	CreatedAt string `json:"created_at"`
 	ExpiresAt string `json:"expires_at"`
 	HitCount int32 `json:"hit_count"`
-	FileHashesomitempty NullableString `json:"file_hashes,omitempty,omitempty"`
+	FileHashes NullableString `json:"file_hashes,omitempty"`
 	Source string `json:"source"`
 }
 
@@ -175,46 +175,46 @@ func (o *CacheInspectResult) SetHitCount(v int32) {
 	o.HitCount = v
 }
 
-// GetFileHashesomitempty returns the FileHashesomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *CacheInspectResult) GetFileHashesomitempty() string {
-	if o == nil || IsNil(o.FileHashesomitempty.Get()) {
+// GetFileHashes returns the FileHashes field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *CacheInspectResult) GetFileHashes() string {
+	if o == nil || IsNil(o.FileHashes.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.FileHashesomitempty.Get()
+	return *o.FileHashes.Get()
 }
 
-// GetFileHashesomitemptyOk returns a tuple with the FileHashesomitempty field value if set, nil otherwise
+// GetFileHashesOk returns a tuple with the FileHashes field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *CacheInspectResult) GetFileHashesomitemptyOk() (*string, bool) {
+func (o *CacheInspectResult) GetFileHashesOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.FileHashesomitempty.Get(), o.FileHashesomitempty.IsSet()
+	return o.FileHashes.Get(), o.FileHashes.IsSet()
 }
 
-// HasFileHashesomitempty returns a boolean if a field has been set.
-func (o *CacheInspectResult) HasFileHashesomitempty() bool {
-	if o != nil && o.FileHashesomitempty.IsSet() {
+// HasFileHashes returns a boolean if a field has been set.
+func (o *CacheInspectResult) HasFileHashes() bool {
+	if o != nil && o.FileHashes.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetFileHashesomitempty gets a reference to the given NullableString and assigns it to the FileHashesomitempty field.
-func (o *CacheInspectResult) SetFileHashesomitempty(v string) {
-	o.FileHashesomitempty.Set(&v)
+// SetFileHashes gets a reference to the given NullableString and assigns it to the FileHashes field.
+func (o *CacheInspectResult) SetFileHashes(v string) {
+	o.FileHashes.Set(&v)
 }
-// SetFileHashesomitemptyNil sets the value for FileHashesomitempty to be an explicit nil
-func (o *CacheInspectResult) SetFileHashesomitemptyNil() {
-	o.FileHashesomitempty.Set(nil)
+// SetFileHashesNil sets the value for FileHashes to be an explicit nil
+func (o *CacheInspectResult) SetFileHashesNil() {
+	o.FileHashes.Set(nil)
 }
 
-// UnsetFileHashesomitempty ensures that no value is present for FileHashesomitempty, not even an explicit nil
-func (o *CacheInspectResult) UnsetFileHashesomitempty() {
-	o.FileHashesomitempty.Unset()
+// UnsetFileHashes ensures that no value is present for FileHashes, not even an explicit nil
+func (o *CacheInspectResult) UnsetFileHashes() {
+	o.FileHashes.Unset()
 }
 
 // GetSource returns the Source field value
@@ -256,8 +256,8 @@ func (o CacheInspectResult) ToMap() (map[string]interface{}, error) {
 	toSerialize["created_at"] = o.CreatedAt
 	toSerialize["expires_at"] = o.ExpiresAt
 	toSerialize["hit_count"] = o.HitCount
-	if o.FileHashesomitempty.IsSet() {
-		toSerialize["file_hashes,omitempty"] = o.FileHashesomitempty.Get()
+	if o.FileHashes.IsSet() {
+		toSerialize["file_hashes"] = o.FileHashes.Get()
 	}
 	toSerialize["source"] = o.Source
 	return toSerialize, nil

@@ -8,12 +8,12 @@ part of 'audit_request.dart';
 
 class _$AuditRequest extends AuditRequest {
   @override
-  final int? limitCommaOmitempty;
+  final int? limit;
 
   factory _$AuditRequest([void Function(AuditRequestBuilder)? updates]) =>
       (AuditRequestBuilder()..update(updates))._build();
 
-  _$AuditRequest._({this.limitCommaOmitempty}) : super._();
+  _$AuditRequest._({this.limit}) : super._();
   @override
   AuditRequest rebuild(void Function(AuditRequestBuilder) updates) =>
       (toBuilder()..update(updates)).build();
@@ -25,13 +25,13 @@ class _$AuditRequest extends AuditRequest {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is AuditRequest &&
-        limitCommaOmitempty == other.limitCommaOmitempty;
+        limit == other.limit;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
-    _$hash = $jc(_$hash, limitCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, limit.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -39,7 +39,7 @@ class _$AuditRequest extends AuditRequest {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'AuditRequest')
-          ..add('limitCommaOmitempty', limitCommaOmitempty))
+          ..add('limit', limit))
         .toString();
   }
 }
@@ -48,10 +48,10 @@ class AuditRequestBuilder
     implements Builder<AuditRequest, AuditRequestBuilder> {
   _$AuditRequest? _$v;
 
-  int? _limitCommaOmitempty;
-  int? get limitCommaOmitempty => _$this._limitCommaOmitempty;
-  set limitCommaOmitempty(int? limitCommaOmitempty) =>
-      _$this._limitCommaOmitempty = limitCommaOmitempty;
+  int? _limit;
+  int? get limit => _$this._limit;
+  set limit(int? limit) =>
+      _$this._limit = limit;
 
   AuditRequestBuilder() {
     AuditRequest._defaults(this);
@@ -60,7 +60,7 @@ class AuditRequestBuilder
   AuditRequestBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
-      _limitCommaOmitempty = $v.limitCommaOmitempty;
+      _limit = $v.limit;
       _$v = null;
     }
     return this;
@@ -82,7 +82,7 @@ class AuditRequestBuilder
   _$AuditRequest _build() {
     final _$result = _$v ??
         _$AuditRequest._(
-          limitCommaOmitempty: limitCommaOmitempty,
+          limit: limit,
         );
     replace(_$result);
     return _$result;

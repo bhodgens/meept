@@ -22,7 +22,7 @@ var _ MappedNullable = &ClaimRequest{}
 // ClaimRequest struct for ClaimRequest
 type ClaimRequest struct {
 	WorkerId string `json:"worker_id"`
-	Capabilitiesomitempty NullableString `json:"capabilities,omitempty,omitempty"`
+	Capabilities NullableString `json:"capabilities,omitempty"`
 }
 
 type _ClaimRequest ClaimRequest
@@ -69,46 +69,46 @@ func (o *ClaimRequest) SetWorkerId(v string) {
 	o.WorkerId = v
 }
 
-// GetCapabilitiesomitempty returns the Capabilitiesomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *ClaimRequest) GetCapabilitiesomitempty() string {
-	if o == nil || IsNil(o.Capabilitiesomitempty.Get()) {
+// GetCapabilities returns the Capabilities field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *ClaimRequest) GetCapabilities() string {
+	if o == nil || IsNil(o.Capabilities.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.Capabilitiesomitempty.Get()
+	return *o.Capabilities.Get()
 }
 
-// GetCapabilitiesomitemptyOk returns a tuple with the Capabilitiesomitempty field value if set, nil otherwise
+// GetCapabilitiesOk returns a tuple with the Capabilities field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *ClaimRequest) GetCapabilitiesomitemptyOk() (*string, bool) {
+func (o *ClaimRequest) GetCapabilitiesOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.Capabilitiesomitempty.Get(), o.Capabilitiesomitempty.IsSet()
+	return o.Capabilities.Get(), o.Capabilities.IsSet()
 }
 
-// HasCapabilitiesomitempty returns a boolean if a field has been set.
-func (o *ClaimRequest) HasCapabilitiesomitempty() bool {
-	if o != nil && o.Capabilitiesomitempty.IsSet() {
+// HasCapabilities returns a boolean if a field has been set.
+func (o *ClaimRequest) HasCapabilities() bool {
+	if o != nil && o.Capabilities.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetCapabilitiesomitempty gets a reference to the given NullableString and assigns it to the Capabilitiesomitempty field.
-func (o *ClaimRequest) SetCapabilitiesomitempty(v string) {
-	o.Capabilitiesomitempty.Set(&v)
+// SetCapabilities gets a reference to the given NullableString and assigns it to the Capabilities field.
+func (o *ClaimRequest) SetCapabilities(v string) {
+	o.Capabilities.Set(&v)
 }
-// SetCapabilitiesomitemptyNil sets the value for Capabilitiesomitempty to be an explicit nil
-func (o *ClaimRequest) SetCapabilitiesomitemptyNil() {
-	o.Capabilitiesomitempty.Set(nil)
+// SetCapabilitiesNil sets the value for Capabilities to be an explicit nil
+func (o *ClaimRequest) SetCapabilitiesNil() {
+	o.Capabilities.Set(nil)
 }
 
-// UnsetCapabilitiesomitempty ensures that no value is present for Capabilitiesomitempty, not even an explicit nil
-func (o *ClaimRequest) UnsetCapabilitiesomitempty() {
-	o.Capabilitiesomitempty.Unset()
+// UnsetCapabilities ensures that no value is present for Capabilities, not even an explicit nil
+func (o *ClaimRequest) UnsetCapabilities() {
+	o.Capabilities.Unset()
 }
 
 func (o ClaimRequest) MarshalJSON() ([]byte, error) {
@@ -122,8 +122,8 @@ func (o ClaimRequest) MarshalJSON() ([]byte, error) {
 func (o ClaimRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["worker_id"] = o.WorkerId
-	if o.Capabilitiesomitempty.IsSet() {
-		toSerialize["capabilities,omitempty"] = o.Capabilitiesomitempty.Get()
+	if o.Capabilities.IsSet() {
+		toSerialize["capabilities"] = o.Capabilities.Get()
 	}
 	return toSerialize, nil
 }

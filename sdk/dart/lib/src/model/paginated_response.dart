@@ -15,7 +15,7 @@ part 'paginated_response.g.dart';
 /// * [items] 
 /// * [total] 
 /// * [hasMore] 
-/// * [nextOffsetCommaOmitempty] 
+/// * [nextOffset] 
 @BuiltValue()
 abstract class PaginatedResponse implements Built<PaginatedResponse, PaginatedResponseBuilder> {
   @BuiltValueField(wireName: r'items')
@@ -27,8 +27,8 @@ abstract class PaginatedResponse implements Built<PaginatedResponse, PaginatedRe
   @BuiltValueField(wireName: r'has_more')
   bool get hasMore;
 
-  @BuiltValueField(wireName: r'next_offset,omitempty')
-  int? get nextOffsetCommaOmitempty;
+  @BuiltValueField(wireName: r'next_offset')
+  int? get nextOffset;
 
   PaginatedResponse._();
 
@@ -68,10 +68,10 @@ class _$PaginatedResponseSerializer implements PrimitiveSerializer<PaginatedResp
       object.hasMore,
       specifiedType: const FullType(bool),
     );
-    if (object.nextOffsetCommaOmitempty != null) {
-      yield r'next_offset,omitempty';
+    if (object.nextOffset != null) {
+      yield r'next_offset';
       yield serializers.serialize(
-        object.nextOffsetCommaOmitempty,
+        object.nextOffset,
         specifiedType: const FullType(int),
       );
     }
@@ -120,12 +120,12 @@ class _$PaginatedResponseSerializer implements PrimitiveSerializer<PaginatedResp
           ) as bool;
           result.hasMore = valueDes;
           break;
-        case r'next_offset,omitempty':
+        case r'next_offset':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.nextOffsetCommaOmitempty = valueDes;
+          result.nextOffset = valueDes;
           break;
         default:
           unhandled.add(key);

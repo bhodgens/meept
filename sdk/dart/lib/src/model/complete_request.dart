@@ -13,14 +13,14 @@ part 'complete_request.g.dart';
 ///
 /// Properties:
 /// * [jobId] 
-/// * [resultCommaOmitempty] 
+/// * [result] 
 @BuiltValue()
 abstract class CompleteRequest implements Built<CompleteRequest, CompleteRequestBuilder> {
   @BuiltValueField(wireName: r'job_id')
   String get jobId;
 
-  @BuiltValueField(wireName: r'result,omitempty')
-  JsonObject? get resultCommaOmitempty;
+  @BuiltValueField(wireName: r'result')
+  JsonObject? get result;
 
   CompleteRequest._();
 
@@ -50,10 +50,10 @@ class _$CompleteRequestSerializer implements PrimitiveSerializer<CompleteRequest
       object.jobId,
       specifiedType: const FullType(String),
     );
-    if (object.resultCommaOmitempty != null) {
-      yield r'result,omitempty';
+    if (object.result != null) {
+      yield r'result';
       yield serializers.serialize(
-        object.resultCommaOmitempty,
+        object.result,
         specifiedType: const FullType(JsonObject),
       );
     }
@@ -87,12 +87,12 @@ class _$CompleteRequestSerializer implements PrimitiveSerializer<CompleteRequest
           ) as String;
           result.jobId = valueDes;
           break;
-        case r'result,omitempty':
+        case r'result':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(JsonObject),
           ) as JsonObject;
-          result.resultCommaOmitempty = valueDes;
+          result.result = valueDes;
           break;
         default:
           unhandled.add(key);

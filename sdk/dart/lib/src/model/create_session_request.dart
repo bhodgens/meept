@@ -11,11 +11,11 @@ part 'create_session_request.g.dart';
 /// CreateSessionRequest
 ///
 /// Properties:
-/// * [nameCommaOmitempty] 
+/// * [name] 
 @BuiltValue()
 abstract class CreateSessionRequest implements Built<CreateSessionRequest, CreateSessionRequestBuilder> {
-  @BuiltValueField(wireName: r'name,omitempty')
-  String? get nameCommaOmitempty;
+  @BuiltValueField(wireName: r'name')
+  String? get name;
 
   CreateSessionRequest._();
 
@@ -40,10 +40,10 @@ class _$CreateSessionRequestSerializer implements PrimitiveSerializer<CreateSess
     CreateSessionRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
-    if (object.nameCommaOmitempty != null) {
-      yield r'name,omitempty';
+    if (object.name != null) {
+      yield r'name';
       yield serializers.serialize(
-        object.nameCommaOmitempty,
+        object.name,
         specifiedType: const FullType(String),
       );
     }
@@ -70,12 +70,12 @@ class _$CreateSessionRequestSerializer implements PrimitiveSerializer<CreateSess
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
-        case r'name,omitempty':
+        case r'name':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.nameCommaOmitempty = valueDes;
+          result.name = valueDes;
           break;
         default:
           unhandled.add(key);

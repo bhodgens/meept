@@ -19,9 +19,9 @@ var _ MappedNullable = &ListEventsRequest{}
 
 // ListEventsRequest struct for ListEventsRequest
 type ListEventsRequest struct {
-	TimeMinomitempty *string `json:"time_min,omitempty,omitempty"`
-	TimeMaxomitempty *string `json:"time_max,omitempty,omitempty"`
-	MaxResultsomitempty *int32 `json:"max_results,omitempty,omitempty"`
+	TimeMin *string `json:"time_min,omitempty"`
+	TimeMax *string `json:"time_max,omitempty"`
+	MaxResults *int32 `json:"max_results,omitempty"`
 }
 
 // NewListEventsRequest instantiates a new ListEventsRequest object
@@ -41,100 +41,100 @@ func NewListEventsRequestWithDefaults() *ListEventsRequest {
 	return &this
 }
 
-// GetTimeMinomitempty returns the TimeMinomitempty field value if set, zero value otherwise.
-func (o *ListEventsRequest) GetTimeMinomitempty() string {
-	if o == nil || IsNil(o.TimeMinomitempty) {
+// GetTimeMin returns the TimeMin field value if set, zero value otherwise.
+func (o *ListEventsRequest) GetTimeMin() string {
+	if o == nil || IsNil(o.TimeMin) {
 		var ret string
 		return ret
 	}
-	return *o.TimeMinomitempty
+	return *o.TimeMin
 }
 
-// GetTimeMinomitemptyOk returns a tuple with the TimeMinomitempty field value if set, nil otherwise
+// GetTimeMinOk returns a tuple with the TimeMin field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ListEventsRequest) GetTimeMinomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.TimeMinomitempty) {
+func (o *ListEventsRequest) GetTimeMinOk() (*string, bool) {
+	if o == nil || IsNil(o.TimeMin) {
 		return nil, false
 	}
-	return o.TimeMinomitempty, true
+	return o.TimeMin, true
 }
 
-// HasTimeMinomitempty returns a boolean if a field has been set.
-func (o *ListEventsRequest) HasTimeMinomitempty() bool {
-	if o != nil && !IsNil(o.TimeMinomitempty) {
+// HasTimeMin returns a boolean if a field has been set.
+func (o *ListEventsRequest) HasTimeMin() bool {
+	if o != nil && !IsNil(o.TimeMin) {
 		return true
 	}
 
 	return false
 }
 
-// SetTimeMinomitempty gets a reference to the given string and assigns it to the TimeMinomitempty field.
-func (o *ListEventsRequest) SetTimeMinomitempty(v string) {
-	o.TimeMinomitempty = &v
+// SetTimeMin gets a reference to the given string and assigns it to the TimeMin field.
+func (o *ListEventsRequest) SetTimeMin(v string) {
+	o.TimeMin = &v
 }
 
-// GetTimeMaxomitempty returns the TimeMaxomitempty field value if set, zero value otherwise.
-func (o *ListEventsRequest) GetTimeMaxomitempty() string {
-	if o == nil || IsNil(o.TimeMaxomitempty) {
+// GetTimeMax returns the TimeMax field value if set, zero value otherwise.
+func (o *ListEventsRequest) GetTimeMax() string {
+	if o == nil || IsNil(o.TimeMax) {
 		var ret string
 		return ret
 	}
-	return *o.TimeMaxomitempty
+	return *o.TimeMax
 }
 
-// GetTimeMaxomitemptyOk returns a tuple with the TimeMaxomitempty field value if set, nil otherwise
+// GetTimeMaxOk returns a tuple with the TimeMax field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ListEventsRequest) GetTimeMaxomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.TimeMaxomitempty) {
+func (o *ListEventsRequest) GetTimeMaxOk() (*string, bool) {
+	if o == nil || IsNil(o.TimeMax) {
 		return nil, false
 	}
-	return o.TimeMaxomitempty, true
+	return o.TimeMax, true
 }
 
-// HasTimeMaxomitempty returns a boolean if a field has been set.
-func (o *ListEventsRequest) HasTimeMaxomitempty() bool {
-	if o != nil && !IsNil(o.TimeMaxomitempty) {
+// HasTimeMax returns a boolean if a field has been set.
+func (o *ListEventsRequest) HasTimeMax() bool {
+	if o != nil && !IsNil(o.TimeMax) {
 		return true
 	}
 
 	return false
 }
 
-// SetTimeMaxomitempty gets a reference to the given string and assigns it to the TimeMaxomitempty field.
-func (o *ListEventsRequest) SetTimeMaxomitempty(v string) {
-	o.TimeMaxomitempty = &v
+// SetTimeMax gets a reference to the given string and assigns it to the TimeMax field.
+func (o *ListEventsRequest) SetTimeMax(v string) {
+	o.TimeMax = &v
 }
 
-// GetMaxResultsomitempty returns the MaxResultsomitempty field value if set, zero value otherwise.
-func (o *ListEventsRequest) GetMaxResultsomitempty() int32 {
-	if o == nil || IsNil(o.MaxResultsomitempty) {
+// GetMaxResults returns the MaxResults field value if set, zero value otherwise.
+func (o *ListEventsRequest) GetMaxResults() int32 {
+	if o == nil || IsNil(o.MaxResults) {
 		var ret int32
 		return ret
 	}
-	return *o.MaxResultsomitempty
+	return *o.MaxResults
 }
 
-// GetMaxResultsomitemptyOk returns a tuple with the MaxResultsomitempty field value if set, nil otherwise
+// GetMaxResultsOk returns a tuple with the MaxResults field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ListEventsRequest) GetMaxResultsomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.MaxResultsomitempty) {
+func (o *ListEventsRequest) GetMaxResultsOk() (*int32, bool) {
+	if o == nil || IsNil(o.MaxResults) {
 		return nil, false
 	}
-	return o.MaxResultsomitempty, true
+	return o.MaxResults, true
 }
 
-// HasMaxResultsomitempty returns a boolean if a field has been set.
-func (o *ListEventsRequest) HasMaxResultsomitempty() bool {
-	if o != nil && !IsNil(o.MaxResultsomitempty) {
+// HasMaxResults returns a boolean if a field has been set.
+func (o *ListEventsRequest) HasMaxResults() bool {
+	if o != nil && !IsNil(o.MaxResults) {
 		return true
 	}
 
 	return false
 }
 
-// SetMaxResultsomitempty gets a reference to the given int32 and assigns it to the MaxResultsomitempty field.
-func (o *ListEventsRequest) SetMaxResultsomitempty(v int32) {
-	o.MaxResultsomitempty = &v
+// SetMaxResults gets a reference to the given int32 and assigns it to the MaxResults field.
+func (o *ListEventsRequest) SetMaxResults(v int32) {
+	o.MaxResults = &v
 }
 
 func (o ListEventsRequest) MarshalJSON() ([]byte, error) {
@@ -147,14 +147,14 @@ func (o ListEventsRequest) MarshalJSON() ([]byte, error) {
 
 func (o ListEventsRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	if !IsNil(o.TimeMinomitempty) {
-		toSerialize["time_min,omitempty"] = o.TimeMinomitempty
+	if !IsNil(o.TimeMin) {
+		toSerialize["time_min"] = o.TimeMin
 	}
-	if !IsNil(o.TimeMaxomitempty) {
-		toSerialize["time_max,omitempty"] = o.TimeMaxomitempty
+	if !IsNil(o.TimeMax) {
+		toSerialize["time_max"] = o.TimeMax
 	}
-	if !IsNil(o.MaxResultsomitempty) {
-		toSerialize["max_results,omitempty"] = o.MaxResultsomitempty
+	if !IsNil(o.MaxResults) {
+		toSerialize["max_results"] = o.MaxResults
 	}
 	return toSerialize, nil
 }

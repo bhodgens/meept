@@ -22,8 +22,8 @@ var _ MappedNullable = &AttendeeInfo{}
 // AttendeeInfo struct for AttendeeInfo
 type AttendeeInfo struct {
 	Email string `json:"email"`
-	DisplayNameomitempty *string `json:"display_name,omitempty,omitempty"`
-	Responseomitempty *string `json:"response,omitempty,omitempty"`
+	DisplayName *string `json:"display_name,omitempty"`
+	Response *string `json:"response,omitempty"`
 }
 
 type _AttendeeInfo AttendeeInfo
@@ -70,68 +70,68 @@ func (o *AttendeeInfo) SetEmail(v string) {
 	o.Email = v
 }
 
-// GetDisplayNameomitempty returns the DisplayNameomitempty field value if set, zero value otherwise.
-func (o *AttendeeInfo) GetDisplayNameomitempty() string {
-	if o == nil || IsNil(o.DisplayNameomitempty) {
+// GetDisplayName returns the DisplayName field value if set, zero value otherwise.
+func (o *AttendeeInfo) GetDisplayName() string {
+	if o == nil || IsNil(o.DisplayName) {
 		var ret string
 		return ret
 	}
-	return *o.DisplayNameomitempty
+	return *o.DisplayName
 }
 
-// GetDisplayNameomitemptyOk returns a tuple with the DisplayNameomitempty field value if set, nil otherwise
+// GetDisplayNameOk returns a tuple with the DisplayName field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *AttendeeInfo) GetDisplayNameomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.DisplayNameomitempty) {
+func (o *AttendeeInfo) GetDisplayNameOk() (*string, bool) {
+	if o == nil || IsNil(o.DisplayName) {
 		return nil, false
 	}
-	return o.DisplayNameomitempty, true
+	return o.DisplayName, true
 }
 
-// HasDisplayNameomitempty returns a boolean if a field has been set.
-func (o *AttendeeInfo) HasDisplayNameomitempty() bool {
-	if o != nil && !IsNil(o.DisplayNameomitempty) {
+// HasDisplayName returns a boolean if a field has been set.
+func (o *AttendeeInfo) HasDisplayName() bool {
+	if o != nil && !IsNil(o.DisplayName) {
 		return true
 	}
 
 	return false
 }
 
-// SetDisplayNameomitempty gets a reference to the given string and assigns it to the DisplayNameomitempty field.
-func (o *AttendeeInfo) SetDisplayNameomitempty(v string) {
-	o.DisplayNameomitempty = &v
+// SetDisplayName gets a reference to the given string and assigns it to the DisplayName field.
+func (o *AttendeeInfo) SetDisplayName(v string) {
+	o.DisplayName = &v
 }
 
-// GetResponseomitempty returns the Responseomitempty field value if set, zero value otherwise.
-func (o *AttendeeInfo) GetResponseomitempty() string {
-	if o == nil || IsNil(o.Responseomitempty) {
+// GetResponse returns the Response field value if set, zero value otherwise.
+func (o *AttendeeInfo) GetResponse() string {
+	if o == nil || IsNil(o.Response) {
 		var ret string
 		return ret
 	}
-	return *o.Responseomitempty
+	return *o.Response
 }
 
-// GetResponseomitemptyOk returns a tuple with the Responseomitempty field value if set, nil otherwise
+// GetResponseOk returns a tuple with the Response field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *AttendeeInfo) GetResponseomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Responseomitempty) {
+func (o *AttendeeInfo) GetResponseOk() (*string, bool) {
+	if o == nil || IsNil(o.Response) {
 		return nil, false
 	}
-	return o.Responseomitempty, true
+	return o.Response, true
 }
 
-// HasResponseomitempty returns a boolean if a field has been set.
-func (o *AttendeeInfo) HasResponseomitempty() bool {
-	if o != nil && !IsNil(o.Responseomitempty) {
+// HasResponse returns a boolean if a field has been set.
+func (o *AttendeeInfo) HasResponse() bool {
+	if o != nil && !IsNil(o.Response) {
 		return true
 	}
 
 	return false
 }
 
-// SetResponseomitempty gets a reference to the given string and assigns it to the Responseomitempty field.
-func (o *AttendeeInfo) SetResponseomitempty(v string) {
-	o.Responseomitempty = &v
+// SetResponse gets a reference to the given string and assigns it to the Response field.
+func (o *AttendeeInfo) SetResponse(v string) {
+	o.Response = &v
 }
 
 func (o AttendeeInfo) MarshalJSON() ([]byte, error) {
@@ -145,11 +145,11 @@ func (o AttendeeInfo) MarshalJSON() ([]byte, error) {
 func (o AttendeeInfo) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["email"] = o.Email
-	if !IsNil(o.DisplayNameomitempty) {
-		toSerialize["display_name,omitempty"] = o.DisplayNameomitempty
+	if !IsNil(o.DisplayName) {
+		toSerialize["display_name"] = o.DisplayName
 	}
-	if !IsNil(o.Responseomitempty) {
-		toSerialize["response,omitempty"] = o.Responseomitempty
+	if !IsNil(o.Response) {
+		toSerialize["response"] = o.Response
 	}
 	return toSerialize, nil
 }

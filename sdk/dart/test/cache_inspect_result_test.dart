@@ -32,8 +32,8 @@ void main() {
       // TODO
     });
 
-    // String fileHashesCommaOmitempty
-    test('to test the property `fileHashesCommaOmitempty`', () async {
+    // String fileHashes
+    test('to test the property `fileHashes`', () async {
       // TODO
     });
 

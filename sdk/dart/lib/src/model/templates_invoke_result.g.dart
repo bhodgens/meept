@@ -10,11 +10,11 @@ class _$TemplatesInvokeResult extends TemplatesInvokeResult {
   @override
   final String prompt;
   @override
-  final String? outputCommaOmitempty;
+  final String? output;
   @override
   final bool success;
   @override
-  final String? errorCommaOmitempty;
+  final String? error;
 
   factory _$TemplatesInvokeResult(
           [void Function(TemplatesInvokeResultBuilder)? updates]) =>
@@ -22,9 +22,9 @@ class _$TemplatesInvokeResult extends TemplatesInvokeResult {
 
   _$TemplatesInvokeResult._(
       {required this.prompt,
-      this.outputCommaOmitempty,
+      this.output,
       required this.success,
-      this.errorCommaOmitempty})
+      this.error})
       : super._();
   @override
   TemplatesInvokeResult rebuild(
@@ -40,18 +40,18 @@ class _$TemplatesInvokeResult extends TemplatesInvokeResult {
     if (identical(other, this)) return true;
     return other is TemplatesInvokeResult &&
         prompt == other.prompt &&
-        outputCommaOmitempty == other.outputCommaOmitempty &&
+        output == other.output &&
         success == other.success &&
-        errorCommaOmitempty == other.errorCommaOmitempty;
+        error == other.error;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, prompt.hashCode);
-    _$hash = $jc(_$hash, outputCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, output.hashCode);
     _$hash = $jc(_$hash, success.hashCode);
-    _$hash = $jc(_$hash, errorCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, error.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -60,9 +60,9 @@ class _$TemplatesInvokeResult extends TemplatesInvokeResult {
   String toString() {
     return (newBuiltValueToStringHelper(r'TemplatesInvokeResult')
           ..add('prompt', prompt)
-          ..add('outputCommaOmitempty', outputCommaOmitempty)
+          ..add('output', output)
           ..add('success', success)
-          ..add('errorCommaOmitempty', errorCommaOmitempty))
+          ..add('error', error))
         .toString();
   }
 }
@@ -75,19 +75,19 @@ class TemplatesInvokeResultBuilder
   String? get prompt => _$this._prompt;
   set prompt(String? prompt) => _$this._prompt = prompt;
 
-  String? _outputCommaOmitempty;
-  String? get outputCommaOmitempty => _$this._outputCommaOmitempty;
-  set outputCommaOmitempty(String? outputCommaOmitempty) =>
-      _$this._outputCommaOmitempty = outputCommaOmitempty;
+  String? _output;
+  String? get output => _$this._output;
+  set output(String? output) =>
+      _$this._output = output;
 
   bool? _success;
   bool? get success => _$this._success;
   set success(bool? success) => _$this._success = success;
 
-  String? _errorCommaOmitempty;
-  String? get errorCommaOmitempty => _$this._errorCommaOmitempty;
-  set errorCommaOmitempty(String? errorCommaOmitempty) =>
-      _$this._errorCommaOmitempty = errorCommaOmitempty;
+  String? _error;
+  String? get error => _$this._error;
+  set error(String? error) =>
+      _$this._error = error;
 
   TemplatesInvokeResultBuilder() {
     TemplatesInvokeResult._defaults(this);
@@ -97,9 +97,9 @@ class TemplatesInvokeResultBuilder
     final $v = _$v;
     if ($v != null) {
       _prompt = $v.prompt;
-      _outputCommaOmitempty = $v.outputCommaOmitempty;
+      _output = $v.output;
       _success = $v.success;
-      _errorCommaOmitempty = $v.errorCommaOmitempty;
+      _error = $v.error;
       _$v = null;
     }
     return this;
@@ -123,10 +123,10 @@ class TemplatesInvokeResultBuilder
         _$TemplatesInvokeResult._(
           prompt: BuiltValueNullFieldError.checkNotNull(
               prompt, r'TemplatesInvokeResult', 'prompt'),
-          outputCommaOmitempty: outputCommaOmitempty,
+          output: output,
           success: BuiltValueNullFieldError.checkNotNull(
               success, r'TemplatesInvokeResult', 'success'),
-          errorCommaOmitempty: errorCommaOmitempty,
+          error: error,
         );
     replace(_$result);
     return _$result;

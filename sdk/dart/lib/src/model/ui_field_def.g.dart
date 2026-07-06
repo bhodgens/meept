@@ -14,15 +14,15 @@ class _$UIFieldDef extends UIFieldDef {
   @override
   final String type;
   @override
-  final bool? requiredCommaOmitempty;
+  final bool? required_;
   @override
-  final JsonObject? defaultCommaOmitempty;
+  final JsonObject? default_;
   @override
-  final String? optionsCommaOmitempty;
+  final String? options;
   @override
-  final String? placeholderCommaOmitempty;
+  final String? placeholder;
   @override
-  final String? helpCommaOmitempty;
+  final String? help;
 
   factory _$UIFieldDef([void Function(UIFieldDefBuilder)? updates]) =>
       (UIFieldDefBuilder()..update(updates))._build();
@@ -31,11 +31,11 @@ class _$UIFieldDef extends UIFieldDef {
       {required this.name,
       required this.label,
       required this.type,
-      this.requiredCommaOmitempty,
-      this.defaultCommaOmitempty,
-      this.optionsCommaOmitempty,
-      this.placeholderCommaOmitempty,
-      this.helpCommaOmitempty})
+      this.required_,
+      this.default_,
+      this.options,
+      this.placeholder,
+      this.help})
       : super._();
   @override
   UIFieldDef rebuild(void Function(UIFieldDefBuilder) updates) =>
@@ -51,11 +51,11 @@ class _$UIFieldDef extends UIFieldDef {
         name == other.name &&
         label == other.label &&
         type == other.type &&
-        requiredCommaOmitempty == other.requiredCommaOmitempty &&
-        defaultCommaOmitempty == other.defaultCommaOmitempty &&
-        optionsCommaOmitempty == other.optionsCommaOmitempty &&
-        placeholderCommaOmitempty == other.placeholderCommaOmitempty &&
-        helpCommaOmitempty == other.helpCommaOmitempty;
+        required_ == other.required_ &&
+        default_ == other.default_ &&
+        options == other.options &&
+        placeholder == other.placeholder &&
+        help == other.help;
   }
 
   @override
@@ -64,11 +64,11 @@ class _$UIFieldDef extends UIFieldDef {
     _$hash = $jc(_$hash, name.hashCode);
     _$hash = $jc(_$hash, label.hashCode);
     _$hash = $jc(_$hash, type.hashCode);
-    _$hash = $jc(_$hash, requiredCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, defaultCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, optionsCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, placeholderCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, helpCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, required_.hashCode);
+    _$hash = $jc(_$hash, default_.hashCode);
+    _$hash = $jc(_$hash, options.hashCode);
+    _$hash = $jc(_$hash, placeholder.hashCode);
+    _$hash = $jc(_$hash, help.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -79,11 +79,11 @@ class _$UIFieldDef extends UIFieldDef {
           ..add('name', name)
           ..add('label', label)
           ..add('type', type)
-          ..add('requiredCommaOmitempty', requiredCommaOmitempty)
-          ..add('defaultCommaOmitempty', defaultCommaOmitempty)
-          ..add('optionsCommaOmitempty', optionsCommaOmitempty)
-          ..add('placeholderCommaOmitempty', placeholderCommaOmitempty)
-          ..add('helpCommaOmitempty', helpCommaOmitempty))
+          ..add('required_', required_)
+          ..add('default_', default_)
+          ..add('options', options)
+          ..add('placeholder', placeholder)
+          ..add('help', help))
         .toString();
   }
 }
@@ -103,30 +103,30 @@ class UIFieldDefBuilder implements Builder<UIFieldDef, UIFieldDefBuilder> {
   String? get type => _$this._type;
   set type(String? type) => _$this._type = type;
 
-  bool? _requiredCommaOmitempty;
-  bool? get requiredCommaOmitempty => _$this._requiredCommaOmitempty;
-  set requiredCommaOmitempty(bool? requiredCommaOmitempty) =>
-      _$this._requiredCommaOmitempty = requiredCommaOmitempty;
+  bool? _required_;
+  bool? get required_ => _$this._required_;
+  set required_(bool? required_) =>
+      _$this._required_ = required_;
 
-  JsonObject? _defaultCommaOmitempty;
-  JsonObject? get defaultCommaOmitempty => _$this._defaultCommaOmitempty;
-  set defaultCommaOmitempty(JsonObject? defaultCommaOmitempty) =>
-      _$this._defaultCommaOmitempty = defaultCommaOmitempty;
+  JsonObject? _default_;
+  JsonObject? get default_ => _$this._default_;
+  set default_(JsonObject? default_) =>
+      _$this._default_ = default_;
 
-  String? _optionsCommaOmitempty;
-  String? get optionsCommaOmitempty => _$this._optionsCommaOmitempty;
-  set optionsCommaOmitempty(String? optionsCommaOmitempty) =>
-      _$this._optionsCommaOmitempty = optionsCommaOmitempty;
+  String? _options;
+  String? get options => _$this._options;
+  set options(String? options) =>
+      _$this._options = options;
 
-  String? _placeholderCommaOmitempty;
-  String? get placeholderCommaOmitempty => _$this._placeholderCommaOmitempty;
-  set placeholderCommaOmitempty(String? placeholderCommaOmitempty) =>
-      _$this._placeholderCommaOmitempty = placeholderCommaOmitempty;
+  String? _placeholder;
+  String? get placeholder => _$this._placeholder;
+  set placeholder(String? placeholder) =>
+      _$this._placeholder = placeholder;
 
-  String? _helpCommaOmitempty;
-  String? get helpCommaOmitempty => _$this._helpCommaOmitempty;
-  set helpCommaOmitempty(String? helpCommaOmitempty) =>
-      _$this._helpCommaOmitempty = helpCommaOmitempty;
+  String? _help;
+  String? get help => _$this._help;
+  set help(String? help) =>
+      _$this._help = help;
 
   UIFieldDefBuilder() {
     UIFieldDef._defaults(this);
@@ -138,11 +138,11 @@ class UIFieldDefBuilder implements Builder<UIFieldDef, UIFieldDefBuilder> {
       _name = $v.name;
       _label = $v.label;
       _type = $v.type;
-      _requiredCommaOmitempty = $v.requiredCommaOmitempty;
-      _defaultCommaOmitempty = $v.defaultCommaOmitempty;
-      _optionsCommaOmitempty = $v.optionsCommaOmitempty;
-      _placeholderCommaOmitempty = $v.placeholderCommaOmitempty;
-      _helpCommaOmitempty = $v.helpCommaOmitempty;
+      _required_ = $v.required_;
+      _default_ = $v.default_;
+      _options = $v.options;
+      _placeholder = $v.placeholder;
+      _help = $v.help;
       _$v = null;
     }
     return this;
@@ -170,11 +170,11 @@ class UIFieldDefBuilder implements Builder<UIFieldDef, UIFieldDefBuilder> {
               label, r'UIFieldDef', 'label'),
           type: BuiltValueNullFieldError.checkNotNull(
               type, r'UIFieldDef', 'type'),
-          requiredCommaOmitempty: requiredCommaOmitempty,
-          defaultCommaOmitempty: defaultCommaOmitempty,
-          optionsCommaOmitempty: optionsCommaOmitempty,
-          placeholderCommaOmitempty: placeholderCommaOmitempty,
-          helpCommaOmitempty: helpCommaOmitempty,
+          required_: required_,
+          default_: default_,
+          options: options,
+          placeholder: placeholder,
+          help: help,
         );
     replace(_$result);
     return _$result;

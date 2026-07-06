@@ -7,8 +7,8 @@ void main() {
   // TODO add properties to the builder and call build()
 
   group(InvalidateRequest, () {
-    // String pathCommaOmitempty
-    test('to test the property `pathCommaOmitempty`', () async {
+    // String path
+    test('to test the property `path`', () async {
       // TODO
     });
 

@@ -12,27 +12,27 @@ part 'create_pipeline_request.g.dart';
 /// CreatePipelineRequest
 ///
 /// Properties:
-/// * [idCommaOmitempty] 
+/// * [id] 
 /// * [name] 
-/// * [descriptionCommaOmitempty] 
-/// * [stepsCommaOmitempty] 
-/// * [metadataCommaOmitempty] 
+/// * [description] 
+/// * [steps] 
+/// * [metadata] 
 @BuiltValue()
 abstract class CreatePipelineRequest implements Built<CreatePipelineRequest, CreatePipelineRequestBuilder> {
-  @BuiltValueField(wireName: r'id,omitempty')
-  String? get idCommaOmitempty;
+  @BuiltValueField(wireName: r'id')
+  String? get id;
 
   @BuiltValueField(wireName: r'name')
   String get name;
 
-  @BuiltValueField(wireName: r'description,omitempty')
-  String? get descriptionCommaOmitempty;
+  @BuiltValueField(wireName: r'description')
+  String? get description;
 
-  @BuiltValueField(wireName: r'steps,omitempty')
-  BuiltList<String>? get stepsCommaOmitempty;
+  @BuiltValueField(wireName: r'steps')
+  BuiltList<String>? get steps;
 
-  @BuiltValueField(wireName: r'metadata,omitempty')
-  String? get metadataCommaOmitempty;
+  @BuiltValueField(wireName: r'metadata')
+  String? get metadata;
 
   CreatePipelineRequest._();
 
@@ -57,10 +57,10 @@ class _$CreatePipelineRequestSerializer implements PrimitiveSerializer<CreatePip
     CreatePipelineRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
-    if (object.idCommaOmitempty != null) {
-      yield r'id,omitempty';
+    if (object.id != null) {
+      yield r'id';
       yield serializers.serialize(
-        object.idCommaOmitempty,
+        object.id,
         specifiedType: const FullType(String),
       );
     }
@@ -69,24 +69,24 @@ class _$CreatePipelineRequestSerializer implements PrimitiveSerializer<CreatePip
       object.name,
       specifiedType: const FullType(String),
     );
-    if (object.descriptionCommaOmitempty != null) {
-      yield r'description,omitempty';
+    if (object.description != null) {
+      yield r'description';
       yield serializers.serialize(
-        object.descriptionCommaOmitempty,
+        object.description,
         specifiedType: const FullType(String),
       );
     }
-    if (object.stepsCommaOmitempty != null) {
-      yield r'steps,omitempty';
+    if (object.steps != null) {
+      yield r'steps';
       yield serializers.serialize(
-        object.stepsCommaOmitempty,
+        object.steps,
         specifiedType: const FullType.nullable(BuiltList, [FullType(String)]),
       );
     }
-    if (object.metadataCommaOmitempty != null) {
-      yield r'metadata,omitempty';
+    if (object.metadata != null) {
+      yield r'metadata';
       yield serializers.serialize(
-        object.metadataCommaOmitempty,
+        object.metadata,
         specifiedType: const FullType.nullable(String),
       );
     }
@@ -113,12 +113,12 @@ class _$CreatePipelineRequestSerializer implements PrimitiveSerializer<CreatePip
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
-        case r'id,omitempty':
+        case r'id':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.idCommaOmitempty = valueDes;
+          result.id = valueDes;
           break;
         case r'name':
           final valueDes = serializers.deserialize(
@@ -127,28 +127,28 @@ class _$CreatePipelineRequestSerializer implements PrimitiveSerializer<CreatePip
           ) as String;
           result.name = valueDes;
           break;
-        case r'description,omitempty':
+        case r'description':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.descriptionCommaOmitempty = valueDes;
+          result.description = valueDes;
           break;
-        case r'steps,omitempty':
+        case r'steps':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(BuiltList, [FullType(String)]),
           ) as BuiltList<String>?;
           if (valueDes == null) continue;
-          result.stepsCommaOmitempty.replace(valueDes);
+          result.steps.replace(valueDes);
           break;
-        case r'metadata,omitempty':
+        case r'metadata':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.metadataCommaOmitempty = valueDes;
+          result.metadata = valueDes;
           break;
         default:
           unhandled.add(key);

@@ -11,9 +11,9 @@ Name | Type | Description | Notes
 **name** | **String** |  | 
 **description** | **String** |  | 
 **scope** | [**JsonObject**](.md) |  | 
-**pathCommaOmitempty** | **String** |  | [optional] 
+**path** | **String** |  | [optional] 
 **priority** | **int** |  | 
-**bodyCommaOmitempty** | **String** |  | [optional] 
+**body** | **String** |  | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

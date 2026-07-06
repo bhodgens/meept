@@ -23,7 +23,7 @@ var _ MappedNullable = &VectorStoreRequest{}
 type VectorStoreRequest struct {
 	MemoryId string `json:"memory_id"`
 	Content string `json:"content"`
-	Metadataomitempty NullableString `json:"metadata,omitempty,omitempty"`
+	Metadata NullableString `json:"metadata,omitempty"`
 }
 
 type _VectorStoreRequest VectorStoreRequest
@@ -95,46 +95,46 @@ func (o *VectorStoreRequest) SetContent(v string) {
 	o.Content = v
 }
 
-// GetMetadataomitempty returns the Metadataomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *VectorStoreRequest) GetMetadataomitempty() string {
-	if o == nil || IsNil(o.Metadataomitempty.Get()) {
+// GetMetadata returns the Metadata field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *VectorStoreRequest) GetMetadata() string {
+	if o == nil || IsNil(o.Metadata.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.Metadataomitempty.Get()
+	return *o.Metadata.Get()
 }
 
-// GetMetadataomitemptyOk returns a tuple with the Metadataomitempty field value if set, nil otherwise
+// GetMetadataOk returns a tuple with the Metadata field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *VectorStoreRequest) GetMetadataomitemptyOk() (*string, bool) {
+func (o *VectorStoreRequest) GetMetadataOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.Metadataomitempty.Get(), o.Metadataomitempty.IsSet()
+	return o.Metadata.Get(), o.Metadata.IsSet()
 }
 
-// HasMetadataomitempty returns a boolean if a field has been set.
-func (o *VectorStoreRequest) HasMetadataomitempty() bool {
-	if o != nil && o.Metadataomitempty.IsSet() {
+// HasMetadata returns a boolean if a field has been set.
+func (o *VectorStoreRequest) HasMetadata() bool {
+	if o != nil && o.Metadata.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetMetadataomitempty gets a reference to the given NullableString and assigns it to the Metadataomitempty field.
-func (o *VectorStoreRequest) SetMetadataomitempty(v string) {
-	o.Metadataomitempty.Set(&v)
+// SetMetadata gets a reference to the given NullableString and assigns it to the Metadata field.
+func (o *VectorStoreRequest) SetMetadata(v string) {
+	o.Metadata.Set(&v)
 }
-// SetMetadataomitemptyNil sets the value for Metadataomitempty to be an explicit nil
-func (o *VectorStoreRequest) SetMetadataomitemptyNil() {
-	o.Metadataomitempty.Set(nil)
+// SetMetadataNil sets the value for Metadata to be an explicit nil
+func (o *VectorStoreRequest) SetMetadataNil() {
+	o.Metadata.Set(nil)
 }
 
-// UnsetMetadataomitempty ensures that no value is present for Metadataomitempty, not even an explicit nil
-func (o *VectorStoreRequest) UnsetMetadataomitempty() {
-	o.Metadataomitempty.Unset()
+// UnsetMetadata ensures that no value is present for Metadata, not even an explicit nil
+func (o *VectorStoreRequest) UnsetMetadata() {
+	o.Metadata.Unset()
 }
 
 func (o VectorStoreRequest) MarshalJSON() ([]byte, error) {
@@ -149,8 +149,8 @@ func (o VectorStoreRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["memory_id"] = o.MemoryId
 	toSerialize["content"] = o.Content
-	if o.Metadataomitempty.IsSet() {
-		toSerialize["metadata,omitempty"] = o.Metadataomitempty.Get()
+	if o.Metadata.IsSet() {
+		toSerialize["metadata"] = o.Metadata.Get()
 	}
 	return toSerialize, nil
 }

@@ -12,13 +12,13 @@ class _$ExecuteResult extends ExecuteResult {
   @override
   final bool success;
   @override
-  final String? errorCommaOmitempty;
+  final String? error;
 
   factory _$ExecuteResult([void Function(ExecuteResultBuilder)? updates]) =>
       (ExecuteResultBuilder()..update(updates))._build();
 
   _$ExecuteResult._(
-      {required this.output, required this.success, this.errorCommaOmitempty})
+      {required this.output, required this.success, this.error})
       : super._();
   @override
   ExecuteResult rebuild(void Function(ExecuteResultBuilder) updates) =>
@@ -33,7 +33,7 @@ class _$ExecuteResult extends ExecuteResult {
     return other is ExecuteResult &&
         output == other.output &&
         success == other.success &&
-        errorCommaOmitempty == other.errorCommaOmitempty;
+        error == other.error;
   }
 
   @override
@@ -41,7 +41,7 @@ class _$ExecuteResult extends ExecuteResult {
     var _$hash = 0;
     _$hash = $jc(_$hash, output.hashCode);
     _$hash = $jc(_$hash, success.hashCode);
-    _$hash = $jc(_$hash, errorCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, error.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -51,7 +51,7 @@ class _$ExecuteResult extends ExecuteResult {
     return (newBuiltValueToStringHelper(r'ExecuteResult')
           ..add('output', output)
           ..add('success', success)
-          ..add('errorCommaOmitempty', errorCommaOmitempty))
+          ..add('error', error))
         .toString();
   }
 }
@@ -68,10 +68,10 @@ class ExecuteResultBuilder
   bool? get success => _$this._success;
   set success(bool? success) => _$this._success = success;
 
-  String? _errorCommaOmitempty;
-  String? get errorCommaOmitempty => _$this._errorCommaOmitempty;
-  set errorCommaOmitempty(String? errorCommaOmitempty) =>
-      _$this._errorCommaOmitempty = errorCommaOmitempty;
+  String? _error;
+  String? get error => _$this._error;
+  set error(String? error) =>
+      _$this._error = error;
 
   ExecuteResultBuilder() {
     ExecuteResult._defaults(this);
@@ -82,7 +82,7 @@ class ExecuteResultBuilder
     if ($v != null) {
       _output = $v.output;
       _success = $v.success;
-      _errorCommaOmitempty = $v.errorCommaOmitempty;
+      _error = $v.error;
       _$v = null;
     }
     return this;
@@ -108,7 +108,7 @@ class ExecuteResultBuilder
               output, r'ExecuteResult', 'output'),
           success: BuiltValueNullFieldError.checkNotNull(
               success, r'ExecuteResult', 'success'),
-          errorCommaOmitempty: errorCommaOmitempty,
+          error: error,
         );
     replace(_$result);
     return _$result;

@@ -16,13 +16,13 @@ part 'skill_ui_descriptor.g.dart';
 /// * [name] 
 /// * [description] 
 /// * [uiType] 
-/// * [categoryCommaOmitempty] 
-/// * [tagsCommaOmitempty] 
-/// * [examplesCommaOmitempty] 
-/// * [riskLevelCommaOmitempty] 
-/// * [bodyCommaOmitempty] 
-/// * [fieldsCommaOmitempty] 
-/// * [actionsCommaOmitempty] 
+/// * [category] 
+/// * [tags] 
+/// * [examples] 
+/// * [riskLevel] 
+/// * [body] 
+/// * [fields] 
+/// * [actions] 
 @BuiltValue()
 abstract class SkillUIDescriptor implements Built<SkillUIDescriptor, SkillUIDescriptorBuilder> {
   @BuiltValueField(wireName: r'slug')
@@ -37,26 +37,26 @@ abstract class SkillUIDescriptor implements Built<SkillUIDescriptor, SkillUIDesc
   @BuiltValueField(wireName: r'ui_type')
   String get uiType;
 
-  @BuiltValueField(wireName: r'category,omitempty')
-  String? get categoryCommaOmitempty;
+  @BuiltValueField(wireName: r'category')
+  String? get category;
 
-  @BuiltValueField(wireName: r'tags,omitempty')
-  String? get tagsCommaOmitempty;
+  @BuiltValueField(wireName: r'tags')
+  String? get tags;
 
-  @BuiltValueField(wireName: r'examples,omitempty')
-  String? get examplesCommaOmitempty;
+  @BuiltValueField(wireName: r'examples')
+  String? get examples;
 
-  @BuiltValueField(wireName: r'risk_level,omitempty')
-  String? get riskLevelCommaOmitempty;
+  @BuiltValueField(wireName: r'risk_level')
+  String? get riskLevel;
 
-  @BuiltValueField(wireName: r'body,omitempty')
-  String? get bodyCommaOmitempty;
+  @BuiltValueField(wireName: r'body')
+  String? get body;
 
-  @BuiltValueField(wireName: r'fields,omitempty')
-  BuiltList<String>? get fieldsCommaOmitempty;
+  @BuiltValueField(wireName: r'fields')
+  BuiltList<String>? get fields;
 
-  @BuiltValueField(wireName: r'actions,omitempty')
-  BuiltList<String>? get actionsCommaOmitempty;
+  @BuiltValueField(wireName: r'actions')
+  BuiltList<String>? get actions;
 
   SkillUIDescriptor._();
 
@@ -101,52 +101,52 @@ class _$SkillUIDescriptorSerializer implements PrimitiveSerializer<SkillUIDescri
       object.uiType,
       specifiedType: const FullType(String),
     );
-    if (object.categoryCommaOmitempty != null) {
-      yield r'category,omitempty';
+    if (object.category != null) {
+      yield r'category';
       yield serializers.serialize(
-        object.categoryCommaOmitempty,
+        object.category,
         specifiedType: const FullType(String),
       );
     }
-    if (object.tagsCommaOmitempty != null) {
-      yield r'tags,omitempty';
+    if (object.tags != null) {
+      yield r'tags';
       yield serializers.serialize(
-        object.tagsCommaOmitempty,
+        object.tags,
         specifiedType: const FullType.nullable(String),
       );
     }
-    if (object.examplesCommaOmitempty != null) {
-      yield r'examples,omitempty';
+    if (object.examples != null) {
+      yield r'examples';
       yield serializers.serialize(
-        object.examplesCommaOmitempty,
+        object.examples,
         specifiedType: const FullType.nullable(String),
       );
     }
-    if (object.riskLevelCommaOmitempty != null) {
-      yield r'risk_level,omitempty';
+    if (object.riskLevel != null) {
+      yield r'risk_level';
       yield serializers.serialize(
-        object.riskLevelCommaOmitempty,
+        object.riskLevel,
         specifiedType: const FullType(String),
       );
     }
-    if (object.bodyCommaOmitempty != null) {
-      yield r'body,omitempty';
+    if (object.body != null) {
+      yield r'body';
       yield serializers.serialize(
-        object.bodyCommaOmitempty,
+        object.body,
         specifiedType: const FullType(String),
       );
     }
-    if (object.fieldsCommaOmitempty != null) {
-      yield r'fields,omitempty';
+    if (object.fields != null) {
+      yield r'fields';
       yield serializers.serialize(
-        object.fieldsCommaOmitempty,
+        object.fields,
         specifiedType: const FullType.nullable(BuiltList, [FullType(String)]),
       );
     }
-    if (object.actionsCommaOmitempty != null) {
-      yield r'actions,omitempty';
+    if (object.actions != null) {
+      yield r'actions';
       yield serializers.serialize(
-        object.actionsCommaOmitempty,
+        object.actions,
         specifiedType: const FullType.nullable(BuiltList, [FullType(String)]),
       );
     }
@@ -201,58 +201,58 @@ class _$SkillUIDescriptorSerializer implements PrimitiveSerializer<SkillUIDescri
           ) as String;
           result.uiType = valueDes;
           break;
-        case r'category,omitempty':
+        case r'category':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.categoryCommaOmitempty = valueDes;
+          result.category = valueDes;
           break;
-        case r'tags,omitempty':
+        case r'tags':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.tagsCommaOmitempty = valueDes;
+          result.tags = valueDes;
           break;
-        case r'examples,omitempty':
+        case r'examples':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.examplesCommaOmitempty = valueDes;
+          result.examples = valueDes;
           break;
-        case r'risk_level,omitempty':
+        case r'risk_level':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.riskLevelCommaOmitempty = valueDes;
+          result.riskLevel = valueDes;
           break;
-        case r'body,omitempty':
+        case r'body':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.bodyCommaOmitempty = valueDes;
+          result.body = valueDes;
           break;
-        case r'fields,omitempty':
+        case r'fields':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(BuiltList, [FullType(String)]),
           ) as BuiltList<String>?;
           if (valueDes == null) continue;
-          result.fieldsCommaOmitempty.replace(valueDes);
+          result.fields.replace(valueDes);
           break;
-        case r'actions,omitempty':
+        case r'actions':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(BuiltList, [FullType(String)]),
           ) as BuiltList<String>?;
           if (valueDes == null) continue;
-          result.actionsCommaOmitempty.replace(valueDes);
+          result.actions.replace(valueDes);
           break;
         default:
           unhandled.add(key);

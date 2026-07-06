@@ -23,8 +23,8 @@ var _ MappedNullable = &PublishRequest{}
 type PublishRequest struct {
 	Topic string `json:"topic"`
 	Type string `json:"type"`
-	Sourceomitempty *string `json:"source,omitempty,omitempty"`
-	Payloadomitempty NullableString `json:"payload,omitempty,omitempty"`
+	Source *string `json:"source,omitempty"`
+	Payload NullableString `json:"payload,omitempty"`
 }
 
 type _PublishRequest PublishRequest
@@ -96,78 +96,78 @@ func (o *PublishRequest) SetType(v string) {
 	o.Type = v
 }
 
-// GetSourceomitempty returns the Sourceomitempty field value if set, zero value otherwise.
-func (o *PublishRequest) GetSourceomitempty() string {
-	if o == nil || IsNil(o.Sourceomitempty) {
+// GetSource returns the Source field value if set, zero value otherwise.
+func (o *PublishRequest) GetSource() string {
+	if o == nil || IsNil(o.Source) {
 		var ret string
 		return ret
 	}
-	return *o.Sourceomitempty
+	return *o.Source
 }
 
-// GetSourceomitemptyOk returns a tuple with the Sourceomitempty field value if set, nil otherwise
+// GetSourceOk returns a tuple with the Source field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *PublishRequest) GetSourceomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Sourceomitempty) {
+func (o *PublishRequest) GetSourceOk() (*string, bool) {
+	if o == nil || IsNil(o.Source) {
 		return nil, false
 	}
-	return o.Sourceomitempty, true
+	return o.Source, true
 }
 
-// HasSourceomitempty returns a boolean if a field has been set.
-func (o *PublishRequest) HasSourceomitempty() bool {
-	if o != nil && !IsNil(o.Sourceomitempty) {
+// HasSource returns a boolean if a field has been set.
+func (o *PublishRequest) HasSource() bool {
+	if o != nil && !IsNil(o.Source) {
 		return true
 	}
 
 	return false
 }
 
-// SetSourceomitempty gets a reference to the given string and assigns it to the Sourceomitempty field.
-func (o *PublishRequest) SetSourceomitempty(v string) {
-	o.Sourceomitempty = &v
+// SetSource gets a reference to the given string and assigns it to the Source field.
+func (o *PublishRequest) SetSource(v string) {
+	o.Source = &v
 }
 
-// GetPayloadomitempty returns the Payloadomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *PublishRequest) GetPayloadomitempty() string {
-	if o == nil || IsNil(o.Payloadomitempty.Get()) {
+// GetPayload returns the Payload field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *PublishRequest) GetPayload() string {
+	if o == nil || IsNil(o.Payload.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.Payloadomitempty.Get()
+	return *o.Payload.Get()
 }
 
-// GetPayloadomitemptyOk returns a tuple with the Payloadomitempty field value if set, nil otherwise
+// GetPayloadOk returns a tuple with the Payload field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *PublishRequest) GetPayloadomitemptyOk() (*string, bool) {
+func (o *PublishRequest) GetPayloadOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.Payloadomitempty.Get(), o.Payloadomitempty.IsSet()
+	return o.Payload.Get(), o.Payload.IsSet()
 }
 
-// HasPayloadomitempty returns a boolean if a field has been set.
-func (o *PublishRequest) HasPayloadomitempty() bool {
-	if o != nil && o.Payloadomitempty.IsSet() {
+// HasPayload returns a boolean if a field has been set.
+func (o *PublishRequest) HasPayload() bool {
+	if o != nil && o.Payload.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetPayloadomitempty gets a reference to the given NullableString and assigns it to the Payloadomitempty field.
-func (o *PublishRequest) SetPayloadomitempty(v string) {
-	o.Payloadomitempty.Set(&v)
+// SetPayload gets a reference to the given NullableString and assigns it to the Payload field.
+func (o *PublishRequest) SetPayload(v string) {
+	o.Payload.Set(&v)
 }
-// SetPayloadomitemptyNil sets the value for Payloadomitempty to be an explicit nil
-func (o *PublishRequest) SetPayloadomitemptyNil() {
-	o.Payloadomitempty.Set(nil)
+// SetPayloadNil sets the value for Payload to be an explicit nil
+func (o *PublishRequest) SetPayloadNil() {
+	o.Payload.Set(nil)
 }
 
-// UnsetPayloadomitempty ensures that no value is present for Payloadomitempty, not even an explicit nil
-func (o *PublishRequest) UnsetPayloadomitempty() {
-	o.Payloadomitempty.Unset()
+// UnsetPayload ensures that no value is present for Payload, not even an explicit nil
+func (o *PublishRequest) UnsetPayload() {
+	o.Payload.Unset()
 }
 
 func (o PublishRequest) MarshalJSON() ([]byte, error) {
@@ -182,11 +182,11 @@ func (o PublishRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["topic"] = o.Topic
 	toSerialize["type"] = o.Type
-	if !IsNil(o.Sourceomitempty) {
-		toSerialize["source,omitempty"] = o.Sourceomitempty
+	if !IsNil(o.Source) {
+		toSerialize["source"] = o.Source
 	}
-	if o.Payloadomitempty.IsSet() {
-		toSerialize["payload,omitempty"] = o.Payloadomitempty.Get()
+	if o.Payload.IsSet() {
+		toSerialize["payload"] = o.Payload.Get()
 	}
 	return toSerialize, nil
 }

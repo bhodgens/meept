@@ -8,12 +8,12 @@ part of 'trigger_request.dart';
 
 class _$TriggerRequest extends TriggerRequest {
   @override
-  final bool? forceCommaOmitempty;
+  final bool? force;
 
   factory _$TriggerRequest([void Function(TriggerRequestBuilder)? updates]) =>
       (TriggerRequestBuilder()..update(updates))._build();
 
-  _$TriggerRequest._({this.forceCommaOmitempty}) : super._();
+  _$TriggerRequest._({this.force}) : super._();
   @override
   TriggerRequest rebuild(void Function(TriggerRequestBuilder) updates) =>
       (toBuilder()..update(updates)).build();
@@ -25,13 +25,13 @@ class _$TriggerRequest extends TriggerRequest {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is TriggerRequest &&
-        forceCommaOmitempty == other.forceCommaOmitempty;
+        force == other.force;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
-    _$hash = $jc(_$hash, forceCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, force.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -39,7 +39,7 @@ class _$TriggerRequest extends TriggerRequest {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'TriggerRequest')
-          ..add('forceCommaOmitempty', forceCommaOmitempty))
+          ..add('force', force))
         .toString();
   }
 }
@@ -48,10 +48,10 @@ class TriggerRequestBuilder
     implements Builder<TriggerRequest, TriggerRequestBuilder> {
   _$TriggerRequest? _$v;
 
-  bool? _forceCommaOmitempty;
-  bool? get forceCommaOmitempty => _$this._forceCommaOmitempty;
-  set forceCommaOmitempty(bool? forceCommaOmitempty) =>
-      _$this._forceCommaOmitempty = forceCommaOmitempty;
+  bool? _force;
+  bool? get force => _$this._force;
+  set force(bool? force) =>
+      _$this._force = force;
 
   TriggerRequestBuilder() {
     TriggerRequest._defaults(this);
@@ -60,7 +60,7 @@ class TriggerRequestBuilder
   TriggerRequestBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
-      _forceCommaOmitempty = $v.forceCommaOmitempty;
+      _force = $v.force;
       _$v = null;
     }
     return this;
@@ -82,7 +82,7 @@ class TriggerRequestBuilder
   _$TriggerRequest _build() {
     final _$result = _$v ??
         _$TriggerRequest._(
-          forceCommaOmitempty: forceCommaOmitempty,
+          force: force,
         );
     replace(_$result);
     return _$result;

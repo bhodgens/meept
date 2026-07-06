@@ -12,13 +12,13 @@ void main() {
       // TODO
     });
 
-    // String scopeCommaOmitempty
-    test('to test the property `scopeCommaOmitempty`', () async {
+    // String scope
+    test('to test the property `scope`', () async {
       // TODO
     });
 
-    // int limitCommaOmitempty
-    test('to test the property `limitCommaOmitempty`', () async {
+    // int limit
+    test('to test the property `limit`', () async {
       // TODO
     });
 

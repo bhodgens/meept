@@ -7,8 +7,8 @@ void main() {
   // TODO add properties to the builder and call build()
 
   group(AuditRequest, () {
-    // int limitCommaOmitempty
-    test('to test the property `limitCommaOmitempty`', () async {
+    // int limit
+    test('to test the property `limit`', () async {
       // TODO
     });
 

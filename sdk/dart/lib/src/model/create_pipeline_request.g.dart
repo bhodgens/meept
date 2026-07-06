@@ -8,26 +8,26 @@ part of 'create_pipeline_request.dart';
 
 class _$CreatePipelineRequest extends CreatePipelineRequest {
   @override
-  final String? idCommaOmitempty;
+  final String? id;
   @override
   final String name;
   @override
-  final String? descriptionCommaOmitempty;
+  final String? description;
   @override
-  final BuiltList<String>? stepsCommaOmitempty;
+  final BuiltList<String>? steps;
   @override
-  final String? metadataCommaOmitempty;
+  final String? metadata;
 
   factory _$CreatePipelineRequest(
           [void Function(CreatePipelineRequestBuilder)? updates]) =>
       (CreatePipelineRequestBuilder()..update(updates))._build();
 
   _$CreatePipelineRequest._(
-      {this.idCommaOmitempty,
+      {this.id,
       required this.name,
-      this.descriptionCommaOmitempty,
-      this.stepsCommaOmitempty,
-      this.metadataCommaOmitempty})
+      this.description,
+      this.steps,
+      this.metadata})
       : super._();
   @override
   CreatePipelineRequest rebuild(
@@ -42,21 +42,21 @@ class _$CreatePipelineRequest extends CreatePipelineRequest {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is CreatePipelineRequest &&
-        idCommaOmitempty == other.idCommaOmitempty &&
+        id == other.id &&
         name == other.name &&
-        descriptionCommaOmitempty == other.descriptionCommaOmitempty &&
-        stepsCommaOmitempty == other.stepsCommaOmitempty &&
-        metadataCommaOmitempty == other.metadataCommaOmitempty;
+        description == other.description &&
+        steps == other.steps &&
+        metadata == other.metadata;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
-    _$hash = $jc(_$hash, idCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, id.hashCode);
     _$hash = $jc(_$hash, name.hashCode);
-    _$hash = $jc(_$hash, descriptionCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, stepsCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, metadataCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, description.hashCode);
+    _$hash = $jc(_$hash, steps.hashCode);
+    _$hash = $jc(_$hash, metadata.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -64,11 +64,11 @@ class _$CreatePipelineRequest extends CreatePipelineRequest {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'CreatePipelineRequest')
-          ..add('idCommaOmitempty', idCommaOmitempty)
+          ..add('id', id)
           ..add('name', name)
-          ..add('descriptionCommaOmitempty', descriptionCommaOmitempty)
-          ..add('stepsCommaOmitempty', stepsCommaOmitempty)
-          ..add('metadataCommaOmitempty', metadataCommaOmitempty))
+          ..add('description', description)
+          ..add('steps', steps)
+          ..add('metadata', metadata))
         .toString();
   }
 }
@@ -77,30 +77,30 @@ class CreatePipelineRequestBuilder
     implements Builder<CreatePipelineRequest, CreatePipelineRequestBuilder> {
   _$CreatePipelineRequest? _$v;
 
-  String? _idCommaOmitempty;
-  String? get idCommaOmitempty => _$this._idCommaOmitempty;
-  set idCommaOmitempty(String? idCommaOmitempty) =>
-      _$this._idCommaOmitempty = idCommaOmitempty;
+  String? _id;
+  String? get id => _$this._id;
+  set id(String? id) =>
+      _$this._id = id;
 
   String? _name;
   String? get name => _$this._name;
   set name(String? name) => _$this._name = name;
 
-  String? _descriptionCommaOmitempty;
-  String? get descriptionCommaOmitempty => _$this._descriptionCommaOmitempty;
-  set descriptionCommaOmitempty(String? descriptionCommaOmitempty) =>
-      _$this._descriptionCommaOmitempty = descriptionCommaOmitempty;
+  String? _description;
+  String? get description => _$this._description;
+  set description(String? description) =>
+      _$this._description = description;
 
-  ListBuilder<String>? _stepsCommaOmitempty;
-  ListBuilder<String> get stepsCommaOmitempty =>
-      _$this._stepsCommaOmitempty ??= ListBuilder<String>();
-  set stepsCommaOmitempty(ListBuilder<String>? stepsCommaOmitempty) =>
-      _$this._stepsCommaOmitempty = stepsCommaOmitempty;
+  ListBuilder<String>? _steps;
+  ListBuilder<String> get steps =>
+      _$this._steps ??= ListBuilder<String>();
+  set steps(ListBuilder<String>? steps) =>
+      _$this._steps = steps;
 
-  String? _metadataCommaOmitempty;
-  String? get metadataCommaOmitempty => _$this._metadataCommaOmitempty;
-  set metadataCommaOmitempty(String? metadataCommaOmitempty) =>
-      _$this._metadataCommaOmitempty = metadataCommaOmitempty;
+  String? _metadata;
+  String? get metadata => _$this._metadata;
+  set metadata(String? metadata) =>
+      _$this._metadata = metadata;
 
   CreatePipelineRequestBuilder() {
     CreatePipelineRequest._defaults(this);
@@ -109,11 +109,11 @@ class CreatePipelineRequestBuilder
   CreatePipelineRequestBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
-      _idCommaOmitempty = $v.idCommaOmitempty;
+      _id = $v.id;
       _name = $v.name;
-      _descriptionCommaOmitempty = $v.descriptionCommaOmitempty;
-      _stepsCommaOmitempty = $v.stepsCommaOmitempty?.toBuilder();
-      _metadataCommaOmitempty = $v.metadataCommaOmitempty;
+      _description = $v.description;
+      _steps = $v.steps?.toBuilder();
+      _metadata = $v.metadata;
       _$v = null;
     }
     return this;
@@ -137,18 +137,18 @@ class CreatePipelineRequestBuilder
     try {
       _$result = _$v ??
           _$CreatePipelineRequest._(
-            idCommaOmitempty: idCommaOmitempty,
+            id: id,
             name: BuiltValueNullFieldError.checkNotNull(
                 name, r'CreatePipelineRequest', 'name'),
-            descriptionCommaOmitempty: descriptionCommaOmitempty,
-            stepsCommaOmitempty: _stepsCommaOmitempty?.build(),
-            metadataCommaOmitempty: metadataCommaOmitempty,
+            description: description,
+            steps: _steps?.build(),
+            metadata: metadata,
           );
     } catch (_) {
       late String _$failedField;
       try {
-        _$failedField = 'stepsCommaOmitempty';
-        _stepsCommaOmitempty?.build();
+        _$failedField = 'steps';
+        _steps?.build();
       } catch (e) {
         throw BuiltValueNestedFieldError(
             r'CreatePipelineRequest', _$failedField, e.toString());

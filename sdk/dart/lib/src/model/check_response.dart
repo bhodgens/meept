@@ -12,14 +12,14 @@ part 'check_response.g.dart';
 ///
 /// Properties:
 /// * [allowed] 
-/// * [reasonCommaOmitempty] 
+/// * [reason] 
 @BuiltValue()
 abstract class CheckResponse implements Built<CheckResponse, CheckResponseBuilder> {
   @BuiltValueField(wireName: r'allowed')
   bool get allowed;
 
-  @BuiltValueField(wireName: r'reason,omitempty')
-  String? get reasonCommaOmitempty;
+  @BuiltValueField(wireName: r'reason')
+  String? get reason;
 
   CheckResponse._();
 
@@ -49,10 +49,10 @@ class _$CheckResponseSerializer implements PrimitiveSerializer<CheckResponse> {
       object.allowed,
       specifiedType: const FullType(bool),
     );
-    if (object.reasonCommaOmitempty != null) {
-      yield r'reason,omitempty';
+    if (object.reason != null) {
+      yield r'reason';
       yield serializers.serialize(
-        object.reasonCommaOmitempty,
+        object.reason,
         specifiedType: const FullType(String),
       );
     }
@@ -86,12 +86,12 @@ class _$CheckResponseSerializer implements PrimitiveSerializer<CheckResponse> {
           ) as bool;
           result.allowed = valueDes;
           break;
-        case r'reason,omitempty':
+        case r'reason':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.reasonCommaOmitempty = valueDes;
+          result.reason = valueDes;
           break;
         default:
           unhandled.add(key);

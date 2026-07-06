@@ -19,9 +19,9 @@ var _ MappedNullable = &ListOptions{}
 
 // ListOptions struct for ListOptions
 type ListOptions struct {
-	Limitomitempty *int32 `json:"limit,omitempty,omitempty"`
-	Offsetomitempty *int32 `json:"offset,omitempty,omitempty"`
-	Filteromitempty *string `json:"filter,omitempty,omitempty"`
+	Limit *int32 `json:"limit,omitempty"`
+	Offset *int32 `json:"offset,omitempty"`
+	Filter *string `json:"filter,omitempty"`
 }
 
 // NewListOptions instantiates a new ListOptions object
@@ -41,100 +41,100 @@ func NewListOptionsWithDefaults() *ListOptions {
 	return &this
 }
 
-// GetLimitomitempty returns the Limitomitempty field value if set, zero value otherwise.
-func (o *ListOptions) GetLimitomitempty() int32 {
-	if o == nil || IsNil(o.Limitomitempty) {
+// GetLimit returns the Limit field value if set, zero value otherwise.
+func (o *ListOptions) GetLimit() int32 {
+	if o == nil || IsNil(o.Limit) {
 		var ret int32
 		return ret
 	}
-	return *o.Limitomitempty
+	return *o.Limit
 }
 
-// GetLimitomitemptyOk returns a tuple with the Limitomitempty field value if set, nil otherwise
+// GetLimitOk returns a tuple with the Limit field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ListOptions) GetLimitomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.Limitomitempty) {
+func (o *ListOptions) GetLimitOk() (*int32, bool) {
+	if o == nil || IsNil(o.Limit) {
 		return nil, false
 	}
-	return o.Limitomitempty, true
+	return o.Limit, true
 }
 
-// HasLimitomitempty returns a boolean if a field has been set.
-func (o *ListOptions) HasLimitomitempty() bool {
-	if o != nil && !IsNil(o.Limitomitempty) {
+// HasLimit returns a boolean if a field has been set.
+func (o *ListOptions) HasLimit() bool {
+	if o != nil && !IsNil(o.Limit) {
 		return true
 	}
 
 	return false
 }
 
-// SetLimitomitempty gets a reference to the given int32 and assigns it to the Limitomitempty field.
-func (o *ListOptions) SetLimitomitempty(v int32) {
-	o.Limitomitempty = &v
+// SetLimit gets a reference to the given int32 and assigns it to the Limit field.
+func (o *ListOptions) SetLimit(v int32) {
+	o.Limit = &v
 }
 
-// GetOffsetomitempty returns the Offsetomitempty field value if set, zero value otherwise.
-func (o *ListOptions) GetOffsetomitempty() int32 {
-	if o == nil || IsNil(o.Offsetomitempty) {
+// GetOffset returns the Offset field value if set, zero value otherwise.
+func (o *ListOptions) GetOffset() int32 {
+	if o == nil || IsNil(o.Offset) {
 		var ret int32
 		return ret
 	}
-	return *o.Offsetomitempty
+	return *o.Offset
 }
 
-// GetOffsetomitemptyOk returns a tuple with the Offsetomitempty field value if set, nil otherwise
+// GetOffsetOk returns a tuple with the Offset field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ListOptions) GetOffsetomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.Offsetomitempty) {
+func (o *ListOptions) GetOffsetOk() (*int32, bool) {
+	if o == nil || IsNil(o.Offset) {
 		return nil, false
 	}
-	return o.Offsetomitempty, true
+	return o.Offset, true
 }
 
-// HasOffsetomitempty returns a boolean if a field has been set.
-func (o *ListOptions) HasOffsetomitempty() bool {
-	if o != nil && !IsNil(o.Offsetomitempty) {
+// HasOffset returns a boolean if a field has been set.
+func (o *ListOptions) HasOffset() bool {
+	if o != nil && !IsNil(o.Offset) {
 		return true
 	}
 
 	return false
 }
 
-// SetOffsetomitempty gets a reference to the given int32 and assigns it to the Offsetomitempty field.
-func (o *ListOptions) SetOffsetomitempty(v int32) {
-	o.Offsetomitempty = &v
+// SetOffset gets a reference to the given int32 and assigns it to the Offset field.
+func (o *ListOptions) SetOffset(v int32) {
+	o.Offset = &v
 }
 
-// GetFilteromitempty returns the Filteromitempty field value if set, zero value otherwise.
-func (o *ListOptions) GetFilteromitempty() string {
-	if o == nil || IsNil(o.Filteromitempty) {
+// GetFilter returns the Filter field value if set, zero value otherwise.
+func (o *ListOptions) GetFilter() string {
+	if o == nil || IsNil(o.Filter) {
 		var ret string
 		return ret
 	}
-	return *o.Filteromitempty
+	return *o.Filter
 }
 
-// GetFilteromitemptyOk returns a tuple with the Filteromitempty field value if set, nil otherwise
+// GetFilterOk returns a tuple with the Filter field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ListOptions) GetFilteromitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Filteromitempty) {
+func (o *ListOptions) GetFilterOk() (*string, bool) {
+	if o == nil || IsNil(o.Filter) {
 		return nil, false
 	}
-	return o.Filteromitempty, true
+	return o.Filter, true
 }
 
-// HasFilteromitempty returns a boolean if a field has been set.
-func (o *ListOptions) HasFilteromitempty() bool {
-	if o != nil && !IsNil(o.Filteromitempty) {
+// HasFilter returns a boolean if a field has been set.
+func (o *ListOptions) HasFilter() bool {
+	if o != nil && !IsNil(o.Filter) {
 		return true
 	}
 
 	return false
 }
 
-// SetFilteromitempty gets a reference to the given string and assigns it to the Filteromitempty field.
-func (o *ListOptions) SetFilteromitempty(v string) {
-	o.Filteromitempty = &v
+// SetFilter gets a reference to the given string and assigns it to the Filter field.
+func (o *ListOptions) SetFilter(v string) {
+	o.Filter = &v
 }
 
 func (o ListOptions) MarshalJSON() ([]byte, error) {
@@ -147,14 +147,14 @@ func (o ListOptions) MarshalJSON() ([]byte, error) {
 
 func (o ListOptions) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	if !IsNil(o.Limitomitempty) {
-		toSerialize["limit,omitempty"] = o.Limitomitempty
+	if !IsNil(o.Limit) {
+		toSerialize["limit"] = o.Limit
 	}
-	if !IsNil(o.Offsetomitempty) {
-		toSerialize["offset,omitempty"] = o.Offsetomitempty
+	if !IsNil(o.Offset) {
+		toSerialize["offset"] = o.Offset
 	}
-	if !IsNil(o.Filteromitempty) {
-		toSerialize["filter,omitempty"] = o.Filteromitempty
+	if !IsNil(o.Filter) {
+		toSerialize["filter"] = o.Filter
 	}
 	return toSerialize, nil
 }

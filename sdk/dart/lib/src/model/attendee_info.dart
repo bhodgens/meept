@@ -12,18 +12,18 @@ part 'attendee_info.g.dart';
 ///
 /// Properties:
 /// * [email] 
-/// * [displayNameCommaOmitempty] 
-/// * [responseCommaOmitempty] 
+/// * [displayName] 
+/// * [response] 
 @BuiltValue()
 abstract class AttendeeInfo implements Built<AttendeeInfo, AttendeeInfoBuilder> {
   @BuiltValueField(wireName: r'email')
   String get email;
 
-  @BuiltValueField(wireName: r'display_name,omitempty')
-  String? get displayNameCommaOmitempty;
+  @BuiltValueField(wireName: r'display_name')
+  String? get displayName;
 
-  @BuiltValueField(wireName: r'response,omitempty')
-  String? get responseCommaOmitempty;
+  @BuiltValueField(wireName: r'response')
+  String? get response;
 
   AttendeeInfo._();
 
@@ -53,17 +53,17 @@ class _$AttendeeInfoSerializer implements PrimitiveSerializer<AttendeeInfo> {
       object.email,
       specifiedType: const FullType(String),
     );
-    if (object.displayNameCommaOmitempty != null) {
-      yield r'display_name,omitempty';
+    if (object.displayName != null) {
+      yield r'display_name';
       yield serializers.serialize(
-        object.displayNameCommaOmitempty,
+        object.displayName,
         specifiedType: const FullType(String),
       );
     }
-    if (object.responseCommaOmitempty != null) {
-      yield r'response,omitempty';
+    if (object.response != null) {
+      yield r'response';
       yield serializers.serialize(
-        object.responseCommaOmitempty,
+        object.response,
         specifiedType: const FullType(String),
       );
     }
@@ -97,19 +97,19 @@ class _$AttendeeInfoSerializer implements PrimitiveSerializer<AttendeeInfo> {
           ) as String;
           result.email = valueDes;
           break;
-        case r'display_name,omitempty':
+        case r'display_name':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.displayNameCommaOmitempty = valueDes;
+          result.displayName = valueDes;
           break;
-        case r'response,omitempty':
+        case r'response':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.responseCommaOmitempty = valueDes;
+          result.response = valueDes;
           break;
         default:
           unhandled.add(key);

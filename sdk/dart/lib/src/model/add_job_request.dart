@@ -16,9 +16,9 @@ part 'add_job_request.g.dart';
 /// * [name] 
 /// * [schedule] 
 /// * [type] 
-/// * [agentConfigCommaOmitempty] 
-/// * [shellConfigCommaOmitempty] 
-/// * [enabledCommaOmitempty] 
+/// * [agentConfig] 
+/// * [shellConfig] 
+/// * [enabled] 
 @BuiltValue()
 abstract class AddJobRequest implements Built<AddJobRequest, AddJobRequestBuilder> {
   @BuiltValueField(wireName: r'id')
@@ -33,14 +33,14 @@ abstract class AddJobRequest implements Built<AddJobRequest, AddJobRequestBuilde
   @BuiltValueField(wireName: r'type')
   String get type;
 
-  @BuiltValueField(wireName: r'agent_config,omitempty')
-  JsonObject? get agentConfigCommaOmitempty;
+  @BuiltValueField(wireName: r'agent_config')
+  JsonObject? get agentConfig;
 
-  @BuiltValueField(wireName: r'shell_config,omitempty')
-  JsonObject? get shellConfigCommaOmitempty;
+  @BuiltValueField(wireName: r'shell_config')
+  JsonObject? get shellConfig;
 
-  @BuiltValueField(wireName: r'enabled,omitempty')
-  bool? get enabledCommaOmitempty;
+  @BuiltValueField(wireName: r'enabled')
+  bool? get enabled;
 
   AddJobRequest._();
 
@@ -85,24 +85,24 @@ class _$AddJobRequestSerializer implements PrimitiveSerializer<AddJobRequest> {
       object.type,
       specifiedType: const FullType(String),
     );
-    if (object.agentConfigCommaOmitempty != null) {
-      yield r'agent_config,omitempty';
+    if (object.agentConfig != null) {
+      yield r'agent_config';
       yield serializers.serialize(
-        object.agentConfigCommaOmitempty,
+        object.agentConfig,
         specifiedType: const FullType.nullable(JsonObject),
       );
     }
-    if (object.shellConfigCommaOmitempty != null) {
-      yield r'shell_config,omitempty';
+    if (object.shellConfig != null) {
+      yield r'shell_config';
       yield serializers.serialize(
-        object.shellConfigCommaOmitempty,
+        object.shellConfig,
         specifiedType: const FullType.nullable(JsonObject),
       );
     }
-    if (object.enabledCommaOmitempty != null) {
-      yield r'enabled,omitempty';
+    if (object.enabled != null) {
+      yield r'enabled';
       yield serializers.serialize(
-        object.enabledCommaOmitempty,
+        object.enabled,
         specifiedType: const FullType(bool),
       );
     }
@@ -157,28 +157,28 @@ class _$AddJobRequestSerializer implements PrimitiveSerializer<AddJobRequest> {
           ) as String;
           result.type = valueDes;
           break;
-        case r'agent_config,omitempty':
+        case r'agent_config':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(JsonObject),
           ) as JsonObject?;
           if (valueDes == null) continue;
-          result.agentConfigCommaOmitempty = valueDes;
+          result.agentConfig = valueDes;
           break;
-        case r'shell_config,omitempty':
+        case r'shell_config':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(JsonObject),
           ) as JsonObject?;
           if (valueDes == null) continue;
-          result.shellConfigCommaOmitempty = valueDes;
+          result.shellConfig = valueDes;
           break;
-        case r'enabled,omitempty':
+        case r'enabled':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(bool),
           ) as bool;
-          result.enabledCommaOmitempty = valueDes;
+          result.enabled = valueDes;
           break;
         default:
           unhandled.add(key);

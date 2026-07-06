@@ -12,7 +12,7 @@ class _$VectorStoreRequest extends VectorStoreRequest {
   @override
   final String content;
   @override
-  final String? metadataCommaOmitempty;
+  final String? metadata;
 
   factory _$VectorStoreRequest(
           [void Function(VectorStoreRequestBuilder)? updates]) =>
@@ -21,7 +21,7 @@ class _$VectorStoreRequest extends VectorStoreRequest {
   _$VectorStoreRequest._(
       {required this.memoryId,
       required this.content,
-      this.metadataCommaOmitempty})
+      this.metadata})
       : super._();
   @override
   VectorStoreRequest rebuild(
@@ -38,7 +38,7 @@ class _$VectorStoreRequest extends VectorStoreRequest {
     return other is VectorStoreRequest &&
         memoryId == other.memoryId &&
         content == other.content &&
-        metadataCommaOmitempty == other.metadataCommaOmitempty;
+        metadata == other.metadata;
   }
 
   @override
@@ -46,7 +46,7 @@ class _$VectorStoreRequest extends VectorStoreRequest {
     var _$hash = 0;
     _$hash = $jc(_$hash, memoryId.hashCode);
     _$hash = $jc(_$hash, content.hashCode);
-    _$hash = $jc(_$hash, metadataCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, metadata.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -56,7 +56,7 @@ class _$VectorStoreRequest extends VectorStoreRequest {
     return (newBuiltValueToStringHelper(r'VectorStoreRequest')
           ..add('memoryId', memoryId)
           ..add('content', content)
-          ..add('metadataCommaOmitempty', metadataCommaOmitempty))
+          ..add('metadata', metadata))
         .toString();
   }
 }
@@ -73,10 +73,10 @@ class VectorStoreRequestBuilder
   String? get content => _$this._content;
   set content(String? content) => _$this._content = content;
 
-  String? _metadataCommaOmitempty;
-  String? get metadataCommaOmitempty => _$this._metadataCommaOmitempty;
-  set metadataCommaOmitempty(String? metadataCommaOmitempty) =>
-      _$this._metadataCommaOmitempty = metadataCommaOmitempty;
+  String? _metadata;
+  String? get metadata => _$this._metadata;
+  set metadata(String? metadata) =>
+      _$this._metadata = metadata;
 
   VectorStoreRequestBuilder() {
     VectorStoreRequest._defaults(this);
@@ -87,7 +87,7 @@ class VectorStoreRequestBuilder
     if ($v != null) {
       _memoryId = $v.memoryId;
       _content = $v.content;
-      _metadataCommaOmitempty = $v.metadataCommaOmitempty;
+      _metadata = $v.metadata;
       _$v = null;
     }
     return this;
@@ -113,7 +113,7 @@ class VectorStoreRequestBuilder
               memoryId, r'VectorStoreRequest', 'memoryId'),
           content: BuiltValueNullFieldError.checkNotNull(
               content, r'VectorStoreRequest', 'content'),
-          metadataCommaOmitempty: metadataCommaOmitempty,
+          metadata: metadata,
         );
     replace(_$result);
     return _$result;

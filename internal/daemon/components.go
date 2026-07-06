@@ -604,7 +604,32 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 			rtCfg, err := llm.ValidateAndNormalize(*provider.Lifecycle)
 			if err != nil {
-				logger.Warn("Skipping invalid runtime config", "provider", providerID, "error", err)
+				// When the provider is configured to auto_start, the user
+				// explicitly expects the runtime to come up. A validation
+				// failure here will surface downstream as an opaque EOF on
+				// the first chat request, so elevate to ERROR and make the
+				// log line self-contained: the reader should know exactly
+				// which config key to fix without grepping for context.
+				msg := "Skipping invalid runtime config"
+				modelPath := provider.Lifecycle.ModelPath
+				if modelPath == "" && len(provider.Lifecycle.ModelPaths) > 0 {
+					for _, p := range provider.Lifecycle.ModelPaths {
+						modelPath = p
+						break
+					}
+				}
+				fields := []any{
+					"provider", providerID,
+					"auto_start", provider.Lifecycle.AutoStart,
+					"model_path", modelPath,
+					"error", err,
+				}
+				if provider.Lifecycle.AutoStart {
+					msg = "Local LLM runtime skipped — see model_path and error"
+					logger.Error(msg, fields...)
+				} else {
+					logger.Warn(msg, fields...)
+				}
 				continue
 			}
 

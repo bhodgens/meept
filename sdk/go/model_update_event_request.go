@@ -22,11 +22,11 @@ var _ MappedNullable = &UpdateEventRequest{}
 // UpdateEventRequest struct for UpdateEventRequest
 type UpdateEventRequest struct {
 	Id string `json:"id"`
-	Summaryomitempty *string `json:"summary,omitempty,omitempty"`
-	Descriptionomitempty *string `json:"description,omitempty,omitempty"`
-	Locationomitempty *string `json:"location,omitempty,omitempty"`
-	Startomitempty NullableString `json:"start,omitempty,omitempty"`
-	Endomitempty NullableString `json:"end,omitempty,omitempty"`
+	Summary *string `json:"summary,omitempty"`
+	Description *string `json:"description,omitempty"`
+	Location *string `json:"location,omitempty"`
+	Start NullableString `json:"start,omitempty"`
+	End NullableString `json:"end,omitempty"`
 }
 
 type _UpdateEventRequest UpdateEventRequest
@@ -73,184 +73,184 @@ func (o *UpdateEventRequest) SetId(v string) {
 	o.Id = v
 }
 
-// GetSummaryomitempty returns the Summaryomitempty field value if set, zero value otherwise.
-func (o *UpdateEventRequest) GetSummaryomitempty() string {
-	if o == nil || IsNil(o.Summaryomitempty) {
+// GetSummary returns the Summary field value if set, zero value otherwise.
+func (o *UpdateEventRequest) GetSummary() string {
+	if o == nil || IsNil(o.Summary) {
 		var ret string
 		return ret
 	}
-	return *o.Summaryomitempty
+	return *o.Summary
 }
 
-// GetSummaryomitemptyOk returns a tuple with the Summaryomitempty field value if set, nil otherwise
+// GetSummaryOk returns a tuple with the Summary field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *UpdateEventRequest) GetSummaryomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Summaryomitempty) {
+func (o *UpdateEventRequest) GetSummaryOk() (*string, bool) {
+	if o == nil || IsNil(o.Summary) {
 		return nil, false
 	}
-	return o.Summaryomitempty, true
+	return o.Summary, true
 }
 
-// HasSummaryomitempty returns a boolean if a field has been set.
-func (o *UpdateEventRequest) HasSummaryomitempty() bool {
-	if o != nil && !IsNil(o.Summaryomitempty) {
+// HasSummary returns a boolean if a field has been set.
+func (o *UpdateEventRequest) HasSummary() bool {
+	if o != nil && !IsNil(o.Summary) {
 		return true
 	}
 
 	return false
 }
 
-// SetSummaryomitempty gets a reference to the given string and assigns it to the Summaryomitempty field.
-func (o *UpdateEventRequest) SetSummaryomitempty(v string) {
-	o.Summaryomitempty = &v
+// SetSummary gets a reference to the given string and assigns it to the Summary field.
+func (o *UpdateEventRequest) SetSummary(v string) {
+	o.Summary = &v
 }
 
-// GetDescriptionomitempty returns the Descriptionomitempty field value if set, zero value otherwise.
-func (o *UpdateEventRequest) GetDescriptionomitempty() string {
-	if o == nil || IsNil(o.Descriptionomitempty) {
+// GetDescription returns the Description field value if set, zero value otherwise.
+func (o *UpdateEventRequest) GetDescription() string {
+	if o == nil || IsNil(o.Description) {
 		var ret string
 		return ret
 	}
-	return *o.Descriptionomitempty
+	return *o.Description
 }
 
-// GetDescriptionomitemptyOk returns a tuple with the Descriptionomitempty field value if set, nil otherwise
+// GetDescriptionOk returns a tuple with the Description field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *UpdateEventRequest) GetDescriptionomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Descriptionomitempty) {
+func (o *UpdateEventRequest) GetDescriptionOk() (*string, bool) {
+	if o == nil || IsNil(o.Description) {
 		return nil, false
 	}
-	return o.Descriptionomitempty, true
+	return o.Description, true
 }
 
-// HasDescriptionomitempty returns a boolean if a field has been set.
-func (o *UpdateEventRequest) HasDescriptionomitempty() bool {
-	if o != nil && !IsNil(o.Descriptionomitempty) {
+// HasDescription returns a boolean if a field has been set.
+func (o *UpdateEventRequest) HasDescription() bool {
+	if o != nil && !IsNil(o.Description) {
 		return true
 	}
 
 	return false
 }
 
-// SetDescriptionomitempty gets a reference to the given string and assigns it to the Descriptionomitempty field.
-func (o *UpdateEventRequest) SetDescriptionomitempty(v string) {
-	o.Descriptionomitempty = &v
+// SetDescription gets a reference to the given string and assigns it to the Description field.
+func (o *UpdateEventRequest) SetDescription(v string) {
+	o.Description = &v
 }
 
-// GetLocationomitempty returns the Locationomitempty field value if set, zero value otherwise.
-func (o *UpdateEventRequest) GetLocationomitempty() string {
-	if o == nil || IsNil(o.Locationomitempty) {
+// GetLocation returns the Location field value if set, zero value otherwise.
+func (o *UpdateEventRequest) GetLocation() string {
+	if o == nil || IsNil(o.Location) {
 		var ret string
 		return ret
 	}
-	return *o.Locationomitempty
+	return *o.Location
 }
 
-// GetLocationomitemptyOk returns a tuple with the Locationomitempty field value if set, nil otherwise
+// GetLocationOk returns a tuple with the Location field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *UpdateEventRequest) GetLocationomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Locationomitempty) {
+func (o *UpdateEventRequest) GetLocationOk() (*string, bool) {
+	if o == nil || IsNil(o.Location) {
 		return nil, false
 	}
-	return o.Locationomitempty, true
+	return o.Location, true
 }
 
-// HasLocationomitempty returns a boolean if a field has been set.
-func (o *UpdateEventRequest) HasLocationomitempty() bool {
-	if o != nil && !IsNil(o.Locationomitempty) {
+// HasLocation returns a boolean if a field has been set.
+func (o *UpdateEventRequest) HasLocation() bool {
+	if o != nil && !IsNil(o.Location) {
 		return true
 	}
 
 	return false
 }
 
-// SetLocationomitempty gets a reference to the given string and assigns it to the Locationomitempty field.
-func (o *UpdateEventRequest) SetLocationomitempty(v string) {
-	o.Locationomitempty = &v
+// SetLocation gets a reference to the given string and assigns it to the Location field.
+func (o *UpdateEventRequest) SetLocation(v string) {
+	o.Location = &v
 }
 
-// GetStartomitempty returns the Startomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *UpdateEventRequest) GetStartomitempty() string {
-	if o == nil || IsNil(o.Startomitempty.Get()) {
+// GetStart returns the Start field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *UpdateEventRequest) GetStart() string {
+	if o == nil || IsNil(o.Start.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.Startomitempty.Get()
+	return *o.Start.Get()
 }
 
-// GetStartomitemptyOk returns a tuple with the Startomitempty field value if set, nil otherwise
+// GetStartOk returns a tuple with the Start field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *UpdateEventRequest) GetStartomitemptyOk() (*string, bool) {
+func (o *UpdateEventRequest) GetStartOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.Startomitempty.Get(), o.Startomitempty.IsSet()
+	return o.Start.Get(), o.Start.IsSet()
 }
 
-// HasStartomitempty returns a boolean if a field has been set.
-func (o *UpdateEventRequest) HasStartomitempty() bool {
-	if o != nil && o.Startomitempty.IsSet() {
+// HasStart returns a boolean if a field has been set.
+func (o *UpdateEventRequest) HasStart() bool {
+	if o != nil && o.Start.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetStartomitempty gets a reference to the given NullableString and assigns it to the Startomitempty field.
-func (o *UpdateEventRequest) SetStartomitempty(v string) {
-	o.Startomitempty.Set(&v)
+// SetStart gets a reference to the given NullableString and assigns it to the Start field.
+func (o *UpdateEventRequest) SetStart(v string) {
+	o.Start.Set(&v)
 }
-// SetStartomitemptyNil sets the value for Startomitempty to be an explicit nil
-func (o *UpdateEventRequest) SetStartomitemptyNil() {
-	o.Startomitempty.Set(nil)
-}
-
-// UnsetStartomitempty ensures that no value is present for Startomitempty, not even an explicit nil
-func (o *UpdateEventRequest) UnsetStartomitempty() {
-	o.Startomitempty.Unset()
+// SetStartNil sets the value for Start to be an explicit nil
+func (o *UpdateEventRequest) SetStartNil() {
+	o.Start.Set(nil)
 }
 
-// GetEndomitempty returns the Endomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *UpdateEventRequest) GetEndomitempty() string {
-	if o == nil || IsNil(o.Endomitempty.Get()) {
+// UnsetStart ensures that no value is present for Start, not even an explicit nil
+func (o *UpdateEventRequest) UnsetStart() {
+	o.Start.Unset()
+}
+
+// GetEnd returns the End field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *UpdateEventRequest) GetEnd() string {
+	if o == nil || IsNil(o.End.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.Endomitempty.Get()
+	return *o.End.Get()
 }
 
-// GetEndomitemptyOk returns a tuple with the Endomitempty field value if set, nil otherwise
+// GetEndOk returns a tuple with the End field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *UpdateEventRequest) GetEndomitemptyOk() (*string, bool) {
+func (o *UpdateEventRequest) GetEndOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.Endomitempty.Get(), o.Endomitempty.IsSet()
+	return o.End.Get(), o.End.IsSet()
 }
 
-// HasEndomitempty returns a boolean if a field has been set.
-func (o *UpdateEventRequest) HasEndomitempty() bool {
-	if o != nil && o.Endomitempty.IsSet() {
+// HasEnd returns a boolean if a field has been set.
+func (o *UpdateEventRequest) HasEnd() bool {
+	if o != nil && o.End.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetEndomitempty gets a reference to the given NullableString and assigns it to the Endomitempty field.
-func (o *UpdateEventRequest) SetEndomitempty(v string) {
-	o.Endomitempty.Set(&v)
+// SetEnd gets a reference to the given NullableString and assigns it to the End field.
+func (o *UpdateEventRequest) SetEnd(v string) {
+	o.End.Set(&v)
 }
-// SetEndomitemptyNil sets the value for Endomitempty to be an explicit nil
-func (o *UpdateEventRequest) SetEndomitemptyNil() {
-	o.Endomitempty.Set(nil)
+// SetEndNil sets the value for End to be an explicit nil
+func (o *UpdateEventRequest) SetEndNil() {
+	o.End.Set(nil)
 }
 
-// UnsetEndomitempty ensures that no value is present for Endomitempty, not even an explicit nil
-func (o *UpdateEventRequest) UnsetEndomitempty() {
-	o.Endomitempty.Unset()
+// UnsetEnd ensures that no value is present for End, not even an explicit nil
+func (o *UpdateEventRequest) UnsetEnd() {
+	o.End.Unset()
 }
 
 func (o UpdateEventRequest) MarshalJSON() ([]byte, error) {
@@ -264,20 +264,20 @@ func (o UpdateEventRequest) MarshalJSON() ([]byte, error) {
 func (o UpdateEventRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["id"] = o.Id
-	if !IsNil(o.Summaryomitempty) {
-		toSerialize["summary,omitempty"] = o.Summaryomitempty
+	if !IsNil(o.Summary) {
+		toSerialize["summary"] = o.Summary
 	}
-	if !IsNil(o.Descriptionomitempty) {
-		toSerialize["description,omitempty"] = o.Descriptionomitempty
+	if !IsNil(o.Description) {
+		toSerialize["description"] = o.Description
 	}
-	if !IsNil(o.Locationomitempty) {
-		toSerialize["location,omitempty"] = o.Locationomitempty
+	if !IsNil(o.Location) {
+		toSerialize["location"] = o.Location
 	}
-	if o.Startomitempty.IsSet() {
-		toSerialize["start,omitempty"] = o.Startomitempty.Get()
+	if o.Start.IsSet() {
+		toSerialize["start"] = o.Start.Get()
 	}
-	if o.Endomitempty.IsSet() {
-		toSerialize["end,omitempty"] = o.Endomitempty.Get()
+	if o.End.IsSet() {
+		toSerialize["end"] = o.End.Get()
 	}
 	return toSerialize, nil
 }

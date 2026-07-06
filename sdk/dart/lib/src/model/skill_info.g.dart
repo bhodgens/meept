@@ -14,13 +14,13 @@ class _$SkillInfo extends SkillInfo {
   @override
   final String description;
   @override
-  final String? categoryCommaOmitempty;
+  final String? category;
   @override
-  final String? capabilitiesCommaOmitempty;
+  final String? capabilities;
   @override
   final bool enabled;
   @override
-  final String? uiTypeCommaOmitempty;
+  final String? uiType;
 
   factory _$SkillInfo([void Function(SkillInfoBuilder)? updates]) =>
       (SkillInfoBuilder()..update(updates))._build();
@@ -29,10 +29,10 @@ class _$SkillInfo extends SkillInfo {
       {required this.slug,
       required this.name,
       required this.description,
-      this.categoryCommaOmitempty,
-      this.capabilitiesCommaOmitempty,
+      this.category,
+      this.capabilities,
       required this.enabled,
-      this.uiTypeCommaOmitempty})
+      this.uiType})
       : super._();
   @override
   SkillInfo rebuild(void Function(SkillInfoBuilder) updates) =>
@@ -48,10 +48,10 @@ class _$SkillInfo extends SkillInfo {
         slug == other.slug &&
         name == other.name &&
         description == other.description &&
-        categoryCommaOmitempty == other.categoryCommaOmitempty &&
-        capabilitiesCommaOmitempty == other.capabilitiesCommaOmitempty &&
+        category == other.category &&
+        capabilities == other.capabilities &&
         enabled == other.enabled &&
-        uiTypeCommaOmitempty == other.uiTypeCommaOmitempty;
+        uiType == other.uiType;
   }
 
   @override
@@ -60,10 +60,10 @@ class _$SkillInfo extends SkillInfo {
     _$hash = $jc(_$hash, slug.hashCode);
     _$hash = $jc(_$hash, name.hashCode);
     _$hash = $jc(_$hash, description.hashCode);
-    _$hash = $jc(_$hash, categoryCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, capabilitiesCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, category.hashCode);
+    _$hash = $jc(_$hash, capabilities.hashCode);
     _$hash = $jc(_$hash, enabled.hashCode);
-    _$hash = $jc(_$hash, uiTypeCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, uiType.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -74,10 +74,10 @@ class _$SkillInfo extends SkillInfo {
           ..add('slug', slug)
           ..add('name', name)
           ..add('description', description)
-          ..add('categoryCommaOmitempty', categoryCommaOmitempty)
-          ..add('capabilitiesCommaOmitempty', capabilitiesCommaOmitempty)
+          ..add('category', category)
+          ..add('capabilities', capabilities)
           ..add('enabled', enabled)
-          ..add('uiTypeCommaOmitempty', uiTypeCommaOmitempty))
+          ..add('uiType', uiType))
         .toString();
   }
 }
@@ -97,24 +97,24 @@ class SkillInfoBuilder implements Builder<SkillInfo, SkillInfoBuilder> {
   String? get description => _$this._description;
   set description(String? description) => _$this._description = description;
 
-  String? _categoryCommaOmitempty;
-  String? get categoryCommaOmitempty => _$this._categoryCommaOmitempty;
-  set categoryCommaOmitempty(String? categoryCommaOmitempty) =>
-      _$this._categoryCommaOmitempty = categoryCommaOmitempty;
+  String? _category;
+  String? get category => _$this._category;
+  set category(String? category) =>
+      _$this._category = category;
 
-  String? _capabilitiesCommaOmitempty;
-  String? get capabilitiesCommaOmitempty => _$this._capabilitiesCommaOmitempty;
-  set capabilitiesCommaOmitempty(String? capabilitiesCommaOmitempty) =>
-      _$this._capabilitiesCommaOmitempty = capabilitiesCommaOmitempty;
+  String? _capabilities;
+  String? get capabilities => _$this._capabilities;
+  set capabilities(String? capabilities) =>
+      _$this._capabilities = capabilities;
 
   bool? _enabled;
   bool? get enabled => _$this._enabled;
   set enabled(bool? enabled) => _$this._enabled = enabled;
 
-  String? _uiTypeCommaOmitempty;
-  String? get uiTypeCommaOmitempty => _$this._uiTypeCommaOmitempty;
-  set uiTypeCommaOmitempty(String? uiTypeCommaOmitempty) =>
-      _$this._uiTypeCommaOmitempty = uiTypeCommaOmitempty;
+  String? _uiType;
+  String? get uiType => _$this._uiType;
+  set uiType(String? uiType) =>
+      _$this._uiType = uiType;
 
   SkillInfoBuilder() {
     SkillInfo._defaults(this);
@@ -126,10 +126,10 @@ class SkillInfoBuilder implements Builder<SkillInfo, SkillInfoBuilder> {
       _slug = $v.slug;
       _name = $v.name;
       _description = $v.description;
-      _categoryCommaOmitempty = $v.categoryCommaOmitempty;
-      _capabilitiesCommaOmitempty = $v.capabilitiesCommaOmitempty;
+      _category = $v.category;
+      _capabilities = $v.capabilities;
       _enabled = $v.enabled;
-      _uiTypeCommaOmitempty = $v.uiTypeCommaOmitempty;
+      _uiType = $v.uiType;
       _$v = null;
     }
     return this;
@@ -157,11 +157,11 @@ class SkillInfoBuilder implements Builder<SkillInfo, SkillInfoBuilder> {
               BuiltValueNullFieldError.checkNotNull(name, r'SkillInfo', 'name'),
           description: BuiltValueNullFieldError.checkNotNull(
               description, r'SkillInfo', 'description'),
-          categoryCommaOmitempty: categoryCommaOmitempty,
-          capabilitiesCommaOmitempty: capabilitiesCommaOmitempty,
+          category: category,
+          capabilities: capabilities,
           enabled: BuiltValueNullFieldError.checkNotNull(
               enabled, r'SkillInfo', 'enabled'),
-          uiTypeCommaOmitempty: uiTypeCommaOmitempty,
+          uiType: uiType,
         );
     replace(_$result);
     return _$result;

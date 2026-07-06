@@ -7,8 +7,8 @@ void main() {
   // TODO add properties to the builder and call build()
 
   group(RegisterProjectRequest, () {
-    // String idCommaOmitempty
-    test('to test the property `idCommaOmitempty`', () async {
+    // String id
+    test('to test the property `id`', () async {
       // TODO
     });
 
@@ -17,13 +17,13 @@ void main() {
       // TODO
     });
 
-    // String gitUrlCommaOmitempty
-    test('to test the property `gitUrlCommaOmitempty`', () async {
+    // String gitUrl
+    test('to test the property `gitUrl`', () async {
       // TODO
     });
 
-    // String localPathCommaOmitempty
-    test('to test the property `localPathCommaOmitempty`', () async {
+    // String localPath
+    test('to test the property `localPath`', () async {
       // TODO
     });
 

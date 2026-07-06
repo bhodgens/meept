@@ -12,7 +12,7 @@ class _$ForkSessionRequest extends ForkSessionRequest {
   @override
   final int fromMessageId;
   @override
-  final String? nameCommaOmitempty;
+  final String? name;
 
   factory _$ForkSessionRequest(
           [void Function(ForkSessionRequestBuilder)? updates]) =>
@@ -21,7 +21,7 @@ class _$ForkSessionRequest extends ForkSessionRequest {
   _$ForkSessionRequest._(
       {required this.sessionId,
       required this.fromMessageId,
-      this.nameCommaOmitempty})
+      this.name})
       : super._();
   @override
   ForkSessionRequest rebuild(
@@ -38,7 +38,7 @@ class _$ForkSessionRequest extends ForkSessionRequest {
     return other is ForkSessionRequest &&
         sessionId == other.sessionId &&
         fromMessageId == other.fromMessageId &&
-        nameCommaOmitempty == other.nameCommaOmitempty;
+        name == other.name;
   }
 
   @override
@@ -46,7 +46,7 @@ class _$ForkSessionRequest extends ForkSessionRequest {
     var _$hash = 0;
     _$hash = $jc(_$hash, sessionId.hashCode);
     _$hash = $jc(_$hash, fromMessageId.hashCode);
-    _$hash = $jc(_$hash, nameCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, name.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -56,7 +56,7 @@ class _$ForkSessionRequest extends ForkSessionRequest {
     return (newBuiltValueToStringHelper(r'ForkSessionRequest')
           ..add('sessionId', sessionId)
           ..add('fromMessageId', fromMessageId)
-          ..add('nameCommaOmitempty', nameCommaOmitempty))
+          ..add('name', name))
         .toString();
   }
 }
@@ -74,10 +74,10 @@ class ForkSessionRequestBuilder
   set fromMessageId(int? fromMessageId) =>
       _$this._fromMessageId = fromMessageId;
 
-  String? _nameCommaOmitempty;
-  String? get nameCommaOmitempty => _$this._nameCommaOmitempty;
-  set nameCommaOmitempty(String? nameCommaOmitempty) =>
-      _$this._nameCommaOmitempty = nameCommaOmitempty;
+  String? _name;
+  String? get name => _$this._name;
+  set name(String? name) =>
+      _$this._name = name;
 
   ForkSessionRequestBuilder() {
     ForkSessionRequest._defaults(this);
@@ -88,7 +88,7 @@ class ForkSessionRequestBuilder
     if ($v != null) {
       _sessionId = $v.sessionId;
       _fromMessageId = $v.fromMessageId;
-      _nameCommaOmitempty = $v.nameCommaOmitempty;
+      _name = $v.name;
       _$v = null;
     }
     return this;
@@ -114,7 +114,7 @@ class ForkSessionRequestBuilder
               sessionId, r'ForkSessionRequest', 'sessionId'),
           fromMessageId: BuiltValueNullFieldError.checkNotNull(
               fromMessageId, r'ForkSessionRequest', 'fromMessageId'),
-          nameCommaOmitempty: nameCommaOmitempty,
+          name: name,
         );
     replace(_$result);
     return _$result;

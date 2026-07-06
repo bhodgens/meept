@@ -10,9 +10,9 @@ class _$VectorSearchRequest extends VectorSearchRequest {
   @override
   final String query;
   @override
-  final int? limitCommaOmitempty;
+  final int? limit;
   @override
-  final String? shardTypesCommaOmitempty;
+  final String? shardTypes;
 
   factory _$VectorSearchRequest(
           [void Function(VectorSearchRequestBuilder)? updates]) =>
@@ -20,8 +20,8 @@ class _$VectorSearchRequest extends VectorSearchRequest {
 
   _$VectorSearchRequest._(
       {required this.query,
-      this.limitCommaOmitempty,
-      this.shardTypesCommaOmitempty})
+      this.limit,
+      this.shardTypes})
       : super._();
   @override
   VectorSearchRequest rebuild(
@@ -37,16 +37,16 @@ class _$VectorSearchRequest extends VectorSearchRequest {
     if (identical(other, this)) return true;
     return other is VectorSearchRequest &&
         query == other.query &&
-        limitCommaOmitempty == other.limitCommaOmitempty &&
-        shardTypesCommaOmitempty == other.shardTypesCommaOmitempty;
+        limit == other.limit &&
+        shardTypes == other.shardTypes;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, query.hashCode);
-    _$hash = $jc(_$hash, limitCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, shardTypesCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, limit.hashCode);
+    _$hash = $jc(_$hash, shardTypes.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -55,8 +55,8 @@ class _$VectorSearchRequest extends VectorSearchRequest {
   String toString() {
     return (newBuiltValueToStringHelper(r'VectorSearchRequest')
           ..add('query', query)
-          ..add('limitCommaOmitempty', limitCommaOmitempty)
-          ..add('shardTypesCommaOmitempty', shardTypesCommaOmitempty))
+          ..add('limit', limit)
+          ..add('shardTypes', shardTypes))
         .toString();
   }
 }
@@ -69,15 +69,15 @@ class VectorSearchRequestBuilder
   String? get query => _$this._query;
   set query(String? query) => _$this._query = query;
 
-  int? _limitCommaOmitempty;
-  int? get limitCommaOmitempty => _$this._limitCommaOmitempty;
-  set limitCommaOmitempty(int? limitCommaOmitempty) =>
-      _$this._limitCommaOmitempty = limitCommaOmitempty;
+  int? _limit;
+  int? get limit => _$this._limit;
+  set limit(int? limit) =>
+      _$this._limit = limit;
 
-  String? _shardTypesCommaOmitempty;
-  String? get shardTypesCommaOmitempty => _$this._shardTypesCommaOmitempty;
-  set shardTypesCommaOmitempty(String? shardTypesCommaOmitempty) =>
-      _$this._shardTypesCommaOmitempty = shardTypesCommaOmitempty;
+  String? _shardTypes;
+  String? get shardTypes => _$this._shardTypes;
+  set shardTypes(String? shardTypes) =>
+      _$this._shardTypes = shardTypes;
 
   VectorSearchRequestBuilder() {
     VectorSearchRequest._defaults(this);
@@ -87,8 +87,8 @@ class VectorSearchRequestBuilder
     final $v = _$v;
     if ($v != null) {
       _query = $v.query;
-      _limitCommaOmitempty = $v.limitCommaOmitempty;
-      _shardTypesCommaOmitempty = $v.shardTypesCommaOmitempty;
+      _limit = $v.limit;
+      _shardTypes = $v.shardTypes;
       _$v = null;
     }
     return this;
@@ -112,8 +112,8 @@ class VectorSearchRequestBuilder
         _$VectorSearchRequest._(
           query: BuiltValueNullFieldError.checkNotNull(
               query, r'VectorSearchRequest', 'query'),
-          limitCommaOmitempty: limitCommaOmitempty,
-          shardTypesCommaOmitempty: shardTypesCommaOmitempty,
+          limit: limit,
+          shardTypes: shardTypes,
         );
     replace(_$result);
     return _$result;

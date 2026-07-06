@@ -13,7 +13,7 @@ Name | Type | Description | Notes
 **createdAt** | **String** |  | 
 **expiresAt** | **String** |  | 
 **hitCount** | **int** |  | 
-**fileHashesCommaOmitempty** | **String** |  | [optional] 
+**fileHashes** | **String** |  | [optional] 
 **source_** | **String** |  | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)

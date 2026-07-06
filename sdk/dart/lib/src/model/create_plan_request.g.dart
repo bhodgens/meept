@@ -10,11 +10,11 @@ class _$CreatePlanRequest extends CreatePlanRequest {
   @override
   final String title;
   @override
-  final String? descriptionCommaOmitempty;
+  final String? description;
   @override
-  final String? projectIdCommaOmitempty;
+  final String? projectId;
   @override
-  final String? projectPathCommaOmitempty;
+  final String? projectPath;
   @override
   final String sessionId;
 
@@ -24,9 +24,9 @@ class _$CreatePlanRequest extends CreatePlanRequest {
 
   _$CreatePlanRequest._(
       {required this.title,
-      this.descriptionCommaOmitempty,
-      this.projectIdCommaOmitempty,
-      this.projectPathCommaOmitempty,
+      this.description,
+      this.projectId,
+      this.projectPath,
       required this.sessionId})
       : super._();
   @override
@@ -42,9 +42,9 @@ class _$CreatePlanRequest extends CreatePlanRequest {
     if (identical(other, this)) return true;
     return other is CreatePlanRequest &&
         title == other.title &&
-        descriptionCommaOmitempty == other.descriptionCommaOmitempty &&
-        projectIdCommaOmitempty == other.projectIdCommaOmitempty &&
-        projectPathCommaOmitempty == other.projectPathCommaOmitempty &&
+        description == other.description &&
+        projectId == other.projectId &&
+        projectPath == other.projectPath &&
         sessionId == other.sessionId;
   }
 
@@ -52,9 +52,9 @@ class _$CreatePlanRequest extends CreatePlanRequest {
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, title.hashCode);
-    _$hash = $jc(_$hash, descriptionCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, projectIdCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, projectPathCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, description.hashCode);
+    _$hash = $jc(_$hash, projectId.hashCode);
+    _$hash = $jc(_$hash, projectPath.hashCode);
     _$hash = $jc(_$hash, sessionId.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
@@ -64,9 +64,9 @@ class _$CreatePlanRequest extends CreatePlanRequest {
   String toString() {
     return (newBuiltValueToStringHelper(r'CreatePlanRequest')
           ..add('title', title)
-          ..add('descriptionCommaOmitempty', descriptionCommaOmitempty)
-          ..add('projectIdCommaOmitempty', projectIdCommaOmitempty)
-          ..add('projectPathCommaOmitempty', projectPathCommaOmitempty)
+          ..add('description', description)
+          ..add('projectId', projectId)
+          ..add('projectPath', projectPath)
           ..add('sessionId', sessionId))
         .toString();
   }
@@ -80,20 +80,20 @@ class CreatePlanRequestBuilder
   String? get title => _$this._title;
   set title(String? title) => _$this._title = title;
 
-  String? _descriptionCommaOmitempty;
-  String? get descriptionCommaOmitempty => _$this._descriptionCommaOmitempty;
-  set descriptionCommaOmitempty(String? descriptionCommaOmitempty) =>
-      _$this._descriptionCommaOmitempty = descriptionCommaOmitempty;
+  String? _description;
+  String? get description => _$this._description;
+  set description(String? description) =>
+      _$this._description = description;
 
-  String? _projectIdCommaOmitempty;
-  String? get projectIdCommaOmitempty => _$this._projectIdCommaOmitempty;
-  set projectIdCommaOmitempty(String? projectIdCommaOmitempty) =>
-      _$this._projectIdCommaOmitempty = projectIdCommaOmitempty;
+  String? _projectId;
+  String? get projectId => _$this._projectId;
+  set projectId(String? projectId) =>
+      _$this._projectId = projectId;
 
-  String? _projectPathCommaOmitempty;
-  String? get projectPathCommaOmitempty => _$this._projectPathCommaOmitempty;
-  set projectPathCommaOmitempty(String? projectPathCommaOmitempty) =>
-      _$this._projectPathCommaOmitempty = projectPathCommaOmitempty;
+  String? _projectPath;
+  String? get projectPath => _$this._projectPath;
+  set projectPath(String? projectPath) =>
+      _$this._projectPath = projectPath;
 
   String? _sessionId;
   String? get sessionId => _$this._sessionId;
@@ -107,9 +107,9 @@ class CreatePlanRequestBuilder
     final $v = _$v;
     if ($v != null) {
       _title = $v.title;
-      _descriptionCommaOmitempty = $v.descriptionCommaOmitempty;
-      _projectIdCommaOmitempty = $v.projectIdCommaOmitempty;
-      _projectPathCommaOmitempty = $v.projectPathCommaOmitempty;
+      _description = $v.description;
+      _projectId = $v.projectId;
+      _projectPath = $v.projectPath;
       _sessionId = $v.sessionId;
       _$v = null;
     }
@@ -134,9 +134,9 @@ class CreatePlanRequestBuilder
         _$CreatePlanRequest._(
           title: BuiltValueNullFieldError.checkNotNull(
               title, r'CreatePlanRequest', 'title'),
-          descriptionCommaOmitempty: descriptionCommaOmitempty,
-          projectIdCommaOmitempty: projectIdCommaOmitempty,
-          projectPathCommaOmitempty: projectPathCommaOmitempty,
+          description: description,
+          projectId: projectId,
+          projectPath: projectPath,
           sessionId: BuiltValueNullFieldError.checkNotNull(
               sessionId, r'CreatePlanRequest', 'sessionId'),
         );

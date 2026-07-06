@@ -23,7 +23,7 @@ var _ MappedNullable = &ForkSessionRequest{}
 type ForkSessionRequest struct {
 	SessionId string `json:"session_id"`
 	FromMessageId int32 `json:"from_message_id"`
-	Nameomitempty *string `json:"name,omitempty,omitempty"`
+	Name *string `json:"name,omitempty"`
 }
 
 type _ForkSessionRequest ForkSessionRequest
@@ -95,36 +95,36 @@ func (o *ForkSessionRequest) SetFromMessageId(v int32) {
 	o.FromMessageId = v
 }
 
-// GetNameomitempty returns the Nameomitempty field value if set, zero value otherwise.
-func (o *ForkSessionRequest) GetNameomitempty() string {
-	if o == nil || IsNil(o.Nameomitempty) {
+// GetName returns the Name field value if set, zero value otherwise.
+func (o *ForkSessionRequest) GetName() string {
+	if o == nil || IsNil(o.Name) {
 		var ret string
 		return ret
 	}
-	return *o.Nameomitempty
+	return *o.Name
 }
 
-// GetNameomitemptyOk returns a tuple with the Nameomitempty field value if set, nil otherwise
+// GetNameOk returns a tuple with the Name field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ForkSessionRequest) GetNameomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Nameomitempty) {
+func (o *ForkSessionRequest) GetNameOk() (*string, bool) {
+	if o == nil || IsNil(o.Name) {
 		return nil, false
 	}
-	return o.Nameomitempty, true
+	return o.Name, true
 }
 
-// HasNameomitempty returns a boolean if a field has been set.
-func (o *ForkSessionRequest) HasNameomitempty() bool {
-	if o != nil && !IsNil(o.Nameomitempty) {
+// HasName returns a boolean if a field has been set.
+func (o *ForkSessionRequest) HasName() bool {
+	if o != nil && !IsNil(o.Name) {
 		return true
 	}
 
 	return false
 }
 
-// SetNameomitempty gets a reference to the given string and assigns it to the Nameomitempty field.
-func (o *ForkSessionRequest) SetNameomitempty(v string) {
-	o.Nameomitempty = &v
+// SetName gets a reference to the given string and assigns it to the Name field.
+func (o *ForkSessionRequest) SetName(v string) {
+	o.Name = &v
 }
 
 func (o ForkSessionRequest) MarshalJSON() ([]byte, error) {
@@ -139,8 +139,8 @@ func (o ForkSessionRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["session_id"] = o.SessionId
 	toSerialize["from_message_id"] = o.FromMessageId
-	if !IsNil(o.Nameomitempty) {
-		toSerialize["name,omitempty"] = o.Nameomitempty
+	if !IsNil(o.Name) {
+		toSerialize["name"] = o.Name
 	}
 	return toSerialize, nil
 }

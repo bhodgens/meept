@@ -23,8 +23,8 @@ var _ MappedNullable = &CommandHistory{}
 type CommandHistory struct {
 	Id string `json:"id"`
 	Command string `json:"command"`
-	Outputomitempty *string `json:"output,omitempty,omitempty"`
-	Stderromitempty *string `json:"stderr,omitempty,omitempty"`
+	Output *string `json:"output,omitempty"`
+	Stderr *string `json:"stderr,omitempty"`
 	ExitCode int32 `json:"exit_code"`
 	Timestamp string `json:"timestamp"`
 	WorkingDir string `json:"working_dir"`
@@ -108,68 +108,68 @@ func (o *CommandHistory) SetCommand(v string) {
 	o.Command = v
 }
 
-// GetOutputomitempty returns the Outputomitempty field value if set, zero value otherwise.
-func (o *CommandHistory) GetOutputomitempty() string {
-	if o == nil || IsNil(o.Outputomitempty) {
+// GetOutput returns the Output field value if set, zero value otherwise.
+func (o *CommandHistory) GetOutput() string {
+	if o == nil || IsNil(o.Output) {
 		var ret string
 		return ret
 	}
-	return *o.Outputomitempty
+	return *o.Output
 }
 
-// GetOutputomitemptyOk returns a tuple with the Outputomitempty field value if set, nil otherwise
+// GetOutputOk returns a tuple with the Output field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CommandHistory) GetOutputomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Outputomitempty) {
+func (o *CommandHistory) GetOutputOk() (*string, bool) {
+	if o == nil || IsNil(o.Output) {
 		return nil, false
 	}
-	return o.Outputomitempty, true
+	return o.Output, true
 }
 
-// HasOutputomitempty returns a boolean if a field has been set.
-func (o *CommandHistory) HasOutputomitempty() bool {
-	if o != nil && !IsNil(o.Outputomitempty) {
+// HasOutput returns a boolean if a field has been set.
+func (o *CommandHistory) HasOutput() bool {
+	if o != nil && !IsNil(o.Output) {
 		return true
 	}
 
 	return false
 }
 
-// SetOutputomitempty gets a reference to the given string and assigns it to the Outputomitempty field.
-func (o *CommandHistory) SetOutputomitempty(v string) {
-	o.Outputomitempty = &v
+// SetOutput gets a reference to the given string and assigns it to the Output field.
+func (o *CommandHistory) SetOutput(v string) {
+	o.Output = &v
 }
 
-// GetStderromitempty returns the Stderromitempty field value if set, zero value otherwise.
-func (o *CommandHistory) GetStderromitempty() string {
-	if o == nil || IsNil(o.Stderromitempty) {
+// GetStderr returns the Stderr field value if set, zero value otherwise.
+func (o *CommandHistory) GetStderr() string {
+	if o == nil || IsNil(o.Stderr) {
 		var ret string
 		return ret
 	}
-	return *o.Stderromitempty
+	return *o.Stderr
 }
 
-// GetStderromitemptyOk returns a tuple with the Stderromitempty field value if set, nil otherwise
+// GetStderrOk returns a tuple with the Stderr field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CommandHistory) GetStderromitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Stderromitempty) {
+func (o *CommandHistory) GetStderrOk() (*string, bool) {
+	if o == nil || IsNil(o.Stderr) {
 		return nil, false
 	}
-	return o.Stderromitempty, true
+	return o.Stderr, true
 }
 
-// HasStderromitempty returns a boolean if a field has been set.
-func (o *CommandHistory) HasStderromitempty() bool {
-	if o != nil && !IsNil(o.Stderromitempty) {
+// HasStderr returns a boolean if a field has been set.
+func (o *CommandHistory) HasStderr() bool {
+	if o != nil && !IsNil(o.Stderr) {
 		return true
 	}
 
 	return false
 }
 
-// SetStderromitempty gets a reference to the given string and assigns it to the Stderromitempty field.
-func (o *CommandHistory) SetStderromitempty(v string) {
-	o.Stderromitempty = &v
+// SetStderr gets a reference to the given string and assigns it to the Stderr field.
+func (o *CommandHistory) SetStderr(v string) {
+	o.Stderr = &v
 }
 
 // GetExitCode returns the ExitCode field value
@@ -328,11 +328,11 @@ func (o CommandHistory) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["id"] = o.Id
 	toSerialize["command"] = o.Command
-	if !IsNil(o.Outputomitempty) {
-		toSerialize["output,omitempty"] = o.Outputomitempty
+	if !IsNil(o.Output) {
+		toSerialize["output"] = o.Output
 	}
-	if !IsNil(o.Stderromitempty) {
-		toSerialize["stderr,omitempty"] = o.Stderromitempty
+	if !IsNil(o.Stderr) {
+		toSerialize["stderr"] = o.Stderr
 	}
 	toSerialize["exit_code"] = o.ExitCode
 	toSerialize["timestamp"] = o.Timestamp

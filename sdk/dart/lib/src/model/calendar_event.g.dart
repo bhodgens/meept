@@ -12,9 +12,9 @@ class _$CalendarEvent extends CalendarEvent {
   @override
   final String summary;
   @override
-  final String? descriptionCommaOmitempty;
+  final String? description;
   @override
-  final String? locationCommaOmitempty;
+  final String? location;
   @override
   final String start;
   @override
@@ -22,11 +22,11 @@ class _$CalendarEvent extends CalendarEvent {
   @override
   final bool allDay;
   @override
-  final String? statusCommaOmitempty;
+  final String? status;
   @override
-  final String? htmlLinkCommaOmitempty;
+  final String? htmlLink;
   @override
-  final BuiltList<String>? attendeesCommaOmitempty;
+  final BuiltList<String>? attendees;
 
   factory _$CalendarEvent([void Function(CalendarEventBuilder)? updates]) =>
       (CalendarEventBuilder()..update(updates))._build();
@@ -34,14 +34,14 @@ class _$CalendarEvent extends CalendarEvent {
   _$CalendarEvent._(
       {required this.id,
       required this.summary,
-      this.descriptionCommaOmitempty,
-      this.locationCommaOmitempty,
+      this.description,
+      this.location,
       required this.start,
       required this.end,
       required this.allDay,
-      this.statusCommaOmitempty,
-      this.htmlLinkCommaOmitempty,
-      this.attendeesCommaOmitempty})
+      this.status,
+      this.htmlLink,
+      this.attendees})
       : super._();
   @override
   CalendarEvent rebuild(void Function(CalendarEventBuilder) updates) =>
@@ -56,14 +56,14 @@ class _$CalendarEvent extends CalendarEvent {
     return other is CalendarEvent &&
         id == other.id &&
         summary == other.summary &&
-        descriptionCommaOmitempty == other.descriptionCommaOmitempty &&
-        locationCommaOmitempty == other.locationCommaOmitempty &&
+        description == other.description &&
+        location == other.location &&
         start == other.start &&
         end == other.end &&
         allDay == other.allDay &&
-        statusCommaOmitempty == other.statusCommaOmitempty &&
-        htmlLinkCommaOmitempty == other.htmlLinkCommaOmitempty &&
-        attendeesCommaOmitempty == other.attendeesCommaOmitempty;
+        status == other.status &&
+        htmlLink == other.htmlLink &&
+        attendees == other.attendees;
   }
 
   @override
@@ -71,14 +71,14 @@ class _$CalendarEvent extends CalendarEvent {
     var _$hash = 0;
     _$hash = $jc(_$hash, id.hashCode);
     _$hash = $jc(_$hash, summary.hashCode);
-    _$hash = $jc(_$hash, descriptionCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, locationCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, description.hashCode);
+    _$hash = $jc(_$hash, location.hashCode);
     _$hash = $jc(_$hash, start.hashCode);
     _$hash = $jc(_$hash, end.hashCode);
     _$hash = $jc(_$hash, allDay.hashCode);
-    _$hash = $jc(_$hash, statusCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, htmlLinkCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, attendeesCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, status.hashCode);
+    _$hash = $jc(_$hash, htmlLink.hashCode);
+    _$hash = $jc(_$hash, attendees.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -88,14 +88,14 @@ class _$CalendarEvent extends CalendarEvent {
     return (newBuiltValueToStringHelper(r'CalendarEvent')
           ..add('id', id)
           ..add('summary', summary)
-          ..add('descriptionCommaOmitempty', descriptionCommaOmitempty)
-          ..add('locationCommaOmitempty', locationCommaOmitempty)
+          ..add('description', description)
+          ..add('location', location)
           ..add('start', start)
           ..add('end', end)
           ..add('allDay', allDay)
-          ..add('statusCommaOmitempty', statusCommaOmitempty)
-          ..add('htmlLinkCommaOmitempty', htmlLinkCommaOmitempty)
-          ..add('attendeesCommaOmitempty', attendeesCommaOmitempty))
+          ..add('status', status)
+          ..add('htmlLink', htmlLink)
+          ..add('attendees', attendees))
         .toString();
   }
 }
@@ -112,15 +112,15 @@ class CalendarEventBuilder
   String? get summary => _$this._summary;
   set summary(String? summary) => _$this._summary = summary;
 
-  String? _descriptionCommaOmitempty;
-  String? get descriptionCommaOmitempty => _$this._descriptionCommaOmitempty;
-  set descriptionCommaOmitempty(String? descriptionCommaOmitempty) =>
-      _$this._descriptionCommaOmitempty = descriptionCommaOmitempty;
+  String? _description;
+  String? get description => _$this._description;
+  set description(String? description) =>
+      _$this._description = description;
 
-  String? _locationCommaOmitempty;
-  String? get locationCommaOmitempty => _$this._locationCommaOmitempty;
-  set locationCommaOmitempty(String? locationCommaOmitempty) =>
-      _$this._locationCommaOmitempty = locationCommaOmitempty;
+  String? _location;
+  String? get location => _$this._location;
+  set location(String? location) =>
+      _$this._location = location;
 
   String? _start;
   String? get start => _$this._start;
@@ -134,21 +134,21 @@ class CalendarEventBuilder
   bool? get allDay => _$this._allDay;
   set allDay(bool? allDay) => _$this._allDay = allDay;
 
-  String? _statusCommaOmitempty;
-  String? get statusCommaOmitempty => _$this._statusCommaOmitempty;
-  set statusCommaOmitempty(String? statusCommaOmitempty) =>
-      _$this._statusCommaOmitempty = statusCommaOmitempty;
+  String? _status;
+  String? get status => _$this._status;
+  set status(String? status) =>
+      _$this._status = status;
 
-  String? _htmlLinkCommaOmitempty;
-  String? get htmlLinkCommaOmitempty => _$this._htmlLinkCommaOmitempty;
-  set htmlLinkCommaOmitempty(String? htmlLinkCommaOmitempty) =>
-      _$this._htmlLinkCommaOmitempty = htmlLinkCommaOmitempty;
+  String? _htmlLink;
+  String? get htmlLink => _$this._htmlLink;
+  set htmlLink(String? htmlLink) =>
+      _$this._htmlLink = htmlLink;
 
-  ListBuilder<String>? _attendeesCommaOmitempty;
-  ListBuilder<String> get attendeesCommaOmitempty =>
-      _$this._attendeesCommaOmitempty ??= ListBuilder<String>();
-  set attendeesCommaOmitempty(ListBuilder<String>? attendeesCommaOmitempty) =>
-      _$this._attendeesCommaOmitempty = attendeesCommaOmitempty;
+  ListBuilder<String>? _attendees;
+  ListBuilder<String> get attendees =>
+      _$this._attendees ??= ListBuilder<String>();
+  set attendees(ListBuilder<String>? attendees) =>
+      _$this._attendees = attendees;
 
   CalendarEventBuilder() {
     CalendarEvent._defaults(this);
@@ -159,14 +159,14 @@ class CalendarEventBuilder
     if ($v != null) {
       _id = $v.id;
       _summary = $v.summary;
-      _descriptionCommaOmitempty = $v.descriptionCommaOmitempty;
-      _locationCommaOmitempty = $v.locationCommaOmitempty;
+      _description = $v.description;
+      _location = $v.location;
       _start = $v.start;
       _end = $v.end;
       _allDay = $v.allDay;
-      _statusCommaOmitempty = $v.statusCommaOmitempty;
-      _htmlLinkCommaOmitempty = $v.htmlLinkCommaOmitempty;
-      _attendeesCommaOmitempty = $v.attendeesCommaOmitempty?.toBuilder();
+      _status = $v.status;
+      _htmlLink = $v.htmlLink;
+      _attendees = $v.attendees?.toBuilder();
       _$v = null;
     }
     return this;
@@ -194,23 +194,23 @@ class CalendarEventBuilder
                 id, r'CalendarEvent', 'id'),
             summary: BuiltValueNullFieldError.checkNotNull(
                 summary, r'CalendarEvent', 'summary'),
-            descriptionCommaOmitempty: descriptionCommaOmitempty,
-            locationCommaOmitempty: locationCommaOmitempty,
+            description: description,
+            location: location,
             start: BuiltValueNullFieldError.checkNotNull(
                 start, r'CalendarEvent', 'start'),
             end: BuiltValueNullFieldError.checkNotNull(
                 end, r'CalendarEvent', 'end'),
             allDay: BuiltValueNullFieldError.checkNotNull(
                 allDay, r'CalendarEvent', 'allDay'),
-            statusCommaOmitempty: statusCommaOmitempty,
-            htmlLinkCommaOmitempty: htmlLinkCommaOmitempty,
-            attendeesCommaOmitempty: _attendeesCommaOmitempty?.build(),
+            status: status,
+            htmlLink: htmlLink,
+            attendees: _attendees?.build(),
           );
     } catch (_) {
       late String _$failedField;
       try {
-        _$failedField = 'attendeesCommaOmitempty';
-        _attendeesCommaOmitempty?.build();
+        _$failedField = 'attendees';
+        _attendees?.build();
       } catch (e) {
         throw BuiltValueNestedFieldError(
             r'CalendarEvent', _$failedField, e.toString());

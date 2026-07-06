@@ -13,7 +13,7 @@ part 'follow_up_request.g.dart';
 /// Properties:
 /// * [message] 
 /// * [conversationId] 
-/// * [sourceCommaOmitempty] 
+/// * [source] 
 @BuiltValue()
 abstract class FollowUpRequest implements Built<FollowUpRequest, FollowUpRequestBuilder> {
   @BuiltValueField(wireName: r'message')
@@ -22,8 +22,8 @@ abstract class FollowUpRequest implements Built<FollowUpRequest, FollowUpRequest
   @BuiltValueField(wireName: r'conversation_id')
   String get conversationId;
 
-  @BuiltValueField(wireName: r'source,omitempty')
-  String? get sourceCommaOmitempty;
+  @BuiltValueField(wireName: r'source')
+  String? get source;
 
   FollowUpRequest._();
 
@@ -58,10 +58,10 @@ class _$FollowUpRequestSerializer implements PrimitiveSerializer<FollowUpRequest
       object.conversationId,
       specifiedType: const FullType(String),
     );
-    if (object.sourceCommaOmitempty != null) {
-      yield r'source,omitempty';
+    if (object.source != null) {
+      yield r'source';
       yield serializers.serialize(
-        object.sourceCommaOmitempty,
+        object.source,
         specifiedType: const FullType(String),
       );
     }
@@ -102,12 +102,12 @@ class _$FollowUpRequestSerializer implements PrimitiveSerializer<FollowUpRequest
           ) as String;
           result.conversationId = valueDes;
           break;
-        case r'source,omitempty':
+        case r'source':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.sourceCommaOmitempty = valueDes;
+          result.source = valueDes;
           break;
         default:
           unhandled.add(key);

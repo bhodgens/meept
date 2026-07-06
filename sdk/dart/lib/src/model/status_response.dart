@@ -12,7 +12,7 @@ part 'status_response.g.dart';
 ///
 /// Properties:
 /// * [enabled] 
-/// * [lastCycleCommaOmitempty] 
+/// * [lastCycle] 
 /// * [skillsLearned] 
 /// * [pendingTasks] 
 @BuiltValue()
@@ -20,8 +20,8 @@ abstract class StatusResponse implements Built<StatusResponse, StatusResponseBui
   @BuiltValueField(wireName: r'enabled')
   bool get enabled;
 
-  @BuiltValueField(wireName: r'last_cycle,omitempty')
-  String? get lastCycleCommaOmitempty;
+  @BuiltValueField(wireName: r'last_cycle')
+  String? get lastCycle;
 
   @BuiltValueField(wireName: r'skills_learned')
   int get skillsLearned;
@@ -57,10 +57,10 @@ class _$StatusResponseSerializer implements PrimitiveSerializer<StatusResponse> 
       object.enabled,
       specifiedType: const FullType(bool),
     );
-    if (object.lastCycleCommaOmitempty != null) {
-      yield r'last_cycle,omitempty';
+    if (object.lastCycle != null) {
+      yield r'last_cycle';
       yield serializers.serialize(
-        object.lastCycleCommaOmitempty,
+        object.lastCycle,
         specifiedType: const FullType(String),
       );
     }
@@ -104,12 +104,12 @@ class _$StatusResponseSerializer implements PrimitiveSerializer<StatusResponse> 
           ) as bool;
           result.enabled = valueDes;
           break;
-        case r'last_cycle,omitempty':
+        case r'last_cycle':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.lastCycleCommaOmitempty = valueDes;
+          result.lastCycle = valueDes;
           break;
         case r'skills_learned':
           final valueDes = serializers.deserialize(

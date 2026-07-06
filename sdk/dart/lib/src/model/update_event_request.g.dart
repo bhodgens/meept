@@ -10,15 +10,15 @@ class _$UpdateEventRequest extends UpdateEventRequest {
   @override
   final String id;
   @override
-  final String? summaryCommaOmitempty;
+  final String? summary;
   @override
-  final String? descriptionCommaOmitempty;
+  final String? description;
   @override
-  final String? locationCommaOmitempty;
+  final String? location;
   @override
-  final String? startCommaOmitempty;
+  final String? start;
   @override
-  final String? endCommaOmitempty;
+  final String? end;
 
   factory _$UpdateEventRequest(
           [void Function(UpdateEventRequestBuilder)? updates]) =>
@@ -26,11 +26,11 @@ class _$UpdateEventRequest extends UpdateEventRequest {
 
   _$UpdateEventRequest._(
       {required this.id,
-      this.summaryCommaOmitempty,
-      this.descriptionCommaOmitempty,
-      this.locationCommaOmitempty,
-      this.startCommaOmitempty,
-      this.endCommaOmitempty})
+      this.summary,
+      this.description,
+      this.location,
+      this.start,
+      this.end})
       : super._();
   @override
   UpdateEventRequest rebuild(
@@ -46,22 +46,22 @@ class _$UpdateEventRequest extends UpdateEventRequest {
     if (identical(other, this)) return true;
     return other is UpdateEventRequest &&
         id == other.id &&
-        summaryCommaOmitempty == other.summaryCommaOmitempty &&
-        descriptionCommaOmitempty == other.descriptionCommaOmitempty &&
-        locationCommaOmitempty == other.locationCommaOmitempty &&
-        startCommaOmitempty == other.startCommaOmitempty &&
-        endCommaOmitempty == other.endCommaOmitempty;
+        summary == other.summary &&
+        description == other.description &&
+        location == other.location &&
+        start == other.start &&
+        end == other.end;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, id.hashCode);
-    _$hash = $jc(_$hash, summaryCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, descriptionCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, locationCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, startCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, endCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, summary.hashCode);
+    _$hash = $jc(_$hash, description.hashCode);
+    _$hash = $jc(_$hash, location.hashCode);
+    _$hash = $jc(_$hash, start.hashCode);
+    _$hash = $jc(_$hash, end.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -70,11 +70,11 @@ class _$UpdateEventRequest extends UpdateEventRequest {
   String toString() {
     return (newBuiltValueToStringHelper(r'UpdateEventRequest')
           ..add('id', id)
-          ..add('summaryCommaOmitempty', summaryCommaOmitempty)
-          ..add('descriptionCommaOmitempty', descriptionCommaOmitempty)
-          ..add('locationCommaOmitempty', locationCommaOmitempty)
-          ..add('startCommaOmitempty', startCommaOmitempty)
-          ..add('endCommaOmitempty', endCommaOmitempty))
+          ..add('summary', summary)
+          ..add('description', description)
+          ..add('location', location)
+          ..add('start', start)
+          ..add('end', end))
         .toString();
   }
 }
@@ -87,30 +87,30 @@ class UpdateEventRequestBuilder
   String? get id => _$this._id;
   set id(String? id) => _$this._id = id;
 
-  String? _summaryCommaOmitempty;
-  String? get summaryCommaOmitempty => _$this._summaryCommaOmitempty;
-  set summaryCommaOmitempty(String? summaryCommaOmitempty) =>
-      _$this._summaryCommaOmitempty = summaryCommaOmitempty;
+  String? _summary;
+  String? get summary => _$this._summary;
+  set summary(String? summary) =>
+      _$this._summary = summary;
 
-  String? _descriptionCommaOmitempty;
-  String? get descriptionCommaOmitempty => _$this._descriptionCommaOmitempty;
-  set descriptionCommaOmitempty(String? descriptionCommaOmitempty) =>
-      _$this._descriptionCommaOmitempty = descriptionCommaOmitempty;
+  String? _description;
+  String? get description => _$this._description;
+  set description(String? description) =>
+      _$this._description = description;
 
-  String? _locationCommaOmitempty;
-  String? get locationCommaOmitempty => _$this._locationCommaOmitempty;
-  set locationCommaOmitempty(String? locationCommaOmitempty) =>
-      _$this._locationCommaOmitempty = locationCommaOmitempty;
+  String? _location;
+  String? get location => _$this._location;
+  set location(String? location) =>
+      _$this._location = location;
 
-  String? _startCommaOmitempty;
-  String? get startCommaOmitempty => _$this._startCommaOmitempty;
-  set startCommaOmitempty(String? startCommaOmitempty) =>
-      _$this._startCommaOmitempty = startCommaOmitempty;
+  String? _start;
+  String? get start => _$this._start;
+  set start(String? start) =>
+      _$this._start = start;
 
-  String? _endCommaOmitempty;
-  String? get endCommaOmitempty => _$this._endCommaOmitempty;
-  set endCommaOmitempty(String? endCommaOmitempty) =>
-      _$this._endCommaOmitempty = endCommaOmitempty;
+  String? _end;
+  String? get end => _$this._end;
+  set end(String? end) =>
+      _$this._end = end;
 
   UpdateEventRequestBuilder() {
     UpdateEventRequest._defaults(this);
@@ -120,11 +120,11 @@ class UpdateEventRequestBuilder
     final $v = _$v;
     if ($v != null) {
       _id = $v.id;
-      _summaryCommaOmitempty = $v.summaryCommaOmitempty;
-      _descriptionCommaOmitempty = $v.descriptionCommaOmitempty;
-      _locationCommaOmitempty = $v.locationCommaOmitempty;
-      _startCommaOmitempty = $v.startCommaOmitempty;
-      _endCommaOmitempty = $v.endCommaOmitempty;
+      _summary = $v.summary;
+      _description = $v.description;
+      _location = $v.location;
+      _start = $v.start;
+      _end = $v.end;
       _$v = null;
     }
     return this;
@@ -148,11 +148,11 @@ class UpdateEventRequestBuilder
         _$UpdateEventRequest._(
           id: BuiltValueNullFieldError.checkNotNull(
               id, r'UpdateEventRequest', 'id'),
-          summaryCommaOmitempty: summaryCommaOmitempty,
-          descriptionCommaOmitempty: descriptionCommaOmitempty,
-          locationCommaOmitempty: locationCommaOmitempty,
-          startCommaOmitempty: startCommaOmitempty,
-          endCommaOmitempty: endCommaOmitempty,
+          summary: summary,
+          description: description,
+          location: location,
+          start: start,
+          end: end,
         );
     replace(_$result);
     return _$result;

@@ -744,9 +744,9 @@ class _FormSections extends StatelessWidget {
               color: CyberpunkColors.lightGray,
             ),
             dropdownColor: CyberpunkColors.darkGray,
-            items: [
-              const DropdownMenuItem(value: 'ctrl', child: Text('ctrl (all platforms)')),
-              const DropdownMenuItem(value: 'cmd', child: Text('cmd (macOS only)')),
+            items: const [
+              DropdownMenuItem(value: 'ctrl', child: Text('ctrl (all platforms)')),
+              DropdownMenuItem(value: 'cmd', child: Text('cmd (macOS only)')),
             ],
           ),
         ],

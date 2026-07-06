@@ -12,13 +12,13 @@ void main() {
       // TODO
     });
 
-    // String modelCommaOmitempty
-    test('to test the property `modelCommaOmitempty`', () async {
+    // String model
+    test('to test the property `model`', () async {
       // TODO
     });
 
-    // int tokensUsedCommaOmitempty
-    test('to test the property `tokensUsedCommaOmitempty`', () async {
+    // int tokensUsed
+    test('to test the property `tokensUsed`', () async {
       // TODO
     });
 

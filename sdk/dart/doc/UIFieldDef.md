@@ -11,11 +11,11 @@ Name | Type | Description | Notes
 **name** | **String** |  | 
 **label** | **String** |  | 
 **type** | **String** |  | 
-**requiredCommaOmitempty** | **bool** |  | [optional] 
-**defaultCommaOmitempty** | [**JsonObject**](.md) |  | [optional] 
-**optionsCommaOmitempty** | **String** |  | [optional] 
-**placeholderCommaOmitempty** | **String** |  | [optional] 
-**helpCommaOmitempty** | **String** |  | [optional] 
+**required_** | **bool** |  | [optional] 
+**default_** | [**JsonObject**](.md) |  | [optional] 
+**options** | **String** |  | [optional] 
+**placeholder** | **String** |  | [optional] 
+**help** | **String** |  | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

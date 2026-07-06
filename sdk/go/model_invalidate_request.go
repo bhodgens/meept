@@ -19,7 +19,7 @@ var _ MappedNullable = &InvalidateRequest{}
 
 // InvalidateRequest struct for InvalidateRequest
 type InvalidateRequest struct {
-	Pathomitempty *string `json:"path,omitempty,omitempty"`
+	Path *string `json:"path,omitempty"`
 }
 
 // NewInvalidateRequest instantiates a new InvalidateRequest object
@@ -39,36 +39,36 @@ func NewInvalidateRequestWithDefaults() *InvalidateRequest {
 	return &this
 }
 
-// GetPathomitempty returns the Pathomitempty field value if set, zero value otherwise.
-func (o *InvalidateRequest) GetPathomitempty() string {
-	if o == nil || IsNil(o.Pathomitempty) {
+// GetPath returns the Path field value if set, zero value otherwise.
+func (o *InvalidateRequest) GetPath() string {
+	if o == nil || IsNil(o.Path) {
 		var ret string
 		return ret
 	}
-	return *o.Pathomitempty
+	return *o.Path
 }
 
-// GetPathomitemptyOk returns a tuple with the Pathomitempty field value if set, nil otherwise
+// GetPathOk returns a tuple with the Path field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *InvalidateRequest) GetPathomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Pathomitempty) {
+func (o *InvalidateRequest) GetPathOk() (*string, bool) {
+	if o == nil || IsNil(o.Path) {
 		return nil, false
 	}
-	return o.Pathomitempty, true
+	return o.Path, true
 }
 
-// HasPathomitempty returns a boolean if a field has been set.
-func (o *InvalidateRequest) HasPathomitempty() bool {
-	if o != nil && !IsNil(o.Pathomitempty) {
+// HasPath returns a boolean if a field has been set.
+func (o *InvalidateRequest) HasPath() bool {
+	if o != nil && !IsNil(o.Path) {
 		return true
 	}
 
 	return false
 }
 
-// SetPathomitempty gets a reference to the given string and assigns it to the Pathomitempty field.
-func (o *InvalidateRequest) SetPathomitempty(v string) {
-	o.Pathomitempty = &v
+// SetPath gets a reference to the given string and assigns it to the Path field.
+func (o *InvalidateRequest) SetPath(v string) {
+	o.Path = &v
 }
 
 func (o InvalidateRequest) MarshalJSON() ([]byte, error) {
@@ -81,8 +81,8 @@ func (o InvalidateRequest) MarshalJSON() ([]byte, error) {
 
 func (o InvalidateRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	if !IsNil(o.Pathomitempty) {
-		toSerialize["path,omitempty"] = o.Pathomitempty
+	if !IsNil(o.Path) {
+		toSerialize["path"] = o.Path
 	}
 	return toSerialize, nil
 }

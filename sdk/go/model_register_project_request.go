@@ -21,10 +21,10 @@ var _ MappedNullable = &RegisterProjectRequest{}
 
 // RegisterProjectRequest struct for RegisterProjectRequest
 type RegisterProjectRequest struct {
-	Idomitempty *string `json:"id,omitempty,omitempty"`
+	Id *string `json:"id,omitempty"`
 	Name string `json:"name"`
-	GitUrlomitempty *string `json:"git_url,omitempty,omitempty"`
-	LocalPathomitempty *string `json:"local_path,omitempty,omitempty"`
+	GitUrl *string `json:"git_url,omitempty"`
+	LocalPath *string `json:"local_path,omitempty"`
 }
 
 type _RegisterProjectRequest RegisterProjectRequest
@@ -47,36 +47,36 @@ func NewRegisterProjectRequestWithDefaults() *RegisterProjectRequest {
 	return &this
 }
 
-// GetIdomitempty returns the Idomitempty field value if set, zero value otherwise.
-func (o *RegisterProjectRequest) GetIdomitempty() string {
-	if o == nil || IsNil(o.Idomitempty) {
+// GetId returns the Id field value if set, zero value otherwise.
+func (o *RegisterProjectRequest) GetId() string {
+	if o == nil || IsNil(o.Id) {
 		var ret string
 		return ret
 	}
-	return *o.Idomitempty
+	return *o.Id
 }
 
-// GetIdomitemptyOk returns a tuple with the Idomitempty field value if set, nil otherwise
+// GetIdOk returns a tuple with the Id field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *RegisterProjectRequest) GetIdomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Idomitempty) {
+func (o *RegisterProjectRequest) GetIdOk() (*string, bool) {
+	if o == nil || IsNil(o.Id) {
 		return nil, false
 	}
-	return o.Idomitempty, true
+	return o.Id, true
 }
 
-// HasIdomitempty returns a boolean if a field has been set.
-func (o *RegisterProjectRequest) HasIdomitempty() bool {
-	if o != nil && !IsNil(o.Idomitempty) {
+// HasId returns a boolean if a field has been set.
+func (o *RegisterProjectRequest) HasId() bool {
+	if o != nil && !IsNil(o.Id) {
 		return true
 	}
 
 	return false
 }
 
-// SetIdomitempty gets a reference to the given string and assigns it to the Idomitempty field.
-func (o *RegisterProjectRequest) SetIdomitempty(v string) {
-	o.Idomitempty = &v
+// SetId gets a reference to the given string and assigns it to the Id field.
+func (o *RegisterProjectRequest) SetId(v string) {
+	o.Id = &v
 }
 
 // GetName returns the Name field value
@@ -103,68 +103,68 @@ func (o *RegisterProjectRequest) SetName(v string) {
 	o.Name = v
 }
 
-// GetGitUrlomitempty returns the GitUrlomitempty field value if set, zero value otherwise.
-func (o *RegisterProjectRequest) GetGitUrlomitempty() string {
-	if o == nil || IsNil(o.GitUrlomitempty) {
+// GetGitUrl returns the GitUrl field value if set, zero value otherwise.
+func (o *RegisterProjectRequest) GetGitUrl() string {
+	if o == nil || IsNil(o.GitUrl) {
 		var ret string
 		return ret
 	}
-	return *o.GitUrlomitempty
+	return *o.GitUrl
 }
 
-// GetGitUrlomitemptyOk returns a tuple with the GitUrlomitempty field value if set, nil otherwise
+// GetGitUrlOk returns a tuple with the GitUrl field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *RegisterProjectRequest) GetGitUrlomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.GitUrlomitempty) {
+func (o *RegisterProjectRequest) GetGitUrlOk() (*string, bool) {
+	if o == nil || IsNil(o.GitUrl) {
 		return nil, false
 	}
-	return o.GitUrlomitempty, true
+	return o.GitUrl, true
 }
 
-// HasGitUrlomitempty returns a boolean if a field has been set.
-func (o *RegisterProjectRequest) HasGitUrlomitempty() bool {
-	if o != nil && !IsNil(o.GitUrlomitempty) {
+// HasGitUrl returns a boolean if a field has been set.
+func (o *RegisterProjectRequest) HasGitUrl() bool {
+	if o != nil && !IsNil(o.GitUrl) {
 		return true
 	}
 
 	return false
 }
 
-// SetGitUrlomitempty gets a reference to the given string and assigns it to the GitUrlomitempty field.
-func (o *RegisterProjectRequest) SetGitUrlomitempty(v string) {
-	o.GitUrlomitempty = &v
+// SetGitUrl gets a reference to the given string and assigns it to the GitUrl field.
+func (o *RegisterProjectRequest) SetGitUrl(v string) {
+	o.GitUrl = &v
 }
 
-// GetLocalPathomitempty returns the LocalPathomitempty field value if set, zero value otherwise.
-func (o *RegisterProjectRequest) GetLocalPathomitempty() string {
-	if o == nil || IsNil(o.LocalPathomitempty) {
+// GetLocalPath returns the LocalPath field value if set, zero value otherwise.
+func (o *RegisterProjectRequest) GetLocalPath() string {
+	if o == nil || IsNil(o.LocalPath) {
 		var ret string
 		return ret
 	}
-	return *o.LocalPathomitempty
+	return *o.LocalPath
 }
 
-// GetLocalPathomitemptyOk returns a tuple with the LocalPathomitempty field value if set, nil otherwise
+// GetLocalPathOk returns a tuple with the LocalPath field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *RegisterProjectRequest) GetLocalPathomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.LocalPathomitempty) {
+func (o *RegisterProjectRequest) GetLocalPathOk() (*string, bool) {
+	if o == nil || IsNil(o.LocalPath) {
 		return nil, false
 	}
-	return o.LocalPathomitempty, true
+	return o.LocalPath, true
 }
 
-// HasLocalPathomitempty returns a boolean if a field has been set.
-func (o *RegisterProjectRequest) HasLocalPathomitempty() bool {
-	if o != nil && !IsNil(o.LocalPathomitempty) {
+// HasLocalPath returns a boolean if a field has been set.
+func (o *RegisterProjectRequest) HasLocalPath() bool {
+	if o != nil && !IsNil(o.LocalPath) {
 		return true
 	}
 
 	return false
 }
 
-// SetLocalPathomitempty gets a reference to the given string and assigns it to the LocalPathomitempty field.
-func (o *RegisterProjectRequest) SetLocalPathomitempty(v string) {
-	o.LocalPathomitempty = &v
+// SetLocalPath gets a reference to the given string and assigns it to the LocalPath field.
+func (o *RegisterProjectRequest) SetLocalPath(v string) {
+	o.LocalPath = &v
 }
 
 func (o RegisterProjectRequest) MarshalJSON() ([]byte, error) {
@@ -177,15 +177,15 @@ func (o RegisterProjectRequest) MarshalJSON() ([]byte, error) {
 
 func (o RegisterProjectRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	if !IsNil(o.Idomitempty) {
-		toSerialize["id,omitempty"] = o.Idomitempty
+	if !IsNil(o.Id) {
+		toSerialize["id"] = o.Id
 	}
 	toSerialize["name"] = o.Name
-	if !IsNil(o.GitUrlomitempty) {
-		toSerialize["git_url,omitempty"] = o.GitUrlomitempty
+	if !IsNil(o.GitUrl) {
+		toSerialize["git_url"] = o.GitUrl
 	}
-	if !IsNil(o.LocalPathomitempty) {
-		toSerialize["local_path,omitempty"] = o.LocalPathomitempty
+	if !IsNil(o.LocalPath) {
+		toSerialize["local_path"] = o.LocalPath
 	}
 	return toSerialize, nil
 }

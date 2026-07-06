@@ -10,12 +10,12 @@ class _$ClaimRequest extends ClaimRequest {
   @override
   final String workerId;
   @override
-  final String? capabilitiesCommaOmitempty;
+  final String? capabilities;
 
   factory _$ClaimRequest([void Function(ClaimRequestBuilder)? updates]) =>
       (ClaimRequestBuilder()..update(updates))._build();
 
-  _$ClaimRequest._({required this.workerId, this.capabilitiesCommaOmitempty})
+  _$ClaimRequest._({required this.workerId, this.capabilities})
       : super._();
   @override
   ClaimRequest rebuild(void Function(ClaimRequestBuilder) updates) =>
@@ -29,14 +29,14 @@ class _$ClaimRequest extends ClaimRequest {
     if (identical(other, this)) return true;
     return other is ClaimRequest &&
         workerId == other.workerId &&
-        capabilitiesCommaOmitempty == other.capabilitiesCommaOmitempty;
+        capabilities == other.capabilities;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, workerId.hashCode);
-    _$hash = $jc(_$hash, capabilitiesCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, capabilities.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -45,7 +45,7 @@ class _$ClaimRequest extends ClaimRequest {
   String toString() {
     return (newBuiltValueToStringHelper(r'ClaimRequest')
           ..add('workerId', workerId)
-          ..add('capabilitiesCommaOmitempty', capabilitiesCommaOmitempty))
+          ..add('capabilities', capabilities))
         .toString();
   }
 }
@@ -58,10 +58,10 @@ class ClaimRequestBuilder
   String? get workerId => _$this._workerId;
   set workerId(String? workerId) => _$this._workerId = workerId;
 
-  String? _capabilitiesCommaOmitempty;
-  String? get capabilitiesCommaOmitempty => _$this._capabilitiesCommaOmitempty;
-  set capabilitiesCommaOmitempty(String? capabilitiesCommaOmitempty) =>
-      _$this._capabilitiesCommaOmitempty = capabilitiesCommaOmitempty;
+  String? _capabilities;
+  String? get capabilities => _$this._capabilities;
+  set capabilities(String? capabilities) =>
+      _$this._capabilities = capabilities;
 
   ClaimRequestBuilder() {
     ClaimRequest._defaults(this);
@@ -71,7 +71,7 @@ class ClaimRequestBuilder
     final $v = _$v;
     if ($v != null) {
       _workerId = $v.workerId;
-      _capabilitiesCommaOmitempty = $v.capabilitiesCommaOmitempty;
+      _capabilities = $v.capabilities;
       _$v = null;
     }
     return this;
@@ -95,7 +95,7 @@ class ClaimRequestBuilder
         _$ClaimRequest._(
           workerId: BuiltValueNullFieldError.checkNotNull(
               workerId, r'ClaimRequest', 'workerId'),
-          capabilitiesCommaOmitempty: capabilitiesCommaOmitempty,
+          capabilities: capabilities,
         );
     replace(_$result);
     return _$result;

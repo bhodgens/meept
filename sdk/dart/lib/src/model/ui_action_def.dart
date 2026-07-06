@@ -14,7 +14,7 @@ part 'ui_action_def.g.dart';
 /// * [id] 
 /// * [label] 
 /// * [type] 
-/// * [styleCommaOmitempty] 
+/// * [style] 
 @BuiltValue()
 abstract class UIActionDef implements Built<UIActionDef, UIActionDefBuilder> {
   @BuiltValueField(wireName: r'id')
@@ -26,8 +26,8 @@ abstract class UIActionDef implements Built<UIActionDef, UIActionDefBuilder> {
   @BuiltValueField(wireName: r'type')
   String get type;
 
-  @BuiltValueField(wireName: r'style,omitempty')
-  String? get styleCommaOmitempty;
+  @BuiltValueField(wireName: r'style')
+  String? get style;
 
   UIActionDef._();
 
@@ -67,10 +67,10 @@ class _$UIActionDefSerializer implements PrimitiveSerializer<UIActionDef> {
       object.type,
       specifiedType: const FullType(String),
     );
-    if (object.styleCommaOmitempty != null) {
-      yield r'style,omitempty';
+    if (object.style != null) {
+      yield r'style';
       yield serializers.serialize(
-        object.styleCommaOmitempty,
+        object.style,
         specifiedType: const FullType(String),
       );
     }
@@ -118,12 +118,12 @@ class _$UIActionDefSerializer implements PrimitiveSerializer<UIActionDef> {
           ) as String;
           result.type = valueDes;
           break;
-        case r'style,omitempty':
+        case r'style':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.styleCommaOmitempty = valueDes;
+          result.style = valueDes;
           break;
         default:
           unhandled.add(key);

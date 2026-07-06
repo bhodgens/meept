@@ -11,15 +11,15 @@ part 'list_request.g.dart';
 /// ListRequest
 ///
 /// Properties:
-/// * [stateCommaOmitempty] 
-/// * [limitCommaOmitempty] 
+/// * [state] 
+/// * [limit] 
 @BuiltValue()
 abstract class ListRequest implements Built<ListRequest, ListRequestBuilder> {
-  @BuiltValueField(wireName: r'state,omitempty')
-  String? get stateCommaOmitempty;
+  @BuiltValueField(wireName: r'state')
+  String? get state;
 
-  @BuiltValueField(wireName: r'limit,omitempty')
-  int? get limitCommaOmitempty;
+  @BuiltValueField(wireName: r'limit')
+  int? get limit;
 
   ListRequest._();
 
@@ -44,17 +44,17 @@ class _$ListRequestSerializer implements PrimitiveSerializer<ListRequest> {
     ListRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
-    if (object.stateCommaOmitempty != null) {
-      yield r'state,omitempty';
+    if (object.state != null) {
+      yield r'state';
       yield serializers.serialize(
-        object.stateCommaOmitempty,
+        object.state,
         specifiedType: const FullType(String),
       );
     }
-    if (object.limitCommaOmitempty != null) {
-      yield r'limit,omitempty';
+    if (object.limit != null) {
+      yield r'limit';
       yield serializers.serialize(
-        object.limitCommaOmitempty,
+        object.limit,
         specifiedType: const FullType(int),
       );
     }
@@ -81,19 +81,19 @@ class _$ListRequestSerializer implements PrimitiveSerializer<ListRequest> {
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
-        case r'state,omitempty':
+        case r'state':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.stateCommaOmitempty = valueDes;
+          result.state = valueDes;
           break;
-        case r'limit,omitempty':
+        case r'limit':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.limitCommaOmitempty = valueDes;
+          result.limit = valueDes;
           break;
         default:
           unhandled.add(key);

@@ -11,15 +11,15 @@ part 'skills_list_request.g.dart';
 /// SkillsListRequest
 ///
 /// Properties:
-/// * [categoryCommaOmitempty] 
-/// * [limitCommaOmitempty] 
+/// * [category] 
+/// * [limit] 
 @BuiltValue()
 abstract class SkillsListRequest implements Built<SkillsListRequest, SkillsListRequestBuilder> {
-  @BuiltValueField(wireName: r'category,omitempty')
-  String? get categoryCommaOmitempty;
+  @BuiltValueField(wireName: r'category')
+  String? get category;
 
-  @BuiltValueField(wireName: r'limit,omitempty')
-  int? get limitCommaOmitempty;
+  @BuiltValueField(wireName: r'limit')
+  int? get limit;
 
   SkillsListRequest._();
 
@@ -44,17 +44,17 @@ class _$SkillsListRequestSerializer implements PrimitiveSerializer<SkillsListReq
     SkillsListRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
-    if (object.categoryCommaOmitempty != null) {
-      yield r'category,omitempty';
+    if (object.category != null) {
+      yield r'category';
       yield serializers.serialize(
-        object.categoryCommaOmitempty,
+        object.category,
         specifiedType: const FullType(String),
       );
     }
-    if (object.limitCommaOmitempty != null) {
-      yield r'limit,omitempty';
+    if (object.limit != null) {
+      yield r'limit';
       yield serializers.serialize(
-        object.limitCommaOmitempty,
+        object.limit,
         specifiedType: const FullType(int),
       );
     }
@@ -81,19 +81,19 @@ class _$SkillsListRequestSerializer implements PrimitiveSerializer<SkillsListReq
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
-        case r'category,omitempty':
+        case r'category':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.categoryCommaOmitempty = valueDes;
+          result.category = valueDes;
           break;
-        case r'limit,omitempty':
+        case r'limit':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.limitCommaOmitempty = valueDes;
+          result.limit = valueDes;
           break;
         default:
           unhandled.add(key);

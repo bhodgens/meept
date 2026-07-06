@@ -10,7 +10,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **memoryId** | **String** |  | 
 **content** | **String** |  | 
-**metadataCommaOmitempty** | **String** |  | [optional] 
+**metadata** | **String** |  | [optional] 
 **relevanceScore** | **num** |  | 
 **vectorSimilarity** | **num** |  | 
 

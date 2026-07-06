@@ -23,7 +23,7 @@ var _ MappedNullable = &SteerRequest{}
 type SteerRequest struct {
 	Message string `json:"message"`
 	ConversationId string `json:"conversation_id"`
-	Sourceomitempty *string `json:"source,omitempty,omitempty"`
+	Source *string `json:"source,omitempty"`
 }
 
 type _SteerRequest SteerRequest
@@ -95,36 +95,36 @@ func (o *SteerRequest) SetConversationId(v string) {
 	o.ConversationId = v
 }
 
-// GetSourceomitempty returns the Sourceomitempty field value if set, zero value otherwise.
-func (o *SteerRequest) GetSourceomitempty() string {
-	if o == nil || IsNil(o.Sourceomitempty) {
+// GetSource returns the Source field value if set, zero value otherwise.
+func (o *SteerRequest) GetSource() string {
+	if o == nil || IsNil(o.Source) {
 		var ret string
 		return ret
 	}
-	return *o.Sourceomitempty
+	return *o.Source
 }
 
-// GetSourceomitemptyOk returns a tuple with the Sourceomitempty field value if set, nil otherwise
+// GetSourceOk returns a tuple with the Source field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *SteerRequest) GetSourceomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Sourceomitempty) {
+func (o *SteerRequest) GetSourceOk() (*string, bool) {
+	if o == nil || IsNil(o.Source) {
 		return nil, false
 	}
-	return o.Sourceomitempty, true
+	return o.Source, true
 }
 
-// HasSourceomitempty returns a boolean if a field has been set.
-func (o *SteerRequest) HasSourceomitempty() bool {
-	if o != nil && !IsNil(o.Sourceomitempty) {
+// HasSource returns a boolean if a field has been set.
+func (o *SteerRequest) HasSource() bool {
+	if o != nil && !IsNil(o.Source) {
 		return true
 	}
 
 	return false
 }
 
-// SetSourceomitempty gets a reference to the given string and assigns it to the Sourceomitempty field.
-func (o *SteerRequest) SetSourceomitempty(v string) {
-	o.Sourceomitempty = &v
+// SetSource gets a reference to the given string and assigns it to the Source field.
+func (o *SteerRequest) SetSource(v string) {
+	o.Source = &v
 }
 
 func (o SteerRequest) MarshalJSON() ([]byte, error) {
@@ -139,8 +139,8 @@ func (o SteerRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["message"] = o.Message
 	toSerialize["conversation_id"] = o.ConversationId
-	if !IsNil(o.Sourceomitempty) {
-		toSerialize["source,omitempty"] = o.Sourceomitempty
+	if !IsNil(o.Source) {
+		toSerialize["source"] = o.Source
 	}
 	return toSerialize, nil
 }

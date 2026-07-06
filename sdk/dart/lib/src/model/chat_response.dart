@@ -12,18 +12,18 @@ part 'chat_response.g.dart';
 ///
 /// Properties:
 /// * [reply] 
-/// * [modelCommaOmitempty] 
-/// * [tokensUsedCommaOmitempty] 
+/// * [model] 
+/// * [tokensUsed] 
 @BuiltValue()
 abstract class ChatResponse implements Built<ChatResponse, ChatResponseBuilder> {
   @BuiltValueField(wireName: r'reply')
   String get reply;
 
-  @BuiltValueField(wireName: r'model,omitempty')
-  String? get modelCommaOmitempty;
+  @BuiltValueField(wireName: r'model')
+  String? get model;
 
-  @BuiltValueField(wireName: r'tokens_used,omitempty')
-  int? get tokensUsedCommaOmitempty;
+  @BuiltValueField(wireName: r'tokens_used')
+  int? get tokensUsed;
 
   ChatResponse._();
 
@@ -53,17 +53,17 @@ class _$ChatResponseSerializer implements PrimitiveSerializer<ChatResponse> {
       object.reply,
       specifiedType: const FullType(String),
     );
-    if (object.modelCommaOmitempty != null) {
-      yield r'model,omitempty';
+    if (object.model != null) {
+      yield r'model';
       yield serializers.serialize(
-        object.modelCommaOmitempty,
+        object.model,
         specifiedType: const FullType(String),
       );
     }
-    if (object.tokensUsedCommaOmitempty != null) {
-      yield r'tokens_used,omitempty';
+    if (object.tokensUsed != null) {
+      yield r'tokens_used';
       yield serializers.serialize(
-        object.tokensUsedCommaOmitempty,
+        object.tokensUsed,
         specifiedType: const FullType(int),
       );
     }
@@ -97,19 +97,19 @@ class _$ChatResponseSerializer implements PrimitiveSerializer<ChatResponse> {
           ) as String;
           result.reply = valueDes;
           break;
-        case r'model,omitempty':
+        case r'model':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.modelCommaOmitempty = valueDes;
+          result.model = valueDes;
           break;
-        case r'tokens_used,omitempty':
+        case r'tokens_used':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.tokensUsedCommaOmitempty = valueDes;
+          result.tokensUsed = valueDes;
           break;
         default:
           unhandled.add(key);

@@ -1,8 +1,6 @@
 // Web stub for platform_native_helpers
 // All methods return null/false since web has no filesystem or OS access.
 
-import 'package:flutter/foundation.dart' show debugPrint;
-
 bool nativeIsMacOS() => false;
 bool nativeIsLinux() => false;
 bool nativeIsWindows() => false;

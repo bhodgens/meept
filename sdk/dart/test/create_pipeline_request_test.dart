@@ -7,8 +7,8 @@ void main() {
   // TODO add properties to the builder and call build()
 
   group(CreatePipelineRequest, () {
-    // String idCommaOmitempty
-    test('to test the property `idCommaOmitempty`', () async {
+    // String id
+    test('to test the property `id`', () async {
       // TODO
     });
 
@@ -17,18 +17,18 @@ void main() {
       // TODO
     });
 
-    // String descriptionCommaOmitempty
-    test('to test the property `descriptionCommaOmitempty`', () async {
+    // String description
+    test('to test the property `description`', () async {
       // TODO
     });
 
-    // BuiltList<String> stepsCommaOmitempty
-    test('to test the property `stepsCommaOmitempty`', () async {
+    // BuiltList<String> steps
+    test('to test the property `steps`', () async {
       // TODO
     });
 
-    // String metadataCommaOmitempty
-    test('to test the property `metadataCommaOmitempty`', () async {
+    // String metadata
+    test('to test the property `metadata`', () async {
       // TODO
     });
 

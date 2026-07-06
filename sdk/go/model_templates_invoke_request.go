@@ -22,7 +22,7 @@ var _ MappedNullable = &TemplatesInvokeRequest{}
 // TemplatesInvokeRequest struct for TemplatesInvokeRequest
 type TemplatesInvokeRequest struct {
 	Name string `json:"name"`
-	Argsomitempty NullableString `json:"args,omitempty,omitempty"`
+	Args NullableString `json:"args,omitempty"`
 }
 
 type _TemplatesInvokeRequest TemplatesInvokeRequest
@@ -69,46 +69,46 @@ func (o *TemplatesInvokeRequest) SetName(v string) {
 	o.Name = v
 }
 
-// GetArgsomitempty returns the Argsomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *TemplatesInvokeRequest) GetArgsomitempty() string {
-	if o == nil || IsNil(o.Argsomitempty.Get()) {
+// GetArgs returns the Args field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *TemplatesInvokeRequest) GetArgs() string {
+	if o == nil || IsNil(o.Args.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.Argsomitempty.Get()
+	return *o.Args.Get()
 }
 
-// GetArgsomitemptyOk returns a tuple with the Argsomitempty field value if set, nil otherwise
+// GetArgsOk returns a tuple with the Args field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *TemplatesInvokeRequest) GetArgsomitemptyOk() (*string, bool) {
+func (o *TemplatesInvokeRequest) GetArgsOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.Argsomitempty.Get(), o.Argsomitempty.IsSet()
+	return o.Args.Get(), o.Args.IsSet()
 }
 
-// HasArgsomitempty returns a boolean if a field has been set.
-func (o *TemplatesInvokeRequest) HasArgsomitempty() bool {
-	if o != nil && o.Argsomitempty.IsSet() {
+// HasArgs returns a boolean if a field has been set.
+func (o *TemplatesInvokeRequest) HasArgs() bool {
+	if o != nil && o.Args.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetArgsomitempty gets a reference to the given NullableString and assigns it to the Argsomitempty field.
-func (o *TemplatesInvokeRequest) SetArgsomitempty(v string) {
-	o.Argsomitempty.Set(&v)
+// SetArgs gets a reference to the given NullableString and assigns it to the Args field.
+func (o *TemplatesInvokeRequest) SetArgs(v string) {
+	o.Args.Set(&v)
 }
-// SetArgsomitemptyNil sets the value for Argsomitempty to be an explicit nil
-func (o *TemplatesInvokeRequest) SetArgsomitemptyNil() {
-	o.Argsomitempty.Set(nil)
+// SetArgsNil sets the value for Args to be an explicit nil
+func (o *TemplatesInvokeRequest) SetArgsNil() {
+	o.Args.Set(nil)
 }
 
-// UnsetArgsomitempty ensures that no value is present for Argsomitempty, not even an explicit nil
-func (o *TemplatesInvokeRequest) UnsetArgsomitempty() {
-	o.Argsomitempty.Unset()
+// UnsetArgs ensures that no value is present for Args, not even an explicit nil
+func (o *TemplatesInvokeRequest) UnsetArgs() {
+	o.Args.Unset()
 }
 
 func (o TemplatesInvokeRequest) MarshalJSON() ([]byte, error) {
@@ -122,8 +122,8 @@ func (o TemplatesInvokeRequest) MarshalJSON() ([]byte, error) {
 func (o TemplatesInvokeRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["name"] = o.Name
-	if o.Argsomitempty.IsSet() {
-		toSerialize["args,omitempty"] = o.Argsomitempty.Get()
+	if o.Args.IsSet() {
+		toSerialize["args"] = o.Args.Get()
 	}
 	return toSerialize, nil
 }

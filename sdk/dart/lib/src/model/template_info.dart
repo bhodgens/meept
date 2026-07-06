@@ -15,9 +15,9 @@ part 'template_info.g.dart';
 /// * [name] 
 /// * [description] 
 /// * [scope] 
-/// * [pathCommaOmitempty] 
+/// * [path] 
 /// * [priority] 
-/// * [bodyCommaOmitempty] 
+/// * [body] 
 @BuiltValue()
 abstract class TemplateInfo implements Built<TemplateInfo, TemplateInfoBuilder> {
   @BuiltValueField(wireName: r'name')
@@ -29,14 +29,14 @@ abstract class TemplateInfo implements Built<TemplateInfo, TemplateInfoBuilder> 
   @BuiltValueField(wireName: r'scope')
   JsonObject get scope;
 
-  @BuiltValueField(wireName: r'path,omitempty')
-  String? get pathCommaOmitempty;
+  @BuiltValueField(wireName: r'path')
+  String? get path;
 
   @BuiltValueField(wireName: r'priority')
   int get priority;
 
-  @BuiltValueField(wireName: r'body,omitempty')
-  String? get bodyCommaOmitempty;
+  @BuiltValueField(wireName: r'body')
+  String? get body;
 
   TemplateInfo._();
 
@@ -76,10 +76,10 @@ class _$TemplateInfoSerializer implements PrimitiveSerializer<TemplateInfo> {
       object.scope,
       specifiedType: const FullType(JsonObject),
     );
-    if (object.pathCommaOmitempty != null) {
-      yield r'path,omitempty';
+    if (object.path != null) {
+      yield r'path';
       yield serializers.serialize(
-        object.pathCommaOmitempty,
+        object.path,
         specifiedType: const FullType(String),
       );
     }
@@ -88,10 +88,10 @@ class _$TemplateInfoSerializer implements PrimitiveSerializer<TemplateInfo> {
       object.priority,
       specifiedType: const FullType(int),
     );
-    if (object.bodyCommaOmitempty != null) {
-      yield r'body,omitempty';
+    if (object.body != null) {
+      yield r'body';
       yield serializers.serialize(
-        object.bodyCommaOmitempty,
+        object.body,
         specifiedType: const FullType(String),
       );
     }
@@ -139,12 +139,12 @@ class _$TemplateInfoSerializer implements PrimitiveSerializer<TemplateInfo> {
           ) as JsonObject;
           result.scope = valueDes;
           break;
-        case r'path,omitempty':
+        case r'path':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.pathCommaOmitempty = valueDes;
+          result.path = valueDes;
           break;
         case r'priority':
           final valueDes = serializers.deserialize(
@@ -153,12 +153,12 @@ class _$TemplateInfoSerializer implements PrimitiveSerializer<TemplateInfo> {
           ) as int;
           result.priority = valueDes;
           break;
-        case r'body,omitempty':
+        case r'body':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.bodyCommaOmitempty = valueDes;
+          result.body = valueDes;
           break;
         default:
           unhandled.add(key);

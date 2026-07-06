@@ -10,9 +10,9 @@ class _$MemoryQueryRequest extends MemoryQueryRequest {
   @override
   final String query;
   @override
-  final int? limitCommaOmitempty;
+  final int? limit;
   @override
-  final String? categoryCommaOmitempty;
+  final String? category;
 
   factory _$MemoryQueryRequest(
           [void Function(MemoryQueryRequestBuilder)? updates]) =>
@@ -20,8 +20,8 @@ class _$MemoryQueryRequest extends MemoryQueryRequest {
 
   _$MemoryQueryRequest._(
       {required this.query,
-      this.limitCommaOmitempty,
-      this.categoryCommaOmitempty})
+      this.limit,
+      this.category})
       : super._();
   @override
   MemoryQueryRequest rebuild(
@@ -37,16 +37,16 @@ class _$MemoryQueryRequest extends MemoryQueryRequest {
     if (identical(other, this)) return true;
     return other is MemoryQueryRequest &&
         query == other.query &&
-        limitCommaOmitempty == other.limitCommaOmitempty &&
-        categoryCommaOmitempty == other.categoryCommaOmitempty;
+        limit == other.limit &&
+        category == other.category;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, query.hashCode);
-    _$hash = $jc(_$hash, limitCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, categoryCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, limit.hashCode);
+    _$hash = $jc(_$hash, category.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -55,8 +55,8 @@ class _$MemoryQueryRequest extends MemoryQueryRequest {
   String toString() {
     return (newBuiltValueToStringHelper(r'MemoryQueryRequest')
           ..add('query', query)
-          ..add('limitCommaOmitempty', limitCommaOmitempty)
-          ..add('categoryCommaOmitempty', categoryCommaOmitempty))
+          ..add('limit', limit)
+          ..add('category', category))
         .toString();
   }
 }
@@ -69,15 +69,15 @@ class MemoryQueryRequestBuilder
   String? get query => _$this._query;
   set query(String? query) => _$this._query = query;
 
-  int? _limitCommaOmitempty;
-  int? get limitCommaOmitempty => _$this._limitCommaOmitempty;
-  set limitCommaOmitempty(int? limitCommaOmitempty) =>
-      _$this._limitCommaOmitempty = limitCommaOmitempty;
+  int? _limit;
+  int? get limit => _$this._limit;
+  set limit(int? limit) =>
+      _$this._limit = limit;
 
-  String? _categoryCommaOmitempty;
-  String? get categoryCommaOmitempty => _$this._categoryCommaOmitempty;
-  set categoryCommaOmitempty(String? categoryCommaOmitempty) =>
-      _$this._categoryCommaOmitempty = categoryCommaOmitempty;
+  String? _category;
+  String? get category => _$this._category;
+  set category(String? category) =>
+      _$this._category = category;
 
   MemoryQueryRequestBuilder() {
     MemoryQueryRequest._defaults(this);
@@ -87,8 +87,8 @@ class MemoryQueryRequestBuilder
     final $v = _$v;
     if ($v != null) {
       _query = $v.query;
-      _limitCommaOmitempty = $v.limitCommaOmitempty;
-      _categoryCommaOmitempty = $v.categoryCommaOmitempty;
+      _limit = $v.limit;
+      _category = $v.category;
       _$v = null;
     }
     return this;
@@ -112,8 +112,8 @@ class MemoryQueryRequestBuilder
         _$MemoryQueryRequest._(
           query: BuiltValueNullFieldError.checkNotNull(
               query, r'MemoryQueryRequest', 'query'),
-          limitCommaOmitempty: limitCommaOmitempty,
-          categoryCommaOmitempty: categoryCommaOmitempty,
+          limit: limit,
+          category: category,
         );
     replace(_$result);
     return _$result;

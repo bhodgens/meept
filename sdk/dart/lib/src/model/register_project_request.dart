@@ -11,23 +11,23 @@ part 'register_project_request.g.dart';
 /// RegisterProjectRequest
 ///
 /// Properties:
-/// * [idCommaOmitempty] 
+/// * [id] 
 /// * [name] 
-/// * [gitUrlCommaOmitempty] 
-/// * [localPathCommaOmitempty] 
+/// * [gitUrl] 
+/// * [localPath] 
 @BuiltValue()
 abstract class RegisterProjectRequest implements Built<RegisterProjectRequest, RegisterProjectRequestBuilder> {
-  @BuiltValueField(wireName: r'id,omitempty')
-  String? get idCommaOmitempty;
+  @BuiltValueField(wireName: r'id')
+  String? get id;
 
   @BuiltValueField(wireName: r'name')
   String get name;
 
-  @BuiltValueField(wireName: r'git_url,omitempty')
-  String? get gitUrlCommaOmitempty;
+  @BuiltValueField(wireName: r'git_url')
+  String? get gitUrl;
 
-  @BuiltValueField(wireName: r'local_path,omitempty')
-  String? get localPathCommaOmitempty;
+  @BuiltValueField(wireName: r'local_path')
+  String? get localPath;
 
   RegisterProjectRequest._();
 
@@ -52,10 +52,10 @@ class _$RegisterProjectRequestSerializer implements PrimitiveSerializer<Register
     RegisterProjectRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
-    if (object.idCommaOmitempty != null) {
-      yield r'id,omitempty';
+    if (object.id != null) {
+      yield r'id';
       yield serializers.serialize(
-        object.idCommaOmitempty,
+        object.id,
         specifiedType: const FullType(String),
       );
     }
@@ -64,17 +64,17 @@ class _$RegisterProjectRequestSerializer implements PrimitiveSerializer<Register
       object.name,
       specifiedType: const FullType(String),
     );
-    if (object.gitUrlCommaOmitempty != null) {
-      yield r'git_url,omitempty';
+    if (object.gitUrl != null) {
+      yield r'git_url';
       yield serializers.serialize(
-        object.gitUrlCommaOmitempty,
+        object.gitUrl,
         specifiedType: const FullType(String),
       );
     }
-    if (object.localPathCommaOmitempty != null) {
-      yield r'local_path,omitempty';
+    if (object.localPath != null) {
+      yield r'local_path';
       yield serializers.serialize(
-        object.localPathCommaOmitempty,
+        object.localPath,
         specifiedType: const FullType(String),
       );
     }
@@ -101,12 +101,12 @@ class _$RegisterProjectRequestSerializer implements PrimitiveSerializer<Register
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
-        case r'id,omitempty':
+        case r'id':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.idCommaOmitempty = valueDes;
+          result.id = valueDes;
           break;
         case r'name':
           final valueDes = serializers.deserialize(
@@ -115,19 +115,19 @@ class _$RegisterProjectRequestSerializer implements PrimitiveSerializer<Register
           ) as String;
           result.name = valueDes;
           break;
-        case r'git_url,omitempty':
+        case r'git_url':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.gitUrlCommaOmitempty = valueDes;
+          result.gitUrl = valueDes;
           break;
-        case r'local_path,omitempty':
+        case r'local_path':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.localPathCommaOmitempty = valueDes;
+          result.localPath = valueDes;
           break;
         default:
           unhandled.add(key);

@@ -10,8 +10,8 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **id** | **String** |  | 
 **command** | **String** |  | 
-**outputCommaOmitempty** | **String** |  | [optional] 
-**stderrCommaOmitempty** | **String** |  | [optional] 
+**output** | **String** |  | [optional] 
+**stderr** | **String** |  | [optional] 
 **exitCode** | **int** |  | 
 **timestamp** | **String** |  | 
 **workingDir** | **String** |  | 

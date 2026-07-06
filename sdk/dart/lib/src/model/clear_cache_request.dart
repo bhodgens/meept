@@ -11,11 +11,11 @@ part 'clear_cache_request.g.dart';
 /// ClearCacheRequest
 ///
 /// Properties:
-/// * [prefixCommaOmitempty] 
+/// * [prefix] 
 @BuiltValue()
 abstract class ClearCacheRequest implements Built<ClearCacheRequest, ClearCacheRequestBuilder> {
-  @BuiltValueField(wireName: r'prefix,omitempty')
-  String? get prefixCommaOmitempty;
+  @BuiltValueField(wireName: r'prefix')
+  String? get prefix;
 
   ClearCacheRequest._();
 
@@ -40,10 +40,10 @@ class _$ClearCacheRequestSerializer implements PrimitiveSerializer<ClearCacheReq
     ClearCacheRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
-    if (object.prefixCommaOmitempty != null) {
-      yield r'prefix,omitempty';
+    if (object.prefix != null) {
+      yield r'prefix';
       yield serializers.serialize(
-        object.prefixCommaOmitempty,
+        object.prefix,
         specifiedType: const FullType(String),
       );
     }
@@ -70,12 +70,12 @@ class _$ClearCacheRequestSerializer implements PrimitiveSerializer<ClearCacheReq
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
-        case r'prefix,omitempty':
+        case r'prefix':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.prefixCommaOmitempty = valueDes;
+          result.prefix = valueDes;
           break;
         default:
           unhandled.add(key);

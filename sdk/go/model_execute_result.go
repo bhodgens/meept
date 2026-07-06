@@ -23,7 +23,7 @@ var _ MappedNullable = &ExecuteResult{}
 type ExecuteResult struct {
 	Output string `json:"output"`
 	Success bool `json:"success"`
-	Erroromitempty *string `json:"error,omitempty,omitempty"`
+	Error *string `json:"error,omitempty"`
 }
 
 type _ExecuteResult ExecuteResult
@@ -95,36 +95,36 @@ func (o *ExecuteResult) SetSuccess(v bool) {
 	o.Success = v
 }
 
-// GetErroromitempty returns the Erroromitempty field value if set, zero value otherwise.
-func (o *ExecuteResult) GetErroromitempty() string {
-	if o == nil || IsNil(o.Erroromitempty) {
+// GetError returns the Error field value if set, zero value otherwise.
+func (o *ExecuteResult) GetError() string {
+	if o == nil || IsNil(o.Error) {
 		var ret string
 		return ret
 	}
-	return *o.Erroromitempty
+	return *o.Error
 }
 
-// GetErroromitemptyOk returns a tuple with the Erroromitempty field value if set, nil otherwise
+// GetErrorOk returns a tuple with the Error field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ExecuteResult) GetErroromitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Erroromitempty) {
+func (o *ExecuteResult) GetErrorOk() (*string, bool) {
+	if o == nil || IsNil(o.Error) {
 		return nil, false
 	}
-	return o.Erroromitempty, true
+	return o.Error, true
 }
 
-// HasErroromitempty returns a boolean if a field has been set.
-func (o *ExecuteResult) HasErroromitempty() bool {
-	if o != nil && !IsNil(o.Erroromitempty) {
+// HasError returns a boolean if a field has been set.
+func (o *ExecuteResult) HasError() bool {
+	if o != nil && !IsNil(o.Error) {
 		return true
 	}
 
 	return false
 }
 
-// SetErroromitempty gets a reference to the given string and assigns it to the Erroromitempty field.
-func (o *ExecuteResult) SetErroromitempty(v string) {
-	o.Erroromitempty = &v
+// SetError gets a reference to the given string and assigns it to the Error field.
+func (o *ExecuteResult) SetError(v string) {
+	o.Error = &v
 }
 
 func (o ExecuteResult) MarshalJSON() ([]byte, error) {
@@ -139,8 +139,8 @@ func (o ExecuteResult) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["output"] = o.Output
 	toSerialize["success"] = o.Success
-	if !IsNil(o.Erroromitempty) {
-		toSerialize["error,omitempty"] = o.Erroromitempty
+	if !IsNil(o.Error) {
+		toSerialize["error"] = o.Error
 	}
 	return toSerialize, nil
 }

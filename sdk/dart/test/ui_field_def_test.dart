@@ -22,28 +22,28 @@ void main() {
       // TODO
     });
 
-    // bool requiredCommaOmitempty
-    test('to test the property `requiredCommaOmitempty`', () async {
+    // bool required_
+    test('to test the property `required_`', () async {
       // TODO
     });
 
-    // JsonObject defaultCommaOmitempty
-    test('to test the property `defaultCommaOmitempty`', () async {
+    // JsonObject default_
+    test('to test the property `default_`', () async {
       // TODO
     });
 
-    // String optionsCommaOmitempty
-    test('to test the property `optionsCommaOmitempty`', () async {
+    // String options
+    test('to test the property `options`', () async {
       // TODO
     });
 
-    // String placeholderCommaOmitempty
-    test('to test the property `placeholderCommaOmitempty`', () async {
+    // String placeholder
+    test('to test the property `placeholder`', () async {
       // TODO
     });
 
-    // String helpCommaOmitempty
-    test('to test the property `helpCommaOmitempty`', () async {
+    // String help
+    test('to test the property `help`', () async {
       // TODO
     });
 

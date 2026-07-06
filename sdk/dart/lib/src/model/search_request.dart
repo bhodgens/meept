@@ -12,18 +12,18 @@ part 'search_request.g.dart';
 ///
 /// Properties:
 /// * [query] 
-/// * [scopeCommaOmitempty] 
-/// * [limitCommaOmitempty] 
+/// * [scope] 
+/// * [limit] 
 @BuiltValue()
 abstract class SearchRequest implements Built<SearchRequest, SearchRequestBuilder> {
   @BuiltValueField(wireName: r'query')
   String get query;
 
-  @BuiltValueField(wireName: r'scope,omitempty')
-  String? get scopeCommaOmitempty;
+  @BuiltValueField(wireName: r'scope')
+  String? get scope;
 
-  @BuiltValueField(wireName: r'limit,omitempty')
-  int? get limitCommaOmitempty;
+  @BuiltValueField(wireName: r'limit')
+  int? get limit;
 
   SearchRequest._();
 
@@ -53,17 +53,17 @@ class _$SearchRequestSerializer implements PrimitiveSerializer<SearchRequest> {
       object.query,
       specifiedType: const FullType(String),
     );
-    if (object.scopeCommaOmitempty != null) {
-      yield r'scope,omitempty';
+    if (object.scope != null) {
+      yield r'scope';
       yield serializers.serialize(
-        object.scopeCommaOmitempty,
+        object.scope,
         specifiedType: const FullType(String),
       );
     }
-    if (object.limitCommaOmitempty != null) {
-      yield r'limit,omitempty';
+    if (object.limit != null) {
+      yield r'limit';
       yield serializers.serialize(
-        object.limitCommaOmitempty,
+        object.limit,
         specifiedType: const FullType(int),
       );
     }
@@ -97,19 +97,19 @@ class _$SearchRequestSerializer implements PrimitiveSerializer<SearchRequest> {
           ) as String;
           result.query = valueDes;
           break;
-        case r'scope,omitempty':
+        case r'scope':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.scopeCommaOmitempty = valueDes;
+          result.scope = valueDes;
           break;
-        case r'limit,omitempty':
+        case r'limit':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.limitCommaOmitempty = valueDes;
+          result.limit = valueDes;
           break;
         default:
           unhandled.add(key);

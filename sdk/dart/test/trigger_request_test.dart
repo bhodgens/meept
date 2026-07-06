@@ -7,8 +7,8 @@ void main() {
   // TODO add properties to the builder and call build()
 
   group(TriggerRequest, () {
-    // bool forceCommaOmitempty
-    test('to test the property `forceCommaOmitempty`', () async {
+    // bool force
+    test('to test the property `force`', () async {
       // TODO
     });
 

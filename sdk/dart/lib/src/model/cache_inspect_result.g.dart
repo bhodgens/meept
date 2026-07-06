@@ -18,7 +18,7 @@ class _$CacheInspectResult extends CacheInspectResult {
   @override
   final int hitCount;
   @override
-  final String? fileHashesCommaOmitempty;
+  final String? fileHashes;
   @override
   final String source_;
 
@@ -32,7 +32,7 @@ class _$CacheInspectResult extends CacheInspectResult {
       required this.createdAt,
       required this.expiresAt,
       required this.hitCount,
-      this.fileHashesCommaOmitempty,
+      this.fileHashes,
       required this.source_})
       : super._();
   @override
@@ -53,7 +53,7 @@ class _$CacheInspectResult extends CacheInspectResult {
         createdAt == other.createdAt &&
         expiresAt == other.expiresAt &&
         hitCount == other.hitCount &&
-        fileHashesCommaOmitempty == other.fileHashesCommaOmitempty &&
+        fileHashes == other.fileHashes &&
         source_ == other.source_;
   }
 
@@ -65,7 +65,7 @@ class _$CacheInspectResult extends CacheInspectResult {
     _$hash = $jc(_$hash, createdAt.hashCode);
     _$hash = $jc(_$hash, expiresAt.hashCode);
     _$hash = $jc(_$hash, hitCount.hashCode);
-    _$hash = $jc(_$hash, fileHashesCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, fileHashes.hashCode);
     _$hash = $jc(_$hash, source_.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
@@ -79,7 +79,7 @@ class _$CacheInspectResult extends CacheInspectResult {
           ..add('createdAt', createdAt)
           ..add('expiresAt', expiresAt)
           ..add('hitCount', hitCount)
-          ..add('fileHashesCommaOmitempty', fileHashesCommaOmitempty)
+          ..add('fileHashes', fileHashes)
           ..add('source_', source_))
         .toString();
   }
@@ -109,10 +109,10 @@ class CacheInspectResultBuilder
   int? get hitCount => _$this._hitCount;
   set hitCount(int? hitCount) => _$this._hitCount = hitCount;
 
-  String? _fileHashesCommaOmitempty;
-  String? get fileHashesCommaOmitempty => _$this._fileHashesCommaOmitempty;
-  set fileHashesCommaOmitempty(String? fileHashesCommaOmitempty) =>
-      _$this._fileHashesCommaOmitempty = fileHashesCommaOmitempty;
+  String? _fileHashes;
+  String? get fileHashes => _$this._fileHashes;
+  set fileHashes(String? fileHashes) =>
+      _$this._fileHashes = fileHashes;
 
   String? _source_;
   String? get source_ => _$this._source_;
@@ -130,7 +130,7 @@ class CacheInspectResultBuilder
       _createdAt = $v.createdAt;
       _expiresAt = $v.expiresAt;
       _hitCount = $v.hitCount;
-      _fileHashesCommaOmitempty = $v.fileHashesCommaOmitempty;
+      _fileHashes = $v.fileHashes;
       _source_ = $v.source_;
       _$v = null;
     }
@@ -163,7 +163,7 @@ class CacheInspectResultBuilder
               expiresAt, r'CacheInspectResult', 'expiresAt'),
           hitCount: BuiltValueNullFieldError.checkNotNull(
               hitCount, r'CacheInspectResult', 'hitCount'),
-          fileHashesCommaOmitempty: fileHashesCommaOmitempty,
+          fileHashes: fileHashes,
           source_: BuiltValueNullFieldError.checkNotNull(
               source_, r'CacheInspectResult', 'source_'),
         );

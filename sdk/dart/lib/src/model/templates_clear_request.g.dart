@@ -10,14 +10,14 @@ class _$TemplatesClearRequest extends TemplatesClearRequest {
   @override
   final String conversationId;
   @override
-  final String? nameCommaOmitempty;
+  final String? name;
 
   factory _$TemplatesClearRequest(
           [void Function(TemplatesClearRequestBuilder)? updates]) =>
       (TemplatesClearRequestBuilder()..update(updates))._build();
 
   _$TemplatesClearRequest._(
-      {required this.conversationId, this.nameCommaOmitempty})
+      {required this.conversationId, this.name})
       : super._();
   @override
   TemplatesClearRequest rebuild(
@@ -33,14 +33,14 @@ class _$TemplatesClearRequest extends TemplatesClearRequest {
     if (identical(other, this)) return true;
     return other is TemplatesClearRequest &&
         conversationId == other.conversationId &&
-        nameCommaOmitempty == other.nameCommaOmitempty;
+        name == other.name;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, conversationId.hashCode);
-    _$hash = $jc(_$hash, nameCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, name.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -49,7 +49,7 @@ class _$TemplatesClearRequest extends TemplatesClearRequest {
   String toString() {
     return (newBuiltValueToStringHelper(r'TemplatesClearRequest')
           ..add('conversationId', conversationId)
-          ..add('nameCommaOmitempty', nameCommaOmitempty))
+          ..add('name', name))
         .toString();
   }
 }
@@ -63,10 +63,10 @@ class TemplatesClearRequestBuilder
   set conversationId(String? conversationId) =>
       _$this._conversationId = conversationId;
 
-  String? _nameCommaOmitempty;
-  String? get nameCommaOmitempty => _$this._nameCommaOmitempty;
-  set nameCommaOmitempty(String? nameCommaOmitempty) =>
-      _$this._nameCommaOmitempty = nameCommaOmitempty;
+  String? _name;
+  String? get name => _$this._name;
+  set name(String? name) =>
+      _$this._name = name;
 
   TemplatesClearRequestBuilder() {
     TemplatesClearRequest._defaults(this);
@@ -76,7 +76,7 @@ class TemplatesClearRequestBuilder
     final $v = _$v;
     if ($v != null) {
       _conversationId = $v.conversationId;
-      _nameCommaOmitempty = $v.nameCommaOmitempty;
+      _name = $v.name;
       _$v = null;
     }
     return this;
@@ -100,7 +100,7 @@ class TemplatesClearRequestBuilder
         _$TemplatesClearRequest._(
           conversationId: BuiltValueNullFieldError.checkNotNull(
               conversationId, r'TemplatesClearRequest', 'conversationId'),
-          nameCommaOmitempty: nameCommaOmitempty,
+          name: name,
         );
     replace(_$result);
     return _$result;

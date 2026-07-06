@@ -1,6 +1,8 @@
 import 'dart:async';
 // Platform checks removed for web compatibility
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:ui' show PlatformDispatcher;
+
+import 'package:flutter/foundation.dart' show kIsWeb, FlutterError, debugPrint;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,6 +19,22 @@ import 'providers/providers.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Catch unhandled async errors that escape Future chains (fire-and-forget
+  // methods, timer callbacks, etc.). Without this, Dart prints the error but
+  // the app has no chance to log or report it properly.
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('[error] unhandled: $error');
+    return true;
+  };
+
+  // Catch framework errors (build, layout, painting) that Flutter would
+  // otherwise dump to the console in debug mode and silently swallow in
+  // release mode.
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    debugPrint('[error] framework: ${details.exception}');
+  };
 
   // Initialize persistent storage before any provider or service reads
   await StorageService.instance.init();
@@ -36,7 +54,7 @@ void main() async {
 
   // Initialize Sentry for crash reporting (only when a real DSN is configured)
   // Environment variables not available on web
-    final sentryDsn = null;  // Platform.environment['SENTRY_DSN'];
+    const sentryDsn = null;  // Platform.environment['SENTRY_DSN'];
   if (sentryDsn != null && sentryDsn.isNotEmpty) {
     await SentryFlutter.init(
       (options) {
@@ -44,18 +62,18 @@ void main() async {
         options.tracesSampleRate = 1.0;
       },
       appRunner: () => runApp(
-        ProviderScope(
+        const ProviderScope(
           child: _ModifierKeyInitializer(
-            child: const CyberpunkApp(),
+            child: CyberpunkApp(),
           ),
         ),
       ),
     );
   } else {
     runApp(
-      ProviderScope(
+      const ProviderScope(
         child: _ModifierKeyInitializer(
-          child: const CyberpunkApp(),
+          child: CyberpunkApp(),
         ),
       ),
     );

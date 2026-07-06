@@ -12,23 +12,23 @@ void main() {
       // TODO
     });
 
-    // String contextCommaOmitempty
-    test('to test the property `contextCommaOmitempty`', () async {
+    // String context
+    test('to test the property `context`', () async {
       // TODO
     });
 
-    // String modelCommaOmitempty
-    test('to test the property `modelCommaOmitempty`', () async {
+    // String model
+    test('to test the property `model`', () async {
       // TODO
     });
 
-    // int maxTokensCommaOmitempty
-    test('to test the property `maxTokensCommaOmitempty`', () async {
+    // int maxTokens
+    test('to test the property `maxTokens`', () async {
       // TODO
     });
 
-    // num temperatureCommaOmitempty
-    test('to test the property `temperatureCommaOmitempty`', () async {
+    // num temperature
+    test('to test the property `temperature`', () async {
       // TODO
     });
 

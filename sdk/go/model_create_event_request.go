@@ -22,11 +22,11 @@ var _ MappedNullable = &CreateEventRequest{}
 // CreateEventRequest struct for CreateEventRequest
 type CreateEventRequest struct {
 	Summary string `json:"summary"`
-	Descriptionomitempty *string `json:"description,omitempty,omitempty"`
-	Locationomitempty *string `json:"location,omitempty,omitempty"`
+	Description *string `json:"description,omitempty"`
+	Location *string `json:"location,omitempty"`
 	Start string `json:"start"`
 	End string `json:"end"`
-	Attendeesomitempty NullableString `json:"attendees,omitempty,omitempty"`
+	Attendees NullableString `json:"attendees,omitempty"`
 }
 
 type _CreateEventRequest CreateEventRequest
@@ -75,68 +75,68 @@ func (o *CreateEventRequest) SetSummary(v string) {
 	o.Summary = v
 }
 
-// GetDescriptionomitempty returns the Descriptionomitempty field value if set, zero value otherwise.
-func (o *CreateEventRequest) GetDescriptionomitempty() string {
-	if o == nil || IsNil(o.Descriptionomitempty) {
+// GetDescription returns the Description field value if set, zero value otherwise.
+func (o *CreateEventRequest) GetDescription() string {
+	if o == nil || IsNil(o.Description) {
 		var ret string
 		return ret
 	}
-	return *o.Descriptionomitempty
+	return *o.Description
 }
 
-// GetDescriptionomitemptyOk returns a tuple with the Descriptionomitempty field value if set, nil otherwise
+// GetDescriptionOk returns a tuple with the Description field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CreateEventRequest) GetDescriptionomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Descriptionomitempty) {
+func (o *CreateEventRequest) GetDescriptionOk() (*string, bool) {
+	if o == nil || IsNil(o.Description) {
 		return nil, false
 	}
-	return o.Descriptionomitempty, true
+	return o.Description, true
 }
 
-// HasDescriptionomitempty returns a boolean if a field has been set.
-func (o *CreateEventRequest) HasDescriptionomitempty() bool {
-	if o != nil && !IsNil(o.Descriptionomitempty) {
+// HasDescription returns a boolean if a field has been set.
+func (o *CreateEventRequest) HasDescription() bool {
+	if o != nil && !IsNil(o.Description) {
 		return true
 	}
 
 	return false
 }
 
-// SetDescriptionomitempty gets a reference to the given string and assigns it to the Descriptionomitempty field.
-func (o *CreateEventRequest) SetDescriptionomitempty(v string) {
-	o.Descriptionomitempty = &v
+// SetDescription gets a reference to the given string and assigns it to the Description field.
+func (o *CreateEventRequest) SetDescription(v string) {
+	o.Description = &v
 }
 
-// GetLocationomitempty returns the Locationomitempty field value if set, zero value otherwise.
-func (o *CreateEventRequest) GetLocationomitempty() string {
-	if o == nil || IsNil(o.Locationomitempty) {
+// GetLocation returns the Location field value if set, zero value otherwise.
+func (o *CreateEventRequest) GetLocation() string {
+	if o == nil || IsNil(o.Location) {
 		var ret string
 		return ret
 	}
-	return *o.Locationomitempty
+	return *o.Location
 }
 
-// GetLocationomitemptyOk returns a tuple with the Locationomitempty field value if set, nil otherwise
+// GetLocationOk returns a tuple with the Location field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CreateEventRequest) GetLocationomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Locationomitempty) {
+func (o *CreateEventRequest) GetLocationOk() (*string, bool) {
+	if o == nil || IsNil(o.Location) {
 		return nil, false
 	}
-	return o.Locationomitempty, true
+	return o.Location, true
 }
 
-// HasLocationomitempty returns a boolean if a field has been set.
-func (o *CreateEventRequest) HasLocationomitempty() bool {
-	if o != nil && !IsNil(o.Locationomitempty) {
+// HasLocation returns a boolean if a field has been set.
+func (o *CreateEventRequest) HasLocation() bool {
+	if o != nil && !IsNil(o.Location) {
 		return true
 	}
 
 	return false
 }
 
-// SetLocationomitempty gets a reference to the given string and assigns it to the Locationomitempty field.
-func (o *CreateEventRequest) SetLocationomitempty(v string) {
-	o.Locationomitempty = &v
+// SetLocation gets a reference to the given string and assigns it to the Location field.
+func (o *CreateEventRequest) SetLocation(v string) {
+	o.Location = &v
 }
 
 // GetStart returns the Start field value
@@ -187,46 +187,46 @@ func (o *CreateEventRequest) SetEnd(v string) {
 	o.End = v
 }
 
-// GetAttendeesomitempty returns the Attendeesomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *CreateEventRequest) GetAttendeesomitempty() string {
-	if o == nil || IsNil(o.Attendeesomitempty.Get()) {
+// GetAttendees returns the Attendees field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *CreateEventRequest) GetAttendees() string {
+	if o == nil || IsNil(o.Attendees.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.Attendeesomitempty.Get()
+	return *o.Attendees.Get()
 }
 
-// GetAttendeesomitemptyOk returns a tuple with the Attendeesomitempty field value if set, nil otherwise
+// GetAttendeesOk returns a tuple with the Attendees field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *CreateEventRequest) GetAttendeesomitemptyOk() (*string, bool) {
+func (o *CreateEventRequest) GetAttendeesOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.Attendeesomitempty.Get(), o.Attendeesomitempty.IsSet()
+	return o.Attendees.Get(), o.Attendees.IsSet()
 }
 
-// HasAttendeesomitempty returns a boolean if a field has been set.
-func (o *CreateEventRequest) HasAttendeesomitempty() bool {
-	if o != nil && o.Attendeesomitempty.IsSet() {
+// HasAttendees returns a boolean if a field has been set.
+func (o *CreateEventRequest) HasAttendees() bool {
+	if o != nil && o.Attendees.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetAttendeesomitempty gets a reference to the given NullableString and assigns it to the Attendeesomitempty field.
-func (o *CreateEventRequest) SetAttendeesomitempty(v string) {
-	o.Attendeesomitempty.Set(&v)
+// SetAttendees gets a reference to the given NullableString and assigns it to the Attendees field.
+func (o *CreateEventRequest) SetAttendees(v string) {
+	o.Attendees.Set(&v)
 }
-// SetAttendeesomitemptyNil sets the value for Attendeesomitempty to be an explicit nil
-func (o *CreateEventRequest) SetAttendeesomitemptyNil() {
-	o.Attendeesomitempty.Set(nil)
+// SetAttendeesNil sets the value for Attendees to be an explicit nil
+func (o *CreateEventRequest) SetAttendeesNil() {
+	o.Attendees.Set(nil)
 }
 
-// UnsetAttendeesomitempty ensures that no value is present for Attendeesomitempty, not even an explicit nil
-func (o *CreateEventRequest) UnsetAttendeesomitempty() {
-	o.Attendeesomitempty.Unset()
+// UnsetAttendees ensures that no value is present for Attendees, not even an explicit nil
+func (o *CreateEventRequest) UnsetAttendees() {
+	o.Attendees.Unset()
 }
 
 func (o CreateEventRequest) MarshalJSON() ([]byte, error) {
@@ -240,16 +240,16 @@ func (o CreateEventRequest) MarshalJSON() ([]byte, error) {
 func (o CreateEventRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["summary"] = o.Summary
-	if !IsNil(o.Descriptionomitempty) {
-		toSerialize["description,omitempty"] = o.Descriptionomitempty
+	if !IsNil(o.Description) {
+		toSerialize["description"] = o.Description
 	}
-	if !IsNil(o.Locationomitempty) {
-		toSerialize["location,omitempty"] = o.Locationomitempty
+	if !IsNil(o.Location) {
+		toSerialize["location"] = o.Location
 	}
 	toSerialize["start"] = o.Start
 	toSerialize["end"] = o.End
-	if o.Attendeesomitempty.IsSet() {
-		toSerialize["attendees,omitempty"] = o.Attendeesomitempty.Get()
+	if o.Attendees.IsSet() {
+		toSerialize["attendees"] = o.Attendees.Get()
 	}
 	return toSerialize, nil
 }

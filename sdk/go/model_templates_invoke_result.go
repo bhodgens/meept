@@ -22,9 +22,9 @@ var _ MappedNullable = &TemplatesInvokeResult{}
 // TemplatesInvokeResult struct for TemplatesInvokeResult
 type TemplatesInvokeResult struct {
 	Prompt string `json:"prompt"`
-	Outputomitempty *string `json:"output,omitempty,omitempty"`
+	Output *string `json:"output,omitempty"`
 	Success bool `json:"success"`
-	Erroromitempty *string `json:"error,omitempty,omitempty"`
+	Error *string `json:"error,omitempty"`
 }
 
 type _TemplatesInvokeResult TemplatesInvokeResult
@@ -72,36 +72,36 @@ func (o *TemplatesInvokeResult) SetPrompt(v string) {
 	o.Prompt = v
 }
 
-// GetOutputomitempty returns the Outputomitempty field value if set, zero value otherwise.
-func (o *TemplatesInvokeResult) GetOutputomitempty() string {
-	if o == nil || IsNil(o.Outputomitempty) {
+// GetOutput returns the Output field value if set, zero value otherwise.
+func (o *TemplatesInvokeResult) GetOutput() string {
+	if o == nil || IsNil(o.Output) {
 		var ret string
 		return ret
 	}
-	return *o.Outputomitempty
+	return *o.Output
 }
 
-// GetOutputomitemptyOk returns a tuple with the Outputomitempty field value if set, nil otherwise
+// GetOutputOk returns a tuple with the Output field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *TemplatesInvokeResult) GetOutputomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Outputomitempty) {
+func (o *TemplatesInvokeResult) GetOutputOk() (*string, bool) {
+	if o == nil || IsNil(o.Output) {
 		return nil, false
 	}
-	return o.Outputomitempty, true
+	return o.Output, true
 }
 
-// HasOutputomitempty returns a boolean if a field has been set.
-func (o *TemplatesInvokeResult) HasOutputomitempty() bool {
-	if o != nil && !IsNil(o.Outputomitempty) {
+// HasOutput returns a boolean if a field has been set.
+func (o *TemplatesInvokeResult) HasOutput() bool {
+	if o != nil && !IsNil(o.Output) {
 		return true
 	}
 
 	return false
 }
 
-// SetOutputomitempty gets a reference to the given string and assigns it to the Outputomitempty field.
-func (o *TemplatesInvokeResult) SetOutputomitempty(v string) {
-	o.Outputomitempty = &v
+// SetOutput gets a reference to the given string and assigns it to the Output field.
+func (o *TemplatesInvokeResult) SetOutput(v string) {
+	o.Output = &v
 }
 
 // GetSuccess returns the Success field value
@@ -128,36 +128,36 @@ func (o *TemplatesInvokeResult) SetSuccess(v bool) {
 	o.Success = v
 }
 
-// GetErroromitempty returns the Erroromitempty field value if set, zero value otherwise.
-func (o *TemplatesInvokeResult) GetErroromitempty() string {
-	if o == nil || IsNil(o.Erroromitempty) {
+// GetError returns the Error field value if set, zero value otherwise.
+func (o *TemplatesInvokeResult) GetError() string {
+	if o == nil || IsNil(o.Error) {
 		var ret string
 		return ret
 	}
-	return *o.Erroromitempty
+	return *o.Error
 }
 
-// GetErroromitemptyOk returns a tuple with the Erroromitempty field value if set, nil otherwise
+// GetErrorOk returns a tuple with the Error field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *TemplatesInvokeResult) GetErroromitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Erroromitempty) {
+func (o *TemplatesInvokeResult) GetErrorOk() (*string, bool) {
+	if o == nil || IsNil(o.Error) {
 		return nil, false
 	}
-	return o.Erroromitempty, true
+	return o.Error, true
 }
 
-// HasErroromitempty returns a boolean if a field has been set.
-func (o *TemplatesInvokeResult) HasErroromitempty() bool {
-	if o != nil && !IsNil(o.Erroromitempty) {
+// HasError returns a boolean if a field has been set.
+func (o *TemplatesInvokeResult) HasError() bool {
+	if o != nil && !IsNil(o.Error) {
 		return true
 	}
 
 	return false
 }
 
-// SetErroromitempty gets a reference to the given string and assigns it to the Erroromitempty field.
-func (o *TemplatesInvokeResult) SetErroromitempty(v string) {
-	o.Erroromitempty = &v
+// SetError gets a reference to the given string and assigns it to the Error field.
+func (o *TemplatesInvokeResult) SetError(v string) {
+	o.Error = &v
 }
 
 func (o TemplatesInvokeResult) MarshalJSON() ([]byte, error) {
@@ -171,12 +171,12 @@ func (o TemplatesInvokeResult) MarshalJSON() ([]byte, error) {
 func (o TemplatesInvokeResult) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["prompt"] = o.Prompt
-	if !IsNil(o.Outputomitempty) {
-		toSerialize["output,omitempty"] = o.Outputomitempty
+	if !IsNil(o.Output) {
+		toSerialize["output"] = o.Output
 	}
 	toSerialize["success"] = o.Success
-	if !IsNil(o.Erroromitempty) {
-		toSerialize["error,omitempty"] = o.Erroromitempty
+	if !IsNil(o.Error) {
+		toSerialize["error"] = o.Error
 	}
 	return toSerialize, nil
 }

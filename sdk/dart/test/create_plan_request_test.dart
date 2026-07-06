@@ -12,18 +12,18 @@ void main() {
       // TODO
     });
 
-    // String descriptionCommaOmitempty
-    test('to test the property `descriptionCommaOmitempty`', () async {
+    // String description
+    test('to test the property `description`', () async {
       // TODO
     });
 
-    // String projectIdCommaOmitempty
-    test('to test the property `projectIdCommaOmitempty`', () async {
+    // String projectId
+    test('to test the property `projectId`', () async {
       // TODO
     });
 
-    // String projectPathCommaOmitempty
-    test('to test the property `projectPathCommaOmitempty`', () async {
+    // String projectPath
+    test('to test the property `projectPath`', () async {
       // TODO
     });
 

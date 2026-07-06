@@ -11,9 +11,9 @@ Name | Type | Description | Notes
 **id** | **String** |  | 
 **name** | **String** |  | 
 **status** | **String** |  | 
-**errorCommaOmitempty** | **String** |  | [optional] 
-**startedAtCommaOmitempty** | **String** |  | [optional] 
-**endedAtCommaOmitempty** | **String** |  | [optional] 
+**error** | **String** |  | [optional] 
+**startedAt** | **String** |  | [optional] 
+**endedAt** | **String** |  | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

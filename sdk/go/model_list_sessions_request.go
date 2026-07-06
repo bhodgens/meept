@@ -19,7 +19,7 @@ var _ MappedNullable = &ListSessionsRequest{}
 
 // ListSessionsRequest struct for ListSessionsRequest
 type ListSessionsRequest struct {
-	Limitomitempty *int32 `json:"limit,omitempty,omitempty"`
+	Limit *int32 `json:"limit,omitempty"`
 }
 
 // NewListSessionsRequest instantiates a new ListSessionsRequest object
@@ -39,36 +39,36 @@ func NewListSessionsRequestWithDefaults() *ListSessionsRequest {
 	return &this
 }
 
-// GetLimitomitempty returns the Limitomitempty field value if set, zero value otherwise.
-func (o *ListSessionsRequest) GetLimitomitempty() int32 {
-	if o == nil || IsNil(o.Limitomitempty) {
+// GetLimit returns the Limit field value if set, zero value otherwise.
+func (o *ListSessionsRequest) GetLimit() int32 {
+	if o == nil || IsNil(o.Limit) {
 		var ret int32
 		return ret
 	}
-	return *o.Limitomitempty
+	return *o.Limit
 }
 
-// GetLimitomitemptyOk returns a tuple with the Limitomitempty field value if set, nil otherwise
+// GetLimitOk returns a tuple with the Limit field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ListSessionsRequest) GetLimitomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.Limitomitempty) {
+func (o *ListSessionsRequest) GetLimitOk() (*int32, bool) {
+	if o == nil || IsNil(o.Limit) {
 		return nil, false
 	}
-	return o.Limitomitempty, true
+	return o.Limit, true
 }
 
-// HasLimitomitempty returns a boolean if a field has been set.
-func (o *ListSessionsRequest) HasLimitomitempty() bool {
-	if o != nil && !IsNil(o.Limitomitempty) {
+// HasLimit returns a boolean if a field has been set.
+func (o *ListSessionsRequest) HasLimit() bool {
+	if o != nil && !IsNil(o.Limit) {
 		return true
 	}
 
 	return false
 }
 
-// SetLimitomitempty gets a reference to the given int32 and assigns it to the Limitomitempty field.
-func (o *ListSessionsRequest) SetLimitomitempty(v int32) {
-	o.Limitomitempty = &v
+// SetLimit gets a reference to the given int32 and assigns it to the Limit field.
+func (o *ListSessionsRequest) SetLimit(v int32) {
+	o.Limit = &v
 }
 
 func (o ListSessionsRequest) MarshalJSON() ([]byte, error) {
@@ -81,8 +81,8 @@ func (o ListSessionsRequest) MarshalJSON() ([]byte, error) {
 
 func (o ListSessionsRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	if !IsNil(o.Limitomitempty) {
-		toSerialize["limit,omitempty"] = o.Limitomitempty
+	if !IsNil(o.Limit) {
+		toSerialize["limit"] = o.Limit
 	}
 	return toSerialize, nil
 }

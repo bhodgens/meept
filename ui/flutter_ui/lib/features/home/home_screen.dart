@@ -11,7 +11,6 @@ import '../../theme/typography.dart';
 import '../../widgets/command_palette.dart';
 import '../../widgets/status_bar.dart';
 import '../../widgets/tab_bar.dart';
-import '../../providers/project_provider.dart';
 import '../../providers/providers.dart';
 import '../../providers/status_message_provider.dart';
 import '../../providers/tab_activation_provider.dart';

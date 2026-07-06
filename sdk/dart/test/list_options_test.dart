@@ -7,18 +7,18 @@ void main() {
   // TODO add properties to the builder and call build()
 
   group(ListOptions, () {
-    // int limitCommaOmitempty
-    test('to test the property `limitCommaOmitempty`', () async {
+    // int limit
+    test('to test the property `limit`', () async {
       // TODO
     });
 
-    // int offsetCommaOmitempty
-    test('to test the property `offsetCommaOmitempty`', () async {
+    // int offset
+    test('to test the property `offset`', () async {
       // TODO
     });
 
-    // String filterCommaOmitempty
-    test('to test the property `filterCommaOmitempty`', () async {
+    // String filter
+    test('to test the property `filter`', () async {
       // TODO
     });
 

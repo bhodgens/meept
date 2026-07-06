@@ -25,9 +25,9 @@ type AddJobRequest struct {
 	Name string `json:"name"`
 	Schedule string `json:"schedule"`
 	Type string `json:"type"`
-	AgentConfigomitempty map[string]interface{} `json:"agent_config,omitempty,omitempty"`
-	ShellConfigomitempty map[string]interface{} `json:"shell_config,omitempty,omitempty"`
-	Enabledomitempty *bool `json:"enabled,omitempty,omitempty"`
+	AgentConfig map[string]interface{} `json:"agent_config,omitempty"`
+	ShellConfig map[string]interface{} `json:"shell_config,omitempty"`
+	Enabled *bool `json:"enabled,omitempty"`
 }
 
 type _AddJobRequest AddJobRequest
@@ -149,102 +149,102 @@ func (o *AddJobRequest) SetType(v string) {
 	o.Type = v
 }
 
-// GetAgentConfigomitempty returns the AgentConfigomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *AddJobRequest) GetAgentConfigomitempty() map[string]interface{} {
+// GetAgentConfig returns the AgentConfig field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *AddJobRequest) GetAgentConfig() map[string]interface{} {
 	if o == nil {
 		var ret map[string]interface{}
 		return ret
 	}
-	return o.AgentConfigomitempty
+	return o.AgentConfig
 }
 
-// GetAgentConfigomitemptyOk returns a tuple with the AgentConfigomitempty field value if set, nil otherwise
+// GetAgentConfigOk returns a tuple with the AgentConfig field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *AddJobRequest) GetAgentConfigomitemptyOk() (map[string]interface{}, bool) {
-	if o == nil || IsNil(o.AgentConfigomitempty) {
+func (o *AddJobRequest) GetAgentConfigOk() (map[string]interface{}, bool) {
+	if o == nil || IsNil(o.AgentConfig) {
 		return map[string]interface{}{}, false
 	}
-	return o.AgentConfigomitempty, true
+	return o.AgentConfig, true
 }
 
-// HasAgentConfigomitempty returns a boolean if a field has been set.
-func (o *AddJobRequest) HasAgentConfigomitempty() bool {
-	if o != nil && !IsNil(o.AgentConfigomitempty) {
+// HasAgentConfig returns a boolean if a field has been set.
+func (o *AddJobRequest) HasAgentConfig() bool {
+	if o != nil && !IsNil(o.AgentConfig) {
 		return true
 	}
 
 	return false
 }
 
-// SetAgentConfigomitempty gets a reference to the given map[string]interface{} and assigns it to the AgentConfigomitempty field.
-func (o *AddJobRequest) SetAgentConfigomitempty(v map[string]interface{}) {
-	o.AgentConfigomitempty = v
+// SetAgentConfig gets a reference to the given map[string]interface{} and assigns it to the AgentConfig field.
+func (o *AddJobRequest) SetAgentConfig(v map[string]interface{}) {
+	o.AgentConfig = v
 }
 
-// GetShellConfigomitempty returns the ShellConfigomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *AddJobRequest) GetShellConfigomitempty() map[string]interface{} {
+// GetShellConfig returns the ShellConfig field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *AddJobRequest) GetShellConfig() map[string]interface{} {
 	if o == nil {
 		var ret map[string]interface{}
 		return ret
 	}
-	return o.ShellConfigomitempty
+	return o.ShellConfig
 }
 
-// GetShellConfigomitemptyOk returns a tuple with the ShellConfigomitempty field value if set, nil otherwise
+// GetShellConfigOk returns a tuple with the ShellConfig field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *AddJobRequest) GetShellConfigomitemptyOk() (map[string]interface{}, bool) {
-	if o == nil || IsNil(o.ShellConfigomitempty) {
+func (o *AddJobRequest) GetShellConfigOk() (map[string]interface{}, bool) {
+	if o == nil || IsNil(o.ShellConfig) {
 		return map[string]interface{}{}, false
 	}
-	return o.ShellConfigomitempty, true
+	return o.ShellConfig, true
 }
 
-// HasShellConfigomitempty returns a boolean if a field has been set.
-func (o *AddJobRequest) HasShellConfigomitempty() bool {
-	if o != nil && !IsNil(o.ShellConfigomitempty) {
+// HasShellConfig returns a boolean if a field has been set.
+func (o *AddJobRequest) HasShellConfig() bool {
+	if o != nil && !IsNil(o.ShellConfig) {
 		return true
 	}
 
 	return false
 }
 
-// SetShellConfigomitempty gets a reference to the given map[string]interface{} and assigns it to the ShellConfigomitempty field.
-func (o *AddJobRequest) SetShellConfigomitempty(v map[string]interface{}) {
-	o.ShellConfigomitempty = v
+// SetShellConfig gets a reference to the given map[string]interface{} and assigns it to the ShellConfig field.
+func (o *AddJobRequest) SetShellConfig(v map[string]interface{}) {
+	o.ShellConfig = v
 }
 
-// GetEnabledomitempty returns the Enabledomitempty field value if set, zero value otherwise.
-func (o *AddJobRequest) GetEnabledomitempty() bool {
-	if o == nil || IsNil(o.Enabledomitempty) {
+// GetEnabled returns the Enabled field value if set, zero value otherwise.
+func (o *AddJobRequest) GetEnabled() bool {
+	if o == nil || IsNil(o.Enabled) {
 		var ret bool
 		return ret
 	}
-	return *o.Enabledomitempty
+	return *o.Enabled
 }
 
-// GetEnabledomitemptyOk returns a tuple with the Enabledomitempty field value if set, nil otherwise
+// GetEnabledOk returns a tuple with the Enabled field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *AddJobRequest) GetEnabledomitemptyOk() (*bool, bool) {
-	if o == nil || IsNil(o.Enabledomitempty) {
+func (o *AddJobRequest) GetEnabledOk() (*bool, bool) {
+	if o == nil || IsNil(o.Enabled) {
 		return nil, false
 	}
-	return o.Enabledomitempty, true
+	return o.Enabled, true
 }
 
-// HasEnabledomitempty returns a boolean if a field has been set.
-func (o *AddJobRequest) HasEnabledomitempty() bool {
-	if o != nil && !IsNil(o.Enabledomitempty) {
+// HasEnabled returns a boolean if a field has been set.
+func (o *AddJobRequest) HasEnabled() bool {
+	if o != nil && !IsNil(o.Enabled) {
 		return true
 	}
 
 	return false
 }
 
-// SetEnabledomitempty gets a reference to the given bool and assigns it to the Enabledomitempty field.
-func (o *AddJobRequest) SetEnabledomitempty(v bool) {
-	o.Enabledomitempty = &v
+// SetEnabled gets a reference to the given bool and assigns it to the Enabled field.
+func (o *AddJobRequest) SetEnabled(v bool) {
+	o.Enabled = &v
 }
 
 func (o AddJobRequest) MarshalJSON() ([]byte, error) {
@@ -261,14 +261,14 @@ func (o AddJobRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize["name"] = o.Name
 	toSerialize["schedule"] = o.Schedule
 	toSerialize["type"] = o.Type
-	if o.AgentConfigomitempty != nil {
-		toSerialize["agent_config,omitempty"] = o.AgentConfigomitempty
+	if o.AgentConfig != nil {
+		toSerialize["agent_config"] = o.AgentConfig
 	}
-	if o.ShellConfigomitempty != nil {
-		toSerialize["shell_config,omitempty"] = o.ShellConfigomitempty
+	if o.ShellConfig != nil {
+		toSerialize["shell_config"] = o.ShellConfig
 	}
-	if !IsNil(o.Enabledomitempty) {
-		toSerialize["enabled,omitempty"] = o.Enabledomitempty
+	if !IsNil(o.Enabled) {
+		toSerialize["enabled"] = o.Enabled
 	}
 	return toSerialize, nil
 }

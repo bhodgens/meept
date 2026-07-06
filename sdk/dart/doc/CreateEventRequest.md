@@ -9,11 +9,11 @@ import 'package:meept_client/api.dart';
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **summary** | **String** |  | 
-**descriptionCommaOmitempty** | **String** |  | [optional] 
-**locationCommaOmitempty** | **String** |  | [optional] 
+**description** | **String** |  | [optional] 
+**location** | **String** |  | [optional] 
 **start** | **String** |  | 
 **end** | **String** |  | 
-**attendeesCommaOmitempty** | **String** |  | [optional] 
+**attendees** | **String** |  | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

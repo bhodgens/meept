@@ -22,8 +22,8 @@ var _ MappedNullable = &VectorSearchRequest{}
 // VectorSearchRequest struct for VectorSearchRequest
 type VectorSearchRequest struct {
 	Query string `json:"query"`
-	Limitomitempty *int32 `json:"limit,omitempty,omitempty"`
-	ShardTypesomitempty NullableString `json:"shard_types,omitempty,omitempty"`
+	Limit *int32 `json:"limit,omitempty"`
+	ShardTypes NullableString `json:"shard_types,omitempty"`
 }
 
 type _VectorSearchRequest VectorSearchRequest
@@ -70,78 +70,78 @@ func (o *VectorSearchRequest) SetQuery(v string) {
 	o.Query = v
 }
 
-// GetLimitomitempty returns the Limitomitempty field value if set, zero value otherwise.
-func (o *VectorSearchRequest) GetLimitomitempty() int32 {
-	if o == nil || IsNil(o.Limitomitempty) {
+// GetLimit returns the Limit field value if set, zero value otherwise.
+func (o *VectorSearchRequest) GetLimit() int32 {
+	if o == nil || IsNil(o.Limit) {
 		var ret int32
 		return ret
 	}
-	return *o.Limitomitempty
+	return *o.Limit
 }
 
-// GetLimitomitemptyOk returns a tuple with the Limitomitempty field value if set, nil otherwise
+// GetLimitOk returns a tuple with the Limit field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *VectorSearchRequest) GetLimitomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.Limitomitempty) {
+func (o *VectorSearchRequest) GetLimitOk() (*int32, bool) {
+	if o == nil || IsNil(o.Limit) {
 		return nil, false
 	}
-	return o.Limitomitempty, true
+	return o.Limit, true
 }
 
-// HasLimitomitempty returns a boolean if a field has been set.
-func (o *VectorSearchRequest) HasLimitomitempty() bool {
-	if o != nil && !IsNil(o.Limitomitempty) {
+// HasLimit returns a boolean if a field has been set.
+func (o *VectorSearchRequest) HasLimit() bool {
+	if o != nil && !IsNil(o.Limit) {
 		return true
 	}
 
 	return false
 }
 
-// SetLimitomitempty gets a reference to the given int32 and assigns it to the Limitomitempty field.
-func (o *VectorSearchRequest) SetLimitomitempty(v int32) {
-	o.Limitomitempty = &v
+// SetLimit gets a reference to the given int32 and assigns it to the Limit field.
+func (o *VectorSearchRequest) SetLimit(v int32) {
+	o.Limit = &v
 }
 
-// GetShardTypesomitempty returns the ShardTypesomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *VectorSearchRequest) GetShardTypesomitempty() string {
-	if o == nil || IsNil(o.ShardTypesomitempty.Get()) {
+// GetShardTypes returns the ShardTypes field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *VectorSearchRequest) GetShardTypes() string {
+	if o == nil || IsNil(o.ShardTypes.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.ShardTypesomitempty.Get()
+	return *o.ShardTypes.Get()
 }
 
-// GetShardTypesomitemptyOk returns a tuple with the ShardTypesomitempty field value if set, nil otherwise
+// GetShardTypesOk returns a tuple with the ShardTypes field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *VectorSearchRequest) GetShardTypesomitemptyOk() (*string, bool) {
+func (o *VectorSearchRequest) GetShardTypesOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.ShardTypesomitempty.Get(), o.ShardTypesomitempty.IsSet()
+	return o.ShardTypes.Get(), o.ShardTypes.IsSet()
 }
 
-// HasShardTypesomitempty returns a boolean if a field has been set.
-func (o *VectorSearchRequest) HasShardTypesomitempty() bool {
-	if o != nil && o.ShardTypesomitempty.IsSet() {
+// HasShardTypes returns a boolean if a field has been set.
+func (o *VectorSearchRequest) HasShardTypes() bool {
+	if o != nil && o.ShardTypes.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetShardTypesomitempty gets a reference to the given NullableString and assigns it to the ShardTypesomitempty field.
-func (o *VectorSearchRequest) SetShardTypesomitempty(v string) {
-	o.ShardTypesomitempty.Set(&v)
+// SetShardTypes gets a reference to the given NullableString and assigns it to the ShardTypes field.
+func (o *VectorSearchRequest) SetShardTypes(v string) {
+	o.ShardTypes.Set(&v)
 }
-// SetShardTypesomitemptyNil sets the value for ShardTypesomitempty to be an explicit nil
-func (o *VectorSearchRequest) SetShardTypesomitemptyNil() {
-	o.ShardTypesomitempty.Set(nil)
+// SetShardTypesNil sets the value for ShardTypes to be an explicit nil
+func (o *VectorSearchRequest) SetShardTypesNil() {
+	o.ShardTypes.Set(nil)
 }
 
-// UnsetShardTypesomitempty ensures that no value is present for ShardTypesomitempty, not even an explicit nil
-func (o *VectorSearchRequest) UnsetShardTypesomitempty() {
-	o.ShardTypesomitempty.Unset()
+// UnsetShardTypes ensures that no value is present for ShardTypes, not even an explicit nil
+func (o *VectorSearchRequest) UnsetShardTypes() {
+	o.ShardTypes.Unset()
 }
 
 func (o VectorSearchRequest) MarshalJSON() ([]byte, error) {
@@ -155,11 +155,11 @@ func (o VectorSearchRequest) MarshalJSON() ([]byte, error) {
 func (o VectorSearchRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["query"] = o.Query
-	if !IsNil(o.Limitomitempty) {
-		toSerialize["limit,omitempty"] = o.Limitomitempty
+	if !IsNil(o.Limit) {
+		toSerialize["limit"] = o.Limit
 	}
-	if o.ShardTypesomitempty.IsSet() {
-		toSerialize["shard_types,omitempty"] = o.ShardTypesomitempty.Get()
+	if o.ShardTypes.IsSet() {
+		toSerialize["shard_types"] = o.ShardTypes.Get()
 	}
 	return toSerialize, nil
 }

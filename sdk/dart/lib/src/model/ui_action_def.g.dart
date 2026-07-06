@@ -14,7 +14,7 @@ class _$UIActionDef extends UIActionDef {
   @override
   final String type;
   @override
-  final String? styleCommaOmitempty;
+  final String? style;
 
   factory _$UIActionDef([void Function(UIActionDefBuilder)? updates]) =>
       (UIActionDefBuilder()..update(updates))._build();
@@ -23,7 +23,7 @@ class _$UIActionDef extends UIActionDef {
       {required this.id,
       required this.label,
       required this.type,
-      this.styleCommaOmitempty})
+      this.style})
       : super._();
   @override
   UIActionDef rebuild(void Function(UIActionDefBuilder) updates) =>
@@ -39,7 +39,7 @@ class _$UIActionDef extends UIActionDef {
         id == other.id &&
         label == other.label &&
         type == other.type &&
-        styleCommaOmitempty == other.styleCommaOmitempty;
+        style == other.style;
   }
 
   @override
@@ -48,7 +48,7 @@ class _$UIActionDef extends UIActionDef {
     _$hash = $jc(_$hash, id.hashCode);
     _$hash = $jc(_$hash, label.hashCode);
     _$hash = $jc(_$hash, type.hashCode);
-    _$hash = $jc(_$hash, styleCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, style.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -59,7 +59,7 @@ class _$UIActionDef extends UIActionDef {
           ..add('id', id)
           ..add('label', label)
           ..add('type', type)
-          ..add('styleCommaOmitempty', styleCommaOmitempty))
+          ..add('style', style))
         .toString();
   }
 }
@@ -79,10 +79,10 @@ class UIActionDefBuilder implements Builder<UIActionDef, UIActionDefBuilder> {
   String? get type => _$this._type;
   set type(String? type) => _$this._type = type;
 
-  String? _styleCommaOmitempty;
-  String? get styleCommaOmitempty => _$this._styleCommaOmitempty;
-  set styleCommaOmitempty(String? styleCommaOmitempty) =>
-      _$this._styleCommaOmitempty = styleCommaOmitempty;
+  String? _style;
+  String? get style => _$this._style;
+  set style(String? style) =>
+      _$this._style = style;
 
   UIActionDefBuilder() {
     UIActionDef._defaults(this);
@@ -94,7 +94,7 @@ class UIActionDefBuilder implements Builder<UIActionDef, UIActionDefBuilder> {
       _id = $v.id;
       _label = $v.label;
       _type = $v.type;
-      _styleCommaOmitempty = $v.styleCommaOmitempty;
+      _style = $v.style;
       _$v = null;
     }
     return this;
@@ -121,7 +121,7 @@ class UIActionDefBuilder implements Builder<UIActionDef, UIActionDefBuilder> {
               label, r'UIActionDef', 'label'),
           type: BuiltValueNullFieldError.checkNotNull(
               type, r'UIActionDef', 'type'),
-          styleCommaOmitempty: styleCommaOmitempty,
+          style: style,
         );
     replace(_$result);
     return _$result;

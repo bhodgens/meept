@@ -7,13 +7,13 @@ void main() {
   // TODO add properties to the builder and call build()
 
   group(ListRequest, () {
-    // String stateCommaOmitempty
-    test('to test the property `stateCommaOmitempty`', () async {
+    // String state
+    test('to test the property `state`', () async {
       // TODO
     });
 
-    // int limitCommaOmitempty
-    test('to test the property `limitCommaOmitempty`', () async {
+    // int limit
+    test('to test the property `limit`', () async {
       // TODO
     });
 

@@ -10,15 +10,15 @@ class _$CreateEventRequest extends CreateEventRequest {
   @override
   final String summary;
   @override
-  final String? descriptionCommaOmitempty;
+  final String? description;
   @override
-  final String? locationCommaOmitempty;
+  final String? location;
   @override
   final String start;
   @override
   final String end;
   @override
-  final String? attendeesCommaOmitempty;
+  final String? attendees;
 
   factory _$CreateEventRequest(
           [void Function(CreateEventRequestBuilder)? updates]) =>
@@ -26,11 +26,11 @@ class _$CreateEventRequest extends CreateEventRequest {
 
   _$CreateEventRequest._(
       {required this.summary,
-      this.descriptionCommaOmitempty,
-      this.locationCommaOmitempty,
+      this.description,
+      this.location,
       required this.start,
       required this.end,
-      this.attendeesCommaOmitempty})
+      this.attendees})
       : super._();
   @override
   CreateEventRequest rebuild(
@@ -46,22 +46,22 @@ class _$CreateEventRequest extends CreateEventRequest {
     if (identical(other, this)) return true;
     return other is CreateEventRequest &&
         summary == other.summary &&
-        descriptionCommaOmitempty == other.descriptionCommaOmitempty &&
-        locationCommaOmitempty == other.locationCommaOmitempty &&
+        description == other.description &&
+        location == other.location &&
         start == other.start &&
         end == other.end &&
-        attendeesCommaOmitempty == other.attendeesCommaOmitempty;
+        attendees == other.attendees;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, summary.hashCode);
-    _$hash = $jc(_$hash, descriptionCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, locationCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, description.hashCode);
+    _$hash = $jc(_$hash, location.hashCode);
     _$hash = $jc(_$hash, start.hashCode);
     _$hash = $jc(_$hash, end.hashCode);
-    _$hash = $jc(_$hash, attendeesCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, attendees.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -70,11 +70,11 @@ class _$CreateEventRequest extends CreateEventRequest {
   String toString() {
     return (newBuiltValueToStringHelper(r'CreateEventRequest')
           ..add('summary', summary)
-          ..add('descriptionCommaOmitempty', descriptionCommaOmitempty)
-          ..add('locationCommaOmitempty', locationCommaOmitempty)
+          ..add('description', description)
+          ..add('location', location)
           ..add('start', start)
           ..add('end', end)
-          ..add('attendeesCommaOmitempty', attendeesCommaOmitempty))
+          ..add('attendees', attendees))
         .toString();
   }
 }
@@ -87,15 +87,15 @@ class CreateEventRequestBuilder
   String? get summary => _$this._summary;
   set summary(String? summary) => _$this._summary = summary;
 
-  String? _descriptionCommaOmitempty;
-  String? get descriptionCommaOmitempty => _$this._descriptionCommaOmitempty;
-  set descriptionCommaOmitempty(String? descriptionCommaOmitempty) =>
-      _$this._descriptionCommaOmitempty = descriptionCommaOmitempty;
+  String? _description;
+  String? get description => _$this._description;
+  set description(String? description) =>
+      _$this._description = description;
 
-  String? _locationCommaOmitempty;
-  String? get locationCommaOmitempty => _$this._locationCommaOmitempty;
-  set locationCommaOmitempty(String? locationCommaOmitempty) =>
-      _$this._locationCommaOmitempty = locationCommaOmitempty;
+  String? _location;
+  String? get location => _$this._location;
+  set location(String? location) =>
+      _$this._location = location;
 
   String? _start;
   String? get start => _$this._start;
@@ -105,10 +105,10 @@ class CreateEventRequestBuilder
   String? get end => _$this._end;
   set end(String? end) => _$this._end = end;
 
-  String? _attendeesCommaOmitempty;
-  String? get attendeesCommaOmitempty => _$this._attendeesCommaOmitempty;
-  set attendeesCommaOmitempty(String? attendeesCommaOmitempty) =>
-      _$this._attendeesCommaOmitempty = attendeesCommaOmitempty;
+  String? _attendees;
+  String? get attendees => _$this._attendees;
+  set attendees(String? attendees) =>
+      _$this._attendees = attendees;
 
   CreateEventRequestBuilder() {
     CreateEventRequest._defaults(this);
@@ -118,11 +118,11 @@ class CreateEventRequestBuilder
     final $v = _$v;
     if ($v != null) {
       _summary = $v.summary;
-      _descriptionCommaOmitempty = $v.descriptionCommaOmitempty;
-      _locationCommaOmitempty = $v.locationCommaOmitempty;
+      _description = $v.description;
+      _location = $v.location;
       _start = $v.start;
       _end = $v.end;
-      _attendeesCommaOmitempty = $v.attendeesCommaOmitempty;
+      _attendees = $v.attendees;
       _$v = null;
     }
     return this;
@@ -146,13 +146,13 @@ class CreateEventRequestBuilder
         _$CreateEventRequest._(
           summary: BuiltValueNullFieldError.checkNotNull(
               summary, r'CreateEventRequest', 'summary'),
-          descriptionCommaOmitempty: descriptionCommaOmitempty,
-          locationCommaOmitempty: locationCommaOmitempty,
+          description: description,
+          location: location,
           start: BuiltValueNullFieldError.checkNotNull(
               start, r'CreateEventRequest', 'start'),
           end: BuiltValueNullFieldError.checkNotNull(
               end, r'CreateEventRequest', 'end'),
-          attendeesCommaOmitempty: attendeesCommaOmitempty,
+          attendees: attendees,
         );
     replace(_$result);
     return _$result;

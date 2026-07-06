@@ -22,8 +22,8 @@ var _ MappedNullable = &CreateTaskRequest{}
 // CreateTaskRequest struct for CreateTaskRequest
 type CreateTaskRequest struct {
 	Name string `json:"name"`
-	Descriptionomitempty *string `json:"description,omitempty,omitempty"`
-	SessionIdomitempty *string `json:"session_id,omitempty,omitempty"`
+	Description *string `json:"description,omitempty"`
+	SessionId *string `json:"session_id,omitempty"`
 }
 
 type _CreateTaskRequest CreateTaskRequest
@@ -70,68 +70,68 @@ func (o *CreateTaskRequest) SetName(v string) {
 	o.Name = v
 }
 
-// GetDescriptionomitempty returns the Descriptionomitempty field value if set, zero value otherwise.
-func (o *CreateTaskRequest) GetDescriptionomitempty() string {
-	if o == nil || IsNil(o.Descriptionomitempty) {
+// GetDescription returns the Description field value if set, zero value otherwise.
+func (o *CreateTaskRequest) GetDescription() string {
+	if o == nil || IsNil(o.Description) {
 		var ret string
 		return ret
 	}
-	return *o.Descriptionomitempty
+	return *o.Description
 }
 
-// GetDescriptionomitemptyOk returns a tuple with the Descriptionomitempty field value if set, nil otherwise
+// GetDescriptionOk returns a tuple with the Description field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CreateTaskRequest) GetDescriptionomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Descriptionomitempty) {
+func (o *CreateTaskRequest) GetDescriptionOk() (*string, bool) {
+	if o == nil || IsNil(o.Description) {
 		return nil, false
 	}
-	return o.Descriptionomitempty, true
+	return o.Description, true
 }
 
-// HasDescriptionomitempty returns a boolean if a field has been set.
-func (o *CreateTaskRequest) HasDescriptionomitempty() bool {
-	if o != nil && !IsNil(o.Descriptionomitempty) {
+// HasDescription returns a boolean if a field has been set.
+func (o *CreateTaskRequest) HasDescription() bool {
+	if o != nil && !IsNil(o.Description) {
 		return true
 	}
 
 	return false
 }
 
-// SetDescriptionomitempty gets a reference to the given string and assigns it to the Descriptionomitempty field.
-func (o *CreateTaskRequest) SetDescriptionomitempty(v string) {
-	o.Descriptionomitempty = &v
+// SetDescription gets a reference to the given string and assigns it to the Description field.
+func (o *CreateTaskRequest) SetDescription(v string) {
+	o.Description = &v
 }
 
-// GetSessionIdomitempty returns the SessionIdomitempty field value if set, zero value otherwise.
-func (o *CreateTaskRequest) GetSessionIdomitempty() string {
-	if o == nil || IsNil(o.SessionIdomitempty) {
+// GetSessionId returns the SessionId field value if set, zero value otherwise.
+func (o *CreateTaskRequest) GetSessionId() string {
+	if o == nil || IsNil(o.SessionId) {
 		var ret string
 		return ret
 	}
-	return *o.SessionIdomitempty
+	return *o.SessionId
 }
 
-// GetSessionIdomitemptyOk returns a tuple with the SessionIdomitempty field value if set, nil otherwise
+// GetSessionIdOk returns a tuple with the SessionId field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CreateTaskRequest) GetSessionIdomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.SessionIdomitempty) {
+func (o *CreateTaskRequest) GetSessionIdOk() (*string, bool) {
+	if o == nil || IsNil(o.SessionId) {
 		return nil, false
 	}
-	return o.SessionIdomitempty, true
+	return o.SessionId, true
 }
 
-// HasSessionIdomitempty returns a boolean if a field has been set.
-func (o *CreateTaskRequest) HasSessionIdomitempty() bool {
-	if o != nil && !IsNil(o.SessionIdomitempty) {
+// HasSessionId returns a boolean if a field has been set.
+func (o *CreateTaskRequest) HasSessionId() bool {
+	if o != nil && !IsNil(o.SessionId) {
 		return true
 	}
 
 	return false
 }
 
-// SetSessionIdomitempty gets a reference to the given string and assigns it to the SessionIdomitempty field.
-func (o *CreateTaskRequest) SetSessionIdomitempty(v string) {
-	o.SessionIdomitempty = &v
+// SetSessionId gets a reference to the given string and assigns it to the SessionId field.
+func (o *CreateTaskRequest) SetSessionId(v string) {
+	o.SessionId = &v
 }
 
 func (o CreateTaskRequest) MarshalJSON() ([]byte, error) {
@@ -145,11 +145,11 @@ func (o CreateTaskRequest) MarshalJSON() ([]byte, error) {
 func (o CreateTaskRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["name"] = o.Name
-	if !IsNil(o.Descriptionomitempty) {
-		toSerialize["description,omitempty"] = o.Descriptionomitempty
+	if !IsNil(o.Description) {
+		toSerialize["description"] = o.Description
 	}
-	if !IsNil(o.SessionIdomitempty) {
-		toSerialize["session_id,omitempty"] = o.SessionIdomitempty
+	if !IsNil(o.SessionId) {
+		toSerialize["session_id"] = o.SessionId
 	}
 	return toSerialize, nil
 }

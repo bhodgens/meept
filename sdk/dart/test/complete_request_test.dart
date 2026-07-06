@@ -12,8 +12,8 @@ void main() {
       // TODO
     });
 
-    // JsonObject resultCommaOmitempty
-    test('to test the property `resultCommaOmitempty`', () async {
+    // JsonObject result
+    test('to test the property `result`', () async {
       // TODO
     });
 

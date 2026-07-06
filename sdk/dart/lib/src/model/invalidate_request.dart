@@ -11,11 +11,11 @@ part 'invalidate_request.g.dart';
 /// InvalidateRequest
 ///
 /// Properties:
-/// * [pathCommaOmitempty] 
+/// * [path] 
 @BuiltValue()
 abstract class InvalidateRequest implements Built<InvalidateRequest, InvalidateRequestBuilder> {
-  @BuiltValueField(wireName: r'path,omitempty')
-  String? get pathCommaOmitempty;
+  @BuiltValueField(wireName: r'path')
+  String? get path;
 
   InvalidateRequest._();
 
@@ -40,10 +40,10 @@ class _$InvalidateRequestSerializer implements PrimitiveSerializer<InvalidateReq
     InvalidateRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
-    if (object.pathCommaOmitempty != null) {
-      yield r'path,omitempty';
+    if (object.path != null) {
+      yield r'path';
       yield serializers.serialize(
-        object.pathCommaOmitempty,
+        object.path,
         specifiedType: const FullType(String),
       );
     }
@@ -70,12 +70,12 @@ class _$InvalidateRequestSerializer implements PrimitiveSerializer<InvalidateReq
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
-        case r'path,omitempty':
+        case r'path':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.pathCommaOmitempty = valueDes;
+          result.path = valueDes;
           break;
         default:
           unhandled.add(key);

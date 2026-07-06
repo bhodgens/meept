@@ -8,20 +8,20 @@ part of 'list_events_request.dart';
 
 class _$ListEventsRequest extends ListEventsRequest {
   @override
-  final String? timeMinCommaOmitempty;
+  final String? timeMin;
   @override
-  final String? timeMaxCommaOmitempty;
+  final String? timeMax;
   @override
-  final int? maxResultsCommaOmitempty;
+  final int? maxResults;
 
   factory _$ListEventsRequest(
           [void Function(ListEventsRequestBuilder)? updates]) =>
       (ListEventsRequestBuilder()..update(updates))._build();
 
   _$ListEventsRequest._(
-      {this.timeMinCommaOmitempty,
-      this.timeMaxCommaOmitempty,
-      this.maxResultsCommaOmitempty})
+      {this.timeMin,
+      this.timeMax,
+      this.maxResults})
       : super._();
   @override
   ListEventsRequest rebuild(void Function(ListEventsRequestBuilder) updates) =>
@@ -35,17 +35,17 @@ class _$ListEventsRequest extends ListEventsRequest {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is ListEventsRequest &&
-        timeMinCommaOmitempty == other.timeMinCommaOmitempty &&
-        timeMaxCommaOmitempty == other.timeMaxCommaOmitempty &&
-        maxResultsCommaOmitempty == other.maxResultsCommaOmitempty;
+        timeMin == other.timeMin &&
+        timeMax == other.timeMax &&
+        maxResults == other.maxResults;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
-    _$hash = $jc(_$hash, timeMinCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, timeMaxCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, maxResultsCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, timeMin.hashCode);
+    _$hash = $jc(_$hash, timeMax.hashCode);
+    _$hash = $jc(_$hash, maxResults.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -53,9 +53,9 @@ class _$ListEventsRequest extends ListEventsRequest {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'ListEventsRequest')
-          ..add('timeMinCommaOmitempty', timeMinCommaOmitempty)
-          ..add('timeMaxCommaOmitempty', timeMaxCommaOmitempty)
-          ..add('maxResultsCommaOmitempty', maxResultsCommaOmitempty))
+          ..add('timeMin', timeMin)
+          ..add('timeMax', timeMax)
+          ..add('maxResults', maxResults))
         .toString();
   }
 }
@@ -64,20 +64,20 @@ class ListEventsRequestBuilder
     implements Builder<ListEventsRequest, ListEventsRequestBuilder> {
   _$ListEventsRequest? _$v;
 
-  String? _timeMinCommaOmitempty;
-  String? get timeMinCommaOmitempty => _$this._timeMinCommaOmitempty;
-  set timeMinCommaOmitempty(String? timeMinCommaOmitempty) =>
-      _$this._timeMinCommaOmitempty = timeMinCommaOmitempty;
+  String? _timeMin;
+  String? get timeMin => _$this._timeMin;
+  set timeMin(String? timeMin) =>
+      _$this._timeMin = timeMin;
 
-  String? _timeMaxCommaOmitempty;
-  String? get timeMaxCommaOmitempty => _$this._timeMaxCommaOmitempty;
-  set timeMaxCommaOmitempty(String? timeMaxCommaOmitempty) =>
-      _$this._timeMaxCommaOmitempty = timeMaxCommaOmitempty;
+  String? _timeMax;
+  String? get timeMax => _$this._timeMax;
+  set timeMax(String? timeMax) =>
+      _$this._timeMax = timeMax;
 
-  int? _maxResultsCommaOmitempty;
-  int? get maxResultsCommaOmitempty => _$this._maxResultsCommaOmitempty;
-  set maxResultsCommaOmitempty(int? maxResultsCommaOmitempty) =>
-      _$this._maxResultsCommaOmitempty = maxResultsCommaOmitempty;
+  int? _maxResults;
+  int? get maxResults => _$this._maxResults;
+  set maxResults(int? maxResults) =>
+      _$this._maxResults = maxResults;
 
   ListEventsRequestBuilder() {
     ListEventsRequest._defaults(this);
@@ -86,9 +86,9 @@ class ListEventsRequestBuilder
   ListEventsRequestBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
-      _timeMinCommaOmitempty = $v.timeMinCommaOmitempty;
-      _timeMaxCommaOmitempty = $v.timeMaxCommaOmitempty;
-      _maxResultsCommaOmitempty = $v.maxResultsCommaOmitempty;
+      _timeMin = $v.timeMin;
+      _timeMax = $v.timeMax;
+      _maxResults = $v.maxResults;
       _$v = null;
     }
     return this;
@@ -110,9 +110,9 @@ class ListEventsRequestBuilder
   _$ListEventsRequest _build() {
     final _$result = _$v ??
         _$ListEventsRequest._(
-          timeMinCommaOmitempty: timeMinCommaOmitempty,
-          timeMaxCommaOmitempty: timeMaxCommaOmitempty,
-          maxResultsCommaOmitempty: maxResultsCommaOmitempty,
+          timeMin: timeMin,
+          timeMax: timeMax,
+          maxResults: maxResults,
         );
     replace(_$result);
     return _$result;

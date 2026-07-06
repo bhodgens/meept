@@ -22,7 +22,7 @@ var _ MappedNullable = &StatusResponse{}
 // StatusResponse struct for StatusResponse
 type StatusResponse struct {
 	Enabled bool `json:"enabled"`
-	LastCycleomitempty *string `json:"last_cycle,omitempty,omitempty"`
+	LastCycle *string `json:"last_cycle,omitempty"`
 	SkillsLearned int32 `json:"skills_learned"`
 	PendingTasks int32 `json:"pending_tasks"`
 }
@@ -73,36 +73,36 @@ func (o *StatusResponse) SetEnabled(v bool) {
 	o.Enabled = v
 }
 
-// GetLastCycleomitempty returns the LastCycleomitempty field value if set, zero value otherwise.
-func (o *StatusResponse) GetLastCycleomitempty() string {
-	if o == nil || IsNil(o.LastCycleomitempty) {
+// GetLastCycle returns the LastCycle field value if set, zero value otherwise.
+func (o *StatusResponse) GetLastCycle() string {
+	if o == nil || IsNil(o.LastCycle) {
 		var ret string
 		return ret
 	}
-	return *o.LastCycleomitempty
+	return *o.LastCycle
 }
 
-// GetLastCycleomitemptyOk returns a tuple with the LastCycleomitempty field value if set, nil otherwise
+// GetLastCycleOk returns a tuple with the LastCycle field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *StatusResponse) GetLastCycleomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.LastCycleomitempty) {
+func (o *StatusResponse) GetLastCycleOk() (*string, bool) {
+	if o == nil || IsNil(o.LastCycle) {
 		return nil, false
 	}
-	return o.LastCycleomitempty, true
+	return o.LastCycle, true
 }
 
-// HasLastCycleomitempty returns a boolean if a field has been set.
-func (o *StatusResponse) HasLastCycleomitempty() bool {
-	if o != nil && !IsNil(o.LastCycleomitempty) {
+// HasLastCycle returns a boolean if a field has been set.
+func (o *StatusResponse) HasLastCycle() bool {
+	if o != nil && !IsNil(o.LastCycle) {
 		return true
 	}
 
 	return false
 }
 
-// SetLastCycleomitempty gets a reference to the given string and assigns it to the LastCycleomitempty field.
-func (o *StatusResponse) SetLastCycleomitempty(v string) {
-	o.LastCycleomitempty = &v
+// SetLastCycle gets a reference to the given string and assigns it to the LastCycle field.
+func (o *StatusResponse) SetLastCycle(v string) {
+	o.LastCycle = &v
 }
 
 // GetSkillsLearned returns the SkillsLearned field value
@@ -164,8 +164,8 @@ func (o StatusResponse) MarshalJSON() ([]byte, error) {
 func (o StatusResponse) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["enabled"] = o.Enabled
-	if !IsNil(o.LastCycleomitempty) {
-		toSerialize["last_cycle,omitempty"] = o.LastCycleomitempty
+	if !IsNil(o.LastCycle) {
+		toSerialize["last_cycle"] = o.LastCycle
 	}
 	toSerialize["skills_learned"] = o.SkillsLearned
 	toSerialize["pending_tasks"] = o.PendingTasks

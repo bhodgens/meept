@@ -8,14 +8,14 @@ part of 'list_request.dart';
 
 class _$ListRequest extends ListRequest {
   @override
-  final String? stateCommaOmitempty;
+  final String? state;
   @override
-  final int? limitCommaOmitempty;
+  final int? limit;
 
   factory _$ListRequest([void Function(ListRequestBuilder)? updates]) =>
       (ListRequestBuilder()..update(updates))._build();
 
-  _$ListRequest._({this.stateCommaOmitempty, this.limitCommaOmitempty})
+  _$ListRequest._({this.state, this.limit})
       : super._();
   @override
   ListRequest rebuild(void Function(ListRequestBuilder) updates) =>
@@ -28,15 +28,15 @@ class _$ListRequest extends ListRequest {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is ListRequest &&
-        stateCommaOmitempty == other.stateCommaOmitempty &&
-        limitCommaOmitempty == other.limitCommaOmitempty;
+        state == other.state &&
+        limit == other.limit;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
-    _$hash = $jc(_$hash, stateCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, limitCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, state.hashCode);
+    _$hash = $jc(_$hash, limit.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -44,8 +44,8 @@ class _$ListRequest extends ListRequest {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'ListRequest')
-          ..add('stateCommaOmitempty', stateCommaOmitempty)
-          ..add('limitCommaOmitempty', limitCommaOmitempty))
+          ..add('state', state)
+          ..add('limit', limit))
         .toString();
   }
 }
@@ -53,15 +53,15 @@ class _$ListRequest extends ListRequest {
 class ListRequestBuilder implements Builder<ListRequest, ListRequestBuilder> {
   _$ListRequest? _$v;
 
-  String? _stateCommaOmitempty;
-  String? get stateCommaOmitempty => _$this._stateCommaOmitempty;
-  set stateCommaOmitempty(String? stateCommaOmitempty) =>
-      _$this._stateCommaOmitempty = stateCommaOmitempty;
+  String? _state;
+  String? get state => _$this._state;
+  set state(String? state) =>
+      _$this._state = state;
 
-  int? _limitCommaOmitempty;
-  int? get limitCommaOmitempty => _$this._limitCommaOmitempty;
-  set limitCommaOmitempty(int? limitCommaOmitempty) =>
-      _$this._limitCommaOmitempty = limitCommaOmitempty;
+  int? _limit;
+  int? get limit => _$this._limit;
+  set limit(int? limit) =>
+      _$this._limit = limit;
 
   ListRequestBuilder() {
     ListRequest._defaults(this);
@@ -70,8 +70,8 @@ class ListRequestBuilder implements Builder<ListRequest, ListRequestBuilder> {
   ListRequestBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
-      _stateCommaOmitempty = $v.stateCommaOmitempty;
-      _limitCommaOmitempty = $v.limitCommaOmitempty;
+      _state = $v.state;
+      _limit = $v.limit;
       _$v = null;
     }
     return this;
@@ -93,8 +93,8 @@ class ListRequestBuilder implements Builder<ListRequest, ListRequestBuilder> {
   _$ListRequest _build() {
     final _$result = _$v ??
         _$ListRequest._(
-          stateCommaOmitempty: stateCommaOmitempty,
-          limitCommaOmitempty: limitCommaOmitempty,
+          state: state,
+          limit: limit,
         );
     replace(_$result);
     return _$result;

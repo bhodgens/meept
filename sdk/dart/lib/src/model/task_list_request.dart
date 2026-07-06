@@ -11,15 +11,15 @@ part 'task_list_request.g.dart';
 /// TaskListRequest
 ///
 /// Properties:
-/// * [limitCommaOmitempty] 
-/// * [sessionIdCommaOmitempty] 
+/// * [limit] 
+/// * [sessionId] 
 @BuiltValue()
 abstract class TaskListRequest implements Built<TaskListRequest, TaskListRequestBuilder> {
-  @BuiltValueField(wireName: r'limit,omitempty')
-  int? get limitCommaOmitempty;
+  @BuiltValueField(wireName: r'limit')
+  int? get limit;
 
-  @BuiltValueField(wireName: r'session_id,omitempty')
-  String? get sessionIdCommaOmitempty;
+  @BuiltValueField(wireName: r'session_id')
+  String? get sessionId;
 
   TaskListRequest._();
 
@@ -44,17 +44,17 @@ class _$TaskListRequestSerializer implements PrimitiveSerializer<TaskListRequest
     TaskListRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
-    if (object.limitCommaOmitempty != null) {
-      yield r'limit,omitempty';
+    if (object.limit != null) {
+      yield r'limit';
       yield serializers.serialize(
-        object.limitCommaOmitempty,
+        object.limit,
         specifiedType: const FullType(int),
       );
     }
-    if (object.sessionIdCommaOmitempty != null) {
-      yield r'session_id,omitempty';
+    if (object.sessionId != null) {
+      yield r'session_id';
       yield serializers.serialize(
-        object.sessionIdCommaOmitempty,
+        object.sessionId,
         specifiedType: const FullType(String),
       );
     }
@@ -81,19 +81,19 @@ class _$TaskListRequestSerializer implements PrimitiveSerializer<TaskListRequest
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
-        case r'limit,omitempty':
+        case r'limit':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.limitCommaOmitempty = valueDes;
+          result.limit = valueDes;
           break;
-        case r'session_id,omitempty':
+        case r'session_id':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.sessionIdCommaOmitempty = valueDes;
+          result.sessionId = valueDes;
           break;
         default:
           unhandled.add(key);

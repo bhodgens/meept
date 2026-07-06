@@ -7,13 +7,13 @@ void main() {
   // TODO add properties to the builder and call build()
 
   group(SkillsListRequest, () {
-    // String categoryCommaOmitempty
-    test('to test the property `categoryCommaOmitempty`', () async {
+    // String category
+    test('to test the property `category`', () async {
       // TODO
     });
 
-    // int limitCommaOmitempty
-    test('to test the property `limitCommaOmitempty`', () async {
+    // int limit
+    test('to test the property `limit`', () async {
       // TODO
     });
 

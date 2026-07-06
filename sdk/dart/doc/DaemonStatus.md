@@ -9,9 +9,9 @@ import 'package:meept_client/api.dart';
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **status** | **String** |  | 
-**pidCommaOmitempty** | **int** |  | [optional] 
-**uptimeSecondsCommaOmitempty** | **num** |  | [optional] 
-**modelCommaOmitempty** | **String** |  | [optional] 
+**pid** | **int** |  | [optional] 
+**uptimeSeconds** | **num** |  | [optional] 
+**model** | **String** |  | [optional] 
 **tokensUsed** | **int** |  | 
 **tokensRemaining** | **int** |  | 
 **budgetUsed** | **num** |  | 

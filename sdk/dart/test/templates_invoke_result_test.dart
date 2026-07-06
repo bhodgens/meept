@@ -12,8 +12,8 @@ void main() {
       // TODO
     });
 
-    // String outputCommaOmitempty
-    test('to test the property `outputCommaOmitempty`', () async {
+    // String output
+    test('to test the property `output`', () async {
       // TODO
     });
 
@@ -22,8 +22,8 @@ void main() {
       // TODO
     });
 
-    // String errorCommaOmitempty
-    test('to test the property `errorCommaOmitempty`', () async {
+    // String error
+    test('to test the property `error`', () async {
       // TODO
     });
 

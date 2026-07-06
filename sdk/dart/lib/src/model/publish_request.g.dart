@@ -12,9 +12,9 @@ class _$PublishRequest extends PublishRequest {
   @override
   final String type;
   @override
-  final String? sourceCommaOmitempty;
+  final String? source;
   @override
-  final String? payloadCommaOmitempty;
+  final String? payload;
 
   factory _$PublishRequest([void Function(PublishRequestBuilder)? updates]) =>
       (PublishRequestBuilder()..update(updates))._build();
@@ -22,8 +22,8 @@ class _$PublishRequest extends PublishRequest {
   _$PublishRequest._(
       {required this.topic,
       required this.type,
-      this.sourceCommaOmitempty,
-      this.payloadCommaOmitempty})
+      this.source,
+      this.payload})
       : super._();
   @override
   PublishRequest rebuild(void Function(PublishRequestBuilder) updates) =>
@@ -38,8 +38,8 @@ class _$PublishRequest extends PublishRequest {
     return other is PublishRequest &&
         topic == other.topic &&
         type == other.type &&
-        sourceCommaOmitempty == other.sourceCommaOmitempty &&
-        payloadCommaOmitempty == other.payloadCommaOmitempty;
+        source == other.source &&
+        payload == other.payload;
   }
 
   @override
@@ -47,8 +47,8 @@ class _$PublishRequest extends PublishRequest {
     var _$hash = 0;
     _$hash = $jc(_$hash, topic.hashCode);
     _$hash = $jc(_$hash, type.hashCode);
-    _$hash = $jc(_$hash, sourceCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, payloadCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, source.hashCode);
+    _$hash = $jc(_$hash, payload.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -58,8 +58,8 @@ class _$PublishRequest extends PublishRequest {
     return (newBuiltValueToStringHelper(r'PublishRequest')
           ..add('topic', topic)
           ..add('type', type)
-          ..add('sourceCommaOmitempty', sourceCommaOmitempty)
-          ..add('payloadCommaOmitempty', payloadCommaOmitempty))
+          ..add('source', source)
+          ..add('payload', payload))
         .toString();
   }
 }
@@ -76,15 +76,15 @@ class PublishRequestBuilder
   String? get type => _$this._type;
   set type(String? type) => _$this._type = type;
 
-  String? _sourceCommaOmitempty;
-  String? get sourceCommaOmitempty => _$this._sourceCommaOmitempty;
-  set sourceCommaOmitempty(String? sourceCommaOmitempty) =>
-      _$this._sourceCommaOmitempty = sourceCommaOmitempty;
+  String? _source;
+  String? get source => _$this._source;
+  set source(String? source) =>
+      _$this._source = source;
 
-  String? _payloadCommaOmitempty;
-  String? get payloadCommaOmitempty => _$this._payloadCommaOmitempty;
-  set payloadCommaOmitempty(String? payloadCommaOmitempty) =>
-      _$this._payloadCommaOmitempty = payloadCommaOmitempty;
+  String? _payload;
+  String? get payload => _$this._payload;
+  set payload(String? payload) =>
+      _$this._payload = payload;
 
   PublishRequestBuilder() {
     PublishRequest._defaults(this);
@@ -95,8 +95,8 @@ class PublishRequestBuilder
     if ($v != null) {
       _topic = $v.topic;
       _type = $v.type;
-      _sourceCommaOmitempty = $v.sourceCommaOmitempty;
-      _payloadCommaOmitempty = $v.payloadCommaOmitempty;
+      _source = $v.source;
+      _payload = $v.payload;
       _$v = null;
     }
     return this;
@@ -122,8 +122,8 @@ class PublishRequestBuilder
               topic, r'PublishRequest', 'topic'),
           type: BuiltValueNullFieldError.checkNotNull(
               type, r'PublishRequest', 'type'),
-          sourceCommaOmitempty: sourceCommaOmitempty,
-          payloadCommaOmitempty: payloadCommaOmitempty,
+          source: source,
+          payload: payload,
         );
     replace(_$result);
     return _$result;

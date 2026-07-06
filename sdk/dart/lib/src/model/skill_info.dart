@@ -14,10 +14,10 @@ part 'skill_info.g.dart';
 /// * [slug] 
 /// * [name] 
 /// * [description] 
-/// * [categoryCommaOmitempty] 
-/// * [capabilitiesCommaOmitempty] 
+/// * [category] 
+/// * [capabilities] 
 /// * [enabled] 
-/// * [uiTypeCommaOmitempty] 
+/// * [uiType] 
 @BuiltValue()
 abstract class SkillInfo implements Built<SkillInfo, SkillInfoBuilder> {
   @BuiltValueField(wireName: r'slug')
@@ -29,17 +29,17 @@ abstract class SkillInfo implements Built<SkillInfo, SkillInfoBuilder> {
   @BuiltValueField(wireName: r'description')
   String get description;
 
-  @BuiltValueField(wireName: r'category,omitempty')
-  String? get categoryCommaOmitempty;
+  @BuiltValueField(wireName: r'category')
+  String? get category;
 
-  @BuiltValueField(wireName: r'capabilities,omitempty')
-  String? get capabilitiesCommaOmitempty;
+  @BuiltValueField(wireName: r'capabilities')
+  String? get capabilities;
 
   @BuiltValueField(wireName: r'enabled')
   bool get enabled;
 
-  @BuiltValueField(wireName: r'ui_type,omitempty')
-  String? get uiTypeCommaOmitempty;
+  @BuiltValueField(wireName: r'ui_type')
+  String? get uiType;
 
   SkillInfo._();
 
@@ -79,17 +79,17 @@ class _$SkillInfoSerializer implements PrimitiveSerializer<SkillInfo> {
       object.description,
       specifiedType: const FullType(String),
     );
-    if (object.categoryCommaOmitempty != null) {
-      yield r'category,omitempty';
+    if (object.category != null) {
+      yield r'category';
       yield serializers.serialize(
-        object.categoryCommaOmitempty,
+        object.category,
         specifiedType: const FullType(String),
       );
     }
-    if (object.capabilitiesCommaOmitempty != null) {
-      yield r'capabilities,omitempty';
+    if (object.capabilities != null) {
+      yield r'capabilities';
       yield serializers.serialize(
-        object.capabilitiesCommaOmitempty,
+        object.capabilities,
         specifiedType: const FullType.nullable(String),
       );
     }
@@ -98,10 +98,10 @@ class _$SkillInfoSerializer implements PrimitiveSerializer<SkillInfo> {
       object.enabled,
       specifiedType: const FullType(bool),
     );
-    if (object.uiTypeCommaOmitempty != null) {
-      yield r'ui_type,omitempty';
+    if (object.uiType != null) {
+      yield r'ui_type';
       yield serializers.serialize(
-        object.uiTypeCommaOmitempty,
+        object.uiType,
         specifiedType: const FullType(String),
       );
     }
@@ -149,20 +149,20 @@ class _$SkillInfoSerializer implements PrimitiveSerializer<SkillInfo> {
           ) as String;
           result.description = valueDes;
           break;
-        case r'category,omitempty':
+        case r'category':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.categoryCommaOmitempty = valueDes;
+          result.category = valueDes;
           break;
-        case r'capabilities,omitempty':
+        case r'capabilities':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.capabilitiesCommaOmitempty = valueDes;
+          result.capabilities = valueDes;
           break;
         case r'enabled':
           final valueDes = serializers.deserialize(
@@ -171,12 +171,12 @@ class _$SkillInfoSerializer implements PrimitiveSerializer<SkillInfo> {
           ) as bool;
           result.enabled = valueDes;
           break;
-        case r'ui_type,omitempty':
+        case r'ui_type':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.uiTypeCommaOmitempty = valueDes;
+          result.uiType = valueDes;
           break;
         default:
           unhandled.add(key);

@@ -9,9 +9,9 @@ import 'package:meept_client/api.dart';
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **title** | **String** |  | 
-**descriptionCommaOmitempty** | **String** |  | [optional] 
-**projectIdCommaOmitempty** | **String** |  | [optional] 
-**projectPathCommaOmitempty** | **String** |  | [optional] 
+**description** | **String** |  | [optional] 
+**projectId** | **String** |  | [optional] 
+**projectPath** | **String** |  | [optional] 
 **sessionId** | **String** |  | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)

@@ -17,8 +17,8 @@ void main() {
       // TODO
     });
 
-    // String metadataCommaOmitempty
-    test('to test the property `metadataCommaOmitempty`', () async {
+    // String metadata
+    test('to test the property `metadata`', () async {
       // TODO
     });
 

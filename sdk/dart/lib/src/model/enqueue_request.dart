@@ -12,34 +12,34 @@ part 'enqueue_request.g.dart';
 ///
 /// Properties:
 /// * [type] 
-/// * [priorityCommaOmitempty] 
-/// * [taskIdCommaOmitempty] 
+/// * [priority] 
+/// * [taskId] 
 /// * [prompt] 
-/// * [sessionIdCommaOmitempty] 
-/// * [requiredCapsCommaOmitempty] 
-/// * [payloadCommaOmitempty] 
+/// * [sessionId] 
+/// * [requiredCaps] 
+/// * [payload] 
 @BuiltValue()
 abstract class EnqueueRequest implements Built<EnqueueRequest, EnqueueRequestBuilder> {
   @BuiltValueField(wireName: r'type')
   String get type;
 
-  @BuiltValueField(wireName: r'priority,omitempty')
-  int? get priorityCommaOmitempty;
+  @BuiltValueField(wireName: r'priority')
+  int? get priority;
 
-  @BuiltValueField(wireName: r'task_id,omitempty')
-  String? get taskIdCommaOmitempty;
+  @BuiltValueField(wireName: r'task_id')
+  String? get taskId;
 
   @BuiltValueField(wireName: r'prompt')
   String get prompt;
 
-  @BuiltValueField(wireName: r'session_id,omitempty')
-  String? get sessionIdCommaOmitempty;
+  @BuiltValueField(wireName: r'session_id')
+  String? get sessionId;
 
-  @BuiltValueField(wireName: r'required_caps,omitempty')
-  String? get requiredCapsCommaOmitempty;
+  @BuiltValueField(wireName: r'required_caps')
+  String? get requiredCaps;
 
-  @BuiltValueField(wireName: r'payload,omitempty')
-  String? get payloadCommaOmitempty;
+  @BuiltValueField(wireName: r'payload')
+  String? get payload;
 
   EnqueueRequest._();
 
@@ -69,17 +69,17 @@ class _$EnqueueRequestSerializer implements PrimitiveSerializer<EnqueueRequest> 
       object.type,
       specifiedType: const FullType(String),
     );
-    if (object.priorityCommaOmitempty != null) {
-      yield r'priority,omitempty';
+    if (object.priority != null) {
+      yield r'priority';
       yield serializers.serialize(
-        object.priorityCommaOmitempty,
+        object.priority,
         specifiedType: const FullType(int),
       );
     }
-    if (object.taskIdCommaOmitempty != null) {
-      yield r'task_id,omitempty';
+    if (object.taskId != null) {
+      yield r'task_id';
       yield serializers.serialize(
-        object.taskIdCommaOmitempty,
+        object.taskId,
         specifiedType: const FullType(String),
       );
     }
@@ -88,24 +88,24 @@ class _$EnqueueRequestSerializer implements PrimitiveSerializer<EnqueueRequest> 
       object.prompt,
       specifiedType: const FullType(String),
     );
-    if (object.sessionIdCommaOmitempty != null) {
-      yield r'session_id,omitempty';
+    if (object.sessionId != null) {
+      yield r'session_id';
       yield serializers.serialize(
-        object.sessionIdCommaOmitempty,
+        object.sessionId,
         specifiedType: const FullType(String),
       );
     }
-    if (object.requiredCapsCommaOmitempty != null) {
-      yield r'required_caps,omitempty';
+    if (object.requiredCaps != null) {
+      yield r'required_caps';
       yield serializers.serialize(
-        object.requiredCapsCommaOmitempty,
+        object.requiredCaps,
         specifiedType: const FullType.nullable(String),
       );
     }
-    if (object.payloadCommaOmitempty != null) {
-      yield r'payload,omitempty';
+    if (object.payload != null) {
+      yield r'payload';
       yield serializers.serialize(
-        object.payloadCommaOmitempty,
+        object.payload,
         specifiedType: const FullType.nullable(String),
       );
     }
@@ -139,19 +139,19 @@ class _$EnqueueRequestSerializer implements PrimitiveSerializer<EnqueueRequest> 
           ) as String;
           result.type = valueDes;
           break;
-        case r'priority,omitempty':
+        case r'priority':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.priorityCommaOmitempty = valueDes;
+          result.priority = valueDes;
           break;
-        case r'task_id,omitempty':
+        case r'task_id':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.taskIdCommaOmitempty = valueDes;
+          result.taskId = valueDes;
           break;
         case r'prompt':
           final valueDes = serializers.deserialize(
@@ -160,28 +160,28 @@ class _$EnqueueRequestSerializer implements PrimitiveSerializer<EnqueueRequest> 
           ) as String;
           result.prompt = valueDes;
           break;
-        case r'session_id,omitempty':
+        case r'session_id':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.sessionIdCommaOmitempty = valueDes;
+          result.sessionId = valueDes;
           break;
-        case r'required_caps,omitempty':
+        case r'required_caps':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.requiredCapsCommaOmitempty = valueDes;
+          result.requiredCaps = valueDes;
           break;
-        case r'payload,omitempty':
+        case r'payload':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.payloadCommaOmitempty = valueDes;
+          result.payload = valueDes;
           break;
         default:
           unhandled.add(key);

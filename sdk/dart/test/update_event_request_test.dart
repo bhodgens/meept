@@ -12,28 +12,28 @@ void main() {
       // TODO
     });
 
-    // String summaryCommaOmitempty
-    test('to test the property `summaryCommaOmitempty`', () async {
+    // String summary
+    test('to test the property `summary`', () async {
       // TODO
     });
 
-    // String descriptionCommaOmitempty
-    test('to test the property `descriptionCommaOmitempty`', () async {
+    // String description
+    test('to test the property `description`', () async {
       // TODO
     });
 
-    // String locationCommaOmitempty
-    test('to test the property `locationCommaOmitempty`', () async {
+    // String location
+    test('to test the property `location`', () async {
       // TODO
     });
 
-    // String startCommaOmitempty
-    test('to test the property `startCommaOmitempty`', () async {
+    // String start
+    test('to test the property `start`', () async {
       // TODO
     });
 
-    // String endCommaOmitempty
-    test('to test the property `endCommaOmitempty`', () async {
+    // String end
+    test('to test the property `end`', () async {
       // TODO
     });
 

@@ -12,18 +12,18 @@ void main() {
       // TODO
     });
 
-    // int pidCommaOmitempty
-    test('to test the property `pidCommaOmitempty`', () async {
+    // int pid
+    test('to test the property `pid`', () async {
       // TODO
     });
 
-    // num uptimeSecondsCommaOmitempty
-    test('to test the property `uptimeSecondsCommaOmitempty`', () async {
+    // num uptimeSeconds
+    test('to test the property `uptimeSeconds`', () async {
       // TODO
     });
 
-    // String modelCommaOmitempty
-    test('to test the property `modelCommaOmitempty`', () async {
+    // String model
+    test('to test the property `model`', () async {
       // TODO
     });
 

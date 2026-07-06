@@ -10,17 +10,17 @@ class _$ChatResponse extends ChatResponse {
   @override
   final String reply;
   @override
-  final String? modelCommaOmitempty;
+  final String? model;
   @override
-  final int? tokensUsedCommaOmitempty;
+  final int? tokensUsed;
 
   factory _$ChatResponse([void Function(ChatResponseBuilder)? updates]) =>
       (ChatResponseBuilder()..update(updates))._build();
 
   _$ChatResponse._(
       {required this.reply,
-      this.modelCommaOmitempty,
-      this.tokensUsedCommaOmitempty})
+      this.model,
+      this.tokensUsed})
       : super._();
   @override
   ChatResponse rebuild(void Function(ChatResponseBuilder) updates) =>
@@ -34,16 +34,16 @@ class _$ChatResponse extends ChatResponse {
     if (identical(other, this)) return true;
     return other is ChatResponse &&
         reply == other.reply &&
-        modelCommaOmitempty == other.modelCommaOmitempty &&
-        tokensUsedCommaOmitempty == other.tokensUsedCommaOmitempty;
+        model == other.model &&
+        tokensUsed == other.tokensUsed;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, reply.hashCode);
-    _$hash = $jc(_$hash, modelCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, tokensUsedCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, model.hashCode);
+    _$hash = $jc(_$hash, tokensUsed.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -52,8 +52,8 @@ class _$ChatResponse extends ChatResponse {
   String toString() {
     return (newBuiltValueToStringHelper(r'ChatResponse')
           ..add('reply', reply)
-          ..add('modelCommaOmitempty', modelCommaOmitempty)
-          ..add('tokensUsedCommaOmitempty', tokensUsedCommaOmitempty))
+          ..add('model', model)
+          ..add('tokensUsed', tokensUsed))
         .toString();
   }
 }
@@ -66,15 +66,15 @@ class ChatResponseBuilder
   String? get reply => _$this._reply;
   set reply(String? reply) => _$this._reply = reply;
 
-  String? _modelCommaOmitempty;
-  String? get modelCommaOmitempty => _$this._modelCommaOmitempty;
-  set modelCommaOmitempty(String? modelCommaOmitempty) =>
-      _$this._modelCommaOmitempty = modelCommaOmitempty;
+  String? _model;
+  String? get model => _$this._model;
+  set model(String? model) =>
+      _$this._model = model;
 
-  int? _tokensUsedCommaOmitempty;
-  int? get tokensUsedCommaOmitempty => _$this._tokensUsedCommaOmitempty;
-  set tokensUsedCommaOmitempty(int? tokensUsedCommaOmitempty) =>
-      _$this._tokensUsedCommaOmitempty = tokensUsedCommaOmitempty;
+  int? _tokensUsed;
+  int? get tokensUsed => _$this._tokensUsed;
+  set tokensUsed(int? tokensUsed) =>
+      _$this._tokensUsed = tokensUsed;
 
   ChatResponseBuilder() {
     ChatResponse._defaults(this);
@@ -84,8 +84,8 @@ class ChatResponseBuilder
     final $v = _$v;
     if ($v != null) {
       _reply = $v.reply;
-      _modelCommaOmitempty = $v.modelCommaOmitempty;
-      _tokensUsedCommaOmitempty = $v.tokensUsedCommaOmitempty;
+      _model = $v.model;
+      _tokensUsed = $v.tokensUsed;
       _$v = null;
     }
     return this;
@@ -109,8 +109,8 @@ class ChatResponseBuilder
         _$ChatResponse._(
           reply: BuiltValueNullFieldError.checkNotNull(
               reply, r'ChatResponse', 'reply'),
-          modelCommaOmitempty: modelCommaOmitempty,
-          tokensUsedCommaOmitempty: tokensUsedCommaOmitempty,
+          model: model,
+          tokensUsed: tokensUsed,
         );
     replace(_$result);
     return _$result;

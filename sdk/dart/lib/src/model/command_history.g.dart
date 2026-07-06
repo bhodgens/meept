@@ -12,9 +12,9 @@ class _$CommandHistory extends CommandHistory {
   @override
   final String command;
   @override
-  final String? outputCommaOmitempty;
+  final String? output;
   @override
-  final String? stderrCommaOmitempty;
+  final String? stderr;
   @override
   final int exitCode;
   @override
@@ -34,8 +34,8 @@ class _$CommandHistory extends CommandHistory {
   _$CommandHistory._(
       {required this.id,
       required this.command,
-      this.outputCommaOmitempty,
-      this.stderrCommaOmitempty,
+      this.output,
+      this.stderr,
       required this.exitCode,
       required this.timestamp,
       required this.workingDir,
@@ -56,8 +56,8 @@ class _$CommandHistory extends CommandHistory {
     return other is CommandHistory &&
         id == other.id &&
         command == other.command &&
-        outputCommaOmitempty == other.outputCommaOmitempty &&
-        stderrCommaOmitempty == other.stderrCommaOmitempty &&
+        output == other.output &&
+        stderr == other.stderr &&
         exitCode == other.exitCode &&
         timestamp == other.timestamp &&
         workingDir == other.workingDir &&
@@ -71,8 +71,8 @@ class _$CommandHistory extends CommandHistory {
     var _$hash = 0;
     _$hash = $jc(_$hash, id.hashCode);
     _$hash = $jc(_$hash, command.hashCode);
-    _$hash = $jc(_$hash, outputCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, stderrCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, output.hashCode);
+    _$hash = $jc(_$hash, stderr.hashCode);
     _$hash = $jc(_$hash, exitCode.hashCode);
     _$hash = $jc(_$hash, timestamp.hashCode);
     _$hash = $jc(_$hash, workingDir.hashCode);
@@ -88,8 +88,8 @@ class _$CommandHistory extends CommandHistory {
     return (newBuiltValueToStringHelper(r'CommandHistory')
           ..add('id', id)
           ..add('command', command)
-          ..add('outputCommaOmitempty', outputCommaOmitempty)
-          ..add('stderrCommaOmitempty', stderrCommaOmitempty)
+          ..add('output', output)
+          ..add('stderr', stderr)
           ..add('exitCode', exitCode)
           ..add('timestamp', timestamp)
           ..add('workingDir', workingDir)
@@ -112,15 +112,15 @@ class CommandHistoryBuilder
   String? get command => _$this._command;
   set command(String? command) => _$this._command = command;
 
-  String? _outputCommaOmitempty;
-  String? get outputCommaOmitempty => _$this._outputCommaOmitempty;
-  set outputCommaOmitempty(String? outputCommaOmitempty) =>
-      _$this._outputCommaOmitempty = outputCommaOmitempty;
+  String? _output;
+  String? get output => _$this._output;
+  set output(String? output) =>
+      _$this._output = output;
 
-  String? _stderrCommaOmitempty;
-  String? get stderrCommaOmitempty => _$this._stderrCommaOmitempty;
-  set stderrCommaOmitempty(String? stderrCommaOmitempty) =>
-      _$this._stderrCommaOmitempty = stderrCommaOmitempty;
+  String? _stderr;
+  String? get stderr => _$this._stderr;
+  set stderr(String? stderr) =>
+      _$this._stderr = stderr;
 
   int? _exitCode;
   int? get exitCode => _$this._exitCode;
@@ -155,8 +155,8 @@ class CommandHistoryBuilder
     if ($v != null) {
       _id = $v.id;
       _command = $v.command;
-      _outputCommaOmitempty = $v.outputCommaOmitempty;
-      _stderrCommaOmitempty = $v.stderrCommaOmitempty;
+      _output = $v.output;
+      _stderr = $v.stderr;
       _exitCode = $v.exitCode;
       _timestamp = $v.timestamp;
       _workingDir = $v.workingDir;
@@ -188,8 +188,8 @@ class CommandHistoryBuilder
               id, r'CommandHistory', 'id'),
           command: BuiltValueNullFieldError.checkNotNull(
               command, r'CommandHistory', 'command'),
-          outputCommaOmitempty: outputCommaOmitempty,
-          stderrCommaOmitempty: stderrCommaOmitempty,
+          output: output,
+          stderr: stderr,
           exitCode: BuiltValueNullFieldError.checkNotNull(
               exitCode, r'CommandHistory', 'exitCode'),
           timestamp: BuiltValueNullFieldError.checkNotNull(

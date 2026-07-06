@@ -17,8 +17,8 @@ void main() {
       // TODO
     });
 
-    // String agentIdCommaOmitempty
-    test('to test the property `agentIdCommaOmitempty`', () async {
+    // String agentId
+    test('to test the property `agentId`', () async {
       // TODO
     });
 

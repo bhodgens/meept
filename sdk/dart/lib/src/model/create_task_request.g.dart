@@ -10,9 +10,9 @@ class _$CreateTaskRequest extends CreateTaskRequest {
   @override
   final String name;
   @override
-  final String? descriptionCommaOmitempty;
+  final String? description;
   @override
-  final String? sessionIdCommaOmitempty;
+  final String? sessionId;
 
   factory _$CreateTaskRequest(
           [void Function(CreateTaskRequestBuilder)? updates]) =>
@@ -20,8 +20,8 @@ class _$CreateTaskRequest extends CreateTaskRequest {
 
   _$CreateTaskRequest._(
       {required this.name,
-      this.descriptionCommaOmitempty,
-      this.sessionIdCommaOmitempty})
+      this.description,
+      this.sessionId})
       : super._();
   @override
   CreateTaskRequest rebuild(void Function(CreateTaskRequestBuilder) updates) =>
@@ -36,16 +36,16 @@ class _$CreateTaskRequest extends CreateTaskRequest {
     if (identical(other, this)) return true;
     return other is CreateTaskRequest &&
         name == other.name &&
-        descriptionCommaOmitempty == other.descriptionCommaOmitempty &&
-        sessionIdCommaOmitempty == other.sessionIdCommaOmitempty;
+        description == other.description &&
+        sessionId == other.sessionId;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, name.hashCode);
-    _$hash = $jc(_$hash, descriptionCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, sessionIdCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, description.hashCode);
+    _$hash = $jc(_$hash, sessionId.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -54,8 +54,8 @@ class _$CreateTaskRequest extends CreateTaskRequest {
   String toString() {
     return (newBuiltValueToStringHelper(r'CreateTaskRequest')
           ..add('name', name)
-          ..add('descriptionCommaOmitempty', descriptionCommaOmitempty)
-          ..add('sessionIdCommaOmitempty', sessionIdCommaOmitempty))
+          ..add('description', description)
+          ..add('sessionId', sessionId))
         .toString();
   }
 }
@@ -68,15 +68,15 @@ class CreateTaskRequestBuilder
   String? get name => _$this._name;
   set name(String? name) => _$this._name = name;
 
-  String? _descriptionCommaOmitempty;
-  String? get descriptionCommaOmitempty => _$this._descriptionCommaOmitempty;
-  set descriptionCommaOmitempty(String? descriptionCommaOmitempty) =>
-      _$this._descriptionCommaOmitempty = descriptionCommaOmitempty;
+  String? _description;
+  String? get description => _$this._description;
+  set description(String? description) =>
+      _$this._description = description;
 
-  String? _sessionIdCommaOmitempty;
-  String? get sessionIdCommaOmitempty => _$this._sessionIdCommaOmitempty;
-  set sessionIdCommaOmitempty(String? sessionIdCommaOmitempty) =>
-      _$this._sessionIdCommaOmitempty = sessionIdCommaOmitempty;
+  String? _sessionId;
+  String? get sessionId => _$this._sessionId;
+  set sessionId(String? sessionId) =>
+      _$this._sessionId = sessionId;
 
   CreateTaskRequestBuilder() {
     CreateTaskRequest._defaults(this);
@@ -86,8 +86,8 @@ class CreateTaskRequestBuilder
     final $v = _$v;
     if ($v != null) {
       _name = $v.name;
-      _descriptionCommaOmitempty = $v.descriptionCommaOmitempty;
-      _sessionIdCommaOmitempty = $v.sessionIdCommaOmitempty;
+      _description = $v.description;
+      _sessionId = $v.sessionId;
       _$v = null;
     }
     return this;
@@ -111,8 +111,8 @@ class CreateTaskRequestBuilder
         _$CreateTaskRequest._(
           name: BuiltValueNullFieldError.checkNotNull(
               name, r'CreateTaskRequest', 'name'),
-          descriptionCommaOmitempty: descriptionCommaOmitempty,
-          sessionIdCommaOmitempty: sessionIdCommaOmitempty,
+          description: description,
+          sessionId: sessionId,
         );
     replace(_$result);
     return _$result;

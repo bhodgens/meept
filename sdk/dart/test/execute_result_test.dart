@@ -17,8 +17,8 @@ void main() {
       // TODO
     });
 
-    // String errorCommaOmitempty
-    test('to test the property `errorCommaOmitempty`', () async {
+    // String error
+    test('to test the property `error`', () async {
       // TODO
     });
 

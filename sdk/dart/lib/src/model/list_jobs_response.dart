@@ -15,9 +15,9 @@ part 'list_jobs_response.g.dart';
 /// * [name] 
 /// * [schedule] 
 /// * [enabled] 
-/// * [lastRunCommaOmitempty] 
-/// * [nextRunCommaOmitempty] 
-/// * [lastErrorCommaOmitempty] 
+/// * [lastRun] 
+/// * [nextRun] 
+/// * [lastError] 
 /// * [runCount] 
 /// * [isRunning] 
 @BuiltValue()
@@ -34,14 +34,14 @@ abstract class ListJobsResponse implements Built<ListJobsResponse, ListJobsRespo
   @BuiltValueField(wireName: r'enabled')
   bool get enabled;
 
-  @BuiltValueField(wireName: r'last_run,omitempty')
-  String? get lastRunCommaOmitempty;
+  @BuiltValueField(wireName: r'last_run')
+  String? get lastRun;
 
-  @BuiltValueField(wireName: r'next_run,omitempty')
-  String? get nextRunCommaOmitempty;
+  @BuiltValueField(wireName: r'next_run')
+  String? get nextRun;
 
-  @BuiltValueField(wireName: r'last_error,omitempty')
-  String? get lastErrorCommaOmitempty;
+  @BuiltValueField(wireName: r'last_error')
+  String? get lastError;
 
   @BuiltValueField(wireName: r'run_count')
   int get runCount;
@@ -92,24 +92,24 @@ class _$ListJobsResponseSerializer implements PrimitiveSerializer<ListJobsRespon
       object.enabled,
       specifiedType: const FullType(bool),
     );
-    if (object.lastRunCommaOmitempty != null) {
-      yield r'last_run,omitempty';
+    if (object.lastRun != null) {
+      yield r'last_run';
       yield serializers.serialize(
-        object.lastRunCommaOmitempty,
+        object.lastRun,
         specifiedType: const FullType.nullable(String),
       );
     }
-    if (object.nextRunCommaOmitempty != null) {
-      yield r'next_run,omitempty';
+    if (object.nextRun != null) {
+      yield r'next_run';
       yield serializers.serialize(
-        object.nextRunCommaOmitempty,
+        object.nextRun,
         specifiedType: const FullType.nullable(String),
       );
     }
-    if (object.lastErrorCommaOmitempty != null) {
-      yield r'last_error,omitempty';
+    if (object.lastError != null) {
+      yield r'last_error';
       yield serializers.serialize(
-        object.lastErrorCommaOmitempty,
+        object.lastError,
         specifiedType: const FullType(String),
       );
     }
@@ -174,28 +174,28 @@ class _$ListJobsResponseSerializer implements PrimitiveSerializer<ListJobsRespon
           ) as bool;
           result.enabled = valueDes;
           break;
-        case r'last_run,omitempty':
+        case r'last_run':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.lastRunCommaOmitempty = valueDes;
+          result.lastRun = valueDes;
           break;
-        case r'next_run,omitempty':
+        case r'next_run':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.nextRunCommaOmitempty = valueDes;
+          result.nextRun = valueDes;
           break;
-        case r'last_error,omitempty':
+        case r'last_error':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.lastErrorCommaOmitempty = valueDes;
+          result.lastError = valueDes;
           break;
         case r'run_count':
           final valueDes = serializers.deserialize(

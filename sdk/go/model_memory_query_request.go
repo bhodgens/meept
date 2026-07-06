@@ -22,8 +22,8 @@ var _ MappedNullable = &MemoryQueryRequest{}
 // MemoryQueryRequest struct for MemoryQueryRequest
 type MemoryQueryRequest struct {
 	Query string `json:"query"`
-	Limitomitempty *int32 `json:"limit,omitempty,omitempty"`
-	Categoryomitempty *string `json:"category,omitempty,omitempty"`
+	Limit *int32 `json:"limit,omitempty"`
+	Category *string `json:"category,omitempty"`
 }
 
 type _MemoryQueryRequest MemoryQueryRequest
@@ -70,68 +70,68 @@ func (o *MemoryQueryRequest) SetQuery(v string) {
 	o.Query = v
 }
 
-// GetLimitomitempty returns the Limitomitempty field value if set, zero value otherwise.
-func (o *MemoryQueryRequest) GetLimitomitempty() int32 {
-	if o == nil || IsNil(o.Limitomitempty) {
+// GetLimit returns the Limit field value if set, zero value otherwise.
+func (o *MemoryQueryRequest) GetLimit() int32 {
+	if o == nil || IsNil(o.Limit) {
 		var ret int32
 		return ret
 	}
-	return *o.Limitomitempty
+	return *o.Limit
 }
 
-// GetLimitomitemptyOk returns a tuple with the Limitomitempty field value if set, nil otherwise
+// GetLimitOk returns a tuple with the Limit field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *MemoryQueryRequest) GetLimitomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.Limitomitempty) {
+func (o *MemoryQueryRequest) GetLimitOk() (*int32, bool) {
+	if o == nil || IsNil(o.Limit) {
 		return nil, false
 	}
-	return o.Limitomitempty, true
+	return o.Limit, true
 }
 
-// HasLimitomitempty returns a boolean if a field has been set.
-func (o *MemoryQueryRequest) HasLimitomitempty() bool {
-	if o != nil && !IsNil(o.Limitomitempty) {
+// HasLimit returns a boolean if a field has been set.
+func (o *MemoryQueryRequest) HasLimit() bool {
+	if o != nil && !IsNil(o.Limit) {
 		return true
 	}
 
 	return false
 }
 
-// SetLimitomitempty gets a reference to the given int32 and assigns it to the Limitomitempty field.
-func (o *MemoryQueryRequest) SetLimitomitempty(v int32) {
-	o.Limitomitempty = &v
+// SetLimit gets a reference to the given int32 and assigns it to the Limit field.
+func (o *MemoryQueryRequest) SetLimit(v int32) {
+	o.Limit = &v
 }
 
-// GetCategoryomitempty returns the Categoryomitempty field value if set, zero value otherwise.
-func (o *MemoryQueryRequest) GetCategoryomitempty() string {
-	if o == nil || IsNil(o.Categoryomitempty) {
+// GetCategory returns the Category field value if set, zero value otherwise.
+func (o *MemoryQueryRequest) GetCategory() string {
+	if o == nil || IsNil(o.Category) {
 		var ret string
 		return ret
 	}
-	return *o.Categoryomitempty
+	return *o.Category
 }
 
-// GetCategoryomitemptyOk returns a tuple with the Categoryomitempty field value if set, nil otherwise
+// GetCategoryOk returns a tuple with the Category field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *MemoryQueryRequest) GetCategoryomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Categoryomitempty) {
+func (o *MemoryQueryRequest) GetCategoryOk() (*string, bool) {
+	if o == nil || IsNil(o.Category) {
 		return nil, false
 	}
-	return o.Categoryomitempty, true
+	return o.Category, true
 }
 
-// HasCategoryomitempty returns a boolean if a field has been set.
-func (o *MemoryQueryRequest) HasCategoryomitempty() bool {
-	if o != nil && !IsNil(o.Categoryomitempty) {
+// HasCategory returns a boolean if a field has been set.
+func (o *MemoryQueryRequest) HasCategory() bool {
+	if o != nil && !IsNil(o.Category) {
 		return true
 	}
 
 	return false
 }
 
-// SetCategoryomitempty gets a reference to the given string and assigns it to the Categoryomitempty field.
-func (o *MemoryQueryRequest) SetCategoryomitempty(v string) {
-	o.Categoryomitempty = &v
+// SetCategory gets a reference to the given string and assigns it to the Category field.
+func (o *MemoryQueryRequest) SetCategory(v string) {
+	o.Category = &v
 }
 
 func (o MemoryQueryRequest) MarshalJSON() ([]byte, error) {
@@ -145,11 +145,11 @@ func (o MemoryQueryRequest) MarshalJSON() ([]byte, error) {
 func (o MemoryQueryRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["query"] = o.Query
-	if !IsNil(o.Limitomitempty) {
-		toSerialize["limit,omitempty"] = o.Limitomitempty
+	if !IsNil(o.Limit) {
+		toSerialize["limit"] = o.Limit
 	}
-	if !IsNil(o.Categoryomitempty) {
-		toSerialize["category,omitempty"] = o.Categoryomitempty
+	if !IsNil(o.Category) {
+		toSerialize["category"] = o.Category
 	}
 	return toSerialize, nil
 }

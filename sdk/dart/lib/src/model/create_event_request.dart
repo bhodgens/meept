@@ -12,21 +12,21 @@ part 'create_event_request.g.dart';
 ///
 /// Properties:
 /// * [summary] 
-/// * [descriptionCommaOmitempty] 
-/// * [locationCommaOmitempty] 
+/// * [description] 
+/// * [location] 
 /// * [start] 
 /// * [end] 
-/// * [attendeesCommaOmitempty] 
+/// * [attendees] 
 @BuiltValue()
 abstract class CreateEventRequest implements Built<CreateEventRequest, CreateEventRequestBuilder> {
   @BuiltValueField(wireName: r'summary')
   String get summary;
 
-  @BuiltValueField(wireName: r'description,omitempty')
-  String? get descriptionCommaOmitempty;
+  @BuiltValueField(wireName: r'description')
+  String? get description;
 
-  @BuiltValueField(wireName: r'location,omitempty')
-  String? get locationCommaOmitempty;
+  @BuiltValueField(wireName: r'location')
+  String? get location;
 
   @BuiltValueField(wireName: r'start')
   String get start;
@@ -34,8 +34,8 @@ abstract class CreateEventRequest implements Built<CreateEventRequest, CreateEve
   @BuiltValueField(wireName: r'end')
   String get end;
 
-  @BuiltValueField(wireName: r'attendees,omitempty')
-  String? get attendeesCommaOmitempty;
+  @BuiltValueField(wireName: r'attendees')
+  String? get attendees;
 
   CreateEventRequest._();
 
@@ -65,17 +65,17 @@ class _$CreateEventRequestSerializer implements PrimitiveSerializer<CreateEventR
       object.summary,
       specifiedType: const FullType(String),
     );
-    if (object.descriptionCommaOmitempty != null) {
-      yield r'description,omitempty';
+    if (object.description != null) {
+      yield r'description';
       yield serializers.serialize(
-        object.descriptionCommaOmitempty,
+        object.description,
         specifiedType: const FullType(String),
       );
     }
-    if (object.locationCommaOmitempty != null) {
-      yield r'location,omitempty';
+    if (object.location != null) {
+      yield r'location';
       yield serializers.serialize(
-        object.locationCommaOmitempty,
+        object.location,
         specifiedType: const FullType(String),
       );
     }
@@ -89,10 +89,10 @@ class _$CreateEventRequestSerializer implements PrimitiveSerializer<CreateEventR
       object.end,
       specifiedType: const FullType(String),
     );
-    if (object.attendeesCommaOmitempty != null) {
-      yield r'attendees,omitempty';
+    if (object.attendees != null) {
+      yield r'attendees';
       yield serializers.serialize(
-        object.attendeesCommaOmitempty,
+        object.attendees,
         specifiedType: const FullType.nullable(String),
       );
     }
@@ -126,19 +126,19 @@ class _$CreateEventRequestSerializer implements PrimitiveSerializer<CreateEventR
           ) as String;
           result.summary = valueDes;
           break;
-        case r'description,omitempty':
+        case r'description':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.descriptionCommaOmitempty = valueDes;
+          result.description = valueDes;
           break;
-        case r'location,omitempty':
+        case r'location':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.locationCommaOmitempty = valueDes;
+          result.location = valueDes;
           break;
         case r'start':
           final valueDes = serializers.deserialize(
@@ -154,13 +154,13 @@ class _$CreateEventRequestSerializer implements PrimitiveSerializer<CreateEventR
           ) as String;
           result.end = valueDes;
           break;
-        case r'attendees,omitempty':
+        case r'attendees':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.attendeesCommaOmitempty = valueDes;
+          result.attendees = valueDes;
           break;
         default:
           unhandled.add(key);

@@ -13,7 +13,7 @@ part 'chat_request.g.dart';
 /// Properties:
 /// * [message] 
 /// * [conversationId] 
-/// * [agentIdCommaOmitempty] 
+/// * [agentId] 
 @BuiltValue()
 abstract class ChatRequest implements Built<ChatRequest, ChatRequestBuilder> {
   @BuiltValueField(wireName: r'message')
@@ -22,8 +22,8 @@ abstract class ChatRequest implements Built<ChatRequest, ChatRequestBuilder> {
   @BuiltValueField(wireName: r'conversation_id')
   String get conversationId;
 
-  @BuiltValueField(wireName: r'agent_id,omitempty')
-  String? get agentIdCommaOmitempty;
+  @BuiltValueField(wireName: r'agent_id')
+  String? get agentId;
 
   ChatRequest._();
 
@@ -58,10 +58,10 @@ class _$ChatRequestSerializer implements PrimitiveSerializer<ChatRequest> {
       object.conversationId,
       specifiedType: const FullType(String),
     );
-    if (object.agentIdCommaOmitempty != null) {
-      yield r'agent_id,omitempty';
+    if (object.agentId != null) {
+      yield r'agent_id';
       yield serializers.serialize(
-        object.agentIdCommaOmitempty,
+        object.agentId,
         specifiedType: const FullType(String),
       );
     }
@@ -102,12 +102,12 @@ class _$ChatRequestSerializer implements PrimitiveSerializer<ChatRequest> {
           ) as String;
           result.conversationId = valueDes;
           break;
-        case r'agent_id,omitempty':
+        case r'agent_id':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.agentIdCommaOmitempty = valueDes;
+          result.agentId = valueDes;
           break;
         default:
           unhandled.add(key);

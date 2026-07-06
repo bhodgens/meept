@@ -19,8 +19,8 @@ var _ MappedNullable = &SkillsListRequest{}
 
 // SkillsListRequest struct for SkillsListRequest
 type SkillsListRequest struct {
-	Categoryomitempty *string `json:"category,omitempty,omitempty"`
-	Limitomitempty *int32 `json:"limit,omitempty,omitempty"`
+	Category *string `json:"category,omitempty"`
+	Limit *int32 `json:"limit,omitempty"`
 }
 
 // NewSkillsListRequest instantiates a new SkillsListRequest object
@@ -40,68 +40,68 @@ func NewSkillsListRequestWithDefaults() *SkillsListRequest {
 	return &this
 }
 
-// GetCategoryomitempty returns the Categoryomitempty field value if set, zero value otherwise.
-func (o *SkillsListRequest) GetCategoryomitempty() string {
-	if o == nil || IsNil(o.Categoryomitempty) {
+// GetCategory returns the Category field value if set, zero value otherwise.
+func (o *SkillsListRequest) GetCategory() string {
+	if o == nil || IsNil(o.Category) {
 		var ret string
 		return ret
 	}
-	return *o.Categoryomitempty
+	return *o.Category
 }
 
-// GetCategoryomitemptyOk returns a tuple with the Categoryomitempty field value if set, nil otherwise
+// GetCategoryOk returns a tuple with the Category field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *SkillsListRequest) GetCategoryomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Categoryomitempty) {
+func (o *SkillsListRequest) GetCategoryOk() (*string, bool) {
+	if o == nil || IsNil(o.Category) {
 		return nil, false
 	}
-	return o.Categoryomitempty, true
+	return o.Category, true
 }
 
-// HasCategoryomitempty returns a boolean if a field has been set.
-func (o *SkillsListRequest) HasCategoryomitempty() bool {
-	if o != nil && !IsNil(o.Categoryomitempty) {
+// HasCategory returns a boolean if a field has been set.
+func (o *SkillsListRequest) HasCategory() bool {
+	if o != nil && !IsNil(o.Category) {
 		return true
 	}
 
 	return false
 }
 
-// SetCategoryomitempty gets a reference to the given string and assigns it to the Categoryomitempty field.
-func (o *SkillsListRequest) SetCategoryomitempty(v string) {
-	o.Categoryomitempty = &v
+// SetCategory gets a reference to the given string and assigns it to the Category field.
+func (o *SkillsListRequest) SetCategory(v string) {
+	o.Category = &v
 }
 
-// GetLimitomitempty returns the Limitomitempty field value if set, zero value otherwise.
-func (o *SkillsListRequest) GetLimitomitempty() int32 {
-	if o == nil || IsNil(o.Limitomitempty) {
+// GetLimit returns the Limit field value if set, zero value otherwise.
+func (o *SkillsListRequest) GetLimit() int32 {
+	if o == nil || IsNil(o.Limit) {
 		var ret int32
 		return ret
 	}
-	return *o.Limitomitempty
+	return *o.Limit
 }
 
-// GetLimitomitemptyOk returns a tuple with the Limitomitempty field value if set, nil otherwise
+// GetLimitOk returns a tuple with the Limit field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *SkillsListRequest) GetLimitomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.Limitomitempty) {
+func (o *SkillsListRequest) GetLimitOk() (*int32, bool) {
+	if o == nil || IsNil(o.Limit) {
 		return nil, false
 	}
-	return o.Limitomitempty, true
+	return o.Limit, true
 }
 
-// HasLimitomitempty returns a boolean if a field has been set.
-func (o *SkillsListRequest) HasLimitomitempty() bool {
-	if o != nil && !IsNil(o.Limitomitempty) {
+// HasLimit returns a boolean if a field has been set.
+func (o *SkillsListRequest) HasLimit() bool {
+	if o != nil && !IsNil(o.Limit) {
 		return true
 	}
 
 	return false
 }
 
-// SetLimitomitempty gets a reference to the given int32 and assigns it to the Limitomitempty field.
-func (o *SkillsListRequest) SetLimitomitempty(v int32) {
-	o.Limitomitempty = &v
+// SetLimit gets a reference to the given int32 and assigns it to the Limit field.
+func (o *SkillsListRequest) SetLimit(v int32) {
+	o.Limit = &v
 }
 
 func (o SkillsListRequest) MarshalJSON() ([]byte, error) {
@@ -114,11 +114,11 @@ func (o SkillsListRequest) MarshalJSON() ([]byte, error) {
 
 func (o SkillsListRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	if !IsNil(o.Categoryomitempty) {
-		toSerialize["category,omitempty"] = o.Categoryomitempty
+	if !IsNil(o.Category) {
+		toSerialize["category"] = o.Category
 	}
-	if !IsNil(o.Limitomitempty) {
-		toSerialize["limit,omitempty"] = o.Limitomitempty
+	if !IsNil(o.Limit) {
+		toSerialize["limit"] = o.Limit
 	}
 	return toSerialize, nil
 }

@@ -14,7 +14,7 @@ class _$RejectPlanRequest extends RejectPlanRequest {
   @override
   final String by;
   @override
-  final String? reasonCommaOmitempty;
+  final String? reason;
 
   factory _$RejectPlanRequest(
           [void Function(RejectPlanRequestBuilder)? updates]) =>
@@ -24,7 +24,7 @@ class _$RejectPlanRequest extends RejectPlanRequest {
       {required this.planId,
       required this.sessionId,
       required this.by,
-      this.reasonCommaOmitempty})
+      this.reason})
       : super._();
   @override
   RejectPlanRequest rebuild(void Function(RejectPlanRequestBuilder) updates) =>
@@ -41,7 +41,7 @@ class _$RejectPlanRequest extends RejectPlanRequest {
         planId == other.planId &&
         sessionId == other.sessionId &&
         by == other.by &&
-        reasonCommaOmitempty == other.reasonCommaOmitempty;
+        reason == other.reason;
   }
 
   @override
@@ -50,7 +50,7 @@ class _$RejectPlanRequest extends RejectPlanRequest {
     _$hash = $jc(_$hash, planId.hashCode);
     _$hash = $jc(_$hash, sessionId.hashCode);
     _$hash = $jc(_$hash, by.hashCode);
-    _$hash = $jc(_$hash, reasonCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, reason.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -61,7 +61,7 @@ class _$RejectPlanRequest extends RejectPlanRequest {
           ..add('planId', planId)
           ..add('sessionId', sessionId)
           ..add('by', by)
-          ..add('reasonCommaOmitempty', reasonCommaOmitempty))
+          ..add('reason', reason))
         .toString();
   }
 }
@@ -82,10 +82,10 @@ class RejectPlanRequestBuilder
   String? get by => _$this._by;
   set by(String? by) => _$this._by = by;
 
-  String? _reasonCommaOmitempty;
-  String? get reasonCommaOmitempty => _$this._reasonCommaOmitempty;
-  set reasonCommaOmitempty(String? reasonCommaOmitempty) =>
-      _$this._reasonCommaOmitempty = reasonCommaOmitempty;
+  String? _reason;
+  String? get reason => _$this._reason;
+  set reason(String? reason) =>
+      _$this._reason = reason;
 
   RejectPlanRequestBuilder() {
     RejectPlanRequest._defaults(this);
@@ -97,7 +97,7 @@ class RejectPlanRequestBuilder
       _planId = $v.planId;
       _sessionId = $v.sessionId;
       _by = $v.by;
-      _reasonCommaOmitempty = $v.reasonCommaOmitempty;
+      _reason = $v.reason;
       _$v = null;
     }
     return this;
@@ -125,7 +125,7 @@ class RejectPlanRequestBuilder
               sessionId, r'RejectPlanRequest', 'sessionId'),
           by: BuiltValueNullFieldError.checkNotNull(
               by, r'RejectPlanRequest', 'by'),
-          reasonCommaOmitempty: reasonCommaOmitempty,
+          reason: reason,
         );
     replace(_$result);
     return _$result;

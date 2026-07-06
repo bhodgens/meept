@@ -11,19 +11,19 @@ part 'list_events_request.g.dart';
 /// ListEventsRequest
 ///
 /// Properties:
-/// * [timeMinCommaOmitempty] 
-/// * [timeMaxCommaOmitempty] 
-/// * [maxResultsCommaOmitempty] 
+/// * [timeMin] 
+/// * [timeMax] 
+/// * [maxResults] 
 @BuiltValue()
 abstract class ListEventsRequest implements Built<ListEventsRequest, ListEventsRequestBuilder> {
-  @BuiltValueField(wireName: r'time_min,omitempty')
-  String? get timeMinCommaOmitempty;
+  @BuiltValueField(wireName: r'time_min')
+  String? get timeMin;
 
-  @BuiltValueField(wireName: r'time_max,omitempty')
-  String? get timeMaxCommaOmitempty;
+  @BuiltValueField(wireName: r'time_max')
+  String? get timeMax;
 
-  @BuiltValueField(wireName: r'max_results,omitempty')
-  int? get maxResultsCommaOmitempty;
+  @BuiltValueField(wireName: r'max_results')
+  int? get maxResults;
 
   ListEventsRequest._();
 
@@ -48,24 +48,24 @@ class _$ListEventsRequestSerializer implements PrimitiveSerializer<ListEventsReq
     ListEventsRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
-    if (object.timeMinCommaOmitempty != null) {
-      yield r'time_min,omitempty';
+    if (object.timeMin != null) {
+      yield r'time_min';
       yield serializers.serialize(
-        object.timeMinCommaOmitempty,
+        object.timeMin,
         specifiedType: const FullType(String),
       );
     }
-    if (object.timeMaxCommaOmitempty != null) {
-      yield r'time_max,omitempty';
+    if (object.timeMax != null) {
+      yield r'time_max';
       yield serializers.serialize(
-        object.timeMaxCommaOmitempty,
+        object.timeMax,
         specifiedType: const FullType(String),
       );
     }
-    if (object.maxResultsCommaOmitempty != null) {
-      yield r'max_results,omitempty';
+    if (object.maxResults != null) {
+      yield r'max_results';
       yield serializers.serialize(
-        object.maxResultsCommaOmitempty,
+        object.maxResults,
         specifiedType: const FullType(int),
       );
     }
@@ -92,26 +92,26 @@ class _$ListEventsRequestSerializer implements PrimitiveSerializer<ListEventsReq
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
-        case r'time_min,omitempty':
+        case r'time_min':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.timeMinCommaOmitempty = valueDes;
+          result.timeMin = valueDes;
           break;
-        case r'time_max,omitempty':
+        case r'time_max':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.timeMaxCommaOmitempty = valueDes;
+          result.timeMax = valueDes;
           break;
-        case r'max_results,omitempty':
+        case r'max_results':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.maxResultsCommaOmitempty = valueDes;
+          result.maxResults = valueDes;
           break;
         default:
           unhandled.add(key);

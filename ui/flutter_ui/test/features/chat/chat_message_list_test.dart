@@ -321,15 +321,6 @@ void main() {
         (tester) async {
       late ProviderContainer container;
       await tester.pumpWidget(ProviderScope(
-        child: MaterialApp(
-          theme: ThemeData.dark(),
-          home: Scaffold(
-            body: Builder(builder: (context) {
-              container = ProviderScope.containerOf(context);
-              return const ChatMessageList(sessionId: 'test-session');
-            }),
-          ),
-        ),
         overrides: [
           chatProvider.overrideWith(
             (_) => _TestChatNotifier(
@@ -339,6 +330,15 @@ void main() {
             ),
           ),
         ],
+        child: MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(
+            body: Builder(builder: (context) {
+              container = ProviderScope.containerOf(context);
+              return const ChatMessageList(sessionId: 'test-session');
+            }),
+          ),
+        ),
       ));
 
       // Set the pending scroll target AFTER the widget tree has built so we

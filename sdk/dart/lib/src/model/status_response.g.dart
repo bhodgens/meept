@@ -10,7 +10,7 @@ class _$StatusResponse extends StatusResponse {
   @override
   final bool enabled;
   @override
-  final String? lastCycleCommaOmitempty;
+  final String? lastCycle;
   @override
   final int skillsLearned;
   @override
@@ -21,7 +21,7 @@ class _$StatusResponse extends StatusResponse {
 
   _$StatusResponse._(
       {required this.enabled,
-      this.lastCycleCommaOmitempty,
+      this.lastCycle,
       required this.skillsLearned,
       required this.pendingTasks})
       : super._();
@@ -37,7 +37,7 @@ class _$StatusResponse extends StatusResponse {
     if (identical(other, this)) return true;
     return other is StatusResponse &&
         enabled == other.enabled &&
-        lastCycleCommaOmitempty == other.lastCycleCommaOmitempty &&
+        lastCycle == other.lastCycle &&
         skillsLearned == other.skillsLearned &&
         pendingTasks == other.pendingTasks;
   }
@@ -46,7 +46,7 @@ class _$StatusResponse extends StatusResponse {
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, enabled.hashCode);
-    _$hash = $jc(_$hash, lastCycleCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, lastCycle.hashCode);
     _$hash = $jc(_$hash, skillsLearned.hashCode);
     _$hash = $jc(_$hash, pendingTasks.hashCode);
     _$hash = $jf(_$hash);
@@ -57,7 +57,7 @@ class _$StatusResponse extends StatusResponse {
   String toString() {
     return (newBuiltValueToStringHelper(r'StatusResponse')
           ..add('enabled', enabled)
-          ..add('lastCycleCommaOmitempty', lastCycleCommaOmitempty)
+          ..add('lastCycle', lastCycle)
           ..add('skillsLearned', skillsLearned)
           ..add('pendingTasks', pendingTasks))
         .toString();
@@ -72,10 +72,10 @@ class StatusResponseBuilder
   bool? get enabled => _$this._enabled;
   set enabled(bool? enabled) => _$this._enabled = enabled;
 
-  String? _lastCycleCommaOmitempty;
-  String? get lastCycleCommaOmitempty => _$this._lastCycleCommaOmitempty;
-  set lastCycleCommaOmitempty(String? lastCycleCommaOmitempty) =>
-      _$this._lastCycleCommaOmitempty = lastCycleCommaOmitempty;
+  String? _lastCycle;
+  String? get lastCycle => _$this._lastCycle;
+  set lastCycle(String? lastCycle) =>
+      _$this._lastCycle = lastCycle;
 
   int? _skillsLearned;
   int? get skillsLearned => _$this._skillsLearned;
@@ -94,7 +94,7 @@ class StatusResponseBuilder
     final $v = _$v;
     if ($v != null) {
       _enabled = $v.enabled;
-      _lastCycleCommaOmitempty = $v.lastCycleCommaOmitempty;
+      _lastCycle = $v.lastCycle;
       _skillsLearned = $v.skillsLearned;
       _pendingTasks = $v.pendingTasks;
       _$v = null;
@@ -120,7 +120,7 @@ class StatusResponseBuilder
         _$StatusResponse._(
           enabled: BuiltValueNullFieldError.checkNotNull(
               enabled, r'StatusResponse', 'enabled'),
-          lastCycleCommaOmitempty: lastCycleCommaOmitempty,
+          lastCycle: lastCycle,
           skillsLearned: BuiltValueNullFieldError.checkNotNull(
               skillsLearned, r'StatusResponse', 'skillsLearned'),
           pendingTasks: BuiltValueNullFieldError.checkNotNull(

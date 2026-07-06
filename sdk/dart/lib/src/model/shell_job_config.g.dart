@@ -10,13 +10,13 @@ class _$ShellJobConfig extends ShellJobConfig {
   @override
   final String command;
   @override
-  final String? argsCommaOmitempty;
+  final String? args;
   @override
-  final String? workDirCommaOmitempty;
+  final String? workDir;
   @override
-  final String? envCommaOmitempty;
+  final String? env;
   @override
-  final int? timeoutSecsCommaOmitempty;
+  final int? timeoutSecs;
   @override
   final bool captureOutput;
 
@@ -25,10 +25,10 @@ class _$ShellJobConfig extends ShellJobConfig {
 
   _$ShellJobConfig._(
       {required this.command,
-      this.argsCommaOmitempty,
-      this.workDirCommaOmitempty,
-      this.envCommaOmitempty,
-      this.timeoutSecsCommaOmitempty,
+      this.args,
+      this.workDir,
+      this.env,
+      this.timeoutSecs,
       required this.captureOutput})
       : super._();
   @override
@@ -43,10 +43,10 @@ class _$ShellJobConfig extends ShellJobConfig {
     if (identical(other, this)) return true;
     return other is ShellJobConfig &&
         command == other.command &&
-        argsCommaOmitempty == other.argsCommaOmitempty &&
-        workDirCommaOmitempty == other.workDirCommaOmitempty &&
-        envCommaOmitempty == other.envCommaOmitempty &&
-        timeoutSecsCommaOmitempty == other.timeoutSecsCommaOmitempty &&
+        args == other.args &&
+        workDir == other.workDir &&
+        env == other.env &&
+        timeoutSecs == other.timeoutSecs &&
         captureOutput == other.captureOutput;
   }
 
@@ -54,10 +54,10 @@ class _$ShellJobConfig extends ShellJobConfig {
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, command.hashCode);
-    _$hash = $jc(_$hash, argsCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, workDirCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, envCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, timeoutSecsCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, args.hashCode);
+    _$hash = $jc(_$hash, workDir.hashCode);
+    _$hash = $jc(_$hash, env.hashCode);
+    _$hash = $jc(_$hash, timeoutSecs.hashCode);
     _$hash = $jc(_$hash, captureOutput.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
@@ -67,10 +67,10 @@ class _$ShellJobConfig extends ShellJobConfig {
   String toString() {
     return (newBuiltValueToStringHelper(r'ShellJobConfig')
           ..add('command', command)
-          ..add('argsCommaOmitempty', argsCommaOmitempty)
-          ..add('workDirCommaOmitempty', workDirCommaOmitempty)
-          ..add('envCommaOmitempty', envCommaOmitempty)
-          ..add('timeoutSecsCommaOmitempty', timeoutSecsCommaOmitempty)
+          ..add('args', args)
+          ..add('workDir', workDir)
+          ..add('env', env)
+          ..add('timeoutSecs', timeoutSecs)
           ..add('captureOutput', captureOutput))
         .toString();
   }
@@ -84,25 +84,25 @@ class ShellJobConfigBuilder
   String? get command => _$this._command;
   set command(String? command) => _$this._command = command;
 
-  String? _argsCommaOmitempty;
-  String? get argsCommaOmitempty => _$this._argsCommaOmitempty;
-  set argsCommaOmitempty(String? argsCommaOmitempty) =>
-      _$this._argsCommaOmitempty = argsCommaOmitempty;
+  String? _args;
+  String? get args => _$this._args;
+  set args(String? args) =>
+      _$this._args = args;
 
-  String? _workDirCommaOmitempty;
-  String? get workDirCommaOmitempty => _$this._workDirCommaOmitempty;
-  set workDirCommaOmitempty(String? workDirCommaOmitempty) =>
-      _$this._workDirCommaOmitempty = workDirCommaOmitempty;
+  String? _workDir;
+  String? get workDir => _$this._workDir;
+  set workDir(String? workDir) =>
+      _$this._workDir = workDir;
 
-  String? _envCommaOmitempty;
-  String? get envCommaOmitempty => _$this._envCommaOmitempty;
-  set envCommaOmitempty(String? envCommaOmitempty) =>
-      _$this._envCommaOmitempty = envCommaOmitempty;
+  String? _env;
+  String? get env => _$this._env;
+  set env(String? env) =>
+      _$this._env = env;
 
-  int? _timeoutSecsCommaOmitempty;
-  int? get timeoutSecsCommaOmitempty => _$this._timeoutSecsCommaOmitempty;
-  set timeoutSecsCommaOmitempty(int? timeoutSecsCommaOmitempty) =>
-      _$this._timeoutSecsCommaOmitempty = timeoutSecsCommaOmitempty;
+  int? _timeoutSecs;
+  int? get timeoutSecs => _$this._timeoutSecs;
+  set timeoutSecs(int? timeoutSecs) =>
+      _$this._timeoutSecs = timeoutSecs;
 
   bool? _captureOutput;
   bool? get captureOutput => _$this._captureOutput;
@@ -117,10 +117,10 @@ class ShellJobConfigBuilder
     final $v = _$v;
     if ($v != null) {
       _command = $v.command;
-      _argsCommaOmitempty = $v.argsCommaOmitempty;
-      _workDirCommaOmitempty = $v.workDirCommaOmitempty;
-      _envCommaOmitempty = $v.envCommaOmitempty;
-      _timeoutSecsCommaOmitempty = $v.timeoutSecsCommaOmitempty;
+      _args = $v.args;
+      _workDir = $v.workDir;
+      _env = $v.env;
+      _timeoutSecs = $v.timeoutSecs;
       _captureOutput = $v.captureOutput;
       _$v = null;
     }
@@ -145,10 +145,10 @@ class ShellJobConfigBuilder
         _$ShellJobConfig._(
           command: BuiltValueNullFieldError.checkNotNull(
               command, r'ShellJobConfig', 'command'),
-          argsCommaOmitempty: argsCommaOmitempty,
-          workDirCommaOmitempty: workDirCommaOmitempty,
-          envCommaOmitempty: envCommaOmitempty,
-          timeoutSecsCommaOmitempty: timeoutSecsCommaOmitempty,
+          args: args,
+          workDir: workDir,
+          env: env,
+          timeoutSecs: timeoutSecs,
           captureOutput: BuiltValueNullFieldError.checkNotNull(
               captureOutput, r'ShellJobConfig', 'captureOutput'),
         );

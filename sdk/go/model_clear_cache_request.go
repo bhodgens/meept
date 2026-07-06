@@ -19,7 +19,7 @@ var _ MappedNullable = &ClearCacheRequest{}
 
 // ClearCacheRequest struct for ClearCacheRequest
 type ClearCacheRequest struct {
-	Prefixomitempty *string `json:"prefix,omitempty,omitempty"`
+	Prefix *string `json:"prefix,omitempty"`
 }
 
 // NewClearCacheRequest instantiates a new ClearCacheRequest object
@@ -39,36 +39,36 @@ func NewClearCacheRequestWithDefaults() *ClearCacheRequest {
 	return &this
 }
 
-// GetPrefixomitempty returns the Prefixomitempty field value if set, zero value otherwise.
-func (o *ClearCacheRequest) GetPrefixomitempty() string {
-	if o == nil || IsNil(o.Prefixomitempty) {
+// GetPrefix returns the Prefix field value if set, zero value otherwise.
+func (o *ClearCacheRequest) GetPrefix() string {
+	if o == nil || IsNil(o.Prefix) {
 		var ret string
 		return ret
 	}
-	return *o.Prefixomitempty
+	return *o.Prefix
 }
 
-// GetPrefixomitemptyOk returns a tuple with the Prefixomitempty field value if set, nil otherwise
+// GetPrefixOk returns a tuple with the Prefix field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ClearCacheRequest) GetPrefixomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Prefixomitempty) {
+func (o *ClearCacheRequest) GetPrefixOk() (*string, bool) {
+	if o == nil || IsNil(o.Prefix) {
 		return nil, false
 	}
-	return o.Prefixomitempty, true
+	return o.Prefix, true
 }
 
-// HasPrefixomitempty returns a boolean if a field has been set.
-func (o *ClearCacheRequest) HasPrefixomitempty() bool {
-	if o != nil && !IsNil(o.Prefixomitempty) {
+// HasPrefix returns a boolean if a field has been set.
+func (o *ClearCacheRequest) HasPrefix() bool {
+	if o != nil && !IsNil(o.Prefix) {
 		return true
 	}
 
 	return false
 }
 
-// SetPrefixomitempty gets a reference to the given string and assigns it to the Prefixomitempty field.
-func (o *ClearCacheRequest) SetPrefixomitempty(v string) {
-	o.Prefixomitempty = &v
+// SetPrefix gets a reference to the given string and assigns it to the Prefix field.
+func (o *ClearCacheRequest) SetPrefix(v string) {
+	o.Prefix = &v
 }
 
 func (o ClearCacheRequest) MarshalJSON() ([]byte, error) {
@@ -81,8 +81,8 @@ func (o ClearCacheRequest) MarshalJSON() ([]byte, error) {
 
 func (o ClearCacheRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	if !IsNil(o.Prefixomitempty) {
-		toSerialize["prefix,omitempty"] = o.Prefixomitempty
+	if !IsNil(o.Prefix) {
+		toSerialize["prefix"] = o.Prefix
 	}
 	return toSerialize, nil
 }

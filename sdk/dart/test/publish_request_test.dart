@@ -17,13 +17,13 @@ void main() {
       // TODO
     });
 
-    // String sourceCommaOmitempty
-    test('to test the property `sourceCommaOmitempty`', () async {
+    // String source
+    test('to test the property `source`', () async {
       // TODO
     });
 
-    // String payloadCommaOmitempty
-    test('to test the property `payloadCommaOmitempty`', () async {
+    // String payload
+    test('to test the property `payload`', () async {
       // TODO
     });
 

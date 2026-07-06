@@ -12,26 +12,26 @@ part 'agent_job_config.g.dart';
 ///
 /// Properties:
 /// * [prompt] 
-/// * [contextCommaOmitempty] 
-/// * [modelCommaOmitempty] 
-/// * [maxTokensCommaOmitempty] 
-/// * [temperatureCommaOmitempty] 
+/// * [context] 
+/// * [model] 
+/// * [maxTokens] 
+/// * [temperature] 
 @BuiltValue()
 abstract class AgentJobConfig implements Built<AgentJobConfig, AgentJobConfigBuilder> {
   @BuiltValueField(wireName: r'prompt')
   String get prompt;
 
-  @BuiltValueField(wireName: r'context,omitempty')
-  String? get contextCommaOmitempty;
+  @BuiltValueField(wireName: r'context')
+  String? get context;
 
-  @BuiltValueField(wireName: r'model,omitempty')
-  String? get modelCommaOmitempty;
+  @BuiltValueField(wireName: r'model')
+  String? get model;
 
-  @BuiltValueField(wireName: r'max_tokens,omitempty')
-  int? get maxTokensCommaOmitempty;
+  @BuiltValueField(wireName: r'max_tokens')
+  int? get maxTokens;
 
-  @BuiltValueField(wireName: r'temperature,omitempty')
-  num? get temperatureCommaOmitempty;
+  @BuiltValueField(wireName: r'temperature')
+  num? get temperature;
 
   AgentJobConfig._();
 
@@ -61,31 +61,31 @@ class _$AgentJobConfigSerializer implements PrimitiveSerializer<AgentJobConfig> 
       object.prompt,
       specifiedType: const FullType(String),
     );
-    if (object.contextCommaOmitempty != null) {
-      yield r'context,omitempty';
+    if (object.context != null) {
+      yield r'context';
       yield serializers.serialize(
-        object.contextCommaOmitempty,
+        object.context,
         specifiedType: const FullType.nullable(String),
       );
     }
-    if (object.modelCommaOmitempty != null) {
-      yield r'model,omitempty';
+    if (object.model != null) {
+      yield r'model';
       yield serializers.serialize(
-        object.modelCommaOmitempty,
+        object.model,
         specifiedType: const FullType(String),
       );
     }
-    if (object.maxTokensCommaOmitempty != null) {
-      yield r'max_tokens,omitempty';
+    if (object.maxTokens != null) {
+      yield r'max_tokens';
       yield serializers.serialize(
-        object.maxTokensCommaOmitempty,
+        object.maxTokens,
         specifiedType: const FullType(int),
       );
     }
-    if (object.temperatureCommaOmitempty != null) {
-      yield r'temperature,omitempty';
+    if (object.temperature != null) {
+      yield r'temperature';
       yield serializers.serialize(
-        object.temperatureCommaOmitempty,
+        object.temperature,
         specifiedType: const FullType(num),
       );
     }
@@ -119,34 +119,34 @@ class _$AgentJobConfigSerializer implements PrimitiveSerializer<AgentJobConfig> 
           ) as String;
           result.prompt = valueDes;
           break;
-        case r'context,omitempty':
+        case r'context':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.contextCommaOmitempty = valueDes;
+          result.context = valueDes;
           break;
-        case r'model,omitempty':
+        case r'model':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.modelCommaOmitempty = valueDes;
+          result.model = valueDes;
           break;
-        case r'max_tokens,omitempty':
+        case r'max_tokens':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.maxTokensCommaOmitempty = valueDes;
+          result.maxTokens = valueDes;
           break;
-        case r'temperature,omitempty':
+        case r'temperature':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(num),
           ) as num;
-          result.temperatureCommaOmitempty = valueDes;
+          result.temperature = valueDes;
           break;
         default:
           unhandled.add(key);

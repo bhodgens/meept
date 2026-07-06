@@ -11,10 +11,10 @@ Name | Type | Description | Notes
 **slug** | **String** |  | 
 **name** | **String** |  | 
 **description** | **String** |  | 
-**categoryCommaOmitempty** | **String** |  | [optional] 
-**capabilitiesCommaOmitempty** | **String** |  | [optional] 
+**category** | **String** |  | [optional] 
+**capabilities** | **String** |  | [optional] 
 **enabled** | **bool** |  | 
-**uiTypeCommaOmitempty** | **String** |  | [optional] 
+**uiType** | **String** |  | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

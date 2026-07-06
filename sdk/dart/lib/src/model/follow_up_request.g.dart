@@ -12,7 +12,7 @@ class _$FollowUpRequest extends FollowUpRequest {
   @override
   final String conversationId;
   @override
-  final String? sourceCommaOmitempty;
+  final String? source;
 
   factory _$FollowUpRequest([void Function(FollowUpRequestBuilder)? updates]) =>
       (FollowUpRequestBuilder()..update(updates))._build();
@@ -20,7 +20,7 @@ class _$FollowUpRequest extends FollowUpRequest {
   _$FollowUpRequest._(
       {required this.message,
       required this.conversationId,
-      this.sourceCommaOmitempty})
+      this.source})
       : super._();
   @override
   FollowUpRequest rebuild(void Function(FollowUpRequestBuilder) updates) =>
@@ -35,7 +35,7 @@ class _$FollowUpRequest extends FollowUpRequest {
     return other is FollowUpRequest &&
         message == other.message &&
         conversationId == other.conversationId &&
-        sourceCommaOmitempty == other.sourceCommaOmitempty;
+        source == other.source;
   }
 
   @override
@@ -43,7 +43,7 @@ class _$FollowUpRequest extends FollowUpRequest {
     var _$hash = 0;
     _$hash = $jc(_$hash, message.hashCode);
     _$hash = $jc(_$hash, conversationId.hashCode);
-    _$hash = $jc(_$hash, sourceCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, source.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -53,7 +53,7 @@ class _$FollowUpRequest extends FollowUpRequest {
     return (newBuiltValueToStringHelper(r'FollowUpRequest')
           ..add('message', message)
           ..add('conversationId', conversationId)
-          ..add('sourceCommaOmitempty', sourceCommaOmitempty))
+          ..add('source', source))
         .toString();
   }
 }
@@ -71,10 +71,10 @@ class FollowUpRequestBuilder
   set conversationId(String? conversationId) =>
       _$this._conversationId = conversationId;
 
-  String? _sourceCommaOmitempty;
-  String? get sourceCommaOmitempty => _$this._sourceCommaOmitempty;
-  set sourceCommaOmitempty(String? sourceCommaOmitempty) =>
-      _$this._sourceCommaOmitempty = sourceCommaOmitempty;
+  String? _source;
+  String? get source => _$this._source;
+  set source(String? source) =>
+      _$this._source = source;
 
   FollowUpRequestBuilder() {
     FollowUpRequest._defaults(this);
@@ -85,7 +85,7 @@ class FollowUpRequestBuilder
     if ($v != null) {
       _message = $v.message;
       _conversationId = $v.conversationId;
-      _sourceCommaOmitempty = $v.sourceCommaOmitempty;
+      _source = $v.source;
       _$v = null;
     }
     return this;
@@ -111,7 +111,7 @@ class FollowUpRequestBuilder
               message, r'FollowUpRequest', 'message'),
           conversationId: BuiltValueNullFieldError.checkNotNull(
               conversationId, r'FollowUpRequest', 'conversationId'),
-          sourceCommaOmitempty: sourceCommaOmitempty,
+          source: source,
         );
     replace(_$result);
     return _$result;

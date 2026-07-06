@@ -12,27 +12,27 @@ part 'shell_job_config.g.dart';
 ///
 /// Properties:
 /// * [command] 
-/// * [argsCommaOmitempty] 
-/// * [workDirCommaOmitempty] 
-/// * [envCommaOmitempty] 
-/// * [timeoutSecsCommaOmitempty] 
+/// * [args] 
+/// * [workDir] 
+/// * [env] 
+/// * [timeoutSecs] 
 /// * [captureOutput] 
 @BuiltValue()
 abstract class ShellJobConfig implements Built<ShellJobConfig, ShellJobConfigBuilder> {
   @BuiltValueField(wireName: r'command')
   String get command;
 
-  @BuiltValueField(wireName: r'args,omitempty')
-  String? get argsCommaOmitempty;
+  @BuiltValueField(wireName: r'args')
+  String? get args;
 
-  @BuiltValueField(wireName: r'work_dir,omitempty')
-  String? get workDirCommaOmitempty;
+  @BuiltValueField(wireName: r'work_dir')
+  String? get workDir;
 
-  @BuiltValueField(wireName: r'env,omitempty')
-  String? get envCommaOmitempty;
+  @BuiltValueField(wireName: r'env')
+  String? get env;
 
-  @BuiltValueField(wireName: r'timeout_secs,omitempty')
-  int? get timeoutSecsCommaOmitempty;
+  @BuiltValueField(wireName: r'timeout_secs')
+  int? get timeoutSecs;
 
   @BuiltValueField(wireName: r'capture_output')
   bool get captureOutput;
@@ -65,31 +65,31 @@ class _$ShellJobConfigSerializer implements PrimitiveSerializer<ShellJobConfig> 
       object.command,
       specifiedType: const FullType(String),
     );
-    if (object.argsCommaOmitempty != null) {
-      yield r'args,omitempty';
+    if (object.args != null) {
+      yield r'args';
       yield serializers.serialize(
-        object.argsCommaOmitempty,
+        object.args,
         specifiedType: const FullType.nullable(String),
       );
     }
-    if (object.workDirCommaOmitempty != null) {
-      yield r'work_dir,omitempty';
+    if (object.workDir != null) {
+      yield r'work_dir';
       yield serializers.serialize(
-        object.workDirCommaOmitempty,
+        object.workDir,
         specifiedType: const FullType(String),
       );
     }
-    if (object.envCommaOmitempty != null) {
-      yield r'env,omitempty';
+    if (object.env != null) {
+      yield r'env';
       yield serializers.serialize(
-        object.envCommaOmitempty,
+        object.env,
         specifiedType: const FullType.nullable(String),
       );
     }
-    if (object.timeoutSecsCommaOmitempty != null) {
-      yield r'timeout_secs,omitempty';
+    if (object.timeoutSecs != null) {
+      yield r'timeout_secs';
       yield serializers.serialize(
-        object.timeoutSecsCommaOmitempty,
+        object.timeoutSecs,
         specifiedType: const FullType(int),
       );
     }
@@ -128,35 +128,35 @@ class _$ShellJobConfigSerializer implements PrimitiveSerializer<ShellJobConfig> 
           ) as String;
           result.command = valueDes;
           break;
-        case r'args,omitempty':
+        case r'args':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.argsCommaOmitempty = valueDes;
+          result.args = valueDes;
           break;
-        case r'work_dir,omitempty':
+        case r'work_dir':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.workDirCommaOmitempty = valueDes;
+          result.workDir = valueDes;
           break;
-        case r'env,omitempty':
+        case r'env':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.envCommaOmitempty = valueDes;
+          result.env = valueDes;
           break;
-        case r'timeout_secs,omitempty':
+        case r'timeout_secs':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.timeoutSecsCommaOmitempty = valueDes;
+          result.timeoutSecs = valueDes;
           break;
         case r'capture_output':
           final valueDes = serializers.deserialize(

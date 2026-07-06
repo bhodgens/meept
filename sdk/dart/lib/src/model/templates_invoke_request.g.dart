@@ -10,13 +10,13 @@ class _$TemplatesInvokeRequest extends TemplatesInvokeRequest {
   @override
   final String name;
   @override
-  final String? argsCommaOmitempty;
+  final String? args;
 
   factory _$TemplatesInvokeRequest(
           [void Function(TemplatesInvokeRequestBuilder)? updates]) =>
       (TemplatesInvokeRequestBuilder()..update(updates))._build();
 
-  _$TemplatesInvokeRequest._({required this.name, this.argsCommaOmitempty})
+  _$TemplatesInvokeRequest._({required this.name, this.args})
       : super._();
   @override
   TemplatesInvokeRequest rebuild(
@@ -32,14 +32,14 @@ class _$TemplatesInvokeRequest extends TemplatesInvokeRequest {
     if (identical(other, this)) return true;
     return other is TemplatesInvokeRequest &&
         name == other.name &&
-        argsCommaOmitempty == other.argsCommaOmitempty;
+        args == other.args;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, name.hashCode);
-    _$hash = $jc(_$hash, argsCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, args.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -48,7 +48,7 @@ class _$TemplatesInvokeRequest extends TemplatesInvokeRequest {
   String toString() {
     return (newBuiltValueToStringHelper(r'TemplatesInvokeRequest')
           ..add('name', name)
-          ..add('argsCommaOmitempty', argsCommaOmitempty))
+          ..add('args', args))
         .toString();
   }
 }
@@ -61,10 +61,10 @@ class TemplatesInvokeRequestBuilder
   String? get name => _$this._name;
   set name(String? name) => _$this._name = name;
 
-  String? _argsCommaOmitempty;
-  String? get argsCommaOmitempty => _$this._argsCommaOmitempty;
-  set argsCommaOmitempty(String? argsCommaOmitempty) =>
-      _$this._argsCommaOmitempty = argsCommaOmitempty;
+  String? _args;
+  String? get args => _$this._args;
+  set args(String? args) =>
+      _$this._args = args;
 
   TemplatesInvokeRequestBuilder() {
     TemplatesInvokeRequest._defaults(this);
@@ -74,7 +74,7 @@ class TemplatesInvokeRequestBuilder
     final $v = _$v;
     if ($v != null) {
       _name = $v.name;
-      _argsCommaOmitempty = $v.argsCommaOmitempty;
+      _args = $v.args;
       _$v = null;
     }
     return this;
@@ -98,7 +98,7 @@ class TemplatesInvokeRequestBuilder
         _$TemplatesInvokeRequest._(
           name: BuiltValueNullFieldError.checkNotNull(
               name, r'TemplatesInvokeRequest', 'name'),
-          argsCommaOmitempty: argsCommaOmitempty,
+          args: args,
         );
     replace(_$result);
     return _$result;

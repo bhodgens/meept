@@ -9,7 +9,7 @@ import 'package:meept_client/api.dart';
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **enabled** | **bool** |  | 
-**lastCycleCommaOmitempty** | **String** |  | [optional] 
+**lastCycle** | **String** |  | [optional] 
 **skillsLearned** | **int** |  | 
 **pendingTasks** | **int** |  | 
 

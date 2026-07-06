@@ -38,7 +38,11 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
     super.didUpdateWidget(oldWidget);
     if (widget.sessionId != oldWidget.sessionId) {
       _previousMessageCount = 0;
-      _loadMessages();
+      // Defer to next frame so we don't modify providers during the build
+      // phase (didUpdateWidget runs inside the build lifecycle).
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadMessages();
+      });
     }
   }
 

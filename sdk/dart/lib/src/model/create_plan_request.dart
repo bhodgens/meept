@@ -12,23 +12,23 @@ part 'create_plan_request.g.dart';
 ///
 /// Properties:
 /// * [title] 
-/// * [descriptionCommaOmitempty] 
-/// * [projectIdCommaOmitempty] 
-/// * [projectPathCommaOmitempty] 
+/// * [description] 
+/// * [projectId] 
+/// * [projectPath] 
 /// * [sessionId] 
 @BuiltValue()
 abstract class CreatePlanRequest implements Built<CreatePlanRequest, CreatePlanRequestBuilder> {
   @BuiltValueField(wireName: r'title')
   String get title;
 
-  @BuiltValueField(wireName: r'description,omitempty')
-  String? get descriptionCommaOmitempty;
+  @BuiltValueField(wireName: r'description')
+  String? get description;
 
-  @BuiltValueField(wireName: r'project_id,omitempty')
-  String? get projectIdCommaOmitempty;
+  @BuiltValueField(wireName: r'project_id')
+  String? get projectId;
 
-  @BuiltValueField(wireName: r'project_path,omitempty')
-  String? get projectPathCommaOmitempty;
+  @BuiltValueField(wireName: r'project_path')
+  String? get projectPath;
 
   @BuiltValueField(wireName: r'session_id')
   String get sessionId;
@@ -61,24 +61,24 @@ class _$CreatePlanRequestSerializer implements PrimitiveSerializer<CreatePlanReq
       object.title,
       specifiedType: const FullType(String),
     );
-    if (object.descriptionCommaOmitempty != null) {
-      yield r'description,omitempty';
+    if (object.description != null) {
+      yield r'description';
       yield serializers.serialize(
-        object.descriptionCommaOmitempty,
+        object.description,
         specifiedType: const FullType(String),
       );
     }
-    if (object.projectIdCommaOmitempty != null) {
-      yield r'project_id,omitempty';
+    if (object.projectId != null) {
+      yield r'project_id';
       yield serializers.serialize(
-        object.projectIdCommaOmitempty,
+        object.projectId,
         specifiedType: const FullType(String),
       );
     }
-    if (object.projectPathCommaOmitempty != null) {
-      yield r'project_path,omitempty';
+    if (object.projectPath != null) {
+      yield r'project_path';
       yield serializers.serialize(
-        object.projectPathCommaOmitempty,
+        object.projectPath,
         specifiedType: const FullType(String),
       );
     }
@@ -117,26 +117,26 @@ class _$CreatePlanRequestSerializer implements PrimitiveSerializer<CreatePlanReq
           ) as String;
           result.title = valueDes;
           break;
-        case r'description,omitempty':
+        case r'description':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.descriptionCommaOmitempty = valueDes;
+          result.description = valueDes;
           break;
-        case r'project_id,omitempty':
+        case r'project_id':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.projectIdCommaOmitempty = valueDes;
+          result.projectId = valueDes;
           break;
-        case r'project_path,omitempty':
+        case r'project_path':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.projectPathCommaOmitempty = valueDes;
+          result.projectPath = valueDes;
           break;
         case r'session_id':
           final valueDes = serializers.deserialize(

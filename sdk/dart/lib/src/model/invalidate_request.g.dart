@@ -8,13 +8,13 @@ part of 'invalidate_request.dart';
 
 class _$InvalidateRequest extends InvalidateRequest {
   @override
-  final String? pathCommaOmitempty;
+  final String? path;
 
   factory _$InvalidateRequest(
           [void Function(InvalidateRequestBuilder)? updates]) =>
       (InvalidateRequestBuilder()..update(updates))._build();
 
-  _$InvalidateRequest._({this.pathCommaOmitempty}) : super._();
+  _$InvalidateRequest._({this.path}) : super._();
   @override
   InvalidateRequest rebuild(void Function(InvalidateRequestBuilder) updates) =>
       (toBuilder()..update(updates)).build();
@@ -27,13 +27,13 @@ class _$InvalidateRequest extends InvalidateRequest {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is InvalidateRequest &&
-        pathCommaOmitempty == other.pathCommaOmitempty;
+        path == other.path;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
-    _$hash = $jc(_$hash, pathCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, path.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -41,7 +41,7 @@ class _$InvalidateRequest extends InvalidateRequest {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'InvalidateRequest')
-          ..add('pathCommaOmitempty', pathCommaOmitempty))
+          ..add('path', path))
         .toString();
   }
 }
@@ -50,10 +50,10 @@ class InvalidateRequestBuilder
     implements Builder<InvalidateRequest, InvalidateRequestBuilder> {
   _$InvalidateRequest? _$v;
 
-  String? _pathCommaOmitempty;
-  String? get pathCommaOmitempty => _$this._pathCommaOmitempty;
-  set pathCommaOmitempty(String? pathCommaOmitempty) =>
-      _$this._pathCommaOmitempty = pathCommaOmitempty;
+  String? _path;
+  String? get path => _$this._path;
+  set path(String? path) =>
+      _$this._path = path;
 
   InvalidateRequestBuilder() {
     InvalidateRequest._defaults(this);
@@ -62,7 +62,7 @@ class InvalidateRequestBuilder
   InvalidateRequestBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
-      _pathCommaOmitempty = $v.pathCommaOmitempty;
+      _path = $v.path;
       _$v = null;
     }
     return this;
@@ -84,7 +84,7 @@ class InvalidateRequestBuilder
   _$InvalidateRequest _build() {
     final _$result = _$v ??
         _$InvalidateRequest._(
-          pathCommaOmitempty: pathCommaOmitempty,
+          path: path,
         );
     replace(_$result);
     return _$result;

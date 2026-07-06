@@ -14,9 +14,9 @@ part 'pipeline_step_status.g.dart';
 /// * [id] 
 /// * [name] 
 /// * [status] 
-/// * [errorCommaOmitempty] 
-/// * [startedAtCommaOmitempty] 
-/// * [endedAtCommaOmitempty] 
+/// * [error] 
+/// * [startedAt] 
+/// * [endedAt] 
 @BuiltValue()
 abstract class PipelineStepStatus implements Built<PipelineStepStatus, PipelineStepStatusBuilder> {
   @BuiltValueField(wireName: r'id')
@@ -28,14 +28,14 @@ abstract class PipelineStepStatus implements Built<PipelineStepStatus, PipelineS
   @BuiltValueField(wireName: r'status')
   String get status;
 
-  @BuiltValueField(wireName: r'error,omitempty')
-  String? get errorCommaOmitempty;
+  @BuiltValueField(wireName: r'error')
+  String? get error;
 
-  @BuiltValueField(wireName: r'started_at,omitempty')
-  String? get startedAtCommaOmitempty;
+  @BuiltValueField(wireName: r'started_at')
+  String? get startedAt;
 
-  @BuiltValueField(wireName: r'ended_at,omitempty')
-  String? get endedAtCommaOmitempty;
+  @BuiltValueField(wireName: r'ended_at')
+  String? get endedAt;
 
   PipelineStepStatus._();
 
@@ -75,24 +75,24 @@ class _$PipelineStepStatusSerializer implements PrimitiveSerializer<PipelineStep
       object.status,
       specifiedType: const FullType(String),
     );
-    if (object.errorCommaOmitempty != null) {
-      yield r'error,omitempty';
+    if (object.error != null) {
+      yield r'error';
       yield serializers.serialize(
-        object.errorCommaOmitempty,
+        object.error,
         specifiedType: const FullType(String),
       );
     }
-    if (object.startedAtCommaOmitempty != null) {
-      yield r'started_at,omitempty';
+    if (object.startedAt != null) {
+      yield r'started_at';
       yield serializers.serialize(
-        object.startedAtCommaOmitempty,
+        object.startedAt,
         specifiedType: const FullType.nullable(String),
       );
     }
-    if (object.endedAtCommaOmitempty != null) {
-      yield r'ended_at,omitempty';
+    if (object.endedAt != null) {
+      yield r'ended_at';
       yield serializers.serialize(
-        object.endedAtCommaOmitempty,
+        object.endedAt,
         specifiedType: const FullType.nullable(String),
       );
     }
@@ -140,28 +140,28 @@ class _$PipelineStepStatusSerializer implements PrimitiveSerializer<PipelineStep
           ) as String;
           result.status = valueDes;
           break;
-        case r'error,omitempty':
+        case r'error':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.errorCommaOmitempty = valueDes;
+          result.error = valueDes;
           break;
-        case r'started_at,omitempty':
+        case r'started_at':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.startedAtCommaOmitempty = valueDes;
+          result.startedAt = valueDes;
           break;
-        case r'ended_at,omitempty':
+        case r'ended_at':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.endedAtCommaOmitempty = valueDes;
+          result.endedAt = valueDes;
           break;
         default:
           unhandled.add(key);

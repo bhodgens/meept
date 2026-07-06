@@ -24,9 +24,9 @@ type PipelineStepStatus struct {
 	Id string `json:"id"`
 	Name string `json:"name"`
 	Status string `json:"status"`
-	Erroromitempty *string `json:"error,omitempty,omitempty"`
-	StartedAtomitempty NullableString `json:"started_at,omitempty,omitempty"`
-	EndedAtomitempty NullableString `json:"ended_at,omitempty,omitempty"`
+	Error *string `json:"error,omitempty"`
+	StartedAt NullableString `json:"started_at,omitempty"`
+	EndedAt NullableString `json:"ended_at,omitempty"`
 }
 
 type _PipelineStepStatus PipelineStepStatus
@@ -123,120 +123,120 @@ func (o *PipelineStepStatus) SetStatus(v string) {
 	o.Status = v
 }
 
-// GetErroromitempty returns the Erroromitempty field value if set, zero value otherwise.
-func (o *PipelineStepStatus) GetErroromitempty() string {
-	if o == nil || IsNil(o.Erroromitempty) {
+// GetError returns the Error field value if set, zero value otherwise.
+func (o *PipelineStepStatus) GetError() string {
+	if o == nil || IsNil(o.Error) {
 		var ret string
 		return ret
 	}
-	return *o.Erroromitempty
+	return *o.Error
 }
 
-// GetErroromitemptyOk returns a tuple with the Erroromitempty field value if set, nil otherwise
+// GetErrorOk returns a tuple with the Error field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *PipelineStepStatus) GetErroromitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Erroromitempty) {
+func (o *PipelineStepStatus) GetErrorOk() (*string, bool) {
+	if o == nil || IsNil(o.Error) {
 		return nil, false
 	}
-	return o.Erroromitempty, true
+	return o.Error, true
 }
 
-// HasErroromitempty returns a boolean if a field has been set.
-func (o *PipelineStepStatus) HasErroromitempty() bool {
-	if o != nil && !IsNil(o.Erroromitempty) {
+// HasError returns a boolean if a field has been set.
+func (o *PipelineStepStatus) HasError() bool {
+	if o != nil && !IsNil(o.Error) {
 		return true
 	}
 
 	return false
 }
 
-// SetErroromitempty gets a reference to the given string and assigns it to the Erroromitempty field.
-func (o *PipelineStepStatus) SetErroromitempty(v string) {
-	o.Erroromitempty = &v
+// SetError gets a reference to the given string and assigns it to the Error field.
+func (o *PipelineStepStatus) SetError(v string) {
+	o.Error = &v
 }
 
-// GetStartedAtomitempty returns the StartedAtomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *PipelineStepStatus) GetStartedAtomitempty() string {
-	if o == nil || IsNil(o.StartedAtomitempty.Get()) {
+// GetStartedAt returns the StartedAt field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *PipelineStepStatus) GetStartedAt() string {
+	if o == nil || IsNil(o.StartedAt.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.StartedAtomitempty.Get()
+	return *o.StartedAt.Get()
 }
 
-// GetStartedAtomitemptyOk returns a tuple with the StartedAtomitempty field value if set, nil otherwise
+// GetStartedAtOk returns a tuple with the StartedAt field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *PipelineStepStatus) GetStartedAtomitemptyOk() (*string, bool) {
+func (o *PipelineStepStatus) GetStartedAtOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.StartedAtomitempty.Get(), o.StartedAtomitempty.IsSet()
+	return o.StartedAt.Get(), o.StartedAt.IsSet()
 }
 
-// HasStartedAtomitempty returns a boolean if a field has been set.
-func (o *PipelineStepStatus) HasStartedAtomitempty() bool {
-	if o != nil && o.StartedAtomitempty.IsSet() {
+// HasStartedAt returns a boolean if a field has been set.
+func (o *PipelineStepStatus) HasStartedAt() bool {
+	if o != nil && o.StartedAt.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetStartedAtomitempty gets a reference to the given NullableString and assigns it to the StartedAtomitempty field.
-func (o *PipelineStepStatus) SetStartedAtomitempty(v string) {
-	o.StartedAtomitempty.Set(&v)
+// SetStartedAt gets a reference to the given NullableString and assigns it to the StartedAt field.
+func (o *PipelineStepStatus) SetStartedAt(v string) {
+	o.StartedAt.Set(&v)
 }
-// SetStartedAtomitemptyNil sets the value for StartedAtomitempty to be an explicit nil
-func (o *PipelineStepStatus) SetStartedAtomitemptyNil() {
-	o.StartedAtomitempty.Set(nil)
-}
-
-// UnsetStartedAtomitempty ensures that no value is present for StartedAtomitempty, not even an explicit nil
-func (o *PipelineStepStatus) UnsetStartedAtomitempty() {
-	o.StartedAtomitempty.Unset()
+// SetStartedAtNil sets the value for StartedAt to be an explicit nil
+func (o *PipelineStepStatus) SetStartedAtNil() {
+	o.StartedAt.Set(nil)
 }
 
-// GetEndedAtomitempty returns the EndedAtomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *PipelineStepStatus) GetEndedAtomitempty() string {
-	if o == nil || IsNil(o.EndedAtomitempty.Get()) {
+// UnsetStartedAt ensures that no value is present for StartedAt, not even an explicit nil
+func (o *PipelineStepStatus) UnsetStartedAt() {
+	o.StartedAt.Unset()
+}
+
+// GetEndedAt returns the EndedAt field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *PipelineStepStatus) GetEndedAt() string {
+	if o == nil || IsNil(o.EndedAt.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.EndedAtomitempty.Get()
+	return *o.EndedAt.Get()
 }
 
-// GetEndedAtomitemptyOk returns a tuple with the EndedAtomitempty field value if set, nil otherwise
+// GetEndedAtOk returns a tuple with the EndedAt field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *PipelineStepStatus) GetEndedAtomitemptyOk() (*string, bool) {
+func (o *PipelineStepStatus) GetEndedAtOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.EndedAtomitempty.Get(), o.EndedAtomitempty.IsSet()
+	return o.EndedAt.Get(), o.EndedAt.IsSet()
 }
 
-// HasEndedAtomitempty returns a boolean if a field has been set.
-func (o *PipelineStepStatus) HasEndedAtomitempty() bool {
-	if o != nil && o.EndedAtomitempty.IsSet() {
+// HasEndedAt returns a boolean if a field has been set.
+func (o *PipelineStepStatus) HasEndedAt() bool {
+	if o != nil && o.EndedAt.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetEndedAtomitempty gets a reference to the given NullableString and assigns it to the EndedAtomitempty field.
-func (o *PipelineStepStatus) SetEndedAtomitempty(v string) {
-	o.EndedAtomitempty.Set(&v)
+// SetEndedAt gets a reference to the given NullableString and assigns it to the EndedAt field.
+func (o *PipelineStepStatus) SetEndedAt(v string) {
+	o.EndedAt.Set(&v)
 }
-// SetEndedAtomitemptyNil sets the value for EndedAtomitempty to be an explicit nil
-func (o *PipelineStepStatus) SetEndedAtomitemptyNil() {
-	o.EndedAtomitempty.Set(nil)
+// SetEndedAtNil sets the value for EndedAt to be an explicit nil
+func (o *PipelineStepStatus) SetEndedAtNil() {
+	o.EndedAt.Set(nil)
 }
 
-// UnsetEndedAtomitempty ensures that no value is present for EndedAtomitempty, not even an explicit nil
-func (o *PipelineStepStatus) UnsetEndedAtomitempty() {
-	o.EndedAtomitempty.Unset()
+// UnsetEndedAt ensures that no value is present for EndedAt, not even an explicit nil
+func (o *PipelineStepStatus) UnsetEndedAt() {
+	o.EndedAt.Unset()
 }
 
 func (o PipelineStepStatus) MarshalJSON() ([]byte, error) {
@@ -252,14 +252,14 @@ func (o PipelineStepStatus) ToMap() (map[string]interface{}, error) {
 	toSerialize["id"] = o.Id
 	toSerialize["name"] = o.Name
 	toSerialize["status"] = o.Status
-	if !IsNil(o.Erroromitempty) {
-		toSerialize["error,omitempty"] = o.Erroromitempty
+	if !IsNil(o.Error) {
+		toSerialize["error"] = o.Error
 	}
-	if o.StartedAtomitempty.IsSet() {
-		toSerialize["started_at,omitempty"] = o.StartedAtomitempty.Get()
+	if o.StartedAt.IsSet() {
+		toSerialize["started_at"] = o.StartedAt.Get()
 	}
-	if o.EndedAtomitempty.IsSet() {
-		toSerialize["ended_at,omitempty"] = o.EndedAtomitempty.Get()
+	if o.EndedAt.IsSet() {
+		toSerialize["ended_at"] = o.EndedAt.Get()
 	}
 	return toSerialize, nil
 }

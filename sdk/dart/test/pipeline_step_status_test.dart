@@ -22,18 +22,18 @@ void main() {
       // TODO
     });
 
-    // String errorCommaOmitempty
-    test('to test the property `errorCommaOmitempty`', () async {
+    // String error
+    test('to test the property `error`', () async {
       // TODO
     });
 
-    // String startedAtCommaOmitempty
-    test('to test the property `startedAtCommaOmitempty`', () async {
+    // String startedAt
+    test('to test the property `startedAt`', () async {
       // TODO
     });
 
-    // String endedAtCommaOmitempty
-    test('to test the property `endedAtCommaOmitempty`', () async {
+    // String endedAt
+    test('to test the property `endedAt`', () async {
       // TODO
     });
 

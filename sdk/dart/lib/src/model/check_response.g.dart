@@ -10,12 +10,12 @@ class _$CheckResponse extends CheckResponse {
   @override
   final bool allowed;
   @override
-  final String? reasonCommaOmitempty;
+  final String? reason;
 
   factory _$CheckResponse([void Function(CheckResponseBuilder)? updates]) =>
       (CheckResponseBuilder()..update(updates))._build();
 
-  _$CheckResponse._({required this.allowed, this.reasonCommaOmitempty})
+  _$CheckResponse._({required this.allowed, this.reason})
       : super._();
   @override
   CheckResponse rebuild(void Function(CheckResponseBuilder) updates) =>
@@ -29,14 +29,14 @@ class _$CheckResponse extends CheckResponse {
     if (identical(other, this)) return true;
     return other is CheckResponse &&
         allowed == other.allowed &&
-        reasonCommaOmitempty == other.reasonCommaOmitempty;
+        reason == other.reason;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, allowed.hashCode);
-    _$hash = $jc(_$hash, reasonCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, reason.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -45,7 +45,7 @@ class _$CheckResponse extends CheckResponse {
   String toString() {
     return (newBuiltValueToStringHelper(r'CheckResponse')
           ..add('allowed', allowed)
-          ..add('reasonCommaOmitempty', reasonCommaOmitempty))
+          ..add('reason', reason))
         .toString();
   }
 }
@@ -58,10 +58,10 @@ class CheckResponseBuilder
   bool? get allowed => _$this._allowed;
   set allowed(bool? allowed) => _$this._allowed = allowed;
 
-  String? _reasonCommaOmitempty;
-  String? get reasonCommaOmitempty => _$this._reasonCommaOmitempty;
-  set reasonCommaOmitempty(String? reasonCommaOmitempty) =>
-      _$this._reasonCommaOmitempty = reasonCommaOmitempty;
+  String? _reason;
+  String? get reason => _$this._reason;
+  set reason(String? reason) =>
+      _$this._reason = reason;
 
   CheckResponseBuilder() {
     CheckResponse._defaults(this);
@@ -71,7 +71,7 @@ class CheckResponseBuilder
     final $v = _$v;
     if ($v != null) {
       _allowed = $v.allowed;
-      _reasonCommaOmitempty = $v.reasonCommaOmitempty;
+      _reason = $v.reason;
       _$v = null;
     }
     return this;
@@ -95,7 +95,7 @@ class CheckResponseBuilder
         _$CheckResponse._(
           allowed: BuiltValueNullFieldError.checkNotNull(
               allowed, r'CheckResponse', 'allowed'),
-          reasonCommaOmitempty: reasonCommaOmitempty,
+          reason: reason,
         );
     replace(_$result);
     return _$result;

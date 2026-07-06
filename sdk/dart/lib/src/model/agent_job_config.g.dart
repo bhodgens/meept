@@ -10,23 +10,23 @@ class _$AgentJobConfig extends AgentJobConfig {
   @override
   final String prompt;
   @override
-  final String? contextCommaOmitempty;
+  final String? context;
   @override
-  final String? modelCommaOmitempty;
+  final String? model;
   @override
-  final int? maxTokensCommaOmitempty;
+  final int? maxTokens;
   @override
-  final num? temperatureCommaOmitempty;
+  final num? temperature;
 
   factory _$AgentJobConfig([void Function(AgentJobConfigBuilder)? updates]) =>
       (AgentJobConfigBuilder()..update(updates))._build();
 
   _$AgentJobConfig._(
       {required this.prompt,
-      this.contextCommaOmitempty,
-      this.modelCommaOmitempty,
-      this.maxTokensCommaOmitempty,
-      this.temperatureCommaOmitempty})
+      this.context,
+      this.model,
+      this.maxTokens,
+      this.temperature})
       : super._();
   @override
   AgentJobConfig rebuild(void Function(AgentJobConfigBuilder) updates) =>
@@ -40,20 +40,20 @@ class _$AgentJobConfig extends AgentJobConfig {
     if (identical(other, this)) return true;
     return other is AgentJobConfig &&
         prompt == other.prompt &&
-        contextCommaOmitempty == other.contextCommaOmitempty &&
-        modelCommaOmitempty == other.modelCommaOmitempty &&
-        maxTokensCommaOmitempty == other.maxTokensCommaOmitempty &&
-        temperatureCommaOmitempty == other.temperatureCommaOmitempty;
+        context == other.context &&
+        model == other.model &&
+        maxTokens == other.maxTokens &&
+        temperature == other.temperature;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, prompt.hashCode);
-    _$hash = $jc(_$hash, contextCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, modelCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, maxTokensCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, temperatureCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, context.hashCode);
+    _$hash = $jc(_$hash, model.hashCode);
+    _$hash = $jc(_$hash, maxTokens.hashCode);
+    _$hash = $jc(_$hash, temperature.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -62,10 +62,10 @@ class _$AgentJobConfig extends AgentJobConfig {
   String toString() {
     return (newBuiltValueToStringHelper(r'AgentJobConfig')
           ..add('prompt', prompt)
-          ..add('contextCommaOmitempty', contextCommaOmitempty)
-          ..add('modelCommaOmitempty', modelCommaOmitempty)
-          ..add('maxTokensCommaOmitempty', maxTokensCommaOmitempty)
-          ..add('temperatureCommaOmitempty', temperatureCommaOmitempty))
+          ..add('context', context)
+          ..add('model', model)
+          ..add('maxTokens', maxTokens)
+          ..add('temperature', temperature))
         .toString();
   }
 }
@@ -78,25 +78,25 @@ class AgentJobConfigBuilder
   String? get prompt => _$this._prompt;
   set prompt(String? prompt) => _$this._prompt = prompt;
 
-  String? _contextCommaOmitempty;
-  String? get contextCommaOmitempty => _$this._contextCommaOmitempty;
-  set contextCommaOmitempty(String? contextCommaOmitempty) =>
-      _$this._contextCommaOmitempty = contextCommaOmitempty;
+  String? _context;
+  String? get context => _$this._context;
+  set context(String? context) =>
+      _$this._context = context;
 
-  String? _modelCommaOmitempty;
-  String? get modelCommaOmitempty => _$this._modelCommaOmitempty;
-  set modelCommaOmitempty(String? modelCommaOmitempty) =>
-      _$this._modelCommaOmitempty = modelCommaOmitempty;
+  String? _model;
+  String? get model => _$this._model;
+  set model(String? model) =>
+      _$this._model = model;
 
-  int? _maxTokensCommaOmitempty;
-  int? get maxTokensCommaOmitempty => _$this._maxTokensCommaOmitempty;
-  set maxTokensCommaOmitempty(int? maxTokensCommaOmitempty) =>
-      _$this._maxTokensCommaOmitempty = maxTokensCommaOmitempty;
+  int? _maxTokens;
+  int? get maxTokens => _$this._maxTokens;
+  set maxTokens(int? maxTokens) =>
+      _$this._maxTokens = maxTokens;
 
-  num? _temperatureCommaOmitempty;
-  num? get temperatureCommaOmitempty => _$this._temperatureCommaOmitempty;
-  set temperatureCommaOmitempty(num? temperatureCommaOmitempty) =>
-      _$this._temperatureCommaOmitempty = temperatureCommaOmitempty;
+  num? _temperature;
+  num? get temperature => _$this._temperature;
+  set temperature(num? temperature) =>
+      _$this._temperature = temperature;
 
   AgentJobConfigBuilder() {
     AgentJobConfig._defaults(this);
@@ -106,10 +106,10 @@ class AgentJobConfigBuilder
     final $v = _$v;
     if ($v != null) {
       _prompt = $v.prompt;
-      _contextCommaOmitempty = $v.contextCommaOmitempty;
-      _modelCommaOmitempty = $v.modelCommaOmitempty;
-      _maxTokensCommaOmitempty = $v.maxTokensCommaOmitempty;
-      _temperatureCommaOmitempty = $v.temperatureCommaOmitempty;
+      _context = $v.context;
+      _model = $v.model;
+      _maxTokens = $v.maxTokens;
+      _temperature = $v.temperature;
       _$v = null;
     }
     return this;
@@ -133,10 +133,10 @@ class AgentJobConfigBuilder
         _$AgentJobConfig._(
           prompt: BuiltValueNullFieldError.checkNotNull(
               prompt, r'AgentJobConfig', 'prompt'),
-          contextCommaOmitempty: contextCommaOmitempty,
-          modelCommaOmitempty: modelCommaOmitempty,
-          maxTokensCommaOmitempty: maxTokensCommaOmitempty,
-          temperatureCommaOmitempty: temperatureCommaOmitempty,
+          context: context,
+          model: model,
+          maxTokens: maxTokens,
+          temperature: temperature,
         );
     replace(_$result);
     return _$result;

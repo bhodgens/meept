@@ -22,9 +22,9 @@ var _ MappedNullable = &CreatePlanRequest{}
 // CreatePlanRequest struct for CreatePlanRequest
 type CreatePlanRequest struct {
 	Title string `json:"title"`
-	Descriptionomitempty *string `json:"description,omitempty,omitempty"`
-	ProjectIdomitempty *string `json:"project_id,omitempty,omitempty"`
-	ProjectPathomitempty *string `json:"project_path,omitempty,omitempty"`
+	Description *string `json:"description,omitempty"`
+	ProjectId *string `json:"project_id,omitempty"`
+	ProjectPath *string `json:"project_path,omitempty"`
 	SessionId string `json:"session_id"`
 }
 
@@ -73,100 +73,100 @@ func (o *CreatePlanRequest) SetTitle(v string) {
 	o.Title = v
 }
 
-// GetDescriptionomitempty returns the Descriptionomitempty field value if set, zero value otherwise.
-func (o *CreatePlanRequest) GetDescriptionomitempty() string {
-	if o == nil || IsNil(o.Descriptionomitempty) {
+// GetDescription returns the Description field value if set, zero value otherwise.
+func (o *CreatePlanRequest) GetDescription() string {
+	if o == nil || IsNil(o.Description) {
 		var ret string
 		return ret
 	}
-	return *o.Descriptionomitempty
+	return *o.Description
 }
 
-// GetDescriptionomitemptyOk returns a tuple with the Descriptionomitempty field value if set, nil otherwise
+// GetDescriptionOk returns a tuple with the Description field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CreatePlanRequest) GetDescriptionomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Descriptionomitempty) {
+func (o *CreatePlanRequest) GetDescriptionOk() (*string, bool) {
+	if o == nil || IsNil(o.Description) {
 		return nil, false
 	}
-	return o.Descriptionomitempty, true
+	return o.Description, true
 }
 
-// HasDescriptionomitempty returns a boolean if a field has been set.
-func (o *CreatePlanRequest) HasDescriptionomitempty() bool {
-	if o != nil && !IsNil(o.Descriptionomitempty) {
+// HasDescription returns a boolean if a field has been set.
+func (o *CreatePlanRequest) HasDescription() bool {
+	if o != nil && !IsNil(o.Description) {
 		return true
 	}
 
 	return false
 }
 
-// SetDescriptionomitempty gets a reference to the given string and assigns it to the Descriptionomitempty field.
-func (o *CreatePlanRequest) SetDescriptionomitempty(v string) {
-	o.Descriptionomitempty = &v
+// SetDescription gets a reference to the given string and assigns it to the Description field.
+func (o *CreatePlanRequest) SetDescription(v string) {
+	o.Description = &v
 }
 
-// GetProjectIdomitempty returns the ProjectIdomitempty field value if set, zero value otherwise.
-func (o *CreatePlanRequest) GetProjectIdomitempty() string {
-	if o == nil || IsNil(o.ProjectIdomitempty) {
+// GetProjectId returns the ProjectId field value if set, zero value otherwise.
+func (o *CreatePlanRequest) GetProjectId() string {
+	if o == nil || IsNil(o.ProjectId) {
 		var ret string
 		return ret
 	}
-	return *o.ProjectIdomitempty
+	return *o.ProjectId
 }
 
-// GetProjectIdomitemptyOk returns a tuple with the ProjectIdomitempty field value if set, nil otherwise
+// GetProjectIdOk returns a tuple with the ProjectId field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CreatePlanRequest) GetProjectIdomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.ProjectIdomitempty) {
+func (o *CreatePlanRequest) GetProjectIdOk() (*string, bool) {
+	if o == nil || IsNil(o.ProjectId) {
 		return nil, false
 	}
-	return o.ProjectIdomitempty, true
+	return o.ProjectId, true
 }
 
-// HasProjectIdomitempty returns a boolean if a field has been set.
-func (o *CreatePlanRequest) HasProjectIdomitempty() bool {
-	if o != nil && !IsNil(o.ProjectIdomitempty) {
+// HasProjectId returns a boolean if a field has been set.
+func (o *CreatePlanRequest) HasProjectId() bool {
+	if o != nil && !IsNil(o.ProjectId) {
 		return true
 	}
 
 	return false
 }
 
-// SetProjectIdomitempty gets a reference to the given string and assigns it to the ProjectIdomitempty field.
-func (o *CreatePlanRequest) SetProjectIdomitempty(v string) {
-	o.ProjectIdomitempty = &v
+// SetProjectId gets a reference to the given string and assigns it to the ProjectId field.
+func (o *CreatePlanRequest) SetProjectId(v string) {
+	o.ProjectId = &v
 }
 
-// GetProjectPathomitempty returns the ProjectPathomitempty field value if set, zero value otherwise.
-func (o *CreatePlanRequest) GetProjectPathomitempty() string {
-	if o == nil || IsNil(o.ProjectPathomitempty) {
+// GetProjectPath returns the ProjectPath field value if set, zero value otherwise.
+func (o *CreatePlanRequest) GetProjectPath() string {
+	if o == nil || IsNil(o.ProjectPath) {
 		var ret string
 		return ret
 	}
-	return *o.ProjectPathomitempty
+	return *o.ProjectPath
 }
 
-// GetProjectPathomitemptyOk returns a tuple with the ProjectPathomitempty field value if set, nil otherwise
+// GetProjectPathOk returns a tuple with the ProjectPath field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CreatePlanRequest) GetProjectPathomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.ProjectPathomitempty) {
+func (o *CreatePlanRequest) GetProjectPathOk() (*string, bool) {
+	if o == nil || IsNil(o.ProjectPath) {
 		return nil, false
 	}
-	return o.ProjectPathomitempty, true
+	return o.ProjectPath, true
 }
 
-// HasProjectPathomitempty returns a boolean if a field has been set.
-func (o *CreatePlanRequest) HasProjectPathomitempty() bool {
-	if o != nil && !IsNil(o.ProjectPathomitempty) {
+// HasProjectPath returns a boolean if a field has been set.
+func (o *CreatePlanRequest) HasProjectPath() bool {
+	if o != nil && !IsNil(o.ProjectPath) {
 		return true
 	}
 
 	return false
 }
 
-// SetProjectPathomitempty gets a reference to the given string and assigns it to the ProjectPathomitempty field.
-func (o *CreatePlanRequest) SetProjectPathomitempty(v string) {
-	o.ProjectPathomitempty = &v
+// SetProjectPath gets a reference to the given string and assigns it to the ProjectPath field.
+func (o *CreatePlanRequest) SetProjectPath(v string) {
+	o.ProjectPath = &v
 }
 
 // GetSessionId returns the SessionId field value
@@ -204,14 +204,14 @@ func (o CreatePlanRequest) MarshalJSON() ([]byte, error) {
 func (o CreatePlanRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["title"] = o.Title
-	if !IsNil(o.Descriptionomitempty) {
-		toSerialize["description,omitempty"] = o.Descriptionomitempty
+	if !IsNil(o.Description) {
+		toSerialize["description"] = o.Description
 	}
-	if !IsNil(o.ProjectIdomitempty) {
-		toSerialize["project_id,omitempty"] = o.ProjectIdomitempty
+	if !IsNil(o.ProjectId) {
+		toSerialize["project_id"] = o.ProjectId
 	}
-	if !IsNil(o.ProjectPathomitempty) {
-		toSerialize["project_path,omitempty"] = o.ProjectPathomitempty
+	if !IsNil(o.ProjectPath) {
+		toSerialize["project_path"] = o.ProjectPath
 	}
 	toSerialize["session_id"] = o.SessionId
 	return toSerialize, nil

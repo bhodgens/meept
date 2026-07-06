@@ -24,7 +24,7 @@ type PaginatedResponse struct {
 	Items []string `json:"items"`
 	Total int32 `json:"total"`
 	HasMore bool `json:"has_more"`
-	NextOffsetomitempty *int32 `json:"next_offset,omitempty,omitempty"`
+	NextOffset *int32 `json:"next_offset,omitempty"`
 }
 
 type _PaginatedResponse PaginatedResponse
@@ -123,36 +123,36 @@ func (o *PaginatedResponse) SetHasMore(v bool) {
 	o.HasMore = v
 }
 
-// GetNextOffsetomitempty returns the NextOffsetomitempty field value if set, zero value otherwise.
-func (o *PaginatedResponse) GetNextOffsetomitempty() int32 {
-	if o == nil || IsNil(o.NextOffsetomitempty) {
+// GetNextOffset returns the NextOffset field value if set, zero value otherwise.
+func (o *PaginatedResponse) GetNextOffset() int32 {
+	if o == nil || IsNil(o.NextOffset) {
 		var ret int32
 		return ret
 	}
-	return *o.NextOffsetomitempty
+	return *o.NextOffset
 }
 
-// GetNextOffsetomitemptyOk returns a tuple with the NextOffsetomitempty field value if set, nil otherwise
+// GetNextOffsetOk returns a tuple with the NextOffset field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *PaginatedResponse) GetNextOffsetomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.NextOffsetomitempty) {
+func (o *PaginatedResponse) GetNextOffsetOk() (*int32, bool) {
+	if o == nil || IsNil(o.NextOffset) {
 		return nil, false
 	}
-	return o.NextOffsetomitempty, true
+	return o.NextOffset, true
 }
 
-// HasNextOffsetomitempty returns a boolean if a field has been set.
-func (o *PaginatedResponse) HasNextOffsetomitempty() bool {
-	if o != nil && !IsNil(o.NextOffsetomitempty) {
+// HasNextOffset returns a boolean if a field has been set.
+func (o *PaginatedResponse) HasNextOffset() bool {
+	if o != nil && !IsNil(o.NextOffset) {
 		return true
 	}
 
 	return false
 }
 
-// SetNextOffsetomitempty gets a reference to the given int32 and assigns it to the NextOffsetomitempty field.
-func (o *PaginatedResponse) SetNextOffsetomitempty(v int32) {
-	o.NextOffsetomitempty = &v
+// SetNextOffset gets a reference to the given int32 and assigns it to the NextOffset field.
+func (o *PaginatedResponse) SetNextOffset(v int32) {
+	o.NextOffset = &v
 }
 
 func (o PaginatedResponse) MarshalJSON() ([]byte, error) {
@@ -170,8 +170,8 @@ func (o PaginatedResponse) ToMap() (map[string]interface{}, error) {
 	}
 	toSerialize["total"] = o.Total
 	toSerialize["has_more"] = o.HasMore
-	if !IsNil(o.NextOffsetomitempty) {
-		toSerialize["next_offset,omitempty"] = o.NextOffsetomitempty
+	if !IsNil(o.NextOffset) {
+		toSerialize["next_offset"] = o.NextOffset
 	}
 	return toSerialize, nil
 }

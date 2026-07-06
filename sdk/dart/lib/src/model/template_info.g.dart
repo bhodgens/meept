@@ -14,11 +14,11 @@ class _$TemplateInfo extends TemplateInfo {
   @override
   final JsonObject scope;
   @override
-  final String? pathCommaOmitempty;
+  final String? path;
   @override
   final int priority;
   @override
-  final String? bodyCommaOmitempty;
+  final String? body;
 
   factory _$TemplateInfo([void Function(TemplateInfoBuilder)? updates]) =>
       (TemplateInfoBuilder()..update(updates))._build();
@@ -27,9 +27,9 @@ class _$TemplateInfo extends TemplateInfo {
       {required this.name,
       required this.description,
       required this.scope,
-      this.pathCommaOmitempty,
+      this.path,
       required this.priority,
-      this.bodyCommaOmitempty})
+      this.body})
       : super._();
   @override
   TemplateInfo rebuild(void Function(TemplateInfoBuilder) updates) =>
@@ -45,9 +45,9 @@ class _$TemplateInfo extends TemplateInfo {
         name == other.name &&
         description == other.description &&
         scope == other.scope &&
-        pathCommaOmitempty == other.pathCommaOmitempty &&
+        path == other.path &&
         priority == other.priority &&
-        bodyCommaOmitempty == other.bodyCommaOmitempty;
+        body == other.body;
   }
 
   @override
@@ -56,9 +56,9 @@ class _$TemplateInfo extends TemplateInfo {
     _$hash = $jc(_$hash, name.hashCode);
     _$hash = $jc(_$hash, description.hashCode);
     _$hash = $jc(_$hash, scope.hashCode);
-    _$hash = $jc(_$hash, pathCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, path.hashCode);
     _$hash = $jc(_$hash, priority.hashCode);
-    _$hash = $jc(_$hash, bodyCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, body.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -69,9 +69,9 @@ class _$TemplateInfo extends TemplateInfo {
           ..add('name', name)
           ..add('description', description)
           ..add('scope', scope)
-          ..add('pathCommaOmitempty', pathCommaOmitempty)
+          ..add('path', path)
           ..add('priority', priority)
-          ..add('bodyCommaOmitempty', bodyCommaOmitempty))
+          ..add('body', body))
         .toString();
   }
 }
@@ -92,19 +92,19 @@ class TemplateInfoBuilder
   JsonObject? get scope => _$this._scope;
   set scope(JsonObject? scope) => _$this._scope = scope;
 
-  String? _pathCommaOmitempty;
-  String? get pathCommaOmitempty => _$this._pathCommaOmitempty;
-  set pathCommaOmitempty(String? pathCommaOmitempty) =>
-      _$this._pathCommaOmitempty = pathCommaOmitempty;
+  String? _path;
+  String? get path => _$this._path;
+  set path(String? path) =>
+      _$this._path = path;
 
   int? _priority;
   int? get priority => _$this._priority;
   set priority(int? priority) => _$this._priority = priority;
 
-  String? _bodyCommaOmitempty;
-  String? get bodyCommaOmitempty => _$this._bodyCommaOmitempty;
-  set bodyCommaOmitempty(String? bodyCommaOmitempty) =>
-      _$this._bodyCommaOmitempty = bodyCommaOmitempty;
+  String? _body;
+  String? get body => _$this._body;
+  set body(String? body) =>
+      _$this._body = body;
 
   TemplateInfoBuilder() {
     TemplateInfo._defaults(this);
@@ -116,9 +116,9 @@ class TemplateInfoBuilder
       _name = $v.name;
       _description = $v.description;
       _scope = $v.scope;
-      _pathCommaOmitempty = $v.pathCommaOmitempty;
+      _path = $v.path;
       _priority = $v.priority;
-      _bodyCommaOmitempty = $v.bodyCommaOmitempty;
+      _body = $v.body;
       _$v = null;
     }
     return this;
@@ -146,10 +146,10 @@ class TemplateInfoBuilder
               description, r'TemplateInfo', 'description'),
           scope: BuiltValueNullFieldError.checkNotNull(
               scope, r'TemplateInfo', 'scope'),
-          pathCommaOmitempty: pathCommaOmitempty,
+          path: path,
           priority: BuiltValueNullFieldError.checkNotNull(
               priority, r'TemplateInfo', 'priority'),
-          bodyCommaOmitempty: bodyCommaOmitempty,
+          body: body,
         );
     replace(_$result);
     return _$result;

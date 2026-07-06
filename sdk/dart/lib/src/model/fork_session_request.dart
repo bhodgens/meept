@@ -13,7 +13,7 @@ part 'fork_session_request.g.dart';
 /// Properties:
 /// * [sessionId] 
 /// * [fromMessageId] 
-/// * [nameCommaOmitempty] 
+/// * [name] 
 @BuiltValue()
 abstract class ForkSessionRequest implements Built<ForkSessionRequest, ForkSessionRequestBuilder> {
   @BuiltValueField(wireName: r'session_id')
@@ -22,8 +22,8 @@ abstract class ForkSessionRequest implements Built<ForkSessionRequest, ForkSessi
   @BuiltValueField(wireName: r'from_message_id')
   int get fromMessageId;
 
-  @BuiltValueField(wireName: r'name,omitempty')
-  String? get nameCommaOmitempty;
+  @BuiltValueField(wireName: r'name')
+  String? get name;
 
   ForkSessionRequest._();
 
@@ -58,10 +58,10 @@ class _$ForkSessionRequestSerializer implements PrimitiveSerializer<ForkSessionR
       object.fromMessageId,
       specifiedType: const FullType(int),
     );
-    if (object.nameCommaOmitempty != null) {
-      yield r'name,omitempty';
+    if (object.name != null) {
+      yield r'name';
       yield serializers.serialize(
-        object.nameCommaOmitempty,
+        object.name,
         specifiedType: const FullType(String),
       );
     }
@@ -102,12 +102,12 @@ class _$ForkSessionRequestSerializer implements PrimitiveSerializer<ForkSessionR
           ) as int;
           result.fromMessageId = valueDes;
           break;
-        case r'name,omitempty':
+        case r'name':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.nameCommaOmitempty = valueDes;
+          result.name = valueDes;
           break;
         default:
           unhandled.add(key);

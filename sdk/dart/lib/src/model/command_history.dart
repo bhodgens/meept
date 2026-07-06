@@ -14,8 +14,8 @@ part 'command_history.g.dart';
 /// Properties:
 /// * [id] 
 /// * [command] 
-/// * [outputCommaOmitempty] 
-/// * [stderrCommaOmitempty] 
+/// * [output] 
+/// * [stderr] 
 /// * [exitCode] 
 /// * [timestamp] 
 /// * [workingDir] 
@@ -30,11 +30,11 @@ abstract class CommandHistory implements Built<CommandHistory, CommandHistoryBui
   @BuiltValueField(wireName: r'command')
   String get command;
 
-  @BuiltValueField(wireName: r'output,omitempty')
-  String? get outputCommaOmitempty;
+  @BuiltValueField(wireName: r'output')
+  String? get output;
 
-  @BuiltValueField(wireName: r'stderr,omitempty')
-  String? get stderrCommaOmitempty;
+  @BuiltValueField(wireName: r'stderr')
+  String? get stderr;
 
   @BuiltValueField(wireName: r'exit_code')
   int get exitCode;
@@ -87,17 +87,17 @@ class _$CommandHistorySerializer implements PrimitiveSerializer<CommandHistory> 
       object.command,
       specifiedType: const FullType(String),
     );
-    if (object.outputCommaOmitempty != null) {
-      yield r'output,omitempty';
+    if (object.output != null) {
+      yield r'output';
       yield serializers.serialize(
-        object.outputCommaOmitempty,
+        object.output,
         specifiedType: const FullType(String),
       );
     }
-    if (object.stderrCommaOmitempty != null) {
-      yield r'stderr,omitempty';
+    if (object.stderr != null) {
+      yield r'stderr';
       yield serializers.serialize(
-        object.stderrCommaOmitempty,
+        object.stderr,
         specifiedType: const FullType(String),
       );
     }
@@ -168,19 +168,19 @@ class _$CommandHistorySerializer implements PrimitiveSerializer<CommandHistory> 
           ) as String;
           result.command = valueDes;
           break;
-        case r'output,omitempty':
+        case r'output':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.outputCommaOmitempty = valueDes;
+          result.output = valueDes;
           break;
-        case r'stderr,omitempty':
+        case r'stderr':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.stderrCommaOmitempty = valueDes;
+          result.stderr = valueDes;
           break;
         case r'exit_code':
           final valueDes = serializers.deserialize(

@@ -7,13 +7,13 @@ void main() {
   // TODO add properties to the builder and call build()
 
   group(TaskListRequest, () {
-    // int limitCommaOmitempty
-    test('to test the property `limitCommaOmitempty`', () async {
+    // int limit
+    test('to test the property `limit`', () async {
       // TODO
     });
 
-    // String sessionIdCommaOmitempty
-    test('to test the property `sessionIdCommaOmitempty`', () async {
+    // String sessionId
+    test('to test the property `sessionId`', () async {
       // TODO
     });
 

@@ -21,11 +21,11 @@ var _ MappedNullable = &CreatePipelineRequest{}
 
 // CreatePipelineRequest struct for CreatePipelineRequest
 type CreatePipelineRequest struct {
-	Idomitempty *string `json:"id,omitempty,omitempty"`
+	Id *string `json:"id,omitempty"`
 	Name string `json:"name"`
-	Descriptionomitempty *string `json:"description,omitempty,omitempty"`
-	Stepsomitempty []string `json:"steps,omitempty,omitempty"`
-	Metadataomitempty NullableString `json:"metadata,omitempty,omitempty"`
+	Description *string `json:"description,omitempty"`
+	Steps []string `json:"steps,omitempty"`
+	Metadata NullableString `json:"metadata,omitempty"`
 }
 
 type _CreatePipelineRequest CreatePipelineRequest
@@ -48,36 +48,36 @@ func NewCreatePipelineRequestWithDefaults() *CreatePipelineRequest {
 	return &this
 }
 
-// GetIdomitempty returns the Idomitempty field value if set, zero value otherwise.
-func (o *CreatePipelineRequest) GetIdomitempty() string {
-	if o == nil || IsNil(o.Idomitempty) {
+// GetId returns the Id field value if set, zero value otherwise.
+func (o *CreatePipelineRequest) GetId() string {
+	if o == nil || IsNil(o.Id) {
 		var ret string
 		return ret
 	}
-	return *o.Idomitempty
+	return *o.Id
 }
 
-// GetIdomitemptyOk returns a tuple with the Idomitempty field value if set, nil otherwise
+// GetIdOk returns a tuple with the Id field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CreatePipelineRequest) GetIdomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Idomitempty) {
+func (o *CreatePipelineRequest) GetIdOk() (*string, bool) {
+	if o == nil || IsNil(o.Id) {
 		return nil, false
 	}
-	return o.Idomitempty, true
+	return o.Id, true
 }
 
-// HasIdomitempty returns a boolean if a field has been set.
-func (o *CreatePipelineRequest) HasIdomitempty() bool {
-	if o != nil && !IsNil(o.Idomitempty) {
+// HasId returns a boolean if a field has been set.
+func (o *CreatePipelineRequest) HasId() bool {
+	if o != nil && !IsNil(o.Id) {
 		return true
 	}
 
 	return false
 }
 
-// SetIdomitempty gets a reference to the given string and assigns it to the Idomitempty field.
-func (o *CreatePipelineRequest) SetIdomitempty(v string) {
-	o.Idomitempty = &v
+// SetId gets a reference to the given string and assigns it to the Id field.
+func (o *CreatePipelineRequest) SetId(v string) {
+	o.Id = &v
 }
 
 // GetName returns the Name field value
@@ -104,111 +104,111 @@ func (o *CreatePipelineRequest) SetName(v string) {
 	o.Name = v
 }
 
-// GetDescriptionomitempty returns the Descriptionomitempty field value if set, zero value otherwise.
-func (o *CreatePipelineRequest) GetDescriptionomitempty() string {
-	if o == nil || IsNil(o.Descriptionomitempty) {
+// GetDescription returns the Description field value if set, zero value otherwise.
+func (o *CreatePipelineRequest) GetDescription() string {
+	if o == nil || IsNil(o.Description) {
 		var ret string
 		return ret
 	}
-	return *o.Descriptionomitempty
+	return *o.Description
 }
 
-// GetDescriptionomitemptyOk returns a tuple with the Descriptionomitempty field value if set, nil otherwise
+// GetDescriptionOk returns a tuple with the Description field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CreatePipelineRequest) GetDescriptionomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Descriptionomitempty) {
+func (o *CreatePipelineRequest) GetDescriptionOk() (*string, bool) {
+	if o == nil || IsNil(o.Description) {
 		return nil, false
 	}
-	return o.Descriptionomitempty, true
+	return o.Description, true
 }
 
-// HasDescriptionomitempty returns a boolean if a field has been set.
-func (o *CreatePipelineRequest) HasDescriptionomitempty() bool {
-	if o != nil && !IsNil(o.Descriptionomitempty) {
+// HasDescription returns a boolean if a field has been set.
+func (o *CreatePipelineRequest) HasDescription() bool {
+	if o != nil && !IsNil(o.Description) {
 		return true
 	}
 
 	return false
 }
 
-// SetDescriptionomitempty gets a reference to the given string and assigns it to the Descriptionomitempty field.
-func (o *CreatePipelineRequest) SetDescriptionomitempty(v string) {
-	o.Descriptionomitempty = &v
+// SetDescription gets a reference to the given string and assigns it to the Description field.
+func (o *CreatePipelineRequest) SetDescription(v string) {
+	o.Description = &v
 }
 
-// GetStepsomitempty returns the Stepsomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *CreatePipelineRequest) GetStepsomitempty() []string {
+// GetSteps returns the Steps field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *CreatePipelineRequest) GetSteps() []string {
 	if o == nil {
 		var ret []string
 		return ret
 	}
-	return o.Stepsomitempty
+	return o.Steps
 }
 
-// GetStepsomitemptyOk returns a tuple with the Stepsomitempty field value if set, nil otherwise
+// GetStepsOk returns a tuple with the Steps field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *CreatePipelineRequest) GetStepsomitemptyOk() ([]string, bool) {
-	if o == nil || IsNil(o.Stepsomitempty) {
+func (o *CreatePipelineRequest) GetStepsOk() ([]string, bool) {
+	if o == nil || IsNil(o.Steps) {
 		return nil, false
 	}
-	return o.Stepsomitempty, true
+	return o.Steps, true
 }
 
-// HasStepsomitempty returns a boolean if a field has been set.
-func (o *CreatePipelineRequest) HasStepsomitempty() bool {
-	if o != nil && !IsNil(o.Stepsomitempty) {
+// HasSteps returns a boolean if a field has been set.
+func (o *CreatePipelineRequest) HasSteps() bool {
+	if o != nil && !IsNil(o.Steps) {
 		return true
 	}
 
 	return false
 }
 
-// SetStepsomitempty gets a reference to the given []string and assigns it to the Stepsomitempty field.
-func (o *CreatePipelineRequest) SetStepsomitempty(v []string) {
-	o.Stepsomitempty = v
+// SetSteps gets a reference to the given []string and assigns it to the Steps field.
+func (o *CreatePipelineRequest) SetSteps(v []string) {
+	o.Steps = v
 }
 
-// GetMetadataomitempty returns the Metadataomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *CreatePipelineRequest) GetMetadataomitempty() string {
-	if o == nil || IsNil(o.Metadataomitempty.Get()) {
+// GetMetadata returns the Metadata field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *CreatePipelineRequest) GetMetadata() string {
+	if o == nil || IsNil(o.Metadata.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.Metadataomitempty.Get()
+	return *o.Metadata.Get()
 }
 
-// GetMetadataomitemptyOk returns a tuple with the Metadataomitempty field value if set, nil otherwise
+// GetMetadataOk returns a tuple with the Metadata field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *CreatePipelineRequest) GetMetadataomitemptyOk() (*string, bool) {
+func (o *CreatePipelineRequest) GetMetadataOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.Metadataomitempty.Get(), o.Metadataomitempty.IsSet()
+	return o.Metadata.Get(), o.Metadata.IsSet()
 }
 
-// HasMetadataomitempty returns a boolean if a field has been set.
-func (o *CreatePipelineRequest) HasMetadataomitempty() bool {
-	if o != nil && o.Metadataomitempty.IsSet() {
+// HasMetadata returns a boolean if a field has been set.
+func (o *CreatePipelineRequest) HasMetadata() bool {
+	if o != nil && o.Metadata.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetMetadataomitempty gets a reference to the given NullableString and assigns it to the Metadataomitempty field.
-func (o *CreatePipelineRequest) SetMetadataomitempty(v string) {
-	o.Metadataomitempty.Set(&v)
+// SetMetadata gets a reference to the given NullableString and assigns it to the Metadata field.
+func (o *CreatePipelineRequest) SetMetadata(v string) {
+	o.Metadata.Set(&v)
 }
-// SetMetadataomitemptyNil sets the value for Metadataomitempty to be an explicit nil
-func (o *CreatePipelineRequest) SetMetadataomitemptyNil() {
-	o.Metadataomitempty.Set(nil)
+// SetMetadataNil sets the value for Metadata to be an explicit nil
+func (o *CreatePipelineRequest) SetMetadataNil() {
+	o.Metadata.Set(nil)
 }
 
-// UnsetMetadataomitempty ensures that no value is present for Metadataomitempty, not even an explicit nil
-func (o *CreatePipelineRequest) UnsetMetadataomitempty() {
-	o.Metadataomitempty.Unset()
+// UnsetMetadata ensures that no value is present for Metadata, not even an explicit nil
+func (o *CreatePipelineRequest) UnsetMetadata() {
+	o.Metadata.Unset()
 }
 
 func (o CreatePipelineRequest) MarshalJSON() ([]byte, error) {
@@ -221,18 +221,18 @@ func (o CreatePipelineRequest) MarshalJSON() ([]byte, error) {
 
 func (o CreatePipelineRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	if !IsNil(o.Idomitempty) {
-		toSerialize["id,omitempty"] = o.Idomitempty
+	if !IsNil(o.Id) {
+		toSerialize["id"] = o.Id
 	}
 	toSerialize["name"] = o.Name
-	if !IsNil(o.Descriptionomitempty) {
-		toSerialize["description,omitempty"] = o.Descriptionomitempty
+	if !IsNil(o.Description) {
+		toSerialize["description"] = o.Description
 	}
-	if o.Stepsomitempty != nil {
-		toSerialize["steps,omitempty"] = o.Stepsomitempty
+	if o.Steps != nil {
+		toSerialize["steps"] = o.Steps
 	}
-	if o.Metadataomitempty.IsSet() {
-		toSerialize["metadata,omitempty"] = o.Metadataomitempty.Get()
+	if o.Metadata.IsSet() {
+		toSerialize["metadata"] = o.Metadata.Get()
 	}
 	return toSerialize, nil
 }

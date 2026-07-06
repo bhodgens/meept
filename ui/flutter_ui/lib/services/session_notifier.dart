@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
 import 'sdk_client.dart';
@@ -55,17 +57,25 @@ class SessionNotifier extends StateNotifier<SessionState> {
     }
   }
 
-  /// Create a new session with the given title
+  /// Create a new session with the given title.
+  ///
+  /// Inserts the newly created session into local state immediately so
+  /// the caller gets it back without waiting for a list refresh. A
+  /// background [loadSessions] is fired-and-forgotten via [unawaited]
+  /// to reconcile with the server's persisted ordering; if that call
+  /// hangs, the UI is unaffected because the Future is detached.
   Future<Session?> createSession(String title) async {
     try {
       final raw = await sdkClient.createSession(title: title);
       final session = Session.fromJson(raw);
-      // Reload sessions from server to ensure we have the persisted list
-      state = state.copyWith(isLoading: true, error: null);
-      final rawSessions = await sdkClient.listSessions();
-      final sessions =
-          rawSessions.map(Session.fromJson).toList(growable: false);
-      state = state.copyWith(sessions: sessions, isLoading: false);
+      // Insert into local state right away — no server round-trip.
+      final updated = [session, ...state.sessions];
+      updateSessions(updated);
+      // Refresh in the background to pick up server-side sort order or
+      // server-defaulted fields. Deliberately unawaited: the caller has
+      // already received the session and the UI must not hang if the
+      // daemon's GET /api/v1/sessions stalls.
+      unawaited(loadSessions());
       return session;
     } catch (e) {
       state = state.copyWith(

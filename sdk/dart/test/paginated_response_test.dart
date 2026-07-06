@@ -22,8 +22,8 @@ void main() {
       // TODO
     });
 
-    // int nextOffsetCommaOmitempty
-    test('to test the property `nextOffsetCommaOmitempty`', () async {
+    // int nextOffset
+    test('to test the property `nextOffset`', () async {
       // TODO
     });
 

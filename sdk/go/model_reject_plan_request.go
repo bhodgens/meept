@@ -24,7 +24,7 @@ type RejectPlanRequest struct {
 	PlanId string `json:"plan_id"`
 	SessionId string `json:"session_id"`
 	By string `json:"by"`
-	Reasonomitempty *string `json:"reason,omitempty,omitempty"`
+	Reason *string `json:"reason,omitempty"`
 }
 
 type _RejectPlanRequest RejectPlanRequest
@@ -121,36 +121,36 @@ func (o *RejectPlanRequest) SetBy(v string) {
 	o.By = v
 }
 
-// GetReasonomitempty returns the Reasonomitempty field value if set, zero value otherwise.
-func (o *RejectPlanRequest) GetReasonomitempty() string {
-	if o == nil || IsNil(o.Reasonomitempty) {
+// GetReason returns the Reason field value if set, zero value otherwise.
+func (o *RejectPlanRequest) GetReason() string {
+	if o == nil || IsNil(o.Reason) {
 		var ret string
 		return ret
 	}
-	return *o.Reasonomitempty
+	return *o.Reason
 }
 
-// GetReasonomitemptyOk returns a tuple with the Reasonomitempty field value if set, nil otherwise
+// GetReasonOk returns a tuple with the Reason field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *RejectPlanRequest) GetReasonomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Reasonomitempty) {
+func (o *RejectPlanRequest) GetReasonOk() (*string, bool) {
+	if o == nil || IsNil(o.Reason) {
 		return nil, false
 	}
-	return o.Reasonomitempty, true
+	return o.Reason, true
 }
 
-// HasReasonomitempty returns a boolean if a field has been set.
-func (o *RejectPlanRequest) HasReasonomitempty() bool {
-	if o != nil && !IsNil(o.Reasonomitempty) {
+// HasReason returns a boolean if a field has been set.
+func (o *RejectPlanRequest) HasReason() bool {
+	if o != nil && !IsNil(o.Reason) {
 		return true
 	}
 
 	return false
 }
 
-// SetReasonomitempty gets a reference to the given string and assigns it to the Reasonomitempty field.
-func (o *RejectPlanRequest) SetReasonomitempty(v string) {
-	o.Reasonomitempty = &v
+// SetReason gets a reference to the given string and assigns it to the Reason field.
+func (o *RejectPlanRequest) SetReason(v string) {
+	o.Reason = &v
 }
 
 func (o RejectPlanRequest) MarshalJSON() ([]byte, error) {
@@ -166,8 +166,8 @@ func (o RejectPlanRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize["plan_id"] = o.PlanId
 	toSerialize["session_id"] = o.SessionId
 	toSerialize["by"] = o.By
-	if !IsNil(o.Reasonomitempty) {
-		toSerialize["reason,omitempty"] = o.Reasonomitempty
+	if !IsNil(o.Reason) {
+		toSerialize["reason"] = o.Reason
 	}
 	return toSerialize, nil
 }

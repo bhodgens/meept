@@ -14,11 +14,11 @@ class _$PipelineStep extends PipelineStep {
   @override
   final String status;
   @override
-  final String? errorCommaOmitempty;
+  final String? error;
   @override
-  final String? startedAtCommaOmitempty;
+  final String? startedAt;
   @override
-  final String? endedAtCommaOmitempty;
+  final String? endedAt;
 
   factory _$PipelineStep([void Function(PipelineStepBuilder)? updates]) =>
       (PipelineStepBuilder()..update(updates))._build();
@@ -27,9 +27,9 @@ class _$PipelineStep extends PipelineStep {
       {required this.id,
       required this.name,
       required this.status,
-      this.errorCommaOmitempty,
-      this.startedAtCommaOmitempty,
-      this.endedAtCommaOmitempty})
+      this.error,
+      this.startedAt,
+      this.endedAt})
       : super._();
   @override
   PipelineStep rebuild(void Function(PipelineStepBuilder) updates) =>
@@ -45,9 +45,9 @@ class _$PipelineStep extends PipelineStep {
         id == other.id &&
         name == other.name &&
         status == other.status &&
-        errorCommaOmitempty == other.errorCommaOmitempty &&
-        startedAtCommaOmitempty == other.startedAtCommaOmitempty &&
-        endedAtCommaOmitempty == other.endedAtCommaOmitempty;
+        error == other.error &&
+        startedAt == other.startedAt &&
+        endedAt == other.endedAt;
   }
 
   @override
@@ -56,9 +56,9 @@ class _$PipelineStep extends PipelineStep {
     _$hash = $jc(_$hash, id.hashCode);
     _$hash = $jc(_$hash, name.hashCode);
     _$hash = $jc(_$hash, status.hashCode);
-    _$hash = $jc(_$hash, errorCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, startedAtCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, endedAtCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, error.hashCode);
+    _$hash = $jc(_$hash, startedAt.hashCode);
+    _$hash = $jc(_$hash, endedAt.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -69,9 +69,9 @@ class _$PipelineStep extends PipelineStep {
           ..add('id', id)
           ..add('name', name)
           ..add('status', status)
-          ..add('errorCommaOmitempty', errorCommaOmitempty)
-          ..add('startedAtCommaOmitempty', startedAtCommaOmitempty)
-          ..add('endedAtCommaOmitempty', endedAtCommaOmitempty))
+          ..add('error', error)
+          ..add('startedAt', startedAt)
+          ..add('endedAt', endedAt))
         .toString();
   }
 }
@@ -92,20 +92,20 @@ class PipelineStepBuilder
   String? get status => _$this._status;
   set status(String? status) => _$this._status = status;
 
-  String? _errorCommaOmitempty;
-  String? get errorCommaOmitempty => _$this._errorCommaOmitempty;
-  set errorCommaOmitempty(String? errorCommaOmitempty) =>
-      _$this._errorCommaOmitempty = errorCommaOmitempty;
+  String? _error;
+  String? get error => _$this._error;
+  set error(String? error) =>
+      _$this._error = error;
 
-  String? _startedAtCommaOmitempty;
-  String? get startedAtCommaOmitempty => _$this._startedAtCommaOmitempty;
-  set startedAtCommaOmitempty(String? startedAtCommaOmitempty) =>
-      _$this._startedAtCommaOmitempty = startedAtCommaOmitempty;
+  String? _startedAt;
+  String? get startedAt => _$this._startedAt;
+  set startedAt(String? startedAt) =>
+      _$this._startedAt = startedAt;
 
-  String? _endedAtCommaOmitempty;
-  String? get endedAtCommaOmitempty => _$this._endedAtCommaOmitempty;
-  set endedAtCommaOmitempty(String? endedAtCommaOmitempty) =>
-      _$this._endedAtCommaOmitempty = endedAtCommaOmitempty;
+  String? _endedAt;
+  String? get endedAt => _$this._endedAt;
+  set endedAt(String? endedAt) =>
+      _$this._endedAt = endedAt;
 
   PipelineStepBuilder() {
     PipelineStep._defaults(this);
@@ -117,9 +117,9 @@ class PipelineStepBuilder
       _id = $v.id;
       _name = $v.name;
       _status = $v.status;
-      _errorCommaOmitempty = $v.errorCommaOmitempty;
-      _startedAtCommaOmitempty = $v.startedAtCommaOmitempty;
-      _endedAtCommaOmitempty = $v.endedAtCommaOmitempty;
+      _error = $v.error;
+      _startedAt = $v.startedAt;
+      _endedAt = $v.endedAt;
       _$v = null;
     }
     return this;
@@ -146,9 +146,9 @@ class PipelineStepBuilder
               name, r'PipelineStep', 'name'),
           status: BuiltValueNullFieldError.checkNotNull(
               status, r'PipelineStep', 'status'),
-          errorCommaOmitempty: errorCommaOmitempty,
-          startedAtCommaOmitempty: startedAtCommaOmitempty,
-          endedAtCommaOmitempty: endedAtCommaOmitempty,
+          error: error,
+          startedAt: startedAt,
+          endedAt: endedAt,
         );
     replace(_$result);
     return _$result;

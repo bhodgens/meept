@@ -8,9 +8,9 @@ import 'package:meept_client/api.dart';
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**limitCommaOmitempty** | **int** |  | [optional] 
-**offsetCommaOmitempty** | **int** |  | [optional] 
-**filterCommaOmitempty** | **String** |  | [optional] 
+**limit** | **int** |  | [optional] 
+**offset** | **int** |  | [optional] 
+**filter** | **String** |  | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

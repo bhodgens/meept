@@ -22,7 +22,7 @@ var _ MappedNullable = &CheckResponse{}
 // CheckResponse struct for CheckResponse
 type CheckResponse struct {
 	Allowed bool `json:"allowed"`
-	Reasonomitempty *string `json:"reason,omitempty,omitempty"`
+	Reason *string `json:"reason,omitempty"`
 }
 
 type _CheckResponse CheckResponse
@@ -69,36 +69,36 @@ func (o *CheckResponse) SetAllowed(v bool) {
 	o.Allowed = v
 }
 
-// GetReasonomitempty returns the Reasonomitempty field value if set, zero value otherwise.
-func (o *CheckResponse) GetReasonomitempty() string {
-	if o == nil || IsNil(o.Reasonomitempty) {
+// GetReason returns the Reason field value if set, zero value otherwise.
+func (o *CheckResponse) GetReason() string {
+	if o == nil || IsNil(o.Reason) {
 		var ret string
 		return ret
 	}
-	return *o.Reasonomitempty
+	return *o.Reason
 }
 
-// GetReasonomitemptyOk returns a tuple with the Reasonomitempty field value if set, nil otherwise
+// GetReasonOk returns a tuple with the Reason field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CheckResponse) GetReasonomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Reasonomitempty) {
+func (o *CheckResponse) GetReasonOk() (*string, bool) {
+	if o == nil || IsNil(o.Reason) {
 		return nil, false
 	}
-	return o.Reasonomitempty, true
+	return o.Reason, true
 }
 
-// HasReasonomitempty returns a boolean if a field has been set.
-func (o *CheckResponse) HasReasonomitempty() bool {
-	if o != nil && !IsNil(o.Reasonomitempty) {
+// HasReason returns a boolean if a field has been set.
+func (o *CheckResponse) HasReason() bool {
+	if o != nil && !IsNil(o.Reason) {
 		return true
 	}
 
 	return false
 }
 
-// SetReasonomitempty gets a reference to the given string and assigns it to the Reasonomitempty field.
-func (o *CheckResponse) SetReasonomitempty(v string) {
-	o.Reasonomitempty = &v
+// SetReason gets a reference to the given string and assigns it to the Reason field.
+func (o *CheckResponse) SetReason(v string) {
+	o.Reason = &v
 }
 
 func (o CheckResponse) MarshalJSON() ([]byte, error) {
@@ -112,8 +112,8 @@ func (o CheckResponse) MarshalJSON() ([]byte, error) {
 func (o CheckResponse) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["allowed"] = o.Allowed
-	if !IsNil(o.Reasonomitempty) {
-		toSerialize["reason,omitempty"] = o.Reasonomitempty
+	if !IsNil(o.Reason) {
+		toSerialize["reason"] = o.Reason
 	}
 	return toSerialize, nil
 }

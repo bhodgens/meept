@@ -13,8 +13,8 @@ part 'publish_request.g.dart';
 /// Properties:
 /// * [topic] 
 /// * [type] 
-/// * [sourceCommaOmitempty] 
-/// * [payloadCommaOmitempty] 
+/// * [source] 
+/// * [payload] 
 @BuiltValue()
 abstract class PublishRequest implements Built<PublishRequest, PublishRequestBuilder> {
   @BuiltValueField(wireName: r'topic')
@@ -23,11 +23,11 @@ abstract class PublishRequest implements Built<PublishRequest, PublishRequestBui
   @BuiltValueField(wireName: r'type')
   String get type;
 
-  @BuiltValueField(wireName: r'source,omitempty')
-  String? get sourceCommaOmitempty;
+  @BuiltValueField(wireName: r'source')
+  String? get source;
 
-  @BuiltValueField(wireName: r'payload,omitempty')
-  String? get payloadCommaOmitempty;
+  @BuiltValueField(wireName: r'payload')
+  String? get payload;
 
   PublishRequest._();
 
@@ -62,17 +62,17 @@ class _$PublishRequestSerializer implements PrimitiveSerializer<PublishRequest> 
       object.type,
       specifiedType: const FullType(String),
     );
-    if (object.sourceCommaOmitempty != null) {
-      yield r'source,omitempty';
+    if (object.source != null) {
+      yield r'source';
       yield serializers.serialize(
-        object.sourceCommaOmitempty,
+        object.source,
         specifiedType: const FullType(String),
       );
     }
-    if (object.payloadCommaOmitempty != null) {
-      yield r'payload,omitempty';
+    if (object.payload != null) {
+      yield r'payload';
       yield serializers.serialize(
-        object.payloadCommaOmitempty,
+        object.payload,
         specifiedType: const FullType.nullable(String),
       );
     }
@@ -113,20 +113,20 @@ class _$PublishRequestSerializer implements PrimitiveSerializer<PublishRequest> 
           ) as String;
           result.type = valueDes;
           break;
-        case r'source,omitempty':
+        case r'source':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.sourceCommaOmitempty = valueDes;
+          result.source = valueDes;
           break;
-        case r'payload,omitempty':
+        case r'payload':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.payloadCommaOmitempty = valueDes;
+          result.payload = valueDes;
           break;
         default:
           unhandled.add(key);

@@ -8,13 +8,13 @@ part of 'templates_list_request.dart';
 
 class _$TemplatesListRequest extends TemplatesListRequest {
   @override
-  final int? limitCommaOmitempty;
+  final int? limit;
 
   factory _$TemplatesListRequest(
           [void Function(TemplatesListRequestBuilder)? updates]) =>
       (TemplatesListRequestBuilder()..update(updates))._build();
 
-  _$TemplatesListRequest._({this.limitCommaOmitempty}) : super._();
+  _$TemplatesListRequest._({this.limit}) : super._();
   @override
   TemplatesListRequest rebuild(
           void Function(TemplatesListRequestBuilder) updates) =>
@@ -28,13 +28,13 @@ class _$TemplatesListRequest extends TemplatesListRequest {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is TemplatesListRequest &&
-        limitCommaOmitempty == other.limitCommaOmitempty;
+        limit == other.limit;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
-    _$hash = $jc(_$hash, limitCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, limit.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -42,7 +42,7 @@ class _$TemplatesListRequest extends TemplatesListRequest {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'TemplatesListRequest')
-          ..add('limitCommaOmitempty', limitCommaOmitempty))
+          ..add('limit', limit))
         .toString();
   }
 }
@@ -51,10 +51,10 @@ class TemplatesListRequestBuilder
     implements Builder<TemplatesListRequest, TemplatesListRequestBuilder> {
   _$TemplatesListRequest? _$v;
 
-  int? _limitCommaOmitempty;
-  int? get limitCommaOmitempty => _$this._limitCommaOmitempty;
-  set limitCommaOmitempty(int? limitCommaOmitempty) =>
-      _$this._limitCommaOmitempty = limitCommaOmitempty;
+  int? _limit;
+  int? get limit => _$this._limit;
+  set limit(int? limit) =>
+      _$this._limit = limit;
 
   TemplatesListRequestBuilder() {
     TemplatesListRequest._defaults(this);
@@ -63,7 +63,7 @@ class TemplatesListRequestBuilder
   TemplatesListRequestBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
-      _limitCommaOmitempty = $v.limitCommaOmitempty;
+      _limit = $v.limit;
       _$v = null;
     }
     return this;
@@ -85,7 +85,7 @@ class TemplatesListRequestBuilder
   _$TemplatesListRequest _build() {
     final _$result = _$v ??
         _$TemplatesListRequest._(
-          limitCommaOmitempty: limitCommaOmitempty,
+          limit: limit,
         );
     replace(_$result);
     return _$result;

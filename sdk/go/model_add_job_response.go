@@ -25,9 +25,9 @@ type AddJobResponse struct {
 	Name string `json:"name"`
 	Schedule string `json:"schedule"`
 	Enabled bool `json:"enabled"`
-	LastRunomitempty NullableString `json:"last_run,omitempty,omitempty"`
-	NextRunomitempty NullableString `json:"next_run,omitempty,omitempty"`
-	LastErroromitempty *string `json:"last_error,omitempty,omitempty"`
+	LastRun NullableString `json:"last_run,omitempty"`
+	NextRun NullableString `json:"next_run,omitempty"`
+	LastError *string `json:"last_error,omitempty"`
 	RunCount int32 `json:"run_count"`
 	IsRunning bool `json:"is_running"`
 }
@@ -153,120 +153,120 @@ func (o *AddJobResponse) SetEnabled(v bool) {
 	o.Enabled = v
 }
 
-// GetLastRunomitempty returns the LastRunomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *AddJobResponse) GetLastRunomitempty() string {
-	if o == nil || IsNil(o.LastRunomitempty.Get()) {
+// GetLastRun returns the LastRun field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *AddJobResponse) GetLastRun() string {
+	if o == nil || IsNil(o.LastRun.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.LastRunomitempty.Get()
+	return *o.LastRun.Get()
 }
 
-// GetLastRunomitemptyOk returns a tuple with the LastRunomitempty field value if set, nil otherwise
+// GetLastRunOk returns a tuple with the LastRun field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *AddJobResponse) GetLastRunomitemptyOk() (*string, bool) {
+func (o *AddJobResponse) GetLastRunOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.LastRunomitempty.Get(), o.LastRunomitempty.IsSet()
+	return o.LastRun.Get(), o.LastRun.IsSet()
 }
 
-// HasLastRunomitempty returns a boolean if a field has been set.
-func (o *AddJobResponse) HasLastRunomitempty() bool {
-	if o != nil && o.LastRunomitempty.IsSet() {
+// HasLastRun returns a boolean if a field has been set.
+func (o *AddJobResponse) HasLastRun() bool {
+	if o != nil && o.LastRun.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetLastRunomitempty gets a reference to the given NullableString and assigns it to the LastRunomitempty field.
-func (o *AddJobResponse) SetLastRunomitempty(v string) {
-	o.LastRunomitempty.Set(&v)
+// SetLastRun gets a reference to the given NullableString and assigns it to the LastRun field.
+func (o *AddJobResponse) SetLastRun(v string) {
+	o.LastRun.Set(&v)
 }
-// SetLastRunomitemptyNil sets the value for LastRunomitempty to be an explicit nil
-func (o *AddJobResponse) SetLastRunomitemptyNil() {
-	o.LastRunomitempty.Set(nil)
-}
-
-// UnsetLastRunomitempty ensures that no value is present for LastRunomitempty, not even an explicit nil
-func (o *AddJobResponse) UnsetLastRunomitempty() {
-	o.LastRunomitempty.Unset()
+// SetLastRunNil sets the value for LastRun to be an explicit nil
+func (o *AddJobResponse) SetLastRunNil() {
+	o.LastRun.Set(nil)
 }
 
-// GetNextRunomitempty returns the NextRunomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *AddJobResponse) GetNextRunomitempty() string {
-	if o == nil || IsNil(o.NextRunomitempty.Get()) {
+// UnsetLastRun ensures that no value is present for LastRun, not even an explicit nil
+func (o *AddJobResponse) UnsetLastRun() {
+	o.LastRun.Unset()
+}
+
+// GetNextRun returns the NextRun field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *AddJobResponse) GetNextRun() string {
+	if o == nil || IsNil(o.NextRun.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.NextRunomitempty.Get()
+	return *o.NextRun.Get()
 }
 
-// GetNextRunomitemptyOk returns a tuple with the NextRunomitempty field value if set, nil otherwise
+// GetNextRunOk returns a tuple with the NextRun field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *AddJobResponse) GetNextRunomitemptyOk() (*string, bool) {
+func (o *AddJobResponse) GetNextRunOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.NextRunomitempty.Get(), o.NextRunomitempty.IsSet()
+	return o.NextRun.Get(), o.NextRun.IsSet()
 }
 
-// HasNextRunomitempty returns a boolean if a field has been set.
-func (o *AddJobResponse) HasNextRunomitempty() bool {
-	if o != nil && o.NextRunomitempty.IsSet() {
+// HasNextRun returns a boolean if a field has been set.
+func (o *AddJobResponse) HasNextRun() bool {
+	if o != nil && o.NextRun.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetNextRunomitempty gets a reference to the given NullableString and assigns it to the NextRunomitempty field.
-func (o *AddJobResponse) SetNextRunomitempty(v string) {
-	o.NextRunomitempty.Set(&v)
+// SetNextRun gets a reference to the given NullableString and assigns it to the NextRun field.
+func (o *AddJobResponse) SetNextRun(v string) {
+	o.NextRun.Set(&v)
 }
-// SetNextRunomitemptyNil sets the value for NextRunomitempty to be an explicit nil
-func (o *AddJobResponse) SetNextRunomitemptyNil() {
-	o.NextRunomitempty.Set(nil)
-}
-
-// UnsetNextRunomitempty ensures that no value is present for NextRunomitempty, not even an explicit nil
-func (o *AddJobResponse) UnsetNextRunomitempty() {
-	o.NextRunomitempty.Unset()
+// SetNextRunNil sets the value for NextRun to be an explicit nil
+func (o *AddJobResponse) SetNextRunNil() {
+	o.NextRun.Set(nil)
 }
 
-// GetLastErroromitempty returns the LastErroromitempty field value if set, zero value otherwise.
-func (o *AddJobResponse) GetLastErroromitempty() string {
-	if o == nil || IsNil(o.LastErroromitempty) {
+// UnsetNextRun ensures that no value is present for NextRun, not even an explicit nil
+func (o *AddJobResponse) UnsetNextRun() {
+	o.NextRun.Unset()
+}
+
+// GetLastError returns the LastError field value if set, zero value otherwise.
+func (o *AddJobResponse) GetLastError() string {
+	if o == nil || IsNil(o.LastError) {
 		var ret string
 		return ret
 	}
-	return *o.LastErroromitempty
+	return *o.LastError
 }
 
-// GetLastErroromitemptyOk returns a tuple with the LastErroromitempty field value if set, nil otherwise
+// GetLastErrorOk returns a tuple with the LastError field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *AddJobResponse) GetLastErroromitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.LastErroromitempty) {
+func (o *AddJobResponse) GetLastErrorOk() (*string, bool) {
+	if o == nil || IsNil(o.LastError) {
 		return nil, false
 	}
-	return o.LastErroromitempty, true
+	return o.LastError, true
 }
 
-// HasLastErroromitempty returns a boolean if a field has been set.
-func (o *AddJobResponse) HasLastErroromitempty() bool {
-	if o != nil && !IsNil(o.LastErroromitempty) {
+// HasLastError returns a boolean if a field has been set.
+func (o *AddJobResponse) HasLastError() bool {
+	if o != nil && !IsNil(o.LastError) {
 		return true
 	}
 
 	return false
 }
 
-// SetLastErroromitempty gets a reference to the given string and assigns it to the LastErroromitempty field.
-func (o *AddJobResponse) SetLastErroromitempty(v string) {
-	o.LastErroromitempty = &v
+// SetLastError gets a reference to the given string and assigns it to the LastError field.
+func (o *AddJobResponse) SetLastError(v string) {
+	o.LastError = &v
 }
 
 // GetRunCount returns the RunCount field value
@@ -331,14 +331,14 @@ func (o AddJobResponse) ToMap() (map[string]interface{}, error) {
 	toSerialize["name"] = o.Name
 	toSerialize["schedule"] = o.Schedule
 	toSerialize["enabled"] = o.Enabled
-	if o.LastRunomitempty.IsSet() {
-		toSerialize["last_run,omitempty"] = o.LastRunomitempty.Get()
+	if o.LastRun.IsSet() {
+		toSerialize["last_run"] = o.LastRun.Get()
 	}
-	if o.NextRunomitempty.IsSet() {
-		toSerialize["next_run,omitempty"] = o.NextRunomitempty.Get()
+	if o.NextRun.IsSet() {
+		toSerialize["next_run"] = o.NextRun.Get()
 	}
-	if !IsNil(o.LastErroromitempty) {
-		toSerialize["last_error,omitempty"] = o.LastErroromitempty
+	if !IsNil(o.LastError) {
+		toSerialize["last_error"] = o.LastError
 	}
 	toSerialize["run_count"] = o.RunCount
 	toSerialize["is_running"] = o.IsRunning

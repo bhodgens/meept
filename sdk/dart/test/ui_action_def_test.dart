@@ -22,8 +22,8 @@ void main() {
       // TODO
     });
 
-    // String styleCommaOmitempty
-    test('to test the property `styleCommaOmitempty`', () async {
+    // String style
+    test('to test the property `style`', () async {
       // TODO
     });
 

@@ -22,10 +22,10 @@ var _ MappedNullable = &ShellJobConfig{}
 // ShellJobConfig struct for ShellJobConfig
 type ShellJobConfig struct {
 	Command string `json:"command"`
-	Argsomitempty NullableString `json:"args,omitempty,omitempty"`
-	WorkDiromitempty *string `json:"work_dir,omitempty,omitempty"`
-	Envomitempty NullableString `json:"env,omitempty,omitempty"`
-	TimeoutSecsomitempty *int32 `json:"timeout_secs,omitempty,omitempty"`
+	Args NullableString `json:"args,omitempty"`
+	WorkDir *string `json:"work_dir,omitempty"`
+	Env NullableString `json:"env,omitempty"`
+	TimeoutSecs *int32 `json:"timeout_secs,omitempty"`
 	CaptureOutput bool `json:"capture_output"`
 }
 
@@ -74,152 +74,152 @@ func (o *ShellJobConfig) SetCommand(v string) {
 	o.Command = v
 }
 
-// GetArgsomitempty returns the Argsomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *ShellJobConfig) GetArgsomitempty() string {
-	if o == nil || IsNil(o.Argsomitempty.Get()) {
+// GetArgs returns the Args field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *ShellJobConfig) GetArgs() string {
+	if o == nil || IsNil(o.Args.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.Argsomitempty.Get()
+	return *o.Args.Get()
 }
 
-// GetArgsomitemptyOk returns a tuple with the Argsomitempty field value if set, nil otherwise
+// GetArgsOk returns a tuple with the Args field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *ShellJobConfig) GetArgsomitemptyOk() (*string, bool) {
+func (o *ShellJobConfig) GetArgsOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.Argsomitempty.Get(), o.Argsomitempty.IsSet()
+	return o.Args.Get(), o.Args.IsSet()
 }
 
-// HasArgsomitempty returns a boolean if a field has been set.
-func (o *ShellJobConfig) HasArgsomitempty() bool {
-	if o != nil && o.Argsomitempty.IsSet() {
+// HasArgs returns a boolean if a field has been set.
+func (o *ShellJobConfig) HasArgs() bool {
+	if o != nil && o.Args.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetArgsomitempty gets a reference to the given NullableString and assigns it to the Argsomitempty field.
-func (o *ShellJobConfig) SetArgsomitempty(v string) {
-	o.Argsomitempty.Set(&v)
+// SetArgs gets a reference to the given NullableString and assigns it to the Args field.
+func (o *ShellJobConfig) SetArgs(v string) {
+	o.Args.Set(&v)
 }
-// SetArgsomitemptyNil sets the value for Argsomitempty to be an explicit nil
-func (o *ShellJobConfig) SetArgsomitemptyNil() {
-	o.Argsomitempty.Set(nil)
-}
-
-// UnsetArgsomitempty ensures that no value is present for Argsomitempty, not even an explicit nil
-func (o *ShellJobConfig) UnsetArgsomitempty() {
-	o.Argsomitempty.Unset()
+// SetArgsNil sets the value for Args to be an explicit nil
+func (o *ShellJobConfig) SetArgsNil() {
+	o.Args.Set(nil)
 }
 
-// GetWorkDiromitempty returns the WorkDiromitempty field value if set, zero value otherwise.
-func (o *ShellJobConfig) GetWorkDiromitempty() string {
-	if o == nil || IsNil(o.WorkDiromitempty) {
+// UnsetArgs ensures that no value is present for Args, not even an explicit nil
+func (o *ShellJobConfig) UnsetArgs() {
+	o.Args.Unset()
+}
+
+// GetWorkDir returns the WorkDir field value if set, zero value otherwise.
+func (o *ShellJobConfig) GetWorkDir() string {
+	if o == nil || IsNil(o.WorkDir) {
 		var ret string
 		return ret
 	}
-	return *o.WorkDiromitempty
+	return *o.WorkDir
 }
 
-// GetWorkDiromitemptyOk returns a tuple with the WorkDiromitempty field value if set, nil otherwise
+// GetWorkDirOk returns a tuple with the WorkDir field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ShellJobConfig) GetWorkDiromitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.WorkDiromitempty) {
+func (o *ShellJobConfig) GetWorkDirOk() (*string, bool) {
+	if o == nil || IsNil(o.WorkDir) {
 		return nil, false
 	}
-	return o.WorkDiromitempty, true
+	return o.WorkDir, true
 }
 
-// HasWorkDiromitempty returns a boolean if a field has been set.
-func (o *ShellJobConfig) HasWorkDiromitempty() bool {
-	if o != nil && !IsNil(o.WorkDiromitempty) {
+// HasWorkDir returns a boolean if a field has been set.
+func (o *ShellJobConfig) HasWorkDir() bool {
+	if o != nil && !IsNil(o.WorkDir) {
 		return true
 	}
 
 	return false
 }
 
-// SetWorkDiromitempty gets a reference to the given string and assigns it to the WorkDiromitempty field.
-func (o *ShellJobConfig) SetWorkDiromitempty(v string) {
-	o.WorkDiromitempty = &v
+// SetWorkDir gets a reference to the given string and assigns it to the WorkDir field.
+func (o *ShellJobConfig) SetWorkDir(v string) {
+	o.WorkDir = &v
 }
 
-// GetEnvomitempty returns the Envomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *ShellJobConfig) GetEnvomitempty() string {
-	if o == nil || IsNil(o.Envomitempty.Get()) {
+// GetEnv returns the Env field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *ShellJobConfig) GetEnv() string {
+	if o == nil || IsNil(o.Env.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.Envomitempty.Get()
+	return *o.Env.Get()
 }
 
-// GetEnvomitemptyOk returns a tuple with the Envomitempty field value if set, nil otherwise
+// GetEnvOk returns a tuple with the Env field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *ShellJobConfig) GetEnvomitemptyOk() (*string, bool) {
+func (o *ShellJobConfig) GetEnvOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.Envomitempty.Get(), o.Envomitempty.IsSet()
+	return o.Env.Get(), o.Env.IsSet()
 }
 
-// HasEnvomitempty returns a boolean if a field has been set.
-func (o *ShellJobConfig) HasEnvomitempty() bool {
-	if o != nil && o.Envomitempty.IsSet() {
+// HasEnv returns a boolean if a field has been set.
+func (o *ShellJobConfig) HasEnv() bool {
+	if o != nil && o.Env.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetEnvomitempty gets a reference to the given NullableString and assigns it to the Envomitempty field.
-func (o *ShellJobConfig) SetEnvomitempty(v string) {
-	o.Envomitempty.Set(&v)
+// SetEnv gets a reference to the given NullableString and assigns it to the Env field.
+func (o *ShellJobConfig) SetEnv(v string) {
+	o.Env.Set(&v)
 }
-// SetEnvomitemptyNil sets the value for Envomitempty to be an explicit nil
-func (o *ShellJobConfig) SetEnvomitemptyNil() {
-	o.Envomitempty.Set(nil)
-}
-
-// UnsetEnvomitempty ensures that no value is present for Envomitempty, not even an explicit nil
-func (o *ShellJobConfig) UnsetEnvomitempty() {
-	o.Envomitempty.Unset()
+// SetEnvNil sets the value for Env to be an explicit nil
+func (o *ShellJobConfig) SetEnvNil() {
+	o.Env.Set(nil)
 }
 
-// GetTimeoutSecsomitempty returns the TimeoutSecsomitempty field value if set, zero value otherwise.
-func (o *ShellJobConfig) GetTimeoutSecsomitempty() int32 {
-	if o == nil || IsNil(o.TimeoutSecsomitempty) {
+// UnsetEnv ensures that no value is present for Env, not even an explicit nil
+func (o *ShellJobConfig) UnsetEnv() {
+	o.Env.Unset()
+}
+
+// GetTimeoutSecs returns the TimeoutSecs field value if set, zero value otherwise.
+func (o *ShellJobConfig) GetTimeoutSecs() int32 {
+	if o == nil || IsNil(o.TimeoutSecs) {
 		var ret int32
 		return ret
 	}
-	return *o.TimeoutSecsomitempty
+	return *o.TimeoutSecs
 }
 
-// GetTimeoutSecsomitemptyOk returns a tuple with the TimeoutSecsomitempty field value if set, nil otherwise
+// GetTimeoutSecsOk returns a tuple with the TimeoutSecs field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ShellJobConfig) GetTimeoutSecsomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.TimeoutSecsomitempty) {
+func (o *ShellJobConfig) GetTimeoutSecsOk() (*int32, bool) {
+	if o == nil || IsNil(o.TimeoutSecs) {
 		return nil, false
 	}
-	return o.TimeoutSecsomitempty, true
+	return o.TimeoutSecs, true
 }
 
-// HasTimeoutSecsomitempty returns a boolean if a field has been set.
-func (o *ShellJobConfig) HasTimeoutSecsomitempty() bool {
-	if o != nil && !IsNil(o.TimeoutSecsomitempty) {
+// HasTimeoutSecs returns a boolean if a field has been set.
+func (o *ShellJobConfig) HasTimeoutSecs() bool {
+	if o != nil && !IsNil(o.TimeoutSecs) {
 		return true
 	}
 
 	return false
 }
 
-// SetTimeoutSecsomitempty gets a reference to the given int32 and assigns it to the TimeoutSecsomitempty field.
-func (o *ShellJobConfig) SetTimeoutSecsomitempty(v int32) {
-	o.TimeoutSecsomitempty = &v
+// SetTimeoutSecs gets a reference to the given int32 and assigns it to the TimeoutSecs field.
+func (o *ShellJobConfig) SetTimeoutSecs(v int32) {
+	o.TimeoutSecs = &v
 }
 
 // GetCaptureOutput returns the CaptureOutput field value
@@ -257,17 +257,17 @@ func (o ShellJobConfig) MarshalJSON() ([]byte, error) {
 func (o ShellJobConfig) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["command"] = o.Command
-	if o.Argsomitempty.IsSet() {
-		toSerialize["args,omitempty"] = o.Argsomitempty.Get()
+	if o.Args.IsSet() {
+		toSerialize["args"] = o.Args.Get()
 	}
-	if !IsNil(o.WorkDiromitempty) {
-		toSerialize["work_dir,omitempty"] = o.WorkDiromitempty
+	if !IsNil(o.WorkDir) {
+		toSerialize["work_dir"] = o.WorkDir
 	}
-	if o.Envomitempty.IsSet() {
-		toSerialize["env,omitempty"] = o.Envomitempty.Get()
+	if o.Env.IsSet() {
+		toSerialize["env"] = o.Env.Get()
 	}
-	if !IsNil(o.TimeoutSecsomitempty) {
-		toSerialize["timeout_secs,omitempty"] = o.TimeoutSecsomitempty
+	if !IsNil(o.TimeoutSecs) {
+		toSerialize["timeout_secs"] = o.TimeoutSecs
 	}
 	toSerialize["capture_output"] = o.CaptureOutput
 	return toSerialize, nil

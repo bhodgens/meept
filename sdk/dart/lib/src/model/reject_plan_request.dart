@@ -14,7 +14,7 @@ part 'reject_plan_request.g.dart';
 /// * [planId] 
 /// * [sessionId] 
 /// * [by] 
-/// * [reasonCommaOmitempty] 
+/// * [reason] 
 @BuiltValue()
 abstract class RejectPlanRequest implements Built<RejectPlanRequest, RejectPlanRequestBuilder> {
   @BuiltValueField(wireName: r'plan_id')
@@ -26,8 +26,8 @@ abstract class RejectPlanRequest implements Built<RejectPlanRequest, RejectPlanR
   @BuiltValueField(wireName: r'by')
   String get by;
 
-  @BuiltValueField(wireName: r'reason,omitempty')
-  String? get reasonCommaOmitempty;
+  @BuiltValueField(wireName: r'reason')
+  String? get reason;
 
   RejectPlanRequest._();
 
@@ -67,10 +67,10 @@ class _$RejectPlanRequestSerializer implements PrimitiveSerializer<RejectPlanReq
       object.by,
       specifiedType: const FullType(String),
     );
-    if (object.reasonCommaOmitempty != null) {
-      yield r'reason,omitempty';
+    if (object.reason != null) {
+      yield r'reason';
       yield serializers.serialize(
-        object.reasonCommaOmitempty,
+        object.reason,
         specifiedType: const FullType(String),
       );
     }
@@ -118,12 +118,12 @@ class _$RejectPlanRequestSerializer implements PrimitiveSerializer<RejectPlanReq
           ) as String;
           result.by = valueDes;
           break;
-        case r'reason,omitempty':
+        case r'reason':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.reasonCommaOmitempty = valueDes;
+          result.reason = valueDes;
           break;
         default:
           unhandled.add(key);

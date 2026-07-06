@@ -7,8 +7,8 @@ void main() {
   // TODO add properties to the builder and call build()
 
   group(ClearCacheRequest, () {
-    // String prefixCommaOmitempty
-    test('to test the property `prefixCommaOmitempty`', () async {
+    // String prefix
+    test('to test the property `prefix`', () async {
       // TODO
     });
 

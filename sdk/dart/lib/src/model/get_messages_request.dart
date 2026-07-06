@@ -12,18 +12,18 @@ part 'get_messages_request.g.dart';
 ///
 /// Properties:
 /// * [id] 
-/// * [offsetCommaOmitempty] 
-/// * [limitCommaOmitempty] 
+/// * [offset] 
+/// * [limit] 
 @BuiltValue()
 abstract class GetMessagesRequest implements Built<GetMessagesRequest, GetMessagesRequestBuilder> {
   @BuiltValueField(wireName: r'id')
   String get id;
 
-  @BuiltValueField(wireName: r'offset,omitempty')
-  int? get offsetCommaOmitempty;
+  @BuiltValueField(wireName: r'offset')
+  int? get offset;
 
-  @BuiltValueField(wireName: r'limit,omitempty')
-  int? get limitCommaOmitempty;
+  @BuiltValueField(wireName: r'limit')
+  int? get limit;
 
   GetMessagesRequest._();
 
@@ -53,17 +53,17 @@ class _$GetMessagesRequestSerializer implements PrimitiveSerializer<GetMessagesR
       object.id,
       specifiedType: const FullType(String),
     );
-    if (object.offsetCommaOmitempty != null) {
-      yield r'offset,omitempty';
+    if (object.offset != null) {
+      yield r'offset';
       yield serializers.serialize(
-        object.offsetCommaOmitempty,
+        object.offset,
         specifiedType: const FullType(int),
       );
     }
-    if (object.limitCommaOmitempty != null) {
-      yield r'limit,omitempty';
+    if (object.limit != null) {
+      yield r'limit';
       yield serializers.serialize(
-        object.limitCommaOmitempty,
+        object.limit,
         specifiedType: const FullType(int),
       );
     }
@@ -97,19 +97,19 @@ class _$GetMessagesRequestSerializer implements PrimitiveSerializer<GetMessagesR
           ) as String;
           result.id = valueDes;
           break;
-        case r'offset,omitempty':
+        case r'offset':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.offsetCommaOmitempty = valueDes;
+          result.offset = valueDes;
           break;
-        case r'limit,omitempty':
+        case r'limit':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.limitCommaOmitempty = valueDes;
+          result.limit = valueDes;
           break;
         default:
           unhandled.add(key);

@@ -19,8 +19,8 @@ var _ MappedNullable = &TaskListRequest{}
 
 // TaskListRequest struct for TaskListRequest
 type TaskListRequest struct {
-	Limitomitempty *int32 `json:"limit,omitempty,omitempty"`
-	SessionIdomitempty *string `json:"session_id,omitempty,omitempty"`
+	Limit *int32 `json:"limit,omitempty"`
+	SessionId *string `json:"session_id,omitempty"`
 }
 
 // NewTaskListRequest instantiates a new TaskListRequest object
@@ -40,68 +40,68 @@ func NewTaskListRequestWithDefaults() *TaskListRequest {
 	return &this
 }
 
-// GetLimitomitempty returns the Limitomitempty field value if set, zero value otherwise.
-func (o *TaskListRequest) GetLimitomitempty() int32 {
-	if o == nil || IsNil(o.Limitomitempty) {
+// GetLimit returns the Limit field value if set, zero value otherwise.
+func (o *TaskListRequest) GetLimit() int32 {
+	if o == nil || IsNil(o.Limit) {
 		var ret int32
 		return ret
 	}
-	return *o.Limitomitempty
+	return *o.Limit
 }
 
-// GetLimitomitemptyOk returns a tuple with the Limitomitempty field value if set, nil otherwise
+// GetLimitOk returns a tuple with the Limit field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *TaskListRequest) GetLimitomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.Limitomitempty) {
+func (o *TaskListRequest) GetLimitOk() (*int32, bool) {
+	if o == nil || IsNil(o.Limit) {
 		return nil, false
 	}
-	return o.Limitomitempty, true
+	return o.Limit, true
 }
 
-// HasLimitomitempty returns a boolean if a field has been set.
-func (o *TaskListRequest) HasLimitomitempty() bool {
-	if o != nil && !IsNil(o.Limitomitempty) {
+// HasLimit returns a boolean if a field has been set.
+func (o *TaskListRequest) HasLimit() bool {
+	if o != nil && !IsNil(o.Limit) {
 		return true
 	}
 
 	return false
 }
 
-// SetLimitomitempty gets a reference to the given int32 and assigns it to the Limitomitempty field.
-func (o *TaskListRequest) SetLimitomitempty(v int32) {
-	o.Limitomitempty = &v
+// SetLimit gets a reference to the given int32 and assigns it to the Limit field.
+func (o *TaskListRequest) SetLimit(v int32) {
+	o.Limit = &v
 }
 
-// GetSessionIdomitempty returns the SessionIdomitempty field value if set, zero value otherwise.
-func (o *TaskListRequest) GetSessionIdomitempty() string {
-	if o == nil || IsNil(o.SessionIdomitempty) {
+// GetSessionId returns the SessionId field value if set, zero value otherwise.
+func (o *TaskListRequest) GetSessionId() string {
+	if o == nil || IsNil(o.SessionId) {
 		var ret string
 		return ret
 	}
-	return *o.SessionIdomitempty
+	return *o.SessionId
 }
 
-// GetSessionIdomitemptyOk returns a tuple with the SessionIdomitempty field value if set, nil otherwise
+// GetSessionIdOk returns a tuple with the SessionId field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *TaskListRequest) GetSessionIdomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.SessionIdomitempty) {
+func (o *TaskListRequest) GetSessionIdOk() (*string, bool) {
+	if o == nil || IsNil(o.SessionId) {
 		return nil, false
 	}
-	return o.SessionIdomitempty, true
+	return o.SessionId, true
 }
 
-// HasSessionIdomitempty returns a boolean if a field has been set.
-func (o *TaskListRequest) HasSessionIdomitempty() bool {
-	if o != nil && !IsNil(o.SessionIdomitempty) {
+// HasSessionId returns a boolean if a field has been set.
+func (o *TaskListRequest) HasSessionId() bool {
+	if o != nil && !IsNil(o.SessionId) {
 		return true
 	}
 
 	return false
 }
 
-// SetSessionIdomitempty gets a reference to the given string and assigns it to the SessionIdomitempty field.
-func (o *TaskListRequest) SetSessionIdomitempty(v string) {
-	o.SessionIdomitempty = &v
+// SetSessionId gets a reference to the given string and assigns it to the SessionId field.
+func (o *TaskListRequest) SetSessionId(v string) {
+	o.SessionId = &v
 }
 
 func (o TaskListRequest) MarshalJSON() ([]byte, error) {
@@ -114,11 +114,11 @@ func (o TaskListRequest) MarshalJSON() ([]byte, error) {
 
 func (o TaskListRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	if !IsNil(o.Limitomitempty) {
-		toSerialize["limit,omitempty"] = o.Limitomitempty
+	if !IsNil(o.Limit) {
+		toSerialize["limit"] = o.Limit
 	}
-	if !IsNil(o.SessionIdomitempty) {
-		toSerialize["session_id,omitempty"] = o.SessionIdomitempty
+	if !IsNil(o.SessionId) {
+		toSerialize["session_id"] = o.SessionId
 	}
 	return toSerialize, nil
 }

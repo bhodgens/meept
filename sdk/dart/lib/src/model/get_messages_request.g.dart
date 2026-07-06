@@ -10,16 +10,16 @@ class _$GetMessagesRequest extends GetMessagesRequest {
   @override
   final String id;
   @override
-  final int? offsetCommaOmitempty;
+  final int? offset;
   @override
-  final int? limitCommaOmitempty;
+  final int? limit;
 
   factory _$GetMessagesRequest(
           [void Function(GetMessagesRequestBuilder)? updates]) =>
       (GetMessagesRequestBuilder()..update(updates))._build();
 
   _$GetMessagesRequest._(
-      {required this.id, this.offsetCommaOmitempty, this.limitCommaOmitempty})
+      {required this.id, this.offset, this.limit})
       : super._();
   @override
   GetMessagesRequest rebuild(
@@ -35,16 +35,16 @@ class _$GetMessagesRequest extends GetMessagesRequest {
     if (identical(other, this)) return true;
     return other is GetMessagesRequest &&
         id == other.id &&
-        offsetCommaOmitempty == other.offsetCommaOmitempty &&
-        limitCommaOmitempty == other.limitCommaOmitempty;
+        offset == other.offset &&
+        limit == other.limit;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, id.hashCode);
-    _$hash = $jc(_$hash, offsetCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, limitCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, offset.hashCode);
+    _$hash = $jc(_$hash, limit.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -53,8 +53,8 @@ class _$GetMessagesRequest extends GetMessagesRequest {
   String toString() {
     return (newBuiltValueToStringHelper(r'GetMessagesRequest')
           ..add('id', id)
-          ..add('offsetCommaOmitempty', offsetCommaOmitempty)
-          ..add('limitCommaOmitempty', limitCommaOmitempty))
+          ..add('offset', offset)
+          ..add('limit', limit))
         .toString();
   }
 }
@@ -67,15 +67,15 @@ class GetMessagesRequestBuilder
   String? get id => _$this._id;
   set id(String? id) => _$this._id = id;
 
-  int? _offsetCommaOmitempty;
-  int? get offsetCommaOmitempty => _$this._offsetCommaOmitempty;
-  set offsetCommaOmitempty(int? offsetCommaOmitempty) =>
-      _$this._offsetCommaOmitempty = offsetCommaOmitempty;
+  int? _offset;
+  int? get offset => _$this._offset;
+  set offset(int? offset) =>
+      _$this._offset = offset;
 
-  int? _limitCommaOmitempty;
-  int? get limitCommaOmitempty => _$this._limitCommaOmitempty;
-  set limitCommaOmitempty(int? limitCommaOmitempty) =>
-      _$this._limitCommaOmitempty = limitCommaOmitempty;
+  int? _limit;
+  int? get limit => _$this._limit;
+  set limit(int? limit) =>
+      _$this._limit = limit;
 
   GetMessagesRequestBuilder() {
     GetMessagesRequest._defaults(this);
@@ -85,8 +85,8 @@ class GetMessagesRequestBuilder
     final $v = _$v;
     if ($v != null) {
       _id = $v.id;
-      _offsetCommaOmitempty = $v.offsetCommaOmitempty;
-      _limitCommaOmitempty = $v.limitCommaOmitempty;
+      _offset = $v.offset;
+      _limit = $v.limit;
       _$v = null;
     }
     return this;
@@ -110,8 +110,8 @@ class GetMessagesRequestBuilder
         _$GetMessagesRequest._(
           id: BuiltValueNullFieldError.checkNotNull(
               id, r'GetMessagesRequest', 'id'),
-          offsetCommaOmitempty: offsetCommaOmitempty,
-          limitCommaOmitempty: limitCommaOmitempty,
+          offset: offset,
+          limit: limit,
         );
     replace(_$result);
     return _$result;

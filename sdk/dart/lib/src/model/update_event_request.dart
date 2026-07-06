@@ -12,30 +12,30 @@ part 'update_event_request.g.dart';
 ///
 /// Properties:
 /// * [id] 
-/// * [summaryCommaOmitempty] 
-/// * [descriptionCommaOmitempty] 
-/// * [locationCommaOmitempty] 
-/// * [startCommaOmitempty] 
-/// * [endCommaOmitempty] 
+/// * [summary] 
+/// * [description] 
+/// * [location] 
+/// * [start] 
+/// * [end] 
 @BuiltValue()
 abstract class UpdateEventRequest implements Built<UpdateEventRequest, UpdateEventRequestBuilder> {
   @BuiltValueField(wireName: r'id')
   String get id;
 
-  @BuiltValueField(wireName: r'summary,omitempty')
-  String? get summaryCommaOmitempty;
+  @BuiltValueField(wireName: r'summary')
+  String? get summary;
 
-  @BuiltValueField(wireName: r'description,omitempty')
-  String? get descriptionCommaOmitempty;
+  @BuiltValueField(wireName: r'description')
+  String? get description;
 
-  @BuiltValueField(wireName: r'location,omitempty')
-  String? get locationCommaOmitempty;
+  @BuiltValueField(wireName: r'location')
+  String? get location;
 
-  @BuiltValueField(wireName: r'start,omitempty')
-  String? get startCommaOmitempty;
+  @BuiltValueField(wireName: r'start')
+  String? get start;
 
-  @BuiltValueField(wireName: r'end,omitempty')
-  String? get endCommaOmitempty;
+  @BuiltValueField(wireName: r'end')
+  String? get end;
 
   UpdateEventRequest._();
 
@@ -65,38 +65,38 @@ class _$UpdateEventRequestSerializer implements PrimitiveSerializer<UpdateEventR
       object.id,
       specifiedType: const FullType(String),
     );
-    if (object.summaryCommaOmitempty != null) {
-      yield r'summary,omitempty';
+    if (object.summary != null) {
+      yield r'summary';
       yield serializers.serialize(
-        object.summaryCommaOmitempty,
+        object.summary,
         specifiedType: const FullType(String),
       );
     }
-    if (object.descriptionCommaOmitempty != null) {
-      yield r'description,omitempty';
+    if (object.description != null) {
+      yield r'description';
       yield serializers.serialize(
-        object.descriptionCommaOmitempty,
+        object.description,
         specifiedType: const FullType(String),
       );
     }
-    if (object.locationCommaOmitempty != null) {
-      yield r'location,omitempty';
+    if (object.location != null) {
+      yield r'location';
       yield serializers.serialize(
-        object.locationCommaOmitempty,
+        object.location,
         specifiedType: const FullType(String),
       );
     }
-    if (object.startCommaOmitempty != null) {
-      yield r'start,omitempty';
+    if (object.start != null) {
+      yield r'start';
       yield serializers.serialize(
-        object.startCommaOmitempty,
+        object.start,
         specifiedType: const FullType.nullable(String),
       );
     }
-    if (object.endCommaOmitempty != null) {
-      yield r'end,omitempty';
+    if (object.end != null) {
+      yield r'end';
       yield serializers.serialize(
-        object.endCommaOmitempty,
+        object.end,
         specifiedType: const FullType.nullable(String),
       );
     }
@@ -130,42 +130,42 @@ class _$UpdateEventRequestSerializer implements PrimitiveSerializer<UpdateEventR
           ) as String;
           result.id = valueDes;
           break;
-        case r'summary,omitempty':
+        case r'summary':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.summaryCommaOmitempty = valueDes;
+          result.summary = valueDes;
           break;
-        case r'description,omitempty':
+        case r'description':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.descriptionCommaOmitempty = valueDes;
+          result.description = valueDes;
           break;
-        case r'location,omitempty':
+        case r'location':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.locationCommaOmitempty = valueDes;
+          result.location = valueDes;
           break;
-        case r'start,omitempty':
+        case r'start':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.startCommaOmitempty = valueDes;
+          result.start = valueDes;
           break;
-        case r'end,omitempty':
+        case r'end':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.endCommaOmitempty = valueDes;
+          result.end = valueDes;
           break;
         default:
           unhandled.add(key);

@@ -12,13 +12,13 @@ void main() {
       // TODO
     });
 
-    // int priorityCommaOmitempty
-    test('to test the property `priorityCommaOmitempty`', () async {
+    // int priority
+    test('to test the property `priority`', () async {
       // TODO
     });
 
-    // String taskIdCommaOmitempty
-    test('to test the property `taskIdCommaOmitempty`', () async {
+    // String taskId
+    test('to test the property `taskId`', () async {
       // TODO
     });
 
@@ -27,18 +27,18 @@ void main() {
       // TODO
     });
 
-    // String sessionIdCommaOmitempty
-    test('to test the property `sessionIdCommaOmitempty`', () async {
+    // String sessionId
+    test('to test the property `sessionId`', () async {
       // TODO
     });
 
-    // String requiredCapsCommaOmitempty
-    test('to test the property `requiredCapsCommaOmitempty`', () async {
+    // String requiredCaps
+    test('to test the property `requiredCaps`', () async {
       // TODO
     });
 
-    // String payloadCommaOmitempty
-    test('to test the property `payloadCommaOmitempty`', () async {
+    // String payload
+    test('to test the property `payload`', () async {
       // TODO
     });
 

@@ -13,7 +13,7 @@ part 'vector_search_result.g.dart';
 /// Properties:
 /// * [memoryId] 
 /// * [content] 
-/// * [metadataCommaOmitempty] 
+/// * [metadata] 
 /// * [relevanceScore] 
 /// * [vectorSimilarity] 
 @BuiltValue()
@@ -24,8 +24,8 @@ abstract class VectorSearchResult implements Built<VectorSearchResult, VectorSea
   @BuiltValueField(wireName: r'content')
   String get content;
 
-  @BuiltValueField(wireName: r'metadata,omitempty')
-  String? get metadataCommaOmitempty;
+  @BuiltValueField(wireName: r'metadata')
+  String? get metadata;
 
   @BuiltValueField(wireName: r'relevance_score')
   num get relevanceScore;
@@ -66,10 +66,10 @@ class _$VectorSearchResultSerializer implements PrimitiveSerializer<VectorSearch
       object.content,
       specifiedType: const FullType(String),
     );
-    if (object.metadataCommaOmitempty != null) {
-      yield r'metadata,omitempty';
+    if (object.metadata != null) {
+      yield r'metadata';
       yield serializers.serialize(
-        object.metadataCommaOmitempty,
+        object.metadata,
         specifiedType: const FullType.nullable(String),
       );
     }
@@ -120,13 +120,13 @@ class _$VectorSearchResultSerializer implements PrimitiveSerializer<VectorSearch
           ) as String;
           result.content = valueDes;
           break;
-        case r'metadata,omitempty':
+        case r'metadata':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.metadataCommaOmitempty = valueDes;
+          result.metadata = valueDes;
           break;
         case r'relevance_score':
           final valueDes = serializers.deserialize(

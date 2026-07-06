@@ -12,9 +12,9 @@ part 'daemon_status.g.dart';
 ///
 /// Properties:
 /// * [status] 
-/// * [pidCommaOmitempty] 
-/// * [uptimeSecondsCommaOmitempty] 
-/// * [modelCommaOmitempty] 
+/// * [pid] 
+/// * [uptimeSeconds] 
+/// * [model] 
 /// * [tokensUsed] 
 /// * [tokensRemaining] 
 /// * [budgetUsed] 
@@ -40,14 +40,14 @@ abstract class DaemonStatus implements Built<DaemonStatus, DaemonStatusBuilder> 
   @BuiltValueField(wireName: r'status')
   String get status;
 
-  @BuiltValueField(wireName: r'pid,omitempty')
-  int? get pidCommaOmitempty;
+  @BuiltValueField(wireName: r'pid')
+  int? get pid;
 
-  @BuiltValueField(wireName: r'uptime_seconds,omitempty')
-  num? get uptimeSecondsCommaOmitempty;
+  @BuiltValueField(wireName: r'uptime_seconds')
+  num? get uptimeSeconds;
 
-  @BuiltValueField(wireName: r'model,omitempty')
-  String? get modelCommaOmitempty;
+  @BuiltValueField(wireName: r'model')
+  String? get model;
 
   @BuiltValueField(wireName: r'tokens_used')
   int get tokensUsed;
@@ -137,24 +137,24 @@ class _$DaemonStatusSerializer implements PrimitiveSerializer<DaemonStatus> {
       object.status,
       specifiedType: const FullType(String),
     );
-    if (object.pidCommaOmitempty != null) {
-      yield r'pid,omitempty';
+    if (object.pid != null) {
+      yield r'pid';
       yield serializers.serialize(
-        object.pidCommaOmitempty,
+        object.pid,
         specifiedType: const FullType(int),
       );
     }
-    if (object.uptimeSecondsCommaOmitempty != null) {
-      yield r'uptime_seconds,omitempty';
+    if (object.uptimeSeconds != null) {
+      yield r'uptime_seconds';
       yield serializers.serialize(
-        object.uptimeSecondsCommaOmitempty,
+        object.uptimeSeconds,
         specifiedType: const FullType(num),
       );
     }
-    if (object.modelCommaOmitempty != null) {
-      yield r'model,omitempty';
+    if (object.model != null) {
+      yield r'model';
       yield serializers.serialize(
-        object.modelCommaOmitempty,
+        object.model,
         specifiedType: const FullType(String),
       );
     }
@@ -316,26 +316,26 @@ class _$DaemonStatusSerializer implements PrimitiveSerializer<DaemonStatus> {
           ) as String;
           result.status = valueDes;
           break;
-        case r'pid,omitempty':
+        case r'pid':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.pidCommaOmitempty = valueDes;
+          result.pid = valueDes;
           break;
-        case r'uptime_seconds,omitempty':
+        case r'uptime_seconds':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(num),
           ) as num;
-          result.uptimeSecondsCommaOmitempty = valueDes;
+          result.uptimeSeconds = valueDes;
           break;
-        case r'model,omitempty':
+        case r'model':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.modelCommaOmitempty = valueDes;
+          result.model = valueDes;
           break;
         case r'tokens_used':
           final valueDes = serializers.deserialize(

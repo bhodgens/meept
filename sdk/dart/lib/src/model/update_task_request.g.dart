@@ -10,16 +10,16 @@ class _$UpdateTaskRequest extends UpdateTaskRequest {
   @override
   final String id;
   @override
-  final String? stateCommaOmitempty;
+  final String? state;
   @override
-  final String? nameCommaOmitempty;
+  final String? name;
 
   factory _$UpdateTaskRequest(
           [void Function(UpdateTaskRequestBuilder)? updates]) =>
       (UpdateTaskRequestBuilder()..update(updates))._build();
 
   _$UpdateTaskRequest._(
-      {required this.id, this.stateCommaOmitempty, this.nameCommaOmitempty})
+      {required this.id, this.state, this.name})
       : super._();
   @override
   UpdateTaskRequest rebuild(void Function(UpdateTaskRequestBuilder) updates) =>
@@ -34,16 +34,16 @@ class _$UpdateTaskRequest extends UpdateTaskRequest {
     if (identical(other, this)) return true;
     return other is UpdateTaskRequest &&
         id == other.id &&
-        stateCommaOmitempty == other.stateCommaOmitempty &&
-        nameCommaOmitempty == other.nameCommaOmitempty;
+        state == other.state &&
+        name == other.name;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, id.hashCode);
-    _$hash = $jc(_$hash, stateCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, nameCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, state.hashCode);
+    _$hash = $jc(_$hash, name.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -52,8 +52,8 @@ class _$UpdateTaskRequest extends UpdateTaskRequest {
   String toString() {
     return (newBuiltValueToStringHelper(r'UpdateTaskRequest')
           ..add('id', id)
-          ..add('stateCommaOmitempty', stateCommaOmitempty)
-          ..add('nameCommaOmitempty', nameCommaOmitempty))
+          ..add('state', state)
+          ..add('name', name))
         .toString();
   }
 }
@@ -66,15 +66,15 @@ class UpdateTaskRequestBuilder
   String? get id => _$this._id;
   set id(String? id) => _$this._id = id;
 
-  String? _stateCommaOmitempty;
-  String? get stateCommaOmitempty => _$this._stateCommaOmitempty;
-  set stateCommaOmitempty(String? stateCommaOmitempty) =>
-      _$this._stateCommaOmitempty = stateCommaOmitempty;
+  String? _state;
+  String? get state => _$this._state;
+  set state(String? state) =>
+      _$this._state = state;
 
-  String? _nameCommaOmitempty;
-  String? get nameCommaOmitempty => _$this._nameCommaOmitempty;
-  set nameCommaOmitempty(String? nameCommaOmitempty) =>
-      _$this._nameCommaOmitempty = nameCommaOmitempty;
+  String? _name;
+  String? get name => _$this._name;
+  set name(String? name) =>
+      _$this._name = name;
 
   UpdateTaskRequestBuilder() {
     UpdateTaskRequest._defaults(this);
@@ -84,8 +84,8 @@ class UpdateTaskRequestBuilder
     final $v = _$v;
     if ($v != null) {
       _id = $v.id;
-      _stateCommaOmitempty = $v.stateCommaOmitempty;
-      _nameCommaOmitempty = $v.nameCommaOmitempty;
+      _state = $v.state;
+      _name = $v.name;
       _$v = null;
     }
     return this;
@@ -109,8 +109,8 @@ class UpdateTaskRequestBuilder
         _$UpdateTaskRequest._(
           id: BuiltValueNullFieldError.checkNotNull(
               id, r'UpdateTaskRequest', 'id'),
-          stateCommaOmitempty: stateCommaOmitempty,
-          nameCommaOmitempty: nameCommaOmitempty,
+          state: state,
+          name: name,
         );
     replace(_$result);
     return _$result;

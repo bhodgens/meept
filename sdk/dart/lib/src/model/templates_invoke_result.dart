@@ -12,22 +12,22 @@ part 'templates_invoke_result.g.dart';
 ///
 /// Properties:
 /// * [prompt] 
-/// * [outputCommaOmitempty] 
+/// * [output] 
 /// * [success] 
-/// * [errorCommaOmitempty] 
+/// * [error] 
 @BuiltValue()
 abstract class TemplatesInvokeResult implements Built<TemplatesInvokeResult, TemplatesInvokeResultBuilder> {
   @BuiltValueField(wireName: r'prompt')
   String get prompt;
 
-  @BuiltValueField(wireName: r'output,omitempty')
-  String? get outputCommaOmitempty;
+  @BuiltValueField(wireName: r'output')
+  String? get output;
 
   @BuiltValueField(wireName: r'success')
   bool get success;
 
-  @BuiltValueField(wireName: r'error,omitempty')
-  String? get errorCommaOmitempty;
+  @BuiltValueField(wireName: r'error')
+  String? get error;
 
   TemplatesInvokeResult._();
 
@@ -57,10 +57,10 @@ class _$TemplatesInvokeResultSerializer implements PrimitiveSerializer<Templates
       object.prompt,
       specifiedType: const FullType(String),
     );
-    if (object.outputCommaOmitempty != null) {
-      yield r'output,omitempty';
+    if (object.output != null) {
+      yield r'output';
       yield serializers.serialize(
-        object.outputCommaOmitempty,
+        object.output,
         specifiedType: const FullType(String),
       );
     }
@@ -69,10 +69,10 @@ class _$TemplatesInvokeResultSerializer implements PrimitiveSerializer<Templates
       object.success,
       specifiedType: const FullType(bool),
     );
-    if (object.errorCommaOmitempty != null) {
-      yield r'error,omitempty';
+    if (object.error != null) {
+      yield r'error';
       yield serializers.serialize(
-        object.errorCommaOmitempty,
+        object.error,
         specifiedType: const FullType(String),
       );
     }
@@ -106,12 +106,12 @@ class _$TemplatesInvokeResultSerializer implements PrimitiveSerializer<Templates
           ) as String;
           result.prompt = valueDes;
           break;
-        case r'output,omitempty':
+        case r'output':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.outputCommaOmitempty = valueDes;
+          result.output = valueDes;
           break;
         case r'success':
           final valueDes = serializers.deserialize(
@@ -120,12 +120,12 @@ class _$TemplatesInvokeResultSerializer implements PrimitiveSerializer<Templates
           ) as bool;
           result.success = valueDes;
           break;
-        case r'error,omitempty':
+        case r'error':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.errorCommaOmitempty = valueDes;
+          result.error = valueDes;
           break;
         default:
           unhandled.add(key);

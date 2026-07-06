@@ -8,19 +8,19 @@ part of 'list_options.dart';
 
 class _$ListOptions extends ListOptions {
   @override
-  final int? limitCommaOmitempty;
+  final int? limit;
   @override
-  final int? offsetCommaOmitempty;
+  final int? offset;
   @override
-  final String? filterCommaOmitempty;
+  final String? filter;
 
   factory _$ListOptions([void Function(ListOptionsBuilder)? updates]) =>
       (ListOptionsBuilder()..update(updates))._build();
 
   _$ListOptions._(
-      {this.limitCommaOmitempty,
-      this.offsetCommaOmitempty,
-      this.filterCommaOmitempty})
+      {this.limit,
+      this.offset,
+      this.filter})
       : super._();
   @override
   ListOptions rebuild(void Function(ListOptionsBuilder) updates) =>
@@ -33,17 +33,17 @@ class _$ListOptions extends ListOptions {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is ListOptions &&
-        limitCommaOmitempty == other.limitCommaOmitempty &&
-        offsetCommaOmitempty == other.offsetCommaOmitempty &&
-        filterCommaOmitempty == other.filterCommaOmitempty;
+        limit == other.limit &&
+        offset == other.offset &&
+        filter == other.filter;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
-    _$hash = $jc(_$hash, limitCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, offsetCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, filterCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, limit.hashCode);
+    _$hash = $jc(_$hash, offset.hashCode);
+    _$hash = $jc(_$hash, filter.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -51,9 +51,9 @@ class _$ListOptions extends ListOptions {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'ListOptions')
-          ..add('limitCommaOmitempty', limitCommaOmitempty)
-          ..add('offsetCommaOmitempty', offsetCommaOmitempty)
-          ..add('filterCommaOmitempty', filterCommaOmitempty))
+          ..add('limit', limit)
+          ..add('offset', offset)
+          ..add('filter', filter))
         .toString();
   }
 }
@@ -61,20 +61,20 @@ class _$ListOptions extends ListOptions {
 class ListOptionsBuilder implements Builder<ListOptions, ListOptionsBuilder> {
   _$ListOptions? _$v;
 
-  int? _limitCommaOmitempty;
-  int? get limitCommaOmitempty => _$this._limitCommaOmitempty;
-  set limitCommaOmitempty(int? limitCommaOmitempty) =>
-      _$this._limitCommaOmitempty = limitCommaOmitempty;
+  int? _limit;
+  int? get limit => _$this._limit;
+  set limit(int? limit) =>
+      _$this._limit = limit;
 
-  int? _offsetCommaOmitempty;
-  int? get offsetCommaOmitempty => _$this._offsetCommaOmitempty;
-  set offsetCommaOmitempty(int? offsetCommaOmitempty) =>
-      _$this._offsetCommaOmitempty = offsetCommaOmitempty;
+  int? _offset;
+  int? get offset => _$this._offset;
+  set offset(int? offset) =>
+      _$this._offset = offset;
 
-  String? _filterCommaOmitempty;
-  String? get filterCommaOmitempty => _$this._filterCommaOmitempty;
-  set filterCommaOmitempty(String? filterCommaOmitempty) =>
-      _$this._filterCommaOmitempty = filterCommaOmitempty;
+  String? _filter;
+  String? get filter => _$this._filter;
+  set filter(String? filter) =>
+      _$this._filter = filter;
 
   ListOptionsBuilder() {
     ListOptions._defaults(this);
@@ -83,9 +83,9 @@ class ListOptionsBuilder implements Builder<ListOptions, ListOptionsBuilder> {
   ListOptionsBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
-      _limitCommaOmitempty = $v.limitCommaOmitempty;
-      _offsetCommaOmitempty = $v.offsetCommaOmitempty;
-      _filterCommaOmitempty = $v.filterCommaOmitempty;
+      _limit = $v.limit;
+      _offset = $v.offset;
+      _filter = $v.filter;
       _$v = null;
     }
     return this;
@@ -107,9 +107,9 @@ class ListOptionsBuilder implements Builder<ListOptions, ListOptionsBuilder> {
   _$ListOptions _build() {
     final _$result = _$v ??
         _$ListOptions._(
-          limitCommaOmitempty: limitCommaOmitempty,
-          offsetCommaOmitempty: offsetCommaOmitempty,
-          filterCommaOmitempty: filterCommaOmitempty,
+          limit: limit,
+          offset: offset,
+          filter: filter,
         );
     replace(_$result);
     return _$result;

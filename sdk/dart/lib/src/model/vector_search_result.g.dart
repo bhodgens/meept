@@ -12,7 +12,7 @@ class _$VectorSearchResult extends VectorSearchResult {
   @override
   final String content;
   @override
-  final String? metadataCommaOmitempty;
+  final String? metadata;
   @override
   final num relevanceScore;
   @override
@@ -25,7 +25,7 @@ class _$VectorSearchResult extends VectorSearchResult {
   _$VectorSearchResult._(
       {required this.memoryId,
       required this.content,
-      this.metadataCommaOmitempty,
+      this.metadata,
       required this.relevanceScore,
       required this.vectorSimilarity})
       : super._();
@@ -44,7 +44,7 @@ class _$VectorSearchResult extends VectorSearchResult {
     return other is VectorSearchResult &&
         memoryId == other.memoryId &&
         content == other.content &&
-        metadataCommaOmitempty == other.metadataCommaOmitempty &&
+        metadata == other.metadata &&
         relevanceScore == other.relevanceScore &&
         vectorSimilarity == other.vectorSimilarity;
   }
@@ -54,7 +54,7 @@ class _$VectorSearchResult extends VectorSearchResult {
     var _$hash = 0;
     _$hash = $jc(_$hash, memoryId.hashCode);
     _$hash = $jc(_$hash, content.hashCode);
-    _$hash = $jc(_$hash, metadataCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, metadata.hashCode);
     _$hash = $jc(_$hash, relevanceScore.hashCode);
     _$hash = $jc(_$hash, vectorSimilarity.hashCode);
     _$hash = $jf(_$hash);
@@ -66,7 +66,7 @@ class _$VectorSearchResult extends VectorSearchResult {
     return (newBuiltValueToStringHelper(r'VectorSearchResult')
           ..add('memoryId', memoryId)
           ..add('content', content)
-          ..add('metadataCommaOmitempty', metadataCommaOmitempty)
+          ..add('metadata', metadata)
           ..add('relevanceScore', relevanceScore)
           ..add('vectorSimilarity', vectorSimilarity))
         .toString();
@@ -85,10 +85,10 @@ class VectorSearchResultBuilder
   String? get content => _$this._content;
   set content(String? content) => _$this._content = content;
 
-  String? _metadataCommaOmitempty;
-  String? get metadataCommaOmitempty => _$this._metadataCommaOmitempty;
-  set metadataCommaOmitempty(String? metadataCommaOmitempty) =>
-      _$this._metadataCommaOmitempty = metadataCommaOmitempty;
+  String? _metadata;
+  String? get metadata => _$this._metadata;
+  set metadata(String? metadata) =>
+      _$this._metadata = metadata;
 
   num? _relevanceScore;
   num? get relevanceScore => _$this._relevanceScore;
@@ -109,7 +109,7 @@ class VectorSearchResultBuilder
     if ($v != null) {
       _memoryId = $v.memoryId;
       _content = $v.content;
-      _metadataCommaOmitempty = $v.metadataCommaOmitempty;
+      _metadata = $v.metadata;
       _relevanceScore = $v.relevanceScore;
       _vectorSimilarity = $v.vectorSimilarity;
       _$v = null;
@@ -137,7 +137,7 @@ class VectorSearchResultBuilder
               memoryId, r'VectorSearchResult', 'memoryId'),
           content: BuiltValueNullFieldError.checkNotNull(
               content, r'VectorSearchResult', 'content'),
-          metadataCommaOmitempty: metadataCommaOmitempty,
+          metadata: metadata,
           relevanceScore: BuiltValueNullFieldError.checkNotNull(
               relevanceScore, r'VectorSearchResult', 'relevanceScore'),
           vectorSimilarity: BuiltValueNullFieldError.checkNotNull(

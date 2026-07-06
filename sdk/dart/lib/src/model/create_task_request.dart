@@ -12,18 +12,18 @@ part 'create_task_request.g.dart';
 ///
 /// Properties:
 /// * [name] 
-/// * [descriptionCommaOmitempty] 
-/// * [sessionIdCommaOmitempty] 
+/// * [description] 
+/// * [sessionId] 
 @BuiltValue()
 abstract class CreateTaskRequest implements Built<CreateTaskRequest, CreateTaskRequestBuilder> {
   @BuiltValueField(wireName: r'name')
   String get name;
 
-  @BuiltValueField(wireName: r'description,omitempty')
-  String? get descriptionCommaOmitempty;
+  @BuiltValueField(wireName: r'description')
+  String? get description;
 
-  @BuiltValueField(wireName: r'session_id,omitempty')
-  String? get sessionIdCommaOmitempty;
+  @BuiltValueField(wireName: r'session_id')
+  String? get sessionId;
 
   CreateTaskRequest._();
 
@@ -53,17 +53,17 @@ class _$CreateTaskRequestSerializer implements PrimitiveSerializer<CreateTaskReq
       object.name,
       specifiedType: const FullType(String),
     );
-    if (object.descriptionCommaOmitempty != null) {
-      yield r'description,omitempty';
+    if (object.description != null) {
+      yield r'description';
       yield serializers.serialize(
-        object.descriptionCommaOmitempty,
+        object.description,
         specifiedType: const FullType(String),
       );
     }
-    if (object.sessionIdCommaOmitempty != null) {
-      yield r'session_id,omitempty';
+    if (object.sessionId != null) {
+      yield r'session_id';
       yield serializers.serialize(
-        object.sessionIdCommaOmitempty,
+        object.sessionId,
         specifiedType: const FullType(String),
       );
     }
@@ -97,19 +97,19 @@ class _$CreateTaskRequestSerializer implements PrimitiveSerializer<CreateTaskReq
           ) as String;
           result.name = valueDes;
           break;
-        case r'description,omitempty':
+        case r'description':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.descriptionCommaOmitempty = valueDes;
+          result.description = valueDes;
           break;
-        case r'session_id,omitempty':
+        case r'session_id':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.sessionIdCommaOmitempty = valueDes;
+          result.sessionId = valueDes;
           break;
         default:
           unhandled.add(key);

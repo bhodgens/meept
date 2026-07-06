@@ -22,7 +22,7 @@ var _ MappedNullable = &TemplatesClearRequest{}
 // TemplatesClearRequest struct for TemplatesClearRequest
 type TemplatesClearRequest struct {
 	ConversationId string `json:"conversation_id"`
-	Nameomitempty *string `json:"name,omitempty,omitempty"`
+	Name *string `json:"name,omitempty"`
 }
 
 type _TemplatesClearRequest TemplatesClearRequest
@@ -69,36 +69,36 @@ func (o *TemplatesClearRequest) SetConversationId(v string) {
 	o.ConversationId = v
 }
 
-// GetNameomitempty returns the Nameomitempty field value if set, zero value otherwise.
-func (o *TemplatesClearRequest) GetNameomitempty() string {
-	if o == nil || IsNil(o.Nameomitempty) {
+// GetName returns the Name field value if set, zero value otherwise.
+func (o *TemplatesClearRequest) GetName() string {
+	if o == nil || IsNil(o.Name) {
 		var ret string
 		return ret
 	}
-	return *o.Nameomitempty
+	return *o.Name
 }
 
-// GetNameomitemptyOk returns a tuple with the Nameomitempty field value if set, nil otherwise
+// GetNameOk returns a tuple with the Name field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *TemplatesClearRequest) GetNameomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Nameomitempty) {
+func (o *TemplatesClearRequest) GetNameOk() (*string, bool) {
+	if o == nil || IsNil(o.Name) {
 		return nil, false
 	}
-	return o.Nameomitempty, true
+	return o.Name, true
 }
 
-// HasNameomitempty returns a boolean if a field has been set.
-func (o *TemplatesClearRequest) HasNameomitempty() bool {
-	if o != nil && !IsNil(o.Nameomitempty) {
+// HasName returns a boolean if a field has been set.
+func (o *TemplatesClearRequest) HasName() bool {
+	if o != nil && !IsNil(o.Name) {
 		return true
 	}
 
 	return false
 }
 
-// SetNameomitempty gets a reference to the given string and assigns it to the Nameomitempty field.
-func (o *TemplatesClearRequest) SetNameomitempty(v string) {
-	o.Nameomitempty = &v
+// SetName gets a reference to the given string and assigns it to the Name field.
+func (o *TemplatesClearRequest) SetName(v string) {
+	o.Name = &v
 }
 
 func (o TemplatesClearRequest) MarshalJSON() ([]byte, error) {
@@ -112,8 +112,8 @@ func (o TemplatesClearRequest) MarshalJSON() ([]byte, error) {
 func (o TemplatesClearRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["conversation_id"] = o.ConversationId
-	if !IsNil(o.Nameomitempty) {
-		toSerialize["name,omitempty"] = o.Nameomitempty
+	if !IsNil(o.Name) {
+		toSerialize["name"] = o.Name
 	}
 	return toSerialize, nil
 }

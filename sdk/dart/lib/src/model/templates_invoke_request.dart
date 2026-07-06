@@ -12,14 +12,14 @@ part 'templates_invoke_request.g.dart';
 ///
 /// Properties:
 /// * [name] 
-/// * [argsCommaOmitempty] 
+/// * [args] 
 @BuiltValue()
 abstract class TemplatesInvokeRequest implements Built<TemplatesInvokeRequest, TemplatesInvokeRequestBuilder> {
   @BuiltValueField(wireName: r'name')
   String get name;
 
-  @BuiltValueField(wireName: r'args,omitempty')
-  String? get argsCommaOmitempty;
+  @BuiltValueField(wireName: r'args')
+  String? get args;
 
   TemplatesInvokeRequest._();
 
@@ -49,10 +49,10 @@ class _$TemplatesInvokeRequestSerializer implements PrimitiveSerializer<Template
       object.name,
       specifiedType: const FullType(String),
     );
-    if (object.argsCommaOmitempty != null) {
-      yield r'args,omitempty';
+    if (object.args != null) {
+      yield r'args';
       yield serializers.serialize(
-        object.argsCommaOmitempty,
+        object.args,
         specifiedType: const FullType.nullable(String),
       );
     }
@@ -86,13 +86,13 @@ class _$TemplatesInvokeRequestSerializer implements PrimitiveSerializer<Template
           ) as String;
           result.name = valueDes;
           break;
-        case r'args,omitempty':
+        case r'args':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.argsCommaOmitempty = valueDes;
+          result.args = valueDes;
           break;
         default:
           unhandled.add(key);

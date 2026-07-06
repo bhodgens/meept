@@ -27,18 +27,18 @@ void main() {
       // TODO
     });
 
-    // JsonObject agentConfigCommaOmitempty
-    test('to test the property `agentConfigCommaOmitempty`', () async {
+    // JsonObject agentConfig
+    test('to test the property `agentConfig`', () async {
       // TODO
     });
 
-    // JsonObject shellConfigCommaOmitempty
-    test('to test the property `shellConfigCommaOmitempty`', () async {
+    // JsonObject shellConfig
+    test('to test the property `shellConfig`', () async {
       // TODO
     });
 
-    // bool enabledCommaOmitempty
-    test('to test the property `enabledCommaOmitempty`', () async {
+    // bool enabled
+    test('to test the property `enabled`', () async {
       // TODO
     });
 

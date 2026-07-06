@@ -12,13 +12,13 @@ Name | Type | Description | Notes
 **name** | **String** |  | 
 **description** | **String** |  | 
 **uiType** | **String** |  | 
-**categoryCommaOmitempty** | **String** |  | [optional] 
-**tagsCommaOmitempty** | **String** |  | [optional] 
-**examplesCommaOmitempty** | **String** |  | [optional] 
-**riskLevelCommaOmitempty** | **String** |  | [optional] 
-**bodyCommaOmitempty** | **String** |  | [optional] 
-**fieldsCommaOmitempty** | **BuiltList&lt;String&gt;** |  | [optional] 
-**actionsCommaOmitempty** | **BuiltList&lt;String&gt;** |  | [optional] 
+**category** | **String** |  | [optional] 
+**tags** | **String** |  | [optional] 
+**examples** | **String** |  | [optional] 
+**riskLevel** | **String** |  | [optional] 
+**body** | **String** |  | [optional] 
+**fields** | **BuiltList&lt;String&gt;** |  | [optional] 
+**actions** | **BuiltList&lt;String&gt;** |  | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

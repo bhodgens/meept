@@ -12,18 +12,18 @@ part 'update_task_request.g.dart';
 ///
 /// Properties:
 /// * [id] 
-/// * [stateCommaOmitempty] 
-/// * [nameCommaOmitempty] 
+/// * [state] 
+/// * [name] 
 @BuiltValue()
 abstract class UpdateTaskRequest implements Built<UpdateTaskRequest, UpdateTaskRequestBuilder> {
   @BuiltValueField(wireName: r'id')
   String get id;
 
-  @BuiltValueField(wireName: r'state,omitempty')
-  String? get stateCommaOmitempty;
+  @BuiltValueField(wireName: r'state')
+  String? get state;
 
-  @BuiltValueField(wireName: r'name,omitempty')
-  String? get nameCommaOmitempty;
+  @BuiltValueField(wireName: r'name')
+  String? get name;
 
   UpdateTaskRequest._();
 
@@ -53,17 +53,17 @@ class _$UpdateTaskRequestSerializer implements PrimitiveSerializer<UpdateTaskReq
       object.id,
       specifiedType: const FullType(String),
     );
-    if (object.stateCommaOmitempty != null) {
-      yield r'state,omitempty';
+    if (object.state != null) {
+      yield r'state';
       yield serializers.serialize(
-        object.stateCommaOmitempty,
+        object.state,
         specifiedType: const FullType(String),
       );
     }
-    if (object.nameCommaOmitempty != null) {
-      yield r'name,omitempty';
+    if (object.name != null) {
+      yield r'name';
       yield serializers.serialize(
-        object.nameCommaOmitempty,
+        object.name,
         specifiedType: const FullType(String),
       );
     }
@@ -97,19 +97,19 @@ class _$UpdateTaskRequestSerializer implements PrimitiveSerializer<UpdateTaskReq
           ) as String;
           result.id = valueDes;
           break;
-        case r'state,omitempty':
+        case r'state':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.stateCommaOmitempty = valueDes;
+          result.state = valueDes;
           break;
-        case r'name,omitempty':
+        case r'name':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.nameCommaOmitempty = valueDes;
+          result.name = valueDes;
           break;
         default:
           unhandled.add(key);

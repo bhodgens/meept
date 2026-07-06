@@ -14,7 +14,7 @@ class _$PaginatedResponse extends PaginatedResponse {
   @override
   final bool hasMore;
   @override
-  final int? nextOffsetCommaOmitempty;
+  final int? nextOffset;
 
   factory _$PaginatedResponse(
           [void Function(PaginatedResponseBuilder)? updates]) =>
@@ -24,7 +24,7 @@ class _$PaginatedResponse extends PaginatedResponse {
       {this.items,
       required this.total,
       required this.hasMore,
-      this.nextOffsetCommaOmitempty})
+      this.nextOffset})
       : super._();
   @override
   PaginatedResponse rebuild(void Function(PaginatedResponseBuilder) updates) =>
@@ -41,7 +41,7 @@ class _$PaginatedResponse extends PaginatedResponse {
         items == other.items &&
         total == other.total &&
         hasMore == other.hasMore &&
-        nextOffsetCommaOmitempty == other.nextOffsetCommaOmitempty;
+        nextOffset == other.nextOffset;
   }
 
   @override
@@ -50,7 +50,7 @@ class _$PaginatedResponse extends PaginatedResponse {
     _$hash = $jc(_$hash, items.hashCode);
     _$hash = $jc(_$hash, total.hashCode);
     _$hash = $jc(_$hash, hasMore.hashCode);
-    _$hash = $jc(_$hash, nextOffsetCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, nextOffset.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -61,7 +61,7 @@ class _$PaginatedResponse extends PaginatedResponse {
           ..add('items', items)
           ..add('total', total)
           ..add('hasMore', hasMore)
-          ..add('nextOffsetCommaOmitempty', nextOffsetCommaOmitempty))
+          ..add('nextOffset', nextOffset))
         .toString();
   }
 }
@@ -82,10 +82,10 @@ class PaginatedResponseBuilder
   bool? get hasMore => _$this._hasMore;
   set hasMore(bool? hasMore) => _$this._hasMore = hasMore;
 
-  int? _nextOffsetCommaOmitempty;
-  int? get nextOffsetCommaOmitempty => _$this._nextOffsetCommaOmitempty;
-  set nextOffsetCommaOmitempty(int? nextOffsetCommaOmitempty) =>
-      _$this._nextOffsetCommaOmitempty = nextOffsetCommaOmitempty;
+  int? _nextOffset;
+  int? get nextOffset => _$this._nextOffset;
+  set nextOffset(int? nextOffset) =>
+      _$this._nextOffset = nextOffset;
 
   PaginatedResponseBuilder() {
     PaginatedResponse._defaults(this);
@@ -97,7 +97,7 @@ class PaginatedResponseBuilder
       _items = $v.items?.toBuilder();
       _total = $v.total;
       _hasMore = $v.hasMore;
-      _nextOffsetCommaOmitempty = $v.nextOffsetCommaOmitempty;
+      _nextOffset = $v.nextOffset;
       _$v = null;
     }
     return this;
@@ -126,7 +126,7 @@ class PaginatedResponseBuilder
                 total, r'PaginatedResponse', 'total'),
             hasMore: BuiltValueNullFieldError.checkNotNull(
                 hasMore, r'PaginatedResponse', 'hasMore'),
-            nextOffsetCommaOmitempty: nextOffsetCommaOmitempty,
+            nextOffset: nextOffset,
           );
     } catch (_) {
       late String _$failedField;

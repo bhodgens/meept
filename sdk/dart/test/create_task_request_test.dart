@@ -12,13 +12,13 @@ void main() {
       // TODO
     });
 
-    // String descriptionCommaOmitempty
-    test('to test the property `descriptionCommaOmitempty`', () async {
+    // String description
+    test('to test the property `description`', () async {
       // TODO
     });
 
-    // String sessionIdCommaOmitempty
-    test('to test the property `sessionIdCommaOmitempty`', () async {
+    // String sessionId
+    test('to test the property `sessionId`', () async {
       // TODO
     });
 

@@ -10,11 +10,11 @@ class _$DaemonStatus extends DaemonStatus {
   @override
   final String status;
   @override
-  final int? pidCommaOmitempty;
+  final int? pid;
   @override
-  final num? uptimeSecondsCommaOmitempty;
+  final num? uptimeSeconds;
   @override
-  final String? modelCommaOmitempty;
+  final String? model;
   @override
   final int tokensUsed;
   @override
@@ -61,9 +61,9 @@ class _$DaemonStatus extends DaemonStatus {
 
   _$DaemonStatus._(
       {required this.status,
-      this.pidCommaOmitempty,
-      this.uptimeSecondsCommaOmitempty,
-      this.modelCommaOmitempty,
+      this.pid,
+      this.uptimeSeconds,
+      this.model,
       required this.tokensUsed,
       required this.tokensRemaining,
       required this.budgetUsed,
@@ -97,9 +97,9 @@ class _$DaemonStatus extends DaemonStatus {
     if (identical(other, this)) return true;
     return other is DaemonStatus &&
         status == other.status &&
-        pidCommaOmitempty == other.pidCommaOmitempty &&
-        uptimeSecondsCommaOmitempty == other.uptimeSecondsCommaOmitempty &&
-        modelCommaOmitempty == other.modelCommaOmitempty &&
+        pid == other.pid &&
+        uptimeSeconds == other.uptimeSeconds &&
+        model == other.model &&
         tokensUsed == other.tokensUsed &&
         tokensRemaining == other.tokensRemaining &&
         budgetUsed == other.budgetUsed &&
@@ -126,9 +126,9 @@ class _$DaemonStatus extends DaemonStatus {
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, status.hashCode);
-    _$hash = $jc(_$hash, pidCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, uptimeSecondsCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, modelCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, pid.hashCode);
+    _$hash = $jc(_$hash, uptimeSeconds.hashCode);
+    _$hash = $jc(_$hash, model.hashCode);
     _$hash = $jc(_$hash, tokensUsed.hashCode);
     _$hash = $jc(_$hash, tokensRemaining.hashCode);
     _$hash = $jc(_$hash, budgetUsed.hashCode);
@@ -157,9 +157,9 @@ class _$DaemonStatus extends DaemonStatus {
   String toString() {
     return (newBuiltValueToStringHelper(r'DaemonStatus')
           ..add('status', status)
-          ..add('pidCommaOmitempty', pidCommaOmitempty)
-          ..add('uptimeSecondsCommaOmitempty', uptimeSecondsCommaOmitempty)
-          ..add('modelCommaOmitempty', modelCommaOmitempty)
+          ..add('pid', pid)
+          ..add('uptimeSeconds', uptimeSeconds)
+          ..add('model', model)
           ..add('tokensUsed', tokensUsed)
           ..add('tokensRemaining', tokensRemaining)
           ..add('budgetUsed', budgetUsed)
@@ -192,20 +192,20 @@ class DaemonStatusBuilder
   String? get status => _$this._status;
   set status(String? status) => _$this._status = status;
 
-  int? _pidCommaOmitempty;
-  int? get pidCommaOmitempty => _$this._pidCommaOmitempty;
-  set pidCommaOmitempty(int? pidCommaOmitempty) =>
-      _$this._pidCommaOmitempty = pidCommaOmitempty;
+  int? _pid;
+  int? get pid => _$this._pid;
+  set pid(int? pid) =>
+      _$this._pid = pid;
 
-  num? _uptimeSecondsCommaOmitempty;
-  num? get uptimeSecondsCommaOmitempty => _$this._uptimeSecondsCommaOmitempty;
-  set uptimeSecondsCommaOmitempty(num? uptimeSecondsCommaOmitempty) =>
-      _$this._uptimeSecondsCommaOmitempty = uptimeSecondsCommaOmitempty;
+  num? _uptimeSeconds;
+  num? get uptimeSeconds => _$this._uptimeSeconds;
+  set uptimeSeconds(num? uptimeSeconds) =>
+      _$this._uptimeSeconds = uptimeSeconds;
 
-  String? _modelCommaOmitempty;
-  String? get modelCommaOmitempty => _$this._modelCommaOmitempty;
-  set modelCommaOmitempty(String? modelCommaOmitempty) =>
-      _$this._modelCommaOmitempty = modelCommaOmitempty;
+  String? _model;
+  String? get model => _$this._model;
+  set model(String? model) =>
+      _$this._model = model;
 
   int? _tokensUsed;
   int? get tokensUsed => _$this._tokensUsed;
@@ -308,9 +308,9 @@ class DaemonStatusBuilder
     final $v = _$v;
     if ($v != null) {
       _status = $v.status;
-      _pidCommaOmitempty = $v.pidCommaOmitempty;
-      _uptimeSecondsCommaOmitempty = $v.uptimeSecondsCommaOmitempty;
-      _modelCommaOmitempty = $v.modelCommaOmitempty;
+      _pid = $v.pid;
+      _uptimeSeconds = $v.uptimeSeconds;
+      _model = $v.model;
       _tokensUsed = $v.tokensUsed;
       _tokensRemaining = $v.tokensRemaining;
       _budgetUsed = $v.budgetUsed;
@@ -354,9 +354,9 @@ class DaemonStatusBuilder
         _$DaemonStatus._(
           status: BuiltValueNullFieldError.checkNotNull(
               status, r'DaemonStatus', 'status'),
-          pidCommaOmitempty: pidCommaOmitempty,
-          uptimeSecondsCommaOmitempty: uptimeSecondsCommaOmitempty,
-          modelCommaOmitempty: modelCommaOmitempty,
+          pid: pid,
+          uptimeSeconds: uptimeSeconds,
+          model: model,
           tokensUsed: BuiltValueNullFieldError.checkNotNull(
               tokensUsed, r'DaemonStatus', 'tokensUsed'),
           tokensRemaining: BuiltValueNullFieldError.checkNotNull(

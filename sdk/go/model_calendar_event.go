@@ -23,14 +23,14 @@ var _ MappedNullable = &CalendarEvent{}
 type CalendarEvent struct {
 	Id string `json:"id"`
 	Summary string `json:"summary"`
-	Descriptionomitempty *string `json:"description,omitempty,omitempty"`
-	Locationomitempty *string `json:"location,omitempty,omitempty"`
+	Description *string `json:"description,omitempty"`
+	Location *string `json:"location,omitempty"`
 	Start string `json:"start"`
 	End string `json:"end"`
 	AllDay bool `json:"all_day"`
-	Statusomitempty *string `json:"status,omitempty,omitempty"`
-	HtmlLinkomitempty *string `json:"html_link,omitempty,omitempty"`
-	Attendeesomitempty []string `json:"attendees,omitempty,omitempty"`
+	Status *string `json:"status,omitempty"`
+	HtmlLink *string `json:"html_link,omitempty"`
+	Attendees []string `json:"attendees,omitempty"`
 }
 
 type _CalendarEvent CalendarEvent
@@ -105,68 +105,68 @@ func (o *CalendarEvent) SetSummary(v string) {
 	o.Summary = v
 }
 
-// GetDescriptionomitempty returns the Descriptionomitempty field value if set, zero value otherwise.
-func (o *CalendarEvent) GetDescriptionomitempty() string {
-	if o == nil || IsNil(o.Descriptionomitempty) {
+// GetDescription returns the Description field value if set, zero value otherwise.
+func (o *CalendarEvent) GetDescription() string {
+	if o == nil || IsNil(o.Description) {
 		var ret string
 		return ret
 	}
-	return *o.Descriptionomitempty
+	return *o.Description
 }
 
-// GetDescriptionomitemptyOk returns a tuple with the Descriptionomitempty field value if set, nil otherwise
+// GetDescriptionOk returns a tuple with the Description field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CalendarEvent) GetDescriptionomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Descriptionomitempty) {
+func (o *CalendarEvent) GetDescriptionOk() (*string, bool) {
+	if o == nil || IsNil(o.Description) {
 		return nil, false
 	}
-	return o.Descriptionomitempty, true
+	return o.Description, true
 }
 
-// HasDescriptionomitempty returns a boolean if a field has been set.
-func (o *CalendarEvent) HasDescriptionomitempty() bool {
-	if o != nil && !IsNil(o.Descriptionomitempty) {
+// HasDescription returns a boolean if a field has been set.
+func (o *CalendarEvent) HasDescription() bool {
+	if o != nil && !IsNil(o.Description) {
 		return true
 	}
 
 	return false
 }
 
-// SetDescriptionomitempty gets a reference to the given string and assigns it to the Descriptionomitempty field.
-func (o *CalendarEvent) SetDescriptionomitempty(v string) {
-	o.Descriptionomitempty = &v
+// SetDescription gets a reference to the given string and assigns it to the Description field.
+func (o *CalendarEvent) SetDescription(v string) {
+	o.Description = &v
 }
 
-// GetLocationomitempty returns the Locationomitempty field value if set, zero value otherwise.
-func (o *CalendarEvent) GetLocationomitempty() string {
-	if o == nil || IsNil(o.Locationomitempty) {
+// GetLocation returns the Location field value if set, zero value otherwise.
+func (o *CalendarEvent) GetLocation() string {
+	if o == nil || IsNil(o.Location) {
 		var ret string
 		return ret
 	}
-	return *o.Locationomitempty
+	return *o.Location
 }
 
-// GetLocationomitemptyOk returns a tuple with the Locationomitempty field value if set, nil otherwise
+// GetLocationOk returns a tuple with the Location field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CalendarEvent) GetLocationomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Locationomitempty) {
+func (o *CalendarEvent) GetLocationOk() (*string, bool) {
+	if o == nil || IsNil(o.Location) {
 		return nil, false
 	}
-	return o.Locationomitempty, true
+	return o.Location, true
 }
 
-// HasLocationomitempty returns a boolean if a field has been set.
-func (o *CalendarEvent) HasLocationomitempty() bool {
-	if o != nil && !IsNil(o.Locationomitempty) {
+// HasLocation returns a boolean if a field has been set.
+func (o *CalendarEvent) HasLocation() bool {
+	if o != nil && !IsNil(o.Location) {
 		return true
 	}
 
 	return false
 }
 
-// SetLocationomitempty gets a reference to the given string and assigns it to the Locationomitempty field.
-func (o *CalendarEvent) SetLocationomitempty(v string) {
-	o.Locationomitempty = &v
+// SetLocation gets a reference to the given string and assigns it to the Location field.
+func (o *CalendarEvent) SetLocation(v string) {
+	o.Location = &v
 }
 
 // GetStart returns the Start field value
@@ -241,101 +241,101 @@ func (o *CalendarEvent) SetAllDay(v bool) {
 	o.AllDay = v
 }
 
-// GetStatusomitempty returns the Statusomitempty field value if set, zero value otherwise.
-func (o *CalendarEvent) GetStatusomitempty() string {
-	if o == nil || IsNil(o.Statusomitempty) {
+// GetStatus returns the Status field value if set, zero value otherwise.
+func (o *CalendarEvent) GetStatus() string {
+	if o == nil || IsNil(o.Status) {
 		var ret string
 		return ret
 	}
-	return *o.Statusomitempty
+	return *o.Status
 }
 
-// GetStatusomitemptyOk returns a tuple with the Statusomitempty field value if set, nil otherwise
+// GetStatusOk returns a tuple with the Status field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CalendarEvent) GetStatusomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Statusomitempty) {
+func (o *CalendarEvent) GetStatusOk() (*string, bool) {
+	if o == nil || IsNil(o.Status) {
 		return nil, false
 	}
-	return o.Statusomitempty, true
+	return o.Status, true
 }
 
-// HasStatusomitempty returns a boolean if a field has been set.
-func (o *CalendarEvent) HasStatusomitempty() bool {
-	if o != nil && !IsNil(o.Statusomitempty) {
+// HasStatus returns a boolean if a field has been set.
+func (o *CalendarEvent) HasStatus() bool {
+	if o != nil && !IsNil(o.Status) {
 		return true
 	}
 
 	return false
 }
 
-// SetStatusomitempty gets a reference to the given string and assigns it to the Statusomitempty field.
-func (o *CalendarEvent) SetStatusomitempty(v string) {
-	o.Statusomitempty = &v
+// SetStatus gets a reference to the given string and assigns it to the Status field.
+func (o *CalendarEvent) SetStatus(v string) {
+	o.Status = &v
 }
 
-// GetHtmlLinkomitempty returns the HtmlLinkomitempty field value if set, zero value otherwise.
-func (o *CalendarEvent) GetHtmlLinkomitempty() string {
-	if o == nil || IsNil(o.HtmlLinkomitempty) {
+// GetHtmlLink returns the HtmlLink field value if set, zero value otherwise.
+func (o *CalendarEvent) GetHtmlLink() string {
+	if o == nil || IsNil(o.HtmlLink) {
 		var ret string
 		return ret
 	}
-	return *o.HtmlLinkomitempty
+	return *o.HtmlLink
 }
 
-// GetHtmlLinkomitemptyOk returns a tuple with the HtmlLinkomitempty field value if set, nil otherwise
+// GetHtmlLinkOk returns a tuple with the HtmlLink field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CalendarEvent) GetHtmlLinkomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.HtmlLinkomitempty) {
+func (o *CalendarEvent) GetHtmlLinkOk() (*string, bool) {
+	if o == nil || IsNil(o.HtmlLink) {
 		return nil, false
 	}
-	return o.HtmlLinkomitempty, true
+	return o.HtmlLink, true
 }
 
-// HasHtmlLinkomitempty returns a boolean if a field has been set.
-func (o *CalendarEvent) HasHtmlLinkomitempty() bool {
-	if o != nil && !IsNil(o.HtmlLinkomitempty) {
+// HasHtmlLink returns a boolean if a field has been set.
+func (o *CalendarEvent) HasHtmlLink() bool {
+	if o != nil && !IsNil(o.HtmlLink) {
 		return true
 	}
 
 	return false
 }
 
-// SetHtmlLinkomitempty gets a reference to the given string and assigns it to the HtmlLinkomitempty field.
-func (o *CalendarEvent) SetHtmlLinkomitempty(v string) {
-	o.HtmlLinkomitempty = &v
+// SetHtmlLink gets a reference to the given string and assigns it to the HtmlLink field.
+func (o *CalendarEvent) SetHtmlLink(v string) {
+	o.HtmlLink = &v
 }
 
-// GetAttendeesomitempty returns the Attendeesomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *CalendarEvent) GetAttendeesomitempty() []string {
+// GetAttendees returns the Attendees field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *CalendarEvent) GetAttendees() []string {
 	if o == nil {
 		var ret []string
 		return ret
 	}
-	return o.Attendeesomitempty
+	return o.Attendees
 }
 
-// GetAttendeesomitemptyOk returns a tuple with the Attendeesomitempty field value if set, nil otherwise
+// GetAttendeesOk returns a tuple with the Attendees field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *CalendarEvent) GetAttendeesomitemptyOk() ([]string, bool) {
-	if o == nil || IsNil(o.Attendeesomitempty) {
+func (o *CalendarEvent) GetAttendeesOk() ([]string, bool) {
+	if o == nil || IsNil(o.Attendees) {
 		return nil, false
 	}
-	return o.Attendeesomitempty, true
+	return o.Attendees, true
 }
 
-// HasAttendeesomitempty returns a boolean if a field has been set.
-func (o *CalendarEvent) HasAttendeesomitempty() bool {
-	if o != nil && !IsNil(o.Attendeesomitempty) {
+// HasAttendees returns a boolean if a field has been set.
+func (o *CalendarEvent) HasAttendees() bool {
+	if o != nil && !IsNil(o.Attendees) {
 		return true
 	}
 
 	return false
 }
 
-// SetAttendeesomitempty gets a reference to the given []string and assigns it to the Attendeesomitempty field.
-func (o *CalendarEvent) SetAttendeesomitempty(v []string) {
-	o.Attendeesomitempty = v
+// SetAttendees gets a reference to the given []string and assigns it to the Attendees field.
+func (o *CalendarEvent) SetAttendees(v []string) {
+	o.Attendees = v
 }
 
 func (o CalendarEvent) MarshalJSON() ([]byte, error) {
@@ -350,23 +350,23 @@ func (o CalendarEvent) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["id"] = o.Id
 	toSerialize["summary"] = o.Summary
-	if !IsNil(o.Descriptionomitempty) {
-		toSerialize["description,omitempty"] = o.Descriptionomitempty
+	if !IsNil(o.Description) {
+		toSerialize["description"] = o.Description
 	}
-	if !IsNil(o.Locationomitempty) {
-		toSerialize["location,omitempty"] = o.Locationomitempty
+	if !IsNil(o.Location) {
+		toSerialize["location"] = o.Location
 	}
 	toSerialize["start"] = o.Start
 	toSerialize["end"] = o.End
 	toSerialize["all_day"] = o.AllDay
-	if !IsNil(o.Statusomitempty) {
-		toSerialize["status,omitempty"] = o.Statusomitempty
+	if !IsNil(o.Status) {
+		toSerialize["status"] = o.Status
 	}
-	if !IsNil(o.HtmlLinkomitempty) {
-		toSerialize["html_link,omitempty"] = o.HtmlLinkomitempty
+	if !IsNil(o.HtmlLink) {
+		toSerialize["html_link"] = o.HtmlLink
 	}
-	if o.Attendeesomitempty != nil {
-		toSerialize["attendees,omitempty"] = o.Attendeesomitempty
+	if o.Attendees != nil {
+		toSerialize["attendees"] = o.Attendees
 	}
 	return toSerialize, nil
 }

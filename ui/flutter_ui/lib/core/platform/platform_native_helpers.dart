@@ -12,9 +12,8 @@
 // conditional imports (export_web.dart / export_native.dart).
 library platform_native_helpers;
 
-import 'dart:io' show Platform, File, FileSystemException, X509Certificate;
+import 'dart:io' show Platform, File, FileSystemException;
 import 'package:flutter/foundation.dart' show debugPrint;
-import 'dart:typed_data' show Uint8List;
 
 /// Detect if running on macOS.
 bool nativeIsMacOS() {

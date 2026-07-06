@@ -15,11 +15,11 @@ part 'ui_field_def.g.dart';
 /// * [name] 
 /// * [label] 
 /// * [type] 
-/// * [requiredCommaOmitempty] 
-/// * [defaultCommaOmitempty] 
-/// * [optionsCommaOmitempty] 
-/// * [placeholderCommaOmitempty] 
-/// * [helpCommaOmitempty] 
+/// * [required_] 
+/// * [default_] 
+/// * [options] 
+/// * [placeholder] 
+/// * [help] 
 @BuiltValue()
 abstract class UIFieldDef implements Built<UIFieldDef, UIFieldDefBuilder> {
   @BuiltValueField(wireName: r'name')
@@ -31,20 +31,20 @@ abstract class UIFieldDef implements Built<UIFieldDef, UIFieldDefBuilder> {
   @BuiltValueField(wireName: r'type')
   String get type;
 
-  @BuiltValueField(wireName: r'required,omitempty')
-  bool? get requiredCommaOmitempty;
+  @BuiltValueField(wireName: r'required')
+  bool? get required_;
 
-  @BuiltValueField(wireName: r'default,omitempty')
-  JsonObject? get defaultCommaOmitempty;
+  @BuiltValueField(wireName: r'default')
+  JsonObject? get default_;
 
-  @BuiltValueField(wireName: r'options,omitempty')
-  String? get optionsCommaOmitempty;
+  @BuiltValueField(wireName: r'options')
+  String? get options;
 
-  @BuiltValueField(wireName: r'placeholder,omitempty')
-  String? get placeholderCommaOmitempty;
+  @BuiltValueField(wireName: r'placeholder')
+  String? get placeholder;
 
-  @BuiltValueField(wireName: r'help,omitempty')
-  String? get helpCommaOmitempty;
+  @BuiltValueField(wireName: r'help')
+  String? get help;
 
   UIFieldDef._();
 
@@ -84,38 +84,38 @@ class _$UIFieldDefSerializer implements PrimitiveSerializer<UIFieldDef> {
       object.type,
       specifiedType: const FullType(String),
     );
-    if (object.requiredCommaOmitempty != null) {
-      yield r'required,omitempty';
+    if (object.required_ != null) {
+      yield r'required';
       yield serializers.serialize(
-        object.requiredCommaOmitempty,
+        object.required_,
         specifiedType: const FullType(bool),
       );
     }
-    if (object.defaultCommaOmitempty != null) {
-      yield r'default,omitempty';
+    if (object.default_ != null) {
+      yield r'default';
       yield serializers.serialize(
-        object.defaultCommaOmitempty,
+        object.default_,
         specifiedType: const FullType(JsonObject),
       );
     }
-    if (object.optionsCommaOmitempty != null) {
-      yield r'options,omitempty';
+    if (object.options != null) {
+      yield r'options';
       yield serializers.serialize(
-        object.optionsCommaOmitempty,
+        object.options,
         specifiedType: const FullType.nullable(String),
       );
     }
-    if (object.placeholderCommaOmitempty != null) {
-      yield r'placeholder,omitempty';
+    if (object.placeholder != null) {
+      yield r'placeholder';
       yield serializers.serialize(
-        object.placeholderCommaOmitempty,
+        object.placeholder,
         specifiedType: const FullType(String),
       );
     }
-    if (object.helpCommaOmitempty != null) {
-      yield r'help,omitempty';
+    if (object.help != null) {
+      yield r'help';
       yield serializers.serialize(
-        object.helpCommaOmitempty,
+        object.help,
         specifiedType: const FullType(String),
       );
     }
@@ -163,41 +163,41 @@ class _$UIFieldDefSerializer implements PrimitiveSerializer<UIFieldDef> {
           ) as String;
           result.type = valueDes;
           break;
-        case r'required,omitempty':
+        case r'required':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(bool),
           ) as bool;
-          result.requiredCommaOmitempty = valueDes;
+          result.required_ = valueDes;
           break;
-        case r'default,omitempty':
+        case r'default':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(JsonObject),
           ) as JsonObject;
-          result.defaultCommaOmitempty = valueDes;
+          result.default_ = valueDes;
           break;
-        case r'options,omitempty':
+        case r'options':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType.nullable(String),
           ) as String?;
           if (valueDes == null) continue;
-          result.optionsCommaOmitempty = valueDes;
+          result.options = valueDes;
           break;
-        case r'placeholder,omitempty':
+        case r'placeholder':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.placeholderCommaOmitempty = valueDes;
+          result.placeholder = valueDes;
           break;
-        case r'help,omitempty':
+        case r'help':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.helpCommaOmitempty = valueDes;
+          result.help = valueDes;
           break;
         default:
           unhandled.add(key);

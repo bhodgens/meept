@@ -24,11 +24,11 @@ type UIFieldDef struct {
 	Name string `json:"name"`
 	Label string `json:"label"`
 	Type string `json:"type"`
-	Requiredomitempty *bool `json:"required,omitempty,omitempty"`
-	Defaultomitempty map[string]interface{} `json:"default,omitempty,omitempty"`
-	Optionsomitempty NullableString `json:"options,omitempty,omitempty"`
-	Placeholderomitempty *string `json:"placeholder,omitempty,omitempty"`
-	Helpomitempty *string `json:"help,omitempty,omitempty"`
+	Required *bool `json:"required,omitempty"`
+	Default map[string]interface{} `json:"default,omitempty"`
+	Options NullableString `json:"options,omitempty"`
+	Placeholder *string `json:"placeholder,omitempty"`
+	Help *string `json:"help,omitempty"`
 }
 
 type _UIFieldDef UIFieldDef
@@ -125,174 +125,174 @@ func (o *UIFieldDef) SetType(v string) {
 	o.Type = v
 }
 
-// GetRequiredomitempty returns the Requiredomitempty field value if set, zero value otherwise.
-func (o *UIFieldDef) GetRequiredomitempty() bool {
-	if o == nil || IsNil(o.Requiredomitempty) {
+// GetRequired returns the Required field value if set, zero value otherwise.
+func (o *UIFieldDef) GetRequired() bool {
+	if o == nil || IsNil(o.Required) {
 		var ret bool
 		return ret
 	}
-	return *o.Requiredomitempty
+	return *o.Required
 }
 
-// GetRequiredomitemptyOk returns a tuple with the Requiredomitempty field value if set, nil otherwise
+// GetRequiredOk returns a tuple with the Required field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *UIFieldDef) GetRequiredomitemptyOk() (*bool, bool) {
-	if o == nil || IsNil(o.Requiredomitempty) {
+func (o *UIFieldDef) GetRequiredOk() (*bool, bool) {
+	if o == nil || IsNil(o.Required) {
 		return nil, false
 	}
-	return o.Requiredomitempty, true
+	return o.Required, true
 }
 
-// HasRequiredomitempty returns a boolean if a field has been set.
-func (o *UIFieldDef) HasRequiredomitempty() bool {
-	if o != nil && !IsNil(o.Requiredomitempty) {
+// HasRequired returns a boolean if a field has been set.
+func (o *UIFieldDef) HasRequired() bool {
+	if o != nil && !IsNil(o.Required) {
 		return true
 	}
 
 	return false
 }
 
-// SetRequiredomitempty gets a reference to the given bool and assigns it to the Requiredomitempty field.
-func (o *UIFieldDef) SetRequiredomitempty(v bool) {
-	o.Requiredomitempty = &v
+// SetRequired gets a reference to the given bool and assigns it to the Required field.
+func (o *UIFieldDef) SetRequired(v bool) {
+	o.Required = &v
 }
 
-// GetDefaultomitempty returns the Defaultomitempty field value if set, zero value otherwise.
-func (o *UIFieldDef) GetDefaultomitempty() map[string]interface{} {
-	if o == nil || IsNil(o.Defaultomitempty) {
+// GetDefault returns the Default field value if set, zero value otherwise.
+func (o *UIFieldDef) GetDefault() map[string]interface{} {
+	if o == nil || IsNil(o.Default) {
 		var ret map[string]interface{}
 		return ret
 	}
-	return o.Defaultomitempty
+	return o.Default
 }
 
-// GetDefaultomitemptyOk returns a tuple with the Defaultomitempty field value if set, nil otherwise
+// GetDefaultOk returns a tuple with the Default field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *UIFieldDef) GetDefaultomitemptyOk() (map[string]interface{}, bool) {
-	if o == nil || IsNil(o.Defaultomitempty) {
+func (o *UIFieldDef) GetDefaultOk() (map[string]interface{}, bool) {
+	if o == nil || IsNil(o.Default) {
 		return map[string]interface{}{}, false
 	}
-	return o.Defaultomitempty, true
+	return o.Default, true
 }
 
-// HasDefaultomitempty returns a boolean if a field has been set.
-func (o *UIFieldDef) HasDefaultomitempty() bool {
-	if o != nil && !IsNil(o.Defaultomitempty) {
+// HasDefault returns a boolean if a field has been set.
+func (o *UIFieldDef) HasDefault() bool {
+	if o != nil && !IsNil(o.Default) {
 		return true
 	}
 
 	return false
 }
 
-// SetDefaultomitempty gets a reference to the given map[string]interface{} and assigns it to the Defaultomitempty field.
-func (o *UIFieldDef) SetDefaultomitempty(v map[string]interface{}) {
-	o.Defaultomitempty = v
+// SetDefault gets a reference to the given map[string]interface{} and assigns it to the Default field.
+func (o *UIFieldDef) SetDefault(v map[string]interface{}) {
+	o.Default = v
 }
 
-// GetOptionsomitempty returns the Optionsomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *UIFieldDef) GetOptionsomitempty() string {
-	if o == nil || IsNil(o.Optionsomitempty.Get()) {
+// GetOptions returns the Options field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *UIFieldDef) GetOptions() string {
+	if o == nil || IsNil(o.Options.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.Optionsomitempty.Get()
+	return *o.Options.Get()
 }
 
-// GetOptionsomitemptyOk returns a tuple with the Optionsomitempty field value if set, nil otherwise
+// GetOptionsOk returns a tuple with the Options field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *UIFieldDef) GetOptionsomitemptyOk() (*string, bool) {
+func (o *UIFieldDef) GetOptionsOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.Optionsomitempty.Get(), o.Optionsomitempty.IsSet()
+	return o.Options.Get(), o.Options.IsSet()
 }
 
-// HasOptionsomitempty returns a boolean if a field has been set.
-func (o *UIFieldDef) HasOptionsomitempty() bool {
-	if o != nil && o.Optionsomitempty.IsSet() {
+// HasOptions returns a boolean if a field has been set.
+func (o *UIFieldDef) HasOptions() bool {
+	if o != nil && o.Options.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetOptionsomitempty gets a reference to the given NullableString and assigns it to the Optionsomitempty field.
-func (o *UIFieldDef) SetOptionsomitempty(v string) {
-	o.Optionsomitempty.Set(&v)
+// SetOptions gets a reference to the given NullableString and assigns it to the Options field.
+func (o *UIFieldDef) SetOptions(v string) {
+	o.Options.Set(&v)
 }
-// SetOptionsomitemptyNil sets the value for Optionsomitempty to be an explicit nil
-func (o *UIFieldDef) SetOptionsomitemptyNil() {
-	o.Optionsomitempty.Set(nil)
-}
-
-// UnsetOptionsomitempty ensures that no value is present for Optionsomitempty, not even an explicit nil
-func (o *UIFieldDef) UnsetOptionsomitempty() {
-	o.Optionsomitempty.Unset()
+// SetOptionsNil sets the value for Options to be an explicit nil
+func (o *UIFieldDef) SetOptionsNil() {
+	o.Options.Set(nil)
 }
 
-// GetPlaceholderomitempty returns the Placeholderomitempty field value if set, zero value otherwise.
-func (o *UIFieldDef) GetPlaceholderomitempty() string {
-	if o == nil || IsNil(o.Placeholderomitempty) {
+// UnsetOptions ensures that no value is present for Options, not even an explicit nil
+func (o *UIFieldDef) UnsetOptions() {
+	o.Options.Unset()
+}
+
+// GetPlaceholder returns the Placeholder field value if set, zero value otherwise.
+func (o *UIFieldDef) GetPlaceholder() string {
+	if o == nil || IsNil(o.Placeholder) {
 		var ret string
 		return ret
 	}
-	return *o.Placeholderomitempty
+	return *o.Placeholder
 }
 
-// GetPlaceholderomitemptyOk returns a tuple with the Placeholderomitempty field value if set, nil otherwise
+// GetPlaceholderOk returns a tuple with the Placeholder field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *UIFieldDef) GetPlaceholderomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Placeholderomitempty) {
+func (o *UIFieldDef) GetPlaceholderOk() (*string, bool) {
+	if o == nil || IsNil(o.Placeholder) {
 		return nil, false
 	}
-	return o.Placeholderomitempty, true
+	return o.Placeholder, true
 }
 
-// HasPlaceholderomitempty returns a boolean if a field has been set.
-func (o *UIFieldDef) HasPlaceholderomitempty() bool {
-	if o != nil && !IsNil(o.Placeholderomitempty) {
+// HasPlaceholder returns a boolean if a field has been set.
+func (o *UIFieldDef) HasPlaceholder() bool {
+	if o != nil && !IsNil(o.Placeholder) {
 		return true
 	}
 
 	return false
 }
 
-// SetPlaceholderomitempty gets a reference to the given string and assigns it to the Placeholderomitempty field.
-func (o *UIFieldDef) SetPlaceholderomitempty(v string) {
-	o.Placeholderomitempty = &v
+// SetPlaceholder gets a reference to the given string and assigns it to the Placeholder field.
+func (o *UIFieldDef) SetPlaceholder(v string) {
+	o.Placeholder = &v
 }
 
-// GetHelpomitempty returns the Helpomitempty field value if set, zero value otherwise.
-func (o *UIFieldDef) GetHelpomitempty() string {
-	if o == nil || IsNil(o.Helpomitempty) {
+// GetHelp returns the Help field value if set, zero value otherwise.
+func (o *UIFieldDef) GetHelp() string {
+	if o == nil || IsNil(o.Help) {
 		var ret string
 		return ret
 	}
-	return *o.Helpomitempty
+	return *o.Help
 }
 
-// GetHelpomitemptyOk returns a tuple with the Helpomitempty field value if set, nil otherwise
+// GetHelpOk returns a tuple with the Help field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *UIFieldDef) GetHelpomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Helpomitempty) {
+func (o *UIFieldDef) GetHelpOk() (*string, bool) {
+	if o == nil || IsNil(o.Help) {
 		return nil, false
 	}
-	return o.Helpomitempty, true
+	return o.Help, true
 }
 
-// HasHelpomitempty returns a boolean if a field has been set.
-func (o *UIFieldDef) HasHelpomitempty() bool {
-	if o != nil && !IsNil(o.Helpomitempty) {
+// HasHelp returns a boolean if a field has been set.
+func (o *UIFieldDef) HasHelp() bool {
+	if o != nil && !IsNil(o.Help) {
 		return true
 	}
 
 	return false
 }
 
-// SetHelpomitempty gets a reference to the given string and assigns it to the Helpomitempty field.
-func (o *UIFieldDef) SetHelpomitempty(v string) {
-	o.Helpomitempty = &v
+// SetHelp gets a reference to the given string and assigns it to the Help field.
+func (o *UIFieldDef) SetHelp(v string) {
+	o.Help = &v
 }
 
 func (o UIFieldDef) MarshalJSON() ([]byte, error) {
@@ -308,20 +308,20 @@ func (o UIFieldDef) ToMap() (map[string]interface{}, error) {
 	toSerialize["name"] = o.Name
 	toSerialize["label"] = o.Label
 	toSerialize["type"] = o.Type
-	if !IsNil(o.Requiredomitempty) {
-		toSerialize["required,omitempty"] = o.Requiredomitempty
+	if !IsNil(o.Required) {
+		toSerialize["required"] = o.Required
 	}
-	if !IsNil(o.Defaultomitempty) {
-		toSerialize["default,omitempty"] = o.Defaultomitempty
+	if !IsNil(o.Default) {
+		toSerialize["default"] = o.Default
 	}
-	if o.Optionsomitempty.IsSet() {
-		toSerialize["options,omitempty"] = o.Optionsomitempty.Get()
+	if o.Options.IsSet() {
+		toSerialize["options"] = o.Options.Get()
 	}
-	if !IsNil(o.Placeholderomitempty) {
-		toSerialize["placeholder,omitempty"] = o.Placeholderomitempty
+	if !IsNil(o.Placeholder) {
+		toSerialize["placeholder"] = o.Placeholder
 	}
-	if !IsNil(o.Helpomitempty) {
-		toSerialize["help,omitempty"] = o.Helpomitempty
+	if !IsNil(o.Help) {
+		toSerialize["help"] = o.Help
 	}
 	return toSerialize, nil
 }

@@ -8,13 +8,13 @@ part of 'create_session_request.dart';
 
 class _$CreateSessionRequest extends CreateSessionRequest {
   @override
-  final String? nameCommaOmitempty;
+  final String? name;
 
   factory _$CreateSessionRequest(
           [void Function(CreateSessionRequestBuilder)? updates]) =>
       (CreateSessionRequestBuilder()..update(updates))._build();
 
-  _$CreateSessionRequest._({this.nameCommaOmitempty}) : super._();
+  _$CreateSessionRequest._({this.name}) : super._();
   @override
   CreateSessionRequest rebuild(
           void Function(CreateSessionRequestBuilder) updates) =>
@@ -28,13 +28,13 @@ class _$CreateSessionRequest extends CreateSessionRequest {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is CreateSessionRequest &&
-        nameCommaOmitempty == other.nameCommaOmitempty;
+        name == other.name;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
-    _$hash = $jc(_$hash, nameCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, name.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -42,7 +42,7 @@ class _$CreateSessionRequest extends CreateSessionRequest {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'CreateSessionRequest')
-          ..add('nameCommaOmitempty', nameCommaOmitempty))
+          ..add('name', name))
         .toString();
   }
 }
@@ -51,10 +51,10 @@ class CreateSessionRequestBuilder
     implements Builder<CreateSessionRequest, CreateSessionRequestBuilder> {
   _$CreateSessionRequest? _$v;
 
-  String? _nameCommaOmitempty;
-  String? get nameCommaOmitempty => _$this._nameCommaOmitempty;
-  set nameCommaOmitempty(String? nameCommaOmitempty) =>
-      _$this._nameCommaOmitempty = nameCommaOmitempty;
+  String? _name;
+  String? get name => _$this._name;
+  set name(String? name) =>
+      _$this._name = name;
 
   CreateSessionRequestBuilder() {
     CreateSessionRequest._defaults(this);
@@ -63,7 +63,7 @@ class CreateSessionRequestBuilder
   CreateSessionRequestBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
-      _nameCommaOmitempty = $v.nameCommaOmitempty;
+      _name = $v.name;
       _$v = null;
     }
     return this;
@@ -85,7 +85,7 @@ class CreateSessionRequestBuilder
   _$CreateSessionRequest _build() {
     final _$result = _$v ??
         _$CreateSessionRequest._(
-          nameCommaOmitempty: nameCommaOmitempty,
+          name: name,
         );
     replace(_$result);
     return _$result;

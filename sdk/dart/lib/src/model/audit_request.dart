@@ -11,11 +11,11 @@ part 'audit_request.g.dart';
 /// AuditRequest
 ///
 /// Properties:
-/// * [limitCommaOmitempty] 
+/// * [limit] 
 @BuiltValue()
 abstract class AuditRequest implements Built<AuditRequest, AuditRequestBuilder> {
-  @BuiltValueField(wireName: r'limit,omitempty')
-  int? get limitCommaOmitempty;
+  @BuiltValueField(wireName: r'limit')
+  int? get limit;
 
   AuditRequest._();
 
@@ -40,10 +40,10 @@ class _$AuditRequestSerializer implements PrimitiveSerializer<AuditRequest> {
     AuditRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
-    if (object.limitCommaOmitempty != null) {
-      yield r'limit,omitempty';
+    if (object.limit != null) {
+      yield r'limit';
       yield serializers.serialize(
-        object.limitCommaOmitempty,
+        object.limit,
         specifiedType: const FullType(int),
       );
     }
@@ -70,12 +70,12 @@ class _$AuditRequestSerializer implements PrimitiveSerializer<AuditRequest> {
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
-        case r'limit,omitempty':
+        case r'limit':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(int),
           ) as int;
-          result.limitCommaOmitempty = valueDes;
+          result.limit = valueDes;
           break;
         default:
           unhandled.add(key);

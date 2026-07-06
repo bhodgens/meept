@@ -22,10 +22,10 @@ var _ MappedNullable = &AgentJobConfig{}
 // AgentJobConfig struct for AgentJobConfig
 type AgentJobConfig struct {
 	Prompt string `json:"prompt"`
-	Contextomitempty NullableString `json:"context,omitempty,omitempty"`
-	Modelomitempty *string `json:"model,omitempty,omitempty"`
-	MaxTokensomitempty *int32 `json:"max_tokens,omitempty,omitempty"`
-	Temperatureomitempty *float32 `json:"temperature,omitempty,omitempty"`
+	Context NullableString `json:"context,omitempty"`
+	Model *string `json:"model,omitempty"`
+	MaxTokens *int32 `json:"max_tokens,omitempty"`
+	Temperature *float32 `json:"temperature,omitempty"`
 }
 
 type _AgentJobConfig AgentJobConfig
@@ -72,142 +72,142 @@ func (o *AgentJobConfig) SetPrompt(v string) {
 	o.Prompt = v
 }
 
-// GetContextomitempty returns the Contextomitempty field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *AgentJobConfig) GetContextomitempty() string {
-	if o == nil || IsNil(o.Contextomitempty.Get()) {
+// GetContext returns the Context field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *AgentJobConfig) GetContext() string {
+	if o == nil || IsNil(o.Context.Get()) {
 		var ret string
 		return ret
 	}
-	return *o.Contextomitempty.Get()
+	return *o.Context.Get()
 }
 
-// GetContextomitemptyOk returns a tuple with the Contextomitempty field value if set, nil otherwise
+// GetContextOk returns a tuple with the Context field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *AgentJobConfig) GetContextomitemptyOk() (*string, bool) {
+func (o *AgentJobConfig) GetContextOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.Contextomitempty.Get(), o.Contextomitempty.IsSet()
+	return o.Context.Get(), o.Context.IsSet()
 }
 
-// HasContextomitempty returns a boolean if a field has been set.
-func (o *AgentJobConfig) HasContextomitempty() bool {
-	if o != nil && o.Contextomitempty.IsSet() {
+// HasContext returns a boolean if a field has been set.
+func (o *AgentJobConfig) HasContext() bool {
+	if o != nil && o.Context.IsSet() {
 		return true
 	}
 
 	return false
 }
 
-// SetContextomitempty gets a reference to the given NullableString and assigns it to the Contextomitempty field.
-func (o *AgentJobConfig) SetContextomitempty(v string) {
-	o.Contextomitempty.Set(&v)
+// SetContext gets a reference to the given NullableString and assigns it to the Context field.
+func (o *AgentJobConfig) SetContext(v string) {
+	o.Context.Set(&v)
 }
-// SetContextomitemptyNil sets the value for Contextomitempty to be an explicit nil
-func (o *AgentJobConfig) SetContextomitemptyNil() {
-	o.Contextomitempty.Set(nil)
-}
-
-// UnsetContextomitempty ensures that no value is present for Contextomitempty, not even an explicit nil
-func (o *AgentJobConfig) UnsetContextomitempty() {
-	o.Contextomitempty.Unset()
+// SetContextNil sets the value for Context to be an explicit nil
+func (o *AgentJobConfig) SetContextNil() {
+	o.Context.Set(nil)
 }
 
-// GetModelomitempty returns the Modelomitempty field value if set, zero value otherwise.
-func (o *AgentJobConfig) GetModelomitempty() string {
-	if o == nil || IsNil(o.Modelomitempty) {
+// UnsetContext ensures that no value is present for Context, not even an explicit nil
+func (o *AgentJobConfig) UnsetContext() {
+	o.Context.Unset()
+}
+
+// GetModel returns the Model field value if set, zero value otherwise.
+func (o *AgentJobConfig) GetModel() string {
+	if o == nil || IsNil(o.Model) {
 		var ret string
 		return ret
 	}
-	return *o.Modelomitempty
+	return *o.Model
 }
 
-// GetModelomitemptyOk returns a tuple with the Modelomitempty field value if set, nil otherwise
+// GetModelOk returns a tuple with the Model field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *AgentJobConfig) GetModelomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Modelomitempty) {
+func (o *AgentJobConfig) GetModelOk() (*string, bool) {
+	if o == nil || IsNil(o.Model) {
 		return nil, false
 	}
-	return o.Modelomitempty, true
+	return o.Model, true
 }
 
-// HasModelomitempty returns a boolean if a field has been set.
-func (o *AgentJobConfig) HasModelomitempty() bool {
-	if o != nil && !IsNil(o.Modelomitempty) {
+// HasModel returns a boolean if a field has been set.
+func (o *AgentJobConfig) HasModel() bool {
+	if o != nil && !IsNil(o.Model) {
 		return true
 	}
 
 	return false
 }
 
-// SetModelomitempty gets a reference to the given string and assigns it to the Modelomitempty field.
-func (o *AgentJobConfig) SetModelomitempty(v string) {
-	o.Modelomitempty = &v
+// SetModel gets a reference to the given string and assigns it to the Model field.
+func (o *AgentJobConfig) SetModel(v string) {
+	o.Model = &v
 }
 
-// GetMaxTokensomitempty returns the MaxTokensomitempty field value if set, zero value otherwise.
-func (o *AgentJobConfig) GetMaxTokensomitempty() int32 {
-	if o == nil || IsNil(o.MaxTokensomitempty) {
+// GetMaxTokens returns the MaxTokens field value if set, zero value otherwise.
+func (o *AgentJobConfig) GetMaxTokens() int32 {
+	if o == nil || IsNil(o.MaxTokens) {
 		var ret int32
 		return ret
 	}
-	return *o.MaxTokensomitempty
+	return *o.MaxTokens
 }
 
-// GetMaxTokensomitemptyOk returns a tuple with the MaxTokensomitempty field value if set, nil otherwise
+// GetMaxTokensOk returns a tuple with the MaxTokens field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *AgentJobConfig) GetMaxTokensomitemptyOk() (*int32, bool) {
-	if o == nil || IsNil(o.MaxTokensomitempty) {
+func (o *AgentJobConfig) GetMaxTokensOk() (*int32, bool) {
+	if o == nil || IsNil(o.MaxTokens) {
 		return nil, false
 	}
-	return o.MaxTokensomitempty, true
+	return o.MaxTokens, true
 }
 
-// HasMaxTokensomitempty returns a boolean if a field has been set.
-func (o *AgentJobConfig) HasMaxTokensomitempty() bool {
-	if o != nil && !IsNil(o.MaxTokensomitempty) {
+// HasMaxTokens returns a boolean if a field has been set.
+func (o *AgentJobConfig) HasMaxTokens() bool {
+	if o != nil && !IsNil(o.MaxTokens) {
 		return true
 	}
 
 	return false
 }
 
-// SetMaxTokensomitempty gets a reference to the given int32 and assigns it to the MaxTokensomitempty field.
-func (o *AgentJobConfig) SetMaxTokensomitempty(v int32) {
-	o.MaxTokensomitempty = &v
+// SetMaxTokens gets a reference to the given int32 and assigns it to the MaxTokens field.
+func (o *AgentJobConfig) SetMaxTokens(v int32) {
+	o.MaxTokens = &v
 }
 
-// GetTemperatureomitempty returns the Temperatureomitempty field value if set, zero value otherwise.
-func (o *AgentJobConfig) GetTemperatureomitempty() float32 {
-	if o == nil || IsNil(o.Temperatureomitempty) {
+// GetTemperature returns the Temperature field value if set, zero value otherwise.
+func (o *AgentJobConfig) GetTemperature() float32 {
+	if o == nil || IsNil(o.Temperature) {
 		var ret float32
 		return ret
 	}
-	return *o.Temperatureomitempty
+	return *o.Temperature
 }
 
-// GetTemperatureomitemptyOk returns a tuple with the Temperatureomitempty field value if set, nil otherwise
+// GetTemperatureOk returns a tuple with the Temperature field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *AgentJobConfig) GetTemperatureomitemptyOk() (*float32, bool) {
-	if o == nil || IsNil(o.Temperatureomitempty) {
+func (o *AgentJobConfig) GetTemperatureOk() (*float32, bool) {
+	if o == nil || IsNil(o.Temperature) {
 		return nil, false
 	}
-	return o.Temperatureomitempty, true
+	return o.Temperature, true
 }
 
-// HasTemperatureomitempty returns a boolean if a field has been set.
-func (o *AgentJobConfig) HasTemperatureomitempty() bool {
-	if o != nil && !IsNil(o.Temperatureomitempty) {
+// HasTemperature returns a boolean if a field has been set.
+func (o *AgentJobConfig) HasTemperature() bool {
+	if o != nil && !IsNil(o.Temperature) {
 		return true
 	}
 
 	return false
 }
 
-// SetTemperatureomitempty gets a reference to the given float32 and assigns it to the Temperatureomitempty field.
-func (o *AgentJobConfig) SetTemperatureomitempty(v float32) {
-	o.Temperatureomitempty = &v
+// SetTemperature gets a reference to the given float32 and assigns it to the Temperature field.
+func (o *AgentJobConfig) SetTemperature(v float32) {
+	o.Temperature = &v
 }
 
 func (o AgentJobConfig) MarshalJSON() ([]byte, error) {
@@ -221,17 +221,17 @@ func (o AgentJobConfig) MarshalJSON() ([]byte, error) {
 func (o AgentJobConfig) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["prompt"] = o.Prompt
-	if o.Contextomitempty.IsSet() {
-		toSerialize["context,omitempty"] = o.Contextomitempty.Get()
+	if o.Context.IsSet() {
+		toSerialize["context"] = o.Context.Get()
 	}
-	if !IsNil(o.Modelomitempty) {
-		toSerialize["model,omitempty"] = o.Modelomitempty
+	if !IsNil(o.Model) {
+		toSerialize["model"] = o.Model
 	}
-	if !IsNil(o.MaxTokensomitempty) {
-		toSerialize["max_tokens,omitempty"] = o.MaxTokensomitempty
+	if !IsNil(o.MaxTokens) {
+		toSerialize["max_tokens"] = o.MaxTokens
 	}
-	if !IsNil(o.Temperatureomitempty) {
-		toSerialize["temperature,omitempty"] = o.Temperatureomitempty
+	if !IsNil(o.Temperature) {
+		toSerialize["temperature"] = o.Temperature
 	}
 	return toSerialize, nil
 }

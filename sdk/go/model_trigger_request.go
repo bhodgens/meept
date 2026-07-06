@@ -19,7 +19,7 @@ var _ MappedNullable = &TriggerRequest{}
 
 // TriggerRequest struct for TriggerRequest
 type TriggerRequest struct {
-	Forceomitempty *bool `json:"force,omitempty,omitempty"`
+	Force *bool `json:"force,omitempty"`
 }
 
 // NewTriggerRequest instantiates a new TriggerRequest object
@@ -39,36 +39,36 @@ func NewTriggerRequestWithDefaults() *TriggerRequest {
 	return &this
 }
 
-// GetForceomitempty returns the Forceomitempty field value if set, zero value otherwise.
-func (o *TriggerRequest) GetForceomitempty() bool {
-	if o == nil || IsNil(o.Forceomitempty) {
+// GetForce returns the Force field value if set, zero value otherwise.
+func (o *TriggerRequest) GetForce() bool {
+	if o == nil || IsNil(o.Force) {
 		var ret bool
 		return ret
 	}
-	return *o.Forceomitempty
+	return *o.Force
 }
 
-// GetForceomitemptyOk returns a tuple with the Forceomitempty field value if set, nil otherwise
+// GetForceOk returns a tuple with the Force field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *TriggerRequest) GetForceomitemptyOk() (*bool, bool) {
-	if o == nil || IsNil(o.Forceomitempty) {
+func (o *TriggerRequest) GetForceOk() (*bool, bool) {
+	if o == nil || IsNil(o.Force) {
 		return nil, false
 	}
-	return o.Forceomitempty, true
+	return o.Force, true
 }
 
-// HasForceomitempty returns a boolean if a field has been set.
-func (o *TriggerRequest) HasForceomitempty() bool {
-	if o != nil && !IsNil(o.Forceomitempty) {
+// HasForce returns a boolean if a field has been set.
+func (o *TriggerRequest) HasForce() bool {
+	if o != nil && !IsNil(o.Force) {
 		return true
 	}
 
 	return false
 }
 
-// SetForceomitempty gets a reference to the given bool and assigns it to the Forceomitempty field.
-func (o *TriggerRequest) SetForceomitempty(v bool) {
-	o.Forceomitempty = &v
+// SetForce gets a reference to the given bool and assigns it to the Force field.
+func (o *TriggerRequest) SetForce(v bool) {
+	o.Force = &v
 }
 
 func (o TriggerRequest) MarshalJSON() ([]byte, error) {
@@ -81,8 +81,8 @@ func (o TriggerRequest) MarshalJSON() ([]byte, error) {
 
 func (o TriggerRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	if !IsNil(o.Forceomitempty) {
-		toSerialize["force,omitempty"] = o.Forceomitempty
+	if !IsNil(o.Force) {
+		toSerialize["force"] = o.Force
 	}
 	return toSerialize, nil
 }

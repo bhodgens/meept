@@ -16,19 +16,19 @@ class _$SkillUIDescriptor extends SkillUIDescriptor {
   @override
   final String uiType;
   @override
-  final String? categoryCommaOmitempty;
+  final String? category;
   @override
-  final String? tagsCommaOmitempty;
+  final String? tags;
   @override
-  final String? examplesCommaOmitempty;
+  final String? examples;
   @override
-  final String? riskLevelCommaOmitempty;
+  final String? riskLevel;
   @override
-  final String? bodyCommaOmitempty;
+  final String? body;
   @override
-  final BuiltList<String>? fieldsCommaOmitempty;
+  final BuiltList<String>? fields;
   @override
-  final BuiltList<String>? actionsCommaOmitempty;
+  final BuiltList<String>? actions;
 
   factory _$SkillUIDescriptor(
           [void Function(SkillUIDescriptorBuilder)? updates]) =>
@@ -39,13 +39,13 @@ class _$SkillUIDescriptor extends SkillUIDescriptor {
       required this.name,
       required this.description,
       required this.uiType,
-      this.categoryCommaOmitempty,
-      this.tagsCommaOmitempty,
-      this.examplesCommaOmitempty,
-      this.riskLevelCommaOmitempty,
-      this.bodyCommaOmitempty,
-      this.fieldsCommaOmitempty,
-      this.actionsCommaOmitempty})
+      this.category,
+      this.tags,
+      this.examples,
+      this.riskLevel,
+      this.body,
+      this.fields,
+      this.actions})
       : super._();
   @override
   SkillUIDescriptor rebuild(void Function(SkillUIDescriptorBuilder) updates) =>
@@ -63,13 +63,13 @@ class _$SkillUIDescriptor extends SkillUIDescriptor {
         name == other.name &&
         description == other.description &&
         uiType == other.uiType &&
-        categoryCommaOmitempty == other.categoryCommaOmitempty &&
-        tagsCommaOmitempty == other.tagsCommaOmitempty &&
-        examplesCommaOmitempty == other.examplesCommaOmitempty &&
-        riskLevelCommaOmitempty == other.riskLevelCommaOmitempty &&
-        bodyCommaOmitempty == other.bodyCommaOmitempty &&
-        fieldsCommaOmitempty == other.fieldsCommaOmitempty &&
-        actionsCommaOmitempty == other.actionsCommaOmitempty;
+        category == other.category &&
+        tags == other.tags &&
+        examples == other.examples &&
+        riskLevel == other.riskLevel &&
+        body == other.body &&
+        fields == other.fields &&
+        actions == other.actions;
   }
 
   @override
@@ -79,13 +79,13 @@ class _$SkillUIDescriptor extends SkillUIDescriptor {
     _$hash = $jc(_$hash, name.hashCode);
     _$hash = $jc(_$hash, description.hashCode);
     _$hash = $jc(_$hash, uiType.hashCode);
-    _$hash = $jc(_$hash, categoryCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, tagsCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, examplesCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, riskLevelCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, bodyCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, fieldsCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, actionsCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, category.hashCode);
+    _$hash = $jc(_$hash, tags.hashCode);
+    _$hash = $jc(_$hash, examples.hashCode);
+    _$hash = $jc(_$hash, riskLevel.hashCode);
+    _$hash = $jc(_$hash, body.hashCode);
+    _$hash = $jc(_$hash, fields.hashCode);
+    _$hash = $jc(_$hash, actions.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -97,13 +97,13 @@ class _$SkillUIDescriptor extends SkillUIDescriptor {
           ..add('name', name)
           ..add('description', description)
           ..add('uiType', uiType)
-          ..add('categoryCommaOmitempty', categoryCommaOmitempty)
-          ..add('tagsCommaOmitempty', tagsCommaOmitempty)
-          ..add('examplesCommaOmitempty', examplesCommaOmitempty)
-          ..add('riskLevelCommaOmitempty', riskLevelCommaOmitempty)
-          ..add('bodyCommaOmitempty', bodyCommaOmitempty)
-          ..add('fieldsCommaOmitempty', fieldsCommaOmitempty)
-          ..add('actionsCommaOmitempty', actionsCommaOmitempty))
+          ..add('category', category)
+          ..add('tags', tags)
+          ..add('examples', examples)
+          ..add('riskLevel', riskLevel)
+          ..add('body', body)
+          ..add('fields', fields)
+          ..add('actions', actions))
         .toString();
   }
 }
@@ -128,42 +128,42 @@ class SkillUIDescriptorBuilder
   String? get uiType => _$this._uiType;
   set uiType(String? uiType) => _$this._uiType = uiType;
 
-  String? _categoryCommaOmitempty;
-  String? get categoryCommaOmitempty => _$this._categoryCommaOmitempty;
-  set categoryCommaOmitempty(String? categoryCommaOmitempty) =>
-      _$this._categoryCommaOmitempty = categoryCommaOmitempty;
+  String? _category;
+  String? get category => _$this._category;
+  set category(String? category) =>
+      _$this._category = category;
 
-  String? _tagsCommaOmitempty;
-  String? get tagsCommaOmitempty => _$this._tagsCommaOmitempty;
-  set tagsCommaOmitempty(String? tagsCommaOmitempty) =>
-      _$this._tagsCommaOmitempty = tagsCommaOmitempty;
+  String? _tags;
+  String? get tags => _$this._tags;
+  set tags(String? tags) =>
+      _$this._tags = tags;
 
-  String? _examplesCommaOmitempty;
-  String? get examplesCommaOmitempty => _$this._examplesCommaOmitempty;
-  set examplesCommaOmitempty(String? examplesCommaOmitempty) =>
-      _$this._examplesCommaOmitempty = examplesCommaOmitempty;
+  String? _examples;
+  String? get examples => _$this._examples;
+  set examples(String? examples) =>
+      _$this._examples = examples;
 
-  String? _riskLevelCommaOmitempty;
-  String? get riskLevelCommaOmitempty => _$this._riskLevelCommaOmitempty;
-  set riskLevelCommaOmitempty(String? riskLevelCommaOmitempty) =>
-      _$this._riskLevelCommaOmitempty = riskLevelCommaOmitempty;
+  String? _riskLevel;
+  String? get riskLevel => _$this._riskLevel;
+  set riskLevel(String? riskLevel) =>
+      _$this._riskLevel = riskLevel;
 
-  String? _bodyCommaOmitempty;
-  String? get bodyCommaOmitempty => _$this._bodyCommaOmitempty;
-  set bodyCommaOmitempty(String? bodyCommaOmitempty) =>
-      _$this._bodyCommaOmitempty = bodyCommaOmitempty;
+  String? _body;
+  String? get body => _$this._body;
+  set body(String? body) =>
+      _$this._body = body;
 
-  ListBuilder<String>? _fieldsCommaOmitempty;
-  ListBuilder<String> get fieldsCommaOmitempty =>
-      _$this._fieldsCommaOmitempty ??= ListBuilder<String>();
-  set fieldsCommaOmitempty(ListBuilder<String>? fieldsCommaOmitempty) =>
-      _$this._fieldsCommaOmitempty = fieldsCommaOmitempty;
+  ListBuilder<String>? _fields;
+  ListBuilder<String> get fields =>
+      _$this._fields ??= ListBuilder<String>();
+  set fields(ListBuilder<String>? fields) =>
+      _$this._fields = fields;
 
-  ListBuilder<String>? _actionsCommaOmitempty;
-  ListBuilder<String> get actionsCommaOmitempty =>
-      _$this._actionsCommaOmitempty ??= ListBuilder<String>();
-  set actionsCommaOmitempty(ListBuilder<String>? actionsCommaOmitempty) =>
-      _$this._actionsCommaOmitempty = actionsCommaOmitempty;
+  ListBuilder<String>? _actions;
+  ListBuilder<String> get actions =>
+      _$this._actions ??= ListBuilder<String>();
+  set actions(ListBuilder<String>? actions) =>
+      _$this._actions = actions;
 
   SkillUIDescriptorBuilder() {
     SkillUIDescriptor._defaults(this);
@@ -176,13 +176,13 @@ class SkillUIDescriptorBuilder
       _name = $v.name;
       _description = $v.description;
       _uiType = $v.uiType;
-      _categoryCommaOmitempty = $v.categoryCommaOmitempty;
-      _tagsCommaOmitempty = $v.tagsCommaOmitempty;
-      _examplesCommaOmitempty = $v.examplesCommaOmitempty;
-      _riskLevelCommaOmitempty = $v.riskLevelCommaOmitempty;
-      _bodyCommaOmitempty = $v.bodyCommaOmitempty;
-      _fieldsCommaOmitempty = $v.fieldsCommaOmitempty?.toBuilder();
-      _actionsCommaOmitempty = $v.actionsCommaOmitempty?.toBuilder();
+      _category = $v.category;
+      _tags = $v.tags;
+      _examples = $v.examples;
+      _riskLevel = $v.riskLevel;
+      _body = $v.body;
+      _fields = $v.fields?.toBuilder();
+      _actions = $v.actions?.toBuilder();
       _$v = null;
     }
     return this;
@@ -214,21 +214,21 @@ class SkillUIDescriptorBuilder
                 description, r'SkillUIDescriptor', 'description'),
             uiType: BuiltValueNullFieldError.checkNotNull(
                 uiType, r'SkillUIDescriptor', 'uiType'),
-            categoryCommaOmitempty: categoryCommaOmitempty,
-            tagsCommaOmitempty: tagsCommaOmitempty,
-            examplesCommaOmitempty: examplesCommaOmitempty,
-            riskLevelCommaOmitempty: riskLevelCommaOmitempty,
-            bodyCommaOmitempty: bodyCommaOmitempty,
-            fieldsCommaOmitempty: _fieldsCommaOmitempty?.build(),
-            actionsCommaOmitempty: _actionsCommaOmitempty?.build(),
+            category: category,
+            tags: tags,
+            examples: examples,
+            riskLevel: riskLevel,
+            body: body,
+            fields: _fields?.build(),
+            actions: _actions?.build(),
           );
     } catch (_) {
       late String _$failedField;
       try {
-        _$failedField = 'fieldsCommaOmitempty';
-        _fieldsCommaOmitempty?.build();
-        _$failedField = 'actionsCommaOmitempty';
-        _actionsCommaOmitempty?.build();
+        _$failedField = 'fields';
+        _fields?.build();
+        _$failedField = 'actions';
+        _actions?.build();
       } catch (e) {
         throw BuiltValueNestedFieldError(
             r'SkillUIDescriptor', _$failedField, e.toString());

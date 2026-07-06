@@ -10,29 +10,29 @@ class _$EnqueueRequest extends EnqueueRequest {
   @override
   final String type;
   @override
-  final int? priorityCommaOmitempty;
+  final int? priority;
   @override
-  final String? taskIdCommaOmitempty;
+  final String? taskId;
   @override
   final String prompt;
   @override
-  final String? sessionIdCommaOmitempty;
+  final String? sessionId;
   @override
-  final String? requiredCapsCommaOmitempty;
+  final String? requiredCaps;
   @override
-  final String? payloadCommaOmitempty;
+  final String? payload;
 
   factory _$EnqueueRequest([void Function(EnqueueRequestBuilder)? updates]) =>
       (EnqueueRequestBuilder()..update(updates))._build();
 
   _$EnqueueRequest._(
       {required this.type,
-      this.priorityCommaOmitempty,
-      this.taskIdCommaOmitempty,
+      this.priority,
+      this.taskId,
       required this.prompt,
-      this.sessionIdCommaOmitempty,
-      this.requiredCapsCommaOmitempty,
-      this.payloadCommaOmitempty})
+      this.sessionId,
+      this.requiredCaps,
+      this.payload})
       : super._();
   @override
   EnqueueRequest rebuild(void Function(EnqueueRequestBuilder) updates) =>
@@ -46,24 +46,24 @@ class _$EnqueueRequest extends EnqueueRequest {
     if (identical(other, this)) return true;
     return other is EnqueueRequest &&
         type == other.type &&
-        priorityCommaOmitempty == other.priorityCommaOmitempty &&
-        taskIdCommaOmitempty == other.taskIdCommaOmitempty &&
+        priority == other.priority &&
+        taskId == other.taskId &&
         prompt == other.prompt &&
-        sessionIdCommaOmitempty == other.sessionIdCommaOmitempty &&
-        requiredCapsCommaOmitempty == other.requiredCapsCommaOmitempty &&
-        payloadCommaOmitempty == other.payloadCommaOmitempty;
+        sessionId == other.sessionId &&
+        requiredCaps == other.requiredCaps &&
+        payload == other.payload;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, type.hashCode);
-    _$hash = $jc(_$hash, priorityCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, taskIdCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, priority.hashCode);
+    _$hash = $jc(_$hash, taskId.hashCode);
     _$hash = $jc(_$hash, prompt.hashCode);
-    _$hash = $jc(_$hash, sessionIdCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, requiredCapsCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, payloadCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, sessionId.hashCode);
+    _$hash = $jc(_$hash, requiredCaps.hashCode);
+    _$hash = $jc(_$hash, payload.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -72,12 +72,12 @@ class _$EnqueueRequest extends EnqueueRequest {
   String toString() {
     return (newBuiltValueToStringHelper(r'EnqueueRequest')
           ..add('type', type)
-          ..add('priorityCommaOmitempty', priorityCommaOmitempty)
-          ..add('taskIdCommaOmitempty', taskIdCommaOmitempty)
+          ..add('priority', priority)
+          ..add('taskId', taskId)
           ..add('prompt', prompt)
-          ..add('sessionIdCommaOmitempty', sessionIdCommaOmitempty)
-          ..add('requiredCapsCommaOmitempty', requiredCapsCommaOmitempty)
-          ..add('payloadCommaOmitempty', payloadCommaOmitempty))
+          ..add('sessionId', sessionId)
+          ..add('requiredCaps', requiredCaps)
+          ..add('payload', payload))
         .toString();
   }
 }
@@ -90,34 +90,34 @@ class EnqueueRequestBuilder
   String? get type => _$this._type;
   set type(String? type) => _$this._type = type;
 
-  int? _priorityCommaOmitempty;
-  int? get priorityCommaOmitempty => _$this._priorityCommaOmitempty;
-  set priorityCommaOmitempty(int? priorityCommaOmitempty) =>
-      _$this._priorityCommaOmitempty = priorityCommaOmitempty;
+  int? _priority;
+  int? get priority => _$this._priority;
+  set priority(int? priority) =>
+      _$this._priority = priority;
 
-  String? _taskIdCommaOmitempty;
-  String? get taskIdCommaOmitempty => _$this._taskIdCommaOmitempty;
-  set taskIdCommaOmitempty(String? taskIdCommaOmitempty) =>
-      _$this._taskIdCommaOmitempty = taskIdCommaOmitempty;
+  String? _taskId;
+  String? get taskId => _$this._taskId;
+  set taskId(String? taskId) =>
+      _$this._taskId = taskId;
 
   String? _prompt;
   String? get prompt => _$this._prompt;
   set prompt(String? prompt) => _$this._prompt = prompt;
 
-  String? _sessionIdCommaOmitempty;
-  String? get sessionIdCommaOmitempty => _$this._sessionIdCommaOmitempty;
-  set sessionIdCommaOmitempty(String? sessionIdCommaOmitempty) =>
-      _$this._sessionIdCommaOmitempty = sessionIdCommaOmitempty;
+  String? _sessionId;
+  String? get sessionId => _$this._sessionId;
+  set sessionId(String? sessionId) =>
+      _$this._sessionId = sessionId;
 
-  String? _requiredCapsCommaOmitempty;
-  String? get requiredCapsCommaOmitempty => _$this._requiredCapsCommaOmitempty;
-  set requiredCapsCommaOmitempty(String? requiredCapsCommaOmitempty) =>
-      _$this._requiredCapsCommaOmitempty = requiredCapsCommaOmitempty;
+  String? _requiredCaps;
+  String? get requiredCaps => _$this._requiredCaps;
+  set requiredCaps(String? requiredCaps) =>
+      _$this._requiredCaps = requiredCaps;
 
-  String? _payloadCommaOmitempty;
-  String? get payloadCommaOmitempty => _$this._payloadCommaOmitempty;
-  set payloadCommaOmitempty(String? payloadCommaOmitempty) =>
-      _$this._payloadCommaOmitempty = payloadCommaOmitempty;
+  String? _payload;
+  String? get payload => _$this._payload;
+  set payload(String? payload) =>
+      _$this._payload = payload;
 
   EnqueueRequestBuilder() {
     EnqueueRequest._defaults(this);
@@ -127,12 +127,12 @@ class EnqueueRequestBuilder
     final $v = _$v;
     if ($v != null) {
       _type = $v.type;
-      _priorityCommaOmitempty = $v.priorityCommaOmitempty;
-      _taskIdCommaOmitempty = $v.taskIdCommaOmitempty;
+      _priority = $v.priority;
+      _taskId = $v.taskId;
       _prompt = $v.prompt;
-      _sessionIdCommaOmitempty = $v.sessionIdCommaOmitempty;
-      _requiredCapsCommaOmitempty = $v.requiredCapsCommaOmitempty;
-      _payloadCommaOmitempty = $v.payloadCommaOmitempty;
+      _sessionId = $v.sessionId;
+      _requiredCaps = $v.requiredCaps;
+      _payload = $v.payload;
       _$v = null;
     }
     return this;
@@ -156,13 +156,13 @@ class EnqueueRequestBuilder
         _$EnqueueRequest._(
           type: BuiltValueNullFieldError.checkNotNull(
               type, r'EnqueueRequest', 'type'),
-          priorityCommaOmitempty: priorityCommaOmitempty,
-          taskIdCommaOmitempty: taskIdCommaOmitempty,
+          priority: priority,
+          taskId: taskId,
           prompt: BuiltValueNullFieldError.checkNotNull(
               prompt, r'EnqueueRequest', 'prompt'),
-          sessionIdCommaOmitempty: sessionIdCommaOmitempty,
-          requiredCapsCommaOmitempty: requiredCapsCommaOmitempty,
-          payloadCommaOmitempty: payloadCommaOmitempty,
+          sessionId: sessionId,
+          requiredCaps: requiredCaps,
+          payload: payload,
         );
     replace(_$result);
     return _$result;

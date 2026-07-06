@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:meept_ui/providers/project_provider.dart';
 import 'package:meept_ui/providers/providers.dart';
 import 'package:meept_ui/services/sdk_client.dart';
 

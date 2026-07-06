@@ -11,11 +11,11 @@ part 'trigger_request.g.dart';
 /// TriggerRequest
 ///
 /// Properties:
-/// * [forceCommaOmitempty] 
+/// * [force] 
 @BuiltValue()
 abstract class TriggerRequest implements Built<TriggerRequest, TriggerRequestBuilder> {
-  @BuiltValueField(wireName: r'force,omitempty')
-  bool? get forceCommaOmitempty;
+  @BuiltValueField(wireName: r'force')
+  bool? get force;
 
   TriggerRequest._();
 
@@ -40,10 +40,10 @@ class _$TriggerRequestSerializer implements PrimitiveSerializer<TriggerRequest> 
     TriggerRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
-    if (object.forceCommaOmitempty != null) {
-      yield r'force,omitempty';
+    if (object.force != null) {
+      yield r'force';
       yield serializers.serialize(
-        object.forceCommaOmitempty,
+        object.force,
         specifiedType: const FullType(bool),
       );
     }
@@ -70,12 +70,12 @@ class _$TriggerRequestSerializer implements PrimitiveSerializer<TriggerRequest> 
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
-        case r'force,omitempty':
+        case r'force':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(bool),
           ) as bool;
-          result.forceCommaOmitempty = valueDes;
+          result.force = valueDes;
           break;
         default:
           unhandled.add(key);

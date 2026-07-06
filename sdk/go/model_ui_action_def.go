@@ -24,7 +24,7 @@ type UIActionDef struct {
 	Id string `json:"id"`
 	Label string `json:"label"`
 	Type string `json:"type"`
-	Styleomitempty *string `json:"style,omitempty,omitempty"`
+	Style *string `json:"style,omitempty"`
 }
 
 type _UIActionDef UIActionDef
@@ -121,36 +121,36 @@ func (o *UIActionDef) SetType(v string) {
 	o.Type = v
 }
 
-// GetStyleomitempty returns the Styleomitempty field value if set, zero value otherwise.
-func (o *UIActionDef) GetStyleomitempty() string {
-	if o == nil || IsNil(o.Styleomitempty) {
+// GetStyle returns the Style field value if set, zero value otherwise.
+func (o *UIActionDef) GetStyle() string {
+	if o == nil || IsNil(o.Style) {
 		var ret string
 		return ret
 	}
-	return *o.Styleomitempty
+	return *o.Style
 }
 
-// GetStyleomitemptyOk returns a tuple with the Styleomitempty field value if set, nil otherwise
+// GetStyleOk returns a tuple with the Style field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *UIActionDef) GetStyleomitemptyOk() (*string, bool) {
-	if o == nil || IsNil(o.Styleomitempty) {
+func (o *UIActionDef) GetStyleOk() (*string, bool) {
+	if o == nil || IsNil(o.Style) {
 		return nil, false
 	}
-	return o.Styleomitempty, true
+	return o.Style, true
 }
 
-// HasStyleomitempty returns a boolean if a field has been set.
-func (o *UIActionDef) HasStyleomitempty() bool {
-	if o != nil && !IsNil(o.Styleomitempty) {
+// HasStyle returns a boolean if a field has been set.
+func (o *UIActionDef) HasStyle() bool {
+	if o != nil && !IsNil(o.Style) {
 		return true
 	}
 
 	return false
 }
 
-// SetStyleomitempty gets a reference to the given string and assigns it to the Styleomitempty field.
-func (o *UIActionDef) SetStyleomitempty(v string) {
-	o.Styleomitempty = &v
+// SetStyle gets a reference to the given string and assigns it to the Style field.
+func (o *UIActionDef) SetStyle(v string) {
+	o.Style = &v
 }
 
 func (o UIActionDef) MarshalJSON() ([]byte, error) {
@@ -166,8 +166,8 @@ func (o UIActionDef) ToMap() (map[string]interface{}, error) {
 	toSerialize["id"] = o.Id
 	toSerialize["label"] = o.Label
 	toSerialize["type"] = o.Type
-	if !IsNil(o.Styleomitempty) {
-		toSerialize["style,omitempty"] = o.Styleomitempty
+	if !IsNil(o.Style) {
+		toSerialize["style"] = o.Style
 	}
 	return toSerialize, nil
 }

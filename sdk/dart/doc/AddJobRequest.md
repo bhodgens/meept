@@ -12,9 +12,9 @@ Name | Type | Description | Notes
 **name** | **String** |  | 
 **schedule** | **String** |  | 
 **type** | **String** |  | 
-**agentConfigCommaOmitempty** | [**JsonObject**](.md) |  | [optional] 
-**shellConfigCommaOmitempty** | [**JsonObject**](.md) |  | [optional] 
-**enabledCommaOmitempty** | **bool** |  | [optional] 
+**agentConfig** | [**JsonObject**](.md) |  | [optional] 
+**shellConfig** | [**JsonObject**](.md) |  | [optional] 
+**enabled** | **bool** |  | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

@@ -7,18 +7,18 @@ void main() {
   // TODO add properties to the builder and call build()
 
   group(ListEventsRequest, () {
-    // String timeMinCommaOmitempty
-    test('to test the property `timeMinCommaOmitempty`', () async {
+    // String timeMin
+    test('to test the property `timeMin`', () async {
       // TODO
     });
 
-    // String timeMaxCommaOmitempty
-    test('to test the property `timeMaxCommaOmitempty`', () async {
+    // String timeMax
+    test('to test the property `timeMax`', () async {
       // TODO
     });
 
-    // int maxResultsCommaOmitempty
-    test('to test the property `maxResultsCommaOmitempty`', () async {
+    // int maxResults
+    test('to test the property `maxResults`', () async {
       // TODO
     });
 

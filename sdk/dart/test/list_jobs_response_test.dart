@@ -27,18 +27,18 @@ void main() {
       // TODO
     });
 
-    // String lastRunCommaOmitempty
-    test('to test the property `lastRunCommaOmitempty`', () async {
+    // String lastRun
+    test('to test the property `lastRun`', () async {
       // TODO
     });
 
-    // String nextRunCommaOmitempty
-    test('to test the property `nextRunCommaOmitempty`', () async {
+    // String nextRun
+    test('to test the property `nextRun`', () async {
       // TODO
     });
 
-    // String lastErrorCommaOmitempty
-    test('to test the property `lastErrorCommaOmitempty`', () async {
+    // String lastError
+    test('to test the property `lastError`', () async {
       // TODO
     });
 

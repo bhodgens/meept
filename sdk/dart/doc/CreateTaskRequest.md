@@ -9,8 +9,8 @@ import 'package:meept_client/api.dart';
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **name** | **String** |  | 
-**descriptionCommaOmitempty** | **String** |  | [optional] 
-**sessionIdCommaOmitempty** | **String** |  | [optional] 
+**description** | **String** |  | [optional] 
+**sessionId** | **String** |  | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

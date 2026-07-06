@@ -10,15 +10,15 @@ class _$SearchRequest extends SearchRequest {
   @override
   final String query;
   @override
-  final String? scopeCommaOmitempty;
+  final String? scope;
   @override
-  final int? limitCommaOmitempty;
+  final int? limit;
 
   factory _$SearchRequest([void Function(SearchRequestBuilder)? updates]) =>
       (SearchRequestBuilder()..update(updates))._build();
 
   _$SearchRequest._(
-      {required this.query, this.scopeCommaOmitempty, this.limitCommaOmitempty})
+      {required this.query, this.scope, this.limit})
       : super._();
   @override
   SearchRequest rebuild(void Function(SearchRequestBuilder) updates) =>
@@ -32,16 +32,16 @@ class _$SearchRequest extends SearchRequest {
     if (identical(other, this)) return true;
     return other is SearchRequest &&
         query == other.query &&
-        scopeCommaOmitempty == other.scopeCommaOmitempty &&
-        limitCommaOmitempty == other.limitCommaOmitempty;
+        scope == other.scope &&
+        limit == other.limit;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, query.hashCode);
-    _$hash = $jc(_$hash, scopeCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, limitCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, scope.hashCode);
+    _$hash = $jc(_$hash, limit.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -50,8 +50,8 @@ class _$SearchRequest extends SearchRequest {
   String toString() {
     return (newBuiltValueToStringHelper(r'SearchRequest')
           ..add('query', query)
-          ..add('scopeCommaOmitempty', scopeCommaOmitempty)
-          ..add('limitCommaOmitempty', limitCommaOmitempty))
+          ..add('scope', scope)
+          ..add('limit', limit))
         .toString();
   }
 }
@@ -64,15 +64,15 @@ class SearchRequestBuilder
   String? get query => _$this._query;
   set query(String? query) => _$this._query = query;
 
-  String? _scopeCommaOmitempty;
-  String? get scopeCommaOmitempty => _$this._scopeCommaOmitempty;
-  set scopeCommaOmitempty(String? scopeCommaOmitempty) =>
-      _$this._scopeCommaOmitempty = scopeCommaOmitempty;
+  String? _scope;
+  String? get scope => _$this._scope;
+  set scope(String? scope) =>
+      _$this._scope = scope;
 
-  int? _limitCommaOmitempty;
-  int? get limitCommaOmitempty => _$this._limitCommaOmitempty;
-  set limitCommaOmitempty(int? limitCommaOmitempty) =>
-      _$this._limitCommaOmitempty = limitCommaOmitempty;
+  int? _limit;
+  int? get limit => _$this._limit;
+  set limit(int? limit) =>
+      _$this._limit = limit;
 
   SearchRequestBuilder() {
     SearchRequest._defaults(this);
@@ -82,8 +82,8 @@ class SearchRequestBuilder
     final $v = _$v;
     if ($v != null) {
       _query = $v.query;
-      _scopeCommaOmitempty = $v.scopeCommaOmitempty;
-      _limitCommaOmitempty = $v.limitCommaOmitempty;
+      _scope = $v.scope;
+      _limit = $v.limit;
       _$v = null;
     }
     return this;
@@ -107,8 +107,8 @@ class SearchRequestBuilder
         _$SearchRequest._(
           query: BuiltValueNullFieldError.checkNotNull(
               query, r'SearchRequest', 'query'),
-          scopeCommaOmitempty: scopeCommaOmitempty,
-          limitCommaOmitempty: limitCommaOmitempty,
+          scope: scope,
+          limit: limit,
         );
     replace(_$result);
     return _$result;

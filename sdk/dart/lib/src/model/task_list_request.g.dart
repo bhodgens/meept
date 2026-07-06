@@ -8,14 +8,14 @@ part of 'task_list_request.dart';
 
 class _$TaskListRequest extends TaskListRequest {
   @override
-  final int? limitCommaOmitempty;
+  final int? limit;
   @override
-  final String? sessionIdCommaOmitempty;
+  final String? sessionId;
 
   factory _$TaskListRequest([void Function(TaskListRequestBuilder)? updates]) =>
       (TaskListRequestBuilder()..update(updates))._build();
 
-  _$TaskListRequest._({this.limitCommaOmitempty, this.sessionIdCommaOmitempty})
+  _$TaskListRequest._({this.limit, this.sessionId})
       : super._();
   @override
   TaskListRequest rebuild(void Function(TaskListRequestBuilder) updates) =>
@@ -28,15 +28,15 @@ class _$TaskListRequest extends TaskListRequest {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is TaskListRequest &&
-        limitCommaOmitempty == other.limitCommaOmitempty &&
-        sessionIdCommaOmitempty == other.sessionIdCommaOmitempty;
+        limit == other.limit &&
+        sessionId == other.sessionId;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
-    _$hash = $jc(_$hash, limitCommaOmitempty.hashCode);
-    _$hash = $jc(_$hash, sessionIdCommaOmitempty.hashCode);
+    _$hash = $jc(_$hash, limit.hashCode);
+    _$hash = $jc(_$hash, sessionId.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -44,8 +44,8 @@ class _$TaskListRequest extends TaskListRequest {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'TaskListRequest')
-          ..add('limitCommaOmitempty', limitCommaOmitempty)
-          ..add('sessionIdCommaOmitempty', sessionIdCommaOmitempty))
+          ..add('limit', limit)
+          ..add('sessionId', sessionId))
         .toString();
   }
 }
@@ -54,15 +54,15 @@ class TaskListRequestBuilder
     implements Builder<TaskListRequest, TaskListRequestBuilder> {
   _$TaskListRequest? _$v;
 
-  int? _limitCommaOmitempty;
-  int? get limitCommaOmitempty => _$this._limitCommaOmitempty;
-  set limitCommaOmitempty(int? limitCommaOmitempty) =>
-      _$this._limitCommaOmitempty = limitCommaOmitempty;
+  int? _limit;
+  int? get limit => _$this._limit;
+  set limit(int? limit) =>
+      _$this._limit = limit;
 
-  String? _sessionIdCommaOmitempty;
-  String? get sessionIdCommaOmitempty => _$this._sessionIdCommaOmitempty;
-  set sessionIdCommaOmitempty(String? sessionIdCommaOmitempty) =>
-      _$this._sessionIdCommaOmitempty = sessionIdCommaOmitempty;
+  String? _sessionId;
+  String? get sessionId => _$this._sessionId;
+  set sessionId(String? sessionId) =>
+      _$this._sessionId = sessionId;
 
   TaskListRequestBuilder() {
     TaskListRequest._defaults(this);
@@ -71,8 +71,8 @@ class TaskListRequestBuilder
   TaskListRequestBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
-      _limitCommaOmitempty = $v.limitCommaOmitempty;
-      _sessionIdCommaOmitempty = $v.sessionIdCommaOmitempty;
+      _limit = $v.limit;
+      _sessionId = $v.sessionId;
       _$v = null;
     }
     return this;
@@ -94,8 +94,8 @@ class TaskListRequestBuilder
   _$TaskListRequest _build() {
     final _$result = _$v ??
         _$TaskListRequest._(
-          limitCommaOmitempty: limitCommaOmitempty,
-          sessionIdCommaOmitempty: sessionIdCommaOmitempty,
+          limit: limit,
+          sessionId: sessionId,
         );
     replace(_$result);
     return _$result;
