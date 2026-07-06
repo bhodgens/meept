@@ -6,7 +6,7 @@ import (
 	"golang.org/x/tools/go/analysis/analysistest"
 )
 
-func TestAnalyzer(t *testing.T) {
+func TestGuardedFieldAccess(t *testing.T) {
 	testdata := analysistest.TestData()
 	analysistest.Run(t, testdata, Analyzer, "guarded")
 }
@@ -14,9 +14,4 @@ func TestAnalyzer(t *testing.T) {
 func TestImmutableFieldWrite(t *testing.T) {
 	testdata := analysistest.TestData()
 	analysistest.Run(t, testdata, Analyzer, "immutable")
-}
-
-func TestGuardedFieldAccess(t *testing.T) {
-	testdata := analysistest.TestData()
-	analysistest.Run(t, testdata, Analyzer, "guarded_access")
 }

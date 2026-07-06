@@ -1,7 +1,7 @@
 package immutable
 
 type WithImmutable struct {
-	cfg string // immutable
+	cfg  string // immutable
 	Name string
 }
 
@@ -21,4 +21,9 @@ func (w *WithImmutable) SetCfgWrong(cfg string) {
 // Correct: mutable field write
 func (w *WithImmutable) SetName(name string) {
 	w.Name = name
+}
+
+// Correct: reading immutable field is always OK
+func (w *WithImmutable) GetCfg() string {
+	return w.cfg
 }

@@ -1,7 +1,10 @@
 package ast
 
 import (
+	"fmt"
 	"testing"
+
+	"github.com/caimlas/meept/tools/mutation"
 )
 
 // TestParseRule tests YAML rule parsing
@@ -453,5 +456,59 @@ func RegularFunc() {}
 		if len(result.Matches) > 0 && result.Matches[0].Captures["funcName"] != "TestSomething" {
 			t.Errorf("Expected 'TestSomething', got '%s'", result.Matches[0].Captures["funcName"])
 		}
+	})
+}
+
+// TestRuleExecutor_Transform_Mutation tests mutation testing pattern
+// as specified in Phase 3 of code-quality-detection-gaps.md
+func TestRuleExecutor_Transform_Mutation(t *testing.T) {
+	executor := &RuleExecutor{}
+	
+	t.Run("uppercase transform basic test", func(t *testing.T) {
+		captures := map[string]string{"name": "testValue"}
+		transforms := []Transform{
+			{Type: "uppercase", Node: "name"},
+		}
+		
+		result := executor.applyTransforms(captures, transforms)
+		if result["name"] != "TESTVALUE" {
+			t.Errorf("Expected 'TESTVALUE', got '%s'", result["name"])
+		}
+	})
+
+	t.Run("prepend transform basic test", func(t *testing.T) {
+		captures := map[string]string{"name": "value"}
+		transforms := []Transform{
+			{Type: "prepend", Node: "name", Prefix: "new"},
+		}
+		
+		result := executor.applyTransforms(captures, transforms)
+		if result["name"] != "newvalue" {
+			t.Errorf("Expected 'newvalue', got '%s'", result["name"])
+		}
+	})
+
+	t.Run("mutation test for prepend transform", func(t *testing.T) {
+		captures := map[string]string{"name": "value"}
+		expectedResult := "newvalue"
+		transforms := []Transform{
+			{Type: "prepend", Node: "name", Prefix: "new"},
+		}
+		
+		mutation.RunMutationTest(t,
+			func() {
+				// Mutate: change prefix to wrong value
+				transforms[0].Prefix = "wrong"
+			},
+			func() error {
+				result := executor.applyTransforms(captures, transforms)
+				if result["name"] != expectedResult {
+					// Good - test detected the mutation
+					return fmt.Errorf("mutation detected: got '%s'", result["name"])
+				}
+				// Bad - mutation didn't change result, test is insufficient
+				return nil
+			},
+		)
 	})
 }

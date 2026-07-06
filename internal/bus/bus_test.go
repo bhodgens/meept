@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/pkg/models"
+	"github.com/caimlas/meept/tools/mutation"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -220,4 +221,35 @@ func TestBus_BufferNearFull(t *testing.T) {
 
 	// Cleanup
 	bus.Unsubscribe(sub)
+}
+
+// TestMessageBus_Mutation demonstrates mutation testing pattern
+// as specified in Phase 3 of code-quality-detection-gaps.md
+func TestMessageBus_Mutation(t *testing.T) {
+	t.Run("mutation test for subscriber count", func(t *testing.T) {
+		bus := New(DefaultConfig(), nil)
+		defer bus.Close()
+
+		// Add a subscriber
+		sub := bus.Subscribe("test-sub", "test.topic")
+		
+		mutation.RunMutationTest(t,
+			func() {
+				// Mutate: unsubscribe to simulate bug
+				bus.Unsubscribe(sub)
+			},
+			func() error {
+				stats := bus.Stats()
+				if stats["_total"] == 0 {
+					// Good - mutation detected (subscriber count changed)
+					return fmt.Errorf("mutation detected: no subscribers")
+				}
+				// Bad - mutation didn't change result
+				return nil
+			},
+		)
+		
+		// Re-subscribe to clean up
+		_ = bus.Subscribe("test-sub", "test.topic")
+	})
 }
