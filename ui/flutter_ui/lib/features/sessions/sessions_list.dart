@@ -84,56 +84,30 @@ class _SessionsListState extends ConsumerState<SessionsList> {
     return KeyEventResult.ignored;
   }
 
-  Future<void> _showCreateSessionDialog() async {
-    final controller = TextEditingController();
+  /// Quick-create a new session and switch to the chat tab.
+  ///
+  /// Replaces the former title-prompt dialog (`_showCreateSessionDialog`)
+  /// because session titles are now auto-derived from the first user
+  /// message (see `_maybeGenerateSessionDescription` in chat_input.dart).
+  /// The session is created with a placeholder title "new session" and
+  /// the LLM summariser rewrites it after the first exchange.
+  ///
+  /// Parity: mirrors the TUI's "always have a session" behaviour.
+  Future<void> _createQuickSession() async {
     final notifier = ref.read(sessionProvider.notifier);
-    await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: CyberpunkColors.darkGray,
-        title: const Text('create session', style: CyberpunkTypography.headlineMedium),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(
-            hintText: 'enter session title...',
-            hintStyle: CyberpunkTypography.bodySmall,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('cancel', style: CyberpunkTypography.bodyMedium),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (controller.text.isNotEmpty) {
-                final session = await notifier.createSession(controller.text);
-                if (session != null) {
-                  // Refresh the list so the new session appears immediately (Issue 6).
-                  await notifier.loadSessions();
-                  if (!context.mounted) return;
-                  Navigator.pop(context);
-                  ref.read(activeSessionProvider.notifier).state = session;
-                  context.go('/');
-                } else {
-                  // Error: don't pop, show feedback (bug F4).
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('failed to create session'),
-                        backgroundColor: CyberpunkColors.redAlert,
-                      ),
-                    );
-                  }
-                }
-              }
-            },
-            child: const Text('create', style: CyberpunkTypography.bodyMedium),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
+    final session = await notifier.createSession('new session');
+    if (session == null) {
+      // Notifier sets state.error on failure; surface it as a status.
+      final error = ref.read(sessionProvider).error ?? 'failed to create session';
+      if (mounted) {
+        showStatusMessage(ref, 'create failed: $error');
+      }
+      return;
+    }
+    ref.read(activeSessionProvider.notifier).state = session;
+    ref.read(chatProvider.notifier).clearMessages();
+    ref.read(tabActivationProvider.notifier).state = HomeTab.chat;
+    if (mounted) context.go('/');
   }
 
   Future<void> _showArchiveConfirmation(String sessionId, String title) async {
@@ -252,7 +226,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
     // focusInputRequestProvider pattern used by the chat input.
     ref.listen<bool>(createSessionRequestProvider, (previous, next) {
       if (next) {
-        _showCreateSessionDialog();
+        _createQuickSession();
         ref.read(createSessionRequestProvider.notifier).state = false;
       }
     });
@@ -283,7 +257,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
                 IconButton(
                   icon: const Icon(Icons.add, size: 18),
                   color: CyberpunkColors.orangePrimary,
-                  onPressed: _showCreateSessionDialog,
+                  onPressed: _createQuickSession,
                 ),
               ],
             ),

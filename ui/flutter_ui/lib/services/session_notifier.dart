@@ -92,6 +92,18 @@ class SessionNotifier extends StateNotifier<SessionState> {
     }
   }
 
+  /// Replace the sessions list in state without a server round-trip.
+  ///
+  /// Used by callers that patch a single session field (e.g. the chat
+  /// input auto-derives a title via `session.generate_description` and
+  /// patches the matching entry locally). The daemon has already
+  /// persisted the change by the time this is called, so a subsequent
+  /// [loadSessions] would also reflect it — this method avoids the
+  /// extra round-trip.
+  void updateSessions(List<Session> sessions) {
+    state = state.copyWith(sessions: sessions, error: null);
+  }
+
   /// Archive a session. Mutates local state to flip the flag and re-sorts
   /// the list so archived sessions move to the bottom.
   Future<void> archiveSession(String sessionId) async {

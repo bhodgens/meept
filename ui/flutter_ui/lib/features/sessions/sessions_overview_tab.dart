@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/providers.dart';
+import '../../theme/colors.dart';
 import '../../widgets/background_image.dart';
 import 'sessions_list.dart';
 import 'sessions_detail.dart';
@@ -20,12 +21,21 @@ class SessionsOverviewTab extends StatelessWidget {
                 width: 280,
                 child: SessionsList(),
               ),
-              if (activeSession != null)
-                Expanded(
-                  child: BackgroundImage(
-                    child: SessionsDetailPane(session: activeSession),
-                  ),
+              const VerticalDivider(width: 1),
+              Expanded(
+                child: BackgroundImage(
+                  child: activeSession != null
+                      ? SessionsDetailPane(session: activeSession)
+                      : const Center(
+                          child: Text(
+                            'select a session',
+                            style: TextStyle(
+                              color: CyberpunkColors.orangePrimary,
+                            ),
+                          ),
+                        ),
                 ),
+              ),
             ],
           );
       },

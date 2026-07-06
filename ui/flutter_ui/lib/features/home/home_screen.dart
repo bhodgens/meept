@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -243,7 +245,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _leaderController.onCycleVerbosity = _cycleVerbosity;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(chatProvider);
-      _onConnectionChanged(ref.read(connectionStateProvider));
+      unawaited(_onConnectionChanged(ref.read(connectionStateProvider)));
       // Apply the router-forced initial tab if present.
       final override = TabOverrideScope.of(context);
       if (override != null && override != HomeTab.chat) {
@@ -272,10 +274,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     context.go(path);
   }
 
-  void _onConnectionChanged(bool connected) {
+  Future<void> _onConnectionChanged(bool connected) async {
     if (connected && !_initialLoadDone) {
       _initialLoadDone = true;
-      ref.read(sessionProvider.notifier).loadSessions();
+      await ref.read(sessionProvider.notifier).loadSessions();
       ref.read(taskProvider.notifier).loadTasks();
       ref.read(agentProvider.notifier).loadAgents();
       // Best-effort refresh of the active-project indicator. The
@@ -286,6 +288,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       // 'default', and any later `ref.watch(sessionDetailFamily('default'))`
       // resolves from cache without re-fetching.
       ref.read(sessionDetailFamily('default'));
+
+      // Auto-create a new session if none is active. This guarantees a
+      // chat target on first launch and mirrors the TUI's "always have
+      // a session" behaviour. Skip when a previous run already selected
+      // one (e.g. reconnect after a transient network drop).
+      final active = ref.read(activeSessionProvider);
+      if (active == null) {
+        final session =
+            await ref.read(sessionProvider.notifier).createSession('new session');
+        if (session != null) {
+          ref.read(activeSessionProvider.notifier).state = session;
+        }
+      }
     }
   }
 
@@ -474,7 +489,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     ref.listen<bool>(connectionStateProvider, (prev, connected) {
-      _onConnectionChanged(connected);
+      unawaited(_onConnectionChanged(connected));
     });
 
     // Child widgets request tab switches via tabActivationProvider.

@@ -140,7 +140,7 @@ class StatusBar extends ConsumerWidget {
 
   String? _projectPart(WidgetRef ref) {
     final p = ref.watch(currentProjectProvider);
-    if (!p.isActive) return null;
+    if (!p.isActive) return '[no project]';
     // Show localPath if available, otherwise fall back to name
     final pathToShow = p.localPath.isNotEmpty ? p.localPath : p.name;
     // Use grapheme-cluster-aware truncation for long paths

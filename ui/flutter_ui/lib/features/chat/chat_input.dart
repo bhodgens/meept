@@ -13,6 +13,7 @@ import '../../services/skills_service.dart' show SkillsService;
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
+import '../../providers/status_message_provider.dart';
 import 'slash_autocomplete.dart';
 
 /// Image file extensions that should be uploaded as multimodal image parts
@@ -545,54 +546,62 @@ class _ChatInputState extends ConsumerState<ChatInput>
     }
   }
 
-  /// Handle /project file picker trigger.
+  /// Handle `/project <path>`: bind the project to the current session.
   ///
-  /// Shows a dialog with available project paths for selection.
-  /// If project paths haven't been loaded yet, fetches them first.
-  Future<void> _handleProjectFilePicker() async {
-    if (_projectPaths.isEmpty) {
-      await _loadProjectPaths();
-      if (!mounted) return;
-    }
-    if (_projectPaths.isEmpty) {
-      debugPrint('[chat_input] no projects available');
+  /// Calls the daemon's `project.set` RPC (via the bus/call bridge) with the
+  /// path-only invocation, which auto-detects/registers the project.  On
+  /// success, refreshes [currentProjectProvider] so the status bar picks up
+  /// the change, reloads project paths so the typeahead includes the new
+  /// path, and shows a transient status message.  Errors are surfaced via a
+  /// SnackBar.
+  Future<void> _handleProjectSetCommand(String pathArg) async {
+    final path = pathArg.trim();
+    if (path.isEmpty) {
+      // Shouldn't happen (caller filters), but guard anyway.
       return;
     }
 
-    // Show dialog with project path options
-    showDialog<String>(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: CyberpunkColors.darkGray,
-        title: const Text('select project', style: CyberpunkTypography.headlineMedium),
-        contentPadding: EdgeInsets.zero,
-        content: SizedBox(
-          width: 400,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: _projectPaths.length,
-            itemBuilder: (context, index) {
-              final path = _projectPaths[index];
-              return ListTile(
-                title: Text(
-                  path,
-                  style: CyberpunkTypography.bodyMedium,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                onTap: () {
-                  Navigator.pop(context, path);
-                },
-              );
-            },
+    final session = ref.read(activeSessionProvider);
+    final sessionId = session?.id ?? widget.sessionId;
+    if (sessionId.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('no active session'),
+            backgroundColor: CyberpunkColors.redAlert,
           ),
-        ),
-      ),
-    ).then((selectedPath) {
-      if (selectedPath != null) {
-        _onProjectSelected(selectedPath);
+        );
       }
-    });
+      return;
+    }
+
+    try {
+      final sdk = ref.read(sdkClientProvider);
+      await sdk.setProject(sessionId: sessionId, path: path);
+
+      // Refresh currentProjectProvider so the status bar picks up the change.
+      await ref.read(currentProjectProvider.notifier).refresh();
+      // Reload project paths so typeahead includes the new path.
+      await _loadProjectPaths();
+
+      if (mounted) {
+        // Show transient success status via the status message provider.
+        // The StatusBar auto-clears the message after its timeout.
+        showStatusMessage(ref, 'project: $path');
+        // Clear the input.
+        _resetInputState();
+      }
+    } catch (e) {
+      debugPrint('[chat_input] /project failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('project set failed: $e'),
+            backgroundColor: CyberpunkColors.redAlert,
+          ),
+        );
+      }
+    }
   }
 
   /// Try to handle a slash command locally.
@@ -618,18 +627,36 @@ class _ChatInputState extends ConsumerState<ChatInput>
             );
         return true;
       case '/project':
-        // /project without arguments triggers file picker
+        // /project without args opens the typeahead popup so the user can
+        // pick from known project paths.  With args, dispatch immediately
+        // to the daemon via the project.set RPC.
         if (spaceIdx == -1) {
-          ref.read(filePickerTriggerProvider.notifier).trigger();
+          setState(() {
+            _controller.text = '/project ';
+            _controller.selection =
+                const TextSelection.collapsed(offset: '/project '.length);
+            _showSlashAutocomplete = true;
+            _slashQuery = '/project ';
+            _slashSelectedIndex = 0;
+          });
+          _focusNode.requestFocus();
           return true;
         }
-        return false;
+        final arg = text.substring(spaceIdx).trim();
+        // Fire-and-forget; _handleProjectSetCommand manages its own error UI.
+        unawaited(_handleProjectSetCommand(arg));
+        return true;
       default:
         return false;
     }
   }
 
   void _sendNormal(String text) {
+    // Capture first-message state before sending so the auto-derivation
+    // fires only on the very first user exchange in a session (parity with
+    // the TUI's m.sessionDescription != "" guard in chat.go).
+    final isFirstMessage = ref.read(chatProvider).messages.isEmpty;
+
     // Multimodal path: when image attachments are present, build structured
     // content parts and route via sendMessageWithParts.  Slash commands are
     // text-only and never run in this branch.
@@ -639,12 +666,16 @@ class _ChatInputState extends ConsumerState<ChatInput>
       final expanded = _expandPastes(text.trim());
       final chatNotifier = ref.read(chatProvider.notifier);
       final activeAgent = ref.read(activeAgentProvider);
+      final sentText = expanded.isNotEmpty ? expanded : '(image attached)';
       chatNotifier.sendMessageWithParts(
         sessionId: widget.sessionId,
-        text: expanded.isNotEmpty ? expanded : '(image attached)',
+        text: sentText,
         parts: parts,
         agentId: activeAgent?.id ?? 'coder',
       );
+      if (isFirstMessage) {
+        unawaited(_maybeGenerateSessionDescription(sentText));
+      }
       _resetInputState();
       return;
     }
@@ -667,7 +698,58 @@ class _ChatInputState extends ConsumerState<ChatInput>
       agentId: activeAgent?.id ?? 'coder',
     );
 
+    if (isFirstMessage) {
+      unawaited(_maybeGenerateSessionDescription(payload));
+    }
     _resetInputState();
+  }
+
+  /// Auto-derive a session title from the first user message.
+  ///
+  /// Calls the daemon's `session.generate_description` RPC (via the bus/call
+  /// bridge) which uses an LLM to summarise the user's intent into a short
+  /// title. On success, updates the active session in [sessionProvider] and
+  /// [activeSessionProvider] so the sessions list and status bar reflect the
+  /// new title without a manual reload. Errors are logged and swallowed
+  /// (best-effort: title remains "new session" if generation fails).
+  ///
+  /// Mirrors the TUI's `internal/tui/models/chat.go:1826-1877` flow.
+  Future<void> _maybeGenerateSessionDescription(String firstMessage) async {
+    final sessionId = widget.sessionId;
+    if (sessionId.isEmpty || sessionId == 'default') return;
+    try {
+      final client = ref.read(sdkClientProvider);
+      final projectName = ref.read(currentProjectProvider).name;
+      final result = await client.generateSessionDescription(
+        sessionId: sessionId,
+        firstMessage: firstMessage,
+        projectName: projectName,
+      );
+      final newName = result['name'] as String?;
+      if (newName == null || newName.isEmpty) return;
+
+      // Update the active session in place so the sessions list and status
+      // bar pick up the new title without a full reload.
+      final active = ref.read(activeSessionProvider);
+      if (active != null && active.id == sessionId) {
+        final updated = active.copyWith(title: newName);
+        ref.read(activeSessionProvider.notifier).state = updated;
+      }
+
+      // Patch the session entry in the SessionNotifier list state so the
+      // sidebar updates immediately. The daemon already persisted the new
+      // title, so a subsequent loadSessions() would also reflect it; this
+      // avoids a round-trip.
+      final sessionState = ref.read(sessionProvider);
+      final sessions = sessionState.sessions.map((s) {
+        if (s.id == sessionId) return s.copyWith(title: newName);
+        return s;
+      }).toList(growable: false);
+      ref.read(sessionProvider.notifier).updateSessions(sessions);
+    } catch (e) {
+      // Best-effort: leave the existing title ("new session") on failure.
+      debugPrint('[warn] generateSessionDescription: $e');
+    }
   }
 
   void _sendSteer(String text) {
@@ -727,6 +809,14 @@ class _ChatInputState extends ConsumerState<ChatInput>
             final idx = _slashSelectedIndex.clamp(0, matches.length - 1);
             _onSlashSelected(matches[idx]);
           }
+          return KeyEventResult.handled;
+        }
+
+        // Slash commands dispatch immediately (no double-Enter debounce).
+        // They represent explicit user intent and should not be held.
+        final text = _controller.text;
+        if (text.startsWith('/')) {
+          _sendNormal(text);
           return KeyEventResult.handled;
         }
 
@@ -835,16 +925,6 @@ class _ChatInputState extends ConsumerState<ChatInput>
             _controller.selection = const TextSelection.collapsed(offset: 1);
           }
           ref.read(focusInputRequestProvider.notifier).state = false;
-        }
-      },
-    );
-
-    // Listen for /project file picker trigger
-    ref.listen<bool>(
-      filePickerTriggerProvider,
-      (previous, next) {
-        if (next) {
-          _handleProjectFilePicker();
         }
       },
     );

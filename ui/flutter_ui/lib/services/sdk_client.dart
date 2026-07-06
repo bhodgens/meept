@@ -513,6 +513,40 @@ class SdkApiClient {
     await _patch('/api/v1/sessions/$sessionId', body: {'archived': archived});
   }
 
+  /// Generate a session description/title via the daemon's LLM summarizer.
+  ///
+  /// Calls the `session.generate_description` RPC through the bus/call
+  /// bridge (`POST /api/v1/bus/call`). The daemon auto-saves the new title
+  /// to the session, so callers should refresh their local session list
+  /// (or update the active session in place) after a successful call.
+  ///
+  /// Returns the inner `result` object with `name` and `description`
+  /// fields. Throws on transport errors or when the `result` envelope is
+  /// missing.
+  Future<Map<String, dynamic>> generateSessionDescription({
+    required String sessionId,
+    required String firstMessage,
+    String projectName = '',
+  }) async {
+    final envelope = await _post('/api/v1/bus/call', body: {
+      'method': 'session.generate_description',
+      'params': {
+        'session_id': sessionId,
+        'first_message': firstMessage,
+        'project_name': projectName,
+      },
+    });
+    // The bus/call handler wraps the RPC result in {"result": ...}.
+    final inner = envelope['result'];
+    if (inner is Map<String, dynamic>) return inner;
+    // Some daemon configurations return the result inline (no envelope).
+    if (envelope.containsKey('name') || envelope.containsKey('description')) {
+      return envelope;
+    }
+    throw StateError(
+        'generateSessionDescription: unexpected envelope shape: $envelope');
+  }
+
   /// Returns the raw `plans` array for `/api/v1/sessions/{sessionId}/plans`.
   Future<List<Map<String, dynamic>>> listPlansBySession(String sessionId) async {
     try {
@@ -1096,6 +1130,44 @@ class SdkApiClient {
   Future<void> checkoutBranch(String projectId, String branch) async {
     final body = <String, dynamic>{'branch': branch};
     await _post('/api/v1/projects/$projectId/checkout', body: body);
+  }
+
+  /// Bind a project to a session via the daemon's `project.set` RPC.
+  ///
+  /// When [path] is provided (path-only invocation), the daemon
+  /// auto-detects/registers the project via `DetectFromPath` — this is the
+  /// preferred entry point for `/project <path>`.  When [projectId] is
+  /// provided instead, the daemon binds the existing project to the
+  /// session.
+  ///
+  /// Dispatched through the `POST /api/v1/bus/call` RPC bridge since
+  /// `project.set` is not a dedicated REST endpoint.  The inner `result`
+  /// object is unwrapped before returning (the bus/call handler wraps RPC
+  /// results in `{"result": ...}`).
+  Future<Map<String, dynamic>> setProject({
+    required String sessionId,
+    String? projectId,
+    String? path,
+  }) async {
+    final params = <String, dynamic>{
+      'session_id': sessionId,
+      if (projectId != null) 'project_id': projectId,
+      if (path != null) 'path': path,
+    };
+    final envelope = await _post('/api/v1/bus/call', body: {
+      'method': 'project.set',
+      'params': params,
+    });
+    final inner = envelope['result'];
+    if (inner is Map<String, dynamic>) return inner;
+    // Some daemon configurations return the result inline (no envelope).
+    if (envelope.containsKey('status') ||
+        envelope.containsKey('project_id') ||
+        envelope.containsKey('path')) {
+      return envelope;
+    }
+    throw StateError(
+        'setProject: unexpected envelope shape: $envelope');
   }
 
   // ===== Plans =====
