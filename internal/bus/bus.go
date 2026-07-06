@@ -113,6 +113,46 @@ func (b *MessageBus) Publish(topic string, msg *models.BusMessage) int {
 	}
 
 	b.mu.RLock()
+	subs := b.subscribers[topic]
+
+	// Check for zero subscribers - warn (and optionally panic for tests)
+	if len(subs) == 0 {
+		// Check wildcard subscribers too
+		hasWildcardSubs := false
+		for pattern, subList := range b.subscribers {
+			if pattern != topic && matchWildcard(pattern, topic) {
+				if len(subList) > 0 {
+					hasWildcardSubs = true
+					break
+				}
+			}
+		}
+
+		if !hasWildcardSubs {
+			b.mu.RUnlock()
+			b.logger.Warn("bus: Publish with no subscribers", "topic", topic)
+			if panicOnUndrainedSubscription {
+				panic(fmt.Sprintf("bus: Publish(%q) with no subscribers", topic))
+			}
+			return 0
+		}
+	}
+
+	// Check for near-full subscriber buffers (early warning)
+	for _, sub := range subs {
+		if cap(sub.Channel) > 0 && len(sub.Channel) > cap(sub.Channel)*9/10 {
+			utilization := float64(len(sub.Channel)) / float64(cap(sub.Channel))
+			b.logger.Warn("bus: subscriber buffer near full",
+				"topic", topic,
+				"subscriber", sub.ID,
+				"utilization", utilization,
+			)
+		}
+	}
+
+	b.mu.RUnlock()
+
+	b.mu.RLock()
 	defer b.mu.RUnlock()
 
 	if b.closed {
@@ -204,6 +244,11 @@ func (b *MessageBus) Unsubscribe(sub *Subscriber) {
 	for i, s := range subs {
 		if s.ID == sub.ID {
 			b.subscribers[sub.Topic] = append(subs[:i], subs[i+1:]...)
+
+			// Clean up subscription metadata
+			chAddr := fmt.Sprintf("%p", sub.Channel)
+			delete(b.subMeta, chAddr)
+
 			close(sub.Channel)
 			b.logger.Debug("bus: unsubscribed", "id", sub.ID, "topic", sub.Topic)
 			return
