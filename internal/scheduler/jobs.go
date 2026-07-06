@@ -37,9 +37,10 @@ const (
 	JobTypeAgent        JobType = "agent"
 	JobTypeShell        JobType = "shell"
 	JobTypeReminder     JobType = "reminder"
-	JobTypeOptimization JobType = "optimization" // Memory graph optimization
-	JobTypeSecurity     JobType = "security"     // Security scans
-	JobTypeLearning     JobType = "learning"     // Learning consolidation
+	JobTypeOptimization JobType = "optimization"   // Memory graph optimization
+	JobTypeSecurity     JobType = "security"       // Security scans
+	JobTypeLearning     JobType = "learning"       // Learning consolidation
+	JobTypeInterval     JobType = "interval"       // Generic interval callback
 )
 
 // JobConfig is the serializable configuration for a job.
@@ -131,6 +132,32 @@ type JobResult struct {
 	Success   bool          `json:"success"`
 	Output    string        `json:"output,omitempty"`
 	Error     string        `json:"error,omitempty"`
+}
+
+// IntervalJob is a persisted placeholder for the transient simpleIntervalJob
+// created by employeeSchedulerAdapter. Its Execute is a no-op because the
+// actual callback is re-registered at startup by the adapter.
+type IntervalJob struct {
+	baseJob
+}
+
+// Execute is a no-op — the real callback lives in simpleIntervalJob.
+func (j *IntervalJob) Execute(_ context.Context) error { return nil }
+
+// NewIntervalJob creates a placeholder job from persisted config.
+func NewIntervalJob(cfg JobConfig) (*IntervalJob, error) {
+	if cfg.Schedule == "" {
+		cfg.Schedule = "@every 1h"
+	}
+	return &IntervalJob{
+		baseJob: baseJob{
+			id:       cfg.ID,
+			name:     cfg.Name,
+			schedule: cfg.Schedule,
+			jobType:  cfg.Type,
+			config:   cfg,
+		},
+	}, nil
 }
 
 // baseJob provides common job functionality.
@@ -641,6 +668,8 @@ func CreateJob(cfg JobConfig, msgBus *bus.MessageBus) (Job, error) {
 		return NewReminderJob(cfg, msgBus)
 	case JobTypeOptimization, JobTypeSecurity, JobTypeLearning:
 		return nil, fmt.Errorf("job type %s requires dependencies; use CreateJobWithDeps", cfg.Type)
+	case JobTypeInterval:
+		return NewIntervalJob(cfg)
 	default:
 		return nil, fmt.Errorf("unknown job type: %s", cfg.Type)
 	}
@@ -661,6 +690,8 @@ func CreateJobWithDeps(cfg JobConfig, deps *JobDependencies) (Job, error) {
 		return NewSecurityJob(cfg, deps)
 	case JobTypeLearning:
 		return NewLearningJob(cfg, deps)
+	case JobTypeInterval:
+		return NewIntervalJob(cfg)
 	default:
 		return nil, fmt.Errorf("unknown job type: %s", cfg.Type)
 	}

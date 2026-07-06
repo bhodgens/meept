@@ -56,7 +56,7 @@ type simpleIntervalJob struct {
 func (j *simpleIntervalJob) ID() string                 { return j.id }
 func (j *simpleIntervalJob) Name() string               { return j.name }
 func (j *simpleIntervalJob) Schedule() string           { return fmt.Sprintf("@every %s", j.interval) }
-func (j *simpleIntervalJob) Type() scheduler.JobType    { return scheduler.JobTypeLearning }
+func (j *simpleIntervalJob) Type() scheduler.JobType    { return scheduler.JobTypeInterval }
 func (j *simpleIntervalJob) Execute(_ context.Context) error {
 	j.fn()
 	return nil
@@ -65,7 +65,7 @@ func (j *simpleIntervalJob) Config() scheduler.JobConfig {
 	return scheduler.JobConfig{
 		ID:        j.id,
 		Name:      j.name,
-		Type:      scheduler.JobTypeLearning,
+		Type:      scheduler.JobTypeInterval,
 		Schedule:  fmt.Sprintf("@every %s", j.interval),
 		Enabled:   true,
 		CreatedAt: time.Now().UTC(),

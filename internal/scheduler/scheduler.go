@@ -640,6 +640,18 @@ func (s *Scheduler) loadPersistedJobs() error {
 			continue
 		}
 
+		// Skip interval jobs — they are ephemeral, re-registered by their
+		// adapters (e.g. employeeSchedulerAdapter) at startup.
+		if cfg.Type == JobTypeInterval {
+			// Remove stale persisted config so it doesn't clutter the store
+			if remErr := s.store.Remove(cfg.ID); remErr != nil {
+				s.logger.Debug("scheduler: removed stale interval job config",
+					"job_id", cfg.ID)
+			}
+			s.logger.Debug("scheduler: skipping transient interval job", "job_id", cfg.ID)
+			continue
+		}
+
 		job, err := s.createJob(cfg)
 		if err != nil {
 			s.logger.Warn("scheduler: failed to create job from config",
