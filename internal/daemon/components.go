@@ -4026,6 +4026,24 @@ func createSecurityOrchestrator(cfg *config.Config, logger *slog.Logger) *intsec
 	return orch
 }
 
+// shadowOllamaProviderID is the provider name under which baked adapter models
+// are registered in Ollama. Used to construct "ollama/<baked-name>" refs that
+// the resolver can route to.
+const shadowOllamaProviderID = "ollama"
+
+// shadowOllamaActivator adapts *adapters.OllamaAdapter to the
+// shadow.OllamaActivator interface. OllamaAdapter.CreateModelWithAdapter has
+// the exact signature the interface wants, but a different method name; this
+// thin wrapper bridges that gap so the shadow package doesn't need to import
+// the adapters package.
+type shadowOllamaActivator struct {
+	adapter *adapters.OllamaAdapter
+}
+
+func (a *shadowOllamaActivator) ActivateAdapter(ctx context.Context, baseName, adapterName, adapterPath string) error {
+	return a.adapter.CreateModelWithAdapter(ctx, baseName, adapterName, adapterPath)
+}
+
 // convertShadowConfig converts config.ShadowConfig to shadow.Config.
 func convertShadowConfig(cfg config.ShadowConfig) *shadow.Config {
 	return &shadow.Config{
@@ -4089,6 +4107,8 @@ func convertShadowConfig(cfg config.ShadowConfig) *shadow.Config {
 			TrainThreshold: cfg.Adapters.TrainThreshold,
 			TrainSchedule:  cfg.Adapters.TrainSchedule,
 			AdapterDir:     cfg.Adapters.AdapterDir,
+			HotSwapEnabled: cfg.Adapters.HotSwapEnabled,
+			EvalThreshold:  cfg.Adapters.EvalThreshold,
 			LoRA: shadow.LoRAConfig{
 				Rank:                 cfg.Adapters.LoRA.Rank,
 				Alpha:                cfg.Adapters.LoRA.Alpha,

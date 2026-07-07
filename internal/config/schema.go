@@ -1380,6 +1380,15 @@ type ShadowAdaptersConfig struct {
 	AdapterDir     string           `json:"adapter_dir"     toml:"adapter_dir"`
 	LoRA           ShadowLoRAConfig `json:"lora"            toml:"lora"`
 	DPO            ShadowDPOConfig  `json:"dpo"             toml:"dpo"`
+
+	// HotSwapEnabled controls whether activated adapters are hot-swapped into
+	// the serving LLM client via the Ollama activator + agent-loop callback.
+	// When false, ActivateAdapter only flips the DB flag. Default true.
+	HotSwapEnabled bool `json:"hot_swap_enabled" toml:"hot_swap_enabled"`
+
+	// EvalThreshold is the minimum eval score a TrainingRun must achieve
+	// before its adapter can be activated. 0.0 disables the gate. Default 0.7.
+	EvalThreshold float64 `json:"eval_threshold" toml:"eval_threshold"`
 }
 
 // ShadowLoRAConfig configures LoRA training parameters.
@@ -1835,6 +1844,8 @@ func DefaultConfig() *Config {
 				TrainThreshold: 500,
 				TrainSchedule:  "",
 				AdapterDir:     "~/.meept/shadow/adapters",
+				HotSwapEnabled: true,
+				EvalThreshold:  0.7,
 				LoRA: ShadowLoRAConfig{
 					Rank:                 16,
 					Alpha:                32,
