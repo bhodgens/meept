@@ -36,6 +36,10 @@ type Manager struct {
 	autoTrainStop chan struct{}
 	autoTrainDone chan struct{}
 
+	// Hot-swap coordinator wires shadow adapter activation into the
+	// serving LLM client via OllamaActivator + HotSwapCallback.
+	hotSwap hotSwapCoordinator
+
 	// Synchronization
 	mu sync.RWMutex
 	wg sync.WaitGroup
@@ -561,6 +565,45 @@ func (m *Manager) ActivateAdapter(ctx context.Context, id string) error {
 	}
 
 	return m.adaptersStore.SetActiveAdapter(ctx, id)
+}
+
+// SetOllamaActivator registers the Ollama adapter used for hot-swapping.
+// Nil guard per CLAUDE.md setter rule.
+func (m *Manager) SetOllamaActivator(a OllamaActivator) {
+	if a == nil {
+		return
+	}
+	m.hotSwap.activator = a
+}
+
+// SetHotSwapCallback registers the callback fired on successful hot-swap.
+// The callback receives the baked model name (without provider prefix); the
+// daemon wiring is responsible for prepending the provider (e.g. "ollama/")
+// before passing it to agentLoop.SetModelOverride.
+func (m *Manager) SetHotSwapCallback(cb HotSwapCallback) {
+	if cb == nil {
+		return
+	}
+	m.hotSwap.callback = cb
+}
+
+// HotSwap activates an adapter end-to-end: bakes it into an Ollama model
+// (if an activator is registered), notifies the LLM client via the
+// registered callback, and flips the DB active flag (subject to the eval
+// gate). Returns an error if hot-swap is disabled in config or the
+// activation/gate fails.
+func (m *Manager) HotSwap(ctx context.Context, adapterID string) error {
+	if !m.config.Adapters.HotSwapEnabled {
+		return fmt.Errorf("hot-swap disabled in config")
+	}
+	if m.adaptersStore == nil {
+		return fmt.Errorf("adapters store not initialized")
+	}
+	adapter, err := m.adaptersStore.GetAdapter(ctx, adapterID)
+	if err != nil {
+		return fmt.Errorf("get adapter: %w", err)
+	}
+	return m.hotSwap.Activate(ctx, m, adapter)
 }
 
 // GetActiveAdapter returns the active adapter for a base model.
