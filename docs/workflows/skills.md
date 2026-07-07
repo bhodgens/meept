@@ -146,6 +146,17 @@ Runs every 6 hours (configurable). Three passes:
 
 Pattern-to-skill promotion checks TF-IDF similarity via `CapabilityIndex.Match` (threshold 0.7) to avoid duplicates. Name collisions are handled by `dedupePatternSkillName` which appends numeric suffixes.
 
+### Pass D: Gap Analysis
+
+Beyond refining, promoting, and pruning skills based on what *exists*, Meept also surfaces what's *missing*. The capability index records every user or skill-discovery query whose best match score fell below 0.5. Queries that recur at least 5 times become new-skill candidates:
+
+```bash
+meept skills gaps          # list current low-match queries
+meept skills evolve        # run all four passes (A/B/C/D)
+```
+
+Pass D proposals pass through the same verifier as the other passes.
+
 ### Verifier Gate
 
 Every proposal passes through a 4-dimension LLM rubric before going live:
