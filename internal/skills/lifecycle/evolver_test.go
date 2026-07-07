@@ -128,6 +128,14 @@ func (s *stubUsageTracker) GetLowPerformers(threshold float64, minInjections int
 	return s.low, nil
 }
 
+func (s *stubUsageTracker) RecordLowMatchQuery(_ context.Context, _ string, _ float64) error {
+	return nil
+}
+
+func (s *stubUsageTracker) GetLowMatchQueries(_ context.Context, _ float64, _ int) ([]LowMatchQuery, error) {
+	return nil, nil
+}
+
 func (s *stubUsageTracker) Close() error { return nil }
 
 func (s *stubUsageTracker) SetStats(name string, stats *UsageStats) {

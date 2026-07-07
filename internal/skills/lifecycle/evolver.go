@@ -158,10 +158,14 @@ func (e *Evolver) RunCycle(ctx context.Context) (*EvolutionReport, error) {
 	// Pass C: prune low-performing skills.
 	e.passCPrune(ctx, report)
 
+	// Pass D: fill coverage gaps from low-match queries.
+	e.passDFillGap(ctx, report)
+
 	e.logger.Info("evolution cycle complete",
 		"refined", report.Refined,
 		"promoted", report.Promoted,
 		"pruned", report.Pruned,
+		"gaps", report.Gaps,
 		"skipped", report.Skipped,
 		"rejected", report.Rejected,
 		"planned", report.Planned,
@@ -592,6 +596,66 @@ func (e *Evolver) processProposal(ctx context.Context, report *EvolutionReport, 
 	report.Details = append(report.Details, proposal)
 }
 
+// ---------------------------------------------------------------------------
+// Pass D: Fill coverage gaps
+// ---------------------------------------------------------------------------
+
+// passDFillGap mines low-match queries (queries that recurred without matching
+// any existing skill) and proposes new skills to cover them. Uses a type
+// assertion on the UsageTracker to gracefully degrade when the runtime tracker
+// doesn't support low-match recording.
+func (e *Evolver) passDFillGap(ctx context.Context, report *EvolutionReport) {
+	if e.usage == nil {
+		return
+	}
+	lowMatchTracker, ok := e.usage.(interface {
+		GetLowMatchQueries(context.Context, float64, int) ([]LowMatchQuery, error)
+	})
+	if !ok {
+		return
+	}
+	gaps, err := lowMatchTracker.GetLowMatchQueries(ctx, 0.5, 50)
+	if err != nil {
+		e.logger.Warn("pass D: low-match query fetch failed", "error", err)
+		return
+	}
+	if len(gaps) == 0 {
+		return
+	}
+	analyzer := NewGapAnalyzer()
+	for _, p := range analyzer.Propose(ctx, gaps) {
+		result, err := e.verifier.Verify(ctx, VerifyRequest{
+			Action:           string(p.Action),
+			SkillName:        p.SkillName,
+			CandidateContent: p.CandidateContent,
+			EvidenceSummary:  p.Rationale,
+		})
+		if err != nil {
+			e.logger.Warn("pass D: verifier error", "skill", p.SkillName, "error", err)
+			report.Skipped++
+			report.Details = append(report.Details, p)
+			continue
+		}
+		p.VerifierResult = result
+		if result.Action == ActionAccept {
+			if e.cfg.AutoApply {
+				if err := e.applyProposal(ctx, p); err != nil {
+					e.logger.Error("pass D: failed to apply gap proposal",
+						"skill", p.SkillName, "error", err)
+					report.Skipped++
+				} else {
+					report.Gaps++
+				}
+			} else {
+				report.Planned++
+			}
+		} else {
+			report.Rejected++
+		}
+		report.Details = append(report.Details, p)
+	}
+}
+
 // incrementActionCount bumps the appropriate report counter for a successfully
 // applied proposal.
 func (e *Evolver) incrementActionCount(report *EvolutionReport, action EvolutionProposalAction) {
@@ -611,7 +675,7 @@ func (e *Evolver) incrementActionCount(report *EvolutionReport, action Evolution
 // archive, it calls Writer.ArchiveSkill.
 func (e *Evolver) applyProposal(ctx context.Context, proposal EvolutionProposal) error {
 	switch proposal.Action {
-	case ProposalRefine, ProposalCreate:
+	case ProposalRefine, ProposalCreate, ProposalFillGap:
 		if e.writer == nil {
 			return fmt.Errorf("evolver: writer not configured")
 		}

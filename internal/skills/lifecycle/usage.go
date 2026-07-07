@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -39,6 +40,16 @@ type UsageTracker interface {
 	// whose effectiveness is below the given threshold. Used by the evolver
 	// prune pass.
 	GetLowPerformers(threshold float64, minInjections int) ([]*UsageStats, error)
+
+	// RecordLowMatchQuery records a user/skill-discovery query whose best
+	// capability-index match score was below threshold. Used by Pass D
+	// (gap analysis) to surface unmet needs as new-skill candidates.
+	RecordLowMatchQuery(ctx context.Context, query string, bestScore float64) error
+
+	// GetLowMatchQueries returns low-match queries ranked by descending count,
+	// filtered to those whose best score was strictly below maxScore. limit
+	// caps the result count.
+	GetLowMatchQueries(ctx context.Context, maxScore float64, limit int) ([]LowMatchQuery, error)
 
 	// Close releases the underlying database connection.
 	Close() error
@@ -127,6 +138,17 @@ CREATE INDEX IF NOT EXISTS idx_skill_usage_events_skill
 
 CREATE INDEX IF NOT EXISTS idx_skill_usage_events_type
     ON skill_usage_events(event_type);
+
+CREATE TABLE IF NOT EXISTS skill_query_misses (
+    query       TEXT PRIMARY KEY,
+    best_score  REAL NOT NULL,
+    first_seen  DATETIME NOT NULL,
+    last_seen   DATETIME NOT NULL,
+    count       INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_skill_query_misses_count
+    ON skill_query_misses(count);
 `
 
 func (ut *UsageTrackerImpl) initSchema() error {
@@ -352,6 +374,46 @@ func (ut *UsageTrackerImpl) GetLowPerformers(threshold float64, minInjections in
 		result = append(result, stats)
 	}
 	return result, nil
+}
+
+// RecordLowMatchQuery records that a user or skill-discovery query matched
+// no skill above threshold. Repeated queries accumulate count and track the
+// best (highest) score seen. Idempotent on query text.
+func (ut *UsageTrackerImpl) RecordLowMatchQuery(ctx context.Context, query string, bestScore float64) error {
+	now := time.Now().UTC()
+	_, err := ut.db.ExecContext(ctx, `
+		INSERT INTO skill_query_misses (query, best_score, first_seen, last_seen, count)
+		VALUES (?, ?, ?, ?, 1)
+		ON CONFLICT(query) DO UPDATE SET
+			best_score = MIN(best_score, excluded.best_score),
+			last_seen  = excluded.last_seen,
+			count      = count + 1
+	`, query, bestScore, now, now)
+	if err != nil {
+		return fmt.Errorf("usage tracker: record low-match query: %w", err)
+	}
+	return nil
+}
+
+// GetLowMatchQueries returns low-match queries ranked by descending count,
+// filtered to those with best_score strictly below maxScore. limit caps the
+// result. Used by Pass D gap analysis.
+func (ut *UsageTrackerImpl) GetLowMatchQueries(ctx context.Context, maxScore float64, limit int) ([]LowMatchQuery, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var rows []LowMatchQuery
+	err := ut.db.SelectContext(ctx, &rows, `
+		SELECT query, best_score, first_seen, last_seen, count
+		FROM skill_query_misses
+		WHERE best_score < ?
+		ORDER BY count DESC, best_score ASC
+		LIMIT ?
+	`, maxScore, limit)
+	if err != nil {
+		return nil, fmt.Errorf("usage tracker: get low-match queries: %w", err)
+	}
+	return rows, nil
 }
 
 // Close releases the database connection.

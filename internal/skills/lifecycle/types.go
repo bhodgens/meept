@@ -153,6 +153,9 @@ const (
 	ProposalCreate EvolutionProposalAction = "create"
 	// ProposalArchive means prune (archive) a low-performing skill.
 	ProposalArchive EvolutionProposalAction = "archive"
+	// ProposalFillGap means create a new skill to cover a recurring query
+	// that no existing skill matched. Surfaced by Pass D gap analysis.
+	ProposalFillGap EvolutionProposalAction = "fill_gap"
 )
 
 // EvolutionProposal represents a single proposed skill change produced by one
@@ -173,8 +176,19 @@ type EvolutionReport struct {
 	Refined  int                 `json:"refined"`   // Pass A: skills improved
 	Promoted int                 `json:"promoted"`  // Pass B: patterns promoted
 	Pruned   int                 `json:"pruned"`    // Pass C: skills archived
+	Gaps     int                 `json:"gaps"`      // Pass D: gaps filled
 	Skipped  int                 `json:"skipped"`   // proposals not applied (LLM said skip)
 	Rejected int                 `json:"rejected"`  // verifier rejected
 	Planned  int                 `json:"planned"`   // AutoApply=false → plan created
 	Details  []EvolutionProposal `json:"details"`
+}
+
+// LowMatchQuery is a user or skill-discovery query that didn't strongly match
+// any existing skill. Aggregated by Pass D to surface coverage gaps.
+type LowMatchQuery struct {
+	Query     string    `json:"query"`
+	Count     int       `json:"count"`
+	BestScore float64   `json:"best_score"`
+	FirstSeen time.Time `json:"first_seen"`
+	LastSeen  time.Time `json:"last_seen"`
 }
