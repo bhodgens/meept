@@ -982,6 +982,13 @@ func WithModelOverride(modelRef string) LoopOption {
 }
 
 // SetModelOverride sets the model override at runtime (thread-safe).
+//
+// Consumers:
+//   - dispatcher: user-driven model reassignment (clears after one cycle)
+//   - shadow training: hot-swap callback sets this to a baked adapter model
+//     ref after a successful ActivateAdapter + Ollama bake. The override
+//     persists until ClearModelOverride is called (e.g. on daemon shutdown
+//     or adapter rollback).
 func (l *AgentLoop) SetModelOverride(modelRef string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
