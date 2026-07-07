@@ -1305,6 +1305,40 @@ run_on_start = false            # Skip immediate cycle on daemon startup
 
 ---
 
+### Self-Improvement Loop
+
+Meept continuously improves its own model quality and skill coverage through four interacting loops:
+
+#### Shadow Training (Model Improvement)
+
+Production LLM traffic is shadowed against a teacher model (typically a stronger cloud model). Preference pairs are mined and used to LoRA-train the local student model. Trained adapters pass an eval gate (minimum score and record count) before being hot-swapped into the serving alias — production traffic shifts to the improved model without a daemon restart.
+
+**Location:** `internal/shadow/`
+**Config:** `[shadow]` block in `meept.json5`
+**Docs:** [workflows/shadow-training.md](workflows/shadow-training.md)
+
+#### Skill Evolution (Skill Improvement)
+
+Every 6 hours, the skill evolver runs four passes: refine existing skills (Pass A), promote learned patterns (Pass B), prune low-performers (Pass C), and surface coverage gaps from low-match queries (Pass D). Each proposal passes a four-dimension LLM-judge verifier.
+
+**Location:** `internal/skills/lifecycle/`
+**Docs:** [workflows/skills.md](workflows/skills.md), [workflows/self-improvement.md](workflows/self-improvement.md)
+
+#### Reflection (Per-Turn Learning)
+
+After each agent turn, a classifier proposes 0-1 improvements (new skills, skill updates, prompt tweaks) and queues them in `.meept/improvements.md`. The skill evolver drains this queue at the start of each cycle, so reflection proposals are auto-consumed — no manual review required unless the proposal type is in the propose-only set (agent prompts, project instructions).
+
+**Location:** `internal/agent/reflection_collector.go`
+
+#### Routing Decision Logging
+
+Every model-resolution decision is persisted to a SQLite store. The log is the training-set foundation for future routing-classifier work and provides observability into why each request went where.
+
+**Location:** `internal/llm/routing_log.go`
+**Docs:** [workflows/routing-decisions.md](workflows/routing-decisions.md)
+
+---
+
 ### Q Agent (Meta-Optimization)
 
 The Q Agent (Quartermaster) is a meta-agent that analyzes system performance and designs improvements.
