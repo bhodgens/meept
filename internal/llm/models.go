@@ -100,8 +100,10 @@ func (m *ChatMessage) ToOpenAIDictWithStore(store UploadStore) map[string]any {
 			}
 		}
 		msg["content"] = content
-	} else {
+	} else if m.Content != "" {
 		msg["content"] = m.Content
+	} else if m.Role != RoleAssistant || len(m.ToolCalls) == 0 {
+		msg["content"] = nil
 	}
 	if m.Name != "" {
 		msg["name"] = m.Name

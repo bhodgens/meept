@@ -80,3 +80,32 @@ func TestToOpenAIDict_AssistantMessageWithToolCalls(t *testing.T) {
 		t.Errorf("expected 1 tool_call, got %d", len(toolCalls))
 	}
 }
+
+func TestToOpenAIDict_AssistantToolCallsEmptyContent(t *testing.T) {
+	msg := &ChatMessage{
+		Role:    RoleAssistant,
+		Content: "",
+		ToolCalls: []ToolCall{
+			{ID: "call_empty", Type: "function", Function: ToolCallFunction{Name: "test_func", Arguments: "{}"}},
+		},
+	}
+	dict := msg.ToOpenAIDict()
+	if _, hasContent := dict["content"]; hasContent {
+		t.Errorf("content key should be absent for assistant+tool_calls+empty content, got %v", dict["content"])
+	}
+	if _, ok := dict["tool_calls"].([]map[string]any); !ok {
+		t.Error("tool_calls should be present")
+	}
+}
+
+func TestToOpenAIDict_EmptyContentNoToolCalls(t *testing.T) {
+	msg := &ChatMessage{Role: RoleUser, Content: ""}
+	dict := msg.ToOpenAIDict()
+	content, hasContent := dict["content"]
+	if !hasContent {
+		t.Fatal("content key should be present as nil")
+	}
+	if content != nil {
+		t.Errorf("expected nil content, got %v", content)
+	}
+}

@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -33,6 +35,7 @@ type Resolver struct {
 	aliases       map[string]*AliasEntry
 	health        map[string]*AliasHealth
 	pricingSyncer *PricingSyncer
+	routingLogger *RoutingLogger
 	mu            sync.Mutex
 	logger        *slog.Logger
 }
@@ -86,6 +89,14 @@ func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
 	}
 
 	return r
+}
+
+// SetRoutingLogger attaches a routing decision logger. Pass nil to disable
+// (the setter is a no-op on nil to honor the CLAUDE.md typed-nil setter rule).
+func (r *Resolver) SetRoutingLogger(rl *RoutingLogger) {
+	if rl != nil {
+		r.routingLogger = rl
+	}
 }
 
 // DefaultModel returns the default model configuration.
@@ -162,6 +173,20 @@ func (r *Resolver) ResolveForSkill(skill *SkillRequirements, currentModel *Model
 		"skill", skill.Name,
 		"requires", required,
 	)
+
+	// Persist the routing decision for later mining (Phase 4 student-learns-routing).
+	// Errors are best-effort: routing data is observability/training fodder, not
+	// a correctness signal, so we swallow rather than fail the request.
+	if r.routingLogger != nil {
+		decision := RoutingDecision{
+			ChosenModelID:    selected.ModelID,
+			ChosenProviderID: selected.ProviderID,
+			Reason:           "capability_escalation",
+			Skill:            skill.Name,
+			CandidatesJSON:   r.candidatesJSON(candidates),
+		}
+		_ = r.routingLogger.Record(context.Background(), decision)
+	}
 
 	return selected, nil
 }
@@ -240,10 +265,34 @@ func (r *Resolver) ResolveForAlias(aliasName string) (*ModelConfig, error) {
 
 	// Return the active model
 	if health.CurrentIndex < len(alias.Models) {
-		return alias.Models[health.CurrentIndex], nil
+		chosen := alias.Models[health.CurrentIndex]
+		// Persist the routing decision for later mining (Phase 4 student-learns-routing).
+		// Best-effort: swallow errors so routing observability never breaks serving.
+		if r.routingLogger != nil {
+			decision := RoutingDecision{
+				ChosenModelID:    chosen.ModelID,
+				ChosenProviderID: chosen.ProviderID,
+				Alias:            aliasName,
+				Reason:           "round_robin",
+			}
+			_ = r.routingLogger.Record(context.Background(), decision)
+		}
+		return chosen, nil
 	}
 
 	return nil, fmt.Errorf("all models in alias %q exhausted", aliasName)
+}
+
+// candidatesJSON serializes the candidate model list as a JSON array of
+// "provider/model-id" strings, for the routing decision log. Errors are
+// swallowed because json.Marshal on a []string cannot fail in practice.
+func (r *Resolver) candidatesJSON(candidates []*ModelConfig) string {
+	ids := make([]string, len(candidates))
+	for i, c := range candidates {
+		ids[i] = c.ProviderID + "/" + c.ModelID
+	}
+	b, _ := json.Marshal(ids)
+	return string(b)
 }
 
 // RecordAliasFailure records a failure for cooldown tracking.
