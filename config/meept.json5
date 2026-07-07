@@ -826,7 +826,7 @@
   "employees": {
     "enabled": true,
     // "audit": {
-    //   "model": "small",
+    //   "model": "",                     // empty = use small_model; or set a model alias
     //   "periodic_interval": "6h",
     //   "drift_pause_threshold": 0.3,
     //   "findings_retention_days": 90,

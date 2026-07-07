@@ -138,7 +138,8 @@ type EmployeesConfig struct {
 type EmployeesAuditConfig struct {
 	// Model is the alias (from config/models.json5) used for the post-turn
 	// and periodic audits. Small models are recommended to keep audit cost
-	// low relative to the employee's working model.
+	// low relative to the employee's working model. When empty (the default),
+	// the daemon falls back to the top-level small_model, then default_model.
 	Model string `json:"model" toml:"model"`
 
 	// PeriodicInterval is the global default cadence for the periodic
@@ -1950,7 +1951,7 @@ func DefaultConfig() *Config {
 		Employees: EmployeesConfig{
 			Enabled: true,
 			Audit: EmployeesAuditConfig{
-				Model:                "small",
+				Model:                "",
 				PeriodicInterval:     "6h",
 				DriftPauseThreshold:  0.3,
 				FindingsRetentionDays: 90,

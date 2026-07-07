@@ -44,6 +44,18 @@ FEATURE_DOCS_DIR="docs/workflows"
 CONCEPTS_DIR="docs/concepts"
 REFERENCE_DIR="docs/reference"
 
+# Packages that already have adequate docs or are infrastructure/tooling
+# that don't need a workflow doc. Add new entries when a package's docs are
+# already covered by an existing doc or when the package is purely
+# internal plumbing (logging, config types, test helpers, etc.).
+# Format: space-separated package names (the top-level dir under internal/).
+DOCS_ALLOWLIST="bus comm config daemon errcls metrics preferences queue registry rpc runtime schema session sharedclient task transport util lint version benchmark debug context pathutil validator workers agents mcp shadow"
+
+# Packages whose changes are significant enough to always warrant a doc
+# check even for modifications. If a package is NOT in this list, only
+# newly-added files trigger the doc check.
+SIGNIFICANT_PACKAGES="agent llm memory security tools skills employee planner"
+
 # Track features needing docs (space-separated list)
 FEATURES_NEEDING_DOCS=""
 
@@ -54,6 +66,13 @@ echo ""
 
 # Get list of staged files (excluding deleted files)
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=d 2>/dev/null || true)
+
+# Get list of newly-added files only (for the doc trigger).
+# The feature-doc check should fire for NEW feature code, not for minor
+# tweaks to existing files (log line additions, bug fixes, refactors).
+# For "significant" packages (agent, llm, etc.) we still check modified
+# files since those packages are core to the product.
+STAGED_ADDED_FILES=$(git diff --cached --name-only --diff-filter=A 2>/dev/null || true)
 
 if [ -z "$STAGED_FILES" ]; then
   echo -e "${GREEN}✅ No staged changes to check${NC}"
@@ -176,6 +195,35 @@ feature_in_list() {
   local feature="$1"
   local list="$2"
   echo " $list " | grep -q " $feature "
+}
+
+# Function to check if a package (the raw top-level dir under internal/)
+# is in the allowlist of packages that don't need a workflow doc.
+# Arg 1: raw package dir name (e.g. "bus", "comm", "config")
+is_doc_allowed() {
+  local pkg="$1"
+  echo " $DOCS_ALLOWLIST " | grep -q " $pkg "
+}
+
+# Function to check if a package is "significant" enough to warrant
+# doc checks even for file modifications (not just additions).
+# Arg 1: raw package dir name
+is_significant_package() {
+  local pkg="$1"
+  echo " $SIGNIFICANT_PACKAGES " | grep -q " $pkg "
+}
+
+# Function to check if a file was newly added (vs modified)
+is_added_file() {
+  local file="$1"
+  echo "$STAGED_ADDED_FILES" | grep -q "^${file}$"
+}
+
+# Function to extract the raw package dir from a file path.
+# E.g. "internal/bus/handler.go" -> "bus", "internal/agent/loop.go" -> "agent"
+raw_pkg_dir() {
+  local file="$1"
+  echo "$file" | sed 's|^internal/||' | sed 's|^cmd/||' | cut -d'/' -f1
 }
 
 # Function to generate documentation suggestion using aider
@@ -352,6 +400,21 @@ for file in $STAGED_FILES; do
   # Check if it's a feature code file
   if is_feature_code "$file"; then
     feature=$(extract_feature_name "$file")
+    pkg_dir=$(raw_pkg_dir "$file")
+
+    # Skip packages in the allowlist (docs already adequate or infrastructure)
+    if is_doc_allowed "$pkg_dir"; then
+      continue
+    fi
+
+    # For non-significant packages, only trigger on newly-added files.
+    # Modifications to existing files (log lines, bug fixes, refactors)
+    # should not trigger the doc check.
+    if ! is_significant_package "$pkg_dir"; then
+      if ! is_added_file "$file"; then
+        continue
+      fi
+    fi
 
     # Check if documentation exists or was modified
     if ! doc_modified_in_commit "$feature"; then

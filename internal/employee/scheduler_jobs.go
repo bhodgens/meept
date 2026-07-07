@@ -183,7 +183,7 @@ func (m *Manager) runAssessForEmployee(ctx context.Context, employeeID string) {
 			"employee_id", employeeID, "error", err)
 		return
 	}
-	if !emp.HasConstitution() {
+	if emp == nil || !emp.HasConstitution() {
 		return
 	}
 	_, err = m.Trigger(ctx, employeeID, map[string]any{

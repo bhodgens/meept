@@ -17,7 +17,12 @@ import (
 	"github.com/caimlas/meept/internal/bot"
 )
 
-// errNotConfigured is returned when the Manager is nil (employees not wired).
+// errNotConfigured is returned when the RPCHandler has no Manager wired at
+// all (nil pointer). This is distinct from a Manager with a nil botManager
+// backend, which gracefully degrades to empty/no-op results (see Manager
+// method docs). The daemon constructs an RPCHandler even when employees are
+// disabled so that the agents.* namespace returns a clear error rather than
+// "method not found".
 var errNotConfigured = errors.New("employees not configured")
 
 // constitutionFields is the canonical set of field names that belong to the
@@ -55,7 +60,10 @@ var constitutionFields = map[string]struct{}{
 //
 // All handlers gracefully handle a nil Manager by returning errNotConfigured,
 // so a daemon that has not wired the employee subsystem returns clear errors
-// instead of panicking.
+// instead of panicking. A non-nil Manager with a nil bot backend returns
+// empty/no-op results (for read methods) or a "bot backend not configured"
+// error (for state-changing methods); the handler layer does not need to
+// distinguish these cases.
 type RPCHandler struct {
 	manager *Manager
 	logger  *slog.Logger
@@ -63,8 +71,9 @@ type RPCHandler struct {
 
 // NewRPCHandler creates a new RPC handler for employee operations.
 //
-// manager may be nil during a partial rollout; handlers will return
-// errNotConfigured in that case.
+// manager may be nil when the employee subsystem is entirely disabled;
+// handlers will return errNotConfigured in that case. A non-nil manager
+// with a nil bot backend is valid and returns graceful empty results.
 func NewRPCHandler(manager *Manager) *RPCHandler {
 	return &RPCHandler{
 		manager: manager,

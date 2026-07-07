@@ -591,8 +591,10 @@ type Manager struct {
 
 // NewManager constructs a new employee Manager wrapping the given bot.Manager.
 //
-// bm may be nil during partial rollout; callers should check for nil before
-// calling methods (the RPCHandler handles this via errNotConfigured).
+// bm may be nil; the Manager is a valid no-op in that state. Read-only methods
+// (ListEmployees, GetEmployee) return empty/nil results, and state-changing
+// methods return a clear "bot backend not configured" error. Callers do not
+// need to nil-check the Manager itself.
 func NewManager(bm *bot.Manager) *Manager {
 	return &Manager{
 		botManager:     bm,
@@ -608,7 +610,8 @@ func NewManager(bm *bot.Manager) *Manager {
 // NewManagerWithStores constructs a Manager with explicit constitution,
 // goal, and audit stores. This is the production constructor used by the
 // daemon wiring (wiring.go). Any nil store is accepted; the corresponding
-// methods will return ErrNotImplemented when invoked.
+// methods will return ErrNotImplemented when invoked. A nil bm is accepted:
+// the Manager gracefully degrades to a no-op (see NewManager for semantics).
 func NewManagerWithStores(
 	bm *bot.Manager,
 	bs *bot.Store,
@@ -898,9 +901,12 @@ func (m *Manager) clearCachedConstitution(employeeID string) {
 // ListEmployees lists all employees, optionally filtered by status string.
 // Empty filter returns all employees. Each Employee includes its
 // Constitution (loaded from the cache or the store).
+//
+// When the Manager has no bot backend (e.g. bots.enabled=false), returns an
+// empty slice and nil error — the Manager is a valid no-op in that state.
 func (m *Manager) ListEmployees(ctx context.Context, statusFilter string) ([]Employee, error) {
 	if m.botManager == nil {
-		return nil, errNotConfigured
+		return []Employee{}, nil
 	}
 	bots, err := m.botManager.ListBots(ctx)
 	if err != nil {
@@ -940,9 +946,12 @@ func (m *Manager) ListEmployees(ctx context.Context, statusFilter string) ([]Emp
 
 // GetEmployee retrieves a single employee by ID, including constitution
 // and cached drift score.
+//
+// When the Manager has no bot backend, returns (nil, nil) — the caller
+// treats this as "not found" without needing special error handling.
 func (m *Manager) GetEmployee(ctx context.Context, id string) (*Employee, error) {
 	if m.botManager == nil {
-		return nil, errNotConfigured
+		return nil, nil
 	}
 	b, err := m.botManager.GetBot(ctx, id)
 	if err != nil {
@@ -976,7 +985,7 @@ func (m *Manager) GetEmployee(ctx context.Context, id string) (*Employee, error)
 // bus and an audit finding is written at SeverityCritical.
 func (m *Manager) Hire(ctx context.Context, req HireRequest) (*Employee, error) {
 	if m.botManager == nil {
-		return nil, errNotConfigured
+		return nil, fmt.Errorf("hire: bot backend not configured (enable bots.enabled to manage employees)")
 	}
 	// Decode and validate the constitution. A missing or empty
 	// constitution is rejected per spec line 222.
@@ -1085,7 +1094,7 @@ func (m *Manager) Hire(ctx context.Context, req HireRequest) (*Employee, error) 
 // Constitution changes must go through AmendConstitution.
 func (m *Manager) UpdateEmployee(ctx context.Context, req UpdateRequest) (*Employee, error) {
 	if m.botManager == nil {
-		return nil, errNotConfigured
+		return nil, fmt.Errorf("update employee %q: bot backend not configured (enable bots.enabled to manage employees)", req.ID)
 	}
 	existing, err := m.botManager.GetBot(ctx, req.ID)
 	if err != nil {
@@ -1121,7 +1130,7 @@ func (m *Manager) UpdateEmployee(ctx context.Context, req UpdateRequest) (*Emplo
 // table. The constitution row is removed explicitly.
 func (m *Manager) Retire(ctx context.Context, id string) error {
 	if m.botManager == nil {
-		return errNotConfigured
+		return fmt.Errorf("retire employee %q: bot backend not configured (enable bots.enabled to manage employees)", id)
 	}
 	// Delete bot (stops triggers if running via botManager.DeleteBot).
 	if err := m.botManager.DeleteBot(ctx, id); err != nil {
@@ -1156,7 +1165,7 @@ func (m *Manager) Pause(ctx context.Context, id string) error {
 // the lock (per CLAUDE.md mutex-scope rule — publishing may do I/O).
 func (m *Manager) pauseWithSource(ctx context.Context, id, reason, source string) error {
 	if m.botManager == nil {
-		return errNotConfigured
+		return fmt.Errorf("pause employee %q: bot backend not configured (enable bots.enabled to manage employees)", id)
 	}
 	if err := m.botManager.PauseBot(ctx, id); err != nil {
 		return err
@@ -1269,7 +1278,7 @@ func (m *Manager) recordConstitutionValidationError(ctx context.Context, req Hir
 // (the default).
 func (m *Manager) Resume(ctx context.Context, id string) error {
 	if m.botManager == nil {
-		return errNotConfigured
+		return fmt.Errorf("resume employee %q: bot backend not configured (enable bots.enabled to manage employees)", id)
 	}
 	return m.botManager.ResumeBot(ctx, id)
 }
@@ -1290,7 +1299,7 @@ func (m *Manager) Resume(ctx context.Context, id string) error {
 // constitution/loop.
 func (m *Manager) Trigger(ctx context.Context, id string, payload map[string]any) (*TriggerResult, error) {
 	if m.botManager == nil {
-		return nil, errNotConfigured
+		return nil, fmt.Errorf("trigger employee %q: bot backend not configured (enable bots.enabled to manage employees)", id)
 	}
 	// Verify the employee exists and is not paused.
 	def, err := m.botManager.GetBot(ctx, id)
@@ -1425,7 +1434,7 @@ func (m *Manager) emitBudgetMetric(ctx context.Context, id string) {
 // AmendmentPolicy.SelfProposeAllowed is false, the amendment is rejected.
 func (m *Manager) AmendConstitution(ctx context.Context, req AmendRequest) (string, error) {
 	if m.botManager == nil {
-		return "", errNotConfigured
+		return "", fmt.Errorf("amend employee %q: bot backend not configured (enable bots.enabled to manage employees)", req.EmployeeID)
 	}
 	existing, err := m.GetEmployee(ctx, req.EmployeeID)
 	if err != nil {
@@ -1789,6 +1798,9 @@ func (m *Manager) Review(ctx context.Context, id string) (*Review, error) {
 	emp, err := m.GetEmployee(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if emp == nil {
+		return nil, ErrEmployeeNotFound
 	}
 	r := &Review{Employee: *emp}
 	if m.botManager != nil {

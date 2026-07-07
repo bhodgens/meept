@@ -300,7 +300,7 @@ The `employees` block in `~/.meept/meept.json5`:
   employees: {
     enabled: true,
     audit: {
-      model: "small",                  // alias from config/models.json5
+      model: "small",                  // optional; empty = use top-level small_model
       periodic_interval: "6h",         // global default
       drift_pause_threshold: 0.3,
       findings_retention_days: 90,
@@ -320,7 +320,7 @@ Defaults are applied by `config.Default()`; users only need to override fields t
 | Field | Default | Description |
 |-------|---------|-------------|
 | `enabled` | `true` | Turns on the employee layer. When `false`, the legacy bot runtime is used as-is. |
-| `audit.model` | `"small"` | Model alias for post-turn and periodic audits. |
+| `audit.model` | `""` (empty) | Model alias for post-turn and periodic audits. When empty, falls back to `small_model`, then `default_model`. |
 | `audit.periodic_interval` | `"6h"` | Global default cadence for the periodic bulk audit. |
 | `audit.drift_pause_threshold` | `0.3` | Drift score (0.0-1.0) above which the periodic auditor auto-pauses. |
 | `audit.findings_retention_days` | `90` | How long findings are kept before pruning. |

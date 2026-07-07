@@ -3,6 +3,7 @@ package employee
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -18,14 +19,17 @@ import (
 // ---------------------------------------------------------------------------
 
 // TestTrigger_NoGoalLoop_Fallback verifies that when no GoalLoop is
-// registered, Trigger falls back to the errNotConfigured error (since
-// botManager is nil in this test). This confirms the fallback path is
-// reached when no loop is registered.
+// registered and the bot backend is absent, Trigger returns a clear "bot
+// backend not configured" error. This confirms the graceful-degradation
+// path is reached when no loop is registered and no bot manager is wired.
 func TestTrigger_NoGoalLoop_Fallback(t *testing.T) {
 	m := NewManager(nil) // no bot manager
 	_, err := m.Trigger(context.Background(), "emp-1", map[string]any{"source": "test"})
 	if err == nil {
-		t.Fatal("expected errNotConfigured when botManager is nil")
+		t.Fatal("expected error when botManager is nil")
+	}
+	if !strings.Contains(err.Error(), "bot backend not configured") {
+		t.Fatalf("expected 'bot backend not configured' error, got: %v", err)
 	}
 }
 

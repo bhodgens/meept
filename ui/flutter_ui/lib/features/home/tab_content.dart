@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../providers/providers.dart';
+import '../../providers/status_message_provider.dart';
 import 'home_screen.dart';
 import '../chat/chat_tab.dart';
 import '../sessions/sessions_overview_tab.dart';
@@ -48,17 +50,88 @@ class TabContent extends ConsumerWidget {
 /// Rendered in the chat tab when no session is active.  Avoids fabricating
 /// a `'default'` session ID just to give [ChatTab] a non-null string, which
 /// would otherwise cause noise from `GET /sessions/default/messages` 404s.
-class _NoSessionPlaceholder extends StatelessWidget {
+///
+/// The placeholder is itself the entry point for session creation from the
+/// chat tab: tapping the action text calls [SessionNotifier.createSession]
+/// directly (mirroring `SessionsList._createQuickSession`) so the user never
+/// has to leave the chat tab to recover from "no session".
+class _NoSessionPlaceholder extends ConsumerStatefulWidget {
   const _NoSessionPlaceholder();
+
+  @override
+  ConsumerState<_NoSessionPlaceholder> createState() =>
+      _NoSessionPlaceholderState();
+}
+
+class _NoSessionPlaceholderState extends ConsumerState<_NoSessionPlaceholder> {
+  bool _creating = false;
+
+  Future<void> _createSession() async {
+    if (_creating) return;
+    setState(() => _creating = true);
+    final notifier = ref.read(sessionProvider.notifier);
+    final session = await notifier.createSession('new session');
+    if (!mounted) {
+      // Widget disposed while the RPC was in flight; nothing to update.
+      return;
+    }
+    if (session == null) {
+      setState(() => _creating = false);
+      final error =
+          ref.read(sessionProvider).error ?? 'failed to create session';
+      showStatusMessage(ref, 'create failed: $error');
+      return;
+    }
+    ref.read(activeSessionProvider.notifier).state = session;
+    ref.read(chatProvider.notifier).clearMessages();
+    // No setState needed: setting activeSessionProvider re-renders
+    // TabContent, which swaps this placeholder out for ChatTab.
+  }
 
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Text(
-        'no session — press + to create one',
-        style: CyberpunkTypography.bodyMedium.copyWith(
-          color: CyberpunkColors.midGray,
-        ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'no session',
+            style: CyberpunkTypography.bodyMedium.copyWith(
+              color: CyberpunkColors.midGray,
+            ),
+          ),
+          const SizedBox(height: 8),
+          GestureDetector(
+            onTap: _creating ? null : _createSession,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_creating)
+                  const Padding(
+                    padding: EdgeInsets.only(right: 6),
+                    child: SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          CyberpunkColors.orangePrimary,
+                        ),
+                      ),
+                    ),
+                  ),
+                Text(
+                  _creating ? 'creating...' : 'tap to create one',
+                  style: CyberpunkTypography.bodyMedium.copyWith(
+                    color: CyberpunkColors.orangePrimary,
+                    decoration: TextDecoration.underline,
+                    decorationColor: CyberpunkColors.orangePrimary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

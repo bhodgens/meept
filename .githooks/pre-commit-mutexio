@@ -17,9 +17,47 @@ fi
 # Collect staged Go files (added, copied, modified).
 # Force -c color.ui=false (and -c core.quotepath=false for unicode filenames)
 # so the filename list is never polluted with ANSI escapes.
+#
+# Exclude files under separate Go modules (subdirectories with their own
+# go.mod, e.g. sdk/go/). The analyzer runs in the context of the main module
+# and cannot resolve packages from nested modules — including them causes
+# "main module does not contain package" errors that are false positives.
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 staged_go_files=$(git -c color.ui=false -c core.quotepath=false diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
 
-# Fast path: no Go files staged.
+# Filter out files belonging to nested Go modules (dirs containing a go.mod
+# other than the repo root). We precompute the list of nested-module dirs
+# once per hook run rather than per-file.
+nested_module_dirs=""
+while IFS= read -r modpath; do
+    moddir=$(dirname "$modpath")
+    if [ "$moddir" != "." ] && [ "$moddir" != "$repo_root" ]; then
+        nested_module_dirs="$nested_module_dirs $moddir"
+    fi
+done < <(git ls-files '*/go.mod')
+
+filtered_files=""
+while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    skip=0
+    for moddir in $nested_module_dirs; do
+        # File is under a nested module dir (with trailing / to avoid
+        # matching sibling dirs that share a prefix).
+        case "$f" in
+            "$moddir"/*) skip=1; break ;;
+        esac
+    done
+    [ "$skip" -eq 1 ] && continue
+    if [ -z "$filtered_files" ]; then
+        filtered_files="$f"
+    else
+        filtered_files="$filtered_files
+$f"
+    fi
+done <<< "$staged_go_files"
+staged_go_files="$filtered_files"
+
+# Fast path: no Go files staged (or all were in nested modules).
 if [ -z "$staged_go_files" ]; then
     exit 0
 fi

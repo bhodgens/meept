@@ -1024,7 +1024,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 					Timestamp: synthesized.Timestamp,
 					Payload:   payload,
 				}
-				msgBus.Publish("agent.progress.synthesized", synthMsg)
+				msgBus.PublishExternalOnly("agent.progress.synthesized", synthMsg)
 			}
 		}
 	}()
@@ -2848,31 +2848,34 @@ func (c *Components) Start(ctx context.Context) error {
 
 		// Construct PostTurnAuditor + PeriodicAuditor from config (spec
 		// lines 358-441, Gap G1). Both use the small model resolved from
-		// employees.audit.model (default "small"). The auditors are wired
-		// to the Manager and to each other's auto-pause callbacks.
+		// employees.audit.model. The auditors are wired to the Manager
+		// and to each other's auto-pause callbacks.
 		if c.LLMResolver != nil && c.EmployeeAuditStore != nil {
-			modelAlias := "small"
-			if c.Config != nil && c.Config.Employees.Audit.Model != "" {
+			modelAlias := ""
+			if c.Config != nil {
 				modelAlias = c.Config.Employees.Audit.Model
 			}
 			driftThreshold := 0.3
 			if c.Config != nil && c.Config.Employees.Audit.DriftPauseThreshold > 0 {
 				driftThreshold = c.Config.Employees.Audit.DriftPauseThreshold
 			}
-			// Resolve the audit model. employees.audit.model historically
-			// defaults to "small", but "small" is not registered as a
-			// real alias in models.json5 — it's the conceptual name for
-			// the small/fast model configured via the top-level
-			// `small_model` key. Try the alias first (for users who do
-			// define it), then fall back to SmallModel(), then
-			// DefaultModel() so the auditor works in the common case.
+			// Resolve the audit model. When the user sets an explicit
+			// alias, try ResolveForAlias first. When empty (the default),
+			// skip straight to SmallModel() — the natural default for an
+			// audit/checkpoint model — then DefaultModel() as a final
+			// fallback.
 			var modelCfg *llm.ModelConfig
-			if resolved, err := c.LLMResolver.ResolveForAlias(modelAlias); err == nil && resolved != nil {
-				modelCfg = resolved
-			} else if small := c.LLMResolver.SmallModel(); small != nil {
-				modelCfg = small
-			} else if def := c.LLMResolver.DefaultModel(); def != nil {
-				modelCfg = def
+			if modelAlias != "" {
+				if resolved, err := c.LLMResolver.ResolveForAlias(modelAlias); err == nil && resolved != nil {
+					modelCfg = resolved
+				}
+			}
+			if modelCfg == nil {
+				if small := c.LLMResolver.SmallModel(); small != nil {
+					modelCfg = small
+				} else if def := c.LLMResolver.DefaultModel(); def != nil {
+					modelCfg = def
+				}
 			}
 			if modelCfg != nil {
 				auditChatter := llm.NewClient(modelCfg, llm.WithLogger(
@@ -2923,8 +2926,12 @@ func (c *Components) Start(ctx context.Context) error {
 
 				c.EmployeeManager.SetPostTurnAuditor(postTurn)
 				c.EmployeeManager.SetPeriodicAuditor(periodic)
+				logAlias := modelAlias
+				if logAlias == "" {
+					logAlias = "small-model-default"
+				}
 				c.Logger.Info("Employee audit checkpoints wired",
-					"model_alias", modelAlias,
+					"model_alias", logAlias,
 					"drift_threshold", driftThreshold,
 					"post_turn", true,
 					"periodic", true,
