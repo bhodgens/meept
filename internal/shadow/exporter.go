@@ -233,11 +233,14 @@ func (e *Exporter) exportDPO(ctx context.Context, writer *bufio.Writer, opts Exp
 		}
 
 		// Build DPO format
-		// Format: {"prompt": "...", "chosen": "...", "rejected": "..."}
+		// Format: {"prompt": "...", "chosen": "...", "rejected": "...", "domain": "...", "task_type": "...", "margin": ...}
 		entry := map[string]any{
 			"prompt":   formatPrompt(pair.PromptMessages),
 			"chosen":   pair.ChosenResponse,
 			"rejected": pair.RejectedResponse,
+			"domain":   string(pair.Domain),
+			"task_type": string(pair.TaskType),
+			"margin":   pair.Margin,
 		}
 
 		data, err := json.Marshal(entry)

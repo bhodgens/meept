@@ -125,6 +125,9 @@ type PreferencePair struct {
 	RejectedResponse string     `json:"rejected_response"`
 	RejectedModel    string     `json:"rejected_model"`
 	Margin           float64    `json:"margin"`
+	Domain           Domain     `json:"domain,omitempty"`
+	TaskType         TaskType   `json:"task_type,omitempty"`
+	RoutingPath      string     `json:"routing_path,omitempty"` // alias/skill context from the original decision
 	ExportedAt       *time.Time `json:"exported_at,omitempty"`
 }
 
@@ -134,6 +137,8 @@ func NewPreferencePair(record *ShadowRecord, studentScore, teacherScore float64)
 		ID:             uuid.New().String(),
 		SourceRecordID: record.ID,
 		PromptMessages: record.Messages,
+		Domain:         record.Domain,
+		TaskType:       record.TaskType,
 	}
 
 	margin := teacherScore - studentScore
