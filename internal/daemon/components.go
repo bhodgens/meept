@@ -5423,6 +5423,21 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 			c.LLMClient,
 			logger.With("component", "skill-verifier"),
 		)
+		// Build evolver options. When the reflection collector is wired,
+		// bridge it to the evolver's ReflectionProposer interface via the
+		// reflectionProposerAdapter. This closes the self-improvement loop:
+		// per-turn reflection proposals queued by ReflectionCollector are
+		// drained at the start of each evolver cycle and routed through the
+		// verifier as skill creates/updates.
+		var evolverOpts []lifecycle.EvolverOption
+		if c.ReflectionCollector != nil {
+			evolverOpts = append(evolverOpts, lifecycle.WithReflectionProposer(
+				&reflectionProposerAdapter{rc: c.ReflectionCollector},
+			))
+			logger.Info("Skill evolver wired to reflection collector",
+				"component", "skill-evolver",
+			)
+		}
 		c.SkillEvolver = lifecycle.NewEvolver(
 			c.SkillUsageTracker,
 			c.LearningPipeline,
@@ -5434,6 +5449,7 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 			c.PlanManager,
 			cfg.Skills.Evolver,
 			logger,
+			evolverOpts...,
 		)
 		c.SkillEvolverSched = lifecycle.NewEvolverScheduler(
 			c.SkillEvolver,
