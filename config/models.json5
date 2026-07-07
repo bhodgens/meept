@@ -69,18 +69,18 @@
         "baseURL": "http://127.0.0.1:8080/v1"
       },
       "lifecycle": {
-        "runtime": "llama",
+        "runtime": "llama-cpp",
         "model_path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-F16.gguf",
         "auto_start": true,
         "auto_stop_on_exit": true,
         "pid_file": "~/.meept/run/llama.pid",
         "spawn_command": ["llama-server", "--model", "${MODEL_PATH}", "--port", "8080", "--host", "127.0.0.1"],
-        "spawn_timeout_seconds": 60,
+        "spawn_timeout_seconds": 180,
         "health_check": {
           "endpoint": "/health",
           "interval_seconds": 10,
           "timeout_seconds": 5,
-          "unhealthy_threshold": 3
+          "unhealthy_threshold": 18
         },
         "restart_policy": {
           "enabled": true,
