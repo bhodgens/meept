@@ -54,6 +54,7 @@ import (
 	"github.com/caimlas/meept/internal/services"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/shadow"
+	"github.com/caimlas/meept/internal/shadow/adapters"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/skills/lifecycle"
 	"github.com/caimlas/meept/internal/task"
@@ -163,6 +164,10 @@ type Components struct {
 
 	// Pricing syncer for dynamic model pricing
 	PricingSyncer *llm.PricingSyncer
+
+	// RoutingLogger persists LLM routing decisions for training-data mining
+	// (Phase 2 of self-improvement loop closure).
+	RoutingLogger *llm.RoutingLogger
 
 	// Local LLM runtime lifecycle manager
 	ContainerManager *llm.RuntimeManager
@@ -475,6 +480,24 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			c.LLMResolver.SetPricingSyncer(pricingSyncer)
 		}
 
+		// Construct routing decision logger and wire it into the resolver.
+		// Decisions are persisted to SQLite for later mining (Phase 4
+		// student-learns-routing). Best-effort: if the logger fails to
+		// construct, the resolver continues without persistence.
+		routingLogger, rlErr := llm.NewRoutingLogger(
+			filepath.Join(cfg.Daemon.DataDir, "routing.db"),
+			logger.With("component", "routing-log"),
+		)
+		if rlErr != nil {
+			logger.Warn("Failed to create routing decision logger", "error", rlErr)
+		} else {
+			c.RoutingLogger = routingLogger
+			if c.LLMResolver != nil {
+				c.LLMResolver.SetRoutingLogger(routingLogger)
+			}
+			logger.Debug("Routing decision logger initialized")
+		}
+
 		// Create auxiliary LLM clients for classifier and summarizer
 		// Use resolver for alias-based model selection (enables fallback rotation)
 		classifierRef := c.ModelsConfig.ClassifierModel
@@ -545,6 +568,23 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				"data_dir", shadowCfg.DataDir,
 				"teacher_model", shadowCfg.Teacher.Model,
 			)
+
+			// Wire Ollama activator for hot-swap. The activator wraps
+			// OllamaAdapter.CreateModelWithAdapter (which bakes LoRA weights
+			// into a new Ollama model) behind the shadow.OllamaActivator
+			// interface so the shadow manager doesn't depend on the
+			// concrete adapters package.
+			if shadowCfg.Adapters.Enabled && shadowCfg.Adapters.HotSwapEnabled {
+				ollamaAdapter := adapters.NewOllamaAdapter(
+					shadowCfg.Adapters.OllamaEndpoint, nil,
+				)
+				shadowMgr.SetOllamaActivator(&shadowOllamaActivator{
+					adapter: ollamaAdapter,
+				})
+				logger.Info("Shadow hot-swap Ollama activator wired",
+					"endpoint", shadowCfg.Adapters.OllamaEndpoint,
+				)
+			}
 		}
 	}
 
@@ -944,6 +984,23 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Wire context firewall settings from LLM config
 	c.AgentLoop.SetContextFirewallConfig(cfg.LLM.ContextFirewall)
 	c.AgentLoop.SetCompactionConfig(cfg.Compaction)
+
+	// Wire shadow hot-swap callback so that successful adapter activations
+	// propagate the baked model ref into the agent loop's modelOverride.
+	// The callback receives the bare baked name (e.g. "qwen2.5:7b-shadow-")
+	// and we prepend the Ollama provider prefix here, since the daemon
+	// knows which provider Ollama is registered under.
+	if c.ShadowManager != nil && cfg.Shadow.Enabled && cfg.Shadow.Adapters.HotSwapEnabled {
+		agentLoop := c.AgentLoop
+		c.ShadowManager.SetHotSwapCallback(func(bakedName string) {
+			bakedRef := shadowOllamaProviderID + "/" + bakedName
+			agentLoop.SetModelOverride(bakedRef)
+			logger.Info("shadow hot-swap activated",
+				"baked_ref", bakedRef,
+			)
+		})
+		logger.Info("Shadow hot-swap callback wired to agent loop")
+	}
 
 	// Note: RepoMap generator wiring to AgentLoop is deferred to after
 	// RepoMapGen creation (see below). The scheduler is also wired there.
@@ -3576,6 +3633,14 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	}
 	if c.SummarizerClient != nil {
 		c.SummarizerClient.Close()
+	}
+
+	// Close routing decision logger (Phase 2 self-improvement loop).
+	if c.RoutingLogger != nil {
+		if err := c.RoutingLogger.Close(); err != nil {
+			c.Logger.Error("Failed to close routing logger", "error", err)
+			lastErr = err
+		}
 	}
 
 	if c.AgentRegistry != nil {
