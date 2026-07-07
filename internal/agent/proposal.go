@@ -119,6 +119,89 @@ func (q *proposalQueue) MarkSkipped(id string) error {
 	return q.markStatus(id, "skipped")
 }
 
+// DrainPending returns all pending proposals and rewrites the queue file so
+// that no pending entries remain (applied/skipped entries are preserved for
+// audit). Intended to be called by the skill evolver at the start of each
+// cycle. Use ListPending for a non-destructive read.
+//
+// The mutex serializes against Append and markStatus for the same reason
+// those two methods hold the mutex: this method does a read-truncate-write
+// on the queue file. The file I/O happens while holding the lock; this is
+// an intentional exception to the CLAUDE.md mutex-scope rule because the
+// alternative (collect under lock, release, operate) would reintroduce the
+// race we are fixing (a concurrent Append between read and rewrite would
+// be lost when we WriteFile our in-memory snapshot).
+func (q *proposalQueue) DrainPending() ([]ReflectionProposal, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	data, err := os.ReadFile(q.path) //nolint:mutexio // I/O under mutex required to prevent race with Append
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	all := parseProposals(string(data))
+	var pending []ReflectionProposal
+	for _, p := range all {
+		if p.Status == "pending" || p.Status == "" {
+			pending = append(pending, p)
+		}
+	}
+	// Rewrite the file with all pending blocks stripped. Applied/skipped
+	// entries are preserved so the audit trail remains intact.
+	if err := os.WriteFile(q.path, []byte(strippedPending(string(data))), 0o644); err != nil { //nolint:mutexio // I/O under mutex required to prevent race with Append
+		return nil, err
+	}
+	return pending, nil
+}
+
+// strippedPending returns the queue file contents with all "## [pending]"
+// blocks removed. Used by DrainPending to atomically clear pending state.
+// A pending block runs from its header line ("## [pending] ...") up to (but
+// not including) the next "## [" header, or to end-of-string if there is no
+// following header. Non-pending blocks (applied/skipped) are passed through
+// unchanged.
+func strippedPending(s string) string {
+	var out strings.Builder
+	rest := s
+	for {
+		idx := strings.Index(rest, "\n## [pending]")
+		if idx < 0 {
+			// No more pending headers. Flush whatever remains.
+			//
+			// Edge case: if the file STARTS with "## [pending]" (no leading
+			// newline), strings.Index above returns -1 because we search for
+			// "\n## [pending]". That case is handled below.
+			out.WriteString(rest)
+			break
+		}
+		// Emit everything up to and including the newline that precedes the
+		// pending header. The pending block (header + body) is dropped.
+		out.WriteString(rest[:idx+1])
+		rest = rest[idx+1:]
+		// Skip forward to the next "## [" header (or end of string).
+		end := strings.Index(rest, "\n## [")
+		if end < 0 {
+			// Pending block runs to end of file — nothing left to emit.
+			return out.String()
+		}
+		rest = rest[end:]
+	}
+	// Handle the edge case where the file begins with "## [pending]" (no
+	// leading newline). The loop above only matches "\n## [pending]", so a
+	// leading pending block would have been emitted verbatim. Re-strip.
+	if strings.HasPrefix(out.String(), "## [pending]") {
+		end := strings.Index(out.String(), "\n## [")
+		if end < 0 {
+			return ""
+		}
+		return out.String()[end+1:]
+	}
+	return out.String()
+}
+
 func (q *proposalQueue) markStatus(id, newStatus string) error {
 	// markStatus does read-modify-write on the queue file: it reads the whole
 	// file, replaces a [pending] header in memory, then truncates and rewrites

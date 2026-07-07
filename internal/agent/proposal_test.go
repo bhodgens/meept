@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -303,3 +304,138 @@ func TestProposalQueue_AppendConcurrency(t *testing.T) {
 		t.Errorf("after 10 concurrent Appends, pending = %d; want 10", len(pending))
 	}
 }
+
+// TestProposalQueue_DrainPending_LeavesApplied verifies that DrainPending
+// returns all pending proposals and rewrites the queue file so that no
+// pending entries remain. Applied/skipped entries (if any) should be
+// preserved — only pending entries are drained.
+func TestProposalQueue_DrainPending_LeavesApplied(t *testing.T) {
+	q := newProposalQueue(filepath.Join(t.TempDir(), "improvements.md"))
+	if err := q.Append(ReflectionProposal{Type: "skill_create", Target: "foo", Confidence: 0.9}); err != nil {
+		t.Fatalf("Append foo: %v", err)
+	}
+	if err := q.Append(ReflectionProposal{Type: "skill_create", Target: "bar", Confidence: 0.6}); err != nil {
+		t.Fatalf("Append bar: %v", err)
+	}
+
+	drained, err := q.DrainPending()
+	if err != nil {
+		t.Fatalf("DrainPending: %v", err)
+	}
+	if len(drained) != 2 {
+		t.Fatalf("expected 2 drained proposals, got %d", len(drained))
+	}
+
+	// File should now have no pending entries.
+	data, err := os.ReadFile(q.path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if containsPending(string(data)) {
+		t.Errorf("expected no pending entries after drain, file still has them")
+	}
+
+	// ListPending should now return zero entries.
+	remaining, err := q.ListPending()
+	if err != nil {
+		t.Fatalf("ListPending after drain: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Errorf("expected 0 remaining pending, got %d", len(remaining))
+	}
+}
+
+// TestProposalQueue_DrainPending_PreservesApplied verifies that DrainPending
+// only removes pending entries — applied and skipped entries remain in the
+// file for audit purposes.
+func TestProposalQueue_DrainPending_PreservesApplied(t *testing.T) {
+	q := newProposalQueue(filepath.Join(t.TempDir(), "improvements.md"))
+	// Append three proposals; mark first as applied, second as skipped, third
+	// remains pending.
+	if err := q.Append(ReflectionProposal{Type: "skill_create", Target: "applied-skill", Confidence: 0.9}); err != nil {
+		t.Fatalf("Append 1: %v", err)
+	}
+	if err := q.Append(ReflectionProposal{Type: "skill_create", Target: "skipped-skill", Confidence: 0.9}); err != nil {
+		t.Fatalf("Append 2: %v", err)
+	}
+	if err := q.Append(ReflectionProposal{Type: "skill_create", Target: "pending-skill", Confidence: 0.9}); err != nil {
+		t.Fatalf("Append 3: %v", err)
+	}
+	all, _ := q.ListPending()
+	if len(all) != 3 {
+		t.Fatalf("setup: expected 3 pending, got %d", len(all))
+	}
+	if err := q.MarkApplied(all[0].ID); err != nil {
+		t.Fatalf("MarkApplied: %v", err)
+	}
+	if err := q.MarkSkipped(all[1].ID); err != nil {
+		t.Fatalf("MarkSkipped: %v", err)
+	}
+
+	drained, err := q.DrainPending()
+	if err != nil {
+		t.Fatalf("DrainPending: %v", err)
+	}
+	if len(drained) != 1 {
+		t.Fatalf("expected 1 drained (only pending), got %d", len(drained))
+	}
+	if drained[0].Target != "pending-skill" {
+		t.Errorf("expected drained target 'pending-skill', got %q", drained[0].Target)
+	}
+
+	// File should still contain the applied and skipped entries.
+	data, err := os.ReadFile(q.path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	body := string(data)
+	if !strings.Contains(body, "applied-skill") {
+		t.Errorf("applied entry should be preserved; file:\n%s", body)
+	}
+	if !strings.Contains(body, "skipped-skill") {
+		t.Errorf("skipped entry should be preserved; file:\n%s", body)
+	}
+	if containsPending(body) {
+		t.Errorf("no pending entries should remain; file:\n%s", body)
+	}
+}
+
+// TestProposalQueue_DrainPending_Empty verifies DrainPending on a missing
+// or empty queue returns nil, nil without error.
+func TestProposalQueue_DrainPending_Empty(t *testing.T) {
+	q := newProposalQueue(filepath.Join(t.TempDir(), "subdir", "missing.md"))
+	drained, err := q.DrainPending()
+	if err != nil {
+		t.Fatalf("DrainPending on missing file: %v", err)
+	}
+	if drained != nil {
+		t.Errorf("expected nil drained on missing file, got %v", drained)
+	}
+}
+
+// TestProposalQueue_DrainPending_Idempotent verifies that a second DrainPending
+// returns nothing (the first call cleared all pending state).
+func TestProposalQueue_DrainPending_Idempotent(t *testing.T) {
+	q := newProposalQueue(filepath.Join(t.TempDir(), "improvements.md"))
+	if err := q.Append(ReflectionProposal{Type: "skill_create", Target: "x", Confidence: 0.5}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	first, err := q.DrainPending()
+	if err != nil {
+		t.Fatalf("first DrainPending: %v", err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("expected 1 on first drain, got %d", len(first))
+	}
+	second, err := q.DrainPending()
+	if err != nil {
+		t.Fatalf("second DrainPending: %v", err)
+	}
+	if len(second) != 0 {
+		t.Errorf("expected 0 on second drain, got %d", len(second))
+	}
+}
+
+// containsPending is a tiny test helper that greps for "## [pending]" in the
+// queue file content. Used to verify DrainPending cleared pending entries.
+func containsPending(s string) bool { return strings.Contains(s, "## [pending]") }
