@@ -530,11 +530,36 @@ func (m *Manager) RegisterAdapter(ctx context.Context, adapter *Adapter) error {
 	return m.adaptersStore.SaveAdapter(ctx, adapter)
 }
 
-// ActivateAdapter activates an adapter.
+// ActivateAdapter activates an adapter after passing the eval gate.
+// The gate prevents deploying adapters whose TrainingRun scored below the
+// configured EvalThreshold or was trained on too few records.
 func (m *Manager) ActivateAdapter(ctx context.Context, id string) error {
 	if m.adaptersStore == nil {
 		return fmt.Errorf("adapters store not initialized")
 	}
+
+	// Look up the adapter to find its model base.
+	adapter, err := m.adaptersStore.GetAdapter(ctx, id)
+	if err != nil {
+		return fmt.Errorf("activate adapter: %w", err)
+	}
+
+	// Find the most recent training run for this adapter.
+	runs, err := m.adaptersStore.ListTrainingRuns(ctx, adapter.ID)
+	if err != nil {
+		return fmt.Errorf("list training runs: %w", err)
+	}
+	if len(runs) == 0 {
+		return fmt.Errorf("activate adapter: no training run on record")
+	}
+	latest := runs[0] // ListTrainingRuns returns newest-first
+
+	// Gate.
+	gate := NewEvalGate(m.config.Adapters.EvalThreshold)
+	if err := gate.Check(ctx, latest); err != nil {
+		return fmt.Errorf("activate adapter: %w", err)
+	}
+
 	return m.adaptersStore.SetActiveAdapter(ctx, id)
 }
 

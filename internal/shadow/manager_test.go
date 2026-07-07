@@ -359,3 +359,104 @@ func TestExpandPath(t *testing.T) {
 		t.Errorf("expandPath(\"~/\") = %q, want %q or %q", result, home, home+"/")
 	}
 }
+
+// newTestManager constructs a Manager with the provided config mutator,
+// using a temp data dir. Skips if FTS5 isn't available.
+func newTestManager(t *testing.T, mut func(c *Config)) *Manager {
+	t.Helper()
+	tmpDir := t.TempDir()
+
+	cfg := DefaultConfig()
+	cfg.Enabled = true
+	cfg.Teacher.Model = "test-teacher"
+	cfg.DataDir = tmpDir
+	cfg.Quality.Method = MethodHeuristic
+	if mut != nil {
+		mut(cfg)
+	}
+
+	mgr, err := NewManager(ManagerConfig{
+		Config: cfg,
+		Logger: slog.Default(),
+	})
+	if err != nil {
+		if containsFTS5(err.Error()) {
+			t.Skip("SQLite FTS5 module not available")
+		}
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	t.Cleanup(func() { _ = mgr.Close() })
+	return mgr
+}
+
+func TestManager_ActivateAdapter_RejectedByEvalGate(t *testing.T) {
+	// Construct a manager with a high eval threshold so a low-score run fails.
+	m := newTestManager(t, func(c *Config) {
+		c.Adapters.Enabled = true
+		c.Adapters.EvalThreshold = 0.9
+	})
+
+	ctx := context.Background()
+	adapter := NewAdapter("test", "qwen2.5:7b", "lora", "/tmp/adapter")
+	if err := m.RegisterAdapter(ctx, adapter); err != nil {
+		t.Fatalf("RegisterAdapter: %v", err)
+	}
+
+	// Complete a training run that fails the gate (low score, sufficient records).
+	run := NewTrainingRun(adapter.ID, map[string]any{"rank": 16})
+	run.RecordsUsed = 100
+	run.Complete(1.5, 0.3) // loss=1.5, eval=0.3
+	// SaveTrainingRun persists the (already-completed) run as-is, since
+	// CompleteTrainingRun takes (id, loss, eval) and would re-stamp completed_at.
+	if err := m.adaptersStore.SaveTrainingRun(ctx, run); err != nil {
+		t.Fatalf("SaveTrainingRun: %v", err)
+	}
+
+	err := m.ActivateAdapter(ctx, adapter.ID)
+	if err == nil {
+		t.Errorf("expected eval-gate rejection, got nil")
+	}
+}
+
+func TestManager_ActivateAdapter_PassesEvalGate(t *testing.T) {
+	m := newTestManager(t, func(c *Config) {
+		c.Adapters.Enabled = true
+		c.Adapters.EvalThreshold = 0.5
+	})
+
+	ctx := context.Background()
+	adapter := NewAdapter("test-pass", "qwen2.5:7b", "lora", "/tmp/adapter")
+	if err := m.RegisterAdapter(ctx, adapter); err != nil {
+		t.Fatalf("RegisterAdapter: %v", err)
+	}
+
+	run := NewTrainingRun(adapter.ID, map[string]any{"rank": 16})
+	run.RecordsUsed = 100
+	run.Complete(0.5, 0.85) // eval=0.85 > threshold 0.5
+	if err := m.adaptersStore.SaveTrainingRun(ctx, run); err != nil {
+		t.Fatalf("SaveTrainingRun: %v", err)
+	}
+
+	if err := m.ActivateAdapter(ctx, adapter.ID); err != nil {
+		t.Errorf("expected pass, got %v", err)
+	}
+}
+
+func TestManager_ActivateAdapter_NoTrainingRun(t *testing.T) {
+	m := newTestManager(t, func(c *Config) {
+		c.Adapters.Enabled = true
+		c.Adapters.EvalThreshold = 0.7
+	})
+
+	ctx := context.Background()
+	adapter := NewAdapter("test-norun", "qwen2.5:7b", "lora", "/tmp/adapter")
+	if err := m.RegisterAdapter(ctx, adapter); err != nil {
+		t.Fatalf("RegisterAdapter: %v", err)
+	}
+
+	err := m.ActivateAdapter(ctx, adapter.ID)
+	if err == nil {
+		t.Errorf("expected error for missing training run, got nil")
+	}
+}
+
