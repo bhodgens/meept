@@ -708,6 +708,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if len(inUse) > 0 {
 			c.ContainerManager.SetModelsInUse(inUse)
 		}
+		// Start local LLM runtimes
+		if err := c.ContainerManager.StartAll(ctx); err != nil {
+			logger.Error("Failed to start LLM runtimes", "error", err)
+		} else {
+			logger.Info("LLM runtimes started")
+		}
 	}
 
 	// Create learning pipeline
