@@ -1214,6 +1214,7 @@ type SkillsEvolverConfig struct {
 	MinEffectiveness             float64       `json:"min_effectiveness"              toml:"min_effectiveness"`                // Prune threshold; default 0.2
 	PatternPromotionConfidence   float64       `json:"pattern_promotion_confidence"   toml:"pattern_promotion_confidence"`     // Default 0.7
 	PatternPromotionUseCount     int           `json:"pattern_promotion_use_count"    toml:"pattern_promotion_use_count"`      // Default 5
+	MinProposalConfidence        float64       `json:"min_proposal_confidence"        toml:"min_proposal_confidence"`          // Default 0.7; reflection proposals below this confidence are dropped before reaching the verifier
 	AutoApply                    bool          `json:"auto_apply"                     toml:"auto_apply"`                       // Default false (requires plan approval)
 	RunOnStart                   bool          `json:"run_on_start"                   toml:"run_on_start"`                     // Default false; when true, scheduler runs one cycle immediately on Start (noisy on daemon startup)
 }
@@ -1724,6 +1725,7 @@ func DefaultConfig() *Config {
 				MinEffectiveness:           0.2,
 				PatternPromotionConfidence: 0.7,
 				PatternPromotionUseCount:   5,
+				MinProposalConfidence:      0.7,
 				AutoApply:                  false,
 				RunOnStart:                 false,
 			},

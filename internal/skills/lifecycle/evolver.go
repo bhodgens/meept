@@ -28,6 +28,26 @@ type llmChatter interface {
 	Chat(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error)
 }
 
+// ReflectionProposal is a skill-change proposal from the agent's per-turn
+// reflection system. We define our own copy here (rather than importing
+// internal/agent) to avoid an import cycle: the agent package already
+// imports internal/skills/lifecycle transitively. The daemon package
+// constructs a tiny adapter (reflectionProposerAdapter) that converts
+// agent.ReflectionProposal values to this type at the boundary.
+type ReflectionProposal struct {
+	Type          string  // skill_create | skill_update (others are ignored)
+	Target        string  // skill name (for skill_update) or new skill name (for skill_create)
+	Change        string  // full SKILL.md content for the new/updated skill
+	Justification string  // human-readable rationale surfacing in EvolutionProposal.Rationale
+	Confidence    float64 // [0,1]; proposals below MinProposalConfidence are filtered
+}
+
+// ReflectionProposer drains pending reflection proposals. The daemon wires
+// this to *agent.ReflectionCollector via an adapter; tests use a stub.
+type ReflectionProposer interface {
+	DrainPending() ([]ReflectionProposal, error)
+}
+
 // Evolver is the closed-loop skill evolution engine. On each RunCycle it runs
 // three passes:
 //
@@ -51,6 +71,7 @@ type Evolver struct {
 	verifier   *Verifier
 	llmClient  llmChatter
 	planMgr    *plan.PlanManager // nullable — when nil + AutoApply=false, proposals are just recorded
+	proposer   ReflectionProposer // nullable — when set, Pass A drains it at cycle start
 	cfg        config.SkillsEvolverConfig
 	logger     *slog.Logger
 }
@@ -64,6 +85,19 @@ func WithEvolverLLMChatter(c llmChatter) EvolverOption {
 	return func(e *Evolver) {
 		if c != nil {
 			e.llmClient = c
+		}
+	}
+}
+
+// WithReflectionProposer injects a proposal source for Pass A consumption. When
+// set, Pass A drains pending reflection proposals at the start of each cycle
+// and routes each one (above MinProposalConfidence) through the verifier as
+// either a ProposalCreate (skill_create) or ProposalRefine (skill_update).
+// Unknown types are logged and skipped. Nil is a no-op (graceful degradation).
+func WithReflectionProposer(p ReflectionProposer) EvolverOption {
+	return func(e *Evolver) {
+		if p != nil {
+			e.proposer = p
 		}
 	}
 }
@@ -150,8 +184,32 @@ Respond in JSON format:
 }`
 
 // passARefine iterates registered skills and asks the LLM how to improve each
-// one that has enough injections to be statistically meaningful.
+// one that has enough injections to be statistically meaningful. At the very
+// start of the pass, it also drains any pending reflection proposals from the
+// agent's per-turn reflection queue (when a ReflectionProposer is wired) and
+// routes them through the verifier.
 func (e *Evolver) passARefine(ctx context.Context, report *EvolutionReport) {
+	// Drain reflection proposals first so they are visible in the report even
+	// when the LLM-driven refine loop below would skip (e.g., no usage stats).
+	if e.proposer != nil {
+		pending, err := e.proposer.DrainPending()
+		if err != nil {
+			e.logger.Warn("pass A: drain reflection proposals failed", "error", err)
+		} else {
+			for _, p := range pending {
+				if p.Confidence < e.cfg.MinProposalConfidence {
+					e.logger.Debug("pass A: drop reflection proposal below confidence threshold",
+						"target", p.Target,
+						"confidence", p.Confidence,
+						"threshold", e.cfg.MinProposalConfidence,
+					)
+					continue
+				}
+				e.handleReflectionProposal(ctx, report, p)
+			}
+		}
+	}
+
 	if e.usage == nil || e.registry == nil {
 		e.logger.Debug("pass A (refine) skipped: usage tracker or registry not configured")
 		return
@@ -221,6 +279,55 @@ func (e *Evolver) buildRefinePrompt(name, currentContent string, stats *UsageSta
 	sb.WriteString(currentContent)
 	sb.WriteString("\n\nAnalyze the skill and its usage data. If the effectiveness is low, identify what could be improved. Return the full improved skill content or 'skip' if no change is needed.")
 	return sb.String()
+}
+
+// handleReflectionProposal converts a drained ReflectionProposal into an
+// EvolutionProposal and routes it through processProposal. skill_create
+// becomes ProposalCreate (a new skill is written); skill_update becomes
+// ProposalRefine (an existing skill is overwritten). Other types
+// (agent_prompt, project_instruction, prompt_component) are logged and
+// skipped — they do not map to skill changes.
+//
+// The verifyAction passed to processProposal mirrors what Pass A/B/C already
+// use: "create_skill" for creates, "improve_skill" for refines.
+func (e *Evolver) handleReflectionProposal(ctx context.Context, report *EvolutionReport, p ReflectionProposal) {
+	action, verifyAction, ok := mapReflectionType(p.Type)
+	if !ok {
+		e.logger.Info("pass A: skip reflection proposal with non-skill type",
+			"type", p.Type, "target", p.Target)
+		return
+	}
+
+	// Read current content for the verifier (refines need a baseline to diff
+	// against). For creates there is no current content.
+	currentContent := ""
+	if action == ProposalRefine && e.writer != nil {
+		if content, err := e.writer.ReadSkill(p.Target); err == nil {
+			currentContent = content
+		}
+	}
+
+	proposal := EvolutionProposal{
+		Action:           action,
+		SkillName:        p.Target,
+		Rationale:        p.Justification,
+		CandidateContent: p.Change,
+	}
+	e.processProposal(ctx, report, proposal, currentContent, verifyAction)
+}
+
+// mapReflectionType converts a reflection proposal type string to the
+// corresponding EvolutionProposalAction and verifier action. Returns
+// ok=false for types that do not map to skill changes.
+func mapReflectionType(reflType string) (action EvolutionProposalAction, verifyAction string, ok bool) {
+	switch reflType {
+	case "skill_create":
+		return ProposalCreate, "create_skill", true
+	case "skill_update":
+		return ProposalRefine, "improve_skill", true
+	default:
+		return "", "", false
+	}
 }
 
 // ---------------------------------------------------------------------------
