@@ -8,7 +8,7 @@ import (
 )
 
 func TestAgentLoop_ModelOverride_SetGetClear(t *testing.T) {
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	// Initially empty
 	assert.Empty(t, loop.GetModelOverride(), "initial model override should be empty")
@@ -23,7 +23,7 @@ func TestAgentLoop_ModelOverride_SetGetClear(t *testing.T) {
 }
 
 func TestAgentLoop_ModelOverride_WithOption(t *testing.T) {
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithModelOverride("anthropic/claude-3-opus"),
 	)
 
@@ -80,7 +80,7 @@ func TestAgentLoop_ExtractModelOverrideFromMetadata(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			loop := NewAgentLoop()
+			loop := NewAgentLoop("test-session", "/tmp")
 			got := loop.extractModelOverrideFromMetadata(tt.metadata)
 			assert.Equal(t, tt.want, got)
 		})
@@ -88,7 +88,7 @@ func TestAgentLoop_ExtractModelOverrideFromMetadata(t *testing.T) {
 }
 
 func TestAgentLoop_PersistentModelOverride_DoesNotAutoClear(t *testing.T) {
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	// Initially empty and not persistent
 	assert.Empty(t, loop.GetModelOverride(), "initial model override should be empty")
@@ -119,7 +119,7 @@ func TestAgentLoop_PersistentModelOverride_DoesNotAutoClear(t *testing.T) {
 }
 
 func TestAgentLoop_SetModelOverride_ResetsPersistentFlag(t *testing.T) {
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	// Set persistent first
 	loop.SetPersistentModelOverride("persistent-model")

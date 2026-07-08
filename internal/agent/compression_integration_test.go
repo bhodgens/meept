@@ -407,7 +407,7 @@ func TestAgentLoop_WithCompressionPipeline(t *testing.T) {
 	defer pipeline.Close()
 
 	// Create an agent loop with the compression pipeline
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithCompressionPipeline(pipeline),
 		WithAgentConfig(AgentConfig{
 			MaxIterations: 3,
@@ -420,7 +420,7 @@ func TestAgentLoop_WithCompressionPipeline(t *testing.T) {
 	}
 
 	// Test using SetCompressionPipeline (setter after construction)
-	loop2 := NewAgentLoop()
+	loop2 := NewAgentLoop("test-session-2", "/tmp")
 	loop2.SetCompressionPipeline(pipeline)
 	if loop2.compressionPipeline == nil {
 		t.Error("compressionPipeline should be set via SetCompressionPipeline")
@@ -436,7 +436,7 @@ func TestAgentLoop_WithCompressionPipeline(t *testing.T) {
 // --- Test 6: Compression System Prompt ---
 
 func TestAgentLoop_CompressionSystemPrompt(t *testing.T) {
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session-3", "/tmp",
 		WithAgentConfig(AgentConfig{
 			Constitution: "Test constitution for compression prompt test",
 			ProactiveCompression: true,
@@ -469,7 +469,7 @@ func TestAgentLoop_CompressionSystemPrompt(t *testing.T) {
 	})
 	defer pipeline.Close()
 
-	loop2 := NewAgentLoop(
+	loop2 := NewAgentLoop("test-session-4", "/tmp",
 		WithAgentConfig(AgentConfig{
 			Constitution: "Test constitution",
 		}),

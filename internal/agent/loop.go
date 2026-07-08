@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -467,8 +466,11 @@ type AgentLoop struct {
 	// Claude artifacts integration
 	artifactManager *ArtifactManager
 
-	// Working directory for artifact scanning (defaults to os.Getwd())
-	workingDir string
+	// Session identification for per-session isolation
+	sessionID string
+
+	// Working directory for artifact scanning
+	workingDir string // Explicitly set in NewAgentLoop, no fallback
 
 	// Hallucination detection
 	hallucinationDetector *HallucinationDetector
@@ -514,7 +516,6 @@ type AgentLoop struct {
 	eventEmitter *EventEmitter
 	hookRegistry *HookRegistry
 
-
 	// File system hooks
 	fileWatcher *FileWatcherHook
 	// Session persistence (wired after construction)
@@ -522,6 +523,12 @@ type AgentLoop struct {
 
 	// Branch navigation (wired after construction)
 	branchManager branchManager
+
+	// Session refresher for periodic title updates (wired after construction)
+	sessionRefresher *session.SessionRefresher
+
+	// Turn counter for periodic title refresh
+	turnCounter int
 
 	// MCP server awareness for system prompt context
 	mcpServerLister func() []MCPServerInfo
@@ -811,6 +818,20 @@ func WithMemvidClient(client *memvid.Client) LoopOption {
 func WithAgentID(id string) LoopOption {
 	return func(l *AgentLoop) {
 		l.agentID = id
+	}
+}
+
+// WithSessionID sets the session identifier.
+func WithSessionID(sessionID string) LoopOption {
+	return func(l *AgentLoop) {
+		l.currentSessionID = sessionID
+	}
+}
+
+// WithWorkingDir sets the working directory for agent context.
+func WithWorkingDir(dir string) LoopOption {
+	return func(l *AgentLoop) {
+		l.workingDir = dir
 	}
 }
 
@@ -1221,9 +1242,20 @@ func (l *AgentLoop) CompressionPipeline() *compress.Pipeline {
 	return l.compressionPipeline
 }
 
-// NewAgentLoop creates a new agent loop.
-func NewAgentLoop(opts ...LoopOption) *AgentLoop {
+// NewAgentLoop creates a new agent loop with explicit session context.
+// sessionID identifies the session this loop belongs to.
+// workingDir is the project directory for agent execution (required, no fallback).
+func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *AgentLoop {
+	if sessionID == "" {
+		panic("NewAgentLoop: sessionID required")
+	}
+	if workingDir == "" {
+		panic("NewAgentLoop: workingDir required")
+	}
+
 	loop := &AgentLoop{
+		sessionID:       sessionID,
+		workingDir:      workingDir,
 		config:          DefaultAgentConfig(),
 		detectionConfig: DefaultDetectionConfig(),
 		conversations:   NewConversationStore(100),
@@ -1232,13 +1264,6 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 
 	for _, opt := range opts {
 		opt(loop)
-	}
-
-	// Default working directory for artifact scanning
-	if loop.workingDir == "" {
-		if wd, err := os.Getwd(); err == nil {
-			loop.workingDir = wd
-		}
 	}
 
 	// Initialize detectors
@@ -1517,7 +1542,6 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		}
 	}
 
-
 	// Start file system hooks for this session
 	if l.fileWatcher != nil {
 		if err := l.fileWatcher.Start(ctx); err != nil {
@@ -1563,9 +1587,9 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 
 		// Session end hooks (metrics, audit, cleanup)
 		sessionEndResult := SessionLifecycleResult{
-			Success:   err == nil,
-			Error:     err,
-			EndTime:   time.Now(),
+			Success: err == nil,
+			Error:   err,
+			EndTime: time.Now(),
 		}
 		if l.hookRegistry != nil {
 			l.hookRegistry.RunSessionEnd(ctx, sessionStartState, sessionEndResult)
@@ -4275,6 +4299,14 @@ func (l *AgentLoop) publishTurnEndEvent(ctx context.Context, conversationID stri
 	if l.eventEmitter == nil {
 		return
 	}
+
+	// Increment turn counter and trigger periodic title refresh
+	l.turnCounter++
+	const titleRefreshInterval = 5 // Refresh title every 5 turns
+	if l.sessionRefresher != nil && l.turnCounter%titleRefreshInterval == 0 && l.currentSessionID != "" {
+		go l.triggerTitleRefresh(ctx, conversationID)
+	}
+
 	l.eventEmitter.EmitWithFields(ctx, AgentEvent{
 		Type:           AgentEventTurnEnd,
 		ConversationID: conversationID,
@@ -4324,6 +4356,18 @@ func (l *AgentLoop) SetMemvidClient(client *memvid.Client) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.memvid = client
+}
+
+// SetSessionRefresher sets the session refresher for periodic title updates.
+// This allows wiring the refresher after the loop is created when
+// dependencies are initialized in a specific order.
+func (l *AgentLoop) SetSessionRefresher(r *session.SessionRefresher) {
+	if r == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.sessionRefresher = r
 }
 
 // SetTaskStore sets the task store after construction.
@@ -4773,4 +4817,81 @@ func (l *AgentLoop) clearSessionDesignation() {
 		l.logger.Warn("failed to clear session designation",
 			"session_id", l.currentSessionID, "error", err)
 	}
+}
+
+// triggerTitleRefresh triggers a session title refresh via the bus.
+// Runs in a goroutine to avoid blocking the agent loop.
+func (l *AgentLoop) triggerTitleRefresh(ctx context.Context, conversationID string) {
+	if l.sessionRefresher == nil || l.currentSessionID == "" {
+		return
+	}
+
+	l.logger.Debug("Triggering periodic session title refresh",
+		"session_id", l.currentSessionID,
+		"turn_count", l.turnCounter,
+	)
+
+	// Build refresh request with keywords from conversation
+	var keywords []string
+	if conv := l.conversations.Get(conversationID); conv != nil {
+		// Extract simple keywords from conversation messages
+		msgs := conv.GetMessages()
+		if len(msgs) > 0 {
+			// Concatenate recent message content for keyword extraction
+			var textParts []string
+			start := 0
+			if len(msgs) > 10 {
+				start = len(msgs) - 10
+			}
+			for _, msg := range msgs[start:] {
+				if len(msg.Content) > 0 {
+					textParts = append(textParts, msg.Content)
+				}
+			}
+			keywords = extractKeywords(strings.Join(textParts, " "))
+		}
+	}
+
+	req := session.RefreshRequest{
+		SessionID: l.currentSessionID,
+		TurnCount: l.turnCounter,
+		Keywords:  keywords,
+	}
+
+	// Call the refresher
+	result, err := l.sessionRefresher.Refresh(ctx, req)
+	if err != nil {
+		l.logger.Warn("Periodic title refresh failed",
+			"session_id", l.currentSessionID,
+			"error", err,
+		)
+		return
+	}
+
+	// Publish event for GUI updates
+	if l.bus != nil {
+		payload, mErr := json.Marshal(map[string]any{
+			"session_id":  l.currentSessionID,
+			"name":        result.Name,
+			"description": result.Description,
+		})
+		if mErr != nil {
+			l.logger.Warn("Failed to marshal title refresh payload", "error", mErr)
+			return
+		}
+		l.bus.Publish("session.title_updated", &models.BusMessage{
+			ID:        id.Generate("title-refresh-"),
+			Type:      models.MessageTypeEvent,
+			Topic:     "session.title_updated",
+			Source:    "agent-loop",
+			Timestamp: time.Now().UTC(),
+			Payload:   payload,
+		})
+	}
+
+	l.logger.Info("Periodic session title refreshed",
+		"session_id", l.currentSessionID,
+		"name", result.Name,
+		"description", result.Description,
+	)
 }

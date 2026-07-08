@@ -131,7 +131,7 @@ func TestSuggestionNoOpOnSelfModulationFalse(t *testing.T) {
 		AllowSelfModulation:  false,
 	}
 
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithAgentReasoning(arc),
 	)
 	require.NotNil(t, loop)
@@ -155,7 +155,7 @@ func TestSuggestionAppliedOnSelfModulationTrue(t *testing.T) {
 		AllowSelfModulation:  true,
 	}
 
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithAgentReasoning(arc),
 	)
 	require.NotNil(t, loop)
@@ -179,7 +179,7 @@ func TestSuggestionClampedByBounds(t *testing.T) {
 		MaxEffort:            llm.ReasoningHigh,
 	}
 
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithAgentReasoning(arc),
 	)
 	require.NotNil(t, loop)

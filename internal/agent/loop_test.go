@@ -78,7 +78,7 @@ func (m *mockChatter) Config() *llm.ModelConfig {
 }
 
 func TestNewAgentLoop(t *testing.T) {
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	require.NotNil(t, loop, "NewAgentLoop returned nil")
 
@@ -94,7 +94,7 @@ func TestAgentLoopWithOptions(t *testing.T) {
 		Constitution:  "Custom constitution",
 	}
 
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithAgentConfig(customConfig),
 	)
 
@@ -104,7 +104,7 @@ func TestAgentLoopWithOptions(t *testing.T) {
 }
 
 func TestAgentLoopNoLLMClient(t *testing.T) {
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	_, err := loop.RunOnce(context.Background(), "Hello", "test-conv")
 	assert.True(t, errors.Is(err, ErrNoLLMClient), "expected ErrNoLLMClient, got %v")
@@ -118,7 +118,7 @@ func TestConversationAndMockClient(t *testing.T) {
 	})
 
 	// Test conversation management
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 	conv := loop.conversations.Get("test-conv")
 	conv.AddUserMessage("Hello")
 
@@ -135,7 +135,7 @@ func TestConversationAndMockClient(t *testing.T) {
 }
 
 func TestAgentLoopBuildSystemPrompt(t *testing.T) {
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithAgentConfig(AgentConfig{
 			Constitution: "Test constitution",
 			Restrictions: "Test restrictions",
@@ -153,7 +153,7 @@ func TestAgentLoopBuildSystemPrompt(t *testing.T) {
 }
 
 func TestAgentLoopBuildSystemPromptWithOverride(t *testing.T) {
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithAgentConfig(AgentConfig{
 			SystemPromptOveride: "Complete custom prompt",
 		}),
@@ -170,7 +170,7 @@ func TestAgentLoopBuildSystemPromptWithToolRegistry(t *testing.T) {
 	registry := NewPlaceholderToolRegistry()
 	registry.Register(NewMockTool("test_tool", "A test tool", nil))
 
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithToolRegistry(registry),
 	)
 
@@ -182,7 +182,7 @@ func TestAgentLoopBuildSystemPromptWithToolRegistry(t *testing.T) {
 }
 
 func TestAgentLoopConversationManagement(t *testing.T) {
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	// Get a conversation
 	conv1 := loop.GetConversation("conv1")
@@ -204,7 +204,7 @@ func TestAgentLoopConversationManagement(t *testing.T) {
 }
 
 func TestAgentLoopSetConfig(t *testing.T) {
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	newConfig := AgentConfig{
 		MaxIterations: 15,
@@ -218,7 +218,7 @@ func TestAgentLoopSetConfig(t *testing.T) {
 }
 
 func TestAgentLoopHandleMessage(t *testing.T) {
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	// Without LLM client, should return error
 	_, err := loop.HandleMessage(context.Background(), "Hello")
@@ -227,7 +227,7 @@ func TestAgentLoopHandleMessage(t *testing.T) {
 
 func TestAgentLoopExecuteToolCalls(t *testing.T) {
 	// Test with no executor
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	toolCalls := []llm.ToolCall{
 		{
@@ -259,7 +259,7 @@ func TestAgentLoopWithExecutor(t *testing.T) {
 	// Create security checker with default config
 	secChecker := security.NewPermissionChecker(security.Config{})
 
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithToolRegistry(registry),
 		WithSecurityChecker(secChecker),
 	)
@@ -346,7 +346,7 @@ func TestDefaultAgentConfig(t *testing.T) {
 }
 
 func TestAgentLoopRunChannel(t *testing.T) {
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	messages := make(chan *AgentMessage, 1)
 	responses := make(chan *AgentResponse, 1)
@@ -373,7 +373,7 @@ func TestAgentLoopRunChannel(t *testing.T) {
 }
 
 func TestAgentLoopRunWithContextCancel(t *testing.T) {
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	messages := make(chan *AgentMessage)
 	responses := make(chan *AgentResponse, 1)
@@ -419,7 +419,7 @@ func TestErrorConstants(t *testing.T) {
 
 func TestAgentLoopPublishAction(t *testing.T) {
 	// Test without bus (should not panic)
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	toolCalls := []llm.ToolCall{
 		{
@@ -438,7 +438,7 @@ func TestAgentLoopPublishAction(t *testing.T) {
 
 func TestAgentLoopPublishResult(t *testing.T) {
 	// Test without bus (should not panic)
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	results := []*ExecutionResult{
 		{
@@ -453,7 +453,7 @@ func TestAgentLoopPublishResult(t *testing.T) {
 }
 
 func TestAgentLoopDiscoverRelevantSkills(t *testing.T) {
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	// Without capability index, should return nil
 	result := loop.discoverRelevantSkills(context.Background(), "write code", 0.5)
@@ -461,7 +461,7 @@ func TestAgentLoopDiscoverRelevantSkills(t *testing.T) {
 }
 
 func TestAgentLoopSetCapabilityIndex(t *testing.T) {
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	// Initially should be nil
 	if loop.capabilityIndex != nil {
@@ -479,7 +479,7 @@ func TestAgentLoopSetCapabilityIndex(t *testing.T) {
 }
 
 func TestAgentLoopSetSkillLoader(t *testing.T) {
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	// Initially should be nil
 	if loop.skillLoader != nil {
@@ -492,7 +492,7 @@ func TestAgentLoopSetSkillLoader(t *testing.T) {
 }
 
 func TestAgentLoopDiscoverRelevantSkillsWithIndex(t *testing.T) {
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	// Create and set a test capability index
 	idx := createTestCapabilityIndex()
@@ -512,7 +512,7 @@ func TestAgentLoopDiscoverRelevantSkillsWithIndex(t *testing.T) {
 }
 
 func TestBuildSkillContextSection(t *testing.T) {
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 
 	// Empty discovered list should return empty string
 	result := loop.buildSkillContextSection(context.Background(), nil)
@@ -528,14 +528,14 @@ func TestBuildSkillContextSection(t *testing.T) {
 
 func TestBuildMCPContextSection(t *testing.T) {
 	// No lister configured
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 	result := loop.buildMCPContextSection()
 	if result != "" {
 		t.Error("expected empty string when no MCP server lister configured")
 	}
 
 	// Empty server list
-	loop = NewAgentLoop(
+	loop = NewAgentLoop("test-session", "/tmp",
 		WithMCPServerLister(func() []MCPServerInfo {
 			return []MCPServerInfo{}
 		}),
@@ -546,7 +546,7 @@ func TestBuildMCPContextSection(t *testing.T) {
 	}
 
 	// With servers
-	loop = NewAgentLoop(
+	loop = NewAgentLoop("test-session", "/tmp",
 		WithMCPServerLister(func() []MCPServerInfo {
 			return []MCPServerInfo{
 				{Name: "my-server", ToolCount: 5, Connected: true},
@@ -609,7 +609,7 @@ func TestRecallModeDisabledGatesMemoryTools(t *testing.T) {
 	}))
 
 	secChecker := security.NewPermissionChecker(security.Config{})
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithAgentConfig(AgentConfig{
 			Memory: AgentMemoryConfig{
 				RecallMode: RecallModeDisabled,
@@ -655,7 +655,7 @@ func TestRecallModeAutoAllowsMemoryTools(t *testing.T) {
 		return map[string]any{"results": []any{}}, nil
 	}))
 
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithAgentConfig(AgentConfig{
 			Memory: AgentMemoryConfig{
 				RecallMode: RecallModeAuto,
@@ -690,7 +690,7 @@ func TestSnapshotCachingEnabledControlsFreeze(t *testing.T) {
 			SnapshotCachingEnabled: false,
 		},
 	}
-	loop := NewAgentLoop(WithAgentConfig(cfg))
+	loop := NewAgentLoop("test-session", "/tmp", WithAgentConfig(cfg))
 
 	assert.False(t, loop.config.Memory.SnapshotCachingEnabled, "SnapshotCachingEnabled should be false when explicitly set")
 }
@@ -708,7 +708,7 @@ func TestShouldAutoInject(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.mode), func(t *testing.T) {
-			loop := NewAgentLoop(WithAgentConfig(AgentConfig{
+			loop := NewAgentLoop("test-session", "/tmp", WithAgentConfig(AgentConfig{
 				Memory: AgentMemoryConfig{RecallMode: tt.mode},
 			}))
 			got := loop.shouldAutoInject()
@@ -732,7 +732,7 @@ func TestShouldFetchOnQuery(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.mode), func(t *testing.T) {
-			loop := NewAgentLoop(WithAgentConfig(AgentConfig{
+			loop := NewAgentLoop("test-session", "/tmp", WithAgentConfig(AgentConfig{
 				Memory: AgentMemoryConfig{RecallMode: tt.mode},
 			}))
 			got := loop.shouldFetchOnQuery()
@@ -750,7 +750,7 @@ func TestAgentLoop_PublishTokenUsage(t *testing.T) {
 	sub := msgBus.Subscribe("test", "llm.tokens.used")
 	defer msgBus.Unsubscribe(sub)
 
-	loop := NewAgentLoop(WithMessageBus(msgBus))
+	loop := NewAgentLoop("test-session", "/tmp", WithMessageBus(msgBus))
 
 	// Publish token usage
 	loop.publishTokenUsage("conv-1", 1500)
@@ -920,7 +920,7 @@ func TestEmitTurnStart(t *testing.T) {
 
 func TestBuildTerminateResponse(t *testing.T) {
 	t.Run("single successful result", func(t *testing.T) {
-		loop := NewAgentLoop()
+		loop := NewAgentLoop("test-session", "/tmp")
 		results := []*ExecutionResult{
 			{ToolCallID: "c1", Success: true, Result: map[string]any{"answer": 42}},
 		}
@@ -931,7 +931,7 @@ func TestBuildTerminateResponse(t *testing.T) {
 	})
 
 	t.Run("multiple successful results joined", func(t *testing.T) {
-		loop := NewAgentLoop()
+		loop := NewAgentLoop("test-session", "/tmp")
 		results := []*ExecutionResult{
 			{ToolCallID: "c1", Success: true, Result: "first"},
 			{ToolCallID: "c2", Success: true, Result: "second"},
@@ -943,7 +943,7 @@ func TestBuildTerminateResponse(t *testing.T) {
 	})
 
 	t.Run("skips failed results", func(t *testing.T) {
-		loop := NewAgentLoop()
+		loop := NewAgentLoop("test-session", "/tmp")
 		results := []*ExecutionResult{
 			{ToolCallID: "c1", Success: false, Error: "failed"},
 			{ToolCallID: "c2", Success: true, Result: "ok"},
@@ -956,7 +956,7 @@ func TestBuildTerminateResponse(t *testing.T) {
 	})
 
 	t.Run("all failed returns done", func(t *testing.T) {
-		loop := NewAgentLoop()
+		loop := NewAgentLoop("test-session", "/tmp")
 		results := []*ExecutionResult{
 			{ToolCallID: "c1", Success: false, Error: "err"},
 		}
@@ -1055,7 +1055,7 @@ func TestShouldTerminate_IntegrationWithLoopPath(t *testing.T) {
 	testBus := bus.New(nil, slogDiscardLogger())
 	executor := NewExecutor(registry, secChecker)
 
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithLLMChatter(chatter),
 		WithToolRegistry(registry),
 		WithSecurityChecker(secChecker),
@@ -1106,7 +1106,7 @@ func TestAgentLoop_TerminatePathReturnsToolResults(t *testing.T) {
 	executor := NewExecutor(registry, secChecker)
 
 	// Create the loop with the executor
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithToolRegistry(registry),
 		WithSecurityChecker(secChecker),
 	)
@@ -1160,7 +1160,7 @@ func TestAgentLoop_TerminatePathSkipsLLMFollowUp(t *testing.T) {
 	testBus := bus.New(nil, slogDiscardLogger())
 	executor := NewExecutor(registry, secChecker)
 
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithLLMChatter(chatter),
 		WithToolRegistry(registry),
 		WithSecurityChecker(secChecker),
@@ -1230,7 +1230,7 @@ func TestAgentLoop_StartProjectSub_UpdatesWorkingDir(t *testing.T) {
 	testBus := bus.New(nil, slogDiscardLogger())
 	defer testBus.Close()
 
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithMessageBus(testBus),
 		WithAgentID("test-agent"),
 	)

@@ -767,7 +767,7 @@ func TestChatClientDisconnectedData(t *testing.T) {
 
 func TestHandleRequestBroadcastsMessageReceived(t *testing.T) {
 	msgBus := bus.New(nil, slogDiscardLogger())
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 	handler := NewChatHandler(loop, nil, msgBus, slogDiscardLogger())
 
 	// Subscribe to chat.message.received to verify broadcast
@@ -817,7 +817,7 @@ func TestHandleRequestBroadcastsMessageReceived(t *testing.T) {
 
 func TestHandleRequestNoBroadcastWithoutSourceClient(t *testing.T) {
 	msgBus := bus.New(nil, slogDiscardLogger())
-	loop := NewAgentLoop()
+	loop := NewAgentLoop("test-session", "/tmp")
 	handler := NewChatHandler(loop, nil, msgBus, slogDiscardLogger())
 
 	// Subscribe to chat.message.received

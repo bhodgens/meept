@@ -9,7 +9,7 @@ import (
 )
 
 func TestCompressionPromptWithoutPipeline(t *testing.T) {
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithAgentConfig(AgentConfig{
 			Constitution: "test constitution",
 		}),
@@ -41,7 +41,7 @@ func TestCompressionPromptWithContextPipeline(t *testing.T) {
 	})
 	defer pipeline.Close()
 
-	loop := NewAgentLoop(
+	loop := NewAgentLoop("test-session", "/tmp",
 		WithAgentConfig(AgentConfig{
 			Constitution: "test constitution",
 		}),

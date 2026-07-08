@@ -23,7 +23,7 @@ import (
 // when methods are later called on the stored field.
 func TestAllSetters_NilSafe(t *testing.T) {
 	// Pre-build structs that need non-trivial constructors.
-	agentLoop := NewAgentLoop()
+	agentLoop := NewAgentLoop("test-session", "/tmp")
 	registry := NewAgentRegistry(RegistryConfig{})
 	dispatcher := NewDispatcher(DispatcherConfig{})
 	queue := NewMessageQueue()

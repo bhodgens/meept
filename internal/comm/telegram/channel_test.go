@@ -93,7 +93,7 @@ func TestChatIDToTarget(t *testing.T) {
 
 func TestNewTelegramChannel_MissingToken(t *testing.T) {
 	store := session.NewMemoryStore(nil)
-	loop := agent.NewAgentLoop()
+	loop := agent.NewAgentLoop("test-session", "/tmp")
 	_, err := NewTelegramChannel(TelegramChannelConfig{
 		Token:   "",
 		DataDir: t.TempDir(),
@@ -106,7 +106,7 @@ func TestNewTelegramChannel_MissingToken(t *testing.T) {
 
 func TestNewTelegramChannel_MissingDataDir(t *testing.T) {
 	store := session.NewMemoryStore(nil)
-	loop := agent.NewAgentLoop()
+	loop := agent.NewAgentLoop("test-session", "/tmp")
 	_, err := NewTelegramChannel(TelegramChannelConfig{
 		Token:   "123:ABC",
 		DataDir: "",
@@ -119,7 +119,7 @@ func TestNewTelegramChannel_MissingDataDir(t *testing.T) {
 
 func TestNewTelegramChannel_MissingBotID(t *testing.T) {
 	store := session.NewMemoryStore(nil)
-	loop := agent.NewAgentLoop()
+	loop := agent.NewAgentLoop("test-session", "/tmp")
 	_, err := NewTelegramChannel(TelegramChannelConfig{
 		Token:   "123:ABC",
 		DataDir: "/tmp/test",
@@ -132,7 +132,7 @@ func TestNewTelegramChannel_MissingBotID(t *testing.T) {
 
 func TestTelegramChannel_CreatesSuccessfully(t *testing.T) {
 	store := session.NewMemoryStore(nil)
-	loop := agent.NewAgentLoop()
+	loop := agent.NewAgentLoop("test-session", "/tmp")
 
 	ch, err := NewTelegramChannel(TelegramChannelConfig{
 		Token:       "123:ABC",
@@ -154,7 +154,7 @@ func TestTelegramChannel_CreatesSuccessfully(t *testing.T) {
 
 func TestTelegramChannel_BotClientNotNil(t *testing.T) {
 	store := session.NewMemoryStore(nil)
-	loop := agent.NewAgentLoop()
+	loop := agent.NewAgentLoop("test-session", "/tmp")
 
 	ch, err := NewTelegramChannel(TelegramChannelConfig{
 		Token:   "123:ABC",
@@ -172,7 +172,7 @@ func TestTelegramChannel_BotClientNotNil(t *testing.T) {
 
 func TestTelegramChannel_CanInitiate(t *testing.T) {
 	store := session.NewMemoryStore(nil)
-	loop := agent.NewAgentLoop()
+	loop := agent.NewAgentLoop("test-session", "/tmp")
 
 	ch, err := NewTelegramChannel(TelegramChannelConfig{
 		Token:   "123:ABC",
@@ -190,7 +190,7 @@ func TestTelegramChannel_CanInitiate(t *testing.T) {
 
 func TestTelegramChannel_SendMessage_InvalidTarget(t *testing.T) {
 	store := session.NewMemoryStore(nil)
-	loop := agent.NewAgentLoop()
+	loop := agent.NewAgentLoop("test-session", "/tmp")
 
 	ch, err := NewTelegramChannel(TelegramChannelConfig{
 		Token:   "123:ABC",

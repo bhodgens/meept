@@ -2,7 +2,7 @@ module github.com/caimlas/meept
 
 go 1.25.5
 
-toolchain go1.26.4
+toolchain go1.26.5
 
 require (
 	charm.land/bubbles/v2 v2.1.0
@@ -36,7 +36,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/tailscale/hujson v0.0.0-20250605163823-992244df8c5a
-	github.com/yuin/goldmark v1.7.4
+	github.com/yuin/goldmark v1.8.2
 	github.com/zeebo/blake3 v0.2.4
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/crypto v0.53.0

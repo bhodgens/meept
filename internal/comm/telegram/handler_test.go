@@ -10,7 +10,7 @@ import (
 
 func TestAgentHandler_CreatesSession(t *testing.T) {
 	store := session.NewMemoryStore(nil)
-	loop := agent.NewAgentLoop()
+	loop := agent.NewAgentLoop("test-session", "/tmp")
 	handler := NewAgentHandler(store, loop, t.TempDir(), nil)
 
 	sid := handler.getOrCreateSession(12345)
@@ -25,7 +25,7 @@ func TestAgentHandler_CreatesSession(t *testing.T) {
 
 func TestAgentHandler_SameSessionForSameChat(t *testing.T) {
 	store := session.NewMemoryStore(nil)
-	loop := agent.NewAgentLoop()
+	loop := agent.NewAgentLoop("test-session", "/tmp")
 	handler := NewAgentHandler(store, loop, t.TempDir(), nil)
 
 	sid1 := handler.getOrCreateSession(123)
@@ -42,7 +42,7 @@ func TestAgentHandler_SameSessionForSameChat(t *testing.T) {
 
 func TestAgentHandler_DifferentSessionsForDifferentChats(t *testing.T) {
 	store := session.NewMemoryStore(nil)
-	loop := agent.NewAgentLoop()
+	loop := agent.NewAgentLoop("test-session", "/tmp")
 	handler := NewAgentHandler(store, loop, t.TempDir(), nil)
 
 	sid1 := handler.getOrCreateSession(100)
@@ -59,7 +59,7 @@ func TestAgentHandler_DifferentSessionsForDifferentChats(t *testing.T) {
 
 func TestAgentHandler_ResetSession(t *testing.T) {
 	store := session.NewMemoryStore(nil)
-	loop := agent.NewAgentLoop()
+	loop := agent.NewAgentLoop("test-session", "/tmp")
 	handler := NewAgentHandler(store, loop, t.TempDir(), nil)
 
 	_ = handler.getOrCreateSession(99999)
@@ -76,7 +76,7 @@ func TestAgentHandler_ResetSession(t *testing.T) {
 
 func TestAgentHandler_ResetNonexistentSession(t *testing.T) {
 	store := session.NewMemoryStore(nil)
-	loop := agent.NewAgentLoop()
+	loop := agent.NewAgentLoop("test-session", "/tmp")
 	handler := NewAgentHandler(store, loop, t.TempDir(), nil)
 
 	// Should not panic
@@ -89,7 +89,7 @@ func TestAgentHandler_ResetNonexistentSession(t *testing.T) {
 
 func TestAgentHandler_NewCreatesEmptySessions(t *testing.T) {
 	store := session.NewMemoryStore(nil)
-	loop := agent.NewAgentLoop()
+	loop := agent.NewAgentLoop("test-session", "/tmp")
 	handler := NewAgentHandler(store, loop, t.TempDir(), nil)
 
 	if handler.GetSessionCount() != 0 {
@@ -99,7 +99,7 @@ func TestAgentHandler_NewCreatesEmptySessions(t *testing.T) {
 
 func TestAgentHandler_HandleReturnsErrorWithoutLLM(t *testing.T) {
 	store := session.NewMemoryStore(nil)
-	loop := agent.NewAgentLoop() // no LLM configured
+	loop := agent.NewAgentLoop("test-session", "/tmp") // no LLM configured
 	handler := NewAgentHandler(store, loop, t.TempDir(), nil)
 
 	msg := &Message{
@@ -121,7 +121,7 @@ func TestAgentHandler_HandleReturnsErrorWithoutLLM(t *testing.T) {
 func TestAgentHandler_SessionPersistence(t *testing.T) {
 	dir := t.TempDir()
 	store := session.NewMemoryStore(nil)
-	loop := agent.NewAgentLoop()
+	loop := agent.NewAgentLoop("test-session", "/tmp")
 
 	handler := NewAgentHandler(store, loop, dir, nil)
 	_ = handler.getOrCreateSession(42)

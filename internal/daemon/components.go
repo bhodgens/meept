@@ -986,7 +986,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	c.AgentEventEmitter = emitter
 
 	// Note: memvid and taskStore are wired AFTER their initialization below
-	c.AgentLoop = agent.NewAgentLoop(agentOpts...)
+	wd, _ := os.Getwd()
+	c.AgentLoop = agent.NewAgentLoop("daemon", wd, agentOpts...)
 	// Wire context firewall settings from LLM config
 	c.AgentLoop.SetContextFirewallConfig(cfg.LLM.ContextFirewall)
 	c.AgentLoop.SetCompactionConfig(cfg.Compaction)
@@ -1314,8 +1315,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Create session handler with summarizer if LLM is available
 	sessionOpts := []session.HandlerOption{}
 	var summarizer *session.Summarizer
+	var summarizerLLM *llm.Client
 	if c.LLMClient != nil {
-		summarizerLLM := c.SummarizerClient
+		summarizerLLM = c.SummarizerClient
 		if summarizerLLM == nil {
 			summarizerLLM = c.LLMClient
 		}
@@ -1348,6 +1350,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		)
 	}
 
+	// Create session refresher for periodic title updates
+	var refresher *session.SessionRefresher
+	if summarizerLLM != nil {
+		refresher = session.NewSessionRefresher(summarizerLLM, logger.With("component", "refresher"))
+		sessionOpts = append(sessionOpts, session.WithRefresher(refresher))
+		logger.Debug("Session refresher enabled for periodic title updates")
+	}
+
 	c.SessionHandler = session.NewHandler(c.SessionStore, msgBus, logger.With("component", "session"), sessionOpts...)
 
 	// Wire session store to agent loop for persistence
@@ -1356,6 +1366,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		logger.Info("Session persistence wired to agent loop",
 			"restore_message_limit", cfg.Session.RestoreMessageLimit,
 		)
+	}
+
+	// Wire session refresher to agent loop for periodic title updates
+	if refresher != nil && c.AgentLoop != nil {
+		c.AgentLoop.SetSessionRefresher(refresher)
+		logger.Debug("Session refresher wired to agent loop")
 	}
 
 	// Wire branch manager to agent loop for in-memory cache coordination
