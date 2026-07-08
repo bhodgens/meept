@@ -486,8 +486,12 @@ func (c *httpClient) ListSessions() (*types.SessionListResponse, error) {
 }
 
 // CreateSession creates a new session.
-func (c *httpClient) CreateSession(name string) (*types.Session, error) {
-	result, err := c.callAPI(context.Background(), "session.create", map[string]string{"name": name})
+func (c *httpClient) CreateSession(name string, cwd string) (*types.Session, error) {
+	params := map[string]any{"name": name}
+	if cwd != "" {
+		params["detection_context"] = map[string]string{"cwd": cwd}
+	}
+	result, err := c.callAPI(context.Background(), "session.create", params)
 	if err != nil {
 		return nil, err
 	}

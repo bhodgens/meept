@@ -10,7 +10,7 @@ import (
 // It allows transport.Client or any other implementation to be used.
 type SessionClient interface {
 	GetMostRecentSession() (*types.Session, error)
-	CreateSession(name string) (*types.Session, error)
+	CreateSession(name string, cwd string) (*types.Session, error)
 	ListSessions() (*types.SessionListResponse, error)
 	DeleteSession(sessionID string) error
 	UpdateSessionDescription(sessionID, description string) error
@@ -65,7 +65,7 @@ func (s *SessionManager) LoadOrCreateSession(ctx context.Context, sessionName st
 	resp, err := s.client.GetMostRecentSession()
 	if err != nil {
 		// No sessions exist, create a new one
-		session, err := s.client.CreateSession(s.defaultName)
+		session, err := s.client.CreateSession(s.defaultName, "")
 		if err != nil {
 			return err
 		}
@@ -87,8 +87,8 @@ func (s *SessionManager) ListSessions(ctx context.Context) ([]types.Session, err
 }
 
 // CreateSession creates a new session with the given name.
-func (s *SessionManager) CreateSession(ctx context.Context, name string) error {
-	session, err := s.client.CreateSession(name)
+func (s *SessionManager) CreateSession(ctx context.Context, name string, cwd string) error {
+	session, err := s.client.CreateSession(name, cwd)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func (s *SessionManager) switchSession(ctx context.Context, identifier string) e
 	}
 
 	// Not found, create a new session with this name
-	session, err := s.client.CreateSession(identifier)
+	session, err := s.client.CreateSession(identifier, "")
 	if err != nil {
 		return err
 	}

@@ -42,7 +42,7 @@ type Client interface {
 
 	// Session methods
 	ListSessions() (*types.SessionListResponse, error)
-	CreateSession(name string) (*types.Session, error)
+	CreateSession(name string, cwd string) (*types.Session, error)
 	AttachSession(sessionID, clientID string) error
 	DetachSession(sessionID, clientID string) error
 	GetMostRecentSession() (*types.Session, error)

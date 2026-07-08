@@ -18,6 +18,7 @@ import (
 var (
 	// Global flags
 	socketPath    string
+	rootCwd       string  // working directory for session
 	stateDir      string
 	debugFile     string // Empty = no debug, "-" = stderr, "filename" = file
 	transportFlag string // "rpc" or "http"
@@ -109,18 +110,39 @@ Analytics:
 		// root.RunE delegates to runChat to preserve `meept --project X` style
 		// flags without requiring `meept chat`. The `chat` subcommand exists for
 		// explicit invocation and shares the same handler.
-		RunE:          runChat,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Detect `meept /path/to/dir` syntax - if first arg looks like a path
+			if len(args) == 1 {
+				potentialPath := args[0]
+				// Check if it's an absolute path or starts with ~ or .
+				if len(potentialPath) > 0 && (potentialPath[0] == '/' || potentialPath[0] == '~' || potentialPath[0] == '.') {
+					// Check if it's a valid directory
+					if info, err := os.Stat(potentialPath); err == nil && info.IsDir() {
+						// It's a directory, use it as --cwd
+						if err := cmd.PersistentFlags().Set("cwd", potentialPath); err != nil {
+							return fmt.Errorf("failed to set cwd: %w", err)
+						}
+					}
+				}
+			}
+			return runChat(cmd, args)
+		},
 	}
 
 	// Global flags
 	rootCmd.PersistentFlags().StringVarP(&socketPath, "socket", "s", defaultSocket, "Unix socket path (for RPC)")
 	rootCmd.PersistentFlags().StringVarP(&stateDir, "state-dir", "d", defaultStateDir, "State directory")
+	rootCmd.PersistentFlags().StringVar(&rootCwd, "cwd", "", "set working directory for session")
 	rootCmd.PersistentFlags().StringVar(&debugFile, "debug", "", "Enable debug output (--debug or --debug=file, use '-' for stderr)")
 	rootCmd.PersistentFlags().StringVar(&transportFlag, "transport", "rpc", "Transport: rpc or http")
 	rootCmd.PersistentFlags().StringVar(&httpURLFlag, "http-url", "https://localhost:8081", "HTTP base URL for daemon")
 	rootCmd.PersistentFlags().Lookup("debug").NoOptDefVal = "debug.log"
 
 	// Add subcommands
+	// Pass rootCwd to chat command if set
+	if rootCwd != "" {
+		chatCwd = rootCwd
+	}
 	rootCmd.AddCommand(newChatCmd())
 	rootCmd.AddCommand(newStatusCmd())
 	rootCmd.AddCommand(newDaemonCmd())

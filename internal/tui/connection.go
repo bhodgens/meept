@@ -24,7 +24,7 @@ type DaemonClient interface {
 	QueryMemory(query string, limit int) (*types.MemoryQueryResponse, error)
 	GetRecentMemories(limit int) (*types.MemoryQueryResponse, error)
 	ListWorkers() (*types.WorkerListResponse, error)
-	CreateSession(name string) (*types.Session, error)
+	CreateSession(name string, cwd string) (*types.Session, error)
 	ListSessions() (*types.SessionListResponse, error)
 	AttachSession(sessionID, clientID string) error
 	DetachSession(sessionID, clientID string) error

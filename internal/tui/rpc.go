@@ -488,8 +488,11 @@ func (c *RPCClient) ListWorkers() (*types.WorkerListResponse, error) {
 }
 
 // CreateSession creates a new session.
-func (c *RPCClient) CreateSession(name string) (*types.Session, error) {
+func (c *RPCClient) CreateSession(name string, cwd string) (*types.Session, error) {
 	params := map[string]any{ParamName: name}
+	if cwd != "" {
+		params["detection_context"] = map[string]string{"cwd": cwd}
+	}
 	result, err := c.Call("session.create", params)
 	if err != nil {
 		return nil, err

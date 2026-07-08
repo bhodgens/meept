@@ -331,8 +331,12 @@ func (c *SDKClient) ListSessions() (*types.SessionListResponse, error) {
 	return &resp, nil
 }
 
-func (c *SDKClient) CreateSession(name string) (*types.Session, error) {
-	result, err := c.callAPI("session.create", map[string]string{"name": name})
+func (c *SDKClient) CreateSession(name string, cwd string) (*types.Session, error) {
+	params := map[string]any{"name": name}
+	if cwd != "" {
+		params["detection_context"] = map[string]string{"cwd": cwd}
+	}
+	result, err := c.callAPI("session.create", params)
 	if err != nil {
 		return nil, err
 	}

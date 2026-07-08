@@ -125,7 +125,7 @@ func (t *TUI) setupMenuCallbacks() {
 			t.scrollback = t.scrollback[:0]
 			if ctx := t.client; ctx != nil {
 				name := t.sessionMgr.GetSessionName() + " (copy)"
-				if sess, err := ctx.CreateSession(name); err == nil {
+				if sess, err := ctx.CreateSession(name, ""); err == nil {
 					t.sessionMgr.SetSession(sess)
 					t.prompt.SetSessionName(sess.Name)
 				}

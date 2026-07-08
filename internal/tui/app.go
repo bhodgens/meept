@@ -140,6 +140,11 @@ type App struct {
 	// Current session
 	currentSession *types.Session
 
+	// Project prompt state for legacy sessions
+	projectPromptSessionID   string
+	projectPromptDefaultPath string
+	showProjectPrompt        bool
+
 	// Current project
 	currentProjectID     string
 	currentProjectName   string
@@ -224,7 +229,7 @@ func DefaultKeyMap() KeyMap {
 }
 
 // NewApp creates a new TUI application.
-func NewApp(socketPath string) *App {
+func NewApp(socketPath string, cwd string) *App {
 	rpc := NewRPCClient(socketPath)
 	// Separate RPC client for event stream polling so it doesn't block
 	// on the main client's callMu while a Chat call is in-flight
@@ -235,7 +240,16 @@ func NewApp(socketPath string) *App {
 	clientConfig, clientConfigPath := LoadClientConfigPath()
 
 	// Get current working directory for display
-	projectDir, _ := os.Getwd()
+	var projectDir string
+	if cwd != "" {
+		projectDir = cwd
+	} else {
+		var err error
+		projectDir, err = os.Getwd()
+		if err != nil {
+			projectDir = "." // fallback to current directory
+		}
+	}
 
 	// Create input behavior config from client config
 	inputConfig := models.InputBehaviorConfig{
@@ -505,7 +519,7 @@ func (a *App) loadSession() tea.Msg {
 	}
 
 	// Fall back to creating a new session (same logic as SessionManager would do)
-	session, err := a.rpc.CreateSession(a.clientConfig.Session.DefaultName)
+	session, err := a.rpc.CreateSession(a.clientConfig.Session.DefaultName, a.projectDir)
 	if err != nil {
 		return SessionLoadedMsg{Session: nil, Err: err, IsNew: false}
 	}
@@ -944,6 +958,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.statusMessage = fmt.Sprintf("session error: %v", msg.Err)
 			a.statusMessageTime = time.Now()
 		} else if msg.Session != nil {
+			// Check if session lacks project binding (legacy session)
+			if !msg.IsNew && msg.Session.ProjectPath == "" && msg.Session.DetectionContext == nil {
+				// Show project prompt for legacy session
+				cwd, _ := os.Getwd()
+				a.projectPromptSessionID = msg.Session.ID
+				a.projectPromptDefaultPath = cwd
+				a.showProjectPrompt = true
+				a.statusMessage = "Session has no project bound - press P to pick project"
+				a.statusMessageTime = time.Now()
+			}
+			
 			a.currentSession = msg.Session
 			// Wire up session ID for tasks FilterMine feature
 			a.tasks.SetCurrentSession(msg.Session.ID)
@@ -2037,7 +2062,7 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // createSession creates a new session via SessionManager.
 func (a *App) createSession(name string) tea.Cmd {
 	return func() tea.Msg {
-		err := a.sessionMgr.CreateSession(context.TODO(), name)
+		err := a.sessionMgr.CreateSession(context.TODO(), name, a.projectDir)
 		if err != nil {
 			return SessionLoadedMsg{Session: nil, Err: err}
 		}

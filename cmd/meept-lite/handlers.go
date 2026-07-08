@@ -169,7 +169,7 @@ func (h *CommandHandler) handleNew(ctx context.Context) {
 	// Create a new session on the daemon side
 	if ctx != nil {
 		name := h.tui.sessionMgr.GetSessionName() + " (copy)"
-		sess, err := h.tui.client.CreateSession(name)
+		sess, err := h.tui.client.CreateSession(name, "")
 		if err == nil {
 			h.tui.sessionMgr.SetSession(sess)
 		}
@@ -330,7 +330,7 @@ func (h *CommandHandler) handleSessionCreate(args []string) {
 		return
 	}
 	name := strings.Join(args, " ")
-	sess, err := h.tui.client.CreateSession(name)
+	sess, err := h.tui.client.CreateSession(name, "")
 	if err != nil {
 		h.addError(err)
 		return

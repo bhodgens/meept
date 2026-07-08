@@ -22,6 +22,7 @@ var (
 	chatProject   string
 	chatNoFence   bool
 	chatSessionID string // target specific session by ID
+	chatCwd       string // working directory for session
 )
 
 func newChatCmd() *cobra.Command {
@@ -48,6 +49,7 @@ Examples:
 	cmd.Flags().StringVar(&chatProject, "project", "", "bind session to named project")
 	cmd.Flags().BoolVar(&chatNoFence, "nofence", false, "disable path fencing for this session")
 	cmd.Flags().StringVar(&chatSessionID, "session", "", "target specific session by ID")
+	cmd.Flags().StringVar(&chatCwd, "cwd", "", "set working directory for session")
 
 	return cmd
 }
@@ -114,7 +116,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 	}
 
 	// CASE 4: No args, no --session - open TUI to most recent
-	return runTUI()
+	return runTUI(chatCwd)
 }
 
 // getOrCreateOneshotSession finds the oneshot_responses session or creates it.
@@ -196,16 +198,16 @@ func chatWithSession(client transport.Client, sessionID, message string) error {
 func openTUIToSession(sessionID string) error {
 	// TODO: Extend TUI to accept target session ID
 	fmt.Fprintf(os.Stderr, "Note: TUI session targeting not yet implemented, opening to most recent\n")
-	return runTUI()
+	return runTUI(chatCwd)
 }
 
-func runTUI() error {
+func runTUI(cwd string) error {
 	// The TUI requires RPC for event streaming and real-time updates.
 	// If --transport=http is set, warn and fall back to RPC.
 	if transportFlag == "http" {
 		return fmt.Errorf("TUI does not yet support --transport=http; use the default RPC transport or the Flutter web UI")
 	}
-	app := tui.NewApp(getSocketPath())
+	app := tui.NewApp(getSocketPath(), cwd)
 	p := tea.NewProgram(app)
 	_, err := p.Run()
 	return err
