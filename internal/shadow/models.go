@@ -78,6 +78,11 @@ type ShadowRecord struct {
 	Preference       Preference `json:"preference"`
 	Domain           Domain     `json:"domain"`
 	TaskType         TaskType   `json:"task_type"`
+	// RoutingPath captures the skill or alias context that routed this interaction
+	// (e.g. "skill:coding" or "alias:default"). Populated from agent-loop context
+	// at capture time. Not persisted in shadow_records — flows transiently into
+	// PreferencePair via NewPreferencePair.
+	RoutingPath      string     `json:"routing_path,omitempty"`
 	IsHighQuality    bool       `json:"is_high_quality"`
 }
 
@@ -125,6 +130,9 @@ type PreferencePair struct {
 	RejectedResponse string     `json:"rejected_response"`
 	RejectedModel    string     `json:"rejected_model"`
 	Margin           float64    `json:"margin"`
+	Domain           Domain     `json:"domain,omitempty"`
+	TaskType         TaskType   `json:"task_type,omitempty"`
+	RoutingPath      string     `json:"routing_path,omitempty"` // alias/skill context from the original decision
 	ExportedAt       *time.Time `json:"exported_at,omitempty"`
 }
 
@@ -134,6 +142,9 @@ func NewPreferencePair(record *ShadowRecord, studentScore, teacherScore float64)
 		ID:             uuid.New().String(),
 		SourceRecordID: record.ID,
 		PromptMessages: record.Messages,
+		Domain:         record.Domain,
+		TaskType:       record.TaskType,
+		RoutingPath:    record.RoutingPath,
 	}
 
 	margin := teacherScore - studentScore

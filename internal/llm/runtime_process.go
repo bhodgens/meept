@@ -91,6 +91,9 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
 
+	// Wait for process exit in background to prevent zombies
+	p.waitBackground()
+
 	return nil
 }
 
@@ -193,4 +196,20 @@ func (p *RuntimeProcess) readPIDFile() (int, error) {
 		return 0, err
 	}
 	return strconv.Atoi(string(data))
+}
+
+// waitBackground waits for the process to exit and reaps it to prevent zombies
+func (p *RuntimeProcess) waitBackground() {
+	go func() {
+		err := p.cmd.Wait()
+		exitCode := -1
+		if p.cmd != nil && p.cmd.ProcessState != nil {
+			exitCode = p.cmd.ProcessState.ExitCode()
+		}
+		fmt.Fprintf(os.Stderr, "MLX process exited: exitCode=%d err=%v\n", exitCode, err)
+		p.mu.Lock()
+		p.pid = 0
+		p.cmd = nil
+		p.mu.Unlock()
+	}()
 }

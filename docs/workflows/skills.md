@@ -115,7 +115,7 @@ Agent Loop (inject skills into prompt)
 UsageTracker (SQLite: inject_count, outcomes)
     │
     ▼ scheduled (6h default)
-Evolver (3 passes: refine, promote, prune)
+Evolver (4 passes: refine, promote, prune, fill_gap)
     │
     ▼ each proposal
 Verifier (4-dimension LLM rubric gate)
@@ -136,15 +136,27 @@ Effectiveness ratio: `positive_count / inject_count`.
 
 ### Evolver Cycle
 
-Runs every 6 hours (configurable). Three passes:
+Runs every 6 hours (configurable). Four passes:
 
 | Pass | What it does | Threshold |
 |------|-------------|-----------|
 | **A: Refine** | LLM-driven improvement of existing skills based on usage evidence | inject_count >= 5 |
 | **B: Promote** | Promotes learned patterns to new skills | UseCount >= 5, Confidence >= 0.7, stable >= 14d |
 | **C: Prune** | Archives skills that actively hurt | inject_count >= 10, effectiveness < 0.2 |
+| **D: Fill Gap** | Proposes new skills for queries that recurred without matching anything | count >= 5, best_score < 0.5 |
 
 Pattern-to-skill promotion checks TF-IDF similarity via `CapabilityIndex.Match` (threshold 0.7) to avoid duplicates. Name collisions are handled by `dedupePatternSkillName` which appends numeric suffixes.
+
+### Pass D: Gap Analysis
+
+Beyond refining, promoting, and pruning skills based on what *exists*, Meept also surfaces what's *missing*. The capability index records every user or skill-discovery query whose best match score fell below 0.5. Queries that recur at least 5 times become new-skill candidates:
+
+```bash
+meept skills gaps          # list current low-match queries
+meept skills evolve        # run all four passes (A/B/C/D)
+```
+
+Pass D proposals pass through the same verifier as the other passes.
 
 ### Verifier Gate
 

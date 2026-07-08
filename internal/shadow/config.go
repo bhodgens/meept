@@ -153,6 +153,14 @@ type AdaptersConfig struct {
 	AdapterDir     string     `toml:"adapter_dir"`
 	LoRA           LoRAConfig `toml:"lora"`
 	DPO            DPOConfig  `toml:"dpo"`
+
+	// HotSwapEnabled controls whether activated adapters are wired into the
+	// serving LLM client. When false, ActivateAdapter only flips the DB flag.
+	HotSwapEnabled bool `toml:"hot_swap_enabled"`
+
+	// EvalThreshold is the minimum eval score a TrainingRun must achieve
+	// before its adapter can be activated. 0.0 disables the gate.
+	EvalThreshold float64 `toml:"eval_threshold"`
 }
 
 // DefaultConfig returns a configuration with sensible defaults.
@@ -218,6 +226,8 @@ func DefaultConfig() *Config {
 			TrainThreshold: 500,
 			TrainSchedule:  "",
 			AdapterDir:     "~/.meept/shadow/adapters",
+			HotSwapEnabled: true,
+			EvalThreshold:  0.7,
 			LoRA: LoRAConfig{
 				Rank:                 16,
 				Alpha:                32,

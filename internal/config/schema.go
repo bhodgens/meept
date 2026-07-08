@@ -1214,6 +1214,7 @@ type SkillsEvolverConfig struct {
 	MinEffectiveness             float64       `json:"min_effectiveness"              toml:"min_effectiveness"`                // Prune threshold; default 0.2
 	PatternPromotionConfidence   float64       `json:"pattern_promotion_confidence"   toml:"pattern_promotion_confidence"`     // Default 0.7
 	PatternPromotionUseCount     int           `json:"pattern_promotion_use_count"    toml:"pattern_promotion_use_count"`      // Default 5
+	MinProposalConfidence        float64       `json:"min_proposal_confidence"        toml:"min_proposal_confidence"`          // Default 0.7; reflection proposals below this confidence are dropped before reaching the verifier
 	AutoApply                    bool          `json:"auto_apply"                     toml:"auto_apply"`                       // Default false (requires plan approval)
 	RunOnStart                   bool          `json:"run_on_start"                   toml:"run_on_start"`                     // Default false; when true, scheduler runs one cycle immediately on Start (noisy on daemon startup)
 }
@@ -1380,6 +1381,15 @@ type ShadowAdaptersConfig struct {
 	AdapterDir     string           `json:"adapter_dir"     toml:"adapter_dir"`
 	LoRA           ShadowLoRAConfig `json:"lora"            toml:"lora"`
 	DPO            ShadowDPOConfig  `json:"dpo"             toml:"dpo"`
+
+	// HotSwapEnabled controls whether activated adapters are hot-swapped into
+	// the serving LLM client via the Ollama activator + agent-loop callback.
+	// When false, ActivateAdapter only flips the DB flag. Default true.
+	HotSwapEnabled bool `json:"hot_swap_enabled" toml:"hot_swap_enabled"`
+
+	// EvalThreshold is the minimum eval score a TrainingRun must achieve
+	// before its adapter can be activated. 0.0 disables the gate. Default 0.7.
+	EvalThreshold float64 `json:"eval_threshold" toml:"eval_threshold"`
 }
 
 // ShadowLoRAConfig configures LoRA training parameters.
@@ -1715,6 +1725,7 @@ func DefaultConfig() *Config {
 				MinEffectiveness:           0.2,
 				PatternPromotionConfidence: 0.7,
 				PatternPromotionUseCount:   5,
+				MinProposalConfidence:      0.7,
 				AutoApply:                  false,
 				RunOnStart:                 false,
 			},
@@ -1835,6 +1846,8 @@ func DefaultConfig() *Config {
 				TrainThreshold: 500,
 				TrainSchedule:  "",
 				AdapterDir:     "~/.meept/shadow/adapters",
+				HotSwapEnabled: true,
+				EvalThreshold:  0.7,
 				LoRA: ShadowLoRAConfig{
 					Rank:                 16,
 					Alpha:                32,

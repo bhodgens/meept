@@ -5,11 +5,29 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
+	"os"
 	"sync"
 	"time"
 
 	docker "github.com/fsouza/go-dockerclient"
 )
+
+// dockerHostFromEnv returns the Docker host from DOCKER_HOST, or the Unix
+// socket default. This mirrors what docker.NewClientFromEnv does internally.
+func dockerHostFromEnv() string {
+	h := os.Getenv("DOCKER_HOST")
+	if h == "" {
+		return "unix:///var/run/docker.sock"
+	}
+	return h
+}
+
+// socketPath extracts the Unix socket path from a Docker host URL.
+func socketPath(host string) string {
+	return host[len("unix://"):]
+}
 
 // DockerBackend executes commands inside Docker containers.
 type DockerBackend struct {
@@ -33,9 +51,25 @@ func NewDockerBackend(cfg DockerConfig) (*DockerBackend, error) {
 
 // newDockerBackend creates a new Docker execution backend with a persistent container.
 func newDockerBackend(cfg DockerConfig, image string, logger *slog.Logger) (*DockerBackend, error) {
-	client, err := docker.NewClientFromEnv()
+	dockerHost := dockerHostFromEnv()
+	client, err := docker.NewClient(dockerHost)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
+	}
+
+	// SkipServerVersionCheck avoids an internal GET /version call that
+	// doesn't accept a context and will hang on a slow/unresponsive socket.
+	client.SkipServerVersionCheck = true
+	// Give the ping a short timeout so a socket that accepts but never
+	// responds doesn't block forever.
+	client.HTTPClient = &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				d := net.Dialer{Timeout: 5 * time.Second}
+				return d.DialContext(ctx, "unix", socketPath(dockerHost))
+			},
+		},
 	}
 
 	// Verify Docker daemon is accessible

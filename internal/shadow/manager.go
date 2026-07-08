@@ -36,6 +36,10 @@ type Manager struct {
 	autoTrainStop chan struct{}
 	autoTrainDone chan struct{}
 
+	// Hot-swap coordinator wires shadow adapter activation into the
+	// serving LLM client via OllamaActivator + HotSwapCallback.
+	hotSwap hotSwapCoordinator
+
 	// Synchronization
 	mu sync.RWMutex
 	wg sync.WaitGroup
@@ -250,7 +254,9 @@ func (m *Manager) ProcessRecord(ctx context.Context, record *ShadowRecord) error
 
 // CaptureInteraction captures an LLM interaction for shadow training.
 // This is the primary entry point for data collection from the agent loop.
-func (m *Manager) CaptureInteraction(ctx context.Context, conversationID string, messages []llm.ChatMessage, response *llm.Response, modelID string) {
+// routingPath carries the skill/alias context that routed this interaction
+// (e.g. "skill:coding" or "alias:default"); pass "" when unknown.
+func (m *Manager) CaptureInteraction(ctx context.Context, conversationID string, messages []llm.ChatMessage, response *llm.Response, modelID, routingPath string) {
 	if !m.IsEnabled() || m.trainingStore == nil {
 		return
 	}
@@ -283,6 +289,7 @@ func (m *Manager) CaptureInteraction(ctx context.Context, conversationID string,
 	record.StudentTokensOut = response.Usage.CompletionTokens
 	record.Domain = domain
 	record.TaskType = taskType
+	record.RoutingPath = routingPath
 
 	switch m.config.Shadowing.Mode {
 	case ModeSync:
@@ -530,12 +537,76 @@ func (m *Manager) RegisterAdapter(ctx context.Context, adapter *Adapter) error {
 	return m.adaptersStore.SaveAdapter(ctx, adapter)
 }
 
-// ActivateAdapter activates an adapter.
+// ActivateAdapter activates an adapter after passing the eval gate.
+// The gate prevents deploying adapters whose TrainingRun scored below the
+// configured EvalThreshold or was trained on too few records.
 func (m *Manager) ActivateAdapter(ctx context.Context, id string) error {
 	if m.adaptersStore == nil {
 		return fmt.Errorf("adapters store not initialized")
 	}
+
+	// Look up the adapter to find its model base.
+	adapter, err := m.adaptersStore.GetAdapter(ctx, id)
+	if err != nil {
+		return fmt.Errorf("activate adapter: %w", err)
+	}
+
+	// Find the most recent training run for this adapter.
+	runs, err := m.adaptersStore.ListTrainingRuns(ctx, adapter.ID)
+	if err != nil {
+		return fmt.Errorf("list training runs: %w", err)
+	}
+	if len(runs) == 0 {
+		return fmt.Errorf("activate adapter: no training run on record")
+	}
+	latest := runs[0] // ListTrainingRuns returns newest-first
+
+	// Gate.
+	gate := NewEvalGate(m.config.Adapters.EvalThreshold)
+	if err := gate.Check(ctx, latest); err != nil {
+		return fmt.Errorf("activate adapter: %w", err)
+	}
+
 	return m.adaptersStore.SetActiveAdapter(ctx, id)
+}
+
+// SetOllamaActivator registers the Ollama adapter used for hot-swapping.
+// Nil guard per CLAUDE.md setter rule.
+func (m *Manager) SetOllamaActivator(a OllamaActivator) {
+	if a == nil {
+		return
+	}
+	m.hotSwap.activator = a
+}
+
+// SetHotSwapCallback registers the callback fired on successful hot-swap.
+// The callback receives the baked model name (without provider prefix); the
+// daemon wiring is responsible for prepending the provider (e.g. "ollama/")
+// before passing it to agentLoop.SetModelOverride.
+func (m *Manager) SetHotSwapCallback(cb HotSwapCallback) {
+	if cb == nil {
+		return
+	}
+	m.hotSwap.callback = cb
+}
+
+// HotSwap activates an adapter end-to-end: bakes it into an Ollama model
+// (if an activator is registered), notifies the LLM client via the
+// registered callback, and flips the DB active flag (subject to the eval
+// gate). Returns an error if hot-swap is disabled in config or the
+// activation/gate fails.
+func (m *Manager) HotSwap(ctx context.Context, adapterID string) error {
+	if !m.config.Adapters.HotSwapEnabled {
+		return fmt.Errorf("hot-swap disabled in config")
+	}
+	if m.adaptersStore == nil {
+		return fmt.Errorf("adapters store not initialized")
+	}
+	adapter, err := m.adaptersStore.GetAdapter(ctx, adapterID)
+	if err != nil {
+		return fmt.Errorf("get adapter: %w", err)
+	}
+	return m.hotSwap.Activate(ctx, m, adapter)
 }
 
 // GetActiveAdapter returns the active adapter for a base model.
@@ -568,7 +639,9 @@ func (m *Manager) ResetMetrics() {
 
 // CaptureToolInteraction captures a tool-use interaction for shadow training.
 // This is called when the LLM returns tool calls, capturing the intermediate step.
-func (m *Manager) CaptureToolInteraction(ctx context.Context, conversationID string, messages []llm.ChatMessage, response *llm.Response, modelID string) {
+// routingPath carries the skill/alias context that routed this interaction
+// (e.g. "skill:coding" or "alias:default"); pass "" when unknown.
+func (m *Manager) CaptureToolInteraction(ctx context.Context, conversationID string, messages []llm.ChatMessage, response *llm.Response, modelID, routingPath string) {
 	if !m.IsEnabled() || m.trainingStore == nil {
 		return
 	}
@@ -612,6 +685,7 @@ func (m *Manager) CaptureToolInteraction(ctx context.Context, conversationID str
 	record.StudentTokensOut = response.Usage.CompletionTokens
 	record.Domain = domain
 	record.TaskType = taskType
+	record.RoutingPath = routingPath
 
 	// For tool-use interactions, we typically don't get teacher responses
 	// since the exact tool choice is context-dependent. Just process the record.

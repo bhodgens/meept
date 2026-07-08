@@ -34,3 +34,4 @@ Feature specifications describing how each Meept subsystem works, with configura
 | Feature | Description |
 |---------|-------------|
 | [Self-Improvement](self-improvement.md) | Automated issue detection and code fixing |
+| [Routing Decisions](routing-decisions.md) | Persistent log of every LLM model-resolution decision |

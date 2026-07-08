@@ -102,3 +102,30 @@ backup_before_changes = true
 - Changes expire if not approved
 - Notification sent to user
 - Option to extend approval window
+
+## Closed-Loop Skill and Model Improvement
+
+In addition to the issue-detection flow above, Meept runs two continuous improvement loops:
+
+### Skill Evolution Loop
+
+Scheduled every 6 hours (configurable). Four passes:
+
+1. **Pass A (Refine)** — Improves existing skills based on usage evidence and reflection proposals.
+2. **Pass B (Promote)** — Promotes learned patterns meeting thresholds to new skills.
+3. **Pass C (Prune)** — Archives low-performing skills.
+4. **Pass D (Fill Gap)** — Mines low-match queries from the capability index; proposes new skills for unmet recurring needs.
+
+Every proposal passes the four-dimension verifier (`grounded_in_evidence`, `preserves_existing_value`, `specificity_and_reusability`, `safe_to_publish`) before being applied or planned.
+
+### Shadow Training Loop
+
+Continuous. Captures production LLM traffic, scores against a teacher model, and produces LoRA training pairs. Trained adapters pass an eval gate before being hot-swapped into the serving alias. See [Shadow Training](./shadow-training.md).
+
+### Reflection Queue
+
+Per-turn reflection (`internal/agent/reflection_collector.go`) writes proposals to `.meept/improvements.md`. The skill evolver drains this queue at the start of every Pass A cycle, so reflection proposals feed directly into skill refinement without manual review.
+
+### Routing Decision Log
+
+Every model-resolution decision is persisted to `<data_dir>/routing.db`. See [Routing Decisions](./routing-decisions.md).

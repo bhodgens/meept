@@ -26,6 +26,7 @@ func newSkillsCmd() *cobra.Command {
 	cmd.AddCommand(newSkillsRestoreCmd())
 	cmd.AddCommand(newSkillsHistoryCmd())
 	cmd.AddCommand(newSkillsEvolveCmd())
+	cmd.AddCommand(newSkillsGapsCmd())
 
 	return cmd
 }
@@ -672,6 +673,78 @@ rather than applied directly.`,
 				}
 				w.Flush()
 			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "output as JSON")
+	return cmd
+}
+
+func newSkillsGapsCmd() *cobra.Command {
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "gaps",
+		Short: "show skill coverage gaps (low-match queries)",
+		Long: `Show user queries that recurred without matching any existing skill
+above the capability-index confidence threshold. These are coverage gaps —
+candidates for new skill creation via Pass D gap analysis.
+
+Examples:
+  meept skills gaps
+  meept skills gaps --json
+`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer c.Close()
+
+			rawResult, err := c.Call("skills.gaps", nil)
+			if err != nil {
+				return fmt.Errorf("skills.gaps failed: %w", err)
+			}
+
+			var resultMap map[string]any
+			if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+				return fmt.Errorf("failed to parse response: %w", err)
+			}
+
+			if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
+				return fmt.Errorf("%s", errMsg)
+			}
+
+			if outputJSON {
+				output, err := json.MarshalIndent(resultMap, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal JSON: %w", err)
+				}
+				fmt.Println(string(output))
+				return nil
+			}
+
+			gaps, ok := resultMap["gaps"].([]any)
+			if !ok || len(gaps) == 0 {
+				fmt.Println("no coverage gaps detected")
+				return nil
+			}
+
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "COUNT\tBEST\tQUERY")
+			for _, g := range gaps {
+				gap, ok := g.(map[string]any)
+				if !ok {
+					continue
+				}
+				count := gap["count"]
+				best := gap["best_score"]
+				query := getStringOr(gap, "query", "?")
+				fmt.Fprintf(w, "%v\t%v\t%s\n", count, best, query)
+			}
+			w.Flush()
 			return nil
 		},
 	}

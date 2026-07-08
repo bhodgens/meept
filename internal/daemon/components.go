@@ -54,6 +54,7 @@ import (
 	"github.com/caimlas/meept/internal/services"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/shadow"
+	"github.com/caimlas/meept/internal/shadow/adapters"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/skills/lifecycle"
 	"github.com/caimlas/meept/internal/task"
@@ -163,6 +164,10 @@ type Components struct {
 
 	// Pricing syncer for dynamic model pricing
 	PricingSyncer *llm.PricingSyncer
+
+	// RoutingLogger persists LLM routing decisions for training-data mining
+	// (Phase 2 of self-improvement loop closure).
+	RoutingLogger *llm.RoutingLogger
 
 	// Local LLM runtime lifecycle manager
 	ContainerManager *llm.RuntimeManager
@@ -475,6 +480,24 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			c.LLMResolver.SetPricingSyncer(pricingSyncer)
 		}
 
+		// Construct routing decision logger and wire it into the resolver.
+		// Decisions are persisted to SQLite for later mining (Phase 4
+		// student-learns-routing). Best-effort: if the logger fails to
+		// construct, the resolver continues without persistence.
+		routingLogger, rlErr := llm.NewRoutingLogger(
+			filepath.Join(cfg.Daemon.DataDir, "routing.db"),
+			logger.With("component", "routing-log"),
+		)
+		if rlErr != nil {
+			logger.Warn("Failed to create routing decision logger", "error", rlErr)
+		} else {
+			c.RoutingLogger = routingLogger
+			if c.LLMResolver != nil {
+				c.LLMResolver.SetRoutingLogger(routingLogger)
+			}
+			logger.Debug("Routing decision logger initialized")
+		}
+
 		// Create auxiliary LLM clients for classifier and summarizer
 		// Use resolver for alias-based model selection (enables fallback rotation)
 		classifierRef := c.ModelsConfig.ClassifierModel
@@ -545,6 +568,23 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				"data_dir", shadowCfg.DataDir,
 				"teacher_model", shadowCfg.Teacher.Model,
 			)
+
+			// Wire Ollama activator for hot-swap. The activator wraps
+			// OllamaAdapter.CreateModelWithAdapter (which bakes LoRA weights
+			// into a new Ollama model) behind the shadow.OllamaActivator
+			// interface so the shadow manager doesn't depend on the
+			// concrete adapters package.
+			if shadowCfg.Adapters.Enabled && shadowCfg.Adapters.HotSwapEnabled {
+				ollamaAdapter := adapters.NewOllamaAdapter(
+					shadowCfg.Adapters.OllamaEndpoint, nil,
+				)
+				shadowMgr.SetOllamaActivator(&shadowOllamaActivator{
+					adapter: ollamaAdapter,
+				})
+				logger.Info("Shadow hot-swap Ollama activator wired",
+					"endpoint", shadowCfg.Adapters.OllamaEndpoint,
+				)
+			}
 		}
 	}
 
@@ -667,6 +707,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		inUse := llm.BuildModelsInUse(agentRefs, slots, lifecycleCfg.ModelAliases, lifecycleCfg.DisabledProviders)
 		if len(inUse) > 0 {
 			c.ContainerManager.SetModelsInUse(inUse)
+		}
+		// Start local LLM runtimes
+		if err := c.ContainerManager.StartAll(ctx); err != nil {
+			logger.Error("Failed to start LLM runtimes", "error", err)
+		} else {
+			logger.Info("LLM runtimes started")
 		}
 	}
 
@@ -944,6 +990,23 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Wire context firewall settings from LLM config
 	c.AgentLoop.SetContextFirewallConfig(cfg.LLM.ContextFirewall)
 	c.AgentLoop.SetCompactionConfig(cfg.Compaction)
+
+	// Wire shadow hot-swap callback so that successful adapter activations
+	// propagate the baked model ref into the agent loop's modelOverride.
+	// The callback receives the bare baked name (e.g. "qwen2.5:7b-shadow-")
+	// and we prepend the Ollama provider prefix here, since the daemon
+	// knows which provider Ollama is registered under.
+	if c.ShadowManager != nil && cfg.Shadow.Enabled && cfg.Shadow.Adapters.HotSwapEnabled {
+		agentLoop := c.AgentLoop
+		c.ShadowManager.SetHotSwapCallback(func(bakedName string) {
+			bakedRef := shadowOllamaProviderID + "/" + bakedName
+			agentLoop.SetPersistentModelOverride(bakedRef)
+			logger.Info("shadow hot-swap activated",
+				"baked_ref", bakedRef,
+			)
+		})
+		logger.Info("Shadow hot-swap callback wired to agent loop")
+	}
 
 	// Note: RepoMap generator wiring to AgentLoop is deferred to after
 	// RepoMapGen creation (see below). The scheduler is also wired there.
@@ -3578,6 +3641,14 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		c.SummarizerClient.Close()
 	}
 
+	// Close routing decision logger (Phase 2 self-improvement loop).
+	if c.RoutingLogger != nil {
+		if err := c.RoutingLogger.Close(); err != nil {
+			c.Logger.Error("Failed to close routing logger", "error", err)
+			lastErr = err
+		}
+	}
+
 	if c.AgentRegistry != nil {
 		c.AgentRegistry.Close()
 	}
@@ -3961,6 +4032,24 @@ func createSecurityOrchestrator(cfg *config.Config, logger *slog.Logger) *intsec
 	return orch
 }
 
+// shadowOllamaProviderID is the provider name under which baked adapter models
+// are registered in Ollama. Used to construct "ollama/<baked-name>" refs that
+// the resolver can route to.
+const shadowOllamaProviderID = "ollama"
+
+// shadowOllamaActivator adapts *adapters.OllamaAdapter to the
+// shadow.OllamaActivator interface. OllamaAdapter.CreateModelWithAdapter has
+// the exact signature the interface wants, but a different method name; this
+// thin wrapper bridges that gap so the shadow package doesn't need to import
+// the adapters package.
+type shadowOllamaActivator struct {
+	adapter *adapters.OllamaAdapter
+}
+
+func (a *shadowOllamaActivator) ActivateAdapter(ctx context.Context, baseName, adapterName, adapterPath string) error {
+	return a.adapter.CreateModelWithAdapter(ctx, baseName, adapterName, adapterPath)
+}
+
 // convertShadowConfig converts config.ShadowConfig to shadow.Config.
 func convertShadowConfig(cfg config.ShadowConfig) *shadow.Config {
 	return &shadow.Config{
@@ -4024,6 +4113,8 @@ func convertShadowConfig(cfg config.ShadowConfig) *shadow.Config {
 			TrainThreshold: cfg.Adapters.TrainThreshold,
 			TrainSchedule:  cfg.Adapters.TrainSchedule,
 			AdapterDir:     cfg.Adapters.AdapterDir,
+			HotSwapEnabled: cfg.Adapters.HotSwapEnabled,
+			EvalThreshold:  cfg.Adapters.EvalThreshold,
 			LoRA: shadow.LoRAConfig{
 				Rank:                 cfg.Adapters.LoRA.Rank,
 				Alpha:                cfg.Adapters.LoRA.Alpha,
@@ -4663,6 +4754,10 @@ func (a *skillUsageTrackerAdapter) RecordOutcome(skillName string, outcome agent
 		lcOutcome = lifecycle.OutcomeNeutral
 	}
 	return a.tracker.RecordOutcome(skillName, lcOutcome, sessionID)
+}
+
+func (a *skillUsageTrackerAdapter) RecordLowMatchQuery(ctx context.Context, query string, bestScore float64) error {
+	return a.tracker.RecordLowMatchQuery(ctx, query, bestScore)
 }
 
 // learningPipelineAdapter wraps selfimprove.LearningPipeline to implement agent.LearningPipeline.
@@ -5338,6 +5433,21 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 			c.LLMClient,
 			logger.With("component", "skill-verifier"),
 		)
+		// Build evolver options. When the reflection collector is wired,
+		// bridge it to the evolver's ReflectionProposer interface via the
+		// reflectionProposerAdapter. This closes the self-improvement loop:
+		// per-turn reflection proposals queued by ReflectionCollector are
+		// drained at the start of each evolver cycle and routed through the
+		// verifier as skill creates/updates.
+		var evolverOpts []lifecycle.EvolverOption
+		if c.ReflectionCollector != nil {
+			evolverOpts = append(evolverOpts, lifecycle.WithReflectionProposer(
+				&reflectionProposerAdapter{rc: c.ReflectionCollector},
+			))
+			logger.Info("Skill evolver wired to reflection collector",
+				"component", "skill-evolver",
+			)
+		}
 		c.SkillEvolver = lifecycle.NewEvolver(
 			c.SkillUsageTracker,
 			c.LearningPipeline,
@@ -5349,6 +5459,7 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 			c.PlanManager,
 			cfg.Skills.Evolver,
 			logger,
+			evolverOpts...,
 		)
 		c.SkillEvolverSched = lifecycle.NewEvolverScheduler(
 			c.SkillEvolver,

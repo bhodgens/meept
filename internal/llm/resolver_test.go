@@ -1,8 +1,10 @@
 package llm
 
 import (
+	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -441,5 +443,148 @@ func TestResolver_FindCheapest_UsesLivePricing(t *testing.T) {
 	// glm-4.5-air should be cheapest due to live pricing
 	if cheapest.ModelID != "glm-4.5-air" {
 		t.Errorf("expected glm-4.5-air as cheapest with live pricing, got %s", cheapest.ModelID)
+	}
+}
+
+// TestResolver_RecordsDecisionsToRoutingLogger verifies that ResolveForAlias
+// emits a RoutingDecision to the attached RoutingLogger. The fixture uses the
+// real ProvidersConfig schema (internal/llm/providers.go): Providers is
+// map[string]ProviderConfig (value, not pointer), with API/Options/Models
+// fields and ModelDef entries.
+func TestResolver_RecordsDecisionsToRoutingLogger(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "routing.db")
+	rl, err := NewRoutingLogger(dbPath, nil)
+	if err != nil {
+		t.Fatalf("NewRoutingLogger: %v", err)
+	}
+	defer rl.Close()
+
+	cfg := &ProvidersConfig{
+		Model: "ollama/qwen2.5:7b",
+		Providers: map[string]ProviderConfig{
+			"ollama": {
+				API: "openai",
+				Options: ProviderOptionsConfig{
+					BaseURL: "http://localhost:11434/v1",
+					APIKey:  "dummy",
+				},
+				Models: map[string]ModelDef{
+					"qwen2.5:7b": {
+						Name:         "qwen2.5:7b",
+						Capabilities: []string{"chat"},
+						InputCost:    0.0,
+						OutputCost:   0.0,
+						ContextLimit: 32000,
+						MaxOutput:    4096,
+						Temperature:  0.7,
+					},
+				},
+			},
+		},
+		ModelAliases: map[string]ModelAliasEntry{
+			"default": {
+				Models:  []string{"ollama/qwen2.5:7b"},
+				Timeout: 30,
+			},
+		},
+	}
+	r := NewResolver(cfg, nil)
+	r.SetRoutingLogger(rl)
+
+	mc, err := r.ResolveForAlias("default")
+	if err != nil {
+		t.Fatalf("ResolveForAlias: %v", err)
+	}
+	if mc == nil {
+		t.Fatalf("expected non-nil model config")
+	}
+
+	got, err := rl.Recent(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("Recent: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 routing decision, got %d", len(got))
+	}
+	if got[0].ChosenModelID != "qwen2.5:7b" {
+		t.Errorf("expected chosen model qwen2.5:7b, got %q", got[0].ChosenModelID)
+	}
+	if got[0].Alias != "default" {
+		t.Errorf("expected alias 'default', got %q", got[0].Alias)
+	}
+	if got[0].Reason != "round_robin" {
+		t.Errorf("expected reason 'round_robin', got %q", got[0].Reason)
+	}
+}
+
+// TestResolver_RecordsDecisionsForSkill verifies that ResolveForSkill emits a
+// RoutingDecision when it escalates to a capability-matched model.
+func TestResolver_RecordsDecisionsForSkill(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "routing.db")
+	rl, err := NewRoutingLogger(dbPath, nil)
+	if err != nil {
+		t.Fatalf("NewRoutingLogger: %v", err)
+	}
+	defer rl.Close()
+
+	cfg := &ProvidersConfig{
+		Model: "ollama/qwen2.5:7b",
+		Providers: map[string]ProviderConfig{
+			"ollama": {
+				API: "openai",
+				Options: ProviderOptionsConfig{
+					BaseURL: "http://localhost:11434/v1",
+				},
+				Models: map[string]ModelDef{
+					"qwen2.5:7b": {
+						Name:         "qwen2.5:7b",
+						Capabilities: []string{"chat"},
+					},
+					"qwen2.5-coder:7b": {
+						Name:         "qwen2.5-coder:7b",
+						Capabilities: []string{"chat", "code"},
+					},
+				},
+			},
+		},
+	}
+	r := NewResolver(cfg, nil)
+	r.SetRoutingLogger(rl)
+
+	skill := &SkillRequirements{Name: "coding", Requires: []string{"code"}}
+	mc, err := r.ResolveForSkill(skill, nil)
+	if err != nil {
+		t.Fatalf("ResolveForSkill: %v", err)
+	}
+	if mc == nil || mc.ModelID != "qwen2.5-coder:7b" {
+		t.Fatalf("expected qwen2.5-coder:7b, got %v", mc)
+	}
+
+	got, err := rl.Recent(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("Recent: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 routing decision, got %d", len(got))
+	}
+	if got[0].ChosenModelID != "qwen2.5-coder:7b" {
+		t.Errorf("expected chosen model qwen2.5-coder:7b, got %q", got[0].ChosenModelID)
+	}
+	if got[0].Reason != "capability_escalation" {
+		t.Errorf("expected reason 'capability_escalation', got %q", got[0].Reason)
+	}
+	if got[0].Skill != "coding" {
+		t.Errorf("expected skill 'coding', got %q", got[0].Skill)
+	}
+}
+
+// TestResolver_SetRoutingLogger_NilGuard verifies the setter's nil guard
+// (CLAUDE.md typed-nil setter rule).
+func TestResolver_SetRoutingLogger_NilGuard(t *testing.T) {
+	cfg := createTestConfig()
+	r := NewResolver(cfg, nil)
+	r.SetRoutingLogger(nil)
+	if r.routingLogger != nil {
+		t.Error("expected routingLogger to remain nil after SetRoutingLogger(nil)")
 	}
 }

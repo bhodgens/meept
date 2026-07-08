@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 )
@@ -63,9 +64,13 @@ func (h *HealthChecker) checkOnce() {
 	wasHealthy := h.healthy
 	h.mu.RUnlock()
 
-	// Perform HTTP check outside the lock to avoid blocking IsHealthy() calls.
-	url := h.baseURL + h.config.HealthEndpoint
-	resp, err := h.client.Get(url)
+	// Construct health URL from server root, not API base URL.
+	// This handles baseURL like "http://host:port/v1" where health is at "/health".
+	healthURL := h.baseURL + h.config.HealthEndpoint
+	if parsed, err := url.Parse(h.baseURL); err == nil && parsed.Path != "" {
+		healthURL = fmt.Sprintf("%s://%s%s", parsed.Scheme, parsed.Host, h.config.HealthEndpoint)
+	}
+	resp, err := h.client.Get(healthURL)
 
 	// Read status code and close the body before acquiring the lock so that
 	// no I/O happens while the mutex is held (CLAUDE.md mutex-scope rule).

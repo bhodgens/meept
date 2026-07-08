@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -53,11 +54,12 @@ func (m *mockLLMChatter) SetResponse(resp string) {
 
 // stubUsageTracker implements UsageTracker for testing.
 type stubUsageTracker struct {
-	mu       sync.Mutex
-	allStats map[string]*UsageStats
-	low      []*UsageStats
-	injects  int
-	outcomes int
+	mu              sync.Mutex
+	allStats        map[string]*UsageStats
+	low             []*UsageStats
+	lowMatchQueries []LowMatchQuery
+	injects         int
+	outcomes        int
 }
 
 func newStubUsageTracker() *stubUsageTracker {
@@ -127,6 +129,21 @@ func (s *stubUsageTracker) GetLowPerformers(threshold float64, minInjections int
 	return s.low, nil
 }
 
+func (s *stubUsageTracker) RecordLowMatchQuery(_ context.Context, _ string, _ float64) error {
+	return nil
+}
+
+func (s *stubUsageTracker) GetLowMatchQueries(_ context.Context, _ float64, _ int) ([]LowMatchQuery, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lowMatchQueries == nil {
+		return nil, nil
+	}
+	out := make([]LowMatchQuery, len(s.lowMatchQueries))
+	copy(out, s.lowMatchQueries)
+	return out, nil
+}
+
 func (s *stubUsageTracker) Close() error { return nil }
 
 func (s *stubUsageTracker) SetStats(name string, stats *UsageStats) {
@@ -143,6 +160,12 @@ func (s *stubUsageTracker) SetLowPerformers(low []*UsageStats) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.low = low
+}
+
+func (s *stubUsageTracker) SetLowMatchQueries(qs []LowMatchQuery) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lowMatchQueries = qs
 }
 
 // ---------------------------------------------------------------------------
@@ -178,7 +201,7 @@ func makeRefineLLMResponse(action, skillContent string) string {
 	return fmt.Sprintf("```json\n%s\n```", string(b))
 }
 
-// defaultEvolverConfig returns a config with AutoApply enabled for testing.
+// defaultEvolverConfig returns a config matching production defaults.
 func defaultEvolverConfig() config.SkillsEvolverConfig {
 	return config.SkillsEvolverConfig{
 		Enabled:                    true,
@@ -187,7 +210,8 @@ func defaultEvolverConfig() config.SkillsEvolverConfig {
 		MinEffectiveness:           0.2,
 		PatternPromotionConfidence: 0.7,
 		PatternPromotionUseCount:   5,
-		AutoApply:                  true,
+		MinProposalConfidence:      0.7,
+		AutoApply:                  false,
 	}
 }
 
@@ -220,6 +244,7 @@ func TestEvolver_PassA_Refine(t *testing.T) {
 
 	verifier := newTestVerifier(true)
 	cfg := defaultEvolverConfig()
+	cfg.AutoApply = true // Verify applied refine path
 
 	evolver := NewEvolver(
 		usage, nil, writer, registry, nil,
@@ -328,6 +353,7 @@ func TestEvolver_PassB_Promote(t *testing.T) {
 	mockLLM := &mockLLMChatter{response: "{}"}
 	usage := newStubUsageTracker()
 	cfg := defaultEvolverConfig()
+	cfg.AutoApply = true // Verify applied promote path
 
 	evolver := NewEvolver(
 		usage, lp, writer, registry, capIndex,
@@ -433,6 +459,7 @@ func TestEvolver_PassC_Prune(t *testing.T) {
 
 	mockLLM := &mockLLMChatter{}
 	cfg := defaultEvolverConfig()
+	cfg.AutoApply = true // Verify applied prune+archive path
 
 	evolver := NewEvolver(
 		usage, nil, writer, registry, nil,
@@ -774,6 +801,7 @@ func TestEvolver_PassB_NonAllDomain(t *testing.T) {
 	mockLLM := &mockLLMChatter{response: "{}"}
 	usage := newStubUsageTracker()
 	cfg := defaultEvolverConfig()
+	cfg.AutoApply = true // Verify applied promote path
 
 	evolver := NewEvolver(
 		usage, lp, writer, registry, capIndex,
@@ -968,6 +996,7 @@ func TestEvolver_PatternToSkillNameCollision(t *testing.T) {
 	mockLLM := &mockLLMChatter{response: "{}"}
 	usage := newStubUsageTracker()
 	cfg := defaultEvolverConfig()
+	cfg.AutoApply = true // Verify applied promote path
 
 	evolver := NewEvolver(
 		usage, lp, writer, registry, capIndex,
@@ -1063,6 +1092,8 @@ func TestEvolver_FullCycle_AllThreePasses(t *testing.T) {
 	mockLLM := &mockLLMChatter{response: makeRefineLLMResponse("improve_skill", improvedContent)}
 
 	cfg := defaultEvolverConfig()
+	cfg.AutoApply = true // Verify applied refine/promote/prune path
+
 	evolver := NewEvolver(
 		usage, lp, writer, registry, capIndex,
 		newTestVerifier(true), mockLLM, nil,
@@ -1087,5 +1118,357 @@ func TestEvolver_FullCycle_AllThreePasses(t *testing.T) {
 	// Total proposals: 1 refine + 1 promote + 1 prune = 3.
 	if len(report.Details) != 3 {
 		t.Errorf("expected 3 proposals in details, got %d", len(report.Details))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Phase 3 — Pass A consumes reflection proposals
+// ---------------------------------------------------------------------------
+
+// stubReflectionProposer implements ReflectionProposer for testing. It returns
+// a fixed list of proposals and tracks how many times DrainPending was called.
+type stubReflectionProposer struct {
+	mu        sync.Mutex
+	proposals []ReflectionProposal
+	calls     int
+}
+
+func (s *stubReflectionProposer) DrainPending() ([]ReflectionProposal, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls++
+	out := s.proposals
+	s.proposals = nil // subsequent calls return nothing
+	return out, nil
+}
+
+func (s *stubReflectionProposer) CallCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
+}
+
+// TestEvolver_PassAConsumesReflectionProposals verifies that when a
+// ReflectionProposer is wired via WithReflectionProposer, Pass A drains it at
+// the start of the cycle and converts each proposal (above MinProposalConfidence)
+// into an EvolutionProposal that flows through the verifier. We seed two
+// proposals — one skill_create and one skill_update — and verify both appear
+// in the report.
+func TestEvolver_PassAConsumesReflectionProposals(t *testing.T) {
+	dir := t.TempDir()
+	writer := NewWriter(dir, slog.Default())
+	registry := skills.NewRegistry()
+
+	// Pre-create a skill that the skill_update proposal will target so that
+	// the verifier has CurrentContent to compare against. (The verifier is in
+	// accept-mode via newTestVerifier(true), so this isn't strictly required,
+	// but it makes the test more representative.)
+	targetSkill := "existing-skill"
+	targetContent := "---\nname: existing-skill\ndescription: existing\n---\n\nbody"
+	if err := writer.WriteSkill(targetSkill, targetContent); err != nil {
+		t.Fatalf("WriteSkill: %v", err)
+	}
+	parsed, err := skills.ParseSkillFile(filepath.Join(dir, targetSkill, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("ParseSkillFile: %v", err)
+	}
+	registry.Register(parsed)
+
+	// Two proposals: one skill_create (-> ProposalCreate) and one skill_update
+	// (-> ProposalRefine). Both above MinProposalConfidence=0.7 default.
+	proposer := &stubReflectionProposer{proposals: []ReflectionProposal{
+		{
+			Type:          "skill_create",
+			Target:        "new-from-reflection",
+			Change:        "---\nname: new-from-reflection\ndescription: reflected\n---\n\nbody",
+			Justification: "pattern observed at runtime",
+			Confidence:    0.92,
+		},
+		{
+			Type:          "skill_update",
+			Target:        targetSkill,
+			Change:        "---\nname: existing-skill\ndescription: improved\n---\n\nimproved body",
+			Justification: "low effectiveness signal",
+			Confidence:    0.85,
+		},
+	}}
+
+	cfg := defaultEvolverConfig()
+	cfg.AutoApply = true // Verify applied reflection proposals
+	// Disable Pass A's normal LLM-driven refinement loop so the only proposals
+	// arriving in Pass A come from the reflection proposer. With no usage stats
+	// in the tracker, the LLM loop already skips; this is belt-and-suspenders.
+	usage := newStubUsageTracker()
+
+	evolver := NewEvolver(
+		usage, nil, writer, registry, nil,
+		newTestVerifier(true), &mockLLMChatter{}, nil,
+		cfg, slog.Default(),
+		WithReflectionProposer(proposer),
+	)
+
+	report, err := evolver.RunCycle(context.Background())
+	if err != nil {
+		t.Fatalf("RunCycle: %v", err)
+	}
+
+	if proposer.CallCount() != 1 {
+		t.Errorf("expected DrainPending called once, got %d", proposer.CallCount())
+	}
+
+	// Both proposals should have flowed through the verifier (accept-mode) and
+	// been applied (cfg.AutoApply=true). The skill_create
+	// increments Promoted; the skill_update increments Refined.
+	if report.Promoted != 1 {
+		t.Errorf("expected Promoted=1 (skill_create), got %d", report.Promoted)
+	}
+	if report.Refined != 1 {
+		t.Errorf("expected Refined=1 (skill_update), got %d", report.Refined)
+	}
+
+	// Verify both proposals appear in Details with the expected action and
+	// skill name derived from the reflection proposal's Target.
+	seenCreate := false
+	seenRefine := false
+	for _, p := range report.Details {
+		if p.Action == ProposalCreate && p.SkillName == "new-from-reflection" {
+			seenCreate = true
+		}
+		if p.Action == ProposalRefine && p.SkillName == targetSkill {
+			seenRefine = true
+		}
+	}
+	if !seenCreate {
+		t.Errorf("expected a ProposalCreate for new-from-reflection in details; got %+v", report.Details)
+	}
+	if !seenRefine {
+		t.Errorf("expected a ProposalRefine for %s in details; got %+v", targetSkill, report.Details)
+	}
+
+	// Verify the new skill was actually written to disk.
+	if _, err := writer.ReadSkill("new-from-reflection"); err != nil {
+		t.Errorf("expected new-from-reflection skill on disk: %v", err)
+	}
+	// Verify the existing skill was updated.
+	got, err := writer.ReadSkill(targetSkill)
+	if err != nil {
+		t.Fatalf("ReadSkill(target): %v", err)
+	}
+	if !strings.Contains(got, "improved body") {
+		t.Errorf("expected target skill updated to 'improved body'; got %q", got)
+	}
+}
+
+// TestEvolver_PassAReflectionProposal_BelowConfidenceFiltered verifies that
+// reflection proposals with Confidence < MinProposalConfidence are filtered
+// out before reaching the verifier.
+func TestEvolver_PassAReflectionProposal_BelowConfidenceFiltered(t *testing.T) {
+	dir := t.TempDir()
+	writer := NewWriter(dir, slog.Default())
+	registry := skills.NewRegistry()
+
+	proposer := &stubReflectionProposer{proposals: []ReflectionProposal{
+		{
+			Type:       "skill_create",
+			Target:     "low-conf",
+			Change:     "body",
+			Confidence: 0.3, // below default MinProposalConfidence=0.7
+		},
+	}}
+
+	cfg := defaultEvolverConfig()
+	// Explicitly set MinProposalConfidence to 0.7 (the default).
+	cfg.MinProposalConfidence = 0.7
+
+	evolver := NewEvolver(
+		newStubUsageTracker(), nil, writer, registry, nil,
+		newTestVerifier(true), &mockLLMChatter{}, nil,
+		cfg, slog.Default(),
+		WithReflectionProposer(proposer),
+	)
+
+	report, err := evolver.RunCycle(context.Background())
+	if err != nil {
+		t.Fatalf("RunCycle: %v", err)
+	}
+
+	if report.Promoted != 0 {
+		t.Errorf("expected Promoted=0 (filtered), got %d", report.Promoted)
+	}
+	if report.Refined != 0 {
+		t.Errorf("expected Refined=0 (filtered), got %d", report.Refined)
+	}
+	// Should not even reach Details.
+	if len(report.Details) != 0 {
+		t.Errorf("expected no proposals in details, got %d (%+v)", len(report.Details), report.Details)
+	}
+}
+
+// TestEvolver_PassAReflectionProposal_UnknownTypeSkipped verifies that
+// reflection proposals with an unrecognized Type are skipped (recorded in
+// Details but not applied) rather than crashing the cycle.
+func TestEvolver_PassAReflectionProposal_UnknownTypeSkipped(t *testing.T) {
+	dir := t.TempDir()
+	writer := NewWriter(dir, slog.Default())
+	registry := skills.NewRegistry()
+
+	proposer := &stubReflectionProposer{proposals: []ReflectionProposal{
+		{
+			Type:       "agent_prompt", // not skill_create or skill_update
+			Target:     "CLAUDE.md",
+			Change:     "tweak",
+			Confidence: 0.95,
+		},
+	}}
+
+	cfg := defaultEvolverConfig()
+
+	evolver := NewEvolver(
+		newStubUsageTracker(), nil, writer, registry, nil,
+		newTestVerifier(true), &mockLLMChatter{}, nil,
+		cfg, slog.Default(),
+		WithReflectionProposer(proposer),
+	)
+
+	report, err := evolver.RunCycle(context.Background())
+	if err != nil {
+		t.Fatalf("RunCycle: %v", err)
+	}
+
+	// Unknown types are logged and skipped — they should not be applied.
+	if report.Promoted != 0 || report.Refined != 0 {
+		t.Errorf("expected no application of unknown-type proposal; got Promoted=%d Refined=%d",
+			report.Promoted, report.Refined)
+	}
+}
+
+// TestEvolver_PassA_NoProposer verifies that when no ReflectionProposer is
+// wired, the evolver still functions normally (graceful degradation).
+func TestEvolver_PassA_NoProposer(t *testing.T) {
+	dir := t.TempDir()
+	writer := NewWriter(dir, slog.Default())
+	registry := skills.NewRegistry()
+
+	evolver := NewEvolver(
+		newStubUsageTracker(), nil, writer, registry, nil,
+		newTestVerifier(true), &mockLLMChatter{}, nil,
+		defaultEvolverConfig(), slog.Default(),
+		// No WithReflectionProposer option.
+	)
+
+	report, err := evolver.RunCycle(context.Background())
+	if err != nil {
+		t.Fatalf("RunCycle: %v", err)
+	}
+	if report == nil {
+		t.Fatal("expected non-nil report")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: GAP #8 — Pass D RunCycle integration (passDFillGap)
+// ---------------------------------------------------------------------------
+
+// TestEvolver_RunCycle_PassDFillGap verifies that Pass D (gap analysis) is
+// exercised end-to-end through RunCycle when the usage tracker returns
+// non-empty LowMatchQueries. The gap analyzer produces a ProposalFillGap
+// action, the verifier accepts it, and under AutoApply=true the proposal is
+// applied (skill written to disk) and report.Gaps is incremented.
+func TestEvolver_RunCycle_PassDFillGap(t *testing.T) {
+	dir := t.TempDir()
+	writer := NewWriter(dir, slog.Default())
+	registry := skills.NewRegistry()
+
+	usage := newStubUsageTracker()
+	usage.SetLowMatchQueries([]LowMatchQuery{
+		{
+			Query:     "deploy containers to kubernetes",
+			Count:     7, // >= minCountForGapProposal (5)
+			BestScore: 0.3,
+		},
+	})
+
+	cfg := defaultEvolverConfig()
+	cfg.AutoApply = true // Verify applied gap-fill path
+	mockLLM := &mockLLMChatter{}
+
+	evolver := NewEvolver(
+		usage, nil, writer, registry, nil,
+		newTestVerifier(true), mockLLM, nil,
+		cfg, slog.Default(),
+	)
+
+	report, err := evolver.RunCycle(context.Background())
+	if err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	if report.Gaps != 1 {
+		t.Errorf("expected Gaps=1, got %d (report: %+v)", report.Gaps, report)
+	}
+
+	// Verify the skill was written to disk under the slugified query name.
+	expectedSlug := "deploy-containers-to-kubernetes"
+	skillPath := filepath.Join(dir, expectedSlug, "SKILL.md")
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Errorf("expected skill file at %s: %v", skillPath, err)
+	}
+
+	// Verify the proposal appears in Details with the correct action.
+	foundGap := false
+	for _, p := range report.Details {
+		if p.Action == ProposalFillGap && p.SkillName == expectedSlug {
+			foundGap = true
+		}
+	}
+	if !foundGap {
+		t.Errorf("expected a ProposalFillGap for %q in details; got %+v", expectedSlug, report.Details)
+	}
+}
+
+// TestEvolver_RunCycle_PassDFillGap_NoAutoApply verifies that when
+// AutoApply=false, Pass D proposals are routed to the plan manager
+// (report.Planned) instead of being written to disk (report.Gaps).
+func TestEvolver_RunCycle_PassDFillGap_NoAutoApply(t *testing.T) {
+	dir := t.TempDir()
+	writer := NewWriter(dir, slog.Default())
+	registry := skills.NewRegistry()
+
+	usage := newStubUsageTracker()
+	usage.SetLowMatchQueries([]LowMatchQuery{
+		{
+			Query:     "configure tls mutual auth",
+			Count:     6, // >= minCountForGapProposal (5)
+			BestScore: 0.25,
+		},
+	})
+
+	cfg := defaultEvolverConfig()
+	cfg.AutoApply = false
+	mockLLM := &mockLLMChatter{}
+
+	evolver := NewEvolver(
+		usage, nil, writer, registry, nil,
+		newTestVerifier(true), mockLLM, nil,
+		cfg, slog.Default(),
+	)
+
+	report, err := evolver.RunCycle(context.Background())
+	if err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	if report.Planned != 1 {
+		t.Errorf("expected Planned=1 (AutoApply=false), got %d (report: %+v)", report.Planned, report)
+	}
+	if report.Gaps != 0 {
+		t.Errorf("expected Gaps=0 (AutoApply=false), got %d", report.Gaps)
+	}
+
+	// Skill should NOT be on disk.
+	expectedSlug := "configure-tls-mutual-auth"
+	skillPath := filepath.Join(dir, expectedSlug, "SKILL.md")
+	if _, err := os.Stat(skillPath); err == nil {
+		t.Errorf("skill file should not exist when AutoApply=false: %s", skillPath)
 	}
 }

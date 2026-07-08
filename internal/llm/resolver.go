@@ -193,7 +193,21 @@ func (r *Resolver) ResolveForSkill(skill *SkillRequirements, currentModel *Model
 
 // ResolveRef resolves a "provider/model-id" reference.
 func (r *Resolver) ResolveRef(ref string) *ModelConfig {
-	return ResolveModelRef(ref, r.config)
+	mc := ResolveModelRef(ref, r.config)
+	if mc == nil {
+		return nil
+	}
+	// Persist the routing decision for later mining (G9 wiring: explicit
+	// resolution path). Best-effort: swallow errors so routing observability
+	// never breaks serving.
+	if r.routingLogger != nil {
+		_ = r.routingLogger.Record(context.Background(), RoutingDecision{
+			ChosenModelID:    mc.ModelID,
+			ChosenProviderID: mc.ProviderID,
+			Reason:           "explicit",
+		})
+	}
+	return mc
 }
 
 // FindByCapabilities finds all models with the specified capabilities.

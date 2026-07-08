@@ -4,7 +4,7 @@
 
   // Fast/cheap model for classification, summarization
   // Use "classifier" or "summarizer" aliases for automatic fallback
-  "small_model": "local/lfm-8b-4bit",
+  "small_model": "local/lfm-1.2b-q8",
 
   // Model for intent classification (use alias "classifier" for fallback)
   "classifier_model": "classifier",
@@ -13,27 +13,27 @@
   "summarizer_model": "summarizer",
 
   // Model for vision/language tasks (opportunistic loading)
-  "vision_model": "local/lfm-vl-1.6b-6bit",
+  // NOTE: Vision models require MLX runtime - currently disabled
+  "vision_model": "ollama/llama3.2",
 
   // Model aliases with cooldown-based failover
   "model_aliases": {
     "classifier": {
       "models": [
-        "local/lfm-8b-4bit",         // Primary: LFM2.5-8B-A1B-MLX-4bit
-        "local/lfm-1.2b-4bit",       // Fallback 1: Best overall (69.1% accuracy, 2.9% error rate, 279ms)
-        "local/lfm-thinking-claude", // Fallback 2: Thinking-Claude (58.8% accuracy, better on plan intent)
-        "local/lfm-code",            // Fallback 3: fast local model
-        "zai/glm-4.5-air",           // Fallback 4: remote API
-        "ollama/llama3.2"            // Fallback 5: local Ollama
+        "local/lfm-1.2b-q8",        // Primary: Best overall (69.1% accuracy, 2.9% error rate, 279ms)
+        "local/lfm-8b-f16",         // Fallback 1: LFM2.5-8B-A1B-GGUF-F16
+        "zai/glm-4.5-air",          // Fallback 2: remote API
+        "ollama/llama3.2"           // Fallback 3: local Ollama
       ],
       "timeout": 10,
       "max_fails": 2
     },
     "summarizer": {
       "models": [
-        "local/lfm-code",      // Primary: fast local model
-        "zai/glm-4.5-air",     // Fallback 1: remote API
-        "ollama/llama3.2"      // Fallback 2: local Ollama
+        "local/lfm-1.2b-q8",   // Primary: fast local model
+        "local/lfm-8b-f16",    // Fallback 1: LFM2.5-8B-A1B-GGUF-F16
+        "zai/glm-4.5-air",     // Fallback 2: remote API
+        "ollama/llama3.2"      // Fallback 3: local Ollama
       ],
       "timeout": 15,
       "max_fails": 2
@@ -52,36 +52,6 @@
       "models": ["zai/glm-4.5-air", "ollama/qwen2.5-coder"],
       "timeout": 20,
       "max_fails": 3
-    },
-    "classifier-test-a": {
-      "models": ["local/lfm-combined-sft"],
-      "timeout": 30,
-      "max_fails": 1
-    },
-    "classifier-test-b": {
-      "models": ["local/lfm-thinking-claude"],
-      "timeout": 30,
-      "max_fails": 1
-    },
-    "classifier-test-1.2b-4bit": {
-      "models": ["local/lfm-1.2b-4bit"],
-      "timeout": 30,
-      "max_fails": 1
-    },
-    "classifier-test-thinking-8bit": {
-      "models": ["local/lfm-thinking-8bit"],
-      "timeout": 30,
-      "max_fails": 1
-    },
-    "classifier-test-24b-8bit": {
-      "models": ["local/lfm-24b-8bit"],
-      "timeout": 30,
-      "max_fails": 1
-    },
-    "classifier-test-thinking-bf16": {
-      "models": ["local/lfm-thinking-bf16"],
-      "timeout": 30,
-      "max_fails": 1
     }
   },
 
@@ -89,6 +59,7 @@
   "default_timeout": 3000,
 
   // Providers to skip entirely
+  // NOTE: "local" re-enabled for llama.cpp GGUF support (MLX still disabled)
   "disabled_providers": ["gala-mlx", "gala-llama"],
 
   "providers": {
@@ -98,18 +69,18 @@
         "baseURL": "http://127.0.0.1:8080/v1"
       },
       "lifecycle": {
-        "runtime": "mlx",
-        "model_path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
+        "runtime": "llama-cpp",
+        "model_path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-F16.gguf",
         "auto_start": true,
         "auto_stop_on_exit": true,
-        "pid_file": "~/.meept/run/mlx.pid",
-        "spawn_command": ["mlx_lm", "server", "--model", "${MODEL_PATH}", "--port", "8080"],
-        "spawn_timeout_seconds": 60,
+        "pid_file": "~/.meept/run/llama.pid",
+        "spawn_command": ["llama-server", "--model", "${MODEL_PATH}", "--port", "8080", "--host", "127.0.0.1"],
+        "spawn_timeout_seconds": 180,
         "health_check": {
           "endpoint": "/health",
           "interval_seconds": 10,
           "timeout_seconds": 5,
-          "unhealthy_threshold": 3
+          "unhealthy_threshold": 18
         },
         "restart_policy": {
           "enabled": true,
@@ -119,103 +90,29 @@
         }
       },
       "models": {
-        "lfm-code": {
-          // mlx_lm.server reports the model ID as the path passed via --model.
+        "lfm-8b-f16": {
+          // llama-server reports the model ID as the path passed via --model.
           // The "name" must match this ID so the daemon doesn't try to look
           // up a different model name on HuggingFace.
-          "name": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
-          "path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
+          "name": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-F16.gguf",
+          "path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-F16.gguf",
           "capabilities": ["completion", "code", "reasoning"],
           "input_cost": 0.0,
           "output_cost": 0.0,
-          "context_limit": 8192,
+          "context_limit": 16384,
           "max_output": 2048,
           "temperature": 0.7,
-          // Max concurrent requests to this model (0 = unlimited)
-          // Useful for local LLMs to prevent overwhelming the server
           "max_concurrency": 2
         },
-        "lfm-combined-sft": {
-          "name": "/Volumes/LLMs/lfm2.5-1.2b-combined-serialized-sft",
-          "path": "/Volumes/LLMs/lfm2.5-1.2b-combined-serialized-sft",
+        "lfm-1.2b-q8": {
+          "name": "/Volumes/LLMs/BenjaminHelle/LFM2.5-1.2B-Code/LFM2.5-1.2B-Instruct.Q8_0.gguf",
+          "path": "/Volumes/LLMs/BenjaminHelle/LFM2.5-1.2B-Code/LFM2.5-1.2B-Instruct.Q8_0.gguf",
           "capabilities": ["completion", "code", "reasoning"],
           "input_cost": 0.0,
           "output_cost": 0.0,
           "context_limit": 8192,
           "max_output": 512,
           "temperature": 0.1
-        },
-        "lfm-thinking-claude": {
-          "name": "/Volumes/LLMs/alexgusevski/LFM2.5-1.2B-Instruct-Thinking-Claude-High-Reasoning-mlx-4Bit",
-          "path": "/Volumes/LLMs/alexgusevski/LFM2.5-1.2B-Instruct-Thinking-Claude-High-Reasoning-mlx-4Bit",
-          "capabilities": ["completion", "reasoning"],
-          "input_cost": 0.0,
-          "output_cost": 0.0,
-          "context_limit": 8192,
-          "max_output": 512,
-          "temperature": 0.1
-        },
-        "lfm-8b-4bit": {
-          "name": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
-          "path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
-          "capabilities": ["completion", "code", "reasoning"],
-          "input_cost": 0.0,
-          "output_cost": 0.0,
-          "context_limit": 16384,
-          "max_output": 1024,
-          "temperature": 0.7,
-          "max_concurrency": 2
-        },
-        "lfm-1.2b-4bit": {
-          "name": "/Volumes/LLMs/LFM2.5-1.2B-Instruct-MLX-4bit",
-          "path": "/Volumes/LLMs/LFM2.5-1.2B-Instruct-MLX-4bit",
-          "capabilities": ["completion", "code", "reasoning"],
-          "input_cost": 0.0,
-          "output_cost": 0.0,
-          "context_limit": 8192,
-          "max_output": 512,
-          "temperature": 0.1
-        },
-        "lfm-thinking-8bit": {
-          "name": "/Volumes/LLMs/lmstudio-community/LFM2.5-1.2B-Thinking-MLX-8bit",
-          "path": "/Volumes/LLMs/lmstudio-community/LFM2.5-1.2B-Thinking-MLX-8bit",
-          "capabilities": ["completion", "reasoning"],
-          "input_cost": 0.0,
-          "output_cost": 0.0,
-          "context_limit": 8192,
-          "max_output": 512,
-          "temperature": 0.1
-        },
-        "lfm-24b-8bit": {
-          "name": "/Volumes/LLMs/lmstudio-community/LFM2-24B-A2B-MLX-8bit",
-          "path": "/Volumes/LLMs/lmstudio-community/LFM2-24B-A2B-MLX-8bit",
-          "capabilities": ["completion", "code", "reasoning"],
-          "input_cost": 0.0,
-          "output_cost": 0.0,
-          "context_limit": 16384,
-          "max_output": 512,
-          "temperature": 0.1
-        },
-        "lfm-thinking-bf16": {
-          "name": "/Volumes/LLMs/lmstudio-community/LFM2.5-1.2B-Thinking-MLX-bf16",
-          "path": "/Volumes/LLMs/lmstudio-community/LFM2.5-1.2B-Thinking-MLX-bf16",
-          "capabilities": ["completion", "reasoning"],
-          "input_cost": 0.0,
-          "output_cost": 0.0,
-          "context_limit": 8192,
-          "max_output": 512,
-          "temperature": 0.1
-        },
-        "lfm-vl-1.6b-6bit": {
-          "name": "LFM2.5-VL-1.6B-MLX-6bit",
-          "path": "/Volumes/LLMs/lmstudio-community/LFM2.5-VL-1.6B-MLX-6bit",
-          "capabilities": ["vision", "completion"],
-          "input_cost": 0.0,
-          "output_cost": 0.0,
-          "context_limit": 8192,
-          "max_output": 512,
-          "temperature": 0.7,
-          "max_concurrency": 1
         }
       }
     },

@@ -456,7 +456,7 @@ func TestAgentLoopDiscoverRelevantSkills(t *testing.T) {
 	loop := NewAgentLoop()
 
 	// Without capability index, should return nil
-	result := loop.discoverRelevantSkills("write code", 0.5)
+	result := loop.discoverRelevantSkills(context.Background(), "write code", 0.5)
 	assert.Nil(t, result, "expected nil when no capability index configured")
 }
 
@@ -499,13 +499,13 @@ func TestAgentLoopDiscoverRelevantSkillsWithIndex(t *testing.T) {
 	loop.SetCapabilityIndex(idx)
 
 	// Should find skills matching input
-	result := loop.discoverRelevantSkills("code review", 0.3)
+	result := loop.discoverRelevantSkills(context.Background(), "code review", 0.3)
 	if result == nil {
 		t.Error("expected to find skills matching 'code review'")
 	}
 
 	// With high threshold, might not find matches
-	result = loop.discoverRelevantSkills("xyz random", 0.9)
+	result = loop.discoverRelevantSkills(context.Background(), "xyz random", 0.9)
 	if len(result) > 0 {
 		t.Log("Unexpected match for random input:", result[0].Entry.Name)
 	}
@@ -1257,4 +1257,33 @@ func TestAgentLoop_StartProjectSub_UpdatesWorkingDir(t *testing.T) {
 		case <-time.After(20 * time.Millisecond):
 		}
 	}
+}
+
+func TestDeriveRoutingPath_MultipleInjectedSkills(t *testing.T) {
+	loop := &AgentLoop{}
+
+	// No skills, no model ref -> empty
+	require.Equal(t, "", loop.deriveRoutingPath())
+
+	// Multiple injected skills -> comma-joined
+	loop.lastInjectedSkills = []string{"coding", "skills/eval", "coding/tests"}
+	require.Equal(t, "skill:coding,skills/eval,coding/tests", loop.deriveRoutingPath())
+
+	// Single injected skill -> no trailing comma
+	loop.lastInjectedSkills = []string{"coding"}
+	require.Equal(t, "skill:coding", loop.deriveRoutingPath())
+}
+
+func TestDeriveRoutingPath_ModelRefFallback(t *testing.T) {
+	loop := &AgentLoop{}
+
+	// Skills present, model ref also set -> skills win
+	loop.lastInjectedSkills = []string{"coding"}
+	loop.modelRef = "deep"
+	require.Equal(t, "skill:coding", loop.deriveRoutingPath())
+
+	// No skills, model ref set -> alias prefix added
+	loop.lastInjectedSkills = nil
+	loop.modelRef = "deep"
+	require.Equal(t, "alias:deep", loop.deriveRoutingPath())
 }

@@ -172,6 +172,22 @@ func (rc *ReflectionCollector) ReflectInactiveSessions(ctx context.Context) {
 	rc.logger.Debug("ReflectInactiveSessions scheduled (MVP stub: needs SessionStore integration)")
 }
 
+// DrainPendingProposals returns all pending reflection proposals and marks
+// them consumed (rewrites the queue file to remove pending entries; applied
+// and skipped entries are preserved for audit). Intended to be called by the
+// skill evolver at the start of each cycle so that per-turn reflections flow
+// into skill refinement as an additional input stream alongside the learned
+// pattern promotion in Pass B.
+//
+// Returns nil, nil when the collector is disabled or no queue is configured
+// (e.g., test constructs that bypass NewReflectionCollector).
+func (rc *ReflectionCollector) DrainPendingProposals() ([]ReflectionProposal, error) {
+	if rc.queue == nil {
+		return nil, nil
+	}
+	return rc.queue.DrainPending()
+}
+
 // IsAlwaysProposeOnly is an exported wrapper around isAlwaysProposeOnly for
 // external callers (CLI, HTTP handlers).
 func IsAlwaysProposeOnly(target string) bool {

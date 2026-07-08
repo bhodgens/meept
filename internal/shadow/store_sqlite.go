@@ -28,7 +28,7 @@ var (
 
 // Schema version constants
 const (
-	TrainingStoreSchemaVersion = 2
+	TrainingStoreSchemaVersion = 3
 	ExamplesStoreSchemaVersion = 2
 	AdaptersStoreSchemaVersion = 1
 )
@@ -86,6 +86,10 @@ func (s *SQLiteTrainingStore) migrate() error {
 
 	if currentVersion < 2 {
 		s.migrateToV2()
+	}
+
+	if currentVersion < 3 {
+		s.migrateToV3()
 	}
 
 	// Update version
@@ -177,6 +181,23 @@ func (s *SQLiteTrainingStore) migrateToV2() {
 		CREATE INDEX IF NOT EXISTS idx_shadow_records_exported ON shadow_records(exported_at);
 	`); ierr != nil {
 		slog.Warn("shadow training store migration: create index failed", "error", ierr)
+	}
+}
+
+// migrateToV3 adds domain, task_type, and routing_path columns to
+// preference_pairs so DPO exports can carry training context.
+func (s *SQLiteTrainingStore) migrateToV3() {
+	_, err := s.db.Exec(`ALTER TABLE preference_pairs ADD COLUMN domain TEXT DEFAULT '';`)
+	if err != nil && !errcls.IsDuplicateColumn(err) {
+		slog.Warn("shadow training store migration v3: add domain failed", "error", err)
+	}
+	_, err = s.db.Exec(`ALTER TABLE preference_pairs ADD COLUMN task_type TEXT DEFAULT '';`)
+	if err != nil && !errcls.IsDuplicateColumn(err) {
+		slog.Warn("shadow training store migration v3: add task_type failed", "error", err)
+	}
+	_, err = s.db.Exec(`ALTER TABLE preference_pairs ADD COLUMN routing_path TEXT DEFAULT '';`)
+	if err != nil && !errcls.IsDuplicateColumn(err) {
+		slog.Warn("shadow training store migration v3: add routing_path failed", "error", err)
 	}
 }
 
@@ -321,8 +342,8 @@ func (s *SQLiteTrainingStore) SavePreferencePair(ctx context.Context, pair *Pref
 		INSERT INTO preference_pairs (
 			id, source_record_id, prompt_json,
 			chosen_response, chosen_model, rejected_response, rejected_model,
-			margin, exported_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			margin, domain, task_type, routing_path, exported_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	var exportedAt *string
 	if pair.ExportedAt != nil {
@@ -334,7 +355,7 @@ func (s *SQLiteTrainingStore) SavePreferencePair(ctx context.Context, pair *Pref
 		pair.ID, pair.SourceRecordID, pair.PromptJSON(),
 		pair.ChosenResponse, pair.ChosenModel,
 		pair.RejectedResponse, pair.RejectedModel,
-		pair.Margin, exportedAt,
+		pair.Margin, string(pair.Domain), string(pair.TaskType), pair.RoutingPath, exportedAt,
 	)
 	return err
 }
@@ -344,7 +365,7 @@ func (s *SQLiteTrainingStore) GetPreferencePair(ctx context.Context, id string) 
 	query := `
 		SELECT id, source_record_id, prompt_json,
 			chosen_response, chosen_model, rejected_response, rejected_model,
-			margin, exported_at
+			margin, domain, task_type, routing_path, exported_at
 		FROM preference_pairs WHERE id = ?
 	`
 	row := s.db.QueryRowContext(ctx, query, id)
@@ -371,7 +392,7 @@ func (s *SQLiteTrainingStore) ListPreferencePairs(ctx context.Context, opts List
 	query := `
 		SELECT id, source_record_id, prompt_json,
 			chosen_response, chosen_model, rejected_response, rejected_model,
-			margin, exported_at
+			margin, domain, task_type, routing_path, exported_at
 		FROM preference_pairs
 	`
 	if len(conditions) > 0 {
@@ -576,13 +597,14 @@ func (s *SQLiteTrainingStore) scanRecordRow(rows *sql.Rows) (*ShadowRecord, erro
 func (s *SQLiteTrainingStore) scanPair(row *sql.Row) (*PreferencePair, error) {
 	var pair PreferencePair
 	var promptJSON string
+	var domain, taskType, routingPath string
 	var exportedAt sql.NullString
 
 	err := row.Scan(
 		&pair.ID, &pair.SourceRecordID, &promptJSON,
 		&pair.ChosenResponse, &pair.ChosenModel,
 		&pair.RejectedResponse, &pair.RejectedModel,
-		&pair.Margin, &exportedAt,
+		&pair.Margin, &domain, &taskType, &routingPath, &exportedAt,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -591,6 +613,9 @@ func (s *SQLiteTrainingStore) scanPair(row *sql.Row) (*PreferencePair, error) {
 		return nil, err
 	}
 
+	pair.Domain = Domain(domain)
+	pair.TaskType = TaskType(taskType)
+	pair.RoutingPath = routingPath
 	_ = pair.SetPromptFromJSON(promptJSON)
 	if exportedAt.Valid {
 		t, _ := time.Parse(time.RFC3339, exportedAt.String)
@@ -603,18 +628,22 @@ func (s *SQLiteTrainingStore) scanPair(row *sql.Row) (*PreferencePair, error) {
 func (s *SQLiteTrainingStore) scanPairRow(rows *sql.Rows) (*PreferencePair, error) {
 	var pair PreferencePair
 	var promptJSON string
+	var domain, taskType, routingPath string
 	var exportedAt sql.NullString
 
 	err := rows.Scan(
 		&pair.ID, &pair.SourceRecordID, &promptJSON,
 		&pair.ChosenResponse, &pair.ChosenModel,
 		&pair.RejectedResponse, &pair.RejectedModel,
-		&pair.Margin, &exportedAt,
+		&pair.Margin, &domain, &taskType, &routingPath, &exportedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 
+	pair.Domain = Domain(domain)
+	pair.TaskType = TaskType(taskType)
+	pair.RoutingPath = routingPath
 	_ = pair.SetPromptFromJSON(promptJSON)
 	if exportedAt.Valid {
 		t, _ := time.Parse(time.RFC3339, exportedAt.String)

@@ -469,10 +469,31 @@ func RegisterSkillsHandlers(server *Server, registry *skills.Registry, executor 
 			"refined":  report.Refined,
 			"promoted": report.Promoted,
 			"pruned":   report.Pruned,
+			"gaps":     report.Gaps,
 			"skipped":  report.Skipped,
 			"rejected": report.Rejected,
 			"planned":  report.Planned,
 			"details":  report.Details,
+		}, nil
+	})
+
+	// skills.gaps - show low-match queries (coverage gaps).
+	// Returns queries that recurred without matching any existing skill above
+	// threshold, ranked by descending count. Used to identify what new skills
+	// should be created.
+	server.RegisterHandler("skills.gaps", func(ctx context.Context, params json.RawMessage) (any, error) {
+		if tracker == nil {
+			return nil, fmt.Errorf("skill usage tracker not configured")
+		}
+
+		gaps, err := tracker.GetLowMatchQueries(ctx, 0.5, 50)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get low-match queries: %w", err)
+		}
+
+		return map[string]any{
+			"gaps":  gaps,
+			"count": len(gaps),
 		}, nil
 	})
 }

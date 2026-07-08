@@ -139,6 +139,19 @@ func (rl *RoutingLogger) Recent(ctx context.Context, limit int) ([]RoutingDecisi
 	return out, err
 }
 
+// ByModel returns decisions whose chosen_model_id matches modelID, most
+// recent first. limit caps the result count (default 100 if non-positive).
+func (rl *RoutingLogger) ByModel(ctx context.Context, modelID string, limit int) ([]RoutingDecision, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var out []RoutingDecision
+	err := rl.db.SelectContext(ctx, &out,
+		`SELECT * FROM routing_decisions WHERE chosen_model_id = ? ORDER BY timestamp DESC LIMIT ?`,
+		modelID, limit)
+	return out, err
+}
+
 // Close releases the database connection. Safe to call multiple times; a nil
 // receiver or nil db returns nil.
 func (rl *RoutingLogger) Close() error {
