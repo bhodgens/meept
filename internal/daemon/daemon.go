@@ -201,6 +201,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		)
 	}
 
+	// Register routing-log handlers (Phase 4 wiring: meept routing CLI surface)
+	if rpcServer != nil && components.RoutingLogger != nil {
+		rpc.RegisterRoutingHandlers(rpcServer, components.RoutingLogger)
+		logger.Info("Routing log RPC handlers registered")
+	}
+
 	// Register template handlers
 	if rpcServer != nil && components.TemplateRegistry != nil {
 		rpc.RegisterTemplateHandlers(rpcServer, components.TemplateRegistry, components.SkillExecutor)

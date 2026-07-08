@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 )
@@ -199,6 +200,59 @@ func TestParseOutcome(t *testing.T) {
 		if got := ParseOutcome(tc.input); got != tc.want {
 			t.Errorf("ParseOutcome(%q) = %d, want %d", tc.input, got, tc.want)
 		}
+	}
+}
+
+// TestUsageTrackerImpl_RecordsAndReturnsLowMatchQueries verifies the Pass D
+// data source: RecordLowMatchQuery upserts accumulate count, and
+// GetLowMatchQueries returns them ranked by descending count, filtered by
+// maxScore. This test is mandated by plan Task 5.1 Step 1.
+func TestUsageTrackerImpl_RecordsAndReturnsLowMatchQueries(t *testing.T) {
+	tracker := newTestTracker(t)
+	defer func() { _ = tracker.Close() }()
+
+	ctx := context.Background()
+	if err := tracker.RecordLowMatchQuery(ctx, "debug goroutine race condition", 0.42); err != nil {
+		t.Fatalf("RecordLowMatchQuery: %v", err)
+	}
+	// Repeat the same query — count should increment.
+	if err := tracker.RecordLowMatchQuery(ctx, "debug goroutine race condition", 0.42); err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	// Different query with lower best_score.
+	if err := tracker.RecordLowMatchQuery(ctx, "deploy to kubernetes", 0.35); err != nil {
+		t.Fatalf("third: %v", err)
+	}
+
+	got, err := tracker.GetLowMatchQueries(ctx, 0.5, 10)
+	if err != nil {
+		t.Fatalf("GetLowMatchQueries: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("expected 2 distinct queries, got %d", len(got))
+	}
+	// First entry should be the duplicate (higher count).
+	if got[0].Count != 2 {
+		t.Errorf("expected count 2 on top entry, got %d", got[0].Count)
+	}
+	// Verify ordering: count DESC means the count-2 entry comes first.
+	if got[0].Query != "debug goroutine race condition" {
+		t.Errorf("expected top query to be the duplicated one, got %q", got[0].Query)
+	}
+	// Verify the second entry.
+	if got[1].Count != 1 {
+		t.Errorf("expected count 1 on second entry, got %d", got[1].Count)
+	}
+	if got[1].Query != "deploy to kubernetes" {
+		t.Errorf("expected second query to be %q, got %q", "deploy to kubernetes", got[1].Query)
+	}
+	// Verify maxScore filter excludes queries at or above threshold.
+	high, err := tracker.GetLowMatchQueries(ctx, 0.3, 10)
+	if err != nil {
+		t.Fatalf("GetLowMatchQueries(0.3): %v", err)
+	}
+	if len(high) != 0 {
+		t.Errorf("expected 0 queries with maxScore=0.3 (both are >= 0.35), got %d", len(high))
 	}
 }
 

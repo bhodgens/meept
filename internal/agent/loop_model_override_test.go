@@ -86,3 +86,56 @@ func TestAgentLoop_ExtractModelOverrideFromMetadata(t *testing.T) {
 		})
 	}
 }
+
+func TestAgentLoop_PersistentModelOverride_DoesNotAutoClear(t *testing.T) {
+	loop := NewAgentLoop()
+
+	// Initially empty and not persistent
+	assert.Empty(t, loop.GetModelOverride(), "initial model override should be empty")
+	assert.False(t, loop.IsModelOverridePersistent(), "initial persistent flag should be false")
+
+	// Set persistent override
+	loop.SetPersistentModelOverride("test-model")
+	assert.Equal(t, "test-model", loop.GetModelOverride(), "override should be set")
+	assert.True(t, loop.IsModelOverridePersistent(), "persistent flag should be true")
+
+	// Simulate the consumption site: apply override, then check if we should clear.
+	// The consumption site only auto-clears when NOT persistent.
+	if !loop.IsModelOverridePersistent() {
+		loop.ClearModelOverride()
+	}
+
+	// Override should STILL be present (persistent mode does not auto-clear)
+	assert.Equal(t, "test-model", loop.GetModelOverride(),
+		"persistent override should NOT be cleared after consumption site")
+	assert.True(t, loop.IsModelOverridePersistent(),
+		"persistent flag should still be true after consumption site")
+
+	// Explicit clear should remove the override and reset persistent flag
+	loop.ClearModelOverride()
+	assert.Empty(t, loop.GetModelOverride(), "override should be empty after explicit clear")
+	assert.False(t, loop.IsModelOverridePersistent(),
+		"persistent flag should be false after explicit clear")
+}
+
+func TestAgentLoop_SetModelOverride_ResetsPersistentFlag(t *testing.T) {
+	loop := NewAgentLoop()
+
+	// Set persistent first
+	loop.SetPersistentModelOverride("persistent-model")
+	assert.True(t, loop.IsModelOverridePersistent())
+
+	// Set one-shot should reset persistent flag
+	loop.SetModelOverride("one-shot-model")
+	assert.False(t, loop.IsModelOverridePersistent(),
+		"SetModelOverride should reset persistent flag to false")
+	assert.Equal(t, "one-shot-model", loop.GetModelOverride())
+
+	// Simulate consumption site: one-shot auto-clears
+	if !loop.IsModelOverridePersistent() {
+		loop.ClearModelOverride()
+	}
+
+	assert.Empty(t, loop.GetModelOverride(),
+		"one-shot override should be cleared after consumption site")
+}

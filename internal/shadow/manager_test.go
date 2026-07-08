@@ -125,7 +125,7 @@ func TestManager_CaptureInteraction_Disabled(t *testing.T) {
 	}
 
 	// This should be a no-op when disabled
-	mgr.CaptureInteraction(ctx, "conv-1", messages, response, "test-model")
+	mgr.CaptureInteraction(ctx, "conv-1", messages, response, "test-model", "")
 }
 
 func TestManager_CaptureToolInteraction_Disabled(t *testing.T) {
@@ -166,7 +166,7 @@ func TestManager_CaptureToolInteraction_Disabled(t *testing.T) {
 	}
 
 	// This should be a no-op when disabled
-	mgr.CaptureToolInteraction(ctx, "conv-1", messages, response, "test-model")
+	mgr.CaptureToolInteraction(ctx, "conv-1", messages, response, "test-model", "")
 }
 
 func TestManager_GetFewShotExamples_Disabled(t *testing.T) {

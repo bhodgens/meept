@@ -160,6 +160,7 @@ Analytics:
 	rootCmd.AddCommand(newPromptsCmd())
 	rootCmd.AddCommand(newBackupCmd())
 	rootCmd.AddCommand(newSyncCmd())
+	rootCmd.AddCommand(newRoutingCmd())
 	rootCmd.AddCommand(newMigrateCmd())
 
 	if err := rootCmd.Execute(); err != nil {

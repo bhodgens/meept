@@ -186,9 +186,9 @@ type EvolutionReport struct {
 // LowMatchQuery is a user or skill-discovery query that didn't strongly match
 // any existing skill. Aggregated by Pass D to surface coverage gaps.
 type LowMatchQuery struct {
-	Query     string    `json:"query"`
-	Count     int       `json:"count"`
-	BestScore float64   `json:"best_score"`
-	FirstSeen time.Time `json:"first_seen"`
-	LastSeen  time.Time `json:"last_seen"`
+	Query     string    `json:"query"      db:"query"`
+	Count     int       `json:"count"      db:"count"`
+	BestScore float64   `json:"best_score" db:"best_score"`
+	FirstSeen time.Time `json:"first_seen" db:"first_seen"`
+	LastSeen  time.Time `json:"last_seen"  db:"last_seen"`
 }

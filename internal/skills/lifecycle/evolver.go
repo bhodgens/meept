@@ -612,6 +612,7 @@ func (e *Evolver) passDFillGap(ctx context.Context, report *EvolutionReport) {
 		GetLowMatchQueries(context.Context, float64, int) ([]LowMatchQuery, error)
 	})
 	if !ok {
+		e.logger.Debug("pass D: usage tracker does not support GetLowMatchQueries; gap analysis skipped")
 		return
 	}
 	gaps, err := lowMatchTracker.GetLowMatchQueries(ctx, 0.5, 50)
@@ -620,6 +621,7 @@ func (e *Evolver) passDFillGap(ctx context.Context, report *EvolutionReport) {
 		return
 	}
 	if len(gaps) == 0 {
+		e.logger.Debug("pass D: no coverage gaps detected")
 		return
 	}
 	analyzer := NewGapAnalyzer()

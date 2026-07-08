@@ -1000,7 +1000,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		agentLoop := c.AgentLoop
 		c.ShadowManager.SetHotSwapCallback(func(bakedName string) {
 			bakedRef := shadowOllamaProviderID + "/" + bakedName
-			agentLoop.SetModelOverride(bakedRef)
+			agentLoop.SetPersistentModelOverride(bakedRef)
 			logger.Info("shadow hot-swap activated",
 				"baked_ref", bakedRef,
 			)
@@ -4754,6 +4754,10 @@ func (a *skillUsageTrackerAdapter) RecordOutcome(skillName string, outcome agent
 		lcOutcome = lifecycle.OutcomeNeutral
 	}
 	return a.tracker.RecordOutcome(skillName, lcOutcome, sessionID)
+}
+
+func (a *skillUsageTrackerAdapter) RecordLowMatchQuery(ctx context.Context, query string, bestScore float64) error {
+	return a.tracker.RecordLowMatchQuery(ctx, query, bestScore)
 }
 
 // learningPipelineAdapter wraps selfimprove.LearningPipeline to implement agent.LearningPipeline.

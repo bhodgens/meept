@@ -530,6 +530,12 @@ type AgentLoop struct {
 	// Set before reasoningCycle() runs; cleared after application.
 	modelOverride string
 
+	// modelOverridePersistent, when true, indicates the override was set via
+	// SetPersistentModelOverride (shadow hot-swap) and should NOT auto-clear
+	// after one reasoning cycle. It persists until ClearModelOverride is
+	// explicitly called (e.g. daemon shutdown, adapter rollback).
+	modelOverridePersistent bool
+
 	// Budget scope tracking for per-task/per-session token and cost limits
 	currentTaskID    string
 	currentSessionID string
@@ -605,6 +611,9 @@ type LearningPipeline interface {
 type lifecycleUsageTracker interface {
 	RecordInjection(skillName string) error
 	RecordOutcome(skillName string, outcome LifecycleOutcome, sessionID string) error
+	// RecordLowMatchQuery records a query that matched no skill above threshold.
+	// Used by Pass D (gap analysis) to surface unmet needs as new-skill candidates.
+	RecordLowMatchQuery(ctx context.Context, query string, bestScore float64) error
 }
 
 // LifecycleOutcome mirrors lifecycle.Outcome. Defined locally so the agent
@@ -982,17 +991,24 @@ func WithModelOverride(modelRef string) LoopOption {
 }
 
 // SetModelOverride sets the model override at runtime (thread-safe).
-//
-// Consumers:
-//   - dispatcher: user-driven model reassignment (clears after one cycle)
-//   - shadow training: hot-swap callback sets this to a baked adapter model
-//     ref after a successful ActivateAdapter + Ollama bake. The override
-//     persists until ClearModelOverride is called (e.g. on daemon shutdown
-//     or adapter rollback).
+// This is a one-shot override: it auto-clears after one reasoning cycle
+// via the consumption site in reasoningCycle. Used by the dispatcher for
+// user-driven model reassignment.
 func (l *AgentLoop) SetModelOverride(modelRef string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.modelOverride = modelRef
+	l.modelOverridePersistent = false
+}
+
+// SetPersistentModelOverride sets a model override that does NOT auto-clear
+// after one cycle. Used by shadow training hot-swap so the baked adapter
+// persists until ClearModelOverride is explicitly called. Thread-safe.
+func (l *AgentLoop) SetPersistentModelOverride(modelRef string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.modelOverride = modelRef
+	l.modelOverridePersistent = true
 }
 
 // GetModelOverride returns the current model override (thread-safe).
@@ -1002,11 +1018,40 @@ func (l *AgentLoop) GetModelOverride() string {
 	return l.modelOverride
 }
 
+// IsModelOverridePersistent returns true if the current override was set via
+// SetPersistentModelOverride and should NOT auto-clear after one cycle.
+// Thread-safe.
+func (l *AgentLoop) IsModelOverridePersistent() bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.modelOverridePersistent
+}
+
 // ClearModelOverride clears the model override after it has been applied.
+// Also resets the persistent flag so subsequent SetModelOverride calls
+// behave as one-shot by default.
 func (l *AgentLoop) ClearModelOverride() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.modelOverride = ""
+	l.modelOverridePersistent = false
+}
+
+// deriveRoutingPath builds a routing context string for shadow training
+// capture. It joins all injected skills with commas (e.g. "skill:coding,tests")
+// and falls back to the configured model reference / alias (e.g. "alias:default").
+// Returns "" when no routing context is available.
+func (l *AgentLoop) deriveRoutingPath() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	if len(l.lastInjectedSkills) > 0 {
+		return "skill:" + strings.Join(l.lastInjectedSkills, ",")
+	}
+	if l.modelRef != "" {
+		return "alias:" + l.modelRef
+	}
+	return ""
 }
 
 // SetReasoningOverride installs a per-turn reasoning directive (highest
@@ -1577,7 +1622,7 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	}
 
 	// Discover relevant skills for this input (metadata-driven, lightweight)
-	discovered := l.discoverRelevantSkills(sanitizedMessage, l.skillDiscoveryThreshold())
+	discovered := l.discoverRelevantSkills(ctx, sanitizedMessage, l.skillDiscoveryThreshold())
 	if len(discovered) > 0 {
 		l.logger.Info("Discovered relevant skills",
 			"conversation", conversationID,
@@ -2006,7 +2051,9 @@ type DiscoveredSkill struct {
 
 // discoverRelevantSkills finds skills that might help with the current input.
 // Uses the CapabilityIndex for metadata-driven matching without loading bodies.
-func (l *AgentLoop) discoverRelevantSkills(input string, minConfidence float64) []*DiscoveredSkill {
+// When no skill matches above threshold, the query is recorded as a low-match
+// miss for Pass D gap analysis (provided a usage tracker is wired).
+func (l *AgentLoop) discoverRelevantSkills(ctx context.Context, input string, minConfidence float64) []*DiscoveredSkill {
 	l.mu.RLock()
 	ci := l.capabilityIndex
 	l.mu.RUnlock()
@@ -2017,6 +2064,22 @@ func (l *AgentLoop) discoverRelevantSkills(input string, minConfidence float64) 
 
 	matches := ci.MatchWithThreshold(input, minConfidence, 3)
 	if len(matches) == 0 {
+		// Record the low-match query so Pass D can surface coverage gaps.
+		// Best-effort: failures are logged at debug level and do not break
+		// skill discovery.
+		if l.usageTracker != nil {
+			bestScore := 0.0
+			if top := ci.Match(input, 1); len(top) > 0 {
+				bestScore = top[0].Confidence
+			}
+			if err := l.usageTracker.RecordLowMatchQuery(ctx, input, bestScore); err != nil {
+				l.logger.Debug("Failed to record low-match query",
+					"query", input,
+					"best_score", bestScore,
+					"error", err,
+				)
+			}
+		}
 		return nil
 	}
 
@@ -2457,8 +2520,11 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					"override_ref", override,
 				)
 			}
-			// Clear override after first application to avoid repeated switches
-			l.ClearModelOverride()
+			// Clear one-shot override after first application. Persistent overrides
+			// (shadow hot-swap) remain until explicitly cleared via ClearModelOverride.
+			if !l.IsModelOverridePersistent() {
+				l.ClearModelOverride()
+			}
 		}
 
 		// Resolve effective reasoning config and pass to LLM.
@@ -2583,12 +2649,14 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				if l.llmClient != nil {
 					modelID = l.llmClient.Config().ModelID
 				}
+				routingPath := l.deriveRoutingPath()
 				go l.shadowMgr.CaptureToolInteraction(
 					context.Background(),
 					conversationID,
 					messages,
 					response,
 					modelID,
+					routingPath,
 				)
 			}
 
@@ -2840,6 +2908,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			if l.llmClient != nil {
 				modelID = l.llmClient.Config().ModelID
 			}
+			routingPath := l.deriveRoutingPath()
 			// Use context.Background() to match the CaptureToolInteraction call
 			// above (line ~1951): the reasoningCycle context will be cancelled
 			// when the loop returns, but shadow capture is best-effort and
@@ -2849,6 +2918,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				messages,
 				response,
 				modelID,
+				routingPath,
 			)
 		}
 
@@ -3125,7 +3195,7 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	if t.Description != "" {
 		taskInput += " " + t.Description
 	}
-	discovered := l.discoverRelevantSkills(taskInput, l.skillDiscoveryThreshold())
+	discovered := l.discoverRelevantSkills(ctx, taskInput, l.skillDiscoveryThreshold())
 	if len(discovered) > 0 {
 		l.logger.Info("Discovered skills for task",
 			"task", t.ID,

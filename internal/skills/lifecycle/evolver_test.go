@@ -54,11 +54,12 @@ func (m *mockLLMChatter) SetResponse(resp string) {
 
 // stubUsageTracker implements UsageTracker for testing.
 type stubUsageTracker struct {
-	mu       sync.Mutex
-	allStats map[string]*UsageStats
-	low      []*UsageStats
-	injects  int
-	outcomes int
+	mu              sync.Mutex
+	allStats        map[string]*UsageStats
+	low             []*UsageStats
+	lowMatchQueries []LowMatchQuery
+	injects         int
+	outcomes        int
 }
 
 func newStubUsageTracker() *stubUsageTracker {
@@ -133,7 +134,14 @@ func (s *stubUsageTracker) RecordLowMatchQuery(_ context.Context, _ string, _ fl
 }
 
 func (s *stubUsageTracker) GetLowMatchQueries(_ context.Context, _ float64, _ int) ([]LowMatchQuery, error) {
-	return nil, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lowMatchQueries == nil {
+		return nil, nil
+	}
+	out := make([]LowMatchQuery, len(s.lowMatchQueries))
+	copy(out, s.lowMatchQueries)
+	return out, nil
 }
 
 func (s *stubUsageTracker) Close() error { return nil }
@@ -152,6 +160,12 @@ func (s *stubUsageTracker) SetLowPerformers(low []*UsageStats) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.low = low
+}
+
+func (s *stubUsageTracker) SetLowMatchQueries(qs []LowMatchQuery) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lowMatchQueries = qs
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +201,7 @@ func makeRefineLLMResponse(action, skillContent string) string {
 	return fmt.Sprintf("```json\n%s\n```", string(b))
 }
 
-// defaultEvolverConfig returns a config with AutoApply enabled for testing.
+// defaultEvolverConfig returns a config matching production defaults.
 func defaultEvolverConfig() config.SkillsEvolverConfig {
 	return config.SkillsEvolverConfig{
 		Enabled:                    true,
@@ -197,7 +211,7 @@ func defaultEvolverConfig() config.SkillsEvolverConfig {
 		PatternPromotionConfidence: 0.7,
 		PatternPromotionUseCount:   5,
 		MinProposalConfidence:      0.7,
-		AutoApply:                  true,
+		AutoApply:                  false,
 	}
 }
 
@@ -230,6 +244,7 @@ func TestEvolver_PassA_Refine(t *testing.T) {
 
 	verifier := newTestVerifier(true)
 	cfg := defaultEvolverConfig()
+	cfg.AutoApply = true // Verify applied refine path
 
 	evolver := NewEvolver(
 		usage, nil, writer, registry, nil,
@@ -338,6 +353,7 @@ func TestEvolver_PassB_Promote(t *testing.T) {
 	mockLLM := &mockLLMChatter{response: "{}"}
 	usage := newStubUsageTracker()
 	cfg := defaultEvolverConfig()
+	cfg.AutoApply = true // Verify applied promote path
 
 	evolver := NewEvolver(
 		usage, lp, writer, registry, capIndex,
@@ -443,6 +459,7 @@ func TestEvolver_PassC_Prune(t *testing.T) {
 
 	mockLLM := &mockLLMChatter{}
 	cfg := defaultEvolverConfig()
+	cfg.AutoApply = true // Verify applied prune+archive path
 
 	evolver := NewEvolver(
 		usage, nil, writer, registry, nil,
@@ -784,6 +801,7 @@ func TestEvolver_PassB_NonAllDomain(t *testing.T) {
 	mockLLM := &mockLLMChatter{response: "{}"}
 	usage := newStubUsageTracker()
 	cfg := defaultEvolverConfig()
+	cfg.AutoApply = true // Verify applied promote path
 
 	evolver := NewEvolver(
 		usage, lp, writer, registry, capIndex,
@@ -978,6 +996,7 @@ func TestEvolver_PatternToSkillNameCollision(t *testing.T) {
 	mockLLM := &mockLLMChatter{response: "{}"}
 	usage := newStubUsageTracker()
 	cfg := defaultEvolverConfig()
+	cfg.AutoApply = true // Verify applied promote path
 
 	evolver := NewEvolver(
 		usage, lp, writer, registry, capIndex,
@@ -1073,6 +1092,8 @@ func TestEvolver_FullCycle_AllThreePasses(t *testing.T) {
 	mockLLM := &mockLLMChatter{response: makeRefineLLMResponse("improve_skill", improvedContent)}
 
 	cfg := defaultEvolverConfig()
+	cfg.AutoApply = true // Verify applied refine/promote/prune path
+
 	evolver := NewEvolver(
 		usage, lp, writer, registry, capIndex,
 		newTestVerifier(true), mockLLM, nil,
@@ -1173,6 +1194,7 @@ func TestEvolver_PassAConsumesReflectionProposals(t *testing.T) {
 	}}
 
 	cfg := defaultEvolverConfig()
+	cfg.AutoApply = true // Verify applied reflection proposals
 	// Disable Pass A's normal LLM-driven refinement loop so the only proposals
 	// arriving in Pass A come from the reflection proposer. With no usage stats
 	// in the tracker, the LLM loop already skips; this is belt-and-suspenders.
@@ -1195,7 +1217,7 @@ func TestEvolver_PassAConsumesReflectionProposals(t *testing.T) {
 	}
 
 	// Both proposals should have flowed through the verifier (accept-mode) and
-	// been applied (AutoApply=true in defaultEvolverConfig). The skill_create
+	// been applied (cfg.AutoApply=true). The skill_create
 	// increments Promoted; the skill_update increments Refined.
 	if report.Promoted != 1 {
 		t.Errorf("expected Promoted=1 (skill_create), got %d", report.Promoted)
@@ -1340,5 +1362,113 @@ func TestEvolver_PassA_NoProposer(t *testing.T) {
 	}
 	if report == nil {
 		t.Fatal("expected non-nil report")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: GAP #8 — Pass D RunCycle integration (passDFillGap)
+// ---------------------------------------------------------------------------
+
+// TestEvolver_RunCycle_PassDFillGap verifies that Pass D (gap analysis) is
+// exercised end-to-end through RunCycle when the usage tracker returns
+// non-empty LowMatchQueries. The gap analyzer produces a ProposalFillGap
+// action, the verifier accepts it, and under AutoApply=true the proposal is
+// applied (skill written to disk) and report.Gaps is incremented.
+func TestEvolver_RunCycle_PassDFillGap(t *testing.T) {
+	dir := t.TempDir()
+	writer := NewWriter(dir, slog.Default())
+	registry := skills.NewRegistry()
+
+	usage := newStubUsageTracker()
+	usage.SetLowMatchQueries([]LowMatchQuery{
+		{
+			Query:     "deploy containers to kubernetes",
+			Count:     7, // >= minCountForGapProposal (5)
+			BestScore: 0.3,
+		},
+	})
+
+	cfg := defaultEvolverConfig()
+	cfg.AutoApply = true // Verify applied gap-fill path
+	mockLLM := &mockLLMChatter{}
+
+	evolver := NewEvolver(
+		usage, nil, writer, registry, nil,
+		newTestVerifier(true), mockLLM, nil,
+		cfg, slog.Default(),
+	)
+
+	report, err := evolver.RunCycle(context.Background())
+	if err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	if report.Gaps != 1 {
+		t.Errorf("expected Gaps=1, got %d (report: %+v)", report.Gaps, report)
+	}
+
+	// Verify the skill was written to disk under the slugified query name.
+	expectedSlug := "deploy-containers-to-kubernetes"
+	skillPath := filepath.Join(dir, expectedSlug, "SKILL.md")
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Errorf("expected skill file at %s: %v", skillPath, err)
+	}
+
+	// Verify the proposal appears in Details with the correct action.
+	foundGap := false
+	for _, p := range report.Details {
+		if p.Action == ProposalFillGap && p.SkillName == expectedSlug {
+			foundGap = true
+		}
+	}
+	if !foundGap {
+		t.Errorf("expected a ProposalFillGap for %q in details; got %+v", expectedSlug, report.Details)
+	}
+}
+
+// TestEvolver_RunCycle_PassDFillGap_NoAutoApply verifies that when
+// AutoApply=false, Pass D proposals are routed to the plan manager
+// (report.Planned) instead of being written to disk (report.Gaps).
+func TestEvolver_RunCycle_PassDFillGap_NoAutoApply(t *testing.T) {
+	dir := t.TempDir()
+	writer := NewWriter(dir, slog.Default())
+	registry := skills.NewRegistry()
+
+	usage := newStubUsageTracker()
+	usage.SetLowMatchQueries([]LowMatchQuery{
+		{
+			Query:     "configure tls mutual auth",
+			Count:     6, // >= minCountForGapProposal (5)
+			BestScore: 0.25,
+		},
+	})
+
+	cfg := defaultEvolverConfig()
+	cfg.AutoApply = false
+	mockLLM := &mockLLMChatter{}
+
+	evolver := NewEvolver(
+		usage, nil, writer, registry, nil,
+		newTestVerifier(true), mockLLM, nil,
+		cfg, slog.Default(),
+	)
+
+	report, err := evolver.RunCycle(context.Background())
+	if err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	if report.Planned != 1 {
+		t.Errorf("expected Planned=1 (AutoApply=false), got %d (report: %+v)", report.Planned, report)
+	}
+	if report.Gaps != 0 {
+		t.Errorf("expected Gaps=0 (AutoApply=false), got %d", report.Gaps)
+	}
+
+	// Skill should NOT be on disk.
+	expectedSlug := "configure-tls-mutual-auth"
+	skillPath := filepath.Join(dir, expectedSlug, "SKILL.md")
+	if _, err := os.Stat(skillPath); err == nil {
+		t.Errorf("skill file should not exist when AutoApply=false: %s", skillPath)
 	}
 }

@@ -254,7 +254,9 @@ func (m *Manager) ProcessRecord(ctx context.Context, record *ShadowRecord) error
 
 // CaptureInteraction captures an LLM interaction for shadow training.
 // This is the primary entry point for data collection from the agent loop.
-func (m *Manager) CaptureInteraction(ctx context.Context, conversationID string, messages []llm.ChatMessage, response *llm.Response, modelID string) {
+// routingPath carries the skill/alias context that routed this interaction
+// (e.g. "skill:coding" or "alias:default"); pass "" when unknown.
+func (m *Manager) CaptureInteraction(ctx context.Context, conversationID string, messages []llm.ChatMessage, response *llm.Response, modelID, routingPath string) {
 	if !m.IsEnabled() || m.trainingStore == nil {
 		return
 	}
@@ -287,6 +289,7 @@ func (m *Manager) CaptureInteraction(ctx context.Context, conversationID string,
 	record.StudentTokensOut = response.Usage.CompletionTokens
 	record.Domain = domain
 	record.TaskType = taskType
+	record.RoutingPath = routingPath
 
 	switch m.config.Shadowing.Mode {
 	case ModeSync:
@@ -636,7 +639,9 @@ func (m *Manager) ResetMetrics() {
 
 // CaptureToolInteraction captures a tool-use interaction for shadow training.
 // This is called when the LLM returns tool calls, capturing the intermediate step.
-func (m *Manager) CaptureToolInteraction(ctx context.Context, conversationID string, messages []llm.ChatMessage, response *llm.Response, modelID string) {
+// routingPath carries the skill/alias context that routed this interaction
+// (e.g. "skill:coding" or "alias:default"); pass "" when unknown.
+func (m *Manager) CaptureToolInteraction(ctx context.Context, conversationID string, messages []llm.ChatMessage, response *llm.Response, modelID, routingPath string) {
 	if !m.IsEnabled() || m.trainingStore == nil {
 		return
 	}
@@ -680,6 +685,7 @@ func (m *Manager) CaptureToolInteraction(ctx context.Context, conversationID str
 	record.StudentTokensOut = response.Usage.CompletionTokens
 	record.Domain = domain
 	record.TaskType = taskType
+	record.RoutingPath = routingPath
 
 	// For tool-use interactions, we typically don't get teacher responses
 	// since the exact tool choice is context-dependent. Just process the record.

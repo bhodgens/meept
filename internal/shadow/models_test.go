@@ -22,3 +22,19 @@ func TestNewPreferencePair_PreservesDomainAndTaskType(t *testing.T) {
 		t.Errorf("expected margin ~0.6, got %v", pair.Margin)
 	}
 }
+
+func TestNewPreferencePair_PreservesRoutingPath(t *testing.T) {
+	record := &ShadowRecord{
+		Domain:         DomainCode,
+		TaskType:       TaskTypeReasoning,
+		RoutingPath:    "skill:coding",
+		StudentContent: "student",
+		TeacherContent: "teacher",
+		StudentModel:   "qwen2.5:7b",
+		TeacherModel:   "claude-opus-4",
+	}
+	pair := NewPreferencePair(record, 0.3, 0.9) // teacher wins
+	if pair.RoutingPath != "skill:coding" {
+		t.Errorf("expected RoutingPath=skill:coding, got %q", pair.RoutingPath)
+	}
+}
