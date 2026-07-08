@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -301,4 +303,157 @@ func TestWorkerPool_FindWorkerWithCapacity(t *testing.T) {
 	if worker != w2 {
 		t.Error("expected to find worker with capacity")
 	}
+}
+
+// TestWorkerPool_MultipleStartStop tests that Start/Stop can be called
+// multiple times without panicking.
+func TestWorkerPool_MultipleStartStop(t *testing.T) {
+	pool := NewWorkerPool(DefaultWorkerPoolConfig())
+
+	for i := 0; i < 5; i++ {
+		pool.Start()
+		pool.Stop()
+	}
+}
+
+// TestWorkerPool_Multiplexing verifies the 1:5 lazy multiplexing ratio:
+// a single worker may accept up to MaxLoopsPerWorker agent loops;
+// adding more forces a new worker or returns an error.
+func TestWorkerPool_Multiplexing(t *testing.T) {
+	cfg := WorkerPoolConfig{
+		MaxWorkers:        10,
+		MaxLoopsPerWorker: 5,
+	}
+	pool := NewWorkerPool(cfg)
+	pool.Start()
+	defer pool.Stop()
+
+	wait := make(chan struct{})
+	go func() {
+		<-wait // never consume -- keep workers busy
+	}()
+
+	// Submit 5 distinct loops. All should fit on one worker.
+	for i := 0; i < 5; i++ {
+		loop := agent.NewAgentLoop("mp-session", "/tmp")
+		item := WorkItem{
+			Loop:           loop,
+			Trigger:        TriggerUserMessage,
+			Message:        "test",
+			ConversationID: "conv",
+		}
+		if err := pool.Submit(item); err != nil {
+			t.Fatalf("Submit loop %d: %v", i, err)
+		}
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	pool.mu.RLock()
+	workersAfterFive := len(pool.workers)
+	pool.mu.RUnlock()
+
+	if workersAfterFive != 1 {
+		t.Errorf("expected 1 worker for 5 loops, got %d", workersAfterFive)
+	}
+
+	// 6th loop must trigger a new worker.
+	loop6 := agent.NewAgentLoop("mp-session-2", "/tmp")
+	if err := pool.Submit(WorkItem{
+		Loop:           loop6,
+		Trigger:        TriggerUserMessage,
+		Message:        "test",
+		ConversationID: "conv-2",
+	}); err != nil {
+		t.Fatalf("Submit loop 6: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	pool.mu.RLock()
+	workersAfterSix := len(pool.workers)
+	pool.mu.RUnlock()
+
+	if workersAfterSix != 2 {
+		t.Errorf("expected 2 workers for 6 loops, got %d", workersAfterSix)
+	}
+}
+
+// TestWorkerPool_ConcurrentSubmit tests thread safety of Submit when
+// called from many goroutines simultaneously.  Run with -race to
+// verify no data races.
+func TestWorkerPool_ConcurrentSubmit(t *testing.T) {
+	cfg := WorkerPoolConfig{
+		MaxWorkers:        20,
+		MaxLoopsPerWorker: 10,
+	}
+	pool := NewWorkerPool(cfg)
+	pool.Start()
+	defer pool.Stop()
+
+	var wg sync.WaitGroup
+	var successCount, errorCount int64
+
+	numGoroutines := 50
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			loop := agent.NewAgentLoop("conc-session", "/tmp")
+			err := pool.Submit(WorkItem{
+				Loop:           loop,
+				Trigger:        TriggerUserMessage,
+				Message:        "hello",
+				ConversationID: "conv",
+			})
+			if err != nil {
+				atomic.AddInt64(&errorCount, 1)
+			} else {
+				atomic.AddInt64(&successCount, 1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// With 20 workers x 10 loops = 200 capacity, all 50 should succeed.
+	if successCount != int64(numGoroutines) {
+		t.Errorf("expected %d successes, got %d", numGoroutines, successCount)
+	}
+
+	pool.mu.RLock()
+	actualWorkers := len(pool.workers)
+	pool.mu.RUnlock()
+
+	// Multiplexing means fewer workers than goroutines.
+	if actualWorkers >= numGoroutines {
+		t.Errorf("expected fewer than %d workers (multiplexing), got %d",
+			numGoroutines, actualWorkers)
+	}
+}
+
+// TestWorkerPool_ConcurrentStop verifies that Stop is safe while
+// goroutines are concurrently submitting work.
+func TestWorkerPool_ConcurrentStop(t *testing.T) {
+	pool := NewWorkerPool(WorkerPoolConfig{
+		MaxWorkers:        5,
+		MaxLoopsPerWorker: 10,
+	})
+	pool.Start()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = pool.Submit(WorkItem{
+				Loop:           agent.NewAgentLoop("stop-conc", "/tmp"),
+				Trigger:        TriggerUserMessage,
+				ConversationID: "conv",
+			})
+		}()
+	}
+
+	// Stop concurrently with submits.
+	pool.Stop()
+	wg.Wait()
 }
