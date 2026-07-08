@@ -92,15 +92,15 @@ func (v *Versioner) versionDir(name string, version int) string {
 func (v *Versioner) Snapshot(name string) (string, error) {
 	mu := v.lockFor(name)
 	mu.Lock()
-	defer mu.Unlock()
 
 	skillPath := v.skillFilePath(name)
+
+	// Collect data under lock, release before I/O (CLAUDE.md mutex-scope rule).
+	mu.Unlock()
+
 	content, err := os.ReadFile(skillPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// First write — nothing to snapshot. Per plan contract:
-			// "Snapshot(name) returns empty string + no-op if the skill
-			// doesn't exist yet — that's fine, it's a first-write."
 			v.logger.Debug("Snapshot skip: skill does not exist yet",
 				"name", name, "path", skillPath)
 			return "", nil //nolint:nilerr // intentional: first-write is a documented no-op
@@ -111,14 +111,14 @@ func (v *Versioner) Snapshot(name string) (string, error) {
 	contentSHA := sha256Hex(content)
 	treeSHA := computeTreeSHA(skillPath, contentSHA, len(content))
 
-	// Ensure the versions parent directory exists before reading history
-	// (glob on a non-existent dir returns empty, which is fine, but creating
-	// it early avoids a race between History glob and subsequent MkdirAll).
+	// Re-acquire lock only for the critical section of version number assignment.
+	mu.Lock()
 	versionsDir := v.versionsDir(name)
 	_ = os.MkdirAll(versionsDir, 0o755)
 
 	entries, err := v.History(name)
 	if err != nil {
+		mu.Unlock()
 		return "", fmt.Errorf("versioner: read history for next version: %w", err)
 	}
 
@@ -126,19 +126,19 @@ func (v *Versioner) Snapshot(name string) (string, error) {
 	if len(entries) > 0 {
 		nextVersion = entries[len(entries)-1].Version + 1
 	}
+	mu.Unlock()
 
+	// All I/O outside the lock.
 	versionDir := v.versionDir(name, nextVersion)
 	if err := os.MkdirAll(versionDir, 0o755); err != nil {
 		return "", fmt.Errorf("versioner: create version dir: %w", err)
 	}
 
-	// Copy SKILL.md into the version dir.
 	versionedSkillPath := filepath.Join(versionDir, "SKILL.md")
 	if err := os.WriteFile(versionedSkillPath, content, 0o644); err != nil {
 		return "", fmt.Errorf("versioner: write versioned skill file: %w", err)
 	}
 
-	// Write bundle.json manifest.
 	manifest := VersionEntry{
 		Version:    nextVersion,
 		ContentSHA: contentSHA,
@@ -151,7 +151,6 @@ func (v *Versioner) Snapshot(name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("versioner: marshal manifest: %w", err)
 	}
-	// Atomic manifest write: tmp + rename.
 	tmpManifest := manifestPath + ".tmp"
 	if err := os.WriteFile(tmpManifest, manifestBytes, 0o644); err != nil {
 		return "", fmt.Errorf("versioner: write manifest tmp: %w", err)
@@ -161,8 +160,6 @@ func (v *Versioner) Snapshot(name string) (string, error) {
 		return "", fmt.Errorf("versioner: rename manifest: %w", err)
 	}
 
-	// Prune oldest beyond cap. The new version directory is already on disk,
-	// so total count is len(entries) + 1 (the just-written manifest).
 	if err := v.pruneOldVersions(name, len(entries)+1); err != nil {
 		v.logger.Warn("Versioner: prune old versions failed",
 			"name", name, "error", err)
@@ -255,9 +252,10 @@ func (v *Versioner) Restore(name string, version int) error {
 
 	mu := v.lockFor(name)
 	mu.Lock()
-	defer mu.Unlock()
-
 	versionedSkillPath := filepath.Join(v.versionDir(name, version), "SKILL.md")
+	mu.Unlock()
+
+	// Read outside the lock.
 	content, err := os.ReadFile(versionedSkillPath)
 	if err != nil {
 		return fmt.Errorf("versioner: read versioned skill: %w", err)
