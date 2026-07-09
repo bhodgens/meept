@@ -184,9 +184,21 @@ type Session struct {
 	// Session designation (Plan 4.1)
 	Designation    *SessionDesignation `json:"designation,omitempty"`
 
+	// Project binding for agent execution context
+	ProjectID        string `json:"project_id,omitempty"`
+	ProjectPath      string `json:"project_path,omitempty"`
+	DetectionContext *DetectionContext `json:"detection_context,omitempty"`
+
 	// Archived controls soft-archive (sort-to-bottom, dimmed rendering).
 	// Mirror of internal/session.Session.Archived.
 	Archived bool `json:"archived,omitempty"`
+}
+
+// DetectionContext captures client-side context for session creation (TUI type).
+type DetectionContext struct {
+	CWD               string   `json:"cwd,omitempty"`
+	DetectedProjectID string   `json:"detected_project_id,omitempty"`
+	CLIArgs           []string `json:"cli_args,omitempty"`
 }
 
 // SessionDesignation tracks a session's special status requiring attention (TUI type).

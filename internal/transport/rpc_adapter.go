@@ -58,7 +58,7 @@ func (a *rpcAdapter) CacheInspect(promptHash string) (*types.CacheInspectRespons
 	return a.client.CacheInspect(promptHash)
 }
 func (a *rpcAdapter) ListSessions() (*types.SessionListResponse, error) { return a.client.ListSessions() }
-func (a *rpcAdapter) CreateSession(name string) (*types.Session, error) { return a.client.CreateSession(name) }
+func (a *rpcAdapter) CreateSession(name string, cwd string) (*types.Session, error) { return a.client.CreateSession(name, cwd) }
 func (a *rpcAdapter) AttachSession(sessionID, clientID string) error { return a.client.AttachSession(sessionID, clientID) }
 func (a *rpcAdapter) DetachSession(sessionID, clientID string) error { return a.client.DetachSession(sessionID, clientID) }
 func (a *rpcAdapter) GetMostRecentSession() (*types.Session, error)  { return a.client.GetMostRecentSession() }

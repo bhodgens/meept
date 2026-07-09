@@ -51,6 +51,13 @@ type SessionDesignation struct {
 	Priority       string            `json:"priority"` // low, normal, high, urgent
 }
 
+// DetectionContext captures client-side context for session creation.
+type DetectionContext struct {
+	CWD               string   `json:"cwd,omitempty"`
+	DetectedProjectID string   `json:"detected_project_id,omitempty"`
+	CLIArgs           []string `json:"cli_args,omitempty"`
+}
+
 // Session represents an active conversation session that can be shared
 // by multiple clients.
 //
@@ -67,6 +74,7 @@ type Session struct {
 	LeafMessageID   *int64              `json:"leaf_message_id,omitempty"`
 	ProjectID       string              `json:"project_id,omitempty"`
 	ProjectPath     string              `json:"project_path,omitempty"`
+	DetectionContext *DetectionContext   `json:"detection_context,omitempty"`
 	NoFence         bool                `json:"no_fence,omitempty"`
 
 	// Archived indicates the session has been soft-archived. Archived sessions
@@ -1108,6 +1116,7 @@ type Handler struct {
 	bus           *bus.MessageBus
 	logger        *slog.Logger
 	summarizer    *Summarizer
+	refresher     *SessionRefresher
 	branchManager *BranchManager
 }
 
@@ -1125,6 +1134,13 @@ func WithSummarizer(s *Summarizer) HandlerOption {
 func WithBranchManager(bm *BranchManager) HandlerOption {
 	return func(h *Handler) {
 		h.branchManager = bm
+	}
+}
+
+// WithRefresher sets the refresher for mid-session title updates.
+func WithRefresher(r *SessionRefresher) HandlerOption {
+	return func(h *Handler) {
+		h.refresher = r
 	}
 }
 
@@ -1154,9 +1170,10 @@ func NewHandler(store Store, msgBus *bus.MessageBus, logger *slog.Logger, opts .
 		"session.delete":               h.handleSessionDelete,
 		"session.messages.save":        h.handleSessionSaveMessages,
 		"session.messages.get":         h.handleSessionGetMessages,
-		"session.update_description":   h.handleSessionUpdateDescription,
-		"session.generate_description": h.handleSessionGenerateDescription,
-		"session.stop":                 h.handleSessionStop,
+		"session.update_description":    h.handleSessionUpdateDescription,
+		"session.generate_description":  h.handleSessionGenerateDescription,
+		"session.refresh_title":            h.handleSessionRefreshTitle,
+		"session.stop":                  h.handleSessionStop,
 		"session.get_child_tasks":      h.handleSessionGetChildTasks,
 		"session.branch.navigate":      h.handleBranchNavigate,
 		"session.branches.list":        h.handleBranchesList,
@@ -1252,6 +1269,10 @@ func (h *Handler) handleSessionTreeGet(ctx context.Context, topic string, msg an
 	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
+func (h *Handler) handleSessionRefreshTitle(ctx context.Context, topic string, msg any) {
+h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
 // handleMessage routes messages to the appropriate handler.
 func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 	var response any
@@ -1280,6 +1301,8 @@ func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 		response, err = h.handleUpdateDescription(msg)
 	case "session.generate_description":
 		response, err = h.handleGenerateDescription(msg)
+	case "session.refresh_title":
+		response, err = h.handleRefreshTitle(msg)
 	case "session.stop":
 		response, err = h.handleStop(msg)
 	case "session.get_child_tasks":
@@ -1303,7 +1326,8 @@ func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 // handleCreate creates a new session.
 func (h *Handler) handleCreate(msg *models.BusMessage) (any, error) {
 	var params struct {
-		Name string `json:"name"`
+		Name             string            `json:"name"`
+		DetectionContext *DetectionContext `json:"detection_context,omitempty"`
 	}
 	if err := json.Unmarshal(msg.Payload, &params); err != nil {
 		return nil, err
@@ -1312,6 +1336,16 @@ func (h *Handler) handleCreate(msg *models.BusMessage) (any, error) {
 	session, err := h.store.Create(params.Name)
 	if err != nil {
 		return nil, err
+	}
+
+	// Store detection context if provided
+	if params.DetectionContext != nil {
+		session.DetectionContext = params.DetectionContext
+		// If a project was detected, bind it
+		if params.DetectionContext.DetectedProjectID != "" {
+			// Project binding happens via project.set RPC
+			// Here we just store the context for later use
+		}
 	}
 	return session, nil
 }
@@ -1727,4 +1761,70 @@ func (h *Handler) sendResponse(replyTo, topic string, response any, err error) {
 	}
 
 	h.bus.Publish(topic, msg)
+}
+
+// handleRefreshTitle handles a session title refresh request.
+// It calls the SessionRefresher to generate an updated title based on
+// conversation progress, saves it to the session store, and publishes
+// a session.title_updated event for real-time GUI updates.
+func (h *Handler) handleRefreshTitle(msg *models.BusMessage) (any, error) {
+	var params RefreshRequest
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		h.logger.Error("Failed to unmarshal refresh title params", "error", err)
+		return nil, err
+	}
+
+	if h.refresher == nil {
+		h.logger.Warn("Session refresher not configured, cannot refresh title")
+		return nil, fmt.Errorf("session refresher not configured")
+	}
+
+	// Call the refresher to generate an updated title
+	result, err := h.refresher.Refresh(context.Background(), params)
+	if err != nil {
+		h.logger.Error("Failed to refresh session title", "error", err, "session_id", params.SessionID)
+		return nil, err
+	}
+
+	// Update the session name and description in the store
+	if err := h.store.UpdateName(params.SessionID, result.Name); err != nil {
+		h.logger.Error("Failed to save refreshed session name", "error", err, "session_id", params.SessionID)
+		return nil, err
+	}
+	if err := h.store.UpdateDescription(params.SessionID, result.Description); err != nil {
+		h.logger.Error("Failed to save refreshed session description", "error", err, "session_id", params.SessionID)
+		return nil, err
+	}
+
+	h.logger.Info("Session title refreshed",
+		"session_id", params.SessionID,
+		"name", result.Name,
+		"description", result.Description,
+	)
+
+	// Publish real-time event for GUI updates
+	h.bus.Publish("session.title_updated", &models.BusMessage{
+		ID:        sid.Generate("session-title-"),
+		Type:      models.MessageTypeEvent,
+		Topic:     "session.title_updated",
+		Source:    "session-handler",
+		Timestamp: time.Now().UTC(),
+		Payload:   jsonMustMarshal(map[string]any{
+			"session_id":  params.SessionID,
+			"name":        result.Name,
+			"description": result.Description,
+		}),
+	})
+
+	return result, nil
+}
+
+// jsonMustMarshal marshals a value to JSON, panicking on failure.
+// Used for internal payloads where marshaling should never fail.
+func jsonMustMarshal(v any) []byte {
+	data, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return data
 }
