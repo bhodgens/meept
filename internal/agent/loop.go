@@ -1278,13 +1278,13 @@ func (l *AgentLoop) CompressionPipeline() *compress.Pipeline {
 
 // NewAgentLoop creates a new agent loop with explicit session context.
 // sessionID identifies the session this loop belongs to.
-// workingDir is the project directory for agent execution (required; use SetWorkingDir to change later).
+// workingDir is the project directory for agent execution. May be empty at
+// construction for two-phase initialization (registry creates loops with
+// empty workingDir, then calls SetWorkingDir when the session binds to a
+// project); callers that know the directory up-front should pass it.
 func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *AgentLoop {
 	if sessionID == "" {
 		panic("NewAgentLoop: sessionID required")
-	}
-	if workingDir == "" {
-		panic("NewAgentLoop: workingDir required")
 	}
 	loop := &AgentLoop{
 		sessionID:       sessionID,

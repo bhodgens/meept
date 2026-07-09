@@ -23,11 +23,15 @@ func TestNewAgentLoop_PanicsOnEmptySessionID(t *testing.T) {
 	})
 }
 
-// TestNewAgentLoop_PanicsOnEmptyWorkingDir verifies the workingDir panic guard.
-func TestNewAgentLoop_PanicsOnEmptyWorkingDir(t *testing.T) {
-	require.PanicsWithValue(t, "NewAgentLoop: workingDir required", func() {
-		_ = NewAgentLoop("s", "")
-	})
+// TestNewAgentLoop_AllowsEmptyWorkingDir verifies that the constructor permits
+// an empty workingDir for two-phase initialization (registry creates loops
+// with empty workingDir, then calls SetWorkingDir once the session binds to
+// a project). There is no os.Getwd() default fallback.
+func TestNewAgentLoop_AllowsEmptyWorkingDir(t *testing.T) {
+	loop := NewAgentLoop("s", "")
+
+	assert.Equal(t, "", loop.GetWorkingDir(), "empty workingDir should stay empty (no default fallback)")
+	assert.Equal(t, "s", loop.GetSessionID(), "sessionID should still be wired")
 }
 
 // TestNewAgentLoop_NoDefaultFallbacks verifies that a freshly constructed loop
