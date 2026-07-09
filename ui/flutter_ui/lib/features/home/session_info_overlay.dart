@@ -21,10 +21,6 @@ import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
 import '../../models/api_models.dart';
-import '../../widgets/background_image.dart';
-import '../plans/plans_tab.dart';
-import '../tasks/tasks_tab.dart';
-import '../agents/agents_tab.dart';
 
 /// Session info overlay dialog
 class SessionInfoOverlay extends StatefulWidget {
@@ -229,10 +225,12 @@ class _PlansTabContent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // TODO Phase 5: Filter plans by session ID
     final plansState = ref.watch(planProvider);
+    final sessionPlans = plansState.plans
+        .where((p) => p.sourceSession == sessionId)
+        .toList();
 
-    if (plansState.plans.isEmpty) {
+    if (sessionPlans.isEmpty) {
       return const _EmptyState(
         icon: Icons.document_scanner,
         message: 'no plans for this session',
@@ -241,9 +239,9 @@ class _PlansTabContent extends ConsumerWidget {
 
     return ListView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: plansState.plans.length,
+      itemCount: sessionPlans.length,
       itemBuilder: (context, index) {
-        final plan = plansState.plans[index];
+        final plan = sessionPlans[index];
         return _PlanItem(plan: plan);
       },
     );
@@ -252,7 +250,7 @@ class _PlansTabContent extends ConsumerWidget {
 
 /// Single plan item in the list
 class _PlanItem extends StatelessWidget {
-  final dynamic plan; // TODO: Use proper Plan type
+  final Plan plan;
 
   const _PlanItem({required this.plan});
 
@@ -273,17 +271,17 @@ class _PlanItem extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            plan.title ?? 'Untitled Plan',
+            plan.title.isEmpty ? 'Untitled Plan' : plan.title,
             style: CyberpunkTypography.bodyMedium.copyWith(
               color: CyberpunkColors.orangePrimary,
               fontFamily: 'SourceCodePro',
             ),
           ),
-          if (plan.description != null && plan.description!.isNotEmpty)
+          if (plan.description.isNotEmpty)
             const SizedBox(height: 4),
-          if (plan.description != null && plan.description!.isNotEmpty)
+          if (plan.description.isNotEmpty)
             Text(
-              plan.description!,
+              plan.description,
               style: CyberpunkTypography.bodySmall.copyWith(
                 color: CyberpunkColors.lightGray,
               ),
@@ -304,10 +302,12 @@ class _TasksTabContent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // TODO Phase 5: Filter tasks by session ID
     final tasksState = ref.watch(taskProvider);
+    final sessionTasks = tasksState.tasks
+        .where((t) => t.sessionId == sessionId)
+        .toList();
 
-    if (tasksState.tasks.isEmpty) {
+    if (sessionTasks.isEmpty) {
       return const _EmptyState(
         icon: Icons.task_alt,
         message: 'no tasks for this session',
@@ -316,9 +316,9 @@ class _TasksTabContent extends ConsumerWidget {
 
     return ListView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: tasksState.tasks.length,
+      itemCount: sessionTasks.length,
       itemBuilder: (context, index) {
-        final task = tasksState.tasks[index];
+        final task = sessionTasks[index];
         return _TaskItem(task: task);
       },
     );
@@ -327,7 +327,7 @@ class _TasksTabContent extends ConsumerWidget {
 
 /// Single task item in the list
 class _TaskItem extends StatelessWidget {
-  final dynamic task; // TODO: Use proper Task type
+  final Task task;
 
   const _TaskItem({required this.task});
 
@@ -354,7 +354,7 @@ class _TaskItem extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              task.title ?? 'Untitled Task',
+              task.title.isEmpty ? 'Untitled Task' : task.title,
               style: CyberpunkTypography.bodyMedium.copyWith(
                 color: CyberpunkColors.lightGray,
                 fontFamily: 'SourceCodePro',
@@ -366,7 +366,7 @@ class _TaskItem extends StatelessWidget {
     );
   }
 
-  IconData _taskStatusIcon(String? status) {
+  IconData _taskStatusIcon(String status) {
     switch (status) {
       case 'completed':
         return Icons.check_circle;
@@ -379,7 +379,7 @@ class _TaskItem extends StatelessWidget {
     }
   }
 
-  Color _taskStatusColor(String? status) {
+  Color _taskStatusColor(String status) {
     switch (status) {
       case 'completed':
         return CyberpunkColors.greenSuccess;
@@ -393,7 +393,7 @@ class _TaskItem extends StatelessWidget {
   }
 }
 
-/// Agents tab content - session scoped
+/// Agents tab content - shows agents assigned to tasks in this session
 class _AgentsTabContent extends ConsumerWidget {
   final String sessionId;
 
@@ -401,21 +401,37 @@ class _AgentsTabContent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // TODO Phase 5: Filter agents by session
     final agentsState = ref.watch(agentProvider);
+    final tasksState = ref.watch(taskProvider);
 
-    if (agentsState.agents.isEmpty) {
+    // Collect unique agent IDs from tasks in this session
+    final sessionTaskAgentIds = <String>{
+      for (final t in tasksState.tasks)
+        if (t.sessionId == sessionId && t.agentId != null) t.agentId!,
+    };
+
+    // If we have specific agents, show them; otherwise show all agents
+    final List<Agent> displayAgents;
+    if (sessionTaskAgentIds.isEmpty || sessionTaskAgentIds.length >= agentsState.agents.length) {
+      displayAgents = agentsState.agents;
+    } else {
+      displayAgents = agentsState.agents
+          .where((a) => sessionTaskAgentIds.contains(a.id))
+          .toList();
+    }
+
+    if (displayAgents.isEmpty) {
       return const _EmptyState(
         icon: Icons.smart_toy,
-        message: 'no agents available',
+        message: 'no agents for this session',
       );
     }
 
     return ListView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: agentsState.agents.length,
+      itemCount: displayAgents.length,
       itemBuilder: (context, index) {
-        final agent = agentsState.agents[index];
+        final agent = displayAgents[index];
         return _AgentItem(agent: agent);
       },
     );
@@ -424,7 +440,7 @@ class _AgentsTabContent extends ConsumerWidget {
 
 /// Single agent item in the list
 class _AgentItem extends StatelessWidget {
-  final dynamic agent; // TODO: Use proper Agent type
+  final Agent agent;
 
   const _AgentItem({required this.agent});
 
@@ -454,15 +470,15 @@ class _AgentItem extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  agent.name ?? 'Unknown Agent',
+                  agent.name.isEmpty ? 'Unknown Agent' : agent.name,
                   style: CyberpunkTypography.bodyMedium.copyWith(
                     color: CyberpunkColors.orangePrimary,
                     fontFamily: 'SourceCodePro',
                   ),
                 ),
-                if (agent.role != null && agent.role!.isNotEmpty)
+                if (agent.description.isNotEmpty)
                   Text(
-                    agent.role!,
+                    agent.description,
                     style: CyberpunkTypography.bodySmall.copyWith(
                       color: CyberpunkColors.lightGray,
                       fontSize: 10,
@@ -471,7 +487,7 @@ class _AgentItem extends StatelessWidget {
               ],
             ),
           ),
-          if (agent.status == 'active')
+          if (agent.enabled)
             Container(
               width: 8,
               height: 8,

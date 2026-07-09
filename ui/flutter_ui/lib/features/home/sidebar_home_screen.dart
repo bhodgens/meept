@@ -25,7 +25,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/router.dart';
@@ -33,12 +32,10 @@ import '../../core/shortcuts.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../widgets/command_palette.dart';
-import '../../widgets/background_image.dart';
 import '../../widgets/status_bar.dart';
 import '../../providers/providers.dart';
 import '../../models/api_models.dart';
 import '../../providers/status_message_provider.dart';
-import '../../providers/tab_activation_provider.dart';
 import '../../providers/verbosity_provider.dart';
 import '../chat/chat_tab.dart';
 import 'tools_dropdown.dart' show HamburgerMenu;
@@ -421,7 +418,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
 }
 
 /// Individual session tree item with expand/collapse
-class _SessionTreeItem extends StatelessWidget {
+class _SessionTreeItem extends ConsumerStatefulWidget {
   final Session session;
   final bool isSelected;
   final bool isExpanded;
@@ -437,17 +434,70 @@ class _SessionTreeItem extends StatelessWidget {
   });
 
   @override
+  ConsumerState<_SessionTreeItem> createState() => _SessionTreeItemState();
+}
+
+/// Holds child items (tasks+plans) loaded for one session.
+class _SessionChildren {
+  final List<Task> tasks;
+  final List<Plan> plans;
+  const _SessionChildren({required this.tasks, required this.plans});
+}
+
+class _SessionTreeItemState extends ConsumerState<_SessionTreeItem> {
+  Future<_SessionChildren?>? _childrenFuture;
+
+  @override
+  void didUpdateWidget(_SessionTreeItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Reset on expansion toggle so we refetch
+    if (widget.isExpanded != oldWidget.isExpanded) {
+      _childrenFuture = null;
+    }
+  }
+
+  Future<_SessionChildren?> _fetchChildren() async {
+    final sdkClient = ref.read(sdkClientProvider);
+    final sessionId = widget.session.id;
+    try {
+      final futures = <Future<dynamic>>[
+        sdkClient.listTasks(sessionId: sessionId).then(
+            (r) => r.map((t) => Task.fromJson(t)).toList()),
+        sdkClient.listPlansBySession(sessionId).then(
+            (r) => r.map((p) => Plan.fromJson(p)).toList()),
+      ];
+      final results = await Future.wait(futures);
+      return _SessionChildren(
+        tasks: results[0] as List<Task>,
+        plans: results[1] as List<Plan>,
+      );
+    } catch (e) {
+      debugPrint('[tree] load children for session $sessionId: $e');
+      return null;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    // Kick off loading when expanded for the first time
+    if (widget.isExpanded && _childrenFuture == null) {
+      _childrenFuture = _fetchChildren();
+      // Trigger re-build once data arrives
+      _childrenFuture!.then((_) => setState(() {}));
+    }
+
     return Column(
       children: [
         Container(
           decoration: BoxDecoration(
-            color: isSelected
+            color: widget.isSelected
                 ? CyberpunkColors.orangePrimary.withValues(alpha: 0.2)
                 : Colors.transparent,
             border: Border(
               left: BorderSide(
-                color: isSelected ? CyberpunkColors.orangePrimary : Colors.transparent,
+                color: widget.isSelected
+                    ? CyberpunkColors.orangePrimary
+                    : Colors.transparent,
                 width: 3,
               ),
             ),
@@ -455,27 +505,33 @@ class _SessionTreeItem extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           child: Row(
             children: [
-              // Expand/collapse indicator
+              // Expand/collapse indicator (always show arrow to allow collapse)
               GestureDetector(
-                onTap: onToggle,
+                onTap: widget.onToggle,
                 child: SizedBox(
                   width: 16,
                   height: 16,
                   child: Icon(
-                    isExpanded ? Icons.arrow_drop_down : Icons.arrow_right,
+                    widget.isExpanded
+                        ? Icons.arrow_drop_down
+                        : Icons.arrow_right,
                     size: 14,
-                    color: CyberpunkColors.lightGray,
+                    color: widget.isExpanded
+                        ? CyberpunkColors.orangePrimary
+                        : CyberpunkColors.midGray,
                   ),
                 ),
               ),
               // Session name (clickable)
               Expanded(
                 child: GestureDetector(
-                  onTap: onSelect,
+                  onTap: widget.onSelect,
                   child: Text(
-                    session.title.isEmpty ? 'unnamed' : session.title,
+                    widget.session.title.isEmpty
+                        ? 'unnamed'
+                        : widget.session.title,
                     style: CyberpunkTypography.bodySmall.copyWith(
-                      color: isSelected
+                      color: widget.isSelected
                           ? CyberpunkColors.orangePrimary
                           : CyberpunkColors.lightGray,
                       fontFamily: 'SourceCodePro',
@@ -491,7 +547,8 @@ class _SessionTreeItem extends StatelessWidget {
                   showDialog(
                     context: context,
                     barrierDismissible: true,
-                    builder: (_) => SessionInfoOverlay(session: session),
+                    builder: (_) =>
+                        SessionInfoOverlay(session: widget.session),
                   );
                 },
                 child: Padding(
@@ -507,27 +564,172 @@ class _SessionTreeItem extends StatelessWidget {
           ),
         ),
         // Children (tasks/plans) - shown when expanded
-        if (isExpanded) ..._buildChildren(),
+        if (widget.isExpanded) ..._buildChildren(),
       ],
     );
   }
 
   List<Widget> _buildChildren() {
-    // TODO: This will be populated with actual tasks/plans in Phase 5
-    // For now, show a placeholder
+    final future = _childrenFuture;
+
+    // Not yet loaded — show loading indicator
+    if (future == null) {
+      return [
+        Padding(
+          padding: const EdgeInsets.only(left: 24, bottom: 4),
+          child: Text(
+            'loading...',
+            style: CyberpunkTypography.bodySmall.copyWith(
+              color: CyberpunkColors.midGray,
+              fontFamily: 'SourceCodePro',
+              fontSize: 10,
+            ),
+          ),
+        ),
+      ];
+    }
+
     return [
-      Padding(
-        padding: const EdgeInsets.only(left: 24, bottom: 4),
-        child: Text(
-          'loading...',
-          style: CyberpunkTypography.bodySmall.copyWith(
-            color: CyberpunkColors.midGray,
-            fontFamily: 'SourceCodePro',
-            fontSize: 10,
+      FutureBuilder<_SessionChildren?>(
+        future: future,
+        builder: (context, snap) {
+          if (snap.hasData && snap.data != null) {
+            final data = snap.data!;
+            final allChildren = <Map<String, dynamic>>[
+              for (final t in data.tasks) {'type': 'task', 'data': t},
+              for (final p in data.plans) {'type': 'plan', 'data': p},
+            ]..sort((a, b) {
+                final ta = a['type'] as String;
+                final tb = b['type'] as String;
+                if (ta != tb) return ta == 'task' ? -1 : 1;
+                return 0;
+              });
+
+            if (allChildren.isEmpty) {
+              return Padding(
+                padding: const EdgeInsets.only(left: 24, bottom: 4),
+                child: Text(
+                  'no tasks or plans',
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    color: CyberpunkColors.midGray,
+                    fontFamily: 'SourceCodePro',
+                    fontSize: 10,
+                  ),
+                ),
+              );
+            }
+
+            return Column(
+              children: allChildren
+                  .map((child) {
+                    final type = child['type'] as String;
+                    final task = type == 'task' ? (child['data'] as Task?) : null;
+                    final plan = type == 'plan' ? (child['data'] as Plan?) : null;
+                    return Padding(
+                      padding: const EdgeInsets.only(left: 24, bottom: 2),
+                      child: _ChildWidget(type: type, task: task, plan: plan),
+                    );
+                  })
+                  .toList(),
+            );
+          }
+
+          if (snap.hasError) {
+            return Padding(
+              padding: const EdgeInsets.only(left: 24, bottom: 4),
+              child: Text(
+                'error loading children',
+                style: CyberpunkTypography.bodySmall.copyWith(
+                  color: CyberpunkColors.redAlert,
+                  fontFamily: 'SourceCodePro',
+                  fontSize: 10,
+                ),
+              ),
+            );
+          }
+
+          return Padding(
+            padding: const EdgeInsets.only(left: 24, bottom: 4),
+            child: Text(
+              'loading...',
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.midGray,
+                fontFamily: 'SourceCodePro',
+                fontSize: 10,
+              ),
+            ),
+          );
+        },
+      ),
+    ];
+  }
+}
+
+/// Renders a single child item (task or plan) in the session tree.
+class _ChildWidget extends StatelessWidget {
+  final String type;
+  final Task? task;
+  final Plan? plan;
+
+  const _ChildWidget({
+    required this.type,
+    this.task,
+    this.plan,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bgColor = CyberpunkColors.midGray.withValues(alpha: 0.2);
+    final textColor = CyberpunkColors.lightGray;
+    final accentColor =
+        type == 'task' ? CyberpunkColors.orangeDark : CyberpunkColors.greenSuccess;
+    final title = type == 'task' ? (task!.title.isEmpty ? 'untitled task' : task!.title) : plan!.title;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: bgColor,
+        border: Border(
+          left: BorderSide(
+            color: accentColor.withValues(alpha: 0.3),
+            width: 2,
           ),
         ),
       ),
-    ];
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(
+        children: [
+          // Type icon
+          Icon(
+            type == 'task' ? Icons.check_box_outline_blank : Icons.folder_outlined,
+            size: 12,
+            color: accentColor,
+          ),
+          const SizedBox(width: 6),
+          // Label
+          Expanded(
+            child: Text(
+              title,
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: textColor,
+                fontFamily: 'SourceCodePro',
+                fontSize: 10,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          // Task status
+          if (type == 'task' && task!.status.isNotEmpty)
+            Text(
+              task!.status,
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: accentColor.withValues(alpha: 0.6),
+                fontFamily: 'SourceCodePro',
+                fontSize: 9,
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }
 
