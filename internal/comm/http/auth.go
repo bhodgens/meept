@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -100,16 +99,6 @@ func (a *APIKeyAuth) extractKey(r *http.Request) string {
 				}
 			}
 		}
-
-		// Legacy fallback: query param token.
-		// WARNING: credentials in query params are logged in access logs.
-		if token := r.URL.Query().Get("token"); token != "" {
-			slog.Warn("websocket auth via query param (credentials visible in logs)",
-				"remote", r.RemoteAddr,
-				"hint", "use Authorization header or Sec-WebSocket-Protocol: bearer.<key>",
-			)
-			return token
-		}
 	}
 
 	return ""
@@ -117,9 +106,9 @@ func (a *APIKeyAuth) extractKey(r *http.Request) string {
 
 
 // ExtractKeyFromRequest extracts the API key from HTTP request headers or
-// query parameters using the same logic as the APIKeyAuth middleware.
+// Sec-WebSocket-Protocol header using the same logic as the APIKeyAuth middleware.
 // Returns the key if found, empty string if missing.
-// Priority: Authorization header > Sec-WebSocket-Protocol > query param ?token=
+// Priority: Authorization header > Sec-WebSocket-Protocol
 func ExtractKeyFromRequest(r *http.Request) string {
 	auth := r.Header.Get("Authorization")
 	const bearerPrefix = "Bearer "
@@ -136,14 +125,6 @@ func ExtractKeyFromRequest(r *http.Request) string {
 					return p[len("bearer."):]
 				}
 			}
-		}
-		// Legacy fallback - warning logged inline
-		if token := r.URL.Query().Get("token"); token != "" {
-			slog.Warn("websocket auth via query param (credentials visible in logs)",
-				"remote", r.RemoteAddr,
-				"hint", "use Authorization header or Sec-WebSocket-Protocol: bearer.<key>",
-			)
-			return token
 		}
 	}
 	return ""

@@ -79,11 +79,47 @@ func (cs *CredentialStore) Delete(providerID string) error {
 }
 
 // writeToFile writes credentials to disk without holding any lock.
+// Uses atomic write pattern (temp file + rename) to prevent corruption
+// and TOCTOU race conditions.
 func (cs *CredentialStore) writeToFile(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+
+	// Write to temp file first, then atomically rename
+	tmpFile, err := os.CreateTemp(dir, "credentials-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmpFile.Name()
+
+	// Clean up temp file on any error
+	success := false
+	defer func() {
+		if !success {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Chmod(0o600); err != nil {
+		tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+
+	// Atomic rename
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	success = true
+	return nil
 }
 
 // List returns all stored provider IDs.

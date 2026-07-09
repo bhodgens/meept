@@ -131,15 +131,6 @@ func ClientTLSConfig(cfg TLSConfig) (*tls.Config, error) {
 	return tlsConfig, nil
 }
 
-// InsecureSkipVerify creates a TLS config that skips certificate verification.
-// WARNING: This should only be used for testing/development.
-func InsecureSkipVerify() *tls.Config {
-	return &tls.Config{
-		InsecureSkipVerify: true, //nolint:gosec // development mode only; production uses proper TLS
-		MinVersion:         tls.VersionTLS12,
-	}
-}
-
 // VersionString returns a human-readable TLS version string.
 func VersionString(version uint16) string {
 	switch version {

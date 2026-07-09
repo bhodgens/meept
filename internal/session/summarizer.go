@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -104,32 +103,14 @@ All lowercase. No punctuation at end of description.`
 
 	s.logger.Debug("LLM summarization response received", "raw_response", resp.Content)
 
-	// Parse JSON response
-	content := strings.TrimSpace(resp.Content)
-	var result SummarizeResult
-	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		s.logger.Warn("Failed to parse JSON response, using fallback", "error", err, "content", content)
-		return extractSimpleResult(req.FirstMessage), nil
-	}
+	// Parse JSON response and clean up
+	name, desc := cleanTitleResult(resp.Content,
+		extractSimpleResult(req.FirstMessage).Name,
+		extractSimpleResult(req.FirstMessage).Description,
+	)
 
-	// Clean up and validate
-	result.Name = strings.ToLower(strings.TrimSpace(result.Name))
-	result.Description = strings.ToLower(strings.TrimSpace(result.Description))
-	result.Description = strings.TrimSuffix(result.Description, ".")
-
-	// Ensure name is a single word
-	if words := strings.Fields(result.Name); len(words) > 1 {
-		result.Name = words[0]
-	}
-	if result.Name == "" {
-		result.Name = "chat"
-	}
-	if len(result.Description) > 60 {
-		result.Description = result.Description[:60] + "..."
-	}
-
-	s.logger.Debug("Generated session summary", "name", result.Name, "description", result.Description)
-	return &result, nil
+	s.logger.Debug("Generated session summary", "name", name, "description", desc)
+	return &SummarizeResult{Name: name, Description: desc}, nil
 }
 
 // SummarizeBranchRequest contains the data needed to summarize a conversation branch.
@@ -235,33 +216,61 @@ func fallbackBranchSummary(req SummarizeBranchRequest) string {
 	return fmt.Sprintf("branch %s: %d messages covering %s", req.BranchID, len(req.Messages), firstUserMsg)
 }
 
-// extractSimpleResult extracts the first few words as a fallback.
+// extractSimpleResult extracts a session name and description from text.
+// Name: first non-filler word (or first word if all are fillers)
+// Description: lowercased text, truncated to 60 chars with "..." if needed.
 func extractSimpleResult(text string) *SummarizeResult {
 	words := strings.Fields(text)
 
-	// Name: first significant word (or first 2 words if they form a clear action)
-	name := "chat"
-	if len(words) > 0 {
-		name = strings.ToLower(words[0])
-		// Skip common short words
-		if len(name) < 3 && len(words) > 1 {
-			name = strings.ToLower(words[1])
-		}
-		// Use first 2 words if they form a clear action phrase (e.g., "review project")
-		if len(words) >= 2 && len(words[0]) >= 3 && len(words[0]) <= 10 {
-			name = strings.ToLower(strings.Join(words[:2], " "))
+	// Default result for empty input
+	if len(words) == 0 {
+		return &SummarizeResult{
+			Name:        "chat",
+			Description: "new conversation",
 		}
 	}
 
-	// Description: first 15 words for better context (was 6)
-	maxWords := min(len(words), 15)
-	desc := "new conversation"
-	if maxWords > 0 {
-		desc = strings.Join(words[:maxWords], " ")
-		if len(words) > maxWords {
-			desc += "..."
+	// Fillers to skip when extracting the name
+	fillers := map[string]bool{
+		"a": true, "an": true, "the": true,
+		"is": true, "are": true, "was": true, "were": true,
+		"i": true, "you": true, "we": true, "they": true,
+		"my": true, "your": true, "our": true, "their": true,
+		"what": true, "when": true, "where": true, "why": true, "how": true,
+		"do": true, "does": true, "did": true, "will": true, "would": true,
+		"can": true, "could": true, "should": true, "may": true, "might": true,
+		"for": true, "to": true, "from": true, "in": true, "on": true, "at": true,
+		"and": true, "or": true, "but": true, "of": true, "with": true,
+		"me": true, "us": true, "it": true, "this": true, "that": true,
+		"tell": true, "show": true, "give": true, "get": true, "got": true,
+		"have": true, "had": true, "been": true, "being": true, "be": true,
+	}
+
+	// Find first non-filler word(s) for the name
+	name := strings.ToLower(words[0])
+	nonFillerIdx := -1
+	for i, w := range words {
+		if !fillers[strings.ToLower(w)] {
+			nonFillerIdx = i
+			break
 		}
-		desc = strings.ToLower(desc)
+	}
+	if nonFillerIdx >= 0 {
+		// Take 1-2 non-filler words for the name
+		if nonFillerIdx+1 < len(words) && !fillers[strings.ToLower(words[nonFillerIdx+1])] {
+			name = strings.ToLower(strings.Join(words[nonFillerIdx:nonFillerIdx+2], " "))
+		} else {
+			name = strings.ToLower(words[nonFillerIdx])
+		}
+	}
+
+	// Strip punctuation from name
+	name = strings.Trim(name, ".,!?;:\"'()[]{}")
+
+	// Description: lowercased text, truncated
+	desc := strings.ToLower(strings.Join(words, " "))
+	if len(desc) > 60 {
+		desc = desc[:57] + "..."
 	}
 
 	return &SummarizeResult{

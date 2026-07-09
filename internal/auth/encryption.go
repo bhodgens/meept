@@ -97,21 +97,22 @@ func (k *EncryptionKey) Key() []byte {
 	return cp
 }
 
-// deriveMachineKey generates a 256-bit key from machine-specific identifiers.
-// It combines hostname + username + a platform-specific hardware ID.
+// deriveMachineKey generates a 256-bit key from stable machine-specific
+// identifiers. It combines username + a platform-specific hardware ID
+// (e.g., macOS IOPlatformUUID, Linux /etc/machine-id, or a persisted random
+// key for other platforms).
 //
-// Stability note: the hostname component can change across reboots, DHCP
-// renewals, or container rebuilds, which invalidates previously-encrypted
-// tokens. Operators who need stable cross-environment keys should pass an
-// explicit userKey to NewEncryptionKey, which bypasses this derivation
-// entirely and uses the operator-supplied value instead.
+// The hostname is intentionally excluded because it can change across reboots,
+// DHCP renewals, or container rebuilds -- which would invalidate all
+// previously-encrypted tokens.
 //
-// The platformMachineID function is defined in per-platform files (darwin, linux, other).
+// Operators who need stable cross-environment keys should pass an explicit
+// userKey to NewEncryptionKey, which bypasses this derivation entirely and
+// uses the operator-supplied value instead.
+//
+// The platformMachineID function is defined in per-platform files (darwin,
+// linux, other).
 func deriveMachineKey() (string, error) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		hostname = "unknown"
-	}
 	username := os.Getenv("USER")
 	if username == "" {
 		username = os.Getenv("USERNAME")
@@ -124,5 +125,5 @@ func deriveMachineKey() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("hardware id: %w", err)
 	}
-	return hostname + ":" + username + ":" + hwID, nil
+	return username + ":" + hwID, nil
 }

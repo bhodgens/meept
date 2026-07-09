@@ -217,7 +217,7 @@ func (s *Server) toolSessions(args map[string]any) (any, error) {
 		if name == "" {
 			name = "mcp-session"
 		}
-		return s.client.CreateSession(name)
+		return s.client.CreateSession(name, "")
 	case "attach":
 		sessionID, _ := args["session_id"].(string)
 		clientID, _ := args["client_id"].(string)
@@ -306,11 +306,18 @@ func (s *Server) toolSessionHistory(args map[string]any) (any, error) {
 	return s.client.GetSessionMessages(sessionID, 0, limit)
 }
 
+// mustMarshal marshals a value to JSON, panicking on error.
+// This is safe for internal use where the types are controlled
+// and marshal errors indicate a programming bug, not user error.
 func mustMarshal(v any) json.RawMessage {
-	data, _ := json.Marshal(v)
+	data, err := json.Marshal(v)
+	if err != nil {
+		// Marshal errors for these controlled types indicate a bug.
+		// Panic to surface the issue during development/testing.
+		panic(fmt.Sprintf("json.Marshal: %v", err))
+	}
 	return data
 }
-
 // ConnectRPC connects to the daemon's Unix socket. The socket is trusted to
 // provide authenticated RPC. If the socket file is world-accessible, a warning
 // is logged so the operator can investigate unintended permission drift.

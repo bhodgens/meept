@@ -26,7 +26,10 @@ func LoadJSON5(path string, v any) error {
 	}
 
 	// Expand env vars in raw content
-	content := expandEnvVars(string(data))
+	content, err := ExpandEnvVars(string(data))
+	if err != nil {
+		return fmt.Errorf("failed to expand env vars in config %s: %w", path, err)
+	}
 
 	// Standardize JSON5 to JSON
 	stdJSON, err := hujson.Standardize([]byte(content))

@@ -34,7 +34,10 @@ func Load(path string) (*Config, error) {
 	}
 
 	// Expand environment variables in the raw TOML content
-	content := expandEnvVars(string(data))
+	content, err := ExpandEnvVars(string(data))
+	if err != nil {
+		return nil, err
+	}
 
 	cfg := DefaultConfig()
 	if err := toml.Unmarshal([]byte(content), cfg); err != nil {
@@ -152,11 +155,27 @@ func warnDeprecatedConfig(cfg *Config) {
 	}
 }
 
+// ErrEnvVarCycle is returned when environment variable expansion detects a cycle.
+type ErrEnvVarCycle struct {
+	Input string
+}
+
+func (e ErrEnvVarCycle) Error() string {
+	return fmt.Sprintf("environment variable expansion detected a cycle: %s", e.Input)
+}
+
+// Is reports whether err is an ErrEnvVarCycle.
+func (ErrEnvVarCycle) Is(err error) bool {
+	_, ok := err.(ErrEnvVarCycle)
+	return ok
+}
+
 // ExpandEnvVars expands environment variables in a string.
 // Uses a regex rather than os.ExpandEnv because configs use both $VAR and
 // ${VAR} syntax (os.ExpandEnv only supports the former).
 // Implements recursion depth limiting to detect cyclic env var references.
-func ExpandEnvVars(s string) string {
+// Returns ErrEnvVarCycle when a cycle is detected.
+func ExpandEnvVars(s string) (string, error) {
 	const maxPasses = 5
 	result := s
 	for range maxPasses {
@@ -185,17 +204,17 @@ func ExpandEnvVars(s string) string {
 			break
 		}
 	}
-	// Warn if we hit the cap (cycle detected) - caller should log
 	if envVarPattern.MatchString(result) {
-		slog.Warn("env var expansion hit maxPasses — possible cycle", "input", s)
+		return result, ErrEnvVarCycle{Input: s}
 	}
-	return result
+	return result, nil
 }
 
 // expandEnvVars expands environment variables in a string.
-// Supports both ${VAR_NAME} and $VAR_NAME syntax.
+// Internal helper that ignores errors (used where error propagation is not needed).
 func expandEnvVars(s string) string {
-	return ExpandEnvVars(s)
+	result, _ := ExpandEnvVars(s)
+	return result
 }
 
 // expandPath expands ~ to the home directory.

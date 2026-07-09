@@ -272,9 +272,6 @@ func (r *AgentRegistry) GetForTask(agentID, taskID string) (*AgentLoop, error) {
 	}
 
 	loop := r.createLoop(spec)
-	// Wire project.set bus subscription so AgentLoop.workingDir stays in sync
-	// with /project set commands. Safe to call — no-op when bus is nil.
-	loop.StartProjectSub(context.Background())
 	taskLoops[taskID] = loop
 	r.logger.Info("Created task-scoped agent loop", "agent_id", agentID, "task_id", taskID, "name", spec.Name)
 	return loop, nil
@@ -420,7 +417,9 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 	// the same conversation history keyed by conversationID.
 	opts = append(opts, WithSharedConversationStore(r.sharedConvStore))
 
-	return NewAgentLoop(opts...)
+	// Agent loops created by registry use agentID as sessionID
+	// workingDir is set later via SetWorkingDir when session binds to project
+	return NewAgentLoop(spec.ID, "", opts...)
 }
 
 // filterTools returns a filtered tool registry based on agent spec.
@@ -444,29 +443,30 @@ func (r *AgentRegistry) filterTools(spec *AgentSpec) ToolRegistry {
 }
 
 // GetByRole returns all agent loops with the given role.
-func (r *AgentRegistry) GetByRole(role AgentRole) ([]*AgentLoop, error) {
+// Holds the read lock during all lookups to avoid TOCTOU races where a
+// concurrent UnregisterSpec could remove a loop between the spec match
+// and the Get call.
+func (r *AgentRegistry) GetByRole(role AgentRole) []*AgentLoop {
 	r.mu.RLock()
-	specs := make([]*AgentSpec, 0)
-	for _, spec := range r.specs {
-		if spec.Role == role {
-			specs = append(specs, spec)
-		}
-	}
-	r.mu.RUnlock()
+	defer r.mu.RUnlock()
 
-	loops := make([]*AgentLoop, 0, len(specs))
-	for _, spec := range specs {
-		loop, err := r.Get(spec.ID)
-		if err != nil {
-			return nil, err
+	var loops []*AgentLoop
+	for _, spec := range r.specs {
+		if spec.Role != role {
+			continue
 		}
-		loops = append(loops, loop)
+		if taskLoops, ok := r.loops[spec.ID]; ok {
+			// Collect all task-scoped loops for this spec, in stable key order.
+			for _, loop := range taskLoops {
+				loops = append(loops, loop)
+			}
+		}
 	}
-	return loops, nil
+	return loops
 }
 
 // GetExecutors returns all executor agent loops.
-func (r *AgentRegistry) GetExecutors() ([]*AgentLoop, error) {
+func (r *AgentRegistry) GetExecutors() []*AgentLoop {
 	return r.GetByRole(RoleExecutor)
 }
 

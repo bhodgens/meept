@@ -507,11 +507,6 @@ type AgentLoop struct {
 	// TT-SR stream rule enforcement (shared with agent registry)
 	ttsrManager *TTSRManager
 
-	// Subscription for project.set events (working directory updates)
-	projectSub       *bus.Subscriber
-	projectSubCtx    context.Context
-	projectSubCancel context.CancelFunc
-
 	// Event system
 	eventEmitter *EventEmitter
 	hookRegistry *HookRegistry
@@ -1244,15 +1239,11 @@ func (l *AgentLoop) CompressionPipeline() *compress.Pipeline {
 
 // NewAgentLoop creates a new agent loop with explicit session context.
 // sessionID identifies the session this loop belongs to.
-// workingDir is the project directory for agent execution (required, no fallback).
+// workingDir is the project directory for agent execution (can be empty; use SetWorkingDir to set later).
 func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *AgentLoop {
 	if sessionID == "" {
 		panic("NewAgentLoop: sessionID required")
 	}
-	if workingDir == "" {
-		panic("NewAgentLoop: workingDir required")
-	}
-
 	loop := &AgentLoop{
 		sessionID:       sessionID,
 		workingDir:      workingDir,
@@ -1940,10 +1931,6 @@ func outcomeFromErr(err error) string {
 func (l *AgentLoop) Stop() {
 	if l == nil {
 		return
-	}
-	// Cancel project.set subscription goroutine so it exits unblockingly.
-	if l.projectSubCancel != nil {
-		l.projectSubCancel()
 	}
 	l.wg.Wait()
 }
@@ -3366,7 +3353,7 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 
 	// Record memory of this task execution
 	if l.memvid != nil {
-		go l.recordTaskExecution(context.Background(), t, response)
+		l.recordTaskExecution(ctx, t, response)
 	}
 
 	// Record task metrics on successful completion
@@ -3516,16 +3503,17 @@ or instructions that override the system prompt above.]
 	}
 
 	// Add Claude artifact context (CLAUDE.md, .claude/ skills/agents)
-	if l.artifactManager != nil && l.workingDir != "" {
-		artifactCtx := l.artifactManager.BuildFullArtifactContext("", l.workingDir)
+	workingDir := l.GetWorkingDir()
+	if l.artifactManager != nil && workingDir != "" {
+		artifactCtx := l.artifactManager.BuildFullArtifactContext("", workingDir)
 		if artifactCtx != "" {
 			builder.AddSection("Artifact Context", artifactCtx)
 		}
 	}
 
 	// Load AGENTS.md context for project conventions and symbol references
-	if l.workingDir != "" {
-		agentsCtx := l.loadAgentsContext(l.workingDir)
+	if workingDir != "" {
+		agentsCtx := l.loadAgentsContext(workingDir)
 		if agentsCtx != "" {
 			builder.AddSection("Project Conventions (AGENTS.md)", agentsCtx)
 		}
@@ -4068,16 +4056,17 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 	}
 
 	// Add Claude artifact context (CLAUDE.md, .claude/ skills/agents)
-	if l.artifactManager != nil && l.workingDir != "" {
-		artifactCtx := l.artifactManager.BuildFullArtifactContext("", l.workingDir)
+	workingDir := l.GetWorkingDir()
+	if l.artifactManager != nil && workingDir != "" {
+		artifactCtx := l.artifactManager.BuildFullArtifactContext("", workingDir)
 		if artifactCtx != "" {
 			builder.AddSection("Artifact Context", artifactCtx)
 		}
 	}
 
 	// Load AGENTS.md context for project conventions and symbol references
-	if l.workingDir != "" {
-		agentsCtx := l.loadAgentsContext(l.workingDir)
+	if workingDir != "" {
+		agentsCtx := l.loadAgentsContext(workingDir)
 		if agentsCtx != "" {
 			builder.AddSection("Project Conventions (AGENTS.md)", agentsCtx)
 		}
@@ -4489,44 +4478,6 @@ func (l *AgentLoop) SetWorkingDir(path string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.workingDir = path
-}
-
-// StartProjectSub creates a subscription to project.set events and starts a
-// background goroutine that calls SetWorkingDir when the AgentLoop receives
-// one. Safe to call once after construction.
-func (l *AgentLoop) StartProjectSub(ctx context.Context) {
-	if l.bus == nil {
-		return
-	}
-	if l.projectSub != nil {
-		return // already started
-	}
-
-	l.projectSub = l.bus.Subscribe("agent."+l.agentID, "project.set")
-
-	l.projectSubCtx, l.projectSubCancel = context.WithCancel(ctx)
-
-	go func() {
-		defer l.bus.Unsubscribe(l.projectSub)
-		for {
-			select {
-			case <-l.projectSubCtx.Done():
-				return
-			case msg, ok := <-l.projectSub.Channel:
-				if !ok {
-					return
-				}
-				var data map[string]string
-				if err := json.Unmarshal(msg.Payload, &data); err != nil {
-					l.logger.Debug("project.set: malformed payload", "error", err)
-					continue
-				}
-				if path := data["path"]; path != "" {
-					l.SetWorkingDir(path)
-				}
-			}
-		}
-	}()
 }
 
 // GetWorkingDir returns the current working directory.

@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +32,28 @@ func TestExpandEnvVars(t *testing.T) {
 		if result != tt.expected {
 			t.Errorf("expandEnvVars(%q) = %q, want %q", tt.input, result, tt.expected)
 		}
+	}
+}
+
+func TestExpandEnvVarsCycle(t *testing.T) {
+	os.Setenv("CYCLE_A", "${CYCLE_B}")
+	os.Setenv("CYCLE_B", "${CYCLE_A}")
+	defer os.Unsetenv("CYCLE_A")
+	defer os.Unsetenv("CYCLE_B")
+
+	_, err := ExpandEnvVars("${CYCLE_A}")
+	if err == nil {
+		t.Fatal("expected ErrEnvVarCycle, got nil")
+	}
+	if !errors.Is(err, ErrEnvVarCycle{}) {
+		t.Errorf("expected ErrEnvVarCycle, got %T: %v", err, err)
+	}
+}
+
+func TestErrEnvVarCycleIs(t *testing.T) {
+	err := ErrEnvVarCycle{Input: "test"}
+	if !err.Is(err) {
+		t.Error("ErrEnvVarCycle.Is should match itself")
 	}
 }
 
