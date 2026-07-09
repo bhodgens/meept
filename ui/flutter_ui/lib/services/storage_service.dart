@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../core/constants.dart';
@@ -71,6 +71,9 @@ class StorageService {
     if (_cachedApiKey == null || _cachedApiKey!.isEmpty) {
       _cachedApiKey = await _tryReadDevKeyFile();
     }
+
+    // Load GUI layout from client.json5 file for file-based config support
+    await loadGuiLayoutFromFile();
   }
 
   /// Attempt to read the daemon's per-installation dev key from
@@ -218,12 +221,43 @@ class StorageService {
   }
 
   /// GUI layout preference: "toptabs" (default) or "sidebar".
+  /// Reads from SharedPreferences first, then falls back to client.json5 file.
   String? getGuiLayout() {
-    return _prefs?.getString(_guiLayoutPref);
+    // SharedPreferences takes priority (set via UI)
+    final prefsValue = _prefs?.getString(_guiLayoutPref);
+    if (prefsValue != null) return prefsValue;
+
+    // Fall back to cached client.json5 value
+    return _cachedClientGuiLayout;
   }
 
   Future<void> setGuiLayout(String value) async {
     await _prefs?.setString(_guiLayoutPref, value);
+  }
+
+  /// Cache for GUI layout from client.json5 file
+  String? _cachedClientGuiLayout;
+
+  /// Load GUI layout from client.json5 file (~/.meept/client.json5).
+  /// Call this at app startup before getGuiLayout() is used.
+  Future<void> loadGuiLayoutFromFile() async {
+    if (kIsWeb) return; // Web can't read files
+
+    final home = await platformService?.getHomeDirectory();
+    if (home == null) return;
+
+    final path = '$home/.meept/client.json5';
+    final content = await platformService?.readFile(path);
+    if (content == null || content.isEmpty) return;
+
+    // Simple JSON5 parsing for gui.layout field
+    // Look for "gui": { ..."layout": "value" } pattern
+    final layoutRegex = RegExp(r'"gui"\s*:\s*\{[^}]*"layout"\s*:\s*"([^"]+)"');
+    final match = layoutRegex.firstMatch(content);
+    if (match != null && match.groupCount >= 1) {
+      _cachedClientGuiLayout = match.group(1);
+      debugPrint('[storage] Loaded gui.layout from $path: $_cachedClientGuiLayout');
+    }
   }
 
   /// Double-enter behavior: "steer", "interrupt", or "preempt".

@@ -62,6 +62,20 @@ client.json5 ("gui.layout")
 
 6. **No drag-and-drop reorder** of sessions in the sidebar tree.
 
+## Configuration Fix (2026-07-09)
+
+**Problem:** Setting `"gui.layout": "sidebar"` in `~/.meept/client.json5` was not respected by the Flutter app. The app read from Flutter's SharedPreferences only, ignoring the file-based config.
+
+**Fix:** Modified `StorageService` to:
+1. Read `~/.meept/client.json5` at startup using `platformService.readFile()`
+2. Parse the `gui.layout` value via regex
+3. Cache the file-based value and use it as a fallback when SharedPreferences has no value
+
+**Files modified:**
+- `ui/flutter_ui/lib/services/storage_service.dart` - Added `loadGuiLayoutFromFile()` and `_cachedClientGuiLayout`
+
+**Priority:** SharedPreferences (set via UI) > client.json5 file > default ("toptabs")
+
 ## How to Use
 
 1. Open the Meept Flutter GUI
