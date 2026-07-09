@@ -1258,6 +1258,60 @@ func WithAgentReasoning(rc *llm.AgentReasoningConfig) LoopOption {
 	}
 }
 
+// WithUploadStore sets the upload store for resolving image file references.
+func WithUploadStore(store llm.UploadStore) LoopOption {
+	return func(l *AgentLoop) {
+		if store != nil {
+			l.uploadStore = store
+		}
+	}
+}
+
+// WithFileWatcher sets the file watcher hook for filesystem-level hooks.
+func WithFileWatcher(fw *FileWatcherHook) LoopOption {
+	return func(l *AgentLoop) {
+		if fw != nil {
+			l.fileWatcher = fw
+		}
+	}
+}
+
+// WithSessionRefresher sets the session refresher for periodic title updates.
+func WithSessionRefresher(r *session.SessionRefresher) LoopOption {
+	return func(l *AgentLoop) {
+		if r != nil {
+			l.sessionRefresher = r
+		}
+	}
+}
+
+// WithEpistemicHook sets the post-turn ambient-extraction hook.
+func WithEpistemicHook(hook *EpistemicHook) LoopOption {
+	return func(l *AgentLoop) {
+		if hook != nil {
+			l.epistemicHook = hook
+		}
+	}
+}
+
+// WithContextInjectorFunc sets the context injector for system prompt enrichment.
+func WithContextInjectorFunc(injector *ContextInjector) LoopOption {
+	return func(l *AgentLoop) {
+		if injector != nil {
+			l.contextInjector = injector
+		}
+	}
+}
+
+// WithHTTPHooks sets the hook batch executor for outbound HTTP notifications.
+func WithHTTPHooks(executor *HookBatchExecutor) LoopOption {
+	return func(l *AgentLoop) {
+		if executor != nil {
+			l.httpHooks = executor
+		}
+	}
+}
+
 // SetCompressionPipeline sets the compression pipeline after agent loop creation.
 // This is used when the compression pipeline depends on components created
 // after the agent loop (e.g. in daemon wiring).
@@ -4375,6 +4429,134 @@ func (l *AgentLoop) GetConfig() AgentConfig {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.config
+}
+
+// ConfigSnapshot returns a slice of LoopOptions that capture this loop's
+// current configuration (LLM client, tool registry, skills, hooks, etc.).
+// Applying these options to a fresh AgentLoop reproduces this loop's
+// wired dependencies (excluding session-specific fields like sessionID,
+// workingDir, projectID).
+//
+// Used by Manager.GetOrCreateWired to spin up per-session loops that
+// inherit the singleton daemon loop's configuration.
+func (l *AgentLoop) ConfigSnapshot() []LoopOption {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	return []LoopOption{
+		// --- Core LLM + resolver ---
+		WithLLMChatter(l.llm),
+		WithResolver(l.resolver),
+		WithModelRef(l.modelRef),
+		WithAgentSpec(l.spec),
+
+		// --- Config ---
+		WithAgentConfig(l.config),
+
+		// --- Tools + security ---
+		WithToolRegistry(l.registry),
+		WithSecurityChecker(l.security),
+		WithSecurityOrchestrator(l.securityOrch),
+		WithMessageBus(l.bus),
+		WithLoopLogger(l.logger),
+
+		// --- Memory + task ---
+		WithMemvidClient(l.memvid),
+		WithTaskStore(l.taskStore),
+
+		// --- Learning + reflection ---
+		WithLearningPipeline(l.learningPipeline),
+		WithReflectionCollector(l.reflectionCollector),
+		WithUsageTracker(l.usageTracker),
+		WithShadowManager(l.shadowMgr),
+
+		// --- Cache + progress ---
+		WithResultCache(l.cache),
+		WithProgressEnabled(l.progressEnabled),
+
+		// --- Skills ---
+		WithCapabilityIndex(l.capabilityIndex),
+		WithSkillLoader(l.skillLoader),
+
+		// --- Prefetch + queue ---
+		WithPrefetchCallback(l.prefetchCallback),
+		WithMessageQueue(l.queue),
+		WithAgentRegistry(l.agentRegistry),
+
+		// --- Artifacts + detection ---
+		WithArtifactManager(l.artifactManager),
+		WithHallucinationDetector(l.hallucinationDetector),
+		WithRepoMapGenerator(l.repoMapGen),
+		WithWatchdog(l.watchdog),
+
+		// --- TTSR ---
+		WithTTSRManager(l.ttsrManager),
+
+		// --- Events + hooks ---
+		WithEventEmitter(l.eventEmitter),
+		WithHookRegistry(l.hookRegistry),
+		WithNotificationPublisher(l.notificationPublisher),
+		WithMCPServerLister(l.mcpServerLister),
+
+		// --- Metrics ---
+		WithTaskCollector(l.taskCollector),
+		WithResponseAnalyzer(l.responseAnalyzer),
+		WithCompressionPipeline(l.compressionPipeline),
+		WithAgentReasoning(l.agentReasoning),
+
+		// --- Agent identity (shared from daemon template) ---
+		WithAgentID(l.agentID),
+
+		// --- Upload store ---
+		WithUploadStore(l.uploadStore),
+
+		// --- File watcher ---
+		WithFileWatcher(l.fileWatcher),
+
+		// --- Session refresher ---
+		WithSessionRefresher(l.sessionRefresher),
+
+		// --- Epistemic + context enrichment ---
+		WithEpistemicHook(l.epistemicHook),
+		WithContextInjectorFunc(l.contextInjector),
+		WithHTTPHooks(l.httpHooks),
+
+		// --- Session persistence + branch navigation ---
+		// These are unexported interface types; inline closures avoid
+		// exposing them publicly while still propagating the daemon-level
+		// singletons to per-session clones.
+		func(l2 *AgentLoop) {
+			if l.sessionStore != nil {
+				l2.sessionStore = l.sessionStore
+			}
+		},
+		func(l2 *AgentLoop) {
+			if l.branchManager != nil {
+				l2.branchManager = l.branchManager
+			}
+		},
+
+		// NOTE: The following fields are deliberately EXCLUDED:
+		// - sessionID, workingDir, projectID, detectionContext, workerID:
+		//   per-session fields set explicitly by GetOrCreateWired.
+		// - isActive (atomic.Bool): runtime state, not config.
+		// - conversations (ConversationStore): each loop gets its own via
+		//   NewAgentLoop; cross-agent sharing is opt-in via
+		//   WithSharedConversationStore.
+		// - contextFirewall: created per-loop from config during
+		//   NewAgentLoop initialization; sharing would double-wrap the LLM.
+		// - modelOverride / modelOverridePersistent: transient runtime state.
+		// - reasoningOverride / reasoningForNextTurn: transient per-turn state.
+		// - cycleDetector / convergenceDetector: per-loop runtime state.
+		// - budgetTracker: created per-loop during NewAgentLoop.
+		// - promptBuilder: created per-loop during NewAgentLoop.
+		// - executor: created per-loop during NewAgentLoop.
+		// - turnCounter: per-loop counter.
+		// - currentTaskID / currentSessionID: per-session runtime state.
+		// - sessionStore / branchManager: interface types set via Set* with
+		//   `any` params; included via a dedicated option below for loops
+		//   that need session persistence.
+	}
 }
 
 // SetMemvidClient sets the memvid client after construction.

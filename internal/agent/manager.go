@@ -65,6 +65,36 @@ func (m *Manager) GetOrCreate(sessionID string, workingDir string, opts ...LoopO
 	return loop, nil
 }
 
+// GetOrCreateWired returns an existing loop for sessionID, or creates a new
+// one whose configuration (LLM client, tools, skills, hooks) is mirrored
+// from template. The template is typically the daemon's singleton AgentLoop.
+//
+// workingDir is the project directory for the new loop; it overrides any
+// value on the template (per-session isolation). All other config is copied
+// via template.ConfigSnapshot().
+func (m *Manager) GetOrCreateWired(sessionID, workingDir string, template *AgentLoop) (*AgentLoop, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if loop, ok := m.loops[sessionID]; ok {
+		return loop, nil
+	}
+	if sessionID == "" {
+		return nil, fmt.Errorf("sessionID required")
+	}
+	if workingDir == "" {
+		return nil, fmt.Errorf("workingDir required")
+	}
+	if template == nil {
+		return nil, fmt.Errorf("template loop required")
+	}
+
+	opts := template.ConfigSnapshot()
+	loop := NewAgentLoop(sessionID, workingDir, opts...)
+	m.loops[sessionID] = loop
+	return loop, nil
+}
+
 // Get returns existing loop without creating.
 func (m *Manager) Get(sessionID string) (*AgentLoop, bool) {
 	m.mu.RLock()

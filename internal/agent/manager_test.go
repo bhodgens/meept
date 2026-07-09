@@ -6,6 +6,7 @@ import (
 
 	"github.com/caimlas/meept/internal/session"
 	"log/slog"
+	"time"
 )
 
 // managerConfig returns a minimal, ready-to-use ManagerConfig for tests.
@@ -204,5 +205,193 @@ func TestManager_Validation(t *testing.T) {
 				t.Errorf("error = %q, want %q", err.Error(), tt.wantErr)
 			}
 		})
+	}
+}
+
+// --- GetOrCreateWired tests ---
+
+// makeTemplateLoop creates a minimal template loop with distinctive config
+// values for ConfigSnapshot / GetOrCreateWired testing.
+func makeTemplateLoop(t *testing.T) *AgentLoop {
+	t.Helper()
+	template := NewAgentLoop("daemon-template", "/template/dir")
+	cfg := DefaultAgentConfig()
+	cfg.MaxIterations = 4242
+	cfg.Timeout = 99 * time.Second
+	cfg.Purpose = "template-purpose-marker"
+	cfg.GlobalRules = "template-global-rules"
+	template.SetConfig(cfg)
+	return template
+}
+
+func TestManager_GetOrCreateWired_InheritsConfig(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewManager(managerConfig())
+	template := makeTemplateLoop(t)
+
+	loop, err := mgr.GetOrCreateWired("sess-wired", "/project/dir", template)
+	if err != nil {
+		t.Fatalf("GetOrCreateWired failed: %v", err)
+	}
+
+	cfg := loop.GetConfig()
+	if cfg.MaxIterations != 4242 {
+		t.Errorf("MaxIterations = %d, want 4242", cfg.MaxIterations)
+	}
+	if cfg.Timeout != 99*time.Second {
+		t.Errorf("Timeout = %v, want 99s", cfg.Timeout)
+	}
+	if cfg.Purpose != "template-purpose-marker" {
+		t.Errorf("Purpose = %q, want %q", cfg.Purpose, "template-purpose-marker")
+	}
+	if cfg.GlobalRules != "template-global-rules" {
+		t.Errorf("GlobalRules = %q, want %q", cfg.GlobalRules, "template-global-rules")
+	}
+}
+
+func TestManager_GetOrCreateWired_IdentityOnReuse(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewManager(managerConfig())
+	template := makeTemplateLoop(t)
+
+	loop1, err := mgr.GetOrCreateWired("sess-identity", "/project/a", template)
+	if err != nil {
+		t.Fatalf("first GetOrCreateWired failed: %v", err)
+	}
+
+	loop2, err := mgr.GetOrCreateWired("sess-identity", "/project/b", template)
+	if err != nil {
+		t.Fatalf("second GetOrCreateWired failed: %v", err)
+	}
+
+	if loop1 != loop2 {
+		t.Error("expected same loop pointer on reuse")
+	}
+}
+
+func TestManager_GetOrCreateWired_ValidationErrors(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewManager(managerConfig())
+	template := makeTemplateLoop(t)
+
+	tests := []struct {
+		name       string
+		sessionID  string
+		workingDir string
+		template   *AgentLoop
+		wantErr    string
+	}{
+		{"empty sessionID", "", "/dir", template, "sessionID required"},
+		{"empty workingDir", "sess-1", "", template, "workingDir required"},
+		{"nil template", "sess-1", "/dir", nil, "template loop required"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := mgr.GetOrCreateWired(tt.sessionID, tt.workingDir, tt.template)
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if err.Error() != tt.wantErr {
+				t.Errorf("error = %q, want %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestManager_GetOrCreateWired_IndependentSessionContext(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewManager(managerConfig())
+	template := makeTemplateLoop(t)
+
+	loop, err := mgr.GetOrCreateWired("sess-isolated", "/unique/project/path", template)
+	if err != nil {
+		t.Fatalf("GetOrCreateWired failed: %v", err)
+	}
+
+	if loop.GetSessionID() == template.GetSessionID() {
+		t.Errorf("sessionID = %q, should differ from template %q",
+			loop.GetSessionID(), template.GetSessionID())
+	}
+	if loop.GetWorkingDir() == template.GetWorkingDir() {
+		t.Errorf("workingDir = %q, should differ from template %q",
+			loop.GetWorkingDir(), template.GetWorkingDir())
+	}
+	if loop.GetSessionID() != "sess-isolated" {
+		t.Errorf("sessionID = %q, want %q", loop.GetSessionID(), "sess-isolated")
+	}
+	if loop.GetWorkingDir() != "/unique/project/path" {
+		t.Errorf("workingDir = %q, want %q", loop.GetWorkingDir(), "/unique/project/path")
+	}
+}
+
+func TestManager_GetOrCreateWired_DoesNotMutateTemplate(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewManager(managerConfig())
+	template := makeTemplateLoop(t)
+
+	origSessionID := template.GetSessionID()
+	origWorkingDir := template.GetWorkingDir()
+	origConfig := template.GetConfig()
+
+	_, err := mgr.GetOrCreateWired("sess-no-mutate", "/other/dir", template)
+	if err != nil {
+		t.Fatalf("GetOrCreateWired failed: %v", err)
+	}
+
+	if template.GetSessionID() != origSessionID {
+		t.Errorf("template sessionID mutated: %q -> %q",
+			origSessionID, template.GetSessionID())
+	}
+	if template.GetWorkingDir() != origWorkingDir {
+		t.Errorf("template workingDir mutated: %q -> %q",
+			origWorkingDir, template.GetWorkingDir())
+	}
+	afterCfg := template.GetConfig()
+	if afterCfg.MaxIterations != origConfig.MaxIterations {
+		t.Errorf("template MaxIterations mutated: %d -> %d",
+			origConfig.MaxIterations, afterCfg.MaxIterations)
+	}
+	if afterCfg.Purpose != origConfig.Purpose {
+		t.Errorf("template Purpose mutated: %q -> %q",
+			origConfig.Purpose, afterCfg.Purpose)
+	}
+}
+
+func TestAgentLoop_ConfigSnapshot(t *testing.T) {
+	t.Parallel()
+
+	template := NewAgentLoop("daemon-snapshot", "/snap/dir")
+	cfg := DefaultAgentConfig()
+	cfg.MaxIterations = 7777
+	cfg.Purpose = "snapshot-test-purpose"
+	template.SetConfig(cfg)
+
+	opts := template.ConfigSnapshot()
+	if len(opts) == 0 {
+		t.Fatal("ConfigSnapshot returned empty slice")
+	}
+
+	// Apply snapshot to a fresh loop and verify config was inherited.
+	fresh := NewAgentLoop("fresh-session", "/fresh/dir", opts...)
+	freshCfg := fresh.GetConfig()
+	if freshCfg.MaxIterations != 7777 {
+		t.Errorf("fresh MaxIterations = %d, want 7777", freshCfg.MaxIterations)
+	}
+	if freshCfg.Purpose != "snapshot-test-purpose" {
+		t.Errorf("fresh Purpose = %q, want %q", freshCfg.Purpose, "snapshot-test-purpose")
+	}
+
+	// Verify session-specific fields are NOT inherited.
+	if fresh.GetSessionID() == template.GetSessionID() {
+		t.Error("ConfigSnapshot should not propagate sessionID")
+	}
+	if fresh.GetWorkingDir() == template.GetWorkingDir() {
+		t.Error("ConfigSnapshot should not propagate workingDir")
 	}
 }
