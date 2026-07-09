@@ -56,6 +56,8 @@ func (s *SessionService) GetSession(ctx context.Context, req GetSessionRequest) 
 	if sess == nil {
 		return nil, wrapError("session", "GetSession", ErrNotFound)
 	}
+	// Migration: backfill DetectionContext from ProjectPath for legacy sessions
+	migrateSessionDetectionContext(sess)
 	return sess, nil
 }
 
@@ -105,6 +107,21 @@ type ListSessionsRequest struct {
 	Designation *string `json:"designation,omitempty"`
 }
 
+// migrateSessionDetectionContext backfills DetectionContext from ProjectPath
+// for legacy sessions that were created before DetectionContext was added.
+// This is an in-memory migration only - the session store is not modified.
+func migrateSessionDetectionContext(sess *session.Session) {
+	if sess == nil {
+		return
+	}
+	// Only backfill if DetectionContext is nil but ProjectPath is set
+	if sess.DetectionContext == nil && sess.ProjectPath != "" {
+		sess.DetectionContext = &session.DetectionContext{
+			CWD: sess.ProjectPath,
+		}
+	}
+}
+
 // GetMostRecent returns the most recently active session, or nil if none exist.
 func (s *SessionService) GetMostRecent(ctx context.Context) (*session.Session, error) {
 	if s.store == nil {
@@ -118,7 +135,10 @@ func (s *SessionService) GetMostRecent(ctx context.Context) (*session.Session, e
 		return nil, wrapError("session", "GetMostRecent", ErrNotFound)
 	}
 	// Sessions from store.List() are ordered by most recent first.
-	return sessions[0], nil
+	sess := sessions[0]
+	// Migration: backfill DetectionContext from ProjectPath for legacy sessions
+	migrateSessionDetectionContext(sess)
+	return sess, nil
 }
 
 // List returns all sessions, optionally filtered by designation status.
@@ -129,6 +149,11 @@ func (s *SessionService) List(ctx context.Context, req ListSessionsRequest) ([]*
 	sessions, err := s.store.List()
 	if err != nil {
 		return nil, wrapError("session", "List", err)
+	}
+
+	// Migration: backfill DetectionContext from ProjectPath for legacy sessions
+	for _, sess := range sessions {
+		migrateSessionDetectionContext(sess)
 	}
 
 	// Apply optional designation filter
