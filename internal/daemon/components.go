@@ -114,6 +114,14 @@ type Components struct {
 	Orchestrator  *agent.Orchestrator
 	ReviewManager *agent.ReviewManager
 
+	// AgentLoopManager provides per-session AgentLoop instances for
+	// session-scoped dispatch. Constructed at startup; nil if worker pool
+	// is disabled. Distinct from the scheduler's WorkerPool above.
+	AgentLoopManager *agent.Manager
+	// AgentWorkerPool is the lazy goroutine pool that executes work for
+	// session-scoped AgentLoops. Distinct from *worker.Pool above.
+	AgentWorkerPool *WorkerPool
+
 	// Collaboration engine for pair programming and differential modes
 	CollaborationEngine *agent.CollaborationEngine
 	// Team orchestrator for N-agent parallel team sessions
@@ -2080,6 +2088,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// Wire the per-session AgentLoop manager and its backing worker pool.
+	// Must run AFTER all c.AgentLoop.Set* calls so the singleton loop is
+	// fully configured first, and AFTER SessionStore + ProjectManager are
+	// constructed. See internal/daemon/agent_manager_wiring.go.
+	wireAgentLoopManager(c, cfg, logger)
+
 	// Create job processor that uses the agent loop (with optional multi-agent registry)
 	jobProc := NewAgentJobProcessor(c.AgentLoop, logger)
 	if c.AgentRegistry != nil {
@@ -3634,6 +3648,21 @@ func (c *Components) stopComponents(ctx context.Context) error {
 			c.Logger.Error("Failed to close memory manager", "error", err)
 			lastErr = err
 		}
+	}
+
+	// Stop managed per-session AgentLoops and the agent worker pool before
+	// stopping the singleton loop. Managed loops are created on demand by
+	// AgentLoopManager.GetOrCreate; drain them so in-flight work completes.
+	if c.AgentLoopManager != nil {
+		for sid, loop := range c.AgentLoopManager.List() {
+			loop.Stop()
+			c.AgentLoopManager.Remove(sid)
+		}
+		c.Logger.Info("agent loop manager drained")
+	}
+	if c.AgentWorkerPool != nil {
+		c.AgentWorkerPool.Stop()
+		c.Logger.Info("agent worker pool stopped")
 	}
 
 	// Wait for in-flight reflection/learning goroutines to finish before

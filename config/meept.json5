@@ -313,6 +313,15 @@
       // Note: when compression is enabled, originals are stored in the CCR store
       // and can be retrieved via hash markers for full reversibility.
     },
+    // Per-session AgentLoop worker pool. When enabled, the daemon constructs
+    // an agent.Manager that provides isolated AgentLoop instances per session
+    // via GetOrCreate, backed by a lazy goroutine pool.
+    "worker_pool": {
+      "enabled": true,
+      "max_workers": 100,
+      "max_loops_per_worker": 5,
+      "idle_timeout": "5m",
+    },
   },
 
   // Security configuration

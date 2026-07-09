@@ -824,6 +824,19 @@ type AgentConfig struct {
 	Lint AgentLintConfig `json:"lint" toml:"lint"`
 	// Compression holds prompt compression settings for tool outputs and conversation
 	Compression AgentCompressionConfig `json:"compression" toml:"compression"`
+	// WorkerPool configures the per-session AgentLoop worker pool.
+	// When enabled, the daemon constructs an agent.Manager and a lazy
+	// WorkerPool for session-scoped dispatch. Zero-value fields fall back
+	// to daemon.DefaultWorkerPoolConfig() at wiring time.
+	WorkerPool AgentWorkerPoolConfig `json:"worker_pool" toml:"worker_pool"`
+}
+
+// AgentWorkerPoolConfig configures the per-session AgentLoop worker pool.
+type AgentWorkerPoolConfig struct {
+	Enabled           bool   `json:"enabled"            toml:"enabled"`
+	MaxWorkers        int    `json:"max_workers"        toml:"max_workers"`
+	MaxLoopsPerWorker int    `json:"max_loops_per_worker" toml:"max_loops_per_worker"`
+	IdleTimeout       string `json:"idle_timeout"       toml:"idle_timeout"` // duration string e.g. "5m"
 }
 
 // AgentCompactionConfig holds context compaction settings for the agent.
