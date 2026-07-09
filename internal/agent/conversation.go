@@ -474,6 +474,21 @@ func (c *Conversation) GetMessages() []llm.ChatMessage {
 	return c.buildMessageList()
 }
 
+// LastUserMessage returns the content of the most recent user-role message,
+// or empty string if none exists. Used by the learning capture pipeline to
+// associate tool calls with the originating user intent.
+func (c *Conversation) LastUserMessage() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	for i := len(c.messages) - 1; i >= 0; i-- {
+		if c.messages[i].Role == llm.RoleUser {
+			return c.messages[i].Content
+		}
+	}
+	return ""
+}
+
 // buildMessageList constructs the message list with system prompt.
 // Must be called with at least a read lock held.
 func (c *Conversation) buildMessageList() []llm.ChatMessage {

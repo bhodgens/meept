@@ -92,6 +92,7 @@ type Config struct {
 	Backup              BackupConfig            `json:"backup"              toml:"backup"`
 	PeerSync            PeerSyncConfig          `json:"peer_sync"           toml:"peer_sync"`
 	ConfigSync          ConfigSyncConfig        `json:"config_sync"         toml:"config_sync"`
+	Learning            LearningConfig          `json:"learning"            toml:"learning"`
 }
 
 // ReasoningGlobalConfig holds global reasoning/thinking settings, currently
@@ -1245,6 +1246,36 @@ type SelfImproveConfig struct {
 	Detection             DetectionConfig `json:"detection"                toml:"detection"`
 }
 
+// LearningConfig holds LoRA learning pipeline settings.
+type LearningConfig struct {
+	Enabled     bool                   `json:"enabled"       toml:"enabled"`
+	DataDir     string                 `json:"data_dir"      toml:"data_dir"`
+	AdaptersDir string                 `json:"adapters_dir"  toml:"adapters_dir"`
+	Capture     LearningCaptureConfig  `json:"capture"       toml:"capture"`
+	Training    LearningTrainingConfig `json:"training"      toml:"training"`
+	Retention   LearningRetentionConfig `json:"retention"    toml:"retention"`
+}
+
+// LearningCaptureConfig holds settings for passive research capture.
+type LearningCaptureConfig struct {
+	Enabled         bool     `json:"enabled"             toml:"enabled"`
+	IncludeTools    []string `json:"include_tools"       toml:"include_tools"`
+	MinQualityScore float64  `json:"min_quality_score"   toml:"min_quality_score"`
+}
+
+// LearningTrainingConfig holds settings for LoRA training.
+type LearningTrainingConfig struct {
+	DefaultModel        string `json:"default_model"          toml:"default_model"`
+	AutoTrainThreshold  int    `json:"auto_train_threshold"   toml:"auto_train_threshold"`
+	ManualOnly          bool   `json:"manual_only"            toml:"manual_only"`
+}
+
+// LearningRetentionConfig holds dataset retention settings.
+type LearningRetentionConfig struct {
+	MaxDatasetSizeMB int `json:"max_dataset_size_mb" toml:"max_dataset_size_mb"`
+	KeepVersions     int `json:"keep_versions"       toml:"keep_versions"`
+}
+
 // AIInfraConfig holds AI infrastructure settings for self-improvement.
 type AIInfraConfig struct {
 	Enabled         bool    `json:"enabled"          toml:"enabled"`
@@ -1797,6 +1828,25 @@ func DefaultConfig() *Config {
 			InterviewAmbiguityThreshold: 0.6,
 			MaxStepsPerPhase:            8,
 			MaxPhases:                   12,
+		},
+		Learning: LearningConfig{
+			Enabled:     true,
+			DataDir:     "~/.meept/learning",
+			AdaptersDir: "~/.meept/adapters",
+			Capture: LearningCaptureConfig{
+				Enabled:         true,
+				IncludeTools:    []string{"memory_search", "file_read", "grep", "web_search"},
+				MinQualityScore: 0.6,
+			},
+			Training: LearningTrainingConfig{
+				DefaultModel:       "lfm2.5-8b",
+				AutoTrainThreshold: 500,
+				ManualOnly:         true,
+			},
+			Retention: LearningRetentionConfig{
+				MaxDatasetSizeMB: 100,
+				KeepVersions:     3,
+			},
 		},
 		Shadow: ShadowConfig{
 			Enabled: false,

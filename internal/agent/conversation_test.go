@@ -196,6 +196,30 @@ func TestConversationLastMessage(t *testing.T) {
 	}
 }
 
+func TestConversationLastUserMessage(t *testing.T) {
+	conv := NewConversation()
+
+	if got := conv.LastUserMessage(); got != "" {
+		t.Errorf("expected empty string for empty conversation, got %q", got)
+	}
+
+	conv.AddUserMessage("first question")
+	conv.AddAssistantMessage("first answer")
+	conv.AddUserMessage("second question")
+	conv.AddAssistantMessage("second answer")
+
+	if got := conv.LastUserMessage(); got != "second question" {
+		t.Errorf("expected 'second question', got %q", got)
+	}
+
+	// Only assistant messages — should return empty.
+	conv2 := NewConversation()
+	conv2.AddAssistantMessage("no user here")
+	if got := conv2.LastUserMessage(); got != "" {
+		t.Errorf("expected empty for assistant-only, got %q", got)
+	}
+}
+
 func TestConversationRemoveLast(t *testing.T) {
 	conv := NewConversation()
 

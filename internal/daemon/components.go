@@ -33,6 +33,7 @@ import (
 	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/lint"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/learning"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	memsync "github.com/caimlas/meept/internal/memory/sync"
@@ -149,6 +150,12 @@ type Components struct {
 
 	// Learning pipeline
 	LearningPipeline *selfimprove.LearningPipeline
+
+	// LoRA learning capture recorder
+	LearningCapture *learning.CaptureRecorder
+
+	// LoRA adapter router for domain-routed inference (Phase 6).
+	AdapterRouter *llm.AdapterRouter
 
 	// Self-reflection (Turbo Thread E)
 	ReflectionCollector *agent.ReflectionCollector
@@ -797,6 +804,39 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// Create learning capture recorder (LoRA learning pipeline).
+	if cfg.Learning.Enabled {
+		ldataDir := cfg.Learning.DataDir
+		if ldataDir == "" {
+			ldataDir = filepath.Join(cfg.Daemon.DataDir, "learning")
+		}
+		cap, err := learning.NewCaptureRecorder(ldataDir)
+		if err != nil {
+			logger.Error("learning capture init failed", "error", err)
+		} else {
+			c.LearningCapture = cap
+			logger.Info("learning capture initialized", "data_dir", ldataDir)
+		}
+	}
+
+	// Load LoRA adapter registry for domain-routed inference (Phase 6).
+	adapterRegistryPath := filepath.Join(cfg.Daemon.DataDir, "adapter_registry.json")
+	if cfg.Learning.AdaptersDir != "" {
+		adapterRegistryPath = filepath.Join(filepath.Dir(cfg.Learning.AdaptersDir), "adapter_registry.json")
+	}
+	adapterRegistry, err := llm.LoadAdapterRegistry(adapterRegistryPath)
+	if err != nil {
+		logger.Warn("failed to load adapter registry", "error", err, "path", adapterRegistryPath)
+	} else if len(adapterRegistry.Adapters) > 0 {
+		lfmLoader := llm.NewLFMLoader(cfg.Learning.Training.DefaultModel, "", logger.With("component", "lfm_loader"))
+		if err := lfmLoader.LoadAllAdapters(adapterRegistry); err != nil {
+			logger.Warn("failed to load adapters", "error", err)
+		} else {
+			c.AdapterRouter = llm.NewAdapterRouter(lfmLoader.Adapters, nil)
+			logger.Info("lora adapters loaded", "count", len(lfmLoader.Adapters))
+		}
+	}
+
 	// Create skill usage tracker and writer (closed-loop skill evolution).
 	// Gated on cfg.Skills.Enabled (not cfg.SelfImprove.Enabled) so skill
 	// tracking works even when self-improve is off.
@@ -901,6 +941,16 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		lpAdapter := &learningPipelineAdapter{pipeline: c.LearningPipeline}
 		agentOpts = append(agentOpts, agent.WithLearningPipeline(lpAdapter))
 		logger.Info("Agent loop configured with learning pipeline")
+	}
+	// Wire LoRA learning capture recorder
+	if c.LearningCapture != nil {
+		agentOpts = append(agentOpts, agent.WithLearningCapture(c.LearningCapture))
+		logger.Info("agent loop configured with learning capture")
+	}
+	// Wire LoRA adapter router for domain-routed inference
+	if c.AdapterRouter != nil {
+		agentOpts = append(agentOpts, agent.WithAdapterRouter(c.AdapterRouter))
+		logger.Info("agent loop configured with adapter router")
 	}
 	// Wire skill usage tracker for closed-loop skill evolution
 	if c.SkillUsageTracker != nil {

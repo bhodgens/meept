@@ -1,0 +1,180 @@
+package learning
+
+import (
+	"crypto/md5"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+// DatasetVersion records metadata about a snapshot of a domain dataset.
+type DatasetVersion struct {
+	Version      int       `json:"version"`
+	CreatedAt    time.Time `json:"created_at"`
+	Domain       string    `json:"domain"`
+	ExampleCount int       `json:"example_count"`
+	MD5          string    `json:"md5"`
+	Source       string    `json:"source"` // "raw_captures" or "distillation"
+}
+
+// CreateSnapshot copies {datasetsDir}/{domain}.jsonl to
+// {versionsDir}/{domain}_v{N}.jsonl where N is the next version number,
+// computes the MD5 checksum, and appends a DatasetVersion entry to
+// {versionsDir}/versions.json.
+func CreateSnapshot(domain, datasetsDir, versionsDir string) (*DatasetVersion, error) {
+	if err := os.MkdirAll(versionsDir, 0o755); err != nil {
+		return nil, fmt.Errorf("learning: mkdir versions %s: %w", versionsDir, err)
+	}
+
+	srcPath := filepath.Join(datasetsDir, domain+".jsonl")
+	srcFile, err := os.Open(srcPath)
+	if err != nil {
+		return nil, fmt.Errorf("learning: open source dataset %s: %w", srcPath, err)
+	}
+	defer srcFile.Close()
+
+	// Count existing versions for this domain to compute the next version number.
+	nextVer, err := nextVersionNumber(domain, versionsDir)
+	if err != nil {
+		return nil, err
+	}
+
+	dstPath := filepath.Join(versionsDir, fmt.Sprintf("%s_v%d.jsonl", domain, nextVer))
+	dstFile, err := os.Create(dstPath)
+	if err != nil {
+		return nil, fmt.Errorf("learning: create versioned snapshot %s: %w", dstPath, err)
+	}
+
+	hasher := md5.New()
+	exampleCount := 0
+
+	// We need to count lines and compute MD5. Copy through a tee reader and
+	// count newlines.
+	tee := io.TeeReader(srcFile, dstFile)
+	scannerBuf := make([]byte, 32*1024)
+	lineCount := 0
+	for {
+		n, rerr := tee.Read(scannerBuf)
+		if n > 0 {
+			hasher.Write(scannerBuf[:n])
+			// Count newlines in the chunk.
+			for _, b := range scannerBuf[:n] {
+				if b == '\n' {
+					lineCount++
+				}
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			dstFile.Close()
+			return nil, fmt.Errorf("learning: copy dataset to snapshot: %w", rerr)
+		}
+	}
+	dstFile.Close()
+	exampleCount = lineCount
+
+	version := &DatasetVersion{
+		Version:      nextVer,
+		CreatedAt:    time.Now().UTC(),
+		Domain:       domain,
+		ExampleCount: exampleCount,
+		MD5:          hex.EncodeToString(hasher.Sum(nil)),
+		Source:       "raw_captures",
+	}
+
+	// Append version metadata to versions.json (JSON array on disk).
+	if err := appendVersionMetadata(versionsDir, version); err != nil {
+		return version, err
+	}
+
+	return version, nil
+}
+
+func nextVersionNumber(domain, versionsDir string) (int, error) {
+	entries, err := os.ReadDir(versionsDir)
+	if err != nil {
+		return 0, fmt.Errorf("learning: read versions dir: %w", err)
+	}
+	maxVer := 0
+	prefix := domain + "_v"
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() {
+			continue
+		}
+		// Only count files matching {domain}_v{N}.jsonl.
+		rest, ok := cutPrefix(name, prefix)
+		if !ok {
+			continue
+		}
+		// rest looks like "3.jsonl"
+		numStr := rest
+		if idx := indexByte(numStr, '.'); idx >= 0 {
+			numStr = numStr[:idx]
+		}
+		var n int
+		for _, c := range numStr {
+			if c < '0' || c > '9' {
+				n = 0
+				break
+			}
+			n = n*10 + int(c-'0')
+		}
+		if n > maxVer {
+			maxVer = n
+		}
+	}
+	return maxVer + 1, nil
+}
+
+func appendVersionMetadata(versionsDir string, v *DatasetVersion) error {
+	versionsFile := filepath.Join(versionsDir, "versions.json")
+
+	var versions []DatasetVersion
+	data, err := os.ReadFile(versionsFile)
+	if err == nil && len(data) > 0 {
+		if err := json.Unmarshal(data, &versions); err != nil {
+			// If corrupt, start fresh.
+			versions = nil
+		}
+	}
+	versions = append(versions, *v)
+
+	out, err := json.MarshalIndent(versions, "", "  ")
+	if err != nil {
+		return fmt.Errorf("learning: marshal versions: %w", err)
+	}
+	if err := os.WriteFile(versionsFile, out, 0o644); err != nil {
+		return fmt.Errorf("learning: write versions.json: %w", err)
+	}
+	return nil
+}
+
+// cutPrefix is a local replacement for strings.CutPrefix (Go 1.20+) to
+// avoid importing strings just for this.
+func cutPrefix(s, prefix string) (string, bool) {
+	if len(s) < len(prefix) {
+		return s, false
+	}
+	for i := 0; i < len(prefix); i++ {
+		if s[i] != prefix[i] {
+			return s, false
+		}
+	}
+	return s[len(prefix):], true
+}
+
+func indexByte(s string, b byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == b {
+			return i
+		}
+	}
+	return -1
+}

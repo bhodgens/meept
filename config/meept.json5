@@ -533,6 +533,27 @@
     },
   },
 
+  // LoRA learning pipeline configuration
+  "learning": {
+    "enabled": true,
+    "data_dir": "~/.meept/learning",
+    "adapters_dir": "~/.meept/adapters",
+    "capture": {
+      "enabled": true,
+      "include_tools": ["memory_search", "file_read", "grep", "web_search"],
+      "min_quality_score": 0.6,
+    },
+    "training": {
+      "default_model": "lfm2.5-8b",
+      "auto_train_threshold": 500,
+      "manual_only": true,
+    },
+    "retention": {
+      "max_dataset_size_mb": 100,
+      "keep_versions": 3,
+    },
+  },
+
   // Hierarchical orchestrator settings
   "orchestrator": {
     // max_plan_steps removed (Thread C+F): use max_steps_per_phase * max_phases instead.

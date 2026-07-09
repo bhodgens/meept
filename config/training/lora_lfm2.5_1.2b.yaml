@@ -1,0 +1,28 @@
+# LoRA Training Config for LFM2.5-1.2B
+model:
+  name_or_path: "LFM/LFM2.5-1.2B"
+  dtype: "bfloat16"
+
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+
+training:
+  batch_size: 4
+  gradient_accumulation: 4
+  epochs: 3
+  learning_rate: 1.0e-4
+  max_seq_length: 2048
+  fp16: true
+
+output:
+  base_dir: "~/.meept/adapters"

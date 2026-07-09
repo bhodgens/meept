@@ -20,6 +20,7 @@ import (
 	"github.com/caimlas/meept/internal/compress"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/learning"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/project"
@@ -430,6 +431,10 @@ type AgentLoop struct {
 
 	// Learning pipeline for JUDGE/DISTILL/CONSOLIDATE
 	learningPipeline LearningPipeline
+	// learningCapture records research trajectories for LoRA training data.
+	learningCapture *learning.CaptureRecorder
+	// adapterRouter selects domain-specific LoRA adapters at inference time.
+	adapterRouter *llm.AdapterRouter
 	// reflectionCollector drives immediate per-turn self-reflection
 	// (Turbo Thread E). Optional; when nil, no reflection runs.
 	reflectionCollector *ReflectionCollector
@@ -754,6 +759,27 @@ func WithLearningPipeline(lp LearningPipeline) LoopOption {
 	return func(l *AgentLoop) {
 		if lp != nil {
 			l.learningPipeline = lp
+		}
+	}
+}
+
+// WithLearningCapture wires the LoRA research capture recorder so that
+// tool calls are appended to the learning pipeline's raw captures log.
+func WithLearningCapture(lc *learning.CaptureRecorder) LoopOption {
+	return func(l *AgentLoop) {
+		if lc != nil {
+			l.learningCapture = lc
+		}
+	}
+}
+
+// WithAdapterRouter wires the LoRA adapter router so that domain-specific
+// adapters can be selected at inference time. Nil guard prevents typed-nil
+// panic.
+func WithAdapterRouter(ar *llm.AdapterRouter) LoopOption {
+	return func(l *AgentLoop) {
+		if ar != nil {
+			l.adapterRouter = ar
 		}
 	}
 }
@@ -1875,6 +1901,42 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		}()
 	}
 
+	// LoRA trajectory capture: record the full (intent, synthesis, tool path,
+	// outcome) tuple for training data. This is the rich capture format that
+	// associates the user's original intent with the agent's final response.
+	// Runs asynchronously; non-blocking on errors.
+	if l.learningCapture != nil && err == nil {
+		lc := l.learningCapture
+		convSnapshot := conv
+		convID := conversationID
+		intent := userMessage
+		synthesis := finalResponse
+		success := err == nil
+
+		l.wg.Add(1)
+		go func() {
+			defer l.wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					l.logger.Warn("learning trajectory capture panicked", "error", r)
+				}
+			}()
+			// Collect tool names from the conversation's tool results.
+			msgs := convSnapshot.GetMessages()
+			var toolNames []string
+			for _, m := range msgs {
+				if m.Role == llm.RoleAssistant && len(m.ToolCalls) > 0 {
+					for _, tc := range m.ToolCalls {
+						toolNames = append(toolNames, tc.Function.Name)
+					}
+				}
+			}
+			if err := lc.RecordTrajectory(context.Background(), convID, intent, synthesis, toolNames, success); err != nil {
+				l.logger.Warn("learning trajectory capture failed", "error", err)
+			}
+		}()
+	}
+
 	// Add final response to conversation
 	conv.AddAssistantMessage(finalResponse)
 
@@ -2871,6 +2933,15 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					}
 				}
 				conv.AddToolResult(result.ToolCallID, output)
+
+				// Learning capture: record per-tool-call research trajectories
+				// for LoRA training data. Non-blocking on errors; warn only.
+				if l.learningCapture != nil {
+					userQuery := conv.LastUserMessage()
+				if err := l.learningCapture.RecordResearch(ctx, conversationID, userQuery, toolName, output); err != nil {
+						l.logger.Warn("learning capture failed", "error", err)
+					}
+				}
 			}
 
 			// Publish agent result event
@@ -4466,6 +4537,8 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 
 		// --- Learning + reflection ---
 		WithLearningPipeline(l.learningPipeline),
+		WithLearningCapture(l.learningCapture),
+		WithAdapterRouter(l.adapterRouter),
 		WithReflectionCollector(l.reflectionCollector),
 		WithUsageTracker(l.usageTracker),
 		WithShadowManager(l.shadowMgr),
