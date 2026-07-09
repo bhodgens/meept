@@ -34,6 +34,50 @@ class BackgroundImage extends StatelessWidget {
   }
 }
 
+/// Background image with optional color tint overlay.
+///
+/// For sidebar: use green tint at low opacity
+/// For chat area: use no tint (standard background)
+class TintedBackgroundImage extends StatelessWidget {
+  final Widget child;
+  final double imageOpacity;
+  final Color? tintColor;
+  final double tintOpacity;
+
+  const TintedBackgroundImage({
+    super.key,
+    required this.child,
+    this.imageOpacity = 0.15,
+    this.tintColor,
+    this.tintOpacity = 0.1,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        // Background image
+        Positioned.fill(
+          child: Image.asset(
+            'assets/images/gui-bg.png',
+            fit: BoxFit.cover,
+            opacity: AlwaysStoppedAnimation(imageOpacity),
+          ),
+        ),
+        // Tint overlay (if specified)
+        if (tintColor != null)
+          Positioned.fill(
+            child: Container(
+              color: tintColor!.withValues(alpha: tintOpacity),
+            ),
+          ),
+        // Content overlay
+        child,
+      ],
+    );
+  }
+}
+
 /// Semi-transparent container for chat bubbles with background image.
 ///
 /// Wraps chat content with a 60% opacity background to blend with

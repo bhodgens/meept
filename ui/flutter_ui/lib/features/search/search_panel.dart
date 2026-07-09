@@ -9,6 +9,7 @@ import '../../theme/typography.dart';
 import '../../models/api_models.dart';
 import '../../services/sdk_client.dart';
 import '../../providers/providers.dart';
+import '../../providers/session_project_provider.dart';
 
 /// SearchPanel provides full-text search across sessions, tasks, memories, and plans.
 ///
@@ -548,6 +549,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
   /// Fetch a session by ID, set it as active, and navigate to chat.
   /// If [messageId] is provided, requests ChatMessageList to scroll to
   /// that message once messages have loaded.
+  /// Prompts for project binding if the session has no project context.
   Future<void> _navigateToSession(String sessionId, {String? messageId}) async {
     try {
       final raw = await _sdkClient.getSession(sessionId);
@@ -559,6 +561,16 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
         ref.read(pendingScrollMessageProvider(session.id).notifier).state =
             messageId;
       }
+
+      // Check project binding and prompt if needed.
+      final proceed = await SessionProjectChecker.checkAndPrompt(
+        context: context,
+        session: session,
+        onSkip: () {},
+        onProjectBound: (cwd) {},
+      );
+      if (!proceed) return;
+
       ref.read(activeSessionProvider.notifier).state = session;
       ref.read(chatProvider.notifier).loadMessages(session.id);
       context.go('/');

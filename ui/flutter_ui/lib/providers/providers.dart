@@ -48,7 +48,8 @@ final websocketProvider = Provider<WebSocketService>((ref) {
 final sessionProvider =
     StateNotifierProvider<SessionNotifier, SessionState>((ref) {
   final client = ref.watch(sdkClientProvider);
-  return SessionNotifier(sdkClient: client);
+  final websocket = ref.watch(websocketProvider);
+  return SessionNotifier(sdkClient: client, websocket: websocket);
 });
 
 // Active session state

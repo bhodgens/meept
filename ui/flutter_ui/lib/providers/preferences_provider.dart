@@ -28,3 +28,26 @@ class ModifierKeyNotifier extends StateNotifier<String> {
     await set(newValue);
   }
 }
+
+/// GUI layout preference: "toptabs" (default) or "sidebar".
+/// Controls the overall navigation structure of the Flutter UI.
+/// Defaults to "toptabs" (traditional horizontal tab bar).
+final guiLayoutProvider = StateNotifierProvider<GuiLayoutNotifier, String>((ref) {
+  return GuiLayoutNotifier();
+});
+
+class GuiLayoutNotifier extends StateNotifier<String> {
+  GuiLayoutNotifier() : super('toptabs');
+
+  /// Load the preference from storage. Call this at app startup.
+  Future<void> load() async {
+    final value = StorageService.instance.getGuiLayout();
+    state = value ?? 'toptabs';
+  }
+
+  /// Set the preference and persist to storage.
+  Future<void> set(String value) async {
+    await StorageService.instance.setGuiLayout(value);
+    state = value;
+  }
+}

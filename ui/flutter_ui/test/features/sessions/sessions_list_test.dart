@@ -10,6 +10,7 @@ import 'package:meept_ui/providers/status_message_provider.dart';
 import 'package:meept_ui/services/session_notifier.dart';
 import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/services/sdk_client.dart';
+import '../../mocks/mock_websocket_service.dart';
 
 void main() {
   group('SessionsList widget', () {
@@ -19,7 +20,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            sessionProvider.overrideWith((ref) => SessionNotifier(sdkClient: client)),
+            sessionProvider.overrideWith((ref) => SessionNotifier(sdkClient: client, websocket: MockWebSocketService())),
           ],
           child: const MaterialApp(
             home: Scaffold(body: SessionsList()),
@@ -42,7 +43,7 @@ void main() {
         ProviderScope(
           overrides: [
             sessionProvider.overrideWith(
-                (ref) => SessionNotifier(sdkClient: _TestSdkClient([]))),
+                (ref) => SessionNotifier(sdkClient: _TestSdkClient([]), websocket: MockWebSocketService())),
           ],
           child: const MaterialApp(
             home: Scaffold(body: SessionsList()),
@@ -61,7 +62,7 @@ void main() {
         ProviderScope(
           overrides: [
             sessionProvider.overrideWith((ref) {
-              final notifier = SessionNotifier(sdkClient: _TestSdkClient(_testSessions));
+              final notifier = SessionNotifier(sdkClient: _TestSdkClient(_testSessions), websocket: MockWebSocketService());
               return notifier;
             }),
           ],
@@ -91,7 +92,7 @@ void main() {
         ProviderScope(
           overrides: [
             sessionProvider.overrideWith((ref) {
-              return SessionNotifier(sdkClient: _TestSdkClient([session]));
+              return SessionNotifier(sdkClient: _TestSdkClient([session]), websocket: MockWebSocketService());
             }),
             activeSessionProvider.overrideWith((ref) => null),
           ],
@@ -147,7 +148,7 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           sessionProvider.overrideWith((ref) =>
-              SessionNotifier(sdkClient: _TestSdkClient([session]))),
+              SessionNotifier(sdkClient: _TestSdkClient([session]), websocket: MockWebSocketService())),
         ],
       );
       addTearDown(container.dispose);
@@ -192,7 +193,7 @@ void main() {
         ProviderScope(
           overrides: [
             sessionProvider.overrideWith(
-                (ref) => SessionNotifier(sdkClient: _TestSdkClient([]))),
+                (ref) => SessionNotifier(sdkClient: _TestSdkClient([]), websocket: MockWebSocketService())),
           ],
           child: const MaterialApp(
             home: Scaffold(body: SessionsList()),
@@ -223,7 +224,7 @@ void main() {
                   title: 'Archive Me',
                   createdAt: DateTime.now(),
                 ),
-              ]));
+              ]), websocket: MockWebSocketService());
               return notifier;
             }),
           ],
@@ -253,7 +254,7 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           sessionProvider.overrideWith((ref) => SessionNotifier(
-              sdkClient: _ArchiveThrowingSdkClient())),
+              sdkClient: _ArchiveThrowingSdkClient(), websocket: MockWebSocketService())),
         ],
       );
       addTearDown(container.dispose);
@@ -299,7 +300,7 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           sessionProvider.overrideWith((ref) => SessionNotifier(
-              sdkClient: _DeleteThrowingSdkClient())),
+              sdkClient: _DeleteThrowingSdkClient(), websocket: MockWebSocketService())),
         ],
       );
       addTearDown(container.dispose);
@@ -338,14 +339,14 @@ void main() {
 
   group('SessionNotifier', () {
     test('state starts empty', () {
-      final notifier = SessionNotifier(sdkClient: _TestSdkClient([]));
+      final notifier = SessionNotifier(sdkClient: _TestSdkClient([]), websocket: MockWebSocketService());
       expect(notifier.state.sessions, isEmpty);
       expect(notifier.state.isLoading, isFalse);
       expect(notifier.state.error, isNull);
     });
 
     test('loadSessions populates sessions', () async {
-      final notifier = SessionNotifier(sdkClient: _TestSdkClient(_testSessions));
+      final notifier = SessionNotifier(sdkClient: _TestSdkClient(_testSessions), websocket: MockWebSocketService());
       await notifier.loadSessions();
 
       expect(notifier.state.sessions, hasLength(_testSessions.length));
@@ -354,7 +355,7 @@ void main() {
     });
 
     test('loadSessions sets error on failure', () async {
-      final notifier = SessionNotifier(sdkClient: _ThrowingSdkClient());
+      final notifier = SessionNotifier(sdkClient: _ThrowingSdkClient(), websocket: MockWebSocketService());
       await notifier.loadSessions();
 
       expect(notifier.state.sessions, isEmpty);
@@ -364,7 +365,7 @@ void main() {
 
     test('createSession appends new session', () async {
       final client = _TestSdkClient(_testSessions);
-      final notifier = SessionNotifier(sdkClient: client);
+      final notifier = SessionNotifier(sdkClient: client, websocket: MockWebSocketService());
       await notifier.loadSessions();
 
       final count = notifier.state.sessions.length;
@@ -374,7 +375,7 @@ void main() {
 
     test('deleteSession removes session', () async {
       final client = _TestSdkClient(_testSessions);
-      final notifier = SessionNotifier(sdkClient: client);
+      final notifier = SessionNotifier(sdkClient: client, websocket: MockWebSocketService());
       await notifier.loadSessions();
 
       final firstId = _testSessions[0].id;
@@ -387,9 +388,9 @@ void main() {
     // preserves any prior error — once a banner shows it stays stuck.
     test('deleteSession clears prior error on success', () async {
       final client = _TestSdkClient(_testSessions);
-      final notifier = SessionNotifier(sdkClient: client);
+      final notifier = SessionNotifier(sdkClient: client, websocket: MockWebSocketService());
       // Seed an error via a failing load.
-      final throwing = SessionNotifier(sdkClient: _ThrowingSdkClient());
+      final throwing = SessionNotifier(sdkClient: _ThrowingSdkClient(), websocket: MockWebSocketService());
       await throwing.loadSessions();
       expect(throwing.state.error, isNotNull);
       // Simulate error carrying over by copying state into `notifier`.
@@ -402,7 +403,7 @@ void main() {
 
     test('archiveSession clears prior error on success', () async {
       final client = _TestSdkClient(_testSessions);
-      final notifier = SessionNotifier(sdkClient: client);
+      final notifier = SessionNotifier(sdkClient: client, websocket: MockWebSocketService());
       await notifier.loadSessions();
       // Seed an error.
       notifier.state = notifier.state.copyWith(error: 'prior failure');
@@ -414,7 +415,7 @@ void main() {
 
     test('unarchiveSession clears prior error on success', () async {
       final client = _TestSdkClient(_testSessions);
-      final notifier = SessionNotifier(sdkClient: client);
+      final notifier = SessionNotifier(sdkClient: client, websocket: MockWebSocketService());
       await notifier.loadSessions();
       // Seed an error.
       notifier.state = notifier.state.copyWith(error: 'prior failure');
@@ -461,6 +462,7 @@ class _TestSdkClient extends SdkApiClient {
   Future<Map<String, dynamic>> createSession({
     required String title,
     String? agentId,
+    String? cwd,
   }) async {
     final session = Session(
       id: 'new-${_localSessions.length + 1}',

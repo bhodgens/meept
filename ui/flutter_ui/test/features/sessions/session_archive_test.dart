@@ -6,6 +6,7 @@ import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/providers/providers.dart';
 import 'package:meept_ui/services/session_notifier.dart';
 import 'package:meept_ui/services/sdk_client.dart';
+import '../../mocks/mock_websocket_service.dart';
 
 void main() {
   testWidgets('archived session renders with reduced opacity and sorts after active',
@@ -24,16 +25,14 @@ void main() {
       lastActivity: DateTime.now(),
     );
 
-    // Return sessions in the order the backend would (active before archived,
-    // matching the server's ORDER BY clause). loadSessions() does not re-sort
-    // locally — it trusts the server ordering.
     final client = _ArchiveTestClient([active, archived]);
+    final websocket = MockWebSocketService();
 
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           sessionProvider.overrideWith(
-              (ref) => SessionNotifier(sdkClient: client)),
+              (ref) => SessionNotifier(sdkClient: client, websocket: websocket)),
         ],
         child: const MaterialApp(
           home: Scaffold(body: SessionsList()),
@@ -48,15 +47,11 @@ void main() {
     final activeTile = find.byKey(const ValueKey('session-tile-act1'));
     expect(activeTile, findsOneWidget);
 
-    // Active session should render above archived (lower Y coordinate).
     expect(
       tester.getCenter(activeTile).dy,
       lessThan(tester.getCenter(archivedTile).dy),
     );
 
-    // Archived tile should be wrapped in an Opacity widget < 1.0.
-    // Opacity is the parent of the InkWell that carries the ValueKey, so
-    // search ancestors rather than descendants.
     final opacityFinder = find.ancestor(
       of: archivedTile,
       matching: find.byType(Opacity),
@@ -74,12 +69,13 @@ void main() {
       createdAt: DateTime.now(),
     );
     final client = _ArchiveTestClient([session]);
+    final websocket = MockWebSocketService();
 
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           sessionProvider.overrideWith(
-              (ref) => SessionNotifier(sdkClient: client)),
+              (ref) => SessionNotifier(sdkClient: client, websocket: websocket)),
         ],
         child: const MaterialApp(
           home: Scaffold(body: SessionsList()),
@@ -90,7 +86,6 @@ void main() {
 
     expect(find.byIcon(Icons.archive_outlined), findsOneWidget);
     await tester.tap(find.byIcon(Icons.archive_outlined));
-    // InkWell delays onTap when onDoubleTap is present; pump past the double-tap window
     await tester.pump(const Duration(milliseconds: 350));
     await tester.pumpAndSettle();
 
@@ -108,7 +103,5 @@ class _ArchiveTestClient extends SdkApiClient {
   }
 
   @override
-  Future<void> archiveSession(String sessionId, {required bool archived}) async {
-    // No-op — notifier flips the flag locally.
-  }
+  Future<void> archiveSession(String sessionId, {required bool archived}) async {}
 }

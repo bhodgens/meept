@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/home/home_screen.dart';
+import '../features/home/sidebar_home_screen.dart';
 import '../features/settings/settings_panel.dart';
 import '../features/search/search_panel.dart';
 import '../features/projects/branches_panel.dart';
@@ -12,6 +13,7 @@ import '../features/reflection/reflection_panel.dart';
 import '../features/prompts/prompt_panel.dart';
 import '../theme/colors.dart';
 import '../theme/typography.dart';
+import '../providers/preferences_provider.dart';
 
 /// Global GoRouter instance, accessible via [routerProvider] or directly.
 ///
@@ -184,6 +186,49 @@ final routerProvider = Provider<GoRouter>((ref) => router);
 /// This is a lightweight adapter — HomeScreen still owns tab state
 /// internally, but it will call `setState` to the provided [initialTab]
 /// during the first build frame.
+
+/// Layout shell that chooses between HomeScreen and SidebarHomeScreen
+/// based on the gui.layout configuration option.
+///
+/// Default: "toptabs" -> HomeScreen (traditional top tab bar)
+/// Alternative: "sidebar" -> SidebarHomeScreen (left sidebar navigation)
+class _LayoutShell extends ConsumerStatefulWidget {
+  final HomeTab tab;
+
+  const _LayoutShell({required this.tab});
+
+  @override
+  ConsumerState<_LayoutShell> createState() => _LayoutShellState();
+}
+
+class _LayoutShellState extends ConsumerState<_LayoutShell> {
+  String? _layout;
+
+  @override
+  void initState() {
+    super.initState();
+    // Load layout preference from provider
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      setState(() {
+        _layout = ref.read(guiLayoutProvider);
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Default to toptabs if layout not yet loaded
+    final layout = _layout ?? 'toptabs';
+    
+    if (layout == 'sidebar') {
+      // Sidebar layout only uses the chat tab - other tabs accessed via overlay
+      return const SidebarHomeScreen();
+    }
+    
+    // Default toptabs layout
+    return _HomeShell(initialTab: widget.tab);
+  }
+}
 class _HomeShell extends StatefulWidget {
   final HomeTab initialTab;
 

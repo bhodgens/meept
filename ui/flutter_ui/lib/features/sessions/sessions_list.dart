@@ -8,6 +8,7 @@ import '../../theme/typography.dart';
 import '../../features/home/home_screen.dart' show HomeTab;
 import '../../models/api_models.dart';
 import '../../providers/providers.dart';
+import '../../providers/session_project_provider.dart';
 import '../../providers/status_message_provider.dart';
 import '../../providers/tab_activation_provider.dart';
 
@@ -74,9 +75,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
       if (event.logicalKey == LogicalKeyboardKey.enter) {
         final sessions = sessionState.sessions;
         if (_selectedIndex >= 0 && _selectedIndex < sessions.length) {
-          ref.read(activeSessionProvider.notifier).state = sessions[_selectedIndex];
-          ref.read(tabActivationProvider.notifier).state = HomeTab.chat;
-          context.go('/');
+          _activateSession(context, sessions[_selectedIndex]);
         }
         return KeyEventResult.handled;
       }
@@ -108,6 +107,38 @@ class _SessionsListState extends ConsumerState<SessionsList> {
     ref.read(chatProvider.notifier).clearMessages();
     ref.read(tabActivationProvider.notifier).state = HomeTab.chat;
     if (mounted) context.go('/');
+  }
+
+  /// Activate [session] as the active session, prompting for project
+  /// binding if the session has no project context.
+  void _activateSession(BuildContext context, Session session) {
+    if (!SessionProjectChecker.needsProjectPrompt(session)) {
+      // Already bound — fast path.
+      _doActivateSession(session);
+      return;
+    }
+
+    SessionProjectChecker.checkAndPrompt(
+      context: context,
+      session: session,
+      onSkip: () {
+        _doActivateSession(session);
+      },
+      onProjectBound: (cwd) {
+        // Project will be bound by the daemon on next RPC; for now
+        // just activate the session and let the project context
+        // resolve on the next refresh.
+        _doActivateSession(session);
+      },
+    );
+  }
+
+  /// Perform the actual session activation (navigate, clear messages).
+  void _doActivateSession(Session session) {
+    ref.read(activeSessionProvider.notifier).state = session;
+    ref.read(chatProvider.notifier).clearMessages();
+    ref.read(tabActivationProvider.notifier).state = HomeTab.chat;
+    context.go('/');
   }
 
   Future<void> _showArchiveConfirmation(String sessionId, String title) async {
@@ -322,9 +353,11 @@ class _SessionsListState extends ConsumerState<SessionsList> {
       opacity: session.archived ? 0.5 : 1.0,
       child: InkWell(
         key: ValueKey('session-tile-${session.id}'),
-        onTap: () => ref.read(activeSessionProvider.notifier).state = session,
+        onTap: () => _activateSession(context, session),
         onDoubleTap: () {
-          ref.read(activeSessionProvider.notifier).state = session;
+          // Session was already activated by onTap; this fast-path
+          // just ensures navigation to chat without re-triggering the
+          // project prompt.
           ref.read(tabActivationProvider.notifier).state = HomeTab.chat;
           context.go('/');
         },
