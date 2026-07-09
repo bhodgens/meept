@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -879,5 +880,139 @@ func TestRouteToAgent_NilIntentRegression(t *testing.T) {
 	_, err = d.RouteToAgent(context.Background(), result, "conv-test")
 	if err == nil {
 		t.Fatal("expected error for nil intent, got nil")
+	}
+}
+
+// stubSessionStore is a minimal SessionStoreReader for testing.
+type stubSessionStore struct {
+	sessions map[string]*session.Session
+}
+
+func (s *stubSessionStore) Get(id string) *session.Session {
+	return s.sessions[id]
+}
+
+func TestChatHandler_SessionLoop_FallsBackToSingleton_WhenManagerNil(t *testing.T) {
+	singletonLoop := NewAgentLoop("singleton", "/tmp")
+	h := NewChatHandler(singletonLoop, nil, nil, slogDiscardLogger())
+
+	got := h.sessionLoop("any-session")
+	if got != singletonLoop {
+		t.Error("expected singleton loop when manager is nil")
+	}
+}
+
+func TestChatHandler_SessionLoop_FallsBackToSingleton_WhenSessionStoreNil(t *testing.T) {
+	singletonLoop := NewAgentLoop("singleton", "/tmp")
+	h := NewChatHandler(singletonLoop, nil, nil, slogDiscardLogger())
+	// Set a manager but no session store
+	mgr := NewManager(ManagerConfig{})
+	h.SetAgentLoopManager(mgr)
+
+	got := h.sessionLoop("any-session")
+	if got != singletonLoop {
+		t.Error("expected singleton loop when session store is nil")
+	}
+}
+
+func TestChatHandler_SessionLoop_FallsBackToSingleton_WhenSessionUnknown(t *testing.T) {
+	singletonLoop := NewAgentLoop("singleton", "/tmp")
+	h := NewChatHandler(singletonLoop, nil, nil, slogDiscardLogger())
+
+	store := &stubSessionStore{sessions: map[string]*session.Session{}}
+	h.SetSessionStore(store)
+	mgr := NewManager(ManagerConfig{})
+	h.SetAgentLoopManager(mgr)
+
+	got := h.sessionLoop("unknown-session")
+	if got != singletonLoop {
+		t.Error("expected singleton loop when session is unknown")
+	}
+}
+
+func TestChatHandler_SessionLoop_FallsBackToSingleton_WhenNoProjectPath(t *testing.T) {
+	singletonLoop := NewAgentLoop("singleton", "/tmp")
+	h := NewChatHandler(singletonLoop, nil, nil, slogDiscardLogger())
+
+	store := &stubSessionStore{
+		sessions: map[string]*session.Session{
+			"sess-no-project": {ID: "sess-no-project", ProjectPath: ""},
+		},
+	}
+	h.SetSessionStore(store)
+	mgr := NewManager(ManagerConfig{})
+	h.SetAgentLoopManager(mgr)
+
+	got := h.sessionLoop("sess-no-project")
+	if got != singletonLoop {
+		t.Error("expected singleton loop when session has no project path")
+	}
+}
+
+func TestChatHandler_SessionLoop_ReturnsSessionScopedLoop(t *testing.T) {
+	singletonLoop := NewAgentLoop("singleton", "/tmp")
+	h := NewChatHandler(singletonLoop, nil, nil, slogDiscardLogger())
+
+	const sessionID = "sess-with-project"
+	const projectPath = "/repos/myproject"
+	store := &stubSessionStore{
+		sessions: map[string]*session.Session{
+			sessionID: {ID: sessionID, ProjectPath: projectPath},
+		},
+	}
+	h.SetSessionStore(store)
+	mgr := NewManager(ManagerConfig{})
+	h.SetAgentLoopManager(mgr)
+
+	got := h.sessionLoop(sessionID)
+	if got == nil {
+		t.Fatal("expected non-nil loop")
+	}
+	if got == singletonLoop {
+		t.Fatal("expected session-scoped loop, got singleton")
+	}
+	if got.GetSessionID() != sessionID {
+		t.Errorf("GetSessionID() = %q, want %q", got.GetSessionID(), sessionID)
+	}
+	if got.GetWorkingDir() != projectPath {
+		t.Errorf("GetWorkingDir() = %q, want %q", got.GetWorkingDir(), projectPath)
+	}
+}
+
+func TestChatHandler_SessionLoop_CachesLoopAcrossCalls(t *testing.T) {
+	singletonLoop := NewAgentLoop("singleton", "/tmp")
+	h := NewChatHandler(singletonLoop, nil, nil, slogDiscardLogger())
+
+	const sessionID = "sess-cache"
+	const projectPath = "/repos/cached"
+	store := &stubSessionStore{
+		sessions: map[string]*session.Session{
+			sessionID: {ID: sessionID, ProjectPath: projectPath},
+		},
+	}
+	h.SetSessionStore(store)
+	mgr := NewManager(ManagerConfig{})
+	h.SetAgentLoopManager(mgr)
+
+	first := h.sessionLoop(sessionID)
+	second := h.sessionLoop(sessionID)
+	if first != second {
+		t.Error("expected the same loop instance on repeated calls (cached by manager)")
+	}
+}
+
+func TestChatHandler_SetAgentLoopManager_NilSafe(t *testing.T) {
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+	h.SetAgentLoopManager(nil) // should not panic
+	if h.loopManager != nil {
+		t.Error("loopManager should remain nil after SetAgentLoopManager(nil)")
+	}
+}
+
+func TestChatHandler_SetSessionStore_NilSafe(t *testing.T) {
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+	h.SetSessionStore(nil) // should not panic
+	if h.sessionStore != nil {
+		t.Error("sessionStore should remain nil after SetSessionStore(nil)")
 	}
 }

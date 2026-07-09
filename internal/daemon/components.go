@@ -2094,6 +2094,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// constructed. See internal/daemon/agent_manager_wiring.go.
 	wireAgentLoopManager(c, cfg, logger)
 
+	// Wire per-session AgentLoop manager and session store onto ChatHandler
+	// so direct-mode requests route to session-scoped loops when available.
+	// Must run AFTER wireAgentLoopManager (which constructs c.AgentLoopManager)
+	// and AFTER both ChatHandler construction sites.
+	if c.ChatHandler != nil && c.AgentLoopManager != nil {
+		c.ChatHandler.SetAgentLoopManager(c.AgentLoopManager)
+	}
+	if c.ChatHandler != nil && c.SessionStore != nil {
+		c.ChatHandler.SetSessionStore(c.SessionStore)
+	}
+
 	// Create job processor that uses the agent loop (with optional multi-agent registry)
 	jobProc := NewAgentJobProcessor(c.AgentLoop, logger)
 	if c.AgentRegistry != nil {

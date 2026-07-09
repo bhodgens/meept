@@ -17,9 +17,18 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/metrics"
+	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
 )
+
+// SessionStoreReader is the narrow interface ChatHandler needs from a session
+// store: looking up a session by ID to inspect its project path. Using a
+// local interface avoids requiring tests to implement the full session.Store
+// (30+ methods).
+type SessionStoreReader interface {
+	Get(id string) *session.Session
+}
 
 // ChatHandler bridges the message bus to the AgentLoop.
 // It subscribes to chat.request and publishes responses to chat.response.
@@ -41,6 +50,15 @@ type ChatHandler struct {
 
 	// CollaborationEngine for starting collaboration sessions from IntentCollaborate
 	collabEngine *CollaborationEngine
+
+	// Per-session AgentLoop manager for session-scoped dispatch.
+	// When set and a session exists with a project path, direct-mode
+	// requests route to a session-scoped AgentLoop instead of the
+	// singleton loop. Falls back to `loop` when nil or session unknown.
+	loopManager *Manager
+
+	// SessionStoreReader for looking up session project paths.
+	sessionStore SessionStoreReader
 
 	// Synchronous dispatch mode: when true, async-dispatched tasks wait
 	// for completion instead of returning immediately (Issue 0022).
@@ -679,8 +697,13 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		// Record the routing decision for debugging and persistent audit trail.
 		h.dispatcher.RecordDispatch(conversationID, handlerCase, inputSummary, result, hasParts, dispatchErr)
 	} else {
-		// Direct mode: send to standalone agent loop
-		reply, err = h.loop.RunOnceWithParts(ctx, req.Message, req.Parts, conversationID)
+		// Direct mode: prefer a session-scoped AgentLoop when a manager
+		// is wired and the session has a project path. This isolates
+		// per-session execution contexts (working directory, project).
+		// Falls back to the singleton loop when the manager is unset,
+		// the session is unknown, or GetOrCreateWired fails.
+		loop := h.sessionLoop(conversationID)
+		reply, err = loop.RunOnceWithParts(ctx, req.Message, req.Parts, conversationID)
 	}
 
 	// Append classification degradation notice when dispatch used a fallback classifier.
@@ -1350,6 +1373,47 @@ func (h *ChatHandler) SetCollaborationEngine(engine *CollaborationEngine) {
 	if engine != nil {
 		h.collabEngine = engine
 	}
+}
+
+// SetAgentLoopManager registers a per-session AgentLoop manager.
+// When set, direct-mode chat requests route to a session-scoped
+// AgentLoop (created via GetOrCreateWired from the singleton template)
+// if the session has a project path. Falls back to the singleton loop.
+func (h *ChatHandler) SetAgentLoopManager(m *Manager) {
+	if m != nil {
+		h.loopManager = m
+	}
+}
+
+// SetSessionStore registers a session store for project-path lookup.
+// Accepts any type with a Get(id string) *session.Session method (e.g.
+// session.Store or the narrow SessionStoreReader).
+func (h *ChatHandler) SetSessionStore(s SessionStoreReader) {
+	if s != nil {
+		h.sessionStore = s
+	}
+}
+
+// sessionLoop returns a per-session AgentLoop when a manager is wired
+// and the session has a project path; otherwise returns the singleton.
+func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
+	if h.loopManager == nil || h.sessionStore == nil {
+		return h.loop
+	}
+	sess := h.sessionStore.Get(conversationID)
+	if sess == nil || sess.ProjectPath == "" {
+		return h.loop
+	}
+	loop, err := h.loopManager.GetOrCreateWired(conversationID, sess.ProjectPath, h.loop)
+	if err != nil {
+		h.logger.Warn("session-scoped loop creation failed; using singleton",
+			"session", conversationID,
+			"project", sess.ProjectPath,
+			"error", err,
+		)
+		return h.loop
+	}
+	return loop
 }
 
 // startCollaborationSession initiates a collaboration session via the CollaborationEngine
