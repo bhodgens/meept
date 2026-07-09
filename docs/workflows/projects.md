@@ -242,3 +242,54 @@ Tests cover:
 **Bus event not received:**
 - Verify message bus is initialized in daemon
 - Check subscription topic matches exactly (`project.set`)
+
+---
+
+## Session Project Binding
+
+Projects can be bound to sessions for per-session project isolation. This allows working on multiple projects concurrently in different sessions.
+
+### How It Works
+
+When a session is bound to a project:
+1. The `ProjectID` and `ProjectPath` are stored in the session record
+2. The `DetectionContext.CWD` is set to the project path
+3. The AgentLoop's `workingDir` is set for artifact scanning
+4. All agent operations execute within the project context
+
+### Binding Methods
+
+**Automatic (on session creation):**
+- TUI: Sends current CWD via `detection_context.cwd`
+- CLI: `meept /path/to/dir chat` or `meept chat --cwd /path`
+- Flutter: Platform CWD detection
+
+**Manual (existing session):**
+- Use `/project set <path|name|id>` command
+- Calls `project.set` RPC which fires `project.set` bus event
+- AgentLoop subscribes and updates `workingDir`
+
+### Migration for Legacy Sessions
+
+Sessions created before project binding support are handled gracefully:
+
+```go
+// In-memory migration (internal/services/session_service.go)
+func migrateSessionDetectionContext(sess *session.Session) {
+    if sess.DetectionContext == nil && sess.ProjectPath != "" {
+        sess.DetectionContext = &session.DetectionContext{
+            CWD: sess.ProjectPath,
+        }
+    }
+}
+```
+
+Applied in: `GetSession`, `GetMostRecent`, `List`
+
+### User Prompt Flow
+
+For sessions with neither `ProjectPath` nor `DetectionContext`:
+- **TUI**: Shows `ProjectPromptModal` with Yes/No/Pick options
+- **Flutter**: Shows `ProjectPromptDialog` with accept/decline/pick
+
+See `internal/tui/modals/project_prompt.go` and `ui/flutter_ui/lib/dialogs/project_prompt_dialog.dart`.
