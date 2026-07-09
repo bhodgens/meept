@@ -1278,10 +1278,13 @@ func (l *AgentLoop) CompressionPipeline() *compress.Pipeline {
 
 // NewAgentLoop creates a new agent loop with explicit session context.
 // sessionID identifies the session this loop belongs to.
-// workingDir is the project directory for agent execution (can be empty; use SetWorkingDir to set later).
+// workingDir is the project directory for agent execution (required; use SetWorkingDir to change later).
 func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *AgentLoop {
 	if sessionID == "" {
 		panic("NewAgentLoop: sessionID required")
+	}
+	if workingDir == "" {
+		panic("NewAgentLoop: workingDir required")
 	}
 	loop := &AgentLoop{
 		sessionID:       sessionID,
@@ -4525,6 +4528,14 @@ func (l *AgentLoop) GetWorkingDir() string {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.workingDir
+}
+
+// GetSessionID returns the session identifier this loop belongs to.
+// Safe to call concurrently.
+func (l *AgentLoop) GetSessionID() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.sessionID
 }
 
 // SetDetectionContext wires the client-side detection context (CWD, detected
