@@ -92,6 +92,19 @@ go build -o bin/meept-daemon ./cmd/meept-daemon
 | `notifications.enabled` | bool | false | Enable desktop notifications |
 | `notifications.retention` | int | 30 | Days to retain notification history |
 
+### Client Configuration (TUI + Flutter GUI)
+
+Client config lives in `~/.meept/client.json5`. See `config/client.json5` in the repo for the full template with defaults. Key client-side options:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `connection.transport` | string | `"auto"` | RPC, HTTP, or auto-detect |
+| `connection.address` | string | `"~/.meept/meept.sock"` | Daemon socket path or host:port |
+| `gui.layout` | string | `"toptabs"` | Flutter GUI layout: `"toptabs"` (horizontal tab bar) or `"sidebar"` (left sidebar with session tree) |
+| `vim.enabled` | bool | `false` | Vim keybindings in TUI |
+| `chat.verbosity` | string | `"normal"` | Agent progress verbosity: `"quiet"`, `"normal"`, `"verbose"` |
+| `session.auto_resume` | bool | `true` | Resume most recent session on startup |
+
 ### Integration Configuration
 
 - **Telegram** - Telegram bot interface

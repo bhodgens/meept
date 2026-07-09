@@ -96,6 +96,56 @@ A `FutureProvider.family<Session, String>` (`sessionDetailFamily` in `ui/flutter
 
 `SessionsDetailPane` accepts an optional `sessionId`; when provided it consumes `sessionDetailFamily(sessionId)` instead of re-fetching, so navigation from the sessions list into a detail view reuses the cached row data. `HomeScreen` also warms the cache for the `default` session on connect.
 
+### Layout modes
+
+The Flutter GUI supports two layout modes controlled by the `gui.layout` config option in `~/.meept/client.json5`.
+
+**Top-tabs (default):** Traditional horizontal tab bar with tabs for chat, sessions, plans, tasks, and agents. This is the original navigation pattern.
+
+**Sidebar:** Alternative left-sidebar layout featuring:
+
+```
++--------------+------------------------------------------+
+|  SESSIONS    |  Header: Session Title                   |
+|  ──────────  +──────────────────────────────────────────+
+|  [+] sess1   |                                          |
+|  ├─ task1    │           Chat Message Area              |
+|  │ └─ plan1  │                                          |
+|  ▼ sess2     │                                          |
+|  ├─ plan1    │                                          |
+|  │ └─ task1  ├──────────────────────────────────────────+
+|  │ └─ task2  │  [ Chat Input Area ]                     |
++──────────────+──────────────────────────────────────────+
+|  [Status Bar]                                           |
++----------------------------------------------------------+
+```
+
+The sidebar layout includes:
+- **Left sidebar** (220px wide): Expandable/collapsible session tree showing sessions, tasks, and plans with lazy-loaded child nodes
+- **Header bar**: Session title with description, connection status indicator, and hamburger menu for tool access
+- **Chat area**: Same `ChatTab` component used in top-tabs layout
+- **Session info overlay**: Click the [i] icon next to any session to view scoped plans, tasks, and agents in a tabbed dialog
+
+**Switching layouts:**
+
+Change `gui.layout` in `~/.meept/client.json5`:
+
+```json5
+{
+  "gui": {
+    "layout": "sidebar"  // or "toptabs" for the default
+  }
+}
+```
+
+The layout switch takes effect immediately without restarting the app (the router listens for changes to `guiLayoutProvider` and rebuilds the shell). After a full app restart the persisted preference is loaded from storage.
+
+**Component locations:**
+- `ui/flutter_ui/lib/features/home/sidebar_home_screen.dart` — Sidebar home screen
+- `ui/flutter_ui/lib/features/home/session_info_overlay.dart` — Session info overlay dialog
+- `ui/flutter_ui/lib/core/router.dart` — `_LayoutShell` selects layout based on config
+- `ui/flutter_ui/lib/providers/preferences_provider.dart` — `GuiLayoutNotifier` for config management
+
 ## Edge cases
 
 - **Grey transcript on session swap:** `ChatMessageList` previously showed "no messages yet" during the brief window between selecting a new session and the messages RPC resolving. The empty-state now checks `chatState.isLoading` before rendering the placeholder, so a loading session never shows a stale empty message.
@@ -103,4 +153,4 @@ A `FutureProvider.family<Session, String>` (`sessionDetailFamily` in `ui/flutter
 
 ---
 
-*Initial version covers status bar, command palette, verbosity, agent tiles, session archive UI, and cached detail providers from the 2026-06 Flutter GUI gap fixes.*
+*Initial version covers status bar, command palette, verbosity, agent tiles, session archive UI, cached detail providers, and layout modes (2026-06 Flutter GUI gap fixes + 2026-07 sidebar layout).*

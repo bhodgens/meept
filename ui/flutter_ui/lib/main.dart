@@ -97,6 +97,7 @@ class _ModifierKeyInitializerState extends ConsumerState<_ModifierKeyInitializer
     // Load the modifier key preference from storage
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(modifierKeyProvider.notifier).load();
+      ref.read(guiLayoutProvider.notifier).load();
     });
   }
 

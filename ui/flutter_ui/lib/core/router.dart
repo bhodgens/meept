@@ -39,7 +39,7 @@ final GoRouter router = GoRouter(
       name: 'chat',
       pageBuilder: (context, state) {
         return const NoTransitionPage(
-          child: _HomeShell(initialTab: HomeTab.chat),
+          child: _LayoutShell(tab: HomeTab.chat),
         );
       },
     ),
@@ -48,7 +48,7 @@ final GoRouter router = GoRouter(
       name: 'sessions',
       pageBuilder: (context, state) {
         return const NoTransitionPage(
-          child: _HomeShell(initialTab: HomeTab.sessions),
+          child: _LayoutShell(tab: HomeTab.sessions),
         );
       },
     ),
@@ -57,7 +57,7 @@ final GoRouter router = GoRouter(
       name: 'tasks',
       pageBuilder: (context, state) {
         return const NoTransitionPage(
-          child: _HomeShell(initialTab: HomeTab.tasks),
+          child: _LayoutShell(tab: HomeTab.tasks),
         );
       },
     ),
@@ -66,7 +66,7 @@ final GoRouter router = GoRouter(
       name: 'plans',
       pageBuilder: (context, state) {
         return const NoTransitionPage(
-          child: _HomeShell(initialTab: HomeTab.plans),
+          child: _LayoutShell(tab: HomeTab.plans),
         );
       },
     ),
@@ -75,7 +75,7 @@ final GoRouter router = GoRouter(
       name: 'agents',
       pageBuilder: (context, state) {
         return const NoTransitionPage(
-          child: _HomeShell(initialTab: HomeTab.agents),
+          child: _LayoutShell(tab: HomeTab.agents),
         );
       },
     ),
@@ -207,11 +207,20 @@ class _LayoutShellState extends ConsumerState<_LayoutShell> {
   @override
   void initState() {
     super.initState();
-    // Load layout preference from provider
+    // Listen for layout changes so the shell switches without restart
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      setState(() {
-        _layout = ref.read(guiLayoutProvider);
+      _updateLayout();
+      ref.listen<String>(guiLayoutProvider, (prev, next) {
+        if (next != _layout) {
+          setState(() => _layout = next);
+        }
       });
+    });
+  }
+
+  void _updateLayout() {
+    setState(() {
+      _layout = ref.read(guiLayoutProvider);
     });
   }
 
@@ -219,12 +228,12 @@ class _LayoutShellState extends ConsumerState<_LayoutShell> {
   Widget build(BuildContext context) {
     // Default to toptabs if layout not yet loaded
     final layout = _layout ?? 'toptabs';
-    
+
     if (layout == 'sidebar') {
       // Sidebar layout only uses the chat tab - other tabs accessed via overlay
       return const SidebarHomeScreen();
     }
-    
+
     // Default toptabs layout
     return _HomeShell(initialTab: widget.tab);
   }
