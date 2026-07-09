@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/internal/agent/prompts"
@@ -472,6 +473,20 @@ type AgentLoop struct {
 	// Working directory for artifact scanning
 	workingDir string // Explicitly set in NewAgentLoop, no fallback
 
+	// Session worker pool fields (plan 2026-07-07 Task 3.1)
+	// detectionContext holds client-side context captured at session creation
+	// (CWD, detected project, CLI args). Optional; nil when not provided.
+	detectionContext *DetectionContext
+	// projectID is the bound project identifier for this loop's session.
+	projectID string
+	// workerID identifies which worker slot owns this loop within the pool.
+	// Distinct from the watchdog-local workerID variables constructed from
+	// agentID + conversationID — this is a stable struct-level identifier.
+	workerID int
+	// isActive tracks whether this loop has pending work (e.g. an in-flight
+	// reasoning cycle). Accessed atomically.
+	isActive atomic.Bool
+
 	// Hallucination detection
 	hallucinationDetector *HallucinationDetector
 
@@ -827,6 +842,30 @@ func WithSessionID(sessionID string) LoopOption {
 func WithWorkingDir(dir string) LoopOption {
 	return func(l *AgentLoop) {
 		l.workingDir = dir
+	}
+}
+
+// WithDetectionContext sets the client-side detection context captured at
+// session creation (CWD, detected project, CLI args). Nil-safe.
+func WithDetectionContext(dc *DetectionContext) LoopOption {
+	return func(l *AgentLoop) {
+		if dc != nil {
+			l.detectionContext = dc
+		}
+	}
+}
+
+// WithProjectID sets the bound project identifier for the loop's session.
+func WithProjectID(pid string) LoopOption {
+	return func(l *AgentLoop) {
+		l.projectID = pid
+	}
+}
+
+// WithWorkerID sets the worker slot identifier within the session pool.
+func WithWorkerID(wid int) LoopOption {
+	return func(l *AgentLoop) {
+		l.workerID = wid
 	}
 }
 
@@ -4486,6 +4525,68 @@ func (l *AgentLoop) GetWorkingDir() string {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.workingDir
+}
+
+// SetDetectionContext wires the client-side detection context (CWD, detected
+// project, CLI args) captured at session creation. Nil-safe per CLAUDE.md
+// setter convention.
+func (l *AgentLoop) SetDetectionContext(dc *DetectionContext) {
+	if dc == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.detectionContext = dc
+}
+
+// GetDetectionContext returns the detection context, or nil if not set.
+// Safe to call concurrently.
+func (l *AgentLoop) GetDetectionContext() *DetectionContext {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.detectionContext
+}
+
+// SetProjectID sets the bound project identifier for this loop's session.
+// Safe to call concurrently.
+func (l *AgentLoop) SetProjectID(pid string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.projectID = pid
+}
+
+// GetProjectID returns the bound project identifier (empty string if unset).
+// Safe to call concurrently.
+func (l *AgentLoop) GetProjectID() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.projectID
+}
+
+// SetWorkerID sets the worker slot identifier within the session pool.
+// Safe to call concurrently.
+func (l *AgentLoop) SetWorkerID(wid int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.workerID = wid
+}
+
+// GetWorkerID returns the worker slot identifier (zero if unset).
+// Safe to call concurrently.
+func (l *AgentLoop) GetWorkerID() int {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.workerID
+}
+
+// SetActive atomically sets the has-pending-work flag.
+func (l *AgentLoop) SetActive(v bool) {
+	l.isActive.Store(v)
+}
+
+// IsActive atomically returns whether this loop has pending work.
+func (l *AgentLoop) IsActive() bool {
+	return l.isActive.Load()
 }
 
 // HookRegistry returns the agent loop's hook registry.
