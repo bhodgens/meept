@@ -81,3 +81,7 @@ menubar/MeeptMenuBar.app/
 # Runtime instruction files
 internal/comm/http/.meept/
 internal/comm/http/project/
+
+# Compiled test binaries
+daemon.test
+*.test

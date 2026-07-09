@@ -96,6 +96,14 @@
     "verbosity": "normal",
   },
 
+  // GUI layout configuration (Flutter UI only)
+  "gui": {
+    // Layout style: "toptabs" (default) or "sidebar"
+    // - "toptabs": Traditional horizontal tab bar (chat|sessions|plans|tasks|agents)
+    // - "sidebar": Vertical sidebar with session tree, chat always visible
+    "layout": "toptabs",
+  },
+
   // Text-to-speech configuration (TTS)
   "tts": {
     "enabled": false,
