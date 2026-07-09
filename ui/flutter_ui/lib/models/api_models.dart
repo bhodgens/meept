@@ -444,6 +444,19 @@ Map<String, dynamic>? _serializeDesignation(SessionDesignation? v) {
   };
 }
 
+
+@freezed
+class DetectionContext with _$DetectionContext {
+  const factory DetectionContext({
+    @JsonKey(name: 'cwd') String? cwd,
+    @JsonKey(name: 'detected_project_id') String? detectedProjectId,
+    @JsonKey(name: 'cli_args') List<String>? cliArgs,
+  }) = _DetectionContext;
+
+  factory DetectionContext.fromJson(Map<String, dynamic> json) =>
+      _$$DetectionContextImplFromJson(json);
+}
+
 @freezed
 class Session with _$Session {
   const Session._();
@@ -466,24 +479,29 @@ class Session with _$Session {
     @Default(false)
     @JsonKey(name: 'archived')
     bool archived,
+    @JsonKey(name: 'project_id') String? projectId,
+    @JsonKey(name: 'project_path') String? projectPath,
+    @JsonKey(name: 'detection_context') DetectionContext? detectionContext,
   }) = _Session;
 
   factory Session.fromJson(Map<String, dynamic> json) =>
       _$$SessionImplFromJson(_normaliseSessionJson(json));
 
   /// Normalise backend JSON before freezed parsing.
-  /// Prefer description as display title when name is generic ("default") or
-  /// shorter.
+  /// Prefer LLM-generated name unless it's generic, then fall back to description.
   static Map<String, dynamic> _normaliseSessionJson(Map<String, dynamic> json) {
     final name =
         json['name'] as String? ?? json['title'] as String? ?? 'Untitled';
     final description = json['description'] as String?;
-    final displayTitle =
-        (description != null &&
-                description.isNotEmpty &&
-                (name == 'default' || name.length < description.length))
-            ? description
-            : name;
+
+    // Prefer name (LLM-generated) unless it's generic, then fall back to description.
+    final isGenericName = name == 'default' ||
+        name == 'Untitled' ||
+        name == 'chat' ||
+        name.isEmpty;
+    final displayTitle = (name.isNotEmpty && !isGenericName)
+        ? name  // Use LLM-generated name
+        : (description ?? name);  // Fall back to description or name
     return {...json, 'name': displayTitle};
   }
 }

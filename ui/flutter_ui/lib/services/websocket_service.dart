@@ -612,6 +612,18 @@ class WebSocketService {
     }
   }
 
+  /// Subscribe to session title updates via WebSocket.
+  ///
+  /// Returns a stream emitting [Map] entries for all session.title_updated messages.
+  /// The Flutter client does not need to send a subscribe message to the server
+  /// for title updates - it's a broadcast event that all clients receive.
+  Stream<Map<String, dynamic>> subscribeToSessionTitles() {
+    return _messageSubject.stream.where((m) {
+      return m['type'] == 'session.title_updated' ||
+          m['topic'] == 'session.title_updated';
+    });
+  }
+
   /// Dispose all resources
   void dispose() {
     disconnect();

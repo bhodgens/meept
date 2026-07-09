@@ -95,48 +95,30 @@ class StorageService {
   // ------ API Key (secure storage) ------
 
   /// Read API key synchronously.
-  ///
-  /// Returns the cached keychain value if [init] has been awaited,
-  /// otherwise falls back to SharedPreferences for backward compatibility.
-  /// Returns null when no key is configured. Callers (e.g. [SdkApiClient.storage])
-  /// treat null as "no Authorization header". UI surfaces a warning when the
-  /// resolved key equals [AppConstants.defaultApiKey] (the dev fallback) so
-  /// operators notice misconfiguration instead of silently authing with a
-  /// well-known value.
   String? getApiKey() {
     if (_cachedApiKey != null && _cachedApiKey!.isNotEmpty) {
       return _cachedApiKey;
     }
     final prefsKey = _prefs?.getString(AppConstants.apiKeyPref);
     if (prefsKey != null && prefsKey.isNotEmpty) return prefsKey;
-    // Dev-only fallback (empty in release builds per --dart-define).
     if (AppConstants.defaultApiKey.isNotEmpty) return AppConstants.defaultApiKey;
     return null;
   }
 
   /// Read API key from keychain (async) for full security.
-  /// Falls back to SharedPreferences if keychain unavailable.
-  /// Returns null if no key is configured anywhere (storage, config, or build-time).
   Future<String?> getApiKeyAsync() async {
-    // Try keychain first
     final keychainKey = await _secureStorage?.read(key: AppConstants.apiKeyPref);
     if (keychainKey != null) return keychainKey;
-    // Fallback to SharedPreferences for backward compatibility
     final prefsKey = _prefs?.getString(AppConstants.apiKeyPref);
     if (prefsKey != null) return prefsKey;
-    // Build-time injected fallback (empty in release builds)
     if (AppConstants.defaultApiKey.isNotEmpty) return AppConstants.defaultApiKey;
     return null;
   }
 
   /// Write API key to both keychain and SharedPreferences.
-  /// Keychain is primary; SharedPreferences is for backward compatibility.
   Future<void> setApiKey(String key) async {
     _cachedApiKey = key;
-    // Write to keychain (primary)
     await _secureStorage?.write(key: AppConstants.apiKeyPref, value: key);
-    // Also write to SharedPreferences for backward compatibility and sync reads
-    // TODO: remove SharedPreferences fallback in a future version
     await _prefs?.setString(AppConstants.apiKeyPref, key);
   }
 
@@ -216,11 +198,9 @@ class StorageService {
   // ------ Keybindings ------
 
   /// Leader key preference: "cmd+x" (macOS) or "ctrl+x" (linux/win).
-  /// Defaults to platform-appropriate value when not set.
   String getLeaderKey() {
     final stored = _prefs?.getString(_leaderKeyPref);
     if (stored != null) return stored;
-    // Platform default from platform service
     return platformService?.defaultLeaderKey ?? 'ctrl+x';
   }
 
@@ -228,14 +208,22 @@ class StorageService {
     await _prefs?.setString(_leaderKeyPref, value);
   }
 
-  /// Modifier key preference for leader shortcut: "ctrl" or "cmd".
-  /// Defaults to "ctrl" on all platforms (user requested).
+  /// Modifier key preference: "ctrl" or "cmd".
   String getModifierKey() {
     return _prefs?.getString(_modifierKeyPref) ?? 'ctrl';
   }
 
   Future<void> setModifierKey(String value) async {
     await _prefs?.setString(_modifierKeyPref, value);
+  }
+
+  /// GUI layout preference: "toptabs" (default) or "sidebar".
+  String? getGuiLayout() {
+    return _prefs?.getString(_guiLayoutPref);
+  }
+
+  Future<void> setGuiLayout(String value) async {
+    await _prefs?.setString(_guiLayoutPref, value);
   }
 
   /// Double-enter behavior: "steer", "interrupt", or "preempt".
@@ -274,5 +262,6 @@ class StorageService {
   static const String _portPref = 'api_port';
   static const String _leaderKeyPref = 'leader_key';
   static const String _modifierKeyPref = 'modifier_key';
+  static const String _guiLayoutPref = 'gui_layout';
   static const String _doubleEnterPref = 'double_enter';
 }

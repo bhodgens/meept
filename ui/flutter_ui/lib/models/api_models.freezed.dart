@@ -309,6 +309,207 @@ abstract class _ChatMessage extends ChatMessage {
       throw _privateConstructorUsedError;
 }
 
+DetectionContext _$DetectionContextFromJson(Map<String, dynamic> json) {
+  return _DetectionContext.fromJson(json);
+}
+
+/// @nodoc
+mixin _$DetectionContext {
+  @JsonKey(name: 'cwd')
+  String? get cwd => throw _privateConstructorUsedError;
+  @JsonKey(name: 'detected_project_id')
+  String? get detectedProjectId => throw _privateConstructorUsedError;
+  @JsonKey(name: 'cli_args')
+  List<String>? get cliArgs => throw _privateConstructorUsedError;
+
+  Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
+  @JsonKey(ignore: true)
+  $DetectionContextCopyWith<DetectionContext> get copyWith =>
+      throw _privateConstructorUsedError;
+}
+
+/// @nodoc
+abstract class $DetectionContextCopyWith<$Res> {
+  factory $DetectionContextCopyWith(
+          DetectionContext value, $Res Function(DetectionContext) then) =
+      _$DetectionContextCopyWithImpl<$Res, DetectionContext>;
+  @useResult
+  $Res call(
+      {@JsonKey(name: 'cwd') String? cwd,
+      @JsonKey(name: 'detected_project_id') String? detectedProjectId,
+      @JsonKey(name: 'cli_args') List<String>? cliArgs});
+}
+
+/// @nodoc
+class _$DetectionContextCopyWithImpl<$Res, $Val extends DetectionContext>
+    implements $DetectionContextCopyWith<$Res> {
+  _$DetectionContextCopyWithImpl(this._value, this._then);
+
+  // ignore: unused_field
+  final $Val _value;
+  // ignore: unused_field
+  final $Res Function($Val) _then;
+
+  @pragma('vm:prefer-inline')
+  @override
+  $Res call({
+    Object? cwd = freezed,
+    Object? detectedProjectId = freezed,
+    Object? cliArgs = freezed,
+  }) {
+    return _then(_value.copyWith(
+      cwd: freezed == cwd
+          ? _value.cwd
+          : cwd // ignore: cast_nullable_to_non_nullable
+              as String?,
+      detectedProjectId: freezed == detectedProjectId
+          ? _value.detectedProjectId
+          : detectedProjectId // ignore: cast_nullable_to_non_nullable
+              as String?,
+      cliArgs: freezed == cliArgs
+          ? _value.cliArgs
+          : cliArgs // ignore: cast_nullable_to_non_nullable
+              as List<String>?,
+    ) as $Val);
+  }
+}
+
+/// @nodoc
+abstract class _$$DetectionContextImplCopyWith<$Res>
+    implements $DetectionContextCopyWith<$Res> {
+  factory _$$DetectionContextImplCopyWith(_$DetectionContextImpl value,
+          $Res Function(_$DetectionContextImpl) then) =
+      __$$DetectionContextImplCopyWithImpl<$Res>;
+  @override
+  @useResult
+  $Res call(
+      {@JsonKey(name: 'cwd') String? cwd,
+      @JsonKey(name: 'detected_project_id') String? detectedProjectId,
+      @JsonKey(name: 'cli_args') List<String>? cliArgs});
+}
+
+/// @nodoc
+class __$$DetectionContextImplCopyWithImpl<$Res>
+    extends _$DetectionContextCopyWithImpl<$Res, _$DetectionContextImpl>
+    implements _$$DetectionContextImplCopyWith<$Res> {
+  __$$DetectionContextImplCopyWithImpl(_$DetectionContextImpl _value,
+      $Res Function(_$DetectionContextImpl) _then)
+      : super(_value, _then);
+
+  @pragma('vm:prefer-inline')
+  @override
+  $Res call({
+    Object? cwd = freezed,
+    Object? detectedProjectId = freezed,
+    Object? cliArgs = freezed,
+  }) {
+    return _then(_$DetectionContextImpl(
+      cwd: freezed == cwd
+          ? _value.cwd
+          : cwd // ignore: cast_nullable_to_non_nullable
+              as String?,
+      detectedProjectId: freezed == detectedProjectId
+          ? _value.detectedProjectId
+          : detectedProjectId // ignore: cast_nullable_to_non_nullable
+              as String?,
+      cliArgs: freezed == cliArgs
+          ? _value._cliArgs
+          : cliArgs // ignore: cast_nullable_to_non_nullable
+              as List<String>?,
+    ));
+  }
+}
+
+/// @nodoc
+@JsonSerializable()
+class _$DetectionContextImpl implements _DetectionContext {
+  const _$DetectionContextImpl(
+      {@JsonKey(name: 'cwd') this.cwd,
+      @JsonKey(name: 'detected_project_id') this.detectedProjectId,
+      @JsonKey(name: 'cli_args') final List<String>? cliArgs})
+      : _cliArgs = cliArgs;
+
+  factory _$DetectionContextImpl.fromJson(Map<String, dynamic> json) =>
+      _$$DetectionContextImplFromJson(json);
+
+  @override
+  @JsonKey(name: 'cwd')
+  final String? cwd;
+  @override
+  @JsonKey(name: 'detected_project_id')
+  final String? detectedProjectId;
+  final List<String>? _cliArgs;
+  @override
+  @JsonKey(name: 'cli_args')
+  List<String>? get cliArgs {
+    final value = _cliArgs;
+    if (value == null) return null;
+    if (_cliArgs is EqualUnmodifiableListView) return _cliArgs;
+    // ignore: implicit_dynamic_type
+    return EqualUnmodifiableListView(value);
+  }
+
+  @override
+  String toString() {
+    return 'DetectionContext(cwd: $cwd, detectedProjectId: $detectedProjectId, cliArgs: $cliArgs)';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        (other.runtimeType == runtimeType &&
+            other is _$DetectionContextImpl &&
+            (identical(other.cwd, cwd) || other.cwd == cwd) &&
+            (identical(other.detectedProjectId, detectedProjectId) ||
+                other.detectedProjectId == detectedProjectId) &&
+            const DeepCollectionEquality().equals(other._cliArgs, _cliArgs));
+  }
+
+  @JsonKey(ignore: true)
+  @override
+  int get hashCode => Object.hash(runtimeType, cwd, detectedProjectId,
+      const DeepCollectionEquality().hash(_cliArgs));
+
+  @JsonKey(ignore: true)
+  @override
+  @pragma('vm:prefer-inline')
+  _$$DetectionContextImplCopyWith<_$DetectionContextImpl> get copyWith =>
+      __$$DetectionContextImplCopyWithImpl<_$DetectionContextImpl>(
+          this, _$identity);
+
+  @override
+  Map<String, dynamic> toJson() {
+    return _$$DetectionContextImplToJson(
+      this,
+    );
+  }
+}
+
+abstract class _DetectionContext implements DetectionContext {
+  const factory _DetectionContext(
+          {@JsonKey(name: 'cwd') final String? cwd,
+          @JsonKey(name: 'detected_project_id') final String? detectedProjectId,
+          @JsonKey(name: 'cli_args') final List<String>? cliArgs}) =
+      _$DetectionContextImpl;
+
+  factory _DetectionContext.fromJson(Map<String, dynamic> json) =
+      _$DetectionContextImpl.fromJson;
+
+  @override
+  @JsonKey(name: 'cwd')
+  String? get cwd;
+  @override
+  @JsonKey(name: 'detected_project_id')
+  String? get detectedProjectId;
+  @override
+  @JsonKey(name: 'cli_args')
+  List<String>? get cliArgs;
+  @override
+  @JsonKey(ignore: true)
+  _$$DetectionContextImplCopyWith<_$DetectionContextImpl> get copyWith =>
+      throw _privateConstructorUsedError;
+}
+
 Session _$SessionFromJson(Map<String, dynamic> json) {
   return _Session.fromJson(json);
 }
@@ -336,6 +537,12 @@ mixin _$Session {
   SessionDesignation? get designation => throw _privateConstructorUsedError;
   @JsonKey(name: 'archived')
   bool get archived => throw _privateConstructorUsedError;
+  @JsonKey(name: 'project_id')
+  String? get projectId => throw _privateConstructorUsedError;
+  @JsonKey(name: 'project_path')
+  String? get projectPath => throw _privateConstructorUsedError;
+  @JsonKey(name: 'detection_context')
+  DetectionContext? get detectionContext => throw _privateConstructorUsedError;
 
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
   @JsonKey(ignore: true)
@@ -360,7 +567,12 @@ abstract class $SessionCopyWith<$Res> {
           fromJson: _parseDesignation,
           toJson: _serializeDesignation)
       SessionDesignation? designation,
-      @JsonKey(name: 'archived') bool archived});
+      @JsonKey(name: 'archived') bool archived,
+      @JsonKey(name: 'project_id') String? projectId,
+      @JsonKey(name: 'project_path') String? projectPath,
+      @JsonKey(name: 'detection_context') DetectionContext? detectionContext});
+
+  $DetectionContextCopyWith<$Res>? get detectionContext;
 }
 
 /// @nodoc
@@ -385,6 +597,9 @@ class _$SessionCopyWithImpl<$Res, $Val extends Session>
     Object? attachedClients = freezed,
     Object? designation = freezed,
     Object? archived = null,
+    Object? projectId = freezed,
+    Object? projectPath = freezed,
+    Object? detectionContext = freezed,
   }) {
     return _then(_value.copyWith(
       id: null == id
@@ -423,7 +638,31 @@ class _$SessionCopyWithImpl<$Res, $Val extends Session>
           ? _value.archived
           : archived // ignore: cast_nullable_to_non_nullable
               as bool,
+      projectId: freezed == projectId
+          ? _value.projectId
+          : projectId // ignore: cast_nullable_to_non_nullable
+              as String?,
+      projectPath: freezed == projectPath
+          ? _value.projectPath
+          : projectPath // ignore: cast_nullable_to_non_nullable
+              as String?,
+      detectionContext: freezed == detectionContext
+          ? _value.detectionContext
+          : detectionContext // ignore: cast_nullable_to_non_nullable
+              as DetectionContext?,
     ) as $Val);
+  }
+
+  @override
+  @pragma('vm:prefer-inline')
+  $DetectionContextCopyWith<$Res>? get detectionContext {
+    if (_value.detectionContext == null) {
+      return null;
+    }
+
+    return $DetectionContextCopyWith<$Res>(_value.detectionContext!, (value) {
+      return _then(_value.copyWith(detectionContext: value) as $Val);
+    });
   }
 }
 
@@ -447,7 +686,13 @@ abstract class _$$SessionImplCopyWith<$Res> implements $SessionCopyWith<$Res> {
           fromJson: _parseDesignation,
           toJson: _serializeDesignation)
       SessionDesignation? designation,
-      @JsonKey(name: 'archived') bool archived});
+      @JsonKey(name: 'archived') bool archived,
+      @JsonKey(name: 'project_id') String? projectId,
+      @JsonKey(name: 'project_path') String? projectPath,
+      @JsonKey(name: 'detection_context') DetectionContext? detectionContext});
+
+  @override
+  $DetectionContextCopyWith<$Res>? get detectionContext;
 }
 
 /// @nodoc
@@ -470,6 +715,9 @@ class __$$SessionImplCopyWithImpl<$Res>
     Object? attachedClients = freezed,
     Object? designation = freezed,
     Object? archived = null,
+    Object? projectId = freezed,
+    Object? projectPath = freezed,
+    Object? detectionContext = freezed,
   }) {
     return _then(_$SessionImpl(
       id: null == id
@@ -508,6 +756,18 @@ class __$$SessionImplCopyWithImpl<$Res>
           ? _value.archived
           : archived // ignore: cast_nullable_to_non_nullable
               as bool,
+      projectId: freezed == projectId
+          ? _value.projectId
+          : projectId // ignore: cast_nullable_to_non_nullable
+              as String?,
+      projectPath: freezed == projectPath
+          ? _value.projectPath
+          : projectPath // ignore: cast_nullable_to_non_nullable
+              as String?,
+      detectionContext: freezed == detectionContext
+          ? _value.detectionContext
+          : detectionContext // ignore: cast_nullable_to_non_nullable
+              as DetectionContext?,
     ));
   }
 }
@@ -528,7 +788,10 @@ class _$SessionImpl extends _Session {
           fromJson: _parseDesignation,
           toJson: _serializeDesignation)
       this.designation,
-      @JsonKey(name: 'archived') this.archived = false})
+      @JsonKey(name: 'archived') this.archived = false,
+      @JsonKey(name: 'project_id') this.projectId,
+      @JsonKey(name: 'project_path') this.projectPath,
+      @JsonKey(name: 'detection_context') this.detectionContext})
       : _attachedClients = attachedClients,
         super._();
 
@@ -573,10 +836,19 @@ class _$SessionImpl extends _Session {
   @override
   @JsonKey(name: 'archived')
   final bool archived;
+  @override
+  @JsonKey(name: 'project_id')
+  final String? projectId;
+  @override
+  @JsonKey(name: 'project_path')
+  final String? projectPath;
+  @override
+  @JsonKey(name: 'detection_context')
+  final DetectionContext? detectionContext;
 
   @override
   String toString() {
-    return 'Session(id: $id, title: $title, description: $description, conversationId: $conversationId, createdAt: $createdAt, lastActivity: $lastActivity, attachedClients: $attachedClients, designation: $designation, archived: $archived)';
+    return 'Session(id: $id, title: $title, description: $description, conversationId: $conversationId, createdAt: $createdAt, lastActivity: $lastActivity, attachedClients: $attachedClients, designation: $designation, archived: $archived, projectId: $projectId, projectPath: $projectPath, detectionContext: $detectionContext)';
   }
 
   @override
@@ -599,7 +871,13 @@ class _$SessionImpl extends _Session {
             (identical(other.designation, designation) ||
                 other.designation == designation) &&
             (identical(other.archived, archived) ||
-                other.archived == archived));
+                other.archived == archived) &&
+            (identical(other.projectId, projectId) ||
+                other.projectId == projectId) &&
+            (identical(other.projectPath, projectPath) ||
+                other.projectPath == projectPath) &&
+            (identical(other.detectionContext, detectionContext) ||
+                other.detectionContext == detectionContext));
   }
 
   @JsonKey(ignore: true)
@@ -614,7 +892,10 @@ class _$SessionImpl extends _Session {
       lastActivity,
       const DeepCollectionEquality().hash(_attachedClients),
       designation,
-      archived);
+      archived,
+      projectId,
+      projectPath,
+      detectionContext);
 
   @JsonKey(ignore: true)
   @override
@@ -644,7 +925,11 @@ abstract class _Session extends Session {
           fromJson: _parseDesignation,
           toJson: _serializeDesignation)
       final SessionDesignation? designation,
-      @JsonKey(name: 'archived') final bool archived}) = _$SessionImpl;
+      @JsonKey(name: 'archived') final bool archived,
+      @JsonKey(name: 'project_id') final String? projectId,
+      @JsonKey(name: 'project_path') final String? projectPath,
+      @JsonKey(name: 'detection_context')
+      final DetectionContext? detectionContext}) = _$SessionImpl;
   const _Session._() : super._();
 
   factory _Session.fromJson(Map<String, dynamic> json) = _$SessionImpl.fromJson;
@@ -679,6 +964,15 @@ abstract class _Session extends Session {
   @override
   @JsonKey(name: 'archived')
   bool get archived;
+  @override
+  @JsonKey(name: 'project_id')
+  String? get projectId;
+  @override
+  @JsonKey(name: 'project_path')
+  String? get projectPath;
+  @override
+  @JsonKey(name: 'detection_context')
+  DetectionContext? get detectionContext;
   @override
   @JsonKey(ignore: true)
   _$$SessionImplCopyWith<_$SessionImpl> get copyWith =>

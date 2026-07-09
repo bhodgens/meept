@@ -33,6 +33,24 @@ Map<String, dynamic> _$$ChatMessageImplToJson(_$ChatMessageImpl instance) =>
       'parts': instance.parts,
     };
 
+_$DetectionContextImpl _$$DetectionContextImplFromJson(
+        Map<String, dynamic> json) =>
+    _$DetectionContextImpl(
+      cwd: json['cwd'] as String?,
+      detectedProjectId: json['detected_project_id'] as String?,
+      cliArgs: (json['cli_args'] as List<dynamic>?)
+          ?.map((e) => e as String)
+          .toList(),
+    );
+
+Map<String, dynamic> _$$DetectionContextImplToJson(
+        _$DetectionContextImpl instance) =>
+    <String, dynamic>{
+      'cwd': instance.cwd,
+      'detected_project_id': instance.detectedProjectId,
+      'cli_args': instance.cliArgs,
+    };
+
 _$SessionImpl _$$SessionImplFromJson(Map<String, dynamic> json) =>
     _$SessionImpl(
       id: json['id'] as String,
@@ -48,6 +66,12 @@ _$SessionImpl _$$SessionImplFromJson(Map<String, dynamic> json) =>
           .toList(),
       designation: _parseDesignation(json['designation']),
       archived: json['archived'] as bool? ?? false,
+      projectId: json['project_id'] as String?,
+      projectPath: json['project_path'] as String?,
+      detectionContext: json['detection_context'] == null
+          ? null
+          : DetectionContext.fromJson(
+              json['detection_context'] as Map<String, dynamic>),
     );
 
 Map<String, dynamic> _$$SessionImplToJson(_$SessionImpl instance) =>
@@ -61,6 +85,9 @@ Map<String, dynamic> _$$SessionImplToJson(_$SessionImpl instance) =>
       'attached_clients': instance.attachedClients,
       'designation': _serializeDesignation(instance.designation),
       'archived': instance.archived,
+      'project_id': instance.projectId,
+      'project_path': instance.projectPath,
+      'detection_context': instance.detectionContext,
     };
 
 _$TaskImpl _$$TaskImplFromJson(Map<String, dynamic> json) => _$TaskImpl(

@@ -499,9 +499,13 @@ class SdkApiClient {
   Future<Map<String, dynamic>> createSession({
     required String title,
     String? agentId,
+    String? cwd,
   }) async {
     final body = <String, dynamic>{'name': title};
     if (agentId != null) body['agent_id'] = agentId;
+    if (cwd != null && cwd.isNotEmpty) {
+      body['detection_context'] = {'cwd': cwd};
+    }
     return _post('/api/v1/sessions', body: body);
   }
 

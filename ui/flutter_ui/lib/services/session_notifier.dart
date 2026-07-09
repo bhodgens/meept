@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
 import 'sdk_client.dart';
+import 'websocket_service.dart';
 
 const _unset = Object();
 
@@ -33,10 +34,45 @@ class SessionState {
 
 /// StateNotifier that manages session CRUD operations
 class SessionNotifier extends StateNotifier<SessionState> {
-  SessionNotifier({required this.sdkClient})
-      : super(const SessionState());
+  SessionNotifier({required this.sdkClient, required WebSocketService websocket})
+      : super(const SessionState()) {
+    _initWebSocket(websocket);
+  }
 
   final SdkApiClient sdkClient;
+  StreamSubscription<Map<String, dynamic>>? _titleSubscription;
+
+  /// Initialize WebSocket subscription for session title updates
+  void _initWebSocket(WebSocketService websocket) {
+    _titleSubscription = websocket.subscribeToSessionTitles().listen((message) {
+      final sessionId = message['session_id'] as String?;
+      // Backend sends 'name' but Session model uses 'title'
+      final title = message['name'] as String?;
+      final description = message['description'] as String?;
+      if (sessionId != null && title != null && description != null) {
+        _updateSessionTitle(sessionId, title, description);
+      }
+    });
+  }
+
+  /// Internal method to update session title (called from WebSocket listener)
+  void _updateSessionTitle(String sessionId, String title, String description) {
+    final updated = state.sessions.map((s) {
+      if (s.id == sessionId) {
+        return s.copyWith(title: title, description: description);
+      }
+      return s;
+    }).toList();
+    updated.sort(_sessionSort);
+    state = state.copyWith(sessions: updated, error: null);
+  }
+
+  @override
+  void dispose() {
+    _titleSubscription?.cancel();
+    _titleSubscription = null;
+    super.dispose();
+  }
 
   /// Fetch all sessions from the server
   Future<void> loadSessions() async {
