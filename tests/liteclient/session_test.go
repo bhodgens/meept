@@ -200,7 +200,7 @@ func TestSessionManager_LoadOrCreateSession_ByName(t *testing.T) {
 	sm := sharedclient.NewSessionManager(client, "default")
 
 	// Pre-create a session to test switching
-	client.CreateSession("test-session")
+	client.CreateSession("test-session", "")
 
 	err := sm.LoadOrCreateSession(context.TODO(), "test-session")
 	if err != nil {

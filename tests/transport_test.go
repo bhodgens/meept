@@ -836,7 +836,7 @@ func TestHTTPTransport_SessionMethods(t *testing.T) {
 	}
 
 	// CreateSession
-	sess, err := client.CreateSession("test")
+	sess, err := client.CreateSession("test", "")
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
@@ -904,7 +904,7 @@ func TestRPCTransport_SessionMethods(t *testing.T) {
 	defer client.Close()
 
 	// CreateSession
-	sess, err := client.CreateSession("test")
+	sess, err := client.CreateSession("test", "")
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}

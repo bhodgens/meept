@@ -116,7 +116,7 @@ func TestIntegration_SessionAndChat(t *testing.T) {
 	defer client.Close()
 
 	// Create session via client
-	sess, err := client.CreateSession("e2e-test")
+	sess, err := client.CreateSession("e2e-test", "")
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestIntegration_MultipleChatRoundTrips(t *testing.T) {
 	defer client.Close()
 
 	sm := sharedclient.NewSessionManager(client, "default")
-	sess, _ := client.CreateSession("round-trip")
+	sess, _ := client.CreateSession("round-trip", "")
 	sm.SetSession(sess)
 
 	messages := []string{"first", "second", "third"}
