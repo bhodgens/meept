@@ -50,21 +50,24 @@ func CreateSnapshot(domain, datasetsDir, versionsDir string) (*DatasetVersion, e
 	}
 
 	hasher := md5.New()
-	exampleCount := 0
 
-	// We need to count lines and compute MD5. Copy through a tee reader and
-	// count newlines.
+	// Copy through a tee reader, compute MD5, and count examples. A final
+	// non-empty partial line without trailing newline still counts as one
+	// example (JSONL writers normally terminate lines, but be defensive).
 	tee := io.TeeReader(srcFile, dstFile)
 	scannerBuf := make([]byte, 32*1024)
 	lineCount := 0
+	partial := false
 	for {
 		n, rerr := tee.Read(scannerBuf)
 		if n > 0 {
 			hasher.Write(scannerBuf[:n])
-			// Count newlines in the chunk.
 			for _, b := range scannerBuf[:n] {
 				if b == '\n' {
 					lineCount++
+					partial = false
+				} else {
+					partial = true
 				}
 			}
 		}
@@ -77,7 +80,10 @@ func CreateSnapshot(domain, datasetsDir, versionsDir string) (*DatasetVersion, e
 		}
 	}
 	dstFile.Close()
-	exampleCount = lineCount
+	exampleCount := lineCount
+	if partial {
+		exampleCount++
+	}
 
 	version := &DatasetVersion{
 		Version:      nextVer,

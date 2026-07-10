@@ -94,13 +94,36 @@ func newLearningConsolidateCmd() *cobra.Command {
 	return cmd
 }
 
-func runConsolidate(minQuality float64) error {
+// learningPaths resolves data and adapter directories from config (with
+// expanded ~), falling back to ~/.meept defaults when config is unavailable.
+func learningPaths() (learningDir, adaptersDir string, cfg *config.Config, err error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("cannot determine home directory: %w", err)
+		return "", "", nil, fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	learningDir = filepath.Join(homeDir, ".meept", "learning")
+	adaptersDir = filepath.Join(homeDir, ".meept", "adapters")
+
+	cfg, loadErr := config.LoadDefault()
+	if loadErr != nil {
+		// Config optional for offline/status use; keep home defaults.
+		return learningDir, adaptersDir, nil, nil
+	}
+	if cfg.Learning.DataDir != "" {
+		learningDir = cfg.Learning.DataDir
+	}
+	if cfg.Learning.AdaptersDir != "" {
+		adaptersDir = cfg.Learning.AdaptersDir
+	}
+	return learningDir, adaptersDir, cfg, nil
+}
+
+func runConsolidate(minQuality float64) error {
+	learningDir, _, cfg, err := learningPaths()
+	if err != nil {
+		return err
 	}
 
-	learningDir := filepath.Join(homeDir, ".meept", "learning")
 	rawPath := filepath.Join(learningDir, "raw_captures.jsonl")
 	datasetsDir := filepath.Join(learningDir, "datasets")
 
@@ -110,8 +133,17 @@ func runConsolidate(minQuality float64) error {
 
 	// Load retention config; fall back to 100MB default on error.
 	maxDatasetMB := 100
-	if cfg, err := config.LoadDefault(); err == nil {
-		maxDatasetMB = cfg.Learning.Retention.MaxDatasetSizeMB
+	keepVersions := 3
+	if cfg != nil {
+		if cfg.Learning.Retention.MaxDatasetSizeMB > 0 {
+			maxDatasetMB = cfg.Learning.Retention.MaxDatasetSizeMB
+		}
+		if cfg.Learning.Retention.KeepVersions > 0 {
+			keepVersions = cfg.Learning.Retention.KeepVersions
+		}
+		if minQuality <= 0 && cfg.Learning.Capture.MinQualityScore > 0 {
+			minQuality = cfg.Learning.Capture.MinQualityScore
+		}
 	}
 	maxDatasetBytes := int64(maxDatasetMB) * 1024 * 1024
 
@@ -127,13 +159,6 @@ func runConsolidate(minQuality float64) error {
 	fmt.Printf("skipped:    %d\n", stats.Skipped)
 	fmt.Printf("duplicates: %d\n", stats.Duplicates)
 
-	// Snapshot each domain that received additions; prune old versions per config.
-	keepVersions := 3
-	if cfg, err := config.LoadDefault(); err == nil {
-		if cfg.Learning.Retention.KeepVersions > 0 {
-			keepVersions = cfg.Learning.Retention.KeepVersions
-		}
-	}
 	versionsDir := filepath.Join(learningDir, "versions")
 	for _, domain := range stats.DomainsTouched {
 		snap, err := learning.CreateSnapshot(domain, datasetsDir, versionsDir)
@@ -182,12 +207,11 @@ func newLearningSnapshotCmd() *cobra.Command {
 }
 
 func runSnapshot(domain string) error {
-	homeDir, err := os.UserHomeDir()
+	learningDir, _, _, err := learningPaths()
 	if err != nil {
-		return fmt.Errorf("cannot determine home directory: %w", err)
+		return err
 	}
 
-	learningDir := filepath.Join(homeDir, ".meept", "learning")
 	datasetsDir := filepath.Join(learningDir, "datasets")
 	versionsDir := filepath.Join(learningDir, "versions")
 
@@ -200,13 +224,58 @@ func runSnapshot(domain string) error {
 	return nil
 }
 
-func runTraining(domain, model string) error {
-	homeDir, err := os.UserHomeDir()
+// nextAdapterVersion returns the next free version number for
+// {adaptersDir}/{domain}/{model}-vN so re-training never silently overwrites.
+func nextAdapterVersion(adaptersDir, domain, model string) (int, error) {
+	domainDir := filepath.Join(adaptersDir, domain)
+	entries, err := os.ReadDir(domainDir)
 	if err != nil {
-		return fmt.Errorf("cannot determine home directory: %w", err)
+		if os.IsNotExist(err) {
+			return 1, nil
+		}
+		return 0, err
+	}
+	prefix := model + "-v"
+	maxVer := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		numStr := strings.TrimPrefix(name, prefix)
+		n := 0
+		valid := true
+		for _, c := range numStr {
+			if c < '0' || c > '9' {
+				valid = false
+				break
+			}
+			n = n*10 + int(c-'0')
+		}
+		if valid && n > maxVer {
+			maxVer = n
+		}
+	}
+	return maxVer + 1, nil
+}
+
+func runTraining(domain, model string) error {
+	learningDir, adaptersDir, cfg, err := learningPaths()
+	if err != nil {
+		return err
 	}
 
-	datasetPath := filepath.Join(homeDir, ".meept", "learning", "datasets", domain+".jsonl")
+	if model == "" {
+		model = "lfm2.5-8b"
+		if cfg != nil && cfg.Learning.Training.DefaultModel != "" {
+			model = cfg.Learning.Training.DefaultModel
+		}
+	}
+
+	datasetPath := filepath.Join(learningDir, "datasets", domain+".jsonl")
 	if _, err := os.Stat(datasetPath); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("dataset not found: %s", datasetPath)
@@ -214,17 +283,13 @@ func runTraining(domain, model string) error {
 		return fmt.Errorf("stat dataset: %w", err)
 	}
 
-	outputDir := filepath.Join(homeDir, ".meept", "adapters", domain, model+"-v1")
+	ver, err := nextAdapterVersion(adaptersDir, domain, model)
+	if err != nil {
+		return fmt.Errorf("resolve adapter version: %w", err)
+	}
+	outputDir := filepath.Join(adaptersDir, domain, fmt.Sprintf("%s-v%d", model, ver))
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
-	}
-
-	// Prefer default model from config when flag left at CLI default and config differs.
-	if model == "" {
-		model = "lfm2.5-8b"
-		if cfg, err := config.LoadDefault(); err == nil && cfg.Learning.Training.DefaultModel != "" {
-			model = cfg.Learning.Training.DefaultModel
-		}
 	}
 
 	// Shell out to python training script (relative to CWD / project root).
@@ -240,7 +305,7 @@ func runTraining(domain, model string) error {
 	trainCmd.Stdout = os.Stdout
 	trainCmd.Stderr = os.Stderr
 
-	fmt.Printf("training %s adapter for domain '%s'...\n", model, domain)
+	fmt.Printf("training %s adapter for domain '%s' (v%d)...\n", model, domain, ver)
 	if err := trainCmd.Run(); err != nil {
 		return fmt.Errorf("training failed: %w (ensure python deps via scripts/setup-training.sh)", err)
 	}
@@ -264,14 +329,15 @@ func runTraining(domain, model string) error {
 }
 
 func showLearningStatus() error {
-	homeDir, err := os.UserHomeDir()
+	learningDir, adaptersDir, _, err := learningPaths()
 	if err != nil {
-		return fmt.Errorf("cannot determine home directory: %w", err)
+		return err
 	}
 
-	learningDir := filepath.Join(homeDir, ".meept", "learning")
 	fmt.Println("learning pipeline status")
 	fmt.Println("=======================")
+	fmt.Printf("data dir:       %s\n", learningDir)
+	fmt.Printf("adapters dir:   %s\n", adaptersDir)
 
 	// Raw captures count.
 	rawPath := filepath.Join(learningDir, "raw_captures.jsonl")
@@ -299,7 +365,6 @@ func showLearningStatus() error {
 	}
 
 	// Adapters.
-	adaptersDir := filepath.Join(homeDir, ".meept", "adapters")
 	adapterEntries, err := os.ReadDir(adaptersDir)
 	if err != nil {
 		fmt.Printf("adapters:       none\n")
@@ -335,12 +400,11 @@ func showLearningStatus() error {
 }
 
 func listAdapters() error {
-	homeDir, err := os.UserHomeDir()
+	_, adaptersDir, _, err := learningPaths()
 	if err != nil {
-		return fmt.Errorf("cannot determine home directory: %w", err)
+		return err
 	}
 
-	adaptersDir := filepath.Join(homeDir, ".meept", "adapters")
 	entries, err := os.ReadDir(adaptersDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -374,13 +438,12 @@ func listAdapters() error {
 }
 
 func showDatasetStats(domain string) error {
-	homeDir, err := os.UserHomeDir()
+	learningDir, _, _, err := learningPaths()
 	if err != nil {
-		return fmt.Errorf("cannot determine home directory: %w", err)
+		return err
 	}
 
-	datasetsDir := filepath.Join(homeDir, ".meept", "learning", "datasets")
-	datasetPath := filepath.Join(datasetsDir, domain+".jsonl")
+	datasetPath := filepath.Join(learningDir, "datasets", domain+".jsonl")
 
 	f, err := os.Open(datasetPath)
 	if err != nil {
@@ -394,7 +457,6 @@ func showDatasetStats(domain string) error {
 
 	totalCount := 0
 	qualitySum := 0.0
-	domains := map[string]int{}
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -410,7 +472,6 @@ func showDatasetStats(domain string) error {
 		}
 		totalCount++
 		qualitySum += example.Metadata.QualityScore
-		domains[example.Metadata.Domain]++
 	}
 
 	fmt.Printf("dataset stats: %s\n", domain)

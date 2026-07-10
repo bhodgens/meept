@@ -2,6 +2,7 @@
 package daemon
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -4947,10 +4948,35 @@ func runLoRAConsolidate(cfg config.LearningConfig) error {
 	if err != nil {
 		return fmt.Errorf("lora consolidate: refresh domain stats: %w", err)
 	}
+	// Keep RawCapturesCount in sync with the immutable log (CLI parity).
+	if n, err := countJSONLLines(rawPath); err == nil {
+		meta.RawCapturesCount = n
+	}
 	if err := learning.SaveMetadata(learningDir, meta); err != nil {
 		return fmt.Errorf("lora consolidate: save metadata: %w", err)
 	}
 	return nil
+}
+
+// countJSONLLines counts non-empty lines in a JSONL file. Missing file → 0.
+func countJSONLLines(path string) (int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	defer f.Close()
+	count := 0
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		if len(sc.Bytes()) > 0 {
+			count++
+		}
+	}
+	return count, sc.Err()
 }
 
 // learningPipelineAdapter wraps selfimprove.LearningPipeline to implement agent.LearningPipeline.

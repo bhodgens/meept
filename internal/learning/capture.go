@@ -17,7 +17,8 @@ import (
 type CaptureRecorder struct {
 	dataDir      string
 	includeTools map[string]struct{} // nil/empty = capture all tools
-	mu           sync.Mutex
+	mu           sync.Mutex          // guards includeTools / dataDir
+	writeMu      sync.Mutex          // serializes appends only (not classification)
 }
 
 // NewCaptureRecorder creates a CaptureRecorder that writes captures into
@@ -72,10 +73,14 @@ func (c *CaptureRecorder) toolAllowed(toolName string) bool {
 // empty-synthesis entries so only full RecordTrajectory turns become training
 // data; per-tool lines remain in the immutable raw log for auditing.
 func (c *CaptureRecorder) RecordResearch(ctx context.Context, sessionID, query, toolName, toolOutput string) error {
+	// Snapshot allowlist under lock, then release before domain classification
+	// and disk I/O (never hold the mutex across I/O).
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	allowed := c.toolAllowed(toolName)
+	dataDir := c.dataDir
+	c.mu.Unlock()
 
-	if !c.toolAllowed(toolName) {
+	if !allowed {
 		return nil
 	}
 
@@ -96,7 +101,7 @@ func (c *CaptureRecorder) RecordResearch(ctx context.Context, sessionID, query, 
 		Timestamp: time.Now().UTC(),
 	}
 
-	return c.appendTrajectory(trajectory)
+	return appendTrajectory(dataDir, &c.writeMu, trajectory)
 }
 
 // RecordTrajectory appends a complete research trajectory — the full
@@ -107,7 +112,8 @@ func (c *CaptureRecorder) RecordResearch(ctx context.Context, sessionID, query, 
 // at turn end (after the response is generated). Safe for concurrent use.
 func (c *CaptureRecorder) RecordTrajectory(ctx context.Context, sessionID, intent, synthesis string, toolNames []string, success bool) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	dataDir := c.dataDir
+	c.mu.Unlock()
 
 	// Classify from intent + synthesis (the richest signal for domain routing).
 	domain := ClassifyDomain(intent, synthesis)
@@ -138,28 +144,31 @@ func (c *CaptureRecorder) RecordTrajectory(ctx context.Context, sessionID, inten
 		Timestamp: time.Now().UTC(),
 	}
 
-	return c.appendTrajectory(trajectory)
+	return appendTrajectory(dataDir, &c.writeMu, trajectory)
 }
 
 // appendTrajectory writes a ResearchTrajectory as one JSONL line.
-// Caller must hold c.mu.
-func (c *CaptureRecorder) appendTrajectory(trajectory ResearchTrajectory) error {
-	capturesFile := filepath.Join(c.dataDir, "raw_captures.jsonl")
+// Classification happens outside locks; only the disk append is serialized
+// so large trajectories never interleave lines under concurrent capture.
+func appendTrajectory(dataDir string, writeMu *sync.Mutex, trajectory ResearchTrajectory) error {
+	data, err := json.Marshal(trajectory)
+	if err != nil {
+		return fmt.Errorf("learning: marshal trajectory: %w", err)
+	}
+	line := append(data, '\n')
+
+	writeMu.Lock()
+	defer writeMu.Unlock()
+
+	capturesFile := filepath.Join(dataDir, "raw_captures.jsonl")
 	f, err := os.OpenFile(capturesFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("learning: open captures file: %w", err)
 	}
 	defer f.Close()
 
-	data, err := json.Marshal(trajectory)
-	if err != nil {
-		return fmt.Errorf("learning: marshal trajectory: %w", err)
-	}
-	if _, err := f.Write(data); err != nil {
+	if _, err := f.Write(line); err != nil {
 		return fmt.Errorf("learning: write capture: %w", err)
-	}
-	if _, err := f.Write([]byte("\n")); err != nil {
-		return fmt.Errorf("learning: write newline: %w", err)
 	}
 	return nil
 }

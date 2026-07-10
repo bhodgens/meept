@@ -27,14 +27,14 @@ Training (scripts/train_lora.py)
     |
     | PEFT/TRL LoRA fine-tuning
     v
-Adapters (~/.meept/adapters/{domain}/{model}-v1/)
+Adapters (~/.meept/adapters/{domain}/{model}-vN/)
 ```
 
 ## Capture Flow
 
-1. When `learning.enabled` is true in config, the daemon creates a
-   `CaptureRecorder` and wires it into each agent loop via
-   `WithLearningCapture`.
+1. When both `learning.enabled` and `learning.capture.enabled` are true,
+   the daemon creates a `CaptureRecorder` and wires it into each agent loop
+   via `WithLearningCapture`.
 
 2. After each successful tool call in `executeToolCalls`, the agent loop
    calls `RecordResearch(ctx, conversationID, userQuery, toolName, output)`.
@@ -113,7 +113,7 @@ meept learning dataset-stats code
 ```json5
 {
   "learning": {
-    "enabled": false,
+    "enabled": true,
     "data_dir": "~/.meept/learning",
     "adapters_dir": "~/.meept/adapters",
     "capture": {
@@ -138,7 +138,7 @@ meept learning dataset-stats code
 
 | Field | Description | Default |
 |-------|-------------|---------|
-| `learning.enabled` | Master switch for learning capture | `true` |
+| `learning.enabled` | Master switch (capture job + scheduled consolidate) | `true` |
 | `learning.data_dir` | Directory for raw captures and datasets | `~/.meept/learning` |
 | `learning.adapters_dir` | Directory for trained adapters | `~/.meept/adapters` |
 | `learning.capture.enabled` | Enable/disable capture within the learning subsystem | `true` |

@@ -66,6 +66,11 @@ func Consolidate(rawCapturesPath, datasetsDir string, minQuality float64, maxDat
 			stats.Skipped++
 			continue
 		}
+		// Research pipeline: pure chat with no tool path is not training data.
+		if len(traj.ToolCalls) == 0 {
+			stats.Skipped++
+			continue
+		}
 
 		score := ScoreExample(traj)
 		if score < minQuality {
@@ -73,9 +78,15 @@ func Consolidate(rawCapturesPath, datasetsDir string, minQuality float64, maxDat
 			continue
 		}
 
+		// Prefer Intent (user's original ask) over Query when present.
+		instruction := strings.TrimSpace(traj.Intent)
+		if instruction == "" {
+			instruction = traj.Query
+		}
+
 		// Build the training example from the trajectory.
 		example := TrainingExample{
-			Instruction: traj.Query,
+			Instruction: instruction,
 			Input:       "",
 			Output:      traj.Synthesis,
 			Metadata: ExampleMetadata{
@@ -108,9 +119,11 @@ func Consolidate(rawCapturesPath, datasetsDir string, minQuality float64, maxDat
 		stats.DomainsTouched = appendUnique(stats.DomainsTouched, traj.Domain)
 
 		if maxDatasetSizeBytes > 0 {
-			if err := enforceRetention(datasetsDir, traj.Domain, maxDatasetSizeBytes); err != nil {
-				// Non-fatal: log via stats, continue
-				stats.Skipped++
+			// Best-effort: the example is already appended. A retention failure
+			// must not reverse the add or inflate skipped counts; the next
+			// consolidation pass will re-enforce the size cap.
+			if retErr := enforceRetention(datasetsDir, traj.Domain, maxDatasetSizeBytes); retErr != nil {
+				continue
 			}
 		}
 	}

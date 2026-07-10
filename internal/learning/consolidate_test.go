@@ -189,6 +189,7 @@ func TestConsolidateSkipsEmptySynthesis(t *testing.T) {
 
 	// High-score trajectory but empty synthesis (per-tool capture style).
 	// Score would be 0.65 (base + used), above minQuality 0.6, but must skip.
+	// Also skip pure chat (no tool calls) even with synthesis.
 	trajectories := []ResearchTrajectory{
 		{
 			ID:        "t-empty",
@@ -203,10 +204,23 @@ func TestConsolidateSkipsEmptySynthesis(t *testing.T) {
 			Timestamp: time.Now().UTC(),
 		},
 		{
+			ID:        "t-no-tools",
+			SessionID: "s1",
+			Domain:    "code",
+			Query:     "what is 2+2",
+			Synthesis: "4",
+			TaskOutcome: TaskOutcome{
+				Success: true,
+			},
+			ToolCalls: nil,
+			Timestamp: time.Now().UTC(),
+		},
+		{
 			ID:        "t-good",
 			SessionID: "s1",
 			Domain:    "code",
-			Query:     "how to parse json",
+			Intent:    "how to parse json in go",
+			Query:     "fallback query",
 			Synthesis: "use encoding/json",
 			TaskOutcome: TaskOutcome{
 				Success: true,
@@ -233,17 +247,17 @@ func TestConsolidateSkipsEmptySynthesis(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Consolidate: %v", err)
 	}
-	if stats.Processed != 2 {
-		t.Errorf("processed = %d, want 2", stats.Processed)
+	if stats.Processed != 3 {
+		t.Errorf("processed = %d, want 3", stats.Processed)
 	}
-	if stats.Skipped != 1 {
-		t.Errorf("skipped = %d, want 1 (empty synthesis)", stats.Skipped)
+	if stats.Skipped != 2 {
+		t.Errorf("skipped = %d, want 2 (empty synthesis + no tools)", stats.Skipped)
 	}
 	if stats.Added != 1 {
 		t.Errorf("added = %d, want 1 (full trajectory only)", stats.Added)
 	}
 
-	// Dataset should only contain the good example.
+	// Dataset should only contain the good example, preferring Intent as instruction.
 	domainPath := filepath.Join(datasetsDir, "code.jsonl")
 	content, err := os.ReadFile(domainPath)
 	if err != nil {
@@ -251,6 +265,12 @@ func TestConsolidateSkipsEmptySynthesis(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "use encoding/json") {
 		t.Error("expected good synthesis in dataset")
+	}
+	if !strings.Contains(string(content), "how to parse json in go") {
+		t.Error("expected Intent used as instruction")
+	}
+	if strings.Contains(string(content), "fallback query") {
+		t.Error("should prefer Intent over Query for instruction")
 	}
 	lines := 0
 	for _, b := range content {
