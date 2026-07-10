@@ -4,12 +4,38 @@
 /// - Left sidebar with session tree (expandable/collapsible)
 /// - Chat view always visible in main content area
 /// - Session info overlay accessible via [i] icon
+/// - Resizable sidebar width with drag-to-resize divider
+/// - Collapsible sidebar with arrow toggle
+///
+/// Structure:
+/// ```
+/// +------+------------------------------------------+
+/// |  <   |  Header: Session Title                   |
+/// | SESS |  ────────────────────────────────────────+
+/// | [+]  |                                          |
+/// | sess1│           Chat Message Area              |
+/// | ├─ t │                                          |
+/// | ▼ s2 │                                          |
+/// | ├─ p ├──────────────────────────────────────────+
+/// | │ t  │  [ Chat Input Area ]                     |
+/// +------+──────────────────────────────────────────+
+/// |  [Status Bar]                                   |
+/// +-------------------------------------------------+
+/// ```
+
+/// Sidebar-based home screen layout
+///
+/// Alternative to the traditional top-tab navigation, featuring:
+/// - Left sidebar with session tree, hamburger menu, and connection status
+/// - Chat view always visible in main content area
+/// - Session info overlay accessible via [i] icon
+/// - Header bar with session title and description
 ///
 /// Structure:
 /// ```
 /// +--------------+------------------------------------------+
-/// |  SESSIONS    |  Header: Session Title                   |
-/// |  ──────────  +──────────────────────────────────────────+
+/// | [汉堡] meept ● |  Header: Session Title                   |
+/// |  SESSIONS    |  ────────────────────────────────────────+
 /// |  [+] sess1   |                                          |
 /// |  ├─ task1    │           Chat Message Area              |
 /// |  │ └─ plan1  │                                          |
@@ -21,6 +47,11 @@
 /// |  [Status Bar]                                           |
 /// +----------------------------------------------------------+
 /// ```
+///
+/// The sidebar header includes:
+/// - Hamburger menu button for tools (search, branches, etc.)
+/// - ASCII-style "meept" logo
+/// - Connection status indicator (green dot = connected)
 
 import 'dart:async';
 
@@ -57,6 +88,7 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
   Session? _selectedSession;
   bool _initialLoadDone = false;
   late final LeaderKeyController _leaderController;
+
 
   @override
   void initState() {
@@ -177,9 +209,81 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
       case 'projects':
         _leaderController.onBranches?.call();
         break;
-      default:
+      // Open full-window dialogs for tab views
+      case 'sessions':
+        _showFullWindowDialog('sessions', Icons.folder, const _SessionsDialog());
+        break;
+      case 'plans':
+        _showFullWindowDialog('plans', Icons.document_scanner, const _PlansDialog());
+        break;
+      case 'tasks':
+        _showFullWindowDialog('tasks', Icons.task_alt, const _TasksDialog());
+        break;
+      case 'agents':
+        _showFullWindowDialog('agents', Icons.smart_toy, const _AgentsDialog());
+        break;
+      case 'edit description':
+        _showEditDescriptionDialog();
         break;
     }
+  }
+
+  void _showFullWindowDialog(String title, IconData icon, Widget content) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => _FullWindowDialog(
+        title: title,
+        icon: icon,
+        content: content,
+        onClose: () => Navigator.of(context).pop(),
+      ),
+    );
+  }
+
+  void _showEditDescriptionDialog() {
+    final controller = TextEditingController(text: _selectedSession?.description ?? '');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: CyberpunkColors.darkGray,
+        title: Text(
+          'edit description',
+          style: CyberpunkTypography.bodyMedium.copyWith(
+            color: CyberpunkColors.orangePrimary,
+          ),
+        ),
+        content: TextField(
+          controller: controller,
+          style: CyberpunkTypography.bodyMedium,
+          decoration: InputDecoration(
+            hintText: 'session description',
+            hintStyle: CyberpunkTypography.bodyMedium.copyWith(
+              color: CyberpunkColors.midGray,
+            ),
+            filled: true,
+            fillColor: CyberpunkColors.black,
+            border: OutlineInputBorder(
+              borderSide: BorderSide(color: CyberpunkColors.orangeDark),
+            ),
+          ),
+          maxLines: 3,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text('cancel', style: CyberpunkTypography.bodySmall),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              showStatusMessage(ref, 'description updated');
+            },
+            child: Text('save', style: CyberpunkTypography.bodySmall.copyWith(color: CyberpunkColors.orangePrimary)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _cycleVerbosity() {
@@ -371,9 +475,9 @@ class _SidebarState extends ConsumerState<_Sidebar> {
       ),
       child: Column(
         children: [
-          // Sidebar header
+          // Sidebar header with hamburger, meept logo, and connection status
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(
@@ -382,12 +486,36 @@ class _SidebarState extends ConsumerState<_Sidebar> {
                 ),
               ),
             ),
-            child: Text(
-              'sessions',
-              style: CyberpunkTypography.label.copyWith(
-                color: CyberpunkColors.orangePrimary,
-                letterSpacing: 2,
-              ),
+            child: Row(
+              children: [
+                // Hamburger menu
+                HamburgerMenu(
+                  onToolSelected: (route) {
+                    switch (route) {
+                      case 'search':
+                        context.goToolSearch();
+                      case 'branches':
+                        context.goToolBranches();
+                      default:
+                        break;
+                    }
+                  },
+                ),
+                const SizedBox(width: 8),
+                // ASCII-style meept logo
+                Text(
+                  'meept',
+                  style: CyberpunkTypography.label.copyWith(
+                    color: CyberpunkColors.orangePrimary,
+                    fontFamily: 'SourceCodePro',
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1,
+                  ),
+                ),
+                const Spacer(),
+                // Connection status
+                _ConnectionDot(),
+              ],
             ),
           ),
           // Session tree
@@ -771,23 +899,6 @@ class _Header extends StatelessWidget {
               maxLines: 1,
             ),
           ),
-          // Connection indicator
-          _ConnectionDot(),
-          const SizedBox(width: 12),
-          // Hamburger menu
-          HamburgerMenu(
-            onToolSelected: (route) {
-              // Navigate to tool
-              switch (route) {
-                case 'search':
-                  context.goToolSearch();
-                case 'branches':
-                  context.goToolBranches();
-                default:
-                  break;
-              }
-            },
-          ),
         ],
       ),
     );
@@ -830,6 +941,339 @@ class _ConnectionDot extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Full-window dialog for tab views
+// -----------------------------------------------------------------------------
+
+class _FullWindowDialog extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  final Widget content;
+  final VoidCallback onClose;
+
+  const _FullWindowDialog({
+    required this.title,
+    required this.icon,
+    required this.content,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.all(20),
+      child: Container(
+        width: 800,
+        height: 600,
+        decoration: BoxDecoration(
+          color: CyberpunkColors.darkGray,
+          border: Border.all(
+            color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
+            width: 2,
+          ),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: CyberpunkColors.orangePrimary,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(8),
+                  topRight: Radius.circular(8),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(icon, color: CyberpunkColors.black, size: 20),
+                  const SizedBox(width: 12),
+                  Text(
+                    title,
+                    style: CyberpunkTypography.bodyMedium.copyWith(
+                      color: CyberpunkColors.black,
+                      fontWeight: FontWeight.bold,
+                      fontFamily: 'SourceCodePro',
+                    ),
+                  ),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: onClose,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(Icons.close, size: 20, color: CyberpunkColors.black),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Content
+            Expanded(child: content),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Sessions dialog
+// -----------------------------------------------------------------------------
+
+class _SessionsDialog extends ConsumerWidget {
+  const _SessionsDialog();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sessionsState = ref.watch(sessionProvider);
+    final sessions = sessionsState.sessions;
+
+    if (sessions.isEmpty) {
+      return const Center(
+        child: Text(
+          'no sessions',
+          style: TextStyle(color: CyberpunkColors.midGray, fontSize: 16),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: sessions.length,
+      itemBuilder: (context, index) {
+        final session = sessions[index];
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: CyberpunkColors.midGray.withValues(alpha: 0.2),
+            border: Border.all(color: CyberpunkColors.orangeDark.withValues(alpha: 0.3)),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            session.title.isEmpty ? 'unnamed' : session.title,
+            style: CyberpunkTypography.bodyMedium.copyWith(
+              color: CyberpunkColors.lightGray,
+              fontFamily: 'SourceCodePro',
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Plans dialog
+// -----------------------------------------------------------------------------
+
+class _PlansDialog extends ConsumerWidget {
+  const _PlansDialog();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final plansState = ref.watch(planProvider);
+    final plans = plansState.plans;
+
+    if (plans.isEmpty) {
+      return const Center(
+        child: Text(
+          'no plans',
+          style: TextStyle(color: CyberpunkColors.midGray, fontSize: 16),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: plans.length,
+      itemBuilder: (context, index) {
+        final plan = plans[index];
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: CyberpunkColors.midGray.withValues(alpha: 0.2),
+            border: Border.all(color: CyberpunkColors.orangeDark.withValues(alpha: 0.3)),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                plan.title.isEmpty ? 'Untitled Plan' : plan.title,
+                style: CyberpunkTypography.bodyMedium.copyWith(
+                  color: CyberpunkColors.orangePrimary,
+                  fontFamily: 'SourceCodePro',
+                ),
+              ),
+              if (plan.description.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  plan.description,
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    color: CyberpunkColors.lightGray,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Tasks dialog
+// -----------------------------------------------------------------------------
+
+class _TasksDialog extends ConsumerWidget {
+  const _TasksDialog();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tasksState = ref.watch(taskProvider);
+    final tasks = tasksState.tasks;
+
+    if (tasks.isEmpty) {
+      return const Center(
+        child: Text(
+          'no tasks',
+          style: TextStyle(color: CyberpunkColors.midGray, fontSize: 16),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: tasks.length,
+      itemBuilder: (context, index) {
+        final task = tasks[index];
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: CyberpunkColors.midGray.withValues(alpha: 0.2),
+            border: Border.all(color: CyberpunkColors.orangeDark.withValues(alpha: 0.3)),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                task.status == 'completed' ? Icons.check_circle :
+                task.status == 'failed' ? Icons.error :
+                task.status == 'in_progress' ? Icons.hourglass_empty :
+                Icons.circle_outlined,
+                size: 18,
+                color: task.status == 'completed' ? CyberpunkColors.greenSuccess :
+                     task.status == 'failed' ? CyberpunkColors.redAlert :
+                     task.status == 'in_progress' ? CyberpunkColors.orangePrimary :
+                     CyberpunkColors.lightGray,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  task.title.isEmpty ? 'Untitled Task' : task.title,
+                  style: CyberpunkTypography.bodyMedium.copyWith(
+                    color: CyberpunkColors.lightGray,
+                    fontFamily: 'SourceCodePro',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Agents dialog
+// -----------------------------------------------------------------------------
+
+class _AgentsDialog extends ConsumerWidget {
+  const _AgentsDialog();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final agentsState = ref.watch(agentProvider);
+    final agents = agentsState.agents;
+
+    if (agents.isEmpty) {
+      return const Center(
+        child: Text(
+          'no agents',
+          style: TextStyle(color: CyberpunkColors.midGray, fontSize: 16),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: agents.length,
+      itemBuilder: (context, index) {
+        final agent = agents[index];
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: CyberpunkColors.midGray.withValues(alpha: 0.2),
+            border: Border.all(color: CyberpunkColors.orangeDark.withValues(alpha: 0.3)),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.smart_toy,
+                size: 20,
+                color: CyberpunkColors.orangePrimary,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      agent.name.isEmpty ? 'Unknown Agent' : agent.name,
+                      style: CyberpunkTypography.bodyMedium.copyWith(
+                        color: CyberpunkColors.orangePrimary,
+                        fontFamily: 'SourceCodePro',
+                      ),
+                    ),
+                    if (agent.description.isNotEmpty)
+                      Text(
+                        agent.description,
+                        style: CyberpunkTypography.bodySmall.copyWith(
+                          color: CyberpunkColors.lightGray,
+                          fontSize: 10,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (agent.enabled)
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: CyberpunkColors.greenSuccess,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

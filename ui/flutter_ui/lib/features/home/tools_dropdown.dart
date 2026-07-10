@@ -110,10 +110,11 @@ class _HamburgerMenuState extends State<HamburgerMenu> {
       );
     }
 
-    // Calculate menu position (below the button, aligned left)
+    // Calculate menu position (below the button, aligned to left edge of button)
     final menuTop = offset.dy + size.height;
-    final menuLeft = offset.dx;
     const menuWidth = 180.0;
+    
+    final menuLeft = offset.dx;
 
     _overlayEntry = OverlayEntry(
       builder: (context) => Stack(
