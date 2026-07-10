@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/learning"
@@ -137,6 +138,24 @@ func runConsolidate(minQuality float64) error {
 		fmt.Printf("snapshot:  %s v%d (%d examples, md5=%s)\n", domain, snap.Version, snap.ExampleCount, snap.MD5[:8])
 	}
 
+	// Update metadata.json with current provenance/stats.
+	meta, err := learning.LoadMetadata(learningDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: load metadata: %v\n", err)
+		meta = &learning.LearningMetadata{}
+	}
+	meta.LastConsolidatedAt = time.Now().UTC()
+	meta, err = learning.RefreshDomainStats(learningDir, meta)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: refresh domain stats: %v\n", err)
+	}
+	if n, err := countLines(rawPath); err == nil {
+		meta.RawCapturesCount = n
+	}
+	if err := learning.SaveMetadata(learningDir, meta); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: save metadata: %v\n", err)
+	}
+
 	return nil
 }
 
@@ -259,6 +278,23 @@ func showLearningStatus() error {
 			}
 		}
 		fmt.Printf("adapters:       %d\n", adapterCount)
+	}
+
+	// Metadata provenance.
+	if meta, err := learning.LoadMetadata(learningDir); err == nil && meta != nil {
+		fmt.Println("metadata:")
+		if !meta.LastConsolidatedAt.IsZero() {
+			fmt.Printf("  last consolidated: %s\n", meta.LastConsolidatedAt.Format(time.RFC3339))
+		} else {
+			fmt.Printf("  last consolidated: (never)\n")
+		}
+		fmt.Printf("  raw captures:      %d\n", meta.RawCapturesCount)
+		if len(meta.DomainStats) > 0 {
+			fmt.Println("  domain stats:")
+			for domain, ds := range meta.DomainStats {
+				fmt.Printf("    %-20s %d examples, %d bytes\n", domain, ds.ExampleCount, ds.Bytes)
+			}
+		}
 	}
 
 	return nil
