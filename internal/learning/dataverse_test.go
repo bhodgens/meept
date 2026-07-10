@@ -92,3 +92,67 @@ func TestCreateSnapshot(t *testing.T) {
 		t.Errorf("expected 2 versions, got %d", len(versions))
 	}
 }
+
+func TestPruneOldVersions(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	datasetsDir := filepath.Join(tmp, "datasets")
+	versionsDir := filepath.Join(tmp, "versions")
+
+	datasets, err := NewDomainDatasets(datasetsDir)
+	if err != nil {
+		t.Fatalf("NewDomainDatasets: %v", err)
+	}
+	if err := datasets.Append("code", TrainingExample{Instruction: "q", Output: "a"}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	for i := 0; i < 5; i++ {
+		if _, err := CreateSnapshot("code", datasetsDir, versionsDir); err != nil {
+			t.Fatalf("CreateSnapshot %d: %v", i, err)
+		}
+	}
+
+	pruned, err := PruneOldVersions("code", versionsDir, 3)
+	if err != nil {
+		t.Fatalf("PruneOldVersions: %v", err)
+	}
+	if pruned != 2 {
+		t.Errorf("expected 2 pruned, got %d", pruned)
+	}
+
+	// v1 and v2 should be gone; v3-v5 remain.
+	for _, gone := range []string{"code_v1.jsonl", "code_v2.jsonl"} {
+		if _, err := os.Stat(filepath.Join(versionsDir, gone)); !os.IsNotExist(err) {
+			t.Errorf("expected %s removed, stat err=%v", gone, err)
+		}
+	}
+	for _, kept := range []string{"code_v3.jsonl", "code_v4.jsonl", "code_v5.jsonl"} {
+		if _, err := os.Stat(filepath.Join(versionsDir, kept)); err != nil {
+			t.Errorf("expected %s kept: %v", kept, err)
+		}
+	}
+
+	// versions.json should only have 3 entries for code.
+	data, err := os.ReadFile(filepath.Join(versionsDir, "versions.json"))
+	if err != nil {
+		t.Fatalf("read versions.json: %v", err)
+	}
+	var versions []DatasetVersion
+	if err := json.Unmarshal(data, &versions); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(versions) != 3 {
+		t.Errorf("expected 3 version metadata entries, got %d", len(versions))
+	}
+
+	// keep <= 0 is a no-op
+	pruned, err = PruneOldVersions("code", versionsDir, 0)
+	if err != nil {
+		t.Fatalf("PruneOldVersions keep=0: %v", err)
+	}
+	if pruned != 0 {
+		t.Errorf("expected 0 pruned with keep=0, got %d", pruned)
+	}
+}

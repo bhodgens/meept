@@ -127,7 +127,13 @@ func runConsolidate(minQuality float64) error {
 	fmt.Printf("skipped:    %d\n", stats.Skipped)
 	fmt.Printf("duplicates: %d\n", stats.Duplicates)
 
-	// Snapshot each domain that received additions.
+	// Snapshot each domain that received additions; prune old versions per config.
+	keepVersions := 3
+	if cfg, err := config.LoadDefault(); err == nil {
+		if cfg.Learning.Retention.KeepVersions > 0 {
+			keepVersions = cfg.Learning.Retention.KeepVersions
+		}
+	}
 	versionsDir := filepath.Join(learningDir, "versions")
 	for _, domain := range stats.DomainsTouched {
 		snap, err := learning.CreateSnapshot(domain, datasetsDir, versionsDir)
@@ -136,6 +142,11 @@ func runConsolidate(minQuality float64) error {
 			continue
 		}
 		fmt.Printf("snapshot:  %s v%d (%d examples, md5=%s)\n", domain, snap.Version, snap.ExampleCount, snap.MD5[:8])
+		if pruned, err := learning.PruneOldVersions(domain, versionsDir, keepVersions); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: prune %s versions: %v\n", domain, err)
+		} else if pruned > 0 {
+			fmt.Printf("pruned:    %s removed %d old version(s) (keep=%d)\n", domain, pruned, keepVersions)
+		}
 	}
 
 	// Update metadata.json with current provenance/stats.
@@ -208,8 +219,19 @@ func runTraining(domain, model string) error {
 		return fmt.Errorf("create output dir: %w", err)
 	}
 
-	// Best-effort: shell out to python training script.
+	// Prefer default model from config when flag left at CLI default and config differs.
+	if model == "" {
+		model = "lfm2.5-8b"
+		if cfg, err := config.LoadDefault(); err == nil && cfg.Learning.Training.DefaultModel != "" {
+			model = cfg.Learning.Training.DefaultModel
+		}
+	}
+
+	// Shell out to python training script (relative to CWD / project root).
 	scriptPath := filepath.Join("scripts", "train_lora.py")
+	if _, err := os.Stat(scriptPath); err != nil {
+		return fmt.Errorf("training script not found at %s (run from project root): %w", scriptPath, err)
+	}
 	trainCmd := exec.Command("python", scriptPath,
 		"--model", model,
 		"--dataset", datasetPath,
@@ -220,12 +242,24 @@ func runTraining(domain, model string) error {
 
 	fmt.Printf("training %s adapter for domain '%s'...\n", model, domain)
 	if err := trainCmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "training failed: %v\n", err)
-		fmt.Fprintf(os.Stderr, "ensure python and scripts/train_lora.py are available\n")
-		return nil // non-fatal: report error but don't panic
+		return fmt.Errorf("training failed: %w (ensure python deps via scripts/setup-training.sh)", err)
 	}
 
 	fmt.Printf("adapter saved to %s\n", outputDir)
+
+	// Post-training hook: write training_meta.json and regenerate adapter registry.
+	hookPath := filepath.Join("hooks", "on_adapter_trained.sh")
+	if _, err := os.Stat(hookPath); err == nil {
+		hookCmd := exec.Command("bash", hookPath, domain, model, outputDir)
+		hookCmd.Stdout = os.Stdout
+		hookCmd.Stderr = os.Stderr
+		if err := hookCmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: post-training hook failed: %v\n", err)
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "warning: post-training hook not found at %s; registry not regenerated\n", hookPath)
+	}
+
 	return nil
 }
 

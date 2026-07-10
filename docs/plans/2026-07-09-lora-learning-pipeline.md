@@ -3,7 +3,13 @@
 **Date**: 2026-07-09
 **Type**: Implementation Plan
 **Priority**: High
-**Status**: Pending approval
+**Status**: Complete (2026-07-10)
+
+> Implementation lives in `internal/learning/`, `internal/llm/adapter_*.go`,
+> `internal/llm/lfm_loader.go`, `cmd/meept/learning.go`, `scripts/train_lora.py`,
+> `scripts/generate_adapter_config.py`, `hooks/on_adapter_trained.sh`, and
+> daemon wiring in `internal/daemon/components.go`. Deferred distillation work
+> remains in `.github/ISSUES/lora-distillation-pipeline.md`.
 
 ---
 

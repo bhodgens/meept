@@ -171,3 +171,69 @@ func TestRecordTrajectory(t *testing.T) {
 		t.Errorf("expected 1 line, got %d", lineCount)
 	}
 }
+
+func TestRecordResearchIncludeToolsFilter(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	rec, err := NewCaptureRecorder(tmp)
+	if err != nil {
+		t.Fatalf("NewCaptureRecorder failed: %v", err)
+	}
+	rec.Configure([]string{"memory_search", "file_read"})
+
+	ctx := context.Background()
+	// Allowed tools
+	if err := rec.RecordResearch(ctx, "s1", "query", "memory_search", "hits"); err != nil {
+		t.Fatalf("memory_search: %v", err)
+	}
+	if err := rec.RecordResearch(ctx, "s1", "query", "file_read", "content"); err != nil {
+		t.Fatalf("file_read: %v", err)
+	}
+	// Filtered out
+	if err := rec.RecordResearch(ctx, "s1", "query", "shell_exec", "output"); err != nil {
+		t.Fatalf("shell_exec should be silent skip, got: %v", err)
+	}
+	if err := rec.RecordResearch(ctx, "s1", "query", "web_search", "results"); err != nil {
+		t.Fatalf("web_search should be silent skip, got: %v", err)
+	}
+
+	capturesFile := filepath.Join(tmp, "raw_captures.jsonl")
+	data, err := os.ReadFile(capturesFile)
+	if err != nil {
+		t.Fatalf("read captures: %v", err)
+	}
+	lines := 0
+	for _, b := range data {
+		if b == '\n' {
+			lines++
+		}
+	}
+	if lines != 2 {
+		t.Errorf("expected 2 captured lines (allowlisted only), got %d", lines)
+	}
+}
+
+func TestRecordResearchAllToolsWhenUnconfigured(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	rec, err := NewCaptureRecorder(tmp)
+	if err != nil {
+		t.Fatalf("NewCaptureRecorder failed: %v", err)
+	}
+	// No Configure → capture all tools
+
+	ctx := context.Background()
+	if err := rec.RecordResearch(ctx, "s1", "q", "shell_exec", "out"); err != nil {
+		t.Fatalf("RecordResearch: %v", err)
+	}
+	capturesFile := filepath.Join(tmp, "raw_captures.jsonl")
+	data, err := os.ReadFile(capturesFile)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("expected capture when no allowlist configured")
+	}
+}

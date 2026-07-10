@@ -85,6 +85,23 @@ func TestConsolidateRoutesCorrectly(t *testing.T) {
 		t.Errorf("expected 2 added, got %d", stats.Added)
 	}
 
+	// Verify DomainsTouched contains both domains.
+	if len(stats.DomainsTouched) != 2 {
+		t.Errorf("expected 2 domains touched, got %d: %v", len(stats.DomainsTouched), stats.DomainsTouched)
+	}
+	for _, want := range []string{"code", "debugging"} {
+		found := false
+		for _, d := range stats.DomainsTouched {
+			if d == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected DomainsTouched to contain %q, got %v", want, stats.DomainsTouched)
+		}
+	}
+
 	// Verify domain files were created.
 	codePath := filepath.Join(datasetsDir, "code.jsonl")
 	if _, err := os.Stat(codePath); err != nil {
@@ -105,6 +122,9 @@ func TestConsolidateRoutesCorrectly(t *testing.T) {
 	}
 	if stats2.Added != 0 {
 		t.Errorf("expected 0 added on second pass, got %d", stats2.Added)
+	}
+	if len(stats2.DomainsTouched) != 0 {
+		t.Errorf("expected 0 domains touched on duplicate-only pass, got %v", stats2.DomainsTouched)
 	}
 }
 
@@ -154,6 +174,92 @@ func TestConsolidateQualityFilter(t *testing.T) {
 	}
 	if stats.Skipped != 1 {
 		t.Errorf("expected 1 skipped, got %d", stats.Skipped)
+	}
+	if len(stats.DomainsTouched) != 0 {
+		t.Errorf("expected 0 domains touched when nothing added, got %v", stats.DomainsTouched)
+	}
+}
+
+func TestConsolidateSkipsEmptySynthesis(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	rawPath := filepath.Join(tmp, "raw_captures.jsonl")
+	datasetsDir := filepath.Join(tmp, "datasets")
+
+	// High-score trajectory but empty synthesis (per-tool capture style).
+	// Score would be 0.65 (base + used), above minQuality 0.6, but must skip.
+	trajectories := []ResearchTrajectory{
+		{
+			ID:        "t-empty",
+			SessionID: "s1",
+			Domain:    "code",
+			Query:     "how to parse json",
+			Synthesis: "",
+			TaskOutcome: TaskOutcome{
+				Success: false,
+			},
+			ToolCalls: []ToolCallRecord{{Tool: "file_read", Used: true}},
+			Timestamp: time.Now().UTC(),
+		},
+		{
+			ID:        "t-good",
+			SessionID: "s1",
+			Domain:    "code",
+			Query:     "how to parse json",
+			Synthesis: "use encoding/json",
+			TaskOutcome: TaskOutcome{
+				Success: true,
+			},
+			ToolCalls: []ToolCallRecord{{Tool: "file_read", Used: true}},
+			Timestamp: time.Now().UTC(),
+		},
+	}
+
+	var data []byte
+	for _, traj := range trajectories {
+		line, err := json.Marshal(traj)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		data = append(data, line...)
+		data = append(data, '\n')
+	}
+	if err := os.WriteFile(rawPath, data, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	stats, err := Consolidate(rawPath, datasetsDir, 0.6, 0)
+	if err != nil {
+		t.Fatalf("Consolidate: %v", err)
+	}
+	if stats.Processed != 2 {
+		t.Errorf("processed = %d, want 2", stats.Processed)
+	}
+	if stats.Skipped != 1 {
+		t.Errorf("skipped = %d, want 1 (empty synthesis)", stats.Skipped)
+	}
+	if stats.Added != 1 {
+		t.Errorf("added = %d, want 1 (full trajectory only)", stats.Added)
+	}
+
+	// Dataset should only contain the good example.
+	domainPath := filepath.Join(datasetsDir, "code.jsonl")
+	content, err := os.ReadFile(domainPath)
+	if err != nil {
+		t.Fatalf("read domain file: %v", err)
+	}
+	if !strings.Contains(string(content), "use encoding/json") {
+		t.Error("expected good synthesis in dataset")
+	}
+	lines := 0
+	for _, b := range content {
+		if b == '\n' {
+			lines++
+		}
+	}
+	if lines != 1 {
+		t.Errorf("expected 1 dataset line, got %d", lines)
 	}
 }
 

@@ -15,12 +15,14 @@ import (
 // CaptureRecorder intercepts agent tool calls and records them as
 // ResearchTrajectory entries to raw_captures.jsonl.
 type CaptureRecorder struct {
-	dataDir string
-	mu      sync.Mutex
+	dataDir      string
+	includeTools map[string]struct{} // nil/empty = capture all tools
+	mu           sync.Mutex
 }
 
 // NewCaptureRecorder creates a CaptureRecorder that writes captures into
 // dataDir. The directory (and parents) are created if they don't exist.
+// All tools are captured until Configure is called with an include list.
 func NewCaptureRecorder(dataDir string) (*CaptureRecorder, error) {
 	if dataDir == "" {
 		return nil, fmt.Errorf("learning: dataDir must not be empty")
@@ -31,13 +33,51 @@ func NewCaptureRecorder(dataDir string) (*CaptureRecorder, error) {
 	return &CaptureRecorder{dataDir: dataDir}, nil
 }
 
+// Configure sets the tool allowlist used by RecordResearch. An empty or nil
+// list means all tools are captured. Thread-safe.
+func (c *CaptureRecorder) Configure(includeTools []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if len(includeTools) == 0 {
+		c.includeTools = nil
+		return
+	}
+	m := make(map[string]struct{}, len(includeTools))
+	for _, t := range includeTools {
+		if t != "" {
+			m[t] = struct{}{}
+		}
+	}
+	c.includeTools = m
+}
+
+// shouldCaptureTool reports whether toolName is allowed. Caller must hold c.mu
+// only if reading includeTools without races; Configure holds the lock when
+// writing, and we re-check under lock in RecordResearch.
+func (c *CaptureRecorder) toolAllowed(toolName string) bool {
+	if len(c.includeTools) == 0 {
+		return true
+	}
+	_, ok := c.includeTools[toolName]
+	return ok
+}
+
 // RecordResearch appends a per-tool-call capture entry to raw_captures.jsonl.
 // The domain is classified from the query and tool output. This captures
 // individual tool invocations in real time (non-blocking, cheap). Safe for
-// concurrent use.
+// concurrent use. Tools not in the configured allowlist are silently skipped.
+//
+// Note: per-tool captures intentionally omit Synthesis. Consolidation skips
+// empty-synthesis entries so only full RecordTrajectory turns become training
+// data; per-tool lines remain in the immutable raw log for auditing.
 func (c *CaptureRecorder) RecordResearch(ctx context.Context, sessionID, query, toolName, toolOutput string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if !c.toolAllowed(toolName) {
+		return nil
+	}
 
 	domain := ClassifyDomain(query, toolOutput)
 	trajectory := ResearchTrajectory{
@@ -74,6 +114,9 @@ func (c *CaptureRecorder) RecordTrajectory(ctx context.Context, sessionID, inten
 
 	toolCalls := make([]ToolCallRecord, 0, len(toolNames))
 	for _, tn := range toolNames {
+		// Trajectory captures the tools that ran this turn even if some would
+		// not be allowlisted for per-tool RecordResearch — the turn-level
+		// synthesis is what training needs.
 		toolCalls = append(toolCalls, ToolCallRecord{
 			Tool:    tn,
 			Results: 1,

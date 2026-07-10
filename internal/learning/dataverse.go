@@ -96,6 +96,122 @@ func CreateSnapshot(domain, datasetsDir, versionsDir string) (*DatasetVersion, e
 	return version, nil
 }
 
+// PruneOldVersions deletes older snapshots for domain when more than keep
+// versioned files exist. keep <= 0 means retain everything. Files are ordered
+// by version number ascending; the oldest excess files (and matching
+// versions.json entries) are removed. Returns the number of files pruned.
+func PruneOldVersions(domain, versionsDir string, keep int) (int, error) {
+	if keep <= 0 {
+		return 0, nil
+	}
+
+	entries, err := os.ReadDir(versionsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("learning: read versions dir: %w", err)
+	}
+
+	type verFile struct {
+		name string
+		n    int
+	}
+	var files []verFile
+	prefix := domain + "_v"
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		rest, ok := cutPrefix(name, prefix)
+		if !ok {
+			continue
+		}
+		numStr := rest
+		if idx := indexByte(numStr, '.'); idx >= 0 {
+			numStr = numStr[:idx]
+		}
+		n := 0
+		valid := true
+		for _, c := range numStr {
+			if c < '0' || c > '9' {
+				valid = false
+				break
+			}
+			n = n*10 + int(c-'0')
+		}
+		if !valid || n <= 0 {
+			continue
+		}
+		files = append(files, verFile{name: name, n: n})
+	}
+
+	if len(files) <= keep {
+		return 0, nil
+	}
+
+	// Sort ascending by version number (oldest first) via simple insertion.
+	for i := 1; i < len(files); i++ {
+		j := i
+		for j > 0 && files[j].n < files[j-1].n {
+			files[j], files[j-1] = files[j-1], files[j]
+			j--
+		}
+	}
+
+	toDelete := files[:len(files)-keep]
+	pruned := 0
+	deletedNums := map[int]struct{}{}
+	for _, f := range toDelete {
+		path := filepath.Join(versionsDir, f.name)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return pruned, fmt.Errorf("learning: remove old version %s: %w", path, err)
+		}
+		deletedNums[f.n] = struct{}{}
+		pruned++
+	}
+
+	// Drop matching entries from versions.json.
+	if err := filterVersionMetadata(versionsDir, domain, deletedNums); err != nil {
+		return pruned, err
+	}
+	return pruned, nil
+}
+
+// filterVersionMetadata rewrites versions.json without entries whose
+// (domain, version) pair is in deletedNums.
+func filterVersionMetadata(versionsDir, domain string, deletedNums map[int]struct{}) error {
+	versionsFile := filepath.Join(versionsDir, "versions.json")
+	data, err := os.ReadFile(versionsFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("learning: read versions.json: %w", err)
+	}
+	var versions []DatasetVersion
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &versions); err != nil {
+			return nil // corrupt — leave alone
+		}
+	}
+	kept := versions[:0]
+	for _, v := range versions {
+		if v.Domain == domain {
+			if _, drop := deletedNums[v.Version]; drop {
+				continue
+			}
+		}
+		kept = append(kept, v)
+	}
+	out, err := json.MarshalIndent(kept, "", "  ")
+	if err != nil {
+		return fmt.Errorf("learning: marshal versions: %w", err)
+	}
+	return os.WriteFile(versionsFile, out, 0o644)
+}
+
 func nextVersionNumber(domain, versionsDir string) (int, error) {
 	entries, err := os.ReadDir(versionsDir)
 	if err != nil {

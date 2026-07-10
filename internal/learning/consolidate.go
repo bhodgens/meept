@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -51,6 +52,17 @@ func Consolidate(rawCapturesPath, datasetsDir string, minQuality float64, maxDat
 		var traj ResearchTrajectory
 		if err := json.Unmarshal(line, &traj); err != nil {
 			// Skip malformed entries.
+			stats.Skipped++
+			continue
+		}
+
+		// Per-tool captures (RecordResearch) have empty synthesis by design;
+		// only full turn trajectories (RecordTrajectory) are training-worthy.
+		if strings.TrimSpace(traj.Synthesis) == "" {
+			stats.Skipped++
+			continue
+		}
+		if strings.TrimSpace(traj.Domain) == "" {
 			stats.Skipped++
 			continue
 		}

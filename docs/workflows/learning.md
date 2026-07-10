@@ -37,11 +37,18 @@ Adapters (~/.meept/adapters/{domain}/{model}-v1/)
    `WithLearningCapture`.
 
 2. After each successful tool call in `executeToolCalls`, the agent loop
-   calls `RecordResearch(ctx, conversationID, "", toolName, output)`.
+   calls `RecordResearch(ctx, conversationID, userQuery, toolName, output)`.
+   Tools not listed in `learning.capture.include_tools` are skipped.
 
-3. `RecordResearch` classifies the domain (code, debugging, api_research),
-   wraps the data into a `ResearchTrajectory`, and appends it as JSONL to
-   `~/.meept/learning/raw_captures.jsonl`.
+3. `RecordResearch` classifies the domain (code, debugging, api_research,
+   security, meept_internal, personal), wraps the data into a
+   `ResearchTrajectory`, and appends it as JSONL to
+   `~/.meept/learning/raw_captures.jsonl`. Per-tool captures omit synthesis
+   (audit log only). At turn end, `RecordTrajectory` records the full
+   (intent, synthesis, tool path, outcome) tuple used for training.
+
+4. Consolidation skips empty-synthesis entries so only full trajectories
+   become domain dataset training examples.
 
 ## Directory Structure
 
@@ -82,7 +89,13 @@ twice to a domain dataset.
 ## CLI Commands
 
 ```bash
-# Train a LoRA adapter for a domain
+# Process raw captures into domain datasets (score, dedup, route)
+meept learning consolidate
+
+# Snapshot a domain dataset for versioned retention
+meept learning snapshot code
+
+# Train a LoRA adapter for a domain (runs post-train hook + registry regen)
 meept learning train code --model lfm2.5-8b
 
 # Show learning pipeline status (raw captures, datasets, adapters)
@@ -125,7 +138,7 @@ meept learning dataset-stats code
 
 | Field | Description | Default |
 |-------|-------------|---------|
-| `learning.enabled` | Master switch for learning capture | `false` |
+| `learning.enabled` | Master switch for learning capture | `true` |
 | `learning.data_dir` | Directory for raw captures and datasets | `~/.meept/learning` |
 | `learning.adapters_dir` | Directory for trained adapters | `~/.meept/adapters` |
 | `learning.capture.enabled` | Enable/disable capture within the learning subsystem | `true` |
@@ -139,10 +152,12 @@ meept learning dataset-stats code
 
 ## Adapter Loading
 
-At daemon startup, adapters are loaded from `~/.meept/adapters/` via
-`internal/llm/adapter_loader.go`. The `AdapterRouter` in
-`internal/llm/adapter_router.go` selects the appropriate adapter by domain
-at inference time, falling back to a general adapter or base model.
+At daemon startup, the adapter registry (`~/.meept/adapter_registry.json`)
+is loaded via `internal/llm/adapter_loader.go`, adapters matching the
+configured base model are registered with `LFMLoader`, and an
+`AdapterRouter` is wired into each agent loop. At chat time the last user
+message is domain-classified and the matching adapter path is passed to
+the LLM client via `WithAdapter` (providers without adapter support ignore it).
 
 ## Training Scripts
 
