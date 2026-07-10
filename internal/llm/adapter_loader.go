@@ -8,9 +8,13 @@ import (
 
 // AdapterRegistry holds a list of trained LoRA adapter entries. This type
 // is defined locally in the llm package to avoid an import cycle with
-// internal/config.
+// internal/config. Version and GeneratedAt preserve the provenance fields
+// written by scripts/generate_adapter_config.py so they are not silently
+// dropped on load.
 type AdapterRegistry struct {
-	Adapters []AdapterEntry `json:"adapters"`
+	Adapters    []AdapterEntry `json:"adapters"`
+	Version     int            `json:"version"`
+	GeneratedAt string         `json:"generated_at"`
 }
 
 // AdapterEntry describes a single adapter for loading purposes.
