@@ -45,7 +45,10 @@ Adapters (~/.meept/adapters/{domain}/{model}-vN/)
    `ResearchTrajectory`, and appends it as JSONL to
    `~/.meept/learning/raw_captures.jsonl`. Per-tool captures omit synthesis
    (audit log only). At turn end, `RecordTrajectory` records the full
-   (intent, synthesis, tool path, outcome) tuple used for training.
+   (intent, synthesis, tool path, outcome) tuple used for training. The
+   tool path is scoped to the **current turn only** (tools after the last
+   user message) so multi-turn history does not pollute training metadata.
+   Pure chat turns with no tool use are not written as trajectories.
 
 4. Consolidation skips empty-synthesis entries so only full trajectories
    become domain dataset training examples.
@@ -164,8 +167,13 @@ the LLM client via `WithAdapter` (providers without adapter support ignore it).
 Training is performed via Python scripts (not part of the Go binary):
 
 - `scripts/train_lora.py` -- PEFT/TRL LoRA training for LFM2.5 models
+  (dtype/amp matched: bf16 when supported, else fp16/fp32)
 - `scripts/generate_adapter_config.py` -- Generate adapter registry JSON
-- `scripts/train_all_adapters.sh` -- Batch train all domains
+  (`--adapters-dir`, `--output`, `--datasets-dir` for custom paths)
+- `scripts/train_all_adapters.sh` -- Batch train all domains (auto-versions
+  as `{model}-vN`; respects `MEEPT_ADAPTERS_DIR` / `MEEPT_DATASETS_DIR`)
+- `hooks/on_adapter_trained.sh` -- Writes `training_meta.json` and regenerates
+  the registry next to the adapters parent (daemon load path)
 
 Training configs live in `config/training/lora_lfm2.5_8b.yaml` and
 `config/training/lora_lfm2.5_1.2b.yaml`.

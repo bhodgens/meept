@@ -1904,7 +1904,9 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// LoRA trajectory capture: record the full (intent, synthesis, tool path,
 	// outcome) tuple for training data. This is the rich capture format that
 	// associates the user's original intent with the agent's final response.
-	// Runs asynchronously; non-blocking on errors.
+	// Runs asynchronously; non-blocking on errors. Only tools from the current
+	// turn (after the last user message) are included so multi-turn history
+	// does not pollute the tool path.
 	if l.learningCapture != nil && err == nil {
 		lc := l.learningCapture
 		convSnapshot := conv
@@ -1921,15 +1923,10 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 					l.logger.Warn("learning trajectory capture panicked", "error", r)
 				}
 			}()
-			// Collect tool names from the conversation's tool results.
-			msgs := convSnapshot.GetMessages()
-			var toolNames []string
-			for _, m := range msgs {
-				if m.Role == llm.RoleAssistant && len(m.ToolCalls) > 0 {
-					for _, tc := range m.ToolCalls {
-						toolNames = append(toolNames, tc.Function.Name)
-					}
-				}
+			toolNames := toolNamesSinceLastUser(convSnapshot.GetMessages())
+			// Pure chat with no tool use is not research training data.
+			if len(toolNames) == 0 {
+				return
 			}
 			if err := lc.RecordTrajectory(context.Background(), convID, intent, synthesis, toolNames, success); err != nil {
 				l.logger.Warn("learning trajectory capture failed", "error", err)
@@ -5240,4 +5237,33 @@ func lastUserMessageText(messages []llm.ChatMessage) string {
 		}
 	}
 	return ""
+}
+
+// toolNamesSinceLastUser returns tool function names invoked after the last
+// user message in the conversation. Used by LoRA trajectory capture so that
+// multi-turn history does not accumulate prior turns' tools into the current
+// example's tool_path. Returns nil when there is no user message or no tools.
+func toolNamesSinceLastUser(messages []llm.ChatMessage) []string {
+	lastUserIdx := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == llm.RoleUser {
+			lastUserIdx = i
+			break
+		}
+	}
+	if lastUserIdx < 0 {
+		return nil
+	}
+	var names []string
+	for _, m := range messages[lastUserIdx+1:] {
+		if m.Role != llm.RoleAssistant || len(m.ToolCalls) == 0 {
+			continue
+		}
+		for _, tc := range m.ToolCalls {
+			if tc.Function.Name != "" {
+				names = append(names, tc.Function.Name)
+			}
+		}
+	}
+	return names
 }

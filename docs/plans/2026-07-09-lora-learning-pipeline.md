@@ -10,6 +10,12 @@
 > `scripts/generate_adapter_config.py`, `hooks/on_adapter_trained.sh`, and
 > daemon wiring in `internal/daemon/components.go`. Deferred distillation work
 > remains in `.github/ISSUES/lora-distillation-pipeline.md`.
+>
+> **Gap closure (2026-07-10):** Fixed multi-turn tool-path pollution in
+> trajectory capture (current-turn only), skip pure-chat trajectories, match
+> train_lora dtype/amp (bf16 vs fp16), versioned `train_all_adapters.sh`,
+> custom path support for adapter registry generation, and CLI→hook path
+> passthrough. See `docs/workflows/learning.md`.
 
 ---
 

@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """Generate adapter registry config after training.
 
-Scans ~/.meept/adapters/ for trained adapter directories, reads
-training_meta.json from each (if present), and emits
-~/.meept/adapter_registry.json with the full adapter list.
+Scans an adapters directory for trained adapter directories, reads
+training_meta.json from each (if present), and emits adapter_registry.json.
 
 Usage:
     python scripts/generate_adapter_config.py
+    python scripts/generate_adapter_config.py \
+        --adapters-dir ~/.meept/adapters \
+        --output ~/.meept/adapter_registry.json
 """
 
+from __future__ import annotations
+
+import argparse
 import hashlib
 import json
 import sys
@@ -16,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-def get_dataset_md5(dataset_path):
+def get_dataset_md5(dataset_path: Path) -> str:
     """Hash the training dataset for provenance."""
     try:
         with open(dataset_path, "rb") as f:
@@ -25,15 +30,14 @@ def get_dataset_md5(dataset_path):
         return ""
 
 
-def scan_adapters(base_dir):
+def scan_adapters(base_dir: Path, learning_datasets_dir: Path) -> list:
     """Scan adapter directory structure and return list of adapter entries."""
     adapters = []
-    base = Path(base_dir)
 
-    if not base.exists():
+    if not base_dir.exists():
         return adapters
 
-    for domain_dir in sorted(base.iterdir()):
+    for domain_dir in sorted(base_dir.iterdir()):
         if not domain_dir.is_dir():
             continue
         domain = domain_dir.name
@@ -52,15 +56,27 @@ def scan_adapters(base_dir):
             else:
                 meta = {"dataset": f"{domain}.jsonl"}
 
-            # Compute dataset MD5 for provenance
-            dataset_path = Path.home() / ".meept" / "learning" / "datasets" / meta.get("dataset", f"{domain}.jsonl")
+            # Prefer model from meta; fall back to directory name without -vN.
+            model_id = meta.get("model")
+            if not model_id:
+                name = model_dir.name
+                if "-v" in name:
+                    model_id = name.rsplit("-v", 1)[0]
+                else:
+                    model_id = name
+
+            dataset_name = meta.get("dataset", f"{domain}.jsonl")
+            dataset_path = learning_datasets_dir / dataset_name
+
+            # Prefer trained_at from meta for stable created_at across regen.
+            created_at = meta.get("trained_at") or datetime.now().isoformat()
 
             adapters.append({
                 "id": f"{domain}-{model_dir.name}",
                 "domain": domain,
-                "model": model_dir.name.split("-v")[0],
-                "path": str(model_dir),
-                "created_at": datetime.now().isoformat(),
+                "model": model_id,
+                "path": str(model_dir.resolve()),
+                "created_at": created_at,
                 "training_md5": get_dataset_md5(dataset_path),
                 "enabled": True,
             })
@@ -68,14 +84,46 @@ def scan_adapters(base_dir):
     return adapters
 
 
-def main():
-    base_dir = Path.home() / ".meept" / "adapters"
+def main() -> int:
+    home = Path.home()
+    default_adapters = home / ".meept" / "adapters"
+    default_learning = home / ".meept" / "learning" / "datasets"
 
-    if not base_dir.exists():
-        print("No adapters directory found at {}".format(base_dir))
-        sys.exit(0)
+    parser = argparse.ArgumentParser(description="Generate adapter registry JSON")
+    parser.add_argument(
+        "--adapters-dir",
+        type=Path,
+        default=default_adapters,
+        help="Root directory of trained adapters (default: ~/.meept/adapters)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output registry path (default: <parent of adapters-dir>/adapter_registry.json)",
+    )
+    parser.add_argument(
+        "--datasets-dir",
+        type=Path,
+        default=default_learning,
+        help="Domain datasets dir for MD5 provenance (default: ~/.meept/learning/datasets)",
+    )
+    args = parser.parse_args()
 
-    adapters = scan_adapters(base_dir)
+    adapters_dir = args.adapters_dir.expanduser()
+    datasets_dir = args.datasets_dir.expanduser()
+    if args.output is not None:
+        output = args.output.expanduser()
+    else:
+        # Match daemon resolution: registry lives next to the adapters parent.
+        # ~/.meept/adapters -> ~/.meept/adapter_registry.json
+        output = adapters_dir.parent / "adapter_registry.json"
+
+    if not adapters_dir.exists():
+        print(f"No adapters directory found at {adapters_dir}")
+        return 0
+
+    adapters = scan_adapters(adapters_dir, datasets_dir)
 
     registry = {
         "adapters": adapters,
@@ -83,11 +131,11 @@ def main():
         "generated_at": datetime.now().isoformat(),
     }
 
-    output = Path.home() / ".meept" / "adapter_registry.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(registry, indent=2))
     print(f"Generated adapter registry: {len(adapters)} adapters -> {output}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

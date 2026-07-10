@@ -22,7 +22,9 @@ training:
   epochs: 3
   learning_rate: 1.0e-4
   max_seq_length: 2048
-  fp16: true
+  # Match model.dtype: use bf16 when available; train_lora.py picks amp from hardware.
+  bf16: true
+  fp16: false
 
 output:
   base_dir: "~/.meept/adapters"

@@ -7,8 +7,9 @@ package config
 
 // AdapterRegistry is the on-disk registry of trained LoRA adapters.
 type AdapterRegistry struct {
-	Adapters []AdapterEntry `json:"adapters"`
-	Version  int            `json:"version"`
+	Adapters    []AdapterEntry `json:"adapters"`
+	Version     int            `json:"version"`
+	GeneratedAt string         `json:"generated_at,omitempty"`
 }
 
 // AdapterEntry describes a single trained adapter.

@@ -313,9 +313,12 @@ func runTraining(domain, model string) error {
 	fmt.Printf("adapter saved to %s\n", outputDir)
 
 	// Post-training hook: write training_meta.json and regenerate adapter registry.
+	// Pass adapters + datasets roots so custom config paths produce a registry
+	// where the daemon loads it (parent of adapters_dir).
 	hookPath := filepath.Join("hooks", "on_adapter_trained.sh")
 	if _, err := os.Stat(hookPath); err == nil {
-		hookCmd := exec.Command("bash", hookPath, domain, model, outputDir)
+		datasetsDir := filepath.Join(learningDir, "datasets")
+		hookCmd := exec.Command("bash", hookPath, domain, model, outputDir, adaptersDir, datasetsDir)
 		hookCmd.Stdout = os.Stdout
 		hookCmd.Stderr = os.Stderr
 		if err := hookCmd.Run(); err != nil {
