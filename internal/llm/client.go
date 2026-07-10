@@ -314,6 +314,12 @@ func (c *Client) buildChatRequest(messages []ChatMessage, cfg *ModelConfig, opts
 		applyOpenAICompatReasoning(payload, cfg, chatOpts.reasoning, nil)
 	}
 
+	// Thread LoRA adapter path through to providers that support it.
+	// Providers without adapter support silently ignore this key.
+	if chatOpts.adapterPath != "" {
+		payload["adapter_path"] = chatOpts.adapterPath
+	}
+
 	return chatOpts, payload, nil
 }
 
@@ -623,6 +629,7 @@ type chatOptions struct {
 	taskID           string
 	sessionID        string
 	reasoning        *ReasoningConfig
+	adapterPath      string // LoRA adapter path for providers that support it
 }
 
 // ChatOption is a functional option for configuring a chat request.
@@ -682,6 +689,16 @@ func WithTaskScope(taskID, sessionID string) ChatOption {
 	return func(o *chatOptions) {
 		o.taskID = taskID
 		o.sessionID = sessionID
+	}
+}
+
+// WithAdapter sets the LoRA adapter path to use for this request. The
+// path is passed through to providers that support adapter selection
+// (e.g. a local LFM inference server). Providers that do not support
+// adapters silently ignore it.
+func WithAdapter(path string) ChatOption {
+	return func(o *chatOptions) {
+		o.adapterPath = path
 	}
 }
 

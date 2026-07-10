@@ -3139,6 +3139,21 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 		opts = append([]llm.ChatOption{llm.WithTaskScope(taskID, sessionID)}, opts...)
 	}
 
+	// Domain-aware adapter routing: if a LoRA adapter router is wired
+	// and the classified domain has a trained adapter, thread its path
+	// through to the LLM client via WithAdapter. Providers without
+	// adapter support ignore it. This closes the dormant-wiring gap
+	// where the router was constructed and propagated to clone loops
+	// but never consulted at inference time.
+	if l.adapterRouter != nil && len(messages) > 0 {
+		if lastUser := lastUserMessageText(messages); lastUser != "" {
+			domain := learning.ClassifyDomain(lastUser, "")
+			if adapter := l.adapterRouter.SelectAdapter(domain); adapter != nil && adapter.Path != "" {
+				opts = append(opts, llm.WithAdapter(adapter.Path))
+			}
+		}
+	}
+
 	attempt := 0
 	currentBackoff := baseBackoff
 
@@ -5212,4 +5227,16 @@ func (l *AgentLoop) triggerTitleRefresh(ctx context.Context, conversationID stri
 		"name", result.Name,
 		"description", result.Description,
 	)
+}
+
+// lastUserMessageText scans messages in reverse and returns the Content
+// of the last message with role "user". Returns "" if none is found.
+// Used by chatWithFailoverRaw for domain classification input.
+func lastUserMessageText(messages []llm.ChatMessage) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == llm.RoleUser {
+			return messages[i].Content
+		}
+	}
+	return ""
 }
