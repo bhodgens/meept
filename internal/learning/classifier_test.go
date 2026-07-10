@@ -30,6 +30,42 @@ func TestClassifyDomain(t *testing.T) {
 			want:       "api_research",
 		},
 		{
+			name:       "security domain dominates over code",
+			query:      "audit this code for SQL injection and XSS",
+			toolOutput: "found cve-2024-1234 vulnerability in sanitize path",
+			want:       "security",
+		},
+		{
+			name:       "meept_internal domain dominates",
+			query:      "why is the meept agent orchestrator not dispatching",
+			toolOutput: "daemon rpc session memory plan skill",
+			want:       "meept_internal",
+		},
+		{
+			name:       "personal domain dominates",
+			query:      "what's on my calendar for the meeting today",
+			toolOutput: "email reminder schedule todo task",
+			want:       "personal",
+		},
+		{
+			name:       "security with csrf and tls keywords",
+			query:      "check the tls certificate for csrf vulnerabilities",
+			toolOutput: "privilege escalation exploit crypto",
+			want:       "security",
+		},
+		{
+			name:       "meept_internal with dispatcher and rpc",
+			query:      "the dispatcher is sending rpc calls to the wrong session",
+			toolOutput: "meept daemon orchestrator memory",
+			want:       "meept_internal",
+		},
+		{
+			name:       "personal with email and reminder",
+			query:      "send an email reminder about the meeting schedule",
+			toolOutput: "my calendar todo task",
+			want:       "personal",
+		},
+		{
 			name:       "empty input defaults to code",
 			query:      "",
 			toolOutput: "",
