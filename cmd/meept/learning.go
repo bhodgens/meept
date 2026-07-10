@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/learning"
 	"github.com/spf13/cobra"
 )
@@ -28,6 +29,7 @@ domain-routed training datasets. Train lora adapters from captured data.`,
 	cmd.AddCommand(newLearningListCmd())
 	cmd.AddCommand(newLearningDatasetStatsCmd())
 	cmd.AddCommand(newLearningConsolidateCmd())
+	cmd.AddCommand(newLearningSnapshotCmd())
 
 	return cmd
 }
@@ -105,7 +107,14 @@ func runConsolidate(minQuality float64) error {
 		return fmt.Errorf("create datasets dir: %w", err)
 	}
 
-	stats, err := learning.Consolidate(rawPath, datasetsDir, minQuality)
+	// Load retention config; fall back to 100MB default on error.
+	maxDatasetMB := 100
+	if cfg, err := config.LoadDefault(); err == nil {
+		maxDatasetMB = cfg.Learning.Retention.MaxDatasetSizeMB
+	}
+	maxDatasetBytes := int64(maxDatasetMB) * 1024 * 1024
+
+	stats, err := learning.Consolidate(rawPath, datasetsDir, minQuality, maxDatasetBytes)
 	if err != nil {
 		return fmt.Errorf("consolidate failed: %w", err)
 	}
@@ -116,6 +125,48 @@ func runConsolidate(minQuality float64) error {
 	fmt.Printf("added:      %d\n", stats.Added)
 	fmt.Printf("skipped:    %d\n", stats.Skipped)
 	fmt.Printf("duplicates: %d\n", stats.Duplicates)
+
+	// Snapshot each domain that received additions.
+	versionsDir := filepath.Join(learningDir, "versions")
+	for _, domain := range stats.DomainsTouched {
+		snap, err := learning.CreateSnapshot(domain, datasetsDir, versionsDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: snapshot %s failed: %v\n", domain, err)
+			continue
+		}
+		fmt.Printf("snapshot:  %s v%d (%d examples, md5=%s)\n", domain, snap.Version, snap.ExampleCount, snap.MD5[:8])
+	}
+
+	return nil
+}
+
+func newLearningSnapshotCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "snapshot [domain]",
+		Short: "create a versioned snapshot of a domain dataset",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSnapshot(args[0])
+		},
+	}
+}
+
+func runSnapshot(domain string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("cannot determine home directory: %w", err)
+	}
+
+	learningDir := filepath.Join(homeDir, ".meept", "learning")
+	datasetsDir := filepath.Join(learningDir, "datasets")
+	versionsDir := filepath.Join(learningDir, "versions")
+
+	snap, err := learning.CreateSnapshot(domain, datasetsDir, versionsDir)
+	if err != nil {
+		return fmt.Errorf("snapshot failed: %w", err)
+	}
+
+	fmt.Printf("snapshot:  %s v%d (%d examples, md5=%s)\n", domain, snap.Version, snap.ExampleCount, snap.MD5[:8])
 	return nil
 }
 
