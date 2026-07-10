@@ -2936,9 +2936,10 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 				// Learning capture: record per-tool-call research trajectories
 				// for LoRA training data. Non-blocking on errors; warn only.
+				// Tool allowlist is enforced inside CaptureRecorder.Configure.
 				if l.learningCapture != nil {
 					userQuery := conv.LastUserMessage()
-				if err := l.learningCapture.RecordResearch(ctx, conversationID, userQuery, toolName, output); err != nil {
+					if err := l.learningCapture.RecordResearch(ctx, conversationID, userQuery, toolName, output); err != nil {
 						l.logger.Warn("learning capture failed", "error", err)
 					}
 				}

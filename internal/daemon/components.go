@@ -805,7 +805,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 
 	// Create learning capture recorder (LoRA learning pipeline).
-	if cfg.Learning.Enabled {
+	// Gated on both master switch and capture.enabled so operators can keep
+	// adapters/training enabled while pausing passive capture.
+	if cfg.Learning.Enabled && cfg.Learning.Capture.Enabled {
 		ldataDir := cfg.Learning.DataDir
 		if ldataDir == "" {
 			ldataDir = filepath.Join(cfg.Daemon.DataDir, "learning")
@@ -814,8 +816,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if err != nil {
 			logger.Error("learning capture init failed", "error", err)
 		} else {
+			cap.Configure(cfg.Learning.Capture.IncludeTools)
 			c.LearningCapture = cap
-			logger.Info("learning capture initialized", "data_dir", ldataDir)
+			logger.Info("learning capture initialized",
+				"data_dir", ldataDir,
+				"include_tools", cfg.Learning.Capture.IncludeTools,
+			)
 		}
 	}
 
@@ -2201,11 +2207,32 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				},
 			}
 		}
+		// Learning job consolidates both self-improve patterns and the LoRA
+		// research-capture pipeline (when enabled). Either may be nil.
+		var learningFns []func(context.Context) error
 		if c.LearningPipeline != nil {
+			learningFns = append(learningFns, func(ctx context.Context) error {
+				_, err := c.LearningPipeline.Consolidate(ctx)
+				return err
+			})
+		}
+		if cfg.Learning.Enabled {
+			learningCfg := cfg.Learning
+			learningFns = append(learningFns, func(ctx context.Context) error {
+				return runLoRAConsolidate(learningCfg)
+			})
+		}
+		if len(learningFns) > 0 {
+			fns := learningFns
 			jobDeps.LearningPipeline = &scheduler.LearningConsolidatorAdapter{
 				ConsolidateFn: func(ctx context.Context) error {
-					_, err := c.LearningPipeline.Consolidate(ctx)
-					return err
+					var firstErr error
+					for _, fn := range fns {
+						if err := fn(ctx); err != nil && firstErr == nil {
+							firstErr = err
+						}
+					}
+					return firstErr
 				},
 			}
 		}
@@ -4864,6 +4891,66 @@ func (a *skillUsageTrackerAdapter) RecordOutcome(skillName string, outcome agent
 
 func (a *skillUsageTrackerAdapter) RecordLowMatchQuery(ctx context.Context, query string, bestScore float64) error {
 	return a.tracker.RecordLowMatchQuery(ctx, query, bestScore)
+}
+
+// runLoRAConsolidate processes raw research captures into domain datasets
+// using the LoRA learning pipeline (internal/learning). Used by the scheduled
+// learning job and mirrors `meept learning consolidate`.
+func runLoRAConsolidate(cfg config.LearningConfig) error {
+	learningDir := cfg.DataDir
+	if learningDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("lora consolidate: home dir: %w", err)
+		}
+		learningDir = filepath.Join(home, ".meept", "learning")
+	}
+	rawPath := filepath.Join(learningDir, "raw_captures.jsonl")
+	datasetsDir := filepath.Join(learningDir, "datasets")
+	if err := os.MkdirAll(datasetsDir, 0o755); err != nil {
+		return fmt.Errorf("lora consolidate: mkdir datasets: %w", err)
+	}
+
+	minQuality := cfg.Capture.MinQualityScore
+	if minQuality <= 0 {
+		minQuality = 0.6
+	}
+	maxMB := cfg.Retention.MaxDatasetSizeMB
+	if maxMB <= 0 {
+		maxMB = 100
+	}
+	maxBytes := int64(maxMB) * 1024 * 1024
+
+	stats, err := learning.Consolidate(rawPath, datasetsDir, minQuality, maxBytes)
+	if err != nil {
+		return fmt.Errorf("lora consolidate: %w", err)
+	}
+
+	versionsDir := filepath.Join(learningDir, "versions")
+	keep := cfg.Retention.KeepVersions
+	for _, domain := range stats.DomainsTouched {
+		if _, err := learning.CreateSnapshot(domain, datasetsDir, versionsDir); err != nil {
+			// Non-fatal: consolidation already succeeded.
+			continue
+		}
+		if _, err := learning.PruneOldVersions(domain, versionsDir, keep); err != nil {
+			continue
+		}
+	}
+
+	meta, err := learning.LoadMetadata(learningDir)
+	if err != nil {
+		meta = &learning.LearningMetadata{}
+	}
+	meta.LastConsolidatedAt = time.Now().UTC()
+	meta, err = learning.RefreshDomainStats(learningDir, meta)
+	if err != nil {
+		return fmt.Errorf("lora consolidate: refresh domain stats: %w", err)
+	}
+	if err := learning.SaveMetadata(learningDir, meta); err != nil {
+		return fmt.Errorf("lora consolidate: save metadata: %w", err)
+	}
+	return nil
 }
 
 // learningPipelineAdapter wraps selfimprove.LearningPipeline to implement agent.LearningPipeline.

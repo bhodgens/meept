@@ -78,6 +78,24 @@ func TestExpandPath(t *testing.T) {
 	}
 }
 
+func TestExpandConfigPathsLearning(t *testing.T) {
+	homeDir, _ := os.UserHomeDir()
+	cfg := DefaultConfig()
+	cfg.Learning.DataDir = "~/.meept/learning"
+	cfg.Learning.AdaptersDir = "~/.meept/adapters"
+
+	expandConfigPaths(cfg)
+
+	wantData := filepath.Join(homeDir, ".meept", "learning")
+	wantAdapters := filepath.Join(homeDir, ".meept", "adapters")
+	if cfg.Learning.DataDir != wantData {
+		t.Errorf("Learning.DataDir = %q, want %q", cfg.Learning.DataDir, wantData)
+	}
+	if cfg.Learning.AdaptersDir != wantAdapters {
+		t.Errorf("Learning.AdaptersDir = %q, want %q", cfg.Learning.AdaptersDir, wantAdapters)
+	}
+}
+
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 

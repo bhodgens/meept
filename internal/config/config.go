@@ -286,6 +286,10 @@ func expandConfigPaths(cfg *Config) {
 	cfg.Projects.BaseDir = expandPath(cfg.Projects.BaseDir)
 	cfg.OAuth.TokenDir = expandPath(cfg.OAuth.TokenDir)
 	cfg.Bots.DataDir = expandPath(cfg.Bots.DataDir)
+
+	// Expand LoRA learning pipeline paths
+	cfg.Learning.DataDir = expandPath(cfg.Learning.DataDir)
+	cfg.Learning.AdaptersDir = expandPath(cfg.Learning.AdaptersDir)
 }
 
 // ModelsConfig represents the models.json5 configuration structure.
