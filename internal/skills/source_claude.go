@@ -137,7 +137,7 @@ func (s *ClaudeSource) loadAndAdapt(path string, adapter *ClaudeSkillAdapter) (*
 	skill, err := ParseSkillFile(path)
 	if err != nil {
 		if errors.Is(err, ErrNoFrontmatter) {
-			s.logger.Warn("Claude skill file has no frontmatter, using slug as name",
+			s.logger.Debug("Claude skill file has no frontmatter, using slug as name",
 				"path", path,
 			)
 			// Return the partial skill if we got one from ErrNoFrontmatter

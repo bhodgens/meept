@@ -146,7 +146,8 @@ type SkillMetadata struct {
 	UIType        string            `yaml:"ui-type"`
 
 	// Claude-specific fields (parsed separately, merged into Tags).
-	Trigger string `yaml:"trigger"`
+	Trigger  string   `yaml:"trigger"`
+	Triggers []string `yaml:"triggers"`
 
 	// Hermes-specific fields (populated during 4th parse pass).
 	HermesPrereqs *HermesPrerequisites `yaml:"-"`

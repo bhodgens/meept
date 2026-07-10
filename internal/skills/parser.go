@@ -359,6 +359,18 @@ func parseMetadata(frontmatter string) (*SkillMetadata, error) {
 		meta.Trigger = ""
 	}
 
+	// Map Claude's "triggers" field (plural) into Tags if present.
+	// This supports Claude Code's multi-trigger format.
+	if len(meta.Triggers) > 0 {
+		for _, trigger := range meta.Triggers {
+			// Only add if not already in tags
+			if !slices.Contains(meta.Tags, trigger) {
+				meta.Tags = append(meta.Tags, trigger)
+			}
+		}
+		meta.Triggers = nil // Clear after merging
+	}
+
 	// --- Hermes pass: parse Hermes-specific frontmatter fields ---
 	// Only attempt if the frontmatter contains Hermes-specific keys.
 	hermesMeta := parseHermesMetadata(frontmatter)
