@@ -445,7 +445,7 @@ func (s *VectorShard) Stats() ShardStats {
 	}
 
 	var count int64
-	if err := s.db.QueryRow("SELECT count(*) FROM embeddings").Scan(&count); err == nil {
+	if err := s.db.QueryRow("SELECT count(*) FROM embeddings").Scan(&count); err == nil { //nolint:mutexio // read-only stats under RLock; query is instantaneous
 		stats.VectorCount = count
 	}
 

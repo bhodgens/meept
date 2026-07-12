@@ -659,31 +659,32 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 	// NEW: Run validation gate if interval reached
 	ts.runValidationGateIfDue(ctx, step.TaskID)
 
-	// Update parent task's completed jobs counter
-	t, err := ts.taskStore.GetByID(step.TaskID)
-	if err != nil || t == nil {
-		ts.logger.Error("Failed to get parent task", "task_id", step.TaskID, "error", err)
-		return nil
+	// A-08 FIX: Use atomic store operations instead of Get → mutate → Update.
+	// The previous RMW sequence lost increments when parallel step completions
+	// both read CompletedJobs=N, both set N+1, and one overwrote the other.
+	// IncrementCompletedJobs does `SET completed_jobs = completed_jobs + 1` in
+	// a single SQL statement, eliminating the race.
+	completedCount, err := ts.taskStore.IncrementCompletedJobs(step.TaskID)
+	if err != nil {
+		ts.logger.Error("Failed to increment completed jobs", "task_id", step.TaskID, "error", err)
 	}
-	t.CompleteJob()
 
-	// Aggregate token usage from step to parent task
+	// Aggregate token usage from step to parent task (also atomic).
 	if step.TokenUsage > 0 {
-		t.AddTokenUsage(step.TokenUsage)
+		if err := ts.taskStore.AddTokenUsage(step.TaskID, step.TokenUsage); err != nil {
+			ts.logger.Error("Failed to add token usage to task", "task_id", step.TaskID, "error", err)
+		}
 		ts.logger.Debug("Aggregated token usage from step to task",
 			"step_id", step.ID,
 			"step_tokens", step.TokenUsage,
-			"task_total_tokens", t.TokenUsage,
 		)
 	}
 
-	if err := ts.taskStore.Update(t); err != nil {
-		ts.logger.Error("Failed to update task after job completion", "error", err)
-	}
-
-	// Publish token progress event
-	if step.TokenUsage > 0 {
-		ts.publishTokenProgress(t)
+	// Publish token progress event using the atomically incremented counter.
+	if step.TokenUsage > 0 || completedCount > 0 {
+		if t, err := ts.taskStore.GetByID(step.TaskID); err == nil && t != nil {
+			ts.publishTokenProgress(t)
+		}
 	}
 
 	// Check for newly unblocked steps (only if step was approved/completed)
@@ -714,6 +715,13 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 	allDone, err := ts.stepStore.AreAllCompleted(step.TaskID)
 	if err != nil {
 		ts.logger.Error("Failed to check task completion", "error", err)
+		return nil
+	}
+
+	// Load task for state transition / progress reporting.
+	t, err := ts.taskStore.GetByID(step.TaskID)
+	if err != nil || t == nil {
+		ts.logger.Error("Failed to get task for completion check", "task_id", step.TaskID, "error", err)
 		return nil
 	}
 

@@ -579,6 +579,19 @@ func (s *MemoryStore) SetProject(sessionID, projectID, projectPath string) error
 	return nil
 }
 
+// F-04 FIX: SetNoFence updates the per-session fence override flag.
+func (s *MemoryStore) SetNoFence(sessionID string, noFence bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.NoFence = noFence
+	return nil
+}
+
 // HasResponses checks if a session has any assistant messages.
 func (s *MemoryStore) HasResponses(sessionID string) (bool, error) {
 	s.mu.RLock()
@@ -1179,6 +1192,7 @@ func NewHandler(store Store, msgBus *bus.MessageBus, logger *slog.Logger, opts .
 		"session.branches.list":        h.handleBranchesList,
 		"session.fork":                 h.handleSessionFork,
 		"session.tree.get":             h.handleSessionTreeGet,
+		"session.set_nofence":          h.handleSessionSetNoFence, // F-04 FIX
 	}
 
 	for topic, callback := range topics {
@@ -1273,6 +1287,11 @@ func (h *Handler) handleSessionRefreshTitle(ctx context.Context, topic string, m
 h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
+// F-04 FIX: callback for session.set_nofence topic.
+func (h *Handler) handleSessionSetNoFence(ctx context.Context, topic string, msg any) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
 // handleMessage routes messages to the appropriate handler.
 func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 	var response any
@@ -1315,6 +1334,8 @@ func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 		response, err = h.handleForkMsg(msg)
 	case "session.tree.get":
 		response, err = h.handleTreeGetMsg(msg)
+	case "session.set_nofence": // F-04 FIX
+		response, err = h.handleSetNoFence(msg)
 	default:
 		err = fmt.Errorf("unknown topic: %s", topic)
 	}
@@ -1325,10 +1346,14 @@ func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 
 // handleCreate creates a new session.
 func (h *Handler) handleCreate(msg *models.BusMessage) (any, error) {
+	// F-04 FIX: Accept no_fence, project_id, and project_path in create params.
 	var params struct {
 		Name             string            `json:"name"`
 		Description      string            `json:"description,omitempty"`
 		DetectionContext *DetectionContext `json:"detection_context,omitempty"`
+		NoFence          bool              `json:"no_fence,omitempty"`
+		ProjectID        string            `json:"project_id,omitempty"`
+		ProjectPath      string            `json:"project_path,omitempty"`
 	}
 	if err := json.Unmarshal(msg.Payload, &params); err != nil {
 		return nil, err
@@ -1347,6 +1372,23 @@ func (h *Handler) handleCreate(msg *models.BusMessage) (any, error) {
 		}
 	}
 
+	// F-04 FIX: Apply project binding if provided at creation time.
+	if params.ProjectID != "" || params.ProjectPath != "" {
+		if err := h.store.SetProject(session.ID, params.ProjectID, params.ProjectPath); err != nil {
+			return nil, fmt.Errorf("failed to set project: %w", err)
+		}
+		session.ProjectID = params.ProjectID
+		session.ProjectPath = params.ProjectPath
+	}
+
+	// F-04 FIX: Apply fence override if requested at creation time.
+	if params.NoFence {
+		if err := h.store.SetNoFence(session.ID, true); err != nil {
+			return nil, fmt.Errorf("failed to set no_fence: %w", err)
+		}
+		session.NoFence = true
+	}
+
 	// Store detection context if provided
 	if params.DetectionContext != nil {
 		session.DetectionContext = params.DetectionContext
@@ -1357,6 +1399,24 @@ func (h *Handler) handleCreate(msg *models.BusMessage) (any, error) {
 		}
 	}
 	return session, nil
+}
+
+// F-04 FIX: handleSetNoFence updates the no_fence flag on an existing session.
+func (h *Handler) handleSetNoFence(msg *models.BusMessage) (any, error) {
+	var params struct {
+		SessionID string `json:"session_id"`
+		NoFence   bool   `json:"no_fence"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+	if params.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	if err := h.store.SetNoFence(params.SessionID, params.NoFence); err != nil {
+		return nil, fmt.Errorf("failed to set no_fence: %w", err)
+	}
+	return map[string]any{"session_id": params.SessionID, "no_fence": params.NoFence}, nil
 }
 
 // handleList lists all sessions.

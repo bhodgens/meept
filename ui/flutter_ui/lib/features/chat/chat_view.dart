@@ -5,10 +5,7 @@ import '../../widgets/background_image.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
 import '../../widgets/destructive_confirmation_dialog.dart';
-<<<<<<< Updated upstream
 import '../../widgets/thread_selector.dart';
-=======
->>>>>>> Stashed changes
 import 'chat_message_list.dart';
 import 'chat_input.dart';
 
@@ -26,34 +23,6 @@ class _ChatViewState extends ConsumerState<ChatView> {
   bool _dialogShown = false;
 
   @override
-  void initState() {
-    super.initState();
-    // Listen for destructive-tool confirmation requests surfaced by the
-    // ChatNotifier.  When one arrives, show DestructiveConfirmationDialog
-    // and forward the user's decision back via resolveConfirmation.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _listenForConfirmation();
-    });
-  }
-
-  void _listenForConfirmation() {
-    ref.listen<ChatState?>(chatProvider, (previous, next) {
-      final pending = next?.pendingConfirmation;
-      if (pending == null) return;
-      if (!mounted) return;
-      // Coalesce: if a dialog is already visible, skip duplicate events for
-      // the same action until the user resolves it.
-      showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => DestructiveConfirmationDialog(response: pending),
-      ).then((confirmed) {
-        ref.read(chatProvider.notifier).resolveConfirmation(confirmed ?? false);
-      });
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
     // Listen for destructive-tool confirmation requests surfaced by the
     // ChatNotifier. When one arrives, show DestructiveConfirmationDialog
@@ -63,7 +32,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
       if (pending == null) return;
       if (!mounted) return;
       if (_dialogShown) return; // Prevent duplicate dialogs
-      
+
       // Coalesce: if a dialog is already visible, skip duplicate events for
       // the same action until the user resolves it.
       _dialogShown = true;

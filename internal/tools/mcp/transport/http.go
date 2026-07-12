@@ -216,10 +216,19 @@ func (t *HTTPTransport) Send(ctx context.Context, message []byte) ([]byte, error
 }
 
 // parseSSEResponse parses a Server-Sent Events response.
+//
+// B-13 FIX: Previously this returned on the first event containing a result
+// or error, silently discarding subsequent events. Now it collects ALL
+// result/error payloads. For the common single-response case (standard MCP
+// request/response), it returns the payload as-is for backwards
+// compatibility. If multiple result/error events are present, it returns a
+// JSON array of all payloads.
 func (t *HTTPTransport) parseSSEResponse(r io.Reader) ([]byte, error) {
 	scanner := bufio.NewScanner(r)
 	// Use a larger buffer (up to 10MB) to handle large SSE events.
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+
+	var payloads []json.RawMessage
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -246,12 +255,14 @@ func (t *HTTPTransport) parseSSEResponse(r io.Reader) ([]byte, error) {
 			continue
 		}
 
-		// Check if it's a response (has result or error)
+		// Collect result/error events instead of returning on the first one.
 		if _, hasResult := parsed["result"]; hasResult {
-			return []byte(data), nil
+			payloads = append(payloads, json.RawMessage(data))
+			continue
 		}
 		if _, hasError := parsed["error"]; hasError {
-			return []byte(data), nil
+			payloads = append(payloads, json.RawMessage(data))
+			continue
 		}
 	}
 
@@ -259,7 +270,20 @@ func (t *HTTPTransport) parseSSEResponse(r io.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("error reading SSE: %w", err)
 	}
 
-	return nil, fmt.Errorf("no response received in SSE stream")
+	switch len(payloads) {
+	case 0:
+		return nil, fmt.Errorf("no response received in SSE stream")
+	case 1:
+		// Common case: single response — return as-is for backwards compatibility.
+		return payloads[0], nil
+	default:
+		// Multiple result/error events — return as a JSON array.
+		combined, err := json.Marshal(payloads)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal multiple SSE payloads: %w", err)
+		}
+		return combined, nil
+	}
 }
 
 // SendNotification sends a JSON-RPC notification via HTTP POST without waiting

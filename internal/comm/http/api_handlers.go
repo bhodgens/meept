@@ -1297,10 +1297,23 @@ func (s *Server) handleModelsGetCredential(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{
-		"provider":   provider,
-		"credential": cred,
+	// C-12 FIX: never return raw credentials over HTTP. Return a masked
+	// preview (last 4 chars) and a boolean indicating presence.
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"provider":           provider,
+		"credential_masked":  maskCredential(cred),
+		"has_credential":     cred != "",
 	})
+}
+
+// maskCredential returns a masked version of a credential string, showing
+// only the last 4 characters with the rest replaced by '*'.
+// C-12 FIX: prevents raw credential leakage over HTTP API responses.
+func maskCredential(cred string) string {
+	if len(cred) <= 4 {
+		return "****"
+	}
+	return strings.Repeat("*", len(cred)-4) + cred[len(cred)-4:]
 }
 
 // handleModelsSetCredential handles POST /api/v1/models/credentials/{provider}.

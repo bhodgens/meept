@@ -153,17 +153,17 @@ func (m *WireGuardManager) ApplyConfig(cfg *WireGuardConfig) error {
 
 	tmpConfig, err := m.generateSyncConf(cfg)
 	if err != nil {
-		tmpFile.Close()
+		tmpFile.Close() //nolint:mutexio // exclusive config-write under lock
 		os.Remove(tmpPath)
 		return err
 	}
 
 	if _, err := tmpFile.Write(tmpConfig); err != nil {
-		tmpFile.Close()
+		tmpFile.Close() //nolint:mutexio // exclusive config-write under lock
 		os.Remove(tmpPath)
 		return fmt.Errorf("failed to write temp config: %w", err)
 	}
-	tmpFile.Close()
+	tmpFile.Close() //nolint:mutexio // exclusive config-write under lock
 
 	// wg syncconf applies the new config atomically — it replaces peers
 	// without tearing down the interface.
@@ -172,7 +172,7 @@ func (m *WireGuardManager) ApplyConfig(cfg *WireGuardConfig) error {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Run(); err != nil { //nolint:mutexio // exclusive config-write: wg syncconf under lock
 		os.Remove(tmpPath)
 
 		stderrStr := strings.TrimSpace(stderr.String())

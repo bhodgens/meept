@@ -163,7 +163,7 @@ func TestSyncMetadataStore_SetLastMergeStats_Persistence(t *testing.T) {
 		SessionsMerged: 7,
 		TurnsMerged:    42,
 		MemoriesMerged: 3,
-		Skipped:        9,
+		SkippedOrFailed: 9,
 		Errors:         1,
 	}
 	if err := store.SetLastMergeStats(peerID, want); err != nil {
@@ -186,8 +186,8 @@ func TestSyncMetadataStore_SetLastMergeStats_Persistence(t *testing.T) {
 	if st.LastMergeStats == nil {
 		t.Fatal("LastMergeStats is nil in returned status")
 	}
-	if st.LastMergeStats.Skipped != 9 {
-		t.Errorf("Skipped = %d, want 9", st.LastMergeStats.Skipped)
+	if st.LastMergeStats.SkippedOrFailed != 9 {
+		t.Errorf("SkippedOrFailed = %d, want 9", st.LastMergeStats.SkippedOrFailed)
 	}
 	if st.LastMergeStats.Errors != 1 {
 		t.Errorf("Errors = %d, want 1", st.LastMergeStats.Errors)
@@ -212,7 +212,7 @@ func TestSyncMetadataStore_SetLastMergeStats_JSONKeyTags(t *testing.T) {
 
 	store, db := newMetaStore(t)
 	peerID := "peer-keytags"
-	want := &MergeStats{SessionsMerged: 5, TurnsMerged: 10, MemoriesMerged: 2, Skipped: 3, Errors: 0}
+	want := &MergeStats{SessionsMerged: 5, TurnsMerged: 10, MemoriesMerged: 2, SkippedOrFailed: 3, Errors: 0}
 	if err := store.SetLastMergeStats(peerID, want); err != nil {
 		t.Fatalf("SetLastMergeStats: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestSyncMetadataStore_SetLastMergeStats_JSONKeyTags(t *testing.T) {
 	}
 
 	// Verify all five keys present in the serialized JSON.
-	for _, key := range []string{`"sessions":5`, `"turns":10`, `"memories":2`, `"skipped":3`, `"errors":0`} {
+	for _, key := range []string{`"sessions":5`, `"turns":10`, `"memories":2`, `"skipped_or_failed":3`, `"errors":0`} {
 		if !strings.Contains(raw, key) {
 			t.Errorf("raw JSON %q missing key %q", raw, key)
 		}
@@ -236,7 +236,7 @@ func TestSyncMetadataStore_SetLastMergeStats_JSONKeyTags(t *testing.T) {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 	if got.SessionsMerged != 5 || got.TurnsMerged != 10 || got.MemoriesMerged != 2 ||
-		got.Skipped != 3 || got.Errors != 0 {
+		got.SkippedOrFailed != 3 || got.Errors != 0 {
 		t.Errorf("round-trip mismatch: got %+v, want %+v", got, *want)
 	}
 }

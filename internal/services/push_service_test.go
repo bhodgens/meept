@@ -204,6 +204,9 @@ func (f *fakeStore) GetToolCallsForMessages([]int64) (map[int64][]session.ToolCa
 	return nil, nil
 }
 func (f *fakeStore) SetProject(string, string, string) error { return nil }
+
+// F-04 FIX: stub for new Store interface method.
+func (f *fakeStore) SetNoFence(string, bool) error { return nil }
 func (f *fakeStore) SearchMessages(context.Context, string, int) ([]session.MessageSearchResult, error) {
 	return nil, nil
 }

@@ -84,16 +84,53 @@ func runChat(cmd *cobra.Command, args []string) error {
 	}
 	defer client.Close()
 
+	// F-04 FIX: Resolve --project to project ID and path before dispatching.
+	var projectID, projectPath string
+	if chatProject != "" {
+		pid, ppath, perr := resolveProjectByName(client, chatProject)
+		if perr != nil {
+			return fmt.Errorf("--project: %w", perr)
+		}
+		projectID = pid
+		projectPath = ppath
+		// Use project path as cwd if not explicitly set.
+		if chatCwd == "" {
+			chatCwd = ppath
+		}
+	}
+
 	// CASE 1: --session with message - append to session, print response, exit
 	if chatSessionID != "" && message != "" {
 		if strings.TrimSpace(message) == "" {
 			return fmt.Errorf("empty message")
+		}
+		// F-04 FIX: Apply --project and --nofence to the existing session.
+		if projectID != "" {
+			if err := applyProjectToSession(client, chatSessionID, projectID, projectPath); err != nil {
+				return err
+			}
+		}
+		if chatNoFence {
+			if err := applyNoFenceToSession(client, chatSessionID); err != nil {
+				return err
+			}
 		}
 		return chatWithSession(client, chatSessionID, message)
 	}
 
 	// CASE 2: --session without message - open TUI to that session
 	if chatSessionID != "" && message == "" {
+		// F-04 FIX: Apply --project and --nofence to the existing session.
+		if projectID != "" {
+			if err := applyProjectToSession(client, chatSessionID, projectID, projectPath); err != nil {
+				return err
+			}
+		}
+		if chatNoFence {
+			if err := applyNoFenceToSession(client, chatSessionID); err != nil {
+				return err
+			}
+		}
 		return openTUIToSession(chatSessionID)
 	}
 
@@ -102,13 +139,25 @@ func runChat(cmd *cobra.Command, args []string) error {
 		if strings.TrimSpace(message) == "" {
 			return fmt.Errorf("empty message")
 		}
+		// F-04 FIX: When --project or --nofence is set, create a fresh session
+		// with those flags rather than reusing the shared oneshot_responses session.
+		var sessionID string
 		if chatProject != "" || chatNoFence {
-			fmt.Fprintf(os.Stderr, "Note: --project and --nofence are not yet supported for oneshot CLI chat; use the TUI or session-based chat.\n")
-		}
-		sessionID, err := getOrCreateOneshotSession(client)
-		if err != nil {
-			// Fallback to ephemeral session
-			sessionID = id.Generate("cli-")
+			sid, serr := createFlaggedSession(client, "oneshot_responses", projectID, projectPath, chatNoFence)
+			if serr != nil {
+				// Fallback to ephemeral session
+				sessionID = id.Generate("cli-")
+			} else {
+				sessionID = sid
+			}
+		} else {
+			sid, serr := getOrCreateOneshotSession(client)
+			if serr != nil {
+				// Fallback to ephemeral session
+				sessionID = id.Generate("cli-")
+			} else {
+				sessionID = sid
+			}
 		}
 		reply, err := client.Chat(context.Background(), message, sessionID)
 		if err != nil {
@@ -118,7 +167,16 @@ func runChat(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// CASE 4: No args, no --session - open TUI to most recent
+	// CASE 4: No args, no --session - open TUI
+	// F-04 FIX: When --project or --nofence is set, create a session with those
+	// flags first, then open the TUI to it.
+	if chatProject != "" || chatNoFence {
+		sessionID, serr := createFlaggedSession(client, "cli-chat", projectID, projectPath, chatNoFence)
+		if serr != nil {
+			return fmt.Errorf("failed to create session: %w", serr)
+		}
+		return openTUIToSession(sessionID)
+	}
 	return runTUI(chatCwd)
 }
 
@@ -166,6 +224,99 @@ func getOrCreateOneshotSession(client transport.Client) (string, error) {
 	}
 
 	return "", fmt.Errorf("failed to get session ID from create response")
+}
+
+// F-04 FIX: resolveProjectByName looks up a project by name via the project.list RPC.
+// Returns the project ID and local_path. Returns an error if the project is not found.
+func resolveProjectByName(client transport.Client, name string) (projectID, projectPath string, err error) {
+	rawResult, err := client.Call("project.list", map[string]any{})
+	if err != nil {
+		return "", "", fmt.Errorf("failed to list projects: %w", err)
+	}
+
+	var resultMap map[string]any
+	if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+		return "", "", fmt.Errorf("failed to parse project list: %w", err)
+	}
+
+	projects, ok := resultMap["projects"].([]any)
+	if !ok {
+		return "", "", fmt.Errorf("project %q not found", name)
+	}
+
+	for _, p := range projects {
+		proj, ok := p.(map[string]any)
+		if !ok {
+			continue
+		}
+		if pname, ok := proj["name"].(string); ok && pname == name {
+			id, _ := proj["id"].(string)
+			path, _ := proj["local_path"].(string)
+			if id != "" {
+				return id, path, nil
+			}
+		}
+	}
+	return "", "", fmt.Errorf("project %q not found", name)
+}
+
+// F-04 FIX: createFlaggedSession creates a new session with project and/or fence
+// overrides applied at creation time.
+func createFlaggedSession(client transport.Client, name, projectID, projectPath string, noFence bool) (string, error) {
+	createParams := map[string]any{
+		"name": name,
+	}
+	if projectID != "" {
+		createParams["project_id"] = projectID
+	}
+	if projectPath != "" {
+		createParams["project_path"] = projectPath
+	}
+	if noFence {
+		createParams["no_fence"] = true
+	}
+
+	createResult, err := client.Call("session.create", createParams)
+	if err != nil {
+		return "", fmt.Errorf("failed to create session: %w", err)
+	}
+
+	var createMap map[string]any
+	if err := json.Unmarshal(createResult, &createMap); err != nil {
+		return "", fmt.Errorf("failed to parse create response: %w", err)
+	}
+
+	if sessID, ok := createMap["id"].(string); ok && sessID != "" {
+		return sessID, nil
+	}
+	return "", fmt.Errorf("failed to get session ID from create response")
+}
+
+// F-04 FIX: applyProjectToSession binds a project to an existing session via RPC.
+func applyProjectToSession(client transport.Client, sessionID, projectID, projectPath string) error {
+	params := map[string]string{
+		"session_id": sessionID,
+		"project_id": projectID,
+	}
+	_, err := client.Call("project.set", params)
+	if err != nil {
+		return fmt.Errorf("failed to set project on session: %w", err)
+	}
+	return nil
+}
+
+// F-04 FIX: applyNoFenceToSession disables fencing on an existing session
+// via the session.set_nofence RPC.
+func applyNoFenceToSession(client transport.Client, sessionID string) error {
+	params := map[string]any{
+		"session_id": sessionID,
+		"no_fence":   true,
+	}
+	_, err := client.Call("session.set_nofence", params)
+	if err != nil {
+		return fmt.Errorf("failed to set no_fence on session: %w", err)
+	}
+	return nil
 }
 
 // chatWithSession sends a message to an existing session after validating it exists.

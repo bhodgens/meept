@@ -35,7 +35,7 @@ type GossipEngine struct {
 	sub     *bus.Subscriber
 	stopCh  chan struct{}
 	doneCh  chan struct{}
-	eventID string
+	eventID string //lint:ignore U1000 reserved for future gossip event correlation
 
 	// wg tracks background goroutines (run and retryLoop) so Stop can
 	// wait for both to fully exit before returning (S6-16).

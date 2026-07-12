@@ -16,8 +16,13 @@ type MergeStats struct {
 	SessionsMerged int `json:"sessions"`
 	TurnsMerged    int `json:"turns"`
 	MemoriesMerged int `json:"memories"`
-	Skipped        int `json:"skipped"` // duplicate IDs skipped
-	Errors         int `json:"errors"`
+	// D-15 FIX: renamed from Skipped to clarify that this counter includes
+	// ALL rows that INSERT OR IGNORE did not insert — both duplicate PK
+	// collisions AND rows rejected due to CHECK/NOT NULL constraint
+	// violations. SQLite does not distinguish these cases in its API, so we
+	// cannot separate them here.
+	SkippedOrFailed int `json:"skipped_or_failed"`
+	Errors          int `json:"errors"`
 }
 
 // MergePeerDB merges data from a peer's backup database into the local gossip database.
@@ -62,17 +67,17 @@ func MergePeerDB(ctx context.Context, gossipDB *sql.DB, peerDBPath, peerID strin
 	// Merge sessions
 	sessionMerged, sessionSkipped, sessionErr := mergeSessions(ctx, tx, peerDB, peerID)
 	stats.SessionsMerged = sessionMerged
-	stats.Skipped += sessionSkipped
+	stats.SkippedOrFailed += sessionSkipped // D-15 FIX: counts dupes + constraint violations
 
 	// Merge turns
 	turnMerged, turnSkipped, turnErr := mergeTurns(ctx, tx, peerDB, peerID)
 	stats.TurnsMerged = turnMerged
-	stats.Skipped += turnSkipped
+	stats.SkippedOrFailed += turnSkipped // D-15 FIX: counts dupes + constraint violations
 
 	// Merge memories
 	memMerged, memSkipped, memErr := mergeMemories(ctx, tx, peerDB, peerID)
 	stats.MemoriesMerged = memMerged
-	stats.Skipped += memSkipped
+	stats.SkippedOrFailed += memSkipped // D-15 FIX: counts dupes + constraint violations
 
 	// Count errors
 	if sessionErr != nil {
@@ -121,7 +126,10 @@ func MergePeerDB(ctx context.Context, gossipDB *sql.DB, peerDBPath, peerID strin
 }
 
 // runMergeOp executes a merge INSERT OR IGNORE and updates stats with the result.
-// sourceCount is the number of rows in the peer table; skipped = sourceCount - merged.
+// sourceCount is the number of rows in the peer table; skipped counts ALL rows
+// INSERT OR IGNORE did not insert — both duplicate PK collisions and rows
+// rejected due to CHECK/NOT NULL constraint violations.
+// D-15 FIX: SQLite does not distinguish these cases in its rows-affected count.
 func runMergeOp(ctx context.Context, tx *sql.Tx, sourceCount int, query string, args ...interface{}) (merged, skipped int, err error) {
 	res, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {

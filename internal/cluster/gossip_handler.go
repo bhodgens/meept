@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/memory"
@@ -35,6 +36,13 @@ type eventGossipHandler struct {
 	// gossip_handler.go routing). When nil, TASK_CREATE falls through to
 	// the default (no-op) case.
 	executorBridge *ExecutorBridge
+
+	// D-06 FIX: per-memory-ID mutex map to prevent TOCTOU races between
+	// fetchExistingMemoryEvent (read) and StoreRemoteMemory (write).
+	// Without this, two concurrent handler invocations for the same memory
+	// ID can both read the old state, both resolve in the same direction,
+	// and the loser overwrites the winner's write.
+	memMu sync.Map // map[string]*sync.Mutex, keyed by memory ID
 }
 
 // NewGossipHandler creates a handler that writes gossip-received events
@@ -172,6 +180,14 @@ func (h *eventGossipHandler) handleMemoryStored(event *models.ClusterEvent) erro
 		return &GossipHandlerError{EventID: event.EventID, EventType: string(event.EventType), Err: err}
 	}
 
+	// D-06 FIX: Hold a per-memory-ID mutex across the entire check-then-write
+	// critical section so concurrent handler invocations for the same memory
+	// ID serialize. This prevents a TOCTOU race where two goroutines both read
+	// the old state before either writes.
+	memMu := h.getMemoryMu(payload.ID)
+	memMu.Lock()
+	defer memMu.Unlock()
+
 	// Entity-level conflict resolution: if a resolver is wired and a memory
 	// with the same ID already exists, decide which event wins. The existing
 	// row's created_at (RFC3339Nano) and source_node form a synthetic event
@@ -229,6 +245,13 @@ func (h *eventGossipHandler) handleMemoryStored(event *models.ClusterEvent) erro
 	}
 
 	return nil
+}
+
+// D-06 FIX: getMemoryMu lazily creates and returns a per-memory-ID mutex
+// using LoadOrStore so concurrent callers get the same mutex instance.
+func (h *eventGossipHandler) getMemoryMu(memoryID string) *sync.Mutex {
+	v, _ := h.memMu.LoadOrStore(memoryID, &sync.Mutex{})
+	return v.(*sync.Mutex)
 }
 
 // fetchExistingMemoryEvent reconstructs a synthetic ClusterEvent from a

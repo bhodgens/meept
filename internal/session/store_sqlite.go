@@ -1261,6 +1261,25 @@ func (s *SQLiteStore) SetProject(sessionID, projectID, projectPath string) error
 	return nil
 }
 
+// F-04 FIX: SetNoFence updates the per-session fence override flag.
+func (s *SQLiteStore) SetNoFence(sessionID string, noFence bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec(
+		`UPDATE sessions SET no_fence = ?, last_activity = ? WHERE id = ?`,
+		noFence, time.Now().UTC().Format(time.RFC3339), sessionID,
+	) //nolint:mutexio // mutex serializes sqlite connection access
+	if err != nil {
+		return fmt.Errorf("failed to set no_fence for session: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
 // GetMessagePath returns the path from root to the given leaf message ID,
 // using a recursive CTE to walk the parent chain.
 func (s *SQLiteStore) GetMessagePath(sessionID string, leafID int64) ([]Message, error) {

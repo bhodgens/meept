@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -233,7 +234,21 @@ func (p *ProxyHandler) makeProxy(requestTopic, responseTopic string, timeout tim
 	}
 }
 
+// isCriticalTopic returns true for topics whose messages must never be
+// silently dropped due to a full subscriber buffer.
+// C-09 FIX: security approvals and related events are routed via
+// makeFireAndForget; without this guard they hit the non-blocking Publish
+// path and are silently discarded when buffers fill.
+func isCriticalTopic(topic string) bool {
+	return strings.HasPrefix(topic, "security.") ||
+		strings.HasPrefix(topic, "approval.")
+}
+
 // makeFireAndForget creates a handler that publishes to a topic without waiting.
+// For security-critical topic prefixes (security.*, approval.*), it uses
+// PublishBlocking to guarantee delivery even when subscriber buffers are full.
+// C-09 FIX: previously all fire-and-forget calls used non-blocking Publish,
+// causing security approval messages to be silently dropped on full buffers.
 func (p *ProxyHandler) makeFireAndForget(topic string) Handler {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
 		msg := &models.BusMessage{
@@ -243,7 +258,14 @@ func (p *ProxyHandler) makeFireAndForget(topic string) Handler {
 			Source:  "rpc.proxy",
 			Payload: params,
 		}
-		delivered := p.bus.Publish(topic, msg)
+		// C-09 FIX: route critical topics through PublishBlocking so they
+		// are not silently dropped when subscriber buffers are full.
+		var delivered int
+		if isCriticalTopic(topic) {
+			delivered = p.bus.PublishBlocking(topic, msg)
+		} else {
+			delivered = p.bus.Publish(topic, msg)
+		}
 		status := "published"
 		if delivered == 0 {
 			status = "dropped"

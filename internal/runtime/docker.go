@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -25,8 +26,14 @@ func dockerHostFromEnv() string {
 }
 
 // socketPath extracts the Unix socket path from a Docker host URL.
+// E-07 FIX: Callers should only invoke this after verifying the scheme is unix://.
 func socketPath(host string) string {
-	return host[len("unix://"):]
+	u, err := url.Parse(host)
+	if err != nil || u.Scheme != "unix" {
+		// Fallback: strip prefix manually for backward compatibility.
+		return host[len("unix://"):]
+	}
+	return u.Path
 }
 
 // DockerBackend executes commands inside Docker containers.
@@ -61,16 +68,48 @@ func newDockerBackend(cfg DockerConfig, image string, logger *slog.Logger) (*Doc
 	// SkipServerVersionCheck avoids an internal GET /version call that
 	// doesn't accept a context and will hang on a slow/unresponsive socket.
 	client.SkipServerVersionCheck = true
+
+	// E-07 FIX: Parse DOCKER_HOST scheme and only override DialContext for
+	// unix sockets. For tcp/http/https, use the default transport so Go
+	// handles TCP dialing correctly. For npipe/ssh, warn and fall back to
+	// the default transport (the go-dockerclient library may handle them
+	// internally or the user needs a proxy).
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	parsedHost, parseErr := url.Parse(dockerHost)
+	switch {
+	case parseErr != nil:
+		// Unparseable DOCKER_HOST — fall back to unix socket dialing with
+		// the old prefix-strip logic, preserving historical behavior.
+		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			d := net.Dialer{Timeout: 5 * time.Second}
+			return d.DialContext(ctx, "unix", socketPath(dockerHost))
+		}
+	case parsedHost.Scheme == "unix":
+		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			d := net.Dialer{Timeout: 5 * time.Second}
+			return d.DialContext(ctx, "unix", parsedHost.Path)
+		}
+	case parsedHost.Scheme == "tcp" || parsedHost.Scheme == "http" || parsedHost.Scheme == "https":
+		// Use default transport — no custom DialContext needed. TCP/HTTP
+		// dialing is handled by Go's built-in transport.
+	case parsedHost.Scheme == "npipe" || parsedHost.Scheme == "ssh":
+		// Warn and fall back to default transport. The go-dockerclient
+		// library or the OS may handle these natively (e.g., named pipes
+		// on Windows via npipe). If not supported, the Ping() below will
+		// return a clear error.
+		slog.Warn("Docker host scheme may not be fully supported; using default transport",
+			"scheme", parsedHost.Scheme, "host", dockerHost)
+	default:
+		// Unknown scheme — warn and use default transport.
+		slog.Warn("Unknown Docker host scheme; using default transport",
+			"scheme", parsedHost.Scheme, "host", dockerHost)
+	}
+
 	// Give the ping a short timeout so a socket that accepts but never
 	// responds doesn't block forever.
 	client.HTTPClient = &http.Client{
-		Timeout: 5 * time.Second,
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				d := net.Dialer{Timeout: 5 * time.Second}
-				return d.DialContext(ctx, "unix", socketPath(dockerHost))
-			},
-		},
+		Timeout:   5 * time.Second,
+		Transport: transport,
 	}
 
 	// Verify Docker daemon is accessible

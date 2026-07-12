@@ -176,8 +176,8 @@ func TestSyncPull_MergePeerIntoGossipAndPersistMetadata(t *testing.T) {
 	if st.LastMergeStats == nil {
 		t.Fatal("LastMergeStats is nil in metadata store")
 	}
-	if st.LastMergeStats.Skipped != 0 {
-		t.Errorf("stored Skipped = %d, want 0", st.LastMergeStats.Skipped)
+	if st.LastMergeStats.SkippedOrFailed != 0 {
+		t.Errorf("stored SkippedOrFailed = %d, want 0", st.LastMergeStats.SkippedOrFailed)
 	}
 	if st.LastMergeStats.Errors != 0 {
 		t.Errorf("stored Errors = %d, want 0", st.LastMergeStats.Errors)

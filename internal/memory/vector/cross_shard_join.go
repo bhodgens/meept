@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -235,17 +236,42 @@ func (c *CrossShardJoin) QueryShards(ctx context.Context, queries map[string]str
 		}
 
 		var results []SearchResult
+		// D-09 FIX: track scan errors so we can abort this shard on fatal
+		// errors (e.g., column count mismatch) rather than silently skipping.
+		var scanErr error
 		for rows.Next() {
 			var sr SearchResult
 			var metaStr string
 			if err := rows.Scan(&sr.MemoryID, &sr.Content, &sr.VectorSimilarity, &metaStr); err != nil {
-				continue
+				// D-09 FIX: log the scan error with alias context instead of
+				// silently continuing. A scan error usually indicates a schema
+				// mismatch or corrupt row — abort this shard's query.
+				slog.Warn("cross_shard_join: scan error, aborting shard query",
+					"shard_alias", alias, "error", err)
+				scanErr = err
+				break
 			}
 			sr.RelevanceScore = sr.VectorSimilarity
 			sr.Metadata = parseMetadataString(metaStr)
 			results = append(results, sr)
 		}
-		rows.Close()
+		// D-09 FIX: check rows.Err() after the loop to detect fatal cursor
+		// errors mid-iteration (e.g., context cancellation, I/O failure).
+		// Previously this was never checked, silently dropping fatal errors
+		// and returning partial/garbage results.
+		if cursorErr := rows.Err(); cursorErr != nil {
+			slog.Warn("cross_shard_join: cursor error after row iteration",
+				"shard_alias", alias, "error", cursorErr)
+			scanErr = cursorErr
+		}
+		rows.Close() //nolint:mutexio // same locked-query scope as QueryContext above
+
+		if scanErr != nil {
+			// D-09 FIX: abort this shard — don't return partial results from
+			// a cursor that errored mid-iteration.
+			missing = append(missing, alias)
+			continue
+		}
 
 		if len(results) > 0 {
 			shardResultMap[alias] = results

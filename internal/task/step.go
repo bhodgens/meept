@@ -449,9 +449,13 @@ func (s *StepStore) Create(step *TaskStep) error {
 }
 
 // Update updates an existing task step and records state transitions.
-// The SELECT, UPDATE, and state-transition INSERT are wrapped in a single
-// transaction (BEGIN IMMEDIATE) so that concurrent updates serialize and the
-// recorded FromState is always correct.
+//
+// A-09 FIX: The SELECT, UPDATE, and state-transition INSERT are wrapped in a
+// single deferred transaction (default isolation). Concurrency safety comes
+// from optimistic CAS guards: the UPDATE uses a `WHERE state = ?` clause and
+// RowsAffected is checked to detect concurrent transitions. This is
+// functionally equivalent to BEGIN IMMEDIATE serialization for state
+// transitions but avoids write-lock contention.
 func (s *StepStore) Update(step *TaskStep) error {
 	ctx := context.Background()
 
@@ -841,14 +845,21 @@ func (s *StepStore) SetResult(id, result string) error {
 // - All steps are in a terminal state
 // - No steps have failed (StepFailed)
 // - All rejected steps have a successful revision (completed/approved)
+//
+// A task with zero steps (e.g., a plan's parent task that delegates all work
+// to child/phase tasks) has nothing pending and is considered complete.
 func (s *StepStore) AreAllCompleted(taskID string) (bool, error) {
 	steps, err := s.ListByTaskID(taskID)
 	if err != nil {
 		return false, err
 	}
 
+	// A-02 FIX: A task with zero steps has nothing pending, so it's considered
+	// complete. This allows the plan parent task (which has no steps of its
+	// own — its steps belong to child/phase tasks) to auto-complete via the
+	// standard step-completion polling path in OnJobCompleted.
 	if len(steps) == 0 {
-		return false, nil
+		return true, nil
 	}
 
 	// Build a map of step states and track which rejected steps have successful revisions

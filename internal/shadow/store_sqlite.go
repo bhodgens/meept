@@ -33,6 +33,17 @@ const (
 	AdaptersStoreSchemaVersion = 1
 )
 
+// setSchemaVersion persists the given schema version. E-14 FIX: Called after
+// each individual migration step succeeds so the version always reflects the
+// last completed step, not a future step that might fail.
+func setSchemaVersion(db *sql.DB, version int) error {
+	_, err := db.Exec(`
+		INSERT OR REPLACE INTO schema_version (id, version, migrated_at)
+		VALUES (1, ?, ?)
+	`, version, time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
 // SQLiteTrainingStore implements TrainingStore using SQLite.
 type SQLiteTrainingStore struct {
 	db *sql.DB
@@ -77,32 +88,36 @@ func (s *SQLiteTrainingStore) migrate() error {
 	row := s.db.QueryRow("SELECT version FROM schema_version WHERE id = 1")
 	_ = row.Scan(&currentVersion) // Ignore error - table might be empty
 
-	// Run migrations based on version
+	// E-14 FIX: Bump schema version after each successful migration step,
+	// not once at the end. If a step fails, the persisted version reflects
+	// the last successful step and the caller's error prevents construction.
 	if currentVersion < 1 {
 		if err := s.migrateToV1(); err != nil {
 			return fmt.Errorf("migration to v1 failed: %w", err)
 		}
+		if err := setSchemaVersion(s.db, 1); err != nil {
+			return fmt.Errorf("failed to set schema version 1: %w", err)
+		}
+		currentVersion = 1
 	}
 
 	if currentVersion < 2 {
 		if err := s.migrateToV2(); err != nil {
 			return fmt.Errorf("migration to v2 failed: %w", err)
 		}
+		if err := setSchemaVersion(s.db, 2); err != nil {
+			return fmt.Errorf("failed to set schema version 2: %w", err)
+		}
+		currentVersion = 2
 	}
 
 	if currentVersion < 3 {
 		if err := s.migrateToV3(); err != nil {
 			return fmt.Errorf("migration to v3 failed: %w", err)
 		}
-	}
-
-	// Update version
-	_, err = s.db.Exec(`
-		INSERT OR REPLACE INTO schema_version (id, version, migrated_at)
-		VALUES (1, ?, ?)
-	`, TrainingStoreSchemaVersion, time.Now().UTC().Format(time.RFC3339))
-	if err != nil {
-		return fmt.Errorf("failed to update schema version: %w", err)
+		if err := setSchemaVersion(s.db, 3); err != nil {
+			return fmt.Errorf("failed to set schema version 3: %w", err)
+		}
 	}
 
 	return nil
@@ -733,24 +748,24 @@ func (s *SQLiteExamplesStore) migrate() error {
 	row := s.db.QueryRow("SELECT version FROM schema_version WHERE id = 1")
 	_ = row.Scan(&currentVersion) // Ignore error - table might be empty
 
-	// Run migrations based on version
+	// E-14 FIX: Bump schema version after each successful migration step,
+	// not once at the end. If a step fails, the persisted version reflects
+	// the last successful step and the caller's error prevents construction.
 	if currentVersion < 1 {
 		if err := s.migrateToV1(); err != nil {
 			return fmt.Errorf("migration to v1 failed: %w", err)
 		}
+		if err := setSchemaVersion(s.db, 1); err != nil {
+			return fmt.Errorf("failed to set schema version 1: %w", err)
+		}
+		currentVersion = 1
 	}
 
 	if currentVersion < 2 {
 		s.migrateToV2()
-	}
-
-	// Update version
-	_, err = s.db.Exec(`
-		INSERT OR REPLACE INTO schema_version (id, version, migrated_at)
-		VALUES (1, ?, ?)
-	`, ExamplesStoreSchemaVersion, time.Now().UTC().Format(time.RFC3339))
-	if err != nil {
-		return fmt.Errorf("failed to update schema version: %w", err)
+		if err := setSchemaVersion(s.db, 2); err != nil {
+			return fmt.Errorf("failed to set schema version 2: %w", err)
+		}
 	}
 
 	return nil
@@ -1143,20 +1158,16 @@ func (s *SQLiteAdaptersStore) migrate() error {
 	row := s.db.QueryRow("SELECT version FROM schema_version WHERE id = 1")
 	_ = row.Scan(&currentVersion) // Ignore error - table might be empty
 
-	// Run migrations based on version
+	// E-14 FIX: Bump schema version after each successful migration step,
+	// not once at the end. If a step fails, the persisted version reflects
+	// the last successful step and the caller's error prevents construction.
 	if currentVersion < 1 {
 		if err := s.migrateToV1(); err != nil {
 			return fmt.Errorf("migration to v1 failed: %w", err)
 		}
-	}
-
-	// Update version
-	_, err = s.db.Exec(`
-		INSERT OR REPLACE INTO schema_version (id, version, migrated_at)
-		VALUES (1, ?, ?)
-	`, AdaptersStoreSchemaVersion, time.Now().UTC().Format(time.RFC3339))
-	if err != nil {
-		return fmt.Errorf("failed to update schema version: %w", err)
+		if err := setSchemaVersion(s.db, 1); err != nil {
+			return fmt.Errorf("failed to set schema version 1: %w", err)
+		}
 	}
 
 	return nil
