@@ -358,14 +358,15 @@ func (r *ExecutionResult) ToChatMessage() llm.ChatMessage {
 
 // Executor handles tool execution with security checks.
 type Executor struct {
-	mu          sync.RWMutex
-	registry    ToolRegistry
-	security    *security.PermissionChecker
-	logger      *slog.Logger
-	parallelism int
-	agentID     string          // Identifier for the agent/worker using this executor
-	cache       *ResultCache    // Tool result cache
-	bus         *bus.MessageBus // Optional: for publishing streaming progress events
+	mu           sync.RWMutex
+	registry     ToolRegistry
+	security     *security.PermissionChecker
+	logger       *slog.Logger
+	parallelism  int
+	agentID      string          // Identifier for the agent/worker using this executor
+	cache        *ResultCache    // Tool result cache
+	bus          *bus.MessageBus // Optional: for publishing streaming progress events
+	depInferrer  *DependencyInferrer
 }
 
 // ExecutorOption is a functional option for configuring an Executor.
@@ -408,6 +409,17 @@ func WithExecutorBus(msgBus *bus.MessageBus) ExecutorOption {
 	return func(e *Executor) {
 		if msgBus != nil {
 			e.bus = msgBus
+		}
+	}
+}
+
+// WithExecutorInferrer sets the dependency inferrer for dependency-aware parallel
+// scheduling. If nil (or not provided), the executor lazily initializes one from
+// the registry when ExecuteAll is first called.
+func WithExecutorInferrer(inferrer *DependencyInferrer) ExecutorOption {
+	return func(e *Executor) {
+		if inferrer != nil {
+			e.depInferrer = inferrer
 		}
 	}
 }
@@ -649,30 +661,94 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	return result
 }
 
-// ExecuteAll runs multiple tool calls, potentially in parallel.
+// ExecuteAll runs multiple tool calls with dependency-aware scheduling.
+//
+// Independent tool calls are executed in parallel within each wave (group);
+// dependent calls are ordered across waves. The result slice preserves the
+// original input order regardless of execution grouping, so callers that
+// correlate results by index (e.g., executeToolCalls) continue to work
+// correctly.
 func (e *Executor) ExecuteAll(ctx context.Context, toolCalls []llm.ToolCall) []*ExecutionResult {
 	if len(toolCalls) == 0 {
 		return nil
 	}
-
-	// For single tool call, execute directly
 	if len(toolCalls) == 1 {
 		return []*ExecutionResult{e.Execute(ctx, toolCalls[0])}
 	}
 
-	// Execute in parallel with limited concurrency
-	results := make([]*ExecutionResult, len(toolCalls))
-	var wg sync.WaitGroup
+	graph := e.inferDependencies(toolCalls)
+	groups := graph.IndependentGroups()
 
-	// Create a semaphore channel for limiting parallelism
+	// results preserves original index order regardless of group execution order.
+	results := make([]*ExecutionResult, len(toolCalls))
+	// Build ID -> original index map for fast lookup.
+	idToIdx := make(map[string]int, len(toolCalls))
+	for i, tc := range toolCalls {
+		idToIdx[tc.ID] = i
+	}
+
+	for _, group := range groups {
+		// Execute this group's calls in parallel.
+		groupResults := e.executeParallelGroup(ctx, group)
+		// Scatter results back to their original positions.
+		for j, tc := range group {
+			origIdx := idToIdx[tc.ID]
+			if j < len(groupResults) {
+				results[origIdx] = groupResults[j]
+			}
+		}
+		if e.shouldTerminateEarly(groupResults) {
+			// Fill remaining nil slots with skipped-error results.
+			for i := range results {
+				if results[i] == nil {
+					results[i] = &ExecutionResult{
+						ToolCallID: toolCalls[i].ID,
+						Success:    false,
+						Error:      "skipped: earlier group reported a critical error",
+					}
+				}
+			}
+			return results
+		}
+	}
+
+	return results
+}
+
+// inferDependencies builds a ToolDependencyGraph for the given calls. Falls
+// back to an empty graph (all calls independent) if no inferrer is configured.
+func (e *Executor) inferDependencies(toolCalls []llm.ToolCall) *ToolDependencyGraph {
+	if e.depInferrer == nil {
+		// Lazy init if registry is available; otherwise return empty graph.
+		if e.registry == nil {
+			return NewToolDependencyGraph()
+		}
+		e.depInferrer = NewDependencyInferrer(e.registry, e.logger)
+	}
+	return e.depInferrer.InferDependencies(toolCalls)
+}
+
+// executeParallelGroup runs a group of independent tool calls in parallel using
+// the existing semaphore-based concurrency limiter. Results are returned in the
+// same order as the input slice so callers can correlate by position within
+// the group.
+func (e *Executor) executeParallelGroup(ctx context.Context, group []llm.ToolCall) []*ExecutionResult {
+	if len(group) == 0 {
+		return nil
+	}
+	if len(group) == 1 {
+		return []*ExecutionResult{e.Execute(ctx, group[0])}
+	}
+
+	results := make([]*ExecutionResult, len(group))
+	var wg sync.WaitGroup
 	sem := make(chan struct{}, e.parallelism)
 
-	for i, tc := range toolCalls {
+	for i, tc := range group {
 		wg.Add(1)
 		go func(idx int, toolCall llm.ToolCall) {
 			defer wg.Done()
 
-			// Acquire semaphore
 			select {
 			case sem <- struct{}{}:
 				defer func() { <-sem }()
@@ -691,6 +767,27 @@ func (e *Executor) ExecuteAll(ctx context.Context, toolCalls []llm.ToolCall) []*
 
 	wg.Wait()
 	return results
+}
+
+// shouldTerminateEarly returns true if execution should stop due to critical
+// errors in the given group's results.
+func (e *Executor) shouldTerminateEarly(results []*ExecutionResult) bool {
+	for _, r := range results {
+		if r == nil {
+			continue
+		}
+		if !r.Success && e.isCriticalError(r.Error) {
+			return true
+		}
+	}
+	return false
+}
+
+// isCriticalError returns true for errors that should halt execution of
+// subsequent dependency groups.
+func (e *Executor) isCriticalError(err string) bool {
+	return strings.Contains(err, "permission denied") ||
+		strings.Contains(err, "authentication failed")
 }
 
 // ExecuteSequential runs tool calls sequentially (no parallelism).

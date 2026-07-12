@@ -466,6 +466,11 @@ type AgentLoop struct {
 	// Multi-turn budget tracking
 	budgetTracker *TurnBudgetTracker
 
+	// budgetHierarchy provides hierarchical task/phase/turn budgets (Phase 2 of
+	// hierarchical budget plan). Runs alongside budgetTracker which continues to
+	// drive wrap-up behavior; this field is queried via GetBudgetStatus().
+	budgetHierarchy *BudgetHierarchy
+
 	// Prompt building
 	promptBuilder *PromptBuilder
 
@@ -1514,6 +1519,16 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 	// Initialize multi-turn budget tracker
 	// Default: 100,000 tokens total, 30,000 per turn, max 10 turns
 	loop.budgetTracker = NewTurnBudgetTracker(100000, 30000, 10)
+
+	// Initialize hierarchical budget tracker (additive; old tracker still drives wrap-up).
+	loop.budgetHierarchy = NewBudgetHierarchy(
+		100000, // task total
+		[]string{"default"},
+		[]int{90000},
+	)
+	if err := loop.budgetHierarchy.SelectPhaseBudget("default"); err != nil {
+		loop.logger.Warn("failed to select default phase budget", "error", err)
+	}
 
 	return loop
 }
@@ -2843,6 +2858,11 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			l.budgetTracker.RecordUsage(response.Usage.TotalTokens)
 		}
 
+		// Record usage in hierarchical budget tracker (additive; runs in parallel).
+		if l.budgetHierarchy != nil {
+			l.budgetHierarchy.RecordUsage(response.Usage.TotalTokens)
+		}
+
 		// Publish token usage event
 		l.publishTokenUsage(conversationID, totalTokens)
 
@@ -3241,6 +3261,16 @@ func (l *AgentLoop) GetStateSnapshot() AgentStateSnapshot {
 		Timestamp:      time.Now(),
 	}
 	return snap
+}
+
+// GetBudgetStatus returns the hierarchical budget status snapshot, or nil if
+// the hierarchy is not initialized.
+func (l *AgentLoop) GetBudgetStatus() *BudgetStatus {
+	if l.budgetHierarchy == nil {
+		return nil
+	}
+	status := l.budgetHierarchy.GetStatus()
+	return &status
 }
 
 // handleErrorBasedOnState dispatches error handling based on the current agent
