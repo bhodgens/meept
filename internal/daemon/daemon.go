@@ -398,7 +398,6 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		logger.Info("gossip handler registered with cluster engine")
 	}
 
-
 	// Wire cluster config into components
 	if clusterCfg != nil {
 		if components != nil {
@@ -828,6 +827,26 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 					return loop.GetStateSnapshot(), nil
 				}
 				logger.Info("Agent state HTTP getter registered", "endpoint", "/api/v1/sessions/{id}/state")
+			}
+
+			// Wire hierarchical budget status getter for GET /api/v1/sessions/{id}/budget
+			// (Phase 4 of hierarchical budget management plan). Uses the ChatHandler's
+			// per-session loop lookup so the budget snapshot reflects the loop actually
+			// servicing the conversation.
+			if components.ChatHandler != nil {
+				chatHandlerRef := components.ChatHandler
+				httpSrv.HierarchicalBudgetGetter = func(sessionID string) (*agent.BudgetStatus, error) {
+					loop := chatHandlerRef.LookupLoop(sessionID)
+					if loop == nil {
+						return nil, fmt.Errorf("no agent loop for session %q", sessionID)
+					}
+					status := loop.GetBudgetStatus()
+					if status == nil {
+						return nil, fmt.Errorf("budget hierarchy not initialized for session %q", sessionID)
+					}
+					return status, nil
+				}
+				logger.Info("Hierarchical budget status HTTP getter registered", "endpoint", "/api/v1/sessions/{id}/budget")
 			}
 
 			// Wire budget stats getter for HTTP endpoint (FIX #0031/#0035)
@@ -1763,4 +1782,3 @@ func (a *taskCreatorAdapter) ScheduleSteps(ctx context.Context, taskID string) e
 	a.registry.PublishExternal("orchestrator.schedule", msg)
 	return nil
 }
-

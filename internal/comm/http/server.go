@@ -47,15 +47,15 @@ var defaultWSOrigins = []string{"localhost", "127.0.0.1", "::1"}
 // ServerConfig holds configuration for the HTTP server.
 // TLS is always enabled; there is no option to disable HTTPS.
 type ServerConfig struct {
-	Addr                    string        // Listen address (default: :8081)
-	ReadTimeout             time.Duration // Read timeout
-	WriteTimeout            time.Duration // Write timeout
-	MaxHeaderBytes          int           // Max header size
-	EnableCORS              bool          // Enable CORS headers
-	APIKeys                 []string      // Valid API keys for authentication
-	RequireAuth             bool          // Require API key authentication (default: true)
-	TLSCertFile             string        // TLS certificate file path
-	TLSKeyFile              string        // TLS key file path
+	Addr                    string                // Listen address (default: :8081)
+	ReadTimeout             time.Duration         // Read timeout
+	WriteTimeout            time.Duration         // Write timeout
+	MaxHeaderBytes          int                   // Max header size
+	EnableCORS              bool                  // Enable CORS headers
+	APIKeys                 []string              // Valid API keys for authentication
+	RequireAuth             bool                  // Require API key authentication (default: true)
+	TLSCertFile             string                // TLS certificate file path
+	TLSKeyFile              string                // TLS key file path
 	RESTEnabled             bool                  // Enable REST API at /api/v1/* (default: true)
 	WebSocketAllowedOrigins []string              // Allowed origins for WebSocket (default: localhost, 127.0.0.1, ::1)
 	SecurityHeaders         SecurityHeadersConfig // HSTS, CSP, X-Frame-Options, etc.
@@ -72,16 +72,16 @@ func DefaultServerConfig() ServerConfig {
 	defaultKeyFile := filepath.Join(homeDir, ".meept", "tls", "key.pem")
 
 	return ServerConfig{
-		Addr:           ":8081", // Different from existing web server (:8080)
-		ReadTimeout:    30 * time.Second,
-		WriteTimeout:   30 * time.Second,
-		MaxHeaderBytes: 1 << 20, // 1 MB
-		EnableCORS:     true,    // Enable CORS for local HTTP clients
-		RequireAuth:    true,    // Enabled by default for security
-		APIKeys:        []string{},
-		TLSCertFile:    defaultCertFile,
-		TLSKeyFile:     defaultKeyFile,
-		RESTEnabled:    true, // REST API enabled by default
+		Addr:            ":8081", // Different from existing web server (:8080)
+		ReadTimeout:     30 * time.Second,
+		WriteTimeout:    30 * time.Second,
+		MaxHeaderBytes:  1 << 20, // 1 MB
+		EnableCORS:      true,    // Enable CORS for local HTTP clients
+		RequireAuth:     true,    // Enabled by default for security
+		APIKeys:         []string{},
+		TLSCertFile:     defaultCertFile,
+		TLSKeyFile:      defaultKeyFile,
+		RESTEnabled:     true, // REST API enabled by default
 		SecurityHeaders: DefaultSecurityHeaders(),
 		TLSMinVersion:   tls.VersionTLS12,
 		TLSClientAuth:   tls.NoClientCert,
@@ -134,6 +134,10 @@ type Server struct {
 	// AgentStateGetter is an optional callback that returns a state snapshot
 	// for a given session ID. Used by the agent state endpoint.
 	AgentStateGetter func(sessionID string) (agent.AgentStateSnapshot, error)
+
+	// HierarchicalBudgetGetter returns hierarchical budget status for a given
+	// session. Used by the budget status endpoint.
+	HierarchicalBudgetGetter func(sessionID string) (*agent.BudgetStatus, error)
 
 	// ClusterMetricsGetter is an optional callback that returns a snapshot
 	// of gossip-engine observability counters (Task 4.8). Renders nil/empty
@@ -716,7 +720,6 @@ func WithRPCCall(fn func(ctx context.Context, method string, params json.RawMess
 	}
 }
 
-
 // WithNotification enables the notification event system.
 func WithNotification(emitter NotificationEmitter) ServerOption {
 	return func(s *Server) {
@@ -811,9 +814,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Build server object outside lock (I/O and initialization), then assign under lock
 	server := &http.Server{
-		Addr:           s.config.Addr,
-		Handler:        handler,
-		ReadTimeout:    s.config.ReadTimeout,
+		Addr:        s.config.Addr,
+		Handler:     handler,
+		ReadTimeout: s.config.ReadTimeout,
 		// WriteTimeout is intentionally set to 0 (no global write deadline).
 		// A non-zero WriteTimeout breaks SSE streams (/mcp/sse, /api/v1/chat/stream)
 		// and WebSocket upgrades because Go's http.Server applies the deadline
@@ -888,9 +891,9 @@ func (l *tlsDetectListener) Accept() (net.Conn, error) {
 		}
 		// Peek at the first byte with a short timeout
 		// 10 second timeout for TLS handshake - gives Flutter/Dart time to complete
-        // certificate verification. Shorter timeouts (2s) cause EOF errors when
-        // the client's cert validation takes longer than expected.
-        if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		// certificate verification. Shorter timeouts (2s) cause EOF errors when
+		// the client's cert validation takes longer than expected.
+		if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
 			conn.Close()
 			continue
 		}
@@ -1216,6 +1219,9 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	// Agent state endpoint
 	mux.HandleFunc("GET /api/v1/sessions/{id}/state", s.handleGetAgentState)
 
+	// Hierarchical budget status endpoint
+	mux.HandleFunc("GET /api/v1/sessions/{id}/budget", s.handleGetBudgetStatus)
+
 	// Firewall stats endpoint
 	mux.HandleFunc("GET /api/v1/metrics/firewall", s.handleFirewallStats)
 
@@ -1336,7 +1342,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
 			w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
-			w.Header().Set("Vary", "Origin")  // D13: Prevent cache poisoning via CDN/proxy
+			w.Header().Set("Vary", "Origin") // D13: Prevent cache poisoning via CDN/proxy
 
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusOK)
@@ -2852,4 +2858,26 @@ func (s *Server) handleGetAgentState(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, snapshot)
+}
+
+// handleGetBudgetStatus handles GET /api/v1/sessions/{id}/budget.
+func (s *Server) handleGetBudgetStatus(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	if sessionID == "" {
+		s.writeError(w, http.StatusBadRequest, "session id required")
+		return
+	}
+
+	if s.HierarchicalBudgetGetter == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "budget status not configured")
+		return
+	}
+
+	status, err := s.HierarchicalBudgetGetter(sessionID)
+	if err != nil {
+		s.writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, status)
 }

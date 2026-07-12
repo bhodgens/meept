@@ -17,6 +17,149 @@ import (
 	"github.com/caimlas/meept/pkg/security"
 )
 
+// ToolConcurrencyProfile categorizes tools by their resource profile to drive
+// adaptive parallelism (Phase 3 of parallel-tool-execution plan).
+type ToolConcurrencyProfile uint8
+
+const (
+	// ProfileIOBound: network, file I/O. High parallelism safe.
+	ProfileIOBound ToolConcurrencyProfile = iota
+	// ProfileCPUBound: AST parsing, code analysis. Limited parallelism.
+	ProfileCPUBound
+	// ProfileStateful: shell sessions, DB connections. Sequential per resource.
+	ProfileStateful
+	// ProfileExclusive: git commit, global mutations. One at a time.
+	ProfileExclusive
+)
+
+// String returns the human-readable name of the profile.
+func (p ToolConcurrencyProfile) String() string {
+	switch p {
+	case ProfileIOBound:
+		return "io_bound"
+	case ProfileCPUBound:
+		return "cpu_bound"
+	case ProfileStateful:
+		return "stateful"
+	case ProfileExclusive:
+		return "exclusive"
+	default:
+		return "unknown"
+	}
+}
+
+// toolProfiles maps tool names to their concurrency profiles.
+// Tools not listed here default to ProfileIOBound.
+var toolProfiles = map[string]ToolConcurrencyProfile{
+	"web_search":    ProfileIOBound,
+	"web_fetch":     ProfileIOBound,
+	"file_read":     ProfileIOBound,
+	"file_write":    ProfileIOBound,
+	"file_edit":     ProfileIOBound,
+	"memory_search": ProfileIOBound,
+	"ast_parse":     ProfileCPUBound,
+	"ast_query":     ProfileCPUBound,
+	"shell":         ProfileStateful,
+	"bash":          ProfileStateful,
+	"git_diff":      ProfileExclusive,
+	"git_commit":    ProfileExclusive,
+}
+
+// AdaptiveParallelismLimiter limits concurrency per ToolConcurrencyProfile.
+// Each profile has its own semaphore channel; tools within the same profile
+// share that profile's slot pool.
+type AdaptiveParallelismLimiter struct {
+	mu     sync.Mutex
+	slots  map[ToolConcurrencyProfile]chan struct{}
+	limits map[ToolConcurrencyProfile]int
+}
+
+// NewAdaptiveParallelismLimiter creates a limiter where baseParallelism is the
+// IO-bound slot limit. CPU-bound gets max(1, baseParallelism/2); stateful and
+// exclusive each get 1.
+func NewAdaptiveParallelismLimiter(baseParallelism int) *AdaptiveParallelismLimiter {
+	if baseParallelism < 1 {
+		baseParallelism = 1
+	}
+	cpuBoundLimit := baseParallelism / 2
+	if cpuBoundLimit < 1 {
+		cpuBoundLimit = 1
+	}
+
+	limits := map[ToolConcurrencyProfile]int{
+		ProfileIOBound:    baseParallelism,
+		ProfileCPUBound:   cpuBoundLimit,
+		ProfileStateful:   1,
+		ProfileExclusive:  1,
+	}
+	slots := make(map[ToolConcurrencyProfile]chan struct{}, len(limits))
+	for profile, lim := range limits {
+		slots[profile] = make(chan struct{}, lim)
+	}
+
+	return &AdaptiveParallelismLimiter{
+		slots:  slots,
+		limits: limits,
+	}
+}
+
+// Acquire blocks until a slot for the given profile is available or ctx is
+// cancelled.
+func (l *AdaptiveParallelismLimiter) Acquire(ctx context.Context, profile ToolConcurrencyProfile) error {
+	ch := l.slotChannel(profile)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case ch <- struct{}{}:
+		return nil
+	}
+}
+
+// Release frees a slot for the given profile. It is non-blocking; calling
+// Release without a matching Acquire is a programming error.
+func (l *AdaptiveParallelismLimiter) Release(profile ToolConcurrencyProfile) {
+	ch := l.slotChannel(profile)
+	select {
+	case <-ch:
+	default:
+		// Slot already free; this should not happen in correct usage.
+	}
+}
+
+// ProfileForTool returns the concurrency profile for the given tool name.
+// Unknown tools default to ProfileIOBound.
+func (l *AdaptiveParallelismLimiter) ProfileForTool(toolName string) ToolConcurrencyProfile {
+	if profile, ok := toolProfiles[toolName]; ok {
+		return profile
+	}
+	return ProfileIOBound
+}
+
+// Limit returns the concurrency limit for the given profile.
+func (l *AdaptiveParallelismLimiter) Limit(profile ToolConcurrencyProfile) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if lim, ok := l.limits[profile]; ok {
+		return lim
+	}
+	return 0
+}
+
+// slotChannel returns the semaphore channel for the profile, initializing it
+// lazily if missing (defensive).
+func (l *AdaptiveParallelismLimiter) slotChannel(profile ToolConcurrencyProfile) chan struct{} {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	ch, ok := l.slots[profile]
+	if !ok {
+		// Unknown profile: create a single-slot channel as a safe default.
+		ch = make(chan struct{}, 1)
+		l.slots[profile] = ch
+		l.limits[profile] = 1
+	}
+	return ch
+}
+
 // ToolActionMap maps tool names to permission action categories.
 var ToolActionMap = map[string]string{
 	// File operations
@@ -358,15 +501,16 @@ func (r *ExecutionResult) ToChatMessage() llm.ChatMessage {
 
 // Executor handles tool execution with security checks.
 type Executor struct {
-	mu           sync.RWMutex
-	registry     ToolRegistry
-	security     *security.PermissionChecker
-	logger       *slog.Logger
-	parallelism  int
-	agentID      string          // Identifier for the agent/worker using this executor
-	cache        *ResultCache    // Tool result cache
-	bus          *bus.MessageBus // Optional: for publishing streaming progress events
-	depInferrer  *DependencyInferrer
+	mu                 sync.RWMutex
+	registry           ToolRegistry
+	security           *security.PermissionChecker
+	logger             *slog.Logger
+	parallelism        int
+	agentID            string // Identifier for the agent/worker using this executor
+	cache              *ResultCache
+	bus                *bus.MessageBus // Optional: for publishing streaming progress events
+	depInferrer        *DependencyInferrer
+	parallelismLimiter *AdaptiveParallelismLimiter
 }
 
 // ExecutorOption is a functional option for configuring an Executor.
@@ -424,13 +568,25 @@ func WithExecutorInferrer(inferrer *DependencyInferrer) ExecutorOption {
 	}
 }
 
+// WithExecutorParallelismLimiter sets a custom adaptive parallelism limiter.
+// If nil (or not provided), the executor initializes a default limiter with
+// baseParallelism matching the parallelism setting.
+func WithExecutorParallelismLimiter(limiter *AdaptiveParallelismLimiter) ExecutorOption {
+	return func(e *Executor) {
+		if limiter != nil {
+			e.parallelismLimiter = limiter
+		}
+	}
+}
+
 // NewExecutor creates a new tool executor.
 func NewExecutor(registry ToolRegistry, permChecker *security.PermissionChecker, opts ...ExecutorOption) *Executor {
 	e := &Executor{
-		registry:    registry,
-		security:    permChecker,
-		logger:      slog.Default(),
-		parallelism: 4, // Default parallelism
+		registry:           registry,
+		security:           permChecker,
+		logger:             slog.Default(),
+		parallelism:        4, // Default parallelism
+		parallelismLimiter: NewAdaptiveParallelismLimiter(4),
 	}
 
 	for _, opt := range opts {
@@ -728,10 +884,11 @@ func (e *Executor) inferDependencies(toolCalls []llm.ToolCall) *ToolDependencyGr
 	return e.depInferrer.InferDependencies(toolCalls)
 }
 
-// executeParallelGroup runs a group of independent tool calls in parallel using
-// the existing semaphore-based concurrency limiter. Results are returned in the
-// same order as the input slice so callers can correlate by position within
-// the group.
+// executeParallelGroup runs a group of independent tool calls in parallel.
+// Concurrency is limited per-tool via the AdaptiveParallelismLimiter when
+// configured; otherwise it falls back to the executor's base parallelism.
+// Results are returned in the same order as the input slice so callers can
+// correlate by position within the group.
 func (e *Executor) executeParallelGroup(ctx context.Context, group []llm.ToolCall) []*ExecutionResult {
 	if len(group) == 0 {
 		return nil
@@ -742,26 +899,26 @@ func (e *Executor) executeParallelGroup(ctx context.Context, group []llm.ToolCal
 
 	results := make([]*ExecutionResult, len(group))
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, e.parallelism)
 
 	for i, tc := range group {
 		wg.Add(1)
-		go func(idx int, toolCall llm.ToolCall) {
+		go func(idx int, call llm.ToolCall) {
 			defer wg.Done()
 
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-ctx.Done():
-				results[idx] = &ExecutionResult{
-					ToolCallID: toolCall.ID,
-					Success:    false,
-					Error:      "context cancelled",
+			if e.parallelismLimiter != nil {
+				profile := e.parallelismLimiter.ProfileForTool(call.Function.Name)
+				if err := e.parallelismLimiter.Acquire(ctx, profile); err != nil {
+					results[idx] = &ExecutionResult{
+						ToolCallID: call.ID,
+						Success:    false,
+						Error:      "context cancelled acquiring slot: " + err.Error(),
+					}
+					return
 				}
-				return
+				defer e.parallelismLimiter.Release(profile)
 			}
 
-			results[idx] = e.Execute(ctx, toolCall)
+			results[idx] = e.Execute(ctx, call)
 		}(i, tc)
 	}
 

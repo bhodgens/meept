@@ -3331,8 +3331,11 @@ func (l *AgentLoop) chatWithFailover(ctx context.Context, messages []llm.ChatMes
 // streaming. onDelta may be nil (non-streaming).
 func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.ChatMessage, onDelta llm.DeltaCallback, opts ...llm.ChatOption) (*llm.Response, error) {
 	const maxAttempts = 5
-	const maxBackoff = 30 * time.Second
-	baseBackoff := 2 * time.Second
+	// Backoff utility (Phase 3 of exponential-backoff plan). Previously this
+	// function used hand-rolled currentBackoff arithmetic; it now defers to
+	// the shared Backoff type so retry behavior is consistent across the
+	// codebase and covered by backoff_test.go.
+	llmBackoff := NewBackoff(LLMBackoffConfig())
 
 	// Prepend WithTaskScope option if scope is set
 	l.mu.RLock()
@@ -3359,7 +3362,6 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 	}
 
 	attempt := 0
-	currentBackoff := baseBackoff
 
 	for {
 		attempt++
@@ -3373,16 +3375,18 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 					"attempt", attempt,
 					"error", err,
 				)
-				// If all models in alias exhausted, apply backoff
+				// If all models in alias exhausted, apply backoff via shared utility.
 				if attempt < maxAttempts {
+					delay, ok := llmBackoff.NextDelay()
+					if !ok {
+						return nil, fmt.Errorf("max retry attempts (%d) reached for alias exhaustion: %w", maxAttempts, err)
+					}
 					l.logger.Info("Waiting before retry due to exhausted alias",
-						"backoff", currentBackoff,
+						"backoff", delay,
 						"attempt", attempt,
 					)
 					select {
-					case <-time.After(currentBackoff):
-						currentBackoff = time.Duration(float64(currentBackoff) * 2)
-						currentBackoff = min(currentBackoff, maxBackoff)
+					case <-time.After(delay):
 						continue
 					case <-ctx.Done():
 						return nil, ctx.Err()
@@ -3510,10 +3514,22 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 				return nil, fmt.Errorf("max retry attempts (%d) reached for rate limit: %w", maxAttempts, err)
 			}
 
-			// Use Retry-After header if available, otherwise use computed backoff
-			waitTime := currentBackoff
-			if rateLimitErr.RetryAfter > 0 && rateLimitErr.RetryAfter < maxBackoff {
+			// Use Retry-After header if available, otherwise use Backoff utility.
+			// Backoff.Sleep advances the attempt counter; we still cap via
+			// LLMBackoffConfig().MaxAttempts above (attempt < maxAttempts guard).
+			var waitTime time.Duration
+			if rateLimitErr.RetryAfter > 0 && rateLimitErr.RetryAfter <= 30*time.Second {
 				waitTime = rateLimitErr.RetryAfter
+				// Advance backoff attempt counter so subsequent retries grow.
+				if _, ok := llmBackoff.NextDelay(); !ok {
+					return nil, fmt.Errorf("max retry attempts (%d) reached for rate limit: %w", maxAttempts, err)
+				}
+			} else {
+				delay, ok := llmBackoff.NextDelay()
+				if !ok {
+					return nil, fmt.Errorf("max retry attempts (%d) reached for rate limit: %w", maxAttempts, err)
+				}
+				waitTime = delay
 			}
 
 			l.logger.Info("Waiting before retry due to rate limit",
@@ -3523,9 +3539,6 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 
 			select {
 			case <-time.After(waitTime):
-				// Increase backoff for next attempt
-				currentBackoff = time.Duration(float64(currentBackoff) * 2)
-				currentBackoff = min(currentBackoff, maxBackoff)
 				continue
 			case <-ctx.Done():
 				return nil, ctx.Err()

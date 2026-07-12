@@ -156,3 +156,99 @@ func TestBudgetHierarchy_GetStatus(t *testing.T) {
 		t.Error("turn budget should be positive in status after SelectPhaseBudget")
 	}
 }
+
+func TestBudgetHierarchy_Carryover(t *testing.T) {
+	h := NewBudgetHierarchy(10000, []string{"phase1", "phase2"}, []int{5000, 5000})
+
+	// Record 4000 used in phase1 (so Available = 5000 - 4000 = 1000)
+	h.phaseBudgets["phase1"].Allocate(4000)
+
+	availBefore := h.phaseBudgets["phase2"].totalBudget
+	if err := h.CarryoverUnused("phase1", "phase2"); err != nil {
+		t.Fatalf("CarryoverUnused failed: %v", err)
+	}
+
+	// phase2 should have gained ~1000
+	availAfter := h.phaseBudgets["phase2"].totalBudget
+	if availAfter != availBefore+1000 {
+		t.Errorf("expected phase2 total to increase by 1000 (%d -> %d)", availBefore, availAfter)
+	}
+
+	// phase1 should be marked as fully consumed
+	p1 := h.phaseBudgets["phase1"]
+	if p1.usedBudget != p1.totalBudget {
+		t.Errorf("expected phase1 usedBudget == totalBudget (%d), got usedBudget=%d", p1.totalBudget, p1.usedBudget)
+	}
+}
+
+func TestBudgetHierarchy_Carryover_NotAllowed(t *testing.T) {
+	h := NewBudgetHierarchy(10000, []string{"phase1", "phase2"}, []int{5000, 5000})
+
+	// Disable carryover on phase1 (phases default to allowCarryover=true via NewBudgetHierarchy)
+	h.phaseBudgets["phase1"].allowCarryover = false
+
+	err := h.CarryoverUnused("phase1", "phase2")
+	if err == nil {
+		t.Fatal("expected error when carryover not allowed, got nil")
+	}
+}
+
+func TestBudgetHierarchy_Carryover_NotFound(t *testing.T) {
+	h := NewBudgetHierarchy(10000, []string{"phase1", "phase2"}, []int{5000, 5000})
+
+	err := h.CarryoverUnused("nonexistent", "phase2")
+	if err == nil {
+		t.Fatal("expected error for non-existent source phase, got nil")
+	}
+
+	err = h.CarryoverUnused("phase1", "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent destination phase, got nil")
+	}
+}
+
+func TestBudgetHierarchy_BorrowForPhase(t *testing.T) {
+	h := NewBudgetHierarchy(10000, []string{"phase1", "phase2"}, []int{5000, 5000})
+
+	// phase1 fully consumed (requesting phase has 0 available)
+	h.phaseBudgets["phase1"].Allocate(5000)
+	if !h.phaseBudgets["phase1"].IsExhausted() {
+		t.Fatal("phase1 should be exhausted after allocating all 5000")
+	}
+
+	// phase2 has borrowing enabled and surplus
+	h.phaseBudgets["phase2"].WithBorrowing(true)
+
+	totalBefore := h.phaseBudgets["phase1"].totalBudget
+	ok := h.BorrowForPhase("phase1", 1000)
+	if !ok {
+		t.Fatal("BorrowForPhase should succeed when sibling has surplus and borrowing enabled")
+	}
+
+	// phase1 totalBudget should increase by 1000
+	totalAfter := h.phaseBudgets["phase1"].totalBudget
+	if totalAfter != totalBefore+1000 {
+		t.Errorf("expected phase1 total to increase by 1000 (%d -> %d)", totalBefore, totalAfter)
+	}
+
+	// phase2 should have 1000 more used
+	used2 := h.phaseBudgets["phase2"].Used()
+	if used2 != 1000 {
+		t.Errorf("expected phase2 used=1000 after lending, got %d", used2)
+	}
+}
+
+func TestBudgetHierarchy_BorrowForPhase_NoSurplus(t *testing.T) {
+	h := NewBudgetHierarchy(10000, []string{"phase1", "phase2"}, []int{5000, 5000})
+
+	// Exhaust both phases
+	h.phaseBudgets["phase1"].Allocate(5000)
+	h.phaseBudgets["phase2"].Allocate(5000)
+	h.phaseBudgets["phase2"].WithBorrowing(true)
+
+	// Neither has surplus; borrow should fail
+	ok := h.BorrowForPhase("phase1", 1000)
+	if ok {
+		t.Fatal("BorrowForPhase should return false when no sibling has surplus")
+	}
+}

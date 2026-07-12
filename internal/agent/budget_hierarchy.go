@@ -420,6 +420,108 @@ func (h *BudgetHierarchy) GetStatus() BudgetStatus {
 	return status
 }
 
+// CarryoverUnused moves unused budget from one phase to another. The source
+// phase must have allowCarryover enabled. After carryover, the source phase's
+// usedBudget is set equal to its totalBudget so it appears fully consumed for
+// accounting purposes.
+func (h *BudgetHierarchy) CarryoverUnused(fromPhaseID, toPhaseID string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	fromPhase, ok := h.phaseBudgets[fromPhaseID]
+	if !ok {
+		return fmt.Errorf("source phase %s not found", fromPhaseID)
+	}
+	if !fromPhase.allowCarryover {
+		return fmt.Errorf("phase %s does not allow carryover", fromPhaseID)
+	}
+
+	toPhase, ok := h.phaseBudgets[toPhaseID]
+	if !ok {
+		return fmt.Errorf("destination phase %s not found", toPhaseID)
+	}
+
+	unused := fromPhase.Available()
+	if unused <= 0 {
+		return nil // Nothing to carry over
+	}
+
+	// Transfer budget to destination phase
+	toPhase.mu.Lock()
+	toPhase.totalBudget += unused
+	toPhase.mu.Unlock()
+
+	// Mark source phase as fully consumed
+	fromPhase.mu.Lock()
+	fromPhase.usedBudget = fromPhase.totalBudget
+	fromPhase.mu.Unlock()
+
+	if h.logger != nil {
+		h.logger.Info("budget carryover",
+			"from", fromPhaseID,
+			"to", toPhaseID,
+			"amount", unused)
+	}
+
+	return nil
+}
+
+// BorrowForPhase attempts to borrow tokens from a sibling phase that has
+// borrowing enabled and sufficient surplus. The sibling with the most surplus
+// is preferred. Returns true if the borrow succeeded, false otherwise.
+func (h *BudgetHierarchy) BorrowForPhase(phaseID string, tokens int) bool {
+	if tokens <= 0 {
+		return false
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	phase, ok := h.phaseBudgets[phaseID]
+	if !ok {
+		return false
+	}
+
+	// Find the sibling with the most surplus that allows borrowing.
+	var bestSibling *BudgetAllocation
+	bestSurplus := 0
+	for id, sibling := range h.phaseBudgets {
+		if id == phaseID {
+			continue
+		}
+		if !sibling.allowBorrowing {
+			continue
+		}
+		surplus := sibling.Available()
+		if surplus >= tokens && surplus > bestSurplus {
+			bestSibling = sibling
+			bestSurplus = surplus
+		}
+	}
+
+	if bestSibling == nil {
+		return false
+	}
+
+	// Deduct from sibling
+	bestSibling.mu.Lock()
+	bestSibling.usedBudget += tokens
+	bestSibling.mu.Unlock()
+
+	// Add to requesting phase
+	phase.mu.Lock()
+	phase.totalBudget += tokens
+	phase.mu.Unlock()
+
+	if h.logger != nil {
+		h.logger.Info("budget borrow",
+			"phase", phaseID,
+			"amount", tokens)
+	}
+
+	return true
+}
+
 // budgetToStatus converts a BudgetAllocation to an exported BudgetSummary.
 func (h *BudgetHierarchy) budgetToStatus(b *BudgetAllocation) BudgetSummary {
 	if b == nil {
