@@ -1416,6 +1416,17 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 	return loop
 }
 
+// LookupLoop returns the AgentLoop responsible for a given conversation/session
+// ID. It is the public accessor over sessionLoop for external callers (HTTP
+// server state queries, RPC handlers, etc.). Returns nil if the handler has no
+// loop available.
+func (h *ChatHandler) LookupLoop(conversationID string) *AgentLoop {
+	if h == nil {
+		return nil
+	}
+	return h.sessionLoop(conversationID)
+}
+
 // startCollaborationSession initiates a collaboration session via the CollaborationEngine
 // and returns an acknowledgment. The session runs asynchronously; results are delivered
 // via the collaboration.result bus topic and pushed back to chat by handleCollabResult.

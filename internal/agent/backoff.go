@@ -3,40 +3,233 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/caimlas/meept/internal/errcls"
+	"github.com/caimlas/meept/internal/llm"
 )
 
-// --- WIP stubs: definitions for stubbed-in symbols from backoff enhancement plan ---
+// --- Error classification and retry budget ---
 
-// RetryBudget tracks how many retries are still allowed.
-type RetryBudget struct {
-	mu      sync.Mutex
-	allowed int
+// ErrRetryBudgetExhausted indicates no retries remain.
+var ErrRetryBudgetExhausted = errors.New("retry budget exhausted")
+
+// RetryableError indicates an error that may be retried. Implementations
+// provide a retry-after hint and a retryable flag so callers can make
+// informed decisions without type-switching on concrete error types.
+type RetryableError interface {
+	error
+	// RetryAfter returns the recommended wait time before retrying.
+	// Returns 0 if no specific wait time is recommended.
+	RetryAfter() time.Duration
+	// IsRetryable returns true if this specific error instance should be retried.
+	IsRetryable() bool
 }
 
-// TryUse decrements the budget and returns true if a retry is allowed.
-func (rb *RetryBudget) TryUse(label string) bool {
-	rb.mu.Lock()
-	defer rb.mu.Unlock()
-	if rb.allowed > 0 {
-		rb.allowed--
+// retryableError wraps an error with retry metadata.
+type retryableError struct {
+	err        error
+	retryable  bool
+	retryAfter time.Duration
+	reason     string
+}
+
+func (e *retryableError) Error() string {
+	if e.reason != "" {
+		return e.err.Error() + " (" + e.reason + ")"
+	}
+	return e.err.Error()
+}
+
+func (e *retryableError) Unwrap() error {
+	return e.err
+}
+
+func (e *retryableError) RetryAfter() time.Duration {
+	return e.retryAfter
+}
+
+func (e *retryableError) IsRetryable() bool {
+	return e.retryable
+}
+
+// Retryable wraps an error as retryable with the given metadata.
+// Returns nil if err is nil (nil guard).
+func Retryable(err error, retryable bool, retryAfter time.Duration, reason string) error {
+	if err == nil {
+		return nil
+	}
+	return &retryableError{
+		err:        err,
+		retryable:  retryable,
+		retryAfter: retryAfter,
+		reason:     reason,
+	}
+}
+
+// IsRetryable returns true if the error is retryable.
+// It first checks the RetryableError interface, then delegates to
+// errcls.IsRetryable for network/HTTP/rate-limit classification, and
+// finally falls back to string matching for common transient error messages.
+func IsRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// 1. Try the RetryableError interface (covers errors wrapped via Retryable()).
+	var re RetryableError
+	if errors.As(err, &re) {
+		return re.IsRetryable()
+	}
+
+	// 2. llm.RateLimitError is always retryable.
+	var rateLimitErr *llm.RateLimitError
+	if errors.As(err, &rateLimitErr) {
 		return true
 	}
+
+	// 3. Delegate to errcls for structured network/HTTP/context classification.
+	if errcls.IsRetryable(err) {
+		return true
+	}
+
+	// 4. HTTPError with a retryable status code.
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) {
+		return isRetryableHTTPStatus(httpErr.StatusCode)
+	}
+
+	// 5. String fallback for common transient error messages that lack
+	// structured error types.
+	errMsg := err.Error()
+	if strings.Contains(errMsg, "connection reset") ||
+		strings.Contains(errMsg, "connection refused") ||
+		strings.Contains(errMsg, "EOF") {
+		return true
+	}
+
 	return false
 }
 
-var ErrRetryBudgetExhausted = errors.New("retry budget exhausted")
+// GetRetryAfter extracts a retry-after hint from an error if available.
+// Returns 0 when there is no hint.
+func GetRetryAfter(err error) time.Duration {
+	if err == nil {
+		return 0
+	}
 
-// IsRetryable checks whether an error qualifies for automatic retry.
-func IsRetryable(err error) bool {
-	return err != nil && errors.Is(err, context.DeadlineExceeded)
+	var re RetryableError
+	if errors.As(err, &re) {
+		return re.RetryAfter()
+	}
+
+	var rateLimitErr *llm.RateLimitError
+	if errors.As(err, &rateLimitErr) {
+		return rateLimitErr.RetryAfter
+	}
+
+	return 0
 }
 
-// GetRetryAfter extracts a Retry-After hint from an error, if present.
-// Returns 0 when there is no hint.
-func GetRetryAfter(err error) time.Duration { return 0 }
+// isRetryableHTTPStatus returns true for HTTP status codes that are worth retrying.
+func isRetryableHTTPStatus(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests,     // 429
+		http.StatusBadGateway,            // 502
+		http.StatusServiceUnavailable,    // 503
+		http.StatusGatewayTimeout,        // 504
+		http.StatusRequestTimeout,        // 408
+		http.StatusInternalServerError,   // 500 (sometimes transient)
+		http.StatusConflict:              // 409 (sometimes transient, e.g., concurrent modification)
+		return true
+	default:
+		return false
+	}
+}
+
+// HTTPError represents an HTTP error response with status code, body, and URL.
+// It implements the IsRetryable() bool method but does NOT satisfy the
+// RetryableError interface (no RetryAfter method).
+type HTTPError struct {
+	StatusCode int
+	Body       string
+	URL        string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Body)
+}
+
+// IsRetryable returns true if the HTTP status code warrants a retry.
+func (e *HTTPError) IsRetryable() bool {
+	return isRetryableHTTPStatus(e.StatusCode)
+}
+
+// RetryBudget tracks how many retries remain for an operation chain.
+type RetryBudget struct {
+	mu      sync.Mutex
+	max     int
+	current int
+	usedBy  map[string]int // operation -> attempts used
+}
+
+// NewRetryBudget creates a new retry budget.
+func NewRetryBudget(max int) *RetryBudget {
+	return &RetryBudget{
+		max:     max,
+		current: max,
+		usedBy:  make(map[string]int),
+	}
+}
+
+// TryUse attempts to use one retry for the given operation (label).
+// Returns true if successful (budget available), false if exhausted.
+func (b *RetryBudget) TryUse(operation string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.current <= 0 {
+		return false
+	}
+
+	b.current--
+	b.usedBy[operation]++
+	return true
+}
+
+// Remaining returns the number of retries left.
+func (b *RetryBudget) Remaining() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.current
+}
+
+// Used returns the number of retries used.
+func (b *RetryBudget) Used() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.max - b.current
+}
+
+// UsedBy returns how many retries a specific operation used.
+func (b *RetryBudget) UsedBy(operation string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.usedBy[operation]
+}
+
+// Reset restores the budget to full.
+func (b *RetryBudget) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.current = b.max
+	b.usedBy = make(map[string]int)
+}
 
 // BackoffConfig configures exponential backoff behavior.
 type BackoffConfig struct {

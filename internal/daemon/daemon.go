@@ -814,6 +814,22 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				logger.Info("Firewall stats HTTP getter registered")
 			}
 
+			// Wire agent state getter for GET /api/v1/sessions/{id}/state
+			// (Phase 3 of agent state machine formalization plan). Uses the
+			// ChatHandler's per-session loop lookup so the snapshot reflects
+			// the loop actually servicing the conversation.
+			if components.ChatHandler != nil {
+				chatHandlerRef := components.ChatHandler
+				httpSrv.AgentStateGetter = func(sessionID string) (agent.AgentStateSnapshot, error) {
+					loop := chatHandlerRef.LookupLoop(sessionID)
+					if loop == nil {
+						return agent.AgentStateSnapshot{}, fmt.Errorf("no agent loop for session %q", sessionID)
+					}
+					return loop.GetStateSnapshot(), nil
+				}
+				logger.Info("Agent state HTTP getter registered", "endpoint", "/api/v1/sessions/{id}/state")
+			}
+
 			// Wire budget stats getter for HTTP endpoint (FIX #0031/#0035)
 			if components.LLMClient != nil {
 				budget := components.LLMClient.Budget()

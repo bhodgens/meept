@@ -19,6 +19,11 @@ const (
 	EventAgentStarted   = "agent.lifecycle.started"
 	EventAgentEnded     = "agent.lifecycle.ended"
 	EventAgentIteration = "agent.iteration.completed"
+
+	// EventAgentStateChanged is published when an agent transitions between
+	// formal states (see internal/agent/agent_state.go). Payload is
+	// agent.StateTransition.
+	EventAgentStateChanged = "agent.state.changed"
 )
 
 // Session lifecycle event topics.

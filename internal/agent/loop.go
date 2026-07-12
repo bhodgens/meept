@@ -1390,6 +1390,23 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 	}
 	loop.stateMachine = NewAgentStateMachine(loop.logger)
 
+	// Publish state transitions to the message bus (Phase 3.3 of agent state
+	// machine formalization plan). Listener is registered after the bus field
+	// is wired (via WithMessageBus option applied above).
+	if loop.bus != nil {
+		busRef := loop.bus
+		loop.stateMachine.OnTransition(func(t StateTransition) {
+			msg, err := models.NewBusMessage(models.MessageTypeEvent, loop.agentID, t)
+			if err != nil {
+				loop.logger.Debug("state-change bus marshal failed",
+					"error", err, "to", t.To)
+				return
+			}
+			msg.Topic = bus.EventAgentStateChanged
+			busRef.Publish(bus.EventAgentStateChanged, msg)
+		})
+	}
+
 	// Initialize detectors
 	loop.cycleDetector = newCycleDetector(loop.detectionConfig, loop.logger)
 	loop.convergenceDetector = newConvergenceDetector(loop.detectionConfig, loop.logger)
@@ -2798,7 +2815,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					"error":   err.Error(),
 					"iteration": iteration,
 				})
-				return "", fmt.Errorf("LLM call failed: %w", err)
+				return "", l.handleErrorBasedOnState(fmt.Errorf("LLM call failed: %w", err))
 			}
 		}
 		// Clear per-turn reasoning after the LLM call consumes it.
@@ -3224,6 +3241,51 @@ func (l *AgentLoop) GetStateSnapshot() AgentStateSnapshot {
 		Timestamp:      time.Now(),
 	}
 	return snap
+}
+
+// handleErrorBasedOnState dispatches error handling based on the current agent
+// state (Phase 4 of agent state machine formalization plan). It returns the
+// error the caller should surface (possibly wrapped or transformed), or nil if
+// the error was fully absorbed by a recovery action.
+//
+// State semantics:
+//   - StateThinking: LLM call failed — delegate to model failover logic.
+//     The caller already attempts failover in chatWithFailover; this only
+//     logs the state-tagged context so downstream consumers can correlate.
+//   - StateToolExecuting: tool failure — check retryability.
+//   - StateBlocked: awaiting approval or rate-limit lift — do NOT retry.
+//   - StateBudgetExhausted / StateMaxIterations: terminal — wrap up.
+//   - default: pass-through.
+func (l *AgentLoop) handleErrorBasedOnState(err error) error {
+	if err == nil || l.stateMachine == nil {
+		return err
+	}
+	state := l.stateMachine.CurrentState()
+	switch state {
+	case StateThinking:
+		// LLM failure — tagged in history already; let caller's failover handle it.
+		l.logger.Debug("error during thinking state",
+			"error", err.Error(), "state", state.String())
+		return err
+	case StateToolExecuting:
+		// Tool failures are generally surfaced verbatim; the loop's tool-call
+		// dispatcher decides whether to feed the error back to the LLM.
+		l.logger.Debug("error during tool execution",
+			"error", err.Error(), "state", state.String())
+		return err
+	case StateBlocked:
+		// Awaiting external action (approval / rate-limit). Never auto-retry.
+		l.logger.Debug("error while blocked — surfacing without retry",
+			"error", err.Error(), "state", state.String())
+		return err
+	case StateBudgetExhausted, StateMaxIterations:
+		// Terminal resource limits — graceful wrap-up. Caller returns to user.
+		l.logger.Debug("terminal state error — wrapping up",
+			"error", err.Error(), "state", state.String())
+		return fmt.Errorf("%s: %w", state.String(), err)
+	default:
+		return err
+	}
 }
 
 // chatWithFailover wraps LLM Chat calls with model rotation and backoff for rate limit handling.
