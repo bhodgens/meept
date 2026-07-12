@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -319,15 +320,27 @@ type Backoff struct {
 	attempt int
 	mu      sync.Mutex
 	rng     *rand.Rand
+	logger  *slog.Logger
 }
 
 // NewBackoff creates a new backoff instance with a deterministic-seeded RNG.
+// The logger defaults to slog.Default(); override with WithLogger.
 func NewBackoff(config BackoffConfig) *Backoff {
 	return &Backoff{
 		config:  config,
 		rng:     rand.New(rand.NewSource(time.Now().UnixNano())),
 		attempt: 0,
+		logger:  slog.Default(),
 	}
+}
+
+// WithLogger sets the structured logger for backoff events. Returns the same
+// Backoff pointer for chaining. If l is nil, the logger is left unchanged.
+func (b *Backoff) WithLogger(l *slog.Logger) *Backoff {
+	if l != nil {
+		b.logger = l
+	}
+	return b
 }
 
 // NextDelay returns the next delay duration and whether more retries are allowed.
@@ -385,11 +398,21 @@ func (b *Backoff) Reset() {
 func (b *Backoff) Sleep(ctx context.Context) bool {
 	delay, ok := b.NextDelay()
 	if !ok {
+		b.logger.Debug("backoff max attempts reached",
+			"attempt", b.attempt,
+			"max_attempts", b.config.MaxAttempts,
+		)
 		return false
 	}
 
+	b.logger.Debug("backoff waiting",
+		"attempt", b.attempt,
+		"delay_ms", delay.Milliseconds(),
+	)
+
 	select {
 	case <-ctx.Done():
+		b.logger.Debug("backoff interrupted by context cancellation")
 		return false
 	case <-time.After(delay):
 		return true
@@ -410,10 +433,16 @@ func RunWithRetry[T any](ctx context.Context, config BackoffConfig, fn func() (T
 
 	var lastErr error
 	var first bool = true
+	var attempt int
 
 	for {
 		result, err := fn()
 		if err == nil {
+			if attempt > 0 {
+				backoff.logger.Debug("retry succeeding after attempts",
+					"attempts", attempt+1,
+				)
+			}
 			return result, nil
 		}
 
@@ -424,6 +453,9 @@ func RunWithRetry[T any](ctx context.Context, config BackoffConfig, fn func() (T
 
 		// Check if error is retryable
 		if !IsRetryable(err) {
+			backoff.logger.Debug("retry stopped: non-retryable error",
+				"error", err.Error(),
+			)
 			return zero, err
 		}
 
@@ -433,6 +465,12 @@ func RunWithRetry[T any](ctx context.Context, config BackoffConfig, fn func() (T
 				return zero, ErrRetryBudgetExhausted
 			}
 		}
+
+		backoff.logger.Debug("retrying after error",
+			"attempt", attempt,
+			"error", err.Error(),
+		)
+		attempt++
 
 		// If error carries a Retry-After hint, honor it instead of backoff.
 		if retryAfter := GetRetryAfter(err); retryAfter > 0 {

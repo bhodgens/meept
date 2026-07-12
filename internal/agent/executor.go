@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/code/ast"
@@ -244,6 +245,117 @@ type ExecutionResult struct {
 	// When non-empty, downstream policy checks can apply stricter rules
 	// (e.g., blocking the tainted value from reaching shell_exec).
 	TaintLabel taint.TaintLabel `json:"taint_label,omitempty"`
+	// CascadeFrom is the tool call ID that caused this failure (if cascading).
+	CascadeFrom string `json:"cascade_from,omitempty"`
+	// IsCascading is true when this failure is a downstream effect of an earlier failure.
+	IsCascading bool `json:"is_cascading,omitempty"`
+}
+
+// ErrorSeverity classifies the severity of a parallel execution error.
+type ErrorSeverity string
+
+const (
+	ErrorSeverityCritical ErrorSeverity = "critical"
+	ErrorSeverityWarning  ErrorSeverity = "warning"
+	ErrorSeverityInfo     ErrorSeverity = "info"
+)
+
+// ParallelExecutionError aggregates errors from multiple tool calls in a parallel batch.
+type ParallelExecutionError struct {
+	ToolCallID    string        `json:"tool_call_id"`
+	Message       string        `json:"error"`
+	IsCascading   bool          `json:"is_cascading"`
+	CascadeSource string        `json:"cascade_source"`
+	RelatedErrors []string      `json:"related_errors"`
+	Severity      ErrorSeverity `json:"severity"`
+}
+
+// Error returns the error string for the parallel execution error.
+func (e *ParallelExecutionError) Error() string {
+	if e.CascadeSource != "" {
+		return fmt.Sprintf("tool %s failed (cascading from %s): %s", e.ToolCallID, e.CascadeSource, e.Message)
+	}
+	return fmt.Sprintf("tool %s failed: %s", e.ToolCallID, e.Message)
+}
+
+// detectCascadingErrors marks downstream failures caused by an upstream failure.
+// When a tool call fails and other calls depended on it, those dependent calls
+// would have been skipped or received no data — their failures are cascading
+// symptoms rather than independent root causes.
+func detectCascadingErrors(results []*ExecutionResult, graph *ToolDependencyGraph) []*ExecutionResult {
+	if graph == nil || len(results) == 0 {
+		return results
+	}
+
+	// Build a set of failed tool call IDs.
+	failedIDs := make(map[string]bool)
+	for _, r := range results {
+		if r == nil {
+			continue
+		}
+		if !r.Success {
+			failedIDs[r.ToolCallID] = true
+		}
+	}
+
+	// For each failed result, check if it had upstream dependencies that also failed.
+	// If so, mark it as cascading.
+	for _, r := range results {
+		if r == nil || r.Success {
+			continue
+		}
+		deps := graph.GetDependencies(r.ToolCallID)
+		for _, depID := range deps {
+			if failedIDs[depID] {
+				// This failure is downstream of another failure.
+				r.IsCascading = true
+				r.CascadeFrom = depID
+				break
+			}
+		}
+	}
+
+	return results
+}
+
+// AggregateErrors converts ExecutionResult failures into a ParallelExecutionError
+// slice with severity heuristics for downstream observability.
+// Cascading failures get Warning severity (they are symptoms, not root causes).
+// Non-cascading failures get Critical severity.
+func AggregateErrors(results []*ExecutionResult) []*ParallelExecutionError {
+	var errors []*ParallelExecutionError
+	for _, r := range results {
+		if r == nil || r.Success {
+			continue
+		}
+		pe := &ParallelExecutionError{
+			ToolCallID:  r.ToolCallID,
+			Message:     r.Error,
+			IsCascading: r.IsCascading,
+		}
+		if r.IsCascading {
+			pe.CascadeSource = r.CascadeFrom
+			pe.Severity = ErrorSeverityWarning
+		} else {
+			pe.Severity = ErrorSeverityCritical
+		}
+		errors = append(errors, pe)
+	}
+	// Populate RelatedErrors: each cascading error references the root cause's
+	// tool call ID and vice versa.
+	for _, pe := range errors {
+		if pe.IsCascading && pe.CascadeSource != "" {
+			for _, root := range errors {
+				if root.ToolCallID == pe.CascadeSource {
+					root.RelatedErrors = append(root.RelatedErrors, pe.ToolCallID)
+				}
+			}
+		}
+	}
+	if errors == nil {
+		return nil
+	}
+	return errors
 }
 
 // ToJSON converts the result to a JSON string.
@@ -738,17 +850,12 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 		"args_summary", summarizeArgs(args),
 	)
 
-	// Check if tool supports streaming progress
-	var toolResult any
-	var toolErr error
-	if st, ok := tool.(tools.StreamingTool); ok && e.bus != nil {
-		toolResult, toolErr = st.ExecuteStreaming(ctx, args, func(pu tools.ProgressUpdate) {
-			pu.ToolCallID = toolCall.ID
-			e.publishToolProgress(ctx, toolCall.ID, toolName, pu)
-		})
-	} else {
-		toolResult, toolErr = tool.Execute(ctx, args)
-	}
+	// Execute with retry on retryable errors. Only the actual tool execution
+	// call is retried — all earlier exit paths (cache hit, unknown tool,
+	// permission denied, security block) are deterministic failures that
+	// bypass this code entirely.
+	retryConfig := e.getRetryConfigForTool(toolName)
+	toolResult, toolErr := e.executeToolWithRetry(ctx, tool, retryConfig, toolCall.ID, toolName, args)
 	if toolErr != nil {
 		e.logger.Error("Tool execution failed",
 			"agent", e.agentID,
@@ -817,6 +924,119 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	return result
 }
 
+// executeToolWithRetry runs a single tool's execution with exponential backoff
+// retry on retryable errors. Non-retryable errors and successes return
+// immediately. Streaming tools use their streaming path when the bus is
+// available.
+func (e *Executor) executeToolWithRetry(ctx context.Context, tool tools.Tool, config BackoffConfig, toolCallID, toolName string, args map[string]any) (any, error) {
+	backoff := NewBackoff(config)
+	var lastErr error
+
+	for {
+		// Check context before attempting.
+		if err := ctx.Err(); err != nil {
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, err
+		}
+
+		var toolResult any
+		var toolErr error
+		if st, ok := tool.(tools.StreamingTool); ok && e.bus != nil {
+			toolResult, toolErr = st.ExecuteStreaming(ctx, args, func(pu tools.ProgressUpdate) {
+				pu.ToolCallID = toolCallID
+				e.publishToolProgress(ctx, toolCallID, toolName, pu)
+			})
+		} else {
+			toolResult, toolErr = tool.Execute(ctx, args)
+		}
+
+		if toolErr == nil {
+			return toolResult, nil
+		}
+
+		lastErr = toolErr
+
+		// Only retry if the error is classified as retryable.
+		if !IsRetryable(toolErr) {
+			return nil, toolErr
+		}
+
+		e.logger.Debug("Tool execution failed (retryable), will retry",
+			"agent", e.agentID,
+			"tool", toolName,
+			"error", toolErr,
+		)
+
+		// Honor Retry-After hint if present, otherwise use backoff.
+		if retryAfter := GetRetryAfter(toolErr); retryAfter > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, lastErr
+			case <-time.After(retryAfter):
+			}
+		} else {
+			if !backoff.Sleep(ctx) {
+				// Context cancelled or max attempts exhausted.
+				return nil, lastErr
+			}
+		}
+	}
+}
+
+// getRetryConfigForTool returns the backoff configuration appropriate for the
+// given tool. Network tools get more retries with longer delays; shell tools
+// get fewer retries with shorter delays; all others use the default config.
+func (e *Executor) getRetryConfigForTool(toolName string) BackoffConfig {
+	// Network tools: more retries, longer delays.
+	if toolName == "web_search" || toolName == "web_fetch" {
+		return BackoffConfig{
+			BaseDelay:   2 * time.Second,
+			MaxDelay:    30 * time.Second,
+			Multiplier:  2.0,
+			Jitter:      0.3,
+			MaxAttempts: 5,
+		}
+	}
+	// Shell commands: fewer retries, shorter delays.
+	if toolName == "shell" {
+		return BackoffConfig{
+			BaseDelay:   1 * time.Second,
+			MaxDelay:    10 * time.Second,
+			Multiplier:  1.5,
+			Jitter:      0.2,
+			MaxAttempts: 2,
+		}
+	}
+	// Default.
+	return DefaultBackoffConfig()
+}
+
+// trackCombinedTaint creates a ParallelTaintTracker, records taint labels from
+// successful results, and logs a warning if the combined taint is non-none.
+// This is observability-only — results are not modified.
+func (e *Executor) trackCombinedTaint(results []*ExecutionResult) {
+	tracker := taint.NewParallelTaintTracker()
+	var successfulCallIDs []string
+	for _, r := range results {
+		if r == nil || !r.Success {
+			continue
+		}
+		if r.TaintLabel != taint.TaintNone && r.TaintLabel != "" {
+			tracker.RecordTaint(r.ToolCallID, r.TaintLabel)
+		}
+		successfulCallIDs = append(successfulCallIDs, r.ToolCallID)
+	}
+	combinedTaint := tracker.GetCombinedTaint(successfulCallIDs)
+	if combinedTaint != taint.TaintNone && combinedTaint != "" {
+		e.logger.Warn("parallel execution produced combined taint",
+			"taint", combinedTaint,
+			"tool_calls", successfulCallIDs,
+		)
+	}
+}
+
 // ExecuteAll runs multiple tool calls with dependency-aware scheduling.
 //
 // Independent tool calls are executed in parallel within each wave (group);
@@ -864,9 +1084,19 @@ func (e *Executor) ExecuteAll(ctx context.Context, toolCalls []llm.ToolCall) []*
 					}
 				}
 			}
+			// Detect cascading errors before returning early.
+			detectCascadingErrors(results, graph)
+			e.trackCombinedTaint(results)
 			return results
 		}
 	}
+
+	// Detect cascading errors: mark downstream failures that were caused by
+	// upstream failures in the dependency graph.
+	detectCascadingErrors(results, graph)
+
+	// Track combined taint from parallel execution for observability.
+	e.trackCombinedTaint(results)
 
 	return results
 }

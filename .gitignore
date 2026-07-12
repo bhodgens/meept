@@ -25,6 +25,8 @@ Thumbs.db
 .coverage
 htmlcov/
 .mypy_cache/
+__pycache__/
+*.pyc
 
 # Runtime
 *.sock
