@@ -141,10 +141,10 @@ func (c *httpClient) verifyPinnedCert(rawCerts [][]byte, _ [][]*x509.Certificate
 	return nil
 }
 
-// isLoopbackBaseURL reports whether the host portion of baseURL resolves to
+// IsLoopbackBaseURL reports whether the host portion of baseURL resolves to
 // loopback. Used by DefaultConfig in client.go to decide whether to set
 // InsecureSkipVerify=true when no pin is configured.
-func isLoopbackBaseURL(baseURL string) bool {
+func IsLoopbackBaseURL(baseURL string) bool {
 	host := baseURL
 	if u, err := url.Parse(baseURL); err == nil && u.Host != "" {
 		host = u.Hostname()
@@ -249,7 +249,7 @@ func (c *httpClient) callAPI(ctx context.Context, method string, params any) (js
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
-		return data, nil
+		return nil, fmt.Errorf("malformed bus response: %w (body: %.200s)", err, string(data))
 	}
 	if result.Error != nil {
 		return nil, fmt.Errorf("[%d] %s", result.Error.Code, result.Error.Message)

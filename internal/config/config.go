@@ -191,7 +191,9 @@ func ExpandEnvVars(s string) (string, error) {
 			if val, ok := os.LookupEnv(varName); ok {
 				return val
 			}
-			// Return empty string for undefined variables
+			// Log a warning for undefined env vars so empty substitutions
+			// are visible. Return empty string to preserve existing behavior.
+			slog.Warn("config references undefined environment variable", "var", varName)
 			return ""
 		})
 		// If no more env vars to expand, we're done

@@ -102,10 +102,17 @@ func NewShardManager(cfg ShardManagerConfig) (*ShardManager, error) {
 }
 
 // loadShard loads or creates a shard of the given type.
+// This acquires m.mu.Lock() — do NOT call from within a held lock;
+// use loadShardLocked instead.
 func (m *ShardManager) loadShard(shardType ShardType) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.loadShardLocked(shardType)
+}
 
+// loadShardLocked loads or creates a shard of the given type.
+// Caller MUST hold m.mu.
+func (m *ShardManager) loadShardLocked(shardType ShardType) error {
 	// Already loaded?
 	if _, ok := m.shards[shardType]; ok {
 		return nil
@@ -154,9 +161,9 @@ func (m *ShardManager) unloadShard(shardType ShardType) error {
 func (m *ShardManager) GetShard(shardType ShardType) (*VectorShard, error) {
 	m.mu.Lock()
 
-	// Load if not present
+	// Load if not present (using lock-free variant since we hold the lock)
 	if _, ok := m.shards[shardType]; !ok {
-		if err := m.loadShard(shardType); err != nil {
+		if err := m.loadShardLocked(shardType); err != nil {
 			m.mu.Unlock()
 			return nil, err
 		}

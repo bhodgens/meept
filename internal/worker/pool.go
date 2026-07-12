@@ -28,6 +28,7 @@ type Pool struct {
 	logger    *slog.Logger
 
 	mu        sync.RWMutex
+	ctx       context.Context
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
 	startOnce sync.Once
@@ -78,6 +79,7 @@ func (p *Pool) Start(ctx context.Context, workerCount int) error {
 	var startErr error
 	p.startOnce.Do(func() {
 		ctx, p.cancel = context.WithCancel(ctx)
+		p.ctx = ctx
 
 		// Start workers
 		for i := range workerCount {
@@ -114,6 +116,11 @@ func (p *Pool) Start(ctx context.Context, workerCount int) error {
 		})
 	})
 	if startErr != nil {
+		// Partial start: some workers may be running, context is set,
+		// and startOnce has fired. The caller can either proceed with
+		// the workers that succeeded (call Start again — it will be a
+		// no-op returning nil since startOnce already fired) or call
+		// Stop to reset the pool and retry cleanly.
 		return startErr
 	}
 	if p.cancel == nil {
@@ -122,7 +129,9 @@ func (p *Pool) Start(ctx context.Context, workerCount int) error {
 	return nil
 }
 
-// Stop gracefully stops all workers.
+// Stop gracefully stops all workers. After Stop returns, Start can be
+// called again without requiring a new NewPool — the startOnce guard,
+// context, and worker map are all reset.
 func (p *Pool) Stop(ctx context.Context) error {
 	p.mu.Lock()
 	if p.cancel == nil {
@@ -131,6 +140,7 @@ func (p *Pool) Stop(ctx context.Context) error {
 	}
 	p.cancel()
 	p.cancel = nil
+	p.ctx = nil
 	p.mu.Unlock()
 
 	// Wait for all workers with timeout
@@ -147,6 +157,12 @@ func (p *Pool) Stop(ctx context.Context) error {
 		p.logger.Warn("Worker pool shutdown timed out")
 		return ctx.Err()
 	}
+
+	// Reset the pool so Start() can be called again (A-16).
+	p.mu.Lock()
+	p.workers = make(map[string]*Worker)
+	p.startOnce = sync.Once{}
+	p.mu.Unlock()
 
 	p.publishEvent("worker.pool.stopped", nil)
 	return nil
@@ -224,6 +240,20 @@ func (p *Pool) GetWorkers() []*Worker {
 	return workers
 }
 
+// GetWaitGroup returns the pool's WaitGroup so externally added workers
+// can be tracked for graceful shutdown.
+func (p *Pool) GetWaitGroup() *sync.WaitGroup {
+	return &p.wg
+}
+
+// GetContext returns the pool's long-lived context, or nil if the pool
+// has not been started yet.
+func (p *Pool) GetContext() context.Context {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.ctx
+}
+
 // GetStats returns pool statistics.
 func (p *Pool) GetStats() PoolStats {
 	p.mu.RLock()
@@ -257,10 +287,15 @@ func (p *Pool) GetStats() PoolStats {
 // This follows the "collect under lock, release, then operate" pattern
 // from CLAUDE.md, since holding the lock across AddWorker/RemoveWorker
 // would deadlock.
-func (p *Pool) Scale(ctx context.Context, targetCount int) error {
+func (p *Pool) Scale(_ context.Context, targetCount int) error {
 	p.mu.RLock()
 	currentCount := len(p.workers)
+	poolCtx := p.ctx
 	p.mu.RUnlock()
+
+	if poolCtx == nil {
+		return fmt.Errorf("pool not started")
+	}
 
 	if targetCount == currentCount {
 		return nil
@@ -275,7 +310,7 @@ func (p *Pool) Scale(ctx context.Context, targetCount int) error {
 			}
 
 			worker.wg = &p.wg
-			if err := worker.Start(ctx); err != nil {
+			if err := worker.Start(poolCtx); err != nil {
 				p.logger.Error("Worker failed to start", "id", worker.ID, "error", err)
 			}
 		}
@@ -471,6 +506,15 @@ func (h *Handler) handleAdd(_ context.Context, msg *models.BusMessage) (any, err
 	worker, err := h.pool.AddWorker(params.Capabilities, params.AgentID)
 	if err != nil {
 		return nil, err
+	}
+
+	// Start the worker so it can begin claiming jobs.
+	worker.wg = h.pool.GetWaitGroup()
+	poolCtx := h.pool.GetContext()
+	if poolCtx != nil {
+		if err := worker.Start(poolCtx); err != nil {
+			return nil, fmt.Errorf("worker added but failed to start: %w", err)
+		}
 	}
 
 	return map[string]any{

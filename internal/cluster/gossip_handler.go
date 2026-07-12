@@ -110,8 +110,8 @@ func (h *eventGossipHandler) OnEvent(event *models.ClusterEvent) error {
 	}
 }
 
-// handleSessionTurn converts a SESSION_TURN gossip event into a memory
-// record stored in the gossip DB (via StoreRemoteMemory).
+// handleSessionTurn converts a SESSION_TURN gossip event into a turn
+// record stored in the gossip DB (via StoreRemoteTurn).
 func (h *eventGossipHandler) handleSessionTurn(event *models.ClusterEvent) error {
 	if event.NodeID == h.localNode {
 		return nil // skip events from this node
@@ -126,28 +126,23 @@ func (h *eventGossipHandler) handleSessionTurn(event *models.ClusterEvent) error
 		return &GossipHandlerError{EventID: event.EventID, EventType: string(event.EventType), Err: err}
 	}
 
-	turnContent := `[turn:role=` + payload.Role + `] ` + payload.Content
-
-	mem := &memory.Memory{
-		ID:        "gossip-turn-" + event.EventID,
-		Type:      memory.MemoryType("episode"),
-		Category:  "session_turn",
-		Content:   turnContent,
-		CreatedAt: time.Unix(0, payload.Timestamp).UTC(),
-		AgentID:   event.NodeID,
+	turn := &memory.Turn{
+		TurnID:    payload.TurnID,
 		SessionID: payload.SessionID,
+		Role:      payload.Role,
+		Content:   payload.Content,
+		Timestamp: time.Unix(0, payload.Timestamp).UTC(),
 		Metadata: map[string]any{
-			"turn_id": payload.TurnID,
-			"source_node": event.NodeID,
-			"gossip_event_id": event.EventID,
+			"source_node":      event.NodeID,
+			"gossip_event_id":  event.EventID,
 		},
 	}
 
 	if h.dualStore != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := h.dualStore.StoreRemoteMemory(ctx, mem, event.NodeID); err != nil {
-			h.logger.Warn("gossip handler: store remote turn failed", "turn_id", payload.TurnID, "err", err)
+		if err := h.dualStore.StoreRemoteTurn(ctx, turn, event.NodeID); err != nil {
+			return &GossipHandlerError{EventID: event.EventID, EventType: string(event.EventType), Err: err}
 		}
 	}
 
@@ -241,9 +236,11 @@ func (h *eventGossipHandler) handleMemoryStored(event *models.ClusterEvent) erro
 // compare it against an incoming event. Returns nil if the memory does
 // not exist or cannot be read (caller treats nil as "no conflict").
 //
-// The gossip memories table stores created_at as RFC3339Nano text and
-// source_node as the originating node ID, which become the synthetic
-// event's Timestamp and NodeID respectively.
+// The gossip memories table stores updated_at (when set) and created_at as
+// RFC3339Nano text and source_node as the originating node ID. The
+// synthetic event's Timestamp uses COALESCE(updated_at, created_at) so
+// that re-stored memories with a newer updated_at win LWW conflicts
+// against events with the original creation timestamp.
 func (h *eventGossipHandler) fetchExistingMemoryEvent(memoryID string) *models.ClusterEvent {
 	if h.dualStore == nil || memoryID == "" {
 		return nil
@@ -256,11 +253,11 @@ func (h *eventGossipHandler) fetchExistingMemoryEvent(memoryID string) *models.C
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	var createdAtStr, sourceNode string
+	var tsStr, sourceNode string
 	err := db.QueryRowContext(ctx,
-		`SELECT created_at, source_node FROM memories WHERE id = ?`,
+		`SELECT COALESCE(NULLIF(updated_at, ''), created_at), source_node FROM memories WHERE id = ?`,
 		memoryID,
-	).Scan(&createdAtStr, &sourceNode)
+	).Scan(&tsStr, &sourceNode)
 	if err != nil {
 		if err != sql.ErrNoRows {
 			h.logger.Debug("gossip handler: query existing memory failed",
@@ -269,10 +266,10 @@ func (h *eventGossipHandler) fetchExistingMemoryEvent(memoryID string) *models.C
 		return nil
 	}
 
-	ts, err := time.Parse(time.RFC3339Nano, createdAtStr)
+	ts, err := time.Parse(time.RFC3339Nano, tsStr)
 	if err != nil {
 		h.logger.Debug("gossip handler: parse existing memory timestamp failed",
-			"mem_id", memoryID, "raw_ts", createdAtStr, "err", err)
+			"mem_id", memoryID, "raw_ts", tsStr, "err", err)
 		return nil
 	}
 

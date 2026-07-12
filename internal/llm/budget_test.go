@@ -65,6 +65,13 @@ func TestBudgetGetStatus(t *testing.T) {
 		Aggressiveness: 1.0,
 	}, nil)
 
+	// Simulate the real request flow: WaitForRateLimit reserves the RPM
+	// slot (sole appender to requestTimestamps), then RecordUsage records
+	// token usage without appending a second RPM timestamp.
+	ctx := context.Background()
+	if err := b.WaitForRateLimit(ctx); err != nil {
+		t.Fatalf("WaitForRateLimit failed: %v", err)
+	}
 	b.RecordUsage(TokenUsage{TotalTokens: 200})
 
 	status := b.GetStatus()
@@ -94,7 +101,7 @@ func TestBudgetGetStatus(t *testing.T) {
 	}
 
 	if status.RPMCurrent != 1 {
-		t.Errorf("RPMCurrent = %d, want 1", status.RPMCurrent)
+		t.Errorf("RPMCurrent = %d, want 1 (one WaitForRateLimit reservation)", status.RPMCurrent)
 	}
 }
 

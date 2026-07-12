@@ -566,6 +566,11 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			"mode", fullCfg.Plans.Mode,
 			"task_creator_available", taskCreator != nil,
 		)
+
+		// Restore plan-task mappings for executing plans that survived restart.
+		if err := planManagerInst.RestoreMappings(context.Background()); err != nil {
+			logger.Warn("failed to restore plan-task mappings", "error", err)
+		}
 	}
 
 	// Register plan RPC handlers (direct Go handlers override bus proxy)
@@ -1716,5 +1721,30 @@ func (a *taskCreatorAdapter) UpdateTaskStep(_ context.Context, step *task.TaskSt
 
 func (a *taskCreatorAdapter) LinkSession(ctx context.Context, taskID, sessionID string) error {
 	return a.registry.LinkSession(ctx, taskID, sessionID)
+}
+
+func (a *taskCreatorAdapter) SetTaskJobCount(ctx context.Context, taskID string, count int) error {
+	t, err := a.registry.Get(ctx, taskID)
+	if err != nil || t == nil {
+		return err
+	}
+	t.TotalJobs = count
+	return a.registry.Update(ctx, t)
+}
+
+func (a *taskCreatorAdapter) ScheduleSteps(ctx context.Context, taskID string) error {
+	// Promote ready steps (root steps with no deps) to StepReady.
+	if _, err := a.registry.StepStore().PromoteReadySteps(taskID); err != nil {
+		return fmt.Errorf("promote ready steps: %w", err)
+	}
+	// Publish orchestrator.schedule so the tactical planner picks up the task.
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "plan-manager", map[string]any{
+		"task_id": taskID,
+	})
+	if err != nil {
+		return fmt.Errorf("create schedule bus message: %w", err)
+	}
+	a.registry.PublishExternal("orchestrator.schedule", msg)
+	return nil
 }
 

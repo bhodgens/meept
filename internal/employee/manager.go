@@ -1744,14 +1744,29 @@ func (m *Manager) ApprovePlan(ctx context.Context, goalID, planID, reason string
 // RejectPlan rejects a pending plan. A reason is required (spec CLI line
 // 483). The rejection is routed through the injected PlanDisposer; when
 // the disposer is not wired, the method returns a clear "not configured"
-// error. The goal's ActivePlanID is NOT updated (rejected plans never
-// become active).
+// error. The plan is removed from the goal's ActivePlanIDs so that
+// MaxActivePlans accurately reflects remaining in-flight plans.
 func (m *Manager) RejectPlan(ctx context.Context, goalID, planID, reason string) error {
 	if m.planDisposer == nil {
 		return errors.New("employee: plan disposer not configured")
 	}
 	if err := m.planDisposer.RejectPlan(ctx, planID, "", "user", reason); err != nil {
 		return fmt.Errorf("reject plan %s: %w", planID, err)
+	}
+	// Remove the rejected plan from the goal's ActivePlanIDs so the
+	// MaxActivePlans cap reflects the actual in-flight count.
+	if m.goalStore != nil && goalID != "" {
+		goal, err := m.goalStore.Get(ctx, goalID)
+		if err != nil {
+			m.logger.Warn("reject plan: goal lookup failed; plan rejected but ActivePlanIDs not updated",
+				"goal_id", goalID, "plan_id", planID, "error", err)
+		} else {
+			goal.RemoveActivePlan(planID)
+			if updateErr := m.goalStore.Update(ctx, goal); updateErr != nil {
+				m.logger.Warn("reject plan: goal update failed; ActivePlanIDs not persisted",
+					"goal_id", goalID, "plan_id", planID, "error", updateErr)
+			}
+		}
 	}
 	m.logger.Info("plan rejected",
 		"goal_id", goalID, "plan_id", planID)

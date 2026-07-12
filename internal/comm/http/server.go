@@ -131,6 +131,10 @@ type Server struct {
 	// pipeline statistics. Used by the compression stats handler.
 	CompressionStatsGetter func() map[string]any
 
+	// AgentStateGetter is an optional callback that returns a state snapshot
+	// for a given session ID. Used by the agent state endpoint.
+	AgentStateGetter func(sessionID string) (agent.AgentStateSnapshot, error)
+
 	// ClusterMetricsGetter is an optional callback that returns a snapshot
 	// of gossip-engine observability counters (Task 4.8). Renders nil/empty
 	// when cluster is disabled or metrics aren't wired.
@@ -1208,6 +1212,9 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("POST /api/v1/bus/publish", s.handleBusPublish)
 	mux.HandleFunc("GET /api/v1/bus/stats", s.handleBusStats)
+
+	// Agent state endpoint
+	mux.HandleFunc("GET /api/v1/sessions/{id}/state", s.handleGetAgentState)
 
 	// Firewall stats endpoint
 	mux.HandleFunc("GET /api/v1/metrics/firewall", s.handleFirewallStats)
@@ -2823,4 +2830,26 @@ func (s *Server) handleRuntimeRestart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "restarted"})
+}
+
+// handleGetAgentState handles GET /api/v1/sessions/{id}/state.
+func (s *Server) handleGetAgentState(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	if sessionID == "" {
+		s.writeError(w, http.StatusBadRequest, "session id required")
+		return
+	}
+
+	if s.AgentStateGetter == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "agent state getter not configured")
+		return
+	}
+
+	snapshot, err := s.AgentStateGetter(sessionID)
+	if err != nil {
+		s.writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, snapshot)
 }

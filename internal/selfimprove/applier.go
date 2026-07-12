@@ -210,6 +210,12 @@ func (a *ChangeApplier) Rollback(applied *AppliedFix) error {
 		originalPath = filepath.Join(a.projectRoot, filepath.Base(legacy))
 	}
 
+	// Validate the resolved path is within projectRoot to prevent path
+	// traversal via a malicious OriginalPath.
+	if !isWithinDir(a.projectRoot, originalPath) {
+		return fmt.Errorf("rollback target path escapes project root: %q", originalPath)
+	}
+
 	//nolint:gosec // user config directory/file permissions
 	if err := os.WriteFile(originalPath, backupContent, 0o644); err != nil {
 		return fmt.Errorf("failed to restore file: %w", err)
@@ -245,6 +251,13 @@ func isWithinDir(dir, target string) bool {
 // createBackup creates a backup of the file being modified.
 func (a *ChangeApplier) createBackup(fix *ProposedFix) (string, error) {
 	filePath := filepath.Join(a.projectRoot, fix.FilePath)
+
+	// Validate the resolved path is within projectRoot before reading to
+	// prevent path traversal from exfiltrating sensitive file contents.
+	if !isWithinDir(a.projectRoot, filePath) {
+		return "", fmt.Errorf("fix file path escapes project root: %q", fix.FilePath)
+	}
+
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", err

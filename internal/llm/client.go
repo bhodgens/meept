@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -304,6 +305,11 @@ func (c *Client) buildChatRequest(messages []ChatMessage, cfg *ModelConfig, opts
 
 	if addStream {
 		payload["stream"] = true
+		// B-02 FIX: Request usage in the final stream chunk so budget
+		// accounting and cost tracking work for streaming completions.
+		payload["stream_options"] = map[string]any{
+			"include_usage": true,
+		}
 	}
 
 	// Apply reasoning effort translation for OpenAI-compatible vendors
@@ -1206,6 +1212,9 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
+	// B-05 FIX: Raise scanner buffer to 10 MiB so large SSE lines
+	// (e.g. tool-call arguments) don't fail the stream.
+	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 	// Pre-populate tool calls from retryState
 	toolCallAccums := make(map[int]*toolCallAccum)
 	if retryState != nil && retryState.toolCallAccums != nil {
@@ -1223,10 +1232,34 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		deltasSent = retryState.deltasSent
 	}
 
+	// savePartialState copies accumulated content, tool calls, usage, and
+	// deltasSent into retryState so a retry attempt can skip already-delivered
+	// deltas (B-03 fix).
+	savePartialState := func() {
+		if retryState == nil {
+			return
+		}
+		retryState.accumulated = strings.Builder{}
+		retryState.accumulated.WriteString(accumulated.String())
+		retryState.usage = usage
+		retryState.deltasSent = deltasSent
+		retryState.toolCallAccums = make(map[int]*toolCallAccum, len(toolCallAccums))
+		for idx, accum := range toolCallAccums {
+			clone := &toolCallAccum{
+				ID:   accum.ID,
+				Name: accum.Name,
+			}
+			clone.Arguments.WriteString(accum.Arguments.String())
+			retryState.toolCallAccums[idx] = clone
+		}
+	}
+
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
 			resp.Body.Close()
+			// B-03 FIX: Save partial state so retry can skip delivered deltas.
+			savePartialState()
 			// S3-9 FIX: body is now closed; don't return resp.
 			return nil, nil, ctx.Err()
 		default:
@@ -1268,6 +1301,15 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 			c.logger.Warn("failed to parse stream chunk", "error", err, "data", data)
 			continue
 		}
+		// B-02 FIX: Capture usage BEFORE the empty-choices check.
+		// OpenAI sends the final usage in a chunk with empty choices.
+		if chunk.Usage != nil {
+			usage = TokenUsage{
+				PromptTokens:     chunk.Usage.PromptTokens,
+				CompletionTokens: chunk.Usage.CompletionTokens,
+				TotalTokens:      chunk.Usage.TotalTokens,
+			}
+		}
 		if len(chunk.Choices) == 0 {
 			continue
 		}
@@ -1291,6 +1333,14 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		for _, tcDelta := range chunk.Choices[0].Delta.ToolCalls {
 			idx := tcDelta.Index
 			if accum, exists := toolCallAccums[idx]; exists {
+				// B-10 FIX: Update ID and name if provided in later deltas.
+				// Some providers send the ID and name in separate chunks.
+				if tcDelta.ID != "" {
+					accum.ID = tcDelta.ID
+				}
+				if tcDelta.Function.Name != "" {
+					accum.Name = tcDelta.Function.Name
+				}
 				accum.Arguments.WriteString(tcDelta.Function.Arguments)
 			} else {
 				toolCallAccums[idx] = &toolCallAccum{
@@ -1301,15 +1351,6 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 			}
 		}
 
-		// Capture usage from final chunk
-		if chunk.Usage != nil {
-			usage = TokenUsage{
-				PromptTokens:     chunk.Usage.PromptTokens,
-				CompletionTokens: chunk.Usage.CompletionTokens,
-				TotalTokens:      chunk.Usage.TotalTokens,
-			}
-		}
-
 		if chunk.Choices[0].FinishReason != nil {
 			finishReason = *chunk.Choices[0].FinishReason
 		}
@@ -1317,13 +1358,23 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 	resp.Body.Close()
 
 	if err := scanner.Err(); err != nil {
+		// B-03 FIX: Save partial state so retry can skip delivered deltas.
+		savePartialState()
 		// S3-9 FIX: body is already closed above; don't return resp.
 		return nil, nil, &ClientError{Message: "stream read failed", Cause: err}
 	}
 
-	// Build tool calls from accumulators
+	// Build tool calls from accumulators, sorted by index for deterministic order.
+	// B-09 FIX: Ranging over map[int]*toolCallAccum gives non-deterministic
+	// iteration order, which can reverse multi-tool turns.
 	var toolCalls []ToolCall
-	for _, accum := range toolCallAccums {
+	indices := make([]int, 0, len(toolCallAccums))
+	for idx := range toolCallAccums {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+	for _, idx := range indices {
+		accum := toolCallAccums[idx]
 		toolCalls = append(toolCalls, ToolCall{
 			ID:   accum.ID,
 			Type: "function",

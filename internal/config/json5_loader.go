@@ -168,19 +168,31 @@ func UnmarshalJSON5(data []byte, v any) error {
 	return json.Unmarshal(stdJSON, v)
 }
 
-// quotedDuration matches a quoted Go duration string like "30s", "2m", "100ms".
-var quotedDuration = regexp.MustCompile(`"\d+(?:\.\d+)?(?:ns|us|ms|s|m|h|d)"`)
+// quotedDuration matches a quoted Go duration string used as a JSON value
+// (preceded by `: ` to avoid matching duration-like strings embedded in
+// descriptive text). Examples: "30s", "2m", "100ms".
+var quotedDuration = regexp.MustCompile(`:\s*"(\d+(?:\.\d+)?(?:ns|us|ms|s|m|h|d))"`)
 
 // quotedDurationToNanos converts quoted time.Duration strings to their nanosecond integer value.
+// Only matches quoted durations that appear as JSON values (after `: `) to
+// avoid corrupting non-duration string fields.
 func quotedDurationToNanos(data string) string {
 	return quotedDuration.ReplaceAllStringFunc(data, func(match string) string {
-		// match is like '"30s' — extract the duration value
-		val := match[1 : len(match)-1] // "30s" -> 30s
+		// Extract the duration value from the quoted string.
+		sub := quotedDuration.FindStringSubmatch(match)
+		if len(sub) < 2 {
+			return match
+		}
+		val := sub[1]
 		d, err := parseDuration(val)
 		if err != nil {
 			return match // leave unchanged on parse error
 		}
-		return fmt.Sprintf("%d", d)
+		// Preserve the original prefix (`: ` or `:`).
+		// Find the colon position and rebuild the value.
+		colonIdx := strings.Index(match, ":")
+		prefix := match[:colonIdx+1]
+		return prefix + fmt.Sprintf(" %d", d)
 	})
 }
 

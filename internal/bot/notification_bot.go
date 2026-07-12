@@ -203,7 +203,11 @@ func (nb *NotificationBot) handleEvent(ctx context.Context, event *http.Notifica
 			nb.wg.Add(1)
 			go func(id int64, m string) {
 				defer nb.wg.Done()
-				if err := nb.telegram.SendMessage(ctx, id, m); err != nil {
+				// Use a detached context with timeout so in-flight sends
+				// are not cancelled by the event loop shutting down.
+				sendCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				if err := nb.telegram.SendMessage(sendCtx, id, m); err != nil {
 					nb.logger.Error("failed to send telegram notification",
 						"chat_id", id, "error", err)
 				}

@@ -85,11 +85,15 @@ func (s *SQLiteTrainingStore) migrate() error {
 	}
 
 	if currentVersion < 2 {
-		s.migrateToV2()
+		if err := s.migrateToV2(); err != nil {
+			return fmt.Errorf("migration to v2 failed: %w", err)
+		}
 	}
 
 	if currentVersion < 3 {
-		s.migrateToV3()
+		if err := s.migrateToV3(); err != nil {
+			return fmt.Errorf("migration to v3 failed: %w", err)
+		}
 	}
 
 	// Update version
@@ -156,16 +160,16 @@ func (s *SQLiteTrainingStore) migrateToV1() error {
 	return err
 }
 
-func (s *SQLiteTrainingStore) migrateToV2() {
+func (s *SQLiteTrainingStore) migrateToV2() error {
 	// Add any V2 schema changes here
 	// Example: Add metadata column to shadow_records if it doesn't exist
 	_, err := s.db.Exec(`
 		ALTER TABLE shadow_records ADD COLUMN metadata_json TEXT DEFAULT '';
 	`)
-	// Ignore error if column already exists (duplicate column). Otherwise log
-	// at WARN so unexpected migration failures are visible.
+	// Ignore error if column already exists (duplicate column). Otherwise
+	// return the error so the migration version is not bumped.
 	if err != nil && !errcls.IsDuplicateColumn(err) {
-		slog.Warn("shadow training store migration: ALTER failed", "error", err)
+		return fmt.Errorf("ALTER add metadata_json: %w", err)
 	}
 
 	// Add export tracking
@@ -173,32 +177,34 @@ func (s *SQLiteTrainingStore) migrateToV2() {
 		ALTER TABLE shadow_records ADD COLUMN exported_at TEXT;
 	`)
 	if err != nil && !errcls.IsDuplicateColumn(err) {
-		slog.Warn("shadow training store migration: add exported_at failed", "error", err)
+		return fmt.Errorf("ALTER add exported_at: %w", err)
 	}
 
 	// Create index for export tracking
 	if _, ierr := s.db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_shadow_records_exported ON shadow_records(exported_at);
 	`); ierr != nil {
-		slog.Warn("shadow training store migration: create index failed", "error", ierr)
+		return fmt.Errorf("create index exported_at: %w", ierr)
 	}
+	return nil
 }
 
 // migrateToV3 adds domain, task_type, and routing_path columns to
 // preference_pairs so DPO exports can carry training context.
-func (s *SQLiteTrainingStore) migrateToV3() {
+func (s *SQLiteTrainingStore) migrateToV3() error {
 	_, err := s.db.Exec(`ALTER TABLE preference_pairs ADD COLUMN domain TEXT DEFAULT '';`)
 	if err != nil && !errcls.IsDuplicateColumn(err) {
-		slog.Warn("shadow training store migration v3: add domain failed", "error", err)
+		return fmt.Errorf("ALTER add domain: %w", err)
 	}
 	_, err = s.db.Exec(`ALTER TABLE preference_pairs ADD COLUMN task_type TEXT DEFAULT '';`)
 	if err != nil && !errcls.IsDuplicateColumn(err) {
-		slog.Warn("shadow training store migration v3: add task_type failed", "error", err)
+		return fmt.Errorf("ALTER add task_type: %w", err)
 	}
 	_, err = s.db.Exec(`ALTER TABLE preference_pairs ADD COLUMN routing_path TEXT DEFAULT '';`)
 	if err != nil && !errcls.IsDuplicateColumn(err) {
-		slog.Warn("shadow training store migration v3: add routing_path failed", "error", err)
+		return fmt.Errorf("ALTER add routing_path: %w", err)
 	}
+	return nil
 }
 
 // SaveRecord saves a shadow record.

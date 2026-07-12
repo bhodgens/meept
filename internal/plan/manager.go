@@ -24,6 +24,12 @@ type TaskCreator interface {
 	CreateTaskStep(ctx context.Context, taskID, description string, sequence int) (*task.TaskStep, error)
 	UpdateTaskStep(ctx context.Context, step *task.TaskStep) error
 	LinkSession(ctx context.Context, taskID, sessionID string) error
+	// SetTaskJobCount sets the TotalJobs counter on the task so that
+	// auto-completion (CompletedJobs == TotalJobs) works correctly.
+	SetTaskJobCount(ctx context.Context, taskID string, count int) error
+	// ScheduleSteps promotes ready steps and publishes the
+	// orchestrator.schedule event so the tactical planner can enqueue jobs.
+	ScheduleSteps(ctx context.Context, taskID string) error
 }
 
 // PlanManager orchestrates plan lifecycle: creation, approval, synthesis
@@ -420,6 +426,12 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 		m.taskPlanMap[childTask.ID] = planID
 		m.mu.Unlock()
 
+		// Persist the child task ID on the phase for recovery after restart.
+		phase.TaskID = childTask.ID
+		if err := m.store.UpdatePhase(ctx, phase); err != nil {
+			m.logger.Warn("failed to persist phase task ID", "phase_id", phase.ID, "error", err)
+		}
+
 		// Create TaskSteps from parsed step details.
 		pp, hasParsed := parsedPhases[phase.Sequence]
 		if hasParsed {
@@ -465,6 +477,18 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 		// Mark phase in progress.
 		if err := m.store.SetPhaseState(ctx, phase.ID, PhaseInProgress); err != nil {
 			m.logger.Warn("failed to set phase state to in_progress", "phase_id", phase.ID, "error", err)
+		}
+
+		// Set TotalJobs on the child task and schedule its steps.
+		stepCount := len(pp.Steps)
+		if !hasParsed {
+			stepCount = 1 // placeholder step
+		}
+		if err := m.taskCreator.SetTaskJobCount(ctx, childTask.ID, stepCount); err != nil {
+			m.logger.Warn("failed to set task job count", "task_id", childTask.ID, "error", err)
+		}
+		if err := m.taskCreator.ScheduleSteps(ctx, childTask.ID); err != nil {
+			m.logger.Warn("failed to schedule steps for phase task", "task_id", childTask.ID, "error", err)
 		}
 	}
 
@@ -542,6 +566,24 @@ func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID string) error 
 			"task_id":  taskID,
 			"phase_id": phaseID,
 		})
+
+		// Check if all phases of the plan are now complete. If so,
+		// transition the plan to completed.
+		allPhases, err := m.store.GetPhases(ctx, planID)
+		if err != nil {
+			m.logger.Warn("failed to get phases for completion check", "plan_id", planID, "error", err)
+			return nil
+		}
+		allComplete := len(allPhases) > 0
+		for _, ph := range allPhases {
+			if ph.State != PhaseCompleted {
+				allComplete = false
+				break
+			}
+		}
+		if allComplete {
+			return m.completePlan(ctx, planID)
+		}
 		return nil
 	}
 
@@ -556,6 +598,22 @@ func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID string) error 
 	}
 
 	// Only transition if the plan is in executing state.
+	if plan.State != StateExecuting {
+		return nil
+	}
+
+	return m.completePlan(ctx, planID)
+}
+
+// completePlan transitions a plan to completed, updates plan.md, and
+// publishes the plan.completed event. It is called either when the parent
+// task completes or when all phase child tasks have completed.
+func (m *PlanManager) completePlan(ctx context.Context, planID string) error {
+	plan, err := m.store.GetPlan(ctx, planID)
+	if err != nil {
+		return fmt.Errorf("get plan for completion: %w", err)
+	}
+
 	if plan.State != StateExecuting {
 		return nil
 	}
@@ -582,7 +640,6 @@ func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID string) error 
 	m.publishEvent("plan.completed", map[string]any{
 		"plan_id":     plan.ID,
 		"title":       plan.Title,
-		"task_id":     taskID,
 		"phase_count": len(phases),
 		"step_count":  totalSteps,
 	})
@@ -614,6 +671,45 @@ func (m *PlanManager) RegisterTaskPlan(taskID, planID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.taskPlanMap[taskID] = planID
+}
+
+// RestoreMappings rebuilds phaseTaskMap and taskPlanMap from the persistent
+// store. This should be called on daemon startup to recover plan-task
+// associations for executing plans that survived a restart.
+func (m *PlanManager) RestoreMappings(ctx context.Context) error {
+	plans, err := m.store.ListPlansByState(ctx, StateExecuting, 100)
+	if err != nil {
+		return fmt.Errorf("list executing plans for mapping restore: %w", err)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, plan := range plans {
+		// Restore parent task -> plan mapping.
+		if plan.TaskID != "" {
+			m.taskPlanMap[plan.TaskID] = plan.ID
+		}
+
+		// Restore child task -> phase + plan mappings.
+		phases, err := m.store.GetPhases(ctx, plan.ID)
+		if err != nil {
+			m.logger.Warn("failed to get phases for mapping restore", "plan_id", plan.ID, "error", err)
+			continue
+		}
+		for _, phase := range phases {
+			if phase.TaskID != "" {
+				m.phaseTaskMap[phase.TaskID] = phase.ID
+				m.taskPlanMap[phase.TaskID] = plan.ID
+			}
+		}
+	}
+
+	m.logger.Info("restored plan-task mappings",
+		"plans", len(plans),
+		"phase_mappings", len(m.phaseTaskMap),
+		"plan_mappings", len(m.taskPlanMap))
+	return nil
 }
 
 // CreatePhase persists a phase record to the underlying store. This is the

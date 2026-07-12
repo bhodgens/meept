@@ -26,7 +26,7 @@ func main() {
 	}
 
 	defaultSocket := filepath.Join(homeDir, ".meept", "meept.sock")
-	defaultHTTP := "http://localhost:8081"
+	defaultHTTP := "https://localhost:8081"
 
 	flag.StringVar(&socketPath, "socket", defaultSocket, "Unix socket path (for RPC)")
 	flag.StringVar(&socketPath, "s", defaultSocket, "Unix socket path (shorthand)")
@@ -38,9 +38,10 @@ func main() {
 
 	// Create transport client
 	cfg := &transport.Config{
-		Transport:   transportFlag,
-		SocketPath:  socketPath,
-		HTTPBaseURL: httpURLFlag,
+		Transport:          transportFlag,
+		SocketPath:         socketPath,
+		HTTPBaseURL:        httpURLFlag,
+		InsecureSkipVerify: transport.IsLoopbackBaseURL(httpURLFlag),
 	}
 
 	client, err := transport.New(cfg)
@@ -51,7 +52,7 @@ func main() {
 
 	if err := client.Connect(); err != nil {
 		host := "localhost:8081"
-		if transportFlag == "http" && httpURLFlag != "http://localhost:8081" {
+		if transportFlag == "http" && httpURLFlag != "https://localhost:8081" {
 			host = httpURLFlag
 		}
 		fmt.Fprintf(os.Stderr, "failed to connect to daemon (%v)\n", err)

@@ -121,21 +121,34 @@ func MergePeerDB(ctx context.Context, gossipDB *sql.DB, peerDBPath, peerID strin
 }
 
 // runMergeOp executes a merge INSERT OR IGNORE and updates stats with the result.
-func runMergeOp(ctx context.Context, tx *sql.Tx, query string, args ...interface{}) (merged, skipped int, err error) {
+// sourceCount is the number of rows in the peer table; skipped = sourceCount - merged.
+func runMergeOp(ctx context.Context, tx *sql.Tx, sourceCount int, query string, args ...interface{}) (merged, skipped int, err error) {
 	res, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, 0, err
 	}
 
-	// RowsAffected returns total rows matched + inserted.
-	// With INSERT OR IGNORE, if a row already exists it's "skipped".
-	// We treat all rows as "merged" since INSERT OR IGNORE is the desired behavior
-	// (idempotent upsert). The "skipped" concept is tracked via the error count.
 	rows, err := res.RowsAffected()
 	if err != nil {
 		return 0, 0, err
 	}
-	return int(rows), 0, nil
+	merged = int(rows)
+	skipped = sourceCount - merged
+	if skipped < 0 {
+		skipped = 0
+	}
+	return merged, skipped, nil
+}
+
+// countRows returns the number of rows in the given table.
+func countRows(ctx context.Context, db *sql.DB, tableName string) (int, error) {
+	var count int
+	err := db.QueryRowContext(ctx,
+		fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func mergeSessions(ctx context.Context, tx *sql.Tx, peerDB *sql.DB, peerID string) (merged, skipped int, err error) {
@@ -149,10 +162,14 @@ func mergeSessions(ctx context.Context, tx *sql.Tx, peerDB *sql.DB, peerID strin
 		return 0, 0, nil
 	}
 
-	query := `INSERT OR IGNORE INTO sessions (id, created_at, updated_at, metadata, source_node)
-SELECT id, created_at, updated_at, metadata, ? FROM peer.sessions`
+	query := `INSERT OR IGNORE INTO sessions (id, created_at, last_activity, metadata_json, source_node)
+SELECT id, created_at, last_activity, metadata_json, ? FROM peer.sessions`
 
-	merged, skipped, err = runMergeOp(ctx, tx, query, peerID)
+	srcCount, err := countRows(ctx, peerDB, "sessions")
+	if err != nil {
+		return 0, 0, SyncWrap("merge_peer_sessions_count", err)
+	}
+	merged, skipped, err = runMergeOp(ctx, tx, srcCount, query, peerID)
 	if err != nil {
 		if strings.Contains(err.Error(), "no such table") || strings.Contains(err.Error(), "not exist") {
 			// Local sessions table doesn't exist yet
@@ -181,7 +198,11 @@ func mergeTurns(ctx context.Context, tx *sql.Tx, peerDB *sql.DB, peerID string) 
 	query := `INSERT OR IGNORE INTO turns (turn_id, session_id, role, content, timestamp, source_node)
 SELECT turn_id, session_id, role, content, timestamp, ? FROM peer.turns`
 
-	merged, skipped, err = runMergeOp(ctx, tx, query, peerID)
+	srcCount, err := countRows(ctx, peerDB, "turns")
+	if err != nil {
+		return 0, 0, SyncWrap("merge_peer_turns_count", err)
+	}
+	merged, skipped, err = runMergeOp(ctx, tx, srcCount, query, peerID)
 	if err != nil {
 		if strings.Contains(err.Error(), "no such table") || strings.Contains(err.Error(), "not exist") {
 			slog.Debug("backup: local turns table not found, skipping merge", "peer_id", peerID)
@@ -209,7 +230,11 @@ func mergeMemories(ctx context.Context, tx *sql.Tx, peerDB *sql.DB, peerID strin
 	query := `INSERT OR IGNORE INTO memories (id, type, category, content, created_at, agent_id, session_id, source_node)
 SELECT id, type, category, content, created_at, agent_id, session_id, ? FROM peer.memories`
 
-	merged, skipped, err = runMergeOp(ctx, tx, query, peerID)
+	srcCount, err := countRows(ctx, peerDB, "memories")
+	if err != nil {
+		return 0, 0, SyncWrap("merge_peer_memories_count", err)
+	}
+	merged, skipped, err = runMergeOp(ctx, tx, srcCount, query, peerID)
 	if err != nil {
 		if strings.Contains(err.Error(), "no such table") || strings.Contains(err.Error(), "not exist") {
 			slog.Debug("backup: local memories table not found, skipping merge", "peer_id", peerID)

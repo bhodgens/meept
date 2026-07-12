@@ -74,6 +74,14 @@ type Queue interface {
 	Close() error
 }
 
+// Heartbeater is an optional interface that queues can implement to support
+// extending claim timeouts for long-running jobs. The worker calls Heartbeat
+// periodically while processing to prevent the cluster reclaim mechanism
+// from re-claiming in-flight work.
+type Heartbeater interface {
+	Heartbeat(jobID string)
+}
+
 // PersistentQueue implements Queue with SQLite persistence and bus notifications.
 type PersistentQueue struct {
 	store           *Store

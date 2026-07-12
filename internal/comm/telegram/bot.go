@@ -371,24 +371,37 @@ func (b *Bot) SendTyping(ctx context.Context, chatID int64) error {
 }
 
 // isAllowed checks if the message sender is authorized.
+// C-07 FIX: Deny by default when allowlists are empty to prevent
+// unauthorized access to the bot.
 func (b *Bot) isAllowed(msg *Message) bool {
+	// C-07: Fail closed - require at least one allowlist to be configured
+	// and the sender must be in it. Empty allowlists deny all access.
+	hasUserAllowlist := len(b.config.AllowedUsers) > 0
+	hasChatAllowlist := len(b.config.AllowedChats) > 0
+
+	// If no allowlists configured, deny by default
+	if !hasUserAllowlist && !hasChatAllowlist {
+		b.logger.Debug("Telegram bot: denying request - no allowlists configured")
+		return false
+	}
+
 	// Check user allowlist
-	if len(b.config.AllowedUsers) > 0 && msg.From != nil {
-		found := slices.Contains(b.config.AllowedUsers, msg.From.ID)
-		if !found {
+	if hasUserAllowlist && msg.From != nil {
+		if !slices.Contains(b.config.AllowedUsers, msg.From.ID) {
 			return false
 		}
+		// User is in allowlist
+		return true
 	}
 
 	// Check chat allowlist
-	if len(b.config.AllowedChats) > 0 {
-		found := slices.Contains(b.config.AllowedChats, msg.Chat.ID)
-		if !found {
-			return false
+	if hasChatAllowlist {
+		if slices.Contains(b.config.AllowedChats, msg.Chat.ID) {
+			return true
 		}
 	}
 
-	return true
+	return false
 }
 
 // splitMessage splits a long message into chunks.

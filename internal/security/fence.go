@@ -160,12 +160,123 @@ func (fc *FenceChecker) CheckPath(path string, op string) error {
 	return fmt.Errorf("fence: %s access denied for %q (outside project root %q)", op, path, fc.cfg.RootPath)
 }
 
-// CheckCommand validates a shell command working directory.
+// CheckCommand validates a shell command and its working directory.
+// It checks both the working directory and any explicit file path arguments
+// in the command to prevent access to files outside the fence boundary.
+//
+// C-03 FIX: Instead of substring-matching a hardcoded list of sensitive paths,
+// we tokenize the command and validate each path-like token against CheckPath.
+// This catches absolute paths and parent-traversal sequences in any command,
+// not just a fixed set of file-access utilities.
 func (fc *FenceChecker) CheckCommand(cmd string, workDir string) error {
 	if fc.cfg.NoFence || !fc.cfg.Enabled {
 		return nil
 	}
-	return fc.CheckPath(workDir, "exec")
+
+	// First check the working directory
+	if err := fc.CheckPath(workDir, "exec"); err != nil {
+		return err
+	}
+
+	// Tokenize the command and extract path-like arguments for validation.
+	// We do not attempt to parse shell metacharacters — we just identify
+	// tokens that look like file paths and validate each against the fence.
+	tokens := tokenizeCommand(cmd)
+	for _, tok := range tokens {
+		path := extractPathFromToken(tok)
+		if path == "" {
+			continue
+		}
+		if err := fc.CheckPath(path, "read"); err != nil {
+			return fmt.Errorf("fence: command references path outside project root: %q", path)
+		}
+	}
+
+	return nil
+}
+
+// tokenizeCommand splits a command string into whitespace-delimited tokens,
+// stripping surrounding quotes from each token. This is intentionally simple —
+// we don't evaluate shell syntax, we just need to identify path-like arguments.
+func tokenizeCommand(cmd string) []string {
+	var tokens []string
+	var current strings.Builder
+	inSingle := false
+	inDouble := false
+
+	for i := 0; i < len(cmd); i++ {
+		c := cmd[i]
+		switch {
+		case c == '\\' && i+1 < len(cmd):
+			// Preserve escape pair
+			current.WriteByte(c)
+			current.WriteByte(cmd[i+1])
+			i++
+		case c == '\'' && !inDouble:
+			inSingle = !inSingle
+		case c == '"' && !inSingle:
+			inDouble = !inDouble
+		case (c == ' ' || c == '\t') && !inSingle && !inDouble:
+			if current.Len() > 0 {
+				tokens = append(tokens, current.String())
+				current.Reset()
+			}
+		default:
+			current.WriteByte(c)
+		}
+	}
+	if current.Len() > 0 {
+		tokens = append(tokens, current.String())
+	}
+	return tokens
+}
+
+// extractPathFromToken checks whether a token looks like a file path and
+// returns the path if so. Returns "" for non-path tokens (flags, env vars,
+// command names without path separators).
+func extractPathFromToken(tok string) string {
+	if tok == "" {
+		return ""
+	}
+
+	// Skip flags (-f, --verbose)
+	if strings.HasPrefix(tok, "-") {
+		return ""
+	}
+
+	// Skip env variable assignments (FOO=bar)
+	if strings.Contains(tok, "=") && !strings.HasPrefix(tok, "/") && !strings.HasPrefix(tok, "~") {
+		return ""
+	}
+
+	// Skip single-token command names with no path component
+	isPathLike := false
+
+	// Absolute paths
+	if strings.HasPrefix(tok, "/") {
+		isPathLike = true
+	}
+
+	// Home directory paths
+	if strings.HasPrefix(tok, "~") {
+		isPathLike = true
+	}
+
+	// Relative paths with parent traversal (../)
+	if strings.Contains(tok, "..") {
+		isPathLike = true
+	}
+
+	// Relative paths with explicit ./ prefix
+	if strings.HasPrefix(tok, "./") {
+		isPathLike = true
+	}
+
+	if !isPathLike {
+		return ""
+	}
+
+	return tok
 }
 
 // IsNoFence returns true if fencing is disabled.

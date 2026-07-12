@@ -281,14 +281,23 @@ func (s *UploadService) loadRecords() map[string]Upload {
 	return records
 }
 
-// saveRecords writes the uploads metadata to the JSON store.
+// saveRecords writes the uploads metadata to the JSON store atomically.
+// Uses temp-file + rename so a crash mid-write doesn't truncate the DB.
 // Caller must hold s.mu.
 func (s *UploadService) saveRecords(records map[string]Upload) error {
 	data, err := json.Marshal(records)
 	if err != nil {
 		return fmt.Errorf("failed to marshal records: %w", err)
 	}
-	return os.WriteFile(s.dbPath, data, 0644)
+	tmpPath := s.dbPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write temp metadata: %w", err)
+	}
+	if err := os.Rename(tmpPath, s.dbPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to rename temp metadata: %w", err)
+	}
+	return nil
 }
 
 func (s *UploadService) allowedTypesList() string {

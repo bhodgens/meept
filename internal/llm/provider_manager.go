@@ -371,7 +371,14 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 		} else {
 			attemptCtx, cancel = context.WithCancel(ctx)
 		}
-		resp, err := entry.Chatter.Chat(attemptCtx, messages, opts...)
+		// B-04 FIX: Call ChatWithProgress so progress-capable providers
+		// stream stage updates to the caller. Without this, the failover
+		// path silently drops all progress reporting.
+		resp, err := entry.Chatter.ChatWithProgress(attemptCtx, messages, func(stage ProgressStage, detail string) {
+			if progress != nil {
+				progress(stage, detail)
+			}
+		}, opts...)
 		cancel()
 
 		latency := time.Since(start)

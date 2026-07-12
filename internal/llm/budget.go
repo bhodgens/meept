@@ -282,10 +282,22 @@ func (b *Budget) hourlyUsed() int {
 	return total
 }
 
+// effectiveTokenCount returns the best available token count from a usage
+// record. Some providers set TotalTokens while others leave it 0 and only
+// populate PromptTokens + CompletionTokens. Fall back to the sum so budgets
+// are enforced correctly regardless of provider behavior.
+func effectiveTokenCount(usage TokenUsage) int {
+	if usage.TotalTokens > 0 {
+		return usage.TotalTokens
+	}
+	return usage.PromptTokens + usage.CompletionTokens
+}
+
 // RecordUsage records a completed API call's token usage.
 func (b *Budget) RecordUsage(usage TokenUsage) {
-	if usage.TotalTokens < 0 {
-		b.logger.Warn("Negative token count - ignoring", "tokens", usage.TotalTokens)
+	tokens := effectiveTokenCount(usage)
+	if tokens < 0 {
+		b.logger.Warn("Negative token count - ignoring", "tokens", tokens)
 		return
 	}
 
@@ -297,10 +309,11 @@ func (b *Budget) RecordUsage(usage TokenUsage) {
 
 	b.hourlyWindow = append(b.hourlyWindow, usageRecord{
 		timestamp: now,
-		tokens:    usage.TotalTokens,
+		tokens:    tokens,
 	})
-	b.dailyUsed += usage.TotalTokens
-	b.requestTimestamps = append(b.requestTimestamps, now)
+	b.dailyUsed += tokens
+	// RPM timestamp is reserved by WaitForRateLimit (sole appender for
+	// requestTimestamps) to avoid double-counting: exactly one timestamp per request.
 
 	b.logger.Debug("Recorded token usage",
 		"tokens", usage.TotalTokens,
@@ -311,8 +324,9 @@ func (b *Budget) RecordUsage(usage TokenUsage) {
 
 // RecordUsageWithScope records token usage and tracks it per-task and per-session.
 func (b *Budget) RecordUsageWithScope(usage TokenUsage, taskID, sessionID string) {
-	if usage.TotalTokens < 0 {
-		b.logger.Warn("Negative token count - ignoring", "tokens", usage.TotalTokens)
+	tokens := effectiveTokenCount(usage)
+	if tokens < 0 {
+		b.logger.Warn("Negative token count - ignoring", "tokens", tokens)
 		return
 	}
 
@@ -324,22 +338,23 @@ func (b *Budget) RecordUsageWithScope(usage TokenUsage, taskID, sessionID string
 
 	b.hourlyWindow = append(b.hourlyWindow, usageRecord{
 		timestamp: now,
-		tokens:    usage.TotalTokens,
+		tokens:    tokens,
 	})
-	b.dailyUsed += usage.TotalTokens
-	b.requestTimestamps = append(b.requestTimestamps, now)
+	b.dailyUsed += tokens
+	// RPM timestamp is reserved by WaitForRateLimit (sole appender for
+	// requestTimestamps) to avoid double-counting: exactly one timestamp per request.
 
 	// Track per-task
 	if len(taskID) > 0 {
-		b.tasks[taskID] += usage.TotalTokens
+		b.tasks[taskID] += tokens
 	}
 	// Track per-session
 	if len(sessionID) > 0 {
-		b.sessions[sessionID] += usage.TotalTokens
+		b.sessions[sessionID] += tokens
 	}
 
 	b.logger.Debug("Recorded token usage with scope",
-		"tokens", usage.TotalTokens,
+		"tokens", tokens,
 		"hourly", b.hourlyUsed(),
 		"daily", b.dailyUsed,
 		"task", taskID,
@@ -734,11 +749,12 @@ func (b *Budget) GetStatus() Status {
 // WaitForRateLimit blocks until the RPM rate limit window allows another request.
 // If rateLimitRPM is 0 (unlimited), this returns immediately.
 //
-// LLM-M1 FIX: This method reserves a rate-limit slot by appending time.Now()
-// to requestTimestamps when capacity is available. Without the reservation,
-// N concurrent callers would all observe the same spare capacity and all
-// proceed, exceeding RPM. RecordUsage appends again post-completion; the
-// reservation is a conservative over-count that is safe for rate limiting.
+// This method is the sole appender to requestTimestamps. It reserves a
+// rate-limit slot by appending time.Now() when capacity is available.
+// Without the reservation, N concurrent callers would all observe the same
+// spare capacity and all proceed, exceeding RPM. RecordUsage does NOT append
+// to requestTimestamps — the reservation here is the single source of truth
+// for RPM accounting, giving exactly one timestamp per request.
 func (b *Budget) WaitForRateLimit(ctx context.Context) error {
 	if b.rateLimitRPM <= 0 {
 		return nil

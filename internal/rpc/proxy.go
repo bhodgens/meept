@@ -74,7 +74,7 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	server.RegisterHandler("security.query_log", p.makeProxy("security.query_log", "security.result", 10*time.Second))
 	server.RegisterHandler("security.get_stats", p.makeProxy("security.get_stats", "security.result", 10*time.Second))
 	server.RegisterHandler("security.record_override", p.makeProxy("security.record_override", "security.result", 10*time.Second))
-	server.RegisterHandler("security.approve_action", p.makeFireAndForget("security.approve_action"))
+	server.RegisterHandler("security.approve_action", p.makeFireAndForgetBlocking("security.approve_action"))
 
 	// Note: skills methods are NOT proxied here.
 	// Direct RPC handlers are registered by RegisterSkillsHandlers (internal/rpc/skills.go)
@@ -244,6 +244,31 @@ func (p *ProxyHandler) makeFireAndForget(topic string) Handler {
 			Payload: params,
 		}
 		delivered := p.bus.Publish(topic, msg)
+		status := "published"
+		if delivered == 0 {
+			status = "dropped"
+		}
+		return map[string]any{
+			RPCKeyStatus: status,
+			"topic":      topic,
+			"delivered":  delivered,
+		}, nil
+	}
+}
+
+// makeFireAndForgetBlocking creates a handler that uses PublishBlocking for
+// security-critical events that must not be dropped. Same as makeFireAndForget
+// but uses blocking publish with a 5-second timeout.
+func (p *ProxyHandler) makeFireAndForgetBlocking(topic string) Handler {
+	return func(ctx context.Context, params json.RawMessage) (any, error) {
+		msg := &models.BusMessage{
+			ID:      id.Generate("fire-"),
+			Type:    models.MessageTypeEvent,
+			Topic:   topic,
+			Source:  "rpc.proxy",
+			Payload: params,
+		}
+		delivered := p.bus.PublishBlocking(topic, msg)
 		status := "published"
 		if delivered == 0 {
 			status = "dropped"

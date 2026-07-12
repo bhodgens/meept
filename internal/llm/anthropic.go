@@ -671,11 +671,19 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 			})
 		}
 		for _, tc := range msg.ToolCalls {
+			// B-12 FIX: Empty Arguments must produce valid JSON for the
+			// Anthropic "input" field. An empty string is not valid JSON.
+			// The streaming response path defaults to "{}" (see
+			// buildResponseFromBlocks); mirror that here.
+			input := json.RawMessage(tc.Function.Arguments)
+			if len(input) == 0 {
+				input = json.RawMessage("{}")
+			}
 			content = append(content, anthropicContent{
 				Type:  ContentTypeToolUse,
 				ID:    tc.ID,
 				Name:  tc.Function.Name,
-				Input: json.RawMessage(tc.Function.Arguments),
+				Input: input,
 			})
 		}
 		if apiIdx < len(apiMessages) && apiMessages[apiIdx].Role == "assistant" {
@@ -1319,7 +1327,14 @@ func (s *sseScanner) Scan() bool {
 			n, err := s.reader.Read(chunk)
 			if err != nil {
 				if err == io.EOF {
-					return len(s.buffer) > 0 || currentLine.Len() > 0
+					// B-06 FIX: Flush any pending line into the event, then
+					// return the event if it has data. Without this, the last
+					// SSE event is silently dropped when the connection ends
+					// without a trailing blank line.
+					if currentLine.Len() > 0 {
+						s.processLine(currentLine.String())
+					}
+					return s.event.Data != ""
 				}
 				s.err = err
 				return false

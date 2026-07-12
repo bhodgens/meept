@@ -218,6 +218,14 @@ func (s *VectorShard) Insert(ctx context.Context, memoryID string, embedding []f
 	}
 	defer func() { _ = tx.Rollback() }() //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 
+	// Delete any existing embedding for this memory_id to avoid orphaning
+	// the old vec0 row when re-inserting.
+	var oldRowID int64
+	_ = tx.QueryRowContext(ctx, `SELECT rowid FROM embedding_rowids WHERE memory_id = ?`, memoryID).Scan(&oldRowID) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
+	if oldRowID > 0 {
+		_, _ = tx.ExecContext(ctx, `DELETE FROM embeddings WHERE rowid = ?`, oldRowID) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
+	}
+
 	vecJSON := JSONFloat32Slice(embedding)
 
 	result, err := tx.ExecContext(ctx, `INSERT INTO embeddings (embedding) VALUES (?)`, vecJSON) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
@@ -285,9 +293,29 @@ func (s *VectorShard) InsertBatch(ctx context.Context, memoryIDs []string, embed
 	}
 	defer metaStmt.Close()
 
+	// Prepare statement to look up and delete old embeddings for re-inserts.
+	oldRowIDStmt, err := tx.PrepareContext(ctx, `SELECT rowid FROM embedding_rowids WHERE memory_id = ?`) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
+	if err != nil {
+		return fmt.Errorf("prepare old rowid stmt: %w", err)
+	}
+	defer oldRowIDStmt.Close()
+
+	delEmbedStmt, err := tx.PrepareContext(ctx, `DELETE FROM embeddings WHERE rowid = ?`) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
+	if err != nil {
+		return fmt.Errorf("prepare delete embedding stmt: %w", err)
+	}
+	defer delEmbedStmt.Close()
+
 	for i := range embeddings {
 		if len(embeddings[i]) != s.dimension {
 			return fmt.Errorf("embedding dimension mismatch at index %d: expected %d, got %d", i, s.dimension, len(embeddings[i]))
+		}
+
+		// Delete old embedding if this memory_id already exists.
+		var oldRowID int64
+		_ = oldRowIDStmt.QueryRowContext(ctx, memoryIDs[i]).Scan(&oldRowID) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
+		if oldRowID > 0 {
+			_, _ = delEmbedStmt.ExecContext(ctx, oldRowID) //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
 		}
 
 		if _, err := vecStmt.ExecContext(ctx, JSONFloat32Slice(embeddings[i])); err != nil { //nolint:mutexio // mutex serializes sqlite connection access; tx bound to protected conn
@@ -430,8 +458,16 @@ func (s *VectorShard) Stats() ShardStats {
 
 func (s *VectorShard) Dimension() int                       { return s.dimension }
 func (s *VectorShard) ShardID() string                      { return s.shardID }
-func (s *VectorShard) EFSearch() int                        { return s.efSearch }
-func (s *VectorShard) SetEFSearch(ef int)                   { s.efSearch = ef }
+func (s *VectorShard) EFSearch() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.efSearch
+}
+func (s *VectorShard) SetEFSearch(ef int) {
+	s.mu.Lock()
+	s.efSearch = ef
+	s.mu.Unlock()
+}
 func (s *VectorShard) WithProvider(p Provider) *VectorShard { s.provider = p; return s }
 
 func JSONFloat32Slice(v []float32) string {

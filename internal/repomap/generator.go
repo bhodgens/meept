@@ -7,6 +7,7 @@ package repomap
 import (
 	"context"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -111,8 +112,22 @@ func NewRepoMapGenerator(config RepoMapConfig, logger *slog.Logger, watchedFiles
 		config.MaxMapTokens = 1024
 	}
 	if config.CacheDir == "" {
-		homeDir := filepath.Join("~", ".meept", "repomap_cache")
-		config.CacheDir = homeDir
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			homeDir = os.TempDir()
+		}
+		config.CacheDir = filepath.Join(homeDir, ".meept", "repomap_cache")
+	} else if strings.HasPrefix(config.CacheDir, "~") {
+		// Expand tilde in non-empty cache dir
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			homeDir = os.TempDir()
+		}
+		if config.CacheDir == "~" {
+			config.CacheDir = homeDir
+		} else if strings.HasPrefix(config.CacheDir, "~/") {
+			config.CacheDir = filepath.Join(homeDir, config.CacheDir[2:])
+		}
 	}
 	if config.MapMulNoFiles == 0 {
 		config.MapMulNoFiles = 8.0

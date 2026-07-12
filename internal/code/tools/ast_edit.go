@@ -233,7 +233,15 @@ func (t *ASTEditTool) Execute(ctx context.Context, args map[string]any) (any, er
 		return response, nil
 	}
 
-	// Apply edits immediately when preview_only=false or no registry
+	// If preview_only is true without a registry, return preview without
+	// writing to disk. The tool description states the default is preview-only.
+	if previewOnly {
+		response["modified_source"] = string(modifiedSource)
+		response["message"] = fmt.Sprintf("AST edit preview (%d matches). Set preview_only=false to apply.", result.Rewrite.MatchCount)
+		return response, nil
+	}
+
+	// Apply edits immediately when preview_only=false
 	response["modified_source"] = string(modifiedSource)
 
 	// Fence check: validate the resolved file path against the workspace

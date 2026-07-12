@@ -42,16 +42,19 @@ func TestGossipHandler_OnEvent_SessionTurn(t *testing.T) {
 		t.Fatalf("OnEvent returned error: %v", err)
 	}
 
-	// Verify the turn derived memory was stored in gossip DB.
-	results, err := ds.GetMemories(t.Context(), &memory.MemoryQuery{Category: "session_turn", Limit: 10})
+	// Verify the turn was stored in the gossip DB.
+	turns, err := ds.GetTurnsForSession(t.Context(), "sess-test")
 	if err != nil {
-		t.Fatalf("GetMemories failed: %v", err)
+		t.Fatalf("GetTurnsForSession failed: %v", err)
 	}
-	if len(results) == 0 {
-		t.Fatal("expected at least one session turn memory in gossip store")
+	if len(turns) == 0 {
+		t.Fatal("expected at least one session turn in gossip store")
 	}
-	if results[0].Memory.SessionID != "sess-test" {
-		t.Errorf("SessionID = %q, want %q", results[0].Memory.SessionID, "sess-test")
+	if turns[0].SessionID != "sess-test" {
+		t.Errorf("SessionID = %q, want %q", turns[0].SessionID, "sess-test")
+	}
+	if turns[0].TurnID != "turn-001" {
+		t.Errorf("TurnID = %q, want %q", turns[0].TurnID, "turn-001")
 	}
 }
 

@@ -370,10 +370,101 @@ func (t *TaskUpdateTool) Execute(ctx context.Context, args map[string]any) (any,
 	}, nil
 }
 
+// TaskSummarizeTool produces an LLM summary of a task's current state.
+type TaskSummarizeTool struct {
+	store   *task.Store
+	chatter llm.Chatter
+}
+
+// NewTaskSummarizeTool creates a task summarize tool. Returns nil if chatter is nil.
+func NewTaskSummarizeTool(chatter llm.Chatter) *TaskSummarizeTool {
+	if chatter == nil {
+		return nil
+	}
+	return &TaskSummarizeTool{chatter: chatter}
+}
+
+// SetStore injects the task store (optional; summarize needs a store to load tasks).
+func (t *TaskSummarizeTool) SetStore(store *task.Store) {
+	if store != nil {
+		t.store = store
+	}
+}
+
+func (t *TaskSummarizeTool) Name() string { return "task_summarize" }
+
+func (t *TaskSummarizeTool) Category() string { return "tasks" }
+
+func (t *TaskSummarizeTool) Description() string {
+	return "Summarize a task's state, progress, and next steps using the configured LLM."
+}
+
+func (t *TaskSummarizeTool) Parameters() llm.FunctionParameters {
+	return llm.FunctionParameters{
+		Type: schemaTypeObject,
+		Properties: map[string]llm.ParameterProperty{
+			"id": {
+				Type:        schemaTypeString,
+				Description: "The task ID to summarize.",
+			},
+		},
+		Required: []string{"id"},
+	}
+}
+
+func (t *TaskSummarizeTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	if t == nil || t.chatter == nil {
+		return nil, fmt.Errorf("task summarizer not configured")
+	}
+	id, _ := args["id"].(string)
+	if id == "" {
+		return nil, fmt.Errorf("task id is required")
+	}
+
+	var taskObj *task.Task
+	if t.store != nil {
+		var err error
+		taskObj, err = t.store.GetByID(id)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get task: %w", err)
+		}
+		if taskObj == nil {
+			return nil, fmt.Errorf("task not found: %s", id)
+		}
+	} else {
+		// Store not wired: still produce a minimal summary request context.
+		taskObj = &task.Task{ID: id, Name: id}
+	}
+
+	prompt := fmt.Sprintf(
+		"Summarize this task briefly (status, progress, next steps):\n"+
+			"id: %s\nname: %s\ndescription: %s\nstate: %s\njobs: %d/%d completed, %d failed\nagent: %s\n",
+		taskObj.ID, taskObj.Name, taskObj.Description, taskObj.State,
+		taskObj.CompletedJobs, taskObj.TotalJobs, taskObj.FailedJobs, taskObj.AssignedAgent,
+	)
+	resp, err := t.chatter.Chat(ctx, []llm.ChatMessage{
+		{Role: llm.RoleUser, Content: prompt},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("summarize failed: %w", err)
+	}
+	summary := ""
+	if resp != nil {
+		summary = resp.Content
+	}
+	return map[string]any{
+		"success":  true,
+		"task_id":  taskObj.ID,
+		"summary":  summary,
+		"state":    string(taskObj.State),
+	}, nil
+}
+
 // Ensure tools implement the Tool interface
 var (
 	_ tools.Tool = (*TaskCreateTool)(nil)
 	_ tools.Tool = (*TaskGetTool)(nil)
 	_ tools.Tool = (*TaskListTool)(nil)
 	_ tools.Tool = (*TaskUpdateTool)(nil)
+	_ tools.Tool = (*TaskSummarizeTool)(nil)
 )

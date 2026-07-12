@@ -350,7 +350,7 @@ func parseTime(s string) time.Time {
 	return t
 }
 
-func scanProject(row *sql.Row) (*Project, error) {
+func scanProject(row *sqlite.PooledRow) (*Project, error) {
 	var p Project
 	var lastSync, createdAt, updatedAt string
 	err := row.Scan(&p.ID, &p.Name, &p.Mode, &p.GitURL, &p.Branch, &p.LocalPath,
@@ -381,7 +381,7 @@ func scanProjectFromRows(rows sqlite.Rows) (*Project, error) {
 	return &p, nil
 }
 
-func scanWorktree(row *sql.Row) (*Worktree, error) {
+func scanWorktree(row *sqlite.PooledRow) (*Worktree, error) {
 	var w Worktree
 	var createdAt string
 	err := row.Scan(&w.ID, &w.ProjectID, &w.SessionID, &w.PlanID, &w.Path,

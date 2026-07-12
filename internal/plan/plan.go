@@ -71,6 +71,7 @@ type PlanPhase struct {
 	CompletedSteps int        `json:"completed_steps" db:"completed_steps"`
 	FailedSteps    int        `json:"failed_steps" db:"failed_steps"`
 	State          PhaseState `json:"state" db:"state"`
+	TaskID         string     `json:"task_id,omitempty" db:"task_id"`
 	// Produces/Consumes declare phase artifacts. Serialized as JSON in SQLite
 	// (db:"-" because sqlx StructScan cannot bind JSON columns directly; the
 	// store layer handles these via explicit marshal/unmarshal).

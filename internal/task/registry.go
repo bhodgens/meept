@@ -441,6 +441,16 @@ func (r *Registry) publishEvent(topic string, data map[string]any) {
 	r.bus.Publish(topic, msg)
 }
 
+// PublishExternal publishes a pre-constructed BusMessage to a topic on the
+// registry's message bus. This allows external callers (e.g., the plan
+// TaskCreator adapter) to publish events through the registry's bus.
+func (r *Registry) PublishExternal(topic string, msg *models.BusMessage) {
+	if r.bus == nil || msg == nil {
+		return
+	}
+	r.bus.Publish(topic, msg)
+}
+
 // Handler handles task-related requests on the message bus.
 type Handler struct {
 	handler  *bus.SubscriptionHandler

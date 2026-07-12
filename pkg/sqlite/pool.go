@@ -276,13 +276,43 @@ func (p *Pool) Query(ctx context.Context, query string, args ...any) (Rows, erro
 }
 
 // QueryRow executes a query that returns at most one row.
-func (p *Pool) QueryRow(ctx context.Context, query string, args ...any) (*sql.Row, error) {
+// The returned PooledRow must be scanned to completion and then Close'd
+// so the connection is returned to the pool. Failing to Close leaks the
+// connection.
+func (p *Pool) QueryRow(ctx context.Context, query string, args ...any) (*PooledRow, error) {
 	db, err := p.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer p.Put(db)
-	return db.QueryRowContext(ctx, query, args...), nil
+	row := db.QueryRowContext(ctx, query, args...)
+	return &PooledRow{row: row, pool: p, db: db}, nil
+}
+
+// PooledRow wraps *sql.Row so the connection is returned to the pool
+// after Scan. Unlike *sql.Row, PooledRow.Close must be called to release
+// the pool connection — the pool cannot return it until Scan releases
+// the underlying database/sql connection.
+type PooledRow struct {
+	row  *sql.Row
+	pool *Pool
+	db   *sql.DB
+}
+
+// Scan scans the row, then immediately returns the connection to the pool.
+func (r *PooledRow) Scan(dest ...any) error {
+	err := r.row.Scan(dest...)
+	r.pool.Put(r.db)
+	r.db = nil
+	return err
+}
+
+// Close returns the connection to the pool if Scan was never called.
+// Safe to call multiple times.
+func (r *PooledRow) Close() {
+	if r.db != nil {
+		r.pool.Put(r.db)
+		r.db = nil
+	}
 }
 
 // pooledRows wraps sql.Rows to return the connection when closed.
@@ -290,15 +320,18 @@ type pooledRows struct {
 	rows *sql.Rows
 	pool *Pool
 	db   *sql.DB
+	once sync.Once
 }
 
 func (r *pooledRows) Close() error {
-	closeErr := r.rows.Close()
-	if iterErr := r.rows.Err(); iterErr != nil {
+	var closeErr error
+	r.once.Do(func() {
+		closeErr = r.rows.Close()
+		if iterErr := r.rows.Err(); iterErr != nil {
+			closeErr = iterErr
+		}
 		r.pool.Put(r.db)
-		return iterErr
-	}
-	r.pool.Put(r.db)
+	})
 	return closeErr
 }
 

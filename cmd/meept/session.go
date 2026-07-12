@@ -190,7 +190,7 @@ func newSessionGetCmd() *cobra.Command {
 			}
 			defer client.Close()
 
-			params := map[string]string{"session_id": sessionID}
+			params := map[string]string{"id": sessionID}
 			rawResult, err := client.Call("session.get", params)
 			if err != nil {
 				return fmt.Errorf("failed to get session: %w", err)
@@ -259,7 +259,7 @@ func newSessionDeleteCmd() *cobra.Command {
 			}
 			defer client.Close()
 
-			params := map[string]string{"session_id": sessionID}
+			params := map[string]string{"id": sessionID}
 			rawResult, err := client.Call("session.delete", params)
 			if err != nil {
 				return fmt.Errorf("failed to delete session: %w", err)
@@ -474,7 +474,7 @@ func newSessionNeedsAttentionCmd() *cobra.Command {
 	var outputJSON bool
 
 	cmd := &cobra.Command{
-		Use:   "--needs-attention",
+		Use:   "needs-attention",
 		Short: "List sessions requiring attention",
 		Long:  "List sessions whose designation is non-trivial (e.g. waiting_human, requires_approval).",
 		RunE: func(cmd *cobra.Command, args []string) error {

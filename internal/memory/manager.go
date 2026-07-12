@@ -1391,11 +1391,11 @@ func (m *Manager) GetVersionHistory(ctx context.Context, id string) ([]Memory, e
 	// Find all versions using the SQL parent_id column
 	rows, err := db.QueryContext(ctx, `
 		WITH RECURSIVE version_chain AS (
-			SELECT id, content, category, metadata_json, created_at, last_accessed_at
+			SELECT id, content, category, metadata_json, created_at, last_accessed_at, parent_id
 			FROM episodic_memories
 			WHERE id = ?
 			UNION ALL
-			SELECT e.id, e.content, e.category, e.metadata_json, e.created_at, e.last_accessed_at
+			SELECT e.id, e.content, e.category, e.metadata_json, e.created_at, e.last_accessed_at, e.parent_id
 			FROM episodic_memories e
 			INNER JOIN version_chain vc ON e.id = vc.parent_id
 			WHERE vc.parent_id IS NOT NULL

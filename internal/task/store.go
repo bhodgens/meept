@@ -238,6 +238,39 @@ func (s *Store) Update(task *Task) error {
 	return nil
 }
 
+// IncrementCompletedJobs atomically increments completed_jobs for the given
+// task and returns the updated value. This avoids the read-modify-write
+// race that occurs when multiple parallel steps complete concurrently.
+func (s *Store) IncrementCompletedJobs(taskID string) (int, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(
+		`UPDATE tasks SET completed_jobs = completed_jobs + 1, updated_at = ? WHERE id = ?`,
+		now, taskID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to increment completed_jobs: %w", err)
+	}
+	var count int
+	err = s.db.QueryRow(`SELECT completed_jobs FROM tasks WHERE id = ?`, taskID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read completed_jobs: %w", err)
+	}
+	return count, nil
+}
+
+// AddTokenUsage atomically adds delta to token_usage for the given task.
+func (s *Store) AddTokenUsage(taskID string, delta int) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(
+		`UPDATE tasks SET token_usage = token_usage + ?, updated_at = ? WHERE id = ?`,
+		delta, now, taskID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to add token_usage: %w", err)
+	}
+	return nil
+}
+
 // Delete removes a task by ID.
 func (s *Store) Delete(id string) error {
 	result, err := s.db.Exec("DELETE FROM tasks WHERE id = ?", id)

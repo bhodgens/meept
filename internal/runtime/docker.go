@@ -51,6 +51,7 @@ func NewDockerBackend(cfg DockerConfig) (*DockerBackend, error) {
 
 // newDockerBackend creates a new Docker execution backend with a persistent container.
 func newDockerBackend(cfg DockerConfig, image string, logger *slog.Logger) (*DockerBackend, error) {
+	// Build client from DOCKER_HOST env, falling back to default socket.
 	dockerHost := dockerHostFromEnv()
 	client, err := docker.NewClient(dockerHost)
 	if err != nil {

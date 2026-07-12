@@ -1327,6 +1327,7 @@ func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 func (h *Handler) handleCreate(msg *models.BusMessage) (any, error) {
 	var params struct {
 		Name             string            `json:"name"`
+		Description      string            `json:"description,omitempty"`
 		DetectionContext *DetectionContext `json:"detection_context,omitempty"`
 	}
 	if err := json.Unmarshal(msg.Payload, &params); err != nil {
@@ -1336,6 +1337,14 @@ func (h *Handler) handleCreate(msg *models.BusMessage) (any, error) {
 	session, err := h.store.Create(params.Name)
 	if err != nil {
 		return nil, err
+	}
+
+	// Apply description if provided
+	if params.Description != "" {
+		session.Description = params.Description
+		if err := h.store.UpdateDescription(session.ID, params.Description); err != nil {
+			return nil, fmt.Errorf("failed to set description: %w", err)
+		}
 	}
 
 	// Store detection context if provided
@@ -1351,10 +1360,20 @@ func (h *Handler) handleCreate(msg *models.BusMessage) (any, error) {
 }
 
 // handleList lists all sessions.
-func (h *Handler) handleList(_ *models.BusMessage) (any, error) {
+func (h *Handler) handleList(msg *models.BusMessage) (any, error) {
 	sessions, err := h.store.List()
 	if err != nil {
 		return nil, err
+	}
+	// Apply limit if provided in the payload
+	var params struct {
+		Limit int `json:"limit"`
+	}
+	if msg.Payload != nil {
+		_ = json.Unmarshal(msg.Payload, &params)
+	}
+	if params.Limit > 0 && params.Limit < len(sessions) {
+		sessions = sessions[:params.Limit]
 	}
 	return map[string]any{"sessions": sessions}, nil
 }

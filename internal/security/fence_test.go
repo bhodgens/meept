@@ -202,6 +202,68 @@ func TestCheckCommand(t *testing.T) {
 	}
 }
 
+func TestCheckCommand_PathValidation(t *testing.T) {
+	root := t.TempDir()
+	otherDir := t.TempDir()
+
+	fc := NewFenceChecker(FenceConfig{
+		Enabled:  true,
+		RootPath: root,
+	}, nil)
+
+	// Command with absolute path inside root -> allowed
+	err := fc.CheckCommand("cat "+filepath.Join(root, "file.txt"), root)
+	if err != nil {
+		t.Errorf("CheckCommand with path inside root = %v, want nil", err)
+	}
+
+	// Command with absolute path outside root -> blocked
+	outsideFile := filepath.Join(otherDir, "secret.txt")
+	err = fc.CheckCommand("cat "+outsideFile, root)
+	if err == nil {
+		t.Errorf("CheckCommand with path outside root = nil, want error")
+	}
+
+	// Command with /etc/passwd -> blocked
+	err = fc.CheckCommand("cat /etc/passwd", root)
+	if err == nil {
+		t.Error("CheckCommand with /etc/passwd = nil, want error")
+	}
+
+	// Command with ~ path -> blocked (home dir outside root)
+	err = fc.CheckCommand("cat ~/.ssh/id_rsa", root)
+	if err == nil {
+		t.Error("CheckCommand with ~/.ssh/id_rsa = nil, want error")
+	}
+
+	// Command with parent traversal -> blocked
+	err = fc.CheckCommand("cat ../../etc/passwd", root)
+	if err == nil {
+		t.Error("CheckCommand with ../../etc/passwd = nil, want error")
+	}
+
+	// Simple command with no path args -> allowed (workdir is inside root)
+	err = fc.CheckCommand("echo hello world", root)
+	if err != nil {
+		t.Errorf("CheckCommand(\"echo hello world\") = %v, want nil", err)
+	}
+
+	// Command with flags that look like paths but aren't -> allowed
+	err = fc.CheckCommand("grep --color=auto pattern file", root)
+	if err != nil {
+		t.Errorf("CheckCommand with flags = %v, want nil", err)
+	}
+
+	// Relative path inside root (./ prefix) -> allowed when cwd is root
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+	os.Chdir(root)
+	err = fc.CheckCommand("cat ./src/main.go", root)
+	if err != nil {
+		t.Errorf("CheckCommand with ./src/main.go = %v, want nil (inside root)", err)
+	}
+}
+
 func TestIsNoFence(t *testing.T) {
 	fc := NewFenceChecker(FenceConfig{NoFence: true}, nil)
 	if !fc.IsNoFence() {

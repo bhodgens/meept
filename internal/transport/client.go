@@ -99,7 +99,7 @@ func DefaultConfig() *Config {
 		Transport:          "rpc",
 		SocketPath:         "~/.meept/meept.sock",
 		HTTPBaseURL:        httpBase,
-		InsecureSkipVerify: isLoopbackBaseURL(httpBase),
+		InsecureSkipVerify: IsLoopbackBaseURL(httpBase),
 		Timeout:            120 * time.Second,
 	}
 }

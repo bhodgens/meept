@@ -122,9 +122,10 @@ func (v *InstructionVerifier) assessShellRisk(instr *ParsedInstruction) string {
 	if cmd, ok := instr.Action.Args["command"].(string); ok && cmd != "" {
 		cmdLower := strings.ToLower(cmd)
 
-		// Check known-safe commands
+		// Check known-safe commands (exact match only to prevent bypass
+		// via substring injection like "rm -rf /; go test ./...").
 		for _, safe := range v.safeCommands {
-			if strings.Contains(cmdLower, safe) {
+			if cmdLower == safe {
 				return "low"
 			}
 		}

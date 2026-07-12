@@ -376,12 +376,17 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 	}
 
 	// Claim the job (reuse now from above since it's already in the same transaction)
-	_, err = tx.Exec(`
+	claimResult, err := tx.Exec(`
 		UPDATE jobs SET state = 'claimed', claimed_by = ?, updated_at = ?
 		WHERE id = ? AND state = 'pending'`,
 		workerID, now, claimableJob.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to claim job: %w", err)
+	}
+
+	affected, _ := claimResult.RowsAffected()
+	if affected == 0 {
+		return nil, ErrJobAlreadyClaimed
 	}
 
 	if err := tx.Commit(); err != nil {

@@ -449,20 +449,24 @@ const (
 // memories table, applying the query's filters. When sourceNode != nil the
 // gossip schema (with source_node) is used.
 func (s *DualStore) scanMemoriesFromDB(ctx context.Context, db *sql.DB, sourceNode *sql.NullString, query *MemoryQuery) ([]MemoryResult, error) {
+	// Columns: id, type, category, content, metadata_json, created_at,
+	// updated_at, agent_id, session_id, bot_id [, source_node]
+	// Nullable columns (updated_at, agent_id, session_id, bot_id) use
+	// sql.NullString to avoid "converting NULL to string" errors.
 	var cols []any
 	var selectExpr string
 
 	if sourceNode != nil && sourceNode.Valid {
 		cols = []any{
 			new(string), new(string), new(string), new(string), new(string),
-			new(string), new(string), new(string), new(string), new(string),
+			new(string), new(sql.NullString), new(sql.NullString), new(sql.NullString), new(sql.NullString),
 			new(string),
 		}
 		selectExpr = memColsGossip
 	} else {
 		cols = []any{
 			new(string), new(string), new(string), new(string), new(string),
-			new(string), new(string), new(string), new(string), new(string),
+			new(string), new(sql.NullString), new(sql.NullString), new(sql.NullString), new(sql.NullString),
 		}
 		selectExpr = memColsLocal
 	}
@@ -521,31 +525,41 @@ func (s *DualStore) scanMemoriesFromDB(ctx context.Context, db *sql.DB, sourceNo
 			return nil, fmt.Errorf("dual store scan memory row: %w", err)
 		}
 
-		strs := make([]string, len(cols))
-		for i, c := range cols {
-			strs[i] = *(c.(*string))
+		// Extract column values: first 6 are NOT NULL strings,
+		// next 4 are nullable (sql.NullString), last is optional string.
+		getStr := func(i int) string {
+			if s, ok := cols[i].(*string); ok {
+				return *s
+			}
+			return ""
+		}
+		getNullStr := func(i int) string {
+			if ns, ok := cols[i].(*sql.NullString); ok && ns.Valid {
+				return ns.String
+			}
+			return ""
 		}
 
 		mem := Memory{
-			ID:        strs[0],
-			Type:      MemoryType(strs[1]),
-			Category:  strs[2],
-			Content:   strs[3],
-			Metadata:  ParseMetadata(strs[4]),
-			CreatedAt: parseTimeRFC(strs[5]),
+			ID:        getStr(0),
+			Type:      MemoryType(getStr(1)),
+			Category:  getStr(2),
+			Content:   getStr(3),
+			Metadata:  ParseMetadata(getStr(4)),
+			CreatedAt: parseTimeRFC(getStr(5)),
 		}
-		if t := parseTimeRFC(strs[6]); !t.IsZero() {
+		if t := parseTimeRFC(getNullStr(6)); !t.IsZero() {
 			mem.UpdatedAt = &t
 		}
-		mem.AgentID = strs[7]
-		mem.SessionID = strs[8]
-		mem.BotID = strs[9]
+		mem.AgentID = getNullStr(7)
+		mem.SessionID = getNullStr(8)
+		mem.BotID = getNullStr(9)
 
 		if sourceNode != nil && sourceNode.Valid {
 			if mem.Metadata == nil {
 				mem.Metadata = make(map[string]any)
 			}
-			mem.Metadata["source_node"] = strs[10]
+			mem.Metadata["source_node"] = getStr(10)
 		}
 
 		source := "memory"
@@ -553,7 +567,7 @@ func (s *DualStore) scanMemoriesFromDB(ctx context.Context, db *sql.DB, sourceNo
 			source = string(mem.Type)
 		}
 		if sourceNode != nil && sourceNode.Valid {
-			source = fmt.Sprintf("gossip:%s", strs[10])
+			source = fmt.Sprintf("gossip:%s", getStr(10))
 		}
 
 		score := 1.0

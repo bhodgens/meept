@@ -65,7 +65,7 @@ func TestIsRetryable(t *testing.T) {
 		{"budget exceeded (non-retryable)", &llm.BudgetExceededError{}, false},
 		{"context size exceeded (non-retryable)", &llm.ContextSizeExceededError{}, false},
 		{"context deadline", context.DeadlineExceeded, true},
-		{"context canceled", context.Canceled, true},
+		{"context canceled", context.Canceled, false},
 		{"net temp error", tempNetError{}, true},
 		{"net timeout error", timeoutNetError{}, true},
 		{"ECONNREFUSED", syscall.ECONNREFUSED, true},

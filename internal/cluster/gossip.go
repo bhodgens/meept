@@ -455,6 +455,25 @@ func (g *GossipEngine) handleClusterEvent(msg *models.BusMessage) {
 		return
 	}
 
+	// Verify signature BEFORE dedup so that a poisoned/unsigned event with
+	// a known event ID cannot suppress a legitimate signed event.
+	if g.cfg.Security.RequireNodeSignatures {
+		if len(event.Signature) == 0 {
+			g.logger.Warn("gossip: rejecting unsigned event (signatures required)",
+				"event_id", event.EventID, "node_id", event.NodeID)
+			return
+		}
+		pubKey, found := g.PeerSigningKey(event.NodeID)
+		if !found {
+			g.logger.Warn("gossip: no signing key for event sender", "node_id", event.NodeID)
+			return
+		}
+		if !event.Verify(pubKey) {
+			g.logger.Warn("gossip: event signature verification failed", "event_id", event.EventID, "node_id", event.NodeID)
+			return
+		}
+	}
+
 	// Deduplicate via xxhash of event_id — atomic check-and-set under a
 	// single write lock to prevent the TOCTOU race where two concurrent
 	// handlers for the same eventID both pass the RLock check.
@@ -475,24 +494,6 @@ func (g *GossipEngine) handleClusterEvent(msg *models.BusMessage) {
 	// Event passed dedup — count as a genuine peer receipt.
 	if g.metrics != nil {
 		g.metrics.IncEventReceived()
-	}
-
-	// Verify signature if node signature requirement is enabled
-	if g.cfg.Security.RequireNodeSignatures {
-		if len(event.Signature) == 0 {
-			g.logger.Warn("gossip: rejecting unsigned event (signatures required)",
-				"event_id", event.EventID, "node_id", event.NodeID)
-			return
-		}
-		pubKey, found := g.PeerSigningKey(event.NodeID)
-		if !found {
-			g.logger.Warn("gossip: no signing key for event sender", "node_id", event.NodeID)
-			return
-		}
-		if !event.Verify(pubKey) {
-			g.logger.Warn("gossip: event signature verification failed", "event_id", event.EventID, "node_id", event.NodeID)
-			return
-		}
 	}
 
 	// Persist (INSERT OR IGNORE prevents duplicates)

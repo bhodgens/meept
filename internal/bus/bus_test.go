@@ -351,3 +351,45 @@ func TestPublishExternalOnly_PanicsInTestMode(t *testing.T) {
 	msg, _ := models.NewBusMessage(models.MessageTypeEvent, "test", map[string]any{"v": 1})
 	bus.PublishExternalOnly("external.panic.topic", msg)
 }
+
+// TestPublishBlocking_DeliversToSubscribers verifies that PublishBlocking
+// successfully delivers messages to subscribers.
+func TestPublishBlocking_DeliversToSubscribers(t *testing.T) {
+	bus := New(nil, nil)
+	defer bus.Close()
+
+	sub := bus.Subscribe("test-sub", "critical.topic")
+	msg := &models.BusMessage{
+		ID:      "msg-block-1",
+		Type:    models.MessageTypeEvent,
+		Source:  "test",
+		Payload: []byte(`{"data":"critical"}`),
+	}
+	delivered := bus.PublishBlocking("critical.topic", msg)
+	assert.Equal(t, 1, delivered)
+
+	select {
+	case received := <-sub.Channel:
+		assert.Equal(t, "msg-block-1", received.ID)
+		assert.Equal(t, "critical.topic", received.Topic)
+	case <-time.After(100 * time.Millisecond):
+		t.Error("timeout waiting for blocking-published message")
+	}
+}
+
+// TestPublishBlocking_WorksWhenBufferHasSpace verifies that blocking publish
+// does not unnecessarily delay when there is buffer capacity available.
+func TestPublishBlocking_WorksWhenBufferHasSpace(t *testing.T) {
+	bus := New(DefaultConfig(), nil) // default buffer size 100
+	defer bus.Close()
+
+	bus.Subscribe("test-sub", "quick.topic")
+	msg, _ := models.NewBusMessage(models.MessageTypeEvent, "test", map[string]any{"v": 1})
+
+	start := time.Now()
+	delivered := bus.PublishBlocking("quick.topic", msg)
+	elapsed := time.Since(start)
+
+	assert.Equal(t, 1, delivered)
+	assert.Less(t, elapsed, 100*time.Millisecond, "blocking publish should return immediately when buffer has space")
+}

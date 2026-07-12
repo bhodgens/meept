@@ -406,11 +406,13 @@ func (e *Engine) CheckForAgent(action, toolName string, details map[string]strin
 	// this stage entirely — no behavior change for existing agents.
 	if agentID != "" && len(e.preExecCheckers) > 0 {
 		if checker, ok := e.preExecCheckers[agentID]; ok {
-			// Populate risk_level in details so the checker can compare
-			// against the constitution's risk ceiling.
-			checkDetails := details
-			if checkDetails == nil {
-				checkDetails = make(map[string]string)
+			// C-08 FIX: Create a copy of the details map to avoid mutating
+			// the caller's map while holding only RLock. This prevents data
+			// races when multiple goroutines call CheckForAgent concurrently
+			// with the same details map.
+			checkDetails := make(map[string]string, len(details)+2)
+			for k, v := range details {
+				checkDetails[k] = v
 			}
 			if _, hasRL := checkDetails["risk_level"]; !hasRL {
 				checkDetails["risk_level"] = effectiveRisk.String()

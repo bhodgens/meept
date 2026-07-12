@@ -26,6 +26,7 @@ type EventActionRouter struct {
 
 	mu        sync.RWMutex
 	topicSubs map[string]map[string]BotTrigger // topic -> set of bot IDs
+	ctx       context.Context                   // set by Start, nil before
 }
 
 // NewEventActionRouter creates a new event-to-action router.
@@ -39,19 +40,32 @@ func NewEventActionRouter(msgBus *bus.MessageBus, handler BotTriggerHandler) *Ev
 }
 
 // Register adds a bot's bus_event triggers to the router.
+// If the router has already started, new topics are subscribed immediately.
 func (r *EventActionRouter) Register(def BotDefinition) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 
+	newTopics := make(map[string]bool)
 	for _, trigger := range def.Triggers {
 		if trigger.Type != TriggerTypeBusEvent || !trigger.Enabled {
 			continue
 		}
 		if r.topicSubs[trigger.Topic] == nil {
 			r.topicSubs[trigger.Topic] = make(map[string]BotTrigger)
+			newTopics[trigger.Topic] = true
 		}
 		r.topicSubs[trigger.Topic][def.ID] = trigger
 		r.logger.Info("registered bot for bus event", "bot_id", def.ID, "topic", trigger.Topic)
+	}
+
+	ctx := r.ctx
+	r.mu.Unlock()
+
+	// Subscribe to any new topics if the router has already started.
+	if ctx != nil {
+		for topic := range newTopics {
+			sub := r.bus.Subscribe("bot-router-"+topic, topic)
+			go r.listenTopic(ctx, topic, sub)
+		}
 	}
 }
 
@@ -71,31 +85,35 @@ func (r *EventActionRouter) Unregister(botID string) {
 
 // Start begins listening for bus events on all registered topics.
 func (r *EventActionRouter) Start(ctx context.Context) {
-	r.mu.RLock()
+	r.mu.Lock()
+	r.ctx = ctx
 	topics := make([]string, 0, len(r.topicSubs))
 	for topic := range r.topicSubs {
 		topics = append(topics, topic)
 	}
-	r.mu.RUnlock()
+	r.mu.Unlock()
 
 	for _, topic := range topics {
 		sub := r.bus.Subscribe("bot-router-"+topic, topic)
-		go func(topic string, ch <-chan *models.BusMessage) {
-			for {
-				select {
-				case <-ctx.Done():
-					r.bus.Unsubscribe(sub)
-					return
-				case msg, ok := <-ch:
-					if !ok {
-						return
-					}
-					r.handleEvent(ctx, topic, msg)
-				}
-			}
-		}(topic, sub.Channel)
+		go r.listenTopic(ctx, topic, sub)
 	}
 	r.logger.Info("event action router started", "topics", topics)
+}
+
+// listenTopic processes bus messages for a single topic subscription.
+func (r *EventActionRouter) listenTopic(ctx context.Context, topic string, sub *bus.Subscriber) {
+	for {
+		select {
+		case <-ctx.Done():
+			r.bus.Unsubscribe(sub)
+			return
+		case msg, ok := <-sub.Channel:
+			if !ok {
+				return
+			}
+			r.handleEvent(ctx, topic, msg)
+		}
+	}
 }
 
 func (r *EventActionRouter) handleEvent(ctx context.Context, topic string, msg *models.BusMessage) {

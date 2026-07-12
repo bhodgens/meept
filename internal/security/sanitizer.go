@@ -355,6 +355,20 @@ func (s *InputSanitizer) detectPatterns(text string) []Warning {
 func (s *InputSanitizer) sanitizeStructure(text string) (string, bool) {
 	modified := false
 
+	// Escape boundary markers to prevent prompt injection boundary breakout
+	boundaryMarkers := []string{
+		"<<<USER_INPUT>>>", "<<<END_USER_INPUT>>>",
+		"<<<TOOL_OUTPUT:", "<<<END_TOOL_OUTPUT>>>",
+	}
+	for _, marker := range boundaryMarkers {
+		if strings.Contains(text, marker) {
+			// Insert zero-width space after first character to neutralize
+			replacement := string(marker[0]) + "\u200b" + marker[1:]
+			text = strings.ReplaceAll(text, marker, replacement)
+			modified = true
+		}
+	}
+
 	// Escape special tokens by inserting a zero-width space
 	for _, tok := range structuralTokens {
 		if tok.Pattern.MatchString(text) {

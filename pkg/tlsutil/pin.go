@@ -76,9 +76,16 @@ type PinningVerifier struct {
 }
 
 // VerifyConnection implements tls.Config.VerifyConnection.
+// C-06 FIX: Returns an error when no fingerprints are configured to prevent
+// fail-open MITM vulnerability.
 func (pv *PinningVerifier) VerifyConnection(cs tls.ConnectionState) error {
 	if len(cs.PeerCertificates) == 0 {
 		return fmt.Errorf("no peer certificates presented")
+	}
+	// C-06: Fail closed when no fingerprints configured - this prevents
+	// a misconfigured pin verifier from allowing MITM attacks
+	if pv.ExpectedCertFP == "" && pv.ExpectedSPKIFP == "" {
+		return fmt.Errorf("TLS pin verifier misconfigured: no fingerprints specified")
 	}
 	peer := cs.PeerCertificates[0]
 	if pv.ExpectedCertFP != "" {

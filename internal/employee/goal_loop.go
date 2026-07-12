@@ -904,14 +904,44 @@ func (l *GoalLoop) decideTier2(ctx context.Context, trigger TriggerEvent, logger
 			"employee_id", l.employeeID)
 	}
 
+	store := l.goalStore
 	for _, candidate := range candidates {
-		_, planErr := l.Plan(ctx, candidate)
+		// G2: Re-check the plan cap before each candidate to avoid
+		// flooding the approval queue beyond MaxActivePlans. Pending
+		// plans are tracked in ActivePlanIDs so the cap gates total
+		// in-flight plans (pending + executing), not just executing.
+		if goal, err := l.lookupActiveGoal(ctx); err == nil && goal != nil {
+			if !goal.CanAddActivePlan(maxActive) {
+				logger.Debug("tier2 plan creation skipped: reached MaxActivePlans cap",
+					"max", maxActive,
+					"active_count", len(goal.ActivePlans()),
+					"candidate", candidate.Title)
+				break
+			}
+		}
+
+		ref, planErr := l.Plan(ctx, candidate)
 		if planErr != nil {
 			logger.Error("tier2 plan creation failed",
 				"candidate", candidate.Title,
 				"error", planErr)
 			// Continue to next candidate; one failure shouldn't block others.
 			continue
+		}
+
+		// G2: Add the pending plan to ActivePlanIDs immediately so the
+		// cap accurately reflects total in-flight plans. This is removed
+		// on rejection (Manager.RejectPlan) or after execution completes
+		// (ApproveAndExecute). AddActivePlan dedups so the re-add in
+		// ApproveAndExecute is a no-op.
+		if store != nil {
+			if goal, err := l.lookupActiveGoal(ctx); err == nil && goal != nil {
+				goal.AddActivePlan(ref.ID)
+				if updateErr := store.Update(ctx, goal); updateErr != nil {
+					logger.Warn("failed to track pending plan in ActivePlanIDs",
+						"plan_id", ref.ID, "error", updateErr)
+				}
+			}
 		}
 	}
 	return nil

@@ -218,6 +218,17 @@ func (cq *ClusterQueue) CheckNodeReachability(ctx context.Context, nodeID string
 	return lastHeartbeat > threshold
 }
 
+// Heartbeat extends the claim timeout for a locally claimed job. This
+// should be called periodically by workers processing long-running jobs
+// to prevent the reclaim mechanism from reclaiming in-flight work.
+func (cq *ClusterQueue) Heartbeat(jobID string) {
+	cq.mu.Lock()
+	defer cq.mu.Unlock()
+	if record, ok := cq.claimed[jobID]; ok {
+		record.TimeoutAt = time.Now().UTC().Add(cq.cfg.DefaultClaimTimeout)
+	}
+}
+
 // IsClaimed checks if a job is currently claimed by any node.
 func (cq *ClusterQueue) IsClaimed(ctx context.Context, jobID string) (string, bool) {
 	cq.mu.RLock()

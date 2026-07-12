@@ -15,11 +15,12 @@ import (
 
 // StdioTransport implements Transport over stdio to a subprocess.
 type StdioTransport struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	stdout  io.ReadCloser
-	reader  *bufio.Reader
-	writeMu sync.Mutex // serializes header+content writes to avoid interleaved frames
+	cmd      *exec.Cmd
+	stdin    io.WriteCloser
+	stdout   io.ReadCloser
+	reader   *bufio.Reader
+	writeMu  sync.Mutex    // serializes header+content writes to avoid interleaved frames
+	readWG   sync.WaitGroup // tracks outstanding Read goroutines
 }
 
 // NewStdioTransport creates a transport by starting a subprocess.
@@ -63,7 +64,9 @@ func (t *StdioTransport) Read(ctx context.Context) ([]byte, error) {
 	// Use a channel to unblock when context is cancelled
 	resultCh := make(chan readResult, 1)
 
+	t.readWG.Add(1)
 	go func() {
+		defer t.readWG.Done()
 		var contentLength int
 		var readErr error
 		for {
@@ -106,6 +109,9 @@ func (t *StdioTransport) Read(ctx context.Context) ([]byte, error) {
 
 	select {
 	case <-ctx.Done():
+		// The goroutine may still be blocked on the reader. It will be
+		// unblocked when Close() closes stdout. We wait for it during
+		// Close via readWG so it doesn't permanently leak.
 		return nil, ctx.Err()
 	case result := <-resultCh:
 		return result.data, result.err
@@ -142,6 +148,19 @@ func (t *StdioTransport) Close() error {
 	}
 	if t.stdout != nil {
 		t.stdout.Close()
+	}
+	// Wait for any Read goroutines blocked on the reader to finish after
+	// stdout is closed. Bounded by the same 5s timeout below for the
+	// process Wait.
+	readDone := make(chan struct{})
+	go func() {
+		t.readWG.Wait()
+		close(readDone)
+	}()
+	select {
+	case <-readDone:
+	case <-time.After(5 * time.Second):
+		// Best-effort; goroutines will eventually finish when GC reclaims.
 	}
 	if t.cmd != nil && t.cmd.Process != nil {
 		if err := t.cmd.Process.Kill(); err != nil {

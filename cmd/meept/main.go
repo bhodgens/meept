@@ -111,6 +111,10 @@ Analytics:
 		// flags without requiring `meept chat`. The `chat` subcommand exists for
 		// explicit invocation and shares the same handler.
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Propagate root --cwd to chatCwd so runChat/runTUI pick it up
+			if chatCwd == "" && rootCwd != "" {
+				chatCwd = rootCwd
+			}
 			// Detect `meept /path/to/dir` syntax - if first arg looks like a path
 			if len(args) == 1 {
 				potentialPath := args[0]
@@ -118,10 +122,9 @@ Analytics:
 				if len(potentialPath) > 0 && (potentialPath[0] == '/' || potentialPath[0] == '~' || potentialPath[0] == '.') {
 					// Check if it's a valid directory
 					if info, err := os.Stat(potentialPath); err == nil && info.IsDir() {
-						// It's a directory, use it as --cwd
-						if err := cmd.PersistentFlags().Set("cwd", potentialPath); err != nil {
-							return fmt.Errorf("failed to set cwd: %w", err)
-						}
+						// It's a directory, use it as --cwd and open TUI (no chat message)
+						chatCwd = potentialPath
+						args = nil // clear args so runChat opens TUI instead of chatting the path
 					}
 				}
 			}
@@ -139,10 +142,6 @@ Analytics:
 	rootCmd.PersistentFlags().Lookup("debug").NoOptDefVal = "debug.log"
 
 	// Add subcommands
-	// Pass rootCwd to chat command if set
-	if rootCwd != "" {
-		chatCwd = rootCwd
-	}
 	rootCmd.AddCommand(newChatCmd())
 	rootCmd.AddCommand(newStatusCmd())
 	rootCmd.AddCommand(newDaemonCmd())
@@ -257,6 +256,9 @@ func getTransportConfig() *transport.Config {
 	cfg.SocketPath = getSocketPath()
 	if httpURLFlag != "" {
 		cfg.HTTPBaseURL = httpURLFlag
+		// Recompute InsecureSkipVerify based on the actual target URL,
+		// not the default loopback URL from DefaultConfig.
+		cfg.InsecureSkipVerify = transport.IsLoopbackBaseURL(httpURLFlag)
 	}
 	return cfg
 }

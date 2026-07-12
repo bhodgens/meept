@@ -41,6 +41,11 @@ func (pm *ProjectManager) RegisterGit(ctx context.Context, id, name, gitURL stri
 	if id == "" {
 		id = uuid.New().String()
 	}
+	// Reject IDs that contain path separators or `..` to prevent path
+	// traversal outside BaseDir.
+	if strings.Contains(id, "..") || strings.ContainsAny(id, `/\`) {
+		return nil, fmt.Errorf("invalid project id %q: must not contain path separators or '..'", id)
+	}
 	// Reject URLs that begin with '-' to prevent option injection into
 	// git clone (e.g. "--upload-pack=...").
 	if strings.HasPrefix(gitURL, "-") {
@@ -51,6 +56,10 @@ func (pm *ProjectManager) RegisterGit(ctx context.Context, id, name, gitURL stri
 
 	// Check if directory already exists
 	if _, err := os.Stat(localPath); err == nil {
+		// Validate it's actually a git repository before reusing it.
+		if _, gitErr := os.Stat(filepath.Join(localPath, ".git")); gitErr != nil {
+			return nil, fmt.Errorf("project directory %q already exists but is not a git repository", localPath)
+		}
 		pm.logger.Info("project directory already exists, skipping clone", "path", localPath)
 	} else {
 		// Clone the repo. Use '--' to separate git options from the URL/path.
@@ -219,8 +228,10 @@ func (pm *ProjectManager) Status(ctx context.Context, id string) (*ProjectStatus
 		aheadBehind, _ := pm.gitOutput(ctx, p.LocalPath, "rev-list", "--left-right", "--count", "origin/"+status.Branch+"...HEAD")
 		parts := strings.Fields(aheadBehind)
 		if len(parts) == 2 {
-			fmt.Sscanf(parts[0], "%d", &status.Ahead)
-			fmt.Sscanf(parts[1], "%d", &status.Behind)
+			// --left-right: left = commits in origin but not local (behind),
+			// right = commits in local but not origin (ahead).
+			fmt.Sscanf(parts[0], "%d", &status.Behind)
+			fmt.Sscanf(parts[1], "%d", &status.Ahead)
 		}
 	}
 

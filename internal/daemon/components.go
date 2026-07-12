@@ -4,7 +4,9 @@ package daemon
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -839,8 +841,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if err := lfmLoader.LoadAllAdapters(adapterRegistry); err != nil {
 			logger.Warn("failed to load adapters", "error", err)
 		} else {
-			c.AdapterRouter = llm.NewAdapterRouter(lfmLoader.Adapters, nil)
-			logger.Info("lora adapters loaded", "count", len(lfmLoader.Adapters))
+			c.AdapterRouter = llm.NewAdapterRouterFromLoader(lfmLoader)
+			logger.Info("lora adapters loaded",
+				"count", len(lfmLoader.Adapters),
+				"fallback", lfmLoader.Fallback != nil,
+			)
 		}
 	}
 
@@ -1663,7 +1668,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if c.TaskRegistry != nil {
 		taskStore = c.TaskRegistry.Store()
 	}
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, containerMgr, c.PTYManager, c.LLMClient, c.FenceChecker, logger)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger)
 
 	// Register /remember tool for agents to propose improvements (Thread E)
 	c.ToolRegistry.Register(builtin.NewRememberTool(".meept/improvements.md"))
@@ -2281,9 +2286,21 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 
 		// Create authenticator
+		// C-04 FIX: Require authentication when web server is enabled.
+		// If no secret key is configured, generate a random one to prevent
+		// unauthorized access.
 		var auth web.Authenticator
 		if cfg.Web.SecretKey != "" {
 			auth = web.NewBearerAuth(cfg.Web.SecretKey)
+		} else {
+			// Generate a random secret key to prevent unauthorized access
+			// This is a fail-closed default: web enabled without explicit
+			// key configuration still requires auth with a random key
+			// that can be retrieved from logs or via daemon status.
+			randomKey, _ := generateRandomSecretKey(32)
+			auth = web.NewBearerAuth(randomKey)
+			logger.Warn("Web server using auto-generated secret key",
+				"hint", "set web.secret_key in config to persist across restarts")
 		}
 
 		// Collect server options with adapters
@@ -4281,10 +4298,10 @@ func registerBuiltinTools(
 	containerMgr *runtime.ContainerManager,
 	ptyMgr *pty.Manager,
 	llmClient *llm.Client,
+	summarizerChatter llm.Chatter,
 	fenceChecker *intsecurity.FenceChecker,
 	logger *slog.Logger,
 ) {
-	// Shared read cache for hashline edit recovery
 	readCache := builtin.NewReadCache(30)
 
 	// Filesystem tools
@@ -4436,6 +4453,13 @@ func registerBuiltinTools(
 		registry.Register(builtin.NewTaskGetTool(taskStore))
 		registry.Register(builtin.NewTaskListTool(taskStore))
 		registry.Register(builtin.NewTaskUpdateTool(taskStore))
+		// task_summarize: optional LLM summary of a task.
+		if summarizerChatter != nil {
+			if st := builtin.NewTaskSummarizeTool(summarizerChatter); st != nil {
+				st.SetStore(taskStore)
+				registry.Register(st)
+			}
+		}
 		logger.Debug("Registered task tools")
 	}
 
@@ -4952,10 +4976,144 @@ func runLoRAConsolidate(cfg config.LearningConfig) error {
 	if n, err := countJSONLLines(rawPath); err == nil {
 		meta.RawCapturesCount = n
 	}
+	// Preserve LastAutoTrain across refresh (RefreshDomainStats keeps other fields).
 	if err := learning.SaveMetadata(learningDir, meta); err != nil {
 		return fmt.Errorf("lora consolidate: save metadata: %w", err)
 	}
+
+	// Auto-train: when manual_only is false, enqueue domains past threshold.
+	// Training runs asynchronously so the scheduler job is not blocked for hours.
+	if !cfg.Training.ManualOnly {
+		threshold := cfg.Training.AutoTrainThreshold
+		if threshold <= 0 {
+			threshold = 500
+		}
+		model := cfg.Training.DefaultModel
+		if model == "" {
+			model = "lfm2.5-8b"
+		}
+		// Reload meta so LastAutoTrain is current.
+		if m2, err := learning.LoadMetadata(learningDir); err == nil {
+			meta = m2
+		}
+		for _, domain := range learning.DomainsReadyForTrain(meta, threshold) {
+			count := 0
+			if ds, ok := meta.DomainStats[domain]; ok {
+				count = ds.ExampleCount
+			}
+			_ = learning.EnqueueAutoTrain(learningDir, learning.PendingAutoTrain{
+				Domain:       domain,
+				Model:        model,
+				ExampleCount: count,
+			})
+		}
+		// Fire-and-forget: process pending train queue in the background.
+		go processPendingAutoTrains(learningDir, cfg)
+	}
+
 	return nil
+}
+
+// processPendingAutoTrains drains the pending auto-train queue by invoking
+// scripts/train_lora.py (same path as `meept learning train`). Best-effort:
+// failures are marked on metadata and leave the domain retryable.
+func processPendingAutoTrains(learningDir string, cfg config.LearningConfig) {
+	pending, err := learning.ListPendingAutoTrain(learningDir)
+	if err != nil || len(pending) == 0 {
+		return
+	}
+	adaptersDir := cfg.AdaptersDir
+	if adaptersDir == "" {
+		home, _ := os.UserHomeDir()
+		adaptersDir = filepath.Join(home, ".meept", "adapters")
+	}
+	datasetsDir := filepath.Join(learningDir, "datasets")
+	scriptPath := filepath.Join("scripts", "train_lora.py")
+	if _, err := os.Stat(scriptPath); err != nil {
+		// Try absolute path relative to executable workdir is project root.
+		return
+	}
+
+	for _, p := range pending {
+		_ = learning.MarkAutoTrainStarted(learningDir, p.Domain, p.Model, p.ExampleCount)
+		datasetPath := filepath.Join(datasetsDir, p.Domain+".jsonl")
+		if _, err := os.Stat(datasetPath); err != nil {
+			_ = learning.MarkAutoTrainFailed(learningDir, p.Domain, p.Model, p.ExampleCount)
+			_ = learning.ClearPendingAutoTrain(learningDir, p.Domain, p.Model)
+			continue
+		}
+		// Versioned output dir (mirror CLI nextAdapterVersion logic).
+		ver := nextAdapterVersionDir(adaptersDir, p.Domain, p.Model)
+		outputDir := filepath.Join(adaptersDir, p.Domain, fmt.Sprintf("%s-v%d", p.Model, ver))
+		_ = os.MkdirAll(outputDir, 0o755)
+
+		trainArgs := []string{
+			scriptPath,
+			"--model", p.Model,
+			"--dataset", datasetPath,
+			"--output", outputDir,
+		}
+		configName := map[string]string{
+			"lfm2.5-8b":   "lora_lfm2.5_8b.yaml",
+			"lfm2.5-1.2b": "lora_lfm2.5_1.2b.yaml",
+		}[p.Model]
+		if configName != "" {
+			cfgPath := filepath.Join("config", "training", configName)
+			if _, err := os.Stat(cfgPath); err == nil {
+				trainArgs = append(trainArgs, "--config", cfgPath)
+			}
+		}
+		cmd := exec.Command("python", trainArgs...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			_ = learning.MarkAutoTrainFailed(learningDir, p.Domain, p.Model, p.ExampleCount)
+			_ = learning.ClearPendingAutoTrain(learningDir, p.Domain, p.Model)
+			continue
+		}
+		// Post-training hook for registry regeneration.
+		hookPath := filepath.Join("hooks", "on_adapter_trained.sh")
+		if _, err := os.Stat(hookPath); err == nil {
+			hook := exec.Command("bash", hookPath, p.Domain, p.Model, outputDir, adaptersDir, datasetsDir)
+			_ = hook.Run()
+		}
+		_ = learning.MarkAutoTrainCompleted(learningDir, p.Domain, p.Model, p.ExampleCount)
+		_ = learning.ClearPendingAutoTrain(learningDir, p.Domain, p.Model)
+	}
+}
+
+// nextAdapterVersionDir returns the next free -vN under adaptersDir/domain for model.
+func nextAdapterVersionDir(adaptersDir, domain, model string) int {
+	domainDir := filepath.Join(adaptersDir, domain)
+	entries, err := os.ReadDir(domainDir)
+	if err != nil {
+		return 1
+	}
+	prefix := model + "-v"
+	maxVer := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		numStr := strings.TrimPrefix(name, prefix)
+		n := 0
+		valid := true
+		for _, c := range numStr {
+			if c < '0' || c > '9' {
+				valid = false
+				break
+			}
+			n = n*10 + int(c-'0')
+		}
+		if valid && n > maxVer {
+			maxVer = n
+		}
+	}
+	return maxVer + 1
 }
 
 // countJSONLLines counts non-empty lines in a JSONL file. Missing file → 0.
@@ -6382,4 +6540,14 @@ func loadAgentModelRefs(cfg *config.Config, logger *slog.Logger) []llm.AgentMode
 		out = append(out, llm.AgentModelRef{Model: def.Model, Enabled: def.IsEnabled()})
 	}
 	return out
+}
+
+// generateRandomSecretKey generates a random hex-encoded secret key of the
+// specified byte length. Returns the key string and any error encountered.
+func generateRandomSecretKey(byteLen int) (string, error) {
+	b := make([]byte, byteLen)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

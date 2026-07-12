@@ -91,6 +91,9 @@ func (w *Worker) Start(ctx context.Context) error {
 	}
 	w.StartTime = time.Now()
 	w.setState(StateIdle)
+	// Recreate the done channel so a restarted worker doesn't
+	// double-close the original channel.
+	w.done = make(chan struct{})
 	ctx, w.cancel = context.WithCancel(ctx)
 	w.mu.Unlock()
 
@@ -278,8 +281,30 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 		w.logger.Error("Failed to mark job as processing", "job", job.ID, "error", err)
 	}
 
+	// Start heartbeat for cluster queue if supported.
+	// This extends the claim timeout so long-running jobs are not
+	// reclaimed by the cluster stale-claim sweeper.
+	heartbeatDone := make(chan struct{})
+	if hb, ok := w.queue.(queue.Heartbeater); ok {
+		hb.Heartbeat(job.ID) // initial heartbeat
+		go func() {
+			ticker := time.NewTicker(60 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-heartbeatDone:
+					return
+				case <-ticker.C:
+					hb.Heartbeat(job.ID)
+				}
+			}
+		}()
+	}
+
 	// Execute the job
 	result, processErr := w.processor.Process(ctx, job)
+
+	close(heartbeatDone)
 
 	w.mu.Lock()
 	w.CurrentJob = nil

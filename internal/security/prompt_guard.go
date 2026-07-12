@@ -84,13 +84,26 @@ func NewPromptGuardWithInterval(interval int) *PromptGuard {
 }
 
 // WrapUserInput wraps text in user-input boundary markers.
+// It neutralizes embedded boundary markers in the input to prevent
+// prompt injection attacks that attempt to prematurely close the boundary.
 func (pg *PromptGuard) WrapUserInput(text string) string {
-	return fmt.Sprintf("%s\n%s\n%s", UserInputStart, text, UserInputEnd)
+	// Neutralize embedded end markers by escaping them with zero-width space
+	// to prevent attackers from closing the boundary early
+	neutralized := strings.ReplaceAll(text, UserInputEnd, "<"+UserInputEnd)
+	neutralized = strings.ReplaceAll(neutralized, UserInputStart, UserInputStart[:len(UserInputStart)-3]+"‌>>>")
+	return fmt.Sprintf("%s\n%s\n%s", UserInputStart, neutralized, UserInputEnd)
 }
 
 // WrapToolOutput wraps output from a tool in tool-output boundary markers.
+// It neutralizes embedded boundary markers in the output to prevent
+// prompt injection attacks that attempt to prematurely close the boundary.
 func (pg *PromptGuard) WrapToolOutput(toolName, output string) string {
-	return fmt.Sprintf("%s\n%s\n%s", ToolOutputStartTag(toolName), output, ToolOutputEndTag)
+	// Neutralize embedded end markers by prefixing with angle bracket
+	// to prevent attackers from closing the boundary early
+	neutralized := strings.ReplaceAll(output, ToolOutputEndTag, "<"+ToolOutputEndTag)
+	startTag := ToolOutputStartTag(toolName)
+	neutralized = strings.ReplaceAll(neutralized, startTag, "<"+startTag)
+	return fmt.Sprintf("%s\n%s\n%s", startTag, neutralized, ToolOutputEndTag)
 }
 
 // WrapSkillOutput wraps output from a skill execution in boundary markers.

@@ -2,6 +2,7 @@ package vector
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"path/filepath"
 	"testing"
@@ -245,8 +246,8 @@ func TestBatchInsert(t *testing.T) {
 	contents := make([]string, n)
 
 	for i := 0; i < n; i++ {
-		memoryIDs[i] = string(rune('a' + i%26))
-		contents[i] = "content item " + string(rune('a'+i%26))
+		memoryIDs[i] = fmt.Sprintf("mem-%d", i)
+		contents[i] = fmt.Sprintf("content item %d", i)
 		emb, err := provider.GenerateEmbedding(ctx, contents[i])
 		if err != nil {
 			t.Fatalf("generate embedding: %v", err)

@@ -108,7 +108,16 @@ func New(cfg *Config, logger *slog.Logger) *MessageBus {
 // A nil msg is silently dropped to protect subscriber goroutines from
 // nil-pointer dereferences when reading the message.
 func (b *MessageBus) Publish(topic string, msg *models.BusMessage) int {
-	return b.publish(topic, msg, false)
+	return b.publish(topic, msg, false, false)
+}
+
+// PublishBlocking sends a message to all subscribers, blocking until the
+// message is enqueued in every subscriber's channel or a 5-second timeout
+// elapses. Use this for security-critical events where message drops are
+// unacceptable (e.g., approval requests). Returns the number of subscribers
+// the message was delivered to.
+func (b *MessageBus) PublishBlocking(topic string, msg *models.BusMessage) int {
+	return b.publish(topic, msg, false, true)
 }
 
 // PublishExternalOnly is like Publish but downgrades the "no subscribers" log
@@ -117,13 +126,14 @@ func (b *MessageBus) Publish(topic string, msg *models.BusMessage) int {
 // connected (e.g., worker.*, chat.message.received).
 // The panicOnUndrainedSubscription behavior is unchanged — tests still catch bugs.
 func (b *MessageBus) PublishExternalOnly(topic string, msg *models.BusMessage) int {
-	return b.publish(topic, msg, true)
+	return b.publish(topic, msg, true, false)
 }
 
-// publish is the shared core for Publish and PublishExternalOnly.
+// publish is the shared core for Publish, PublishBlocking, and PublishExternalOnly.
 // When suppressWarning is true, the "no subscribers" log is downgraded from
-// WARN to DEBUG.
-func (b *MessageBus) publish(topic string, msg *models.BusMessage, suppressWarning bool) int {
+// WARN to DEBUG. When blocking is true, sends to subscriber channels use a
+// 5-second timeout instead of non-blocking select-default.
+func (b *MessageBus) publish(topic string, msg *models.BusMessage, suppressWarning, blocking bool) int {
 	if msg == nil {
 		return 0
 	}
@@ -193,14 +203,26 @@ func (b *MessageBus) publish(topic string, msg *models.BusMessage, suppressWarni
 
 	// Direct topic subscribers
 	for _, sub := range b.subscribers[topic] {
-		select {
-		case sub.Channel <- msg:
-			delivered++
-		default:
-			b.logger.Warn("bus: dropped message (buffer full)",
-				"topic", topic,
-				"subscriber", sub.ID,
-			)
+		if blocking {
+			select {
+			case sub.Channel <- msg:
+				delivered++
+			case <-time.After(5 * time.Second):
+				b.logger.Error("bus: blocking publish timed out (buffer full)",
+					"topic", topic,
+					"subscriber", sub.ID,
+				)
+			}
+		} else {
+			select {
+			case sub.Channel <- msg:
+				delivered++
+			default:
+				b.logger.Warn("bus: dropped message (buffer full)",
+					"topic", topic,
+					"subscriber", sub.ID,
+				)
+			}
 		}
 	}
 
@@ -208,14 +230,26 @@ func (b *MessageBus) publish(topic string, msg *models.BusMessage, suppressWarni
 	for pattern, subs := range b.subscribers {
 		if pattern != topic && matchWildcard(pattern, topic) {
 			for _, sub := range subs {
-				select {
-				case sub.Channel <- msg:
-					delivered++
-				default:
-					b.logger.Warn("bus: dropped message (buffer full)",
-						"topic", topic,
-						"subscriber", sub.ID,
-					)
+				if blocking {
+					select {
+					case sub.Channel <- msg:
+						delivered++
+					case <-time.After(5 * time.Second):
+						b.logger.Error("bus: blocking publish timed out (buffer full)",
+							"topic", topic,
+							"subscriber", sub.ID,
+						)
+					}
+				} else {
+					select {
+					case sub.Channel <- msg:
+						delivered++
+					default:
+						b.logger.Warn("bus: dropped message (buffer full)",
+							"topic", topic,
+							"subscriber", sub.ID,
+						)
+					}
 				}
 			}
 		}

@@ -13,15 +13,27 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/pty"
+	"github.com/caimlas/meept/internal/security"
 	"github.com/gorilla/websocket"
 )
 
 // PTYHandler handles PTY session HTTP requests.
 type PTYHandler struct {
-	ptyMgr *pty.Manager
-	logger *slog.Logger
-	subs   map[string][]chan []byte
-	mu     sync.RWMutex
+	ptyMgr       *pty.Manager
+	logger       *slog.Logger
+	subs         map[string][]chan []byte
+	mu           sync.RWMutex
+	fenceChecker *security.FenceChecker
+}
+
+// PTYHandlerOption configures a PTYHandler.
+type PTYHandlerOption func(*PTYHandler)
+
+// WithFenceChecker sets the fence checker for path validation.
+func WithFenceChecker(fc *security.FenceChecker) PTYHandlerOption {
+	return func(h *PTYHandler) {
+		h.fenceChecker = fc
+	}
 }
 
 // PTYSessionRequest holds a session creation request.
@@ -35,12 +47,16 @@ type PTYSessionRequest struct {
 }
 
 // NewPTYHandler creates a new PTY HTTP handler.
-func NewPTYHandler(ptyMgr *pty.Manager, logger *slog.Logger) *PTYHandler {
-	return &PTYHandler{
+func NewPTYHandler(ptyMgr *pty.Manager, logger *slog.Logger, opts ...PTYHandlerOption) *PTYHandler {
+	h := &PTYHandler{
 		ptyMgr: ptyMgr,
 		logger: logger.With("component", "pty-handler"),
 		subs:   make(map[string][]chan []byte),
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // RegisterRoutes registers PTY endpoints.
@@ -65,6 +81,19 @@ func (h *PTYHandler) handleSessions(w http.ResponseWriter, r *http.Request) {
 	if req.Cmd == "" {
 		http.Error(w, "cmd is required", http.StatusBadRequest)
 		return
+	}
+
+	// C-02 FIX: Apply fence check to working directory
+	if h.fenceChecker != nil {
+		workDir := req.Dir
+		if workDir == "" {
+			workDir = "."
+		}
+		if err := h.fenceChecker.CheckCommand(req.Cmd, workDir); err != nil {
+			h.logger.Warn("PTY session blocked by fence", "cmd", req.Cmd, "dir", workDir, "error", err)
+			http.Error(w, "command blocked by security fence: "+err.Error(), http.StatusForbidden)
+			return
+		}
 	}
 
 	sessionID := generateSessionID()

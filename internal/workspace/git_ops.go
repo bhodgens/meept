@@ -110,11 +110,17 @@ func gitDiffHEAD(ctx context.Context, dir string) ([]byte, error) {
 // the destination directory" behaviour works (if we cd into destPath first,
 // git clone fails because the directory doesn't exist yet).
 func gitClone(ctx context.Context, repoURL, destPath string) error {
+	// Reject URLs that begin with '-' to prevent option injection (e.g.
+	// "--upload-pack=...").
+	if strings.HasPrefix(repoURL, "-") {
+		return fmt.Errorf("clone URL %q starts with '-' (refusing ambiguous git arg)", repoURL)
+	}
 	g := defaultGitRunner
 	parent := filepath.Dir(destPath)
 	// Inline clone rather than using g.run, because g.run sets cmd.Dir to
 	// destPath (which doesn't exist yet). We need cmd.Dir = parent.
-	cmd := exec.CommandContext(ctx, "git", "clone", repoURL, destPath)
+	// Use '--' to separate git options from the URL/path arguments.
+	cmd := exec.CommandContext(ctx, "git", "clone", "--", repoURL, destPath)
 	cmd.Dir = parent
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0",

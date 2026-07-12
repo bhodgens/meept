@@ -20,9 +20,10 @@ func NewConflictResolver(logger *slog.Logger) *ConflictResolver {
 }
 
 // Resolve returns the event that should be applied when two events
-// target the same resource. For events without vector clocks, the
-// higher timestamp wins. For vector clock events, causal ordering
-// is preferred; concurrent events are resolved by node ID (lexicographic).
+// target the same resource. For events with vector clocks, causal ordering
+// is preferred — if one event happened-before the other, the later event
+// wins. For concurrent events (or events without vector clocks), the
+// higher timestamp wins; timestamps collide resolved by node ID (lexicographic).
 func (r *ConflictResolver) Resolve(event1, event2 *models.ClusterEvent) (*models.ClusterEvent, error) {
 	if event1 == nil {
 		return event2, nil
@@ -31,7 +32,21 @@ func (r *ConflictResolver) Resolve(event1, event2 *models.ClusterEvent) (*models
 		return event1, nil
 	}
 
-	// Simple last-write-wins by timestamp.
+	// If both events have vector clocks, use causal ordering.
+	if len(event1.VectorClock) > 0 && len(event2.VectorClock) > 0 {
+		cmp := CompareVectorClocks(event1.VectorClock, event2.VectorClock)
+		if cmp == -1 {
+			// event1 happened-before event2 → event2 wins
+			return event2, nil
+		}
+		if cmp == 1 {
+			// event2 happened-before event1 → event1 wins
+			return event1, nil
+		}
+		// cmp == 0: concurrent or equal — fall through to LWW + tiebreak.
+	}
+
+	// Last-write-wins by timestamp for concurrent/non-VC events.
 	if event1.Timestamp.After(event2.Timestamp) {
 		return event1, nil
 	}

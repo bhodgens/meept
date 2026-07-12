@@ -15,21 +15,24 @@ import (
 )
 
 // mergeTestSchema is the canonical gossip schema used by merge functions.
+// It mirrors internal/memory/schema_gossip.sql so merge tests exercise
+// the same column names production code uses.
 const mergeTestSchema = `
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
-    created_at INTEGER,
-    updated_at INTEGER,
-    metadata BLOB,
-    source_node TEXT
+    created_at TEXT NOT NULL,
+    last_activity TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    source_node TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS turns (
     turn_id TEXT PRIMARY KEY,
-    session_id TEXT,
-    role TEXT,
-    content TEXT,
-    timestamp INTEGER,
-    source_node TEXT
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    source_node TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS memories (
     id TEXT PRIMARY KEY,
@@ -67,9 +70,9 @@ func insertSession(t *testing.T, db *sql.DB, sessionID, sourceNode string) {
 	t.Helper()
 
 	_, err := db.Exec(
-		`INSERT INTO sessions (id, created_at, updated_at, metadata, source_node)
+		`INSERT INTO sessions (id, created_at, last_activity, metadata_json, source_node)
 		 VALUES (?, ?, ?, ?, ?)`,
-		sessionID, time.Now().UnixNano(), time.Now().UnixNano(), []byte(`{}`), sourceNode,
+		sessionID, time.Now().Format(time.RFC3339Nano), time.Now().Format(time.RFC3339Nano), `{}`, sourceNode,
 	)
 	if err != nil {
 		t.Fatalf("insert session %q: %v", sessionID, err)
@@ -403,6 +406,7 @@ func TestRunMergeOp_PropagatesExecError(t *testing.T) {
 	merged, skipped, err := runMergeOp(
 		context.Background(),
 		tx,
+		0,
 		`INSERT OR IGNORE INTO nonexistent (id) VALUES ('x')`,
 	)
 	if err == nil {
@@ -438,7 +442,7 @@ func TestMergePeerDB_AllOpsFailErrorAggregation(t *testing.T) {
 	}
 	t.Cleanup(func() { gossipDB.Close() })
 
-	if _, err := gossipDB.Exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, created_at INTEGER, updated_at INTEGER, metadata BLOB)`); err != nil {
+	if _, err := gossipDB.Exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, last_activity TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}')`); err != nil {
 		t.Fatalf("create gossip sessions: %v", err)
 	}
 	if _, err := gossipDB.Exec(`CREATE TABLE turns (turn_id TEXT PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp INTEGER)`); err != nil {
@@ -455,7 +459,7 @@ func TestMergePeerDB_AllOpsFailErrorAggregation(t *testing.T) {
 	}
 	t.Cleanup(func() { peerDB.Close() })
 
-	if _, err := peerDB.Exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, created_at INTEGER, updated_at INTEGER, metadata BLOB, source_node TEXT)`); err != nil {
+	if _, err := peerDB.Exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, last_activity TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', source_node TEXT NOT NULL)`); err != nil {
 		t.Fatalf("create peer sessions: %v", err)
 	}
 	if _, err := peerDB.Exec(`CREATE TABLE turns (turn_id TEXT PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp INTEGER, source_node TEXT)`); err != nil {
@@ -493,8 +497,8 @@ func TestMergePeerDB_SourceNodeSet(t *testing.T) {
 	peerID := "explicit-merge-source"
 	// Peer DB's source_node is "wrong" — merge MUST override it.
 	if _, err := peerDB.Exec(
-		`INSERT INTO sessions (id, created_at, updated_at, metadata, source_node) VALUES (?, ?, ?, ?, ?)`,
-		"sess-s", time.Now().UnixNano(), time.Now().UnixNano(), []byte(`{}`), "wrong-node",
+		`INSERT INTO sessions (id, created_at, last_activity, metadata_json, source_node) VALUES (?, ?, ?, ?, ?)`,
+		"sess-s", time.Now().Format(time.RFC3339Nano), time.Now().Format(time.RFC3339Nano), `{}`, "wrong-node",
 	); err != nil {
 		t.Fatalf("insert peer session: %v", err)
 	}
@@ -532,7 +536,7 @@ func TestMergePeerDB_AllOpsFail_RollbackReverts(t *testing.T) {
 	}
 	t.Cleanup(func() { gossipDB.Close() })
 
-	if _, err := gossipDB.Exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, created_at INTEGER, updated_at INTEGER, metadata BLOB)`); err != nil {
+	if _, err := gossipDB.Exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, last_activity TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}')`); err != nil {
 		t.Fatalf("create gossip sessions: %v", err)
 	}
 	if _, err := gossipDB.Exec(`CREATE TABLE turns (turn_id TEXT PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp INTEGER)`); err != nil {
@@ -548,7 +552,7 @@ func TestMergePeerDB_AllOpsFail_RollbackReverts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sql.Open peer: %v", err)
 	}
-	if _, err := peerDB.Exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, created_at INTEGER, updated_at INTEGER, metadata BLOB, source_node TEXT)`); err != nil {
+	if _, err := peerDB.Exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, last_activity TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', source_node TEXT NOT NULL)`); err != nil {
 		peerDB.Close()
 		t.Fatalf("create peer sessions: %v", err)
 	}
@@ -560,7 +564,7 @@ func TestMergePeerDB_AllOpsFail_RollbackReverts(t *testing.T) {
 		peerDB.Close()
 		t.Fatalf("create peer memories: %v", err)
 	}
-	if _, err := peerDB.Exec(`INSERT INTO sessions (id, created_at, updated_at, metadata, source_node) VALUES ('s1', 1, 1, x'', 'peer')`); err != nil {
+	if _, err := peerDB.Exec(`INSERT INTO sessions (id, created_at, last_activity, metadata_json, source_node) VALUES ('s1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '{}', 'peer')`); err != nil {
 		peerDB.Close()
 		t.Fatalf("insert peer session: %v", err)
 	}

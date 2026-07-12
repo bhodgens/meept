@@ -174,11 +174,6 @@ func (s *PlacementScheduler) Decide(req PlacementRequest) PlacementDecision {
 	policy := s.policy
 	s.mu.RUnlock()
 
-	// Cap candidates if MaxNodes is set.
-	if req.MaxNodes > 0 && len(candidates) > req.MaxNodes {
-		candidates = candidates[:req.MaxNodes]
-	}
-
 	// 1. Preferred node.
 	if req.PreferredNode != "" {
 		for _, c := range candidates {
@@ -222,6 +217,12 @@ func (s *PlacementScheduler) Decide(req PlacementRequest) PlacementDecision {
 		}
 		return scoredNodes[i].node.NodeID < scoredNodes[j].node.NodeID
 	})
+
+	// Cap candidates to MaxNodes AFTER scoring so the best-scoring nodes
+	// are retained rather than random ones from map iteration order.
+	if req.MaxNodes > 0 && len(scoredNodes) > req.MaxNodes {
+		scoredNodes = scoredNodes[:req.MaxNodes]
+	}
 
 	if len(scoredNodes) > 0 {
 		winner := scoredNodes[0]

@@ -12,6 +12,13 @@ import (
 
 // CrossShardJoin enables queries across multiple shard databases
 // using SQLite's ATTACH DATABASE mechanism.
+//
+// Because SQLite ATTACH is connection-scoped, CrossShardJoin does not ATTACH
+// at registration time. Instead, AttachDatabase registers alias→path mappings.
+// Query methods pin a single sql.Conn from the pool, ATTACH all registered
+// shards on that connection, run the query, DETACH, and return the connection
+// — all under the mutex so no other goroutine can mutate the attach scope
+// mid-query.
 type CrossShardJoin struct {
 	mu       sync.Mutex
 	baseDB   *sql.DB
@@ -26,62 +33,58 @@ func NewCrossShardJoin(baseDB *sql.DB) *CrossShardJoin {
 	}
 }
 
-// AttachDatabase attaches a shard's SQLite database file with the given alias.
-// Multiple shards can be attached and queried together.
+// AttachDatabase registers a shard's SQLite database file with the given alias.
+// The actual ATTACH happens on a pinned connection during query execution.
 func (c *CrossShardJoin) AttachDatabase(alias, path string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Detach existing attachment with same alias if present
-	if _, exists := c.attached[alias]; exists {
-		if err := c.detachNoLock(alias); err != nil {
-			return fmt.Errorf("failed to detach existing %s: %w", alias, err)
-		}
-	}
-
-	query := fmt.Sprintf("ATTACH DATABASE '%s' AS %s", path, alias)
-	if _, err := c.baseDB.ExecContext(context.Background(), query); err != nil { //nolint:mutexio // mutex serializes sqlite ATTACH/DETACH which mutate connection-level attach state
-		return fmt.Errorf("attach database %s at %s: %w", path, alias, err)
+	// Validate alias to prevent SQL injection — only allow alphanumeric + underscore.
+	if !isSafeIdentifier(alias) {
+		return fmt.Errorf("attach database: invalid alias %q (must be alphanumeric/underscore)", alias)
 	}
 
 	c.attached[alias] = path
 	return nil
 }
 
-// DetachDatabase detaches a shard database by alias.
+// isSafeIdentifier returns true if s contains only [A-Za-z0-9_].
+func isSafeIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// DetachDatabase removes a shard database registration by alias.
 func (c *CrossShardJoin) DetachDatabase(alias string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if _, exists := c.attached[alias]; !exists {
-		return nil // already detached
-	}
-
-	return c.detachNoLock(alias)
+	delete(c.attached, alias)
+	return nil
 }
 
-// DetachAll detaches all attached databases.
+// DetachAll removes all shard database registrations.
 func (c *CrossShardJoin) DetachAll() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Detach in reverse order of attachment (SQLite requires LIFO order).
-	aliases := make([]string, 0, len(c.attached))
-	for a := range c.attached {
-		aliases = append(aliases, a)
-	}
-	for i := len(aliases) - 1; i >= 0; i-- {
-		_ = c.detachNoLock(aliases[i])
-	}
+	c.attached = make(map[string]string)
 	return nil
 }
 
-// attachedCount returns the number of attached shards (caller must hold lock).
+// attachedCount returns the number of registered shards (caller must hold lock).
 func (c *CrossShardJoin) attachedCount() int {
 	return len(c.attached)
 }
 
-// AttachedAliases returns a copy of the attached alias set.
+// AttachedAliases returns a copy of the registered alias set.
 func (c *CrossShardJoin) AttachedAliases() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -93,18 +96,75 @@ func (c *CrossShardJoin) AttachedAliases() []string {
 	return aliases
 }
 
+// sortedAliases returns registered aliases sorted alphabetically (caller must hold lock).
+func (c *CrossShardJoin) sortedAliases() []string {
+	aliases := make([]string, 0, len(c.attached))
+	for a := range c.attached {
+		aliases = append(aliases, a)
+	}
+	slices.Sort(aliases)
+	return aliases
+}
+
+// attachAllLocked ATTACHes all registered shards on the given pinned connection.
+// Returns the list of aliases in attach order for later DETACH.
+// Caller MUST hold c.mu.
+func (c *CrossShardJoin) attachAllLocked(ctx context.Context, conn *sql.Conn) ([]string, error) {
+	aliases := c.sortedAliases()
+	attached := make([]string, 0, len(aliases))
+	for _, alias := range aliases {
+		path := c.attached[alias]
+		escapedPath := strings.ReplaceAll(path, "'", "''")
+		attachSQL := fmt.Sprintf("ATTACH DATABASE '%s' AS %s", escapedPath, alias)
+		if _, err := conn.ExecContext(ctx, attachSQL); err != nil { //nolint:mutexio // mutex serializes cross-shard ATTACH/DETACH/query; conn is pinned to single connection
+			return attached, fmt.Errorf("attach database %s at %s: %w", path, alias, err)
+		}
+		attached = append(attached, alias)
+	}
+	return attached, nil
+}
+
+// detachAllLocked DETACHes the given aliases in reverse order (LIFO).
+// Caller MUST hold c.mu. Best-effort: errors are ignored.
+func (c *CrossShardJoin) detachAllLocked(ctx context.Context, conn *sql.Conn, aliases []string) {
+	for i := len(aliases) - 1; i >= 0; i-- {
+		alias := aliases[i]
+		if !isSafeIdentifier(alias) {
+			continue
+		}
+		_, _ = conn.ExecContext(ctx, fmt.Sprintf("DETACH DATABASE %s", alias)) //nolint:mutexio // mutex serializes cross-shard ATTACH/DETACH/query; conn is pinned to single connection
+	}
+}
+
 // QueryAllShards executes a UNION query across all attached shard databases.
 // The query must reference tables using the attached aliases and should include
 // columns: memory_id, content, vector_similarity, metadata_json in that order.
 func (c *CrossShardJoin) QueryAllShards(ctx context.Context, query string, args ...any) ([]SearchResult, error) {
-	c.mu.Lock()
+	c.mu.Lock() //nolint:mutexio // mutex held across ATTACH+query+DETACH to ensure connection-stable attach scope
+	defer c.mu.Unlock()
+
 	if c.attachedCount() == 0 {
-		c.mu.Unlock()
 		return nil, fmt.Errorf("no shards attached")
 	}
-	c.mu.Unlock()
 
-	rows, err := c.baseDB.QueryContext(ctx, query, args...)
+	// Pin a single connection so ATTACH and query land on the same connection.
+	conn, err := c.baseDB.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("acquire connection for cross-shard query: %w", err)
+	}
+	defer conn.Close()
+
+	// ATTACH all registered shards on this pinned connection.
+	attachedAliases, err := c.attachAllLocked(ctx, conn)
+	// Always DETACH what was successfully attached, even on error.
+	defer func() {
+		c.detachAllLocked(ctx, conn, attachedAliases)
+	}()
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := conn.QueryContext(ctx, query, args...) //nolint:mutexio // mutex serializes cross-shard query; conn is pinned to single connection
 	if err != nil {
 		return nil, fmt.Errorf("query all shards: %w", err)
 	}
@@ -138,17 +198,37 @@ type ShardResults struct {
 
 // QueryShards executes queries across individual shard aliases and merges results.
 // Each entry in queries maps an alias to its SQL query string.
-// The alias must already be attached before calling this method.
+// The alias must already be registered before calling this method.
 func (c *CrossShardJoin) QueryShards(ctx context.Context, queries map[string]string) (*ShardResults, error) {
 	if len(queries) == 0 {
 		return &ShardResults{}, nil
 	}
 
+	c.mu.Lock() //nolint:mutexio // mutex held across ATTACH+query+DETACH to ensure connection-stable attach scope
+	defer c.mu.Unlock()
+
+	// Pin a single connection so ATTACH and query land on the same connection.
+	conn, err := c.baseDB.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("acquire connection for cross-shard query: %w", err)
+	}
+	defer conn.Close()
+
+	// ATTACH all registered shards on this pinned connection.
+	attachedAliases, err := c.attachAllLocked(ctx, conn)
+	// Always DETACH what was successfully attached, even on error.
+	defer func() {
+		c.detachAllLocked(ctx, conn, attachedAliases)
+	}()
+	if err != nil {
+		return nil, err
+	}
+
 	shardResultMap := make(map[string][]SearchResult)
 	var missing []string
 
-	for alias, query := range queries {
-		rows, err := c.baseDB.QueryContext(ctx, query)
+	for alias, q := range queries {
+		rows, err := conn.QueryContext(ctx, q) //nolint:mutexio // mutex serializes cross-shard query; conn is pinned to single connection
 		if err != nil {
 			missing = append(missing, alias)
 			continue
@@ -157,14 +237,12 @@ func (c *CrossShardJoin) QueryShards(ctx context.Context, queries map[string]str
 		var results []SearchResult
 		for rows.Next() {
 			var sr SearchResult
-			if err := rows.Scan(&sr.MemoryID, &sr.Content, &sr.VectorSimilarity, &sr.Metadata); err == nil {
-				sr.RelevanceScore = sr.VectorSimilarity
-			} else {
-				var metaStr string
-				rows.Scan(&sr.MemoryID, &sr.Content, &sr.VectorSimilarity, &metaStr)
-				sr.RelevanceScore = sr.VectorSimilarity
-				sr.Metadata = parseMetadataString(metaStr)
+			var metaStr string
+			if err := rows.Scan(&sr.MemoryID, &sr.Content, &sr.VectorSimilarity, &metaStr); err != nil {
+				continue
 			}
+			sr.RelevanceScore = sr.VectorSimilarity
+			sr.Metadata = parseMetadataString(metaStr)
 			results = append(results, sr)
 		}
 		rows.Close()
@@ -232,15 +310,4 @@ func BuildUnionQuery(queries map[string]string) (string, int) {
 	combined += " ORDER BY vector_similarity DESC"
 
 	return combined, count
-}
-
-// detachNoLock detaches without acquiring the lock (caller must hold it).
-func (c *CrossShardJoin) detachNoLock(alias string) error {
-	query := fmt.Sprintf("DETACH DATABASE %s", alias)
-	if _, err := c.baseDB.ExecContext(context.Background(), query); err != nil {
-		return fmt.Errorf("detach database %s: %w", alias, err)
-	}
-
-	delete(c.attached, alias)
-	return nil
 }

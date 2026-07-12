@@ -713,11 +713,13 @@ func (s *StepStore) PromoteReadySteps(taskID string) ([]*TaskStep, error) {
 			continue
 		}
 
-		// Check if all dependencies are completed
+		// Check if all dependencies are successfully completed.
+		// Use IsSuccessfullyTerminal (Completed/Approved only) so that
+		// failed, skipped, or rejected deps block promotion.
 		allDepsCompleted := true
 		for _, depID := range step.DependsOn {
 			depState, ok := stateMap[depID]
-			if !ok || !depState.IsTerminal() || depState == StepFailed {
+			if !ok || !depState.IsSuccessfullyTerminal() {
 				allDepsCompleted = false
 				break
 			}
@@ -740,10 +742,11 @@ func (s *StepStore) PromoteReadySteps(taskID string) ([]*TaskStep, error) {
 // SetState updates a step's state and records the transition.
 //
 // The SELECT, UPDATE, and transition INSERT are wrapped in a single
-// BEGIN IMMEDIATE transaction so that concurrent transitions from the
-// same starting state serialize: the first writer commits its view of
-// oldState and the second writer sees the new state when it acquires
-// the write lock. This provides SELECT...FOR UPDATE semantics on SQLite.
+// transaction. The UPDATE guards on the oldState read within the same
+// transaction so that concurrent transitions from the same starting
+// state do not clobber each other: only the first writer's UPDATE
+// succeeds (WHERE state = oldState), and the second writer sees the
+// new state on its next read.
 func (s *StepStore) SetState(id string, state StepState) error {
 	ctx := context.Background()
 
@@ -761,10 +764,19 @@ func (s *StepStore) SetState(id string, state StepState) error {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE task_steps SET state = ?, updated_at = ? WHERE id = ?`,
-		string(state), now, id); err != nil {
+	result, err := tx.ExecContext(ctx, `
+		UPDATE task_steps SET state = ?, updated_at = ? WHERE id = ? AND state = ?`,
+		string(state), now, id, string(oldState))
+	if err != nil {
 		return fmt.Errorf("failed to set step state: %w", err)
+	}
+
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		// Another writer changed the state between our SELECT and UPDATE.
+		// This is expected under concurrency; return nil since the step
+		// has already transitioned away from oldState.
+		return nil
 	}
 
 	// Record transition inside the same transaction when state changed.
@@ -1187,8 +1199,8 @@ func decodeChecklist(s string) *Checklist {
 // SetStateWithReason updates a step's state and records the transition with a reason.
 //
 // Like SetState, this wraps the SELECT, UPDATE, and transition INSERT in a
-// single BEGIN IMMEDIATE transaction so concurrent callers cannot observe
-// a stale oldState between the read and the write.
+// single transaction. The UPDATE guards on the oldState read so concurrent
+// callers cannot clobber each other's transitions.
 func (s *StepStore) SetStateWithReason(id string, state StepState, reason string) error {
 	ctx := context.Background()
 
@@ -1210,10 +1222,17 @@ func (s *StepStore) SetStateWithReason(id string, state StepState, reason string
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE task_steps SET state = ?, updated_at = ? WHERE id = ?`,
-		string(state), now, id); err != nil {
+	result, err := tx.ExecContext(ctx, `
+		UPDATE task_steps SET state = ?, updated_at = ? WHERE id = ? AND state = ?`,
+		string(state), now, id, string(currentStepState))
+	if err != nil {
 		return fmt.Errorf("failed to set step state: %w", err)
+	}
+
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		// Another writer changed the state between our SELECT and UPDATE.
+		return nil
 	}
 
 	if currentStepState != state {

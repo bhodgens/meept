@@ -315,10 +315,13 @@ func runClusterJoin(joinKey, configPath string) error {
 	fmt.Printf("Config:     %s\n", configPath)
 
 	// Write config if returned
-	if cfgData, ok := result["config"].(json.RawMessage); ok && len(cfgData) > 0 {
-		dir := filepath.Dir(configPath)
-		if err := os.MkdirAll(dir, 0700); err == nil {
-			_ = os.WriteFile(configPath, cfgData, 0600)
+	if cfgVal, ok := result["config"]; ok && cfgVal != nil {
+		cfgBytes, err := json.MarshalIndent(cfgVal, "", "  ")
+		if err == nil && len(cfgBytes) > 0 {
+			dir := filepath.Dir(configPath)
+			if err := os.MkdirAll(dir, 0700); err == nil {
+				_ = os.WriteFile(configPath, cfgBytes, 0600)
+			}
 		}
 	}
 

@@ -73,7 +73,7 @@ func IsRetryable(err error) bool {
 	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode >= 500 && apiErr.StatusCode < 600
 	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+	if errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
 	var netErr net.Error

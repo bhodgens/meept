@@ -47,6 +47,11 @@ type StdioTransport struct {
 
 	// closeOnce ensures stderrDone is closed only once.
 	closeOnce sync.Once
+
+	// cmdCancel cancels the detached command context created in Start.
+	// Called from Close() to ensure the subprocess exits even if Kill()
+	// somehow fails.
+	cmdCancel context.CancelFunc
 }
 
 // NewStdioTransport creates a new stdio transport.
@@ -59,6 +64,12 @@ func NewStdioTransport(command string, args []string, config Config) *StdioTrans
 }
 
 // Start launches the subprocess and sets up communication pipes.
+//
+// The caller's context is used only for the handshake during Connect; the
+// subprocess itself is NOT bound to it. If it were, a short-lived RPC
+// timeout context (e.g. from mcp.set_enabled) would kill the process as
+// soon as the handler returns. Instead we derive a detached context so
+// the subprocess lives until Close() is called.
 func (t *StdioTransport) Start(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -67,9 +78,21 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 		return fmt.Errorf("transport already running")
 	}
 
-	// Build command
+	// Use a detached context so the subprocess is not killed when the
+	// caller's context (typically a per-RPC timeout) expires. The
+	// subprocess lifecycle is managed by Close() via t.running and
+	// explicit Process.Kill.
+	// We still accept ctx for potential cancellation during startup, but
+	// the CommandContext below uses a background-derived context.
+	cmdCtx, cancel := context.WithCancel(context.Background())
+	_ = ctx // ctx is used for the handshake in Client.Connect; not for subprocess lifetime
+
 	//nolint:gosec // validated input
-	cmd := exec.CommandContext(ctx, t.command, t.args...)
+	cmd := exec.CommandContext(cmdCtx, t.command, t.args...)
+
+	// Store the cancel func so Close() can cancel the command context
+	// in addition to killing the process.
+	t.cmdCancel = cancel
 
 	// Set up environment
 	cmd.Env = os.Environ()
@@ -185,17 +208,19 @@ func (t *StdioTransport) relayStdout() {
 
 	for {
 		line, err := t.stdout.ReadBytes('\n')
-		select {
-		case t.relayCh <- stdoutLine{data: line, err: err}:
-			if err != nil {
-				return
-			}
-		default:
-			// No one listening (Send timed out or transport closed).
-			// Discard the line and keep reading.
-			if err != nil {
-				return
-			}
+		if !t.running.Load() {
+			return
+		}
+		// B-11 FIX: Use a blocking send so responses are not discarded
+		// when the channel is temporarily full. The relay goroutine is
+		// the sole reader of stdout; discarding data means the matching
+		// response can be lost forever, causing Send() to hang until
+		// timeout. If the transport is shut down, the running check
+		// above plus Close() killing the subprocess will unblock the
+		// read.
+		t.relayCh <- stdoutLine{data: line, err: err}
+		if err != nil {
+			return
 		}
 	}
 }
@@ -290,6 +315,11 @@ func (t *StdioTransport) Close() error {
 	}
 
 	t.running.Store(false)
+
+	// Cancel the detached command context (defence in depth alongside Kill).
+	if t.cmdCancel != nil {
+		t.cmdCancel()
+	}
 
 	// Close stdin to signal EOF to the subprocess
 	if t.stdin != nil {

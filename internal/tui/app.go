@@ -181,6 +181,9 @@ type App struct {
 	// Error state
 	err error
 
+	// Target session for startup (set via SetTargetSession before Init)
+	targetSessionID string
+
 	// Verbosity level for agent progress display
 	verbosity VerbosityLevel
 
@@ -382,6 +385,14 @@ func NewApp(socketPath string, cwd string) *App {
 	return app
 }
 
+// SetTargetSession sets a session ID to load on startup. Must be called
+// before Init() so that loadSession picks up the target session.
+func (a *App) SetTargetSession(sessionID string) {
+	if sessionID != "" {
+		a.targetSessionID = sessionID
+	}
+}
+
 // loadMainConfigForTTS loads the main meept.json5 config and returns TTS settings.
 // Used for config merging: meept.json5 provides Playback and Behavior defaults,
 // while client.json5 can override Enabled, Engine, and Voice.
@@ -507,6 +518,21 @@ func (a *App) loadSession() tea.Msg {
 	// Wait for connection first - this will be called after connectDaemon
 	if !a.rpc.IsConnected() {
 		return nil
+	}
+
+	// If a target session was specified (e.g., --session flag), load it first.
+	if a.targetSessionID != "" {
+		resp, err := a.rpc.ListSessions()
+		if err == nil {
+			for _, sess := range resp.Sessions {
+				if sess.ID == a.targetSessionID {
+					a.sessionMgr.SetSession(&sess)
+					return SessionLoadedMsg{Session: &sess, IsNew: false}
+				}
+			}
+		}
+		// Target not found — fall through to normal resume/create logic
+		slog.Warn("target session not found, falling back to default", "session_id", a.targetSessionID)
 	}
 
 	// Auto-resume: try to load most recent session before using default

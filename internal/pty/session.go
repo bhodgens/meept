@@ -71,24 +71,28 @@ type SessionConfig struct {
 
 // ptySession implements Session using github.com/creack/pty.
 type ptySession struct {
-	mu         sync.RWMutex
-	wg         sync.WaitGroup // waits for readLoop before waitLoop closes channels
-	ptyCmd     *exec.Cmd      // PTY mode: the actual command started by pty.StartWithSize
-	plainCmd   *exec.Cmd      // Non-PTY mode: process to Wait on.
-	ptmx       *os.File       // PTY master device (PTY mode)
-	stdoutPipe io.Reader      // Non-PTY mode: cmd.Stdout
-	stdinPipe  io.Writer      // Non-PTY mode: cmd.Stdin
-	outputChan chan []byte
-	errorChan  chan error
+	mu            sync.RWMutex
+	wg            sync.WaitGroup // waits for readLoop before waitLoop closes channels
+	ptyCmd        *exec.Cmd      // PTY mode: the actual command started by pty.StartWithSize
+	plainCmd      *exec.Cmd      // Non-PTY mode: process to Wait on.
+	ptmx          *os.File       // PTY master device (PTY mode)
+	stdoutPipe    io.Reader      // Non-PTY mode: cmd.Stdout
+	stdinPipe     io.Writer      // Non-PTY mode: cmd.Stdin
+	outputChan    chan []byte
+	errorChan     chan error
 	// pending holds the unread remainder of a large output chunk so
 	// that the next Read() call can serve it without data loss.
-	pending   []byte
-	done      chan struct{}
-	closed    bool
-	exitCode  int
-	rows      int
-	cols      int
-	fallback  bool
+	pending      []byte
+	done         chan struct{}
+	closed       bool
+	finished     bool
+	exitCode     int
+	rows         int
+	cols         int
+	fallback     bool
+	timeoutFired bool
+	timeoutCtx   context.Context
+	timeoutCancel context.CancelFunc
 }
 
 var (
@@ -130,6 +134,7 @@ func NewSession(cfg SessionConfig) (Session, error) {
 			cols:       cols,
 			fallback:   false,
 		}
+		sess.startTimeout(cfg.Timeout)
 
 		sess.wg.Add(1)
 		go sess.readLoop()
@@ -139,8 +144,32 @@ func NewSession(cfg SessionConfig) (Session, error) {
 	}
 
 	// Fall back to non-PTY mode
+	cmd := exec.Command(cfg.Cmd, cfg.Args...)
+	cmd.Dir = cfg.Dir
+	cmd.Env = cfg.Env
+
+	// Create pipes BEFORE Start — StdoutPipe/StdinPipe must be called
+	// before the process starts (Go's os/exec requires this ordering).
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stdout pipe: %w", err)
+	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		stdout.Close()
+		return nil, fmt.Errorf("failed to get stdin pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		stdout.Close()
+		stdin.Close()
+		return nil, fmt.Errorf("failed to start command: %w", err)
+	}
+
 	sess := &ptySession{
-		plainCmd:   exec.Command(cfg.Cmd, cfg.Args...),
+		plainCmd:   cmd,
+		stdoutPipe: stdout,
+		stdinPipe:  stdin,
 		outputChan: make(chan []byte, 100),
 		errorChan:  make(chan error, 10),
 		done:       make(chan struct{}),
@@ -148,28 +177,7 @@ func NewSession(cfg SessionConfig) (Session, error) {
 		cols:       cols,
 		fallback:   true,
 	}
-	sess.plainCmd.Dir = cfg.Dir
-	sess.plainCmd.Env = cfg.Env
-
-	if err := sess.plainCmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start command: %w", err)
-	}
-
-	stdout, err := sess.plainCmd.StdoutPipe()
-	if err != nil {
-		_ = sess.plainCmd.Process.Kill()
-		_ = sess.plainCmd.Wait()
-		return nil, fmt.Errorf("failed to get stdout: %w", err)
-	}
-	stdin, err := sess.plainCmd.StdinPipe()
-	if err != nil {
-		_ = sess.plainCmd.Process.Kill()
-		_ = sess.plainCmd.Wait()
-		return nil, fmt.Errorf("failed to get stdin: %w", err)
-	}
-
-	sess.stdoutPipe = stdout
-	sess.stdinPipe = stdin
+	sess.startTimeout(cfg.Timeout)
 
 	sess.wg.Add(1)
 	go sess.readLoop()
@@ -222,11 +230,14 @@ func (s *ptySession) Write(data []byte) (int, error) {
 // Read reads output from the PTY (context-aware).
 func (s *ptySession) Read(ctx context.Context, buf []byte) (int, error) {
 	// Serve any remaining unread data from a previous large chunk.
+	s.mu.Lock()
 	if len(s.pending) > 0 {
 		n := copy(buf, s.pending)
 		s.pending = s.pending[n:]
+		s.mu.Unlock()
 		return n, nil
 	}
+	s.mu.Unlock()
 
 	select {
 	case <-ctx.Done():
@@ -240,7 +251,9 @@ func (s *ptySession) Read(ctx context.Context, buf []byte) (int, error) {
 		if n < len(chunk) {
 			// Chunk is larger than the caller's buffer; save the
 			// remainder so the next Read() call can serve it.
+			s.mu.Lock()
 			s.pending = append(s.pending[:0], chunk[n:]...)
+			s.mu.Unlock()
 		}
 		return n, nil
 	}
@@ -299,6 +312,11 @@ func (s *ptySession) Close() error {
 
 	s.closed = true
 
+	// Cancel timeout timer if active
+	if s.timeoutCancel != nil {
+		s.timeoutCancel()
+	}
+
 	// Close PTY master
 	if s.ptmx != nil {
 		s.ptmx.Close() //nolint:mutexio // one-time teardown guarded by closed flag
@@ -336,7 +354,7 @@ func (s *ptySession) Close() error {
 func (s *ptySession) IsRunning() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return !s.closed
+	return !s.closed && !s.finished
 }
 
 // ExitCode returns the command exit code.
@@ -419,6 +437,7 @@ func (s *ptySession) waitLoop() {
 	}
 
 	s.mu.Lock()
+	s.finished = true
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		s.exitCode = exitErr.ExitCode()
 	} else if err != nil && err != context.DeadlineExceeded && err != io.EOF {
@@ -447,6 +466,29 @@ drained:
 	close(s.errorChan)
 }
 
+// startTimeout launches a goroutine that closes the session after the
+// configured timeout. A timeout of 0 means no timeout.
+func (s *ptySession) startTimeout(timeout time.Duration) {
+	if timeout <= 0 {
+		return
+	}
+	s.timeoutCtx, s.timeoutCancel = context.WithTimeout(context.Background(), timeout)
+	go func() {
+		<-s.timeoutCtx.Done()
+		if s.timeoutCtx.Err() == context.DeadlineExceeded {
+			s.mu.Lock()
+			if !s.closed && !s.timeoutFired {
+				s.timeoutFired = true
+				s.mu.Unlock()
+				s.Close()
+				return
+			}
+			s.mu.Unlock()
+		}
+		// context.Canceled means Close() was called normally.
+	}()
+}
+
 // IsTerminalAvailable checks if PTY is available on this platform.
 func IsTerminalAvailable() bool {
 	f, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
@@ -468,13 +510,18 @@ type SessionInfo struct {
 }
 
 // KillProcessTree sends SIGKILL to the process group of a command.
+// Only attempts group kill if the process was started with Setpgid=true;
+// otherwise falls back to killing just the process itself.
 func KillProcessTree(cmd *exec.Cmd) error {
 	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
 	pid := cmd.Process.Pid
 	if pid > 0 {
-		syscall.Kill(-pid, syscall.SIGKILL)
+		// Only send to process group if Setpgid was set when starting.
+		if cmd.SysProcAttr != nil && cmd.SysProcAttr.Setpgid {
+			syscall.Kill(-pid, syscall.SIGKILL)
+		}
 	}
 	return cmd.Process.Kill()
 }

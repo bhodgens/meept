@@ -102,6 +102,9 @@ func runChat(cmd *cobra.Command, args []string) error {
 		if strings.TrimSpace(message) == "" {
 			return fmt.Errorf("empty message")
 		}
+		if chatProject != "" || chatNoFence {
+			fmt.Fprintf(os.Stderr, "Note: --project and --nofence are not yet supported for oneshot CLI chat; use the TUI or session-based chat.\n")
+		}
 		sessionID, err := getOrCreateOneshotSession(client)
 		if err != nil {
 			// Fallback to ephemeral session
@@ -168,7 +171,7 @@ func getOrCreateOneshotSession(client transport.Client) (string, error) {
 // chatWithSession sends a message to an existing session after validating it exists.
 func chatWithSession(client transport.Client, sessionID, message string) error {
 	// Verify session exists
-	getParams := map[string]string{"session_id": sessionID}
+	getParams := map[string]string{"id": sessionID}
 	rawResult, err := client.Call("session.get", getParams)
 	if err != nil {
 		return fmt.Errorf("failed to get session %s: %w", sessionID, err)
@@ -194,20 +197,24 @@ func chatWithSession(client transport.Client, sessionID, message string) error {
 }
 
 // openTUIToSession opens the TUI targeted to a specific session.
-// Currently stubbed - opens TUI to most recent session.
 func openTUIToSession(sessionID string) error {
-	// TODO: Extend TUI to accept target session ID
-	fmt.Fprintf(os.Stderr, "Note: TUI session targeting not yet implemented, opening to most recent\n")
-	return runTUI(chatCwd)
+	return runTUIWithSession(chatCwd, sessionID)
 }
 
 func runTUI(cwd string) error {
+	return runTUIWithSession(cwd, "")
+}
+
+func runTUIWithSession(cwd, sessionID string) error {
 	// The TUI requires RPC for event streaming and real-time updates.
 	// If --transport=http is set, warn and fall back to RPC.
 	if transportFlag == "http" {
 		return fmt.Errorf("TUI does not yet support --transport=http; use the default RPC transport or the Flutter web UI")
 	}
 	app := tui.NewApp(getSocketPath(), cwd)
+	if sessionID != "" {
+		app.SetTargetSession(sessionID)
+	}
 	p := tea.NewProgram(app)
 	_, err := p.Run()
 	return err

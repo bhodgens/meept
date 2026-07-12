@@ -124,6 +124,9 @@ func (s *SQLiteStore) migrate() error {
 	if err := s.addColumnIfMissing("plan_phases", "consumes", "TEXT"); err != nil {
 		return fmt.Errorf("failed to add consumes column: %w", err)
 	}
+	if err := s.addColumnIfMissing("plan_phases", "task_id", "TEXT"); err != nil {
+		return fmt.Errorf("failed to add task_id column: %w", err)
+	}
 
 	return nil
 }
@@ -316,7 +319,7 @@ func (s *SQLiteStore) SetPlanState(ctx context.Context, id string, state PlanSta
 
 // ---------- Phase operations ----------
 
-const phaseColumns = `id, plan_id, name, sequence, total_steps, completed_steps, failed_steps, state, produces, consumes`
+const phaseColumns = `id, plan_id, name, sequence, total_steps, completed_steps, failed_steps, state, produces, consumes, task_id`
 
 func (s *SQLiteStore) CreatePhase(ctx context.Context, p *PlanPhase) error {
 	producesJSON, err := artifactsToJSON(p.Produces)
@@ -364,11 +367,12 @@ func (s *SQLiteStore) GetPhases(ctx context.Context, planID string) ([]*PlanPhas
 			stateStr     string
 			producesRaw  sql.NullString
 			consumesRaw  sql.NullString
+			taskID       sql.NullString
 		)
 		if err := rows.Scan(
 			&id, &planID, &name, &sequence,
 			&totalSteps, &completed, &failed,
-			&stateStr, &producesRaw, &consumesRaw,
+			&stateStr, &producesRaw, &consumesRaw, &taskID,
 		); err != nil {
 			s.logger.Error("Failed to scan phase", "error", err)
 			continue
@@ -382,6 +386,9 @@ func (s *SQLiteStore) GetPhases(ctx context.Context, planID string) ([]*PlanPhas
 			CompletedSteps: completed,
 			FailedSteps:    failed,
 			State:          PhaseState(stateStr),
+		}
+		if taskID.Valid {
+			p.TaskID = taskID.String
 		}
 		if producesRaw.Valid {
 			p.Produces = artifactsFromJSON(producesRaw.String)
@@ -410,10 +417,10 @@ func (s *SQLiteStore) UpdatePhase(ctx context.Context, p *PlanPhase) error {
 	_, err = s.db.ExecContext(ctx, `
 		UPDATE plan_phases
 		SET name = ?, sequence = ?, total_steps = ?, completed_steps = ?, failed_steps = ?, state = ?,
-		    produces = ?, consumes = ?
+		    produces = ?, consumes = ?, task_id = ?
 		WHERE id = ?`,
 		p.Name, p.Sequence, p.TotalSteps, p.CompletedSteps, p.FailedSteps, string(p.State),
-		producesJSON, consumesJSON, p.ID)
+		producesJSON, consumesJSON, nullableString(p.TaskID), p.ID)
 	if err != nil {
 		s.logger.Error("Failed to update phase", "id", p.ID, "error", err)
 		return fmt.Errorf("failed to update phase: %w", err)
