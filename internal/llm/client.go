@@ -1037,7 +1037,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 			retryState.isResume = true
 			c.logger.Debug("stream retry attempt", "attempt", attempt+1, "max", streamMaxRetries)
 		}
-		resp, httpResp, err := c.doStreamRequest(ctx, body, onDelta, retryState) //nolint:bodyclose
+		resp, httpStatus, err := c.doStreamRequest(ctx, body, onDelta, retryState)
 		if err == nil {
 			// Record usage with scope
 			if c.budget != nil && resp != nil {
@@ -1057,7 +1057,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 			}
 
 			// Record metrics on success
-			if c.metricsStore != nil && resp != nil && httpResp != nil {
+			if c.metricsStore != nil && resp != nil && httpStatus > 0 {
 				latencyMs := time.Since(start).Milliseconds()
 				costUSD := float64(resp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
 				// Snapshot values accessed by the goroutine to avoid races
@@ -1065,7 +1065,6 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 				promptTokens := resp.Usage.PromptTokens
 				completionTokens := resp.Usage.CompletionTokens
 				cachedTokens := resp.Usage.CachedTokens
-				httpStatus := httpResp.StatusCode
 				//nolint:gosec // goroutine outlives request context
 				go func() {
 					record := metrics.RequestRecord{
@@ -1123,12 +1122,13 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 // If retryState.isResume is true, the request includes Last-Event-ID header for resume.
 // NOTE: resp.Body is closed before the function returns (line 1270). Callers only access
 // resp.StatusCode and must not read resp.Body.
-func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta DeltaCallback, retryState *streamRetryState) (*Response, *http.Response, error) {
+// Returns HTTP status code as int so callers don't manage *http.Response lifecycle.
+func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta DeltaCallback, retryState *streamRetryState) (*Response, int, error) {
 	// Acquire concurrency limit semaphore (if configured)
 	release, err := c.acquireConcurrencyLimit(ctx)
 	if err != nil {
 		c.logger.Debug("stream concurrency limit wait interrupted", "error", err)
-		return nil, nil, &ClientError{Message: "concurrency limit wait interrupted", Cause: err}
+		return nil, 0, &ClientError{Message: "concurrency limit wait interrupted", Cause: err}
 	}
 	defer release()
 
@@ -1144,7 +1144,7 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		c.logger.Debug("stream request failed at creation", "error", err)
-		return nil, nil, &ClientError{Message: "failed to create request", Cause: err}
+		return nil, 0, &ClientError{Message: "failed to create request", Cause: err}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
@@ -1159,7 +1159,7 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 	if c.tokenResolver != nil && c.oauthProvider != "" {
 		token, err := c.tokenResolver.ResolveToken(ctx, c.oauthProvider)
 		if err != nil {
-			return nil, nil, &ClientError{Message: "failed to resolve OAuth token", Cause: err}
+			return nil, 0, &ClientError{Message: "failed to resolve OAuth token", Cause: err}
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 	} else if apiKey != "" {
@@ -1174,7 +1174,7 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		c.logger.Debug("stream request failed", "error", err)
-		return nil, nil, &ClientError{Message: "request failed", Cause: err}
+		return nil, 0, &ClientError{Message: "request failed", Cause: err}
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -1188,7 +1188,7 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		apiErr := &APIError{StatusCode: resp.StatusCode, Detail: string(detail)}
 		// Wrap in RateLimitError for 429 to preserve Retry-After
 		if resp.StatusCode == 429 && retryAfter > 0 {
-			return nil, nil, &RateLimitError{
+			return nil, 0, &RateLimitError{
 				ProviderID: providerID,
 				ModelID:    modelID,
 				RetryAfter: retryAfter,
@@ -1197,7 +1197,7 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		}
 		// S3-9 FIX: return nil resp — body is already closed; returning it
 		// would let callers dereference a closed-body http.Response.
-		return nil, nil, apiErr
+		return nil, 0, apiErr
 	}
 
 	// Parse stream
@@ -1261,7 +1261,7 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 			// B-03 FIX: Save partial state so retry can skip delivered deltas.
 			savePartialState()
 			// S3-9 FIX: body is now closed; don't return resp.
-			return nil, nil, ctx.Err()
+			return nil, 0, ctx.Err()
 		default:
 		}
 
@@ -1323,7 +1323,7 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 				if err := onDelta(delta); err != nil {
 					resp.Body.Close()
 					// S3-9 FIX: body is now closed; don't return resp.
-					return nil, nil, err
+					return nil, 0, err
 				}
 				deltasSent++
 			}
@@ -1361,7 +1361,7 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		// B-03 FIX: Save partial state so retry can skip delivered deltas.
 		savePartialState()
 		// S3-9 FIX: body is already closed above; don't return resp.
-		return nil, nil, &ClientError{Message: "stream read failed", Cause: err}
+		return nil, 0, &ClientError{Message: "stream read failed", Cause: err}
 	}
 
 	// Build tool calls from accumulators, sorted by index for deterministic order.
@@ -1393,7 +1393,7 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		FinishReason: finishReason,
 	}
 
-	return result, resp, nil
+	return result, resp.StatusCode, nil
 }
 
 // SwitchModel switches to a different model/endpoint at runtime.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -77,6 +78,7 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 	p.cmd = exec.CommandContext(ctx, name, args...)
 	p.cmd.Stdout = stdout
 	p.cmd.Stderr = stderr
+	p.cmd.Stdin = nil // Explicitly set stdin to nil to avoid blocking
 	p.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := p.cmd.Start(); err != nil {
@@ -91,8 +93,18 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
 
-	// Wait for process exit in background to prevent zombies
-	p.waitBackground()
+	// Start a goroutine to wait for the process to exit and prevent zombies.
+	// This is necessary because Setpgid=true creates a new process group,
+	// and without waiting, exited processes become defunct (zombies).
+	go func() {
+		if err := p.cmd.Wait(); err != nil { //nolint:mutexio // Wait runs BEFORE Lock; no I/O under mutex
+			slog.Warn("runtime process wait returned error", "error", err)
+		}
+		p.mu.Lock()
+		p.pid = 0
+		p.cmd = nil
+		p.mu.Unlock()
+	}()
 
 	return nil
 }
@@ -196,20 +208,4 @@ func (p *RuntimeProcess) readPIDFile() (int, error) {
 		return 0, err
 	}
 	return strconv.Atoi(string(data))
-}
-
-// waitBackground waits for the process to exit and reaps it to prevent zombies
-func (p *RuntimeProcess) waitBackground() {
-	go func() {
-		err := p.cmd.Wait()
-		exitCode := -1
-		if p.cmd != nil && p.cmd.ProcessState != nil {
-			exitCode = p.cmd.ProcessState.ExitCode()
-		}
-		fmt.Fprintf(os.Stderr, "MLX process exited: exitCode=%d err=%v\n", exitCode, err)
-		p.mu.Lock()
-		p.pid = 0
-		p.cmd = nil
-		p.mu.Unlock()
-	}()
 }
