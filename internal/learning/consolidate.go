@@ -84,16 +84,24 @@ func Consolidate(rawCapturesPath, datasetsDir string, minQuality float64, maxDat
 			instruction = traj.Query
 		}
 
+		toolPath := toolCallNames(traj.ToolCalls)
+		// Surface tool path as optional Input so the model can learn research
+		// patterns (which tools were used), not only instruction→answer.
+		input := ""
+		if len(toolPath) > 0 {
+			input = "tools: " + strings.Join(toolPath, " -> ")
+		}
+
 		// Build the training example from the trajectory.
 		example := TrainingExample{
 			Instruction: instruction,
-			Input:       "",
+			Input:       input,
 			Output:      traj.Synthesis,
 			Metadata: ExampleMetadata{
 				Source:       "agent_research",
 				Domain:       traj.Domain,
 				SessionID:    traj.SessionID,
-				ToolPath:     toolCallNames(traj.ToolCalls),
+				ToolPath:     toolPath,
 				QualityScore: score,
 				Timestamp:    time.Now().UTC().Format(time.RFC3339),
 			},

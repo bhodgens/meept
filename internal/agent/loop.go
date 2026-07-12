@@ -598,6 +598,11 @@ type AgentLoop struct {
 	// notifications (Plan 2.2). When non-nil, lifecycle events trigger
 	// payload delivery to configured HTTP destinations.
 	httpHooks *HookBatchExecutor
+
+	// State machine for explicit state tracking
+	stateMachine *AgentStateMachine
+	// stateMu protects state-dependent operations during transitions
+	stateMu sync.Mutex
 }
 
 // sessionStore is an interface for session persistence operations needed by AgentLoop.
@@ -1378,6 +1383,12 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 	for _, opt := range opts {
 		opt(loop)
 	}
+
+	// Initialize state machine
+	if loop.logger == nil {
+		loop.logger = slog.Default()
+	}
+	loop.stateMachine = NewAgentStateMachine(loop.logger)
 
 	// Initialize detectors
 	loop.cycleDetector = newCycleDetector(loop.detectionConfig, loop.logger)
@@ -2465,6 +2476,11 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 	convBudget := l.conversationTokenBudget()
 	inWarningZone := false
 
+	// Transition to thinking state at the start of the reasoning cycle.
+	l.safeTransition(StateThinking, "reasoning_cycle_start", map[string]any{
+		"conversation_id": conversationID,
+	})
+
 	for iteration := 1; iteration <= l.config.MaxIterations; iteration++ {
 		// Reset per-iteration tracking
 		hadToolCalls = false
@@ -2498,6 +2514,11 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				"budget", convBudget,
 				"conversation", conversationID,
 			)
+			l.safeTransition(StateBudgetExhausted, "budget_exhausted_conversation", map[string]any{
+				"used":        totalTokens,
+				"total":       convBudget,
+				"conversation": conversationID,
+			})
 			return "I've used my full token budget for this request. Here is what I accomplished so far -- " +
 				"please let me know if you'd like me to continue in a follow-up.", ErrConversationBudgetExhausted
 		}
@@ -2512,6 +2533,11 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				"total_tokens", total,
 				"conversation", conversationID,
 			)
+			l.safeTransition(StateBudgetExhausted, "budget_exhausted_turns", map[string]any{
+				"used":        used,
+				"total":       total,
+				"conversation": conversationID,
+			})
 			return "I've completed the maximum number of turns allowed for this session. " +
 				"Here's a summary of what was accomplished -- please start a new session if you need further assistance.", nil
 		}
@@ -2768,6 +2794,10 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					"iteration", iteration,
 					"error", err,
 				)
+				l.safeTransition(StateError, "llm_call_failed", map[string]any{
+					"error":   err.Error(),
+					"iteration": iteration,
+				})
 				return "", fmt.Errorf("LLM call failed: %w", err)
 			}
 		}
@@ -2845,11 +2875,19 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			}
 
 			// Execute tools
+			l.safeTransition(StateToolExecuting, "tool_calls_received", map[string]any{
+				"tool_count": len(response.ToolCalls),
+				"iteration":  iteration,
+			})
 			results := l.executeToolCalls(ctx, response.ToolCalls)
 
 			// Plan 4.2: Check for permission denied errors and set requires_approval designation
 			for _, result := range results {
 				if !result.Success && strings.Contains(result.Error, "permission denied") {
+					l.safeTransition(StateBlocked, "permission_denied", map[string]any{
+						"tool": result.ToolCallID,
+						"iteration": iteration,
+					})
 					l.updateSessionDesignation(session.DesignationRequiresApproval, "Blocked: action requires approval", "high")
 					// Plan 4.3: Send notification for approval request
 					if l.notificationPublisher != nil {
@@ -2949,6 +2987,22 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			l.publishIteration(conversationID, iteration)
 			l.publishTurnEndEvent(ctx, conversationID, iteration, hadToolCalls, toolCallCount, response.Usage.TotalTokens, response.Usage.CachedTokens, "tool_calls")
 
+			// Transition to processing result after tool execution
+			successCount := 0
+			failCount := 0
+			for _, r := range results {
+				if r.Success {
+					successCount++
+				} else {
+					failCount++
+				}
+			}
+			l.safeTransition(StateProcessingResult, "tools_completed", map[string]any{
+				"success_count": successCount,
+				"failure_count": failCount,
+				"iteration":     iteration,
+			})
+
 			// Check if any tool requested termination (no LLM follow-up needed)
 			shouldTerminate := false
 			for _, result := range results {
@@ -2962,6 +3016,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					"conversation", conversationID,
 					"iteration", iteration,
 				)
+				l.safeTransition(StateCompleted, "tool_requested_termination", map[string]any{"iteration": iteration})
 				return l.buildTerminateResponse(results), nil
 			}
 
@@ -3098,6 +3153,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			)
 		}
 
+		l.safeTransition(StateGeneratingResponse, "generating_response", map[string]any{"iteration": iteration})
 		return response.Content, nil
 	}
 
@@ -3107,9 +3163,67 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		"conversation", conversationID,
 	)
 
+	l.safeTransition(StateMaxIterations, "max_iterations_reached", map[string]any{
+		"max_iterations": l.config.MaxIterations,
+		"conversation":   conversationID,
+	})
+
 	exhaustMsg := "I've reached the maximum number of reasoning steps for this turn. " +
 		"Here is what I have so far -- please let me know if you'd like me to continue."
 	return exhaustMsg, ErrMaxIterationsReached
+}
+
+// safeTransition is a convenience wrapper around stateMachine.Transition that
+// never fails — invalid transitions are logged but do not propagate, useful
+// from hot paths where a failed transition is preferable to an early exit.
+func (l *AgentLoop) safeTransition(to AgentState, reason string, metadata map[string]any) {
+	if l.stateMachine != nil {
+		if err := l.stateMachine.Transition(to, reason, metadata); err != nil {
+			l.logger.Debug("agent state transition rejected", "to", to, "reason", reason, "error", err)
+		}
+	}
+}
+
+// GetState returns the current agent state.
+func (l *AgentLoop) GetState() AgentState {
+	if l.stateMachine == nil {
+		return StateIdle
+	}
+	return l.stateMachine.CurrentState()
+}
+
+// GetStateHistory returns recent state transitions.
+func (l *AgentLoop) GetStateHistory() []StateTransition {
+	if l.stateMachine == nil {
+		return nil
+	}
+	return l.stateMachine.History()
+}
+
+// IsAgentActive returns true if the agent is actively processing.
+func (l *AgentLoop) IsAgentActive() bool {
+	if l.stateMachine == nil {
+		return false
+	}
+	return l.stateMachine.IsActive()
+}
+
+// GetStateSnapshot returns a full snapshot of agent state.
+func (l *AgentLoop) GetStateSnapshot() AgentStateSnapshot {
+	l.stateMu.Lock()
+	defer l.stateMu.Unlock()
+
+	snap := AgentStateSnapshot{
+		CurrentState:   l.stateMachine.CurrentState().String(),
+		IsTerminal:     l.stateMachine.IsTerminal(),
+		IsActive:       l.stateMachine.IsActive(),
+		ConversationID: l.sessionID,
+		AgentID:        l.agentID,
+		CurrentTurn:    l.turnCounter,
+		History:        l.stateMachine.History(),
+		Timestamp:      time.Now(),
+	}
+	return snap
 }
 
 // chatWithFailover wraps LLM Chat calls with model rotation and backoff for rate limit handling.

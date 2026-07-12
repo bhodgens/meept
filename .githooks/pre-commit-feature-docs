@@ -152,6 +152,7 @@ extract_feature_name() {
     "selfimprove") echo "self-improvement" ;;
     "project") echo "project-context" ;;
     "daemon") echo "daemon" ;;
+    "employee") echo "employees" ;;
     *) echo "$base_feature" ;;
   esac
 }

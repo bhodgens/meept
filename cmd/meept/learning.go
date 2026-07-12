@@ -31,6 +31,8 @@ domain-routed training datasets. Train lora adapters from captured data.`,
 	cmd.AddCommand(newLearningDatasetStatsCmd())
 	cmd.AddCommand(newLearningConsolidateCmd())
 	cmd.AddCommand(newLearningSnapshotCmd())
+	cmd.AddCommand(newLearningFeedbackCmd())
+	cmd.AddCommand(newLearningAutoTrainCmd())
 
 	return cmd
 }
@@ -192,7 +194,179 @@ func runConsolidate(minQuality float64) error {
 		fmt.Fprintf(os.Stderr, "warning: save metadata: %v\n", err)
 	}
 
+	// Training readiness / auto-train when domains cross auto_train_threshold.
+	if cfg != nil && meta != nil {
+		threshold := cfg.Learning.Training.AutoTrainThreshold
+		if threshold <= 0 {
+			threshold = 500
+		}
+		ready := learning.DomainsReadyForTrain(meta, threshold)
+		if cfg.Learning.Training.ManualOnly {
+			for _, domain := range ready {
+				ds := meta.DomainStats[domain]
+				fmt.Printf("ready:     %s has %d examples (threshold=%d); train with: meept learning train %s\n",
+					domain, ds.ExampleCount, threshold, domain)
+			}
+		} else if len(ready) > 0 {
+			model := cfg.Learning.Training.DefaultModel
+			if model == "" {
+				model = "lfm2.5-8b"
+			}
+			fmt.Printf("auto-train: manual_only=false; training %d domain(s) with %s\n", len(ready), model)
+			for _, domain := range ready {
+				ds := meta.DomainStats[domain]
+				fmt.Printf("auto-train: %s (%d examples)...\n", domain, ds.ExampleCount)
+				if err := learning.MarkAutoTrainStarted(learningDir, domain, model, ds.ExampleCount); err != nil {
+					fmt.Fprintf(os.Stderr, "auto-train: mark started failed for %s: %v\n", domain, err)
+				}
+				if err := runTraining(domain, model); err != nil {
+					fmt.Fprintf(os.Stderr, "auto-train failed for %s: %v\n", domain, err)
+					if err := learning.MarkAutoTrainFailed(learningDir, domain, model, ds.ExampleCount); err != nil {
+						fmt.Fprintf(os.Stderr, "auto-train: mark failed failed for %s: %v\n", domain, err)
+					}
+					continue
+				}
+				if err := learning.MarkAutoTrainCompleted(learningDir, domain, model, ds.ExampleCount); err != nil {
+					fmt.Fprintf(os.Stderr, "auto-train: mark completed failed for %s: %v\n", domain, err)
+				}
+				fmt.Printf("auto-train: %s completed\n", domain)
+			}
+		}
+	}
+
 	return nil
+}
+
+func newLearningFeedbackCmd() *cobra.Command {
+	var trajectoryID string
+	cmd := &cobra.Command{
+		Use:   "feedback <session_id> <positive|negative|neutral>",
+		Short: "apply user feedback to captured research trajectories",
+		Long: `Update TaskOutcome.UserFeedback on raw captures for a session.
+
+Positive feedback raises quality score (+0.15) during consolidate;
+negative lowers it (-0.2). Neutral clears feedback.
+
+Examples:
+  meept learning feedback sess-abc positive
+  meept learning feedback sess-abc negative --trajectory=ltraj-xyz`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runFeedback(args[0], args[1], trajectoryID)
+		},
+	}
+	cmd.Flags().StringVar(&trajectoryID, "trajectory", "", "optional trajectory id (default: all for session)")
+	return cmd
+}
+
+func runFeedback(sessionID, feedback, trajectoryID string) error {
+	learningDir, _, _, err := learningPaths()
+	if err != nil {
+		return err
+	}
+	result, err := learning.ApplyUserFeedback(learningDir, sessionID, trajectoryID, feedback)
+	if err != nil {
+		return err
+	}
+	label, _ := learning.NormalizeFeedback(feedback)
+	fmt.Printf("feedback applied: %s\n", label)
+	fmt.Printf("  session:     %s\n", sessionID)
+	if trajectoryID != "" {
+		fmt.Printf("  trajectory:  %s\n", trajectoryID)
+	}
+	fmt.Printf("  matched:     %d\n", result.Matched)
+	fmt.Printf("  updated:     %d\n", result.Updated)
+	if result.Matched == 0 {
+		fmt.Println("  hint: no captures for this session; check session id in raw_captures.jsonl")
+	} else {
+		fmt.Println("  hint: re-run `meept learning consolidate` to re-score into datasets")
+	}
+	return nil
+}
+
+func newLearningAutoTrainCmd() *cobra.Command {
+	var force bool
+	var model string
+	cmd := &cobra.Command{
+		Use:   "auto-train",
+		Short: "train adapters for domains at or above auto_train_threshold",
+		Long: `Train every domain whose dataset size meets learning.training.auto_train_threshold.
+
+Respects last-auto-train metadata so the same data size is not re-trained
+unless --force is set. Works even when manual_only=true (explicit invocation).`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runAutoTrain(model, force)
+		},
+	}
+	cmd.Flags().BoolVar(&force, "force", false, "re-train even if last auto-train covered current size")
+	cmd.Flags().StringVar(&model, "model", "", "base model (default: config training.default_model)")
+	return cmd
+}
+
+func runAutoTrain(model string, force bool) error {
+	learningDir, _, cfg, err := learningPaths()
+	if err != nil {
+		return err
+	}
+	if model == "" {
+		model = "lfm2.5-8b"
+		if cfg != nil && cfg.Learning.Training.DefaultModel != "" {
+			model = cfg.Learning.Training.DefaultModel
+		}
+	}
+	threshold := 500
+	if cfg != nil && cfg.Learning.Training.AutoTrainThreshold > 0 {
+		threshold = cfg.Learning.Training.AutoTrainThreshold
+	}
+
+	meta, err := learning.LoadMetadata(learningDir)
+	if err != nil {
+		return fmt.Errorf("load metadata: %w", err)
+	}
+	meta, err = learning.RefreshDomainStats(learningDir, meta)
+	if err != nil {
+		return fmt.Errorf("refresh domain stats: %w", err)
+	}
+
+	var domains []string
+	if force {
+		for domain, ds := range meta.DomainStats {
+			if ds.ExampleCount >= threshold {
+				domains = append(domains, domain)
+			}
+		}
+	} else {
+		domains = learning.DomainsReadyForTrain(meta, threshold)
+	}
+	if len(domains) == 0 {
+		fmt.Printf("no domains ready (threshold=%d)\n", threshold)
+		return nil
+	}
+
+	fmt.Printf("auto-train: %d domain(s), model=%s, threshold=%d\n", len(domains), model, threshold)
+	var firstErr error
+	for _, domain := range domains {
+		ds := meta.DomainStats[domain]
+		fmt.Printf("training %s (%d examples)...\n", domain, ds.ExampleCount)
+		if err := learning.MarkAutoTrainStarted(learningDir, domain, model, ds.ExampleCount); err != nil {
+			fmt.Fprintf(os.Stderr, "mark started failed %s: %v\n", domain, err)
+		}
+		if err := runTraining(domain, model); err != nil {
+			fmt.Fprintf(os.Stderr, "failed %s: %v\n", domain, err)
+			if err := learning.MarkAutoTrainFailed(learningDir, domain, model, ds.ExampleCount); err != nil {
+				fmt.Fprintf(os.Stderr, "mark failed failed %s: %v\n", domain, err)
+			}
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if err := learning.MarkAutoTrainCompleted(learningDir, domain, model, ds.ExampleCount); err != nil {
+			fmt.Fprintf(os.Stderr, "mark completed failed %s: %v\n", domain, err)
+		}
+		fmt.Printf("completed %s\n", domain)
+	}
+	return firstErr
 }
 
 func newLearningSnapshotCmd() *cobra.Command {
@@ -297,11 +471,24 @@ func runTraining(domain, model string) error {
 	if _, err := os.Stat(scriptPath); err != nil {
 		return fmt.Errorf("training script not found at %s (run from project root): %w", scriptPath, err)
 	}
-	trainCmd := exec.Command("python", scriptPath,
+	trainArgs := []string{
+		scriptPath,
 		"--model", model,
 		"--dataset", datasetPath,
 		"--output", outputDir,
-	)
+	}
+	// Prefer stock YAML so train_lora uses official HF model ids / hyperparams.
+	configName := map[string]string{
+		"lfm2.5-8b":  "lora_lfm2.5_8b.yaml",
+		"lfm2.5-1.2b": "lora_lfm2.5_1.2b.yaml",
+	}[model]
+	if configName != "" {
+		cfgPath := filepath.Join("config", "training", configName)
+		if _, err := os.Stat(cfgPath); err == nil {
+			trainArgs = append(trainArgs, "--config", cfgPath)
+		}
+	}
+	trainCmd := exec.Command("python", trainArgs...)
 	trainCmd.Stdout = os.Stdout
 	trainCmd.Stderr = os.Stderr
 
@@ -396,6 +583,21 @@ func showLearningStatus() error {
 			for domain, ds := range meta.DomainStats {
 				fmt.Printf("    %-20s %d examples, %d bytes\n", domain, ds.ExampleCount, ds.Bytes)
 			}
+		}
+		if len(meta.LastAutoTrain) > 0 {
+			fmt.Println("  last auto-train:")
+			for domain, rec := range meta.LastAutoTrain {
+				fmt.Printf("    %-20s status=%s examples=%d model=%s at=%s\n",
+					domain, rec.Status, rec.ExampleCount, rec.Model, rec.TrainedAt.Format(time.RFC3339))
+			}
+		}
+	}
+
+	if pending, err := learning.ListPendingAutoTrain(learningDir); err == nil && len(pending) > 0 {
+		fmt.Println("pending auto-train:")
+		for _, p := range pending {
+			fmt.Printf("  %-20s model=%s examples=%d enqueued=%s\n",
+				p.Domain, p.Model, p.ExampleCount, p.EnqueuedAt.Format(time.RFC3339))
 		}
 	}
 

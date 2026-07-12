@@ -272,6 +272,9 @@ func TestConsolidateSkipsEmptySynthesis(t *testing.T) {
 	if strings.Contains(string(content), "fallback query") {
 		t.Error("should prefer Intent over Query for instruction")
 	}
+	if !strings.Contains(string(content), "tools: file_read") {
+		t.Error("expected tool path in Input field")
+	}
 	lines := 0
 	for _, b := range content {
 		if b == '\n' {

@@ -64,10 +64,13 @@ func (h *HealthChecker) checkOnce() {
 	wasHealthy := h.healthy
 	h.mu.RUnlock()
 
-	// Construct health URL from server root, not API base URL.
-	// This handles baseURL like "http://host:port/v1" where health is at "/health".
+	// Perform HTTP check outside the lock to avoid blocking IsHealthy() calls.
+	// Construct the health check URL from the server root, not the API base URL.
+	// This handles cases where baseURL is "http://host:port/v1" but the health
+	// endpoint is at "http://host:port/health".
 	healthURL := h.baseURL + h.config.HealthEndpoint
 	if parsed, err := url.Parse(h.baseURL); err == nil && parsed.Path != "" {
+		// baseURL has a path component (e.g., /v1), strip it and use server root
 		healthURL = fmt.Sprintf("%s://%s%s", parsed.Scheme, parsed.Host, h.config.HealthEndpoint)
 	}
 	resp, err := h.client.Get(healthURL)

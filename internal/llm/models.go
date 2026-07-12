@@ -103,6 +103,10 @@ func (m *ChatMessage) ToOpenAIDictWithStore(store UploadStore) map[string]any {
 	} else if m.Content != "" {
 		msg["content"] = m.Content
 	} else if m.Role != RoleAssistant || len(m.ToolCalls) == 0 {
+		// Emit null for empty content only when the message isn't an
+		// assistant-with-tool-calls (those omit content per OpenAI spec).
+		// GLM/Qwen reject assistant messages with content="" + tool_calls
+		// (HTTP 400, error 1214: "messages parameter is illegal").
 		msg["content"] = nil
 	}
 	if m.Name != "" {

@@ -23,10 +23,16 @@ func ScoreExample(traj ResearchTrajectory) float64 {
 		score += 0.1
 	}
 
-	// User positive feedback
-	if traj.TaskOutcome.UserFeedback == "positive" {
+	// User feedback (applied via `meept learning feedback`).
+	switch traj.TaskOutcome.UserFeedback {
+	case FeedbackPositive:
 		score += 0.15
+	case FeedbackNegative:
+		score -= 0.2
 	}
 
+	if score < 0 {
+		return 0
+	}
 	return math.Min(score, 1.0)
 }

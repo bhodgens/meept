@@ -101,6 +101,15 @@ meept learning snapshot code
 # Train a LoRA adapter for a domain (runs post-train hook + registry regen)
 meept learning train code --model lfm2.5-8b
 
+# Apply user feedback to a session's captures (raises/lowers quality score)
+meept learning feedback <session_id> positive
+meept learning feedback <session_id> negative --trajectory=ltraj-...
+meept learning feedback <session_id> neutral   # clear feedback
+
+# Train all domains at/above auto_train_threshold
+meept learning auto-train
+meept learning auto-train --force --model lfm2.5-1.2b
+
 # Show learning pipeline status (raw captures, datasets, adapters)
 meept learning status
 
@@ -149,25 +158,53 @@ meept learning dataset-stats code
 | `learning.capture.min_quality_score` | Minimum quality for consolidation | `0.6` |
 | `learning.training.default_model` | Default base model for training | `lfm2.5-8b` |
 | `learning.training.auto_train_threshold` | Example count threshold for auto-training | `500` |
-| `learning.training.manual_only` | Disable auto-training entirely | `true` |
+| `learning.training.manual_only` | When `true`, only hints; when `false`, consolidate auto-trains ready domains | `true` |
 | `learning.retention.max_dataset_size_mb` | Max size per domain dataset | `100` |
 | `learning.retention.keep_versions` | Number of dataset versions to retain | `3` |
+
+### User feedback
+
+`ScoreExample` applies:
+
+- **positive** → +0.15
+- **negative** → −0.2
+- **neutral** → clears feedback
+
+`meept learning feedback` rewrites `raw_captures.jsonl` and re-scores matching
+rows already present in domain datasets (so feedback is not stuck behind
+dedup). Re-run consolidate only if you need newly scored rows that were
+previously filtered below `min_quality_score`.
+
+### Auto-train
+
+When `manual_only` is **false**:
+
+- CLI `meept learning consolidate` trains each ready domain (grown past last
+  successful auto-train size and ≥ threshold).
+- Daemon scheduled consolidate enqueues `pending_auto_train.jsonl` and runs
+  training asynchronously via `scripts/train_lora.py`.
+
+When `manual_only` is **true** (default), consolidate only prints a train
+hint. Use `meept learning auto-train` (or `train`) explicitly.
 
 ## Adapter Loading
 
 At daemon startup, the adapter registry (`~/.meept/adapter_registry.json`)
-is loaded via `internal/llm/adapter_loader.go`, adapters matching the
-configured base model are registered with `LFMLoader`, and an
-`AdapterRouter` is wired into each agent loop. At chat time the last user
-message is domain-classified and the matching adapter path is passed to
-the LLM client via `WithAdapter` (providers without adapter support ignore it).
+is loaded via `internal/llm/adapter_loader.go`. `LFMLoader` validates PEFT
+artifacts on disk (`adapter_config.json`, `*.safetensors`, etc.), keeps the
+highest `-vN` per domain, sets a `general` (or first) fallback, and builds
+an `AdapterRouter`. At chat time the last user message is domain-classified
+and the matching adapter path is passed to the LLM client via `WithAdapter`
+(providers without adapter support ignore it). Incomplete adapter dirs are
+never selected.
 
 ## Training Scripts
 
 Training is performed via Python scripts (not part of the Go binary):
 
 - `scripts/train_lora.py` -- PEFT/TRL LoRA training for LFM2.5 models
-  (dtype/amp matched: bf16 when supported, else fp16/fp32)
+  (dtype/amp matched: bf16 when supported, else fp16/fp32; passes tokenizer
+  to SFTTrainer; auto-loads `config/training/lora_lfm2.5_*.yaml`)
 - `scripts/generate_adapter_config.py` -- Generate adapter registry JSON
   (`--adapters-dir`, `--output`, `--datasets-dir` for custom paths)
 - `scripts/train_all_adapters.sh` -- Batch train all domains (auto-versions
@@ -176,7 +213,16 @@ Training is performed via Python scripts (not part of the Go binary):
   the registry next to the adapters parent (daemon load path)
 
 Training configs live in `config/training/lora_lfm2.5_8b.yaml` and
-`config/training/lora_lfm2.5_1.2b.yaml`.
+`config/training/lora_lfm2.5_1.2b.yaml`. Base model IDs:
+
+| CLI model | Hugging Face id |
+|-----------|-----------------|
+| `lfm2.5-8b` | `LiquidAI/LFM2.5-8B-A1B` |
+| `lfm2.5-1.2b` | `LiquidAI/LFM2.5-1.2B-Instruct` |
+
+With `manual_only: true` (default), `auto_train_threshold` is advisory
+(hints only). Set `manual_only: false` to enable automatic training on
+consolidate once a domain reaches the threshold.
 
 ## Dataset Versioning
 

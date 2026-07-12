@@ -1,6 +1,6 @@
-# LoRA Training Config for LFM2.5-1.2B
+# LoRA Training Config for LFM2.5-1.2B Instruct
 model:
-  name_or_path: "LFM/LFM2.5-1.2B"
+  name_or_path: "LiquidAI/LFM2.5-1.2B-Instruct"
   dtype: "bfloat16"
 
 lora:

@@ -13,10 +13,11 @@ import (
 // LearningMetadata holds provenance and aggregate stats for the learning
 // pipeline's data directory. Written to {dataDir}/metadata.json.
 type LearningMetadata struct {
-	LastConsolidatedAt time.Time            `json:"last_consolidated_at"`
-	DomainStats        map[string]DomainStat `json:"domain_stats"`
-	RawCapturesCount   int                  `json:"raw_captures_count"`
-	SchemaVersion      int                  `json:"schema_version"`
+	LastConsolidatedAt time.Time                  `json:"last_consolidated_at"`
+	DomainStats        map[string]DomainStat      `json:"domain_stats"`
+	RawCapturesCount   int                        `json:"raw_captures_count"`
+	SchemaVersion      int                        `json:"schema_version"`
+	LastAutoTrain      map[string]AutoTrainRecord `json:"last_auto_train,omitempty"`
 }
 
 // DomainStat summarizes one domain dataset file.
@@ -43,6 +44,9 @@ func LoadMetadata(dataDir string) (*LearningMetadata, error) {
 	}
 	if m.DomainStats == nil {
 		m.DomainStats = map[string]DomainStat{}
+	}
+	if m.LastAutoTrain == nil {
+		m.LastAutoTrain = map[string]AutoTrainRecord{}
 	}
 	return &m, nil
 }

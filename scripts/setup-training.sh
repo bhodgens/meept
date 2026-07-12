@@ -11,7 +11,8 @@ pip install \
     trl \
     accelerate \
     bitsandbytes \
-    datasets
+    datasets \
+    pyyaml
 
 echo ""
 echo "=== Verifying GPU availability ==="

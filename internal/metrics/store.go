@@ -385,7 +385,10 @@ func (s *Store) flush() {
 			data, _ := json.Marshal(m.tags)
 			tagsJSON = string(data)
 		}
-		if _, err := stmt.Exec(m.timestamp, m.name, m.value, tagsJSON); err != nil {
+		// Format timestamp as SQLite DATETIME (without timezone offset)
+		// to ensure strftime() functions work correctly in aggregations.
+		ts := m.timestamp.Format("2006-01-02 15:04:05")
+		if _, err := stmt.Exec(ts, m.name, m.value, tagsJSON); err != nil {
 			s.logger.Warn("Failed to insert metric row", "error", err)
 		}
 	}

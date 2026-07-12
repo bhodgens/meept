@@ -2,8 +2,11 @@ package runtime
 
 import (
 	"context"
+	"net"
+	"net/http"
 	"os"
 	"testing"
+	"time"
 
 	docker "github.com/fsouza/go-dockerclient"
 	"github.com/stretchr/testify/assert"
@@ -16,11 +19,40 @@ func hasDocker() bool {
 }
 
 // dockerAvailable checks if the Docker socket is accessible by attempting a ping.
+// Uses a short dial timeout and skips the server API version check (which has
+// no timeout in the library) to avoid hanging the test suite when Docker is
+// not running.
 func dockerAvailable() bool {
-	client, err := docker.NewClientFromEnv()
+	dockerHost := os.Getenv("DOCKER_HOST")
+	if dockerHost == "" {
+		dockerHost = "unix:///var/run/docker.sock"
+	}
+
+	client, err := docker.NewClient(dockerHost)
 	if err != nil {
 		return false
 	}
+	// SkipServerVersionCheck avoids an internal GET /version call that
+	// doesn't accept a context and will hang on a missing Unix socket.
+	client.SkipServerVersionCheck = true
+	// Override the HTTP client with a short dial timeout.
+	client.HTTPClient = &http.Client{
+		Timeout: 2 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				d := net.Dialer{Timeout: 2 * time.Second}
+				// Extract the socket path from dockerHost to support
+				// non-standard locations (Colima: run/docker.sock, Podman:
+				// /run/storage/docker.sock, DOCKER_HOST overrides).
+				path := dockerHost
+				if len(path) > len("unix://") {
+					path = path[len("unix://"):]
+				}
+				return d.DialContext(ctx, "unix", path)
+			},
+		},
+	}
+
 	return client.Ping() == nil
 }
 

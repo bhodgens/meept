@@ -459,6 +459,9 @@ func TestResolver_RecordsDecisionsToRoutingLogger(t *testing.T) {
 	}
 	defer rl.Close()
 
+	// Fixture matches the real ProvidersConfig schema
+	// (internal/llm/providers.go:47-55). Providers is map[string]ProviderConfig
+	// (value type, not pointer). ModelDef holds the model definition.
 	cfg := &ProvidersConfig{
 		Model: "ollama/qwen2.5:7b",
 		Providers: map[string]ProviderConfig{
@@ -491,6 +494,7 @@ func TestResolver_RecordsDecisionsToRoutingLogger(t *testing.T) {
 	r := NewResolver(cfg, nil)
 	r.SetRoutingLogger(rl)
 
+	// Trigger ResolveForAlias (the production hot path).
 	mc, err := r.ResolveForAlias("default")
 	if err != nil {
 		t.Fatalf("ResolveForAlias: %v", err)
@@ -551,6 +555,7 @@ func TestResolver_RecordsDecisionsForSkill(t *testing.T) {
 	r := NewResolver(cfg, nil)
 	r.SetRoutingLogger(rl)
 
+	// Default model lacks "code"; resolver should escalate to qwen2.5-coder:7b.
 	skill := &SkillRequirements{Name: "coding", Requires: []string{"code"}}
 	mc, err := r.ResolveForSkill(skill, nil)
 	if err != nil {
@@ -583,6 +588,7 @@ func TestResolver_RecordsDecisionsForSkill(t *testing.T) {
 func TestResolver_SetRoutingLogger_NilGuard(t *testing.T) {
 	cfg := createTestConfig()
 	r := NewResolver(cfg, nil)
+	// Passing nil must not panic and must leave routingLogger nil.
 	r.SetRoutingLogger(nil)
 	if r.routingLogger != nil {
 		t.Error("expected routingLogger to remain nil after SetRoutingLogger(nil)")
