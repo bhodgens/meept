@@ -1497,6 +1497,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 			pm := project.NewProjectManager(projStore, recents, cfg.Projects, logger.With("component", "project-manager"))
 			c.ProjectManager = pm
+			// Wire session store into project manager for bulk path updates on rename.
+			if c.SessionStore != nil {
+				pm.SetSessionStore(c.SessionStore)
+			}
 			logger.Info("Project manager initialized",
 				"base_dir", cfg.Projects.BaseDir,
 				"auto_detect", cfg.Projects.AutoDetect,
