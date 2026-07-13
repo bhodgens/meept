@@ -50,6 +50,11 @@ var (
 	ErrConvergenceDetected         = errors.New("agent responses converged without progress")
 	ErrConversationBudgetExhausted = errors.New("conversation token budget exhausted")
 	ErrNoSkill                     = errors.New("skill is nil")
+	// ErrAgentBlocked is returned by attemptStateRecovery when the state
+	// machine is in StateBlocked and requires external action (approval or
+	// rate-limit lift). It wraps the triggering error so callers retain the
+	// original context.
+	ErrAgentBlocked = errors.New("agent blocked awaiting external action")
 )
 
 // Evidence prompt section instructs agents to substantiate their claims.
@@ -606,6 +611,9 @@ type AgentLoop struct {
 
 	// State machine for explicit state tracking
 	stateMachine *AgentStateMachine
+	// statePersister optionally persists state snapshots for crash recovery
+	// (Phase 5). Nil by default; wired via SetStatePersister.
+	statePersister AgentStatePersister
 	// stateMu protects state-dependent operations during transitions
 	stateMu sync.Mutex
 }
@@ -2830,7 +2838,16 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					"error":   err.Error(),
 					"iteration": iteration,
 				})
-				return "", l.handleErrorBasedOnState(fmt.Errorf("LLM call failed: %w", err))
+				l.persistCurrentState("llm_call_failed")
+				handled := l.handleErrorBasedOnState(fmt.Errorf("LLM call failed: %w", err))
+				if handled != nil {
+					// Fallback: attempt one state-based recovery action
+					// (e.g., reset Error→Idle, surface Blocked to user,
+					// or revive ToolWaiting). If recovery absorbs the error,
+					// surface nil; otherwise propagate the wrapped error.
+					return "", l.attemptStateRecovery(handled)
+				}
+				return "", nil
 			}
 		}
 		// Clear per-turn reasoning after the LLM call consumes it.
@@ -3054,6 +3071,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					"iteration", iteration,
 				)
 				l.safeTransition(StateCompleted, "tool_requested_termination", map[string]any{"iteration": iteration})
+				l.persistCurrentState("tool_requested_termination")
 				return l.buildTerminateResponse(results), nil
 			}
 
@@ -3221,6 +3239,34 @@ func (l *AgentLoop) safeTransition(to AgentState, reason string, metadata map[st
 	}
 }
 
+// SetStatePersister attaches a state persister for crash recovery (Phase 5).
+// Nil-guarded per CLAUDE.md setter convention.
+func (l *AgentLoop) SetStatePersister(p AgentStatePersister) {
+	if p != nil {
+		l.statePersister = p
+	}
+}
+
+// persistCurrentState snapshots the current agent state and saves it via the
+// attached persister. It is best-effort: nil-checks short-circuit, and errors
+// are logged at Warn level without blocking the agent loop.
+func (l *AgentLoop) persistCurrentState(reason string) {
+	if l.statePersister == nil || l.stateMachine == nil {
+		return
+	}
+	snap := l.GetStateSnapshot()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := l.statePersister.Save(ctx, l.agentID, snap); err != nil {
+		if l.logger != nil {
+			l.logger.Warn("failed to persist agent state",
+				"reason", reason,
+				"agent_id", l.agentID,
+				"error", err)
+		}
+	}
+}
+
 // GetState returns the current agent state.
 func (l *AgentLoop) GetState() AgentState {
 	if l.stateMachine == nil {
@@ -3273,6 +3319,19 @@ func (l *AgentLoop) GetBudgetStatus() *BudgetStatus {
 	return &status
 }
 
+// AdvanceBudgetPhase transitions the budget hierarchy to a new phase,
+// carrying over unused budget if the current phase allows it. Returns nil
+// (no-op) if the hierarchy is not initialized.
+//
+// TODO: call from orchestrator_phases.go startNextPhase() when phase
+// transitions occur, so the budget hierarchy tracks plan-driven phase changes.
+func (l *AgentLoop) AdvanceBudgetPhase(newPhaseID string) error {
+	if l.budgetHierarchy == nil {
+		return nil
+	}
+	return l.budgetHierarchy.AdvancePhase(newPhaseID)
+}
+
 // handleErrorBasedOnState dispatches error handling based on the current agent
 // state (Phase 4 of agent state machine formalization plan). It returns the
 // error the caller should surface (possibly wrapped or transformed), or nil if
@@ -3313,6 +3372,71 @@ func (l *AgentLoop) handleErrorBasedOnState(err error) error {
 		l.logger.Debug("terminal state error — wrapping up",
 			"error", err.Error(), "state", state.String())
 		return fmt.Errorf("%s: %w", state.String(), err)
+	default:
+		return err
+	}
+}
+
+// notifyUserBlocked publishes a notification that the agent is blocked and
+// cannot proceed without user action (approval, rate-limit lift, etc.). It is
+// a best-effort signal — no notification infrastructure wired is a no-op.
+func (l *AgentLoop) notifyUserBlocked(err error) {
+	l.logger.Warn("agent blocked — surfacing to user",
+		"error", err.Error())
+	if l.notificationPublisher != nil {
+		l.notificationPublisher.PublishTaskNotification(
+			"", l.agentID, "warning", "Agent Blocked",
+			"The agent is blocked and requires user action to continue: "+err.Error())
+	}
+}
+
+// attemptStateRecovery is the fallback recovery path invoked after
+// handleErrorBasedOnState returns a non-nil error. It consults the current
+// state-machine state and attempts one recovery action (Phase 4 §4.2 of the
+// agent state machine plan):
+//
+//   - StateError: reset to StateIdle so the next user turn starts fresh.
+//     Returns nil (recovery absorbed the error).
+//   - StateBlocked: notify the user and return ErrAgentBlocked wrapping the
+//     original error. The caller surfaces this to the user; no auto-retry.
+//   - StateToolWaiting: a tool result timed out — transition back to
+//     ProcessingResult so the loop can synthesize a tool-error result and
+//     continue. Returns nil.
+//   - default: nothing to recover; return err unchanged.
+//
+// It is safe to call when stateMachine is nil (returns err).
+func (l *AgentLoop) attemptStateRecovery(err error) error {
+	if err == nil || l.stateMachine == nil {
+		return err
+	}
+	state := l.stateMachine.CurrentState()
+	switch state {
+	case StateError:
+		l.logger.Info("recovering from error state — resetting to idle",
+			"error", err.Error())
+		if tErr := l.stateMachine.Transition(StateIdle, "recovery_reset", map[string]any{
+			"prior_error": err.Error(),
+		}); tErr != nil {
+			// Transition rejected — surface the original error.
+			l.logger.Debug("recovery_reset transition rejected",
+				"error", tErr.Error())
+			return err
+		}
+		return nil
+	case StateBlocked:
+		l.notifyUserBlocked(err)
+		return fmt.Errorf("%w: %s", ErrAgentBlocked, err.Error())
+	case StateToolWaiting:
+		l.logger.Info("recovering from tool_waiting — returning to processing_result",
+			"error", err.Error())
+		if tErr := l.stateMachine.Transition(StateProcessingResult, "tool_timeout", map[string]any{
+			"prior_error": err.Error(),
+		}); tErr != nil {
+			l.logger.Debug("tool_timeout transition rejected",
+				"error", tErr.Error())
+			return err
+		}
+		return nil
 	default:
 		return err
 	}
@@ -5080,6 +5204,47 @@ func (l *AgentLoop) GetWorkerID() int {
 // SetActive atomically sets the has-pending-work flag.
 func (l *AgentLoop) SetActive(v bool) {
 	l.isActive.Store(v)
+}
+
+// SetBudgetConfig overrides the hierarchical budget totals. When total > 0,
+// the BudgetHierarchy is rebuilt with the new task budget. reservedRatio
+// sets the emergency reserve fraction (0.0-1.0). Nil-guarded per CLAUDE.md.
+func (l *AgentLoop) SetBudgetConfig(total int, reservedRatio float64) {
+	if l == nil || total <= 0 {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	reserved := int(float64(total) * reservedRatio)
+	if reserved < 0 {
+		reserved = 0
+	}
+	phaseBudget := total - reserved
+	if phaseBudget < 1 {
+		phaseBudget = total // no meaningful phase budget; use full total
+	}
+	l.budgetHierarchy = NewBudgetHierarchy(total, []string{"default"}, []int{phaseBudget})
+	if err := l.budgetHierarchy.SelectPhaseBudget("default"); err != nil {
+		if l.logger != nil {
+			l.logger.Warn("SetBudgetConfig: failed to select default phase", "error", err)
+		}
+	}
+}
+
+// SetParallelismConfig proxies parallelism settings to the executor's
+// AdaptiveParallelismLimiter. Profiles map keys: "io_bound", "cpu_bound",
+// "stateful", "exclusive". Nil-guarded per CLAUDE.md.
+func (l *AgentLoop) SetParallelismConfig(baseParallelism int, profiles map[string]int) {
+	if l == nil {
+		return
+	}
+	l.mu.RLock()
+	executor := l.executor
+	l.mu.RUnlock()
+	if executor == nil {
+		return
+	}
+	executor.SetParallelismConfig(baseParallelism, profiles)
 }
 
 // IsActive atomically returns whether this loop has pending work.

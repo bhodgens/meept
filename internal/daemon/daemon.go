@@ -496,6 +496,46 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		logger.Info("Response analyzer wired into agent loop")
 	}
 
+	// Wire agent state persister (Phase 5). When config enables persistence,
+	// construct a SQLiteStatePersister sharing the metrics store's *sql.DB
+	// handle to avoid SQLite file-locking conflicts. The persister creates
+	// its own table (agent_states) so there is no schema collision.
+	if fullCfg.Agent.StateTracking.Persist && components.AgentLoop != nil && metricsStore != nil {
+		persister, perr := agent.NewSQLiteStatePersister(metricsStore.DB().DB)
+		if perr != nil {
+			logger.Warn("Failed to create agent state persister, persistence disabled",
+				"error", perr)
+		} else {
+			components.AgentLoop.SetStatePersister(persister)
+			logger.Info("Agent state persister wired",
+				"db", "metrics.db/agent_states")
+		}
+	}
+
+	// Apply budget config if set. When Total > 0, the AgentLoop's
+	// BudgetHierarchy is rebuilt with the configured task budget and
+	// emergency reserve ratio.
+	if components.AgentLoop != nil && fullCfg.Agent.Budget.Total > 0 {
+		components.AgentLoop.SetBudgetConfig(fullCfg.Agent.Budget.Total, fullCfg.Agent.Budget.ReservedRatio)
+		logger.Info("Agent budget config applied",
+			"total", fullCfg.Agent.Budget.Total,
+			"reserved_ratio", fullCfg.Agent.Budget.ReservedRatio)
+	}
+
+	// Apply parallel tool execution config if enabled.
+	if components.AgentLoop != nil && fullCfg.Agent.ParallelToolExec.Enabled {
+		profiles := make(map[string]int, 4)
+		for name, p := range fullCfg.Agent.ParallelToolExec.Profiles {
+			profiles[name] = p.Parallelism
+		}
+		components.AgentLoop.SetParallelismConfig(fullCfg.Agent.ParallelToolExec.BaseParallelism, profiles)
+		logger.Info("Agent parallelism config applied",
+			"base_parallelism", fullCfg.Agent.ParallelToolExec.BaseParallelism,
+			"profiles", len(profiles))
+	}
+
+	// TODO: retry config consumption deferred — backoff.go presets cover current needs.
+
 	// Create metrics collector with getter functions for actual values
 	var coll *metrics.Collector
 	if metricsStore != nil && components != nil {
@@ -1005,6 +1045,38 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// planManager field is nil at construction time.
 	if components != nil && components.RalphLoop != nil && planManagerInst != nil {
 		components.RalphLoop.SetPlanManager(planManagerInst)
+	}
+
+	// Wire orchestrator phase-transition hook. The callback logs every plan
+	// phase transition and, when an AgentLoopManager with active per-session
+	// loops is available, advances each loop's budget phase to track the
+	// plan-driven phase change. Best-effort: panics in the callback are
+	// recovered so the orchestrator is never broken by a subscriber fault.
+	if components != nil && components.Orchestrator != nil {
+		loopMgr := components.AgentLoopManager
+		hookLogger := logger.With("component", "phase-transition-hook")
+		components.Orchestrator.SetPhaseTransitionHook(func(taskID, fromPhase, toPhase string) {
+			defer func() { _ = recover() }()
+			hookLogger.Info("plan phase transition",
+				"task_id", taskID,
+				"from_phase", fromPhase,
+				"to_phase", toPhase,
+			)
+			if loopMgr != nil {
+				for _, loop := range loopMgr.List() {
+					if loop != nil {
+						if err := loop.AdvanceBudgetPhase(toPhase); err != nil {
+							hookLogger.Warn("failed to advance budget phase on loop",
+								"task_id", taskID,
+								"to_phase", toPhase,
+								"error", err,
+							)
+						}
+					}
+				}
+			}
+		})
+		logger.Info("Orchestrator phase-transition hook wired")
 	}
 
 	return d, nil

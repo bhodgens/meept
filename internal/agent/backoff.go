@@ -173,7 +173,7 @@ func (e *HTTPError) IsRetryable() bool {
 
 // RetryBudget tracks how many retries remain for an operation chain.
 type RetryBudget struct {
-	mu      sync.Mutex
+	mu      sync.RWMutex
 	max     int
 	current int
 	usedBy  map[string]int // operation -> attempts used
@@ -205,22 +205,22 @@ func (b *RetryBudget) TryUse(operation string) bool {
 
 // Remaining returns the number of retries left.
 func (b *RetryBudget) Remaining() int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	return b.current
 }
 
 // Used returns the number of retries used.
 func (b *RetryBudget) Used() int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	return b.max - b.current
 }
 
 // UsedBy returns how many retries a specific operation used.
 func (b *RetryBudget) UsedBy(operation string) int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	return b.usedBy[operation]
 }
 
@@ -372,10 +372,7 @@ func (b *Backoff) NextDelay() (delay time.Duration, ok bool) {
 		jitterRange := float64(delay) * b.config.Jitter
 		jitter := b.rng.Float64()*jitterRange*2 - jitterRange
 		delay = delay + time.Duration(jitter)
-		// Ensure minimum delay (even with negative jitter)
-		if delay < 100*time.Millisecond && b.config.BaseDelay < 100*time.Millisecond {
-			delay = b.config.BaseDelay
-		}
+		// Enforce a 100ms floor to prevent retry storms.
 		if delay < 100*time.Millisecond {
 			delay = 100 * time.Millisecond
 		}

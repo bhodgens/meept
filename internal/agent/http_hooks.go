@@ -232,45 +232,75 @@ func (h *HTTPHook) executeSync(ctx context.Context, payload any) error {
 		req.Header.Set(k, v)
 	}
 
-	// Execute with retries
-	var lastErr error
-	for attempt := 0; attempt <= h.config.RetryCount; attempt++ {
-		resp, err := h.client.Do(req)
-		if err != nil {
-			lastErr = err
-			if attempt < h.config.RetryCount {
-				time.Sleep(time.Second * time.Duration(attempt+1))
-				continue
-			}
-			return fmt.Errorf("HTTP request failed after %d retries: %w", h.config.RetryCount, err)
-		}
-
-		// Check response
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			errorBody, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(errorBody))
-			if attempt < h.config.RetryCount {
-				time.Sleep(time.Second * time.Duration(attempt+1))
-				continue
-			}
-			return lastErr
-		}
-
-		resp.Body.Close()
-		if h.logger != nil {
-			h.logger.Debug("HTTP hook executed successfully", "url", h.config.URL, "status", resp.StatusCode)
-		}
-		return nil
+	// Execute with exponential backoff + jitter retries.
+	// MaxAttempts is set to RetryCount so the Backoff type controls pacing.
+	bo := NewBackoff(HTTPHookBackoffConfig(h.config.RetryCount))
+	if h.logger != nil {
+		bo.WithLogger(h.logger)
 	}
 
-	return lastErr
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		resp, err := h.client.Do(req)
+		if err == nil {
+			// Check response status.
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				errorBody, _ := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(errorBody))
+				if attempt >= h.config.RetryCount {
+					return lastErr
+				}
+				if !shouldRetryHookError(lastErr) {
+					return lastErr
+				}
+				if !bo.Sleep(ctx) {
+					return lastErr
+				}
+				continue
+			}
+
+			resp.Body.Close()
+			if h.logger != nil {
+				h.logger.Debug("HTTP hook executed successfully", "url", h.config.URL, "status", resp.StatusCode)
+			}
+			return nil
+		}
+
+		// Network/transport error.
+		lastErr = err
+		if attempt >= h.config.RetryCount {
+			return fmt.Errorf("HTTP request failed after %d retries: %w", h.config.RetryCount, err)
+		}
+		if !shouldRetryHookError(err) {
+			return fmt.Errorf("HTTP request failed: %w", err)
+		}
+		if !bo.Sleep(ctx) {
+			return fmt.Errorf("HTTP request failed after %d retries: %w", h.config.RetryCount, err)
+		}
+	}
 }
 
 // Wait blocks until all in-flight async executions complete.
 // This is primarily intended for graceful shutdown and tests.
 func (h *HTTPHook) Wait() {
 	h.wg.Wait()
+}
+
+// shouldRetryHookError decides whether the HTTP hook retry loop should
+// retry on the given error. It uses IsRetryable from backoff.go for
+// structured classification, falling back to err != nil for plain
+// transport errors that lack structured metadata.
+func shouldRetryHookError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if IsRetryable(err) {
+		return true
+	}
+	// Fallback: retry on any non-nil error to preserve the original
+	// behavior where all transport errors were retried.
+	return true
 }
 
 // OnSessionStart implements SessionStartHook.

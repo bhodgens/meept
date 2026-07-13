@@ -219,23 +219,70 @@ func (m *AgentStateMachine) Transition(to AgentState, reason string, metadata ma
 }
 
 // isValidTransition returns true if the transition is allowed.
+//
+// The table is intentionally permissive: it favors allowing legitimate
+// production transitions over strict enforcement, because the agent loop
+// (reasoningCycle in loop.go) drives transitions directly and any rejection
+// silently fails via safeTransition (logged at Debug level), leaving the
+// machine stuck in a stale state. The concrete impact of an overly-strict
+// table is that GetStateSnapshot() always reports "idle", bus events never
+// fire, and handleErrorBasedOnState always hits the default branch.
+//
+// Specifically, reasoningCycle begins in StateIdle (the initial state) and
+// immediately transitions to StateThinking. It can also reach terminal
+// states directly from Idle when an early-exit condition triggers before the
+// first iteration (budget exhausted, completed via cached path, etc.). The
+// table therefore permits every state reachable from Idle in practice, while
+// still rejecting nonsensical transitions such as terminal -> terminal of a
+// different kind, or Completed -> Thinking without going through the Idle
+// reset.
 func (m *AgentStateMachine) isValidTransition(from, to AgentState) bool {
-	// Define allowed transitions
+	// Same-state transitions are no-ops handled earlier by Transition; mirror
+	// that here for safety.
+	if from == to {
+		return true
+	}
+
+	// Define allowed transitions. Every defined AgentState appears as a key
+	// below; if a future state is added without an entry here the `!ok` fall-
+	// through below rejects it (safe-by-default) until the table is updated.
 	allowedTransitions := map[AgentState][]AgentState{
-		StateIdle:               {StateReceivingInput, StateCancelled},
-		StateReceivingInput:     {StateClassifying, StateCancelled},
-		StateClassifying:        {StateThinking, StateError, StateCancelled},
-		StateThinking:           {StateToolExecuting, StateGeneratingResponse, StateError, StateCancelled, StateMaxIterations, StateBudgetExhausted},
-		StateToolExecuting:      {StateToolWaiting, StateProcessingResult, StateError, StateBlocked},
-		StateToolWaiting:        {StateProcessingResult, StateError, StateBlocked},
-		StateProcessingResult:   {StateThinking, StateCompleted, StateError, StateMaxIterations},
-		StateGeneratingResponse: {StateCompleted, StateError},
-		StateBlocked:            {StateThinking, StateToolExecuting, StateCancelled, StateError},
-		StateError:              {StateIdle, StateCancelled}, // Reset or cancel
-		StateCompleted:          {StateIdle},                  // Reset
-		StateCancelled:          {StateIdle},                  // Reset
-		StateMaxIterations:      {StateIdle},                  // Reset
-		StateBudgetExhausted:    {StateIdle},                  // Reset
+		// Idle is the initial/reset state. reasoningCycle starts here and may
+		// jump directly to Thinking, or short-circuit to a terminal state for
+		// early exits (budget exhausted, error during setup, immediate
+		// completion, max-iterations on a zero-iteration path, etc.).
+		StateIdle: {
+			StateReceivingInput,
+			StateClassifying,
+			StateThinking,
+			StateGeneratingResponse,
+			StateToolExecuting,
+			StateProcessingResult,
+			StateError,
+			StateCancelled,
+			StateMaxIterations,
+			StateBudgetExhausted,
+			StateCompleted,
+		},
+		StateReceivingInput:   {StateClassifying, StateThinking, StateError, StateCancelled},
+		StateClassifying:      {StateThinking, StateGeneratingResponse, StateError, StateCancelled},
+		StateThinking:         {StateToolExecuting, StateToolWaiting, StateGeneratingResponse, StateProcessingResult, StateError, StateBlocked, StateCancelled, StateMaxIterations, StateBudgetExhausted, StateCompleted},
+		StateToolExecuting:    {StateToolWaiting, StateProcessingResult, StateGeneratingResponse, StateError, StateBlocked, StateCancelled},
+		StateToolWaiting:      {StateProcessingResult, StateToolExecuting, StateError, StateBlocked, StateCancelled},
+		StateProcessingResult: {StateThinking, StateGeneratingResponse, StateToolExecuting, StateCompleted, StateError, StateBlocked, StateMaxIterations, StateCancelled},
+		StateGeneratingResponse: {StateCompleted, StateError, StateCancelled, StateThinking},
+		StateBlocked:            {StateThinking, StateToolExecuting, StateProcessingResult, StateCancelled, StateError},
+		// Terminal states may only reset to Idle. Error additionally allows
+		// transitioning back to Thinking for self-recovery (attemptStateRecovery
+		// performs an Error→Idle reset; callers that prefer direct retry can
+		// use Error→Thinking). Any other terminal-to-X transition is rejected,
+		// including terminal→terminal pivots (e.g., Completed→Cancelled,
+		// Error→MaxIterations) which must go through Idle first.
+		StateError:           {StateIdle, StateThinking},
+		StateCompleted:       {StateIdle},
+		StateCancelled:       {StateIdle},
+		StateMaxIterations:   {StateIdle},
+		StateBudgetExhausted: {StateIdle},
 	}
 
 	allowed, ok := allowedTransitions[from]
@@ -283,8 +330,14 @@ func (m *AgentStateMachine) IsActive() bool {
 func (m *AgentStateMachine) SafeTransition(to AgentState, reason string, metadata map[string]any) {
 	if err := m.Transition(to, reason, metadata); err != nil {
 		if m.logger != nil {
+			// Snapshot from-state under the read lock to avoid a data race
+			// with concurrent Transition calls (m.currentState is written
+			// under m.mu in Transition).
+			m.mu.RLock()
+			from := m.currentState
+			m.mu.RUnlock()
 			m.logger.Warn("State transition failed (ignoring)",
-				"from", m.currentState,
+				"from", from,
 				"to", to,
 				"reason", reason,
 				"error", err)

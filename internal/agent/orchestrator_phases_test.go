@@ -434,3 +434,102 @@ func TestMaybeTransitionPhase_NoPhaseShortCircuits(t *testing.T) {
 	// Should be a safe no-op — no panics, no errors propagating.
 	o.maybeTransitionPhase(ctx, s1.ID, "task-nop")
 }
+
+// TestOrchestrator_StartNextPhase_HookInvoked verifies that when
+// SetPhaseTransitionHook has been called, the callback fires with the correct
+// (taskID, fromPhase, toPhase) tuple during startNextPhase.
+func TestOrchestrator_StartNextPhase_HookInvoked(t *testing.T) {
+	o, store, stub := newTestOrchestrator(t)
+	ctx := context.Background()
+
+	planID := "plan-hook"
+	phase1 := &plan.PlanPhase{ID: "p1", PlanID: planID, Name: "Alpha", Sequence: 0, State: plan.PhaseCompleted}
+	phase2 := &plan.PlanPhase{ID: "p2", PlanID: planID, Name: "Beta", Sequence: 1, State: plan.PhasePending}
+	_ = stub.CreatePhase(ctx, phase1)
+	_ = stub.CreatePhase(ctx, phase2)
+	o.planManager.RegisterTaskPlan("task-hook", planID)
+
+	step := task.NewTaskStep("task-hook", "x", 1)
+	step.ID = "sh1"
+	step.Phase = "Beta"
+	_ = store.Create(step)
+
+	var gotTask, gotFrom, gotTo string
+	called := false
+	o.SetPhaseTransitionHook(func(taskID, fromPhase, toPhase string) {
+		called = true
+		gotTask, gotFrom, gotTo = taskID, fromPhase, toPhase
+	})
+
+	if err := o.startNextPhase(ctx, "task-hook", "Alpha"); err != nil {
+		t.Fatalf("startNextPhase: %v", err)
+	}
+
+	if !called {
+		t.Fatal("phase transition hook was not invoked")
+	}
+	if gotTask != "task-hook" {
+		t.Errorf("hook taskID = %q; want %q", gotTask, "task-hook")
+	}
+	if gotFrom != "Alpha" {
+		t.Errorf("hook fromPhase = %q; want %q", gotFrom, "Alpha")
+	}
+	if gotTo != "Beta" {
+		t.Errorf("hook toPhase = %q; want %q", gotTo, "Beta")
+	}
+}
+
+// TestOrchestrator_SetPhaseTransitionHook_NilGuard verifies that calling
+// SetPhaseTransitionHook(nil) is a no-op: it does not overwrite an already-set
+// hook and does not panic.
+func TestOrchestrator_SetPhaseTransitionHook_NilGuard(t *testing.T) {
+	o, _, _ := newTestOrchestrator(t)
+
+	original := func(taskID, fromPhase, toPhase string) {}
+	o.SetPhaseTransitionHook(original)
+
+	// Attempt to clear with nil — should be ignored.
+	o.SetPhaseTransitionHook(nil)
+
+	if o.onPhaseTransition == nil {
+		t.Fatal("SetPhaseTransitionHook(nil) cleared the hook; want no-op")
+	}
+	// Pointer-equality: the original closure must still be in place.
+	// (reflect would be needed for deep equality; pointer-equality suffices
+	// since we assigned the exact same func value.)
+}
+
+// TestOrchestrator_StartNextPhase_HookPanicsDoNotBlock verifies that a panicking
+// subscriber is recovered and does not break the phase transition.
+func TestOrchestrator_StartNextPhase_HookPanicsDoNotBlock(t *testing.T) {
+	o, store, stub := newTestOrchestrator(t)
+	ctx := context.Background()
+
+	planID := "plan-panic"
+	phase1 := &plan.PlanPhase{ID: "p1", PlanID: planID, Name: "P1", Sequence: 0, State: plan.PhaseCompleted}
+	phase2 := &plan.PlanPhase{ID: "p2", PlanID: planID, Name: "P2", Sequence: 1, State: plan.PhasePending}
+	_ = stub.CreatePhase(ctx, phase1)
+	_ = stub.CreatePhase(ctx, phase2)
+	o.planManager.RegisterTaskPlan("task-panic", planID)
+
+	step := task.NewTaskStep("task-panic", "x", 1)
+	step.ID = "sp1"
+	step.Phase = "P2"
+	_ = store.Create(step)
+
+	o.SetPhaseTransitionHook(func(taskID, fromPhase, toPhase string) {
+		panic("intentional subscriber panic")
+	})
+
+	// Must not propagate the panic.
+	err := o.startNextPhase(ctx, "task-panic", "P1")
+	if err != nil {
+		t.Fatalf("startNextPhase should recover subscriber panic; got: %v", err)
+	}
+
+	// Phase transition still happened — step got its conversation ID.
+	got, _ := store.GetByID("sp1")
+	if got == nil || !strings.HasPrefix(got.ConversationID, "phase-") {
+		t.Errorf("phase transition should have proceeded despite subscriber panic; ConversationID = %q", got.ConversationID)
+	}
+}

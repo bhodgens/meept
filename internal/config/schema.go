@@ -830,6 +830,75 @@ type AgentConfig struct {
 	// WorkerPool for session-scoped dispatch. Zero-value fields fall back
 	// to daemon.DefaultWorkerPoolConfig() at wiring time.
 	WorkerPool AgentWorkerPoolConfig `json:"worker_pool" toml:"worker_pool"`
+	// Retry configures exponential backoff retry behavior for LLM, tool, and HTTP operations.
+	Retry AgentRetryConfig `json:"retry" toml:"retry"`
+	// StateTracking configures the agent state machine observability hooks.
+	StateTracking AgentStateTrackingConfig `json:"state_tracking" toml:"state_tracking"`
+	// Budget configures hierarchical task/phase/turn token budgets.
+	Budget AgentBudgetConfig `json:"budget" toml:"budget"`
+	// ParallelToolExec configures dependency-aware parallel tool execution.
+	ParallelToolExec AgentParallelToolConfig `json:"parallel_tool_execution" toml:"parallel_tool_execution"`
+}
+
+// AgentRetryConfig configures exponential backoff retry behavior for LLM, tool, and HTTP operations.
+type AgentRetryConfig struct {
+	Enabled       bool                          `json:"enabled"        toml:"enabled"`
+	DefaultBudget int                           `json:"default_budget" toml:"default_budget"` // Max retries per operation chain
+	Backoff       AgentBackoffConfig            `json:"backoff"        toml:"backoff"`
+	PerOperation  map[string]AgentBackoffConfig `json:"per_operation"  toml:"per_operation"` // keys: "llm", "tool_web", "tool_shell", "http"
+}
+
+// AgentBackoffConfig holds per-operation backoff parameters.
+type AgentBackoffConfig struct {
+	BaseDelay  string  `json:"base_delay"  toml:"base_delay"`  // duration string, e.g. "1s"
+	MaxDelay   string  `json:"max_delay"   toml:"max_delay"`   // duration string, e.g. "30s"
+	Multiplier float64 `json:"multiplier"  toml:"multiplier"`
+	Jitter     float64 `json:"jitter"      toml:"jitter"`
+	Budget     int     `json:"budget"      toml:"budget"` // per-operation retry budget (0 = use DefaultBudget)
+}
+
+// AgentStateTrackingConfig configures the agent state machine observability hooks.
+type AgentStateTrackingConfig struct {
+	Enabled    bool `json:"enabled"     toml:"enabled"`
+	MaxHistory int  `json:"max_history" toml:"max_history"` // default 100
+	Persist    bool `json:"persist"     toml:"persist"`     // enable SQLite persistence (Phase 5)
+	EmitEvents bool `json:"emit_events" toml:"emit_events"` // publish bus events on transitions
+}
+
+// AgentBudgetConfig configures hierarchical task/phase/turn token budgets.
+type AgentBudgetConfig struct {
+	Total             int                     `json:"total"              toml:"total"`              // Total task budget in tokens
+	ReservedRatio     float64                 `json:"reserved_ratio"     toml:"reserved_ratio"`    // Emergency reserve fraction (0.0-1.0)
+	Phases            AgentBudgetPhasesConfig `json:"phases"             toml:"phases"`
+	WarningThresholds AgentBudgetThresholds   `json:"warning_thresholds" toml:"warning_thresholds"`
+}
+
+// AgentBudgetPhasesConfig configures phase-level budget allocation behavior.
+type AgentBudgetPhasesConfig struct {
+	Enabled      bool `json:"enabled"       toml:"enabled"`
+	AutoAllocate bool `json:"auto_allocate" toml:"auto_allocate"` // Auto-distribute if not specified
+	Carryover    bool `json:"carryover"     toml:"carryover"`     // Unused phase budget carries to next phase
+	Borrowing    bool `json:"borrowing"     toml:"borrowing"`     // Allow phases to borrow from reserve
+}
+
+// AgentBudgetThresholds holds warning thresholds for each budget scope.
+type AgentBudgetThresholds struct {
+	Task  float64 `json:"task"  toml:"task"`  // default 0.7
+	Phase float64 `json:"phase" toml:"phase"` // default 0.8
+	Turn  float64 `json:"turn"  toml:"turn"`  // default 0.9
+}
+
+// AgentParallelToolConfig configures dependency-aware parallel tool execution.
+type AgentParallelToolConfig struct {
+	Enabled         bool                              `json:"enabled"          toml:"enabled"`
+	BaseParallelism int                               `json:"base_parallelism" toml:"base_parallelism"`
+	Adaptive        bool                              `json:"adaptive"         toml:"adaptive"`
+	Profiles        map[string]AgentToolProfileConfig `json:"profiles"         toml:"profiles"`
+}
+
+// AgentToolProfileConfig holds per-profile parallelism settings.
+type AgentToolProfileConfig struct {
+	Parallelism int `json:"parallelism" toml:"parallelism"`
 }
 
 // AgentWorkerPoolConfig configures the per-session AgentLoop worker pool.
@@ -1690,6 +1759,49 @@ func DefaultConfig() *Config {
 				JSONCompression:      true,
 				CompressUserMessages: false,
 				TargetRatio:          0.0, // Use compressor defaults
+			},
+			Retry: AgentRetryConfig{
+				Enabled:       true,
+				DefaultBudget: 5, // Max retries per operation chain
+				Backoff: AgentBackoffConfig{
+					BaseDelay:  "1s",
+					MaxDelay:   "30s",
+					Multiplier: 2.0,
+					Jitter:     0.3, // 30% jitter
+				},
+				// PerOperation is nil/empty — consumer code applies per-operation defaults.
+			},
+			StateTracking: AgentStateTrackingConfig{
+				Enabled:    true,
+				MaxHistory: 100,
+				Persist:    false, // SQLite persistence deferred (Phase 5)
+				EmitEvents: true,
+			},
+			Budget: AgentBudgetConfig{
+				Total:         200000, // 200K tokens default task budget
+				ReservedRatio: 0.1,    // 10% emergency reserve
+				Phases: AgentBudgetPhasesConfig{
+					Enabled:      true,
+					AutoAllocate: true,
+					Carryover:    true,
+					Borrowing:    true,
+				},
+				WarningThresholds: AgentBudgetThresholds{
+					Task:  0.7, // Warn at 70% of task budget
+					Phase: 0.8, // Warn at 80% of phase budget
+					Turn:  0.9, // Warn at 90% of turn budget
+				},
+			},
+			ParallelToolExec: AgentParallelToolConfig{
+				Enabled:         true,
+				BaseParallelism: 4,
+				Adaptive:        true,
+				Profiles: map[string]AgentToolProfileConfig{
+					"io_bound":  {Parallelism: 10},
+					"cpu_bound": {Parallelism: 2},
+					"stateful":  {Parallelism: 1},
+					"exclusive": {Parallelism: 1},
+				},
 			},
 		},
 		Security: SecurityConfig{

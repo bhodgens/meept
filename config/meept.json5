@@ -322,6 +322,56 @@
       "max_loops_per_worker": 5,
       "idle_timeout": "5m",
     },
+    // Exponential backoff retry for LLM, tool, and HTTP operations
+    "retry": {
+      "enabled": true,
+      "default_budget": 5,             // Max retries per operation chain
+      "backoff": {
+        "base_delay": "1s",            // Initial delay before first retry
+        "max_delay": "30s",            // Cap on backoff delay
+        "multiplier": 2.0,             // Exponential growth factor
+        "jitter": 0.3,                 // 30% jitter to avoid thundering herd
+        "budget": 0,                   // Per-operation retry budget (0 = use default_budget)
+      },
+      // Per-operation overrides; keys: "llm", "tool_web", "tool_shell", "http"
+      // Omitted = consumer code applies its own per-operation defaults.
+      "per_operation": {},
+    },
+    // Agent state machine observability hooks
+    "state_tracking": {
+      "enabled": true,
+      "max_history": 100,              // Max state transitions retained in-memory
+      "persist": false,                // Enable SQLite persistence (Phase 5)
+      "emit_events": true,             // Publish bus events on state transitions
+    },
+    // Hierarchical task/phase/turn token budgets
+    "budget": {
+      "total": 200000,                 // Total task budget in tokens
+      "reserved_ratio": 0.1,           // Emergency reserve fraction (0.0-1.0)
+      "phases": {
+        "enabled": true,
+        "auto_allocate": true,         // Auto-distribute budget across phases
+        "carryover": true,             // Unused phase budget carries to next phase
+        "borrowing": true,             // Allow phases to borrow from reserve
+      },
+      "warning_thresholds": {
+        "task": 0.7,                   // Warn at 70% of task budget
+        "phase": 0.8,                  // Warn at 80% of phase budget
+        "turn": 0.9,                   // Warn at 90% of turn budget
+      },
+    },
+    // Dependency-aware parallel tool execution
+    "parallel_tool_execution": {
+      "enabled": true,
+      "base_parallelism": 4,           // Default parallelism level
+      "adaptive": true,                // Dynamically adjust based on load
+      "profiles": {
+        "io_bound":  {"parallelism": 10},  // File reads, web fetches
+        "cpu_bound": {"parallelism": 2},   // Code execution, analysis
+        "stateful":  {"parallelism": 1},   // Writes, mutations (serialized)
+        "exclusive": {"parallelism": 1},   // Exclusive locks (one at a time)
+      },
+    },
   },
 
   // Security configuration

@@ -2,7 +2,9 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -113,11 +115,16 @@ func TestAgentStateMachine_ChainOfTransitions(t *testing.T) {
 }
 
 func TestAgentStateMachine_InvalidTransition(t *testing.T) {
+	// Terminal-to-terminal pivots must go through Idle reset.
+	// Idle -> Completed is allowed by the permissive production table; pivot
+	// from Completed to a different terminal (Error) is rejected.
 	sm := NewAgentStateMachine(nil)
-	// Must go through ReceivingInput -> Classifying before reaching Thinking, not idle -> completed
-	err := sm.Transition(StateCompleted, "forced", nil)
+	if err := sm.Transition(StateCompleted, "to_completed", nil); err != nil {
+		t.Fatalf("Idle -> Completed should be allowed: %v", err)
+	}
+	err := sm.Transition(StateError, "terminal_pivot", nil)
 	if err == nil {
-		t.Error("invalid transition should have failed")
+		t.Error("Completed -> Error should be rejected (terminal-to-terminal)")
 	}
 }
 
@@ -289,21 +296,70 @@ func TestAgentStateMachine_TransitionWithErrorMetadata(t *testing.T) {
 	}
 }
 
-func TestAgentStateMachine_CannotDirectToCompleted(t *testing.T) {
-	sm := NewAgentStateMachine(nil)
-	err := sm.Transition(StateCompleted, "direct_complete", nil)
-	if err == nil {
-		t.Error("should not allow direct transition to completed from idle")
+// TestAgentStateMachine_IdleAllowsProductionStates verifies that the
+// permissive Idle transition table permits every state that reasoningCycle
+// reaches directly from Idle (the bug that motivated widening the table:
+// previously Idle only allowed ReceivingInput/Cancelled, so every
+// safeTransition from Idle silently failed and the machine was stuck).
+func TestAgentStateMachine_IdleAllowsProductionStates(t *testing.T) {
+	allowed := []AgentState{
+		StateThinking,
+		StateReceivingInput,
+		StateClassifying,
+		StateGeneratingResponse,
+		StateCompleted,
+		StateError,
+		StateCancelled,
+		StateMaxIterations,
+		StateBudgetExhausted,
+	}
+	for _, target := range allowed {
+		sm := NewAgentStateMachine(nil)
+		if err := sm.Transition(target, "from_idle", nil); err != nil {
+			t.Errorf("Idle -> %s should be allowed (permissive production table): %v", target, err)
+		}
 	}
 }
 
-func TestAgentStateMachine_Invalidation(t *testing.T) {
+// TestAgentStateMachine_TerminalToTerminalRejected verifies the table still
+// enforces the one constraint that matters: a terminal state cannot pivot
+// directly to a different terminal state (must reset through Idle first).
+func TestAgentStateMachine_TerminalToTerminalRejected(t *testing.T) {
+	terminals := []AgentState{StateCompleted, StateError, StateCancelled, StateMaxIterations, StateBudgetExhausted}
+	for _, from := range terminals {
+		for _, to := range terminals {
+			if from == to {
+				continue
+			}
+			sm := NewAgentStateMachine(nil)
+			// Reach `from` via Idle (always permitted by the permissive table).
+			if err := sm.Transition(from, "to_terminal", nil); err != nil {
+				t.Fatalf("setup Idle -> %s failed: %v", from, err)
+			}
+			if err := sm.Transition(to, "pivot", nil); err == nil {
+				t.Errorf("terminal %s -> %s should be rejected (must reset to Idle first)", from, to)
+			}
+		}
+	}
+}
+
+// TestAgentStateMachine_CompletedCannotPivotToThinking verifies the one
+// non-Idle reset path that remains disallowed: a completed cycle cannot
+// resume Thinking without first resetting to Idle.
+func TestAgentStateMachine_CompletedCannotPivotToThinking(t *testing.T) {
 	sm := NewAgentStateMachine(nil)
-	// From idle, can go to receiving_input or cancelled
-	// Can NOT go to thinking
-	err := sm.Transition(StateThinking, "bypass", nil)
-	if err == nil {
-		t.Error("should not allow idle -> thinking")
+	if err := sm.Transition(StateCompleted, "complete", nil); err != nil {
+		t.Fatalf("Idle -> Completed should be allowed: %v", err)
+	}
+	if err := sm.Transition(StateThinking, "pivot_without_reset", nil); err == nil {
+		t.Error("Completed -> Thinking should be rejected (must reset to Idle first)")
+	}
+	// Reset-then-Think is fine.
+	if err := sm.Transition(StateIdle, "reset", nil); err != nil {
+		t.Fatalf("Completed -> Idle reset failed: %v", err)
+	}
+	if err := sm.Transition(StateThinking, "fresh_cycle", nil); err != nil {
+		t.Errorf("Idle -> Thinking after reset should be allowed: %v", err)
 	}
 }
 
@@ -715,5 +771,224 @@ func TestAgentStateMachine_TransitionPreservesTurnID(t *testing.T) {
 	hist := sm.History()
 	if hist[0].Metadata["turn_id"] != 42 {
 		t.Errorf("turn_id metadata = %v, want 42", hist[0].Metadata["turn_id"])
+	}
+}
+
+// --- Phase 4 integration tests (GAP 4) ---
+//
+// These tests verify the state-machine integration points the Phase 4 plan
+// named:
+//  1. TestReasoningCycle_StateTransitions — the transition table permits the
+//     full expected reasoning cycle: Idle -> Thinking -> ToolExecuting ->
+//     ProcessingResult -> Thinking -> GeneratingResponse -> Completed -> Idle.
+//     Full reasoningCycle execution requires LLM + tool infrastructure that
+//     is too heavy for this unit test; instead we drive the state machine
+//     through the exact transition sequence that reasoningCycle emits (per
+//     safeTransition call sites in loop.go) and assert each step succeeds.
+//  2. TestStateAwareErrorHandling — verifies handleErrorBasedOnState
+//     dispatches based on the current state machine state.
+//  3. TestHTTPStateEndpoint — full HTTP server setup is too heavy; instead we
+//     verify GetStateSnapshot returns correct fields after transitions, which
+//     is what the HTTP endpoint serializes.
+
+// TestReasoningCycle_StateTransitions verifies the permissive transition
+// table admits the full expected reasoning-cycle state sequence. Each step
+// mirrors a real safeTransition call site in loop.go's reasoningCycle:
+//
+//	Idle -> Thinking (line ~2512, reasoning_cycle_start)
+//	Thinking -> ToolExecuting (line ~2915, tool_calls_received)
+//	ToolExecuting -> ProcessingResult (line ~3037, tools_completed)
+//	ProcessingResult -> Thinking (next-iteration continuation)
+//	Thinking -> GeneratingResponse (line ~3193, generating_response)
+//	GeneratingResponse -> Completed (line ~3056 / terminal)
+//	Completed -> Idle (reset for next turn)
+func TestReasoningCycle_StateTransitions(t *testing.T) {
+	sm := NewAgentStateMachine(nil)
+
+	// Each step must succeed; a failure here means the transition table
+	// rejects a sequence the production agent loop actually emits, which is
+	// the silent-failure bug from BUG 1.
+	type step struct {
+		to     AgentState
+		reason string
+	}
+	steps := []step{
+		{StateThinking, "reasoning_cycle_start"},
+		{StateToolExecuting, "tool_calls_received"},
+		{StateProcessingResult, "tools_completed"},
+		{StateThinking, "next_iteration"},
+		{StateGeneratingResponse, "generating_response"},
+		{StateCompleted, "done"},
+		{StateIdle, "reset_for_next_turn"},
+	}
+
+	for i, s := range steps {
+		if err := sm.Transition(s.to, s.reason, nil); err != nil {
+			t.Fatalf("step %d (%s) transition to %s failed: %v",
+				i+1, s.reason, s.to, err)
+		}
+	}
+
+	if sm.CurrentState() != StateIdle {
+		t.Errorf("expected final Idle after reset, got %v", sm.CurrentState())
+	}
+
+	hist := sm.History()
+	// 6 transitions recorded (the 7th step is Completed->Idle, so all 7 minus
+	// any same-state no-ops; none of these are same-state so we expect 7).
+	if len(hist) != len(steps) {
+		t.Errorf("expected %d history entries, got %d", len(steps), len(hist))
+	}
+	// Spot-check the first and last meaningful transitions.
+	if hist[0].From != StateIdle || hist[0].To != StateThinking {
+		t.Errorf("first transition = %+v, want Idle->Thinking", hist[0])
+	}
+	last := hist[len(hist)-1]
+	if last.From != StateCompleted || last.To != StateIdle {
+		t.Errorf("last transition = %+v, want Completed->Idle", last)
+	}
+}
+
+// TestStateAwareErrorHandling verifies handleErrorBasedOnState dispatches
+// based on the current agent-loop state. It exercises the StateThinking
+// (LLM-error) and StateBlocked (no-retry) branches explicitly.
+func TestStateAwareErrorHandling(t *testing.T) {
+	t.Run("thinking_state_llm_error", func(t *testing.T) {
+		loop := NewAgentLoop("err-test-thinking", "/tmp/test")
+		// Drive the state machine to StateThinking (the permissive table
+		// allows Idle -> Thinking directly).
+		if err := loop.stateMachine.Transition(StateThinking, "test_setup", nil); err != nil {
+			t.Fatalf("setup transition to Thinking failed: %v", err)
+		}
+		original := errors.New("llm boom")
+		got := loop.handleErrorBasedOnState(original)
+		if got == nil {
+			t.Fatal("handleErrorBasedOnState(Thinking) should return non-nil error")
+		}
+		if !errors.Is(got, original) {
+			t.Errorf("expected returned error to wrap original, got %v", got)
+		}
+	})
+
+	t.Run("blocked_state_no_retry", func(t *testing.T) {
+		loop := NewAgentLoop("err-test-blocked", "/tmp/test")
+		// Drive to StateBlocked via the production path: Idle -> Thinking ->
+		// ToolExecuting -> Blocked (matches loop.go permission-denied path).
+		sm := loop.stateMachine
+		for _, s := range []struct {
+			to     AgentState
+			reason string
+		}{
+			{StateThinking, "start"},
+			{StateToolExecuting, "tools"},
+			{StateBlocked, "permission_denied"},
+		} {
+			if err := sm.Transition(s.to, s.reason, nil); err != nil {
+				t.Fatalf("setup transition to %s failed: %v", s.to, err)
+			}
+		}
+		original := errors.New("blocked")
+		got := loop.handleErrorBasedOnState(original)
+		if got == nil {
+			t.Fatal("handleErrorBasedOnState(Blocked) should return non-nil (no auto-retry)")
+		}
+		if !errors.Is(got, original) {
+			t.Errorf("Blocked path should surface original error unwrapped, got %v", got)
+		}
+	})
+
+	t.Run("terminal_state_wraps", func(t *testing.T) {
+		loop := NewAgentLoop("err-test-terminal", "/tmp/test")
+		if err := loop.stateMachine.Transition(StateBudgetExhausted, "budget", nil); err != nil {
+			t.Fatalf("setup transition failed: %v", err)
+		}
+		original := errors.New("underlying")
+		got := loop.handleErrorBasedOnState(original)
+		if got == nil {
+			t.Fatal("terminal path should return non-nil")
+		}
+		// Terminal states wrap with their state name prefix.
+		if !errors.Is(got, original) {
+			t.Errorf("terminal wrap should preserve original via %%w, got %v", got)
+		}
+		expectedPrefix := StateBudgetExhausted.String()
+		if !strings.Contains(got.Error(), expectedPrefix) {
+			t.Errorf("expected error message to mention %q, got %q", expectedPrefix, got.Error())
+		}
+	})
+}
+
+// TestHTTPStateEndpoint verifies the snapshot returned by GetStateSnapshot
+// reflects the current state machine state. This is the data the HTTP
+// /api/v1/agent/state endpoint serializes; full HTTP server setup is too
+// heavy for this unit test.
+func TestHTTPStateEndpoint(t *testing.T) {
+	loop := NewAgentLoop("snapshot-conv", "/tmp/test")
+	loop.agentID = "agent-snap"
+
+	// Initial snapshot: idle, not terminal, not active.
+	snap := loop.GetStateSnapshot()
+	if snap.CurrentState != "idle" {
+		t.Errorf("initial current_state = %q, want idle", snap.CurrentState)
+	}
+	if snap.IsTerminal {
+		t.Error("initial state should not be terminal")
+	}
+	if snap.IsActive {
+		t.Error("initial state should not be active")
+	}
+	if snap.ConversationID != "snapshot-conv" {
+		t.Errorf("conversation_id = %q, want snapshot-conv", snap.ConversationID)
+	}
+	if snap.AgentID != "agent-snap" {
+		t.Errorf("agent_id = %q, want agent-snap", snap.AgentID)
+	}
+	if snap.Timestamp.IsZero() {
+		t.Error("timestamp should not be zero")
+	}
+
+	// Transition to Thinking and re-snapshot.
+	if err := loop.stateMachine.Transition(StateThinking, "snap_test", nil); err != nil {
+		t.Fatalf("transition to Thinking failed: %v", err)
+	}
+	snap = loop.GetStateSnapshot()
+	if snap.CurrentState != "thinking" {
+		t.Errorf("after transition current_state = %q, want thinking", snap.CurrentState)
+	}
+	if !snap.IsActive {
+		t.Error("thinking should be active")
+	}
+	if snap.IsTerminal {
+		t.Error("thinking should not be terminal")
+	}
+	if len(snap.History) != 1 {
+		t.Errorf("expected 1 history entry, got %d", len(snap.History))
+	}
+
+	// Transition to terminal and verify flags flip.
+	if err := loop.stateMachine.Transition(StateCompleted, "done", nil); err != nil {
+		t.Fatalf("transition to Completed failed: %v", err)
+	}
+	snap = loop.GetStateSnapshot()
+	if snap.CurrentState != "completed" {
+		t.Errorf("after transition current_state = %q, want completed", snap.CurrentState)
+	}
+	if !snap.IsTerminal {
+		t.Error("completed should be terminal")
+	}
+	if snap.IsActive {
+		t.Error("completed should not be active")
+	}
+	if len(snap.History) != 2 {
+		t.Errorf("expected 2 history entries, got %d", len(snap.History))
+	}
+
+	// Snapshot must serialize to JSON without error (the HTTP endpoint path).
+	data, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatalf("marshal snapshot failed: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("marshaled snapshot should be non-empty")
 	}
 }

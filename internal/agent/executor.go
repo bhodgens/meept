@@ -66,6 +66,18 @@ var toolProfiles = map[string]ToolConcurrencyProfile{
 	"git_commit":    ProfileExclusive,
 }
 
+// maxAdaptiveLimit is the ceiling for any profile's limit after runtime
+// adjustment via AdjustLimits.
+const maxAdaptiveLimit = 20
+
+// ExecutionMetrics captures runtime statistics for adaptive parallelism tuning.
+type ExecutionMetrics struct {
+	AvgLatency      time.Duration `json:"avg_latency"`
+	ErrorRate       float64       `json:"error_rate"`
+	ActiveGoroutines int          `json:"active_goroutines"`
+	Throughput      float64       `json:"throughput"`
+}
+
 // AdaptiveParallelismLimiter limits concurrency per ToolConcurrencyProfile.
 // Each profile has its own semaphore channel; tools within the same profile
 // share that profile's slot pool.
@@ -73,6 +85,7 @@ type AdaptiveParallelismLimiter struct {
 	mu     sync.Mutex
 	slots  map[ToolConcurrencyProfile]chan struct{}
 	limits map[ToolConcurrencyProfile]int
+	logger *slog.Logger
 }
 
 // NewAdaptiveParallelismLimiter creates a limiter where baseParallelism is the
@@ -159,6 +172,76 @@ func (l *AdaptiveParallelismLimiter) slotChannel(profile ToolConcurrencyProfile)
 		l.limits[profile] = 1
 	}
 	return ch
+}
+
+// SetLogger sets the logger used for recording limit adjustments.
+// Nil is ignored per the CLAUDE.md setter-nil-guard convention.
+func (l *AdaptiveParallelismLimiter) SetLogger(logger *slog.Logger) {
+	if logger != nil {
+		l.logger = logger
+	}
+}
+
+// AdjustLimits tunes the IO-bound and CPU-bound concurrency limits based on
+// runtime execution metrics. The adjustment replaces the semaphore channel
+// pointer under the write lock so that the change only affects NEW Acquire
+// calls; goroutines already holding slots on the old channel are unaffected.
+// Old channels are garbage-collected once all holders drain.
+//
+// Rules:
+//   - High error rate (> 0.5): reduce ioBoundLimit and cpuBoundLimit by 1 (floor 1).
+//   - Healthy system (error rate < 0.05 AND avg latency < 500ms): increase
+//     ioBoundLimit by 1 (cap at maxAdaptiveLimit).
+//   - ProfileStateful and ProfileExclusive are never adjusted (always limit 1).
+func (l *AdaptiveParallelismLimiter) AdjustLimits(metrics ExecutionMetrics) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if metrics.ErrorRate > 0.5 {
+		l.shrinkLimit(ProfileIOBound)
+		l.shrinkLimit(ProfileCPUBound)
+		if l.logger != nil {
+			l.logger.Debug("adjustlimits: reduced concurrency due to high error rate",
+				"error_rate", metrics.ErrorRate,
+				"io_bound_limit", l.limits[ProfileIOBound],
+				"cpu_bound_limit", l.limits[ProfileCPUBound])
+		}
+		return
+	}
+
+	if metrics.ErrorRate < 0.05 && metrics.AvgLatency < 500*time.Millisecond {
+		l.growLimit(ProfileIOBound)
+		if l.logger != nil {
+			l.logger.Debug("adjustlimits: increased io-bound concurrency due to healthy metrics",
+				"error_rate", metrics.ErrorRate,
+				"avg_latency_ms", metrics.AvgLatency.Milliseconds(),
+				"io_bound_limit", l.limits[ProfileIOBound])
+		}
+	}
+}
+
+// shrinkLimit decrements the profile's limit by 1 (floor 1) and rebuilds the
+// semaphore channel. Caller must hold l.mu.
+func (l *AdaptiveParallelismLimiter) shrinkLimit(profile ToolConcurrencyProfile) {
+	current := l.limits[profile]
+	if current <= 1 {
+		return // already at floor
+	}
+	newLimit := current - 1
+	l.limits[profile] = newLimit
+	l.slots[profile] = make(chan struct{}, newLimit)
+}
+
+// growLimit increments the profile's limit by 1 (cap maxAdaptiveLimit) and
+// rebuilds the semaphore channel. Caller must hold l.mu.
+func (l *AdaptiveParallelismLimiter) growLimit(profile ToolConcurrencyProfile) {
+	current := l.limits[profile]
+	if current >= maxAdaptiveLimit {
+		return // already at ceiling
+	}
+	newLimit := current + 1
+	l.limits[profile] = newLimit
+	l.slots[profile] = make(chan struct{}, newLimit)
 }
 
 // ToolActionMap maps tool names to permission action categories.
@@ -731,6 +814,56 @@ func (e *Executor) SetAgentID(id string) {
 	e.mu.Unlock()
 }
 
+// SetParallelismConfig adjusts the adaptive parallelism limiter from config.
+// baseParallelism sets the IO-bound limit (and derives CPU-bound as base/2
+// when no explicit cpu_bound profile is given). Profiles map keys: "io_bound",
+// "cpu_bound", "stateful", "exclusive". Nil-guarded per CLAUDE.md.
+func (e *Executor) SetParallelismConfig(baseParallelism int, profiles map[string]int) {
+	if e == nil || e.parallelismLimiter == nil || baseParallelism <= 0 {
+		return
+	}
+
+	// Build the resize map from profile name strings to ToolConcurrencyProfile.
+	resizeMap := make(map[ToolConcurrencyProfile]int, 4)
+
+	// Apply explicit profile values.
+	for name, parallelism := range profiles {
+		if parallelism < 1 {
+			parallelism = 1
+		}
+		switch name {
+		case "io_bound":
+			resizeMap[ProfileIOBound] = parallelism
+		case "cpu_bound":
+			resizeMap[ProfileCPUBound] = parallelism
+		case "stateful":
+			resizeMap[ProfileStateful] = parallelism
+		case "exclusive":
+			resizeMap[ProfileExclusive] = parallelism
+		}
+	}
+
+	// If io_bound wasn't explicitly set, use baseParallelism.
+	if _, ok := resizeMap[ProfileIOBound]; !ok {
+		resizeMap[ProfileIOBound] = baseParallelism
+	}
+	// If cpu_bound wasn't explicitly set, derive from base.
+	if _, ok := resizeMap[ProfileCPUBound]; !ok {
+		cpuLimit := baseParallelism / 2
+		if cpuLimit < 1 {
+			cpuLimit = 1
+		}
+		resizeMap[ProfileCPUBound] = cpuLimit
+	}
+
+	e.mu.Lock()
+	e.parallelism = baseParallelism
+	limiter := e.parallelismLimiter
+	e.mu.Unlock()
+
+	limiter.Resize(resizeMap)
+}
+
 // Execute runs a single tool call with security checks.
 func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *ExecutionResult {
 	toolName := toolCall.Function.Name
@@ -1171,10 +1304,12 @@ func (e *Executor) shouldTerminateEarly(results []*ExecutionResult) bool {
 }
 
 // isCriticalError returns true for errors that should halt execution of
-// subsequent dependency groups.
+// subsequent dependency groups. The check is case-insensitive so that wrapped
+// errors with non-standard casing (e.g. "Permission Denied") are still caught.
 func (e *Executor) isCriticalError(err string) bool {
-	return strings.Contains(err, "permission denied") ||
-		strings.Contains(err, "authentication failed")
+	lower := strings.ToLower(err)
+	return strings.Contains(lower, "permission denied") ||
+		strings.Contains(lower, "authentication failed")
 }
 
 // ExecuteSequential runs tool calls sequentially (no parallelism).
@@ -1514,6 +1649,29 @@ func (r *FilteredToolRegistry) GetDefinitions() []llm.ToolDefinition {
 		}
 	}
 	return filtered
+}
+
+// Resize adjusts per-profile concurrency limits in bulk. Only profiles present
+// in the limits map are changed; omitted profiles keep their current limits.
+// The semaphore channels are rebuilt under lock so that only NEW Acquire calls
+// are affected; goroutines already holding slots on old channels are unaffected.
+// Values are clamped to [1, maxAdaptiveLimit].
+func (l *AdaptiveParallelismLimiter) Resize(limits map[ToolConcurrencyProfile]int) {
+	if l == nil || len(limits) == 0 {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for profile, newLimit := range limits {
+		if newLimit < 1 {
+			newLimit = 1
+		}
+		if newLimit > maxAdaptiveLimit {
+			newLimit = maxAdaptiveLimit
+		}
+		l.limits[profile] = newLimit
+		l.slots[profile] = make(chan struct{}, newLimit)
+	}
 }
 
 // FilterToolsForSkill creates a filtered tool registry based on a skill's allowed-tools.

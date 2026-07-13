@@ -50,6 +50,11 @@ type Orchestrator struct {
 	artifacts         *artifactStore
 	phaseSpecOverride map[string]*PlanPhaseSpec // test override for phase specs
 
+	// onPhaseTransition is invoked (if non-nil) when a task transitions between
+	// plan phases. Wired by the daemon layer to advance per-loop budget
+	// hierarchies and emit observability events. See startNextPhase.
+	onPhaseTransition func(taskID, fromPhase, toPhase string)
+
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 }
@@ -78,6 +83,15 @@ type OrchestratorDeps struct {
 func (o *Orchestrator) SetRepoMapGenerator(gen *repomap.RepoMapGenerator) {
 	if gen != nil {
 		o.repoMapGen = gen
+	}
+}
+
+// SetPhaseTransitionHook wires a callback invoked on plan phase transitions.
+// Used by the daemon to advance budget hierarchies on active AgentLoops.
+// Nil-guarded per CLAUDE.md setter convention.
+func (o *Orchestrator) SetPhaseTransitionHook(fn func(taskID, fromPhase, toPhase string)) {
+	if fn != nil {
+		o.onPhaseTransition = fn
 	}
 }
 

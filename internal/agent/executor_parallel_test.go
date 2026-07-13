@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"log/slog"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -301,5 +302,155 @@ func TestWithExecutorParallelismLimiter(t *testing.T) {
 	executor2 := NewExecutor(nil, nil, WithExecutorParallelismLimiter(nil))
 	if executor2.parallelismLimiter == nil {
 		t.Error("expected default parallelismLimiter to remain when nil passed")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AdjustLimits (runtime-adaptive parallelism tuning) tests
+// ---------------------------------------------------------------------------
+
+func TestAdaptiveParallelismLimiter_AdjustLimits(t *testing.T) {
+	t.Run("high error rate reduces io_bound and cpu_bound", func(t *testing.T) {
+		limiter := NewAdaptiveParallelismLimiter(8) // io=8, cpu=4
+
+		limiter.AdjustLimits(ExecutionMetrics{
+			ErrorRate: 0.6,
+		})
+
+		if got := limiter.Limit(ProfileIOBound); got != 7 {
+			t.Errorf("io_bound limit after high-error AdjustLimits = %d, want 7", got)
+		}
+		if got := limiter.Limit(ProfileCPUBound); got != 3 {
+			t.Errorf("cpu_bound limit after high-error AdjustLimits = %d, want 3", got)
+		}
+		// Stateful and exclusive are never adjusted.
+		if got := limiter.Limit(ProfileStateful); got != 1 {
+			t.Errorf("stateful limit = %d, want 1 (never adjusted)", got)
+		}
+		if got := limiter.Limit(ProfileExclusive); got != 1 {
+			t.Errorf("exclusive limit = %d, want 1 (never adjusted)", got)
+		}
+	})
+
+	t.Run("low error rate and low latency increases io_bound", func(t *testing.T) {
+		limiter := NewAdaptiveParallelismLimiter(4) // io=4
+
+		limiter.AdjustLimits(ExecutionMetrics{
+			ErrorRate:  0.01,
+			AvgLatency: 100 * time.Millisecond,
+		})
+
+		if got := limiter.Limit(ProfileIOBound); got != 5 {
+			t.Errorf("io_bound limit after healthy AdjustLimits = %d, want 5", got)
+		}
+	})
+
+	t.Run("floor of 1 enforced", func(t *testing.T) {
+		limiter := NewAdaptiveParallelismLimiter(1) // io=1, cpu=1
+
+		// Repeated high-error adjustments should not go below 1.
+		for i := 0; i < 5; i++ {
+			limiter.AdjustLimits(ExecutionMetrics{ErrorRate: 0.9})
+		}
+
+		if got := limiter.Limit(ProfileIOBound); got != 1 {
+			t.Errorf("io_bound limit after repeated shrinkage = %d, want 1 (floor)", got)
+		}
+		if got := limiter.Limit(ProfileCPUBound); got != 1 {
+			t.Errorf("cpu_bound limit after repeated shrinkage = %d, want 1 (floor)", got)
+		}
+	})
+
+	t.Run("cap at maxAdaptiveLimit enforced", func(t *testing.T) {
+		// Use a limiter whose io-bound is already at the cap.
+		limiter := NewAdaptiveParallelismLimiter(maxAdaptiveLimit)
+
+		// Healthy metrics should not increase beyond cap.
+		for i := 0; i < 5; i++ {
+			limiter.AdjustLimits(ExecutionMetrics{
+				ErrorRate:  0.0,
+				AvgLatency: 10 * time.Millisecond,
+			})
+		}
+
+		if got := limiter.Limit(ProfileIOBound); got != maxAdaptiveLimit {
+			t.Errorf("io_bound limit after repeated growth = %d, want %d (cap)", got, maxAdaptiveLimit)
+		}
+	})
+
+	t.Run("moderate error rate does not adjust", func(t *testing.T) {
+		limiter := NewAdaptiveParallelismLimiter(4) // io=4, cpu=2
+
+		limiter.AdjustLimits(ExecutionMetrics{
+			ErrorRate:  0.2,
+			AvgLatency: 100 * time.Millisecond,
+		})
+
+		if got := limiter.Limit(ProfileIOBound); got != 4 {
+			t.Errorf("io_bound limit should be unchanged = %d, want 4", got)
+		}
+		if got := limiter.Limit(ProfileCPUBound); got != 2 {
+			t.Errorf("cpu_bound limit should be unchanged = %d, want 2", got)
+		}
+	})
+
+	t.Run("high error rate but high latency does not grow", func(t *testing.T) {
+		limiter := NewAdaptiveParallelismLimiter(4)
+
+		limiter.AdjustLimits(ExecutionMetrics{
+			ErrorRate:  0.01,
+			AvgLatency: 2 * time.Second, // too slow
+		})
+
+		if got := limiter.Limit(ProfileIOBound); got != 4 {
+			t.Errorf("io_bound limit should not grow with high latency = %d, want 4", got)
+		}
+	})
+
+	t.Run("adjust then acquire works with new limit", func(t *testing.T) {
+		limiter := NewAdaptiveParallelismLimiter(4) // io=4
+
+		// Grow to 5.
+		limiter.AdjustLimits(ExecutionMetrics{
+			ErrorRate:  0.0,
+			AvgLatency: 50 * time.Millisecond,
+		})
+
+		if got := limiter.Limit(ProfileIOBound); got != 5 {
+			t.Fatalf("io_bound limit = %d, want 5", got)
+		}
+
+		// Acquire 5 slots without blocking.
+		for i := 0; i < 5; i++ {
+			if err := limiter.Acquire(context.Background(), ProfileIOBound); err != nil {
+				t.Fatalf("Acquire[%d] failed: %v", i, err)
+			}
+		}
+
+		// 6th should block.
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		if err := limiter.Acquire(ctx, ProfileIOBound); err == nil {
+			t.Error("6th Acquire should have timed out (limit=5)")
+		}
+
+		// Release all.
+		for i := 0; i < 5; i++ {
+			limiter.Release(ProfileIOBound)
+		}
+	})
+}
+
+func TestAdaptiveParallelismLimiter_SetLogger(t *testing.T) {
+	limiter := NewAdaptiveParallelismLimiter(4)
+
+	// Nil should be ignored (no panic).
+	limiter.SetLogger(nil)
+
+	// Non-nil should be set.
+	l := slog.Default()
+	limiter.SetLogger(l)
+	if limiter.logger != l {
+		t.Error("expected logger to be set")
 	}
 }

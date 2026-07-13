@@ -303,6 +303,7 @@ type BudgetHierarchy struct {
 	taskBudget   *BudgetAllocation
 	phaseBudgets map[string]*BudgetAllocation
 	turnBudget   *BudgetAllocation
+	currentPhase string // ID of the currently-selected phase
 	logger       *slog.Logger
 }
 
@@ -325,15 +326,43 @@ func NewBudgetHierarchy(taskBudget int, phases []string, phaseBudgets []int) *Bu
 		WithBorrowing(true)
 
 	// Create phase budgets
+	// Compute auto-distribution correctly: sum explicitly-allocated phases,
+	// then split the remaining non-reserved pool among auto-allocated phases.
+	reserved := taskBudget / 10
+	nonReservedPool := taskBudget - reserved
+	explicitSum := 0
+	autoCount := 0
+	for i, phaseID := range phases {
+		budget := 0
+		if i < len(phaseBudgets) {
+			budget = phaseBudgets[i]
+		}
+		if budget > 0 {
+			explicitSum += budget
+		} else {
+			autoCount++
+		}
+		_ = phaseID
+	}
+	remaining := nonReservedPool - explicitSum
+	if remaining < 0 {
+		if h.logger != nil {
+			h.logger.Warn("phase budgets exceed task budget",
+				"task_budget", taskBudget,
+				"explicit_sum", explicitSum,
+				"reserved", reserved)
+		}
+		remaining = 0
+	}
+
 	for i, phaseID := range phases {
 		budget := 0
 		if i < len(phaseBudgets) {
 			budget = phaseBudgets[i]
 		}
 		if budget <= 0 {
-			// Distribute remaining budget evenly across all phases
-			if len(phases) > 0 {
-				budget = (taskBudget - taskBudget/10) / len(phases)
+			if autoCount > 0 {
+				budget = remaining / autoCount
 			}
 		}
 
@@ -364,6 +393,7 @@ func (h *BudgetHierarchy) SelectPhaseBudget(phaseID string) error {
 	turnBudget := phase.Available() / 10
 	h.turnBudget = NewBudgetAllocation("turn", BudgetLevelTurn, turnBudget)
 	phase.AddChild(h.turnBudget)
+	h.currentPhase = phaseID
 
 	return nil
 }
@@ -379,12 +409,19 @@ func (h *BudgetHierarchy) GetTurnBudget() int {
 	return h.turnBudget.Available()
 }
 
-// RecordUsage records token usage at the turn level.
-// Logs a warning if the turn budget becomes exhausted.
+// RecordUsage records token usage at all three levels of the hierarchy:
+// turn, the currently-selected phase, and the task root. Each level has its
+// own totalBudget pool, so the same tokens are independently tracked at each
+// level — this is the correct semantic for hierarchical budgets (a turn
+// consumes from its turn allocation AND its parent phase AND the task).
+//
+// If the phase allocation fails because the phase is exhausted, and the phase
+// has borrowing enabled, auto-borrow from a sibling and retry.
 func (h *BudgetHierarchy) RecordUsage(tokens int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	// 1. Record at turn level.
 	if h.turnBudget != nil {
 		h.turnBudget.Allocate(tokens)
 
@@ -397,6 +434,78 @@ func (h *BudgetHierarchy) RecordUsage(tokens int) {
 			}
 		}
 	}
+
+	// 2. Record at phase level.
+	if h.currentPhase != "" {
+		phase, ok := h.phaseBudgets[h.currentPhase]
+		if ok {
+			if !phase.Allocate(tokens) && phase.allowBorrowing {
+				// Phase exhausted and borrowing enabled — auto-borrow and retry.
+				if h.borrowForPhaseLocked(h.currentPhase, tokens) {
+					if h.logger != nil {
+						h.logger.Info("auto-borrow succeeded for phase",
+							"phase", h.currentPhase,
+							"tokens", tokens)
+					}
+					phase.Allocate(tokens)
+				}
+			}
+		}
+	}
+
+	// 3. Record at task level.
+	if h.taskBudget != nil {
+		h.taskBudget.Allocate(tokens)
+	}
+}
+
+// AdvancePhase transitions from the current phase to a new phase. If
+// carryover is enabled on the current phase, unused budget is carried over to
+// the new phase before selecting it. Returns an error if the new phase does
+// not exist or if carryover fails.
+func (h *BudgetHierarchy) AdvancePhase(newPhaseID string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// Carry over unused budget from current phase if applicable.
+	if h.currentPhase != "" && h.currentPhase != newPhaseID {
+		fromPhase, ok := h.phaseBudgets[h.currentPhase]
+		if ok && fromPhase.allowCarryover {
+			if _, ok := h.phaseBudgets[newPhaseID]; !ok {
+				return fmt.Errorf("destination phase %s not found", newPhaseID)
+			}
+			unused := fromPhase.Available()
+			if unused > 0 {
+				toPhase := h.phaseBudgets[newPhaseID]
+				toPhase.mu.Lock()
+				toPhase.totalBudget += unused
+				toPhase.mu.Unlock()
+
+				fromPhase.mu.Lock()
+				fromPhase.usedBudget = fromPhase.totalBudget
+				fromPhase.mu.Unlock()
+
+				if h.logger != nil {
+					h.logger.Info("budget carryover on phase advance",
+						"from", h.currentPhase,
+						"to", newPhaseID,
+						"amount", unused)
+				}
+			}
+		}
+	}
+
+	// Select the new phase (inline to avoid re-locking since we hold h.mu).
+	phase, ok := h.phaseBudgets[newPhaseID]
+	if !ok {
+		return fmt.Errorf("phase %s not found", newPhaseID)
+	}
+	turnBudget := phase.Available() / 10
+	h.turnBudget = NewBudgetAllocation("turn", BudgetLevelTurn, turnBudget)
+	phase.AddChild(h.turnBudget)
+	h.currentPhase = newPhaseID
+
+	return nil
 }
 
 // GetStatus returns a summary of budget status at all levels.
@@ -477,6 +586,16 @@ func (h *BudgetHierarchy) BorrowForPhase(phaseID string, tokens int) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	return h.borrowForPhaseLocked(phaseID, tokens)
+}
+
+// borrowForPhaseLocked is the lock-held implementation of BorrowForPhase.
+// Caller MUST hold h.mu.
+func (h *BudgetHierarchy) borrowForPhaseLocked(phaseID string, tokens int) bool {
+	if tokens <= 0 {
+		return false
+	}
+
 	phase, ok := h.phaseBudgets[phaseID]
 	if !ok {
 		return false
@@ -522,17 +641,45 @@ func (h *BudgetHierarchy) BorrowForPhase(phaseID string, tokens int) bool {
 	return true
 }
 
+// budgetSnapshot captures a consistent point-in-time view of a BudgetAllocation.
+type budgetSnapshot struct {
+	totalBudget      int
+	usedBudget       int
+	reservedBudget   int
+	warningThreshold float64
+}
+
+// snapshot returns a consistent snapshot of the allocation's budget fields
+// under a read lock. Callers can use this to avoid reading individual fields
+// without synchronization.
+func (a *BudgetAllocation) snapshot() budgetSnapshot {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return budgetSnapshot{
+		totalBudget:      a.totalBudget,
+		usedBudget:       a.usedBudget,
+		reservedBudget:   a.reservedBudget,
+		warningThreshold: a.warningThreshold,
+	}
+}
+
 // budgetToStatus converts a BudgetAllocation to an exported BudgetSummary.
 func (h *BudgetHierarchy) budgetToStatus(b *BudgetAllocation) BudgetSummary {
 	if b == nil {
 		return BudgetSummary{}
 	}
+	s := b.snapshot()
+	available := s.totalBudget - s.usedBudget - s.reservedBudget
+	var usageRatio float64
+	if s.totalBudget > 0 {
+		usageRatio = float64(s.usedBudget) / float64(s.totalBudget)
+	}
 	return BudgetSummary{
-		Total:       b.totalBudget,
-		Used:        b.Used(),
-		Available:   b.Available(),
-		UsageRatio:  b.UsageRatio(),
-		IsExhausted: b.IsExhausted(),
-		IsWarning:   b.IsWarningZone(),
+		Total:       s.totalBudget,
+		Used:        s.usedBudget,
+		Available:   available,
+		UsageRatio:  usageRatio,
+		IsExhausted: available <= 0,
+		IsWarning:   usageRatio >= s.warningThreshold,
 	}
 }

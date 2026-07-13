@@ -74,6 +74,16 @@ func (o *Orchestrator) startNextPhase(ctx context.Context, taskID, completedPhas
 		return fmt.Errorf("update phase steps: %w", err)
 	}
 
+	// Notify phase-transition subscribers (e.g., hierarchical budget advancement
+	// on active AgentLoops). Best-effort: panic-safe so a buggy subscriber never
+	// breaks a phase transition.
+	if o.onPhaseTransition != nil {
+		func() {
+			defer func() { _ = recover() }()
+			o.onPhaseTransition(taskID, completedPhaseName, nextPhase.Name)
+		}()
+	}
+
 	o.logger.Info("Phase transition",
 		"task_id", taskID,
 		"from", completedPhaseName,

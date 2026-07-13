@@ -282,6 +282,38 @@ func TestIsCriticalError(t *testing.T) {
 	}
 }
 
+func TestIsCriticalError_CaseInsensitive(t *testing.T) {
+	executor := &Executor{}
+
+	tests := []struct {
+		err  string
+		want bool
+	}{
+		// Mixed case variations of "permission denied"
+		{"Permission Denied", true},
+		{"PERMISSION DENIED", true},
+		{"Permission denied: access restricted", true},
+		{"Error: Permission Denied by policy", true},
+		// Mixed case variations of "authentication failed"
+		{"Authentication Failed", true},
+		{"AUTHENTICATION FAILED", true},
+		{"Authentication failed: bad token", true},
+		{"wrapped: Authentication Failed (retry)", true},
+		// Non-critical errors still return false
+		{"Permission scope mismatch", false},
+		{"Authentication timeout (not failed)", false},
+		{"network timeout", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		got := executor.isCriticalError(tt.err)
+		if got != tt.want {
+			t.Errorf("isCriticalError(%q) = %v, want %v", tt.err, got, tt.want)
+		}
+	}
+}
+
 func TestShouldTerminateEarly(t *testing.T) {
 	executor := &Executor{}
 
