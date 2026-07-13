@@ -200,6 +200,13 @@ func (h *ProjectHandler) handleSet(ctx context.Context, params json.RawMessage) 
 
 	var p *project.Project
 
+	// Deactivate any previously active project before resolving/activating
+	// the new one. This avoids CreateOrResolve creating a new project with
+	// Status="active" only to have DeactivateActive immediately deactivate it.
+	if err := pm.DeactivateActive(ctx); err != nil {
+		h.logger.Warn("failed to deactivate previous active project", "error", err)
+	}
+
 	if req.Path != "" {
 		// Use CreateOrResolve which handles both shorthand names and
 		// absolute paths, including sidecar-based adoption.
@@ -217,12 +224,9 @@ func (h *ProjectHandler) handleSet(ctx context.Context, params json.RawMessage) 
 		}
 	}
 
-	// Deactivate any previously active project before activating this one.
-	if err := pm.DeactivateActive(ctx); err != nil {
-		h.logger.Warn("failed to deactivate previous active project", "error", err)
-	}
-
-	// Set this project as active.
+	// Set this project as active (CreateOrResolve may have already set it,
+	// but for existing projects returned from Get, we need to re-activate
+	// after DeactivateActive above).
 	p.Status = "active"
 	if err := pm.SetStatus(ctx, p.ID, "active"); err != nil {
 		h.logger.Warn("failed to set project active", "error", err)
