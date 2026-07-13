@@ -1182,6 +1182,26 @@ class SdkApiClient {
         'setProject: unexpected envelope shape: $envelope');
   }
 
+  /// Calls `project.rename` via the bus/call RPC bridge.
+  Future<Map<String, dynamic>> renameProject({
+    required String projectId,
+    required String newName,
+  }) async {
+    final envelope = await _post('/api/v1/bus/call', body: {
+      'method': 'project.rename',
+      'params': {
+        'id': projectId,
+        'new_name': newName,
+      },
+    });
+    final inner = envelope['result'];
+    if (inner is Map<String, dynamic>) return inner;
+    if (envelope.containsKey('status') || envelope.containsKey('name')) {
+      return envelope;
+    }
+    throw StateError('renameProject: unexpected envelope shape: $envelope');
+  }
+
   /// Calls `project.readdir` via the bus/call RPC bridge.  Returns
   /// recents (top N), filesystem matches (under the expanded prefix), and
   /// discovered git roots — for `/project ` typeahead popups.

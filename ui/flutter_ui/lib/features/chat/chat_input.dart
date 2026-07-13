@@ -648,6 +648,57 @@ class _ChatInputState extends ConsumerState<ChatInput>
     }
   }
 
+  /// Handle `/project rename <new-name>`: renames the current project's
+  /// directory via the daemon's project.rename RPC.
+  Future<void> _handleProjectRenameCommand(String newName) async {
+    final session = ref.read(activeSessionProvider);
+    final sessionId = session?.id ?? widget.sessionId;
+    if (sessionId.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('no active session'),
+            backgroundColor: CyberpunkColors.redAlert,
+          ),
+        );
+      }
+      return;
+    }
+
+    final projectId = ref.read(currentProjectProvider).id;
+    if (projectId.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('no active project to rename'),
+            backgroundColor: CyberpunkColors.redAlert,
+          ),
+        );
+      }
+      return;
+    }
+
+    try {
+      final sdk = ref.read(sdkClientProvider);
+      await sdk.renameProject(projectId: projectId, newName: newName);
+      await ref.read(currentProjectProvider.notifier).refresh();
+      if (mounted) {
+        showStatusMessage(ref, 'project renamed to: $newName');
+        _resetInputState();
+      }
+    } catch (e) {
+      debugPrint('[chat_input] /project rename failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('project rename failed: $e'),
+            backgroundColor: CyberpunkColors.redAlert,
+          ),
+        );
+      }
+    }
+  }
+
   /// Try to handle a slash command locally.
   ///
   /// Returns true if the command was consumed and should NOT be sent
@@ -704,6 +755,14 @@ class _ChatInputState extends ConsumerState<ChatInput>
           unawaited(_loadProjectPaths());
           _focusNode.requestFocus();
           return true;
+        }
+        // Check for "rename <new-name>" subcommand.
+        if (arg.startsWith('rename ')) {
+          final newName = arg.substring('rename '.length).trim();
+          if (newName.isNotEmpty) {
+            unawaited(_handleProjectRenameCommand(newName));
+            return true;
+          }
         }
         // Fire-and-forget; _handleProjectSetCommand manages its own error UI.
         unawaited(_handleProjectSetCommand(arg));
