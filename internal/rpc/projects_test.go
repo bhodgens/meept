@@ -103,3 +103,35 @@ func TestHandleSet_DeactivatesPreviousActive(t *testing.T) {
 		t.Fatal("expected an active project")
 	}
 }
+
+func TestHandleRename(t *testing.T) {
+	h, pm := newTestProjectHandler(t)
+	ctx := context.Background()
+
+	// Create a project via shorthand.
+	p, err := pm.CreateOrResolve(ctx, "oldname")
+	if err != nil {
+		t.Fatalf("CreateOrResolve: %v", err)
+	}
+
+	params, _ := json.Marshal(map[string]string{
+		"id":       p.ID,
+		"new_name": "newname",
+	})
+
+	result, err := h.handleRename(ctx, params)
+	if err != nil {
+		t.Fatalf("handleRename: %v", err)
+	}
+
+	m := result.(map[string]any)
+	name, _ := m["name"].(string)
+	if name != "newname" {
+		t.Errorf("name = %q, want %q", name, "newname")
+	}
+	path, _ := m["local_path"].(string)
+	expectedPath := filepath.Join(pm.Config().BaseDir, "newname")
+	if path != expectedPath {
+		t.Errorf("local_path = %q, want %q", path, expectedPath)
+	}
+}

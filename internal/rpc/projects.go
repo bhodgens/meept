@@ -76,6 +76,7 @@ func (h *ProjectHandler) RegisterProjectMethods(server *Server) {
 	server.RegisterHandler("project.status", h.handleStatus)
 	server.RegisterHandler("project.detect", h.handleDetect)
 	server.RegisterHandler("project.readdir", h.handleReadDir)
+	server.RegisterHandler("project.rename", h.handleRename)
 }
 
 // handleList handles project.list RPC calls.
@@ -418,6 +419,37 @@ func findGitRoot(path string) (string, error) {
 		}
 		path = parent
 	}
+}
+
+// handleRename handles project.rename RPC calls.
+func (h *ProjectHandler) handleRename(ctx context.Context, params json.RawMessage) (any, error) {
+	pm, err := h.pmOrErr()
+	if err != nil {
+		return nil, err
+	}
+
+	var req struct {
+		ID      string `json:"id"`
+		NewName string `json:"new_name"`
+	}
+	if err := json.Unmarshal(params, &req); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	if req.ID == "" || req.NewName == "" {
+		return nil, fmt.Errorf("id and new_name are required")
+	}
+
+	p, err := pm.Rename(ctx, req.ID, req.NewName)
+	if err != nil {
+		return nil, fmt.Errorf("rename project: %w", err)
+	}
+
+	return map[string]any{
+		RPCKeyStatus: "renamed",
+		"id":         p.ID,
+		"name":       p.Name,
+		"local_path": p.LocalPath,
+	}, nil
 }
 
 // HandleReadDirForTest is an exported wrapper for handleReadDir used in integration tests.
