@@ -575,6 +575,7 @@ type AgentLoop struct {
 	// Metrics collection for analytics
 	taskCollector    *metrics.TaskCollector
 	responseAnalyzer *metrics.ResponseAnalyzer
+	retryMetrics     *RetryMetrics
 
 	// Compression pipeline for prompt compression (CCR-based)
 	compressionPipeline *compress.Pipeline
@@ -1282,6 +1283,28 @@ func (l *AgentLoop) SetResponseAnalyzer(ra *metrics.ResponseAnalyzer) {
 	}
 }
 
+// SetRetryMetrics sets the retry metrics collector after agent loop creation.
+// It also propagates the collector to the executor if one is already attached.
+// Nil-guarded per CLAUDE.md setter convention.
+func (l *AgentLoop) SetRetryMetrics(m *RetryMetrics) {
+	if m == nil {
+		return
+	}
+	l.retryMetrics = m
+	if l.executor != nil {
+		l.executor.SetRetryMetrics(m)
+	}
+}
+
+// RetryMetricsSnapshot returns a point-in-time copy of retry metrics.
+// Returns an empty snapshot if no collector is wired.
+func (l *AgentLoop) RetryMetricsSnapshot() RetryMetricsSnapshot {
+	if l.retryMetrics == nil {
+		return RetryMetricsSnapshot{}
+	}
+	return l.retryMetrics.Snapshot()
+}
+
 // WithCompressionPipeline sets the compression pipeline for prompt compression.
 // This enables CCR-based compression of tool results and messages.
 func WithCompressionPipeline(pipeline *compress.Pipeline) LoopOption {
@@ -1527,6 +1550,12 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 	// Initialize multi-turn budget tracker
 	// Default: 100,000 tokens total, 30,000 per turn, max 10 turns
 	loop.budgetTracker = NewTurnBudgetTracker(100000, 30000, 10)
+
+	// Initialize retry metrics collector and wire to executor.
+	loop.retryMetrics = NewRetryMetrics()
+	if loop.executor != nil {
+		loop.executor.SetRetryMetrics(loop.retryMetrics)
+	}
 
 	// Initialize hierarchical budget tracker (additive; old tracker still drives wrap-up).
 	loop.budgetHierarchy = NewBudgetHierarchy(
@@ -3442,6 +3471,18 @@ func (l *AgentLoop) attemptStateRecovery(err error) error {
 	}
 }
 
+// attachLLMBudget creates a RetryBudget sized to maxAttempts and attaches it
+// to the context via WithRetryBudget. This ensures nested operations (tool
+// calls, sub-requests) that consume via RunWithRetry share the same budget
+// as the LLM call path. If a budget is already attached, the existing one is
+// preserved.
+func attachLLMBudget(ctx context.Context, maxAttempts int) context.Context {
+	if GetRetryBudget(ctx) != nil {
+		return ctx // budget already attached by caller
+	}
+	return WithRetryBudget(ctx, NewRetryBudget(maxAttempts))
+}
+
 // chatWithFailover wraps LLM Chat calls with model rotation and backoff for rate limit handling.
 // When a rate limit error occurs:
 // 1. If there are more models in the alias, rotate to the next model and retry immediately.
@@ -3466,6 +3507,7 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 	llmCfg := LLMBackoffConfig()
 	maxAttempts := llmCfg.MaxAttempts
 	llmBackoff := NewBackoff(llmCfg)
+	ctx = attachLLMBudget(ctx, maxAttempts)
 
 	// Prepend WithTaskScope option if scope is set
 	l.mu.RLock()
@@ -3515,6 +3557,9 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 						"backoff", delay,
 						"attempt", attempt,
 					)
+					if l.retryMetrics != nil {
+						l.retryMetrics.RecordRetry("llm", err, delay)
+					}
 					select {
 					case <-time.After(delay):
 						continue
@@ -3666,6 +3711,10 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 				"backoff", waitTime,
 				"attempt", attempt,
 			)
+
+			if l.retryMetrics != nil {
+				l.retryMetrics.RecordRetry("llm", err, waitTime)
+			}
 
 			select {
 			case <-time.After(waitTime):

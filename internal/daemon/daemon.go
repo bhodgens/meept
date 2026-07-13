@@ -494,6 +494,11 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		respAnalyzer := metrics.NewResponseAnalyzer()
 		components.AgentLoop.SetResponseAnalyzer(respAnalyzer)
 		logger.Info("Response analyzer wired into agent loop")
+
+		// Wire retry metrics (shared between AgentLoop and Executor).
+		retryMetrics := agent.NewRetryMetrics()
+		components.AgentLoop.SetRetryMetrics(retryMetrics)
+		logger.Info("Retry metrics wired into agent loop")
 	}
 
 	// Wire agent state persister (Phase 5). When config enables persistence,
@@ -578,6 +583,35 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			"multiplier", override.Multiplier,
 			"jitter", override.Jitter,
 			"max_attempts", override.MaxAttempts)
+
+		// Apply per-operation backoff overrides.
+		for key, poc := range fullCfg.Agent.Retry.PerOperation {
+			pocOverride := agent.BackoffConfig{}
+			if poc.BaseDelay != "" {
+				if d, err := time.ParseDuration(poc.BaseDelay); err == nil {
+					pocOverride.BaseDelay = d
+				}
+			}
+			if poc.MaxDelay != "" {
+				if d, err := time.ParseDuration(poc.MaxDelay); err == nil {
+					pocOverride.MaxDelay = d
+				}
+			}
+			if poc.Multiplier > 0 {
+				pocOverride.Multiplier = poc.Multiplier
+			}
+			if poc.Jitter > 0 {
+				pocOverride.Jitter = poc.Jitter
+			}
+			if poc.Budget > 0 {
+				pocOverride.MaxAttempts = poc.Budget
+			}
+			agent.SetPerOperationBackoffOverride(key, pocOverride)
+			logger.Info("Agent per-operation backoff applied",
+				"operation", key,
+				"base_delay", pocOverride.BaseDelay,
+				"max_attempts", pocOverride.MaxAttempts)
+		}
 	}
 
 	// Create metrics collector with getter functions for actual values

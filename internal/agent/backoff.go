@@ -254,6 +254,11 @@ type BackoffConfig struct {
 // at startup via SetDefaultBackoffOverride.
 var defaultBackoffOverride atomic.Pointer[BackoffConfig]
 
+// perOperationOverrides holds config-driven backoff overrides keyed by
+// operation category ("llm", "tool_web", "tool_shell", "http"). The daemon
+// populates this from config.Agent.Retry.PerOperation.
+var perOperationOverrides sync.Map // map[string]BackoffConfig
+
 // SetDefaultBackoffOverride installs config-driven backoff defaults. When
 // non-nil, LLMBackoffConfig() and DefaultBackoffConfig() merge the override
 // over their hardcoded presets (override fields with non-zero values win).
@@ -268,28 +273,63 @@ func clearDefaultBackoffOverride() {
 	defaultBackoffOverride.Store(nil)
 }
 
-// mergeOverride applies non-zero fields from the override (if set) to a
-// preset config. Zero-value fields in the override are ignored so callers
-// can override only the fields they care about.
-func mergeOverride(preset BackoffConfig) BackoffConfig {
-	if ov := defaultBackoffOverride.Load(); ov != nil {
-		if ov.BaseDelay > 0 {
-			preset.BaseDelay = ov.BaseDelay
-		}
-		if ov.MaxDelay > 0 {
-			preset.MaxDelay = ov.MaxDelay
-		}
-		if ov.Multiplier > 0 {
-			preset.Multiplier = ov.Multiplier
-		}
-		if ov.Jitter > 0 {
-			preset.Jitter = ov.Jitter
-		}
-		if ov.MaxAttempts > 0 {
-			preset.MaxAttempts = ov.MaxAttempts
-		}
+// SetPerOperationBackoffOverride installs a config-driven backoff override
+// for a specific operation category. Preset functions (LLMBackoffConfig,
+// ToolBackoffConfig, HTTPHookBackoffConfig, and tool-profile lookups via
+// getRetryConfigForTool) consult this map first; the global override
+// applies as a fallback. Safe for concurrent use.
+func SetPerOperationBackoffOverride(key string, cfg BackoffConfig) {
+	perOperationOverrides.Store(key, cfg)
+}
+
+// getPerOperationOverride returns the override for a key, or nil if unset.
+func getPerOperationOverride(key string) *BackoffConfig {
+	if v, ok := perOperationOverrides.Load(key); ok {
+		c := v.(BackoffConfig)
+		return &c
 	}
-	return preset
+	return nil
+}
+
+// clearPerOperationOverrides is a test-only helper.
+func clearPerOperationOverrides() {
+	perOperationOverrides.Range(func(k, _ any) bool {
+		perOperationOverrides.Delete(k)
+		return true
+	})
+}
+
+// applyOverride applies non-zero fields from the override pointer (if non-nil)
+// to a base config. Zero-value fields in the override are ignored so callers
+// can override only the fields they care about. If ov is nil, base is returned
+// unchanged.
+func applyOverride(base BackoffConfig, ov *BackoffConfig) BackoffConfig {
+	if ov == nil {
+		return base
+	}
+	if ov.BaseDelay > 0 {
+		base.BaseDelay = ov.BaseDelay
+	}
+	if ov.MaxDelay > 0 {
+		base.MaxDelay = ov.MaxDelay
+	}
+	if ov.Multiplier > 0 {
+		base.Multiplier = ov.Multiplier
+	}
+	if ov.Jitter > 0 {
+		base.Jitter = ov.Jitter
+	}
+	if ov.MaxAttempts > 0 {
+		base.MaxAttempts = ov.MaxAttempts
+	}
+	return base
+}
+
+// mergeOverride applies the global override (if set) to a preset config.
+// Kept as a convenience wrapper around applyOverride for backward
+// compatibility.
+func mergeOverride(preset BackoffConfig) BackoffConfig {
+	return applyOverride(preset, defaultBackoffOverride.Load())
 }
 
 // DefaultBackoffConfig returns sensible defaults for general backoff.
@@ -328,16 +368,18 @@ func ConservativeBackoffConfig() BackoffConfig {
 }
 
 // LLMBackoffConfig returns a backoff profile tuned for LLM API calls.
-// When a config-driven override is installed via SetDefaultBackoffOverride,
-// non-zero fields from the override take precedence.
+// Resolution order: per-operation override for "llm" takes highest precedence,
+// then global override, then hardcoded preset.
 func LLMBackoffConfig() BackoffConfig {
-	return mergeOverride(BackoffConfig{
+	preset := BackoffConfig{
 		BaseDelay:   1 * time.Second,
 		MaxDelay:    30 * time.Second,
 		Multiplier:  2.0,
 		Jitter:      0.3,
 		MaxAttempts: 5,
-	})
+	}
+	merged := mergeOverride(preset) // apply global first
+	return applyOverride(merged, getPerOperationOverride("llm"))
 }
 
 // ToolBackoffConfig returns a backoff profile tuned for tool execution.
@@ -353,14 +395,16 @@ func ToolBackoffConfig() BackoffConfig {
 
 // HTTPHookBackoffConfig returns a backoff profile for HTTP hook requests.
 // More aggressive than default to support the retry_count pattern of HTTP hooks.
+// Resolution order: per-operation override for "http" → hardcoded preset.
 func HTTPHookBackoffConfig(count int) BackoffConfig {
-	return BackoffConfig{
+	preset := BackoffConfig{
 		BaseDelay:   500 * time.Millisecond,
 		MaxDelay:    10 * time.Second,
 		Multiplier:  2.0,
 		Jitter:      0.2,
 		MaxAttempts: count,
 	}
+	return applyOverride(preset, getPerOperationOverride("http"))
 }
 
 // Backoff implements exponential backoff with jitter.

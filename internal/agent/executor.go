@@ -706,6 +706,7 @@ type Executor struct {
 	bus                *bus.MessageBus // Optional: for publishing streaming progress events
 	depInferrer        *DependencyInferrer
 	parallelismLimiter *AdaptiveParallelismLimiter
+	retryMetrics       *RetryMetrics
 }
 
 // ExecutorOption is a functional option for configuring an Executor.
@@ -774,6 +775,16 @@ func WithExecutorParallelismLimiter(limiter *AdaptiveParallelismLimiter) Executo
 	}
 }
 
+// WithExecutorRetryMetrics sets the retry metrics collector for the executor.
+// If nil (or not provided), retry events are not recorded.
+func WithExecutorRetryMetrics(m *RetryMetrics) ExecutorOption {
+	return func(e *Executor) {
+		if m != nil {
+			e.retryMetrics = m
+		}
+	}
+}
+
 // NewExecutor creates a new tool executor.
 func NewExecutor(registry ToolRegistry, permChecker *security.PermissionChecker, opts ...ExecutorOption) *Executor {
 	e := &Executor{
@@ -800,6 +811,17 @@ func (e *Executor) SetRegistry(registry ToolRegistry) {
 	}
 	e.mu.Lock()
 	e.registry = registry
+	e.mu.Unlock()
+}
+
+// SetRetryMetrics sets the retry metrics collector after executor construction.
+// Nil-guarded per CLAUDE.md setter convention.
+func (e *Executor) SetRetryMetrics(m *RetryMetrics) {
+	if m == nil {
+		return
+	}
+	e.mu.Lock()
+	e.retryMetrics = m
 	e.mu.Unlock()
 }
 
@@ -1104,12 +1126,18 @@ func (e *Executor) executeToolWithRetry(ctx context.Context, tool tools.Tool, co
 
 		// Honor Retry-After hint if present, otherwise use backoff.
 		if retryAfter := GetRetryAfter(toolErr); retryAfter > 0 {
+			if e.retryMetrics != nil {
+				e.retryMetrics.RecordRetry("tool", toolErr, retryAfter)
+			}
 			select {
 			case <-ctx.Done():
 				return nil, lastErr
 			case <-time.After(retryAfter):
 			}
 		} else {
+			if e.retryMetrics != nil {
+				e.retryMetrics.RecordRetry("tool", toolErr, 0)
+			}
 			if !backoff.Sleep(ctx) {
 				// Context cancelled or max attempts exhausted.
 				return nil, lastErr
@@ -1121,26 +1149,30 @@ func (e *Executor) executeToolWithRetry(ctx context.Context, tool tools.Tool, co
 // getRetryConfigForTool returns the backoff configuration appropriate for the
 // given tool. Network tools get more retries with longer delays; shell tools
 // get fewer retries with shorter delays; all others use the default config.
+// Per-operation config overrides (from config.Agent.Retry.PerOperation) are
+// consulted for "tool_web" and "tool_shell" keys.
 func (e *Executor) getRetryConfigForTool(toolName string) BackoffConfig {
 	// Network tools: more retries, longer delays.
 	if toolName == "web_search" || toolName == "web_fetch" {
-		return BackoffConfig{
+		preset := BackoffConfig{
 			BaseDelay:   2 * time.Second,
 			MaxDelay:    30 * time.Second,
 			Multiplier:  2.0,
 			Jitter:      0.3,
 			MaxAttempts: 5,
 		}
+		return applyOverride(preset, getPerOperationOverride("tool_web"))
 	}
 	// Shell commands: fewer retries, shorter delays.
 	if toolName == "shell" {
-		return BackoffConfig{
+		preset := BackoffConfig{
 			BaseDelay:   1 * time.Second,
 			MaxDelay:    10 * time.Second,
 			Multiplier:  1.5,
 			Jitter:      0.2,
 			MaxAttempts: 2,
 		}
+		return applyOverride(preset, getPerOperationOverride("tool_shell"))
 	}
 	// Default.
 	return DefaultBackoffConfig()

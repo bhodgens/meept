@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -151,5 +152,173 @@ func TestSetDefaultBackoffOverride_Clear(t *testing.T) {
 	}
 	if cfg.MaxAttempts != 5 {
 		t.Errorf("after clear, MaxAttempts: got %d, want 5 (preset)", cfg.MaxAttempts)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Per-operation override tests
+// ---------------------------------------------------------------------------
+
+// TestPerOperationOverride_LLM verifies that an "llm" per-operation override
+// takes precedence over the hardcoded preset, and that clearing the override
+// restores the preset.
+func TestPerOperationOverride_LLM(t *testing.T) {
+	t.Cleanup(func() {
+		clearPerOperationOverrides()
+		clearDefaultBackoffOverride()
+	})
+
+	SetPerOperationBackoffOverride("llm", BackoffConfig{
+		BaseDelay: 7 * time.Second,
+	})
+
+	cfg := LLMBackoffConfig()
+	if cfg.BaseDelay != 7*time.Second {
+		t.Errorf("BaseDelay: got %v, want 7s", cfg.BaseDelay)
+	}
+	// Non-overridden fields should retain preset values.
+	if cfg.MaxAttempts != 5 {
+		t.Errorf("MaxAttempts: got %d, want 5 (preset)", cfg.MaxAttempts)
+	}
+
+	// Clear per-op overrides and verify fallback to preset.
+	clearPerOperationOverrides()
+	cfg = LLMBackoffConfig()
+	if cfg.BaseDelay != 1*time.Second {
+		t.Errorf("after clear, BaseDelay: got %v, want 1s (preset)", cfg.BaseDelay)
+	}
+}
+
+// TestPerOperationOverride_ToolWeb verifies that a "tool_web" per-operation
+// override is consumed by getRetryConfigForTool for web tools.
+func TestPerOperationOverride_ToolWeb(t *testing.T) {
+	t.Cleanup(func() {
+		clearPerOperationOverrides()
+		clearDefaultBackoffOverride()
+	})
+
+	SetPerOperationBackoffOverride("tool_web", BackoffConfig{
+		MaxAttempts: 9,
+	})
+
+	e := &Executor{}
+	cfg := e.getRetryConfigForTool("web_search")
+	if cfg.MaxAttempts != 9 {
+		t.Errorf("web_search MaxAttempts: got %d, want 9", cfg.MaxAttempts)
+	}
+
+	cfg = e.getRetryConfigForTool("web_fetch")
+	if cfg.MaxAttempts != 9 {
+		t.Errorf("web_fetch MaxAttempts: got %d, want 9", cfg.MaxAttempts)
+	}
+}
+
+// TestPerOperationOverride_GlobalFallback verifies that when no per-op
+// override is set, the global override still applies to LLMBackoffConfig.
+func TestPerOperationOverride_GlobalFallback(t *testing.T) {
+	t.Cleanup(func() {
+		clearPerOperationOverrides()
+		clearDefaultBackoffOverride()
+	})
+
+	SetDefaultBackoffOverride(BackoffConfig{
+		BaseDelay: 9 * time.Second,
+	})
+
+	cfg := LLMBackoffConfig()
+	if cfg.BaseDelay != 9*time.Second {
+		t.Errorf("BaseDelay: got %v, want 9s (global fallback)", cfg.BaseDelay)
+	}
+}
+
+// TestPerOperationOverride_PerOpWinsOverGlobal verifies that when both a
+// per-op override and a global override are set, the per-op override wins
+// for its operation category.
+func TestPerOperationOverride_PerOpWinsOverGlobal(t *testing.T) {
+	t.Cleanup(func() {
+		clearPerOperationOverrides()
+		clearDefaultBackoffOverride()
+	})
+
+	SetDefaultBackoffOverride(BackoffConfig{
+		BaseDelay: 9 * time.Second,
+	})
+	SetPerOperationBackoffOverride("llm", BackoffConfig{
+		BaseDelay: 7 * time.Second,
+	})
+
+	cfg := LLMBackoffConfig()
+	if cfg.BaseDelay != 7*time.Second {
+		t.Errorf("BaseDelay: got %v, want 7s (per-op wins)", cfg.BaseDelay)
+	}
+}
+
+// TestPerOperationOverride_NilGuard verifies that applyOverride with a nil
+// override pointer returns the preset unchanged.
+func TestPerOperationOverride_NilGuard(t *testing.T) {
+	preset := BackoffConfig{
+		BaseDelay:   1 * time.Second,
+		MaxDelay:    30 * time.Second,
+		Multiplier:  2.0,
+		Jitter:      0.3,
+		MaxAttempts: 5,
+	}
+	result := applyOverride(preset, nil)
+	if result != preset {
+		t.Errorf("applyOverride with nil should return preset unchanged: got %+v", result)
+	}
+}
+
+// TestPerOperationOverride_HTTP verifies that an "http" per-operation
+// override is consumed by HTTPHookBackoffConfig.
+func TestPerOperationOverride_HTTP(t *testing.T) {
+	t.Cleanup(func() {
+		clearPerOperationOverrides()
+		clearDefaultBackoffOverride()
+	})
+
+	SetPerOperationBackoffOverride("http", BackoffConfig{
+		BaseDelay: 3 * time.Second,
+	})
+
+	cfg := HTTPHookBackoffConfig(4)
+	if cfg.BaseDelay != 3*time.Second {
+		t.Errorf("HTTP BaseDelay: got %v, want 3s", cfg.BaseDelay)
+	}
+	// MaxAttempts should retain the passed count since override doesn't set it.
+	if cfg.MaxAttempts != 4 {
+		t.Errorf("HTTP MaxAttempts: got %d, want 4 (count param)", cfg.MaxAttempts)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// RetryBudget LLM path attachment test
+// ---------------------------------------------------------------------------
+
+// TestRetryBudget_LLMPathBudgetAttached verifies that attachLLMBudget attaches
+// a non-nil RetryBudget to the context, and that an already-attached budget is
+// preserved.
+func TestRetryBudget_LLMPathBudgetAttached(t *testing.T) {
+	// Fresh context has no budget.
+	ctx := context.Background()
+	if b := GetRetryBudget(ctx); b != nil {
+		t.Fatal("expected nil budget on fresh context")
+	}
+
+	// attachLLMBudget should attach a budget sized to maxAttempts.
+	ctx = attachLLMBudget(ctx, 5)
+	budget := GetRetryBudget(ctx)
+	if budget == nil {
+		t.Fatal("expected non-nil budget after attachLLMBudget")
+	}
+	if budget.Remaining() != 5 {
+		t.Errorf("budget.Remaining(): got %d, want 5", budget.Remaining())
+	}
+
+	// Calling attachLLMBudget again should NOT replace the existing budget.
+	existing := GetRetryBudget(ctx)
+	ctx = attachLLMBudget(ctx, 99)
+	if GetRetryBudget(ctx) != existing {
+		t.Error("attachLLMBudget should preserve existing budget, not replace it")
 	}
 }
