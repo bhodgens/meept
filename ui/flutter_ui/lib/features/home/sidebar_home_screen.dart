@@ -62,6 +62,7 @@ import '../../core/router.dart';
 import '../../core/shortcuts.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../widgets/background_image.dart';
 import '../../widgets/command_palette.dart';
 import '../../widgets/status_bar.dart';
 import '../../providers/providers.dart';
@@ -88,6 +89,7 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
   Session? _selectedSession;
   bool _initialLoadDone = false;
   late final LeaderKeyController _leaderController;
+  bool _sidebarCollapsed = false;
 
 
   @override
@@ -383,30 +385,30 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
       controller: _leaderController,
       child: Scaffold(
         backgroundColor: CyberpunkColors.black,
-        body: Row(
-          children: [
-            // Left sidebar with session tree
-            _Sidebar(
-              onSessionSelected: _onSessionSelected,
-              selectedSession: _selectedSession,
-            ),
-            // Main content area
-            Expanded(
-              child: Column(
-                children: [
-                  // Header with session info
-                  _Header(session: _selectedSession),
-                  // Chat content
-                  Expanded(
-                    child: _selectedSession != null
-                        ? ChatTab(sessionId: _selectedSession!.id)
-                        : const _NoSessionPlaceholder(),
-                  ),
-                  // Chat input is part of ChatTab
-                ],
+        body: BackgroundImage(
+          child: Row(
+            children: [
+              // Left sidebar with session tree (collapsible)
+              if (!_sidebarCollapsed)
+                _Sidebar(
+                  onSessionSelected: _onSessionSelected,
+                  selectedSession: _selectedSession,
+                ),
+              // Collapse/expand toggle arrow
+              _SidebarToggle(
+                collapsed: _sidebarCollapsed,
+                onTap: () {
+                  setState(() => _sidebarCollapsed = !_sidebarCollapsed);
+                },
               ),
-            ),
-          ],
+              // Main content area (ChatTab provides its own header)
+              Expanded(
+                child: _selectedSession != null
+                    ? ChatTab(sessionId: _selectedSession!.id)
+                    : const _NoSessionPlaceholder(),
+              ),
+            ],
+          ),
         ),
         bottomNavigationBar: StatusBar(selectedTabIndex: 0),
       ),
@@ -441,6 +443,45 @@ class _NoSessionPlaceholder extends StatelessWidget {
   }
 }
 
+/// Collapse/expand toggle arrow on the sidebar divider.
+/// Shows a left arrow (chevron_left) when sidebar is open,
+/// and a right arrow (chevron_right) when collapsed.
+class _SidebarToggle extends StatelessWidget {
+  final bool collapsed;
+  final VoidCallback onTap;
+
+  const _SidebarToggle({required this.collapsed, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Container(
+          width: 18,
+          decoration: BoxDecoration(
+            color: CyberpunkColors.orangeDark.withValues(alpha: 0.15),
+            border: Border(
+              right: BorderSide(
+                color: CyberpunkColors.orangeDark.withValues(alpha: 0.3),
+                width: 1,
+              ),
+            ),
+          ),
+          child: Center(
+            child: Icon(
+              collapsed ? Icons.chevron_right : Icons.chevron_left,
+              size: 16,
+              color: CyberpunkColors.orangePrimary,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Sidebar with session tree
 class _Sidebar extends ConsumerStatefulWidget {
   final ValueChanged<Session> onSessionSelected;
@@ -465,7 +506,6 @@ class _SidebarState extends ConsumerState<_Sidebar> {
     return Container(
       width: 220,
       decoration: BoxDecoration(
-        color: CyberpunkColors.greenSuccess.withValues(alpha: 0.1),
         border: Border(
           right: BorderSide(
             color: CyberpunkColors.orangeDark.withValues(alpha: 0.3),
@@ -473,7 +513,11 @@ class _SidebarState extends ConsumerState<_Sidebar> {
           ),
         ),
       ),
-      child: Column(
+      child: TintedBackgroundImage(
+        imageOpacity: 0.15,
+        tintColor: CyberpunkColors.greenSuccess,
+        tintOpacity: 0.08,
+        child: Column(
         children: [
           // Sidebar header with hamburger, meept logo, and connection status
           Container(
@@ -540,6 +584,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
             ),
           ),
         ],
+        ),
       ),
     );
   }
@@ -855,50 +900,6 @@ class _ChildWidget extends StatelessWidget {
                 fontSize: 9,
               ),
             ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Header bar showing session info
-class _Header extends StatelessWidget {
-  final Session? session;
-
-  const _Header({this.session});
-
-  @override
-  Widget build(BuildContext context) {
-    String headerText = 'meept';
-
-    if (session != null && session!.title.isNotEmpty) {
-      headerText = session!.title;
-      if (session!.description != null && session!.description!.isNotEmpty) {
-        final truncated = session!.description!.length > 60
-            ? '${session!.description!.substring(0, 57)}...'
-            : session!.description!;
-        headerText = '$headerText │ $truncated';
-      }
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: CyberpunkColors.orangePrimary,
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              headerText.toLowerCase(),
-              style: CyberpunkTypography.bodyMedium.copyWith(
-                color: CyberpunkColors.black,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'SourceCodePro',
-                fontSize: 13,
-              ),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
-            ),
-          ),
         ],
       ),
     );
