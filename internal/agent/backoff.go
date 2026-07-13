@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/internal/errcls"
@@ -247,15 +248,61 @@ type BackoffConfig struct {
 	MaxAttempts int
 }
 
+// defaultBackoffOverride holds optional config-driven defaults that take
+// precedence over the hardcoded presets when set. Package-level to avoid
+// threading the config through every call site; the daemon sets this once
+// at startup via SetDefaultBackoffOverride.
+var defaultBackoffOverride atomic.Pointer[BackoffConfig]
+
+// SetDefaultBackoffOverride installs config-driven backoff defaults. When
+// non-nil, LLMBackoffConfig() and DefaultBackoffConfig() merge the override
+// over their hardcoded presets (override fields with non-zero values win).
+// Pass a zero-value BackoffConfig or call clearDefaultBackoffOverride to
+// reset. Safe for concurrent use.
+func SetDefaultBackoffOverride(cfg BackoffConfig) {
+	defaultBackoffOverride.Store(&cfg)
+}
+
+// clearDefaultBackoffOverride is a test-only helper to reset the override.
+func clearDefaultBackoffOverride() {
+	defaultBackoffOverride.Store(nil)
+}
+
+// mergeOverride applies non-zero fields from the override (if set) to a
+// preset config. Zero-value fields in the override are ignored so callers
+// can override only the fields they care about.
+func mergeOverride(preset BackoffConfig) BackoffConfig {
+	if ov := defaultBackoffOverride.Load(); ov != nil {
+		if ov.BaseDelay > 0 {
+			preset.BaseDelay = ov.BaseDelay
+		}
+		if ov.MaxDelay > 0 {
+			preset.MaxDelay = ov.MaxDelay
+		}
+		if ov.Multiplier > 0 {
+			preset.Multiplier = ov.Multiplier
+		}
+		if ov.Jitter > 0 {
+			preset.Jitter = ov.Jitter
+		}
+		if ov.MaxAttempts > 0 {
+			preset.MaxAttempts = ov.MaxAttempts
+		}
+	}
+	return preset
+}
+
 // DefaultBackoffConfig returns sensible defaults for general backoff.
+// When a config-driven override is installed via SetDefaultBackoffOverride,
+// non-zero fields from the override take precedence.
 func DefaultBackoffConfig() BackoffConfig {
-	return BackoffConfig{
+	return mergeOverride(BackoffConfig{
 		BaseDelay:   1 * time.Second,
 		MaxDelay:    30 * time.Second,
 		Multiplier:  2.0,
 		Jitter:      0.3, // 30% jitter to prevent thundering herd
 		MaxAttempts: 10,
-	}
+	})
 }
 
 // AggressiveBackoffConfig returns a more aggressive backoff for time-sensitive operations.
@@ -281,14 +328,16 @@ func ConservativeBackoffConfig() BackoffConfig {
 }
 
 // LLMBackoffConfig returns a backoff profile tuned for LLM API calls.
+// When a config-driven override is installed via SetDefaultBackoffOverride,
+// non-zero fields from the override take precedence.
 func LLMBackoffConfig() BackoffConfig {
-	return BackoffConfig{
+	return mergeOverride(BackoffConfig{
 		BaseDelay:   1 * time.Second,
 		MaxDelay:    30 * time.Second,
 		Multiplier:  2.0,
 		Jitter:      0.3,
 		MaxAttempts: 5,
-	}
+	})
 }
 
 // ToolBackoffConfig returns a backoff profile tuned for tool execution.

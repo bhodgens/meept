@@ -433,3 +433,107 @@ func TestBudgetHierarchy_AdvancePhase(t *testing.T) {
 		t.Errorf("turn budget after advance = %d, want > 0", got)
 	}
 }
+
+// TestNewBudgetHierarchyWithConfig_AppliesOptions verifies that
+// NewBudgetHierarchyWithConfig correctly applies all override values:
+// reserved ratio, task warning threshold, phase warning threshold,
+// turn warning threshold, carryover, and borrowing.
+func TestNewBudgetHierarchyWithConfig_AppliesOptions(t *testing.T) {
+	opts := BudgetHierarchyOptions{
+		ReservedRatio:     0.2, // 20% reserve
+		TaskWarningRatio:  0.6,
+		PhaseWarningRatio: 0.75,
+		TurnWarningRatio:  0.85,
+		CarryoverEnabled:  false,
+		BorrowingEnabled:  false,
+	}
+	h := NewBudgetHierarchyWithConfig(10000, []string{"p1", "p2"}, []int{4000, 4000}, opts)
+
+	// Task budget: 20% reserve = 2000.
+	if h.taskBudget.reservedBudget != 2000 {
+		t.Errorf("task reserved = %d, want 2000 (20%% of 10000)", h.taskBudget.reservedBudget)
+	}
+
+	// Task warning threshold.
+	if h.taskBudget.warningThreshold != 0.6 {
+		t.Errorf("task warningThreshold = %v, want 0.6", h.taskBudget.warningThreshold)
+	}
+
+	// Task borrowing disabled.
+	if h.taskBudget.allowBorrowing {
+		t.Error("task allowBorrowing = true, want false")
+	}
+
+	// Phase carryover disabled.
+	p1 := h.phaseBudgets["p1"]
+	if p1.allowCarryover {
+		t.Error("phase p1 allowCarryover = true, want false")
+	}
+
+	// Phase warning threshold.
+	if p1.warningThreshold != 0.75 {
+		t.Errorf("phase p1 warningThreshold = %v, want 0.75", p1.warningThreshold)
+	}
+
+	// Turn warning threshold: select a phase, then check turn budget.
+	if err := h.SelectPhaseBudget("p1"); err != nil {
+		t.Fatalf("SelectPhaseBudget failed: %v", err)
+	}
+	if h.turnBudget.warningThreshold != 0.85 {
+		t.Errorf("turn warningThreshold = %v, want 0.85", h.turnBudget.warningThreshold)
+	}
+}
+
+// TestNewBudgetHierarchyWithConfig_ZeroDefaults verifies that a zero-valued
+// BudgetHierarchyOptions produces the same result as NewBudgetHierarchy:
+// 10% reserve, 0.7 task warning, 0.8 phase warning, 0.9 turn warning,
+// carryover=false (zero bool), borrowing=false (zero bool).
+// But the defaults from NewBudgetHierarchy have carryover=true and
+// borrowing=true — those are the original hardcoded values. The zero-valued
+// struct gives false for bools (Go zero value), so we only check the
+// numeric defaults here.
+func TestNewBudgetHierarchyWithConfig_ZeroDefaults(t *testing.T) {
+	// Zero-valued options: numeric fields default to the same values
+	// as NewBudgetHierarchy.
+	h := NewBudgetHierarchyWithConfig(10000, []string{"p1"}, []int{5000}, BudgetHierarchyOptions{})
+
+	// Task: 10% reserve (default).
+	if h.taskBudget.reservedBudget != 1000 {
+		t.Errorf("task reserved = %d, want 1000 (default 10%%)", h.taskBudget.reservedBudget)
+	}
+
+	// Task warning threshold: default 0.7.
+	if h.taskBudget.warningThreshold != defaultTaskWarningRatio {
+		t.Errorf("task warningThreshold = %v, want %v (default)", h.taskBudget.warningThreshold, defaultTaskWarningRatio)
+	}
+
+	// Phase warning threshold: default 0.8.
+	p1 := h.phaseBudgets["p1"]
+	if p1.warningThreshold != defaultPhaseWarningRatio {
+		t.Errorf("phase p1 warningThreshold = %v, want %v (default)", p1.warningThreshold, defaultPhaseWarningRatio)
+	}
+
+	// Turn warning threshold: default 0.9.
+	if err := h.SelectPhaseBudget("p1"); err != nil {
+		t.Fatalf("SelectPhaseBudget failed: %v", err)
+	}
+	if h.turnBudget.warningThreshold != defaultTurnWarningRatio {
+		t.Errorf("turn warningThreshold = %v, want %v (default)", h.turnBudget.warningThreshold, defaultTurnWarningRatio)
+	}
+
+	// Verify parity with NewBudgetHierarchy for numeric fields.
+	h2 := NewBudgetHierarchy(10000, []string{"p1"}, []int{5000})
+	if h2.taskBudget.reservedBudget != h.taskBudget.reservedBudget {
+		t.Errorf("reserved mismatch: legacy=%d, withConfig=%d",
+			h2.taskBudget.reservedBudget, h.taskBudget.reservedBudget)
+	}
+	if h2.taskBudget.warningThreshold != h.taskBudget.warningThreshold {
+		t.Errorf("task warning mismatch: legacy=%v, withConfig=%v",
+			h2.taskBudget.warningThreshold, h.taskBudget.warningThreshold)
+	}
+	p2Legacy := h2.phaseBudgets["p1"]
+	if p2Legacy.warningThreshold != p1.warningThreshold {
+		t.Errorf("phase warning mismatch: legacy=%v, withConfig=%v",
+			p2Legacy.warningThreshold, p1.warningThreshold)
+	}
+}

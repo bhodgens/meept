@@ -395,3 +395,110 @@ func TestAgentLoop_ConfigSnapshot(t *testing.T) {
 		t.Error("ConfigSnapshot should not propagate workingDir")
 	}
 }
+
+// --- LoopsForTask tests ---
+
+// setTaskID is a test helper that sets a loop's currentTaskID under its mutex.
+// Only used in tests within the agent package.
+func setTaskID(t *testing.T, loop *AgentLoop, taskID string) {
+	t.Helper()
+	loop.mu.Lock()
+	defer loop.mu.Unlock()
+	loop.currentTaskID = taskID
+}
+
+func TestManager_LoopsForTask(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewManager(managerConfig())
+
+	// Create 3 loops across 2 agents/sessions and 2 taskIDs.
+	// sess-A -> task-A
+	// sess-B -> task-A
+	// sess-C -> task-B
+	loopA, err := mgr.GetOrCreate("sess-A", "/tmp/work")
+	if err != nil {
+		t.Fatalf("GetOrCreate sess-A: %v", err)
+	}
+	loopB, err := mgr.GetOrCreate("sess-B", "/tmp/work")
+	if err != nil {
+		t.Fatalf("GetOrCreate sess-B: %v", err)
+	}
+	loopC, err := mgr.GetOrCreate("sess-C", "/tmp/work")
+	if err != nil {
+		t.Fatalf("GetOrCreate sess-C: %v", err)
+	}
+
+	setTaskID(t, loopA, "task-A")
+	setTaskID(t, loopB, "task-A")
+	setTaskID(t, loopC, "task-B")
+
+	// LoopsForTask("task-A") should return exactly loopA and loopB.
+	matches := mgr.LoopsForTask("task-A")
+	if len(matches) != 2 {
+		t.Fatalf("expected 2 loops for task-A, got %d", len(matches))
+	}
+
+	// Verify identity: both loopA and loopB should be in the result.
+	seen := make(map[*AgentLoop]bool)
+	for _, l := range matches {
+		seen[l] = true
+	}
+	if !seen[loopA] {
+		t.Error("loopA not found in LoopsForTask(task-A) results")
+	}
+	if !seen[loopB] {
+		t.Error("loopB not found in LoopsForTask(task-A) results")
+	}
+	if seen[loopC] {
+		t.Error("loopC should NOT be in LoopsForTask(task-A) results")
+	}
+
+	// LoopsForTask("task-B") should return exactly loopC.
+	matchesB := mgr.LoopsForTask("task-B")
+	if len(matchesB) != 1 {
+		t.Fatalf("expected 1 loop for task-B, got %d", len(matchesB))
+	}
+	if matchesB[0] != loopC {
+		t.Error("expected loopC for task-B")
+	}
+}
+
+func TestManager_LoopsForTask_NoMatches(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewManager(managerConfig())
+
+	// No loops at all — should return nil.
+	if got := mgr.LoopsForTask("nonexistent"); got != nil {
+		t.Errorf("expected nil for empty manager, got %v", got)
+	}
+
+	// Create a loop with task-A and query for task-X.
+	loop, err := mgr.GetOrCreate("sess-1", "/tmp/work")
+	if err != nil {
+		t.Fatalf("GetOrCreate: %v", err)
+	}
+	setTaskID(t, loop, "task-A")
+
+	if got := mgr.LoopsForTask("task-X"); got != nil {
+		t.Errorf("expected nil for unmatched taskID, got %v", got)
+	}
+}
+
+func TestManager_LoopsForTask_EmptyTaskID(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewManager(managerConfig())
+
+	// Empty taskID is a no-op — returns nil without scanning.
+	loop, err := mgr.GetOrCreate("sess-1", "/tmp/work")
+	if err != nil {
+		t.Fatalf("GetOrCreate: %v", err)
+	}
+	setTaskID(t, loop, "")
+
+	if got := mgr.LoopsForTask(""); got != nil {
+		t.Errorf("expected nil for empty taskID, got %v", got)
+	}
+}

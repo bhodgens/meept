@@ -513,10 +513,18 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	}
 
 	// Apply budget config if set. When Total > 0, the AgentLoop's
-	// BudgetHierarchy is rebuilt with the configured task budget and
-	// emergency reserve ratio.
+	// BudgetHierarchy is rebuilt with the configured task budget,
+	// emergency reserve ratio, warning thresholds, and carryover/borrowing.
 	if components.AgentLoop != nil && fullCfg.Agent.Budget.Total > 0 {
-		components.AgentLoop.SetBudgetConfig(fullCfg.Agent.Budget.Total, fullCfg.Agent.Budget.ReservedRatio)
+		opts := agent.BudgetHierarchyOptions{
+			ReservedRatio:     fullCfg.Agent.Budget.ReservedRatio,
+			TaskWarningRatio:  fullCfg.Agent.Budget.WarningThresholds.Task,
+			PhaseWarningRatio: fullCfg.Agent.Budget.WarningThresholds.Phase,
+			TurnWarningRatio:  fullCfg.Agent.Budget.WarningThresholds.Turn,
+			CarryoverEnabled:  fullCfg.Agent.Budget.Phases.Carryover,
+			BorrowingEnabled:  fullCfg.Agent.Budget.Phases.Borrowing,
+		}
+		components.AgentLoop.SetBudgetConfig(fullCfg.Agent.Budget.Total, opts)
 		logger.Info("Agent budget config applied",
 			"total", fullCfg.Agent.Budget.Total,
 			"reserved_ratio", fullCfg.Agent.Budget.ReservedRatio)
@@ -534,7 +542,43 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			"profiles", len(profiles))
 	}
 
-	// TODO: retry config consumption deferred — backoff.go presets cover current needs.
+	// Apply retry config: install override so LLMBackoffConfig() and
+	// DefaultBackoffConfig() honor config.Agent.Retry.Backoff when enabled.
+	// Per-operation presets (Tool, HTTPHook, Aggressive, Conservative) are
+	// intentionally left untouched — only the LLM/default paths consume the
+	// global override.
+	if fullCfg.Agent.Retry.Enabled {
+		rb := fullCfg.Agent.Retry.Backoff
+		override := agent.BackoffConfig{}
+		if rb.BaseDelay != "" {
+			if d, err := time.ParseDuration(rb.BaseDelay); err == nil {
+				override.BaseDelay = d
+			}
+		}
+		if rb.MaxDelay != "" {
+			if d, err := time.ParseDuration(rb.MaxDelay); err == nil {
+				override.MaxDelay = d
+			}
+		}
+		if rb.Multiplier > 0 {
+			override.Multiplier = rb.Multiplier
+		}
+		if rb.Jitter > 0 {
+			override.Jitter = rb.Jitter
+		}
+		if rb.Budget > 0 {
+			override.MaxAttempts = rb.Budget
+		} else if fullCfg.Agent.Retry.DefaultBudget > 0 {
+			override.MaxAttempts = fullCfg.Agent.Retry.DefaultBudget
+		}
+		agent.SetDefaultBackoffOverride(override)
+		logger.Info("Agent retry config applied",
+			"base_delay", override.BaseDelay,
+			"max_delay", override.MaxDelay,
+			"multiplier", override.Multiplier,
+			"jitter", override.Jitter,
+			"max_attempts", override.MaxAttempts)
+	}
 
 	// Create metrics collector with getter functions for actual values
 	var coll *metrics.Collector
@@ -1049,9 +1093,10 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 
 	// Wire orchestrator phase-transition hook. The callback logs every plan
 	// phase transition and, when an AgentLoopManager with active per-session
-	// loops is available, advances each loop's budget phase to track the
-	// plan-driven phase change. Best-effort: panics in the callback are
-	// recovered so the orchestrator is never broken by a subscriber fault.
+	// loops is available, advances the budget phase on loops whose
+	// currentTaskID matches the transitioning task. Best-effort: panics in
+	// the callback are recovered so the orchestrator is never broken by a
+	// subscriber fault.
 	if components != nil && components.Orchestrator != nil {
 		loopMgr := components.AgentLoopManager
 		hookLogger := logger.With("component", "phase-transition-hook")
@@ -1063,7 +1108,8 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				"to_phase", toPhase,
 			)
 			if loopMgr != nil {
-				for _, loop := range loopMgr.List() {
+				loops := loopMgr.LoopsForTask(taskID)
+				for _, loop := range loops {
 					if loop != nil {
 						if err := loop.AdvanceBudgetPhase(toPhase); err != nil {
 							hookLogger.Warn("failed to advance budget phase on loop",

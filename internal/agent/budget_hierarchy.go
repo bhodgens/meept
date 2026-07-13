@@ -305,6 +305,61 @@ type BudgetHierarchy struct {
 	turnBudget   *BudgetAllocation
 	currentPhase string // ID of the currently-selected phase
 	logger       *slog.Logger
+
+	// turnWarningThreshold is applied to turn budgets created by
+	// SelectPhaseBudget and AdvancePhase. Defaults to 0.9 when zero.
+	turnWarningThreshold float64
+}
+
+// BudgetHierarchyOptions configures optional BudgetHierarchy behavior.
+// All fields have sensible defaults when zero-valued.
+type BudgetHierarchyOptions struct {
+	ReservedRatio     float64 // 0 = use default 0.1
+	TaskWarningRatio  float64 // 0 = use default 0.7
+	PhaseWarningRatio float64 // 0 = use default 0.8
+	TurnWarningRatio  float64 // 0 = use default 0.9
+	CarryoverEnabled  bool
+	BorrowingEnabled  bool
+}
+
+// Default option values when BudgetHierarchyOptions fields are zero.
+const (
+	defaultReservedRatio     = 0.1
+	defaultTaskWarningRatio  = 0.7
+	defaultPhaseWarningRatio = 0.8
+	defaultTurnWarningRatio  = 0.9
+)
+
+// effectiveReservedRatio returns the option value or the default when zero.
+func (o BudgetHierarchyOptions) effectiveReservedRatio() float64 {
+	if o.ReservedRatio == 0 {
+		return defaultReservedRatio
+	}
+	return o.ReservedRatio
+}
+
+// effectiveTaskWarningRatio returns the option value or the default when zero.
+func (o BudgetHierarchyOptions) effectiveTaskWarningRatio() float64 {
+	if o.TaskWarningRatio == 0 {
+		return defaultTaskWarningRatio
+	}
+	return o.TaskWarningRatio
+}
+
+// effectivePhaseWarningRatio returns the option value or the default when zero.
+func (o BudgetHierarchyOptions) effectivePhaseWarningRatio() float64 {
+	if o.PhaseWarningRatio == 0 {
+		return defaultPhaseWarningRatio
+	}
+	return o.PhaseWarningRatio
+}
+
+// effectiveTurnWarningRatio returns the option value or the default when zero.
+func (o BudgetHierarchyOptions) effectiveTurnWarningRatio() float64 {
+	if o.TurnWarningRatio == 0 {
+		return defaultTurnWarningRatio
+	}
+	return o.TurnWarningRatio
 }
 
 // NewBudgetHierarchy creates a new budget hierarchy.
@@ -314,25 +369,51 @@ type BudgetHierarchy struct {
 // warning threshold. Phases with a budget <= 0 are auto-distributed an equal
 // share of the non-reserved task budget.
 func NewBudgetHierarchy(taskBudget int, phases []string, phaseBudgets []int) *BudgetHierarchy {
+	return newBudgetHierarchyWithOpts(taskBudget, phases, phaseBudgets, BudgetHierarchyOptions{
+		ReservedRatio:     defaultReservedRatio,
+		TaskWarningRatio:  defaultTaskWarningRatio,
+		PhaseWarningRatio: defaultPhaseWarningRatio,
+		TurnWarningRatio:  defaultTurnWarningRatio,
+		CarryoverEnabled:  true,
+		BorrowingEnabled:  true,
+	})
+}
+
+// NewBudgetHierarchyWithConfig is like NewBudgetHierarchy but accepts
+// configuration overrides for reserve ratio, warning thresholds, and
+// carryover/borrowing behavior. Zero-valued fields fall back to defaults.
+func NewBudgetHierarchyWithConfig(taskBudget int, phases []string, phaseBudgets []int, opts BudgetHierarchyOptions) *BudgetHierarchy {
+	return newBudgetHierarchyWithOpts(taskBudget, phases, phaseBudgets, opts)
+}
+
+// newBudgetHierarchyWithOpts is the shared implementation for both
+// NewBudgetHierarchy and NewBudgetHierarchyWithConfig.
+func newBudgetHierarchyWithOpts(taskBudget int, phases []string, phaseBudgets []int, opts BudgetHierarchyOptions) *BudgetHierarchy {
 	h := &BudgetHierarchy{
-		phaseBudgets: make(map[string]*BudgetAllocation),
-		logger:       slog.Default(),
+		phaseBudgets:        make(map[string]*BudgetAllocation),
+		logger:              slog.Default(),
+		turnWarningThreshold: opts.effectiveTurnWarningRatio(),
 	}
+
+	reservedRatio := opts.effectiveReservedRatio()
+	taskWarn := opts.effectiveTaskWarningRatio()
+	phaseWarn := opts.effectivePhaseWarningRatio()
+
+	reserved := int(float64(taskBudget) * reservedRatio)
 
 	// Create task-level budget
 	h.taskBudget = NewBudgetAllocation("task", BudgetLevelTask, taskBudget).
-		WithReserved(taskBudget / 10). // 10% emergency reserve
-		WithWarningThreshold(0.7).     // Warn at 70%
-		WithBorrowing(true)
+		WithReserved(reserved).
+		WithWarningThreshold(taskWarn).
+		WithBorrowing(opts.BorrowingEnabled)
 
 	// Create phase budgets
 	// Compute auto-distribution correctly: sum explicitly-allocated phases,
 	// then split the remaining non-reserved pool among auto-allocated phases.
-	reserved := taskBudget / 10
 	nonReservedPool := taskBudget - reserved
 	explicitSum := 0
 	autoCount := 0
-	for i, phaseID := range phases {
+	for i := range phases {
 		budget := 0
 		if i < len(phaseBudgets) {
 			budget = phaseBudgets[i]
@@ -342,7 +423,6 @@ func NewBudgetHierarchy(taskBudget int, phases []string, phaseBudgets []int) *Bu
 		} else {
 			autoCount++
 		}
-		_ = phaseID
 	}
 	remaining := nonReservedPool - explicitSum
 	if remaining < 0 {
@@ -367,8 +447,8 @@ func NewBudgetHierarchy(taskBudget int, phases []string, phaseBudgets []int) *Bu
 		}
 
 		phaseAlloc := NewBudgetAllocation(phaseID, BudgetLevelPhase, budget).
-			WithCarryover(true).
-			WithWarningThreshold(0.8)
+			WithCarryover(opts.CarryoverEnabled).
+			WithWarningThreshold(phaseWarn)
 
 		h.phaseBudgets[phaseID] = phaseAlloc
 		h.taskBudget.AddChild(phaseAlloc)
@@ -391,7 +471,8 @@ func (h *BudgetHierarchy) SelectPhaseBudget(phaseID string) error {
 
 	// Create turn budget under phase (estimate ~10 turns per phase)
 	turnBudget := phase.Available() / 10
-	h.turnBudget = NewBudgetAllocation("turn", BudgetLevelTurn, turnBudget)
+	h.turnBudget = NewBudgetAllocation("turn", BudgetLevelTurn, turnBudget).
+		WithWarningThreshold(h.turnWarningThreshold)
 	phase.AddChild(h.turnBudget)
 	h.currentPhase = phaseID
 
@@ -501,7 +582,8 @@ func (h *BudgetHierarchy) AdvancePhase(newPhaseID string) error {
 		return fmt.Errorf("phase %s not found", newPhaseID)
 	}
 	turnBudget := phase.Available() / 10
-	h.turnBudget = NewBudgetAllocation("turn", BudgetLevelTurn, turnBudget)
+	h.turnBudget = NewBudgetAllocation("turn", BudgetLevelTurn, turnBudget).
+		WithWarningThreshold(h.turnWarningThreshold)
 	phase.AddChild(h.turnBudget)
 	h.currentPhase = newPhaseID
 

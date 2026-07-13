@@ -120,3 +120,29 @@ func (m *Manager) List() map[string]*AgentLoop {
 	}
 	return result
 }
+
+// LoopsForTask returns all AgentLoops whose currentTaskID matches the given
+// taskID. Used by the daemon's phase-transition hook to advance budget
+// hierarchies only on loops actually working on the transitioning task.
+// Returns nil if no loops match. Safe for concurrent use.
+func (m *Manager) LoopsForTask(taskID string) []*AgentLoop {
+	if taskID == "" {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var result []*AgentLoop
+	for _, loop := range m.loops {
+		if loop == nil {
+			continue
+		}
+		loop.mu.RLock()
+		match := loop.currentTaskID == taskID
+		loop.mu.RUnlock()
+		if match {
+			result = append(result, loop)
+		}
+	}
+	return result
+}

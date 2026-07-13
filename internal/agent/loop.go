@@ -3454,12 +3454,18 @@ func (l *AgentLoop) chatWithFailover(ctx context.Context, messages []llm.ChatMes
 // chatWithFailoverRaw is the shared implementation for failover with optional
 // streaming. onDelta may be nil (non-streaming).
 func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.ChatMessage, onDelta llm.DeltaCallback, opts ...llm.ChatOption) (*llm.Response, error) {
-	const maxAttempts = 5
 	// Backoff utility (Phase 3 of exponential-backoff plan). Previously this
 	// function used hand-rolled currentBackoff arithmetic; it now defers to
 	// the shared Backoff type so retry behavior is consistent across the
 	// codebase and covered by backoff_test.go.
-	llmBackoff := NewBackoff(LLMBackoffConfig())
+	//
+	// LLMBackoffConfig() honors any config-driven override installed by the
+	// daemon via SetDefaultBackoffOverride (from config.Agent.Retry.Backoff).
+	// config.Agent.Retry.DefaultBudget is consumed as MaxAttempts in the
+	// override; no separate per-loop setter is needed.
+	llmCfg := LLMBackoffConfig()
+	maxAttempts := llmCfg.MaxAttempts
+	llmBackoff := NewBackoff(llmCfg)
 
 	// Prepend WithTaskScope option if scope is set
 	l.mu.RLock()
@@ -5207,14 +5213,17 @@ func (l *AgentLoop) SetActive(v bool) {
 }
 
 // SetBudgetConfig overrides the hierarchical budget totals. When total > 0,
-// the BudgetHierarchy is rebuilt with the new task budget. reservedRatio
-// sets the emergency reserve fraction (0.0-1.0). Nil-guarded per CLAUDE.md.
-func (l *AgentLoop) SetBudgetConfig(total int, reservedRatio float64) {
+// the BudgetHierarchy is rebuilt with the new task budget and the provided
+// options (reserved ratio, warning thresholds, carryover/borrowing toggles).
+// opts is a BudgetHierarchyOptions struct; zero-valued fields fall back to
+// sensible defaults. Nil-guarded per CLAUDE.md.
+func (l *AgentLoop) SetBudgetConfig(total int, opts BudgetHierarchyOptions) {
 	if l == nil || total <= 0 {
 		return
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	reservedRatio := opts.effectiveReservedRatio()
 	reserved := int(float64(total) * reservedRatio)
 	if reserved < 0 {
 		reserved = 0
@@ -5223,7 +5232,7 @@ func (l *AgentLoop) SetBudgetConfig(total int, reservedRatio float64) {
 	if phaseBudget < 1 {
 		phaseBudget = total // no meaningful phase budget; use full total
 	}
-	l.budgetHierarchy = NewBudgetHierarchy(total, []string{"default"}, []int{phaseBudget})
+	l.budgetHierarchy = NewBudgetHierarchyWithConfig(total, []string{"default"}, []int{phaseBudget}, opts)
 	if err := l.budgetHierarchy.SelectPhaseBudget("default"); err != nil {
 		if l.logger != nil {
 			l.logger.Warn("SetBudgetConfig: failed to select default phase", "error", err)
