@@ -317,6 +317,112 @@ func TestGetProjectByPath(t *testing.T) {
 	}
 }
 
+func TestStore_GetActive(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	// No projects yet → no active project.
+	p, err := store.GetActive(ctx)
+	if err != nil {
+		t.Fatalf("GetActive on empty store: %v", err)
+	}
+	if p != nil {
+		t.Errorf("expected nil, got %+v", p)
+	}
+
+	// Create an active project.
+	proj := &Project{
+		ID: "p1", Name: "alpha", Mode: ModeGit,
+		LocalPath: "/tmp/alpha", Status: "active",
+	}
+	if err := store.CreateProject(ctx, proj); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	p, err = store.GetActive(ctx)
+	if err != nil {
+		t.Fatalf("GetActive: %v", err)
+	}
+	if p == nil || p.ID != "p1" {
+		t.Fatalf("expected p1, got %+v", p)
+	}
+
+	// Create a second active project — GetActive should return one of them
+	// (deterministically the most recently updated).
+	proj2 := &Project{
+		ID: "p2", Name: "beta", Mode: ModeGit,
+		LocalPath: "/tmp/beta", Status: "active",
+	}
+	if err := store.CreateProject(ctx, proj2); err != nil {
+		t.Fatalf("CreateProject p2: %v", err)
+	}
+
+	p, err = store.GetActive(ctx)
+	if err != nil {
+		t.Fatalf("GetActive after p2: %v", err)
+	}
+	if p == nil {
+		t.Fatal("expected non-nil active project")
+	}
+}
+
+func TestStore_DeactivateActive(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	// Create two active projects.
+	for _, p := range []*Project{
+		{ID: "a1", Name: "a1", Mode: ModeGit, LocalPath: "/tmp/a1", Status: "active"},
+		{ID: "a2", Name: "a2", Mode: ModeGit, LocalPath: "/tmp/a2", Status: "active"},
+	} {
+		if err := store.CreateProject(ctx, p); err != nil {
+			t.Fatalf("CreateProject %s: %v", p.ID, err)
+		}
+	}
+
+	// Deactivate all active.
+	if err := store.DeactivateActive(ctx); err != nil {
+		t.Fatalf("DeactivateActive: %v", err)
+	}
+
+	// No active project should remain.
+	p, err := store.GetActive(ctx)
+	if err != nil {
+		t.Fatalf("GetActive after deactivate: %v", err)
+	}
+	if p != nil {
+		t.Errorf("expected nil active after deactivate, got %+v", p)
+	}
+}
+
+func TestStore_UpdateProjectPath(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	orig := &Project{
+		ID: "u1", Name: "old-name", Mode: ModeGit,
+		LocalPath: "/tmp/old-name", Status: "active",
+	}
+	if err := store.CreateProject(ctx, orig); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	if err := store.UpdateProjectPath(ctx, "u1", "/tmp/new-name", "new-name"); err != nil {
+		t.Fatalf("UpdateProjectPath: %v", err)
+	}
+
+	got, err := store.GetProject(ctx, "u1")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+	if got.LocalPath != "/tmp/new-name" {
+		t.Errorf("LocalPath = %q, want %q", got.LocalPath, "/tmp/new-name")
+	}
+	if got.Name != "new-name" {
+		t.Errorf("Name = %q, want %q", got.Name, "new-name")
+	}
+}
+
 // Ensure the pool types compile correctly.
 var _ = (*sqlite.Pool)(nil)
 

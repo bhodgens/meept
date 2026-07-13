@@ -223,6 +223,55 @@ func (s *Store) GetProjectByPath(ctx context.Context, localPath string) (*Projec
 	return scanProject(row)
 }
 
+// GetActive returns the single active project, or nil if none exist.
+// When multiple projects have status="active", returns the most recently
+// updated one (deterministic).
+func (s *Store) GetActive(ctx context.Context) (*Project, error) {
+	row, err := s.pool.QueryRow(ctx,
+		`SELECT id, name, mode, git_url, branch, local_path, status, last_sync, created_at, updated_at
+		 FROM projects WHERE status = 'active'
+		 ORDER BY updated_at DESC LIMIT 1`)
+	if err != nil {
+		return nil, err
+	}
+	p, err := scanProject(row)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return p, nil
+}
+
+// DeactivateActive sets all active projects to "inactive".
+// Returns the count of deactivated projects.
+func (s *Store) DeactivateActive(ctx context.Context) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE projects SET status = 'inactive', updated_at = ? WHERE status = 'active'`,
+		time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return fmt.Errorf("deactivate active projects: %w", err)
+	}
+	return nil
+}
+
+// UpdateProjectPath updates a project's local_path and name (which must
+// always equal filepath.Base(local_path)).
+func (s *Store) UpdateProjectPath(ctx context.Context, id, localPath, name string) error {
+	res, err := s.pool.Exec(ctx,
+		`UPDATE projects SET local_path = ?, name = ?, updated_at = ? WHERE id = ?`,
+		localPath, name, time.Now().UTC().Format(time.RFC3339Nano), id)
+	if err != nil {
+		return fmt.Errorf("update project path: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ---------- Worktree CRUD ----------
 
 // CreateWorktree inserts a new worktree record.
