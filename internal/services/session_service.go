@@ -5,17 +5,34 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/session"
 )
 
 // SessionService handles session operations.
 type SessionService struct {
 	store session.Store
+	pm    ProjectResolver
+}
+
+// ProjectResolver is the narrow interface SessionService needs from the
+// project manager: ensuring a default project exists and returning it.
+type ProjectResolver interface {
+	EnsureDefault(ctx context.Context) (*project.Project, error)
+	GetActive(ctx context.Context) (*project.Project, error)
 }
 
 // NewSessionService creates a session service.
 func NewSessionService(s session.Store) *SessionService {
 	return &SessionService{store: s}
+}
+
+// SetProjectManager wires the project manager for default project resolution
+// on session creation.
+func (s *SessionService) SetProjectManager(pm ProjectResolver) {
+	if pm != nil {
+		s.pm = pm
+	}
 }
 
 // CreateSessionRequest contains session creation parameters.
@@ -36,6 +53,18 @@ func (s *SessionService) CreateSession(ctx context.Context, req CreateSessionReq
 	if err != nil {
 		return nil, wrapError("session", "CreateSession", err)
 	}
+
+	// Inherit or create the active project so every session has a working
+	// directory.
+	if s.pm != nil {
+		p, err := s.pm.EnsureDefault(ctx)
+		if err == nil && p != nil {
+			s.store.SetProject(sess.ID, p.ID, p.LocalPath)
+			sess.ProjectID = p.ID
+			sess.ProjectPath = p.LocalPath
+		}
+	}
+
 	return sess, nil
 }
 

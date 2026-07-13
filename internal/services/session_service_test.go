@@ -5,8 +5,12 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/session"
 )
 
@@ -81,4 +85,73 @@ func isServiceError(err, target error) bool {
 		return false
 	}
 	return errors.Is(se, target)
+}
+
+func newTestProjectManager(t *testing.T) *project.ProjectManager {
+	t.Helper()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	store, err := project.NewStore(dbPath, nil)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	cfg := config.ProjectsConfig{
+		BaseDir:       filepath.Join(dir, "projects"),
+		DefaultBranch: "main",
+	}
+	os.MkdirAll(cfg.BaseDir, 0o755)
+	return project.NewProjectManager(store, nil, cfg, nil)
+}
+
+func TestCreateSession_InheritsActiveProject(t *testing.T) {
+	// Create a session store + project manager with an active project.
+	sessionStore := session.NewMemoryStore(nil)
+	pm := newTestProjectManager(t)
+	ctx := context.Background()
+
+	// Create an active project.
+	activeProj, err := pm.EnsureDefault(ctx)
+	if err != nil {
+		t.Fatalf("EnsureDefault: %v", err)
+	}
+
+	// Wire project manager into session service.
+	svc := NewSessionService(sessionStore)
+	svc.SetProjectManager(pm)
+
+	// Create a session — should inherit the active project.
+	sess, err := svc.CreateSession(ctx, CreateSessionRequest{Name: "test"})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if sess.ProjectID != activeProj.ID {
+		t.Errorf("ProjectID = %q, want %q", sess.ProjectID, activeProj.ID)
+	}
+	if sess.ProjectPath != activeProj.LocalPath {
+		t.Errorf("ProjectPath = %q, want %q", sess.ProjectPath, activeProj.LocalPath)
+	}
+}
+
+func TestCreateSession_CreatesDefaultWhenNoneActive(t *testing.T) {
+	sessionStore := session.NewMemoryStore(nil)
+	pm := newTestProjectManager(t)
+	ctx := context.Background()
+
+	// No active project yet.
+	svc := NewSessionService(sessionStore)
+	svc.SetProjectManager(pm)
+
+	// Create a session — should auto-create a default project.
+	sess, err := svc.CreateSession(ctx, CreateSessionRequest{Name: "test"})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if sess.ProjectID == "" {
+		t.Error("ProjectID should not be empty")
+	}
+	if sess.ProjectPath == "" {
+		t.Error("ProjectPath should not be empty")
+	}
 }

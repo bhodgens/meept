@@ -126,6 +126,9 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 		reg.Session = NewSessionService(cfg.SessionStore)
 		reg.SessionStore = cfg.SessionStore
 		reg.Thread = NewThreadService(cfg.SessionStore)
+		if cfg.ProjectManager != nil {
+			reg.Session.SetProjectManager(cfg.ProjectManager)
+		}
 	}
 	if cfg.WorkerPool != nil {
 		reg.Worker = NewWorkerService(cfg.WorkerPool)
