@@ -2,6 +2,8 @@ package project
 
 import (
 	"context"
+	crypto_rand "crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -345,6 +347,94 @@ func (pm *ProjectManager) ReadSidecarID(projectDir string) (string, error) {
 		return "", fmt.Errorf("read sidecar: %w", err)
 	}
 	return strings.TrimSpace(string(data)), nil
+}
+
+// ---------- active project management ----------
+
+// GetActive returns the currently active project, or nil if none.
+func (pm *ProjectManager) GetActive(ctx context.Context) (*Project, error) {
+	return pm.store.GetActive(ctx)
+}
+
+// DeactivateActive sets all active projects to inactive.
+func (pm *ProjectManager) DeactivateActive(ctx context.Context) error {
+	return pm.store.DeactivateActive(ctx)
+}
+
+// EnsureDefault ensures at least one active project exists. If none exists,
+// creates a new project under base_dir/<short-uuid>, initializes git, writes
+// the sidecar, and registers it as active. If an active project already
+// exists, returns it without creating a new one.
+func (pm *ProjectManager) EnsureDefault(ctx context.Context) (*Project, error) {
+	// Check if an active project already exists.
+	existing, err := pm.GetActive(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("check active project: %w", err)
+	}
+	if existing != nil {
+		return existing, nil
+	}
+
+	// Generate a short hex ID (8 chars = 4 bytes, enough for uniqueness
+	// within a single user's project directory).
+	shortID := pm.generateShortID()
+	localPath := filepath.Join(pm.cfg.BaseDir, shortID)
+
+	// Create the directory.
+	if err := os.MkdirAll(localPath, 0o755); err != nil {
+		return nil, fmt.Errorf("create project dir: %w", err)
+	}
+
+	// Initialize git.
+	if err := pm.runGit(ctx, localPath, "init"); err != nil {
+		return nil, fmt.Errorf("git init: %w", err)
+	}
+
+	// Set default branch.
+	branch := pm.cfg.DefaultBranch
+	if branch == "" {
+		branch = "main"
+	}
+	// Configure git to use the desired default branch.
+	_ = pm.runGit(ctx, localPath, "symbolic-ref", "HEAD", "refs/heads/"+branch)
+
+	// Configure user if not set (best-effort, ignore errors).
+	_ = pm.runGit(ctx, localPath, "config", "user.email", "meept@local")
+	_ = pm.runGit(ctx, localPath, "config", "user.name", "meept")
+
+	// Write sidecar.
+	if err := pm.WriteSidecarID(localPath, shortID); err != nil {
+		return nil, fmt.Errorf("write sidecar: %w", err)
+	}
+
+	p := &Project{
+		ID:        shortID,
+		Name:      shortID,
+		Mode:      ModeGit,
+		LocalPath: localPath,
+		Branch:    branch,
+		Status:    "active",
+	}
+
+	if err := pm.store.CreateProject(ctx, p); err != nil {
+		return nil, fmt.Errorf("create default project: %w", err)
+	}
+
+	pm.logger.Info("created default project",
+		"id", shortID,
+		"path", localPath,
+	)
+
+	return p, nil
+}
+
+// generateShortID returns an 8-character hex string using crypto/rand.
+func (pm *ProjectManager) generateShortID() string {
+	b := make([]byte, 4)
+	if _, err := crypto_rand.Read(b); err != nil {
+		return "00000000"
+	}
+	return hex.EncodeToString(b)
 }
 
 // Branch operations are in manager_branches.go

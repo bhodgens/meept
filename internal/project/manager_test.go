@@ -279,3 +279,116 @@ func TestManager_WriteAndReadSidecar(t *testing.T) {
 		t.Errorf("expected %q, got %q", "abc-123", id)
 	}
 }
+
+func TestManager_GetActive_None(t *testing.T) {
+	pm, _ := newTestManager(t)
+	ctx := context.Background()
+
+	p, err := pm.GetActive(ctx)
+	if err != nil {
+		t.Fatalf("GetActive: %v", err)
+	}
+	if p != nil {
+		t.Errorf("expected nil, got %+v", p)
+	}
+}
+
+func TestManager_GetActive_Exists(t *testing.T) {
+	pm, store := newTestManager(t)
+	ctx := context.Background()
+
+	p := &Project{
+		ID: "active-1", Name: "alpha", Mode: ModeGit,
+		LocalPath: "/tmp/alpha", Status: "active",
+	}
+	if err := store.CreateProject(ctx, p); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	got, err := pm.GetActive(ctx)
+	if err != nil {
+		t.Fatalf("GetActive: %v", err)
+	}
+	if got == nil || got.ID != "active-1" {
+		t.Fatalf("expected active-1, got %+v", got)
+	}
+}
+
+func TestManager_DeactivateActive(t *testing.T) {
+	pm, store := newTestManager(t)
+	ctx := context.Background()
+
+	p := &Project{
+		ID: "a1", Name: "alpha", Mode: ModeGit,
+		LocalPath: "/tmp/alpha", Status: "active",
+	}
+	store.CreateProject(ctx, p)
+
+	if err := pm.DeactivateActive(ctx); err != nil {
+		t.Fatalf("DeactivateActive: %v", err)
+	}
+
+	got, _ := pm.GetActive(ctx)
+	if got != nil {
+		t.Errorf("expected nil after deactivate, got %+v", got)
+	}
+}
+
+func TestManager_EnsureDefault_CreatesProject(t *testing.T) {
+	pm, _ := newTestManager(t)
+	ctx := context.Background()
+
+	p, err := pm.EnsureDefault(ctx)
+	if err != nil {
+		t.Fatalf("EnsureDefault: %v", err)
+	}
+	if p == nil {
+		t.Fatal("expected non-nil project")
+	}
+	if p.Mode != ModeGit {
+		t.Errorf("Mode = %q, want %q", p.Mode, ModeGit)
+	}
+	if p.LocalPath == "" {
+		t.Error("LocalPath should not be empty")
+	}
+	// Directory should exist.
+	if _, err := os.Stat(p.LocalPath); os.IsNotExist(err) {
+		t.Errorf("project dir not created: %s", p.LocalPath)
+	}
+	// .git should exist.
+	if _, err := os.Stat(filepath.Join(p.LocalPath, ".git")); os.IsNotExist(err) {
+		t.Errorf(".git not initialized in %s", p.LocalPath)
+	}
+	// Sidecar should exist.
+	id, err := pm.ReadSidecarID(p.LocalPath)
+	if err != nil {
+		t.Fatalf("ReadSidecarID: %v", err)
+	}
+	if id != p.ID {
+		t.Errorf("sidecar ID = %q, want %q", id, p.ID)
+	}
+	// Name should equal filepath.Base(LocalPath).
+	if p.Name != filepath.Base(p.LocalPath) {
+		t.Errorf("Name = %q, want %q", p.Name, filepath.Base(p.LocalPath))
+	}
+}
+
+func TestManager_EnsureDefault_DoesNotCreateWhenActiveExists(t *testing.T) {
+	pm, store := newTestManager(t)
+	ctx := context.Background()
+
+	// Pre-create an active project.
+	existing := &Project{
+		ID: "existing", Name: "alpha", Mode: ModeGit,
+		LocalPath: "/tmp/alpha", Status: "active",
+	}
+	store.CreateProject(ctx, existing)
+
+	p, err := pm.EnsureDefault(ctx)
+	if err != nil {
+		t.Fatalf("EnsureDefault: %v", err)
+	}
+	if p.ID != "existing" {
+		t.Errorf("expected existing, got %s", p.ID)
+	}
+}
