@@ -43,6 +43,7 @@ type CommandResultMsg struct {
 type CommandHandler struct {
 	rpc          *RPCClient
 	getChatModel func() *models.ChatModel
+	getProjectID func() string
 	skillCommand *commands.SkillCommand
 	notifier     NotificationToggler
 }
@@ -62,6 +63,13 @@ type CommandHandlerOption func(*CommandHandler)
 func WithChatModelGetter(fn func() *models.ChatModel) CommandHandlerOption {
 	return func(h *CommandHandler) {
 		h.getChatModel = fn
+	}
+}
+
+// WithProjectIDGetter sets a function that returns the current project ID.
+func WithProjectIDGetter(fn func() string) CommandHandlerOption {
+	return func(h *CommandHandler) {
+		h.getProjectID = fn
 	}
 }
 
@@ -244,7 +252,7 @@ func (h *CommandHandler) executeHelp(args []string) *CommandResult {
 	sb.WriteString("  /edit <path>        open file in system editor\n")
 	sb.WriteString("  /plan               enter planning mode\n")
 	sb.WriteString("  /review             review current changes\n")
-	sb.WriteString("  /project [subcmd]   manage projects (list, set, add, sync, status)\n")
+	sb.WriteString("  /project [subcmd]   manage projects (list, set, add, sync, status, rename)\n")
 	sb.WriteString("  /skill [name|search <q>] list, show, or search skills\n")
 	sb.WriteString("  /dnd [on|off]       toggle or set do-not-disturb (suppresses toasts)\n")
 	sb.WriteString("  /remember <rule>    save a proposed improvement to the queue\n")
@@ -404,6 +412,7 @@ subcommands:
   add <path|url>      register a new project
   sync                synchronize the current project (git pull)
   status              show git status of current project
+  rename <name>       rename current project directory
 
 examples:
   /project                        show project info
@@ -412,7 +421,8 @@ examples:
   /project add /home/user/myapp   add local project
   /project add https://github.com/org/repo.git
   /project sync                   sync current project
-  /project status                 show project git status`,
+  /project status                 show project git status
+  /project rename new-name        rename current project directory`,
 
 	"skill": `usage: /skill [name|search <query>]
 
@@ -1639,6 +1649,7 @@ func isTemplateNotFoundError(err error) bool {
 //	/project add <path>  - register a new project
 //	/project sync        - sync current project
 //	/project status      - show current project status
+//	/project rename <name> - rename current project directory
 func (h *CommandHandler) executeProject(args []string) *CommandResult {
 	if h.rpc == nil || !h.rpc.IsConnected() {
 		return &CommandResult{
@@ -1665,9 +1676,11 @@ func (h *CommandHandler) executeProject(args []string) *CommandResult {
 		return h.executeProjectSync()
 	case "status":
 		return h.executeProjectStatus()
+	case "rename":
+		return h.executeProjectRename(args[1:])
 	default:
 		return &CommandResult{
-			Output:  fmt.Sprintf("unknown project subcommand: %s\nuse: /project [list|set|add|sync|status]", subcmd),
+			Output:  fmt.Sprintf("unknown project subcommand: %s\nuse: /project [list|set|add|sync|status|rename]", subcmd),
 			IsError: true,
 		}
 	}
@@ -1989,4 +2002,46 @@ func (h *CommandHandler) executeProjectStatus() *CommandResult {
 	}
 
 	return &CommandResult{Output: strings.TrimSpace(sb.String())}
+}
+
+// executeProjectRename renames the current project's directory.
+func (h *CommandHandler) executeProjectRename(args []string) *CommandResult {
+	if len(args) == 0 || args[0] == "" {
+		return &CommandResult{
+			Output:  "usage: /project rename <new-name>",
+			IsError: true,
+		}
+	}
+
+	newName := args[0]
+
+	if h.getProjectID == nil {
+		return &CommandResult{
+			Output:  "project ID accessor not available",
+			IsError: true,
+		}
+	}
+	projectID := h.getProjectID()
+	if projectID == "" {
+		return &CommandResult{
+			Output:  "no active project to rename",
+			IsError: true,
+		}
+	}
+
+	// Call project.rename RPC.
+	_, err := h.rpc.Call("project.rename", map[string]string{
+		"id":       projectID,
+		"new_name": newName,
+	})
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("rename failed: %v", err),
+			IsError: true,
+		}
+	}
+
+	return &CommandResult{
+		Output: fmt.Sprintf("renamed project to '%s'", newName),
+	}
 }

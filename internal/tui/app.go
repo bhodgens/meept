@@ -309,6 +309,9 @@ func NewApp(socketPath string, cwd string) *App {
 		WithChatModelGetter(func() *models.ChatModel {
 			return app.chat
 		}),
+		WithProjectIDGetter(func() string {
+			return app.currentProjectID
+		}),
 	}
 	// Wire /skill command via RPC-backed lister (nil-guard for defense in depth).
 	if rpc != nil {
