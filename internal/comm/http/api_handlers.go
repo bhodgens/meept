@@ -2797,6 +2797,48 @@ func (s *Server) handleProjectCheckout(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "checked out"})
 }
 
+// handleProjectRename handles POST /api/v1/projects/{id}/rename.
+func (s *Server) handleProjectRename(w http.ResponseWriter, r *http.Request) {
+	if s.rpcCall == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "project service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "project id is required")
+		return
+	}
+
+	var body struct {
+		NewName string `json:"new_name"`
+	}
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	if body.NewName == "" {
+		s.writeError(w, http.StatusBadRequest, "new_name is required")
+		return
+	}
+
+	params, err := json.Marshal(map[string]string{
+		"id":       id,
+		"new_name": body.NewName,
+	})
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "failed to encode request")
+		return
+	}
+
+	result, err := s.rpcCall(r.Context(), "project.rename", params)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, result)
+}
+
 // ===== Plan Endpoints =====
 
 // handlePlanList handles GET /api/v1/plans.

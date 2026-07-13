@@ -1234,6 +1234,7 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/projects/{id}/status", s.handleProjectStatus)
 	mux.HandleFunc("GET /api/v1/projects/{id}/branches", s.handleProjectBranches)
 	mux.HandleFunc("POST /api/v1/projects/{id}/checkout", s.handleProjectCheckout)
+	mux.HandleFunc("POST /api/v1/projects/{id}/rename", s.handleProjectRename)
 	mux.HandleFunc("POST /api/v1/projects/detect", s.handleProjectDetect)
 
 	// Search endpoint
