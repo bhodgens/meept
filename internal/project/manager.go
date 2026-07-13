@@ -50,6 +50,19 @@ func (pm *ProjectManager) SetSessionStore(s SessionPathUpdater) {
 	}
 }
 
+// validateShortName rejects shorthand project names that contain path
+// separators or '..' to prevent directory traversal outside base_dir.
+// This mirrors the guard in RegisterGit.
+func validateShortName(name string) error {
+	if name == "" {
+		return fmt.Errorf("project name must not be empty")
+	}
+	if strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("invalid project name %q: must not contain path separators or '..'", name)
+	}
+	return nil
+}
+
 // RegisterGit clones a git repository and registers it as a project.
 // The repo is cloned into baseDir/id.
 func (pm *ProjectManager) RegisterGit(ctx context.Context, id, name, gitURL string) (*Project, error) {
@@ -523,6 +536,11 @@ func (pm *ProjectManager) CreateOrResolve(ctx context.Context, arg string) (*Pro
 	}
 
 	// Shorthand name: resolve to base_dir/<arg>.
+	// Reject names containing path separators or '..' to prevent traversal
+	// outside base_dir (same threat model as RegisterGit's id guard).
+	if err := validateShortName(arg); err != nil {
+		return nil, err
+	}
 	localPath := filepath.Join(pm.cfg.BaseDir, arg)
 
 	// Check if directory already exists with a sidecar.
@@ -625,6 +643,12 @@ func (pm *ProjectManager) Rename(ctx context.Context, projectID, newName string)
 	}
 	if !strings.HasPrefix(projPath, baseDir+string(filepath.Separator)) {
 		return nil, fmt.Errorf("cannot rename external project %q: only projects under base_dir can be renamed", p.LocalPath)
+	}
+
+	// Reject new names containing path separators or '..' to prevent the
+	// renamed directory from escaping base_dir.
+	if err := validateShortName(newName); err != nil {
+		return nil, fmt.Errorf("invalid new name: %w", err)
 	}
 
 	newPath := filepath.Join(baseDir, newName)

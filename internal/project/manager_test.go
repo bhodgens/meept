@@ -532,6 +532,27 @@ func TestManager_CreateOrResolve_AdoptsRenamedDir(t *testing.T) {
 	}
 }
 
+func TestManager_CreateOrResolve_RejectsPathTraversal(t *testing.T) {
+	pm, _ := newTestManager(t)
+	ctx := context.Background()
+
+	for _, bad := range []string{"../evil", "foo/bar", "a/b", "..", "x/.."} {
+		_, err := pm.CreateOrResolve(ctx, bad)
+		if err == nil {
+			t.Errorf("CreateOrResolve(%q) succeeded; want error", bad)
+		}
+	}
+}
+
+func TestManager_CreateOrResolve_RejectsEmptyName(t *testing.T) {
+	pm, _ := newTestManager(t)
+	ctx := context.Background()
+	_, err := pm.CreateOrResolve(ctx, "")
+	if err == nil {
+		t.Error("CreateOrResolve(\"\") succeeded; want error")
+	}
+}
+
 func TestManager_Rename_UnderBaseDir(t *testing.T) {
 	pm, _ := newTestManager(t)
 	ctx := context.Background()
@@ -587,5 +608,23 @@ func TestManager_Rename_ExternalProjectFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "under base_dir") {
 		t.Errorf("expected 'under base_dir' error, got: %v", err)
+	}
+}
+
+func TestManager_Rename_RejectsPathTraversal(t *testing.T) {
+	pm, _ := newTestManager(t)
+	ctx := context.Background()
+
+	// Create a project under base_dir.
+	p, err := pm.CreateOrResolve(ctx, "validname")
+	if err != nil {
+		t.Fatalf("CreateOrResolve: %v", err)
+	}
+
+	for _, bad := range []string{"../evil", "foo/bar", "..", "a/b"} {
+		_, err := pm.Rename(ctx, p.ID, bad)
+		if err == nil {
+			t.Errorf("Rename(%q) succeeded; want error", bad)
+		}
 	}
 }
