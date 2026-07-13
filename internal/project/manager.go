@@ -437,4 +437,156 @@ func (pm *ProjectManager) generateShortID() string {
 	return hex.EncodeToString(b)
 }
 
+// ---------- project resolution ----------
+
+// CreateOrResolve resolves a user-provided project argument.
+//
+// - Absolute path with .git -> DetectFromPath (auto-register or return existing)
+// - Absolute path without .git -> check for sidecar (adopt if found),
+//   otherwise RegisterLocal
+// - Shorthand name (not absolute) -> resolve to base_dir/<name>, mkdir -p,
+//   git init if no .git, write sidecar, register as git project
+//
+// For all paths, if a sidecar file exists inside the directory, the project
+// is adopted (DB local_path and name updated) rather than re-registered.
+func (pm *ProjectManager) CreateOrResolve(ctx context.Context, arg string) (*Project, error) {
+	// Check if arg is an absolute path.
+	if filepath.IsAbs(arg) {
+		absPath, err := filepath.Abs(arg)
+		if err != nil {
+			return nil, fmt.Errorf("resolve path: %w", err)
+		}
+
+		// Check for sidecar — enables adoption of renamed directories.
+		sidecarID, err := pm.ReadSidecarID(absPath)
+		if err != nil {
+			return nil, fmt.Errorf("read sidecar: %w", err)
+		}
+
+		if sidecarID != "" {
+			// Sidecar exists — look up in DB.
+			existing, err := pm.store.GetProject(ctx, sidecarID)
+			if err == nil && existing != nil {
+				// Adopt: update path and name if they've changed.
+				name := filepath.Base(absPath)
+				if existing.LocalPath != absPath || existing.Name != name {
+					if err := pm.store.UpdateProjectPath(ctx, sidecarID, absPath, name); err != nil {
+						return nil, fmt.Errorf("adopt project path: %w", err)
+					}
+					existing.LocalPath = absPath
+					existing.Name = name
+				}
+				return existing, nil
+			}
+			// Sidecar exists but project not in DB — re-register with the
+			// sidecar's UUID.
+			name := filepath.Base(absPath)
+			p := &Project{
+				ID:        sidecarID,
+				Name:      name,
+				Mode:      ModeGit,
+				LocalPath: absPath,
+				Branch:    pm.cfg.DefaultBranch,
+				Status:    "active",
+			}
+			if p.Branch == "" {
+				p.Branch = "main"
+			}
+			if err := pm.store.CreateProject(ctx, p); err != nil {
+				return nil, fmt.Errorf("re-register from sidecar: %w", err)
+			}
+			return p, nil
+		}
+
+		// No sidecar — check for .git.
+		if _, err := os.Stat(filepath.Join(absPath, ".git")); err == nil {
+			// Git repo — use DetectFromPath (auto-registers or returns existing).
+			return pm.DetectFromPath(ctx, absPath)
+		}
+
+		// No .git, no sidecar — register as local project.
+		name := filepath.Base(absPath)
+		return pm.RegisterLocal(ctx, "", name, absPath)
+	}
+
+	// Shorthand name: resolve to base_dir/<arg>.
+	localPath := filepath.Join(pm.cfg.BaseDir, arg)
+
+	// Check if directory already exists with a sidecar.
+	sidecarID, _ := pm.ReadSidecarID(localPath)
+	if sidecarID != "" {
+		existing, err := pm.store.GetProject(ctx, sidecarID)
+		if err == nil && existing != nil {
+			return existing, nil
+		}
+	}
+
+	// Check if already registered by path.
+	existing, err := pm.store.GetProjectByPath(ctx, localPath)
+	if err == nil && existing != nil {
+		return existing, nil
+	}
+
+	// Create directory, git init, write sidecar, register.
+	if err := os.MkdirAll(localPath, 0o755); err != nil {
+		return nil, fmt.Errorf("create project dir: %w", err)
+	}
+
+	// Initialize git if .git doesn't exist.
+	if _, err := os.Stat(filepath.Join(localPath, ".git")); os.IsNotExist(err) {
+		if err := pm.runGit(ctx, localPath, "init"); err != nil {
+			return nil, fmt.Errorf("git init: %w", err)
+		}
+		branch := pm.cfg.DefaultBranch
+		if branch == "" {
+			branch = "main"
+		}
+		_ = pm.runGit(ctx, localPath, "symbolic-ref", "HEAD", "refs/heads/"+branch)
+		_ = pm.runGit(ctx, localPath, "config", "user.email", "meept@local")
+		_ = pm.runGit(ctx, localPath, "config", "user.name", "meept")
+	}
+
+	// Determine branch.
+	branch, _ := pm.gitOutput(ctx, localPath, "rev-parse", "--abbrev-ref", "HEAD")
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		branch = pm.cfg.DefaultBranch
+		if branch == "" {
+			branch = "main"
+		}
+	}
+
+	// Use the sidecar ID if it exists, otherwise generate a new one.
+	id := sidecarID
+	if id == "" {
+		id = pm.generateShortID()
+	}
+
+	// Write sidecar.
+	if err := pm.WriteSidecarID(localPath, id); err != nil {
+		return nil, fmt.Errorf("write sidecar: %w", err)
+	}
+
+	p := &Project{
+		ID:        id,
+		Name:      arg,
+		Mode:      ModeGit,
+		LocalPath: localPath,
+		Branch:    branch,
+		Status:    "active",
+	}
+
+	if err := pm.store.CreateProject(ctx, p); err != nil {
+		return nil, fmt.Errorf("create project: %w", err)
+	}
+
+	pm.logger.Info("created project from shorthand",
+		"id", id,
+		"name", arg,
+		"path", localPath,
+	)
+
+	return p, nil
+}
+
 // Branch operations are in manager_branches.go

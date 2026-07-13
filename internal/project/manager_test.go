@@ -392,3 +392,141 @@ func TestManager_EnsureDefault_DoesNotCreateWhenActiveExists(t *testing.T) {
 		t.Errorf("expected existing, got %s", p.ID)
 	}
 }
+
+func TestManager_CreateOrResolve_ShorthandName(t *testing.T) {
+	pm, _ := newTestManager(t)
+	ctx := context.Background()
+
+	p, err := pm.CreateOrResolve(ctx, "myapp")
+	if err != nil {
+		t.Fatalf("CreateOrResolve: %v", err)
+	}
+	if p.Name != "myapp" {
+		t.Errorf("Name = %q, want %q", p.Name, "myapp")
+	}
+	expectedPath := filepath.Join(pm.cfg.BaseDir, "myapp")
+	if p.LocalPath != expectedPath {
+		t.Errorf("LocalPath = %q, want %q", p.LocalPath, expectedPath)
+	}
+	if p.Mode != ModeGit {
+		t.Errorf("Mode = %q, want %q", p.Mode, ModeGit)
+	}
+	// Directory should exist.
+	if _, err := os.Stat(p.LocalPath); os.IsNotExist(err) {
+		t.Errorf("project dir not created: %s", p.LocalPath)
+	}
+	// .git should exist.
+	if _, err := os.Stat(filepath.Join(p.LocalPath, ".git")); os.IsNotExist(err) {
+		t.Errorf(".git not initialized")
+	}
+	// Sidecar should exist.
+	sid, err := pm.ReadSidecarID(p.LocalPath)
+	if err != nil {
+		t.Fatalf("ReadSidecarID: %v", err)
+	}
+	if sid != p.ID {
+		t.Errorf("sidecar = %q, want %q", sid, p.ID)
+	}
+}
+
+func TestManager_CreateOrResolve_ExistingShorthand(t *testing.T) {
+	pm, _ := newTestManager(t)
+	ctx := context.Background()
+
+	// First call creates the project.
+	p1, err := pm.CreateOrResolve(ctx, "myapp")
+	if err != nil {
+		t.Fatalf("CreateOrResolve first: %v", err)
+	}
+
+	// Second call should return the same project (idempotent).
+	p2, err := pm.CreateOrResolve(ctx, "myapp")
+	if err != nil {
+		t.Fatalf("CreateOrResolve second: %v", err)
+	}
+	if p2.ID != p1.ID {
+		t.Errorf("second call returned different ID: %q vs %q", p2.ID, p1.ID)
+	}
+}
+
+func TestManager_CreateOrResolve_AbsolutePathWithGit(t *testing.T) {
+	pm, _ := newTestManager(t)
+	ctx := context.Background()
+
+	// Create a real git repo in a temp dir.
+	repoDir := filepath.Join(t.TempDir(), "myrepo")
+	os.MkdirAll(repoDir, 0o755)
+	initGitRepo(t, repoDir)
+
+	p, err := pm.CreateOrResolve(ctx, repoDir)
+	if err != nil {
+		t.Fatalf("CreateOrResolve: %v", err)
+	}
+	if p.Mode != ModeGit {
+		t.Errorf("Mode = %q, want %q", p.Mode, ModeGit)
+	}
+	if p.LocalPath != repoDir {
+		t.Errorf("LocalPath = %q, want %q", p.LocalPath, repoDir)
+	}
+}
+
+func TestManager_CreateOrResolve_AbsolutePathNoGit(t *testing.T) {
+	pm, _ := newTestManager(t)
+	ctx := context.Background()
+
+	// A directory with no .git.
+	localDir := filepath.Join(t.TempDir(), "localproj")
+	os.MkdirAll(localDir, 0o755)
+
+	p, err := pm.CreateOrResolve(ctx, localDir)
+	if err != nil {
+		t.Fatalf("CreateOrResolve: %v", err)
+	}
+	if p.Mode != ModeLocal {
+		t.Errorf("Mode = %q, want %q", p.Mode, ModeLocal)
+	}
+	if p.LocalPath != localDir {
+		t.Errorf("LocalPath = %q, want %q", p.LocalPath, localDir)
+	}
+}
+
+func TestManager_CreateOrResolve_AdoptsRenamedDir(t *testing.T) {
+	pm, store := newTestManager(t)
+	ctx := context.Background()
+
+	// Create a project via shorthand.
+	p, err := pm.CreateOrResolve(ctx, "original")
+	if err != nil {
+		t.Fatalf("CreateOrResolve: %v", err)
+	}
+
+	// Simulate external rename: move the directory.
+	renamedPath := filepath.Join(filepath.Dir(p.LocalPath), "renamed")
+	if err := os.Rename(p.LocalPath, renamedPath); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+
+	// Now resolve the renamed path — should adopt via sidecar.
+	adopted, err := pm.CreateOrResolve(ctx, renamedPath)
+	if err != nil {
+		t.Fatalf("CreateOrResolve after rename: %v", err)
+	}
+	if adopted.ID != p.ID {
+		t.Errorf("adopted ID = %q, want original %q", adopted.ID, p.ID)
+	}
+	if adopted.LocalPath != renamedPath {
+		t.Errorf("adopted LocalPath = %q, want %q", adopted.LocalPath, renamedPath)
+	}
+	if adopted.Name != "renamed" {
+		t.Errorf("adopted Name = %q, want %q", adopted.Name, "renamed")
+	}
+
+	// DB should reflect the new path.
+	dbProj, err := store.GetProject(ctx, p.ID)
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+	if dbProj.LocalPath != renamedPath {
+		t.Errorf("DB LocalPath = %q, want %q", dbProj.LocalPath, renamedPath)
+	}
+}
