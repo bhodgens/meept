@@ -628,3 +628,48 @@ func TestManager_Rename_RejectsPathTraversal(t *testing.T) {
 		}
 	}
 }
+
+func TestManager_ResolutionChain_InheritThenSwitch(t *testing.T) {
+	pm, _ := newTestManager(t)
+	ctx := context.Background()
+
+	// First call to EnsureDefault creates a uuid project.
+	p1, err := pm.EnsureDefault(ctx)
+	if err != nil {
+		t.Fatalf("EnsureDefault first: %v", err)
+	}
+
+	// Second call returns the same project (already active).
+	p2, err := pm.EnsureDefault(ctx)
+	if err != nil {
+		t.Fatalf("EnsureDefault second: %v", err)
+	}
+	if p2.ID != p1.ID {
+		t.Errorf("second EnsureDefault returned different project: %q vs %q", p2.ID, p1.ID)
+	}
+
+	// CreateOrResolve with a shorthand name deactivates the old and creates new.
+	p3, err := pm.CreateOrResolve(ctx, "myapp")
+	if err != nil {
+		t.Fatalf("CreateOrResolve: %v", err)
+	}
+
+	// Deactivate old, activate new.
+	pm.DeactivateActive(ctx)
+	pm.SetStatus(ctx, p3.ID, "active")
+
+	// GetActive should now return the new project.
+	active, _ := pm.GetActive(ctx)
+	if active == nil || active.ID != p3.ID {
+		t.Errorf("GetActive = %+v, want %s", active, p3.ID)
+	}
+
+	// EnsureDefault should return the new active project, not create another.
+	p4, err := pm.EnsureDefault(ctx)
+	if err != nil {
+		t.Fatalf("EnsureDefault after switch: %v", err)
+	}
+	if p4.ID != p3.ID {
+		t.Errorf("EnsureDefault returned %q, want %q", p4.ID, p3.ID)
+	}
+}
