@@ -215,12 +215,69 @@ Tests cover:
 - Empty prefix returns all recents
 - No matching results handling
 
+## Project Resolution
+
+Every session gets a working directory automatically:
+
+1. **Inherit**: If an active project exists, new sessions inherit its path.
+2. **Auto-create**: If no active project exists, one is created under
+   `projects.base_dir/<short-uuid>` with `git init`.
+3. **Override**: `/project <name>` switches to a different project at any time.
+
+### `/project` subcommands
+
+| Command | Behavior |
+|---|---|
+| `/project` | Show current project info |
+| `/project <name>` | Resolve to `base_dir/<name>`, mkdir, git init, switch |
+| `/project /abs/path` | Detect git or register as local, switch |
+| `/project rename <new-name>` | Rename current project's directory (base_dir projects only) |
+| `/project list` | List all registered projects |
+| `/project sync` | Git pull current project |
+| `/project status` | Show git status of current project |
+
+### Sidecar files
+
+Each project directory contains `.meept/project_id` storing the project's
+UUID. This enables automatic adoption when a directory is renamed outside
+meept — the next `/project /new/path` detects the sidecar and updates the
+database rather than creating a duplicate.
+
+### Single active project
+
+Only one project is `active` at a time. Switching projects via `/project`
+deactivates the previous one.
+
+### Path traversal validation
+
+Project names passed to `/project <name>` and `/project rename <new-name>`
+are validated to reject names containing `..` or path separators (`/`, `\`).
+This prevents directory traversal attacks that could escape `base_dir` and
+write to arbitrary filesystem locations. The same validation is applied to
+project IDs used in `RegisterGit`. Empty names are also rejected.
+
+**Implementation:** `validateShortName()` in `internal/project/manager.go`.
+
+### Rename behavior
+
+`/project rename <new-name>` renames the current project's directory on
+disk and updates the database. Constraints:
+
+- Only projects under `base_dir` can be renamed. External projects
+  (registered via absolute path) are rejected.
+- The new name must pass `validateShortName` (no `..`, no path separators,
+  non-empty).
+- All sessions bound to the renamed project have their `project_path`
+  updated in bulk via `UpdateSessionProjectPath`.
+- The `.meept/project_id` sidecar file travels with the directory, so
+  sessions and future resolution calls continue to work after the rename.
+
 ## Related Files
 
-- `internal/project/store.go` - SQLite schema (project_recents table)
+- `internal/project/store.go` - SQLite schema (project_recents table), `GetActive`, `DeactivateActive`, `UpdateProjectPath`, `UpdateSessionProjectPath`
 - `internal/project/recents.go` - RecentsStore implementation + SchedulePruneJob
-- `internal/project/manager.go` - ProjectManager.TouchRecent, ListRecents
-- `internal/rpc/projects.go` - RPC handlers (handleReadDir, handleSet)
+- `internal/project/manager.go` - ProjectManager.TouchRecent, ListRecents, `EnsureDefault`, `GetActive`, `DeactivateActive`, `CreateOrResolve`, `Rename`, sidecar helpers (`WriteSidecarID`, `ReadSidecarID`), `validateShortName`
+- `internal/rpc/projects.go` - RPC handlers (handleReadDir, handleSet, handleRename)
 - `internal/agent/loop.go` - SetWorkingDir, StartProjectSub (bus subscription)
 - `internal/tui/components/project_typeahead.go` - TUI component
 - `internal/tui/command_handler.go` - `/project` slash command dispatcher
