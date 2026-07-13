@@ -2,6 +2,7 @@
 package session
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"testing"
@@ -168,5 +169,36 @@ func TestGetMostRecentSession_WithProject(t *testing.T) {
 	}
 	if sess.DetectionContext.CWD != "/tmp/recent-project" {
 		t.Errorf("expected CWD=/tmp/recent-project, got %s", sess.DetectionContext.CWD)
+	}
+}
+
+// TestSQLiteStore_UpdateSessionsProjectPath verifies that bulk-updating
+// session project_path values works correctly for the rename flow.
+func TestSQLiteStore_UpdateSessionsProjectPath(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	// Create a session with a project path.
+	sess, err := store.Create("test-sess")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := store.SetProject(sess.ID, "proj-1", "/old/path"); err != nil {
+		t.Fatalf("SetProject: %v", err)
+	}
+
+	// Update the project path for all sessions pointing at /old/path.
+	if err := store.UpdateSessionsProjectPath(ctx, "/old/path", "/new/path"); err != nil {
+		t.Fatalf("UpdateSessionsProjectPath: %v", err)
+	}
+
+	// Verify the session now has the new path.
+	got := store.Get(sess.ID)
+	if got == nil {
+		t.Fatal("session not found")
+	}
+	if got.ProjectPath != "/new/path" {
+		t.Errorf("ProjectPath = %q, want %q", got.ProjectPath, "/new/path")
 	}
 }

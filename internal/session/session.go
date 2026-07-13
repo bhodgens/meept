@@ -579,6 +579,18 @@ func (s *MemoryStore) SetProject(sessionID, projectID, projectPath string) error
 	return nil
 }
 
+// UpdateSessionsProjectPath is a no-op for MemoryStore (sessions are in-memory).
+func (s *MemoryStore) UpdateSessionsProjectPath(ctx context.Context, oldPath, newPath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sess := range s.sessions {
+		if sess.ProjectPath == oldPath {
+			sess.ProjectPath = newPath
+		}
+	}
+	return nil
+}
+
 // F-04 FIX: SetNoFence updates the per-session fence override flag.
 func (s *MemoryStore) SetNoFence(sessionID string, noFence bool) error {
 	s.mu.Lock()

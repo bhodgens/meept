@@ -1261,6 +1261,22 @@ func (s *SQLiteStore) SetProject(sessionID, projectID, projectPath string) error
 	return nil
 }
 
+// UpdateSessionsProjectPath bulk-updates all sessions whose project_path
+// matches oldPath to newPath. Used when a project directory is renamed.
+func (s *SQLiteStore) UpdateSessionsProjectPath(ctx context.Context, oldPath, newPath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE sessions SET project_path = ?, last_activity = ? WHERE project_path = ?`,
+		newPath, time.Now().UTC().Format(time.RFC3339Nano), oldPath,
+	) //nolint:mutexio // mutex serializes sqlite connection access
+	if err != nil {
+		return fmt.Errorf("update sessions project_path: %w", err)
+	}
+	return nil
+}
+
 // F-04 FIX: SetNoFence updates the per-session fence override flag.
 func (s *SQLiteStore) SetNoFence(sessionID string, noFence bool) error {
 	s.mu.Lock()

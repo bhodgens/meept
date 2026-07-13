@@ -108,6 +108,7 @@ type Store interface {
 
 	// Project operations
 	SetProject(sessionID, projectID, projectPath string) error
+	UpdateSessionsProjectPath(ctx context.Context, oldPath, newPath string) error
 
 	// F-04 FIX: Allow per-session fence override for --nofence CLI flag.
 	SetNoFence(sessionID string, noFence bool) error
