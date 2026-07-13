@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/caimlas/meept/internal/config"
@@ -528,5 +529,63 @@ func TestManager_CreateOrResolve_AdoptsRenamedDir(t *testing.T) {
 	}
 	if dbProj.LocalPath != renamedPath {
 		t.Errorf("DB LocalPath = %q, want %q", dbProj.LocalPath, renamedPath)
+	}
+}
+
+func TestManager_Rename_UnderBaseDir(t *testing.T) {
+	pm, _ := newTestManager(t)
+	ctx := context.Background()
+
+	// Create a project via shorthand.
+	p, err := pm.CreateOrResolve(ctx, "oldname")
+	if err != nil {
+		t.Fatalf("CreateOrResolve: %v", err)
+	}
+
+	// Rename it.
+	renamed, err := pm.Rename(ctx, p.ID, "newname")
+	if err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if renamed.Name != "newname" {
+		t.Errorf("Name = %q, want %q", renamed.Name, "newname")
+	}
+	expectedPath := filepath.Join(pm.cfg.BaseDir, "newname")
+	if renamed.LocalPath != expectedPath {
+		t.Errorf("LocalPath = %q, want %q", renamed.LocalPath, expectedPath)
+	}
+
+	// Old directory should not exist.
+	if _, err := os.Stat(p.LocalPath); !os.IsNotExist(err) {
+		t.Errorf("old dir should not exist: %s", p.LocalPath)
+	}
+	// New directory should exist.
+	if _, err := os.Stat(renamed.LocalPath); os.IsNotExist(err) {
+		t.Errorf("new dir should exist: %s", renamed.LocalPath)
+	}
+	// Sidecar should still have the same ID.
+	sid, _ := pm.ReadSidecarID(renamed.LocalPath)
+	if sid != p.ID {
+		t.Errorf("sidecar = %q, want %q", sid, p.ID)
+	}
+}
+
+func TestManager_Rename_ExternalProjectFails(t *testing.T) {
+	pm, store := newTestManager(t)
+	ctx := context.Background()
+
+	// Create a project NOT under base_dir.
+	p := &Project{
+		ID: "ext1", Name: "ext", Mode: ModeGit,
+		LocalPath: "/tmp/ext-project", Status: "active",
+	}
+	store.CreateProject(ctx, p)
+
+	_, err := pm.Rename(ctx, "ext1", "newname")
+	if err == nil {
+		t.Fatal("expected error renaming external project")
+	}
+	if !strings.Contains(err.Error(), "under base_dir") {
+		t.Errorf("expected 'under base_dir' error, got: %v", err)
 	}
 }

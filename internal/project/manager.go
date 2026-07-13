@@ -22,6 +22,12 @@ type ProjectManager struct {
 	recentsStore *RecentsStore
 	cfg          config.ProjectsConfig
 	logger       *slog.Logger
+	sessionStore SessionPathUpdater
+}
+
+// SessionPathUpdater is the narrow interface needed for bulk session path updates.
+type SessionPathUpdater interface {
+	UpdateSessionsProjectPath(ctx context.Context, oldPath, newPath string) error
 }
 
 // NewProjectManager creates a new ProjectManager.
@@ -34,6 +40,13 @@ func NewProjectManager(store *Store, recents *RecentsStore, cfg config.ProjectsC
 		recentsStore: recents,
 		cfg:          cfg,
 		logger:       logger,
+	}
+}
+
+// SetSessionStore wires the session store for bulk path updates on rename.
+func (pm *ProjectManager) SetSessionStore(s SessionPathUpdater) {
+	if s != nil {
+		pm.sessionStore = s
 	}
 }
 
@@ -584,6 +597,70 @@ func (pm *ProjectManager) CreateOrResolve(ctx context.Context, arg string) (*Pro
 		"id", id,
 		"name", arg,
 		"path", localPath,
+	)
+
+	return p, nil
+}
+
+// ---------- rename ----------
+
+// Rename renames a project's directory and updates the DB.
+// Only projects whose local_path is under base_dir can be renamed.
+// The sidecar file travels with the directory. All sessions pointing
+// at the old path are updated to the new path.
+func (pm *ProjectManager) Rename(ctx context.Context, projectID, newName string) (*Project, error) {
+	p, err := pm.store.GetProject(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("get project for rename: %w", err)
+	}
+
+	// Only allow renaming projects under base_dir.
+	baseDir, err := filepath.Abs(pm.cfg.BaseDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve base_dir: %w", err)
+	}
+	projPath, err := filepath.Abs(p.LocalPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve project path: %w", err)
+	}
+	if !strings.HasPrefix(projPath, baseDir+string(filepath.Separator)) {
+		return nil, fmt.Errorf("cannot rename external project %q: only projects under base_dir can be renamed", p.LocalPath)
+	}
+
+	newPath := filepath.Join(baseDir, newName)
+	oldPath := p.LocalPath
+
+	// Move the directory.
+	if err := os.Rename(p.LocalPath, newPath); err != nil {
+		return nil, fmt.Errorf("rename directory: %w", err)
+	}
+
+	// Update DB.
+	if err := pm.store.UpdateProjectPath(ctx, projectID, newPath, newName); err != nil {
+		// Best-effort: try to move the directory back on DB failure.
+		os.Rename(newPath, p.LocalPath)
+		return nil, fmt.Errorf("update project path in DB: %w", err)
+	}
+
+	// Update sessions pointing at old path.
+	if pm.sessionStore != nil {
+		if err := pm.sessionStore.UpdateSessionsProjectPath(ctx, oldPath, newPath); err != nil {
+			pm.logger.Warn("failed to update sessions after rename",
+				"old_path", oldPath,
+				"new_path", newPath,
+				"error", err,
+			)
+		}
+	}
+
+	p.LocalPath = newPath
+	p.Name = newName
+
+	pm.logger.Info("renamed project",
+		"id", projectID,
+		"old_path", oldPath,
+		"new_path", newPath,
+		"new_name", newName,
 	)
 
 	return p, nil
