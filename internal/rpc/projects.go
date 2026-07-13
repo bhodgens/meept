@@ -200,10 +200,11 @@ func (h *ProjectHandler) handleSet(ctx context.Context, params json.RawMessage) 
 	var p *project.Project
 
 	if req.Path != "" {
-		// Path-only invocation: detect and upsert project from path.
-		p, err = pm.DetectFromPath(ctx, req.Path)
+		// Use CreateOrResolve which handles both shorthand names and
+		// absolute paths, including sidecar-based adoption.
+		p, err = pm.CreateOrResolve(ctx, req.Path)
 		if err != nil {
-			return nil, fmt.Errorf("detect project: %w", err)
+			return nil, fmt.Errorf("resolve project: %w", err)
 		}
 	} else if req.SessionID == "" || req.ProjectID == "" {
 		return nil, fmt.Errorf("session_id and project_id, or path, are required")
@@ -213,6 +214,17 @@ func (h *ProjectHandler) handleSet(ctx context.Context, params json.RawMessage) 
 		if err != nil {
 			return nil, fmt.Errorf("get project: %w", err)
 		}
+	}
+
+	// Deactivate any previously active project before activating this one.
+	if err := pm.DeactivateActive(ctx); err != nil {
+		h.logger.Warn("failed to deactivate previous active project", "error", err)
+	}
+
+	// Set this project as active.
+	p.Status = "active"
+	if err := pm.SetStatus(ctx, p.ID, "active"); err != nil {
+		h.logger.Warn("failed to set project active", "error", err)
 	}
 
 	// Bind to session

@@ -690,4 +690,19 @@ func (pm *ProjectManager) Rename(ctx context.Context, projectID, newName string)
 	return p, nil
 }
 
+// SetStatus updates a project's status.
+func (pm *ProjectManager) SetStatus(ctx context.Context, id, status string) error {
+	p, err := pm.store.GetProject(ctx, id)
+	if err != nil {
+		return err
+	}
+	p.Status = status
+	return pm.store.UpdateProject(ctx, p)
+}
+
+// Config returns the project manager's configuration.
+func (pm *ProjectManager) Config() config.ProjectsConfig {
+	return pm.cfg
+}
+
 // Branch operations are in manager_branches.go
