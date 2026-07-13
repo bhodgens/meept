@@ -1702,6 +1702,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+			// Handle project refresh (e.g. after rename).
+			if msg.Result.RefreshProject {
+				return a, tea.Batch(
+					a.fetchCurrentProject,
+					tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+						return StatusMessageClearMsg{}
+					}),
+				)
+			}
+
 			// Clear status message after delay
 			return a, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 				return StatusMessageClearMsg{}

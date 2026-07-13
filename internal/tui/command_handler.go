@@ -32,6 +32,8 @@ type CommandResult struct {
 	ToggleVimMode bool
 	// SetProjectID requests the app to switch the current session's project.
 	SetProjectID string
+	// RefreshProject requests the app to re-fetch project info (e.g. after rename).
+	RefreshProject bool
 }
 
 // CommandResultMsg is a bubbletea message containing a command result.
@@ -2042,6 +2044,7 @@ func (h *CommandHandler) executeProjectRename(args []string) *CommandResult {
 	}
 
 	return &CommandResult{
-		Output: fmt.Sprintf("renamed project to '%s'", newName),
+		Output:        fmt.Sprintf("renamed project to '%s'", newName),
+		RefreshProject: true,
 	}
 }
