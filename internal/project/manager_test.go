@@ -251,3 +251,31 @@ func TestRegisterGit_RejectsDashPrefixedURL(t *testing.T) {
 		}
 	}
 }
+
+func TestManager_WriteAndReadSidecar(t *testing.T) {
+	pm, _ := newTestManager(t)
+	dir := t.TempDir()
+
+	// No sidecar yet.
+	id, err := pm.ReadSidecarID(dir)
+	if err != nil {
+		t.Fatalf("ReadSidecarID on empty dir: %v", err)
+	}
+	if id != "" {
+		t.Errorf("expected empty ID, got %q", id)
+	}
+
+	// Write sidecar.
+	if err := pm.WriteSidecarID(dir, "abc-123"); err != nil {
+		t.Fatalf("WriteSidecarID: %v", err)
+	}
+
+	// Read it back.
+	id, err = pm.ReadSidecarID(dir)
+	if err != nil {
+		t.Fatalf("ReadSidecarID: %v", err)
+	}
+	if id != "abc-123" {
+		t.Errorf("expected %q, got %q", "abc-123", id)
+	}
+}

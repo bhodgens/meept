@@ -307,4 +307,44 @@ func (pm *ProjectManager) RecentsStore() *RecentsStore {
 	return pm.recentsStore
 }
 
+// ---------- sidecar helpers ----------
+
+// sidecarDir is the subdirectory inside a project for meept metadata.
+const sidecarDir = ".meept"
+
+// sidecarFile is the filename storing the project's UUID.
+const sidecarFile = "project_id"
+
+// sidecarPath returns the full path to the sidecar file for a project directory.
+func sidecarPath(projectDir string) string {
+	return filepath.Join(projectDir, sidecarDir, sidecarFile)
+}
+
+// WriteSidecarID writes the project's UUID into .meept/project_id inside
+// the project directory. Creates .meept/ if it doesn't exist.
+func (pm *ProjectManager) WriteSidecarID(projectDir, projectID string) error {
+	meeptDir := filepath.Join(projectDir, sidecarDir)
+	if err := os.MkdirAll(meeptDir, 0o755); err != nil {
+		return fmt.Errorf("create sidecar dir: %w", err)
+	}
+	data := []byte(projectID)
+	if err := os.WriteFile(sidecarPath(projectDir), data, 0o644); err != nil {
+		return fmt.Errorf("write sidecar: %w", err)
+	}
+	return nil
+}
+
+// ReadSidecarID reads the project UUID from .meept/project_id. Returns
+// empty string if the file does not exist (not an error).
+func (pm *ProjectManager) ReadSidecarID(projectDir string) (string, error) {
+	data, err := os.ReadFile(sidecarPath(projectDir))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read sidecar: %w", err)
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
 // Branch operations are in manager_branches.go
