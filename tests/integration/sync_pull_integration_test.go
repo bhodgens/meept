@@ -19,10 +19,10 @@ import (
 const gossipSchemaForSync = `
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
-    created_at INTEGER,
-    updated_at INTEGER,
-    metadata BLOB,
-    source_node TEXT
+    created_at INTEGER NOT NULL,
+    last_activity TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    source_node TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS turns (
     turn_id TEXT PRIMARY KEY,
@@ -81,8 +81,8 @@ func TestSyncPull_MergePeerIntoGossipAndPersistMetadata(t *testing.T) {
 	for i := 0; i < sessionRows; i++ {
 		sid := id.Generate("sess-")
 		_, err = peerDB.Exec(
-			`INSERT INTO sessions (id, created_at, updated_at, metadata, source_node) VALUES (?, ?, ?, ?, ?)`,
-			sid, time.Now().UnixNano(), time.Now().UnixNano(), []byte(`{}`), peerID,
+			`INSERT INTO sessions (id, created_at, last_activity, metadata_json, source_node) VALUES (?, ?, ?, ?, ?)`,
+			sid, time.Now().UnixNano(), time.Now().Format(time.RFC3339), `{}`, peerID,
 		)
 		if err != nil {
 			t.Fatalf("insert peer session %d: %v", i, err)
@@ -247,8 +247,8 @@ func TestSyncPull_MergeIsIdempotent_AcrossTwoCycles(t *testing.T) {
 	peerID := id.Generate("peer-")
 	stableSessionID := "sess-stable-id"
 	_, err = peerDB.Exec(
-		`INSERT INTO sessions (id, created_at, updated_at, metadata, source_node) VALUES (?, ?, ?, ?, ?)`,
-		stableSessionID, 1, 1, []byte(`{}`), peerID,
+		`INSERT INTO sessions (id, created_at, last_activity, metadata_json, source_node) VALUES (?, ?, ?, ?, ?)`,
+		stableSessionID, 1, `2026-01-01T00:00:00Z`, `{}`, peerID,
 	)
 	if err != nil {
 		t.Fatalf("insert stable session: %v", err)

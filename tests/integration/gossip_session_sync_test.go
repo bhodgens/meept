@@ -33,8 +33,8 @@ func makeGossipEvent(t *testing.T, eventType models.ClusterEventType, nodeID str
 }
 
 // TestGossipHandler_SessionTurn_PersistsToGossipDB verifies that a SESSION_TURN
-// gossip event from a peer node is persisted as a memory record in the gossip DB
-// via the dual store.
+// gossip event from a peer node is persisted as a turn record in the gossip DB
+// via the dual store (StoreRemoteTurn).
 func TestGossipHandler_SessionTurn_PersistsToGossipDB(t *testing.T) {
 	t.Parallel()
 
@@ -61,19 +61,18 @@ func TestGossipHandler_SessionTurn_PersistsToGossipDB(t *testing.T) {
 		t.Fatalf("OnEvent: %v", err)
 	}
 
-	// Verify the gossip DB has one row in memories with source_node = node-peer.
-	// The handler stores SESSION_TURN as an episodic memory via StoreRemoteMemory.
+	// Verify the gossip DB has one row in turns with source_node = node-peer.
+	// The handler stores SESSION_TURN as a turn record via StoreRemoteTurn.
 	ctx := context.Background()
-	expectedID := "gossip-turn-" + event.EventID
 	var count int
 	if err := store.GossipDB().QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM memories WHERE id = ? AND source_node = ?`,
-		expectedID, "node-peer",
+		`SELECT COUNT(*) FROM turns WHERE turn_id = ? AND source_node = ?`,
+		payload.TurnID, "node-peer",
 	).Scan(&count); err != nil {
-		t.Fatalf("query gossip memories: %v", err)
+		t.Fatalf("query gossip turns: %v", err)
 	}
 	if count != 1 {
-		t.Errorf("gossip memories count = %d, want 1 (eventID=%s)", count, expectedID)
+		t.Errorf("gossip turns count = %d, want 1 (turnID=%s)", count, payload.TurnID)
 	}
 }
 
@@ -106,17 +105,16 @@ func TestGossipHandler_SessionTurn_SkipsLocalOrigin(t *testing.T) {
 		t.Fatalf("OnEvent: %v", err)
 	}
 
-	// No memory should have been written.
+	// No turn should have been written.
 	ctx := context.Background()
-	expectedID := "gossip-turn-" + event.EventID
 	var count int
 	if err := store.GossipDB().QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM memories WHERE id = ?`, expectedID,
+		`SELECT COUNT(*) FROM turns WHERE turn_id = ?`, payload.TurnID,
 	).Scan(&count); err != nil {
-		t.Fatalf("query gossip: %v", err)
+		t.Fatalf("query gossip turns: %v", err)
 	}
 	if count != 0 {
-		t.Errorf("gossip memories count = %d, want 0 (local-origin events must be skipped)", count)
+		t.Errorf("gossip turns count = %d, want 0 (local-origin events must be skipped)", count)
 	}
 }
 
