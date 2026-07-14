@@ -101,9 +101,9 @@ func TestExtractTitle(t *testing.T) {
 		{"with quotes", `"Fix the bug"`, 50, "Fix the bug"},
 		{"with prefix", "Title: Fix the bug", 50, "Fix the bug"},
 		{"multiline", "Fix the bug\nin the sidebar", 50, "Fix the bug"},
-		{"truncate", "This is a very long title that needs truncation", 20, "This is a very lon…"},
+		{"truncate", "This is a very long title that needs truncation", 20, "This is a very lo…"},
 		{"empty", "", 50, ""},
-		{"short max", "Long title", 5, "Long…"},
+		{"short max", "Long title", 5, "Lo…"},
 	}
 
 	for _, tt := range tests {

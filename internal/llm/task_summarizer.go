@@ -119,6 +119,10 @@ func (s *TaskSummarizer) SummarizeTaskTitle(ctx context.Context, messages []Chat
 	if conversationText == "" {
 		return TaskTitleResult{Title: "Unknown task"}, nil
 	}
+	// Handle nil chatter gracefully - return fallback title instead of panicking
+	if s.chatter == nil {
+		return TaskTitleResult{Title: "Task title generation unavailable"}, nil
+	}
 	prompt := fmt.Sprintf(taskTitlePrompt, maxLen, conversationText)
 	resp, err := s.chatter.Chat(ctx, []ChatMessage{{Role: RoleUser, Content: prompt}})
 	if err != nil {

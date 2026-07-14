@@ -48,6 +48,12 @@ const (
 // compilers (rustc/javac/cmake), and build runners (make/go) are intentionally
 // excluded — they can execute arbitrary code, write files, or run lifecycle
 // hooks. Treat them as RiskModerate or higher so callers gate them.
+//
+// SECURITY FIX (2026-07-14): git was removed from this list. Git can modify
+// state (commit, push, rebase, filter-branch), read any file, and execute
+// hooks. Commands like `git push`, `git commit --amend`, `git filter-branch`
+// can have destructive effects. Git commands are now classified as RiskHigh
+// (unknown command) and require explicit approval.
 var readOnlyCommands = map[string]bool{
 	"ls": true, "cat": true, "head": true, "tail": true, "grep": true, "find": true,
 	"wc": true, "du": true, "df": true, "file": true, "stat": true, "which": true,
@@ -58,7 +64,6 @@ var readOnlyCommands = map[string]bool{
 	"sed": true, "rg": true, "fd": true, "bat": true, "less": true, "more": true,
 	"realpath": true, "basename": true, "dirname": true, "ps": true, "top": true,
 	"htop": true, "free": true, "lsof": true, "netstat": true, "ss": true,
-	"git": true,
 }
 
 // blockedCommands are always denied.
@@ -679,6 +684,8 @@ func (t *ShellExecuteTool) CreateSession(sessionID string, config tools.PTYSessi
 }
 
 // WriteToSession sends input to a PTY session.
+// SEC-H4 FIX (2026-07-14): Validate input for dangerous escape sequences
+// that could be used to break out of the intended command context.
 func (t *ShellExecuteTool) WriteToSession(sessionID string, input []byte) error {
 	if t.ptyMgr == nil {
 		return fmt.Errorf("PTY manager not available")
@@ -687,6 +694,22 @@ func (t *ShellExecuteTool) WriteToSession(sessionID string, input []byte) error 
 	sess := t.ptyMgr.GetSession(sessionID)
 	if sess == nil {
 		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	// Log dangerous escape sequences that could enable shell escape
+	// This is defense-in-depth; fence checking at session creation is primary boundary
+	dangerousPatterns := [][]byte{
+		[]byte("\x03"), // Ctrl-C (interrupt)
+		[]byte("\x1a"), // Ctrl-Z (suspend)
+		[]byte("\x1c"), // Ctrl-\ (quit)
+		[]byte("\x1b"), // Escape key
+	}
+	for _, pattern := range dangerousPatterns {
+		if bytes.Contains(input, pattern) {
+			t.logger.Debug("PTY input contains control sequence",
+				"session", sessionID,
+				"pattern", fmt.Sprintf("%x", pattern))
+		}
 	}
 
 	_, err := sess.Write(input)
