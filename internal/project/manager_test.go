@@ -378,10 +378,11 @@ func TestManager_EnsureDefault_DoesNotCreateWhenActiveExists(t *testing.T) {
 	pm, store := newTestManager(t)
 	ctx := context.Background()
 
-	// Pre-create an active project.
+	// Pre-create an active project with a real directory.
+	realDir := t.TempDir()
 	existing := &Project{
 		ID: "existing", Name: "alpha", Mode: ModeGit,
-		LocalPath: "/tmp/alpha", Status: "active",
+		LocalPath: realDir, Status: "active",
 	}
 	store.CreateProject(ctx, existing)
 
@@ -671,5 +672,89 @@ func TestManager_ResolutionChain_InheritThenSwitch(t *testing.T) {
 	}
 	if p4.ID != p3.ID {
 		t.Errorf("EnsureDefault returned %q, want %q", p4.ID, p3.ID)
+	}
+}
+
+// TestManager_EnsureDefault_StaleDirRecreates verifies that EnsureDefault
+// creates a new project when the active project's directory has been removed.
+func TestManager_EnsureDefault_StaleDirRecreates(t *testing.T) {
+	pm, store := newTestManager(t)
+	ctx := context.Background()
+
+	// Pre-create an active project with a directory that exists initially.
+	staleDir := filepath.Join(pm.Config().BaseDir, "stale")
+	os.MkdirAll(staleDir, 0o755)
+	existing := &Project{
+		ID: "stale", Name: "stale", Mode: ModeGit,
+		LocalPath: staleDir, Status: "active",
+	}
+	store.CreateProject(ctx, existing)
+
+	// Remove the directory to simulate external deletion.
+	os.RemoveAll(staleDir)
+
+	p, err := pm.EnsureDefault(ctx)
+	if err != nil {
+		t.Fatalf("EnsureDefault: %v", err)
+	}
+	if p.ID == "stale" {
+		t.Errorf("expected new project, got stale one")
+	}
+	if p.Status != "active" {
+		t.Errorf("expected active status, got %q", p.Status)
+	}
+	// New directory should exist.
+	if _, err := os.Stat(p.LocalPath); os.IsNotExist(err) {
+		t.Errorf("new project dir not created: %s", p.LocalPath)
+	}
+}
+
+// TestManager_CreateOrResolve_SidecarNoGitUsesLocalMode verifies that a
+// sidecar-bearing directory without .git is registered as ModeLocal.
+func TestManager_CreateOrResolve_SidecarNoGitUsesLocalMode(t *testing.T) {
+	pm, _ := newTestManager(t)
+	ctx := context.Background()
+
+	// Create a directory with a sidecar but no .git.
+	dir := t.TempDir()
+	sidecarPath := filepath.Join(dir, ".meept", "project_id")
+	os.MkdirAll(filepath.Dir(sidecarPath), 0o755)
+	os.WriteFile(sidecarPath, []byte("sidecar-test-id"), 0o644)
+
+	p, err := pm.CreateOrResolve(ctx, dir)
+	if err != nil {
+		t.Fatalf("CreateOrResolve: %v", err)
+	}
+	if p.Mode != ModeLocal {
+		t.Errorf("Mode = %q, want %q", p.Mode, ModeLocal)
+	}
+	if p.ID != "sidecar-test-id" {
+		t.Errorf("ID = %q, want %q", p.ID, "sidecar-test-id")
+	}
+}
+
+// TestManager_Rename_RollbackOnDBFailure verifies that when the DB update
+// fails after the directory has been moved, the directory is moved back.
+func TestManager_Rename_RollbackOnDBFailure(t *testing.T) {
+	pm, store := newTestManager(t)
+	ctx := context.Background()
+
+	// Create a project under base_dir.
+	p, err := pm.CreateOrResolve(ctx, "rb-test")
+	if err != nil {
+		t.Fatalf("CreateOrResolve: %v", err)
+	}
+
+	// Close the store to make DB operations fail.
+	store.Close()
+
+	_, err = pm.Rename(ctx, p.ID, "rb-test-renamed")
+	if err == nil {
+		t.Fatalf("expected rename to fail with closed DB")
+	}
+
+	// Original directory should still exist (rollback succeeded).
+	if _, statErr := os.Stat(p.LocalPath); statErr != nil {
+		t.Errorf("original directory should exist after rollback: %v", statErr)
 	}
 }

@@ -398,7 +398,21 @@ func (pm *ProjectManager) EnsureDefault(ctx context.Context) (*Project, error) {
 		return nil, fmt.Errorf("check active project: %w", err)
 	}
 	if existing != nil {
-		return existing, nil
+		// Verify the active project's directory still exists. If it was
+		// removed externally, deactivate it and create a new default.
+		if _, statErr := os.Stat(existing.LocalPath); statErr != nil {
+			pm.logger.Warn("active project directory missing, creating new default",
+				"project_id", existing.ID,
+				"path", existing.LocalPath,
+				"stat_error", statErr,
+			)
+			if err := pm.DeactivateActive(ctx); err != nil {
+				pm.logger.Warn("failed to deactivate stale project", "error", err)
+			}
+			// Fall through to create a new default.
+		} else {
+			return existing, nil
+		}
 	}
 
 	// Generate a short hex ID (8 chars = 4 bytes, enough for uniqueness
@@ -507,10 +521,14 @@ func (pm *ProjectManager) CreateOrResolve(ctx context.Context, arg string) (*Pro
 			// Sidecar exists but project not in DB — re-register with the
 			// sidecar's UUID.
 			name := filepath.Base(absPath)
+			mode := ModeLocal
+			if _, err := os.Stat(filepath.Join(absPath, ".git")); err == nil {
+				mode = ModeGit
+			}
 			p := &Project{
 				ID:        sidecarID,
 				Name:      name,
-				Mode:      ModeGit,
+				Mode:      mode,
 				LocalPath: absPath,
 				Branch:    pm.cfg.DefaultBranch,
 				Status:    "active",
@@ -662,7 +680,15 @@ func (pm *ProjectManager) Rename(ctx context.Context, projectID, newName string)
 	// Update DB.
 	if err := pm.store.UpdateProjectPath(ctx, projectID, newPath, newName); err != nil {
 		// Best-effort: try to move the directory back on DB failure.
-		os.Rename(newPath, p.LocalPath)
+		if rbErr := os.Rename(newPath, p.LocalPath); rbErr != nil {
+			pm.logger.Warn("failed to rollback directory rename after DB error",
+				"project_id", projectID,
+				"new_path", newPath,
+				"old_path", p.LocalPath,
+				"db_error", err,
+				"rollback_error", rbErr,
+			)
+		}
 		return nil, fmt.Errorf("update project path in DB: %w", err)
 	}
 

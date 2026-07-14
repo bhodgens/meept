@@ -155,3 +155,56 @@ func TestCreateSession_CreatesDefaultWhenNoneActive(t *testing.T) {
 		t.Error("ProjectPath should not be empty")
 	}
 }
+
+func TestCreateSession_NilProjectManager(t *testing.T) {
+	// SessionService without a project manager should still create sessions.
+	store := session.NewMemoryStore(nil)
+	svc := NewSessionService(store)
+	// Do NOT call SetProjectManager — pm stays nil.
+
+	sess, err := svc.CreateSession(context.Background(), CreateSessionRequest{Name: "no-pm"})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if sess.ProjectID != "" {
+		t.Errorf("expected empty ProjectID, got %q", sess.ProjectID)
+	}
+}
+
+func TestSetProjectManager_NilGuard(t *testing.T) {
+	svc := NewSessionService(session.NewMemoryStore(nil))
+	// SetProjectManager(nil) should be a no-op.
+	svc.SetProjectManager(nil)
+	if svc.pm != nil {
+		t.Error("expected nil pm after SetProjectManager(nil)")
+	}
+}
+
+// failingProjectResolver implements ProjectResolver but always returns an error.
+type failingProjectResolver struct{}
+
+func (failingProjectResolver) EnsureDefault(ctx context.Context) (*project.Project, error) {
+	return nil, errors.New("simulated failure")
+}
+func (failingProjectResolver) GetActive(ctx context.Context) (*project.Project, error) {
+	return nil, errors.New("simulated failure")
+}
+
+func TestCreateSession_EnsureDefaultError(t *testing.T) {
+	// When EnsureDefault fails, CreateSession should still succeed — the
+	// error is logged, not propagated. The session just won't have a project.
+	sessionStore := session.NewMemoryStore(nil)
+	svc := NewSessionService(sessionStore)
+	svc.SetProjectManager(failingProjectResolver{})
+
+	sess, err := svc.CreateSession(context.Background(), CreateSessionRequest{Name: "test"})
+	if err != nil {
+		t.Fatalf("CreateSession should not fail even if EnsureDefault errors: %v", err)
+	}
+	if sess == nil || sess.ID == "" {
+		t.Error("expected valid session")
+	}
+	if sess.ProjectID != "" {
+		t.Errorf("expected empty ProjectID on EnsureDefault failure, got %q", sess.ProjectID)
+	}
+}

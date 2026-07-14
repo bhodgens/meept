@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -11,8 +12,9 @@ import (
 
 // SessionService handles session operations.
 type SessionService struct {
-	store session.Store
-	pm    ProjectResolver
+	store  session.Store
+	pm     ProjectResolver
+	logger *slog.Logger
 }
 
 // ProjectResolver is the narrow interface SessionService needs from the
@@ -24,7 +26,7 @@ type ProjectResolver interface {
 
 // NewSessionService creates a session service.
 func NewSessionService(s session.Store) *SessionService {
-	return &SessionService{store: s}
+	return &SessionService{store: s, logger: slog.Default()}
 }
 
 // SetProjectManager wires the project manager for default project resolution
@@ -58,10 +60,22 @@ func (s *SessionService) CreateSession(ctx context.Context, req CreateSessionReq
 	// directory.
 	if s.pm != nil {
 		p, err := s.pm.EnsureDefault(ctx)
-		if err == nil && p != nil {
-			s.store.SetProject(sess.ID, p.ID, p.LocalPath)
-			sess.ProjectID = p.ID
-			sess.ProjectPath = p.LocalPath
+		if err != nil {
+			s.logger.Warn("EnsureDefault failed during session creation",
+				"session_id", sess.ID,
+				"error", err,
+			)
+		} else if p != nil {
+			if err := s.store.SetProject(sess.ID, p.ID, p.LocalPath); err != nil {
+				s.logger.Warn("SetProject failed during session creation",
+					"session_id", sess.ID,
+					"project_id", p.ID,
+					"error", err,
+				)
+			} else {
+				sess.ProjectID = p.ID
+				sess.ProjectPath = p.LocalPath
+			}
 		}
 	}
 

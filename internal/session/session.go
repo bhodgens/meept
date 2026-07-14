@@ -579,13 +579,16 @@ func (s *MemoryStore) SetProject(sessionID, projectID, projectPath string) error
 	return nil
 }
 
-// UpdateSessionsProjectPath is a no-op for MemoryStore (sessions are in-memory).
+// UpdateSessionsProjectPath updates all sessions whose project_path matches
+// oldPath to newPath. Also bumps last_activity to match SQLiteStore behavior.
 func (s *MemoryStore) UpdateSessionsProjectPath(ctx context.Context, oldPath, newPath string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	now := time.Now()
 	for _, sess := range s.sessions {
 		if sess.ProjectPath == oldPath {
 			sess.ProjectPath = newPath
+			sess.LastActivity = now
 		}
 	}
 	return nil

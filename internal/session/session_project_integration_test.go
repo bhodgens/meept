@@ -202,3 +202,96 @@ func TestSQLiteStore_UpdateSessionsProjectPath(t *testing.T) {
 		t.Errorf("ProjectPath = %q, want %q", got.ProjectPath, "/new/path")
 	}
 }
+
+// TestSQLiteStore_UpdateSessionsProjectPath_MultiSession verifies that
+// multiple sessions pointing at the same old path are all updated.
+func TestSQLiteStore_UpdateSessionsProjectPath_MultiSession(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	// Create 3 sessions, 2 pointing at the old path, 1 at a different path.
+	sess1, _ := store.Create("sess-1")
+	sess2, _ := store.Create("sess-2")
+	sess3, _ := store.Create("sess-3")
+
+	store.SetProject(sess1.ID, "proj-1", "/old/path")
+	store.SetProject(sess2.ID, "proj-1", "/old/path")
+	store.SetProject(sess3.ID, "proj-2", "/other/path")
+
+	if err := store.UpdateSessionsProjectPath(ctx, "/old/path", "/new/path"); err != nil {
+		t.Fatalf("UpdateSessionsProjectPath: %v", err)
+	}
+
+	for _, id := range []string{sess1.ID, sess2.ID} {
+		got := store.Get(id)
+		if got == nil {
+			t.Fatalf("session %s not found", id)
+		}
+		if got.ProjectPath != "/new/path" {
+			t.Errorf("session %s: ProjectPath = %q, want %q", id, got.ProjectPath, "/new/path")
+		}
+	}
+
+	// Session 3 should be untouched.
+	got3 := store.Get(sess3.ID)
+	if got3.ProjectPath != "/other/path" {
+		t.Errorf("session 3: ProjectPath = %q, want %q", got3.ProjectPath, "/other/path")
+	}
+}
+
+// TestSQLiteStore_UpdateSessionsProjectPath_ZeroMatches verifies that
+// updating with no matching sessions is a no-op (no error).
+func TestSQLiteStore_UpdateSessionsProjectPath_ZeroMatches(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	sess, _ := store.Create("sess-1")
+	store.SetProject(sess.ID, "proj-1", "/some/path")
+
+	// Update a path that doesn't match any session.
+	err := store.UpdateSessionsProjectPath(ctx, "/nonexistent", "/new/path")
+	if err != nil {
+		t.Fatalf("expected nil error for zero matches, got: %v", err)
+	}
+
+	// Original session should be unchanged.
+	got := store.Get(sess.ID)
+	if got.ProjectPath != "/some/path" {
+		t.Errorf("ProjectPath = %q, want %q", got.ProjectPath, "/some/path")
+	}
+}
+
+// TestMemoryStore_UpdateSessionsProjectPath_MultiSession verifies the
+// MemoryStore implementation also updates last_activity for parity.
+func TestMemoryStore_UpdateSessionsProjectPath_MultiSession(t *testing.T) {
+	store := NewMemoryStore(nil)
+	ctx := context.Background()
+
+	sess1, _ := store.Create("sess-1")
+	sess2, _ := store.Create("sess-2")
+	store.SetProject(sess1.ID, "proj-1", "/old/path")
+	store.SetProject(sess2.ID, "proj-1", "/old/path")
+
+	// Record pre-update activity.
+	before1 := store.Get(sess1.ID).LastActivity
+
+	if err := store.UpdateSessionsProjectPath(ctx, "/old/path", "/new/path"); err != nil {
+		t.Fatalf("UpdateSessionsProjectPath: %v", err)
+	}
+
+	for _, id := range []string{sess1.ID, sess2.ID} {
+		got := store.Get(id)
+		if got == nil {
+			t.Fatalf("session %s not found", id)
+		}
+		if got.ProjectPath != "/new/path" {
+			t.Errorf("session %s: ProjectPath = %q, want %q", id, got.ProjectPath, "/new/path")
+		}
+		// last_activity should be bumped.
+		if !got.LastActivity.After(before1) {
+			t.Errorf("session %s: LastActivity not updated", id)
+		}
+	}
+}
