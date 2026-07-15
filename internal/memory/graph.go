@@ -600,10 +600,18 @@ func (g *KnowledgeGraph) persistPageRank(ctx context.Context, nodes []string, sc
 		}
 		defer func() { _ = tx.Rollback() }()
 
+		// SECURITY FIX (2026-07-14): Use INSERT ... ON CONFLICT DO UPDATE to preserve
+		// community_id values instead of overwriting them with empty string.
+		// Previously, INSERT OR REPLACE destroyed community detection results.
 		stmt, err := tx.PrepareContext(ctx,
-			`INSERT OR REPLACE INTO memory_pagerank
+			`INSERT INTO memory_pagerank
 			(memory_id, score, in_degree, out_degree, community_id, updated_at)
-			VALUES (?, ?, ?, ?, '', ?)`)
+			VALUES (?, ?, ?, ?, COALESCE((SELECT community_id FROM memory_pagerank WHERE memory_id = ?), ''), ?)
+			ON CONFLICT(memory_id) DO UPDATE SET
+				score = excluded.score,
+				in_degree = excluded.in_degree,
+				out_degree = excluded.out_degree,
+				updated_at = excluded.updated_at`)
 		if err != nil {
 			return err
 		}
@@ -614,7 +622,7 @@ func (g *KnowledgeGraph) persistPageRank(ctx context.Context, nodes []string, sc
 			inDegree := len(inLinks[i])
 			outDegree := len(outLinks[i])
 
-			_, err := stmt.ExecContext(ctx, id, scores[i], inDegree, outDegree, now)
+			_, err := stmt.ExecContext(ctx, id, scores[i], inDegree, outDegree, id, now)
 			if err != nil {
 				return err
 			}

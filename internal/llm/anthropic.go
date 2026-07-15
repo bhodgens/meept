@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/llm/metrics"
@@ -38,6 +39,7 @@ var anthropicRetryableStatusCodes = map[int]bool{
 // AnthropicClient implements the Chatter interface for Anthropic's Messages API.
 // It provides native support for Anthropic-specific features including extended thinking.
 type AnthropicClient struct {
+	configMu     sync.RWMutex
 	config       *ModelConfig
 	budget       *Budget
 	httpClient   *http.Client
@@ -108,6 +110,9 @@ func WithAnthropicUploadStore(store UploadStore) AnthropicClientOption {
 
 // NewAnthropicClient creates a new Anthropic API client.
 func NewAnthropicClient(config *ModelConfig, opts ...AnthropicClientOption) *AnthropicClient {
+	if config == nil {
+		config = &ModelConfig{}
+	}
 	c := &AnthropicClient{
 		config: config,
 		httpClient: &http.Client{
@@ -172,11 +177,15 @@ func (c *AnthropicClient) anthropicRequestURL(streaming bool) string {
 
 // Chat sends a chat completion request to Anthropic's Messages API.
 func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
+	// Capture config under lock to avoid race with SwitchModel
+	c.configMu.RLock()
+	cfg := c.config
+	c.configMu.RUnlock()
 	chatOpts := &chatOptions{
-		temperature:   c.config.Temperature,
-		maxTokens:     c.config.MaxTokens,
-		topP:          c.config.TopP,
-		stopSequences: c.config.StopSequences,
+		temperature:   cfg.Temperature,
+		maxTokens:     cfg.MaxTokens,
+		topP:          cfg.TopP,
+		stopSequences: cfg.StopSequences,
 		// Note: Anthropic doesn't support frequency_penalty or presence_penalty
 	}
 	for _, opt := range opts {
@@ -185,7 +194,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 
 	// Check cache
 	if c.tokenCache != nil && c.keyBuilder != nil {
-		cacheKey := c.keyBuilder.Build("", c.config.ModelID, messages)
+		cacheKey := c.keyBuilder.Build("", cfg.ModelID, messages)
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
 			return cached.Response, nil
 		}
@@ -215,8 +224,8 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 		}
 		timeout := c.timeoutCalc.Calculate(
 			ctx,
-			c.config.ProviderID,
-			c.config.ModelID,
+			cfg.ProviderID,
+			cfg.ModelID,
 			estimatedTokens,
 			anthropicDefaultTimeout,
 		)
@@ -266,8 +275,8 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 		if c.budget != nil {
 			c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
 			// Record cost with scope if model pricing is available
-			if c.config != nil {
-				costUSD := float64(resp.Usage.PromptTokens)*c.config.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*c.config.CostPerMillionOutput/1_000_000
+			if cfg != nil {
+				costUSD := float64(resp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
 				if costUSD > 0 {
 					c.budget.RecordCostWithScope(CostRecord{
 						Timestamp:        time.Now(),
@@ -281,7 +290,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 
 		// Store in cache
 		if c.tokenCache != nil && c.keyBuilder != nil {
-			cacheKey := c.keyBuilder.Build("", c.config.ModelID, messages)
+			cacheKey := c.keyBuilder.Build("", cfg.ModelID, messages)
 			c.tokenCache.Put(ctx, cacheKey, resp)
 		}
 
@@ -311,13 +320,18 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 		}()
 	}
 
+	// Capture config under lock to avoid race with SwitchModel
+	c.configMu.RLock()
+	cfg := c.config
+	c.configMu.RUnlock()
+
 	reportProgress(ProgressStageStarting, "Starting Anthropic request...")
 
 	chatOpts := &chatOptions{
-		temperature:   c.config.Temperature,
-		maxTokens:     c.config.MaxTokens,
-		topP:          c.config.TopP,
-		stopSequences: c.config.StopSequences,
+		temperature:   cfg.Temperature,
+		maxTokens:     cfg.MaxTokens,
+		topP:          cfg.TopP,
+		stopSequences: cfg.StopSequences,
 		// Note: Anthropic doesn't support frequency_penalty or presence_penalty
 	}
 	for _, opt := range opts {
@@ -326,7 +340,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 
 	// Check cache
 	if c.tokenCache != nil && c.keyBuilder != nil {
-		cacheKey := c.keyBuilder.Build("", c.config.ModelID, messages)
+		cacheKey := c.keyBuilder.Build("", cfg.ModelID, messages)
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
 			reportProgress(ProgressStageDone, "Cache hit")
 			return cached.Response, nil
@@ -360,8 +374,8 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 		}
 		timeout := c.timeoutCalc.Calculate(
 			ctx,
-			c.config.ProviderID,
-			c.config.ModelID,
+			cfg.ProviderID,
+			cfg.ModelID,
 			estimatedTokens,
 			anthropicDefaultTimeout,
 		)
@@ -381,7 +395,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 	}
 
 	// Check if model supports extended thinking
-	supportsExtendedThinking := c.config.HasCapability("extended_thinking")
+	supportsExtendedThinking := cfg.HasCapability("extended_thinking")
 	if supportsExtendedThinking {
 		reportProgress(ProgressStageThinking, "Model supports extended thinking")
 	}
@@ -431,8 +445,8 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 		if c.budget != nil {
 			c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
 			// Record cost with scope if model pricing is available
-			if c.config != nil {
-				costUSD := float64(resp.Usage.PromptTokens)*c.config.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*c.config.CostPerMillionOutput/1_000_000
+			if cfg != nil {
+				costUSD := float64(resp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
 				if costUSD > 0 {
 					c.budget.RecordCostWithScope(CostRecord{
 						Timestamp:        time.Now(),
@@ -446,7 +460,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 
 		// Store in cache
 		if c.tokenCache != nil && c.keyBuilder != nil {
-			cacheKey := c.keyBuilder.Build("", c.config.ModelID, messages)
+			cacheKey := c.keyBuilder.Build("", cfg.ModelID, messages)
 			c.tokenCache.Put(ctx, cacheKey, resp)
 		}
 

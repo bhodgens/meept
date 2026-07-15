@@ -2,6 +2,7 @@ package memory
 
 import (
 	"database/sql"
+	"strings"
 	"fmt"
 	"io"
 	"log/slog"
@@ -170,8 +171,11 @@ func mergeMemoryDbIntoLocal(memoryPath, localPath string, logger *slog.Logger) e
 			continue
 		}
 		// ATTACH memory.db, CREATE TABLE AS SELECT, DETACH.
+		// SECURITY FIX (2026-07-14): Escape single quotes in the path to prevent
+		// SQL injection via crafted directory names (e.g., "dir's-name").
+		escapedMemPath := strings.ReplaceAll(safeMemPath, "'", "''")
 		stmt := fmt.Sprintf(`ATTACH '%s' AS src; CREATE TABLE "%s" AS SELECT * FROM src."%s"; DETACH src;`,
-			safeMemPath, tblName(tbl), tblName(tbl))
+			escapedMemPath, tblName(tbl), tblName(tbl))
 		if _, err := localDB.Exec(stmt); err != nil {
 			logger.Warn("migration: failed to copy table", "table", tbl, "error", err)
 		} else {

@@ -109,38 +109,32 @@ func (a *BasicAuth) Authenticate(r *http.Request) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password)) == nil
 }
 
-// APIKeyAuth authenticates using an API key header or query parameter.
+// APIKeyAuth authenticates using an API key header only.
+// Query parameters are NOT supported to prevent credential leakage via:
+// - Access logs
+// - Browser history
+// - Referer headers
 type APIKeyAuth struct {
 	keys       []string
 	headerName string
-	queryParam string
 }
 
 // NewAPIKeyAuth creates a new APIKeyAuth.
-func NewAPIKeyAuth(keys []string, headerName, queryParam string) *APIKeyAuth {
+func NewAPIKeyAuth(keys []string, headerName string) *APIKeyAuth {
 	if headerName == "" {
 		headerName = "X-API-Key"
-	}
-	if queryParam == "" {
-		queryParam = "api_key"
 	}
 
 	return &APIKeyAuth{
 		keys:       keys,
 		headerName: headerName,
-		queryParam: queryParam,
 	}
 }
 
-// Authenticate checks for a valid API key in header or query param.
+// Authenticate checks for a valid API key in header only.
+// Query parameters are explicitly NOT checked to prevent credential leakage.
 func (a *APIKeyAuth) Authenticate(r *http.Request) bool {
-	// Check header first
 	if key := r.Header.Get(a.headerName); key != "" {
-		return a.constantTimeKeyCheck(key)
-	}
-
-	// Check query parameter
-	if key := r.URL.Query().Get(a.queryParam); key != "" {
 		return a.constantTimeKeyCheck(key)
 	}
 

@@ -84,6 +84,10 @@ var dangerousPattern = regexp.MustCompile(
 		`|iptables|nft|deluser|userdel|groupdel)\b`,
 )
 
+// shellMetaPattern matches shell metacharacters that can chain commands.
+// This includes: ; | && || $() ` ` > < >> << and newlines.
+var shellMetaPattern = regexp.MustCompile(`[;&|<>]|&&|\|\||[` + "`" + `]|\$\(|\n`)
+
 // FenceChecker validates paths against fence boundaries.
 type FenceChecker interface {
 	CheckPath(path string, op string) error
@@ -568,6 +572,46 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 }
 
 // classifyRisk determines the risk level of a command.
+// classifyRiskSimple is a helper that classifies a simple command without
+// re-splitting on shell metacharacters (used to avoid infinite recursion).
+func (t *ShellExecuteTool) classifyRiskSimple(command string) ShellCommandRisk {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return RiskMedium
+	}
+
+	baseCmd := extractBaseCommand(command)
+
+	// Check blocked commands
+	if blockedCommands[baseCmd] {
+		return RiskCritical
+	}
+
+	// Check for sudo
+	if baseCmd == "sudo" {
+		return RiskCritical
+	}
+
+	// Check dangerous patterns
+	if dangerousPattern.MatchString(command) {
+		return RiskHigh
+	}
+
+	// Check read-only commands
+	if readOnlyCommands[baseCmd] {
+		return RiskMedium
+	}
+
+	// Check operator-configured allowlist for otherwise-unknown commands.
+	if _, ok := t.knownSafeCommands[baseCmd]; ok {
+		return RiskMedium
+	}
+
+	// Default: HIGH for unknown commands
+	return RiskHigh
+}
+
+// classifyRisk determines the risk level of a command.
 func (t *ShellExecuteTool) classifyRisk(command string) ShellCommandRisk {
 	command = strings.TrimSpace(command)
 	if command == "" {
@@ -594,9 +638,39 @@ func (t *ShellExecuteTool) classifyRisk(command string) ShellCommandRisk {
 	if segments, ok := splitOnUnquotedPipes(command); ok {
 		maxRisk := RiskMedium
 		for _, seg := range segments {
-			segRisk := t.classifyRisk(strings.TrimSpace(seg))
+			segRisk := t.classifyRiskSimple(strings.TrimSpace(seg))
 			if segRisk > maxRisk {
 				maxRisk = segRisk
+			}
+		}
+		return maxRisk
+	}
+
+	// SECURITY FIX (2026-07-14): Detect shell metacharacters that can chain
+	// commands. If present, split on semicolons and &&/|| to evaluate each
+	// command segment independently. This prevents bypasses like:
+	// `cat /etc/passwd; rm -rf /`
+	// We use classifyRiskSimple to avoid infinite recursion.
+	if shellMetaPattern.MatchString(command) {
+		// Split on semicolons first
+		semiSegments := strings.Split(command, ";")
+		maxRisk := RiskMedium
+		for _, seg := range semiSegments {
+			seg = strings.TrimSpace(seg)
+			if seg == "" {
+				continue
+			}
+			// Further split on && and ||
+			andOrSegments := splitOnLogicalOperators(seg)
+			for _, subSeg := range andOrSegments {
+				subSeg = strings.TrimSpace(subSeg)
+				if subSeg == "" {
+					continue
+				}
+				subRisk := t.classifyRiskSimple(subSeg)
+				if subRisk > maxRisk {
+					maxRisk = subRisk
+				}
 			}
 		}
 		return maxRisk
@@ -621,6 +695,34 @@ func (t *ShellExecuteTool) classifyRisk(command string) ShellCommandRisk {
 	return RiskHigh
 }
 
+// splitOnLogicalOperators splits a command on && and || operators.
+func splitOnLogicalOperators(cmd string) []string {
+	var segments []string
+	current := cmd
+	for {
+		idxAnd := strings.Index(current, "&&")
+		idxOr := strings.Index(current, "||")
+		if idxAnd == -1 && idxOr == -1 {
+			if current != "" {
+				segments = append(segments, current)
+			}
+			break
+		}
+		// Find which comes first
+		splitIdx := -1
+		if idxAnd != -1 && (idxOr == -1 || idxAnd < idxOr) {
+			splitIdx = idxAnd
+		} else {
+			splitIdx = idxOr
+		}
+		if splitIdx > 0 {
+			segments = append(segments, current[:splitIdx])
+		}
+		current = current[splitIdx+2:]
+	}
+	return segments
+}
+
 // GetRiskLevel returns the risk level for a command (public accessor).
 func (t *ShellExecuteTool) GetRiskLevel(command string) security.RiskLevel {
 	risk := t.classifyRisk(command)
@@ -640,11 +742,16 @@ func (t *ShellExecuteTool) GetRiskLevel(command string) security.RiskLevel {
 
 // CreateSession creates a new PTY session.
 func (t *ShellExecuteTool) CreateSession(sessionID string, config tools.PTYSessionConfig) (*tools.PTYSessionInfo, error) {
-	// SEC-H4 FIX: Check fence boundaries before creating PTY sessions.
-	// Regular shell execution checks at lines 208-213, but PTY sessions
-	// previously bypassed the fence entirely.
-	if t.fenceChecker != nil && config.Dir != "" {
-		if err := t.fenceChecker.CheckCommand(config.Cmd, config.Dir); err != nil {
+	// SECURITY FIX (2026-07-14): Always check fence boundaries before creating
+	// PTY sessions. Previously, the fence check was skipped when config.Dir
+	// was empty, allowing commands to execute outside the workspace.
+	// When Dir is empty, the command runs in the tool's default workingDir.
+	checkDir := config.Dir
+	if checkDir == "" {
+		checkDir = t.workingDir
+	}
+	if t.fenceChecker != nil {
+		if err := t.fenceChecker.CheckCommand(config.Cmd, checkDir); err != nil {
 			return nil, fmt.Errorf("pty session rejected by fence: %w", err)
 		}
 	}

@@ -108,7 +108,7 @@ func (t *ReadFileTool) executeRead(args map[string]any, progress func(tools.Prog
 		return nil, fmt.Errorf("no path specified")
 	}
 
-	resolved, err := resolvePath(rawPath)
+	resolved, err := resolvePathSecure(rawPath)
 	if err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}
@@ -397,7 +397,7 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 		return nil, fmt.Errorf("content too large (max %d bytes)", MaxWriteSize)
 	}
 
-	resolved, err := resolvePath(rawPath)
+	resolved, err := resolvePathSecure(rawPath)
 	if err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}
@@ -559,7 +559,7 @@ func (t *DeleteFileTool) Execute(ctx context.Context, args map[string]any) (any,
 		return nil, fmt.Errorf("no path specified")
 	}
 
-	resolved, err := resolvePath(rawPath)
+	resolved, err := resolvePathSecure(rawPath)
 	if err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}
@@ -699,7 +699,7 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (a
 		return nil, fmt.Errorf("no path specified")
 	}
 
-	resolved, err := resolvePath(rawPath)
+	resolved, err := resolvePathSecure(rawPath)
 	if err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}
@@ -864,6 +864,10 @@ func stripHashlinePrefixes(content string) string {
 }
 
 // resolvePath expands ~ and resolves to absolute path.
+// SECURITY FIX (2026-07-14): Previously, this function did not resolve symlinks,
+// allowing fence bypass via symlink attacks (e.g., a symlink inside the workspace
+// pointing to /etc or ~/.ssh). Callers that need full path resolution including
+// symlinks should use resolvePathSecure instead.
 func resolvePath(path string) (string, error) {
 	if strings.HasPrefix(path, "~") {
 		home, err := os.UserHomeDir()
@@ -879,6 +883,56 @@ func resolvePath(path string) (string, error) {
 	}
 
 	return filepath.Clean(absPath), nil
+}
+
+// resolvePathSecure expands ~ and resolves to absolute path including symlinks.
+// This is the secure variant that should be used for all file operations to
+// prevent symlink-based fence bypass attacks.
+func resolvePathSecure(path string) (string, error) {
+	resolved, err := resolvePath(path)
+	if err != nil {
+		return "", err
+	}
+
+	// SECURITY FIX (2026-07-14): Resolve symlinks to their real paths.
+	// This prevents attackers from creating symlinks inside the workspace
+	// that point to sensitive files outside (e.g., /etc/passwd, ~/.ssh/id_rsa).
+	// The fence checker will then validate the resolved real path.
+	if strings.HasPrefix(path, "~") {
+		// For ~ paths, we need to resolve the home directory symlink too
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("cannot resolve home directory: %w", err)
+		}
+		// Check if home itself is a symlink
+		resolvedHome, err := filepath.EvalSymlinks(home)
+		if err != nil {
+			return "", fmt.Errorf("cannot resolve home symlink: %w", err)
+		}
+		relPath := strings.TrimPrefix(path[1:], string(filepath.Separator))
+		resolved = filepath.Join(resolvedHome, relPath)
+	}
+
+	// Check if the path exists before resolving symlinks
+	_, err = os.Stat(resolved)
+	if os.IsNotExist(err) {
+		// For non-existent paths (e.g., new files being created),
+		// resolve symlinks in the parent directory
+		dir := filepath.Dir(resolved)
+		if parentResolved, evalErr := filepath.EvalSymlinks(dir); evalErr == nil {
+			resolved = filepath.Join(parentResolved, filepath.Base(resolved))
+		}
+		// If parent doesn't exist, return the unresolved path
+		// (fence checking will handle validation)
+	} else {
+		// Path exists - fully resolve it
+		resolved, err = filepath.EvalSymlinks(resolved)
+		if err != nil {
+			return "", fmt.Errorf("cannot resolve symlinks: %w", err)
+		}
+	}
+
+	return resolved, nil
 }
 
 // Ensure tools implement the Tool interface

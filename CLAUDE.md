@@ -71,6 +71,18 @@ See `docs/concepts/architecture.md` for full documentation.
 
 ## Coding Practices
 
+### Predictable ID Prevention
+
+**Never use `time.Now().UnixNano()` or `math/rand` for ID generation, even in fallback paths.**
+
+When `crypto/rand` fails, use `pkg/id.Generate()` which has a documented zero-suffix fallback.
+The zero suffix indicates catastrophic system failure (entropy exhaustion) rather than providing
+pseudo-random IDs that appear secure but are predictable.
+
+**Custom analyzers:** Run `go run ./tools/analyzers/predid/... ./...` to detect predictable ID patterns.
+
+See skill: `go-predictable-id-fallback` for audit patterns and fix examples.
+
 ### Optimization Posture
 
 **Prefer early optimization over defensible-but-suboptimal defaults.** Pick the optimized approach when cost/benefit is reasonable.

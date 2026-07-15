@@ -5,8 +5,13 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"net"
 	"net/http"
 	"strings"
+	"sync"
+	
+
+	"golang.org/x/time/rate"
 )
 
 type contextKey string
@@ -127,8 +132,119 @@ func ExtractKeyFromRequest(r *http.Request) string {
 	}
 	return ""
 }
+
 // APIKeyFromContext retrieves API key from context.
 func APIKeyFromContext(ctx context.Context) (string, bool) {
 	key, ok := ctx.Value(apiKeyContextKey).(string)
 	return key, ok
+}
+
+// rateLimiter implements per-IP rate limiting using a token bucket algorithm.
+// Default: 100 requests per minute per IP, burst of 20.
+type rateLimiter struct {
+	mu       sync.RWMutex
+	limiters map[string]*rate.Limiter
+	r        rate.Limit // tokens per second
+	burst    int
+}
+
+// newRateLimiter creates a rate limiter for per-IP rate limiting.
+// r = requests per second, burst = max burst size.
+func newRateLimiter(r float64, burst int) *rateLimiter {
+	return &rateLimiter{
+		limiters: make(map[string]*rate.Limiter),
+		r:        rate.Limit(r),
+		burst:    burst,
+	}
+}
+
+// getLimiter returns (or creates) a rate limiter for the given IP.
+func (rl *rateLimiter) getLimiter(ip string) *rate.Limiter {
+	// Fast path: read lock check
+	rl.mu.RLock()
+	limiter, exists := rl.limiters[ip]
+	rl.mu.RUnlock()
+
+	if exists {
+		return limiter
+	}
+
+	// Slow path: create new limiter
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	// Double-check after acquiring write lock
+	if limiter, exists = rl.limiters[ip]; exists {
+		return limiter
+	}
+
+	limiter = rate.NewLimiter(rl.r, rl.burst)
+	rl.limiters[ip] = limiter
+	return limiter
+}
+
+// allow checks if a request from the given IP is allowed.
+func (rl *rateLimiter) allow(ip string) bool {
+	return rl.getLimiter(ip).Allow()
+}
+
+// RateLimitMiddleware creates middleware that rate limits requests per IP.
+// limitPerMinute = max requests per minute, burst = max burst size.
+// Example: 100 req/min with burst of 20 allows 20 rapid requests, then 100/min sustained.
+func RateLimitMiddleware(limitPerMinute int, burst int) func(http.Handler) http.Handler {
+	rl := newRateLimiter(float64(limitPerMinute)/60.0, burst)
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip rate limiting for health checks
+			if r.URL.Path == "/health" || r.URL.Path == "/api/v1/health" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			ip := extractClientIP(r)
+			if !rl.allow(ip) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"error":   "rate limit exceeded",
+					"message": "too many requests, please slow down",
+				})
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// extractClientIP extracts the client IP from the request.
+// It checks X-Forwarded-For and X-Real-IP headers first (if behind a proxy),
+// then falls back to RemoteAddr.
+func extractClientIP(r *http.Request) string {
+	// Check X-Forwarded-For header (can contain multiple IPs, first is the client)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		ips := strings.Split(xff, ",")
+		if len(ips) > 0 {
+			return strings.TrimSpace(ips[0])
+		}
+	}
+
+	// Check X-Real-IP header
+	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+		return realIP
+	}
+
+	// Fall back to RemoteAddr
+	host, err := splitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// splitHostPort wraps net.SplitHostPort for cleaner error handling.
+func splitHostPort(addr string) (string, error) {
+	host, _, err := net.SplitHostPort(addr)
+	return host, err
 }

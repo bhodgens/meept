@@ -15,12 +15,23 @@ import (
 
 // ScheduleCreateTool creates a new scheduled job.
 type ScheduleCreateTool struct {
-	sched *scheduler.Scheduler
+	sched        *scheduler.Scheduler
+	fenceChecker FenceChecker
 }
 
 // NewScheduleCreateTool creates a new schedule creation tool.
 func NewScheduleCreateTool(sched *scheduler.Scheduler) *ScheduleCreateTool {
 	return &ScheduleCreateTool{sched: sched}
+}
+
+// SetFenceChecker sets the fence checker for shell command validation.
+// SECURITY FIX (2026-07-14): Previously, scheduled shell jobs bypassed
+// fence checking entirely, allowing commands to be scheduled that could
+// execute outside the workspace when triggered.
+func (t *ScheduleCreateTool) SetFenceChecker(fc FenceChecker) {
+	if fc != nil {
+		t.fenceChecker = fc
+	}
 }
 
 func (t *ScheduleCreateTool) Name() string { return "schedule_create" }
@@ -155,6 +166,22 @@ func (t *ScheduleCreateTool) Execute(ctx context.Context, args map[string]any) (
 				Success: false,
 				Error:   "command is required for shell jobs",
 			}, nil
+		}
+		// SECURITY FIX (2026-07-14): Validate shell command through fence checker
+		// before allowing the job to be scheduled. This prevents scheduling
+		// commands that would execute outside the workspace fence.
+		if t.fenceChecker != nil {
+			workDir, _ := args["working_dir"].(string)
+			if workDir == "" {
+				// Will use scheduler's default working directory
+				workDir = "."
+			}
+			if err := t.fenceChecker.CheckCommand(command, workDir); err != nil {
+				return ScheduleCreateResult{
+					Success: false,
+					Error:   fmt.Sprintf("shell command rejected by fence: %v", err),
+				}, nil
+			}
 		}
 		shellCfg := &scheduler.ShellJobConfig{
 			Command:    command,

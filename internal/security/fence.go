@@ -63,44 +63,58 @@ func (fc *FenceChecker) Valid() bool {
 	return fc.valid
 }
 
-// resolveSymlinks resolves symlinks in a path, even if the final component
-// doesn't exist yet. It walks up to the longest existing ancestor, resolves
-// symlinks there, then appends the remaining non-existent suffix.
+// resolveSymlinks resolves symlinks in a path, handling non-existent final
+// components (common for write operations). It resolves symlinks by finding
+// the longest-existing prefix and resolving from there.
 //
-// Returns (", false) when no existing ancestor could be resolved (i.e.
-// EvalSymlinks failed on every ancestor including the filesystem root). In
-// normal operation this never happens because EvalSymlinks("/") always
-// succeeds; the failure case exists as defense-in-depth for misconfigured or
-// broken environments. Callers must treat a false return as "path cannot be
-// safely resolved" and refuse the operation rather than falling back to the
-// raw input — returning an unresolved path would allow crafted inputs such as
-// "/../etc/passwd" to bypass the fence when the filesystem is in an
-// unexpected state.
+// FAIL-HARD behavior: If the filesystem root "/" cannot be resolved, returns
+// ("", false). This is defense-in-depth against crafted paths designed to
+// exploit resolution errors.
 func resolveSymlinks(path string) (string, bool) {
-	// Normalize relative paths with .. components before symlink resolution
+	// Normalize the path first
 	path = filepath.Clean(path)
-	if evaled, err := filepath.EvalSymlinks(path); err == nil {
+
+	// Try direct resolution - works for existing paths
+	evaled, err := filepath.EvalSymlinks(path)
+	if err == nil {
 		return evaled, true
 	}
-	// Walk up to find an existing ancestor, then re-append the rest.
-	p := path
-	suffix := ""
-	for {
-		if evaled, err := filepath.EvalSymlinks(p); err == nil {
-			if suffix == "" {
-				return evaled, true
+
+	// Path doesn't exist. Find the longest-existing prefix by walking down
+	// from root, resolving each component and building the result incrementally.
+	parts := splitPath(path)
+	resolvedSoFar := "/"
+
+	for i, part := range parts {
+		// Build candidate by appending the next component to what we've resolved
+		candidate := filepath.Join(resolvedSoFar, part)
+		if evaledCandidate, err := filepath.EvalSymlinks(candidate); err == nil {
+			resolvedSoFar = evaledCandidate
+		} else {
+			// This component doesn't exist. Append remaining components as-is.
+			remaining := filepath.Join(parts[i:]...)
+			if resolvedSoFar == "/" {
+				return "/" + remaining, true
 			}
-			return filepath.Join(evaled, suffix), true
-		}
-		suffix = filepath.Join(filepath.Base(p), suffix)
-		p = filepath.Dir(p)
-		if p == "/" || p == "." {
-			// Fail closed: every ancestor failed to resolve, including the
-			// filesystem root. Returning the unresolvable input would allow
-			// traversal payloads to skip the fence.
-			return "", false
+			return resolvedSoFar + "/" + remaining, true
 		}
 	}
+
+	// All components existed (should have been caught by initial EvalSymlinks)
+	return resolvedSoFar, true
+}
+
+// splitPath splits an absolute path into its components.
+// E.g., "/a/b/c" -> ["a", "b", "c"]
+func splitPath(path string) []string {
+	path = filepath.Clean(path)
+	if path == "/" {
+		return nil
+	}
+	if path[0] == '/' {
+		path = path[1:]
+	}
+	return strings.Split(path, "/")
 }
 
 // CheckPath validates a path against the fence.

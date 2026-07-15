@@ -993,9 +993,46 @@ func (o *Orchestrator) applyFix(ctx context.Context, fix *FixAttempt) []string {
 			continue
 		}
 
-		// Attempt to write the fix content to the file
-		if err := os.WriteFile(resolved, []byte(content), 0644); err != nil {
-			o.logger.Warn("Failed to apply fix to file",
+		// Write atomically: write to temp file first, then rename
+		dir := filepath.Dir(resolved)
+		tmpFile, err := os.CreateTemp(dir, ".meept-fix-*.tmp")
+		if err != nil {
+			o.logger.Warn("Failed to create temp file for atomic write",
+				"file", resolved,
+				"error", err,
+			)
+			continue
+		}
+		tmpPath := tmpFile.Name()
+		if _, err := tmpFile.WriteString(content); err != nil {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			o.logger.Warn("Failed to write content to temp file",
+				"file", resolved,
+				"error", err,
+			)
+			continue
+		}
+		if err := tmpFile.Chmod(0644); err != nil {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			o.logger.Warn("Failed to set permissions on temp file",
+				"file", resolved,
+				"error", err,
+			)
+			continue
+		}
+		if err := tmpFile.Close(); err != nil {
+			os.Remove(tmpPath)
+			o.logger.Warn("Failed to close temp file",
+				"file", resolved,
+				"error", err,
+			)
+			continue
+		}
+		if err := os.Rename(tmpPath, resolved); err != nil {
+			os.Remove(tmpPath)
+			o.logger.Warn("Failed to rename temp file to target",
 				"file", resolved,
 				"error", err,
 			)

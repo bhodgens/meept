@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -11,6 +12,9 @@ import (
 
 	"golang.org/x/net/websocket"
 )
+
+// wsConnLimit is the maximum number of WebSocket connections per IP.
+const wsConnLimit = 10
 
 var wsAllowedOrigins = map[string]struct{}{
 	"localhost": {},
@@ -146,12 +150,88 @@ func (h *WebSocketHub) Broadcast(msgType string, data any) {
 	}
 }
 
+// wsConnLimiter tracks per-IP WebSocket connection counts.
+type wsConnLimiter struct {
+	mu   sync.Mutex
+	conns map[string]int // ip -> connection count
+}
+
+// newWSConnLimiter creates a new WebSocket connection limiter.
+func newWSConnLimiter() *wsConnLimiter {
+	return &wsConnLimiter{
+		conns: make(map[string]int),
+	}
+}
+
+// getConnectionCount returns the current connection count for an IP.
+func (wcl *wsConnLimiter) getConnectionCount(ip string) int {
+	wcl.mu.Lock()
+	defer wcl.mu.Unlock()
+	return wcl.conns[ip]
+}
+
+// increment increments the connection count for an IP and returns the new count.
+func (wcl *wsConnLimiter) increment(ip string) int {
+	wcl.mu.Lock()
+	defer wcl.mu.Unlock()
+	wcl.conns[ip]++
+	return wcl.conns[ip]
+}
+
+// decrement decrements the connection count for an IP and returns the new count.
+// If count reaches zero, the entry is removed to prevent unbounded growth.
+func (wcl *wsConnLimiter) decrement(ip string) int {
+	wcl.mu.Lock()
+	defer wcl.mu.Unlock()
+	wcl.conns[ip]--
+	if wcl.conns[ip] <= 0 {
+		delete(wcl.conns, ip)
+		return 0
+	}
+	return wcl.conns[ip]
+}
+
+// extractClientIP extracts the client IP from an HTTP request.
+func extractClientIP(r *http.Request) string {
+	// Check X-Forwarded-For header (can contain multiple IPs, first is the client)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		ips := strings.Split(xff, ",")
+		if len(ips) > 0 {
+			return strings.TrimSpace(ips[0])
+		}
+	}
+
+	// Check X-Real-IP header
+	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+		return realIP
+	}
+
+	// Fall back to RemoteAddr
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
 // handleWebSocket upgrades an HTTP connection to WebSocket and manages the lifecycle.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	clientIP := extractClientIP(r)
+
+	// Check per-IP connection limit before handshake
+	currentConns := s.wsConnLimiter.getConnectionCount(clientIP)
+	if currentConns >= wsConnLimit {
+		http.Error(w, fmt.Sprintf("WebSocket connection limit exceeded (max %d per IP)", wsConnLimit), http.StatusTooManyRequests)
+		return
+	}
+
 	wsServer := &websocket.Server{
 		Handler: func(conn *websocket.Conn) {
 			s.wsHub.Register(conn)
-			defer s.wsHub.Unregister(conn)
+			defer func() {
+				s.wsConnLimiter.decrement(clientIP)
+				s.wsHub.Unregister(conn)
+			}()
 
 			for {
 				var msg WSMessage

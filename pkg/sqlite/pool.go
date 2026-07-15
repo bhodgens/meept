@@ -168,14 +168,15 @@ func (p *Pool) Get(ctx context.Context) (*sql.DB, error) {
 }
 
 // Put returns a connection to the pool.
+// SECURITY FIX (2026-07-14): Previously, if Close() executed between the
+// closed check (line 179-181) and the channel send (line 189), this would
+// panic with "send on closed channel". The fix uses a recover guard.
 func (p *Pool) Put(db *sql.DB) {
 	if db == nil {
 		return
 	}
 
-	// Check closed flag under lock, then operate on db outside lock.
-	// db.Close() is I/O and must not be called while holding p.mu
-	// (CLAUDE.md "Mutex scope" rule).
+	// Check closed flag under lock.
 	p.mu.Lock()
 	closed := p.closed
 	p.mu.Unlock()
@@ -184,6 +185,14 @@ func (p *Pool) Put(db *sql.DB) {
 		db.Close()
 		return
 	}
+
+	// Recover guard: if the channel was closed between our check and send,
+	// we safely close the connection instead of panicking.
+	defer func() {
+		if r := recover(); r != nil {
+			db.Close()
+		}
+	}()
 
 	select {
 	case p.conns <- db:

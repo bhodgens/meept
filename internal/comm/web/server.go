@@ -109,6 +109,7 @@ type Server struct {
 
 	// New service dependencies
 	wsHub          *WebSocketHub
+	wsConnLimiter  *wsConnLimiter
 	chatStreamer   ChatStreamer
 	sessionManager SessionManager
 	agentLister    AgentLister
@@ -226,6 +227,7 @@ func NewServer(cfg ServerConfig, handler Handler, auth Authenticator, logger *sl
 		auth:    auth,
 		logger:  logger,
 		wsHub:   NewWebSocketHub(logger),
+		wsConnLimiter: newWSConnLimiter(),
 	}
 
 	for _, opt := range opts {

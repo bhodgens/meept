@@ -235,6 +235,9 @@ func WithConcurrencyLimit(maxConcurrency int) ClientOption {
 
 // NewClient creates a new LLM client.
 func NewClient(config *ModelConfig, opts ...ClientOption) *Client {
+	if config == nil {
+		config = &ModelConfig{}
+	}
 	c := &Client{
 		config: config,
 		httpClient: &http.Client{
@@ -379,7 +382,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 	var lastErr error
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		resp, err := c.doRequest(ctx, payload)
+		resp, err := c.doRequest(ctx, payload, cfg)
 		if err != nil {
 			var apiErr *APIError
 			var rlErr *RateLimitError
@@ -426,7 +429,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 			c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
 			// Record cost with scope if model pricing is available
 			if c.config != nil {
-				costUSD := float64(resp.Usage.PromptTokens)*c.config.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*c.config.CostPerMillionOutput/1_000_000
+				costUSD := float64(resp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
 				if costUSD > 0 {
 					c.budget.RecordCostWithScope(CostRecord{
 						Timestamp:        time.Now(),
@@ -538,7 +541,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 			reportProgress(ProgressStageThinking, "Model is thinking...")
 		}
 
-		resp, err := c.doRequest(ctx, payload)
+		resp, err := c.doRequest(ctx, payload, cfg)
 		if err != nil {
 			var apiErr *APIError
 			var rlErr *RateLimitError
@@ -587,7 +590,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 			c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
 			// Record cost with scope if model pricing is available
 			if c.config != nil {
-				costUSD := float64(resp.Usage.PromptTokens)*c.config.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*c.config.CostPerMillionOutput/1_000_000
+				costUSD := float64(resp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
 				if costUSD > 0 {
 					c.budget.RecordCostWithScope(CostRecord{
 						Timestamp:        time.Now(),
@@ -719,7 +722,8 @@ func WithReasoning(rc *ReasoningConfig) ChatOption {
 }
 
 // doRequest performs the HTTP request and parses the response.
-func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Response, error) {
+// cfg must be captured under lock by the caller.
+func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *ModelConfig) (*Response, error) {
 	// Acquire concurrency limit semaphore (if configured)
 	release, err := c.acquireConcurrencyLimit(ctx)
 	if err != nil {
@@ -735,13 +739,14 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 	// Build URL - baseURL should be the full API base (e.g., http://host/v1 or http://host/api)
 	// We just append /chat/completions to whatever baseURL is configured
 	c.configMu.RLock()
-	baseURL := strings.TrimSuffix(c.config.BaseURL, "/")
-	modelID := c.config.ModelID
-	apiKey := c.config.APIKey
-	providerID := c.config.ProviderID
+	baseURL := strings.TrimSuffix(cfg.BaseURL, "/")
 	extraHeaders := c.extraHeaders
 	c.configMu.RUnlock()
 	url := baseURL + "/chat/completions"
+	// Use cfg for modelID, apiKey, providerID to avoid race with SwitchModel
+	modelID := cfg.ModelID
+	apiKey := cfg.APIKey
+	providerID := cfg.ProviderID
 
 	// Log request for diagnosis
 	c.logger.Debug("Making LLM request", "url", url, "model", modelID, "payload_len", len(body), "messages_count", len(payload["messages"].([]map[string]any)))
@@ -915,7 +920,7 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 
 	// Update metrics with actual token counts if available
 	if c.metricsStore != nil && parsedResp != nil {
-		costUSD := float64(chatResp.Usage.PromptTokens)*c.config.CostPerMillionInput/1_000_000 + float64(chatResp.Usage.CompletionTokens)*c.config.CostPerMillionOutput/1_000_000
+		costUSD := float64(chatResp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 + float64(chatResp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
 		//nolint:gosec // goroutine outlives request context
 		go func() {
 			record := metrics.RequestRecord{
@@ -1037,14 +1042,14 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 			retryState.isResume = true
 			c.logger.Debug("stream retry attempt", "attempt", attempt+1, "max", streamMaxRetries)
 		}
-		resp, httpStatus, err := c.doStreamRequest(ctx, body, onDelta, retryState)
+		resp, httpStatus, err := c.doStreamRequest(ctx, body, onDelta, retryState, cfg)
 		if err == nil {
 			// Record usage with scope
 			if c.budget != nil && resp != nil {
 				c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
 				// Record cost with scope if model pricing is available
 				if c.config != nil {
-					costUSD := float64(resp.Usage.PromptTokens)*c.config.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*c.config.CostPerMillionOutput/1_000_000
+					costUSD := float64(resp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 + float64(resp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
 					if costUSD > 0 {
 						c.budget.RecordCostWithScope(CostRecord{
 							Timestamp:        time.Now(),
@@ -1123,7 +1128,8 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 // NOTE: resp.Body is closed before the function returns (line 1270). Callers only access
 // resp.StatusCode and must not read resp.Body.
 // Returns HTTP status code as int so callers don't manage *http.Response lifecycle.
-func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta DeltaCallback, retryState *streamRetryState) (*Response, int, error) {
+// cfg must be captured under lock by the caller.
+func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta DeltaCallback, retryState *streamRetryState, cfg *ModelConfig) (*Response, int, error) {
 	// Acquire concurrency limit semaphore (if configured)
 	release, err := c.acquireConcurrencyLimit(ctx)
 	if err != nil {
@@ -1138,13 +1144,14 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 	defer release()
 
 	c.configMu.RLock()
-	baseURL := strings.TrimSuffix(c.config.BaseURL, "/")
-	modelID := c.config.ModelID
-	apiKey := c.config.APIKey
-	providerID := c.config.ProviderID
+	baseURL := strings.TrimSuffix(cfg.BaseURL, "/")
 	extraHeaders := c.extraHeaders
 	c.configMu.RUnlock()
 	url := baseURL + "/chat/completions"
+	// Use cfg for modelID, apiKey, providerID to avoid race with SwitchModel
+	modelID := cfg.ModelID
+	apiKey := cfg.APIKey
+	providerID := cfg.ProviderID
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {

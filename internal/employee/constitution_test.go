@@ -1,6 +1,7 @@
 package employee
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -879,5 +880,102 @@ func TestDefaultConservativeConstitution_Validates(t *testing.T) {
 	c := DefaultConservativeConstitution("test employee")
 	if err := c.Validate("emp-test"); err != nil {
 		t.Fatalf("DefaultConservativeConstitution should pass Validate: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test: flattenJSON catches nested frozen-field bypasses
+// ---------------------------------------------------------------------------
+
+func TestFindFrozenViolation_FlattensNestedJSON(t *testing.T) {
+	frozen := []string{"constraints.never", "constraints.risk_ceiling", "purpose"}
+
+	tests := []struct {
+		name    string
+		patch   map[string]any
+		wantBad string
+	}{
+		{
+			name:    "nested constraints.never bypass",
+			patch:   map[string]any{"constraints": map[string]any{"never": []any{"new rule"}}},
+			wantBad: "constraints.never",
+		},
+		{
+			name:    "nested constraints.risk_ceiling bypass",
+			patch:   map[string]any{"constraints": map[string]any{"risk_ceiling": "high"}},
+			wantBad: "constraints.risk_ceiling",
+		},
+		{
+			name:    "deeply nested bypass",
+			patch:   map[string]any{"constraints": map[string]any{"nested": map[string]any{"deep": "value"}}},
+			wantBad: "", // not frozen
+		},
+		{
+			name:    "top-level frozen field",
+			patch:   map[string]any{"purpose": "new purpose"},
+			wantBad: "purpose",
+		},
+		{
+			name:    "non-frozen nested field",
+			patch:   map[string]any{"constraints": map[string]any{"tools_allowed": []any{"web_fetch"}}},
+			wantBad: "",
+		},
+		{
+			name:    "mixed frozen and non-frozen nested",
+			patch:   map[string]any{"constraints": map[string]any{"never": []any{"x"}, "risk_ceiling": "low"}},
+			wantBad: "constraints.never",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := findFrozenViolation(tt.patch, frozen)
+			if got != tt.wantBad {
+				t.Errorf("findFrozenViolation() = %q, want %q", got, tt.wantBad)
+			}
+		})
+	}
+}
+
+func TestFlattenJSON(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  map[string]any
+		output map[string]any
+	}{
+		{
+			name:   "flat passthrough",
+			input:  map[string]any{"a": 1, "b": "two"},
+			output: map[string]any{"a": 1, "b": "two"},
+		},
+		{
+			name:   "one level nested",
+			input:  map[string]any{"constraints": map[string]any{"never": []any{"rule1"}}},
+			output: map[string]any{"constraints.never": []any{"rule1"}},
+		},
+		{
+			name:   "two level nested",
+			input:  map[string]any{"a": map[string]any{"b": map[string]any{"c": "deep"}}},
+			output: map[string]any{"a.b.c": "deep"},
+		},
+		{
+			name:   "multiple keys nested",
+			input:  map[string]any{"constraints": map[string]any{"never": []any{"x"}, "risk_ceiling": "low"}},
+			output: map[string]any{"constraints.never": []any{"x"}, "constraints.risk_ceiling": "low"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := flattenJSON(tt.input)
+			if len(got) != len(tt.output) {
+				t.Fatalf("flattenJSON() length mismatch: got %d, want %d", len(got), len(tt.output))
+			}
+			for k, v := range tt.output {
+				if gv, ok := got[k]; !ok || !reflect.DeepEqual(gv, v) {
+					t.Errorf("flattenJSON()[%q] = %v, want %v", k, gv, v)
+				}
+			}
+		})
 	}
 }

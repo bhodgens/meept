@@ -77,7 +77,7 @@ func TestBasicAuth_UnknownUser(t *testing.T) {
 }
 
 func TestAPIKeyAuth_Header(t *testing.T) {
-	auth := NewAPIKeyAuth([]string{"key1", "key2"}, "", "")
+	auth := NewAPIKeyAuth([]string{"key1", "key2"}, "")
 	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req.Header.Set("X-API-Key", "key1")
 	if !auth.Authenticate(req) {
@@ -85,16 +85,18 @@ func TestAPIKeyAuth_Header(t *testing.T) {
 	}
 }
 
-func TestAPIKeyAuth_QueryParam(t *testing.T) {
-	auth := NewAPIKeyAuth([]string{"key1"}, "", "")
+func TestAPIKeyAuth_NoQueryParam(t *testing.T) {
+	// Query parameters are explicitly NOT supported to prevent credential leakage
+	// via access logs, browser history, and Referer headers
+	auth := NewAPIKeyAuth([]string{"key1"}, "")
 	req := httptest.NewRequest(http.MethodGet, "/?api_key=key1", http.NoBody)
-	if !auth.Authenticate(req) {
-		t.Fatalf("expected valid authentication via query param")
+	if auth.Authenticate(req) {
+		t.Fatalf("query parameter authentication should be disabled for security")
 	}
 }
 
 func TestAPIKeyAuth_InvalidKey(t *testing.T) {
-	auth := NewAPIKeyAuth([]string{"key1"}, "", "")
+	auth := NewAPIKeyAuth([]string{"key1"}, "")
 	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req.Header.Set("X-API-Key", "wrong")
 	if auth.Authenticate(req) {
@@ -103,7 +105,7 @@ func TestAPIKeyAuth_InvalidKey(t *testing.T) {
 }
 
 func TestAPIKeyAuth_CustomHeader(t *testing.T) {
-	auth := NewAPIKeyAuth([]string{"key1"}, "X-Custom-Key", "")
+	auth := NewAPIKeyAuth([]string{"key1"}, "X-Custom-Key")
 	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req.Header.Set("X-Custom-Key", "key1")
 	if !auth.Authenticate(req) {
@@ -113,7 +115,7 @@ func TestAPIKeyAuth_CustomHeader(t *testing.T) {
 
 func TestChainAuth(t *testing.T) {
 	bearer := NewBearerAuth("token1")
-	apiKey := NewAPIKeyAuth([]string{"key1"}, "", "")
+	apiKey := NewAPIKeyAuth([]string{"key1"}, "")
 	auth := NewChainAuth(bearer, apiKey)
 
 	// Test bearer auth works

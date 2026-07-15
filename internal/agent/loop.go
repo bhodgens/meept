@@ -3898,7 +3898,9 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 
 	// Start long-running task notification goroutine (after 30s)
 	if l.notificationPublisher != nil {
+		l.wg.Add(1)
 		go func() {
+			defer l.wg.Done()
 			select {
 			case <-ctx.Done():
 				return

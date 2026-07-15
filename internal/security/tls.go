@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"log/slog"
 	"os"
 )
 
@@ -65,16 +64,16 @@ func ServerTLSConfig(cfg TLSConfig) (*tls.Config, error) {
 		}
 		tlsConfig.ClientCAs = caPool
 
+		// SECURITY FIX (2026-07-14): Reject "none" verify mode outright instead
+		// of allowing mTLS to be disabled. Previously this allowed a configuration
+		// bypass where client certificates were not verified.
 		switch cfg.VerifyMode {
-		case "none":
-			slog.Warn("mTLS disabled: verify_mode=none — client certs will not be verified")
-			tlsConfig.ClientAuth = tls.NoClientCert
 		case "optional":
 			tlsConfig.ClientAuth = tls.RequestClientCert
 		case "require", "":
 			tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
 		default:
-			return nil, fmt.Errorf("invalid verify mode: %s", cfg.VerifyMode)
+			return nil, fmt.Errorf("invalid verify mode: %s (must be 'require' or 'optional')", cfg.VerifyMode)
 		}
 	}
 

@@ -389,6 +389,14 @@ func (s *ConstitutionStore) Delete(ctx context.Context, employeeID string) error
 // Manager
 // --------------------------------------------------------------------------
 
+// pendingConstitution holds a constitution patch awaiting plan approval.
+// The employeeID is stored so ApprovePlan can apply the patch to the
+// correct employee's constitution.
+type pendingConstitution struct {
+	employeeID    string
+	constitution *Constitution
+}
+
 // PlanCreatorFunc is an optional callback injected by the daemon wiring to
 // route constitution amendments through the Plan signoff workflow. It
 // breaks what would otherwise be a circular import (plan → agent →
@@ -511,6 +519,13 @@ type Manager struct {
 	// falls back to LastAssessed.
 	planLookup PlanLookup
 
+	// pendingConstitutions maps plan_id to a constitution amendment request
+	// that is waiting for approval. When a constitution amendment plan is
+	// created, the patched constitution is stored here (not persisted).
+	// On plan approval, the patch is applied; on rejection, it is discarded.
+	// Guarded by mu since it is shared state modified at runtime.
+	pendingConstitutions map[string]*pendingConstitution
+
 	// botsDir overrides the default ~/.meept/bots/ scan path used by
 	// Migrate. When empty, Migrate falls back to the default. Set via
 	// SetBotsDir (typically by tests or by the daemon wiring when the
@@ -599,6 +614,7 @@ func NewManager(bm *bot.Manager) *Manager {
 	return &Manager{
 		botManager:     bm,
 		constitutions:  make(map[string]Constitution),
+		pendingConstitutions: make(map[string]*pendingConstitution),
 		driftScores:    make(map[string]float64),
 		goalLoops:      make(map[string]*GoalLoop),
 		invokeMuMap:    make(map[string]*sync.Mutex),
@@ -630,6 +646,7 @@ func NewManagerWithStores(
 		goalStore:         gs,
 		auditStore:        as,
 		constitutions:     make(map[string]Constitution),
+		pendingConstitutions: make(map[string]*pendingConstitution),
 		driftScores:       make(map[string]float64),
 		goalLoops:         make(map[string]*GoalLoop),
 		invokeMuMap:       make(map[string]*sync.Mutex),
@@ -1525,16 +1542,19 @@ func (m *Manager) AmendConstitution(ctx context.Context, req AmendRequest) (stri
 		if err != nil {
 			return "", fmt.Errorf("amend: plan signoff: %w", err)
 		}
-		// Persist the patched constitution. In the full flow this
-		// would be applied only after the Plan is approved; for the
-		// MVP we persist immediately and record the Plan ID.
-		if m.constitutionStore != nil {
-			if err := m.constitutionStore.Put(ctx, req.EmployeeID, patched); err != nil {
-				return "", fmt.Errorf("amend: persist: %w", err)
-			}
+		// Store the patched constitution as PENDING. Do NOT persist yet —
+		// the constitution is only applied when the Plan is approved.
+		m.mu.Lock()
+		if m.pendingConstitutions == nil {
+			m.pendingConstitutions = make(map[string]*pendingConstitution)
 		}
-		m.setCachedConstitution(req.EmployeeID, patched)
-		m.logger.Info("constitution amended via plan signoff",
+		pc := &pendingConstitution{
+			employeeID:   req.EmployeeID,
+			constitution: &patched,
+		}
+		m.pendingConstitutions[planID] = pc
+		m.mu.Unlock()
+		m.logger.Info("constitution amendment pending plan approval",
 			"employee_id", req.EmployeeID, "plan_id", planID,
 			"old_version", existing.Constitution.Version,
 			"new_version", patched.Version)
@@ -1749,6 +1769,30 @@ func (m *Manager) ApprovePlan(ctx context.Context, goalID, planID, reason string
 				"goal_id", goalID, "plan_id", planID, "error", err)
 		}
 	}
+	// Apply pending constitution patch if this plan was a constitution amendment.
+	m.mu.Lock()
+	if pending, ok := m.pendingConstitutions[planID]; ok {
+		// Apply the constitution patch to the store
+		if m.constitutionStore != nil {
+			if err := m.constitutionStore.Put(ctx, pending.employeeID, *pending.constitution); err != nil {
+				m.mu.Unlock()
+				m.logger.Error("approve plan: failed to apply constitution patch",
+					"plan_id", planID, "employee_id", pending.employeeID, "error", err)
+				// Don't fail the approval - the plan is already approved
+				// in the signoff system. Just clear the pending entry.
+			}
+		}
+		m.setCachedConstitution(pending.employeeID, *pending.constitution)
+		delete(m.pendingConstitutions, planID)
+		m.logger.Info("constitution patch applied on plan approval",
+			"plan_id", planID, "employee_id", pending.employeeID,
+			"version", pending.constitution.Version)
+	} else {
+		m.logger.Debug("no pending constitution patch for plan (not an amendment)",
+			"plan_id", planID)
+	}
+	m.mu.Unlock()
+
 	m.logger.Info("plan approved",
 		"goal_id", goalID, "plan_id", planID)
 	m.emitMetric("employee.plan.approvals", 1, map[string]string{
@@ -1790,6 +1834,15 @@ func (m *Manager) RejectPlan(ctx context.Context, goalID, planID, reason string)
 			}
 		}
 	}
+	// Clear pending constitution patch if this plan was a constitution amendment.
+	m.mu.Lock()
+	if pending, ok := m.pendingConstitutions[planID]; ok {
+		delete(m.pendingConstitutions, planID)
+		m.logger.Info("constitution patch discarded on plan rejection",
+			"plan_id", planID, "employee_id", pending.employeeID)
+	}
+	m.mu.Unlock()
+
 	m.logger.Info("plan rejected",
 		"goal_id", goalID, "plan_id", planID)
 	m.emitMetric("employee.plan.approvals", 1, map[string]string{
@@ -2346,18 +2399,53 @@ func decodeConstitution(raw map[string]any) (Constitution, error) {
 	return c, nil
 }
 
+// flattenJSON converts nested JSON to dotted paths.
+// Example: {"constraints": {"never": []}} → {"constraints.never": []}
+// This is used by findFrozenViolation to catch nested frozen-field violations.
+func flattenJSON(src map[string]any) map[string]any {
+	result := make(map[string]any)
+	for k, v := range src {
+		if nested, ok := v.(map[string]any); ok {
+			for fk, fv := range flattenJSONInner(k, nested) {
+				result[fk] = fv
+			}
+		} else {
+			result[k] = v
+		}
+	}
+	return result
+}
+
+func flattenJSONInner(prefix string, src map[string]any) map[string]any {
+	result := make(map[string]any)
+	for k, v := range src {
+		path := prefix + "." + k
+		if nested, ok := v.(map[string]any); ok {
+			for fk, fv := range flattenJSONInner(path, nested) {
+				result[fk] = fv
+			}
+		} else {
+			result[path] = v
+		}
+	}
+	return result
+}
+
 // findFrozenViolation returns the first key in patch that appears in the
 // frozen list, or "" when none match. Both plain ("purpose") and dotted
-// ("constraints.risk_ceiling") forms are honored.
+// ("constraints.risk_ceiling") forms are honored. The patch is flattened
+// before checking so nested objects like {"constraints": {...}} are caught.
 func findFrozenViolation(patch map[string]any, frozen []string) string {
 	if len(frozen) == 0 || len(patch) == 0 {
 		return ""
 	}
+	// Flatten nested JSON to dotted paths before checking
+	flattened := flattenJSON(patch)
 	frozenSet := make(map[string]struct{}, len(frozen))
 	for _, f := range frozen {
 		frozenSet[strings.ToLower(strings.TrimSpace(f))] = struct{}{}
 	}
-	for k := range patch {
+	for k := range flattened {
 		lk := strings.ToLower(strings.TrimSpace(k))
 		if _, bad := frozenSet[lk]; bad {
 			return k
