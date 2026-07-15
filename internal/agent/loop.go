@@ -1720,6 +1720,11 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// wall-clock latency to the trajectory.
 	begin := time.Now()
 
+	// Snapshot file watcher under lock to avoid racing with SetFileWatcher.
+	l.mu.RLock()
+	fw := l.fileWatcher
+	l.mu.RUnlock()
+
 	// Session start hooks (memory prefetch, context injection, etc.)
 	sessionStartState := SessionLifecycleState{
 		SessionID: conversationID,
@@ -1736,8 +1741,8 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	}
 
 	// Start file system hooks for this session
-	if l.fileWatcher != nil {
-		if err := l.fileWatcher.Start(ctx); err != nil {
+	if fw != nil {
+		if err := fw.Start(ctx); err != nil {
 			l.logger.Warn("failed to start file watcher", "error", err)
 		}
 	}
@@ -1774,8 +1779,10 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		}
 
 		// Stop file system hooks for this session (independent of queue registration)
-		if l.fileWatcher != nil {
-			_ = l.fileWatcher.Stop()
+		if fw != nil {
+			if err := fw.Stop(); err != nil {
+				slog.Warn("file watcher stop", "error", err)
+			}
 		}
 
 		// Session end hooks (metrics, audit, cleanup)
@@ -2793,10 +2800,15 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		var reasoningCfg *llm.ReasoningConfig
 		if l.reasoningOverride != nil {
 			reasoningCfg = l.reasoningOverride
-		} else if l.reasoningForNextTurn != "" {
-			reasoningCfg = &llm.ReasoningConfig{Effort: l.reasoningForNextTurn}
-		} else if l.agentReasoning != nil {
-			reasoningCfg = l.agentReasoning.ToReasoningConfig(l.agentReasoning.Effort)
+		} else {
+			l.mu.RLock()
+			reasoning := l.reasoningForNextTurn
+			l.mu.RUnlock()
+			if reasoning != "" {
+				reasoningCfg = &llm.ReasoningConfig{Effort: reasoning}
+			} else if l.agentReasoning != nil {
+				reasoningCfg = l.agentReasoning.ToReasoningConfig(l.agentReasoning.Effort)
+			}
 		}
 		if reasoningCfg != nil {
 			chatOpts = append(chatOpts, llm.WithReasoning(reasoningCfg))
@@ -2880,7 +2892,9 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			}
 		}
 		// Clear per-turn reasoning after the LLM call consumes it.
+		l.mu.Lock()
 		l.reasoningForNextTurn = ""
+		l.mu.Unlock()
 		// Track token usage
 		totalTokens += response.Usage.TotalTokens
 		cachedTokens += response.Usage.CachedTokens
@@ -2929,14 +2943,23 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					modelID = l.llmClient.Config().ModelID
 				}
 				routingPath := l.deriveRoutingPath()
-				go l.shadowMgr.CaptureToolInteraction(
-					context.Background(),
-					conversationID,
-					messages,
-					response,
-					modelID,
-					routingPath,
-				)
+				l.wg.Add(1)
+				go func(convID string, msgs []llm.ChatMessage, resp *llm.Response, mid, route string) {
+					defer l.wg.Done()
+					defer func() {
+						if r := recover(); r != nil {
+							l.logger.Warn("shadow capture panicked", "error", r)
+						}
+					}()
+					l.shadowMgr.CaptureToolInteraction(
+						context.Background(),
+						convID,
+						msgs,
+						resp,
+						mid,
+						route,
+					)
+				}(conversationID, messages, response, modelID, routingPath)
 			}
 
 			// Build tool names for progress
@@ -3228,13 +3251,22 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// above (line ~1951): the reasoningCycle context will be cancelled
 			// when the loop returns, but shadow capture is best-effort and
 			// should outlive the request (S1-9).
-			go l.shadowMgr.CaptureInteraction(context.Background(),
-				conversationID,
-				messages,
-				response,
-				modelID,
-				routingPath,
-			)
+			l.wg.Add(1)
+			go func(convID string, msgs []llm.ChatMessage, resp *llm.Response, mid, route string) {
+				defer l.wg.Done()
+				defer func() {
+					if r := recover(); r != nil {
+						l.logger.Warn("shadow capture panicked", "error", r)
+					}
+				}()
+				l.shadowMgr.CaptureInteraction(context.Background(),
+					convID,
+					msgs,
+					resp,
+					mid,
+					route,
+				)
+			}(conversationID, messages, response, modelID, routingPath)
 		}
 
 		l.safeTransition(StateGeneratingResponse, "generating_response", map[string]any{"iteration": iteration})
@@ -4344,18 +4376,27 @@ func (l *AgentLoop) recordTaskExecution(ctx context.Context, t *task.Task, respo
 // formatMemoryForPrompt formats a memory for inclusion in the prompt.
 func formatMemoryForPrompt(m memvid.Memory) string {
 	content := m.Content
-	if len(content) > 300 {
-		content = content[:297] + "..."
+	runes := []rune(content)
+	if len(runes) > 300 {
+		content = string(runes[:297]) + "..."
 	}
 	return content
 }
 
 // truncateForMemory truncates content for memory storage.
+// Rune-safe to avoid splitting multi-byte UTF-8 characters.
 func truncateForMemory(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if maxLen <= 0 {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return string(runes[:maxLen])
+	}
+	return string(runes[:maxLen-3]) + "..."
 }
 
 // injectFewShotExamples retrieves and injects relevant few-shot examples into messages.

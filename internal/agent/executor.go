@@ -1269,14 +1269,24 @@ func (e *Executor) ExecuteAll(ctx context.Context, toolCalls []llm.ToolCall) []*
 // inferDependencies builds a ToolDependencyGraph for the given calls. Falls
 // back to an empty graph (all calls independent) if no inferrer is configured.
 func (e *Executor) inferDependencies(toolCalls []llm.ToolCall) *ToolDependencyGraph {
+	// Snapshot registry under RLock for consistency with Execute().
+	e.mu.RLock()
+	registry := e.registry
+	e.mu.RUnlock()
+
+	e.mu.Lock()
 	if e.depInferrer == nil {
 		// Lazy init if registry is available; otherwise return empty graph.
-		if e.registry == nil {
+		if registry == nil {
+			e.mu.Unlock()
 			return NewToolDependencyGraph()
 		}
-		e.depInferrer = NewDependencyInferrer(e.registry, e.logger)
+		e.depInferrer = NewDependencyInferrer(registry, e.logger)
 	}
-	return e.depInferrer.InferDependencies(toolCalls)
+	inferrer := e.depInferrer
+	e.mu.Unlock()
+
+	return inferrer.InferDependencies(toolCalls)
 }
 
 // executeParallelGroup runs a group of independent tool calls in parallel.

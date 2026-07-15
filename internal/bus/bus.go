@@ -269,6 +269,13 @@ func (b *MessageBus) Subscribe(id, topic string) *Subscriber {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	if b.closed {
+		// Return a subscriber with a closed channel so callers' defer Unsubscribe works.
+		sub := &Subscriber{ID: id, Topic: topic, Channel: make(chan *models.BusMessage, 1)}
+		close(sub.Channel)
+		return sub
+	}
+
 	sub := &Subscriber{
 		ID:      id,
 		Topic:   topic,

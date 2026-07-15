@@ -70,7 +70,7 @@ func ServerTLSConfig(cfg TLSConfig) (*tls.Config, error) {
 			slog.Warn("mTLS disabled: verify_mode=none — client certs will not be verified")
 			tlsConfig.ClientAuth = tls.NoClientCert
 		case "optional":
-			tlsConfig.ClientAuth = tls.VerifyClientCertIfGiven
+			tlsConfig.ClientAuth = tls.RequestClientCert
 		case "require", "":
 			tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
 		default:

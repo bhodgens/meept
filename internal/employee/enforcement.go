@@ -20,6 +20,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	mathrand "math/rand"
 	"path"
 	"regexp"
@@ -257,16 +258,19 @@ func (t *TurnBudgetTracker) Remaining() (tokensRemaining, costRemaining int) {
 }
 
 // IsExhausted returns true when either the token or cost budget has been
-// exceeded. A nil tracker is never exhausted (unlimited).
+// exceeded. A nil tracker is never exhausted (unlimited). A remaining value
+// of -1 means "no limit"; any other non-positive value means exhausted or
+// overspent.
 func (t *TurnBudgetTracker) IsExhausted() bool {
 	if t == nil {
 		return false
 	}
 	tokens, cost := t.Remaining()
-	if tokens >= 0 && tokens == 0 {
+	// -1 means "no limit"; other non-positive values mean exhausted/overspent.
+	if tokens != -1 && tokens <= 0 {
 		return true
 	}
-	if cost >= 0 && cost == 0 {
+	if cost != -1 && cost <= 0 {
 		return true
 	}
 	return false
@@ -732,7 +736,8 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 	// more tools).
 	if turnBudget != nil {
 		tokensRem, costRem := turnBudget.Remaining()
-		if tokensRem == 0 || costRem == 0 {
+		// -1 means "no limit"; treat any other non-positive value as exhausted.
+		if (tokensRem != -1 && tokensRem <= 0) || (costRem != -1 && costRem <= 0) {
 			p.recordDenial(context.Background(), p.employeeID, action, toolName,
 				"turn budget exhausted", SeverityCritical)
 			if autoPause != nil {
@@ -796,6 +801,8 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 // audit-trail integrity (spec line 397: "all three checkpoints persist
 // findings").
 func (p *PreExecChecker) recordDenial(ctx context.Context, employeeID, action, toolName, reason string, severity AuditSeverity) {
+	// Check is synchronous and does not receive a caller context, so
+	// context.Background() is the correct choice for the store write.
 	defer func() {
 		// Never let an audit-write failure propagate into the checker.
 		_ = recover()
@@ -1172,7 +1179,8 @@ func (a *PostTurnAuditor) Audit(ctx context.Context, turn TurnRecord) (*AuditFin
 	empTurns := a.turnCache[turn.EmployeeID]
 	empTurns = append(empTurns, turn)
 	if len(empTurns) > maxCachedTurns {
-		empTurns = empTurns[len(empTurns)-maxCachedTurns:]
+		// Allocate a fresh slice to release the old backing array.
+		empTurns = append([]TurnRecord(nil), empTurns[len(empTurns)-maxCachedTurns:]...)
 	}
 	a.turnCache[turn.EmployeeID] = empTurns
 	a.turnCacheMu.Unlock()
@@ -1242,7 +1250,9 @@ func (a *PostTurnAuditor) Audit(ctx context.Context, turn TurnRecord) (*AuditFin
 		}
 	}
 	if store != nil {
-		_ = store.Create(context.Background(), *finding) // best-effort persist
+		if err := store.Create(ctx, *finding); err != nil {
+			slog.Warn("best-effort finding persist", "error", err, "finding_id", finding.ID)
+		}
 	}
 	// G7: explicit goal attachment for findings (spec line 382: "attach to
 	// owning Goal"). When the finding carries a GoalID and a callback is
@@ -1468,10 +1478,12 @@ func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]Audi
 	}
 
 	// Backoff: if the last failure was recent, skip this call.
+	// Snapshot both fields under the same lock to avoid a torn read.
 	a.failMu.Lock()
 	sinceLast := time.Since(a.lastFailureAt)
+	failures := a.consecutiveFailures
 	a.failMu.Unlock()
-	if a.consecutiveFailures > 0 && sinceLast < 30*time.Second {
+	if failures > 0 && sinceLast < 30*time.Second {
 		return nil, 0, nil
 	}
 
@@ -1515,7 +1527,9 @@ func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]Audi
 	}
 	for i := range findings {
 		if store != nil {
-			_ = store.Create(context.Background(), findings[i])
+			if err := store.Create(ctx, findings[i]); err != nil {
+				slog.Warn("periodic finding persist", "error", err, "finding_id", findings[i].ID)
+			}
 		}
 		if findings[i].Severity == SeverityCritical && autoPause != nil {
 			_ = autoPause(employeeID, "periodic critical: "+findings[i].ViolatedRule)

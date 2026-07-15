@@ -77,6 +77,7 @@ func (h *InstructionsHandler) handleCreate(w http.ResponseWriter, r *http.Reques
 		Tier  string `json:"tier,omitempty"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(InstructionResponse{
@@ -197,6 +198,7 @@ func (h *InstructionsHandler) handleUpdateByID(w http.ResponseWriter, r *http.Re
 		Tier    string  `json:"tier,omitempty"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(InstructionResponse{
@@ -300,6 +302,7 @@ func (h *InstructionsHandler) handlePreview(w http.ResponseWriter, r *http.Reque
 		Input string `json:"input"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(InstructionResponse{

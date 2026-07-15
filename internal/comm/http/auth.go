@@ -72,11 +72,9 @@ func (a *APIKeyAuth) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// extractKey checks the Authorization header (Bearer <key>),
-// the Sec-WebSocket-Protocol header (for WebSocket clients),
-// and as a legacy fallback the ?token=<key> query parameter for WebSocket.
-// The query param fallback logs a warning because credentials in the URL are
-// visible in server/proxy access logs (Bug S1).
+// extractKey checks the Authorization header (Bearer <key>) and, for
+// WebSocket upgrade requests, the Sec-WebSocket-Protocol header
+// (convention: "bearer.<key>" subprotocol).
 func (a *APIKeyAuth) extractKey(r *http.Request) string {
 	auth := r.Header.Get("Authorization")
 	// Require the standard "Bearer <token>" scheme. A non-Bearer header

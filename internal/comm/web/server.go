@@ -295,6 +295,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 	s.logger.Info("HTTP server shutting down")
 
+	// TODO: when bus-to-WebSocket forwarding is added to this server (as in
+	// internal/comm/http/server.go), unsubscribe all bus forwarding goroutines
+	// here before calling s.server.Shutdown. The production server tracks
+	// subscribers in wsSubscribers/wsSubMu and iterates them in Shutdown
+	// (see internal/comm/http/server.go:958-966).
+
 	s.running = false
 	if s.server != nil {
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)

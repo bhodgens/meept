@@ -726,12 +726,10 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 	var candidates []overrideCandidate
 
 	for _, o := range overrides {
-		// Check max_uses (preliminary check - atomic check below)
-		if o.MaxUses > 0 && o.UsageCount >= o.MaxUses {
-			continue
-		}
-
-		// Check pattern match
+		// NOTE: Do NOT check usage_count >= max_uses here — that would be a
+		// TOCTOU race. The atomic UPDATE in Phase 2 is the single source of
+		// truth for exhaustion. Pre-filtering here only skips the pattern
+		// match, not the authoritative check.
 		if o.Pattern != "*" {
 			detailsJSON, _ := json.Marshal(details)
 			detailStr := string(detailsJSON)

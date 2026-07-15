@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	intsecurity "github.com/caimlas/meept/internal/security"
@@ -43,6 +44,10 @@ type WebFetchTool struct {
 	// Production code never sets this; it exists for unit tests that run
 	// against httptest.NewServer (which binds to 127.0.0.1).
 	allowPrivateRanges bool
+
+	// clientMu guards client and its Transport during SetAllowPrivateRanges
+	// to prevent a race with concurrent Execute reads.
+	clientMu sync.Mutex
 }
 
 // NewWebFetchTool creates a new web fetch tool.
@@ -95,6 +100,8 @@ func (t *WebFetchTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
 // Intended only for unit tests that exercise the fetch path against
 // httptest.NewServer. Production callers must never invoke this.
 func (t *WebFetchTool) SetAllowPrivateRanges(allow bool) {
+	t.clientMu.Lock()
+	defer t.clientMu.Unlock()
 	t.allowPrivateRanges = allow
 	// Rebuild the transport so the dial-time SSRF check is also disabled.
 	t.client.Transport = &http.Transport{
@@ -176,8 +183,13 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) (any, e
 	req.Header.Set("User-Agent", "Meept/0.2 (autonomous assistant)")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain,*/*")
 
+	// Snapshot client under lock to avoid race with SetAllowPrivateRanges.
+	t.clientMu.Lock()
+	client := t.client
+	t.clientMu.Unlock()
+
 	// Execute request
-	resp, err := t.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("request timed out after %v", t.timeout)
@@ -350,7 +362,12 @@ func (t *WebFetchTool) ExecuteStreaming(ctx context.Context, args map[string]any
 	req.Header.Set("User-Agent", "Meept/0.2 (autonomous assistant)")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain,*/*")
 
-	resp, err := t.client.Do(req)
+	// Snapshot client under lock to avoid race with SetAllowPrivateRanges.
+	t.clientMu.Lock()
+	client := t.client
+	t.clientMu.Unlock()
+
+	resp, err := client.Do(req)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("request timed out after %v", t.timeout)

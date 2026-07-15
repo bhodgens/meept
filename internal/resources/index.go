@@ -147,6 +147,44 @@ func (i *Index) Put(rec *metaRecord) error {
 	return nil
 }
 
+// UpdateAtomic performs an atomic read-modify-write on the record identified
+// by hashHex. The callback fn receives a pointer to a copy of the current
+// record; mutations are persisted atomically. If the record does not exist,
+// fn is not called and the method returns false.
+func (i *Index) UpdateAtomic(hashHex string, fn func(rec *metaRecord)) bool {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	rec := i.cache[hashHex]
+	if rec == nil {
+		return false
+	}
+
+	// Work on a copy.
+	cp := *rec
+	fn(&cp)
+
+	// Persist to bbolt (the write transaction serializes access).
+	data, err := json.Marshal(&cp)
+	if err != nil {
+		return false
+	}
+	key := []byte(hashHex)
+	if err := i.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketResources)
+		if b == nil {
+			return errors.New("resources: index bucket missing")
+		}
+		return b.Put(key, data)
+	}); err != nil {
+		return false
+	}
+
+	// Update cache in-place (already holding write lock).
+	i.cache[hashHex] = &cp
+	return true
+}
+
 // Delete removes a record from both bbolt and cache.
 func (i *Index) Delete(hash string) error {
 	key := []byte(hash)

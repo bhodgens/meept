@@ -552,11 +552,16 @@ func (m *Manager) CallTool(ctx context.Context, fullName string, args map[string
 		return nil, fmt.Errorf("MCP server %q is not connected", serverName)
 	}
 
-	// Increment request counter under lock before dispatching. The stats
-	// entry should exist (server is active, per checks above) but guard
-	// against nil just in case.
+	// Increment request counter under lock before dispatching. Re-check that
+	// the server still exists in m.clients to avoid creating a misleading
+	// fresh stats entry for a server that was stopped/removed between the
+	// RLock above and this write lock (TOCTOU).
 	now := time.Now()
 	m.mu.Lock()
+	if _, stillExists := m.clients[serverName]; !stillExists {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("server %q stopped during call", serverName)
+	}
 	if st, ok := m.stats[serverName]; ok && st != nil {
 		st.Requests++
 		st.LastRequestAt = &now

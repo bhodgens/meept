@@ -98,11 +98,16 @@ func (pg *PromptGuard) WrapUserInput(text string) string {
 // It neutralizes embedded boundary markers in the output to prevent
 // prompt injection attacks that attempt to prematurely close the boundary.
 func (pg *PromptGuard) WrapToolOutput(toolName, output string) string {
-	// Neutralize embedded end markers by prefixing with angle bracket
-	// to prevent attackers from closing the boundary early
-	neutralized := strings.ReplaceAll(output, ToolOutputEndTag, "<"+ToolOutputEndTag)
 	startTag := ToolOutputStartTag(toolName)
-	neutralized = strings.ReplaceAll(neutralized, startTag, "<"+startTag)
+	// Neutralize embedded boundary markers by inserting a zero-width
+	// joiner inside the marker text. Prefixing with "<" is insufficient
+	// because the original tag string still appears as a substring of the
+	// neutralized form (e.g. "<<<END_TOOL_OUTPUT>>>" is a substring of
+	// "<<<<END_TOOL_OUTPUT>>>"), so IsWithinBoundary / ExtractToolOutput
+	// would still match it. Breaking up the literal marker text ensures
+	// no exact match is possible.
+	neutralized := strings.ReplaceAll(output, ToolOutputEndTag, "<<<END\u200dTOOL_OUTPUT>>>")
+	neutralized = strings.ReplaceAll(neutralized, startTag, "<<<TOOL_OUTPUT\u200d:"+toolName+">>>")
 	return fmt.Sprintf("%s\n%s\n%s", startTag, neutralized, ToolOutputEndTag)
 }
 

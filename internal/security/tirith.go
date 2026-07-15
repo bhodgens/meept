@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 const tirithTimeout = 2 * time.Second
@@ -28,13 +30,18 @@ var detailRE = regexp.MustCompile(`\[(\w+)]\s+(\S+)`)
 
 // tirithAvailabilityCache caches availability by binary path.
 // SEC-2 FIX: Per-binary caching instead of package-level Once.
+// SEC-7 FIX: singleflight prevents thundering-herd of exec.CommandContext
+// when N goroutines miss the cache simultaneously.
 var (
 	tirithCacheMu  sync.RWMutex
 	tirithCacheMap = make(map[string]bool)
+	tirithSF       singleflight.Group
 )
 
 // CheckTirithAvailable checks whether the tirith binary is reachable on PATH.
 // SEC-2 FIX: Now caches per binary path instead of using a single package-level sync.Once.
+// SEC-7 FIX: Uses singleflight to deduplicate concurrent checks for the same binary,
+// preventing N goroutines from spawning exec.CommandContext simultaneously.
 func CheckTirithAvailable(ctx context.Context, binary string) bool {
 	if binary == "" {
 		binary = BinaryTirith
@@ -49,26 +56,36 @@ func CheckTirithAvailable(ctx context.Context, binary string) bool {
 		return available
 	}
 
-	// Double-check after acquiring write lock
-	tirithCacheMu.Lock()
-	if available, cached = tirithCacheMap[binary]; cached {
+	// Use singleflight to deduplicate concurrent first-time checks.
+	// Only one goroutine per binary will run exec.CommandContext; the
+	// rest wait for its result.
+	v, err, _ := tirithSF.Do(binary, func() (interface{}, error) {
+		// Re-check cache after dedup — another goroutine may have
+		// populated it while we were waiting.
+		tirithCacheMu.RLock()
+		if a, ok := tirithCacheMap[binary]; ok {
+			tirithCacheMu.RUnlock()
+			return a, nil
+		}
+		tirithCacheMu.RUnlock()
+
+		// Run subprocess OUTSIDE the lock.
+		checkCtx, cancel := context.WithTimeout(ctx, tirithTimeout)
+		defer cancel()
+
+		cmd := exec.CommandContext(checkCtx, binary, "--version")
+		a := cmd.Run() == nil
+
+		tirithCacheMu.Lock()
+		tirithCacheMap[binary] = a
 		tirithCacheMu.Unlock()
-		return available
+
+		return a, nil
+	})
+	if err != nil {
+		return false
 	}
-	tirithCacheMu.Unlock()
-
-	// Run subprocess OUTSIDE the lock to avoid serializing concurrent scans.
-	ctx, cancel := context.WithTimeout(ctx, tirithTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, binary, "--version")
-	available = cmd.Run() == nil
-
-	tirithCacheMu.Lock()
-	tirithCacheMap[binary] = available
-	tirithCacheMu.Unlock()
-
-	return available
+	return v.(bool)
 }
 
 // ScanCommand runs tirith check on a shell command and parses the output.

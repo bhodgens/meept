@@ -70,8 +70,8 @@ var dangerousCommandsRE = regexp.MustCompile(
 
 // Financial operation patterns.
 var financialPatternsRE = regexp.MustCompile(
-	`(?i)\b(transfer\s+(funds?|money|payment)|send\s+(payment|money|funds?)` +
-		`|wire\s+transfer|purchase|buy|sell|trade|withdraw` +
+	`(?i)\b(transfer\s*(funds?|money|payment)|send\s*(payment|money|funds?)` +
+		`|wire\s*transfer|purchase|buy|sell|trade|withdraw` +
 		`|credit\s*card|bank\s*account|routing\s*number` +
 		`|cryptocurrency|bitcoin|ethereum|wallet\s*address)\b`,
 )
@@ -144,21 +144,6 @@ func (pc *PermissionChecker) expandPathAll(path string) []string {
 	return forms
 }
 
-func (pc *PermissionChecker) expandPath(path string) string {
-	if strings.HasPrefix(path, "~") && pc.homeDir != "" {
-		path = pc.homeDir + path[1:]
-	}
-	// Clean the path
-	cleaned := filepath.Clean(path)
-	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
-		return resolved
-	}
-	if resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(cleaned)); err == nil {
-		return filepath.Join(resolvedParent, filepath.Base(cleaned))
-	}
-	return cleaned
-}
-
 // SetPreExecChecker registers a PreExecChecker for the given agent/employee
 // ID. The checker's Check method is invoked at the top of CheckPermission
 // (before the financial/path/risk pipeline) whenever details["agent_id"]
@@ -220,23 +205,35 @@ func (pc *PermissionChecker) CheckPath(path string) bool {
 
 // CheckPathWithReason returns (allowed, reason).
 func (pc *PermissionChecker) checkPathWithReason(pathStr string) (ok bool, result string) {
-	resolved := pc.expandPath(pathStr)
-	if absPath, err := filepath.Abs(resolved); err == nil {
-		resolved = absPath
+	// Use expandPathAll to get BOTH raw and resolved forms.
+	// This is needed because EvalSymlinks may succeed for the configured
+	// allow pattern but fail for a requested path under it (common on
+	// macOS where /home is an autofs mount). Checking against both forms
+	// ensures the prefix match succeeds regardless of which side resolves.
+	pathForms := pc.expandPathAll(pathStr)
+	// Also produce an Abs form for each, since configured globs are abs.
+	for i, p := range pathForms {
+		if absPath, err := filepath.Abs(p); err == nil {
+			pathForms[i] = absPath
+		}
 	}
 
 	// Block list takes precedence
 	for _, pattern := range pc.blockedGlobs {
-		if pc.matchGlobPattern(pattern, resolved) {
-			return false, "Path matches blocked pattern: " + pattern
+		for _, p := range pathForms {
+			if pc.matchGlobPattern(pattern, p) {
+				return false, "Path matches blocked pattern: " + pattern
+			}
 		}
 	}
 
 	// If there's an allow list, path must match at least one
 	if len(pc.allowedGlobs) > 0 {
 		for _, pattern := range pc.allowedGlobs {
-			if pc.matchGlobPattern(pattern, resolved) {
-				return true, "Path is within allowed paths"
+			for _, p := range pathForms {
+				if pc.matchGlobPattern(pattern, p) {
+					return true, "Path is within allowed paths"
+				}
 			}
 		}
 		return false, "Path does not match any allowed path pattern"

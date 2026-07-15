@@ -60,7 +60,11 @@ const (
 
 // ConductResearch performs deep-dive analysis on a pattern report.
 func (e *ResearchEngine) ConductResearch(ctx context.Context, pattern PatternReport, analyses []*SessionAnalysis) *ResearchReport {
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(e.config.AnalysisTimeoutMinutes)*time.Minute)
+	timeoutMin := e.config.AnalysisTimeoutMinutes
+	if timeoutMin == 0 {
+		timeoutMin = 30
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMin)*time.Minute)
 	defer cancel()
 
 	report := &ResearchReport{

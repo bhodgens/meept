@@ -580,6 +580,10 @@ func (g *KnowledgeGraph) ComputePageRank(ctx context.Context) error {
 	for i, id := range nodes {
 		g.pageRankCache[id] = scores[i]
 	}
+	// Invalidate community cache: PageRank recomputation may change node
+	// importance scores, which affects community detection weights. Clearing
+	// the cache forces GetCommunity to recompute on next access.
+	g.communityCache = make(map[string]string)
 	g.cacheLastUpdated = time.Now()
 	g.mu.Unlock()
 
@@ -1225,7 +1229,7 @@ func (g *KnowledgeGraph) ImportEdges(ctx context.Context, edges []MemoryEdge) er
 
 		for _, edge := range edges {
 			if edge.ID == "" {
-				edge.ID = fmt.Sprintf("%s-%s-%s", edge.SourceID[:min(8, len(edge.SourceID))], edge.TargetID[:min(8, len(edge.TargetID))], edge.EdgeType)
+				edge.ID = generateEdgeID(edge.SourceID, edge.TargetID, edge.EdgeType)
 			}
 			if edge.CreatedAt.IsZero() {
 				edge.CreatedAt = time.Now()

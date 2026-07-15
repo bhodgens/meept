@@ -297,8 +297,8 @@ func (g *GitSync) pullRemote() error {
 		}
 	}
 
-	// git pull --rebase origin main
-	if err := g.git("pull", "--rebase", "origin", "main"); err != nil {
+	// git pull --rebase origin <branch>
+	if err := g.git("pull", "--rebase", "origin", g.branch()); err != nil {
 		// If there's a rebase conflict, try to resolve it
 		if err2 := g.handleRebaseConflict(); err2 != nil {
 			return fmt.Errorf("pullRemote: pull --rebase failed: %w (rebase resolve: %v)", err, err2)
@@ -323,7 +323,7 @@ func (g *GitSync) handleRebaseConflict() error {
 	}
 
 	// Try merge instead
-	if err := g.git("merge", "origin/main"); err != nil {
+	if err := g.git("merge", "origin/"+g.branch()); err != nil {
 		// Merge also conflicts -- abort and accept worst case
 		if abortErr := g.git("merge", "--abort"); abortErr != nil {
 			g.logger.Debug("git_sync: merge --abort returned error", "error", abortErr)
@@ -388,21 +388,24 @@ func (g *GitSync) pushHeartbeat() error {
 
 // push commits any remaining staged changes and pushes to origin.
 func (g *GitSync) push() error {
-	hasChanges, err := g.hasStagedChanges()
-	if err != nil || !hasChanges {
-		return nil
-	}
-
-	// Commit remaining changes
+	// Commit any remaining staged changes (non-fatal if nothing to commit).
 	if err := g.git("commit", "-m", "cluster: git sync"); err != nil {
 		return fmt.Errorf("push: commit: %w", err)
 	}
 
-	if err := g.git("push", "origin", "main"); err != nil {
+	if err := g.git("push", "origin", g.branch()); err != nil {
 		return fmt.Errorf("push: %w", err)
 	}
 
 	return nil
+}
+
+// branch returns the configured git branch, defaulting to "main".
+func (g *GitSync) branch() string {
+	if g.cfg != nil && g.cfg.Git.Branch != "" {
+		return g.cfg.Git.Branch
+	}
+	return "main"
 }
 
 // isGitRepo checks whether the repo path is a valid git repository.

@@ -804,8 +804,12 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
-	httpReq.Header.Set("x-api-key", c.config.APIKey)
-	httpReq.Header.Set("anthropic-version", anthropicAPIVersion)
+	// Bedrock rejects x-api-key and anthropic-version headers; it uses
+	// AWS SigV4 authentication via the SDK/HTTP client instead.
+	if c.config.ProviderID != ProviderIDBedrock {
+		httpReq.Header.Set("x-api-key", c.config.APIKey)
+		httpReq.Header.Set("anthropic-version", anthropicAPIVersion)
+	}
 
 	start := time.Now()
 	resp, err := c.httpClient.Do(httpReq)
@@ -947,8 +951,12 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
-	httpReq.Header.Set("x-api-key", c.config.APIKey)
-	httpReq.Header.Set("anthropic-version", anthropicAPIVersion)
+	// Bedrock rejects x-api-key and anthropic-version headers; it uses
+	// AWS SigV4 authentication via the SDK/HTTP client instead.
+	if c.config.ProviderID != ProviderIDBedrock {
+		httpReq.Header.Set("x-api-key", c.config.APIKey)
+		httpReq.Header.Set("anthropic-version", anthropicAPIVersion)
+	}
 
 	start := time.Now()
 	resp, err := c.httpClient.Do(httpReq)
@@ -1390,10 +1398,12 @@ func (s *sseScanner) Scan() bool {
 }
 
 func (s *sseScanner) processLine(line string) {
-	if after, ok := strings.CutPrefix(line, "event: "); ok {
-		s.event.Type = after
-	} else if after, ok := strings.CutPrefix(line, "data: "); ok {
-		data := after
+	// RFC 8895 allows optional space after "data:" / "event:" colon.
+	// Use CutPrefix without trailing space, then trim at most one leading space.
+	if after, ok := strings.CutPrefix(line, "event:"); ok {
+		s.event.Type = strings.TrimPrefix(after, " ")
+	} else if after, ok := strings.CutPrefix(line, "data:"); ok {
+		data := strings.TrimPrefix(after, " ")
 		if s.event.Data != "" {
 			s.event.Data += "\n" + data
 		} else {

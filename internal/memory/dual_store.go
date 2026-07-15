@@ -56,6 +56,15 @@ type DualStore struct {
 	gossipPub   GossipPublisher
 	logger      *slog.Logger
 	mu          sync.RWMutex
+	// localWriteMu and gossipWriteMu serialize write I/O per backing DB.
+	// SQLite (WAL) allows only one writer at a time even across pooled
+	// connections; without this serialization, concurrent INSERT/UPDATE
+	// calls on different pooled connections fail with SQLITE_BUSY instead
+	// of waiting. Per-DB locks satisfy CLAUDE.md's mutex-scope rule: the
+	// mutex's sole purpose IS to serialize the SQLite writer, mirroring the
+	// documented single-shared-connection exception.
+	localWriteMu  sync.Mutex
+	gossipWriteMu sync.Mutex
 }
 // runs their schemas, and returns a DualStore. The caller should call Close()
 // when done.
@@ -252,25 +261,26 @@ func (s *DualStore) setSyncMetaGossip(ctx context.Context, key, value string) er
 func (s *DualStore) StoreMemory(ctx context.Context, mem *Memory) error {
 	sourceNode := memorySourceNode(mem)
 	if sourceNode == s.localNodeID || sourceNode == "" {
+		// Snapshot DB and publisher under lock, release, then do I/O.
 		s.mu.Lock()
-		if err := s.storeMemoryLocal(ctx, mem); err != nil {
-			s.mu.Unlock()
-			return err
-		}
-		// Snapshot publisher under lock, release, then publish outside.
+		localDB := s.localDB
 		pub := s.gossipPub
 		s.mu.Unlock()
 
+		if err := s.storeMemoryLocalDB(ctx, localDB, mem); err != nil {
+			return err
+		}
 		if pub != nil {
 			s.publishMemoryGossip(pub, mem)
 		}
 		return nil
 	}
 
+	// Remote memory: write to gossip DB.
 	s.mu.Lock()
-	err := s.storeMemoryGossip(ctx, mem, sourceNode)
+	gossipDB := s.gossipDB
 	s.mu.Unlock()
-	return err
+	return s.storeMemoryGossipDB(ctx, gossipDB, mem, sourceNode)
 }
 
 // publishMemoryGossip broadcasts a locally-written memory to gossip peers
@@ -300,13 +310,15 @@ func (s *DualStore) StoreRemoteMemory(ctx context.Context, mem *Memory, sourceNo
 		return fmt.Errorf("dual store: StoreRemoteMemory requires non-empty sourceNode")
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.storeMemoryGossip(ctx, mem, sourceNode)
+	s.mu.RLock()
+	db := s.gossipDB
+	s.mu.RUnlock()
+	return s.storeMemoryGossipDB(ctx, db, mem, sourceNode)
 }
 
-// storeMemoryLocal writes a memory to local.db.
-func (s *DualStore) storeMemoryLocal(ctx context.Context, mem *Memory) error {
+// storeMemoryLocalDB writes a memory to the given local DB handle.
+// Called with a snapshot of the DB pointer obtained outside the lock.
+func (s *DualStore) storeMemoryLocalDB(ctx context.Context, db *sql.DB, mem *Memory) error {
 	metaJSON := mem.MetadataJSON()
 	createdAt := mem.CreatedAt.UTC().Format(time.RFC3339Nano)
 
@@ -315,7 +327,9 @@ func (s *DualStore) storeMemoryLocal(ctx context.Context, mem *Memory) error {
 		updatedAt = mem.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	}
 
-	_, err := s.localDB.ExecContext(ctx,
+	s.localWriteMu.Lock()
+	defer s.localWriteMu.Unlock()
+	_, err := db.ExecContext(ctx, //nolint:mutexio // serializes SQLite writer across pooled conns
 		`INSERT OR REPLACE INTO memories
 		 (id, type, category, content, metadata_json, created_at, updated_at, agent_id, session_id, bot_id)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -333,8 +347,9 @@ func (s *DualStore) storeMemoryLocal(ctx context.Context, mem *Memory) error {
 	return err
 }
 
-// storeMemoryGossip writes a memory to gossip.db with source_node.
-func (s *DualStore) storeMemoryGossip(ctx context.Context, mem *Memory, sourceNode string) error {
+// storeMemoryGossipDB writes a memory to the given gossip DB handle.
+// Called with a snapshot of the DB pointer obtained outside the lock.
+func (s *DualStore) storeMemoryGossipDB(ctx context.Context, db *sql.DB, mem *Memory, sourceNode string) error {
 	metaJSON := mem.MetadataJSON()
 	createdAt := mem.CreatedAt.UTC().Format(time.RFC3339Nano)
 
@@ -343,7 +358,9 @@ func (s *DualStore) storeMemoryGossip(ctx context.Context, mem *Memory, sourceNo
 		updatedAt = mem.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	}
 
-	_, err := s.gossipDB.ExecContext(ctx,
+	s.gossipWriteMu.Lock()
+	defer s.gossipWriteMu.Unlock()
+	_, err := db.ExecContext(ctx, //nolint:mutexio // serializes SQLite writer across pooled conns
 		`INSERT OR REPLACE INTO memories
 		 (id, type, category, content, metadata_json, created_at, updated_at, agent_id, session_id, bot_id, source_node)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -690,14 +707,15 @@ func (s *DualStore) StoreSession(ctx context.Context, sess *Session) error {
 		return fmt.Errorf("dual store: StoreSession requires a non-empty session ID")
 	}
 
+	// Snapshot DB and publisher under lock, release, then do I/O.
 	s.mu.Lock()
-	if err := s.storeSessionLocal(ctx, sess); err != nil {
-		s.mu.Unlock()
-		return err
-	}
+	localDB := s.localDB
 	pub := s.gossipPub
 	s.mu.Unlock()
 
+	if err := s.storeSessionLocalDB(ctx, localDB, sess); err != nil {
+		return err
+	}
 	if pub != nil {
 		s.publishSessionCreatedGossip(pub, sess)
 	}
@@ -730,13 +748,16 @@ func (s *DualStore) StoreRemoteSession(ctx context.Context, sess *Session, sourc
 		return fmt.Errorf("dual store: StoreRemoteSession requires a non-empty session")
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.storeSessionGossip(ctx, sess, sourceNode)
+	s.mu.RLock()
+	gossipDB := s.gossipDB
+	s.mu.RUnlock()
+	return s.storeSessionGossipDB(ctx, gossipDB, sess, sourceNode)
 }
 
-func (s *DualStore) storeSessionLocal(ctx context.Context, sess *Session) error {
-	_, err := s.localDB.ExecContext(ctx,
+func (s *DualStore) storeSessionLocalDB(ctx context.Context, db *sql.DB, sess *Session) error {
+	s.localWriteMu.Lock()
+	defer s.localWriteMu.Unlock()
+	_, err := db.ExecContext(ctx, //nolint:mutexio // serializes SQLite writer across pooled conns
 		`INSERT OR REPLACE INTO sessions
 		 (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, metadata_json)
 		 VALUES (?, ?, ?, ?, ?, '[]', '[]', ?, NULL, ?, ?, ?, ?)`,
@@ -751,8 +772,10 @@ func (s *DualStore) storeSessionLocal(ctx context.Context, sess *Session) error 
 	return err
 }
 
-func (s *DualStore) storeSessionGossip(ctx context.Context, sess *Session, sourceNode string) error {
-	_, err := s.gossipDB.ExecContext(ctx,
+func (s *DualStore) storeSessionGossipDB(ctx context.Context, db *sql.DB, sess *Session, sourceNode string) error {
+	s.gossipWriteMu.Lock()
+	defer s.gossipWriteMu.Unlock()
+	_, err := db.ExecContext(ctx, //nolint:mutexio // serializes SQLite writer across pooled conns
 		`INSERT OR REPLACE INTO sessions
 		 (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, metadata_json, source_node)
 		 VALUES (?, ?, ?, ?, ?, '[]', '[]', ?, NULL, ?, ?, ?, ?, ?)`,
@@ -785,14 +808,15 @@ func (s *DualStore) StoreTurn(ctx context.Context, turn *Turn) error {
 		return fmt.Errorf("dual store: StoreTurn requires a non-empty turn ID")
 	}
 
+	// Snapshot DB and publisher under lock, release, then do I/O.
 	s.mu.Lock()
-	if err := s.storeTurnLocal(ctx, turn); err != nil {
-		s.mu.Unlock()
-		return err
-	}
+	localDB := s.localDB
 	pub := s.gossipPub
 	s.mu.Unlock()
 
+	if err := s.storeTurnLocalDB(ctx, localDB, turn); err != nil {
+		return err
+	}
 	if pub != nil {
 		s.publishTurnGossip(pub, turn)
 	}
@@ -826,13 +850,16 @@ func (s *DualStore) StoreRemoteTurn(ctx context.Context, turn *Turn, sourceNode 
 		return fmt.Errorf("dual store: StoreRemoteTurn requires a non-empty turn")
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.storeTurnGossip(ctx, turn, sourceNode)
+	s.mu.RLock()
+	gossipDB := s.gossipDB
+	s.mu.RUnlock()
+	return s.storeTurnGossipDB(ctx, gossipDB, turn, sourceNode)
 }
 
-func (s *DualStore) storeTurnLocal(ctx context.Context, turn *Turn) error {
-	_, err := s.localDB.ExecContext(ctx,
+func (s *DualStore) storeTurnLocalDB(ctx context.Context, db *sql.DB, turn *Turn) error {
+	s.localWriteMu.Lock()
+	defer s.localWriteMu.Unlock()
+	_, err := db.ExecContext(ctx, //nolint:mutexio // serializes SQLite writer across pooled conns
 		`INSERT OR REPLACE INTO turns
 		 (turn_id, session_id, role, content, timestamp, metadata_json)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
@@ -843,8 +870,10 @@ func (s *DualStore) storeTurnLocal(ctx context.Context, turn *Turn) error {
 	return err
 }
 
-func (s *DualStore) storeTurnGossip(ctx context.Context, turn *Turn, sourceNode string) error {
-	_, err := s.gossipDB.ExecContext(ctx,
+func (s *DualStore) storeTurnGossipDB(ctx context.Context, db *sql.DB, turn *Turn, sourceNode string) error {
+	s.gossipWriteMu.Lock()
+	defer s.gossipWriteMu.Unlock()
+	_, err := db.ExecContext(ctx, //nolint:mutexio // serializes SQLite writer across pooled conns
 		`INSERT OR REPLACE INTO turns
 		 (turn_id, session_id, role, content, timestamp, metadata_json, source_node)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,

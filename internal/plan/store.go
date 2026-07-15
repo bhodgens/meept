@@ -14,6 +14,12 @@ type PlanStore interface {
 	ListPlansByState(ctx context.Context, state PlanState, limit int) ([]*Plan, error)
 	SetPlanState(ctx context.Context, id string, state PlanState) error
 
+	// UpdatePlanStateConditional atomically transitions a plan from
+	// fromState to toState. Returns true if the transition succeeded
+	// (i.e., exactly one row was affected), false if the plan was not
+	// in the expected state (another caller won the race).
+	UpdatePlanStateConditional(ctx context.Context, id string, fromState, toState PlanState) (bool, error)
+
 	// Phase operations
 	CreatePhase(ctx context.Context, p *PlanPhase) error
 	GetPhases(ctx context.Context, planID string) ([]*PlanPhase, error)

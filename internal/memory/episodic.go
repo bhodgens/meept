@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/pkg/sqlite"
@@ -61,6 +62,11 @@ END`
 type EpisodicMemory struct {
 	store  *SQLiteFTSStore
 	logger *slog.Logger
+
+	// Background goroutine tracking for last_accessed_at updates.
+	wg           sync.WaitGroup
+	shutdownCtx  context.Context
+	shutdownFunc context.CancelFunc
 }
 
 // EpisodicConfig holds configuration for episodic memory.
@@ -92,9 +98,13 @@ func NewEpisodicMemory(cfg EpisodicConfig) (*EpisodicMemory, error) {
 		return nil, fmt.Errorf("failed to create episodic store: %w", err)
 	}
 
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+
 	return &EpisodicMemory{
-		store:  store,
-		logger: cfg.Logger,
+		store:        store,
+		logger:       cfg.Logger,
+		shutdownCtx:  shutdownCtx,
+		shutdownFunc: shutdownCancel,
 	}, nil
 }
 
@@ -233,26 +243,25 @@ func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([
 	// caller may reuse or replace the slice after Return, and while
 	// updateLastAccessed extracts its own ids []string internally, the
 	// goroutine must not depend on the caller's slice still being valid.
-	// Recover is added as a safety net for any unexpected panic in the
-	// background write path.
+	// Tracked via e.wg so Close() can wait for in-flight updates; uses the
+	// store's shutdown context so updates are cancelled on shutdown.
 	memoryIDs := make([]string, len(results))
 	for i, r := range results {
 		memoryIDs[i] = r.Memory.ID
 	}
-	//nolint:gosec // goroutine outlives request context
-	go func() {
+	e.wg.Go(func() {
 		defer func() {
 			if r := recover(); r != nil {
 				e.logger.Debug("updateLastAccessedByIDs panic recovered", "reason", r)
 			}
 		}()
 
-		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		updateCtx, cancel := context.WithTimeout(e.shutdownCtx, 5*time.Second)
 		defer cancel()
 		if err := e.updateLastAccessedByIDs(updateCtx, memoryIDs); err != nil {
 			e.logger.Warn("Failed to update last_accessed_at", "error", err)
 		}
-	}()
+	})
 
 	return results, nil
 }
@@ -422,8 +431,14 @@ func (e *EpisodicMemory) GetNewestTimestamp(ctx context.Context) (*time.Time, er
 	return e.store.GetNewestTimestamp(ctx, "episodic_memories")
 }
 
-// Close releases all resources.
+// Close releases all resources. It cancels the shutdown context to stop
+// background goroutines, waits for in-flight updates to complete, then
+// closes the underlying store.
 func (e *EpisodicMemory) Close() error {
+	if e.shutdownFunc != nil {
+		e.shutdownFunc()
+	}
+	e.wg.Wait()
 	return e.store.Close()
 }
 

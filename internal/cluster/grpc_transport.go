@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/status"
+	"golang.org/x/sync/singleflight"
 )
 
 // =====================================================================
@@ -106,6 +107,10 @@ type GRPCTransport struct {
 
 	// peerAddrs maps node IDs to network addresses for lazy dialing.
 	peerAddrs *peerAddrMap
+
+	// dialSF deduplicates concurrent DialPeer calls for the same nodeID,
+	// preventing connection leaks.
+	dialSF singleflight.Group
 }
 
 // NewGRPCTransport creates a new transport. The transport is not started;
@@ -339,9 +344,10 @@ func (t *GRPCTransport) streamInterceptor(srv any, ss grpc.ServerStream, info *g
 // DialPeer establishes (or retrieves cached) a gRPC connection to a peer.
 // The connection is reused for subsequent calls to the same peer. When addr
 // is empty, the transport falls back to its peer address registry (populated
-// via RegisterPeerAddr).
+// via RegisterPeerAddr). Uses singleflight to deduplicate concurrent dial
+// attempts for the same nodeID, preventing connection leaks.
 func (t *GRPCTransport) DialPeer(ctx context.Context, nodeID, addr string) (*PeerClient, error) {
-	// Check cache.
+	// Quick cache check (fast path).
 	t.peersMu.RLock()
 	if pc, ok := t.peers[nodeID]; ok {
 		t.peersMu.RUnlock()
@@ -349,53 +355,68 @@ func (t *GRPCTransport) DialPeer(ctx context.Context, nodeID, addr string) (*Pee
 	}
 	t.peersMu.RUnlock()
 
-	// Fall back to registered address when addr is empty.
-	if addr == "" && t.peerAddrs != nil {
-		if registered, ok := t.peerAddrs.Get(nodeID); ok {
-			addr = registered
+	v, err, _ := t.dialSF.Do(nodeID, func() (interface{}, error) {
+		// Re-check cache after dedup — another caller may have populated it.
+		t.peersMu.RLock()
+		if pc, ok := t.peers[nodeID]; ok {
+			t.peersMu.RUnlock()
+			return pc, nil
 		}
-	}
-	if addr == "" {
-		return nil, fmt.Errorf("grpc transport: no address known for peer %s", nodeID)
-	}
+		t.peersMu.RUnlock()
 
-	// Collect TLS config under lock.
-	t.mu.RLock()
-	tlsCfg := t.tlsConfig
-	t.mu.RUnlock()
+		// Fall back to registered address when addr is empty.
+		dialAddr := addr
+		if dialAddr == "" && t.peerAddrs != nil {
+			if registered, ok := t.peerAddrs.Get(nodeID); ok {
+				dialAddr = registered
+			}
+		}
+		if dialAddr == "" {
+			return nil, fmt.Errorf("grpc transport: no address known for peer %s", nodeID)
+		}
 
-	dialOpts := []grpc.DialOption{
-		grpc.WithDefaultCallOptions(jsonCallOption()),
-	}
-	if tlsCfg != nil {
-		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
-	} else {
-		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	}
+		// Collect TLS config under lock.
+		t.mu.RLock()
+		tlsCfg := t.tlsConfig
+		t.mu.RUnlock()
 
-	conn, err := grpc.NewClient(addr, dialOpts...)
+		dialOpts := []grpc.DialOption{
+			grpc.WithDefaultCallOptions(jsonCallOption()),
+		}
+		if tlsCfg != nil {
+			dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+		} else {
+			dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		}
+
+		conn, derr := grpc.NewClient(dialAddr, dialOpts...)
+		if derr != nil {
+			return nil, fmt.Errorf("grpc transport: dial peer %s at %s: %w", nodeID, dialAddr, derr)
+		}
+
+		pc := &PeerClient{
+			nodeID: nodeID,
+			addr:   dialAddr,
+			conn:   conn,
+			logger: t.logger,
+		}
+
+		t.peersMu.Lock()
+		t.peers[nodeID] = pc
+		t.peersMu.Unlock()
+
+		t.logger.Debug("grpc_transport: dialed peer",
+			"node_id", nodeID,
+			"addr", dialAddr,
+			"tls", tlsCfg != nil,
+		)
+
+		return pc, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("grpc transport: dial peer %s at %s: %w", nodeID, addr, err)
+		return nil, err
 	}
-
-	pc := &PeerClient{
-		nodeID: nodeID,
-		addr:   addr,
-		conn:   conn,
-		logger: t.logger,
-	}
-
-	t.peersMu.Lock()
-	t.peers[nodeID] = pc
-	t.peersMu.Unlock()
-
-	t.logger.Debug("grpc_transport: dialed peer",
-		"node_id", nodeID,
-		"addr", addr,
-		"tls", tlsCfg != nil,
-	)
-
-	return pc, nil
+	return v.(*PeerClient), nil
 }
 
 // ClosePeer closes the cached connection to a specific peer.

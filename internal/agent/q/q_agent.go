@@ -216,7 +216,11 @@ func (q *QAgent) RunAnalysis(ctx context.Context) (*AnalysisResult, error) {
 
 // fetchCompletedSessions fetches completed sessions from memvid.
 func (q *QAgent) fetchCompletedSessions(ctx context.Context) ([]SessionData, error) {
-	cutoffTime := time.Now().Add(-time.Duration(q.config.SessionIdleTriggerHours) * time.Hour)
+	idleHours := q.config.SessionIdleTriggerHours
+	if idleHours == 0 {
+		idleHours = 24
+	}
+	cutoffTime := time.Now().Add(-time.Duration(idleHours) * time.Hour)
 
 	memories, err := q.memvidClient.Search(ctx, fmt.Sprintf("session:complete before:%s", cutoffTime.Format(time.RFC3339)), 100)
 	if err != nil {

@@ -74,7 +74,7 @@ func (h *PTYHandler) handleSessions(w http.ResponseWriter, r *http.Request) {
 
 	var req PTYSessionRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBodySize)).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, sanitizeErrMessage(err.Error()), http.StatusBadRequest)
 		return
 	}
 

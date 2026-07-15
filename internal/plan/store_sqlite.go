@@ -308,13 +308,32 @@ func (s *SQLiteStore) ListPlansByState(ctx context.Context, state PlanState, lim
 
 func (s *SQLiteStore) SetPlanState(ctx context.Context, id string, state PlanState) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, `
 		UPDATE plans SET state = ?, updated_at = ? WHERE id = ?`,
 		string(state), now, id)
 	if err != nil {
 		return fmt.Errorf("failed to set plan state: %w", err)
 	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return ErrPlanNotFound
+	}
 	return nil
+}
+
+// UpdatePlanStateConditional atomically transitions a plan from fromState to
+// toState. Returns true if exactly one row was affected (transition succeeded),
+// false if the plan was not in fromState.
+func (s *SQLiteStore) UpdatePlanStateConditional(ctx context.Context, id string, fromState, toState PlanState) (bool, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE plans SET state = ?, updated_at = ? WHERE id = ? AND state = ?`,
+		string(toState), now, id, string(fromState))
+	if err != nil {
+		return false, fmt.Errorf("failed to conditionally update plan state: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	return affected == 1, nil
 }
 
 // ---------- Phase operations ----------

@@ -1128,6 +1128,11 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 	release, err := c.acquireConcurrencyLimit(ctx)
 	if err != nil {
 		c.logger.Debug("stream concurrency limit wait interrupted", "error", err)
+		// Release the RPM slot reserved by WaitForRateLimit since the request
+		// will not reach the API.
+		if c.budget != nil {
+			c.budget.ReleaseRateLimitSlot()
+		}
 		return nil, 0, &ClientError{Message: "concurrency limit wait interrupted", Cause: err}
 	}
 	defer release()
@@ -1202,6 +1207,7 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 
 	// Parse stream
 	var accumulated strings.Builder
+	var reasoningBuilder strings.Builder
 	var finishReason string
 	var usage TokenUsage
 
@@ -1266,10 +1272,12 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		}
 
 		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
+		// RFC 8895 allows optional space after "data:" colon.
+		data, ok := strings.CutPrefix(line, "data:")
+		if !ok {
 			continue
 		}
-		data := strings.TrimPrefix(line, "data: ")
+		data = strings.TrimPrefix(data, " ")
 		if data == "[DONE]" {
 			break
 		}
@@ -1277,9 +1285,10 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
-					Content   string `json:"content"`
-					Role      string `json:"role"`
-					ToolCalls []struct {
+					Content          string `json:"content"`
+					ReasoningContent string `json:"reasoning_content,omitempty"`
+					Role             string `json:"role"`
+					ToolCalls        []struct {
 						Index    int    `json:"index"`
 						ID       string `json:"id"`
 						Type     string `json:"type"`
@@ -1312,6 +1321,11 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		}
 		if len(chunk.Choices) == 0 {
 			continue
+		}
+
+		// Accumulate reasoning_content (DeepSeek/o1 emit this during streaming)
+		if chunk.Choices[0].Delta.ReasoningContent != "" {
+			reasoningBuilder.WriteString(chunk.Choices[0].Delta.ReasoningContent)
 		}
 
 		// Handle content delta
@@ -1391,6 +1405,7 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		Usage:        usage,
 		Model:        modelID,
 		FinishReason: finishReason,
+		Reasoning:    reasoningBuilder.String(),
 	}
 
 	return result, resp.StatusCode, nil

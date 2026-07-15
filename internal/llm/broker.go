@@ -197,10 +197,16 @@ func (b *ModelBroker) Chat(ctx context.Context, messages []ChatMessage, opts ...
 			"error", err)
 	}
 
-	// All healthy providers failed, try fallback if enabled
-	if len(healthyEntries) > 0 && b.config.FallbackEnabled && b.fallback != nil {
-		b.logger.Warn("all healthy providers failed, using fallback",
-			"last_error", lastErr)
+	// All healthy providers failed (or none healthy), try fallback if enabled.
+	// Fallback is a last resort: it should be invoked even when the healthy
+	// pool is empty, as long as a fallback model is configured.
+	if b.config.FallbackEnabled && b.fallback != nil {
+		if len(healthyEntries) > 0 {
+			b.logger.Warn("all healthy providers failed, using fallback",
+				"last_error", lastErr)
+		} else {
+			b.logger.Warn("no healthy providers available, using fallback")
+		}
 		return b.fallback.Chat(ctx, messages, opts...)
 	}
 
@@ -251,10 +257,16 @@ func (b *ModelBroker) ChatWithProgress(ctx context.Context, messages []ChatMessa
 			"error", err)
 	}
 
-	// All healthy providers failed, try fallback if enabled
-	if len(healthyEntries) > 0 && b.config.FallbackEnabled && b.fallback != nil {
-		b.logger.Warn("all healthy providers failed, using fallback",
-			"last_error", lastErr)
+	// All healthy providers failed (or none healthy), try fallback if enabled.
+	// Fallback is a last resort: it should be invoked even when the healthy
+	// pool is empty, as long as a fallback model is configured.
+	if b.config.FallbackEnabled && b.fallback != nil {
+		if len(healthyEntries) > 0 {
+			b.logger.Warn("all healthy providers failed, using fallback",
+				"last_error", lastErr)
+		} else {
+			b.logger.Warn("no healthy providers available, using fallback")
+		}
 		return b.fallback.ChatWithProgress(ctx, messages, progress, opts...)
 	}
 

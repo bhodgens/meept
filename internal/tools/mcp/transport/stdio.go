@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sync"
@@ -307,29 +308,40 @@ func (t *StdioTransport) SendNotification(_ context.Context, message []byte) err
 
 // Close terminates the subprocess.
 func (t *StdioTransport) Close() error {
+	// Collect under lock, release, then operate (CLAUDE.md mutex-scope rule).
 	t.mu.Lock()
-	defer t.mu.Unlock()
 
 	if !t.running.Load() {
+		t.mu.Unlock()
 		return nil
 	}
 
 	t.running.Store(false)
 
-	// Cancel the detached command context (defence in depth alongside Kill).
-	if t.cmdCancel != nil {
-		t.cmdCancel()
-	}
+	// Snapshot fields needed for the blocking teardown.
+	cmdCancel := t.cmdCancel
+	cmd := t.cmd
+	stdoutFile := t.stdoutFile
+	relayDone := t.relayDone
+	stderrDone := t.stderrDone
 
-	// Close stdin to signal EOF to the subprocess
+	// Close stdin to signal EOF to the subprocess (still under lock so
+	// relayStdout sees a consistent running=false state).
 	if t.stdin != nil {
-		t.stdin.Close() //nolint:mutexio // one-time teardown guarded by running flag
+		t.stdin.Close()
 	}
 
-	if t.cmd == nil || t.cmd.Process == nil {
+	t.mu.Unlock()
+
+	// Cancel context outside the lock (defence in depth alongside Kill).
+	if cmdCancel != nil {
+		cmdCancel()
+	}
+
+	if cmd == nil || cmd.Process == nil {
 		// Close stdout file to unblock relayStdout
-		if t.stdoutFile != nil {
-			t.stdoutFile.Close() //nolint:mutexio // one-time teardown guarded by running flag
+		if stdoutFile != nil {
+			stdoutFile.Close()
 		}
 		return nil
 	}
@@ -337,7 +349,7 @@ func (t *StdioTransport) Close() error {
 	// Give the process a chance to exit gracefully
 	done := make(chan error, 1)
 	go func() {
-		done <- t.cmd.Wait() //nolint:mutexio // mutex serializes subprocess teardown; Wait reaps the process under the same lock that owns the cmd
+		done <- cmd.Wait()
 	}()
 
 	select {
@@ -345,32 +357,34 @@ func (t *StdioTransport) Close() error {
 		// Process exited — pipes are now closed, relayStdout will unblock
 	case <-time.After(5 * time.Second):
 		// Force kill — this closes the process and its pipes
-		_ = t.cmd.Process.Kill()
+		if killErr := cmd.Process.Kill(); killErr != nil {
+			slog.Warn("force kill MCP process", "error", killErr)
+		}
 		<-done
 	}
 
 	// Wait for the relay goroutine to finish before closing stdoutFile,
 	// otherwise we race with relayStdout's read.
-	if t.relayDone != nil {
+	if relayDone != nil {
 		select {
-		case <-t.relayDone:
+		case <-relayDone:
 		case <-time.After(2 * time.Second):
 			// Relay didn't exit in time; don't block forever
 		}
 	}
 
 	// Wait for stderr drain goroutine to finish as well.
-	if t.stderrDone != nil {
+	if stderrDone != nil {
 		select {
-		case <-t.stderrDone:
+		case <-stderrDone:
 		case <-time.After(2 * time.Second):
 			// stderr drain didn't exit in time; don't block forever
 		}
 	}
 
 	// Close stdout file after relayStdout has exited.
-	if t.stdoutFile != nil {
-		t.stdoutFile.Close() //nolint:mutexio // one-time teardown guarded by running flag
+	if stdoutFile != nil {
+		stdoutFile.Close()
 	}
 
 	return nil

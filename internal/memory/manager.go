@@ -88,6 +88,13 @@ type Manager struct {
 	prefetchQueue    chan prefetchRequest
 	prefetchShutdown chan struct{}
 	prefetchWg       sync.WaitGroup
+	prefetchCancel   context.CancelFunc // cancels worker context; called before Wait() in stopPrefetchServiceLocked
+
+	// Epistemic context for background relationship detection goroutines.
+	// Cancelled in Close() before prefetch shutdown so in-flight detection
+	// goroutines stop promptly.
+	epistemicCtx    context.Context
+	epistemicCancel context.CancelFunc
 
 	// DualStore reference for cluster-aware routing (Phase 3 dual-DB).
 	// When non-nil, the manager can publish local memory writes to gossip
@@ -257,6 +264,10 @@ func (m *Manager) Initialize(ctx context.Context) error {
 
 	// Check if distributed mode is enabled
 	m.distributed = m.distributedCfg.Enabled && m.distributedCfg.Mode == "distributed"
+
+	// Create epistemic context for background relationship detection.
+	// Cancelled in Close() so in-flight detection goroutines stop promptly.
+	m.epistemicCtx, m.epistemicCancel = context.WithCancel(context.Background())
 
 	backend := "sqlite"
 	if m.useMemvid {
@@ -441,30 +452,41 @@ func (m *Manager) Store(ctx context.Context, mem Memory) (string, error) {
 	m.maybeMirrorToDualStore(ctx, mem, id)
 
 	// Epistemic post-Store hook: run detection in a background goroutine.
-	// Uses context.Background() to avoid caller cancellation; detection is
-	// best-effort and must not block Store.
+	// Uses the manager's epistemic context (cancelled in Close()) so that
+	// detection does not outlive the manager. Tracked via prefetchWg so
+	// that Close() waits for in-flight detection before shutting down.
 	//
 	// The Consolidator also runs a full pass over epistemic memories added
 	// since the last consolidation to catch relationships that depend on
 	// the evolving comparison set. See Consolidator.runEpistemicDetectionPass.
 	m.mu.RLock()
 	detector := m.detector
+	epistemicCtx := m.epistemicCtx
 	m.mu.RUnlock()
 	if detector != nil && IsEpistemicType(mem.Type) && id != "" {
 		mem.ID = id
-		go func() {
-			edges, derr := detector.DetectRelationships(context.Background(), mem)
+		m.prefetchWg.Go(func() {
+			defer func() {
+				if r := recover(); r != nil {
+					m.logger.Warn("epistemic detection panic recovered", "memory_id", id, "panic", r)
+				}
+			}()
+			edges, derr := detector.DetectRelationships(epistemicCtx, mem)
 			if derr != nil {
-				m.logger.Warn("epistemic detection failed", "memory_id", id, "error", derr)
+				if !errors.Is(derr, context.Canceled) {
+					m.logger.Warn("epistemic detection failed", "memory_id", id, "error", derr)
+				}
 				return
 			}
 			if len(edges) == 0 {
 				return
 			}
-			if perr := detector.PersistCandidateEdges(context.Background(), edges); perr != nil {
-				m.logger.Warn("epistemic edge persist failed", "memory_id", id, "error", perr)
+			if perr := detector.PersistCandidateEdges(epistemicCtx, edges); perr != nil {
+				if !errors.Is(perr, context.Canceled) {
+					m.logger.Warn("epistemic edge persist failed", "memory_id", id, "error", perr)
+				}
 			}
-		}()
+		})
 	}
 
 	return id, nil
@@ -678,7 +700,7 @@ func (m *Manager) searchViaMemvid(ctx context.Context, query MemoryQuery) ([]Mem
 		source := mr.Memory.Zone
 
 		// Derive memory type from zone
-		if len(mr.Memory.Zone) >= 4 && mr.Memory.Zone[:4] == "task" {
+		if strings.HasPrefix(mr.Memory.Zone, "task") {
 			memType = MemoryTypeTask
 		} else if mr.Memory.Zone == "personality" {
 			memType = MemoryTypePersonality
@@ -808,7 +830,11 @@ func (m *Manager) GetRecent(ctx context.Context, limit int) ([]MemoryResult, err
 		if err == nil && len(results) > 0 {
 			return results, nil
 		}
-		m.logger.Warn("Memvid get-recent failed, trying SQLite fallback", "error", err)
+		if err != nil {
+			m.logger.Warn("Memvid get-recent failed, trying SQLite fallback", "error", err)
+		} else {
+			m.logger.Debug("Memvid returned no recent memories, trying SQLite fallback")
+		}
 	}
 
 	var results []MemoryResult
@@ -1615,6 +1641,13 @@ func (m *Manager) StartPrefetchService(ctx context.Context) {
 		return // Already started
 	}
 
+	// Create a cancellable child context so that stopPrefetchServiceLocked
+	// can cancel in-flight workers before calling Wait(). Without this,
+	// workers blocked in GetRelevantContext→m.mu.RLock() would deadlock
+	// against Close()'s m.mu.Lock().
+	prefetchCtx, cancel := context.WithCancel(ctx)
+	m.prefetchCancel = cancel
+
 	m.prefetchQueue = make(chan prefetchRequest, 10)
 	m.prefetchShutdown = make(chan struct{})
 
@@ -1623,7 +1656,7 @@ func (m *Manager) StartPrefetchService(ctx context.Context) {
 			select {
 			case req := <-m.prefetchQueue:
 				m.prefetchWg.Go(func() {
-					m.doPrefetch(ctx, req)
+					m.doPrefetch(prefetchCtx, req)
 				})
 			case <-m.prefetchShutdown:
 				return
@@ -1699,12 +1732,21 @@ func (m *Manager) stopPrefetchServiceLocked() {
 		return // Not running
 	}
 
+	// Cancel the worker context BEFORE Wait() so that in-flight
+	// GetRelevantContext calls return promptly via ctx.Err() propagation.
+	// Without this, workers blocked in GetRelevantContext→m.mu.RLock()
+	// would deadlock against Close()'s exclusive m.mu.Lock().
+	if m.prefetchCancel != nil {
+		m.prefetchCancel()
+	}
+
 	close(m.prefetchShutdown)
 	m.prefetchWg.Wait()
 
 	close(m.prefetchQueue)
 	m.prefetchQueue = nil
 	m.prefetchShutdown = nil
+	m.prefetchCancel = nil
 
 	// Clear cache
 	m.prefetchCache = sync.Map{}
@@ -1730,6 +1772,15 @@ func (m *Manager) Close() error {
 
 	if m.consolidator != nil {
 		m.consolidator.Stop()
+	}
+
+	// Cancel epistemic context before prefetch shutdown: epistemic goroutines
+	// are tracked by prefetchWg, so they must be cancelled before Wait()
+	// inside stopPrefetchServiceLocked.
+	if m.epistemicCancel != nil {
+		m.epistemicCancel()
+		m.epistemicCancel = nil
+		m.epistemicCtx = nil
 	}
 
 	// MEM-5 FIX: Stop prefetch service before closing other subsystems

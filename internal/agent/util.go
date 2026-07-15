@@ -6,15 +6,23 @@ import (
 	"strings"
 )
 
-// truncateString truncates a string to the given max length, adding "..." if truncated.
+// truncateString truncates a string to the given max length (in runes), adding "..." if truncated.
+// Rune-safe to avoid splitting multi-byte UTF-8 characters.
 func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if maxLen <= 0 {
 		return s
 	}
-	if maxLen <= 3 {
-		return "..."[:maxLen]
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
 	}
-	return s[:maxLen-3] + "..."
+	// When maxLen is too small to fit any content alongside the ellipsis,
+	// return just the ellipsis (matches the original byte-level behavior
+	// and avoids a negative slice bound when maxLen < 3).
+	if maxLen <= 3 {
+		return "..."
+	}
+	return string(runes[:maxLen-3]) + "..."
 }
 
 // extractBriefDescription returns the first meaningful (non-heading, non-empty)

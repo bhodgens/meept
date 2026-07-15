@@ -653,7 +653,9 @@ func (m *Manager) SetLogger(l *slog.Logger) {
 	if l == nil {
 		return
 	}
+	m.mu.Lock()
 	m.logger = l.With("component", "employee-manager")
+	m.mu.Unlock()
 }
 
 // SetConstitutionStore attaches a constitution store post-construction.
@@ -1015,20 +1017,20 @@ func (m *Manager) Hire(ctx context.Context, req HireRequest) (*Employee, error) 
 	knownTools := m.knownToolNames
 	m.mu.RUnlock()
 
-	if len(knownAgents) > 0 {
-		if unknown, err := c.CheckEscalationReferences(knownAgents); err != nil {
-			return nil, fmt.Errorf("hire: escalation references: %w (unknown IDs: %v)", err, unknown)
-		}
-		// Build escalation graph for cycle detection. Include the new
-		// employee being hired plus cached constitutions so we catch
-		// self-referential and transitive cycles.
-		graph := m.buildEscalationGraphForHire(req.ID, c, knownAgents)
-		agentIDs := allAgentIDs(req.ID, knownAgents)
-		if cycles, err := DetectEscalationCycles(graph, agentIDs); err != nil {
-			return nil, fmt.Errorf("hire: cycle detection: %w", err)
-		} else if len(cycles) > 0 {
-			return nil, fmt.Errorf("hire: escalation cycle detected: %s", cycles[0].String())
-		}
+	// Always validate escalation references and detect cycles, even when
+	// knownAgents is empty. The new employee's own self-references must be
+	// checked regardless of how many other agents exist.
+	if unknown, err := c.CheckEscalationReferences(knownAgents); err != nil {
+		return nil, fmt.Errorf("hire: escalation references: %w (unknown IDs: %v)", err, unknown)
+	}
+	// Always build a graph — even with no known agents, the new employee's
+	// self-references must be checked.
+	graph := m.buildEscalationGraphForHire(req.ID, c, knownAgents)
+	agentIDs := allAgentIDs(req.ID, knownAgents)
+	if cycles, err := DetectEscalationCycles(graph, agentIDs); err != nil {
+		return nil, fmt.Errorf("hire: cycle detection: %w", err)
+	} else if len(cycles) > 0 {
+		return nil, fmt.Errorf("hire: escalation cycle detected: %s", cycles[0].String())
 	}
 
 	if len(knownTools) > 0 {
@@ -1147,6 +1149,21 @@ func (m *Manager) Retire(ctx context.Context, id string) error {
 		}
 	}
 	m.clearCachedConstitution(id)
+
+	// Prune per-employee maps to prevent unbounded growth on retire.
+	m.invokeMuMapGuard.Lock()
+	delete(m.invokeMuMap, id)
+	m.invokeMuMapGuard.Unlock()
+
+	m.goalLoopsMu.Lock()
+	delete(m.goalLoops, id)
+	m.goalLoopsMu.Unlock()
+
+	// assessmentSems shares invokeMuMapGuard.
+	m.invokeMuMapGuard.Lock()
+	delete(m.assessmentSems, id)
+	m.invokeMuMapGuard.Unlock()
+
 	m.logger.Info("employee retired", "employee_id", id)
 	return nil
 }
@@ -1754,15 +1771,20 @@ func (m *Manager) RejectPlan(ctx context.Context, goalID, planID, reason string)
 		return fmt.Errorf("reject plan %s: %w", planID, err)
 	}
 	// Remove the rejected plan from the goal's ActivePlanIDs so the
-	// MaxActivePlans cap reflects the actual in-flight count.
+	// MaxActivePlans cap reflects the actual in-flight count. Hold the
+	// Goal's lock across read-modify-write to prevent concurrent writers
+	// from clobbering.
 	if m.goalStore != nil && goalID != "" {
 		goal, err := m.goalStore.Get(ctx, goalID)
 		if err != nil {
 			m.logger.Warn("reject plan: goal lookup failed; plan rejected but ActivePlanIDs not updated",
 				"goal_id", goalID, "plan_id", planID, "error", err)
 		} else {
+			goal.Lock()
 			goal.RemoveActivePlan(planID)
-			if updateErr := m.goalStore.Update(ctx, goal); updateErr != nil {
+			updateErr := m.goalStore.Update(ctx, goal)
+			goal.Unlock()
+			if updateErr != nil {
 				m.logger.Warn("reject plan: goal update failed; ActivePlanIDs not persisted",
 					"goal_id", goalID, "plan_id", planID, "error", updateErr)
 			}

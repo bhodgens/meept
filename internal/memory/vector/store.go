@@ -169,16 +169,14 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]SearchRe
 	// Fetch embeddings with a hard cap to avoid loading the entire table.
 	// Preferring recent rows (higher rowid) so that newer memories are
 	// candidates for similarity scoring even when the table is large.
-	maxRows := limit
-	if maxRows <= 0 {
-		maxRows = 500
-	}
-	if maxRows > 5000 {
-		maxRows = 5000
-	}
-	rows, err := s.db.Query(`
+	//
+	// The scan pool is deliberately decoupled from the result limit: callers
+	// may pass a small limit (e.g., 5) but we still scan a meaningful pool so
+	// that the similarity sort has enough candidates to choose from.
+	const scanPool = 5000
+	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, vector FROM embeddings ORDER BY rowid DESC LIMIT ?
-	`, maxRows) //nolint:mutexio // mutex serializes sqlite connection access
+	`, scanPool) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, fmt.Errorf("failed to query embeddings: %w", err)
 	}
@@ -232,7 +230,7 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]SearchRe
 	// RLock serializes DB access per the package convention; see the
 	// sibling nolint:mutexio comments elsewhere in this file.
 	for i := range results {
-		metadata, content, err := s.getMemoryMetadata(results[i].MemoryID)
+		metadata, content, err := s.getMemoryMetadata(ctx, results[i].MemoryID)
 		if err == nil {
 			results[i].Metadata = metadata
 			results[i].Content = content
@@ -244,10 +242,10 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]SearchRe
 }
 
 // getMemoryMetadata retrieves metadata and content for a memory.
-func (s *Store) getMemoryMetadata(memoryID string) (metadata map[string]any, content string, err error) {
-	rows, err := s.db.Query(`
+func (s *Store) getMemoryMetadata(ctx context.Context, memoryID string) (metadata map[string]any, content string, err error) {
+	rows, err := s.db.QueryContext(ctx, `
 		SELECT key, value FROM metadata WHERE memory_id = ?
-	`, memoryID)
+	`, memoryID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, "", err
 	}
@@ -276,7 +274,7 @@ func (s *Store) getMemoryMetadata(memoryID string) (metadata map[string]any, con
 }
 
 // GetEmbedding retrieves the cached embedding for a memory.
-func (s *Store) GetEmbedding(memoryID string) ([]float32, bool) {
+func (s *Store) GetEmbedding(ctx context.Context, memoryID string) ([]float32, bool) {
 	if emb, ok := s.embeddingCache.Load(memoryID); ok {
 		return emb.([]float32), true
 	}
@@ -286,7 +284,7 @@ func (s *Store) GetEmbedding(memoryID string) ([]float32, bool) {
 	defer s.mu.RUnlock()
 
 	var vectorBlob []byte
-	err := s.db.QueryRow(`
+	err := s.db.QueryRowContext(ctx, `
 		SELECT vector FROM embeddings WHERE id = ?
 	`, memoryID).Scan(&vectorBlob) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
@@ -303,20 +301,20 @@ func (s *Store) GetEmbedding(memoryID string) ([]float32, bool) {
 }
 
 // Delete removes an embedding from the store.
-func (s *Store) Delete(memoryID string) error {
+func (s *Store) Delete(ctx context.Context, memoryID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.embeddingCache.Delete(memoryID)
 
-	_, err := s.db.Exec(`
+	_, err := s.db.ExecContext(ctx, `
 		DELETE FROM embeddings WHERE id = ?
 	`, memoryID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return err
 	}
 
-	_, err = s.db.Exec(`
+	_, err = s.db.ExecContext(ctx, `
 		DELETE FROM metadata WHERE memory_id = ?
 	`, memoryID) //nolint:mutexio // mutex serializes sqlite connection access
 	return err

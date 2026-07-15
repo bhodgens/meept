@@ -596,6 +596,7 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 	pauseFn := l.pauseFn
 	statusFn := l.statusFn
 	emitMetricFn := l.emitMetricFn
+	auditor := l.auditor
 	l.mu.Unlock()
 
 	// Spec line 615: operator pauses while invocation in flight → in-flight
@@ -651,14 +652,14 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 	}
 
 	// Run the post-turn auditor if configured (Checkpoint 2).
-	if l.auditor != nil && result != nil {
+	if auditor != nil && result != nil {
 		turn := TurnRecord{
 			EmployeeID:  l.employeeID,
 			PlanID:      plan.ID,
 			FinalOutput: result.Output,
 			Constitution: constitution,
 		}
-		if _, auditErr := l.auditor.Audit(ctx, turn); auditErr != nil {
+		if _, auditErr := auditor.Audit(ctx, turn); auditErr != nil {
 			logger.Warn("post-turn audit failed (non-fatal)", "error", auditErr)
 		}
 	}
@@ -933,11 +934,15 @@ func (l *GoalLoop) decideTier2(ctx context.Context, trigger TriggerEvent, logger
 		// cap accurately reflects total in-flight plans. This is removed
 		// on rejection (Manager.RejectPlan) or after execution completes
 		// (ApproveAndExecute). AddActivePlan dedups so the re-add in
-		// ApproveAndExecute is a no-op.
+		// ApproveAndExecute is a no-op. Hold the Goal's lock across
+		// read-modify-write to prevent concurrent writers from clobbering.
 		if store != nil {
 			if goal, err := l.lookupActiveGoal(ctx); err == nil && goal != nil {
+				goal.Lock()
 				goal.AddActivePlan(ref.ID)
-				if updateErr := store.Update(ctx, goal); updateErr != nil {
+				updateErr := store.Update(ctx, goal)
+				goal.Unlock()
+				if updateErr != nil {
 					logger.Warn("failed to track pending plan in ActivePlanIDs",
 						"plan_id", ref.ID, "error", updateErr)
 				}
@@ -970,11 +975,15 @@ func (l *GoalLoop) ApproveAndExecute(ctx context.Context, planRef PlanRef) (*bot
 
 	// Set the active plan ID BEFORE execution so concurrent observers see the
 	// correct in-flight plan (spec: record ActivePlanID during execution, not
-	// after). G2: add to ActivePlanIDs.
+	// after). G2: add to ActivePlanIDs. Hold the Goal's lock across
+	// read-modify-write to prevent concurrent writers from clobbering.
 	if store != nil {
 		if goal, lookupErr := l.lookupActiveGoal(ctx); lookupErr == nil && goal != nil {
+			goal.Lock()
 			goal.AddActivePlan(planRef.ID)
-			if updateErr := store.Update(ctx, goal); updateErr != nil {
+			updateErr := store.Update(ctx, goal)
+			goal.Unlock()
+			if updateErr != nil {
 				logger.Warn("failed to add active plan on goal",
 					"goal_id", goal.ID, "plan_id", planRef.ID, "error", updateErr)
 			}
@@ -997,12 +1006,16 @@ func (l *GoalLoop) ApproveAndExecute(ctx context.Context, planRef PlanRef) (*bot
 	}
 
 	// After Reflect completes (success OR failure), remove the plan from
-	// active list and append to history (G2 + G4).
+	// active list and append to history (G2 + G4). Hold the Goal's lock
+	// across read-modify-write to prevent concurrent writers from clobbering.
 	if store != nil {
 		if goal, lookupErr := l.lookupActiveGoal(ctx); lookupErr == nil && goal != nil {
+			goal.Lock()
 			goal.RemoveActivePlan(planRef.ID)
 			goal.AppendHistory(planRef.ID)
-			if updateErr := store.Update(ctx, goal); updateErr != nil {
+			updateErr := store.Update(ctx, goal)
+			goal.Unlock()
+			if updateErr != nil {
 				logger.Warn("failed to remove active plan on goal",
 					"goal_id", goal.ID, "error", updateErr)
 			}

@@ -100,6 +100,11 @@ func NewVectorShardFromConfig(cfg VectorShardConfig) (*VectorShard, error) {
 		return nil, fmt.Errorf("failed to create directory %s: %w", filepath.Dir(dbPath), err)
 	}
 
+	// Note: uses the cgo "sqlite3" driver (github.com/mattn/go-sqlite3) because
+	// sqlite-vec's vec0 virtual table requires the C sqlite extension registered
+	// by the sqlite-vec-go-bindings/cgo package. The rest of the memory stack
+	// uses the pure-Go "sqlite" (modernc.org/sqlite) driver. These two drivers
+	// operate on different DB files and do not share WAL state.
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)

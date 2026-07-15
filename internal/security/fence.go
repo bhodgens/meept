@@ -182,7 +182,32 @@ func (fc *FenceChecker) CheckCommand(cmd string, workDir string) error {
 	// We do not attempt to parse shell metacharacters — we just identify
 	// tokens that look like file paths and validate each against the fence.
 	tokens := tokenizeCommand(cmd)
-	for _, tok := range tokens {
+	for i, tok := range tokens {
+		// Check for shell redirection operators — the following token is
+		// the redirect target and must be validated as a write path.
+		if tok == ">" || tok == ">>" || tok == "2>" || tok == "&>" || tok == "1>" {
+			if i+1 < len(tokens) {
+				target := extractPathFromToken(tokens[i+1])
+				if target != "" {
+					if err := fc.CheckPath(target, "write"); err != nil {
+						return fmt.Errorf("fence: redirect target outside project root: %q", target)
+					}
+				}
+			}
+			continue
+		}
+		// Check for inline redirection (e.g. ">/outside/file")
+		if strings.HasPrefix(tok, ">") || strings.HasPrefix(tok, "2>") || strings.HasPrefix(tok, "&>") {
+			if remainder := strings.TrimLeft(tok, ">&12"); remainder != "" && remainder != tok {
+				target := extractPathFromToken(remainder)
+				if target != "" {
+					if err := fc.CheckPath(target, "write"); err != nil {
+						return fmt.Errorf("fence: redirect target outside project root: %q", target)
+					}
+				}
+				continue
+			}
+		}
 		path := extractPathFromToken(tok)
 		if path == "" {
 			continue

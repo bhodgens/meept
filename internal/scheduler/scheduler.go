@@ -523,9 +523,10 @@ func (s *Scheduler) JobCount() int {
 // wrapJob creates a function wrapper for the job that handles execution tracking.
 func (s *Scheduler) wrapJob(job Job) func() {
 	return func() {
-		// Derive from runNowCtx so shutdown can signal cancellation,
-		// rather than using detached context.Background().
+		// Snapshot runNowCtx under lock to avoid racing with Start/Stop.
+		s.mu.RLock()
 		baseCtx := s.runNowCtx
+		s.mu.RUnlock()
 		if baseCtx == nil {
 			baseCtx = context.Background()
 		}

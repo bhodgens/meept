@@ -64,6 +64,8 @@ type GitConfig struct {
 	SyncInterval    time.Duration `json:"sync_interval"`
 	HeartbeatCommit bool          `json:"heartbeat_commit"`
 	RemoteURL       string        `json:"remote_url"`
+	// Branch is the git branch to push/pull. Defaults to "main".
+	Branch string `json:"branch"`
 }
 
 // SecurityConfig holds security settings.
@@ -135,6 +137,9 @@ func (c *Config) setDefault() {
 	}
 	if c.Git.SyncInterval == 0 {
 		c.Git.SyncInterval = 5 * time.Minute
+	}
+	if c.Git.Branch == "" {
+		c.Git.Branch = "main"
 	}
 	if c.Security.Ed25519KeyRotationDays == 0 {
 		c.Security.Ed25519KeyRotationDays = 90

@@ -154,14 +154,27 @@ func (m *PlanManager) SubmitPlan(ctx context.Context, planID string) error {
 }
 
 // ApprovePlan approves a pending plan, records the signoff, and triggers synthesis.
+// Uses a conditional state transition to prevent TOCTOU races between concurrent
+// callers.
 func (m *PlanManager) ApprovePlan(ctx context.Context, planID, sessionID, by string) error {
-	plan, err := m.store.GetPlan(ctx, planID)
+	// Atomic conditional transition: only succeeds if plan is still pending.
+	won, err := m.store.UpdatePlanStateConditional(ctx, planID, StatePendingApproval, StateApproved)
 	if err != nil {
-		return fmt.Errorf("get plan: %w", err)
+		return fmt.Errorf("approve plan: conditional state transition: %w", err)
+	}
+	if !won {
+		// Another caller already transitioned this plan.
+		plan, getErr := m.store.GetPlan(ctx, planID)
+		if getErr != nil {
+			return fmt.Errorf("approve plan: failed to get plan state after race: %w", getErr)
+		}
+		return fmt.Errorf("plan %s is in state %s, expected pending_approval", planID, plan.State)
 	}
 
-	if plan.State != StatePendingApproval {
-		return fmt.Errorf("plan %s is in state %s, expected pending_approval", planID, plan.State)
+	// Re-read the plan to get the current state.
+	plan, err := m.store.GetPlan(ctx, planID)
+	if err != nil {
+		return fmt.Errorf("get plan after approval: %w", err)
 	}
 
 	signoff := NewPlanSignoff(planID, "", sessionID, by, "approved", "")
@@ -170,7 +183,6 @@ func (m *PlanManager) ApprovePlan(ctx context.Context, planID, sessionID, by str
 	}
 
 	now := time.Now().UTC()
-	plan.State = StateApproved
 	plan.ApprovedAt = &now
 	plan.ApprovedBy = by
 	plan.UpdatedAt = now
@@ -343,6 +355,8 @@ func (m *PlanManager) CancelPlan(ctx context.Context, planID, reason string) err
 
 // Synthesize creates the task hierarchy from the plan: a parent task with child
 // tasks for each phase, and TaskSteps for each parsed step within a phase.
+// This method is idempotent: if the plan already has a TaskID, it returns nil
+// without re-creating tasks.
 func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 	if m.taskCreator == nil {
 		return fmt.Errorf("synthesize plan %s: no task creator configured", planID)
@@ -351,6 +365,14 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 	plan, err := m.store.GetPlan(ctx, planID)
 	if err != nil {
 		return fmt.Errorf("get plan: %w", err)
+	}
+
+	// Idempotency guard: if the plan already has a TaskID, synthesis was
+	// already performed (e.g., by a concurrent ApprovePlan or a restart).
+	if plan.TaskID != "" {
+		m.logger.Info("synthesize: plan already has task, skipping",
+			"plan_id", planID, "task_id", plan.TaskID)
+		return nil
 	}
 
 	phases, err := m.store.GetPhases(ctx, planID)

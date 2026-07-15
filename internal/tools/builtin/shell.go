@@ -116,6 +116,7 @@ func NewShellExecuteTool(workingDir string, defaultTimeout time.Duration, ptyMgr
 		defaultTimeout:    defaultTimeout,
 		knownSafeCommands: make(map[string]struct{}),
 		ptyMgr:            ptyMgr,
+		logger:            slog.Default().With("component", "shell-tool"),
 	}
 }
 

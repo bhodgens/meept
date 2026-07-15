@@ -40,6 +40,9 @@ type NotificationService struct {
 
 // NewNotificationService creates a new notification service.
 func NewNotificationService(logger *slog.Logger, config *NotificationConfig) *NotificationService {
+	if config == nil {
+		config = DefaultNotificationConfig()
+	}
 	return &NotificationService{
 		logger: logger,
 		config: config,

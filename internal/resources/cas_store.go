@@ -317,54 +317,43 @@ func (s *CASStore) GetPath(hashHex string) (string, error) {
 // IncrementRef atomically increments the refcount for a blob. No-op if the
 // blob is not in the index.
 func (s *CASStore) IncrementRef(hashHex string) {
-	rec, ok := s.index.Get(hashHex)
-	if !ok {
-		return
-	}
-	rec.Refcount++
-	_ = s.index.Put(rec)
+	s.index.UpdateAtomic(hashHex, func(rec *metaRecord) {
+		rec.Refcount++
+	})
 }
 
 // DecrementRef atomically decrements the refcount for a blob, flooring at
 // zero. When refcount transitions from 1 to 0, the blob becomes eligible
 // for eviction and a telemetry signal is emitted.
 func (s *CASStore) DecrementRef(hashHex string) {
-	rec, ok := s.index.Get(hashHex)
-	if !ok {
-		return
-	}
-	if rec.Refcount == 0 {
-		// Already zero; no-op, no telemetry.
-		return
-	}
-	wasPositive := rec.Refcount > 0
-	rec.Refcount--
-	_ = s.index.Put(rec)
+	var becameZero bool
+	s.index.UpdateAtomic(hashHex, func(rec *metaRecord) {
+		if rec.Refcount == 0 {
+			// Already zero; no-op.
+			return
+		}
+		rec.Refcount--
+		becameZero = rec.Refcount == 0
+	})
 
 	// Fire telemetry only on the 1→0 transition.
-	if wasPositive && rec.Refcount == 0 {
+	if becameZero {
 		s.metrics.IncCASRefcountZeroEligible()
 	}
 }
 
 // Pin marks a blob as exempt from eviction.
 func (s *CASStore) Pin(hashHex string) {
-	rec, ok := s.index.Get(hashHex)
-	if !ok {
-		return
-	}
-	rec.Pinned = true
-	_ = s.index.Put(rec)
+	s.index.UpdateAtomic(hashHex, func(rec *metaRecord) {
+		rec.Pinned = true
+	})
 }
 
 // Unpin removes the eviction exemption from a blob.
 func (s *CASStore) Unpin(hashHex string) {
-	rec, ok := s.index.Get(hashHex)
-	if !ok {
-		return
-	}
-	rec.Pinned = false
-	_ = s.index.Put(rec)
+	s.index.UpdateAtomic(hashHex, func(rec *metaRecord) {
+		rec.Pinned = false
+	})
 }
 
 // IsPinned returns true if the blob is pinned (either by config or by Pin()).

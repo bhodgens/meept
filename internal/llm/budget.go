@@ -793,6 +793,24 @@ func (b *Budget) WaitForRateLimit(ctx context.Context) error {
 	}
 }
 
+// ReleaseRateLimitSlot releases the most recently reserved RPM slot.
+// Call this when a request that called WaitForRateLimit fails before
+// reaching the API (e.g., concurrency limit acquisition fails, payload
+// marshalling error), so the reserved timestamp doesn't artificially
+// consume rate-limit capacity.
+func (b *Budget) ReleaseRateLimitSlot() {
+	if b.rateLimitRPM <= 0 {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.requestTimestamps) == 0 {
+		return
+	}
+	// Remove the most recent entry (the reservation).
+	b.requestTimestamps = b.requestTimestamps[:len(b.requestTimestamps)-1]
+}
+
 // BudgetLimit identifies which budget limit was exceeded.
 type BudgetLimit string
 

@@ -130,6 +130,13 @@ type GossipOption func(*GossipEngine)
 
 // NewGossipEngine creates a new gossip engine.
 func NewGossipEngine(cfg *Config, localNode string, msgBus *bus.MessageBus, logger *slog.Logger, opts ...GossipOption) *GossipEngine {
+	// Guard against nil config to prevent nil-pointer dereference when
+	// accessing cfg.Security.RequireNodeSignatures below.
+	if cfg == nil {
+		cfg = &Config{}
+		cfg.setDefault()
+	}
+
 	g := &GossipEngine{
 		cfg:         cfg,
 		localNode:   localNode,

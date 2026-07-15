@@ -4,7 +4,6 @@
 package preferences
 
 import (
-	"crypto/rand"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -477,25 +476,17 @@ func isValidFilenameByte(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-'
 }
 
+// generateSaveID generates a random 16-character hex ID for instruction storage.
+// Uses crypto/rand via pkg/id.Generate() for unpredictable IDs.
 func generateSaveID() string {
-	hexBytes := make([]byte, 8)
-	_, _ = randBytes(hexBytes)
-	return fmt.Sprintf("%x", hexBytes)
-}
-
-// randBytes generates random bytes for ID generation using crypto/rand.
-func randBytes(b []byte) (int, error) {
-	_, err := rand.Read(b)
-	if err != nil {
-		// Fallback to pseudo-random if crypto/rand fails
-		r := uint64(time.Now().UnixNano())
-		for i := range b {
-			r *= 6364136223846793005
-			r += 1
-			b[i] = byte(r)
-		}
+	// Use pkg/id.Generate which handles crypto/rand failure gracefully
+	// with a documented zero-suffix fallback rather than predictable time-based IDs
+	fullID := id.Generate("")
+	// Return last 16 hex chars to保持 compatibility with existing ID format
+	if len(fullID) >= 16 {
+		return fullID[len(fullID)-16:]
 	}
-	return len(b), nil
+	return fullID
 }
 
 // DefaultTier returns the default tier for saving new instructions.

@@ -491,12 +491,14 @@ func (q *MessageQueue) publishEvent(topic string, payload QueueEventPayload) {
 }
 
 // previewContent returns the first maxChars characters of s, truncated if longer.
+// Rune-safe to avoid splitting multi-byte UTF-8 characters.
 func previewContent(s string) string {
 	const maxChars = 100
-	if len(s) <= maxChars {
+	runes := []rune(s)
+	if len(runes) <= maxChars {
 		return s
 	}
-	return s[:maxChars] + "..."
+	return string(runes[:maxChars]) + "..."
 }
 
 // noopLogger is a no-op implementation of Logger for when no logger is configured.
