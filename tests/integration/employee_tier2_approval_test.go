@@ -342,7 +342,7 @@ func TestEmployee_Tier2ApprovalCycle(t *testing.T) {
 	// When no PlanDisposer is wired, the methods should return a clear
 	// "not configured" error, not ErrNotImplemented.
 	t.Run("manager.ApprovePlan without disposer returns not-configured error", func(t *testing.T) {
-		err := env.empMgr.ApprovePlan(ctx, goal.ID, "plan-fake", "approved")
+		err := env.empMgr.ApprovePlan(ctx, goal.ID, "plan-fake", "system", "approved")
 		if err == nil {
 			t.Fatal("expected error when plan disposer not configured, got nil")
 		}
@@ -352,7 +352,7 @@ func TestEmployee_Tier2ApprovalCycle(t *testing.T) {
 	})
 
 	t.Run("manager.RejectPlan without disposer returns not-configured error", func(t *testing.T) {
-		err := env.empMgr.RejectPlan(ctx, goal.ID, "plan-fake", "rejected")
+		err := env.empMgr.RejectPlan(ctx, goal.ID, "plan-fake", "system", "rejected")
 		if err == nil {
 			t.Fatal("expected error when plan disposer not configured, got nil")
 		}
@@ -382,7 +382,7 @@ func TestEmployee_Tier2ApprovalCycle(t *testing.T) {
 
 	t.Run("manager.ApprovePlan delegates to disposer and sets active plan", func(t *testing.T) {
 		planID := "plan-approve-test"
-		if err := env.empMgr.ApprovePlan(ctx, disposerGoal.ID, planID, "looks good"); err != nil {
+		if err := env.empMgr.ApprovePlan(ctx, disposerGoal.ID, planID, "system", "looks good"); err != nil {
 			t.Fatalf("ApprovePlan: %v", err)
 		}
 		// Disposer recorded the approval.
@@ -424,7 +424,7 @@ func TestEmployee_Tier2ApprovalCycle(t *testing.T) {
 		}
 
 		planID := "plan-reject-test"
-		if err := env.empMgr.RejectPlan(ctx, rejectGoal.ID, planID, "bad idea"); err != nil {
+		if err := env.empMgr.RejectPlan(ctx, rejectGoal.ID, planID, "system", "bad idea"); err != nil {
 			t.Fatalf("RejectPlan: %v", err)
 		}
 		// Disposer recorded the rejection.
