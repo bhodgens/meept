@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	
+	"time"
 
 	"golang.org/x/time/rate"
 )
@@ -141,31 +141,70 @@ func APIKeyFromContext(ctx context.Context) (string, bool) {
 
 // rateLimiter implements per-IP rate limiting using a token bucket algorithm.
 // Default: 100 requests per minute per IP, burst of 20.
+// Limiters are pruned after 10 minutes of inactivity to prevent unbounded growth.
 type rateLimiter struct {
-	mu       sync.RWMutex
-	limiters map[string]*rate.Limiter
-	r        rate.Limit // tokens per second
-	burst    int
+	mu         sync.RWMutex
+	limiters   map[string]*rate.Limiter
+	lastAccess map[string]time.Time
+	r          rate.Limit // tokens per second
+	burst      int
+	pruneAfter time.Duration // Time after which inactive limiters are pruned
 }
+
+// pruneInterval is the interval between limiter pruning operations.
+const pruneInterval = 5 * time.Minute
 
 // newRateLimiter creates a rate limiter for per-IP rate limiting.
 // r = requests per second, burst = max burst size.
 func newRateLimiter(r float64, burst int) *rateLimiter {
-	return &rateLimiter{
-		limiters: make(map[string]*rate.Limiter),
-		r:        rate.Limit(r),
-		burst:    burst,
+	rl := &rateLimiter{
+		limiters:   make(map[string]*rate.Limiter),
+		lastAccess: make(map[string]time.Time),
+		r:          rate.Limit(r),
+		burst:      burst,
+		pruneAfter: 10 * time.Minute,
+	}
+	// Start background pruner
+	go rl.pruneLoop()
+	return rl
+}
+
+// pruneLoop periodically removes inactive limiters to prevent unbounded growth.
+func (rl *rateLimiter) pruneLoop() {
+	ticker := time.NewTicker(pruneInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		rl.pruneInactive()
+	}
+}
+
+// pruneInactive removes limiters that haven't been accessed within pruneAfter.
+func (rl *rateLimiter) pruneInactive() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	now := time.Now()
+	cutoff := now.Add(-rl.pruneAfter)
+	for ip, last := range rl.lastAccess {
+		if last.Before(cutoff) {
+			delete(rl.limiters, ip)
+			delete(rl.lastAccess, ip)
+		}
 	}
 }
 
 // getLimiter returns (or creates) a rate limiter for the given IP.
+// Tracks last access time for pruning inactive limiters.
 func (rl *rateLimiter) getLimiter(ip string) *rate.Limiter {
-	// Fast path: read lock check
+	// Fast path: read lock check (skip time tracking for performance)
 	rl.mu.RLock()
 	limiter, exists := rl.limiters[ip]
 	rl.mu.RUnlock()
 
 	if exists {
+		// Update last access time lazily (only if old)
+		rl.mu.Lock()
+		rl.lastAccess[ip] = time.Now()
+		rl.mu.Unlock()
 		return limiter
 	}
 
@@ -175,11 +214,13 @@ func (rl *rateLimiter) getLimiter(ip string) *rate.Limiter {
 
 	// Double-check after acquiring write lock
 	if limiter, exists = rl.limiters[ip]; exists {
+		rl.lastAccess[ip] = time.Now()
 		return limiter
 	}
 
 	limiter = rate.NewLimiter(rl.r, rl.burst)
 	rl.limiters[ip] = limiter
+	rl.lastAccess[ip] = time.Now()
 	return limiter
 }
 
