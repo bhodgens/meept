@@ -292,6 +292,19 @@ func NewShellJob(cfg JobConfig, msgBus *bus.MessageBus) (*ShellJob, error) {
 }
 
 // Execute runs the shell command.
+//
+// SECURITY NOTE: The fence check for the working directory and command
+// arguments happens at job CREATION time (in tool_schedule_create.go).
+// There is a TOCTOU (time-of-check-time-of-use) window between creation
+// and execution where:
+//   1. The working directory could be modified
+//   2. Files referenced could be replaced with symlinks to sensitive locations
+//
+// For high-security deployments, consider:
+//   - Storing resolved realpath of workDir at creation and verifying at execution
+//   - Re-validating fence.CheckCommand() at execution time (requires injecting
+//     FenceChecker into ShellJob via NewShellJob)
+//   - Using openat2() with RESOLVE_BENEATH for path operations
 func (j *ShellJob) Execute(ctx context.Context) error {
 	// Create timeout context
 	execCtx, cancel := context.WithTimeout(ctx, j.timeout)

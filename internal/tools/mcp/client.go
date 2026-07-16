@@ -288,9 +288,15 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments map[st
 				text.WriteString("[image]")
 			}
 		case "resource":
-			// Include resource reference with URI
+			// SECURITY: Validate resource URI to prevent path traversal injection
+			// Malicious MCP servers could inject file:// URIs pointing to sensitive files
 			if block.Resource != nil && block.Resource.URI != "" {
-				fmt.Fprintf(&text, "[resource: %s]", block.Resource.URI)
+				uri := block.Resource.URI
+				// Reject URIs that look like local file paths
+				if strings.HasPrefix(uri, "file://") && (strings.Contains(uri, "/etc/") || strings.Contains(uri, "/../") || strings.HasPrefix(uri, "file:///")) {
+					uri = "[blocked: potential path traversal]"
+				}
+				fmt.Fprintf(&text, "[resource: %s]", uri)
 			} else {
 				text.WriteString("[resource]")
 			}

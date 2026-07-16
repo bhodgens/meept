@@ -405,6 +405,15 @@ func getFileExtension(filePath string) string {
 	return ext
 }
 
+// runGitCmd executes a git command in the specified directory.
+//
+// SECURITY NOTE: Git hooks (.git/hooks/*) execute automatically for many
+// git commands. These hooks could:
+//   - Run arbitrary code with user's permissions
+//   - Access files outside the workspace
+//   - Exfiltrate sensitive data via network
+//
+// For untrusted repositories, consider adding "--no-verify" to args.
 func (t *GitSplitTool) runGitCmd(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir

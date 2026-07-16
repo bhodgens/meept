@@ -13,6 +13,15 @@ import (
 	"github.com/caimlas/meept/internal/tools"
 )
 
+// noVerifyKey is the context key for disabling git hooks.
+type noVerifyKey struct{}
+
+// WithGitNoVerify returns a context that disables git hooks for git operations.
+// This prevents execution of potentially malicious .git/hooks/* scripts.
+func WithGitNoVerify(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noVerifyKey{}, true)
+}
+
 // GitCommitTool creates git commits with validation and multi-commit support.
 type GitCommitTool struct {
 	workingDir   string
@@ -321,7 +330,20 @@ func countSuccessfulCommits(results []GitCommitResult) int {
 }
 
 func (t *GitCommitTool) createCommit(ctx context.Context, dir, message string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "commit", "-m", message)
+	// SECURITY: Add --no-verify to skip git hooks which could execute arbitrary code
+	// Git hooks (.git/hooks/*) run automatically and could:
+	//   - Exfiltrate data via network
+	//   - Modify files outside workspace
+	//   - Execute malicious payloads
+	// Mitigation: Use --no-verify for untrusted repositories
+	args := []string{"commit", "-m", message}
+	
+	// Check if no-verify is requested via context value
+	if noVerify, ok := ctx.Value(noVerifyKey{}).(bool); ok && noVerify {
+		args = append(args, "--no-verify")
+	}
+	
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {

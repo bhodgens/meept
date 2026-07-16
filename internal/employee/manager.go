@@ -389,6 +389,20 @@ func (s *ConstitutionStore) Delete(ctx context.Context, employeeID string) error
 // Manager
 // --------------------------------------------------------------------------
 
+// singleAgentGraph implements EscalationGraph for a single agent (used in amendment validation).
+type singleAgentGraph struct {
+	agentID     string
+	escalatesTo []string
+}
+
+// Lookup implements EscalationGraph for singleAgentGraph.
+func (g singleAgentGraph) Lookup(agentID string) (Constitution, bool) {
+	if agentID != g.agentID {
+		return Constitution{}, false
+	}
+	return Constitution{EscalatesTo: g.escalatesTo}, true
+}
+
 // pendingConstitution holds a constitution patch awaiting plan approval.
 // The employeeID is stored so ApprovePlan can apply the patch to the
 // correct employee's constitution.
@@ -1521,6 +1535,24 @@ func (m *Manager) AmendConstitution(ctx context.Context, req AmendRequest) (stri
 	}
 	if err := patched.Validate(req.EmployeeID); err != nil {
 		return "", fmt.Errorf("amend: patched constitution invalid: %w", err)
+	}
+
+	// SECURITY FIX: Re-run escalation cycle detection on the patched constitution.
+	// The original validation at hire time doesn't catch cycles introduced via
+	// runtime amendments. Build a minimal graph with the patched escalates_to.
+	// Note: This is a local check; full graph cycle detection requires
+	// knowledge of all employees. For complete protection, the daemon should
+	// re-run DetectEscalationCycles on the full graph before applying.
+	if len(patched.EscalatesTo) > 0 {
+		// Build minimal graph interface for local validation
+		localGraph := singleAgentGraph{agentID: req.EmployeeID, escalatesTo: patched.EscalatesTo}
+		cycles, err := DetectEscalationCycles(localGraph, []string{req.EmployeeID})
+		if err != nil {
+			return "", fmt.Errorf("amend: escalation cycle detected: %w", err)
+		}
+		if len(cycles) > 0 {
+			return "", fmt.Errorf("amend: would create escalation cycle: %s", cycles[0].String())
+		}
 	}
 	// Bump version + provenance.
 	patched.Version = existing.Constitution.Version + 1
