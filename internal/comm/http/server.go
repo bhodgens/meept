@@ -47,7 +47,7 @@ var defaultWSOrigins = []string{"localhost", "127.0.0.1", "::1"}
 // ServerConfig holds configuration for the HTTP server.
 // TLS is always enabled; there is no option to disable HTTPS.
 type ServerConfig struct {
-	Addr                    string                // Listen address (default: :8081)
+	Addr                    string                // Listen address (default: 127.0.0.1:8081)
 	ReadTimeout             time.Duration         // Read timeout
 	WriteTimeout            time.Duration         // Write timeout
 	MaxHeaderBytes          int                   // Max header size
@@ -72,7 +72,7 @@ func DefaultServerConfig() ServerConfig {
 	defaultKeyFile := filepath.Join(homeDir, ".meept", "tls", "key.pem")
 
 	return ServerConfig{
-		Addr:            ":8081", // Different from existing web server (:8080)
+		Addr:            "127.0.0.1:8081", // Bind localhost only (security fix)
 		ReadTimeout:     30 * time.Second,
 		WriteTimeout:    30 * time.Second,
 		MaxHeaderBytes:  1 << 20, // 1 MB
@@ -207,7 +207,7 @@ type Agent struct {
 // NewServer creates a new HTTP API server.
 func NewServer(cfg ServerConfig, configSvc *ConfigService, daemonCtrl DaemonController, metricsSvc MetricsService, svcRegistry *services.ServiceRegistry, logger *slog.Logger, opts ...ServerOption) *Server {
 	if cfg.Addr == "" {
-		cfg.Addr = ":8081"
+		cfg.Addr = "127.0.0.1:8081"
 	}
 	if logger == nil {
 		logger = slog.Default()
