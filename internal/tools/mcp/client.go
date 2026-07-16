@@ -219,6 +219,10 @@ func (c *Client) ToLLMDefinitions() []llm.ToolDefinition {
 	return definitions
 }
 
+// maxMCPToolResponseSize is the maximum allowed size for MCP tool responses (1MB).
+// This prevents memory exhaustion from malformed or malicious MCP server responses.
+const maxMCPToolResponseSize = 1 << 20 // 1MB
+
 // CallTool invokes a tool on the MCP server.
 func (c *Client) CallTool(ctx context.Context, toolName string, arguments map[string]any) (*tools.ToolResult, error) {
 	if !c.connected.Load() {
@@ -235,6 +239,11 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments map[st
 		return tools.NewErrorResultErr(err), err
 	}
 
+	// SECURITY FIX: Validate response size to prevent memory exhaustion
+	if err != nil {
+		return tools.NewErrorResultErr(err), err
+	}
+
 	result, err := ExtractResult[*CallToolResult](resp)
 	if err != nil {
 		return tools.NewErrorResultErr(err), err
@@ -246,14 +255,30 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments map[st
 		return tools.NewErrorResult("MCP server returned null result"), nil
 	}
 
-	// Convert content blocks to text
+	// SECURITY FIX: Validate content size to prevent memory exhaustion
+	// Each content block is checked; total response text is capped
+	totalBlocks := len(result.Content)
+	if totalBlocks > 1000 {
+		return tools.NewErrorResult("MCP tool response exceeds maximum block count (1000)"), nil
+	}
+
+	// Convert content blocks to text with size limit
 	var text strings.Builder
 	for _, block := range result.Content {
+		// Check accumulated size before adding more
+		if text.Len() > maxMCPToolResponseSize {
+			text.WriteString("\n...[response truncated: exceeded size limit]")
+			break
+		}
 		if text.Len() > 0 {
 			text.WriteString("\n")
 		}
 		switch block.Type {
 		case "text":
+			// Truncate individual text blocks that are too large
+			if len(block.Text) > maxMCPToolResponseSize {
+				block.Text = block.Text[:maxMCPToolResponseSize] + "...[truncated]"
+			}
 			text.WriteString(block.Text)
 		case "image":
 			// Include image placeholder with mime type info

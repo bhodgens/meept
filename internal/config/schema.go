@@ -133,6 +133,30 @@ type EmployeesConfig struct {
 	AutoPause EmployeesAutoPauseConfig `json:"auto_pause" toml:"auto_pause"`
 }
 
+// Validate validates the EmployeesConfig.
+func (c *EmployeesConfig) Validate() error {
+	// Validate audit config
+	if err := c.Audit.Validate(); err != nil {
+		return fmt.Errorf("audit: %w", err)
+	}
+	return nil
+}
+
+// Validate validates the EmployeesAuditConfig.
+func (c *EmployeesAuditConfig) Validate() error {
+	// Validate approval timeout if set
+	if c.ApprovalTimeout != "" {
+		if _, err := time.ParseDuration(c.ApprovalTimeout); err != nil {
+			return fmt.Errorf("invalid approval_timeout %q: %w", c.ApprovalTimeout, err)
+		}
+	}
+	// Validate drift threshold is 0-1
+	if c.DriftPauseThreshold < 0 || c.DriftPauseThreshold > 1 {
+		return fmt.Errorf("drift_pause_threshold must be between 0 and 1, got %f", c.DriftPauseThreshold)
+	}
+	return nil
+}
+
 // EmployeesAuditConfig configures the constitution audit checkpoints
 // (post-turn and periodic). The pre-exec gate is always on when the
 // employee layer is enabled; these settings only affect the LLM-based
@@ -196,6 +220,20 @@ type PlansConfig struct {
 	Storage      PlansStorageConfig      `json:"storage"       toml:"storage"`
 	Approval     PlansApprovalConfig     `json:"approval"      toml:"approval"`
 	Confirmation PlansConfirmationConfig `json:"confirmation"  toml:"confirmation"`
+}
+
+// Validate validates the PlansConfig.
+func (c *PlansConfig) Validate() error {
+	// Validate mode if set
+	if c.Mode != "" {
+		switch c.Mode {
+		case "auto", "manual", "hybrid":
+			// valid
+		default:
+			return fmt.Errorf("invalid mode %q: must be auto, manual, or hybrid", c.Mode)
+		}
+	}
+	return nil
 }
 
 // PlansThresholdConfig holds threshold-based plan triggering settings.
@@ -1153,6 +1191,31 @@ type SecurityConfig struct {
 	// Path fencing for agent sandboxing
 	FenceEnabled   bool     `json:"fence_enabled"    toml:"fence_enabled"`
 	FenceAllowRead []string `json:"fence_allow_read" toml:"fence_allow_read"`
+}
+
+// Validate validates the SecurityConfig.
+func (c *SecurityConfig) Validate() error {
+	// Validate sanitize strictness if set
+	if c.SanitizeInputs && c.SanitizeStrictness != "" {
+		switch c.SanitizeStrictness {
+		case "permissive", "standard", "strict":
+			// valid
+		default:
+			return fmt.Errorf("invalid sanitize_strictness %q: must be permissive, standard, or strict", c.SanitizeStrictness)
+		}
+	}
+	// Validate allowed/blocked paths don't have obvious conflicts
+	for _, path := range c.AllowedPaths {
+		if path == "" {
+			return fmt.Errorf("allowed_paths contains empty string")
+		}
+	}
+	for _, path := range c.BlockedPaths {
+		if path == "" {
+			return fmt.Errorf("blocked_paths contains empty string")
+		}
+	}
+	return nil
 }
 
 // TaintConfig holds taint tracking configuration for information flow security.
@@ -2441,6 +2504,23 @@ func (c *Config) ValidateAll() error {
 	// Validate config sync config
 	if err := c.ConfigSync.Validate(); err != nil {
 		return fmt.Errorf("config sync config: %w", err)
+	}
+
+	// SECURITY FIX: Validate security config
+	if err := c.Security.Validate(); err != nil {
+		return fmt.Errorf("security config: %w", err)
+	}
+
+	// Validate employees config when enabled
+	if c.Employees.Enabled {
+		if err := c.Employees.Validate(); err != nil {
+			return fmt.Errorf("employees config: %w", err)
+		}
+	}
+
+	// Validate plans config
+	if err := c.Plans.Validate(); err != nil {
+		return fmt.Errorf("plans config: %w", err)
 	}
 
 	return nil
