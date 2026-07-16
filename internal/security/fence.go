@@ -192,6 +192,21 @@ func (fc *FenceChecker) CheckCommand(cmd string, workDir string) error {
 		return err
 	}
 
+// SECURITY FIX: Detect shell command substitution patterns that could
+	// bypass path validation. These patterns execute nested commands that
+	// we cannot validate because they're hidden inside the substitution.
+	// Patterns: $(), ``, $(()), >(), <()
+	if strings.Contains(cmd, "$(") || strings.Contains(cmd, "=$((") {
+		return fmt.Errorf("fence: command substitution $() is not allowed: %q", cmd)
+	}
+	if strings.Contains(cmd, "`") {
+		return fmt.Errorf("fence: backtick command substitution is not allowed: %q", cmd)
+	}
+	// Process substitution <() and >() can also hide commands
+	if strings.Contains(cmd, "<(") || strings.Contains(cmd, ">(") {
+		return fmt.Errorf("fence: process substitution <() >() is not allowed: %q", cmd)
+	}
+
 	// Tokenize the command and extract path-like arguments for validation.
 	// We do not attempt to parse shell metacharacters — we just identify
 	// tokens that look like file paths and validate each against the fence.
