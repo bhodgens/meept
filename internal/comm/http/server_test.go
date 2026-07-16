@@ -62,8 +62,8 @@ func TestNewServer(t *testing.T) {
 	if server == nil {
 		t.Fatal("NewServer returned nil")
 	}
-	if server.config.Addr != ":8081" {
-		t.Errorf("default addr = %s, want :8081", server.config.Addr)
+	if server.config.Addr != "127.0.0.1:8081" {
+		t.Errorf("default addr = %s, want 127.0.0.1:8081", server.config.Addr)
 	}
 }
 
@@ -550,8 +550,8 @@ func TestWriteError(t *testing.T) {
 func TestDefaultServerConfig(t *testing.T) {
 	cfg := DefaultServerConfig()
 
-	if cfg.Addr != ":8081" {
-		t.Errorf("Addr = %s, want :8081", cfg.Addr)
+	if cfg.Addr != "127.0.0.1:8081" {
+		t.Errorf("Addr = %s, want 127.0.0.1:8081", cfg.Addr)
 	}
 	if cfg.ReadTimeout != 30*time.Second {
 		t.Errorf("ReadTimeout = %v, want 30s", cfg.ReadTimeout)
