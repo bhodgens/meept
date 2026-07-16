@@ -372,7 +372,7 @@ func (m *Manager) runApprovalTimeoutSweep(ctx context.Context, timeout time.Dura
 		m.logger.Info("approval timeout: rejecting stale plan",
 			"goal_id", g.ID, "plan_id", g.ActivePlanID,
 			"age", time.Since(g.LastAssessed))
-		if err := m.RejectPlan(ctx, g.ID, g.ActivePlanID,
+		if err := m.RejectPlan(ctx, g.ID, g.ActivePlanID, "system",
 			"auto-rejected: approval timeout (spec line 591)"); err != nil {
 			// RejectPlan may fail if the plan was already approved
 			// or rejected between sweeps — log and continue.

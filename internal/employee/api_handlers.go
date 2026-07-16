@@ -143,7 +143,10 @@ func (h *AgentAPIHandler) dispatch(w http.ResponseWriter, r *http.Request, metho
 	} else {
 		raw = json.RawMessage("{}")
 	}
-	result, err := h.rpc(r.Context(), method, raw)
+	// Inject caller information from HTTP context into RPC context.
+	// This enables RPC handlers to validate caller authorization.
+	ctx := injectCallerIntoContext(r.Context(), r)
+	result, err := h.rpc(ctx, method, raw)
 	if err != nil {
 		// Map common sentinel errors to HTTP status codes.
 		msg := err.Error()
@@ -152,6 +155,8 @@ func (h *AgentAPIHandler) dispatch(w http.ResponseWriter, r *http.Request, metho
 			h.writeError(w, http.StatusNotFound, msg)
 		case strings.Contains(msg, "invalid") || strings.Contains(msg, "required"):
 			h.writeError(w, http.StatusBadRequest, msg)
+		case strings.Contains(msg, "unauthorized") || strings.Contains(msg, "unauthenticated"):
+			h.writeError(w, http.StatusUnauthorized, msg)
 		case strings.Contains(msg, "not configured") || strings.Contains(msg, "not available"):
 			h.writeError(w, http.StatusServiceUnavailable, msg)
 		default:
@@ -160,6 +165,36 @@ func (h *AgentAPIHandler) dispatch(w http.ResponseWriter, r *http.Request, metho
 		return
 	}
 	h.writeJSON(w, http.StatusOK, result)
+}
+
+// injectCallerIntoContext extracts the API key from the HTTP request context
+// and injects a CallerInfo into the context for RPC handlers to use.
+func injectCallerIntoContext(ctx context.Context, r *http.Request) context.Context {
+	// Extract API key from HTTP context (set by auth middleware)
+	apiKey := extractAPIKeyFromContext(ctx)
+	if apiKey == "" {
+		// No API key in context - return original context
+		// RPC handlers will handle unauthenticated requests
+		return ctx
+	}
+	// Create caller info and inject into context
+	callerInfo := &CallerInfo{
+		APIKey: apiKey,
+		UserID: deriveUserIDFromAPIKey(apiKey),
+	}
+	return ContextWithCaller(ctx, callerInfo)
+}
+
+// extractAPIKeyFromContext extracts API key from HTTP context.
+// Uses the same context key as internal/comm/http/auth.go to avoid import cycle.
+func extractAPIKeyFromContext(ctx context.Context) string {
+	type contextKey string
+	const apiKeyContextKey contextKey = "api_key"
+	key, ok := ctx.Value(apiKeyContextKey).(string)
+	if !ok {
+		return ""
+	}
+	return key
 }
 
 // ---------------------------------------------------------------------------

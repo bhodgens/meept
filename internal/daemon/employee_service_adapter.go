@@ -121,13 +121,13 @@ func (a employeeServiceAdapter) GetGoal(ctx context.Context, id string) (any, er
 }
 
 // ApprovePlan wraps Manager.ApprovePlan.
-func (a employeeServiceAdapter) ApprovePlan(ctx context.Context, goalID, planID, reason string) error {
-	return a.m.ApprovePlan(ctx, goalID, planID, reason)
+func (a employeeServiceAdapter) ApprovePlan(ctx context.Context, goalID, planID, callerID, reason string) error {
+	return a.m.ApprovePlan(ctx, goalID, planID, callerID, reason)
 }
 
 // RejectPlan wraps Manager.RejectPlan.
-func (a employeeServiceAdapter) RejectPlan(ctx context.Context, goalID, planID, reason string) error {
-	return a.m.RejectPlan(ctx, goalID, planID, reason)
+func (a employeeServiceAdapter) RejectPlan(ctx context.Context, goalID, planID, callerID, reason string) error {
+	return a.m.RejectPlan(ctx, goalID, planID, callerID, reason)
 }
 
 // ListAuditFindings wraps Manager.ListAuditFindings, building an

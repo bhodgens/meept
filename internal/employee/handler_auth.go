@@ -42,7 +42,7 @@ func CallerFromContext(ctx context.Context) *CallerInfo {
 // extractCallerFromAPIKey extracts caller info from an API key.
 // The primary API key is treated as "user", other keys derive user ID from the key.
 //
-//nolint:unused // Used by api_handlers.go for caller injection
+//lint:ignore U1000 Used by api_handlers.go for caller injection
 func extractCallerFromAPIKey(apiKey string) *CallerInfo {
 	return &CallerInfo{
 		APIKey: apiKey,
@@ -53,7 +53,7 @@ func extractCallerFromAPIKey(apiKey string) *CallerInfo {
 // deriveUserIDFromAPIKey derives a logical user identity from an API key.
 // This can be extended to support multi-tenant deployments.
 //
-//nolint:unused // Used by api_handlers.go for caller injection
+//lint:ignore U1000 Used by api_handlers.go for caller injection
 func deriveUserIDFromAPIKey(apiKey string) string {
 	if apiKey == "" {
 		return "anonymous"
@@ -67,7 +67,7 @@ func deriveUserIDFromAPIKey(apiKey string) string {
 // returns a CallerInfo suitable for passing to employee RPC handlers.
 // Returns nil if no API key is present in context.
 //
-//nolint:unused // Used by api_handlers.go for caller injection
+//lint:ignore U1000 Used by api_handlers.go for caller injection
 func injectCallerFromHTTPContext(ctx context.Context) *CallerInfo {
 	apiKey, ok := http.APIKeyFromContext(ctx)
 	if !ok || apiKey == "" {
@@ -81,7 +81,7 @@ func injectCallerFromHTTPContext(ctx context.Context) *CallerInfo {
 // 1. "user" (primary API key holder) can always approve
 // 2. Anyone in the employee's escalates_to list can approve
 //
-//nolint:unused // Used by handler.go for plan approval validation
+//lint:ignore U1000 Used by handler.go for plan approval validation
 func isAuthorizedApprover(callerID string, escalatesTo []string) bool {
 	if callerID == "user" {
 		return true
@@ -97,7 +97,7 @@ func isAuthorizedApprover(callerID string, escalatesTo []string) bool {
 // isAuthorizedAmmender checks if the caller is authorized to propose
 // constitution amendments for the given employee.
 //
-//nolint:unused // Used by handler.go for constitution amendment validation
+//lint:ignore U1000 Used by handler.go for constitution amendment validation
 func isAuthorizedAmmender(callerID string, employeeID string, escalatesTo []string, selfProposeAllowed bool) bool {
 	// User can always amend
 	if callerID == "user" {
@@ -120,7 +120,7 @@ func isAuthorizedAmmender(callerID string, employeeID string, escalatesTo []stri
 // Returns error if no caller is present or if caller is not authorized
 // for the specified employee operation.
 //
-//nolint:unused // Used by handler.go for operation-level authorization
+//lint:ignore U1000 Used by handler.go for operation-level authorization
 func requireCaller(ctx context.Context, emp *Employee, operation string) (*CallerInfo, error) {
 	caller := CallerFromContext(ctx)
 	if caller == nil {
@@ -137,7 +137,7 @@ func requireCaller(ctx context.Context, emp *Employee, operation string) (*Calle
 
 // isAuthorizedForOperation checks if a caller can perform an operation on an employee.
 //
-//nolint:unused // Used by handler.go for operation-level authorization
+//lint:ignore U1000 Used by handler.go for operation-level authorization
 func isAuthorizedForOperation(callerID, employeeID string, escalatesTo []string, operation string) bool {
 	// "user" can perform all operations
 	if callerID == "user" {

@@ -1737,7 +1737,7 @@ func (m *Manager) GetGoal(ctx context.Context, id string) (*Goal, error) {
 // (spec line 295: "Active plan ID recorded on the Goal") when the
 // goalStore is available and goalID is non-empty. Actual plan execution
 // is left to the GoalLoop driver, which has its own scheduler hook.
-func (m *Manager) ApprovePlan(ctx context.Context, goalID, planID, reason string) error {
+func (m *Manager) ApprovePlan(ctx context.Context, goalID, planID, callerID, reason string) error {
 	if m.planDisposer == nil {
 		return errors.New("employee: plan disposer not configured")
 	}
@@ -1747,7 +1747,7 @@ func (m *Manager) ApprovePlan(ctx context.Context, goalID, planID, reason string
 	// this signoff path per the spec's "require_operator_resume"
 	// invariant). The reason is forwarded as the sessionID-free context.
 	_ = reason // reason is recorded by the disposer's own signoff row
-	if err := m.planDisposer.ApprovePlan(ctx, planID, "", "user"); err != nil {
+	if err := m.planDisposer.ApprovePlan(ctx, planID, "", callerID); err != nil {
 		return fmt.Errorf("approve plan %s: %w", planID, err)
 	}
 	// Record the active plan on the goal so the GoalLoop driver can
@@ -1807,11 +1807,11 @@ func (m *Manager) ApprovePlan(ctx context.Context, goalID, planID, reason string
 // the disposer is not wired, the method returns a clear "not configured"
 // error. The plan is removed from the goal's ActivePlanIDs so that
 // MaxActivePlans accurately reflects remaining in-flight plans.
-func (m *Manager) RejectPlan(ctx context.Context, goalID, planID, reason string) error {
+func (m *Manager) RejectPlan(ctx context.Context, goalID, planID, callerID, reason string) error {
 	if m.planDisposer == nil {
 		return errors.New("employee: plan disposer not configured")
 	}
-	if err := m.planDisposer.RejectPlan(ctx, planID, "", "user", reason); err != nil {
+	if err := m.planDisposer.RejectPlan(ctx, planID, "", callerID, reason); err != nil {
 		return fmt.Errorf("reject plan %s: %w", planID, err)
 	}
 	// Remove the rejected plan from the goal's ActivePlanIDs so the
@@ -1824,10 +1824,8 @@ func (m *Manager) RejectPlan(ctx context.Context, goalID, planID, reason string)
 			m.logger.Warn("reject plan: goal lookup failed; plan rejected but ActivePlanIDs not updated",
 				"goal_id", goalID, "plan_id", planID, "error", err)
 		} else {
-			goal.Lock()
 			goal.RemoveActivePlan(planID)
 			updateErr := m.goalStore.Update(ctx, goal)
-			goal.Unlock()
 			if updateErr != nil {
 				m.logger.Warn("reject plan: goal update failed; ActivePlanIDs not persisted",
 					"goal_id", goalID, "plan_id", planID, "error", updateErr)

@@ -479,13 +479,39 @@ func (h *RPCHandler) handleGoalsApprove(ctx context.Context, raw json.RawMessage
 	if req.GoalID == "" || req.PlanID == "" {
 		return nil, fmt.Errorf("goal_id and plan_id are required")
 	}
-	if err := h.manager.ApprovePlan(ctx, req.GoalID, req.PlanID, req.Reason); err != nil {
+
+	// Extract caller from context and validate authorization
+	caller := CallerFromContext(ctx)
+	if caller == nil {
+		return nil, fmt.Errorf("unauthenticated: API key required for plan approval")
+	}
+
+	// Get the goal to find the employee and check escalates_to
+	goal, err := h.manager.GetGoal(ctx, req.GoalID)
+	if err != nil {
+		return nil, fmt.Errorf("get goal: %w", err)
+	}
+
+	// Get the employee to check escalates_to
+	emp, err := h.manager.GetEmployee(ctx, goal.EmployeeID)
+	if err != nil {
+		return nil, fmt.Errorf("get employee: %w", err)
+	}
+
+	// Validate caller is authorized to approve plans for this employee
+	if !isAuthorizedApprover(caller.UserID, emp.Constitution.EscalatesTo) {
+		return nil, fmt.Errorf("unauthorized: caller %q cannot approve plans for employee %q (escalates_to: %v)", caller.UserID, emp.ID, emp.Constitution.EscalatesTo)
+	}
+
+	// Pass caller identity to ApprovePlan for accurate audit trail
+	if err := h.manager.ApprovePlan(ctx, req.GoalID, req.PlanID, caller.UserID, req.Reason); err != nil {
 		return nil, fmt.Errorf("approve plan: %w", err)
 	}
 	return map[string]any{
 		"goal_id": req.GoalID,
 		"plan_id": req.PlanID,
 		"status":  "approved",
+		"approver": caller.UserID,
 	}, nil
 }
 
@@ -503,13 +529,39 @@ func (h *RPCHandler) handleGoalsReject(ctx context.Context, raw json.RawMessage)
 	if req.Reason == "" {
 		return nil, fmt.Errorf("reason is required when rejecting a plan")
 	}
-	if err := h.manager.RejectPlan(ctx, req.GoalID, req.PlanID, req.Reason); err != nil {
+
+	// Extract caller from context and validate authorization
+	caller := CallerFromContext(ctx)
+	if caller == nil {
+		return nil, fmt.Errorf("unauthenticated: API key required for plan rejection")
+	}
+
+	// Get the goal to find the employee and check escalates_to
+	goal, err := h.manager.GetGoal(ctx, req.GoalID)
+	if err != nil {
+		return nil, fmt.Errorf("get goal: %w", err)
+	}
+
+	// Get the employee to check escalates_to
+	emp, err := h.manager.GetEmployee(ctx, goal.EmployeeID)
+	if err != nil {
+		return nil, fmt.Errorf("get employee: %w", err)
+	}
+
+	// Validate caller is authorized to reject plans for this employee
+	if !isAuthorizedApprover(caller.UserID, emp.Constitution.EscalatesTo) {
+		return nil, fmt.Errorf("unauthorized: caller %q cannot reject plans for employee %q (escalates_to: %v)", caller.UserID, emp.ID, emp.Constitution.EscalatesTo)
+	}
+
+	// Pass caller identity to RejectPlan for accurate audit trail
+	if err := h.manager.RejectPlan(ctx, req.GoalID, req.PlanID, caller.UserID, req.Reason); err != nil {
 		return nil, fmt.Errorf("reject plan: %w", err)
 	}
 	return map[string]any{
 		"goal_id": req.GoalID,
 		"plan_id": req.PlanID,
 		"status":  "rejected",
+		"rejector": caller.UserID,
 	}, nil
 }
 

@@ -26,8 +26,8 @@ type EmployeeManager interface {
 	AmendConstitution(ctx context.Context, employeeID string, fields map[string]any, reason string) (string, error)
 	ListGoals(ctx context.Context, employeeID string) ([]any, error)
 	GetGoal(ctx context.Context, id string) (any, error)
-	ApprovePlan(ctx context.Context, goalID, planID, reason string) error
-	RejectPlan(ctx context.Context, goalID, planID, reason string) error
+	ApprovePlan(ctx context.Context, goalID, planID, callerID, reason string) error
+	RejectPlan(ctx context.Context, goalID, planID, callerID, reason string) error
 	ListAuditFindings(ctx context.Context, employeeID string, since time.Duration, severity string) ([]any, error)
 	ResolveAuditFinding(ctx context.Context, findingID, resolution, note string) error
 	Migrate(ctx context.Context) ([]any, error)
@@ -223,28 +223,28 @@ func (s *EmployeeService) GetGoal(ctx context.Context, id string) (any, error) {
 }
 
 // ApprovePlan signs off on a pending plan for a goal.
-func (s *EmployeeService) ApprovePlan(ctx context.Context, goalID, planID, reason string) error {
+func (s *EmployeeService) ApprovePlan(ctx context.Context, goalID, planID, callerID, reason string) error {
 	if goalID == "" || planID == "" {
 		return wrapError("employee", "ApprovePlan", ErrInvalidInput)
 	}
 	if s.manager == nil {
 		return wrapError("employee", "ApprovePlan", ErrUnavailable)
 	}
-	if err := s.manager.ApprovePlan(ctx, goalID, planID, reason); err != nil {
+	if err := s.manager.ApprovePlan(ctx, goalID, planID, callerID, reason); err != nil {
 		return wrapError("employee", "ApprovePlan", err)
 	}
 	return nil
 }
 
 // RejectPlan rejects a pending plan for a goal.
-func (s *EmployeeService) RejectPlan(ctx context.Context, goalID, planID, reason string) error {
+func (s *EmployeeService) RejectPlan(ctx context.Context, goalID, planID, callerID, reason string) error {
 	if goalID == "" || planID == "" {
 		return wrapError("employee", "RejectPlan", ErrInvalidInput)
 	}
 	if s.manager == nil {
 		return wrapError("employee", "RejectPlan", ErrUnavailable)
 	}
-	if err := s.manager.RejectPlan(ctx, goalID, planID, reason); err != nil {
+	if err := s.manager.RejectPlan(ctx, goalID, planID, callerID, reason); err != nil {
 		return wrapError("employee", "RejectPlan", err)
 	}
 	return nil
