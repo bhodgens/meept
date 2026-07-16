@@ -1168,6 +1168,14 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.status.Store(models.StatusStarting)
 	d.startTime = time.Now()
 
+	// Validate all config sections BEFORE starting any components.
+	// This fails fast on invalid configuration rather than failing silently later.
+	if d.fullConfig != nil {
+		if err := d.fullConfig.ValidateAll(); err != nil {
+			return fmt.Errorf("invalid configuration: %w", err)
+		}
+	}
+
 	// Check for existing daemon
 	if err := d.checkExisting(); err != nil {
 		return err

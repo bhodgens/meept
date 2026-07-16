@@ -103,3 +103,50 @@ func TestBackupConfig_IsValidated(t *testing.T) {
 		t.Error("expected disabled config to report IsValidated=false")
 	}
 }
+
+func TestConfig_ValidateAll(t *testing.T) {
+	// Test that default config passes validation
+	cfg := DefaultConfig()
+	if err := cfg.ValidateAll(); err != nil {
+		t.Errorf("Default config should be valid: %v", err)
+	}
+
+	// Test that backup config errors are wrapped
+	cfg2 := DefaultConfig()
+	cfg2.Backup.Enabled = true
+	// Missing RepoURL should fail
+	if err := cfg2.ValidateAll(); err == nil {
+		t.Error("Expected error for invalid backup config, got nil")
+	} else if !contains(err.Error(), "backup config") {
+		t.Errorf("Expected 'backup config' in error message, got: %v", err)
+	}
+
+	// Test that peer sync config errors are wrapped
+	cfg3 := DefaultConfig()
+	cfg3.PeerSync.Enabled = true
+	// Missing Peers should fail
+	if err := cfg3.ValidateAll(); err == nil {
+		t.Error("Expected error for invalid peer sync config, got nil")
+	} else if !contains(err.Error(), "peer sync config") {
+		t.Errorf("Expected 'peer sync config' in error message, got: %v", err)
+	}
+
+	// Test that config sync config errors are wrapped
+	cfg4 := DefaultConfig()
+	cfg4.ConfigSync.Enabled = true
+	// Missing RepoURL should fail
+	if err := cfg4.ValidateAll(); err == nil {
+		t.Error("Expected error for invalid config sync config, got nil")
+	} else if !contains(err.Error(), "config sync config") {
+		t.Errorf("Expected 'config sync config' in error message, got: %v", err)
+	}
+}
+
+func contains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

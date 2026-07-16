@@ -21,6 +21,10 @@
 // categories: vcs, search, data, automation, browser, infra, messaging, coding,
 //             network, reasoning
 //
+// rate limiting: per-server rate limits protect against flooding.
+//   - rate_limit_rps: requests per second (default: 10)
+//   - rate_limit_burst: max burst size (default: 20)
+//
 // runtimes:
 //   - npx (node):    requires node.js + npm installed.
 //   - uvx (python):  requires uv installed (https://docs.astral.sh/uv/).

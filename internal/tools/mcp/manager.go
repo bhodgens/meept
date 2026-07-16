@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/internal/tools/mcp/transport"
@@ -26,7 +28,9 @@ type ServerConfig struct {
 	Env         map[string]string `json:"env,omitempty"`
 	Headers     map[string]string `json:"headers,omitempty"`     // For HTTP transport
 	Description string            `json:"description,omitempty"` // Optional, for UI display
-	Category    string            `json:"category,omitempty"`    // Optional, for UI grouping
+	Category       string            `json:"category,omitempty"`    // Optional, for UI grouping
+	RateLimitRPS   float64           `json:"rate_limit_rps,omitempty"`  // Requests per second (default: 10)
+	RateLimitBurst int               `json:"rate_limit_burst,omitempty"` // Burst size (default: 20)
 }
 
 // IsEnabled reports whether the server should be started. A nil Enabled
@@ -86,6 +90,8 @@ type Manager struct {
 	stats        map[string]*ServerStats // in-memory runtime stats, guarded by mu
 	configs      map[string]ServerConfig // snapshot of all configured servers (incl. disabled)
 	localTools   map[string]LocalToolkit  // keyed by toolkit name prefix
+	rateLimiters map[string]*rate.Limiter // per-server rate limiters
+	rateLimitMu  sync.RWMutex
 }
 
 // NewManager creates a new MCP manager.
@@ -97,8 +103,9 @@ func NewManager(logger *slog.Logger) *Manager {
 		clients:    make(map[string]*Client),
 		stats:      make(map[string]*ServerStats),
 		configs:    make(map[string]ServerConfig),
-		localTools: make(map[string]LocalToolkit),
-		logger:     logger.With("component", "mcp-manager"),
+		localTools:   make(map[string]LocalToolkit),
+		rateLimiters: make(map[string]*rate.Limiter),
+		logger:       logger.With("component", "mcp-manager"),
 	}
 }
 
@@ -535,9 +542,14 @@ func (m *Manager) CallTool(ctx context.Context, fullName string, args map[string
 	serverName := parts[0]
 	toolName := parts[1]
 
-	// Check if this is a local toolkit tool first
+	// Check if this is a local toolkit tool first (not rate limited)
 	if toolkit, ok := m.localToolkitLookup(serverName); ok {
 		return m.dispatchLocal(ctx, toolkit, toolName, args)
+	}
+
+	// Check rate limit before dispatch for remote MCP servers
+	if limiter := m.getRateLimiter(serverName); limiter != nil && !limiter.Allow() {
+		return nil, fmt.Errorf("rate limit exceeded for server %q", serverName)
 	}
 
 	m.mu.RLock()
@@ -610,6 +622,39 @@ func (m *Manager) dispatchLocal(ctx context.Context, toolkit LocalToolkit, toolN
 		return tools.NewErrorResultErr(err), nil
 	}
 	return tools.NewSuccessResult(result), nil
+}
+
+// getRateLimiter returns the rate limiter for a given server, creating one if
+// it doesn't exist. The limiter is configured from the server's config entry.
+// Returns the limiter (never nil - uses defaults if no config). Default: 10 req/sec, burst 20.
+func (m *Manager) getRateLimiter(serverID string) *rate.Limiter {
+	m.rateLimitMu.RLock()
+	limiter, exists := m.rateLimiters[serverID]
+	m.rateLimitMu.RUnlock()
+
+	if !exists {
+		// Get config to check for custom rate limits
+		m.mu.RLock()
+		cfg, cfgExists := m.configs[serverID]
+		m.mu.RUnlock()
+
+		// Default values if no config or config has no rate limit settings
+		rps := 10.0
+		burst := 20
+		if cfgExists && cfg.RateLimitRPS > 0 {
+			rps = cfg.RateLimitRPS
+			if cfg.RateLimitBurst > 0 {
+				burst = cfg.RateLimitBurst
+			}
+		}
+
+		limiter = rate.NewLimiter(rate.Limit(rps), burst)
+		m.rateLimitMu.Lock()
+		m.rateLimiters[serverID] = limiter
+		m.rateLimitMu.Unlock()
+	}
+
+	return limiter
 }
 
 // ServerCount returns the number of connected servers.

@@ -220,8 +220,8 @@ type Constitution struct {
 	// Authority: who this employee escalates to. Entries are agent IDs
 	// or role sentinels ("role:user", "role:oncall", or legacy bare
 	// names like "user" which are auto-normalised at load time). Empty
-	// means no escalation path; tier 2 employees with empty EscalatesTo
-	// will log a warning at load time because plans cannot be approved.
+	// means no escalation path; tier 2+ employees with empty EscalatesTo
+	// are rejected at validation time because plans cannot be approved.
 	EscalatesTo []string `json:"escalates_to"`
 
 	// Hard constraints (machine-enforced)
@@ -407,6 +407,13 @@ func (c *Constitution) Validate(selfID string) error {
 				break // one report is enough
 			}
 		}
+	}
+
+	// Tier 2+ employees must have at least one escalates_to entry for
+	// plan approval. Empty escalates_to at tier 2+ means plans will hang
+	// indefinitely waiting for approval that can never happen.
+	if c.AutonomyTier >= Tier2Propose && len(c.EscalatesTo) == 0 {
+		errs = append(errs, errors.New("tier 2+ employees must have at least one escalates_to entry for plan approval"))
 	}
 
 	// Amendment policy invariants.
@@ -614,16 +621,14 @@ func (c *Constitution) removeUnknownTools(unknown []string, allowed bool) {
 }
 
 // LogWarnings writes human-readable warnings for soft validation
-// findings (unknown tools, tier 2 with empty EscalatesTo, etc.) to the
-// given logger. Pass slog.Default() if you don't have one handy. Nil
-// logger is a no-op (defence in depth).
+// findings (unknown tools, etc.) to the given logger. Pass slog.Default()
+// if you don't have one handy. Nil logger is a no-op (defence in depth).
+//
+// Note: Tier 2+ with empty escalates_to is now a hard validation error
+// (see Validate), so it is not warned about here.
 func (c *Constitution) LogWarnings(logger *slog.Logger, employeeID string, knownToolNames map[string]struct{}) {
 	if c == nil || logger == nil {
 		return
-	}
-	if c.AutonomyTier >= Tier2Propose && len(c.EscalatesTo) == 0 {
-		logger.Warn("employee constitution: tier >=2 with empty escalates_to; plans will stall in pending approval",
-			"employee_id", employeeID)
 	}
 	unknownA, unknownF := c.CheckToolReferences(knownToolNames)
 	if len(unknownA) > 0 {

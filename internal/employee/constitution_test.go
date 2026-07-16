@@ -141,6 +141,24 @@ func TestConstitution_Validate(t *testing.T) {
 			wantErr:     true,
 			errContains: "frozen_fields",
 		},
+		{
+			name: "tier 2+ with empty escalates_to rejected",
+			mutate: func(c *Constitution) {
+				c.EscalatesTo = []string{}
+			},
+			selfID:      "emp-a",
+			wantErr:     true,
+			errContains: "tier 2+",
+		},
+		{
+			name: "tier 1 with empty escalates_to accepted",
+			mutate: func(c *Constitution) {
+				c.AutonomyTier = Tier1Reactive
+				c.EscalatesTo = []string{}
+			},
+			selfID:  "emp-a",
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {

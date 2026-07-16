@@ -42,6 +42,25 @@ func (t ReflectionTrajectory) JSON() ([]byte, error) {
 // errors 300 chars. Trajectory capped at 50 steps. A nil conversation
 // yields an empty trajectory (header fields still populated).
 func buildTrajectory(conv *Conversation, sessionID, agentID, userInput, outcome string, duration time.Duration) ReflectionTrajectory {
+	if conv == nil {
+		return ReflectionTrajectory{
+			UserInput: userInput,
+			SessionID: sessionID,
+			AgentID:   agentID,
+			Outcome:   outcome,
+			Duration:  duration,
+		}
+	}
+	messages := conv.GetMessages()
+	return buildTrajectoryFromMessages(messages, sessionID, agentID, userInput, outcome, duration)
+}
+
+// buildTrajectoryFromMessages assembles a ReflectionTrajectory from a pre-fetched
+// message snapshot. This is used by goroutines that need to avoid capturing a live
+// Conversation pointer which may be modified by subsequent turns.
+// Truncation: assistant messages 1000 chars, tool results 500 chars, errors 300 chars.
+// Trajectory capped at 50 steps.
+func buildTrajectoryFromMessages(messages []llm.ChatMessage, sessionID, agentID, userInput, outcome string, duration time.Duration) ReflectionTrajectory {
 	traj := ReflectionTrajectory{
 		UserInput: userInput,
 		SessionID: sessionID,
@@ -49,10 +68,6 @@ func buildTrajectory(conv *Conversation, sessionID, agentID, userInput, outcome 
 		Outcome:   outcome,
 		Duration:  duration,
 	}
-	if conv == nil {
-		return traj
-	}
-	messages := conv.GetMessages()
 	for _, m := range messages {
 		if len(traj.Steps) >= 50 {
 			break

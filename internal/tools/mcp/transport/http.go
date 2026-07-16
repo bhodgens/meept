@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -22,7 +23,10 @@ const (
 	MaxResponseSize = 10 * 1024 * 1024
 )
 
-func isBlockedAddress(addr string) bool {
+func isBlockedAddress(addr string, allowPrivate bool) bool {
+	if allowPrivate {
+		return false
+	}
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		host = addr
@@ -38,7 +42,7 @@ func isBlockedAddress(addr string) bool {
 		ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()
 }
 
-func checkRedirectURL(ctx context.Context, rawURL string) error {
+func checkRedirectURL(ctx context.Context, rawURL string, allowPrivate bool) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid redirect URL: %w", err)
@@ -50,7 +54,8 @@ func checkRedirectURL(ctx context.Context, rawURL string) error {
 	if host == "" {
 		return fmt.Errorf("redirect URL missing host")
 	}
-	if isBlockedAddress(host) {
+	if isBlockedAddress(host, allowPrivate) {
+		slog.Warn("ssrf: blocked direct IP attempt", "host", host)
 		return fmt.Errorf("redirect host %q is blocked", host)
 	}
 	// Use the request's context so that DNS resolution is cancelled when
@@ -64,7 +69,8 @@ func checkRedirectURL(ctx context.Context, rawURL string) error {
 		return fmt.Errorf("resolve redirect %s: %w", host, err)
 	}
 	for _, ip := range ips {
-		if isBlockedAddress(ip.IP.String()) {
+		if isBlockedAddress(ip.IP.String(), allowPrivate) {
+			slog.Warn("ssrf: blocked DNS rebind attempt", "host", host, "resolved", ip.IP)
 			return fmt.Errorf("redirect host %s resolves to blocked address %s", host, ip.IP)
 		}
 	}
@@ -79,7 +85,7 @@ func redirectChecker() func(*http.Request, []*http.Request) error {
 		if len(via) >= 5 {
 			return fmt.Errorf("too many redirects")
 		}
-		return checkRedirectURL(req.Context(), req.URL.String())
+		return checkRedirectURL(req.Context(), req.URL.String(), false)
 	}
 }
 
@@ -92,8 +98,9 @@ type HTTPTransport struct {
 	headers map[string]string
 	config  Config
 
-	client    *http.Client
-	sessionID string
+	client      *http.Client
+	sessionID   string
+	allowPrivate bool
 	running   atomic.Bool
 	mu        sync.RWMutex
 }
@@ -109,6 +116,7 @@ func NewHTTPTransport(url string, headers map[string]string, config Config) *HTT
 		url:     url,
 		headers: headers,
 		config:  config,
+		allowPrivate: false,
 		client: &http.Client{
 			Timeout: timeout,
 			Transport: &http.Transport{
@@ -125,6 +133,7 @@ func NewHTTPTransport(url string, headers map[string]string, config Config) *HTT
 func (t *HTTPTransport) SetAllowPrivateRanges(allow bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.allowPrivate = allow
 	timeout := t.client.Timeout
 	t.client = &http.Client{
 		Timeout: timeout,
@@ -146,6 +155,16 @@ func (t *HTTPTransport) Start(ctx context.Context) error {
 func (t *HTTPTransport) Send(ctx context.Context, message []byte) ([]byte, error) {
 	if !t.running.Load() {
 		return nil, fmt.Errorf("transport not running")
+	}
+
+	// Pre-check the initial URL for SSRF before making the request.
+	// This is critical because the dial-time check in ssrfDialContext happens
+	// after DNS resolution, and fast-flux DNS can return different IPs between
+	// a pre-check and dial time. We need BOTH checks:
+	// 1. Pre-check: validate the URL and its DNS resolution now
+	// 2. Dial-time: re-validate at socket connection time (ssrfDialContext)
+	if err := checkRedirectURL(ctx, t.url, t.allowPrivate); err != nil {
+		return nil, err
 	}
 
 	// Check request body size to prevent memory exhaustion
@@ -291,6 +310,12 @@ func (t *HTTPTransport) parseSSEResponse(r io.Reader) ([]byte, error) {
 func (t *HTTPTransport) SendNotification(ctx context.Context, message []byte) error {
 	if !t.running.Load() {
 		return fmt.Errorf("transport not running")
+	}
+
+	// Pre-check the initial URL for SSRF before making the request.
+	// Same dual-check pattern as Send(): pre-check + dial-time validation.
+	if err := checkRedirectURL(ctx, t.url, t.allowPrivate); err != nil {
+		return err
 	}
 
 	// Enforce the same size cap as Send to prevent memory-exhaustion via

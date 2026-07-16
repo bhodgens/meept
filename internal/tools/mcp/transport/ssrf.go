@@ -36,7 +36,7 @@ func ssrfDialContext(allowPrivate bool) func(ctx context.Context, network, addr 
 			return nil, fmt.Errorf("ssrf dial: resolve %s: %w", host, err)
 		}
 		for _, ip := range ips {
-			if isBlockedAddress(ip.IP.String()) {
+			if isBlockedAddress(ip.IP.String(), false) {
 				return nil, fmt.Errorf("ssrf dial: %s resolves to blocked address %s", host, ip.IP)
 			}
 		}

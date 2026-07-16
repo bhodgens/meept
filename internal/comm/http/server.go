@@ -356,7 +356,7 @@ func (h *WebSocketHub) Register(wc *wsConn) {
 }
 
 // Unregister removes a WebSocket client connection and closes it.
-func (h *WebSocketHub) Unregister(wc *wsConn) {
+func (h *WebSocketHub) Unregister(wc *wsConn, progressRateLimiter *progressRateLimiter) {
 	h.mu.Lock()
 	delete(h.clients, wc)
 	h.mu.Unlock()
@@ -364,6 +364,11 @@ func (h *WebSocketHub) Unregister(wc *wsConn) {
 	h.sessMu.Lock()
 	delete(h.sessionSubs, wc)
 	h.sessMu.Unlock()
+
+	// Clean up rate limiter entry to prevent memory leak
+	if progressRateLimiter != nil {
+		progressRateLimiter.remove(wc)
+	}
 
 	wc.conn.Close()
 	h.logger.Debug("ws client unregistered", "remote", wc.conn.RemoteAddr())
@@ -438,7 +443,7 @@ func (h *WebSocketHub) Broadcast(msgType string, data any) {
 	}
 
 	for _, wc := range failedConns {
-		h.Unregister(wc)
+		h.Unregister(wc, nil)
 	}
 }
 
@@ -569,11 +574,7 @@ func (s *Server) handleWSProgress(msg *models.BusMessage) {
 		}
 		if err := wc.write(payload); err != nil {
 			s.logger.Warn("ws progress write error, removing client", "error", err)
-			h.Unregister(wc)
-			// Drop the rate-limiter entry too so the map doesn't leak.
-			if s.progressRateLimiter != nil {
-				s.progressRateLimiter.remove(wc)
-			}
+			h.Unregister(wc, s.progressRateLimiter)
 		} else if s.progressRateLimiter != nil {
 			s.progressRateLimiter.recordSend(wc)
 		}
@@ -2146,7 +2147,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				s.logger.Debug("ws welcome send failed", "remote", r.RemoteAddr, "error", err)
 			}
 			defer func() {
-				s.wsHub.Unregister(wc)
+				s.wsHub.Unregister(wc, s.progressRateLimiter)
 				s.logger.Info("WebSocket client disconnected", "remote", r.RemoteAddr)
 			}()
 

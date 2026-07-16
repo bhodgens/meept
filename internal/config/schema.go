@@ -2,6 +2,7 @@
 package config
 
 import (
+	"fmt"
 	"log/slog"
 	"time"
 )
@@ -2422,4 +2423,25 @@ type HTTPHookConfig struct {
 	// AsyncRewake publishes a hook.async_rewake bus signal after successful
 	// async completion.
 	AsyncRewake bool `json:"async_rewake,omitempty"`
+}
+
+// ValidateAll validates all config sections and returns the first error encountered.
+// This should be called at daemon startup to fail fast on invalid configuration.
+func (c *Config) ValidateAll() error {
+	// Validate backup config
+	if err := c.Backup.Validate(); err != nil {
+		return fmt.Errorf("backup config: %w", err)
+	}
+
+	// Validate peer sync config
+	if err := c.PeerSync.Validate(); err != nil {
+		return fmt.Errorf("peer sync config: %w", err)
+	}
+
+	// Validate config sync config
+	if err := c.ConfigSync.Validate(); err != nil {
+		return fmt.Errorf("config sync config: %w", err)
+	}
+
+	return nil
 }

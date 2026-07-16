@@ -136,3 +136,70 @@ func TestManagerStopAll(t *testing.T) {
 		t.Errorf("expected 0 servers after StopAll, got %d", m.ServerCount())
 	}
 }
+
+func TestGetRateLimiter_Defaults(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	m := NewManager(logger)
+
+	// First call should create a new limiter with default values
+	limiter := m.getRateLimiter("test-server")
+	if limiter == nil {
+		t.Fatal("getRateLimiter returned nil")
+	}
+
+	// Default: 10 RPS, burst 20
+	// Limit() should return 10
+	if float64(limiter.Limit()) != 10.0 {
+		t.Errorf("expected default limit 10.0, got %f", limiter.Limit())
+	}
+}
+
+func TestGetRateLimiter_FromConfig(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	m := NewManager(logger)
+
+	// Set config with custom rate limits
+	m.SetConfigs([]ServerConfig{
+		{
+			Name:           "custom-server",
+			RateLimitRPS:   5.0,
+			RateLimitBurst: 10,
+		},
+	})
+
+	limiter := m.getRateLimiter("custom-server")
+	if limiter == nil {
+		t.Fatal("getRateLimiter returned nil")
+	}
+
+	if float64(limiter.Limit()) != 5.0 {
+		t.Errorf("expected custom limit 5.0, got %f", limiter.Limit())
+	}
+}
+
+func TestCallTool_RateLimitEnforced(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	m := NewManager(logger)
+
+	// Set config with very low rate limit: 1 RPS, burst of 1
+	m.SetConfigs([]ServerConfig{
+		{
+			Name:           "rate-limited-server",
+			RateLimitRPS:   1.0,
+			RateLimitBurst: 1,
+		},
+	})
+
+	// Get the limiter directly
+	limiter := m.getRateLimiter("rate-limited-server")
+	
+	// First Allow() should succeed (uses the burst)
+	if !limiter.Allow() {
+		t.Error("expected first Allow() to succeed")
+	}
+
+	// Second immediate Allow() should fail (rate limited)
+	if limiter.Allow() {
+		t.Error("expected second Allow() to be rate limited")
+	}
+}
