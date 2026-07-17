@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
@@ -50,7 +51,8 @@ type RLMAnalyzer struct {
 	llmClient     *llm.Client
 	semaphore     *PerDepthSemaphore
 	logger        *slog.Logger
-	knownTraceIDs []string // loaded on first Analyze call
+	emitter       *TelemetryEmitter // HALO-style self-tracing
+	knownTraceIDs []string          // loaded on first Analyze call
 }
 
 // NewRLMAnalyzer creates an analyzer for the given trace store.
@@ -320,6 +322,8 @@ func (a *RLMAnalyzer) executeAgent(run *analyzerRun, traceIDs []string, prompt s
 
 // invokeLLM calls the LLM client with the prompt and tool definitions.
 func (a *RLMAnalyzer) invokeLLM(ctx context.Context, run *analyzerRun, prompt string) (string, error) {
+	start := time.Now()
+
 	// Build messages similar to agent loop pattern.
 	messages := []llm.ChatMessage{
 		{Role: llm.RoleSystem, Content: "You are a trace analysis assistant. Analyze execution traces to find failure patterns."},
@@ -327,6 +331,29 @@ func (a *RLMAnalyzer) invokeLLM(ctx context.Context, run *analyzerRun, prompt st
 	}
 
 	result, err := a.llmClient.Chat(ctx, messages)
+
+	// Emit telemetry if enabled (fire-and-forget — never block main path).
+	if a.emitter != nil && a.emitter.IsEnabled() {
+		durationMs := time.Since(start).Milliseconds()
+		//nolint:errcheck // telemetry is best-effort; failures logged internally
+		_ = a.emitter.EmitLLMSpan(
+			"rlm.llm.call",
+			a.config.Model,
+			prompt,
+			result.Content,
+			result.Usage.PromptTokens,
+			result.Usage.CompletionTokens,
+		)
+		//nolint:errcheck // telemetry is best-effort; failures logged internally
+		_ = a.emitter.EmitToolSpan(
+			"llm.chat",
+			"llm_client",
+			prompt,
+			result.Content,
+			durationMs,
+		)
+	}
+
 	if err != nil {
 		return "", fmt.Errorf("chat: %w", err)
 	}
