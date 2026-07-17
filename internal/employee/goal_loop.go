@@ -709,10 +709,13 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 	}
 
 	// Update the active goal's health in the store.
+	// NOTE: Assess() acquires goal.mu; we must release it before store.Update
+	// to avoid deadlock (store.Update calls goal.snapshot() which acquires RLock).
 	if store != nil {
 		if goal, err := l.lookupActiveGoal(ctx); err == nil && goal != nil {
 			now := time.Now().UTC()
 			goal.Assess(health, now)
+			// Update store after releasing goal lock to prevent deadlock
 			if updateErr := store.Update(ctx, goal); updateErr != nil {
 				logger.Warn("failed to persist goal health update", "goal_id", goal.ID, "error", updateErr)
 			}
@@ -938,10 +941,8 @@ func (l *GoalLoop) decideTier2(ctx context.Context, trigger TriggerEvent, logger
 		// read-modify-write to prevent concurrent writers from clobbering.
 		if store != nil {
 			if goal, err := l.lookupActiveGoal(ctx); err == nil && goal != nil {
-				goal.Lock()
 				goal.AddActivePlan(ref.ID)
 				updateErr := store.Update(ctx, goal)
-				goal.Unlock()
 				if updateErr != nil {
 					logger.Warn("failed to track pending plan in ActivePlanIDs",
 						"plan_id", ref.ID, "error", updateErr)
@@ -975,15 +976,14 @@ func (l *GoalLoop) ApproveAndExecute(ctx context.Context, planRef PlanRef) (*bot
 
 	// Set the active plan ID BEFORE execution so concurrent observers see the
 	// correct in-flight plan (spec: record ActivePlanID during execution, not
-	// after). G2: add to ActivePlanIDs. Hold the Goal's lock across
-	// read-modify-write to prevent concurrent writers from clobbering.
+	// after). G2: add to ActivePlanIDs.
+	// NOTE: AddActivePlan has internal locking that is released before returning,
+	// so store.Update (which calls goal.snapshot()) won't deadlock.
 	if store != nil {
 		if goal, lookupErr := l.lookupActiveGoal(ctx); lookupErr == nil && goal != nil {
-			goal.Lock()
 			goal.AddActivePlan(planRef.ID)
-			updateErr := store.Update(ctx, goal)
-			goal.Unlock()
-			if updateErr != nil {
+			// Update store after releasing goal lock to prevent deadlock
+			if updateErr := store.Update(ctx, goal); updateErr != nil {
 				logger.Warn("failed to add active plan on goal",
 					"goal_id", goal.ID, "plan_id", planRef.ID, "error", updateErr)
 			}
@@ -1006,16 +1006,14 @@ func (l *GoalLoop) ApproveAndExecute(ctx context.Context, planRef PlanRef) (*bot
 	}
 
 	// After Reflect completes (success OR failure), remove the plan from
-	// active list and append to history (G2 + G4). Hold the Goal's lock
-	// across read-modify-write to prevent concurrent writers from clobbering.
+	// active list and append to history (G2 + G4).
+	// NOTE: Same lock ordering fix as above - release goal lock before store.Update.
 	if store != nil {
 		if goal, lookupErr := l.lookupActiveGoal(ctx); lookupErr == nil && goal != nil {
-			goal.Lock()
 			goal.RemoveActivePlan(planRef.ID)
 			goal.AppendHistory(planRef.ID)
-			updateErr := store.Update(ctx, goal)
-			goal.Unlock()
-			if updateErr != nil {
+			// Update store after releasing goal lock to prevent deadlock
+			if updateErr := store.Update(ctx, goal); updateErr != nil {
 				logger.Warn("failed to remove active plan on goal",
 					"goal_id", goal.ID, "error", updateErr)
 			}

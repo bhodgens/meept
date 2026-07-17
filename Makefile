@@ -928,3 +928,18 @@ localcert: localcert-check
 	@echo "  meept-daemon -f"
 	@echo ""
 	@echo "Your browser will now trust the certificate without warnings."
+
+.PHONY: selflock
+selflock:
+	@echo "Running selflock analyzer (detects self-deadlock patterns)..."
+	@go run ./tools/analyzers/selflock/ ./... || (echo "" && \
+		echo "SELF-DEADLOCK PATTERN DETECTED" && \
+		echo "This usually means:" && \
+		echo "  1. obj.Lock() followed by obj.MethodWithInternalLock()" && \
+		echo "  2. obj.Lock() followed by store.Update(obj) with callback" && \
+		echo "" && \
+		echo "See: .claude/skills/go-mutex-self-deadlock-store-callback/SKILL.md" && \
+		echo "     https://go.dev/doc/effective_go#concurrency" && \
+		exit 1)
+
+analyzers: selflock

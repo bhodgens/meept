@@ -220,6 +220,12 @@ type Dispatcher struct {
 	planManager       *plan.PlanManager
 	metricsStore      *metrics.Store
 
+	// toolRegistry provides structural tool gating by depth.
+	// When non-nil, the dispatcher uses it to gate depth-sensitive
+	// tools (like subagent spawn) so agents at maxDepth simply
+	// don't have them in their registry.
+	toolRegistry *DepthToolRegistry
+
 	// threadRouter handles thread-aware routing of conversations per
 	// Thread-Based Context Partitioning spec. When nil, the dispatcher
 	// operates in legacy mode (single conversation per session). Wired via
@@ -276,6 +282,11 @@ type DispatcherConfig struct {
 	// routing on high-ambiguity inputs. 0 means use the legacy const
 	// (defaultAmbiguityThreshold = 0.6 in intent_analyzer.go).
 	AmbiguityThreshold float64
+
+	// ToolRegistry provides structural depth-based tool gating.
+	// When non-nil, tools are gated so agents at maxDepth don't
+	// see spawn capabilities ("make illegal states unrepresentable").
+	ToolRegistry *DepthToolRegistry
 }
 
 // NewDispatcher creates a new dispatcher.
@@ -297,6 +308,7 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 		logger:            cfg.Logger,
 		capabilityMatcher: cfg.CapabilityMatcher,
 		planManager:       cfg.PlanManager,
+		toolRegistry:      cfg.ToolRegistry,
 	}
 
 	// Initialize model reassignment parser
@@ -1597,6 +1609,19 @@ func (d *Dispatcher) handlePlatformIntrospection(ctx context.Context, input stri
 	}
 	sb.WriteString("\n")
 
+	// Structural depth gating
+	if d.toolRegistry != nil {
+		maxDepth := d.toolRegistry.MaxDepth()
+		fmt.Fprintf(&sb, "### Depth Gating\n\n")
+		if maxDepth > 0 {
+			fmt.Fprintf(&sb, "- Maximum depth: %d\n", maxDepth)
+			fmt.Fprintf(&sb, "- At max depth, spawn tools are structurally unavailable (not registered)\n")
+		} else {
+			sb.WriteString("- No depth gating configured\n")
+		}
+		sb.WriteString("\n")
+	}
+
 	// List available skills
 	if d.skillRegistry != nil {
 		skillList := d.skillRegistry.List()
@@ -2271,6 +2296,19 @@ func (d *Dispatcher) SetMetricsStore(store *metrics.Store) {
 	if store != nil {
 		d.metricsStore = store
 	}
+}
+
+// SetToolRegistry wires a depth-based tool registry for structural gating.
+// At maxDepth the agent simply won't have spawn tools in its registry.
+func (d *Dispatcher) SetToolRegistry(reg *DepthToolRegistry) {
+	if reg != nil {
+		d.toolRegistry = reg
+	}
+}
+
+// ToolRegistry returns the depth-based tool registry, or nil if not configured.
+func (d *Dispatcher) ToolRegistry() *DepthToolRegistry {
+	return d.toolRegistry
 }
 
 // RecordDispatch logs a dispatch routing decision from the handler switch for

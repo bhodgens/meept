@@ -69,7 +69,37 @@ func (d *IssueDetector) DetectAll(ctx context.Context) ([]Issue, error) {
 	return allIssues, nil
 }
 
-// ScanLogs scans log files for errors.
+// ScanTraces runs the RLM trace analyzer over the given trace store path
+// and converts failure modes into selfimprove Issues.
+//
+// NOTE: RLM analyzer integration is deferred to avoid import cycle.
+// Trace analysis can be performed directly via agent.RLMAnalyzer.
+func (d *IssueDetector) ScanTraces(ctx context.Context, traceStorePath string) ([]Issue, error) {
+	// Stub: RLM analyzer integration deferred to avoid import cycle.
+	// Callers should use agent.RLMAnalyzer directly for trace analysis.
+	d.logger.Debug("trace analysis via RLM is deferred, use agent.RLMAnalyzer directly", "path", traceStorePath)
+	return nil, nil
+}
+
+// FailureModeToIssueType maps an RLM analyzer failure mode category to an IssueType.
+// Exported for use by external RLM analyzer callers.
+func FailureModeToIssueType(category string) IssueType {
+	switch {
+	case category == "hallucination", category == "semantic":
+		return IssueTypeError
+	case category == "refusal_loop":
+		return IssueTypeReliability
+	case category == "redundant_args":
+		return IssueTypePerformance
+	case category == "tool_error":
+		return IssueTypeReliability
+	case category == "timeout":
+		return IssueTypeReliability
+	default:
+		return IssueTypeReliability
+	}
+}
+
 func (d *IssueDetector) ScanLogs(ctx context.Context) ([]Issue, error) {
 	var issues []Issue
 

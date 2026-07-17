@@ -73,7 +73,10 @@ func (r *ReportRouter) Route(ctx context.Context, params RouteParams) RouteResul
 		"depth", params.Depth,
 	)
 
-	// Force notify at max depth to prevent infinite handoff loops
+	// Force notify at max depth to prevent infinite handoff loops.
+	// Structural tool gating (DepthToolRegistry) already ensures
+	// agents at maxDepth don't have spawn tools; this runtime check
+	// is a safety net for routing-level handoff loops.
 	if params.Depth >= r.maxDepth {
 		r.logger.Warn("max route depth reached, forcing user notification",
 			"depth", params.Depth,

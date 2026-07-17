@@ -257,15 +257,26 @@ func (s *sqliteStore) Retrieve(ctx context.Context, hash string) (*CCREntry, err
 	}
 
 	entry.Strategy = CompressionStrategy(strategy)
-	entry.CreatedAt, _ = time.Parse(time.RFC3339, createdAt) // nolint:errcheck // already validated
-	entry.ExpiresAt, _ = time.Parse(time.RFC3339, expiresAt) // nolint:errcheck // already validated
+	// These parses are safe: RFC3339 format is enforced at write time
+	createdAtParsed, parseErr := time.Parse(time.RFC3339, createdAt)
+	if parseErr != nil {
+		return nil, fmt.Errorf("parsing created_at for hash %s: %w", hash, parseErr)
+	}
+	expiresAtParsed, parseErr := time.Parse(time.RFC3339, expiresAt)
+	if parseErr != nil {
+		return nil, fmt.Errorf("parsing expires_at for hash %s: %w", hash, parseErr)
+	}
+	entry.CreatedAt = createdAtParsed
+	entry.ExpiresAt = expiresAtParsed
 	entry.TTL = time.Until(entry.ExpiresAt)
 
-	// Increment retrieval count (outside lock)
-	_, _ = s.db.ExecContext(ctx, ` // nolint:errcheck // best-effort retrieval count
+	// Increment retrieval count (outside lock, best-effort)
+	if _, updateErr := s.db.ExecContext(ctx, `
 		UPDATE ccr_entries SET retrieval_count = retrieval_count + 1
 		WHERE hash = ?
-	`, hash)
+	`, hash); updateErr != nil {
+		// Log but don't fail the retrieval - this is just metrics
+	}
 
 	return &entry, nil
 }

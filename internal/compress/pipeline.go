@@ -158,7 +158,8 @@ func (p *Pipeline) Compress(ctx context.Context, messages []Message, cfg Compres
 		result.TokensAfter += crushResult.CompressedTokens
 		result.TransformsApplied = appendUnique(result.TransformsApplied, crushResult.TransformsApplied...)
 
-		_ = hash // nolint:ineffassign // Could log for metrics
+		// hash available for CCR metrics logging if needed
+		_ = hash
 	}
 
 	result.TokensSaved = max(0, result.TokensBefore-result.TokensAfter)
