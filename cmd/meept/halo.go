@@ -214,7 +214,7 @@ func parseTurnsFromJSON(data []byte) ([]agent.Turn, error) {
 		return session.Turns, nil
 	}
 
-	return nil, fmt.Errorf("could not parse turns from JSON")
+	return nil, fmt.Errorf("parse turns: could not parse JSON - expected array of turns or object with 'turns' field")
 }
 
 func sumTurnTokens(turns []agent.Turn) int {
