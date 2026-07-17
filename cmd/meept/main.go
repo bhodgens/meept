@@ -184,6 +184,7 @@ Analytics:
 	rootCmd.AddCommand(newRoutingCmd())
 	rootCmd.AddCommand(newMigrateCmd())
 	rootCmd.AddCommand(newLearningCmd())
+	rootCmd.AddCommand(newHaloCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "\nError: %v\n\n", err)

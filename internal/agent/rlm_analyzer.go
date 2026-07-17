@@ -51,7 +51,9 @@ type RLMAnalyzer struct {
 	llmClient     *llm.Client
 	semaphore     *PerDepthSemaphore
 	logger        *slog.Logger
-	emitter       *TelemetryEmitter // HALO-style self-tracing
+	compactor     *TurnCompactor    // Phase 1: atomic tool-turn compaction
+	emitter       *TelemetryEmitter // Phase 3: HALO-style self-tracing
+	runID         string            // Phase 3: telemetry run ID
 	knownTraceIDs []string          // loaded on first Analyze call
 }
 
@@ -74,6 +76,9 @@ func NewRLMAnalyzer(cfg RLMAnalyzerConfig, store TraceStoreReader, llmClient *ll
 		llmClient: llmClient,
 		semaphore: NewPerDepthSemaphore(limits),
 		logger:    logger,
+		compactor: NewTurnCompactor(),    // Phase 1: atomic tool-turn compaction
+		emitter:   NewTelemetryEmitter(uuid.New().String()), // Phase 3: checks HALO_TELEMETRY_PATH
+		runID:     uuid.New().String(),   // Phase 3: telemetry run ID
 	}
 }
 
