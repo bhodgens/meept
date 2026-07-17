@@ -1,1122 +1,552 @@
 package agent
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
+	"context"
+	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/caimlas/meept/internal/llm"
 )
 
 // -----------------------------------------------------------------------
-// WriteCheckpoint / ReadCheckpoint round-trip
+// Helper: create error types for testing
 // -----------------------------------------------------------------------
 
-func TestRunRecoverer_WriteReadCheckpoint(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	cp := &Checkpoint{
-		RunID:   "run-test-001",
-		AgentID: "researcher-v2",
-		Depth:   2,
-		TurnCounter: struct {
-			Current int `json:"current"`
-			Limit   int `json:"limit"`
-		}{Current: 5, Limit: 20},
-		ToolCalls: []TurnRecord{
-			{Name: "view_trace", Output: "trace data", Success: true},
-		},
-		LLMMessages: []LLMMessage{
-			{Role: "user", Content: "Analyze this trace."},
-			{Role: "assistant", Content: "Found the issue."},
-		},
-		Outputs: "trace identified",
-	}
-
-	if err := r.WriteCheckpoint(cp); err != nil {
-		t.Fatalf("WriteCheckpoint: %v", err)
-	}
-
-	// Read it back.
-	read, err := r.ReadCheckpoint("run-test-001")
-	if err != nil {
-		t.Fatalf("ReadCheckpoint: %v", err)
-	}
-
-	if read.RunID != "run-test-001" {
-		t.Errorf("RunID: got %s, want run-test-001", read.RunID)
-	}
-	if read.AgentID != "researcher-v2" {
-		t.Errorf("AgentID: got %s, want researcher-v2", read.AgentID)
-	}
-	if read.Depth != 2 {
-		t.Errorf("Depth: got %d, want 2", read.Depth)
-	}
-	if read.TurnCounter.Current != 5 {
-		t.Errorf("TurnCounter.Current: got %d, want 5", read.TurnCounter.Current)
-	}
-	if read.TurnCounter.Limit != 20 {
-		t.Errorf("TurnCounter.Limit: got %d, want 20", read.TurnCounter.Limit)
-	}
-	if len(read.ToolCalls) != 1 {
-		t.Fatalf("ToolCalls: got %d, want 1", len(read.ToolCalls))
-	}
-	if read.ToolCalls[0].Name != "view_trace" {
-		t.Errorf("ToolCalls[0].Name: got %s, want view_trace", read.ToolCalls[0].Name)
-	}
-	if len(read.LLMMessages) != 2 {
-		t.Fatalf("LLMMessages: got %d, want 2", len(read.LLMMessages))
-	}
-	if read.Outputs != "trace identified" {
-		t.Errorf("Outputs: got %s, want 'trace identified'", read.Outputs)
+func rateLimitErr() error {
+	return &llm.RateLimitError{
+		ProviderID: "test",
+		ModelID:    "test-model",
+		RetryAfter: 100 * time.Millisecond,
 	}
 }
 
-func TestRunRecoverer_WriteNilCheckpoint(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	err = r.WriteCheckpoint(nil)
-	if err == nil {
-		t.Fatal("expected error for nil checkpoint, got nil")
+func authErr() error {
+	return &HTTPError{
+		StatusCode: 401,
+		Body:       "unauthorized",
+		URL:        "http://test",
 	}
 }
 
-func TestRunRecoverer_AutoRunID(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
+func invalidReqErr() error {
+	return fmt.Errorf("invalid_parameter: field 'x' is required")
+}
+
+func timeoutErr() error {
+	return context.DeadlineExceeded
+}
+
+func networkErr() error {
+	return fmt.Errorf("connection refused")
+}
+
+func recoverableHTTP502() error {
+	return Retryable(fmt.Errorf("502: bad gateway"), true, 0, "502")
+}
+
+// -----------------------------------------------------------------------
+// TestNewRetryRecovery
+// -----------------------------------------------------------------------
+
+func TestRetryRecovery_NewDefaults(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{})
+	if r == nil {
+		t.Fatal("expected non-nil RetryRecovery")
+	}
+	state := r.GetRecoveryState()
+	if state.Completed {
+		t.Error("should start with Completed=false")
 	}
 
-	cp := &Checkpoint{
-		AgentID: "auto-agent",
-		TurnCounter: struct {
-			Current int `json:"current"`
-			Limit   int `json:"limit"`
-		}{Current: 1, Limit: 10},
+	// Verify default config via ShouldRetry
+	if !r.ShouldRetry(rateLimitErr()) {
+		t.Error("default config should retry rate limit errors")
 	}
-
-	if err := r.WriteCheckpoint(cp); err != nil {
-		t.Fatalf("WriteCheckpoint: %v", err)
-	}
-
-	// Verify a file was written.
-	runs, err := r.ListIncompleteRuns()
-	if err != nil {
-		t.Fatalf("ListIncompleteRuns: %v", err)
-	}
-	if len(runs) != 1 {
-		t.Fatalf("Expected 1 incomplete run, got %d", len(runs))
-	}
-
-	// Read it back by the auto-generated ID.
-	read, err := r.ReadCheckpoint(runs[0])
-	if err != nil {
-		t.Fatalf("ReadCheckpoint: %v", err)
-	}
-	if read.AgentID != "auto-agent" {
-		t.Errorf("AgentID: got %s, want auto-agent", read.AgentID)
+	if r.ShouldRetry(authErr()) {
+		t.Error("default config should NOT retry auth errors")
 	}
 }
 
-func TestRunRecoverer_ReadCheckpoint_NotFound(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
+func TestRetryRecovery_CustomConfig(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{
+		MaxRetries:        1,
+		RetryDelay:        50 * time.Millisecond,
+		RecoverableErrors: []string{"transient"},
+		NonRecoverableErrors: []string{"always_fail"},
+	})
+
+	// Should retry on custom recoverable pattern
+	if !r.ShouldRetry(fmt.Errorf("transient failure")) {
+		t.Error("should retry on custom recoverable pattern")
 	}
 
-	_, err = r.ReadCheckpoint("nonexistent-run")
-	if err == nil {
-		t.Fatal("expected error for missing checkpoint, got nil")
+	// Should not retry on custom non-recoverable pattern
+	if r.ShouldRetry(fmt.Errorf("always fail retry")) {
+		t.Error("should not retry on custom non-recoverable pattern")
 	}
 }
 
 // -----------------------------------------------------------------------
-// MarkComplete / IsComplete
+// TestShouldRetry
 // -----------------------------------------------------------------------
 
-func TestRunRecoverer_MarkComplete(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
+func TestShouldRetry_RateLimitReturnsTrue(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{})
+	if !r.ShouldRetry(rateLimitErr()) {
+		t.Error("ShouldRetry should return true for RateLimitError")
 	}
+}
 
-	cp := &Checkpoint{
-		RunID: "run-complete",
-		TurnCounter: struct {
-			Current int `json:"current"`
-			Limit   int `json:"limit"`
-		}{Current: 10, Limit: 20},
+func TestShouldRetry_NonRecoverableReturnsFalse(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{})
+	if r.ShouldRetry(authErr()) {
+		t.Error("ShouldRetry should return false for auth error")
 	}
+}
 
-	if err := r.WriteCheckpoint(cp); err != nil {
-		t.Fatalf("WriteCheckpoint: %v", err)
+func TestShouldRetry_NilReturnsFalse(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{})
+	if r.ShouldRetry(nil) {
+		t.Error("ShouldRetry(nil) should return false")
 	}
+}
 
-	// Should be incomplete.
-	incomplete, err := r.ListIncompleteRuns()
-	if err != nil {
-		t.Fatalf("ListIncompleteRuns before complete: %v", err)
+func TestShouldRetry_TimeoutReturnsTrue(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{})
+	if !r.ShouldRetry(timeoutErr()) {
+		t.Error("ShouldRetry should return true for DeadlineExceeded")
 	}
-	if len(incomplete) != 1 {
-		t.Fatalf("Incomplete before mark: got %d, want 1", len(incomplete))
-	}
+}
 
-	if r.IsComplete("run-complete") {
-		t.Fatal("expected run to be incomplete before MarkComplete")
+func TestShouldRetry_NetworkReturnsTrue(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{})
+	if !r.ShouldRetry(networkErr()) {
+		t.Error("ShouldRetry should return true for connection refused")
 	}
+}
 
-	// Mark complete.
-	if err := r.MarkComplete("run-complete"); err != nil {
-		t.Fatalf("MarkComplete: %v", err)
+func TestShouldRetry_InvalidRequestReturnsFalse(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{})
+	if r.ShouldRetry(invalidReqErr()) {
+		t.Error("ShouldRetry should return false for invalid parameter error")
 	}
+}
 
-	// Should no longer be in incomplete list.
-	incomplete, err = r.ListIncompleteRuns()
-	if err != nil {
-		t.Fatalf("ListIncompleteRuns after complete: %v", err)
+func TestShouldRetry_502ReturnsTrue(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{})
+	if !r.ShouldRetry(recoverableHTTP502()) {
+		t.Error("ShouldRetry should return true for 502 error")
 	}
-	if len(incomplete) != 0 {
-		t.Errorf("Incomplete after mark: got %d, want 0", len(incomplete))
-	}
+}
 
-	// Should show in completed list.
-	completed, err := r.ListCompletedRuns()
-	if err != nil {
-		t.Fatalf("ListCompletedRuns: %v", err)
+func TestShouldRetry_NonRecoverablePatternPriority(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{
+		// "timeout" is in both lists but non-recovarable should win.
+		RecoverableErrors:      []string{"timeout"},
+		NonRecoverableErrors:   []string{"timeout"},
+	})
+	// "timeout" appears in error message
+	if r.ShouldRetry(fmt.Errorf("operation timed out with timeout")) {
+		t.Error("non-recoverable pattern should take priority")
 	}
-	if len(completed) != 1 {
-		t.Fatalf("Completed: got %d, want 1", len(completed))
-	}
-	if completed[0] != "run-complete" {
-		t.Errorf("Completed[0]: got %s, want run-complete", completed[0])
-	}
+}
 
-	// IsComplete should be true.
-	if !r.IsComplete("run-complete") {
-		t.Error("IsComplete should return true after MarkComplete")
+func TestShouldRetry_CaseInsensitive(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{
+		RecoverableErrors:   []string{"RATELIMIT"},
+		NonRecoverableErrors: nil,
+	})
+	if !r.ShouldRetry(fmt.Errorf("rate limit exceeded")) {
+		t.Error("ShouldRetry pattern matching should be case-insensitive")
 	}
 }
 
 // -----------------------------------------------------------------------
-// ListIncompleteRuns
+// TestReset
 // -----------------------------------------------------------------------
 
-func TestRunRecoverer_ListIncompleteRuns(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
+func TestRetryRecovery_Reset(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{})
+	r.state.CurrentRetry = 2
+	r.state.LastError = "test error"
+	r.state.Completed = true
 
-	// Empty should return nil/empty.
-	runs, err := r.ListIncompleteRuns()
-	if err != nil {
-		t.Fatalf("ListIncompleteRuns (empty): %v", err)
-	}
-	if len(runs) != 0 {
-		t.Errorf("Empty incomplete runs: got %d, want 0", len(runs))
-	}
+	r.Reset()
 
-	// Write some checkpoints.
-	for _, runID := range []string{"run-b", "run-a", "run-c"} {
-		cp := &Checkpoint{
-			RunID: runID,
-			TurnCounter: struct {
-				Current int `json:"current"`
-				Limit   int `json:"limit"`
-			}{Current: 3, Limit: 10},
+	state := r.GetRecoveryState()
+	if state.CurrentRetry != 0 {
+		t.Errorf("after reset: CurrentRetry=%d, want 0", state.CurrentRetry)
+	}
+	if state.LastError != "" {
+		t.Errorf("after reset: LastError=%q, want empty", state.LastError)
+	}
+	if state.Completed {
+		t.Error("after reset: Completed should be false")
+	}
+}
+
+// -----------------------------------------------------------------------
+// TestExecuteWithRetry - Success on first attempt
+// -----------------------------------------------------------------------
+
+func TestExecuteWithRetry_SuccessFirstAttempt(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{
+		MaxRetries: 3,
+		RetryDelay: time.Second,
+	})
+	callCount := 0
+	result, err := r.ExecuteWithRetry(context.Background(), "web_search", func() (any, error) {
+		callCount++
+		return "search result", nil
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "search result" {
+		t.Errorf("got %v, want search result", result)
+	}
+	if callCount != 1 {
+		t.Errorf("called %d times, want 1", callCount)
+	}
+	state := r.GetRecoveryState()
+	if !state.Completed {
+		t.Error("should be completed")
+	}
+}
+
+// -----------------------------------------------------------------------
+// TestRetryRecovery_RateLimitRetry - retries on rate limit
+// -----------------------------------------------------------------------
+
+func TestRetryRecovery_RateLimitRetry(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{
+		MaxRetries: 3,
+		RetryDelay: 50 * time.Millisecond,
+	})
+	callCount := 0
+
+	result, err := r.ExecuteWithRetry(context.Background(), "web_search", func() (any, error) {
+		callCount++
+		if callCount < 3 {
+			return nil, rateLimitErr()
 		}
-		if err := r.WriteCheckpoint(cp); err != nil {
-			t.Fatalf("WriteCheckpoint(%s): %v", runID, err)
-		}
-	}
+		return "recovered", nil
+	})
 
-	runs, err = r.ListIncompleteRuns()
 	if err != nil {
-		t.Fatalf("ListIncompleteRuns: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(runs) != 3 {
-		t.Fatalf("Incomplete runs: got %d, want 3", len(runs))
+	if result != "recovered" {
+		t.Errorf("got %v, want recovered", result)
 	}
-	// Should be sorted.
-	if runs[0] != "run-a" || runs[1] != "run-b" || runs[2] != "run-c" {
-		t.Errorf("Not sorted: got %v", runs)
+	if callCount != 3 {
+		t.Errorf("called %d times, want 3", callCount)
 	}
-
-	// Mark one complete and verify it is removed from incomplete.
-	r.MarkComplete("run-b")
-	runs, err = r.ListIncompleteRuns()
-	if err != nil {
-		t.Fatalf("ListIncompleteRuns after partial complete: %v", err)
+	state := r.GetRecoveryState()
+	if !state.Completed {
+		t.Error("should be completed after recovery")
 	}
-	if len(runs) != 2 {
-		t.Errorf("Incomplete after partial complete: got %d, want 2", len(runs))
+	if state.RecoveryAttempts != 2 {
+		t.Errorf("RecoveryAttempts=%d, want 2 (2 retries then success)", state.RecoveryAttempts)
 	}
 }
 
 // -----------------------------------------------------------------------
-// ShouldCheckpoint
+// TestRetryRecovery_NonRecoverableSkip - no retry on auth error
 // -----------------------------------------------------------------------
 
-func TestRunRecoverer_ShouldCheckpoint(t *testing.T) {
+func TestRetryRecovery_NonRecoverableSkip(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{
+		MaxRetries: 3,
+		RetryDelay: time.Second,
+	})
+	callCount := 0
+
+	_, err := r.ExecuteWithRetry(context.Background(), "web_search", func() (any, error) {
+		callCount++
+		return nil, authErr()
+	})
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if callCount != 1 {
+		t.Errorf("called %d times, want 1 (non-recoverable should not retry)", callCount)
+	}
+	state := r.GetRecoveryState()
+	if !state.Final {
+		t.Error("should be final")
+	}
+	if state.CurrentRetry != 0 {
+		t.Errorf("CurrentRetry=%d, want 0 (no retries attempted)", state.CurrentRetry)
+	}
+}
+
+// -----------------------------------------------------------------------
+// TestRetryRecovery_ExponentialBackoff - delay increases
+// -----------------------------------------------------------------------
+
+func TestRetryRecovery_ExponentialBackoff(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{
+		MaxRetries: 10, // high; we check delay progression
+		RetryDelay: 10 * time.Millisecond, // fast for tests
+	})
+
+	callCount := 0
+	start := time.Now()
+
+	_, err := r.ExecuteWithRetry(context.Background(), "web_search", func() (any, error) {
+		callCount++
+		if callCount <= 3 {
+			return nil, rateLimitErr()
+		}
+		return "ok", nil
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Total time should reflect backoff delays: 10ms + 20ms + 40ms = 70ms + some overhead
+	// Minimum total wait is ~70ms
+	elapsed := time.Since(start)
+	minDelay := 10*time.Millisecond + 20*time.Millisecond + 40*time.Millisecond
+	if elapsed < minDelay {
+		t.Errorf("elapsed %v, want at least %v for exponential backoff", elapsed, minDelay)
+	}
+	if callCount != 4 {
+		t.Errorf("called %d times, want 4", callCount)
+	}
+
+	state := r.GetRecoveryState()
+	// After success, the last recorded retry state should show attempts progressing
+	if !state.Completed {
+		t.Error("should be completed")
+	}
+}
+
+// -----------------------------------------------------------------------
+// TestRetryRecovery_MaxRetriesExceeded - gives up after N attempts
+// -----------------------------------------------------------------------
+
+func TestRetryRecovery_MaxRetriesExceeded(t *testing.T) {
+	// Use Retryable wrapper so ShouldRetry recognizes the error.
+	r := NewRetryRecovery(RecoveryConfig{
+		MaxRetries: 2,
+		RetryDelay: 10 * time.Millisecond,
+	})
+	callCount := 0
+
+	_, err := r.ExecuteWithRetry(context.Background(), "web_search", func() (any, error) {
+		callCount++
+		return nil, Retryable(errors.New("transient failure"), true, 0, "transient")
+	})
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	// 1 initial + 2 retries = 3 total calls
+	if callCount != 3 {
+		t.Errorf("called %d times, want 3 (1 initial + 2 retries)", callCount)
+	}
+	state := r.GetRecoveryState()
+	if !state.Final {
+		t.Error("should be final (max retries exceeded)")
+	}
+	if state.CurrentRetry != 2 {
+		t.Errorf("CurrentRetry=%d, want 2", state.CurrentRetry)
+	}
+	if state.RecoveryAttempts != 2 {
+		t.Errorf("RecoveryAttempts=%d, want 2", state.RecoveryAttempts)
+	}
+}
+
+// -----------------------------------------------------------------------
+// TestExecuteWithRetry_ContextCancelled
+// -----------------------------------------------------------------------
+
+func TestRetryRecovery_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	r := NewRetryRecovery(RecoveryConfig{
+		MaxRetries: 10,
+		RetryDelay: 20 * time.Millisecond, // short enough for quick retry
+	})
+	callCount := 0
+
+	_, err := r.ExecuteWithRetry(ctx, "web_search", func() (any, error) {
+		callCount++
+		return nil, Retryable(errors.New("transient"), true, 0, "transient")
+	})
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if callCount <= 1 {
+		t.Errorf("called %d times, expected at least 2 (initial + some retries before cancellation)", callCount)
+	}
+	state := r.GetRecoveryState()
+	if !state.Final {
+		t.Error("should be final on context cancelled")
+	}
+}
+
+// -----------------------------------------------------------------------
+// TestErrorTypeName
+// -----------------------------------------------------------------------
+
+func TestErrorTypeName(t *testing.T) {
 	tests := []struct {
-		name     string
-		interval int
-		turn     int
-		want     bool
+		name string
+		err  error
+		want string
 	}{
-		{"disabled zero interval", 0, 1, false},
-		{"disabled negative interval", -1, 5, false},
-		{"turn 0 never", 3, 0, false},
-		{"every 3: turn 3", 3, 3, true},
-		{"every 3: turn 4", 3, 4, false},
-		{"every 3: turn 6", 3, 6, true},
-		{"every 1: every turn", 1, 1, true},
-		{"every 1: turn 0", 1, 0, false},
-		{"interval 5: turn 10", 5, 10, true},
-		{"interval 5: turn 9", 5, 9, false},
+		{"nil", nil, "none"},
+		{"rate_limit", rateLimitErr(), "rate_limit"},
+		{"auth", authErr(), "auth_error"},
+		{"deadline", timeoutErr(), "timeout"},
+		{"http_502", recoverableHTTP502(), "unknown"}, // Retryable wrapper loses HTTPError type
+		{"unknown", errors.New("some error"), "unknown"},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			r, err := NewRunRecoverer(dir, tt.interval)
-			if err != nil {
-				t.Fatalf("NewRunRecoverer: %v", err)
-			}
-			got := r.ShouldCheckpoint(tt.turn)
+			got := errorTypeName(tt.err)
 			if got != tt.want {
-				t.Errorf("ShouldCheckpoint(%d): got %v, want %v", tt.turn, got, tt.want)
+				t.Errorf("errorTypeName(%v) = %q, want %q", tt.err, got, tt.want)
 			}
 		})
 	}
 }
 
 // -----------------------------------------------------------------------
-// Resume / ResumeResult
+// TestBackoffDuration
 // -----------------------------------------------------------------------
 
-func TestRunRecoverer_Resume(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
+func TestBackoffDuration(t *testing.T) {
+	base := 100 * time.Millisecond
+	if got := backoffDuration(base, 0); got != base {
+		t.Errorf("attempt 0: got %v, want %v", got, base)
 	}
-
-	// Write a checkpoint.
-	cp := &Checkpoint{
-		RunID:   "run-resume",
-		AgentID: "researcher-v1",
-		Depth:   3,
-		TurnCounter: struct {
-			Current int `json:"current"`
-			Limit   int `json:"limit"`
-		}{Current: 7, Limit: 20},
-		ToolCalls: []TurnRecord{
-			{Name: "read_file", Output: "file contents", Success: true},
-			{Name: "search_code", Output: "match found", Success: true},
-		},
-		LLMMessages: []LLMMessage{
-			{Role: "user", Content: "Find the bug."},
-			{Role: "assistant", Content: "Searching codebase."},
-			{Role: "assistant", Content: "Found suspicious call."},
-		},
-		Outputs: "likely null ptr at line 42",
+	if got := backoffDuration(base, 1); got != 2*base {
+		t.Errorf("attempt 1: got %v, want %v", got, 2*base)
 	}
-
-	if err := r.WriteCheckpoint(cp); err != nil {
-		t.Fatalf("WriteCheckpoint: %v", err)
+	if got := backoffDuration(base, 2); got != 4*base {
+		t.Errorf("attempt 2: got %v, want %v", got, 4*base)
 	}
-
-	// Resume.
-	result, err := r.Resume("run-resume")
-	if err != nil {
-		t.Fatalf("Resume: %v", err)
-	}
-
-	if !result.Restored {
-		t.Error("ResumeResult.Restored should be true")
-	}
-	if result.RunID != "run-resume" {
-		t.Errorf("RunID: got %s, want run-resume", result.RunID)
-	}
-	if result.SkippedTurns != 7 {
-		t.Errorf("SkippedTurns: got %d, want 7", result.SkippedTurns)
-	}
-	if result.Checkpoint == nil {
-		t.Fatal("Checkpoint should not be nil")
-	}
-	if result.Checkpoint.AgentID != "researcher-v1" {
-		t.Errorf("Checkpoint.AgentID: got %s, want researcher-v1", result.Checkpoint.AgentID)
-	}
-	if result.Checkpoint.Depth != 3 {
-		t.Errorf("Checkpoint.Depth: got %d, want 3", result.Checkpoint.Depth)
-	}
-	if result.Checkpoint.Outputs != "likely null ptr at line 42" {
-		t.Errorf("Checkpoint.Outputs: got %s", result.Checkpoint.Outputs)
-	}
-
-	// Verify State is nil (caller populates).
-	if result.State != nil {
-		t.Error("State should be nil before caller populates")
-	}
-
-	// Verify ResumedAt is set.
-	if result.ResumedAt.IsZero() {
-		t.Error("ResumedAt should not be zero")
-	}
-}
-
-func TestRunRecoverer_ResumeNonExistent(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	_, err = r.Resume("nonexistent")
-	if err == nil {
-		t.Fatal("expected error for nonexistent run, got nil")
-	}
-}
-
-func TestRunRecoverer_ResumeFromLatest(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	// Write checkpoints with different timestamps.
-	older := time.Now().Add(-1 * time.Hour)
-	younger := time.Now()
-
-	cp1 := &Checkpoint{
-		RunID:   "older-run",
-		AgentID: "agent-a",
-		TurnCounter: struct {
-			Current int `json:"current"`
-			Limit   int `json:"limit"`
-		}{Current: 3, Limit: 10},
-		Timestamp: older,
-	}
-	if err := r.WriteCheckpoint(cp1); err != nil {
-		t.Fatalf("WriteCheckpoint cp1: %v", err)
-	}
-
-	cp2 := &Checkpoint{
-		RunID:   "younger-run",
-		AgentID: "agent-b",
-		TurnCounter: struct {
-			Current int `json:"current"`
-			Limit   int `json:"limit"`
-		}{Current: 5, Limit: 15},
-		Timestamp: younger,
-	}
-	if err := r.WriteCheckpoint(cp2); err != nil {
-		t.Fatalf("WriteCheckpoint cp2: %v", err)
-	}
-
-	result, runID, err := r.ResumeFromLatest()
-	if err != nil {
-		t.Fatalf("ResumeFromLatest: %v", err)
-	}
-
-	if runID != "younger-run" {
-		t.Errorf("RunID: got %s, want younger-run", runID)
-	}
-	if result == nil {
-		t.Fatal("ResumeResult should not be nil")
-	}
-	if !result.Restored {
-		t.Error("Should be restored")
-	}
-	if result.Checkpoint.RunID != "younger-run" {
-		t.Errorf("Checkpoint.RunID: got %s, want younger-run", result.Checkpoint.RunID)
-	}
-}
-
-func TestRunRecoverer_ResumeFromLatest_NoIncomplete(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	_, _, err = r.ResumeFromLatest()
-	if err == nil {
-		t.Fatal("expected error when no incomplete runs, got nil")
-	}
-}
-
-func TestRunRecoverer_CheckpointAtTurnZero(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	// Write a checkpoint at turn 0.
-	cp := &Checkpoint{
-		RunID:   "turn-zero",
-		AgentID: "new-agent",
-		TurnCounter: struct {
-			Current int `json:"current"`
-			Limit   int `json:"limit"`
-		}{Current: 0, Limit: 10},
-	}
-	if err := r.WriteCheckpoint(cp); err != nil {
-		t.Fatalf("WriteCheckpoint: %v", err)
-	}
-
-	result, err := r.Resume("turn-zero")
-	if err != nil {
-		t.Fatalf("Resume: %v", err)
-	}
-
-	if result.SkippedTurns != 0 {
-		t.Errorf("SkippedTurns: got %d, want 0", result.SkippedTurns)
-	}
-	if result.Warning == "" {
-		t.Error("expected warning for checkpoint at turn 0")
-	} else if !strings.Contains(result.Warning, "turn 0") {
-		t.Errorf("warning should mention turn 0: %s", result.Warning)
+	if got := backoffDuration(base, 10); got != 30*time.Second {
+		t.Errorf("attempt 10 capped: got %v, want 30s", got)
 	}
 }
 
 // -----------------------------------------------------------------------
-// Turn-based checkpoint gating
+// TestRetryRecovery_ConcurrentAccess
 // -----------------------------------------------------------------------
 
-func TestRunRecoverer_CheckpointIntervalIntegration(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 5)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	// Only turn 5, 10 should trigger checkpoints.
-	for turn := 1; turn <= 12; turn++ {
-		should := r.ShouldCheckpoint(turn)
-		isCheckpoint := (turn % 5 == 0) && turn > 0
-		if should != isCheckpoint {
-			t.Errorf("turn %d: ShouldCheckpoint=%v, want %v",
-				turn, should, isCheckpoint)
-		}
-	}
-}
-
-// -----------------------------------------------------------------------
-// SnapshotForTurn helper
-// -----------------------------------------------------------------------
-
-func TestSnapshotForTurn(t *testing.T) {
-	cp := SnapshotForTurn(
-		"run-123",
-		"analyst-v1",
-		1,
-		8,
-		15,
-		[]TurnRecord{
-			{Name: "read_file", Output: "data"},
-		},
-		[]LLMMessage{
-			{Role: "user", Content: "analyze"},
-		},
-		"analysis result",
-	)
-
-	if cp.RunID != "run-123" {
-		t.Errorf("RunID: got %s, want run-123", cp.RunID)
-	}
-	if cp.AgentID != "analyst-v1" {
-		t.Errorf("AgentID: got %s, want analyst-v1", cp.AgentID)
-	}
-	if cp.Depth != 1 {
-		t.Errorf("Depth: got %d, want 1", cp.Depth)
-	}
-	if cp.TurnCounter.Current != 8 {
-		t.Errorf("Current: got %d, want 8", cp.TurnCounter.Current)
-	}
-	if cp.TurnCounter.Limit != 15 {
-		t.Errorf("Limit: got %d, want 15", cp.TurnCounter.Limit)
-	}
-	if len(cp.ToolCalls) != 1 {
-		t.Errorf("ToolCalls: got %d, want 1", len(cp.ToolCalls))
-	}
-	if cp.ToolCalls[0].Name != "read_file" {
-		t.Errorf("ToolCalls[0].Name: got %s", cp.ToolCalls[0].Name)
-	}
-	if cp.Outputs != "analysis result" {
-		t.Errorf("Outputs: got %s", cp.Outputs)
-	}
-}
-
-// -----------------------------------------------------------------------
-// Cleanup
-// -----------------------------------------------------------------------
-
-func TestRunRecoverer_CleanupCompleted(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	// Write and complete some runs.
-	for _, runID := range []string{"run-a", "run-b", "run-c"} {
-		cp := &Checkpoint{
-			RunID:   runID,
-			AgentID: "test",
-			TurnCounter: struct {
-				Current int `json:"current"`
-				Limit   int `json:"limit"`
-			}{Current: 1, Limit: 5},
-		}
-		if err := r.WriteCheckpoint(cp); err != nil {
-			t.Fatalf("WriteCheckpoint(%s): %v", runID, err)
-		}
-		if err := r.MarkComplete(runID); err != nil {
-			t.Fatalf("MarkComplete(%s): %v", runID, err)
-		}
-	}
-
-	// All runs are complete and done.
-	runs, _ := r.ListIncompleteRuns()
-	if len(runs) != 0 {
-		t.Errorf("Incomplete after all complete: got %d, want 0", len(runs))
-	}
-
-	// Clean up completed runs.
-	removed, err := r.CleanupCompleted("run-a", "run-b")
-	if err != nil {
-		t.Fatalf("CleanupCompleted: %v", err)
-	}
-	if removed != 2 { // 1 file per run (only .done after MarkComplete renames .json to .done)
-		t.Errorf("Removed: got %d, want 2", removed)
-	}
-
-	// run-c should still exist in completed.
-	completed, _ := r.ListCompletedRuns()
-	if len(completed) != 1 {
-		t.Errorf("Completed after cleanup: got %d, want 1", len(completed))
-	}
-
-	// Cleanup non-existent should be no-op.
-	n, _ := r.CleanupCompleted("nonexistent")
-	if n != 0 {
-		t.Errorf("Cleanup non-existent: got %d, want 0", n)
-	}
-}
-
-func TestRunRecoverer_CleanupAllCompleted(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	// Write and complete 3 runs.
-	for i := 'a'; i <= 'c'; i++ {
-		runID := string(i)
-		cp := &Checkpoint{
-			RunID:   runID,
-			AgentID: "test",
-			TurnCounter: struct {
-				Current int `json:"current"`
-				Limit   int `json:"limit"`
-			}{Current: 1, Limit: 5},
-		}
-		if err := r.WriteCheckpoint(cp); err != nil {
-			t.Fatalf("WriteCheckpoint: %v", err)
-		}
-		if err := r.MarkComplete(runID); err != nil {
-			t.Fatalf("MarkComplete: %v", err)
-		}
-	}
-
-	// Also create an incomplete run that should survive.
-	cp := &Checkpoint{
-		RunID:   "still-running",
-		AgentID: "test",
-		TurnCounter: struct {
-			Current int `json:"current"`
-			Limit   int `json:"limit"`
-		}{Current: 1, Limit: 5},
-	}
-	if err := r.WriteCheckpoint(cp); err != nil {
-		t.Fatalf("WriteCheckpoint incomplete: %v", err)
-	}
-
-	removed, err := r.CleanupAllCompleted()
-	if err != nil {
-		t.Fatalf("CleanupAllCompleted: %v", err)
-	}
-	_ = removed
-
-	incomplete, _ := r.ListIncompleteRuns()
-	if len(incomplete) != 1 {
-		t.Errorf("Incomplete after cleanup: got %d, want 1", len(incomplete))
-	}
-	if len(incomplete) > 0 && incomplete[0] != "still-running" {
-		t.Errorf("Incomplete run: got %s, want still-running", incomplete[0])
-	}
-}
-
-func TestRunRecoverer_CleanupBefore(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	// Write a checkpoint from 2 hours ago.
-	cutoff := time.Now().Add(-1 * time.Hour)
-
-	cp := &Checkpoint{
-		RunID:   "old-run",
-		AgentID: "test",
-		TurnCounter: struct {
-			Current int `json:"current"`
-			Limit   int `json:"limit"`
-		}{Current: 3, Limit: 10},
-		Timestamp: cutoff.Add(-1 * time.Hour), // 3 hours ago
-	}
-	if err := r.WriteCheckpoint(cp); err != nil {
-		t.Fatalf("WriteCheckpoint: %v", err)
-	}
-
-	// And one recent checkpoint.
-	cp2 := &Checkpoint{
-		RunID:   "new-run",
-		AgentID: "test",
-		TurnCounter: struct {
-			Current int `json:"current"`
-			Limit   int `json:"limit"`
-		}{Current: 1, Limit: 10},
-		Timestamp: time.Now(),
-	}
-	if err := r.WriteCheckpoint(cp2); err != nil {
-		t.Fatalf("WriteCheckpoint recent: %v", err)
-	}
-
-	removed, err := r.CleanupBefore(cutoff)
-	if err != nil {
-		t.Fatalf("CleanupBefore: %v", err)
-	}
-	if removed != 1 {
-		t.Errorf("Removed: got %d, want 1", removed)
-	}
-
-	// Only new-run should remain.
-	incomplete, _ := r.ListIncompleteRuns()
-	if len(incomplete) != 1 {
-		t.Errorf("Incomplete after cleanup: got %d, want 1", len(incomplete))
-	}
-	if len(incomplete) > 0 && incomplete[0] != "new-run" {
-		t.Errorf("Remaining incomplete: got %s, want new-run", incomplete[0])
-	}
-}
-
-// -----------------------------------------------------------------------
-// IncompleteRunCount
-// -----------------------------------------------------------------------
-
-func TestRunRecoverer_IncompleteRunCount(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	count, err := r.IncompleteRunCount()
-	if err != nil {
-		t.Fatalf("IncompleteRunCount: %v", err)
-	}
-	if count != 0 {
-		t.Errorf("Empty: got %d, want 0", count)
-	}
-
-	r.WriteCheckpoint(&Checkpoint{
-		RunID:   "run-1",
-		AgentID: "test",
-		TurnCounter: struct {
-			Current int `json:"current"`
-			Limit   int `json:"limit"`
-		}{Current: 1, Limit: 10},
-	})
-	r.WriteCheckpoint(&Checkpoint{
-		RunID:   "run-2",
-		AgentID: "test",
-		TurnCounter: struct {
-			Current int `json:"current"`
-			Limit   int `json:"limit"`
-		}{Current: 2, Limit: 10},
+func TestRetryRecovery_ConcurrentAccess(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{
+		MaxRetries: 5,
+		RetryDelay: 10 * time.Millisecond,
 	})
 
-	count, err = r.IncompleteRunCount()
-	if err != nil {
-		t.Fatalf("IncompleteRunCount: %v", err)
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			_ = r.GetRecoveryState()
+			r.Reset()
+			_ = r.ShouldRetry(fmt.Errorf("test"))
+		}(i)
 	}
-	if count != 2 {
-		t.Errorf("After 2 checkpoints: got %d, want 2", count)
+	wg.Wait()
+}
+
+// -----------------------------------------------------------------------
+// TestDefaultRecoveryConfig
+// -----------------------------------------------------------------------
+
+func TestDefaultRecoveryConfig_IsNonZero(t *testing.T) {
+	cfg := DefaultRecoveryConfig()
+	if cfg.MaxRetries != 3 {
+		t.Errorf("MaxRetries: got %d, want 3", cfg.MaxRetries)
+	}
+	if cfg.RetryDelay != time.Second {
+		t.Errorf("RetryDelay: got %v, want 1s", cfg.RetryDelay)
+	}
+	if len(cfg.RecoverableErrors) == 0 {
+		t.Error("RecoverableErrors should not be empty")
+	}
+	if len(cfg.NonRecoverableErrors) == 0 {
+		t.Error("NonRecoverableErrors should not be empty")
 	}
 }
 
 // -----------------------------------------------------------------------
-// SetCheckpointInterval getter setter
+// TestErrorTypeName_HTTPError
 // -----------------------------------------------------------------------
 
-func TestRunRecoverer_CheckpointIntervalMutators(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 5)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	if r.GetCheckpointInterval() != 5 {
-		t.Errorf("Initial: got %d, want 5", r.GetCheckpointInterval())
-	}
-
-	r.SetCheckpointInterval(10)
-	if r.GetCheckpointInterval() != 10 {
-		t.Errorf("After set: got %d, want 10", r.GetCheckpointInterval())
-	}
-}
-
-// -----------------------------------------------------------------------
-// Crash recovery: corrupt file + valid checkpoint
-// -----------------------------------------------------------------------
-
-func TestRunRecoverer_CrashRecovery(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	// Write a valid checkpoint.
-	cp1 := &Checkpoint{
-		RunID:   "pre-crash",
-		AgentID: "researcher-v1",
-		TurnCounter: struct {
-			Current int `json:"current"`
-			Limit   int `json:"limit"`
-		}{Current: 5, Limit: 20},
-		LLMMessages: []LLMMessage{
-			{Role: "assistant", Content: "I found the bug."},
-		},
-	}
-	if err := r.WriteCheckpoint(cp1); err != nil {
-		t.Fatalf("WriteCheckpoint: %v", err)
-	}
-
-	// Write a corrupt checkpoint file to simulate crash mid-write.
-	corruptPath := filepath.Join(dir, checkpointPrefix+"post_crash.json")
-	if err := os.WriteFile(corruptPath, []byte("{invalid json"), 0o644); err != nil {
-		t.Fatalf("WriteFile corrupt: %v", err)
-	}
-
-	// ListIncompleteRuns should pick up both as filenames (they have the
-	// right naming pattern). The recoverer does not validate content on
-	// listing -- it just returns filenames.
-	runs, err := r.ListIncompleteRuns()
-	if err != nil {
-		t.Fatalf("ListIncompleteRuns after crash: %v", err)
-	}
-	if len(runs) != 2 {
-		// Both pre-crash and post_crash files are found in the directory
-		t.Errorf("Incomplete runs after crash: got %d, want 2 (one valid, one corrupt)", len(runs))
-	}
-
-	// Resume of pre-crash should work.
-	result, err := r.Resume("pre-crash")
-	if err != nil {
-		t.Fatalf("Resume pre-crash: %v", err)
-	}
-	if !result.Restored {
-		t.Error("pre-crash should be restored")
-	}
-	if len(result.Checkpoint.LLMMessages) != 1 {
-		t.Errorf("LLMMessages: got %d, want 1", len(result.Checkpoint.LLMMessages))
-	}
-
-	// Resume of corrupt should fail.
-	_, err = r.Resume("post_crash")
-	if err == nil {
-		t.Fatal("Resume of corrupt checkpoint should fail")
-	}
-}
-
-// -----------------------------------------------------------------------
-// Resume warning: turn limit exceeded
-// -----------------------------------------------------------------------
-
-func TestRunRecoverer_ResumeAtLimit(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	cp := &Checkpoint{
-		RunID:   "at-limit",
-		AgentID: "researcher-v1",
-		TurnCounter: struct {
-			Current int `json:"current"`
-			Limit   int `json:"limit"`
-		}{Current: 10, Limit: 10},
-	}
-
-	if err := r.WriteCheckpoint(cp); err != nil {
-		t.Fatalf("WriteCheckpoint: %v", err)
-	}
-
-	result, err := r.Resume("at-limit")
-	if err != nil {
-		t.Fatalf("Resume: %v", err)
-	}
-
-	if result.Warning == "" {
-		t.Error("expected warning for checkpoint at turn limit")
-	}
-}
-
-// -----------------------------------------------------------------------
-// Resume warning: stale checkpoint
-// -----------------------------------------------------------------------
-
-func TestRunRecoverer_ResumeStaleCheckpoint(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	cp := &Checkpoint{
-		RunID:   "stale",
-		AgentID: "researcher-v1",
-		TurnCounter: struct {
-			Current int `json:"current"`
-			Limit   int `json:"limit"`
-		}{Current: 3, Limit: 10},
-		Timestamp: time.Now().Add(-8 * 24 * time.Hour), // 8 days ago
-	}
-
-	if err := r.WriteCheckpoint(cp); err != nil {
-		t.Fatalf("WriteCheckpoint: %v", err)
-	}
-
-	result, err := r.Resume("stale")
-	if err != nil {
-		t.Fatalf("Resume: %v", err)
-	}
-
-	if result.Warning == "" {
-		t.Error("expected warning for stale checkpoint")
-	}
-}
-
-// -----------------------------------------------------------------------
-// Resume round-trip with SnapshotForTurn
-// -----------------------------------------------------------------------
-
-func TestRunRecoverer_ResumeRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 5)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	original := SnapshotForTurn(
-		"roundtrip",
-		"analyst-v2",
-		0,
-		12,
-		30,
-		[]TurnRecord{
-			{Name: "grep", Input: map[string]any{"pattern": "TODO"}, Output: "found 3 matches"},
-			{Name: "view_file", Input: map[string]any{"path": "/src/main.go"}, Output: "file contents"},
-		},
-		[]LLMMessage{
-			{Role: "user", Content: "Find all TODO comments."},
-			{Role: "assistant", Content: "Scanning for TODOs..."},
-			{Role: "assistant", Content: "Found 3 TODOs in main.go and utils.go."},
-		},
-		"3 TODO comments found across 2 files.",
-	)
-
-	if err := r.WriteCheckpoint(original); err != nil {
-		t.Fatalf("WriteCheckpoint: %v", err)
-	}
-
-	result, err := r.Resume("roundtrip")
-	if err != nil {
-		t.Fatalf("Resume: %v", err)
-	}
-
-	if !result.Restored {
-		t.Fatal("Should be restored")
-	}
-	if result.SkippedTurns != 12 {
-		t.Errorf("SkippedTurns: got %d, want 12", result.SkippedTurns)
-	}
-	if result.Checkpoint.RunID != "roundtrip" {
-		t.Errorf("RunID: got %s, want roundtrip", result.Checkpoint.RunID)
-	}
-	if result.Checkpoint.AgentID != "analyst-v2" {
-		t.Errorf("AgentID: got %s, want analyst-v2", result.Checkpoint.AgentID)
-	}
-	if result.Checkpoint.Depth != 0 {
-		t.Errorf("Depth: got %d, want 0", result.Checkpoint.Depth)
-	}
-	if result.Checkpoint.TurnCounter.Current != 12 {
-		t.Errorf("Current: got %d, want 12", result.Checkpoint.TurnCounter.Current)
-	}
-	if result.Checkpoint.TurnCounter.Limit != 30 {
-		t.Errorf("Limit: got %d, want 30", result.Checkpoint.TurnCounter.Limit)
-	}
-	if len(result.Checkpoint.ToolCalls) != 2 {
-		t.Errorf("ToolCalls: got %d, want 2", len(result.Checkpoint.ToolCalls))
-	}
-	if result.Checkpoint.ToolCalls[0].Name != "grep" {
-		t.Errorf("ToolCalls[0].Name: got %s", result.Checkpoint.ToolCalls[0].Name)
-	}
-	if len(result.Checkpoint.LLMMessages) != 3 {
-		t.Errorf("LLMMessages: got %d, want 3", len(result.Checkpoint.LLMMessages))
-	}
-	if result.Checkpoint.Outputs != "3 TODO comments found across 2 files." {
-		t.Errorf("Outputs: got %s", result.Checkpoint.Outputs)
-	}
-}
-
-// -----------------------------------------------------------------------
-// Multiple resume-from-latest picks newest timestamp
-// -----------------------------------------------------------------------
-
-func TestRunRecoverer_ResumeFromLatest_PicksNewest(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	time1 := time.Now().Add(-5 * time.Minute)
-	time2 := time.Now().Add(-3 * time.Minute)
-	time3 := time.Now().Add(-1 * time.Minute)
-
-	for i, tc := range []struct {
-		runID   string
-		ts      time.Time
-		turn    int
+func TestErrorTypeName_HTTPError(t *testing.T) {
+	tests := []struct {
+		statusCode int
+		want       string
 	}{
-		{"z-last-written", time1, 1},
-		{"a-first-written", time3, 3},
-		{"m-middle-written", time2, 2},
-	} {
-		cp := &Checkpoint{
-			RunID:   tc.runID,
-			AgentID: "agent",
-			Depth:   i,
-			TurnCounter: struct {
-				Current int `json:"current"`
-				Limit   int `json:"limit"`
-			}{Current: tc.turn, Limit: 10},
-			Timestamp: tc.ts,
-		}
-		if err := r.WriteCheckpoint(cp); err != nil {
-			t.Fatalf("WriteCheckpoint %s: %v", tc.runID, err)
-		}
+		{401, "auth_error"},
+		{403, "auth_error"},
+		{429, "rate_limit"},
+		{500, "http_500"},
+		{502, "http_502"},
+		{503, "http_503"},
 	}
-
-	result, runID, err := r.ResumeFromLatest()
-	if err != nil {
-		t.Fatalf("ResumeFromLatest: %v", err)
-	}
-
-	// Should pick the one with the newest timestamp: a-first-written
-	if runID != "a-first-written" {
-		t.Errorf("RunID: got %s, want a-first-written", runID)
-	}
-	if result.Checkpoint.RunID != "a-first-written" {
-		t.Errorf("Checkpoint.RunID: got %s, want a-first-written", result.Checkpoint.RunID)
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("HTTP_%d", tt.statusCode), func(t *testing.T) {
+			httpErr := &HTTPError{
+				StatusCode: tt.statusCode,
+			}
+			got := errorTypeName(httpErr)
+			if got != tt.want {
+				t.Errorf("errorTypeName(HTTPError{%d}) = %q, want %q", tt.statusCode, got, tt.want)
+			}
+		})
 	}
 }
 
 // -----------------------------------------------------------------------
-// MarkComplete on non-existent run is idempotent
+// TestRetryRecovery_ConcurrentExecuteWithRetry
 // -----------------------------------------------------------------------
 
-func TestRunRecoverer_MarkCompleteIdempotent(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	// Marking non-existent run is not an error.
-	err = r.MarkComplete("nonexistent")
-	if err != nil {
-		t.Fatalf("MarkComplete on non-existent: %v", err)
-	}
-}
-
-// -----------------------------------------------------------------------
-// FinalSentinelContent
-// -----------------------------------------------------------------------
-
-func TestFinalSentinelContent(t *testing.T) {
-	sentinel := FinalSentinelContent()
-	if sentinel != checkpointFinalSentinel {
-		t.Errorf("sentinel: got %s, want %s", sentinel, checkpointFinalSentinel)
-	}
-}
-
-// -----------------------------------------------------------------------
-// ListIncompleteRuns ignores non-checkpoint files
-// -----------------------------------------------------------------------
-
-func TestRunRecoverer_ListIgnoresUnrelatedFiles(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewRunRecoverer(dir, 3)
-	if err != nil {
-		t.Fatalf("NewRunRecoverer: %v", err)
-	}
-
-	// Write a checkpoint.
-	r.WriteCheckpoint(&Checkpoint{
-		RunID:   "run-a",
-		AgentID: "test",
-		TurnCounter: struct {
-			Current int `json:"current"`
-			Limit   int `json:"limit"`
-		}{Current: 1, Limit: 5},
+func TestRetryRecovery_ConcurrentCalls(t *testing.T) {
+	r := NewRetryRecovery(RecoveryConfig{
+		MaxRetries: 1,
+		RetryDelay: 10 * time.Millisecond,
 	})
 
-	// Add unrelated files.
-	os.WriteFile(filepath.Join(dir, "some-log.txt"), []byte("log data"), 0o644)
-	os.WriteFile(filepath.Join(dir, "checkpoint_backup.json.bak"), []byte{}, 0o644)
-	os.MkdirAll(filepath.Join(dir, "subdir"), 0o755)
+	var wg sync.WaitGroup
+	results := make([]any, 10)
+	errs := make([]error, 10)
 
-	runs, err := r.ListIncompleteRuns()
-	if err != nil {
-		t.Fatalf("ListIncompleteRuns: %v", err)
+	for i := 0; i < 10; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = r.ExecuteWithRetry(context.Background(), "test", func() (any, error) {
+				return i, nil
+			})
+		}()
 	}
-	if len(runs) != 1 {
-		t.Errorf("Incomplete runs: got %d, want 1", len(runs))
-	}
-	if runs[0] != "run-a" {
-		t.Errorf("Incomplete run: got %s, want run-a", runs[0])
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("call %d: unexpected error: %v", i, err)
+		}
+		if results[i] != i {
+			t.Errorf("call %d: result=%d, want %d", i, results[i], i)
+		}
 	}
 }

@@ -1,8 +1,12 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/errcls"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/pkg/id"
 )
 
@@ -476,4 +482,314 @@ func (r *RunRecoverer) IsComplete(runID string) bool {
 // FinalSentinelContent returns the filename component used as the final-run sentinel.
 func FinalSentinelContent() string {
 	return checkpointFinalSentinel
+}
+
+// -----------------------------------------------------------------------
+// Mid-Stream Failure Recovery -- HALO-style retry recovery for tool calls
+// -----------------------------------------------------------------------
+
+// RecoveryConfig controls how RetryRecovery classifies errors and decides
+// whether to retry tool execution.
+type RecoveryConfig struct {
+	// MaxRetries is the maximum number of retry attempts (default 3).
+	MaxRetries int
+	// RetryDelay is the base delay before the first retry; subsequent
+	// retries use exponential backoff (default 1s).
+	RetryDelay time.Duration
+	// RecoverableErrors are substrings that, when found in an error
+	// message, mark the error as recoverable (retry with backoff).
+	RecoverableErrors []string
+	// NonRecoverableErrors are substrings that, when found, permanently
+	// disable retry for that error.
+	NonRecoverableErrors []string
+}
+
+// DefaultRecoveryConfig returns a sensible default configuration.
+func DefaultRecoveryConfig() RecoveryConfig {
+	return RecoveryConfig{
+		MaxRetries: 3,
+		RetryDelay: 1 * time.Second,
+		RecoverableErrors: []string{
+			"rate limit",
+			"too many requests",
+			"429",
+			"502",
+			"503",
+			"504",
+			"connection refused",
+			"connection reset",
+			"EOF",
+			"gateway timeout",
+			"service unavailable",
+			"bad gateway",
+			"deadline exceeded",
+			"unexpected error",
+			"internal server error",
+			"broken pipe",
+			"network unreachable",
+		},
+		NonRecoverableErrors: []string{
+			"permission denied",
+			"unauthorized",
+			"401",
+			"403",
+			"authentication",
+			"invalid api key",
+			"invalid_request",
+			"invalid parameter",
+			"invalid argument",
+			"bad request",
+			"400",
+			"schema violation",
+			"validation failed",
+			"not found",
+			"404",
+		},
+	}
+}
+
+// RecoveryState tracks the current progress and history of a recovery attempt.
+type RecoveryState struct {
+	CurrentRetry     int           `json:"current_retry"`
+	LastError        string        `json:"last_error,omitempty"`
+	LastErrorType    string        `json:"last_error_type,omitempty"`
+	RecoveryAttempts int           `json:"recovery_attempts"`
+	LastDelay        time.Duration `json:"last_delay,omitempty"`
+	Completed        bool          `json:"completed"`
+	Final            bool          `json:"final"`
+}
+
+// RetryRecovery provides HALO-style retry logic with observable state for
+// tool execution failures mid-turn.
+type RetryRecovery struct {
+	config   RecoveryConfig
+	mu       sync.RWMutex
+	state    RecoveryState
+	logger   *slog.Logger
+}
+
+// NewRetryRecovery creates a RetryRecovery with the given config. If config
+// is zero-valued, DefaultRecoveryConfig() is applied.
+func NewRetryRecovery(cfg RecoveryConfig) *RetryRecovery {
+	if cfg.MaxRetries == 0 {
+		cfg = DefaultRecoveryConfig()
+	}
+	return &RetryRecovery{
+		config: cfg,
+		logger: slog.Default(),
+	}
+}
+
+// Reset clears the recovery state for a new tool invocation.
+func (r *RetryRecovery) Reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.state = RecoveryState{}
+}
+
+// ShouldRetry determines whether the error indicates a recoverable condition
+// that warrants retry. Authentication/authorization and invalid-request errors
+// are never retried. Rate-limit and network errors are retried.
+func (r *RetryRecovery) ShouldRetry(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	r.mu.RLock()
+	cfg := r.config
+	r.mu.RUnlock()
+
+	msg := err.Error()
+
+	// 1. Check non-recoverable patterns first (higher priority).
+	for _, pattern := range cfg.NonRecoverableErrors {
+		if strings.Contains(strings.ToLower(msg), strings.ToLower(pattern)) {
+			return false
+		}
+	}
+
+	// 2. Check recoverable patterns.
+	for _, pattern := range cfg.RecoverableErrors {
+		if strings.Contains(strings.ToLower(msg), strings.ToLower(pattern)) {
+			return true
+		}
+	}
+
+	// 3. Delegate to the existing IsRetryable infrastructure for structured
+	// error classification (RateLimitError, HTTP 5xx, context deadlines, etc.).
+	if IsRetryable(err) {
+		return true
+	}
+
+	// 4. llm.RateLimitError and Retryable-wrapped errors.
+	var rateLimitErr *llm.RateLimitError
+	return errors.As(err, &rateLimitErr)
+}
+
+// ExecuteWithRetry runs fn with exponential-backoff retry on recoverable
+// errors. On max retries, returns the last error without retry. The result
+// of the first successful invocation is returned.
+func (r *RetryRecovery) ExecuteWithRetry(ctx context.Context, toolName string, fn func() (any, error)) (result any, retryErr error) {
+	r.Reset()
+
+	maxAttempts := r.config.MaxRetries
+	if maxAttempts <= 0 {
+		maxAttempts = 3
+	}
+	baseDelay := r.config.RetryDelay
+	if baseDelay <= 0 {
+		baseDelay = 1 * time.Second
+	}
+
+	// First attempt.
+	result, retryErr = fn()
+	if retryErr == nil {
+		r.mu.Lock()
+		r.state.Completed = true
+		r.state.Final = true
+		r.mu.Unlock()
+		return result, nil
+	}
+
+	// Check if the initial error is recoverable; if not, return immediately
+	// with clean state (no retry state pollution).
+	if !r.ShouldRetry(retryErr) {
+		r.mu.Lock()
+		r.state.LastError = retryErr.Error()
+		r.state.LastErrorType = errorTypeName(retryErr)
+		r.state.Final = true
+		r.mu.Unlock()
+		return nil, retryErr
+	}
+
+	// Reusable lastErr for the loop.
+	var lastErr error = retryErr
+	attempt := 0
+
+	for {
+		attempt++
+
+		// Check if we've exhausted retries.
+		if attempt > maxAttempts {
+			r.mu.Lock()
+			r.state.Final = true
+			r.mu.Unlock()
+			return nil, lastErr
+		}
+
+		// Update state for this retry.
+		delay := backoffDuration(baseDelay, attempt-1)
+		r.mu.Lock()
+		r.state.CurrentRetry = attempt
+		r.state.LastError = lastErr.Error()
+		r.state.LastErrorType = errorTypeName(lastErr)
+		r.state.RecoveryAttempts = attempt
+		r.state.LastDelay = delay
+		r.mu.Unlock()
+
+		r.logger.Debug("retry recovery: attempting retry",
+			"tool", toolName,
+			"attempt", attempt,
+			"max_retries", maxAttempts,
+			"error", lastErr,
+		)
+
+		// Wait with context awareness.
+		select {
+		case <-ctx.Done():
+			r.mu.Lock()
+			r.state.Final = true
+			r.mu.Unlock()
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+
+		// Attempt execution.
+		result, retryErr = fn()
+		if retryErr == nil {
+			r.mu.Lock()
+			r.state.Completed = true
+			r.state.Final = true
+			r.mu.Unlock()
+			return result, nil
+		}
+
+		// Check if this error is still recoverable; if not, stop.
+		if !r.ShouldRetry(retryErr) {
+			r.mu.Lock()
+			r.state.LastError = retryErr.Error()
+			r.state.LastErrorType = errorTypeName(retryErr)
+			r.state.Final = true
+			r.mu.Unlock()
+			return nil, retryErr
+		}
+
+		lastErr = retryErr
+	}
+}
+
+// GetRecoveryState returns a snapshot of the current recovery state.
+func (r *RetryRecovery) GetRecoveryState() RecoveryState {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	s := r.state
+	return s
+}
+
+// backoffDuration computes exponential backoff: baseDelay * 2^attempt.
+func backoffDuration(baseDelay time.Duration, attempt int) time.Duration {
+	duration := baseDelay
+	for i := 0; i < attempt; i++ {
+		duration *= 2
+	}
+	// Cap at 30 seconds.
+	if duration > 30*time.Second {
+		duration = 30 * time.Second
+	}
+	return duration
+}
+
+// errorTypeName returns a short string describing the error category.
+func errorTypeName(err error) string {
+	if err == nil {
+		return "none"
+	}
+
+	// HTTPError: check structured types first.
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) {
+		switch httpErr.StatusCode {
+		case 429:
+			return "rate_limit"
+		case 401, 403:
+			return "auth_error"
+		default:
+			return fmt.Sprintf("http_%d", httpErr.StatusCode)
+		}
+	}
+
+	if errcls.IsRateLimit(err) {
+		return "rate_limit"
+	}
+	var rateLimitErr *llm.RateLimitError
+	if errors.As(err, &rateLimitErr) {
+		return "rate_limit"
+	}
+	if errcls.IsAuthError(err) {
+		return "auth_error"
+	}
+
+	// context.DeadlineExceeded is a net.Error with Timeout()=true, so check
+	// before the generic network catch.
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return "network_error"
+	}
+	if errcls.IsParameterError(err) {
+		return "invalid_request"
+	}
+	return "unknown"
 }
