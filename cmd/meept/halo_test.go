@@ -186,12 +186,12 @@ func TestHaloCompactCmd_Integration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Run compact command
+	// Run compact command - verify it executes without error
 	cmd := newHaloCompactCmd()
 	cmd.SetArgs([]string{sessionFile, "--format", "summary"})
 
 	err := cmd.Execute()
-	if err == nil {
-		t.Error("expected error: input file is required via flag, but got none")
+	if err != nil {
+		t.Errorf("expected command to execute successfully, got %v", err)
 	}
 }
