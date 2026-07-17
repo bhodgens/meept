@@ -4,6 +4,7 @@ package selfimprove
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caimlas/meept/internal/memory"
 	"github.com/google/uuid"
 )
 
@@ -75,10 +77,143 @@ func (d *IssueDetector) DetectAll(ctx context.Context) ([]Issue, error) {
 // NOTE: RLM analyzer integration is deferred to avoid import cycle.
 // Trace analysis can be performed directly via agent.RLMAnalyzer.
 func (d *IssueDetector) ScanTraces(ctx context.Context, traceStorePath string) ([]Issue, error) {
-	// Stub: RLM analyzer integration deferred to avoid import cycle.
-	// Callers should use agent.RLMAnalyzer directly for trace analysis.
-	d.logger.Debug("trace analysis via RLM is deferred, use agent.RLMAnalyzer directly", "path", traceStorePath)
-	return nil, nil
+	// Load the trace store from JSONL source.
+	// Uses memory package directly to avoid import cycle (selfimprove -> agent -> selfimprove).
+	store, err := memory.LoadTraceStore(traceStorePath)
+	if err != nil {
+		return nil, fmt.Errorf("load trace store: %w", err)
+	}
+
+	traceIDs := store.GetTraceIDs()
+	if len(traceIDs) == 0 {
+		return nil, nil
+	}
+
+	// Scan all traces for failure patterns (deterministic RLM-style analysis).
+	var issues []Issue
+	seenPatterns := make(map[string]bool)
+
+	for _, traceID := range traceIDs {
+		select {
+		case <-ctx.Done():
+			return issues, ctx.Err()
+		default:
+		}
+
+		result, err := store.ViewTrace(traceID)
+		if err != nil {
+			continue
+		}
+
+		// Check for oversized traces.
+		if result.Oversized != nil {
+			key := "oversized_trace:" + traceID
+			if !seenPatterns[key] {
+				seenPatterns[key] = true
+				issues = append(issues, Issue{
+					ID:          uuid.New().String()[:16],
+					Type:        IssueTypePerformance,
+					Severity:    SeverityMedium,
+					Description: fmt.Sprintf("Trace %s is oversized (%d spans) — analysis may be incomplete", traceID, result.Oversized.SpanCount),
+					Source:      traceStorePath,
+					Context:     fmt.Sprintf("span_count=%d recommendation=%s", result.Oversized.SpanCount, result.Oversized.Recommendation),
+					DetectedAt:  time.Now(),
+					Metadata: map[string]any{
+						"category":             "semantic",
+						"trace_id":             traceID,
+						"span_count":           result.Oversized.SpanCount,
+						"error_span_count":     result.Oversized.ErrorSpanCount,
+					},
+				})
+			}
+			continue
+		}
+
+		spans := result.Spans
+		if len(spans) == 0 {
+			continue
+		}
+
+		// Check for refusal/rejection patterns (refusal_loop).
+		for _, span := range spans {
+			lower := strings.ToLower(span.ToolName)
+			if strings.Contains(lower, "refusal") || strings.Contains(lower, "denied") || strings.Contains(lower, "reject") {
+				pattern := "refusal:" + traceID + ":" + span.ToolName
+				if !seenPatterns[pattern] {
+					seenPatterns[pattern] = true
+					issues = append(issues, Issue{
+						ID:          uuid.New().String()[:16],
+						Type:        IssueTypeReliability,
+						Severity:    SeverityHigh,
+						Description: fmt.Sprintf("Refusal/rejection pattern in trace %s at %s", traceID, span.ToolName),
+						Source:      traceStorePath,
+						Context:     span.ToolName,
+						DetectedAt:  time.Now(),
+						Metadata: map[string]any{
+							"category": "refusal_loop",
+							"trace_id": traceID,
+						},
+					})
+				}
+			}
+		}
+
+		// Check for error spans (tool_error).
+		for _, span := range spans {
+			if span.HasError {
+				pattern := "error:" + traceID + ":" + span.ToolName
+				if !seenPatterns[pattern] {
+					seenPatterns[pattern] = true
+					issues = append(issues, Issue{
+						ID:          uuid.New().String()[:16],
+						Type:        IssueTypeReliability,
+						Severity:    SeverityHigh,
+						Description: fmt.Sprintf("Error span in trace %s at %s (model: %s, error_type: %s)", traceID, span.ToolName, span.Model, span.ErrorType),
+						Source:      traceStorePath,
+						Context:     span.ToolName,
+						DetectedAt:  time.Now(),
+						Metadata: map[string]any{
+							"category":  "tool_error",
+							"trace_id":  traceID,
+							"model":     span.Model,
+							"error":     span.ErrorType,
+						},
+					})
+				}
+			}
+		}
+
+		// Check for repeated tool calls (redundant_args).
+		toolCount := make(map[string]int)
+		for _, span := range spans {
+			toolCount[span.ToolName]++
+		}
+		for tool, count := range toolCount {
+			if count >= 3 {
+				key := "repeated:" + traceID + ":" + tool
+				if !seenPatterns[key] {
+					seenPatterns[key] = true
+					issues = append(issues, Issue{
+						ID:          uuid.New().String()[:16],
+						Type:        IssueTypePerformance,
+						Severity:    SeverityMedium,
+						Description: fmt.Sprintf("Repeated tool call '%s' (%d times) in trace %s", tool, count, traceID),
+						Source:      traceStorePath,
+						Context:     fmt.Sprintf("tool=%s,count=%d", tool, count),
+						DetectedAt:  time.Now(),
+						Metadata: map[string]any{
+							"category": "redundant_args",
+							"trace_id": traceID,
+							"tool":     tool,
+							"count":    count,
+						},
+					})
+				}
+			}
+		}
+	}
+
+	return issues, nil
 }
 
 // FailureModeToIssueType maps an RLM analyzer failure mode category to an IssueType.
