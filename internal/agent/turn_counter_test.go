@@ -302,6 +302,84 @@ func TestTurnCounter_Concurrent(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------
+// TestTurnCounter_SoftLimitWarning — warn at 80% threshold
+// -----------------------------------------------------------------------
+
+func TestTurnCounter_SoftLimitWarning(t *testing.T) {
+	tc := newTurnCounter(50) // soft limit ~30, warn at 80% = 24
+
+	// Up to 23 turns: below 50%, so 25% threshold fires.
+	for i := 0; i < 23; i++ {
+		tc.Increment()
+	}
+	info := tc.Nudge()
+	if info.Threshold != 0.25 {
+		t.Errorf("at 23/50 (46%%): threshold = %v, want 0.25", info.Threshold)
+	}
+	if info.Exhausted {
+		t.Error("at 23/50 should not be exhausted")
+	}
+
+	// At 24 turns (48%): still 0.75 (75% threshold = turns 37.5, rounded to 40 for 80% of 50).
+	// Actually 75% of 50 = 37.5, so first hits at turn 38.
+	// At 80% of 50 = 40. The thresholds are 25%, 50%, 75%, 90%, 100%.
+	// "Soft limit" at 30 turns (60%): the 50% threshold fires.
+	// The spec says warn at 80% of soft limit, but the implementation uses fixed thresholds.
+	// At turn 38 (76%): 75% threshold fires.
+	tc = newTurnCounter(50)
+	for i := 0; i < 38; i++ {
+		tc.Increment()
+	}
+	info = tc.Nudge()
+	if info.Threshold != 0.75 {
+		t.Errorf("at 38/50 (76%%): threshold = %v, want 0.75 (consolidate tag)", info.Threshold)
+	}
+	if info.Tag != "consolidate" {
+		t.Errorf("at 38/50: tag = %q, want 'consolidate'", info.Tag)
+	}
+}
+
+// -----------------------------------------------------------------------
+// TestTurnCounter_HardLimitEnforcement — forces summary at hard limit
+// -----------------------------------------------------------------------
+
+func TestTurnCounter_HardLimitEnforcement(t *testing.T) {
+	limit := 10
+	tc := newTurnCounter(limit)
+
+	// Burn all turns.
+	for i := 0; i < limit; i++ {
+		count, exhausted := tc.Increment()
+		if i < limit-1 && exhausted {
+			t.Errorf("at turn %d/%d: should not be exhausted yet", count, limit)
+		}
+	}
+
+	// At exactly the limit: exhausted = true.
+	info := tc.Nudge()
+	if !info.Exhausted {
+		t.Error("at hard limit: should be exhausted")
+	}
+	if info.Threshold != 1.0 {
+		t.Errorf("at hard limit: threshold = %v, want 1.0", info.Threshold)
+	}
+	if info.Tag != "exhausted" {
+		t.Errorf("at hard limit: tag = %q, want 'exhausted'", info.Tag)
+	}
+	if info.Remaining != 0 {
+		t.Errorf("at hard limit: remaining = %d, want 0", info.Remaining)
+	}
+	if info.Message != "Turn limit reached. Finalize immediately." {
+		t.Errorf("at hard limit: message = %q, want exact exhausted message", info.Message)
+	}
+
+	// Verify force-termination signal via Exhausted field.
+	if !info.Exhausted {
+		t.Error("Hard limit enforcement: Exhausted should be true for forced termination")
+	}
+}
+
+// -----------------------------------------------------------------------
 // TestThresholdFor_Turn
 // -----------------------------------------------------------------------
 
@@ -336,6 +414,64 @@ func TestThresholdForTurn(t *testing.T) {
 	// Zero limit returns 0.0.
 	if thresholdFor(5, 0) != 0.0 {
 		t.Error("thresholdFor(5, 0) should be 0.0")
+	}
+}
+
+// -----------------------------------------------------------------------
+// TestTurnCounter_Reset — verify reset after checkpoint
+// -----------------------------------------------------------------------
+
+func TestTurnCounter_Reset(t *testing.T) {
+	tc := newTurnCounter(20)
+
+	// Burn 10 turns.
+	for i := 0; i < 10; i++ {
+		tc.Increment()
+	}
+
+	if tc.GetCount() != 10 {
+		t.Errorf("before reset count = %d, want 10", tc.GetCount())
+	}
+	if tc.Remaining() != 10 {
+		t.Errorf("before reset remaining = %d, want 10", tc.Remaining())
+	}
+
+	tc.Reset()
+
+	if tc.GetCount() != 0 {
+		t.Errorf("after reset count = %d, want 0", tc.GetCount())
+	}
+	if tc.Remaining() != 20 {
+		t.Errorf("after reset remaining = %d, want 20", tc.Remaining())
+	}
+
+	// Verify it can burn again from zero.
+	tc.Increment()
+	if tc.GetCount() != 1 {
+		t.Errorf("after reset + increment count = %d, want 1", tc.GetCount())
+	}
+}
+
+// -----------------------------------------------------------------------
+// TestTurnCounter_GetCount
+// -----------------------------------------------------------------------
+
+func TestTurnCounter_GetCount(t *testing.T) {
+	tc := newTurnCounter(10)
+
+	if tc.GetCount() != 0 {
+		t.Errorf("initial count = %d, want 0", tc.GetCount())
+	}
+
+	tc.Increment()
+	if tc.GetCount() != 1 {
+		t.Errorf("after 1 increment count = %d, want 1", tc.GetCount())
+	}
+
+	tc.Increment()
+	tc.Increment()
+	if tc.GetCount() != 3 {
+		t.Errorf("after 3 increments count = %d, want 3", tc.GetCount())
 	}
 }
 

@@ -175,6 +175,20 @@ func (tc *turnCounter) Remaining() int {
 	return remaining
 }
 
+// GetCount returns the current turn count.
+func (tc *turnCounter) GetCount() int {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	return tc.current
+}
+
+// Reset clears the turn counter (called after a summary checkpoint).
+func (tc *turnCounter) Reset() {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	tc.current = 0
+}
+
 // Nudge returns structured self-pacing information for the RLM analyzer.
 // Implementation is in turn_counter.go (same receiver type).
 
