@@ -281,11 +281,11 @@ func (a *RLMAnalyzer) executeAgent(run *analyzerRun, traceIDs []string, prompt s
 		// Turn counter check.
 		n, exhausted := run.turnCounter.Increment()
 		if n == 1 {
-			outputs = append(outputs, run.turnCounter.Nudge())
+			outputs = append(outputs, run.turnCounter.Nudge().Message)
 		}
 		if exhausted {
 			// Turn limit reached: force final.
-			outputs = append(outputs, run.turnCounter.Nudge())
+			outputs = append(outputs, run.turnCounter.Nudge().Message)
 			outputs = append(outputs, "<final>Analysis complete (turn limit reached).</final>")
 			break
 		}
@@ -422,7 +422,7 @@ func (a *RLMAnalyzer) deterministicScan(run *analyzerRun, traceIDs []string, pro
 	sb.WriteString(fmt.Sprintf("Error spans: %d/%d\n", errorSpanCount, totalSpans))
 
 	// Add turn nudge.
-	sb.WriteString("\n" + run.turnCounter.Nudge())
+	sb.WriteString("\n" + run.turnCounter.Nudge().Message)
 
 	return sb.String()
 }

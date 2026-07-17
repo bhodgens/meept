@@ -175,12 +175,8 @@ func (tc *turnCounter) Remaining() int {
 	return remaining
 }
 
-func (tc *turnCounter) Nudge() string {
-	tc.mu.Lock()
-	c, l := tc.current, tc.limit
-	tc.mu.Unlock()
-	return fmt.Sprintf("[HALO: turn %d of %d — %d turns left]", c, l, l-c)
-}
+// Nudge returns structured self-pacing information for the RLM analyzer.
+// Implementation is in turn_counter.go (same receiver type).
 
 // -----------------------------------------------------------------------
 // toolRegistry is a minimal tool set for the analyzer.
