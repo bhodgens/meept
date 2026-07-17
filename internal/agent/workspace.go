@@ -234,8 +234,8 @@ func (w *WorkspaceManager) gitCmd(ctx context.Context, workspace string, args ..
 	return true, strings.TrimSpace(string(output))
 }
 
-// Checkpoint represents a workspace checkpoint for rollback.
-type Checkpoint struct {
+// WorkspaceCheckpoint represents a workspace checkpoint for rollback.
+type WorkspaceCheckpoint struct {
 	TaskID    string    `json:"task_id"`
 	Label     string    `json:"label"`
 	GitRef    string    `json:"git_ref"`
@@ -244,7 +244,7 @@ type Checkpoint struct {
 
 // CreateCheckpoint creates a checkpoint in the workspace using git tags.
 // The tag format is: checkpoint-{taskID}-{label}-{timestamp}
-func (w *WorkspaceManager) CreateCheckpoint(ctx context.Context, taskID, label string) (*Checkpoint, error) {
+func (w *WorkspaceManager) CreateCheckpoint(ctx context.Context, taskID, label string) (*WorkspaceCheckpoint, error) {
 	w.mu.RLock()
 	workspace, ok := w.workspaces[taskID]
 	w.mu.RUnlock()
@@ -268,7 +268,7 @@ func (w *WorkspaceManager) CreateCheckpoint(ctx context.Context, taskID, label s
 	tagName := fmt.Sprintf("checkpoint-%s-%s-%d", taskID, label, timestamp)
 
 	// Write checkpoint metadata file
-	metadata := Checkpoint{
+	metadata := WorkspaceCheckpoint{
 		TaskID:    taskID,
 		Label:     label,
 		GitRef:    tagName,
@@ -339,7 +339,7 @@ func (w *WorkspaceManager) RestoreCheckpoint(ctx context.Context, taskID, label 
 // AGENT-17 FIX: Tag parsing extracts timestamp from the end (last numeric segment
 // after the final dash) and joins everything between taskID and timestamp as the
 // label, correctly handling labels containing dashes (e.g. "fix-a-bug-1712345678").
-func (w *WorkspaceManager) ListCheckpoints(ctx context.Context, taskID string) ([]Checkpoint, error) {
+func (w *WorkspaceManager) ListCheckpoints(ctx context.Context, taskID string) ([]WorkspaceCheckpoint, error) {
 	w.mu.RLock()
 	workspace, ok := w.workspaces[taskID]
 	w.mu.RUnlock()
@@ -351,11 +351,11 @@ func (w *WorkspaceManager) ListCheckpoints(ctx context.Context, taskID string) (
 	tagPrefix := fmt.Sprintf("checkpoint-%s-", taskID)
 	_, output := w.gitCmd(ctx, workspace, "tag", "-l", tagPrefix+"*")
 	if output == "" {
-		return []Checkpoint{}, nil
+		return []WorkspaceCheckpoint{}, nil
 	}
 
 	tags := strings.Split(strings.TrimSpace(output), "\n")
-	var checkpoints []Checkpoint
+	var checkpoints []WorkspaceCheckpoint
 
 	for _, tag := range tags {
 		if tag == "" {
@@ -393,7 +393,7 @@ func (w *WorkspaceManager) ListCheckpoints(ctx context.Context, taskID string) (
 		}
 		label := strings.TrimPrefix(prefix, expectedPrefix)
 
-		checkpoints = append(checkpoints, Checkpoint{
+		checkpoints = append(checkpoints, WorkspaceCheckpoint{
 			TaskID:    taskID,
 			Label:     label,
 			GitRef:    tag,
