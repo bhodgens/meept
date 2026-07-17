@@ -313,3 +313,182 @@ func TestToolRegistry_ExecuteGatedToolBelowGatedDepth(t *testing.T) {
 		t.Errorf("unexpected result: %v", result)
 	}
 }
+
+// -----------------------------------------------------------------------
+// GatedToolRegistry tests (Phase 5: structural tool gating)
+// -----------------------------------------------------------------------
+
+func TestGatedToolRegistry_DepthGating(t *testing.T) {
+	descs := []ToolDescriptor{
+		{
+			Name:                "call_subagent",
+			Description:         "spawn a subagent",
+			AvailableAtDepths:   []int{0, 1},
+			MaxUses:             0,
+			RequiresState:       "",
+		},
+		{
+			Name:                "view_trace",
+			Description:         "view trace details",
+			AvailableAtDepths:   nil, // all depths
+		},
+		{
+			Name:                "generate_report",
+			Description:         "generate synthesis report",
+			AvailableAtDepths:   []int{0}, // top-level only
+		},
+	}
+	leafNames := []string{"read_file", "write_file", "shell"}
+	reg := NewGatedToolRegistryWithDescriptors(2, descs, leafNames)
+
+	// call_subagent available at depths 0,1
+	if !reg.HasTool(0, "call_subagent") {
+		t.Error("call_subagent should be available at depth 0")
+	}
+	if !reg.HasTool(1, "call_subagent") {
+		t.Error("call_subagent should be available at depth 1")
+	}
+	if reg.HasTool(2, "call_subagent") {
+		t.Error("call_subagent should NOT be available at depth 2 (maxDepth)")
+	}
+
+	// generate_report only at depth 0
+	if !reg.HasTool(0, "generate_report") {
+		t.Error("generate_report should be available at depth 0")
+	}
+	// HasTool checks DepthToolRegistry; generate_report maps to depthGate
+	// with GatedDepth=1, so it's visible at depth 0 only in DTR.
+
+	// AvailableTools checks full gating
+	tools0 := reg.GetAvailableTools(0, "")
+	toolNames0 := make(map[string]bool)
+	for _, td := range tools0 {
+		toolNames0[td.Name] = true
+	}
+	if !toolNames0["call_subagent"] {
+		t.Error("GetAvailableTools(0) missing call_subagent")
+	}
+	if !toolNames0["generate_report"] {
+		t.Error("GetAvailableTools(0) missing generate_report")
+	}
+
+	tools2 := reg.GetAvailableTools(2, "")
+	toolNames2 := make(map[string]bool)
+	for _, td := range tools2 {
+		toolNames2[td.Name] = true
+	}
+	if toolNames2["call_subagent"] {
+		t.Error("GetAvailableTools(2) should NOT have call_subagent")
+	}
+	if toolNames2["generate_report"] {
+		t.Error("GetAvailableTools(2) should NOT have generate_report")
+	}
+}
+
+func TestGatedToolRegistry_MaxUses(t *testing.T) {
+	descs := []ToolDescriptor{
+		{
+			Name:            "limited_tool",
+			Description:     "tool with max uses",
+			AvailableAtDepths: []int{0, 1, 2},
+			MaxUses:         3,
+		},
+	}
+	reg := NewGatedToolRegistryWithDescriptors(2, descs, nil)
+
+	// Available, use it 3 times
+	if !reg.IsAvailable(0, "limited_tool", "") {
+		t.Error("limited_tool should be available")
+	}
+	reg.RecordUse("limited_tool")
+	reg.RecordUse("limited_tool")
+	reg.RecordUse("limited_tool")
+
+	// After 3 uses, should be unavailable
+	if reg.IsAvailable(0, "limited_tool", "") {
+		t.Error("limited_tool should be unavailable after 3 uses")
+	}
+	if reg.UsageCount("limited_tool") != 3 {
+		t.Errorf("UsageCount = %d, want 3", reg.UsageCount("limited_tool"))
+	}
+}
+
+func TestGatedToolRegistry_StateGating(t *testing.T) {
+	descs := []ToolDescriptor{
+		{
+			Name:          "synthesis_tool",
+			Description:   "only available during synthesis",
+			AvailableAtDepths: []int{0},
+			RequiresState:  "planning",
+		},
+	}
+	reg := NewGatedToolRegistryWithDescriptors(2, descs, nil)
+
+	// Available in "planning" state
+	if !reg.IsAvailable(0, "synthesis_tool", "planning") {
+		t.Error("synthesis_tool should be available in planning state")
+	}
+
+	// Unavailable in other states
+	if reg.IsAvailable(0, "synthesis_tool", "executing") {
+		t.Error("synthesis_tool should NOT be available in executing state")
+	}
+	if reg.IsAvailable(0, "synthesis_tool", "") {
+		t.Error("synthesis_tool should NOT be available in empty state")
+	}
+}
+
+func TestGatedToolRegistry_GetAvailableToolsFiltersByMaxUses(t *testing.T) {
+	descs := []ToolDescriptor{
+		{
+			Name:            "bounded_reporter",
+			Description:     "report with bounded uses",
+			AvailableAtDepths: []int{0, 1, 2},
+			MaxUses:         1,
+		},
+	}
+	reg := NewGatedToolRegistryWithDescriptors(2, descs, nil)
+
+	// First call: should be available
+	tools := reg.GetAvailableTools(0, "")
+	if len(tools) != 1 || tools[0].Name != "bounded_reporter" {
+		t.Fatalf("expected 1 tool, got %d", len(tools))
+	}
+
+	// Use it once
+	reg.RecordUse("bounded_reporter")
+
+	// Now should be unavailable in GetAvailableTools
+	tools = reg.GetAvailableTools(0, "")
+	if len(tools) != 0 {
+		t.Errorf("expected 0 tools after use, got %d", len(tools))
+	}
+}
+
+func TestGatedToolRegistry_StateAndDepthGating(t *testing.T) {
+	descs := []ToolDescriptor{
+		{
+			Name:                "depth_and_state_tool",
+			Description:         "gated by both depth and state",
+			AvailableAtDepths:   []int{0, 1},
+			MaxUses:             0,
+			RequiresState:       "analysis",
+		},
+	}
+	reg := NewGatedToolRegistryWithDescriptors(2, descs, nil)
+
+	// Available at depth 1 in analysis state
+	if !reg.IsAvailable(1, "depth_and_state_tool", "analysis") {
+		t.Error("should be available at depth 1 in analysis state")
+	}
+
+	// Unavailable at depth 2 (depth gate) even in correct state
+	if reg.IsAvailable(2, "depth_and_state_tool", "analysis") {
+		t.Error("should NOT be available at depth 2 even in correct state")
+	}
+
+	// Unavailable in wrong state even at valid depth
+	if reg.IsAvailable(0, "depth_and_state_tool", "executing") {
+		t.Error("should NOT be available in executing state even at valid depth")
+	}
+}

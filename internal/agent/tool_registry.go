@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"math"
+	"sync"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
@@ -228,7 +230,244 @@ func (t *spawnLeaf) Execute(ctx context.Context, args map[string]any) (any, erro
 	return t.base.Execute(ctx, args)
 }
 
+// -----------------------------------------------------------------------
+// GatedToolRegistry: multi-dimensional tool gating
+// -----------------------------------------------------------------------
+
+// ToolDescriptor describes a tool with gating constraints across
+// multiple dimensions: depth, invocation count, and runtime state.
+type ToolDescriptor struct {
+	Name          string
+	Description   string
+	InputSchema   llm.FunctionParameters
+	// AvailableAtDepths lists the depths at which this tool is
+	// available. If nil or empty, the tool is available at all depths.
+	AvailableAtDepths []int
+	// MaxUses limits total invocations across the agent run.
+	// Zero means unlimited.
+	MaxUses int
+	// RequiresState, if non-empty, specifies the agent state
+	// in which the tool becomes available. Empty means "any state".
+	RequiresState string
+}
+
+// GatedToolRegistry extends DepthToolRegistry with usage-based and
+// state-based gating. Tools are filtered by three dimensions:
+//
+//   - Depth: AvailableAtDepths gates which depths may use a tool
+//   - Usage: MaxUses limits total invocations
+//   - State: RequiresState gates tools by agent runtime state
+type GatedToolRegistry struct {
+	*DepthToolRegistry
+	mu              sync.Mutex
+	usageCount      map[string]int
+	stateGateRegistry map[string]ToolDescriptor // name → descriptor
+}
+
+// NewGatedToolRegistry creates a gating registry. depthGate tools
+// (those implementing GatedDepth()) are still applied on top of
+// the DepthToolRegistry layer.
+func NewGatedToolRegistry(maxDepth int, leafTools []tools.Tool, gatedTools []depthGate) *GatedToolRegistry {
+	dtr := NewDepthToolRegistry(maxDepth, leafTools, gatedTools)
+	return &GatedToolRegistry{
+		DepthToolRegistry: dtr,
+		usageCount:        make(map[string]int),
+		stateGateRegistry: make(map[string]ToolDescriptor),
+	}
+}
+
+// NewGatedToolRegistryWithDescriptors creates a GatedToolRegistry where
+// each tool is described by a ToolDescriptor giving precise gating
+// per depth, usage count, and state requirement.
+//
+// "maxDepth" is still used for the clamp boundary; depthGate tools
+// are derived from the gating descriptors rather than GatedDepth().
+func NewGatedToolRegistryWithDescriptors(maxDepth int, descriptors []ToolDescriptor, leafNames []string) *GatedToolRegistry {
+	if maxDepth <= 0 {
+		maxDepth = 3
+	}
+
+	stateRegistry := make(map[string]ToolDescriptor)
+	usage := make(map[string]int)
+
+	for _, desc := range descriptors {
+		stateRegistry[desc.Name] = desc
+	}
+
+	// Gather gated tools (those with depth restrictions) for the underlying DTR.
+	allGatedTools := make([]depthGate, 0, len(descriptors))
+	for _, desc := range descriptors {
+		if len(desc.AvailableAtDepths) > 0 {
+			allGatedTools = append(allGatedTools, &descriptorTool{desc})
+		}
+	}
+
+	// Build leaf tools from names not already in the descriptor list.
+	leafTools := make([]tools.Tool, 0, len(leafNames))
+	for _, name := range leafNames {
+		if _, hasDesc := stateRegistry[name]; !hasDesc {
+			leafTools = append(leafTools, &noopLeaf{name: name, description: name + " tool"})
+		}
+	}
+
+	dtr := NewDepthToolRegistry(maxDepth, leafTools, allGatedTools)
+
+	return &GatedToolRegistry{
+		DepthToolRegistry: dtr,
+		usageCount:        usage,
+		stateGateRegistry: stateRegistry,
+	}
+}
+
+// getAvailableAtDepth returns the list of tool names visible at the
+// depth level (from DepthToolRegistry).
+func (g *GatedToolRegistry) getAvailableAtDepth(depth int) []string {
+	tools := g.ToolsAtDepth(depth)
+	names := make([]string, 0, len(tools))
+	for _, t := range tools {
+		names = append(names, t.Name())
+	}
+	return names
+}
+
+// IsAvailable checks if a tool is available given the current depth
+// and state, respecting MaxUses and RequiresState constraints.
+func (g *GatedToolRegistry) IsAvailable(depth int, toolName string, agentState string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	// Check depth gating (from DepthToolRegistry).
+	if !g.HasTool(depth, toolName) {
+		return false
+	}
+
+	// Check state gating.
+	desc, hasDesc := g.stateGateRegistry[toolName]
+	if hasDesc {
+		if desc.RequiresState != "" && desc.RequiresState != agentState {
+			return false
+		}
+		if len(desc.AvailableAtDepths) > 0 {
+			depthOk := false
+			for _, d := range desc.AvailableAtDepths {
+				if d == depth {
+					depthOk = true
+					break
+				}
+			}
+			if !depthOk {
+				return false
+			}
+		}
+	}
+
+	// Check usage gating.
+	if desc.MaxUses > 0 {
+		if g.usageCount[toolName] >= desc.MaxUses {
+			return false
+		}
+	}
+
+	return true
+}
+
+// RecordUse increments the invocation count for a tool.
+func (g *GatedToolRegistry) RecordUse(toolName string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.usageCount[toolName]++
+}
+
+// UsageCount returns the current invocation count for a tool.
+func (g *GatedToolRegistry) UsageCount(toolName string) int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.usageCount[toolName]
+}
+
+// GetAvailableTools returns all tools that are available at the given
+// depth and state, filtered by MaxUses.
+func (g *GatedToolRegistry) GetAvailableTools(depth int, agentState string) []ToolDescriptor {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	var result []ToolDescriptor
+	toolNames := g.getAvailableAtDepth(depth)
+
+	for _, name := range toolNames {
+		desc, hasDesc := g.stateGateRegistry[name]
+		if !hasDesc {
+			// Default: no extra gating, always available at this depth.
+			desc = ToolDescriptor{Name: name, Description: name + " tool"}
+		}
+
+		// State gate check.
+		if desc.RequiresState != "" && desc.RequiresState != agentState {
+			continue
+		}
+
+		// Explicit depth gate from descriptor.
+		if len(desc.AvailableAtDepths) > 0 {
+			depthOk := false
+			for _, d := range desc.AvailableAtDepths {
+				if d == depth {
+					depthOk = true
+					break
+				}
+			}
+			if !depthOk {
+				continue
+			}
+		}
+
+		// Usage gate check.
+		if desc.MaxUses > 0 {
+			if g.usageCount[name] >= desc.MaxUses {
+				continue
+			}
+		}
+
+		result = append(result, desc)
+	}
+
+	return result
+}
+
 // _ ensure compile-time interface satisfaction
 var _ depthGate = (*spawnLeaf)(nil)
 var _ tools.Tool = (*noopLeaf)(nil)
 var _ tools.Tool = (*spawnLeaf)(nil)
+
+// descriptorTool wraps a ToolDescriptor as a tools.Tool for use
+// inside DepthToolRegistry's leaf/gated tool lists.
+type descriptorTool struct {
+	desc ToolDescriptor
+}
+
+func (t *descriptorTool) Name() string                  { return t.desc.Name }
+func (t *descriptorTool) Description() string           { return t.desc.Description }
+func (t *descriptorTool) Parameters() llm.FunctionParameters { return t.desc.InputSchema }
+func (t *descriptorTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	return map[string]any{"tool": t.desc.Name, "args": args}, nil
+}
+
+// GatedDepth returns the maximum depth at which the tool is visible.
+// For descriptor-based gating we derive this from AvailableAtDepths:
+// the gate fires at max(available_depths)+1, meaning the tool disappears
+// at the first depth beyond its allowed range.
+func (t *descriptorTool) GatedDepth() int {
+	depths := t.desc.AvailableAtDepths
+	if len(depths) == 0 {
+		return math.MaxInt32 // always visible
+	}
+	maxD := 0
+	for _, d := range depths {
+		if d > maxD {
+			maxD = d
+		}
+	}
+	return maxD + 1 // hidden at maxD+1 and beyond
+}
+
+var _ depthGate = (*descriptorTool)(nil)
+var _ tools.Tool = (*descriptorTool)(nil)
