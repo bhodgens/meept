@@ -60,3 +60,16 @@ CREATE INDEX IF NOT EXISTS idx_turns_session ON turns(session_id);
 CREATE INDEX IF NOT EXISTS idx_turns_ts ON turns(timestamp);
 CREATE INDEX IF NOT EXISTS idx_sessions_conv ON sessions(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_activity ON sessions(last_activity);
+
+-- halo_run_artifacts tracks on-disk report artifacts for HALO-style analysis runs.
+-- Modeled after HALO's halo_run_artifacts table (report.ts:88-113).
+CREATE TABLE IF NOT EXISTS halo_run_artifacts (
+    id             TEXT PRIMARY KEY,
+    run_id         TEXT NOT NULL,
+    artifact_type  TEXT NOT NULL,
+    path           TEXT NOT NULL,
+    size_bytes     INTEGER NOT NULL,
+    created_at     INTEGER NOT NULL,
+    UNIQUE(run_id, artifact_type)
+);
+CREATE INDEX IF NOT EXISTS idx_halo_run_artifacts_run_id ON halo_run_artifacts(run_id);
