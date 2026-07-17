@@ -102,6 +102,188 @@ func TestTraceStore_Constructor_TraceNotFound(t *testing.T) {
 	}
 }
 
+// ---------- Discovery Cap (4 KB for ViewTrace) ----------
+
+func TestTraceStore_DiscoveryCap(t *testing.T) {
+	// Span with a 10KB Input attribute.
+	// ViewTrace should truncate to 4 KB (DiscoveryAttrTruncationChars).
+	payload := strings.Repeat("x", 10*1024) // 10 KB
+	spans := []SpanRecord{
+		{
+			TraceID:   "discovery-cap",
+			SpanID:    "s1",
+			Input:     payload,
+			Output:    strings.Repeat("y", 5*1024), // 5 KB
+			Service:   "test-svc",
+			StartTime: time.Now(),
+			EndTime:   time.Now().Add(time.Second),
+		},
+	}
+	path := writeTestJSONL(t, spans...)
+
+	store, err := NewTraceStore(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the index captured the span count.
+	row, ok := store.GetTraceIndexRow("discovery-cap")
+	if !ok {
+		t.Fatal("expected trace row")
+	}
+	if row.SpanCount != 1 {
+		t.Fatalf("expected 1 span, got %d", row.SpanCount)
+	}
+
+	result, err := store.ViewTrace("discovery-cap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Oversized != nil {
+		t.Fatal("expected spans, got oversized summary")
+	}
+	if len(result.Spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(result.Spans))
+	}
+
+	sp := result.Spans[0]
+	if len(sp.Input) != DiscoveryAttrTruncationChars {
+		t.Errorf("Input: got %d chars, want %d (DiscoveryAttrTruncationChars)",
+			len(sp.Input), DiscoveryAttrTruncationChars)
+	}
+	if len(sp.Output) != DiscoveryAttrTruncationChars {
+		t.Errorf("Output: got %d chars, want %d (DiscoveryAttrTruncationChars)",
+			len(sp.Output), DiscoveryAttrTruncationChars)
+	}
+	if len(sp.Input) != DiscoveryAttrTruncationChars {
+		t.Errorf("10KB Input should be exactly cap (%d), got %d", DiscoveryAttrTruncationChars, len(sp.Input))
+	}
+}
+
+// ---------- Surgical Cap (16 KB for ViewSpans) ----------
+
+func TestTraceStore_SurgicalCap(t *testing.T) {
+	// Span with a 20KB Input attribute.
+	// ViewSpans should truncate to 16 KB (SurgicalAttrTruncationChars),
+	// which is 4x the discovery cap, so a 20KB attribute survives ViewSpans
+	// but would have been capped at 16 KB.
+	payload := strings.Repeat("x", 20*1024) // 20 KB
+	attr := map[string]string{
+		"tool_input":  strings.Repeat("a", 20 * 1024),
+		"tool_output": strings.Repeat("b", 20*1024),
+	}
+	spans := []SpanRecord{
+		{
+			TraceID:    "surgical-cap",
+			SpanID:     "s1",
+			Input:      payload,
+			Output:     payload,
+			Attributes: attr,
+			Service:    "test-svc",
+			StartTime:  time.Now(),
+			EndTime:    time.Now().Add(time.Second),
+		},
+	}
+	path := writeTestJSONL(t, spans...)
+
+	store, err := NewTraceStore(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := store.ViewSpans("surgical-cap", []string{"s1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Oversized != nil {
+		t.Fatal("expected spans, got oversized summary")
+	}
+	if len(result.Spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(result.Spans))
+	}
+
+	sp := result.Spans[0]
+	if len(sp.Input) != SurgicalAttrTruncationChars {
+		t.Errorf("Input: got %d chars, want %d (SurgicalAttrTruncationChars)",
+			len(sp.Input), SurgicalAttrTruncationChars)
+	}
+	// tool_input should also be capped at 16 KB
+	if len(sp.Attributes["tool_input"]) != SurgicalAttrTruncationChars {
+		t.Errorf("Attributes[tool_input]: got %d chars, want %d",
+			len(sp.Attributes["tool_input"]), SurgicalAttrTruncationChars)
+	}
+}
+
+// ---------- Oversized Summary when budget exceeded ----------
+
+func TestTraceStore_OversizedSummary(t *testing.T) {
+	// Build a trace large enough to exceed the ~150 KB budget.
+	// 30 spans * ~15 KB each (10 KB Input + 5 KB Output + overhead) > 150 KB.
+	var spans []SpanRecord
+	for i := 0; i < 30; i++ {
+		spans = append(spans, SpanRecord{
+			TraceID:   "oversized",
+			SpanID:    fmt.Sprintf("s%d", i),
+			Input:     strings.Repeat("x", 10*1024),
+			Output:    strings.Repeat("y", 5*1024),
+			Service:   "test-svc",
+			Model:     "fake-model",
+			HasError:  i%5 == 0,
+			StartTime: time.Now(),
+			EndTime:   time.Now().Add(time.Duration(i+1) * time.Second),
+		})
+	}
+	path := writeTestJSONL(t, spans...)
+
+	store, err := NewTraceStore(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := store.ViewTrace("oversized")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Oversized == nil {
+		t.Fatal("expected OversizedTraceSummary, got spans")
+	}
+
+	summary := result.Oversized
+	if summary.SpanCount != 30 {
+		t.Errorf("SpanCount: got %d, want 30", summary.SpanCount)
+	}
+	if summary.SpanResponseBytesMax == 0 {
+		t.Error("SpanResponseBytesMax should be non-zero")
+	}
+	// 6 spans have HasError (0,5,10,15,20,25).
+	if summary.ErrorSpanCount != 6 {
+		t.Errorf("ErrorSpanCount: got %d, want 6", summary.ErrorSpanCount)
+	}
+	if len(summary.TopSpanNames) == 0 {
+		t.Error("TopSpanNames should not be empty")
+	}
+	if summary.Recommendation == "" {
+		t.Error("Recommendation should not be empty")
+	}
+	if !strings.Contains(summary.Recommendation, "search_trace") {
+		t.Error("Recommendation should mention search_trace as the follow-up tool")
+	}
+
+	// Verify ViewTraceResult has neither spans nor oversized summary field filled.
+	if len(result.Spans) != 0 {
+		t.Errorf("Oversized result should have Spans=nil, got %d spans", len(result.Spans))
+	}
+
+	// Verify JSON serialization: Oversized field present, Spans omitted.
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "\"oversized\"") {
+		t.Errorf("JSON should contain 'oversized' key: %s", string(data))
+	}
+}
+
 // ---------- truncation tests (renamed to avoid conflict with uncommitted Phase 1 test) ----------
 
 func TestTraceStoreAttrTruncate_CapsInput(t *testing.T) {
