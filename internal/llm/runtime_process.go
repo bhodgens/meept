@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // RuntimeProcess manages a spawned LLM runtime process.
@@ -23,6 +24,9 @@ type RuntimeProcess struct {
 	cmd     *exec.Cmd
 	pid     int
 	pidFile string
+	// waitDone receives the result of cmd.Wait() exactly once.
+	// Created in Start(); consumed by Stop() to avoid a double-Wait race.
+	waitDone chan error
 }
 
 // NewRuntimeProcess creates a new process manager.
@@ -96,14 +100,17 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 	// Start a goroutine to wait for the process to exit and prevent zombies.
 	// This is necessary because Setpgid=true creates a new process group,
 	// and without waiting, exited processes become defunct (zombies).
+	p.waitDone = make(chan error, 1)
 	go func() {
-		if err := p.cmd.Wait(); err != nil { //nolint:mutexio // Wait runs BEFORE Lock; no I/O under mutex
-			slog.Warn("runtime process wait returned error", "error", err)
-		}
+		err := p.cmd.Wait() //nolint:mutexio // Wait runs BEFORE Lock; no I/O under mutex
+		p.waitDone <- err
 		p.mu.Lock()
 		p.pid = 0
 		p.cmd = nil
 		p.mu.Unlock()
+		if err != nil {
+			slog.Warn("runtime process wait returned error", "error", err)
+		}
 	}()
 
 	return nil
@@ -128,29 +135,47 @@ func (p *RuntimeProcess) Stop(ctx context.Context) error {
 		}
 	}
 
-	// Send SIGTERM for graceful shutdown
-	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+	// Snapshot the fields we need after releasing the lock.
+	cmd := p.cmd
+	waitDone := p.waitDone
+	fromPIDFile := p.cmd.Process != nil && p.pid == 0 // recovered from PID file, no Wait goroutine
+	p.mu.Unlock()
+
+	// Send SIGTERM to the entire process group for a clean shutdown.
+	// Setpgid=true in Start() isolates the child; killing the group
+	// ensures no grandchild survives the daemon's death.
+	if err := killProcessGroup(cmd, syscall.SIGTERM); err != nil {
 		// Already dead
 		os.Remove(p.pidFile)
-		p.mu.Unlock()
 		return nil
 	}
 
-	cmd := p.cmd
-	p.mu.Unlock()
-
-	// Wait for process to exit (outside the lock — Wait blocks)
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
+	// Wait for process to exit (outside the lock — Wait blocks).
+	if fromPIDFile || waitDone == nil {
+		// No Wait() goroutine (recovered from PID file). Poll until
+		// the process exits or the context expires.
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				killProcessGroup(cmd, syscall.SIGKILL)
+				os.Remove(p.pidFile)
+				return nil
+			case <-ticker.C:
+				if !p.isProcessRunning(cmd.Process.Pid) {
+					os.Remove(p.pidFile)
+					return nil
+				}
+			}
+		}
+	}
 
 	select {
 	case <-ctx.Done():
-		// Force kill on context cancellation
-		cmd.Process.Kill()
-	case err := <-done:
-		_ = err // Ignored
+		// Force-kill the process group on context cancellation
+		killProcessGroup(cmd, syscall.SIGKILL)
+	case <-waitDone:
 	}
 
 	os.Remove(p.pidFile)
@@ -192,6 +217,20 @@ func (p *RuntimeProcess) isProcessRunning(pid int) bool {
 	}
 	err = proc.Signal(syscall.Signal(0))
 	return err == nil
+}
+
+// killProcessGroup sends a signal to the process group of cmd.
+// Falls back to killing just the leader if getpgid fails.
+func killProcessGroup(cmd *exec.Cmd, sig syscall.Signal) error {
+	if cmd == nil || cmd.Process == nil {
+		return fmt.Errorf("no process")
+	}
+	pgid, err := syscall.Getpgid(cmd.Process.Pid)
+	if err != nil {
+		// Fallback: kill leader only
+		return cmd.Process.Signal(sig)
+	}
+	return syscall.Kill(-pgid, sig)
 }
 
 func (p *RuntimeProcess) writePIDFile(pid int) error {
