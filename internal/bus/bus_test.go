@@ -173,21 +173,24 @@ func TestGossip_SubscriptionDrained(t *testing.T) {
 	// Unsubscribe
 	bus.Unsubscribe(sub)
 
-	// Test panic mode: enable and verify it panics on zero subscribers
+	// Test error log mode: enable and verify it logs at Error level with no subscribers
 	SetPanicOnUndrainedSubscription(true)
 	t.Cleanup(func() {
 		SetPanicOnUndrainedSubscription(false)
 	})
 
-	// Verify panic on publish with no subscribers
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic when publishing with no subscribers (panic mode enabled)")
-		}
-	}()
-	
+	// Verify Error-level log (not panic) on publish with no subscribers
+	var errBuf bytes.Buffer
+	errBus := New(DefaultConfig(), slog.New(slog.NewTextHandler(&errBuf, &slog.HandlerOptions{Level: slog.LevelError})))
+	defer errBus.Close()
+
 	msg3, _ := models.NewBusMessage(models.MessageTypeEvent, "test3", map[string]any{"test": "data3"})
-	bus.Publish("test.topic", msg3)
+	errBus.Publish("test.topic", msg3)
+
+	output := errBuf.String()
+	if !strings.Contains(output, "panic mode enabled") {
+		t.Errorf("Expected Error-level log with 'panic mode enabled', got:\n%s", output)
+	}
 }
 
 // TestBus_BufferNearFull tests that near-full buffers are detected
@@ -332,24 +335,24 @@ func TestPublish_WarnsOnNoSubscribers(t *testing.T) {
 		"Publish should log 'no subscribers' at WARN level:\n%s", output)
 }
 
-// TestPublishExternalOnly_PanicsInTestMode verifies that PublishExternalOnly
-// still respects panicOnUndrainedSubscription so tests catch missing wiring.
-func TestPublishExternalOnly_PanicsInTestMode(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+// TestPublishExternalOnly_ErrorLogInTestMode verifies that PublishExternalOnly
+// still respects panicOnUndrainedSubscription by logging at Error level so tests catch missing wiring.
+func TestPublishExternalOnly_ErrorLogInTestMode(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError}))
 	bus := New(DefaultConfig(), logger)
 	defer bus.Close()
 
 	SetPanicOnUndrainedSubscription(true)
 	t.Cleanup(func() { SetPanicOnUndrainedSubscription(false) })
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic when PublishExternalOnly called with no subscribers in panic mode")
-		}
-	}()
-
 	msg, _ := models.NewBusMessage(models.MessageTypeEvent, "test", map[string]any{"v": 1})
 	bus.PublishExternalOnly("external.panic.topic", msg)
+
+	output := buf.String()
+	if !strings.Contains(output, "panic mode enabled") {
+		t.Errorf("expected Error-level log with 'panic mode enabled', got:\n%s", output)
+	}
 }
 
 // TestPublishBlocking_DeliversToSubscribers verifies that PublishBlocking

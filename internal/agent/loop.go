@@ -1405,7 +1405,8 @@ func (l *AgentLoop) CompressionPipeline() *compress.Pipeline {
 // project); callers that know the directory up-front should pass it.
 func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *AgentLoop {
 	if sessionID == "" {
-		panic("NewAgentLoop: sessionID required")
+		slog.Error("NewAgentLoop: sessionID required")
+		return nil
 	}
 	loop := &AgentLoop{
 		sessionID:       sessionID,

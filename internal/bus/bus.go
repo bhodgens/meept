@@ -70,12 +70,12 @@ type MessageBus struct {
 	subMeta map[string]SubMetadata // key = channel address (%p format)
 }
 
-// panicOnUndrainedSubscription enables panic mode for tests.
-// When true, Publish() will panic if called on a topic with no subscribers.
+// panicOnUndrainedSubscription enables error-level logging mode for tests.
+// When true, Publish() will log at Error level if called on a topic with no subscribers.
 var panicOnUndrainedSubscription = false
 
-// SetPanicOnUndrainedSubscription enables/disables panic mode for testing.
-// When enabled, Publish() panics if no subscribers exist for the topic.
+// SetPanicOnUndrainedSubscription enables/disables error-level logging mode for testing.
+// When enabled, Publish() logs at Error level if no subscribers exist for the topic.
 func SetPanicOnUndrainedSubscription(enabled bool) {
 	panicOnUndrainedSubscription = enabled
 }
@@ -129,7 +129,8 @@ func (b *MessageBus) PublishBlocking(topic string, msg *models.BusMessage) int {
 // from WARN to DEBUG. Use this for fire-and-forget event topics that are
 // informational and expected to have no subscriber when no TUI/MCP client is
 // connected (e.g., worker.*, chat.message.received).
-// The panicOnUndrainedSubscription behavior is unchanged — tests still catch bugs.
+// The panicOnUndrainedSubscription behavior is unchanged — it now logs at
+// Error level instead of panicking, so tests still catch missing wiring.
 func (b *MessageBus) PublishExternalOnly(topic string, msg *models.BusMessage) int {
 	return b.publish(topic, msg, true, false)
 }
@@ -175,7 +176,11 @@ func (b *MessageBus) publish(topic string, msg *models.BusMessage, suppressWarni
 				)
 			}
 			if panicOnUndrainedSubscription {
-				panic(fmt.Sprintf("bus: Publish(%q) with no subscribers", topic))
+				b.logger.Error("bus: Publish with no subscribers (panic mode enabled)",
+					"topic", topic,
+					"source", msg.Source,
+					"msg_id", msg.ID,
+				)
 			}
 			return 0
 		}

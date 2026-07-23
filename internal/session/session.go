@@ -1913,12 +1913,13 @@ func (h *Handler) handleRefreshTitle(msg *models.BusMessage) (any, error) {
 	return result, nil
 }
 
-// jsonMustMarshal marshals a value to JSON, panicking on failure.
+// jsonMustMarshal marshals a value to JSON, logging an error and returning nil on failure.
 // Used for internal payloads where marshaling should never fail.
 func jsonMustMarshal(v any) []byte {
 	data, err := json.Marshal(v)
 	if err != nil {
-		panic(err)
+		slog.Error("jsonMustMarshal failed", "error", err)
+		return nil
 	}
 	return data
 }

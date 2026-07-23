@@ -16,11 +16,11 @@ func TestNewAgentLoop_SessionAndWorkingDir(t *testing.T) {
 	assert.Equal(t, "/tmp/work", loop.GetWorkingDir(), "GetWorkingDir should return the constructor argument")
 }
 
-// TestNewAgentLoop_PanicsOnEmptySessionID verifies the sessionID panic guard.
-func TestNewAgentLoop_PanicsOnEmptySessionID(t *testing.T) {
-	require.PanicsWithValue(t, "NewAgentLoop: sessionID required", func() {
-		_ = NewAgentLoop("", "/tmp")
-	})
+// TestNewAgentLoop_NilOnEmptySessionID verifies the sessionID guard logs and
+// returns nil instead of panicking.
+func TestNewAgentLoop_NilOnEmptySessionID(t *testing.T) {
+	loop := NewAgentLoop("", "/tmp")
+	assert.Nil(t, loop, "NewAgentLoop with empty sessionID should return nil")
 }
 
 // TestNewAgentLoop_AllowsEmptyWorkingDir verifies that the constructor permits

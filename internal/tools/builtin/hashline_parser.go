@@ -3,6 +3,7 @@ package builtin
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"strings"
@@ -162,10 +163,11 @@ func (p *PatchParser) GrammarForConstrainedDecoding() string {
 }
 
 // om creates an orderedMap from alternating key-value pairs.
-// Panics if the number of arguments is odd (programming error).
+// Logs an error and returns an empty orderedMap if the number of arguments is odd.
 func om(kv ...any) *orderedMap {
 	if len(kv)%2 != 0 {
-		panic(fmt.Sprintf("om: odd number of key-value arguments: %d", len(kv)))
+		slog.Error("om: odd number of key-value arguments", "count", len(kv))
+		return newOrderedMap()
 	}
 	omVal := newOrderedMap()
 	for i := 0; i < len(kv); i += 2 {

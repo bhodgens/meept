@@ -306,15 +306,12 @@ func (s *Server) toolSessionHistory(args map[string]any) (any, error) {
 	return s.client.GetSessionMessages(sessionID, 0, limit)
 }
 
-// mustMarshal marshals a value to JSON, panicking on error.
-// This is safe for internal use where the types are controlled
-// and marshal errors indicate a programming bug, not user error.
+// mustMarshal marshals a value to JSON, logging an error and returning nil on failure.
 func mustMarshal(v any) json.RawMessage {
 	data, err := json.Marshal(v)
 	if err != nil {
-		// Marshal errors for these controlled types indicate a bug.
-		// Panic to surface the issue during development/testing.
-		panic(fmt.Sprintf("json.Marshal: %v", err))
+		slog.Error("mustMarshal: json.Marshal failed", "err", err)
+		return nil
 	}
 	return data
 }
