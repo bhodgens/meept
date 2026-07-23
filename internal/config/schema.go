@@ -227,10 +227,10 @@ func (c *PlansConfig) Validate() error {
 	// Validate mode if set
 	if c.Mode != "" {
 		switch c.Mode {
-		case "auto", "manual", "hybrid":
+		case "off", "always", "threshold":
 			// valid
 		default:
-			return fmt.Errorf("invalid mode %q: must be auto, manual, or hybrid", c.Mode)
+			return fmt.Errorf("invalid mode %q: must be off, always, or threshold", c.Mode)
 		}
 	}
 	return nil
