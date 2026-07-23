@@ -86,6 +86,12 @@ type Config struct {
 	Timeout            time.Duration // Per-call timeout
 }
 
+// DefaultHTTPBaseURL is the default base URL used by the HTTP transport when
+// no override is provided by the daemon wiring layer. Consumers (e.g. the
+// daemon) can reference this constant when constructing a Config so the
+// transport package does not hardcode the address in DefaultConfig.
+const DefaultHTTPBaseURL = "https://localhost:8081"
+
 // DefaultConfig returns the default client transport config.
 //
 // InsecureSkipVerify defaults to true only for loopback targets when no
@@ -94,12 +100,11 @@ type Config struct {
 // false, and a fingerprint pin (loaded from ~/.meept/tls/fingerprint.txt via
 // transport.New) always takes precedence and forces chain validation on.
 func DefaultConfig() *Config {
-	httpBase := "https://localhost:8081"
 	return &Config{
 		Transport:          "rpc",
 		SocketPath:         "~/.meept/meept.sock",
-		HTTPBaseURL:        httpBase,
-		InsecureSkipVerify: IsLoopbackBaseURL(httpBase),
+		HTTPBaseURL:        DefaultHTTPBaseURL,
+		InsecureSkipVerify: IsLoopbackBaseURL(DefaultHTTPBaseURL),
 		Timeout:            120 * time.Second,
 	}
 }

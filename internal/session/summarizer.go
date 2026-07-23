@@ -10,21 +10,46 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 )
 
+// defaultPromptTruncationLimit is the default max length (in bytes) of the
+// user prompt sent to the LLM before it gets truncated.
+const defaultPromptTruncationLimit = 8000
+
 // Summarizer generates concise session descriptions using an LLM.
 type Summarizer struct {
-	llmClient *llm.Client
-	logger    *slog.Logger
+	llmClient             *llm.Client
+	logger                *slog.Logger
+	promptTruncationLimit int
+}
+
+// SummarizerOption configures a Summarizer constructed via NewSummarizer.
+type SummarizerOption func(*Summarizer)
+
+// WithPromptTruncationLimit overrides the maximum user-prompt length (in bytes)
+// before truncation is applied. Only takes effect when limit > 0.
+func WithPromptTruncationLimit(limit int) SummarizerOption {
+	return func(s *Summarizer) {
+		if limit > 0 {
+			s.promptTruncationLimit = limit
+		}
+	}
 }
 
 // NewSummarizer creates a new session summarizer.
-func NewSummarizer(llmClient *llm.Client, logger *slog.Logger) *Summarizer {
+func NewSummarizer(llmClient *llm.Client, logger *slog.Logger, opts ...SummarizerOption) *Summarizer {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Summarizer{
-		llmClient: llmClient,
-		logger:    logger,
+	s := &Summarizer{
+		llmClient:             llmClient,
+		logger:                logger,
+		promptTruncationLimit: defaultPromptTruncationLimit,
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+	return s
 }
 
 // SummarizeRequest contains the data needed to generate a summary.
@@ -161,8 +186,8 @@ Do not include pleasantries or filler. Be factual and direct.`
 	)
 
 	// Truncate if too long
-	if len(userPrompt) > 8000 {
-		userPrompt = userPrompt[:8000] + "\n... (truncated)"
+	if len(userPrompt) > s.promptTruncationLimit {
+		userPrompt = userPrompt[:s.promptTruncationLimit] + "\n... (truncated)"
 	}
 
 	messages := []llm.ChatMessage{

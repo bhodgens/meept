@@ -52,12 +52,27 @@ func WithAPIKey(key string) HTTPClientOption {
 // httpClient implements transport.Client over HTTP REST.
 // All RPC-style methods are proxied through the /api/v1/bus/call endpoint,
 // which mirrors the JSON-RPC interface over HTTP.
+// DefaultTLSMinVersion is the minimum TLS version used by the HTTP client
+// when no explicit version is configured.
+const DefaultTLSMinVersion = tls.VersionTLS12
+
 type httpClient struct {
 	baseURL         string
 	client          *http.Client
 	apiKey          string
 	certFingerprint string
 	spkiFingerprint string
+	tlsMinVersion   uint16
+}
+
+// WithTLSMinVersion sets the minimum TLS version for the client's TLS config.
+// If version is 0 the default (DefaultTLSMinVersion) is used.
+func WithTLSMinVersion(version uint16) HTTPClientOption {
+	return func(c *httpClient) {
+		if version != 0 {
+			c.tlsMinVersion = version
+		}
+	}
 }
 
 // NewHTTPClient creates an HTTP-backed transport client.
@@ -71,6 +86,13 @@ func NewHTTPClient(baseURL string, timeout time.Duration, opts ...HTTPClientOpti
 	}
 	for _, opt := range opts {
 		opt(c)
+	}
+	// Default to a sane minimum TLS version if no option was provided.
+	if c.tlsMinVersion == 0 {
+		c.tlsMinVersion = DefaultTLSMinVersion
+	}
+	if transport, ok := c.client.Transport.(*http.Transport); ok && transport.TLSClientConfig != nil {
+		transport.TLSClientConfig.MinVersion = c.tlsMinVersion
 	}
 	// If a fingerprint pin was configured, install the verification callback
 	// and force chain validation on. This overrides any InsecureSkipVerify
@@ -90,7 +112,7 @@ func (c *httpClient) applyPinning() {
 		return
 	}
 	transport.TLSClientConfig.InsecureSkipVerify = false
-	transport.TLSClientConfig.MinVersion = tls.VersionTLS12
+	transport.TLSClientConfig.MinVersion = c.tlsMinVersion
 	transport.TLSClientConfig.VerifyPeerCertificate = c.verifyPinnedCert
 }
 
@@ -100,7 +122,7 @@ func (c *httpClient) applyPinning() {
 func (c *httpClient) buildTLSConfig() *tls.Config {
 	cfg := &tls.Config{
 		InsecureSkipVerify: true,
-		MinVersion:         tls.VersionTLS12,
+		MinVersion:         c.tlsMinVersion,
 	}
 	if c.certFingerprint != "" || c.spkiFingerprint != "" {
 		cfg.InsecureSkipVerify = false

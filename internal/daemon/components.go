@@ -20,8 +20,8 @@ import (
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/agents"
-	bkpkg "github.com/caimlas/meept/internal/backup"
 	authpkg "github.com/caimlas/meept/internal/auth"
+	bkpkg "github.com/caimlas/meept/internal/backup"
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/calendar"
@@ -34,22 +34,22 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/debug"
 	"github.com/caimlas/meept/internal/employee"
+	"github.com/caimlas/meept/internal/learning"
 	"github.com/caimlas/meept/internal/lint"
 	"github.com/caimlas/meept/internal/llm"
-	"github.com/caimlas/meept/internal/learning"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	memsync "github.com/caimlas/meept/internal/memory/sync"
 	"github.com/caimlas/meept/internal/memory/vector"
 	"github.com/caimlas/meept/internal/placement"
 	"github.com/caimlas/meept/internal/plan"
-	"github.com/caimlas/meept/internal/resources"
-	"github.com/caimlas/meept/internal/rpc"
 	"github.com/caimlas/meept/internal/preferences"
 	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/pty"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/repomap"
+	"github.com/caimlas/meept/internal/resources"
+	"github.com/caimlas/meept/internal/rpc"
 	"github.com/caimlas/meept/internal/runtime"
 	"github.com/caimlas/meept/internal/scheduler"
 	intsecurity "github.com/caimlas/meept/internal/security"
@@ -1364,6 +1364,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if embedder != nil {
 		storeOpts = append(storeOpts, session.WithEmbeddingDim(embedder.Dimension()))
 	}
+	if cfg.Session.SQLiteBusyTimeoutMs > 0 {
+		storeOpts = append(storeOpts, session.WithBusyTimeoutMs(cfg.Session.SQLiteBusyTimeoutMs))
+	}
 	sessionStore, err := session.NewSQLiteStore(sessionsDB, logger, storeOpts...)
 	if embedder != nil {
 		logger.Info("Session store embedding dimension wired",
@@ -1391,7 +1394,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if summarizerLLM == nil {
 			summarizerLLM = c.LLMClient
 		}
-		summarizer = session.NewSummarizer(summarizerLLM, logger.With("component", "summarizer"))
+		summarizerOpts := []session.SummarizerOption{}
+		if cfg.Session.SummaryPromptTruncationLimit > 0 {
+			summarizerOpts = append(summarizerOpts, session.WithPromptTruncationLimit(cfg.Session.SummaryPromptTruncationLimit))
+		}
+		summarizer = session.NewSummarizer(summarizerLLM, logger.With("component", "summarizer"), summarizerOpts...)
 		sessionOpts = append(sessionOpts, session.WithSummarizer(summarizer))
 		logger.Info("Session summarizer enabled",
 			"model_source", func() string {

@@ -26,10 +26,11 @@ const defaultEmbeddingDim = 768
 
 // SQLiteStore implements Store using SQLite for persistence.
 type SQLiteStore struct {
-	db          *sql.DB
-	mu          sync.RWMutex
-	logger      *slog.Logger
-	embeddingDim int
+	db                 *sql.DB
+	mu                 sync.RWMutex
+	logger             *slog.Logger
+	embeddingDim       int
+	busyTimeoutMs      int
 	designationHistory DesignationHistoryStore
 	// turnGossip, when set, receives a PublishTurn call for each message
 	// written by SaveMessages. The publisher is responsible for any
@@ -64,28 +65,42 @@ func WithTurnGossipPublisher(pub TurnGossipPublisher) Option {
 	}
 }
 
+// WithBusyTimeoutMs overrides the SQLite busy timeout (milliseconds) used in
+// the connection DSN. A non-positive value is ignored (falls back to the
+// 5000ms default). Must be set at construction time; it is baked into the DSN
+// at sql.Open time and cannot be changed afterwards.
+func WithBusyTimeoutMs(ms int) Option {
+	return func(s *SQLiteStore) {
+		if ms > 0 {
+			s.busyTimeoutMs = ms
+		}
+	}
+}
+
 // NewSQLiteStore creates a new SQLite-backed session store.
 func NewSQLiteStore(dbPath string, logger *slog.Logger, opts ...Option) (*SQLiteStore, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=ON")
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-
 	store := &SQLiteStore{
-		db:           db,
-		logger:       logger,
-		embeddingDim: defaultEmbeddingDim,
-		turnGossip:   nopTurnGossipPublisher{},
+		logger:        logger,
+		embeddingDim:  defaultEmbeddingDim,
+		busyTimeoutMs: 5000,
+		turnGossip:    nopTurnGossipPublisher{},
 	}
 	for _, o := range opts {
 		if o != nil {
 			o(store)
 		}
 	}
+
+	dsn := fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=%d&_foreign_keys=ON", dbPath, store.busyTimeoutMs)
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+	store.db = db
 
 	if err := store.migrate(); err != nil {
 		db.Close()
@@ -984,7 +999,6 @@ func (s *SQLiteStore) Archive(sessionID string, archived bool) error {
 	}
 	return nil
 }
-
 
 // UpdateDesignation sets the session's designation status.
 func (s *SQLiteStore) UpdateDesignation(sessionID string, status DesignationStatus, reason, priority string) error {
@@ -2025,7 +2039,10 @@ var _ Store = (*SQLiteStore)(nil)
 // triggers existed. Bounded by a batch size to avoid lock contention.
 func (s *SQLiteStore) backfillFTS() error {
 	const batchSize = 500
-	type row struct{ id int64; sessionID, role, content string }
+	type row struct {
+		id                       int64
+		sessionID, role, content string
+	}
 	for {
 		var batch []row
 		q := `SELECT sm.id, sm.session_id, sm.role, sm.content

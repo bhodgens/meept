@@ -45,55 +45,55 @@ const (
 //gendoc:desc Root configuration structure containing all subsystem configurations.
 //gendoc:example [config] daemon.socket_path = "~/.meept/meept.sock"
 type Config struct {
-	Daemon            DaemonConfig            `json:"daemon"             toml:"daemon"`
-	Transport         TransportConfig         `json:"transport"          toml:"transport"`
-	LLM               LLMConfig               `json:"llm"                toml:"llm"`
-	Memory            MemoryConfig            `json:"memory"             toml:"memory"`
-	Memvid            MemvidConfig            `json:"memvid"             toml:"memvid"`
-	MultiAgent        MultiAgentConfig        `json:"multiagent"         toml:"multiagent"`
-	Agents            AgentsConfig            `json:"agents"             toml:"agents"`
-	Agent             AgentConfig             `json:"agent"              toml:"agent"`
-	Security          SecurityConfig          `json:"security"           toml:"security"`
-	Scheduler         SchedulerConfig         `json:"scheduler"          toml:"scheduler"`
-	Queue             QueueConfig             `json:"queue"              toml:"queue"`
-	Workers           WorkersConfig           `json:"workers"            toml:"workers"`
-	Isolation         IsolationConfig         `json:"isolation"          toml:"isolation"`
-	Telegram          TelegramConfig          `json:"telegram"           toml:"telegram"`
-	Web               WebConfig               `json:"web"                toml:"web"`
-	MCP               MCPConfig               `json:"mcp"                toml:"mcp"`
-	Plugins           PluginsConfig           `json:"plugins"            toml:"plugins"`
-	Workspace         WorkspaceConfig         `json:"workspace"          toml:"workspace"`
-	Skills            SkillsConfig            `json:"skills"             toml:"skills"`
-	SelfImprove       SelfImproveConfig       `json:"selfimprove"        toml:"selfimprove"`
-	Orchestrator      OrchestratorConfig      `json:"orchestrator"       toml:"orchestrator"`
-	Shadow            ShadowConfig            `json:"shadow"             toml:"shadow"`
-	DistributedMemory DistributedMemoryConfig `json:"distributed_memory" toml:"distributed_memory"`
-	QAgent            QAgentConfig            `json:"q_agent"            toml:"q_agent"`
-	CodeIntel         CodeIntelConfig         `json:"code_intel"         toml:"code_intel"`
-	Calendar          CalendarConfig          `json:"calendar"           toml:"calendar"`
-	Tooling           ToolingConfig           `json:"tooling"            toml:"tooling"`
-	Compaction        CompactionConfig        `json:"compaction"         toml:"compaction"`
-	Session           SessionConfig           `json:"session"            toml:"session"`
-	Cluster           ClusterConfig           `json:"cluster"             toml:"cluster"`
-	Bots              BotsConfig              `json:"bots"                toml:"bots"`
-	Employees         EmployeesConfig         `json:"employees"           toml:"employees"`
-	Plans             PlansConfig             `json:"plans"               toml:"plans"`
-	Projects          ProjectsConfig          `json:"projects"            toml:"projects"`
-	ProjectsRecent    ProjectRecentConfig     `json:"projects_recent"     toml:"projects_recent"`
-	STT               STTConfig               `json:"stt"                 toml:"stt"`
-	TTS               TTSConfig               `json:"tts"                 toml:"tts"`
-	OAuth             OAuthConfig             `json:"oauth"               toml:"oauth"`
-	Analytics         AnalyticsConfig         `json:"analytics,omitempty" toml:"analytics"`
-	Notifications     NotificationsConfig     `json:"notifications,omitempty" toml:"notifications"`
-	Runtime           RuntimeConfig           `json:"runtime"             toml:"runtime"`
-	PTY               PTYConfig               `json:"pty"                  toml:"pty"`
-	Reasoning         ReasoningGlobalConfig   `json:"reasoning"            toml:"reasoning"`
-	Hooks             HooksConfig             `json:"hooks"                toml:"hooks"`
+	Daemon              DaemonConfig              `json:"daemon"             toml:"daemon"`
+	Transport           TransportConfig           `json:"transport"          toml:"transport"`
+	LLM                 LLMConfig                 `json:"llm"                toml:"llm"`
+	Memory              MemoryConfig              `json:"memory"             toml:"memory"`
+	Memvid              MemvidConfig              `json:"memvid"             toml:"memvid"`
+	MultiAgent          MultiAgentConfig          `json:"multiagent"         toml:"multiagent"`
+	Agents              AgentsConfig              `json:"agents"             toml:"agents"`
+	Agent               AgentConfig               `json:"agent"              toml:"agent"`
+	Security            SecurityConfig            `json:"security"           toml:"security"`
+	Scheduler           SchedulerConfig           `json:"scheduler"          toml:"scheduler"`
+	Queue               QueueConfig               `json:"queue"              toml:"queue"`
+	Workers             WorkersConfig             `json:"workers"            toml:"workers"`
+	Isolation           IsolationConfig           `json:"isolation"          toml:"isolation"`
+	Telegram            TelegramConfig            `json:"telegram"           toml:"telegram"`
+	Web                 WebConfig                 `json:"web"                toml:"web"`
+	MCP                 MCPConfig                 `json:"mcp"                toml:"mcp"`
+	Plugins             PluginsConfig             `json:"plugins"            toml:"plugins"`
+	Workspace           WorkspaceConfig           `json:"workspace"          toml:"workspace"`
+	Skills              SkillsConfig              `json:"skills"             toml:"skills"`
+	SelfImprove         SelfImproveConfig         `json:"selfimprove"        toml:"selfimprove"`
+	Orchestrator        OrchestratorConfig        `json:"orchestrator"       toml:"orchestrator"`
+	Shadow              ShadowConfig              `json:"shadow"             toml:"shadow"`
+	DistributedMemory   DistributedMemoryConfig   `json:"distributed_memory" toml:"distributed_memory"`
+	QAgent              QAgentConfig              `json:"q_agent"            toml:"q_agent"`
+	CodeIntel           CodeIntelConfig           `json:"code_intel"         toml:"code_intel"`
+	Calendar            CalendarConfig            `json:"calendar"           toml:"calendar"`
+	Tooling             ToolingConfig             `json:"tooling"            toml:"tooling"`
+	Compaction          CompactionConfig          `json:"compaction"         toml:"compaction"`
+	Session             SessionConfig             `json:"session"            toml:"session"`
+	Cluster             ClusterConfig             `json:"cluster"             toml:"cluster"`
+	Bots                BotsConfig                `json:"bots"                toml:"bots"`
+	Employees           EmployeesConfig           `json:"employees"           toml:"employees"`
+	Plans               PlansConfig               `json:"plans"               toml:"plans"`
+	Projects            ProjectsConfig            `json:"projects"            toml:"projects"`
+	ProjectsRecent      ProjectRecentConfig       `json:"projects_recent"     toml:"projects_recent"`
+	STT                 STTConfig                 `json:"stt"                 toml:"stt"`
+	TTS                 TTSConfig                 `json:"tts"                 toml:"tts"`
+	OAuth               OAuthConfig               `json:"oauth"               toml:"oauth"`
+	Analytics           AnalyticsConfig           `json:"analytics,omitempty" toml:"analytics"`
+	Notifications       NotificationsConfig       `json:"notifications,omitempty" toml:"notifications"`
+	Runtime             RuntimeConfig             `json:"runtime"             toml:"runtime"`
+	PTY                 PTYConfig                 `json:"pty"                  toml:"pty"`
+	Reasoning           ReasoningGlobalConfig     `json:"reasoning"            toml:"reasoning"`
+	Hooks               HooksConfig               `json:"hooks"                toml:"hooks"`
 	ReflectionCollector ReflectionCollectorConfig `json:"reflection_collector" toml:"reflection_collector"`
-	Backup              BackupConfig            `json:"backup"              toml:"backup"`
-	PeerSync            PeerSyncConfig          `json:"peer_sync"           toml:"peer_sync"`
-	ConfigSync          ConfigSyncConfig        `json:"config_sync"         toml:"config_sync"`
-	Learning            LearningConfig          `json:"learning"            toml:"learning"`
+	Backup              BackupConfig              `json:"backup"              toml:"backup"`
+	PeerSync            PeerSyncConfig            `json:"peer_sync"           toml:"peer_sync"`
+	ConfigSync          ConfigSyncConfig          `json:"config_sync"         toml:"config_sync"`
+	Learning            LearningConfig            `json:"learning"            toml:"learning"`
 }
 
 // ReasoningGlobalConfig holds global reasoning/thinking settings, currently
@@ -389,6 +389,15 @@ type SessionConfig struct {
 	// ThreadsEnabled controls whether the thread feature is available.
 	// Default true (threads replace branches).
 	ThreadsEnabled bool `json:"threads_enabled" toml:"threads_enabled"`
+
+	// SQLiteBusyTimeoutMs is the busy timeout (in milliseconds) for the SQLite
+	// session store's _busy_timeout PRAGMA. Default 5000.
+	SQLiteBusyTimeoutMs int `json:"sqlite_busy_timeout_ms" toml:"sqlite_busy_timeout_ms"`
+
+	// SummaryPromptTruncationLimit is the maximum character length of the user
+	// prompt sent to the LLM during session summarization. Prompts exceeding
+	// this limit are truncated. Default 8000.
+	SummaryPromptTruncationLimit int `json:"summary_prompt_truncation_limit" toml:"summary_prompt_truncation_limit"`
 }
 
 // ASTConfig holds AST parsing settings.
@@ -441,19 +450,19 @@ type LSPServerConfig struct {
 //gendoc:desc Configuration for the daemon process including socket, logging, and data directory.
 //gendoc:example [daemon] socket_path = "~/.meept/meept.sock"
 type DaemonConfig struct {
-	SocketPath          string          `json:"socket_path"         toml:"socket_path"`
-	PIDFile             string          `json:"pid_file"             toml:"pid_file"`
-	LogLevel            string          `json:"log_level"             toml:"log_level"`
-	DataDir             string          `json:"data_dir"             toml:"data_dir"`
-	ShutdownTimeout     string          `json:"shutdown_timeout"     toml:"shutdown_timeout"`
-	ChatTimeoutSeconds  int             `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
-	Uploads             UploadsConfig   `json:"uploads"              toml:"uploads"`
-	UserInstructions    InstructionConfig `json:"user_instructions"    toml:"user_instructions"`
+	SocketPath         string            `json:"socket_path"         toml:"socket_path"`
+	PIDFile            string            `json:"pid_file"             toml:"pid_file"`
+	LogLevel           string            `json:"log_level"             toml:"log_level"`
+	DataDir            string            `json:"data_dir"             toml:"data_dir"`
+	ShutdownTimeout    string            `json:"shutdown_timeout"     toml:"shutdown_timeout"`
+	ChatTimeoutSeconds int               `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
+	Uploads            UploadsConfig     `json:"uploads"              toml:"uploads"`
+	UserInstructions   InstructionConfig `json:"user_instructions"    toml:"user_instructions"`
 }
 
 // InstructionConfig holds user instruction automation settings.
 type InstructionConfig struct {
-	Enabled       bool `json:"enabled"       toml:"enabled"`
+	Enabled bool `json:"enabled"       toml:"enabled"`
 }
 
 // UploadsConfig configures the file upload service for multimodal content.
@@ -889,8 +898,8 @@ type AgentRetryConfig struct {
 
 // AgentBackoffConfig holds per-operation backoff parameters.
 type AgentBackoffConfig struct {
-	BaseDelay  string  `json:"base_delay"  toml:"base_delay"`  // duration string, e.g. "1s"
-	MaxDelay   string  `json:"max_delay"   toml:"max_delay"`   // duration string, e.g. "30s"
+	BaseDelay  string  `json:"base_delay"  toml:"base_delay"` // duration string, e.g. "1s"
+	MaxDelay   string  `json:"max_delay"   toml:"max_delay"`  // duration string, e.g. "30s"
 	Multiplier float64 `json:"multiplier"  toml:"multiplier"`
 	Jitter     float64 `json:"jitter"      toml:"jitter"`
 	Budget     int     `json:"budget"      toml:"budget"` // per-operation retry budget (0 = use DefaultBudget)
@@ -906,8 +915,8 @@ type AgentStateTrackingConfig struct {
 
 // AgentBudgetConfig configures hierarchical task/phase/turn token budgets.
 type AgentBudgetConfig struct {
-	Total             int                     `json:"total"              toml:"total"`              // Total task budget in tokens
-	ReservedRatio     float64                 `json:"reserved_ratio"     toml:"reserved_ratio"`    // Emergency reserve fraction (0.0-1.0)
+	Total             int                     `json:"total"              toml:"total"`          // Total task budget in tokens
+	ReservedRatio     float64                 `json:"reserved_ratio"     toml:"reserved_ratio"` // Emergency reserve fraction (0.0-1.0)
 	Phases            AgentBudgetPhasesConfig `json:"phases"             toml:"phases"`
 	WarningThresholds AgentBudgetThresholds   `json:"warning_thresholds" toml:"warning_thresholds"`
 }
@@ -1341,13 +1350,13 @@ type WorkspaceConfig struct {
 
 // SkillsConfig holds skills settings.
 type SkillsConfig struct {
-	Enabled               bool               `json:"enabled"                 toml:"enabled"`
-	SearchPaths           []string           `json:"search_paths"            toml:"search_paths"`           // Additional skill directories beyond defaults
-	AutoReload            bool               `json:"auto_reload"             toml:"auto_reload"`            // Watch for skill file changes
-	CacheSize             int                `json:"max_cached_skills"       toml:"max_cached_skills"`      // Max skills to cache in lazy loader (default: 50)
-	AutoDiscoverHermes    bool               `json:"auto_discover_hermes"    toml:"auto_discover_hermes"`   // Auto-discover ~/.hermes/skills (default: true)
-	HermesSkillsDir       string             `json:"hermes_skills_dir"       toml:"hermes_skills_dir"`      // Path to Hermes skills directory (default: ~/.hermes/skills)
-	ValidatePrerequisites bool               `json:"validate_prerequisites"  toml:"validate_prerequisites"` // Validate Hermes skill prerequisites before execution (default: true)
+	Enabled               bool                `json:"enabled"                 toml:"enabled"`
+	SearchPaths           []string            `json:"search_paths"            toml:"search_paths"`           // Additional skill directories beyond defaults
+	AutoReload            bool                `json:"auto_reload"             toml:"auto_reload"`            // Watch for skill file changes
+	CacheSize             int                 `json:"max_cached_skills"       toml:"max_cached_skills"`      // Max skills to cache in lazy loader (default: 50)
+	AutoDiscoverHermes    bool                `json:"auto_discover_hermes"    toml:"auto_discover_hermes"`   // Auto-discover ~/.hermes/skills (default: true)
+	HermesSkillsDir       string              `json:"hermes_skills_dir"       toml:"hermes_skills_dir"`      // Path to Hermes skills directory (default: ~/.hermes/skills)
+	ValidatePrerequisites bool                `json:"validate_prerequisites"  toml:"validate_prerequisites"` // Validate Hermes skill prerequisites before execution (default: true)
 	Evolver               SkillsEvolverConfig `json:"evolver"                 toml:"evolver"`                // Closed-loop skill evolution settings
 }
 
@@ -1355,15 +1364,15 @@ type SkillsConfig struct {
 // that reads usage stats and learned patterns, decides skill improvements,
 // and applies them gated by the verifier.
 type SkillsEvolverConfig struct {
-	Enabled                      bool          `json:"enabled"                        toml:"enabled"`
-	Interval                     time.Duration `json:"interval"                       toml:"interval"`                         // Default 6h
-	MinInjections                int           `json:"min_injections"                 toml:"min_injections"`                   // Default 5
-	MinEffectiveness             float64       `json:"min_effectiveness"              toml:"min_effectiveness"`                // Prune threshold; default 0.2
-	PatternPromotionConfidence   float64       `json:"pattern_promotion_confidence"   toml:"pattern_promotion_confidence"`     // Default 0.7
-	PatternPromotionUseCount     int           `json:"pattern_promotion_use_count"    toml:"pattern_promotion_use_count"`      // Default 5
-	MinProposalConfidence        float64       `json:"min_proposal_confidence"        toml:"min_proposal_confidence"`          // Default 0.7; reflection proposals below this confidence are dropped before reaching the verifier
-	AutoApply                    bool          `json:"auto_apply"                     toml:"auto_apply"`                       // Default false (requires plan approval)
-	RunOnStart                   bool          `json:"run_on_start"                   toml:"run_on_start"`                     // Default false; when true, scheduler runs one cycle immediately on Start (noisy on daemon startup)
+	Enabled                    bool          `json:"enabled"                        toml:"enabled"`
+	Interval                   time.Duration `json:"interval"                       toml:"interval"`                     // Default 6h
+	MinInjections              int           `json:"min_injections"                 toml:"min_injections"`               // Default 5
+	MinEffectiveness           float64       `json:"min_effectiveness"              toml:"min_effectiveness"`            // Prune threshold; default 0.2
+	PatternPromotionConfidence float64       `json:"pattern_promotion_confidence"   toml:"pattern_promotion_confidence"` // Default 0.7
+	PatternPromotionUseCount   int           `json:"pattern_promotion_use_count"    toml:"pattern_promotion_use_count"`  // Default 5
+	MinProposalConfidence      float64       `json:"min_proposal_confidence"        toml:"min_proposal_confidence"`      // Default 0.7; reflection proposals below this confidence are dropped before reaching the verifier
+	AutoApply                  bool          `json:"auto_apply"                     toml:"auto_apply"`                   // Default false (requires plan approval)
+	RunOnStart                 bool          `json:"run_on_start"                   toml:"run_on_start"`                 // Default false; when true, scheduler runs one cycle immediately on Start (noisy on daemon startup)
 }
 
 // SelfImproveConfig holds self-improvement settings.
@@ -1381,11 +1390,11 @@ type SelfImproveConfig struct {
 
 // LearningConfig holds LoRA learning pipeline settings.
 type LearningConfig struct {
-	Enabled     bool                   `json:"enabled"       toml:"enabled"`
-	DataDir     string                 `json:"data_dir"      toml:"data_dir"`
-	AdaptersDir string                 `json:"adapters_dir"  toml:"adapters_dir"`
-	Capture     LearningCaptureConfig  `json:"capture"       toml:"capture"`
-	Training    LearningTrainingConfig `json:"training"      toml:"training"`
+	Enabled     bool                    `json:"enabled"       toml:"enabled"`
+	DataDir     string                  `json:"data_dir"      toml:"data_dir"`
+	AdaptersDir string                  `json:"adapters_dir"  toml:"adapters_dir"`
+	Capture     LearningCaptureConfig   `json:"capture"       toml:"capture"`
+	Training    LearningTrainingConfig  `json:"training"      toml:"training"`
 	Retention   LearningRetentionConfig `json:"retention"    toml:"retention"`
 }
 
@@ -1398,9 +1407,9 @@ type LearningCaptureConfig struct {
 
 // LearningTrainingConfig holds settings for LoRA training.
 type LearningTrainingConfig struct {
-	DefaultModel        string `json:"default_model"          toml:"default_model"`
-	AutoTrainThreshold  int    `json:"auto_train_threshold"   toml:"auto_train_threshold"`
-	ManualOnly          bool   `json:"manual_only"            toml:"manual_only"`
+	DefaultModel       string `json:"default_model"          toml:"default_model"`
+	AutoTrainThreshold int    `json:"auto_train_threshold"   toml:"auto_train_threshold"`
+	ManualOnly         bool   `json:"manual_only"            toml:"manual_only"`
 }
 
 // LearningRetentionConfig holds dataset retention settings.
@@ -1737,6 +1746,12 @@ func DefaultConfig() *Config {
 				MaxVersions: 10,
 			},
 			ProjectOverrides: make(map[string]MemoryLimitsConfig),
+			Embeddings: EmbeddingConfig{
+				Provider:  "ollama",
+				BaseURL:   "http://localhost:11434",
+				Model:     "nomic-embed-text",
+				Dimension: 768,
+			},
 		},
 		Memvid: MemvidConfig{
 			Enabled:  false,
@@ -2184,12 +2199,14 @@ func DefaultConfig() *Config {
 			TimeoutSeconds:    30,
 		},
 		Session: SessionConfig{
-			Persistence:            false,
-			Branching:              true,
-			BranchSummaryThreshold: 3,
-			RestoreMessageLimit:    0,
-			BranchesEnabled:        false, // Deprecated: use threads instead
-			ThreadsEnabled:         true,
+			Persistence:                  false,
+			Branching:                    true,
+			BranchSummaryThreshold:       3,
+			RestoreMessageLimit:          0,
+			BranchesEnabled:              false, // Deprecated: use threads instead
+			ThreadsEnabled:               true,
+			SQLiteBusyTimeoutMs:          5000,
+			SummaryPromptTruncationLimit: 8000,
 		},
 		Cluster: DefaultClusterConfig(),
 		Bots: BotsConfig{
@@ -2203,15 +2220,15 @@ func DefaultConfig() *Config {
 		Employees: EmployeesConfig{
 			Enabled: true,
 			Audit: EmployeesAuditConfig{
-				Model:                "",
-				PeriodicInterval:     "6h",
-				DriftPauseThreshold:  0.3,
+				Model:                 "",
+				PeriodicInterval:      "6h",
+				DriftPauseThreshold:   0.3,
 				FindingsRetentionDays: 90,
 			},
 			AutoPause: EmployeesAutoPauseConfig{
-				OnCriticalFinding:    true,
-				OnDrift:              true,
-				OnNeverViolation:     true,
+				OnCriticalFinding:     true,
+				OnDrift:               true,
+				OnNeverViolation:      true,
 				RequireOperatorResume: true,
 			},
 		},
@@ -2306,10 +2323,10 @@ type AnalyticsConfig struct {
 
 // NotificationsConfig holds configuration for desktop notifications.
 type NotificationsConfig struct {
-	Enabled        bool            `json:"enabled,omitempty"        toml:"enabled"`
-	Retention      int             `json:"retention,omitempty"      toml:"retention"`
-	MaxPerMinute   int             `json:"max_per_minute,omitempty" toml:"max_per_minute"`
-	EnableTypes    map[string]bool `json:"enable_types,omitempty"   toml:"enable_types"`
+	Enabled      bool            `json:"enabled,omitempty"        toml:"enabled"`
+	Retention    int             `json:"retention,omitempty"      toml:"retention"`
+	MaxPerMinute int             `json:"max_per_minute,omitempty" toml:"max_per_minute"`
+	EnableTypes  map[string]bool `json:"enable_types,omitempty"   toml:"enable_types"`
 	// DoNotDisturb globally suppresses all desktop notifications when true.
 	// Unlike the per-type/per-channel filters in NotificationPreferences,
 	// this flag is checked at the EventEmitter dispatch layer and blocks

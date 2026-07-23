@@ -183,13 +183,21 @@ type OllamaProviderConfig struct {
 	Logger    *slog.Logger
 }
 
+// Default constants for Ollama embedding providers.
+const (
+	// DefaultOllamaBaseURL is the default Ollama API endpoint.
+	DefaultOllamaBaseURL = "http://localhost:11434"
+	// DefaultOllamaModel is the default embedding model name.
+	DefaultOllamaModel = "nomic-embed-text"
+)
+
 // NewOllamaProvider creates a new Ollama embedding provider.
 func NewOllamaProvider(cfg OllamaProviderConfig) *OllamaProvider {
 	if cfg.Model == "" {
-		cfg.Model = "nomic-embed-text"
+		cfg.Model = DefaultOllamaModel
 	}
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = "http://localhost:11434"
+		cfg.BaseURL = DefaultOllamaBaseURL
 	}
 	if cfg.Dimension == 0 {
 		cfg.Dimension = 768 // nomic-embed-text default
