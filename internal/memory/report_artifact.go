@@ -3,6 +3,7 @@ package memory
 import (
 	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -137,13 +138,14 @@ func (rs *ReportStore) upsertArtifact(tx *sql.Tx, runID, path string, sizeBytes 
 }
 
 // generateID creates a random 16-char ID.
+// generateID creates a cryptographically secure random ID.
 func (rs *ReportStore) generateID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback to timestamp-based ID if crypto/rand fails.
-		return fmt.Sprintf("%d", time.Now().UnixNano())
+		// Fallback to UUID-like ID if crypto/rand fails (extremely rare).
+		return fmt.Sprintf("fallback-%x", time.Now().UnixNano())
 	}
-	return fmt.Sprintf("%x", b)[:16]
+	return hex.EncodeToString(b)[:16]
 }
 
 // OutputDirForRun returns the output directory for a run ID.

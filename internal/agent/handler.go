@@ -1595,8 +1595,7 @@ func generateMessageID() string {
 	var randBytes [4]byte
 	if _, err := crypto_rand.Read(randBytes[:]); err != nil {
 		// Fallback: use nanosecond timestamp uniqueness if crypto/rand fails.
-		return time.Now().Format("20060102150405.000000000") + "-" +
-			fmt.Sprintf("%0d", time.Now().UnixNano())
+		return time.Now().Format("20060102150405.000000000") + "-fallback"
 	}
 	return time.Now().Format("20060102150405.000000000") + "-" + hex.EncodeToString(randBytes[:])
 }

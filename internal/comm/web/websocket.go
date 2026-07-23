@@ -170,14 +170,6 @@ func (wcl *wsConnLimiter) getConnectionCount(ip string) int {
 	return wcl.conns[ip]
 }
 
-// increment increments the connection count for an IP and returns the new count.
-func (wcl *wsConnLimiter) increment(ip string) int {
-	wcl.mu.Lock()
-	defer wcl.mu.Unlock()
-	wcl.conns[ip]++
-	return wcl.conns[ip]
-}
-
 // decrement decrements the connection count for an IP and returns the new count.
 // If count reaches zero, the entry is removed to prevent unbounded growth.
 func (wcl *wsConnLimiter) decrement(ip string) int {

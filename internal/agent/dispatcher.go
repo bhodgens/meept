@@ -393,9 +393,8 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 // tests or short-lived processes. Long-lived daemons can rely on process
 // exit, but wiring Stop into the daemon shutdown path is recommended.
 //
-// TODO: wire Stop() into Components.Stop() in internal/daemon/components.go
-// for a fully clean shutdown. Today the dispatcher lives for the daemon
-// lifetime so the leak is benign, but adding the call closes the gap.
+// Stop cancels the semantic index BuildIndex goroutine and waits for it to
+// finish. Called from Components.Stop() during daemon shutdown.
 func (d *Dispatcher) Stop() {
 	if d.indexCancel != nil {
 		d.indexCancel()

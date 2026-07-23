@@ -228,7 +228,7 @@ func (ra *ReportArtifact) writeMarkdown(dir string, failures []FailureMode, anal
 	sb.WriteString("## Executive Summary\n\n")
 	sb.WriteString(fmt.Sprintf("- **Generated**: %s\n", time.Now().UTC().Format(time.RFC3339)))
 	sb.WriteString(fmt.Sprintf("- **Failure Modes Detected**: %d\n", len(failures)))
-	sb.WriteString(fmt.Sprintf("- **Severity Breakdown**:\n\n"))
+	sb.WriteString("- **Severity Breakdown**:\n\n")
 
 	sevCount := make(map[string]int)
 	for _, fm := range failures {

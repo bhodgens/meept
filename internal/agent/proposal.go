@@ -291,10 +291,10 @@ func IsSafeTargetPath(target string) bool {
 func generateProposalID() string {
 	b := make([]byte, 6)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback to timestamp if rand fails (shouldn't happen in practice)
-		return fmt.Sprintf("p%d", time.Now().UnixNano())
+		// Fallback to UUID-like ID if rand fails (shouldn't happen in practice)
+		return fmt.Sprintf("p-fallback-%x", time.Now().UnixNano())
 	}
-	return hex.EncodeToString(b)
+	return "p-" + hex.EncodeToString(b)
 }
 
 // ProposalQueueExternal is the exported wrapper around proposalQueue for

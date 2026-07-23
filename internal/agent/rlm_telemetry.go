@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -71,9 +73,10 @@ func (te *TelemetryEmitter) EmitSpan(span OTLPSpan) error {
 
 // EmitLLMSpan is a convenience helper for emitting LLM call spans.
 func (te *TelemetryEmitter) EmitLLMSpan(name, model, prompt string, completion string, promptTokens, completionTokens int) error {
+	spanID := generateSpanID()
 	span := OTLPSpan{
 		TraceID:   te.runID,
-		SpanID:    fmt.Sprintf("llm-%d", time.Now().UnixNano()),
+		SpanID:    spanID,
 		Name:      name,
 		Kind:      "LLM",
 		StartTime: time.Now(),
@@ -94,7 +97,7 @@ func (te *TelemetryEmitter) EmitToolSpan(name, toolName, input, output string, d
 	now := time.Now()
 	span := OTLPSpan{
 		TraceID:   te.runID,
-		SpanID:    fmt.Sprintf("tool-%d", now.UnixNano()),
+		SpanID:    generateSpanID(),
 		Name:      name,
 		Kind:      "TOOL",
 		StartTime: now.Add(-time.Duration(durationMs) * time.Millisecond),
@@ -113,7 +116,7 @@ func (te *TelemetryEmitter) EmitToolSpan(name, toolName, input, output string, d
 func (te *TelemetryEmitter) EmitAgentSpan(name, agentID, content string, depth int) error {
 	span := OTLPSpan{
 		TraceID:   te.runID,
-		SpanID:    fmt.Sprintf("agent-%d", time.Now().UnixNano()),
+		SpanID:    generateSpanID(),
 		Name:      name,
 		Kind:      "AGENT",
 		StartTime: time.Now(),
@@ -135,4 +138,14 @@ func (te *TelemetryEmitter) IsEnabled() bool {
 // Path returns the telemetry file path (empty if disabled).
 func (te *TelemetryEmitter) Path() string {
 	return te.path
+}
+
+// generateSpanID creates a cryptographically secure random span ID.
+func generateSpanID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-based ID if crypto/rand fails (extremely rare).
+		return fmt.Sprintf("span-%x", time.Now().UnixNano())
+	}
+	return "span-" + hex.EncodeToString(b)
 }

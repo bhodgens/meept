@@ -301,16 +301,7 @@ func (h *RPCHandler) handleUpdate(ctx context.Context, raw json.RawMessage) (any
 	if len(req.Constitution) > 0 {
 		return nil, fmt.Errorf("constitution changes are not allowed via update; use `meept agents amend <id> --field=<key> <value>` to propose an amendment through the plan signoff workflow")
 	}
-	updated, err := h.manager.UpdateEmployee(ctx, UpdateRequest{
-		ID:           req.ID,
-		Name:         req.Name,
-		Description:  req.Description,
-		Prompt:       req.Prompt,
-		Model:        req.Model,
-		Tools:        req.Tools,
-		Enabled:      req.Enabled,
-		Constitution: req.Constitution,
-	})
+	updated, err := h.manager.UpdateEmployee(ctx, UpdateRequest(req))
 	if err != nil {
 		return nil, fmt.Errorf("update: %w", err)
 	}

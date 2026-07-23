@@ -1728,7 +1728,7 @@ func (h *CommandHandler) executeProjectInfo() *CommandResult {
 			}
 		}
 
-		sb.WriteString(fmt.Sprintf("\nuse /project set <path|name> to switch the current session's project\n"))
+		sb.WriteString("\nuse /project set <path|name> to switch the current session's project\n")
 		sb.WriteString(fmt.Sprintf("registered %d project(s). base_dir: ~/.meept/projects\n\n", len(projects.Projects)))
 	} else if len(recents) > 0 || len(matches) > 0 {
 		// No registered projects but recents or filesystem matches available.

@@ -236,7 +236,7 @@ func sumCompactTurnTokens(turns []agent.CompactTurn) int {
 func generateReport(modes []agent.FailureMode) string {
 	var sb strings.Builder
 	sb.WriteString("# HALO Trace Analysis Report\n\n")
-	sb.WriteString(fmt.Sprintf("## Summary\n\n"))
+	sb.WriteString("## Summary\n\n")
 	sb.WriteString(fmt.Sprintf("Failure modes found: **%d**\n\n", len(modes)))
 
 	if len(modes) == 0 {

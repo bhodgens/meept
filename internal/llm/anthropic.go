@@ -169,9 +169,7 @@ func (c *AnthropicClient) anthropicRequestURL(streaming bool) string {
 	// OpenRouter and other OpenAI-compatible gateways expose Anthropic
 	// behind /api/v1; strip a trailing /v1 so appending /v1/messages
 	// doesn't yield /v1/v1/messages.
-	if strings.HasSuffix(base, "/v1") {
-		base = strings.TrimSuffix(base, "/v1")
-	}
+	base = strings.TrimSuffix(base, "/v1")
 	return base + "/v1/messages"
 }
 

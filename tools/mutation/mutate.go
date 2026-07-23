@@ -215,8 +215,8 @@ func (r *MutationReport) AddResult(res MutationResult) {
 // String returns a human-readable report.
 func (r *MutationReport) String() string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Mutation Testing Report\n"))
-	sb.WriteString(fmt.Sprintf("=======================\n"))
+	sb.WriteString("Mutation Testing Report\n")
+	sb.WriteString("=======================\n")
 	sb.WriteString(fmt.Sprintf("Total mutations: %d\n", r.TotalMutations))
 	sb.WriteString(fmt.Sprintf("Killed (caught): %d\n", r.KilledMutations))
 	sb.WriteString(fmt.Sprintf("Survived (missed): %d\n", r.SurvivedMutations))

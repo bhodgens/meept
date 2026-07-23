@@ -455,10 +455,7 @@ func (c *Collector) recordReviewMetrics(msg *models.BusMessage) {
 //   - worker.pool.started   → "pool_started"
 //   - worker.pool.stopped   → "pool_stopped"
 func (c *Collector) recordWorkerMetrics(msg *models.BusMessage) {
-	eventType := msg.Topic
-	if strings.HasPrefix(eventType, "worker.") {
-		eventType = strings.TrimPrefix(eventType, "worker.")
-	}
+	eventType := strings.TrimPrefix(msg.Topic, "worker.")
 
 	source := msg.Source
 	if source == "" {

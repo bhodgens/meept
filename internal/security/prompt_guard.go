@@ -90,7 +90,7 @@ func (pg *PromptGuard) WrapUserInput(text string) string {
 	// Neutralize embedded end markers by escaping them with zero-width space
 	// to prevent attackers from closing the boundary early
 	neutralized := strings.ReplaceAll(text, UserInputEnd, "<"+UserInputEnd)
-	neutralized = strings.ReplaceAll(neutralized, UserInputStart, UserInputStart[:len(UserInputStart)-3]+"‌>>>")
+	neutralized = strings.ReplaceAll(neutralized, UserInputStart, UserInputStart[:len(UserInputStart)-3]+"\u200c>>>")
 	return fmt.Sprintf("%s\n%s\n%s", UserInputStart, neutralized, UserInputEnd)
 }
 

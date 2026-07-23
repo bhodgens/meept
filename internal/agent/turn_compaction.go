@@ -328,22 +328,24 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	}
 	tmpPath := f.Name()
 
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(tmpPath)
+	defer func() {
+		if err != nil {
+			f.Close()
+			os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err = f.Write(data); err != nil {
 		return fmt.Errorf("write temp file: %w", err)
 	}
-	if err := f.Chmod(perm); err != nil {
-		f.Close()
-		os.Remove(tmpPath)
+	if err = f.Chmod(perm); err != nil {
 		return fmt.Errorf("chmod temp file: %w", err)
 	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmpPath)
+	if err = f.Close(); err != nil {
 		return fmt.Errorf("close temp file: %w", err)
 	}
 
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err = os.Rename(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("rename temp to %s: %w", path, err)
 	}
