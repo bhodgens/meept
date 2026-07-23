@@ -160,7 +160,27 @@ func TestRefreshManager_TracksFailures(t *testing.T) {
 	defer cancel()
 
 	rm.Start(ctx, 100*time.Millisecond)
-	time.Sleep(500 * time.Millisecond)
+
+	// Poll for the stale reset: after 3 consecutive failures the counter
+	// resets to 0. We wait for that reset rather than using a fixed sleep,
+	// which is timing-dependent and flaky.
+	//
+	// Phase 1: wait for the first failure to be recorded.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if rm.Failures("fail-provider") > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// Phase 2: wait for the counter to reset (after 3 failures it's deleted).
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if rm.Failures("fail-provider") == 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	rm.Stop()
 
 	// After 3 failures, the counter should be reset (logged as stale).

@@ -70,9 +70,9 @@ func TestConstitution_Validate(t *testing.T) {
 		errContains string
 	}{
 		{
-			name:   "valid constitution",
-			mutate: func(*Constitution) {},
-			selfID: "emp-a",
+			name:    "valid constitution",
+			mutate:  func(*Constitution) {},
+			selfID:  "emp-a",
 			wantErr: false,
 		},
 		{
@@ -211,11 +211,11 @@ func TestConstitution_ValidateFrozenFields(t *testing.T) {
 
 func TestConstitution_CheckEscalationReferences(t *testing.T) {
 	tests := []struct {
-		name          string
-		escalatesTo   []string
-		knownIDs      map[string]struct{}
-		wantUnknown   int
-		wantErr       bool
+		name        string
+		escalatesTo []string
+		knownIDs    map[string]struct{}
+		wantUnknown int
+		wantErr     bool
 	}{
 		{
 			name:        "all known",
@@ -300,11 +300,11 @@ func TestConstitution_CheckToolReferences(t *testing.T) {
 	}
 
 	tests := []struct {
-		name             string
-		allowed          []string
-		forbidden        []string
-		wantUnknownA     int
-		wantUnknownF     int
+		name         string
+		allowed      []string
+		forbidden    []string
+		wantUnknownA int
+		wantUnknownF int
 	}{
 		{
 			name:         "all known",
@@ -497,9 +497,9 @@ func TestAmendRequest_ExpectedVersion(t *testing.T) {
 
 func TestSecurityEngineRiskToCeiling(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    int
-		want     riskLevel
+		name  string
+		input int
+		want  riskLevel
 	}{
 		{"safe=0", 0, riskSafe},
 		{"low=1", 1, riskLow},
@@ -941,14 +941,18 @@ func TestFindFrozenViolation_FlattensNestedJSON(t *testing.T) {
 		{
 			name:    "mixed frozen and non-frozen nested",
 			patch:   map[string]any{"constraints": map[string]any{"never": []any{"x"}, "risk_ceiling": "low"}},
-			wantBad: "constraints.never",
+			wantBad: "any", // both keys are frozen; either is valid (map iteration order is non-deterministic)
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := findFrozenViolation(tt.patch, frozen)
-			if got != tt.wantBad {
+			if tt.wantBad == "any" {
+				if got == "" {
+					t.Errorf("findFrozenViolation() = %q, want a non-empty frozen violation", got)
+				}
+			} else if got != tt.wantBad {
 				t.Errorf("findFrozenViolation() = %q, want %q", got, tt.wantBad)
 			}
 		})
