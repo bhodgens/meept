@@ -34,11 +34,11 @@ const (
 type DesignationStatus string
 
 const (
-	DesignationNone              DesignationStatus = "none"
-	DesignationWaitingHuman      DesignationStatus = "waiting_human"
-	DesignationHumanResponded    DesignationStatus = "human_responded"
-	DesignationBotThinking       DesignationStatus = "bot_thinking"
-	DesignationRequiresApproval  DesignationStatus = "requires_approval"
+	DesignationNone             DesignationStatus = "none"
+	DesignationWaitingHuman     DesignationStatus = "waiting_human"
+	DesignationHumanResponded   DesignationStatus = "human_responded"
+	DesignationBotThinking      DesignationStatus = "bot_thinking"
+	DesignationRequiresApproval DesignationStatus = "requires_approval"
 )
 
 // SessionDesignation tracks a session's special status requiring attention.
@@ -63,19 +63,19 @@ type DetectionContext struct {
 //
 //nolint:revive // stutter with package name is intentional for API clarity
 type Session struct {
-	ID              string              `json:"id"`
-	Name            string              `json:"name"`
-	Description     string              `json:"description,omitempty"`
-	ConversationID  string              `json:"conversation_id"` // DEPRECATED: use thread.ConversationID
-	CreatedAt       time.Time           `json:"created_at"`
-	LastActivity    time.Time           `json:"last_activity"`
-	AttachedClients []string            `json:"attached_clients"`
-	WorkerIDs       []string            `json:"worker_ids,omitempty"`
-	LeafMessageID   *int64              `json:"leaf_message_id,omitempty"`
-	ProjectID       string              `json:"project_id,omitempty"`
-	ProjectPath     string              `json:"project_path,omitempty"`
-	DetectionContext *DetectionContext   `json:"detection_context,omitempty"`
-	NoFence         bool                `json:"no_fence,omitempty"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	Description      string            `json:"description,omitempty"`
+	ConversationID   string            `json:"conversation_id"` // DEPRECATED: use thread.ConversationID
+	CreatedAt        time.Time         `json:"created_at"`
+	LastActivity     time.Time         `json:"last_activity"`
+	AttachedClients  []string          `json:"attached_clients"`
+	WorkerIDs        []string          `json:"worker_ids,omitempty"`
+	LeafMessageID    *int64            `json:"leaf_message_id,omitempty"`
+	ProjectID        string            `json:"project_id,omitempty"`
+	ProjectPath      string            `json:"project_path,omitempty"`
+	DetectionContext *DetectionContext `json:"detection_context,omitempty"`
+	NoFence          bool              `json:"no_fence,omitempty"`
 
 	// Archived indicates the session has been soft-archived. Archived sessions
 	// are excluded from the default visible set and sort to the bottom of
@@ -87,7 +87,7 @@ type Session struct {
 	ActiveThreadID string             `json:"active_thread_id,omitempty"`
 
 	// Session designation (Plan 4.1)
-	Designation    *SessionDesignation `json:"designation,omitempty"`
+	Designation *SessionDesignation `json:"designation,omitempty"`
 
 	// designationHistory is an optional store for recording designation transitions.
 	// When nil, SetDesignation skips history recording (nil-safe).
@@ -146,11 +146,11 @@ func (s *Session) SetDesignation(status DesignationStatus, reason, priority stri
 
 	if s.Designation == nil {
 		s.Designation = &SessionDesignation{
-			Status:      status,
-			Reason:      reason,
-			Priority:    priority,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			Status:    status,
+			Reason:    reason,
+			Priority:  priority,
+			CreatedAt: now,
+			UpdatedAt: now,
 		}
 	} else {
 		s.Designation.Status = status
@@ -526,7 +526,7 @@ func (s *MemoryStore) GetDesignatedSessionIDs() ([]string, error) {
 	defer s.mu.RUnlock()
 
 	type sessionPriority struct {
-		id     string
+		id    string
 		order int
 	}
 	prios := make([]*sessionPriority, 0)
@@ -534,11 +534,16 @@ func (s *MemoryStore) GetDesignatedSessionIDs() ([]string, error) {
 		if sess.HasDesignation() {
 			var order int
 			switch sess.Designation.Priority {
-			case "urgent": order = 0
-			case "high": order = 1
-			case "normal": order = 2
-			case "low": order = 3
-			default: order = 4
+			case "urgent":
+				order = 0
+			case "high":
+				order = 1
+			case "normal":
+				order = 2
+			case "low":
+				order = 3
+			default:
+				order = 4
 			}
 			prios = append(prios, &sessionPriority{id: sess.ID, order: order})
 		}
@@ -782,9 +787,40 @@ func (s *MemoryStore) GetTree(sessionID string) ([]TreeNode, error) {
 	return nodes, nil
 }
 
-// NavigateToBranch is not fully implemented for MemoryStore.
+// NavigateToBranch updates the session's leaf to targetMessageID, returning
+// the previous leaf ID. This mirrors the SQLiteStore implementation: it does
+// not validate that the target is on the current leaf's path — the caller
+// (BranchManager) handles path validation before calling this method.
 func (s *MemoryStore) NavigateToBranch(sessionID string, targetMessageID int64) (int64, error) {
-	return 0, fmt.Errorf("not implemented: NavigateToBranch in MemoryStore")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return 0, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	// Capture old leaf (0 if none set).
+	var oldLeafID int64
+	if session.LeafMessageID != nil {
+		oldLeafID = *session.LeafMessageID
+	}
+
+	// Validate the target message exists in this session's message list.
+	msgs := s.messages[sessionID]
+	found := false
+	for _, msg := range msgs {
+		if msg.ID == targetMessageID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return 0, fmt.Errorf("target message %d not found in session %s", targetMessageID, sessionID)
+	}
+
+	session.LeafMessageID = &targetMessageID
+	return oldLeafID, nil
 }
 
 // ForkSession creates a new session by copying messages up to fromMessageID from the
@@ -903,14 +939,77 @@ func (s *MemoryStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 	return newSession, nil
 }
 
-// InsertCompaction is not fully implemented for MemoryStore.
+// InsertCompaction inserts a compaction message node into the session's
+// message list, returning the new message's ID. The compaction entry stores
+// a JSON-encoded CompactionContent with the summary and compressed IDs.
+// This mirrors the SQLiteStore implementation.
 func (s *MemoryStore) InsertCompaction(sessionID string, parentID int64, summary string, compressedIDs []int64) (int64, error) {
-	return 0, fmt.Errorf("not implemented: InsertCompaction in MemoryStore")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.sessions[sessionID]; !exists {
+		return 0, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	// Build JSON content matching the SQLite store's CompactionContent format.
+	content := CompactionContent{
+		Summary:       summary,
+		CompressedIDs: compressedIDs,
+	}
+	contentJSON, err := json.Marshal(content)
+	if err != nil {
+		return 0, fmt.Errorf("failed to marshal compaction content: %w", err)
+	}
+
+	existing := s.messages[sessionID]
+	newID := int64(len(existing) + 1)
+	parentIDCopy := parentID
+
+	msg := Message{
+		ID:        newID,
+		SessionID: sessionID,
+		ParentID:  &parentIDCopy,
+		Role:      "system",
+		Content:   string(contentJSON),
+		Timestamp: time.Now().UTC(),
+		EntryType: "compaction",
+		BranchID:  BranchMain,
+	}
+	s.messages[sessionID] = append(existing, msg)
+
+	s.logger.Info("Compaction entry inserted (memory)",
+		"id", newID,
+		"session_id", sessionID,
+		"parent_id", parentID,
+		"compressed_count", len(compressedIDs),
+	)
+	return newID, nil
 }
 
-// ReparentAfterCompaction is not fully implemented for MemoryStore.
+// ReparentAfterCompaction re-parents all messages whose ParentID equals afterID
+// (the last compressed message) to point to compactionID instead. This makes
+// GetMessagePath walk through the compaction entry, skipping the compacted
+// messages in the tree. This mirrors the SQLiteStore implementation.
 func (s *MemoryStore) ReparentAfterCompaction(sessionID string, afterID, compactionID int64) error {
-	return fmt.Errorf("not implemented: ReparentAfterCompaction in MemoryStore")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	msgs := s.messages[sessionID]
+	reparented := 0
+	for i := range msgs {
+		if msgs[i].ParentID != nil && *msgs[i].ParentID == afterID {
+			msgs[i].ParentID = &compactionID
+			reparented++
+		}
+	}
+
+	s.logger.Debug("Reparented messages after compaction (memory)",
+		"session_id", sessionID,
+		"old_parent", afterID,
+		"new_parent", compactionID,
+		"reparented", reparented,
+	)
+	return nil
 }
 
 // GetCompactionEntries retrieves compaction entries from in-memory messages.
@@ -1198,10 +1297,10 @@ func NewHandler(store Store, msgBus *bus.MessageBus, logger *slog.Logger, opts .
 		"session.delete":               h.handleSessionDelete,
 		"session.messages.save":        h.handleSessionSaveMessages,
 		"session.messages.get":         h.handleSessionGetMessages,
-		"session.update_description":    h.handleSessionUpdateDescription,
-		"session.generate_description":  h.handleSessionGenerateDescription,
-		"session.refresh_title":            h.handleSessionRefreshTitle,
-		"session.stop":                  h.handleSessionStop,
+		"session.update_description":   h.handleSessionUpdateDescription,
+		"session.generate_description": h.handleSessionGenerateDescription,
+		"session.refresh_title":        h.handleSessionRefreshTitle,
+		"session.stop":                 h.handleSessionStop,
 		"session.get_child_tasks":      h.handleSessionGetChildTasks,
 		"session.branch.navigate":      h.handleBranchNavigate,
 		"session.branches.list":        h.handleBranchesList,
@@ -1299,7 +1398,7 @@ func (h *Handler) handleSessionTreeGet(ctx context.Context, topic string, msg an
 }
 
 func (h *Handler) handleSessionRefreshTitle(ctx context.Context, topic string, msg any) {
-h.handleMessage(topic, msg.(*models.BusMessage))
+	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
 // F-04 FIX: callback for session.set_nofence topic.
@@ -1903,7 +2002,7 @@ func (h *Handler) handleRefreshTitle(msg *models.BusMessage) (any, error) {
 		Topic:     "session.title_updated",
 		Source:    "session-handler",
 		Timestamp: time.Now().UTC(),
-		Payload:   jsonMustMarshal(map[string]any{
+		Payload: jsonMustMarshal(map[string]any{
 			"session_id":  params.SessionID,
 			"name":        result.Name,
 			"description": result.Description,
