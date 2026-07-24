@@ -74,3 +74,14 @@ func BuildSystemPromptBlocks(sections []string) []SystemPromptBlock {
 	}
 	return blocks
 }
+
+// StripPromptCacheBoundary removes the PromptCacheBoundary sentinel and any
+// surrounding blank-line separators from a system prompt string. This must be
+// called before sending the prompt to any provider so the internal marker is
+// never leaked to the API.
+func StripPromptCacheBoundary(s string) string {
+	s = strings.ReplaceAll(s, PromptCacheBoundary+"\n\n", "")
+	s = strings.ReplaceAll(s, "\n\n"+PromptCacheBoundary, "")
+	s = strings.ReplaceAll(s, PromptCacheBoundary, "")
+	return s
+}

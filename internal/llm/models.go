@@ -190,6 +190,20 @@ func (r *Response) HasToolCalls() bool {
 	return len(r.ToolCalls) > 0
 }
 
+// PromptCacheConfig controls prompt caching behavior for providers that
+// support it (e.g. Anthropic's cache_control markers).
+type PromptCacheConfig struct {
+	// Enabled controls whether prompt cache blocks are emitted. Defaults to
+	// true when the struct is zero-valued (use IsEnabled to check).
+	Enabled *bool `json:"enabled" yaml:"enabled"`
+}
+
+// IsEnabled reports whether prompt caching is active. A nil Enabled pointer
+// means "default true".
+func (p *PromptCacheConfig) IsEnabled() bool {
+	return p == nil || p.Enabled == nil || *p.Enabled
+}
+
 // ModelConfig holds configuration for a specific LLM model endpoint.
 type ModelConfig struct {
 	BaseURL              string
@@ -225,6 +239,9 @@ type ModelConfig struct {
 	// configuration. When non-nil, it is used if no per-request or agent-level
 	// reasoning override is present.
 	DefaultReasoning *ReasoningConfig
+	// PromptCache controls prompt caching behavior. When nil, caching is
+	// enabled by default.
+	PromptCache *PromptCacheConfig
 }
 
 // HasCapability checks if the model has a specific capability.

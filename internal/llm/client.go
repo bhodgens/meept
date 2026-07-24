@@ -278,6 +278,12 @@ func (c *Client) buildChatRequest(messages []ChatMessage, cfg *ModelConfig, opts
 	// Build request payload
 	msgDicts := make([]map[string]any, len(messages))
 	for i, msg := range messages {
+		// Strip the internal prompt cache boundary from system messages so
+		// it is never leaked to the API. This keeps the system prompt prefix
+		// stable across calls regardless of internal section ordering.
+		if msg.Role == RoleSystem {
+			msg.Content = StripPromptCacheBoundary(msg.Content)
+		}
 		msgDicts[i] = msg.ToOpenAIDictWithStore(c.uploadStore)
 	}
 

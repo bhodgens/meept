@@ -480,18 +480,79 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 
 // Anthropic API request structures
 
+// anthropicCacheControl marks a content block for prompt caching.
+type anthropicCacheControl struct {
+	Type string `json:"type"` // "ephemeral"
+}
+
+// anthropicSystemBlock is a single block in the system prompt array. When
+// CacheControl is set, Anthropic caches the prefix up to and including this
+// block.
+type anthropicSystemBlock struct {
+	Type         string                `json:"type"` // "text"
+	Text         string                `json:"text"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+}
+
 type anthropicRequest struct {
-	Model         string             `json:"model"`
-	MaxTokens     int                `json:"max_tokens"`
-	System        string             `json:"system,omitempty"`
-	Messages      []anthropicMessage `json:"messages"`
-	Tools         []anthropicTool    `json:"tools,omitempty"`
-	Temperature   *float64           `json:"temperature,omitempty"`
-	TopP          *float64           `json:"top_p,omitempty"`
-	StopSequences []string           `json:"stop_sequences,omitempty"`
-	Stream        bool               `json:"stream,omitempty"`
+	Model         string                 `json:"model"`
+	MaxTokens     int                    `json:"max_tokens"`
+	System        string                 `json:"-"` // marshaled via MarshalJSON
+	SystemBlocks  []anthropicSystemBlock `json:"-"` // marshaled via MarshalJSON
+	Messages      []anthropicMessage     `json:"messages"`
+	Tools         []anthropicTool        `json:"tools,omitempty"`
+	Temperature   *float64               `json:"temperature,omitempty"`
+	TopP          *float64               `json:"top_p,omitempty"`
+	StopSequences []string               `json:"stop_sequences,omitempty"`
+	Stream        bool                   `json:"stream,omitempty"`
 	// Extended thinking configuration
 	Thinking *anthropicThinkingConfig `json:"thinking,omitempty"`
+}
+
+// MarshalJSON implements custom marshaling so that the system field is emitted
+// as either a plain string (System) or an array of content blocks
+// (SystemBlocks), matching the Anthropic API's polymorphic system parameter.
+func (r *anthropicRequest) MarshalJSON() ([]byte, error) {
+	type requestAlias struct {
+		Model         string                   `json:"model"`
+		MaxTokens     int                      `json:"max_tokens"`
+		System        json.RawMessage          `json:"system,omitempty"`
+		Messages      []anthropicMessage       `json:"messages"`
+		Tools         []anthropicTool          `json:"tools,omitempty"`
+		Temperature   *float64                 `json:"temperature,omitempty"`
+		TopP          *float64                 `json:"top_p,omitempty"`
+		StopSequences []string                 `json:"stop_sequences,omitempty"`
+		Stream        bool                     `json:"stream,omitempty"`
+		Thinking      *anthropicThinkingConfig `json:"thinking,omitempty"`
+	}
+
+	a := requestAlias{
+		Model:         r.Model,
+		MaxTokens:     r.MaxTokens,
+		Messages:      r.Messages,
+		Tools:         r.Tools,
+		Temperature:   r.Temperature,
+		TopP:          r.TopP,
+		StopSequences: r.StopSequences,
+		Stream:        r.Stream,
+		Thinking:      r.Thinking,
+	}
+
+	if len(r.SystemBlocks) > 0 {
+		raw, err := json.Marshal(r.SystemBlocks)
+		if err != nil {
+			return nil, fmt.Errorf("marshal system blocks: %w", err)
+		}
+		a.System = raw
+	} else if r.System != "" {
+		raw, err := json.Marshal(r.System)
+		if err != nil {
+			return nil, fmt.Errorf("marshal system string: %w", err)
+		}
+		a.System = raw
+	}
+
+	return json.Marshal(a)
 }
 
 type anthropicThinkingConfig struct {
@@ -706,10 +767,28 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 	req := &anthropicRequest{
 		Model:       c.config.ModelID,
 		MaxTokens:   opts.maxTokens,
-		System:      systemPrompt,
 		Messages:    apiMessages,
 		Stream:      stream,
 		Temperature: &opts.temperature,
+	}
+
+	// When prompt caching is enabled and the system prompt contains the
+	// boundary marker, split into cacheable blocks with cache_control markers.
+	// The boundary is consumed by BuildSystemPromptBlocks and never sent to
+	// the API. When caching is disabled or no boundary is present, strip any
+	// stray boundary markers and send as a plain string.
+	if c.config.PromptCache.IsEnabled() && strings.Contains(systemPrompt, PromptCacheBoundary) {
+		sections := strings.Split(systemPrompt, "\n\n")
+		blocks := BuildSystemPromptBlocks(sections)
+		for _, b := range blocks {
+			block := anthropicSystemBlock{Type: "text", Text: b.Text}
+			if b.CacheScope == CacheScopeStatic {
+				block.CacheControl = &anthropicCacheControl{Type: "ephemeral"}
+			}
+			req.SystemBlocks = append(req.SystemBlocks, block)
+		}
+	} else {
+		req.System = StripPromptCacheBoundary(systemPrompt)
 	}
 
 	// Add optional parameters if set
@@ -939,6 +1018,15 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 				logger.Debug("metrics record failed", "error", rerr)
 			}
 		}()
+	}
+
+	// Log prompt cache metrics when present.
+	if apiResp.Usage.CacheCreationInputTokens > 0 || apiResp.Usage.CacheReadInputTokens > 0 {
+		c.logger.Debug("prompt cache",
+			"cache_creation", apiResp.Usage.CacheCreationInputTokens,
+			"cache_read", apiResp.Usage.CacheReadInputTokens,
+			"input", apiResp.Usage.InputTokens,
+		)
 	}
 
 	return c.parseResponse(&apiResp), nil
@@ -1198,7 +1286,21 @@ func (c *AnthropicClient) parseStreamingResponse(body io.Reader, progress func(P
 	}
 
 	// Build the response from accumulated blocks
-	return c.buildResponseFromBlocks(blocks, stopReason, usage)
+	resp, err := c.buildResponseFromBlocks(blocks, stopReason, usage)
+	if err != nil {
+		return nil, err
+	}
+
+	// Log prompt cache metrics when present.
+	if usage.CacheCreationInputTokens > 0 || usage.CacheReadInputTokens > 0 {
+		c.logger.Debug("prompt cache",
+			"cache_creation", usage.CacheCreationInputTokens,
+			"cache_read", usage.CacheReadInputTokens,
+			"input", usage.InputTokens,
+		)
+	}
+
+	return resp, nil
 }
 
 // buildResponseFromBlocks constructs a Response from accumulated content blocks.
