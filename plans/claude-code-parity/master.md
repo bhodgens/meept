@@ -79,11 +79,11 @@ See SHARED-CONVENTIONS.md §2-§3 for Go coding and test conventions.
 
 | Tree | Status | Notes |
 |------|--------|-------|
-| 01-adversarial-verification | PENDING | |
-| 02-anti-pattern-prompts | PENDING | |
-| 03-prompt-cache | PENDING | |
-| 04-compaction-user-messages | PENDING | |
-| 05-combined-improvements | PENDING | |
+| 01-adversarial-verification | COMPLETE | 3 leaves, all gates pass |
+| 02-anti-pattern-prompts | COMPLETE | 1 leaf, all gates pass |
+| 03-prompt-cache | COMPLETE | 2 leaves, all gates pass |
+| 04-compaction-user-messages | COMPLETE | 1 leaf, all gates pass |
+| 05-combined-improvements | COMPLETE | 4 leaves, all gates pass |
 
 ## Open Questions
 

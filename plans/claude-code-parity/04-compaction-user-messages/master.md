@@ -55,7 +55,7 @@ See SHARED-CONVENTIONS.md §2-§3.
 
 | Leaf | Status | Notes |
 |------|--------|-------|
-| 01-compaction-user-messages | PENDING | |
+| 01-compaction-user-messages | COMPLETE | Verbatim user msg preservation in both prompts |
 
 ## Integration Test Plan
 

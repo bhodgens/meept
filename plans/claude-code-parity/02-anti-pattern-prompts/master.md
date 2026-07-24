@@ -55,7 +55,7 @@ See SHARED-CONVENTIONS.md §2-§3, §5.
 
 | Leaf | Status | Notes |
 |------|--------|-------|
-| 01-anti-pattern-prompts | PENDING | |
+| 01-anti-pattern-prompts | COMPLETE | Universal + 4 conditional components |
 
 ## Integration Test Plan
 

@@ -113,10 +113,10 @@ See SHARED-CONVENTIONS.md §2-§3.
 
 | Leaf | Status | Notes |
 |------|--------|-------|
-| 01-per-tool-safety | PENDING | |
-| 02-file-unchanged-cmdsem | PENDING | |
-| 03-feedback-staleness | PENDING | |
-| 04-security-explore | PENDING | |
+| 01-per-tool-safety | COMPLETE | IsReadOnly/IsConcurrencySafe on Tool interface |
+| 02-file-unchanged-cmdsem | COMPLETE | FILE_UNCHANGED stub + command exit semantics |
+| 03-feedback-staleness | COMPLETE | InlineFeedbackTrigger + MemoryFreshnessText |
+| 04-security-explore | COMPLETE | SecretScanner, bash injection, explore agent |
 
 ## Integration Test Plan
 

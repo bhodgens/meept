@@ -68,8 +68,8 @@ See SHARED-CONVENTIONS.md §2-§3.
 
 | Leaf | Status | Notes |
 |------|--------|-------|
-| 01-boundary-and-builder | PENDING | |
-| 02-adapter-integration | PENDING | |
+| 01-boundary-and-builder | COMPLETE | PromptCacheBoundary, CacheScope, prefix-aware key |
+| 02-adapter-integration | COMPLETE | Anthropic cache_control, boundary stripping |
 
 ## Integration Test Plan
 

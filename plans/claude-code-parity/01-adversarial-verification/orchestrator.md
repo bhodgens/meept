@@ -71,9 +71,9 @@ See SHARED-CONVENTIONS.md §2-§3.
 
 | Leaf | Status | Notes |
 |------|--------|-------|
-| 01-verification-mode | PENDING | |
-| 02-adversarial-prompt | PENDING | |
-| 03-auto-trigger-loop | PENDING | |
+| 01-verification-mode | COMPLETE | VerificationConfig, all 18 AGENT.md updated |
+| 02-adversarial-prompt | COMPLETE | BuildVerifierPrompt, ParseVerdict, verifier agent |
+| 03-auto-trigger-loop | COMPLETE | VerificationTracker, VerificationAutoTrigger hook |
 
 ## Integration Test Plan
 
