@@ -163,7 +163,7 @@ const ToolUsageGuidelines = `# Tool Usage
 
 // BuildBaselinePrompt constructs the baseline section of any agent's prompt.
 func BuildBaselinePrompt() string {
-	return BaselineCapabilities + "\n" + BaselineGuidelines + "\n" + MemoryInstructions + "\n" + ToolUsageGuidelines + "\n" + EvidenceRequirements
+	return BaselineCapabilities + "\n" + BaselineGuidelines + "\n" + BaselineAntiPatterns + "\n" + MemoryInstructions + "\n" + ToolUsageGuidelines + "\n" + EvidenceRequirements
 }
 
 // SkillInfo holds information about a skill for prompt building.

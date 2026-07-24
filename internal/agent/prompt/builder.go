@@ -142,12 +142,16 @@ func (b *Builder) BuildWithDefaults(components, defaults []string, ctx *PromptCo
 func (b *Builder) shouldInclude(ref string, ctx *PromptContext) bool {
 	// Map conditional refs to condition keys
 	conditionMap := map[string]string{
-		"conditional.code_style":         "has_code_task",
-		"conditional.error_context":      "has_error",
-		"conditional.source_evaluation":  "researching",
-		"conditional.analysis_depth":     "analyzing",
-		"conditional.task_decomposition": "planning",
-		"conditional.git_safety":         "git_operation",
+		"conditional.code_style":             "has_code_task",
+		"conditional.error_context":          "has_error",
+		"conditional.source_evaluation":      "researching",
+		"conditional.analysis_depth":         "analyzing",
+		"conditional.task_decomposition":     "planning",
+		"conditional.git_safety":             "git_operation",
+		"conditional.anti_patterns_code":     "has_code_task",
+		"conditional.anti_patterns_plan":     "has_plan_task",
+		"conditional.anti_patterns_debug":    "has_debug_task",
+		"conditional.anti_patterns_analysis": "has_analysis_task",
 	}
 
 	conditionKey, ok := conditionMap[ref]
@@ -213,5 +217,8 @@ func ConditionKeys() []string {
 		"analyzing",
 		"planning",
 		"git_operation",
+		"has_plan_task",
+		"has_debug_task",
+		"has_analysis_task",
 	}
 }

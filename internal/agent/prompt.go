@@ -3,6 +3,8 @@ package agent
 import (
 	"fmt"
 	"strings"
+
+	"github.com/caimlas/meept/internal/llm"
 )
 
 // Default prompt sections (used as fallbacks).
@@ -251,6 +253,9 @@ func (b *PromptBuilder) Build() string {
 			sections = append(sections, "- "+key+": "+value)
 		}
 	}
+
+	// Boundary between static (cacheable) and dynamic (session-specific) sections.
+	sections = append(sections, llm.PromptCacheBoundary)
 
 	// Memory Context
 	if b.memoryContext != "" {
