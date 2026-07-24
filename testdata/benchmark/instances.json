@@ -1,0 +1,42 @@
+[
+  {
+    "id": "psf__requests-1963",
+    "repo": "psf/requests",
+    "base_commit": "da9113c0466850a425e554630a732ec1f7d045fc",
+    "problem_statement": "The original request was never being properly overridden in resolve_redirects.\n\nAs such, having a POST request respond with a 303 would generate a GET request. If the GET request encountered another redirect to something like a 307, then it would use the original request and generate another POST request.\n\nThere are two parts to this fix:\n1. In resolve_redirects, the request object should be updated after each redirect so subsequent redirects use the most recent request, not the original.\n2. The method should be properly changed based on the status code (301/302/303 change to GET, 307/308 preserve method).\n\nExpected: After a 303 redirect changes POST to GET, a subsequent 307 redirect should preserve GET (not revert to the original POST).\nActual: The original POST method is used for all subsequent redirects.",
+    "test_cmd": "python -m pytest tests/test_requests.py -x -q --timeout=60 -k redirect",
+    "language": "python"
+  },
+  {
+    "id": "django__django-11099",
+    "repo": "django/django",
+    "base_commit": "ea071870f943c23a8eaf36dfcdf382afd6478fd1",
+    "problem_statement": "UsernameValidator allows trailing newline in usernames.\n\nDescription: ASCIIUsernameValidator and UnicodeUsernameValidator use the regex r'^[\\w.@+-]+$'. The intent is to only allow alphanumeric characters as well as ., @, +, and -. However, a little known quirk of Python regexes is that $ will also match a trailing newline. So a username like 'user\\n' would pass validation.\n\nExpected: Usernames with trailing newlines should be rejected.\nActual: 'user\\n' passes validation because $ matches before the trailing newline.\n\nFix: Use \\Z instead of $ in the regex to match only at the absolute end of the string.",
+    "test_cmd": "python -m pytest tests/auth_tests/test_validators.py -x -q --timeout=60",
+    "language": "python"
+  },
+  {
+    "id": "pytest-dev__pytest-5631",
+    "repo": "pytest-dev/pytest",
+    "base_commit": "13d8577451e9e68a9651cde122b9f279df824103",
+    "problem_statement": "Mock patching fails when the patched object defines __eq__ that raises or returns unexpected results.\n\nWhen using unittest.mock.patch with pytest, the sentinel comparison uses == instead of identity checks (is). This breaks when the patched object is a numpy-like object that raises on truthiness comparison or defines a custom __eq__.\n\nExample:\n  class NumpyLike:\n      def __init__(self, value): self.value = value\n      def __eq__(self, other): raise TypeError('like numpy, cannot compare against others for truth')\n\n  @patch('dummy.FOO', new=NumpyLike(50))\n  def test_hello(self):\n      assert dummy.FOO.value == 50\n\nThis fails because pytest's mock integration uses == to compare sentinels instead of 'is'.\n\nExpected: Mock patching should use identity checks (is) for sentinel comparison.\nActual: Uses == which triggers __eq__ on numpy-like objects.",
+    "test_cmd": "python -m pytest testing/test_mock_patching.py -x -q --timeout=60",
+    "language": "python"
+  },
+  {
+    "id": "scikit-learn__scikit-learn-14894",
+    "repo": "scikit-learn/scikit-learn",
+    "base_commit": "fdbaa58acbead5a254f2e6d597dc1ab3b947f4c6",
+    "problem_statement": "ZeroDivisionError when using sparse data in SVM in case where support_vectors_ is empty.\n\nWhen fitting an SVR/SVC with sparse input data where all support vectors have zero coefficients (n_SV == 0), the _sparse_fit method raises a ZeroDivisionError because it divides by n_SV without checking for zero.\n\nSteps to reproduce:\n  from scipy import sparse\n  import numpy as np\n  from sklearn import svm\n  X_train = sparse.csr_matrix([[0, 1, 0, 0], [0, 0, 0, 1], [0, 0, 1, 0], [0, 0, 0, 1]])\n  y_train = np.array([0.04, 0.04, 0.10, 0.16])\n  model = svm.SVR(kernel='linear')\n  model.fit(X_train, y_train)  # ZeroDivisionError\n\nExpected: Model fits successfully with empty support_vectors_.\nActual: ZeroDivisionError in BaseLibSVM._sparse_fit.",
+    "test_cmd": "python -m pytest sklearn/svm/tests/test_sparse.py -x -q --timeout=120",
+    "language": "python"
+  },
+  {
+    "id": "pallets__flask-4074",
+    "repo": "pallets/flask",
+    "base_commit": "a541c2ac8b05c2b23e11bd8540088fce1abc2373",
+    "problem_statement": "Blueprints are not registered with nested names and cannot change their registered name.\n\nWhen registering a blueprint that contains nested blueprints, the child blueprints should be registered with their full dotted name (e.g., 'parent.child'). Additionally, it should be possible to register the same blueprint multiple times with different names using the name parameter.\n\nExpected behavior:\n1. bp.register_blueprint(bp2) should register bp2 as 'bp.bp2' (nested name)\n2. app.register_blueprint(bp, name='alt') should register bp under the name 'alt'\n3. Endpoints should reflect the full nested path: 'bp.sub.index2'\n\nActual: Nested blueprints only use their creation name, and re-registering with a different name is not supported.",
+    "test_cmd": "python -m pytest tests/test_blueprints.py -x -q --timeout=60",
+    "language": "python"
+  }
+]

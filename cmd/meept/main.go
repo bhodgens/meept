@@ -156,6 +156,7 @@ Analytics:
 	rootCmd.AddCommand(newSessionCmd())
 	rootCmd.AddCommand(newTemplatesCmd())
 	rootCmd.AddCommand(newSelfImproveCmd())
+	rootCmd.AddCommand(newBenchmarkCmd())
 	rootCmd.AddCommand(newShadowCmd())
 	rootCmd.AddCommand(newDevCmd())
 	rootCmd.AddCommand(newConfigCmd())

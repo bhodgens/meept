@@ -32,6 +32,14 @@ const KeyCycleID = "cycle_id"
 // "applying". progress is 0.0-1.0. message is a human-readable description.
 type ProgressCallback func(phase string, progress float64, message string)
 
+// RegressionChecker is an optional post-apply hook that verifies applied
+// fixes haven't degraded agent capabilities. The benchmark package provides
+// a concrete implementation using SWE-bench-style instances.
+type RegressionChecker interface {
+	// Check runs the regression suite and returns true if no regression detected.
+	Check(ctx context.Context) (passed bool, summary string, err error)
+}
+
 // Controller orchestrates the full self-improvement cycle.
 type Controller struct {
 	mu sync.RWMutex
@@ -68,6 +76,9 @@ type Controller struct {
 
 	// Optional progress callback for external observers (TUI, RPC).
 	progressCallback ProgressCallback
+
+	// Optional regression checker run after fixes are applied.
+	regressionChecker RegressionChecker
 }
 
 // NewController creates a new Controller.
@@ -113,6 +124,18 @@ func (c *Controller) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.securityOrch = orch
+}
+
+// SetRegressionChecker sets an optional regression checker that runs after
+// fixes are applied. If the checker reports a regression, the cycle logs
+// a warning but does not roll back (rollback is a separate decision).
+func (c *Controller) SetRegressionChecker(rc RegressionChecker) {
+	if rc == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.regressionChecker = rc
 }
 
 // SecurityOrchestrator returns the security orchestrator, or nil if not set.
@@ -383,6 +406,31 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 	c.currentCycle.Status = CycleStatusCompleted
 	cycle := c.currentCycle
 	c.mu.Unlock()
+
+	// Phase 6: Regression check (optional).
+	c.mu.RLock()
+	rc := c.regressionChecker
+	appliedCount := cycle.FixesApplied
+	c.mu.RUnlock()
+
+	if rc != nil && appliedCount > 0 {
+		c.logger.Info("phase 6 - running regression check")
+		c.publishStatus("regression_check", map[string]any{KeyCycleID: cycleID})
+		passed, summary, err := rc.Check(ctx)
+		if err != nil {
+			c.logger.Warn("regression check errored", "error", err)
+		} else if !passed {
+			c.logger.Warn("regression detected after applying fixes",
+				"summary", summary,
+				"applied", appliedCount)
+			c.publishStatus("regression_detected", map[string]any{
+				KeyCycleID: cycleID,
+				"summary":  summary,
+			})
+		} else {
+			c.logger.Info("regression check passed", "summary", summary)
+		}
+	}
 
 	c.logger.Info("cycle completed",
 		KeyCycleID, cycleID,
