@@ -2208,3 +2208,100 @@ none`},
 	// messages that were passed through (the ToKeep region may still have
 	// the recent output; the ToCompact region is summarized away).
 }
+
+// ---------------------------------------------------------------------------
+// extractUserMessages
+// ---------------------------------------------------------------------------
+
+func TestExtractUserMessages(t *testing.T) {
+	msgs := []ChatMessage{
+		{Role: RoleSystem, Content: "system prompt"},
+		{Role: RoleUser, Content: "please fix the bug"},
+		{Role: RoleAssistant, Content: "I'll look into it"},
+		{Role: RoleUser, Content: "also add tests"},
+		{Role: RoleTool, Content: "tool output", ToolCallID: "tc1"},
+		{Role: RoleUser, Content: "  make it fast  "},
+	}
+
+	result := extractUserMessages(msgs)
+
+	if len(result) != 3 {
+		t.Fatalf("expected 3 user messages, got %d: %v", len(result), result)
+	}
+	if result[0] != "please fix the bug" {
+		t.Errorf("expected first message verbatim, got %q", result[0])
+	}
+	if result[1] != "also add tests" {
+		t.Errorf("expected second message verbatim, got %q", result[1])
+	}
+	if result[2] != "make it fast" {
+		t.Errorf("expected trimmed third message, got %q", result[2])
+	}
+}
+
+func TestExtractUserMessagesEmpty(t *testing.T) {
+	tests := []struct {
+		name string
+		msgs []ChatMessage
+	}{
+		{"nil messages", nil},
+		{"empty slice", []ChatMessage{}},
+		{"no user messages", []ChatMessage{
+			{Role: RoleSystem, Content: "sys"},
+			{Role: RoleAssistant, Content: "hello"},
+			{Role: RoleTool, Content: "output", ToolCallID: "tc1"},
+		}},
+		{"only empty user messages", []ChatMessage{
+			{Role: RoleUser, Content: ""},
+			{Role: RoleUser, Content: "   "},
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractUserMessages(tt.msgs)
+			if len(result) != 0 {
+				t.Errorf("expected empty result, got %v", result)
+			}
+		})
+	}
+}
+
+func TestToolResultsExcluded(t *testing.T) {
+	msgs := []ChatMessage{
+		{Role: RoleUser, Content: "real user message"},
+		{Role: RoleUser, Content: "tool result disguised", ToolCallID: "tc99"},
+		{Role: RoleTool, Content: "actual tool result", ToolCallID: "tc1"},
+		{Role: RoleUser, Content: "another real message"},
+	}
+
+	result := extractUserMessages(msgs)
+
+	if len(result) != 2 {
+		t.Fatalf("expected 2 user messages (tool results excluded), got %d: %v", len(result), result)
+	}
+	if result[0] != "real user message" {
+		t.Errorf("expected first real user message, got %q", result[0])
+	}
+	if result[1] != "another real message" {
+		t.Errorf("expected second real user message, got %q", result[1])
+	}
+}
+
+func TestCompactionPromptHasUserSection(t *testing.T) {
+	if !strings.Contains(structuredCompactionPrompt, "## All User Messages") {
+		t.Error("structuredCompactionPrompt should contain '## All User Messages' section")
+	}
+	if !strings.Contains(structuredCompactionPrompt, "VERBATIM") {
+		t.Error("structuredCompactionPrompt should instruct to preserve messages VERBATIM")
+	}
+}
+
+func TestHandoffPromptHasUserSection(t *testing.T) {
+	if !strings.Contains(handoffCompactionPrompt, "## All User Messages") {
+		t.Error("handoffCompactionPrompt should contain '## All User Messages' section")
+	}
+	if !strings.Contains(handoffCompactionPrompt, "VERBATIM") {
+		t.Error("handoffCompactionPrompt should instruct to preserve messages VERBATIM")
+	}
+}

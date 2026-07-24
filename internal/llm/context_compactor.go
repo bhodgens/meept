@@ -284,6 +284,26 @@ func (c *ContextCompactor) compactSplitTurn(ctx context.Context, cut CutResult, 
 	return historySummary + "\n\n## In-Progress Turn (compacted mid-turn)\n" + turnPrefixSummary, nil
 }
 
+// extractUserMessages returns the content of all user messages that are not
+// tool results, preserving order. These are injected into the compaction
+// context so the LLM can preserve user intent verbatim across compactions.
+func extractUserMessages(messages []ChatMessage) []string {
+	var userMsgs []string
+	for _, msg := range messages {
+		if msg.Role != RoleUser {
+			continue
+		}
+		if msg.ToolCallID != "" {
+			continue
+		}
+		content := strings.TrimSpace(msg.Content)
+		if content != "" {
+			userMsgs = append(userMsgs, content)
+		}
+	}
+	return userMsgs
+}
+
 // summarizeMessages is a helper that builds a prompt for the given messages
 // and calls the LLM summarizer.
 func (c *ContextCompactor) summarizeMessages(ctx context.Context, messages []ChatMessage, timeout time.Duration) (result string, err error) {
@@ -291,6 +311,19 @@ func (c *ContextCompactor) summarizeMessages(ctx context.Context, messages []Cha
 	if conversationText == "" {
 		return "", nil
 	}
+
+	// Inject user messages so the LLM preserves user intent verbatim.
+	userMsgs := extractUserMessages(messages)
+	if len(userMsgs) > 0 {
+		var b strings.Builder
+		b.WriteString(conversationText)
+		b.WriteString("\n\n## User Messages (preserve verbatim in summary)\n")
+		for i, msg := range userMsgs {
+			b.WriteString(fmt.Sprintf("- [turn %d]: %q\n", i+1, msg))
+		}
+		conversationText = b.String()
+	}
+
 	// Snapshot lastSummary under the lock since Compact writes it concurrently.
 	c.mu.RLock()
 	lastSummary := c.lastSummary
@@ -512,6 +545,14 @@ Extract the following structured information:
 ## Errors Encountered
 - [list errors or failures encountered and what was learned, one per line]
 
+## All User Messages
+List ALL user messages that are not tool results. These are critical for understanding
+the user's feedback and changing intent. Preserve them VERBATIM — do not summarize,
+paraphrase, or omit any. Copy the exact words the user used.
+
+Format:
+- [turn N]: "exact user message text"
+
 ## Next Steps
 [What remains to be done, in order of priority]
 
@@ -599,6 +640,14 @@ Capture exact technical state, not abstractions. The next agent needs precise in
 ## Errors Encountered
 - [paste exact error messages, stack traces, and diagnostic output — not paraphrased]
 
+## All User Messages
+List ALL user messages that are not tool results. These are critical for understanding
+the user's feedback and changing intent. Preserve them VERBATIM — do not summarize,
+paraphrase, or omit any. Copy the exact words the user used.
+
+Format:
+- [turn N]: "exact user message text"
+
 ## Git State
 [exact branch name, last commit hash, uncommitted changes summary]
 
@@ -631,7 +680,7 @@ func (c *ContextCompactor) getCompactionPrompt(strategy string) string {
 	}
 }
 
-var compactionSectionRe = regexp.MustCompile(`(?m)^##\s*(Goal|Constraints|Progress|Key Decisions|Files|Important Discoveries|Errors Encountered|Next Steps|Critical Context)\s*$`)
+var compactionSectionRe = regexp.MustCompile(`(?m)^##\s*(Goal|Constraints|Progress|Key Decisions|Files|Important Discoveries|Errors Encountered|All User Messages|Next Steps|Critical Context)\s*$`)
 
 func (c *ContextCompactor) parseSummaryResponse(raw string) SummaryExtract {
 	var ext SummaryExtract
