@@ -16,6 +16,7 @@ import (
 
 // FileFindTool searches for files and directories matching a glob pattern.
 type FileFindTool struct {
+	tools.ToolDefaults
 	checker      *security.PermissionChecker
 	fenceChecker FenceChecker
 }
@@ -305,6 +306,12 @@ func doubleStarMatch(pattern, relPath string) (bool, error) {
 
 	return false, nil
 }
+
+// IsReadOnly reports that file find operations are always read-only.
+func (t *FileFindTool) IsReadOnly(map[string]any) bool { return true }
+
+// IsConcurrencySafe reports that file find operations are safe for concurrent execution.
+func (t *FileFindTool) IsConcurrencySafe(map[string]any) bool { return true }
 
 // Ensure FileFindTool implements the Tool interface.
 var _ tools.Tool = (*FileFindTool)(nil)

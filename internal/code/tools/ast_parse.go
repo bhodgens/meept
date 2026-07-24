@@ -12,6 +12,7 @@ import (
 
 // ASTParseTool parses source code into an AST.
 type ASTParseTool struct {
+	tools.ToolDefaults
 	parser *ast.ParserManager
 }
 

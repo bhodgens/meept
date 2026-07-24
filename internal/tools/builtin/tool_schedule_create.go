@@ -15,6 +15,7 @@ import (
 
 // ScheduleCreateTool creates a new scheduled job.
 type ScheduleCreateTool struct {
+	tools.ToolDefaults
 	sched        *scheduler.Scheduler
 	fenceChecker FenceChecker
 }

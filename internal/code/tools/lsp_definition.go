@@ -12,6 +12,7 @@ import (
 
 // LSPDefinitionTool finds the definition of a symbol at a given position.
 type LSPDefinitionTool struct {
+	tools.ToolDefaults
 	manager *lsp.Manager
 }
 

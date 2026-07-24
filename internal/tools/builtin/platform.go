@@ -33,6 +33,7 @@ func extractFirstLine(body string) string {
 
 // PlatformStatusTool returns platform status including uptime and component health.
 type PlatformStatusTool struct {
+	tools.ToolDefaults
 	getStatus func() map[string]any
 }
 
@@ -66,6 +67,7 @@ func (t *PlatformStatusTool) Execute(ctx context.Context, args map[string]any) (
 
 // PlatformAgentsTool lists available agent specifications.
 type PlatformAgentsTool struct {
+	tools.ToolDefaults
 	registry *agent.AgentRegistry
 }
 
@@ -141,6 +143,7 @@ func (t *PlatformAgentsTool) Execute(ctx context.Context, args map[string]any) (
 
 // PlatformToolsTool lists registered tools with their names and descriptions.
 type PlatformToolsTool struct {
+	tools.ToolDefaults
 	registry *tools.Registry
 }
 
@@ -235,6 +238,7 @@ type delegateRegistry interface {
 
 // DelegateTaskTool delegates a task to a specific agent.
 type DelegateTaskTool struct {
+	tools.ToolDefaults
 	registry delegateRegistry
 }
 
@@ -394,6 +398,7 @@ func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]any) (an
 // SessionHistoryTool provides access to recent session activity and completed work.
 // This enables agents to provide reports about what was accomplished.
 type SessionHistoryTool struct {
+	tools.ToolDefaults
 	getRecentTasks    func(limit int) ([]SessionTaskInfo, error)
 	getRecentMessages func(sessionID string, limit int) ([]SessionMessageInfo, error)
 }

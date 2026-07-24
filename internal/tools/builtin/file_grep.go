@@ -19,6 +19,7 @@ import (
 
 // FileGrepTool searches for regex patterns in files.
 type FileGrepTool struct {
+	tools.ToolDefaults
 	checker      *security.PermissionChecker
 	fenceChecker FenceChecker
 }
@@ -468,6 +469,12 @@ func isBinary(data []byte) bool {
 	checkSize := min(len(data), 8192)
 	return bytes.Contains(data[:checkSize], []byte{0})
 }
+
+// IsReadOnly reports that grep searches are always read-only.
+func (t *FileGrepTool) IsReadOnly(map[string]any) bool { return true }
+
+// IsConcurrencySafe reports that grep searches are safe for concurrent execution.
+func (t *FileGrepTool) IsConcurrencySafe(map[string]any) bool { return true }
 
 // Ensure FileGrepTool implements the Tool interface.
 var _ tools.Tool = (*FileGrepTool)(nil)

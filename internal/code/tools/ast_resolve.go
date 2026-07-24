@@ -12,7 +12,7 @@ import (
 )
 
 // ASTResolveTool applies or discards pending AST edit proposals.
-type ASTResolveTool struct{}
+type ASTResolveTool struct{ tools.ToolDefaults }
 
 // NewASTResolveTool creates a new AST resolve tool.
 func NewASTResolveTool() (*ASTResolveTool, error) {

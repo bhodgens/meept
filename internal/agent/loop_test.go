@@ -1093,6 +1093,8 @@ func (t *mockTerminatingLoopTool) Execute(ctx context.Context, args map[string]a
 		Terminate: true,
 	}, nil
 }
+func (t *mockTerminatingLoopTool) IsReadOnly(map[string]any) bool        { return false }
+func (t *mockTerminatingLoopTool) IsConcurrencySafe(map[string]any) bool { return false }
 
 func TestAgentLoop_TerminatePathReturnsToolResults(t *testing.T) {
 	// Set up a terminating tool in the registry

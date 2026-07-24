@@ -41,6 +41,7 @@ type HandoffResult struct {
 
 // RequestHandoffTool allows an agent to request a handoff to another agent mid-task.
 type RequestHandoffTool struct {
+	tools.ToolDefaults
 	bus         handoffBus
 	agentExists func(agentID string) bool
 }

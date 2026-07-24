@@ -24,6 +24,7 @@ func WithGitNoVerify(ctx context.Context) context.Context {
 
 // GitCommitTool creates git commits with validation and multi-commit support.
 type GitCommitTool struct {
+	tools.ToolDefaults
 	workingDir   string
 	fenceChecker FenceChecker
 }

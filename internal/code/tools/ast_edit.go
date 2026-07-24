@@ -15,6 +15,7 @@ import (
 
 // ASTEditTool performs structural AST-based edits with preview/apply pattern.
 type ASTEditTool struct {
+	tools.ToolDefaults
 	rewriter               *ast.ASTRewriter
 	parser                 *ast.ParserManager
 	pendingChangesRegistry *builtin.PendingChangesRegistry

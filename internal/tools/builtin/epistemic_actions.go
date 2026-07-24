@@ -38,6 +38,7 @@ func truncatePreview(s string, maxLen int) string {
 // redirects incoming evidence edges. Requires confirmation because it
 // flips is_current on the old memory and mutates the graph.
 type MarkSupersededTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 	graph   epistemicGraph
 }
@@ -151,6 +152,7 @@ func memoryPreview(m *memory.Manager, ctx context.Context, id string) string {
 // MarkResolvedTool closes a prediction with an observed outcome. Requires
 // confirmation because it writes a new memory version and sets status.
 type MarkResolvedTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 }
 
@@ -231,6 +233,7 @@ func (t *MarkResolvedTool) Execute(ctx context.Context, args map[string]any) (an
 // expected-vs-actual overlap. Requires confirmation for the same reason as
 // MarkResolved.
 type RecordReviewTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 }
 
@@ -313,6 +316,7 @@ func (t *RecordReviewTool) Execute(ctx context.Context, args map[string]any) (an
 // are excluded from search ranking and canonical lookup but retained for
 // audit. Requires confirmation.
 type RejectClaimTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 }
 
@@ -383,6 +387,7 @@ func (t *RejectClaimTool) Execute(ctx context.Context, args map[string]any) (any
 // PurgeAutoClaimsTool deletes all ambient-extracted (status=auto) claims
 // older than the given cutoff. Bulk destructive — requires confirmation.
 type PurgeAutoClaimsTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 }
 

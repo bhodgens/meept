@@ -12,6 +12,7 @@ import (
 
 // LSPReferencesTool finds all references to a symbol.
 type LSPReferencesTool struct {
+	tools.ToolDefaults
 	manager *lsp.Manager
 }
 

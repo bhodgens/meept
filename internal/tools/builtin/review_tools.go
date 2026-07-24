@@ -20,6 +20,7 @@ import (
 // the tool auto-selects a reviewer based on the caller's agent type using the
 // default reviewer mapping (coder -> code-reviewer, debugger -> debug-reviewer, etc.).
 type RequestReviewTool struct {
+	tools.ToolDefaults
 	registry      delegateRegistry
 	reviewMapping map[string]string // caller agent ID -> default reviewer ID
 }

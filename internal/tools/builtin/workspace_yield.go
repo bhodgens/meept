@@ -11,6 +11,7 @@ import (
 // WorkspaceYieldTool allows agents in a pair programming session to end their turn
 // and optionally approve, request changes, or request the editor token.
 type WorkspaceYieldTool struct {
+	tools.ToolDefaults
 	// callback is invoked when the tool is executed. Registered by the CollaborationEngine.
 	callback func(ctx context.Context, action, feedback string) error
 }

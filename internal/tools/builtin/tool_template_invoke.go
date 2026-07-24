@@ -30,6 +30,7 @@ const (
 // template as result text, while inject mode activates session-scoped
 // templates or returns content for turn injection.
 type TemplateInvokeTool struct {
+	tools.ToolDefaults
 	registry *templates.Registry
 }
 

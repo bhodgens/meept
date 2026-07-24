@@ -207,6 +207,8 @@ func (t *noopLeaf) Parameters() llm.FunctionParameters {
 func (t *noopLeaf) Execute(ctx context.Context, args map[string]any) (any, error) {
 	return "ok", nil
 }
+func (t *noopLeaf) IsReadOnly(map[string]any) bool        { return false }
+func (t *noopLeaf) IsConcurrencySafe(map[string]any) bool { return false }
 
 // spawnLeaf is a depth-gated tool representing the subagent-spawn capability.
 // It is visible at all depths less than its gate depth, making it invisible
@@ -229,6 +231,8 @@ func (t *spawnLeaf) Parameters() llm.FunctionParameters {
 func (t *spawnLeaf) Execute(ctx context.Context, args map[string]any) (any, error) {
 	return t.base.Execute(ctx, args)
 }
+func (t *spawnLeaf) IsReadOnly(input map[string]any) bool        { return t.base.IsReadOnly(input) }
+func (t *spawnLeaf) IsConcurrencySafe(input map[string]any) bool { return t.base.IsConcurrencySafe(input) }
 
 // -----------------------------------------------------------------------
 // GatedToolRegistry: multi-dimensional tool gating
@@ -450,6 +454,8 @@ func (t *descriptorTool) Parameters() llm.FunctionParameters { return t.desc.Inp
 func (t *descriptorTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	return map[string]any{"tool": t.desc.Name, "args": args}, nil
 }
+func (t *descriptorTool) IsReadOnly(map[string]any) bool        { return false }
+func (t *descriptorTool) IsConcurrencySafe(map[string]any) bool { return false }
 
 // GatedDepth returns the maximum depth at which the tool is visible.
 // For descriptor-based gating we derive this from AvailableAtDepths:

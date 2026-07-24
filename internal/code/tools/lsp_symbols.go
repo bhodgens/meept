@@ -12,6 +12,7 @@ import (
 
 // LSPSymbolsTool searches for symbols in the workspace or document.
 type LSPSymbolsTool struct {
+	tools.ToolDefaults
 	manager *lsp.Manager
 }
 

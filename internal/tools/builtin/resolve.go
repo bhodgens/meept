@@ -12,6 +12,7 @@ import (
 
 // ResolveTool allows accepting or rejecting pending file changes.
 type ResolveTool struct {
+	tools.ToolDefaults
 	registry      *PendingChangesRegistry
 	fenceChecker  FenceChecker
 	defaultExpiry time.Duration

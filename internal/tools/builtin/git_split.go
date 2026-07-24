@@ -32,6 +32,7 @@ var lockFileSuffixes = []string{
 
 // GitSplitTool suggests atomic commit groups from working tree changes.
 type GitSplitTool struct {
+	tools.ToolDefaults
 	workingDir   string
 	fenceChecker FenceChecker
 }

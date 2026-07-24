@@ -13,6 +13,7 @@ import (
 
 // GitOverviewTool provides a summary of working tree changes.
 type GitOverviewTool struct {
+	tools.ToolDefaults
 	workingDir   string
 	fenceChecker FenceChecker
 }

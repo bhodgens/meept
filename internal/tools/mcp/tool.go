@@ -68,6 +68,7 @@ func (s *SecuritySanitizer) Sanitize(text string) SanitizeResult {
 //
 //nolint:revive // stutter with package name is intentional for API clarity
 type MCPTool struct {
+	tools.ToolDefaults
 	def       llm.ToolDefinition
 	manager   *Manager
 	server    string // Server name for routing
@@ -100,6 +101,14 @@ func (t *MCPTool) SetLogger(l *slog.Logger) {
 		t.logger = l
 	}
 }
+
+// IsReadOnly returns false for MCP tools (fail-closed: external tools are
+// assumed to have side effects unless proven otherwise).
+func (t *MCPTool) IsReadOnly(map[string]any) bool { return false }
+
+// IsConcurrencySafe returns false for MCP tools (fail-closed: external tools
+// are assumed to be stateful unless proven otherwise).
+func (t *MCPTool) IsConcurrencySafe(map[string]any) bool { return false }
 
 // Name returns the fully qualified tool name (server.tool).
 func (t *MCPTool) Name() string {

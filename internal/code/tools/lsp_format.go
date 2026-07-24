@@ -14,6 +14,7 @@ import (
 
 // LSPFormatTool formats a source file using the LSP server.
 type LSPFormatTool struct {
+	tools.ToolDefaults
 	manager *lsp.Manager
 }
 

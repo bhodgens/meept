@@ -15,6 +15,7 @@ import (
 // DebugTool provides DAP debugging capabilities as a single tool with
 // action-based dispatch.
 type DebugTool struct {
+	tools.ToolDefaults
 	manager      *debug.Manager
 	checker      *security.PermissionChecker
 	fenceChecker FenceChecker

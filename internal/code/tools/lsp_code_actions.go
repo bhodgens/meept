@@ -14,6 +14,7 @@ import (
 
 // LSPCodeActionsTool retrieves available code actions for a position in a file.
 type LSPCodeActionsTool struct {
+	tools.ToolDefaults
 	manager *lsp.Manager
 }
 

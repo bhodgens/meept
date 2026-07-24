@@ -36,6 +36,7 @@ var (
 
 // WebFetchTool fetches content from URLs and converts to plain text.
 type WebFetchTool struct {
+	tools.ToolDefaults
 	timeout   time.Duration
 	maxLength int
 	client    *http.Client
@@ -445,6 +446,12 @@ func (t *WebFetchTool) ExecuteStreaming(ctx context.Context, args map[string]any
 		TaintLabel: taint.TaintExternal, // web-sourced content is externally tainted
 	}, nil
 }
+
+// IsReadOnly reports that web fetches are always read-only.
+func (t *WebFetchTool) IsReadOnly(map[string]any) bool { return true }
+
+// IsConcurrencySafe reports that web fetches are safe for concurrent execution.
+func (t *WebFetchTool) IsConcurrencySafe(map[string]any) bool { return true }
 
 // Ensure WebFetchTool implements the StreamingTool interface.
 var _ tools.StreamingTool = (*WebFetchTool)(nil)

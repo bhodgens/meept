@@ -12,7 +12,7 @@ import (
 )
 
 // GitValidateTool validates commit messages and git state.
-type GitValidateTool struct{}
+type GitValidateTool struct{ tools.ToolDefaults }
 
 // NewGitValidateTool creates a new git validate tool.
 func NewGitValidateTool() *GitValidateTool {

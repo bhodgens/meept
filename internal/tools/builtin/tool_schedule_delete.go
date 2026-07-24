@@ -12,6 +12,7 @@ import (
 
 // ScheduleDeleteTool deletes a scheduled job.
 type ScheduleDeleteTool struct {
+	tools.ToolDefaults
 	sched *scheduler.Scheduler
 }
 
@@ -82,6 +83,7 @@ func (t *ScheduleDeleteTool) Execute(ctx context.Context, args map[string]any) (
 
 // SchedulePauseTool pauses a scheduled job without deleting it.
 type SchedulePauseTool struct {
+	tools.ToolDefaults
 	sched *scheduler.Scheduler
 }
 
@@ -152,6 +154,7 @@ func (t *SchedulePauseTool) Execute(ctx context.Context, args map[string]any) (a
 
 // ScheduleResumeTool resumes a paused scheduled job.
 type ScheduleResumeTool struct {
+	tools.ToolDefaults
 	sched *scheduler.Scheduler
 }
 
@@ -222,6 +225,7 @@ func (t *ScheduleResumeTool) Execute(ctx context.Context, args map[string]any) (
 
 // ScheduleRunNowTool triggers immediate execution of a scheduled job.
 type ScheduleRunNowTool struct {
+	tools.ToolDefaults
 	sched *scheduler.Scheduler
 }
 

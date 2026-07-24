@@ -13,6 +13,7 @@ import (
 
 // CalendarListTool lists calendar events within a time range.
 type CalendarListTool struct {
+	tools.ToolDefaults
 	client *calendar.Client
 }
 
@@ -82,6 +83,7 @@ func (t *CalendarListTool) Execute(ctx context.Context, args map[string]any) (an
 
 // CalendarCreateTool creates a new calendar event.
 type CalendarCreateTool struct {
+	tools.ToolDefaults
 	client *calendar.Client
 }
 
@@ -169,6 +171,7 @@ func (t *CalendarCreateTool) Execute(ctx context.Context, args map[string]any) (
 
 // CalendarQuickAddTool creates events using natural language.
 type CalendarQuickAddTool struct {
+	tools.ToolDefaults
 	client *calendar.Client
 }
 
@@ -218,6 +221,7 @@ func (t *CalendarQuickAddTool) Execute(ctx context.Context, args map[string]any)
 
 // CalendarTodayTool gets today's events.
 type CalendarTodayTool struct {
+	tools.ToolDefaults
 	client *calendar.Client
 }
 

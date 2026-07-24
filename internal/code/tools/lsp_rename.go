@@ -17,6 +17,7 @@ import (
 
 // LSPRenameTool renames a symbol across the workspace.
 type LSPRenameTool struct {
+	tools.ToolDefaults
 	manager                *lsp.Manager
 	pendingChangesRegistry *builtin.PendingChangesRegistry
 }

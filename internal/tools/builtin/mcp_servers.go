@@ -23,6 +23,7 @@ type MCPServersResult struct {
 
 // MCPServersTool lists connected MCP servers and their tool counts.
 type MCPServersTool struct {
+	tools.ToolDefaults
 	listServers func() []MCPServerInfo
 }
 

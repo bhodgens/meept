@@ -12,6 +12,7 @@ import (
 
 // LSPHoverTool gets hover information (type, documentation) for a symbol.
 type LSPHoverTool struct {
+	tools.ToolDefaults
 	manager *lsp.Manager
 }
 

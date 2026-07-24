@@ -11,6 +11,7 @@ import (
 
 // InitiateCollaborationTool allows agents to request a collaborative session.
 type InitiateCollaborationTool struct {
+	tools.ToolDefaults
 	// callback is called with (mode, task_description, reason, preferred_agents)
 	// Returns (session_id, error)
 	callback func(ctx context.Context, mode, taskDesc, reason string, preferredAgents []string) (string, error)

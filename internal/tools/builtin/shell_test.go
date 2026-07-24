@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -418,4 +419,155 @@ func TestShellExecuteTool_Execute_WithSanitization(t *testing.T) {
 	shellResult := unwrapShellResult(t, result)
 	// The sanitizer inserts a zero-width space into special tokens.
 	assert.Contains(t, shellResult.Stdout, "\u200b", "special token in output should be neutralised")
+}
+
+// --- Command exit code semantics tests ---
+
+func TestInterpretExitCode(t *testing.T) {
+	tests := []struct {
+		name        string
+		command     string
+		exitCode    int
+		wantSuccess bool
+		wantMsg     string
+	}{
+		{"grep exit 0", "grep pattern file.txt", 0, true, ""},
+		{"grep exit 1 no matches", "grep pattern file.txt", 1, true, "no matches found"},
+		{"grep exit 2 error", "grep pattern file.txt", 2, false, "exit code 2"},
+		{"rg exit 1 no matches", "rg pattern", 1, true, "no matches found"},
+		{"rg exit 2 error", "rg pattern", 2, false, "exit code 2"},
+		{"diff exit 1 files differ", "diff a.txt b.txt", 1, true, "files differ"},
+		{"diff exit 2 error", "diff a.txt b.txt", 2, false, "exit code 2"},
+		{"find exit 1 inaccessible", "find / -name foo", 1, true, "some directories were inaccessible"},
+		{"find exit 2 error", "find / -name foo", 2, false, "exit code 2"},
+		{"test exit 1 false", "test -f /nonexistent", 1, true, "condition is false"},
+		{"test exit 2 error", "test -f /nonexistent", 2, false, "exit code 2"},
+		{"unknown cmd exit 1", "mycommand --flag", 1, false, "exit code 1"},
+		{"unknown cmd exit 0", "mycommand --flag", 0, true, ""},
+		{"ls exit 1", "ls /nonexistent", 1, false, "exit code 1"},
+		{"pipe last grep exit 1", "cat file.txt | grep pattern", 1, true, "no matches found"},
+		{"pipe last grep exit 2", "cat file.txt | grep pattern", 2, false, "exit code 2"},
+		{"pipe last unknown exit 1", "cat file.txt | mycommand", 1, false, "exit code 1"},
+		{"path grep exit 1", "/usr/bin/grep pattern file.txt", 1, true, "no matches found"},
+		{"env var grep exit 1", "LC_ALL=C grep pattern file.txt", 1, true, "no matches found"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			success, msg := interpretExitCode(tt.command, tt.exitCode)
+			assert.Equal(t, tt.wantSuccess, success, "success mismatch")
+			assert.Equal(t, tt.wantMsg, msg, "message mismatch")
+		})
+	}
+}
+
+func TestGrepExit1NotError(t *testing.T) {
+	tool := NewShellExecuteTool("", time.Second*10, nil)
+	ctx := context.Background()
+
+	// grep returns exit 1 when no matches found — should be Success=true.
+	result, err := tool.Execute(ctx, map[string]any{
+		"command": "grep zzz_nonexistent_pattern_zzz /dev/null",
+	})
+	require.NoError(t, err)
+
+	tr := result.(tools.ToolResult)
+	assert.True(t, tr.Success, "grep exit 1 should be success")
+	sr := tr.Result.(ShellResult)
+	assert.Equal(t, 1, sr.ReturnCode)
+	assert.Contains(t, sr.Stdout, "[no matches found]")
+}
+
+func TestGrepExit2IsError(t *testing.T) {
+	tool := NewShellExecuteTool("", time.Second*10, nil)
+	ctx := context.Background()
+
+	// grep returns exit 2 on error (e.g., file not found).
+	result, err := tool.Execute(ctx, map[string]any{
+		"command": "grep pattern /nonexistent/file/that/does/not/exist",
+	})
+	require.NoError(t, err)
+
+	tr := result.(tools.ToolResult)
+	assert.False(t, tr.Success, "grep exit 2 should be failure")
+	sr := tr.Result.(ShellResult)
+	assert.Equal(t, 2, sr.ReturnCode)
+}
+
+func TestDiffExit1NotError(t *testing.T) {
+	dir := t.TempDir()
+	fileA := filepath.Join(dir, "a.txt")
+	fileB := filepath.Join(dir, "b.txt")
+	require.NoError(t, os.WriteFile(fileA, []byte("aaa\n"), 0o644))
+	require.NoError(t, os.WriteFile(fileB, []byte("bbb\n"), 0o644))
+
+	tool := NewShellExecuteTool("", time.Second*10, nil)
+	ctx := context.Background()
+
+	result, err := tool.Execute(ctx, map[string]any{
+		"command": "diff " + fileA + " " + fileB,
+	})
+	require.NoError(t, err)
+
+	tr := result.(tools.ToolResult)
+	assert.True(t, tr.Success, "diff exit 1 (files differ) should be success")
+	sr := tr.Result.(ShellResult)
+	assert.Equal(t, 1, sr.ReturnCode)
+	assert.Contains(t, sr.Stdout, "[files differ]")
+}
+
+func TestUnknownCommandExit1IsError(t *testing.T) {
+	tool := NewShellExecuteTool("", time.Second*10, nil)
+	ctx := context.Background()
+
+	// Unknown command with exit 1 should be failure.
+	result, err := tool.Execute(ctx, map[string]any{
+		"command": "sh -c 'exit 1'",
+	})
+	require.NoError(t, err)
+
+	tr := result.(tools.ToolResult)
+	assert.False(t, tr.Success, "unknown command exit 1 should be failure")
+}
+
+func TestCompoundCommandSemantics(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "data.txt")
+	require.NoError(t, os.WriteFile(filePath, []byte("hello\nworld\n"), 0o644))
+
+	tool := NewShellExecuteTool("", time.Second*10, nil)
+	ctx := context.Background()
+
+	// Pipe: cat | grep with no match — last command is grep, exit 1 = success.
+	result, err := tool.Execute(ctx, map[string]any{
+		"command": "cat " + filePath + " | grep zzz_nonexistent_zzz",
+	})
+	require.NoError(t, err)
+
+	tr := result.(tools.ToolResult)
+	assert.True(t, tr.Success, "pipe ending in grep exit 1 should be success")
+	sr := tr.Result.(ShellResult)
+	assert.Contains(t, sr.Stdout, "[no matches found]")
+}
+
+func TestLastPipeCommand(t *testing.T) {
+	tests := []struct {
+		command string
+		want    string
+	}{
+		{"grep pattern file", "grep"},
+		{"cat file | grep pattern", "grep"},
+		{"cat file | sort | uniq -c", "uniq"},
+		{"echo hello", "echo"},
+		{"cat file | wc -l", "wc"},
+		{"/usr/bin/grep pattern", "grep"},
+		{"FOO=bar grep pattern", "grep"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			got := lastPipeCommand(tt.command)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }

@@ -17,6 +17,7 @@ import (
 // CronCreateTool creates a cron-style recurring job.
 // This is a convenience wrapper around schedule_create with helpful cron expression parsing.
 type CronCreateTool struct {
+	tools.ToolDefaults
 	sched *scheduler.Scheduler
 }
 

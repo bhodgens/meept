@@ -12,6 +12,7 @@ import (
 
 // LSPDocumentSymbolsTool gets all symbols in a single file.
 type LSPDocumentSymbolsTool struct {
+	tools.ToolDefaults
 	manager *lsp.Manager
 }
 

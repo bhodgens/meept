@@ -14,6 +14,7 @@ import (
 // In Meept's architecture, entities are represented by memory IDs,
 // so this tool ensures a node exists in the knowledge graph.
 type EntityCreateTool struct {
+	tools.ToolDefaults
 	graph *memory.KnowledgeGraph
 }
 
@@ -108,6 +109,7 @@ func (t *EntityCreateTool) Execute(ctx context.Context, args map[string]any) (an
 
 // EntityLinkTool links two entities with a relation in the knowledge graph.
 type EntityLinkTool struct {
+	tools.ToolDefaults
 	graph *memory.KnowledgeGraph
 }
 
@@ -256,6 +258,7 @@ func (t *EntityLinkTool) Execute(ctx context.Context, args map[string]any) (any,
 
 // EntityQueryTool queries the knowledge graph for related entities.
 type EntityQueryTool struct {
+	tools.ToolDefaults
 	graph *memory.KnowledgeGraph
 }
 
@@ -414,6 +417,7 @@ func (t *EntityQueryTool) Execute(ctx context.Context, args map[string]any) (any
 
 // GraphStatsTool retrieves statistics about the knowledge graph.
 type GraphStatsTool struct {
+	tools.ToolDefaults
 	graph *memory.KnowledgeGraph
 }
 
@@ -481,6 +485,7 @@ func (t *GraphStatsTool) Execute(ctx context.Context, args map[string]any) (any,
 
 // ComputePageRankTool recomputes PageRank scores for all nodes in the graph.
 type ComputePageRankTool struct {
+	tools.ToolDefaults
 	graph *memory.KnowledgeGraph
 }
 
@@ -534,6 +539,7 @@ func (t *ComputePageRankTool) Execute(ctx context.Context, args map[string]any) 
 
 // DetectCommunitiesTool runs community detection on the knowledge graph.
 type DetectCommunitiesTool struct {
+	tools.ToolDefaults
 	graph *memory.KnowledgeGraph
 }
 
@@ -617,6 +623,7 @@ func uniqueValues(m map[string]string) []string {
 
 // GetCommunitySiblingsTool finds other entities in the same community.
 type GetCommunitySiblingsTool struct {
+	tools.ToolDefaults
 	graph *memory.KnowledgeGraph
 }
 

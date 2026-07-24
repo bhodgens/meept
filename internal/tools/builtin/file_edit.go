@@ -42,6 +42,7 @@ type BlockResolver interface {
 
 // FileEditTool performs incremental file edits using hashline-anchored line references.
 type FileEditTool struct {
+	tools.ToolDefaults
 	checker                *security.PermissionChecker
 	readCache              *ReadCache
 	lspNotifier            LSPWriteNotifier
@@ -1062,6 +1063,13 @@ func (t *FileEditTool) generateDiffPreview(filePath, original, modified string) 
 
 	return strings.Join(diff, "\n")
 }
+
+// IsReadOnly reports that file edits are never read-only.
+func (t *FileEditTool) IsReadOnly(map[string]any) bool { return false }
+
+// IsConcurrencySafe reports that file edits to independent paths are safe
+// for concurrent execution.
+func (t *FileEditTool) IsConcurrencySafe(map[string]any) bool { return true }
 
 // Ensure FileEditTool implements the Tool interface.
 var _ tools.Tool = (*FileEditTool)(nil)

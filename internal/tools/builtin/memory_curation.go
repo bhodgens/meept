@@ -14,6 +14,7 @@ import (
 // retention. Unlike memory_store, this is agent-curated: the agent decides
 // the fact is worth remembering permanently, not just recording an event.
 type RetainTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 }
 
@@ -101,6 +102,7 @@ func (t *RetainTool) Execute(ctx context.Context, args map[string]any) (any, err
 // It is a semantic wrapper around memory_search optimized for recalling
 // explicitly curated knowledge.
 type RecallTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 }
 
@@ -180,6 +182,7 @@ func (t *RecallTool) Execute(ctx context.Context, args map[string]any) (any, err
 // of themes, conflicts, and actionable insights. This helps the agent
 // periodically consolidate curated knowledge.
 type ReflectTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 }
 
@@ -284,3 +287,9 @@ var (
 	_ tools.TerminatingTool = (*RetainTool)(nil)
 	_ tools.TerminatingTool = (*ReflectTool)(nil)
 )
+
+// IsReadOnly reports that memory recall (search) is always read-only.
+func (t *RecallTool) IsReadOnly(map[string]any) bool { return true }
+
+// IsConcurrencySafe reports that memory recall is safe for concurrent execution.
+func (t *RecallTool) IsConcurrencySafe(map[string]any) bool { return true }

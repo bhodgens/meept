@@ -243,7 +243,7 @@ func (r *DependencyInferrer) InferDependencies(calls []llm.ToolCall) *ToolDepend
 		ci.args = parseArgs(call.Function.Arguments)
 		ci.filePath = extractFilePath(ci.args)
 		ci.isWrite = isWriteTool(call.Function.Name)
-		ci.isRead = isReadTool(call.Function.Name)
+		ci.isRead = r.isReadOnly(call.Function.Name, ci.args)
 		infos[i] = ci
 	}
 
@@ -315,6 +315,16 @@ func extractFilePath(args map[string]any) string {
 		}
 	}
 	return ""
+}
+
+// isReadOnly reports whether the named tool is read-only for the given input.
+// It prefers the tool's own declaration via the registry, falling back to the
+// name-based heuristic when the tool is not found.
+func (r *DependencyInferrer) isReadOnly(toolName string, input map[string]any) bool {
+	if tool := r.toolRegistry.Get(toolName); tool != nil {
+		return tool.IsReadOnly(input)
+	}
+	return isReadTool(toolName)
 }
 
 // isWriteTool returns true if the tool name suggests it writes/modifies a file.

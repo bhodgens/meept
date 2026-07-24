@@ -15,6 +15,7 @@ import (
 
 // LSPDiagnosticsTool gets diagnostics (errors, warnings) for a file.
 type LSPDiagnosticsTool struct {
+	tools.ToolDefaults
 	manager     *lsp.Manager
 	mu          sync.RWMutex
 	diagnostics map[string][]lsp.Diagnostic // URI -> diagnostics

@@ -687,6 +687,8 @@ func (t *mockStreamingTool) Parameters() llm.FunctionParameters {
 func (t *mockStreamingTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	return t.result, t.err
 }
+func (t *mockStreamingTool) IsReadOnly(map[string]any) bool        { return false }
+func (t *mockStreamingTool) IsConcurrencySafe(map[string]any) bool { return false }
 func (t *mockStreamingTool) ExecuteStreaming(ctx context.Context, args map[string]any, onUpdate func(tools.ProgressUpdate)) (any, error) {
 	for _, u := range t.updates {
 		onUpdate(u)
@@ -720,6 +722,8 @@ func (t *mockTerminatingTool) Parameters() llm.FunctionParameters {
 func (t *mockTerminatingTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	return t.result, t.err
 }
+func (t *mockTerminatingTool) IsReadOnly(map[string]any) bool        { return false }
+func (t *mockTerminatingTool) IsConcurrencySafe(map[string]any) bool { return false }
 func (t *mockTerminatingTool) TerminateHint(args map[string]any) bool {
 	return t.terminate
 }

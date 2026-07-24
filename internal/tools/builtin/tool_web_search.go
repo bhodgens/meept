@@ -48,6 +48,7 @@ type SearchResults struct {
 
 // WebSearchTool performs web searches using DuckDuckGo's HTML interface.
 type WebSearchTool struct {
+	tools.ToolDefaults
 	timeout         time.Duration
 	client          *http.Client
 	mu              sync.Mutex
@@ -361,6 +362,12 @@ func (t *WebSearchTool) decodeHTMLEntities(s string) string {
 
 	return s
 }
+
+// IsReadOnly reports that web searches are always read-only.
+func (t *WebSearchTool) IsReadOnly(map[string]any) bool { return true }
+
+// IsConcurrencySafe reports that web searches are safe for concurrent execution.
+func (t *WebSearchTool) IsConcurrencySafe(map[string]any) bool { return true }
 
 // Ensure WebSearchTool implements the Tool interface
 var _ tools.Tool = (*WebSearchTool)(nil)

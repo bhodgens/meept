@@ -77,6 +77,7 @@ type TeamCallbacks struct {
 
 // TeamCreateTool allows the lead agent to initiate a new team session.
 type TeamCreateTool struct {
+	tools.ToolDefaults
 	callback func(ctx context.Context, config TeamCreateConfig) (string, error)
 }
 
@@ -215,6 +216,7 @@ func (t *TeamCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 
 // TeamAssignTool assigns a subtask to a specific team member.
 type TeamAssignTool struct {
+	tools.ToolDefaults
 	callback func(ctx context.Context, teamID string, assignment TaskAssignment) error
 }
 
@@ -334,6 +336,7 @@ func (t *TeamAssignTool) Execute(ctx context.Context, args map[string]any) (any,
 
 // TeamStatusTool checks the progress of all team members.
 type TeamStatusTool struct {
+	tools.ToolDefaults
 	callback func(ctx context.Context, teamID string) (*TeamStatusResult, error)
 }
 
@@ -396,6 +399,7 @@ func (t *TeamStatusTool) Execute(ctx context.Context, args map[string]any) (any,
 
 // TeamMessageTool sends a broadcast or targeted message within a team.
 type TeamMessageTool struct {
+	tools.ToolDefaults
 	callback func(ctx context.Context, teamID string, msg TeamMessage) error
 }
 
@@ -514,6 +518,7 @@ func (t *TeamMessageTool) Execute(ctx context.Context, args map[string]any) (any
 
 // TeamResultTool allows a team member to submit their partial result.
 type TeamResultTool struct {
+	tools.ToolDefaults
 	callback func(ctx context.Context, teamID string, result MemberResult) error
 }
 
@@ -646,6 +651,7 @@ func (t *TeamResultTool) Execute(ctx context.Context, args map[string]any) (any,
 
 // TeamPresetCreateTool creates a team from a predefined preset configuration.
 type TeamPresetCreateTool struct {
+	tools.ToolDefaults
 	callback func(ctx context.Context, presetName string, taskDescription string, maxConcurrentOverride int) (string, error)
 }
 

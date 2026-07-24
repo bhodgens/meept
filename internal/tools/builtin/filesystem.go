@@ -30,8 +30,12 @@ const (
 	MaxListEntries = 500
 )
 
+// FileUnchangedStub is returned when a file has not changed since the last read.
+const FileUnchangedStub = "File unchanged since last read. The content from the earlier read is still current — refer to that instead of re-reading."
+
 // ReadFileTool reads the contents of a file.
 type ReadFileTool struct {
+	tools.ToolDefaults
 	checker      *security.PermissionChecker
 	readCache    *ReadCache
 	fenceChecker FenceChecker
@@ -153,6 +157,27 @@ func (t *ReadFileTool) executeRead(args map[string]any, progress func(tools.Prog
 
 	text := string(content)
 
+	// Compute content hash once for both unchanged detection and evidence.
+	contentHash := sha256.Sum256(content)
+	contentHashHex := hex.EncodeToString(contentHash[:])
+
+	// Return a compact stub when the file has not changed since the last
+	// full read. Partial reads (offset/limit) always return content so the
+	// caller can request different ranges of an unchanged file.
+	if t.readCache != nil {
+		offsetVal, _ := args["offset"].(float64)
+		limitVal, _ := args["limit"].(float64)
+		if offsetVal <= 0 && limitVal <= 0 {
+			if cached := t.readCache.GetContentHash(resolved); cached != "" && cached == contentHashHex {
+				return tools.ToolResult{
+					Success:    true,
+					Result:     FileUnchangedStub,
+					TaintLabel: taint.TaintUserInput,
+				}, nil
+			}
+		}
+	}
+
 	// Sanitize output for injection patterns if security orchestrator is available
 	if t.secOrch != nil && t.secOrch.InputSanitizer() != nil {
 		sanitizeResult := t.secOrch.InputSanitizer().Sanitize(text)
@@ -223,7 +248,7 @@ func (t *ReadFileTool) executeRead(args map[string]any, progress func(tools.Prog
 			snapshotLines = snapshotLines[:len(snapshotLines)-1]
 		}
 		if snapshotTag != "" {
-			t.readCache.StoreWithTag(resolved, snapshotLines, snapshotTag)
+			t.readCache.StoreWithTagAndHash(resolved, snapshotLines, snapshotTag, contentHashHex)
 		} else {
 			t.readCache.Store(resolved, snapshotLines)
 		}
@@ -270,13 +295,11 @@ func (t *ReadFileTool) executeRead(args map[string]any, progress func(tools.Prog
 		))
 	}
 
-	// Compute SHA256 hash of file content
-	h := sha256.Sum256(content)
-	hash := hex.EncodeToString(h[:])
+	// Reuse the pre-computed content hash for evidence
 	evidence = append(evidence, models.NewEvidence(
 		models.EvidenceFileHash,
 		resolved,
-		hash,
+		contentHashHex,
 		t.Name(),
 	))
 
@@ -295,6 +318,7 @@ func (t *ReadFileTool) executeRead(args map[string]any, progress func(tools.Prog
 
 // WriteFileTool writes content to a file.
 type WriteFileTool struct {
+	tools.ToolDefaults
 	checker      *security.PermissionChecker
 	lspNotifier  LSPWriteNotifier
 	fenceChecker FenceChecker
@@ -507,6 +531,7 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 
 // DeleteFileTool deletes a file from the filesystem.
 type DeleteFileTool struct {
+	tools.ToolDefaults
 	checker      *security.PermissionChecker
 	fenceChecker FenceChecker
 	secOrch      *intsecurity.Orchestrator
@@ -618,6 +643,7 @@ func (t *DeleteFileTool) Execute(ctx context.Context, args map[string]any) (any,
 
 // ListDirectoryTool lists the contents of a directory.
 type ListDirectoryTool struct {
+	tools.ToolDefaults
 	checker      *security.PermissionChecker
 	fenceChecker FenceChecker
 	secOrch      *intsecurity.Orchestrator
@@ -941,8 +967,29 @@ var (
 	_ tools.Tool = (*WriteFileTool)(nil)
 	_ tools.Tool = (*DeleteFileTool)(nil)
 	_ tools.Tool = (*ListDirectoryTool)(nil)
+)
 
-	// Ensure streaming tools implement StreamingTool
+// IsReadOnly reports that file reads are always read-only.
+func (t *ReadFileTool) IsReadOnly(map[string]any) bool { return true }
+
+// IsConcurrencySafe reports that file reads are safe for concurrent execution.
+func (t *ReadFileTool) IsConcurrencySafe(map[string]any) bool { return true }
+
+// IsReadOnly reports that directory listings are always read-only.
+func (t *ListDirectoryTool) IsReadOnly(map[string]any) bool { return true }
+
+// IsConcurrencySafe reports that directory listings are safe for concurrent execution.
+func (t *ListDirectoryTool) IsConcurrencySafe(map[string]any) bool { return true }
+
+// IsReadOnly reports that file writes are never read-only.
+func (t *WriteFileTool) IsReadOnly(map[string]any) bool { return false }
+
+// IsConcurrencySafe reports that file writes to independent paths are safe
+// for concurrent execution.
+func (t *WriteFileTool) IsConcurrencySafe(map[string]any) bool { return true }
+
+// Ensure streaming tools implement StreamingTool
+var (
 	_ tools.StreamingTool = (*ReadFileTool)(nil)
 	_ tools.StreamingTool = (*WriteFileTool)(nil)
 )

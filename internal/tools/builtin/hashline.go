@@ -178,6 +178,7 @@ type ReadCache struct {
 type cacheEntry struct {
 	lines       []string // 0-indexed lines
 	snapshotTag string   // snapshot tag for this cached version
+	contentHash string   // SHA256 hex of the full file content at read time
 }
 
 // NewReadCache creates a ReadCache with the given maximum entries.
@@ -241,6 +242,62 @@ func (c *ReadCache) StoreWithTag(path string, lines []string, snapshotTag string
 		hist = hist[len(hist)-maxHistoryPerPath:]
 	}
 	c.editHistory[path] = hist
+}
+
+// StoreWithTagAndHash records a file snapshot with a snapshot tag and content hash.
+// The content hash enables unchanged-file detection on subsequent reads.
+func (c *ReadCache) StoreWithTagAndHash(path string, lines []string, snapshotTag string, contentHash string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Remove old entry if exists
+	if _, ok := c.entries[path]; ok {
+		for i, p := range c.order {
+			if p == path {
+				c.order = append(c.order[:i], c.order[i+1:]...)
+				break
+			}
+		}
+	}
+
+	// Evict oldest if at capacity
+	if len(c.order) >= c.maxItems {
+		oldest := c.order[0]
+		delete(c.entries, oldest)
+		c.order = c.order[1:]
+	}
+
+	// Store a copy to avoid aliasing
+	copied := make([]string, len(lines))
+	copy(copied, lines)
+	c.entries[path] = &cacheEntry{lines: copied, snapshotTag: snapshotTag, contentHash: contentHash}
+	c.order = append(c.order, path)
+
+	// Append to edit history, capped at 10 per path.
+	const maxHistoryPerPath = 10
+	hist := c.editHistory[path]
+	entry := SnapshotEntry{
+		Lines:     copied,
+		Tag:       snapshotTag,
+		Timestamp: time.Now(),
+	}
+	hist = append(hist, entry)
+	if len(hist) > maxHistoryPerPath {
+		hist = hist[len(hist)-maxHistoryPerPath:]
+	}
+	c.editHistory[path] = hist
+}
+
+// GetContentHash retrieves the cached content hash for a path.
+// Returns "" if the path is not cached or has no hash.
+func (c *ReadCache) GetContentHash(path string) string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if entry, ok := c.entries[path]; ok {
+		return entry.contentHash
+	}
+	return ""
 }
 
 // Get retrieves a file snapshot from the cache.

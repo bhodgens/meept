@@ -18,6 +18,7 @@ import (
 // The tool does NOT apply the change. It queues the proposal for later review
 // and application via /implement-improvements or `meept improvements list`.
 type RememberTool struct {
+	tools.ToolDefaults
 	queue *agent.ProposalQueueExternal
 }
 

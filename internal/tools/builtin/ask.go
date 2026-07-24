@@ -25,6 +25,7 @@ type ResponseFunc func(ctx context.Context, question string, options []string) (
 // While the dispatcher asks clarification questions at routing time, AskTool lets
 // specialist agents (coder, planner, analyst) ask mid-execution questions.
 type AskTool struct {
+	tools.ToolDefaults
 	askUser ResponseFunc
 }
 

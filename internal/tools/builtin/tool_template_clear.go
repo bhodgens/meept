@@ -10,6 +10,7 @@ import (
 
 // TemplateClearTool allows agents to deactivate session-scoped templates.
 type TemplateClearTool struct {
+	tools.ToolDefaults
 	registry *templates.Registry
 }
 

@@ -12,6 +12,7 @@ import (
 
 // TaskCreateTool creates a new task.
 type TaskCreateTool struct {
+	tools.ToolDefaults
 	store *task.Store
 }
 
@@ -107,6 +108,7 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 
 // TaskGetTool retrieves a task by ID.
 type TaskGetTool struct {
+	tools.ToolDefaults
 	store *task.Store
 }
 
@@ -175,6 +177,7 @@ func (t *TaskGetTool) Execute(ctx context.Context, args map[string]any) (any, er
 
 // TaskListTool lists tasks.
 type TaskListTool struct {
+	tools.ToolDefaults
 	store *task.Store
 }
 
@@ -261,6 +264,7 @@ func (t *TaskListTool) Execute(ctx context.Context, args map[string]any) (any, e
 
 // TaskUpdateTool updates an existing task.
 type TaskUpdateTool struct {
+	tools.ToolDefaults
 	store *task.Store
 }
 
@@ -372,6 +376,7 @@ func (t *TaskUpdateTool) Execute(ctx context.Context, args map[string]any) (any,
 
 // TaskSummarizeTool produces an LLM summary of a task's current state.
 type TaskSummarizeTool struct {
+	tools.ToolDefaults
 	store   *task.Store
 	chatter llm.Chatter
 }

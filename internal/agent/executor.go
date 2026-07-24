@@ -1202,6 +1202,29 @@ func (e *Executor) trackCombinedTaint(results []*ExecutionResult) {
 	}
 }
 
+// profileForTool returns the concurrency profile for the given tool, preferring
+// tool-declared safety over the static toolProfiles map. Read-only and
+// concurrency-safe tools are always ProfileIOBound (high parallelism).
+func (e *Executor) profileForTool(toolName string, input map[string]any) ToolConcurrencyProfile {
+	e.mu.RLock()
+	registry := e.registry
+	e.mu.RUnlock()
+	if registry != nil {
+		if tool := registry.Get(toolName); tool != nil {
+			if tool.IsReadOnly(input) {
+				return ProfileIOBound
+			}
+			if tool.IsConcurrencySafe(input) {
+				return ProfileIOBound
+			}
+		}
+	}
+	if profile, ok := toolProfiles[toolName]; ok {
+		return profile
+	}
+	return ProfileIOBound
+}
+
 // ExecuteAll runs multiple tool calls with dependency-aware scheduling.
 //
 // Independent tool calls are executed in parallel within each wave (group);
@@ -1311,7 +1334,8 @@ func (e *Executor) executeParallelGroup(ctx context.Context, group []llm.ToolCal
 			defer wg.Done()
 
 			if e.parallelismLimiter != nil {
-				profile := e.parallelismLimiter.ProfileForTool(call.Function.Name)
+				args, _ := call.ParsedArguments()
+				profile := e.profileForTool(call.Function.Name, args)
 				if err := e.parallelismLimiter.Acquire(ctx, profile); err != nil {
 					results[idx] = &ExecutionResult{
 						ToolCallID: call.ID,
@@ -1633,6 +1657,12 @@ func (t *MockTool) Execute(ctx context.Context, args map[string]any) (any, error
 	}
 	return map[string]any{"success": true, "mock": true}, nil
 }
+
+// IsReadOnly returns false for mock tools by default.
+func (t *MockTool) IsReadOnly(map[string]any) bool { return false }
+
+// IsConcurrencySafe returns false for mock tools by default.
+func (t *MockTool) IsConcurrencySafe(map[string]any) bool { return false }
 
 // FilteredToolRegistry wraps a ToolRegistry and only exposes a subset of tools.
 type FilteredToolRegistry struct {

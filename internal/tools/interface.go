@@ -38,7 +38,34 @@ type Tool interface {
 	// Arguments are parsed from the JSON provided by the LLM.
 	// Returns the result as a map, or an error if execution fails.
 	Execute(ctx context.Context, args map[string]any) (any, error)
+
+	// IsReadOnly reports whether the tool call with the given input is a
+	// read-only operation that does not mutate any state. Read-only tools
+	// can be safely parallelized and cached. The input map contains the
+	// parsed tool arguments so implementations can make input-dependent
+	// decisions (e.g., shell commands that only read vs. write).
+	IsReadOnly(input map[string]any) bool
+
+	// IsConcurrencySafe reports whether the tool call with the given input
+	// can safely execute concurrently with other tool calls. Tools that
+	// are concurrency-safe may be parallelized even if they are not
+	// strictly read-only (e.g., independent file writes to different paths).
+	IsConcurrencySafe(input map[string]any) bool
 }
+
+// ToolDefaults provides default implementations for the safety-query methods
+// on the Tool interface. Embed this struct in tool implementations to inherit
+// conservative defaults (not read-only, not concurrency-safe) and override
+// only the methods that apply.
+type ToolDefaults struct{}
+
+// IsReadOnly returns false by default. Tools that are always read-only should
+// override this method to return true.
+func (ToolDefaults) IsReadOnly(map[string]any) bool { return false }
+
+// IsConcurrencySafe returns false by default. Tools that can safely execute
+// concurrently should override this method to return true.
+func (ToolDefaults) IsConcurrencySafe(map[string]any) bool { return false }
 
 // ToolResult is the standardized result envelope returned by tool execution.
 //

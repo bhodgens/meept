@@ -13,6 +13,7 @@ import (
 // This tool triggers the LSP server's willRenameFiles capability to update
 // barrel files, re-exports, and aliased imports when files are renamed.
 type LSPRenameFilesTool struct {
+	tools.ToolDefaults
 	manager *lsp.Manager
 }
 

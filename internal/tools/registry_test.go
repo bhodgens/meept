@@ -36,6 +36,8 @@ func (m *mockTool) Execute(ctx context.Context, args map[string]any) (any, error
 	}
 	return map[string]any{"result": "ok"}, nil
 }
+func (m *mockTool) IsReadOnly(map[string]any) bool        { return false }
+func (m *mockTool) IsConcurrencySafe(map[string]any) bool { return false }
 
 func TestRegistry_Register(t *testing.T) {
 	r := NewRegistry(nil)

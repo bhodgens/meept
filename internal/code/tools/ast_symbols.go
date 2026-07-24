@@ -11,6 +11,7 @@ import (
 
 // ASTSymbolsTool extracts code symbols from source files.
 type ASTSymbolsTool struct {
+	tools.ToolDefaults
 	extractor *ast.SymbolExtractor
 }
 

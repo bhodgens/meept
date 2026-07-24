@@ -14,6 +14,7 @@ import (
 // ResolveASTEditTool applies or discards pending ast_edit proposals.
 // This tool provides an explicit resolve pattern for the preview-before-apply workflow.
 type ResolveASTEditTool struct {
+	tools.ToolDefaults
 	parser       *ast.ParserManager
 	fenceChecker builtin.FenceChecker
 }

@@ -13,6 +13,7 @@ import (
 
 // ScheduleListTool lists scheduled jobs.
 type ScheduleListTool struct {
+	tools.ToolDefaults
 	sched *scheduler.Scheduler
 }
 
@@ -124,6 +125,7 @@ func (t *ScheduleListTool) Execute(ctx context.Context, args map[string]any) (an
 
 // ScheduleGetTool gets details of a specific scheduled job.
 type ScheduleGetTool struct {
+	tools.ToolDefaults
 	sched *scheduler.Scheduler
 }
 
@@ -203,8 +205,22 @@ func (t *ScheduleGetTool) TerminateHint(args map[string]any) bool { return true 
 var (
 	_ tools.Tool = (*ScheduleListTool)(nil)
 	_ tools.Tool = (*ScheduleGetTool)(nil)
+)
 
-	// Ensure schedule listing tools implement TerminatingTool
+// IsReadOnly reports that schedule listing is always read-only.
+func (t *ScheduleListTool) IsReadOnly(map[string]any) bool { return true }
+
+// IsConcurrencySafe reports that schedule listing is safe for concurrent execution.
+func (t *ScheduleListTool) IsConcurrencySafe(map[string]any) bool { return true }
+
+// IsReadOnly reports that schedule retrieval is always read-only.
+func (t *ScheduleGetTool) IsReadOnly(map[string]any) bool { return true }
+
+// IsConcurrencySafe reports that schedule retrieval is safe for concurrent execution.
+func (t *ScheduleGetTool) IsConcurrencySafe(map[string]any) bool { return true }
+
+// Ensure schedule listing tools implement TerminatingTool
+var (
 	_ tools.TerminatingTool = (*ScheduleListTool)(nil)
 	_ tools.TerminatingTool = (*ScheduleGetTool)(nil)
 )

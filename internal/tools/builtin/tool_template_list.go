@@ -11,6 +11,7 @@ import (
 
 // TemplateListTool allows agents to discover available or active templates.
 type TemplateListTool struct {
+	tools.ToolDefaults
 	registry *templates.Registry
 }
 

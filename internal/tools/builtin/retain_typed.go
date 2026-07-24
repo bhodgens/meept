@@ -40,6 +40,7 @@ func toStringSlice(v any) []string {
 // RetainClaimTool is the Path A tool for storing user-asserted claims
 // (ClaimStatusConfirmed by default). It wraps Manager.StoreClaim.
 type RetainClaimTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 }
 
@@ -123,6 +124,7 @@ func (t *RetainClaimTool) Execute(ctx context.Context, args map[string]any) (any
 // RetainDecisionTool is the Path A tool for storing decisions with expected
 // outcomes and optional review schedules. It wraps Manager.StoreDecision.
 type RetainDecisionTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 }
 
@@ -212,6 +214,7 @@ func (t *RetainDecisionTool) Execute(ctx context.Context, args map[string]any) (
 // RetainPredictionTool is the Path A tool for storing forecasts with a
 // resolution horizon. It wraps Manager.StorePrediction.
 type RetainPredictionTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 }
 

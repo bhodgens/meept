@@ -12,6 +12,7 @@ import (
 
 // LSPImplementationTool finds all implementations of a symbol.
 type LSPImplementationTool struct {
+	tools.ToolDefaults
 	manager *lsp.Manager
 }
 

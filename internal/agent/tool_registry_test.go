@@ -27,6 +27,8 @@ func (t *fakeLeafTool) Parameters() llm.FunctionParameters {
 func (t *fakeLeafTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	return map[string]any{"tool": t.name, "args": args}, nil
 }
+func (t *fakeLeafTool) IsReadOnly(map[string]any) bool        { return false }
+func (t *fakeLeafTool) IsConcurrencySafe(map[string]any) bool { return false }
 
 // fakeSpawnTool is a depth-gated spawn tool with gate at maxDepth.
 type fakeSpawnTool struct {
@@ -45,6 +47,8 @@ func (t *fakeSpawnTool) Parameters() llm.FunctionParameters {
 func (t *fakeSpawnTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	return t.base.Execute(ctx, args)
 }
+func (t *fakeSpawnTool) IsReadOnly(input map[string]any) bool        { return t.base.IsReadOnly(input) }
+func (t *fakeSpawnTool) IsConcurrencySafe(input map[string]any) bool { return t.base.IsConcurrencySafe(input) }
 
 var _ depthGate = (*fakeSpawnTool)(nil)
 

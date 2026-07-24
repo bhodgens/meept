@@ -96,6 +96,7 @@ type FenceChecker interface {
 
 // ShellExecuteTool executes shell commands in a sandboxed subprocess.
 type ShellExecuteTool struct {
+	tools.ToolDefaults
 	workingDir        string
 	defaultTimeout    time.Duration
 	securityOrch      *intsecurity.Orchestrator
@@ -211,6 +212,91 @@ type ShellResult struct {
 	Stderr     string `json:"stderr,omitempty"`
 	ReturnCode int    `json:"return_code"`
 	Truncated  bool   `json:"truncated,omitempty"`
+}
+
+// commandSemantic describes how to interpret non-zero exit codes for a
+// specific command. Many CLI tools use exit code 1 for non-error conditions
+// (e.g. grep returns 1 when no matches are found).
+type commandSemantic struct {
+	isError func(exitCode int) bool
+	message func(exitCode int) string
+}
+
+// commandSemantics maps base command names to their exit-code semantics.
+// Commands not listed here use the default rule: exit 0 = success, non-zero = error.
+var commandSemantics = map[string]commandSemantic{
+	"grep": {
+		isError: func(c int) bool { return c >= 2 },
+		message: func(c int) string {
+			if c == 1 {
+				return "no matches found"
+			}
+			return ""
+		},
+	},
+	"rg": {
+		isError: func(c int) bool { return c >= 2 },
+		message: func(c int) string {
+			if c == 1 {
+				return "no matches found"
+			}
+			return ""
+		},
+	},
+	"diff": {
+		isError: func(c int) bool { return c >= 2 },
+		message: func(c int) string {
+			if c == 1 {
+				return "files differ"
+			}
+			return ""
+		},
+	},
+	"find": {
+		isError: func(c int) bool { return c >= 2 },
+		message: func(c int) string {
+			if c == 1 {
+				return "some directories were inaccessible"
+			}
+			return ""
+		},
+	},
+	"test": {
+		isError: func(c int) bool { return c >= 2 },
+		message: func(c int) string {
+			if c == 1 {
+				return "condition is false"
+			}
+			return ""
+		},
+	},
+}
+
+// lastPipeCommand returns the base command of the last segment in a pipeline.
+// For non-pipe commands it returns the base command directly.
+func lastPipeCommand(command string) string {
+	if segments, ok := splitOnUnquotedPipes(command); ok {
+		last := strings.TrimSpace(segments[len(segments)-1])
+		return extractBaseCommand(last)
+	}
+	return extractBaseCommand(command)
+}
+
+// interpretExitCode determines whether an exit code represents success or
+// failure for the given command, applying command-specific semantics.
+// Returns (success, semanticMessage). When success is true and
+// semanticMessage is non-empty, the message explains the non-zero exit.
+func interpretExitCode(command string, exitCode int) (success bool, message string) {
+	if exitCode == 0 {
+		return true, ""
+	}
+	baseCmd := lastPipeCommand(command)
+	if sem, ok := commandSemantics[baseCmd]; ok {
+		if !sem.isError(exitCode) {
+			return true, sem.message(exitCode)
+		}
+	}
+	return false, fmt.Sprintf("exit code %d", exitCode)
 }
 
 func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (any, error) {
@@ -355,8 +441,13 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 		t.Name(),
 	))
 
+	success, semanticMsg := interpretExitCode(command, returnCode)
+	if semanticMsg != "" {
+		stdoutStr = stdoutStr + "\n[" + semanticMsg + "]"
+	}
+
 	return tools.ToolResult{
-		Success: returnCode == 0,
+		Success: success,
 		Result: ShellResult{
 			Stdout:     stdoutStr,
 			Stderr:     stderrStr,
@@ -558,8 +649,13 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 		t.Name(),
 	))
 
+	success, semanticMsg := interpretExitCode(command, returnCode)
+	if semanticMsg != "" {
+		stdoutStr = stdoutStr + "\n[" + semanticMsg + "]"
+	}
+
 	return tools.ToolResult{
-		Success: returnCode == 0,
+		Success: success,
 		Result: ShellResult{
 			Stdout:     stdoutStr,
 			Stderr:     stderrStr,
@@ -870,3 +966,21 @@ var (
 	_ tools.StreamingTool = (*ShellExecuteTool)(nil)
 	_ tools.PTYTool       = (*ShellExecuteTool)(nil)
 )
+
+// IsReadOnly reports whether the shell command is a read-only operation.
+// It uses the existing risk classification and read-only command table to
+// make an input-dependent determination.
+func (t *ShellExecuteTool) IsReadOnly(input map[string]any) bool {
+	cmd, _ := input["command"].(string)
+	// Redirects (>, >>) make any command a write operation.
+	if strings.Contains(cmd, ">") {
+		return false
+	}
+	return t.classifyRisk(cmd) <= RiskMedium && readOnlyCommands[extractBaseCommand(cmd)]
+}
+
+// IsConcurrencySafe reports whether the shell command can safely execute
+// concurrently. Only read-only commands are considered concurrency-safe.
+func (t *ShellExecuteTool) IsConcurrencySafe(input map[string]any) bool {
+	return t.IsReadOnly(input)
+}

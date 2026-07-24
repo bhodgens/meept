@@ -13,6 +13,7 @@ import (
 // Unlike mcp.MCPTool which routes through the global Manager, this calls
 // the MCP client directly for skill-scoped tool execution.
 type SkillMCPTool struct {
+	tools.ToolDefaults
 	def     llm.ToolDefinition
 	client  *mcp.Client
 	rawName string // unprefixed tool name for the client call
@@ -33,6 +34,8 @@ func NewSkillMCPTool(def llm.ToolDefinition, client *mcp.Client) *SkillMCPTool {
 func (t *SkillMCPTool) Name() string                       { return t.def.Function.Name }
 func (t *SkillMCPTool) Description() string                { return t.def.Function.Description }
 func (t *SkillMCPTool) Parameters() llm.FunctionParameters { return t.def.Function.Parameters }
+func (t *SkillMCPTool) IsReadOnly(map[string]any) bool      { return false }
+func (t *SkillMCPTool) IsConcurrencySafe(map[string]any) bool { return false }
 
 // Execute invokes the MCP tool via the client directly.
 func (t *SkillMCPTool) Execute(ctx context.Context, args map[string]any) (any, error) {

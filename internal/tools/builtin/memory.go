@@ -16,6 +16,7 @@ import (
 
 // MemoryStoreTool stores information in long-term memory.
 type MemoryStoreTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 }
 
@@ -102,6 +103,7 @@ func (t *MemoryStoreTool) Execute(ctx context.Context, args map[string]any) (any
 
 // MemorySearchTool searches memories by query.
 type MemorySearchTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 }
 
@@ -208,6 +210,7 @@ func (t *MemorySearchTool) Execute(ctx context.Context, args map[string]any) (an
 
 // MemoryGetContextTool retrieves contextually relevant memories.
 type MemoryGetContextTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 }
 
@@ -296,6 +299,7 @@ var _ tools.TerminatingTool = (*MemoryStoreTool)(nil)
 
 // MemoryGetVersionTool retrieves a specific version of a memory by ID.
 type MemoryGetVersionTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 }
 
@@ -399,6 +403,7 @@ func (t *MemoryGetVersionTool) Execute(ctx context.Context, args map[string]any)
 
 // MemoryGetVersionHistoryTool retrieves the version history of a memory.
 type MemoryGetVersionHistoryTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 }
 
@@ -518,6 +523,7 @@ func getCurrentVersionFromList(versions []map[string]any) int {
 
 // MemoryRetainTool queues facts into a "Hindsight bank" for later recall.
 type MemoryRetainTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 }
 
@@ -614,6 +620,7 @@ func (t *MemoryRetainTool) Execute(ctx context.Context, args map[string]any) (an
 
 // MemoryRecallTool searches the Hindsight bank for curated facts.
 type MemoryRecallTool struct {
+	tools.ToolDefaults
 	manager *memory.Manager
 }
 
@@ -778,6 +785,7 @@ func importanceRank(level string) int {
 // edges, pending decision/prediction reviews, and auto claims awaiting
 // triage.
 type MemoryReflectTool struct {
+	tools.ToolDefaults
 	manager   *memory.Manager
 	llmClient *llm.Client
 	graph     memoryGraphInspector

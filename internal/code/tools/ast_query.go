@@ -13,6 +13,7 @@ import (
 
 // ASTQueryTool runs tree-sitter queries against source code.
 type ASTQueryTool struct {
+	tools.ToolDefaults
 	executor     *ast.QueryExecutor
 	ruleExecutor *ast.RuleExecutor
 	parser       *ast.ParserManager
