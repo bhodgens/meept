@@ -19,8 +19,8 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/compress"
 	"github.com/caimlas/meept/internal/config"
-	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/learning"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/project"
@@ -609,6 +609,11 @@ type AgentLoop struct {
 	// notifications (Plan 2.2). When non-nil, lifecycle events trigger
 	// payload delivery to configured HTTP destinations.
 	httpHooks *HookBatchExecutor
+
+	// verificationTracker counts file-modifying tool calls for adversarial
+	// verification auto-trigger (Tree 01 Leaf 03). Nil when verification
+	// is disabled for this agent.
+	verificationTracker *VerificationTracker
 
 	// State machine for explicit state tracking
 	stateMachine *AgentStateMachine
@@ -1474,6 +1479,21 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 		Purpose:      loop.config.Purpose,
 		Personality:  loop.config.Personality,
 	})
+
+	// Initialize verification tracker when verification is enabled for this
+	// agent (Tree 01 Leaf 03). The tracker counts file-modifying tool calls
+	// and triggers adversarial verification at the configured threshold.
+	// The threshold defaults to 3 (matching daemon AutoTriggerThreshold).
+	if loop.spec != nil && loop.spec.Verification.Enabled && loop.spec.Verification.AutoTrigger {
+		loop.verificationTracker = NewVerificationTracker(3)
+
+		// Register the auto-trigger hook if a hook registry is available.
+		if loop.hookRegistry != nil {
+			trigger := NewVerificationAutoTrigger(loop.verificationTracker, loop.spec.Verification)
+			trigger.SetSpawner(loop) // AgentLoop implements VerifierSpawner
+			loop.hookRegistry.RegisterPrepareNextTurn("verification_auto_trigger", HookPriorityNormal, trigger)
+		}
+	}
 
 	// Wrap LLM with ContextFirewall for context budget enforcement
 	if loop.llm != nil {
@@ -2592,8 +2612,8 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				"conversation", conversationID,
 			)
 			l.safeTransition(StateBudgetExhausted, "budget_exhausted_conversation", map[string]any{
-				"used":        totalTokens,
-				"total":       convBudget,
+				"used":         totalTokens,
+				"total":        convBudget,
 				"conversation": conversationID,
 			})
 			return "I've used my full token budget for this request. Here is what I accomplished so far -- " +
@@ -2611,8 +2631,8 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				"conversation", conversationID,
 			)
 			l.safeTransition(StateBudgetExhausted, "budget_exhausted_turns", map[string]any{
-				"used":        used,
-				"total":       total,
+				"used":         used,
+				"total":        total,
 				"conversation": conversationID,
 			})
 			return "I've completed the maximum number of turns allowed for this session. " +
@@ -2877,7 +2897,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					"error", err,
 				)
 				l.safeTransition(StateError, "llm_call_failed", map[string]any{
-					"error":   err.Error(),
+					"error":     err.Error(),
 					"iteration": iteration,
 				})
 				l.persistCurrentState("llm_call_failed")
@@ -2988,11 +3008,19 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			})
 			results := l.executeToolCalls(ctx, response.ToolCalls)
 
+			// Record file-modifying tool calls for verification tracking (Tree 01 Leaf 03).
+			if l.verificationTracker != nil {
+				for _, tc := range response.ToolCalls {
+					filePath := extractFilePathFromToolCall(tc)
+					l.verificationTracker.RecordToolCall(tc.Function.Name, filePath)
+				}
+			}
+
 			// Plan 4.2: Check for permission denied errors and set requires_approval designation
 			for _, result := range results {
 				if !result.Success && strings.Contains(result.Error, "permission denied") {
 					l.safeTransition(StateBlocked, "permission_denied", map[string]any{
-						"tool": result.ToolCallID,
+						"tool":      result.ToolCallID,
 						"iteration": iteration,
 					})
 					l.updateSessionDesignation(session.DesignationRequiresApproval, "Blocked: action requires approval", "high")

@@ -1,6 +1,11 @@
 package agent
 
-import "sync"
+import (
+	"encoding/json"
+	"sync"
+
+	"github.com/caimlas/meept/internal/llm"
+)
 
 var fileModifyingTools = map[string]bool{
 	"file_write":    true,
@@ -67,4 +72,23 @@ func (t *VerificationTracker) Reset() {
 	defer t.mu.Unlock()
 	t.editCount = 0
 	t.filesChanged = nil
+}
+
+// extractFilePathFromToolCall extracts a file path from a tool call's JSON
+// arguments. Looks for common path keys: "path", "file_path", "file", "target".
+// Returns empty string if no path is found or arguments can't be parsed.
+func extractFilePathFromToolCall(tc llm.ToolCall) string {
+	if tc.Function.Arguments == "" {
+		return ""
+	}
+	var args map[string]any
+	if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+		return ""
+	}
+	for _, key := range []string{"path", "file_path", "file", "target"} {
+		if v, ok := args[key].(string); ok && v != "" {
+			return v
+		}
+	}
+	return ""
 }

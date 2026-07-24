@@ -55,7 +55,7 @@ func TestAutoTriggerAtThreshold(t *testing.T) {
 	assert.Contains(t, mod.ExtraMessages[0].Content, "main.go")
 	assert.Contains(t, mod.ExtraMessages[0].Content, "util.go")
 	assert.Contains(t, mod.ExtraMessages[0].Content, "old.go")
-	assert.Equal(t, "verification auto-trigger", mod.Reason)
+	assert.Equal(t, "verification auto-trigger (nudge)", mod.Reason)
 
 	// Tracker should be reset after trigger.
 	assert.False(t, tr.ShouldTrigger())
