@@ -256,3 +256,25 @@ func isKnownNonFile(p string) bool {
 	ext := strings.ToLower(p[dot:])
 	return knownNonFileExtensions[ext]
 }
+
+// sha256Hex returns the hex-encoded SHA256 hash of s.
+func sha256Hex(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
+}
+
+// BuildPrefixAwareKey constructs a CacheKey whose PromptHash encodes three
+// independent prefix segments: static system prompt content, dynamic
+// (session-specific) system prompt content, and the message history. This
+// allows cache lookups to match on the stable static prefix even when dynamic
+// context changes between calls.
+func (b *CacheKeyBuilder) BuildPrefixAwareKey(modelID string, systemPrompt []string, messages []ChatMessage) CacheKey {
+	static, dynamic := ClassifyPromptSections(systemPrompt)
+	staticHash := sha256Hex(strings.Join(static, "\n\n"))
+	dynamicHash := sha256Hex(strings.Join(dynamic, "\n\n"))
+	messagesHash := b.ComputePromptHash(messages)
+	return CacheKey{
+		ModelID:    modelID,
+		PromptHash: staticHash[:16] + ":" + dynamicHash[:16] + ":" + messagesHash[:16],
+	}
+}
