@@ -854,6 +854,41 @@ func (lp *LearningPipeline) hashContent(content string) string {
 	return hex.EncodeToString(hash[:])
 }
 
+// SkillProposal represents a proposed skill improvement submitted by the
+// inline feedback trigger during agent execution.
+type SkillProposal struct {
+	Description string // Human-readable description of the improvement
+	SkillName   string // Target skill domain
+	Change      string // The specific change being proposed
+	Source      string // Origin of the proposal (e.g., "inline-feedback")
+}
+
+// SubmitProposal converts a SkillProposal into a LearnedPattern and stores it
+// in the in-memory pattern store for later retrieval and consolidation.
+func (lp *LearningPipeline) SubmitProposal(ctx context.Context, proposal SkillProposal) error {
+	now := time.Now()
+	patternText := proposal.Description + "\n" + proposal.Change
+
+	pattern := &LearnedPattern{
+		ID:           lp.generatePatternID(patternText),
+		Type:         PatternTypeHeuristic,
+		Status:       PatternStatusPending,
+		Domain:       proposal.SkillName,
+		Description:  proposal.Description,
+		Pattern:      proposal.Change,
+		Tags:         []string{proposal.Source, "inline-feedback"},
+		Confidence:   0.6,
+		SuccessRate:  1.0,
+		UseCount:     1,
+		SuccessCount: 1,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		ContentHash:  lp.hashContent(patternText),
+	}
+
+	return lp.StorePattern(ctx, pattern)
+}
+
 func (lp *LearningPipeline) similarity(a, b string) float64 {
 	// Simple word-based Jaccard similarity
 	wordsA := make(map[string]bool)
@@ -892,6 +927,7 @@ func (lp *LearningPipeline) similarity(a, b string) float64 {
 // savePatternsFromSnapshot is deprecated: patterns.json is no longer written.
 // Skills are the new format. Kept as a no-op so the LearningPipeline doesn't
 // error when callers invoke the consolidation path.
+//
 //lint:ignore U1000 // placeholder for legacy patterns consolidation (now uses skills)
 func (lp *LearningPipeline) savePatternsFromSnapshot(patterns map[string]*LearnedPattern) error {
 	return nil
