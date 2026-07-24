@@ -42,6 +42,9 @@ const (
 	// Skill invocation
 	IntentSkill IntentType = "skill"
 
+	// Codebase exploration (read-only search specialist)
+	IntentExplore IntentType = "explore"
+
 	// Compound (multi-intent)
 	IntentCompound IntentType = "compound"
 
@@ -74,7 +77,7 @@ const (
 func (t IntentType) Category() IntentCategory {
 	switch t {
 	case IntentChat, IntentReport, IntentRecall, IntentPlatform, IntentStatus,
-		IntentAnalyze, IntentSearch, IntentResearch, IntentClarify, IntentInstruction:
+		IntentAnalyze, IntentSearch, IntentResearch, IntentClarify, IntentInstruction, IntentExplore:
 		return CategoryInline
 	case IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit, IntentSchedule, IntentPair, IntentCollaborate:
 		return CategoryDefer
@@ -97,7 +100,7 @@ func (t IntentType) Category() IntentCategory {
 // (pair session).
 func (t IntentType) SuggestedMode() string {
 	switch t {
-	case IntentChat, IntentRecall, IntentStatus, IntentReport, IntentPlatform, IntentSearch:
+	case IntentChat, IntentRecall, IntentStatus, IntentReport, IntentPlatform, IntentSearch, IntentExplore:
 		return "direct"
 	case IntentCode, IntentDebug, IntentGit, IntentToolUse, IntentSecurity:
 		return "plan"
@@ -123,6 +126,8 @@ func (t IntentType) DefaultAgent() string {
 		return config.AgentIDPlanner
 	case IntentAnalyze, IntentSearch:
 		return config.AgentIDAnalyst
+	case IntentExplore:
+		return "explore"
 	case IntentResearch:
 		return config.AgentIDResearcher
 	case IntentPair, IntentCollaborate:
@@ -196,7 +201,7 @@ func IsValidIntentType(s string) bool {
 		IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit,
 		IntentSchedule, IntentAnalyze, IntentSearch, IntentResearch,
 		IntentSecurity, IntentToolUse, IntentSkill, IntentPair, IntentCollaborate, IntentCompound, IntentClarify,
-		IntentInstruction, IntentWrite, IntentArchitect, IntentSkeptic, IntentLibrarian:
+		IntentInstruction, IntentWrite, IntentArchitect, IntentSkeptic, IntentLibrarian, IntentExplore:
 		return true
 	}
 	return false
@@ -262,6 +267,8 @@ func (t IntentType) Keywords() []string {
 		return []string{"stress-test", "stress test", "steelman", "what's wrong with", "what is wrong with", "challenge this", "adversarial"}
 	case IntentLibrarian:
 		return []string{"review memory", "memory review", "clean up tags", "mine backlog", "what contradictions", "what have i been thinking"}
+	case IntentExplore:
+		return []string{"explore", "find in codebase", "search codebase", "where is", "locate", "find file", "find function"}
 	default:
 		return nil
 	}

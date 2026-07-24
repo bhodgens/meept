@@ -288,6 +288,19 @@ func newAgentsShowCmd() *cobra.Command {
 			fmt.Printf("Created:     %s\n", getStringOr(resultMap, "created_at", ""))
 			fmt.Printf("Updated:     %s\n", getStringOr(resultMap, "updated_at", ""))
 
+			// Verification config.
+			if verification, ok := resultMap["verification"].(map[string]any); ok {
+				fmt.Println("\nVerification:")
+				fmt.Printf("  enabled:       %v\n", verification["enabled"])
+				model := getStringOr(verification, "model", "")
+				if model == "" {
+					model = "inherit"
+				}
+				fmt.Printf("  model:         %s\n", model)
+				fmt.Printf("  auto_trigger:  %v\n", verification["auto_trigger"])
+				fmt.Printf("  max_fix_loops: %v\n", verification["max_fix_loops"])
+			}
+
 			// Constitution summary.
 			if constitution, ok := resultMap["constitution"].(map[string]any); ok {
 				fmt.Println("\nConstitution:")

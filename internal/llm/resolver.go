@@ -366,6 +366,28 @@ func (r *Resolver) HasAlias(aliasName string) bool {
 	return ok
 }
 
+// ResolveModelTier resolves a model tier name to a concrete model ID.
+// Known tiers:
+//   - "fast": resolves to the configured small/fast model (SmallModel).
+//   - "default": resolves to the default model.
+//
+// If the tier is empty, unknown, or the tier's model is not configured,
+// the fallback model ID is returned. If fallback is also empty, an empty
+// string is returned (caller should use its own default).
+func (r *Resolver) ResolveModelTier(tier string, fallback string) string {
+	switch tier {
+	case "fast":
+		if r.smallModel != nil {
+			return r.smallModel.ProviderID + "/" + r.smallModel.ModelID
+		}
+	case "default":
+		if r.defaultModel != nil {
+			return r.defaultModel.ProviderID + "/" + r.defaultModel.ModelID
+		}
+	}
+	return fallback
+}
+
 // HasHealthyModels reports whether an alias has at least one model that can
 // serve a request right now. A model is considered healthy if:
 //   - It is the currently active model AND not in cooldown, OR

@@ -1810,6 +1810,9 @@ var keywordPatterns = []keywordPattern{
 	{[]string{string(IntentAnalyze), "summarize", KeywordExplain, "what is", "how does"}, string(IntentAnalyze), config.AgentIDAnalyst, 0.7, false},
 	{[]string{string(IntentSearch), "find", "look up", "google"}, string(IntentSearch), config.AgentIDAnalyst, 0.7, false},
 
+	// Codebase exploration (read-only search specialist)
+	{[]string{"explore", "find in codebase", "search codebase", "where is", "locate", "find file", "find function", "find symbol"}, string(IntentExplore), "explore", 0.75, false},
+
 	// General chat (lower priority)
 	{[]string{"hello", "hi", "hey", "thanks", "thank you", "help"}, string(IntentChat), config.AgentIDChat, 0.6, false},
 }

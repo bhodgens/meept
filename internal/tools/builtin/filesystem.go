@@ -36,10 +36,11 @@ const FileUnchangedStub = "File unchanged since last read. The content from the 
 // ReadFileTool reads the contents of a file.
 type ReadFileTool struct {
 	tools.ToolDefaults
-	checker      *security.PermissionChecker
-	readCache    *ReadCache
-	fenceChecker FenceChecker
-	secOrch      *intsecurity.Orchestrator
+	checker       *security.PermissionChecker
+	readCache     *ReadCache
+	fenceChecker  FenceChecker
+	secOrch       *intsecurity.Orchestrator
+	secretScanner *intsecurity.SecretScanner
 }
 
 // NewReadFileTool creates a new file read tool.
@@ -60,6 +61,23 @@ func (t *ReadFileTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
 	if orch != nil {
 		t.secOrch = orch
 	}
+}
+
+// SetSecretScanner sets the secret scanner for file content scanning.
+// Follows the typed-nil interface guard pattern mandated by CLAUDE.md.
+func (t *ReadFileTool) SetSecretScanner(scanner *intsecurity.SecretScanner) {
+	if scanner != nil {
+		t.secretScanner = scanner
+	}
+}
+
+// secretPronePatterns matches filenames that commonly contain secrets.
+var secretPronePatterns = regexp.MustCompile(`(?i)(\.env|\.env\..+|credentials|secrets?\.(ya?ml|json|toml)|\.pem|\.key|id_rsa|id_ed25519|\.p12|\.pfx|\.jks|\.keystore)$`)
+
+// isSecretProneFile returns true if the file path matches known secret-prone patterns.
+func isSecretProneFile(path string) bool {
+	base := filepath.Base(path)
+	return secretPronePatterns.MatchString(base)
 }
 
 func (t *ReadFileTool) Name() string { return "file_read" }
@@ -188,6 +206,13 @@ func (t *ReadFileTool) executeRead(args map[string]any, progress func(tools.Prog
 				"modified", sanitizeResult.WasModified)
 		}
 		text = sanitizeResult.CleanText
+	}
+
+	// Scan secret-prone files for potential secrets and prepend warning.
+	if t.secretScanner != nil && isSecretProneFile(resolved) {
+		if warning := t.secretScanner.ScanAndReport(text); warning != "" {
+			text = warning + "\n" + text
+		}
 	}
 
 	// Apply line range if requested

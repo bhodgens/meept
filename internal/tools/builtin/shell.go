@@ -106,6 +106,7 @@ type ShellExecuteTool struct {
 	logger            *slog.Logger
 	ptyMgr            *pty.Manager
 	fenceChecker      FenceChecker
+	secretScanner     *intsecurity.SecretScanner
 }
 
 // NewShellExecuteTool creates a new shell execution tool.
@@ -137,6 +138,14 @@ func (t *ShellExecuteTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrato
 func (t *ShellExecuteTool) SetFenceChecker(fc FenceChecker) {
 	if fc != nil {
 		t.fenceChecker = fc
+	}
+}
+
+// SetSecretScanner sets the secret scanner for output scanning.
+// Follows the typed-nil interface guard pattern mandated by CLAUDE.md.
+func (t *ShellExecuteTool) SetSecretScanner(scanner *intsecurity.SecretScanner) {
+	if scanner != nil {
+		t.secretScanner = scanner
 	}
 }
 
@@ -418,6 +427,13 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 	stdoutStr = t.sanitizeOutput(command, stdoutStr)
 	stderrStr = t.sanitizeOutput(command, stderrStr)
 
+	// Scan output for potential secrets and prepend warning if found.
+	if t.secretScanner != nil {
+		if warning := t.secretScanner.ScanAndReport(stdoutStr + stderrStr); warning != "" {
+			stdoutStr = warning + "\n" + stdoutStr
+		}
+	}
+
 	// Build evidence: exit code and output hash
 	evidence := make([]models.Evidence, 0, 2)
 	evidence = append(evidence, models.NewEvidence(
@@ -611,6 +627,13 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 	// Sanitize output for prompt-injection patterns (same as Execute).
 	stdoutStr = t.sanitizeOutput(command, stdoutStr)
 	stderrStr = t.sanitizeOutput(command, stderrStr)
+
+	// Scan output for potential secrets and prepend warning if found.
+	if t.secretScanner != nil {
+		if warning := t.secretScanner.ScanAndReport(stdoutStr + stderrStr); warning != "" {
+			stdoutStr = warning + "\n" + stdoutStr
+		}
+	}
 
 	// Emit completion progress with output summary
 	outputSummary := ""

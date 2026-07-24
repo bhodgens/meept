@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/caimlas/meept/internal/agents"
+	"github.com/caimlas/meept/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -117,5 +118,66 @@ func TestVerificationConfigBackwardCompat(t *testing.T) {
 		assert.Equal(t, "custom-verifier", vc.Model)
 		assert.False(t, vc.AutoTrigger)
 		assert.Equal(t, 7, vc.MaxFixLoops)
+	})
+}
+
+func TestDaemonDefaultsOverride(t *testing.T) {
+	cfg := config.DefaultConfig()
+	vd := cfg.Daemon.Verification
+
+	assert.True(t, vd.Enabled, "daemon default verification should be enabled")
+	assert.Equal(t, 3, vd.MaxFixLoops, "daemon default max_fix_loops should be 3")
+	assert.Equal(t, 3, vd.AutoTriggerThreshold, "daemon default auto_trigger_threshold should be 3")
+	assert.Empty(t, vd.DefaultModel, "daemon default model should be empty (inherit)")
+}
+
+func TestAgentOverridesDaemon(t *testing.T) {
+	// Daemon defaults provide the baseline.
+	cfg := config.DefaultConfig()
+	daemonDefaults := cfg.Daemon.Verification
+	require.True(t, daemonDefaults.Enabled)
+	require.Equal(t, 3, daemonDefaults.MaxFixLoops)
+	require.Equal(t, 3, daemonDefaults.AutoTriggerThreshold)
+
+	t.Run("agent metadata overrides daemon defaults", func(t *testing.T) {
+		enabled := false
+		autoTrigger := false
+		meta := &agents.VerificationMetadata{
+			Enabled:     &enabled,
+			Model:       "agent-verifier",
+			AutoTrigger: &autoTrigger,
+			MaxFixLoops: 10,
+		}
+		vc := verificationFromMetadata(meta)
+
+		// Agent values override daemon defaults.
+		assert.False(t, vc.Enabled, "agent should override daemon enabled=true")
+		assert.Equal(t, "agent-verifier", vc.Model, "agent model should override daemon empty model")
+		assert.False(t, vc.AutoTrigger, "agent should override daemon auto_trigger")
+		assert.Equal(t, 10, vc.MaxFixLoops, "agent should override daemon max_fix_loops=3")
+	})
+
+	t.Run("nil agent metadata falls back to defaults", func(t *testing.T) {
+		vc := verificationFromMetadata(nil)
+
+		// Defaults match daemon defaults where applicable.
+		assert.True(t, vc.Enabled, "nil metadata should use default enabled=true")
+		assert.Empty(t, vc.Model, "nil metadata should have empty model (inherit)")
+		assert.True(t, vc.AutoTrigger, "nil metadata should use default auto_trigger=true")
+		assert.Equal(t, 3, vc.MaxFixLoops, "nil metadata should use default max_fix_loops=3")
+	})
+
+	t.Run("partial agent metadata preserves defaults for unset fields", func(t *testing.T) {
+		enabled := false
+		meta := &agents.VerificationMetadata{
+			Enabled: &enabled,
+			// Model, AutoTrigger, MaxFixLoops all unset.
+		}
+		vc := verificationFromMetadata(meta)
+
+		assert.False(t, vc.Enabled, "agent explicitly disables verification")
+		assert.Empty(t, vc.Model, "unset model should remain empty (inherit)")
+		assert.True(t, vc.AutoTrigger, "unset auto_trigger should keep default true")
+		assert.Equal(t, 3, vc.MaxFixLoops, "unset max_fix_loops should keep default 3")
 	})
 }

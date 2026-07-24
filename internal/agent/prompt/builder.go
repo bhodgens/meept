@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/caimlas/meept/internal/agent/prompts"
 )
 
 // PromptContext holds dynamic context for prompt building.
@@ -197,15 +199,33 @@ func QuickBuild(components []string) (string, error) {
 }
 
 // BuildForAgent builds a complete prompt for an agent with its spec.
+// If the agentID matches a known role-based prompt (e.g., "explorer"),
+// the role-specific prompt is returned directly.
 func (b *Builder) BuildForAgent(agentID string, components []string, ctx *PromptContext) (string, error) {
 	if ctx == nil {
 		ctx = NewPromptContext()
+	}
+
+	// Check for role-based prompt overrides.
+	if rolePrompt := RolePrompt(agentID); rolePrompt != "" {
+		return rolePrompt, nil
 	}
 
 	// Add agent ID to variables
 	ctx.Variables["AGENT_ID"] = agentID
 
 	return b.Build(components, ctx)
+}
+
+// RolePrompt returns a role-specific system prompt for known agent roles,
+// or empty string if the agentID does not map to a built-in role prompt.
+func RolePrompt(agentID string) string {
+	switch agentID {
+	case "explorer":
+		return prompts.ExplorerPrompt
+	default:
+		return ""
+	}
 }
 
 // ConditionKeys returns all known condition keys.

@@ -1637,6 +1637,11 @@ func DefaultConfig() *Config {
 				GCRetentionDays: 7,
 				GCIntervalHours: 24,
 			},
+			Verification: VerificationDefaults{
+				Enabled:              true,
+				MaxFixLoops:          3,
+				AutoTriggerThreshold: 3,
+			},
 		},
 		Transport: TransportConfig{
 			RPC: RPCTransportConfig{
