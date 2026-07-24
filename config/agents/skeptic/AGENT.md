@@ -23,6 +23,8 @@ prompt_components:
   - conditional.source_evaluation
 available_skills:
   - grill-me
+verification:
+  enabled: false
 ---
 
 # Skeptic

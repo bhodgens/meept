@@ -834,6 +834,9 @@ func (r *AgentRegistry) definitionToSpec(def *agents.AgentDefinition) *AgentSpec
 		spec.Constraints.TopP = &v
 	}
 
+	// Verification
+	spec.Verification = verificationFromMetadata(def.Verification)
+
 	return spec
 }
 

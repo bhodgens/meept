@@ -18,6 +18,10 @@ prompt_components:
   - base.constitution
   - base.restrictions
   - capabilities.memory
+verification:
+  enabled: true
+  auto_trigger: true
+  max_fix_loops: 3
 ---
 
 # Scheduler Specialist

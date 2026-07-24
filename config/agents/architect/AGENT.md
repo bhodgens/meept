@@ -25,6 +25,10 @@ prompt_components:
   - capabilities.memory
   - capabilities.tasks
   - conditional.code_style
+verification:
+  enabled: true
+  auto_trigger: true
+  max_fix_loops: 3
 ---
 
 # Architecture Specialist

@@ -457,7 +457,20 @@ type DaemonConfig struct {
 	ShutdownTimeout    string            `json:"shutdown_timeout"     toml:"shutdown_timeout"`
 	ChatTimeoutSeconds int               `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
 	Uploads            UploadsConfig     `json:"uploads"              toml:"uploads"`
-	UserInstructions   InstructionConfig `json:"user_instructions"    toml:"user_instructions"`
+	UserInstructions   InstructionConfig    `json:"user_instructions"    toml:"user_instructions"`
+	Verification       VerificationDefaults `json:"verification"         toml:"verification"`
+}
+
+// VerificationDefaults holds daemon-level verification defaults.
+type VerificationDefaults struct {
+	// Enabled controls whether verification is on by default.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// DefaultModel is the default model for verification. Empty = use agent's model.
+	DefaultModel string `json:"default_model" toml:"default_model"`
+	// MaxFixLoops is the default maximum fix-reverify cycles.
+	MaxFixLoops int `json:"max_fix_loops" toml:"max_fix_loops"`
+	// AutoTriggerThreshold is the number of consecutive failures before auto-triggering verification.
+	AutoTriggerThreshold int `json:"auto_trigger_threshold" toml:"auto_trigger_threshold"`
 }
 
 // InstructionConfig holds user instruction automation settings.

@@ -28,6 +28,10 @@ available_skills:
   - litreview
   - dossier
   - code-tour
+verification:
+  enabled: true
+  auto_trigger: true
+  max_fix_loops: 3
 ---
 
 # Research Specialist

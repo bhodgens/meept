@@ -90,6 +90,26 @@ type AgentMetadata struct {
 	// Reasoning holds per-agent reasoning/thinking settings (effort tier,
 	// self-modulation bounds, budget override). Nil = defer to model default.
 	Reasoning *AgentReasoningMetadata `yaml:"reasoning,omitempty"`
+
+	// Verification configures post-completion verification for this agent.
+	// Nil = use DefaultVerificationConfig() at spec conversion time.
+	Verification *VerificationMetadata `yaml:"verification,omitempty" json:"verification,omitempty"`
+}
+
+// VerificationMetadata is the AGENT.md frontmatter form of per-agent
+// verification config. The registry converts it to agent.VerificationConfig.
+type VerificationMetadata struct {
+	// Enabled controls whether verification runs after this agent completes.
+	// Nil = use default (true).
+	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	// Model overrides the model used for verification.
+	Model string `yaml:"model,omitempty" json:"model,omitempty"`
+	// AutoTrigger controls whether verification triggers automatically.
+	// Nil = use default (true).
+	AutoTrigger *bool `yaml:"auto_trigger,omitempty" json:"auto_trigger,omitempty"`
+	// MaxFixLoops is the maximum number of fix-reverify cycles.
+	// 0 = use default (3).
+	MaxFixLoops int `yaml:"max_fix_loops,omitempty" json:"max_fix_loops,omitempty"`
 }
 
 // AgentReasoningMetadata is the AGENT.md frontmatter form of the per-agent

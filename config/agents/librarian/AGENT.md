@@ -38,6 +38,10 @@ skill_triggers:
   "review memory": librarian-reflection-surfacing
   "clean up tags": librarian-tag-hygiene
   "mine backlog": librarian-backlog-mining
+verification:
+  enabled: true
+  auto_trigger: true
+  max_fix_loops: 3
 ---
 
 # Memory Steward

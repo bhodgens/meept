@@ -16,6 +16,9 @@ timeout_seconds: 120
 max_tokens_per_turn: 2048
 max_memory_refs: 10
 temperature: 0.2
+verification:
+  enabled: true
+  auto_trigger: false
 ---
 
 You are a debugging review specialist. Your role is to review debugging work for:

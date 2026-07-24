@@ -15,6 +15,9 @@ prompt_components:
   - base.restrictions
   - capabilities.memory
   - capabilities.platform
+verification:
+  enabled: true
+  auto_trigger: false
 ---
 
 # Dispatcher

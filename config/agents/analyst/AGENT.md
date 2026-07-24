@@ -24,6 +24,10 @@ prompt_components:
   - capabilities.tasks
 available_skills:
   - competitive-teardown
+verification:
+  enabled: true
+  auto_trigger: true
+  max_fix_loops: 3
 ---
 
 # Analysis Specialist

@@ -106,6 +106,8 @@ type AgentSpec struct {
 	AvailableSkills []string `json:"available_skills,omitempty"`
 	// SkillTriggers maps keywords to skill names for automatic invocation.
 	SkillTriggers map[string]string `json:"skill_triggers,omitempty"`
+	// Verification configures post-completion verification for this agent.
+	Verification VerificationConfig `json:"verification" yaml:"verification"`
 }
 
 // BaselineTools are the tools available to all agents.

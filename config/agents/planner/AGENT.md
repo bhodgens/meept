@@ -17,6 +17,10 @@ prompt_components:
   - base.restrictions
   - capabilities.memory
   - capabilities.tasks
+verification:
+  enabled: true
+  auto_trigger: true
+  max_fix_loops: 3
 ---
 
 # Planning Specialist
