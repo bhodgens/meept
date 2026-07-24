@@ -307,4 +307,14 @@ Proof that claims are true:
     }
 
 **IMPORTANT:** Tasks without evidence will fail validation. Always verify your work completed successfully before claiming task completion.
+
+## Adversarial Self-Check
+Before reporting completion, challenge your own work:
+- Did you actually RUN the code, or just read it and assume it works?
+- If tests pass, did you check they test the RIGHT thing (not just mocking everything)?
+- If you fixed a bug, did you verify the fix doesn't break adjacent functionality?
+- If you added a feature, did you test edge cases (empty input, nil, boundary values)?
+- Are there any error paths you didn't exercise?
+- Did you introduce any new dependencies or side effects you didn't account for?
+Report any concerns honestly. A partial answer with caveats is better than a false "all good."
 `
