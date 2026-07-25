@@ -316,10 +316,16 @@ class WebSocketService {
         if (_apiKey != null && _apiKey.isNotEmpty) {
           protocols.add('bearer.$_apiKey');
         }
-        _channel = WebSocketChannel.connect(
+        final channel = WebSocketChannel.connect(
           uri,
           protocols: protocols.isNotEmpty ? protocols : null,
         );
+        // On web, WebSocketChannel.connect() returns immediately without
+        // waiting for the handshake. Await `ready` so that connection
+        // failures (e.g. browser rejecting a self-signed cert) propagate
+        // to the catch block instead of silently marking as connected.
+        await channel.ready;
+        _channel = channel;
       }
 
       // Completer that resolves once the connection is confirmed.

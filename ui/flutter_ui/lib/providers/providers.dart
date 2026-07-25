@@ -393,6 +393,11 @@ class ConnectionMonitor {
       if (!_websocket.isConnected && !_websocket.isConnecting) {
         try {
           await _sdkClient.getDaemonStatus();
+          // Daemon is reachable but the WebSocket is down — kick the
+          // reconnect loop so the UI recovers without user intervention.
+          // connect() is a no-op if a connection already exists or is
+          // being established, so this is safe to call repeatedly.
+          _websocket.connect();
           _proposeState(true);
         } catch (e) {
           debugPrint('[warn] health check daemon status: $e');

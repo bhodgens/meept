@@ -165,7 +165,14 @@ class SdkApiClient {
         message = 'Connection timeout -- is the daemon running?';
         break;
       case DioExceptionType.connectionError:
-        message = 'Cannot connect to daemon at $baseUrl';
+        if (kIsWeb) {
+          message = 'Cannot connect to daemon at $baseUrl — '
+              'the browser may be rejecting the self-signed TLS certificate. '
+              'Visit $baseUrl in a browser tab and accept the certificate, '
+              'then retry.';
+        } else {
+          message = 'Cannot connect to daemon at $baseUrl';
+        }
         break;
       case DioExceptionType.badResponse:
         switch (statusCode) {

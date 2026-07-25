@@ -72,6 +72,7 @@ import '../../providers/verbosity_provider.dart';
 import '../chat/chat_tab.dart';
 import 'tools_dropdown.dart' show HamburgerMenu;
 import 'session_info_overlay.dart';
+import '../sessions/sessions_overview_tab.dart';
 
 /// Home tab enum for sidebar layout
 enum SidebarHomeTab { chat }
@@ -87,7 +88,6 @@ class SidebarHomeScreen extends ConsumerStatefulWidget {
 class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
   SidebarHomeTab _selectedTab = SidebarHomeTab.chat;
   Session? _selectedSession;
-  bool _initialLoadDone = false;
   late final LeaderKeyController _leaderController;
   bool _sidebarCollapsed = false;
 
@@ -161,14 +161,23 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
     context.go(path);
   }
 
+  /// Refresh all data providers from the daemon.
+  ///
+  /// Called on every successful connection (initial connect AND reconnect)
+  /// so the UI always reflects current server state without user intervention.
+  Future<void> _refreshAllData() async {
+    await ref.read(sessionProvider.notifier).loadSessions();
+    ref.read(taskProvider.notifier).loadTasks();
+    ref.read(agentProvider.notifier).loadAgents();
+    ref.read(currentProjectProvider.notifier).refresh();
+  }
+
   Future<void> _onConnectionChanged(bool connected) async {
-    if (connected && !_initialLoadDone) {
-      _initialLoadDone = true;
-      await ref.read(sessionProvider.notifier).loadSessions();
-      ref.read(taskProvider.notifier).loadTasks();
-      ref.read(agentProvider.notifier).loadAgents();
-      ref.read(currentProjectProvider.notifier).refresh();
-    }
+    if (!connected) return;
+
+    // Always refresh data on every (re)connect so the UI reflects
+    // current server state without user intervention.
+    await _refreshAllData();
   }
 
   void _showCommandPalette() {
@@ -400,6 +409,7 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
                     Positioned(
                       right: 0,
                       top: 0,
+                      bottom: 0,
                       child: _SidebarToggle(
                         collapsed: false,
                         onTap: () {
@@ -481,27 +491,27 @@ class _SidebarToggle extends StatelessWidget {
         ? CyberpunkColors.orangePrimary
         : CyberpunkColors.orangeDark.withValues(alpha: 0.3);
 
-    return GestureDetector(
-      onTap: onTap,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: SizedBox(
-          width: 18,
-          child: Stack(
-            children: [
-              // Full-height vertical line at the appropriate edge.
-              Positioned(
-                left: collapsed ? 0 : null,
-                right: collapsed ? null : 0,
-                top: 0,
-                bottom: 0,
-                child: Container(width: 1, color: lineColor),
-              ),
-              // Clickable toggle button at the top, matching header height.
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
+    return SizedBox(
+      width: 18,
+      child: Stack(
+        children: [
+          // Full-height vertical line at the appropriate edge (non-interactive).
+          Positioned(
+            left: collapsed ? 0 : null,
+            right: collapsed ? null : 0,
+            top: 0,
+            bottom: 0,
+            child: Container(width: 1, color: lineColor),
+          ),
+          // Clickable toggle button at the top, matching header height.
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: GestureDetector(
+              onTap: onTap,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
                 child: Container(
                   height: headerHeight,
                   color: CyberpunkColors.orangeDark.withValues(alpha: 0.15),
@@ -514,15 +524,15 @@ class _SidebarToggle extends StatelessWidget {
                   ),
                 ),
               ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
 }
 
-/// Sidebar with session tree
+/// Sidebar with hierarchical project → session tree
 class _Sidebar extends ConsumerStatefulWidget {
   final ValueChanged<Session> onSessionSelected;
   final Session? selectedSession;
@@ -536,12 +546,39 @@ class _Sidebar extends ConsumerStatefulWidget {
   ConsumerState<_Sidebar> createState() => _SidebarState();
 }
 
+/// A project group with its sessions.
+class _ProjectGroup {
+  final String projectId;
+  final String projectName;
+  final String branch;
+  final List<Session> sessions;
+
+  const _ProjectGroup({
+    required this.projectId,
+    required this.projectName,
+    required this.branch,
+    required this.sessions,
+  });
+
+  /// Display suffix: last path component of project name + branch.
+  String get displayLabel {
+    final suffix = projectName.split('/').last;
+    return branch.isNotEmpty ? '$suffix $branch' : suffix;
+  }
+}
+
 class _SidebarState extends ConsumerState<_Sidebar> {
-  final Map<String, bool> _expandedSessions = {};
+  final Map<String, bool> _expandedProjects = {};
+  final Map<String, int> _projectSessionLimit = {};
+  static const int _defaultSessionLimit = 10;
 
   @override
   Widget build(BuildContext context) {
     final sessions = ref.watch(sessionProvider).sessions;
+    final projects = ref.watch(resolveActiveProjectProvider).value;
+
+    // Group sessions by project
+    final groups = _groupByProject(sessions, projects);
 
     return SizedBox(
       width: 220,
@@ -589,26 +626,59 @@ class _SidebarState extends ConsumerState<_Sidebar> {
                   ),
                 ),
                 const Spacer(),
+                // 'i' button — opens full 2-pane sessions view
+                GestureDetector(
+                  onTap: () {
+                    showDialog(
+                      context: context,
+                      barrierDismissible: true,
+                      builder: (_) => _FullWindowDialog(
+                        title: 'sessions',
+                        icon: Icons.folder,
+                        content: const SessionsOverviewTab(),
+                        onClose: () => Navigator.of(context).pop(),
+                      ),
+                    );
+                  },
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Icon(
+                      Icons.info_outline,
+                      size: 16,
+                      color: CyberpunkColors.orangePrimary.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
-          // Session tree
+          // Project-grouped session tree
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: sessions.length,
+              itemCount: groups.length,
               itemBuilder: (context, index) {
-                final session = sessions[index];
-                return _SessionTreeItem(
-                  session: session,
-                  isSelected: widget.selectedSession?.id == session.id,
-                  isExpanded: _expandedSessions[session.id] ?? false,
+                final group = groups[index];
+                final isExpanded = _expandedProjects[group.projectId] ?? false;
+                final limit = _projectSessionLimit[group.projectId] ?? _defaultSessionLimit;
+                return _ProjectGroupItem(
+                  group: group,
+                  isExpanded: isExpanded,
+                  sessionLimit: limit,
+                  selectedSessionId: widget.selectedSession?.id,
                   onToggle: () {
                     setState(() {
-                      _expandedSessions[session.id] = !(_expandedSessions[session.id] ?? false);
+                      _expandedProjects[group.projectId] = !isExpanded;
                     });
                   },
-                  onSelect: () => widget.onSessionSelected(session),
+                  onShowMore: () {
+                    setState(() {
+                      _projectSessionLimit[group.projectId] = limit + 10;
+                    });
+                  },
+                  onSessionSelected: widget.onSessionSelected,
+                  onCreateSession: () => _createSessionInProject(group),
                 );
               },
             ),
@@ -618,319 +688,284 @@ class _SidebarState extends ConsumerState<_Sidebar> {
       ),
     );
   }
+
+  /// Group sessions by project. Uses projectId when available, otherwise
+  /// falls back to projectPath or detectionContext.cwd. Display name is
+  /// the directory suffix (last path component) — matching the status bar.
+  List<_ProjectGroup> _groupByProject(List<Session> sessions, Project? activeProject) {
+    final byProject = <String, List<Session>>{};
+    final projectNames = <String, String>{};
+    final projectBranches = <String, String>{};
+
+    for (final session in sessions) {
+      // Determine grouping key: prefer projectId, fall back to path
+      String key = session.projectId ?? '';
+      if (key.isEmpty) {
+        final path = session.projectPath ?? session.detectionContext?.cwd ?? '';
+        if (path.isNotEmpty) {
+          key = 'path:$path';
+        }
+      }
+      byProject.putIfAbsent(key, () => []).add(session);
+    }
+
+    // Resolve display names: directory suffix of the project path
+    if (activeProject != null) {
+      projectNames[activeProject.id] = activeProject.name.split('/').last;
+      projectBranches[activeProject.id] = activeProject.branch;
+    }
+
+    for (final entry in byProject.entries) {
+      if (projectNames.containsKey(entry.key)) continue;
+      // Derive name from path suffix
+      String? path;
+      if (entry.key.startsWith('path:')) {
+        path = entry.key.substring(5);
+      } else {
+        path = entry.value.first.projectPath ?? entry.value.first.detectionContext?.cwd;
+      }
+      if (path != null && path.isNotEmpty) {
+        projectNames[entry.key] = path.split('/').where((s) => s.isNotEmpty).lastOrNull ?? path;
+      } else if (entry.key.isNotEmpty) {
+        projectNames[entry.key] = entry.key.length > 8 ? entry.key.substring(0, 8) : entry.key;
+      }
+    }
+
+    final groups = <_ProjectGroup>[];
+
+    for (final entry in byProject.entries) {
+      if (entry.key.isEmpty) continue; // truly no project — handled below
+      final sorted = List<Session>.from(entry.value)
+        ..sort((a, b) => (b.lastActivity ?? b.createdAt).compareTo(a.lastActivity ?? a.createdAt));
+      groups.add(_ProjectGroup(
+        projectId: entry.key,
+        projectName: projectNames[entry.key] ?? entry.key,
+        branch: projectBranches[entry.key] ?? '',
+        sessions: sorted,
+      ));
+    }
+
+    // Sessions with truly no project info
+    final noProject = byProject[''];
+    if (noProject != null && noProject.isNotEmpty) {
+      final sorted = List<Session>.from(noProject)
+        ..sort((a, b) => (b.lastActivity ?? b.createdAt).compareTo(a.lastActivity ?? a.createdAt));
+      groups.add(_ProjectGroup(
+        projectId: '',
+        projectName: 'no project',
+        branch: '',
+        sessions: sorted,
+      ));
+    }
+
+    // Sort groups by most recent session activity
+    groups.sort((a, b) {
+      final aTime = a.sessions.isEmpty ? DateTime(1970) : (a.sessions.first.lastActivity ?? a.sessions.first.createdAt);
+      final bTime = b.sessions.isEmpty ? DateTime(1970) : (b.sessions.first.lastActivity ?? b.sessions.first.createdAt);
+      return bTime.compareTo(aTime);
+    });
+
+    return groups;
+  }
+
+  Future<void> _createSessionInProject(_ProjectGroup group) async {
+    final notifier = ref.read(sessionProvider.notifier);
+    final session = await notifier.createSession('new session');
+    if (session != null && mounted) {
+      widget.onSessionSelected(session);
+      ref.read(activeSessionProvider.notifier).state = session;
+    }
+  }
 }
 
-/// Individual session tree item with expand/collapse
-class _SessionTreeItem extends ConsumerStatefulWidget {
-  final Session session;
-  final bool isSelected;
+/// Project group header + session list with expand/collapse
+class _ProjectGroupItem extends StatelessWidget {
+  final _ProjectGroup group;
   final bool isExpanded;
+  final int sessionLimit;
+  final String? selectedSessionId;
   final VoidCallback onToggle;
-  final VoidCallback onSelect;
+  final VoidCallback onShowMore;
+  final ValueChanged<Session> onSessionSelected;
+  final VoidCallback onCreateSession;
 
-  const _SessionTreeItem({
-    required this.session,
-    required this.isSelected,
+  const _ProjectGroupItem({
+    required this.group,
     required this.isExpanded,
+    required this.sessionLimit,
+    required this.selectedSessionId,
     required this.onToggle,
-    required this.onSelect,
+    required this.onShowMore,
+    required this.onSessionSelected,
+    required this.onCreateSession,
   });
 
   @override
-  ConsumerState<_SessionTreeItem> createState() => _SessionTreeItemState();
-}
-
-/// Holds child items (tasks+plans) loaded for one session.
-class _SessionChildren {
-  final List<Task> tasks;
-  final List<Plan> plans;
-  const _SessionChildren({required this.tasks, required this.plans});
-}
-
-class _SessionTreeItemState extends ConsumerState<_SessionTreeItem> {
-  Future<_SessionChildren?>? _childrenFuture;
-
-  @override
-  void didUpdateWidget(_SessionTreeItem oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // Reset on expansion toggle so we refetch
-    if (widget.isExpanded != oldWidget.isExpanded) {
-      _childrenFuture = null;
-    }
-  }
-
-  Future<_SessionChildren?> _fetchChildren() async {
-    final sdkClient = ref.read(sdkClientProvider);
-    final sessionId = widget.session.id;
-    try {
-      final futures = <Future<dynamic>>[
-        sdkClient.listTasks(sessionId: sessionId).then(
-            (r) => r.map((t) => Task.fromJson(t)).toList()),
-        sdkClient.listPlansBySession(sessionId).then(
-            (r) => r.map((p) => Plan.fromJson(p)).toList()),
-      ];
-      final results = await Future.wait(futures);
-      return _SessionChildren(
-        tasks: results[0] as List<Task>,
-        plans: results[1] as List<Plan>,
-      );
-    } catch (e) {
-      debugPrint('[tree] load children for session $sessionId: $e');
-      return null;
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    // Kick off loading when expanded for the first time
-    if (widget.isExpanded && _childrenFuture == null) {
-      _childrenFuture = _fetchChildren();
-      // Trigger re-build once data arrives
-      _childrenFuture!.then((_) => setState(() {}));
-    }
+    final visibleSessions = group.sessions.take(sessionLimit).toList();
+    final hasMore = group.sessions.length > sessionLimit;
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Project header row: [▶/▼] project-suffix branch  [+]
         Container(
-          decoration: BoxDecoration(
-            color: widget.isSelected
-                ? CyberpunkColors.orangePrimary.withValues(alpha: 0.2)
-                : Colors.transparent,
-            border: Border(
-              left: BorderSide(
-                color: widget.isSelected
-                    ? CyberpunkColors.orangePrimary
-                    : Colors.transparent,
-                width: 3,
-              ),
-            ),
-          ),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color: CyberpunkColors.orangePrimary.withValues(alpha: 0.05),
+          ),
           child: Row(
             children: [
-              // Expand/collapse indicator (always show arrow to allow collapse)
+              // Expand/collapse arrow
               GestureDetector(
-                onTap: widget.onToggle,
-                child: SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: Icon(
-                    widget.isExpanded
-                        ? Icons.arrow_drop_down
-                        : Icons.arrow_right,
-                    size: 14,
-                    color: widget.isExpanded
-                        ? CyberpunkColors.orangePrimary
-                        : CyberpunkColors.midGray,
-                  ),
+                onTap: onToggle,
+                behavior: HitTestBehavior.opaque,
+                child: Icon(
+                  isExpanded ? Icons.arrow_drop_down : Icons.arrow_right,
+                  size: 16,
+                  color: CyberpunkColors.orangePrimary,
                 ),
               ),
-              // Session name (clickable)
+              const SizedBox(width: 2),
+              // Project label (suffix + branch)
               Expanded(
                 child: GestureDetector(
-                  onTap: widget.onSelect,
+                  onTap: onToggle,
+                  behavior: HitTestBehavior.opaque,
                   child: Text(
-                    widget.session.title.isEmpty
-                        ? 'unnamed'
-                        : widget.session.title,
+                    group.displayLabel,
                     style: CyberpunkTypography.bodySmall.copyWith(
-                      color: widget.isSelected
-                          ? CyberpunkColors.orangePrimary
-                          : CyberpunkColors.orangeDark,
+                      color: CyberpunkColors.orangePrimary,
                       fontFamily: 'SourceCodePro',
                       fontSize: 11,
+                      fontWeight: FontWeight.bold,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ),
-              // Info icon
+              // Session count badge
+              Text(
+                '${group.sessions.length}',
+                style: CyberpunkTypography.bodySmall.copyWith(
+                  color: CyberpunkColors.midGray,
+                  fontFamily: 'SourceCodePro',
+                  fontSize: 9,
+                ),
+              ),
+              const SizedBox(width: 4),
+              // + button to create session in this project
               GestureDetector(
-                onTap: () {
-                  showDialog(
-                    context: context,
-                    barrierDismissible: true,
-                    builder: (_) =>
-                        SessionInfoOverlay(session: widget.session),
-                  );
-                },
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Icon(
-                    Icons.info_outline,
-                    size: 14,
-                    color: CyberpunkColors.orangePrimary.withValues(alpha: 0.7),
-                  ),
+                onTap: onCreateSession,
+                behavior: HitTestBehavior.opaque,
+                child: Icon(
+                  Icons.add,
+                  size: 14,
+                  color: CyberpunkColors.orangeDark,
                 ),
               ),
             ],
           ),
         ),
-        // Children (tasks/plans) - shown when expanded
-        if (widget.isExpanded) ..._buildChildren(),
-      ],
-    );
-  }
-
-  List<Widget> _buildChildren() {
-    final future = _childrenFuture;
-
-    // Not yet loaded — show loading indicator
-    if (future == null) {
-      return [
-        Padding(
-          padding: const EdgeInsets.only(left: 24, bottom: 4),
-          child: Text(
-            'loading...',
-            style: CyberpunkTypography.bodySmall.copyWith(
-              color: CyberpunkColors.midGray,
-              fontFamily: 'SourceCodePro',
-              fontSize: 10,
+        // Session list (only when expanded)
+        if (isExpanded) ...[
+          for (final session in visibleSessions)
+            _SidebarSessionRow(
+              session: session,
+              isSelected: selectedSessionId == session.id,
+              onSelect: () => onSessionSelected(session),
             ),
-          ),
-        ),
-      ];
-    }
-
-    return [
-      FutureBuilder<_SessionChildren?>(
-        future: future,
-        builder: (context, snap) {
-          if (snap.hasData && snap.data != null) {
-            final data = snap.data!;
-            final allChildren = <Map<String, dynamic>>[
-              for (final t in data.tasks) {'type': 'task', 'data': t},
-              for (final p in data.plans) {'type': 'plan', 'data': p},
-            ]..sort((a, b) {
-                final ta = a['type'] as String;
-                final tb = b['type'] as String;
-                if (ta != tb) return ta == 'task' ? -1 : 1;
-                return 0;
-              });
-
-            if (allChildren.isEmpty) {
-              return Padding(
-                padding: const EdgeInsets.only(left: 24, bottom: 4),
+          // "..." show more button
+          if (hasMore)
+            GestureDetector(
+              onTap: onShowMore,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 28, top: 2, bottom: 4),
                 child: Text(
-                  'no tasks or plans',
+                  '··· ${group.sessions.length - sessionLimit} more',
                   style: CyberpunkTypography.bodySmall.copyWith(
                     color: CyberpunkColors.midGray,
                     fontFamily: 'SourceCodePro',
                     fontSize: 10,
                   ),
                 ),
-              );
-            }
-
-            return Column(
-              children: allChildren
-                  .map((child) {
-                    final type = child['type'] as String;
-                    final task = type == 'task' ? (child['data'] as Task?) : null;
-                    final plan = type == 'plan' ? (child['data'] as Plan?) : null;
-                    return Padding(
-                      padding: const EdgeInsets.only(left: 24, bottom: 2),
-                      child: _ChildWidget(type: type, task: task, plan: plan),
-                    );
-                  })
-                  .toList(),
-            );
-          }
-
-          if (snap.hasError) {
-            return Padding(
-              padding: const EdgeInsets.only(left: 24, bottom: 4),
-              child: Text(
-                'error loading children',
-                style: CyberpunkTypography.bodySmall.copyWith(
-                  color: CyberpunkColors.redAlert,
-                  fontFamily: 'SourceCodePro',
-                  fontSize: 10,
-                ),
-              ),
-            );
-          }
-
-          return Padding(
-            padding: const EdgeInsets.only(left: 24, bottom: 4),
-            child: Text(
-              'loading...',
-              style: CyberpunkTypography.bodySmall.copyWith(
-                color: CyberpunkColors.midGray,
-                fontFamily: 'SourceCodePro',
-                fontSize: 10,
               ),
             ),
-          );
-        },
-      ),
-    ];
+        ],
+      ],
+    );
   }
 }
 
-/// Renders a single child item (task or plan) in the session tree.
-class _ChildWidget extends StatelessWidget {
-  final String type;
-  final Task? task;
-  final Plan? plan;
+/// Single session row within a project group
+class _SidebarSessionRow extends StatelessWidget {
+  final Session session;
+  final bool isSelected;
+  final VoidCallback onSelect;
 
-  const _ChildWidget({
-    required this.type,
-    this.task,
-    this.plan,
+  const _SidebarSessionRow({
+    required this.session,
+    required this.isSelected,
+    required this.onSelect,
   });
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = CyberpunkColors.midGray.withValues(alpha: 0.2);
-    final textColor = CyberpunkColors.lightGray;
-    final accentColor =
-        type == 'task' ? CyberpunkColors.orangeDark : CyberpunkColors.greenSuccess;
-    final title = type == 'task' ? (task!.title.isEmpty ? 'untitled task' : task!.title) : plan!.title;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: bgColor,
-        border: Border(
-          left: BorderSide(
-            color: accentColor.withValues(alpha: 0.3),
-            width: 2,
+    return GestureDetector(
+      onTap: onSelect,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.only(left: 28, right: 4, top: 4, bottom: 4),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? CyberpunkColors.orangePrimary.withValues(alpha: 0.15)
+              : Colors.transparent,
+          border: Border(
+            left: BorderSide(
+              color: isSelected
+                  ? CyberpunkColors.orangePrimary
+                  : Colors.transparent,
+              width: 2,
+            ),
           ),
         ),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: Row(
-        children: [
-          // Type icon
-          Icon(
-            type == 'task' ? Icons.check_box_outline_blank : Icons.folder_outlined,
-            size: 12,
-            color: accentColor,
-          ),
-          const SizedBox(width: 6),
-          // Label
-          Expanded(
-            child: Text(
-              title,
-              style: CyberpunkTypography.bodySmall.copyWith(
-                color: textColor,
-                fontFamily: 'SourceCodePro',
-                fontSize: 10,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          // Task status
-          if (type == 'task' && task!.status.isNotEmpty)
-            Text(
-              task!.status,
-              style: CyberpunkTypography.bodySmall.copyWith(
-                color: accentColor.withValues(alpha: 0.6),
-                fontFamily: 'SourceCodePro',
-                fontSize: 9,
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                session.title.isEmpty ? 'unnamed' : session.title,
+                style: CyberpunkTypography.bodySmall.copyWith(
+                  color: isSelected
+                      ? CyberpunkColors.orangePrimary
+                      : CyberpunkColors.orangeDark,
+                  fontFamily: 'SourceCodePro',
+                  fontSize: 11,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-        ],
+            // Info icon — opens 4-tab session overlay
+            GestureDetector(
+              onTap: () {
+                showDialog(
+                  context: context,
+                  barrierDismissible: true,
+                  builder: (_) => SessionInfoOverlay(session: session),
+                );
+              },
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  Icons.info_outline,
+                  size: 13,
+                  color: CyberpunkColors.orangePrimary.withValues(alpha: 0.7),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

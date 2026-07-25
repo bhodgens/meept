@@ -272,20 +272,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     context.go(path);
   }
 
-  Future<void> _onConnectionChanged(bool connected) async {
-    if (connected && !_initialLoadDone) {
-      _initialLoadDone = true;
-      await ref.read(sessionProvider.notifier).loadSessions();
-      ref.read(taskProvider.notifier).loadTasks();
-      ref.read(agentProvider.notifier).loadAgents();
-      // Best-effort refresh of the active-project indicator. The
-      // notifier swallows errors and degrades to CurrentProject.empty.
-      ref.read(currentProjectProvider.notifier).refresh();
+  /// Refresh all data providers from the daemon.
+  ///
+  /// Called on every successful connection (initial connect AND reconnect)
+  /// so the UI always reflects current server state without user intervention.
+  Future<void> _refreshAllData() async {
+    await ref.read(sessionProvider.notifier).loadSessions();
+    ref.read(taskProvider.notifier).loadTasks();
+    ref.read(agentProvider.notifier).loadAgents();
+    // Best-effort refresh of the active-project indicator. The
+    // notifier swallows errors and degrades to CurrentProject.empty.
+    ref.read(currentProjectProvider.notifier).refresh();
+  }
 
-      // Auto-create a new session if none is active. This guarantees a
-      // chat target on first launch and mirrors the TUI's "always have
-      // a session" behaviour. Skip when a previous run already selected
-      // one (e.g. reconnect after a transient network drop).
+  Future<void> _onConnectionChanged(bool connected) async {
+    if (!connected) return;
+
+    // Always refresh data on every (re)connect so the UI reflects
+    // current server state without user intervention.
+    await _refreshAllData();
+
+    // Auto-create a new session if none is active. This guarantees a
+    // chat target on first launch and mirrors the TUI's "always have
+    // a session" behaviour. Skip when a previous run already selected
+    // one (e.g. reconnect after a transient network drop).
+    if (!_initialLoadDone) {
+      _initialLoadDone = true;
       final active = ref.read(activeSessionProvider);
       if (active == null) {
         final session =
