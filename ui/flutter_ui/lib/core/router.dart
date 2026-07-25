@@ -202,32 +202,12 @@ class _LayoutShell extends ConsumerStatefulWidget {
 }
 
 class _LayoutShellState extends ConsumerState<_LayoutShell> {
-  String? _layout;
-
-  @override
-  void initState() {
-    super.initState();
-    // Listen for layout changes so the shell switches without restart
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _updateLayout();
-      ref.listen<String>(guiLayoutProvider, (prev, next) {
-        if (next != _layout) {
-          setState(() => _layout = next);
-        }
-      });
-    });
-  }
-
-  void _updateLayout() {
-    setState(() {
-      _layout = ref.read(guiLayoutProvider);
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
-    // Default to toptabs if layout not yet loaded
-    final layout = _layout ?? 'toptabs';
+    // Watch the layout preference so the shell rebuilds on change.
+    // ref.watch must be used here (not ref.listen in initState) because
+    // Riverpod only allows ref.listen inside build.
+    final layout = ref.watch(guiLayoutProvider);
 
     if (layout == 'sidebar') {
       // Sidebar layout only uses the chat tab - other tabs accessed via overlay
