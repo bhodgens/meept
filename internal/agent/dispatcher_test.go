@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/task"
 )
 
@@ -832,5 +833,154 @@ func TestValidateMode(t *testing.T) {
 		if got != c.want {
 			t.Errorf("validateMode(%q) = %q; want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// --- resolveAgent tests ---
+
+func TestDispatcher_SetAgentLoopManager_NilSafe(t *testing.T) {
+	d := &Dispatcher{}
+	d.SetAgentLoopManager(nil) // should not panic
+	if d.loopManager != nil {
+		t.Error("loopManager should remain nil after SetAgentLoopManager(nil)")
+	}
+}
+
+func TestDispatcher_SetSessionStore_NilSafe(t *testing.T) {
+	d := &Dispatcher{}
+	d.SetSessionStore(nil) // should not panic
+	if d.sessionStore != nil {
+		t.Error("sessionStore should remain nil after SetSessionStore(nil)")
+	}
+}
+
+func newTestRegistryWithChat(t *testing.T) *AgentRegistry {
+	t.Helper()
+	reg := NewAgentRegistry(RegistryConfig{Logger: slog.Default()})
+	if err := reg.RegisterSpec(&AgentSpec{
+		ID:   config.AgentIDChat,
+		Name: "chat",
+		Role: "executor",
+	}); err != nil {
+		t.Fatalf("RegisterSpec: %v", err)
+	}
+	return reg
+}
+
+func TestDispatcher_ResolveAgent_FallsBackToRegistry_WhenManagerNil(t *testing.T) {
+	reg := newTestRegistryWithChat(t)
+	registryLoop, _ := reg.Get(config.AgentIDChat)
+
+	d := &Dispatcher{registry: reg, logger: slog.Default()}
+	got := d.resolveAgent(config.AgentIDChat, "any-session")
+	if got != registryLoop {
+		t.Error("expected registry loop when loopManager is nil")
+	}
+}
+
+func TestDispatcher_ResolveAgent_FallsBackToRegistry_WhenSessionStoreNil(t *testing.T) {
+	reg := newTestRegistryWithChat(t)
+	registryLoop, _ := reg.Get(config.AgentIDChat)
+
+	d := &Dispatcher{
+		registry:    reg,
+		loopManager: NewManager(ManagerConfig{}),
+		logger:      slog.Default(),
+	}
+	got := d.resolveAgent(config.AgentIDChat, "any-session")
+	if got != registryLoop {
+		t.Error("expected registry loop when sessionStore is nil")
+	}
+}
+
+func TestDispatcher_ResolveAgent_FallsBackToRegistry_WhenSessionUnknown(t *testing.T) {
+	reg := newTestRegistryWithChat(t)
+	registryLoop, _ := reg.Get(config.AgentIDChat)
+
+	store := &stubSessionStore{sessions: map[string]*session.Session{}}
+	d := &Dispatcher{
+		registry:     reg,
+		loopManager:  NewManager(ManagerConfig{}),
+		sessionStore: store,
+		logger:       slog.Default(),
+	}
+	got := d.resolveAgent(config.AgentIDChat, "unknown-session")
+	if got != registryLoop {
+		t.Error("expected registry loop when session is unknown")
+	}
+}
+
+func TestDispatcher_ResolveAgent_FallsBackToRegistry_WhenNoProjectPath(t *testing.T) {
+	reg := newTestRegistryWithChat(t)
+	registryLoop, _ := reg.Get(config.AgentIDChat)
+
+	store := &stubSessionStore{
+		sessions: map[string]*session.Session{
+			"sess-no-project": {ID: "sess-no-project", ProjectPath: ""},
+		},
+	}
+	d := &Dispatcher{
+		registry:     reg,
+		loopManager:  NewManager(ManagerConfig{}),
+		sessionStore: store,
+		logger:       slog.Default(),
+	}
+	got := d.resolveAgent(config.AgentIDChat, "sess-no-project")
+	if got != registryLoop {
+		t.Error("expected registry loop when session has no project path")
+	}
+}
+
+func TestDispatcher_ResolveAgent_ReturnsSessionScopedLoop(t *testing.T) {
+	reg := newTestRegistryWithChat(t)
+	registryLoop, _ := reg.Get(config.AgentIDChat)
+
+	const sessionID = "sess-with-project"
+	const projectPath = "/repos/myproject"
+	store := &stubSessionStore{
+		sessions: map[string]*session.Session{
+			sessionID: {ID: sessionID, ProjectPath: projectPath},
+		},
+	}
+	d := &Dispatcher{
+		registry:     reg,
+		loopManager:  NewManager(ManagerConfig{}),
+		sessionStore: store,
+		logger:       slog.Default(),
+	}
+
+	got := d.resolveAgent(config.AgentIDChat, sessionID)
+	if got == nil {
+		t.Fatal("expected non-nil loop")
+	}
+	if got == registryLoop {
+		t.Fatal("expected session-scoped loop, got registry singleton")
+	}
+	if got.GetWorkingDir() != projectPath {
+		t.Errorf("GetWorkingDir() = %q, want %q", got.GetWorkingDir(), projectPath)
+	}
+}
+
+func TestDispatcher_ResolveAgent_CachesLoopAcrossCalls(t *testing.T) {
+	reg := newTestRegistryWithChat(t)
+
+	const sessionID = "sess-cache"
+	const projectPath = "/repos/cached"
+	store := &stubSessionStore{
+		sessions: map[string]*session.Session{
+			sessionID: {ID: sessionID, ProjectPath: projectPath},
+		},
+	}
+	d := &Dispatcher{
+		registry:     reg,
+		loopManager:  NewManager(ManagerConfig{}),
+		sessionStore: store,
+		logger:       slog.Default(),
+	}
+
+	first := d.resolveAgent(config.AgentIDChat, sessionID)
+	second := d.resolveAgent(config.AgentIDChat, sessionID)
+	if first != second {
+		t.Error("expected the same loop instance on repeated calls (cached by manager)")
 	}
 }

@@ -1855,6 +1855,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			logger.Info("ThreadRouter wired to dispatcher")
 		}
 
+		// Wire session store onto the dispatcher so RouteToAgent can look
+		// up a session's project_path. The loop manager is wired below in
+		// wireAgentLoopManager (which constructs c.AgentLoopManager); the
+		// SetAgentLoopManager call happens there alongside the ChatHandler
+		// wiring. Here we only wire what is available now.
+		if c.SessionStore != nil {
+			c.Dispatcher.SetSessionStore(c.SessionStore)
+		}
+
 		// Register platform tools now that agent registry is available
 		registerPlatformTools(c.ToolRegistry, c.AgentRegistry, c.StatusHandler, c.MCPManager, msgBus, logger)
 
@@ -2176,6 +2185,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 	if c.ChatHandler != nil && c.SessionStore != nil {
 		c.ChatHandler.SetSessionStore(c.SessionStore)
+	}
+
+	// Wire the same manager onto the Dispatcher so the multi-agent
+	// dispatch path (RouteToAgent) also resolves session-scoped loops
+	// with the correct project working directory.
+	if c.Dispatcher != nil && c.AgentLoopManager != nil {
+		c.Dispatcher.SetAgentLoopManager(c.AgentLoopManager)
 	}
 
 	// Create job processor that uses the agent loop (with optional multi-agent registry)

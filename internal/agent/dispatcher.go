@@ -251,6 +251,15 @@ type Dispatcher struct {
 
 	// instructionParser parses natural language into structured instructions.
 	instructionParser *InstructionParser
+
+	// loopManager resolves per-session AgentLoops so that dispatched
+	// agents execute with the session's project_path as their working
+	// directory. When nil, RouteToAgent falls back to the singleton
+	// registry agent (legacy behaviour).
+	loopManager *Manager
+
+	// sessionStore looks up session project paths for loopManager.
+	sessionStore SessionStoreReader
 }
 
 // IntentClassifier is an interface for classifying intents.
@@ -411,6 +420,24 @@ func (d *Dispatcher) SetThreadRouter(tr *ThreadRouter) {
 		return
 	}
 	d.threadRouter = tr
+}
+
+// SetAgentLoopManager wires the per-session AgentLoop manager so that
+// RouteToAgent can resolve a session-scoped loop (with the correct
+// project working directory) instead of always using the singleton
+// registry agent. Nil is a no-op.
+func (d *Dispatcher) SetAgentLoopManager(m *Manager) {
+	if m != nil {
+		d.loopManager = m
+	}
+}
+
+// SetSessionStore wires a session store for project-path lookup in
+// RouteToAgent. Nil is a no-op.
+func (d *Dispatcher) SetSessionStore(s SessionStoreReader) {
+	if s != nil {
+		d.sessionStore = s
+	}
 }
 // SetInstructionStore wires the instruction store for intent-based action attachment.
 func (d *Dispatcher) SetInstructionStore(store *preferences.Store) {
@@ -1495,14 +1522,13 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	// Build context message with memory refs
 	contextMsg := d.buildContextMessage(result, conversationID)
 
-	// Get the agent
-	agent, err := d.registry.Get(result.AgentID)
-	if err != nil {
-		d.logger.Warn("Agent not found, falling back to chat", "agent", result.AgentID, "error", err)
-		agent, err = d.registry.Get(config.AgentIDChat)
-		if err != nil {
-			return "", fmt.Errorf("fallback agent not found: %w", err)
-		}
+	// Resolve the agent loop. Prefer a session-scoped loop (with the
+	// session's project_path as working directory) when the manager and
+	// session store are wired. Falls back to the singleton registry agent
+	// when the session has no project path or the manager is unavailable.
+	agent := d.resolveAgent(result.AgentID, conversationID)
+	if agent == nil {
+		return "", fmt.Errorf("no agent available for %q", result.AgentID)
 	}
 
 	// Run the agent. When the dispatcher is carrying multimodal parts
@@ -1510,6 +1536,7 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	// provider serializer emits native image blocks. Otherwise use the
 	// plain RunOnce path — the two are equivalent for text-only turns.
 	var response string
+	var err error
 	if len(result.Parts) > 0 {
 		response, err = agent.RunOnceWithParts(ctx, contextMsg, result.Parts, conversationID)
 	} else {
@@ -1660,7 +1687,52 @@ func (d *Dispatcher) handleStatsQuery(_ context.Context) (string, error) {
 	return string(data), nil
 }
 
-// buildContextMessage builds a message with memory context injected.
+// resolveAgent returns the AgentLoop that should handle a dispatched
+// request for the given conversation. When the loop manager and session
+// store are wired AND the session has a project_path, it returns a
+// session-scoped loop whose working directory matches the session's
+// project. Otherwise it falls back to the singleton registry agent.
+//
+// This mirrors ChatHandler.sessionLoop() but lives on the Dispatcher so
+// that the multi-agent dispatch path (RouteToAgent) also benefits from
+// per-session project isolation.
+func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
+	// Try session-scoped loop first.
+	if d.loopManager != nil && d.sessionStore != nil && conversationID != "" {
+		if sess := d.sessionStore.Get(conversationID); sess != nil && sess.ProjectPath != "" {
+			// Use the registry agent as the template so the session loop
+			// inherits LLM client, tools, skills, and hooks.
+			template, templateErr := d.registry.Get(agentID)
+			if templateErr != nil {
+				template, templateErr = d.registry.Get(config.AgentIDChat)
+			}
+			if templateErr == nil && template != nil {
+				loop, err := d.loopManager.GetOrCreateWired(conversationID, sess.ProjectPath, template)
+				if err == nil {
+					return loop
+				}
+				d.logger.Warn("session-scoped loop creation failed; using registry agent",
+					"session", conversationID,
+					"project", sess.ProjectPath,
+					"error", err,
+				)
+			}
+		}
+	}
+
+	// Fallback: singleton from registry.
+	agent, err := d.registry.Get(agentID)
+	if err != nil {
+		d.logger.Warn("Agent not found, falling back to chat", "agent", agentID, "error", err)
+		agent, err = d.registry.Get(config.AgentIDChat)
+		if err != nil {
+			d.logger.Error("fallback agent not found", "error", err)
+			return nil
+		}
+	}
+	return agent
+}
+
 // The primary content is the full original user input (result.OriginalInput);
 // a brief summary is prepended only when it differs from the full input.
 func (d *Dispatcher) buildContextMessage(result *DispatchResult, conversationID string) string {

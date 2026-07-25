@@ -72,7 +72,6 @@ import '../../providers/verbosity_provider.dart';
 import '../chat/chat_tab.dart';
 import 'tools_dropdown.dart' show HamburgerMenu;
 import 'session_info_overlay.dart';
-import '../sessions/sessions_overview_tab.dart';
 
 /// Home tab enum for sidebar layout
 enum SidebarHomeTab { chat }
@@ -560,11 +559,8 @@ class _ProjectGroup {
     required this.sessions,
   });
 
-  /// Display suffix: last path component of project name + branch.
-  String get displayLabel {
-    final suffix = projectName.split('/').last;
-    return branch.isNotEmpty ? '$suffix $branch' : suffix;
-  }
+  /// Display label: directory name of the project repo (no branch).
+  String get displayLabel => projectName.split('/').last;
 }
 
 class _SidebarState extends ConsumerState<_Sidebar> {
@@ -579,6 +575,23 @@ class _SidebarState extends ConsumerState<_Sidebar> {
 
     // Group sessions by project
     final groups = _groupByProject(sessions, projects);
+
+    // Auto-expand the group containing the selected session so newly
+    // created sessions are immediately visible.
+    if (widget.selectedSession != null) {
+      for (final group in groups) {
+        if (group.sessions.any((s) => s.id == widget.selectedSession!.id)) {
+          if (_expandedProjects[group.projectId] != true) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                setState(() => _expandedProjects[group.projectId] = true);
+              }
+            });
+          }
+          break;
+        }
+      }
+    }
 
     return SizedBox(
       width: 220,
@@ -626,30 +639,6 @@ class _SidebarState extends ConsumerState<_Sidebar> {
                   ),
                 ),
                 const Spacer(),
-                // 'i' button — opens full 2-pane sessions view
-                GestureDetector(
-                  onTap: () {
-                    showDialog(
-                      context: context,
-                      barrierDismissible: true,
-                      builder: (_) => _FullWindowDialog(
-                        title: 'sessions',
-                        icon: Icons.folder,
-                        content: const SessionsOverviewTab(),
-                        onClose: () => Navigator.of(context).pop(),
-                      ),
-                    );
-                  },
-                  behavior: HitTestBehavior.opaque,
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Icon(
-                      Icons.info_outline,
-                      size: 16,
-                      color: CyberpunkColors.orangePrimary.withValues(alpha: 0.7),
-                    ),
-                  ),
-                ),
               ],
             ),
           ),
@@ -698,12 +687,18 @@ class _SidebarState extends ConsumerState<_Sidebar> {
     final projectBranches = <String, String>{};
 
     for (final session in sessions) {
-      // Determine grouping key: prefer projectId, fall back to path
+      // Determine grouping key: prefer projectId, fall back to path.
+      // When neither is available, merge into the active project's group
+      // so legacy sessions (created before project wiring) don't form a
+      // duplicate group with the same display name.
       String key = session.projectId ?? '';
       if (key.isEmpty) {
         final path = session.projectPath ?? session.detectionContext?.cwd ?? '';
         if (path.isNotEmpty) {
           key = 'path:$path';
+        } else if (activeProject != null) {
+          // No project info at all — fold into the active project.
+          key = activeProject.id;
         }
       }
       byProject.putIfAbsent(key, () => []).add(session);
@@ -745,15 +740,21 @@ class _SidebarState extends ConsumerState<_Sidebar> {
       ));
     }
 
-    // Sessions with truly no project info
+    // Sessions with truly no project info — group under the active
+    // project's directory name (the daemon's working project).
     final noProject = byProject[''];
     if (noProject != null && noProject.isNotEmpty) {
       final sorted = List<Session>.from(noProject)
         ..sort((a, b) => (b.lastActivity ?? b.createdAt).compareTo(a.lastActivity ?? a.createdAt));
+      // Use active project name if available, otherwise "no project"
+      final fallbackName = activeProject != null
+          ? activeProject.name.split('/').last
+          : 'no project';
+      final fallbackBranch = activeProject?.branch ?? '';
       groups.add(_ProjectGroup(
         projectId: '',
-        projectName: 'no project',
-        branch: '',
+        projectName: fallbackName,
+        branch: fallbackBranch,
         sessions: sorted,
       ));
     }
