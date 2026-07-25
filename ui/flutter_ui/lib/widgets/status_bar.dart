@@ -11,6 +11,7 @@ import '../providers/status_message_provider.dart';
 ///
 /// Styling:
 /// - Connection status: green (connected), red (disconnected), orange (connecting)
+///   Clickable — toggles connect/disconnect.
 /// - Session: orange
 /// - Keybind hints: very light gray (almost white)
 /// - Project path: orange
@@ -31,13 +32,9 @@ class StatusBar extends ConsumerWidget {
     // Build rich text with contextual colors for each part
     final spans = <InlineSpan>[];
 
-    // Connection part (contextual color)
-    spans.add(_connectionSpan(ref));
-
     // Session part (orange)
     final sessionPart = _sessionPart(ref);
     if (sessionPart.isNotEmpty) {
-      spans.add(_separator());
       spans.add(TextSpan(text: sessionPart, style: _orangeStyle));
     }
 
@@ -60,10 +57,20 @@ class StatusBar extends ConsumerWidget {
     ));
 
     return _bar(
-      child: RichText(
-        text: TextSpan(children: spans),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+      child: Row(
+        children: [
+          // Clickable connection indicator
+          _ConnectionToggle(),
+          const SizedBox(width: 4),
+          // Remaining status parts
+          Expanded(
+            child: RichText(
+              text: TextSpan(children: spans),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -99,25 +106,6 @@ class StatusBar extends ConsumerWidget {
 
   InlineSpan _separator() => const TextSpan(text: ' · ', style: TextStyle(color: CyberpunkColors.midGray));
 
-  InlineSpan _connectionSpan(WidgetRef ref) {
-    final connected = ref.watch(connectionStateProvider);
-    final isConnecting = ref.watch(isConnectingProvider);
-    final statusText = ref.watch(connectionStatusProvider);
-
-    // Contextual color: green (connected), red (disconnected), orange (connecting)
-    final color = isConnecting
-        ? CyberpunkColors.orangePrimary
-        : connected
-            ? CyberpunkColors.greenSuccess
-            : CyberpunkColors.redAlert;
-
-    final dot = connected ? '●' : '○';
-    return TextSpan(
-      text: '$dot $statusText',
-      style: _baseStyle.copyWith(color: color),
-    );
-  }
-
   String _sessionPart(WidgetRef ref) {
     final session = ref.watch(activeSessionProvider);
     final name = session?.title;
@@ -152,5 +140,175 @@ class StatusBar extends ConsumerWidget {
       return '[$displayPath$branch$dirty]';
     }
     return '[local:$displayPath]';
+  }
+}
+
+/// Clickable connection indicator in the status bar.
+/// Tap to open a dialog for managing the daemon connection.
+class _ConnectionToggle extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final connected = ref.watch(connectionStateProvider);
+    final isConnecting = ref.watch(isConnectingProvider);
+    final statusText = ref.watch(connectionStatusProvider);
+
+    final color = isConnecting
+        ? CyberpunkColors.orangePrimary
+        : connected
+            ? CyberpunkColors.greenSuccess
+            : CyberpunkColors.redAlert;
+
+    final dot = connected ? '●' : '○';
+
+    return GestureDetector(
+      onTap: () => _showConnectionDialog(context, ref),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Text(
+          '$dot $statusText',
+          style: CyberpunkTypography.bodySmall.copyWith(
+            color: color,
+            fontFamily: 'SourceCodePro',
+            fontSize: 12,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showConnectionDialog(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => const _ConnectionDialog(),
+    );
+  }
+}
+
+/// Dialog for checking and toggling the daemon connection.
+/// The action button blocks (shows spinner) until the operation completes.
+class _ConnectionDialog extends ConsumerStatefulWidget {
+  const _ConnectionDialog();
+
+  @override
+  ConsumerState<_ConnectionDialog> createState() => _ConnectionDialogState();
+}
+
+class _ConnectionDialogState extends ConsumerState<_ConnectionDialog> {
+  bool _operationInProgress = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final connected = ref.watch(connectionStateProvider);
+    final isConnecting = ref.watch(isConnectingProvider);
+    final statusText = ref.watch(connectionStatusProvider);
+
+    final statusColor = isConnecting
+        ? CyberpunkColors.orangePrimary
+        : connected
+            ? CyberpunkColors.greenSuccess
+            : CyberpunkColors.redAlert;
+
+    final dot = connected ? '●' : '○';
+    final busy = _operationInProgress || isConnecting;
+
+    return AlertDialog(
+      backgroundColor: CyberpunkColors.darkGray,
+      title: Text(
+        'connection',
+        style: CyberpunkTypography.bodyMedium.copyWith(
+          color: CyberpunkColors.orangePrimary,
+        ),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Live status line
+          Row(
+            children: [
+              Text(
+                '$dot $statusText',
+                style: CyberpunkTypography.bodyMedium.copyWith(
+                  color: statusColor,
+                  fontFamily: 'SourceCodePro',
+                ),
+              ),
+              if (busy) ...[
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: CyberpunkColors.orangePrimary,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(
+            'close',
+            style: CyberpunkTypography.bodySmall.copyWith(
+              color: CyberpunkColors.midGray,
+            ),
+          ),
+        ),
+        TextButton(
+          onPressed: busy
+              ? null
+              : () => connected ? _disconnect() : _connect(),
+          child: Text(
+            connected ? 'disconnect' : 'connect',
+            style: CyberpunkTypography.bodySmall.copyWith(
+              color: busy
+                  ? CyberpunkColors.midGray
+                  : connected
+                      ? CyberpunkColors.redAlert
+                      : CyberpunkColors.greenSuccess,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _connect() async {
+    setState(() => _operationInProgress = true);
+    final ws = ref.read(websocketProvider);
+    ws.connect();
+
+    // Block until connected or timeout (30s).
+    final deadline = DateTime.now().add(const Duration(seconds: 30));
+    while (mounted && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      if (!mounted) return;
+      final connected = ref.read(connectionStateProvider);
+      if (connected) break;
+    }
+    if (mounted) setState(() => _operationInProgress = false);
+  }
+
+  Future<void> _disconnect() async {
+    setState(() => _operationInProgress = true);
+    final ws = ref.read(websocketProvider);
+    ws.disconnect();
+    // Invalidate to get a fresh (non-disposed) instance on next connect.
+    ref.invalidate(websocketProvider);
+
+    // Block until state confirms disconnected (should be near-instant).
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    while (mounted && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      if (!mounted) return;
+      final connected = ref.read(connectionStateProvider);
+      if (!connected) break;
+    }
+    if (mounted) setState(() => _operationInProgress = false);
   }
 }

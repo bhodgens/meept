@@ -390,17 +390,33 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
             children: [
               // Left sidebar with session tree (collapsible)
               if (!_sidebarCollapsed)
-                _Sidebar(
-                  onSessionSelected: _onSessionSelected,
-                  selectedSession: _selectedSession,
+                Stack(
+                  children: [
+                    _Sidebar(
+                      onSessionSelected: _onSessionSelected,
+                      selectedSession: _selectedSession,
+                    ),
+                    // Toggle overlaid at the sidebar's right edge
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      child: _SidebarToggle(
+                        collapsed: false,
+                        onTap: () {
+                          setState(() => _sidebarCollapsed = true);
+                        },
+                      ),
+                    ),
+                  ],
+                )
+              else
+                // Collapsed: toggle at window's left edge
+                _SidebarToggle(
+                  collapsed: true,
+                  onTap: () {
+                    setState(() => _sidebarCollapsed = false);
+                  },
                 ),
-              // Collapse/expand toggle arrow
-              _SidebarToggle(
-                collapsed: _sidebarCollapsed,
-                onTap: () {
-                  setState(() => _sidebarCollapsed = !_sidebarCollapsed);
-                },
-              ),
               // Main content area (ChatTab provides its own header)
               Expanded(
                 child: _selectedSession != null
@@ -446,6 +462,11 @@ class _NoSessionPlaceholder extends StatelessWidget {
 /// Collapse/expand toggle arrow on the sidebar divider.
 /// Shows a left arrow (chevron_left) when sidebar is open,
 /// and a right arrow (chevron_right) when collapsed.
+///
+/// The clickable button matches the chat header height and sits at the top.
+/// A full-height vertical line runs below it:
+///   - expanded: right edge, ghosted orangeDark
+///   - collapsed: left edge, solid orangePrimary (matching the header bar)
 class _SidebarToggle extends StatelessWidget {
   final bool collapsed;
   final VoidCallback onTap;
@@ -454,27 +475,46 @@ class _SidebarToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Match the chat header height (vertical 8 padding + ~26px content row).
+    const double headerHeight = 44;
+    final lineColor = collapsed
+        ? CyberpunkColors.orangePrimary
+        : CyberpunkColors.orangeDark.withValues(alpha: 0.3);
+
     return GestureDetector(
       onTap: onTap,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
-        child: Container(
+        child: SizedBox(
           width: 18,
-          decoration: BoxDecoration(
-            color: CyberpunkColors.orangeDark.withValues(alpha: 0.15),
-            border: Border(
-              right: BorderSide(
-                color: CyberpunkColors.orangeDark.withValues(alpha: 0.3),
-                width: 1,
+          child: Stack(
+            children: [
+              // Full-height vertical line at the appropriate edge.
+              Positioned(
+                left: collapsed ? 0 : null,
+                right: collapsed ? null : 0,
+                top: 0,
+                bottom: 0,
+                child: Container(width: 1, color: lineColor),
               ),
-            ),
-          ),
-          child: Center(
-            child: Icon(
-              collapsed ? Icons.chevron_right : Icons.chevron_left,
-              size: 16,
-              color: CyberpunkColors.orangePrimary,
-            ),
+              // Clickable toggle button at the top, matching header height.
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  height: headerHeight,
+                  color: CyberpunkColors.orangeDark.withValues(alpha: 0.15),
+                  child: Center(
+                    child: Icon(
+                      collapsed ? Icons.chevron_right : Icons.chevron_left,
+                      size: 16,
+                      color: CyberpunkColors.orangePrimary,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -503,16 +543,8 @@ class _SidebarState extends ConsumerState<_Sidebar> {
   Widget build(BuildContext context) {
     final sessions = ref.watch(sessionProvider).sessions;
 
-    return Container(
+    return SizedBox(
       width: 220,
-      decoration: BoxDecoration(
-        border: Border(
-          right: BorderSide(
-            color: CyberpunkColors.orangeDark.withValues(alpha: 0.3),
-            width: 1,
-          ),
-        ),
-      ),
       child: TintedBackgroundImage(
         imageOpacity: 0.15,
         tintColor: CyberpunkColors.greenSuccess,
@@ -557,8 +589,6 @@ class _SidebarState extends ConsumerState<_Sidebar> {
                   ),
                 ),
                 const Spacer(),
-                // Connection status
-                _ConnectionDot(),
               ],
             ),
           ),
@@ -706,7 +736,7 @@ class _SessionTreeItemState extends ConsumerState<_SessionTreeItem> {
                     style: CyberpunkTypography.bodySmall.copyWith(
                       color: widget.isSelected
                           ? CyberpunkColors.orangePrimary
-                          : CyberpunkColors.lightGray,
+                          : CyberpunkColors.orangeDark,
                       fontFamily: 'SourceCodePro',
                       fontSize: 11,
                     ),
@@ -902,46 +932,6 @@ class _ChildWidget extends StatelessWidget {
             ),
         ],
       ),
-    );
-  }
-}
-
-/// Connection status indicator
-class _ConnectionDot extends ConsumerWidget {
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final connected = ref.watch(connectionStateProvider);
-    final isConnecting = ref.watch(isConnectingProvider);
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: isConnecting
-                ? CyberpunkColors.orangePrimary
-                : connected
-                    ? CyberpunkColors.greenSuccess
-                    : CyberpunkColors.redAlert,
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          isConnecting ? 'connecting...' : (connected ? 'connected' : 'disconnected'),
-          style: CyberpunkTypography.bodySmall.copyWith(
-            color: isConnecting
-                ? CyberpunkColors.orangePrimary
-                : connected
-                    ? CyberpunkColors.greenSuccess
-                    : CyberpunkColors.redAlert,
-            fontFamily: 'SourceCodePro',
-            fontSize: 10,
-          ),
-        ),
-      ],
     );
   }
 }
