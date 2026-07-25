@@ -221,14 +221,21 @@ class StorageService {
   }
 
   /// GUI layout preference: "toptabs" (default) or "sidebar".
-  /// Reads from SharedPreferences first, then falls back to client.json5 file.
+  /// Reads from SharedPreferences first, then falls back to client.json5 file,
+  /// then to the MEEPT_GUI_LAYOUT dart-define (injected by Makefile for web).
   String? getGuiLayout() {
     // SharedPreferences takes priority (set via UI)
     final prefsValue = _prefs?.getString(_guiLayoutPref);
     if (prefsValue != null) return prefsValue;
 
     // Fall back to cached client.json5 value
-    return _cachedClientGuiLayout;
+    if (_cachedClientGuiLayout != null) return _cachedClientGuiLayout;
+
+    // Fall back to build-time dart-define (web can't read files)
+    const defineValue = String.fromEnvironment('MEEPT_GUI_LAYOUT');
+    if (defineValue.isNotEmpty) return defineValue;
+
+    return null;
   }
 
   Future<void> setGuiLayout(String value) async {

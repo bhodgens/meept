@@ -105,7 +105,9 @@ endif
 # authenticate with the daemon out of the box. If the file doesn't exist,
 # we fall back to the legacy constant in pkg/constants/api_key.go.
 MEEPT_DEV_API_KEY := $(shell cat $(HOME)/.meept/dev_key 2>/dev/null || echo "meept_dev_default_key_CHANGE_ME")
-FLUTTER_DART_DEFINES := --dart-define=MEEPT_DEV_API_KEY=$(MEEPT_DEV_API_KEY)
+# GUI layout from client.json5 (web can't read the file at runtime)
+MEEPT_GUI_LAYOUT := $(shell grep -o '"layout"[[:space:]]*:[[:space:]]*"[^"]*"' $(HOME)/.meept/client.json5 2>/dev/null | head -1 | sed 's/.*"\([^"]*\)"$$/\1/')
+FLUTTER_DART_DEFINES := --dart-define=MEEPT_DEV_API_KEY=$(MEEPT_DEV_API_KEY) --dart-define=MEEPT_GUI_LAYOUT=$(MEEPT_GUI_LAYOUT)
 # =============================================================================
 # Setup
 # =============================================================================
