@@ -568,6 +568,10 @@ class _SidebarState extends ConsumerState<_Sidebar> {
   final Map<String, int> _projectSessionLimit = {};
   static const int _defaultSessionLimit = 10;
 
+  /// Tracks the session ID we last auto-expanded for, so we only
+  /// auto-expand once per session selection (not on every rebuild).
+  String? _lastAutoExpandedSessionId;
+
   @override
   Widget build(BuildContext context) {
     final sessions = ref.watch(sessionProvider).sessions;
@@ -577,8 +581,11 @@ class _SidebarState extends ConsumerState<_Sidebar> {
     final groups = _groupByProject(sessions, projects);
 
     // Auto-expand the group containing the selected session so newly
-    // created sessions are immediately visible.
-    if (widget.selectedSession != null) {
+    // created sessions are immediately visible. Only fires once per
+    // session selection — the user can still collapse it afterward.
+    if (widget.selectedSession != null &&
+        widget.selectedSession!.id != _lastAutoExpandedSessionId) {
+      _lastAutoExpandedSessionId = widget.selectedSession!.id;
       for (final group in groups) {
         if (group.sessions.any((s) => s.id == widget.selectedSession!.id)) {
           if (_expandedProjects[group.projectId] != true) {
@@ -828,7 +835,7 @@ class _ProjectGroupItem extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 2),
-              // Project label (suffix + branch)
+              // Project label (directory name)
               Expanded(
                 child: GestureDetector(
                   onTap: onToggle,

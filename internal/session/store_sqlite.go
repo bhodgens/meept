@@ -565,7 +565,7 @@ func (s *SQLiteStore) scanSession(row *sql.Row) *Session {
 	return session
 }
 
-// List returns all sessions that have at least one assistant response, ordered by last activity.
+// List returns all sessions ordered by archived status and last activity.
 func (s *SQLiteStore) List() ([]*Session, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -573,10 +573,6 @@ func (s *SQLiteStore) List() ([]*Session, error) {
 	rows, err := s.db.Query(`
 		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description, s.leaf_message_id, s.project_id, s.project_path, s.no_fence, s.archived
 		FROM sessions s
-		WHERE EXISTS (
-			SELECT 1 FROM session_messages sm
-			WHERE sm.session_id = s.id AND sm.role = 'assistant'
-		)
 		ORDER BY s.archived ASC, s.last_activity DESC`) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		s.logger.Error("Failed to list sessions", "error", err)

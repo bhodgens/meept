@@ -932,13 +932,13 @@ func TestSQLiteStore_ExistingMethodsStillWork(t *testing.T) {
 		t.Error("GetByConversationID failed")
 	}
 
-	// Test List (empty since no assistant messages)
+	// Test List (session appears immediately, even without messages)
 	list, err := store.List()
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
 	}
-	if len(list) != 0 {
-		t.Errorf("expected empty list (no assistant msgs), got %d", len(list))
+	if len(list) != 1 {
+		t.Errorf("expected 1 session in list, got %d", len(list))
 	}
 
 	_ = // Save assistant message
@@ -955,7 +955,7 @@ func TestSQLiteStore_ExistingMethodsStillWork(t *testing.T) {
 		t.Error("expected HasResponses to be true")
 	}
 
-	// Test List (now should have 1)
+	// Test List (still 1 session after adding message)
 	list, err = store.List()
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
@@ -1599,8 +1599,7 @@ func TestListSortsArchivedToBottom(t *testing.T) {
 
 	// old-active has older LastActivity than new-archived, but new-archived
 	// must still sort BELOW old-active because archived sorts to bottom
-	// regardless of activity. List() requires at least one assistant message
-	// per session, so seed each with one.
+	// regardless of activity.
 	mustCreate := func(id string, name string, last time.Time, archived bool) {
 		s, err := store.Create(name)
 		if err != nil {

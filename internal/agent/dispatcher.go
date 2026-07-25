@@ -439,6 +439,7 @@ func (d *Dispatcher) SetSessionStore(s SessionStoreReader) {
 		d.sessionStore = s
 	}
 }
+
 // SetInstructionStore wires the instruction store for intent-based action attachment.
 func (d *Dispatcher) SetInstructionStore(store *preferences.Store) {
 	if store == nil {

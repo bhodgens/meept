@@ -1,16 +1,17 @@
 /// Session Info Overlay - Tabbed panel showing session-scoped data
 ///
 /// Opens when clicking the [i] icon next to a session in the sidebar.
-/// Shows three tabs: plans, tasks, agents - all scoped to the selected session.
+/// Shows four tabs: sessions (2-pane), plans, tasks, agents.
+/// The sessions tab shows all sessions with the clicked one highlighted.
 ///
 /// ```
 /// ┌─────────────────────────────────────────────────────────────────┐
 /// │  Session: session4                          [X]                 │
 /// ├─────────────────────────────────────────────────────────────────┤
-/// │  plans  │  tasks  │  agents                                     │
-/// ├─────────┴─────────┴─────────────────────────────────────────────┤
+/// │  sessions │ plans │ tasks │ agents                              │
+/// ├───────────┴───────┴───────┴─────────────────────────────────────┤
 /// │                                                                   │
-/// │  [Tab content - session-scoped lists]                          │
+/// │  [Tab content]                                                  │
 /// │                                                                   │
 /// └─────────────────────────────────────────────────────────────────┘
 /// ```
@@ -21,6 +22,8 @@ import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
 import '../../models/api_models.dart';
+import '../sessions/sessions_list.dart';
+import '../sessions/sessions_detail.dart';
 
 /// Session info overlay dialog
 class SessionInfoOverlay extends StatefulWidget {
@@ -40,7 +43,7 @@ class _SessionInfoOverlayState extends State<SessionInfoOverlay>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(() {
       setState(() => _selectedTabIndex = _tabController.index);
     });
@@ -58,8 +61,8 @@ class _SessionInfoOverlayState extends State<SessionInfoOverlay>
       backgroundColor: Colors.transparent,
       insetPadding: const EdgeInsets.all(24),
       child: Container(
-        width: 600,
-        height: 500,
+        width: 800,
+        height: 560,
         decoration: BoxDecoration(
           color: CyberpunkColors.darkGray,
           border: Border.all(
@@ -74,7 +77,7 @@ class _SessionInfoOverlayState extends State<SessionInfoOverlay>
             _Header(session: widget.session, onClose: () => Navigator.pop(context)),
             // Tab bar
             _TabBar(
-              tabs: const ['plans', 'tasks', 'agents'],
+              tabs: const ['sessions', 'plans', 'tasks', 'agents'],
               selectedIndex: _selectedTabIndex,
               onTap: (index) => _tabController.animateTo(index),
             ),
@@ -83,6 +86,7 @@ class _SessionInfoOverlayState extends State<SessionInfoOverlay>
               child: IndexedStack(
                 index: _selectedTabIndex,
                 children: [
+                  _SessionsTabContent(selectedSession: widget.session),
                   _PlansTabContent(sessionId: widget.session.id),
                   _TasksTabContent(sessionId: widget.session.id),
                   _AgentsTabContent(sessionId: widget.session.id),
@@ -92,6 +96,32 @@ class _SessionInfoOverlayState extends State<SessionInfoOverlay>
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Sessions tab: 2-pane view (list + detail) with the clicked session selected.
+class _SessionsTabContent extends ConsumerWidget {
+  final Session selectedSession;
+
+  const _SessionsTabContent({required this.selectedSession});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Ensure the clicked session is the active one for the detail pane
+    final activeSession = ref.watch(activeSessionProvider);
+    final displaySession = activeSession?.id == selectedSession.id
+        ? activeSession!
+        : selectedSession;
+
+    return Row(
+      children: [
+        const SizedBox(width: 260, child: SessionsList()),
+        const VerticalDivider(width: 1),
+        Expanded(
+          child: SessionsDetailPane(session: displaySession),
+        ),
+      ],
     );
   }
 }
