@@ -114,6 +114,7 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 	payload := map[string]any{
 		"message":         req.Message,
 		"conversation_id": conversationID,
+		"session_id":      req.ConversationID, // original session ID for persistence
 		"agent_id":        req.AgentID,
 	}
 	if len(req.Parts) > 0 {

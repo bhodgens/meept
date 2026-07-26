@@ -98,6 +98,7 @@ type Worker struct {
 type ChatRequest struct {
 	Message        string              `json:"message"`
 	ConversationID string              `json:"conversation_id"`
+	SessionID      string              `json:"session_id,omitempty"` // original session ID for persistence
 	SourceClient   string              `json:"source_client,omitempty"`
 	Parts          []llm.ContentPart   `json:"parts,omitempty"`
 }
@@ -760,7 +761,13 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 
 	// Persist the user message and assistant reply so HTTP-only clients
 	// (Flutter GUI) can reload conversation history after switching sessions.
-	h.persistExchange(conversationID, req.Message, req.Parts, response.Reply)
+	// Use the original session ID (from the client) for persistence; fall back
+	// to conversationID for backward compatibility with TUI clients.
+	persistID := req.SessionID
+	if persistID == "" {
+		persistID = conversationID
+	}
+	h.persistExchange(persistID, req.Message, req.Parts, response.Reply)
 
 	// Send response
 	h.sendResponse(msg.ID, response)
