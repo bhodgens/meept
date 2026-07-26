@@ -593,6 +593,86 @@ class _ChatInputState extends ConsumerState<ChatInput>
   /// Handle `/project <path>`: bind the project to the current session.
   ///
   /// Calls the daemon's `project.set` RPC (via the bus/call bridge) with the
+  /// /debugsession — fetch and display full session metadata in a dialog.
+  Future<void> _showDebugSession() async {
+    final sessionId = widget.sessionId;
+    if (sessionId.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('no active session'),
+            backgroundColor: CyberpunkColors.redAlert,
+          ),
+        );
+      }
+      return;
+    }
+
+    try {
+      final sdk = ref.read(sdkClientProvider);
+      final raw = await sdk.getSession(sessionId);
+
+      final buf = StringBuffer();
+      buf.writeln('=== session debug ===');
+      buf.writeln('id:              ${raw['id'] ?? '?'}');
+      buf.writeln('name:            ${raw['name'] ?? '?'}');
+      buf.writeln('conversation_id: ${raw['conversation_id'] ?? '?'}');
+      buf.writeln('created_at:      ${raw['created_at'] ?? '?'}');
+      buf.writeln('last_activity:   ${raw['last_activity'] ?? '?'}');
+      buf.writeln('project_id:      ${raw['project_id'] ?? '(none)'}');
+      buf.writeln('project_path:    ${raw['project_path'] ?? '(none)'}');
+      buf.writeln('archived:        ${raw['archived'] ?? false}');
+      final dc = raw['detection_context'];
+      if (dc is Map) {
+        buf.writeln('cwd:             ${dc['cwd'] ?? '(none)'}');
+      }
+      final clients = raw['attached_clients'];
+      buf.writeln('attached:        ${clients is List ? clients.length : 0}');
+      final desig = raw['designation'];
+      if (desig is Map) {
+        buf.writeln('designation:     ${desig['status'] ?? '?'}');
+      }
+
+      if (mounted) {
+        _resetInputState();
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: CyberpunkColors.darkGray,
+            title: const Text('debug session',
+                style: TextStyle(fontFamily: 'SourceCodePro', fontSize: 14)),
+            content: SingleChildScrollView(
+              child: SelectableText(
+                buf.toString(),
+                style: const TextStyle(
+                  fontFamily: 'SourceCodePro',
+                  fontSize: 12,
+                  color: CyberpunkColors.greenSuccess,
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('close'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[chat_input] /debugsession failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('debug session failed: $e'),
+            backgroundColor: CyberpunkColors.redAlert,
+          ),
+        );
+      }
+    }
+  }
+
   /// path-only invocation, which auto-detects/registers the project.  On
   /// success, refreshes [currentProjectProvider] so the status bar picks up
   /// the change, reloads project paths so the typeahead includes the new
@@ -720,6 +800,9 @@ class _ChatInputState extends ConsumerState<ChatInput>
               sessionId: widget.sessionId,
               text: '/stop',
             );
+        return true;
+      case '/debugsession':
+        unawaited(_showDebugSession());
         return true;
       case '/project':
         // /project without args (or with only whitespace) opens the typeahead

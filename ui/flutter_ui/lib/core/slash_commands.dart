@@ -77,4 +77,5 @@ const _defaultCommands = <SlashCommand>[
       name: '/skill',
       description: 'list, search, or show skill details',
       usage: '/skill [name|search <query>]'),
+  SlashCommand(name: '/debugsession', description: 'show session debug info'),
 ];
