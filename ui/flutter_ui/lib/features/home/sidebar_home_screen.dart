@@ -402,6 +402,7 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
   }
 
   void _onSessionSelected(Session session) {
+    debugPrint('[session-debug] _onSessionSelected: id=${session.id} title=${session.title}');
     setState(() => _selectedSession = session);
     ref.read(activeSessionProvider.notifier).state = session;
   }
@@ -451,9 +452,12 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
                 ),
               // Main content area (ChatTab provides its own header)
               Expanded(
-                child: _selectedSession != null
-                    ? ChatTab(sessionId: _selectedSession!.id)
-                    : const _NoSessionPlaceholder(),
+                child: Builder(builder: (context) {
+                  debugPrint('[session-debug] build main area: _selectedSession=${_selectedSession?.id}');
+                  return _selectedSession != null
+                      ? ChatTab(sessionId: _selectedSession!.id)
+                      : const _NoSessionPlaceholder();
+                }),
               ),
             ],
           ),

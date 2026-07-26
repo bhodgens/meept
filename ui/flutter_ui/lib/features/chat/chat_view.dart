@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
@@ -23,7 +24,20 @@ class _ChatViewState extends ConsumerState<ChatView> {
   bool _dialogShown = false;
 
   @override
+  void initState() {
+    super.initState();
+    debugPrint('[session-debug] ChatView.initState sessionId=${widget.sessionId}');
+  }
+
+  @override
+  void didUpdateWidget(ChatView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    debugPrint('[session-debug] ChatView.didUpdateWidget old=${oldWidget.sessionId} new=${widget.sessionId}');
+  }
+
+  @override
   Widget build(BuildContext context) {
+    debugPrint('[session-debug] ChatView.build sessionId=${widget.sessionId}');
     // Listen for destructive-tool confirmation requests surfaced by the
     // ChatNotifier. When one arrives, show DestructiveConfirmationDialog
     // and forward the user's decision back via resolveConfirmation.

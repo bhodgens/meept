@@ -483,6 +483,7 @@ class SdkApiClient {
         'offset': offset,
         'limit': limit,
       });
+      debugPrint('[session-debug] getMessages raw response keys=${raw.keys.toList()} messages_type=${raw['messages'].runtimeType} messages_len=${(raw['messages'] as List?)?.length}');
       final messagesRaw = raw['messages'] as List?;
       if (messagesRaw == null) return [];
       return messagesRaw

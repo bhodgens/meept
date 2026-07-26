@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
@@ -29,6 +30,7 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   @override
   void initState() {
     super.initState();
+    debugPrint('[session-debug] ChatMessageList.initState sessionId=${widget.sessionId}');
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadMessages());
   }
@@ -36,6 +38,7 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   @override
   void didUpdateWidget(ChatMessageList oldWidget) {
     super.didUpdateWidget(oldWidget);
+    debugPrint('[session-debug] ChatMessageList.didUpdateWidget old=${oldWidget.sessionId} new=${widget.sessionId} changed=${widget.sessionId != oldWidget.sessionId}');
     if (widget.sessionId != oldWidget.sessionId) {
       _previousMessageCount = 0;
       // Defer to next frame so we don't modify providers during the build
@@ -47,7 +50,10 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   }
 
   Future<void> _loadMessages() async {
+    debugPrint('[session-debug] ChatMessageList._loadMessages sessionId=${widget.sessionId}');
     await ref.read(chatProvider.notifier).loadMessages(widget.sessionId);
+    final st = ref.read(chatProvider);
+    debugPrint('[session-debug] ChatMessageList._loadMessages done: messages=${st.messages.length} isLoading=${st.isLoading} error=${st.error}');
   }
 
   @override
@@ -77,6 +83,7 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   Widget build(BuildContext context) {
     final chatState = ref.watch(chatProvider);
     final sessionId = widget.sessionId;
+    debugPrint('[session-debug] ChatMessageList.build sessionId=$sessionId messages=${chatState.messages.length} isLoading=${chatState.isLoading} error=${chatState.error}');
     final findVisible = ref.watch(findBarVisibleProvider(sessionId));
     final findQuery = ref.watch(findQueryProvider(sessionId));
     final findCase = ref.watch(findCaseSensitiveProvider(sessionId));

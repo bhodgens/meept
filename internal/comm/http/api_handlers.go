@@ -13,6 +13,7 @@ import (
 
 	configCli "github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/services"
+	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -795,7 +796,10 @@ func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
 		s.handleServiceError(w, err)
 		return
 	}
-
+	// Guarantee a JSON array (not null) so clients can always iterate.
+	if messages == nil {
+		messages = []session.Message{}
+	}
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"messages": messages,
 		"total":    len(messages),

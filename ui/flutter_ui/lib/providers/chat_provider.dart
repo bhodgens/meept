@@ -248,6 +248,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
       // deserialize each entry via ChatMessage.fromBackendMessage because
       // the OpenAPI spec leaves the ChatMessage entity untyped.
       final rawMessages = await sdkClient.getMessages(sessionId);
+      debugPrint('[session-debug] loadMessages: sessionId=$sessionId rawMessages.length=${rawMessages.length}');
+      if (rawMessages.isNotEmpty) {
+        debugPrint('[session-debug] loadMessages: first raw message keys=${rawMessages.first.keys.toList()}');
+      }
       if (_disposed) return;
       final messages = rawMessages
           .map((m) => ChatMessage.fromBackendMessage(m))
