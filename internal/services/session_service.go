@@ -22,6 +22,9 @@ type SessionService struct {
 type ProjectResolver interface {
 	EnsureDefault(ctx context.Context) (*project.Project, error)
 	GetActive(ctx context.Context) (*project.Project, error)
+	// Get retrieves a project by ID. Used when the client explicitly
+	// requests a specific project for a new session.
+	Get(ctx context.Context, id string) (*project.Project, error)
 }
 
 // NewSessionService creates a session service.
@@ -39,7 +42,9 @@ func (s *SessionService) SetProjectManager(pm ProjectResolver) {
 
 // CreateSessionRequest contains session creation parameters.
 type CreateSessionRequest struct {
-	Name string `json:"name,omitempty"`
+	Name              string                      `json:"name,omitempty"`
+	ProjectID         string                      `json:"project_id,omitempty"`
+	DetectionContext  *session.DetectionContext    `json:"detection_context,omitempty"`
 }
 
 // CreateSession creates a new session.
@@ -56,16 +61,38 @@ func (s *SessionService) CreateSession(ctx context.Context, req CreateSessionReq
 		return nil, wrapError("session", "CreateSession", err)
 	}
 
-	// Inherit or create the active project so every session has a working
-	// directory.
+	// Store the client-provided detection context (cwd, etc.) on the
+	// session so downstream components can resolve the working directory.
+	if req.DetectionContext != nil {
+		sess.DetectionContext = req.DetectionContext
+	}
+
+	// Project resolution priority:
+	//   1. Explicit project_id from the client (GUI project selection)
+	//   2. Fall back to the active/default project
 	if s.pm != nil {
-		p, err := s.pm.EnsureDefault(ctx)
-		if err != nil {
-			s.logger.Warn("EnsureDefault failed during session creation",
-				"session_id", sess.ID,
-				"error", err,
-			)
-		} else if p != nil {
+		var p *project.Project
+		if req.ProjectID != "" {
+			p, err = s.pm.Get(ctx, req.ProjectID)
+			if err != nil {
+				s.logger.Warn("explicit project lookup failed, falling back to default",
+					"session_id", sess.ID,
+					"project_id", req.ProjectID,
+					"error", err,
+				)
+				p = nil
+			}
+		}
+		if p == nil {
+			p, err = s.pm.EnsureDefault(ctx)
+			if err != nil {
+				s.logger.Warn("EnsureDefault failed during session creation",
+					"session_id", sess.ID,
+					"error", err,
+				)
+			}
+		}
+		if p != nil {
 			if err := s.store.SetProject(sess.ID, p.ID, p.LocalPath); err != nil {
 				s.logger.Warn("SetProject failed during session creation",
 					"session_id", sess.ID,

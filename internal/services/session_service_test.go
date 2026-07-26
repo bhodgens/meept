@@ -189,6 +189,9 @@ func (failingProjectResolver) EnsureDefault(ctx context.Context) (*project.Proje
 func (failingProjectResolver) GetActive(ctx context.Context) (*project.Project, error) {
 	return nil, errors.New("simulated failure")
 }
+func (failingProjectResolver) Get(ctx context.Context, id string) (*project.Project, error) {
+	return nil, errors.New("simulated failure")
+}
 
 func TestCreateSession_EnsureDefaultError(t *testing.T) {
 	// When EnsureDefault fails, CreateSession should still succeed — the

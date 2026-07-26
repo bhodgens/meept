@@ -805,7 +805,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
 
   Future<void> _createSessionInProject(_ProjectGroup group) async {
     final notifier = ref.read(sessionProvider.notifier);
-    final session = await notifier.createSession('new session');
+    final session = await notifier.createSession('new session', projectId: group.projectId);
     if (session != null && mounted) {
       widget.onSessionSelected(session);
       ref.read(activeSessionProvider.notifier).state = session;

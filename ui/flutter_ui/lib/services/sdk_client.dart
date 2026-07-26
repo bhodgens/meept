@@ -508,9 +508,13 @@ class SdkApiClient {
     required String title,
     String? agentId,
     String? cwd,
+    String? projectId,
   }) async {
     final body = <String, dynamic>{'name': title};
     if (agentId != null) body['agent_id'] = agentId;
+    if (projectId != null && projectId.isNotEmpty) {
+      body['project_id'] = projectId;
+    }
     if (cwd != null && cwd.isNotEmpty) {
       body['detection_context'] = {'cwd': cwd};
     }

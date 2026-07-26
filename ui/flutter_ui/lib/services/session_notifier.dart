@@ -117,9 +117,9 @@ class SessionNotifier extends StateNotifier<SessionState> {
   /// background [loadSessions] is fired-and-forgotten via [unawaited]
   /// to reconcile with the server's persisted ordering; if that call
   /// hangs, the UI is unaffected because the Future is detached.
-  Future<Session?> createSession(String title) async {
+  Future<Session?> createSession(String title, {String? projectId}) async {
     try {
-      final raw = await sdkClient.createSession(title: title);
+      final raw = await sdkClient.createSession(title: title, projectId: projectId);
       final session = Session.fromJson(raw);
       // Insert into local state right away — no server round-trip.
       final updated = [session, ...state.sessions];

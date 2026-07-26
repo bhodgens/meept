@@ -84,6 +84,9 @@ var builtinCommands = map[string]struct{}{
 
 	// Cluster dispatch (submit/status/results for cross-daemon tasks).
 	"dispatch": {},
+
+	// Debug session: dump all known data about the current session.
+	"debugsession": {},
 }
 
 // CommandTasks is the "tasks" command name, exported for compatibility with tui/constants.go.

@@ -2185,6 +2185,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 	if c.ChatHandler != nil && c.SessionStore != nil {
 		c.ChatHandler.SetSessionStore(c.SessionStore)
+		c.ChatHandler.SetMessageSaver(c.SessionStore)
 	}
 
 	// Wire the same manager onto the Dispatcher so the multi-agent

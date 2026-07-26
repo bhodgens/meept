@@ -485,6 +485,11 @@ func (m *ChatModel) IsTTSEnabled() bool {
 	return m.ttsEnabled
 }
 
+// SessionID returns the current session ID.
+func (m *ChatModel) SessionID() string {
+	return m.sessionID
+}
+
 func generateConversationID() string {
 	return id.Generate("conv-")
 }

@@ -568,6 +568,22 @@ func (c *RPCClient) DeleteSession(sessionID string) error {
 	return err
 }
 
+// GetSession retrieves a session by ID.
+func (c *RPCClient) GetSession(sessionID string) (*types.Session, error) {
+	params := map[string]string{"id": sessionID}
+	result, err := c.Call("session.get", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.Session
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse session response: %w", err)
+	}
+
+	return &resp, nil
+}
+
 // ArchiveSession sets or clears the archived flag on a session via the
 // "sessions.archive" RPC method (registered in internal/daemon/session_rpc.go).
 func (c *RPCClient) ArchiveSession(sessionID string, archived bool) error {

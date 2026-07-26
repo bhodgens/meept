@@ -30,6 +30,12 @@ type SessionStoreReader interface {
 	Get(id string) *session.Session
 }
 
+// SessionMessageSaver persists chat messages to the session store.
+// Wired by the daemon to bridge ChatHandler → session.Store.SaveMessages.
+type SessionMessageSaver interface {
+	SaveMessages(sessionID string, messages []session.Message) error
+}
+
 // ChatHandler bridges the message bus to the AgentLoop.
 // It subscribes to chat.request and publishes responses to chat.response.
 type ChatHandler struct {
@@ -59,6 +65,10 @@ type ChatHandler struct {
 
 	// SessionStoreReader for looking up session project paths.
 	sessionStore SessionStoreReader
+
+	// messageSaver persists chat messages to the session store after each
+	// exchange. Wired by the daemon via SetMessageSaver.
+	messageSaver SessionMessageSaver
 
 	// Synchronous dispatch mode: when true, async-dispatched tasks wait
 	// for completion instead of returning immediately (Issue 0022).
@@ -748,8 +758,59 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		response.Reply = reply
 	}
 
+	// Persist the user message and assistant reply so HTTP-only clients
+	// (Flutter GUI) can reload conversation history after switching sessions.
+	h.persistExchange(conversationID, req.Message, req.Parts, response.Reply)
+
 	// Send response
 	h.sendResponse(msg.ID, response)
+}
+
+// persistExchange saves the user message and assistant reply to the session
+// store so HTTP-only clients (Flutter GUI) can reload conversation history.
+// Errors are logged but never propagate — persistence failure must not break
+// the chat response path.
+func (h *ChatHandler) persistExchange(sessionID, userMsg string, parts []llm.ContentPart, reply string) {
+	if h.messageSaver == nil || sessionID == "" {
+		return
+	}
+
+	now := time.Now().UTC()
+	var msgs []session.Message
+
+	// User message
+	userEntry := session.Message{
+		SessionID: sessionID,
+		Role:      "user",
+		Content:   userMsg,
+		Timestamp: now,
+		EntryType: "message",
+		BranchID:  "main",
+	}
+	if len(parts) > 0 {
+		userEntry.Parts = parts
+	}
+	msgs = append(msgs, userEntry)
+
+	// Assistant reply (skip empty replies, e.g. async-dispatch acks)
+	if reply != "" {
+		msgs = append(msgs, session.Message{
+			SessionID: sessionID,
+			Role:      "assistant",
+			Content:   reply,
+			Timestamp: now,
+			EntryType: "message",
+			BranchID:  "main",
+		})
+	}
+
+	if err := h.messageSaver.SaveMessages(sessionID, msgs); err != nil {
+		h.logger.Warn("failed to persist chat exchange",
+			"session_id", sessionID,
+			"message_count", len(msgs),
+			"error", err,
+		)
+	}
 }
 
 // publishPlanRequest sends a plan request to the orchestrator via the bus.
@@ -1391,6 +1452,16 @@ func (h *ChatHandler) SetAgentLoopManager(m *Manager) {
 func (h *ChatHandler) SetSessionStore(s SessionStoreReader) {
 	if s != nil {
 		h.sessionStore = s
+	}
+}
+
+// SetMessageSaver wires the session message persistence callback.
+// When set, ChatHandler persists user and assistant messages after each
+// successful exchange so the Flutter GUI (and any HTTP-only client) can
+// reload conversation history.
+func (h *ChatHandler) SetMessageSaver(s SessionMessageSaver) {
+	if s != nil {
+		h.messageSaver = s
 	}
 }
 

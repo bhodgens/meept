@@ -220,6 +220,8 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 		return h.executePrompts(cmd.Args)
 	case "dispatch":
 		return h.handleDispatchCommand(cmd.Args)
+	case "debugsession":
+		return h.executeDebugSession()
 	default:
 		return &CommandResult{
 			Output:  fmt.Sprintf("unknown command: %s", cmd.Name),
@@ -2046,5 +2048,65 @@ func (h *CommandHandler) executeProjectRename(args []string) *CommandResult {
 	return &CommandResult{
 		Output:        fmt.Sprintf("renamed project to '%s'", newName),
 		RefreshProject: true,
+	}
+}
+
+// executeDebugSession displays detailed information about the current session.
+func (h *CommandHandler) executeDebugSession() *CommandResult {
+	chat := h.getChatModel()
+	if chat == nil {
+		return &CommandResult{
+			Output:  "no active chat session",
+			IsError: true,
+		}
+	}
+
+	sessionID := chat.SessionID()
+	if sessionID == "" {
+		return &CommandResult{
+			Output:  "no session ID available",
+			IsError: true,
+		}
+	}
+
+	session, err := h.rpc.GetSession(sessionID)
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to get session: %v", err),
+			IsError: true,
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("=== Session Debug Info ===\n\n")
+	sb.WriteString(fmt.Sprintf("ID:              %s\n", session.ID))
+	sb.WriteString(fmt.Sprintf("Name:            %s\n", session.Name))
+	sb.WriteString(fmt.Sprintf("Conversation ID: %s\n", session.ConversationID))
+	sb.WriteString(fmt.Sprintf("Created:         %s\n", session.CreatedAt))
+	sb.WriteString(fmt.Sprintf("Last Activity:   %s\n", session.LastActivity))
+	
+	if session.ProjectID != "" {
+		sb.WriteString(fmt.Sprintf("Project ID:      %s\n", session.ProjectID))
+	}
+	if session.ProjectPath != "" {
+		sb.WriteString(fmt.Sprintf("Project Path:    %s\n", session.ProjectPath))
+	}
+	if session.DetectionContext != nil {
+		sb.WriteString(fmt.Sprintf("CWD:             %s\n", session.DetectionContext.CWD))
+		if session.DetectionContext.DetectedProjectID != "" {
+			sb.WriteString(fmt.Sprintf("Detected Project: %s\n", session.DetectionContext.DetectedProjectID))
+		}
+	}
+	
+	sb.WriteString(fmt.Sprintf("Archived:        %v\n", session.Archived))
+	sb.WriteString(fmt.Sprintf("Attached Clients: %d\n", len(session.AttachedClients)))
+	sb.WriteString(fmt.Sprintf("Worker IDs:      %d\n", len(session.WorkerIDs)))
+	
+	if session.Designation != nil {
+		sb.WriteString(fmt.Sprintf("Designation:     %s\n", session.Designation.Status))
+	}
+
+	return &CommandResult{
+		Output: sb.String(),
 	}
 }
