@@ -1086,12 +1086,27 @@ type pendingClarification struct {
 	SessionID     string              `json:"session_id"`
 }
 
+// maxCombinedClarificationLen caps the combined input to prevent
+// unbounded growth when clarification retries accumulate context.
+const maxCombinedClarificationLen = 32_000
+
 // ResumeAfterClarification re-classifies a user input that is a response to a
 // previous clarification request. It combines the original input with the user's
 // response and re-runs intent analysis. If the combined input is still ambiguous,
 // it asks follow-up questions. Otherwise, it routes normally.
 func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput, userResponse, sessionID string) (*DispatchResult, error) {
 	combinedInput := originalInput + "\n\nUser clarification: " + userResponse
+
+	// Guard against unbounded growth from repeated clarification retries.
+	if len(combinedInput) > maxCombinedClarificationLen {
+		d.logger.Warn("Clarification combined input too large, clearing and classifying raw",
+			"session", sessionID,
+			"combined_len", len(combinedInput),
+		)
+		d.clearPendingClarification(sessionID)
+		// Classify just the user's latest response to break the cycle.
+		return d.ClassifyAndRoute(ctx, userResponse, sessionID, nil)
+	}
 
 	d.logger.Info("Resuming after clarification",
 		"session", sessionID,
@@ -1208,13 +1223,21 @@ func (d *Dispatcher) getPendingClarification(sessionID string) *pendingClarifica
 	}
 }
 
-// clearPendingClarification removes the clarification state for a session.
-// This is called when the clarification flow is resolved.
+// clearPendingClarification removes the clarification state for a session
+// by recording a neutral intent so isPendingClarification returns false.
 func (d *Dispatcher) clearPendingClarification(sessionID string) {
-	// The clarification state is implicitly cleared by recording a new
-	// non-clarify intent in the session tracker. No explicit clearing needed
-	// since the next RecordIntent call in ClassifyAndRoute will overwrite
-	// the last intent.
+	if d.sessionTracker == nil {
+		return
+	}
+	// Record a non-clarify intent to break the clarification detection
+	// loop. Without this, isPendingClarification keeps returning true
+	// and ResumeAfterClarification recurses infinitely.
+	d.sessionTracker.RecordIntent(sessionID, &Intent{
+		Type:       string(IntentChat),
+		Confidence: 1.0,
+		AgentType:  config.AgentIDChat,
+		Summary:    "(clarification cleared)",
+	}, config.AgentIDChat)
 }
 
 // shouldCreateTask determines if a task should be created.
