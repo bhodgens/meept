@@ -459,6 +459,20 @@ class _ChatInputState extends ConsumerState<ChatInput>
   }
 
   void _onSlashSelected(SlashCommand command) {
+    // Commands that take no arguments execute immediately on selection.
+    if (command.usage == null) {
+      setState(() {
+        _showSlashAutocomplete = false;
+        _slashQuery = '';
+      });
+      if (!_tryHandleSlashCommand(command.name)) {
+        // Not handled locally — send to backend as a chat message.
+        _sendNormal(command.name);
+      } else {
+        _resetInputState();
+      }
+      return;
+    }
     final cmdText = '${command.name} ';
     setState(() {
       _controller.text = cmdText;
