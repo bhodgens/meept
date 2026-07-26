@@ -18,6 +18,7 @@ class BackgroundImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Stack(
+      fit: StackFit.expand,
       children: [
         // Background image
         Positioned.fill(
@@ -55,6 +56,7 @@ class TintedBackgroundImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Stack(
+      fit: StackFit.expand,
       children: [
         // Background image
         Positioned.fill(
