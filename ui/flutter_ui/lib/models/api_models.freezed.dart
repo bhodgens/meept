@@ -544,6 +544,11 @@ mixin _$Session {
   @JsonKey(name: 'detection_context')
   DetectionContext? get detectionContext => throw _privateConstructorUsedError;
 
+  /// Backend field: leaf_message_id (*int64, omitted when null).
+  /// Null means the session has no messages — i.e. it's empty.
+  @JsonKey(name: 'leaf_message_id')
+  int? get leafMessageId => throw _privateConstructorUsedError;
+
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
   @JsonKey(ignore: true)
   $SessionCopyWith<Session> get copyWith => throw _privateConstructorUsedError;
@@ -570,7 +575,8 @@ abstract class $SessionCopyWith<$Res> {
       @JsonKey(name: 'archived') bool archived,
       @JsonKey(name: 'project_id') String? projectId,
       @JsonKey(name: 'project_path') String? projectPath,
-      @JsonKey(name: 'detection_context') DetectionContext? detectionContext});
+      @JsonKey(name: 'detection_context') DetectionContext? detectionContext,
+      @JsonKey(name: 'leaf_message_id') int? leafMessageId});
 
   $DetectionContextCopyWith<$Res>? get detectionContext;
 }
@@ -600,6 +606,7 @@ class _$SessionCopyWithImpl<$Res, $Val extends Session>
     Object? projectId = freezed,
     Object? projectPath = freezed,
     Object? detectionContext = freezed,
+    Object? leafMessageId = freezed,
   }) {
     return _then(_value.copyWith(
       id: null == id
@@ -650,6 +657,10 @@ class _$SessionCopyWithImpl<$Res, $Val extends Session>
           ? _value.detectionContext
           : detectionContext // ignore: cast_nullable_to_non_nullable
               as DetectionContext?,
+      leafMessageId: freezed == leafMessageId
+          ? _value.leafMessageId
+          : leafMessageId // ignore: cast_nullable_to_non_nullable
+              as int?,
     ) as $Val);
   }
 
@@ -689,7 +700,8 @@ abstract class _$$SessionImplCopyWith<$Res> implements $SessionCopyWith<$Res> {
       @JsonKey(name: 'archived') bool archived,
       @JsonKey(name: 'project_id') String? projectId,
       @JsonKey(name: 'project_path') String? projectPath,
-      @JsonKey(name: 'detection_context') DetectionContext? detectionContext});
+      @JsonKey(name: 'detection_context') DetectionContext? detectionContext,
+      @JsonKey(name: 'leaf_message_id') int? leafMessageId});
 
   @override
   $DetectionContextCopyWith<$Res>? get detectionContext;
@@ -718,6 +730,7 @@ class __$$SessionImplCopyWithImpl<$Res>
     Object? projectId = freezed,
     Object? projectPath = freezed,
     Object? detectionContext = freezed,
+    Object? leafMessageId = freezed,
   }) {
     return _then(_$SessionImpl(
       id: null == id
@@ -768,6 +781,10 @@ class __$$SessionImplCopyWithImpl<$Res>
           ? _value.detectionContext
           : detectionContext // ignore: cast_nullable_to_non_nullable
               as DetectionContext?,
+      leafMessageId: freezed == leafMessageId
+          ? _value.leafMessageId
+          : leafMessageId // ignore: cast_nullable_to_non_nullable
+              as int?,
     ));
   }
 }
@@ -791,7 +808,8 @@ class _$SessionImpl extends _Session {
       @JsonKey(name: 'archived') this.archived = false,
       @JsonKey(name: 'project_id') this.projectId,
       @JsonKey(name: 'project_path') this.projectPath,
-      @JsonKey(name: 'detection_context') this.detectionContext})
+      @JsonKey(name: 'detection_context') this.detectionContext,
+      @JsonKey(name: 'leaf_message_id') this.leafMessageId})
       : _attachedClients = attachedClients,
         super._();
 
@@ -846,9 +864,15 @@ class _$SessionImpl extends _Session {
   @JsonKey(name: 'detection_context')
   final DetectionContext? detectionContext;
 
+  /// Backend field: leaf_message_id (*int64, omitted when null).
+  /// Null means the session has no messages — i.e. it's empty.
+  @override
+  @JsonKey(name: 'leaf_message_id')
+  final int? leafMessageId;
+
   @override
   String toString() {
-    return 'Session(id: $id, title: $title, description: $description, conversationId: $conversationId, createdAt: $createdAt, lastActivity: $lastActivity, attachedClients: $attachedClients, designation: $designation, archived: $archived, projectId: $projectId, projectPath: $projectPath, detectionContext: $detectionContext)';
+    return 'Session(id: $id, title: $title, description: $description, conversationId: $conversationId, createdAt: $createdAt, lastActivity: $lastActivity, attachedClients: $attachedClients, designation: $designation, archived: $archived, projectId: $projectId, projectPath: $projectPath, detectionContext: $detectionContext, leafMessageId: $leafMessageId)';
   }
 
   @override
@@ -877,7 +901,9 @@ class _$SessionImpl extends _Session {
             (identical(other.projectPath, projectPath) ||
                 other.projectPath == projectPath) &&
             (identical(other.detectionContext, detectionContext) ||
-                other.detectionContext == detectionContext));
+                other.detectionContext == detectionContext) &&
+            (identical(other.leafMessageId, leafMessageId) ||
+                other.leafMessageId == leafMessageId));
   }
 
   @JsonKey(ignore: true)
@@ -895,7 +921,8 @@ class _$SessionImpl extends _Session {
       archived,
       projectId,
       projectPath,
-      detectionContext);
+      detectionContext,
+      leafMessageId);
 
   @JsonKey(ignore: true)
   @override
@@ -929,7 +956,9 @@ abstract class _Session extends Session {
       @JsonKey(name: 'project_id') final String? projectId,
       @JsonKey(name: 'project_path') final String? projectPath,
       @JsonKey(name: 'detection_context')
-      final DetectionContext? detectionContext}) = _$SessionImpl;
+      final DetectionContext? detectionContext,
+      @JsonKey(name: 'leaf_message_id')
+      final int? leafMessageId}) = _$SessionImpl;
   const _Session._() : super._();
 
   factory _Session.fromJson(Map<String, dynamic> json) = _$SessionImpl.fromJson;
@@ -973,6 +1002,12 @@ abstract class _Session extends Session {
   @override
   @JsonKey(name: 'detection_context')
   DetectionContext? get detectionContext;
+  @override
+
+  /// Backend field: leaf_message_id (*int64, omitted when null).
+  /// Null means the session has no messages — i.e. it's empty.
+  @JsonKey(name: 'leaf_message_id')
+  int? get leafMessageId;
   @override
   @JsonKey(ignore: true)
   _$$SessionImplCopyWith<_$SessionImpl> get copyWith =>

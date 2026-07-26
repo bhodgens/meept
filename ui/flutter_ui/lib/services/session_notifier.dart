@@ -93,6 +93,23 @@ class SessionNotifier extends StateNotifier<SessionState> {
     }
   }
 
+  /// Find an existing empty session to reuse instead of creating a new one.
+  ///
+  /// An "empty" session has no messages, which the backend signals via a
+  /// null `leaf_message_id`. Returns the most recent non-archived empty
+  /// session (state.sessions is already sorted non-archived-first, then by
+  /// lastActivity descending), or null when every session has content.
+  ///
+  /// Callers should prefer this over [createSession] on startup so relaunching
+  /// the UI doesn't accumulate a pile of unused "new session" entries.
+  Session? findReusableEmptySession() {
+    for (final s in state.sessions) {
+      if (s.archived) continue;
+      if (s.leafMessageId == null) return s;
+    }
+    return null;
+  }
+
   /// Create a new session with the given title.
   ///
   /// Inserts the newly created session into local state immediately so

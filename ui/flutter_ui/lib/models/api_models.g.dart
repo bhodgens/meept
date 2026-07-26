@@ -72,6 +72,7 @@ _$SessionImpl _$$SessionImplFromJson(Map<String, dynamic> json) =>
           ? null
           : DetectionContext.fromJson(
               json['detection_context'] as Map<String, dynamic>),
+      leafMessageId: (json['leaf_message_id'] as num?)?.toInt(),
     );
 
 Map<String, dynamic> _$$SessionImplToJson(_$SessionImpl instance) =>
@@ -88,6 +89,7 @@ Map<String, dynamic> _$$SessionImplToJson(_$SessionImpl instance) =>
       'project_id': instance.projectId,
       'project_path': instance.projectPath,
       'detection_context': instance.detectionContext,
+      'leaf_message_id': instance.leafMessageId,
     };
 
 _$TaskImpl _$$TaskImplFromJson(Map<String, dynamic> json) => _$TaskImpl(

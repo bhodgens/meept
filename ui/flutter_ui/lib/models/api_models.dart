@@ -482,6 +482,9 @@ class Session with _$Session {
     @JsonKey(name: 'project_id') String? projectId,
     @JsonKey(name: 'project_path') String? projectPath,
     @JsonKey(name: 'detection_context') DetectionContext? detectionContext,
+    /// Backend field: leaf_message_id (*int64, omitted when null).
+    /// Null means the session has no messages — i.e. it's empty.
+    @JsonKey(name: 'leaf_message_id') int? leafMessageId,
   }) = _Session;
 
   factory Session.fromJson(Map<String, dynamic> json) =>

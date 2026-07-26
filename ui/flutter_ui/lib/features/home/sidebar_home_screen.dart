@@ -90,6 +90,10 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
   late final LeaderKeyController _leaderController;
   bool _sidebarCollapsed = false;
 
+  /// Guards the one-time initial session selection so reconnects after a
+  /// transient network drop don't re-run it (mirrors HomeScreen).
+  bool _initialLoadDone = false;
+
 
   @override
   void initState() {
@@ -125,11 +129,12 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
       ref.read(chatProvider);
       unawaited(_onConnectionChanged(ref.read(connectionStateProvider)));
 
-      // Auto-create session if none exists
+      // Sync local selection from any already-active session. The initial
+      // session selection (reuse-or-create) happens in _onConnectionChanged
+      // after the session list has loaded — doing it here would race the
+      // load and always create a new session.
       final active = ref.read(activeSessionProvider);
-      if (active == null) {
-        _createInitialSession();
-      } else {
+      if (active != null) {
         setState(() => _selectedSession = active);
       }
     });
@@ -141,8 +146,13 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
     super.dispose();
   }
 
+  /// Select an initial session, reusing an existing empty one when possible
+  /// so relaunching the UI doesn't accumulate unused "new session" entries.
+  /// Falls back to creating a new session when none is reusable.
   Future<void> _createInitialSession() async {
-    final session = await ref.read(sessionProvider.notifier).createSession('new session');
+    final notifier = ref.read(sessionProvider.notifier);
+    final session = notifier.findReusableEmptySession() ??
+        await notifier.createSession('new session');
     if (session != null && mounted) {
       setState(() => _selectedSession = session);
       ref.read(activeSessionProvider.notifier).state = session;
@@ -177,6 +187,19 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
     // Always refresh data on every (re)connect so the UI reflects
     // current server state without user intervention.
     await _refreshAllData();
+
+    // One-time initial session selection, run after the session list has
+    // loaded so findReusableEmptySession() sees real data. Guarded so
+    // reconnects after a transient network drop don't re-run it.
+    if (!_initialLoadDone) {
+      _initialLoadDone = true;
+      final active = ref.read(activeSessionProvider);
+      if (active == null) {
+        await _createInitialSession();
+      } else if (mounted) {
+        setState(() => _selectedSession = active);
+      }
+    }
   }
 
   void _showCommandPalette() {
@@ -907,7 +930,7 @@ class _ProjectGroupItem extends StatelessWidget {
 }
 
 /// Single session row within a project group
-class _SidebarSessionRow extends StatelessWidget {
+class _SidebarSessionRow extends ConsumerWidget {
   final Session session;
   final bool isSelected;
   final VoidCallback onSelect;
@@ -918,8 +941,59 @@ class _SidebarSessionRow extends StatelessWidget {
     required this.onSelect,
   });
 
+  /// Confirm and archive this session. Mirrors the sessions-list flow:
+  /// a dialog guards the destructive action, and a status message reports
+  /// the outcome only after the RPC resolves (parity with TUI).
+  Future<void> _showArchiveConfirmation(BuildContext context, WidgetRef ref) async {
+    await showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: CyberpunkColors.darkGray,
+        title: Text(
+          'archive session?',
+          style: CyberpunkTypography.bodyMedium.copyWith(
+            color: CyberpunkColors.orangePrimary,
+          ),
+        ),
+        content: Text(
+          '"${(session.title.isEmpty ? 'unnamed' : session.title).toLowerCase()}"',
+          style: CyberpunkTypography.bodyMedium,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(
+              'cancel',
+              style: CyberpunkTypography.bodyMedium.copyWith(
+                color: CyberpunkColors.midGray,
+              ),
+            ),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final notifier = ref.read(sessionProvider.notifier);
+              await notifier.archiveSession(session.id);
+              final error = ref.read(sessionProvider).error;
+              if (error == null) {
+                showStatusMessage(
+                    ref, 'archived: ${(session.title.isEmpty ? 'unnamed' : session.title).toLowerCase()}');
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
+              } else {
+                showStatusMessage(ref, 'archive failed: $error');
+              }
+            },
+            child: const Text(
+              'archive',
+              style: CyberpunkTypography.bodyMedium,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return GestureDetector(
       onTap: onSelect,
       behavior: HitTestBehavior.opaque,
@@ -951,6 +1025,19 @@ class _SidebarSessionRow extends StatelessWidget {
                   fontSize: 11,
                 ),
                 overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            // Archive icon — confirm + archive this session
+            GestureDetector(
+              onTap: () => _showArchiveConfirmation(context, ref),
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  Icons.archive_outlined,
+                  size: 13,
+                  color: CyberpunkColors.orangePrimary.withValues(alpha: 0.7),
+                ),
               ),
             ),
             // Info icon — opens 4-tab session overlay

@@ -292,16 +292,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // current server state without user intervention.
     await _refreshAllData();
 
-    // Auto-create a new session if none is active. This guarantees a
-    // chat target on first launch and mirrors the TUI's "always have
-    // a session" behaviour. Skip when a previous run already selected
-    // one (e.g. reconnect after a transient network drop).
+    // Auto-select a session if none is active. This guarantees a chat
+    // target on first launch and mirrors the TUI's "always have a
+    // session" behaviour. Skip when a previous run already selected one
+    // (e.g. reconnect after a transient network drop).
+    //
+    // Prefer reusing an existing empty session over creating a new one so
+    // relaunching the UI doesn't accumulate unused "new session" entries.
     if (!_initialLoadDone) {
       _initialLoadDone = true;
       final active = ref.read(activeSessionProvider);
       if (active == null) {
-        final session =
-            await ref.read(sessionProvider.notifier).createSession('new session');
+        final notifier = ref.read(sessionProvider.notifier);
+        final session = notifier.findReusableEmptySession() ??
+            await notifier.createSession('new session');
         if (session != null) {
           ref.read(activeSessionProvider.notifier).state = session;
         }
