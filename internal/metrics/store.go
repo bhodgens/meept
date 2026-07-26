@@ -429,6 +429,12 @@ func (s *Store) aggregateHourly() {
 		COUNT(*)
 	FROM metrics_live
 	WHERE timestamp < datetime('now', '-1 hour')
+		-- strftime returns NULL for malformed timestamps (e.g., Go's
+		-- default time.Time format with timezone/monotonic suffix).
+		-- Exclude them so the NOT NULL constraint on metrics_hourly.hour
+		-- is never violated. This is purely defensive; well-formed rows
+		-- ("YYYY-MM-DD HH:MM:SS") always produce a non-NULL hour.
+		AND strftime('%Y-%m-%d %H:00:00', timestamp) IS NOT NULL
 	GROUP BY hour, metric_name
 	`
 
@@ -440,6 +446,14 @@ func (s *Store) aggregateHourly() {
 
 	// Clean up old raw data (keep last 24 hours of time-series)
 	_, _ = s.db.Exec("DELETE FROM metrics_live WHERE timestamp < datetime('now', '-24 hours')")
+
+	// Purge malformed timestamps that strftime() cannot parse. These come
+	// from legacy inserts that stored Go's default time.Time.String() output
+	// (with timezone and monotonic suffix); they aggregate to NULL hour,
+	// are unqueryable by time range, and serve no reporting purpose.
+	if _, err := s.db.Exec("DELETE FROM metrics_live WHERE strftime('%Y-%m-%d %H:00:00', timestamp) IS NULL"); err != nil {
+		s.logger.Warn("failed to purge malformed metrics_live timestamps", "error", err)
+	}
 
 	// Apply retention policy to audit tables (default 30 days)
 	if s.retentionDays > 0 {

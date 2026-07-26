@@ -195,7 +195,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			"jobs":            len(s.jobs),
 			"timezone":        s.location.String(),
 		})
-		s.bus.Publish("scheduler.started", msg)
+		s.bus.PublishExternalOnly("scheduler.started", msg)
 	}
 
 	s.logger.Info("scheduler: started", "jobs", len(s.jobs))
@@ -241,7 +241,7 @@ func (s *Scheduler) Stop(ctx context.Context) error {
 		msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler", map[string]any{
 			SchedulerKeyEvent: "stopped",
 		})
-		s.bus.Publish("scheduler.stopped", msg)
+		s.bus.PublishExternalOnly("scheduler.stopped", msg)
 	}
 
 	s.logger.Info("scheduler: stopped")
@@ -562,7 +562,7 @@ func (s *Scheduler) executeJob(ctx context.Context, job Job) {
 			"name":            job.Name(),
 			"type":            job.Type(),
 		})
-		s.bus.Publish("scheduler.job.started", msg)
+		s.bus.PublishExternalOnly("scheduler.job.started", msg)
 	}
 
 	// Execute job
@@ -592,7 +592,7 @@ func (s *Scheduler) executeJob(ctx context.Context, job Job) {
 		}
 
 		msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler."+jobID, result)
-		s.bus.Publish("scheduler.job.completed", msg)
+		s.bus.PublishExternalOnly("scheduler.job.completed", msg)
 	}
 
 	// Notify HTTP clients on successful job completion

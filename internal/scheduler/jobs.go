@@ -360,7 +360,7 @@ func (j *ShellJob) Execute(ctx context.Context) error {
 	// Publish job completion event
 	if j.bus != nil {
 		msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler."+j.id, result)
-		j.bus.Publish("scheduler.job.completed", msg)
+		j.bus.PublishExternalOnly("scheduler.job.completed", msg)
 	}
 
 	return err
@@ -441,7 +441,7 @@ func (j *ReminderJob) Execute(ctx context.Context) error {
 	}
 
 	// Also publish a general reminder event
-	j.bus.Publish("scheduler.reminder", msg)
+	j.bus.PublishExternalOnly("scheduler.reminder", msg)
 
 	if totalDelivered == 0 && lastErr != nil {
 		return lastErr
@@ -619,7 +619,7 @@ func (j *SecurityJob) Execute(ctx context.Context) error {
 			"scan_types":      j.scanTypes,
 		}
 		msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler."+j.id, payload)
-		j.deps.Bus.Publish("scheduler.security.completed", msg)
+		j.deps.Bus.PublishExternalOnly("scheduler.security.completed", msg)
 	}
 
 	return nil
