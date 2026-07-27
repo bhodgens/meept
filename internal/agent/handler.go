@@ -70,6 +70,10 @@ type ChatHandler struct {
 	// exchange. Wired by the daemon via SetMessageSaver.
 	messageSaver SessionMessageSaver
 
+	// budgetResumeWatcher parks turns interrupted by budget exhaustion and
+	// retries them when the budget window clears.
+	budgetResumeWatcher *BudgetResumeWatcher
+
 	// Synchronous dispatch mode: when true, async-dispatched tasks wait
 	// for completion instead of returning immediately (Issue 0022).
 	syncMode bool
@@ -99,6 +103,7 @@ type ChatRequest struct {
 	Message        string              `json:"message"`
 	ConversationID string              `json:"conversation_id"`
 	SessionID      string              `json:"session_id,omitempty"` // original session ID for persistence
+	AgentID        string              `json:"agent_id,omitempty"`   // agent override from the client
 	SourceClient   string              `json:"source_client,omitempty"`
 	Parts          []llm.ContentPart   `json:"parts,omitempty"`
 }
@@ -128,6 +133,11 @@ func NewChatHandler(loop *AgentLoop, dispatcher *Dispatcher, msgBus *bus.Message
 // Start begins listening for chat requests.
 func (h *ChatHandler) Start(ctx context.Context) error {
 	ctx, h.cancel = context.WithCancel(ctx)
+
+	// Start the budget resume watcher if configured.
+	if h.budgetResumeWatcher != nil {
+		h.budgetResumeWatcher.Start(ctx)
+	}
 
 	// Subscribe to chat requests
 	chatSub := h.bus.Subscribe(SourceChatHandler, "chat.request")
@@ -461,6 +471,11 @@ func (h *ChatHandler) handleWorkerListRequest(msg *models.BusMessage) {
 
 // Stop gracefully stops the handler.
 func (h *ChatHandler) Stop(ctx context.Context) error {
+	// Stop the budget resume watcher first.
+	if h.budgetResumeWatcher != nil {
+		h.budgetResumeWatcher.Stop()
+	}
+
 	if h.cancel != nil {
 		h.cancel()
 	}
@@ -745,12 +760,36 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		ConversationID: conversationID,
 	}
 
+	// Resolve the persistence/session ID up front: prefer the original session
+	// ID from the client, fall back to the resolved conversation ID. Used both
+	// for message persistence and for parking budget-interrupted turns.
+	persistID := req.SessionID
+	if persistID == "" {
+		persistID = conversationID
+	}
+
 	if err != nil {
 		// Check for BudgetExceededError to provide user-friendly message
 		var budgetErr *llm.BudgetExceededError
 		if errors.As(err, &budgetErr) {
 			response.Error = budgetErr.UserMessage()
 			response.Reply = budgetErr.UserMessage()
+			// If this is a time-windowed limit that will clear on its own,
+			// park the turn for automatic retry and tell the user.
+			if h.budgetResumeWatcher != nil && isTimeWindowedBudget(budgetErr.Reason) {
+				if h.budgetResumeWatcher.Park(ParkedTurn{
+					SessionID:      persistID,
+					ConversationID: conversationID,
+					Message:        req.Message,
+					Parts:          req.Parts,
+					AgentID:        req.AgentID,
+					SourceClient:   req.SourceClient,
+				}) {
+					response.Reply = budgetErr.UserMessage() +
+						"\n\nYour message has been queued and will be sent automatically when the budget window resets."
+					response.Error = ""
+				}
+			}
 		} else {
 			response.Error = err.Error()
 			response.Reply = reply // AgentLoop returns a user-friendly message even on error
@@ -761,12 +800,6 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 
 	// Persist the user message and assistant reply so HTTP-only clients
 	// (Flutter GUI) can reload conversation history after switching sessions.
-	// Use the original session ID (from the client) for persistence; fall back
-	// to conversationID for backward compatibility with TUI clients.
-	persistID := req.SessionID
-	if persistID == "" {
-		persistID = conversationID
-	}
 	h.persistExchange(persistID, req.Message, req.Parts, response.Reply)
 
 	// Send response
@@ -1313,12 +1346,17 @@ func (h *ChatHandler) SetTaskStore(store *task.Store) {
 	}
 }
 
-// SetBudget sets the token budget tracker for async dispatch pre-checks.
-// This prevents zombie tasks from being created when the budget is exceeded.
+// SetBudget sets the token budget tracker for async dispatch pre-checks and
+// enables auto-resume of turns interrupted by budget exhaustion. This prevents
+// zombie tasks from being created when the budget is exceeded, and parks
+// time-windowed budget failures (hourly/daily tokens or cost) for automatic
+// retry once the window clears.
 func (h *ChatHandler) SetBudget(budget *llm.Budget) {
-	if budget != nil {
-		h.budget = budget
+	if budget == nil {
+		return
 	}
+	h.budget = budget
+	h.budgetResumeWatcher = NewBudgetResumeWatcher(budget, h.logger, h.resumeParkedTurn)
 }
 
 // SetSyncMode enables or disables synchronous dispatch mode.
@@ -1470,6 +1508,48 @@ func (h *ChatHandler) SetMessageSaver(s SessionMessageSaver) {
 	if s != nil {
 		h.messageSaver = s
 	}
+}
+
+// resumeParkedTurn re-runs a turn that was parked due to budget exhaustion.
+// Called by the BudgetResumeWatcher once the budget window clears.
+func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
+	h.logger.Info("resuming parked turn after budget clearance",
+		"session_id", turn.SessionID,
+		"conversation_id", turn.ConversationID,
+		"parked_at", turn.ParkedAt,
+	)
+
+	// Run the turn through the same path as a normal chat request.
+	loop := h.sessionLoop(turn.ConversationID)
+	reply, err := loop.RunOnceWithParts(ctx, turn.Message, turn.Parts, turn.ConversationID)
+
+	if err != nil {
+		h.logger.Error("resumed turn failed",
+			"session_id", turn.SessionID,
+			"error", err,
+		)
+		// Push error back to session
+		h.sendResponse("budget-resume-"+turn.SessionID, ChatResponse{
+			ConversationID: turn.SessionID,
+			Error:          "Auto-resume failed: " + err.Error(),
+		})
+		return
+	}
+
+	// Persist the exchange
+	h.persistExchange(turn.SessionID, turn.Message, turn.Parts, reply)
+
+	// Push the result back to the session via the bus (WebSocket layer
+	// subscribes to chat.response and forwards to clients).
+	h.sendResponse("budget-resume-"+turn.SessionID, ChatResponse{
+		ConversationID: turn.SessionID,
+		Reply:          reply,
+	})
+
+	h.logger.Info("resumed turn completed successfully",
+		"session_id", turn.SessionID,
+		"reply_length", len(reply),
+	)
 }
 
 // sessionLoop returns a per-session AgentLoop when a manager is wired

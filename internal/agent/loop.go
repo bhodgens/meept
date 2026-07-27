@@ -3499,6 +3499,23 @@ func (l *AgentLoop) attemptStateRecovery(err error) error {
 	if err == nil || l.stateMachine == nil {
 		return err
 	}
+
+	// Budget exhaustion must propagate to the caller so the handler can
+	// surface a user-visible message. Absorbing it here would leave the
+	// user staring at a blank reply with no explanation.
+	var budgetErr *llm.BudgetExceededError
+	if errors.As(err, &budgetErr) {
+		// Still reset the state machine so the next turn starts clean.
+		if l.stateMachine.CurrentState() == StateError {
+			if tErr := l.stateMachine.Transition(StateIdle, "budget_recovery_reset", map[string]any{
+				"prior_error": err.Error(),
+			}); tErr != nil {
+				l.logger.Debug("budget recovery state reset failed (non-fatal)", "error", tErr)
+			}
+		}
+		return err
+	}
+
 	state := l.stateMachine.CurrentState()
 	switch state {
 	case StateError:
