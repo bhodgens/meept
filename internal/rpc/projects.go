@@ -200,14 +200,16 @@ func (h *ProjectHandler) handleSet(ctx context.Context, params json.RawMessage) 
 
 	var p *project.Project
 
-	// Deactivate any previously active project before resolving/activating
-	// the new one. This avoids CreateOrResolve creating a new project with
-	// Status="active" only to have DeactivateActive immediately deactivate it.
-	if err := pm.DeactivateActive(ctx); err != nil {
-		h.logger.Warn("failed to deactivate previous active project", "error", err)
-	}
+	// NOTE: We intentionally do NOT call pm.DeactivateActive(ctx) here.
+	// A project being bound to one session does not require it to be the
+	// globally "active" project, and deactivating all other projects would
+	// reset every other session's displayed project (B1). The session
+	// binding via h.sessionStore.SetProject() is sufficient. We still mark
+	// this project as active so new sessions have a sensible default.
 
 	if req.Path != "" {
+		// Expand ~ in the path before resolving (B4).
+		req.Path = expandTilde(req.Path)
 		// Use CreateOrResolve which handles both shorthand names and
 		// absolute paths, including sidecar-based adoption.
 		p, err = pm.CreateOrResolve(ctx, req.Path)
@@ -224,9 +226,10 @@ func (h *ProjectHandler) handleSet(ctx context.Context, params json.RawMessage) 
 		}
 	}
 
-	// Set this project as active (CreateOrResolve may have already set it,
-	// but for existing projects returned from Get, we need to re-activate
-	// after DeactivateActive above).
+	// Mark this project as active so new sessions have a default project.
+	// CreateOrResolve may have already set it, but for existing projects
+	// returned from Get we set it here. Other projects are left untouched
+	// so they remain visible/detected for their own sessions (B1).
 	p.Status = "active"
 	if err := pm.SetStatus(ctx, p.ID, "active"); err != nil {
 		h.logger.Warn("failed to set project active", "error", err)
@@ -343,6 +346,9 @@ func (h *ProjectHandler) handleDetect(ctx context.Context, params json.RawMessag
 	if req.Path == "" {
 		return nil, fmt.Errorf("path is required")
 	}
+
+	// Expand ~ in the path before detection (B4).
+	req.Path = expandTilde(req.Path)
 
 	p, err := pm.DetectFromPath(ctx, req.Path)
 	if err != nil {

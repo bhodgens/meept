@@ -1809,6 +1809,13 @@ func (h *CommandHandler) executeProjectSet(args []string) *CommandResult {
 	}
 
 	query := args[0]
+	// Expand a leading ~ in the query so paths like ~/code/foo resolve
+	// correctly through DetectProject (B4).
+	if strings.HasPrefix(query, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			query = strings.Replace(query, "~", home, 1)
+		}
+	}
 
 	// Try path-based detection first.
 	if detected, err := h.rpc.DetectProject(query); err == nil && detected != nil && detected.ID != "" {

@@ -5,6 +5,7 @@ import 'dart:io' show File; // ignore: web_unsafe_import
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/path_utils.dart' show expandTilde;
 import '../../core/slash_commands.dart';
 import '../../models/api_models.dart' show Attachment;
 import '../../services/sdk_client.dart' show SdkApiClient;
@@ -557,6 +558,27 @@ class _ChatInputState extends ConsumerState<ChatInput>
     return expanded;
   }
 
+  /// Expand `~` in slash-command path arguments before sending.
+  ///
+  /// Handles commands like `/session ~/git/foo` or `/project ~/repos/x` where
+  /// the argument is a filesystem path. Non-slash inputs and commands without
+  /// path-like args are returned unchanged. This covers server-side commands
+  /// (e.g. `/session`) that are sent as chat messages; locally-handled
+  /// commands like `/project` expand the tilde inside their own handlers.
+  String _expandSlashCommandTildes(String text) {
+    if (!text.startsWith('/')) return text;
+    final spaceIdx = text.indexOf(' ');
+    if (spaceIdx == -1) return text;
+    final command = text.substring(0, spaceIdx);
+    final arg = text.substring(spaceIdx + 1).trim();
+    if (arg.isEmpty || !arg.startsWith('~')) return text;
+    // Only expand for commands known to take filesystem paths.
+    const pathCommands = <String>{'/session', '/project', '/add', '/cd'};
+    if (!pathCommands.contains(command)) return text;
+    final expanded = expandTilde(arg);
+    return '$command $expanded';
+  }
+
   /// Build multimodal content parts for a send.
   ///
   /// Each uploaded image attachment becomes an `image_url` part; the
@@ -766,7 +788,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
   /// path, and shows a transient status message.  Errors are surfaced via a
   /// SnackBar.
   Future<void> _handleProjectSetCommand(String pathArg) async {
-    final path = pathArg.trim();
+    final path = expandTilde(pathArg.trim());
     if (path.isEmpty) {
       // Shouldn't happen (caller filters), but guard anyway.
       return;
@@ -792,6 +814,11 @@ class _ChatInputState extends ConsumerState<ChatInput>
 
       // Refresh currentProjectProvider so the status bar picks up the change.
       await ref.read(currentProjectProvider.notifier).refresh();
+      // Reload the session list so the sidebar project tree re-groups the
+      // switched session under its new project. The daemon's setProject RPC
+      // mutates the session's project binding server-side; without this
+      // refresh the sidebar keeps showing the session in its old group.
+      await ref.read(sessionProvider.notifier).loadSessions();
       // Reload project paths so typeahead includes the new path.
       await _loadProjectPaths();
 
@@ -877,18 +904,22 @@ class _ChatInputState extends ConsumerState<ChatInput>
 
     switch (command) {
       case '/new':
+        _history.add(widget.sessionId, text);
         _createNewSession();
         return true;
       case '/clear':
+        _history.add(widget.sessionId, text);
         ref.read(chatProvider.notifier).clearMessages();
         return true;
       case '/stop':
+        _history.add(widget.sessionId, text);
         ref.read(chatProvider.notifier).sendSteer(
               sessionId: widget.sessionId,
               text: '/stop',
             );
         return true;
       case '/debugsession':
+        _history.add(widget.sessionId, text);
         unawaited(_showDebugSession());
         return true;
       case '/project':
@@ -930,11 +961,13 @@ class _ChatInputState extends ConsumerState<ChatInput>
         if (arg.startsWith('rename ')) {
           final newName = arg.substring('rename '.length).trim();
           if (newName.isNotEmpty) {
+            _history.add(widget.sessionId, text);
             unawaited(_handleProjectRenameCommand(newName));
             return true;
           }
         }
         // Fire-and-forget; _handleProjectSetCommand manages its own error UI.
+        _history.add(widget.sessionId, text);
         unawaited(_handleProjectSetCommand(arg));
         return true;
       default:
@@ -982,15 +1015,21 @@ class _ChatInputState extends ConsumerState<ChatInput>
       return;
     }
 
+    // Expand ~ in slash-command path arguments (e.g. /session ~/git/foo)
+    // before sending to the daemon. Locally-handled commands (/project) are
+    // expanded inside their own handlers; this covers server-side commands
+    // like /session that are sent as chat messages.
+    final finalPayload = _expandSlashCommandTildes(payload);
+
     // Record to history (only actual chat messages, not local slash commands).
-    _history.add(widget.sessionId, payload);
+    _history.add(widget.sessionId, finalPayload);
 
     final chatNotifier = ref.read(chatProvider.notifier);
     final activeAgent = ref.read(activeAgentProvider);
 
     chatNotifier.sendMessage(
       sessionId: widget.sessionId,
-      text: payload,
+      text: finalPayload,
       agentId: activeAgent?.id ?? 'coder',
     );
 
@@ -1112,6 +1151,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
             if (spaceIdx != -1) {
               final path = text.substring(spaceIdx).trim();
               if (path.isNotEmpty) {
+                _history.add(widget.sessionId, text);
                 unawaited(_handleProjectSetCommand(path));
                 return KeyEventResult.handled;
               }

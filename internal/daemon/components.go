@@ -4530,6 +4530,26 @@ func registerPlatformTools(
 	}
 	registry.Register(builtin.NewPlatformStatusTool(statusFunc))
 
+	// Project info tool - resolves current project metadata at call time.
+	projectInfoFunc := func() map[string]any {
+		wd, err := os.Getwd()
+		if err != nil || wd == "" {
+			return map[string]any{"status": "no project bound"}
+		}
+		info := map[string]any{
+			"name": filepath.Base(wd),
+			"path": wd,
+		}
+		if branch, err := exec.Command("git", "-C", wd, "branch", "--show-current").Output(); err == nil {
+			info["branch"] = strings.TrimSpace(string(branch))
+		}
+		if statusOut, err := exec.Command("git", "-C", wd, "status", "--porcelain").Output(); err == nil {
+			info["dirty"] = strings.TrimSpace(string(statusOut)) != ""
+		}
+		return info
+	}
+	registry.Register(builtin.NewProjectInfoTool(projectInfoFunc))
+
 	// Platform agents tool
 	registry.Register(builtin.NewPlatformAgentsTool(agentRegistry))
 

@@ -615,40 +615,44 @@ func (a *App) fetchTemplateNames() tea.Msg {
 }
 
 // fetchCurrentProject fetches the current project info from the daemon and
-// updates the project indicator fields on the App.
+// updates the project indicator fields on the App. It reads from the CURRENT
+// SESSION's project binding (a.currentSession.ProjectID) rather than scanning
+// for the globally-active project, so switching projects in one session does
+// not affect what is displayed for another (B1).
 func (a *App) fetchCurrentProject() tea.Msg {
 	if a.rpc == nil || !a.rpc.IsConnected() {
 		return ProjectInfoUpdatedMsg{}
 	}
 
-	projects, err := a.rpc.ListProjects()
-	if err != nil {
+	// No current session or no project binding -> empty project indicator.
+	if a.currentSession == nil || a.currentSession.ProjectID == "" {
 		return ProjectInfoUpdatedMsg{}
 	}
 
-	// Find the first active project
-	for _, p := range projects.Projects {
-		if p.Status == "active" {
-			dirty := false
-			branch := ""
-			if p.Mode == "git" {
-				status, err := a.rpc.ProjectStatus(p.ID)
-				if err == nil {
-					dirty = status.Dirty
-					branch = status.Branch
-				}
-			}
-			return ProjectInfoUpdatedMsg{
-				ProjectID:   p.ID,
-				ProjectName: p.Name,
-				ProjectMode: string(p.Mode),
-				Dirty:       dirty,
-				Branch:      branch,
-			}
-		}
+	projectID := a.currentSession.ProjectID
+	p, err := a.rpc.GetProject(projectID)
+	if err != nil {
+		// The bound project may have been unregistered, or the daemon may
+		// be momentarily unavailable. Show empty rather than crashing.
+		return ProjectInfoUpdatedMsg{}
 	}
 
-	return ProjectInfoUpdatedMsg{}
+	dirty := false
+	branch := ""
+	if p.Mode == "git" {
+		status, err := a.rpc.ProjectStatus(p.ID)
+		if err == nil {
+			dirty = status.Dirty
+			branch = status.Branch
+		}
+	}
+	return ProjectInfoUpdatedMsg{
+		ProjectID:   p.ID,
+		ProjectName: p.Name,
+		ProjectMode: string(p.Mode),
+		Dirty:       dirty,
+		Branch:      branch,
+	}
 }
 
 // ProjectInfoUpdatedMsg carries updated project info to the App model.
@@ -953,6 +957,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if strings.HasPrefix(strings.TrimSpace(input), "/") {
 					cmd := ParseSlash(input)
 					if cmd != nil {
+						// Record the slash command in session input history
+						// so Up-arrow can recall it (B3-TUI).
+						a.chat.RecordToHistory(input)
 						a.chat.SetInputValue("")
 						a.slashAutocomplete.Hide()
 						return a, a.commandHandler.Execute(cmd)
@@ -967,6 +974,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Parse the slash command
 				cmd := ParseSlash(input)
 				if cmd != nil {
+					// Record the slash command in session input history
+					// so Up-arrow can recall it (B3-TUI).
+					a.chat.RecordToHistory(input)
 					// Clear the input
 					a.chat.SetInputValue("")
 					// Execute the command
@@ -1689,6 +1699,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if a.currentSession != nil {
 					sessionID := a.currentSession.ID
 					projectID := msg.Result.SetProjectID
+					// Optimistically update the local session binding so the
+					// follow-up fetchCurrentProject reads the new project (B1).
+					a.currentSession.ProjectID = projectID
 					return a, tea.Batch(
 						func() tea.Msg {
 							err := a.rpc.SetProject(sessionID, projectID)
@@ -1834,11 +1847,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SlashAutocompleteMsg:
 		// Insert the selected command and execute it
 		if a.currentView == ViewChat && a.appFocus == FocusChat {
-			a.chat.SetInputValue(msg.Command + " ")
+			rawInput := msg.Command + " "
+			a.chat.SetInputValue(rawInput)
 			a.slashAutocomplete.Hide()
 			// Parse and execute the command
-			cmd := ParseSlash(msg.Command + " ")
+			cmd := ParseSlash(rawInput)
 			if cmd != nil {
+				// Record the slash command in session input history
+				// so Up-arrow can recall it (B3-TUI).
+				a.chat.RecordToHistory(rawInput)
 				return a, a.commandHandler.Execute(cmd)
 			}
 		}
@@ -1871,6 +1888,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.currentSession != nil && msg.ProjectID != "" {
 			sessionID := a.currentSession.ID
 			projectID := msg.ProjectID
+			// Optimistically update the local session binding so the
+			// follow-up fetchCurrentProject reads the new project (B1).
+			a.currentSession.ProjectID = projectID
 			a.statusMessage = fmt.Sprintf("project set: %s", msg.ProjectID)
 			a.statusMessageTime = time.Now()
 			clearCmd := tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {

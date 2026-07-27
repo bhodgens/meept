@@ -891,10 +891,17 @@ func (m *ChatModel) addToHistory(text string) {
 	}
 
 	m.history.Add(m.sessionID, text)
-
 	// Reset history browsing position
 	m.historyIdx = -1
 	m.savedInput = ""
+}
+
+// RecordToHistory records raw input text (e.g. a slash command) into the
+// current session's input history so it can be recalled with Up-arrow. It is
+// a thin wrapper around addToHistory that callers outside the models package
+// can use without depending on internal history mechanics.
+func (m *ChatModel) RecordToHistory(text string) {
+	m.addToHistory(text)
 }
 
 // navigateHistory handles up/down arrows for input history.

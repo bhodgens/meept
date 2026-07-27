@@ -135,6 +135,54 @@ func TestPromptBuilderWithMemoryContext(t *testing.T) {
 	}
 }
 
+func TestPromptBuilderWithProjectInfo(t *testing.T) {
+	prompt := NewPromptBuilder().
+		WithProjectInfo("meept", "/Users/caimlas/git/meept", "main", true).
+		Build()
+
+	if !strings.Contains(prompt, "# Current Project") {
+		t.Error("prompt missing current project section")
+	}
+	if !strings.Contains(prompt, "Name: meept") {
+		t.Error("prompt missing project name")
+	}
+	if !strings.Contains(prompt, "Path: /Users/caimlas/git/meept") {
+		t.Error("prompt missing project path")
+	}
+	if !strings.Contains(prompt, "Branch: main (dirty)") {
+		t.Error("prompt should include dirty branch")
+	}
+}
+
+func TestPromptBuilderWithProjectInfoClean(t *testing.T) {
+	prompt := NewPromptBuilder().
+		WithProjectInfo("meept", "/Users/caimlas/git/meept", "main", false).
+		Build()
+
+	if !strings.Contains(prompt, "Branch: main") {
+		t.Error("prompt missing branch")
+	}
+	if strings.Contains(prompt, "(dirty)") {
+		t.Error("clean project should not include dirty marker")
+	}
+}
+
+func TestProjectInfoBeforeMemoryContext(t *testing.T) {
+	prompt := NewPromptBuilder().
+		WithProjectInfo("meept", "/path", "main", false).
+		WithMemoryContext("some memory").
+		Build()
+
+	projPos := strings.Index(prompt, "# Current Project")
+	memPos := strings.Index(prompt, "# Relevant Context")
+	if projPos == -1 || memPos == -1 {
+		t.Fatalf("project or memory section missing (proj=%d mem=%d)", projPos, memPos)
+	}
+	if projPos > memPos {
+		t.Errorf("current project section should appear before memory context (proj=%d mem=%d)", projPos, memPos)
+	}
+}
+
 func TestPromptBuilderWithUserPreferences(t *testing.T) {
 	prefs := map[string]string{
 		"timezone": "UTC",

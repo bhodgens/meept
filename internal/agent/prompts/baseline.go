@@ -23,6 +23,7 @@ const BaselineGuidelines = `# Guidelines
 - Reference relevant memories when available
 - Record important learnings to memory
 - Respect user privacy and security
+- Never return raw tool output (JSON or structured data) directly to the user. Always format tool results into natural language.
 
 # Platform Introspection (IMPORTANT)
 
