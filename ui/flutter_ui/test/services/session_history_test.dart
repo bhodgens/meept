@@ -1,7 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meept_ui/services/session_history.dart';
+import 'package:meept_ui/services/storage_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   // The store is a process-wide singleton, so each test uses a unique session
   // ID to avoid cross-test contamination.
   var counter = 0;
@@ -123,6 +127,46 @@ void main() {
 
       // Calling previous again returns the same oldest entry (stays at boundary)
       expect(store.previous(id, ''), 'msg-50');
+    });
+  });
+
+  group('SessionHistoryStore persistence', () {
+    setUp(() async {
+      // Back StorageService with an in-memory SharedPreferences so add()
+      // persists and evict()+reload reads back from "disk".
+      SharedPreferences.setMockInitialValues({});
+      await StorageService.instance.init();
+    });
+
+    test('entries survive evict + reload from storage', () async {
+      final store = SessionHistoryStore.instance;
+      final id = 'persist-${DateTime.now().microsecondsSinceEpoch}';
+
+      store.add(id, 'alpha');
+      store.add(id, 'beta');
+      store.add(id, 'gamma');
+
+      // Drop the in-memory cache to simulate an app restart.
+      store.evict(id);
+
+      // Reload should pull the persisted entries back, newest-first on recall.
+      expect(store.previous(id, ''), 'gamma');
+      expect(store.previous(id, ''), 'beta');
+      expect(store.previous(id, ''), 'alpha');
+    });
+
+    test('persisted history is isolated per session', () async {
+      final store = SessionHistoryStore.instance;
+      final a = 'persist-a-${DateTime.now().microsecondsSinceEpoch}';
+      final b = 'persist-b-${DateTime.now().microsecondsSinceEpoch}';
+
+      store.add(a, 'from-a');
+      store.add(b, 'from-b');
+      store.evict(a);
+      store.evict(b);
+
+      expect(store.previous(a, ''), 'from-a');
+      expect(store.previous(b, ''), 'from-b');
     });
   });
 }

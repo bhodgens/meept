@@ -276,6 +276,19 @@ class StorageService {
     await _prefs?.setString(_doubleEnterPref, value);
   }
 
+  // ------ Input history (per-session chat input recall) ------
+
+  /// Read the persisted input history for a session (oldest → newest).
+  /// Returns an empty list when nothing is stored.
+  List<String> getInputHistory(String sessionId) {
+    return _prefs?.getStringList('$_inputHistoryPrefix$sessionId') ?? const [];
+  }
+
+  /// Persist the input history for a session (oldest → newest).
+  Future<void> setInputHistory(String sessionId, List<String> entries) async {
+    await _prefs?.setStringList('$_inputHistoryPrefix$sessionId', entries);
+  }
+
   // ------ General helpers ------
 
   bool? getBool(String key) => _prefs?.getBool(key);
@@ -305,4 +318,5 @@ class StorageService {
   static const String _modifierKeyPref = 'modifier_key';
   static const String _guiLayoutPref = 'gui_layout';
   static const String _doubleEnterPref = 'double_enter';
+  static const String _inputHistoryPrefix = 'input_history_';
 }

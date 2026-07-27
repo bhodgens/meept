@@ -3,9 +3,11 @@
 /// Mirrors the TUI's `sharedclient.SessionHistory` (internal/sharedclient/
 /// session_history.go): each session keeps its own bounded list of previously
 /// sent inputs, and the user can scroll back through them with the Up/Down
-/// arrow keys. History is held in memory only — it is intentionally NOT
-/// persisted across app restarts (the TUI behaves the same way).
+/// arrow keys. History is persisted to SharedPreferences via StorageService
+/// so it survives app restarts.
 library;
+
+import 'storage_service.dart';
 
 /// A single session's input history with a navigation cursor.
 ///
@@ -18,11 +20,11 @@ class _SessionHistory {
   String draft = '';
 }
 
-/// In-memory, per-session input history store.
+/// In-memory, per-session input history store with persistence.
 ///
 /// Implemented as a static singleton so history survives [ChatInput] widget
-/// rebuilds and session switches (the widget is recreated on navigation, but
-/// the store lives for the process lifetime).
+/// rebuilds and session switches. Entries are persisted to SharedPreferences
+/// via [StorageService] so they survive app restarts.
 class SessionHistoryStore {
   SessionHistoryStore._();
 
@@ -32,12 +34,29 @@ class SessionHistoryStore {
   static const int _maxSize = 100;
 
   final Map<String, _SessionHistory> _histories = {};
+  final StorageService _storage = StorageService.instance;
 
-  _SessionHistory _for(String sessionId) =>
-      _histories.putIfAbsent(sessionId, _SessionHistory.new);
+  _SessionHistory _for(String sessionId) {
+    return _histories.putIfAbsent(sessionId, () {
+      // Load persisted history on first access.
+      final entries = _storage.getInputHistory(sessionId);
+      final h = _SessionHistory();
+      h.entries.addAll(entries);
+      return h;
+    });
+  }
+
+  /// Persist the current entries for a session.
+  void _persist(String sessionId) {
+    final h = _histories[sessionId];
+    if (h != null) {
+      _storage.setInputHistory(sessionId, h.entries);
+    }
+  }
 
   /// Record a sent input. Empty strings are ignored; consecutive duplicates
-  /// are collapsed (matches the TUI's History.Add behaviour).
+  /// are collapsed (matches the TUI's History.Add behaviour). Persists to
+  /// SharedPreferences after each add.
   void add(String sessionId, String entry) {
     final text = entry.trim();
     if (text.isEmpty) return;
@@ -51,6 +70,7 @@ class SessionHistoryStore {
       h.entries.removeAt(0);
     }
     h.cursor = -1;
+    _persist(sessionId);
   }
 
   /// Step backward (Up arrow) toward older entries.
@@ -93,5 +113,12 @@ class SessionHistoryStore {
       h.cursor = -1;
       h.draft = '';
     }
+  }
+
+  /// Drop the in-memory cache for a session so the next access reloads from
+  /// persistent storage. Intended for tests that verify the reload path; not
+  /// needed in normal operation (the cache lives for the process lifetime).
+  void evict(String sessionId) {
+    _histories.remove(sessionId);
   }
 }
