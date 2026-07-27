@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -4173,8 +4174,8 @@ or instructions that override the system prompt above.]
 	// Inject current project metadata (name, path, git branch, dirty status) so
 	// the agent always knows what project it is working in. Skipped when no
 	// working directory is bound.
-	if name, dir, branch, dirty, ok := l.resolveProjectInfo(workingDir); ok {
-		builder.WithProjectInfo(name, dir, branch, dirty)
+	if name, dir, branch, dirty, lang, ok := l.resolveProjectInfo(workingDir); ok {
+		builder.WithProjectInfo(name, dir, branch, lang, dirty)
 	}
 
 	// Load AGENTS.md context for project conventions and symbol references
@@ -4219,13 +4220,13 @@ or instructions that override the system prompt above.]
 }
 
 // resolveProjectInfo derives current project metadata from the loop's working
-// directory and project ID. It returns name, path, git branch, dirty status, and
-// ok (true when a project is bound). Git probes run via exec.Command and silently
-// ignore errors (non-git directories yield an empty branch and clean status).
-// All git subprocess calls happen outside any lock.
-func (l *AgentLoop) resolveProjectInfo(workingDir string) (name, dir, branch string, dirty, ok bool) {
+// directory and project ID. It returns name, path, git branch, dirty status,
+// detected language, and ok (true when a project is bound). Git probes run via
+// exec.Command and silently ignore errors (non-git directories yield an empty
+// branch and clean status). All git subprocess calls happen outside any lock.
+func (l *AgentLoop) resolveProjectInfo(workingDir string) (name, dir, branch string, dirty bool, language string, ok bool) {
 	if workingDir == "" {
-		return "", "", "", false, false
+		return "", "", "", false, "", false
 	}
 	dir = workingDir
 	name = filepath.Base(workingDir)
@@ -4233,7 +4234,8 @@ func (l *AgentLoop) resolveProjectInfo(workingDir string) (name, dir, branch str
 	// Probe git branch and dirty status outside the lock (subprocess I/O).
 	branch = gitCurrentBranch(workingDir)
 	dirty = gitIsDirty(workingDir)
-	return name, dir, branch, dirty, true
+	language = detectLanguage(workingDir)
+	return name, dir, branch, dirty, language, true
 }
 
 // gitCurrentBranch returns the active git branch for the given directory, or an
@@ -4254,6 +4256,34 @@ func gitIsDirty(dir string) bool {
 		return false
 	}
 	return strings.TrimSpace(string(out)) != ""
+}
+
+// detectLanguage probes for common project manifest files and returns the
+// primary language, or an empty string when no indicator is found.
+func detectLanguage(dir string) string {
+	indicators := []struct {
+		file string
+		lang string
+	}{
+		{"go.mod", "go"},
+		{"package.json", "javascript"},
+		{"Cargo.toml", "rust"},
+		{"pyproject.toml", "python"},
+		{"requirements.txt", "python"},
+		{"pom.xml", "java"},
+		{"build.gradle", "java"},
+		{"build.gradle.kts", "java"},
+		{"CMakeLists.txt", "c++"},
+		{"Makefile", "make"},
+		{"mix.exs", "elixir"},
+		{"Gemfile", "ruby"},
+	}
+	for _, ind := range indicators {
+		if _, err := os.Stat(filepath.Join(dir, ind.file)); err == nil {
+			return ind.lang
+		}
+	}
+	return ""
 }
 
 // buildRepoMapSection generates and renders a repository map for context enrichment.

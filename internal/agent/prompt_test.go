@@ -137,7 +137,7 @@ func TestPromptBuilderWithMemoryContext(t *testing.T) {
 
 func TestPromptBuilderWithProjectInfo(t *testing.T) {
 	prompt := NewPromptBuilder().
-		WithProjectInfo("meept", "/Users/caimlas/git/meept", "main", true).
+		WithProjectInfo("meept", "/Users/caimlas/git/meept", "main", "go", true).
 		Build()
 
 	if !strings.Contains(prompt, "# Current Project") {
@@ -152,11 +152,14 @@ func TestPromptBuilderWithProjectInfo(t *testing.T) {
 	if !strings.Contains(prompt, "Branch: main (dirty)") {
 		t.Error("prompt should include dirty branch")
 	}
+	if !strings.Contains(prompt, "Language: go") {
+		t.Error("prompt missing language")
+	}
 }
 
 func TestPromptBuilderWithProjectInfoClean(t *testing.T) {
 	prompt := NewPromptBuilder().
-		WithProjectInfo("meept", "/Users/caimlas/git/meept", "main", false).
+		WithProjectInfo("meept", "/Users/caimlas/git/meept", "main", "", false).
 		Build()
 
 	if !strings.Contains(prompt, "Branch: main") {
@@ -169,7 +172,7 @@ func TestPromptBuilderWithProjectInfoClean(t *testing.T) {
 
 func TestProjectInfoBeforeMemoryContext(t *testing.T) {
 	prompt := NewPromptBuilder().
-		WithProjectInfo("meept", "/path", "main", false).
+		WithProjectInfo("meept", "/path", "main", "", false).
 		WithMemoryContext("some memory").
 		Build()
 

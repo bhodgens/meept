@@ -208,8 +208,9 @@ func (b *PromptBuilder) WithCoworkerAwareness(awareness string) *PromptBuilder {
 // The section is emitted as "# Current Project" immediately after the prompt
 // cache boundary (before memory context) so the agent always knows what project
 // it is working in. dirty indicates whether the working tree has uncommitted
-// changes; when false the "(dirty)" suffix is omitted.
-func (b *PromptBuilder) WithProjectInfo(name, path, branch string, dirty bool) *PromptBuilder {
+// changes; when false the "(dirty)" suffix is omitted. language is the detected
+// primary language (e.g. "go", "python"); empty string is omitted.
+func (b *PromptBuilder) WithProjectInfo(name, path, branch, language string, dirty bool) *PromptBuilder {
 	if name == "" && path == "" {
 		b.projectInfo = ""
 		return b
@@ -235,6 +236,13 @@ func (b *PromptBuilder) WithProjectInfo(name, path, branch string, dirty bool) *
 		if dirty {
 			sb.WriteString(" (dirty)")
 		}
+	}
+	if language != "" {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("Language: ")
+		sb.WriteString(language)
 	}
 	b.projectInfo = sb.String()
 	return b

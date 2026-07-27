@@ -4507,6 +4507,34 @@ func registerBuiltinTools(
 	logger.Info("Registered builtin tools", "count", registry.Count())
 }
 
+// detectProjectLanguage probes for common project manifest files and returns
+// the primary language, or an empty string when no indicator is found.
+func detectProjectLanguage(dir string) string {
+	indicators := []struct {
+		file string
+		lang string
+	}{
+		{"go.mod", "go"},
+		{"package.json", "javascript"},
+		{"Cargo.toml", "rust"},
+		{"pyproject.toml", "python"},
+		{"requirements.txt", "python"},
+		{"pom.xml", "java"},
+		{"build.gradle", "java"},
+		{"build.gradle.kts", "java"},
+		{"CMakeLists.txt", "c++"},
+		{"Makefile", "make"},
+		{"mix.exs", "elixir"},
+		{"Gemfile", "ruby"},
+	}
+	for _, ind := range indicators {
+		if _, err := os.Stat(filepath.Join(dir, ind.file)); err == nil {
+			return ind.lang
+		}
+	}
+	return ""
+}
+
 // registerPlatformTools registers platform introspection tools.
 // Called after AgentRegistry is created since platform_agents needs it.
 func registerPlatformTools(
@@ -4545,6 +4573,9 @@ func registerPlatformTools(
 		}
 		if statusOut, err := exec.Command("git", "-C", wd, "status", "--porcelain").Output(); err == nil {
 			info["dirty"] = strings.TrimSpace(string(statusOut)) != ""
+		}
+		if lang := detectProjectLanguage(wd); lang != "" {
+			info["language"] = lang
 		}
 		return info
 	}
