@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -4169,6 +4170,13 @@ or instructions that override the system prompt above.]
 		}
 	}
 
+	// Inject current project metadata (name, path, git branch, dirty status) so
+	// the agent always knows what project it is working in. Skipped when no
+	// working directory is bound.
+	if name, dir, branch, dirty, ok := l.resolveProjectInfo(workingDir); ok {
+		builder.WithProjectInfo(name, dir, branch, dirty)
+	}
+
 	// Load AGENTS.md context for project conventions and symbol references
 	if workingDir != "" {
 		agentsCtx := l.loadAgentsContext(workingDir)
@@ -4208,6 +4216,44 @@ or instructions that override the system prompt above.]
 	}
 
 	return base
+}
+
+// resolveProjectInfo derives current project metadata from the loop's working
+// directory and project ID. It returns name, path, git branch, dirty status, and
+// ok (true when a project is bound). Git probes run via exec.Command and silently
+// ignore errors (non-git directories yield an empty branch and clean status).
+// All git subprocess calls happen outside any lock.
+func (l *AgentLoop) resolveProjectInfo(workingDir string) (name, dir, branch string, dirty, ok bool) {
+	if workingDir == "" {
+		return "", "", "", false, false
+	}
+	dir = workingDir
+	name = filepath.Base(workingDir)
+
+	// Probe git branch and dirty status outside the lock (subprocess I/O).
+	branch = gitCurrentBranch(workingDir)
+	dirty = gitIsDirty(workingDir)
+	return name, dir, branch, dirty, true
+}
+
+// gitCurrentBranch returns the active git branch for the given directory, or an
+// empty string if git is unavailable or the directory is not a repository.
+func gitCurrentBranch(dir string) string {
+	out, err := exec.Command("git", "-C", dir, "branch", "--show-current").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// gitIsDirty reports whether the working tree at dir has uncommitted changes.
+// Any non-empty output from `git status --porcelain` is treated as dirty.
+func gitIsDirty(dir string) bool {
+	out, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) != ""
 }
 
 // buildRepoMapSection generates and renders a repository map for context enrichment.

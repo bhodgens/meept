@@ -61,6 +61,7 @@ type PromptBuilder struct {
 	customSections    []promptSection
 	coworkerAwareness string
 	agentsContext     string
+	projectInfo       string
 }
 
 type promptSection struct {
@@ -203,6 +204,42 @@ func (b *PromptBuilder) WithCoworkerAwareness(awareness string) *PromptBuilder {
 	return b
 }
 
+// WithProjectInfo sets the current project metadata section.
+// The section is emitted as "# Current Project" immediately after the prompt
+// cache boundary (before memory context) so the agent always knows what project
+// it is working in. dirty indicates whether the working tree has uncommitted
+// changes; when false the "(dirty)" suffix is omitted.
+func (b *PromptBuilder) WithProjectInfo(name, path, branch string, dirty bool) *PromptBuilder {
+	if name == "" && path == "" {
+		b.projectInfo = ""
+		return b
+	}
+	var sb strings.Builder
+	if name != "" {
+		sb.WriteString("Name: ")
+		sb.WriteString(name)
+	}
+	if path != "" {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("Path: ")
+		sb.WriteString(path)
+	}
+	if branch != "" {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("Branch: ")
+		sb.WriteString(branch)
+		if dirty {
+			sb.WriteString(" (dirty)")
+		}
+	}
+	b.projectInfo = sb.String()
+	return b
+}
+
 // DefaultCoworkerAwareness returns the standard coworker awareness prompt.
 func DefaultCoworkerAwareness() string {
 	return `You have access to introspection tools to understand your capabilities:
@@ -256,6 +293,12 @@ func (b *PromptBuilder) Build() string {
 
 	// Boundary between static (cacheable) and dynamic (session-specific) sections.
 	sections = append(sections, llm.PromptCacheBoundary)
+
+	// Current Project metadata (emitted before memory context so the agent
+	// always knows what project it is working in).
+	if b.projectInfo != "" {
+		sections = append(sections, "\n# Current Project", b.projectInfo)
+	}
 
 	// Memory Context
 	if b.memoryContext != "" {
