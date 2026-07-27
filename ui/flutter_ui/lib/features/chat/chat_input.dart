@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/slash_commands.dart';
 import '../../models/api_models.dart' show Attachment;
 import '../../services/sdk_client.dart' show SdkApiClient;
+import '../../services/session_history.dart';
 import '../../services/skills_service.dart' show SkillsService;
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
@@ -160,6 +161,10 @@ class _ChatInputState extends ConsumerState<ChatInput>
   final Set<String> _inFlightUploads = {};
   bool _hasFocused = false;
 
+  /// Per-session input history (Up/Down arrow recall). Singleton so history
+  /// survives widget rebuilds and session switches.
+  final SessionHistoryStore _history = SessionHistoryStore.instance;
+
   @override
   void initState() {
     super.initState();
@@ -186,6 +191,16 @@ class _ChatInputState extends ConsumerState<ChatInput>
     // input rendering; if it fails, we silently fall back to no suggestions.
     unawaited(_loadSkillNames());
     unawaited(_loadProjectPaths());
+  }
+
+  @override
+  void didUpdateWidget(ChatInput oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // When the user switches sessions, abandon any in-progress history
+    // navigation so Up starts fresh from the new session's most recent entry.
+    if (oldWidget.sessionId != widget.sessionId) {
+      _history.resetCursor(oldWidget.sessionId);
+    }
   }
 
   /// Fetch skill names via [SkillsService] (backed by [SdkApiClient]) so the
@@ -590,6 +605,20 @@ class _ChatInputState extends ConsumerState<ChatInput>
     _slashQuery = '';
     _readdirPaths = const [];
     _readdirDebounceTimer?.cancel();
+    // Abandon any in-progress history navigation so the next Up starts fresh.
+    _history.resetCursor(widget.sessionId);
+  }
+
+  /// Replace the input text without firing [_onTextChanged] side effects
+  /// (paste detection, slash autocomplete, ghost text). Used when recalling
+  /// history entries so the recalled text isn't re-interpreted as a paste or
+  /// a fresh slash query. Cursor is placed at the end.
+  void _setInputPreservingListener(String text) {
+    _controller.removeListener(_onTextChanged);
+    _controller.text = text;
+    _controller.selection = TextSelection.collapsed(offset: text.length);
+    _previousText = text;
+    _controller.addListener(_onTextChanged);
   }
 
   /// Create a new chat session and switch to it.
@@ -929,6 +958,8 @@ class _ChatInputState extends ConsumerState<ChatInput>
       final chatNotifier = ref.read(chatProvider.notifier);
       final activeAgent = ref.read(activeAgentProvider);
       final sentText = expanded.isNotEmpty ? expanded : '(image attached)';
+      // Record to history (multimodal sends are real messages).
+      _history.add(widget.sessionId, sentText);
       chatNotifier.sendMessageWithParts(
         sessionId: widget.sessionId,
         text: sentText,
@@ -950,6 +981,9 @@ class _ChatInputState extends ConsumerState<ChatInput>
       _resetInputState();
       return;
     }
+
+    // Record to history (only actual chat messages, not local slash commands).
+    _history.add(widget.sessionId, payload);
 
     final chatNotifier = ref.read(chatProvider.notifier);
     final activeAgent = ref.read(activeAgentProvider);
@@ -1154,6 +1188,24 @@ class _ChatInputState extends ConsumerState<ChatInput>
             _slashSelectedIndex =
                 (_slashSelectedIndex - 1).clamp(0, maxIdx < 0 ? 0 : maxIdx);
           });
+          return KeyEventResult.handled;
+        }
+      }
+
+      // Arrow up/down recalls per-session input history when the slash
+      // autocomplete popup is NOT visible (parity with the TUI). Up walks
+      // toward older entries; Down walks back toward the live draft.
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        final entry = _history.previous(widget.sessionId, _controller.text);
+        if (entry != null) {
+          _setInputPreservingListener(entry);
+          return KeyEventResult.handled;
+        }
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        final entry = _history.next(widget.sessionId);
+        if (entry != null) {
+          _setInputPreservingListener(entry);
           return KeyEventResult.handled;
         }
       }
