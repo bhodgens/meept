@@ -1,3 +1,6 @@
+import 'dart:async' show Timer;
+import 'dart:math' show max;
+
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -200,27 +203,8 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                             ),
                           );
                         } else {
-                          return const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 8),
-                            child: Row(
-                              children: [
-                                SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      CyberpunkColors.orangePrimary,
-                                    ),
-                                  ),
-                                ),
-                                SizedBox(width: 8),
-                                Text(
-                                  'thinking...',
-                                  style: CyberpunkTypography.bodySmall,
-                                ),
-                              ],
-                            ),
+                          return _ThinkingIndicator(
+                            startedAt: chatState.thinkingStartedAt,
                           );
                         }
                       }
@@ -378,6 +362,88 @@ class MessagePlaceholder extends StatelessWidget {
               color: CyberpunkColors.lightGray,
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A "thinking Xs..." indicator with a live elapsed timer.
+///
+/// Renders a spinner next to the word "thinking" followed by an elapsed
+/// duration. The widget starts a 1-second [Timer.periodic] on mount so the
+/// label updates every second. When [startedAt] is null (unknown start),
+/// falls back to the static "thinking..." label.
+class _ThinkingIndicator extends StatefulWidget {
+  final DateTime? startedAt;
+
+  const _ThinkingIndicator({this.startedAt});
+
+  @override
+  State<_ThinkingIndicator> createState() => _ThinkingIndicatorState();
+}
+
+class _ThinkingIndicatorState extends State<_ThinkingIndicator> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTimerIfNeeded();
+  }
+
+  @override
+  void didUpdateWidget(_ThinkingIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.startedAt != widget.startedAt) {
+      _timer?.cancel();
+      _startTimerIfNeeded();
+    }
+  }
+
+  void _startTimerIfNeeded() {
+    if (widget.startedAt == null) return;
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  String _formatElapsed(Duration elapsed) {
+    final s = max(0, elapsed.inSeconds);
+    if (s < 60) return '${s}s';
+    final m = s ~/ 60;
+    final rs = s % 60;
+    return '${m}m${rs}s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final startedAt = widget.startedAt;
+    final label = startedAt == null
+        ? 'thinking...'
+        : 'thinking ${_formatElapsed(DateTime.now().difference(startedAt))}...';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                CyberpunkColors.orangePrimary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(label, style: CyberpunkTypography.bodySmall),
         ],
       ),
     );

@@ -618,6 +618,10 @@ func (m ProgressUpdateMsg) IsChatVisible() bool {
 	return m.ChatVisible
 }
 
+// ProgressTickMsg is a 1-second tick that re-renders the pending progress
+// message so the elapsed timer stays live while the agent is thinking.
+type ProgressTickMsg struct{}
+
 // SteeringResultMsg is returned after a steering RPC call completes.
 type SteeringResultMsg struct {
 	Success bool
@@ -680,6 +684,9 @@ type ProgressState struct {
 	TokensUsed    int
 	ContextResets int
 	LastUpdate    time.Time
+	// StartedAt is when the pending operation began, used to render an
+	// elapsed timer ("thinking 12s..."). Zero means unknown.
+	StartedAt time.Time
 }
 
 // Render returns the formatted progress string for display.
@@ -706,7 +713,7 @@ func (p *ProgressState) Render() string {
 		bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
 		parts = append(parts, fmt.Sprintf("[%s %.0f%%]", bar, p.Percent))
 	} else if p.Stage != "" {
-		parts = append(parts, p.Stage)
+		parts = append(parts, formatStageWithTimer(p.Stage, p.StartedAt))
 	}
 
 	// Current tool
@@ -1392,7 +1399,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 	case ProgressUpdateMsg:
 		if m.progressState == nil {
-			m.progressState = &ProgressState{}
+			m.progressState = &ProgressState{StartedAt: time.Now()}
 		}
 		if msg.AgentID != "" {
 			m.progressState.AgentID = msg.AgentID
@@ -1414,6 +1421,15 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		}
 		m.progressState.LastUpdate = time.Now()
 		m.updateProgressMessage()
+		return nil
+
+	case ProgressTickMsg:
+		// Re-render the pending message to update the elapsed timer.
+		// Keep ticking as long as we're still loading.
+		if m.loading && m.pendingMsgIdx >= 0 {
+			m.updateProgressMessage()
+			return tea.Tick(time.Second, func(time.Time) tea.Msg { return ProgressTickMsg{} })
+		}
 		return nil
 
 	case AgentLifecycleMsg:
@@ -1771,7 +1787,8 @@ func (m *ChatModel) doSendMessage() tea.Cmd {
 
 	// Initialize progress state
 	m.progressState = &ProgressState{
-		Stage:      "sending...",
+		Stage:      "thinking...",
+		StartedAt:  time.Now(),
 		LastUpdate: time.Now(),
 	}
 
@@ -1787,7 +1804,12 @@ func (m *ChatModel) doSendMessage() tea.Cmd {
 	m.updateViewport()
 
 	m.loading = true
-	return m.sendMessageWithParts(actualText, parts)
+	// Start a 1-second tick to re-render the elapsed timer in the
+	// pending progress message while the agent is thinking.
+	return tea.Batch(
+		m.sendMessageWithParts(actualText, parts),
+		tea.Tick(time.Second, func(time.Time) tea.Msg { return ProgressTickMsg{} }),
+	)
 }
 
 // GetInputHeight returns the fixed input height in lines.
@@ -1932,7 +1954,7 @@ func (m *ChatModel) renderProgressContent() string {
 		bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
 		parts = append(parts, fmt.Sprintf("[%s %.0f%%]", bar, p.Percent))
 	} else if p.Stage != "" {
-		parts = append(parts, p.Stage)
+		parts = append(parts, formatStageWithTimer(p.Stage, p.StartedAt))
 	}
 
 	// Current tool
@@ -1951,6 +1973,28 @@ func (m *ChatModel) renderProgressContent() string {
 	}
 
 	return strings.Join(parts, " │ ")
+}
+
+// formatStageWithTimer renders a progress stage label with an elapsed
+// timer when startedAt is known. The trailing "..." of the stage label
+// is preserved after the timer, e.g. "thinking..." + 12s → "thinking 12s...".
+// If startedAt is zero the stage is returned unchanged.
+func formatStageWithTimer(stage string, startedAt time.Time) string {
+	if startedAt.IsZero() {
+		return stage
+	}
+	elapsed := time.Since(startedAt)
+	var timer string
+	if elapsed < 60*time.Second {
+		timer = fmt.Sprintf("%ds", int(elapsed.Seconds()))
+	} else {
+		timer = fmt.Sprintf("%dm%ds", int(elapsed.Minutes()), int(elapsed.Seconds())%60)
+	}
+	// Insert the timer before a trailing "..." if present, otherwise append.
+	if strings.HasSuffix(stage, "...") {
+		return strings.TrimSuffix(stage, "...") + " " + timer + "..."
+	}
+	return stage + " " + timer
 }
 
 // formatTokens formats token counts for display.

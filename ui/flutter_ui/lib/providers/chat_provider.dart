@@ -125,6 +125,7 @@ const int _maxMessages = 500;
 const _unset = Object();
 const _progressUnset = Object();
 const _confirmUnset = Object();
+const _thinkingUnset = Object();
 
 /// Send endpoint type — distinct route for normal, steer, and follow-up messages.
 enum _SendEndpoint { normal, steer, followUp }
@@ -141,6 +142,9 @@ class ChatState {
   final bool isAgentProcessing;
   final String? error;
   final AgentProgress? currentProgress;
+  /// When the agent started thinking (wall clock). Used by the UI to render
+  /// an elapsed timer ("thinking 12s..."). Null when the agent is idle.
+  final DateTime? thinkingStartedAt;
 
   /// When non-null, a destructive tool returned a phase-1 confirmation
   /// request and the UI must prompt the user.  The value is the confirmation
@@ -154,6 +158,7 @@ class ChatState {
     this.isAgentProcessing = false,
     this.error,
     this.currentProgress,
+    this.thinkingStartedAt,
     this.pendingConfirmation,
   });
 
@@ -164,6 +169,7 @@ class ChatState {
     Object? error = _unset,
     Object? currentProgress = _progressUnset,
     Object? pendingConfirmation = _confirmUnset,
+    Object? thinkingStartedAt = _thinkingUnset,
   }) {
     // Limit messages to prevent memory leaks
     List<ChatMessage> limitedMessages = messages ?? this.messages;
@@ -182,6 +188,9 @@ class ChatState {
       pendingConfirmation: identical(pendingConfirmation, _confirmUnset)
           ? this.pendingConfirmation
           : pendingConfirmation as Map<String, dynamic>?,
+      thinkingStartedAt: identical(thinkingStartedAt, _thinkingUnset)
+          ? this.thinkingStartedAt
+          : thinkingStartedAt as DateTime?,
     );
   }
 }
@@ -407,6 +416,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
       isLoading: true,
       isAgentProcessing: true,
       error: null,
+      thinkingStartedAt: DateTime.now(),
     );
 
     try {
@@ -458,6 +468,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
           isLoading: false,
           isAgentProcessing: false,
           error: errorMsg,
+          thinkingStartedAt: null,
         );
       } else if (chatResp != null &&
           chatResp['reply'] != null &&
@@ -478,6 +489,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
           messages: [...state.messages, assistantMessage],
           isLoading: false,
           isAgentProcessing: false,
+          thinkingStartedAt: null,
         );
       } else {
         // HTTP call succeeded but no reply in the body — the agent is
@@ -508,6 +520,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
         isLoading: false,
         isAgentProcessing: false,
         error: errorStr,
+        thinkingStartedAt: null,
       );
     } finally {
       _sendingTimeoutTimer?.cancel();
@@ -546,6 +559,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
           isLoading: false,
           isAgentProcessing: false,
           error: systemMessage.content,
+          thinkingStartedAt: null,
         );
         return;
       }
@@ -582,7 +596,11 @@ class ChatNotifier extends StateNotifier<ChatState> {
               ? false
               : state.isAgentProcessing;
 
-      state = state.copyWith(messages: newMessages, isAgentProcessing: newIsAgentProcessing);
+      state = state.copyWith(
+        messages: newMessages,
+        isAgentProcessing: newIsAgentProcessing,
+        thinkingStartedAt: newIsAgentProcessing ? state.thinkingStartedAt : null,
+      );
     } catch (e) {
       final errorMessage = ChatMessage(
         id: 'error_${DateTime.now().millisecondsSinceEpoch}',
@@ -595,6 +613,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
         isLoading: false,
         isAgentProcessing: false,
         error: e.toString(),
+        thinkingStartedAt: null,
       );
     }
   }

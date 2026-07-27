@@ -1563,10 +1563,26 @@ func TestChatModel_SendMessage_WithImageAttachment(t *testing.T) {
 		t.Fatal("expected command returned for image send")
 	}
 	// Execute the returned command so the RPC call is actually made.
-	if msg := cmd(); msg != nil {
-		// Drain the ChatResponseMsg; the test only cares about the side-effect
-		// on the mock. We invoke the closure synchronously.
-		_ = msg.(ChatResponseMsg)
+	// doSendMessage returns a tea.BatchMsg ([send, progressTick]); find the
+	// ChatResponseMsg within the batch and drain it.
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range batch {
+			sub := c()
+			if sub == nil {
+				continue
+			}
+			// Skip non-ChatResponseMsgs (e.g. ProgressTickMsg).
+			switch sub.(type) {
+			case ChatResponseMsg:
+				// drained
+			}
+		}
+	} else {
+		switch msg.(type) {
+		case ChatResponseMsg:
+			// drained
+		}
 	}
 
 	if len(mock.ChatWithPartsCalls) != 1 {
@@ -1621,8 +1637,24 @@ func TestChatModel_SendMessage_WithNonImageAttachment(t *testing.T) {
 		t.Fatal("expected command returned for non-image send")
 	}
 	// Execute the returned command so the RPC call is actually made.
+	// doSendMessage returns a tea.BatchMsg ([send, progressTick]); drain any
+	// ChatResponseMsg within it, ignoring tick/other messages.
 	if msg := cmd(); msg != nil {
-		_ = msg.(ChatResponseMsg)
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, c := range batch {
+				if sub := c(); sub != nil {
+					switch sub.(type) {
+					case ChatResponseMsg:
+						// drained
+					}
+				}
+			}
+		} else {
+			switch msg.(type) {
+			case ChatResponseMsg:
+				// drained
+			}
+		}
 	}
 
 	if len(mock.ChatCalls) != 1 {
