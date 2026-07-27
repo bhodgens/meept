@@ -1491,6 +1491,18 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 		)
 		return h.loop
 	}
+	// Wire session identity + project context onto the loop so the system
+	// prompt's "Session Context" section is populated. ConfigSnapshot
+	// deliberately excludes these per-session fields, so they must be set
+	// here on every lookup (idempotent for an already-cached loop).
+	loop.SetProjectID(sess.ProjectID)
+	if sess.DetectionContext != nil {
+		loop.SetDetectionContext(&DetectionContext{
+			CWD:               sess.DetectionContext.CWD,
+			DetectedProjectID: sess.DetectionContext.DetectedProjectID,
+			CLIArgs:           sess.DetectionContext.CLIArgs,
+		})
+	}
 	return loop
 }
 

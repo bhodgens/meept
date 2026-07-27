@@ -4692,6 +4692,11 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 	builder.AddSection("Platform Capabilities", prompts.BaselineCapabilities)
 	builder.AddSection("Platform Guidelines", prompts.BaselineGuidelines)
 
+	// Inject session/project context so the agent knows where it is.
+	if ctxSection := l.buildSessionContextSection(); ctxSection != "" {
+		builder.AddSection("Session Context", ctxSection)
+	}
+
 	// Add global rules if configured
 	if l.config.GlobalRules != "" {
 		builder.AddSection("Global Rules", l.config.GlobalRules)
@@ -4734,6 +4739,38 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 	}
 
 	return builder.Build()
+}
+
+// buildSessionContextSection builds a "Session Context" block for the system
+// prompt so the agent knows which session, project, and working directory it
+// is operating in. Returns "" when no meaningful context is available.
+func (l *AgentLoop) buildSessionContextSection() string {
+	l.mu.RLock()
+	sessID := l.sessionID
+	projID := l.projectID
+	wd := l.workingDir
+	dc := l.detectionContext
+	l.mu.RUnlock()
+
+	var b strings.Builder
+	if sessID != "" {
+		fmt.Fprintf(&b, "Session ID: %s\n", sessID)
+	}
+	if projID != "" {
+		fmt.Fprintf(&b, "Project ID: %s\n", projID)
+	}
+	if wd != "" {
+		fmt.Fprintf(&b, "Working directory: %s\n", wd)
+	}
+	if dc != nil {
+		if dc.CWD != "" {
+			fmt.Fprintf(&b, "Client CWD: %s\n", dc.CWD)
+		}
+		if dc.DetectedProjectID != "" {
+			fmt.Fprintf(&b, "Detected project: %s\n", dc.DetectedProjectID)
+		}
+	}
+	return b.String()
 }
 
 // buildSystemPromptWithOverride builds system prompt with an override.

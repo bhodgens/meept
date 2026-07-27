@@ -1733,6 +1733,16 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 			if templateErr == nil && template != nil {
 				loop, err := d.loopManager.GetOrCreateWired(conversationID, sess.ProjectPath, template)
 				if err == nil {
+					// Wire session identity + project context (mirrors
+					// ChatHandler.sessionLoop; ConfigSnapshot excludes these).
+					loop.SetProjectID(sess.ProjectID)
+					if sess.DetectionContext != nil {
+						loop.SetDetectionContext(&DetectionContext{
+							CWD:               sess.DetectionContext.CWD,
+							DetectedProjectID: sess.DetectionContext.DetectedProjectID,
+							CLIArgs:           sess.DetectionContext.CLIArgs,
+						})
+					}
 					return loop
 				}
 				d.logger.Warn("session-scoped loop creation failed; using registry agent",

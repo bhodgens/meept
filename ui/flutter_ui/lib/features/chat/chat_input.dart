@@ -604,10 +604,11 @@ class _ChatInputState extends ConsumerState<ChatInput>
     }
   }
 
-  /// Handle `/project <path>`: bind the project to the current session.
-  ///
-  /// Calls the daemon's `project.set` RPC (via the bus/call bridge) with the
   /// /debugsession — fetch and display full session metadata in a dialog.
+  ///
+  /// Pulls the session record via the HTTP API and augments it with a
+  /// persisted-message count and the bound project's display name so the
+  /// dialog is enough to diagnose "agent doesn't know its project" issues.
   Future<void> _showDebugSession() async {
     final sessionId = widget.sessionId;
     if (sessionId.isEmpty) {
@@ -626,6 +627,34 @@ class _ChatInputState extends ConsumerState<ChatInput>
       final sdk = ref.read(sdkClientProvider);
       final raw = await sdk.getSession(sessionId);
 
+      // Best-effort: count persisted messages for this session. The SDK
+      // unwraps the `messages` array, so length is the count (capped at the
+      // limit — fine for a debug readout).
+      int messageCount = -1;
+      try {
+        final msgs = await sdk.getMessages(sessionId, limit: 100000);
+        messageCount = msgs.length;
+      } catch (_) {
+        // Leave as -1 (unknown) if the messages endpoint fails.
+      }
+
+      // Best-effort: resolve the project's display name from its ID.
+      String projectName = '(unknown)';
+      final projectId = raw['project_id'] as String?;
+      if (projectId != null && projectId.isNotEmpty) {
+        try {
+          final projects = await sdk.listProjects();
+          for (final p in projects) {
+            if (p['id'] == projectId) {
+              projectName = (p['name'] as String?) ?? '(unnamed)';
+              break;
+            }
+          }
+        } catch (_) {
+          // Leave as (unknown).
+        }
+      }
+
       final buf = StringBuffer();
       buf.writeln('=== session debug ===');
       buf.writeln('id:              ${raw['id'] ?? '?'}');
@@ -633,15 +662,27 @@ class _ChatInputState extends ConsumerState<ChatInput>
       buf.writeln('conversation_id: ${raw['conversation_id'] ?? '?'}');
       buf.writeln('created_at:      ${raw['created_at'] ?? '?'}');
       buf.writeln('last_activity:   ${raw['last_activity'] ?? '?'}');
-      buf.writeln('project_id:      ${raw['project_id'] ?? '(none)'}');
+      buf.writeln('persisted_msgs:  ${messageCount < 0 ? "(unknown)" : messageCount}');
+      buf.writeln('--- project binding ---');
+      buf.writeln('project_id:      ${projectId ?? '(none)'}');
+      buf.writeln('project_name:    ${(projectId == null || projectId.isEmpty) ? '(none)' : projectName}');
       buf.writeln('project_path:    ${raw['project_path'] ?? '(none)'}');
-      buf.writeln('archived:        ${raw['archived'] ?? false}');
       final dc = raw['detection_context'];
       if (dc is Map) {
         buf.writeln('cwd:             ${dc['cwd'] ?? '(none)'}');
+        final detected = dc['detected_project_id'];
+        if (detected != null && detected.toString().isNotEmpty) {
+          buf.writeln('detected_proj:   $detected');
+        }
+      } else {
+        buf.writeln('cwd:             (no detection_context)');
       }
+      buf.writeln('--- state ---');
+      buf.writeln('archived:        ${raw['archived'] ?? false}');
       final clients = raw['attached_clients'];
       buf.writeln('attached:        ${clients is List ? clients.length : 0}');
+      final workers = raw['worker_ids'];
+      buf.writeln('workers:         ${workers is List ? workers.length : 0}');
       final desig = raw['designation'];
       if (desig is Map) {
         buf.writeln('designation:     ${desig['status'] ?? '?'}');
@@ -687,6 +728,9 @@ class _ChatInputState extends ConsumerState<ChatInput>
     }
   }
 
+  /// Handle `/project <path>`: bind the project to the current session.
+  ///
+  /// Calls the daemon's `project.set` RPC (via the bus/call bridge) with the
   /// path-only invocation, which auto-detects/registers the project.  On
   /// success, refreshes [currentProjectProvider] so the status bar picks up
   /// the change, reloads project paths so the typeahead includes the new
