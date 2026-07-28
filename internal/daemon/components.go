@@ -4559,10 +4559,17 @@ func registerPlatformTools(
 	registry.Register(builtin.NewPlatformStatusTool(statusFunc))
 
 	// Project info tool - resolves current project metadata at call time.
-	projectInfoFunc := func() map[string]any {
-		wd, err := os.Getwd()
-		if err != nil || wd == "" {
-			return map[string]any{"status": "no project bound"}
+	// The closure receives a workingDir string: when non-empty (set via
+	// SetWorkingDirFunc from a session-scoped loop), it probes THAT directory;
+	// when empty, it falls back to os.Getwd() (the daemon's directory).
+	projectInfoFunc := func(workingDir string) map[string]any {
+		wd := workingDir
+		if wd == "" {
+			var err error
+			wd, err = os.Getwd()
+			if err != nil || wd == "" {
+				return map[string]any{"status": "no project bound"}
+			}
 		}
 		info := map[string]any{
 			"name": filepath.Base(wd),

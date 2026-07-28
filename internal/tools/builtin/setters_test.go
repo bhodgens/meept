@@ -52,6 +52,8 @@ func TestAllSetters_NilSafe(t *testing.T) {
 		// Setters added by round-5 S4-x fixes (fence-checker coverage gaps)
 		{"DebugTool.SetFenceChecker", func() { (&DebugTool{}).SetFenceChecker(nil) }},
 		{"lspWriteNotifier.SetFenceChecker", func() { (&lspWriteNotifier{}).SetFenceChecker(nil) }},
+		// project_info session-scoped working directory setter
+		{"ProjectInfoTool.SetWorkingDirFunc", func() { (&ProjectInfoTool{}).SetWorkingDirFunc(nil) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

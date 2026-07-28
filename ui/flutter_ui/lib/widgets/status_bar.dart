@@ -130,12 +130,44 @@ class StatusBar extends ConsumerWidget {
     // Read from the active session first (per-session project binding),
     // falling back to the global provider for legacy sessions.
     final session = ref.watch(activeSessionProvider);
+
+    // 1. Session-scoped project (has projectId): use projectStatusProvider
+    //    so we get the same git branch/dirty rendering as currentProjectProvider.
+    if (session != null &&
+        session.projectId != null &&
+        session.projectId!.isNotEmpty) {
+      final status = ref.watch(projectStatusProvider(session.projectId!));
+      final cp = status.maybeWhen(
+        data: (v) => v,
+        orElse: () => null,
+      );
+      if (cp != null && cp.isActive) {
+        final pathToShow = cp.localPath.isNotEmpty ? cp.localPath : cp.name;
+        final chars = pathToShow.characters;
+        final displayPath = chars.length > 30
+            ? '...${chars.takeLast(27).toString()}'
+            : pathToShow;
+        if (cp.mode == 'git') {
+          final branch = cp.branch.isNotEmpty ? ' ${cp.branch}' : '';
+          final dirty = cp.dirty ? '*' : '';
+          return '[$displayPath$branch$dirty]';
+        }
+        return '[local:$displayPath]';
+      }
+      // Loading or error: show a brief placeholder.
+      if (status.isLoading) return ' […]';
+      // Fall through to other branches on error.
+    }
+
+    // 2. Session has projectPath but no projectId: show basename only.
+    //    We can't determine git vs local from path alone.
     if (session?.projectPath != null && session!.projectPath!.isNotEmpty) {
       final path = session.projectPath!;
       final name = path.split('/').last;
-      return '[local:$name]';
+      return '[$name]';
     }
-    // Fall back to global provider (covers legacy sessions and /project-set)
+
+    // 3. Fall back to global provider (covers legacy sessions and /project-set)
     final p = ref.watch(currentProjectProvider);
     if (!p.isActive) return '[no project]';
     // Show localPath if available, otherwise fall back to name

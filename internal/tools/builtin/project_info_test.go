@@ -45,7 +45,7 @@ func TestProjectInfoToolNilFunc(t *testing.T) {
 }
 
 func TestProjectInfoToolNilReturn(t *testing.T) {
-	tool := NewProjectInfoTool(func() map[string]any {
+	tool := NewProjectInfoTool(func(workingDir string) map[string]any {
 		return nil
 	})
 	result, err := tool.Execute(context.Background(), nil)
@@ -68,7 +68,7 @@ func TestProjectInfoToolWithData(t *testing.T) {
 		"branch": "main",
 		"dirty":  true,
 	}
-	tool := NewProjectInfoTool(func() map[string]any {
+	tool := NewProjectInfoTool(func(workingDir string) map[string]any {
 		return expected
 	})
 	result, err := tool.Execute(context.Background(), nil)
@@ -84,5 +84,46 @@ func TestProjectInfoToolWithData(t *testing.T) {
 	}
 	if m["branch"] != "main" {
 		t.Errorf("expected branch 'main', got %v", m["branch"])
+	}
+}
+
+// TestProjectInfoToolWorkingDirFunc verifies that SetWorkingDirFunc causes
+// Execute to pass the resolved directory to the getInfo closure.
+func TestProjectInfoToolWorkingDirFunc(t *testing.T) {
+	var receivedDir string
+	tool := NewProjectInfoTool(func(workingDir string) map[string]any {
+		receivedDir = workingDir
+		return map[string]any{"name": "test", "path": workingDir}
+	})
+	tool.SetWorkingDirFunc(func() string { return "/custom/session/path" })
+	result, err := tool.Execute(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	m, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map[string]any, got %T", result)
+	}
+	if m["path"] != "/custom/session/path" {
+		t.Errorf("expected path '/custom/session/path', got %v", m["path"])
+	}
+	if receivedDir != "/custom/session/path" {
+		t.Errorf("closure received %q, want '/custom/session/path'", receivedDir)
+	}
+}
+
+// TestProjectInfoToolWorkingDirFuncEmptyFallack verifies that when
+// workingDirFunc returns an empty string, Execute passes empty to the
+// closure (which is expected to fall back to os.Getwd()).
+func TestProjectInfoToolWorkingDirFuncEmptyFallback(t *testing.T) {
+	var receivedDir string
+	tool := NewProjectInfoTool(func(workingDir string) map[string]any {
+		receivedDir = workingDir
+		return map[string]any{"status": "fallback"}
+	})
+	tool.SetWorkingDirFunc(func() string { return "" })
+	_, _ = tool.Execute(context.Background(), nil)
+	if receivedDir != "" {
+		t.Errorf("closure received %q, want empty (fallback)", receivedDir)
 	}
 }

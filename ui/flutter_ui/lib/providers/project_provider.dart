@@ -106,3 +106,56 @@ final currentProjectProvider =
     StateNotifierProvider<CurrentProjectNotifier, CurrentProject>((ref) {
   return CurrentProjectNotifier(ref.watch(sdkClientProvider));
 });
+
+/// Session-scoped project status provider.
+///
+/// A [FutureProvider.family] keyed by projectId. Fetches the project's
+/// metadata (name, mode, localPath) from [listProjects] and its live git
+/// state (branch, dirty) from [getProjectStatus], returning a populated
+/// [CurrentProject] — the same model used by [currentProjectProvider] — so
+/// consumers can treat both surfaces uniformly.
+///
+/// Errors degrade gracefully to [CurrentProject.empty] so the status bar
+/// renders its "no project" affordance rather than throwing.
+final projectStatusProvider =
+    FutureProvider.family<CurrentProject, String>((ref, projectId) async {
+  final client = ref.watch(sdkClientProvider);
+  try {
+    // Fetch project details (name, mode, localPath) from the projects list.
+    final projects = await client.listProjects();
+    final match = projects.firstWhere(
+      (p) => p['id'] == projectId,
+      orElse: () => const <String, dynamic>{},
+    );
+    if (match.isEmpty) {
+      // Project not found — possibly deleted or stale session binding.
+      return CurrentProject.empty;
+    }
+
+    final project = Project.fromJson(match);
+    String branch = '';
+    bool dirty = false;
+    if (project.mode == 'git') {
+      try {
+        final status = await client.getProjectStatus(projectId);
+        branch = status['branch'] as String? ?? '';
+        dirty = status['dirty'] as bool? ?? false;
+      } catch (e) {
+        // Best-effort: branch/dirty are optional indicators.
+        debugPrint('[warn] projectStatusProvider($projectId) status fetch: $e');
+      }
+    }
+
+    return CurrentProject(
+      id: project.id,
+      name: project.name,
+      mode: project.mode,
+      branch: branch,
+      dirty: dirty,
+      localPath: project.localPath,
+    );
+  } catch (e) {
+    debugPrint('[warn] projectStatusProvider($projectId): $e');
+    return CurrentProject.empty;
+  }
+});

@@ -2,6 +2,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -145,4 +146,20 @@ func (m *Manager) LoopsForTask(taskID string) []*AgentLoop {
 		}
 	}
 	return result
+}
+
+// ResolveProjectPath looks up a project's LocalPath by its ID using the
+// project manager wired into the Manager. Returns empty string if the
+// project manager is nil, the project ID is empty, or the lookup fails.
+// This is used to recover the working directory for legacy sessions that
+// have a ProjectID but no ProjectPath (pre-fix sessions).
+func (m *Manager) ResolveProjectPath(ctx context.Context, projectID string) string {
+	if m == nil || m.projectMgr == nil || projectID == "" {
+		return ""
+	}
+	p, err := m.projectMgr.Get(ctx, projectID)
+	if err != nil || p == nil {
+		return ""
+	}
+	return p.LocalPath
 }

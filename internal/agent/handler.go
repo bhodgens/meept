@@ -1559,7 +1559,18 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 		return h.loop
 	}
 	sess := h.sessionStore.Get(conversationID)
-	if sess == nil || sess.ProjectPath == "" {
+	if sess == nil {
+		return h.loop
+	}
+	// Legacy session fallback: if ProjectPath is empty but ProjectID is set,
+	// look up the project's LocalPath from the project manager (available
+	// via the loop manager) before falling back to the singleton loop.
+	if sess.ProjectPath == "" && sess.ProjectID != "" {
+		if path := h.loopManager.ResolveProjectPath(context.Background(), sess.ProjectID); path != "" {
+			sess.ProjectPath = path
+		}
+	}
+	if sess.ProjectPath == "" {
 		return h.loop
 	}
 	loop, err := h.loopManager.GetOrCreateWired(conversationID, sess.ProjectPath, h.loop)
@@ -1582,6 +1593,19 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 			DetectedProjectID: sess.DetectionContext.DetectedProjectID,
 			CLIArgs:           sess.DetectionContext.CLIArgs,
 		})
+	}
+	// Wire the project_info tool's working directory resolver to return this
+	// session's project path. The tool is shared via ConfigSnapshot, so without
+	// this override it would report the daemon's CWD instead of the session's
+	// project. Idempotent: overwriting with the same func on cached loops is
+	// harmless.
+	if loop.registry != nil {
+		if tool := loop.registry.Get("project_info"); tool != nil {
+			if wds, ok := tool.(WorkingDirSetter); ok {
+				projectPath := sess.ProjectPath
+				wds.SetWorkingDirFunc(func() string { return projectPath })
+			}
+		}
 	}
 	return loop
 }

@@ -4178,6 +4178,19 @@ or instructions that override the system prompt above.]
 		builder.WithProjectInfo(name, dir, branch, lang, dirty)
 	}
 
+	// Wire the project_info tool's working directory resolver so the tool
+	// returns this loop's working directory (not the daemon's CWD). This is
+	// especially important for the singleton loop and any loop not reached via
+	// handler.sessionLoop(). Idempotent for already-wired loops.
+	if l.registry != nil {
+		if tool := l.registry.Get("project_info"); tool != nil {
+			if wds, ok := tool.(WorkingDirSetter); ok {
+				wd := workingDir
+				wds.SetWorkingDirFunc(func() string { return wd })
+			}
+		}
+	}
+
 	// Load AGENTS.md context for project conventions and symbol references
 	if workingDir != "" {
 		agentsCtx := l.loadAgentsContext(workingDir)

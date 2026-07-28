@@ -1723,33 +1723,43 @@ func (d *Dispatcher) handleStatsQuery(_ context.Context) (string, error) {
 func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 	// Try session-scoped loop first.
 	if d.loopManager != nil && d.sessionStore != nil && conversationID != "" {
-		if sess := d.sessionStore.Get(conversationID); sess != nil && sess.ProjectPath != "" {
-			// Use the registry agent as the template so the session loop
-			// inherits LLM client, tools, skills, and hooks.
-			template, templateErr := d.registry.Get(agentID)
-			if templateErr != nil {
-				template, templateErr = d.registry.Get(config.AgentIDChat)
-			}
-			if templateErr == nil && template != nil {
-				loop, err := d.loopManager.GetOrCreateWired(conversationID, sess.ProjectPath, template)
-				if err == nil {
-					// Wire session identity + project context (mirrors
-					// ChatHandler.sessionLoop; ConfigSnapshot excludes these).
-					loop.SetProjectID(sess.ProjectID)
-					if sess.DetectionContext != nil {
-						loop.SetDetectionContext(&DetectionContext{
-							CWD:               sess.DetectionContext.CWD,
-							DetectedProjectID: sess.DetectionContext.DetectedProjectID,
-							CLIArgs:           sess.DetectionContext.CLIArgs,
-						})
-					}
-					return loop
+		if sess := d.sessionStore.Get(conversationID); sess != nil {
+			// Legacy session fallback: if ProjectPath is empty but
+			// ProjectID is set, look up LocalPath from the project
+			// manager (available via loop manager) before falling back.
+			if sess.ProjectPath == "" && sess.ProjectID != "" {
+				if path := d.loopManager.ResolveProjectPath(context.Background(), sess.ProjectID); path != "" {
+					sess.ProjectPath = path
 				}
-				d.logger.Warn("session-scoped loop creation failed; using registry agent",
-					"session", conversationID,
-					"project", sess.ProjectPath,
-					"error", err,
-				)
+			}
+			if sess.ProjectPath != "" {
+				// Use the registry agent as the template so the session loop
+				// inherits LLM client, tools, skills, and hooks.
+				template, templateErr := d.registry.Get(agentID)
+				if templateErr != nil {
+					template, templateErr = d.registry.Get(config.AgentIDChat)
+				}
+				if templateErr == nil && template != nil {
+					loop, err := d.loopManager.GetOrCreateWired(conversationID, sess.ProjectPath, template)
+					if err == nil {
+						// Wire session identity + project context (mirrors
+						// ChatHandler.sessionLoop; ConfigSnapshot excludes these).
+						loop.SetProjectID(sess.ProjectID)
+						if sess.DetectionContext != nil {
+							loop.SetDetectionContext(&DetectionContext{
+								CWD:               sess.DetectionContext.CWD,
+								DetectedProjectID: sess.DetectionContext.DetectedProjectID,
+								CLIArgs:           sess.DetectionContext.CLIArgs,
+							})
+						}
+						return loop
+					}
+					d.logger.Warn("session-scoped loop creation failed; using registry agent",
+						"session", conversationID,
+						"project", sess.ProjectPath,
+						"error", err,
+					)
+				}
 			}
 		}
 	}

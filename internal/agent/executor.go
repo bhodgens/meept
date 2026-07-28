@@ -267,6 +267,7 @@ var ToolActionMap = map[string]string{
 	ToolPlatformStatus: "platform_read",
 	ToolPlatformAgents: "platform_read",
 	ToolPlatformTools:  "platform_read",
+	"project_info":     "platform_read",
 
 	// Task management
 	"task_create": "task_write",
@@ -289,6 +290,13 @@ var ToolActionMap = map[string]string{
 	"lsp_hover":             ToolCodeRead,
 	"lsp_workspace_symbols": ToolCodeRead,
 	"lsp_diagnostics":       ToolCodeRead,
+}
+
+// WorkingDirSetter is implemented by tools that accept a session-scoped
+// working directory resolver (e.g. ProjectInfoTool). The agent layer uses
+// this interface to avoid importing the builtin package (which imports agent).
+type WorkingDirSetter interface {
+	SetWorkingDirFunc(fn func() string)
 }
 
 // ToolRegistry provides access to available tools.
@@ -959,6 +967,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 			ToolPlatformTools:    true,
 			ToolMemorySearch:     true,
 			ToolMemoryGetContext: true,
+			"project_info":       true,
 		}
 		if !allowedSafeTools[toolName] {
 			e.logger.Error("Tool execution blocked: security not configured (fail-closed)",
