@@ -236,12 +236,18 @@ class ChatNotifier extends StateNotifier<ChatState> {
       websocket.unsubscribeFromChat(_sessionId!);
     }
 
-    // Clear previous messages when loading a new session
-    state = const ChatState(
-      messages: [],
-      isLoading: true,
-      error: null,
-    );
+    // Clear previous messages only when switching to a DIFFERENT session.
+    // Reloading the same session (e.g. coming back from another tab) preserves
+    // existing messages to avoid the "sent message disappears" flicker while
+    // the HTTP fetch is in flight.
+    final isSessionSwitch = _sessionId != sessionId;
+    if (isSessionSwitch) {
+      state = const ChatState(
+        messages: [],
+        isLoading: true,
+        error: null,
+      );
+    }
 
     // Update session scope so the existing subscription filters correctly
     _sessionId = sessionId;
@@ -532,6 +538,15 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// Add a chat message from websocket stream
   void addStreamMessage(Map<String, dynamic> data) {
     try {
+      // Guard: ignore messages for a different session. The WS stream is
+      // filtered by sessionId, but events already past the filter when the
+      // subscription is cancelled still arrive. Without this guard, a
+      // response for session A lands in session B's state after switching.
+      final msgSessionId = data['session_id'] as String?;
+      if (msgSessionId != null && _sessionId != null && msgSessionId != _sessionId) {
+        return;
+      }
+
       // Destructive-tool confirmation requests are detected before the
       // normal chat-message handling so the UI can render
       // DestructiveConfirmationDialog instead of treating the payload as a
