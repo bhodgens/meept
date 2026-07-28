@@ -1594,19 +1594,11 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 			CLIArgs:           sess.DetectionContext.CLIArgs,
 		})
 	}
-	// Wire the project_info tool's working directory resolver to return this
-	// session's project path. The tool is shared via ConfigSnapshot, so without
-	// this override it would report the daemon's CWD instead of the session's
-	// project. Idempotent: overwriting with the same func on cached loops is
-	// harmless.
-	if loop.registry != nil {
-		if tool := loop.registry.Get("project_info"); tool != nil {
-			if wds, ok := tool.(WorkingDirSetter); ok {
-				projectPath := sess.ProjectPath
-				wds.SetWorkingDirFunc(func() string { return projectPath })
-			}
-		}
-	}
+	// Note: project_info tool resolution is handled via context injection
+	// in AgentLoop.executeToolCalls (tools.ContextWithWorkingDir), not via
+	// SetWorkingDirFunc here. The context approach avoids a race condition
+	// where multiple sessions sharing the same tool registry pointer would
+	// overwrite each other's working directory resolver.
 	return loop
 }
 
