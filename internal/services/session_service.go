@@ -25,6 +25,10 @@ type ProjectResolver interface {
 	// Get retrieves a project by ID. Used when the client explicitly
 	// requests a specific project for a new session.
 	Get(ctx context.Context, id string) (*project.Project, error)
+	// CreateOrResolve resolves or registers a project from a filesystem
+	// path. Used when the client provides a CWD (detection context) so the
+	// session binds to the user's actual repo instead of a synthetic default.
+	CreateOrResolve(ctx context.Context, arg string) (*project.Project, error)
 }
 
 // NewSessionService creates a session service.
@@ -69,7 +73,8 @@ func (s *SessionService) CreateSession(ctx context.Context, req CreateSessionReq
 
 	// Project resolution priority:
 	//   1. Explicit project_id from the client (GUI project selection)
-	//   2. Fall back to the active/default project
+	//   2. CWD from detection context (binds to user's actual repo)
+	//   3. Fall back to the active/default project
 	if s.pm != nil {
 		var p *project.Project
 		if req.ProjectID != "" {
@@ -78,6 +83,17 @@ func (s *SessionService) CreateSession(ctx context.Context, req CreateSessionReq
 				s.logger.Warn("explicit project lookup failed, falling back to default",
 					"session_id", sess.ID,
 					"project_id", req.ProjectID,
+					"error", err,
+				)
+				p = nil
+			}
+		}
+		if p == nil && req.DetectionContext != nil && req.DetectionContext.CWD != "" {
+			p, err = s.pm.CreateOrResolve(ctx, req.DetectionContext.CWD)
+			if err != nil {
+				s.logger.Warn("CWD-based project resolution failed, falling back to default",
+					"session_id", sess.ID,
+					"cwd", req.DetectionContext.CWD,
 					"error", err,
 				)
 				p = nil
