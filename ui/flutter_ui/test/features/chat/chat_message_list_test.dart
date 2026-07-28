@@ -90,10 +90,10 @@ class _StubTtsNotifier extends StateNotifier<TtsState> implements TtsNotifier {
 }
 
 class _TestChatNotifier extends ChatNotifier {
-  _TestChatNotifier({required super.sdkClient, required super.websocket, required super.ttsNotifier});
+  _TestChatNotifier({required super.sdkClient, required super.websocket, required super.ttsNotifier, required super.sessionId});
 
   @override
-  Future<void> loadMessages(String sessionId) async {
+  Future<void> loadMessages() async {
     // No-op in tests - state is set directly
   }
 }
@@ -120,7 +120,7 @@ class _InitialChatStateState extends ConsumerState<_InitialChatState> {
     // Set initial state immediately (before first frame)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        ref.read(chatProvider.notifier).state = widget.initialState;
+        ref.read(chatProvider("test-session").notifier).state = widget.initialState;
       }
     });
   }
@@ -137,11 +137,12 @@ Widget _buildTestApp({
 }) {
   return ProviderScope(
     overrides: [
-      chatProvider.overrideWith(
-        (_) => _TestChatNotifier(
+      chatProvider("test-session").overrideWith(
+        (ref) => _TestChatNotifier(
           sdkClient: _StubSdkClient(),
           websocket: _StubWebSocket(),
           ttsNotifier: _StubTtsNotifier(),
+          sessionId: "test-session",
         ),
       ),
     ],
@@ -322,11 +323,12 @@ void main() {
       late ProviderContainer container;
       await tester.pumpWidget(ProviderScope(
         overrides: [
-          chatProvider.overrideWith(
-            (_) => _TestChatNotifier(
+          chatProvider("test-session").overrideWith(
+            (ref) => _TestChatNotifier(
               sdkClient: _StubSdkClient(),
               websocket: _StubWebSocket(),
               ttsNotifier: _StubTtsNotifier(),
+              sessionId: "test-session",
             ),
           ),
         ],

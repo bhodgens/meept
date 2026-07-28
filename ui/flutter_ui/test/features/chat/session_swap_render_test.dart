@@ -109,10 +109,11 @@ class _TestChatNotifier extends ChatNotifier {
     required super.sdkClient,
     required super.websocket,
     required super.ttsNotifier,
+    required super.sessionId,
   });
 
   @override
-  Future<void> loadMessages(String sessionId) async {
+  Future<void> loadMessages() async {
     // No-op — state is set directly by tests.
   }
 }
@@ -138,7 +139,7 @@ class _InitialChatStateState extends ConsumerState<_InitialChatState> {
     super.didChangeDependencies();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        ref.read(chatProvider.notifier).state = widget.initialState;
+        ref.read(chatProvider("test-session").notifier).state = widget.initialState;
       }
     });
   }
@@ -153,11 +154,12 @@ Widget _buildTestApp({
 }) {
   return ProviderScope(
     overrides: [
-      chatProvider.overrideWith(
-        (_) => _TestChatNotifier(
+      chatProvider("test-session").overrideWith(
+        (ref) => _TestChatNotifier(
           sdkClient: _StubSdkClient(),
           websocket: _StubWebSocket(),
           ttsNotifier: _StubTtsNotifier(),
+          sessionId: "test-session",
         ),
       ),
     ],

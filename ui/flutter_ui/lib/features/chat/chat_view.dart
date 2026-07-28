@@ -41,7 +41,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
     // Listen for destructive-tool confirmation requests surfaced by the
     // ChatNotifier. When one arrives, show DestructiveConfirmationDialog
     // and forward the user's decision back via resolveConfirmation.
-    ref.listen<ChatState?>(chatProvider, (previous, next) {
+    ref.listen<ChatState?>(chatProvider(widget.sessionId), (previous, next) {
       final pending = next?.pendingConfirmation;
       if (pending == null) return;
       if (!mounted) return;
@@ -57,7 +57,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
       ).then((confirmed) {
         _dialogShown = false;
         if (mounted) {
-          ref.read(chatProvider.notifier).resolveConfirmation(confirmed ?? false);
+          ref.read(chatProvider(widget.sessionId).notifier).resolveConfirmation(confirmed ?? false);
         }
       });
     });

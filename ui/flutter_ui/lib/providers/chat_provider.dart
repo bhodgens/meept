@@ -195,19 +195,29 @@ class ChatState {
   }
 }
 
-/// StateNotifier that manages chat messages for a session
+/// StateNotifier that manages chat messages for a session.
+/// Each sessionId gets its own isolated ChatNotifier instance via the
+/// .family provider — no shared mutable state across sessions.
 class ChatNotifier extends StateNotifier<ChatState> {
-  ChatNotifier({required this.sdkClient, required this.websocket, required this.ttsNotifier})
-      : super(const ChatState()) {
+  ChatNotifier({
+    required this.sdkClient,
+    required this.websocket,
+    required this.ttsNotifier,
+    required this.sessionId,
+  })  : super(const ChatState()) {
     _initWebSocket();
+    // Auto-load messages on creation — the family provider is created
+    // on first watch, so this happens when the UI first references the
+    // session's chat state.
+    _autoLoadMessages();
   }
 
   final SdkApiClient sdkClient;
   final WebSocketService websocket;
   final TtsNotifier ttsNotifier;
+  final String sessionId;
   StreamSubscription<Map<String, dynamic>>? _wsChatSubscription;
   StreamSubscription<Map<String, dynamic>>? _progressSubscription;
-  String? _sessionId;
   int _loadGeneration = 0;
 
   /// Prevents duplicate message sends from rapid button taps
@@ -227,61 +237,44 @@ class ChatNotifier extends StateNotifier<ChatState> {
     websocket.connect();
   }
 
-  /// Load chat history for a session and subscribe to updates
-  Future<void> loadMessages(String sessionId) async {
+  /// Auto-load messages on provider creation. Separated from the
+  /// constructor body so it can be async without blocking construction.
+  Future<void> _autoLoadMessages() async {
+    await loadMessages();
+  }
+
+  /// Load chat history for this session and subscribe to updates.
+  /// sessionId is fixed at construction time via the .family provider.
+  Future<void> loadMessages() async {
     final generation = ++_loadGeneration;
 
-    // Unsubscribe from previous session's WS channel to prevent accumulation
-    if (_sessionId != null && _sessionId != sessionId) {
-      websocket.unsubscribeFromChat(_sessionId!);
-    }
+    // Clear messages while loading
+    state = const ChatState(
+      messages: [],
+      isLoading: true,
+      error: null,
+    );
 
-    // Clear previous messages only when switching to a DIFFERENT session.
-    // Reloading the same session (e.g. coming back from another tab) preserves
-    // existing messages to avoid the "sent message disappears" flicker while
-    // the HTTP fetch is in flight.
-    final isSessionSwitch = _sessionId != sessionId;
-    if (isSessionSwitch) {
-      state = const ChatState(
-        messages: [],
-        isLoading: true,
-        error: null,
-      );
-    }
-
-    // Update session scope so the existing subscription filters correctly
-    _sessionId = sessionId;
-
-    // Cancel any existing WS subscription before the HTTP fetch to avoid the
-    // race where WS messages arrive during the fetch and are then overwritten.
+    // Cancel any existing WS subscription before the HTTP fetch
     _wsChatSubscription?.cancel();
     _wsChatSubscription = null;
+    _progressSubscription?.cancel();
+    _progressSubscription = null;
 
     // Fetch messages from the HTTP API
     try {
-      // SdkApiClient.getMessages returns the raw `messages` array — callers
-      // deserialize each entry via ChatMessage.fromBackendMessage because
-      // the OpenAPI spec leaves the ChatMessage entity untyped.
       final rawMessages = await sdkClient.getMessages(sessionId);
-      debugPrint('[session-debug] loadMessages: sessionId=$sessionId rawMessages.length=${rawMessages.length}');
-      if (rawMessages.isNotEmpty) {
-        debugPrint('[session-debug] loadMessages: first raw message keys=${rawMessages.first.keys.toList()}');
-      }
       if (_disposed) return;
       final messages = rawMessages
           .map((m) => ChatMessage.fromBackendMessage(m))
           .toList(growable: false);
+      if (_disposed || generation != _loadGeneration) return;
       state = ChatState(
         messages: messages,
         isLoading: false,
       );
     } catch (e) {
       if (_disposed) return;
-      // Surface load failures via chatState.error so the UI can render the
-      // standard ErrorBanner.  Previously a fabricated 'default' session ID
-      // was special-cased here to swallow the inevitable 404, but ChatTab is
-      // now only ever created with a real session ID (see TabContent), so
-      // the special-case is no longer needed.
       state = ChatState(
         messages: [],
         isLoading: false,
@@ -291,19 +284,14 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
     if (_disposed || generation != _loadGeneration) return;
 
-    // Set up WS subscription AFTER the HTTP fetch completes so that any
-    // messages arriving via WS are appended to (not replaced by) the fetch.
+    // Set up WS subscription AFTER the HTTP fetch completes
     _wsChatSubscription = websocket.subscribeToChat(sessionId).listen((message) {
       addStreamMessage(message);
     });
 
     // Subscribe to agent progress for this session
-    _progressSubscription?.cancel();
     _progressSubscription = websocket.subscribeToAgentProgress(sessionId).listen((message) {
       if (_disposed) return;
-      // Destructive tools may surface their phase-1 confirmation request
-      // via agent_progress events.  Detect and stash in state so the UI
-      // can show DestructiveConfirmationDialog.
       final confirmation = _extractConfirmationRequest(message);
       if (confirmation != null) {
         state = state.copyWith(pendingConfirmation: confirmation);
@@ -538,12 +526,11 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// Add a chat message from websocket stream
   void addStreamMessage(Map<String, dynamic> data) {
     try {
-      // Guard: ignore messages for a different session. The WS stream is
-      // filtered by sessionId, but events already past the filter when the
-      // subscription is cancelled still arrive. Without this guard, a
-      // response for session A lands in session B's state after switching.
+      // Defense-in-depth: ignore messages for a different session. With
+      // the .family provider each session has its own WS subscription
+      // filtered by sessionId, but this guard catches any edge cases.
       final msgSessionId = data['session_id'] as String?;
-      if (msgSessionId != null && _sessionId != null && msgSessionId != _sessionId) {
+      if (msgSessionId != null && msgSessionId != sessionId) {
         return;
       }
 
@@ -724,20 +711,26 @@ class ChatNotifier extends StateNotifier<ChatState> {
     _wsChatSubscription = null;
     _progressSubscription?.cancel();
     _progressSubscription = null;
-    if (_sessionId != null) {
-      websocket.unsubscribeFromChat(_sessionId!);
-    }
+    websocket.unsubscribeFromChat(sessionId);
     super.dispose();
   }
 }
 
-/// Chat provider
+/// Chat provider — keyed by sessionId so each session has its own
+/// isolated ChatNotifier with its own state, WS subscription, and
+/// progress subscription. This eliminates the cross-session race
+/// condition where responses from one session appeared in another.
 final chatProvider =
-    StateNotifierProvider<ChatNotifier, ChatState>((ref) {
+    StateNotifierProvider.family<ChatNotifier, ChatState, String>((ref, sessionId) {
   final client = ref.watch(sdkClientProvider);
   final websocket = ref.watch(websocketProvider);
   final ttsNotifier = ref.read(ttsProvider.notifier);
-  return ChatNotifier(sdkClient: client, websocket: websocket, ttsNotifier: ttsNotifier);
+  return ChatNotifier(
+    sdkClient: client,
+    websocket: websocket,
+    ttsNotifier: ttsNotifier,
+    sessionId: sessionId,
+  );
 });
 
 /// Current session ID provider

@@ -104,7 +104,6 @@ class _SessionsListState extends ConsumerState<SessionsList> {
       return;
     }
     ref.read(activeSessionProvider.notifier).state = session;
-    ref.read(chatProvider.notifier).clearMessages();
     ref.read(tabActivationProvider.notifier).state = HomeTab.chat;
     if (mounted) context.go('/');
   }
@@ -136,7 +135,6 @@ class _SessionsListState extends ConsumerState<SessionsList> {
   /// Perform the actual session activation (navigate, clear messages).
   void _doActivateSession(Session session) {
     ref.read(activeSessionProvider.notifier).state = session;
-    ref.read(chatProvider.notifier).clearMessages();
     ref.read(tabActivationProvider.notifier).state = HomeTab.chat;
     context.go('/');
   }

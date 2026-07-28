@@ -64,11 +64,12 @@ Widget _buildTestApp({
 }) {
   return ProviderScope(
     overrides: [
-      chatProvider.overrideWith(
-        (_) => ChatNotifier(
+      chatProvider("test-session").overrideWith(
+        (ref) => ChatNotifier(
           sdkClient: _StubSdkClient(),
           websocket: _StubWebSocket(),
           ttsNotifier: _StubTtsNotifier(),
+          sessionId: "test-session",
         ),
       ),
       agentProvider.overrideWith(
@@ -199,11 +200,12 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            chatProvider.overrideWith(
-              (_) => ChatNotifier(
+            chatProvider("test-session").overrideWith(
+              (ref) => ChatNotifier(
                 sdkClient: _StubSdkClient(),
                 websocket: _StubWebSocket(),
                 ttsNotifier: _StubTtsNotifier(),
+                sessionId: "test-session",
               )..state = const ChatState(isLoading: true),
             ),
             agentProvider.overrideWith(

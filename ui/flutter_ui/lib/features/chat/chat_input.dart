@@ -651,7 +651,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
     );
     if (session != null) {
       ref.read(activeSessionProvider.notifier).state = session;
-      ref.read(chatProvider.notifier).clearMessages();
+      ref.read(chatProvider(widget.sessionId).notifier).clearMessages();
     }
   }
 
@@ -909,11 +909,11 @@ class _ChatInputState extends ConsumerState<ChatInput>
         return true;
       case '/clear':
         _history.add(widget.sessionId, text);
-        ref.read(chatProvider.notifier).clearMessages();
+        ref.read(chatProvider(widget.sessionId).notifier).clearMessages();
         return true;
       case '/stop':
         _history.add(widget.sessionId, text);
-        ref.read(chatProvider.notifier).sendSteer(
+        ref.read(chatProvider(widget.sessionId).notifier).sendSteer(
               sessionId: widget.sessionId,
               text: '/stop',
             );
@@ -979,7 +979,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
     // Capture first-message state before sending so the auto-derivation
     // fires only on the very first user exchange in a session (parity with
     // the TUI's m.sessionDescription != "" guard in chat.go).
-    final isFirstMessage = ref.read(chatProvider).messages.isEmpty;
+    final isFirstMessage = ref.read(chatProvider(widget.sessionId)).messages.isEmpty;
 
     // Multimodal path: when image attachments are present, build structured
     // content parts and route via sendMessageWithParts.  Slash commands are
@@ -988,7 +988,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
       final parts = _buildParts(text);
       if (parts.isEmpty) return;
       final expanded = _expandPastes(text.trim());
-      final chatNotifier = ref.read(chatProvider.notifier);
+      final chatNotifier = ref.read(chatProvider(widget.sessionId).notifier);
       final activeAgent = ref.read(activeAgentProvider);
       final sentText = expanded.isNotEmpty ? expanded : '(image attached)';
       // Record to history (multimodal sends are real messages).
@@ -1024,7 +1024,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
     // Record to history (only actual chat messages, not local slash commands).
     _history.add(widget.sessionId, finalPayload);
 
-    final chatNotifier = ref.read(chatProvider.notifier);
+    final chatNotifier = ref.read(chatProvider(widget.sessionId).notifier);
     final activeAgent = ref.read(activeAgentProvider);
 
     chatNotifier.sendMessage(
@@ -1091,7 +1091,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
     final payload = _preparePayload(text);
     if (payload.isEmpty) return;
 
-    ref.read(chatProvider.notifier).sendSteer(
+    ref.read(chatProvider(widget.sessionId).notifier).sendSteer(
       sessionId: widget.sessionId,
       text: payload,
     );
@@ -1104,7 +1104,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
     if (event is KeyDownEvent) {
       if (event.logicalKey == LogicalKeyboardKey.enter) {
         // Guard: ignore Enter while LLM is responding (bug F6).
-        if (ref.read(chatProvider).isLoading) return KeyEventResult.ignored;
+        if (ref.read(chatProvider(widget.sessionId)).isLoading) return KeyEventResult.ignored;
 
         final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
 
@@ -1434,7 +1434,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
   }
 
   Widget _buildSendButton() {
-    final chatState = ref.watch(chatProvider);
+    final chatState = ref.watch(chatProvider(widget.sessionId));
     return GestureDetector(
       onTap: chatState.isLoading ? null : () => _sendNormal(_controller.text),
       child: Container(

@@ -83,7 +83,6 @@ class _NoSessionPlaceholderState extends ConsumerState<_NoSessionPlaceholder> {
       return;
     }
     ref.read(activeSessionProvider.notifier).state = session;
-    ref.read(chatProvider.notifier).clearMessages();
     // No setState needed: setting activeSessionProvider re-renders
     // TabContent, which swaps this placeholder out for ChatTab.
   }

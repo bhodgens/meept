@@ -54,8 +54,8 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
 
   Future<void> _loadMessages() async {
     debugPrint('[session-debug] ChatMessageList._loadMessages sessionId=${widget.sessionId}');
-    await ref.read(chatProvider.notifier).loadMessages(widget.sessionId);
-    final st = ref.read(chatProvider);
+    await ref.read(chatProvider(widget.sessionId).notifier);
+    final st = ref.read(chatProvider(widget.sessionId));
     debugPrint('[session-debug] ChatMessageList._loadMessages done: messages=${st.messages.length} isLoading=${st.isLoading} error=${st.error}');
   }
 
@@ -84,7 +84,7 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
 
   @override
   Widget build(BuildContext context) {
-    final chatState = ref.watch(chatProvider);
+    final chatState = ref.watch(chatProvider(widget.sessionId));
     final sessionId = widget.sessionId;
     debugPrint('[session-debug] ChatMessageList.build sessionId=$sessionId messages=${chatState.messages.length} isLoading=${chatState.isLoading} error=${chatState.error}');
     final findVisible = ref.watch(findBarVisibleProvider(sessionId));
@@ -220,7 +220,7 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                 padding: const EdgeInsets.all(8),
                 child: ErrorBanner(
                   message: chatState.error!,
-                  onDismiss: () => ref.read(chatProvider.notifier).clearError(),
+                  onDismiss: () => ref.read(chatProvider(widget.sessionId).notifier).clearError(),
                 ),
               ),
             ),

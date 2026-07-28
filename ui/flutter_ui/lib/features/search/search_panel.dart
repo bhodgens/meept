@@ -572,7 +572,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
       if (!proceed) return;
 
       ref.read(activeSessionProvider.notifier).state = session;
-      ref.read(chatProvider.notifier).loadMessages(session.id);
+      ref.read(chatProvider(session.id).notifier);
       context.go('/');
     } catch (e) {
       // If the session fetch fails, fall back to the sessions list

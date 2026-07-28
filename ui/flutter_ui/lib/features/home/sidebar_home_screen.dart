@@ -126,7 +126,6 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
     _leaderController.onCycleVerbosity = _cycleVerbosity;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(chatProvider);
       unawaited(_onConnectionChanged(ref.read(connectionStateProvider)));
 
       // Sync local selection from any already-active session. The initial

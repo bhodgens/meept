@@ -242,7 +242,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _leaderController.onShowCommandPalette = _showCommandPalette;
     _leaderController.onCycleVerbosity = _cycleVerbosity;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(chatProvider);
       unawaited(_onConnectionChanged(ref.read(connectionStateProvider)));
       // Apply the router-forced initial tab if present.
       final override = TabOverrideScope.of(context);
