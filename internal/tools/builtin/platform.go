@@ -562,9 +562,9 @@ var (
 
 // TerminatingTool implementations for platform tools.
 // These tools return definitive results that do not need LLM follow-up.
-
-// TerminateHint implements tools.TerminatingTool for PlatformStatusTool.
-func (t *PlatformStatusTool) TerminateHint(args map[string]any) bool { return true }
+// PlatformStatusTool is intentionally NOT terminating — its structured
+// (map[string]any) result must flow back through the LLM for formatting
+// so the user sees natural language, not raw JSON.
 
 // TerminateHint implements tools.TerminatingTool for PlatformAgentsTool.
 func (t *PlatformAgentsTool) TerminateHint(args map[string]any) bool { return true }
@@ -572,9 +572,9 @@ func (t *PlatformAgentsTool) TerminateHint(args map[string]any) bool { return tr
 // TerminateHint implements tools.TerminatingTool for PlatformToolsTool.
 func (t *PlatformToolsTool) TerminateHint(args map[string]any) bool { return true }
 
-// Ensure platform tools implement TerminatingTool
+// Ensure platform tools implement TerminatingTool.
+// PlatformStatusTool is excluded — see comment above.
 var (
-	_ tools.TerminatingTool = (*PlatformStatusTool)(nil)
 	_ tools.TerminatingTool = (*PlatformAgentsTool)(nil)
 	_ tools.TerminatingTool = (*PlatformToolsTool)(nil)
 )

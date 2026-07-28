@@ -122,6 +122,7 @@ var BaselineTools = []string{
 	ToolPlatformStatus,
 	ToolPlatformAgents,
 	ToolPlatformTools,
+	"project_info",
 	"delegate_task",
 }
 
