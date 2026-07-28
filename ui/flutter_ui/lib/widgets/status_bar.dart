@@ -127,6 +127,15 @@ class StatusBar extends ConsumerWidget {
   }
 
   String? _projectPart(WidgetRef ref) {
+    // Read from the active session first (per-session project binding),
+    // falling back to the global provider for legacy sessions.
+    final session = ref.watch(activeSessionProvider);
+    if (session?.projectPath != null && session!.projectPath!.isNotEmpty) {
+      final path = session.projectPath!;
+      final name = path.split('/').last;
+      return '[local:$name]';
+    }
+    // Fall back to global provider (covers legacy sessions and /project-set)
     final p = ref.watch(currentProjectProvider);
     if (!p.isActive) return '[no project]';
     // Show localPath if available, otherwise fall back to name
