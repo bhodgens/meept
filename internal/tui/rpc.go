@@ -1223,6 +1223,36 @@ func (c *RPCClient) SetProject(sessionID, projectID string) error {
 	return err
 }
 
+// CreateWorktree creates a session-scoped git worktree.
+func (c *RPCClient) CreateWorktree(sessionID, projectID string) (*types.WorktreeResponse, error) {
+	params := map[string]string{
+		ParamSessionID: sessionID,
+	}
+	if projectID != "" {
+		params["project_id"] = projectID
+	}
+	result, err := c.Call("project.worktree.create", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.WorktreeResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse worktree create response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// RemoveWorktree releases the session's worktree and reverts to the project path.
+func (c *RPCClient) RemoveWorktree(sessionID string) error {
+	params := map[string]string{
+		ParamSessionID: sessionID,
+	}
+	_, err := c.Call("project.worktree.remove", params)
+	return err
+}
+
 // SyncProject synchronizes a project (pulls latest for git projects).
 func (c *RPCClient) SyncProject(id string) error {
 	params := map[string]string{"id": id}

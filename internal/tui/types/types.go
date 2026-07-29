@@ -182,11 +182,13 @@ type Session struct {
 	ActiveThreadID string            `json:"active_thread_id,omitempty"`
 
 	// Session designation (Plan 4.1)
-	Designation    *SessionDesignation `json:"designation,omitempty"`
+	Designation *SessionDesignation `json:"designation,omitempty"`
 
 	// Project binding for agent execution context
-	ProjectID        string `json:"project_id,omitempty"`
-	ProjectPath      string `json:"project_path,omitempty"`
+	ProjectID        string            `json:"project_id,omitempty"`
+	ProjectPath      string            `json:"project_path,omitempty"`
+	WorktreeID       string            `json:"worktree_id,omitempty"`
+	WorktreePath     string            `json:"worktree_path,omitempty"`
 	DetectionContext *DetectionContext `json:"detection_context,omitempty"`
 
 	// Archived controls soft-archive (sort-to-bottom, dimmed rendering).
@@ -527,6 +529,13 @@ type ProjectStatusResponse struct {
 	Ahead         int    `json:"ahead"`
 	Behind        int    `json:"behind"`
 	ModifiedFiles int    `json:"modified_files"`
+}
+
+// WorktreeResponse represents the response from project.worktree.create RPC.
+type WorktreeResponse struct {
+	WorktreeID string `json:"worktree_id"`
+	Path       string `json:"path"`
+	Branch     string `json:"branch"`
 }
 
 // PlanExtended represents a plan with phase details for TUI display.

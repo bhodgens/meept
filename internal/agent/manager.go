@@ -75,25 +75,46 @@ func (m *Manager) GetOrCreate(sessionID string, workingDir string, opts ...LoopO
 // value on the template (per-session isolation). All other config is copied
 // via template.ConfigSnapshot().
 func (m *Manager) GetOrCreateWired(sessionID, workingDir string, template *AgentLoop) (*AgentLoop, error) {
+	// Collect stale loop under lock, Close it outside lock (CLAUDE.md mutex scope rule).
+	var staleLoop *AgentLoop
+
+	func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+
+		if loop, ok := m.loops[sessionID]; ok {
+			// BUG FIX: If the session's project changed (workingDir differs from
+			// the cached loop's), evict the stale loop and create a fresh one.
+			// Without this, /project set would keep using the old project's
+			// working directory for the rest of the session.
+			if loop.GetWorkingDir() != workingDir {
+				slog.Default().Info("evicting session-scoped loop: project changed",
+					"session", sessionID,
+					"old_working_dir", loop.GetWorkingDir(),
+					"new_working_dir", workingDir,
+				)
+				staleLoop = loop
+				delete(m.loops, sessionID)
+				// Fall through to create a new loop
+			} else {
+				return
+			}
+		} else {
+			return
+		}
+	}()
+
+	// Close the stale loop outside the mutex — Close() calls wg.Wait() which blocks.
+	// The mutexio analyzer is static and can't see the IIFE scope boundary, so suppress.
+	if staleLoop != nil {
+		staleLoop.Close() //nolint:mutexio // staleLoop is collected outside lock scope; Close runs after IIFE releases mutex
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if loop, ok := m.loops[sessionID]; ok {
-		// BUG FIX: If the session's project changed (workingDir differs from
-		// the cached loop's), evict the stale loop and create a fresh one.
-		// Without this, /project set would keep using the old project's
-		// working directory for the rest of the session.
-		if loop.GetWorkingDir() != workingDir {
-			slog.Default().Info("evicting session-scoped loop: project changed",
-				"session", sessionID,
-				"old_working_dir", loop.GetWorkingDir(),
-				"new_working_dir", workingDir,
-			)
-			delete(m.loops, sessionID)
-			// Fall through to create a new loop
-		} else {
-			return loop, nil
-		}
+		return loop, nil
 	}
 	if sessionID == "" {
 		return nil, fmt.Errorf("sessionID required")

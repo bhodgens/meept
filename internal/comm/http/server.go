@@ -507,7 +507,35 @@ func (s *Server) handleWSEvent(msg *models.BusMessage) {
 	if !ok || eventType == "" {
 		return
 	}
-	s.wsHub.Broadcast(eventType, frontendData)
+
+	// Extract session_id for per-connection filtering (defense-in-depth).
+	// Events without a session_id are broadcast to all connections.
+	eventSessionID, _ := frontendData["session_id"].(string)
+
+	h := s.wsHub
+	payload, err := json.Marshal(map[string]any{
+		"type": eventType,
+		"data": frontendData,
+	})
+	if err != nil {
+		return
+	}
+
+	h.mu.RLock()
+	conns := make([]*wsConn, 0, len(h.clients))
+	for wc := range h.clients {
+		if eventSessionID == "" || h.ShouldSendProgress(wc, eventSessionID) {
+			conns = append(conns, wc)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, wc := range conns {
+		if err := wc.write(payload); err != nil {
+			s.logger.Warn("ws event write error, removing client", "error", err)
+			h.Unregister(wc, s.progressRateLimiter)
+		}
+	}
 }
 
 // handleWSProgress forwards a synthesized progress event to WebSocket

@@ -2201,6 +2201,19 @@ func (l *AgentLoop) Stop() {
 	l.wg.Wait()
 }
 
+// Close releases resources held by this loop before eviction or shutdown.
+// It waits for background goroutines (reflection, learning, epistemic hooks)
+// to finish, then marks the loop as inactive. Safe to call multiple times
+// (idempotent). Does NOT close shared resources (LLM client, tool registry,
+// security) — those are owned by the daemon and shared via ConfigSnapshot.
+func (l *AgentLoop) Close() {
+	if l == nil {
+		return
+	}
+	l.wg.Wait()
+	l.isActive.Store(false)
+}
+
 // triggerLearning runs the JUDGE/DISTILL learning pipeline asynchronously.
 // The injectedSkills parameter is a snapshot of the skills surfaced into the
 // prompt for this turn; outcomes are recorded against each after the judgment
@@ -4220,14 +4233,62 @@ or instructions that override the system prompt above.]
 	return base
 }
 
+// gitProbeCache caches git branch/dirty/language probes with a short TTL
+// to avoid spawning 3 subprocesses on every system prompt build.
+type gitProbeCache struct {
+	mu      sync.RWMutex
+	entries map[string]*gitProbeEntry
+	ttl     time.Duration
+}
+
+type gitProbeEntry struct {
+	branch    string
+	dirty     bool
+	language  string
+	fetchedAt time.Time
+}
+
+var gitCache = &gitProbeCache{
+	entries: make(map[string]*gitProbeEntry),
+	ttl:     5 * time.Second,
+}
+
+func (c *gitProbeCache) get(dir string) (branch string, dirty bool, language string, ok bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if e, found := c.entries[dir]; found {
+		if time.Since(e.fetchedAt) < c.ttl {
+			return e.branch, e.dirty, e.language, true
+		}
+	}
+	return "", false, "", false
+}
+
+func (c *gitProbeCache) set(dir, branch string, dirty bool, language string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries[dir] = &gitProbeEntry{
+		branch:    branch,
+		dirty:     dirty,
+		language:  language,
+		fetchedAt: time.Now(),
+	}
+}
+
 // resolveProjectInfo derives current project metadata from the loop's working
 // directory and project ID. It returns name, path, git branch, dirty status,
 // detected language, and ok (true when a project is bound). Git probes run via
 // exec.Command and silently ignore errors (non-git directories yield an empty
-// branch and clean status). All git subprocess calls happen outside any lock.
+// branch and clean status). Results are cached with a 5-second TTL to avoid
+// spawning 3 subprocesses on every system-prompt build. All git subprocess calls
+// happen outside any lock.
 func (l *AgentLoop) resolveProjectInfo(workingDir string) (name, dir, branch string, dirty bool, language string, ok bool) {
 	if workingDir == "" {
 		return "", "", "", false, "", false
+	}
+	// check cache first
+	if b, d, lang, cached := gitCache.get(workingDir); cached {
+		return filepath.Base(workingDir), workingDir, b, d, lang, true
 	}
 	dir = workingDir
 	name = filepath.Base(workingDir)
@@ -4236,6 +4297,7 @@ func (l *AgentLoop) resolveProjectInfo(workingDir string) (name, dir, branch str
 	branch = gitCurrentBranch(workingDir)
 	dirty = gitIsDirty(workingDir)
 	language = detectLanguage(workingDir)
+	gitCache.set(workingDir, branch, dirty, language)
 	return name, dir, branch, dirty, language, true
 }
 
@@ -5693,8 +5755,9 @@ func (l *AgentLoop) buildMCPContextSection() string {
 
 // buildTerminateResponse builds a response string from tool execution results.
 // Successful results are joined; string results are used directly (no JSON encoding)
-// to preserve formatting. Non-string results are JSON-encoded. If all results failed,
-// returns "done".
+// to preserve formatting. Non-string results are formatted as human-readable text
+// via formatToolResult to avoid dumping raw JSON to the user. If all results
+// failed, returns "done".
 func (l *AgentLoop) buildTerminateResponse(results []*ExecutionResult) string {
 	var parts []string
 	for _, r := range results {
@@ -5707,17 +5770,54 @@ func (l *AgentLoop) buildTerminateResponse(results []*ExecutionResult) string {
 			parts = append(parts, s)
 			continue
 		}
-		data, err := json.Marshal(r.Result)
-		if err != nil {
-			parts = append(parts, fmt.Sprintf("%v", r.Result))
-		} else {
-			parts = append(parts, string(data))
-		}
+		parts = append(parts, formatToolResult(r.Result))
 	}
 	if len(parts) == 0 {
 		return "done"
 	}
 	return strings.Join(parts, "\n")
+}
+
+// formatToolResult converts a structured tool result (map[string]any, etc.)
+// into a human-readable summary. This prevents raw JSON from reaching the
+// user when a terminating tool returns structured data.
+func formatToolResult(result any) string {
+	if m, ok := result.(map[string]any); ok {
+		// platform agents return {"agents": [{"name": "..."}, ...]}
+		if agents, ok := m["agents"].([]any); ok {
+			var names []string
+			for _, a := range agents {
+				if am, ok := a.(map[string]any); ok {
+					if name, ok := am["name"].(string); ok {
+						names = append(names, name)
+					}
+				}
+			}
+			if len(names) > 0 {
+				return fmt.Sprintf("available agents: %s", strings.Join(names, ", "))
+			}
+		}
+		// platform tools return {"tools": [{"name": "..."}, ...]}
+		if tools, ok := m["tools"].([]any); ok {
+			var names []string
+			for _, t := range tools {
+				if tm, ok := t.(map[string]any); ok {
+					if name, ok := tm["name"].(string); ok {
+						names = append(names, name)
+					}
+				}
+			}
+			if len(names) > 0 {
+				return fmt.Sprintf("available tools: %s", strings.Join(names, ", "))
+			}
+		}
+	}
+	// fallback: indented JSON for unrecognised structured data
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("%v", result)
+	}
+	return string(data)
 }
 
 // recordTaskMetrics records task execution metrics to the task collector.

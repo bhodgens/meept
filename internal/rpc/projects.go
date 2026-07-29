@@ -77,6 +77,8 @@ func (h *ProjectHandler) RegisterProjectMethods(server *Server) {
 	server.RegisterHandler("project.detect", h.handleDetect)
 	server.RegisterHandler("project.readdir", h.handleReadDir)
 	server.RegisterHandler("project.rename", h.handleRename)
+	server.RegisterHandler("project.worktree.create", h.handleWorktreeCreate)
+	server.RegisterHandler("project.worktree.remove", h.handleWorktreeRemove)
 }
 
 // handleList handles project.list RPC calls.
@@ -467,6 +469,97 @@ func (h *ProjectHandler) handleRename(ctx context.Context, params json.RawMessag
 		"name":       p.Name,
 		"local_path": p.LocalPath,
 	}, nil
+}
+
+// handleWorktreeCreate creates a git worktree for the session's project and
+// binds it to the session. The session must already have a project set.
+func (h *ProjectHandler) handleWorktreeCreate(ctx context.Context, params json.RawMessage) (any, error) {
+	pm, err := h.pmOrErr()
+	if err != nil {
+		return nil, err
+	}
+
+	var req struct {
+		SessionID string `json:"session_id"`
+		ProjectID string `json:"project_id"`
+	}
+	if err := json.Unmarshal(params, &req); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	if req.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+
+	// Fall back to the session's stored ProjectID if the caller did not supply one.
+	projectID := req.ProjectID
+	if projectID == "" {
+		sess := h.sessionStore.Get(req.SessionID)
+		if sess == nil {
+			return nil, fmt.Errorf("session not found: %s", req.SessionID)
+		}
+		projectID = sess.ProjectID
+	}
+	if projectID == "" {
+		return nil, fmt.Errorf("no project bound to session; set a project first")
+	}
+
+	wt, err := pm.CreateWorktree(ctx, projectID, req.SessionID, "")
+	if err != nil {
+		return nil, fmt.Errorf("create worktree: %w", err)
+	}
+
+	if h.sessionStore != nil {
+		if err := h.sessionStore.SetWorktree(req.SessionID, wt.ID, wt.Path); err != nil {
+			// Best-effort: the worktree exists on disk, we just failed to
+			// record it on the session. Log and continue.
+			h.logger.Warn("failed to set worktree on session", "error", err, "session", req.SessionID)
+		}
+	}
+
+	return map[string]any{
+		"worktree_id": wt.ID,
+		"path":        wt.Path,
+		"branch":      wt.Branch,
+	}, nil
+}
+
+// handleWorktreeRemove releases the worktree bound to a session and clears the
+// session's worktree association.
+func (h *ProjectHandler) handleWorktreeRemove(ctx context.Context, params json.RawMessage) (any, error) {
+	pm, err := h.pmOrErr()
+	if err != nil {
+		return nil, err
+	}
+
+	var req struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(params, &req); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	if req.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+
+	sess := h.sessionStore.Get(req.SessionID)
+	if sess == nil {
+		return nil, fmt.Errorf("session not found: %s", req.SessionID)
+	}
+	if sess.WorktreeID == "" {
+		return nil, fmt.Errorf("session has no worktree")
+	}
+
+	if err := pm.ReleaseWorktree(ctx, sess.WorktreeID); err != nil {
+		return nil, fmt.Errorf("release worktree: %w", err)
+	}
+
+	if h.sessionStore != nil {
+		if err := h.sessionStore.SetWorktree(req.SessionID, "", ""); err != nil {
+			h.logger.Warn("failed to clear worktree on session", "error", err, "session", req.SessionID)
+		}
+	}
+
+	return map[string]string{RPCKeyStatus: "removed"}, nil
 }
 
 // HandleReadDirForTest is an exported wrapper for handleReadDir used in integration tests.

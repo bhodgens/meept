@@ -172,6 +172,10 @@ func (s *SQLiteStore) migrate() error {
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN project_path TEXT DEFAULT ''", "project_path")
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN no_fence BOOLEAN DEFAULT 0", "no_fence")
 
+	// Add worktree association columns to sessions
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN worktree_id TEXT DEFAULT ''", "worktree_id")
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN worktree_path TEXT DEFAULT ''", "worktree_path")
+
 	// Add archived column (soft-archive flag; default 0 = not archived).
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN archived BOOLEAN DEFAULT 0", "archived")
 
@@ -487,7 +491,7 @@ func (s *SQLiteStore) GetMostRecent() *Session {
 	defer s.mu.RUnlock()
 
 	row := s.db.QueryRow(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path
 		FROM sessions
 		ORDER BY last_activity DESC
 		LIMIT 1`) //nolint:mutexio // mutex serializes sqlite connection access
@@ -499,7 +503,7 @@ func (s *SQLiteStore) getByColumn(column, value string) *Session {
 	// #nosec G201 -- column name is hardcoded at call sites, not user input
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path
 		FROM sessions
 		WHERE %s = ?`, column)
 
@@ -515,11 +519,12 @@ func (s *SQLiteStore) scanSession(row *sql.Row) *Session {
 		description               sql.NullString
 		leafMessageID             sql.NullInt64
 		projectID, projectPath    sql.NullString
+		worktreeID, worktreePath  sql.NullString
 		noFence                   bool
 		archived                  bool
 	)
 
-	err := row.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived)
+	err := row.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived, &worktreeID, &worktreePath)
 	if err != nil {
 		if err != sql.ErrNoRows {
 			s.logger.Error("Failed to scan session", "error", err)
@@ -547,6 +552,12 @@ func (s *SQLiteStore) scanSession(row *sql.Row) *Session {
 	if projectPath.Valid {
 		session.ProjectPath = projectPath.String
 	}
+	if worktreeID.Valid {
+		session.WorktreeID = worktreeID.String
+	}
+	if worktreePath.Valid {
+		session.WorktreePath = worktreePath.String
+	}
 
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 		session.CreatedAt = t
@@ -571,7 +582,7 @@ func (s *SQLiteStore) List() ([]*Session, error) {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description, s.leaf_message_id, s.project_id, s.project_path, s.no_fence, s.archived
+		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description, s.leaf_message_id, s.project_id, s.project_path, s.no_fence, s.archived, s.worktree_id, s.worktree_path
 		FROM sessions s
 		ORDER BY s.archived ASC, s.last_activity DESC`) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
@@ -597,11 +608,12 @@ func (s *SQLiteStore) scanSessionRows(rows *sql.Rows) []*Session {
 			description               sql.NullString
 			leafMessageID             sql.NullInt64
 			projectID, projectPath    sql.NullString
+			worktreeID, worktreePath  sql.NullString
 			noFence                   bool
 			archived                  bool
 		)
 
-		if err := rows.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived); err != nil {
+		if err := rows.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived, &worktreeID, &worktreePath); err != nil {
 			s.logger.Error("Failed to scan session row", "error", err)
 			continue
 		}
@@ -625,6 +637,12 @@ func (s *SQLiteStore) scanSessionRows(rows *sql.Rows) []*Session {
 		}
 		if projectPath.Valid {
 			session.ProjectPath = projectPath.String
+		}
+		if worktreeID.Valid {
+			session.WorktreeID = worktreeID.String
+		}
+		if worktreePath.Valid {
+			session.WorktreePath = worktreePath.String
 		}
 
 		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
@@ -1169,7 +1187,7 @@ func (s *SQLiteStore) getByColumnUnsafe(column, value string) *Session {
 	// #nosec G201 -- column name is hardcoded at call sites, not user input
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path
 		FROM sessions
 		WHERE %s = ?`, column)
 
@@ -1186,7 +1204,7 @@ func (s *SQLiteStore) updateSession(session *Session) error {
 
 	result, err := s.db.Exec(`
 		UPDATE sessions
-		SET name = ?, attached_clients = ?, worker_ids = ?, last_activity = ?, description = ?, leaf_message_id = ?, project_id = ?, project_path = ?, no_fence = ?
+		SET name = ?, attached_clients = ?, worker_ids = ?, last_activity = ?, description = ?, leaf_message_id = ?, project_id = ?, project_path = ?, no_fence = ?, worktree_id = ?, worktree_path = ?
 		WHERE id = ?`,
 		session.Name,
 		string(attachedJSON),
@@ -1197,6 +1215,8 @@ func (s *SQLiteStore) updateSession(session *Session) error {
 		session.ProjectID,
 		session.ProjectPath,
 		session.NoFence,
+		session.WorktreeID,
+		session.WorktreePath,
 		session.ID,
 	)
 
@@ -1263,6 +1283,25 @@ func (s *SQLiteStore) SetProject(sessionID, projectID, projectPath string) error
 	) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return fmt.Errorf("failed to set project for session: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
+// SetWorktree updates the worktree association for a session.
+func (s *SQLiteStore) SetWorktree(sessionID, worktreeID, worktreePath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec(
+		`UPDATE sessions SET worktree_id = ?, worktree_path = ?, last_activity = ? WHERE id = ?`,
+		worktreeID, worktreePath, time.Now().UTC().Format(time.RFC3339), sessionID,
+	) //nolint:mutexio // mutex serializes sqlite connection access
+	if err != nil {
+		return fmt.Errorf("failed to set worktree for session: %w", err)
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {

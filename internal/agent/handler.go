@@ -100,12 +100,12 @@ type Worker struct {
 
 // ChatRequest is the expected payload for chat.request messages.
 type ChatRequest struct {
-	Message        string              `json:"message"`
-	ConversationID string              `json:"conversation_id"`
-	SessionID      string              `json:"session_id,omitempty"` // original session ID for persistence
-	AgentID        string              `json:"agent_id,omitempty"`   // agent override from the client
-	SourceClient   string              `json:"source_client,omitempty"`
-	Parts          []llm.ContentPart   `json:"parts,omitempty"`
+	Message        string            `json:"message"`
+	ConversationID string            `json:"conversation_id"`
+	SessionID      string            `json:"session_id,omitempty"` // original session ID for persistence
+	AgentID        string            `json:"agent_id,omitempty"`   // agent override from the client
+	SourceClient   string            `json:"source_client,omitempty"`
+	Parts          []llm.ContentPart `json:"parts,omitempty"`
 }
 
 // ChatResponse is the payload for chat.response messages.
@@ -1574,13 +1574,17 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 	// workingDir from the session's project path. The registry creates
 	// loops with workingDir="" (registry.go line 422), so the singleton
 	// would otherwise have an empty working directory.
-	if sess.ProjectPath != "" {
-		h.loop.SetWorkingDir(sess.ProjectPath)
+	workingPath := sess.ProjectPath
+	if sess.WorktreePath != "" {
+		workingPath = sess.WorktreePath
 	}
-	if sess.ProjectPath == "" {
+	if workingPath != "" {
+		h.loop.SetWorkingDir(workingPath)
+	}
+	if workingPath == "" {
 		return h.loop
 	}
-	loop, err := h.loopManager.GetOrCreateWired(conversationID, sess.ProjectPath, h.loop)
+	loop, err := h.loopManager.GetOrCreateWired(conversationID, workingPath, h.loop)
 	if err != nil {
 		h.logger.Warn("session-scoped loop creation failed; using singleton",
 			"session", conversationID,

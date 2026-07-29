@@ -222,13 +222,15 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 		return h.handleDispatchCommand(cmd.Args)
 	case "debugsession":
 		return h.executeDebugSession()
+	case "worktree":
+		return h.executeWorktree(cmd.Args)
 	default:
 		return &CommandResult{
 			Output:  fmt.Sprintf("unknown command: %s", cmd.Name),
 			IsError: true,
 		}
 	}
-}// executeHelp shows help for commands.
+} // executeHelp shows help for commands.
 func (h *CommandHandler) executeHelp(args []string) *CommandResult {
 	if len(args) > 0 {
 		// Help for specific command
@@ -428,7 +430,7 @@ examples:
   /project status                 show project git status
   /project rename new-name        rename current project directory`,
 
-	"skill": `usage: /skill [name|search <query>]
+		"skill": `usage: /skill [name|search <query>]
 
 list available skills, show details for a specific skill, or search.
 
@@ -441,7 +443,7 @@ examples:
   /skill code-review              show details for the "code-review" skill
   /skill search code              search for skills matching "code"`,
 
-	"remember": `usage: /remember <rule or description>
+		"remember": `usage: /remember <rule or description>
 
 queues a proposed improvement to .meept/improvements.md for later review.
 proposals are not applied immediately. use /implement-improvements or
@@ -455,7 +457,7 @@ examples:
   /remember always run gofmt before committing go code
   /remember prefer table-driven tests for new validators`,
 
-	"implement-improvements": `usage: /implement-improvements [list|apply <id>|skip <id>]
+		"implement-improvements": `usage: /implement-improvements [list|apply <id>|skip <id>]
 
 reviews queued improvement proposals in .meept/improvements.md.
 
@@ -2053,7 +2055,7 @@ func (h *CommandHandler) executeProjectRename(args []string) *CommandResult {
 	}
 
 	return &CommandResult{
-		Output:        fmt.Sprintf("renamed project to '%s'", newName),
+		Output:         fmt.Sprintf("renamed project to '%s'", newName),
 		RefreshProject: true,
 	}
 }
@@ -2091,7 +2093,7 @@ func (h *CommandHandler) executeDebugSession() *CommandResult {
 	sb.WriteString(fmt.Sprintf("Conversation ID: %s\n", session.ConversationID))
 	sb.WriteString(fmt.Sprintf("Created:         %s\n", session.CreatedAt))
 	sb.WriteString(fmt.Sprintf("Last Activity:   %s\n", session.LastActivity))
-	
+
 	if session.ProjectID != "" {
 		sb.WriteString(fmt.Sprintf("Project ID:      %s\n", session.ProjectID))
 	}
@@ -2104,11 +2106,11 @@ func (h *CommandHandler) executeDebugSession() *CommandResult {
 			sb.WriteString(fmt.Sprintf("Detected Project: %s\n", session.DetectionContext.DetectedProjectID))
 		}
 	}
-	
+
 	sb.WriteString(fmt.Sprintf("Archived:        %v\n", session.Archived))
 	sb.WriteString(fmt.Sprintf("Attached Clients: %d\n", len(session.AttachedClients)))
 	sb.WriteString(fmt.Sprintf("Worker IDs:      %d\n", len(session.WorkerIDs)))
-	
+
 	if session.Designation != nil {
 		sb.WriteString(fmt.Sprintf("Designation:     %s\n", session.Designation.Status))
 	}

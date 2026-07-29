@@ -74,6 +74,8 @@ type Session struct {
 	LeafMessageID    *int64            `json:"leaf_message_id,omitempty"`
 	ProjectID        string            `json:"project_id,omitempty"`
 	ProjectPath      string            `json:"project_path,omitempty"`
+	WorktreeID       string            `json:"worktree_id,omitempty"`
+	WorktreePath     string            `json:"worktree_path,omitempty"`
 	DetectionContext *DetectionContext `json:"detection_context,omitempty"`
 	NoFence          bool              `json:"no_fence,omitempty"`
 
@@ -581,6 +583,20 @@ func (s *MemoryStore) SetProject(sessionID, projectID, projectPath string) error
 	}
 	session.ProjectID = projectID
 	session.ProjectPath = projectPath
+	return nil
+}
+
+// SetWorktree sets the worktree association for a session.
+func (s *MemoryStore) SetWorktree(sessionID, worktreeID, worktreePath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.WorktreeID = worktreeID
+	session.WorktreePath = worktreePath
 	return nil
 }
 
