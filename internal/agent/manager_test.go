@@ -283,6 +283,10 @@ func TestManager_GetOrCreateWired_IdentityOnReuse(t *testing.T) {
 	if loop3.GetWorkingDir() != "/project/b" {
 		t.Errorf("expected workingDir /project/b, got %q", loop3.GetWorkingDir())
 	}
+	// Verify the stale loop's Close() was called during eviction.
+	if !loop1.closed.Load() {
+		t.Error("expected stale loop to be closed after eviction")
+	}
 }
 
 func TestManager_GetOrCreateWired_ValidationErrors(t *testing.T) {

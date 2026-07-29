@@ -504,6 +504,8 @@ type AgentLoop struct {
 	// isActive tracks whether this loop has pending work (e.g. an in-flight
 	// reasoning cycle). Accessed atomically.
 	isActive atomic.Bool
+	// closed is set by Close() so tests can verify cleanup was invoked.
+	closed atomic.Bool
 
 	// Hallucination detection
 	hallucinationDetector *HallucinationDetector
@@ -2212,6 +2214,7 @@ func (l *AgentLoop) Close() {
 	}
 	l.wg.Wait()
 	l.isActive.Store(false)
+	l.closed.Store(true)
 }
 
 // triggerLearning runs the JUDGE/DISTILL learning pipeline asynchronously.

@@ -116,13 +116,15 @@ func TestGitProbeCache_DifferentDirs(t *testing.T) {
 	assert.Equal(t, "dev", b)
 }
 
-// TestAgentLoop_Close verifies Close is safe on a fresh loop and idempotent.
+// TestAgentLoop_Close verifies Close is safe on a fresh loop, idempotent,
+// and sets the closed flag.
 func TestAgentLoop_Close(t *testing.T) {
 	loop := NewAgentLoop("test-close", "/tmp")
 	assert.NotNil(t, loop)
 
 	// Close should not panic
 	loop.Close()
+	assert.True(t, loop.closed.Load(), "expected closed flag after Close")
 
 	// Double-close is safe
 	loop.Close()
