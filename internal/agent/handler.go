@@ -1570,6 +1570,13 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 			sess.ProjectPath = path
 		}
 	}
+	// BUG FIX: Even when falling back to the singleton h.loop, set its
+	// workingDir from the session's project path. The registry creates
+	// loops with workingDir="" (registry.go line 422), so the singleton
+	// would otherwise have an empty working directory.
+	if sess.ProjectPath != "" {
+		h.loop.SetWorkingDir(sess.ProjectPath)
+	}
 	if sess.ProjectPath == "" {
 		return h.loop
 	}

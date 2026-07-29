@@ -4,6 +4,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/caimlas/meept/internal/project"
@@ -78,7 +79,21 @@ func (m *Manager) GetOrCreateWired(sessionID, workingDir string, template *Agent
 	defer m.mu.Unlock()
 
 	if loop, ok := m.loops[sessionID]; ok {
-		return loop, nil
+		// BUG FIX: If the session's project changed (workingDir differs from
+		// the cached loop's), evict the stale loop and create a fresh one.
+		// Without this, /project set would keep using the old project's
+		// working directory for the rest of the session.
+		if loop.GetWorkingDir() != workingDir {
+			slog.Default().Info("evicting session-scoped loop: project changed",
+				"session", sessionID,
+				"old_working_dir", loop.GetWorkingDir(),
+				"new_working_dir", workingDir,
+			)
+			delete(m.loops, sessionID)
+			// Fall through to create a new loop
+		} else {
+			return loop, nil
+		}
 	}
 	if sessionID == "" {
 		return nil, fmt.Errorf("sessionID required")

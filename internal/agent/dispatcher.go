@@ -1494,6 +1494,24 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	// Check if there's an active agent loop for this conversation
 	queue, generation := d.registry.GetActiveQueue(conversationID)
 	if queue != nil {
+		// BUG FIX: Before steering/following-up through the queue, ensure
+		// the queue's agent loop has the correct session-scoped workingDir.
+		// The loop was created by the registry with workingDir="" and only
+		// gets the project path when resolveAgent runs (which is bypassed
+		// when the queue is active).
+		if d.sessionStore != nil && conversationID != "" {
+			if sess := d.sessionStore.Get(conversationID); sess != nil {
+				projectPath := sess.ProjectPath
+				if projectPath == "" && sess.ProjectID != "" && d.loopManager != nil {
+					projectPath = d.loopManager.ResolveProjectPath(context.Background(), sess.ProjectID)
+				}
+				if projectPath != "" {
+					if qLoop := d.registry.GetActiveQueueLoop(conversationID); qLoop != nil {
+						qLoop.SetWorkingDir(projectPath)
+					}
+				}
+			}
+		}
 		// Check if queue is still active
 		if queue.IsClosed() {
 			d.logger.Info("Queue is closed, running new agent",
@@ -1774,6 +1792,22 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 			return nil
 		}
 	}
+
+	// BUG FIX: Even registry-singleton loops get the session's project path
+	// as their working directory. The registry creates loops with workingDir=""
+	// (registry.go line 422), so we must set it here for every fallback path.
+	if d.sessionStore != nil && conversationID != "" {
+		if sess := d.sessionStore.Get(conversationID); sess != nil {
+			projectPath := sess.ProjectPath
+			if projectPath == "" && sess.ProjectID != "" && d.loopManager != nil {
+				projectPath = d.loopManager.ResolveProjectPath(context.Background(), sess.ProjectID)
+			}
+			if projectPath != "" {
+				agent.SetWorkingDir(projectPath)
+			}
+		}
+	}
+
 	return agent
 }
 

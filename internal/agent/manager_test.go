@@ -261,13 +261,27 @@ func TestManager_GetOrCreateWired_IdentityOnReuse(t *testing.T) {
 		t.Fatalf("first GetOrCreateWired failed: %v", err)
 	}
 
-	loop2, err := mgr.GetOrCreateWired("sess-identity", "/project/b", template)
+	// Same sessionID + same workingDir → same loop pointer
+	loop2, err := mgr.GetOrCreateWired("sess-identity", "/project/a", template)
 	if err != nil {
 		t.Fatalf("second GetOrCreateWired failed: %v", err)
 	}
 
 	if loop1 != loop2 {
-		t.Error("expected same loop pointer on reuse")
+		t.Error("expected same loop pointer on reuse with same workingDir")
+	}
+
+	// Different workingDir → loop evicted and recreated
+	loop3, err := mgr.GetOrCreateWired("sess-identity", "/project/b", template)
+	if err != nil {
+		t.Fatalf("third GetOrCreateWired failed: %v", err)
+	}
+
+	if loop1 == loop3 {
+		t.Error("expected new loop pointer after project change")
+	}
+	if loop3.GetWorkingDir() != "/project/b" {
+		t.Errorf("expected workingDir /project/b, got %q", loop3.GetWorkingDir())
 	}
 }
 

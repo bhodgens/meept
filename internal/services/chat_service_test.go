@@ -33,7 +33,7 @@ func newTestChatServiceWithRegistry(t *testing.T, conversationID string) (*ChatS
 		agent.WithQueueBus(msgBus),
 		agent.WithQueueAgentID("test"),
 	)
-	reg.RegisterActiveQueue(conversationID, q)
+	reg.RegisterActiveQueue(conversationID, q, nil)
 
 	svc := NewChatService(msgBus, reg, logger)
 	return svc, reg
@@ -116,7 +116,7 @@ func TestChatService_Steer_QueueClosed(t *testing.T) {
 	defer reg.Close()
 
 	q := agent.NewMessageQueue()
-	reg.RegisterActiveQueue(convID, q)
+	reg.RegisterActiveQueue(convID, q, nil)
 	// UnregisterActiveQueue closes the queue AND removes it from the map,
 	// so the service layer sees ErrQueueNotFound (not ErrQueueClosed).
 	reg.UnregisterActiveQueue(convID)
@@ -213,7 +213,7 @@ func TestChatService_FollowUp_QueueFull(t *testing.T) {
 		MaxFollowUp:     2,
 		PersistFollowUp: false,
 	}))
-	reg.RegisterActiveQueue(convID, q)
+	reg.RegisterActiveQueue(convID, q, nil)
 
 	svc := NewChatService(msgBus, reg, nil)
 

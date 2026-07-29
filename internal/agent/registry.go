@@ -23,6 +23,7 @@ import (
 // QueueEntry wraps a MessageQueue with generation tracking.
 type QueueEntry struct {
 	Queue      *MessageQueue
+	Loop       *AgentLoop // the loop that owns this queue (may be nil in tests)
 	Generation uint64
 }
 
@@ -989,14 +990,16 @@ func (r *AgentRegistry) SetGlobalRules(rules string) {
 }
 
 // RegisterActiveQueue associates a queue with a running conversation.
-// Returns the generation number for this registration.
-func (r *AgentRegistry) RegisterActiveQueue(conversationID string, q *MessageQueue) uint64 {
+// The loop parameter is the AgentLoop that owns this queue; it may be nil
+// in tests. Returns the generation number for this registration.
+func (r *AgentRegistry) RegisterActiveQueue(conversationID string, q *MessageQueue, loop *AgentLoop) uint64 {
 	r.activeQueuesMu.Lock()
 	defer r.activeQueuesMu.Unlock()
 
 	r.nextGen++
 	entry := &QueueEntry{
 		Queue:      q,
+		Loop:       loop,
 		Generation: r.nextGen,
 	}
 
@@ -1035,6 +1038,19 @@ func (r *AgentRegistry) GetActiveQueue(conversationID string) (queue *MessageQue
 	}
 
 	return entry.Queue, entry.Generation
+}
+
+// GetActiveQueueLoop returns the AgentLoop that owns the active queue for a
+// conversation, or nil if no active queue exists or the entry has no loop.
+func (r *AgentRegistry) GetActiveQueueLoop(conversationID string) *AgentLoop {
+	r.activeQueuesMu.RLock()
+	defer r.activeQueuesMu.RUnlock()
+
+	entry, exists := r.activeQueues[conversationID]
+	if !exists {
+		return nil
+	}
+	return entry.Loop
 }
 
 // GetQueueWithVersion performs a version-check after lookup.

@@ -1785,7 +1785,7 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// Register queue for external access if both queue and registry are available
 	queueRegistered := false
 	if l.agentRegistry != nil && l.queue != nil {
-		gen := l.agentRegistry.RegisterActiveQueue(conversationID, l.queue)
+		gen := l.agentRegistry.RegisterActiveQueue(conversationID, l.queue, l)
 		queueRegistered = true
 		l.logger.Debug("registered queue for conversation",
 			"conversation_id", conversationID,
@@ -5389,16 +5389,22 @@ func (l *AgentLoop) SetMCPServerLister(lister func() []MCPServerInfo) {
 }
 
 // SetWorkingDir updates the working directory for artifact scanning.
-// Safe to call concurrently.
+// Safe to call concurrently. Nil-safe: a nil receiver is a no-op.
 func (l *AgentLoop) SetWorkingDir(path string) {
+	if l == nil {
+		return
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.workingDir = path
 }
 
 // GetWorkingDir returns the current working directory.
-// Safe to call concurrently.
+// Safe to call concurrently. Returns "" for a nil receiver.
 func (l *AgentLoop) GetWorkingDir() string {
+	if l == nil {
+		return ""
+	}
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.workingDir

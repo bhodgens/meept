@@ -45,7 +45,7 @@ func TestSteerActiveAgent_ClosedQueue(t *testing.T) {
 
 	d, reg := newTestDispatcherWithRegistry(t)
 	q := NewMessageQueue()
-	reg.RegisterActiveQueue("conv-1", q)
+	reg.RegisterActiveQueue("conv-1", q, nil)
 	q.Close()
 
 	err := d.SteerActiveAgent(context.Background(), "conv-1", "redirect", "test")
@@ -59,7 +59,7 @@ func TestSteerActiveAgent_Success(t *testing.T) {
 
 	d, reg := newTestDispatcherWithRegistry(t)
 	q := NewMessageQueue()
-	reg.RegisterActiveQueue("conv-1", q)
+	reg.RegisterActiveQueue("conv-1", q, nil)
 
 	err := d.SteerActiveAgent(context.Background(), "conv-1", "redirect now", "test")
 	if err != nil {
@@ -97,7 +97,7 @@ func TestFollowUpActiveAgent_ClosedQueue(t *testing.T) {
 
 	d, reg := newTestDispatcherWithRegistry(t)
 	q := NewMessageQueue()
-	reg.RegisterActiveQueue("conv-1", q)
+	reg.RegisterActiveQueue("conv-1", q, nil)
 	q.Close()
 
 	err := d.FollowUpActiveAgent(context.Background(), "conv-1", "also do X", "test")
@@ -111,7 +111,7 @@ func TestFollowUpActiveAgent_Success(t *testing.T) {
 
 	d, reg := newTestDispatcherWithRegistry(t)
 	q := NewMessageQueue()
-	reg.RegisterActiveQueue("conv-1", q)
+	reg.RegisterActiveQueue("conv-1", q, nil)
 
 	err := d.FollowUpActiveAgent(context.Background(), "conv-1", "also do X", "test")
 	if err != nil {
@@ -129,7 +129,7 @@ func TestRouteToAgent_SteerViaActiveQueue(t *testing.T) {
 
 	d, reg := newTestDispatcherWithRegistry(t)
 	q := NewMessageQueue()
-	reg.RegisterActiveQueue("conv-1", q)
+	reg.RegisterActiveQueue("conv-1", q, nil)
 
 	result := &DispatchResult{
 		AgentID: "coder",
@@ -153,7 +153,7 @@ func TestRouteToAgent_FollowUpViaActiveQueue(t *testing.T) {
 
 	d, reg := newTestDispatcherWithRegistry(t)
 	q := NewMessageQueue()
-	reg.RegisterActiveQueue("conv-1", q)
+	reg.RegisterActiveQueue("conv-1", q, nil)
 
 	result := &DispatchResult{
 		AgentID: "chat",
@@ -177,7 +177,7 @@ func TestRouteToAgent_ExplicitSteerOverride(t *testing.T) {
 
 	d, reg := newTestDispatcherWithRegistry(t)
 	q := NewMessageQueue()
-	reg.RegisterActiveQueue("conv-1", q)
+	reg.RegisterActiveQueue("conv-1", q, nil)
 
 	// IntentChat would normally be follow-up, but ExplicitSteerMode forces steering
 	result := &DispatchResult{
@@ -203,7 +203,7 @@ func TestRouteToAgent_ClosedQueueFallsThrough(t *testing.T) {
 
 	d, reg := newTestDispatcherWithRegistry(t)
 	q := NewMessageQueue()
-	reg.RegisterActiveQueue("conv-1", q)
+	reg.RegisterActiveQueue("conv-1", q, nil)
 	q.Close()
 
 	result := &DispatchResult{

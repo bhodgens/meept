@@ -16,7 +16,7 @@ func TestRegistry_RegisterActiveQueue(t *testing.T) {
 	r := newTestRegistry()
 	q := NewMessageQueue()
 
-	gen := r.RegisterActiveQueue("conv-1", q)
+	gen := r.RegisterActiveQueue("conv-1", q, nil)
 	if gen == 0 {
 		t.Error("generation should be > 0")
 	}
@@ -40,8 +40,8 @@ func TestRegistry_RegisterActiveQueue_MultipleGenerations(t *testing.T) {
 	q1 := NewMessageQueue()
 	q2 := NewMessageQueue()
 
-	gen1 := r.RegisterActiveQueue("conv-1", q1)
-	gen2 := r.RegisterActiveQueue("conv-2", q2)
+	gen1 := r.RegisterActiveQueue("conv-1", q1, nil)
+	gen2 := r.RegisterActiveQueue("conv-2", q2, nil)
 
 	if gen1 == gen2 {
 		t.Errorf("generations should differ: gen1=%d gen2=%d", gen1, gen2)
@@ -69,7 +69,7 @@ func TestRegistry_UnregisterActiveQueue(t *testing.T) {
 
 	r := newTestRegistry()
 	q := NewMessageQueue()
-	r.RegisterActiveQueue("conv-1", q)
+	r.RegisterActiveQueue("conv-1", q, nil)
 
 	r.UnregisterActiveQueue("conv-1")
 
@@ -87,7 +87,7 @@ func TestRegistry_UnregisterActiveQueue_ClosesQueue(t *testing.T) {
 
 	r := newTestRegistry()
 	q := NewMessageQueue()
-	r.RegisterActiveQueue("conv-1", q)
+	r.RegisterActiveQueue("conv-1", q, nil)
 
 	r.UnregisterActiveQueue("conv-1")
 
@@ -125,7 +125,7 @@ func TestRegistry_GetQueueWithVersion_Success(t *testing.T) {
 
 	r := newTestRegistry()
 	q := NewMessageQueue()
-	gen := r.RegisterActiveQueue("conv-1", q)
+	gen := r.RegisterActiveQueue("conv-1", q, nil)
 
 	got, err := r.GetQueueWithVersion("conv-1", gen)
 	if err != nil {
@@ -152,7 +152,7 @@ func TestRegistry_GetQueueWithVersion_GenerationMismatch(t *testing.T) {
 
 	r := newTestRegistry()
 	q := NewMessageQueue()
-	gen := r.RegisterActiveQueue("conv-1", q)
+	gen := r.RegisterActiveQueue("conv-1", q, nil)
 
 	_, err := r.GetQueueWithVersion("conv-1", gen+1)
 	if !errors.Is(err, ErrGenerationMismatch) {
@@ -165,7 +165,7 @@ func TestRegistry_GetQueueWithVersion_ClosedQueue(t *testing.T) {
 
 	r := newTestRegistry()
 	q := NewMessageQueue()
-	gen := r.RegisterActiveQueue("conv-1", q)
+	gen := r.RegisterActiveQueue("conv-1", q, nil)
 
 	// Close the queue without unregistering (simulates external close).
 	q.Close()
@@ -204,7 +204,7 @@ func TestRegistry_ConcurrentRegistration(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			q := NewMessageQueue()
-			regs[idx].gen = r.RegisterActiveQueue(regs[idx].id, q)
+			regs[idx].gen = r.RegisterActiveQueue(regs[idx].id, q, nil)
 		}(i)
 	}
 	wg.Wait()

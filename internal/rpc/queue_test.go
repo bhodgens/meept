@@ -28,7 +28,7 @@ func newTestQueueHandler(t *testing.T, conversationID string) (*QueueHandler, *a
 		agent.WithQueueBus(msgBus),
 		agent.WithQueueAgentID("test"),
 	)
-	reg.RegisterActiveQueue(conversationID, q)
+	reg.RegisterActiveQueue(conversationID, q, nil)
 
 	return NewQueueHandler(reg), reg
 }
@@ -134,7 +134,7 @@ func TestQueueHandler_Steer_QueueClosed(t *testing.T) {
 	defer reg.Close()
 
 	q := agent.NewMessageQueue()
-	reg.RegisterActiveQueue(convID, q)
+	reg.RegisterActiveQueue(convID, q, nil)
 	// UnregisterActiveQueue closes the queue AND removes it from the map,
 	// so the RPC handler sees ErrQueueNotFound (not ErrQueueClosed).
 	reg.UnregisterActiveQueue(convID)
@@ -254,7 +254,7 @@ func TestQueueHandler_FollowUp_QueueFull(t *testing.T) {
 		MaxFollowUp:     2,
 		PersistFollowUp: false,
 	}))
-	reg.RegisterActiveQueue(convID, q)
+	reg.RegisterActiveQueue(convID, q, nil)
 
 	h := NewQueueHandler(reg)
 

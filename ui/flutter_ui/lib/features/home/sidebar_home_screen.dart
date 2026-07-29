@@ -711,24 +711,64 @@ class _SidebarState extends ConsumerState<_Sidebar> {
     );
   }
 
+  /// Normalise a filesystem path so that equivalent paths from different
+  /// sources (e.g. trailing slash, case differences) match. This is a
+  /// best-effort lexicographic normalisation — not a real canonical path
+  /// resolver — but it covers the common cases that cause duplicate groups.
+  String _normalisePath(String p) {
+    var n = p.trim();
+    // Strip trailing slashes (but keep a bare "/" as-is).
+    while (n.length > 1 && n.endsWith('/')) {
+      n = n.substring(0, n.length - 1);
+    }
+    // On case-insensitive filesystems (macOS HFS+/APFS default, Windows)
+    // we can't reliably know the on-disk case, but lowercasing the ASCII
+    // portion dramatically improves merge rates without breaking Linux.
+    // We avoid forcing case on the whole string to preserve readability
+    // of any unmatched fallback keys; matching is done on this normalised
+    // form only.
+    return n.toLowerCase();
+  }
+
   /// Group sessions by project. Uses projectId when available, otherwise
   /// falls back to projectPath or detectionContext.cwd. Display name is
   /// the directory suffix (last path component) — matching the status bar.
+  ///
+  /// When a session has a projectPath but no projectId, we try to match that
+  /// path against the paths of sessions (or the active project) that *do*
+  /// have a projectId. This merges sessions into the same group instead of
+  /// creating a duplicate `path:<...>` group for the same logical project.
   List<_ProjectGroup> _groupByProject(List<Session> sessions, Project? activeProject) {
     final byProject = <String, List<Session>>{};
     final projectNames = <String, String>{};
     final projectBranches = <String, String>{};
 
+    // Pass 1: build a path → projectId map from sessions that have both,
+    // plus the active project (if any).
+    final pathToProjectId = <String, String>{};
+    if (activeProject != null && activeProject.localPath.isNotEmpty) {
+      pathToProjectId[_normalisePath(activeProject.localPath)] = activeProject.id;
+    }
     for (final session in sessions) {
-      // Determine grouping key: prefer projectId, fall back to path.
-      // When neither is available, merge into the active project's group
-      // so legacy sessions (created before project wiring) don't form a
-      // duplicate group with the same display name.
+      final pid = session.projectId;
+      if (pid == null || pid.isEmpty) continue;
+      final p = session.projectPath ?? session.detectionContext?.cwd;
+      if (p != null && p.isNotEmpty) {
+        pathToProjectId.putIfAbsent(_normalisePath(p), () => pid);
+      }
+    }
+
+    // Pass 2: assign each session a grouping key.
+    for (final session in sessions) {
+      // Prefer projectId directly.
       String key = session.projectId ?? '';
       if (key.isEmpty) {
         final path = session.projectPath ?? session.detectionContext?.cwd ?? '';
         if (path.isNotEmpty) {
-          key = 'path:$path';
+          // Try to match the path to a known projectId first so we don't
+          // create a duplicate group for the same logical project.
+          final matched = pathToProjectId[_normalisePath(path)];
+          key = matched ?? 'path:$path';
         } else if (activeProject != null) {
           // No project info at all — fold into the active project.
           key = activeProject.id;

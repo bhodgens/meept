@@ -226,6 +226,13 @@ func (h *ProjectHandler) handleSet(ctx context.Context, params json.RawMessage) 
 		}
 	}
 
+	// GAP FIX: After resolving/creating the project, reject session binding
+	// when session_id is empty. Without this, SetProject would be called with
+	// an empty sessionID, silently binding the project to a bogus session key.
+	if req.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+
 	// Mark this project as active so new sessions have a default project.
 	// CreateOrResolve may have already set it, but for existing projects
 	// returned from Get we set it here. Other projects are left untouched
