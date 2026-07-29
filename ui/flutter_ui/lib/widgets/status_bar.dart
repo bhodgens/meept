@@ -159,7 +159,14 @@ class StatusBar extends ConsumerWidget {
       // Fall through to other branches on error.
     }
 
-    // 2. Session has projectPath but no projectId: show basename only.
+    // 2. Session has worktree: show [wt:branch] indicator.
+    if (session?.worktreePath != null && session!.worktreePath!.isNotEmpty) {
+      final path = session.worktreePath!;
+      final branch = path.split('/').last;
+      return '[wt:$branch]';
+    }
+
+    // 3. Session has projectPath but no projectId: show basename only.
     //    We can't determine git vs local from path alone.
     if (session?.projectPath != null && session!.projectPath!.isNotEmpty) {
       final path = session.projectPath!;

@@ -1194,6 +1194,36 @@ class SdkApiClient {
         'setProject: unexpected envelope shape: $envelope');
   }
 
+  /// Creates a session-scoped git worktree via `project.worktree.create` RPC.
+  /// Returns `{worktree_id, path, branch}` on success.
+  Future<Map<String, dynamic>> createWorktree({
+    required String sessionId,
+    String? projectId,
+  }) async {
+    final params = <String, dynamic>{
+      'session_id': sessionId,
+      if (projectId != null && projectId.isNotEmpty) 'project_id': projectId,
+    };
+    final envelope = await _post('/api/v1/bus/call', body: {
+      'method': 'project.worktree.create',
+      'params': params,
+    });
+    final inner = envelope['result'];
+    if (inner is Map<String, dynamic>) return inner;
+    if (envelope.containsKey('worktree_id') || envelope.containsKey('path')) {
+      return envelope;
+    }
+    throw StateError('createWorktree: unexpected envelope shape: $envelope');
+  }
+
+  /// Removes the session's worktree via `project.worktree.remove` RPC.
+  Future<void> removeWorktree({required String sessionId}) async {
+    await _post('/api/v1/bus/call', body: {
+      'method': 'project.worktree.remove',
+      'params': {'session_id': sessionId},
+    });
+  }
+
   /// Calls `project.rename` via the bus/call RPC bridge.
   Future<Map<String, dynamic>> renameProject({
     required String projectId,

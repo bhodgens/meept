@@ -1059,7 +1059,9 @@ class _SidebarSessionRow extends ConsumerWidget {
           children: [
             Expanded(
               child: Text(
-                session.title.isEmpty ? 'unnamed' : session.title,
+                session.worktreePath != null && session.worktreePath!.isNotEmpty
+                    ? 'wt: ${session.title.isEmpty ? 'unnamed' : session.title}'
+                    : session.title.isEmpty ? 'unnamed' : session.title,
                 style: CyberpunkTypography.bodySmall.copyWith(
                   color: isSelected
                       ? CyberpunkColors.orangePrimary

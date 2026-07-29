@@ -784,6 +784,69 @@ class _ChatInputState extends ConsumerState<ChatInput>
   /// Calls the daemon's `project.set` RPC (via the bus/call bridge) with the
   /// path-only invocation, which auto-detects/registers the project.  On
   /// success, refreshes [currentProjectProvider] so the status bar picks up
+  /// Handles `/worktree [create|remove]` by calling the daemon RPC bridge.
+  /// Defaults to `create` when no subcommand is given.
+  Future<void> _handleWorktreeCommand(String arg) async {
+    final subcommand = arg.isEmpty ? 'create' : arg;
+
+    final session = ref.read(activeSessionProvider);
+    final sessionId = session?.id ?? widget.sessionId;
+    if (sessionId.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('no active session'),
+            backgroundColor: CyberpunkColors.redAlert,
+          ),
+        );
+      }
+      return;
+    }
+
+    try {
+      final sdk = ref.read(sdkClientProvider);
+
+      if (subcommand == 'remove' || subcommand == 'rm') {
+        await sdk.removeWorktree(sessionId: sessionId);
+        await ref.read(sessionProvider.notifier).loadSessions();
+        if (mounted) {
+          showStatusMessage(ref, 'worktree removed');
+          _resetInputState();
+        }
+      } else if (subcommand == 'create') {
+        final result = await sdk.createWorktree(
+          sessionId: sessionId,
+          projectId: session?.projectId,
+        );
+        await ref.read(sessionProvider.notifier).loadSessions();
+        if (mounted) {
+          final branch = result['branch'] as String? ?? 'unknown';
+          showStatusMessage(ref, 'worktree: $branch');
+          _resetInputState();
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('unknown worktree subcommand: $subcommand'),
+              backgroundColor: CyberpunkColors.redAlert,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('[chat_input] /worktree failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('worktree error: $e'),
+            backgroundColor: CyberpunkColors.redAlert,
+          ),
+        );
+      }
+    }
+  }
+
   /// the change, reloads project paths so the typeahead includes the new
   /// path, and shows a transient status message.  Errors are surfaced via a
   /// SnackBar.
@@ -969,6 +1032,11 @@ class _ChatInputState extends ConsumerState<ChatInput>
         // Fire-and-forget; _handleProjectSetCommand manages its own error UI.
         _history.add(widget.sessionId, text);
         unawaited(_handleProjectSetCommand(arg));
+        return true;
+      case '/worktree':
+        _history.add(widget.sessionId, text);
+        final arg = spaceIdx == -1 ? '' : text.substring(spaceIdx).trim();
+        unawaited(_handleWorktreeCommand(arg));
         return true;
       default:
         return false;

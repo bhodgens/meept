@@ -73,6 +73,7 @@ const _defaultCommands = <SlashCommand>[
   SlashCommand(name: '/plan', description: 'manage plans', usage: '/plan [list|show|approve]'),
   SlashCommand(name: '/review', description: 'start code review'),
   SlashCommand(name: '/project', description: 'manage projects', usage: '/project [list|add]'),
+  SlashCommand(name: '/worktree', description: 'create a session-scoped worktree', usage: '/worktree [create|remove]'),
   SlashCommand(
       name: '/skill',
       description: 'list, search, or show skill details',

@@ -68,6 +68,8 @@ _$SessionImpl _$$SessionImplFromJson(Map<String, dynamic> json) =>
       archived: json['archived'] as bool? ?? false,
       projectId: json['project_id'] as String?,
       projectPath: json['project_path'] as String?,
+      worktreeId: json['worktree_id'] as String?,
+      worktreePath: json['worktree_path'] as String?,
       detectionContext: json['detection_context'] == null
           ? null
           : DetectionContext.fromJson(
@@ -88,6 +90,8 @@ Map<String, dynamic> _$$SessionImplToJson(_$SessionImpl instance) =>
       'archived': instance.archived,
       'project_id': instance.projectId,
       'project_path': instance.projectPath,
+      'worktree_id': instance.worktreeId,
+      'worktree_path': instance.worktreePath,
       'detection_context': instance.detectionContext,
       'leaf_message_id': instance.leafMessageId,
     };

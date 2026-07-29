@@ -481,6 +481,8 @@ class Session with _$Session {
     bool archived,
     @JsonKey(name: 'project_id') String? projectId,
     @JsonKey(name: 'project_path') String? projectPath,
+    @JsonKey(name: 'worktree_id') String? worktreeId,
+    @JsonKey(name: 'worktree_path') String? worktreePath,
     @JsonKey(name: 'detection_context') DetectionContext? detectionContext,
     /// Backend field: leaf_message_id (*int64, omitted when null).
     /// Null means the session has no messages — i.e. it's empty.

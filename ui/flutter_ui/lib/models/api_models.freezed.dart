@@ -541,6 +541,10 @@ mixin _$Session {
   String? get projectId => throw _privateConstructorUsedError;
   @JsonKey(name: 'project_path')
   String? get projectPath => throw _privateConstructorUsedError;
+  @JsonKey(name: 'worktree_id')
+  String? get worktreeId => throw _privateConstructorUsedError;
+  @JsonKey(name: 'worktree_path')
+  String? get worktreePath => throw _privateConstructorUsedError;
   @JsonKey(name: 'detection_context')
   DetectionContext? get detectionContext => throw _privateConstructorUsedError;
 
@@ -575,6 +579,8 @@ abstract class $SessionCopyWith<$Res> {
       @JsonKey(name: 'archived') bool archived,
       @JsonKey(name: 'project_id') String? projectId,
       @JsonKey(name: 'project_path') String? projectPath,
+      @JsonKey(name: 'worktree_id') String? worktreeId,
+      @JsonKey(name: 'worktree_path') String? worktreePath,
       @JsonKey(name: 'detection_context') DetectionContext? detectionContext,
       @JsonKey(name: 'leaf_message_id') int? leafMessageId});
 
@@ -605,6 +611,8 @@ class _$SessionCopyWithImpl<$Res, $Val extends Session>
     Object? archived = null,
     Object? projectId = freezed,
     Object? projectPath = freezed,
+    Object? worktreeId = freezed,
+    Object? worktreePath = freezed,
     Object? detectionContext = freezed,
     Object? leafMessageId = freezed,
   }) {
@@ -653,6 +661,14 @@ class _$SessionCopyWithImpl<$Res, $Val extends Session>
           ? _value.projectPath
           : projectPath // ignore: cast_nullable_to_non_nullable
               as String?,
+      worktreeId: freezed == worktreeId
+          ? _value.worktreeId
+          : worktreeId // ignore: cast_nullable_to_non_nullable
+              as String?,
+      worktreePath: freezed == worktreePath
+          ? _value.worktreePath
+          : worktreePath // ignore: cast_nullable_to_non_nullable
+              as String?,
       detectionContext: freezed == detectionContext
           ? _value.detectionContext
           : detectionContext // ignore: cast_nullable_to_non_nullable
@@ -700,6 +716,8 @@ abstract class _$$SessionImplCopyWith<$Res> implements $SessionCopyWith<$Res> {
       @JsonKey(name: 'archived') bool archived,
       @JsonKey(name: 'project_id') String? projectId,
       @JsonKey(name: 'project_path') String? projectPath,
+      @JsonKey(name: 'worktree_id') String? worktreeId,
+      @JsonKey(name: 'worktree_path') String? worktreePath,
       @JsonKey(name: 'detection_context') DetectionContext? detectionContext,
       @JsonKey(name: 'leaf_message_id') int? leafMessageId});
 
@@ -729,6 +747,8 @@ class __$$SessionImplCopyWithImpl<$Res>
     Object? archived = null,
     Object? projectId = freezed,
     Object? projectPath = freezed,
+    Object? worktreeId = freezed,
+    Object? worktreePath = freezed,
     Object? detectionContext = freezed,
     Object? leafMessageId = freezed,
   }) {
@@ -777,6 +797,14 @@ class __$$SessionImplCopyWithImpl<$Res>
           ? _value.projectPath
           : projectPath // ignore: cast_nullable_to_non_nullable
               as String?,
+      worktreeId: freezed == worktreeId
+          ? _value.worktreeId
+          : worktreeId // ignore: cast_nullable_to_non_nullable
+              as String?,
+      worktreePath: freezed == worktreePath
+          ? _value.worktreePath
+          : worktreePath // ignore: cast_nullable_to_non_nullable
+              as String?,
       detectionContext: freezed == detectionContext
           ? _value.detectionContext
           : detectionContext // ignore: cast_nullable_to_non_nullable
@@ -808,6 +836,8 @@ class _$SessionImpl extends _Session {
       @JsonKey(name: 'archived') this.archived = false,
       @JsonKey(name: 'project_id') this.projectId,
       @JsonKey(name: 'project_path') this.projectPath,
+      @JsonKey(name: 'worktree_id') this.worktreeId,
+      @JsonKey(name: 'worktree_path') this.worktreePath,
       @JsonKey(name: 'detection_context') this.detectionContext,
       @JsonKey(name: 'leaf_message_id') this.leafMessageId})
       : _attachedClients = attachedClients,
@@ -861,6 +891,12 @@ class _$SessionImpl extends _Session {
   @JsonKey(name: 'project_path')
   final String? projectPath;
   @override
+  @JsonKey(name: 'worktree_id')
+  final String? worktreeId;
+  @override
+  @JsonKey(name: 'worktree_path')
+  final String? worktreePath;
+  @override
   @JsonKey(name: 'detection_context')
   final DetectionContext? detectionContext;
 
@@ -872,7 +908,7 @@ class _$SessionImpl extends _Session {
 
   @override
   String toString() {
-    return 'Session(id: $id, title: $title, description: $description, conversationId: $conversationId, createdAt: $createdAt, lastActivity: $lastActivity, attachedClients: $attachedClients, designation: $designation, archived: $archived, projectId: $projectId, projectPath: $projectPath, detectionContext: $detectionContext, leafMessageId: $leafMessageId)';
+    return 'Session(id: $id, title: $title, description: $description, conversationId: $conversationId, createdAt: $createdAt, lastActivity: $lastActivity, attachedClients: $attachedClients, designation: $designation, archived: $archived, projectId: $projectId, projectPath: $projectPath, worktreeId: $worktreeId, worktreePath: $worktreePath, detectionContext: $detectionContext, leafMessageId: $leafMessageId)';
   }
 
   @override
@@ -900,6 +936,10 @@ class _$SessionImpl extends _Session {
                 other.projectId == projectId) &&
             (identical(other.projectPath, projectPath) ||
                 other.projectPath == projectPath) &&
+            (identical(other.worktreeId, worktreeId) ||
+                other.worktreeId == worktreeId) &&
+            (identical(other.worktreePath, worktreePath) ||
+                other.worktreePath == worktreePath) &&
             (identical(other.detectionContext, detectionContext) ||
                 other.detectionContext == detectionContext) &&
             (identical(other.leafMessageId, leafMessageId) ||
@@ -921,6 +961,8 @@ class _$SessionImpl extends _Session {
       archived,
       projectId,
       projectPath,
+      worktreeId,
+      worktreePath,
       detectionContext,
       leafMessageId);
 
@@ -955,6 +997,8 @@ abstract class _Session extends Session {
       @JsonKey(name: 'archived') final bool archived,
       @JsonKey(name: 'project_id') final String? projectId,
       @JsonKey(name: 'project_path') final String? projectPath,
+      @JsonKey(name: 'worktree_id') final String? worktreeId,
+      @JsonKey(name: 'worktree_path') final String? worktreePath,
       @JsonKey(name: 'detection_context')
       final DetectionContext? detectionContext,
       @JsonKey(name: 'leaf_message_id')
@@ -999,6 +1043,12 @@ abstract class _Session extends Session {
   @override
   @JsonKey(name: 'project_path')
   String? get projectPath;
+  @override
+  @JsonKey(name: 'worktree_id')
+  String? get worktreeId;
+  @override
+  @JsonKey(name: 'worktree_path')
+  String? get worktreePath;
   @override
   @JsonKey(name: 'detection_context')
   DetectionContext? get detectionContext;
