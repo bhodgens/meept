@@ -141,6 +141,26 @@ mu.Unlock()
 result, err := doNetworkCall(ctx, cfg)  // I/O outside lock
 ```
 
+When the collect-then-operate pattern spans an IIFE or closure boundary, the
+`mutexio` static analyzer cannot see the scope separation and will flag it as
+a false positive. Suppress with a `//nolint:mutexio` directive that explains
+why the call is outside the lock scope:
+
+```go
+var stale *Resource
+func() {
+    mu.Lock()
+    defer mu.Unlock()
+    stale = m.resource  // collect under lock
+    delete(m.resources, id)
+}()
+
+// Lock released by IIFE above; safe to do I/O here.
+if stale != nil {
+    stale.Close() //nolint:mutexio // collected outside IIFE lock scope
+}
+```
+
 ## UI Conventions
 
 - **All UI text must be lowercase** (e.g., "switch" not "Switch", "ok" not "OK")

@@ -2,9 +2,11 @@ package http
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -21,6 +23,7 @@ import (
 	"github.com/caimlas/meept/internal/services"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/models"
+	"golang.org/x/net/websocket"
 )
 
 // mockDaemonController implements DaemonController for testing.
@@ -2270,6 +2273,193 @@ func TestHandleClientConfigPatch_NoConfigService_Returns503(t *testing.T) {
 	resp := w.Result()
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+// startWSTestServer starts a real TLS HTTP server with WebSocket enabled on a
+// random port. Returns the wss:// base URL, the bus (for publishing events),
+// and a cancel function. Mirrors the pattern from unified_http_test.go but
+// lives in package http for direct handleWSEvent testing.
+func startWSTestServer(t *testing.T) (baseURL string, msgBus *bus.MessageBus, cancel context.CancelFunc) {
+	t.Helper()
+	msgBus = bus.New(nil, nil)
+
+	cfg := DefaultServerConfig()
+	cfg.Addr = "127.0.0.1:0"
+	cfg.TLSCertFile = filepath.Join(t.TempDir(), "cert.pem")
+	cfg.TLSKeyFile = filepath.Join(t.TempDir(), "key.pem")
+	cfg.RequireAuth = false
+
+	srv := NewServer(cfg, nil, nil, nil, nil, nil, WithWebSocket(msgBus, "/ws"))
+	if srv == nil {
+		t.Fatal("failed to create server")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { _ = srv.Start(ctx) }()
+
+	// Wait for listener to be ready.
+	for i := 0; i < 50; i++ {
+		time.Sleep(20 * time.Millisecond)
+		conn, err := net.Dial("tcp", srv.Addr())
+		if err == nil {
+			conn.Close()
+			break
+		}
+	}
+
+	addr := srv.Addr()
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("failed to parse server address %q: %v", addr, err)
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	baseURL = "https://" + host + ":" + port
+	return baseURL, msgBus, cancel
+}
+
+// dialWSTestClient connects a WebSocket client to the test server and returns
+// the connection. The caller is responsible for consuming the welcome message.
+func dialWSTestClient(t *testing.T, baseURL string) *websocket.Conn {
+	t.Helper()
+	wsURL := "wss://" + strings.TrimPrefix(baseURL, "https://") + "/ws"
+	wsCfg, err := websocket.NewConfig(wsURL, baseURL)
+	if err != nil {
+		t.Fatalf("ws config: %v", err)
+	}
+	wsCfg.TlsConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // test-only
+	conn, err := websocket.DialConfig(wsCfg)
+	if err != nil {
+		t.Fatalf("ws dial: %v", err)
+	}
+	return conn
+}
+
+// wsSendSubscribe sends a subscribe message with a session_id filter.
+func wsSendSubscribe(t *testing.T, conn *websocket.Conn, sessionID string) {
+	t.Helper()
+	data, _ := json.Marshal(map[string]string{
+		"channel":    "chat",
+		"session_id": sessionID,
+	})
+	if err := websocket.JSON.Send(conn, WSMessage{Type: "subscribe", Data: data}); err != nil {
+		t.Fatalf("ws subscribe send: %v", err)
+	}
+}
+
+// wsDrain reads and discards any pending WS messages with a short deadline.
+func wsDrain(conn *websocket.Conn, timeout time.Duration) {
+	conn.SetReadDeadline(time.Now().Add(timeout))
+	for {
+		var msg map[string]any
+		if err := websocket.JSON.Receive(conn, &msg); err != nil {
+			return // timeout or closed
+		}
+	}
+}
+
+// wsReadOne reads exactly one WS JSON message within the deadline.
+// Returns the parsed message and true on success, or nil and false on timeout.
+func wsReadOne(conn *websocket.Conn, timeout time.Duration) (map[string]any, bool) {
+	conn.SetReadDeadline(time.Now().Add(timeout))
+	var msg map[string]any
+	if err := websocket.JSON.Receive(conn, &msg); err != nil {
+		return nil, false
+	}
+	return msg, true
+}
+
+// TestHandleWSEvent_SessionFiltering verifies that handleWSEvent broadcasts
+// session-scoped events only to connections subscribed to that session, while
+// events without a session_id are broadcast to all connections.
+func TestHandleWSEvent_SessionFiltering(t *testing.T) {
+	baseURL, msgBus, cancel := startWSTestServer(t)
+	defer cancel()
+
+	tlsConfig := &tls.Config{InsecureSkipVerify: true} //nolint:gosec // test-only
+	_ = tlsConfig
+
+	// Connect two clients.
+	connA := dialWSTestClient(t, baseURL)
+	defer connA.Close()
+	connB := dialWSTestClient(t, baseURL)
+	defer connB.Close()
+
+	// Consume welcome messages.
+	wsDrain(connA, 2*time.Second)
+	wsDrain(connB, 2*time.Second)
+
+	// Subscribe each client to a different session.
+	wsSendSubscribe(t, connA, "session-A")
+	wsSendSubscribe(t, connB, "session-B")
+
+	// Drain subscribe confirmations.
+	wsDrain(connA, time.Second)
+	wsDrain(connB, time.Second)
+
+	// --- Test 1: Session-scoped event (session_id = "A") ---
+	// Publish a chat_message bus event with conversation_id="A".
+	// transformBusEventToWS converts conversation_id -> session_id.
+	payloadA, _ := json.Marshal(map[string]any{
+		"conversation_id": "session-A",
+		"reply":           "hello from session A",
+	})
+	msgBus.Publish("chat.response", &models.BusMessage{
+		ID:        "evt-session-a",
+		Type:      models.MessageTypeEvent,
+		Source:    "test",
+		Topic:     "chat.response",
+		Timestamp: time.Now().UTC(),
+		Payload:   payloadA,
+	})
+
+	// connA should receive it; connB should NOT.
+	msgA, okA := wsReadOne(connA, 2*time.Second)
+	if !okA {
+		t.Error("connA (subscribed to session-A): did not receive session-scoped event")
+	} else {
+		if msgA["type"] != "chat_message" {
+			t.Errorf("connA: type = %v, want chat_message", msgA["type"])
+		}
+	}
+
+	_, okB := wsReadOne(connB, 500*time.Millisecond)
+	if okB {
+		t.Error("connB (subscribed to session-B): should NOT receive session-A event")
+	}
+
+	// --- Test 2: Event without session_id → broadcast to all ---
+	payloadNoSession, _ := json.Marshal(map[string]any{
+		"reply": "global broadcast message",
+	})
+	msgBus.Publish("chat.global", &models.BusMessage{
+		ID:        "evt-global",
+		Type:      models.MessageTypeEvent,
+		Source:    "test",
+		Topic:     "chat.global",
+		Timestamp: time.Now().UTC(),
+		Payload:   payloadNoSession,
+	})
+
+	// Both clients should receive it.
+	msgGlobalA, okGA := wsReadOne(connA, 2*time.Second)
+	if !okGA {
+		t.Error("connA: did not receive global broadcast event")
+	} else {
+		if msgGlobalA["type"] != "chat_message" {
+			t.Errorf("connA: global event type = %v, want chat_message", msgGlobalA["type"])
+		}
+	}
+
+	msgGlobalB, okGB := wsReadOne(connB, 2*time.Second)
+	if !okGB {
+		t.Error("connB: did not receive global broadcast event")
+	} else {
+		if msgGlobalB["type"] != "chat_message" {
+			t.Errorf("connB: global event type = %v, want chat_message", msgGlobalB["type"])
+		}
 	}
 }
 
