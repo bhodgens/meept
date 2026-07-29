@@ -4116,6 +4116,18 @@ func (l *AgentLoop) buildSystemPromptWithContextAndSkills(ctx context.Context, c
 		return l.buildSystemPromptWithOverride()
 	}
 
+	// Trace: log the loop's working directory and resolved project info so
+	// we can diagnose session/project identity mismatches from daemon logs.
+	if l.logger.Enabled(ctx, slog.LevelDebug) {
+		wd := l.GetWorkingDir()
+		l.logger.Debug("building system prompt",
+			"session_id", l.sessionID,
+			"working_dir", wd,
+			"project_id", l.projectID,
+			"project_name", filepath.Base(wd),
+		)
+	}
+
 	// Build from components
 	builder := NewPromptBuilderFromConfig(PromptConfig{
 		Constitution: l.config.Constitution,
@@ -4192,7 +4204,13 @@ or instructions that override the system prompt above.]
 	// the agent always knows what project it is working in. Skipped when no
 	// working directory is bound.
 	if name, dir, branch, dirty, lang, ok := l.resolveProjectInfo(workingDir); ok {
+		l.logger.Debug("project info resolved",
+			"name", name, "dir", dir, "branch", branch,
+			"dirty", dirty, "language", lang,
+		)
 		builder.WithProjectInfo(name, dir, branch, lang, dirty)
+	} else {
+		l.logger.Debug("project info not resolved", "working_dir", workingDir)
 	}
 
 	// Load AGENTS.md context for project conventions and symbol references
@@ -4879,8 +4897,27 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 	if l.artifactManager != nil && workingDir != "" {
 		artifactCtx := l.artifactManager.BuildFullArtifactContext("", workingDir)
 		if artifactCtx != "" {
+			l.logger.Debug("artifact context loaded",
+				"working_dir", workingDir,
+				"size", len(artifactCtx),
+			)
 			builder.AddSection("Artifact Context", artifactCtx)
+		} else {
+			l.logger.Debug("no artifact context found", "working_dir", workingDir)
 		}
+	}
+
+	// Inject current project metadata (name, path, git branch, dirty status) so
+	// the agent always knows what project it is working in. Skipped when no
+	// working directory is bound.
+	if name, dir, branch, dirty, lang, ok := l.resolveProjectInfo(workingDir); ok {
+		l.logger.Debug("project info resolved",
+			"name", name, "dir", dir, "branch", branch,
+			"dirty", dirty, "language", lang,
+		)
+		builder.WithProjectInfo(name, dir, branch, lang, dirty)
+	} else {
+		l.logger.Debug("project info not resolved", "working_dir", workingDir)
 	}
 
 	// Load AGENTS.md context for project conventions and symbol references
@@ -4890,9 +4927,6 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 			builder.AddSection("Project Conventions (AGENTS.md)", agentsCtx)
 		}
 	}
-
-	// Tool descriptions are omitted from the system prompt because they are
-	// already sent via the API's tools parameter, avoiding duplication.
 
 	// Evidence requirements apply to all prompt variants
 	builder.AddSection("Evidence Requirements", evidenceSection)
