@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
@@ -65,5 +66,13 @@ func (t *ProjectInfoTool) Execute(ctx context.Context, args map[string]any) (any
 	if info == nil {
 		return map[string]any{"status": "no project bound"}, nil
 	}
+	// Trace the resolved working directory so we can diagnose session/project
+	// identity mismatches from daemon debug logs.
+	slog.Debug("project_info resolved",
+		"working_dir_from_ctx", tools.WorkingDirFromContext(ctx),
+		"working_dir_final", workingDir,
+		"result_name", info["name"],
+		"result_path", info["path"],
+	)
 	return info, nil
 }
