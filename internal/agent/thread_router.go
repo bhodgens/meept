@@ -13,6 +13,7 @@ import (
 // session store to perform migration and thread lookups.
 type ThreadRoutable interface {
 	Get(id string) *session.Session
+	GetByConversationID(conversationID string) *session.Session
 	GetActiveThread(ctx context.Context, sessionID string) (*session.Thread, error)
 	ListThreadsBySession(ctx context.Context, sessionID string) ([]*session.Thread, error)
 }
@@ -117,7 +118,12 @@ func (tr *ThreadRouter) GetThreadConversationID(ctx context.Context, sessionID, 
 		return sessionID, nil
 	}
 
-	sess := store.Get(sessionID)
+	sess := store.GetByConversationID(sessionID)
+	if sess == nil {
+		// Fall back to direct ID lookup for legacy callers that pass
+		// the session's primary ID instead of its conversation ID.
+		sess = store.Get(sessionID)
+	}
 	if sess == nil {
 		return sessionID, nil
 	}
@@ -162,7 +168,10 @@ func (tr *ThreadRouter) SetActiveThread(sessionID, threadID string) error {
 		return fmt.Errorf("session store not configured")
 	}
 
-	sess := store.Get(sessionID)
+	sess := store.GetByConversationID(sessionID)
+	if sess == nil {
+		sess = store.Get(sessionID)
+	}
 	if sess == nil {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
@@ -195,7 +204,10 @@ func (tr *ThreadRouter) GetActiveThread(sessionID string) (*session.Thread, erro
 		return nil, nil
 	}
 
-	sess := store.Get(sessionID)
+	sess := store.GetByConversationID(sessionID)
+	if sess == nil {
+		sess = store.Get(sessionID)
+	}
 	if sess == nil {
 		return nil, fmt.Errorf("session not found: %s", sessionID)
 	}
@@ -213,7 +225,10 @@ func (tr *ThreadRouter) CrossThreadContext(sessionID, activeThreadID string) str
 	if store == nil {
 		return ""
 	}
-	sess := store.Get(sessionID)
+	sess := store.GetByConversationID(sessionID)
+	if sess == nil {
+		sess = store.Get(sessionID)
+	}
 	if sess == nil || len(sess.Threads) == 0 {
 		return ""
 	}

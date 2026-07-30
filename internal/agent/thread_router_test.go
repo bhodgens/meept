@@ -24,6 +24,15 @@ func (m *mockThreadStore) Get(id string) *session.Session {
 	return m.sessions[id]
 }
 
+func (m *mockThreadStore) GetByConversationID(conversationID string) *session.Session {
+	for _, sess := range m.sessions {
+		if sess.ConversationID == conversationID {
+			return sess
+		}
+	}
+	return nil
+}
+
 func (m *mockThreadStore) GetActiveThread(ctx context.Context, sessionID string) (*session.Thread, error) {
 	sess := m.Get(sessionID)
 	if sess == nil {
