@@ -28,6 +28,11 @@ import (
 // (30+ methods).
 type SessionStoreReader interface {
 	Get(id string) *session.Session
+	// GetByConversationID looks up a session by its conversation ID (not
+	// the session's primary ID). Use this instead of Get when the caller
+	// only has the conversation ID, as session IDs and conversation IDs
+	// are distinct identifiers.
+	GetByConversationID(conversationID string) *session.Session
 }
 
 // SessionMessageSaver persists chat messages to the session store.
@@ -1558,7 +1563,7 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 	if h.loopManager == nil || h.sessionStore == nil {
 		return h.loop
 	}
-	sess := h.sessionStore.Get(conversationID)
+	sess := h.sessionStore.GetByConversationID(conversationID)
 	if sess == nil {
 		return h.loop
 	}

@@ -939,7 +939,7 @@ func TestDispatcher_ResolveAgent_ReturnsSessionScopedLoop(t *testing.T) {
 	const projectPath = "/repos/myproject"
 	store := &stubSessionStore{
 		sessions: map[string]*session.Session{
-			sessionID: {ID: sessionID, ProjectPath: projectPath},
+			sessionID: {ID: sessionID, ConversationID: sessionID, ProjectPath: projectPath},
 		},
 	}
 	d := &Dispatcher{
@@ -968,7 +968,7 @@ func TestDispatcher_ResolveAgent_CachesLoopAcrossCalls(t *testing.T) {
 	const projectPath = "/repos/cached"
 	store := &stubSessionStore{
 		sessions: map[string]*session.Session{
-			sessionID: {ID: sessionID, ProjectPath: projectPath},
+			sessionID: {ID: sessionID, ConversationID: sessionID, ProjectPath: projectPath},
 		},
 	}
 	d := &Dispatcher{

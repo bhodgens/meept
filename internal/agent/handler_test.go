@@ -892,6 +892,15 @@ func (s *stubSessionStore) Get(id string) *session.Session {
 	return s.sessions[id]
 }
 
+func (s *stubSessionStore) GetByConversationID(conversationID string) *session.Session {
+	for _, sess := range s.sessions {
+		if sess.ConversationID == conversationID {
+			return sess
+		}
+	}
+	return nil
+}
+
 func TestChatHandler_SessionLoop_FallsBackToSingleton_WhenManagerNil(t *testing.T) {
 	singletonLoop := NewAgentLoop("singleton", "/tmp")
 	h := NewChatHandler(singletonLoop, nil, nil, slogDiscardLogger())
@@ -957,7 +966,7 @@ func TestChatHandler_SessionLoop_ReturnsSessionScopedLoop(t *testing.T) {
 	const projectPath = "/repos/myproject"
 	store := &stubSessionStore{
 		sessions: map[string]*session.Session{
-			sessionID: {ID: sessionID, ProjectPath: projectPath},
+			sessionID: {ID: sessionID, ConversationID: sessionID, ProjectPath: projectPath},
 		},
 	}
 	h.SetSessionStore(store)
@@ -987,7 +996,7 @@ func TestChatHandler_SessionLoop_CachesLoopAcrossCalls(t *testing.T) {
 	const projectPath = "/repos/cached"
 	store := &stubSessionStore{
 		sessions: map[string]*session.Session{
-			sessionID: {ID: sessionID, ProjectPath: projectPath},
+			sessionID: {ID: sessionID, ConversationID: sessionID, ProjectPath: projectPath},
 		},
 	}
 	h.SetSessionStore(store)

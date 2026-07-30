@@ -1500,7 +1500,7 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 		// gets the project path when resolveAgent runs (which is bypassed
 		// when the queue is active).
 		if d.sessionStore != nil && conversationID != "" {
-			if sess := d.sessionStore.Get(conversationID); sess != nil {
+			if sess := d.sessionStore.GetByConversationID(conversationID); sess != nil {
 				projectPath := sess.ProjectPath
 				if projectPath == "" && sess.ProjectID != "" && d.loopManager != nil {
 					projectPath = d.loopManager.ResolveProjectPath(context.Background(), sess.ProjectID)
@@ -1741,7 +1741,7 @@ func (d *Dispatcher) handleStatsQuery(_ context.Context) (string, error) {
 func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 	// Try session-scoped loop first.
 	if d.loopManager != nil && d.sessionStore != nil && conversationID != "" {
-		if sess := d.sessionStore.Get(conversationID); sess != nil {
+		if sess := d.sessionStore.GetByConversationID(conversationID); sess != nil {
 			// Legacy session fallback: if ProjectPath is empty but
 			// ProjectID is set, look up LocalPath from the project
 			// manager (available via loop manager) before falling back.
@@ -1797,7 +1797,7 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 	// as their working directory. The registry creates loops with workingDir=""
 	// (registry.go line 422), so we must set it here for every fallback path.
 	if d.sessionStore != nil && conversationID != "" {
-		if sess := d.sessionStore.Get(conversationID); sess != nil {
+		if sess := d.sessionStore.GetByConversationID(conversationID); sess != nil {
 			projectPath := sess.ProjectPath
 			if projectPath == "" && sess.ProjectID != "" && d.loopManager != nil {
 				projectPath = d.loopManager.ResolveProjectPath(context.Background(), sess.ProjectID)
