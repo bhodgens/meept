@@ -1025,3 +1025,39 @@ func TestChatHandler_SetSessionStore_NilSafe(t *testing.T) {
 		t.Error("sessionStore should remain nil after SetSessionStore(nil)")
 	}
 }
+
+// TestChatHandler_SessionLoop_DistinctSessionAndConversationIDs reproduces the
+// production bug where a session's primary ID differs from its conversation ID.
+// Before the fix, sessionLoop called Get(conversationID) which looked up by
+// primary key and returned nil, silently falling back to the singleton loop
+// with workingDir="" — causing the agent to resolve the daemon's own CWD.
+func TestChatHandler_SessionLoop_DistinctSessionAndConversationIDs(t *testing.T) {
+	singletonLoop := NewAgentLoop("singleton", "/tmp")
+	h := NewChatHandler(singletonLoop, nil, nil, slogDiscardLogger())
+
+	const (
+		sessionID      = "session-abc123"
+		conversationID = "conv-xyz789"
+		projectPath    = "/repos/rebellion-the-game"
+	)
+	store := &stubSessionStore{
+		sessions: map[string]*session.Session{
+			sessionID: {ID: sessionID, ConversationID: conversationID, ProjectPath: projectPath},
+		},
+	}
+	h.SetSessionStore(store)
+	mgr := NewManager(ManagerConfig{})
+	h.SetAgentLoopManager(mgr)
+
+	// The dispatcher/handler pass conversationID, not sessionID.
+	got := h.sessionLoop(conversationID)
+	if got == nil {
+		t.Fatal("expected non-nil loop")
+	}
+	if got == singletonLoop {
+		t.Fatal("expected session-scoped loop, got singleton — session lookup by conversation ID failed")
+	}
+	if got.GetWorkingDir() != projectPath {
+		t.Errorf("GetWorkingDir() = %q, want %q", got.GetWorkingDir(), projectPath)
+	}
+}

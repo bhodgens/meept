@@ -984,3 +984,41 @@ func TestDispatcher_ResolveAgent_CachesLoopAcrossCalls(t *testing.T) {
 		t.Error("expected the same loop instance on repeated calls (cached by manager)")
 	}
 }
+
+// TestDispatcher_ResolveAgent_DistinctSessionAndConversationIDs reproduces the
+// production bug where session ID != conversation ID. Before the fix,
+// resolveAgent called Get(conversationID) which looked up by primary key,
+// returned nil, and silently fell through to the singleton registry loop.
+func TestDispatcher_ResolveAgent_DistinctSessionAndConversationIDs(t *testing.T) {
+	reg := newTestRegistryWithChat(t)
+	registryLoop, _ := reg.Get(config.AgentIDChat)
+
+	const (
+		sessionID      = "session-abc123"
+		conversationID = "conv-xyz789"
+		projectPath    = "/repos/rebellion-the-game"
+	)
+	store := &stubSessionStore{
+		sessions: map[string]*session.Session{
+			sessionID: {ID: sessionID, ConversationID: conversationID, ProjectPath: projectPath},
+		},
+	}
+	d := &Dispatcher{
+		registry:     reg,
+		loopManager:  NewManager(ManagerConfig{}),
+		sessionStore: store,
+		logger:       slog.Default(),
+	}
+
+	// resolveAgent receives the conversation ID, not the session ID.
+	got := d.resolveAgent(config.AgentIDChat, conversationID)
+	if got == nil {
+		t.Fatal("expected non-nil loop")
+	}
+	if got == registryLoop {
+		t.Fatal("expected session-scoped loop, got registry singleton — lookup by conversation ID failed")
+	}
+	if got.GetWorkingDir() != projectPath {
+		t.Errorf("GetWorkingDir() = %q, want %q", got.GetWorkingDir(), projectPath)
+	}
+}
