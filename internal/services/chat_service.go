@@ -91,10 +91,13 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 
 	conversationID := req.ConversationID
 
-	// Resolve session ID to the session's internal conversation ID so that
-	// agent-side persistence (persistConversation) writes to the same
-	// session the client is viewing.
+	// The Flutter client sends the session's primary ID (e.g.
+	// "session-abc123") in the conversation_id field. Resolve it to
+	// the session's internal conversation ID (e.g. "conv-xyz789") so
+	// that agent-side persistence writes to the correct session.
 	if s.sessionStore != nil {
+		// Get() searches by primary key (session ID), which is what
+		// the client actually sent despite the field name.
 		if sess := s.sessionStore.Get(req.ConversationID); sess != nil && sess.ConversationID != "" {
 			conversationID = sess.ConversationID
 			s.logger.Debug("resolved conversation_id from session store",

@@ -1575,20 +1575,18 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 			sess.ProjectPath = path
 		}
 	}
-	// BUG FIX: Even when falling back to the singleton h.loop, set its
-	// workingDir from the session's project path. The registry creates
-	// loops with workingDir="" (registry.go line 422), so the singleton
-	// would otherwise have an empty working directory.
+	// Resolve the effective working path (worktree overrides project path).
 	workingPath := sess.ProjectPath
 	if sess.WorktreePath != "" {
 		workingPath = sess.WorktreePath
 	}
-	if workingPath != "" {
-		h.loop.SetWorkingDir(workingPath)
-	}
 	if workingPath == "" {
 		return h.loop
 	}
+	// Create a session-scoped loop via the manager. This avoids mutating
+	// the shared singleton's workingDir (which races with concurrent
+	// sessions). If manager creation fails, fall back to the singleton
+	// with a warning.
 	loop, err := h.loopManager.GetOrCreateWired(conversationID, workingPath, h.loop)
 	if err != nil {
 		h.logger.Warn("session-scoped loop creation failed; using singleton",
@@ -1596,6 +1594,9 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 			"project", sess.ProjectPath,
 			"error", err,
 		)
+		// Last resort: mutate the singleton. This is a known race under
+		// concurrent multi-session load but better than no workingDir.
+		h.loop.SetWorkingDir(workingPath)
 		return h.loop
 	}
 	// Wire session identity + project context onto the loop so the system

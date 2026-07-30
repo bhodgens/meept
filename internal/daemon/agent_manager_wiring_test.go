@@ -64,8 +64,10 @@ func TestWireAgentLoopManager_DisabledByConfig(t *testing.T) {
 
 	wireAgentLoopManager(c, cfg, slog.Default())
 
-	if c.AgentLoopManager != nil {
-		t.Error("expected AgentLoopManager to remain nil when disabled")
+	// Manager should still be created for per-session project isolation,
+	// even when the worker pool is disabled.
+	if c.AgentLoopManager == nil {
+		t.Error("expected AgentLoopManager to be created even when worker pool disabled")
 	}
 	if c.AgentWorkerPool != nil {
 		t.Error("expected AgentWorkerPool to remain nil when disabled")

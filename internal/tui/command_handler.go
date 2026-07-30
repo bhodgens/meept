@@ -2100,6 +2100,12 @@ func (h *CommandHandler) executeDebugSession() *CommandResult {
 	if session.ProjectPath != "" {
 		sb.WriteString(fmt.Sprintf("Project Path:    %s\n", session.ProjectPath))
 	}
+	if session.WorktreePath != "" {
+		sb.WriteString(fmt.Sprintf("Worktree Path:   %s\n", session.WorktreePath))
+		sb.WriteString(fmt.Sprintf("Effective Dir:   %s\n", session.WorktreePath))
+	} else if session.ProjectPath != "" {
+		sb.WriteString(fmt.Sprintf("Effective Dir:   %s\n", session.ProjectPath))
+	}
 	if session.DetectionContext != nil {
 		sb.WriteString(fmt.Sprintf("CWD:             %s\n", session.DetectionContext.CWD))
 		if session.DetectionContext.DetectedProjectID != "" {

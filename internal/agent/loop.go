@@ -1741,6 +1741,15 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		return "", ErrNoLLMClient
 	}
 
+	// Trace: log loop identity at execution start so we can verify the
+	// correct session-scoped loop (with the right workingDir) is running.
+	l.logger.Debug("RunOnceWithParts: agent loop executing",
+		"loop_session_id", l.sessionID,
+		"loop_working_dir", l.GetWorkingDir(),
+		"conversation_id", conversationID,
+		"message_len", len(userMessage),
+	)
+
 	// begin marks the start of the turn for duration tracking. Used by
 	// the immediate self-reflection goroutine (Turbo Thread E) to attach
 	// wall-clock latency to the trajectory.
