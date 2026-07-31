@@ -393,6 +393,24 @@ func (b *MessageBus) Stats() map[string]int {
 	return stats
 }
 
+// HasSubscribers reports whether any subscriber (direct or wildcard) is
+// registered for the given topic. Use this to skip expensive publishes when
+// nobody is listening (e.g., SSE heartbeats in non-streaming mode).
+func (b *MessageBus) HasSubscribers(topic string) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if len(b.subscribers[topic]) > 0 {
+		return true
+	}
+	for pattern, subs := range b.subscribers {
+		if pattern != topic && len(subs) > 0 && matchWildcard(pattern, topic) {
+			return true
+		}
+	}
+	return false
+}
+
 // matchWildcard checks if a pattern matches a topic.
 // Pattern "agent.*" matches "agent.status" but not "agent.sub.topic".
 func matchWildcard(pattern, topic string) bool {

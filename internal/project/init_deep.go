@@ -89,11 +89,9 @@ func (di *DeepInitializer) Run(ctx context.Context) (*DeepInitResult, error) {
 	start := time.Now()
 	root := di.opts.RootDir
 	if root == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("getwd: %w", err)
-		}
-		root = wd
+		// The daemon's CWD is not the user's project. Require an explicit
+		// root directory rather than falling back to os.Getwd().
+		return nil, fmt.Errorf("deep init requires an explicit RootDir (daemon CWD is not a project directory)")
 	}
 
 	result := &DeepInitResult{

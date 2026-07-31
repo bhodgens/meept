@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"sort"
@@ -1659,6 +1660,13 @@ type ConversationStore struct {
 	order         []string // LRU order, most recent at end
 	maxSize       int
 	persistFn     PersistenceFunc
+	logger        *slog.Logger
+
+	// overCapWarned is set once when the store exceeds 2x maxSize with
+	// all conversations active, so we don't spam the log on every
+	// subsequent eviction attempt. Reset when a successful eviction
+	// brings the store back under the threshold.
+	overCapWarned bool
 }
 
 // PersistenceFunc is called to persist messages after they're added.
@@ -1676,6 +1684,15 @@ func WithPersistence(fn PersistenceFunc) ConversationStoreOption {
 	}
 }
 
+// WithStoreLogger sets the logger for the ConversationStore.
+func WithStoreLogger(logger *slog.Logger) ConversationStoreOption {
+	return func(s *ConversationStore) {
+		if logger != nil {
+			s.logger = logger
+		}
+	}
+}
+
 // NewConversationStore creates a new conversation store.
 func NewConversationStore(maxSize int, opts ...ConversationStoreOption) *ConversationStore {
 	if maxSize <= 0 {
@@ -1685,6 +1702,7 @@ func NewConversationStore(maxSize int, opts ...ConversationStoreOption) *Convers
 		conversations: make(map[string]*Conversation),
 		order:         make([]string, 0, maxSize),
 		maxSize:       maxSize,
+		logger:        slog.Default(),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -1797,11 +1815,25 @@ func (s *ConversationStore) evictOldest() {
 		if evictIdx < 0 {
 			// All conversations are active; cannot evict without
 			// disrupting in-flight turns. Allow temporary over-capacity.
+			// Warn once when the store exceeds 2x its configured max so
+			// operators know something is wrong.
+			if len(s.order) > 2*s.maxSize && !s.overCapWarned {
+				s.overCapWarned = true
+				s.logger.Warn("conversation store exceeds 2x max size; all conversations active, cannot evict",
+					"size", len(s.order),
+					"max_size", s.maxSize,
+				)
+			}
 			return
 		}
 		oldest := s.order[evictIdx]
 		delete(s.conversations, oldest)
 		s.order = append(s.order[:evictIdx], s.order[evictIdx+1:]...)
+		// Reset the warning flag once we successfully evict and the
+		// store is back under the 2x threshold.
+		if len(s.order) <= 2*s.maxSize {
+			s.overCapWarned = false
+		}
 	}
 }
 

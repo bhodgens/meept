@@ -208,6 +208,13 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 			case <-heartbeatCtx.Done():
 				return
 			case <-ticker.C:
+				// Skip the publish entirely when no SSE client is
+				// subscribed to chat.progress. In the common
+				// blocking-POST path this avoids a wasted bus
+				// publish (and WARN log) every 5 seconds.
+				if !s.bus.HasSubscribers("chat.progress") {
+					continue
+				}
 				elapsed := time.Since(startTime).Milliseconds()
 				hbPayload, _ := json.Marshal(map[string]any{
 					"request_id": msgID,

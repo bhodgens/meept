@@ -3,7 +3,6 @@ package builtin
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -39,9 +38,8 @@ type GitSplitTool struct {
 
 // NewGitSplitTool creates a new git split tool.
 func NewGitSplitTool(workingDir string) *GitSplitTool {
-	if workingDir == "" {
-		workingDir, _ = os.Getwd()
-	}
+	// workingDir may be empty; set per-session when a project is bound.
+	// Do NOT fall back to os.Getwd() — the daemon's CWD is not the user's project.
 	return &GitSplitTool{workingDir: workingDir}
 }
 

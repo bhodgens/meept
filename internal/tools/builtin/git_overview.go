@@ -3,7 +3,6 @@ package builtin
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -20,9 +19,8 @@ type GitOverviewTool struct {
 
 // NewGitOverviewTool creates a new git overview tool.
 func NewGitOverviewTool(workingDir string) *GitOverviewTool {
-	if workingDir == "" {
-		workingDir, _ = os.Getwd()
-	}
+	// workingDir may be empty; set per-session when a project is bound.
+	// Do NOT fall back to os.Getwd() — the daemon's CWD is not the user's project.
 	return &GitOverviewTool{workingDir: workingDir}
 }
 

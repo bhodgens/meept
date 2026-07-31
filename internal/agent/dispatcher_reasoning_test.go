@@ -109,7 +109,7 @@ func TestDispatchExplicitDirectiveSuppressesSuggestion(t *testing.T) {
 	ctx := context.Background()
 	// "plan a migration using high reasoning" contains an explicit
 	// reasoning directive ("using high reasoning") AND a plan keyword.
-	result, err := d.ClassifyAndRoute(ctx, "plan a migration using high reasoning", "test-session-2", nil)
+	result, err := d.ClassifyAndRoute(ctx, "plan a migration using high reasoning", "test-session-2", nil, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 

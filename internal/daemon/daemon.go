@@ -100,12 +100,11 @@ type Config struct {
 func DefaultConfig() *Config {
 	homeDir, _ := os.UserHomeDir()
 	stateDir := filepath.Join(homeDir, ".meept")
-	workingDir, _ := os.Getwd()
 	return &Config{
 		SocketPath:      filepath.Join(stateDir, "meept.sock"),
 		PIDFile:         filepath.Join(stateDir, "meept.pid"),
 		StateDir:        stateDir,
-		WorkingDir:      workingDir,
+		WorkingDir:      "", // set per-session; daemon CWD is not the user's project
 		ShutdownTimeout: 10 * time.Second,
 		LogLevel:        slog.LevelInfo,
 	}

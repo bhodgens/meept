@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
@@ -109,22 +108,15 @@ func (s *SessionService) CreateSession(ctx context.Context, req CreateSessionReq
 				)
 			}
 		}
-		// Last resort: if EnsureDefault returned nil (no active project and
-		// it failed to create one), try the daemon's working directory. When
-		// the daemon is started from a project root, os.Getwd() IS the user's
-		// project. Skip "/" to avoid binding to filesystem root.
+		// No project could be resolved from the request or the default
+		// project. Do NOT fall back to the daemon's own CWD — the daemon
+		// process's working directory is wherever it was launched from and
+		// is never the user's project. Leave the session unbound; the caller
+		// (or a later BindProject call) is responsible for setting it.
 		if p == nil {
-			if wd, wdErr := os.Getwd(); wdErr == nil && wd != "" && wd != "/" {
-				p, err = s.pm.CreateOrResolve(ctx, wd)
-				if err != nil {
-					s.logger.Debug("daemon CWD project resolution failed",
-						"session_id", sess.ID,
-						"cwd", wd,
-						"error", err,
-					)
-					p = nil
-				}
-			}
+			s.logger.Debug("no project bound to session",
+				"session_id", sess.ID,
+			)
 		}
 		if p != nil {
 			if err := s.store.SetProject(sess.ID, p.ID, p.LocalPath); err != nil {

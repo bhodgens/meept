@@ -469,15 +469,20 @@ func (s *MemoryStore) GetMessageCount(sessionID string) (int, error) {
 }
 
 // ClearMessages removes all messages for a session, resetting the
-// conversation history. The session itself is preserved.
+// conversation history. The session itself is preserved. Also resets the
+// leaf pointer, threads, and active thread so no stale state lingers.
 func (s *MemoryStore) ClearMessages(sessionID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, exists := s.sessions[sessionID]; !exists {
+	sess, exists := s.sessions[sessionID]
+	if !exists {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 	delete(s.messages, sessionID)
+	sess.LeafMessageID = nil
+	sess.Threads = nil
+	sess.ActiveThreadID = ""
 	return nil
 }
 

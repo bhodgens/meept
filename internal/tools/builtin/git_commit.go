@@ -3,7 +3,6 @@ package builtin
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -44,9 +43,8 @@ type BatchCommitResult struct {
 
 // NewGitCommitTool creates a new git commit tool.
 func NewGitCommitTool(workingDir string) *GitCommitTool {
-	if workingDir == "" {
-		workingDir, _ = os.Getwd()
-	}
+	// workingDir may be empty; set per-session when a project is bound.
+	// Do NOT fall back to os.Getwd() — the daemon's CWD is not the user's project.
 	return &GitCommitTool{workingDir: workingDir}
 }
 

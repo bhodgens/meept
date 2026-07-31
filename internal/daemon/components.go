@@ -390,15 +390,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Create security orchestrator for input sanitization, output monitoring, and shell scanning
 	c.SecurityOrchestrator = createSecurityOrchestrator(cfg, logger)
 
-	// Create fence checker for path-based sandboxing
+	// Create fence checker for path-based sandboxing.
+	// RootPath is left empty at init; the per-session working directory
+	// is set when a session binds to a project. The daemon's own CWD is
+	// never the user's project.
 	if cfg.Security.FenceEnabled {
-		wd, _ := os.Getwd()
 		c.FenceChecker = intsecurity.NewFenceChecker(intsecurity.FenceConfig{
 			Enabled:   true,
-			RootPath:  wd,
+			RootPath:  "", // set per-session, not from daemon CWD
 			AllowRead: cfg.Security.FenceAllowRead,
 		}, logger)
-		logger.Info("Fence checker enabled", "root", wd)
+		logger.Info("Fence checker enabled (root set per-session)")
 	}
 
 	// Create LLM client with budget tracking
@@ -910,10 +912,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	logger.Info("Hallucination detector initialized")
 
 	c.ArtifactManager = agent.NewArtifactManager(logger.With("component", "artifact-manager"))
-	// Set project root for hierarchical AGENTS.md loading
-	if wd, err := os.Getwd(); err == nil {
-		c.ArtifactManager.WithProjectRoot(wd)
-	}
+	// Project root is set per-session when a project is bound, not from the
+	// daemon's own CWD (which is wherever the daemon binary was launched).
 	logger.Info("Artifact manager initialized")
 
 	// Create TT-SR stream rule manager and load rules from all skills directories
@@ -1056,8 +1056,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	c.AgentEventEmitter = emitter
 
 	// Note: memvid and taskStore are wired AFTER their initialization below
-	wd, _ := os.Getwd()
-	c.AgentLoop = agent.NewAgentLoop("daemon", wd, agentOpts...)
+	// workingDir is empty at init; set per-session when a project is bound.
+	c.AgentLoop = agent.NewAgentLoop("daemon", "", agentOpts...)
 	// Wire context firewall settings from LLM config
 	c.AgentLoop.SetContextFirewallConfig(cfg.LLM.ContextFirewall)
 	c.AgentLoop.SetCompactionConfig(cfg.Compaction)
@@ -2145,10 +2145,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			watchedFiles = discoverProjectFiles(cfg.Projects.BaseDir, logger)
 		}
 		if len(watchedFiles) == 0 && cfg.Projects.AutoDetect {
-			// Try to pick up files from the working directory
-			if wd, err := os.Getwd(); err == nil {
-				watchedFiles = discoverProjectFiles(wd, logger)
-			}
+			// Auto-detect from configured project directories only; the daemon's
+			// own CWD is never the user's project.
+			logger.Debug("repomap auto-detect: no files from BaseDir; skipping CWD fallback")
 		}
 
 		gen, err := repomap.NewRepoMapGenerator(repoMapCfg, logger.With("component", "repomap"), watchedFiles)
@@ -4391,9 +4390,10 @@ func registerBuiltinTools(
 	registry.Register(fileFindTool)
 	registry.Register(fileGrepTool)
 
-	// Shell tool with security orchestrator for Tirith scanning
-	wd, _ := os.Getwd()
-	shellTool := builtin.NewShellExecuteTool(wd, 60*time.Second, ptyMgr)
+	// Shell tool with security orchestrator for Tirith scanning.
+	// Pass empty workingDir — the shell tool resolves ~ (user home) as
+	// default. The daemon's CWD is NOT the user's project directory.
+	shellTool := builtin.NewShellExecuteTool("", 60*time.Second, ptyMgr)
 	if secOrch != nil {
 		shellTool.SetSecurityOrchestrator(secOrch)
 		logger.Debug("Shell tool configured with security orchestrator")
@@ -4411,10 +4411,10 @@ func registerBuiltinTools(
 	}
 	registry.Register(shellTool)
 
-	// Git tools for commit workflow
-	gitOverviewTool := builtin.NewGitOverviewTool(wd)
-	gitSplitTool := builtin.NewGitSplitTool(wd)
-	gitCommitTool := builtin.NewGitCommitTool(wd)
+	// Git tools for commit workflow (workingDir set per-session)
+	gitOverviewTool := builtin.NewGitOverviewTool("")
+	gitSplitTool := builtin.NewGitSplitTool("")
+	gitCommitTool := builtin.NewGitCommitTool("")
 	if fenceChecker != nil {
 		gitOverviewTool.SetFenceChecker(fenceChecker)
 		gitSplitTool.SetFenceChecker(fenceChecker)
@@ -5403,13 +5403,11 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, pendingChangesRegis
 	}
 	logger.Debug("Registered AST tools")
 
-	// Initialize LSP manager if servers are configured
+	// Initialize LSP manager if servers are configured.
+	// rootURI is empty at init; set per-session when a project is bound.
+	// The daemon's own CWD is never the user's workspace.
 	if len(cfg.CodeIntel.LSP.Servers) > 0 {
-		// Get workspace root
 		rootURI := ""
-		if wd, err := os.Getwd(); err == nil {
-			rootURI = lsp.PathToURI(wd)
-		}
 
 		lspOpts := []lsp.ManagerOption{
 			lsp.WithManagerLogger(logger.With("component", "lsp")),

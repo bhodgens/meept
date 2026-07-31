@@ -607,7 +607,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	if h.dispatcher != nil {
 		// Multi-agent mode: classify and route through dispatcher
 		var dispatchErr error
-		result, dispatchErr = h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID, req.Parts)
+		result, dispatchErr = h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID, req.Parts, req.AgentID)
 
 		// handlerCase tracks which switch case was selected for audit logging.
 		handlerCase := "direct_mode"

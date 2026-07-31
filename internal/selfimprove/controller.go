@@ -83,9 +83,9 @@ type Controller struct {
 
 // NewController creates a new Controller.
 func NewController(cfg Config, msgBus *bus.MessageBus, llmClient *llm.Client, projectRoot string, logger *slog.Logger) *Controller {
-	if projectRoot == "" {
-		projectRoot, _ = os.Getwd()
-	}
+	// projectRoot may be empty; callers must pass the actual project path.
+	// Do NOT fall back to os.Getwd() — the daemon's CWD is not the user's
+	// project.
 	if logger == nil {
 		logger = slog.Default()
 	}

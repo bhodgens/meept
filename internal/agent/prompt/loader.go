@@ -31,10 +31,8 @@ func DefaultLoader() *Loader {
 
 	paths := []string{}
 
-	// Project-local prompts (highest priority)
-	if cwd, err := os.Getwd(); err == nil {
-		paths = append(paths, filepath.Join(cwd, ".meept", "prompts"))
-	}
+	// Project-local prompts are resolved per-session via WithProjectRoot;
+	// do NOT use os.Getwd() here — the daemon's CWD is not the user's project.
 
 	// User prompts
 	if homeDir != "" {

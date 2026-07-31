@@ -130,11 +130,13 @@ func (gl *GoLinter) FormatCheck(ctx context.Context, filePath string) ([]LinterR
 	return nil, nil
 }
 
-// findGoModuleRoot finds the go module root directory.
+// findGoModuleRoot finds the go module root directory by walking up from
+// the given path. Returns "." if no go.mod is found — the daemon's CWD is
+// not meaningful here, so we never fall back to os.Getwd().
 func findGoModuleRoot(path string) string {
 	dir := filepath.Dir(path)
 	if dir == "." {
-		dir, _ = os.Getwd()
+		dir = "."
 	}
 
 	// Walk up looking for go.mod
@@ -147,11 +149,6 @@ func findGoModuleRoot(path string) string {
 			break
 		}
 		dir = parent
-	}
-
-	// Fall back to current directory
-	if dir, err := os.Getwd(); err == nil {
-		return dir
 	}
 
 	return "."

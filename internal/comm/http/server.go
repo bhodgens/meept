@@ -509,8 +509,16 @@ func (s *Server) handleWSEvent(msg *models.BusMessage) {
 	}
 
 	// Extract session_id for per-connection filtering (defense-in-depth).
-	// Events without a session_id are broadcast to all connections.
+	// Prefer session_id (the client-facing session key); fall back to
+	// conversation_id for events that only carry the internal conversation
+	// identifier (agent.progress, tool.execution.progress, agent.event.*).
+	// Events with neither are broadcast to all connections (backward compat).
 	eventSessionID, _ := frontendData["session_id"].(string)
+	if eventSessionID == "" {
+		if convID, ok := frontendData["conversation_id"].(string); ok {
+			eventSessionID = convID
+		}
+	}
 
 	h := s.wsHub
 	payload, err := json.Marshal(map[string]any{

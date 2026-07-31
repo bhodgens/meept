@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -56,13 +55,9 @@ type TerminalSession struct {
 
 // NewTerminalService creates a new terminal service.
 func NewTerminalService(workingDir string, bus *bus.MessageBus, logger *slog.Logger) *TerminalService {
-	if workingDir == "" {
-		if wd, err := os.Getwd(); err == nil {
-			workingDir = wd
-		} else {
-			logger.Warn("getwd failed; falling back to empty working dir", "error", err)
-		}
-	}
+	// workingDir may be empty; the shell tool will fall back to the user's
+	// home directory. Do NOT use os.Getwd() — the daemon's CWD is not the
+	// user's project.
 	if logger == nil {
 		logger = slog.Default()
 	}

@@ -489,7 +489,7 @@ func suggestReasoningForIntent(intentType string) string {
 // non-empty, the parts are attached to the returned DispatchResult so that
 // RouteToAgent can forward them to the specialist agent's RunOnceWithParts.
 // Text-only callers may pass nil.
-func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID string, parts []llm.ContentPart) (*DispatchResult, error) {
+func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID string, parts []llm.ContentPart, agentOverride string) (*DispatchResult, error) {
 	d.logger.Debug("Dispatching request",
 		"session", sessionID,
 		"input_len", len(input),
@@ -641,6 +641,25 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 
 	// 5.2. Synthesize planning mode (Thread D complexity routing).
 	intent.SuggestedMode = suggestMode(IntentType(intent.Type), intent.TrueAnalysis, input)
+
+	// 5.3. Client-specified agent override: if the client explicitly named an
+	// agent and it exists in the registry, use it instead of the classified
+	// intent's agent. Unknown agents fall back to normal classification.
+	if agentOverride != "" {
+		if _, ok := d.registry.GetSpec(agentOverride); ok {
+			d.logger.Info("Client agent override applied",
+				"override", agentOverride,
+				"classified_agent", intent.AgentType,
+				"session", sessionID,
+			)
+			intent.AgentType = agentOverride
+		} else {
+			d.logger.Warn("Client agent override ignored: agent not found in registry",
+				"override", agentOverride,
+				"session", sessionID,
+			)
+		}
+	}
 
 	// 5.5. Check if plan creation is warranted (before task creation)
 	if d.planManager != nil && d.planManager.ShouldCreatePlan(intent.Type, 0) {
@@ -1105,7 +1124,7 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 		)
 		d.clearPendingClarification(sessionID)
 		// Classify just the user's latest response to break the cycle.
-		return d.ClassifyAndRoute(ctx, userResponse, sessionID, nil)
+		return d.ClassifyAndRoute(ctx, userResponse, sessionID, nil, "")
 	}
 
 	d.logger.Info("Resuming after clarification",
@@ -1184,7 +1203,7 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 	// the clarification flow — multimodal attachments only attach to the
 	// original user turn.
 	d.clearPendingClarification(sessionID)
-	return d.ClassifyAndRoute(ctx, combinedInput, sessionID, nil)
+	return d.ClassifyAndRoute(ctx, combinedInput, sessionID, nil, "")
 }
 
 // isPendingClarification checks if the previous intent for a session was a

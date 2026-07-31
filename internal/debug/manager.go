@@ -88,10 +88,10 @@ func (m *Manager) Launch(ctx context.Context, adapterCfg *AdapterConfig, program
 		return nil, fmt.Errorf("invalid adapter command: %w", err)
 	}
 
-	// Resolve working directory.
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
+	// Resolve working directory. If the caller did not provide one, leave it
+	// empty — exec.Command inherits the daemon's CWD, which is acceptable for
+	// a debug adapter but we do NOT explicitly resolve it via os.Getwd() to
+	// avoid implying the daemon's CWD is meaningful as a project directory.
 
 	// Build command.
 	cmdArgs := make([]string, len(adapterCfg.Args))

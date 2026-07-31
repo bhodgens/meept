@@ -984,6 +984,13 @@ func (s *SQLiteStore) ClearMessages(sessionID string) error {
 		return fmt.Errorf("failed to reset leaf pointer: %w", err)
 	}
 
+	// Delete all threads for this session so stale thread state doesn't
+	// linger after a reset.
+	_, err = s.db.Exec("DELETE FROM session_threads WHERE session_id = ?", sessionID) //nolint:mutexio // mutex serializes sqlite connection access
+	if err != nil {
+		return fmt.Errorf("failed to delete threads: %w", err)
+	}
+
 	s.logger.Info("Session messages cleared", "id", sessionID)
 	return nil
 }
