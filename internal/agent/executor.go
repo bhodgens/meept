@@ -710,6 +710,7 @@ type Executor struct {
 	logger             *slog.Logger
 	parallelism        int
 	agentID            string // Identifier for the agent/worker using this executor
+	conversationID     string // Current conversation/session ID for bus event routing
 	cache              *ResultCache
 	bus                *bus.MessageBus // Optional: for publishing streaming progress events
 	depInferrer        *DependencyInferrer
@@ -841,6 +842,15 @@ func (e *Executor) SetRetryMetrics(m *RetryMetrics) {
 func (e *Executor) SetAgentID(id string) {
 	e.mu.Lock()
 	e.agentID = id
+	e.mu.Unlock()
+}
+
+// SetConversationID updates the conversation/session identifier included in
+// bus progress events so the WS filter can route them to the correct client.
+// Safe to call per-invocation from the agent loop.
+func (e *Executor) SetConversationID(id string) {
+	e.mu.Lock()
+	e.conversationID = id
 	e.mu.Unlock()
 }
 
@@ -1483,6 +1493,9 @@ func (e *Executor) publishToolProgress(_ context.Context, toolCallID, toolName s
 		"message":      pu.Message,
 		"percent":      pu.Percent,
 	}
+	if e.conversationID != "" {
+		payload[KeyConversationID] = e.conversationID
+	}
 	if len(pu.PartialResult) > 0 {
 		payload["partial_result"] = pu.PartialResult
 	}
@@ -1506,6 +1519,9 @@ func (e *Executor) publishToolComplete(toolCallID, toolName string, result *Exec
 		"success":      result.Success,
 		"terminate":    result.Terminate,
 		"cached":       result.Cached,
+	}
+	if e.conversationID != "" {
+		payload[KeyConversationID] = e.conversationID
 	}
 
 	// Extract edited files from file_edit tool results.

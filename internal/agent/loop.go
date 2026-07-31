@@ -4788,6 +4788,10 @@ func (l *AgentLoop) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCa
 		return results
 	}
 
+	// Propagate the current conversation/session ID so bus progress events
+	// carry it for WS filter routing.
+	l.executor.SetConversationID(l.currentSessionID)
+
 	if l.config.Memory.RecallMode != RecallModeDisabled {
 		return l.executor.ExecuteAll(ctx, toolCalls)
 	}
