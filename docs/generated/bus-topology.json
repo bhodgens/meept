@@ -1,0 +1,1260 @@
+{
+  "publishers": {
+    "agent.action": [
+      {
+        "file": "internal/agent/loop.go",
+        "line": 5013,
+        "payload_keys": [
+          "conversation_id",
+          "iteration",
+          "tool_calls"
+        ]
+      }
+    ],
+    "agent.progress": [
+      {
+        "file": "internal/agent/loop.go",
+        "line": 5078,
+        "payload_keys": [
+          "detail",
+          "iteration",
+          "stage",
+          "timestamp",
+          "token_count"
+        ]
+      }
+    ],
+    "agent.result": [
+      {
+        "file": "internal/agent/loop.go",
+        "line": 5043,
+        "payload_keys": [
+          "conversation_id",
+          "iteration",
+          "results"
+        ]
+      }
+    ],
+    "agent.status": [
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 62,
+        "payload_keys": []
+      }
+    ],
+    "agent.workers.result": [
+      {
+        "file": "internal/agent/handler.go",
+        "line": 476,
+        "payload_keys": []
+      }
+    ],
+    "calendar.reminder": [
+      {
+        "file": "internal/bot/router_test.go",
+        "line": 69,
+        "payload_keys": [
+          "event_id",
+          "starts_in",
+          "summary"
+        ]
+      }
+    ],
+    "chat.processing": [
+      {
+        "file": "internal/agent/handler.go",
+        "line": 593,
+        "payload_keys": [
+          "conversation_id",
+          "request_id",
+          "status",
+          "worker_id"
+        ]
+      }
+    ],
+    "chat.progress": [
+      {
+        "file": "internal/services/chat_service.go",
+        "line": 233,
+        "payload_keys": [
+          "elapsed_ms",
+          "request_id",
+          "status"
+        ]
+      }
+    ],
+    "chat.request": [
+      {
+        "file": "internal/scheduler/jobs.go",
+        "line": 242,
+        "payload_keys": []
+      },
+      {
+        "file": "internal/services/chat_service.go",
+        "line": 194,
+        "payload_keys": []
+      }
+    ],
+    "chat.response": [
+      {
+        "file": "internal/comm/http/server_test.go",
+        "line": 2409,
+        "payload_keys": [
+          "conversation_id",
+          "reply"
+        ]
+      },
+      {
+        "file": "internal/agent/handler.go",
+        "line": 959,
+        "payload_keys": []
+      }
+    ],
+    "chat_message": [
+      {
+        "file": "internal/comm/http/unified_http_test.go",
+        "line": 745,
+        "payload_keys": []
+      },
+      {
+        "file": "internal/comm/http/server_test.go",
+        "line": 2440,
+        "payload_keys": [
+          "reply"
+        ]
+      }
+    ],
+    "chatresp": [
+      {
+        "file": "internal/comm/http/unified_http_test.go",
+        "line": 920,
+        "payload_keys": []
+      }
+    ],
+    "cluster.event.broadcast": [
+      {
+        "file": "internal/cluster/gossip.go",
+        "line": 412,
+        "payload_keys": [
+          "event"
+        ]
+      },
+      {
+        "file": "internal/cluster/gossip.go",
+        "line": 543,
+        "payload_keys": [
+          "event"
+        ]
+      }
+    ],
+    "cluster.event.heartbeat": [
+      {
+        "file": "internal/cluster/gossip.go",
+        "line": 757,
+        "payload_keys": [
+          "event",
+          "node_id",
+          "peer_count"
+        ]
+      }
+    ],
+    "cluster.event.received": [
+      {
+        "file": "internal/cluster/gossip_transport.go",
+        "line": 252,
+        "payload_keys": [
+          "event"
+        ]
+      }
+    ],
+    "daemon.reloaded": [
+      {
+        "file": "internal/daemon/daemon.go",
+        "line": 1655,
+        "payload_keys": [
+          "event"
+        ]
+      }
+    ],
+    "daemon.started": [
+      {
+        "file": "internal/daemon/daemon.go",
+        "line": 1300,
+        "payload_keys": [
+          "event",
+          "pid"
+        ]
+      }
+    ],
+    "daemon.stopping": [
+      {
+        "file": "internal/daemon/daemon.go",
+        "line": 1346,
+        "payload_keys": [
+          "event"
+        ]
+      }
+    ],
+    "dispatcher.stats.result": [
+      {
+        "file": "internal/daemon/components.go",
+        "line": 1912,
+        "payload_keys": []
+      }
+    ],
+    "employee.constitution_validation_error": [
+      {
+        "file": "internal/daemon/employee_service_adapter.go",
+        "line": 267,
+        "payload_keys": []
+      }
+    ],
+    "employee.critical_finding": [
+      {
+        "file": "internal/daemon/employee_service_adapter.go",
+        "line": 238,
+        "payload_keys": []
+      }
+    ],
+    "employee.metric": [
+      {
+        "file": "internal/daemon/components.go",
+        "line": 3409,
+        "payload_keys": [
+          "name",
+          "tags",
+          "value"
+        ]
+      }
+    ],
+    "employee.paused": [
+      {
+        "file": "internal/daemon/employee_service_adapter.go",
+        "line": 210,
+        "payload_keys": []
+      }
+    ],
+    "event.cluster.task_reclaim": [
+      {
+        "file": "internal/queue/cluster_queue.go",
+        "line": 178,
+        "payload_keys": [
+          "job_id",
+          "node_id",
+          "reason"
+        ]
+      }
+    ],
+    "file.written": [
+      {
+        "file": "internal/agent/phase2_listener_test.go",
+        "line": 123,
+        "payload_keys": [
+          "path"
+        ]
+      }
+    ],
+    "instruction.add": [
+      {
+        "file": "internal/agent/phase4_e2e_test.go",
+        "line": 224,
+        "payload_keys": [
+          "input",
+          "tier"
+        ]
+      }
+    ],
+    "instruction.delete": [
+      {
+        "file": "internal/agent/phase4_e2e_test.go",
+        "line": 284,
+        "payload_keys": [
+          "id"
+        ]
+      }
+    ],
+    "instruction.execute": [
+      {
+        "file": "internal/agent/phase4_e2e_test.go",
+        "line": 97,
+        "payload_keys": [
+          "id"
+        ]
+      },
+      {
+        "file": "internal/agent/phase4_e2e_test.go",
+        "line": 336,
+        "payload_keys": [
+          "id"
+        ]
+      }
+    ],
+    "instruction.executing": [
+      {
+        "file": "internal/agent/instruction_handler.go",
+        "line": 183,
+        "payload_keys": [
+          "action",
+          "args",
+          "instruction_id"
+        ]
+      },
+      {
+        "file": "internal/rpc/instructions.go",
+        "line": 205,
+        "payload_keys": [
+          "action",
+          "args",
+          "instruction_id"
+        ]
+      }
+    ],
+    "instruction.list": [
+      {
+        "file": "internal/agent/phase4_e2e_test.go",
+        "line": 251,
+        "payload_keys": []
+      }
+    ],
+    "instruction.preview": [
+      {
+        "file": "internal/agent/phase4_e2e_test.go",
+        "line": 170,
+        "payload_keys": [
+          "input"
+        ]
+      }
+    ],
+    "llm.tokens.used": [
+      {
+        "file": "internal/agent/loop.go",
+        "line": 5101,
+        "payload_keys": [
+          "conversation_id",
+          "total_tokens"
+        ]
+      }
+    ],
+    "memory.query": [
+      {
+        "file": "internal/memory/handler_test.go",
+        "line": 211,
+        "payload_keys": [
+          "limit",
+          "query"
+        ]
+      },
+      {
+        "file": "internal/memory/handler_test.go",
+        "line": 286,
+        "payload_keys": [
+          "limit",
+          "query"
+        ]
+      },
+      {
+        "file": "internal/memory/handler_test.go",
+        "line": 439,
+        "payload_keys": [
+          "limit",
+          "query"
+        ]
+      },
+      {
+        "file": "internal/memory/handler_test.go",
+        "line": 526,
+        "payload_keys": [
+          "limit",
+          "query"
+        ]
+      }
+    ],
+    "memory.recent": [
+      {
+        "file": "internal/memory/handler_test.go",
+        "line": 352,
+        "payload_keys": [
+          "limit"
+        ]
+      }
+    ],
+    "memory.result": [
+      {
+        "file": "internal/memory/handler.go",
+        "line": 276,
+        "payload_keys": []
+      },
+      {
+        "file": "internal/memory/handler.go",
+        "line": 300,
+        "payload_keys": []
+      }
+    ],
+    "orchestrator.handoff": [
+      {
+        "file": "internal/agent/handoff_test.go",
+        "line": 545,
+        "payload_keys": []
+      }
+    ],
+    "orchestrator.plan": [
+      {
+        "file": "internal/agent/handler.go",
+        "line": 928,
+        "payload_keys": []
+      },
+      {
+        "file": "internal/agent/orchestrator_test.go",
+        "line": 258,
+        "payload_keys": []
+      }
+    ],
+    "orchestrator.replan": [
+      {
+        "file": "internal/agent/ralph_loop.go",
+        "line": 249,
+        "payload_keys": [
+          "context",
+          "iteration",
+          "task_id"
+        ]
+      }
+    ],
+    "project.set": [
+      {
+        "file": "internal/rpc/projects.go",
+        "line": 280,
+        "payload_keys": [
+          "path",
+          "session_id"
+        ]
+      }
+    ],
+    "push.": [
+      {
+        "file": "internal/services/push_service.go",
+        "line": 199,
+        "payload_keys": []
+      }
+    ],
+    "queue.stats": [
+      {
+        "file": "internal/queue/queue_test.go",
+        "line": 300,
+        "payload_keys": []
+      }
+    ],
+    "reflection.complete": [
+      {
+        "file": "internal/agent/orchestrator.go",
+        "line": 1134,
+        "payload_keys": [
+          "files",
+          "fix_length",
+          "prompt"
+        ]
+      }
+    ],
+    "regular.topic": [
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 331,
+        "payload_keys": [
+          "v"
+        ]
+      }
+    ],
+    "session.started": [
+      {
+        "file": "internal/agent/phase2_listener_test.go",
+        "line": 157,
+        "payload_keys": [
+          "session_id"
+        ]
+      }
+    ],
+    "session.title_updated": [
+      {
+        "file": "internal/agent/loop.go",
+        "line": 6009,
+        "payload_keys": [
+          "description",
+          "name",
+          "session_id"
+        ]
+      },
+      {
+        "file": "internal/session/session.go",
+        "line": 2033,
+        "payload_keys": []
+      }
+    ],
+    "skills.result": [
+      {
+        "file": "internal/rpc/skills.go",
+        "line": 217,
+        "payload_keys": []
+      }
+    ],
+    "status.request": [
+      {
+        "file": "internal/daemon/components_test.go",
+        "line": 53,
+        "payload_keys": []
+      }
+    ],
+    "status.response": [
+      {
+        "file": "internal/daemon/components.go",
+        "line": 6099,
+        "payload_keys": []
+      }
+    ],
+    "step.review_completed": [
+      {
+        "file": "internal/agent/review_manager.go",
+        "line": 566,
+        "payload_keys": [
+          "confidence",
+          "feedback",
+          "reviewer",
+          "revision_count",
+          "status"
+        ]
+      }
+    ],
+    "task.amend.request": [
+      {
+        "file": "internal/task/amendment_manager.go",
+        "line": 84,
+        "payload_keys": []
+      },
+      {
+        "file": "internal/rpc/server.go",
+        "line": 535,
+        "payload_keys": [
+          "type"
+        ]
+      }
+    ],
+    "task.create": [
+      {
+        "file": "internal/task/registry_test.go",
+        "line": 305,
+        "payload_keys": [
+          "description",
+          "name"
+        ]
+      }
+    ],
+    "task.list": [
+      {
+        "file": "internal/task/registry_test.go",
+        "line": 362,
+        "payload_keys": [
+          "limit"
+        ]
+      }
+    ],
+    "task.review_completed": [
+      {
+        "file": "internal/agent/review_manager.go",
+        "line": 583,
+        "payload_keys": [
+          "confidence",
+          "feedback",
+          "reviewer",
+          "revision_count",
+          "status"
+        ]
+      }
+    ],
+    "task.status": [
+      {
+        "file": "internal/comm/http/unified_http_test.go",
+        "line": 812,
+        "payload_keys": []
+      },
+      {
+        "file": "internal/comm/http/load_test.go",
+        "line": 201,
+        "payload_keys": [
+          "message",
+          "status",
+          "task_id"
+        ]
+      },
+      {
+        "file": "internal/comm/http/load_test.go",
+        "line": 390,
+        "payload_keys": [
+          "status",
+          "task_id"
+        ]
+      }
+    ],
+    "terminal.command": [
+      {
+        "file": "internal/services/terminal_service.go",
+        "line": 168,
+        "payload_keys": [
+          "command",
+          "id",
+          "success"
+        ]
+      }
+    ],
+    "test.topic": [
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 31,
+        "payload_keys": [
+          "data"
+        ]
+      },
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 148,
+        "payload_keys": [
+          "test"
+        ]
+      },
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 158,
+        "payload_keys": [
+          "test"
+        ]
+      },
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 188,
+        "payload_keys": [
+          "test"
+        ]
+      },
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 213,
+        "payload_keys": [
+          "i"
+        ]
+      },
+      {
+        "file": "internal/bot/router_test.go",
+        "line": 106,
+        "payload_keys": [
+          "key"
+        ]
+      }
+    ],
+    "tool.completed": [
+      {
+        "file": "internal/agent/phase2_listener_test.go",
+        "line": 86,
+        "payload_keys": [
+          "result",
+          "tool"
+        ]
+      },
+      {
+        "file": "internal/agent/phase2_listener_test.go",
+        "line": 194,
+        "payload_keys": [
+          "tool"
+        ]
+      },
+      {
+        "file": "internal/agent/phase2_listener_test.go",
+        "line": 262,
+        "payload_keys": [
+          "n",
+          "tool"
+        ]
+      }
+    ],
+    "tool.execution.complete": [
+      {
+        "file": "internal/agent/executor.go",
+        "line": 1543,
+        "payload_keys": []
+      }
+    ],
+    "tool.execution.progress": [
+      {
+        "file": "internal/agent/executor.go",
+        "line": 1507,
+        "payload_keys": [
+          "message",
+          "percent"
+        ]
+      }
+    ],
+    "worker.started": [
+      {
+        "file": "internal/metrics/collector_worker_test.go",
+        "line": 139,
+        "payload_keys": []
+      },
+      {
+        "file": "internal/metrics/collector_worker_test.go",
+        "line": 201,
+        "payload_keys": [
+          "worker_id"
+        ]
+      }
+    ],
+    "worker.status": [
+      {
+        "file": "internal/metrics/collector_worker_test.go",
+        "line": 149,
+        "payload_keys": [
+          "idle",
+          "total"
+        ]
+      }
+    ],
+    "worker.stop": [
+      {
+        "file": "internal/session/session.go",
+        "line": 1861,
+        "payload_keys": [
+          "action",
+          "worker_id"
+        ]
+      }
+    ],
+    "worker.stopped": [
+      {
+        "file": "internal/metrics/collector_worker_test.go",
+        "line": 144,
+        "payload_keys": []
+      }
+    ]
+  },
+  "subscribers": {
+    "agent.*": [
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 54,
+        "subscriber_id": "test-sub"
+      }
+    ],
+    "agent.action": [
+      {
+        "file": "internal/agent/loop_test.go",
+        "line": 776,
+        "subscriber_id": "test-emit-action"
+      }
+    ],
+    "agent.event.*": [
+      {
+        "file": "internal/daemon/components.go",
+        "line": 1131,
+        "subscriber_id": "progress-synthesizer"
+      }
+    ],
+    "agent.progress": [
+      {
+        "file": "internal/agent/loop_test.go",
+        "line": 886,
+        "subscriber_id": "test-emit-progress"
+      }
+    ],
+    "agent.progress.synthesized": [
+      {
+        "file": "internal/comm/http/server.go",
+        "line": 483,
+        "subscriber_id": "http-ws-agent.progress.synthesized"
+      }
+    ],
+    "agent.result": [
+      {
+        "file": "internal/agent/loop_test.go",
+        "line": 812,
+        "subscriber_id": "test-emit-result"
+      }
+    ],
+    "agent.workers.list": [
+      {
+        "file": "internal/agent/handler.go",
+        "line": 153,
+        "subscriber_id": "worker-handler"
+      }
+    ],
+    "chat.message.received": [
+      {
+        "file": "internal/agent/handler_test.go",
+        "line": 775,
+        "subscriber_id": "test-handler"
+      },
+      {
+        "file": "internal/agent/handler_test.go",
+        "line": 825,
+        "subscriber_id": "test-handler"
+      }
+    ],
+    "chat.request": [
+      {
+        "file": "internal/scheduler/scheduler_test.go",
+        "line": 522,
+        "subscriber_id": "test"
+      },
+      {
+        "file": "internal/scheduler/scheduler_test.go",
+        "line": 747,
+        "subscriber_id": "test-topic-fix"
+      },
+      {
+        "file": "internal/comm/http/unified_http_test.go",
+        "line": 333,
+        "subscriber_id": "test-send"
+      }
+    ],
+    "critical.topic": [
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 364,
+        "subscriber_id": "test-sub"
+      }
+    ],
+    "dispatcher.stats": [
+      {
+        "file": "internal/daemon/components.go",
+        "line": 1890,
+        "subscriber_id": "dispatcher-stats-handler"
+      }
+    ],
+    "employee.critical_finding": [
+      {
+        "file": "internal/daemon/components.go",
+        "line": 2475,
+        "subscriber_id": "employee-critical-finding"
+      }
+    ],
+    "external.topic": [
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 303,
+        "subscriber_id": "test-sub"
+      }
+    ],
+    "instruction.add": [
+      {
+        "file": "internal/rpc/instructions.go",
+        "line": 48,
+        "subscriber_id": "instruction-handler"
+      }
+    ],
+    "instruction.delete": [
+      {
+        "file": "internal/rpc/instructions.go",
+        "line": 50,
+        "subscriber_id": "instruction-handler"
+      }
+    ],
+    "instruction.execute": [
+      {
+        "file": "internal/rpc/instructions.go",
+        "line": 51,
+        "subscriber_id": "instruction-handler"
+      }
+    ],
+    "instruction.executing": [
+      {
+        "file": "internal/agent/phase4_e2e_test.go",
+        "line": 82,
+        "subscriber_id": "exec-monitor"
+      }
+    ],
+    "instruction.list": [
+      {
+        "file": "internal/rpc/instructions.go",
+        "line": 49,
+        "subscriber_id": "instruction-handler"
+      }
+    ],
+    "instruction.preview": [
+      {
+        "file": "internal/rpc/instructions.go",
+        "line": 52,
+        "subscriber_id": "instruction-handler"
+      }
+    ],
+    "llm.tokens.used": [
+      {
+        "file": "internal/agent/loop_test.go",
+        "line": 749,
+        "subscriber_id": "test"
+      },
+      {
+        "file": "internal/agent/loop_test.go",
+        "line": 849,
+        "subscriber_id": "test-emit-tokens"
+      }
+    ],
+    "memory.query": [
+      {
+        "file": "internal/memory/handler.go",
+        "line": 115,
+        "subscriber_id": "memory-handler"
+      }
+    ],
+    "memory.recent": [
+      {
+        "file": "internal/memory/handler.go",
+        "line": 116,
+        "subscriber_id": "memory-handler"
+      }
+    ],
+    "memory.result": [
+      {
+        "file": "internal/memory/handler_test.go",
+        "line": 37,
+        "subscriber_id": "test-consumer"
+      }
+    ],
+    "metrics": [
+      {
+        "file": "internal/metrics/collector.go",
+        "line": 205,
+        "subscriber_id": "metrics-collector"
+      }
+    ],
+    "orchestrator.plan": [
+      {
+        "file": "internal/agent/handler_test.go",
+        "line": 220,
+        "subscriber_id": "test"
+      },
+      {
+        "file": "internal/agent/handler_test.go",
+        "line": 268,
+        "subscriber_id": "test"
+      }
+    ],
+    "orchestrator.schedule": [
+      {
+        "file": "internal/agent/strategic_test.go",
+        "line": 361,
+        "subscriber_id": "test-observer"
+      },
+      {
+        "file": "internal/agent/strategic_test.go",
+        "line": 861,
+        "subscriber_id": "test-observer"
+      }
+    ],
+    "pair.*": [
+      {
+        "file": "internal/agent/pair_manager_test.go",
+        "line": 509,
+        "subscriber_id": "test-pair-events"
+      }
+    ],
+    "queue.job.claimed": [
+      {
+        "file": "internal/memory/sync/handler.go",
+        "line": 40,
+        "subscriber_id": "sync-handler"
+      }
+    ],
+    "queue.job.completed": [
+      {
+        "file": "internal/memory/sync/handler.go",
+        "line": 41,
+        "subscriber_id": "sync-handler"
+      }
+    ],
+    "queue.result": [
+      {
+        "file": "internal/queue/queue_test.go",
+        "line": 288,
+        "subscriber_id": "test-stats"
+      }
+    ],
+    "quick.topic": [
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 389,
+        "subscriber_id": "test-sub"
+      }
+    ],
+    "reminder.notification": [
+      {
+        "file": "internal/scheduler/scheduler_test.go",
+        "line": 575,
+        "subscriber_id": "test"
+      }
+    ],
+    "scheduler.job.completed": [
+      {
+        "file": "internal/scheduler/scheduler_test.go",
+        "line": 387,
+        "subscriber_id": "test-sub"
+      }
+    ],
+    "skills.execute": [
+      {
+        "file": "internal/rpc/skills.go",
+        "line": 40,
+        "subscriber_id": "skills-handler"
+      }
+    ],
+    "skills.get": [
+      {
+        "file": "internal/rpc/skills.go",
+        "line": 39,
+        "subscriber_id": "skills-handler"
+      }
+    ],
+    "skills.list": [
+      {
+        "file": "internal/rpc/skills.go",
+        "line": 38,
+        "subscriber_id": "skills-handler"
+      }
+    ],
+    "status.request": [
+      {
+        "file": "internal/daemon/components.go",
+        "line": 6029,
+        "subscriber_id": "status-handler"
+      }
+    ],
+    "status.response": [
+      {
+        "file": "internal/daemon/components_test.go",
+        "line": 51,
+        "subscriber_id": "test-rollback"
+      }
+    ],
+    "step.*": [
+      {
+        "file": "internal/metrics/collector.go",
+        "line": 216,
+        "subscriber_id": "metrics-collector-review"
+      }
+    ],
+    "task.amend.request": [
+      {
+        "file": "internal/task/amendment_manager.go",
+        "line": 191,
+        "subscriber_id": "amendment-manager"
+      }
+    ],
+    "task.approved": [
+      {
+        "file": "internal/agent/strategic_test.go",
+        "line": 858,
+        "subscriber_id": "test-observer"
+      }
+    ],
+    "task.pending_approval": [
+      {
+        "file": "internal/agent/strategic_test.go",
+        "line": 765,
+        "subscriber_id": "test-observer"
+      },
+      {
+        "file": "internal/agent/strategic_test.go",
+        "line": 1109,
+        "subscriber_id": "test-observer"
+      }
+    ],
+    "task.planned": [
+      {
+        "file": "internal/agent/orchestrator_test.go",
+        "line": 224,
+        "subscriber_id": "test-observer"
+      },
+      {
+        "file": "internal/agent/strategic_test.go",
+        "line": 358,
+        "subscriber_id": "test-observer"
+      },
+      {
+        "file": "internal/agent/strategic_test.go",
+        "line": 1286,
+        "subscriber_id": "test-observer"
+      }
+    ],
+    "task.progress": [
+      {
+        "file": "internal/agent/tactical_test.go",
+        "line": 243,
+        "subscriber_id": "test-aggregate"
+      },
+      {
+        "file": "internal/agent/tactical_test.go",
+        "line": 339,
+        "subscriber_id": "test-includes"
+      },
+      {
+        "file": "internal/agent/tactical_test.go",
+        "line": 409,
+        "subscriber_id": "test-pub"
+      }
+    ],
+    "task.rejected": [
+      {
+        "file": "internal/agent/strategic_test.go",
+        "line": 1006,
+        "subscriber_id": "test-observer"
+      }
+    ],
+    "task.result": [
+      {
+        "file": "internal/task/registry_test.go",
+        "line": 288,
+        "subscriber_id": "test-resp"
+      },
+      {
+        "file": "internal/task/registry_test.go",
+        "line": 350,
+        "subscriber_id": "test-list"
+      }
+    ],
+    "test.topic": [
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 22,
+        "subscriber_id": "test-sub"
+      },
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 81,
+        "subscriber_id": "test-sub"
+      },
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 154,
+        "subscriber_id": "test-sub"
+      },
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 207,
+        "subscriber_id": "test-sub"
+      },
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 237,
+        "subscriber_id": "test-sub"
+      },
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 256,
+        "subscriber_id": "test-sub"
+      }
+    ],
+    "tool.execution.progress": [
+      {
+        "file": "internal/agent/executor_test.go",
+        "line": 744,
+        "subscriber_id": "test-executor"
+      },
+      {
+        "file": "internal/agent/executor_test.go",
+        "line": 965,
+        "subscriber_id": "test-cache"
+      }
+    ],
+    "topic1": [
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 97,
+        "subscriber_id": "sub1"
+      },
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 98,
+        "subscriber_id": "sub2"
+      }
+    ],
+    "topic2": [
+      {
+        "file": "internal/bus/bus_test.go",
+        "line": 99,
+        "subscriber_id": "sub3"
+      }
+    ],
+    "worker.*": [
+      {
+        "file": "internal/metrics/collector.go",
+        "line": 231,
+        "subscriber_id": "metrics-collector-worker"
+      }
+    ]
+  },
+  "orphans": {
+    "published_not_subscribed": [
+      "calendar.reminder",
+      "chat.processing",
+      "chat.progress",
+      "chat.response",
+      "chat_message",
+      "chatresp",
+      "cluster.event.broadcast",
+      "cluster.event.heartbeat",
+      "cluster.event.received",
+      "daemon.reloaded",
+      "daemon.started",
+      "daemon.stopping",
+      "dispatcher.stats.result",
+      "employee.constitution_validation_error",
+      "employee.metric",
+      "employee.paused",
+      "event.cluster.task_reclaim",
+      "file.written",
+      "orchestrator.handoff",
+      "orchestrator.replan",
+      "project.set",
+      "push.",
+      "queue.stats",
+      "reflection.complete",
+      "regular.topic",
+      "session.started",
+      "session.title_updated",
+      "skills.result",
+      "task.create",
+      "task.list",
+      "task.review_completed",
+      "task.status",
+      "terminal.command",
+      "tool.completed",
+      "tool.execution.complete"
+    ],
+    "subscribed_not_published": [
+      "agent.*",
+      "agent.event.*",
+      "agent.progress.synthesized",
+      "agent.workers.list",
+      "chat.message.received",
+      "critical.topic",
+      "dispatcher.stats",
+      "external.topic",
+      "metrics",
+      "orchestrator.schedule",
+      "pair.*",
+      "queue.job.claimed",
+      "queue.job.completed",
+      "queue.result",
+      "quick.topic",
+      "reminder.notification",
+      "scheduler.job.completed",
+      "skills.execute",
+      "skills.get",
+      "skills.list",
+      "step.*",
+      "task.approved",
+      "task.pending_approval",
+      "task.planned",
+      "task.progress",
+      "task.rejected",
+      "task.result",
+      "topic1",
+      "topic2",
+      "worker.*"
+    ]
+  }
+}

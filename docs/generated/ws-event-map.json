@@ -1,0 +1,47 @@
+[
+  {
+    "topic_pattern": "chat_message",
+    "match": "exact",
+    "event_type": "chat_message"
+  },
+  {
+    "topic_pattern": "chat.response",
+    "match": "exact",
+    "event_type": "chat_message"
+  },
+  {
+    "topic_pattern": "chat.*",
+    "match": "prefix",
+    "event_type": "agent_progress"
+  },
+  {
+    "topic_pattern": "metrics.*",
+    "match": "prefix",
+    "event_type": "metrics_update"
+  },
+  {
+    "topic_pattern": "task.*",
+    "match": "prefix",
+    "event_type": "job_update"
+  },
+  {
+    "topic_pattern": "step.*",
+    "match": "prefix",
+    "event_type": "job_update"
+  },
+  {
+    "topic_pattern": "job.*",
+    "match": "prefix",
+    "event_type": "job_update"
+  },
+  {
+    "topic_pattern": "plan.*",
+    "match": "prefix",
+    "event_type": "plan_update"
+  },
+  {
+    "topic_pattern": "*",
+    "match": "default",
+    "event_type": "event"
+  }
+]

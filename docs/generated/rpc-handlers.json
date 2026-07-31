@@ -1,0 +1,1292 @@
+[
+  {
+    "topic": "agent.workers.list",
+    "handler": "p.makeProxy(\"agent.workers.list\", \"agent.workers.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 86
+  },
+  {
+    "topic": "backup.list",
+    "handler": "h.handleBackupList",
+    "file": "internal/rpc/backup_sync.go",
+    "line": 43
+  },
+  {
+    "topic": "backup.push",
+    "handler": "h.handleBackupPush",
+    "file": "internal/rpc/backup_sync.go",
+    "line": 44
+  },
+  {
+    "topic": "bus.poll",
+    "handler": "p.handleBusPoll",
+    "file": "internal/rpc/proxy.go",
+    "line": 144
+  },
+  {
+    "topic": "bus.publish",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/server.go",
+    "line": 476
+  },
+  {
+    "topic": "bus.stats",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/server.go",
+    "line": 497
+  },
+  {
+    "topic": "bus.subscribe",
+    "handler": "p.handleBusSubscribe",
+    "file": "internal/rpc/proxy.go",
+    "line": 143
+  },
+  {
+    "topic": "bus.unsubscribe",
+    "handler": "p.handleBusUnsubscribe",
+    "file": "internal/rpc/proxy.go",
+    "line": 145
+  },
+  {
+    "topic": "cache.clear",
+    "handler": "h.handleClear",
+    "file": "internal/rpc/cache.go",
+    "line": 30
+  },
+  {
+    "topic": "cache.clear",
+    "handler": "p.makeProxy(\"cache.clear\", \"cache.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 135
+  },
+  {
+    "topic": "cache.inspect",
+    "handler": "h.handleInspect",
+    "file": "internal/rpc/cache.go",
+    "line": 32
+  },
+  {
+    "topic": "cache.invalidate",
+    "handler": "h.handleInvalidate",
+    "file": "internal/rpc/cache.go",
+    "line": 31
+  },
+  {
+    "topic": "cache.invalidate",
+    "handler": "p.makeProxy(\"cache.invalidate\", \"cache.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 136
+  },
+  {
+    "topic": "cache.stats",
+    "handler": "h.handleStats",
+    "file": "internal/rpc/cache.go",
+    "line": 29
+  },
+  {
+    "topic": "cache.stats",
+    "handler": "p.makeProxy(\"cache.stats\", \"cache.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 134
+  },
+  {
+    "topic": "chat",
+    "handler": "p.makeProxy(\"chat.request\", \"chat.response\", 120*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 54
+  },
+  {
+    "topic": "chat.followup",
+    "handler": "h.handleFollowUp",
+    "file": "internal/rpc/queue.go",
+    "line": 27
+  },
+  {
+    "topic": "chat.queue.restore",
+    "handler": "h.handleRestore",
+    "file": "internal/rpc/queue.go",
+    "line": 29
+  },
+  {
+    "topic": "chat.queue_status",
+    "handler": "h.handleStatus",
+    "file": "internal/rpc/queue.go",
+    "line": 28
+  },
+  {
+    "topic": "chat.steer",
+    "handler": "h.handleSteer",
+    "file": "internal/rpc/queue.go",
+    "line": 26
+  },
+  {
+    "topic": "cluster.debug.events",
+    "handler": "h.handleDebugEvents",
+    "file": "internal/rpc/cluster_handler.go",
+    "line": 57
+  },
+  {
+    "topic": "cluster.join",
+    "handler": "h.handleJoin",
+    "file": "internal/rpc/cluster_handler.go",
+    "line": 53
+  },
+  {
+    "topic": "cluster.leave",
+    "handler": "h.handleLeave",
+    "file": "internal/rpc/cluster_handler.go",
+    "line": 55
+  },
+  {
+    "topic": "cluster.peer_count",
+    "handler": "h.handlePeerCount",
+    "file": "internal/rpc/cluster_handler.go",
+    "line": 52
+  },
+  {
+    "topic": "cluster.peers",
+    "handler": "h.handlePeers",
+    "file": "internal/rpc/cluster_handler.go",
+    "line": 51
+  },
+  {
+    "topic": "cluster.reset",
+    "handler": "h.handleReset",
+    "file": "internal/rpc/cluster_handler.go",
+    "line": 56
+  },
+  {
+    "topic": "cluster.start",
+    "handler": "h.handleStart",
+    "file": "internal/rpc/cluster_handler.go",
+    "line": 54
+  },
+  {
+    "topic": "cluster.status",
+    "handler": "h.handleStatus",
+    "file": "internal/rpc/cluster_handler.go",
+    "line": 50
+  },
+  {
+    "topic": "config.reload",
+    "handler": "p.makeFireAndForget(\"config.reload\"",
+    "file": "internal/rpc/proxy.go",
+    "line": 72
+  },
+  {
+    "topic": "config_sync.pull",
+    "handler": "h.handleConfigSyncPull",
+    "file": "internal/rpc/backup_sync.go",
+    "line": 46
+  },
+  {
+    "topic": "config_sync.push",
+    "handler": "h.handleConfigSyncPush",
+    "file": "internal/rpc/backup_sync.go",
+    "line": 47
+  },
+  {
+    "topic": "config_sync.status",
+    "handler": "h.handleConfigSyncStatus",
+    "file": "internal/rpc/backup_sync.go",
+    "line": 45
+  },
+  {
+    "topic": "daemon.restart",
+    "handler": "h.handleRestart",
+    "file": "internal/daemon/daemon_rpc.go",
+    "line": 33
+  },
+  {
+    "topic": "daemon.start",
+    "handler": "h.handleStart",
+    "file": "internal/daemon/daemon_rpc.go",
+    "line": 31
+  },
+  {
+    "topic": "daemon.status",
+    "handler": "h.handleStatus",
+    "file": "internal/daemon/daemon_rpc.go",
+    "line": 30
+  },
+  {
+    "topic": "daemon.status",
+    "handler": "statusHandler",
+    "file": "internal/rpc/server.go",
+    "line": 465
+  },
+  {
+    "topic": "daemon.stop",
+    "handler": "h.handleStop",
+    "file": "internal/daemon/daemon_rpc.go",
+    "line": 32
+  },
+  {
+    "topic": "dev.config",
+    "handler": "h.handleConfig",
+    "file": "internal/rpc/dev.go",
+    "line": 143
+  },
+  {
+    "topic": "dev.current_model",
+    "handler": "h.handleCurrentModel",
+    "file": "internal/rpc/dev.go",
+    "line": 140
+  },
+  {
+    "topic": "dev.list_models",
+    "handler": "h.handleListModels",
+    "file": "internal/rpc/dev.go",
+    "line": 139
+  },
+  {
+    "topic": "dev.reload",
+    "handler": "h.handleReload",
+    "file": "internal/rpc/dev.go",
+    "line": 144
+  },
+  {
+    "topic": "dev.switch_model",
+    "handler": "h.handleSwitchModel",
+    "file": "internal/rpc/dev.go",
+    "line": 141
+  },
+  {
+    "topic": "dev.test_llm",
+    "handler": "h.handleTestLLM",
+    "file": "internal/rpc/dev.go",
+    "line": 142
+  },
+  {
+    "topic": "dispatch.results",
+    "handler": "h.handleResults",
+    "file": "internal/rpc/dispatch.go",
+    "line": 99
+  },
+  {
+    "topic": "dispatch.status",
+    "handler": "h.handleStatus",
+    "file": "internal/rpc/dispatch.go",
+    "line": 98
+  },
+  {
+    "topic": "dispatch.submit",
+    "handler": "h.handleSubmit",
+    "file": "internal/rpc/dispatch.go",
+    "line": 97
+  },
+  {
+    "topic": "firewall.stats",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/server.go",
+    "line": 468
+  },
+  {
+    "topic": "instruction.add",
+    "handler": "h.handleAddRPC",
+    "file": "internal/rpc/instructions.go",
+    "line": 258
+  },
+  {
+    "topic": "instruction.delete",
+    "handler": "h.handleDeleteRPC",
+    "file": "internal/rpc/instructions.go",
+    "line": 259
+  },
+  {
+    "topic": "instruction.list",
+    "handler": "h.handleListRPC",
+    "file": "internal/rpc/instructions.go",
+    "line": 257
+  },
+  {
+    "topic": "instruction.preview",
+    "handler": "h.handlePreviewRPC",
+    "file": "internal/rpc/instructions.go",
+    "line": 260
+  },
+  {
+    "topic": "mcp.list",
+    "handler": "h.handleList",
+    "file": "internal/rpc/mcp.go",
+    "line": 56
+  },
+  {
+    "topic": "mcp.set_enabled",
+    "handler": "h.handleSetEnabled",
+    "file": "internal/rpc/mcp.go",
+    "line": 57
+  },
+  {
+    "topic": "memory.export",
+    "handler": "p.makeProxy(\"memory.export\", \"memory.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 62
+  },
+  {
+    "topic": "memory.findCanonical",
+    "handler": "h.handleFindCanonical",
+    "file": "internal/rpc/epistemic.go",
+    "line": 45
+  },
+  {
+    "topic": "memory.listAutoClaims",
+    "handler": "h.handleListAutoClaims",
+    "file": "internal/rpc/epistemic.go",
+    "line": 43
+  },
+  {
+    "topic": "memory.listPendingReviews",
+    "handler": "h.handleListPendingReviews",
+    "file": "internal/rpc/epistemic.go",
+    "line": 44
+  },
+  {
+    "topic": "memory.markResolved",
+    "handler": "h.handleMarkResolved",
+    "file": "internal/rpc/epistemic.go",
+    "line": 39
+  },
+  {
+    "topic": "memory.markSuperseded",
+    "handler": "h.handleMarkSuperseded",
+    "file": "internal/rpc/epistemic.go",
+    "line": 38
+  },
+  {
+    "topic": "memory.promoteClaim",
+    "handler": "h.handlePromoteClaim",
+    "file": "internal/rpc/epistemic.go",
+    "line": 41
+  },
+  {
+    "topic": "memory.query",
+    "handler": "p.makeProxy(\"memory.query\", \"memory.result\", 30*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 60
+  },
+  {
+    "topic": "memory.recent",
+    "handler": "p.makeProxy(\"memory.recent\", \"memory.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 61
+  },
+  {
+    "topic": "memory.recordReview",
+    "handler": "h.handleRecordReview",
+    "file": "internal/rpc/epistemic.go",
+    "line": 40
+  },
+  {
+    "topic": "memory.rejectClaim",
+    "handler": "h.handleRejectClaim",
+    "file": "internal/rpc/epistemic.go",
+    "line": 42
+  },
+  {
+    "topic": "memory.retainClaim",
+    "handler": "h.handleRetainClaim",
+    "file": "internal/rpc/epistemic.go",
+    "line": 35
+  },
+  {
+    "topic": "memory.retainDecision",
+    "handler": "h.handleRetainDecision",
+    "file": "internal/rpc/epistemic.go",
+    "line": 36
+  },
+  {
+    "topic": "memory.retainPrediction",
+    "handler": "h.handleRetainPrediction",
+    "file": "internal/rpc/epistemic.go",
+    "line": 37
+  },
+  {
+    "topic": "memory.reviewQueue",
+    "handler": "h.handleReviewQueue",
+    "file": "internal/rpc/epistemic.go",
+    "line": 46
+  },
+  {
+    "topic": "memory.vector.search",
+    "handler": "p.makeProxy(\"memory.vector.search\", \"memory.result\", 30*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 63
+  },
+  {
+    "topic": "memory.vector.stats",
+    "handler": "p.makeProxy(\"memory.vector.stats\", \"memory.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 64
+  },
+  {
+    "topic": "models.delete_credential",
+    "handler": "h.handleDeleteCredential",
+    "file": "internal/daemon/model_rpc.go",
+    "line": 31
+  },
+  {
+    "topic": "models.get_credential",
+    "handler": "h.handleGetCredential",
+    "file": "internal/daemon/model_rpc.go",
+    "line": 29
+  },
+  {
+    "topic": "models.get_default",
+    "handler": "h.handleGetDefault",
+    "file": "internal/daemon/model_rpc.go",
+    "line": 26
+  },
+  {
+    "topic": "models.list",
+    "handler": "h.handleList",
+    "file": "internal/daemon/model_rpc.go",
+    "line": 24
+  },
+  {
+    "topic": "models.providers",
+    "handler": "h.handleProviders",
+    "file": "internal/daemon/model_rpc.go",
+    "line": 25
+  },
+  {
+    "topic": "models.remove",
+    "handler": "h.handleRemove",
+    "file": "internal/daemon/model_rpc.go",
+    "line": 28
+  },
+  {
+    "topic": "models.set_credential",
+    "handler": "h.handleSetCredential",
+    "file": "internal/daemon/model_rpc.go",
+    "line": 30
+  },
+  {
+    "topic": "models.set_default",
+    "handler": "h.handleSetDefault",
+    "file": "internal/daemon/model_rpc.go",
+    "line": 27
+  },
+  {
+    "topic": "ping",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/server.go",
+    "line": 394
+  },
+  {
+    "topic": "pipeline.status",
+    "handler": "p.makeProxy(\"pipeline.status\", \"pipeline.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 131
+  },
+  {
+    "topic": "plan.approve",
+    "handler": "h.handleApprove",
+    "file": "internal/rpc/plan.go",
+    "line": 31
+  },
+  {
+    "topic": "plan.confirm",
+    "handler": "h.handleConfirm",
+    "file": "internal/rpc/plan.go",
+    "line": 33
+  },
+  {
+    "topic": "plan.count_by_session",
+    "handler": "h.handleCountBySession",
+    "file": "internal/rpc/plan.go",
+    "line": 36
+  },
+  {
+    "topic": "plan.create",
+    "handler": "h.handleCreate",
+    "file": "internal/rpc/plan.go",
+    "line": 28
+  },
+  {
+    "topic": "plan.get",
+    "handler": "h.handleGet",
+    "file": "internal/rpc/plan.go",
+    "line": 30
+  },
+  {
+    "topic": "plan.get_phases",
+    "handler": "h.handleGetPhases",
+    "file": "internal/rpc/plan.go",
+    "line": 37
+  },
+  {
+    "topic": "plan.list",
+    "handler": "h.handleList",
+    "file": "internal/rpc/plan.go",
+    "line": 29
+  },
+  {
+    "topic": "plan.list_by_session",
+    "handler": "h.handleListBySession",
+    "file": "internal/rpc/plan.go",
+    "line": 35
+  },
+  {
+    "topic": "plan.reject",
+    "handler": "h.handleReject",
+    "file": "internal/rpc/plan.go",
+    "line": 32
+  },
+  {
+    "topic": "plan.revise",
+    "handler": "h.handleRevise",
+    "file": "internal/rpc/plan.go",
+    "line": 34
+  },
+  {
+    "topic": "project.detect",
+    "handler": "h.handleDetect",
+    "file": "internal/rpc/projects.go",
+    "line": 77
+  },
+  {
+    "topic": "project.get",
+    "handler": "h.handleGet",
+    "file": "internal/rpc/projects.go",
+    "line": 71
+  },
+  {
+    "topic": "project.list",
+    "handler": "h.handleList",
+    "file": "internal/rpc/projects.go",
+    "line": 70
+  },
+  {
+    "topic": "project.readdir",
+    "handler": "h.handleReadDir",
+    "file": "internal/rpc/projects.go",
+    "line": 78
+  },
+  {
+    "topic": "project.register",
+    "handler": "h.handleRegister",
+    "file": "internal/rpc/projects.go",
+    "line": 72
+  },
+  {
+    "topic": "project.rename",
+    "handler": "h.handleRename",
+    "file": "internal/rpc/projects.go",
+    "line": 79
+  },
+  {
+    "topic": "project.set",
+    "handler": "h.handleSet",
+    "file": "internal/rpc/projects.go",
+    "line": 74
+  },
+  {
+    "topic": "project.status",
+    "handler": "h.handleStatus",
+    "file": "internal/rpc/projects.go",
+    "line": 76
+  },
+  {
+    "topic": "project.sync",
+    "handler": "h.handleSync",
+    "file": "internal/rpc/projects.go",
+    "line": 75
+  },
+  {
+    "topic": "project.unregister",
+    "handler": "h.handleUnregister",
+    "file": "internal/rpc/projects.go",
+    "line": 73
+  },
+  {
+    "topic": "project.worktree.create",
+    "handler": "h.handleWorktreeCreate",
+    "file": "internal/rpc/projects.go",
+    "line": 80
+  },
+  {
+    "topic": "project.worktree.remove",
+    "handler": "h.handleWorktreeRemove",
+    "file": "internal/rpc/projects.go",
+    "line": 81
+  },
+  {
+    "topic": "queue.claim",
+    "handler": "p.makeProxy(\"queue.claim\", \"queue.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 115
+  },
+  {
+    "topic": "queue.complete",
+    "handler": "p.makeProxy(\"queue.complete\", \"queue.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 116
+  },
+  {
+    "topic": "queue.enqueue",
+    "handler": "p.makeProxy(\"queue.enqueue\", \"queue.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 114
+  },
+  {
+    "topic": "queue.fail",
+    "handler": "p.makeProxy(\"queue.fail\", \"queue.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 117
+  },
+  {
+    "topic": "queue.get",
+    "handler": "p.makeProxy(\"queue.get\", \"queue.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 119
+  },
+  {
+    "topic": "queue.list",
+    "handler": "p.makeProxy(\"queue.list\", \"queue.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 120
+  },
+  {
+    "topic": "queue.retry",
+    "handler": "p.makeProxy(\"queue.retry\", \"queue.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 118
+  },
+  {
+    "topic": "queue.stats",
+    "handler": "p.makeProxy(\"queue.stats\", \"queue.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 121
+  },
+  {
+    "topic": "reasoning.get",
+    "handler": "h.handleGet",
+    "file": "internal/rpc/reasoning.go",
+    "line": 69
+  },
+  {
+    "topic": "reasoning.get_budgets",
+    "handler": "h.handleGetBudgets",
+    "file": "internal/rpc/reasoning.go",
+    "line": 71
+  },
+  {
+    "topic": "reasoning.get_model_default",
+    "handler": "h.handleGetModelDefault",
+    "file": "internal/rpc/reasoning.go",
+    "line": 73
+  },
+  {
+    "topic": "reasoning.list_agents",
+    "handler": "h.handleListAgents",
+    "file": "internal/rpc/reasoning.go",
+    "line": 77
+  },
+  {
+    "topic": "reasoning.list_tiers",
+    "handler": "h.handleListTiers",
+    "file": "internal/rpc/reasoning.go",
+    "line": 68
+  },
+  {
+    "topic": "reasoning.session_clear",
+    "handler": "h.handleSessionClear",
+    "file": "internal/rpc/reasoning.go",
+    "line": 76
+  },
+  {
+    "topic": "reasoning.session_set",
+    "handler": "h.handleSessionSet",
+    "file": "internal/rpc/reasoning.go",
+    "line": 75
+  },
+  {
+    "topic": "reasoning.set",
+    "handler": "h.handleSet",
+    "file": "internal/rpc/reasoning.go",
+    "line": 70
+  },
+  {
+    "topic": "reasoning.set_budgets",
+    "handler": "h.handleSetBudgets",
+    "file": "internal/rpc/reasoning.go",
+    "line": 72
+  },
+  {
+    "topic": "reasoning.set_model_default",
+    "handler": "h.handleSetModelDefault",
+    "file": "internal/rpc/reasoning.go",
+    "line": 74
+  },
+  {
+    "topic": "routing.by_model",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/routing.go",
+    "line": 37
+  },
+  {
+    "topic": "routing.recent",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/routing.go",
+    "line": 19
+  },
+  {
+    "topic": "runtime.restart",
+    "handler": "h.handleRestart",
+    "file": "internal/daemon/runtime_rpc.go",
+    "line": 27
+  },
+  {
+    "topic": "runtime.start",
+    "handler": "h.handleStart",
+    "file": "internal/daemon/runtime_rpc.go",
+    "line": 25
+  },
+  {
+    "topic": "runtime.status",
+    "handler": "h.handleStatus",
+    "file": "internal/daemon/runtime_rpc.go",
+    "line": 24
+  },
+  {
+    "topic": "runtime.stop",
+    "handler": "h.handleStop",
+    "file": "internal/daemon/runtime_rpc.go",
+    "line": 26
+  },
+  {
+    "topic": "scheduler.add_job",
+    "handler": "handler.AddJob",
+    "file": "internal/scheduler/rpc.go",
+    "line": 30
+  },
+  {
+    "topic": "scheduler.add_job",
+    "handler": "p.makeProxy(\"scheduler.add_job\", \"scheduler.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 68
+  },
+  {
+    "topic": "scheduler.get_job",
+    "handler": "handler.GetJob",
+    "file": "internal/scheduler/rpc.go",
+    "line": 34
+  },
+  {
+    "topic": "scheduler.list_jobs",
+    "handler": "handler.ListJobs",
+    "file": "internal/scheduler/rpc.go",
+    "line": 32
+  },
+  {
+    "topic": "scheduler.list_jobs",
+    "handler": "p.makeProxy(\"scheduler.list_jobs\", \"scheduler.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 67
+  },
+  {
+    "topic": "scheduler.pause_job",
+    "handler": "handler.PauseJob",
+    "file": "internal/scheduler/rpc.go",
+    "line": 35
+  },
+  {
+    "topic": "scheduler.remove_job",
+    "handler": "handler.RemoveJob",
+    "file": "internal/scheduler/rpc.go",
+    "line": 31
+  },
+  {
+    "topic": "scheduler.resume_job",
+    "handler": "handler.ResumeJob",
+    "file": "internal/scheduler/rpc.go",
+    "line": 36
+  },
+  {
+    "topic": "scheduler.run_job",
+    "handler": "handler.RunJob",
+    "file": "internal/scheduler/rpc.go",
+    "line": 33
+  },
+  {
+    "topic": "scheduler.schedule_agent_task",
+    "handler": "p.makeProxy(\"scheduler.add_job\", \"scheduler.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 69
+  },
+  {
+    "topic": "scheduler.status",
+    "handler": "handler.Status",
+    "file": "internal/scheduler/rpc.go",
+    "line": 38
+  },
+  {
+    "topic": "scheduler.validate_schedule",
+    "handler": "handler.ValidateSchedule",
+    "file": "internal/scheduler/rpc.go",
+    "line": 37
+  },
+  {
+    "topic": "search.keyword",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/daemon/search_rpc.go",
+    "line": 30
+  },
+  {
+    "topic": "search.semantic",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/daemon/search_rpc.go",
+    "line": 21
+  },
+  {
+    "topic": "security.approve_action",
+    "handler": "p.makeFireAndForgetBlocking(\"security.approve_action\"",
+    "file": "internal/rpc/proxy.go",
+    "line": 78
+  },
+  {
+    "topic": "security.check_batch",
+    "handler": "h.handleCheckBatch",
+    "file": "internal/rpc/security.go",
+    "line": 37
+  },
+  {
+    "topic": "security.check_path",
+    "handler": "h.handleCheckPath",
+    "file": "internal/rpc/security.go",
+    "line": 34
+  },
+  {
+    "topic": "security.check_permission",
+    "handler": "h.handleCheckPermission",
+    "file": "internal/rpc/security.go",
+    "line": 25
+  },
+  {
+    "topic": "security.evaluate_shell_risk",
+    "handler": "h.handleEvaluateShellRisk",
+    "file": "internal/rpc/security.go",
+    "line": 28
+  },
+  {
+    "topic": "security.get_stats",
+    "handler": "p.makeProxy(\"security.get_stats\", \"security.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 76
+  },
+  {
+    "topic": "security.is_financial",
+    "handler": "h.handleIsFinancial",
+    "file": "internal/rpc/security.go",
+    "line": 31
+  },
+  {
+    "topic": "security.query_log",
+    "handler": "p.makeProxy(\"security.query_log\", \"security.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 75
+  },
+  {
+    "topic": "security.record_override",
+    "handler": "p.makeProxy(\"security.record_override\", \"security.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 77
+  },
+  {
+    "topic": "selfimprove.analyze",
+    "handler": "h.handleAnalyze",
+    "file": "internal/rpc/selfimprove.go",
+    "line": 30
+  },
+  {
+    "topic": "selfimprove.apply",
+    "handler": "h.handleApply",
+    "file": "internal/rpc/selfimprove.go",
+    "line": 33
+  },
+  {
+    "topic": "selfimprove.cycle",
+    "handler": "h.handleCycle",
+    "file": "internal/rpc/selfimprove.go",
+    "line": 36
+  },
+  {
+    "topic": "selfimprove.detect",
+    "handler": "h.handleDetect",
+    "file": "internal/rpc/selfimprove.go",
+    "line": 29
+  },
+  {
+    "topic": "selfimprove.generate",
+    "handler": "h.handleGenerate",
+    "file": "internal/rpc/selfimprove.go",
+    "line": 31
+  },
+  {
+    "topic": "selfimprove.reject",
+    "handler": "h.handleReject",
+    "file": "internal/rpc/selfimprove.go",
+    "line": 34
+  },
+  {
+    "topic": "selfimprove.status",
+    "handler": "h.handleStatus",
+    "file": "internal/rpc/selfimprove.go",
+    "line": 35
+  },
+  {
+    "topic": "selfimprove.validate",
+    "handler": "h.handleValidate",
+    "file": "internal/rpc/selfimprove.go",
+    "line": 32
+  },
+  {
+    "topic": "session.attach",
+    "handler": "p.makeProxy(\"session.attach\", \"session.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 92
+  },
+  {
+    "topic": "session.create",
+    "handler": "p.makeProxy(\"session.create\", \"session.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 89
+  },
+  {
+    "topic": "session.delete",
+    "handler": "p.makeProxy(\"session.delete\", \"session.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 94
+  },
+  {
+    "topic": "session.detach",
+    "handler": "p.makeProxy(\"session.detach\", \"session.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 93
+  },
+  {
+    "topic": "session.generate_description",
+    "handler": "p.makeProxy(\"session.generate_description\", \"session.result\", 20*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 98
+  },
+  {
+    "topic": "session.get",
+    "handler": "p.makeProxy(\"session.get\", \"session.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 91
+  },
+  {
+    "topic": "session.list",
+    "handler": "p.makeProxy(\"session.list\", \"session.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 90
+  },
+  {
+    "topic": "session.messages.get",
+    "handler": "p.makeProxy(\"session.messages.get\", \"session.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 96
+  },
+  {
+    "topic": "session.messages.save",
+    "handler": "p.makeProxy(\"session.messages.save\", \"session.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 95
+  },
+  {
+    "topic": "session.reset",
+    "handler": "handleSessionReset(sessionSvc, chatHandler",
+    "file": "internal/daemon/session_rpc.go",
+    "line": 32
+  },
+  {
+    "topic": "session.thread.create",
+    "handler": "handleThreadCreate(threadSvc",
+    "file": "internal/daemon/thread_rpc.go",
+    "line": 23
+  },
+  {
+    "topic": "session.thread.current",
+    "handler": "handleThreadGetActive(threadSvc",
+    "file": "internal/daemon/thread_rpc.go",
+    "line": 33
+  },
+  {
+    "topic": "session.thread.delete",
+    "handler": "handleThreadDelete(threadSvc",
+    "file": "internal/daemon/thread_rpc.go",
+    "line": 37
+  },
+  {
+    "topic": "session.thread.get_active",
+    "handler": "handleThreadGetActive(threadSvc",
+    "file": "internal/daemon/thread_rpc.go",
+    "line": 34
+  },
+  {
+    "topic": "session.thread.list",
+    "handler": "handleThreadList(threadSvc",
+    "file": "internal/daemon/thread_rpc.go",
+    "line": 26
+  },
+  {
+    "topic": "session.thread.new",
+    "handler": "handleThreadCreate(threadSvc",
+    "file": "internal/daemon/thread_rpc.go",
+    "line": 22
+  },
+  {
+    "topic": "session.thread.set_active",
+    "handler": "handleThreadSetActive(threadSvc",
+    "file": "internal/daemon/thread_rpc.go",
+    "line": 30
+  },
+  {
+    "topic": "session.thread.switch",
+    "handler": "handleThreadSetActive(threadSvc",
+    "file": "internal/daemon/thread_rpc.go",
+    "line": 29
+  },
+  {
+    "topic": "session.update_description",
+    "handler": "p.makeProxy(\"session.update_description\", \"session.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 97
+  },
+  {
+    "topic": "sessions.archive",
+    "handler": "handleSessionArchive(sessionSvc",
+    "file": "internal/daemon/session_rpc.go",
+    "line": 29
+  },
+  {
+    "topic": "sessions.designated",
+    "handler": "handleSessionsDesignated(sessionSvc",
+    "file": "internal/daemon/session_rpc.go",
+    "line": 23
+  },
+  {
+    "topic": "sessions.designated",
+    "handler": "p.makeProxy(\"sessions.designated\", \"session.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 99
+  },
+  {
+    "topic": "sessions.designated_acknowledge",
+    "handler": "handleSessionDesignatedAcknowledge(sessionSvc",
+    "file": "internal/daemon/session_rpc.go",
+    "line": 26
+  },
+  {
+    "topic": "skills.archive",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/skills.go",
+    "line": 358
+  },
+  {
+    "topic": "skills.evolve",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/skills.go",
+    "line": 458
+  },
+  {
+    "topic": "skills.execute",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/skills.go",
+    "line": 286
+  },
+  {
+    "topic": "skills.gaps",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/skills.go",
+    "line": 484
+  },
+  {
+    "topic": "skills.get",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/skills.go",
+    "line": 253
+  },
+  {
+    "topic": "skills.history",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/skills.go",
+    "line": 426
+  },
+  {
+    "topic": "skills.list",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/skills.go",
+    "line": 227
+  },
+  {
+    "topic": "skills.restore",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/skills.go",
+    "line": 385
+  },
+  {
+    "topic": "skills.stats",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/skills.go",
+    "line": 324
+  },
+  {
+    "topic": "status",
+    "handler": "statusHandler",
+    "file": "internal/rpc/server.go",
+    "line": 464
+  },
+  {
+    "topic": "status",
+    "handler": "p.makeProxy(\"status.request\", \"status.response\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 57
+  },
+  {
+    "topic": "sync.pull",
+    "handler": "h.handleSyncPull",
+    "file": "internal/rpc/backup_sync.go",
+    "line": 49
+  },
+  {
+    "topic": "sync.status",
+    "handler": "h.handleSyncStatus",
+    "file": "internal/rpc/backup_sync.go",
+    "line": 48
+  },
+  {
+    "topic": "task.amend.submit",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/server.go",
+    "line": 502
+  },
+  {
+    "topic": "task.cancel",
+    "handler": "p.makeProxy(\"task.cancel\", \"task.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 107
+  },
+  {
+    "topic": "task.create",
+    "handler": "p.makeProxy(\"task.create\", \"task.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 102
+  },
+  {
+    "topic": "task.delete",
+    "handler": "p.makeProxy(\"task.delete\", \"task.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 108
+  },
+  {
+    "topic": "task.get",
+    "handler": "p.makeProxy(\"task.get\", \"task.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 103
+  },
+  {
+    "topic": "task.link",
+    "handler": "p.makeProxy(\"task.link\", \"task.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 109
+  },
+  {
+    "topic": "task.list",
+    "handler": "p.makeProxy(\"task.list\", \"task.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 104
+  },
+  {
+    "topic": "task.list_extended",
+    "handler": "p.makeProxy(\"task.list_extended\", \"task.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 105
+  },
+  {
+    "topic": "task.steps",
+    "handler": "p.makeProxy(\"task.steps\", \"task.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 111
+  },
+  {
+    "topic": "task.unlink",
+    "handler": "p.makeProxy(\"task.unlink\", \"task.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 110
+  },
+  {
+    "topic": "task.update",
+    "handler": "p.makeProxy(\"task.update\", \"task.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 106
+  },
+  {
+    "topic": "templates.clear",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/templates.go",
+    "line": 113
+  },
+  {
+    "topic": "templates.get",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/templates.go",
+    "line": 40
+  },
+  {
+    "topic": "templates.invoke",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/templates.go",
+    "line": 68
+  },
+  {
+    "topic": "templates.list",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/templates.go",
+    "line": 16
+  },
+  {
+    "topic": "upload.get",
+    "handler": "h.handleGet",
+    "file": "internal/daemon/upload_rpc.go",
+    "line": 30
+  },
+  {
+    "topic": "upload.upload",
+    "handler": "h.handleUpload",
+    "file": "internal/daemon/upload_rpc.go",
+    "line": 29
+  },
+  {
+    "topic": "worker.add",
+    "handler": "p.makeProxy(\"worker.add\", \"worker.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 124
+  },
+  {
+    "topic": "worker.list",
+    "handler": "p.makeProxy(\"worker.list\", \"worker.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 126
+  },
+  {
+    "topic": "worker.remove",
+    "handler": "p.makeProxy(\"worker.remove\", \"worker.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 125
+  },
+  {
+    "topic": "worker.scale",
+    "handler": "p.makeProxy(\"worker.scale\", \"worker.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 128
+  },
+  {
+    "topic": "worker.stats",
+    "handler": "p.makeProxy(\"worker.stats\", \"worker.result\", 10*time.Second",
+    "file": "internal/rpc/proxy.go",
+    "line": 127
+  }
+]

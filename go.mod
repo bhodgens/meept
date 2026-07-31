@@ -45,7 +45,7 @@ require (
 	golang.org/x/time v0.14.0
 	golang.org/x/tools v0.45.0
 	gonum.org/v1/gonum v0.17.0
-	google.golang.org/grpc v1.82.0
+	google.golang.org/grpc v1.82.1
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.50.1
 )

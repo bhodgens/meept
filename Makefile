@@ -1,4 +1,4 @@
-.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui
+.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check
 	@echo "  localcert        Generate trusted SSL cert for localhost (requires mkcert)"
 	@echo "  localcert-install Install mkcert and local CA (one-time setup)"
 
@@ -38,6 +38,8 @@ help:
 	@echo "  lint             Run golangci-lint"
 	@echo "  fmt              Format code"
 	@echo "  vet              Run go vet"
+	@echo "  graphs           Regenerate connectivity graphs (bus/RPC/HTTP/WS)"
+	@echo "  graphs-check     Verify connectivity graphs are up to date (CI)"
 	@echo "  mod-tidy         Tidy go modules"
 	@echo "  clean            Remove build artifacts"
 	@echo "  menubar-clean    Remove menubar build artifacts"
@@ -151,7 +153,7 @@ deps:
 
 build: build-all
 
-build-all: build-daemon build-cli build-gendoc build-gui build-lite
+build-all: build-daemon build-cli build-gendoc build-gui build-lite graphs
 	@echo ""
 	@echo "Build complete:"
 	@ls -lh $(BIN_DIR)/
@@ -394,6 +396,19 @@ predid:
 .PHONY: analyzers
 analyzers: mutexio predid
 	@echo "All Go analyzers complete."
+
+# graphs regenerates the connectivity graph (bus topology, RPC handlers,
+# HTTP routes, WS event map) from source. Runs automatically on every
+# `make build`. Use `make graphs-check` in CI to verify freshness.
+.PHONY: graphs
+graphs:
+	@echo "Generating connectivity graphs..."
+	@python3 scripts/gen-connectivity-graph.py
+	@echo "Connectivity graphs written to docs/generated/"
+
+.PHONY: graphs-check
+graphs-check:
+	@python3 scripts/gen-connectivity-graph.py --check
 
 # audit-scripts runs the Python-based codebase audits:
 #   - dart-enum-name-shadow: flags Dart extensions that shadow Enum.name/index
