@@ -96,6 +96,7 @@ type ChatHandler struct {
 type Worker struct {
 	ID             string    `json:"id"`
 	ConversationID string    `json:"conversation_id"`
+	SessionID      string    `json:"session_id,omitempty"` // original session ID for WS routing
 	RequestID      string    `json:"request_id"`
 	State          string    `json:"state"` // "processing", "executing_tool", "completed", "error"
 	StartTime      time.Time `json:"start_time"`
@@ -117,6 +118,7 @@ type ChatRequest struct {
 type ChatResponse struct {
 	Reply          string `json:"reply"`
 	ConversationID string `json:"conversation_id"`
+	SessionID      string `json:"session_id,omitempty"` // original session ID for WS routing
 	Error          string `json:"error,omitempty"`
 }
 
@@ -531,8 +533,14 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	// Broadcast chat.message.received for bilateral visibility.
 	// All session participants see who sent what.
 	if req.SourceClient != "" {
+		// Use the original session ID for WS routing; fall back to
+		// conversationID when no session ID is available (legacy clients).
+		wsSessionID := req.SessionID
+		if wsSessionID == "" {
+			wsSessionID = conversationID
+		}
 		broadcastPayload, _ := json.Marshal(map[string]string{
-			"session_id":    conversationID,
+			"session_id":    wsSessionID,
 			"source_client": req.SourceClient,
 			"content":       req.Message,
 			"timestamp":     time.Now().UTC().Format(time.RFC3339),
@@ -553,6 +561,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	worker := &Worker{
 		ID:             workerID,
 		ConversationID: conversationID,
+		SessionID:      req.SessionID, // original session ID for WS routing
 		RequestID:      msg.ID,
 		State:          "processing",
 		StartTime:      time.Now(),
@@ -763,6 +772,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	// Build response
 	response := ChatResponse{
 		ConversationID: conversationID,
+		SessionID:      req.SessionID, // original session ID for WS routing
 	}
 
 	// Resolve the persistence/session ID up front: prefer the original session

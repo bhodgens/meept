@@ -1799,7 +1799,49 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 		}
 	}
 
-	// Fallback: singleton from registry.
+	// Fallback: try session-scoped loop before resorting to the registry
+	// singleton. registry.Get() is deferred until actually needed (either
+	// as a template for the session-scoped loop, or as the final return
+	// value) to avoid eagerly creating a task-scoped loop via GetForTask
+	// that is discarded when the session-scoped loop succeeds.
+	if d.sessionStore != nil && conversationID != "" {
+		if sess := d.sessionStore.GetByConversationID(conversationID); sess != nil {
+			projectPath := sess.ProjectPath
+			if projectPath == "" && sess.ProjectID != "" && d.loopManager != nil {
+				projectPath = d.loopManager.ResolveProjectPath(context.Background(), sess.ProjectID)
+			}
+			if projectPath != "" {
+				// Try to create a per-session loop to avoid the singleton race.
+				// registry.Get is called here (not earlier) so the task-scoped
+				// loop is only created when we actually need it as a template.
+				if d.loopManager != nil {
+					template, templateErr := d.registry.Get(agentID)
+					if templateErr != nil {
+						template, templateErr = d.registry.Get(config.AgentIDChat)
+					}
+					if templateErr == nil && template != nil {
+						if loop, err := d.loopManager.GetOrCreateWired(conversationID, projectPath, template); err == nil {
+							loop.SetProjectID(sess.ProjectID)
+							return loop
+						}
+					}
+				}
+				// Session-scoped loop unavailable or failed; fall back to
+				// mutating the singleton with a warning — this is a known
+				// race that only manifests under concurrent multi-session load.
+				if agent, agentErr := d.registry.Get(agentID); agentErr == nil {
+					d.logger.Warn("resolveAgent: mutating shared singleton workingDir (race risk)",
+						"conversation_id", conversationID,
+						"project_path", projectPath,
+					)
+					agent.SetWorkingDir(projectPath)
+					return agent
+				}
+			}
+		}
+	}
+
+	// Final fallback: singleton from registry (no session/project context).
 	agent, err := d.registry.Get(agentID)
 	if err != nil {
 		d.logger.Warn("Agent not found, falling back to chat", "agent", agentID, "error", err)
@@ -1815,38 +1857,6 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 		"loop_session_id", agent.GetSessionID(),
 		"loop_working_dir_before", agent.GetWorkingDir(),
 	)
-
-	// When the manager is available, create a proper session-scoped loop
-	// instead of mutating the shared singleton's workingDir (which races
-	// with concurrent sessions). The manager path above should have
-	// already handled this; this is a defense-in-depth fallback for when
-	// the session was not found by conversation ID but the project path
-	// can still be resolved.
-	if d.sessionStore != nil && conversationID != "" {
-		if sess := d.sessionStore.GetByConversationID(conversationID); sess != nil {
-			projectPath := sess.ProjectPath
-			if projectPath == "" && sess.ProjectID != "" && d.loopManager != nil {
-				projectPath = d.loopManager.ResolveProjectPath(context.Background(), sess.ProjectID)
-			}
-			if projectPath != "" {
-				// Try to create a per-session loop to avoid the singleton race.
-				// If that fails (e.g. manager is nil), fall back to mutating
-				// the singleton with a warning — this is a known race that
-				// only manifests under concurrent multi-session load.
-				if d.loopManager != nil {
-					if loop, err := d.loopManager.GetOrCreateWired(conversationID, projectPath, agent); err == nil {
-						loop.SetProjectID(sess.ProjectID)
-						return loop
-					}
-				}
-				d.logger.Warn("resolveAgent: mutating shared singleton workingDir (race risk)",
-					"conversation_id", conversationID,
-					"project_path", projectPath,
-				)
-				agent.SetWorkingDir(projectPath)
-			}
-		}
-	}
 
 	return agent
 }

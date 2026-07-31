@@ -88,6 +88,14 @@ func (m *CapabilityMatcher) matchPlatformPatterns(inputLower string) *MatchResul
 		"system status",
 		"help me understand",
 		"what are you",
+		"tell me about this project",
+		"tell me about the project",
+		"about this project",
+		"about the project",
+		"describe this project",
+		"describe the project",
+		"what is this project",
+		"what's this project",
 	}
 
 	for _, pattern := range platformPatterns {
@@ -114,6 +122,19 @@ func (m *CapabilityMatcher) matchByCapabilityIndex(inputLower string) *MatchResu
 	// Get top matches from capability index
 	match := m.capabilityIndex.GetTopMatch(inputLower, 0.5)
 	if match == nil {
+		return nil
+	}
+
+	// Require at least 2 keyword matches to avoid routing generic queries
+	// (e.g. "tell me about this project") to a specific skill based on a
+	// single common word like "project". A single keyword match is too
+	// weak a signal for skill-based routing.
+	if len(match.Matches) < 2 {
+		m.logger.Debug("Capability index match rejected: too few keyword matches",
+			"skill", match.Entry.Name,
+			"confidence", match.Confidence,
+			"matches", len(match.Matches),
+		)
 		return nil
 	}
 

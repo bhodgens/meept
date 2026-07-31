@@ -15,7 +15,8 @@ import (
 //  1. context.Context (set by the agent loop per-execution via
 //     tools.ContextWithWorkingDir — no shared mutable state)
 //  2. workingDirFunc (set via SetWorkingDirFunc, for non-loop callers)
-//  3. the getInfo closure's own fallback (typically os.Getwd())
+//  3. If both are empty, returns {"status": "no project bound"} — the
+//     daemon's own CWD is almost never the user's project.
 type ProjectInfoTool struct {
 	tools.ToolDefaults
 	getInfo        func(workingDir string) map[string]any

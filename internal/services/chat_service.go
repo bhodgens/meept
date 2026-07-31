@@ -95,13 +95,25 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 	// "session-abc123") in the conversation_id field. Resolve it to
 	// the session's internal conversation ID (e.g. "conv-xyz789") so
 	// that agent-side persistence writes to the correct session.
+	//
+	// NOTE: Get() searches by primary key (session ID), which is what
+	// the client actually sends despite the field being named
+	// "conversation_id". This works by accident — the field name is
+	// misleading. GetByConversationID is tried as a fallback for
+	// clients that may send the actual conversation ID instead.
 	if s.sessionStore != nil {
-		// Get() searches by primary key (session ID), which is what
-		// the client actually sent despite the field name.
 		if sess := s.sessionStore.Get(req.ConversationID); sess != nil && sess.ConversationID != "" {
 			conversationID = sess.ConversationID
 			s.logger.Debug("resolved conversation_id from session store",
 				"session_id", req.ConversationID,
+				"conversation_id", conversationID,
+			)
+		} else if sess := s.sessionStore.GetByConversationID(req.ConversationID); sess != nil && sess.ConversationID != "" {
+			// Fallback: client may have sent the actual conversation ID
+			// rather than the session primary key.
+			conversationID = sess.ConversationID
+			s.logger.Debug("resolved conversation_id via GetByConversationID fallback",
+				"input", req.ConversationID,
 				"conversation_id", conversationID,
 			)
 		}

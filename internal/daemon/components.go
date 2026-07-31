@@ -4561,16 +4561,13 @@ func registerPlatformTools(
 	// Project info tool - resolves current project metadata at call time.
 	// The closure receives a workingDir string: when non-empty (set via
 	// SetWorkingDirFunc from a session-scoped loop), it probes THAT directory;
-	// when empty, it falls back to os.Getwd() (the daemon's directory).
+	// when empty, it returns "no project bound" — the daemon's own CWD is
+	// almost never the user's project, so probing it is misleading.
 	projectInfoFunc := func(workingDir string) map[string]any {
-		wd := workingDir
-		if wd == "" {
-			var err error
-			wd, err = os.Getwd()
-			if err != nil || wd == "" {
-				return map[string]any{"status": "no project bound"}
-			}
+		if workingDir == "" {
+			return map[string]any{"status": "no project bound"}
 		}
+		wd := workingDir
 		info := map[string]any{
 			"name": filepath.Base(wd),
 			"path": wd,
