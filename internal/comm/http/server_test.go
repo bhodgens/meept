@@ -2431,14 +2431,17 @@ func TestHandleWSEvent_SessionFiltering(t *testing.T) {
 	}
 
 	// --- Test 2: Event without session_id → broadcast to all ---
+	// Use "chat_message" topic (actual chat response) so the transformer
+	// classifies it as type "chat_message". Lifecycle topics like
+	// "chat.global" are intentionally classified as "agent_progress".
 	payloadNoSession, _ := json.Marshal(map[string]any{
 		"reply": "global broadcast message",
 	})
-	msgBus.Publish("chat.global", &models.BusMessage{
+	msgBus.Publish("chat_message", &models.BusMessage{
 		ID:        "evt-global",
 		Type:      models.MessageTypeEvent,
 		Source:    "test",
-		Topic:     "chat.global",
+		Topic:     "chat_message",
 		Timestamp: time.Now().UTC(),
 		Payload:   payloadNoSession,
 	})

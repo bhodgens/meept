@@ -739,9 +739,10 @@ func TestUnifiedHTTPServer_WebSocketConnectionAndBroadcast(t *testing.T) {
 	}
 
 	// Publish a message on the bus — the WS forwarding goroutine should broadcast it.
-	// Note: use a single-segment topic because the bus subscribes with "*" which
-	// only matches single-segment topics in segment-based wildcard matching.
-	msgBus.Publish("chat.message.received", &models.BusMessage{
+	// Use "chat_message" (the actual chat response topic) so the transformer
+	// classifies it as type "chat_message". Lifecycle topics like "chat.progress"
+	// are intentionally classified as "agent_progress" to avoid blank bubbles.
+	msgBus.Publish("chat_message", &models.BusMessage{
 		ID:      "ws-test-1",
 		Type:    models.MessageTypeEvent,
 		Source:  "test",

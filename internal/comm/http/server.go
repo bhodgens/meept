@@ -635,9 +635,15 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 
 	var eventType string
 	switch {
-	case strings.HasPrefix(topic, "chat.") || topic == "chat_message":
-		// All chat-related events → chat_message
+	case topic == "chat_message" || topic == "chat.response":
+		// Actual chat messages → chat_message
 		eventType = "chat_message"
+	case strings.HasPrefix(topic, "chat."):
+		// Lifecycle events (chat.progress, chat.processing,
+		// chat.worker.started, chat.worker.completed) are NOT chat
+		// messages. Label them as progress so the client can update
+		// indicators without creating blank message bubbles.
+		eventType = "agent_progress"
 	case strings.HasPrefix(topic, "metrics."):
 		eventType = "metrics_update"
 	case strings.HasPrefix(topic, "task.") || strings.HasPrefix(topic, "step.") || strings.HasPrefix(topic, "job.") ||

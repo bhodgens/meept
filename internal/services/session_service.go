@@ -100,9 +100,15 @@ func (s *SessionService) CreateSession(ctx context.Context, req CreateSessionReq
 			}
 		}
 		if p == nil {
-			p, err = s.pm.EnsureDefault(ctx)
+			// Bind to the user's active project if one exists. Do NOT
+			// call EnsureDefault — that creates a synthetic empty git
+			// repo which gives the agent a workingDir with no code,
+			// no CLAUDE.md, and no git history, causing it to respond
+			// with generic "platform capabilities" instead of project
+			// context. An unbound session is better than a misleading one.
+			p, err = s.pm.GetActive(ctx)
 			if err != nil {
-				s.logger.Warn("EnsureDefault failed during session creation",
+				s.logger.Warn("GetActive failed during session creation",
 					"session_id", sess.ID,
 					"error", err,
 				)

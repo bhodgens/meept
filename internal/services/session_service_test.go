@@ -134,7 +134,7 @@ func TestCreateSession_InheritsActiveProject(t *testing.T) {
 	}
 }
 
-func TestCreateSession_CreatesDefaultWhenNoneActive(t *testing.T) {
+func TestCreateSession_UnboundWhenNoneActive(t *testing.T) {
 	sessionStore := session.NewMemoryStore(nil)
 	pm := newTestProjectManager(t)
 	ctx := context.Background()
@@ -143,16 +143,17 @@ func TestCreateSession_CreatesDefaultWhenNoneActive(t *testing.T) {
 	svc := NewSessionService(sessionStore)
 	svc.SetProjectManager(pm)
 
-	// Create a session — should auto-create a default project.
+	// Create a session — should NOT auto-create a synthetic default project.
+	// The session is left unbound; the caller binds a project later.
 	sess, err := svc.CreateSession(ctx, CreateSessionRequest{Name: "test"})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if sess.ProjectID == "" {
-		t.Error("ProjectID should not be empty")
+	if sess.ProjectID != "" {
+		t.Errorf("ProjectID should be empty when no active project, got %q", sess.ProjectID)
 	}
-	if sess.ProjectPath == "" {
-		t.Error("ProjectPath should not be empty")
+	if sess.ProjectPath != "" {
+		t.Errorf("ProjectPath should be empty when no active project, got %q", sess.ProjectPath)
 	}
 }
 
