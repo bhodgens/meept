@@ -114,6 +114,9 @@ type Store interface {
 	// F-04 FIX: Allow per-session fence override for --nofence CLI flag.
 	SetNoFence(sessionID string, noFence bool) error
 
+	// ClearMessages removes all messages for a session, resetting the
+	// conversation history. The session itself is preserved.
+	ClearMessages(sessionID string) error
 	// Search operations
 	// SearchMessages performs FTS5 keyword search over session_messages.
 	SearchMessages(ctx context.Context, query string, limit int) ([]MessageSearchResult, error)

@@ -582,6 +582,24 @@ func (s *SessionService) AcknowledgeDesignation(ctx context.Context, sessionID s
 	return nil
 }
 
+// ClearMessages removes all persisted messages for a session, resetting
+// the conversation history. The session itself is preserved.
+func (s *SessionService) ClearMessages(ctx context.Context, sessionID string) error {
+	if sessionID == "" {
+		return wrapError("session", "ClearMessages", ErrInvalidInput)
+	}
+	if s.store == nil {
+		return wrapError("session", "ClearMessages", ErrUnavailable)
+	}
+	if err := s.store.ClearMessages(sessionID); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return wrapError("session", "ClearMessages", ErrNotFound)
+		}
+		return wrapError("session", "ClearMessages", err)
+	}
+	return nil
+}
+
 // ArchiveSessionRequest contains archive parameters.
 type ArchiveSessionRequest struct {
 	ID       string `json:"id"`

@@ -961,6 +961,33 @@ func (s *SQLiteStore) GetMessageCount(sessionID string) (int, error) {
 	return count, nil
 }
 
+// ClearMessages removes all messages for a session and resets the leaf
+// pointer. The session row itself is preserved. FTS cleanup is handled
+// automatically by the session_messages_ad_fts trigger.
+func (s *SQLiteStore) ClearMessages(sessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session := s.getByColumnUnsafe("id", sessionID)
+	if session == nil {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	_, err := s.db.Exec("DELETE FROM session_messages WHERE session_id = ?", sessionID) //nolint:mutexio // mutex serializes sqlite connection access
+	if err != nil {
+		return fmt.Errorf("failed to clear messages: %w", err)
+	}
+
+	// Reset the leaf pointer so the next message starts a fresh tree.
+	_, err = s.db.Exec("UPDATE sessions SET leaf_message_id = NULL WHERE id = ?", sessionID) //nolint:mutexio // mutex serializes sqlite connection access
+	if err != nil {
+		return fmt.Errorf("failed to reset leaf pointer: %w", err)
+	}
+
+	s.logger.Info("Session messages cleared", "id", sessionID)
+	return nil
+}
+
 // UpdateDescription updates a session's description.
 func (s *SQLiteStore) UpdateDescription(sessionID, description string) error {
 	s.mu.Lock()

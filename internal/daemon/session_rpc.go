@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/rpc"
 	"github.com/caimlas/meept/internal/services"
 )
@@ -13,7 +14,7 @@ import (
 // registerSessionRPCHandlers registers session RPC handlers directly on the
 // RPC server. Handles session designation queries used by the CLI
 // (`meept sessions --needs-attention`) and the menubar app.
-func registerSessionRPCHandlers(server *rpc.Server, sessionSvc *services.SessionService) {
+func registerSessionRPCHandlers(server *rpc.Server, sessionSvc *services.SessionService, chatHandler *agent.ChatHandler) {
 	if server == nil || sessionSvc == nil {
 		return
 	}
@@ -26,6 +27,9 @@ func registerSessionRPCHandlers(server *rpc.Server, sessionSvc *services.Session
 
 	// sessions.archive - set or clear the archived flag on a session
 	server.RegisterHandler("sessions.archive", handleSessionArchive(sessionSvc))
+
+	// session.reset - clear conversation history for a session
+	server.RegisterHandler("session.reset", handleSessionReset(sessionSvc, chatHandler))
 }
 
 // handleSessionArchive sets or clears the archived flag on a session.
@@ -54,6 +58,35 @@ func handleSessionArchive(svc *services.SessionService) rpc.Handler {
 		return map[string]any{
 			"status": status,
 			"id":     req.ID,
+		}, nil
+	}
+}
+
+// handleSessionReset clears conversation history for a session.
+func handleSessionReset(svc *services.SessionService, chatHandler *agent.ChatHandler) rpc.Handler {
+	return func(ctx context.Context, params json.RawMessage) (any, error) {
+		var req struct {
+			SessionID string `json:"session_id"`
+		}
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, fmt.Errorf("invalid parameters: %w", err)
+		}
+		if req.SessionID == "" {
+			return nil, fmt.Errorf("session_id is required")
+		}
+
+		if err := svc.ClearMessages(ctx, req.SessionID); err != nil {
+			return nil, fmt.Errorf("failed to clear messages: %w", err)
+		}
+
+		// Clear in-memory conversation cache if the handler is available.
+		if chatHandler != nil {
+			chatHandler.ClearConversation(req.SessionID)
+		}
+
+		return map[string]any{
+			"status":  "reset",
+			"session": req.SessionID,
 		}, nil
 	}
 }

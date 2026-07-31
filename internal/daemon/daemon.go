@@ -798,9 +798,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			logger.Info("Thread RPC handlers registered")
 		}
 
-		// Session designation RPC handlers (queries + acknowledge)
+		// Session designation RPC handlers (queries + acknowledge + reset)
 		if svcRegistry.Session != nil {
-			registerSessionRPCHandlers(rpcServer, svcRegistry.Session)
+			registerSessionRPCHandlers(rpcServer, svcRegistry.Session, components.ChatHandler)
 			logger.Info("Session designation RPC handlers registered")
 		}
 

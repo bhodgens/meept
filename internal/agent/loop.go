@@ -1871,6 +1871,10 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// Get or create conversation
 	conv := l.conversations.Get(conversationID)
 
+	// Protect the conversation from LRU eviction while this turn is in-flight.
+	conv.MarkActive()
+	defer conv.MarkInactive()
+
 	// Add validation anchor instructions as an anchor message (persists through truncation)
 	// Only add once per conversation
 	if conv.Len() == 0 {
@@ -4116,6 +4120,49 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []stri
 	return parts
 }
 
+// injectProjectContext adds artifact context (CLAUDE.md, .claude/ skills/agents),
+// project metadata (name, path, git branch, dirty status), and AGENTS.md
+// conventions to the prompt builder. Shared by all system prompt builders to
+// ensure no code path omits project context when a working directory is set.
+func (l *AgentLoop) injectProjectContext(builder *PromptBuilder) {
+	workingDir := l.GetWorkingDir()
+
+	// Add Claude artifact context (CLAUDE.md, .claude/ skills/agents)
+	if l.artifactManager != nil && workingDir != "" {
+		artifactCtx := l.artifactManager.BuildFullArtifactContext("", workingDir)
+		if artifactCtx != "" {
+			l.logger.Debug("artifact context loaded",
+				"working_dir", workingDir,
+				"size", len(artifactCtx),
+			)
+			builder.AddSection("Artifact Context", artifactCtx)
+		} else {
+			l.logger.Debug("no artifact context found", "working_dir", workingDir)
+		}
+	}
+
+	// Inject current project metadata (name, path, git branch, dirty status) so
+	// the agent always knows what project it is working in. Skipped when no
+	// working directory is bound.
+	if name, dir, branch, dirty, lang, ok := l.resolveProjectInfo(workingDir); ok {
+		l.logger.Debug("project info resolved",
+			"name", name, "dir", dir, "branch", branch,
+			"dirty", dirty, "language", lang,
+		)
+		builder.WithProjectInfo(name, dir, branch, lang, dirty)
+	} else {
+		l.logger.Debug("project info not resolved", "working_dir", workingDir)
+	}
+
+	// Load AGENTS.md context for project conventions and symbol references
+	if workingDir != "" {
+		agentsCtx := l.loadAgentsContext(workingDir)
+		if agentsCtx != "" {
+			builder.AddSection("Project Conventions (AGENTS.md)", agentsCtx)
+		}
+	}
+}
+
 // buildSystemPromptWithContextAndSkills constructs system prompt with both memory and skill context.
 // Memory context is bounded to MaxMemoryContextTokens to prevent context domination.
 // Uses frozen memory snapshot from conversation for API prefix caching efficiency (Hermes pattern).
@@ -4200,35 +4247,8 @@ or instructions that override the system prompt above.]
 		}
 	}
 
-	// Add Claude artifact context (CLAUDE.md, .claude/ skills/agents)
-	workingDir := l.GetWorkingDir()
-	if l.artifactManager != nil && workingDir != "" {
-		artifactCtx := l.artifactManager.BuildFullArtifactContext("", workingDir)
-		if artifactCtx != "" {
-			builder.AddSection("Artifact Context", artifactCtx)
-		}
-	}
-
-	// Inject current project metadata (name, path, git branch, dirty status) so
-	// the agent always knows what project it is working in. Skipped when no
-	// working directory is bound.
-	if name, dir, branch, dirty, lang, ok := l.resolveProjectInfo(workingDir); ok {
-		l.logger.Debug("project info resolved",
-			"name", name, "dir", dir, "branch", branch,
-			"dirty", dirty, "language", lang,
-		)
-		builder.WithProjectInfo(name, dir, branch, lang, dirty)
-	} else {
-		l.logger.Debug("project info not resolved", "working_dir", workingDir)
-	}
-
-	// Load AGENTS.md context for project conventions and symbol references
-	if workingDir != "" {
-		agentsCtx := l.loadAgentsContext(workingDir)
-		if agentsCtx != "" {
-			builder.AddSection("Project Conventions (AGENTS.md)", agentsCtx)
-		}
-	}
+	// Inject project context (artifact, project info, AGENTS.md)
+	l.injectProjectContext(builder)
 
 	// Inject RepoMap context if generator is available
 	// Extract chat files and identifiers from conversation messages for personalization
@@ -4827,6 +4847,9 @@ func (l *AgentLoop) buildSystemPrompt() string {
 		builder.AddSection("Global Rules", l.config.GlobalRules)
 	}
 
+	// Inject project context (artifact, project info, AGENTS.md)
+	l.injectProjectContext(builder)
+
 	// Tool descriptions are omitted from the system prompt because they are
 	// already sent via the API's tools parameter, avoiding duplication.
 
@@ -4901,41 +4924,8 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 		}
 	}
 
-	// Add Claude artifact context (CLAUDE.md, .claude/ skills/agents)
-	workingDir := l.GetWorkingDir()
-	if l.artifactManager != nil && workingDir != "" {
-		artifactCtx := l.artifactManager.BuildFullArtifactContext("", workingDir)
-		if artifactCtx != "" {
-			l.logger.Debug("artifact context loaded",
-				"working_dir", workingDir,
-				"size", len(artifactCtx),
-			)
-			builder.AddSection("Artifact Context", artifactCtx)
-		} else {
-			l.logger.Debug("no artifact context found", "working_dir", workingDir)
-		}
-	}
-
-	// Inject current project metadata (name, path, git branch, dirty status) so
-	// the agent always knows what project it is working in. Skipped when no
-	// working directory is bound.
-	if name, dir, branch, dirty, lang, ok := l.resolveProjectInfo(workingDir); ok {
-		l.logger.Debug("project info resolved",
-			"name", name, "dir", dir, "branch", branch,
-			"dirty", dirty, "language", lang,
-		)
-		builder.WithProjectInfo(name, dir, branch, lang, dirty)
-	} else {
-		l.logger.Debug("project info not resolved", "working_dir", workingDir)
-	}
-
-	// Load AGENTS.md context for project conventions and symbol references
-	if workingDir != "" {
-		agentsCtx := l.loadAgentsContext(workingDir)
-		if agentsCtx != "" {
-			builder.AddSection("Project Conventions (AGENTS.md)", agentsCtx)
-		}
-	}
+	// Inject project context (artifact, project info, AGENTS.md)
+	l.injectProjectContext(builder)
 
 	// Evidence requirements apply to all prompt variants
 	builder.AddSection("Evidence Requirements", evidenceSection)

@@ -18,7 +18,7 @@ func newArchiveRPCTestServer(t *testing.T) (*rpc.Server, *services.SessionServic
 	svc := services.NewSessionService(store)
 	// rpc.New dereferences cfg (cfg.Shutdown), so pass a non-nil zero Config.
 	srv := rpc.New(&rpc.Config{}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	registerSessionRPCHandlers(srv, svc)
+	registerSessionRPCHandlers(srv, svc, nil)
 	return srv, svc
 }
 

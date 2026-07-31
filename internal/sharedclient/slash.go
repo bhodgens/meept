@@ -87,6 +87,9 @@ var builtinCommands = map[string]struct{}{
 
 	// Debug session: dump all known data about the current session.
 	"debugsession": {},
+
+	// Reset: clear conversation history for the current session.
+	"reset": {},
 }
 
 // CommandTasks is the "tasks" command name, exported for compatibility with tui/constants.go.

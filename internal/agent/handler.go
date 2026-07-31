@@ -573,6 +573,25 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	// Publish worker started event
 	h.publishWorkerEvent("chat.worker.started", worker)
 
+	// Publish chat.processing event immediately so SSE clients get
+	// instant feedback that the request was received and is being handled.
+	processingPayload, _ := json.Marshal(map[string]any{
+		"request_id":      msg.ID,
+		"conversation_id": conversationID,
+		"status":          "processing",
+		"worker_id":       workerID,
+	})
+	processingMsg := &models.BusMessage{
+		ID:        generateMessageID(),
+		Type:      models.MessageTypeEvent,
+		Topic:     "chat.processing",
+		Source:    SourceChatHandler,
+		Timestamp: time.Now().UTC(),
+		Payload:   processingPayload,
+		ReplyTo:   msg.ID,
+	}
+	h.bus.Publish("chat.processing", processingMsg)
+
 	// Process the message
 	h.logger.Info("Processing chat message",
 		"worker", workerID,
@@ -1522,6 +1541,14 @@ func (h *ChatHandler) SetSessionStore(s SessionStoreReader) {
 func (h *ChatHandler) SetMessageSaver(s SessionMessageSaver) {
 	if s != nil {
 		h.messageSaver = s
+	}
+}
+
+// ClearConversation removes the in-memory conversation cache for a session.
+// Called by the /reset RPC handler after clearing persisted messages.
+func (h *ChatHandler) ClearConversation(conversationID string) {
+	if h.loop != nil && h.loop.conversations != nil {
+		h.loop.conversations.Delete(conversationID)
 	}
 }
 

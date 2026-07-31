@@ -193,6 +193,45 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 	// Publish request
 	s.bus.Publish("chat.request", msg)
 
+	// Start heartbeat goroutine: publishes periodic chat.progress events
+	// so SSE clients know the request is still being processed.
+	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
+	var heartbeatWG sync.WaitGroup
+	heartbeatWG.Add(1)
+	startTime := time.Now()
+	go func() {
+		defer heartbeatWG.Done()
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case <-ticker.C:
+				elapsed := time.Since(startTime).Milliseconds()
+				hbPayload, _ := json.Marshal(map[string]any{
+					"request_id": msgID,
+					"status":     "processing",
+					"elapsed_ms": elapsed,
+				})
+				hbMsg := &models.BusMessage{
+					ID:        id.Generate("hb-"),
+					Type:      models.MessageTypeEvent,
+					Topic:     "chat.progress",
+					Source:    "svc.chat",
+					Timestamp: time.Now().UTC(),
+					Payload:   hbPayload,
+					ReplyTo:   msgID,
+				}
+				s.bus.Publish("chat.progress", hbMsg)
+			}
+		}
+	}()
+	defer func() {
+		cancelHeartbeat()
+		heartbeatWG.Wait()
+	}()
+
 	// Wait for response
 	timeout := s.timeout
 	if timeout <= 0 {

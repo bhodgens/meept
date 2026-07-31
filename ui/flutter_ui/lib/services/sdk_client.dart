@@ -348,7 +348,9 @@ class SdkApiClient {
       ..conversationId = conversationId ?? ''
       ..agentId = agentId);
 
-    return _post('/api/v1/chat', body: _toJson(req));
+    final body = _toJson(req);
+    body['source_client'] = 'flutter_ui';
+    return _post('/api/v1/chat', body: body);
   }
 
   /// Sends a chat message with multimodal content parts.
@@ -366,6 +368,7 @@ class SdkApiClient {
     final body = <String, dynamic>{
       'message': message,
       'conversation_id': conversationId ?? '',
+      'source_client': 'flutter_ui',
     };
     if (agentId != null) body['agent_id'] = agentId;
     if (parts != null && parts.isNotEmpty) body['parts'] = parts;

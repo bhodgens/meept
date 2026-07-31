@@ -139,6 +139,10 @@ type RegistryConfig struct {
 	// DB is an optional SQLite connection used for queue persistence.
 	// When set, follow-up messages are persisted to the queued_followups table.
 	DB *sql.DB
+
+	// ConversationStoreSize is the LRU capacity of the shared ConversationStore.
+	// When <= 0, DefaultConversationStoreSize is used.
+	ConversationStoreSize int
 }
 
 // NewAgentRegistry creates a new agent registry.
@@ -166,7 +170,7 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		ttsrManager:           cfg.TTSRManager,
 		queueConfig:           cfg.Queues,
 		db:                    cfg.DB,
-		sharedConvStore:       NewConversationStore(100),
+		sharedConvStore:       NewConversationStore(cfg.ConversationStoreSize),
 	}
 
 	// Load global rules

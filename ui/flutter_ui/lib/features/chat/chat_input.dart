@@ -1065,7 +1065,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
         sessionId: widget.sessionId,
         text: sentText,
         parts: parts,
-        agentId: activeAgent?.id ?? 'coder',
+        agentId: activeAgent?.id,
       );
       if (isFirstMessage) {
         unawaited(_maybeGenerateSessionDescription(sentText));
@@ -1098,7 +1098,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
     chatNotifier.sendMessage(
       sessionId: widget.sessionId,
       text: finalPayload,
-      agentId: activeAgent?.id ?? 'coder',
+      agentId: activeAgent?.id,
     );
 
     if (isFirstMessage) {

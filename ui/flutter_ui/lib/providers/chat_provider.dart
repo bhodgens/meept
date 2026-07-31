@@ -229,6 +229,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// Timer to reset _isSending flag if it gets stuck (safety mechanism)
   Timer? _sendingTimeoutTimer;
 
+  /// Fallback timer to clear isAgentProcessing if no WS event arrives
+  /// after an HTTP response that included a synchronous reply.
+  Timer? _processingFallbackTimer;
+
   /// Maximum time to wait for send to complete before auto-resetting
   static const _sendingTimeout = Duration(seconds: 60);
 
@@ -471,6 +475,13 @@ class ChatNotifier extends StateNotifier<ChatState> {
         // body (e.g. platform introspection, direct response). Add it to
         // the message list immediately — don't wait for a WebSocket event
         // that will never arrive.
+        //
+        // NOTE: We do NOT reset isAgentProcessing here.  The HTTP response
+        // may arrive before the WS lifecycle events (chat.worker.started,
+        // progress, chat_message).  Resetting here would cause the UI to
+        // briefly show "done" then flip back to "thinking" when the WS
+        // events land.  Instead, let addStreamMessage() drive the
+        // processing state when the final chat_message arrives.
         final replyContent = chatResp['reply'] as String;
         final assistantMessage = ChatMessage(
           id: 'agent_${DateTime.now().millisecondsSinceEpoch}',
@@ -482,9 +493,22 @@ class ChatNotifier extends StateNotifier<ChatState> {
         state = ChatState(
           messages: [...state.messages, assistantMessage],
           isLoading: false,
-          isAgentProcessing: false,
-          thinkingStartedAt: null,
+          isAgentProcessing: true,
+          thinkingStartedAt: state.thinkingStartedAt,
         );
+        // Safety net: if no WS event resets isAgentProcessing within a
+        // reasonable window (e.g. daemon didn't broadcast), clear it so
+        // the UI doesn't stay stuck on "thinking" forever.
+        _processingFallbackTimer?.cancel();
+        _processingFallbackTimer = Timer(const Duration(seconds: 15), () {
+          _processingFallbackTimer = null;
+          if (!_disposed && state.isAgentProcessing) {
+            state = state.copyWith(
+              isAgentProcessing: false,
+              thinkingStartedAt: null,
+            );
+          }
+        });
       } else {
         // HTTP call succeeded but no reply in the body — the agent is
         // still processing asynchronously. Keep isAgentProcessing=true
@@ -556,7 +580,9 @@ class ChatNotifier extends StateNotifier<ChatState> {
           content: contentText,
           timestamp: DateTime.now(),
         );
-        state = state.copyWith(
+        _processingFallbackTimer?.cancel();
+        _processingFallbackTimer = null;
+        state = ChatState(
           messages: [...state.messages, systemMessage],
           isLoading: false,
           isAgentProcessing: false,
@@ -598,6 +624,12 @@ class ChatNotifier extends StateNotifier<ChatState> {
               ? false
               : state.isAgentProcessing;
 
+      // Cancel the fallback timer — the WS event drove the state transition.
+      if (!newIsAgentProcessing) {
+        _processingFallbackTimer?.cancel();
+        _processingFallbackTimer = null;
+      }
+
       state = state.copyWith(
         messages: newMessages,
         isAgentProcessing: newIsAgentProcessing,
@@ -610,6 +642,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
         content: 'Failed to process message: $e',
         timestamp: DateTime.now(),
       );
+      _processingFallbackTimer?.cancel();
+      _processingFallbackTimer = null;
       state = ChatState(
         messages: [...state.messages, errorMessage],
         isLoading: false,
@@ -707,6 +741,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
     _disposed = true;
     _sendingTimeoutTimer?.cancel();
     _sendingTimeoutTimer = null;
+    _processingFallbackTimer?.cancel();
+    _processingFallbackTimer = null;
     _wsChatSubscription?.cancel();
     _wsChatSubscription = null;
     _progressSubscription?.cancel();

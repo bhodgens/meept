@@ -267,8 +267,20 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 		defer completeUnsub()
 	}
 
+	// Subscribe to chat heartbeat/progress events (published by ChatService)
+	chatProgressSub, chatProgressUnsub := s.services.Bus.Subscribe(subID+"-chatprogress", "chat.progress")
+	if chatProgressSub != nil {
+		defer chatProgressUnsub()
+	}
+
+	// Subscribe to chat.processing events (published by ChatHandler on receipt)
+	chatProcessingSub, chatProcessingUnsub := s.services.Bus.Subscribe(subID+"-chatprocessing", "chat.processing")
+	if chatProcessingSub != nil {
+		defer chatProcessingUnsub()
+	}
+
 	// Extract channels for select, guarding against nil subscriptions
-	var agentCh, synthCh, completeCh <-chan *models.BusMessage
+	var agentCh, synthCh, completeCh, chatProgressCh, chatProcessingCh <-chan *models.BusMessage
 	if agentSub != nil {
 		agentCh = agentSub.Channel
 	}
@@ -277,6 +289,12 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 	if completeSub != nil {
 		completeCh = completeSub.Channel
+	}
+	if chatProgressSub != nil {
+		chatProgressCh = chatProgressSub.Channel
+	}
+	if chatProcessingSub != nil {
+		chatProcessingCh = chatProcessingSub.Channel
 	}
 
 	// Send initial connection event
@@ -344,6 +362,32 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if err := sse.SendEvent("tool_complete", payload); err != nil {
+				return
+			}
+
+		case msg, ok := <-chatProgressCh:
+			if !ok {
+				return
+			}
+			// Forward chat heartbeat/progress as SSE
+			var payload map[string]any
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				continue
+			}
+			if err := sse.SendEvent("chat_progress", payload); err != nil {
+				return
+			}
+
+		case msg, ok := <-chatProcessingCh:
+			if !ok {
+				return
+			}
+			// Forward chat.processing (request received) as SSE
+			var payload map[string]any
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				continue
+			}
+			if err := sse.SendEvent("chat_processing", payload); err != nil {
 				return
 			}
 

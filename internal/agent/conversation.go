@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/caimlas/meept/internal/llm"
 )
@@ -20,6 +21,10 @@ const (
 	DefaultMaxMessages = 200
 	// DefaultContextLimit is the default context token limit for truncation.
 	DefaultContextLimit = 100000
+	// DefaultConversationStoreSize is the default LRU capacity for the shared
+	// ConversationStore. Increased from 100 to 1000 so a busy daemon with many
+	// concurrent sessions does not evict active conversations.
+	DefaultConversationStoreSize = 1000
 )
 
 const (
@@ -176,6 +181,10 @@ type Conversation struct {
 
 	// Anchor messages are exempt from truncation (validation instructions, escalation triggers)
 	anchorMessages map[string]bool // message content hash -> isAnchor
+
+	// active tracks in-flight RunOnce calls. When > 0 the conversation is
+	// protected from LRU eviction by the ConversationStore.
+	active atomic.Int32
 }
 
 // ConversationOption is a functional option for configuring a Conversation.
@@ -216,6 +225,33 @@ func NewConversation(opts ...ConversationOption) *Conversation {
 	}
 
 	return c
+}
+
+// MarkActive increments the in-flight usage counter, protecting the
+// conversation from LRU eviction while a RunOnce turn is executing.
+// Each call must be paired with a MarkInactive (typically via defer).
+func (c *Conversation) MarkActive() {
+	c.active.Add(1)
+}
+
+// MarkInactive decrements the in-flight usage counter.
+func (c *Conversation) MarkInactive() {
+	// Guard against going negative if callers are unbalanced.
+	for {
+		v := c.active.Load()
+		if v <= 0 {
+			return
+		}
+		if c.active.CompareAndSwap(v, v-1) {
+			return
+		}
+	}
+}
+
+// IsActive reports whether the conversation has an in-flight turn and is
+// therefore protected from LRU eviction.
+func (c *Conversation) IsActive() bool {
+	return c.active.Load() > 0
 }
 
 // AddAnchorMessage adds a message that is exempt from truncation.
@@ -1643,7 +1679,7 @@ func WithPersistence(fn PersistenceFunc) ConversationStoreOption {
 // NewConversationStore creates a new conversation store.
 func NewConversationStore(maxSize int, opts ...ConversationStoreOption) *ConversationStore {
 	if maxSize <= 0 {
-		maxSize = 100
+		maxSize = DefaultConversationStoreSize
 	}
 	s := &ConversationStore{
 		conversations: make(map[string]*Conversation),
@@ -1745,13 +1781,27 @@ func (s *ConversationStore) Get(id string) *Conversation {
 	return conv
 }
 
-// evictOldest removes the oldest conversation when over capacity.
+// evictOldest removes the oldest non-active conversation when over capacity.
+// Active conversations (with an in-flight RunOnce) are never evicted.
 // Must be called with lock held.
 func (s *ConversationStore) evictOldest() {
-	if len(s.order) > s.maxSize {
-		oldest := s.order[0]
+	for len(s.order) > s.maxSize {
+		// Find the oldest non-active conversation to evict.
+		evictIdx := -1
+		for i, id := range s.order {
+			if conv, ok := s.conversations[id]; ok && !conv.IsActive() {
+				evictIdx = i
+				break
+			}
+		}
+		if evictIdx < 0 {
+			// All conversations are active; cannot evict without
+			// disrupting in-flight turns. Allow temporary over-capacity.
+			return
+		}
+		oldest := s.order[evictIdx]
 		delete(s.conversations, oldest)
-		s.order = s.order[1:]
+		s.order = append(s.order[:evictIdx], s.order[evictIdx+1:]...)
 	}
 }
 

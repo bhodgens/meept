@@ -468,6 +468,19 @@ func (s *MemoryStore) GetMessageCount(sessionID string) (int, error) {
 	return len(s.messages[sessionID]), nil
 }
 
+// ClearMessages removes all messages for a session, resetting the
+// conversation history. The session itself is preserved.
+func (s *MemoryStore) ClearMessages(sessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.sessions[sessionID]; !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	delete(s.messages, sessionID)
+	return nil
+}
+
 // UpdateDescription updates a session's description.
 func (s *MemoryStore) UpdateDescription(sessionID, description string) error {
 	s.mu.Lock()
