@@ -599,7 +599,15 @@ class ChatNotifier extends StateNotifier<ChatState> {
         ttsNotifier.speak(message.content);
       }
 
-      // Replace or update existing message by id if it exists
+      // Replace or update existing message by id if it exists.
+      //
+      // Also deduplicate against the HTTP synchronous reply: the HTTP
+      // response body contains the same reply that arrives via WebSocket.
+      // The HTTP path adds a message with id 'agent_<timestamp>' while the
+      // WS event carries the daemon's message ID, so the ID-based index
+      // lookup above never matches. Fall back to content comparison: if the
+      // last assistant message has the same content, replace it with the
+      // canonical WS version (correct ID, daemon-side timestamp).
       final existingIndex = state.messages.indexWhere(
         (m) => m.id == message.id,
       );
@@ -608,6 +616,13 @@ class ChatNotifier extends StateNotifier<ChatState> {
       if (existingIndex >= 0) {
         newMessages = [...state.messages];
         newMessages[existingIndex] = message;
+      } else if (message.role == 'assistant' &&
+          state.messages.isNotEmpty &&
+          state.messages.last.role == 'assistant' &&
+          state.messages.last.content == message.content) {
+        // Replace the HTTP-sourced duplicate with the canonical WS message.
+        newMessages = [...state.messages];
+        newMessages[newMessages.length - 1] = message;
       } else {
         newMessages = [...state.messages, message];
       }

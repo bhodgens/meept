@@ -26,7 +26,14 @@ class WebSocketService {
   WebSocketChannel? _channel;
   final String _host;
   final int _port;
-  final String? _apiKey;
+
+  /// API key for daemon authentication. Refreshed from [_storage] on each
+  /// connect attempt to avoid using a stale key captured at construction
+  /// time (e.g. if keychain init was slow or the key was rotated).
+  String? _apiKey;
+
+  /// Optional storage reference for lazy API key reads.
+  final StorageService? _storage;
 
   // rxdart subjects replace manual StreamControllers
   final PublishSubject<Map<String, dynamic>> _messageSubject =
@@ -94,9 +101,11 @@ class WebSocketService {
     String? host,
     int? port,
     String? apiKey,
+    StorageService? storage,
   })  : _host = host ?? AppConstants.defaultApiHost,
         _port = port ?? AppConstants.defaultApiPort,
-        _apiKey = apiKey;
+        _apiKey = apiKey,
+        _storage = storage;
 
   /// Create a WebSocketService using persisted host/port/API key from
   /// [storage].
@@ -126,6 +135,7 @@ class WebSocketService {
       host: storage.getApiHost(),
       port: storage.getApiPort(),
       apiKey: apiKey.isEmpty ? null : apiKey,
+      storage: storage,
     );
   }
 
@@ -281,6 +291,16 @@ class WebSocketService {
       throw StateError('Service disposed');
     }
 
+    // Refresh API key from storage on every connection attempt. This fixes
+    // the race where the keychain read hadn't completed when the service was
+    // constructed, leaving _apiKey null for all subsequent retries.
+    if (_storage != null) {
+      final stored = _storage.getApiKey();
+      if (stored != null && stored.isNotEmpty) {
+        _apiKey = stored;
+      }
+    }
+
     try {
       final uri = Uri.parse('wss://$_host:$_port$wsPath');
 
@@ -291,14 +311,20 @@ class WebSocketService {
       // Use custom HTTP client with certificate pinning for all non-web
       // connections. This ensures self-signed certs are accepted for localhost.
       if (!kIsWeb) {
+        // Apply a connection timeout to prevent indefinite hangs when the
+        // daemon's TLS handshake stalls (e.g. daemon partially initialized,
+        // trustd slow, network stack quirk).
         final ws = await io.WebSocket.connect(
           uri.toString(),
           headers: {
-            if (_apiKey != null && _apiKey.isNotEmpty)
+            if (_apiKey != null && _apiKey!.isNotEmpty)
               'Authorization': 'Bearer $_apiKey',
             'Origin': 'https://localhost:$_port',
           },
           customClient: _createHttpClient(),
+        ).timeout(
+          AppConstants.connectionTimeout,
+          onTimeout: () => throw TimeoutException('WebSocket connect timeout'),
         );
         final channel = IOWebSocketChannel(ws);
         if (_isDisposed || _wasExplicitlyDisconnected) {
@@ -313,7 +339,7 @@ class WebSocketService {
         // keeps the credential out of server access logs (unlike the
         // legacy ?token= query param).
         final protocols = <String>[];
-        if (_apiKey != null && _apiKey.isNotEmpty) {
+        if (_apiKey != null && _apiKey!.isNotEmpty) {
           protocols.add('bearer.$_apiKey');
         }
         final channel = WebSocketChannel.connect(

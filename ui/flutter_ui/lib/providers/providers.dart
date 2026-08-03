@@ -317,6 +317,9 @@ class ConnectionMonitor {
         _container = container {
     _listenToWebSocket();
     _startHealthChecks();
+    // Kick off the initial WebSocket connection immediately rather than
+    // waiting for a chat session or the first 30s health check.
+    _websocket.connect();
   }
 
   void _listenToWebSocket() {

@@ -1485,6 +1485,13 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 		return "", fmt.Errorf("dispatch result has no intent to route")
 	}
 
+	// sessionConversationID is the session-level conversation ID used for
+	// session store lookups (project path, session-scoped loop creation).
+	// The thread router may replace conversationID with a thread-specific
+	// ID below, but session lookups must always use the session-level ID
+	// because GetByConversationID only knows session conversation IDs.
+	sessionConversationID := conversationID
+
 	// Consult the thread router before any other routing logic so that the
 	// conversation ID is resolved to the active thread's conversation ID
 	// (performing silent migration of legacy sessions if needed). When no
@@ -1518,8 +1525,11 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 		// The loop was created by the registry with workingDir="" and only
 		// gets the project path when resolveAgent runs (which is bypassed
 		// when the queue is active).
-		if d.sessionStore != nil && conversationID != "" {
-			if sess := d.sessionStore.GetByConversationID(conversationID); sess != nil {
+		//
+		// Use sessionConversationID (pre-thread-router) for session lookup
+		// because the session store only knows session-level conversation IDs.
+		if d.sessionStore != nil && sessionConversationID != "" {
+			if sess := d.sessionStore.GetByConversationID(sessionConversationID); sess != nil {
 				projectPath := sess.ProjectPath
 				if projectPath == "" && sess.ProjectID != "" && d.loopManager != nil {
 					projectPath = d.loopManager.ResolveProjectPath(context.Background(), sess.ProjectID)
@@ -1587,7 +1597,7 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	// session's project_path as working directory) when the manager and
 	// session store are wired. Falls back to the singleton registry agent
 	// when the session has no project path or the manager is unavailable.
-	agent := d.resolveAgent(result.AgentID, conversationID)
+	agent := d.resolveAgent(result.AgentID, sessionConversationID)
 	if agent == nil {
 		return "", fmt.Errorf("no agent available for %q", result.AgentID)
 	}
