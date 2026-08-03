@@ -2400,17 +2400,17 @@ func TestHandleWSEvent_SessionFiltering(t *testing.T) {
 	wsDrain(connB, time.Second)
 
 	// --- Test 1: Session-scoped event (session_id = "A") ---
-	// Publish a chat_message bus event with conversation_id="A".
-	// transformBusEventToWS converts conversation_id -> session_id.
+	// Publish a chat_message bus event with session_id="A".
+	// transformBusEventToWS routes it to connections subscribed to session-A.
 	payloadA, _ := json.Marshal(map[string]any{
-		"conversation_id": "session-A",
-		"reply":           "hello from session A",
+		"session_id": "session-A",
+		"content":    "hello from session A",
 	})
-	msgBus.Publish("chat.response", &models.BusMessage{
+	msgBus.Publish("chat_message", &models.BusMessage{
 		ID:        "evt-session-a",
 		Type:      models.MessageTypeEvent,
 		Source:    "test",
-		Topic:     "chat.response",
+		Topic:     "chat_message",
 		Timestamp: time.Now().UTC(),
 		Payload:   payloadA,
 	})

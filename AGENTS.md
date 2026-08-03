@@ -268,6 +268,72 @@ if convID, ok := payload["conversation_id"].(string); ok {
 }
 ```
 
+### Surface Unacted Observations
+
+**At the end of every turn, surface to the user any observations you made but
+did not act on.** Silent discoveries are lost discoveries.
+
+While working on one task, the agent often notices adjacent problems — a
+potential bug in a sibling code path, a misconfiguration, a stale comment, an
+inconsistent pattern, a suspicious value. If the agent decides not to address
+these within the current task scope (out of focus, lacking certainty, or out of
+respect for the task boundary), it MUST still tell the user about them before
+completing the turn.
+
+**Format:** Append a brief **Observations** section at the end of the response.
+List each observation with:
+
+- **Location** — `file:line`
+- **What** — a one-line description
+- **Why not acted on** — the reason it was left out of this turn
+
+Example:
+
+```
+Observations:
+- internal/agent/loop.go:412 — error from planner is swallowed (no log). Not
+  acted on: out of scope for this PR; needs its own investigation.
+- config/models.json5:55 — capability "code" has no provider mapped. Not acted
+  on: unclear if intentional; flagging for the user to confirm.
+```
+
+Do not bury observations inside a wall of prose. If there are no observations,
+omit the section entirely (do not write "No observations.").
+
+### Prefer Clean Architectural Fixes
+
+**Always prefer clean architectural fixes over hacky workarounds, even when the
+clean fix requires more work.** Hacky workarounds accumulate technical debt and
+create fragile systems that are hard to reason about.
+
+Examples of hacky patterns to avoid:
+- **Content comparison for deduplication** — comparing serialized content
+  instead of using proper identity keys (`id`, `session_id`, hash of source).
+- **Suppressing symptoms** — catching/swallowing an error to make a test pass
+  without understanding why the error occurs.
+- **Patching around a root cause** — adding a special case downstream instead
+  of fixing the upstream producer of bad data.
+
+**When fixing a bug:**
+
+1. **Trace the root cause** through the full data flow — from the observed
+   symptom back to its origin. Do not stop at the first place you *could* patch.
+2. **Fix it at the source** — change the code that produces the incorrect
+   behavior, not the code that merely reacts to it.
+3. **If a workaround is temporarily necessary**, add a `TODO` comment with the
+   ticket/reference and a concrete plan for the proper fix:
+
+   ```go
+   // TODO(subagent-1234): Temporary dedup by content string. Replace with
+   // proper id-based dedup once Dispatcher emits stable task IDs.
+   if seen[task.Payload] { continue }
+   ```
+
+**Never ship a workaround as the final solution without explicit user
+approval.** If the clean fix is too large for the current change, say so, get
+approval for the temporary measure, and record the follow-up work as an issue
+or TODO.
+
 ## UI Conventions
 
 - **All UI text must be lowercase** (e.g., "switch" not "Switch", "ok" not "OK")

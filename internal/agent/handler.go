@@ -961,6 +961,50 @@ func (h *ChatHandler) sendResponse(replyTo string, response ChatResponse) {
 		"reply_to", replyTo,
 		"delivered", delivered,
 	)
+
+	// Publish a separate chat_message event for WebSocket push notification.
+	// This decouples the RPC reply (chat.response, consumed by ChatService
+	// for the HTTP body) from the WS event stream. Without this, WS clients
+	// would need to relay chat.response — which duplicates the reply for
+	// HTTP+WS clients like the Flutter GUI.
+	//
+	// Skipped when the reply is empty (e.g. async-dispatch acks that carry
+	// no user-visible content) or when this is an error-only response with
+	// no reply text.
+	if response.Reply != "" && response.SessionID != "" {
+		h.publishChatMessage(response, replyTo)
+	}
+}
+
+// publishChatMessage pushes an assistant reply to WS-connected clients via
+// the dedicated chat_message bus topic. This is the single source of truth
+// for assistant messages on the WS event stream — chat.response is NOT
+// relayed to WS clients (it is RPC-only).
+func (h *ChatHandler) publishChatMessage(response ChatResponse, replyTo string) {
+	payload, err := json.Marshal(map[string]any{
+		"role":             "assistant",
+		"content":          response.Reply,
+		"session_id":       response.SessionID,
+		"conversation_id":  response.ConversationID,
+		"error":            response.Error,
+		"timestamp":        time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		h.logger.Error("Failed to marshal chat_message payload", "error", err)
+		return
+	}
+
+	msg := &models.BusMessage{
+		ID:        generateMessageID(),
+		Type:      models.MessageTypeEvent,
+		Topic:     "chat_message",
+		Source:    SourceChatHandler,
+		Timestamp: time.Now().UTC(),
+		Payload:   payload,
+		ReplyTo:   replyTo,
+	}
+
+	h.bus.PublishExternalOnly("chat_message", msg)
 }
 
 // sendError sends an error response.
@@ -1092,6 +1136,7 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 	// Send to all linked sessions
 	for _, sessionID := range payload.LinkedSessions {
 		response.ConversationID = sessionID
+		response.SessionID = sessionID // for WS push routing
 		h.sendResponse("task-completed-"+payload.TaskID, response)
 	}
 
@@ -1195,6 +1240,7 @@ func (h *ChatHandler) handleTaskFailed(msg *models.BusMessage) {
 	// Send to all linked sessions
 	for _, sessionID := range payload.LinkedSessions {
 		response.ConversationID = sessionID
+		response.SessionID = sessionID // for WS push routing
 		h.sendResponse("task-failed-"+payload.TaskID, response)
 	}
 
@@ -1581,10 +1627,11 @@ func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
 	// Persist the exchange
 	h.persistExchange(turn.SessionID, turn.Message, turn.Parts, reply)
 
-	// Push the result back to the session via the bus (WebSocket layer
-	// subscribes to chat.response and forwards to clients).
+	// Push the result back to the session via the bus. sendResponse publishes
+	// both chat.response (RPC reply) and chat_message (WS push notification).
 	h.sendResponse("budget-resume-"+turn.SessionID, ChatResponse{
 		ConversationID: turn.SessionID,
+		SessionID:      turn.SessionID, // for WS push routing
 		Reply:          reply,
 	})
 

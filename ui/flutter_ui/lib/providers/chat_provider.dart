@@ -468,39 +468,31 @@ class ChatNotifier extends StateNotifier<ChatState> {
           error: errorMsg,
           thinkingStartedAt: null,
         );
-      } else if (chatResp != null &&
-          chatResp['reply'] != null &&
-          (chatResp['reply'] as String).isNotEmpty) {
-        // Synchronous response: the daemon returned a reply in the HTTP
-        // body (e.g. platform introspection, direct response). Add it to
-        // the message list immediately — don't wait for a WebSocket event
-        // that will never arrive.
+      } else {
+        // The HTTP response body may contain a synchronous reply, but we do
+        // NOT add it as a chat message here. The daemon publishes the
+        // assistant reply via the chat_message bus topic (WS push), which is
+        // the single source of truth for assistant messages. Adding the HTTP
+        // reply here would duplicate the WS event.
         //
-        // NOTE: We do NOT reset isAgentProcessing here.  The HTTP response
-        // may arrive before the WS lifecycle events (chat.worker.started,
-        // progress, chat_message).  Resetting here would cause the UI to
-        // briefly show "done" then flip back to "thinking" when the WS
-        // events land.  Instead, let addStreamMessage() drive the
-        // processing state when the final chat_message arrives.
-        final replyContent = chatResp['reply'] as String;
-        final assistantMessage = ChatMessage(
-          id: 'agent_${DateTime.now().millisecondsSinceEpoch}',
-          role: 'assistant',
-          content: replyContent,
-          timestamp: DateTime.now(),
-          sessionId: sessionId,
-        );
+        // The HTTP response is used only for:
+        // - Error handling (above)
+        // - Transitioning from "loading history" to "waiting for agent"
+        //
+        // Keep isAgentProcessing=true so the progress indicator stays
+        // visible until the WS chat_message event arrives and resolves
+        // the turn via addStreamMessage.
         state = ChatState(
-          messages: [...state.messages, assistantMessage],
+          messages: state.messages,
           isLoading: false,
           isAgentProcessing: true,
-          thinkingStartedAt: state.thinkingStartedAt,
+          currentProgress: state.currentProgress,
         );
-        // Safety net: if no WS event resets isAgentProcessing within a
-        // reasonable window (e.g. daemon didn't broadcast), clear it so
-        // the UI doesn't stay stuck on "thinking" forever.
+        // Safety net: if no WS chat_message event arrives within a
+        // reasonable window (e.g. daemon didn't broadcast), clear the
+        // processing state so the UI doesn't stay stuck on "thinking".
         _processingFallbackTimer?.cancel();
-        _processingFallbackTimer = Timer(const Duration(seconds: 15), () {
+        _processingFallbackTimer = Timer(const Duration(seconds: 30), () {
           _processingFallbackTimer = null;
           if (!_disposed && state.isAgentProcessing) {
             state = state.copyWith(
@@ -509,17 +501,6 @@ class ChatNotifier extends StateNotifier<ChatState> {
             );
           }
         });
-      } else {
-        // HTTP call succeeded but no reply in the body — the agent is
-        // still processing asynchronously. Keep isAgentProcessing=true
-        // so the progress indicator stays visible. The agent's final
-        // chat_message will arrive via WebSocket.
-        state = ChatState(
-          messages: state.messages,
-          isLoading: false,
-          isAgentProcessing: true,
-          currentProgress: state.currentProgress,
-        );
       }
     } catch (e) {
       if (_disposed) return;
@@ -599,15 +580,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
         ttsNotifier.speak(message.content);
       }
 
-      // Replace or update existing message by id if it exists.
-      //
-      // Also deduplicate against the HTTP synchronous reply: the HTTP
-      // response body contains the same reply that arrives via WebSocket.
-      // The HTTP path adds a message with id 'agent_<timestamp>' while the
-      // WS event carries the daemon's message ID, so the ID-based index
-      // lookup above never matches. Fall back to content comparison: if the
-      // last assistant message has the same content, replace it with the
-      // canonical WS version (correct ID, daemon-side timestamp).
+      // Replace or update existing message by id if it exists
       final existingIndex = state.messages.indexWhere(
         (m) => m.id == message.id,
       );
@@ -616,13 +589,6 @@ class ChatNotifier extends StateNotifier<ChatState> {
       if (existingIndex >= 0) {
         newMessages = [...state.messages];
         newMessages[existingIndex] = message;
-      } else if (message.role == 'assistant' &&
-          state.messages.isNotEmpty &&
-          state.messages.last.role == 'assistant' &&
-          state.messages.last.content == message.content) {
-        // Replace the HTTP-sourced duplicate with the canonical WS message.
-        newMessages = [...state.messages];
-        newMessages[newMessages.length - 1] = message;
       } else {
         newMessages = [...state.messages, message];
       }

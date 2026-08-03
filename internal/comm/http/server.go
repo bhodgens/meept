@@ -635,8 +635,13 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 
 	var eventType string
 	switch {
-	case topic == "chat_message" || topic == "chat.response":
+	case topic == "chat_message" || topic == "chat.message.received":
 		// Actual chat messages → chat_message
+		// Note: chat.response is deliberately excluded — it is an RPC reply
+		// topic consumed by ChatService for the HTTP body. Relaying it to WS
+		// clients duplicates the reply for HTTP+WS clients (Flutter GUI).
+		// WS push notifications use the separate chat_message topic, published
+		// by ChatHandler.publishChatMessage alongside sendResponse.
 		eventType = "chat_message"
 	case strings.HasPrefix(topic, "chat."):
 		// Lifecycle events (chat.progress, chat.processing,
