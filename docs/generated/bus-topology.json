@@ -97,14 +97,6 @@
     ],
     "chat.response": [
       {
-        "file": "internal/comm/http/server_test.go",
-        "line": 2409,
-        "payload_keys": [
-          "conversation_id",
-          "reply"
-        ]
-      },
-      {
         "file": "internal/agent/handler.go",
         "line": 959,
         "payload_keys": []
@@ -115,6 +107,14 @@
         "file": "internal/comm/http/unified_http_test.go",
         "line": 745,
         "payload_keys": []
+      },
+      {
+        "file": "internal/comm/http/server_test.go",
+        "line": 2409,
+        "payload_keys": [
+          "content",
+          "session_id"
+        ]
       },
       {
         "file": "internal/comm/http/server_test.go",

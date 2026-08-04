@@ -5,7 +5,7 @@
     "event_type": "chat_message"
   },
   {
-    "topic_pattern": "chat.response",
+    "topic_pattern": "chat.message.received",
     "match": "exact",
     "event_type": "chat_message"
   },
