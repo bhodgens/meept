@@ -1282,6 +1282,9 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 
 	// Project endpoints
 	mux.HandleFunc("GET /api/v1/projects", s.handleProjectList)
+
+	// Filesystem browse endpoint (daemon-side directory listing for remote clients)
+	mux.HandleFunc("GET /api/v1/filesystem/browse", s.handleFilesystemBrowse)
 	mux.HandleFunc("GET /api/v1/projects/{id}", s.handleProjectGet)
 	mux.HandleFunc("POST /api/v1/projects", s.handleProjectRegister)
 	mux.HandleFunc("DELETE /api/v1/projects/{id}", s.handleProjectUnregister)

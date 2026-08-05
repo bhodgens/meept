@@ -683,6 +683,21 @@ class SdkApiClient {
     await _delete('/api/v1/tasks/$id');
   }
 
+  // ===== Filesystem Browse =====
+
+  /// Browse directories on the daemon's filesystem.
+  ///
+  /// Returns the subdirectories of [path] (defaults to the daemon's home
+  /// directory when empty). This is a daemon-side listing so remote clients
+  /// can navigate the server's filesystem to pick a project root.
+  Future<Map<String, dynamic>> browseDirectories({String? path}) async {
+    final query = <String, dynamic>{};
+    if (path != null && path.isNotEmpty) {
+      query['path'] = path;
+    }
+    return _get('/api/v1/filesystem/browse', query: query);
+  }
+
   Future<void> cancelTask(String id) async {
     try {
       final req = sdk.CancelTaskRequest((b) => b..id = id);

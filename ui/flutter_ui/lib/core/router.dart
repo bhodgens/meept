@@ -11,6 +11,10 @@ import '../features/skills/skill_panel.dart';
 import '../features/memory/memory_panel.dart';
 import '../features/reflection/reflection_panel.dart';
 import '../features/prompts/prompt_panel.dart';
+import '../features/files/files_panel.dart';
+import '../features/terminal/terminal_panel.dart';
+import '../features/calendar/calendar_panel.dart';
+import '../features/metrics/metrics_panel.dart';
 import '../theme/colors.dart';
 import '../theme/typography.dart';
 import '../providers/preferences_provider.dart';
@@ -130,6 +134,34 @@ final GoRouter router = GoRouter(
       name: 'toolsPrompts',
       builder: (context, state) {
         return const PromptPanel();
+      },
+    ),
+    GoRoute(
+      path: '/tools/files',
+      name: 'toolsFiles',
+      builder: (context, state) {
+        return const FilesPanel();
+      },
+    ),
+    GoRoute(
+      path: '/tools/terminal',
+      name: 'toolsTerminal',
+      builder: (context, state) {
+        return const TerminalPanel();
+      },
+    ),
+    GoRoute(
+      path: '/tools/calendar',
+      name: 'toolsCalendar',
+      builder: (context, state) {
+        return const CalendarPanel();
+      },
+    ),
+    GoRoute(
+      path: '/tools/metrics',
+      name: 'toolsMetrics',
+      builder: (context, state) {
+        return const MetricsPanel();
       },
     ),
   ],
@@ -323,4 +355,16 @@ extension AppRouterExtension on BuildContext {
 
   /// Navigate to the prompt-editor tool panel (replace current entry).
   void goToolPrompts() => go('/tools/prompts');
+
+  /// Navigate to the files tool panel (replace current entry).
+  void goToolFiles() => go('/tools/files');
+
+  /// Navigate to the terminal tool panel (replace current entry).
+  void goToolTerminal() => go('/tools/terminal');
+
+  /// Navigate to the calendar tool panel (replace current entry).
+  void goToolCalendar() => go('/tools/calendar');
+
+  /// Navigate to the metrics tool panel (replace current entry).
+  void goToolMetrics() => go('/tools/metrics');
 }

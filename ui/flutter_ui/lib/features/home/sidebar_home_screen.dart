@@ -65,6 +65,7 @@ import '../../theme/typography.dart';
 import '../../widgets/background_image.dart';
 import '../../widgets/command_palette.dart';
 import '../../widgets/status_bar.dart';
+import '../../dialogs/directory_browser_dialog.dart';
 import '../../providers/providers.dart';
 import '../../models/api_models.dart';
 import '../../providers/status_message_provider.dart';
@@ -651,6 +652,20 @@ class _SidebarState extends ConsumerState<_Sidebar> {
                 HamburgerMenu(
                   onToolSelected: (route) {
                     switch (route) {
+                      case 'memory':
+                        context.goToolMemory();
+                      case 'prompts':
+                        context.goToolPrompts();
+                      case 'settings':
+                        context.goSettings();
+                      case 'files':
+                        context.goToolFiles();
+                      case 'terminal':
+                        context.goToolTerminal();
+                      case 'calendar':
+                        context.goToolCalendar();
+                      case 'metrics':
+                        context.goToolMetrics();
                       case 'search':
                         context.goToolSearch();
                       case 'branches':
@@ -703,6 +718,38 @@ class _SidebarState extends ConsumerState<_Sidebar> {
                   onCreateSession: () => _createSessionInProject(group),
                 );
               },
+            ),
+          ),
+          // Sidebar footer with "add project" button
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              border: Border(
+                top: BorderSide(
+                  color: CyberpunkColors.midGray,
+                  width: 0.5,
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.add, size: 18),
+                  iconSize: 18,
+                  padding: const EdgeInsets.all(4),
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  color: CyberpunkColors.greenSuccess,
+                    tooltip: 'add project',
+                  onPressed: _addProject,
+                ),
+                Text(
+                  'add project',
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    fontSize: 11,
+                    color: CyberpunkColors.midGray,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -845,6 +892,23 @@ class _SidebarState extends ConsumerState<_Sidebar> {
   Future<void> _createSessionInProject(_ProjectGroup group) async {
     final notifier = ref.read(sessionProvider.notifier);
     final session = await notifier.createSession('new session', projectId: group.projectId);
+    if (session != null && mounted) {
+      widget.onSessionSelected(session);
+      ref.read(activeSessionProvider.notifier).state = session;
+    }
+  }
+
+  /// Open a daemon-side directory browser to add a new project, then
+  /// create a session bound to the selected directory.
+  Future<void> _addProject() async {
+    final path = await DirectoryBrowserDialog.show(context);
+    if (path == null || !mounted) return;
+
+    // Create a session bound to the selected directory. The daemon's
+    // SessionService resolves the path into a project (CreateOrResolve)
+    // and binds it to the session.
+    final notifier = ref.read(sessionProvider.notifier);
+    final session = await notifier.createSession('new session', cwd: path);
     if (session != null && mounted) {
       widget.onSessionSelected(session);
       ref.read(activeSessionProvider.notifier).state = session;
