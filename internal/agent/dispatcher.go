@@ -669,7 +669,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// 6. Create task if needed (for trackable work)
 	var createdTask *task.Task
 	if d.shouldCreateTask(intent) && d.taskStore != nil {
-		createdTask = d.createTask(ctx, input, intent, sessionID)
+		createdTask = d.createTask(ctx, input, intent, sessionID, intent.AgentType)
 	}
 
 	// 7. Determine routing
@@ -1174,7 +1174,7 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 			// Create task if needed.
 			var createdTask *task.Task
 			if d.shouldCreateTask(intent) && d.taskStore != nil {
-				createdTask = d.createTask(ctx, combinedInput, intent, sessionID)
+				createdTask = d.createTask(ctx, combinedInput, intent, sessionID, intent.AgentType)
 			}
 
 			result := &DispatchResult{
@@ -1269,8 +1269,11 @@ func (d *Dispatcher) shouldCreateTask(intent *Intent) bool {
 	return intent.RequiresPlanning
 }
 
-// createTask creates a new task for the request.
-func (d *Dispatcher) createTask(_ context.Context, input string, intent *Intent, sessionID string) *task.Task {
+// createTask creates a new task for the request. The agentID is the agent
+// that will handle this task; it is persisted on the task via
+// WithAssignedAgent so downstream consumers know the routing decision at
+// dispatch time.
+func (d *Dispatcher) createTask(_ context.Context, input string, intent *Intent, sessionID, agentID string) *task.Task {
 	// Create task summary
 	summary := intent.Summary
 	if summary == "" {
@@ -1278,6 +1281,7 @@ func (d *Dispatcher) createTask(_ context.Context, input string, intent *Intent,
 	}
 
 	t := task.NewTask(summary, input)
+	t.WithAssignedAgent(agentID)
 	t.LinkSession(sessionID)
 
 	// Store task
@@ -1364,11 +1368,13 @@ func (d *Dispatcher) routeCompoundWithModel(ctx context.Context, multi *MultiInt
 		"type", multi.CompoundType,
 	)
 
-	// Create a parent task to track the compound request
+	// Create a parent task to track the compound request.
+	// Compound tasks are always assigned to the orchestrator (matches
+	// the AgentID on the returned DispatchResult).
 	parentTask := d.createTask(ctx, multi.Summary, &Intent{
 		Type:    string(IntentCompound),
 		Summary: multi.Summary,
-	}, sessionID)
+	}, sessionID, "orchestrator")
 
 	if parentTask == nil {
 		return nil, fmt.Errorf("failed to create parent task for compound request")

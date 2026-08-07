@@ -25,6 +25,7 @@ func newSessionCmd() *cobra.Command {
 	cmd.AddCommand(newSessionAttachCmd())
 	cmd.AddCommand(newSessionDetachCmd())
 	cmd.AddCommand(newSessionMessagesCmd())
+	cmd.AddCommand(newSessionTraceCmd())
 	cmd.AddCommand(newSessionNeedsAttentionCmd())
 
 	return cmd
@@ -463,6 +464,114 @@ func newSessionMessagesCmd() *cobra.Command {
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 50, "Maximum number of messages to return")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+
+	return cmd
+}
+
+// newSessionTraceCmd returns a command that shows the dispatch routing history
+// for a session, calling session.dispatch_trace over RPC.
+func newSessionTraceCmd() *cobra.Command {
+	var limit int
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "trace <session-id>",
+		Short: "show dispatch routing history for a session",
+		Long:  "show the full agent routing (dispatch) history for a session.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			sessionID := args[0]
+
+			client, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer client.Close()
+
+			params := map[string]any{
+				"session_id": sessionID,
+				"limit":      limit,
+			}
+
+			rawResult, err := client.Call("session.dispatch_trace", params)
+			if err != nil {
+				return fmt.Errorf("failed to get dispatch trace: %w", err)
+			}
+
+			var resultMap map[string]any
+			if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+				return fmt.Errorf("failed to parse response: %w", err)
+			}
+
+			if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
+				return fmt.Errorf("%s", errMsg)
+			}
+
+			if outputJSON {
+				output, err := json.MarshalIndent(resultMap, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal JSON: %w", err)
+				}
+				fmt.Println(string(output))
+				return nil
+			}
+
+			entries, ok := resultMap["entries"].([]any)
+			if !ok || len(entries) == 0 {
+				fmt.Println("no dispatch entries found.")
+				return nil
+			}
+
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "TIMESTAMP\tAGENT\tINTENT\tCONFIDENCE\tTASK\tCASE")
+
+			for _, e := range entries {
+				entry, ok := e.(map[string]any)
+				if !ok {
+					continue
+				}
+
+				agentID := getStringOr(entry, "agent_id", "-")
+				intent := getStringOr(entry, "intent_type", "-")
+				handlerCase := getStringOr(entry, "handler_case", "-")
+				taskID := getStringOr(entry, "task_id", "")
+				if taskID == "" {
+					taskID = "-"
+				}
+
+				// timestamp is not stored per-entry in DispatchEntry; use
+				// input_summary as context if available.
+				timestamp := getStringOr(entry, "input_summary", "")
+				if len(timestamp) > 20 {
+					timestamp = string([]rune(timestamp)[:17]) + "..."
+				}
+				if timestamp == "" {
+					timestamp = "-"
+				}
+
+				confidence := "-"
+				if c, ok := entry["confidence"].(float64); ok {
+					confidence = fmt.Sprintf("%.2f", c)
+				}
+
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", timestamp, agentID, intent, confidence, taskID, handlerCase)
+			}
+
+			if err := w.Flush(); err != nil {
+				return err
+			}
+
+			count := 0
+			if c, ok := resultMap["count"].(float64); ok {
+				count = int(c)
+			}
+			fmt.Printf("\n%d entries\n", count)
+			return nil
+		},
+	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 50, "maximum number of entries to return")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "output as JSON")
 
 	return cmd
 }

@@ -20,6 +20,7 @@ type Message struct {
 	EntryType  string            `json:"entry_type"` // "message", "branch_point", "compaction", "summary"
 	BranchID   string            `json:"branch_id"`  // "main" or branch identifier
 	Model      string            `json:"model,omitempty"`
+	AgentID    string            `json:"agent_id,omitempty"`
 	Name       string            `json:"name,omitempty"`
 	ToolCallID string            `json:"tool_call_id,omitempty"`
 }

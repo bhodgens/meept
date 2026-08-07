@@ -633,6 +633,31 @@ func (s *Store) QueryDispatchLog(limit int) ([]DispatchEntry, error) {
 	return entries, nil
 }
 
+// QueryDispatchLogBySession returns dispatch entries for a specific session,
+// most recent first. limit caps the result count (default 100 if non-positive).
+func (s *Store) QueryDispatchLogBySession(sessionID string, limit int) ([]DispatchEntry, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var entries []DispatchEntry
+	err := s.db.Select(&entries,
+		`SELECT session_id, input_summary, intent_type, agent_id, confidence,
+		        classifier_method, handler_case, task_id, has_parts, error
+		 FROM dispatch_log
+		 WHERE session_id = ?
+		 ORDER BY id DESC
+		 LIMIT ?`,
+		sessionID, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query dispatch log by session: %w", err)
+	}
+	for i := range entries {
+		entries[i].HasParts = entries[i].HasPartsInt != 0
+	}
+	return entries, nil
+}
+
 // GetLiveMetrics returns current live metrics snapshot.
 func (s *Store) GetLiveMetrics() (*LiveMetricsSnapshot, error) {
 	metrics := &LiveMetricsSnapshot{

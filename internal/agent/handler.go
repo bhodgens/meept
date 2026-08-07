@@ -834,7 +834,13 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 
 	// Persist the user message and assistant reply so HTTP-only clients
 	// (Flutter GUI) can reload conversation history after switching sessions.
-	h.persistExchange(persistID, req.Message, req.Parts, response.Reply)
+	// Resolve the effective agent ID for message attribution: prefer the
+	// user-specified override, fall back to the dispatcher's decision.
+	effectiveAgentID := req.AgentID
+	if effectiveAgentID == "" && result != nil {
+		effectiveAgentID = result.AgentID
+	}
+	h.persistExchange(persistID, req.Message, req.Parts, response.Reply, effectiveAgentID)
 
 	// Send response
 	h.sendResponse(msg.ID, response)
@@ -844,7 +850,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 // store so HTTP-only clients (Flutter GUI) can reload conversation history.
 // Errors are logged but never propagate — persistence failure must not break
 // the chat response path.
-func (h *ChatHandler) persistExchange(sessionID, userMsg string, parts []llm.ContentPart, reply string) {
+func (h *ChatHandler) persistExchange(sessionID, userMsg string, parts []llm.ContentPart, reply string, agentID string) {
 	if h.messageSaver == nil || sessionID == "" {
 		return
 	}
@@ -875,6 +881,7 @@ func (h *ChatHandler) persistExchange(sessionID, userMsg string, parts []llm.Con
 			Timestamp: now,
 			EntryType: "message",
 			BranchID:  "main",
+			AgentID:   agentID,
 		})
 	}
 
@@ -1625,7 +1632,7 @@ func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
 	}
 
 	// Persist the exchange
-	h.persistExchange(turn.SessionID, turn.Message, turn.Parts, reply)
+	h.persistExchange(turn.SessionID, turn.Message, turn.Parts, reply, turn.AgentID)
 
 	// Push the result back to the session via the bus. sendResponse publishes
 	// both chat.response (RPC reply) and chat_message (WS push notification).

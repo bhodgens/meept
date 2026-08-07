@@ -1022,3 +1022,51 @@ func TestDispatcher_ResolveAgent_DistinctSessionAndConversationIDs(t *testing.T)
 		t.Errorf("GetWorkingDir() = %q, want %q", got.GetWorkingDir(), projectPath)
 	}
 }
+
+// TestCreateTask_AssignedAgent verifies that createTask populates
+// Task.AssignedAgent from the agentID argument so the routing decision
+// made at dispatch time is persisted on the task itself.
+func TestCreateTask_AssignedAgent(t *testing.T) {
+	d := &Dispatcher{
+		logger: slog.Default(),
+	}
+
+	intent := &Intent{
+		Type:       string(IntentCode),
+		Confidence: 0.9,
+		AgentType:  config.AgentIDCoder,
+		Summary:    "implement feature X",
+	}
+
+	got := d.createTask(context.Background(), "implement feature X", intent, "session-123", config.AgentIDCoder)
+	if got == nil {
+		t.Fatal("createTask returned nil")
+	}
+	if got.AssignedAgent != config.AgentIDCoder {
+		t.Errorf("AssignedAgent = %q, want %q", got.AssignedAgent, config.AgentIDCoder)
+	}
+}
+
+// TestCreateTask_AssignedAgent_Empty verifies that an empty agentID
+// still flows through without panic (defensive case for callers that
+// haven't resolved an agent yet).
+func TestCreateTask_AssignedAgent_Empty(t *testing.T) {
+	d := &Dispatcher{
+		logger: slog.Default(),
+	}
+
+	intent := &Intent{
+		Type:       string(IntentChat),
+		Confidence: 0.5,
+		AgentType:  "",
+		Summary:    "hello",
+	}
+
+	got := d.createTask(context.Background(), "hello", intent, "session-456", "")
+	if got == nil {
+		t.Fatal("createTask returned nil")
+	}
+	if got.AssignedAgent != "" {
+		t.Errorf("AssignedAgent = %q, want empty", got.AssignedAgent)
+	}
+}

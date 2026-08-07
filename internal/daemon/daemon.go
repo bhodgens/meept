@@ -457,6 +457,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		components.Dispatcher.SetMetricsStore(metricsStore)
 	}
 
+	// Register dispatch trace handlers
+	if rpcServer != nil && metricsStore != nil {
+		rpc.RegisterDispatchHandlers(rpcServer, metricsStore)
+		logger.Info("Dispatch trace RPC handlers registered")
+	}
+
 	// Wire metrics store to EmployeeManager for the six employee.* metrics
 	// (spec lines 668-674). SetMetricsStore is a nil-safe setter.
 	if metricsStore != nil && components != nil && components.EmployeeManager != nil {
