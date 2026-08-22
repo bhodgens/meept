@@ -36,10 +36,12 @@ func TestEscalationGateForTier_WiredOnlyForTier3(t *testing.T) {
 			t.Fatal("tier-3 constitution should produce a non-nil gate")
 		}
 		var c *employee.Constitution
-		if !gate(c, matching) {
+		escalate, _ := gate(c, matching)
+		if !escalate {
 			t.Error("matching candidate should escalate")
 		}
-		if gate(c, nonMatching) {
+		escalate, _ = gate(c, nonMatching)
+		if escalate {
 			t.Error("non-matching candidate should not escalate")
 		}
 	})
