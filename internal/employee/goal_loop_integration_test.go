@@ -411,3 +411,61 @@ func TestGoalLoop_Reflect_NilResult_NoPanic(t *testing.T) {
 		t.Logf("health = %s (expected at_risk for first failure)", health.String())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Leaf 02: ShouldEscalate escalation gate integration.
+// ---------------------------------------------------------------------------
+
+// TestGoalLoop_Tier3_EscalationGate_Integration verifies that a tier-3
+// GoalLoop wired with the ShouldEscalate gate routes a constitution-matching
+// candidate to plan signoff (pending plan) while executing the non-matching
+// candidate immediately — both in ONE Decide call.
+func TestGoalLoop_Tier3_EscalationGate_Integration(t *testing.T) {
+	constitution := testTier3Constitution()
+	constitution.Constraints.EscalationTriggers = []EscalationTrigger{
+		{On: EscalateOnTool, Match: "shell_execute", Reason: "shell requires approval"},
+	}
+
+	reflector := newStubReflector()
+	reflector.queueResponse(`{"candidates":[
+		{"title":"run shell","description":"needs approval","prompt":"use shell_execute to restart CI"},
+		{"title":"fetch page","description":"safe","prompt":"web_fetch the status dashboard"}
+	]}`)
+	// REFLECT after the immediate execution of the non-matching candidate.
+	reflector.queueResponse(`{"health":"healthy","reasoning":"ok"}`)
+
+	executor := &capturingExecutor{stubExecutor: *newStubExecutor()}
+	executor.succeedWith("done", 10)
+
+	planner := newStubPlanner()
+
+	loop := NewGoalLoop("emp-tier3-gate", constitution, nil, nil).
+		WithReflector(reflector).
+		WithExecutor(executor).
+		WithPlanner(planner).
+		WithEscalationGate(func(c *Constitution, cand CandidatePlan) bool {
+			escalate, _ := ShouldEscalate(c, cand)
+			return escalate
+		})
+
+	err := loop.Decide(context.Background(), basicTrigger())
+	if err != nil {
+		t.Fatalf("Decide error: %v", err)
+	}
+
+	// Matching candidate escalated to a pending plan.
+	if planner.CreatedCount() != 1 {
+		t.Fatalf("planner created %d plans, want 1 (escalated candidate)", planner.CreatedCount())
+	}
+	if titles := planner.CreatedTitles(); len(titles) == 1 && titles[0] != "run shell" {
+		t.Errorf("escalated plan title = %q, want %q", titles[0], "run shell")
+	}
+
+	// Non-matching candidate executed immediately (exactly one execution).
+	if executor.CallCount() != 1 {
+		t.Errorf("executor called %d times, want 1 (non-matching candidate only)", executor.CallCount())
+	}
+	if prompts := executor.Prompts(); len(prompts) != 1 || prompts[0] != "web_fetch the status dashboard" {
+		t.Errorf("executed prompts = %v, want [\"web_fetch the status dashboard\"]", prompts)
+	}
+}

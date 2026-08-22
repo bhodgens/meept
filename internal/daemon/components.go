@@ -3361,6 +3361,13 @@ func (c *Components) Start(ctx context.Context) error {
 					if executor != nil {
 						loop = loop.WithExecutor(executor)
 					}
+				// Leaf 02 (tier-3 plan): tier-3 autonomous employees get the
+				// ShouldEscalate gate so constitution-matching candidates are
+				// routed to plan signoff instead of immediate execution.
+				// Tier-1/2 loops ignore the gate (decideTier1/2 never call it).
+				if gate := escalationGateForTier(&emp.Constitution, emp.ID, c.Logger); gate != nil {
+					loop = loop.WithEscalationGate(gate)
+				}
 					if planner != nil {
 						loop = loop.WithPlanner(planner)
 					}
@@ -3551,6 +3558,26 @@ func (c *Components) Start(ctx context.Context) error {
 
 	started = true // signal success so the deferred rollback does not fire
 	return nil
+}
+
+// escalationGateForTier returns an EscalationGate wrapping ShouldEscalate
+// for tier-3 autonomous constitutions, or nil for any other tier (tier-1/2
+// loops never consult the gate). Extracted from the GoalLoop registration
+// block so the wiring is unit-testable without a full daemon Components.
+func escalationGateForTier(c *employee.Constitution, employeeID string, logger *slog.Logger) employee.EscalationGate {
+	if c == nil || c.AutonomyTier != employee.Tier3Autonomous {
+		return nil
+	}
+	constitution := c
+	log := logger.With("component", "escalation-gate", "employee_id", employeeID)
+	return func(_ *employee.Constitution, cand employee.CandidatePlan) bool {
+		escalate, reason := employee.ShouldEscalate(constitution, cand)
+		if escalate {
+			log.Info("candidate escalated to plan signoff",
+				"candidate", cand.Title, "reason", reason)
+		}
+		return escalate
+	}
 }
 
 // Stop stops all components. It is idempotent — safe to call multiple times.

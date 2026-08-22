@@ -781,3 +781,123 @@ func TestParseRiskCeiling(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ShouldEscalate (tier-3 escalation gate, leaf 02) tests.
+// ---------------------------------------------------------------------------
+
+func TestShouldEscalate(t *testing.T) {
+	tests := []struct {
+		name          string
+		triggers      []EscalationTrigger
+		candidate     CandidatePlan
+		wantEscalate  bool
+		wantReason    string
+	}{
+		{
+			name:         "empty triggers never escalates",
+			triggers:     nil,
+			candidate:    CandidatePlan{Prompt: "run shell_execute now"},
+			wantEscalate: false,
+		},
+		{
+			name: "risk_level below band no match",
+			triggers: []EscalationTrigger{
+				{On: EscalateOnRiskLevel, Match: "high", Reason: "high risk"},
+			},
+			candidate:    CandidatePlan{Prompt: "read a file"},
+			wantEscalate: false,
+		},
+		{
+			name: "risk_level at band escalates (medium >= medium)",
+			triggers: []EscalationTrigger{
+				{On: EscalateOnRiskLevel, Match: "medium", Reason: "med+ needs signoff"},
+			},
+			candidate:    CandidatePlan{Prompt: "write a file"},
+			wantEscalate: true,
+			wantReason:   "med+ needs signoff",
+		},
+		{
+			name: "risk_level above band escalates",
+			triggers: []EscalationTrigger{
+				{On: EscalateOnRiskLevel, Match: "low", Reason: "low+ needs signoff"},
+			},
+			candidate:    CandidatePlan{Prompt: "anything"},
+			wantEscalate: true,
+			wantReason:   "low+ needs signoff",
+		},
+		{
+			name: "tool substring hit is case-insensitive",
+			triggers: []EscalationTrigger{
+				{On: EscalateOnTool, Match: "shell_execute", Reason: "shell requires approval"},
+			},
+			candidate:    CandidatePlan{Prompt: "Please run SHELL_EXECUTE on the host"},
+			wantEscalate: true,
+			wantReason:   "shell requires approval",
+		},
+		{
+			name: "tool substring miss",
+			triggers: []EscalationTrigger{
+				{On: EscalateOnTool, Match: "shell_execute", Reason: "shell requires approval"},
+			},
+			candidate:    CandidatePlan{Prompt: "fetch the webpage"},
+			wantEscalate: false,
+		},
+		{
+			name: "action miss",
+			triggers: []EscalationTrigger{
+				{On: EscalateOnAction, Match: "file_delete", Reason: "deletes need signoff"},
+			},
+			candidate:    CandidatePlan{Prompt: "file_create and edit"},
+			wantEscalate: false,
+		},
+		{
+			name: "cost trigger never matches (no candidate cost estimate)",
+			triggers: []EscalationTrigger{
+				{On: EscalateOnCost, Match: "50", Reason: "costly plans need signoff"},
+			},
+			candidate:    CandidatePlan{Prompt: "spend money"},
+			wantEscalate: false,
+		},
+		{
+			name: "unknown On value no match",
+			triggers: []EscalationTrigger{
+				{On: EscalationOn("bogus"), Match: "x", Reason: "never fires"},
+			},
+			candidate:    CandidatePlan{Prompt: "x"},
+			wantEscalate: false,
+		},
+		{
+			name: "first matching trigger wins",
+			triggers: []EscalationTrigger{
+				{On: EscalateOnTool, Match: "git_push", Reason: "pushes need signoff"},
+				{On: EscalateOnTool, Match: "shell_execute", Reason: "shell needs signoff"},
+			},
+			candidate:    CandidatePlan{Prompt: "use shell_execute then git_push"},
+			wantEscalate: true,
+			wantReason:   "pushes need signoff",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := testConstitution()
+			c.Constraints.EscalationTriggers = tt.triggers
+
+			gotEscalate, gotReason := ShouldEscalate(c, tt.candidate)
+			if gotEscalate != tt.wantEscalate {
+				t.Errorf("ShouldEscalate() = %v, want %v", gotEscalate, tt.wantEscalate)
+			}
+			if gotReason != tt.wantReason {
+				t.Errorf("reason = %q, want %q", gotReason, tt.wantReason)
+			}
+		})
+	}
+}
+
+func TestShouldEscalate_NilConstitution(t *testing.T) {
+	escalate, reason := ShouldEscalate(nil, CandidatePlan{Prompt: "anything"})
+	if escalate || reason != "" {
+		t.Errorf("nil constitution should never escalate, got (%v, %q)", escalate, reason)
+	}
+}

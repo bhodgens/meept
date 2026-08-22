@@ -2160,3 +2160,67 @@ func mathrandIntn(n int) int {
 	}
 	return mathrand.Intn(n)
 }
+
+// ---------------------------------------------------------------------------
+// Tier-3 escalation gate (leaf 02 of the tier-3 autonomous GoalLoop plan).
+// ---------------------------------------------------------------------------
+
+// ShouldEscalate reports whether a candidate plan matches any escalation
+// trigger in the constitution and therefore must be routed to Plan signoff
+// instead of immediate tier-3 execution. Returns (true, trigger.Reason) for
+// the first matching trigger, or (false, "") when no trigger matches.
+//
+// Matching semantics per EscalationTrigger.On:
+//   - risk_level: Match is a RiskLevelCeiling band string. Candidate risk is
+//     estimated via estimateCandidateRisk; there is currently no per-candidate
+//     risk estimator wired at the ASSESS level (PreExecChecker estimates risk
+//     per tool call instead), so candidates default to "medium". Escalates
+//     when estimated band >= Match band, reusing the existing parseRiskCeiling
+//     ordering helpers.
+//   - tool / action: escalate if candidate.Prompt contains Match as a
+//     case-insensitive substring. This is deliberately a heuristic at the plan
+//     level — exact per-tool-call gating still happens in PreExecChecker.
+//   - cost: parse Match as an integer cents threshold. CandidatePlan carries
+//     no estimated-cost field today (only Title/Description/Prompt), so this
+//     trigger can never match at the candidate level and always returns false.
+//     Documented here rather than silently dropped so future cost estimates
+//     have an obvious integration point.
+//
+// An unknown On value matches nothing and logs a warning. Empty or nil
+// EscalationTriggers returns (false, "") immediately.
+func ShouldEscalate(c *Constitution, candidate CandidatePlan) (bool, string) {
+	if c == nil || len(c.Constraints.EscalationTriggers) == 0 {
+		return false, ""
+	}
+	for _, trig := range c.Constraints.EscalationTriggers {
+		switch trig.On {
+		case EscalateOnRiskLevel:
+			estimated := estimateCandidateRisk(candidate)
+			band := parseRiskCeiling(trig.Match)
+			if estimated >= band {
+				return true, trig.Reason
+			}
+		case EscalateOnTool, EscalateOnAction:
+			if strings.Contains(strings.ToLower(candidate.Prompt), strings.ToLower(trig.Match)) {
+				return true, trig.Reason
+			}
+		case EscalateOnCost:
+			// No-op: CandidatePlan has no estimated-cost field, so a
+			// candidate-level cost comparison is impossible. Never matches;
+			// see doc comment above.
+		default:
+			slog.Warn("escalation gate: unknown trigger kind ignored",
+				"on", string(trig.On),
+				"match", trig.Match)
+		}
+	}
+	return false, ""
+}
+
+// estimateCandidateRisk estimates the risk band of a candidate plan. There is
+// no LLM-based estimator at the ASSESS stage yet, so all candidates are
+// treated as "medium" per the leaf-02 plan ("if no estimator is available for
+// candidates, treat as medium").
+func estimateCandidateRisk(_ CandidatePlan) riskLevel {
+	return riskMedium
+}
