@@ -71,6 +71,12 @@ type ChatHandler struct {
 	// SessionStoreReader for looking up session project paths.
 	sessionStore SessionStoreReader
 
+	// FenceController is the per-session fence sandbox controller (optional).
+	// When set, sessionLoop updates the shared FenceChecker with the
+	// session's working directory (sandbox root) and no-fence override as
+	// each session binds to its loop. Nil-safe per setter convention.
+	fenceController FenceController
+
 	// messageSaver persists chat messages to the session store after each
 	// exchange. Wired by the daemon via SetMessageSaver.
 	messageSaver SessionMessageSaver
@@ -90,6 +96,22 @@ type ChatHandler struct {
 	// Shutdown
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+}
+
+// FenceController is the narrow interface the ChatHandler needs from the
+// daemon's shared FenceChecker to configure the sandbox per-session.
+type FenceController interface {
+	SetRootPath(root string) error
+	SetNoFence(enabled bool)
+}
+
+// SetFenceController wires the shared fence checker so session-scoped loops
+// get a correct sandbox root and --nofence handling. Safe to call with nil.
+func (h *ChatHandler) SetFenceController(fc FenceController) {
+	if h == nil {
+		return
+	}
+	h.fenceController = fc
 }
 
 // Worker represents an active agent processing a request.
@@ -1673,6 +1695,19 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 	}
 	if workingPath == "" {
 		return h.loop
+	}
+	// Configure the shared fence sandbox for this session: the sandbox root
+	// follows the session's working directory, and the per-session
+	// --nofence override (persisted on the session) disables fencing.
+	if h.fenceController != nil {
+		if err := h.fenceController.SetRootPath(workingPath); err != nil {
+			h.logger.Warn("fence: failed to set session root; fencing stays blocked until a valid root is set",
+				"session", conversationID,
+				"root", workingPath,
+				"error", err,
+			)
+		}
+		h.fenceController.SetNoFence(sess.NoFence)
 	}
 	// Create a session-scoped loop via the manager. This avoids mutating
 	// the shared singleton's workingDir (which races with concurrent

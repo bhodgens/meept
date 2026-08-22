@@ -1410,6 +1410,7 @@ In `internal/comm/http/api_handlers.go`, add handlers for the endpoints listed i
 | `/api/v1/memory/canonical` | GET | `memory.findCanonical` |
 | `/api/v1/memory/review-queue` | GET | `memory.listPendingReviews` |
 | `/api/v1/memory/auto-claims` | GET | `memory.listAutoClaims` |
+| `/api/v1/memory/auto-claims/purge` | POST | `memory.purgeAutoClaims` |
 
 - [ ] **Step 2: Register routes**
 

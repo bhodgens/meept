@@ -55,6 +55,10 @@ func TestWebSocket_Load_100Concurrent(t *testing.T) {
 	cfg.TLSCertFile = filepath.Join(t.TempDir(), "cert.pem")
 	cfg.TLSKeyFile = filepath.Join(t.TempDir(), "key.pem")
 	cfg.RequireAuth = false // no auth for test
+	// 100 concurrent WS connections from 127.0.0.1 would trip the default
+	// per-IP rate limiter (burst 30); lift it for this load test.
+	cfg.RateLimitPerMinute = 100000
+	cfg.RateLimitBurst = numClients
 
 	srv := http.NewServer(cfg, nil, nil, nil, nil, nil, http.WithWebSocket(msgBus, "/ws"))
 	if srv == nil {

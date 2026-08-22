@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // FenceConfig controls path fencing for a session.
@@ -17,7 +18,13 @@ type FenceConfig struct {
 }
 
 // FenceChecker validates paths against fence boundaries.
+//
+// A single FenceChecker is shared by every tool in the process, so its
+// configuration may be updated per-session (SetRootPath / SetNoFence).
+// All reads take an RLock and operate on a snapshot of the config;
+// writes take the full lock (mutexio rule).
 type FenceChecker struct {
+	mu     sync.RWMutex
 	cfg    FenceConfig
 	valid  bool   // Whether RootPath is valid
 	logger *slog.Logger
@@ -28,7 +35,7 @@ func NewFenceChecker(cfg FenceConfig, logger *slog.Logger) *FenceChecker {
 	fc := &FenceChecker{cfg: cfg, logger: logger}
 	// Validate RootPath on construction
 	if cfg.Enabled && !cfg.NoFence {
-		if err := fc.validateRootPath(); err != nil {
+		if err := validateRootPath(cfg.RootPath); err != nil {
 			if logger != nil {
 				logger.Warn("FenceChecker misconfigured - fencing disabled", "error", err)
 			}
@@ -42,12 +49,12 @@ func NewFenceChecker(cfg FenceConfig, logger *slog.Logger) *FenceChecker {
 	return fc
 }
 
-// validateRootPath checks that RootPath is absolute and not a trivial path.
-func (fc *FenceChecker) validateRootPath() error {
-	if fc.cfg.RootPath == "" {
+// validateRootPath checks that root is absolute and not a trivial path.
+func validateRootPath(root string) error {
+	if root == "" {
 		return fmt.Errorf("RootPath is empty")
 	}
-	absRoot, err := filepath.Abs(fc.cfg.RootPath)
+	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return fmt.Errorf("cannot resolve RootPath: %w", err)
 	}
@@ -57,9 +64,50 @@ func (fc *FenceChecker) validateRootPath() error {
 	return nil
 }
 
+// SetRootPath updates the sandbox root for this session. It validates the
+// candidate root before applying it; on validation failure the previous
+// configuration is left untouched and the error is returned.
+func (fc *FenceChecker) SetRootPath(root string) error {
+	if err := validateRootPath(root); err != nil {
+		return fmt.Errorf("fence: SetRootPath rejected %q: %w", root, err)
+	}
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	fc.cfg.RootPath = root
+	fc.recomputeValidLocked()
+	return nil
+}
+
+// SetNoFence toggles the per-session no-fence override (--nofence).
+func (fc *FenceChecker) SetNoFence(enabled bool) {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	fc.cfg.NoFence = enabled
+	fc.recomputeValidLocked()
+}
+
+// snapshot returns a copy of the current config under RLock.
+// AllowRead is shared (read-only by convention); callers must not mutate it.
+func (fc *FenceChecker) snapshot() FenceConfig {
+	fc.mu.RLock()
+	defer fc.mu.RUnlock()
+	return fc.cfg
+}
+
+// recomputeValidLocked recomputes fc.valid. Caller must hold fc.mu.
+func (fc *FenceChecker) recomputeValidLocked() {
+	if fc.cfg.Enabled && !fc.cfg.NoFence {
+		fc.valid = validateRootPath(fc.cfg.RootPath) == nil
+	} else {
+		fc.valid = true // Not enforcing, so no validation needed
+	}
+}
+
 // Valid returns false if the FenceChecker is misconfigured (invalid RootPath).
 // When invalid, CheckPath will return an error for all operations.
 func (fc *FenceChecker) Valid() bool {
+	fc.mu.RLock()
+	defer fc.mu.RUnlock()
 	return fc.valid
 }
 
@@ -121,12 +169,13 @@ func splitPath(path string) []string {
 // op is "read", "write", or "exec".
 // Returns nil if allowed, error if blocked or misconfigured.
 func (fc *FenceChecker) CheckPath(path string, op string) error {
-	if fc.cfg.NoFence || !fc.cfg.Enabled {
+	cfg := fc.snapshot()
+	if cfg.NoFence || !cfg.Enabled {
 		return nil
 	}
 
 	// If fence is enabled but misconfigured, block all operations
-	if !fc.valid {
+	if !fc.Valid() {
 		return fmt.Errorf("fence: misconfigured (invalid RootPath)")
 	}
 
@@ -142,13 +191,13 @@ func (fc *FenceChecker) CheckPath(path string, op string) error {
 	}
 
 	// Check if path is within root
-	rootAbs, err := filepath.Abs(fc.cfg.RootPath)
+	rootAbs, err := filepath.Abs(cfg.RootPath)
 	if err != nil {
 		return fmt.Errorf("fence: cannot resolve root path: %w", err)
 	}
 	root, ok := resolveSymlinks(rootAbs)
 	if !ok {
-		return fmt.Errorf("fence: cannot resolve symlinks for root %q", fc.cfg.RootPath)
+		return fmt.Errorf("fence: cannot resolve symlinks for root %q", cfg.RootPath)
 	}
 	if strings.HasPrefix(abs, root+string(os.PathSeparator)) || abs == root {
 		return nil
@@ -156,7 +205,7 @@ func (fc *FenceChecker) CheckPath(path string, op string) error {
 
 	// Check allow-read system paths
 	if op == "read" {
-		for _, allowed := range fc.cfg.AllowRead {
+		for _, allowed := range cfg.AllowRead {
 			allowedAbs, err := filepath.Abs(allowed)
 			if err != nil {
 				continue
@@ -171,7 +220,7 @@ func (fc *FenceChecker) CheckPath(path string, op string) error {
 		}
 	}
 
-	return fmt.Errorf("fence: %s access denied for %q (outside project root %q)", op, path, fc.cfg.RootPath)
+	return fmt.Errorf("fence: %s access denied for %q (outside project root %q)", op, path, cfg.RootPath)
 }
 
 // CheckCommand validates a shell command and its working directory.
@@ -183,7 +232,8 @@ func (fc *FenceChecker) CheckPath(path string, op string) error {
 // This catches absolute paths and parent-traversal sequences in any command,
 // not just a fixed set of file-access utilities.
 func (fc *FenceChecker) CheckCommand(cmd string, workDir string) error {
-	if fc.cfg.NoFence || !fc.cfg.Enabled {
+	cfg := fc.snapshot()
+	if cfg.NoFence || !cfg.Enabled {
 		return nil
 	}
 
@@ -335,5 +385,5 @@ func extractPathFromToken(tok string) string {
 
 // IsNoFence returns true if fencing is disabled.
 func (fc *FenceChecker) IsNoFence() bool {
-	return fc.cfg.NoFence
+	return fc.snapshot().NoFence
 }

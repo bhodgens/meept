@@ -516,6 +516,8 @@ type HTTPTransportConfig struct {
 	WSPath        string   `json:"ws_path"       toml:"ws_path"`           // WebSocket endpoint path
 	MCP           bool     `json:"mcp"           toml:"mcp"`               // Enable MCP over HTTP+SSE
 	MCPPath       string   `json:"mcp_path"      toml:"mcp_path"`          // MCP endpoint path
+	RateLimitRPM  int      `json:"rate_limit_rpm"  toml:"rate_limit_rpm"`  // Per-IP request rate limit (0 = default 120 req/min)
+	RateLimitBurst int     `json:"rate_limit_burst" toml:"rate_limit_burst"` // Per-IP burst size (0 = default 30)
 }
 
 // LLMConfig holds LLM configuration including budget, broker, and metrics.

@@ -224,12 +224,27 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, resp)
 }
 
-// handleChatStream handles GET /api/v1/chat/stream.
+// handleChatStream handles GET /api/v1/chat/stream?session_id=<id>.
 // It provides an SSE endpoint for real-time tool progress and agent events.
+//
+// When session_id (or conversation_id, accepted as a fallback alias per the
+// session_id/conversation_id duality invariant) is provided, only bus events
+// whose payload carries a matching session_id or conversation_id are
+// forwarded. Without a session param, all sessions' events are streamed
+// (legacy broadcast behavior).
 func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	if s.services == nil || s.services.Bus == nil {
 		s.writeError(w, http.StatusServiceUnavailable, "bus service not available")
 		return
+	}
+
+	// Optional per-session filtering: when the client supplies ?session_id=
+	// (or conversation_id as a fallback alias), only events whose payload
+	// carries a matching session_id or conversation_id are forwarded.
+	// Empty filter = broadcast mode (all sessions), preserving legacy behavior.
+	filter := r.URL.Query().Get("session_id")
+	if filter == "" {
+		filter = r.URL.Query().Get("conversation_id")
 	}
 
 	sse, err := NewSSEWriter(w)
@@ -322,6 +337,9 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 				continue
 			}
+			if !sseSessionMatches(payload, filter) {
+				continue // Event belongs to a different session
+			}
 			if err := sse.SendEvent("tool_progress", payload); err != nil {
 				return // Client disconnected
 			}
@@ -334,6 +352,9 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 			var payload map[string]any
 			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 				continue
+			}
+			if !sseSessionMatches(payload, filter) {
+				continue // Event belongs to a different session
 			}
 			if err := sse.SendEvent("agent_progress", payload); err != nil {
 				return
@@ -348,6 +369,9 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 				continue
 			}
+			if !sseSessionMatches(payload, filter) {
+				continue // Event belongs to a different session
+			}
 			if err := sse.SendEvent("agent_progress", payload); err != nil {
 				return
 			}
@@ -360,6 +384,9 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 			var payload map[string]any
 			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 				continue
+			}
+			if !sseSessionMatches(payload, filter) {
+				continue // Event belongs to a different session
 			}
 			if err := sse.SendEvent("tool_complete", payload); err != nil {
 				return
@@ -374,6 +401,9 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 				continue
 			}
+			if !sseSessionMatches(payload, filter) {
+				continue // Event belongs to a different session
+			}
 			if err := sse.SendEvent("chat_progress", payload); err != nil {
 				return
 			}
@@ -387,6 +417,9 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 				continue
 			}
+			if !sseSessionMatches(payload, filter) {
+				continue // Event belongs to a different session
+			}
 			if err := sse.SendEvent("chat_processing", payload); err != nil {
 				return
 			}
@@ -397,6 +430,23 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+// sseSessionMatches reports whether a bus payload should be forwarded to an
+// SSE client filtered on `filter`. Empty filter = broadcast (forward all).
+// Mirrors the WS filter in server.go: prefer session_id in the payload,
+// fall back to conversation_id (the session_id/conversation_id duality).
+func sseSessionMatches(payload map[string]any, filter string) bool {
+	if filter == "" {
+		return true
+	}
+	if sid, ok := payload["session_id"].(string); ok && sid == filter {
+		return true
+	}
+	if cid, ok := payload["conversation_id"].(string); ok && cid == filter {
+		return true
+	}
+	return false
 }
 
 // ===== Memory Endpoints =====
@@ -3713,6 +3763,55 @@ func (s *Server) handleEpistemicReviewQueue(w http.ResponseWriter, r *http.Reque
 
 func (s *Server) handleEpistemicListAutoClaims(w http.ResponseWriter, r *http.Request) {
 	s.epistemicRPC(w, r, "memory.listAutoClaims", nil)
+}
+
+func (s *Server) handleEpistemicPurgeAutoClaims(w http.ResponseWriter, r *http.Request) {
+	var body map[string]any
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	s.epistemicRPC(w, r, "memory.purgeAutoClaims", body)
+}
+
+// MARK: - Notifications (DND) HTTP endpoints
+
+// handleNotificationsGetDND handles GET /api/v1/notifications/dnd.
+func (s *Server) handleNotificationsGetDND(w http.ResponseWriter, r *http.Request) {
+	if s.rpcCall == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "notifications not available")
+		return
+	}
+	result, err := s.rpcCall(r.Context(), "notifications.get_dnd", json.RawMessage("{}"))
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleNotificationsSetDND handles POST /api/v1/notifications/dnd.
+func (s *Server) handleNotificationsSetDND(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	if s.rpcCall == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "notifications not available")
+		return
+	}
+	raw, err := json.Marshal(map[string]bool{"enabled": body.Enabled})
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "failed to encode request")
+		return
+	}
+	result, err := s.rpcCall(r.Context(), "notifications.set_dnd", raw)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, result)
 }
 
 // MARK: - Reasoning HTTP endpoints

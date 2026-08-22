@@ -1,8 +1,7 @@
 package agent
 
 import (
-	"crypto/rand"
-	"encoding/hex"
+	"github.com/caimlas/meept/pkg/id"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -140,12 +139,7 @@ func (te *TelemetryEmitter) Path() string {
 	return te.path
 }
 
-// generateSpanID creates a cryptographically secure random span ID.
+// generateSpanID creates a cryptographically secure random span ID via pkg/id.
 func generateSpanID() string {
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback to timestamp-based ID if crypto/rand fails (extremely rare).
-		return fmt.Sprintf("span-%x", time.Now().UnixNano())
-	}
-	return "span-" + hex.EncodeToString(b)
+	return id.Generate("span-")
 }

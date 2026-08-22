@@ -800,6 +800,18 @@ func (h *CommandHandler) executeDnd(args []string) *CommandResult {
 	if next {
 		state = "on"
 	}
+	// Also flip the daemon-side suppression so notifications are dropped at
+	// the emitter, not just locally in this TUI session. Best-effort: if no
+	// daemon connection exists, only local suppression applies.
+	if h.rpc != nil && h.rpc.IsConnected() {
+		raw, err := h.rpc.Call("notifications.set_dnd", map[string]bool{"enabled": next})
+		if err != nil || raw == nil {
+			return &CommandResult{
+				Output:  fmt.Sprintf("do not disturb: %s (local only; daemon sync failed)", state),
+				IsError: false,
+			}
+		}
+	}
 	return &CommandResult{
 		Output: fmt.Sprintf("do not disturb: %s", state),
 	}

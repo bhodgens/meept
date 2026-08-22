@@ -816,6 +816,14 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			logger.Info("Epistemic memory RPC handlers registered")
 		}
 
+		// Notification (DND) RPC handlers — runtime control of daemon-side
+		// notification suppression.
+		if components.NotificationEmitter != nil {
+			notifsHandler := rpc.NewNotificationsHandler(components.NotificationEmitter)
+			notifsHandler.RegisterNotificationsHandlers(rpcServer)
+			logger.Info("Notifications RPC handlers registered")
+		}
+
 		// Project management handlers
 		if components.ProjectManager != nil {
 			projectHandler := rpc.NewProjectHandler(components.ProjectManager, nilSafeSessionStore(components))
@@ -857,6 +865,8 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			httpCfg.TLSCertFile = fullCfg.Transport.HTTP.TLSCertFile
 			httpCfg.TLSKeyFile = fullCfg.Transport.HTTP.TLSKeyFile
 			httpCfg.RESTEnabled = fullCfg.Transport.HTTP.REST
+			httpCfg.RateLimitPerMinute = fullCfg.Transport.HTTP.RateLimitRPM
+			httpCfg.RateLimitBurst = fullCfg.Transport.HTTP.RateLimitBurst
 			// Map TLS version string to Go constant
 			switch fullCfg.Transport.HTTP.TLSMinVersion {
 			case "tls1.3":

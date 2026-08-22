@@ -71,7 +71,14 @@ func gossipListenPort(cfg *Config) int {
 }
 
 // gossipListenAddr returns the address to listen on for gossip TCP connections.
+// Uses Network.GossipListenAddr when configured; defaults to ":<port>" on all
+// interfaces for backward compatibility. Cluster traffic is expected to run
+// inside a trusted network (WireGuard) — signatures authenticate events but
+// the gossip port should not be internet-exposed.
 func gossipListenAddr(cfg *Config) string {
+	if cfg != nil && cfg.Network.GossipListenAddr != "" {
+		return cfg.Network.GossipListenAddr
+	}
 	return fmt.Sprintf(":%d", gossipListenPort(cfg))
 }
 

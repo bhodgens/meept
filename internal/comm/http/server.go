@@ -62,6 +62,8 @@ type ServerConfig struct {
 	TLSMinVersion           uint16                // Default: tls.VersionTLS12
 	TLSClientAuth           tls.ClientAuthType    // Default: tls.NoClientCert
 	FingerprintFile         string                // Path to write cert fingerprint for client discovery
+	RateLimitPerMinute      int                   // Per-IP request rate limit (0 = default 120 req/min)
+	RateLimitBurst          int                   // Per-IP burst size (0 = default 30)
 }
 
 // DefaultServerConfig returns sensible defaults for the unified HTTP server.
@@ -1264,6 +1266,12 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/v1/reasoning/agents", s.handleReasoningListAgents)
 	}
 
+	// Notification (DND) endpoints
+	if s.rpcCall != nil {
+		mux.HandleFunc("GET /api/v1/notifications/dnd", s.handleNotificationsGetDND)
+		mux.HandleFunc("POST /api/v1/notifications/dnd", s.handleNotificationsSetDND)
+	}
+
 	// Bus endpoints
 	if s.rpcCall != nil {
 		mux.HandleFunc("POST /api/v1/bus/call", s.handleBusCall)
@@ -1350,6 +1358,7 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/v1/memory/canonical", s.handleEpistemicFindCanonical)
 		mux.HandleFunc("GET /api/v1/memory/review-queue", s.handleEpistemicReviewQueue)
 		mux.HandleFunc("GET /api/v1/memory/auto-claims", s.handleEpistemicListAutoClaims)
+		mux.HandleFunc("POST /api/v1/memory/auto-claims/purge", s.handleEpistemicPurgeAutoClaims)
 	}
 
 	// Compression endpoints
@@ -1376,13 +1385,36 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/dispatch/{id}/results", s.handleDispatchResults)
 }
 
-// middleware applies common middleware (CORS, logging, auth).
+// middleware applies common middleware (rate limiting, CORS, logging, auth).
 func (s *Server) middleware(next http.Handler) http.Handler {
+	// Create rate-limit middleware once (outside the per-request closure).
+	// Defaults: 120 req/min per IP with burst of 30; health endpoints are
+	// exempted by RateLimitMiddleware itself.
+	limitPerMinute := s.config.RateLimitPerMinute
+	if limitPerMinute <= 0 {
+		limitPerMinute = 120
+	}
+	burst := s.config.RateLimitBurst
+	if burst <= 0 {
+		burst = 30
+	}
+	rateLimitMiddleware := RateLimitMiddleware(limitPerMinute, burst)
+
 	// Create auth middleware if API keys are configured
 	var authMiddleware func(http.Handler) http.Handler
 	if s.config.RequireAuth && len(s.config.APIKeys) > 0 {
 		authMiddleware = NewAPIKeyAuth(s.config.APIKeys).Middleware
 	}
+
+	// Compose the chain once: rate limit runs after CORS preflight handling
+	// (OPTIONS short-circuits above before reaching it, so preflights are not
+	// throttled) and before auth, so unauthenticated floods cannot reach the
+	// auth path.
+	handler := next
+	if authMiddleware != nil {
+		handler = authMiddleware(next)
+	}
+	handler = rateLimitMiddleware(handler)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -1411,11 +1443,6 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 
 		// Wrap response writer to capture status code
 		lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-
-		handler := next
-		if authMiddleware != nil {
-			handler = authMiddleware(next)
-		}
 
 		handler.ServeHTTP(lrw, r)
 
@@ -2145,10 +2172,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Auth is enforced by the APIKeyAuth middleware (registered via
-	// s.middleware). The middleware extracts the key from Authorization,
-	// Sec-WebSocket-Protocol: bearer.<key>, or the legacy ?token= query
-	// param, validates it, and stashes it in the request context. We only
-	// need to confirm it ran.
+	// s.middleware). The middleware extracts the key from the Authorization
+	// header (Bearer <key>), or — for WebSocket upgrade requests — from the
+	// Sec-WebSocket-Protocol header ("bearer.<key>" subprotocol), validates
+	// it, and stashes it in the request context. We only need to confirm it
+	// ran.
 	if s.config.RequireAuth {
 		if _, ok := r.Context().Value(apiKeyContextKey).(string); !ok {
 			s.writeError(w, http.StatusUnauthorized, "unauthorized: missing API token")

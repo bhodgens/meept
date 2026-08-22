@@ -547,6 +547,20 @@ func (m *Manager) storeViaSQLite(ctx context.Context, mem Memory) (string, error
 		return m.task.Store(ctx, mem.Content, domain, mem.Metadata)
 
 	default:
+		// Epistemic types (claim/decision/prediction/question) are stored in
+		// the episodic table with their type as the category. The type tag in
+		// metadata lets readers recover the true type (scanResults and GetByID
+		// prefer it over the default "episodic").
+		if IsEpistemicType(mem.Type) {
+			if m.episodic == nil {
+				return "", errors.New("episodic memory is disabled")
+			}
+			if mem.Metadata == nil {
+				mem.Metadata = make(map[string]any)
+			}
+			mem.Metadata["type"] = string(mem.Type)
+			return m.episodic.Store(ctx, mem.Content, string(mem.Type), mem.Metadata)
+		}
 		return "", fmt.Errorf("unknown memory type: %s", mem.Type)
 	}
 }
@@ -765,7 +779,10 @@ func (m *Manager) searchViaMemvid(ctx context.Context, query MemoryQuery) ([]Mem
 func (m *Manager) searchViaSQLite(ctx context.Context, query MemoryQuery) ([]MemoryResult, error) {
 	var results []MemoryResult
 
-	searchEpisodic := query.Type == "" || query.Type == MemoryTypeEpisodic
+	// Epistemic types live in the episodic table (stored with type-as-
+	// category), so queries for them must search the episodic store too.
+	searchEpisodic := query.Type == "" || query.Type == MemoryTypeEpisodic ||
+		IsEpistemicType(query.Type)
 	searchTask := query.Type == "" || query.Type == MemoryTypeTask
 
 	if searchEpisodic && m.episodic != nil {
@@ -1510,7 +1527,16 @@ func (m *Manager) GetByID(ctx context.Context, id string) (*Memory, error) {
 	}
 
 	mem.Metadata = ParseMetadata(metaJSON)
-	mem.Type = MemoryTypeEpisodic
+	if t := memoryTypeFromCategory(mem.Category, MemoryTypeEpisodic); t != "" {
+		// Prefer an explicit type tag in metadata, then the category.
+		if raw, ok := mem.Metadata["type"].(string); ok && IsEpistemicType(MemoryType(raw)) {
+			mem.Type = MemoryType(raw)
+		} else {
+			mem.Type = t
+		}
+	} else {
+		mem.Type = MemoryTypeEpisodic
+	}
 	return &mem, nil
 }
 

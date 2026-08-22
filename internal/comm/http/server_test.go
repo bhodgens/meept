@@ -1266,6 +1266,68 @@ func TestSSEWriter(t *testing.T) {
 	})
 }
 
+func TestHandleChatStream_SessionFilter(t *testing.T) {
+	t.Parallel()
+
+	msgBus := bus.New(nil, nil)
+	busSvc := services.NewBusService(msgBus)
+	svcReg := &services.ServiceRegistry{Bus: busSvc}
+	server := NewServer(ServerConfig{EnableCORS: true}, nil, nil, nil, svcReg, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Subscribe with a session filter that only matches session A.
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/chat/stream?session_id=session-A", http.NoBody).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		server.handleChatStream(w, req)
+		close(done)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	mustPublish := func(topic, convID string) {
+		t.Helper()
+		if err := busSvc.Publish(context.Background(), services.PublishRequest{
+			Topic:  topic,
+			Type:   "event",
+			Source: "test",
+			Payload: map[string]any{
+				"conversation_id": convID,
+				"session_id":      convID,
+				"message":         "m-" + convID,
+			},
+		}); err != nil {
+			t.Errorf("publish %s: %v", topic, err)
+		}
+	}
+
+	// Event for the matching session, then one for a different session.
+	mustPublish("tool.execution.progress", "session-A")
+	time.Sleep(30 * time.Millisecond)
+	mustPublish("tool.execution.progress", "session-B")
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not finish in time")
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "session-A") {
+		t.Error("expected matching-session event to be forwarded")
+	}
+	if strings.Contains(body, "session-B") {
+		t.Error("expected other-session event to be filtered out")
+	}
+}
+
 func TestHandleChatStream_NoService(t *testing.T) {
 	t.Parallel()
 	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)

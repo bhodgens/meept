@@ -1,10 +1,8 @@
 package memory
 
 import (
-	"crypto/rand"
+	"github.com/caimlas/meept/pkg/id"
 	"database/sql"
-	"encoding/hex"
-	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -137,15 +135,9 @@ func (rs *ReportStore) upsertArtifact(tx *sql.Tx, runID, path string, sizeBytes 
 	}, nil
 }
 
-// generateID creates a random 16-char ID.
-// generateID creates a cryptographically secure random ID.
+// generateID creates a cryptographically secure random ID via pkg/id.
 func (rs *ReportStore) generateID() string {
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback to UUID-like ID if crypto/rand fails (extremely rare).
-		return fmt.Sprintf("fallback-%x", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(b)[:16]
+	return id.Generate("")
 }
 
 // OutputDirForRun returns the output directory for a run ID.

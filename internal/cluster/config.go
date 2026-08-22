@@ -49,6 +49,15 @@ type NetworkConfig struct {
 	WireGuardSubnet string `json:"wireguard_subnet"`
 	WireGuardPort   int    `json:"wireguard_port"`
 	Interface       string `json:"mesh_interface"`
+
+	// GossipListenAddr is the address the gossip TCP transport binds to.
+	// Empty means ":<wireguard_port+1>" (all interfaces), matching the
+	// historical default. Set e.g. "127.0.0.1:51821" or a WireGuard mesh IP
+	// to restrict exposure. Cluster traffic is expected to run inside a
+	// trusted network (WireGuard): node signatures (require_node_signatures,
+	// default true) authenticate events, but these ports should not be
+	// internet-exposed.
+	GossipListenAddr string `json:"gossip_listen_addr"`
 }
 
 // GossipConfig holds gossip protocol settings.

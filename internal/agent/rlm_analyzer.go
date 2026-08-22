@@ -270,7 +270,6 @@ func (a *RLMAnalyzer) executeAgent(run *analyzerRun, traceIDs []string, prompt s
 	toolNames := run.toolRegistry.List()
 	toolCtx := fmt.Sprintf("Available tools: %s", strings.Join(toolNames, ", "))
 
-	currentPrompt := prompt
 	for {
 		select {
 		case <-run.ctx.Done():
@@ -290,9 +289,9 @@ func (a *RLMAnalyzer) executeAgent(run *analyzerRun, traceIDs []string, prompt s
 			break
 		}
 
-		// Build the prompt for this turn.
-		//lint:ignore SA4006 turnPrompt used conditionally in LLM path only
-		turnPrompt := currentPrompt
+		// Build the prompt for this turn. Both branches assign before any
+		// read, so no initial value is needed.
+		var turnPrompt string
 		if run.depth > 0 {
 			turnPrompt = fmt.Sprintf("Trace analysis subagent (depth %d).\n%s\n\nContext:\n%s",
 				run.depth, prompt, toolCtx)

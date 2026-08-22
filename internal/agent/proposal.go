@@ -1,8 +1,7 @@
 package agent
 
 import (
-	"crypto/rand"
-	"encoding/hex"
+	"github.com/caimlas/meept/pkg/id"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -289,12 +288,7 @@ func IsSafeTargetPath(target string) bool {
 }
 
 func generateProposalID() string {
-	b := make([]byte, 6)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback to UUID-like ID if rand fails (shouldn't happen in practice)
-		return fmt.Sprintf("p-fallback-%x", time.Now().UnixNano())
-	}
-	return "p-" + hex.EncodeToString(b)
+	return id.Generate("p-")
 }
 
 // ProposalQueueExternal is the exported wrapper around proposalQueue for

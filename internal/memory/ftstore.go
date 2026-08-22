@@ -508,7 +508,7 @@ func (s *SQLiteFTSStore) ScanResults(rows *sql.Rows, hasRank bool, cfg ScanRowCo
 			Memory: Memory{
 				ID:        id,
 				Content:   content,
-				Type:      cfg.MemoryType,
+				Type:      memoryTypeFromCategory(category, cfg.MemoryType),
 				Category:  category,
 				Metadata:  ParseMetadata(metaJSON),
 				CreatedAt: createdAt,
@@ -523,4 +523,18 @@ func (s *SQLiteFTSStore) ScanResults(rows *sql.Rows, hasRank bool, cfg ScanRowCo
 	}
 
 	return results, nil
+}
+
+// memoryTypeFromCategory recovers the epistemic memory type from the stored
+// category. Epistemic memories (claim/decision/prediction/question) are
+// persisted in the episodic table with their type as the category, so the
+// category is authoritative for them; everything else keeps the store's
+// default type.
+func memoryTypeFromCategory(category string, defaultType MemoryType) MemoryType {
+	switch MemoryType(category) {
+	case MemoryTypeClaim, MemoryTypeDecision, MemoryTypePrediction, MemoryTypeQuestion:
+		return MemoryType(category)
+	default:
+		return defaultType
+	}
 }

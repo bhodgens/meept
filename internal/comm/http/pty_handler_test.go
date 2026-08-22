@@ -114,10 +114,10 @@ func TestGenerateSessionID_Unpredictable(t *testing.T) {
 }
 
 // TestGenerateSessionID_Length verifies the ID has the expected length:
-// "pty-" (4) + 32 hex chars from 16 bytes.
+// "pty-" (4) + 16 hex chars from 8 bytes (pkg/id.Generate format).
 func TestGenerateSessionID_Length(t *testing.T) {
 	id := generateSessionID()
-	if len(id) != 4+32 {
-		t.Errorf("session id length = %d, want %d", len(id), 4+32)
+	if len(id) != 4+16 {
+		t.Errorf("session id length = %d, want %d", len(id), 4+16)
 	}
 }

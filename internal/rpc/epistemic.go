@@ -41,6 +41,7 @@ func (h *EpistemicHandler) RegisterEpistemicHandlers(server *Server) {
 	server.RegisterHandler("memory.promoteClaim", h.handlePromoteClaim)
 	server.RegisterHandler("memory.rejectClaim", h.handleRejectClaim)
 	server.RegisterHandler("memory.listAutoClaims", h.handleListAutoClaims)
+	server.RegisterHandler("memory.purgeAutoClaims", h.handlePurgeAutoClaims)
 	server.RegisterHandler("memory.listPendingReviews", h.handleListPendingReviews)
 	server.RegisterHandler("memory.findCanonical", h.handleFindCanonical)
 	server.RegisterHandler("memory.reviewQueue", h.handleReviewQueue)
@@ -247,7 +248,9 @@ func (h *EpistemicHandler) handleListAutoClaims(ctx context.Context, params json
 		return nil, err
 	}
 	var p listAutoClaimsParams
-	_ = json.Unmarshal(params, &p)
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
 	since := time.Now().Add(-time.Duration(p.SinceHours) * time.Hour)
 	if p.SinceHours <= 0 {
 		since = time.Time{}
@@ -261,6 +264,70 @@ func (h *EpistemicHandler) handleListAutoClaims(ctx context.Context, params json
 		return nil, err
 	}
 	return map[string]any{"claims": claims}, nil
+}
+
+type purgeAutoClaimsParams struct {
+	OlderThanDays int  `json:"older_than_days"`
+	Limit         int  `json:"limit"`
+	Confirmed     bool `json:"confirmed"`
+}
+
+func (h *EpistemicHandler) handlePurgeAutoClaims(ctx context.Context, params json.RawMessage) (any, error) {
+	mgr, err := h.managerOrErr()
+	if err != nil {
+		return nil, err
+	}
+	var p purgeAutoClaimsParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	if p.OlderThanDays <= 0 {
+		p.OlderThanDays = 30
+	}
+	if p.Limit <= 0 {
+		p.Limit = 100
+	}
+	cutoff := time.Now().AddDate(0, 0, -p.OlderThanDays)
+
+	// Preview phase: count without deleting.
+	if !p.Confirmed {
+		autoClaims, err := mgr.ListAutoClaims(ctx, cutoff, p.Limit)
+		if err != nil {
+			autoClaims = nil
+		}
+		return map[string]any{
+			"requires_confirmation": true,
+			"action":                "purge_auto_claims",
+			"claim_count":           len(autoClaims),
+			"older_than_days":       p.OlderThanDays,
+		}, nil
+	}
+
+	// Execute phase: list then delete each.
+	autoClaims, err := mgr.ListAutoClaims(ctx, cutoff, p.Limit)
+	if err != nil {
+		return nil, fmt.Errorf("list auto claims for purge: %w", err)
+	}
+	var deleted int
+	var firstErr error
+	for _, r := range autoClaims {
+		if err := mgr.Delete(ctx, r.Memory.ID); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		deleted++
+	}
+	resp := map[string]any{
+		"success":   deleted > 0 || firstErr == nil,
+		"deleted":   deleted,
+		"attempted": len(autoClaims),
+	}
+	if firstErr != nil {
+		resp["first_error"] = firstErr.Error()
+	}
+	return resp, nil
 }
 
 func (h *EpistemicHandler) handleListPendingReviews(ctx context.Context, params json.RawMessage) (any, error) {
@@ -308,7 +375,9 @@ func (h *EpistemicHandler) handleReviewQueue(ctx context.Context, params json.Ra
 		return nil, err
 	}
 	var p listAutoClaimsParams
-	_ = json.Unmarshal(params, &p)
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
 	since := time.Now().Add(-time.Duration(p.SinceHours) * time.Hour)
 	if p.SinceHours <= 0 {
 		since = time.Time{}

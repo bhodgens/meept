@@ -9,6 +9,7 @@ import (
 	"maps"
 	"math"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -260,6 +261,10 @@ type Dispatcher struct {
 
 	// sessionStore looks up session project paths for loopManager.
 	sessionStore SessionStoreReader
+
+	// fenceController configures the shared fence sandbox per-session
+	// (root = project path, plus --nofence override). Optional; nil-safe.
+	fenceController FenceController
 }
 
 // IntentClassifier is an interface for classifying intents.
@@ -438,6 +443,31 @@ func (d *Dispatcher) SetSessionStore(s SessionStoreReader) {
 	if s != nil {
 		d.sessionStore = s
 	}
+}
+
+// SetFenceController wires the shared fence checker so dispatched sessions
+// bind their project path as the sandbox root and honor --nofence.
+func (d *Dispatcher) SetFenceController(fc FenceController) {
+	if d != nil {
+		d.fenceController = fc
+	}
+}
+
+// configureFence updates the shared fence sandbox for this session's
+// working directory and no-fence override. Nil-safe; failures are logged
+// and leave fencing blocked rather than silently widening it.
+func (d *Dispatcher) configureFence(sessionID, workingPath string, noFence bool) {
+	if d.fenceController == nil || workingPath == "" {
+		return
+	}
+	if err := d.fenceController.SetRootPath(workingPath); err != nil {
+		d.logger.Warn("fence: failed to set session root; fencing stays blocked until a valid root is set",
+			"session", sessionID,
+			"root", workingPath,
+			"error", err,
+		)
+	}
+	d.fenceController.SetNoFence(noFence)
 }
 
 // SetInstructionStore wires the instruction store for intent-based action attachment.
@@ -1803,6 +1833,9 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 				}
 			}
 			if sess.ProjectPath != "" {
+				// Bind the shared fence sandbox to this session's project
+				// path and apply the per-session --nofence override.
+				d.configureFence(conversationID, sess.ProjectPath, sess.NoFence)
 				// Use the registry agent as the template so the session loop
 				// inherits LLM client, tools, skills, and hooks.
 				template, templateErr := d.registry.Get(agentID)
@@ -2113,6 +2146,10 @@ func (c *KeywordClassifier) ClassifyAll(ctx context.Context, input string, memCt
 }
 
 // deduplicateIntents keeps only the highest confidence intent per type.
+// The result is sorted by confidence descending (ties broken by type) so
+// callers that take intents[0] get deterministic output; Go map iteration
+// order is randomized, and an unordered return made top-intent selection
+// nondeterministic whenever two intent types tied on confidence.
 func deduplicateIntents(intents []*Intent) []*Intent {
 	seen := make(map[string]*Intent)
 	for _, intent := range intents {
@@ -2125,6 +2162,12 @@ func deduplicateIntents(intents []*Intent) []*Intent {
 	for _, intent := range seen {
 		result = append(result, intent)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Confidence != result[j].Confidence {
+			return result[i].Confidence > result[j].Confidence
+		}
+		return result[i].Type < result[j].Type
+	})
 	return result
 }
 
