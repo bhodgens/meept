@@ -7,10 +7,15 @@ class ErrorBanner extends StatelessWidget {
   final String message;
   final VoidCallback? onDismiss;
 
+  /// Optional retry affordance. When set, a refresh icon button renders
+  /// before the dismiss button (e.g. re-send the failed chat message).
+  final VoidCallback? onRetry;
+
   const ErrorBanner({
     super.key,
     required this.message,
     this.onDismiss,
+    this.onRetry,
   });
 
   @override
@@ -35,6 +40,17 @@ class ErrorBanner extends StatelessWidget {
               maxLines: 3,
             ),
           ),
+          if (onRetry != null) ...[
+            const SizedBox(width: 8),
+            IconButton(
+              tooltip: 'retry',
+              icon: const Icon(Icons.refresh, size: 16),
+              onPressed: onRetry,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              color: CyberpunkColors.orangePrimary,
+            ),
+          ],
           if (onDismiss != null) ...[
             const SizedBox(width: 8),
             IconButton(

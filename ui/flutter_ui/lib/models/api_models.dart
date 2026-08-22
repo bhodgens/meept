@@ -775,6 +775,9 @@ class SearchResultItem with _$SearchResultItem {
     required String title,
     @Default('') String snippet,
     @Default(0.0) double relevance,
+    // Set for message results: the containing session, so the UI can
+    // navigate to it directly.
+    @Default('') String sessionId,
   }) = _SearchResultItem;
 
   factory SearchResultItem.fromJson(Map<String, dynamic> json) =>

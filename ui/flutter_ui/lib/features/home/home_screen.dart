@@ -12,6 +12,7 @@ import '../../widgets/command_palette.dart';
 import '../../widgets/status_bar.dart';
 import '../../widgets/tab_bar.dart';
 import '../../providers/providers.dart';
+import '../../providers/session_detail.dart';
 import '../../providers/status_message_provider.dart';
 import '../../providers/tab_activation_provider.dart';
 import '../../providers/verbosity_provider.dart';
@@ -312,13 +313,76 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
+  /// Edit the active session's description via PATCH /sessions/{id}.
+  void _showEditDescriptionDialog() {
+    final session = ref.read(activeSessionProvider);
+    if (session == null) {
+      showStatusMessage(ref, 'no active session');
+      return;
+    }
+    final controller =
+        TextEditingController(text: session.description ?? '');
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: CyberpunkColors.darkGray,
+        title: Text(
+          'edit description',
+          style: CyberpunkTypography.bodyMedium.copyWith(
+            color: CyberpunkColors.orangePrimary,
+          ),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: CyberpunkTypography.bodyMedium,
+          decoration: InputDecoration(
+            hintText: 'session description',
+            hintStyle: CyberpunkTypography.bodyMedium.copyWith(
+              color: CyberpunkColors.midGray,
+            ),
+            filled: true,
+            fillColor: CyberpunkColors.black,
+            border: OutlineInputBorder(
+              borderSide: BorderSide(color: CyberpunkColors.orangeDark),
+            ),
+          ),
+          maxLines: 3,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text('cancel', style: CyberpunkTypography.bodySmall),
+          ),
+          TextButton(
+            onPressed: () async {
+              final description = controller.text.trim();
+              Navigator.of(dialogContext).pop();
+              try {
+                await ref.read(sdkClientProvider).updateSessionDescription(
+                      session.id,
+                      description,
+                    );
+                ref.invalidate(sessionDetailFamily(session.id));
+                showStatusMessage(ref, 'description updated');
+              } catch (e) {
+                showStatusMessage(ref, 'update failed: $e');
+              }
+            },
+            child: Text('save',
+                style: CyberpunkTypography.bodySmall
+                    .copyWith(color: CyberpunkColors.orangePrimary)),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Navigate to a tool panel via go_router if it has a registered route.
   void _navigateTool(String toolName) {
     switch (toolName) {
       case 'search':
         context.goToolSearch();
-      case 'branches':
-        context.goToolBranches();
       case 'skills':
         context.goToolSkills();
       case 'memory':
@@ -398,10 +462,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ref.read(createSessionRequestProvider.notifier).state = true;
         break;
       case 'edit description':
-        // Backend has no session-description edit endpoint yet
-        // (PATCH /sessions/{id} only accepts {"archived": bool}).
-        // Route to sessions tab as the closest available affordance.
-        _onLeaderTabSelected(HomeTab.sessions.index);
+        _showEditDescriptionDialog();
         break;
       case 'projects':
         _leaderController.onBranches?.call();

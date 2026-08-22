@@ -69,6 +69,7 @@ import '../../dialogs/directory_browser_dialog.dart';
 import '../../providers/providers.dart';
 import '../../models/api_models.dart';
 import '../../providers/status_message_provider.dart';
+import '../../providers/session_detail.dart';
 import '../../providers/verbosity_provider.dart';
 import '../../providers/rendering_prefs_provider.dart';
 import '../chat/chat_tab.dart';
@@ -323,9 +324,26 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
             child: Text('cancel', style: CyberpunkTypography.bodySmall),
           ),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
+              final session = _selectedSession;
+              final description = controller.text.trim();
               Navigator.of(context).pop();
-              showStatusMessage(ref, 'description updated');
+              if (session == null) {
+                showStatusMessage(ref, 'no active session');
+                return;
+              }
+              try {
+                await ref.read(sdkClientProvider).updateSessionDescription(
+                      session.id,
+                      description,
+                    );
+                // Refresh cached session detail so the UI reflects the
+                // change without a full session reload.
+                ref.invalidate(sessionDetailFamily(session.id));
+                showStatusMessage(ref, 'description updated');
+              } catch (e) {
+                showStatusMessage(ref, 'update failed: $e');
+              }
             },
             child: Text(
               'save',

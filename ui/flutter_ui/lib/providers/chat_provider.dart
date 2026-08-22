@@ -226,6 +226,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// Guard against setState after dispose
   bool _disposed = false;
 
+  /// Text of the most recent send that failed, kept for the error
+  /// banner's retry affordance. Null when there is nothing to retry.
+  String? _lastFailedSend;
+
   /// Timer to reset _isSending flag if it gets stuck (safety mechanism)
   Timer? _sendingTimeoutTimer;
 
@@ -389,7 +393,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
     _isSending = true;
 
-    // Set safety timeout to reset flag if something goes wrong
+    // Remember the send for retry; cleared on success.
+    _lastFailedSend = text;
     _sendingTimeoutTimer?.cancel();
     _sendingTimeoutTimer = Timer(_sendingTimeout, () {
       _isSending = false;
@@ -482,6 +487,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
         // Keep isAgentProcessing=true so the progress indicator stays
         // visible until the WS chat_message event arrives and resolves
         // the turn via addStreamMessage.
+        _lastFailedSend = null;
         state = ChatState(
           messages: state.messages,
           isLoading: false,
@@ -526,6 +532,15 @@ class ChatNotifier extends StateNotifier<ChatState> {
       _sendingTimeoutTimer = null;
       _isSending = false;
     }
+  }
+
+  /// Re-send the most recent failed message. No-op when the last send
+  /// succeeded (or there was no send). Used by the error banner's
+  /// retry affordance.
+  Future<void> retryLastSend({String? agentId}) async {
+    final text = _lastFailedSend;
+    if (text == null || text.isEmpty) return;
+    await sendMessage(sessionId: sessionId, text: text, agentId: agentId);
   }
 
   /// Add a chat message from websocket stream

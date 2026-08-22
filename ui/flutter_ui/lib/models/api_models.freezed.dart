@@ -4278,7 +4278,10 @@ mixin _$SearchResultItem {
   String get id => throw _privateConstructorUsedError;
   String get title => throw _privateConstructorUsedError;
   String get snippet => throw _privateConstructorUsedError;
-  double get relevance => throw _privateConstructorUsedError;
+  double get relevance =>
+      throw _privateConstructorUsedError; // Set for message results: the containing session, so the UI can
+// navigate to it directly.
+  String get sessionId => throw _privateConstructorUsedError;
 
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
   @JsonKey(ignore: true)
@@ -4297,7 +4300,8 @@ abstract class $SearchResultItemCopyWith<$Res> {
       String id,
       String title,
       String snippet,
-      double relevance});
+      double relevance,
+      String sessionId});
 }
 
 /// @nodoc
@@ -4318,6 +4322,7 @@ class _$SearchResultItemCopyWithImpl<$Res, $Val extends SearchResultItem>
     Object? title = null,
     Object? snippet = null,
     Object? relevance = null,
+    Object? sessionId = null,
   }) {
     return _then(_value.copyWith(
       type: null == type
@@ -4340,6 +4345,10 @@ class _$SearchResultItemCopyWithImpl<$Res, $Val extends SearchResultItem>
           ? _value.relevance
           : relevance // ignore: cast_nullable_to_non_nullable
               as double,
+      sessionId: null == sessionId
+          ? _value.sessionId
+          : sessionId // ignore: cast_nullable_to_non_nullable
+              as String,
     ) as $Val);
   }
 }
@@ -4357,7 +4366,8 @@ abstract class _$$SearchResultItemImplCopyWith<$Res>
       String id,
       String title,
       String snippet,
-      double relevance});
+      double relevance,
+      String sessionId});
 }
 
 /// @nodoc
@@ -4376,6 +4386,7 @@ class __$$SearchResultItemImplCopyWithImpl<$Res>
     Object? title = null,
     Object? snippet = null,
     Object? relevance = null,
+    Object? sessionId = null,
   }) {
     return _then(_$SearchResultItemImpl(
       type: null == type
@@ -4398,6 +4409,10 @@ class __$$SearchResultItemImplCopyWithImpl<$Res>
           ? _value.relevance
           : relevance // ignore: cast_nullable_to_non_nullable
               as double,
+      sessionId: null == sessionId
+          ? _value.sessionId
+          : sessionId // ignore: cast_nullable_to_non_nullable
+              as String,
     ));
   }
 }
@@ -4410,7 +4425,8 @@ class _$SearchResultItemImpl implements _SearchResultItem {
       required this.id,
       required this.title,
       this.snippet = '',
-      this.relevance = 0.0});
+      this.relevance = 0.0,
+      this.sessionId = ''});
 
   factory _$SearchResultItemImpl.fromJson(Map<String, dynamic> json) =>
       _$$SearchResultItemImplFromJson(json);
@@ -4427,10 +4443,15 @@ class _$SearchResultItemImpl implements _SearchResultItem {
   @override
   @JsonKey()
   final double relevance;
+// Set for message results: the containing session, so the UI can
+// navigate to it directly.
+  @override
+  @JsonKey()
+  final String sessionId;
 
   @override
   String toString() {
-    return 'SearchResultItem(type: $type, id: $id, title: $title, snippet: $snippet, relevance: $relevance)';
+    return 'SearchResultItem(type: $type, id: $id, title: $title, snippet: $snippet, relevance: $relevance, sessionId: $sessionId)';
   }
 
   @override
@@ -4443,13 +4464,15 @@ class _$SearchResultItemImpl implements _SearchResultItem {
             (identical(other.title, title) || other.title == title) &&
             (identical(other.snippet, snippet) || other.snippet == snippet) &&
             (identical(other.relevance, relevance) ||
-                other.relevance == relevance));
+                other.relevance == relevance) &&
+            (identical(other.sessionId, sessionId) ||
+                other.sessionId == sessionId));
   }
 
   @JsonKey(ignore: true)
   @override
   int get hashCode =>
-      Object.hash(runtimeType, type, id, title, snippet, relevance);
+      Object.hash(runtimeType, type, id, title, snippet, relevance, sessionId);
 
   @JsonKey(ignore: true)
   @override
@@ -4472,7 +4495,8 @@ abstract class _SearchResultItem implements SearchResultItem {
       required final String id,
       required final String title,
       final String snippet,
-      final double relevance}) = _$SearchResultItemImpl;
+      final double relevance,
+      final String sessionId}) = _$SearchResultItemImpl;
 
   factory _SearchResultItem.fromJson(Map<String, dynamic> json) =
       _$SearchResultItemImpl.fromJson;
@@ -4487,6 +4511,9 @@ abstract class _SearchResultItem implements SearchResultItem {
   String get snippet;
   @override
   double get relevance;
+  @override // Set for message results: the containing session, so the UI can
+// navigate to it directly.
+  String get sessionId;
   @override
   @JsonKey(ignore: true)
   _$$SearchResultItemImplCopyWith<_$SearchResultItemImpl> get copyWith =>

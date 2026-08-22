@@ -232,6 +232,9 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                 padding: const EdgeInsets.all(8),
                 child: ErrorBanner(
                   message: chatState.error!,
+                  onRetry: () => ref
+                      .read(chatProvider(widget.sessionId).notifier)
+                      .retryLastSend(),
                   onDismiss: () => ref.read(chatProvider(widget.sessionId).notifier).clearError(),
                 ),
               ),

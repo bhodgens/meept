@@ -379,6 +379,7 @@ _$SearchResultItemImpl _$$SearchResultItemImplFromJson(
       title: json['title'] as String,
       snippet: json['snippet'] as String? ?? '',
       relevance: (json['relevance'] as num?)?.toDouble() ?? 0.0,
+      sessionId: json['sessionId'] as String? ?? '',
     );
 
 Map<String, dynamic> _$$SearchResultItemImplToJson(
@@ -389,6 +390,7 @@ Map<String, dynamic> _$$SearchResultItemImplToJson(
       'title': instance.title,
       'snippet': instance.snippet,
       'relevance': instance.relevance,
+      'sessionId': instance.sessionId,
     };
 
 const _$SearchResultTypeEnumMap = {

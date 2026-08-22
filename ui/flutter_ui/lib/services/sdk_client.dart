@@ -538,6 +538,16 @@ class SdkApiClient {
     await _patch('/api/v1/sessions/$sessionId', body: {'archived': archived});
   }
 
+  /// PATCH /api/v1/sessions/{id} -- set the session description.
+  ///
+  /// Returns the updated session JSON (daemon responds 200 with the body
+  /// for description updates; archive-only requests still return 204).
+  Future<Map<String, dynamic>> updateSessionDescription(
+      String sessionId, String description) async {
+    return _patch('/api/v1/sessions/$sessionId',
+        body: {'description': description});
+  }
+
   /// Generate a session description/title via the daemon's LLM summarizer.
   ///
   /// Calls the `session.generate_description` RPC through the bus/call

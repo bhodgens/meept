@@ -525,14 +525,25 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
         await _navigateToSession(result.id);
         break;
       case SearchResultType.message:
-        // Message IDs are formatted as "sessionID:msgID".
-        final parts = result.id.split(':');
-        if (parts.length >= 2) {
-          await _navigateToSession(parts.first, messageId: parts[1]);
+        // Prefer the explicit session_id field (server-provided);
+        // fall back to parsing the legacy "sessionID:msgID" id format.
+        var sessionId = result.sessionId;
+        var messageId = '';
+        if (sessionId.isNotEmpty) {
+          // id remains "sessionID:msgID"; take the message part.
+          final parts = result.id.split(':');
+          messageId = parts.length >= 2 ? parts[1] : result.id;
         } else {
-          // Fallback: treat the whole id as a session id.
-          await _navigateToSession(result.id);
+          final parts = result.id.split(':');
+          if (parts.length >= 2) {
+            sessionId = parts.first;
+            messageId = parts[1];
+          } else {
+            // Fallback: treat the whole id as a session id.
+            sessionId = result.id;
+          }
         }
+        await _navigateToSession(sessionId, messageId: messageId);
         break;
       case SearchResultType.task:
         context.go('/tasks');
