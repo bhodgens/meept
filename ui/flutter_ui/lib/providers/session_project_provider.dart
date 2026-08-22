@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../dialogs/project_prompt_dialog.dart';
+import '../dialogs/directory_browser_dialog.dart';
 import '../models/api_models.dart';
+import 'providers.dart';
 
 /// Helper to check session project binding and show prompt if needed.
 class SessionProjectChecker {
@@ -20,9 +23,11 @@ class SessionProjectChecker {
   }
 
   /// Show project prompt dialog if needed. Returns true if the caller
-  /// should proceed with session activation.
+  /// should proceed with session activation. [ref] resolves the SDK
+  /// client for the "pick project" directory-binding flow.
   static Future<bool> checkAndPrompt({
     required BuildContext context,
+    required WidgetRef ref,
     required Session session,
     required VoidCallback onSkip,
     required ValueSetter<String?> onProjectBound,
@@ -55,10 +60,22 @@ class SessionProjectChecker {
         onSkip();
         return true;
       case ProjectPromptResult.pick:
-        // User wants to explicitly pick a project.
-        // For now, just proceed with session activation (no project bound).
-        // TODO: implement project picker navigation.
-        onSkip();
+        // Open the daemon-side browser so the user picks any directory
+        // on the daemon host; bind it via project.set (DetectFromPath).
+        final client = ref.read(sdkClientProvider);
+        final picked = await DirectoryBrowserDialog.show(context);
+        if (picked == null) {
+          return false;
+        }
+        try {
+          await client
+              .setProject(sessionId: session.id, path: picked);
+          onProjectBound(picked);
+        } catch (_) {
+          // Binding failed — still activate the session unbound rather
+          // than stranding the user in the prompt.
+          onSkip();
+        }
         return true;
     }
   }

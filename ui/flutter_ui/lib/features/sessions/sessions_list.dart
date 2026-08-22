@@ -119,6 +119,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
 
     SessionProjectChecker.checkAndPrompt(
       context: context,
+      ref: ref,
       session: session,
       onSkip: () {
         _doActivateSession(session);

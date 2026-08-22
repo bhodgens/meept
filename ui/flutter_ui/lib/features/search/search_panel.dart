@@ -565,6 +565,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
       // Check project binding and prompt if needed.
       final proceed = await SessionProjectChecker.checkAndPrompt(
         context: context,
+        ref: ref,
         session: session,
         onSkip: () {},
         onProjectBound: (cwd) {},
