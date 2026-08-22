@@ -253,6 +253,11 @@ type GoalLoop struct {
 	// broken→at_risk→healthy transitions.
 	consecutiveSuccessesForRecovery int
 
+	// escalationGate, when non-nil, routes tier-3 candidates to plan
+	// signoff instead of immediate execution (leaf 01 of the tier-3
+	// autonomous GoalLoop plan). Nil default = pure autonomy.
+	escalationGate EscalationGate
+
 	// Mutable state (guarded by mu).
 	mu                   sync.Mutex
 	consecutiveFailures  int
@@ -265,6 +270,31 @@ type GoalLoop struct {
 // GoalLoop. It mirrors Manager.emitMetric so the loop can delegate without
 // holding a direct Manager reference.
 type EmitMetricFunc func(name string, value float64, tags map[string]string)
+
+// EscalationGate reports whether a candidate must be routed to plan signoff
+// instead of immediate execution. Returns true to escalate (tier-3 → tier-2
+// pending-plan path); false for immediate autonomous execution.
+type EscalationGate func(c *Constitution, candidate CandidatePlan) bool
+
+// WithEscalationGate injects the escalation gate used by decideTier3. Nil is
+// ignored (typed-nil guard): a loop with no gate runs in full autonomy mode
+// and never escalates. Leaf 02 of the tier-3 plan populates this.
+func (l *GoalLoop) WithEscalationGate(g EscalationGate) *GoalLoop {
+	if g != nil {
+		l.mu.Lock()
+		l.escalationGate = g
+		l.mu.Unlock()
+	}
+	return l
+}
+
+// escalationGateSnapshot returns the configured gate under lock (nil = no
+// escalation, pure autonomy).
+func (l *GoalLoop) escalationGateSnapshot() EscalationGate {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.escalationGate
+}
 
 // NewGoalLoop constructs a GoalLoop for the given employee. The constitution
 // may be nil during pre-wiring; Decide will return an error until one is set.
@@ -795,7 +825,8 @@ func (l *GoalLoop) lookupActiveGoal(ctx context.Context) (*Goal, error) {
 //     → returns. Execute is only called from ApproveAndExecute when the plan
 //     is approved via signoff.
 //   - Tier3Autonomous: same as Tier 2 but Execute immediately after Assess
-//     (no approval). Phase 2 — returns an error.
+//     (no approval), unless the escalation gate routes a candidate to plan
+//     signoff.
 //
 // Decide returns nil on successful dispatch (including when ASSESS produces
 // no candidates — a no-op is a valid outcome).
@@ -816,8 +847,7 @@ func (l *GoalLoop) Decide(ctx context.Context, trigger TriggerEvent) error {
 	case Tier2Propose:
 		return l.decideTier2(ctx, trigger, logger)
 	case Tier3Autonomous:
-		// Phase 2 (spec line 298-300): not yet implemented.
-		return fmt.Errorf("tier 3 not yet implemented")
+		return l.decideTier3(ctx, trigger, logger)
 	default:
 		return fmt.Errorf("unknown autonomy tier: %d", tier)
 	}
@@ -948,6 +978,132 @@ func (l *GoalLoop) decideTier2(ctx context.Context, trigger TriggerEvent, logger
 						"plan_id", ref.ID, "error", updateErr)
 				}
 			}
+		}
+	}
+	return nil
+}
+
+// decideTier3 implements tier-3 autonomous behaviour: Assess → Execute
+// immediately per candidate (no approval), unless the escalation gate routes
+// the candidate to plan signoff (tier-2 pending-plan path). G2: MaxActivePlans
+// cap is enforced before Assess and re-checked per candidate, mirroring
+// decideTier2. G7: tier-3 plans are self-approved; ApproverID is "system".
+func (l *GoalLoop) decideTier3(ctx context.Context, trigger TriggerEvent, logger *slog.Logger) error {
+	// Read constitution under lock.
+	l.mu.Lock()
+	constitution := l.constitution
+	l.mu.Unlock()
+	if constitution == nil {
+		return errors.New("tier3: no constitution configured")
+	}
+
+	// G2: Multi-plan concurrency check before ASSESS.
+	maxActive := constitution.MaxActivePlans
+	if maxActive <= 0 {
+		maxActive = DefaultMaxActivePlans
+	}
+	if goal, err := l.lookupActiveGoal(ctx); err == nil && goal != nil {
+		if !goal.CanAddActivePlan(maxActive) {
+			logger.Debug("tier3 assess skipped: too many active plans",
+				"max", maxActive,
+				"active_count", len(goal.ActivePlans()))
+			return nil
+		}
+	}
+
+	candidates, err := l.Assess(ctx, trigger)
+	if err != nil {
+		return fmt.Errorf("tier3 assess: %w", err)
+	}
+	if len(candidates) == 0 {
+		logger.Debug("tier3 assess produced no candidates; no-op")
+		return nil
+	}
+
+	gate := l.escalationGateSnapshot()
+	store := l.goalStore
+
+	// Telemetry: emitMetricFn is read once under lock; the callback is
+	// invoked outside the mutex (same pattern as Reflect).
+	l.mu.Lock()
+	emitMetricFn := l.emitMetricFn
+	l.mu.Unlock()
+	emitInvocation := func(outcome string) {
+		if emitMetricFn != nil {
+			emitMetricFn("employee.invocations", 1, map[string]string{
+				"employee_id": l.employeeID,
+				"tier":        "3",
+				"outcome":     outcome,
+			})
+		}
+	}
+
+	for _, candidate := range candidates {
+		// G2: Re-check the plan cap before each candidate to avoid
+		// flooding beyond MaxActivePlans (pending + executing).
+		if goal, err := l.lookupActiveGoal(ctx); err == nil && goal != nil {
+			if !goal.CanAddActivePlan(maxActive) {
+				logger.Debug("tier3 candidate skipped: reached MaxActivePlans cap",
+					"max", maxActive,
+					"active_count", len(goal.ActivePlans()),
+					"candidate", candidate.Title)
+				break
+			}
+		}
+
+		if gate != nil && gate(constitution, candidate) {
+			// Escalate to plan signoff (tier-2 path): create a pending
+			// plan and track it in ActivePlanIDs, without executing.
+			ref, planErr := l.Plan(ctx, candidate)
+			if planErr != nil {
+				logger.Error("tier3 escalation plan creation failed",
+					"candidate", candidate.Title,
+					"error", planErr)
+				continue
+			}
+			if store != nil {
+				if goal, err := l.lookupActiveGoal(ctx); err == nil && goal != nil {
+					goal.AddActivePlan(ref.ID)
+					updateErr := store.Update(ctx, goal)
+					if updateErr != nil {
+						logger.Warn("failed to track escalated plan in ActivePlanIDs",
+							"plan_id", ref.ID, "error", updateErr)
+					}
+				}
+			}
+			logger.Info("tier3 candidate escalated to plan signoff",
+				"plan_id", ref.ID,
+				"candidate", candidate.Title)
+			emitInvocation("escalated")
+			continue
+		}
+
+		// Pure autonomy: execute immediately with system approval
+		// (G3 auto-approval, same as tier-1).
+		planRef := PlanRef{
+			ID:         id.Generate(goalLoopIDPrefix),
+			State:      "executing",
+			Prompt:     candidate.Prompt,
+			ApproverID: "system",
+		}
+		result, execErr := l.Execute(ctx, planRef)
+		if execErr != nil {
+			// Build a synthetic failure result so Reflect can track
+			// the counter.
+			result = &bot.BotExecutionResult{
+				BotID:   l.employeeID,
+				Success: false,
+				Error:   execErr.Error(),
+			}
+		}
+		if result != nil && result.Success {
+			emitInvocation("success")
+		} else {
+			emitInvocation("failure")
+		}
+
+		if _, reflectErr := l.Reflect(ctx, planRef, result); reflectErr != nil {
+			logger.Warn("tier3 reflect failed (non-fatal)", "error", reflectErr)
 		}
 	}
 	return nil

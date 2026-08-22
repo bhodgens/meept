@@ -692,19 +692,27 @@ func TestDecide_Tier2_NoCandidates_NoOp(t *testing.T) {
 	}
 }
 
-func TestDecide_Tier3_NotImplemented(t *testing.T) {
+func TestDecide_Tier3_WithCandidate_ExecutesImmediately(t *testing.T) {
 	reflector := newStubReflector()
+	reflector.queueResponse(`{"candidates":[{"title":"auto","description":"d","prompt":"do it autonomously"}]}`)
+	// Reflect will call the reflector; queue a healthy response.
+	reflector.queueResponse(`{"health":"healthy","reasoning":"ok"}`)
+	executor := newStubExecutor()
+	executor.succeedWith("autonomous done", 42)
+
 	c := testTier2Constitution()
 	c.AutonomyTier = Tier3Autonomous
 
-	loop := NewGoalLoop("emp-test", c, nil, nil).WithReflector(reflector)
+	loop := NewGoalLoop("emp-test", c, nil, nil).
+		WithReflector(reflector).
+		WithExecutor(executor)
 
 	err := loop.Decide(context.Background(), basicTrigger())
-	if err == nil {
-		t.Fatal("expected error for tier 3")
+	if err != nil {
+		t.Fatalf("Decide error: %v", err)
 	}
-	if err.Error() != "tier 3 not yet implemented" {
-		t.Errorf("error = %q, want %q", err.Error(), "tier 3 not yet implemented")
+	if executor.CallCount() != 1 {
+		t.Errorf("executor called %d times, want 1", executor.CallCount())
 	}
 }
 
@@ -1012,5 +1020,348 @@ func TestReflect_NilGoalStore(t *testing.T) {
 	_, err := loop.Reflect(context.Background(), PlanRef{ID: "p1"}, result)
 	if err != nil {
 		t.Fatalf("Reflect with nil goalStore should not error: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: decideTier3 (tier-3 autonomous, leaf 01)
+// ---------------------------------------------------------------------------
+
+// testTier3Constitution returns a minimal tier-3 autonomous constitution.
+func testTier3Constitution() *Constitution {
+	c := testTier2Constitution()
+	c.AutonomyTier = Tier3Autonomous
+	return c
+}
+
+// capturingExecutor records the user messages (prompts) it was called with.
+type capturingExecutor struct {
+	stubExecutor
+	mu      sync.Mutex
+	prompts []string
+}
+
+func (e *capturingExecutor) ExecuteBot(ctx context.Context, systemPrompt, userMessage string) (string, int, error) {
+	e.mu.Lock()
+	e.prompts = append(e.prompts, userMessage)
+	e.mu.Unlock()
+	return e.stubExecutor.ExecuteBot(ctx, systemPrompt, userMessage)
+}
+
+func (e *capturingExecutor) Prompts() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]string, len(e.prompts))
+	copy(out, e.prompts)
+	return out
+}
+
+func TestGoalLoopEscalationGate_Setter(t *testing.T) {
+	t.Run("nil default is pure autonomy", func(t *testing.T) {
+		loop := NewGoalLoop("emp-test", testTier3Constitution(), nil, nil)
+		if gate := loop.escalationGateSnapshot(); gate != nil {
+			t.Fatalf("default gate = %v, want nil", gate)
+		}
+	})
+
+	t.Run("set and read back", func(t *testing.T) {
+		loop := NewGoalLoop("emp-test", testTier3Constitution(), nil, nil)
+		gate := func(c *Constitution, cand CandidatePlan) bool { return true }
+		loop.WithEscalationGate(gate)
+		if got := loop.escalationGateSnapshot(); got == nil {
+			t.Fatal("gate should be set after WithEscalationGate")
+		}
+	})
+
+	t.Run("typed-nil is ignored", func(t *testing.T) {
+		loop := NewGoalLoop("emp-test", testTier3Constitution(), nil, nil)
+		loop.WithEscalationGate(nil)
+		if gate := loop.escalationGateSnapshot(); gate != nil {
+			t.Fatalf("typed-nil gate should be ignored, got %v", gate)
+		}
+	})
+}
+
+func TestDecide_Tier3_HappyPath_NoGate(t *testing.T) {
+	reflector := newStubReflector()
+	reflector.queueResponse(`{"candidates":[{"title":"auto fix","description":"d","prompt":"fix the thing"}]}`)
+	reflector.queueResponse(`{"health":"healthy","reasoning":"ok"}`)
+	executor := &capturingExecutor{stubExecutor: *newStubExecutor()}
+	executor.succeedWith("done", 10)
+
+	loop := NewGoalLoop("emp-test", testTier3Constitution(), nil, nil).
+		WithReflector(reflector).
+		WithExecutor(executor)
+
+	err := loop.Decide(context.Background(), basicTrigger())
+	if err != nil {
+		t.Fatalf("Decide error: %v", err)
+	}
+
+	prompts := executor.Prompts()
+	if len(prompts) != 1 || prompts[0] != "fix the thing" {
+		t.Errorf("executed prompts = %v, want [fix the thing]", prompts)
+	}
+
+	// G3: tier-3 immediate execution uses system approval. Verify via
+	// CanExecutePlan on a synthesized ref (the loop builds refs with
+	// ApproverID "system").
+	if !loop.CanExecutePlan(PlanRef{ID: "x", ApproverID: "system"}) {
+		t.Error("ApproverID \"system\" must be executable for tier-3")
+	}
+
+	// Reflect was invoked: reflector call count = assess + reflect = 2.
+	if calls := reflector.CallCount(); calls != 2 {
+		t.Errorf("reflector calls = %d, want 2 (assess + reflect)", calls)
+	}
+
+	// No pending plans left in ActivePlanIDs (no goal store → no tracking,
+	// but the contract's removal pattern is exercised by the store-based
+	// escalation test below).
+}
+
+func TestDecide_Tier3_BlocksAtMaxActivePlans(t *testing.T) {
+	store := testGoalStore(t)
+	seedBot(t, store, "emp-t3-max")
+
+	// Pre-seed an active goal already at cap=1.
+	g := &Goal{
+		ID:         "goal_t3_max",
+		EmployeeID: "emp-t3-max",
+		Title:      "at cap",
+		Mandate:    "test tier-3 max-plan blocking",
+		State:      GoalActive,
+		Source:     SourceUser,
+	}
+	g.SetActivePlan("plan-active")
+	g.AddActivePlan("plan-active")
+	if err := store.Create(context.Background(), g); err != nil {
+		t.Fatalf("Create goal: %v", err)
+	}
+
+	c := testTier3Constitution()
+	c.MaxActivePlans = 1
+
+	reflector := newStubReflector()
+	executor := newStubExecutor()
+	planner := newStubPlanner()
+
+	loop := NewGoalLoop("emp-t3-max", c, store, nil).
+		WithReflector(reflector).
+		WithExecutor(executor).
+		WithPlanner(planner)
+
+	err := loop.Decide(context.Background(), basicTrigger())
+	if err != nil {
+		t.Fatalf("Decide should not error when at cap: %v", err)
+	}
+	if executor.CallCount() != 0 {
+		t.Errorf("executor called %d times, want 0 (assess skipped at cap)", executor.CallCount())
+	}
+	if reflector.CallCount() != 0 {
+		t.Errorf("reflector called %d times, want 0 (ASSESS blocked)", reflector.CallCount())
+	}
+}
+
+func TestDecide_Tier3_EscalationGate_RoutesToPlanSignoff(t *testing.T) {
+	reflector := newStubReflector()
+	reflector.queueResponse(`{"candidates":[{"title":"risky op","description":"d","prompt":"do risky thing"}]}`)
+
+	planner := newStubPlanner()
+	executor := newStubExecutor()
+
+	c := testTier3Constitution()
+
+	loop := NewGoalLoop("emp-t3-esc", c, nil, nil).
+		WithReflector(reflector).
+		WithExecutor(executor).
+		WithPlanner(planner).
+		WithEscalationGate(func(_ *Constitution, _ CandidatePlan) bool {
+			return true // always escalate
+		})
+
+	err := loop.Decide(context.Background(), basicTrigger())
+	if err != nil {
+		t.Fatalf("Decide error: %v", err)
+	}
+
+	if executor.CallCount() != 0 {
+		t.Errorf("executor called %d times, want 0 (escalated, not executed)", executor.CallCount())
+	}
+	if planner.CreatedCount() != 1 {
+		t.Fatalf("planner created %d plans, want 1 (escalated to signoff)", planner.CreatedCount())
+	}
+	if titles := planner.CreatedTitles(); len(titles) != 1 || titles[0] != "risky op" {
+		t.Errorf("plan titles = %v, want [risky op]", titles)
+	}
+}
+
+func TestDecide_Tier3_EscalatedPlan_TrackedInActivePlanIDs(t *testing.T) {
+	store := testGoalStore(t)
+	seedBot(t, store, "emp-t3-track")
+
+	g := &Goal{
+		ID:         "goal_t3_track",
+		EmployeeID: "emp-t3-track",
+		Title:      "tracking",
+		Mandate:    "track escalated plans",
+		State:      GoalActive,
+		Source:     SourceUser,
+	}
+	if err := store.Create(context.Background(), g); err != nil {
+		t.Fatalf("Create goal: %v", err)
+	}
+
+	reflector := newStubReflector()
+	reflector.queueResponse(`{"candidates":[{"title":"esc","description":"d","prompt":"p"}]}`)
+
+	c := testTier3Constitution()
+	c.MaxActivePlans = 5
+
+	loop := NewGoalLoop("emp-t3-track", c, store, nil).
+		WithReflector(reflector).
+		WithPlanner(&stubPlanner{idPrefix: "plan-esc-"}).
+		WithEscalationGate(func(_ *Constitution, _ CandidatePlan) bool { return true })
+
+	err := loop.Decide(context.Background(), basicTrigger())
+	if err != nil {
+		t.Fatalf("Decide error: %v", err)
+	}
+
+	loaded, getErr := store.Get(context.Background(), "goal_t3_track")
+	if getErr != nil {
+		t.Fatalf("Get goal: %v", getErr)
+	}
+	plans := loaded.ActivePlans()
+	if len(plans) == 0 {
+		t.Fatal("ActivePlanIDs empty; escalated plan not tracked")
+	}
+	if !strings.HasPrefix(plans[0], "plan-") {
+		t.Errorf("tracked plan id %q missing plan prefix", plans[0])
+	}
+}
+
+func TestDecide_Tier3_FailurePath_SyntheticResultAndContinue(t *testing.T) {
+	reflector := newStubReflector()
+	reflector.queueResponse(`{"candidates":[
+		{"title":"first","description":"d","prompt":"fails"},
+		{"title":"second","description":"d","prompt":"succeeds"}
+	]}`)
+	// Two reflect responses (one per candidate); failures default healthy.
+	reflector.queueResponse(`{"health":"at_risk","reasoning":"failed once"}`)
+	reflector.queueResponse(`{"health":"healthy","reasoning":"recovered"}`)
+
+	executor := &capturingExecutor{stubExecutor: *newStubExecutor()}
+	callNum := int32(0)
+	baseFn := func(ctx context.Context, systemPrompt, userMessage string) (string, int, error) {
+		n := atomic.AddInt32(&callNum, 1)
+		if n == 1 {
+			return "", 0, errors.New("boom: first execution fails")
+		}
+		return "ok", 5, nil
+	}
+
+	c := testTier3Constitution()
+	c.MaxActivePlans = 5
+
+	var mu sync.Mutex
+	failures := 0
+	loop := NewGoalLoop("emp-t3-fail", c, nil, nil).
+		WithReflector(reflector).
+		WithExecutor(executor)
+	loop.SetEmitMetricFunc(func(name string, value float64, tags map[string]string) {
+		if name != "employee.invocations" {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if tags["outcome"] == "failure" {
+			failures++
+		}
+	})
+	// Inject the per-call failure behavior after construction.
+	executor.execFn = baseFn
+	_ = executor
+
+	err := loop.Decide(context.Background(), basicTrigger())
+	if err != nil {
+		t.Fatalf("Decide error: %v", err)
+	}
+
+	// Both candidates processed despite first failing.
+	if prompts := executor.Prompts(); len(prompts) != 2 {
+		t.Fatalf("executed prompts = %v, want 2 candidates processed", prompts)
+	} else if prompts[0] != "fails" || prompts[1] != "succeeds" {
+		t.Errorf("prompts = %v, want [fails succeeds]", prompts)
+	}
+
+	// Synthetic failure result reached Reflect → consecutive-failure
+	// counter incremented then reset by the success. Verify counter state:
+	loop.mu.Lock()
+	cf := loop.consecutiveFailures
+	cs := loop.consecutiveSuccesses
+	loop.mu.Unlock()
+	if cf != 0 || cs != 1 {
+		t.Errorf("after fail-then-succeed: consecutiveFailures=%d consecutiveSuccesses=%d, want 0/1", cf, cs)
+	}
+
+	// Failure metric emitted exactly once with tier="3".
+	mu.Lock()
+	f := failures
+	mu.Unlock()
+	if f != 1 {
+		t.Errorf("failure invocations metrics emitted = %d, want 1", f)
+	}
+}
+
+func TestDecide_Tier3_EmitsInvocationMetrics(t *testing.T) {
+	type metric struct {
+		name string
+		tags map[string]string
+	}
+	var mu sync.Mutex
+	var metrics []metric
+
+	reflector := newStubReflector()
+	reflector.queueResponse(`{"candidates":[{"title":"a","description":"d","prompt":"p"}]}`)
+	reflector.queueResponse(`{"health":"healthy","reasoning":"ok"}`)
+	executor := newStubExecutor()
+	executor.succeedWith("ok", 1)
+
+	c := testTier3Constitution()
+	loop := NewGoalLoop("emp-t3-metric", c, nil, nil).
+		WithReflector(reflector).
+		WithExecutor(executor)
+	loop.SetEmitMetricFunc(func(name string, value float64, tags map[string]string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if name == "employee.invocations" {
+			cp := make(map[string]string, len(tags))
+			for k, v := range tags {
+				cp[k] = v
+			}
+			metrics = append(metrics, metric{name: name, tags: cp})
+		}
+	})
+
+	err := loop.Decide(context.Background(), basicTrigger())
+	if err != nil {
+		t.Fatalf("Decide error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(metrics) != 1 {
+		t.Fatalf("employee.invocations metrics = %d, want 1", len(metrics))
+	}
+	tags := metrics[0].tags
+	if tags["tier"] != "3" {
+		t.Errorf("tier tag = %q, want \"3\"", tags["tier"])
+	}
+	if tags["outcome"] != "success" {
+		t.Errorf("outcome tag = %q, want success", tags["outcome"])
+	}
+	if tags["employee_id"] != "emp-t3-metric" {
+		t.Errorf("employee_id tag = %q, want emp-t3-metric", tags["employee_id"])
 	}
 }

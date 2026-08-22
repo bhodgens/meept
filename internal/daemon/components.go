@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2186,6 +2187,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		c.ChatHandler.SetSessionStore(c.SessionStore)
 		c.ChatHandler.SetMessageSaver(c.SessionStore)
 	}
+	// Wire the shared fence checker onto the ChatHandler so each session
+	// binds its working directory as the sandbox root and honors the
+	// per-session --nofence override. Without this, an enabled fence with
+	// no root blocks every file operation ("fence: misconfigured").
+	if c.ChatHandler != nil && c.FenceChecker != nil {
+		c.ChatHandler.SetFenceController(c.FenceChecker)
+	}
 
 	// Wire the same manager onto the Dispatcher so the multi-agent
 	// dispatch path (RouteToAgent) also resolves session-scoped loops
@@ -3467,7 +3475,20 @@ func (c *Components) Start(ctx context.Context) error {
 		if grpcPort == 0 {
 			grpcPort = 51822 // WireGuard default + 2
 		}
-		grpcAddr := fmt.Sprintf(":%d", grpcPort)
+		// Prefer the configured gossip listen address (bind host restriction);
+		// fall back to ":port" on all interfaces for backward compatibility.
+		// Cluster traffic runs inside a trusted network (WireGuard); node
+		// signatures authenticate events but this port should not be
+		// internet-exposed.
+		var grpcAddr string
+		if c.ClusterConfig != nil && c.ClusterConfig.Network.GossipListenAddr != "" {
+			if host, _, err := net.SplitHostPort(c.ClusterConfig.Network.GossipListenAddr); err == nil && host != "" {
+				grpcAddr = net.JoinHostPort(host, fmt.Sprintf("%d", grpcPort))
+			}
+		}
+		if grpcAddr == "" {
+			grpcAddr = fmt.Sprintf(":%d", grpcPort)
+		}
 		if err := c.GRPCTransport.Start(ctx, grpcAddr); err != nil {
 			c.Logger.Error("Failed to start cluster gRPC transport", "addr", grpcAddr, "error", err)
 		} else {
