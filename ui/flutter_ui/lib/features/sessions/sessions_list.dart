@@ -353,12 +353,11 @@ class _SessionsListState extends ConsumerState<SessionsList> {
         key: ValueKey('session-tile-${session.id}'),
         onTap: () => _activateSession(context, session),
         onDoubleTap: () {
-          // A true double-tap suppresses onTap (gesture arena), so the
-          // session may not be activated yet. Activate it here so the
-          // chat tab has a valid active session.
-          _doActivateSession(session);
-          ref.read(tabActivationProvider.notifier).state = HomeTab.chat;
-          context.go('/');
+          // Activate unconditionally: Flutter suppresses onTap when a
+          // double-tap is recognized, so we cannot assume activation
+          // already happened (fast double-click on an unbound session
+          // would otherwise navigate to chat with no active session).
+          _activateSession(context, session);
         },
         onLongPress: () => _showContextMenu(context, session),
         child: Container(

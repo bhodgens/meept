@@ -92,53 +92,49 @@ void main() {
         id: '1',
         title: 'Test Session',
         createdAt: DateTime.now(),
+        // Bound project => _activateSession takes the no-dialog fast path.
+        projectPath: '/tmp/project',
       );
 
-      Session? capturedActiveSession;
+      // GoRouter so `context.go('/')` in _doActivateSession doesn't throw.
+      final router = GoRouter(
+        initialLocation: '/sessions',
+        routes: [
+          GoRoute(
+            path: '/sessions',
+            builder: (_, __) => const Scaffold(
+              body: SizedBox(height: 400, child: SessionsList()),
+            ),
+          ),
+          GoRoute(
+            path: '/',
+            builder: (_, __) => const Scaffold(body: SizedBox.shrink()),
+          ),
+        ],
+      );
+
+      // Use a ProviderContainer so we can assert provider state after
+      // navigation replaces the list page.
+      final container = ProviderContainer(
+        overrides: [
+          sessionProvider.overrideWith((ref) {
+            return SessionNotifier(sdkClient: _TestSdkClient([session]), websocket: MockWebSocketService());
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
 
       await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            sessionProvider.overrideWith((ref) {
-              return SessionNotifier(
-                sdkClient: _TestSdkClient([session]),
-                websocket: MockWebSocketService(),
-              );
-            }),
-            activeSessionProvider.overrideWith((ref) => null),
-          ],
-          child: Consumer(
-            builder: (context, ref, _) {
-              capturedActiveSession = ref.watch(activeSessionProvider);
-              return MaterialApp.router(
-                routerConfig: GoRouter(
-                  initialLocation: '/sessions',
-                  routes: [
-                    GoRoute(
-                      path: '/sessions',
-                      builder: (_, __) => Scaffold(
-                        body: Column(
-                          children: [
-                            const SizedBox(height: 400, child: SessionsList()),
-                            Text(
-                              'active: ${capturedActiveSession?.id ?? "none"}',
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp.router(routerConfig: router),
         ),
       );
 
       await tester.pumpAndSettle();
 
-      // Initially shows "none"
-      expect(find.text('active: none'), findsOneWidget);
+      // Initially no active session
+      expect(container.read(activeSessionProvider), isNull);
 
       // Tap on the session tile text to select it
       await tester.tap(find.text('test session'));
@@ -154,8 +150,9 @@ void main() {
       }
       await tester.pumpAndSettle();
 
-      // Now shows session id '1'
-      expect(find.text('active: 1'), findsOneWidget);
+      // Activation sets the session and switches to the chat tab.
+      expect(container.read(activeSessionProvider)?.id, '1');
+      expect(container.read(tabActivationProvider), HomeTab.chat);
     });
 
     testWidgets(
@@ -165,6 +162,8 @@ void main() {
           id: 'dbl1',
           title: 'double tap me',
           createdAt: DateTime.now(),
+          // Bound project => _activateSession takes the no-dialog fast path.
+          projectPath: '/tmp/project',
         );
 
         // Use a ProviderContainer so we can read providers directly after the
@@ -251,7 +250,51 @@ void main() {
           child: MaterialApp.router(routerConfig: router),
         ),
       );
+      await tester.pumpAndSettle();
 
+      // Double-tap the session title
+      await tester.tap(find.text('double tap me'));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(find.text('double tap me'));
+      await tester.pumpAndSettle();
+
+      expect(container.read(tabActivationProvider), HomeTab.chat);
+      expect(container.read(activeSessionProvider)?.id, 'dbl1');
+    });
+
+    testWidgets(
+        'quick-creates a session when + button is pressed '
+        '(no dialog; titles auto-derive from first message)', (tester) async {
+      // _createQuickSession navigates via context.go('/'), which requires
+      // a GoRouter — same setup as the double-tap test.
+      final container = ProviderContainer(
+        overrides: [
+          sessionProvider.overrideWith(
+              (ref) => SessionNotifier(sdkClient: _TestSdkClient([]), websocket: MockWebSocketService())),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final router = GoRouter(
+        initialLocation: '/sessions',
+        routes: [
+          GoRoute(
+            path: '/sessions',
+            builder: (_, __) => const Scaffold(body: SizedBox(width: 400, child: SessionsList())),
+          ),
+          GoRoute(
+            path: '/',
+            builder: (_, __) => const Scaffold(body: SizedBox.shrink()),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
       await tester.pumpAndSettle();
 
       expect(container.read(sessionProvider).sessions, isEmpty);
@@ -259,9 +302,12 @@ void main() {
       await tester.tap(find.byIcon(Icons.add));
       await tester.pumpAndSettle();
 
-      final sessions = container.read(sessionProvider).sessions;
-      expect(sessions, hasLength(1));
+      // No dialog appears — the session is created directly with a
+      // placeholder title and becomes the active session.
       expect(find.byType(AlertDialog), findsNothing);
+      final active = container.read(activeSessionProvider);
+      expect(active?.title, 'new session');
+      expect(container.read(tabActivationProvider), HomeTab.chat);
     });
 
     testWidgets('archive confirmation shows when archive icon pressed', (

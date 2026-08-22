@@ -156,7 +156,9 @@ class _TabButton extends StatelessWidget {
     return Expanded(
       child: GestureDetector(
         onTap: () {
-          context.findAncestorStateOfType<_Layout4TopTabsPanelsState>()?.selectTab(index);
+          context
+              .findAncestorStateOfType<_Layout4TopTabsPanelsState>()
+              ?.selectTab(index);
         },
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
