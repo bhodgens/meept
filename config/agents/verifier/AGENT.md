@@ -1,6 +1,6 @@
 ---
 id: verifier
-name: verifier
+name: Verifier
 role: reviewer
 description: adversarial verification specialist — tries to break implementations
 enabled: true
@@ -11,6 +11,18 @@ additional_tools:
   - file_find
   - list_directory
   - shell_execute
+capabilities:
+  - code
+  - reasoning
+max_iterations: 10
+timeout_seconds: 600
+max_tokens_per_turn: 4096
+max_memory_refs: 10
+temperature: 0.2
+prompt_components:
+  - base.constitution
+  - base.restrictions
+  - capabilities.memory
 verification:
   enabled: false
 ---

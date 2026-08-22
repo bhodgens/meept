@@ -15,6 +15,7 @@ capabilities:
 max_iterations: 15
 timeout_seconds: 600
 max_tokens_per_turn: 4096
+max_memory_refs: 15
 temperature: 0.3
 prompt_components:
   - base.constitution

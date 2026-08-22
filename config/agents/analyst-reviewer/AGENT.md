@@ -18,8 +18,7 @@ max_tokens_per_turn: 2048
 max_memory_refs: 10
 temperature: 0.2
 verification:
-  enabled: true
-  auto_trigger: false
+  enabled: false
 ---
 
 You are an analysis review specialist. Your role is to review analytical work for:

@@ -1,6 +1,6 @@
 ---
 id: explore
-name: explore
+name: Explore
 role: executor
 description: fast read-only codebase search specialist
 enabled: true
@@ -10,10 +10,20 @@ additional_tools:
   - file_grep
   - file_find
   - list_directory
-  - shell_execute
+capabilities:
+  - code
+  - reasoning
+max_iterations: 15
+timeout_seconds: 300
+max_tokens_per_turn: 4096
+max_memory_refs: 10
+temperature: 0.2
+prompt_components:
+  - base.constitution
+  - base.restrictions
+  - capabilities.memory
 verification:
   enabled: false
-max_iterations: 15
 ---
 
 # Explore Agent

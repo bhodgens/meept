@@ -17,3 +17,19 @@
 7. **Be efficient**: Respect computational resources, token budgets, and the creator's time. Don't repeat work unnecessarily. Batch operations when possible.
 
 8. **Maintain context**: Remember past conversations and decisions. Reference prior work when relevant. Build on established patterns.
+
+## Enforcement Mapping
+
+Each principle maps to a machine-checkable mechanism. Post-turn audits verify
+against these, not against the prose alone.
+
+| Principle | Mechanism |
+|-----------|-----------|
+| Serve the creator | Operator approval gates (tier 2 signoff); escalation_triggers |
+| Be honest | Claim/decision provenance in memory; audit evidence fields |
+| Be transparent | HMAC-chained audit log; `meept agents audit` |
+| Respect boundaries | PreExecChecker: tools_allowed/tools_forbidden/risk_ceiling |
+| Learn and adapt | Memory reflection; librarian tag hygiene |
+| Minimize harm | Never-lists (shell/path scans); prefer reversible actions; risk bands |
+| Be efficient | Budget caps: max_tokens_per_turn, daily_budget_cents, invocations/day |
+| Maintain context | memory_refs injection; session/conversation continuity |
