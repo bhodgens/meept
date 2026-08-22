@@ -258,6 +258,10 @@ type GoalLoop struct {
 	// autonomous GoalLoop plan). Nil default = pure autonomy.
 	escalationGate EscalationGate
 
+	// auditStore, when non-nil, receives an AuditFinding record whenever
+	// decideTier3 escalates a candidate to plan signoff (leaf 03).
+	auditStore *AuditStore
+
 	// Mutable state (guarded by mu).
 	mu                   sync.Mutex
 	consecutiveFailures  int
@@ -272,9 +276,10 @@ type GoalLoop struct {
 type EmitMetricFunc func(name string, value float64, tags map[string]string)
 
 // EscalationGate reports whether a candidate must be routed to plan signoff
-// instead of immediate execution. Returns true to escalate (tier-3 → tier-2
-// pending-plan path); false for immediate autonomous execution.
-type EscalationGate func(c *Constitution, candidate CandidatePlan) bool
+// instead of immediate execution. Returns (true, triggerReason) to escalate
+// (tier-3 → tier-2 pending-plan path); (false, "") for immediate autonomous
+// execution. The reason is carried into the escalation audit record.
+type EscalationGate func(c *Constitution, candidate CandidatePlan) (bool, string)
 
 // WithEscalationGate injects the escalation gate used by decideTier3. Nil is
 // ignored (typed-nil guard): a loop with no gate runs in full autonomy mode
@@ -294,6 +299,18 @@ func (l *GoalLoop) escalationGateSnapshot() EscalationGate {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.escalationGate
+}
+
+// WithAuditStore injects the AuditStore used to persist an audit finding
+// when decideTier3 escalates a candidate to plan signoff. Nil is ignored
+// (typed-nil guard per CLAUDE.md). Leaf 03 of the tier-3 plan.
+func (l *GoalLoop) WithAuditStore(s *AuditStore) *GoalLoop {
+	if s != nil {
+		l.mu.Lock()
+		l.auditStore = s
+		l.mu.Unlock()
+	}
+	return l
 }
 
 // NewGoalLoop constructs a GoalLoop for the given employee. The constitution
@@ -1023,6 +1040,12 @@ func (l *GoalLoop) decideTier3(ctx context.Context, trigger TriggerEvent, logger
 	gate := l.escalationGateSnapshot()
 	store := l.goalStore
 
+	// Leaf 03: audit store for tier-3 escalation records. Read under lock;
+	// Create is invoked outside the mutex (mutex-scope rule).
+	l.mu.Lock()
+	auditStore := l.auditStore
+	l.mu.Unlock()
+
 	// Telemetry: emitMetricFn is read once under lock; the callback is
 	// invoked outside the mutex (same pattern as Reflect).
 	l.mu.Lock()
@@ -1051,31 +1074,60 @@ func (l *GoalLoop) decideTier3(ctx context.Context, trigger TriggerEvent, logger
 			}
 		}
 
-		if gate != nil && gate(constitution, candidate) {
-			// Escalate to plan signoff (tier-2 path): create a pending
-			// plan and track it in ActivePlanIDs, without executing.
-			ref, planErr := l.Plan(ctx, candidate)
-			if planErr != nil {
-				logger.Error("tier3 escalation plan creation failed",
-					"candidate", candidate.Title,
-					"error", planErr)
-				continue
-			}
-			if store != nil {
-				if goal, err := l.lookupActiveGoal(ctx); err == nil && goal != nil {
-					goal.AddActivePlan(ref.ID)
-					updateErr := store.Update(ctx, goal)
-					if updateErr != nil {
-						logger.Warn("failed to track escalated plan in ActivePlanIDs",
-							"plan_id", ref.ID, "error", updateErr)
+		if gate != nil {
+			// Escalation gate returns (escalate, triggerReason) so the
+			// audit record can carry the constitution's reason (leaf 03).
+			escalate, escalateReason := gate(constitution, candidate)
+			if escalate {
+				// Escalate to plan signoff (tier-2 path): create a pending
+				// plan and track it in ActivePlanIDs, without executing.
+				ref, planErr := l.Plan(ctx, candidate)
+				if planErr != nil {
+					logger.Error("tier3 escalation plan creation failed",
+						"candidate", candidate.Title,
+						"error", planErr)
+					continue
+				}
+				if store != nil {
+					if goal, err := l.lookupActiveGoal(ctx); err == nil && goal != nil {
+						goal.AddActivePlan(ref.ID)
+						updateErr := store.Update(ctx, goal)
+						if updateErr != nil {
+							logger.Warn("failed to track escalated plan in ActivePlanIDs",
+								"plan_id", ref.ID, "error", updateErr)
+						}
 					}
 				}
+				// Leaf 03: persist an audit finding for the escalation so
+				// `meept agents audit` surfaces it. plan_id references the
+				// just-created pending plan; evidence carries the trigger
+				// Reason. Non-fatal on error — escalation itself succeeded.
+				if auditStore != nil {
+					auditErr := auditStore.Create(ctx, AuditFinding{
+						EmployeeID:   l.employeeID,
+						PlanID:       ref.ID,
+						Severity:     SeverityInfo,
+						Checkpoint:   CheckpointPreExec,
+						ViolatedRule: "escalation_trigger",
+						Evidence:     fmt.Sprintf("candidate %q escalated: %s", candidate.Title, escalateReason),
+					})
+					if auditErr != nil {
+						logger.Warn("tier3 escalation audit write failed (non-fatal)",
+							"plan_id", ref.ID, "error", auditErr)
+					}
+				}
+				logger.Info("tier3 candidate escalated to plan signoff",
+					"plan_id", ref.ID,
+					"candidate", candidate.Title)
+				// Leaf 03: dedicated escalation counter.
+				if emitMetricFn != nil {
+					emitMetricFn("employee.tier3.escalated", 1, map[string]string{
+						"employee_id": l.employeeID,
+					})
+				}
+				emitInvocation("escalated")
+				continue
 			}
-			logger.Info("tier3 candidate escalated to plan signoff",
-				"plan_id", ref.ID,
-				"candidate", candidate.Title)
-			emitInvocation("escalated")
-			continue
 		}
 
 		// Pure autonomy: execute immediately with system approval

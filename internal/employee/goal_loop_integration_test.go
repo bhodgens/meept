@@ -3,6 +3,10 @@ package employee
 import (
 	"context"
 	"errors"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -443,9 +447,9 @@ func TestGoalLoop_Tier3_EscalationGate_Integration(t *testing.T) {
 		WithReflector(reflector).
 		WithExecutor(executor).
 		WithPlanner(planner).
-		WithEscalationGate(func(c *Constitution, cand CandidatePlan) bool {
+		WithEscalationGate(func(c *Constitution, cand CandidatePlan) (bool, string) {
 			escalate, _ := ShouldEscalate(c, cand)
-			return escalate
+			return escalate, ""
 		})
 
 	err := loop.Decide(context.Background(), basicTrigger())
@@ -467,5 +471,111 @@ func TestGoalLoop_Tier3_EscalationGate_Integration(t *testing.T) {
 	}
 	if prompts := executor.Prompts(); len(prompts) != 1 || prompts[0] != "web_fetch the status dashboard" {
 		t.Errorf("executed prompts = %v, want [\"web_fetch the status dashboard\"]", prompts)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Leaf 03: end-to-end tier-3 wiring — gate + metrics + audit in one Decide.
+// ---------------------------------------------------------------------------
+
+// TestGoalLoop_Tier3_EndToEnd_MetricsAudit verifies the full tier-3 stack in a
+// single Decide call with mixed candidates: the ShouldEscalate gate routes the
+// matching candidate to plan signoff, the non-matching candidate executes
+// immediately, the escalated metric and invocation metric are emitted, and an
+// audit record carrying the pending plan ID is written to the AuditStore.
+func TestGoalLoop_Tier3_EndToEnd_MetricsAudit(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "audit.db")
+	store, err := NewAuditStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewAuditStore: %v", err)
+	}
+	defer store.Close()
+
+	const triggerReason = "shell requires approval"
+	constitution := testTier3Constitution()
+	constitution.Constraints.EscalationTriggers = []EscalationTrigger{
+		{On: EscalateOnTool, Match: "shell_execute", Reason: triggerReason},
+	}
+
+	reflector := newStubReflector()
+	reflector.queueResponse(`{"candidates":[
+		{"title":"run shell","description":"needs approval","prompt":"use shell_execute to restart CI"},
+		{"title":"fetch page","description":"safe","prompt":"web_fetch the status dashboard"}
+	]}`)
+	// REFLECT after the immediate execution of the non-matching candidate.
+	reflector.queueResponse(`{"health":"healthy","reasoning":"ok"}`)
+
+	executor := &capturingExecutor{stubExecutor: *newStubExecutor()}
+	executor.succeedWith("done", 10)
+	planner := newStubPlanner()
+
+	var mu sync.Mutex
+	var metricNames []string
+
+	loop := NewGoalLoop("emp-tier3-e2e", constitution, nil, nil).
+		WithReflector(reflector).
+		WithExecutor(executor).
+		WithPlanner(planner).
+		WithAuditStore(store).
+		WithEscalationGate(func(c *Constitution, cand CandidatePlan) (bool, string) {
+			escalate, reason := ShouldEscalate(c, cand)
+			return escalate, reason
+		})
+	loop.SetEmitMetricFunc(func(name string, value float64, tags map[string]string) {
+		mu.Lock()
+		defer mu.Unlock()
+		metricNames = append(metricNames, name)
+	})
+
+	if err := loop.Decide(context.Background(), basicTrigger()); err != nil {
+		t.Fatalf("Decide error: %v", err)
+	}
+
+	// Signal 1: executed candidate reflected — exactly the safe one ran.
+	if prompts := executor.Prompts(); len(prompts) != 1 || prompts[0] != "web_fetch the status dashboard" {
+		t.Errorf("executed prompts = %v, want [\"web_fetch the status dashboard\"]", prompts)
+	}
+
+	// Signal 2: pending plan exists for the escalated candidate.
+	if planner.CreatedCount() != 1 {
+		t.Fatalf("planner created %d plans, want 1 (escalated candidate)", planner.CreatedCount())
+	}
+	escalatedPlanID := fmt.Sprintf("%s%03d", "plan-test-", 1)
+
+	// Signal 3: both the dedicated escalation counter and the invocation
+	// counter were emitted.
+	mu.Lock()
+	sawEscalated, sawInvocation := false, false
+	for _, n := range metricNames {
+		switch n {
+		case "employee.tier3.escalated":
+			sawEscalated = true
+		case "employee.invocations":
+			sawInvocation = true
+		}
+	}
+	mu.Unlock()
+	if !sawEscalated {
+		t.Errorf("employee.tier3.escalated not emitted; metrics = %v", metricNames)
+	}
+	if !sawInvocation {
+		t.Errorf("employee.invocations not emitted; metrics = %v", metricNames)
+	}
+
+	// Signal 4: audit record written, carrying plan_id + trigger reason.
+	findings, err := store.List(context.Background(), AuditListFilter{EmployeeID: "emp-tier3-e2e"})
+	if err != nil {
+		t.Fatalf("List findings: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("audit findings = %d, want 1 escalation record", len(findings))
+	}
+	f := findings[0]
+	if f.PlanID == "" {
+		t.Error("escalation finding missing plan_id")
+	}
+	_ = escalatedPlanID
+	if !strings.Contains(f.Evidence, triggerReason) {
+		t.Errorf("evidence = %q, want it to contain trigger reason %q", f.Evidence, triggerReason)
 	}
 }

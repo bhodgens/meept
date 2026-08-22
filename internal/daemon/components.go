@@ -3368,6 +3368,12 @@ func (c *Components) Start(ctx context.Context) error {
 				if gate := escalationGateForTier(&emp.Constitution, emp.ID, c.Logger); gate != nil {
 					loop = loop.WithEscalationGate(gate)
 				}
+				// Leaf 03 (tier-3 plan): tier-3 loops write escalation audit
+				// findings so `meept agents audit` surfaces them. Nil-safe:
+				// WithAuditStore ignores nil.
+				if c.EmployeeAuditStore != nil {
+					loop = loop.WithAuditStore(c.EmployeeAuditStore)
+				}
 					if planner != nil {
 						loop = loop.WithPlanner(planner)
 					}
@@ -3570,13 +3576,13 @@ func escalationGateForTier(c *employee.Constitution, employeeID string, logger *
 	}
 	constitution := c
 	log := logger.With("component", "escalation-gate", "employee_id", employeeID)
-	return func(_ *employee.Constitution, cand employee.CandidatePlan) bool {
+	return func(_ *employee.Constitution, cand employee.CandidatePlan) (bool, string) {
 		escalate, reason := employee.ShouldEscalate(constitution, cand)
 		if escalate {
 			log.Info("candidate escalated to plan signoff",
 				"candidate", cand.Title, "reason", reason)
 		}
-		return escalate
+		return escalate, reason
 	}
 }
 

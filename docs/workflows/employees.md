@@ -61,7 +61,49 @@ The loop is tier-aware. Everything else in the system (storage, triggering, sign
 
 **Tier 2 (propose):** Scheduled ASSESS per `Constraints.AssessmentInterval`. The LLM proposes candidate Plans; each goes to `PendingApproval` and routes to the employee's `escalates_to` for signoff via the existing Plan workflow. Once approved, EXECUTE runs `BotRunner.Execute()` with the plan's prompt. REFLECT updates Goal health.
 
-**Tier 3 (autonomous):** Phase 2, not wired. Same as tier 2 except Plans execute immediately after ASSESS — no `PendingApproval` stop. Only the constitution's authority boundaries and escalation triggers gate execution.
+**Tier 3 (autonomous):** IMPLEMENTED. Same as tier 2 except candidate Plans execute immediately after ASSESS — no `PendingApproval` stop — unless an escalation trigger matches, in which case the candidate is routed to plan signoff like tier 2. Implemented in `GoalLoop.decideTier3` (`internal/employee/goal_loop.go`).
+
+#### Tier 3 behavior
+
+1. `Decide` dispatches to `decideTier3` for `AutonomyTier: 2` (Tier3Autonomous).
+2. Per ASSESS candidate, the `EscalationGate` (wired as `ShouldEscalate` from `internal/employee/enforcement.go`) checks the constitution's `escalation_triggers`:
+   - `risk_level`: escalates when the estimated risk band >= the trigger's band. Candidates default to "medium" at plan level (per-tool-call risk is still enforced by `PreExecChecker`).
+   - `tool` / `action`: case-insensitive substring match against the candidate prompt.
+   - `cost`: never matches today — candidates carry no cost estimate; documented integration point for future estimates.
+3. Non-matching candidates execute immediately with system approval (`ApproverID: "system"`), then REFLECT.
+4. Matching candidates become pending Plans routed to `escalates_to`; no execution.
+
+#### Tier 3 observability
+
+- Metric `employee.invocations` with tags `tier="3"`, `outcome=success|failure|escalated`.
+- Metric `employee.tier3.escalated` on each escalation.
+- Audit finding (`violated_rule="escalation_trigger"`, evidence carries the trigger reason and candidate title) written to the employee AuditStore on each escalation — surfaces via `meept agents audit <id>`.
+- MaxActivePlans cap enforced per candidate; consecutive-failure auto-pause still applies.
+
+#### Example tier-3 constitution
+
+```json5
+{
+  purpose: "keep CI green",
+  role: "CI Reliability Engineer",
+  charter: "investigate failures, open issues, never merge code",
+  autonomy_tier: 2, // Tier3Autonomous
+  escalates_to: ["user"],
+  constraints: {
+    tools_allowed: ["web_fetch", "shell_execute", "file_read"],
+    risk_ceiling: "medium",
+    assessment_interval: "15m",
+    daily_budget_cents: 50,
+    max_invocations_per_day: 100,
+    escalation_triggers: [
+      { on: "tool", match: "shell_execute", reason: "shell requires signoff" },
+    ],
+    never: ["force push"],
+  },
+}
+```
+
+Spec reference: `docs/superpowers/specs/2026-06-23-ai-employee-design.md` lines 298–300.
 
 ### Constitution Engine
 

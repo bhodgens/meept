@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1066,7 +1067,7 @@ func TestGoalLoopEscalationGate_Setter(t *testing.T) {
 
 	t.Run("set and read back", func(t *testing.T) {
 		loop := NewGoalLoop("emp-test", testTier3Constitution(), nil, nil)
-		gate := func(c *Constitution, cand CandidatePlan) bool { return true }
+		gate := func(c *Constitution, cand CandidatePlan) (bool, string) { return true, "test" }
 		loop.WithEscalationGate(gate)
 		if got := loop.escalationGateSnapshot(); got == nil {
 			t.Fatal("gate should be set after WithEscalationGate")
@@ -1176,8 +1177,8 @@ func TestDecide_Tier3_EscalationGate_RoutesToPlanSignoff(t *testing.T) {
 		WithReflector(reflector).
 		WithExecutor(executor).
 		WithPlanner(planner).
-		WithEscalationGate(func(_ *Constitution, _ CandidatePlan) bool {
-			return true // always escalate
+		WithEscalationGate(func(_ *Constitution, _ CandidatePlan) (bool, string) {
+			return true, "always escalate"
 		})
 
 	err := loop.Decide(context.Background(), basicTrigger())
@@ -1221,7 +1222,7 @@ func TestDecide_Tier3_EscalatedPlan_TrackedInActivePlanIDs(t *testing.T) {
 	loop := NewGoalLoop("emp-t3-track", c, store, nil).
 		WithReflector(reflector).
 		WithPlanner(&stubPlanner{idPrefix: "plan-esc-"}).
-		WithEscalationGate(func(_ *Constitution, _ CandidatePlan) bool { return true })
+		WithEscalationGate(func(_ *Constitution, _ CandidatePlan) (bool, string) { return true, "test" })
 
 	err := loop.Decide(context.Background(), basicTrigger())
 	if err != nil {
@@ -1363,5 +1364,131 @@ func TestDecide_Tier3_EmitsInvocationMetrics(t *testing.T) {
 	}
 	if tags["employee_id"] != "emp-t3-metric" {
 		t.Errorf("employee_id tag = %q, want emp-t3-metric", tags["employee_id"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Leaf 03: employee.tier3.escalated metric + escalation audit record.
+// ---------------------------------------------------------------------------
+
+// TestDecide_Tier3_EmitsEscalatedMetric verifies that an escalated candidate
+// emits the dedicated "employee.tier3.escalated" counter tagged with
+// employee_id (leaf 03 contract), alongside employee.invocations.
+func TestDecide_Tier3_EmitsEscalatedMetric(t *testing.T) {
+	type metric struct {
+		name string
+		tags map[string]string
+	}
+	var mu sync.Mutex
+	var metrics []metric
+
+	c := testTier3Constitution()
+	c.Constraints.EscalationTriggers = []EscalationTrigger{
+		{On: EscalateOnTool, Match: "shell_execute", Reason: "shell requires approval"},
+	}
+
+	reflector := newStubReflector()
+	reflector.queueResponse(`{"candidates":[{"title":"run shell","description":"d","prompt":"use shell_execute now"}]}`)
+	executor := newStubExecutor()
+	planner := newStubPlanner()
+
+	loop := NewGoalLoop("emp-t3-esc-metric", c, nil, nil).
+		WithReflector(reflector).
+		WithExecutor(executor).
+		WithPlanner(planner).
+		WithEscalationGate(func(c *Constitution, cand CandidatePlan) (bool, string) {
+			escalate, reason := ShouldEscalate(c, cand)
+			return escalate, reason
+		})
+	loop.SetEmitMetricFunc(func(name string, value float64, tags map[string]string) {
+		mu.Lock()
+		defer mu.Unlock()
+		cp := make(map[string]string, len(tags))
+		for k, v := range tags {
+			cp[k] = v
+		}
+		metrics = append(metrics, metric{name: name, tags: cp})
+	})
+
+	if err := loop.Decide(context.Background(), basicTrigger()); err != nil {
+		t.Fatalf("Decide error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	var escalated *metric
+	for i := range metrics {
+		if metrics[i].name == "employee.tier3.escalated" {
+			escalated = &metrics[i]
+			break
+		}
+	}
+	if escalated == nil {
+		t.Fatalf("employee.tier3.escalated not emitted; metrics = %+v", metrics)
+	}
+	if escalated.tags["employee_id"] != "emp-t3-esc-metric" {
+		t.Errorf("employee_id tag = %q, want emp-t3-esc-metric", escalated.tags["employee_id"])
+	}
+}
+
+// TestDecide_Tier3_EscalationWritesAuditRecord verifies that decideTier3's
+// escalation branch persists an AuditFinding carrying the pending plan ID and
+// trigger reason into a real AuditStore (leaf 03 Task 2).
+func TestDecide_Tier3_EscalationWritesAuditRecord(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "audit.db")
+	store, err := NewAuditStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewAuditStore: %v", err)
+	}
+	defer store.Close()
+
+	c := testTier3Constitution()
+	const triggerReason = "shell requires approval"
+	c.Constraints.EscalationTriggers = []EscalationTrigger{
+		{On: EscalateOnTool, Match: "shell_execute", Reason: triggerReason},
+	}
+
+	reflector := newStubReflector()
+	reflector.queueResponse(`{"candidates":[{"title":"run shell","description":"d","prompt":"use shell_execute now"}]}`)
+	executor := newStubExecutor()
+	planner := newStubPlanner()
+
+	loop := NewGoalLoop("emp-t3-audit", c, nil, nil).
+		WithReflector(reflector).
+		WithExecutor(executor).
+		WithPlanner(planner).
+		WithAuditStore(store).
+		WithEscalationGate(func(c *Constitution, cand CandidatePlan) (bool, string) {
+			escalate, reason := ShouldEscalate(c, cand)
+			return escalate, reason
+		})
+
+	if err := loop.Decide(context.Background(), basicTrigger()); err != nil {
+		t.Fatalf("Decide error: %v", err)
+	}
+
+	findings, err := store.List(context.Background(), AuditListFilter{EmployeeID: "emp-t3-audit"})
+	if err != nil {
+		t.Fatalf("List findings: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("audit findings = %d, want 1 escalation record", len(findings))
+	}
+	f := findings[0]
+	if f.PlanID == "" {
+		t.Error("escalation finding missing plan_id")
+	}
+	if f.Severity != SeverityInfo {
+		t.Errorf("severity = %q, want info", f.Severity)
+	}
+	if f.Checkpoint != CheckpointPreExec {
+		t.Errorf("checkpoint = %q, want pre_exec", f.Checkpoint)
+	}
+	if f.EmployeeID != "emp-t3-audit" {
+		t.Errorf("employee_id = %q, want emp-t3-audit", f.EmployeeID)
+	}
+	// The trigger Reason must be carried in the record.
+	if !strings.Contains(f.Evidence, triggerReason) {
+		t.Errorf("evidence = %q, want it to contain trigger reason %q", f.Evidence, triggerReason)
 	}
 }
