@@ -2148,6 +2148,62 @@ func TestHandleSessionArchive(t *testing.T) {
 	}
 }
 
+func TestHandleSessionUpdateDescription(t *testing.T) {
+	srv := newArchiveTestServer(t)
+
+	// Create a session.
+	body := strings.NewReader(`{"name":"desc-test"}`)
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", body)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRR := httptest.NewRecorder()
+	srv.handleSessionCreate(createRR, createReq)
+	var createResp struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(createRR.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("unmarshal create resp: %v", err)
+	}
+
+	// PATCH the description.
+	desc := "my custom description"
+	payload, _ := json.Marshal(map[string]string{"description": desc})
+	patchReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/v1/sessions/"+createResp.ID,
+		strings.NewReader(string(payload)),
+	)
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchReq.SetPathValue("id", createResp.ID)
+	patchRR := httptest.NewRecorder()
+	srv.handleSessionArchive(patchRR, patchReq)
+	if patchRR.Code != http.StatusOK {
+		t.Fatalf("patch description: expected 200, got %d: %s",
+			patchRR.Code, patchRR.Body.String())
+	}
+
+	// Response body carries the updated session.
+	var patchResp map[string]any
+	if err := json.Unmarshal(patchRR.Body.Bytes(), &patchResp); err != nil {
+		t.Fatalf("unmarshal patch resp: %v", err)
+	}
+	if got, _ := patchResp["description"].(string); got != desc {
+		t.Fatalf("expected description=%q in patch response, got %q", desc, patchResp["description"])
+	}
+
+	// Persisted: verify via GET.
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/"+createResp.ID, nil)
+	getReq.SetPathValue("id", createResp.ID)
+	getRR := httptest.NewRecorder()
+	srv.handleSessionGet(getRR, getReq)
+	var getResp map[string]any
+	if err := json.Unmarshal(getRR.Body.Bytes(), &getResp); err != nil {
+		t.Fatalf("unmarshal get resp: %v", err)
+	}
+	if got, _ := getResp["description"].(string); got != desc {
+		t.Fatalf("expected persisted description=%q, got %q", desc, getResp["description"])
+	}
+}
+
 func TestHandleSessionArchiveRejectsUnknownFields(t *testing.T) {
 	srv := newArchiveTestServer(t)
 

@@ -16,11 +16,14 @@ import (
 
 // SearchResult represents a single search result from any scope.
 type SearchResult struct {
-	Type      string  `json:"type"` // "session", "task", "memory", "plan"
+	Type      string  `json:"type"` // "session", "task", "memory", "plan", "message"
 	ID        string  `json:"id"`
 	Title     string  `json:"title"`
 	Snippet   string  `json:"snippet"`
 	Relevance float64 `json:"relevance"`
+	// SessionID is set for "message" results so clients can navigate to
+	// the containing session. Empty for other types.
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // SearchRequest contains parameters for a cross-scope search.
@@ -422,6 +425,7 @@ func sessionResultsToSearchResults(ms []session.MessageSearchResult) []SearchRes
 			Title:     title,
 			Snippet:   snippet,
 			Relevance: clampRelevance(m.Relevance),
+			SessionID: m.SessionID,
 		})
 	}
 	return out

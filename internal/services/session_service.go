@@ -624,3 +624,56 @@ func (s *SessionService) ArchiveSession(ctx context.Context, req ArchiveSessionR
 	}
 	return nil
 }
+
+// SearchMessages performs a server-side content search across all sessions.
+// Delegates to the store's FTS5 index (SQLiteStore) or in-memory fallback
+// (MemoryStore).
+type SearchMessagesRequest struct {
+	Query string `json:"query"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+func (s *SessionService) SearchMessages(ctx context.Context, req SearchMessagesRequest) ([]session.MessageSearchResult, error) {
+	if strings.TrimSpace(req.Query) == "" {
+		return nil, wrapError("session", "SearchMessages", ErrInvalidInput)
+	}
+	if s.store == nil {
+		return nil, wrapError("session", "SearchMessages", ErrUnavailable)
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	results, err := s.store.SearchMessages(ctx, req.Query, limit)
+	if err != nil {
+		return nil, wrapError("session", "SearchMessages", err)
+	}
+	if results == nil {
+		results = []session.MessageSearchResult{}
+	}
+	return results, nil
+}
+
+// UpdateDescription sets a session's description text.
+type UpdateDescriptionRequest struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+}
+
+func (s *SessionService) UpdateDescription(ctx context.Context, req UpdateDescriptionRequest) (*session.Session, error) {
+	if req.ID == "" {
+		return nil, wrapError("session", "UpdateDescription", ErrInvalidInput)
+	}
+	if s.store == nil {
+		return nil, wrapError("session", "UpdateDescription", ErrUnavailable)
+	}
+	sess := s.store.Get(req.ID)
+	if sess == nil {
+		return nil, wrapError("session", "UpdateDescription", ErrNotFound)
+	}
+	if err := s.store.UpdateDescription(req.ID, req.Description); err != nil {
+		return nil, wrapError("session", "UpdateDescription", err)
+	}
+	sess.Description = req.Description
+	return sess, nil
+}

@@ -830,9 +830,11 @@ func (s *Server) handleSessionArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Strict decoding: reject any field that isn't "archived".
+	// Strict decoding: reject any field that isn't "archived" or
+	// "description". Both are optional; at least one must be present.
 	var body struct {
-		Archived *bool `json:"archived"`
+		Archived    *bool   `json:"archived"`
+		Description *string `json:"description"`
 	}
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
@@ -840,18 +842,36 @@ func (s *Server) handleSessionArchive(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "invalid body: "+err.Error())
 		return
 	}
-	if body.Archived == nil {
-		s.writeError(w, http.StatusBadRequest, `"archived" field is required`)
+	if body.Archived == nil && body.Description == nil {
+		s.writeError(w, http.StatusBadRequest,
+			`"archived" or "description" field is required`)
 		return
 	}
-
-	// ArchiveSession maps store "not found" to services.ErrNotFound already;
-	// handleServiceError translates ErrNotFound -> 404.
-	if err := s.services.Session.ArchiveSession(r.Context(), services.ArchiveSessionRequest{ID: id, Archived: *body.Archived}); err != nil {
-		s.handleServiceError(w, err)
-		return
+	if body.Archived != nil {
+		// ArchiveSession maps store "not found" to services.ErrNotFound already;
+		// handleServiceError translates ErrNotFound -> 404.
+		if err := s.services.Session.ArchiveSession(r.Context(), services.ArchiveSessionRequest{ID: id, Archived: *body.Archived}); err != nil {
+			s.handleServiceError(w, err)
+			return
+		}
+	}
+	sess := (*session.Session)(nil)
+	if body.Description != nil {
+		updated, err := s.services.Session.UpdateDescription(r.Context(), services.UpdateDescriptionRequest{ID: id, Description: *body.Description})
+		if err != nil {
+			s.handleServiceError(w, err)
+			return
+		}
+		sess = updated
 	}
 
+	// Preserve the historical archive-only contract (204 No Content).
+	// Return the updated session body only when the description changed,
+	// so clients don't need a follow-up GET in that case.
+	if sess != nil {
+		s.writeJSON(w, http.StatusOK, sess)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
