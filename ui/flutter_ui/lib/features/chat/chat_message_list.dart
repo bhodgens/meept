@@ -28,6 +28,10 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   final ScrollController _scrollController = ScrollController();
   final Map<String, GlobalKey> _messageKeys = {};
   bool _isAtBottom = true;
+  /// Reactive mirror of [!_isAtBottom]; drives the scroll-to-bottom
+  /// button visibility. _isAtBottom alone is a plain field the build
+  /// method cannot observe.
+  bool _showScrollToBottom = false;
   int _previousMessageCount = 0;
 
   @override
@@ -70,6 +74,14 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
     final maxScroll = _scrollController.position.maxScrollExtent;
     final currentScroll = _scrollController.offset;
     _isAtBottom = currentScroll >= (maxScroll - 100);
+    _updateScrollButton();
+  }
+
+  void _updateScrollButton() {
+    final show = !_isAtBottom;
+    if (show != _showScrollToBottom && mounted) {
+      setState(() => _showScrollToBottom = show);
+    }
   }
 
   void _scrollToBottom() {
@@ -221,6 +233,25 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                 child: ErrorBanner(
                   message: chatState.error!,
                   onDismiss: () => ref.read(chatProvider(widget.sessionId).notifier).clearError(),
+                ),
+              ),
+            ),
+          if (_showScrollToBottom)
+            Positioned(
+              bottom: 70, // Above the chat input
+              right: 16,
+              child: Material(
+                color: CyberpunkColors.darkGray,
+                shape: const CircleBorder(),
+                elevation: 4,
+                child: IconButton(
+                  tooltip: 'scroll to latest',
+                  icon: Icon(
+                    Icons.arrow_downward,
+                    size: 20,
+                    color: CyberpunkColors.orangePrimary,
+                  ),
+                  onPressed: _scrollToBottom,
                 ),
               ),
             ),

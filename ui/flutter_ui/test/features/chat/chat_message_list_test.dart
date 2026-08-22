@@ -358,6 +358,43 @@ void main() {
         '2',
       );
     });
+
+    testWidgets('scroll-to-bottom button hidden at bottom, shown when '
+        'scrolled up, tap returns to bottom', (tester) async {
+      // Many tall messages so the list is scrollable.
+      final many = List.generate(
+        40,
+        (i) => ChatMessage(
+          id: 'm$i',
+          role: i.isEven ? 'user' : 'assistant',
+          content: 'message body line $i\n' * 6,
+          timestamp: DateTime.utc(2024, 1, 1).add(Duration(minutes: i)),
+        ),
+      );
+      await tester.pumpWidget(_buildTestApp(
+        child: const SizedBox(
+          width: 600,
+          height: 500,
+          child: ChatMessageList(sessionId: 'test-session'),
+        ),
+        initialChatState: ChatState(messages: many),
+      ));
+      await tester.pumpAndSettle();
+
+      // At bottom: button hidden.
+      expect(find.byIcon(Icons.arrow_downward), findsNothing);
+
+      // Scroll up.
+      await tester.drag(find.byType(ListView), const Offset(0, 800));
+      await tester.pumpAndSettle();
+
+      expect(find.byIcon(Icons.arrow_downward), findsOneWidget);
+
+      // Tap it: returns to bottom and the button hides again.
+      await tester.tap(find.byIcon(Icons.arrow_downward));
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.arrow_downward), findsNothing);
+    });
   });
 
   group('MessagePlaceholder', () {
