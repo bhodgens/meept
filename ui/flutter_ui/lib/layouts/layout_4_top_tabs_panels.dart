@@ -321,7 +321,11 @@ class _ToolItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
+    // Own Material: the parent panel's DecoratedBox paints over the
+    // nearest Material, which hides ListTile ink/background.
+    return Material(
+      color: Colors.transparent,
+      child: ListTile(
       leading: Icon(
         icon,
         size: 18,
@@ -335,6 +339,7 @@ class _ToolItem extends StatelessWidget {
         ),
       ),
       onTap: () {},
+      ),
     );
   }
 }

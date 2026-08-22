@@ -263,11 +263,14 @@ class _StatusBar extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          Text(
-            '^k focus · / cmd · ^f find',
-            style: CyberpunkTypography.bodySmall.copyWith(
-              color: CyberpunkColors.veryLightGray,
-              fontFamily: 'SourceCodePro',
+          Flexible(
+            child: Text(
+              '^k focus · / cmd · ^f find',
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.veryLightGray,
+                fontFamily: 'SourceCodePro',
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],

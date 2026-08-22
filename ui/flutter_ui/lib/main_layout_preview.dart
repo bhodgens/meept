@@ -47,10 +47,15 @@ class _LayoutPreviewAppState extends State<LayoutPreviewApp> {
         color: CyberpunkColors.black,
         child: Stack(
           children: [
-            // Layout content
+            // Layout content. Wrapped in Material: the layouts contain
+            // Material widgets (TextField, InkWell) that require a Material
+            // ancestor, which a bare Container does not provide.
             Positioned.fill(
               top: 80, // Leave space for the overlay header
-              child: _buildLayout(_selectedLayout),
+              child: Material(
+                color: CyberpunkColors.black,
+                child: _buildLayout(_selectedLayout),
+              ),
             ),
             // Overlay header
             Positioned(
