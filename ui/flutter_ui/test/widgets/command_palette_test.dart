@@ -107,4 +107,111 @@ void main() {
     await tester.pump();
     expect(selected, isNotNull);
   });
+
+  group('type-to-filter', () {
+    testWidgets('typing narrows the visible items', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: CommandPalette(
+            items: CommandPalette.defaultItems,
+            onSelected: (_) {},
+          ),
+        ),
+      ));
+      await tester.pump();
+
+      await tester.enterText(find.byType(TextField), 'session');
+      await tester.pump();
+
+      // Matches "sessions" (label) — but not chat/plans/tasks/agents.
+      expect(find.text('sessions'), findsOneWidget);
+      expect(find.text('chat'), findsNothing);
+      expect(find.text('plans'), findsNothing);
+      expect(find.text('tasks'), findsNothing);
+    });
+
+    testWidgets('filter matches description text too', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: CommandPalette(
+            items: CommandPalette.defaultItems,
+            onSelected: (_) {},
+          ),
+        ),
+      ));
+      await tester.pump();
+
+      // "employees" only appears in the agents item's description.
+      await tester.enterText(find.byType(TextField), 'employees');
+      await tester.pump();
+
+      expect(find.text('agents'), findsOneWidget);
+      expect(find.text('chat'), findsNothing);
+    });
+
+    testWidgets('enter activates the filtered selection', (tester) async {
+      CommandPaletteItem? selected;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: CommandPalette(
+            items: CommandPalette.defaultItems,
+            onSelected: (item) => selected = item,
+          ),
+        ),
+      ));
+      await tester.pump();
+
+      await tester.enterText(find.byType(TextField), 'new');
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+
+      expect(selected?.label, 'new session');
+    });
+
+    testWidgets('no-match query shows empty list without crashing',
+        (tester) async {
+      CommandPaletteItem? selected;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: CommandPalette(
+            items: CommandPalette.defaultItems,
+            onSelected: (item) => selected = item,
+          ),
+        ),
+      ));
+      await tester.pump();
+
+      await tester.enterText(find.byType(TextField), 'zzzz');
+      await tester.pump();
+      expect(find.text('chat'), findsNothing);
+
+      // Enter with no candidates must not crash nor select anything.
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(selected, isNull);
+    });
+
+    testWidgets('clearing the filter restores all items', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: CommandPalette(
+            items: CommandPalette.defaultItems,
+            onSelected: (_) {},
+          ),
+        ),
+      ));
+      await tester.pump();
+
+      await tester.enterText(find.byType(TextField), 'plans');
+      await tester.pump();
+      expect(find.text('chat'), findsNothing);
+
+      await tester.enterText(find.byType(TextField), '');
+      await tester.pump();
+      expect(find.text('chat'), findsOneWidget);
+      expect(find.text('plans'), findsOneWidget);
+      expect(find.text('agents'), findsOneWidget);
+    });
+  });
 }
