@@ -53,6 +53,7 @@ func newAgentsCmd() *cobra.Command {
 	cmd.AddCommand(newAgentsListCmd())
 	cmd.AddCommand(newAgentsShowCmd())
 	cmd.AddCommand(newAgentsCreateCmd())
+	cmd.AddCommand(newAgentsValidateCmd())
 	cmd.AddCommand(newAgentsUpdateCmd())
 	cmd.AddCommand(newAgentsDeleteCmd())
 	cmd.AddCommand(newAgentsPauseCmd())
@@ -367,24 +368,33 @@ func newAgentsCreateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "create <definition.json>",
 		Short: "create an employee from a definition file",
-		Long: `Create a new AI employee from a JSON definition file.
+		Long: `Create a new AI employee from a JSON5 definition file.
 
 The definition must include a constitution block. The daemon validates
 the constitution before creating the employee; creation is refused if
-the constitution is missing or invalid.
+the constitution is missing or invalid. Run 'meept agents validate' on
+the file first for offline pre-flight checks (no daemon needed).
 
 Example definition:
   {
-    "role": "researcher",
+    "id": "ci-monitor",
+    "name": "CI Monitor",
+    "prompt": "You are the CI reliability engineer...",
+    "triggers": [{"type": "cron", "value": "*/15 * * * *", "enabled": true}],
+    "tools": ["web_fetch"],
     "constitution": {
-      "role": "researcher",
-      "description": "gathers and synthesizes information",
-      "constraints": [{"rule": "never modify files"}],
-      "goals": [{"id": "daily-brief", "title": "daily research brief"}],
-      "escalates_to": "user",
-      "tier": 2
+      "purpose": "Keep CI green for main branch",
+      "role": "CI Reliability Engineer",
+      "autonomy_tier": "tier_2_propose",
+      "escalates_to": ["user"],
+      "constraints": {
+        "risk_ceiling": "medium",
+        "assessment_interval": "15m"
+      }
     }
-  }`,
+  }
+
+Note: autonomy_tier is the string form ("tier_2_propose"), never numeric.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defPath := args[0]
