@@ -706,17 +706,15 @@ class _FormSections extends StatelessWidget {
               color: CyberpunkColors.lightGray,
             ),
             dropdownColor: CyberpunkColors.darkGray,
-            items: ['cyberpunk', 'midnight', 'solarized']
-                .map((theme) => DropdownMenuItem(
-                      value: theme,
-                      child: Text(
-                        theme.toLowerCase(),
-                        style: CyberpunkTypography.bodySmall.copyWith(
-                          fontFamily: 'SourceCodePro',
-                        ),
-                      ),
-                    ))
-                .toList(),
+            // Theme variants: only 'cyberpunk' exists today. The theme is
+            // hardcoded in main.dart (CyberpunkTheme.darkTheme) and 1000+
+            // widget call-sites reference CyberpunkColors directly, so the
+            // other variants are NOT listed here until real ThemeData
+            // routing ships — a dropdown entry that does nothing is worse
+            // than no entry.
+            items: const [
+              DropdownMenuItem(value: 'cyberpunk', child: Text('cyberpunk')),
+            ],
           ),
           const SizedBox(height: 10),
           // Modifier key preference (ctrl vs cmd for leader shortcut)
