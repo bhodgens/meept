@@ -213,6 +213,11 @@ class _ClientPrefsEditorState extends ConsumerState<ClientPrefsEditor> {
         _isSaving = false;
         _error = null;
       });
+      // Live-apply prefs that the running app reads from providers.
+      if (key == 'gui.layout' && mounted) {
+        final notifier = ref.read(guiLayoutProvider.notifier);
+        await notifier.set(value as String);
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
