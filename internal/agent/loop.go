@@ -507,6 +507,12 @@ type AgentLoop struct {
 	// closed is set by Close() so tests can verify cleanup was invoked.
 	closed atomic.Bool
 
+	// Streaming-delta publish throttle state (see publishStreamDelta).
+	// lastStreamPublish is written on the LLM callback goroutine and read
+	// from the trailing-flush timer goroutine, hence atomic.
+	lastStreamPublish  atomic.Int64 // unix nanos
+	streamFlushPending atomic.Bool
+
 	// Hallucination detection
 	hallucinationDetector *HallucinationDetector
 
@@ -2867,7 +2873,19 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			chatOpts = append(chatOpts, llm.WithReasoning(reasoningCfg))
 		}
 
-		response, err := l.chatWithFailover(ctx, messages, chatOpts...)
+		// Stream assistant text deltas to subscribed clients while the
+		// model generates. The callback accumulates the full text and
+		// publishes throttled agent.progress events (stage "streaming")
+		// carrying text_so_far; the GUI renders it as a live preview
+		// until the final chat_message arrives.
+		var streamAccumulated string
+		streamOnDelta := func(delta string) error {
+			streamAccumulated += delta
+			l.publishStreamDelta(conversationID, iteration, &streamAccumulated)
+			return nil
+		}
+
+		response, err := l.chatWithFailoverRaw(ctx, messages, streamOnDelta, chatOpts...)
 		if err != nil {
 			// Check for TTSR abort — retry with rule content injected.
 			// On mid-stream rule match, the LLM output violated a guardrail.
@@ -5079,6 +5097,57 @@ func (l *AgentLoop) publishProgress(conversationID string, iteration int, stage 
 	if delivered == 0 {
 		l.logger.Debug("Progress event published (no subscribers)", "stage", stage)
 	}
+}
+
+// streamDeltaThrottleInterval is the minimum gap between streaming-delta
+// progress publishes. Raw LLM deltas arrive every few ms; publishing each
+// one would flood the bus and trip the WS progress rate limiter.
+const streamDeltaThrottleInterval = 250 * time.Millisecond
+
+// publishStreamDelta forwards accumulated assistant text to the bus as an
+// agent.progress event with stage "streaming". detail carries the FULL text
+// so far (not just the delta), so clients can render a growing preview
+// without keeping per-conversation accumulation state. Throttled to at most
+// one publish per streamDeltaThrottleInterval; the final flush happens via
+// the trailing timer so the tail of a response is never dropped.
+func (l *AgentLoop) publishStreamDelta(conversationID string, iteration int, accumulated *string) {
+	if !l.progressEnabled || l.bus == nil {
+		return
+	}
+	now := time.Now()
+	last := time.Unix(0, l.lastStreamPublish.Load())
+	if now.Sub(last) < streamDeltaThrottleInterval {
+		// Schedule a single trailing flush if none is pending.
+		if l.streamFlushPending.CompareAndSwap(false, true) {
+			time.AfterFunc(streamDeltaThrottleInterval, func() {
+				l.streamFlushPending.Store(false)
+				if *accumulated != "" && !l.closed.Load() {
+					l.publishStreamDeltaNow(conversationID, iteration, *accumulated)
+				}
+			})
+		}
+		return
+	}
+	l.lastStreamPublish.Store(now.UnixNano())
+	l.publishStreamDeltaNow(conversationID, iteration, *accumulated)
+}
+
+func (l *AgentLoop) publishStreamDeltaNow(conversationID string, iteration int, text string) {
+	payload := map[string]any{
+		"conversation_id": conversationID,
+		"iteration":       iteration,
+		"stage":           "streaming",
+		"detail":          "streaming response…",
+		"text_so_far":     text,
+		"token_count":     0,
+		"timestamp":       time.Now().UTC().Format(time.RFC3339),
+	}
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", payload)
+	if err != nil {
+		l.logger.Warn("Failed to create stream delta bus message", "error", err)
+		return
+	}
+	l.bus.Publish("agent.progress", msg)
 }
 
 // publishTokenUsage publishes token usage to the message bus.

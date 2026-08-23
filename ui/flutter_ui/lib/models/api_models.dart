@@ -133,6 +133,12 @@ class AgentProgress {
   final int tier;         // VerbosityLevel: 0=Quiet, 1=Normal, 2=Verbose
   final String? sourceEvent;
   final DateTime timestamp;
+  /// Progress stage from the daemon ("thinking", "executing", "streaming",
+  /// "complete", …). Empty for legacy events without a stage field.
+  final String stage;
+  /// For stage=="streaming": the assistant text accumulated so far. The
+  /// GUI renders this as a live preview until the final chat_message lands.
+  final String? textSoFar;
 
   AgentProgress({
     required this.agentId,
@@ -140,6 +146,8 @@ class AgentProgress {
     required this.tier,
     this.sourceEvent,
     required this.timestamp,
+    this.stage = '',
+    this.textSoFar,
   });
 
   factory AgentProgress.fromJson(Map<String, dynamic> json) {
@@ -160,6 +168,8 @@ class AgentProgress {
       message: (data?['message'] ?? json['message'] ?? '') as String,
       tier: coerceTier(data?['tier'] ?? json['tier'] ?? 1),
       sourceEvent: (data?['source_event'] ?? json['source_event']) as String?,
+      stage: (json['stage'] ?? '') as String,
+      textSoFar: json['text_so_far'] as String?,
       timestamp: DateTime.tryParse(
               data?['timestamp'] as String? ??
                   json['timestamp'] as String? ??

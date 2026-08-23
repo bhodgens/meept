@@ -201,17 +201,34 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                           ),
                         );
                       } else {
-                        // Dynamic progress indicator or fallback thinking
-                        if (chatState.currentProgress != null) {
+                        // Dynamic progress indicator or fallback thinking.
+                        // Streaming stage: render the growing assistant
+                        // text as a live preview bubble instead of a bare
+                        // progress line.
+                        final progress = chatState.currentProgress;
+                        if (progress != null &&
+                            progress.stage == 'streaming' &&
+                            (progress.textSoFar?.isNotEmpty ?? false)) {
+                          return AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 150),
+                            switchInCurve: Curves.easeIn,
+                            switchOutCurve: Curves.easeOut,
+                            child: _StreamingPreview(
+                              key: const ValueKey('streaming-preview'),
+                              text: progress.textSoFar!,
+                            ),
+                          );
+                        }
+                        if (progress != null) {
                           return AnimatedSwitcher(
                             duration: const Duration(milliseconds: 150),
                             switchInCurve: Curves.easeIn,
                             switchOutCurve: Curves.easeOut,
                             child: AgentProgressIndicator(
                               key: ValueKey(
-                                '${chatState.currentProgress!.message}-${chatState.currentProgress!.timestamp.millisecondsSinceEpoch}',
+                                '${progress.message}-${progress.timestamp.millisecondsSinceEpoch}',
                               ),
-                              progress: chatState.currentProgress!,
+                              progress: progress,
                             ),
                           );
                         } else {
@@ -408,6 +425,56 @@ class MessagePlaceholder extends StatelessWidget {
 /// duration. The widget starts a 1-second [Timer.periodic] on mount so the
 /// label updates every second. When [startedAt] is null (unknown start),
 /// falls back to the static "thinking..." label.
+/// Live preview of the assistant's in-flight streaming response. Rendered
+/// in the trailing list slot while progress.stage == "streaming"; replaced
+/// by the real message bubble when the final chat_message WS event lands.
+class _StreamingPreview extends StatelessWidget {
+  final String text;
+
+  const _StreamingPreview({super.key, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: CyberpunkColors.darkGray.withValues(alpha: 0.6),
+        border: Border(
+          left: BorderSide(
+            color: CyberpunkColors.orangePrimary.withValues(alpha: 0.5),
+            width: 2,
+          ),
+        ),
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(2),
+          topRight: Radius.circular(8),
+          bottomLeft: Radius.circular(8),
+          bottomRight: Radius.circular(8),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'assistant',
+            style: CyberpunkTypography.label.copyWith(
+              color: CyberpunkColors.orangePrimary.withValues(alpha: 0.7),
+            ),
+          ),
+          const SizedBox(height: 4),
+          SelectableText(
+            text,
+            style: CyberpunkTypography.bodyMedium.copyWith(
+              color: CyberpunkColors.veryLightGray,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ThinkingIndicator extends StatefulWidget {
   final DateTime? startedAt;
 
