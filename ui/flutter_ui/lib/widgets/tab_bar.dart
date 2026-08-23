@@ -21,10 +21,7 @@ class OrangeVoidTabBar extends StatelessWidget {
       decoration: const BoxDecoration(
         color: CyberpunkColors.black,
         border: Border(
-          bottom: BorderSide(
-            color: CyberpunkColors.orangeDark,
-            width: 2,
-          ),
+          bottom: BorderSide(color: CyberpunkColors.orangeDark, width: 2),
         ),
       ),
       child: Row(

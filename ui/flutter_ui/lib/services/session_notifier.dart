@@ -34,8 +34,10 @@ class SessionState {
 
 /// StateNotifier that manages session CRUD operations
 class SessionNotifier extends StateNotifier<SessionState> {
-  SessionNotifier({required this.sdkClient, required WebSocketService websocket})
-      : super(const SessionState()) {
+  SessionNotifier({
+    required this.sdkClient,
+    required WebSocketService websocket,
+  }) : super(const SessionState()) {
     _initWebSocket(websocket);
   }
 
@@ -82,14 +84,12 @@ class SessionNotifier extends StateNotifier<SessionState> {
       // callers deserialize each entry via Session.fromJson because
       // the OpenAPI spec leaves the Session entity untyped.
       final rawSessions = await sdkClient.listSessions();
-      final sessions =
-          rawSessions.map(Session.fromJson).toList(growable: false);
+      final sessions = rawSessions
+          .map(Session.fromJson)
+          .toList(growable: false);
       state = state.copyWith(sessions: sessions, isLoading: false);
     } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        error: e.toString(),
-      );
+      state = state.copyWith(isLoading: false, error: e.toString());
     }
   }
 
@@ -121,9 +121,17 @@ class SessionNotifier extends StateNotifier<SessionState> {
   /// When [cwd] is provided, the daemon resolves or registers a project
   /// at that path, binding the session to the user's actual repo instead
   /// of a synthetic default.
-  Future<Session?> createSession(String title, {String? projectId, String? cwd}) async {
+  Future<Session?> createSession(
+    String title, {
+    String? projectId,
+    String? cwd,
+  }) async {
     try {
-      final raw = await sdkClient.createSession(title: title, projectId: projectId, cwd: cwd);
+      final raw = await sdkClient.createSession(
+        title: title,
+        projectId: projectId,
+        cwd: cwd,
+      );
       final session = Session.fromJson(raw);
       // Insert into local state right away — no server round-trip.
       final updated = [session, ...state.sessions];
@@ -135,10 +143,7 @@ class SessionNotifier extends StateNotifier<SessionState> {
       unawaited(loadSessions());
       return session;
     } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        error: e.toString(),
-      );
+      state = state.copyWith(isLoading: false, error: e.toString());
       return null;
     }
   }
@@ -152,10 +157,7 @@ class SessionNotifier extends StateNotifier<SessionState> {
         error: null,
       );
     } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        error: e.toString(),
-      );
+      state = state.copyWith(isLoading: false, error: e.toString());
     }
   }
 

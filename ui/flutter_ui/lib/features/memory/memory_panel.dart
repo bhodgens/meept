@@ -153,42 +153,42 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
                       ),
                     )
                   : _memories.isNotEmpty
-                      ? ListView.builder(
-                          itemCount: _memories.length,
-                          itemBuilder: (context, index) {
-                            return _buildMemoryItem(_memories[index]);
-                          },
-                        )
-                      : _hasSearched
-                          ? Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(
-                                    Icons.search_off,
-                                    color: CyberpunkColors.midGray,
-                                    size: 48,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'no memories found',
-                                    style: CyberpunkTypography.bodySmall.copyWith(
-                                      color: CyberpunkColors.midGray,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : const Center(
-                              child: Text(
-                                'search or browse memories',
-                                style: CyberpunkTypography.bodySmall,
-                              ),
+                  ? ListView.builder(
+                      itemCount: _memories.length,
+                      itemBuilder: (context, index) {
+                        return _buildMemoryItem(_memories[index]);
+                      },
+                    )
+                  : _hasSearched
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.search_off,
+                            color: CyberpunkColors.midGray,
+                            size: 48,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'no memories found',
+                            style: CyberpunkTypography.bodySmall.copyWith(
+                              color: CyberpunkColors.midGray,
                             ),
-          ),
-        ],
+                          ),
+                        ],
+                      ),
+                    )
+                  : const Center(
+                      child: Text(
+                        'search or browse memories',
+                        style: CyberpunkTypography.bodySmall,
+                      ),
+                    ),
+            ),
+          ],
+        ),
       ),
-    ),
     );
   }
 
@@ -280,7 +280,9 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
       decoration: BoxDecoration(
         color: CyberpunkColors.black.withValues(alpha: 0.3),
         border: Border.all(
-          color: _getRelevanceColor(memory.relevanceScore).withValues(alpha: 0.3),
+          color: _getRelevanceColor(
+            memory.relevanceScore,
+          ).withValues(alpha: 0.3),
           width: 1,
         ),
         borderRadius: BorderRadius.circular(8),
@@ -327,12 +329,9 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
               spacing: 4,
               runSpacing: 4,
               children: [
-                if (memory.category.isNotEmpty)
-                  _buildChip(memory.category),
-                if (memory.sessionId != null)
-                  _buildChip('session'),
-                if (memory.taskId != null)
-                  _buildChip('task'),
+                if (memory.category.isNotEmpty) _buildChip(memory.category),
+                if (memory.sessionId != null) _buildChip('session'),
+                if (memory.taskId != null) _buildChip('task'),
               ],
             ),
           ],

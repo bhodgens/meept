@@ -201,7 +201,7 @@ class _CommandPaletteState extends State<CommandPalette> {
                   hintStyle: CyberpunkTypography.bodySmall.copyWith(
                     color: CyberpunkColors.midGray,
                   ),
-                  prefixIcon: Icon(
+                  prefixIcon: const Icon(
                     Icons.search,
                     size: 16,
                     color: CyberpunkColors.midGray,

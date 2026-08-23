@@ -3,7 +3,9 @@ import '../services/storage_service.dart';
 
 /// Modifier key preference: "ctrl" or "cmd".
 /// Defaults to "ctrl" on all platforms.
-final modifierKeyProvider = StateNotifierProvider<ModifierKeyNotifier, String>((ref) {
+final modifierKeyProvider = StateNotifierProvider<ModifierKeyNotifier, String>((
+  ref,
+) {
   return ModifierKeyNotifier();
 });
 
@@ -32,7 +34,9 @@ class ModifierKeyNotifier extends StateNotifier<String> {
 /// GUI layout preference: "toptabs" (default) or "sidebar".
 /// Controls the overall navigation structure of the Flutter UI.
 /// Defaults to "toptabs" (traditional horizontal tab bar).
-final guiLayoutProvider = StateNotifierProvider<GuiLayoutNotifier, String>((ref) {
+final guiLayoutProvider = StateNotifierProvider<GuiLayoutNotifier, String>((
+  ref,
+) {
   return GuiLayoutNotifier();
 });
 

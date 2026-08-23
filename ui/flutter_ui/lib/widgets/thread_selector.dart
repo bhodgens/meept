@@ -39,7 +39,7 @@ class ThreadSelectorState {
 /// Notifier that loads and manages threads for a session.
 class ThreadSelectorNotifier extends StateNotifier<ThreadSelectorState> {
   ThreadSelectorNotifier(this._service, this._sessionId)
-      : super(const ThreadSelectorState());
+    : super(const ThreadSelectorState());
 
   final ThreadService _service;
   final String _sessionId;
@@ -85,22 +85,21 @@ class ThreadSelectorNotifier extends StateNotifier<ThreadSelectorState> {
 }
 
 /// Provider family for [ThreadSelectorNotifier], keyed by session ID.
-final threadSelectorProvider = StateNotifierProvider.family<
-    ThreadSelectorNotifier, ThreadSelectorState, String>(
-  (ref, sessionId) {
-    final service = ref.watch(threadServiceProvider);
-    return ThreadSelectorNotifier(service, sessionId);
-  },
-);
+final threadSelectorProvider =
+    StateNotifierProvider.family<
+      ThreadSelectorNotifier,
+      ThreadSelectorState,
+      String
+    >((ref, sessionId) {
+      final service = ref.watch(threadServiceProvider);
+      return ThreadSelectorNotifier(service, sessionId);
+    });
 
 /// A compact dropdown widget for selecting the active thread.
 class ThreadSelector extends ConsumerStatefulWidget {
   final String sessionId;
 
-  const ThreadSelector({
-    super.key,
-    required this.sessionId,
-  });
+  const ThreadSelector({super.key, required this.sessionId});
 
   @override
   ConsumerState<ThreadSelector> createState() => _ThreadSelectorState();
@@ -143,19 +142,21 @@ class _ThreadSelectorState extends ConsumerState<ThreadSelector> {
       },
       itemBuilder: (context) {
         return [
-          ...state.threads.map((t) => PopupMenuItem<String>(
-                value: t.id,
-                child: Row(
-                  children: [
-                    if (t.id == state.activeThreadId)
-                      const Padding(
-                        padding: EdgeInsets.only(right: 8),
-                        child: Icon(Icons.check, size: 16),
-                      ),
-                    Text(t.topicLabel),
-                  ],
-                ),
-              )),
+          ...state.threads.map(
+            (t) => PopupMenuItem<String>(
+              value: t.id,
+              child: Row(
+                children: [
+                  if (t.id == state.activeThreadId)
+                    const Padding(
+                      padding: EdgeInsets.only(right: 8),
+                      child: Icon(Icons.check, size: 16),
+                    ),
+                  Text(t.topicLabel),
+                ],
+              ),
+            ),
+          ),
           const PopupMenuDivider(),
           const PopupMenuItem<String>(
             value: '__new__',

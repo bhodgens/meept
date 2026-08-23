@@ -34,8 +34,7 @@ class Thread {
           ? DateTime.tryParse(json['created_at'] as String) ?? DateTime.now()
           : DateTime.now(),
       lastActivityAt: json['last_activity'] != null
-          ? DateTime.tryParse(json['last_activity'] as String) ??
-              DateTime.now()
+          ? DateTime.tryParse(json['last_activity'] as String) ?? DateTime.now()
           : DateTime.now(),
       summary: json['summary'] as String?,
       isActive: json['is_active'] == true || json['is_active'] == 1,
@@ -55,8 +54,7 @@ class ThreadService {
   /// List all threads for a session.
   Future<List<Thread>> listThreads(String sessionId) async {
     try {
-      final raw =
-          await _client.dio.get('/api/v1/sessions/$sessionId/threads');
+      final raw = await _client.dio.get('/api/v1/sessions/$sessionId/threads');
       final data = raw.data as Map<String, dynamic>?;
       final threadsRaw = data?['threads'] as List?;
       if (threadsRaw == null) return [];
@@ -97,8 +95,9 @@ class ThreadService {
   /// Get the active thread for a session.
   Future<Thread?> getActiveThread(String sessionId) async {
     try {
-      final raw = await _client.dio
-          .get('/api/v1/sessions/$sessionId/threads/active');
+      final raw = await _client.dio.get(
+        '/api/v1/sessions/$sessionId/threads/active',
+      );
       final data = raw.data as Map<String, dynamic>?;
       if (data == null) return null;
       return Thread.fromJson(data);
@@ -109,10 +108,7 @@ class ThreadService {
   }
 
   /// Set the active thread for a session.
-  Future<Thread?> setActiveThread(
-    String sessionId,
-    String threadId,
-  ) async {
+  Future<Thread?> setActiveThread(String sessionId, String threadId) async {
     try {
       final raw = await _client.dio.put(
         '/api/v1/sessions/$sessionId/threads/active',
@@ -130,8 +126,7 @@ class ThreadService {
   /// Delete a thread by its ID.
   Future<bool> deleteThread(String sessionId, String threadId) async {
     try {
-      await _client.dio
-          .delete('/api/v1/sessions/$sessionId/threads/$threadId');
+      await _client.dio.delete('/api/v1/sessions/$sessionId/threads/$threadId');
       return true;
     } catch (e) {
       debugPrint('[thread-service] deleteThread failed: $e');

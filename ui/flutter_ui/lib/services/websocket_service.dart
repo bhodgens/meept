@@ -39,8 +39,9 @@ class WebSocketService {
   final PublishSubject<Map<String, dynamic>> _messageSubject =
       PublishSubject<Map<String, dynamic>>();
   final PublishSubject<String> _errorSubject = PublishSubject<String>();
-  final BehaviorSubject<bool> _connectionSubject =
-      BehaviorSubject<bool>.seeded(false);
+  final BehaviorSubject<bool> _connectionSubject = BehaviorSubject<bool>.seeded(
+    false,
+  );
 
   bool _isConnecting = false;
   bool _wasExplicitlyDisconnected = false;
@@ -102,10 +103,10 @@ class WebSocketService {
     int? port,
     String? apiKey,
     StorageService? storage,
-  })  : _host = host ?? AppConstants.defaultApiHost,
-        _port = port ?? AppConstants.defaultApiPort,
-        _apiKey = apiKey,
-        _storage = storage;
+  }) : _host = host ?? AppConstants.defaultApiHost,
+       _port = port ?? AppConstants.defaultApiPort,
+       _apiKey = apiKey,
+       _storage = storage;
 
   /// Create a WebSocketService using persisted host/port/API key from
   /// [storage].
@@ -126,10 +127,14 @@ class WebSocketService {
     if (apiKey.isEmpty) {
       // Do not throw — allow the app to start. Connection will fail later,
       // and the UI can show a "configure API key" prompt.
-      debugPrint('[warn] No API key configured — will connect without auth. '
-          'Configure a real key in Settings for production.');
+      debugPrint(
+        '[warn] No API key configured — will connect without auth. '
+        'Configure a real key in Settings for production.',
+      );
     } else if (!kReleaseMode) {
-      debugPrint('[warn] Using default dev API key — configure a real key for production');
+      debugPrint(
+        '[warn] Using default dev API key — configure a real key for production',
+      );
     }
     return WebSocketService(
       host: storage.getApiHost(),
@@ -153,9 +158,9 @@ class WebSocketService {
   /// Whether disconnect() was called (subjects closed, no reconnect).
   bool get _isDisposed => _disposed;
 
-
   /// Whether currently attempting to connect or reconnect.
   bool get isConnecting => _isConnecting;
+
   /// Connect to WebSocket.
   ///
   /// Uses a manual reconnect loop with exponential backoff (1 s base,
@@ -204,11 +209,12 @@ class WebSocketService {
           // Check if this is an HTTP 401 (unauthorized) error
           // Use toString() check for robustness across DioException, WebSocketException, etc.
           final errorStr = e.toString();
-          final is401 = errorStr.contains('401') ||
-              errorStr.contains('Unauthorized');
+          final is401 =
+              errorStr.contains('401') || errorStr.contains('Unauthorized');
           if (is401) {
             _errorSubject.addSafe(
-                'Authentication failed (401). Configure API key in Settings.');
+              'Authentication failed (401). Configure API key in Settings.',
+            );
           } else {
             _errorSubject.addSafe('Reconnecting: $e');
           }
@@ -230,7 +236,11 @@ class WebSocketService {
       send({'type': 'subscribe', 'channel': 'chat', 'session_id': sessionId});
     }
     for (final sessionId in _progressSubscriptions.keys) {
-      send({'type': 'subscribe', 'channel': 'progress', 'session_id': sessionId});
+      send({
+        'type': 'subscribe',
+        'channel': 'progress',
+        'session_id': sessionId,
+      });
     }
     if (_jobsSubscribed) {
       send({'type': 'subscribe', 'channel': 'jobs'});
@@ -251,9 +261,7 @@ class WebSocketService {
   Map<String, dynamic> _flattenWSMessage(Map<String, dynamic> msg) {
     final data = msg['data'];
     if (data is Map<String, dynamic>) {
-      final flat = <String, dynamic>{
-        'type': msg['type'],
-      };
+      final flat = <String, dynamic>{'type': msg['type']};
       flat.addAll(data);
       // Preserve timestamp from top level if data doesn't have one
       if (msg['timestamp'] != null && flat['timestamp'] == null) {
@@ -314,18 +322,20 @@ class WebSocketService {
         // Apply a connection timeout to prevent indefinite hangs when the
         // daemon's TLS handshake stalls (e.g. daemon partially initialized,
         // trustd slow, network stack quirk).
-        final ws = await io.WebSocket.connect(
-          uri.toString(),
-          headers: {
-            if (_apiKey != null && _apiKey!.isNotEmpty)
-              'Authorization': 'Bearer $_apiKey',
-            'Origin': 'https://localhost:$_port',
-          },
-          customClient: _createHttpClient(),
-        ).timeout(
-          AppConstants.connectionTimeout,
-          onTimeout: () => throw TimeoutException('WebSocket connect timeout'),
-        );
+        final ws =
+            await io.WebSocket.connect(
+              uri.toString(),
+              headers: {
+                if (_apiKey != null && _apiKey!.isNotEmpty)
+                  'Authorization': 'Bearer $_apiKey',
+                'Origin': 'https://localhost:$_port',
+              },
+              customClient: _createHttpClient(),
+            ).timeout(
+              AppConstants.connectionTimeout,
+              onTimeout: () =>
+                  throw TimeoutException('WebSocket connect timeout'),
+            );
         final channel = IOWebSocketChannel(ws);
         if (_isDisposed || _wasExplicitlyDisconnected) {
           await channel.sink.close();
@@ -364,7 +374,8 @@ class WebSocketService {
       // Mark as connected as soon as the socket is established
       // This fixes the "connecting..." stuck status issue
       if (!isConnected) {
-        _isConnecting = false; // Stop showing "connecting..." once we're connected
+        _isConnecting =
+            false; // Stop showing "connecting..." once we're connected
         _connectedAt = DateTime.now();
         _connectionSubject.add(true);
         _startPingTimer();
@@ -376,14 +387,12 @@ class WebSocketService {
       _wsSubscription = _channel!.stream.listen(
         (data) {
           try {
-            final message =
-                jsonDecode(data as String) as Map<String, dynamic>;
+            final message = jsonDecode(data as String) as Map<String, dynamic>;
             final flatMessage = _flattenWSMessage(message);
             final type = flatMessage['type'] as String?;
 
             if (type == 'error') {
-              _errorSubject.addSafe(
-                  flatMessage['message'] ?? 'Server error');
+              _errorSubject.addSafe(flatMessage['message'] ?? 'Server error');
             }
 
             if (type == 'pong') {
@@ -540,11 +549,7 @@ class WebSocketService {
     // flushed once the connection is established.
     _chatSubscriptions[sessionId] = SessionSubscription(sessionId);
     if (isConnected) {
-      send({
-        'type': 'subscribe',
-        'channel': 'chat',
-        'session_id': sessionId,
-      });
+      send({'type': 'subscribe', 'channel': 'chat', 'session_id': sessionId});
     }
 
     return _messageSubject.stream.where((m) {
@@ -561,11 +566,7 @@ class WebSocketService {
   void unsubscribeFromChat(String sessionId) {
     _chatSubscriptions.remove(sessionId);
     if (isConnected) {
-      send({
-        'type': 'unsubscribe',
-        'channel': 'chat',
-        'session_id': sessionId,
-      });
+      send({'type': 'unsubscribe', 'channel': 'chat', 'session_id': sessionId});
     }
   }
 

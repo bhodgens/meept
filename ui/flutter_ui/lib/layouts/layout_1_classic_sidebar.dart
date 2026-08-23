@@ -17,6 +17,7 @@
 /// +----------------+------------------------------------------+
 /// |  [Status Bar]                                            |
 /// +----------------------------------------------------------+
+library;
 
 import 'package:flutter/material.dart';
 import '../theme/colors.dart';
@@ -70,12 +71,9 @@ class _Sidebar extends StatelessWidget {
           Container(
             height: 50,
             alignment: Alignment.center,
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               border: Border(
-                bottom: BorderSide(
-                  color: CyberpunkColors.orangeDark,
-                  width: 2,
-                ),
+                bottom: BorderSide(color: CyberpunkColors.orangeDark, width: 2),
               ),
             ),
             child: Text(
@@ -87,7 +85,7 @@ class _Sidebar extends StatelessWidget {
             ),
           ),
           // Navigation items
-          Expanded(
+          const Expanded(
             child: Column(
               children: [
                 _NavItem('chat', true),
@@ -123,7 +121,9 @@ class _NavItem extends StatelessWidget {
             : Colors.transparent,
         border: Border(
           left: BorderSide(
-            color: isActive ? CyberpunkColors.orangePrimary : Colors.transparent,
+            color: isActive
+                ? CyberpunkColors.orangePrimary
+                : Colors.transparent,
             width: 3,
           ),
         ),
@@ -217,10 +217,10 @@ class _ChatInput extends StatelessWidget {
           filled: true,
           fillColor: CyberpunkColors.midGray,
           border: OutlineInputBorder(
-            borderSide: BorderSide(color: CyberpunkColors.orangeDark),
+            borderSide: const BorderSide(color: CyberpunkColors.orangeDark),
             borderRadius: BorderRadius.circular(4),
           ),
-          suffixIcon: Icon(
+          suffixIcon: const Icon(
             Icons.send,
             color: CyberpunkColors.orangePrimary,
           ),
@@ -239,13 +239,13 @@ class _StatusBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: CyberpunkColors.blackTransparent(0.7),
-        border: Border(
+        border: const Border(
           top: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),
       child: Row(
         children: [
-          _StatusDot(connected: true),
+          const _StatusDot(connected: true),
           const SizedBox(width: 6),
           Text(
             'connected',

@@ -42,7 +42,9 @@ class _ConnectionDetailsDialog extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: rows.map((row) {
-            final value = details != null ? details!.rowValue(row.label) : row.value;
+            final value = details != null
+                ? details!.rowValue(row.label)
+                : row.value;
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 2),
               child: Row(
@@ -123,10 +125,7 @@ class _ConnectionDot extends ConsumerWidget {
         ),
       if (summary != null) const PopupMenuDivider(),
       if (connected)
-        const PopupMenuItem<String>(
-          value: 'details',
-          child: Text('details'),
-        ),
+        const PopupMenuItem<String>(value: 'details', child: Text('details')),
       if (connected)
         const PopupMenuItem<String>(
           value: 'disconnect',
@@ -164,8 +163,8 @@ class _ConnectionDot extends ConsumerWidget {
               color: isConnecting
                   ? CyberpunkColors.orangePrimary
                   : connected
-                      ? CyberpunkColors.greenSuccess
-                      : CyberpunkColors.redAlert,
+                  ? CyberpunkColors.greenSuccess
+                  : CyberpunkColors.redAlert,
               shape: BoxShape.circle,
             ),
           ),
@@ -176,8 +175,8 @@ class _ConnectionDot extends ConsumerWidget {
               color: statusColor == 'green'
                   ? CyberpunkColors.greenSuccess
                   : statusColor == 'orange'
-                      ? CyberpunkColors.orangePrimary
-                      : CyberpunkColors.redAlert,
+                  ? CyberpunkColors.orangePrimary
+                  : CyberpunkColors.redAlert,
               fontFamily: 'SourceCodePro',
               fontSize: 10,
             ),
@@ -199,10 +198,22 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   HomeTab _selectedTab = HomeTab.chat;
 
-  final List<String> _tabLabels = ['chat', 'sessions', 'plans', 'tasks', 'agents'];
+  final List<String> _tabLabels = [
+    'chat',
+    'sessions',
+    'plans',
+    'tasks',
+    'agents',
+  ];
 
   /// Route paths corresponding to each tab index.
-  static const List<String> _tabRoutes = ['/', '/sessions', '/plans', '/tasks', '/agents'];
+  static const List<String> _tabRoutes = [
+    '/',
+    '/sessions',
+    '/plans',
+    '/tasks',
+    '/agents',
+  ];
 
   bool _initialLoadDone = false;
   late final LeaderKeyController _leaderController;
@@ -246,7 +257,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _leaderController.onToggleTts = () async {
       await ref.read(ttsProvider.notifier).toggleTts();
       showStatusMessage(
-          ref, 'tts ${ref.read(ttsProvider.notifier).enabled ? 'on' : 'off'}');
+        ref,
+        'tts ${ref.read(ttsProvider.notifier).enabled ? 'on' : 'off'}',
+      );
     };
     // TUI Ctrl+P opens the fuzzy finder over sessions/tasks; the Flutter
     // equivalent is the search tool panel.
@@ -313,7 +326,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       final active = ref.read(activeSessionProvider);
       if (active == null) {
         final notifier = ref.read(sessionProvider.notifier);
-        final session = notifier.findReusableEmptySession() ??
+        final session =
+            notifier.findReusableEmptySession() ??
             await notifier.createSession('new session');
         if (session != null) {
           ref.read(activeSessionProvider.notifier).state = session;
@@ -329,8 +343,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       showStatusMessage(ref, 'no active session');
       return;
     }
-    final controller =
-        TextEditingController(text: session.description ?? '');
+    final controller = TextEditingController(text: session.description ?? '');
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -352,7 +365,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
             filled: true,
             fillColor: CyberpunkColors.black,
-            border: OutlineInputBorder(
+            border: const OutlineInputBorder(
               borderSide: BorderSide(color: CyberpunkColors.orangeDark),
             ),
           ),
@@ -361,26 +374,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
-            child: Text('cancel', style: CyberpunkTypography.bodySmall),
+            child: const Text('cancel', style: CyberpunkTypography.bodySmall),
           ),
           TextButton(
             onPressed: () async {
               final description = controller.text.trim();
               Navigator.of(dialogContext).pop();
               try {
-                await ref.read(sdkClientProvider).updateSessionDescription(
-                      session.id,
-                      description,
-                    );
+                await ref
+                    .read(sdkClientProvider)
+                    .updateSessionDescription(session.id, description);
                 ref.invalidate(sessionDetailFamily(session.id));
                 showStatusMessage(ref, 'description updated');
               } catch (e) {
                 showStatusMessage(ref, 'update failed: $e');
               }
             },
-            child: Text('save',
-                style: CyberpunkTypography.bodySmall
-                    .copyWith(color: CyberpunkColors.orangePrimary)),
+            child: Text(
+              'save',
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.orangePrimary,
+              ),
+            ),
           ),
         ],
       ),
@@ -430,7 +445,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   /// Returns true if [toolName] has a dedicated full-screen route.
   bool _hasRoute(String toolName) {
-    const routedTools = {'search', 'branches', 'skills', 'memory', 'reflection', 'prompts', 'settings'};
+    const routedTools = {
+      'search',
+      'branches',
+      'skills',
+      'memory',
+      'reflection',
+      'prompts',
+      'settings',
+    };
     return routedTools.contains(toolName);
   }
 
@@ -606,66 +629,64 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       child: Scaffold(
         backgroundColor: CyberpunkColors.black,
         body: SafeArea(
-            child: Column(
-              children: [
-                // Top tab bar
-                OrangeVoidTabBar(
-                  tabs: _tabLabels,
-                  selectedIndex: _selectedTab.index,
-                  onTabSelected: (index) {
-                    setState(() => _selectedTab = HomeTab.values[index]);
-                    context.go(_tabRoutes[index]);
-                    // Refresh active-project indicator on tab switch so a
-                    // project change made on the projects panel propagates
-                    // to the status bar without a reconnect (TUI parity).
-                    ref.read(currentProjectProvider.notifier).refresh();
-                  },
+          child: Column(
+            children: [
+              // Top tab bar
+              OrangeVoidTabBar(
+                tabs: _tabLabels,
+                selectedIndex: _selectedTab.index,
+                onTabSelected: (index) {
+                  setState(() => _selectedTab = HomeTab.values[index]);
+                  context.go(_tabRoutes[index]);
+                  // Refresh active-project indicator on tab switch so a
+                  // project change made on the projects panel propagates
+                  // to the status bar without a reconnect (TUI parity).
+                  ref.read(currentProjectProvider.notifier).refresh();
+                },
+              ),
+              // Toolbar with hamburger menu (left) + connection indicator (right)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
                 ),
-                // Toolbar with hamburger menu (left) + connection indicator (right)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  color: CyberpunkColors.blackTransparent(0.7),
-                  child: Row(
-                    children: [
-                      HamburgerMenu(
-                        onToolSelected: (route) {
-                          if (_hasRoute(route)) {
-                            // Full-screen route — don't set activeTool
-                            // to avoid orphaned state (bug F7).
-                            _navigateTool(route);
-                          } else {
-                            ref.read(activeToolProvider.notifier).state = route;
-                            if (_selectedTab != HomeTab.chat) {
-                              setState(() => _selectedTab = HomeTab.chat);
-                            }
+                color: CyberpunkColors.blackTransparent(0.7),
+                child: Row(
+                  children: [
+                    HamburgerMenu(
+                      onToolSelected: (route) {
+                        if (_hasRoute(route)) {
+                          // Full-screen route — don't set activeTool
+                          // to avoid orphaned state (bug F7).
+                          _navigateTool(route);
+                        } else {
+                          ref.read(activeToolProvider.notifier).state = route;
+                          if (_selectedTab != HomeTab.chat) {
+                            setState(() => _selectedTab = HomeTab.chat);
                           }
-                        },
-                      ),
-                      const SizedBox(width: 12),
-                      const _ConnectionDot(),
-                      const Spacer(),
-                    ],
-                  ),
+                        }
+                      },
+                    ),
+                    const SizedBox(width: 12),
+                    const _ConnectionDot(),
+                    const Spacer(),
+                  ],
                 ),
-                const Divider(height: 1, color: CyberpunkColors.midGray),
-                // Main content area
-                Expanded(
-                  child: _buildTabContent(),
-                ),
-                // Status bar (TUI parity)
-                StatusBar(selectedTabIndex: _selectedTab.index),
-              ],
-            ),
+              ),
+              const Divider(height: 1, color: CyberpunkColors.midGray),
+              // Main content area
+              Expanded(child: _buildTabContent()),
+              // Status bar (TUI parity)
+              StatusBar(selectedTabIndex: _selectedTab.index),
+            ],
           ),
         ),
+      ),
     );
   }
 
   Widget _buildTabContent() {
     final activeSession = ref.watch(activeSessionProvider);
-    return TabContent(
-      selectedTab: _selectedTab,
-      activeSession: activeSession,
-    );
+    return TabContent(selectedTab: _selectedTab, activeSession: activeSession);
   }
 }

@@ -19,6 +19,7 @@
 /// +----------------------------------------------------------+
 /// |  [Status Bar]                                            |
 /// +----------------------------------------------------------+
+library;
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -60,13 +61,10 @@ class _HeaderBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       height: 50,
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: CyberpunkColors.darkGray,
         border: Border(
-          bottom: BorderSide(
-            color: CyberpunkColors.orangePrimary,
-            width: 2,
-          ),
+          bottom: BorderSide(color: CyberpunkColors.orangePrimary, width: 2),
         ),
       ),
       child: Row(
@@ -89,15 +87,15 @@ class _HeaderBar extends StatelessWidget {
           _ConnectionPill(),
           const Spacer(),
           // Header actions
-          _ActionButton(Icons.settings, 'settings'),
-          _ActionButton(Icons.info_outline, 'info'),
+          const _ActionButton(Icons.settings, 'settings'),
+          const _ActionButton(Icons.info_outline, 'info'),
           Container(
             width: 2,
             height: 30,
             color: CyberpunkColors.orangeDark,
             margin: const EdgeInsets.symmetric(horizontal: 8),
           ),
-          _ActionButton(Icons.close, 'exit'),
+          const _ActionButton(Icons.close, 'exit'),
         ],
       ),
     );
@@ -211,7 +209,7 @@ class _RadialNavigation extends StatelessWidget {
             final index = entry.key;
             final item = entry.value;
             final angle = (2 * math.pi / navItems.length) * index - math.pi / 2;
-            final radius = 140.0;
+            const radius = 140.0;
             return _PositionedRadialButton(
               angle: angle,
               radius: radius,
@@ -235,16 +233,13 @@ class _CentralHub extends StatelessWidget {
       decoration: BoxDecoration(
         color: CyberpunkColors.darkGray,
         shape: BoxShape.circle,
-        border: Border.all(
-          color: CyberpunkColors.orangePrimary,
-          width: 2,
-        ),
+        border: Border.all(color: CyberpunkColors.orangePrimary, width: 2),
         boxShadow: CyberpunkEffects.glowShadow(intensity: 0.8),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
+          const Icon(
             Icons.center_focus_strong,
             size: 32,
             color: CyberpunkColors.orangePrimary,
@@ -288,11 +283,7 @@ class _PositionedRadialButton extends StatelessWidget {
       top: 200 + y,
       child: Transform.translate(
         offset: Offset(-x, -y),
-        child: _RadialNavItem(
-          label: label,
-          icon: icon,
-          isActive: isActive,
-        ),
+        child: _RadialNavItem(label: label, icon: icon, isActive: isActive),
       ),
     );
   }
@@ -327,7 +318,9 @@ class _RadialNavItem extends StatelessWidget {
             width: isActive ? 2 : 1,
           ),
           shape: BoxShape.circle,
-          boxShadow: isActive ? CyberpunkEffects.glowShadow(intensity: 0.5) : null,
+          boxShadow: isActive
+              ? CyberpunkEffects.glowShadow(intensity: 0.5)
+              : null,
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -365,7 +358,7 @@ class _StatusBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: CyberpunkColors.blackTransparent(0.7),
-        border: Border(
+        border: const Border(
           top: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),

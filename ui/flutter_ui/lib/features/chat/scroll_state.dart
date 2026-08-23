@@ -8,5 +8,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 ///
 /// Value is the backend message ID as a string (matches `ChatMessage.id`).
 /// Empty string means "no pending scroll".
-final pendingScrollMessageProvider =
-    StateProvider.family<String, String>((ref, sessionId) => '');
+final pendingScrollMessageProvider = StateProvider.family<String, String>(
+  (ref, sessionId) => '',
+);

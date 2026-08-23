@@ -6,7 +6,8 @@ import '../../theme/typography.dart';
 import '../../widgets/background_image.dart';
 import '../../models/api_models.dart';
 import '../../providers/providers.dart';
-import '../../providers/tab_activation_provider.dart' show keyboardFocusProvider;
+import '../../providers/tab_activation_provider.dart'
+    show keyboardFocusProvider;
 
 class PlansTab extends ConsumerStatefulWidget {
   const PlansTab({super.key});
@@ -63,27 +64,27 @@ class _PlansTabState extends ConsumerState<PlansTab> {
     final activeSession = ref.watch(activeSessionProvider);
 
     return Row(
-        children: [
-          // Plan list
-          SizedBox(
-            width: 300,
-            child: _buildPlanList(planState),
+      children: [
+        // Plan list
+        SizedBox(width: 300, child: _buildPlanList(planState)),
+        Container(
+          width: 1,
+          color: CyberpunkColors.orangeDark.withValues(alpha: 0.3),
+        ),
+        // Plan detail
+        Expanded(
+          child: BackgroundImage(
+            child: planState.plans.isEmpty
+                ? _buildEmptyState()
+                : _PlanDetailPane(
+                    plans: planState.plans,
+                    sessionId: activeSession?.id,
+                    selectedIndex: _selectedIndex,
+                  ),
           ),
-          Container(width: 1, color: CyberpunkColors.orangeDark.withValues(alpha: 0.3)),
-          // Plan detail
-          Expanded(
-            child: BackgroundImage(
-              child: planState.plans.isEmpty
-                  ? _buildEmptyState()
-                  : _PlanDetailPane(
-                      plans: planState.plans,
-                      sessionId: activeSession?.id,
-                      selectedIndex: _selectedIndex,
-                    ),
-              ),
-          ),
-        ],
-      );
+        ),
+      ],
+    );
   }
 
   Widget _buildPlanList(PlanState planState) {
@@ -106,7 +107,9 @@ class _PlansTabState extends ConsumerState<PlansTab> {
                 color: CyberpunkColors.orangePrimary,
                 onPressed: () {
                   final session = ref.read(activeSessionProvider);
-                  ref.read(planProvider.notifier).loadPlans(sessionID: session?.id);
+                  ref
+                      .read(planProvider.notifier)
+                      .loadPlans(sessionID: session?.id);
                 },
               ),
             ],
@@ -119,7 +122,12 @@ class _PlansTabState extends ConsumerState<PlansTab> {
             child: Center(
               child: Padding(
                 padding: const EdgeInsets.all(16),
-                child: Text(planState.error!, style: CyberpunkTypography.bodySmall.copyWith(color: CyberpunkColors.redAlert)),
+                child: Text(
+                  planState.error!,
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    color: CyberpunkColors.redAlert,
+                  ),
+                ),
               ),
             ),
           )
@@ -153,9 +161,18 @@ class _PlansTabState extends ConsumerState<PlansTab> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.assignment_outlined, size: 64, color: CyberpunkColors.midGray),
+          const Icon(
+            Icons.assignment_outlined,
+            size: 64,
+            color: CyberpunkColors.midGray,
+          ),
           const SizedBox(height: 16),
-          Text('no plan selected', style: CyberpunkTypography.bodyMedium.copyWith(color: CyberpunkColors.lightGray)),
+          Text(
+            'no plan selected',
+            style: CyberpunkTypography.bodyMedium.copyWith(
+              color: CyberpunkColors.lightGray,
+            ),
+          ),
         ],
       ),
     );
@@ -167,7 +184,11 @@ class _PlanTile extends ConsumerWidget {
   final bool selected;
   final VoidCallback onTap;
 
-  const _PlanTile({required this.plan, this.selected = false, required this.onTap});
+  const _PlanTile({
+    required this.plan,
+    this.selected = false,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -223,7 +244,11 @@ class _PlanDetailPane extends ConsumerStatefulWidget {
   final String? sessionId;
   final int selectedIndex;
 
-  const _PlanDetailPane({required this.plans, this.sessionId, required this.selectedIndex});
+  const _PlanDetailPane({
+    required this.plans,
+    this.sessionId,
+    required this.selectedIndex,
+  });
 
   @override
   ConsumerState<_PlanDetailPane> createState() => _PlanDetailPaneState();
@@ -264,14 +289,24 @@ class _PlanDetailPaneState extends ConsumerState<_PlanDetailPane> {
 
           // Phases
           if (plan.phases.isNotEmpty) ...[
-            Text('phases', style: CyberpunkTypography.label.copyWith(color: CyberpunkColors.orangePrimary)),
+            Text(
+              'phases',
+              style: CyberpunkTypography.label.copyWith(
+                color: CyberpunkColors.orangePrimary,
+              ),
+            ),
             const SizedBox(height: 8),
             ...plan.phases.map((phase) => _PhaseCard(phase: phase)),
             const SizedBox(height: 24),
           ],
 
           // Actions
-          Text('actions', style: CyberpunkTypography.label.copyWith(color: CyberpunkColors.orangePrimary)),
+          Text(
+            'actions',
+            style: CyberpunkTypography.label.copyWith(
+              color: CyberpunkColors.orangePrimary,
+            ),
+          ),
           const SizedBox(height: 8),
           _ActionButtons(plan: plan, sessionId: widget.sessionId),
         ],
@@ -295,7 +330,10 @@ class _StateBadge extends StatelessWidget {
       ),
       child: Text(
         state.replaceAll('_', ' '),
-        style: CyberpunkTypography.bodySmall.copyWith(color: _color, fontFamily: 'SourceCodePro'),
+        style: CyberpunkTypography.bodySmall.copyWith(
+          color: _color,
+          fontFamily: 'SourceCodePro',
+        ),
       ),
     );
   }
@@ -337,14 +375,22 @@ class _PhaseCard extends StatelessWidget {
         children: [
           SizedBox(
             width: 24,
-            child: Text('${phase.sequence}', style: CyberpunkTypography.label.copyWith(color: CyberpunkColors.orangePrimary)),
+            child: Text(
+              '${phase.sequence}',
+              style: CyberpunkTypography.label.copyWith(
+                color: CyberpunkColors.orangePrimary,
+              ),
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(phase.name.toLowerCase(), style: CyberpunkTypography.bodyMedium),
+                Text(
+                  phase.name.toLowerCase(),
+                  style: CyberpunkTypography.bodyMedium,
+                ),
                 const SizedBox(height: 4),
                 Text(
                   '${phase.completedSteps}/${phase.totalSteps} steps',
@@ -383,7 +429,11 @@ class _ArtifactList extends StatelessWidget {
   final List<PlanArtifact> artifacts;
   final Color color;
 
-  const _ArtifactList({required this.label, required this.artifacts, required this.color});
+  const _ArtifactList({
+    required this.label,
+    required this.artifacts,
+    required this.color,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -414,7 +464,9 @@ class _ArtifactList extends StatelessWidget {
                   if (a.required)
                     TextSpan(
                       text: ', required',
-                      style: itemStyle.copyWith(color: CyberpunkColors.orangeBright),
+                      style: itemStyle.copyWith(
+                        color: CyberpunkColors.orangeBright,
+                      ),
                     ),
                   TextSpan(
                     text: ')',
@@ -447,7 +499,8 @@ class _ActionButtons extends ConsumerWidget {
           _ActionButton(
             label: 'approve',
             color: CyberpunkColors.greenSuccess,
-            onPressed: () => notifier.approvePlan(plan.id, sessionID: sessionId),
+            onPressed: () =>
+                notifier.approvePlan(plan.id, sessionID: sessionId),
           ),
           _ActionButton(
             label: 'reject',
@@ -464,7 +517,8 @@ class _ActionButtons extends ConsumerWidget {
           _ActionButton(
             label: 'confirm',
             color: CyberpunkColors.greenSuccess,
-            onPressed: () => notifier.confirmPlan(plan.id, sessionID: sessionId),
+            onPressed: () =>
+                notifier.confirmPlan(plan.id, sessionID: sessionId),
           ),
         if (plan.state == 'approved')
           Container(
@@ -476,9 +530,23 @@ class _ActionButtons extends ConsumerWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(CyberpunkColors.orangeBright))),
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation(
+                      CyberpunkColors.orangeBright,
+                    ),
+                  ),
+                ),
                 const SizedBox(width: 8),
-                Text('executing...', style: CyberpunkTypography.bodySmall.copyWith(color: CyberpunkColors.orangeBright)),
+                Text(
+                  'executing...',
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    color: CyberpunkColors.orangeBright,
+                  ),
+                ),
               ],
             ),
           ),
@@ -492,17 +560,32 @@ class _ActionButtons extends ConsumerWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: CyberpunkColors.darkGray,
-        title: const Text('reject plan', style: CyberpunkTypography.headlineMedium),
+        title: const Text(
+          'reject plan',
+          style: CyberpunkTypography.headlineMedium,
+        ),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(hintText: 'reason (optional)...', hintStyle: CyberpunkTypography.bodySmall),
+          decoration: const InputDecoration(
+            hintText: 'reason (optional)...',
+            hintStyle: CyberpunkTypography.bodySmall,
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('cancel', style: CyberpunkTypography.bodyMedium)),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('cancel', style: CyberpunkTypography.bodyMedium),
+          ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: CyberpunkColors.redAlert),
+            style: FilledButton.styleFrom(
+              backgroundColor: CyberpunkColors.redAlert,
+            ),
             onPressed: () {
-              notifier.rejectPlan(plan.id, sessionID: sessionId, reason: controller.text);
+              notifier.rejectPlan(
+                plan.id,
+                sessionID: sessionId,
+                reason: controller.text,
+              );
               Navigator.pop(ctx);
             },
             child: const Text('reject', style: CyberpunkTypography.bodyMedium),
@@ -518,17 +601,30 @@ class _ActionButtons extends ConsumerWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: CyberpunkColors.darkGray,
-        title: const Text('request revision', style: CyberpunkTypography.headlineMedium),
+        title: const Text(
+          'request revision',
+          style: CyberpunkTypography.headlineMedium,
+        ),
         content: TextField(
           controller: controller,
           maxLines: 3,
-          decoration: const InputDecoration(hintText: 'feedback...', hintStyle: CyberpunkTypography.bodySmall),
+          decoration: const InputDecoration(
+            hintText: 'feedback...',
+            hintStyle: CyberpunkTypography.bodySmall,
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('cancel', style: CyberpunkTypography.bodyMedium)),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('cancel', style: CyberpunkTypography.bodyMedium),
+          ),
           FilledButton(
             onPressed: () {
-              notifier.revisePlan(plan.id, sessionID: sessionId, feedback: controller.text);
+              notifier.revisePlan(
+                plan.id,
+                sessionID: sessionId,
+                feedback: controller.text,
+              );
               Navigator.pop(ctx);
             },
             child: const Text('revise', style: CyberpunkTypography.bodyMedium),
@@ -544,14 +640,23 @@ class _ActionButton extends StatelessWidget {
   final Color color;
   final VoidCallback onPressed;
 
-  const _ActionButton({required this.label, required this.color, required this.onPressed});
+  const _ActionButton({
+    required this.label,
+    required this.color,
+    required this.onPressed,
+  });
 
   @override
   Widget build(BuildContext context) {
     return FilledButton(
       style: FilledButton.styleFrom(backgroundColor: color),
       onPressed: onPressed,
-      child: Text(label, style: CyberpunkTypography.bodyMedium.copyWith(color: CyberpunkColors.black)),
+      child: Text(
+        label,
+        style: CyberpunkTypography.bodyMedium.copyWith(
+          color: CyberpunkColors.black,
+        ),
+      ),
     );
   }
 }

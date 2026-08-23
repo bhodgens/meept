@@ -17,11 +17,7 @@ class TabContent extends ConsumerWidget {
   final HomeTab selectedTab;
   final Session? activeSession;
 
-  const TabContent({
-    super.key,
-    required this.selectedTab,
-    this.activeSession,
-  });
+  const TabContent({super.key, required this.selectedTab, this.activeSession});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

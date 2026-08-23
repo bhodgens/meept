@@ -134,8 +134,9 @@ class PromptValidateResult {
       error: json['error'] as String? ?? '',
       errors: errorsRaw
           .whereType<Map>()
-          .map((m) => PromptValidateError.fromJson(
-              Map<String, dynamic>.from(m)))
+          .map(
+            (m) => PromptValidateError.fromJson(Map<String, dynamic>.from(m)),
+          )
           .toList(),
       // Defend against malformed values (string, bool, etc.) — default 0.
       checked: checkedRaw is num ? checkedRaw.toInt() : 0,
@@ -148,10 +149,7 @@ class PromptValidateError {
   final String name;
   final String error;
 
-  const PromptValidateError({
-    required this.name,
-    required this.error,
-  });
+  const PromptValidateError({required this.name, required this.error});
 
   factory PromptValidateError.fromJson(Map<String, dynamic> json) {
     return PromptValidateError(

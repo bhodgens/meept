@@ -17,6 +17,7 @@
 /// +-------------+--------------------------------+------------+
 /// |  [Status Bar]                                            |
 /// +----------------------------------------------------------+
+library;
 
 import 'package:flutter/material.dart';
 import '../theme/colors.dart';
@@ -49,10 +50,8 @@ class _Layout4TopTabsPanelsState extends State<Layout4TopTabsPanels> {
             child: Row(
               children: [
                 if (_leftPanelExpanded) _LeftPanel(),
-                _ToggleButtons(),
-                Expanded(
-                  child: _MainContentArea(tabIndex: _selectedTab),
-                ),
+                _buildToggleButtons(),
+                Expanded(child: _MainContentArea(tabIndex: _selectedTab)),
                 if (_rightPanelExpanded) _RightPanel(),
               ],
             ),
@@ -63,7 +62,7 @@ class _Layout4TopTabsPanelsState extends State<Layout4TopTabsPanels> {
     );
   }
 
-  Widget _ToggleButtons() {
+  Widget _buildToggleButtons() {
     return Column(
       children: [
         _ToggleButton(
@@ -75,7 +74,8 @@ class _Layout4TopTabsPanelsState extends State<Layout4TopTabsPanels> {
         _ToggleButton(
           icon: Icons.chevron_right,
           isActive: _rightPanelExpanded,
-          onTap: () => setState(() => _rightPanelExpanded = !_rightPanelExpanded),
+          onTap: () =>
+              setState(() => _rightPanelExpanded = !_rightPanelExpanded),
         ),
       ],
     );
@@ -91,13 +91,10 @@ class _HeaderWithTabs extends StatelessWidget {
         Container(
           height: 40,
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
+          decoration: const BoxDecoration(
             color: CyberpunkColors.darkGray,
             border: Border(
-              bottom: BorderSide(
-                color: CyberpunkColors.orangeDark,
-                width: 1,
-              ),
+              bottom: BorderSide(color: CyberpunkColors.orangeDark, width: 1),
             ),
           ),
           child: Row(
@@ -118,7 +115,7 @@ class _HeaderWithTabs extends StatelessWidget {
         ),
         // Tab bar
         Container(
-          decoration: BoxDecoration(
+          decoration: const BoxDecoration(
             color: CyberpunkColors.black,
             border: Border(
               bottom: BorderSide(
@@ -127,7 +124,7 @@ class _HeaderWithTabs extends StatelessWidget {
               ),
             ),
           ),
-          child: Row(
+          child: const Row(
             children: [
               _TabButton('chat', 0),
               _TabButton('sessions', 1),
@@ -150,7 +147,10 @@ class _TabButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final selectedTab = (context.findAncestorStateOfType<_Layout4TopTabsPanelsState>())?._selectedTab ?? 0;
+    final selectedTab =
+        (context.findAncestorStateOfType<_Layout4TopTabsPanelsState>())
+            ?._selectedTab ??
+        0;
     final isSelected = selectedTab == index;
 
     return Expanded(
@@ -168,7 +168,9 @@ class _TabButton extends StatelessWidget {
                 : Colors.transparent,
             border: Border(
               bottom: BorderSide(
-                color: isSelected ? CyberpunkColors.orangePrimary : Colors.transparent,
+                color: isSelected
+                    ? CyberpunkColors.orangePrimary
+                    : Colors.transparent,
                 width: 2,
               ),
             ),
@@ -236,7 +238,7 @@ class _LeftPanel extends StatelessWidget {
           ),
         ),
       ),
-      child: Column(
+      child: const Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _PanelHeader('tools'),
@@ -244,7 +246,7 @@ class _LeftPanel extends StatelessWidget {
           _ToolItem(Icons.memory, 'memory'),
           _ToolItem(Icons.lightbulb, 'prompts'),
           _ToolItem(Icons.psychology, 'reflection'),
-          const Divider(color: CyberpunkColors.midGray),
+          Divider(color: CyberpunkColors.midGray),
           _ToolItem(Icons.settings, 'settings'),
           _ToolItem(Icons.extension, 'skills'),
         ],
@@ -270,13 +272,13 @@ class _RightPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _PanelHeader('project'),
+          const _PanelHeader('project'),
           _ProjectInfo(),
           const Divider(color: CyberpunkColors.midGray),
-          _PanelHeader('quick access'),
-          _ToolItem(Icons.call_split, 'branches'),
-          _ToolItem(Icons.folder, 'files'),
-          _ToolItem(Icons.terminal, 'terminal'),
+          const _PanelHeader('quick access'),
+          const _ToolItem(Icons.call_split, 'branches'),
+          const _ToolItem(Icons.folder, 'files'),
+          const _ToolItem(Icons.terminal, 'terminal'),
         ],
       ),
     );
@@ -326,19 +328,19 @@ class _ToolItem extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: ListTile(
-      leading: Icon(
-        icon,
-        size: 18,
-        color: CyberpunkColors.orangePrimary.withValues(alpha: 0.7),
-      ),
-      title: Text(
-        label.toLowerCase(),
-        style: CyberpunkTypography.bodySmall.copyWith(
-          color: CyberpunkColors.lightGray,
-          fontFamily: 'SourceCodePro',
+        leading: Icon(
+          icon,
+          size: 18,
+          color: CyberpunkColors.orangePrimary.withValues(alpha: 0.7),
         ),
-      ),
-      onTap: () {},
+        title: Text(
+          label.toLowerCase(),
+          style: CyberpunkTypography.bodySmall.copyWith(
+            color: CyberpunkColors.lightGray,
+            fontFamily: 'SourceCodePro',
+          ),
+        ),
+        onTap: () {},
       ),
     );
   }
@@ -354,7 +356,7 @@ class _ProjectInfo extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(
+              const Icon(
                 Icons.folder,
                 size: 16,
                 color: CyberpunkColors.orangePrimary,
@@ -437,7 +439,7 @@ class _MainContentArea extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         image: DecorationImage(
           image: AssetImage('assets/images/gui-bg.png'),
           fit: BoxFit.cover,
@@ -505,7 +507,7 @@ class _StatusBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: CyberpunkColors.blackTransparent(0.7),
-        border: Border(
+        border: const Border(
           top: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),

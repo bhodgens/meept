@@ -169,17 +169,18 @@ class _ChatInputState extends ConsumerState<ChatInput>
   @override
   void initState() {
     super.initState();
-    _blinkController = AnimationController(
-      duration: const Duration(milliseconds: 530),
-      vsync: this,
-    )..addStatusListener((status) {
-        final visible = status == AnimationStatus.forward;
-        if (visible != _cursorVisible) {
-          _cursorVisible = visible;
-          _controller.showCursor = visible && _focusNode.hasFocus;
-          _controller.refresh();
-        }
-      });
+    _blinkController =
+        AnimationController(
+          duration: const Duration(milliseconds: 530),
+          vsync: this,
+        )..addStatusListener((status) {
+          final visible = status == AnimationStatus.forward;
+          if (visible != _cursorVisible) {
+            _cursorVisible = visible;
+            _controller.showCursor = visible && _focusNode.hasFocus;
+            _controller.refresh();
+          }
+        });
     _controller = _TerminalCursorController();
     _controller.addListener(_onTextChanged);
     _focusNode.addListener(_onFocusChange);
@@ -220,7 +221,6 @@ class _ChatInputState extends ConsumerState<ChatInput>
     }
   }
 
-  
   /// Fetch project paths via [SdkApiClient] so the autocomplete popup
   /// can offer them after `/project `.
   Future<void> _loadProjectPaths() async {
@@ -230,7 +230,9 @@ class _ChatInputState extends ConsumerState<ChatInput>
       if (!mounted) return;
       setState(() {
         _projectPaths = projects
-            .map((p) => p['local_path'] as String? ?? p['name'] as String? ?? '')
+            .map(
+              (p) => p['local_path'] as String? ?? p['name'] as String? ?? '',
+            )
             .where((p) => p.isNotEmpty)
             .toList();
       });
@@ -257,9 +259,8 @@ class _ChatInputState extends ConsumerState<ChatInput>
         final sdk = ref.read(sdkClientProvider);
         final result = await sdk.readdirProject(prefix: prefix);
         if (!mounted) return;
-        final matches = (result['matches'] as List<dynamic>?)
-                ?.cast<String>()
-                .toList() ??
+        final matches =
+            (result['matches'] as List<dynamic>?)?.cast<String>().toList() ??
             const [];
         setState(() => _readdirPaths = matches);
       } catch (e) {
@@ -395,7 +396,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
   Future<void> _uploadDetectedImage(String path) async {
     // Skip on web - web uses file pickers, not direct filesystem paths
     if (kIsWeb) return;
-    
+
     try {
       final file = File(path);
       if (!await file.exists()) return;
@@ -417,13 +418,15 @@ class _ChatInputState extends ConsumerState<ChatInput>
 
       if (!mounted) return;
       setState(() {
-        _attachments.add(Attachment(
-          uploadId: uploadData['id'] as String? ?? '',
-          filename: filename,
-          mimeType: uploadData['mime_type'] as String? ?? mime,
-          sizeBytes: (uploadData['size_bytes'] as num?)?.toInt() ??
-              bytes.length,
-        ));
+        _attachments.add(
+          Attachment(
+            uploadId: uploadData['id'] as String? ?? '',
+            filename: filename,
+            mimeType: uploadData['mime_type'] as String? ?? mime,
+            sizeBytes:
+                (uploadData['size_bytes'] as num?)?.toInt() ?? bytes.length,
+          ),
+        );
         _pendingFilePaths.remove(path);
       });
     } catch (e) {
@@ -445,9 +448,11 @@ class _ChatInputState extends ConsumerState<ChatInput>
       final spaceIdx = text.indexOf(' ');
       // For `/skill <name>` we keep the full text as the query so the
       // autocomplete can filter skill names by the argument prefix.
-      final isSkillArgs = spaceIdx != -1 && text.substring(0, spaceIdx) == '/skill';
+      final isSkillArgs =
+          spaceIdx != -1 && text.substring(0, spaceIdx) == '/skill';
       // Sync with SlashAutocomplete._projectArg() — mode detected by trailing space.
-      final isProjectArgs = spaceIdx != -1 && text.substring(0, spaceIdx) == '/project';
+      final isProjectArgs =
+          spaceIdx != -1 && text.substring(0, spaceIdx) == '/project';
       // `/skill <name>` and `/project <path>` pass full text as query so
       // `SlashAutocomplete._skillArg()` / `_projectArg()` can detect mode.
       final query = (isSkillArgs || isProjectArgs)
@@ -492,9 +497,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
     final cmdText = '${command.name} ';
     setState(() {
       _controller.text = cmdText;
-      _controller.selection = TextSelection.collapsed(
-        offset: cmdText.length,
-      );
+      _controller.selection = TextSelection.collapsed(offset: cmdText.length);
       _showSlashAutocomplete = false;
       _slashQuery = '';
     });
@@ -713,10 +716,14 @@ class _ChatInputState extends ConsumerState<ChatInput>
       buf.writeln('conversation_id: ${raw['conversation_id'] ?? '?'}');
       buf.writeln('created_at:      ${raw['created_at'] ?? '?'}');
       buf.writeln('last_activity:   ${raw['last_activity'] ?? '?'}');
-      buf.writeln('persisted_msgs:  ${messageCount < 0 ? "(unknown)" : messageCount}');
+      buf.writeln(
+        'persisted_msgs:  ${messageCount < 0 ? "(unknown)" : messageCount}',
+      );
       buf.writeln('--- project binding ---');
       buf.writeln('project_id:      ${projectId ?? '(none)'}');
-      buf.writeln('project_name:    ${(projectId == null || projectId.isEmpty) ? '(none)' : projectName}');
+      buf.writeln(
+        'project_name:    ${(projectId == null || projectId.isEmpty) ? '(none)' : projectName}',
+      );
       buf.writeln('project_path:    ${raw['project_path'] ?? '(none)'}');
       final dc = raw['detection_context'];
       if (dc is Map) {
@@ -745,8 +752,10 @@ class _ChatInputState extends ConsumerState<ChatInput>
           context: context,
           builder: (ctx) => AlertDialog(
             backgroundColor: CyberpunkColors.darkGray,
-            title: const Text('debug session',
-                style: TextStyle(fontFamily: 'SourceCodePro', fontSize: 14)),
+            title: const Text(
+              'debug session',
+              style: TextStyle(fontFamily: 'SourceCodePro', fontSize: 14),
+            ),
             content: SingleChildScrollView(
               child: SelectableText(
                 buf.toString(),
@@ -976,10 +985,9 @@ class _ChatInputState extends ConsumerState<ChatInput>
         return true;
       case '/stop':
         _history.add(widget.sessionId, text);
-        ref.read(chatProvider(widget.sessionId).notifier).sendSteer(
-              sessionId: widget.sessionId,
-              text: '/stop',
-            );
+        ref
+            .read(chatProvider(widget.sessionId).notifier)
+            .sendSteer(sessionId: widget.sessionId, text: '/stop');
         return true;
       case '/debugsession':
         _history.add(widget.sessionId, text);
@@ -992,8 +1000,9 @@ class _ChatInputState extends ConsumerState<ChatInput>
         if (spaceIdx == -1) {
           setState(() {
             _controller.text = '/project ';
-            _controller.selection =
-                const TextSelection.collapsed(offset: '/project '.length);
+            _controller.selection = const TextSelection.collapsed(
+              offset: '/project '.length,
+            );
             _showSlashAutocomplete = true;
             _slashQuery = '/project ';
             _slashSelectedIndex = 0;
@@ -1009,8 +1018,9 @@ class _ChatInputState extends ConsumerState<ChatInput>
           // the typeahead popup so they can pick from known paths.
           setState(() {
             _controller.text = '/project ';
-            _controller.selection =
-                const TextSelection.collapsed(offset: '/project '.length);
+            _controller.selection = const TextSelection.collapsed(
+              offset: '/project '.length,
+            );
             _showSlashAutocomplete = true;
             _slashQuery = '/project ';
             _slashSelectedIndex = 0;
@@ -1047,7 +1057,10 @@ class _ChatInputState extends ConsumerState<ChatInput>
     // Capture first-message state before sending so the auto-derivation
     // fires only on the very first user exchange in a session (parity with
     // the TUI's m.sessionDescription != "" guard in chat.go).
-    final isFirstMessage = ref.read(chatProvider(widget.sessionId)).messages.isEmpty;
+    final isFirstMessage = ref
+        .read(chatProvider(widget.sessionId))
+        .messages
+        .isEmpty;
 
     // Multimodal path: when image attachments are present, build structured
     // content parts and route via sendMessageWithParts.  Slash commands are
@@ -1151,10 +1164,12 @@ class _ChatInputState extends ConsumerState<ChatInput>
       // title, so a subsequent loadSessions() would also reflect it; this
       // avoids a round-trip.
       final sessionState = ref.read(sessionProvider);
-      final sessions = sessionState.sessions.map((s) {
-        if (s.id == sessionId) return s.copyWith(title: newName);
-        return s;
-      }).toList(growable: false);
+      final sessions = sessionState.sessions
+          .map((s) {
+            if (s.id == sessionId) return s.copyWith(title: newName);
+            return s;
+          })
+          .toList(growable: false);
       ref.read(sessionProvider.notifier).updateSessions(sessions);
     } catch (e) {
       // Best-effort: leave the existing title ("new session") on failure.
@@ -1166,10 +1181,9 @@ class _ChatInputState extends ConsumerState<ChatInput>
     final payload = _preparePayload(text);
     if (payload.isEmpty) return;
 
-    ref.read(chatProvider(widget.sessionId).notifier).sendSteer(
-      sessionId: widget.sessionId,
-      text: payload,
-    );
+    ref
+        .read(chatProvider(widget.sessionId).notifier)
+        .sendSteer(sessionId: widget.sessionId, text: payload);
 
     _resetInputState();
   }
@@ -1179,7 +1193,8 @@ class _ChatInputState extends ConsumerState<ChatInput>
     if (event is KeyDownEvent) {
       if (event.logicalKey == LogicalKeyboardKey.enter) {
         // Guard: ignore Enter while LLM is responding (bug F6).
-        if (ref.read(chatProvider(widget.sessionId)).isLoading) return KeyEventResult.ignored;
+        if (ref.read(chatProvider(widget.sessionId)).isLoading)
+          return KeyEventResult.ignored;
 
         final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
 
@@ -1293,15 +1308,19 @@ class _ChatInputState extends ConsumerState<ChatInput>
         final maxIdx = visibleCount - 1;
         if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
           setState(() {
-            _slashSelectedIndex =
-                (_slashSelectedIndex + 1).clamp(0, maxIdx < 0 ? 0 : maxIdx);
+            _slashSelectedIndex = (_slashSelectedIndex + 1).clamp(
+              0,
+              maxIdx < 0 ? 0 : maxIdx,
+            );
           });
           return KeyEventResult.handled;
         }
         if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
           setState(() {
-            _slashSelectedIndex =
-                (_slashSelectedIndex - 1).clamp(0, maxIdx < 0 ? 0 : maxIdx);
+            _slashSelectedIndex = (_slashSelectedIndex - 1).clamp(
+              0,
+              maxIdx < 0 ? 0 : maxIdx,
+            );
           });
           return KeyEventResult.handled;
         }
@@ -1329,8 +1348,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
         // Escape dismisses the find bar first (defensive path — the
         // primary close path is on the FindBar's own FocusNode, but
         // this catches the case where focus remained on ChatInput).
-        final findVisible =
-            ref.read(findBarVisibleProvider(widget.sessionId));
+        final findVisible = ref.read(findBarVisibleProvider(widget.sessionId));
         if (findVisible) {
           ref.read(findBarVisibleProvider(widget.sessionId).notifier).state =
               false;
@@ -1355,9 +1373,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
         if (_ghostText != null) {
           _controller.text = _ghostText!;
           final ghostLen = _ghostText!.length;
-          _controller.selection = TextSelection.collapsed(
-            offset: ghostLen,
-          );
+          _controller.selection = TextSelection.collapsed(offset: ghostLen);
           _ghostText = null;
           setState(() {
             _showSlashAutocomplete = false;
@@ -1376,19 +1392,16 @@ class _ChatInputState extends ConsumerState<ChatInput>
   @override
   Widget build(BuildContext context) {
     // Listen for focus-input requests from the shortcut system
-    ref.listen<bool>(
-      focusInputRequestProvider,
-      (previous, next) {
-        if (next) {
-          _focusNode.requestFocus();
-          if (_controller.text.isEmpty) {
-            _controller.text = '/';
-            _controller.selection = const TextSelection.collapsed(offset: 1);
-          }
-          ref.read(focusInputRequestProvider.notifier).state = false;
+    ref.listen<bool>(focusInputRequestProvider, (previous, next) {
+      if (next) {
+        _focusNode.requestFocus();
+        if (_controller.text.isEmpty) {
+          _controller.text = '/';
+          _controller.selection = const TextSelection.collapsed(offset: 1);
         }
-      },
-    );
+        ref.read(focusInputRequestProvider.notifier).state = false;
+      }
+    });
 
     final hasFocus = _focusNode.hasFocus;
 
@@ -1486,7 +1499,10 @@ class _ChatInputState extends ConsumerState<ChatInput>
                       hintText: '',
                       hintStyle: CyberpunkTypography.bodySmall,
                       border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 10,
+                      ),
                       isDense: true,
                       filled: true,
                       fillColor: CyberpunkColors.black,
@@ -1535,11 +1551,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
                   ),
                 ),
               )
-            : const Icon(
-                Icons.send,
-                color: CyberpunkColors.black,
-                size: 18,
-              ),
+            : const Icon(Icons.send, color: CyberpunkColors.black, size: 18),
       ),
     );
   }

@@ -17,8 +17,10 @@ import 'providers.dart' show sdkClientProvider;
 /// Implemented as a direct `FutureProvider.family` because Riverpod's family
 /// already provides per-id caching, so an additional wrapper would add no
 /// benefit.
-final sessionDetailFamily =
-    FutureProvider.family<Session, String>((ref, id) async {
+final sessionDetailFamily = FutureProvider.family<Session, String>((
+  ref,
+  id,
+) async {
   final client = ref.read(sdkClientProvider);
   final raw = await client.getSession(id);
   return Session.fromJson(raw);

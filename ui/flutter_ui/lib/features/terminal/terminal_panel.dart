@@ -186,7 +186,11 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.arrow_right, color: CyberpunkColors.orangeBright, size: 18),
+          const Icon(
+            Icons.arrow_right,
+            color: CyberpunkColors.orangeBright,
+            size: 18,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: TextField(
@@ -210,7 +214,9 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
               height: 16,
               child: CircularProgressIndicator(
                 strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation<Color>(CyberpunkColors.orangePrimary),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  CyberpunkColors.orangePrimary,
+                ),
               ),
             )
           else
@@ -232,7 +238,9 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
           height: 20,
           child: CircularProgressIndicator(
             strokeWidth: 2,
-            valueColor: AlwaysStoppedAnimation<Color>(CyberpunkColors.orangePrimary),
+            valueColor: AlwaysStoppedAnimation<Color>(
+              CyberpunkColors.orangePrimary,
+            ),
           ),
         ),
       );
@@ -243,7 +251,11 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.terminal, color: CyberpunkColors.midGray, size: 48),
+            const Icon(
+              Icons.terminal,
+              color: CyberpunkColors.midGray,
+              size: 48,
+            ),
             const SizedBox(height: 8),
             Text(
               'no command history',
@@ -344,7 +356,11 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
           const SizedBox(height: 4),
           Row(
             children: [
-              const Icon(Icons.access_time, size: 10, color: CyberpunkColors.midGray),
+              const Icon(
+                Icons.access_time,
+                size: 10,
+                color: CyberpunkColors.midGray,
+              ),
               const SizedBox(width: 4),
               Text(
                 _formatTime(entry.timestamp),
@@ -356,7 +372,11 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
               ),
               if (entry.workingDir.isNotEmpty) ...[
                 const SizedBox(width: 8),
-                const Icon(Icons.folder, size: 10, color: CyberpunkColors.midGray),
+                const Icon(
+                  Icons.folder,
+                  size: 10,
+                  color: CyberpunkColors.midGray,
+                ),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(

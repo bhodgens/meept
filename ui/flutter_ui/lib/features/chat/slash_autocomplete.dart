@@ -20,6 +20,7 @@ import '../../theme/typography.dart';
 /// matching project paths from [projectPaths].
 class SlashAutocomplete extends StatefulWidget {
   final String query;
+
   /// Parent-owned selection index (0-based within the visible 8-item window).
   final int selectedIndex;
   final void Function(SlashCommand command)? onSelected;
@@ -103,10 +104,10 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
   void _updateMatches() {
     final skillArg = _skillArg(widget.query);
     final projectArg = _projectArg(widget.query);
-    
+
     _skillMode = skillArg != null;
     _projectMode = projectArg != null;
-    
+
     if (_skillMode) {
       // In skill-name mode, filter skill names by the argument prefix.
       final lowerArg = skillArg!.toLowerCase();
@@ -133,11 +134,11 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
       _matches = _registry.match(widget.query);
     }
 
-    final empty = _skillMode 
-        ? _skillMatches.isEmpty 
-        : _projectMode 
-            ? _projectMatches.isEmpty 
-            : _matches.isEmpty;
+    final empty = _skillMode
+        ? _skillMatches.isEmpty
+        : _projectMode
+        ? _projectMatches.isEmpty
+        : _matches.isEmpty;
     if (empty) {
       // Defer dismiss to avoid calling parent setState during child build
       // (bug F8: onDismiss during initState/didUpdateWidget triggers parent
@@ -322,7 +323,12 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
     );
   }
 
-  Widget _buildItem(SlashCommand cmd, String prefix, bool isSelected, int index) {
+  Widget _buildItem(
+    SlashCommand cmd,
+    String prefix,
+    bool isSelected,
+    int index,
+  ) {
     // Highlight the matching portion of the command name
     final prefixLen = prefix.length.clamp(0, cmd.name.length);
     final highlighted = cmd.name.substring(0, prefixLen);

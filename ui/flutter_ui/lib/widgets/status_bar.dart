@@ -40,7 +40,9 @@ class StatusBar extends ConsumerWidget {
 
     // Keybind hint (very light gray)
     spans.add(_separator());
-    spans.add(TextSpan(text: _keybindHint(selectedTabIndex), style: _lightStyle));
+    spans.add(
+      TextSpan(text: _keybindHint(selectedTabIndex), style: _lightStyle),
+    );
 
     // Project part (orange)
     final projectPart = _projectPart(ref);
@@ -51,10 +53,12 @@ class StatusBar extends ConsumerWidget {
 
     // Verbosity (very light gray)
     spans.add(_separator());
-    spans.add(TextSpan(
-      text: 'verbosity: ${VerbosityLevel.name(ref.watch(verbosityProvider))}',
-      style: _lightStyle,
-    ));
+    spans.add(
+      TextSpan(
+        text: 'verbosity: ${VerbosityLevel.name(ref.watch(verbosityProvider))}',
+        style: _lightStyle,
+      ),
+    );
 
     return _bar(
       child: Row(
@@ -76,35 +80,37 @@ class StatusBar extends ConsumerWidget {
   }
 
   Widget _bar({required Widget child}) => Container(
-        height: 28, // Increased from 22 for better readability
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          color: CyberpunkColors.blackTransparent(0.7),
-          border: const Border(
-              top: BorderSide(color: CyberpunkColors.midGray, width: 1)),
-        ),
-        alignment: Alignment.centerLeft,
-        child: child,
-      );
+    height: 28, // Increased from 22 for better readability
+    padding: const EdgeInsets.symmetric(horizontal: 12),
+    decoration: BoxDecoration(
+      color: CyberpunkColors.blackTransparent(0.7),
+      border: const Border(
+        top: BorderSide(color: CyberpunkColors.midGray, width: 1),
+      ),
+    ),
+    alignment: Alignment.centerLeft,
+    child: child,
+  );
 
   // Base style - increased font size from 10 to 12
   TextStyle get _baseStyle => CyberpunkTypography.bodySmall.copyWith(
-        color: CyberpunkColors.veryLightGray,
-        fontFamily: 'SourceCodePro',
-        fontSize: 12,
-      );
+    color: CyberpunkColors.veryLightGray,
+    fontFamily: 'SourceCodePro',
+    fontSize: 12,
+  );
 
   // Orange style for session and project
-  TextStyle get _orangeStyle => _baseStyle.copyWith(
-        color: CyberpunkColors.orangePrimary,
-      );
+  TextStyle get _orangeStyle =>
+      _baseStyle.copyWith(color: CyberpunkColors.orangePrimary);
 
   // Very light gray for keybind hints and verbosity
-  TextStyle get _lightStyle => _baseStyle.copyWith(
-        color: CyberpunkColors.veryLightGray,
-      );
+  TextStyle get _lightStyle =>
+      _baseStyle.copyWith(color: CyberpunkColors.veryLightGray);
 
-  InlineSpan _separator() => const TextSpan(text: ' · ', style: TextStyle(color: CyberpunkColors.midGray));
+  InlineSpan _separator() => const TextSpan(
+    text: ' · ',
+    style: TextStyle(color: CyberpunkColors.midGray),
+  );
 
   String _sessionPart(WidgetRef ref) {
     final session = ref.watch(activeSessionProvider);
@@ -137,10 +143,7 @@ class StatusBar extends ConsumerWidget {
         session.projectId != null &&
         session.projectId!.isNotEmpty) {
       final status = ref.watch(projectStatusProvider(session.projectId!));
-      final cp = status.maybeWhen(
-        data: (v) => v,
-        orElse: () => null,
-      );
+      final cp = status.maybeWhen(data: (v) => v, orElse: () => null);
       if (cp != null && cp.isActive) {
         final pathToShow = cp.localPath.isNotEmpty ? cp.localPath : cp.name;
         final chars = pathToShow.characters;
@@ -181,7 +184,9 @@ class StatusBar extends ConsumerWidget {
     final pathToShow = p.localPath.isNotEmpty ? p.localPath : p.name;
     // Use grapheme-cluster-aware truncation for long paths
     final chars = pathToShow.characters;
-    final displayPath = chars.length > 30 ? '...${chars.takeLast(27).toString()}' : pathToShow;
+    final displayPath = chars.length > 30
+        ? '...${chars.takeLast(27).toString()}'
+        : pathToShow;
     if (p.mode == 'git') {
       final branch = p.branch.isNotEmpty ? ' ${p.branch}' : '';
       final dirty = p.dirty ? '*' : '';
@@ -203,8 +208,8 @@ class _ConnectionToggle extends ConsumerWidget {
     final color = isConnecting
         ? CyberpunkColors.orangePrimary
         : connected
-            ? CyberpunkColors.greenSuccess
-            : CyberpunkColors.redAlert;
+        ? CyberpunkColors.greenSuccess
+        : CyberpunkColors.redAlert;
 
     final dot = connected ? '●' : '○';
 
@@ -254,8 +259,8 @@ class _ConnectionDialogState extends ConsumerState<_ConnectionDialog> {
     final statusColor = isConnecting
         ? CyberpunkColors.orangePrimary
         : connected
-            ? CyberpunkColors.greenSuccess
-            : CyberpunkColors.redAlert;
+        ? CyberpunkColors.greenSuccess
+        : CyberpunkColors.redAlert;
 
     final dot = connected ? '●' : '○';
     final busy = _operationInProgress || isConnecting;
@@ -284,7 +289,7 @@ class _ConnectionDialogState extends ConsumerState<_ConnectionDialog> {
               ),
               if (busy) ...[
                 const SizedBox(width: 12),
-                SizedBox(
+                const SizedBox(
                   width: 14,
                   height: 14,
                   child: CircularProgressIndicator(
@@ -308,17 +313,15 @@ class _ConnectionDialogState extends ConsumerState<_ConnectionDialog> {
           ),
         ),
         TextButton(
-          onPressed: busy
-              ? null
-              : () => connected ? _disconnect() : _connect(),
+          onPressed: busy ? null : () => connected ? _disconnect() : _connect(),
           child: Text(
             connected ? 'disconnect' : 'connect',
             style: CyberpunkTypography.bodySmall.copyWith(
               color: busy
                   ? CyberpunkColors.midGray
                   : connected
-                      ? CyberpunkColors.redAlert
-                      : CyberpunkColors.greenSuccess,
+                  ? CyberpunkColors.redAlert
+                  : CyberpunkColors.greenSuccess,
             ),
           ),
         ),

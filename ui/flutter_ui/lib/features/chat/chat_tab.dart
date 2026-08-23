@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../widgets/background_image.dart';
@@ -33,22 +32,30 @@ class _ChatTabState extends ConsumerState<ChatTab> {
   @override
   void initState() {
     super.initState();
-    debugPrint('[session-debug] ChatTab.initState sessionId=${widget.sessionId}');
+    debugPrint(
+      '[session-debug] ChatTab.initState sessionId=${widget.sessionId}',
+    );
   }
 
   @override
   void didUpdateWidget(ChatTab oldWidget) {
     super.didUpdateWidget(oldWidget);
-    debugPrint('[session-debug] ChatTab.didUpdateWidget old=${oldWidget.sessionId} new=${widget.sessionId}');
+    debugPrint(
+      '[session-debug] ChatTab.didUpdateWidget old=${oldWidget.sessionId} new=${widget.sessionId}',
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final activeTool = ref.watch(activeToolProvider);
-    debugPrint('[session-debug] ChatTab.build sessionId=${widget.sessionId} activeTool="$activeTool"');
+    debugPrint(
+      '[session-debug] ChatTab.build sessionId=${widget.sessionId} activeTool="$activeTool"',
+    );
 
     return BackgroundImage(
-      child: activeTool.isNotEmpty ? _buildToolView(activeTool) : ChatView(sessionId: widget.sessionId),
+      child: activeTool.isNotEmpty
+          ? _buildToolView(activeTool)
+          : ChatView(sessionId: widget.sessionId),
     );
   }
 

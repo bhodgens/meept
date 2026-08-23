@@ -61,7 +61,12 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
     );
   }
 
-  Future<void> _createEvent(String summary, DateTime start, DateTime end, String? description) async {
+  Future<void> _createEvent(
+    String summary,
+    DateTime start,
+    DateTime end,
+    String? description,
+  ) async {
     try {
       final client = ref.read(sdkClientProvider);
       await client.createCalendarEvent(
@@ -153,7 +158,9 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
           height: 20,
           child: CircularProgressIndicator(
             strokeWidth: 2,
-            valueColor: AlwaysStoppedAnimation<Color>(CyberpunkColors.orangePrimary),
+            valueColor: AlwaysStoppedAnimation<Color>(
+              CyberpunkColors.orangePrimary,
+            ),
           ),
         ),
       );
@@ -164,7 +171,11 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.event_busy, color: CyberpunkColors.midGray, size: 48),
+            const Icon(
+              Icons.event_busy,
+              color: CyberpunkColors.midGray,
+              size: 48,
+            ),
             const SizedBox(height: 8),
             Text(
               'no events today',
@@ -186,7 +197,8 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
   Widget _buildEventItem(CalendarEvent event) {
     final timeFormat = DateFormat('HH:mm');
     final duration = event.end.difference(event.start);
-    final isAllDay = event.start.hour == 0 &&
+    final isAllDay =
+        event.start.hour == 0 &&
         event.start.minute == 0 &&
         event.end.hour == 0 &&
         event.end.minute == 0 &&
@@ -226,7 +238,11 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
               ),
               const Spacer(),
               if (event.location != null)
-                const Icon(Icons.location_on, size: 14, color: CyberpunkColors.midGray),
+                const Icon(
+                  Icons.location_on,
+                  size: 14,
+                  color: CyberpunkColors.midGray,
+                ),
             ],
           ),
           const SizedBox(height: 6),

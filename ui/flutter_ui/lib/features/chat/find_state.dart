@@ -1,25 +1,30 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// Per-session find bar visibility.
-final findBarVisibleProvider =
-    StateProvider.family<bool, String>((ref, sessionId) => false);
+final findBarVisibleProvider = StateProvider.family<bool, String>(
+  (ref, sessionId) => false,
+);
 
 /// Per-session find query.
-final findQueryProvider =
-    StateProvider.family<String, String>((ref, sessionId) => '');
+final findQueryProvider = StateProvider.family<String, String>(
+  (ref, sessionId) => '',
+);
 
 /// Per-session case-sensitive toggle.
-final findCaseSensitiveProvider =
-    StateProvider.family<bool, String>((ref, sessionId) => false);
+final findCaseSensitiveProvider = StateProvider.family<bool, String>(
+  (ref, sessionId) => false,
+);
 
 /// Per-session regex toggle.
-final findRegexProvider =
-    StateProvider.family<bool, String>((ref, sessionId) => false);
+final findRegexProvider = StateProvider.family<bool, String>(
+  (ref, sessionId) => false,
+);
 
 /// Per-session cursor (which match is "current", 0-based index into the flat
 /// list of all matches across all messages).
-final findCursorProvider =
-    StateProvider.family<int, String>((ref, sessionId) => 0);
+final findCursorProvider = StateProvider.family<int, String>(
+  (ref, sessionId) => 0,
+);
 
 /// A single match location.
 class FindMatch {

@@ -16,7 +16,8 @@ _$ChatMessageImpl _$$ChatMessageImplFromJson(Map<String, dynamic> json) =>
       toolCalls: (json['tool_calls'] as List<dynamic>?)
           ?.map((e) => e as String)
           .toList(),
-      parts: (json['parts'] as List<dynamic>?)
+      parts:
+          (json['parts'] as List<dynamic>?)
               ?.map((e) => ChatMessagePart.fromJson(e as Map<String, dynamic>))
               .toList() ??
           const [],
@@ -34,22 +35,22 @@ Map<String, dynamic> _$$ChatMessageImplToJson(_$ChatMessageImpl instance) =>
     };
 
 _$DetectionContextImpl _$$DetectionContextImplFromJson(
-        Map<String, dynamic> json) =>
-    _$DetectionContextImpl(
-      cwd: json['cwd'] as String?,
-      detectedProjectId: json['detected_project_id'] as String?,
-      cliArgs: (json['cli_args'] as List<dynamic>?)
-          ?.map((e) => e as String)
-          .toList(),
-    );
+  Map<String, dynamic> json,
+) => _$DetectionContextImpl(
+  cwd: json['cwd'] as String?,
+  detectedProjectId: json['detected_project_id'] as String?,
+  cliArgs: (json['cli_args'] as List<dynamic>?)
+      ?.map((e) => e as String)
+      .toList(),
+);
 
 Map<String, dynamic> _$$DetectionContextImplToJson(
-        _$DetectionContextImpl instance) =>
-    <String, dynamic>{
-      'cwd': instance.cwd,
-      'detected_project_id': instance.detectedProjectId,
-      'cli_args': instance.cliArgs,
-    };
+  _$DetectionContextImpl instance,
+) => <String, dynamic>{
+  'cwd': instance.cwd,
+  'detected_project_id': instance.detectedProjectId,
+  'cli_args': instance.cliArgs,
+};
 
 _$SessionImpl _$$SessionImplFromJson(Map<String, dynamic> json) =>
     _$SessionImpl(
@@ -73,7 +74,8 @@ _$SessionImpl _$$SessionImplFromJson(Map<String, dynamic> json) =>
       detectionContext: json['detection_context'] == null
           ? null
           : DetectionContext.fromJson(
-              json['detection_context'] as Map<String, dynamic>),
+              json['detection_context'] as Map<String, dynamic>,
+            ),
       leafMessageId: (json['leaf_message_id'] as num?)?.toInt(),
     );
 
@@ -97,27 +99,27 @@ Map<String, dynamic> _$$SessionImplToJson(_$SessionImpl instance) =>
     };
 
 _$TaskImpl _$$TaskImplFromJson(Map<String, dynamic> json) => _$TaskImpl(
-      id: json['id'] as String,
-      title: json['name'] as String,
-      description: json['description'] as String,
-      status: json['state'] as String,
-      agentId: json['agent_id'] as String?,
-      sessionId: json['session_id'] as String?,
-      createdAt: DateTime.parse(json['created_at'] as String),
-      updatedAt: json['updated_at'] == null
-          ? null
-          : DateTime.parse(json['updated_at'] as String),
-      completedAt: json['completed_at'] == null
-          ? null
-          : DateTime.parse(json['completed_at'] as String),
-      metadata: json['metadata'] as Map<String, dynamic>?,
-      totalJobs: (json['total_jobs'] as num?)?.toInt(),
-      completedJobs: (json['completed_jobs'] as num?)?.toInt(),
-      failedJobs: (json['failed_jobs'] as num?)?.toInt(),
-      steps: (json['steps'] as List<dynamic>?)
-          ?.map((e) => TaskStep.fromJson(e as Map<String, dynamic>))
-          .toList(),
-    );
+  id: json['id'] as String,
+  title: json['name'] as String,
+  description: json['description'] as String,
+  status: json['state'] as String,
+  agentId: json['agent_id'] as String?,
+  sessionId: json['session_id'] as String?,
+  createdAt: DateTime.parse(json['created_at'] as String),
+  updatedAt: json['updated_at'] == null
+      ? null
+      : DateTime.parse(json['updated_at'] as String),
+  completedAt: json['completed_at'] == null
+      ? null
+      : DateTime.parse(json['completed_at'] as String),
+  metadata: json['metadata'] as Map<String, dynamic>?,
+  totalJobs: (json['total_jobs'] as num?)?.toInt(),
+  completedJobs: (json['completed_jobs'] as num?)?.toInt(),
+  failedJobs: (json['failed_jobs'] as num?)?.toInt(),
+  steps: (json['steps'] as List<dynamic>?)
+      ?.map((e) => TaskStep.fromJson(e as Map<String, dynamic>))
+      .toList(),
+);
 
 Map<String, dynamic> _$$TaskImplToJson(_$TaskImpl instance) =>
     <String, dynamic>{
@@ -160,13 +162,13 @@ Map<String, dynamic> _$$TaskStepImplToJson(_$TaskStepImpl instance) =>
     };
 
 _$AgentImpl _$$AgentImplFromJson(Map<String, dynamic> json) => _$AgentImpl(
-      id: json['id'] as String,
-      name: json['name'] as String,
-      description: json['description'] as String? ?? '',
-      enabled: json['enabled'] as bool? ?? true,
-      prompt: json['prompt'] as String?,
-      frontmatter: json['frontmatter'] as Map<String, dynamic>?,
-    );
+  id: json['id'] as String,
+  name: json['name'] as String,
+  description: json['description'] as String? ?? '',
+  enabled: json['enabled'] as bool? ?? true,
+  prompt: json['prompt'] as String?,
+  frontmatter: json['frontmatter'] as Map<String, dynamic>?,
+);
 
 Map<String, dynamic> _$$AgentImplToJson(_$AgentImpl instance) =>
     <String, dynamic>{
@@ -179,45 +181,46 @@ Map<String, dynamic> _$$AgentImplToJson(_$AgentImpl instance) =>
     };
 
 _$JobImpl _$$JobImplFromJson(Map<String, dynamic> json) => _$JobImpl(
-      id: json['id'] as String,
-      type: json['type'] as String,
-      status: json['state'] as String,
-      agentId: json['agent_id'] as String?,
-      payload: json['payload'] as Map<String, dynamic>?,
-      createdAt: DateTime.parse(json['created_at'] as String),
-      completedAt: json['completed_at'] == null
-          ? null
-          : DateTime.parse(json['completed_at'] as String),
-      retryCount: (json['retry_count'] as num?)?.toInt() ?? 0,
-      error: json['error'] as String?,
-    );
+  id: json['id'] as String,
+  type: json['type'] as String,
+  status: json['state'] as String,
+  agentId: json['agent_id'] as String?,
+  payload: json['payload'] as Map<String, dynamic>?,
+  createdAt: DateTime.parse(json['created_at'] as String),
+  completedAt: json['completed_at'] == null
+      ? null
+      : DateTime.parse(json['completed_at'] as String),
+  retryCount: (json['retry_count'] as num?)?.toInt() ?? 0,
+  error: json['error'] as String?,
+);
 
 Map<String, dynamic> _$$JobImplToJson(_$JobImpl instance) => <String, dynamic>{
-      'id': instance.id,
-      'type': instance.type,
-      'state': instance.status,
-      'agent_id': instance.agentId,
-      'payload': instance.payload,
-      'created_at': instance.createdAt.toIso8601String(),
-      'completed_at': instance.completedAt?.toIso8601String(),
-      'retry_count': instance.retryCount,
-      'error': instance.error,
-    };
+  'id': instance.id,
+  'type': instance.type,
+  'state': instance.status,
+  'agent_id': instance.agentId,
+  'payload': instance.payload,
+  'created_at': instance.createdAt.toIso8601String(),
+  'completed_at': instance.completedAt?.toIso8601String(),
+  'retry_count': instance.retryCount,
+  'error': instance.error,
+};
 
 _$SkillImpl _$$SkillImplFromJson(Map<String, dynamic> json) => _$SkillImpl(
-      slug: json['slug'] as String,
-      name: json['name'] as String,
-      description: json['description'] as String,
-      category: json['category'] as String? ?? '',
-      capabilities: (json['capabilities'] as List<dynamic>?)
-              ?.map((e) => e as String)
-              .toList() ??
-          const [],
-      tags:
-          (json['tags'] as List<dynamic>?)?.map((e) => e as String).toList() ??
-              const [],
-      enabled: json['enabled'] as bool? ?? true,
-    );
+  slug: json['slug'] as String,
+  name: json['name'] as String,
+  description: json['description'] as String,
+  category: json['category'] as String? ?? '',
+  capabilities:
+      (json['capabilities'] as List<dynamic>?)
+          ?.map((e) => e as String)
+          .toList() ??
+      const [],
+  tags:
+      (json['tags'] as List<dynamic>?)?.map((e) => e as String).toList() ??
+      const [],
+  enabled: json['enabled'] as bool? ?? true,
+);
 
 Map<String, dynamic> _$$SkillImplToJson(_$SkillImpl instance) =>
     <String, dynamic>{
@@ -231,62 +234,63 @@ Map<String, dynamic> _$$SkillImplToJson(_$SkillImpl instance) =>
     };
 
 _$MetricsSnapshotImpl _$$MetricsSnapshotImplFromJson(
-        Map<String, dynamic> json) =>
-    _$MetricsSnapshotImpl(
-      timestamp: DateTime.parse(json['timestamp'] as String),
-      activeAgents: (json['active_agents'] as num?)?.toInt() ?? 0,
-      requestsPerSec: (json['requests_per_sec'] as num?)?.toDouble() ?? 0.0,
-      tokenUsageRate: (json['token_usage_rate'] as num?)?.toDouble() ?? 0.0,
-      queueDepth: (json['queue_depth'] as num?)?.toInt() ?? 0,
-      totalSessions: (json['total_sessions'] as num?)?.toInt() ?? 0,
-      totalJobs: (json['total_jobs'] as num?)?.toInt() ?? 0,
-      runningJobs: (json['running_jobs'] as num?)?.toInt() ?? 0,
-      pendingJobs: (json['pending_jobs'] as num?)?.toInt() ?? 0,
-      version: json['version'] as String? ?? '',
-      metadata: json['metadata'] as Map<String, dynamic>?,
-    );
+  Map<String, dynamic> json,
+) => _$MetricsSnapshotImpl(
+  timestamp: DateTime.parse(json['timestamp'] as String),
+  activeAgents: (json['active_agents'] as num?)?.toInt() ?? 0,
+  requestsPerSec: (json['requests_per_sec'] as num?)?.toDouble() ?? 0.0,
+  tokenUsageRate: (json['token_usage_rate'] as num?)?.toDouble() ?? 0.0,
+  queueDepth: (json['queue_depth'] as num?)?.toInt() ?? 0,
+  totalSessions: (json['total_sessions'] as num?)?.toInt() ?? 0,
+  totalJobs: (json['total_jobs'] as num?)?.toInt() ?? 0,
+  runningJobs: (json['running_jobs'] as num?)?.toInt() ?? 0,
+  pendingJobs: (json['pending_jobs'] as num?)?.toInt() ?? 0,
+  version: json['version'] as String? ?? '',
+  metadata: json['metadata'] as Map<String, dynamic>?,
+);
 
 Map<String, dynamic> _$$MetricsSnapshotImplToJson(
-        _$MetricsSnapshotImpl instance) =>
-    <String, dynamic>{
-      'timestamp': instance.timestamp.toIso8601String(),
-      'active_agents': instance.activeAgents,
-      'requests_per_sec': instance.requestsPerSec,
-      'token_usage_rate': instance.tokenUsageRate,
-      'queue_depth': instance.queueDepth,
-      'total_sessions': instance.totalSessions,
-      'total_jobs': instance.totalJobs,
-      'running_jobs': instance.runningJobs,
-      'pending_jobs': instance.pendingJobs,
-      'version': instance.version,
-      'metadata': instance.metadata,
-    };
+  _$MetricsSnapshotImpl instance,
+) => <String, dynamic>{
+  'timestamp': instance.timestamp.toIso8601String(),
+  'active_agents': instance.activeAgents,
+  'requests_per_sec': instance.requestsPerSec,
+  'token_usage_rate': instance.tokenUsageRate,
+  'queue_depth': instance.queueDepth,
+  'total_sessions': instance.totalSessions,
+  'total_jobs': instance.totalJobs,
+  'running_jobs': instance.runningJobs,
+  'pending_jobs': instance.pendingJobs,
+  'version': instance.version,
+  'metadata': instance.metadata,
+};
 
 _$PlanImpl _$$PlanImplFromJson(Map<String, dynamic> json) => _$PlanImpl(
-      id: json['id'] as String,
-      title: json['title'] as String,
-      description: json['description'] as String? ?? '',
-      filePath: json['file_path'] as String? ?? '',
-      projectID: json['project_id'] as String?,
-      state: json['state'] as String,
-      createdAt: DateTime.parse(json['created_at'] as String),
-      updatedAt: DateTime.parse(json['updated_at'] as String),
-      approvedAt: json['approved_at'] == null
-          ? null
-          : DateTime.parse(json['approved_at'] as String),
-      confirmedAt: json['confirmed_at'] == null
-          ? null
-          : DateTime.parse(json['confirmed_at'] as String),
-      approvedBy: json['approved_by'] as String?,
-      confirmedBy: json['confirmed_by'] as String?,
-      taskID: json['task_id'] as String?,
-      sourceSession: json['source_session'] as String?,
-      revisionCount: (json['revision_count'] as num?)?.toInt() ?? 0,
-      phases: (json['phases'] as List<dynamic>?)
-              ?.map((e) => PlanPhase.fromJson(e as Map<String, dynamic>))
-              .toList() ??
-          const [],
-    );
+  id: json['id'] as String,
+  title: json['title'] as String,
+  description: json['description'] as String? ?? '',
+  filePath: json['file_path'] as String? ?? '',
+  projectID: json['project_id'] as String?,
+  state: json['state'] as String,
+  createdAt: DateTime.parse(json['created_at'] as String),
+  updatedAt: DateTime.parse(json['updated_at'] as String),
+  approvedAt: json['approved_at'] == null
+      ? null
+      : DateTime.parse(json['approved_at'] as String),
+  confirmedAt: json['confirmed_at'] == null
+      ? null
+      : DateTime.parse(json['confirmed_at'] as String),
+  approvedBy: json['approved_by'] as String?,
+  confirmedBy: json['confirmed_by'] as String?,
+  taskID: json['task_id'] as String?,
+  sourceSession: json['source_session'] as String?,
+  revisionCount: (json['revision_count'] as num?)?.toInt() ?? 0,
+  phases:
+      (json['phases'] as List<dynamic>?)
+          ?.map((e) => PlanPhase.fromJson(e as Map<String, dynamic>))
+          .toList() ??
+      const [],
+);
 
 Map<String, dynamic> _$$PlanImplToJson(_$PlanImpl instance) =>
     <String, dynamic>{
@@ -318,11 +322,13 @@ _$PlanPhaseImpl _$$PlanPhaseImplFromJson(Map<String, dynamic> json) =>
       completedSteps: (json['completed_steps'] as num?)?.toInt() ?? 0,
       failedSteps: (json['failed_steps'] as num?)?.toInt() ?? 0,
       state: json['state'] as String,
-      produces: (json['produces'] as List<dynamic>?)
+      produces:
+          (json['produces'] as List<dynamic>?)
               ?.map((e) => PlanArtifact.fromJson(e as Map<String, dynamic>))
               .toList() ??
           const [],
-      consumes: (json['consumes'] as List<dynamic>?)
+      consumes:
+          (json['consumes'] as List<dynamic>?)
               ?.map((e) => PlanArtifact.fromJson(e as Map<String, dynamic>))
               .toList() ??
           const [],
@@ -360,38 +366,37 @@ Map<String, dynamic> _$$PlanArtifactImplToJson(_$PlanArtifactImpl instance) =>
 
 _$SearchResultsImpl _$$SearchResultsImplFromJson(Map<String, dynamic> json) =>
     _$SearchResultsImpl(
-      results: (json['results'] as List<dynamic>?)
+      results:
+          (json['results'] as List<dynamic>?)
               ?.map((e) => SearchResultItem.fromJson(e as Map<String, dynamic>))
               .toList() ??
           const [],
     );
 
 Map<String, dynamic> _$$SearchResultsImplToJson(_$SearchResultsImpl instance) =>
-    <String, dynamic>{
-      'results': instance.results,
-    };
+    <String, dynamic>{'results': instance.results};
 
 _$SearchResultItemImpl _$$SearchResultItemImplFromJson(
-        Map<String, dynamic> json) =>
-    _$SearchResultItemImpl(
-      type: $enumDecode(_$SearchResultTypeEnumMap, json['type']),
-      id: json['id'] as String,
-      title: json['title'] as String,
-      snippet: json['snippet'] as String? ?? '',
-      relevance: (json['relevance'] as num?)?.toDouble() ?? 0.0,
-      sessionId: json['sessionId'] as String? ?? '',
-    );
+  Map<String, dynamic> json,
+) => _$SearchResultItemImpl(
+  type: $enumDecode(_$SearchResultTypeEnumMap, json['type']),
+  id: json['id'] as String,
+  title: json['title'] as String,
+  snippet: json['snippet'] as String? ?? '',
+  relevance: (json['relevance'] as num?)?.toDouble() ?? 0.0,
+  sessionId: json['sessionId'] as String? ?? '',
+);
 
 Map<String, dynamic> _$$SearchResultItemImplToJson(
-        _$SearchResultItemImpl instance) =>
-    <String, dynamic>{
-      'type': _$SearchResultTypeEnumMap[instance.type]!,
-      'id': instance.id,
-      'title': instance.title,
-      'snippet': instance.snippet,
-      'relevance': instance.relevance,
-      'sessionId': instance.sessionId,
-    };
+  _$SearchResultItemImpl instance,
+) => <String, dynamic>{
+  'type': _$SearchResultTypeEnumMap[instance.type]!,
+  'id': instance.id,
+  'title': instance.title,
+  'snippet': instance.snippet,
+  'relevance': instance.relevance,
+  'sessionId': instance.sessionId,
+};
 
 const _$SearchResultTypeEnumMap = {
   SearchResultType.session: 'session',
@@ -402,23 +407,24 @@ const _$SearchResultTypeEnumMap = {
 };
 
 _$SemanticSearchResultsImpl _$$SemanticSearchResultsImplFromJson(
-        Map<String, dynamic> json) =>
-    _$SemanticSearchResultsImpl(
-      results: (json['results'] as List<dynamic>?)
-              ?.map((e) => SearchResultItem.fromJson(e as Map<String, dynamic>))
-              .toList() ??
-          const [],
-      mode: json['mode'] as String? ?? 'semantic',
-      err: json['err'] as String? ?? '',
-    );
+  Map<String, dynamic> json,
+) => _$SemanticSearchResultsImpl(
+  results:
+      (json['results'] as List<dynamic>?)
+          ?.map((e) => SearchResultItem.fromJson(e as Map<String, dynamic>))
+          .toList() ??
+      const [],
+  mode: json['mode'] as String? ?? 'semantic',
+  err: json['err'] as String? ?? '',
+);
 
 Map<String, dynamic> _$$SemanticSearchResultsImplToJson(
-        _$SemanticSearchResultsImpl instance) =>
-    <String, dynamic>{
-      'results': instance.results,
-      'mode': instance.mode,
-      'err': instance.err,
-    };
+  _$SemanticSearchResultsImpl instance,
+) => <String, dynamic>{
+  'results': instance.results,
+  'mode': instance.mode,
+  'err': instance.err,
+};
 
 _$BranchInfoImpl _$$BranchInfoImplFromJson(Map<String, dynamic> json) =>
     _$BranchInfoImpl(
@@ -441,55 +447,58 @@ _$SkillFormFieldImpl _$$SkillFormFieldImplFromJson(Map<String, dynamic> json) =>
       type: json['type'] as String? ?? 'text',
       required: json['required'] as bool? ?? false,
       defaultValue: json['default_value'] as String?,
-      options: (json['options'] as List<dynamic>?)
+      options:
+          (json['options'] as List<dynamic>?)
               ?.map((e) => e as String)
               .toList() ??
           const [],
     );
 
 Map<String, dynamic> _$$SkillFormFieldImplToJson(
-        _$SkillFormFieldImpl instance) =>
-    <String, dynamic>{
-      'name': instance.name,
-      'label': instance.label,
-      'type': instance.type,
-      'required': instance.required,
-      'default_value': instance.defaultValue,
-      'options': instance.options,
-    };
+  _$SkillFormFieldImpl instance,
+) => <String, dynamic>{
+  'name': instance.name,
+  'label': instance.label,
+  'type': instance.type,
+  'required': instance.required,
+  'default_value': instance.defaultValue,
+  'options': instance.options,
+};
 
 _$SkillUiDescriptorImpl _$$SkillUiDescriptorImplFromJson(
-        Map<String, dynamic> json) =>
-    _$SkillUiDescriptorImpl(
-      uiType: json['ui_type'] as String? ?? 'form',
-      formFields: (json['form_fields'] as List<dynamic>?)
-              ?.map((e) => SkillFormField.fromJson(e as Map<String, dynamic>))
-              .toList() ??
-          const [],
-      actions:
-          (json['actions'] as List<dynamic>?)?.map((e) => e as String).toList(),
-    );
+  Map<String, dynamic> json,
+) => _$SkillUiDescriptorImpl(
+  uiType: json['ui_type'] as String? ?? 'form',
+  formFields:
+      (json['form_fields'] as List<dynamic>?)
+          ?.map((e) => SkillFormField.fromJson(e as Map<String, dynamic>))
+          .toList() ??
+      const [],
+  actions: (json['actions'] as List<dynamic>?)
+      ?.map((e) => e as String)
+      .toList(),
+);
 
 Map<String, dynamic> _$$SkillUiDescriptorImplToJson(
-        _$SkillUiDescriptorImpl instance) =>
-    <String, dynamic>{
-      'ui_type': instance.uiType,
-      'form_fields': instance.formFields,
-      'actions': instance.actions,
-    };
+  _$SkillUiDescriptorImpl instance,
+) => <String, dynamic>{
+  'ui_type': instance.uiType,
+  'form_fields': instance.formFields,
+  'actions': instance.actions,
+};
 
 _$SkillExecuteResultImpl _$$SkillExecuteResultImplFromJson(
-        Map<String, dynamic> json) =>
-    _$SkillExecuteResultImpl(
-      output: json['output'] as String,
-      success: json['success'] as bool,
-      error: json['error'] as String?,
-    );
+  Map<String, dynamic> json,
+) => _$SkillExecuteResultImpl(
+  output: json['output'] as String,
+  success: json['success'] as bool,
+  error: json['error'] as String?,
+);
 
 Map<String, dynamic> _$$SkillExecuteResultImplToJson(
-        _$SkillExecuteResultImpl instance) =>
-    <String, dynamic>{
-      'output': instance.output,
-      'success': instance.success,
-      'error': instance.error,
-    };
+  _$SkillExecuteResultImpl instance,
+) => <String, dynamic>{
+  'output': instance.output,
+  'success': instance.success,
+  'error': instance.error,
+};

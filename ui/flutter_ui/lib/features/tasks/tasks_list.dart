@@ -5,7 +5,8 @@ import 'package:timeago/timeago.dart' as timeago;
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
-import '../../providers/tab_activation_provider.dart' show keyboardFocusProvider;
+import '../../providers/tab_activation_provider.dart'
+    show keyboardFocusProvider;
 import '../../models/api_models.dart';
 
 /// Tasks list widget - displays all tasks for the active session
@@ -112,11 +113,7 @@ class _TasksListState extends ConsumerState<TasksList> {
             ),
           ),
           if (taskState.isLoading)
-            const Expanded(
-              child: Center(
-                child: CircularProgressIndicator(),
-              ),
-            )
+            const Expanded(child: Center(child: CircularProgressIndicator()))
           else if (taskState.error != null)
             Expanded(
               child: Column(
@@ -128,18 +125,18 @@ class _TasksListState extends ConsumerState<TasksList> {
                   ),
                   const SizedBox(height: 12),
                   FilledButton.tonal(
-                    onPressed: () => ref.read(taskProvider.notifier).loadTasks(),
-                    child: const Text('retry', style: CyberpunkTypography.bodySmall),
+                    onPressed: () =>
+                        ref.read(taskProvider.notifier).loadTasks(),
+                    child: const Text(
+                      'retry',
+                      style: CyberpunkTypography.bodySmall,
+                    ),
                   ),
                 ],
               ),
             )
           else if (taskState.tasks.isEmpty)
-            const Expanded(
-              child: Center(
-                child: Text('no tasks'),
-              ),
-            )
+            const Expanded(child: Center(child: Text('no tasks')))
           else
             Expanded(
               child: Focus(
@@ -174,13 +171,13 @@ class _TasksListState extends ConsumerState<TasksList> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: isKeyboardSelected 
+          color: isKeyboardSelected
               ? CyberpunkColors.orangeDark.withValues(alpha: 0.3)
               : null,
           border: Border(
             left: BorderSide(
-              color: isKeyboardSelected 
-                  ? CyberpunkColors.orangeDark 
+              color: isKeyboardSelected
+                  ? CyberpunkColors.orangeDark
                   : statusColor,
               width: isKeyboardSelected ? 3 : 2,
             ),
@@ -199,7 +196,10 @@ class _TasksListState extends ConsumerState<TasksList> {
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: statusColor.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(3),
@@ -294,7 +294,11 @@ class _TaskErrorBanner extends StatelessWidget {
       color: CyberpunkColors.redAlert.withValues(alpha: 0.2),
       child: Row(
         children: [
-          const Icon(Icons.error_outline, color: CyberpunkColors.redAlert, size: 20),
+          const Icon(
+            Icons.error_outline,
+            color: CyberpunkColors.redAlert,
+            size: 20,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(

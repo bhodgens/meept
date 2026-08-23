@@ -22,87 +22,83 @@ class TasksDetail extends ConsumerWidget {
     final task = tasks.where((t) => t.id == active.id).firstOrNull ?? active;
 
     return Container(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                _buildStatusIndicator(task.status),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    task.title.toLowerCase(),
-                    style: CyberpunkTypography.headlineLarge.copyWith(
-                      color: CyberpunkColors.orangePrimary,
-                    ),
-                    overflow: TextOverflow.ellipsis,
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _buildStatusIndicator(task.status),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  task.title.toLowerCase(),
+                  style: CyberpunkTypography.headlineLarge.copyWith(
+                    color: CyberpunkColors.orangePrimary,
                   ),
+                  overflow: TextOverflow.ellipsis,
                 ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            // Status selector
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // Status selector
+          Row(
+            children: [
+              Text(
+                'status',
+                style: CyberpunkTypography.label.copyWith(
+                  color: CyberpunkColors.orangePrimary,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(child: _buildStatusDropdown(context, ref, task)),
+            ],
+          ),
+          if (!_canTransition(task.status)) ...[
+            const SizedBox(height: 12),
             Row(
               children: [
                 Text(
-                  'status',
+                  'cancel',
                   style: CyberpunkTypography.label.copyWith(
-                    color: CyberpunkColors.orangePrimary,
+                    color: CyberpunkColors.redAlert,
                   ),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _buildStatusDropdown(context, ref, task),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: () => _showCancelConfirm(context, ref, task),
+                  icon: const Icon(Icons.cancel, size: 16),
+                  label: const Text(
+                    'cancel task',
+                    style: CyberpunkTypography.bodySmall,
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: CyberpunkColors.redAlert,
+                  ),
                 ),
               ],
             ),
-            if (!_canTransition(task.status)) ...[
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Text(
-                    'cancel',
-                    style: CyberpunkTypography.label.copyWith(
-                      color: CyberpunkColors.redAlert,
-                    ),
-                  ),
-                  const Spacer(),
-                  TextButton.icon(
-                    onPressed: () => _showCancelConfirm(context, ref, task),
-                    icon: const Icon(Icons.cancel, size: 16),
-                    label: const Text(
-                      'cancel task',
-                      style: CyberpunkTypography.bodySmall,
-                    ),
-                    style: TextButton.styleFrom(
-                      foregroundColor: CyberpunkColors.redAlert,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            const SizedBox(height: 24),
-            Text(
-              'description',
-              style: CyberpunkTypography.label.copyWith(
-                color: CyberpunkColors.orangePrimary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              task.description.toLowerCase(),
-              style: CyberpunkTypography.bodyMedium,
-            ),
-            const Spacer(),
           ],
-        ),
-      );
+          const SizedBox(height: 24),
+          Text(
+            'description',
+            style: CyberpunkTypography.label.copyWith(
+              color: CyberpunkColors.orangePrimary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            task.description.toLowerCase(),
+            style: CyberpunkTypography.bodyMedium,
+          ),
+          const Spacer(),
+        ],
+      ),
+    );
   }
 
-  Widget _buildStatusDropdown(
-    BuildContext context, WidgetRef ref, Task task,
-  ) {
+  Widget _buildStatusDropdown(BuildContext context, WidgetRef ref, Task task) {
     final colors = _allStatusColors();
     final transitions = _validTransitions(task.status);
     final statusColor = colors[task.status.toLowerCase()] ?? Colors.grey;
@@ -136,49 +132,49 @@ class TasksDetail extends ConsumerWidget {
       dropdownColor: CyberpunkColors.darkGray,
       underline: const SizedBox(),
       iconEnabledColor: colors[task.status.toLowerCase()] ?? Colors.grey,
-      items: [task.status.toLowerCase(), ..._validTransitions(task.status)].map((status) {
-        final color = colors[status.toLowerCase()] ?? Colors.grey;
-        return DropdownMenuItem<String>(
-          value: status.toLowerCase(),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(3),
-            ),
-            child: Text(
-              status.toLowerCase(),
-              style: CyberpunkTypography.bodySmall.copyWith(
-                color: color,
-                fontFamily: 'SourceCodePro',
+      items: [task.status.toLowerCase(), ..._validTransitions(task.status)].map(
+        (status) {
+          final color = colors[status.toLowerCase()] ?? Colors.grey;
+          return DropdownMenuItem<String>(
+            value: status.toLowerCase(),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(3),
+              ),
+              child: Text(
+                status.toLowerCase(),
+                style: CyberpunkTypography.bodySmall.copyWith(
+                  color: color,
+                  fontFamily: 'SourceCodePro',
+                ),
               ),
             ),
-          ),
-        );
-      }).toList(),
+          );
+        },
+      ).toList(),
       onChanged: (value) async {
-              if (value == null || value == task.status.toLowerCase()) return;
-              final result = await ref
-                  .read(taskProvider.notifier)
-                  .updateTaskStatus(task.id, value);
-              if (result == false && context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('failed to update task status'),
-                    backgroundColor: CyberpunkColors.redAlert,
-                  ),
-                );
-                // Refetch to restore correct state
-                ref.read(taskProvider.notifier).loadTasks();
-              }
-            },
+        if (value == null || value == task.status.toLowerCase()) return;
+        final result = await ref
+            .read(taskProvider.notifier)
+            .updateTaskStatus(task.id, value);
+        if (result == false && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('failed to update task status'),
+              backgroundColor: CyberpunkColors.redAlert,
+            ),
+          );
+          // Refetch to restore correct state
+          ref.read(taskProvider.notifier).loadTasks();
+        }
+      },
     );
   }
 
   /// Show a confirmation dialog before cancelling.
-  void _showCancelConfirm(
-    BuildContext context, WidgetRef ref, Task task,
-  ) {
+  void _showCancelConfirm(BuildContext context, WidgetRef ref, Task task) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -223,10 +219,7 @@ class TasksDetail extends ConsumerWidget {
             style: TextButton.styleFrom(
               foregroundColor: CyberpunkColors.redAlert,
             ),
-            child: const Text(
-              'cancel',
-              style: CyberpunkTypography.bodyMedium,
-            ),
+            child: const Text('cancel', style: CyberpunkTypography.bodyMedium),
           ),
         ],
       ),
@@ -238,10 +231,7 @@ class TasksDetail extends ConsumerWidget {
     return Container(
       width: 10,
       height: 10,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-      ),
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
     );
   }
 

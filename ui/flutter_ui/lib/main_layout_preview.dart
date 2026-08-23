@@ -8,6 +8,7 @@
 ///   flutter run -d chrome --target=lib/main_layout_preview.dart
 ///
 /// Navigate between layouts using the dropdown in the top-right.
+library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,11 +21,7 @@ import 'layouts/layout_4_top_tabs_panels.dart';
 import 'layouts/layout_5_grid_dashboard.dart';
 
 void main() {
-  runApp(
-    const ProviderScope(
-      child: LayoutPreviewApp(),
-    ),
-  );
+  runApp(const ProviderScope(child: LayoutPreviewApp()));
 }
 
 class LayoutPreviewApp extends StatefulWidget {
@@ -92,11 +89,26 @@ class _LayoutPreviewAppState extends State<LayoutPreviewApp> {
                               fontFamily: 'SourceCodePro',
                             ),
                             items: const [
-                              DropdownMenuItem(value: 0, child: Text('1. sidebar')),
-                              DropdownMenuItem(value: 1, child: Text('2. bottom nav')),
-                              DropdownMenuItem(value: 2, child: Text('3. radial hub')),
-                              DropdownMenuItem(value: 3, child: Text('4. top tabs + panels')),
-                              DropdownMenuItem(value: 4, child: Text('5. grid dashboard')),
+                              DropdownMenuItem(
+                                value: 0,
+                                child: Text('1. sidebar'),
+                              ),
+                              DropdownMenuItem(
+                                value: 1,
+                                child: Text('2. bottom nav'),
+                              ),
+                              DropdownMenuItem(
+                                value: 2,
+                                child: Text('3. radial hub'),
+                              ),
+                              DropdownMenuItem(
+                                value: 3,
+                                child: Text('4. top tabs + panels'),
+                              ),
+                              DropdownMenuItem(
+                                value: 4,
+                                child: Text('5. grid dashboard'),
+                              ),
                             ],
                             onChanged: (value) {
                               if (value != null) {
@@ -119,12 +131,18 @@ class _LayoutPreviewAppState extends State<LayoutPreviewApp> {
 
   Widget _buildLayout(int index) {
     switch (index) {
-      case 0: return const Layout1ClassicSidebar();
-      case 1: return const Layout2BottomNav();
-      case 2: return const Layout3RadialHub();
-      case 3: return Layout4TopTabsPanels();
-      case 4: return const Layout5GridDashboard();
-      default: return const Layout1ClassicSidebar();
+      case 0:
+        return const Layout1ClassicSidebar();
+      case 1:
+        return const Layout2BottomNav();
+      case 2:
+        return const Layout3RadialHub();
+      case 3:
+        return const Layout4TopTabsPanels();
+      case 4:
+        return const Layout5GridDashboard();
+      default:
+        return const Layout1ClassicSidebar();
     }
   }
 }

@@ -45,8 +45,7 @@ bool nativeIsWindows() {
 /// Get the home directory path on native platforms.
 Future<String?> getHomeDirectoryNative() async {
   try {
-    return Platform.environment['HOME'] ??
-           Platform.environment['USERPROFILE'];
+    return Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
   } catch (_) {
     return null;
   }

@@ -44,21 +44,18 @@ class AgentNotifier extends StateNotifier<AgentState> {
       // are responsible for deserializing each entry via Agent.fromJson
       // because the OpenAPI spec leaves the Session entity untyped.
       final rawAgents = await sdkClient.listAgents();
-      final agents =
-          rawAgents.map((a) => Agent.fromJson(a)).toList(growable: false);
+      final agents = rawAgents
+          .map((a) => Agent.fromJson(a))
+          .toList(growable: false);
       state = state.copyWith(agents: agents, isLoading: false);
     } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        error: e.toString(),
-      );
+      state = state.copyWith(isLoading: false, error: e.toString());
     }
   }
 }
 
 /// Agent state provider
-final agentProvider =
-    StateNotifierProvider<AgentNotifier, AgentState>((ref) {
+final agentProvider = StateNotifierProvider<AgentNotifier, AgentState>((ref) {
   final client = ref.watch(sdkClientProvider);
   return AgentNotifier(sdkClient: client);
 });

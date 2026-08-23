@@ -25,7 +25,9 @@ import '../services/daemon_cert_pinner.dart';
 import '../models/api_models.dart';
 
 // Storage service — initialized in main() before runApp
-final storageProvider = Provider<StorageService>((ref) => StorageService.instance);
+final storageProvider = Provider<StorageService>(
+  (ref) => StorageService.instance,
+);
 
 // SDK Client provider — wraps the OpenAPI-generated Dart SDK.
 //
@@ -47,8 +49,9 @@ final websocketProvider = Provider<WebSocketService>((ref) {
 });
 
 // Session state provider (StateNotifier for CRUD + selection)
-final sessionProvider =
-    StateNotifierProvider<SessionNotifier, SessionState>((ref) {
+final sessionProvider = StateNotifierProvider<SessionNotifier, SessionState>((
+  ref,
+) {
   final client = ref.watch(sdkClientProvider);
   final websocket = ref.watch(websocketProvider);
   return SessionNotifier(sdkClient: client, websocket: websocket);
@@ -168,18 +171,17 @@ class ConnectionDetails {
 
   /// Build the rows for the connection details dialog.
   List<ConnDataRow> get dialogRows => <ConnDataRow>[
-        const ConnDataRow('host', ''),
-        const ConnDataRow('port', ''),
-        ConnDataRow('tls', tls ? 'yes (self-signed)' : 'no'),
-        if (tls)
-          ConnDataRow('certificate', certFingerprint ?? 'pinned (no file)'),
-        ConnDataRow('connection', connectedAt != null ? 'alive' : '—'),
-        if (connectedAt != null) ConnDataRow('duration', duration),
-        if (pid != null) ConnDataRow('pid', pid.toString()),
-        if (state != 'unknown') ConnDataRow('state', state),
-        if (uptime != null) ConnDataRow('uptime', uptime!),
-        if (version != null) ConnDataRow('version', version!),
-      ];
+    const ConnDataRow('host', ''),
+    const ConnDataRow('port', ''),
+    ConnDataRow('tls', tls ? 'yes (self-signed)' : 'no'),
+    if (tls) ConnDataRow('certificate', certFingerprint ?? 'pinned (no file)'),
+    ConnDataRow('connection', connectedAt != null ? 'alive' : '—'),
+    if (connectedAt != null) ConnDataRow('duration', duration),
+    if (pid != null) ConnDataRow('pid', pid.toString()),
+    if (state != 'unknown') ConnDataRow('state', state),
+    if (uptime != null) ConnDataRow('uptime', uptime!),
+    if (version != null) ConnDataRow('version', version!),
+  ];
 
   /// Get the row value for a given label.
   String rowValue(String label) {
@@ -191,9 +193,10 @@ class ConnectionDetails {
   }
 }
 
-final connectionDetailsProvider = StateNotifierProvider<ConnectionDetailsNotifier, ConnectionDetails?>((ref) {
-  return ConnectionDetailsNotifier(ref);
-});
+final connectionDetailsProvider =
+    StateNotifierProvider<ConnectionDetailsNotifier, ConnectionDetails?>((ref) {
+      return ConnectionDetailsNotifier(ref);
+    });
 
 /// Provides daemon info (version, pid, uptime, state) and connection metadata.
 /// Updated on each successful connection.
@@ -215,7 +218,9 @@ class ConnectionDetailsNotifier extends StateNotifier<ConnectionDetails?> {
     if (_disposed) return;
     // Prevent concurrent fetches (e.g., on connect + periodic timer race)
     if (_isFetching) {
-      debugPrint('[warn] ConnectionDetailsNotifier._fetch() skipped - already fetching');
+      debugPrint(
+        '[warn] ConnectionDetailsNotifier._fetch() skipped - already fetching',
+      );
       return;
     }
     _isFetching = true;
@@ -314,9 +319,9 @@ class ConnectionMonitor {
     required WebSocketService websocket,
     required SdkApiClient sdkClient,
     required ProviderContainer container,
-  })  : _websocket = websocket,
-        _sdkClient = sdkClient,
-        _container = container {
+  }) : _websocket = websocket,
+       _sdkClient = sdkClient,
+       _container = container {
     _listenToWebSocket();
     _startHealthChecks();
     // Kick off the initial WebSocket connection immediately rather than

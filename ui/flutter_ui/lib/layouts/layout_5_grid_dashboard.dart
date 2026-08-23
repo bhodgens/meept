@@ -26,6 +26,7 @@
 /// +----------------------------------------------------------+
 /// |  [Status Bar]                                            |
 /// +----------------------------------------------------------+
+library;
 
 import 'package:flutter/material.dart';
 import '../theme/colors.dart';
@@ -42,9 +43,7 @@ class Layout5GridDashboard extends StatelessWidget {
       child: Column(
         children: [
           _Header(),
-          Expanded(
-            child: _DashboardGrid(),
-          ),
+          Expanded(child: _DashboardGrid()),
           _FloatingChatBar(),
           _StatusBar(),
         ],
@@ -68,11 +67,8 @@ class _Header extends StatelessWidget {
             CyberpunkColors.darkGray.withValues(alpha: 0.5),
           ],
         ),
-        border: Border(
-          bottom: BorderSide(
-            color: CyberpunkColors.orangePrimary,
-            width: 3,
-          ),
+        border: const Border(
+          bottom: BorderSide(color: CyberpunkColors.orangePrimary, width: 3),
         ),
       ),
       child: Row(
@@ -118,8 +114,10 @@ class _Header extends StatelessWidget {
           // User avatar
           CircleAvatar(
             radius: 18,
-            backgroundColor: CyberpunkColors.orangePrimary.withValues(alpha: 0.2),
-            child: Icon(
+            backgroundColor: CyberpunkColors.orangePrimary.withValues(
+              alpha: 0.2,
+            ),
+            child: const Icon(
               Icons.person,
               size: 20,
               color: CyberpunkColors.orangePrimary,
@@ -201,31 +199,31 @@ class _DashboardGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cards = [
-      _DashboardCard(
+      const _DashboardCard(
         title: 'chat',
         icon: Icons.chat_bubble_outline,
         preview: 'active conversation',
         accentColor: CyberpunkColors.orangePrimary,
       ),
-      _DashboardCard(
+      const _DashboardCard(
         title: 'sessions',
         icon: Icons.folder_open,
         preview: '12 archived',
         accentColor: CyberpunkColors.blueInfo,
       ),
-      _DashboardCard(
+      const _DashboardCard(
         title: 'plans',
         icon: Icons.document_scanner,
         preview: '3 in progress',
         accentColor: CyberpunkColors.cyanAccent,
       ),
-      _DashboardCard(
+      const _DashboardCard(
         title: 'tasks',
         icon: Icons.task_alt,
         preview: '24 pending',
         accentColor: CyberpunkColors.yellowWarning,
       ),
-      _DashboardCard(
+      const _DashboardCard(
         title: 'agents',
         icon: Icons.smart_toy,
         preview: '5 active',
@@ -302,11 +300,7 @@ class _DashboardCard extends StatelessWidget {
                         ),
                       ],
                     ),
-                    child: Icon(
-                      icon,
-                      size: 32,
-                      color: accentColor,
-                    ),
+                    child: Icon(icon, size: 32, color: accentColor),
                   ),
                   const Spacer(),
                   Text(
@@ -401,11 +395,7 @@ class _FloatingChatBar extends StatelessWidget {
                 ),
               ),
             ),
-            Container(
-              width: 1,
-              height: 40,
-              color: CyberpunkColors.orangeDark,
-            ),
+            Container(width: 1, height: 40, color: CyberpunkColors.orangeDark),
             IconButton(
               icon: Icon(
                 Icons.attach_file,
@@ -419,7 +409,7 @@ class _FloatingChatBar extends StatelessWidget {
                 color: CyberpunkColors.orangePrimary,
                 borderRadius: BorderRadius.circular(4),
               ),
-              child: Icon(
+              child: const Icon(
                 Icons.send,
                 color: CyberpunkColors.black,
                 size: 20,
@@ -441,7 +431,7 @@ class _StatusBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: CyberpunkColors.blackTransparent(0.7),
-        border: Border(
+        border: const Border(
           top: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),

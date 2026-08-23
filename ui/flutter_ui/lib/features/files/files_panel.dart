@@ -53,7 +53,9 @@ class _FilesPanelState extends ConsumerState<FilesPanel> {
         for (final match in matches) {
           final path = match.group(0)!;
           // Filter for likely file paths
-          if (path.contains('.') || path.startsWith('/') || path.startsWith('~/')) {
+          if (path.contains('.') ||
+              path.startsWith('/') ||
+              path.startsWith('~/')) {
             filePaths.add(path);
           }
         }
@@ -61,7 +63,10 @@ class _FilesPanelState extends ConsumerState<FilesPanel> {
 
       if (mounted) {
         setState(() {
-          _files = filePaths.take(20).map((path) => FileEntry(path: path)).toList();
+          _files = filePaths
+              .take(20)
+              .map((path) => FileEntry(path: path))
+              .toList();
           _isLoading = false;
           // Clear stale error on successful retry so the error banner
           // does not persist after the issue is resolved.
@@ -188,7 +193,9 @@ class _FilesPanelState extends ConsumerState<FilesPanel> {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: CyberpunkColors.black.withValues(alpha: 0.3),
-        border: Border.all(color: CyberpunkColors.midGray.withValues(alpha: 0.3)),
+        border: Border.all(
+          color: CyberpunkColors.midGray.withValues(alpha: 0.3),
+        ),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(

@@ -49,8 +49,7 @@ class _PromptPanelState extends ConsumerState<PromptPanel> {
     try {
       final client = ref.read(sdkClientProvider);
       final rawList = await client.listPromptsRaw();
-      final prompts =
-          rawList.map((m) => PromptSummary.fromJson(m)).toList();
+      final prompts = rawList.map((m) => PromptSummary.fromJson(m)).toList();
       // Stable ordering: tier priority (user first) then name.
       prompts.sort((a, b) {
         final tierCmp = _tierRank(a.tier).compareTo(_tierRank(b.tier));
@@ -106,8 +105,7 @@ class _PromptPanelState extends ConsumerState<PromptPanel> {
           color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
           border: Border(
             top: BorderSide(
-              color:
-                  CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
+              color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
               width: 1,
             ),
           ),
@@ -130,10 +128,10 @@ class _PromptPanelState extends ConsumerState<PromptPanel> {
                       ),
                     )
                   : _error != null
-                      ? _buildErrorState()
-                      : _prompts.isEmpty
-                          ? _buildEmptyState()
-                          : _buildPromptList(),
+                  ? _buildErrorState()
+                  : _prompts.isEmpty
+                  ? _buildEmptyState()
+                  : _buildPromptList(),
             ),
           ],
         ),
@@ -277,10 +275,7 @@ class _PromptPanelState extends ConsumerState<PromptPanel> {
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: CyberpunkColors.black.withValues(alpha: 0.3),
-          border: Border.all(
-            color: tierColor.withValues(alpha: 0.4),
-            width: 1,
-          ),
+          border: Border.all(color: tierColor.withValues(alpha: 0.4), width: 1),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Column(
@@ -288,11 +283,7 @@ class _PromptPanelState extends ConsumerState<PromptPanel> {
           children: [
             Row(
               children: [
-                Icon(
-                  Icons.edit_note,
-                  size: 16,
-                  color: tierColor,
-                ),
+                Icon(Icons.edit_note, size: 16, color: tierColor),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -376,8 +367,7 @@ class _PromptDetailRoute extends ConsumerStatefulWidget {
   const _PromptDetailRoute({required this.summary});
 
   @override
-  ConsumerState<_PromptDetailRoute> createState() =>
-      _PromptDetailRouteState();
+  ConsumerState<_PromptDetailRoute> createState() => _PromptDetailRouteState();
 }
 
 class _PromptDetailRouteState extends ConsumerState<_PromptDetailRoute> {
@@ -585,8 +575,8 @@ class _PromptDetailRouteState extends ConsumerState<_PromptDetailRoute> {
               ),
             )
           : _error != null
-              ? _buildDetailError()
-              : _buildDetailBody(isUserTier),
+          ? _buildDetailError()
+          : _buildDetailBody(isUserTier),
     );
   }
 
@@ -728,13 +718,11 @@ class _PromptDetailRouteState extends ConsumerState<_PromptDetailRoute> {
     required VoidCallback? onTap,
   }) {
     final disabled = onTap == null;
-    final effectiveColor =
-        disabled ? color.withValues(alpha: 0.4) : color;
+    final effectiveColor = disabled ? color.withValues(alpha: 0.4) : color;
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
           color: CyberpunkColors.midGray.withValues(alpha: 0.3),
           border: Border.all(

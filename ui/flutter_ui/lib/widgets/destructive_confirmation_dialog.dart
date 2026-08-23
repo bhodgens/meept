@@ -5,10 +5,7 @@ import 'package:flutter/material.dart';
 class DestructiveConfirmationDialog extends StatefulWidget {
   final Map<String, dynamic> response;
 
-  const DestructiveConfirmationDialog({
-    super.key,
-    required this.response,
-  });
+  const DestructiveConfirmationDialog({super.key, required this.response});
 
   @override
   State<DestructiveConfirmationDialog> createState() =>
@@ -38,13 +35,21 @@ class _DestructiveConfirmationDialogState
             const SizedBox(height: 16),
             if (details != null) ...[
               if (details['old_preview'] != null)
-                _PreviewBlock(label: 'OLD', text: details['old_preview'].toString()),
+                _PreviewBlock(
+                  label: 'OLD',
+                  text: details['old_preview'].toString(),
+                ),
               if (details['new_preview'] != null)
-                _PreviewBlock(label: 'NEW', text: details['new_preview'].toString()),
+                _PreviewBlock(
+                  label: 'NEW',
+                  text: details['new_preview'].toString(),
+                ),
               if (details['affected_edges'] != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
-                  child: Text('${details['affected_edges']} edges will be redirected.'),
+                  child: Text(
+                    '${details['affected_edges']} edges will be redirected.',
+                  ),
                 ),
             ],
             const SizedBox(height: 8),
@@ -52,9 +57,15 @@ class _DestructiveConfirmationDialogState
             if (_showDetails) ...[
               const SizedBox(height: 16),
               const Divider(),
-              const Text('full details', style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text(
+                'full details',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
               ...widget.response.entries
-                  .where((e) => e.key != 'details' && e.key != 'requires_confirmation')
+                  .where(
+                    (e) =>
+                        e.key != 'details' && e.key != 'requires_confirmation',
+                  )
                   .map((e) => Text('  ${e.key}: ${e.value}')),
             ],
           ],

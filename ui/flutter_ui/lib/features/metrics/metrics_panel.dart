@@ -30,8 +30,8 @@ class MetricsPanel extends ConsumerWidget {
       child: state.isLoading
           ? const _MetricsLoading()
           : state.error != null
-              ? _MetricsError(message: state.error!)
-              : _MetricsContent(snapshot: state.current, compact: compact),
+          ? _MetricsError(message: state.error!)
+          : _MetricsContent(snapshot: state.current, compact: compact),
     );
   }
 }
@@ -57,10 +57,7 @@ class _MetricsLoading extends StatelessWidget {
             ),
           ),
           SizedBox(width: 8),
-          Text(
-            'loading metrics...',
-            style: CyberpunkTypography.bodySmall,
-          ),
+          Text('loading metrics...', style: CyberpunkTypography.bodySmall),
         ],
       ),
     );
@@ -166,8 +163,8 @@ class _MetricsContent extends StatelessWidget {
               color: queueDepth > 5
                   ? CyberpunkColors.redAlert
                   : queueDepth > 0
-                      ? CyberpunkColors.yellowWarning
-                      : CyberpunkColors.greenSuccess,
+                  ? CyberpunkColors.yellowWarning
+                  : CyberpunkColors.greenSuccess,
               icon: Icons.queue,
             ),
             _MetricTile(
@@ -239,10 +236,7 @@ class _MetricTile extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
         color: CyberpunkColors.midGray,
-        border: Border.all(
-          color: color.withValues(alpha: 0.3),
-          width: 1,
-        ),
+        border: Border.all(color: color.withValues(alpha: 0.3), width: 1),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Row(

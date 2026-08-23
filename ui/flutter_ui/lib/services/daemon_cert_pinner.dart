@@ -41,7 +41,7 @@ class DaemonCertPinner {
   /// Synchronously load the fingerprint from disk.
   static void _loadFingerprintSync() {
     if (_cachedFingerprint != null) return;
-    if (kIsWeb) return;  // No filesystem access on web
+    if (kIsWeb) return; // No filesystem access on web
 
     final homeDir = Platform.environment['HOME'];
     if (homeDir == null) return;
@@ -91,7 +91,9 @@ class DaemonCertPinner {
   /// because the daemon binds exclusively to localhost and security
   /// is enforced via API key authentication.
   static bool validateCert(X509Certificate cert, String host) {
-    debugPrint('[cert] validateCert called: host=$host, hasFingerprint=${_cachedFingerprint != null}');
+    debugPrint(
+      '[cert] validateCert called: host=$host, hasFingerprint=${_cachedFingerprint != null}',
+    );
 
     // Only allow localhost connections.
     if (host != 'localhost' && host != '127.0.0.1' && host != '::1') {

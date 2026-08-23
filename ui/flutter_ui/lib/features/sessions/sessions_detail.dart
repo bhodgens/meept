@@ -9,15 +9,12 @@ import '../../providers/session_detail.dart';
 /// Session detail pane - displays in-depth session information with tasks and plans
 class SessionsDetailPane extends ConsumerStatefulWidget {
   final Session session;
+
   /// Optional: when provided, the pane refreshes from [sessionDetailFamily].
   /// Falls back to [session] while loading or on error.
   final String? sessionId;
 
-  const SessionsDetailPane({
-    super.key,
-    required this.session,
-    this.sessionId,
-  });
+  const SessionsDetailPane({super.key, required this.session, this.sessionId});
 
   @override
   ConsumerState<SessionsDetailPane> createState() => _SessionsDetailPaneState();
@@ -63,9 +60,9 @@ class _SessionsDetailPaneState extends ConsumerState<SessionsDetailPane> {
     try {
       // Fetch tasks and plans for this session
       await ref.read(taskProvider.notifier).loadTasks();
-      await ref.read(planProvider.notifier).loadPlans(
-            sessionID: widget.sessionId ?? widget.session.id,
-          );
+      await ref
+          .read(planProvider.notifier)
+          .loadPlans(sessionID: widget.sessionId ?? widget.session.id);
       if (mounted) {
         setState(() {
           _loading = false;
@@ -109,95 +106,86 @@ class _SessionsDetailPaneState extends ConsumerState<SessionsDetailPane> {
 
     return Container(
       padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'session details',
-              style: CyberpunkTypography.headlineMedium.copyWith(
-                color: CyberpunkColors.orangePrimary,
-              ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'session details',
+            style: CyberpunkTypography.headlineMedium.copyWith(
+              color: CyberpunkColors.orangePrimary,
             ),
-            const SizedBox(height: 24),
+          ),
+          const SizedBox(height: 24),
+          _buildDetailRow('title', session.title.toLowerCase()),
+          _buildDetailRow('id', session.id),
+          _buildDetailRow('created', _formatDateTime(session.createdAt)),
+          if (session.lastActivity != null)
             _buildDetailRow(
-              'title',
-              session.title.toLowerCase(),
+              'last activity',
+              _formatDateTime(session.lastActivity!),
             ),
-            _buildDetailRow(
-              'id',
-              session.id,
-            ),
-            _buildDetailRow(
-              'created',
-              _formatDateTime(session.createdAt),
-            ),
-            if (session.lastActivity != null)
-              _buildDetailRow(
-                'last activity',
-                _formatDateTime(session.lastActivity!),
-              ),
-            const SizedBox(height: 24),
+          const SizedBox(height: 24),
 
-            // Tasks section
-            Text(
-              'associated tasks',
-              style: CyberpunkTypography.bodyMedium.copyWith(
-                color: CyberpunkColors.orangePrimary,
-                fontWeight: FontWeight.bold,
-              ),
+          // Tasks section
+          Text(
+            'associated tasks',
+            style: CyberpunkTypography.bodyMedium.copyWith(
+              color: CyberpunkColors.orangePrimary,
+              fontWeight: FontWeight.bold,
             ),
-            const SizedBox(height: 8),
-            if (_loading)
-              const CircularProgressIndicator()
-            else if (sessionTasks.isEmpty)
-              Text(
-                'no tasks',
-                style: CyberpunkTypography.bodySmall.copyWith(
-                  color: CyberpunkColors.midGray,
-                  fontStyle: FontStyle.italic,
-                ),
-              )
-            else
-              ...sessionTasks.map((t) => _buildTaskRow(t)),
+          ),
+          const SizedBox(height: 8),
+          if (_loading)
+            const CircularProgressIndicator()
+          else if (sessionTasks.isEmpty)
+            Text(
+              'no tasks',
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.midGray,
+                fontStyle: FontStyle.italic,
+              ),
+            )
+          else
+            ...sessionTasks.map((t) => _buildTaskRow(t)),
 
+          const SizedBox(height: 16),
+
+          // Plans section
+          Text(
+            'associated plans',
+            style: CyberpunkTypography.bodyMedium.copyWith(
+              color: CyberpunkColors.orangePrimary,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (_loading)
+            const CircularProgressIndicator()
+          else if (sessionPlans.isEmpty)
+            Text(
+              'no plans',
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.midGray,
+                fontStyle: FontStyle.italic,
+              ),
+            )
+          else
+            ...sessionPlans.map((p) => _buildPlanRow(p)),
+
+          if (_error != null) ...[
             const SizedBox(height: 16),
-
-            // Plans section
             Text(
-              'associated plans',
-              style: CyberpunkTypography.bodyMedium.copyWith(
-                color: CyberpunkColors.orangePrimary,
-                fontWeight: FontWeight.bold,
+              'error: $_error',
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.redAlert,
               ),
             ),
-            const SizedBox(height: 8),
-            if (_loading)
-              const CircularProgressIndicator()
-            else if (sessionPlans.isEmpty)
-              Text(
-                'no plans',
-                style: CyberpunkTypography.bodySmall.copyWith(
-                  color: CyberpunkColors.midGray,
-                  fontStyle: FontStyle.italic,
-                ),
-              )
-            else
-              ...sessionPlans.map((p) => _buildPlanRow(p)),
-
-            if (_error != null) ...[
-              const SizedBox(height: 16),
-              Text(
-                'error: $_error',
-                style: CyberpunkTypography.bodySmall.copyWith(
-                  color: CyberpunkColors.redAlert,
-                ),
-              ),
-            ],
-
-            const Spacer(),
           ],
-        ),
-      );
+
+          const Spacer(),
+        ],
+      ),
+    );
   }
 
   Widget _buildDetailRow(String label, String value) {
@@ -208,10 +196,7 @@ class _SessionsDetailPaneState extends ConsumerState<SessionsDetailPane> {
         children: [
           SizedBox(
             width: 100,
-            child: Text(
-              label,
-              style: CyberpunkTypography.bodySmall,
-            ),
+            child: Text(label, style: CyberpunkTypography.bodySmall),
           ),
           Expanded(
             child: Text(
@@ -270,7 +255,7 @@ class _SessionsDetailPaneState extends ConsumerState<SessionsDetailPane> {
               ),
               overflow: TextOverflow.ellipsis,
             ),
-          )
+          ),
         ],
       ),
     );

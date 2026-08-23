@@ -56,7 +56,8 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
         if (mounted) {
           setState(() {
             _isLoading = false;
-            _error = 'no active project registered. add a project with '
+            _error =
+                'no active project registered. add a project with '
                 '`meept projects add <path>` first.';
           });
         }
@@ -177,74 +178,74 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
         return KeyEventResult.ignored;
       },
       child: Container(
-      color: CyberpunkColors.darkGray,
-      child: Column(
-        children: [
-          // Header
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(
-                  color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
-                  width: 1,
+        color: CyberpunkColors.darkGray,
+        child: Column(
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
+                    color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
+                    width: 1,
+                  ),
                 ),
               ),
-            ),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.call_split,
-                  color: CyberpunkColors.orangeBright,
-                  size: 24,
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  'branches',
-                  style: CyberpunkTypography.headlineSmall.copyWith(
-                    color: CyberpunkColors.orangePrimary,
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.call_split,
+                    color: CyberpunkColors.orangeBright,
+                    size: 24,
                   ),
-                ),
-                const Spacer(),
-                if (_currentBranch != null)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                        color: CyberpunkColors.orangePrimary,
-                        width: 1,
-                      ),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      _currentBranch!,
-                      style: CyberpunkTypography.bodySmall.copyWith(
-                        color: CyberpunkColors.orangeBright,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-
-          // Content
-          Expanded(
-            child: _isLoading
-                ? const Center(
-                    child: CircularProgressIndicator(
+                  const SizedBox(width: 12),
+                  Text(
+                    'branches',
+                    style: CyberpunkTypography.headlineSmall.copyWith(
                       color: CyberpunkColors.orangePrimary,
                     ),
-                  )
-                : _error != null
-                    ? _buildError()
-                    : _buildBranchList(),
-          ),
-        ],
+                  ),
+                  const Spacer(),
+                  if (_currentBranch != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: CyberpunkColors.orangePrimary,
+                          width: 1,
+                        ),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        _currentBranch!,
+                        style: CyberpunkTypography.bodySmall.copyWith(
+                          color: CyberpunkColors.orangeBright,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
+            // Content
+            Expanded(
+              child: _isLoading
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                        color: CyberpunkColors.orangePrimary,
+                      ),
+                    )
+                  : _error != null
+                  ? _buildError()
+                  : _buildBranchList(),
+            ),
+          ],
+        ),
       ),
-    ),
     );
   }
 

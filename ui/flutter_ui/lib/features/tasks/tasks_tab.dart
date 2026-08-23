@@ -19,10 +19,7 @@ class TasksTab extends ConsumerWidget {
 
     return Row(
       children: [
-        const SizedBox(
-          width: 300,
-          child: TasksList(),
-        ),
+        const SizedBox(width: 300, child: TasksList()),
         const VerticalDivider(width: 1),
         Expanded(
           child: BackgroundImage(
@@ -31,9 +28,7 @@ class TasksTab extends ConsumerWidget {
                 : const Center(
                     child: Text(
                       'select a task',
-                      style: TextStyle(
-                        color: CyberpunkColors.orangePrimary,
-                      ),
+                      style: TextStyle(color: CyberpunkColors.orangePrimary),
                     ),
                   ),
           ),

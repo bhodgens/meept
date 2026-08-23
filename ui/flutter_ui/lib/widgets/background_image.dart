@@ -9,11 +9,7 @@ class BackgroundImage extends StatelessWidget {
   final Widget child;
   final double opacity;
 
-  const BackgroundImage({
-    super.key,
-    required this.child,
-    this.opacity = 1.0,
-  });
+  const BackgroundImage({super.key, required this.child, this.opacity = 1.0});
 
   @override
   Widget build(BuildContext context) {
@@ -69,9 +65,7 @@ class TintedBackgroundImage extends StatelessWidget {
         // Tint overlay (if specified)
         if (tintColor != null)
           Positioned.fill(
-            child: Container(
-              color: tintColor!.withValues(alpha: tintOpacity),
-            ),
+            child: Container(color: tintColor!.withValues(alpha: tintOpacity)),
           ),
         // Content overlay
         child,
@@ -98,10 +92,9 @@ class ChatBubbleContainer extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: (isUser
-                ? CyberpunkColors.orangePrimary
-                : CyberpunkColors.midGray)
-            .withValues(alpha: 0.6),
+        color:
+            (isUser ? CyberpunkColors.orangePrimary : CyberpunkColors.midGray)
+                .withValues(alpha: 0.6),
         border: Border.all(
           color: isUser
               ? CyberpunkColors.orangePrimary

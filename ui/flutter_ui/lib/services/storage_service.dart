@@ -2,7 +2,8 @@ import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../core/constants.dart';
-import '../core/platform/platform_service.dart' show platformService, initPlatformService;
+import '../core/platform/platform_service.dart'
+    show platformService, initPlatformService;
 
 /// Centralized persistent storage backed by [SharedPreferences] and
 /// macOS Keychain (via [FlutterSecureStorage]) for sensitive data.
@@ -46,16 +47,14 @@ class StorageService {
     try {
       // Configure for macOS keychain
       _secureStorage ??= const FlutterSecureStorage(
-          aOptions: AndroidOptions(
-            encryptedSharedPreferences: true,
-          ),
-          iOptions: IOSOptions(
-            accessibility: KeychainAccessibility.first_unlock_this_device,
-          ),
-          mOptions: MacOsOptions(
-            accessibility: KeychainAccessibility.first_unlock_this_device,
-          ),
-        );
+        aOptions: AndroidOptions(encryptedSharedPreferences: true),
+        iOptions: IOSOptions(
+          accessibility: KeychainAccessibility.first_unlock_this_device,
+        ),
+        mOptions: MacOsOptions(
+          accessibility: KeychainAccessibility.first_unlock_this_device,
+        ),
+      );
 
       // Cache API key from keychain so synchronous reads use secure storage
       _cachedApiKey = await _secureStorage?.read(key: AppConstants.apiKeyPref);
@@ -104,17 +103,21 @@ class StorageService {
     }
     final prefsKey = _prefs?.getString(AppConstants.apiKeyPref);
     if (prefsKey != null && prefsKey.isNotEmpty) return prefsKey;
-    if (AppConstants.defaultApiKey.isNotEmpty) return AppConstants.defaultApiKey;
+    if (AppConstants.defaultApiKey.isNotEmpty)
+      return AppConstants.defaultApiKey;
     return null;
   }
 
   /// Read API key from keychain (async) for full security.
   Future<String?> getApiKeyAsync() async {
-    final keychainKey = await _secureStorage?.read(key: AppConstants.apiKeyPref);
+    final keychainKey = await _secureStorage?.read(
+      key: AppConstants.apiKeyPref,
+    );
     if (keychainKey != null) return keychainKey;
     final prefsKey = _prefs?.getString(AppConstants.apiKeyPref);
     if (prefsKey != null) return prefsKey;
-    if (AppConstants.defaultApiKey.isNotEmpty) return AppConstants.defaultApiKey;
+    if (AppConstants.defaultApiKey.isNotEmpty)
+      return AppConstants.defaultApiKey;
     return null;
   }
 
@@ -166,7 +169,8 @@ class StorageService {
     await _prefs?.setDouble(AppConstants.ttsRatePref, rate);
   }
 
-  bool getTtsInterrupt() => _prefs?.getBool(AppConstants.ttsInterruptPref) ?? true;
+  bool getTtsInterrupt() =>
+      _prefs?.getBool(AppConstants.ttsInterruptPref) ?? true;
 
   Future<void> setTtsInterrupt(bool interrupt) async {
     await _prefs?.setBool(AppConstants.ttsInterruptPref, interrupt);
@@ -178,7 +182,8 @@ class StorageService {
     await _prefs?.setBool(AppConstants.ttsQueuePref, queue);
   }
 
-  int getTtsMaxQueueSize() => _prefs?.getInt(AppConstants.ttsMaxQueueSizePref) ?? 5;
+  int getTtsMaxQueueSize() =>
+      _prefs?.getInt(AppConstants.ttsMaxQueueSizePref) ?? 5;
 
   Future<void> setTtsMaxQueueSize(int size) async {
     await _prefs?.setInt(AppConstants.ttsMaxQueueSizePref, size);
@@ -263,7 +268,9 @@ class StorageService {
     final match = layoutRegex.firstMatch(content);
     if (match != null && match.groupCount >= 1) {
       _cachedClientGuiLayout = match.group(1);
-      debugPrint('[storage] Loaded gui.layout from $path: $_cachedClientGuiLayout');
+      debugPrint(
+        '[storage] Loaded gui.layout from $path: $_cachedClientGuiLayout',
+      );
     }
   }
 

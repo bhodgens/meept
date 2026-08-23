@@ -6,7 +6,8 @@ import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../widgets/background_image.dart';
 import '../../providers/providers.dart';
-import '../../providers/tab_activation_provider.dart' show keyboardFocusProvider;
+import '../../providers/tab_activation_provider.dart'
+    show keyboardFocusProvider;
 import '../../models/api_models.dart';
 
 /// Agents tab - displays all available agents.
@@ -116,11 +117,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             ),
             const SizedBox(height: 16),
             if (agentState.isLoading)
-              const Expanded(
-                child: Center(
-                  child: CircularProgressIndicator(),
-                ),
-              )
+              const Expanded(child: Center(child: CircularProgressIndicator()))
             else if (agentState.error != null)
               Expanded(
                 child: Center(
@@ -132,41 +129,48 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                       ),
                       const SizedBox(height: 12),
                       FilledButton.tonal(
-                        onPressed: () => ref.read(agentProvider.notifier).loadAgents(),
-                        child: const Text('retry', style: CyberpunkTypography.bodySmall),
+                        onPressed: () =>
+                            ref.read(agentProvider.notifier).loadAgents(),
+                        child: const Text(
+                          'retry',
+                          style: CyberpunkTypography.bodySmall,
+                        ),
                       ),
                     ],
                   ),
                 ),
               )
             else if (agentState.agents.isEmpty)
-              const Expanded(
-                child: Center(
-                  child: Text('no agents available'),
-                ),
-              )
+              const Expanded(child: Center(child: Text('no agents available')))
             else
               Expanded(
                 child: Focus(
                   onFocusChange: (hasFocus) {
                     if (hasFocus) {
-                      ref.read(keyboardFocusProvider.notifier).setFocusedPane(0);
+                      ref
+                          .read(keyboardFocusProvider.notifier)
+                          .setFocusedPane(0);
                     }
                   },
                   onKeyEvent: _handleKey,
                   child: GridView.builder(
-                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 225,
-                      crossAxisSpacing: 8,
-                      mainAxisSpacing: 8,
-                      childAspectRatio: 0.87,
-                    ),
+                    gridDelegate:
+                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: 225,
+                          crossAxisSpacing: 8,
+                          mainAxisSpacing: 8,
+                          childAspectRatio: 0.87,
+                        ),
                     itemCount: agentState.agents.length,
                     itemBuilder: (context, index) {
                       final agent = agentState.agents[index];
                       final isSelected = activeAgent?.id == agent.id;
                       final isKeyboardSelected = _selectedIndex == index;
-                      return _buildAgentCard(agent, isSelected, isKeyboardSelected);
+                      return _buildAgentCard(
+                        agent,
+                        isSelected,
+                        isKeyboardSelected,
+                      );
                     },
                   ),
                 ),
@@ -177,7 +181,11 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     );
   }
 
-  Widget _buildAgentCard(Agent agent, bool isSelected, bool isKeyboardSelected) {
+  Widget _buildAgentCard(
+    Agent agent,
+    bool isSelected,
+    bool isKeyboardSelected,
+  ) {
     return InkWell(
       key: ValueKey('agent-tile-${agent.id}'),
       onTap: () {
@@ -189,14 +197,14 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
           color: isKeyboardSelected
               ? CyberpunkColors.orangeDark.withValues(alpha: 0.3)
               : (isSelected
-                  ? CyberpunkColors.orangePrimary.withValues(alpha: 0.1)
-                  : CyberpunkColors.black),
+                    ? CyberpunkColors.orangePrimary.withValues(alpha: 0.1)
+                    : CyberpunkColors.black),
           border: Border.all(
             color: isKeyboardSelected
                 ? CyberpunkColors.orangeDark
                 : (isSelected
-                    ? CyberpunkColors.orangePrimary
-                    : CyberpunkColors.midGray),
+                      ? CyberpunkColors.orangePrimary
+                      : CyberpunkColors.midGray),
             width: isKeyboardSelected ? 3 : 1,
           ),
           borderRadius: BorderRadius.circular(8),
@@ -229,7 +237,6 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
       ),
     );
   }
-
 }
 
 /// Inline error banner for agent list errors
@@ -245,7 +252,11 @@ class _AgentErrorBanner extends StatelessWidget {
       color: CyberpunkColors.redAlert.withValues(alpha: 0.2),
       child: Row(
         children: [
-          const Icon(Icons.error_outline, color: CyberpunkColors.redAlert, size: 20),
+          const Icon(
+            Icons.error_outline,
+            color: CyberpunkColors.redAlert,
+            size: 20,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(

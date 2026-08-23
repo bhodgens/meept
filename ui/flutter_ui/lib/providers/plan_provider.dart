@@ -14,11 +14,7 @@ class PlanState {
   final bool isLoading;
   final String? error;
 
-  const PlanState({
-    this.plans = const [],
-    this.isLoading = false,
-    this.error,
-  });
+  const PlanState({this.plans = const [], this.isLoading = false, this.error});
 
   PlanState copyWith({
     List<Plan>? plans,
@@ -34,14 +30,11 @@ class PlanState {
 }
 
 class PlanNotifier extends StateNotifier<PlanState> {
-  PlanNotifier({
-    required this.sdkClient,
-    this.webSocketService,
-  }) : super(const PlanState()) {
+  PlanNotifier({required this.sdkClient, this.webSocketService})
+    : super(const PlanState()) {
     if (webSocketService != null) {
       try {
-        _plansSubscription =
-            webSocketService!.subscribeToPlans().listen((_) {
+        _plansSubscription = webSocketService!.subscribeToPlans().listen((_) {
           // Refresh plans using the same filter as the last loadPlans call.
           loadPlans(sessionID: _lastSessionID, projectID: _lastProjectID);
         });
@@ -72,7 +65,9 @@ class PlanNotifier extends StateNotifier<PlanState> {
       final rawPlans = sessionID != null
           ? await sdkClient.listPlansBySession(sessionID)
           : await sdkClient.listPlans(projectId: projectID);
-      final plans = rawPlans.map((p) => Plan.fromJson(p)).toList(growable: false);
+      final plans = rawPlans
+          .map((p) => Plan.fromJson(p))
+          .toList(growable: false);
       state = state.copyWith(plans: plans, isLoading: false);
     } catch (e) {
       state = state.copyWith(isLoading: false, error: e.toString());
@@ -81,16 +76,29 @@ class PlanNotifier extends StateNotifier<PlanState> {
 
   Future<void> approvePlan(String planID, {String? sessionID}) async {
     try {
-      await sdkClient.approvePlan(planID, sessionID: sessionID, by: 'flutter_ui');
+      await sdkClient.approvePlan(
+        planID,
+        sessionID: sessionID,
+        by: 'flutter_ui',
+      );
       await loadPlans(sessionID: sessionID);
     } catch (e) {
       state = state.copyWith(error: e.toString());
     }
   }
 
-  Future<void> rejectPlan(String planID, {String? sessionID, String? reason}) async {
+  Future<void> rejectPlan(
+    String planID, {
+    String? sessionID,
+    String? reason,
+  }) async {
     try {
-      await sdkClient.rejectPlan(planID, sessionID: sessionID, by: 'flutter_ui', reason: reason);
+      await sdkClient.rejectPlan(
+        planID,
+        sessionID: sessionID,
+        by: 'flutter_ui',
+        reason: reason,
+      );
       await loadPlans(sessionID: sessionID);
     } catch (e) {
       state = state.copyWith(error: e.toString());
@@ -99,16 +107,28 @@ class PlanNotifier extends StateNotifier<PlanState> {
 
   Future<void> confirmPlan(String planID, {String? sessionID}) async {
     try {
-      await sdkClient.confirmPlan(planID, sessionID: sessionID, by: 'flutter_ui');
+      await sdkClient.confirmPlan(
+        planID,
+        sessionID: sessionID,
+        by: 'flutter_ui',
+      );
       await loadPlans(sessionID: sessionID);
     } catch (e) {
       state = state.copyWith(error: e.toString());
     }
   }
 
-  Future<void> revisePlan(String planID, {String? sessionID, String? feedback}) async {
+  Future<void> revisePlan(
+    String planID, {
+    String? sessionID,
+    String? feedback,
+  }) async {
     try {
-      await sdkClient.revisePlan(planID, sessionID: sessionID, feedback: feedback);
+      await sdkClient.revisePlan(
+        planID,
+        sessionID: sessionID,
+        feedback: feedback,
+      );
       await loadPlans(sessionID: sessionID);
     } catch (e) {
       state = state.copyWith(error: e.toString());

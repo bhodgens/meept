@@ -32,9 +32,11 @@ class SkillsService {
     final all = await fetchSkills();
     final lowerQuery = query.toLowerCase();
     return all
-        .where((s) =>
-            s.name.toLowerCase().contains(lowerQuery) ||
-            s.description.toLowerCase().contains(lowerQuery))
+        .where(
+          (s) =>
+              s.name.toLowerCase().contains(lowerQuery) ||
+              s.description.toLowerCase().contains(lowerQuery),
+        )
         .toList();
   }
 
@@ -63,8 +65,14 @@ class SkillSummary {
     return SkillSummary(
       name: json['name'] ?? '',
       description: json['description'] ?? '',
-      tags: (json['tags'] as List<dynamic>?)?.map((e) => e as String).toList() ?? [],
-      requires: (json['requires'] as List<dynamic>?)?.map((e) => e as String).toList() ?? [],
+      tags:
+          (json['tags'] as List<dynamic>?)?.map((e) => e as String).toList() ??
+          [],
+      requires:
+          (json['requires'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          [],
     );
   }
 }

@@ -5,26 +5,26 @@ import 'colors.dart';
 abstract class CyberpunkEffects {
   /// Orange glow shadow for text and widgets
   static List<BoxShadow> glowShadow({double intensity = 1.0}) => [
-        BoxShadow(
-          color: CyberpunkColors.orangePrimary.withValues(alpha: 0.5 * intensity),
-          blurRadius: 10 * intensity,
-          spreadRadius: 2 * intensity,
-        ),
-        BoxShadow(
-          color: CyberpunkColors.orangeGlow.withValues(alpha: 0.3 * intensity),
-          blurRadius: 20 * intensity,
-          spreadRadius: 5 * intensity,
-        ),
-      ];
+    BoxShadow(
+      color: CyberpunkColors.orangePrimary.withValues(alpha: 0.5 * intensity),
+      blurRadius: 10 * intensity,
+      spreadRadius: 2 * intensity,
+    ),
+    BoxShadow(
+      color: CyberpunkColors.orangeGlow.withValues(alpha: 0.3 * intensity),
+      blurRadius: 20 * intensity,
+      spreadRadius: 5 * intensity,
+    ),
+  ];
 
   /// Subtle border glow for containers
   static List<BoxShadow> borderGlow({double intensity = 1.0}) => [
-        BoxShadow(
-          color: CyberpunkColors.orangeDark.withValues(alpha: 0.3 * intensity),
-          blurRadius: 5 * intensity,
-          spreadRadius: 1 * intensity,
-        ),
-      ];
+    BoxShadow(
+      color: CyberpunkColors.orangeDark.withValues(alpha: 0.3 * intensity),
+      blurRadius: 5 * intensity,
+      spreadRadius: 1 * intensity,
+    ),
+  ];
 
   /// Angular gradient for backgrounds
   static const LinearGradient angularGradient = LinearGradient(
@@ -43,19 +43,18 @@ abstract class CyberpunkEffects {
   );
 
   /// Scanline effect overlay
-  static Decoration scanlineOverlay({double opacity = 0.1}) =>
-      BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.black.withValues(alpha: 0),
-            Colors.black.withValues(alpha: opacity),
-            Colors.black.withValues(alpha: 0),
-          ],
-          stops: const [0.0, 0.5, 1.0],
-        ),
-      );
+  static Decoration scanlineOverlay({double opacity = 0.1}) => BoxDecoration(
+    gradient: LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [
+        Colors.black.withValues(alpha: 0),
+        Colors.black.withValues(alpha: opacity),
+        Colors.black.withValues(alpha: 0),
+      ],
+      stops: const [0.0, 0.5, 1.0],
+    ),
+  );
 
   /// Angled corner decoration (cyberpunk style cut corners)
   static ClipPath angledClip({double cutSize = 8.0}) =>

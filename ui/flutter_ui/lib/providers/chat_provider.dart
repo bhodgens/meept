@@ -44,7 +44,8 @@ Map<String, dynamic>? _extractConfirmationRequest(Map<String, dynamic> data) {
 
   // Check nested result/data fields.
   final result = data['result'];
-  if (result is Map<String, dynamic> && result['requires_confirmation'] == true) {
+  if (result is Map<String, dynamic> &&
+      result['requires_confirmation'] == true) {
     return result;
   }
 
@@ -133,8 +134,10 @@ enum _SendEndpoint { normal, steer, followUp }
 /// State for the chat provider
 class ChatState {
   final List<ChatMessage> messages;
+
   /// Whether the session history is being loaded from the server.
   final bool isLoading;
+
   /// Whether the agent is actively processing (receiving progress events
   /// via WebSocket).  This tracks the real agent lifecycle separately from the
   /// HTTP call lifecycle so the progress indicator stays visible while the
@@ -142,6 +145,7 @@ class ChatState {
   final bool isAgentProcessing;
   final String? error;
   final AgentProgress? currentProgress;
+
   /// When the agent started thinking (wall clock). Used by the UI to render
   /// an elapsed timer ("thinking 12s..."). Null when the agent is idle.
   final DateTime? thinkingStartedAt;
@@ -175,7 +179,9 @@ class ChatState {
     List<ChatMessage> limitedMessages = messages ?? this.messages;
     if (limitedMessages.length > _maxMessages) {
       // Keep only the most recent messages
-      limitedMessages = limitedMessages.sublist(limitedMessages.length - _maxMessages);
+      limitedMessages = limitedMessages.sublist(
+        limitedMessages.length - _maxMessages,
+      );
     }
     return ChatState(
       messages: limitedMessages,
@@ -204,7 +210,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
     required this.websocket,
     required this.ttsNotifier,
     required this.sessionId,
-  })  : super(const ChatState()) {
+  }) : super(const ChatState()) {
     _initWebSocket();
     // Auto-load messages on creation — the family provider is created
     // on first watch, so this happens when the UI first references the
@@ -269,11 +275,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
     final generation = ++_loadGeneration;
 
     // Clear messages while loading
-    state = const ChatState(
-      messages: [],
-      isLoading: true,
-      error: null,
-    );
+    state = const ChatState(messages: [], isLoading: true, error: null);
 
     // Cancel any existing WS subscription before the HTTP fetch
     _wsChatSubscription?.cancel();
@@ -318,37 +320,34 @@ class ChatNotifier extends StateNotifier<ChatState> {
       }
       _hasMoreHistory = _oldestLoadedOffset > 0;
       if (_disposed || generation != _loadGeneration) return;
-      state = ChatState(
-        messages: messages,
-        isLoading: false,
-      );
+      state = ChatState(messages: messages, isLoading: false);
     } catch (e) {
       if (_disposed) return;
-      state = ChatState(
-        messages: [],
-        isLoading: false,
-        error: e.toString(),
-      );
+      state = ChatState(messages: [], isLoading: false, error: e.toString());
     }
 
     if (_disposed || generation != _loadGeneration) return;
 
     // Set up WS subscription AFTER the HTTP fetch completes
-    _wsChatSubscription = websocket.subscribeToChat(sessionId).listen((message) {
+    _wsChatSubscription = websocket.subscribeToChat(sessionId).listen((
+      message,
+    ) {
       addStreamMessage(message);
     });
 
     // Subscribe to agent progress for this session
-    _progressSubscription = websocket.subscribeToAgentProgress(sessionId).listen((message) {
-      if (_disposed) return;
-      final confirmation = _extractConfirmationRequest(message);
-      if (confirmation != null) {
-        state = state.copyWith(pendingConfirmation: confirmation);
-        return;
-      }
-      final progress = AgentProgress.fromJson(message);
-      state = state.copyWith(currentProgress: progress);
-    });
+    _progressSubscription = websocket
+        .subscribeToAgentProgress(sessionId)
+        .listen((message) {
+          if (_disposed) return;
+          final confirmation = _extractConfirmationRequest(message);
+          if (confirmation != null) {
+            state = state.copyWith(pendingConfirmation: confirmation);
+            return;
+          }
+          final progress = AgentProgress.fromJson(message);
+          state = state.copyWith(currentProgress: progress);
+        });
   }
 
   /// Send a message and append it to the messages list
@@ -615,8 +614,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
     _isLoadingOlder = true;
     try {
       const pageSize = 200;
-      final offset =
-          (_oldestLoadedOffset - pageSize).clamp(0, _oldestLoadedOffset);
+      final offset = (_oldestLoadedOffset - pageSize).clamp(
+        0,
+        _oldestLoadedOffset,
+      );
       if (offset == _oldestLoadedOffset) {
         // Already at the start.
         _hasMoreHistory = false;
@@ -641,13 +642,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
       // _oldestLoadedOffset was not page-aligned (initial recent-window
       // loads land mid-page). Drop any messages already present.
       final loadedIds = {for (final m in state.messages) m.id};
-      final older =
-          allOlder.where((m) => !loadedIds.contains(m.id)).toList();
+      final older = allOlder.where((m) => !loadedIds.contains(m.id)).toList();
       if (older.isEmpty) return false;
       // Prepend without touching isLoading/isAgentProcessing/error.
-      state = state.copyWith(
-        messages: [...older, ...state.messages],
-      );
+      state = state.copyWith(messages: [...older, ...state.messages]);
       return true;
     } catch (e) {
       // Scroll-back pagination is best-effort; surface but don't clobber
@@ -682,10 +680,14 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
       // Handle system/non-chat messages (token budget, errors, etc.)
       final messageType = data['type'] as String?;
-      if (messageType == 'non-chat' || messageType == 'system' || messageType == 'error') {
+      if (messageType == 'non-chat' ||
+          messageType == 'system' ||
+          messageType == 'error') {
         final contentText = data['content'] is String
             ? data['content'] as String
-            : (data['message'] is String ? data['message'] as String : 'System notification');
+            : (data['message'] is String
+                  ? data['message'] as String
+                  : 'System notification');
         final systemMessage = ChatMessage(
           id: 'system_${DateTime.now().millisecondsSinceEpoch}',
           role: 'system',
@@ -733,8 +735,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
       // don't signal completion.
       final newIsAgentProcessing =
           (message.role == 'assistant' && message.content.isNotEmpty)
-              ? false
-              : state.isAgentProcessing;
+          ? false
+          : state.isAgentProcessing;
 
       // Cancel the fallback timer — the WS event drove the state transition.
       if (!newIsAgentProcessing) {
@@ -745,7 +747,9 @@ class ChatNotifier extends StateNotifier<ChatState> {
       state = state.copyWith(
         messages: newMessages,
         isAgentProcessing: newIsAgentProcessing,
-        thinkingStartedAt: newIsAgentProcessing ? state.thinkingStartedAt : null,
+        thinkingStartedAt: newIsAgentProcessing
+            ? state.thinkingStartedAt
+            : null,
       );
     } catch (e) {
       final errorMessage = ChatMessage(
@@ -821,7 +825,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
             );
           }
         case 'reject_claim':
-          final id = details['claim_id'] as String? ?? details['id'] as String? ?? '';
+          final id =
+              details['claim_id'] as String? ?? details['id'] as String? ?? '';
           if (id.isNotEmpty) {
             await sdkClient.rejectClaim(id: id, confirmed: confirmed);
           }
@@ -869,17 +874,20 @@ class ChatNotifier extends StateNotifier<ChatState> {
 /// progress subscription. This eliminates the cross-session race
 /// condition where responses from one session appeared in another.
 final chatProvider =
-    StateNotifierProvider.family<ChatNotifier, ChatState, String>((ref, sessionId) {
-  final client = ref.watch(sdkClientProvider);
-  final websocket = ref.watch(websocketProvider);
-  final ttsNotifier = ref.read(ttsProvider.notifier);
-  return ChatNotifier(
-    sdkClient: client,
-    websocket: websocket,
-    ttsNotifier: ttsNotifier,
-    sessionId: sessionId,
-  );
-});
+    StateNotifierProvider.family<ChatNotifier, ChatState, String>((
+      ref,
+      sessionId,
+    ) {
+      final client = ref.watch(sdkClientProvider);
+      final websocket = ref.watch(websocketProvider);
+      final ttsNotifier = ref.read(ttsProvider.notifier);
+      return ChatNotifier(
+        sdkClient: client,
+        websocket: websocket,
+        ttsNotifier: ttsNotifier,
+        sessionId: sessionId,
+      );
+    });
 
 /// Current session ID provider
 final currentSessionIdProvider = StateProvider<String?>((ref) => null);

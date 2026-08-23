@@ -1,7 +1,6 @@
 // Platform detection via compile-time constants for web compatibility
 // Runtime checks use platformService where needed (see LeaderKeyController._isMacOS)
 
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -237,7 +236,6 @@ class LeaderKeyController extends ChangeNotifier {
     }
     return HardwareKeyboard.instance.isControlPressed;
   }
-
 }
 
 /// Wraps a child with app-wide shortcuts via a Focus node.
@@ -290,36 +288,54 @@ class _AppShortcutsState extends ConsumerState<AppShortcuts> {
       bindings: {
         // Leader key → command palette
         // Register both variants, but check preference in callback
-        const SingleActivator(LogicalKeyboardKey.keyX, meta: true, control: false):
-            () {
-              if (_useCmd) widget.controller.onShowCommandPalette?.call();
-            },
-        const SingleActivator(LogicalKeyboardKey.keyX, meta: false, control: true):
-            () {
-              if (!_useCmd) widget.controller.onShowCommandPalette?.call();
-            },
+        const SingleActivator(
+          LogicalKeyboardKey.keyX,
+          meta: true,
+          control: false,
+        ): () {
+          if (_useCmd) widget.controller.onShowCommandPalette?.call();
+        },
+        const SingleActivator(
+          LogicalKeyboardKey.keyX,
+          meta: false,
+          control: true,
+        ): () {
+          if (!_useCmd) widget.controller.onShowCommandPalette?.call();
+        },
         // Ctrl+V → cycle verbosity (all platforms, TUI parity)
         // Always uses Ctrl, never Cmd
-        const SingleActivator(LogicalKeyboardKey.keyV, control: true):
-            () => widget.controller.onCycleVerbosity?.call(),
+        const SingleActivator(LogicalKeyboardKey.keyV, control: true): () =>
+            widget.controller.onCycleVerbosity?.call(),
         // Cmd+K / Ctrl+K → focus input (follows modifier preference)
-        const SingleActivator(LogicalKeyboardKey.keyK, meta: true, control: false):
-            () {
-              if (_useCmd) widget.controller.onFocusInput?.call();
-            },
-        const SingleActivator(LogicalKeyboardKey.keyK, meta: false, control: true):
-            () {
-              if (!_useCmd) widget.controller.onFocusInput?.call();
-            },
+        const SingleActivator(
+          LogicalKeyboardKey.keyK,
+          meta: true,
+          control: false,
+        ): () {
+          if (_useCmd) widget.controller.onFocusInput?.call();
+        },
+        const SingleActivator(
+          LogicalKeyboardKey.keyK,
+          meta: false,
+          control: true,
+        ): () {
+          if (!_useCmd) widget.controller.onFocusInput?.call();
+        },
         // Cmd+F / Ctrl+F → in-session find (follows modifier preference)
-        const SingleActivator(LogicalKeyboardKey.keyF, meta: true, control: false):
-            () {
-              if (_useCmd) widget.controller.onInSessionFind?.call();
-            },
-        const SingleActivator(LogicalKeyboardKey.keyF, meta: false, control: true):
-            () {
-              if (!_useCmd) widget.controller.onInSessionFind?.call();
-            },
+        const SingleActivator(
+          LogicalKeyboardKey.keyF,
+          meta: true,
+          control: false,
+        ): () {
+          if (_useCmd) widget.controller.onInSessionFind?.call();
+        },
+        const SingleActivator(
+          LogicalKeyboardKey.keyF,
+          meta: false,
+          control: true,
+        ): () {
+          if (!_useCmd) widget.controller.onInSessionFind?.call();
+        },
       },
       child: Focus(
         autofocus: true,

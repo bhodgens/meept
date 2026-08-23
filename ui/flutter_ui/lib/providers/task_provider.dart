@@ -11,11 +11,7 @@ class TaskState {
   final bool isLoading;
   final String? error;
 
-  const TaskState({
-    this.tasks = const [],
-    this.isLoading = false,
-    this.error,
-  });
+  const TaskState({this.tasks = const [], this.isLoading = false, this.error});
 
   TaskState copyWith({
     List<Task>? tasks,
@@ -32,8 +28,7 @@ class TaskState {
 
 /// StateNotifier that manages task loading
 class TaskNotifier extends StateNotifier<TaskState> {
-  TaskNotifier({required this.sdkClient})
-      : super(const TaskState());
+  TaskNotifier({required this.sdkClient}) : super(const TaskState());
 
   final SdkApiClient sdkClient;
 
@@ -45,21 +40,17 @@ class TaskNotifier extends StateNotifier<TaskState> {
       // deserialize each entry via Task.fromJson because the OpenAPI spec
       // leaves the Task entity untyped.
       final rawTasks = await sdkClient.listTasks();
-      final tasks = rawTasks.map((t) => Task.fromJson(t)).toList(growable: false);
+      final tasks = rawTasks
+          .map((t) => Task.fromJson(t))
+          .toList(growable: false);
       state = state.copyWith(tasks: tasks, isLoading: false);
     } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        error: e.toString(),
-      );
+      state = state.copyWith(isLoading: false, error: e.toString());
     }
   }
 
   /// Create a new task
-  Future<Task?> createTask({
-    required String title,
-    String? sessionId,
-  }) async {
+  Future<Task?> createTask({required String title, String? sessionId}) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
       final raw = await sdkClient.createTask(
@@ -70,10 +61,7 @@ class TaskNotifier extends StateNotifier<TaskState> {
       state = state.copyWith(tasks: [...state.tasks, task], isLoading: false);
       return task;
     } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        error: e.toString(),
-      );
+      state = state.copyWith(isLoading: false, error: e.toString());
       return null;
     }
   }
@@ -87,10 +75,7 @@ class TaskNotifier extends StateNotifier<TaskState> {
       await loadTasks();
       return true;
     } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        error: e.toString(),
-      );
+      state = state.copyWith(isLoading: false, error: e.toString());
       return false;
     }
   }
@@ -103,18 +88,14 @@ class TaskNotifier extends StateNotifier<TaskState> {
       await loadTasks();
       return true;
     } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        error: e.toString(),
-      );
+      state = state.copyWith(isLoading: false, error: e.toString());
       return false;
     }
   }
 }
 
 /// Task state provider
-final taskProvider =
-    StateNotifierProvider<TaskNotifier, TaskState>((ref) {
+final taskProvider = StateNotifierProvider<TaskNotifier, TaskState>((ref) {
   final client = ref.watch(sdkClientProvider);
   return TaskNotifier(sdkClient: client);
 });

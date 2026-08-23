@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
@@ -26,13 +25,17 @@ class _ChatViewState extends ConsumerState<ChatView> {
   @override
   void initState() {
     super.initState();
-    debugPrint('[session-debug] ChatView.initState sessionId=${widget.sessionId}');
+    debugPrint(
+      '[session-debug] ChatView.initState sessionId=${widget.sessionId}',
+    );
   }
 
   @override
   void didUpdateWidget(ChatView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    debugPrint('[session-debug] ChatView.didUpdateWidget old=${oldWidget.sessionId} new=${widget.sessionId}');
+    debugPrint(
+      '[session-debug] ChatView.didUpdateWidget old=${oldWidget.sessionId} new=${widget.sessionId}',
+    );
   }
 
   @override
@@ -57,7 +60,9 @@ class _ChatViewState extends ConsumerState<ChatView> {
       ).then((confirmed) {
         _dialogShown = false;
         if (mounted) {
-          ref.read(chatProvider(widget.sessionId).notifier).resolveConfirmation(confirmed ?? false);
+          ref
+              .read(chatProvider(widget.sessionId).notifier)
+              .resolveConfirmation(confirmed ?? false);
         }
       });
     });
@@ -121,9 +126,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
             ),
           ),
           // Message list
-          Expanded(
-            child: ChatMessageList(sessionId: widget.sessionId),
-          ),
+          Expanded(child: ChatMessageList(sessionId: widget.sessionId)),
           // Input area
           ChatInput(sessionId: widget.sessionId),
         ],

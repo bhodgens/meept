@@ -27,8 +27,14 @@ class CurrentProject {
     this.localPath = '',
   });
 
-  static const empty =
-      CurrentProject(id: '', name: '', mode: '', branch: '', dirty: false, localPath: '');
+  static const empty = CurrentProject(
+    id: '',
+    name: '',
+    mode: '',
+    branch: '',
+    dirty: false,
+    localPath: '',
+  );
 
   bool get isActive => id.isNotEmpty;
 }
@@ -104,8 +110,8 @@ class CurrentProjectNotifier extends StateNotifier<CurrentProject> {
 /// successful daemon connect and on any project-switch signal.
 final currentProjectProvider =
     StateNotifierProvider<CurrentProjectNotifier, CurrentProject>((ref) {
-  return CurrentProjectNotifier(ref.watch(sdkClientProvider));
-});
+      return CurrentProjectNotifier(ref.watch(sdkClientProvider));
+    });
 
 /// Session-scoped project status provider.
 ///
@@ -117,8 +123,10 @@ final currentProjectProvider =
 ///
 /// Errors degrade gracefully to [CurrentProject.empty] so the status bar
 /// renders its "no project" affordance rather than throwing.
-final projectStatusProvider =
-    FutureProvider.family<CurrentProject, String>((ref, projectId) async {
+final projectStatusProvider = FutureProvider.family<CurrentProject, String>((
+  ref,
+  projectId,
+) async {
   final client = ref.watch(sdkClientProvider);
   try {
     // Fetch project details (name, mode, localPath) from the projects list.

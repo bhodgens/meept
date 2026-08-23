@@ -42,9 +42,7 @@ final GoRouter router = GoRouter(
       path: '/',
       name: 'chat',
       pageBuilder: (context, state) {
-        return const NoTransitionPage(
-          child: _LayoutShell(tab: HomeTab.chat),
-        );
+        return const NoTransitionPage(child: _LayoutShell(tab: HomeTab.chat));
       },
     ),
     GoRoute(
@@ -60,27 +58,21 @@ final GoRouter router = GoRouter(
       path: '/tasks',
       name: 'tasks',
       pageBuilder: (context, state) {
-        return const NoTransitionPage(
-          child: _LayoutShell(tab: HomeTab.tasks),
-        );
+        return const NoTransitionPage(child: _LayoutShell(tab: HomeTab.tasks));
       },
     ),
     GoRoute(
       path: '/plans',
       name: 'plans',
       pageBuilder: (context, state) {
-        return const NoTransitionPage(
-          child: _LayoutShell(tab: HomeTab.plans),
-        );
+        return const NoTransitionPage(child: _LayoutShell(tab: HomeTab.plans));
       },
     ),
     GoRoute(
       path: '/agents',
       name: 'agents',
       pageBuilder: (context, state) {
-        return const NoTransitionPage(
-          child: _LayoutShell(tab: HomeTab.agents),
-        );
+        return const NoTransitionPage(child: _LayoutShell(tab: HomeTab.agents));
       },
     ),
 
@@ -250,6 +242,7 @@ class _LayoutShellState extends ConsumerState<_LayoutShell> {
     return _HomeShell(initialTab: widget.tab);
   }
 }
+
 class _HomeShell extends StatefulWidget {
   final HomeTab initialTab;
 
@@ -301,8 +294,8 @@ class TabOverrideScope extends InheritedWidget {
   });
 
   static HomeTab? of(BuildContext context) {
-    final scope =
-        context.dependOnInheritedWidgetOfExactType<TabOverrideScope>();
+    final scope = context
+        .dependOnInheritedWidgetOfExactType<TabOverrideScope>();
     return scope?.initialTab;
   }
 

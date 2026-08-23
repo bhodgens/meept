@@ -63,8 +63,8 @@ class JobUpdate {
       agentId: json['agent_id'] as String?,
       timestamp: ts != null
           ? (ts is String
-              ? DateTime.parse(ts)
-              : DateTime.fromMillisecondsSinceEpoch((ts as num).toInt()))
+                ? DateTime.parse(ts)
+                : DateTime.fromMillisecondsSinceEpoch((ts as num).toInt()))
           : DateTime.now(),
     );
   }
@@ -73,10 +73,8 @@ class JobUpdate {
 /// StateNotifier that manages job queue state via HTTP polling and
 /// WebSocket real-time updates (Task 20).
 class JobNotifier extends StateNotifier<JobState> {
-  JobNotifier({
-    required this.sdkClient,
-    required this.websocket,
-  }) : super(const JobState(isLoading: true)) {
+  JobNotifier({required this.sdkClient, required this.websocket})
+    : super(const JobState(isLoading: true)) {
     _init();
   }
 
@@ -131,13 +129,15 @@ class JobNotifier extends StateNotifier<JobState> {
       if (_disposed || gen != _fetchGeneration) return;
       state = state.copyWith(
         updates: jobs
-            .map((j) => JobUpdate(
-                  jobId: j.id,
-                  type: j.type,
-                  status: j.status,
-                  agentId: j.agentId,
-                  timestamp: j.createdAt,
-                ))
+            .map(
+              (j) => JobUpdate(
+                jobId: j.id,
+                type: j.type,
+                status: j.status,
+                agentId: j.agentId,
+                timestamp: j.createdAt,
+              ),
+            )
             .toList(),
         queueDepth: depth ?? state.queueDepth,
         isLoading: false,
@@ -168,10 +168,7 @@ class JobNotifier extends StateNotifier<JobState> {
             error: null,
           );
         } else {
-          state = state.copyWith(
-            updates: newUpdates,
-            error: null,
-          );
+          state = state.copyWith(updates: newUpdates, error: null);
         }
 
         // Update queue depth if present
@@ -213,8 +210,7 @@ class JobNotifier extends StateNotifier<JobState> {
 }
 
 /// Job queue provider
-final jobProvider =
-    StateNotifierProvider<JobNotifier, JobState>((ref) {
+final jobProvider = StateNotifierProvider<JobNotifier, JobState>((ref) {
   final client = ref.watch(sdkClientProvider);
   final websocket = ref.watch(websocketProvider);
   return JobNotifier(sdkClient: client, websocket: websocket);

@@ -19,10 +19,8 @@ class ProjectPromptDialog extends StatefulWidget {
     return showDialog<ProjectPromptResult>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => ProjectPromptDialog(
-        sessionID: sessionID,
-        defaultPath: defaultPath,
-      ),
+      builder: (context) =>
+          ProjectPromptDialog(sessionID: sessionID, defaultPath: defaultPath),
     );
   }
 
@@ -45,9 +43,9 @@ class _ProjectPromptDialogState extends State<ProjectPromptDialog> {
           const SizedBox(height: 8),
           Text(
             widget.defaultPath,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontFamily: 'monospace',
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
             overflow: TextOverflow.ellipsis,
             maxLines: 2,
           ),
@@ -55,7 +53,8 @@ class _ProjectPromptDialogState extends State<ProjectPromptDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(ProjectPromptResult.decline),
+          onPressed: () =>
+              Navigator.of(context).pop(ProjectPromptResult.decline),
           child: const Text('No'),
         ),
         TextButton(
@@ -63,7 +62,8 @@ class _ProjectPromptDialogState extends State<ProjectPromptDialog> {
           child: const Text('Pick Project'),
         ),
         ElevatedButton(
-          onPressed: () => Navigator.of(context).pop(ProjectPromptResult.accept),
+          onPressed: () =>
+              Navigator.of(context).pop(ProjectPromptResult.accept),
           child: const Text('Yes'),
         ),
       ],
@@ -71,8 +71,4 @@ class _ProjectPromptDialogState extends State<ProjectPromptDialog> {
   }
 }
 
-enum ProjectPromptResult {
-  accept,
-  decline,
-  pick,
-}
+enum ProjectPromptResult { accept, decline, pick }

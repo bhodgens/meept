@@ -11,7 +11,9 @@ class AgentProgressIndicator extends StatelessWidget {
 
   bool get isError {
     final msg = progress.message.toLowerCase();
-    return msg.contains('failed') || msg.contains('error') || msg.contains('abort');
+    return msg.contains('failed') ||
+        msg.contains('error') ||
+        msg.contains('abort');
   }
 
   Color _getColorForTier(int tier, bool isError) {
@@ -42,11 +44,7 @@ class AgentProgressIndicator extends StatelessWidget {
 
   Widget _buildIndicator(bool isError) {
     if (isError) {
-      return const Icon(
-        Icons.error_outline,
-        color: Colors.red,
-        size: 16,
-      );
+      return const Icon(Icons.error_outline, color: Colors.red, size: 16);
     }
     return const SizedBox(
       width: 12,
@@ -67,10 +65,9 @@ class AgentProgressIndicator extends StatelessWidget {
     final fontStyle = _getFontStyleForTier(progress.tier, error);
     final agentColor = error ? Colors.red[300]! : CyberpunkColors.orangePrimary;
 
-    final displayMessage =
-        progress.message.length > 60
-            ? '${progress.message.substring(0, 57)}...'
-            : progress.message;
+    final displayMessage = progress.message.length > 60
+        ? '${progress.message.substring(0, 57)}...'
+        : progress.message;
 
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 150),

@@ -1,7 +1,8 @@
 // NATIVE-ONLY FILE: Uses dart:io HttpClient for certificate pinning.
 // Web uses the browser's built-in HTTP client without custom cert handling.
 // The web build tree-shakes this unused code.
-import 'dart:io' show HttpClient, X509Certificate; // ignore: web_unsafe_import - native only
+import 'dart:io'
+    show HttpClient, X509Certificate; // ignore: web_unsafe_import - native only
 import 'package:built_value/serializer.dart';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
@@ -10,7 +11,8 @@ import 'package:flutter/foundation.dart';
 import 'package:meept_client/meept_client.dart' as sdk;
 
 import '../core/constants.dart';
-import '../models/api_models.dart' show SearchResults, SemanticSearchResults, SearchScope, SearchScopeX;
+import '../models/api_models.dart'
+    show SearchResults, SemanticSearchResults, SearchScope, SearchScopeX;
 import 'daemon_cert_pinner.dart';
 import 'storage_service.dart';
 
@@ -45,15 +47,16 @@ class SdkApiClient {
 
   /// Serialize a built_value model to a JSON-compatible [Map].
   static Map<String, dynamic> _toJson<T>(T model) {
-    final serialized = _serializers.serialize(model,
-        specifiedType: FullType(T));
+    final serialized = _serializers.serialize(
+      model,
+      specifiedType: FullType(T),
+    );
     return Map<String, dynamic>.from(serialized as Map);
   }
 
   /// Deserialize a JSON [Map] into a built_value model of type [T].
   static T? _fromJson<T>(Map<String, dynamic> raw) {
-    final result = _serializers.deserialize(raw,
-        specifiedType: FullType(T));
+    final result = _serializers.deserialize(raw, specifiedType: FullType(T));
     return result as T?;
   }
 
@@ -61,22 +64,19 @@ class SdkApiClient {
   // Construction
   // ------------------------------------------------------------------
 
-  SdkApiClient({
-    required String host,
-    int? port,
-    String? apiKey,
-  })  : baseUrl = 'https://$host:${port ?? AppConstants.defaultApiPort}',
-        _dio = Dio(
-          BaseOptions(
-            baseUrl: 'https://$host:${port ?? AppConstants.defaultApiPort}',
-            connectTimeout: AppConstants.connectionTimeout,
-            receiveTimeout: AppConstants.receiveTimeout,
-            headers: {
-              'Content-Type': 'application/json',
-              if (apiKey != null) 'Authorization': 'Bearer $apiKey',
-            },
-          ),
-        ) {
+  SdkApiClient({required String host, int? port, String? apiKey})
+    : baseUrl = 'https://$host:${port ?? AppConstants.defaultApiPort}',
+      _dio = Dio(
+        BaseOptions(
+          baseUrl: 'https://$host:${port ?? AppConstants.defaultApiPort}',
+          connectTimeout: AppConstants.connectionTimeout,
+          receiveTimeout: AppConstants.receiveTimeout,
+          headers: {
+            'Content-Type': 'application/json',
+            if (apiKey != null) 'Authorization': 'Bearer $apiKey',
+          },
+        ),
+      ) {
     // Configure TLS with certificate pinning on native platforms.
     // Web uses the browser's default HTTP client with browser TLS handling.
     if (!kIsWeb) {
@@ -92,14 +92,16 @@ class SdkApiClient {
     }
 
     // Log all errors for debugging.
-    _dio.interceptors.add(LogInterceptor(
-      requestHeader: false,
-      responseHeader: false,
-      requestBody: false,
-      responseBody: false,
-      error: true,
-      logPrint: (obj) => debugPrint('[sdk-http] $obj'),
-    ));
+    _dio.interceptors.add(
+      LogInterceptor(
+        requestHeader: false,
+        responseHeader: false,
+        requestBody: false,
+        responseBody: false,
+        error: true,
+        logPrint: (obj) => debugPrint('[sdk-http] $obj'),
+      ),
+    );
   }
 
   /// Create an SDK-backed client, optionally loading persisted host/port/API
@@ -166,7 +168,8 @@ class SdkApiClient {
         break;
       case DioExceptionType.connectionError:
         if (kIsWeb) {
-          message = 'Cannot connect to daemon at $baseUrl — '
+          message =
+              'Cannot connect to daemon at $baseUrl — '
               'the browser may be rejecting the self-signed TLS certificate. '
               'Visit $baseUrl in a browser tab and accept the certificate, '
               'then retry.';
@@ -177,7 +180,8 @@ class SdkApiClient {
       case DioExceptionType.badResponse:
         switch (statusCode) {
           case 401:
-            message = serverMessage ?? 'missing API token -- configure in settings';
+            message =
+                serverMessage ?? 'missing API token -- configure in settings';
             break;
           case 418:
             message = serverMessage ?? 'invalid API token (HTTP 418)';
@@ -210,21 +214,23 @@ class SdkApiClient {
   // Raw HTTP helpers (used by typed methods below)
   // ------------------------------------------------------------------
 
-  Future<Map<String, dynamic>> _get(String path,
-      {Map<String, dynamic>? query}) async {
+  Future<Map<String, dynamic>> _get(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
     try {
-      final response = await _dio.get(
-        path,
-        queryParameters: query,
-      );
+      final response = await _dio.get(path, queryParameters: query);
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
       throw _handleError(e);
     }
   }
 
-  Future<Map<String, dynamic>> _post(String path,
-      {Map<String, dynamic>? body, Map<String, dynamic>? query}) async {
+  Future<Map<String, dynamic>> _post(
+    String path, {
+    Map<String, dynamic>? body,
+    Map<String, dynamic>? query,
+  }) async {
     try {
       final response = await _dio.post(
         path,
@@ -237,14 +243,13 @@ class SdkApiClient {
     }
   }
 
-  Future<Map<String, dynamic>> _put(String path,
-      {Map<String, dynamic>? body, Map<String, dynamic>? query}) async {
+  Future<Map<String, dynamic>> _put(
+    String path, {
+    Map<String, dynamic>? body,
+    Map<String, dynamic>? query,
+  }) async {
     try {
-      final response = await _dio.put(
-        path,
-        data: body,
-        queryParameters: query,
-      );
+      final response = await _dio.put(path, data: body, queryParameters: query);
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
       throw _handleError(e);
@@ -254,8 +259,11 @@ class SdkApiClient {
   /// PATCH helper. Some endpoints (e.g. session archive) return 204
   /// No Content with an empty body; Dio's default JSON decoder raises
   /// on an empty body, so we coerce null/empty responses to `{}`.
-  Future<Map<String, dynamic>> _patch(String path,
-      {Map<String, dynamic>? body, Map<String, dynamic>? query}) async {
+  Future<Map<String, dynamic>> _patch(
+    String path, {
+    Map<String, dynamic>? body,
+    Map<String, dynamic>? query,
+  }) async {
     try {
       final response = await _dio.patch(
         path,
@@ -343,10 +351,12 @@ class SdkApiClient {
     String? conversationId,
     String? agentId,
   }) async {
-    final req = sdk.ChatRequest((b) => b
-      ..message = message
-      ..conversationId = conversationId ?? ''
-      ..agentId = agentId);
+    final req = sdk.ChatRequest(
+      (b) => b
+        ..message = message
+        ..conversationId = conversationId ?? ''
+        ..agentId = agentId,
+    );
 
     final body = _toJson(req);
     body['source_client'] = 'flutter_ui';
@@ -425,10 +435,12 @@ class SdkApiClient {
     required String conversationId,
     String? source,
   }) async {
-    final req = sdk.SteerRequest((b) => b
-      ..message = message
-      ..conversationId = conversationId
-      ..source = source);
+    final req = sdk.SteerRequest(
+      (b) => b
+        ..message = message
+        ..conversationId = conversationId
+        ..source = source,
+    );
 
     return _post('/api/v1/chat/steer', body: _toJson(req));
   }
@@ -439,10 +451,12 @@ class SdkApiClient {
     required String conversationId,
     String? source,
   }) async {
-    final req = sdk.FollowUpRequest((b) => b
-      ..message = message
-      ..conversationId = conversationId
-      ..source = source);
+    final req = sdk.FollowUpRequest(
+      (b) => b
+        ..message = message
+        ..conversationId = conversationId
+        ..source = source,
+    );
 
     return _post('/api/v1/chat/followup', body: _toJson(req));
   }
@@ -479,14 +493,19 @@ class SdkApiClient {
   /// Returns the raw `messages` array for `/api/v1/sessions/{id}/messages`.
   ///
   /// Each entry should be passed to the local `ChatMessage.fromBackendMessage`.
-  Future<List<Map<String, dynamic>>> getMessages(String id,
-      {int offset = 0, int limit = 1000}) async {
+  Future<List<Map<String, dynamic>>> getMessages(
+    String id, {
+    int offset = 0,
+    int limit = 1000,
+  }) async {
     try {
-      final raw = await _get('/api/v1/sessions/$id/messages', query: {
-        'offset': offset,
-        'limit': limit,
-      });
-      debugPrint('[session-debug] getMessages raw response keys=${raw.keys.toList()} messages_type=${raw['messages'].runtimeType} messages_len=${(raw['messages'] as List?)?.length}');
+      final raw = await _get(
+        '/api/v1/sessions/$id/messages',
+        query: {'offset': offset, 'limit': limit},
+      );
+      debugPrint(
+        '[session-debug] getMessages raw response keys=${raw.keys.toList()} messages_type=${raw['messages'].runtimeType} messages_len=${(raw['messages'] as List?)?.length}',
+      );
       final messagesRaw = raw['messages'] as List?;
       if (messagesRaw == null) return [];
       return messagesRaw
@@ -504,13 +523,15 @@ class SdkApiClient {
   /// length), so callers can decide whether older pages exist:
   /// `hasMore = offset + returned.length < total`.
   Future<({List<Map<String, dynamic>> messages, int total})> getMessagesPage(
-      String id,
-      {int offset = 0, int limit = 200}) async {
+    String id, {
+    int offset = 0,
+    int limit = 200,
+  }) async {
     try {
-      final raw = await _get('/api/v1/sessions/$id/messages', query: {
-        'offset': offset,
-        'limit': limit,
-      });
+      final raw = await _get(
+        '/api/v1/sessions/$id/messages',
+        query: {'offset': offset, 'limit': limit},
+      );
       final messagesRaw = raw['messages'] as List? ?? [];
       final messages = messagesRaw
           .whereType<Map>()
@@ -558,8 +579,10 @@ class SdkApiClient {
   /// Backend returns 204 No Content on success; the [_patch] helper
   /// coerces the empty response to `{}` so callers can treat this
   /// as `Future<void>`.
-  Future<void> archiveSession(String sessionId,
-      {required bool archived}) async {
+  Future<void> archiveSession(
+    String sessionId, {
+    required bool archived,
+  }) async {
     await _patch('/api/v1/sessions/$sessionId', body: {'archived': archived});
   }
 
@@ -568,9 +591,13 @@ class SdkApiClient {
   /// Returns the updated session JSON (daemon responds 200 with the body
   /// for description updates; archive-only requests still return 204).
   Future<Map<String, dynamic>> updateSessionDescription(
-      String sessionId, String description) async {
-    return _patch('/api/v1/sessions/$sessionId',
-        body: {'description': description});
+    String sessionId,
+    String description,
+  ) async {
+    return _patch(
+      '/api/v1/sessions/$sessionId',
+      body: {'description': description},
+    );
   }
 
   /// Generate a session description/title via the daemon's LLM summarizer.
@@ -588,14 +615,17 @@ class SdkApiClient {
     required String firstMessage,
     String projectName = '',
   }) async {
-    final envelope = await _post('/api/v1/bus/call', body: {
-      'method': 'session.generate_description',
-      'params': {
-        'session_id': sessionId,
-        'first_message': firstMessage,
-        'project_name': projectName,
+    final envelope = await _post(
+      '/api/v1/bus/call',
+      body: {
+        'method': 'session.generate_description',
+        'params': {
+          'session_id': sessionId,
+          'first_message': firstMessage,
+          'project_name': projectName,
+        },
       },
-    });
+    );
     // The bus/call handler wraps the RPC result in {"result": ...}.
     final inner = envelope['result'];
     if (inner is Map<String, dynamic>) return inner;
@@ -604,11 +634,14 @@ class SdkApiClient {
       return envelope;
     }
     throw StateError(
-        'generateSessionDescription: unexpected envelope shape: $envelope');
+      'generateSessionDescription: unexpected envelope shape: $envelope',
+    );
   }
 
   /// Returns the raw `plans` array for `/api/v1/sessions/{sessionId}/plans`.
-  Future<List<Map<String, dynamic>>> listPlansBySession(String sessionId) async {
+  Future<List<Map<String, dynamic>>> listPlansBySession(
+    String sessionId,
+  ) async {
     try {
       final raw = await _get('/api/v1/sessions/$sessionId/plans');
       final plansRaw = raw['plans'] as List?;
@@ -654,7 +687,9 @@ class SdkApiClient {
 
   /// Updates an agent and returns the raw JSON.
   Future<Map<String, dynamic>> updateAgent(
-      String id, Map<String, dynamic> config) async {
+    String id,
+    Map<String, dynamic> config,
+  ) async {
     final raw = await _post('/api/v1/config/agents/$id', body: config);
     return raw;
   }
@@ -692,9 +727,11 @@ class SdkApiClient {
     required String title,
     String? sessionId,
   }) async {
-    final req = sdk.CreateTaskRequest((b) => b
-      ..name = title
-      ..sessionId = sessionId);
+    final req = sdk.CreateTaskRequest(
+      (b) => b
+        ..name = title
+        ..sessionId = sessionId,
+    );
 
     final raw = await _post('/api/v1/tasks', body: _toJson(req));
     return raw;
@@ -706,8 +743,11 @@ class SdkApiClient {
   /// `state,omitempty` OpenAPI-generator bug that affected
   /// [createSession]. Only fields that are explicitly non-null are
   /// sent, which matches PATCH semantics anyway.
-  Future<Map<String, dynamic>> updateTask(String id,
-      {String? name, String? state}) async {
+  Future<Map<String, dynamic>> updateTask(
+    String id, {
+    String? name,
+    String? state,
+  }) async {
     final body = <String, dynamic>{};
     if (name != null) body['name'] = name;
     if (state != null) body['state'] = state;
@@ -780,10 +820,12 @@ class SdkApiClient {
     int limit = 10,
     String? category,
   }) async {
-    final req = sdk.MemoryQueryRequest((b) => b
-      ..query = query
-      ..limit = limit
-      ..category = category);
+    final req = sdk.MemoryQueryRequest(
+      (b) => b
+        ..query = query
+        ..limit = limit
+        ..category = category,
+    );
 
     final raw = await _post('/api/v1/memory/query', body: _toJson(req));
     final memoriesRaw = raw['memories'] as List?;
@@ -791,8 +833,9 @@ class SdkApiClient {
     final results = <sdk.MemoryResult>[];
     for (final m in memoriesRaw) {
       if (m is Map) {
-        final parsed =
-            _fromJson<sdk.MemoryResult>(Map<String, dynamic>.from(m));
+        final parsed = _fromJson<sdk.MemoryResult>(
+          Map<String, dynamic>.from(m),
+        );
         if (parsed != null) results.add(parsed);
       }
     }
@@ -801,15 +844,15 @@ class SdkApiClient {
 
   Future<List<sdk.MemoryResult>> getRecentMemories({int limit = 10}) async {
     try {
-      final raw =
-          await _get('/api/v1/memory/recent', query: {'limit': limit});
+      final raw = await _get('/api/v1/memory/recent', query: {'limit': limit});
       final memoriesRaw = raw['memories'] as List?;
       if (memoriesRaw == null) return [];
       final results = <sdk.MemoryResult>[];
       for (final m in memoriesRaw) {
         if (m is Map) {
-          final parsed =
-              _fromJson<sdk.MemoryResult>(Map<String, dynamic>.from(m));
+          final parsed = _fromJson<sdk.MemoryResult>(
+            Map<String, dynamic>.from(m),
+          );
           if (parsed != null) results.add(parsed);
         }
       }
@@ -842,8 +885,9 @@ class SdkApiClient {
 
   /// Returns the raw `memories` array for callers that need to deserialize
   /// via a local model whose shape differs from [sdk.MemoryResult].
-  Future<List<Map<String, dynamic>>> getRecentMemoriesRaw(
-      {int limit = 10}) async {
+  Future<List<Map<String, dynamic>>> getRecentMemoriesRaw({
+    int limit = 10,
+  }) async {
     final raw = await _get('/api/v1/memory/recent', query: {'limit': limit});
     final memoriesRaw = raw['memories'] as List? ?? [];
     return memoriesRaw
@@ -865,11 +909,10 @@ class SdkApiClient {
     required String newId,
     bool confirmed = false,
   }) async {
-    return _post('/api/v1/memory/supersede', body: {
-      'old_id': oldId,
-      'new_id': newId,
-      'confirmed': confirmed,
-    });
+    return _post(
+      '/api/v1/memory/supersede',
+      body: {'old_id': oldId, 'new_id': newId, 'confirmed': confirmed},
+    );
   }
 
   /// mark_resolved — close a prediction with the given outcome.
@@ -878,10 +921,10 @@ class SdkApiClient {
     required String outcome,
     bool confirmed = false,
   }) async {
-    return _post('/api/v1/memory/predictions/$predictionId/resolve', body: {
-      'outcome': outcome,
-      'confirmed': confirmed,
-    });
+    return _post(
+      '/api/v1/memory/predictions/$predictionId/resolve',
+      body: {'outcome': outcome, 'confirmed': confirmed},
+    );
   }
 
   /// record_review — close a decision with the actual outcome.
@@ -890,10 +933,10 @@ class SdkApiClient {
     required String actualOutcome,
     bool confirmed = false,
   }) async {
-    return _post('/api/v1/memory/decisions/$decisionId/review', body: {
-      'actual_outcome': actualOutcome,
-      'confirmed': confirmed,
-    });
+    return _post(
+      '/api/v1/memory/decisions/$decisionId/review',
+      body: {'actual_outcome': actualOutcome, 'confirmed': confirmed},
+    );
   }
 
   /// reject_claim — mark an auto-claim as rejected.
@@ -901,9 +944,10 @@ class SdkApiClient {
     required String id,
     bool confirmed = false,
   }) async {
-    return _post('/api/v1/memory/claims/$id/reject', body: {
-      'confirmed': confirmed,
-    });
+    return _post(
+      '/api/v1/memory/claims/$id/reject',
+      body: {'confirmed': confirmed},
+    );
   }
 
   /// purge_auto_claims — bulk delete auto claims matching the filter.  The
@@ -929,8 +973,7 @@ class SdkApiClient {
       final results = <sdk.SkillInfo>[];
       for (final s in skillsRaw) {
         if (s is Map) {
-          final parsed =
-              _fromJson<sdk.SkillInfo>(Map<String, dynamic>.from(s));
+          final parsed = _fromJson<sdk.SkillInfo>(Map<String, dynamic>.from(s));
           if (parsed != null) results.add(parsed);
         }
       }
@@ -1028,11 +1071,14 @@ class SdkApiClient {
     required String change,
     required String justification,
   }) async {
-    return _post('/api/v1/reflection/remember', body: {
-      'target': target,
-      'change': change,
-      'justification': justification,
-    });
+    return _post(
+      '/api/v1/reflection/remember',
+      body: {
+        'target': target,
+        'change': change,
+        'justification': justification,
+      },
+    );
   }
 
   // ===== Prompt Templates =====
@@ -1081,14 +1127,10 @@ class SdkApiClient {
   ///
   /// Returns the daemon's confirmation map, which includes the absolute
   /// path the override was written to.
-  Future<Map<String, dynamic>> putPromptRaw(
-      String path, String content) async {
+  Future<Map<String, dynamic>> putPromptRaw(String path, String content) async {
     final encoded = Uri.encodeComponent(path);
     try {
-      return await _put(
-        '/api/v1/prompts/$encoded',
-        body: {'content': content},
-      );
+      return await _put('/api/v1/prompts/$encoded', body: {'content': content});
     } on DioException catch (e) {
       throw _handleError(e);
     }
@@ -1126,11 +1168,15 @@ class SdkApiClient {
   /// Returns the raw search-response JSON.  The SDK only models the
   /// individual [sdk.SearchResult] item, not the top-level response,
   /// so callers deserialize the `results` array themselves.
-  Future<Map<String, dynamic>> search(
-      {required String query, String? scope}) async {
-    final req = sdk.SearchRequest((b) => b
-      ..query = query
-      ..scope = scope);
+  Future<Map<String, dynamic>> search({
+    required String query,
+    String? scope,
+  }) async {
+    final req = sdk.SearchRequest(
+      (b) => b
+        ..query = query
+        ..scope = scope,
+    );
 
     final raw = await _post('/api/v1/search', body: _toJson(req));
     return raw;
@@ -1158,11 +1204,14 @@ class SdkApiClient {
     SearchScope scope = SearchScope.all,
     int limit = 20,
   }) async {
-    final res = await _post('/api/v1/search/semantic', body: {
-      'query': query,
-      'scope': scope == SearchScope.all ? '' : scope.apiValue,
-      'limit': limit,
-    });
+    final res = await _post(
+      '/api/v1/search/semantic',
+      body: {
+        'query': query,
+        'scope': scope == SearchScope.all ? '' : scope.apiValue,
+        'limit': limit,
+      },
+    );
     return SemanticSearchResults.fromJson(res);
   }
 
@@ -1231,10 +1280,10 @@ class SdkApiClient {
       if (projectId != null) 'project_id': projectId,
       if (path != null) 'path': path,
     };
-    final envelope = await _post('/api/v1/bus/call', body: {
-      'method': 'project.set',
-      'params': params,
-    });
+    final envelope = await _post(
+      '/api/v1/bus/call',
+      body: {'method': 'project.set', 'params': params},
+    );
     final inner = envelope['result'];
     if (inner is Map<String, dynamic>) return inner;
     // Some daemon configurations return the result inline (no envelope).
@@ -1243,8 +1292,7 @@ class SdkApiClient {
         envelope.containsKey('path')) {
       return envelope;
     }
-    throw StateError(
-        'setProject: unexpected envelope shape: $envelope');
+    throw StateError('setProject: unexpected envelope shape: $envelope');
   }
 
   /// Creates a session-scoped git worktree via `project.worktree.create` RPC.
@@ -1257,10 +1305,10 @@ class SdkApiClient {
       'session_id': sessionId,
       if (projectId != null && projectId.isNotEmpty) 'project_id': projectId,
     };
-    final envelope = await _post('/api/v1/bus/call', body: {
-      'method': 'project.worktree.create',
-      'params': params,
-    });
+    final envelope = await _post(
+      '/api/v1/bus/call',
+      body: {'method': 'project.worktree.create', 'params': params},
+    );
     final inner = envelope['result'];
     if (inner is Map<String, dynamic>) return inner;
     if (envelope.containsKey('worktree_id') || envelope.containsKey('path')) {
@@ -1271,10 +1319,13 @@ class SdkApiClient {
 
   /// Removes the session's worktree via `project.worktree.remove` RPC.
   Future<void> removeWorktree({required String sessionId}) async {
-    await _post('/api/v1/bus/call', body: {
-      'method': 'project.worktree.remove',
-      'params': {'session_id': sessionId},
-    });
+    await _post(
+      '/api/v1/bus/call',
+      body: {
+        'method': 'project.worktree.remove',
+        'params': {'session_id': sessionId},
+      },
+    );
   }
 
   /// Calls `project.rename` via the bus/call RPC bridge.
@@ -1282,13 +1333,13 @@ class SdkApiClient {
     required String projectId,
     required String newName,
   }) async {
-    final envelope = await _post('/api/v1/bus/call', body: {
-      'method': 'project.rename',
-      'params': {
-        'id': projectId,
-        'new_name': newName,
+    final envelope = await _post(
+      '/api/v1/bus/call',
+      body: {
+        'method': 'project.rename',
+        'params': {'id': projectId, 'new_name': newName},
       },
-    });
+    );
     final inner = envelope['result'];
     if (inner is Map<String, dynamic>) return inner;
     if (envelope.containsKey('status') || envelope.containsKey('name')) {
@@ -1302,10 +1353,10 @@ class SdkApiClient {
   /// discovered git roots — for `/project ` typeahead popups.
   Future<Map<String, dynamic>> readdirProject({String? prefix}) async {
     final params = <String, dynamic>{'prefix': prefix};
-    final envelope = await _post('/api/v1/bus/call', body: {
-      'method': 'project.readdir',
-      'params': params,
-    });
+    final envelope = await _post(
+      '/api/v1/bus/call',
+      body: {'method': 'project.readdir', 'params': params},
+    );
     final inner = envelope['result'];
     if (inner is Map<String, dynamic>) return inner;
     return envelope;
@@ -1314,8 +1365,10 @@ class SdkApiClient {
   // ===== Plans =====
 
   /// Returns the raw `plans` array.  Callers deserialize via `Plan.fromJson`.
-  Future<List<Map<String, dynamic>>> listPlans(
-      {String? projectId, int limit = 50}) async {
+  Future<List<Map<String, dynamic>>> listPlans({
+    String? projectId,
+    int limit = 50,
+  }) async {
     try {
       final query = <String, dynamic>{'limit': limit};
       if (projectId != null) query['project_id'] = projectId;
@@ -1340,12 +1393,17 @@ class SdkApiClient {
     }
   }
 
-  Future<Map<String, dynamic>> approvePlan(String id,
-      {String? sessionID, String? by}) async {
-    final req = sdk.ApprovePlanRequest((b) => b
-      ..planId = id
-      ..sessionId = sessionID ?? ''
-      ..by = by ?? '');
+  Future<Map<String, dynamic>> approvePlan(
+    String id, {
+    String? sessionID,
+    String? by,
+  }) async {
+    final req = sdk.ApprovePlanRequest(
+      (b) => b
+        ..planId = id
+        ..sessionId = sessionID ?? ''
+        ..by = by ?? '',
+    );
     try {
       return await _post('/api/v1/plans/$id/approve', body: _toJson(req));
     } on DioException catch (e) {
@@ -1353,13 +1411,19 @@ class SdkApiClient {
     }
   }
 
-  Future<Map<String, dynamic>> rejectPlan(String id,
-      {String? sessionID, String? by, String? reason}) async {
-    final req = sdk.RejectPlanRequest((b) => b
-      ..planId = id
-      ..sessionId = sessionID ?? ''
-      ..by = by ?? ''
-      ..reason = reason);
+  Future<Map<String, dynamic>> rejectPlan(
+    String id, {
+    String? sessionID,
+    String? by,
+    String? reason,
+  }) async {
+    final req = sdk.RejectPlanRequest(
+      (b) => b
+        ..planId = id
+        ..sessionId = sessionID ?? ''
+        ..by = by ?? ''
+        ..reason = reason,
+    );
     try {
       return await _post('/api/v1/plans/$id/reject', body: _toJson(req));
     } on DioException catch (e) {
@@ -1367,12 +1431,17 @@ class SdkApiClient {
     }
   }
 
-  Future<Map<String, dynamic>> confirmPlan(String id,
-      {String? sessionID, String? by}) async {
-    final req = sdk.ConfirmPlanRequest((b) => b
-      ..planId = id
-      ..sessionId = sessionID ?? ''
-      ..by = by ?? '');
+  Future<Map<String, dynamic>> confirmPlan(
+    String id, {
+    String? sessionID,
+    String? by,
+  }) async {
+    final req = sdk.ConfirmPlanRequest(
+      (b) => b
+        ..planId = id
+        ..sessionId = sessionID ?? ''
+        ..by = by ?? '',
+    );
     try {
       return await _post('/api/v1/plans/$id/confirm', body: _toJson(req));
     } on DioException catch (e) {
@@ -1380,12 +1449,17 @@ class SdkApiClient {
     }
   }
 
-  Future<Map<String, dynamic>> revisePlan(String id,
-      {String? sessionID, String? feedback}) async {
-    final req = sdk.RevisePlanRequest((b) => b
-      ..planId = id
-      ..sessionId = sessionID ?? ''
-      ..feedback = feedback ?? '');
+  Future<Map<String, dynamic>> revisePlan(
+    String id, {
+    String? sessionID,
+    String? feedback,
+  }) async {
+    final req = sdk.RevisePlanRequest(
+      (b) => b
+        ..planId = id
+        ..sessionId = sessionID ?? ''
+        ..feedback = feedback ?? '',
+    );
     try {
       return await _post('/api/v1/plans/$id/revise', body: _toJson(req));
     } on DioException catch (e) {

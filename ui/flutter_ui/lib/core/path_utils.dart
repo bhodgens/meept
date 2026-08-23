@@ -16,7 +16,9 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 
 // Conditional import picks the native implementation on desktop and the
 // web stub on web builds. The stub avoids `dart:io` entirely.
-import 'path_expansion/io_tilde.dart' if (dart.library.html) 'path_expansion/io_tilde_web.dart' as platform;
+import 'path_expansion/io_tilde.dart'
+    if (dart.library.html) 'path_expansion/io_tilde_web.dart'
+    as platform;
 
 /// Replace a leading `~` (or `~/`) in [path] with the home directory.
 ///
@@ -38,7 +40,5 @@ String expandTilde(String path) {
   }
   // Normalise trailing separator so we never emit `//`.
   final sep = home.endsWith('/') ? '' : '/';
-  return path.startsWith('~/')
-      ? '$home$sep${path.substring(2)}'
-      : home;
+  return path.startsWith('~/') ? '$home$sep${path.substring(2)}' : home;
 }

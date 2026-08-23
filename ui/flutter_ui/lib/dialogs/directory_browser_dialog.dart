@@ -60,9 +60,7 @@ class _DirectoryBrowserDialogState
         _currentPath = result['path'] as String?;
         _parentPath = result['parent'] as String?;
         final rawEntries = result['entries'] as List? ?? [];
-        _entries = rawEntries
-            .map((e) => e as Map<String, dynamic>)
-            .toList();
+        _entries = rawEntries.map((e) => e as Map<String, dynamic>).toList();
         _loading = false;
       });
     } catch (e) {
@@ -170,8 +168,9 @@ class _DirectoryBrowserDialogState
       return Center(
         child: Text(
           _error!,
-          style: CyberpunkTypography.bodySmall
-              .copyWith(color: CyberpunkColors.redAlert),
+          style: CyberpunkTypography.bodySmall.copyWith(
+            color: CyberpunkColors.redAlert,
+          ),
           textAlign: TextAlign.center,
         ),
       );
@@ -180,8 +179,9 @@ class _DirectoryBrowserDialogState
       return Center(
         child: Text(
           'no subdirectories',
-          style: CyberpunkTypography.bodySmall
-              .copyWith(color: CyberpunkColors.midGray),
+          style: CyberpunkTypography.bodySmall.copyWith(
+            color: CyberpunkColors.midGray,
+          ),
         ),
       );
     }
@@ -193,7 +193,7 @@ class _DirectoryBrowserDialogState
         final path = entry['path'] as String? ?? '';
         return ListTile(
           dense: true,
-          leading: Icon(
+          leading: const Icon(
             Icons.folder,
             size: 16,
             color: CyberpunkColors.orangePrimary,

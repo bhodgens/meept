@@ -47,8 +47,9 @@ class _ReflectionPanelState extends ConsumerState<ReflectionPanel> {
     try {
       final client = ref.read(sdkClientProvider);
       final rawList = await client.getReflectionProposalsRaw();
-      final proposals =
-          rawList.map((m) => ReflectionProposal.fromJson(m)).toList();
+      final proposals = rawList
+          .map((m) => ReflectionProposal.fromJson(m))
+          .toList();
       if (mounted) {
         setState(() {
           _proposals = proposals;
@@ -192,8 +193,7 @@ class _ReflectionPanelState extends ConsumerState<ReflectionPanel> {
           color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
           border: Border(
             top: BorderSide(
-              color:
-                  CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
+              color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
               width: 1,
             ),
           ),
@@ -216,10 +216,10 @@ class _ReflectionPanelState extends ConsumerState<ReflectionPanel> {
                       ),
                     )
                   : _error != null
-                      ? _buildErrorState()
-                      : _proposals.isEmpty
-                          ? _buildEmptyState()
-                          : _buildProposalList(),
+                  ? _buildErrorState()
+                  : _proposals.isEmpty
+                  ? _buildEmptyState()
+                  : _buildProposalList(),
             ),
           ],
         ),
@@ -408,10 +408,8 @@ class _ReflectionPanelState extends ConsumerState<ReflectionPanel> {
               _buildChip(
                 '${proposal.confidence.toStringAsFixed(2)} confidence',
               ),
-              if (proposal.source.isNotEmpty)
-                _buildChip(proposal.source),
-              if (proposal.status != 'pending')
-                _buildChip(proposal.status),
+              if (proposal.source.isNotEmpty) _buildChip(proposal.source),
+              if (proposal.status != 'pending') _buildChip(proposal.status),
             ],
           ),
           const SizedBox(height: 8),
@@ -463,14 +461,10 @@ class _ReflectionPanelState extends ConsumerState<ReflectionPanel> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
           color: CyberpunkColors.midGray.withValues(alpha: 0.3),
-          border: Border.all(
-            color: color.withValues(alpha: 0.4),
-            width: 1,
-          ),
+          border: Border.all(color: color.withValues(alpha: 0.4), width: 1),
           borderRadius: BorderRadius.circular(2),
         ),
         child: Row(

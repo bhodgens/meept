@@ -63,13 +63,16 @@ class SessionProjectChecker {
         // Open the daemon-side browser so the user picks any directory
         // on the daemon host; bind it via project.set (DetectFromPath).
         final client = ref.read(sdkClientProvider);
+        // This is a static helper: [context] has no `mounted` of its own,
+        // so capture it via the dialog's own result — show() returns null
+        // when the route was popped, covering the unmounted case.
+        // ignore: use_build_context_synchronously
         final picked = await DirectoryBrowserDialog.show(context);
         if (picked == null) {
           return false;
         }
         try {
-          await client
-              .setProject(sessionId: session.id, path: picked);
+          await client.setProject(sessionId: session.id, path: picked);
           onProjectBound(picked);
         } catch (_) {
           // Binding failed — still activate the session unbound rather

@@ -22,6 +22,7 @@
 /// |  [Status Bar]                                   |
 /// +-------------------------------------------------+
 /// ```
+library;
 
 /// Sidebar-based home screen layout
 ///
@@ -312,7 +313,7 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
             ),
             filled: true,
             fillColor: CyberpunkColors.black,
-            border: OutlineInputBorder(
+            border: const OutlineInputBorder(
               borderSide: BorderSide(color: CyberpunkColors.orangeDark),
             ),
           ),
@@ -321,7 +322,7 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: Text('cancel', style: CyberpunkTypography.bodySmall),
+            child: const Text('cancel', style: CyberpunkTypography.bodySmall),
           ),
           TextButton(
             onPressed: () async {
@@ -333,10 +334,9 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
                 return;
               }
               try {
-                await ref.read(sdkClientProvider).updateSessionDescription(
-                      session.id,
-                      description,
-                    );
+                await ref
+                    .read(sdkClientProvider)
+                    .updateSessionDescription(session.id, description);
                 // Refresh cached session detail so the UI reflects the
                 // change without a full session reload.
                 ref.invalidate(sessionDetailFamily(session.id));
@@ -506,7 +506,7 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
             ],
           ),
         ),
-        bottomNavigationBar: StatusBar(selectedTabIndex: 0),
+        bottomNavigationBar: const StatusBar(selectedTabIndex: 0),
       ),
     );
   }
@@ -1068,7 +1068,7 @@ class _ProjectGroupItem extends StatelessWidget {
               GestureDetector(
                 onTap: onCreateSession,
                 behavior: HitTestBehavior.opaque,
-                child: Icon(
+                child: const Icon(
                   Icons.add,
                   size: 14,
                   color: CyberpunkColors.orangeDark,
@@ -1289,9 +1289,9 @@ class _FullWindowDialog extends StatelessWidget {
             // Header
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 color: CyberpunkColors.orangePrimary,
-                borderRadius: const BorderRadius.only(
+                borderRadius: BorderRadius.only(
                   topLeft: Radius.circular(8),
                   topRight: Radius.circular(8),
                 ),
@@ -1557,7 +1557,7 @@ class _AgentsDialog extends ConsumerWidget {
           ),
           child: Row(
             children: [
-              Icon(
+              const Icon(
                 Icons.smart_toy,
                 size: 20,
                 color: CyberpunkColors.orangePrimary,
@@ -1589,7 +1589,7 @@ class _AgentsDialog extends ConsumerWidget {
                 Container(
                   width: 8,
                   height: 8,
-                  decoration: BoxDecoration(
+                  decoration: const BoxDecoration(
                     color: CyberpunkColors.greenSuccess,
                     shape: BoxShape.circle,
                   ),

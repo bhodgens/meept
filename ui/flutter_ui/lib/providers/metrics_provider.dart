@@ -14,11 +14,7 @@ class MetricsState {
   final bool isLoading;
   final String? error;
 
-  const MetricsState({
-    this.current,
-    this.isLoading = false,
-    this.error,
-  });
+  const MetricsState({this.current, this.isLoading = false, this.error});
 
   MetricsState copyWith({
     MetricsSnapshot? current,
@@ -36,10 +32,8 @@ class MetricsState {
 /// StateNotifier that manages metrics from both HTTP polling and
 /// WebSocket updates for live metrics display (Task 19).
 class MetricsNotifier extends StateNotifier<MetricsState> {
-  MetricsNotifier({
-    required this.sdkClient,
-    required this.websocket,
-  }) : super(const MetricsState(isLoading: true)) {
+  MetricsNotifier({required this.sdkClient, required this.websocket})
+    : super(const MetricsState(isLoading: true)) {
     _init();
   }
 
@@ -156,8 +150,9 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
 }
 
 /// Metrics provider
-final metricsProvider =
-    StateNotifierProvider<MetricsNotifier, MetricsState>((ref) {
+final metricsProvider = StateNotifierProvider<MetricsNotifier, MetricsState>((
+  ref,
+) {
   final client = ref.watch(sdkClientProvider);
   final websocket = ref.watch(websocketProvider);
   return MetricsNotifier(sdkClient: client, websocket: websocket);

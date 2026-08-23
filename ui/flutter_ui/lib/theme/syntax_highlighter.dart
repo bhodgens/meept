@@ -21,10 +21,7 @@ class CyberpunkSyntaxHighlighter extends SyntaxHighlighter {
     final lang = language?.isNotEmpty == true ? language! : 'plaintext';
     final nodes = highlight.parse(source, language: lang).nodes;
     if (nodes == null) {
-      return TextSpan(
-        text: source,
-        style: atomOneDarkTheme['root'],
-      );
+      return TextSpan(text: source, style: atomOneDarkTheme['root']);
     }
     return TextSpan(
       style: atomOneDarkTheme['root'],
@@ -40,9 +37,7 @@ class CyberpunkSyntaxHighlighter extends SyntaxHighlighter {
     final spans = <TextSpan>[];
     for (final node in nodes) {
       if (node.value != null) {
-        final style = node.className == null
-            ? null
-            : theme[node.className!];
+        final style = node.className == null ? null : theme[node.className!];
         spans.add(TextSpan(text: node.value, style: style));
       } else if (node.children != null) {
         final childStyle = node.className == null

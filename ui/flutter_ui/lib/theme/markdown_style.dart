@@ -43,10 +43,7 @@ MarkdownStyleSheet buildCyberpunkMarkdownStyle(BuildContext context) {
       color: Color(0xFFFFFFFF),
       fontWeight: FontWeight.bold,
     ),
-    em: const TextStyle(
-      color: Color(0xFFE5E7EB),
-      fontStyle: FontStyle.italic,
-    ),
+    em: const TextStyle(color: Color(0xFFE5E7EB), fontStyle: FontStyle.italic),
     a: const TextStyle(
       color: Color(0xFF3B82F6),
       decoration: TextDecoration.underline,
@@ -61,22 +58,14 @@ MarkdownStyleSheet buildCyberpunkMarkdownStyle(BuildContext context) {
     codeblockDecoration: BoxDecoration(
       color: const Color(0xFF111827),
       borderRadius: const BorderRadius.all(Radius.circular(4)),
-      border: Border.all(
-        color: CyberpunkColors.midGray,
-        width: 1,
-      ),
+      border: Border.all(color: CyberpunkColors.midGray, width: 1),
     ),
     codeblockPadding: const EdgeInsets.all(12),
     blockquote: CyberpunkTypography.bodyMedium.copyWith(
       color: CyberpunkColors.orangeGlow,
     ),
     blockquoteDecoration: const BoxDecoration(
-      border: Border(
-        left: BorderSide(
-          color: Color(0xFF6B7280),
-          width: 3,
-        ),
-      ),
+      border: Border(left: BorderSide(color: Color(0xFF6B7280), width: 3)),
     ),
     blockquotePadding: const EdgeInsets.only(left: 12),
     listBullet: CyberpunkTypography.bodyMedium.copyWith(
@@ -89,21 +78,11 @@ MarkdownStyleSheet buildCyberpunkMarkdownStyle(BuildContext context) {
     tableBody: CyberpunkTypography.bodyMedium.copyWith(
       color: CyberpunkColors.orangeGlow,
     ),
-    tableBorder: TableBorder.all(
-      color: CyberpunkColors.midGray,
-      width: 1,
-    ),
-    tableCellsDecoration: const BoxDecoration(
-      color: Color(0xFF1A1A1A),
-    ),
+    tableBorder: TableBorder.all(color: CyberpunkColors.midGray, width: 1),
+    tableCellsDecoration: const BoxDecoration(color: Color(0xFF1A1A1A)),
     tableColumnWidth: const FlexColumnWidth(),
     horizontalRuleDecoration: const BoxDecoration(
-      border: Border(
-        top: BorderSide(
-          color: CyberpunkColors.midGray,
-          width: 1,
-        ),
-      ),
+      border: Border(top: BorderSide(color: CyberpunkColors.midGray, width: 1)),
     ),
   );
 }

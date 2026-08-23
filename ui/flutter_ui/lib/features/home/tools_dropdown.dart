@@ -97,12 +97,13 @@ class _HamburgerMenuState extends State<HamburgerMenu> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(
               children: [
-                Icon(entry.value, size: 16, color: CyberpunkColors.orangeBright),
-                const SizedBox(width: 8),
-                Text(
-                  entry.key,
-                  style: CyberpunkTypography.bodySmall,
+                Icon(
+                  entry.value,
+                  size: 16,
+                  color: CyberpunkColors.orangeBright,
                 ),
+                const SizedBox(width: 8),
+                Text(entry.key, style: CyberpunkTypography.bodySmall),
               ],
             ),
           ),
@@ -113,7 +114,7 @@ class _HamburgerMenuState extends State<HamburgerMenu> {
     // Calculate menu position (below the button, aligned to left edge of button)
     final menuTop = offset.dy + size.height;
     const menuWidth = 180.0;
-    
+
     final menuLeft = offset.dx;
 
     _overlayEntry = OverlayEntry(

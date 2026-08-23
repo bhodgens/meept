@@ -18,7 +18,7 @@ class DaemonCertPinner {
     // On web, we trust the browser's TLS handling
     if (host != 'localhost' && host != '127.0.0.1' && host != '::1') {
       debugPrint('[cert] Web: non-localhost connection: $host');
-      return true;  // Browser handles validation
+      return true; // Browser handles validation
     }
     return true;
   }

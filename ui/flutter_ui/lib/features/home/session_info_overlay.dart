@@ -15,6 +15,7 @@
 /// │                                                                   │
 /// └─────────────────────────────────────────────────────────────────┘
 /// ```
+library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -74,7 +75,10 @@ class _SessionInfoOverlayState extends State<SessionInfoOverlay>
         child: Column(
           children: [
             // Header with session name and close button
-            _Header(session: widget.session, onClose: () => Navigator.pop(context)),
+            _Header(
+              session: widget.session,
+              onClose: () => Navigator.pop(context),
+            ),
             // Tab bar
             _TabBar(
               tabs: const ['sessions', 'plans', 'tasks', 'agents'],
@@ -118,9 +122,7 @@ class _SessionsTabContent extends ConsumerWidget {
       children: [
         const SizedBox(width: 260, child: SessionsList()),
         const VerticalDivider(width: 1),
-        Expanded(
-          child: SessionsDetailPane(session: displaySession),
-        ),
+        Expanded(child: SessionsDetailPane(session: displaySession)),
       ],
     );
   }
@@ -137,13 +139,10 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: CyberpunkColors.darkGray,
         border: Border(
-          bottom: BorderSide(
-            color: CyberpunkColors.orangePrimary,
-            width: 2,
-          ),
+          bottom: BorderSide(color: CyberpunkColors.orangePrimary, width: 2),
         ),
       ),
       child: Row(
@@ -166,7 +165,7 @@ class _Header extends StatelessWidget {
                   color: CyberpunkColors.orangeDark.withValues(alpha: 0.3),
                 ),
               ),
-              child: Icon(
+              child: const Icon(
                 Icons.close,
                 size: 16,
                 color: CyberpunkColors.orangePrimary,
@@ -196,11 +195,8 @@ class _TabBar extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
-        border: Border(
-          bottom: BorderSide(
-            color: CyberpunkColors.midGray,
-            width: 1,
-          ),
+        border: const Border(
+          bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),
       child: Row(
@@ -307,8 +303,7 @@ class _PlanItem extends StatelessWidget {
               fontFamily: 'SourceCodePro',
             ),
           ),
-          if (plan.description.isNotEmpty)
-            const SizedBox(height: 4),
+          if (plan.description.isNotEmpty) const SizedBox(height: 4),
           if (plan.description.isNotEmpty)
             Text(
               plan.description,
@@ -442,7 +437,8 @@ class _AgentsTabContent extends ConsumerWidget {
 
     // If we have specific agents, show them; otherwise show all agents
     final List<Agent> displayAgents;
-    if (sessionTaskAgentIds.isEmpty || sessionTaskAgentIds.length >= agentsState.agents.length) {
+    if (sessionTaskAgentIds.isEmpty ||
+        sessionTaskAgentIds.length >= agentsState.agents.length) {
       displayAgents = agentsState.agents;
     } else {
       displayAgents = agentsState.agents
@@ -489,7 +485,7 @@ class _AgentItem extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(
+          const Icon(
             Icons.smart_toy,
             size: 20,
             color: CyberpunkColors.orangePrimary,
@@ -551,11 +547,7 @@ class _EmptyState extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 48,
-            color: CyberpunkColors.midGray,
-          ),
+          Icon(icon, size: 48, color: CyberpunkColors.midGray),
           const SizedBox(height: 16),
           Text(
             message,

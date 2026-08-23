@@ -82,7 +82,9 @@ class CommandEntry {
       output: json['output'] as String? ?? '',
       stderr: json['stderr'] as String? ?? '',
       exitCode: json['exit_code'] as int? ?? 0,
-      timestamp: DateTime.parse(json['timestamp'] as String? ?? DateTime.now().toIso8601String()),
+      timestamp: DateTime.parse(
+        json['timestamp'] as String? ?? DateTime.now().toIso8601String(),
+      ),
       workingDir: json['working_dir'] as String? ?? '',
       success: json['success'] as bool? ?? true,
     );
@@ -115,8 +117,20 @@ class CalendarEvent {
       summary: json['summary'] as String? ?? '',
       description: json['description'] as String?,
       location: json['location'] as String?,
-      start: DateTime.tryParse((startVal['dateTime'] as String?) ?? (startVal['date'] as String?) ?? '') ?? DateTime.now(),
-      end: DateTime.tryParse((endVal['dateTime'] as String?) ?? (endVal['date'] as String?) ?? '') ?? DateTime.now(),
+      start:
+          DateTime.tryParse(
+            (startVal['dateTime'] as String?) ??
+                (startVal['date'] as String?) ??
+                '',
+          ) ??
+          DateTime.now(),
+      end:
+          DateTime.tryParse(
+            (endVal['dateTime'] as String?) ??
+                (endVal['date'] as String?) ??
+                '',
+          ) ??
+          DateTime.now(),
     );
   }
 }
@@ -130,12 +144,14 @@ class CalendarEvent {
 class AgentProgress {
   final String agentId;
   final String message;
-  final int tier;         // VerbosityLevel: 0=Quiet, 1=Normal, 2=Verbose
+  final int tier; // VerbosityLevel: 0=Quiet, 1=Normal, 2=Verbose
   final String? sourceEvent;
   final DateTime timestamp;
+
   /// Progress stage from the daemon ("thinking", "executing", "streaming",
   /// "complete", …). Empty for legacy events without a stage field.
   final String stage;
+
   /// For stage=="streaming": the assistant text accumulated so far. The
   /// GUI renders this as a live preview until the final chat_message lands.
   final String? textSoFar;
@@ -170,10 +186,12 @@ class AgentProgress {
       sourceEvent: (data?['source_event'] ?? json['source_event']) as String?,
       stage: (json['stage'] ?? '') as String,
       textSoFar: json['text_so_far'] as String?,
-      timestamp: DateTime.tryParse(
-              data?['timestamp'] as String? ??
-                  json['timestamp'] as String? ??
-                  DateTime.now().toIso8601String()) ??
+      timestamp:
+          DateTime.tryParse(
+            data?['timestamp'] as String? ??
+                json['timestamp'] as String? ??
+                DateTime.now().toIso8601String(),
+          ) ??
           DateTime.now(),
     );
   }
@@ -194,15 +212,12 @@ class ChatMessagePart {
 
   const ChatMessagePart({required this.type, this.text, this.imageUrl});
 
-  ChatMessagePart.text(String t)
-      : type = 'text',
-        text = t,
-        imageUrl = null;
+  ChatMessagePart.text(String t) : type = 'text', text = t, imageUrl = null;
 
   ChatMessagePart.image(ImageRefData r)
-      : type = 'image_url',
-        text = null,
-        imageUrl = r;
+    : type = 'image_url',
+      text = null,
+      imageUrl = r;
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{'type': type};
@@ -303,8 +318,9 @@ class ChatMessage with _$ChatMessage {
     if (ts is String) {
       isoTimestamp = ts;
     } else if (ts is num) {
-      isoTimestamp = DateTime.fromMillisecondsSinceEpoch(ts.toInt())
-          .toIso8601String();
+      isoTimestamp = DateTime.fromMillisecondsSinceEpoch(
+        ts.toInt(),
+      ).toIso8601String();
     } else {
       isoTimestamp = DateTime.now().toIso8601String();
     }
@@ -316,10 +332,12 @@ class ChatMessage with _$ChatMessage {
       'content': json['content'] as String? ?? '',
       'timestamp': isoTimestamp,
       'session_id': json['session_id'] as String?,
-      'tool_calls': (json['tool_calls'] as List?)?.map((e) => e.toString()).toList(),
-      'parts': (json['parts'] as List?)
-              ?.map((p) =>
-                  ChatMessagePart.fromJson(p as Map<String, dynamic>))
+      'tool_calls': (json['tool_calls'] as List?)
+          ?.map((e) => e.toString())
+          .toList(),
+      'parts':
+          (json['parts'] as List?)
+              ?.map((p) => ChatMessagePart.fromJson(p as Map<String, dynamic>))
               .map((p) => p.toJson())
               .toList() ??
           const [],
@@ -372,11 +390,11 @@ SessionPriority _parsePriority(String v) {
 extension SessionPriorityX on SessionPriority {
   /// API parameter value for this priority level.
   String get apiValue => switch (this) {
-        SessionPriority.urgent => 'urgent',
-        SessionPriority.high => 'high',
-        SessionPriority.normal => 'normal',
-        SessionPriority.low => 'low',
-      };
+    SessionPriority.urgent => 'urgent',
+    SessionPriority.high => 'high',
+    SessionPriority.normal => 'normal',
+    SessionPriority.low => 'low',
+  };
 }
 
 /// Priority ordering for sorting designated sessions.
@@ -418,9 +436,11 @@ class SessionDesignation {
       reason: json['reason'] as String? ?? '',
       priority: _parsePriority(priorityRaw),
       createdAt:
-          DateTime.tryParse(json['created_at'] as String? ?? '') ?? DateTime.now(),
+          DateTime.tryParse(json['created_at'] as String? ?? '') ??
+          DateTime.now(),
       updatedAt:
-          DateTime.tryParse(json['updated_at'] as String? ?? '') ?? DateTime.now(),
+          DateTime.tryParse(json['updated_at'] as String? ?? '') ??
+          DateTime.now(),
       acknowledgedAt: json['acknowledged_at'] != null
           ? DateTime.tryParse(json['acknowledged_at'] as String)
           : null,
@@ -436,8 +456,7 @@ class SessionDesignation {
 /// Parse a `designation` object from JSON.
 SessionDesignation? _parseDesignation(dynamic v) {
   if (v == null) return null;
-  return SessionDesignation.fromJson(
-      v as Map<String, dynamic>);
+  return SessionDesignation.fromJson(v as Map<String, dynamic>);
 }
 
 /// Serialize a [SessionDesignation] to a plain JSON map.
@@ -453,7 +472,6 @@ Map<String, dynamic>? _serializeDesignation(SessionDesignation? v) {
       'acknowledged_at': v.acknowledgedAt!.toIso8601String(),
   };
 }
-
 
 @freezed
 class DetectionContext with _$DetectionContext {
@@ -473,6 +491,7 @@ class Session with _$Session {
 
   const factory Session({
     required String id,
+
     /// Backend field name is 'name'; stored as 'title' in the Dart model.
     @JsonKey(name: 'name') required String title,
     String? description,
@@ -486,14 +505,13 @@ class Session with _$Session {
       toJson: _serializeDesignation,
     )
     SessionDesignation? designation,
-    @Default(false)
-    @JsonKey(name: 'archived')
-    bool archived,
+    @Default(false) @JsonKey(name: 'archived') bool archived,
     @JsonKey(name: 'project_id') String? projectId,
     @JsonKey(name: 'project_path') String? projectPath,
     @JsonKey(name: 'worktree_id') String? worktreeId,
     @JsonKey(name: 'worktree_path') String? worktreePath,
     @JsonKey(name: 'detection_context') DetectionContext? detectionContext,
+
     /// Backend field: leaf_message_id (*int64, omitted when null).
     /// Null means the session has no messages — i.e. it's empty.
     @JsonKey(name: 'leaf_message_id') int? leafMessageId,
@@ -510,13 +528,14 @@ class Session with _$Session {
     final description = json['description'] as String?;
 
     // Prefer name (LLM-generated) unless it's generic, then fall back to description.
-    final isGenericName = name == 'default' ||
+    final isGenericName =
+        name == 'default' ||
         name == 'Untitled' ||
         name == 'chat' ||
         name.isEmpty;
     final displayTitle = (name.isNotEmpty && !isGenericName)
-        ? name  // Use LLM-generated name
-        : (description ?? name);  // Fall back to description or name
+        ? name // Use LLM-generated name
+        : (description ?? name); // Fall back to description or name
     return {...json, 'name': displayTitle};
   }
 }
@@ -529,9 +548,11 @@ class Task with _$Task {
 
   const factory Task({
     required String id,
+
     /// Backend field name is 'name'; stored as 'title' in the Dart model.
     @JsonKey(name: 'name') required String title,
     required String description,
+
     /// Backend field name is 'state'; stored as 'status' in the Dart model.
     @JsonKey(name: 'state') required String status,
     @JsonKey(name: 'agent_id') String? agentId,
@@ -554,8 +575,10 @@ class Task with _$Task {
     return {
       ...json,
       'name': json['name'] as String? ?? json['title'] as String? ?? '',
-      'state': json['state'] as String? ?? json['status'] as String? ?? 'pending',
-      'agent_id': json['agent_id'] as String? ?? json['assigned_agent'] as String?,
+      'state':
+          json['state'] as String? ?? json['status'] as String? ?? 'pending',
+      'agent_id':
+          json['agent_id'] as String? ?? json['assigned_agent'] as String?,
     };
   }
 }
@@ -599,6 +622,7 @@ class Job with _$Job {
   const factory Job({
     required String id,
     required String type,
+
     /// Backend field name is 'state'; stored as 'status' in the Dart model.
     @JsonKey(name: 'state') required String status,
     @JsonKey(name: 'agent_id') String? agentId,
@@ -616,7 +640,8 @@ class Job with _$Job {
   static Map<String, dynamic> _normaliseJobJson(Map<String, dynamic> json) {
     return {
       ...json,
-      'state': json['state'] as String? ?? json['status'] as String? ?? 'pending',
+      'state':
+          json['state'] as String? ?? json['status'] as String? ?? 'pending',
     };
   }
 }
@@ -692,8 +717,7 @@ class Plan with _$Plan {
     @Default([]) List<PlanPhase> phases,
   }) = _Plan;
 
-  factory Plan.fromJson(Map<String, dynamic> json) =>
-      _$$PlanImplFromJson(json);
+  factory Plan.fromJson(Map<String, dynamic> json) => _$$PlanImplFromJson(json);
 }
 
 @freezed
@@ -734,44 +758,43 @@ enum SearchScope { all, sessions, messages, tasks, memories, plans }
 
 extension SearchScopeX on SearchScope {
   String get displayName => switch (this) {
-        SearchScope.all => 'all',
-        SearchScope.sessions => 'sessions',
-        SearchScope.messages => 'messages',
-        SearchScope.tasks => 'tasks',
-        SearchScope.memories => 'memories',
-        SearchScope.plans => 'plans',
-      };
+    SearchScope.all => 'all',
+    SearchScope.sessions => 'sessions',
+    SearchScope.messages => 'messages',
+    SearchScope.tasks => 'tasks',
+    SearchScope.memories => 'memories',
+    SearchScope.plans => 'plans',
+  };
 
   /// API parameter value for this scope.  Note: this must NOT be named
   /// `name` because Dart 2.15+ enums have a built-in `Enum.name` getter
   /// that shadows any extension getter with the same name.
   String get apiValue => switch (this) {
-        SearchScope.all => '',
-        SearchScope.sessions => 'sessions',
-        SearchScope.messages => 'messages',
-        SearchScope.tasks => 'tasks',
-        SearchScope.memories => 'memories',
-        SearchScope.plans => 'plans',
-      };
+    SearchScope.all => '',
+    SearchScope.sessions => 'sessions',
+    SearchScope.messages => 'messages',
+    SearchScope.tasks => 'tasks',
+    SearchScope.memories => 'memories',
+    SearchScope.plans => 'plans',
+  };
 }
 
 enum SearchResultType { session, message, task, memory, plan }
 
 extension SearchResultTypeX on SearchResultType {
   String get displayName => switch (this) {
-        SearchResultType.session => 'sessions',
-        SearchResultType.message => 'messages',
-        SearchResultType.task => 'tasks',
-        SearchResultType.memory => 'memories',
-        SearchResultType.plan => 'plans',
-      };
+    SearchResultType.session => 'sessions',
+    SearchResultType.message => 'messages',
+    SearchResultType.task => 'tasks',
+    SearchResultType.memory => 'memories',
+    SearchResultType.plan => 'plans',
+  };
 }
 
 @freezed
 class SearchResults with _$SearchResults {
-  const factory SearchResults({
-    @Default([]) List<SearchResultItem> results,
-  }) = _SearchResults;
+  const factory SearchResults({@Default([]) List<SearchResultItem> results}) =
+      _SearchResults;
 
   factory SearchResults.fromJson(Map<String, dynamic> json) =>
       _$$SearchResultsImplFromJson(json);
@@ -881,8 +904,7 @@ class SkillFormField with _$SkillFormField {
 class SkillUiDescriptor with _$SkillUiDescriptor {
   const factory SkillUiDescriptor({
     @JsonKey(name: 'ui_type') @Default('form') String uiType,
-    @JsonKey(name: 'form_fields') @Default([])
-    List<SkillFormField> formFields,
+    @JsonKey(name: 'form_fields') @Default([]) List<SkillFormField> formFields,
     List<String>? actions,
   }) = _SkillUiDescriptor;
 

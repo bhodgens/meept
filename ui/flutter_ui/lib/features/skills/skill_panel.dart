@@ -237,8 +237,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
       } else if (field.type == 'select') {
         params[field.name] = _selectValues[field.name] ?? '';
       } else {
-        params[field.name] =
-            _textControllers[field.name]?.text.trim() ?? '';
+        params[field.name] = _textControllers[field.name]?.text.trim() ?? '';
       }
     }
     return params;
@@ -271,41 +270,41 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
         return KeyEventResult.ignored;
       },
       child: Container(
-      decoration: BoxDecoration(
-        color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
-        border: Border(
-          top: BorderSide(
-            color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
-            width: 1,
+        decoration: BoxDecoration(
+          color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
+          border: Border(
+            top: BorderSide(
+              color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
+              width: 1,
+            ),
           ),
         ),
-      ),
-      child: Column(
-        children: [
-          _buildHeader(),
-          Expanded(
-            child: _isLoading
-                ? const Center(
-                    child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          CyberpunkColors.orangePrimary,
+        child: Column(
+          children: [
+            _buildHeader(),
+            Expanded(
+              child: _isLoading
+                  ? const Center(
+                      child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            CyberpunkColors.orangePrimary,
+                          ),
                         ),
                       ),
-                    ),
-                  )
-                : _error != null
-                    ? _buildErrorState()
-                    : _selectedSkill != null
-                        ? _buildSkillDetail()
-                        : _buildSkillList(),
-          ),
-        ],
+                    )
+                  : _error != null
+                  ? _buildErrorState()
+                  : _selectedSkill != null
+                  ? _buildSkillDetail()
+                  : _buildSkillList(),
+            ),
+          ],
+        ),
       ),
-    ),
     );
   }
 
@@ -442,8 +441,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
     return ListView.separated(
       padding: const EdgeInsets.all(8),
       itemCount: _skills.length,
-      separatorBuilder: (_, __) =>
-          const SizedBox(height: 4),
+      separatorBuilder: (_, __) => const SizedBox(height: 4),
       itemBuilder: (context, index) {
         final skill = _skills[index];
         return _buildSkillCard(skill);
@@ -580,8 +578,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
             ),
             const SizedBox(height: 16),
             TextButton(
-              onPressed: () =>
-                  _loadSkillUi(_selectedSkill!.slug),
+              onPressed: () => _loadSkillUi(_selectedSkill!.slug),
               child: Text(
                 'retry',
                 style: CyberpunkTypography.bodySmall.copyWith(
@@ -637,9 +634,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
           ),
 
         // Dynamic form fields
-        ..._uiDescriptor!.formFields.map(
-          (field) => _buildFormField(field),
-        ),
+        ..._uiDescriptor!.formFields.map((field) => _buildFormField(field)),
 
         const SizedBox(height: 16),
 
@@ -667,10 +662,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
                       ),
                     ),
                   )
-                : const Text(
-                    'execute',
-                    style: CyberpunkTypography.button,
-                  ),
+                : const Text('execute', style: CyberpunkTypography.button),
           ),
         ),
 
@@ -684,8 +676,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
   }
 
   Widget _buildFormField(SkillFormField field) {
-    final requiredSuffix =
-        field.required ? ' *' : '';
+    final requiredSuffix = field.required ? ' *' : '';
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
@@ -737,10 +728,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
         ),
         filled: true,
         fillColor: CyberpunkColors.black,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 8,
-        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       ),
     );
   }

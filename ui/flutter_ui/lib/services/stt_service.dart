@@ -4,7 +4,8 @@
 
 import 'dart:async';
 import 'package:speech_to_text/speech_to_text.dart'
-    as stt show SpeechToText, ListenMode, SpeechListenOptions;
+    as stt
+    show SpeechToText, ListenMode, SpeechListenOptions;
 import 'package:speech_to_text/speech_recognition_error.dart';
 
 /// Client-side speech-to-text service.

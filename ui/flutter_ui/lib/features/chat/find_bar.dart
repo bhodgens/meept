@@ -37,9 +37,8 @@ class _FindBarState extends ConsumerState<FindBar> {
     final initial = ref.read(findQueryProvider(widget.sessionId));
     _controller = TextEditingController(text: initial);
     _controller.addListener(() {
-      ref
-          .read(findQueryProvider(widget.sessionId).notifier)
-          .state = _controller.text;
+      ref.read(findQueryProvider(widget.sessionId).notifier).state =
+          _controller.text;
       ref.read(findCursorProvider(widget.sessionId).notifier).state = 0;
     });
     _focusNode = FocusNode(onKeyEvent: _onKey);
@@ -78,16 +77,20 @@ class _FindBarState extends ConsumerState<FindBar> {
             child: TextField(
               controller: _controller,
               focusNode: _focusNode,
-              style: CyberpunkTypography.bodyMedium
-                  .copyWith(color: Colors.white),
+              style: CyberpunkTypography.bodyMedium.copyWith(
+                color: Colors.white,
+              ),
               cursorColor: CyberpunkColors.orangePrimary,
               decoration: InputDecoration(
                 isDense: true,
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 6,
+                ),
                 hintText: 'find...',
-                hintStyle: CyberpunkTypography.bodySmall
-                    .copyWith(color: CyberpunkColors.lightGray),
+                hintStyle: CyberpunkTypography.bodySmall.copyWith(
+                  color: CyberpunkColors.lightGray,
+                ),
                 filled: true,
                 fillColor: CyberpunkColors.black,
                 border: OutlineInputBorder(
@@ -114,8 +117,9 @@ class _FindBarState extends ConsumerState<FindBar> {
             child: Text(
               countText,
               textAlign: TextAlign.center,
-              style: CyberpunkTypography.bodySmall
-                  .copyWith(color: CyberpunkColors.lightGray),
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.lightGray,
+              ),
             ),
           ),
           _toggleButton(
@@ -123,9 +127,8 @@ class _FindBarState extends ConsumerState<FindBar> {
             active: caseSensitive,
             tooltip: 'case sensitive (alt+c)',
             onTap: () {
-              ref
-                  .read(findCaseSensitiveProvider(sessionId).notifier)
-                  .state = !caseSensitive;
+              ref.read(findCaseSensitiveProvider(sessionId).notifier).state =
+                  !caseSensitive;
             },
           ),
           _toggleButton(
@@ -149,8 +152,9 @@ class _FindBarState extends ConsumerState<FindBar> {
               padding: const EdgeInsets.only(left: 8),
               child: Text(
                 'regex error',
-                style: CyberpunkTypography.bodySmall
-                    .copyWith(color: CyberpunkColors.redAlert),
+                style: CyberpunkTypography.bodySmall.copyWith(
+                  color: CyberpunkColors.redAlert,
+                ),
               ),
             ),
         ],
@@ -172,9 +176,7 @@ class _FindBarState extends ConsumerState<FindBar> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           margin: const EdgeInsets.symmetric(horizontal: 2),
           decoration: BoxDecoration(
-            color: active
-                ? CyberpunkColors.orangePrimary
-                : Colors.transparent,
+            color: active ? CyberpunkColors.orangePrimary : Colors.transparent,
             border: Border.all(
               color: active
                   ? CyberpunkColors.orangePrimary

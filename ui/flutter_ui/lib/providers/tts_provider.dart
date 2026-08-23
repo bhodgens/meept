@@ -7,10 +7,7 @@ import '../services/tts_service.dart';
 import '../services/storage_service.dart';
 
 /// TTS state enum.
-enum TtsState {
-  idle,
-  speaking,
-}
+enum TtsState { idle, speaking }
 
 /// TTS notifier for Riverpod state management.
 ///
@@ -20,7 +17,10 @@ class TtsNotifier extends StateNotifier<TtsState> {
   final StorageService _storage;
   bool _enabled = false;
 
-  TtsNotifier() : _service = TtsService(), _storage = StorageService.instance, super(TtsState.idle) {
+  TtsNotifier()
+    : _service = TtsService(),
+      _storage = StorageService.instance,
+      super(TtsState.idle) {
     _loadSettings();
   }
 
@@ -28,15 +28,17 @@ class TtsNotifier extends StateNotifier<TtsState> {
   void _loadSettings() {
     _enabled = _storage.getTtsEnabled();
     // Apply other settings to service
-    _service.applyConfig(TtsConfig(
-      enabled: _enabled,
-      voice: _storage.getTtsVoice() ?? 'en-US',
-      volume: _storage.getTtsVolume(),
-      rate: _storage.getTtsRate(),
-      interruptOnNewMsg: _storage.getTtsInterrupt(),
-      queueMessages: _storage.getTtsQueue(),
-      maxQueueSize: _storage.getTtsMaxQueueSize(),
-    ));
+    _service.applyConfig(
+      TtsConfig(
+        enabled: _enabled,
+        voice: _storage.getTtsVoice() ?? 'en-US',
+        volume: _storage.getTtsVolume(),
+        rate: _storage.getTtsRate(),
+        interruptOnNewMsg: _storage.getTtsInterrupt(),
+        queueMessages: _storage.getTtsQueue(),
+        maxQueueSize: _storage.getTtsMaxQueueSize(),
+      ),
+    );
   }
 
   /// Persist current settings (called from setters)
@@ -122,17 +124,27 @@ class TtsNotifier extends StateNotifier<TtsState> {
   }
 
   /// Set behavior settings
-  Future<void> setBehaviorSettings({required bool interrupt, required bool queue, int? maxQueueSize}) async {
-    _service.applyConfig(TtsConfig(
-      enabled: _enabled,
-      voice: _storage.getTtsVoice() ?? 'en-US',
-      volume: _storage.getTtsVolume(),
-      rate: _storage.getTtsRate(),
-      interruptOnNewMsg: interrupt,
-      queueMessages: queue,
-      maxQueueSize: maxQueueSize ?? 5,
-    ));
-    await _saveSettings(interrupt: interrupt, queue: queue, maxQueueSize: maxQueueSize);
+  Future<void> setBehaviorSettings({
+    required bool interrupt,
+    required bool queue,
+    int? maxQueueSize,
+  }) async {
+    _service.applyConfig(
+      TtsConfig(
+        enabled: _enabled,
+        voice: _storage.getTtsVoice() ?? 'en-US',
+        volume: _storage.getTtsVolume(),
+        rate: _storage.getTtsRate(),
+        interruptOnNewMsg: interrupt,
+        queueMessages: queue,
+        maxQueueSize: maxQueueSize ?? 5,
+      ),
+    );
+    await _saveSettings(
+      interrupt: interrupt,
+      queue: queue,
+      maxQueueSize: maxQueueSize,
+    );
   }
 
   /// Set speech speed.

@@ -1,7 +1,6 @@
 import 'dart:async' show Timer;
 import 'dart:math' show max;
 
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
@@ -28,8 +27,10 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   final ScrollController _scrollController = ScrollController();
   final Map<String, GlobalKey> _messageKeys = {};
   bool _isAtBottom = true;
+
   /// Guards against re-entrant scroll-back fetches from _onScroll.
   bool _loadingOlder = false;
+
   /// Reactive mirror of [!_isAtBottom]; drives the scroll-to-bottom
   /// button visibility. _isAtBottom alone is a plain field the build
   /// method cannot observe.
@@ -39,7 +40,9 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   @override
   void initState() {
     super.initState();
-    debugPrint('[session-debug] ChatMessageList.initState sessionId=${widget.sessionId}');
+    debugPrint(
+      '[session-debug] ChatMessageList.initState sessionId=${widget.sessionId}',
+    );
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadMessages());
   }
@@ -47,7 +50,9 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   @override
   void didUpdateWidget(ChatMessageList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    debugPrint('[session-debug] ChatMessageList.didUpdateWidget old=${oldWidget.sessionId} new=${widget.sessionId} changed=${widget.sessionId != oldWidget.sessionId}');
+    debugPrint(
+      '[session-debug] ChatMessageList.didUpdateWidget old=${oldWidget.sessionId} new=${widget.sessionId} changed=${widget.sessionId != oldWidget.sessionId}',
+    );
     if (widget.sessionId != oldWidget.sessionId) {
       _previousMessageCount = 0;
       // Defer to next frame so we don't modify providers during the build
@@ -59,10 +64,14 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   }
 
   Future<void> _loadMessages() async {
-    debugPrint('[session-debug] ChatMessageList._loadMessages sessionId=${widget.sessionId}');
-    await ref.read(chatProvider(widget.sessionId).notifier);
+    debugPrint(
+      '[session-debug] ChatMessageList._loadMessages sessionId=${widget.sessionId}',
+    );
+    ref.read(chatProvider(widget.sessionId).notifier);
     final st = ref.read(chatProvider(widget.sessionId));
-    debugPrint('[session-debug] ChatMessageList._loadMessages done: messages=${st.messages.length} isLoading=${st.isLoading} error=${st.error}');
+    debugPrint(
+      '[session-debug] ChatMessageList._loadMessages done: messages=${st.messages.length} isLoading=${st.isLoading} error=${st.error}',
+    );
   }
 
   @override
@@ -101,8 +110,7 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
       // offset relative to the new content height.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !_scrollController.hasClients) return;
-        final delta =
-            _scrollController.position.maxScrollExtent - previousMax;
+        final delta = _scrollController.position.maxScrollExtent - previousMax;
         if (delta > 0) {
           _scrollController.jumpTo(previousOffset + delta);
         }
@@ -133,7 +141,9 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   Widget build(BuildContext context) {
     final chatState = ref.watch(chatProvider(widget.sessionId));
     final sessionId = widget.sessionId;
-    debugPrint('[session-debug] ChatMessageList.build sessionId=$sessionId messages=${chatState.messages.length} isLoading=${chatState.isLoading} error=${chatState.error}');
+    debugPrint(
+      '[session-debug] ChatMessageList.build sessionId=$sessionId messages=${chatState.messages.length} isLoading=${chatState.isLoading} error=${chatState.error}',
+    );
     final findVisible = ref.watch(findBarVisibleProvider(sessionId));
     final findQuery = ref.watch(findQueryProvider(sessionId));
     final findCase = ref.watch(findCaseSensitiveProvider(sessionId));
@@ -149,9 +159,13 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
     );
 
     // Auto-scroll when new messages arrive and user is at bottom
-    if (chatState.messages.isNotEmpty && _isAtBottom && chatState.messages.length != _previousMessageCount) {
+    if (chatState.messages.isNotEmpty &&
+        _isAtBottom &&
+        chatState.messages.length != _previousMessageCount) {
       _previousMessageCount = chatState.messages.length;
-      WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _scrollToBottom(); });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _scrollToBottom();
+      });
     }
 
     // Pending scroll from search-result navigation.  Consume once the
@@ -175,7 +189,11 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
     if (findVisible && findResult.matches.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        _scrollToFindMatch(findResult.matches, findCursor, chatState.messages.length);
+        _scrollToFindMatch(
+          findResult.matches,
+          findCursor,
+          chatState.messages.length,
+        );
       });
     }
 
@@ -189,146 +207,162 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
           return false;
         },
         child: Stack(
-        children: [
-          Positioned.fill(
-            child: chatState.messages.isEmpty
-                ? (chatState.isLoading
-                    ? const _SessionLoadingPlaceholder()
-                    : const MessagePlaceholder())
-                : ListView.builder(
-                    controller: _scrollController,
-                    padding: EdgeInsets.fromLTRB(
-                        16, findVisible ? 56 : 16, 16, chatState.error != null ? 100 : 16),
-                    reverse: false,
-                    physics: const ClampingScrollPhysics(),
-                    itemCount:
-                        chatState.messages.length + (chatState.isLoading || chatState.isAgentProcessing ? 1 : 0),
-                    itemBuilder: (context, index) {
-                      if (index < chatState.messages.length) {
-                        final message = chatState.messages[index];
-                        // Find matches belonging to this message, with their absolute index
-                        // so we can mark the current one.
-                        final localMatches = <int>[];
-                        for (var i = 0; i < findResult.matches.length; i++) {
-                          if (findResult.matches[i].messageIndex == index) {
-                            localMatches.add(i);
+          children: [
+            Positioned.fill(
+              child: chatState.messages.isEmpty
+                  ? (chatState.isLoading
+                        ? const _SessionLoadingPlaceholder()
+                        : const MessagePlaceholder())
+                  : ListView.builder(
+                      controller: _scrollController,
+                      padding: EdgeInsets.fromLTRB(
+                        16,
+                        findVisible ? 56 : 16,
+                        16,
+                        chatState.error != null ? 100 : 16,
+                      ),
+                      reverse: false,
+                      physics: const ClampingScrollPhysics(),
+                      itemCount:
+                          chatState.messages.length +
+                          (chatState.isLoading || chatState.isAgentProcessing
+                              ? 1
+                              : 0),
+                      itemBuilder: (context, index) {
+                        if (index < chatState.messages.length) {
+                          final message = chatState.messages[index];
+                          // Find matches belonging to this message, with their absolute index
+                          // so we can mark the current one.
+                          final localMatches = <int>[];
+                          for (var i = 0; i < findResult.matches.length; i++) {
+                            if (findResult.matches[i].messageIndex == index) {
+                              localMatches.add(i);
+                            }
                           }
-                        }
-                        // Assign a GlobalKey so scroll-to-message can measure
-                        // this bubble's actual rendered position.
-                        final key = _messageKeys.putIfAbsent(
-                          message.id,
-                          () => GlobalKey(),
-                        );
-                        return KeyedSubtree(
-                          key: key,
-                          child: ChatMessageBubble(
-                            message: message,
-                            highlightQuery: findVisible && findQuery.isNotEmpty ? findQuery : null,
-                            caseSensitive: findCase,
-                            isRegex: findRegex,
-                            highlightRanges: localMatches
-                                .map((absIdx) => findResult.matches[absIdx])
-                                .toList(),
-                            currentRangeAbsIndex: findCursor,
-                            rangeAbsIndices: localMatches,
-                            regexError: findResult.regexError,
-                          ),
-                        );
-                      } else {
-                        // Dynamic progress indicator or fallback thinking.
-                        // Streaming stage: render the growing assistant
-                        // text as a live preview bubble instead of a bare
-                        // progress line.
-                        final progress = chatState.currentProgress;
-                        if (progress != null &&
-                            progress.stage == 'streaming' &&
-                            (progress.textSoFar?.isNotEmpty ?? false)) {
-                          return AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 150),
-                            switchInCurve: Curves.easeIn,
-                            switchOutCurve: Curves.easeOut,
-                            child: _StreamingPreview(
-                              key: const ValueKey('streaming-preview'),
-                              text: progress.textSoFar!,
-                            ),
+                          // Assign a GlobalKey so scroll-to-message can measure
+                          // this bubble's actual rendered position.
+                          final key = _messageKeys.putIfAbsent(
+                            message.id,
+                            () => GlobalKey(),
                           );
-                        }
-                        if (progress != null) {
-                          return AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 150),
-                            switchInCurve: Curves.easeIn,
-                            switchOutCurve: Curves.easeOut,
-                            child: AgentProgressIndicator(
-                              key: ValueKey(
-                                '${progress.message}-${progress.timestamp.millisecondsSinceEpoch}',
-                              ),
-                              progress: progress,
+                          return KeyedSubtree(
+                            key: key,
+                            child: ChatMessageBubble(
+                              message: message,
+                              highlightQuery:
+                                  findVisible && findQuery.isNotEmpty
+                                  ? findQuery
+                                  : null,
+                              caseSensitive: findCase,
+                              isRegex: findRegex,
+                              highlightRanges: localMatches
+                                  .map((absIdx) => findResult.matches[absIdx])
+                                  .toList(),
+                              currentRangeAbsIndex: findCursor,
+                              rangeAbsIndices: localMatches,
+                              regexError: findResult.regexError,
                             ),
                           );
                         } else {
-                          return _ThinkingIndicator(
-                            startedAt: chatState.thinkingStartedAt,
-                          );
+                          // Dynamic progress indicator or fallback thinking.
+                          // Streaming stage: render the growing assistant
+                          // text as a live preview bubble instead of a bare
+                          // progress line.
+                          final progress = chatState.currentProgress;
+                          if (progress != null &&
+                              progress.stage == 'streaming' &&
+                              (progress.textSoFar?.isNotEmpty ?? false)) {
+                            return AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 150),
+                              switchInCurve: Curves.easeIn,
+                              switchOutCurve: Curves.easeOut,
+                              child: _StreamingPreview(
+                                key: const ValueKey('streaming-preview'),
+                                text: progress.textSoFar!,
+                              ),
+                            );
+                          }
+                          if (progress != null) {
+                            return AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 150),
+                              switchInCurve: Curves.easeIn,
+                              switchOutCurve: Curves.easeOut,
+                              child: AgentProgressIndicator(
+                                key: ValueKey(
+                                  '${progress.message}-${progress.timestamp.millisecondsSinceEpoch}',
+                                ),
+                                progress: progress,
+                              ),
+                            );
+                          } else {
+                            return _ThinkingIndicator(
+                              startedAt: chatState.thinkingStartedAt,
+                            );
+                          }
                         }
-                      }
-                    },
+                      },
+                    ),
+            ),
+            if (chatState.error != null)
+              Positioned(
+                bottom: 70, // Just above the chat input
+                left: 0,
+                right: 0,
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: ErrorBanner(
+                    message: chatState.error!,
+                    onRetry: () => ref
+                        .read(chatProvider(widget.sessionId).notifier)
+                        .retryLastSend(),
+                    onDismiss: () => ref
+                        .read(chatProvider(widget.sessionId).notifier)
+                        .clearError(),
                   ),
-          ),
-          if (chatState.error != null)
-            Positioned(
-              bottom: 70, // Just above the chat input
-              left: 0,
-              right: 0,
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: ErrorBanner(
-                  message: chatState.error!,
-                  onRetry: () => ref
-                      .read(chatProvider(widget.sessionId).notifier)
-                      .retryLastSend(),
-                  onDismiss: () => ref.read(chatProvider(widget.sessionId).notifier).clearError(),
                 ),
               ),
-            ),
-          if (_showScrollToBottom)
-            Positioned(
-              bottom: 70, // Above the chat input
-              right: 16,
-              child: Material(
-                color: CyberpunkColors.darkGray,
-                shape: const CircleBorder(),
-                elevation: 4,
-                child: IconButton(
-                  tooltip: 'scroll to latest',
-                  icon: Icon(
-                    Icons.arrow_downward,
-                    size: 20,
-                    color: CyberpunkColors.orangePrimary,
+            if (_showScrollToBottom)
+              Positioned(
+                bottom: 70, // Above the chat input
+                right: 16,
+                child: Material(
+                  color: CyberpunkColors.darkGray,
+                  shape: const CircleBorder(),
+                  elevation: 4,
+                  child: IconButton(
+                    tooltip: 'scroll to latest',
+                    icon: const Icon(
+                      Icons.arrow_downward,
+                      size: 20,
+                      color: CyberpunkColors.orangePrimary,
+                    ),
+                    onPressed: _scrollToBottom,
                   ),
-                  onPressed: _scrollToBottom,
                 ),
               ),
-            ),
-          if (findVisible)
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: FindBar(
-                sessionId: sessionId,
-                matchCount: findResult.matches.length,
-                regexError: findResult.regexError,
+            if (findVisible)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: FindBar(
+                  sessionId: sessionId,
+                  matchCount: findResult.matches.length,
+                  regexError: findResult.regexError,
+                ),
               ),
-            ),
-        ],
-      ),
-    ),  // NotificationListener
-  );  // SelectionArea
+          ],
+        ),
+      ), // NotificationListener
+    ); // SelectionArea
   }
 
   /// Scrolls so the current find match is visible.
-  void _scrollToFindMatch(List<FindMatch> matches, int cursor, int messageCount) {
+  void _scrollToFindMatch(
+    List<FindMatch> matches,
+    int cursor,
+    int messageCount,
+  ) {
     if (!_scrollController.hasClients) return;
     if (matches.isEmpty || cursor < 0 || cursor >= matches.length) return;
     final target = matches[cursor];
@@ -376,7 +410,8 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
     final viewport = _scrollController.position.viewportDimension;
 
     // Center the target in the viewport.
-    final desiredOffset = _scrollController.offset +
+    final desiredOffset =
+        _scrollController.offset +
         targetOffset.dy -
         (viewport - messageHeight) / 2;
     final clamped = desiredOffset.clamp(

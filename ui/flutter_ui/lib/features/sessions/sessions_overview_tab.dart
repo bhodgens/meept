@@ -16,28 +16,25 @@ class SessionsOverviewTab extends StatelessWidget {
       builder: (context, ref, _) {
         final activeSession = ref.watch(activeSessionProvider);
         return Row(
-            children: [
-              const SizedBox(
-                width: 280,
-                child: SessionsList(),
-              ),
-              const VerticalDivider(width: 1),
-              Expanded(
-                child: BackgroundImage(
-                  child: activeSession != null
-                      ? SessionsDetailPane(session: activeSession)
-                      : const Center(
-                          child: Text(
-                            'select a session',
-                            style: TextStyle(
-                              color: CyberpunkColors.orangePrimary,
-                            ),
+          children: [
+            const SizedBox(width: 280, child: SessionsList()),
+            const VerticalDivider(width: 1),
+            Expanded(
+              child: BackgroundImage(
+                child: activeSession != null
+                    ? SessionsDetailPane(session: activeSession)
+                    : const Center(
+                        child: Text(
+                          'select a session',
+                          style: TextStyle(
+                            color: CyberpunkColors.orangePrimary,
                           ),
                         ),
-                ),
+                      ),
               ),
-            ],
-          );
+            ),
+          ],
+        );
       },
     );
   }

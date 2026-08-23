@@ -18,6 +18,7 @@
 /// |--------+---------+---------+---------+-------------------|
 /// |  [Status Bar]                                            |
 /// +----------------------------------------------------------+
+library;
 
 import 'package:flutter/material.dart';
 import '../theme/colors.dart';
@@ -48,13 +49,10 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         gradient: CyberpunkEffects.angularGradient,
         border: Border(
-          bottom: BorderSide(
-            color: CyberpunkColors.orangePrimary,
-            width: 2,
-          ),
+          bottom: BorderSide(color: CyberpunkColors.orangePrimary, width: 2),
         ),
       ),
       child: Row(
@@ -77,7 +75,11 @@ class _Header extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Icon(Icons.folder, size: 14, color: CyberpunkColors.orangePrimary),
+                const Icon(
+                  Icons.folder,
+                  size: 14,
+                  color: CyberpunkColors.orangePrimary,
+                ),
                 const SizedBox(width: 8),
                 Text(
                   '~/projects/meept',
@@ -90,9 +92,9 @@ class _Header extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          _HeaderAction(Icons.search, 'find'),
-          _HeaderAction(Icons.call_split, 'branches'),
-          _HeaderAction(Icons.menu, 'menu'),
+          const _HeaderAction(Icons.search, 'find'),
+          const _HeaderAction(Icons.call_split, 'branches'),
+          const _HeaderAction(Icons.menu, 'menu'),
         ],
       ),
     );
@@ -115,11 +117,7 @@ class _HeaderAction extends StatelessWidget {
           color: CyberpunkColors.orangeDark.withValues(alpha: 0.3),
         ),
       ),
-      child: Icon(
-        icon,
-        size: 18,
-        color: CyberpunkColors.orangePrimary,
-      ),
+      child: Icon(icon, size: 18, color: CyberpunkColors.orangePrimary),
     );
   }
 }
@@ -128,7 +126,7 @@ class _ContentArea extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         image: DecorationImage(
           image: AssetImage('assets/images/gui-bg.png'),
           fit: BoxFit.cover,
@@ -140,11 +138,14 @@ class _ContentArea extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             // Mock chat bubbles to show layout
-            _ChatBubble(isUser: false, text: 'welcome to meept'),
+            const _ChatBubble(isUser: false, text: 'welcome to meept'),
             const SizedBox(height: 8),
-            _ChatBubble(isUser: true, text: 'create a new plan'),
+            const _ChatBubble(isUser: true, text: 'create a new plan'),
             const SizedBox(height: 8),
-            _ChatBubble(isUser: false, text: 'processing your request...'),
+            const _ChatBubble(
+              isUser: false,
+              text: 'processing your request...',
+            ),
             const SizedBox(height: 24),
             Container(
               padding: const EdgeInsets.all(16),
@@ -180,7 +181,7 @@ class _ChatBubble extends StatelessWidget {
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        constraints: BoxConstraints(maxWidth: 400),
+        constraints: const BoxConstraints(maxWidth: 400),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
           color: isUser
@@ -211,16 +212,13 @@ class _BottomNavigation extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: CyberpunkColors.darkGray,
         border: Border(
-          top: BorderSide(
-            color: CyberpunkColors.orangePrimary,
-            width: 2,
-          ),
+          top: BorderSide(color: CyberpunkColors.orangePrimary, width: 2),
         ),
       ),
-      child: Row(
+      child: const Row(
         children: [
           _NavButton('chat', Icons.chat, true),
           _NavButton('sessions', Icons.folder, false),
@@ -294,13 +292,13 @@ class _StatusBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: CyberpunkColors.blackTransparent(0.7),
-        border: Border(
+        border: const Border(
           top: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),
       child: Row(
         children: [
-          _StatusDot(connected: true),
+          const _StatusDot(connected: true),
           const SizedBox(width: 6),
           Text(
             'connected',

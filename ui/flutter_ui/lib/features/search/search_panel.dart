@@ -147,221 +147,223 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
         return KeyEventResult.ignored;
       },
       child: Container(
-      color: CyberpunkColors.darkGray,
-      child: Column(
-        children: [
-          // Header with search input
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(
-                  color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
-                  width: 1,
+        color: CyberpunkColors.darkGray,
+        child: Column(
+          children: [
+            // Header with search input
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
+                    color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
+                    width: 1,
+                  ),
                 ),
               ),
-            ),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    GestureDetector(
-                      onTap: _closePanel,
-                      child: const Icon(
-                        Icons.arrow_back,
-                        color: CyberpunkColors.orangePrimary,
-                        size: 18,
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      GestureDetector(
+                        onTap: _closePanel,
+                        child: const Icon(
+                          Icons.arrow_back,
+                          color: CyberpunkColors.orangePrimary,
+                          size: 18,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Icon(
-                      Icons.search,
-                      color: CyberpunkColors.orangeBright,
-                      size: 24,
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      'search',
-                      style: CyberpunkTypography.headlineSmall.copyWith(
-                        color: CyberpunkColors.orangePrimary,
+                      const SizedBox(width: 8),
+                      const Icon(
+                        Icons.search,
+                        color: CyberpunkColors.orangeBright,
+                        size: 24,
                       ),
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      icon: const Icon(Icons.close, size: 18),
-                      onPressed: _closePanel,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      tooltip: 'close',
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                // Search input
-                Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                      color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
-                      width: 1,
-                    ),
-                    borderRadius: BorderRadius.circular(4),
+                      const SizedBox(width: 12),
+                      Text(
+                        'search',
+                        style: CyberpunkTypography.headlineSmall.copyWith(
+                          color: CyberpunkColors.orangePrimary,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        onPressed: _closePanel,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        tooltip: 'close',
+                      ),
+                    ],
                   ),
-                  child: TextField(
-                    controller: _searchController,
-                    style: CyberpunkTypography.bodyMedium,
-                    decoration: InputDecoration(
-                      hintText: 'search query...',
-                      hintStyle: CyberpunkTypography.bodyMedium.copyWith(
-                        color: CyberpunkColors.orangeDark,
+                  const SizedBox(height: 12),
+                  // Search input
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: CyberpunkColors.orangePrimary.withValues(
+                          alpha: 0.3,
+                        ),
+                        width: 1,
                       ),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: TextField(
+                      controller: _searchController,
+                      style: CyberpunkTypography.bodyMedium,
+                      decoration: InputDecoration(
+                        hintText: 'search query...',
+                        hintStyle: CyberpunkTypography.bodyMedium.copyWith(
+                          color: CyberpunkColors.orangeDark,
+                        ),
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        suffixIcon: _showClear
+                            ? IconButton(
+                                icon: const Icon(
+                                  Icons.clear,
+                                  size: 18,
+                                  color: CyberpunkColors.orangeDark,
+                                ),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  _search('');
+                                },
+                              )
+                            : null,
                       ),
-                      suffixIcon: _showClear
-                          ? IconButton(
-                              icon: const Icon(
-                                Icons.clear,
-                                size: 18,
-                                color: CyberpunkColors.orangeDark,
+                      onChanged: (value) {
+                        _debouncer.run(() => _search(value));
+                      },
+                      onSubmitted: _search,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // Scope selector
+                  Row(
+                    children: [
+                      Text(
+                        'scope:',
+                        style: CyberpunkTypography.bodySmall.copyWith(
+                          color: CyberpunkColors.orangeDark,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ...SearchScope.values.map((scope) {
+                        final isSelected = _scope == scope;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: FilterChip(
+                            label: Text(
+                              scope.displayName,
+                              style: CyberpunkTypography.bodySmall.copyWith(
+                                color: isSelected
+                                    ? CyberpunkColors.darkGray
+                                    : CyberpunkColors.orangePrimary,
                               ),
-                              onPressed: () {
-                                _searchController.clear();
-                                _search('');
-                              },
-                            )
-                          : null,
-                    ),
-                    onChanged: (value) {
-                      _debouncer.run(() => _search(value));
-                    },
-                    onSubmitted: _search,
+                            ),
+                            selected: isSelected,
+                            selectedColor: CyberpunkColors.orangePrimary,
+                            checkmarkColor: CyberpunkColors.darkGray,
+                            backgroundColor: CyberpunkColors.darkGray,
+                            side: const BorderSide(
+                              color: CyberpunkColors.orangePrimary,
+                              width: 1,
+                            ),
+                            onSelected: (selected) {
+                              setState(() => _scope = scope);
+                              if (_lastQuery.isNotEmpty) {
+                                _search(_lastQuery);
+                              }
+                            },
+                          ),
+                        );
+                      }),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 8),
-                // Scope selector
-                Row(
-                  children: [
-                    Text(
-                      'scope:',
-                      style: CyberpunkTypography.bodySmall.copyWith(
-                        color: CyberpunkColors.orangeDark,
+                  const SizedBox(height: 8),
+                  // Semantic toggle + mode indicator
+                  Row(
+                    children: [
+                      Text(
+                        'mode:',
+                        style: CyberpunkTypography.bodySmall.copyWith(
+                          color: CyberpunkColors.orangeDark,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    ...SearchScope.values.map((scope) {
-                      final isSelected = _scope == scope;
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
+                      const SizedBox(width: 8),
+                      Tooltip(
+                        message: _semanticEnabled
+                            ? 'semantic search uses vector embeddings; keyword uses exact match'
+                            : 'keyword search uses exact match; semantic uses vector embeddings',
                         child: FilterChip(
                           label: Text(
-                            scope.displayName,
+                            _semanticEnabled ? 'semantic' : 'keyword',
                             style: CyberpunkTypography.bodySmall.copyWith(
-                              color: isSelected
+                              color: _semanticEnabled
                                   ? CyberpunkColors.darkGray
                                   : CyberpunkColors.orangePrimary,
                             ),
                           ),
-                          selected: isSelected,
-                          selectedColor: CyberpunkColors.orangePrimary,
+                          selected: _semanticEnabled,
+                          selectedColor: CyberpunkColors.cyanAccent,
                           checkmarkColor: CyberpunkColors.darkGray,
                           backgroundColor: CyberpunkColors.darkGray,
-                          side: const BorderSide(
-                            color: CyberpunkColors.orangePrimary,
+                          side: BorderSide(
+                            color: _semanticEnabled
+                                ? CyberpunkColors.cyanAccent
+                                : CyberpunkColors.orangePrimary,
                             width: 1,
                           ),
                           onSelected: (selected) {
-                            setState(() => _scope = scope);
+                            setState(() {
+                              _semanticEnabled = selected;
+                              _mode = selected ? 'semantic' : 'keyword';
+                            });
                             if (_lastQuery.isNotEmpty) {
                               _search(_lastQuery);
                             }
                           },
                         ),
-                      );
-                    }),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                // Semantic toggle + mode indicator
-                Row(
-                  children: [
-                    Text(
-                      'mode:',
-                      style: CyberpunkTypography.bodySmall.copyWith(
-                        color: CyberpunkColors.orangeDark,
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Tooltip(
-                      message: _semanticEnabled
-                          ? 'semantic search uses vector embeddings; keyword uses exact match'
-                          : 'keyword search uses exact match; semantic uses vector embeddings',
-                      child: FilterChip(
-                        label: Text(
-                          _semanticEnabled ? 'semantic' : 'keyword',
+                      const SizedBox(width: 12),
+                      // Mode indicator showing last response mode
+                      if (_results.isNotEmpty || _lastQuery.isNotEmpty)
+                        Text(
+                          'mode: $_mode',
                           style: CyberpunkTypography.bodySmall.copyWith(
-                            color: _semanticEnabled
-                                ? CyberpunkColors.darkGray
-                                : CyberpunkColors.orangePrimary,
+                            color: CyberpunkColors.midGray,
+                            fontStyle: FontStyle.italic,
                           ),
                         ),
-                        selected: _semanticEnabled,
-                        selectedColor: CyberpunkColors.cyanAccent,
-                        checkmarkColor: CyberpunkColors.darkGray,
-                        backgroundColor: CyberpunkColors.darkGray,
-                        side: BorderSide(
-                          color: _semanticEnabled
-                              ? CyberpunkColors.cyanAccent
-                              : CyberpunkColors.orangePrimary,
-                          width: 1,
-                        ),
-                        onSelected: (selected) {
-                          setState(() {
-                            _semanticEnabled = selected;
-                            _mode = selected ? 'semantic' : 'keyword';
-                          });
-                          if (_lastQuery.isNotEmpty) {
-                            _search(_lastQuery);
-                          }
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    // Mode indicator showing last response mode
-                    if (_results.isNotEmpty || _lastQuery.isNotEmpty)
-                      Text(
-                        'mode: $_mode',
-                        style: CyberpunkTypography.bodySmall.copyWith(
-                          color: CyberpunkColors.midGray,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                  ],
-                ),
-              ],
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
 
-          // Results
-          Expanded(
-            child: _isSearching
-                ? const Center(
-                    child: CircularProgressIndicator(
-                      color: CyberpunkColors.orangePrimary,
-                    ),
-                  )
-                : _error != null && _results.isEmpty
-                    ? _buildErrorState()
-                    : _results.isEmpty && _lastQuery.isNotEmpty
-                        ? _buildNoResults()
-                        : _results.isEmpty
-                            ? _buildEmptyState()
-                            : _buildResults(),
-          ),
-        ],
+            // Results
+            Expanded(
+              child: _isSearching
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                        color: CyberpunkColors.orangePrimary,
+                      ),
+                    )
+                  : _error != null && _results.isEmpty
+                  ? _buildErrorState()
+                  : _results.isEmpty && _lastQuery.isNotEmpty
+                  ? _buildNoResults()
+                  : _results.isEmpty
+                  ? _buildEmptyState()
+                  : _buildResults(),
+            ),
+          ],
+        ),
       ),
-    ),
     );
   }
 
@@ -581,7 +583,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
         onSkip: () {},
         onProjectBound: (cwd) {},
       );
-      if (!proceed) return;
+      if (!proceed || !mounted) return;
 
       ref.read(activeSessionProvider.notifier).state = session;
       ref.read(chatProvider(session.id).notifier);
