@@ -102,7 +102,22 @@ void main() {
 
   testWidgets('choosing a dropdown value PATCHes and persists', (tester) async {
     final client = _StubConfigClient();
-    await _pump(tester, client);
+    final container = ProviderContainer(
+      overrides: [sdkClientProvider.overrideWithValue(client)],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(child: ClientPrefsEditor()),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
 
     await tester.tap(find.byType(DropdownButton<String>).first);
     await tester.pumpAndSettle();
@@ -113,6 +128,8 @@ void main() {
     expect(client.patches.first, {
       'chat': {'verbosity': 'verbose'},
     });
+    // Live-applied to the running provider, not just persisted.
+    expect(container.read(verbosityProvider), VerbosityLevel.verbose);
     // Re-fetch applied the merge: switch a second toggle and confirm the
     // earlier value survived in the stub text.
     expect(client.configText, contains('"verbosity": "verbose"'));

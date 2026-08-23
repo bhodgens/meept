@@ -218,6 +218,17 @@ class _ClientPrefsEditorState extends ConsumerState<ClientPrefsEditor> {
         final notifier = ref.read(guiLayoutProvider.notifier);
         await notifier.set(value as String);
       }
+      if (key == 'chat.verbosity' && mounted) {
+        // Map the string level to the provider's int enum and apply via
+        // setLevel. persist: false — this method already PATCHed; the
+        // notifier's hook would duplicate the write.
+        final level = switch (value as String) {
+          'quiet' => VerbosityLevel.quiet,
+          'verbose' => VerbosityLevel.verbose,
+          _ => VerbosityLevel.normal,
+        };
+        ref.read(verbosityProvider.notifier).setLevel(level, persist: false);
+      }
     } catch (e) {
       if (mounted) {
         setState(() {

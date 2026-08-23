@@ -41,8 +41,8 @@ class VerbosityNotifier extends StateNotifier<int> {
   final VerbosityPersistCallback? _onPersist;
 
   VerbosityNotifier({VerbosityPersistCallback? onPersist})
-      : _onPersist = onPersist,
-        super(VerbosityLevel.normal);
+    : _onPersist = onPersist,
+      super(VerbosityLevel.normal);
 
   /// Cycle 0 -> 1 -> 2 -> 0. Matches TUI Ctrl+V (app.go:727).
   ///
@@ -61,10 +61,23 @@ class VerbosityNotifier extends StateNotifier<int> {
       });
     }
   }
+
+  /// Set the level directly. Used by the settings panel so a dropdown
+  /// change behaves exactly like a Ctrl+V cycle to that level. Pass
+  /// `persist: false` when the caller has already saved the new level
+  /// itself (the panel PATCHes first, then applies live without a
+  /// second identical write).
+  void setLevel(int level, {bool persist = true}) {
+    state = level;
+    if (!persist) return;
+    final cb = _onPersist;
+    if (cb != null) {
+      cb(level).catchError((Object _, StackTrace __) {});
+    }
+  }
 }
 
-final verbosityProvider =
-    StateNotifierProvider<VerbosityNotifier, int>((ref) {
+final verbosityProvider = StateNotifierProvider<VerbosityNotifier, int>((ref) {
   return VerbosityNotifier(
     onPersist: (level) => ref.read(sdkClientProvider).setClientConfig({
       'chat': {'verbosity': VerbosityLevel.name(level)},
@@ -74,6 +87,9 @@ final verbosityProvider =
 
 /// Pure predicate used by ChatNotifier to filter agent events by tier.
 /// Mirrors TUI app.go:1347: `if tier <= a.verbosity`.
-bool shouldEmitAgentEvent({required int currentVerbosity, required int eventTier}) {
+bool shouldEmitAgentEvent({
+  required int currentVerbosity,
+  required int eventTier,
+}) {
   return eventTier <= currentVerbosity;
 }

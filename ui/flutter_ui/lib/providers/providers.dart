@@ -9,6 +9,7 @@ export 'plan_provider.dart';
 export 'stt_provider.dart';
 export 'tts_provider.dart';
 export 'preferences_provider.dart';
+export 'verbosity_provider.dart';
 export 'project_provider.dart';
 
 import 'dart:async';
