@@ -126,7 +126,7 @@ class _FilesPanelState extends ConsumerState<FilesPanel> {
             onPressed: _loadFiles,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
-            tooltip: 'refresh',
+            tooltip: 'reload files',
           ),
         ],
       ),
@@ -219,6 +219,7 @@ class _FilesPanelState extends ConsumerState<FilesPanel> {
             ),
           ),
           IconButton(
+            tooltip: 'copy path',
             icon: const Icon(Icons.copy, size: 14),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: file.path));

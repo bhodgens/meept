@@ -1193,8 +1193,9 @@ class _ChatInputState extends ConsumerState<ChatInput>
     if (event is KeyDownEvent) {
       if (event.logicalKey == LogicalKeyboardKey.enter) {
         // Guard: ignore Enter while LLM is responding (bug F6).
-        if (ref.read(chatProvider(widget.sessionId)).isLoading)
+        if (ref.read(chatProvider(widget.sessionId)).isLoading) {
           return KeyEventResult.ignored;
+        }
 
         final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
 

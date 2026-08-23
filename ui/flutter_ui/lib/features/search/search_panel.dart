@@ -192,7 +192,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
                         onPressed: _closePanel,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
-                        tooltip: 'close',
+                        tooltip: 'close search',
                       ),
                     ],
                   ),
@@ -228,6 +228,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
                                   size: 18,
                                   color: CyberpunkColors.orangeDark,
                                 ),
+                                tooltip: 'clear search',
                                 onPressed: () {
                                   _searchController.clear();
                                   _search('');

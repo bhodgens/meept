@@ -397,6 +397,7 @@ class _FloatingChatBar extends StatelessWidget {
             ),
             Container(width: 1, height: 40, color: CyberpunkColors.orangeDark),
             IconButton(
+              tooltip: 'attach file',
               icon: Icon(
                 Icons.attach_file,
                 color: CyberpunkColors.orangePrimary.withValues(alpha: 0.7),

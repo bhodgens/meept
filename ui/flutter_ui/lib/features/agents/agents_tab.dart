@@ -107,6 +107,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                 ),
                 const Spacer(),
                 IconButton(
+                  tooltip: 'refresh employees',
                   icon: const Icon(Icons.refresh, size: 18),
                   color: CyberpunkColors.orangePrimary,
                   onPressed: () {

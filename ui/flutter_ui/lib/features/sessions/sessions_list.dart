@@ -287,6 +287,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
                 ),
                 const Spacer(),
                 IconButton(
+                  tooltip: 'new session',
                   icon: const Icon(Icons.add, size: 18),
                   color: CyberpunkColors.orangePrimary,
                   onPressed: _createQuickSession,
@@ -405,6 +406,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
                 ),
               ),
               IconButton(
+                tooltip: 'archive session',
                 icon: const Icon(Icons.archive_outlined, size: 16),
                 color: CyberpunkColors.orangeDark,
                 onPressed: () =>

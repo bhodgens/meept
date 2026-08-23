@@ -105,6 +105,7 @@ class _TasksListState extends ConsumerState<TasksList> {
                 ),
                 const Spacer(),
                 IconButton(
+                  tooltip: 'create task',
                   icon: const Icon(Icons.add, size: 18),
                   color: CyberpunkColors.orangePrimary,
                   onPressed: _showCreateTaskDialog,

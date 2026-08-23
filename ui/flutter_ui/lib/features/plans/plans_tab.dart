@@ -103,6 +103,7 @@ class _PlansTabState extends ConsumerState<PlansTab> {
               ),
               const Spacer(),
               IconButton(
+                tooltip: 'refresh plans',
                 icon: const Icon(Icons.refresh, size: 18),
                 color: CyberpunkColors.orangePrimary,
                 onPressed: () {

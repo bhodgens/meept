@@ -102,9 +102,12 @@ class StorageService {
       return _cachedApiKey;
     }
     final prefsKey = _prefs?.getString(AppConstants.apiKeyPref);
-    if (prefsKey != null && prefsKey.isNotEmpty) return prefsKey;
-    if (AppConstants.defaultApiKey.isNotEmpty)
+    if (prefsKey != null && prefsKey.isNotEmpty) {
+      return prefsKey;
+    }
+    if (AppConstants.defaultApiKey.isNotEmpty) {
       return AppConstants.defaultApiKey;
+    }
     return null;
   }
 
@@ -113,11 +116,16 @@ class StorageService {
     final keychainKey = await _secureStorage?.read(
       key: AppConstants.apiKeyPref,
     );
-    if (keychainKey != null) return keychainKey;
+    if (keychainKey != null) {
+      return keychainKey;
+    }
     final prefsKey = _prefs?.getString(AppConstants.apiKeyPref);
-    if (prefsKey != null) return prefsKey;
-    if (AppConstants.defaultApiKey.isNotEmpty)
+    if (prefsKey != null) {
+      return prefsKey;
+    }
+    if (AppConstants.defaultApiKey.isNotEmpty) {
       return AppConstants.defaultApiKey;
+    }
     return null;
   }
 
