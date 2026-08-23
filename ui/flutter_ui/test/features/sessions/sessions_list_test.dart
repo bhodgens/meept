@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:meept_ui/features/home/home_screen.dart' show HomeTab;
+import 'package:meept_ui/dialogs/project_prompt_dialog.dart';
 import 'package:meept_ui/features/sessions/sessions_list.dart';
 import 'package:meept_ui/providers/providers.dart';
 import 'package:meept_ui/providers/tab_activation_provider.dart';
@@ -20,11 +21,14 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            sessionProvider.overrideWith((ref) => SessionNotifier(sdkClient: client, websocket: MockWebSocketService())),
+            sessionProvider.overrideWith(
+              (ref) => SessionNotifier(
+                sdkClient: client,
+                websocket: MockWebSocketService(),
+              ),
+            ),
           ],
-          child: const MaterialApp(
-            home: Scaffold(body: SessionsList()),
-          ),
+          child: const MaterialApp(home: Scaffold(body: SessionsList())),
         ),
       );
 
@@ -37,17 +41,20 @@ void main() {
       await tester.pumpAndSettle();
     });
 
-    testWidgets('displays "no sessions" when load succeeds but list is empty',
-        (tester) async {
+    testWidgets('displays "no sessions" when load succeeds but list is empty', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
             sessionProvider.overrideWith(
-                (ref) => SessionNotifier(sdkClient: _TestSdkClient([]), websocket: MockWebSocketService())),
+              (ref) => SessionNotifier(
+                sdkClient: _TestSdkClient([]),
+                websocket: MockWebSocketService(),
+              ),
+            ),
           ],
-          child: const MaterialApp(
-            home: Scaffold(body: SessionsList()),
-          ),
+          child: const MaterialApp(home: Scaffold(body: SessionsList())),
         ),
       );
 
@@ -56,19 +63,19 @@ void main() {
       expect(find.text('no sessions'), findsOneWidget);
     });
 
-    testWidgets('displays session tiles when sessions exist',
-        (tester) async {
+    testWidgets('displays session tiles when sessions exist', (tester) async {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
             sessionProvider.overrideWith((ref) {
-              final notifier = SessionNotifier(sdkClient: _TestSdkClient(_testSessions), websocket: MockWebSocketService());
+              final notifier = SessionNotifier(
+                sdkClient: _TestSdkClient(_testSessions),
+                websocket: MockWebSocketService(),
+              );
               return notifier;
             }),
           ],
-          child: const MaterialApp(
-            home: Scaffold(body: SessionsList()),
-          ),
+          child: const MaterialApp(home: Scaffold(body: SessionsList())),
         ),
       );
 
@@ -78,8 +85,9 @@ void main() {
       expect(find.text('another session'), findsOneWidget);
     });
 
-    testWidgets('selects session on tap, verifies activeSessionProvider updated',
-        (tester) async {
+    testWidgets('selects session on tap, verifies activeSessionProvider updated', (
+      tester,
+    ) async {
       final session = Session(
         id: '1',
         title: 'Test Session',
@@ -92,26 +100,34 @@ void main() {
         ProviderScope(
           overrides: [
             sessionProvider.overrideWith((ref) {
-              return SessionNotifier(sdkClient: _TestSdkClient([session]), websocket: MockWebSocketService());
+              return SessionNotifier(
+                sdkClient: _TestSdkClient([session]),
+                websocket: MockWebSocketService(),
+              );
             }),
             activeSessionProvider.overrideWith((ref) => null),
           ],
           child: Consumer(
             builder: (context, ref, _) {
               capturedActiveSession = ref.watch(activeSessionProvider);
-              return MaterialApp(
-                home: Scaffold(
-                  body: Column(
-                    children: [
-                      const SizedBox(
-                        height: 400,
-                        child: SessionsList(),
+              return MaterialApp.router(
+                routerConfig: GoRouter(
+                  initialLocation: '/sessions',
+                  routes: [
+                    GoRoute(
+                      path: '/sessions',
+                      builder: (_, __) => Scaffold(
+                        body: Column(
+                          children: [
+                            const SizedBox(height: 400, child: SessionsList()),
+                            Text(
+                              'active: ${capturedActiveSession?.id ?? "none"}',
+                            ),
+                          ],
+                        ),
                       ),
-                      Text(
-                        'active: ${capturedActiveSession?.id ?? "none"}',
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               );
             },
@@ -128,6 +144,14 @@ void main() {
       await tester.tap(find.text('test session'));
       // InkWell delays onTap when onDoubleTap is present; pump past the double-tap window
       await tester.pump(const Duration(milliseconds: 350));
+      await tester.pump();
+
+      // The unbound-session project prompt appears; decline it so
+      // activation proceeds without binding a project.
+      if (find.byType(ProjectPromptDialog).evaluate().isNotEmpty) {
+        await tester.tap(find.text('No'));
+        await tester.pump();
+      }
       await tester.pumpAndSettle();
 
       // Now shows session id '1'
@@ -135,39 +159,91 @@ void main() {
     });
 
     testWidgets(
-        'double-tap sets tabActivationProvider to chat and active session',
-        (tester) async {
-      final session = Session(
-        id: 'dbl1',
-        title: 'double tap me',
-        createdAt: DateTime.now(),
-      );
+      'double-tap sets tabActivationProvider to chat and active session',
+      (tester) async {
+        final session = Session(
+          id: 'dbl1',
+          title: 'double tap me',
+          createdAt: DateTime.now(),
+        );
 
-      // Use a ProviderContainer so we can read providers directly after the
-      // widget tree is torn down.
-      final container = ProviderContainer(
-        overrides: [
-          sessionProvider.overrideWith((ref) =>
-              SessionNotifier(sdkClient: _TestSdkClient([session]), websocket: MockWebSocketService())),
-        ],
-      );
-      addTearDown(container.dispose);
+        // Use a ProviderContainer so we can read providers directly after the
+        // widget tree is torn down.
+        final container = ProviderContainer(
+          overrides: [
+            sessionProvider.overrideWith(
+              (ref) => SessionNotifier(
+                sdkClient: _TestSdkClient([session]),
+                websocket: MockWebSocketService(),
+              ),
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
 
-      // GoRouter so `context.go('/')` in onDoubleTap doesn't throw.
+        // GoRouter so `context.go('/')` in onDoubleTap doesn't throw.
+        final router = GoRouter(
+          initialLocation: '/sessions',
+          routes: [
+            GoRoute(
+              path: '/sessions',
+              builder: (_, __) => const Scaffold(
+                body: SizedBox(width: 400, child: SessionsList()),
+              ),
+            ),
+            GoRoute(
+              path: '/',
+              builder: (_, __) => const Scaffold(body: SizedBox.shrink()),
+            ),
+          ],
+        );
+
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: MaterialApp.router(routerConfig: router),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Double-tap the session title
+        await tester.tap(find.text('double tap me'));
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.tap(find.text('double tap me'));
+        await tester.pumpAndSettle();
+
+        expect(container.read(tabActivationProvider), HomeTab.chat);
+        expect(container.read(activeSessionProvider)?.id, 'dbl1');
+      },
+    );
+
+    testWidgets('+ button quick-creates a session (no title dialog)', (
+      tester,
+    ) async {
+      // The + button now quick-creates a placeholder-titled session
+      // instead of showing a dialog; titles are auto-derived from the
+      // first user message. Verify the session appears in state.
       final router = GoRouter(
         initialLocation: '/sessions',
         routes: [
           GoRoute(
             path: '/sessions',
-            builder: (_, __) =>
-                const Scaffold(body: SizedBox(width: 400, child: SessionsList())),
+            builder: (_, __) => const Scaffold(body: SessionsList()),
           ),
-          GoRoute(
-            path: '/',
-            builder: (_, __) => const Scaffold(body: SizedBox.shrink()),
+          GoRoute(path: '/', builder: (_, __) => const Scaffold()),
+        ],
+      );
+      final container = ProviderContainer(
+        overrides: [
+          sessionProvider.overrideWith(
+            (ref) => SessionNotifier(
+              sdkClient: _TestSdkClient([]),
+              websocket: MockWebSocketService(),
+            ),
           ),
         ],
       );
+      addTearDown(container.dispose);
 
       await tester.pumpWidget(
         UncontrolledProviderScope(
@@ -175,62 +251,40 @@ void main() {
           child: MaterialApp.router(routerConfig: router),
         ),
       );
-      await tester.pumpAndSettle();
-
-      // Double-tap the session title
-      await tester.tap(find.text('double tap me'));
-      await tester.pump(const Duration(milliseconds: 50));
-      await tester.tap(find.text('double tap me'));
-      await tester.pumpAndSettle();
-
-      expect(container.read(tabActivationProvider), HomeTab.chat);
-      expect(container.read(activeSessionProvider)?.id, 'dbl1');
-    });
-
-    testWidgets('shows create session dialog when + button is pressed',
-        (tester) async {
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            sessionProvider.overrideWith(
-                (ref) => SessionNotifier(sdkClient: _TestSdkClient([]), websocket: MockWebSocketService())),
-          ],
-          child: const MaterialApp(
-            home: Scaffold(body: SessionsList()),
-          ),
-        ),
-      );
 
       await tester.pumpAndSettle();
+
+      expect(container.read(sessionProvider).sessions, isEmpty);
 
       await tester.tap(find.byIcon(Icons.add));
       await tester.pumpAndSettle();
 
-      expect(find.byType(AlertDialog), findsOneWidget);
-      expect(find.text('create session'), findsOneWidget);
-      expect(find.widgetWithText(TextButton, 'cancel'), findsOneWidget);
-      expect(find.widgetWithText(FilledButton, 'create'), findsOneWidget);
+      final sessions = container.read(sessionProvider).sessions;
+      expect(sessions, hasLength(1));
+      expect(find.byType(AlertDialog), findsNothing);
     });
 
-    testWidgets('archive confirmation shows when archive icon pressed',
-        (tester) async {
+    testWidgets('archive confirmation shows when archive icon pressed', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
             sessionProvider.overrideWith((ref) {
-              final notifier = SessionNotifier(sdkClient: _TestSdkClient([
-                Session(
-                  id: '1',
-                  title: 'Archive Me',
-                  createdAt: DateTime.now(),
-                ),
-              ]), websocket: MockWebSocketService());
+              final notifier = SessionNotifier(
+                sdkClient: _TestSdkClient([
+                  Session(
+                    id: '1',
+                    title: 'Archive Me',
+                    createdAt: DateTime.now(),
+                  ),
+                ]),
+                websocket: MockWebSocketService(),
+              );
               return notifier;
             }),
           ],
-          child: const MaterialApp(
-            home: Scaffold(body: SessionsList()),
-          ),
+          child: const MaterialApp(home: Scaffold(body: SessionsList())),
         ),
       );
 
@@ -249,12 +303,17 @@ void main() {
     // the RPC resolves. If the RPC fails, the user should see an error
     // status, never a premature "archived: X". Parity with TUI's
     // SessionArchivedMsg-based async-status pattern.
-    testWidgets('archive failure does not show premature success status',
-        (tester) async {
+    testWidgets('archive failure does not show premature success status', (
+      tester,
+    ) async {
       final container = ProviderContainer(
         overrides: [
-          sessionProvider.overrideWith((ref) => SessionNotifier(
-              sdkClient: _ArchiveThrowingSdkClient(), websocket: MockWebSocketService())),
+          sessionProvider.overrideWith(
+            (ref) => SessionNotifier(
+              sdkClient: _ArchiveThrowingSdkClient(),
+              websocket: MockWebSocketService(),
+            ),
+          ),
         ],
       );
       addTearDown(container.dispose);
@@ -262,9 +321,7 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(
-            home: Scaffold(body: SessionsList()),
-          ),
+          child: const MaterialApp(home: Scaffold(body: SessionsList())),
         ),
       );
       await tester.pumpAndSettle();
@@ -283,8 +340,11 @@ void main() {
       // After RPC fails, status must reflect failure, NOT "archived: ...".
       final status = container.read(statusMessageProvider);
       expect(status, isNotNull);
-      expect(status!.startsWith('archived:'), isFalse,
-          reason: 'status must not report success when RPC failed');
+      expect(
+        status!.startsWith('archived:'),
+        isFalse,
+        reason: 'status must not report success when RPC failed',
+      );
       expect(status.contains('failed'), isTrue);
 
       // Advance past the 2.5s auto-clear Timer so the test framework's
@@ -294,13 +354,18 @@ void main() {
 
     // Regression: delete status message must NOT fire synchronously before
     // the RPC resolves. Parity with TUI SessionDeletedMsg fix.
-    testWidgets('delete failure does not show premature success status',
-        (tester) async {
+    testWidgets('delete failure does not show premature success status', (
+      tester,
+    ) async {
       // Use a client that succeeds on listSessions but throws on delete.
       final container = ProviderContainer(
         overrides: [
-          sessionProvider.overrideWith((ref) => SessionNotifier(
-              sdkClient: _DeleteThrowingSdkClient(), websocket: MockWebSocketService())),
+          sessionProvider.overrideWith(
+            (ref) => SessionNotifier(
+              sdkClient: _DeleteThrowingSdkClient(),
+              websocket: MockWebSocketService(),
+            ),
+          ),
         ],
       );
       addTearDown(container.dispose);
@@ -308,9 +373,7 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(
-            home: Scaffold(body: SessionsList()),
-          ),
+          child: const MaterialApp(home: Scaffold(body: SessionsList())),
         ),
       );
       await tester.pumpAndSettle();
@@ -328,8 +391,11 @@ void main() {
 
       final status = container.read(statusMessageProvider);
       expect(status, isNotNull);
-      expect(status!.startsWith('deleted:'), isFalse,
-          reason: 'status must not report success when RPC failed');
+      expect(
+        status!.startsWith('deleted:'),
+        isFalse,
+        reason: 'status must not report success when RPC failed',
+      );
       expect(status.contains('failed'), isTrue);
 
       // Advance past the 2.5s auto-clear Timer.
@@ -339,14 +405,20 @@ void main() {
 
   group('SessionNotifier', () {
     test('state starts empty', () {
-      final notifier = SessionNotifier(sdkClient: _TestSdkClient([]), websocket: MockWebSocketService());
+      final notifier = SessionNotifier(
+        sdkClient: _TestSdkClient([]),
+        websocket: MockWebSocketService(),
+      );
       expect(notifier.state.sessions, isEmpty);
       expect(notifier.state.isLoading, isFalse);
       expect(notifier.state.error, isNull);
     });
 
     test('loadSessions populates sessions', () async {
-      final notifier = SessionNotifier(sdkClient: _TestSdkClient(_testSessions), websocket: MockWebSocketService());
+      final notifier = SessionNotifier(
+        sdkClient: _TestSdkClient(_testSessions),
+        websocket: MockWebSocketService(),
+      );
       await notifier.loadSessions();
 
       expect(notifier.state.sessions, hasLength(_testSessions.length));
@@ -355,7 +427,10 @@ void main() {
     });
 
     test('loadSessions sets error on failure', () async {
-      final notifier = SessionNotifier(sdkClient: _ThrowingSdkClient(), websocket: MockWebSocketService());
+      final notifier = SessionNotifier(
+        sdkClient: _ThrowingSdkClient(),
+        websocket: MockWebSocketService(),
+      );
       await notifier.loadSessions();
 
       expect(notifier.state.sessions, isEmpty);
@@ -365,7 +440,10 @@ void main() {
 
     test('createSession appends new session', () async {
       final client = _TestSdkClient(_testSessions);
-      final notifier = SessionNotifier(sdkClient: client, websocket: MockWebSocketService());
+      final notifier = SessionNotifier(
+        sdkClient: client,
+        websocket: MockWebSocketService(),
+      );
       await notifier.loadSessions();
 
       final count = notifier.state.sessions.length;
@@ -375,7 +453,10 @@ void main() {
 
     test('deleteSession removes session', () async {
       final client = _TestSdkClient(_testSessions);
-      final notifier = SessionNotifier(sdkClient: client, websocket: MockWebSocketService());
+      final notifier = SessionNotifier(
+        sdkClient: client,
+        websocket: MockWebSocketService(),
+      );
       await notifier.loadSessions();
 
       final firstId = _testSessions[0].id;
@@ -388,9 +469,15 @@ void main() {
     // preserves any prior error — once a banner shows it stays stuck.
     test('deleteSession clears prior error on success', () async {
       final client = _TestSdkClient(_testSessions);
-      final notifier = SessionNotifier(sdkClient: client, websocket: MockWebSocketService());
+      final notifier = SessionNotifier(
+        sdkClient: client,
+        websocket: MockWebSocketService(),
+      );
       // Seed an error via a failing load.
-      final throwing = SessionNotifier(sdkClient: _ThrowingSdkClient(), websocket: MockWebSocketService());
+      final throwing = SessionNotifier(
+        sdkClient: _ThrowingSdkClient(),
+        websocket: MockWebSocketService(),
+      );
       await throwing.loadSessions();
       expect(throwing.state.error, isNotNull);
       // Simulate error carrying over by copying state into `notifier`.
@@ -403,7 +490,10 @@ void main() {
 
     test('archiveSession clears prior error on success', () async {
       final client = _TestSdkClient(_testSessions);
-      final notifier = SessionNotifier(sdkClient: client, websocket: MockWebSocketService());
+      final notifier = SessionNotifier(
+        sdkClient: client,
+        websocket: MockWebSocketService(),
+      );
       await notifier.loadSessions();
       // Seed an error.
       notifier.state = notifier.state.copyWith(error: 'prior failure');
@@ -415,7 +505,10 @@ void main() {
 
     test('unarchiveSession clears prior error on success', () async {
       final client = _TestSdkClient(_testSessions);
-      final notifier = SessionNotifier(sdkClient: client, websocket: MockWebSocketService());
+      final notifier = SessionNotifier(
+        sdkClient: client,
+        websocket: MockWebSocketService(),
+      );
       await notifier.loadSessions();
       // Seed an error.
       notifier.state = notifier.state.copyWith(error: 'prior failure');
@@ -463,6 +556,7 @@ class _TestSdkClient extends SdkApiClient {
     required String title,
     String? agentId,
     String? cwd,
+    String? projectId,
   }) async {
     final session = Session(
       id: 'new-${_localSessions.length + 1}',
@@ -483,7 +577,10 @@ class _TestSdkClient extends SdkApiClient {
   }
 
   @override
-  Future<void> archiveSession(String sessionId, {required bool archived}) async {
+  Future<void> archiveSession(
+    String sessionId, {
+    required bool archived,
+  }) async {
     // No-op: the notifier flips the flag locally. Tests only assert state.
   }
 }
@@ -513,19 +610,24 @@ class _ThrowingSdkClient extends SdkApiClient {
 /// Client that throws on archiveSession — used to verify the UI does NOT
 /// report success prematurely when the RPC fails (parity with TUI).
 class _ArchiveThrowingSdkClient extends SdkApiClient {
-  _ArchiveThrowingSdkClient()
-      : super(host: 'localhost', port: 65434);
+  _ArchiveThrowingSdkClient() : super(host: 'localhost', port: 65434);
 
   @override
   Future<List<Map<String, dynamic>>> listSessions({int? limit}) async {
     return [
-      Session(id: '1', title: 'archive me', createdAt: DateTime(2025, 1, 1))
-          .toJson(),
+      Session(
+        id: '1',
+        title: 'archive me',
+        createdAt: DateTime(2025, 1, 1),
+      ).toJson(),
     ];
   }
 
   @override
-  Future<void> archiveSession(String sessionId, {required bool archived}) async {
+  Future<void> archiveSession(
+    String sessionId, {
+    required bool archived,
+  }) async {
     throw Exception('archive rpc failed');
   }
 }
@@ -533,14 +635,16 @@ class _ArchiveThrowingSdkClient extends SdkApiClient {
 /// Client that throws on deleteSession — used to verify the UI does NOT
 /// report success prematurely when the RPC fails (parity with TUI).
 class _DeleteThrowingSdkClient extends SdkApiClient {
-  _DeleteThrowingSdkClient()
-      : super(host: 'localhost', port: 65435);
+  _DeleteThrowingSdkClient() : super(host: 'localhost', port: 65435);
 
   @override
   Future<List<Map<String, dynamic>>> listSessions({int? limit}) async {
     return [
-      Session(id: '1', title: 'archive me', createdAt: DateTime(2025, 1, 1))
-          .toJson(),
+      Session(
+        id: '1',
+        title: 'archive me',
+        createdAt: DateTime(2025, 1, 1),
+      ).toJson(),
     ];
   }
 

@@ -21,6 +21,20 @@ class _StubSdkClient extends SdkApiClient {
   Future<List<Map<String, dynamic>>> listAgents() async => [];
 }
 
+/// A [ChatNotifier] whose [loadMessages] is a no-op so tests can set
+/// state directly without triggering a real HTTP fetch.
+class _TestChatNotifier extends ChatNotifier {
+  _TestChatNotifier({
+    required super.sdkClient,
+    required super.websocket,
+    required super.ttsNotifier,
+    required super.sessionId,
+  });
+
+  @override
+  Future<void> loadMessages() async {}
+}
+
 class _StubWebSocket extends WebSocketService {
   _StubWebSocket() : super(host: 'localhost', port: 8081);
 
@@ -201,7 +215,9 @@ void main() {
         ProviderScope(
           overrides: [
             chatProvider("test-session").overrideWith(
-              (ref) => ChatNotifier(
+              // No-load notifier: the real one auto-fetches messages on
+              // construction, clobbering the seeded loading state.
+              (ref) => _TestChatNotifier(
                 sdkClient: _StubSdkClient(),
                 websocket: _StubWebSocket(),
                 ttsNotifier: _StubTtsNotifier(),

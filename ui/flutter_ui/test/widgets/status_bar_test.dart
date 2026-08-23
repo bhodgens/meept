@@ -28,11 +28,20 @@ Widget _wrap({required int tab}) {
   );
 }
 
+
+/// Finds text inside RichText spans (find.textContaining only sees
+/// plain [Text] widgets; StatusBar renders its parts as TextSpans).
+Finder findSpanText(String needle) => find.byWidgetPredicate(
+      (w) =>
+          w is RichText &&
+          w.text.toPlainText().contains(needle),
+    );
+
 void main() {
   testWidgets('renders verbosity + connection', (tester) async {
     await tester.pumpWidget(_wrap(tab: 0));
     await tester.pump();
-    expect(find.textContaining('verbosity'), findsOneWidget);
+    expect(findSpanText('verbosity'), findsOneWidget);
   });
 
   testWidgets('renders transient status message when set, hides other parts',
@@ -56,7 +65,7 @@ void main() {
     container.read(statusMessageProvider.notifier).state = 'session archived';
     await tester.pump();
     expect(find.text('session archived'), findsOneWidget);
-    expect(find.textContaining('verbosity'), findsNothing);
+    expect(findSpanText('verbosity'), findsNothing);
   });
 
   testWidgets('keybind hint shows sessions-specific text on sessions tab',
@@ -65,15 +74,15 @@ void main() {
     await tester.pump();
     // Two assertions guard against a session title like "archive-test"
     // leaking into the session-part and false-matching the keybind hint.
-    expect(find.textContaining('dbl-click'), findsOneWidget);
-    expect(find.textContaining('archive'), findsOneWidget);
+    expect(findSpanText('dbl-click'), findsOneWidget);
+    expect(findSpanText('archive'), findsOneWidget);
   });
 
   testWidgets('keybind hint shows chat-specific text on chat tab',
       (tester) async {
     await tester.pumpWidget(_wrap(tab: 0));
     await tester.pump();
-    expect(find.textContaining('focus'), findsOneWidget);
-    expect(find.textContaining('verbosity'), findsOneWidget);
+    expect(findSpanText('focus'), findsOneWidget);
+    expect(findSpanText('verbosity'), findsOneWidget);
   });
 }

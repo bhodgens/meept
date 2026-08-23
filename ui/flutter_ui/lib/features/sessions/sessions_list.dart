@@ -353,9 +353,10 @@ class _SessionsListState extends ConsumerState<SessionsList> {
         key: ValueKey('session-tile-${session.id}'),
         onTap: () => _activateSession(context, session),
         onDoubleTap: () {
-          // Session was already activated by onTap; this fast-path
-          // just ensures navigation to chat without re-triggering the
-          // project prompt.
+          // A true double-tap suppresses onTap (gesture arena), so the
+          // session may not be activated yet. Activate it here so the
+          // chat tab has a valid active session.
+          _doActivateSession(session);
           ref.read(tabActivationProvider.notifier).state = HomeTab.chat;
           context.go('/');
         },

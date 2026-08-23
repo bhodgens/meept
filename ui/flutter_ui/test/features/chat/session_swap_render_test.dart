@@ -191,7 +191,7 @@ void main() {
       // After the fix: a loading spinner is shown instead, distinguishing
       // the transient loading window from a genuinely empty session.
       await tester.pumpWidget(_buildTestApp(
-        child: const ChatMessageList(sessionId: 'test'),
+        child: const ChatMessageList(sessionId: 'test-session'),
         initialChatState: const ChatState(
           messages: [],
           isLoading: true,
@@ -228,7 +228,7 @@ void main() {
       // Guards against the fix accidentally showing the spinner on
       // genuinely empty sessions.
       await tester.pumpWidget(_buildTestApp(
-        child: const ChatMessageList(sessionId: 'test'),
+        child: const ChatMessageList(sessionId: 'test-session'),
         initialChatState: const ChatState(
           messages: [],
           isLoading: false,
@@ -242,7 +242,7 @@ void main() {
 
     testWidgets('messages render normally when loaded', (tester) async {
       await tester.pumpWidget(_buildTestApp(
-        child: const ChatMessageList(sessionId: 'test'),
+        child: const ChatMessageList(sessionId: 'test-session'),
         initialChatState: ChatState(
           messages: [
             ChatMessage(

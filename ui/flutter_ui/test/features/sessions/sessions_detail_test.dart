@@ -64,9 +64,11 @@ void main() {
             home: Scaffold(
               body: Row(
                 children: [
-                  SessionsDetailPane(
-                    session: fallback,
-                    sessionId: 's1',
+                  Expanded(
+                    child: SessionsDetailPane(
+                      session: fallback,
+                      sessionId: 's1',
+                    ),
                   ),
                 ],
               ),
@@ -102,7 +104,7 @@ void main() {
             home: Scaffold(
               body: Row(
                 children: [
-                  SessionsDetailPane(session: session),
+                  Expanded(child: SessionsDetailPane(session: session)),
                 ],
               ),
             ),

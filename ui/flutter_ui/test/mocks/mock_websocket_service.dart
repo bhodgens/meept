@@ -18,9 +18,6 @@ class MockWebSocketService extends WebSocketService {
   void pause() {}
 
   @override
-  void resume() {}
-
-  @override
   bool get isConnected => false;
 
   @override

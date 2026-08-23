@@ -21,7 +21,6 @@
 import 'package:flutter/material.dart';
 import '../theme/colors.dart';
 import '../theme/typography.dart';
-import '../theme/effects.dart';
 
 class Layout4TopTabsPanels extends StatefulWidget {
   const Layout4TopTabsPanels({super.key});
@@ -34,6 +33,10 @@ class _Layout4TopTabsPanelsState extends State<Layout4TopTabsPanels> {
   bool _leftPanelExpanded = true;
   bool _rightPanelExpanded = true;
   int _selectedTab = 0;
+
+  void selectTab(int index) {
+    setState(() => _selectedTab = index);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -153,8 +156,7 @@ class _TabButton extends StatelessWidget {
     return Expanded(
       child: GestureDetector(
         onTap: () {
-          final state = context.findAncestorStateOfType<_Layout4TopTabsPanelsState>();
-          state?.setState(() => state._selectedTab = index);
+          context.findAncestorStateOfType<_Layout4TopTabsPanelsState>()?.selectTab(index);
         },
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),

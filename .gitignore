@@ -57,6 +57,12 @@ ui/flutter_ui/macos/Flutter/GeneratedPluginRegistrant.swift
 ui/flutter_ui/macos/Podfile.lock
 ui/flutter_ui/macos/Runner.xcodeproj/project.pbxproj
 ui/flutter_ui/pubspec.lock
+
+# Agent skills (installed via `npx skills add` / `dart run skills@`)
+ui/flutter_ui/.agents/
+ui/flutter_ui/.claude/
+ui/flutter_ui/.config/
+ui/flutter_ui/skills-lock.json
 ui/flutter_ui/windows/flutter/generated_plugin_registrant.cc
 ui/flutter_ui/windows/flutter/generated_plugins.cmake
 menubar/.metadata_never_index

@@ -1396,6 +1396,28 @@ class SdkApiClient {
     await _post('/api/v1/config/menubar', body: {'content': content});
   }
 
+  /// GET /api/v1/config/memory — the main daemon config (meept.json5).
+  /// Read-only: the daemon exposes no save endpoint for the whole file.
+  /// Structured edits go through [setClientConfig] (client block) or
+  /// [getOrchestratorConfig]/[saveOrchestratorConfig].
+  Future<String> getMemoryConfig() async {
+    final raw = await _get('/api/v1/config/memory');
+    return raw['content'] as String? ?? '';
+  }
+
+  /// GET /api/v1/config/orchestrator — typed orchestrator settings.
+  Future<Map<String, dynamic>> getOrchestratorConfig() async {
+    return _get('/api/v1/config/orchestrator');
+  }
+
+  /// PUT /api/v1/config/orchestrator — write the orchestrator block back
+  /// to meept.json5, preserving all other top-level keys. Atomic on the
+  /// daemon side (tmp-then-rename).
+  Future<Map<String, dynamic>> saveOrchestratorConfig(
+      Map<String, dynamic> oc) async {
+    return _put('/api/v1/config/orchestrator', body: oc);
+  }
+
   // ===== Terminal =====
 
   Future<sdk.CommandHistory?> getTerminalHistory() async {

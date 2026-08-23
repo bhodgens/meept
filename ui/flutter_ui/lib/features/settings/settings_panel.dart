@@ -9,6 +9,7 @@ import '../../theme/typography.dart';
 import '../../core/constants.dart';
 import '../../providers/providers.dart';
 import 'settings_inputs.dart';
+import 'orchestrator_config_editor.dart';
 import '../../widgets/error_banner.dart';
 
 /// Form field names used throughout the settings panel.
@@ -62,6 +63,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
     'client': 'client.json5',
     'models': 'models.json5',
     'menubar': 'menubar.json5',
+    'memory': 'meept.json5 (read-only)',
   };
 
   @override
@@ -123,6 +125,10 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
           content = await _client.getModelsConfig();
         case 'menubar':
           content = await _client.getMenubarConfig();
+        case 'memory':
+          // Main daemon config — read-only in the GUI. Structured edits
+          // go through the orchestrator editor or `meept config set`.
+          content = await _client.getMemoryConfig();
         default:
           content = '';
       }
@@ -267,6 +273,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
               padding: EdgeInsets.zero,
               children: [
                 _buildConnectionSection(storage),
+                const OrchestratorConfigEditor(),
                 if (_error != null)
                   ErrorBanner(message: _error!, onDismiss: _loadConfig),
                 _buildEditor(),
@@ -487,6 +494,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
                 maxLines: null,
                 expands: true,
                 textAlignVertical: TextAlignVertical.top,
+                readOnly: _selectedConfig == 'memory',
                 onChanged: (value) {
                   if (_programmaticUpdate) return;
                   setState(() {

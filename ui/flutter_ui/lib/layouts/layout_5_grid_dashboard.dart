@@ -432,28 +432,6 @@ class _FloatingChatBar extends StatelessWidget {
   }
 }
 
-class _QuickActionsFab extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(30),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: CyberpunkColors.orangeGradient,
-        ),
-        boxShadow: CyberpunkEffects.glowShadow(intensity: 1.0),
-      ),
-      child: IconButton(
-        icon: const Icon(Icons.add),
-        color: CyberpunkColors.black,
-        onPressed: () {},
-        iconSize: 28,
-      ),
-    );
-  }
-}
 
 class _StatusBar extends StatelessWidget {
   @override
