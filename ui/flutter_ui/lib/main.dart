@@ -41,7 +41,8 @@ void main() async {
 
   // Restore saved window size/position on desktop platforms
   await WindowGeometryService.initialize();
-  if (!kIsWeb) {  // Desktop-only: window management
+  if (!kIsWeb) {
+    // Desktop-only: window management
     // Intercept the native close button so we can persist geometry
     await windowManager.setPreventClose(true);
     windowManager.addListener(_WindowCloseHandler());
@@ -54,7 +55,7 @@ void main() async {
 
   // Initialize Sentry for crash reporting (only when a real DSN is configured)
   // Environment variables not available on web
-    const sentryDsn = null;  // Platform.environment['SENTRY_DSN'];
+  const sentryDsn = null; // Platform.environment['SENTRY_DSN'];
   if (sentryDsn != null && sentryDsn.isNotEmpty) {
     await SentryFlutter.init(
       (options) {
@@ -63,18 +64,14 @@ void main() async {
       },
       appRunner: () => runApp(
         const ProviderScope(
-          child: _ModifierKeyInitializer(
-            child: CyberpunkApp(),
-          ),
+          child: _ModifierKeyInitializer(child: CyberpunkApp()),
         ),
       ),
     );
   } else {
     runApp(
       const ProviderScope(
-        child: _ModifierKeyInitializer(
-          child: CyberpunkApp(),
-        ),
+        child: _ModifierKeyInitializer(child: CyberpunkApp()),
       ),
     );
   }
@@ -87,10 +84,12 @@ class _ModifierKeyInitializer extends ConsumerStatefulWidget {
   const _ModifierKeyInitializer({required this.child});
 
   @override
-  ConsumerState<_ModifierKeyInitializer> createState() => _ModifierKeyInitializerState();
+  ConsumerState<_ModifierKeyInitializer> createState() =>
+      _ModifierKeyInitializerState();
 }
 
-class _ModifierKeyInitializerState extends ConsumerState<_ModifierKeyInitializer> {
+class _ModifierKeyInitializerState
+    extends ConsumerState<_ModifierKeyInitializer> {
   @override
   void initState() {
     super.initState();
@@ -98,6 +97,11 @@ class _ModifierKeyInitializerState extends ConsumerState<_ModifierKeyInitializer
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(modifierKeyProvider.notifier).load();
       ref.read(guiLayoutProvider.notifier).load();
+      // Load rendering prefs from the daemon config (best-effort; the
+      // daemon may not be reachable yet — defaults hold until it is).
+      ref
+          .read(renderingPrefsProvider.notifier)
+          .load(ref.read(sdkClientProvider));
     });
   }
 
@@ -148,8 +152,7 @@ class _AppLifecycleWrapper extends ConsumerStatefulWidget {
       _AppLifecycleWrapperState();
 }
 
-class _AppLifecycleWrapperState
-    extends ConsumerState<_AppLifecycleWrapper>
+class _AppLifecycleWrapperState extends ConsumerState<_AppLifecycleWrapper>
     with WidgetsBindingObserver {
   Timer? _reconnectDelay;
 

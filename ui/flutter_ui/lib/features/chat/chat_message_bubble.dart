@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../providers/rendering_prefs_provider.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../theme/markdown_style.dart';
@@ -7,7 +9,7 @@ import '../../theme/syntax_highlighter.dart';
 import '../../models/api_models.dart';
 import 'find_state.dart';
 
-class ChatMessageBubble extends StatelessWidget {
+class ChatMessageBubble extends ConsumerWidget {
   final ChatMessage message;
   final String? highlightQuery;
   final bool caseSensitive;
@@ -30,9 +32,11 @@ class ChatMessageBubble extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final isUser = message.role == 'user';
     final isSystem = message.role == 'system';
+    // Live rendering prefs: markdown on/off + word wrap toggle.
+    final prefs = ref.watch(renderingPrefsProvider);
 
     // Snapshot of image parts for this message, computed once per build.
     final imageParts = message.parts
@@ -47,10 +51,7 @@ class ChatMessageBubble extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: CyberpunkColors.redAlert.withValues(alpha: 0.15),
-          border: Border.all(
-            color: CyberpunkColors.redAlert,
-            width: 1,
-          ),
+          border: Border.all(color: CyberpunkColors.redAlert, width: 1),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Column(
@@ -83,8 +84,9 @@ class ChatMessageBubble extends StatelessWidget {
                   )
                 : _highlightedText(
                     content: message.content,
-                    baseStyle: CyberpunkTypography.bodyMedium
-                        .copyWith(color: CyberpunkColors.redAlert),
+                    baseStyle: CyberpunkTypography.bodyMedium.copyWith(
+                      color: CyberpunkColors.redAlert,
+                    ),
                   ),
           ],
         ),
@@ -104,8 +106,9 @@ class ChatMessageBubble extends StatelessWidget {
               ? CyberpunkColors.orangePrimary.withValues(alpha: 0.6)
               : CyberpunkColors.midGray.withValues(alpha: 0.6),
           border: Border.all(
-            color:
-                isUser ? CyberpunkColors.orangePrimary : CyberpunkColors.lightGray,
+            color: isUser
+                ? CyberpunkColors.orangePrimary
+                : CyberpunkColors.lightGray,
             width: 1,
           ),
           borderRadius: BorderRadius.only(
@@ -129,18 +132,30 @@ class ChatMessageBubble extends StatelessWidget {
             // v1 (see handler.go FormatEnhancedAsyncTaskAck + modeToLabel).
             // When ChatMessage carries a typed `suggestedMode` field, render a
             // dedicated mode chip here instead of relying on markdown.
-            MarkdownBody(
-              data: message.content,
-              styleSheet: buildCyberpunkMarkdownStyle(context).copyWith(
-                p: isUser
+            if (prefs.markdown)
+              MarkdownBody(
+                data: message.content,
+                styleSheet: buildCyberpunkMarkdownStyle(context).copyWith(
+                  p: isUser
+                      ? CyberpunkTypography.bodyMedium.copyWith(
+                          color: CyberpunkColors.orangeGlow,
+                        )
+                      : null,
+                ),
+                syntaxHighlighter: CyberpunkSyntaxHighlighter(),
+                // word_wrap=false keeps long tokens on one line with a
+                // horizontal scroll; true (default) wraps naturally.
+                softLineBreak: prefs.wordWrap,
+              )
+            else
+              SelectableText(
+                message.content,
+                style: isUser
                     ? CyberpunkTypography.bodyMedium.copyWith(
                         color: CyberpunkColors.orangeGlow,
                       )
-                    : null,
+                    : CyberpunkTypography.bodyMedium,
               ),
-              syntaxHighlighter: CyberpunkSyntaxHighlighter(),
-              softLineBreak: true,
-            ),
             if (highlightQuery != null && highlightRanges.isNotEmpty) ...[
               const SizedBox(height: 4),
               _highlightedText(
@@ -211,18 +226,23 @@ class ChatMessageBubble extends StatelessWidget {
       final start = range.start.clamp(0, content.length);
       final end = range.end.clamp(start, content.length);
       if (start > prev) {
-        spans.add(TextSpan(text: content.substring(prev, start), style: baseStyle));
+        spans.add(
+          TextSpan(text: content.substring(prev, start), style: baseStyle),
+        );
       }
       final isCurrent = absIdx == currentRangeAbsIndex;
-      spans.add(TextSpan(
-        text: content.substring(start, end),
-        style: baseStyle.copyWith(
-          background: Paint()..color = isCurrent
-              ? CyberpunkColors.orangePrimary
-              : CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
-          color: isCurrent ? CyberpunkColors.black : null,
+      spans.add(
+        TextSpan(
+          text: content.substring(start, end),
+          style: baseStyle.copyWith(
+            background: Paint()
+              ..color = isCurrent
+                  ? CyberpunkColors.orangePrimary
+                  : CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
+            color: isCurrent ? CyberpunkColors.black : null,
+          ),
         ),
-      ));
+      );
       prev = end;
     }
     if (prev < content.length) {

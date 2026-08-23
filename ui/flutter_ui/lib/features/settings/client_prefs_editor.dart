@@ -229,6 +229,18 @@ class _ClientPrefsEditorState extends ConsumerState<ClientPrefsEditor> {
         };
         ref.read(verbosityProvider.notifier).setLevel(level, persist: false);
       }
+      if (mounted) {
+        // Rendering prefs: keep the live provider in sync so chat
+        // re-renders immediately (markdown, word wrap, auto-resume).
+        final rp = ref.read(renderingPrefsProvider.notifier);
+        if (key == 'rendering.markdown') {
+          rp.setMarkdown(value as bool);
+        } else if (key == 'rendering.word_wrap') {
+          rp.setWordWrap(value as bool);
+        } else if (key == 'session.auto_resume') {
+          rp.setAutoResume(value as bool);
+        }
+      }
     } catch (e) {
       if (mounted) {
         setState(() {

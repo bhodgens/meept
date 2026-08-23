@@ -70,6 +70,7 @@ import '../../providers/providers.dart';
 import '../../models/api_models.dart';
 import '../../providers/status_message_provider.dart';
 import '../../providers/verbosity_provider.dart';
+import '../../providers/rendering_prefs_provider.dart';
 import '../chat/chat_tab.dart';
 import 'tools_dropdown.dart' show HamburgerMenu;
 import 'session_info_overlay.dart';
@@ -94,7 +95,6 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
   /// Guards the one-time initial session selection so reconnects after a
   /// transient network drop don't re-run it (mirrors HomeScreen).
   bool _initialLoadDone = false;
-
 
   @override
   void initState() {
@@ -151,7 +151,8 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
   /// Falls back to creating a new session when none is reusable.
   Future<void> _createInitialSession() async {
     final notifier = ref.read(sessionProvider.notifier);
-    final session = notifier.findReusableEmptySession() ??
+    final session =
+        notifier.findReusableEmptySession() ??
         await notifier.createSession('new session');
     if (session != null && mounted) {
       setState(() => _selectedSession = session);
@@ -194,6 +195,10 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
     if (!_initialLoadDone) {
       _initialLoadDone = true;
       final active = ref.read(activeSessionProvider);
+      // session.auto_resume=false means "start with no session selected";
+      // the user picks one from the list (or creates one) explicitly.
+      final autoResume = ref.read(renderingPrefsProvider).autoResume;
+      if (!autoResume) return;
       if (active == null) {
         await _createInitialSession();
       } else if (mounted) {
@@ -244,10 +249,18 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
         break;
       // Open full-window dialogs for tab views
       case 'sessions':
-        _showFullWindowDialog('sessions', Icons.folder, const _SessionsDialog());
+        _showFullWindowDialog(
+          'sessions',
+          Icons.folder,
+          const _SessionsDialog(),
+        );
         break;
       case 'plans':
-        _showFullWindowDialog('plans', Icons.document_scanner, const _PlansDialog());
+        _showFullWindowDialog(
+          'plans',
+          Icons.document_scanner,
+          const _PlansDialog(),
+        );
         break;
       case 'tasks':
         _showFullWindowDialog('tasks', Icons.task_alt, const _TasksDialog());
@@ -275,7 +288,9 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
   }
 
   void _showEditDescriptionDialog() {
-    final controller = TextEditingController(text: _selectedSession?.description ?? '');
+    final controller = TextEditingController(
+      text: _selectedSession?.description ?? '',
+    );
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -312,7 +327,12 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
               Navigator.of(context).pop();
               showStatusMessage(ref, 'description updated');
             },
-            child: Text('save', style: CyberpunkTypography.bodySmall.copyWith(color: CyberpunkColors.orangePrimary)),
+            child: Text(
+              'save',
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.orangePrimary,
+              ),
+            ),
           ),
         ],
       ),
@@ -402,7 +422,9 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
   }
 
   void _onSessionSelected(Session session) {
-    debugPrint('[session-debug] _onSessionSelected: id=${session.id} title=${session.title}');
+    debugPrint(
+      '[session-debug] _onSessionSelected: id=${session.id} title=${session.title}',
+    );
     setState(() => _selectedSession = session);
     ref.read(activeSessionProvider.notifier).state = session;
   }
@@ -452,12 +474,16 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
                 ),
               // Main content area (ChatTab provides its own header)
               Expanded(
-                child: Builder(builder: (context) {
-                  debugPrint('[session-debug] build main area: _selectedSession=${_selectedSession?.id}');
-                  return _selectedSession != null
-                      ? ChatTab(sessionId: _selectedSession!.id)
-                      : const _NoSessionPlaceholder();
-                }),
+                child: Builder(
+                  builder: (context) {
+                    debugPrint(
+                      '[session-debug] build main area: _selectedSession=${_selectedSession?.id}',
+                    );
+                    return _selectedSession != null
+                        ? ChatTab(sessionId: _selectedSession!.id)
+                        : const _NoSessionPlaceholder();
+                  },
+                ),
               ),
             ],
           ),
@@ -563,10 +589,7 @@ class _Sidebar extends ConsumerStatefulWidget {
   final ValueChanged<Session> onSessionSelected;
   final Session? selectedSession;
 
-  const _Sidebar({
-    required this.onSessionSelected,
-    this.selectedSession,
-  });
+  const _Sidebar({required this.onSessionSelected, this.selectedSession});
 
   @override
   ConsumerState<_Sidebar> createState() => _SidebarState();
@@ -634,125 +657,128 @@ class _SidebarState extends ConsumerState<_Sidebar> {
         tintColor: CyberpunkColors.greenSuccess,
         tintOpacity: 0.08,
         child: Column(
-        children: [
-          // Sidebar header with hamburger, meept logo, and connection status
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(
-                  color: CyberpunkColors.orangePrimary,
-                  width: 2,
-                ),
-              ),
-            ),
-            child: Row(
-              children: [
-                // Hamburger menu
-                HamburgerMenu(
-                  onToolSelected: (route) {
-                    switch (route) {
-                      case 'memory':
-                        context.goToolMemory();
-                      case 'prompts':
-                        context.goToolPrompts();
-                      case 'settings':
-                        context.goSettings();
-                      case 'files':
-                        context.goToolFiles();
-                      case 'terminal':
-                        context.goToolTerminal();
-                      case 'calendar':
-                        context.goToolCalendar();
-                      case 'metrics':
-                        context.goToolMetrics();
-                      case 'search':
-                        context.goToolSearch();
-                      case 'branches':
-                        context.goToolBranches();
-                      default:
-                        break;
-                    }
-                  },
-                ),
-                const SizedBox(width: 8),
-                // ASCII-style meept logo
-                Text(
-                  'meept',
-                  style: CyberpunkTypography.label.copyWith(
+          children: [
+            // Sidebar header with hamburger, meept logo, and connection status
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
                     color: CyberpunkColors.orangePrimary,
-                    fontFamily: 'SourceCodePro',
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1,
+                    width: 2,
                   ),
-                ),
-                const Spacer(),
-              ],
-            ),
-          ),
-          // Project-grouped session tree
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: groups.length,
-              itemBuilder: (context, index) {
-                final group = groups[index];
-                final isExpanded = _expandedProjects[group.projectId] ?? false;
-                final limit = _projectSessionLimit[group.projectId] ?? _defaultSessionLimit;
-                return _ProjectGroupItem(
-                  group: group,
-                  isExpanded: isExpanded,
-                  sessionLimit: limit,
-                  selectedSessionId: widget.selectedSession?.id,
-                  onToggle: () {
-                    setState(() {
-                      _expandedProjects[group.projectId] = !isExpanded;
-                    });
-                  },
-                  onShowMore: () {
-                    setState(() {
-                      _projectSessionLimit[group.projectId] = limit + 10;
-                    });
-                  },
-                  onSessionSelected: widget.onSessionSelected,
-                  onCreateSession: () => _createSessionInProject(group),
-                );
-              },
-            ),
-          ),
-          // Sidebar footer with "add project" button
-          Container(
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              border: Border(
-                top: BorderSide(
-                  color: CyberpunkColors.midGray,
-                  width: 0.5,
                 ),
               ),
-            ),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.add, size: 18),
-                  iconSize: 18,
-                  padding: const EdgeInsets.all(4),
-                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                  color: CyberpunkColors.greenSuccess,
-                    tooltip: 'add project',
-                  onPressed: _addProject,
-                ),
-                Text(
-                  'add project',
-                  style: CyberpunkTypography.bodySmall.copyWith(
-                    fontSize: 11,
-                    color: CyberpunkColors.midGray,
+              child: Row(
+                children: [
+                  // Hamburger menu
+                  HamburgerMenu(
+                    onToolSelected: (route) {
+                      switch (route) {
+                        case 'memory':
+                          context.goToolMemory();
+                        case 'prompts':
+                          context.goToolPrompts();
+                        case 'settings':
+                          context.goSettings();
+                        case 'files':
+                          context.goToolFiles();
+                        case 'terminal':
+                          context.goToolTerminal();
+                        case 'calendar':
+                          context.goToolCalendar();
+                        case 'metrics':
+                          context.goToolMetrics();
+                        case 'search':
+                          context.goToolSearch();
+                        case 'branches':
+                          context.goToolBranches();
+                        default:
+                          break;
+                      }
+                    },
                   ),
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  // ASCII-style meept logo
+                  Text(
+                    'meept',
+                    style: CyberpunkTypography.label.copyWith(
+                      color: CyberpunkColors.orangePrimary,
+                      fontFamily: 'SourceCodePro',
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  const Spacer(),
+                ],
+              ),
             ),
-          ),
-        ],
+            // Project-grouped session tree
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                itemCount: groups.length,
+                itemBuilder: (context, index) {
+                  final group = groups[index];
+                  final isExpanded =
+                      _expandedProjects[group.projectId] ?? false;
+                  final limit =
+                      _projectSessionLimit[group.projectId] ??
+                      _defaultSessionLimit;
+                  return _ProjectGroupItem(
+                    group: group,
+                    isExpanded: isExpanded,
+                    sessionLimit: limit,
+                    selectedSessionId: widget.selectedSession?.id,
+                    onToggle: () {
+                      setState(() {
+                        _expandedProjects[group.projectId] = !isExpanded;
+                      });
+                    },
+                    onShowMore: () {
+                      setState(() {
+                        _projectSessionLimit[group.projectId] = limit + 10;
+                      });
+                    },
+                    onSessionSelected: widget.onSessionSelected,
+                    onCreateSession: () => _createSessionInProject(group),
+                  );
+                },
+              ),
+            ),
+            // Sidebar footer with "add project" button
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(color: CyberpunkColors.midGray, width: 0.5),
+                ),
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.add, size: 18),
+                    iconSize: 18,
+                    padding: const EdgeInsets.all(4),
+                    constraints: const BoxConstraints(
+                      minWidth: 32,
+                      minHeight: 32,
+                    ),
+                    color: CyberpunkColors.greenSuccess,
+                    tooltip: 'add project',
+                    onPressed: _addProject,
+                  ),
+                  Text(
+                    'add project',
+                    style: CyberpunkTypography.bodySmall.copyWith(
+                      fontSize: 11,
+                      color: CyberpunkColors.midGray,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -785,7 +811,10 @@ class _SidebarState extends ConsumerState<_Sidebar> {
   /// path against the paths of sessions (or the active project) that *do*
   /// have a projectId. This merges sessions into the same group instead of
   /// creating a duplicate `path:<...>` group for the same logical project.
-  List<_ProjectGroup> _groupByProject(List<Session> sessions, Project? activeProject) {
+  List<_ProjectGroup> _groupByProject(
+    List<Session> sessions,
+    Project? activeProject,
+  ) {
     final byProject = <String, List<Session>>{};
     final projectNames = <String, String>{};
     final projectBranches = <String, String>{};
@@ -794,7 +823,8 @@ class _SidebarState extends ConsumerState<_Sidebar> {
     // plus the active project (if any).
     final pathToProjectId = <String, String>{};
     if (activeProject != null && activeProject.localPath.isNotEmpty) {
-      pathToProjectId[_normalisePath(activeProject.localPath)] = activeProject.id;
+      pathToProjectId[_normalisePath(activeProject.localPath)] =
+          activeProject.id;
     }
     for (final session in sessions) {
       final pid = session.projectId;
@@ -837,12 +867,17 @@ class _SidebarState extends ConsumerState<_Sidebar> {
       if (entry.key.startsWith('path:')) {
         path = entry.key.substring(5);
       } else {
-        path = entry.value.first.projectPath ?? entry.value.first.detectionContext?.cwd;
+        path =
+            entry.value.first.projectPath ??
+            entry.value.first.detectionContext?.cwd;
       }
       if (path != null && path.isNotEmpty) {
-        projectNames[entry.key] = path.split('/').where((s) => s.isNotEmpty).lastOrNull ?? path;
+        projectNames[entry.key] =
+            path.split('/').where((s) => s.isNotEmpty).lastOrNull ?? path;
       } else if (entry.key.isNotEmpty) {
-        projectNames[entry.key] = entry.key.length > 8 ? entry.key.substring(0, 8) : entry.key;
+        projectNames[entry.key] = entry.key.length > 8
+            ? entry.key.substring(0, 8)
+            : entry.key;
       }
     }
 
@@ -851,13 +886,19 @@ class _SidebarState extends ConsumerState<_Sidebar> {
     for (final entry in byProject.entries) {
       if (entry.key.isEmpty) continue; // truly no project — handled below
       final sorted = List<Session>.from(entry.value)
-        ..sort((a, b) => (b.lastActivity ?? b.createdAt).compareTo(a.lastActivity ?? a.createdAt));
-      groups.add(_ProjectGroup(
-        projectId: entry.key,
-        projectName: projectNames[entry.key] ?? entry.key,
-        branch: projectBranches[entry.key] ?? '',
-        sessions: sorted,
-      ));
+        ..sort(
+          (a, b) => (b.lastActivity ?? b.createdAt).compareTo(
+            a.lastActivity ?? a.createdAt,
+          ),
+        );
+      groups.add(
+        _ProjectGroup(
+          projectId: entry.key,
+          projectName: projectNames[entry.key] ?? entry.key,
+          branch: projectBranches[entry.key] ?? '',
+          sessions: sorted,
+        ),
+      );
     }
 
     // Sessions with truly no project info — group under the active
@@ -865,24 +906,34 @@ class _SidebarState extends ConsumerState<_Sidebar> {
     final noProject = byProject[''];
     if (noProject != null && noProject.isNotEmpty) {
       final sorted = List<Session>.from(noProject)
-        ..sort((a, b) => (b.lastActivity ?? b.createdAt).compareTo(a.lastActivity ?? a.createdAt));
+        ..sort(
+          (a, b) => (b.lastActivity ?? b.createdAt).compareTo(
+            a.lastActivity ?? a.createdAt,
+          ),
+        );
       // Use active project name if available, otherwise "no project"
       final fallbackName = activeProject != null
           ? activeProject.name.split('/').last
           : 'no project';
       final fallbackBranch = activeProject?.branch ?? '';
-      groups.add(_ProjectGroup(
-        projectId: '',
-        projectName: fallbackName,
-        branch: fallbackBranch,
-        sessions: sorted,
-      ));
+      groups.add(
+        _ProjectGroup(
+          projectId: '',
+          projectName: fallbackName,
+          branch: fallbackBranch,
+          sessions: sorted,
+        ),
+      );
     }
 
     // Sort groups by most recent session activity
     groups.sort((a, b) {
-      final aTime = a.sessions.isEmpty ? DateTime(1970) : (a.sessions.first.lastActivity ?? a.sessions.first.createdAt);
-      final bTime = b.sessions.isEmpty ? DateTime(1970) : (b.sessions.first.lastActivity ?? b.sessions.first.createdAt);
+      final aTime = a.sessions.isEmpty
+          ? DateTime(1970)
+          : (a.sessions.first.lastActivity ?? a.sessions.first.createdAt);
+      final bTime = b.sessions.isEmpty
+          ? DateTime(1970)
+          : (b.sessions.first.lastActivity ?? b.sessions.first.createdAt);
       return bTime.compareTo(aTime);
     });
 
@@ -891,7 +942,10 @@ class _SidebarState extends ConsumerState<_Sidebar> {
 
   Future<void> _createSessionInProject(_ProjectGroup group) async {
     final notifier = ref.read(sessionProvider.notifier);
-    final session = await notifier.createSession('new session', projectId: group.projectId);
+    final session = await notifier.createSession(
+      'new session',
+      projectId: group.projectId,
+    );
     if (session != null && mounted) {
       widget.onSessionSelected(session);
       ref.read(activeSessionProvider.notifier).state = session;
@@ -1051,7 +1105,10 @@ class _SidebarSessionRow extends ConsumerWidget {
   /// Confirm and archive this session. Mirrors the sessions-list flow:
   /// a dialog guards the destructive action, and a status message reports
   /// the outcome only after the RPC resolves (parity with TUI).
-  Future<void> _showArchiveConfirmation(BuildContext context, WidgetRef ref) async {
+  Future<void> _showArchiveConfirmation(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
     await showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -1083,16 +1140,15 @@ class _SidebarSessionRow extends ConsumerWidget {
               final error = ref.read(sessionProvider).error;
               if (error == null) {
                 showStatusMessage(
-                    ref, 'archived: ${(session.title.isEmpty ? 'unnamed' : session.title).toLowerCase()}');
+                  ref,
+                  'archived: ${(session.title.isEmpty ? 'unnamed' : session.title).toLowerCase()}',
+                );
                 if (dialogContext.mounted) Navigator.pop(dialogContext);
               } else {
                 showStatusMessage(ref, 'archive failed: $error');
               }
             },
-            child: const Text(
-              'archive',
-              style: CyberpunkTypography.bodyMedium,
-            ),
+            child: const Text('archive', style: CyberpunkTypography.bodyMedium),
           ),
         ],
       ),
@@ -1125,7 +1181,9 @@ class _SidebarSessionRow extends ConsumerWidget {
               child: Text(
                 session.worktreePath != null && session.worktreePath!.isNotEmpty
                     ? 'wt: ${session.title.isEmpty ? 'unnamed' : session.title}'
-                    : session.title.isEmpty ? 'unnamed' : session.title,
+                    : session.title.isEmpty
+                    ? 'unnamed'
+                    : session.title,
                 style: CyberpunkTypography.bodySmall.copyWith(
                   color: isSelected
                       ? CyberpunkColors.orangePrimary
@@ -1237,7 +1295,11 @@ class _FullWindowDialog extends StatelessWidget {
                     onTap: onClose,
                     child: Container(
                       padding: const EdgeInsets.all(4),
-                      child: Icon(Icons.close, size: 20, color: CyberpunkColors.black),
+                      child: Icon(
+                        Icons.close,
+                        size: 20,
+                        color: CyberpunkColors.black,
+                      ),
                     ),
                   ),
                 ],
@@ -1283,7 +1345,9 @@ class _SessionsDialog extends ConsumerWidget {
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: CyberpunkColors.midGray.withValues(alpha: 0.2),
-            border: Border.all(color: CyberpunkColors.orangeDark.withValues(alpha: 0.3)),
+            border: Border.all(
+              color: CyberpunkColors.orangeDark.withValues(alpha: 0.3),
+            ),
             borderRadius: BorderRadius.circular(4),
           ),
           child: Text(
@@ -1330,7 +1394,9 @@ class _PlansDialog extends ConsumerWidget {
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: CyberpunkColors.midGray.withValues(alpha: 0.2),
-            border: Border.all(color: CyberpunkColors.orangeDark.withValues(alpha: 0.3)),
+            border: Border.all(
+              color: CyberpunkColors.orangeDark.withValues(alpha: 0.3),
+            ),
             borderRadius: BorderRadius.circular(4),
           ),
           child: Column(
@@ -1393,21 +1459,29 @@ class _TasksDialog extends ConsumerWidget {
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: CyberpunkColors.midGray.withValues(alpha: 0.2),
-            border: Border.all(color: CyberpunkColors.orangeDark.withValues(alpha: 0.3)),
+            border: Border.all(
+              color: CyberpunkColors.orangeDark.withValues(alpha: 0.3),
+            ),
             borderRadius: BorderRadius.circular(4),
           ),
           child: Row(
             children: [
               Icon(
-                task.status == 'completed' ? Icons.check_circle :
-                task.status == 'failed' ? Icons.error :
-                task.status == 'in_progress' ? Icons.hourglass_empty :
-                Icons.circle_outlined,
+                task.status == 'completed'
+                    ? Icons.check_circle
+                    : task.status == 'failed'
+                    ? Icons.error
+                    : task.status == 'in_progress'
+                    ? Icons.hourglass_empty
+                    : Icons.circle_outlined,
                 size: 18,
-                color: task.status == 'completed' ? CyberpunkColors.greenSuccess :
-                     task.status == 'failed' ? CyberpunkColors.redAlert :
-                     task.status == 'in_progress' ? CyberpunkColors.orangePrimary :
-                     CyberpunkColors.lightGray,
+                color: task.status == 'completed'
+                    ? CyberpunkColors.greenSuccess
+                    : task.status == 'failed'
+                    ? CyberpunkColors.redAlert
+                    : task.status == 'in_progress'
+                    ? CyberpunkColors.orangePrimary
+                    : CyberpunkColors.lightGray,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1458,7 +1532,9 @@ class _AgentsDialog extends ConsumerWidget {
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: CyberpunkColors.midGray.withValues(alpha: 0.2),
-            border: Border.all(color: CyberpunkColors.orangeDark.withValues(alpha: 0.3)),
+            border: Border.all(
+              color: CyberpunkColors.orangeDark.withValues(alpha: 0.3),
+            ),
             borderRadius: BorderRadius.circular(4),
           ),
           child: Row(

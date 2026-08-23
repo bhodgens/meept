@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meept_ui/features/chat/chat_message_bubble.dart';
 import 'package:meept_ui/models/api_models.dart';
@@ -37,12 +38,14 @@ ChatMessage _assistantMessage({
 }
 
 Widget _buildApp(Widget child) {
-  return MaterialApp(
-    theme: ThemeData.dark(),
-    home: Scaffold(
-      body: Container(
-        constraints: const BoxConstraints(maxWidth: 600),
-        child: child,
+  return ProviderScope(
+    child: MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(
+        body: Container(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: child,
+        ),
       ),
     ),
   );
