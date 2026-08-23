@@ -44,12 +44,6 @@ const _prefs = <_Pref>[
     choices: ['toptabs', 'sidebar'],
   ),
   (
-    key: 'rendering.theme',
-    label: 'theme',
-    kind: _PrefKind.choice,
-    choices: ['cyberpunk', 'monokai', 'dracula', 'solarized-dark'],
-  ),
-  (
     key: 'rendering.markdown',
     label: 'markdown rendering',
     kind: _PrefKind.boolToggle,

@@ -83,7 +83,7 @@ void main() {
     // Seeded int value lands in its field.
     expect(find.widgetWithText(TextField, '3'), findsOneWidget);
     expect(find.byType(Switch), findsNWidgets(6));
-    expect(find.byType(DropdownButton<String>), findsNWidgets(3));
+    expect(find.byType(DropdownButton<String>), findsNWidgets(2));
   });
 
   testWidgets('toggling a switch PATCHes the dotted key', (tester) async {
