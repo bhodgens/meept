@@ -498,6 +498,31 @@ class SdkApiClient {
     }
   }
 
+  /// Fetch a page of messages plus the session's TOTAL message count.
+  ///
+  /// The daemon's `total` field is the full session count (not the page
+  /// length), so callers can decide whether older pages exist:
+  /// `hasMore = offset + returned.length < total`.
+  Future<({List<Map<String, dynamic>> messages, int total})> getMessagesPage(
+      String id,
+      {int offset = 0, int limit = 200}) async {
+    try {
+      final raw = await _get('/api/v1/sessions/$id/messages', query: {
+        'offset': offset,
+        'limit': limit,
+      });
+      final messagesRaw = raw['messages'] as List? ?? [];
+      final messages = messagesRaw
+          .whereType<Map>()
+          .map((m) => Map<String, dynamic>.from(m))
+          .toList();
+      final total = (raw['total'] as num?)?.toInt() ?? messages.length;
+      return (messages: messages, total: total);
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
   /// Creates a session and returns the raw JSON.
   ///
   /// Sends `{"name": title}` directly. The OpenAPI spec previously

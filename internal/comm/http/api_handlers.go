@@ -914,9 +914,17 @@ func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
 	if messages == nil {
 		messages = []session.Message{}
 	}
+	// total is the SESSION's full message count, not this page's length.
+	// Clients use it to decide whether older pages exist for scroll-back
+	// pagination. A best-effort count; on error fall back to the page len
+	// so the response shape is unchanged.
+	total := len(messages)
+	if count, cerr := s.services.Session.GetMessageCount(r.Context(), id); cerr == nil {
+		total = count
+	}
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"messages": messages,
-		"total":    len(messages),
+		"total":    total,
 	})
 }
 
@@ -1418,9 +1426,9 @@ func (s *Server) handleModelsGetCredential(w http.ResponseWriter, r *http.Reques
 	// C-12 FIX: never return raw credentials over HTTP. Return a masked
 	// preview (last 4 chars) and a boolean indicating presence.
 	s.writeJSON(w, http.StatusOK, map[string]any{
-		"provider":           provider,
-		"credential_masked":  maskCredential(cred),
-		"has_credential":     cred != "",
+		"provider":          provider,
+		"credential_masked": maskCredential(cred),
+		"has_credential":    cred != "",
 	})
 }
 
@@ -4396,9 +4404,9 @@ func (s *Server) handlePromptsValidate(w http.ResponseWriter, r *http.Request) {
 	if body.Name != "" {
 		if err := s.services.Prompt.ValidateOne(body.Name); err != nil {
 			s.writeJSON(w, http.StatusOK, map[string]any{
-				"name":   body.Name,
-				"valid":  false,
-				"error":  err.Error(),
+				"name":  body.Name,
+				"valid": false,
+				"error": err.Error(),
 			})
 			return
 		}
@@ -4421,8 +4429,8 @@ func (s *Server) handlePromptsValidate(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	s.writeJSON(w, http.StatusOK, map[string]any{
-		"valid":    len(errs) == 0,
-		"errors":   results,
-		"checked":  len(errs),
+		"valid":   len(errs) == 0,
+		"errors":  results,
+		"checked": len(errs),
 	})
 }

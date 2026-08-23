@@ -46,9 +46,9 @@ func (s *SessionService) SetProjectManager(pm ProjectResolver) {
 
 // CreateSessionRequest contains session creation parameters.
 type CreateSessionRequest struct {
-	Name              string                      `json:"name,omitempty"`
-	ProjectID         string                      `json:"project_id,omitempty"`
-	DetectionContext  *session.DetectionContext    `json:"detection_context,omitempty"`
+	Name             string                    `json:"name,omitempty"`
+	ProjectID        string                    `json:"project_id,omitempty"`
+	DetectionContext *session.DetectionContext `json:"detection_context,omitempty"`
 }
 
 // CreateSession creates a new session.
@@ -205,7 +205,7 @@ func (s *SessionService) DeleteSession(ctx context.Context, req DeleteSessionReq
 
 // ListSessionsRequest contains list parameters.
 type ListSessionsRequest struct {
-	Limit       int `json:"limit,omitempty"`
+	Limit       int     `json:"limit,omitempty"`
 	Designation *string `json:"designation,omitempty"`
 }
 
@@ -460,9 +460,9 @@ type CompactSessionRequest struct {
 // This is a manual trigger; normally compaction happens automatically via maybeCompact.
 // DesignatedSessionSummary is a minimal view of a session with active designation.
 type DesignatedSessionSummary struct {
-	ID           string                 `json:"id"`
-	Name         string                 `json:"name"`
-	LastActivity string                 `json:"last_activity"`
+	ID           string                      `json:"id"`
+	Name         string                      `json:"name"`
+	LastActivity string                      `json:"last_activity"`
 	Designation  *session.SessionDesignation `json:"designation"`
 }
 
@@ -631,6 +631,18 @@ func (s *SessionService) ArchiveSession(ctx context.Context, req ArchiveSessionR
 type SearchMessagesRequest struct {
 	Query string `json:"query"`
 	Limit int    `json:"limit,omitempty"`
+}
+
+// GetMessageCount returns the total number of messages in a session.
+func (s *SessionService) GetMessageCount(ctx context.Context, sessionID string) (int, error) {
+	if s.store == nil {
+		return 0, wrapError("session", "GetMessageCount", ErrUnavailable)
+	}
+	count, err := s.store.GetMessageCount(sessionID)
+	if err != nil {
+		return 0, wrapError("session", "GetMessageCount", err)
+	}
+	return count, nil
 }
 
 func (s *SessionService) SearchMessages(ctx context.Context, req SearchMessagesRequest) ([]session.MessageSearchResult, error) {

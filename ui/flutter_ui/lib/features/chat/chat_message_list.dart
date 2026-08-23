@@ -28,6 +28,8 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   final ScrollController _scrollController = ScrollController();
   final Map<String, GlobalKey> _messageKeys = {};
   bool _isAtBottom = true;
+  /// Guards against re-entrant scroll-back fetches from _onScroll.
+  bool _loadingOlder = false;
   /// Reactive mirror of [!_isAtBottom]; drives the scroll-to-bottom
   /// button visibility. _isAtBottom alone is a plain field the build
   /// method cannot observe.
@@ -75,6 +77,39 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
     final currentScroll = _scrollController.offset;
     _isAtBottom = currentScroll >= (maxScroll - 100);
     _updateScrollButton();
+    // Scroll-back pagination: near the top, fetch the next older page.
+    // Keep the viewport anchored by preserving the offset distance from
+    // the top across the prepend (handled in _loadOlder).
+    if (currentScroll <= 200) {
+      _loadOlder();
+    }
+  }
+
+  Future<void> _loadOlder() async {
+    if (_loadingOlder) return;
+    final notifier = ref.read(chatProvider(widget.sessionId).notifier);
+    if (!notifier.hasMoreHistory || notifier.isLoadingOlder) return;
+    _loadingOlder = true;
+    // Preserve the user's position: remember the oldest visible message id
+    // so we can re-anchor after the prepend shifts everything down.
+    final previousOffset = _scrollController.offset;
+    final previousMax = _scrollController.position.maxScrollExtent;
+    try {
+      await notifier.loadOlderMessages();
+      if (!mounted) return;
+      // After the frame with the prepended items, restore the scroll
+      // offset relative to the new content height.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scrollController.hasClients) return;
+        final delta =
+            _scrollController.position.maxScrollExtent - previousMax;
+        if (delta > 0) {
+          _scrollController.jumpTo(previousOffset + delta);
+        }
+      });
+    } finally {
+      _loadingOlder = false;
+    }
   }
 
   void _updateScrollButton() {

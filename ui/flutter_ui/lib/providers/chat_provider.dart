@@ -230,6 +230,18 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// banner's retry affordance. Null when there is nothing to retry.
   String? _lastFailedSend;
 
+  /// Offset (in full-session message index space) of the oldest loaded
+  /// message. 0 when everything is loaded or the session is short.
+  int _oldestLoadedOffset = 0;
+
+  /// Whether older history pages exist above the current window.
+  bool _hasMoreHistory = false;
+  bool _isLoadingOlder = false;
+
+  /// Whether older messages exist that [loadOlderMessages] can fetch.
+  bool get hasMoreHistory => _hasMoreHistory;
+  bool get isLoadingOlder => _isLoadingOlder;
+
   /// Timer to reset _isSending flag if it gets stuck (safety mechanism)
   Timer? _sendingTimeoutTimer;
 
@@ -269,13 +281,42 @@ class ChatNotifier extends StateNotifier<ChatState> {
     _progressSubscription?.cancel();
     _progressSubscription = null;
 
-    // Fetch messages from the HTTP API
+    // Fetch messages from the HTTP API. The initial load grabs the LAST
+    // page (most recent window) so huge sessions don't fetch everything;
+    // older pages arrive via [loadOlderMessages] when the user scrolls up.
+    const pageSize = 200;
+    var totalCount = 0;
     try {
-      final rawMessages = await sdkClient.getMessages(sessionId);
+      final page = await sdkClient.getMessagesPage(
+        sessionId,
+        offset: 0,
+        limit: pageSize,
+      );
       if (_disposed) return;
-      final messages = rawMessages
-          .map((m) => ChatMessage.fromBackendMessage(m))
-          .toList(growable: false);
+      totalCount = page.total;
+      List<ChatMessage> messages;
+      if (totalCount > page.messages.length) {
+        // Session has more history than one page: fetch the most recent
+        // window. The API pages from the oldest message (ORDER BY id), so
+        // offset = total - pageSize yields the newest pageSize messages.
+        final offset = totalCount > pageSize ? totalCount - pageSize : 0;
+        final recent = await sdkClient.getMessagesPage(
+          sessionId,
+          offset: offset,
+          limit: pageSize,
+        );
+        if (_disposed) return;
+        messages = recent.messages
+            .map((m) => ChatMessage.fromBackendMessage(m))
+            .toList(growable: true);
+        _oldestLoadedOffset = offset;
+      } else {
+        messages = page.messages
+            .map((m) => ChatMessage.fromBackendMessage(m))
+            .toList(growable: true);
+        _oldestLoadedOffset = 0;
+      }
+      _hasMoreHistory = _oldestLoadedOffset > 0;
       if (_disposed || generation != _loadGeneration) return;
       state = ChatState(
         messages: messages,
@@ -563,6 +604,59 @@ class ChatNotifier extends StateNotifier<ChatState> {
     final text = _lastFailedSend;
     if (text == null || text.isEmpty) return;
     await sendMessage(sessionId: sessionId, text: text, agentId: agentId);
+  }
+
+  /// Fetch the next page of OLDER history and prepend it to the state.
+  /// Called by the chat list when the user scrolls to the top. No-op while
+  /// a fetch is in flight or when no older pages exist. Returns true when
+  /// new messages were prepended.
+  Future<bool> loadOlderMessages() async {
+    if (_isLoadingOlder || !_hasMoreHistory || _disposed) return false;
+    _isLoadingOlder = true;
+    try {
+      const pageSize = 200;
+      final offset =
+          (_oldestLoadedOffset - pageSize).clamp(0, _oldestLoadedOffset);
+      if (offset == _oldestLoadedOffset) {
+        // Already at the start.
+        _hasMoreHistory = false;
+        return false;
+      }
+      final page = await sdkClient.getMessagesPage(
+        sessionId,
+        offset: offset,
+        limit: pageSize,
+      );
+      if (_disposed) return false;
+      final allOlder = page.messages
+          .map((m) => ChatMessage.fromBackendMessage(m))
+          .toList(growable: false);
+      _oldestLoadedOffset = offset;
+      if (offset == 0) _hasMoreHistory = false;
+      if (allOlder.isEmpty) {
+        _hasMoreHistory = false;
+        return false;
+      }
+      // The fetched window may overlap what is already loaded when
+      // _oldestLoadedOffset was not page-aligned (initial recent-window
+      // loads land mid-page). Drop any messages already present.
+      final loadedIds = {for (final m in state.messages) m.id};
+      final older =
+          allOlder.where((m) => !loadedIds.contains(m.id)).toList();
+      if (older.isEmpty) return false;
+      // Prepend without touching isLoading/isAgentProcessing/error.
+      state = state.copyWith(
+        messages: [...older, ...state.messages],
+      );
+      return true;
+    } catch (e) {
+      // Scroll-back pagination is best-effort; surface but don't clobber
+      // an active turn's error slot.
+      debugPrint('[chat_provider] loadOlderMessages failed: $e');
+      return false;
+    } finally {
+      _isLoadingOlder = false;
+    }
   }
 
   /// Add a chat message from websocket stream
