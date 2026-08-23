@@ -357,6 +357,28 @@ class ChatNotifier extends StateNotifier<ChatState> {
     );
   }
 
+  // ---- Steer mode (Ctrl+S, TUI parity) ----
+  // Mirrors TUI chat.go steerMode: when armed and the agent is active, the
+  // next sent message routes to the steer queue instead of normal chat.
+
+  bool _steerModeArmed = false;
+
+  /// Whether steer mode is currently armed for this session.
+  bool get steerModeArmed => _steerModeArmed;
+
+  /// Toggle steer-mode arming. Returns the new state. Arming is only
+  /// meaningful while an agent turn is in flight; the UI surfaces the
+  /// resulting status either way (TUI shows "steer mode: on/off").
+  bool toggleSteerMode() {
+    _steerModeArmed = !_steerModeArmed;
+    return _steerModeArmed;
+  }
+
+  /// Disarm steer mode (e.g. after a steer message is sent or a turn ends).
+  void disarmSteerMode() {
+    _steerModeArmed = false;
+  }
+
   /// Send a follow-up message.
   Future<void> sendFollowUp({
     required String sessionId,

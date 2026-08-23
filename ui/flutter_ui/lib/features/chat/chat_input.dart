@@ -1095,11 +1095,18 @@ class _ChatInputState extends ConsumerState<ChatInput>
     final chatNotifier = ref.read(chatProvider(widget.sessionId).notifier);
     final activeAgent = ref.read(activeAgentProvider);
 
-    chatNotifier.sendMessage(
-      sessionId: widget.sessionId,
-      text: finalPayload,
-      agentId: activeAgent?.id,
-    );
+    // Steer mode armed (Ctrl+S while the agent is processing, TUI parity):
+    // route the message to the steer queue and disarm.
+    if (chatNotifier.steerModeArmed) {
+      chatNotifier.disarmSteerMode();
+      chatNotifier.sendSteer(sessionId: widget.sessionId, text: finalPayload);
+    } else {
+      chatNotifier.sendMessage(
+        sessionId: widget.sessionId,
+        text: finalPayload,
+        agentId: activeAgent?.id,
+      );
+    }
 
     if (isFirstMessage) {
       unawaited(_maybeGenerateSessionDescription(payload));

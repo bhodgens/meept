@@ -242,6 +242,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     };
     _leaderController.onShowCommandPalette = _showCommandPalette;
     _leaderController.onCycleVerbosity = _cycleVerbosity;
+    _leaderController.onToggleSteer = _toggleSteerMode;
+    _leaderController.onToggleTts = () async {
+      await ref.read(ttsProvider.notifier).toggleTts();
+      showStatusMessage(
+          ref, 'tts ${ref.read(ttsProvider.notifier).enabled ? 'on' : 'off'}');
+    };
+    // TUI Ctrl+P opens the fuzzy finder over sessions/tasks; the Flutter
+    // equivalent is the search tool panel.
+    _leaderController.onFuzzyFinder = () => context.goToolSearch();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_onConnectionChanged(ref.read(connectionStateProvider)));
       // Apply the router-forced initial tab if present.
@@ -376,6 +385,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ],
       ),
     );
+  }
+
+  /// Ctrl+S (TUI parity): when the agent is processing, arm/disarm steer
+  /// mode for the next message; when idle, jump to the sessions tab —
+  /// exactly the dual behaviour of TUI app.go ctrl+s.
+  void _toggleSteerMode() {
+    final session = ref.read(activeSessionProvider);
+    final sid = session?.id;
+    if (sid == null) {
+      showStatusMessage(ref, 'no active session');
+      return;
+    }
+    final chat = ref.read(chatProvider(sid).notifier);
+    final state = ref.read(chatProvider(sid));
+    if (state.isAgentProcessing || state.isLoading) {
+      final armed = chat.toggleSteerMode();
+      showStatusMessage(ref, 'steer mode: ${armed ? 'on' : 'off'}');
+    } else {
+      _onLeaderTabSelected(HomeTab.sessions.index);
+    }
   }
 
   /// Navigate to a tool panel via go_router if it has a registered route.

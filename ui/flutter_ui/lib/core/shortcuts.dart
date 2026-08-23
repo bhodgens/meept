@@ -94,6 +94,17 @@ class LeaderKeyController extends ChangeNotifier {
   /// Set this callback to handle find/search.
   VoidCallback? onFind;
 
+  /// Toggle steer mode (Ctrl+S, TUI parity). The chat layer decides:
+  /// agent active → arm/disarm steer; idle → navigate to sessions.
+  VoidCallback? onToggleSteer;
+
+  /// Toggle TTS on/off (Ctrl+T, TUI parity).
+  VoidCallback? onToggleTts;
+
+  /// Open the fuzzy finder over sessions/tasks (Ctrl+P, TUI parity).
+  /// The Flutter equivalent is the search panel route.
+  VoidCallback? onFuzzyFinder;
+
   /// Set this callback to open the in-session find bar (Cmd+F / Ctrl+F).
   VoidCallback? onInSessionFind;
 
@@ -158,9 +169,36 @@ class LeaderKeyController extends ChangeNotifier {
       return KeyEventResult.handled;
     }
 
+    // --- Ctrl+S steer toggle (all platforms, TUI parity) ---
+    if (_isCtrlKeyTrigger(event, LogicalKeyboardKey.keyS)) {
+      onToggleSteer?.call();
+      return KeyEventResult.handled;
+    }
+
+    // --- Ctrl+T TTS toggle (all platforms, TUI parity) ---
+    if (_isCtrlKeyTrigger(event, LogicalKeyboardKey.keyT)) {
+      onToggleTts?.call();
+      return KeyEventResult.handled;
+    }
+
+    // --- Ctrl+P fuzzy finder → search panel (TUI parity) ---
+    if (_isCtrlKeyTrigger(event, LogicalKeyboardKey.keyP)) {
+      onFuzzyFinder?.call();
+      return KeyEventResult.handled;
+    }
+
     // Escape is intentionally ignored here — the Focus system handles
     // dismissal of dialogs/popups via EscapeIntent.
     return KeyEventResult.ignored;
+  }
+
+  /// Plain-Ctrl (no meta/shift/alt) trigger check, used for the TUI-parity
+  /// Ctrl+S / Ctrl+T / Ctrl+P bindings which are identical on all platforms.
+  static bool _isCtrlKeyTrigger(KeyEvent event, LogicalKeyboardKey key) {
+    if (event is! KeyDownEvent) return false;
+    if (event.logicalKey != key) return false;
+    final hw = HardwareKeyboard.instance;
+    return hw.isControlPressed && !hw.isMetaPressed && !hw.isAltPressed;
   }
 
   static bool _isLeaderTrigger(KeyEvent event) {
