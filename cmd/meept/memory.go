@@ -86,6 +86,12 @@ Examples:
 			}
 
 			count, _ := result["count"].(float64)
+			if count == 0 {
+				// Newer daemons wrap the payload as {"data": [...], "format": ...}.
+				if data, ok := result["data"].([]any); ok {
+					count = float64(len(data))
+				}
+			}
 			fmt.Printf("Exported %d memories\n", int(count))
 			return nil
 		},

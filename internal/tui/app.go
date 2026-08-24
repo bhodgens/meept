@@ -836,7 +836,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			clearCmd := tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
 				return StatusMessageClearMsg{}
 			})
-			return a, clearCmd
+			// Initialize the view so it fetches sessions from the daemon.
+			return a, tea.Batch(clearCmd, a.initCurrentView())
 		}
 
 		// Check for Ctrl+V: cycle verbosity level
@@ -2035,9 +2036,11 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.currentView = ViewSessions
 			a.statusMessage = "sessions tab (create: n, archive: d, delete: shift+d)"
 			a.statusMessageTime = time.Now()
-			return a, tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
+			clearCmd := tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
 				return StatusMessageClearMsg{}
 			})
+			// Initialize the view so it fetches sessions from the daemon.
+			return a, tea.Batch(clearCmd, a.initCurrentView())
 		case keys.NewSession:
 			// Create a new session directly with default name
 			cmd := a.createSession(a.clientConfig.Session.DefaultName)

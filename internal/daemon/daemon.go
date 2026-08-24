@@ -816,6 +816,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			logger.Info("Epistemic memory RPC handlers registered")
 		}
 
+		// Memory RPC handlers (vector search + export). These override the
+		// dead bus proxies for the same methods — see memory_rpc.go.
+		if svcRegistry.Memory != nil {
+			registerMemoryRPCHandlers(rpcServer, svcRegistry.Memory)
+			logger.Info("Memory RPC handlers registered")
+		}
+
 		// Notification (DND) RPC handlers — runtime control of daemon-side
 		// notification suppression.
 		if components.NotificationEmitter != nil {

@@ -990,7 +990,10 @@ type FuzzyFinderModal struct {
 
 // NewFuzzyFinderModal creates a new fuzzy finder modal.
 func NewFuzzyFinderModal(styles *Styles, rpc *RPCClient) *FuzzyFinderModal {
+	// Initialize the embedded *Modal — leaving it nil made Show() panic
+	// with a nil-pointer dereference on f.visible (ctrl+p crash).
 	return &FuzzyFinderModal{
+		Modal:       NewModal("find", styles),
 		sessions:    []types.Session{},
 		tasks:       []types.TaskExtended{},
 		inputBuffer: "",
