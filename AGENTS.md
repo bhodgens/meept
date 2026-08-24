@@ -374,6 +374,8 @@ All config uses **JSON5** format. Templates in `config/`, copied on
 - **Models**: `config/models.json5` (capability-based resolution)
 - **MCP servers**: `~/.meept/mcp_servers.json5` (21 preconfigured, 4 enabled
   by default)
+- **UI theme** (TUI + GUI): shared tokens in `theme/tokens.json5`; select per
+  client via `rendering.ui_theme` — see `docs/configuration/theming.md`.
 - **Client**: `~/.meept/client.json5` (TUI keybindings)
 - **Log level**: `log_level` field in `~/.meept/meept.json5` (NOT env vars)
 
