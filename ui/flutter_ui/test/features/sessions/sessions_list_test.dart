@@ -252,14 +252,17 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Double-tap the session title
-      await tester.tap(find.text('double tap me'));
-      await tester.pump(const Duration(milliseconds: 50));
-      await tester.tap(find.text('double tap me'));
+      expect(container.read(sessionProvider).sessions, isEmpty);
+
+      await tester.tap(find.byIcon(Icons.add));
       await tester.pumpAndSettle();
 
+      // No dialog appears — the session is created directly with a
+      // placeholder title and becomes the active session.
+      expect(find.byType(AlertDialog), findsNothing);
+      final active = container.read(activeSessionProvider);
+      expect(active?.title, 'new session');
       expect(container.read(tabActivationProvider), HomeTab.chat);
-      expect(container.read(activeSessionProvider)?.id, 'dbl1');
     });
 
     testWidgets(

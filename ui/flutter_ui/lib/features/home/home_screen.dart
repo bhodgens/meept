@@ -15,7 +15,6 @@ import '../../providers/providers.dart';
 import '../../providers/session_detail.dart';
 import '../../providers/status_message_provider.dart';
 import '../../providers/tab_activation_provider.dart';
-import '../../providers/verbosity_provider.dart';
 import 'tab_content.dart';
 import 'tools_dropdown.dart' show HamburgerMenu;
 

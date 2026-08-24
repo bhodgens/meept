@@ -71,8 +71,6 @@ import '../../providers/providers.dart';
 import '../../models/api_models.dart';
 import '../../providers/status_message_provider.dart';
 import '../../providers/session_detail.dart';
-import '../../providers/verbosity_provider.dart';
-import '../../providers/rendering_prefs_provider.dart';
 import '../chat/chat_tab.dart';
 import 'tools_dropdown.dart' show HamburgerMenu;
 import 'session_info_overlay.dart';
@@ -679,7 +677,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
             // Sidebar header with hamburger, meept logo, and connection status
             Container(
               padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 border: Border(
                   bottom: BorderSide(
                     color: CyberpunkColors.orangePrimary,
@@ -767,7 +765,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
             // Sidebar footer with "add project" button
             Container(
               padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 border: Border(
                   top: BorderSide(color: CyberpunkColors.midGray, width: 0.5),
                 ),
@@ -1313,7 +1311,7 @@ class _FullWindowDialog extends StatelessWidget {
                     onTap: onClose,
                     child: Container(
                       padding: const EdgeInsets.all(4),
-                      child: Icon(
+                      child: const Icon(
                         Icons.close,
                         size: 20,
                         color: CyberpunkColors.black,

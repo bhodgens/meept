@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../theme/colors.dart';
 import '../theme/typography.dart';
 import '../providers/providers.dart';
-import '../providers/verbosity_provider.dart';
 import '../providers/status_message_provider.dart';
 
 /// Single-line status bar pinned at the bottom of the HomeScreen.
