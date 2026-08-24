@@ -193,12 +193,13 @@ type App struct {
 
 // KeyMap defines the key bindings.
 type KeyMap struct {
-	Quit      key.Binding
-	Enter     key.Binding
-	Escape    key.Binding
-	Help      key.Binding
-	Command   key.Binding // Ctrl+X prefix
-	ToggleTTS key.Binding // Ctrl+T
+	Quit           key.Binding
+	Enter          key.Binding
+	Escape         key.Binding
+	Help           key.Binding
+	Command        key.Binding // Ctrl+X prefix
+	ToggleTTS      key.Binding // Ctrl+T
+	ToggleMarkdown key.Binding // Ctrl+M: toggle markdown rendering
 }
 
 // DefaultKeyMap returns the default key bindings.
@@ -227,6 +228,10 @@ func DefaultKeyMap() KeyMap {
 		ToggleTTS: key.NewBinding(
 			key.WithKeys("ctrl+t"),
 			key.WithHelp("ctrl+t", "toggle TTS"),
+		),
+		ToggleMarkdown: key.NewBinding(
+			key.WithKeys("ctrl+m"),
+			key.WithHelp("ctrl+m", "toggle markdown rendering"),
 		),
 	}
 }
@@ -799,6 +804,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
+		// Check for Ctrl+M to toggle markdown rendering (GUI parity:
+		// rendering.markdown pref, applied live).
+		if key.Matches(msg, a.keys.ToggleMarkdown) {
+			a.chat.ToggleMarkdown()
+			state := "off"
+			if a.chat.IsMarkdownEnabled() {
+				state = "on"
+			}
+			a.statusMessage = fmt.Sprintf("markdown: %s", state)
+			a.statusMessageTime = time.Now()
+			return a, nil
+		}
+
 		// Check for Ctrl+S: toggle steer mode when agent active, otherwise navigate to sessions tab
 		if msg.String() == "ctrl+s" {
 			if a.chat != nil && a.chat.IsAgentActive() {
@@ -1007,7 +1025,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.statusMessage = "Session has no project bound - press P to pick project"
 				a.statusMessageTime = time.Now()
 			}
-			
+
 			a.currentSession = msg.Session
 			// Wire up session ID for tasks FilterMine feature
 			a.tasks.SetCurrentSession(msg.Session.ID)

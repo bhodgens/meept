@@ -2663,6 +2663,11 @@ func (m *ChatModel) SetMarkdownEnabled(enabled bool) {
 	m.updateViewport()
 }
 
+// IsMarkdownEnabled reports whether markdown rendering is currently on.
+func (m *ChatModel) IsMarkdownEnabled() bool {
+	return m.renderMarkdown
+}
+
 // pasteTokenRe matches "{paste: N lines}" tokens for expansion.
 var pasteTokenRe = regexp.MustCompile(`\{paste: \d+ lines\}`)
 
