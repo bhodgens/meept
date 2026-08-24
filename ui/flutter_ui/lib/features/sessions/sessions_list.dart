@@ -125,7 +125,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
       onSkip: () {
         _doActivateSession(session);
       },
-      onProjectBound: (cwd) {
+      onProjectBound: (cwd) async {
         // Project will be bound by the daemon on next RPC; for now
         // just activate the session and let the project context
         // resolve on the next refresh.

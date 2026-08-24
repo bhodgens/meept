@@ -30,7 +30,7 @@ class SessionProjectChecker {
     required WidgetRef ref,
     required Session session,
     required VoidCallback onSkip,
-    required ValueSetter<String?> onProjectBound,
+    required Future<void> Function(String?) onProjectBound,
   }) async {
     if (!needsProjectPrompt(session)) {
       return true;

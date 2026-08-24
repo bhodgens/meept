@@ -576,13 +576,27 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
             messageId;
       }
 
-      // Check project binding and prompt if needed.
+      // Check project binding and prompt if needed. The callbacks mirror
+      // sessions_list: onSkip proceeds with the session unbound, and
+      // onProjectBound re-reads the session so the chat tab's status bar
+      // shows the freshly bound project instead of a stale copy.
       final proceed = await SessionProjectChecker.checkAndPrompt(
         context: context,
         ref: ref,
         session: session,
         onSkip: () {},
-        onProjectBound: (cwd) {},
+        onProjectBound: (cwd) async {
+          // project.set resolved server-side; refresh the local copy so
+          // the activated session carries the new binding.
+          try {
+            final fresh = await _sdkClient.getSession(session.id);
+            if (!mounted) return;
+            ref.read(activeSessionProvider.notifier).state =
+                Session.fromJson(fresh);
+          } catch (_) {
+            // Refresh is best-effort; the daemon-side bind stands either way.
+          }
+        },
       );
       if (!proceed || !mounted) return;
 

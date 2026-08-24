@@ -44,7 +44,9 @@ void main() {
                   ref: ref,
                   session: _unboundSession(),
                   onSkip: () => skipped = true,
-                  onProjectBound: (p) => boundPath = p,
+                  onProjectBound: (p) async {
+                    boundPath = p;
+                  },
                 );
               },
               child: const Text('activate'),
