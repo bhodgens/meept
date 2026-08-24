@@ -130,6 +130,22 @@ class _ClientPrefsEditorState extends ConsumerState<ClientPrefsEditor> {
   bool _isSaving = false;
   String? _error;
   Map<String, dynamic> _config = {};
+  final TextEditingController _searchController = TextEditingController();
+  String _filter = '';
+
+  /// Prefs matching the current filter (case-insensitive substring on
+  /// label and dotted key). Empty filter shows all.
+  List<_Pref> get _visiblePrefs {
+    if (_filter.isEmpty) return _prefs;
+    final f = _filter.toLowerCase();
+    return _prefs
+        .where(
+          (p) =>
+              p.label.toLowerCase().contains(f) ||
+              p.key.toLowerCase().contains(f),
+        )
+        .toList();
+  }
 
   @override
   void initState() {
@@ -256,6 +272,7 @@ class _ClientPrefsEditorState extends ConsumerState<ClientPrefsEditor> {
     for (final c in _intControllers.values) {
       c.dispose();
     }
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -379,6 +396,57 @@ class _ClientPrefsEditorState extends ConsumerState<ClientPrefsEditor> {
             ),
           ),
           const SizedBox(height: 8),
+          // Filter field: narrows rows by label or dotted key.
+          TextField(
+            controller: _searchController,
+            style: CyberpunkTypography.bodySmall.copyWith(
+              fontFamily: 'SourceCodePro',
+            ),
+            decoration: InputDecoration(
+              hintText: 'filter settings…',
+              hintStyle: const TextStyle(
+                color: CyberpunkColors.midGray,
+                fontFamily: 'SourceCodePro',
+              ),
+              prefixIcon: const Icon(
+                Icons.search,
+                color: CyberpunkColors.orangePrimary,
+                size: 16,
+              ),
+              suffixIcon: _filter.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(
+                        Icons.close,
+                        color: CyberpunkColors.midGray,
+                        size: 14,
+                      ),
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() => _filter = '');
+                      },
+                    ),
+              isDense: true,
+              filled: true,
+              fillColor: CyberpunkColors.black,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: const BorderSide(color: CyberpunkColors.midGray),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: const BorderSide(color: CyberpunkColors.midGray),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: const BorderSide(
+                  color: CyberpunkColors.orangePrimary,
+                  width: 1.5,
+                ),
+              ),
+            ),
+            onChanged: (v) => setState(() => _filter = v.trim()),
+          ),
           if (_error != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
@@ -402,8 +470,19 @@ class _ClientPrefsEditorState extends ConsumerState<ClientPrefsEditor> {
                 ),
               ),
             )
+          else if (_visiblePrefs.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 12, bottom: 4),
+              child: Text(
+                "no settings match '$_filter'",
+                style: CyberpunkTypography.bodySmall.copyWith(
+                  color: CyberpunkColors.midGray,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            )
           else
-            ..._prefs.map(
+            ..._visiblePrefs.map(
               (p) => Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Row(

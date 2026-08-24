@@ -135,6 +135,39 @@ void main() {
     expect(client.configText, contains('"verbosity": "verbose"'));
   });
 
+  testWidgets('filter narrows rows by label and dotted key', (tester) async {
+    final client = _StubConfigClient();
+    await _pump(tester, client);
+
+    expect(find.text('markdown rendering'), findsOneWidget);
+
+    // Filter by label substring.
+    await tester.enterText(
+      find.widgetWithText(TextField, ''), // the filter field
+      'wrap',
+    );
+    await tester.pump();
+
+    expect(find.text('word wrap'), findsOneWidget);
+    expect(find.text('markdown rendering'), findsNothing);
+
+    // Filter by dotted key.
+    await tester.enterText(find.byType(TextField).first, 'chat.scroll');
+    await tester.pump();
+    expect(find.text('chat scroll speed'), findsNWidgets(2)); // label + hint
+    expect(find.text('word wrap'), findsNothing);
+
+    // No matches shows an empty-state message.
+    await tester.enterText(find.byType(TextField).first, 'zzzz');
+    await tester.pump();
+    expect(find.textContaining('no settings match'), findsOneWidget);
+
+    // Clear restores all rows.
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pump();
+    expect(find.text('markdown rendering'), findsOneWidget);
+  });
+
   testWidgets('parseClientConfig strips comments and trailing commas', (
     tester,
   ) async {
