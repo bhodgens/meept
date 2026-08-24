@@ -1,0 +1,65 @@
+{
+  // Unified meept color tokens — single source of truth for TUI + GUI.
+  // Roles are frozen: both consumers must define exactly these keys.
+  // Guarded by theme/tokens_test.go and ui/flutter_ui parity test.
+  "cyberpunk": {
+    "primary": "#FF6600",
+    "primaryBright": "#FF8800",
+    "primaryDark": "#CC5500",
+    "primaryGlow": "#FFAA33",
+    "accent": "#FF9933",
+    "secondary": "#00FFAA",
+    "success": "#00FFAA",
+    "warning": "#FFCC00",
+    "error": "#FF3366",
+    "info": "#3399FF",
+    "background": "#000000",
+    "surface": "#1A1A1A",
+    "surfaceAlt": "#2A2A2A",
+    "border": "#333333",
+    "textPrimary": "#E0E0E0",
+    "textMuted": "#6B7280",
+    "terminalGreen": "#33FF33",
+    "terminalAmber": "#FFB000"
+  },
+  "midnight": {
+    "primary": "#7DC4FF",
+    "primaryBright": "#A5D8FF",
+    "primaryDark": "#4B79A8",
+    "primaryGlow": "#9ECE6A",
+    "accent": "#C0CAF5",
+    "secondary": "#9ECE6A",
+    "success": "#9ECE6A",
+    "warning": "#E0AF68",
+    "error": "#F7768E",
+    "info": "#7AA2F7",
+    "background": "#1A1B26",
+    "surface": "#24283B",
+    "surfaceAlt": "#2F334D",
+    "border": "#414868",
+    "textPrimary": "#C0CAF5",
+    "textMuted": "#565F89",
+    "terminalGreen": "#73DACA",
+    "terminalAmber": "#E0AF68"
+  },
+  "solarized": {
+    "primary": "#B58900",
+    "primaryBright": "#CB4B16",
+    "primaryDark": "#839496",
+    "primaryGlow": "#DC322F",
+    "accent": "#2AA198",
+    "secondary": "#859900",
+    "success": "#859900",
+    "warning": "#B58900",
+    "error": "#DC322F",
+    "info": "#268BD2",
+    "background": "#002B36",
+    "surface": "#073642",
+    "surfaceAlt": "#0E4449",
+    "border": "#586E75",
+    "textPrimary": "#93A1A1",
+    "textMuted": "#657B83",
+    "terminalGreen": "#859900",
+    "terminalAmber": "#B58900"
+  }
+}
