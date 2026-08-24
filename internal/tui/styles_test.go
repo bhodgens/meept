@@ -20,6 +20,32 @@ func TestDefaultStyles(t *testing.T) {
 	}
 }
 
+// TestDefaultStylesReflectsPalette verifies that DefaultStyles derives from
+// the active palette: after switching to midnight, the rendered Title must
+// carry the midnight primary color's truecolor sequence.
+func TestDefaultStylesReflectsPalette(t *testing.T) {
+	// Restore so other tests see the built-in default.
+	defer func() {
+		if err := SetPalette("cyberpunk"); err != nil {
+			t.Errorf("restore cyberpunk: %v", err)
+		}
+	}()
+
+	if err := SetPalette("midnight"); err != nil {
+		t.Fatalf("SetPalette(midnight): %v", err)
+	}
+
+	probe := DefaultStyles().Title.Render("palette probe")
+	// midnight primary #7DC4FF = rgb(125, 196, 255). Matched without the
+	// leading "\x1b[" because lipgloss merges bold+foreground into one SGR
+	// sequence ("\x1b[1;38;2;...m").
+	const wantSeq = "38;2;125;196;255m"
+	if !strings.Contains(probe, wantSeq) {
+		t.Errorf("Title render missing midnight primary sequence %q; got %q",
+			wantSeq, probe)
+	}
+}
+
 func TestFormatUptime(t *testing.T) {
 	tests := []struct {
 		seconds  float64

@@ -4,18 +4,21 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Color palette for dark theme
+// Legacy color vars, repointed to the active palette by SetPalette at
+// startup (see palette.go). Before SetPalette they hold the built-in
+// defaults below — the same literals this package has always shipped — so
+// imports and tests that never call SetPalette observe unchanged colors.
 var (
-	ColorPrimary    = lipgloss.Color("#F97316") // Orange
-	ColorSecondary  = lipgloss.Color("#10B981") // Green
-	ColorAccent     = lipgloss.Color("#F59E0B") // Amber
-	ColorError      = lipgloss.Color("#EF4444") // Red
-	ColorWarning    = lipgloss.Color("#F59E0B") // Amber
-	ColorSuccess    = lipgloss.Color("#10B981") // Green
-	ColorMuted      = lipgloss.Color("#6B7280") // Gray
-	ColorForeground = lipgloss.Color("#E5E7EB") // Light gray
-	ColorBackground = lipgloss.Color("#1F2937") // Dark gray
-	ColorBorder     = lipgloss.Color("#374151") // Medium gray
+	ColorPrimary    = Current().Primary     // orange
+	ColorSecondary  = Current().Secondary   // green
+	ColorAccent     = Current().Accent      // amber
+	ColorError      = Current().ErrorC      // red
+	ColorWarning    = Current().Warning     // amber
+	ColorSuccess    = Current().Success     // green
+	ColorMuted      = Current().TextMuted   // gray
+	ColorForeground = Current().TextPrimary // light gray
+	ColorBackground = Current().Background  // dark gray
+	ColorBorder     = Current().Border      // medium gray
 )
 
 // Styles provides a collection of reusable lipgloss styles.

@@ -13,14 +13,14 @@ import (
 
 // ClientConfig holds TUI client configuration.
 type ClientConfig struct {
-	Keybindings   KeybindingsConfig        `json:"keybindings"`
-	Session       SessionConfig            `json:"session"`
-	Vim           VimConfig                `json:"vim"`
-	Rendering     RenderingConfig          `json:"rendering"`
-	Input         InputConfig              `json:"input"`
-	Chat          ChatConfig               `json:"chat"`
-	STT           STTConfig                `json:"stt"`
-	TTS           TTSConfig                `json:"tts"`
+	Keybindings   KeybindingsConfig         `json:"keybindings"`
+	Session       SessionConfig             `json:"session"`
+	Vim           VimConfig                 `json:"vim"`
+	Rendering     RenderingConfig           `json:"rendering"`
+	Input         InputConfig               `json:"input"`
+	Chat          ChatConfig                `json:"chat"`
+	STT           STTConfig                 `json:"stt"`
+	TTS           TTSConfig                 `json:"tts"`
 	Notifications NotificationsClientConfig `json:"notifications"`
 }
 
@@ -47,6 +47,7 @@ type RenderingConfig struct {
 	Markdown           bool          `json:"markdown"`            // Enable markdown rendering (default: true)
 	SyntaxHighlighting bool          `json:"syntax_highlighting"` // Enable syntax highlighting (default: true)
 	Theme              string        `json:"theme"`               // Syntax theme (default: "monokai")
+	UITheme            string        `json:"ui_theme"`            // UI color palette variant: "cyberpunk", "midnight", or "solarized" (default: "cyberpunk")
 	WordWrap           bool          `json:"word_wrap"`           // Enable word wrap (default: true)
 	ShowHeader         bool          `json:"show_header"`         // Show header bar with session info (default: true)
 	SidebarAnimation   bool          `json:"sidebar_animation"`   // Enable animated dispatch visualization in sidebar (default: true)
@@ -176,6 +177,7 @@ func DefaultClientConfig() *ClientConfig {
 			Markdown:           true,
 			SyntaxHighlighting: true,
 			Theme:              "monokai",
+			UITheme:            "cyberpunk",
 			WordWrap:           true,
 			ShowHeader:         true,
 			SidebarAnimation:   true,
@@ -286,6 +288,10 @@ func checkClientConfigDefaults(path string, cfg *ClientConfig) {
 	if cfg.Rendering.Theme == "" {
 		slog.Warn("client config: using default for missing field", "field", "rendering.theme", "default", "monokai", "path", path)
 		cfg.Rendering.Theme = "monokai"
+	}
+	if cfg.Rendering.UITheme == "" {
+		slog.Warn("client config: using default for missing field", "field", "rendering.ui_theme", "default", "cyberpunk", "path", path)
+		cfg.Rendering.UITheme = "cyberpunk"
 	}
 	if cfg.STT.Engine == "" {
 		slog.Warn("client config: using default for missing field", "field", "stt.engine", "default", "whisper", "path", path)

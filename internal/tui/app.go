@@ -242,10 +242,21 @@ func NewApp(socketPath string, cwd string) *App {
 	// Separate RPC client for event stream polling so it doesn't block
 	// on the main client's callMu while a Chat call is in-flight
 	eventRPC := NewRPCClient(socketPath)
-	styles := DefaultStyles()
 
-	// Load client configuration
+	// Load client configuration first: the UI theme must be applied to the
+	// package-level Color* vars before DefaultStyles() derives from them.
 	clientConfig, clientConfigPath := LoadClientConfigPath()
+	if err := SetPalette(clientConfig.Rendering.UITheme); err != nil {
+		slog.Warn("client config: failed to set ui theme, using built-in defaults",
+			"theme", clientConfig.Rendering.UITheme, "error", err)
+	}
+	// Keep the sidebar visualization palette in sync with the UI theme. A
+	// failure here is non-fatal: viz keeps its built-in defaults.
+	if err := viz.SetPalette(clientConfig.Rendering.UITheme); err != nil {
+		slog.Debug("client config: failed to set viz theme, using built-in defaults",
+			"theme", clientConfig.Rendering.UITheme, "error", err)
+	}
+	styles := DefaultStyles()
 
 	// Get current working directory for display
 	var projectDir string
