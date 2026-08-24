@@ -25,6 +25,9 @@ abstract class AppConstants {
   // Storage keys (SharedPreferences)
   static const String apiKeyPref = 'api_key';
   static const String themePref = 'theme';
+
+  /// UI color-variant preference ('cyberpunk' | 'midnight' | 'solarized').
+  static const String uiThemePref = 'ui_theme';
   // TTS preferences
   static const String ttsEnabledPref = 'tts_enabled';
   static const String ttsVoicePref = 'tts_voice';

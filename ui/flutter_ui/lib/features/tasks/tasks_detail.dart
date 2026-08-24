@@ -161,8 +161,8 @@ class TasksDetail extends ConsumerWidget {
             .updateTaskStatus(task.id, value);
         if (result == false && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('failed to update task status'),
+            SnackBar(
+              content: const Text('failed to update task status'),
               backgroundColor: CyberpunkColors.redAlert,
             ),
           );
@@ -202,15 +202,15 @@ class TasksDetail extends ConsumerWidget {
               if (result) {
                 // The refreshed task list/provider should update automatically
                 messenger.showSnackBar(
-                  const SnackBar(
-                    content: Text('task cancelled'),
+                  SnackBar(
+                    content: const Text('task cancelled'),
                     backgroundColor: CyberpunkColors.orangePrimary,
                   ),
                 );
               } else {
                 messenger.showSnackBar(
-                  const SnackBar(
-                    content: Text('failed to cancel task'),
+                  SnackBar(
+                    content: const Text('failed to cancel task'),
                     backgroundColor: CyberpunkColors.redAlert,
                   ),
                 );

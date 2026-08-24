@@ -167,14 +167,14 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
                     children: [
                       GestureDetector(
                         onTap: _closePanel,
-                        child: const Icon(
+                        child: Icon(
                           Icons.arrow_back,
                           color: CyberpunkColors.orangePrimary,
                           size: 18,
                         ),
                       ),
                       const SizedBox(width: 8),
-                      const Icon(
+                      Icon(
                         Icons.search,
                         color: CyberpunkColors.orangeBright,
                         size: 24,
@@ -223,7 +223,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
                         ),
                         suffixIcon: _showClear
                             ? IconButton(
-                                icon: const Icon(
+                                icon: Icon(
                                   Icons.clear,
                                   size: 18,
                                   color: CyberpunkColors.orangeDark,
@@ -270,7 +270,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
                             selectedColor: CyberpunkColors.orangePrimary,
                             checkmarkColor: CyberpunkColors.darkGray,
                             backgroundColor: CyberpunkColors.darkGray,
-                            side: const BorderSide(
+                            side: BorderSide(
                               color: CyberpunkColors.orangePrimary,
                               width: 1,
                             ),
@@ -349,7 +349,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
             // Results
             Expanded(
               child: _isSearching
-                  ? const Center(
+                  ? Center(
                       child: CircularProgressIndicator(
                         color: CyberpunkColors.orangePrimary,
                       ),
@@ -373,7 +373,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(
+          Icon(
             Icons.search_outlined,
             size: 64,
             color: CyberpunkColors.orangeDark,
@@ -396,11 +396,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(
-            Icons.search_off,
-            size: 48,
-            color: CyberpunkColors.orangeDark,
-          ),
+          Icon(Icons.search_off, size: 48, color: CyberpunkColors.orangeDark),
           const SizedBox(height: 16),
           Text(
             'no results for "$_lastQuery"',
@@ -418,7 +414,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(
+          Icon(
             Icons.error_outline,
             size: 48,
             color: CyberpunkColors.orangeDark,
@@ -591,8 +587,9 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
           try {
             final fresh = await _sdkClient.getSession(session.id);
             if (!mounted) return;
-            ref.read(activeSessionProvider.notifier).state =
-                Session.fromJson(fresh);
+            ref.read(activeSessionProvider.notifier).state = Session.fromJson(
+              fresh,
+            );
           } catch (_) {
             // Refresh is best-effort; the daemon-side bind stands either way.
           }

@@ -203,7 +203,7 @@ class _ReflectionPanelState extends ConsumerState<ReflectionPanel> {
             _buildHeader(),
             Expanded(
               child: _isLoading
-                  ? const Center(
+                  ? Center(
                       child: SizedBox(
                         width: 20,
                         height: 20,
@@ -230,14 +230,14 @@ class _ReflectionPanelState extends ConsumerState<ReflectionPanel> {
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),
       child: Row(
         children: [
-          const Icon(
+          Icon(
             Icons.psychology,
             color: CyberpunkColors.orangePrimary,
             size: 18,
@@ -259,7 +259,7 @@ class _ReflectionPanelState extends ConsumerState<ReflectionPanel> {
           ),
           GestureDetector(
             onTap: _loadProposals,
-            child: const Icon(
+            child: Icon(
               Icons.refresh,
               color: CyberpunkColors.orangePrimary,
               size: 16,
@@ -275,11 +275,7 @@ class _ReflectionPanelState extends ConsumerState<ReflectionPanel> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
-            Icons.error_outline,
-            color: CyberpunkColors.redAlert,
-            size: 48,
-          ),
+          Icon(Icons.error_outline, color: CyberpunkColors.redAlert, size: 48),
           const SizedBox(height: 16),
           Text(
             'failed to load proposals',
@@ -320,7 +316,7 @@ class _ReflectionPanelState extends ConsumerState<ReflectionPanel> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
+          Icon(
             Icons.psychology_outlined,
             size: 48,
             color: CyberpunkColors.orangeDark,

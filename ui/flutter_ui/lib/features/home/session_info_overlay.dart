@@ -139,7 +139,7 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: CyberpunkColors.darkGray,
         border: Border(
           bottom: BorderSide(color: CyberpunkColors.orangePrimary, width: 2),
@@ -165,7 +165,7 @@ class _Header extends StatelessWidget {
                   color: CyberpunkColors.orangeDark.withValues(alpha: 0.3),
                 ),
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.close,
                 size: 16,
                 color: CyberpunkColors.orangePrimary,
@@ -195,7 +195,7 @@ class _TabBar extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
-        border: const Border(
+        border: Border(
           bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),
@@ -485,11 +485,7 @@ class _AgentItem extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.smart_toy,
-            size: 20,
-            color: CyberpunkColors.orangePrimary,
-          ),
+          Icon(Icons.smart_toy, size: 20, color: CyberpunkColors.orangePrimary),
           const SizedBox(width: 12),
           Expanded(
             child: Column(

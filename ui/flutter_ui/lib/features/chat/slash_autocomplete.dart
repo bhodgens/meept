@@ -299,11 +299,7 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
             : null,
         child: Row(
           children: [
-            const Icon(
-              Icons.folder,
-              size: 16,
-              color: CyberpunkColors.orangePrimary,
-            ),
+            Icon(Icons.folder, size: 16, color: CyberpunkColors.orangePrimary),
             const SizedBox(width: 8),
             Expanded(
               child: Text(

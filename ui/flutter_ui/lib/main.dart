@@ -12,7 +12,9 @@ import 'services/storage_service.dart';
 import 'services/sdk_client.dart';
 import 'services/websocket_service.dart';
 import 'services/window_geometry_service.dart';
-import 'theme/cyberpunk_theme.dart';
+import 'theme/app_palette.dart';
+import 'theme/colors.dart';
+import 'theme/palette_provider.dart';
 import 'core/constants.dart';
 import 'core/router.dart';
 import 'providers/providers.dart';
@@ -38,6 +40,10 @@ void main() async {
 
   // Initialize persistent storage before any provider or service reads
   await StorageService.instance.init();
+
+  // Resolve the stored ui theme before runApp so the first frame already
+  // renders in the saved palette and CyberpunkColors forwards to it.
+  initStoredTheme();
 
   // Restore saved window size/position on desktop platforms
   await WindowGeometryService.initialize();
@@ -120,16 +126,42 @@ class _WindowCloseHandler extends WindowListener {
   }
 }
 
-class CyberpunkApp extends StatelessWidget {
+/// Resolves the stored ui theme into startup state, before runApp.
+///
+/// Reads the 'ui_theme' preference first; if unset, falls back to the legacy
+/// 'theme' key but only when its value names a known variant. Stores the
+/// result in [initialThemeName] (used as themeNameProvider's initial state)
+/// and activates the palette on the static CyberpunkColors forwarding layer
+/// so all direct color references follow it from frame one.
+void initStoredTheme() {
+  final storage = StorageService.instance;
+  final stored = storage.getUiTheme() ?? _knownLegacyTheme();
+  if (stored == null) return;
+
+  final palette = AppPalette.forName(stored);
+  initialThemeName = palette.name;
+  CyberpunkColors.setActive(palette);
+}
+
+/// Legacy 'theme' value, only when it already names a known ui variant.
+String? _knownLegacyTheme() {
+  final legacy = StorageService.instance.getTheme();
+  if (legacy != null && AppPalette.palettes.containsKey(legacy)) {
+    return legacy;
+  }
+  return null;
+}
+
+class CyberpunkApp extends ConsumerWidget {
   const CyberpunkApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return MaterialApp.router(
       routerConfig: router,
       title: 'meept gui client v${AppConstants.appVersion}',
       debugShowCheckedModeBanner: false,
-      theme: CyberpunkTheme.darkTheme,
+      theme: ref.watch(appThemeProvider),
       builder: (context, child) {
         return _AppLifecycleWrapper(child: child!);
       },

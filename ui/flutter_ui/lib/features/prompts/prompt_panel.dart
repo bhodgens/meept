@@ -115,7 +115,7 @@ class _PromptPanelState extends ConsumerState<PromptPanel> {
             _buildHeader(),
             Expanded(
               child: _isLoading
-                  ? const Center(
+                  ? Center(
                       child: SizedBox(
                         width: 20,
                         height: 20,
@@ -142,18 +142,14 @@ class _PromptPanelState extends ConsumerState<PromptPanel> {
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.edit_note,
-            color: CyberpunkColors.orangePrimary,
-            size: 18,
-          ),
+          Icon(Icons.edit_note, color: CyberpunkColors.orangePrimary, size: 18),
           const SizedBox(width: 8),
           Text(
             'prompt templates',
@@ -171,7 +167,7 @@ class _PromptPanelState extends ConsumerState<PromptPanel> {
           ),
           GestureDetector(
             onTap: _loadPrompts,
-            child: const Icon(
+            child: Icon(
               Icons.refresh,
               color: CyberpunkColors.orangePrimary,
               size: 16,
@@ -187,11 +183,7 @@ class _PromptPanelState extends ConsumerState<PromptPanel> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
-            Icons.error_outline,
-            color: CyberpunkColors.redAlert,
-            size: 48,
-          ),
+          Icon(Icons.error_outline, color: CyberpunkColors.redAlert, size: 48),
           const SizedBox(height: 16),
           Text(
             'failed to load prompts',
@@ -232,11 +224,7 @@ class _PromptPanelState extends ConsumerState<PromptPanel> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
-            Icons.edit_note,
-            size: 48,
-            color: CyberpunkColors.orangeDark,
-          ),
+          Icon(Icons.edit_note, size: 48, color: CyberpunkColors.orangeDark),
           const SizedBox(height: 16),
           Text(
             'no prompt templates found',
@@ -562,7 +550,7 @@ class _PromptDetailRouteState extends ConsumerState<_PromptDetailRoute> {
         ),
       ),
       body: _isLoading
-          ? const Center(
+          ? Center(
               child: SizedBox(
                 width: 20,
                 height: 20,
@@ -585,11 +573,7 @@ class _PromptDetailRouteState extends ConsumerState<_PromptDetailRoute> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
-            Icons.error_outline,
-            color: CyberpunkColors.redAlert,
-            size: 48,
-          ),
+          Icon(Icons.error_outline, color: CyberpunkColors.redAlert, size: 48),
           const SizedBox(height: 16),
           Text(
             'failed to load template',
@@ -635,7 +619,7 @@ class _PromptDetailRouteState extends ConsumerState<_PromptDetailRoute> {
         // Action bar
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             border: Border(
               bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
             ),

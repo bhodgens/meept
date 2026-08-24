@@ -104,8 +104,8 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
       if (mounted) {
         _loadHistory();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('history cleared'),
+          SnackBar(
+            content: const Text('history cleared'),
             backgroundColor: CyberpunkColors.greenSuccess,
           ),
         );
@@ -141,18 +141,14 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.terminal,
-            color: CyberpunkColors.orangePrimary,
-            size: 18,
-          ),
+          Icon(Icons.terminal, color: CyberpunkColors.orangePrimary, size: 18),
           const SizedBox(width: 8),
           Text(
             'terminal',
@@ -179,14 +175,14 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
   Widget _buildCommandInput() {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),
       child: Row(
         children: [
-          const Icon(
+          Icon(
             Icons.arrow_right,
             color: CyberpunkColors.orangeBright,
             size: 18,
@@ -209,7 +205,7 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
             ),
           ),
           if (_isExecuting)
-            const SizedBox(
+            SizedBox(
               width: 16,
               height: 16,
               child: CircularProgressIndicator(
@@ -232,7 +228,7 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
 
   Widget _buildHistoryList() {
     if (_isLoading) {
-      return const Center(
+      return Center(
         child: SizedBox(
           width: 20,
           height: 20,
@@ -251,11 +247,7 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              Icons.terminal,
-              color: CyberpunkColors.midGray,
-              size: 48,
-            ),
+            Icon(Icons.terminal, color: CyberpunkColors.midGray, size: 48),
             const SizedBox(height: 8),
             Text(
               'no command history',
@@ -356,11 +348,7 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
           const SizedBox(height: 4),
           Row(
             children: [
-              const Icon(
-                Icons.access_time,
-                size: 10,
-                color: CyberpunkColors.midGray,
-              ),
+              Icon(Icons.access_time, size: 10, color: CyberpunkColors.midGray),
               const SizedBox(width: 4),
               Text(
                 _formatTime(entry.timestamp),
@@ -372,11 +360,7 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
               ),
               if (entry.workingDir.isNotEmpty) ...[
                 const SizedBox(width: 8),
-                const Icon(
-                  Icons.folder,
-                  size: 10,
-                  color: CyberpunkColors.midGray,
-                ),
+                Icon(Icons.folder, size: 10, color: CyberpunkColors.midGray),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(

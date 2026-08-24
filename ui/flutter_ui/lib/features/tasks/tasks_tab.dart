@@ -25,7 +25,7 @@ class TasksTab extends ConsumerWidget {
           child: BackgroundImage(
             child: selectedTask != null
                 ? const TasksDetail()
-                : const Center(
+                : Center(
                     child: Text(
                       'select a task',
                       style: TextStyle(color: CyberpunkColors.orangePrimary),

@@ -71,7 +71,7 @@ class _Sidebar extends StatelessWidget {
           Container(
             height: 50,
             alignment: Alignment.center,
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(color: CyberpunkColors.orangeDark, width: 2),
               ),
@@ -217,13 +217,10 @@ class _ChatInput extends StatelessWidget {
           filled: true,
           fillColor: CyberpunkColors.midGray,
           border: OutlineInputBorder(
-            borderSide: const BorderSide(color: CyberpunkColors.orangeDark),
+            borderSide: BorderSide(color: CyberpunkColors.orangeDark),
             borderRadius: BorderRadius.circular(4),
           ),
-          suffixIcon: const Icon(
-            Icons.send,
-            color: CyberpunkColors.orangePrimary,
-          ),
+          suffixIcon: Icon(Icons.send, color: CyberpunkColors.orangePrimary),
         ),
         maxLines: 2,
       ),
@@ -239,7 +236,7 @@ class _StatusBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: CyberpunkColors.blackTransparent(0.7),
-        border: const Border(
+        border: Border(
           top: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),

@@ -295,11 +295,7 @@ class _TaskErrorBanner extends StatelessWidget {
       color: CyberpunkColors.redAlert.withValues(alpha: 0.2),
       child: Row(
         children: [
-          const Icon(
-            Icons.error_outline,
-            color: CyberpunkColors.redAlert,
-            size: 20,
-          ),
+          Icon(Icons.error_outline, color: CyberpunkColors.redAlert, size: 20),
           const SizedBox(width: 8),
           Expanded(
             child: Text(

@@ -49,7 +49,7 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: CyberpunkEffects.angularGradient,
         border: Border(
           bottom: BorderSide(color: CyberpunkColors.orangePrimary, width: 2),
@@ -75,7 +75,7 @@ class _Header extends StatelessWidget {
             ),
             child: Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.folder,
                   size: 14,
                   color: CyberpunkColors.orangePrimary,
@@ -212,7 +212,7 @@ class _BottomNavigation extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: CyberpunkColors.darkGray,
         border: Border(
           top: BorderSide(color: CyberpunkColors.orangePrimary, width: 2),
@@ -292,7 +292,7 @@ class _StatusBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: CyberpunkColors.blackTransparent(0.7),
-        border: const Border(
+        border: Border(
           top: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),

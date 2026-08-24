@@ -70,7 +70,7 @@ class _FindBarState extends ConsumerState<FindBar> {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      color: const Color(0xFF1F2937),
+      color: CyberpunkColors.surfaceAlt,
       child: Row(
         children: [
           Expanded(
@@ -103,9 +103,7 @@ class _FindBarState extends ConsumerState<FindBar> {
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(4),
-                  borderSide: const BorderSide(
-                    color: CyberpunkColors.orangePrimary,
-                  ),
+                  borderSide: BorderSide(color: CyberpunkColors.orangePrimary),
                 ),
               ),
               onSubmitted: (_) => _next(widget.matchCount, sessionId),

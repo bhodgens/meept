@@ -331,7 +331,7 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                   elevation: 4,
                   child: IconButton(
                     tooltip: 'scroll to latest',
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.arrow_downward,
                       size: 20,
                       color: CyberpunkColors.orangePrimary,
@@ -439,7 +439,7 @@ class _SessionLoadingPlaceholder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return Center(
       child: SizedBox(
         width: 24,
         height: 24,
@@ -464,7 +464,7 @@ class MessagePlaceholder extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
+          Icon(
             Icons.chat_bubble_outline,
             size: 64,
             color: CyberpunkColors.midGray,
@@ -603,7 +603,7 @@ class _ThinkingIndicatorState extends State<_ThinkingIndicator> {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
-          const SizedBox(
+          SizedBox(
             width: 16,
             height: 16,
             child: CircularProgressIndicator(

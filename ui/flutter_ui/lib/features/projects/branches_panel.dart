@@ -100,8 +100,8 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
         if (project == null) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('no active project'),
+              SnackBar(
+                content: const Text('no active project'),
                 backgroundColor: CyberpunkColors.orangeDark,
               ),
             );
@@ -194,7 +194,7 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
               ),
               child: Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.call_split,
                     color: CyberpunkColors.orangeBright,
                     size: 24,
@@ -234,7 +234,7 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
             // Content
             Expanded(
               child: _isLoading
-                  ? const Center(
+                  ? Center(
                       child: CircularProgressIndicator(
                         color: CyberpunkColors.orangePrimary,
                       ),
@@ -254,7 +254,7 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(
+          Icon(
             Icons.error_outline,
             size: 48,
             color: CyberpunkColors.orangeDark,
@@ -287,7 +287,7 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
+            Icon(
               Icons.call_split_outlined,
               size: 48,
               color: CyberpunkColors.orangeDark,

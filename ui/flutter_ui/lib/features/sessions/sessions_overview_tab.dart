@@ -23,7 +23,7 @@ class SessionsOverviewTab extends StatelessWidget {
               child: BackgroundImage(
                 child: activeSession != null
                     ? SessionsDetailPane(session: activeSession)
-                    : const Center(
+                    : Center(
                         child: Text(
                           'select a session',
                           style: TextStyle(

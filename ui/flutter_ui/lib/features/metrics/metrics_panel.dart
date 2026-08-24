@@ -41,7 +41,7 @@ class _MetricsLoading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const SizedBox(
+    return SizedBox(
       height: 60,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -56,8 +56,11 @@ class _MetricsLoading extends StatelessWidget {
               ),
             ),
           ),
-          SizedBox(width: 8),
-          Text('loading metrics...', style: CyberpunkTypography.bodySmall),
+          const SizedBox(width: 8),
+          const Text(
+            'loading metrics...',
+            style: CyberpunkTypography.bodySmall,
+          ),
         ],
       ),
     );
@@ -124,7 +127,7 @@ class _MetricsContent extends StatelessWidget {
                 Container(
                   width: 6,
                   height: 6,
-                  decoration: const BoxDecoration(
+                  decoration: BoxDecoration(
                     color: CyberpunkColors.greenSuccess,
                     shape: BoxShape.circle,
                   ),

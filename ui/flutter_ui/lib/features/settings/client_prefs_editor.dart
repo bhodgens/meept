@@ -286,20 +286,17 @@ class _ClientPrefsEditorState extends ConsumerState<ClientPrefsEditor> {
     fillColor: CyberpunkColors.black,
     border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(6),
-      borderSide: const BorderSide(color: CyberpunkColors.midGray),
+      borderSide: BorderSide(color: CyberpunkColors.midGray),
     ),
     enabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(6),
-      borderSide: const BorderSide(color: CyberpunkColors.midGray),
+      borderSide: BorderSide(color: CyberpunkColors.midGray),
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(6),
-      borderSide: const BorderSide(
-        color: CyberpunkColors.orangePrimary,
-        width: 1.5,
-      ),
+      borderSide: BorderSide(color: CyberpunkColors.orangePrimary, width: 1.5),
     ),
-    errorStyle: const TextStyle(color: CyberpunkColors.redAlert, fontSize: 10),
+    errorStyle: TextStyle(color: CyberpunkColors.redAlert, fontSize: 10),
   );
 
   Widget _controlFor(_Pref p) {
@@ -356,7 +353,7 @@ class _ClientPrefsEditorState extends ConsumerState<ClientPrefsEditor> {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: CyberpunkColors.midGray)),
       ),
       child: Column(
@@ -364,7 +361,7 @@ class _ClientPrefsEditorState extends ConsumerState<ClientPrefsEditor> {
         children: [
           Row(
             children: [
-              const Icon(Icons.tune, color: CyberpunkColors.blueInfo, size: 16),
+              Icon(Icons.tune, color: CyberpunkColors.blueInfo, size: 16),
               const SizedBox(width: 8),
               Text(
                 'client preferences',
@@ -374,7 +371,7 @@ class _ClientPrefsEditorState extends ConsumerState<ClientPrefsEditor> {
               ),
               const Spacer(),
               if (_isSaving)
-                const SizedBox(
+                SizedBox(
                   width: 14,
                   height: 14,
                   child: CircularProgressIndicator(
@@ -404,11 +401,11 @@ class _ClientPrefsEditorState extends ConsumerState<ClientPrefsEditor> {
             ),
             decoration: InputDecoration(
               hintText: 'filter settings…',
-              hintStyle: const TextStyle(
+              hintStyle: TextStyle(
                 color: CyberpunkColors.midGray,
                 fontFamily: 'SourceCodePro',
               ),
-              prefixIcon: const Icon(
+              prefixIcon: Icon(
                 Icons.search,
                 color: CyberpunkColors.orangePrimary,
                 size: 16,
@@ -416,7 +413,7 @@ class _ClientPrefsEditorState extends ConsumerState<ClientPrefsEditor> {
               suffixIcon: _filter.isEmpty
                   ? null
                   : IconButton(
-                      icon: const Icon(
+                      icon: Icon(
                         Icons.close,
                         color: CyberpunkColors.midGray,
                         size: 14,
@@ -431,15 +428,15 @@ class _ClientPrefsEditorState extends ConsumerState<ClientPrefsEditor> {
               fillColor: CyberpunkColors.black,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(color: CyberpunkColors.midGray),
+                borderSide: BorderSide(color: CyberpunkColors.midGray),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(color: CyberpunkColors.midGray),
+                borderSide: BorderSide(color: CyberpunkColors.midGray),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(
+                borderSide: BorderSide(
                   color: CyberpunkColors.orangePrimary,
                   width: 1.5,
                 ),
@@ -458,7 +455,7 @@ class _ClientPrefsEditorState extends ConsumerState<ClientPrefsEditor> {
               ),
             ),
           if (_isLoading)
-            const Center(
+            Center(
               child: SizedBox(
                 width: 20,
                 height: 20,

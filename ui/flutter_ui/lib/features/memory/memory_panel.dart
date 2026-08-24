@@ -140,7 +140,7 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
               ErrorBanner(message: _error!, onDismiss: _loadRecentMemories),
             Expanded(
               child: _isLoading && _memories.isEmpty
-                  ? const Center(
+                  ? Center(
                       child: SizedBox(
                         width: 20,
                         height: 20,
@@ -164,7 +164,7 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.search_off,
                             color: CyberpunkColors.midGray,
                             size: 48,
@@ -195,7 +195,7 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
@@ -207,14 +207,14 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
             children: [
               GestureDetector(
                 onTap: _closePanel,
-                child: const Icon(
+                child: Icon(
                   Icons.arrow_back,
                   color: CyberpunkColors.orangePrimary,
                   size: 18,
                 ),
               ),
               const SizedBox(width: 8),
-              const Icon(
+              Icon(
                 Icons.memory,
                 color: CyberpunkColors.orangePrimary,
                 size: 18,
@@ -258,7 +258,7 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
               prefixIcon: const Icon(Icons.search, size: 18),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: CyberpunkColors.midGray),
+                borderSide: BorderSide(color: CyberpunkColors.midGray),
               ),
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 12,

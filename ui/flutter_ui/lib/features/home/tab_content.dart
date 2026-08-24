@@ -102,8 +102,8 @@ class _NoSessionPlaceholderState extends ConsumerState<_NoSessionPlaceholder> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (_creating)
-                  const Padding(
-                    padding: EdgeInsets.only(right: 6),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
                     child: SizedBox(
                       width: 12,
                       height: 12,

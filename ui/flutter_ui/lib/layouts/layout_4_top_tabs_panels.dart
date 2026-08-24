@@ -91,7 +91,7 @@ class _HeaderWithTabs extends StatelessWidget {
         Container(
           height: 40,
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             color: CyberpunkColors.darkGray,
             border: Border(
               bottom: BorderSide(color: CyberpunkColors.orangeDark, width: 1),
@@ -115,7 +115,7 @@ class _HeaderWithTabs extends StatelessWidget {
         ),
         // Tab bar
         Container(
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             color: CyberpunkColors.black,
             border: Border(
               bottom: BorderSide(
@@ -238,17 +238,17 @@ class _LeftPanel extends StatelessWidget {
           ),
         ),
       ),
-      child: const Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _PanelHeader('tools'),
-          _ToolItem(Icons.search, 'search'),
-          _ToolItem(Icons.memory, 'memory'),
-          _ToolItem(Icons.lightbulb, 'prompts'),
-          _ToolItem(Icons.psychology, 'reflection'),
+          const _PanelHeader('tools'),
+          const _ToolItem(Icons.search, 'search'),
+          const _ToolItem(Icons.memory, 'memory'),
+          const _ToolItem(Icons.lightbulb, 'prompts'),
+          const _ToolItem(Icons.psychology, 'reflection'),
           Divider(color: CyberpunkColors.midGray),
-          _ToolItem(Icons.settings, 'settings'),
-          _ToolItem(Icons.extension, 'skills'),
+          const _ToolItem(Icons.settings, 'settings'),
+          const _ToolItem(Icons.extension, 'skills'),
         ],
       ),
     );
@@ -274,7 +274,7 @@ class _RightPanel extends StatelessWidget {
         children: [
           const _PanelHeader('project'),
           _ProjectInfo(),
-          const Divider(color: CyberpunkColors.midGray),
+          Divider(color: CyberpunkColors.midGray),
           const _PanelHeader('quick access'),
           const _ToolItem(Icons.call_split, 'branches'),
           const _ToolItem(Icons.folder, 'files'),
@@ -356,7 +356,7 @@ class _ProjectInfo extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.folder,
                 size: 16,
                 color: CyberpunkColors.orangePrimary,
@@ -507,7 +507,7 @@ class _StatusBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: CyberpunkColors.blackTransparent(0.7),
-        border: const Border(
+        border: Border(
           top: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),

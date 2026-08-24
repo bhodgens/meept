@@ -284,7 +284,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
             _buildHeader(),
             Expanded(
               child: _isLoading
-                  ? const Center(
+                  ? Center(
                       child: SizedBox(
                         width: 20,
                         height: 20,
@@ -311,7 +311,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
@@ -321,7 +321,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
           if (_selectedSkill != null) ...[
             GestureDetector(
               onTap: _goBack,
-              child: const Icon(
+              child: Icon(
                 Icons.arrow_back,
                 color: CyberpunkColors.orangePrimary,
                 size: 18,
@@ -329,7 +329,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
             ),
             const SizedBox(width: 8),
           ],
-          const Icon(
+          Icon(
             Icons.auto_awesome,
             color: CyberpunkColors.orangePrimary,
             size: 18,
@@ -352,7 +352,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
           if (_selectedSkill == null)
             GestureDetector(
               onTap: _loadSkills,
-              child: const Icon(
+              child: Icon(
                 Icons.refresh,
                 color: CyberpunkColors.orangePrimary,
                 size: 16,
@@ -368,11 +368,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
-            Icons.error_outline,
-            color: CyberpunkColors.redAlert,
-            size: 48,
-          ),
+          Icon(Icons.error_outline, color: CyberpunkColors.redAlert, size: 48),
           const SizedBox(height: 16),
           Text(
             'failed to load skills',
@@ -414,7 +410,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               Icons.auto_awesome_outlined,
               size: 48,
               color: CyberpunkColors.orangeDark,
@@ -467,11 +463,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
           children: [
             Row(
               children: [
-                const Icon(
-                  Icons.tune,
-                  size: 16,
-                  color: CyberpunkColors.orangeBright,
-                ),
+                Icon(Icons.tune, size: 16, color: CyberpunkColors.orangeBright),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -532,7 +524,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
 
   Widget _buildSkillDetail() {
     if (_isLoadingUi) {
-      return const Center(
+      return Center(
         child: SizedBox(
           width: 20,
           height: 20,
@@ -551,7 +543,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               Icons.error_outline,
               color: CyberpunkColors.redAlert,
               size: 48,
@@ -652,7 +644,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
               ),
             ),
             child: _isExecuting
-                ? const SizedBox(
+                ? SizedBox(
                     width: 16,
                     height: 16,
                     child: CircularProgressIndicator(
@@ -713,15 +705,15 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
         ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(2),
-          borderSide: const BorderSide(color: CyberpunkColors.midGray),
+          borderSide: BorderSide(color: CyberpunkColors.midGray),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(2),
-          borderSide: const BorderSide(color: CyberpunkColors.midGray),
+          borderSide: BorderSide(color: CyberpunkColors.midGray),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(2),
-          borderSide: const BorderSide(
+          borderSide: BorderSide(
             color: CyberpunkColors.orangePrimary,
             width: 1.5,
           ),

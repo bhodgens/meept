@@ -27,19 +27,19 @@ abstract class CyberpunkEffects {
   ];
 
   /// Angular gradient for backgrounds
-  static const LinearGradient angularGradient = LinearGradient(
+  static LinearGradient get angularGradient => LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
     colors: CyberpunkColors.darkGradient,
-    stops: [0.0, 0.5, 1.0],
+    stops: const [0.0, 0.5, 1.0],
   );
 
   /// Orange accent gradient
-  static const LinearGradient orangeGradient = LinearGradient(
+  static LinearGradient get orangeGradient => LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
     colors: CyberpunkColors.orangeGradient,
-    stops: [0.0, 0.7, 1.0],
+    stops: const [0.0, 0.7, 1.0],
   );
 
   /// Scanline effect overlay

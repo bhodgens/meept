@@ -169,10 +169,10 @@ class _OrchestratorConfigEditorState
         _original = payload;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('orchestrator config saved'),
+        SnackBar(
+          content: const Text('orchestrator config saved'),
           backgroundColor: CyberpunkColors.greenSuccess,
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
         ),
       );
     } catch (e) {
@@ -206,23 +206,20 @@ class _OrchestratorConfigEditorState
         fillColor: CyberpunkColors.black,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(6),
-          borderSide: const BorderSide(color: CyberpunkColors.midGray),
+          borderSide: BorderSide(color: CyberpunkColors.midGray),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(6),
-          borderSide: const BorderSide(color: CyberpunkColors.midGray),
+          borderSide: BorderSide(color: CyberpunkColors.midGray),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(6),
-          borderSide: const BorderSide(
+          borderSide: BorderSide(
             color: CyberpunkColors.orangePrimary,
             width: 1.5,
           ),
         ),
-        errorStyle: const TextStyle(
-          color: CyberpunkColors.redAlert,
-          fontSize: 10,
-        ),
+        errorStyle: TextStyle(color: CyberpunkColors.redAlert, fontSize: 10),
       );
 
   Widget _field(_OrchestratorField f) {
@@ -261,7 +258,7 @@ class _OrchestratorConfigEditorState
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: CyberpunkColors.midGray)),
       ),
       child: Column(
@@ -269,7 +266,7 @@ class _OrchestratorConfigEditorState
         children: [
           Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.account_tree,
                 color: CyberpunkColors.blueInfo,
                 size: 16,
@@ -283,7 +280,7 @@ class _OrchestratorConfigEditorState
               ),
               const Spacer(),
               if (_isSaving)
-                const SizedBox(
+                SizedBox(
                   width: 14,
                   height: 14,
                   child: CircularProgressIndicator(
@@ -330,7 +327,7 @@ class _OrchestratorConfigEditorState
               ),
             ),
           if (_isLoading)
-            const Center(
+            Center(
               child: SizedBox(
                 width: 20,
                 height: 20,

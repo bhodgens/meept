@@ -59,7 +59,7 @@ class ChatMessageBubble extends ConsumerWidget {
           children: [
             Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.error_outline,
                   color: CyberpunkColors.redAlert,
                   size: 16,

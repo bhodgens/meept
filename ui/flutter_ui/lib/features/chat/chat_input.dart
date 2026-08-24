@@ -668,8 +668,8 @@ class _ChatInputState extends ConsumerState<ChatInput>
     if (sessionId.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('no active session'),
+          SnackBar(
+            content: const Text('no active session'),
             backgroundColor: CyberpunkColors.redAlert,
           ),
         );
@@ -759,7 +759,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
             content: SingleChildScrollView(
               child: SelectableText(
                 buf.toString(),
-                style: const TextStyle(
+                style: TextStyle(
                   fontFamily: 'SourceCodePro',
                   fontSize: 12,
                   color: CyberpunkColors.greenSuccess,
@@ -803,8 +803,8 @@ class _ChatInputState extends ConsumerState<ChatInput>
     if (sessionId.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('no active session'),
+          SnackBar(
+            content: const Text('no active session'),
             backgroundColor: CyberpunkColors.redAlert,
           ),
         );
@@ -871,8 +871,8 @@ class _ChatInputState extends ConsumerState<ChatInput>
     if (sessionId.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('no active session'),
+          SnackBar(
+            content: const Text('no active session'),
             backgroundColor: CyberpunkColors.redAlert,
           ),
         );
@@ -922,8 +922,8 @@ class _ChatInputState extends ConsumerState<ChatInput>
     if (sessionId.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('no active session'),
+          SnackBar(
+            content: const Text('no active session'),
             backgroundColor: CyberpunkColors.redAlert,
           ),
         );
@@ -935,8 +935,8 @@ class _ChatInputState extends ConsumerState<ChatInput>
     if (projectId.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('no active project to rename'),
+          SnackBar(
+            content: const Text('no active project to rename'),
             backgroundColor: CyberpunkColors.redAlert,
           ),
         );
@@ -1496,11 +1496,11 @@ class _ChatInputState extends ConsumerState<ChatInput>
                     ),
                     cursorColor: Colors.transparent,
                     cursorWidth: 0,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: '',
                       hintStyle: CyberpunkTypography.bodySmall,
                       border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(
+                      contentPadding: const EdgeInsets.symmetric(
                         horizontal: 8,
                         vertical: 10,
                       ),
@@ -1552,7 +1552,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
                   ),
                 ),
               )
-            : const Icon(Icons.send, color: CyberpunkColors.black, size: 18),
+            : Icon(Icons.send, color: CyberpunkColors.black, size: 18),
       ),
     );
   }

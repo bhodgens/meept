@@ -67,7 +67,7 @@ class _Header extends StatelessWidget {
             CyberpunkColors.darkGray.withValues(alpha: 0.5),
           ],
         ),
-        border: const Border(
+        border: Border(
           bottom: BorderSide(color: CyberpunkColors.orangePrimary, width: 3),
         ),
       ),
@@ -117,7 +117,7 @@ class _Header extends StatelessWidget {
             backgroundColor: CyberpunkColors.orangePrimary.withValues(
               alpha: 0.2,
             ),
-            child: const Icon(
+            child: Icon(
               Icons.person,
               size: 20,
               color: CyberpunkColors.orangePrimary,
@@ -199,31 +199,31 @@ class _DashboardGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cards = [
-      const _DashboardCard(
+      _DashboardCard(
         title: 'chat',
         icon: Icons.chat_bubble_outline,
         preview: 'active conversation',
         accentColor: CyberpunkColors.orangePrimary,
       ),
-      const _DashboardCard(
+      _DashboardCard(
         title: 'sessions',
         icon: Icons.folder_open,
         preview: '12 archived',
         accentColor: CyberpunkColors.blueInfo,
       ),
-      const _DashboardCard(
+      _DashboardCard(
         title: 'plans',
         icon: Icons.document_scanner,
         preview: '3 in progress',
         accentColor: CyberpunkColors.cyanAccent,
       ),
-      const _DashboardCard(
+      _DashboardCard(
         title: 'tasks',
         icon: Icons.task_alt,
         preview: '24 pending',
         accentColor: CyberpunkColors.yellowWarning,
       ),
-      const _DashboardCard(
+      _DashboardCard(
         title: 'agents',
         icon: Icons.smart_toy,
         preview: '5 active',
@@ -410,11 +410,7 @@ class _FloatingChatBar extends StatelessWidget {
                 color: CyberpunkColors.orangePrimary,
                 borderRadius: BorderRadius.circular(4),
               ),
-              child: const Icon(
-                Icons.send,
-                color: CyberpunkColors.black,
-                size: 20,
-              ),
+              child: Icon(Icons.send, color: CyberpunkColors.black, size: 20),
             ),
           ],
         ),
@@ -422,7 +418,6 @@ class _FloatingChatBar extends StatelessWidget {
     );
   }
 }
-
 
 class _StatusBar extends StatelessWidget {
   @override
@@ -432,7 +427,7 @@ class _StatusBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: CyberpunkColors.blackTransparent(0.7),
-        border: const Border(
+        border: Border(
           top: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),

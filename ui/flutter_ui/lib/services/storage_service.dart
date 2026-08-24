@@ -151,6 +151,14 @@ class StorageService {
     await _prefs?.setString(AppConstants.themePref, theme);
   }
 
+  /// UI color variant ('cyberpunk' | 'midnight' | 'solarized'). Separate
+  /// from the legacy [getTheme] key, which stores a chroma syntax theme.
+  String? getUiTheme() => _prefs?.getString(AppConstants.uiThemePref);
+
+  Future<void> setUiTheme(String theme) async {
+    await _prefs?.setString(AppConstants.uiThemePref, theme);
+  }
+
   // ------ TTS Settings ------
 
   bool getTtsEnabled() => _prefs?.getBool(AppConstants.ttsEnabledPref) ?? false;

@@ -180,10 +180,10 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('connection settings saved'),
+          SnackBar(
+            content: const Text('connection settings saved'),
             backgroundColor: CyberpunkColors.greenSuccess,
-            duration: Duration(seconds: 2),
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -218,10 +218,10 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
             trimmed == AppConstants.defaultApiKey;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('api token saved to keychain'),
+        SnackBar(
+          content: const Text('api token saved to keychain'),
           backgroundColor: CyberpunkColors.greenSuccess,
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
         ),
       );
     }
@@ -258,10 +258,10 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
 
   void _showSaveSuccess() {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('config saved successfully'),
+      SnackBar(
+        content: const Text('config saved successfully'),
         backgroundColor: CyberpunkColors.greenSuccess,
-        duration: Duration(seconds: 2),
+        duration: const Duration(seconds: 2),
       ),
     );
   }
@@ -299,7 +299,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: CyberpunkColors.midGray)),
       ),
       child: Column(
@@ -309,14 +309,14 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
             children: [
               GestureDetector(
                 onTap: () => context.go('/'),
-                child: const Icon(
+                child: Icon(
                   Icons.arrow_back,
                   color: CyberpunkColors.orangePrimary,
                   size: 18,
                 ),
               ),
               const SizedBox(width: 8),
-              const Icon(
+              Icon(
                 Icons.settings,
                 color: CyberpunkColors.orangePrimary,
                 size: 18,
@@ -330,7 +330,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
               ),
               const Spacer(),
               if (_isSaving)
-                const SizedBox(
+                SizedBox(
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
@@ -470,7 +470,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
 
   Widget _buildEditor() {
     if (_isLoading) {
-      return const Center(
+      return Center(
         child: SizedBox(
           width: 24,
           height: 24,
@@ -522,14 +522,14 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
                   });
                 },
                 controller: _configController,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   hintText: '// edit configuration...',
                   hintStyle: TextStyle(
                     color: CyberpunkColors.midGray,
                     fontFamily: 'SourceCodePro',
                   ),
                   border: InputBorder.none,
-                  contentPadding: EdgeInsets.all(12),
+                  contentPadding: const EdgeInsets.all(12),
                 ),
               ),
             ),
@@ -584,7 +584,7 @@ class _FormSections extends StatelessWidget {
   Widget _buildConnectionSection(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: CyberpunkColors.midGray)),
       ),
       child: Column(
@@ -593,11 +593,7 @@ class _FormSections extends StatelessWidget {
           // Section header
           Row(
             children: [
-              const Icon(
-                Icons.cloud,
-                color: CyberpunkColors.blueInfo,
-                size: 16,
-              ),
+              Icon(Icons.cloud, color: CyberpunkColors.blueInfo, size: 16),
               const SizedBox(width: 8),
               Text(
                 'connection',
@@ -617,7 +613,7 @@ class _FormSections extends StatelessWidget {
                   ),
                 ),
                 child: isSavingConnection
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 14,
                         height: 14,
                         child: CircularProgressIndicator(
@@ -641,7 +637,7 @@ class _FormSections extends StatelessWidget {
                 color: CyberpunkColors.lightGray,
               ),
               hintText: 'localhost or 192.168.1.10',
-              prefixIcon: const Icon(
+              prefixIcon: Icon(
                 Icons.dns,
                 color: CyberpunkColors.orangePrimary,
                 size: 18,
@@ -651,20 +647,20 @@ class _FormSections extends StatelessWidget {
               fillColor: CyberpunkColors.black,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(color: CyberpunkColors.midGray),
+                borderSide: BorderSide(color: CyberpunkColors.midGray),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(color: CyberpunkColors.midGray),
+                borderSide: BorderSide(color: CyberpunkColors.midGray),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(
+                borderSide: BorderSide(
                   color: CyberpunkColors.orangePrimary,
                   width: 1.5,
                 ),
               ),
-              errorStyle: const TextStyle(
+              errorStyle: TextStyle(
                 color: CyberpunkColors.redAlert,
                 fontSize: 10,
               ),
@@ -684,7 +680,7 @@ class _FormSections extends StatelessWidget {
                 color: CyberpunkColors.lightGray,
               ),
               hintText: '8081',
-              prefixIcon: const Icon(
+              prefixIcon: Icon(
                 Icons.numbers,
                 color: CyberpunkColors.orangePrimary,
                 size: 18,
@@ -694,20 +690,20 @@ class _FormSections extends StatelessWidget {
               fillColor: CyberpunkColors.black,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(color: CyberpunkColors.midGray),
+                borderSide: BorderSide(color: CyberpunkColors.midGray),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(color: CyberpunkColors.midGray),
+                borderSide: BorderSide(color: CyberpunkColors.midGray),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(
+                borderSide: BorderSide(
                   color: CyberpunkColors.orangePrimary,
                   width: 1.5,
                 ),
               ),
-              errorStyle: const TextStyle(
+              errorStyle: TextStyle(
                 color: CyberpunkColors.redAlert,
                 fontSize: 10,
               ),
@@ -732,7 +728,7 @@ class _FormSections extends StatelessWidget {
               labelStyle: CyberpunkTypography.bodySmall.copyWith(
                 color: CyberpunkColors.lightGray,
               ),
-              prefixIcon: const Icon(
+              prefixIcon: Icon(
                 Icons.palette,
                 color: CyberpunkColors.orangePrimary,
                 size: 18,
@@ -742,15 +738,15 @@ class _FormSections extends StatelessWidget {
               fillColor: CyberpunkColors.black,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(color: CyberpunkColors.midGray),
+                borderSide: BorderSide(color: CyberpunkColors.midGray),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(color: CyberpunkColors.midGray),
+                borderSide: BorderSide(color: CyberpunkColors.midGray),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(
+                borderSide: BorderSide(
                   color: CyberpunkColors.orangePrimary,
                   width: 1.5,
                 ),
@@ -786,7 +782,7 @@ class _FormSections extends StatelessWidget {
                 color: CyberpunkColors.midGray,
                 fontSize: 9,
               ),
-              prefixIcon: const Icon(
+              prefixIcon: Icon(
                 Icons.keyboard,
                 color: CyberpunkColors.orangePrimary,
                 size: 18,
@@ -796,15 +792,15 @@ class _FormSections extends StatelessWidget {
               fillColor: CyberpunkColors.black,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(color: CyberpunkColors.midGray),
+                borderSide: BorderSide(color: CyberpunkColors.midGray),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(color: CyberpunkColors.midGray),
+                borderSide: BorderSide(color: CyberpunkColors.midGray),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(
+                borderSide: BorderSide(
                   color: CyberpunkColors.orangePrimary,
                   width: 1.5,
                 ),
@@ -835,7 +831,7 @@ class _FormSections extends StatelessWidget {
   Widget _buildApiKeySection(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: CyberpunkColors.midGray)),
       ),
       child: Column(
@@ -844,7 +840,7 @@ class _FormSections extends StatelessWidget {
           // Section header
           Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.lock_outline,
                 color: CyberpunkColors.greenSuccess,
                 size: 16,
@@ -877,7 +873,7 @@ class _FormSections extends StatelessWidget {
                 color: CyberpunkColors.lightGray,
               ),
               hintText: 'enter API token...',
-              prefixIcon: const Icon(
+              prefixIcon: Icon(
                 Icons.key,
                 color: CyberpunkColors.greenSuccess,
                 size: 18,
@@ -896,20 +892,20 @@ class _FormSections extends StatelessWidget {
               fillColor: CyberpunkColors.black,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(color: CyberpunkColors.midGray),
+                borderSide: BorderSide(color: CyberpunkColors.midGray),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(color: CyberpunkColors.midGray),
+                borderSide: BorderSide(color: CyberpunkColors.midGray),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(
+                borderSide: BorderSide(
                   color: CyberpunkColors.greenSuccess,
                   width: 1.5,
                 ),
               ),
-              errorStyle: const TextStyle(
+              errorStyle: TextStyle(
                 color: CyberpunkColors.redAlert,
                 fontSize: 10,
               ),
@@ -937,7 +933,7 @@ class _FormSections extends StatelessWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.warning_amber,
                       size: 14,
                       color: CyberpunkColors.redAlert,
@@ -1004,7 +1000,7 @@ class _FormSections extends StatelessWidget {
           ),
           child: Container(
             padding: const EdgeInsets.all(12),
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(color: CyberpunkColors.midGray),
               ),
@@ -1015,7 +1011,7 @@ class _FormSections extends StatelessWidget {
                 // Section header with switch
                 Row(
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.mic,
                       color: CyberpunkColors.orangePrimary,
                       size: 16,
@@ -1059,19 +1055,15 @@ class _FormSections extends StatelessWidget {
                       fillColor: CyberpunkColors.black,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(6),
-                        borderSide: const BorderSide(
-                          color: CyberpunkColors.midGray,
-                        ),
+                        borderSide: BorderSide(color: CyberpunkColors.midGray),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(6),
-                        borderSide: const BorderSide(
-                          color: CyberpunkColors.midGray,
-                        ),
+                        borderSide: BorderSide(color: CyberpunkColors.midGray),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(6),
-                        borderSide: const BorderSide(
+                        borderSide: BorderSide(
                           color: CyberpunkColors.orangePrimary,
                           width: 1.5,
                         ),
@@ -1114,24 +1106,24 @@ class _FormSections extends StatelessWidget {
                             fillColor: CyberpunkColors.black,
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(6),
-                              borderSide: const BorderSide(
+                              borderSide: BorderSide(
                                 color: CyberpunkColors.midGray,
                               ),
                             ),
                             enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(6),
-                              borderSide: const BorderSide(
+                              borderSide: BorderSide(
                                 color: CyberpunkColors.midGray,
                               ),
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(6),
-                              borderSide: const BorderSide(
+                              borderSide: BorderSide(
                                 color: CyberpunkColors.orangePrimary,
                                 width: 1.5,
                               ),
                             ),
-                            errorStyle: const TextStyle(
+                            errorStyle: TextStyle(
                               color: CyberpunkColors.redAlert,
                               fontSize: 10,
                             ),

@@ -193,7 +193,7 @@ class _DirectoryBrowserDialogState
         final path = entry['path'] as String? ?? '';
         return ListTile(
           dense: true,
-          leading: const Icon(
+          leading: Icon(
             Icons.folder,
             size: 16,
             color: CyberpunkColors.orangePrimary,

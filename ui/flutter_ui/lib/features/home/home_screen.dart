@@ -364,7 +364,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
             filled: true,
             fillColor: CyberpunkColors.black,
-            border: const OutlineInputBorder(
+            border: OutlineInputBorder(
               borderSide: BorderSide(color: CyberpunkColors.orangeDark),
             ),
           ),
@@ -672,7 +672,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ],
                 ),
               ),
-              const Divider(height: 1, color: CyberpunkColors.midGray),
+              Divider(height: 1, color: CyberpunkColors.midGray),
               // Main content area
               Expanded(child: _buildTabContent()),
               // Status bar (TUI parity)

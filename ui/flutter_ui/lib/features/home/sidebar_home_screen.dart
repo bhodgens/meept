@@ -311,7 +311,7 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
             ),
             filled: true,
             fillColor: CyberpunkColors.black,
-            border: const OutlineInputBorder(
+            border: OutlineInputBorder(
               borderSide: BorderSide(color: CyberpunkColors.orangeDark),
             ),
           ),
@@ -677,7 +677,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
             // Sidebar header with hamburger, meept logo, and connection status
             Container(
               padding: const EdgeInsets.all(8),
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 border: Border(
                   bottom: BorderSide(
                     color: CyberpunkColors.orangePrimary,
@@ -765,7 +765,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
             // Sidebar footer with "add project" button
             Container(
               padding: const EdgeInsets.all(4),
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 border: Border(
                   top: BorderSide(color: CyberpunkColors.midGray, width: 0.5),
                 ),
@@ -1066,7 +1066,7 @@ class _ProjectGroupItem extends StatelessWidget {
               GestureDetector(
                 onTap: onCreateSession,
                 behavior: HitTestBehavior.opaque,
-                child: const Icon(
+                child: Icon(
                   Icons.add,
                   size: 14,
                   color: CyberpunkColors.orangeDark,
@@ -1287,9 +1287,9 @@ class _FullWindowDialog extends StatelessWidget {
             // Header
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 color: CyberpunkColors.orangePrimary,
-                borderRadius: BorderRadius.only(
+                borderRadius: const BorderRadius.only(
                   topLeft: Radius.circular(8),
                   topRight: Radius.circular(8),
                 ),
@@ -1311,7 +1311,7 @@ class _FullWindowDialog extends StatelessWidget {
                     onTap: onClose,
                     child: Container(
                       padding: const EdgeInsets.all(4),
-                      child: const Icon(
+                      child: Icon(
                         Icons.close,
                         size: 20,
                         color: CyberpunkColors.black,
@@ -1343,7 +1343,7 @@ class _SessionsDialog extends ConsumerWidget {
     final sessions = sessionsState.sessions;
 
     if (sessions.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
           'no sessions',
           style: TextStyle(color: CyberpunkColors.midGray, fontSize: 16),
@@ -1392,7 +1392,7 @@ class _PlansDialog extends ConsumerWidget {
     final plans = plansState.plans;
 
     if (plans.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
           'no plans',
           style: TextStyle(color: CyberpunkColors.midGray, fontSize: 16),
@@ -1457,7 +1457,7 @@ class _TasksDialog extends ConsumerWidget {
     final tasks = tasksState.tasks;
 
     if (tasks.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
           'no tasks',
           style: TextStyle(color: CyberpunkColors.midGray, fontSize: 16),
@@ -1530,7 +1530,7 @@ class _AgentsDialog extends ConsumerWidget {
     final agents = agentsState.agents;
 
     if (agents.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
           'no agents',
           style: TextStyle(color: CyberpunkColors.midGray, fontSize: 16),
@@ -1555,7 +1555,7 @@ class _AgentsDialog extends ConsumerWidget {
           ),
           child: Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.smart_toy,
                 size: 20,
                 color: CyberpunkColors.orangePrimary,
@@ -1587,7 +1587,7 @@ class _AgentsDialog extends ConsumerWidget {
                 Container(
                   width: 8,
                   height: 8,
-                  decoration: const BoxDecoration(
+                  decoration: BoxDecoration(
                     color: CyberpunkColors.greenSuccess,
                     shape: BoxShape.circle,
                   ),

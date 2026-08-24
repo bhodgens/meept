@@ -83,9 +83,7 @@ class StatusBar extends ConsumerWidget {
     padding: const EdgeInsets.symmetric(horizontal: 12),
     decoration: BoxDecoration(
       color: CyberpunkColors.blackTransparent(0.7),
-      border: const Border(
-        top: BorderSide(color: CyberpunkColors.midGray, width: 1),
-      ),
+      border: Border(top: BorderSide(color: CyberpunkColors.midGray, width: 1)),
     ),
     alignment: Alignment.centerLeft,
     child: child,
@@ -106,7 +104,7 @@ class StatusBar extends ConsumerWidget {
   TextStyle get _lightStyle =>
       _baseStyle.copyWith(color: CyberpunkColors.veryLightGray);
 
-  InlineSpan _separator() => const TextSpan(
+  InlineSpan _separator() => TextSpan(
     text: ' · ',
     style: TextStyle(color: CyberpunkColors.midGray),
   );
@@ -288,7 +286,7 @@ class _ConnectionDialogState extends ConsumerState<_ConnectionDialog> {
               ),
               if (busy) ...[
                 const SizedBox(width: 12),
-                const SizedBox(
+                SizedBox(
                   width: 14,
                   height: 14,
                   child: CircularProgressIndicator(

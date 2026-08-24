@@ -1,31 +1,64 @@
 import 'package:flutter/material.dart';
 
-/// ORANGE VOID cyberpunk color palette
+import 'app_palette.dart';
+
+/// ORANGE VOID color palette — forwarding shim over the active [AppPalette].
+///
+/// Member names are frozen: ~1,076 call-sites across lib/ reference these
+/// getters directly and must keep compiling without edits. Values follow the
+/// runtime palette set via [setActive]; the default is cyberpunk so a cold
+/// start without initialization renders identically to the pre-palette code.
+///
+/// Legacy member → role mapping:
+///   black→background, darkGray→surface, midGray→surfaceAlt,
+///   lightGray→border, veryLightGray→textPrimary,
+///   orangePrimary→primary, orangeBright→primaryBright,
+///   orangeDark→primaryDark, orangeGlow→primaryGlow, orangeAccent→accent,
+///   cyanAccent/blueInfo→info, greenSuccess→success, redAlert→error,
+///   yellowWarning→warning, terminalGreen→terminalGreen,
+///   terminalAmber→terminalAmber.
 abstract class CyberpunkColors {
+  /// The palette every getter forwards to. Never null; defaults to cyberpunk.
+  static AppPalette _active = AppPalette.forName('cyberpunk');
+
+  /// Swap the palette all [CyberpunkColors] getters read from.
+  ///
+  /// Call once at startup with the stored theme and again whenever the
+  /// theme changes, so direct `CyberpunkColors.*` call-sites follow along.
+  static void setActive(AppPalette palette) {
+    _active = palette;
+  }
+
+  /// Currently active palette (exposed for tests/debug tooling).
+  static AppPalette get active => _active;
+
   // Base colors
-  static const Color black = Color(0xFF000000);
-  static const Color darkGray = Color(0xFF1A1A1A);
-  static const Color midGray = Color(0xFF2A2A2A);
-  static const Color lightGray = Color(0xFF333333);
-  static const Color veryLightGray = Color(0xFFE0E0E0); // For verbosity text
+  static Color get black => _active.background;
+  static Color get darkGray => _active.surface;
+  static Color get midGray => _active.surfaceAlt;
+
+  /// Direct role access (used by newer call-sites like find_bar).
+  static Color get surfaceAlt => _active.surfaceAlt;
+  static Color get lightGray => _active.border;
+  static Color get veryLightGray => _active.textPrimary; // For verbosity text
 
   // Primary - Orange spectrum
-  static const Color orangePrimary = Color(0xFFFF6600);
-  static const Color orangeBright = Color(0xFFFF8800);
-  static const Color orangeDark = Color(0xFFCC5500);
-  static const Color orangeGlow = Color(0xFFFFAA33);
-  static const Color orangeAccent = Color(0xFFFF9933);
+  static Color get orangePrimary => _active.primary;
+  static Color get orangeBright => _active.primaryBright;
+  static Color get orangeDark => _active.primaryDark;
+  static Color get orangeGlow => _active.primaryGlow;
+  static Color get orangeAccent => _active.accent;
 
   // Secondary accents
-  static const Color cyanAccent = Color(0xFF00FFFF);
-  static const Color greenSuccess = Color(0xFF00FFAA);
-  static const Color redAlert = Color(0xFFFF3366);
-  static const Color yellowWarning = Color(0xFFFFCC00);
-  static const Color blueInfo = Color(0xFF3399FF);
+  static Color get cyanAccent => _active.info;
+  static Color get greenSuccess => _active.success;
+  static Color get redAlert => _active.error;
+  static Color get yellowWarning => _active.warning;
+  static Color get blueInfo => _active.info;
 
   // Terminal colors
-  static const Color terminalGreen = Color(0xFF33FF33);
-  static const Color terminalAmber = Color(0xFFFFB000);
+  static Color get terminalGreen => _active.terminalGreen;
+  static Color get terminalAmber => _active.terminalAmber;
 
   // Transparent variants
   static Color orangeTransparent(double opacity) =>
@@ -34,15 +67,11 @@ abstract class CyberpunkColors {
       black.withValues(alpha: opacity);
 
   // Gradients
-  static const List<Color> orangeGradient = [
-    Color(0xFFFF6600),
-    Color(0xFFFF8800),
-    Color(0xFFCC5500),
+  static List<Color> get orangeGradient => [
+    orangePrimary,
+    orangeBright,
+    orangeDark,
   ];
 
-  static const List<Color> darkGradient = [
-    Color(0xFF000000),
-    Color(0xFF1A1A1A),
-    Color(0xFF2A2A2A),
-  ];
+  static List<Color> get darkGradient => [black, darkGray, midGray];
 }

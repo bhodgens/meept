@@ -18,7 +18,7 @@ class OrangeVoidTabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: CyberpunkColors.black,
         border: Border(
           bottom: BorderSide(color: CyberpunkColors.orangeDark, width: 2),

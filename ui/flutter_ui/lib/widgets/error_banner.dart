@@ -25,11 +25,7 @@ class ErrorBanner extends StatelessWidget {
       color: CyberpunkColors.redAlert.withValues(alpha: 0.2),
       child: Row(
         children: [
-          const Icon(
-            Icons.error_outline,
-            color: CyberpunkColors.redAlert,
-            size: 20,
-          ),
+          Icon(Icons.error_outline, color: CyberpunkColors.redAlert, size: 20),
           const SizedBox(width: 8),
           Expanded(
             child: SelectableText(
@@ -82,7 +78,7 @@ class ErrorText extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               Icons.error_outline,
               size: 48,
               color: CyberpunkColors.redAlert,

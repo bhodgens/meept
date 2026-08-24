@@ -40,11 +40,7 @@ class _HamburgerMenuState extends State<HamburgerMenu> {
           border: Border.all(color: CyberpunkColors.midGray, width: 1),
           borderRadius: BorderRadius.circular(4),
         ),
-        child: const Icon(
-          Icons.menu,
-          size: 20,
-          color: CyberpunkColors.orangePrimary,
-        ),
+        child: Icon(Icons.menu, size: 20, color: CyberpunkColors.orangePrimary),
       ),
     );
   }
@@ -72,8 +68,8 @@ class _HamburgerMenuState extends State<HamburgerMenu> {
 
     // Build menu items
     final entries = <Widget>[
-      const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Text(
           'tools',
           style: TextStyle(
@@ -83,7 +79,7 @@ class _HamburgerMenuState extends State<HamburgerMenu> {
           ),
         ),
       ),
-      const Divider(height: 1, color: CyberpunkColors.midGray),
+      Divider(height: 1, color: CyberpunkColors.midGray),
     ];
 
     for (final entry in _knownTools.entries) {

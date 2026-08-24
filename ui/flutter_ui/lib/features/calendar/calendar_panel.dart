@@ -79,8 +79,8 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
         Navigator.pop(context);
         _loadEvents();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('event created'),
+          SnackBar(
+            content: const Text('event created'),
             backgroundColor: CyberpunkColors.greenSuccess,
           ),
         );
@@ -115,14 +115,14 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),
       child: Row(
         children: [
-          const Icon(
+          Icon(
             Icons.calendar_today,
             color: CyberpunkColors.orangePrimary,
             size: 18,
@@ -152,7 +152,7 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
 
   Widget _buildEventList() {
     if (_isLoading) {
-      return const Center(
+      return Center(
         child: SizedBox(
           width: 20,
           height: 20,
@@ -171,11 +171,7 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              Icons.event_busy,
-              color: CyberpunkColors.midGray,
-              size: 48,
-            ),
+            Icon(Icons.event_busy, color: CyberpunkColors.midGray, size: 48),
             const SizedBox(height: 8),
             Text(
               'no events today',
@@ -220,7 +216,7 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
         children: [
           Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.access_time,
                 size: 14,
                 color: CyberpunkColors.orangeBright,
@@ -238,7 +234,7 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
               ),
               const Spacer(),
               if (event.location != null)
-                const Icon(
+                Icon(
                   Icons.location_on,
                   size: 14,
                   color: CyberpunkColors.midGray,

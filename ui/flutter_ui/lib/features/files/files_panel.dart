@@ -101,18 +101,14 @@ class _FilesPanelState extends ConsumerState<FilesPanel> {
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.folder,
-            color: CyberpunkColors.orangePrimary,
-            size: 18,
-          ),
+          Icon(Icons.folder, color: CyberpunkColors.orangePrimary, size: 18),
           const SizedBox(width: 8),
           Text(
             'files',
@@ -135,7 +131,7 @@ class _FilesPanelState extends ConsumerState<FilesPanel> {
 
   Widget _buildFileList() {
     if (_isLoading) {
-      return const Center(
+      return Center(
         child: SizedBox(
           width: 20,
           height: 20,
@@ -154,11 +150,7 @@ class _FilesPanelState extends ConsumerState<FilesPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              Icons.folder_open,
-              color: CyberpunkColors.midGray,
-              size: 48,
-            ),
+            Icon(Icons.folder_open, color: CyberpunkColors.midGray, size: 48),
             const SizedBox(height: 8),
             Text(
               'no files found in memory',

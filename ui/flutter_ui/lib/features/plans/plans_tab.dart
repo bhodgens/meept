@@ -162,7 +162,7 @@ class _PlansTabState extends ConsumerState<PlansTab> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
+          Icon(
             Icons.assignment_outlined,
             size: 64,
             color: CyberpunkColors.midGray,
@@ -531,7 +531,7 @@ class _ActionButtons extends ConsumerWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const SizedBox(
+                SizedBox(
                   width: 14,
                   height: 14,
                   child: CircularProgressIndicator(

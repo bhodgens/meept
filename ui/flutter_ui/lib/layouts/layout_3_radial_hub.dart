@@ -61,7 +61,7 @@ class _HeaderBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       height: 50,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: CyberpunkColors.darkGray,
         border: Border(
           bottom: BorderSide(color: CyberpunkColors.orangePrimary, width: 2),
@@ -239,7 +239,7 @@ class _CentralHub extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(
+          Icon(
             Icons.center_focus_strong,
             size: 32,
             color: CyberpunkColors.orangePrimary,
@@ -358,7 +358,7 @@ class _StatusBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: CyberpunkColors.blackTransparent(0.7),
-        border: const Border(
+        border: Border(
           top: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),
       ),
