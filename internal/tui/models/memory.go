@@ -69,12 +69,12 @@ func NewMemoryModel(rpc MemoryRPCClient) *MemoryModel {
 	// List
 	delegate := list.NewDefaultDelegate()
 	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#F97316")).
+		Foreground(lipgloss.Color("#FFFFFF")). // palette-exempt: max-contrast literal
+		Background(paletteColor("primary")).
 		Bold(true)
 	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
-		Foreground(lipgloss.Color("#E5E7EB")).
-		Background(lipgloss.Color("#F97316"))
+		Foreground(paletteColor("textPrimary")).
+		Background(paletteColor("primary"))
 
 	l := list.New([]list.Item{}, delegate, 40, 10)
 	l.Title = "search results"
@@ -82,7 +82,7 @@ func NewMemoryModel(rpc MemoryRPCClient) *MemoryModel {
 	l.SetFilteringEnabled(false)
 	l.Styles.Title = lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316"))
+		Foreground(paletteColor("primary"))
 
 	return &MemoryModel{
 		rpc:           rpc,
@@ -217,7 +217,7 @@ func (m *MemoryModel) View() string {
 	// Title
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316")).
+		Foreground(paletteColor("primary")).
 		MarginBottom(1)
 
 	b.WriteString(titleStyle.Render("memory browser"))
@@ -226,12 +226,12 @@ func (m *MemoryModel) View() string {
 	// Search input
 	searchStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#374151")).
+		BorderForeground(paletteColor("border")).
 		Padding(0, 1).
 		Width(m.width - 4)
 
 	if m.focusedSearch {
-		searchStyle = searchStyle.BorderForeground(lipgloss.Color("#F97316"))
+		searchStyle = searchStyle.BorderForeground(paletteColor("primary"))
 	}
 
 	b.WriteString(searchStyle.Render(m.searchInput.View()))
@@ -257,7 +257,7 @@ func (m *MemoryModel) View() string {
 
 	// Help hint
 	hintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(paletteColor("textMuted")).
 		MarginTop(1)
 
 	b.WriteString("\n")
@@ -271,7 +271,7 @@ func (m *MemoryModel) renderLoading() string {
 		Width(m.width-4).
 		Align(lipgloss.Center).
 		Padding(2, 0).
-		Foreground(lipgloss.Color("#6B7280"))
+		Foreground(paletteColor("textMuted"))
 
 	return style.Render("searching...")
 }
@@ -279,12 +279,12 @@ func (m *MemoryModel) renderLoading() string {
 func (m *MemoryModel) renderError() string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#EF4444")).
+		BorderForeground(paletteColor("error")).
 		Padding(1, 2).
 		Width(m.width - 4)
 
 	return style.Render(
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true).Render("search error") +
+		lipgloss.NewStyle().Foreground(paletteColor("error")).Bold(true).Render("search error") +
 			"\n\n" +
 			fmt.Sprintf("%v", m.err),
 	)
@@ -295,7 +295,7 @@ func (m *MemoryModel) renderEmpty() string {
 		Width(m.width-4).
 		Align(lipgloss.Center).
 		Padding(2, 0).
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(paletteColor("textMuted")).
 		Italic(true)
 
 	return style.Render("no results. enter a search query and press enter.")
@@ -304,11 +304,11 @@ func (m *MemoryModel) renderEmpty() string {
 func (m *MemoryModel) renderList(width int) string {
 	listStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#374151")).
+		BorderForeground(paletteColor("border")).
 		Width(width - 2)
 
 	if !m.focusedSearch {
-		listStyle = listStyle.BorderForeground(lipgloss.Color("#F97316"))
+		listStyle = listStyle.BorderForeground(paletteColor("primary"))
 	}
 
 	return listStyle.Render(m.list.View())
@@ -317,14 +317,14 @@ func (m *MemoryModel) renderList(width int) string {
 func (m *MemoryModel) renderDetail(width int) string {
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#374151")).
+		BorderForeground(paletteColor("border")).
 		Padding(1, 2).
 		Width(width).
 		Height(m.height - 10)
 
 	if m.selectedItem == nil {
 		content := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6B7280")).
+			Foreground(paletteColor("textMuted")).
 			Italic(true).
 			Render("select an item to view details")
 		return panelStyle.Render(content)
@@ -334,14 +334,14 @@ func (m *MemoryModel) renderDetail(width int) string {
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316"))
+		Foreground(paletteColor("primary"))
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(paletteColor("textMuted")).
 		Width(12)
 
 	valueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB"))
+		Foreground(paletteColor("textPrimary"))
 
 	// Type color
 	memType := item.GetType()
@@ -350,7 +350,7 @@ func (m *MemoryModel) renderDetail(width int) string {
 	case "episodic":
 		typeColor = "#06B6D4" // Cyan
 	case "task":
-		typeColor = ColorAmber // Amber
+		typeColor = paletteHex("warning") // Amber
 	case "personality":
 		typeColor = "#A855F7" // Purple
 	}
@@ -377,7 +377,7 @@ func (m *MemoryModel) renderDetail(width int) string {
 	}
 
 	content += "\n"
-	content += lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F97316")).Render("content:") + "\n\n"
+	content += lipgloss.NewStyle().Bold(true).Foreground(paletteColor("primary")).Render("content:") + "\n\n"
 
 	// Word-wrap content
 	contentText := item.Content

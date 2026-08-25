@@ -9,6 +9,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	palette "github.com/caimlas/meept/internal/tui/components/palette"
 )
 
 // noColor is a sentinel for no color.
@@ -47,7 +49,7 @@ type NotificationManager struct {
 	mu            sync.Mutex
 	maxVisible    int
 	defaultTTL    time.Duration
-	doNotDisturb bool
+	doNotDisturb  bool
 }
 
 // NewNotificationManager creates a new notification manager.
@@ -200,20 +202,20 @@ func renderNotification(n Notification, screenWidth int) string {
 	switch n.Level {
 	case NotifyInfo:
 		icon = "i"
-		titleColor = lipgloss.Color("#06B6D4") // Cyan
-		borderColor = lipgloss.Color("#06B6D4")
+		titleColor = palette.Current("info") // Cyan
+		borderColor = palette.Current("info")
 	case NotifySuccess:
 		icon = "+"
-		titleColor = lipgloss.Color("#10B981") // Green
-		borderColor = lipgloss.Color("#10B981")
+		titleColor = palette.Current("success") // Green
+		borderColor = palette.Current("success")
 	case NotifyWarning:
 		icon = "!"
-		titleColor = lipgloss.Color("#F59E0B") // Amber
-		borderColor = lipgloss.Color("#F59E0B")
+		titleColor = palette.Current("warning") // Amber
+		borderColor = palette.Current("warning")
 	case NotifyError:
 		icon = "x"
-		titleColor = lipgloss.Color("#EF4444") // Red
-		borderColor = lipgloss.Color("#EF4444")
+		titleColor = palette.Current("error") // Red
+		borderColor = palette.Current("error")
 	}
 
 	// Notification box width: ~40 chars, right-aligned
@@ -228,7 +230,7 @@ func renderNotification(n Notification, screenWidth int) string {
 		Bold(true)
 
 	msgStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB"))
+		Foreground(palette.Current("textPrimary"))
 
 	// Build content lines
 	var content strings.Builder
@@ -246,7 +248,7 @@ func renderNotification(n Notification, screenWidth int) string {
 	if n.Action != "" {
 		content.WriteString("\n")
 		hintStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6B7280")).
+			Foreground(palette.Current("textMuted")).
 			Italic(true)
 		content.WriteString(hintStyle.Render(fmt.Sprintf("[%s]  [Esc] dismiss", n.Action)))
 	}
@@ -255,7 +257,7 @@ func renderNotification(n Notification, screenWidth int) string {
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
-		Background(lipgloss.Color("#1F2937")).
+		Background(palette.Current("surfaceAlt")).
 		Padding(0, 1).
 		Width(boxWidth - 4)
 

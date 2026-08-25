@@ -68,14 +68,14 @@ func NewPlansModel(rpcClient PlansRPCClient) *PlansModel {
 	s := table.DefaultStyles()
 	s.Header = s.Header.
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("#374151")).
+		BorderForeground(paletteColor("border")).
 		BorderBottom(true).
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316"))
+		Foreground(paletteColor("primary"))
 
 	s.Selected = s.Selected.
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#F97316")).
+		Foreground(lipgloss.Color("#FFFFFF")). // palette-exempt: max-contrast literal
+		Background(paletteColor("primary")).
 		Bold(true)
 
 	t.SetStyles(s)
@@ -404,7 +404,7 @@ func (m *PlansModel) View() string {
 	// Table
 	tableStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#374151"))
+		BorderForeground(paletteColor("border"))
 
 	b.WriteString(tableStyle.Render(m.table.View()))
 	b.WriteString("\n")
@@ -418,7 +418,7 @@ func (m *PlansModel) View() string {
 
 	// Help hint
 	hintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		MarginTop(1)
 
 	b.WriteString(hintStyle.Render("r: refresh | /: filter | a: approve | v: revise | c: confirm | enter: details | ?: help"))
@@ -429,21 +429,21 @@ func (m *PlansModel) View() string {
 func (m *PlansModel) renderHeader() string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316"))
+		Foreground(paletteColor("primary"))
 
 	tabInactiveStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
-		Background(lipgloss.Color("#1F2937")).
+		Foreground(paletteColor("textMuted")).
+		Background(paletteColor("surfaceAlt")).
 		Padding(0, 1)
 
 	tabActiveStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#F97316")).
+		Foreground(lipgloss.Color("#FFFFFF")). // palette-exempt: max-contrast literal
+		Background(paletteColor("primary")).
 		Bold(true).
 		Padding(0, 1)
 
 	filterStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorAmber)).
+		Foreground(paletteColor("warning")).
 		Padding(0, 1)
 
 	title := titleStyle.Render("plans")
@@ -476,7 +476,7 @@ func (m *PlansModel) renderHeader() string {
 	tabs := allTab + " " + activeTab + " " + pendingTab + " " + completedTab
 
 	// Plan count (cached from updatePlansTable to avoid redundant filtering)
-	countStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray))
+	countStyle := lipgloss.NewStyle().Foreground(paletteColor("textMuted"))
 	count := countStyle.Render(fmt.Sprintf("(%d/%d)", m.filteredCount, len(m.plans)))
 
 	header := lipgloss.JoinHorizontal(
@@ -505,16 +505,16 @@ func (m *PlansModel) renderPlanPreview() string {
 
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#F97316")).
+		BorderForeground(paletteColor("primary")).
 		Padding(0, 1).
 		Width(m.width - 4)
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		Width(12)
 
 	valueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB"))
+		Foreground(paletteColor("textPrimary"))
 
 	var content strings.Builder
 
@@ -552,7 +552,7 @@ func (m *PlansModel) renderPlanPreview() string {
 
 	// Revision count
 	if plan.RevisionCount > 0 {
-		revStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAmber))
+		revStyle := lipgloss.NewStyle().Foreground(paletteColor("warning"))
 		content.WriteString(labelStyle.Render("revisions:"))
 		content.WriteString(revStyle.Render(fmt.Sprintf("%d", plan.RevisionCount)))
 		content.WriteString("\n")
@@ -571,26 +571,26 @@ func (m *PlansModel) renderPlanDetailModal() string {
 
 	modalStyle := lipgloss.NewStyle().
 		Border(lipgloss.DoubleBorder()).
-		BorderForeground(lipgloss.Color("#F97316")).
+		BorderForeground(paletteColor("primary")).
 		Padding(1, 2).
 		Width(modalWidth)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316")).
+		Foreground(paletteColor("primary")).
 		MarginBottom(1)
 
 	sectionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorAmber)).
+		Foreground(paletteColor("warning")).
 		Bold(true).
 		MarginTop(1)
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		Width(14)
 
 	valueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB"))
+		Foreground(paletteColor("textPrimary"))
 
 	stateColor := m.getPlanStateColor(plan.State)
 	stateStyle := lipgloss.NewStyle().
@@ -650,7 +650,7 @@ func (m *PlansModel) renderPlanDetailModal() string {
 
 	if plan.RevisionCount > 0 {
 		content.WriteString(labelStyle.Render("revisions:"))
-		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAmber)).Render(fmt.Sprintf("%d", plan.RevisionCount)))
+		content.WriteString(lipgloss.NewStyle().Foreground(paletteColor("warning")).Render(fmt.Sprintf("%d", plan.RevisionCount)))
 		content.WriteString("\n")
 	}
 
@@ -665,9 +665,9 @@ func (m *PlansModel) renderPlanDetailModal() string {
 	content.WriteString(valueStyle.Render(fmt.Sprintf("%s (%.0f%%)", progress, percent)))
 	content.WriteString("\n")
 
-	completedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGreen))
-	failedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed))
-	pendingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray))
+	completedStyle := lipgloss.NewStyle().Foreground(paletteColor("success"))
+	failedStyle := lipgloss.NewStyle().Foreground(paletteColor("error"))
+	pendingStyle := lipgloss.NewStyle().Foreground(paletteColor("textMuted"))
 
 	pending := max(plan.TotalSteps-plan.CompletedSteps-plan.FailedSteps, 0)
 	content.WriteString("              ")
@@ -717,7 +717,7 @@ func (m *PlansModel) renderPlanDetailModal() string {
 	// Footer
 	content.WriteString("\n")
 	footerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		Italic(true)
 	content.WriteString(footerStyle.Render("[esc/q] close | a: approve | v: revise | c: confirm"))
 
@@ -771,23 +771,23 @@ func (m *PlansModel) formatTimeAgo(timestamp string) string {
 func (m *PlansModel) getPlanStateIcon(state string) string {
 	switch state {
 	case "planning":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#3B82F6")).Render("●") + " plan"
+		return lipgloss.NewStyle().Foreground(paletteColor("info")).Render("●") + " plan"
 	case "draft":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("●") + " draft"
+		return lipgloss.NewStyle().Foreground(paletteColor("textMuted")).Render("●") + " draft"
 	case "pending_approval":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#3B82F6")).Render("●") + " review"
+		return lipgloss.NewStyle().Foreground(paletteColor("info")).Render("●") + " review"
 	case "approved":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGreen)).Render("✓") + " ok"
+		return lipgloss.NewStyle().Foreground(paletteColor("success")).Render("✓") + " ok"
 	case "executing":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAmber)).Render("●") + " exec"
+		return lipgloss.NewStyle().Foreground(paletteColor("warning")).Render("●") + " exec"
 	case "completed":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGreen)).Render("●") + " done"
+		return lipgloss.NewStyle().Foreground(paletteColor("success")).Render("●") + " done"
 	case "confirmed":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGreen)).Bold(true).Render("★") + " ok"
+		return lipgloss.NewStyle().Foreground(paletteColor("success")).Bold(true).Render("★") + " ok"
 	case "failed":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Render("✗") + " fail"
+		return lipgloss.NewStyle().Foreground(paletteColor("error")).Render("✗") + " fail"
 	case "cancelled":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("○") + " cancel"
+		return lipgloss.NewStyle().Foreground(paletteColor("textMuted")).Render("○") + " cancel"
 	default:
 		return "? " + types.TruncateString(state, 4)
 	}
@@ -798,23 +798,23 @@ func (m *PlansModel) getPlanStateColor(state string) string {
 	case "planning":
 		return "#3B82F6" // Blue
 	case "draft":
-		return ColorGray
+		return paletteHex("textMuted")
 	case "pending_approval":
 		return "#3B82F6" // Blue
 	case "approved":
-		return ColorGreen
+		return paletteHex("success")
 	case "executing":
-		return ColorAmber
+		return paletteHex("warning")
 	case "completed":
-		return ColorGreen
+		return paletteHex("success")
 	case "confirmed":
-		return ColorGreen
+		return paletteHex("success")
 	case "failed":
-		return ColorRed
+		return paletteHex("error")
 	case "cancelled":
-		return ColorGray
+		return paletteHex("textMuted")
 	default:
-		return ColorGray
+		return paletteHex("textMuted")
 	}
 }
 
@@ -830,7 +830,7 @@ func (m *PlansModel) renderLoading() string {
 func (m *PlansModel) renderError() string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ColorRed)).
+		BorderForeground(paletteColor("error")).
 		Padding(1, 2).
 		Width(m.width - 4)
 
@@ -840,23 +840,23 @@ func (m *PlansModel) renderError() string {
 	}
 
 	return style.Render(
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("error") +
+		lipgloss.NewStyle().Foreground(paletteColor("error")).Bold(true).Render("error") +
 			"\n\n" +
 			errMsg +
 			"\n\n" +
-			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("press 'r' to refresh"),
+			lipgloss.NewStyle().Foreground(paletteColor("textMuted")).Render("press 'r' to refresh"),
 	)
 }
 
 func (m *PlansModel) renderEmptyDetail() string {
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#374151")).
+		BorderForeground(paletteColor("border")).
 		Padding(1, 2).
 		Width(m.width - 4)
 
 	content := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		Italic(true).
 		Render("select a plan to view details")
 
@@ -866,27 +866,27 @@ func (m *PlansModel) renderEmptyDetail() string {
 func (m *PlansModel) renderHelp() string {
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#F97316")).
+		BorderForeground(paletteColor("primary")).
 		Padding(2, 4).
 		Width(m.width - 4)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316")).
+		Foreground(paletteColor("primary")).
 		MarginBottom(1)
 
 	sectionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorAmber)).
+		Foreground(paletteColor("warning")).
 		Bold(true).
 		MarginTop(1)
 
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorAmber)).
+		Foreground(paletteColor("warning")).
 		Bold(true).
 		Width(12)
 
 	descStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB"))
+		Foreground(paletteColor("textPrimary"))
 
 	content := titleStyle.Render("plans view help") + "\n\n"
 
@@ -918,7 +918,7 @@ func (m *PlansModel) renderHelp() string {
 	content += keyStyle.Render("○ cancel") + descStyle.Render("cancelled") + "\n"
 
 	content += "\n"
-	content += lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("press any key to close")
+	content += lipgloss.NewStyle().Foreground(paletteColor("textMuted")).Render("press any key to close")
 
 	return panelStyle.Render(content)
 }

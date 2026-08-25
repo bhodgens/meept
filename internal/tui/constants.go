@@ -24,13 +24,9 @@ const (
 	RoleAssistant   = "assistant"
 )
 
-// Color constants for TUI rendering.
-const (
-	ColorAmber = "#F59E0B"
-	ColorGreen = "#10B981"
-	ColorRed   = "#EF4444"
-	ColorGray  = "#6B7280"
-)
+// Color constants for TUI rendering were removed by unified theming (L4):
+// colors now come from the shared palette — see internal/tui/palette.go
+// and theme/tokens.json5.
 
 // Map key constants used in RPC/API parameter maps.
 const (

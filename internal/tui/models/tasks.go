@@ -85,14 +85,14 @@ func NewTasksModel(rpc TasksRPCClient) *TasksModel {
 	s := table.DefaultStyles()
 	s.Header = s.Header.
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("#374151")).
+		BorderForeground(paletteColor("border")).
 		BorderBottom(true).
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316"))
+		Foreground(paletteColor("primary"))
 
 	s.Selected = s.Selected.
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#F97316")).
+		Foreground(paletteColor("#FFFFFF")). // palette-exempt: literal kept for max-contrast white on primary
+		Background(paletteColor("primary")).
 		Bold(true)
 
 	t.SetStyles(s)
@@ -721,7 +721,7 @@ func (m *TasksModel) View() string {
 	// Table
 	tableStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#374151"))
+		BorderForeground(paletteColor("border"))
 
 	b.WriteString(tableStyle.Render(m.table.View()))
 	b.WriteString("\n")
@@ -738,7 +738,7 @@ func (m *TasksModel) View() string {
 
 	// Help hint
 	hintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		MarginTop(1)
 
 	if m.viewMode == ViewModeTasks {
@@ -753,21 +753,21 @@ func (m *TasksModel) View() string {
 func (m *TasksModel) renderHeader() string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316"))
+		Foreground(paletteColor("primary"))
 
 	modeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
-		Background(lipgloss.Color("#1F2937")).
+		Foreground(paletteColor("textMuted")).
+		Background(paletteColor("surfaceAlt")).
 		Padding(0, 1)
 
 	activeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#F97316")).
+		Foreground(paletteColor("#FFFFFF")). // palette-exempt: literal kept for max-contrast white on primary
+		Background(paletteColor("primary")).
 		Bold(true).
 		Padding(0, 1)
 
 	filterStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorAmber)).
+		Foreground(paletteColor("warning")).
 		Padding(0, 1)
 
 	var title string
@@ -823,19 +823,19 @@ func (m *TasksModel) renderTaskPreview() string {
 
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#F97316")).
+		BorderForeground(paletteColor("primary")).
 		Padding(0, 1).
 		Width(m.width - 4)
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		Width(12)
 
 	valueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB"))
+		Foreground(paletteColor("textPrimary"))
 
 	memStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorAmber))
+		Foreground(paletteColor("warning"))
 
 	// Quick preview
 	var content strings.Builder
@@ -875,7 +875,7 @@ func (m *TasksModel) renderTaskPreview() string {
 
 	if task.ErrorCount > 0 {
 		content.WriteString(labelStyle.Render("errors:"))
-		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Render(fmt.Sprintf("%d", task.ErrorCount)))
+		content.WriteString(lipgloss.NewStyle().Foreground(paletteColor("error")).Render(fmt.Sprintf("%d", task.ErrorCount)))
 		content.WriteString("\n")
 	}
 
@@ -908,7 +908,7 @@ func (m *TasksModel) renderLoading() string {
 func (m *TasksModel) renderError() string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ColorRed)).
+		BorderForeground(paletteColor("error")).
 		Padding(1, 2).
 		Width(m.width - 4)
 
@@ -918,11 +918,11 @@ func (m *TasksModel) renderError() string {
 	}
 
 	return style.Render(
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("error") +
+		lipgloss.NewStyle().Foreground(paletteColor("error")).Bold(true).Render("error") +
 			"\n\n" +
 			errMsg +
 			"\n\n" +
-			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("press 'r' to refresh"),
+			lipgloss.NewStyle().Foreground(paletteColor("textMuted")).Render("press 'r' to refresh"),
 	)
 }
 
@@ -931,24 +931,24 @@ func (m *TasksModel) renderJobDetail() string {
 
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#F97316")).
+		BorderForeground(paletteColor("primary")).
 		Padding(1, 2).
 		Width(m.width - 4)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316"))
+		Foreground(paletteColor("primary"))
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		Width(14)
 
 	valueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB"))
+		Foreground(paletteColor("textPrimary"))
 
-	statusColor := ColorGreen // Green
+	statusColor := paletteHex("success") // Green
 	if job.Paused {
-		statusColor = ColorAmber // Amber
+		statusColor = paletteHex("warning") // Amber
 	}
 	statusStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(statusColor)).
@@ -1000,12 +1000,12 @@ func (m *TasksModel) renderJobDetail() string {
 func (m *TasksModel) renderEmptyDetail() string {
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#374151")).
+		BorderForeground(paletteColor("border")).
 		Padding(1, 2).
 		Width(m.width - 4)
 
 	content := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		Italic(true).
 		Render("select a job to view details")
 
@@ -1023,26 +1023,26 @@ func (m *TasksModel) renderTaskDetailModal() string {
 
 	modalStyle := lipgloss.NewStyle().
 		Border(lipgloss.DoubleBorder()).
-		BorderForeground(lipgloss.Color("#F97316")).
+		BorderForeground(paletteColor("primary")).
 		Padding(1, 2).
 		Width(modalWidth)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316")).
+		Foreground(paletteColor("primary")).
 		MarginBottom(1)
 
 	sectionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorAmber)).
+		Foreground(paletteColor("warning")).
 		Bold(true).
 		MarginTop(1)
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		Width(14)
 
 	valueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB"))
+		Foreground(paletteColor("textPrimary"))
 
 	statusColor := m.getStateColor(task.State)
 	statusStyle := lipgloss.NewStyle().
@@ -1092,9 +1092,9 @@ func (m *TasksModel) renderTaskDetailModal() string {
 	content.WriteString(valueStyle.Render(fmt.Sprintf("%s (%.0f%%)", progress, percent)))
 	content.WriteString("\n")
 
-	completedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGreen))
-	failedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed))
-	pendingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray))
+	completedStyle := lipgloss.NewStyle().Foreground(paletteColor("success"))
+	failedStyle := lipgloss.NewStyle().Foreground(paletteColor("error"))
+	pendingStyle := lipgloss.NewStyle().Foreground(paletteColor("textMuted"))
 
 	pending := max(task.TotalJobs-task.CompletedJobs-task.FailedJobs, 0)
 
@@ -1113,7 +1113,7 @@ func (m *TasksModel) renderTaskDetailModal() string {
 		content.WriteString("\n")
 
 		agentStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#06B6D4")).
+			Foreground(paletteColor("info")).
 			Bold(true)
 
 		for _, step := range task.Steps {
@@ -1137,7 +1137,7 @@ func (m *TasksModel) renderTaskDetailModal() string {
 			revisionBadge := ""
 			if step.RevisionCount > 0 {
 				revisionBadge = lipgloss.NewStyle().
-					Foreground(lipgloss.Color(ColorAmber)).
+					Foreground(paletteColor("warning")).
 					Render(fmt.Sprintf(" (rev %d)", step.RevisionCount))
 			}
 
@@ -1225,7 +1225,7 @@ func (m *TasksModel) renderTaskDetailModal() string {
 	// Footer
 	content.WriteString("\n")
 	footerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		Italic(true)
 	content.WriteString(footerStyle.Render("[esc/q] close"))
 
@@ -1235,21 +1235,21 @@ func (m *TasksModel) renderTaskDetailModal() string {
 func (m *TasksModel) getStateColor(state string) string {
 	switch state {
 	case StatePending:
-		return ColorGray // Gray
+		return paletteHex("textMuted") // Gray
 	case "planning":
-		return ColorAmber // Amber
+		return paletteHex("warning") // Amber
 	case "executing":
 		return "#3B82F6" // Blue
 	case "testing":
 		return "#8B5CF6" // Purple
 	case StateCompleted:
-		return ColorGreen // Green
+		return paletteHex("success") // Green
 	case StateFailed:
-		return ColorRed // Red
+		return paletteHex("error") // Red
 	case "cancelled":
-		return ColorGray // Gray
+		return paletteHex("textMuted") // Gray
 	default:
-		return ColorGray
+		return paletteHex("textMuted")
 	}
 }
 
@@ -1310,27 +1310,27 @@ func (m *TasksModel) getStepStateLabel(state string) string {
 func (m *TasksModel) getStepStateColor(state string) string {
 	switch state {
 	case "pending":
-		return ColorGray
+		return paletteHex("textMuted")
 	case StateReady:
-		return ColorAmber
+		return paletteHex("warning")
 	case "scheduled":
-		return ColorAmber
+		return paletteHex("warning")
 	case "running":
 		return "#3B82F6"
 	case StateReviewing:
 		return "#8B5CF6"
 	case StateApproved:
-		return ColorGreen
+		return paletteHex("success")
 	case StateRejected:
-		return ColorAmber
+		return paletteHex("warning")
 	case StateCompleted:
-		return ColorGreen
+		return paletteHex("success")
 	case "failed":
-		return ColorRed
+		return paletteHex("error")
 	case "skipped":
-		return ColorGray
+		return paletteHex("textMuted")
 	default:
-		return ColorGray
+		return paletteHex("textMuted")
 	}
 }
 
@@ -1360,11 +1360,11 @@ func (m *TasksModel) renderLineageView() string {
 		// No tasks and no error — show empty state
 		emptyStyle := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#374151")).
+			BorderForeground(paletteColor("border")).
 			Padding(1, 2).
 			Width(m.width - 4)
 		return emptyStyle.Render(
-			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Italic(true).Render("no tasks with lineage information"),
+			lipgloss.NewStyle().Foreground(paletteColor("textMuted")).Italic(true).Render("no tasks with lineage information"),
 		)
 	}
 
@@ -1373,16 +1373,16 @@ func (m *TasksModel) renderLineageView() string {
 	// Header
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316"))
+		Foreground(paletteColor("primary"))
 
 	modeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
-		Background(lipgloss.Color("#1F2937")).
+		Foreground(paletteColor("textMuted")).
+		Background(paletteColor("surfaceAlt")).
 		Padding(0, 1)
 
 	activeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#F97316")).
+		Foreground(paletteColor("#FFFFFF")). // palette-exempt: literal kept for max-contrast white on primary
+		Background(paletteColor("primary")).
 		Bold(true).
 		Padding(0, 1)
 
@@ -1410,13 +1410,13 @@ func (m *TasksModel) renderLineageView() string {
 	// Render tree
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#F97316")).
+		BorderForeground(paletteColor("primary")).
 		Padding(1, 2).
 		Width(m.width - 4)
 
 	if len(rootTasks) == 0 {
 		b.WriteString(panelStyle.Render(
-			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Italic(true).Render("no tasks with lineage information"),
+			lipgloss.NewStyle().Foreground(paletteColor("textMuted")).Italic(true).Render("no tasks with lineage information"),
 		))
 	} else {
 		var treeContent strings.Builder
@@ -1431,7 +1431,7 @@ func (m *TasksModel) renderLineageView() string {
 
 	// Footer hints
 	hintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		MarginTop(1)
 	b.WriteString(hintStyle.Render("tab: tasks view | t: toggle | r: refresh | enter: details | ?: help"))
 
@@ -1444,9 +1444,9 @@ func (m *TasksModel) renderTaskNode(b *strings.Builder, task types.TaskExtended,
 	stateColor := m.getStateColor(task.State)
 	stateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(stateColor))
 
-	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB"))
-	memStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAmber))
-	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray))
+	nameStyle := lipgloss.NewStyle().Foreground(paletteColor("textPrimary"))
+	memStyle := lipgloss.NewStyle().Foreground(paletteColor("warning"))
+	mutedStyle := lipgloss.NewStyle().Foreground(paletteColor("textMuted"))
 
 	// Task name
 	name := task.Name
@@ -1533,27 +1533,27 @@ func (m *TasksModel) renderTaskNode(b *strings.Builder, task types.TaskExtended,
 func (m *TasksModel) renderHelp() string {
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#F97316")).
+		BorderForeground(paletteColor("primary")).
 		Padding(2, 4).
 		Width(m.width - 4)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316")).
+		Foreground(paletteColor("primary")).
 		MarginBottom(1)
 
 	sectionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorAmber)).
+		Foreground(paletteColor("warning")).
 		Bold(true).
 		MarginTop(1)
 
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorAmber)).
+		Foreground(paletteColor("warning")).
 		Bold(true).
 		Width(12)
 
 	descStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB"))
+		Foreground(paletteColor("textPrimary"))
 
 	content := titleStyle.Render("tasks view help") + "\n\n"
 
@@ -1584,7 +1584,7 @@ func (m *TasksModel) renderHelp() string {
 	content += keyStyle.Render("✗") + descStyle.Render("failed") + "\n"
 
 	content += "\n"
-	content += lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("press any key to close")
+	content += lipgloss.NewStyle().Foreground(paletteColor("textMuted")).Render("press any key to close")
 
 	return panelStyle.Render(content)
 }

@@ -17,6 +17,8 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	palette "github.com/caimlas/meept/internal/tui/components/palette"
 )
 
 // PromptEntry describes one discoverable template.
@@ -39,12 +41,12 @@ func (i promptListItem) FilterValue() string { return i.entry.Name }
 
 // Model is the Bubble Tea model for the prompt template browser.
 type Model struct {
-	list     list.Model
-	detail   *PromptDetail
-	entries  []PromptEntry
-	width    int
-	height   int
-	err      error
+	list    list.Model
+	detail  *PromptDetail
+	entries []PromptEntry
+	width   int
+	height  int
+	err     error
 }
 
 // PromptDetail holds the full content for a selected template.
@@ -57,12 +59,12 @@ type PromptDetail struct {
 func New() *Model {
 	delegate := list.NewDefaultDelegate()
 	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#3B82F6")).
+		Foreground(lipgloss.Color("#FFFFFF")). // palette-exempt: max-contrast literal
+		Background(palette.Current("info")).
 		Bold(true)
 	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
-		Foreground(lipgloss.Color("#E5E7EB")).
-		Background(lipgloss.Color("#3B82F6"))
+		Foreground(palette.Current("textPrimary")).
+		Background(palette.Current("info"))
 
 	l := list.New([]list.Item{}, delegate, 60, 15)
 	l.Title = "prompt templates"
@@ -144,7 +146,7 @@ func (m *Model) View() string {
 	}
 	if m.detail != nil {
 		var sb strings.Builder
-		headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#3B82F6"))
+		headerStyle := lipgloss.NewStyle().Bold(true).Foreground(palette.Current("info"))
 		fmt.Fprintf(&sb, "%s\n\n", headerStyle.Render("prompt: "+m.detail.Entry.Name))
 		fmt.Fprintf(&sb, "source: %s (tier: %s)\n\n", m.detail.Entry.Source, m.detail.Entry.Tier)
 		sb.WriteString(m.detail.Content)

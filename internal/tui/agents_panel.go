@@ -33,10 +33,10 @@ import (
 type agentsSubView int
 
 const (
-	agentsViewList       agentsSubView = iota // default: agents list
-	agentsViewDetail                          // drill-in: constitution / goals / audit / state
-	agentsViewApprovals                       // tier-2 plans awaiting user signoff
-	agentsViewAudit                           // severity-colored audit findings
+	agentsViewList      agentsSubView = iota // default: agents list
+	agentsViewDetail                         // drill-in: constitution / goals / audit / state
+	agentsViewApprovals                      // tier-2 plans awaiting user signoff
+	agentsViewAudit                          // severity-colored audit findings
 )
 
 // AgentsPanel is the Bubbletea Model for the employees panel.
@@ -77,55 +77,55 @@ type AgentsRPCClient interface {
 // fields the daemon returns for agents.list plus a few values (drift,
 // daily cost) that the manager computes from bot state.
 type AgentSummary struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Role          string    `json:"role"`
-	Status        string    `json:"status"` // running | paused | error | stopped
-	Tier          string    `json:"tier"`   // tier_1_reactive | tier_2_propose | tier_3_autonomous
-	DriftScore    float64   `json:"drift_score"`
-	DailyCostCents int      `json:"daily_cost_cents"`
-	FindingsCount int       `json:"findings_count"`
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	Role           string    `json:"role"`
+	Status         string    `json:"status"` // running | paused | error | stopped
+	Tier           string    `json:"tier"`   // tier_1_reactive | tier_2_propose | tier_3_autonomous
+	DriftScore     float64   `json:"drift_score"`
+	DailyCostCents int       `json:"daily_cost_cents"`
+	FindingsCount  int       `json:"findings_count"`
 	LastInvocation time.Time `json:"last_invocation"`
 }
 
 // AgentDetail is the drill-in payload. Combines the employee definition
 // with its constitution summary, active goals, and recent findings.
 type AgentDetail struct {
-	Agent            AgentSummary   `json:"agent"`
-	Purpose          string         `json:"purpose"`
-	Charter          string         `json:"charter"`
-	Never            []string       `json:"never"`
-	ToolsAllowed     []string       `json:"tools_allowed"`
-	ToolsForbidden   []string       `json:"tools_forbidden"`
-	RiskCeiling      string         `json:"risk_ceiling"`
-	EscalatesTo      []string       `json:"escalates_to"`
-	ActiveGoals      []AgentGoal    `json:"active_goals"`
-	RecentFindings   []AgentFinding `json:"recent_findings"`
+	Agent          AgentSummary   `json:"agent"`
+	Purpose        string         `json:"purpose"`
+	Charter        string         `json:"charter"`
+	Never          []string       `json:"never"`
+	ToolsAllowed   []string       `json:"tools_allowed"`
+	ToolsForbidden []string       `json:"tools_forbidden"`
+	RiskCeiling    string         `json:"risk_ceiling"`
+	EscalatesTo    []string       `json:"escalates_to"`
+	ActiveGoals    []AgentGoal    `json:"active_goals"`
+	RecentFindings []AgentFinding `json:"recent_findings"`
 }
 
 // AgentGoal mirrors employee.Goal for wire transport.
 type AgentGoal struct {
-	ID           string `json:"id"`
-	Title        string `json:"title"`
-	Mandate      string `json:"mandate"`
-	State        string `json:"state"`  // active | paused | retired
-	Health       string `json:"health"` // healthy | at_risk | broken | unknown
-	ActivePlanID string `json:"active_plan_id,omitempty"`
+	ID           string    `json:"id"`
+	Title        string    `json:"title"`
+	Mandate      string    `json:"mandate"`
+	State        string    `json:"state"`  // active | paused | retired
+	Health       string    `json:"health"` // healthy | at_risk | broken | unknown
+	ActivePlanID string    `json:"active_plan_id,omitempty"`
 	LastAssessed time.Time `json:"last_assessed"`
 }
 
 // AgentFinding mirrors employee.AuditFinding for wire transport.
 type AgentFinding struct {
-	ID           string    `json:"id"`
-	EmployeeID   string    `json:"employee_id"`
-	Severity     string    `json:"severity"` // info | warning | critical
-	Checkpoint   string    `json:"checkpoint"`
-	ViolatedRule string    `json:"violated_rule,omitempty"`
-	Evidence     string    `json:"evidence,omitempty"`
-	DetectedAt   time.Time `json:"detected_at"`
+	ID           string     `json:"id"`
+	EmployeeID   string     `json:"employee_id"`
+	Severity     string     `json:"severity"` // info | warning | critical
+	Checkpoint   string     `json:"checkpoint"`
+	ViolatedRule string     `json:"violated_rule,omitempty"`
+	Evidence     string     `json:"evidence,omitempty"`
+	DetectedAt   time.Time  `json:"detected_at"`
 	ResolvedAt   *time.Time `json:"resolved_at,omitempty"`
-	Resolution   string    `json:"resolution,omitempty"`
-	DriftScore   float64   `json:"drift_score,omitempty"`
+	Resolution   string     `json:"resolution,omitempty"`
+	DriftScore   float64    `json:"drift_score,omitempty"`
 }
 
 // NewAgentsPanel constructs the panel with default table styling.
@@ -149,13 +149,13 @@ func NewAgentsPanel(rpc AgentsRPCClient) *AgentsPanel {
 	s := table.DefaultStyles()
 	s.Header = s.Header.
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("#374151")).
+		BorderForeground(Current().Border).
 		BorderBottom(true).
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316"))
+		Foreground(Current().Primary)
 	s.Selected = s.Selected.
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#F97316")).
+		Foreground(lipgloss.Color("#FFFFFF")). // palette-exempt: max-contrast literal
+		Background(Current().Primary).
 		Bold(true)
 	t.SetStyles(s)
 
@@ -249,14 +249,14 @@ func (p *AgentsPanel) fetchDetail() tea.Msg {
 		return agentsDetailMsg{err: fmt.Errorf("agents.get: %w", err)}
 	}
 	var emp struct {
-		ID             string                 `json:"id"`
-		Name           string                 `json:"name"`
-		Description    string                 `json:"description"`
-		Enabled        bool                   `json:"enabled"`
-		Model          string                 `json:"model,omitempty"`
-		Tools          []string               `json:"tools"`
-		Constitution   map[string]any         `json:"constitution"`
-		Constraints    map[string]any         `json:"constraints,omitempty"`
+		ID           string         `json:"id"`
+		Name         string         `json:"name"`
+		Description  string         `json:"description"`
+		Enabled      bool           `json:"enabled"`
+		Model        string         `json:"model,omitempty"`
+		Tools        []string       `json:"tools"`
+		Constitution map[string]any `json:"constitution"`
+		Constraints  map[string]any `json:"constraints,omitempty"`
 	}
 	if err := json.Unmarshal(raw, &emp); err != nil {
 		return agentsDetailMsg{err: fmt.Errorf("unmarshal agent: %w", err)}
@@ -567,13 +567,13 @@ func (p *AgentsPanel) statusBadge(status string) string {
 	style := lipgloss.NewStyle()
 	switch status {
 	case "running":
-		style = style.Foreground(lipgloss.Color(ColorGreen))
+		style = style.Foreground(Current().Success)
 	case "paused":
-		style = style.Foreground(lipgloss.Color(ColorAmber))
+		style = style.Foreground(Current().Warning)
 	case "error":
-		style = style.Foreground(lipgloss.Color(ColorRed))
+		style = style.Foreground(Current().ErrorC)
 	default:
-		style = style.Foreground(lipgloss.Color(ColorGray))
+		style = style.Foreground(Current().TextMuted)
 	}
 	return style.Render(status)
 }
@@ -619,7 +619,7 @@ func (p *AgentsPanel) View() string {
 
 	tableStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#374151"))
+		BorderForeground(Current().Border)
 	b.WriteString(tableStyle.Render(p.table.View()))
 	b.WriteString("\n")
 
@@ -630,16 +630,16 @@ func (p *AgentsPanel) View() string {
 func (p *AgentsPanel) renderHeader() string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316"))
+		Foreground(Current().Primary)
 
 	tabActive := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#F97316")).
+		Foreground(lipgloss.Color("#FFFFFF")). // palette-exempt: max-contrast literal
+		Background(Current().Primary).
 		Bold(true).
 		Padding(0, 1)
 	tabInactive := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
-		Background(lipgloss.Color("#1F2937")).
+		Foreground(Current().TextMuted).
+		Background(Current().SurfaceAlt).
 		Padding(0, 1)
 
 	header := titleStyle.Render("agents")
@@ -661,7 +661,7 @@ func (p *AgentsPanel) renderHeader() string {
 	}
 	tabsLine := strings.Join(tabParts, " ")
 
-	count := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).
+	count := lipgloss.NewStyle().Foreground(Current().TextMuted).
 		Render(fmt.Sprintf("(%d agents)", len(p.agents)))
 
 	return lipgloss.JoinHorizontal(lipgloss.Left, header, "  ", tabsLine, "  ", count)
@@ -669,7 +669,7 @@ func (p *AgentsPanel) renderHeader() string {
 
 func (p *AgentsPanel) renderHelpHint() string {
 	hintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(Current().TextMuted).
 		MarginTop(1)
 	return hintStyle.Render("r: refresh | enter: details | 1: list | 2: approvals | 3: audit | esc: back")
 }
@@ -685,7 +685,7 @@ func (p *AgentsPanel) renderLoading() string {
 func (p *AgentsPanel) renderError() string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ColorRed)).
+		BorderForeground(Current().ErrorC).
 		Padding(1, 2).
 		Width(max(p.width-4, 20))
 
@@ -694,9 +694,9 @@ func (p *AgentsPanel) renderError() string {
 		errMsg = fmt.Sprintf("%v", p.err)
 	}
 	return style.Render(
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("error") +
+		lipgloss.NewStyle().Foreground(Current().ErrorC).Bold(true).Render("error") +
 			"\n\n" + errMsg + "\n\n" +
-			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("press 'r' to refresh"),
+			lipgloss.NewStyle().Foreground(Current().TextMuted).Render("press 'r' to refresh"),
 	)
 }
 
@@ -711,26 +711,26 @@ func (p *AgentsPanel) renderDetail() string {
 
 	modalStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#F97316")).
+		BorderForeground(Current().Primary).
 		Padding(1, 2).
 		Width(modalWidth)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316")).
+		Foreground(Current().Primary).
 		MarginBottom(1)
 
 	sectionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorAmber)).
+		Foreground(Current().Warning).
 		Bold(true).
 		MarginTop(1)
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(Current().TextMuted).
 		Width(14)
 
 	valueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB"))
+		Foreground(Current().TextPrimary)
 
 	var b strings.Builder
 
@@ -802,7 +802,7 @@ func (p *AgentsPanel) renderDetail() string {
 	b.WriteString(sectionStyle.Render(fmt.Sprintf("--- goals (%d) ---", len(d.ActiveGoals))))
 	b.WriteString("\n")
 	if len(d.ActiveGoals) == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).
+		b.WriteString(lipgloss.NewStyle().Foreground(Current().TextMuted).
 			Italic(true).Render("no active goals"))
 		b.WriteString("\n")
 	}
@@ -816,7 +816,7 @@ func (p *AgentsPanel) renderDetail() string {
 	b.WriteString(sectionStyle.Render(fmt.Sprintf("--- recent findings (%d) ---", len(d.RecentFindings))))
 	b.WriteString("\n")
 	if len(d.RecentFindings) == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).
+		b.WriteString(lipgloss.NewStyle().Foreground(Current().TextMuted).
 			Italic(true).Render("none in the last 7 days"))
 		b.WriteString("\n")
 	}
@@ -827,7 +827,7 @@ func (p *AgentsPanel) renderDetail() string {
 
 	// Actions hint
 	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).
+	b.WriteString(lipgloss.NewStyle().Foreground(Current().TextMuted).
 		Render("p: pause | u: resume | a: approve | x: reject | f: resolve finding | esc: back"))
 
 	return modalStyle.Render(b.String())
@@ -843,7 +843,7 @@ func (p *AgentsPanel) renderApprovals() string {
 	b.WriteString("\n\n")
 
 	sectionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorAmber)).
+		Foreground(Current().Warning).
 		Bold(true)
 
 	b.WriteString(sectionStyle.Render("--- pending plan approvals ---"))
@@ -861,7 +861,7 @@ func (p *AgentsPanel) renderApprovals() string {
 
 	if len(pending) == 0 {
 		empty := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(ColorGray)).
+			Foreground(Current().TextMuted).
 			Italic(true).
 			Width(max(p.width-4, 20)).
 			Align(lipgloss.Center).
@@ -871,10 +871,10 @@ func (p *AgentsPanel) renderApprovals() string {
 	} else {
 		// Render a simple table.
 		labelStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(ColorGray)).
+			Foreground(Current().TextMuted).
 			Width(16)
 		valueStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#E5E7EB"))
+			Foreground(Current().TextPrimary)
 
 		for _, g := range pending {
 			b.WriteString(labelStyle.Render("employee:"))
@@ -891,7 +891,7 @@ func (p *AgentsPanel) renderApprovals() string {
 			b.WriteString("\n\n")
 		}
 
-		hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray))
+		hint := lipgloss.NewStyle().Foreground(Current().TextMuted)
 		b.WriteString(hint.Render("a: approve | x: reject | esc: back to list"))
 		b.WriteString("\n")
 	}
@@ -907,7 +907,7 @@ func (p *AgentsPanel) renderAudit() string {
 	b.WriteString("\n\n")
 
 	sectionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorAmber)).
+		Foreground(Current().Warning).
 		Bold(true)
 
 	b.WriteString(sectionStyle.Render("--- recent audit findings ---"))
@@ -925,7 +925,7 @@ func (p *AgentsPanel) renderAudit() string {
 
 	if len(findings) == 0 {
 		empty := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(ColorGray)).
+			Foreground(Current().TextMuted).
 			Italic(true).
 			Width(max(p.width-4, 20)).
 			Align(lipgloss.Center).
@@ -934,19 +934,19 @@ func (p *AgentsPanel) renderAudit() string {
 		b.WriteString("\n")
 	} else {
 		sevStyle := lipgloss.NewStyle().Bold(true)
-		ruleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB"))
+		ruleStyle := lipgloss.NewStyle().Foreground(Current().TextPrimary)
 
 		for _, f := range findings {
-			color := ColorGray
+			color := Current().TextMuted
 			switch f.Severity {
 			case "critical":
-				color = ColorRed
+				color = Current().ErrorC
 			case "warning":
-				color = ColorAmber
+				color = Current().Warning
 			case "info":
-				color = "#3B82F6"
+				color = Current().Info
 			}
-			dot := sevStyle.Foreground(lipgloss.Color(color)).Render("●")
+			dot := sevStyle.Foreground(color).Render("●")
 
 			rule := f.ViolatedRule
 			if rule == "" {
@@ -955,14 +955,14 @@ func (p *AgentsPanel) renderAudit() string {
 			b.WriteString(fmt.Sprintf("%s %s  %s  %s\n",
 				dot,
 				ruleStyle.Render(truncate(rule, 40)),
-				lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).
+				lipgloss.NewStyle().Foreground(Current().TextMuted).
 					Render(f.Severity),
 				formatTimeAgoTime(f.DetectedAt),
 			))
 		}
 
 		b.WriteString("\n")
-		hint := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray))
+		hint := lipgloss.NewStyle().Foreground(Current().TextMuted)
 		b.WriteString(hint.Render("f: resolve as false positive | esc: back to list"))
 		b.WriteString("\n")
 	}
@@ -971,38 +971,38 @@ func (p *AgentsPanel) renderAudit() string {
 }
 
 func (p *AgentsPanel) renderGoalLine(g AgentGoal) string {
-	healthColor := ColorGray
+	healthColor := Current().TextMuted
 	healthLabel := g.Health
 	switch g.Health {
 	case "healthy":
-		healthColor = ColorGreen
+		healthColor = Current().Success
 	case "at_risk":
-		healthColor = ColorAmber
+		healthColor = Current().Warning
 	case "broken":
-		healthColor = ColorRed
+		healthColor = Current().ErrorC
 	}
-	healthStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(healthColor)).Bold(true)
+	healthStyle := lipgloss.NewStyle().Foreground(healthColor).Bold(true)
 	dot := healthStyle.Render("●")
-	title := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")).Render(g.Title)
+	title := lipgloss.NewStyle().Foreground(Current().TextPrimary).Render(g.Title)
 	plan := ""
 	if g.ActivePlanID != "" {
-		plan = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).
+		plan = lipgloss.NewStyle().Foreground(Current().TextMuted).
 			Render(" plan: " + truncate(g.ActivePlanID, 12))
 	}
 	return fmt.Sprintf("%s %s (%s)%s", dot, title, healthLabel, plan)
 }
 
 func (p *AgentsPanel) renderFindingLine(f AgentFinding) string {
-	sevColor := ColorGray
+	sevColor := Current().TextMuted
 	switch f.Severity {
 	case "critical":
-		sevColor = ColorRed
+		sevColor = Current().ErrorC
 	case "warning":
-		sevColor = ColorAmber
+		sevColor = Current().Warning
 	case "info":
-		sevColor = "#3B82F6"
+		sevColor = Current().Info
 	}
-	sevStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(sevColor)).Bold(true)
+	sevStyle := lipgloss.NewStyle().Foreground(sevColor).Bold(true)
 	rule := f.ViolatedRule
 	if rule == "" {
 		rule = f.Checkpoint

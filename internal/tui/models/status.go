@@ -131,16 +131,16 @@ func (m *StatusModel) renderLoading() string {
 func (m *StatusModel) renderError() string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ColorRed)).
+		BorderForeground(paletteColor("error")).
 		Padding(1, 2).
 		Width(m.width - 4)
 
 	return style.Render(
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("error") +
+		lipgloss.NewStyle().Foreground(paletteColor("error")).Bold(true).Render("error") +
 			"\n\n" +
 			fmt.Sprintf("%v", m.err) +
 			"\n\n" +
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("press 'r' to refresh"),
+			lipgloss.NewStyle().Foreground(paletteColor("textMuted")).Render("press 'r' to refresh"),
 	)
 }
 
@@ -162,7 +162,7 @@ func (m *StatusModel) renderDashboard() string {
 
 	// Add refresh hint
 	hint := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(paletteColor("textMuted")).
 		MarginTop(1).
 		Render(fmt.Sprintf("last updated: %s | press 'r' to refresh",
 			m.lastUpdate.Format("15:04:05")))
@@ -173,27 +173,27 @@ func (m *StatusModel) renderDashboard() string {
 func (m *StatusModel) renderStatusPanel(width int) string {
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#374151")).
+		BorderForeground(paletteColor("border")).
 		Padding(1, 2).
 		Width(width).
 		Height(m.height - 4)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316")).
+		Foreground(paletteColor("primary")).
 		MarginBottom(1)
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(paletteColor("textMuted")).
 		Width(12)
 
 	valueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB"))
+		Foreground(paletteColor("textPrimary"))
 
 	// Status color
-	statusColor := ColorGreen // Green
+	statusColor := paletteHex("success") // Green
 	if m.status.Status != StateRunning {
-		statusColor = ColorRed // Red
+		statusColor = paletteHex("error") // Red
 	}
 	statusStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(statusColor)).
@@ -226,18 +226,18 @@ func (m *StatusModel) renderStatusPanel(width int) string {
 func (m *StatusModel) renderMetricsPanel(width int) string {
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#374151")).
+		BorderForeground(paletteColor("border")).
 		Padding(1, 2).
 		Width(width).
 		Height(m.height - 4)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316")).
+		Foreground(paletteColor("primary")).
 		MarginBottom(1)
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280"))
+		Foreground(paletteColor("textMuted"))
 
 	content := titleStyle.Render("token budget") + "\n\n"
 
@@ -273,23 +273,23 @@ func (m *StatusModel) renderMetricsPanel(width int) string {
 func (m *StatusModel) renderInfoPanel(width int) string {
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#374151")).
+		BorderForeground(paletteColor("border")).
 		Padding(1, 2).
 		Width(width).
 		Height(m.height - 4)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316")).
+		Foreground(paletteColor("primary")).
 		MarginBottom(1)
 
 	content := titleStyle.Render("quick actions") + "\n\n"
 
 	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280"))
+		Foreground(paletteColor("textMuted"))
 
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorAmber)).
+		Foreground(paletteColor("warning")).
 		Bold(true)
 
 	content += keyStyle.Render("c") + helpStyle.Render(" - chat view") + "\n"
@@ -317,16 +317,16 @@ func (m *StatusModel) renderProgressBar(width int, percent float64) string {
 	empty := barWidth - filled
 
 	// Color based on percentage
-	fillColor := ColorGreen // Green
+	fillColor := paletteHex("success") // Green
 	if percent > 0.75 {
-		fillColor = ColorAmber // Amber
+		fillColor = paletteHex("warning") // Amber
 	}
 	if percent > 0.9 {
-		fillColor = ColorRed // Red
+		fillColor = paletteHex("error") // Red
 	}
 
 	fillStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(fillColor))
-	emptyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#374151"))
+	emptyStyle := lipgloss.NewStyle().Foreground(paletteColor("border"))
 
 	bar := "["
 	bar += fillStyle.Render(strings.Repeat("=", filled))

@@ -329,7 +329,7 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 
 	// Configure cursor: orange, blinking, vertical bar
 	styles := ta.Styles()
-	orange := lipgloss.Color("#F97316")
+	orange := paletteColor("primary")
 	styles.Cursor.Color = orange
 	styles.Cursor.Blink = true
 	styles.Cursor.Shape = tea.CursorBar
@@ -362,10 +362,10 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 	findInput.Placeholder = "find..."
 	findInput.CharLimit = 200
 	findStyles := findInput.Styles()
-	findStyles.Focused.Text = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
-	findStyles.Focused.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#F97316"))
-	findStyles.Blurred.Text = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
-	findStyles.Blurred.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#F97316"))
+	findStyles.Focused.Text = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")) // palette-exempt: max-contrast literal
+	findStyles.Focused.Prompt = lipgloss.NewStyle().Foreground(paletteColor("primary"))
+	findStyles.Blurred.Text = lipgloss.NewStyle().Foreground(paletteColor("textMuted"))
+	findStyles.Blurred.Prompt = lipgloss.NewStyle().Foreground(paletteColor("primary"))
 	findInput.SetStyles(findStyles)
 
 	return &ChatModel{
@@ -393,34 +393,34 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 		assistantStyle:    assistantStyle,
 		systemStyle:       systemStyle,
 		pendingStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#F59E0B")).
+			Foreground(paletteColor("warning")).
 			Italic(true).
 			PaddingLeft(2),
 		separatorStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#4B5563")),
+			Foreground(paletteColor("textMuted")),
 		focusedBorder: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#F97316")),
+			BorderForeground(paletteColor("primary")),
 		unfocusedBorder: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#374151")),
+			BorderForeground(paletteColor("border")),
 		headerStyle: lipgloss.NewStyle().
-			Background(lipgloss.Color("#F97316")).
-			Foreground(lipgloss.Color("#000000")).
+			Background(paletteColor("primary")).
+			Foreground(lipgloss.Color("#000000")). // palette-exempt: max-contrast literal
 			Bold(true).
 			Padding(0, 1),
 		steerBadgeStyle: lipgloss.NewStyle().
-			Background(lipgloss.Color("#EF4444")).
-			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(paletteColor("error")).
+			Foreground(lipgloss.Color("#FFFFFF")). // palette-exempt: max-contrast literal
 			Padding(0, 1).
 			Bold(true),
 		followUpBadgeStyle: lipgloss.NewStyle().
-			Background(lipgloss.Color("#10B981")).
-			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(paletteColor("success")).
+			Foreground(lipgloss.Color("#FFFFFF")). // palette-exempt: max-contrast literal
 			Padding(0, 1),
 		agentActiveBadgeStyle: lipgloss.NewStyle().
-			Background(lipgloss.Color("#6B7280")).
-			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(paletteColor("textMuted")).
+			Foreground(lipgloss.Color("#FFFFFF")). // palette-exempt: max-contrast literal
 			Padding(0, 1).
 			Bold(true),
 		findInput:   findInput,
@@ -2053,9 +2053,9 @@ func (m *ChatModel) updateViewport() {
 
 	// Turn separator: a more visible line with turn number
 	turnSepStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#374151"))
+		Foreground(paletteColor("border"))
 	turnLabelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(paletteColor("textMuted")).
 		Bold(true)
 
 	selectedStartLine := -1
@@ -2081,7 +2081,7 @@ func (m *ChatModel) updateViewport() {
 		isSelected := i == m.selectedMsgIdx
 		if isSelected {
 			selectedStartLine = currentLine
-			style = style.Background(lipgloss.Color("#374151"))
+			style = style.Background(paletteColor("border"))
 		}
 
 		// Message threading: user messages and system messages that follow a user
@@ -2136,12 +2136,12 @@ func (m *ChatModel) updateViewport() {
 			if isSelected {
 				pointer = "▸ "
 				copyHint = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#10B981")).
+					Foreground(paletteColor("success")).
 					Bold(true).
 					Render("  (c) copy")
 			}
 			header := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#6B7280")).
+				Foreground(paletteColor("textMuted")).
 				Render(fmt.Sprintf("%s%s", pointer, timestampStr))
 			content.WriteString(header + copyHint)
 			content.WriteString("\n")
@@ -2158,7 +2158,7 @@ func (m *ChatModel) updateViewport() {
 		switch msg.State {
 		case MessageCollapsed:
 			indicator := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#6B7280")).
+				Foreground(paletteColor("textMuted")).
 				Italic(true).
 				Render("  [collapsed - press e to expand]")
 			content.WriteString(indicator)
@@ -2166,7 +2166,7 @@ func (m *ChatModel) updateViewport() {
 			currentLine++
 		case MessageExpanded:
 			indicator := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#6B7280")).
+				Foreground(paletteColor("textMuted")).
 				Italic(true).
 				Render("  [expanded]")
 			content.WriteString(indicator)
@@ -2308,8 +2308,8 @@ func (m *ChatModel) View() string {
 	}
 	if m.isSelecting && m.hasSelection() {
 		copyHintStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#000000")).
-			Background(lipgloss.Color("#F97316")).
+			Foreground(lipgloss.Color("#000000")). // palette-exempt: max-contrast literal
+			Background(paletteColor("primary")).
 			Padding(0, 1)
 		b.WriteString(copyHintStyle.Render(" press 'c' to copy "))
 		b.WriteString("\n")
@@ -2338,7 +2338,7 @@ func (m *ChatModel) View() string {
 
 		// Show attached files in orange [filename.ext] format
 		if len(m.attachments) > 0 {
-			attachStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F97316")) // orange
+			attachStyle := lipgloss.NewStyle().Foreground(paletteColor("primary")) // orange
 			attachLabels := make([]string, 0, len(m.attachments))
 			for _, att := range m.attachments {
 				name := att.Filename
@@ -2366,7 +2366,7 @@ func (m *ChatModel) View() string {
 			if m.historyIdx >= 0 {
 				history := m.currentHistory()
 				historyIndicator := lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#6B7280")).
+					Foreground(paletteColor("textMuted")).
 					Italic(true).
 					Render(fmt.Sprintf(" [history %d/%d]", m.historyIdx+1, len(history)))
 				inputView += historyIndicator
@@ -2399,7 +2399,7 @@ func (m *ChatModel) View() string {
 				// Add newline BEFORE completions line
 				b.WriteString("\n")
 				completions := "/" + strings.Join(matches, "  /")
-				completionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).PaddingLeft(2)
+				completionStyle := lipgloss.NewStyle().Foreground(paletteColor("textMuted")).PaddingLeft(2)
 				b.WriteString(completionStyle.Render(completions))
 			}
 		}
@@ -3143,8 +3143,8 @@ func (m *ChatModel) renderInputWithGhostText() string {
 	}
 
 	// Build styled input: orange for typed, grey for ghost
-	orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F97316"))
-	greyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+	orangeStyle := lipgloss.NewStyle().Foreground(paletteColor("primary"))
+	greyStyle := lipgloss.NewStyle().Foreground(paletteColor("textMuted"))
 
 	typedPortion := inputValue
 	ghostPortion := bestMatch[len(inputValue):]
@@ -3334,7 +3334,7 @@ func (m *ChatModel) renderTTSIndicator() string {
 	// Animated speaker icon with pulse effect
 	indicator := "🔊 speaking..."
 	style := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F97316")). // orange
+		Foreground(paletteColor("primary")). // orange
 		Bold(true)
 
 	return style.Render(indicator)
@@ -3490,8 +3490,8 @@ func (m *ChatModel) cancelRecording() {
 // renderSTTOverlay renders the STT recording/transcribing overlay in place
 // of the normal textarea content.
 func (m *ChatModel) renderSTTOverlay() string {
-	orange := lipgloss.Color("#F97316")
-	darkOrange := lipgloss.Color("#9A3412")
+	orange := paletteColor("primary")
+	darkOrange := lipgloss.Color("#9A3412") // palette-exempt: max-contrast literal
 
 	var content strings.Builder
 	overlayHeight := 3
@@ -3499,7 +3499,7 @@ func (m *ChatModel) renderSTTOverlay() string {
 	if m.recordingState == sttRecording {
 		// Center "speak to transcribe..." in bold black on orange
 		promptStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(lipgloss.Color("#000000")). // palette-exempt: max-contrast literal
 			Bold(true)
 		prompt := promptStyle.Render("speak to transcribe...")
 
@@ -3871,18 +3871,18 @@ func (m *ChatModel) renderFindBar() string {
 	}
 
 	countStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#9CA3AF")).
+		Foreground(paletteColor("textMuted")).
 		Padding(0, 1)
 	toggleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(paletteColor("textMuted")).
 		Padding(0, 1)
 	toggleActiveStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("#F97316")).
-		Foreground(lipgloss.Color("#000000")).
+		Background(paletteColor("primary")).
+		Foreground(lipgloss.Color("#000000")). // palette-exempt: max-contrast literal
 		Bold(true).
 		Padding(0, 1)
 	closeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#9CA3AF")).
+		Foreground(paletteColor("textMuted")).
 		Padding(0, 1)
 
 	caseLabel := "Aa"
@@ -3907,13 +3907,13 @@ func (m *ChatModel) renderFindBar() string {
 
 	if m.findRegexError != "" {
 		errStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#EF4444")).
+			Foreground(paletteColor("error")).
 			Padding(0, 1)
 		bar = lipgloss.JoinVertical(lipgloss.Top, bar, errStyle.Render("regex: "+m.findRegexError))
 	}
 
 	barStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("#1F2937")).
+		Background(paletteColor("surfaceAlt")).
 		Padding(0, 1).
 		Width(m.width - 2)
 	return barStyle.Render(bar)

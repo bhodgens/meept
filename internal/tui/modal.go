@@ -119,7 +119,7 @@ func (m *Modal) renderContent() string {
 		if item.Description != "" {
 			descStyle := m.styles.Muted
 			if i == m.selected {
-				descStyle = descStyle.Background(lipgloss.Color("#374151"))
+				descStyle = descStyle.Background(Current().Border)
 			}
 			line += descStyle.Render(" - " + item.Description)
 		}
@@ -517,8 +517,8 @@ func (s *SessionPickerModal) View(screenW, screenH int) string {
 // SessionSwitchMsg indicates a session switch request.
 type SessionSwitchMsg struct {
 	Session      *types.Session
-	SwitchToChat bool   // If true, switch to ViewChat after session change
-	Err          error  // Non-nil if session switch failed
+	SwitchToChat bool  // If true, switch to ViewChat after session change
+	Err          error // Non-nil if session switch failed
 }
 
 // SessionCreateMsg indicates a new session creation request.
@@ -1169,7 +1169,7 @@ func (f *FuzzyFinderModal) View(screenW, screenH int) string {
 	// Search input
 	inputStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#F97316")).
+		BorderForeground(Current().Primary).
 		Padding(0, 1).
 		Width(f.width - 10)
 	b.WriteString("\n")
@@ -1183,7 +1183,7 @@ func (f *FuzzyFinderModal) View(screenW, screenH int) string {
 	resultsHeight := max(f.height-12, 5)
 	resultsStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#374151")).
+		BorderForeground(Current().Border).
 		Width(f.width - 4).
 		Height(resultsHeight)
 

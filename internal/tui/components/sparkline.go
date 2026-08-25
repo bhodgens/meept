@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+
+	palette "github.com/caimlas/meept/internal/tui/components/palette"
 )
 
 // Sparkline renders a simple sparkline visualization using block characters.
@@ -186,11 +188,11 @@ func (s *MinMaxSparkline) View() string {
 	s.width = originalWidth
 
 	// Append range indicator
-	rangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+	rangeStyle := lipgloss.NewStyle().Foreground(palette.Current("textMuted"))
 	return sparkline + rangeStyle.Render(" [") +
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Render(itoa(minVal)) +
+		lipgloss.NewStyle().Foreground(palette.Current("success")).Render(itoa(minVal)) +
 		rangeStyle.Render("-") +
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Render(itoa(maxVal)) +
+		lipgloss.NewStyle().Foreground(palette.Current("error")).Render(itoa(maxVal)) +
 		rangeStyle.Render("]")
 }
 

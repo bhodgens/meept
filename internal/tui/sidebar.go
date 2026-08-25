@@ -1072,8 +1072,8 @@ func (s *SidebarModel) View() string {
 	versionStr := "meept " + version.String()
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#000000")).
-		Background(lipgloss.Color("#F97316")). // Orange
+		Foreground(lipgloss.Color("#000000")). // palette-exempt: max-contrast literal
+		Background(Current().Primary).         // Orange
 		Width(contentWidth).
 		Align(lipgloss.Center)
 
@@ -1190,7 +1190,7 @@ func (s *SidebarModel) renderPanelHeader(title string, panel SidebarPanel) strin
 
 	// Highlight selected panel when sidebar is focused
 	if s.focused && s.selectedPanel == panel {
-		style = style.Background(lipgloss.Color("#374151"))
+		style = style.Background(Current().Border)
 	}
 
 	return style.Render(fmt.Sprintf("%s%s %s", selectionIndicator, icon, title))
@@ -1270,7 +1270,7 @@ func (s *SidebarModel) renderAgentActivityPanel() string {
 				switch agent.State {
 				case "reasoning":
 					stateIcon = "◐"
-					stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
+					stateStyle = lipgloss.NewStyle().Foreground(Current().Warning)
 				case "tool_exec":
 					stateIcon = "●"
 					stateStyle = s.styles.StatusRunning
@@ -1316,7 +1316,7 @@ func (s *SidebarModel) renderAgentActivityPanel() string {
 					switch tool.State {
 					case "running":
 						toolState = "◐"
-						toolStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
+						toolStyle = lipgloss.NewStyle().Foreground(Current().Warning)
 					case "done":
 						toolState = "✓"
 						toolStyle = s.styles.Success
@@ -1429,13 +1429,13 @@ func (s *SidebarModel) renderTasksPanel() string {
 					statusStyle = s.styles.Muted
 				case StatePlanning:
 					statusIcon = "◐"
-					statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
+					statusStyle = lipgloss.NewStyle().Foreground(Current().Warning)
 				case StateExecuting:
 					statusIcon = "●"
 					statusStyle = s.styles.StatusRunning
 				case "testing":
 					statusIcon = "◑"
-					statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5CF6"))
+					statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5CF6")) // palette-exempt
 				case "completed":
 					statusIcon = "✓"
 					statusStyle = s.styles.Success
@@ -1502,10 +1502,10 @@ func (s *SidebarModel) renderTasksPanel() string {
 					switch {
 					case task.ReviewStatus == "reviewing...":
 						reviewIcon = "..."
-						reviewStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAmber))
+						reviewStyle = lipgloss.NewStyle().Foreground(Current().Warning)
 					case strings.HasPrefix(task.ReviewStatus, "revision #"):
 						reviewIcon = task.ReviewStatus
-						reviewStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAmber))
+						reviewStyle = lipgloss.NewStyle().Foreground(Current().Warning)
 					case task.ReviewStatus == "rejected":
 						reviewIcon = "!"
 						reviewStyle = s.styles.Error
@@ -1596,7 +1596,7 @@ func (s *SidebarModel) renderMemoryPanel() string {
 				typeStyle := s.styles.Muted
 				switch mem.Type {
 				case "episodic":
-					typeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4"))
+					typeStyle = lipgloss.NewStyle().Foreground(Current().Info)
 				case "task":
 					typeStyle = lipgloss.NewStyle().Foreground(ColorAccent)
 				}
@@ -1620,7 +1620,7 @@ func (s *SidebarModel) renderMetricsPanel() string {
 
 	if s.expandedPanels[PanelMetrics] {
 		// Sparkline style
-		sparkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4"))
+		sparkStyle := lipgloss.NewStyle().Foreground(Current().Info)
 		labelStyle := lipgloss.NewStyle().
 			Foreground(ColorMuted).
 			Width(10)
@@ -1633,7 +1633,7 @@ func (s *SidebarModel) renderMetricsPanel() string {
 		b.WriteString("\n")
 
 		// Workers busy sparkline
-		workerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981"))
+		workerStyle := lipgloss.NewStyle().Foreground(Current().Success)
 		s.workersSparkline.SetStyle(workerStyle)
 		b.WriteString("  ")
 		b.WriteString(labelStyle.Render("workers:"))
@@ -1692,13 +1692,13 @@ func (s *SidebarModel) renderActivityFeedPanel() string {
 					case "agent":
 						topicStyle = lipgloss.NewStyle().Foreground(ColorAccent)
 					case "task":
-						topicStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5CF6"))
+						topicStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5CF6")) // palette-exempt
 					case "queue":
-						topicStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4"))
+						topicStyle = lipgloss.NewStyle().Foreground(Current().Info)
 					case "worker":
-						topicStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981"))
+						topicStyle = lipgloss.NewStyle().Foreground(Current().Success)
 					case "memory":
-						topicStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#EC4899"))
+						topicStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#EC4899")) // palette-exempt
 					}
 				}
 

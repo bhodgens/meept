@@ -27,9 +27,9 @@ type MockChatRPCClient struct {
 	ChatWithPartsErr       error
 
 	// Upload tracking
-	UploadCalls  []string
-	UploadID     string
-	UploadErr    error
+	UploadCalls []string
+	UploadID    string
+	UploadErr   error
 
 	// Steering/follow-up tracking
 	SteerCalls     []string
@@ -1696,14 +1696,14 @@ func TestChatModel_GetAttachments_ReturnsPaths(t *testing.T) {
 // TestIsImageFile verifies image-extension detection for the attachment flow.
 func TestIsImageFile(t *testing.T) {
 	cases := map[string]bool{
-		"/tmp/photo.png":  true,
-		"/tmp/photo.JPG":  true,
-		"/tmp/p.jpeg":     true,
-		"/tmp/a.gif":      true,
-		"/tmp/a.webp":     true,
-		"/tmp/notes.txt":  false,
-		"/tmp/noext":      false,
-		"/tmp/README.md":  false,
+		"/tmp/photo.png": true,
+		"/tmp/photo.JPG": true,
+		"/tmp/p.jpeg":    true,
+		"/tmp/a.gif":     true,
+		"/tmp/a.webp":    true,
+		"/tmp/notes.txt": false,
+		"/tmp/noext":     false,
+		"/tmp/README.md": false,
 	}
 	for path, want := range cases {
 		if got := isImageFile(path); got != want {

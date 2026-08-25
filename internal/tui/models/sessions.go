@@ -1,10 +1,11 @@
 package models
 
 import (
-	"sort"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/bubbles/v2/table"
@@ -94,14 +95,14 @@ func NewSessionsModel(rpc SessionsRPCClient) *SessionsModel {
 	s := table.DefaultStyles()
 	s.Header = s.Header.
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("#374151")).
+		BorderForeground(paletteColor("border")).
 		BorderBottom(true).
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316"))
+		Foreground(paletteColor("primary"))
 
 	s.Selected = s.Selected.
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#F97316")).
+		Foreground(paletteColor("#FFFFFF")). // palette-exempt: literal kept for max-contrast white on primary
+		Background(paletteColor("primary")).
 		Bold(true)
 
 	t.SetStyles(s)
@@ -335,9 +336,12 @@ func (m *SessionsModel) Update(msg tea.Msg) tea.Cmd {
 }
 
 // archivedRowStyle dims archived session rows. Applied per-cell since
-// bubbles/table has no per-row style API. Foreground matches ColorGray
-// for a consistent "muted" look alongside other secondary text.
-var archivedRowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray))
+// bubbles/table has no per-row style API. Foreground resolves the palette's
+// textMuted role lazily at first use so it tracks the active theme instead
+// of being frozen at init time.
+var archivedRowStyle = sync.OnceValue(func() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(paletteColor("textMuted"))
+})
 
 func (m *SessionsModel) updateSessionsTable() {
 	rows := make([]table.Row, len(m.sessions))
@@ -351,10 +355,14 @@ func (m *SessionsModel) updateSessionsTable() {
 		desigPrefix := ""
 		if sess.Designation != nil && sess.Designation.Status != "none" {
 			switch sess.Designation.Status {
-			case "requires_approval": desigPrefix = "! "
-			case "waiting_human": desigPrefix = "? "
-			case "human_responded": desigPrefix = "R "
-			case "bot_thinking": desigPrefix = "... "
+			case "requires_approval":
+				desigPrefix = "! "
+			case "waiting_human":
+				desigPrefix = "? "
+			case "human_responded":
+				desigPrefix = "R "
+			case "bot_thinking":
+				desigPrefix = "... "
 			}
 		}
 		// Archived sessions get a visual marker so the dim styling is
@@ -379,9 +387,9 @@ func (m *SessionsModel) updateSessionsTable() {
 		// Apply dim styling to archived rows. Each cell is rendered with
 		// the archived style so the entire row reads as muted.
 		if sess.Archived {
-			titleCell = archivedRowStyle.Render(titleCell)
-			createdCell = archivedRowStyle.Render(createdCell)
-			activityCell = archivedRowStyle.Render(activityCell)
+			titleCell = archivedRowStyle().Render(titleCell)
+			createdCell = archivedRowStyle().Render(createdCell)
+			activityCell = archivedRowStyle().Render(activityCell)
 		}
 
 		rows[i] = table.Row{titleCell, createdCell, activityCell}
@@ -452,13 +460,13 @@ func (m *SessionsModel) View() string {
 	// Table
 	tableStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#374151")).
+		BorderForeground(paletteColor("border")).
 		Width(tableWidth)
 
 	// Detail pane
 	detailStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#F97316")).
+		BorderForeground(paletteColor("primary")).
 		Width(detailWidth).
 		Height(m.height - 8)
 
@@ -467,7 +475,7 @@ func (m *SessionsModel) View() string {
 		detailContent = m.renderSessionDetail()
 	} else {
 		detailContent = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(ColorGray)).
+			Foreground(paletteColor("textMuted")).
 			Italic(true).
 			Render("select a session")
 	}
@@ -478,7 +486,7 @@ func (m *SessionsModel) View() string {
 
 	// Help hint
 	hintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		MarginTop(1)
 
 	b.WriteString(hintStyle.Render("n: new | d: archive | D: delete | r: refresh | enter: details | up/down: navigate | f: search | ?: help"))
@@ -489,10 +497,10 @@ func (m *SessionsModel) View() string {
 func (m *SessionsModel) renderHeader() string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316"))
+		Foreground(paletteColor("primary"))
 
 	countStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray))
+		Foreground(paletteColor("textMuted"))
 
 	title := titleStyle.Render("sessions")
 	count := countStyle.Render(fmt.Sprintf("(%d)", len(m.sessions)))
@@ -507,25 +515,28 @@ func (m *SessionsModel) renderSessionDetail() string {
 	}
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		Width(10)
 
 	valueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB"))
+		Foreground(paletteColor("textPrimary"))
 
 	var content strings.Builder
 
 	// Title
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#E5E7EB"))
+		Foreground(paletteColor("textPrimary"))
 
 	displayTitle := sess.Description
 	if displayTitle == "" {
 		displayTitle = sess.Name
 	}
 	content.WriteString(titleStyle.Render(types.TruncateString(displayTitle, 28)))
-	if badge := m.getDesignationBadge(sess); badge != "" { content.WriteString(" "); content.WriteString(badge) }
+	if badge := m.getDesignationBadge(sess); badge != "" {
+		content.WriteString(" ")
+		content.WriteString(badge)
+	}
 	content.WriteString("\n\n")
 
 	// Session ID
@@ -558,18 +569,18 @@ func (m *SessionsModel) renderSessionDetail() string {
 	// Plans section
 	content.WriteString("\n")
 	sectionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorAmber)).
+		Foreground(paletteColor("warning")).
 		Bold(true)
 	content.WriteString(sectionStyle.Render("--- plans ---"))
 	content.WriteString("\n")
 
 	if m.plansLoading {
-		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Italic(true).Render("loading..."))
+		content.WriteString(lipgloss.NewStyle().Foreground(paletteColor("textMuted")).Italic(true).Render("loading..."))
 	} else if m.plansErr != nil {
-		errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Italic(true)
+		errStyle := lipgloss.NewStyle().Foreground(paletteColor("error")).Italic(true)
 		content.WriteString(errStyle.Render(fmt.Sprintf("error: %s", types.TruncateString(m.plansErr.Error(), 30))))
 	} else if len(m.plans) == 0 {
-		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Italic(true).Render("no plans"))
+		content.WriteString(lipgloss.NewStyle().Foreground(paletteColor("textMuted")).Italic(true).Render("no plans"))
 	} else {
 		for _, plan := range m.plans {
 			stateColor := m.getPlanStateColor(plan.State)
@@ -602,21 +613,21 @@ func (m *SessionsModel) renderSessionDetailModal() string {
 
 	modalStyle := lipgloss.NewStyle().
 		Border(lipgloss.DoubleBorder()).
-		BorderForeground(lipgloss.Color("#F97316")).
+		BorderForeground(paletteColor("primary")).
 		Padding(1, 2).
 		Width(modalWidth)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316")).
+		Foreground(paletteColor("primary")).
 		MarginBottom(1)
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		Width(14)
 
 	valueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB"))
+		Foreground(paletteColor("textPrimary"))
 
 	var content strings.Builder
 
@@ -659,13 +670,13 @@ func (m *SessionsModel) renderSessionDetailModal() string {
 	if len(m.plans) > 0 || m.plansLoading {
 		content.WriteString("\n")
 		sectionStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(ColorAmber)).
+			Foreground(paletteColor("warning")).
 			Bold(true)
 		content.WriteString(sectionStyle.Render("--- associated plans ---"))
 		content.WriteString("\n")
 
 		if m.plansLoading {
-			content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Italic(true).Render("loading..."))
+			content.WriteString(lipgloss.NewStyle().Foreground(paletteColor("textMuted")).Italic(true).Render("loading..."))
 		} else {
 			for _, plan := range m.plans {
 				stateColor := m.getPlanStateColor(plan.State)
@@ -694,7 +705,7 @@ func (m *SessionsModel) renderSessionDetailModal() string {
 	// Footer
 	content.WriteString("\n")
 	footerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		Italic(true)
 	content.WriteString(footerStyle.Render("[esc/q] close"))
 
@@ -713,7 +724,7 @@ func (m *SessionsModel) renderLoading() string {
 func (m *SessionsModel) renderError() string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ColorRed)).
+		BorderForeground(paletteColor("error")).
 		Padding(1, 2).
 		Width(m.width - 4)
 
@@ -723,33 +734,33 @@ func (m *SessionsModel) renderError() string {
 	}
 
 	return style.Render(
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("error") +
+		lipgloss.NewStyle().Foreground(paletteColor("error")).Bold(true).Render("error") +
 			"\n\n" +
 			errMsg +
 			"\n\n" +
-			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("press 'r' to refresh"),
+			lipgloss.NewStyle().Foreground(paletteColor("textMuted")).Render("press 'r' to refresh"),
 	)
 }
 
 func (m *SessionsModel) renderHelp() string {
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#F97316")).
+		BorderForeground(paletteColor("primary")).
 		Padding(2, 4).
 		Width(m.width - 4)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316")).
+		Foreground(paletteColor("primary")).
 		MarginBottom(1)
 
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorAmber)).
+		Foreground(paletteColor("warning")).
 		Bold(true).
 		Width(12)
 
 	descStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB"))
+		Foreground(paletteColor("textPrimary"))
 
 	content := titleStyle.Render("sessions view help") + "\n\n"
 	content += keyStyle.Render("n") + descStyle.Render("create new session") + "\n"
@@ -764,7 +775,7 @@ func (m *SessionsModel) renderHelp() string {
 	content += keyStyle.Render("?") + descStyle.Render("toggle this help") + "\n"
 
 	content += "\n"
-	content += lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("press any key to close")
+	content += lipgloss.NewStyle().Foreground(paletteColor("textMuted")).Render("press any key to close")
 
 	return panelStyle.Render(content)
 }
@@ -826,23 +837,23 @@ func (m *SessionsModel) getPlanStateColor(state string) string {
 	case "planning":
 		return "#3B82F6"
 	case "draft":
-		return ColorGray
+		return paletteHex("textMuted")
 	case "pending_approval":
 		return "#3B82F6"
 	case "approved":
-		return ColorGreen
+		return paletteHex("success")
 	case "executing":
-		return ColorAmber
+		return paletteHex("warning")
 	case "completed":
-		return ColorGreen
+		return paletteHex("success")
 	case "confirmed":
-		return ColorGreen
+		return paletteHex("success")
 	case "failed":
-		return ColorRed
+		return paletteHex("error")
 	case "cancelled":
-		return ColorGray
+		return paletteHex("textMuted")
 	default:
-		return ColorGray
+		return paletteHex("textMuted")
 	}
 }
 

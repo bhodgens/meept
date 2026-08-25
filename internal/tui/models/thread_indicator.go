@@ -18,14 +18,14 @@ import (
 // needed for display; key-handling and list-toggle are intentionally not
 // wired at this layer (see plan Task 8 Step 2: minimal integration).
 type threadIndicatorState struct {
-	threads      []types.Thread
-	activeIndex  int
-	active       lipgloss.Style
-	inactive     lipgloss.Style
-	topicLabel   lipgloss.Style
-	muted        lipgloss.Style
-	indicator    lipgloss.Style
-	container    lipgloss.Style
+	threads     []types.Thread
+	activeIndex int
+	active      lipgloss.Style
+	inactive    lipgloss.Style
+	topicLabel  lipgloss.Style
+	muted       lipgloss.Style
+	indicator   lipgloss.Style
+	container   lipgloss.Style
 }
 
 // newThreadIndicatorState returns a threadIndicatorState with default styles.

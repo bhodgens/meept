@@ -164,7 +164,7 @@ func (s *SlashAutocomplete) View() string {
 		b.WriteString("\n")
 		hint := "↑/↓ navigate · enter select · esc cancel"
 		if s.data.VisibleCount() > s.data.MaxHeight() {
-			hint += " · " + lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("scrolling")
+			hint += " · " + lipgloss.NewStyle().Foreground(Current().TextMuted).Render("scrolling")
 		}
 		b.WriteString(s.styles.Muted.Render(hint))
 	}

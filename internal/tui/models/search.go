@@ -302,34 +302,34 @@ func (m *SearchModel) View() string {
 func (m *SearchModel) renderUnavailable() string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ColorRed)).
+		BorderForeground(paletteColor("error")).
 		Padding(1, 2).
 		Width(max(m.width-4, 40))
 
 	return style.Render(
-		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("search unavailable") +
+		lipgloss.NewStyle().Foreground(paletteColor("error")).Bold(true).Render("search unavailable") +
 			"\n\n" +
-			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("press esc to go back"),
+			lipgloss.NewStyle().Foreground(paletteColor("textMuted")).Render("press esc to go back"),
 	)
 }
 
 func (m *SearchModel) renderHeader() string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F97316"))
+		Foreground(paletteColor("primary"))
 
 	scopeLabel := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray))
+		Foreground(paletteColor("textMuted"))
 
 	scopeValue := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB")).
+		Foreground(paletteColor("textPrimary")).
 		Bold(true)
 
 	modeLabel := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray))
+		Foreground(paletteColor("textMuted"))
 
 	modeValue := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorAmber))
+		Foreground(paletteColor("warning"))
 
 	currentScope := m.scopes[m.scopeIndex]
 	mode := m.mode
@@ -353,7 +353,7 @@ func (m *SearchModel) renderHeader() string {
 
 func (m *SearchModel) renderResults() string {
 	dividerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#374151"))
+		Foreground(paletteColor("border"))
 
 	resultArea := lipgloss.NewStyle().
 		Width(max(m.width, 40))
@@ -365,14 +365,14 @@ func (m *SearchModel) renderResults() string {
 
 	if m.loading {
 		b.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color(ColorGray)).
+			Foreground(paletteColor("textMuted")).
 			Italic(true).
 			Render("searching..."))
 		return resultArea.Render(b.String())
 	}
 
 	if m.err != nil {
-		errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed))
+		errStyle := lipgloss.NewStyle().Foreground(paletteColor("error"))
 		b.WriteString(errStyle.Render(fmt.Sprintf("error: %v", m.err)))
 		return resultArea.Render(b.String())
 	}
@@ -380,12 +380,12 @@ func (m *SearchModel) renderResults() string {
 	if len(m.results) == 0 {
 		if strings.TrimSpace(m.query.Value()) == "" {
 			b.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color(ColorGray)).
+				Foreground(paletteColor("textMuted")).
 				Italic(true).
 				Render("type to search across sessions, memories, tasks, and plans"))
 		} else {
 			b.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color(ColorGray)).
+				Foreground(paletteColor("textMuted")).
 				Italic(true).
 				Render("no results"))
 		}
@@ -393,23 +393,23 @@ func (m *SearchModel) renderResults() string {
 	}
 
 	typeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F97316")).
+		Foreground(paletteColor("primary")).
 		Bold(true).
 		Width(10)
 
 	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB"))
+		Foreground(paletteColor("textPrimary"))
 
 	relevanceStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorAmber))
+		Foreground(paletteColor("warning"))
 
 	snippetStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		Italic(true).
 		PaddingLeft(12)
 
 	cursorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F97316")).
+		Foreground(paletteColor("primary")).
 		Bold(true)
 
 	for i, r := range m.results {
@@ -440,10 +440,10 @@ func (m *SearchModel) renderResults() string {
 
 func (m *SearchModel) renderFooter() string {
 	dividerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#374151"))
+		Foreground(paletteColor("border"))
 
 	hintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorGray)).
+		Foreground(paletteColor("textMuted")).
 		MarginTop(0)
 
 	var b strings.Builder

@@ -1,5 +1,4 @@
-// Package models provides the view models for the TUI.
-package models
+package palette
 
 import (
 	"image/color"
@@ -10,21 +9,18 @@ import (
 	"github.com/caimlas/meept/theme"
 )
 
-// The models sub-package cannot import the parent tui package (tui imports
-// models), so it resolves theme roles directly from the embedded tokens via
-// this bridge. Like the parent palette, themes are restart-applied: the
-// tokens are parsed once and the active variant is fixed at process start,
-// so the once-guarded lookup needs no synchronization afterwards.
+// The components and prompts sub-packages cannot import the parent tui
+// package (tui imports them), so they resolve theme roles directly from the
+// embedded tokens via this bridge — mirroring models/palette_bridge.go.
+// Like the parent palette, themes are restart-applied: the tokens are parsed
+// once and the active variant is fixed at process start, so the once-guarded
+// lookup needs no synchronization afterwards.
 var (
 	roleOnce  sync.Once
 	roleMap   map[string]string
 	roleParse error
 )
 
-// loadRoles parses the embedded theme tokens exactly once, caching both the
-// result and any parse error. On failure roleMap stays nil and every lookup
-// falls back to the built-in cyberpunk literals — never a panic at init or
-// render time.
 func loadRoles() (map[string]string, error) {
 	roleOnce.Do(func() {
 		tokens, err := theme.Parse(theme.TokensJSON5)
@@ -44,10 +40,10 @@ func loadRoles() (map[string]string, error) {
 
 type themeError struct{ variant string }
 
-func errThemeVariant(variant string) error { return &themeError{variant: variant} }
+func errThemeVariant(variant string) error { return &themeError{variant} }
 
 func (e *themeError) Error() string {
-	return "models: default theme variant " + e.variant + " missing from tokens"
+	return "palette: default theme variant " + e.variant + " missing from tokens"
 }
 
 // roleHex returns the hex value for a theme role in the active variant, or
@@ -60,20 +56,13 @@ func roleHex(role, fallback string) string {
 	return fallback
 }
 
-// paletteColor resolves a named role to a lipgloss color using the shared
+// Current resolves a named theme role to a lipgloss color using the shared
 // theme tokens, with hardcoded cyberpunk fallbacks so rendering never fails
 // even if token parsing is broken. Valid roles are those in
 // theme.FrozenRoles (primary, success, warning, error, info, textMuted,
 // border, textPrimary, surfaceAlt, ...).
-func paletteColor(role string) color.Color {
+func Current(role string) color.Color {
 	return lipgloss.Color(roleHex(role, fallbackRoles[role]))
-}
-
-// paletteHex resolves a named role to its hex string, with the same
-// cyberpunk fallback as paletteColor. For dynamic producers that return
-// role strings consumed by lipgloss.Color(string) call sites.
-func paletteHex(role string) string {
-	return roleHex(role, fallbackRoles[role])
 }
 
 // fallbackRoles mirrors the historical literals that preceded the unified

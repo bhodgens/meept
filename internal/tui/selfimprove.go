@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -31,16 +32,37 @@ type SelfImprovePanel struct {
 	lastAction   string
 }
 
+// si* styles are lazily built so they resolve the runtime palette on first
+// use instead of freezing literals at init time.
 var (
-	siTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7dc4ff"))
-	siFixStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#c0caf5"))
-	siSelStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#9ece6a"))
-	siRiskLow    = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ece6a"))
-	siRiskMed    = lipgloss.NewStyle().Foreground(lipgloss.Color("#e0af68"))
-	siRiskHigh   = lipgloss.NewStyle().Foreground(lipgloss.Color("#f7768e"))
-	siHelpStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#565f89"))
-	siErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#f7768e"))
-	siOkStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ece6a"))
+	siTitleStyle = sync.OnceValue(func() lipgloss.Style {
+		return lipgloss.NewStyle().Bold(true).Foreground(Current().Info) // was #7dc4ff
+	})
+	siFixStyle = sync.OnceValue(func() lipgloss.Style {
+		return lipgloss.NewStyle().Foreground(Current().TextPrimary) // was #c0caf5
+	})
+	siSelStyle = sync.OnceValue(func() lipgloss.Style {
+		return lipgloss.NewStyle().Bold(true).Foreground(Current().Success) // was #9ece6a
+	})
+	siRiskLow = sync.OnceValue(func() lipgloss.Style {
+		return lipgloss.NewStyle().Foreground(Current().Success)
+	})
+	// palette-exempt: #e0af68 (terminal amber family, no exact palette role)
+	siRiskMed = sync.OnceValue(func() lipgloss.Style {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#e0af68")) // palette-exempt
+	})
+	siRiskHigh = sync.OnceValue(func() lipgloss.Style {
+		return lipgloss.NewStyle().Foreground(Current().ErrorC) // was #f7768e
+	})
+	siHelpStyle = sync.OnceValue(func() lipgloss.Style {
+		return lipgloss.NewStyle().Foreground(Current().TextMuted) // was #565f89
+	})
+	siErrorStyle = sync.OnceValue(func() lipgloss.Style {
+		return lipgloss.NewStyle().Foreground(Current().ErrorC)
+	})
+	siOkStyle = sync.OnceValue(func() lipgloss.Style {
+		return lipgloss.NewStyle().Foreground(Current().Success)
+	})
 )
 
 // NewSelfImprovePanel creates a new approval panel.
@@ -166,7 +188,7 @@ func (p *SelfImprovePanel) rejectCurrent() tea.Cmd {
 func (p *SelfImprovePanel) View() tea.View {
 	var b strings.Builder
 
-	b.WriteString(siTitleStyle.Render("self-improve - pending approvals"))
+	b.WriteString(siTitleStyle().Render("self-improve - pending approvals"))
 	b.WriteString("\n")
 
 	if p.loading {
@@ -175,30 +197,30 @@ func (p *SelfImprovePanel) View() tea.View {
 	}
 
 	if p.err != "" {
-		b.WriteString(siErrorStyle.Render("error: " + p.err))
+		b.WriteString(siErrorStyle().Render("error: " + p.err))
 		b.WriteString("\n")
 		return tea.NewView(b.String())
 	}
 
 	if len(p.pendingFixes) == 0 {
-		b.WriteString(siOkStyle.Render("no pending approvals"))
+		b.WriteString(siOkStyle().Render("no pending approvals"))
 		b.WriteString("\n")
 		return tea.NewView(b.String())
 	}
 
 	for i, fix := range p.pendingFixes {
-		style := siFixStyle
+		style := siFixStyle()
 		marker := "  "
 		if i == p.selectedIdx {
-			style = siSelStyle
+			style = siSelStyle()
 			marker = "> "
 		}
-		riskStyle := siRiskLow
+		riskStyle := siRiskLow()
 		switch fix.Risk {
 		case "medium":
-			riskStyle = siRiskMed
+			riskStyle = siRiskMed()
 		case "high":
-			riskStyle = siRiskHigh
+			riskStyle = siRiskHigh()
 		}
 
 		line := fmt.Sprintf("%s%s  [%s]  %s", marker, fix.ID, riskStyle.Render(fix.Risk), fix.File)
@@ -210,11 +232,11 @@ func (p *SelfImprovePanel) View() tea.View {
 	}
 
 	if p.lastAction != "" {
-		b.WriteString(siOkStyle.Render(p.lastAction))
+		b.WriteString(siOkStyle().Render(p.lastAction))
 		b.WriteString("\n")
 	}
 
-	b.WriteString(siHelpStyle.Render("a: approve  r: reject  j/k: navigate  R: refresh"))
+	b.WriteString(siHelpStyle().Render("a: approve  r: reject  j/k: navigate  R: refresh"))
 	b.WriteString("\n")
 
 	return tea.NewView(b.String())

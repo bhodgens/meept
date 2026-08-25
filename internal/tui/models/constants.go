@@ -27,13 +27,9 @@ const (
 	RolePending     = "pending"
 )
 
-// Color constants for TUI rendering.
-const (
-	ColorAmber = "#F59E0B"
-	ColorGreen = "#10B981"
-	ColorRed   = "#EF4444"
-	ColorGray  = "#6B7280"
-)
+// Color constants for TUI rendering were removed by unified theming (L4):
+// colors now come from the shared palette via models' palette_bridge.go
+// (paletteColor/paletteHex) and theme/tokens.json5.
 
 // Status text constants.
 const (
