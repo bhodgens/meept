@@ -130,8 +130,17 @@ func (rm *RefreshManager) refreshOne(ctx context.Context, provider string) {
 		return
 	}
 
-	flowCfg := providerCfg.DeviceFlowConfig()
-	refreshed, err := RefreshTokenRequest(ctx, flowCfg, token.RefreshToken)
+	flowCfg, err := providerCfg.ResolveFlowConfig(ctx)
+	if err != nil {
+		slog.Warn("token refresh: failed to resolve flow config", "provider", provider, "error", err)
+		return
+	}
+	var refreshed *TokenResult
+	if providerCfg.Flow == FlowPKCEPaste {
+		refreshed, err = RefreshAnthropicToken(ctx, providerCfg.ClientIDDefault, token.RefreshToken, providerCfg.RefreshJSON)
+	} else {
+		refreshed, err = RefreshTokenRequest(ctx, flowCfg, token.RefreshToken)
+	}
 	if err != nil {
 		rm.mu.Lock()
 		rm.fails[provider]++

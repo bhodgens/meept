@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -93,6 +94,38 @@ var OAuthProviders = map[string]OAuthProviderConfig{
 		},
 		ProviderID: "google-calendar",
 	},
+	"xai-oauth": {
+		ClientIDDefault: "b1a00492-073a-47ea-816f-4c329264a828",
+		DeviceEP:        "https://auth.x.ai/oauth2/device/code",
+		DiscoveryURL:    "https://auth.x.ai/.well-known/openid-configuration",
+		Scopes:          []string{"openid", "profile", "email", "offline_access", "grok-cli:access", "api:access"},
+		ProviderID:      "xai-oauth",
+		Flow:            FlowDeviceRFC8628,
+		Transport:       llm.TransportOpenAIChat,
+		BaseURL:         "https://api.x.ai/v1",
+	},
+	"openai-codex": {
+		ClientIDDefault:  "app_EMoamEEZ73f0CkXaXp7hrann",
+		DeviceUserCodeEP: "https://auth.openai.com/api/accounts/deviceauth/usercode",
+		DevicePollEP:     "https://auth.openai.com/api/accounts/deviceauth/token",
+		TokenEP:          "https://auth.openai.com/oauth/token",
+		ProviderID:       "openai-codex",
+		Flow:             FlowDeviceCodex,
+		Transport:        llm.TransportCodexResponses,
+		BaseURL:          "https://chatgpt.com/backend-api/codex",
+	},
+	"anthropic-sub": {
+		ClientIDDefault: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+		AuthorizeURL:    "https://claude.ai/oauth/authorize",
+		TokenEP:         "https://platform.claude.com/v1/oauth/token",
+		Scopes:          []string{"org:create_api_key", "user:profile", "user:inference"},
+		ProviderID:      "anthropic-sub",
+		Flow:            FlowPKCEPaste,
+		RefreshJSON:     false,
+		Transport:       llm.TransportAnthropicMessages,
+		BaseURL:         "https://api.anthropic.com",
+		VerifyHint:      "authorize, then paste the code shown",
+	},
 }
 
 // ResolveProviderConfig returns the effective OAuth configuration for a
@@ -128,7 +161,24 @@ func (c *OAuthProviderConfig) DeviceFlowConfig() DeviceFlowConfig {
 		DeviceEP:     c.DeviceEP,
 		TokenEP:      c.TokenEP,
 		Scopes:       c.Scopes,
+		FormEncoded:  c.ProviderID == "xai-oauth",
 	}
+}
+
+// ResolveFlowConfig returns the DeviceFlowConfig for this provider,
+// resolving the token endpoint via OIDC discovery when DiscoveryURL is set.
+func (c *OAuthProviderConfig) ResolveFlowConfig(ctx context.Context) (DeviceFlowConfig, error) {
+	cfg := c.DeviceFlowConfig()
+	if c.DiscoveryURL == "" {
+		return cfg, nil
+	}
+
+	tokenEP, err := ResolveTokenEndpoint(ctx, c.DiscoveryURL)
+	if err != nil {
+		return DeviceFlowConfig{}, fmt.Errorf("resolve token endpoint: %w", err)
+	}
+	cfg.TokenEP = tokenEP
+	return cfg, nil
 }
 
 // RegisteredProviders returns the list of registered OAuth provider IDs.
