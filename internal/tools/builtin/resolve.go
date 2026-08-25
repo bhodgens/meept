@@ -18,6 +18,9 @@ type ResolveTool struct {
 	registry      *PendingChangesRegistry
 	fenceChecker  FenceChecker
 	defaultExpiry time.Duration
+	// journal, when non-nil, receives a JournalEntry for every successful
+	// accept so `meept changes revert <id>` can restore the file later.
+	journal *Journal
 }
 
 // NewResolveTool creates a new resolve tool.
@@ -33,6 +36,16 @@ func NewResolveTool(registry *PendingChangesRegistry) *ResolveTool {
 func (t *ResolveTool) SetFenceChecker(fc FenceChecker) {
 	if fc != nil {
 		t.fenceChecker = fc
+	}
+}
+
+// SetJournal installs the change journal that records every accepted change
+// (pre-image + applied checksum) for later revert. Follows the same typed-nil
+// guard pattern as SetFenceChecker: passing nil is a no-op, keeping resolve
+// usable in journal-less deployments (tests, fallback registries).
+func (t *ResolveTool) SetJournal(j *Journal) {
+	if j != nil {
+		t.journal = j
 	}
 }
 
@@ -225,6 +238,23 @@ func (t *ResolveTool) Execute(ctx context.Context, args map[string]any) (any, er
 			if err := os.WriteFile(change.FilePath, []byte(change.Modified), 0644); err != nil {
 				result.Failed = append(result.Failed, id)
 				continue
+			}
+			// Journal the applied change so it can be reverted later. The
+			// pre-image is the Original the registry already holds; PostSHA
+			// is computed from what was actually written (this also covers
+			// legacy staged changes with empty PreImageSHA256). Journaling is
+			// best-effort: a failed record must not fail an accepted write.
+			if t.journal != nil {
+				if err := t.journal.Record(&JournalEntry{
+					SessionID: change.SessionID,
+					FilePath:  change.FilePath,
+					PreImage:  []byte(change.Original),
+					PostSHA:   sha256Hex(change.Modified),
+					ChangeIDs: []string{change.ID},
+				}); err != nil {
+					slog.Warn("ResolveTool: failed to journal accepted change",
+						"change_id", change.ID, "path", change.FilePath, "error", err)
+				}
 			}
 			result.Accepted = append(result.Accepted, id)
 		} else {

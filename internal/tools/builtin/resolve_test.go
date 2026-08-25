@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -335,3 +336,157 @@ func (r *refusingFenceChecker) CheckCommand(string, string) error {
 }
 
 var _ FenceChecker = (*refusingFenceChecker)(nil)
+
+func newJournalForResolveTest(t *testing.T) *Journal {
+	t.Helper()
+	j, err := NewJournal(JournalConfig{DBPath: filepath.Join(t.TempDir(), "changes.db")}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("NewJournal: %v", err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	return j
+}
+
+// TestResolveTool_AcceptRecordsJournal verifies the accept branch journals the
+// applied change with the pre-image it already holds (Original) and the
+// staged ChangeIDs, so `meept changes revert <id>` can restore it later.
+func TestResolveTool_AcceptRecordsJournal(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	path := filepath.Join(dir, "journaled.txt")
+	original := "original bytes\n"
+	modified := "modified bytes\n"
+
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil { //nolint:gosec // test temp dir
+		t.Fatal(err)
+	}
+	reg := NewPendingChangesRegistry()
+	change, err := reg.StageWrite("sess-j", path, []byte(original), []byte(modified))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	journal := newJournalForResolveTest(t)
+	tool := NewResolveTool(reg)
+	tool.SetJournal(journal)
+
+	resultAny, err := tool.Execute(ctx, map[string]any{
+		"change_ids": []any{change.ID},
+		"action":     "accept",
+	})
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	result := resultAny.(ResolveResult)
+	if len(result.Accepted) != 1 {
+		t.Fatalf("accept failed: %+v", result)
+	}
+
+	entries, err := journal.List("sess-j", 10)
+	if err != nil {
+		t.Fatalf("journal.List: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected exactly one journal entry after accept, got %d", len(entries))
+	}
+	entry := entries[0]
+	if entry.FilePath != path {
+		t.Errorf("entry FilePath=%q, want %q", entry.FilePath, path)
+	}
+	if entry.PostSHA != sha256Hex(modified) {
+		t.Errorf("entry PostSHA=%q, want sha256(modified) %q", entry.PostSHA, sha256Hex(modified))
+	}
+	if len(entry.ChangeIDs) != 1 || entry.ChangeIDs[0] != change.ID {
+		t.Errorf("entry ChangeIDs=%v, want [%s]", entry.ChangeIDs, change.ID)
+	}
+	if entry.SessionID != "sess-j" {
+		t.Errorf("entry SessionID=%q, want sess-j", entry.SessionID)
+
+	}
+
+	// The stored pre-image equals Original — verify via direct DB read.
+	var storedPre []byte
+	if err := journal.db.QueryRow(`SELECT pre_image FROM change_journal WHERE id = ?`, entry.ID).Scan(&storedPre); err != nil {
+		t.Fatalf("read stored pre_image: %v", err)
+	}
+	if string(storedPre) != original {
+		t.Errorf("stored PreImage=%q, want original %q", storedPre, original)
+	}
+}
+
+// TestResolveTool_AcceptLegacyEmptyHashStillRecords covers changes staged
+// before integrity tracking (empty PreImageSHA256): accept proceeds and must
+// still record a journal row with PostSHA computed from the written bytes.
+func TestResolveTool_AcceptLegacyEmptyHashStillRecords(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	path := filepath.Join(dir, "legacy.txt")
+
+	reg := NewPendingChangesRegistry()
+	change, err := reg.StageWrite("sess-legacy", path, nil, []byte("brand new\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	change.PreImageSHA256 = "" // simulate legacy staged change w/o hash
+
+	journal := newJournalForResolveTest(t)
+	tool := NewResolveTool(reg)
+	tool.SetJournal(journal)
+
+	resultAny, err := tool.Execute(ctx, map[string]any{
+		"change_ids": []any{change.ID},
+		"action":     "accept",
+	})
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	result := resultAny.(ResolveResult)
+	if len(result.Accepted) != 1 {
+		t.Fatalf("legacy accept should succeed; got %+v", result)
+	}
+
+	entries, err := journal.List("sess-legacy", 10)
+	if err != nil {
+		t.Fatalf("journal.List: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected one journal entry for legacy accept, got %d", len(entries))
+	}
+	if entries[0].PostSHA != sha256Hex("brand new\n") {
+		t.Errorf("legacy entry PostSHA=%q, want sha256 of written bytes", entries[0].PostSHA)
+	}
+}
+
+// TestResolveTool_NilJournalStillAccepts ensures the typed-nil guard keeps
+// resolve usable without a journal (e.g. tests, fallback registries).
+func TestResolveTool_NilJournalStillAccepts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nojournal.txt")
+	if err := os.WriteFile(path, []byte("a"), 0o644); err != nil { //nolint:gosec // test temp dir
+		t.Fatal(err)
+	}
+	reg := NewPendingChangesRegistry()
+	change, err := reg.StageWrite("sess-nj", path, []byte("a"), []byte("b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewResolveTool(reg)
+	tool.SetJournal(nil) // typed-nil guard must swallow this
+
+	resultAny, err := tool.Execute(context.Background(), map[string]any{
+		"change_ids": []any{change.ID},
+		"action":     "accept",
+	})
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	result := resultAny.(ResolveResult)
+	if len(result.Accepted) != 1 {
+		t.Fatalf("accept without journal should succeed; got %+v", result)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "b" {
+		t.Errorf("file content=%q, want modified \"b\"", data)
+	}
+}
