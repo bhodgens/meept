@@ -68,37 +68,39 @@ meept status
 - Registered RPC methods
 - Bus statistics
 
-### `meept sessions` - Session Management
+### `meept session` - Session Management
 
-List and manage chat sessions.
+List and manage chat sessions. (`meept sessions` works as an alias.)
 
 ```bash
 # List sessions
-meept sessions list
+meept session list
 
 # Create new session
-meept sessions create
+meept session create
 
 # Attach to existing session
-meept sessions attach <session-id>
+meept session attach <session-id>
+
+# Inspect
+meept session get <session-id>
+meept session messages <session-id>
+meept session trace <session-id>
+
+# Thread management within a session (see also: meept thread)
+meept session needs-attention
 ```
 
-### `meept jobs` - Job Management
+### `meept jobs` - Scheduled Jobs
 
-Manage scheduled and background jobs.
+List scheduled jobs. (`meept tasks` is an alias.) Job scheduling is configured in `meept.json5` or via AI employees; there are no `jobs run/status/cancel` subcommands — use `meept queue status` for queue state.
 
 ```bash
-# List jobs
-meept jobs list
+# List scheduled jobs
+meept jobs
 
-# Get job status
-meept jobs status <job-id>
-
-# Run job immediately
-meept jobs run <job-id>
-
-# Cancel job
-meept jobs cancel <job-id>
+# Queue state
+meept queue status
 ```
 
 ### `meept memory` - Memory Operations
@@ -106,32 +108,45 @@ meept jobs cancel <job-id>
 Search and manage long-term memory.
 
 ```bash
+# List recent memories
+meept memory
+
 # Search memories
-meept memory search "authentication patterns"
+meept memory "authentication patterns"
 
-# Memory statistics
-meept memory stats
+# Vector search operations
+meept memory vector --help
 
-# Store memory
-meept memory store --content "Important decision" --type episodic
+# Epistemic review workflow (auto-claims)
+meept memory review          # list pending claims
+meept memory promote <id>    # promote an auto-claim to confirmed
+meept memory reject <id>     # reject an auto-claim
+meept memory supersede <id>  # mark a claim superseded by a newer one
+
+# Export
+meept memory export
 ```
 
-### `meept tasks` - Task Management
+Note: there is no `memory stats` subcommand; statistics appear via the analytics commands.
 
-Manage background tasks.
+### `meept task` - Task Management
+
+Manage background tasks. (`meept tasks` is an alias for `meept jobs`, which lists scheduled jobs — not the same thing.)
 
 ```bash
 # List tasks
-meept tasks list
+meept task list
 
 # Create task
-meept tasks create --name "Fix bug" --description "Fix authentication bug"
+meept task create --name "Fix bug" --description "Fix authentication bug"
 
 # Get task details
-meept tasks get <task-id>
+meept task get <task-id>
 
-# Update task
-meept tasks update <task-id> --status completed
+# Delete / link / unlink
+meept task delete <task-id>
+meept task link <task-id> <session-id>
+meept task unlink <task-id>
 ```
 
 ### `meept selfimprove` - Self-Improvement System
@@ -178,14 +193,14 @@ Running `meept chat` with no message argument opens the interactive TUI. In addi
 
 **Keybindings:**
 
-- `ctl-x o` — open the mcp servers menu (same as the `/mcp` slash command).
-- `ctl-x m` — open the memory menu.
-- `esc` — close the active menu or overlay.
+- `ctrl+x` — enter command mode.
+- `esc` — close the active menu or overlay (double `esc`/`ctrl+c` quits).
 
-**Slash Commands:**
+**Slash Commands** (type `/` in the input for autocomplete; full list via `/help`):
 
-- `/mcp` — open the mcp servers menu. Columns shown: `en` (enabled toggle glyph), `server`, `status`, `reqs`, `errors`, `description`. Press `e` to toggle enabled on the selected row, `r` to force a refresh from the daemon, arrow keys to move selection, and `esc` to close.
-- `/memory` — open the memory menu.
+Core built-ins include: `/help`, `/new`, `/clear`, `/retry`, `/undo`, `/usage`, `/stop`, `/status`, `/vim`, `/session`, `/task`, `/tasks`, `/cancel`, `/amend`, `/interrupt`, `/diff`, `/model`, `/compact`, `/edit`, `/plan`, `/review`, `/project`, `/mcp`, `/skill`. Skills are also invocable as slash commands by name.
+
+Note: MCP server enable/disable is managed through the interactive config editor (`meept config`, section "mcp servers") or HTTP — not a TUI menu.
 
 See [tool routing: mcp default catalog](../workflows/tool-routing.md#mcp-default-catalog) for details on the catalog the menu manages.
 
@@ -263,11 +278,11 @@ Manage plans through their lifecycle: creation, approval, execution tracking, an
 # List all plans
 meept plans list
 
-# Filter by state
-meept plans list --state pending_approval
-
 # Filter by project
 meept plans list --project my-app
+
+# JSON output
+meept plans list --json
 
 # Show plan details
 meept plans show plan-a1b2c3d4
@@ -293,19 +308,12 @@ meept plans confirm plan-a1b2c3d4 --comment "All deliverables verified"
 - `reject <id>` - Reject a pending plan with optional `--comment`
 - `confirm <id>` - Confirm sign-off on a completed plan
 
-### `meept tools` - Tool Management
+### `meept tools` - Tool Management (removed)
 
-List registered tools.
+The `meept tools` CLI command has been removed. To inspect available tools:
 
-```bash
-meept tools
-```
-
-**Shows:**
-- Tool names and descriptions
-- Parameter schemas
-- Risk levels
-- Agent access
+- TUI: `/help` lists slash commands; tool activity appears inline during agent runs.
+- MCP: run `meept mcp-chat-server` to expose meept's tools to an external agent platform.
 
 ### `meept daemon` - Daemon Management
 
@@ -413,6 +421,55 @@ meept help chat
 meept help status
 ```
 
+## Other Commands (Quick Reference)
+
+Verified against the binary. Run `meept <command> --help` for flags.
+
+| Command | Subcommands | Purpose |
+|---------|-------------|---------|
+| `meept analytics` | errors, export, models, summary | Agent performance and model metrics |
+| `meept backup` | list, push | Database backups |
+| `meept benchmark` | — | SWE-bench-style regression benchmarks |
+| `meept bots` | — | Removed; see `meept agents` |
+| `meept branch` | list, navigate, tree, summary | Session branches (disabled by default) |
+| `meept cache` | clear, inspect, invalidate, status | Token cache management |
+| `meept calendar` | auth, today | Google Calendar integration |
+| `meept changes` | list, revert | Pending-change staging review |
+| `meept cluster` | debug, init, join, keygen, leave, remote, start, status | P2P cluster mesh |
+| `meept config` | get, list, oauth, set, sync | Config editor + dot-notation get/set (`rendering.ui_theme`, `llm.default_model`, …) |
+| `meept daemon` | restart, start, status, stop | Daemon lifecycle |
+| `meept dispatch` | — | Dispatch tasks to cluster nodes |
+| `meept halo` | — | HALO-style trace analysis |
+| `meept improvements` | apply, list, skip | Improvement proposal workflow |
+| `meept init` | — | Initialize AGENTS.md files for a project |
+| `meept instructions` | — | Manage user instructions |
+| `meept jobs` | — (aliases: `tasks`) | List scheduled jobs |
+| `meept learning` | auto-train, consolidate, dataset-stats, feedback, list, snapshot, status, train | LoRA learning pipeline |
+| `meept memory` | export, promote, reject, review, supersede, vector (+ root search) | Memory operations |
+| `meept migrate` | — | Migrate local data stores to dual-DB layout |
+| `meept mcp-chat-server` | — | Expose meept as an MCP server |
+| `meept plans` | approve, confirm, list, reject, show | Plan lifecycle |
+| `meept projects` | add, list, remove, status, sync | Project registry and worktrees |
+| `meept prompts` | edit, list, show, validate | Prompt templates |
+| `meept q` | analyze, status | Q Agent meta-optimization |
+| `meept queue` | list, retry, status | Job queue |
+| `meept routing` | by-model, recent | Inspect model routing decisions |
+| `meept runtime` | restart, start, status, stop | Local LLM runtime processes |
+| `meept selfimprove` | analyze, apply, detect, full-cycle, generate-fixes, reject, status, validate | Self-improvement cycle |
+| `meept session` | attach, create, delete, detach, get, list, messages, needs-attention, trace | Chat sessions (alias: `sessions`) |
+| `meept shadow` | adapters, examples, export, export-db, status | Shadow training |
+| `meept skills` | archive, evolve, gaps, history, list, restore, run, show, stats | Skill system + closed-loop evolution |
+| `meept status` | — | Daemon health |
+| `meept sync` | pull, status | Peer backup sync |
+| `meept task` | create, delete, get, link, list, unlink | Background tasks |
+| `meept templates` | clear, invoke, list, show | Prompt templates |
+| `meept thread` | current, delete, list, new, switch | Conversation threads in a session |
+| `meept token` | generate, list, revoke | API tokens |
+| `meept tts` | voices | Text-to-speech voices |
+| `meept workers` | list, scale, status | Worker pool |
+
+Developer-only: `meept dev` (config/model/test helpers), `meept completion` (shell completions), `meept version`.
+
 ## Examples
 
 ### Interactive Development Session
@@ -427,22 +484,18 @@ meept status
 # Start coding session
 meept chat "Please help me implement authentication middleware"
 ```
-
-### Scheduled Task
-
-```bash
-# Create scheduled backup job
-meept jobs create --name "Daily backup" --schedule "0 2 * * *" --type shell --command "/usr/bin/backup.sh"
+# List jobs
+meept jobs
 
 # Check job status
-meept jobs list
+meept queue status
 ```
 
 ### Memory Search
 
 ```bash
 # Search for past authentication work
-meept memory search "authentication" --type task --limit 10
+meept memory "authentication"
 ```
 
 ## Exit Codes

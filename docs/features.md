@@ -1650,12 +1650,11 @@ retention = 30
 ./bin/meept branch summary <session> # Show branch summaries
 
 # Jobs
-./bin/meept jobs list              # List jobs
-./bin/meept jobs run <job-id>      # Run job immediately
+./bin/meept jobs                   # List scheduled jobs
 
 # Memory
-./bin/meept memory search "query"  # Search memories
-./bin/meept memory stats           # Memory statistics
+./bin/meept memory "query"         # Search memories
+./bin/meept memory review          # Review pending epistemic claims
 
 # Q Agent
 ./bin/meept q status               # Q Agent status
@@ -1665,9 +1664,9 @@ retention = 30
 ./bin/meept selfimprove detect     # Detect issues
 ./bin/meept selfimprove full-cycle # Run full improvement cycle
 
-# Models
-./bin/meept models setup           # Interactive model configuration
-./bin/meept models list            # List configured models
+# Model configuration is part of the interactive config editor
+./bin/meept config                 # sections include models/llm
+./bin/meept config get llm.default_model
 
 # AI Employees (replaces removed `meept bots`)
 ./bin/meept agents list            # List employees, status, tier, drift

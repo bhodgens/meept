@@ -89,7 +89,7 @@ The agents operate independently to their task (workorder) and report results an
 
 While also able to consume MCP servers via MCP clients, meept also has the ability to be an MCP server for another agent harness.
 
-Meept ships a default catalog of 21 preconfigured MCP client servers in `config/mcp_servers.json5` (4 enabled by default, the rest opt-in). Toggle per-server from the TUI (`ctl-x o`), menubar tools tab, or HTTP. See [tool routing: mcp default catalog](docs/workflows/tool-routing.md#mcp-default-catalog). 
+Meept ships a default catalog of 20 preconfigured MCP client servers in `config/mcp_servers.json5` (6 enabled by default, the rest opt-in). Toggle per-server from the interactive config editor (`meept config`, "mcp servers" section), the menubar tools tab, or HTTP. See [tool routing: mcp default catalog](docs/workflows/tool-routing.md#mcp-default-catalog).
 
 #### Aggressive Memory Retention and Recall 
 
@@ -243,10 +243,9 @@ Learn more: [AI Employees](docs/workflows/employees.md)
 # 1. Clone and build
 git clone https://github.com/caimlas/meept.git
 cd meept
-make go-build-all
-
-# 2. Configure (interactive setup)
-./bin/meept models setup
+# 2. Configure (copy templates, then edit or use the interactive config TUI)
+cp config/models.json5 ~/.meept/models.json5   # add your API keys
+./bin/meept config                              # interactive config editor
 
 # 3. Start daemon
 ./bin/meept-daemon -f
@@ -321,12 +320,11 @@ For complete feature details, see [Features](./docs/features.md).
 ./bin/meept status                         # Daemon health
 
 # Agent inspection
-./bin/meept agents                         # List agents
-./bin/meept tools                          # List tools
+./bin/meept agents                         # List employees, status, tier, drift
 
 # Jobs and memory
-./bin/meept jobs list                      # Scheduled jobs
-./bin/meept memory search "auth bug"       # Search memory
+./bin/meept jobs                           # Scheduled jobs
+./bin/meept memory "auth bug"              # Search memory
 
 # Q Agent (meta-optimization)
 ./bin/meept q status                       # Q Agent state
@@ -340,8 +338,8 @@ For complete feature details, see [Features](./docs/features.md).
 ./bin/meept skills restore <name> --version=N  # Restore specific version
 ./bin/meept skills history <name>          # Version history
 ./bin/meept skills evolve                  # Trigger evolver cycle
-./bin/meept clawskills list                # Installed skills
-./bin/meept clawskills search "kubernetes" # Search marketplace
+./bin/meept skills gaps                    # Show skill coverage gaps
+./bin/meept skills run <name> <input>      # Execute a skill directly
 
 # AI Employees (replaces `meept bots`)
 ./bin/meept agents list                    # List employees, status, tier, drift

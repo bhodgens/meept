@@ -66,10 +66,10 @@ The `cua-driver` entry (category `automation`) adds background desktop computer-
 Three surfaces toggle the `enabled` flag:
 
 1. **Edit the JSON5 file directly** — set `enabled: true` on the entry and fill in any required env vars, then restart the daemon (or trigger a config reload).
-2. **TUI** — press `ctl-x o` (or type `/mcp`) to open the mcp servers menu. Select a row and press `e` to toggle enabled. The toggle persists and reloads immediately.
+2. **Interactive config editor** — run `meept config` and open the "mcp servers" section to edit entries; save writes atomically via the same path.
 3. **Menubar app** — open settings, go to the "tools" tab, and flip the toggle on a row.
 
-Toggling via TUI or menubar writes the change atomically to `~/.meept/mcp_servers.json5` (via `SaveMCPConfig`'s temp-file + rename) and triggers `Manager.Reload`, which starts newly-enabled servers and stops newly-disabled ones without restarting the daemon.
+Toggling via the config editor or menubar writes the change atomically to `~/.meept/mcp_servers.json5` (via `SaveMCPConfig`'s temp-file + rename) and triggers `Manager.Reload`, which starts newly-enabled servers and stops newly-disabled ones without restarting the daemon.
 
 ### Env Var Placeholders (`${VAR}`)
 
@@ -117,7 +117,7 @@ The catalog is reachable from several surfaces:
 
 - RPC: `mcp.list` returns all `ServerStatusEntry` items; `mcp.set_enabled` toggles one server.
 - HTTP: `GET /api/v1/mcp/servers` and `PUT /api/v1/mcp/servers/{name}/enabled` (see [http-api reference](../reference/http-api.md)).
-- TUI: `ctl-x o` keybinding or `/mcp` slash command.
+- Config editor: `meept config` → "mcp servers" section.
 - Menubar: settings → tools tab.
 
 ### Agent-Tool Matching

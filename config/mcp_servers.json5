@@ -7,7 +7,7 @@
 //
 // how to enable a server:
 //   1. edit this file: set `enabled: true` on the entry, fill in env vars.
-//   2. or use the tui: press `ctl-x o` (mcp menu), select server, press `e`.
+//   2. or use the interactive config editor: `meept config` → "mcp servers".
 //   3. or use the menubar app: settings → tools tab, toggle the switch.
 //
 // env vars use `${VAR}` placeholders. export them in your shell before starting
@@ -17,6 +17,18 @@
 //
 // ${VAR} placeholders are never expanded by meept in this file; they are passed
 // through to the subprocess environment at launch time.
+//
+// declared secrets (see the [secrets] section of meept config): env values of
+// the exact form "${secret:<name>}" are replaced with the placeholder token
+// "MEEPT_SECRET:<name>" when the server subprocess launches — never with the
+// real value. declare the secret once in meept.toml:
+//   [secrets.sources.github_api]
+//   kind = "env"
+//   name = "GITHUB_TOKEN"        # loaded from this env var at daemon startup
+// then reference it here:
+//   "env": { "GITHUB_TOKEN": "${secret:github_api}" }
+// the subprocess sees only MEEPT_SECRET:github_api; an enabled egress proxy
+// resolves it for allowlisted hosts. any other ${...} form is untouched.
 //
 // categories: vcs, search, data, automation, browser, infra, messaging, coding,
 //             network, reasoning
