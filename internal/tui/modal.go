@@ -26,6 +26,7 @@ const (
 	ModalFuzzyFinder
 	ModalBranchPicker
 	ModalProjectPicker
+	ModalPendingChanges
 )
 
 // ModalItem represents an item in a modal menu.

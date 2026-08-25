@@ -33,6 +33,7 @@ import (
 	"github.com/caimlas/meept/internal/mcp"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/services"
+	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/pkg/constants"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
@@ -183,6 +184,14 @@ type Server struct {
 	// dispatchSubmitter handles cross-daemon task dispatch (optional).
 	// When nil, dispatch endpoints return 503.
 	dispatchSubmitter DispatchSubmitter
+
+	// Change review API (optional, set via WithChangesAPI): exposes the
+	// pending changes registry and change journal under /api/v1/* for
+	// human review (TUI modal, Flutter panel). Nil registry means the
+	// routes answer 503.
+	changesRegistry *builtin.PendingChangesRegistry
+	changesResolve  *builtin.ResolveTool
+	changesJournal  *builtin.Journal
 }
 
 // AgentInfo describes an agent for listing.
@@ -818,6 +827,27 @@ func WithDispatchSubmitter(ds DispatchSubmitter) ServerOption {
 	}
 }
 
+// WithChangesAPI enables the change-review endpoints under /api/v1/*
+// (pending change list/accept/reject and journal list/revert). The
+// registry holds staged writes, resolveTool supplies the shared accept
+// path (fence + drift check + journal record), and journal backs the
+// journal routes; a nil journal disables only the journal routes.
+// Routes inherit the server's authentication middleware when RequireAuth
+// is enabled. Typed-nil guards per the setter convention.
+func WithChangesAPI(registry *builtin.PendingChangesRegistry, resolveTool *builtin.ResolveTool, journal *builtin.Journal) ServerOption {
+	return func(s *Server) {
+		if registry != nil {
+			s.changesRegistry = registry
+		}
+		if resolveTool != nil {
+			s.changesResolve = resolveTool
+		}
+		if journal != nil {
+			s.changesJournal = journal
+		}
+	}
+}
+
 // SetDispatchSubmitter sets the dispatch submitter at runtime. Nil-guarded
 // per CLAUDE.md setter convention.
 func (s *Server) SetDispatchSubmitter(ds DispatchSubmitter) {
@@ -1180,6 +1210,14 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/sessions/{id}/compact", s.handleSessionCompact)
 	mux.HandleFunc("GET /api/v1/sessions/{id}/designation", s.handleSessionDesignationGet)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/acknowledge", s.handleSessionAcknowledge)
+
+	// Change review endpoints (containment leaf 07): pending changes staged
+	// by write tools for human review, and the journal of applied changes.
+	mux.HandleFunc("GET /api/v1/sessions/{sid}/pending-changes", s.handleListPendingChanges)
+	mux.HandleFunc("POST /api/v1/pending-changes/{id}/accept", s.handleAcceptPendingChange)
+	mux.HandleFunc("POST /api/v1/pending-changes/{id}/reject", s.handleRejectPendingChange)
+	mux.HandleFunc("GET /api/v1/changes/journal", s.handleListJournal)
+	mux.HandleFunc("POST /api/v1/changes/journal/{id}/revert", s.handleRevertJournalEntry)
 
 	// Thread endpoints (thread-based context partitioning)
 	mux.HandleFunc("GET /api/v1/sessions/{id}/threads", s.handleThreadList)

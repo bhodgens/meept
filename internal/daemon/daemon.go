@@ -38,6 +38,7 @@ import (
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/internal/templates"
+	"github.com/caimlas/meept/internal/tools/builtin"
 	mcp "github.com/caimlas/meept/internal/tools/mcp"
 	"github.com/caimlas/meept/internal/worker"
 	"github.com/caimlas/meept/pkg/models"
@@ -858,6 +859,23 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			logger.Info("Project RPC handlers registered")
 		}
 
+		// Change review handlers (changes.*): the TUI's pending-changes
+		// modal and journal view call these over the socket; they share the
+		// same accept path (ResolveTool.AcceptChange) and journal as the
+		// HTTP /api/v1 surface (containment leaf 07).
+		if components.PendingChanges != nil {
+			var resolveTool *builtin.ResolveTool
+			if components.ToolRegistry != nil {
+				if tool := components.ToolRegistry.Get("resolve"); tool != nil {
+					if rt, ok := tool.(*builtin.ResolveTool); ok {
+						resolveTool = rt
+					}
+				}
+			}
+			registerChangesRPCHandlers(rpcServer, components.PendingChanges, resolveTool, components.ChangeJournal)
+			logger.Info("Change review RPC handlers registered", "journal_enabled", components.ChangeJournal != nil)
+		}
+
 		// Employee (AI Employee) management handlers.
 		//
 		// Per spec line 529 ("Existing bot.* methods removed — hard
@@ -950,6 +968,23 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			if components.PTYManager != nil {
 				httpOpts = append(httpOpts, http.WithPTY(http.NewPTYHandler(components.PTYManager, logger)))
 				logger.Info("PTY session endpoints enabled", "path", "/api/v1/pty/*")
+			}
+
+			// Change review endpoints: pending change list/accept/reject and
+			// journal list/revert (containment leaf 07). Reuses the same
+			// ResolveTool accept path as the changes.* RPC handlers so HTTP
+			// and TUI review surfaces behave identically.
+			if components.PendingChanges != nil {
+				var changesResolveTool *builtin.ResolveTool
+				if components.ToolRegistry != nil {
+					if tool := components.ToolRegistry.Get("resolve"); tool != nil {
+						if rt, ok := tool.(*builtin.ResolveTool); ok {
+							changesResolveTool = rt
+						}
+					}
+				}
+				httpOpts = append(httpOpts, http.WithChangesAPI(components.PendingChanges, changesResolveTool, components.ChangeJournal))
+				logger.Info("Change review HTTP endpoints enabled", "path", "/api/v1/pending-changes, /api/v1/changes/journal")
 			}
 
 			var metricsService interface {

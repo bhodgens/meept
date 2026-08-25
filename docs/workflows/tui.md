@@ -11,6 +11,7 @@ The daemon exposes RPC + HTTP; the TUI is the primary interactive client for ter
 ## Behavior
 
 - **Views** (`internal/tui/app.go`): `ViewChat`, `ViewSessions`, `ViewTasks`, `ViewPlans`, `ViewAgents`, `ViewSearch`. Tab-switching via number keys; `?` for help.
+- **Pending changes modal** (`internal/tui/modals/pending_changes.go`): `ctrl+d` lists staged changes of the current session (via `changes.*` RPC); `j`/`k` navigate, `v` views the full diff, `a` accepts, `r` rejects, `esc` closes. Status bar shows a count indicator while changes await review. See [change review](change-review.md).
 - **Chat view** (`internal/tui/models/chat.go`): message rendering, input textarea, in-session find via `ctrl+f` (Spec A). Find bar supports case-sensitive (`alt+c`), regex (`alt+r`), prev/next (`shift+enter`/`enter`), and ANSI highlighting.
 - **Sessions view** (`internal/tui/models/sessions.go`): list sessions, switch, delete. Press `f` to open global search.
 - **Search view** (`internal/tui/models/search.go`): debounced semantic search (250ms) across all scopes. Scope cycling via `tab`, navigate via `up`/`down`/`j`/`k`, open via `enter`, close via `esc`.

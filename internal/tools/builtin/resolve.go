@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,6 +12,14 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
 )
+
+// ErrChangeNotFound indicates no pending change matches the requested ID.
+var ErrChangeNotFound = errors.New("pending change not found")
+
+// ErrChangeDrift indicates the on-disk file changed after the change was
+// staged, so applying it would clobber newer edits. Callers map this to a
+// conflict response (HTTP 409) and keep the change staged for re-resolution.
+var ErrChangeDrift = errors.New("file changed since staging")
 
 // ResolveTool allows accepting or rejecting pending file changes.
 type ResolveTool struct {
@@ -47,6 +56,13 @@ func (t *ResolveTool) SetJournal(j *Journal) {
 	if j != nil {
 		t.journal = j
 	}
+}
+
+// FenceChecker returns the installed fence checker, or nil when none is set.
+// The HTTP change-review surface reuses this so journal reverts enforce the
+// same path policy as accepts.
+func (t *ResolveTool) FenceChecker() FenceChecker {
+	return t.fenceChecker
 }
 
 func (t *ResolveTool) Name() string { return "resolve" }
@@ -146,6 +162,87 @@ func (t *ResolveTool) verifyPreImage(change *PendingChange) (bool, error) {
 	}
 }
 
+// AcceptChange applies one staged pending change using the same logic as
+// the resolve tool's accept branch: fence re-validation at write time,
+// pre-image drift verification, write of the staged Modified content,
+// best-effort journal recording, and removal from the registry.
+//
+// This is the shared accept path — both the resolve tool (agent-driven) and
+// the HTTP/TUI review surfaces (human-driven) call it, so accept semantics
+// can never diverge between surfaces.
+//
+// Errors:
+//   - ErrChangeNotFound: no change with this ID is staged.
+//   - ErrChangeDrift (wrapped with short hashes): the on-disk file changed
+//     after staging; the change stays registered for re-resolution.
+//   - any other error: fence refusal, unreadable file, or write failure; the
+//     change likewise stays registered.
+//
+// Returns the applied file path on success.
+func (t *ResolveTool) AcceptChange(id string) (string, error) {
+	change, ok := t.registry.Get(id)
+	if !ok {
+		return "", fmt.Errorf("%w: %s", ErrChangeNotFound, id)
+	}
+
+	// Re-validate the staged file path against the fence at write time.
+	// The path was checked at registration, but configuration may have
+	// changed or future code paths may bypass that check.
+	if t.fenceChecker != nil {
+		if err := t.fenceChecker.CheckPath(change.FilePath, "write"); err != nil {
+			return change.FilePath, fmt.Errorf("fence refused accept of %s: %w", change.FilePath, err)
+		}
+	}
+
+	// Pre-image integrity check: refuse to apply when the on-disk file
+	// drifted after the change was staged. See verifyPreImage for the
+	// decision table (clean / already-applied / legacy / drift).
+	drifted, err := t.verifyPreImage(change)
+	if err != nil {
+		slog.Warn("ResolveTool: pre-image verification failed", "change_id", change.ID, "error", err)
+		return change.FilePath, fmt.Errorf("pre-image verification failed for %s: %w", change.FilePath, err)
+	}
+	if drifted {
+		stagedShort := shortHash(change.PreImageSHA256)
+		currentShort := ""
+		if data, readErr := os.ReadFile(change.FilePath); readErr == nil {
+			currentShort = shortHash(sha256Hex(string(data)))
+		}
+		refusal := fmt.Errorf(
+			"%w (staged pre-image %s… != current file %s…) — refusing to overwrite; re-stage against current content",
+			ErrChangeDrift, stagedShort, currentShort,
+		)
+		slog.Warn("ResolveTool: "+refusal.Error(), "change_id", change.ID, "path", change.FilePath)
+		return change.FilePath, refusal
+	}
+
+	// Write the modified content to the file.
+	if err := os.WriteFile(change.FilePath, []byte(change.Modified), 0644); err != nil {
+		return change.FilePath, fmt.Errorf("write accepted change to %s: %w", change.FilePath, err)
+	}
+
+	// Journal the applied change so it can be reverted later. The pre-image
+	// is the Original the registry already holds; PostSHA is computed from
+	// what was actually written (this also covers legacy staged changes
+	// with empty PreImageSHA256). Journaling is best-effort: a failed
+	// record must not fail an accepted write.
+	if t.journal != nil {
+		if err := t.journal.Record(&JournalEntry{
+			SessionID: change.SessionID,
+			FilePath:  change.FilePath,
+			PreImage:  []byte(change.Original),
+			PostSHA:   sha256Hex(change.Modified),
+			ChangeIDs: []string{change.ID},
+		}); err != nil {
+			slog.Warn("ResolveTool: failed to journal accepted change",
+				"change_id", change.ID, "path", change.FilePath, "error", err)
+		}
+	}
+
+	t.registry.Remove(id)
+	return change.FilePath, nil
+}
+
 func (t *ResolveTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	changeIDsRaw, _ := args["change_ids"].([]any)
 	if len(changeIDsRaw) == 0 {
@@ -194,67 +291,22 @@ func (t *ResolveTool) Execute(ctx context.Context, args map[string]any) (any, er
 	// Process each change
 	refusalNotes := make([]string, 0)
 	for _, id := range finalIDs {
-		change, ok := t.registry.Get(id)
-		if !ok {
+		if _, ok := t.registry.Get(id); !ok {
 			result.Failed = append(result.Failed, id)
 			continue
 		}
 
 		if action == "accept" {
-			// Re-validate the staged file path against the fence at write time.
-			// The path was checked at registration, but configuration may have
-			// changed or future code paths may bypass that check.
-			if t.fenceChecker != nil {
-				if err := t.fenceChecker.CheckPath(change.FilePath, "write"); err != nil {
-					result.Failed = append(result.Failed, id)
-					continue
-				}
-			}
-			// Pre-image integrity check: refuse to apply when the on-disk file
-			// drifted after the change was staged. See verifyPreImage for the
-			// decision table (clean / already-applied / legacy / drift).
-			drifted, err := t.verifyPreImage(change)
-			if err != nil {
-				slog.Warn("ResolveTool: pre-image verification failed", "change_id", change.ID, "error", err)
+			// Shared accept path (fence re-validation, drift check, write,
+			// journal, registry removal) — the same AcceptChange the
+			// HTTP/TUI review surfaces call, so accept semantics never
+			// diverge between agent-driven and human-driven resolution.
+			if _, err := t.AcceptChange(id); err != nil {
 				result.Failed = append(result.Failed, id)
-				continue
-			}
-			if drifted {
-				stagedShort := shortHash(change.PreImageSHA256)
-				currentShort := ""
-				if data, readErr := os.ReadFile(change.FilePath); readErr == nil {
-					currentShort = shortHash(sha256Hex(string(data)))
+				if errors.Is(err, ErrChangeDrift) {
+					refusalNotes = append(refusalNotes, fmt.Sprintf("%s: %s", id, err.Error()))
 				}
-				refusal := fmt.Sprintf(
-					"file changed since staging (staged pre-image %s… != current file %s…) — refusing to overwrite; re-stage against current content",
-					stagedShort, currentShort,
-				)
-				slog.Warn("ResolveTool: "+refusal, "change_id", change.ID, "path", change.FilePath)
-				refusalNotes = append(refusalNotes, fmt.Sprintf("%s: %s", id, refusal))
-				result.Failed = append(result.Failed, id)
 				continue
-			}
-			// Write the modified content to the file
-			if err := os.WriteFile(change.FilePath, []byte(change.Modified), 0644); err != nil {
-				result.Failed = append(result.Failed, id)
-				continue
-			}
-			// Journal the applied change so it can be reverted later. The
-			// pre-image is the Original the registry already holds; PostSHA
-			// is computed from what was actually written (this also covers
-			// legacy staged changes with empty PreImageSHA256). Journaling is
-			// best-effort: a failed record must not fail an accepted write.
-			if t.journal != nil {
-				if err := t.journal.Record(&JournalEntry{
-					SessionID: change.SessionID,
-					FilePath:  change.FilePath,
-					PreImage:  []byte(change.Original),
-					PostSHA:   sha256Hex(change.Modified),
-					ChangeIDs: []string{change.ID},
-				}); err != nil {
-					slog.Warn("ResolveTool: failed to journal accepted change",
-						"change_id", change.ID, "path", change.FilePath, "error", err)
-				}
 			}
 			result.Accepted = append(result.Accepted, id)
 		} else {

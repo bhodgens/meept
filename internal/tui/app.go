@@ -20,6 +20,7 @@ import (
 	"github.com/caimlas/meept/internal/stt"
 	"github.com/caimlas/meept/internal/tts"
 	"github.com/caimlas/meept/internal/tui/components"
+	"github.com/caimlas/meept/internal/tui/modals"
 	"github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/internal/tui/viz"
@@ -128,14 +129,16 @@ type App struct {
 	ttsManager *tts.Manager
 
 	// Modal state
-	activeModal    ModalType
-	commandPalette *Modal
-	sessionPicker  *SessionPickerModal
-	sessionRename  *SessionRenameModal
-	confirmModal   *ConfirmModal
-	fuzzyFinder    *FuzzyFinderModal
-	branchPicker   *BranchPickerModal
-	projectPicker  *ProjectPickerModal
+	activeModal         ModalType
+	commandPalette      *Modal
+	sessionPicker       *SessionPickerModal
+	sessionRename       *SessionRenameModal
+	confirmModal        *ConfirmModal
+	fuzzyFinder         *FuzzyFinderModal
+	branchPicker        *BranchPickerModal
+	projectPicker       *ProjectPickerModal
+	pendingChangesModal *modals.PendingChangesModal
+	pendingChangesCount int // status bar indicator (0 hides it)
 
 	// Current session
 	currentSession *types.Session
@@ -162,9 +165,9 @@ type App struct {
 	statusMessage     string
 	statusMessageTime time.Time
 
-	// Double-press tracking for Ctrl-C/Ctrl-D
+	// Double-press tracking for Ctrl-C (Ctrl-D opens the pending changes
+	// modal instead of quitting)
 	lastCtrlC      time.Time
-	lastCtrlD      time.Time
 	doublePressTTL time.Duration
 
 	// Tab flash indicator (shows notification dot on tab)
@@ -316,6 +319,7 @@ func NewApp(socketPath string, cwd string) *App {
 		app.branchPicker = NewBranchPickerModal(styles, rpc)
 	}
 	app.projectPicker = NewProjectPickerModal(styles, rpc)
+	app.pendingChangesModal = modals.NewPendingChangesModal(&changesRPCAPI{rpc: rpc})
 
 	// Initialize slash autocomplete
 	app.slashAutocomplete = NewSlashAutocomplete(styles)
@@ -529,6 +533,7 @@ func (a *App) Init() tea.Cmd {
 	return tea.Batch(
 		a.connectDaemon,
 		a.loadSession,
+		a.pendingChangesTick(),
 	)
 }
 
@@ -766,26 +771,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 
-		// Handle Ctrl+D - double-press to exit
+		// Handle Ctrl+D - open the pending changes review modal
+		// (containment leaf 07). The former double-press-to-exit binding
+		// moves entirely to ctrl+c so this key can serve the review
+		// surface; both actions remain reachable.
 		if msg.String() == "ctrl+d" {
-			now := time.Now()
-			if now.Sub(a.lastCtrlD) < a.doublePressTTL {
-				a.sidebar.Cleanup()
-				a.rpc.Close()
-				if a.eventRPC != nil {
-					a.eventRPC.Close()
-				}
-				if a.ttsManager != nil {
-					a.ttsManager.Close()
-				}
-				return a, tea.Quit
+			// Already open: ignore instead of resetting selection.
+			if a.activeModal == ModalPendingChanges {
+				return a, nil
 			}
-			a.lastCtrlD = now
-			a.statusMessage = "press ctrl+d again to exit"
-			a.statusMessageTime = time.Now()
-			return a, tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
-				return StatusMessageClearMsg{}
-			})
+			if a.currentSession == nil {
+				a.statusMessage = "no active session"
+				a.statusMessageTime = time.Now()
+				return a, tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
+					return StatusMessageClearMsg{}
+				})
+			}
+			a.activeModal = ModalPendingChanges
+			return a, a.pendingChangesModal.Show(a.currentSession.ID)
 		}
 
 		// Handle modal key input first
@@ -1053,10 +1056,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			clearCmd := tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
 				return StatusMessageClearMsg{}
 			})
+			refreshCmd := a.refreshPendingChangesCount()
 			if sessionCmd != nil {
-				return a, tea.Batch(sessionCmd, clearCmd)
+				return a, tea.Batch(sessionCmd, clearCmd, refreshCmd)
 			}
-			return a, clearCmd
+			return a, tea.Batch(clearCmd, refreshCmd)
 		}
 		return a, nil
 
@@ -1852,6 +1856,42 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return StatusMessageClearMsg{}
 		})
 
+	case modals.PendingChangesListMsg:
+		if a.pendingChangesModal != nil {
+			a.pendingChangesModal.SetChanges(msg.Changes)
+		}
+		if msg.Err != nil {
+			a.statusMessage = fmt.Sprintf("pending changes: %v", msg.Err)
+			a.statusMessageTime = time.Now()
+		}
+		a.pendingChangesCount = len(msg.Changes)
+		return a, nil
+
+	case modals.PendingChangeActionResultMsg:
+		// Refresh the list after accept/reject and surface the outcome in
+		// the status bar. Count refresh happens via the list refresh.
+		if msg.Err != nil {
+			a.statusMessage = fmt.Sprintf("%s failed: %v", msg.Action, msg.Err)
+		} else {
+			a.statusMessage = fmt.Sprintf("change %s", pastTenseChangeAction(msg.Action))
+		}
+		a.statusMessageTime = time.Now()
+		var refreshCmd tea.Cmd
+		if a.pendingChangesModal != nil && a.currentSession != nil {
+			refreshCmd = a.pendingChangesModal.Refresh()
+		}
+		clearCmd := tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
+			return StatusMessageClearMsg{}
+		})
+		return a, tea.Batch(refreshCmd, clearCmd)
+
+	case modals.PendingChangesCountMsg:
+		a.pendingChangesCount = msg.Count
+		return a, nil
+
+	case pendingChangesTickMsg:
+		return a, tea.Batch(a.refreshPendingChangesCount(), a.pendingChangesTick())
+
 	case components.NotificationExpiredMsg:
 		if a.notifications != nil {
 			a.notifications.Update(msg)
@@ -2145,6 +2185,17 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.activeModal = ModalNone
 		}
 		return a, cmd
+
+	case ModalPendingChanges:
+		if a.pendingChangesModal != nil {
+			cmd := a.pendingChangesModal.HandleKey(keyStr)
+			if !a.pendingChangesModal.IsVisible() {
+				a.activeModal = ModalNone
+			}
+			return a, cmd
+		}
+		a.activeModal = ModalNone
+		return a, nil
 	}
 
 	return a, nil
@@ -2355,6 +2406,11 @@ func (a *App) renderModalOverlay() string {
 		return a.branchPicker.View(a.width, a.height)
 	case ModalProjectPicker:
 		return a.projectPicker.View(a.width, a.height)
+	case ModalPendingChanges:
+		if a.pendingChangesModal == nil {
+			return ""
+		}
+		return a.pendingChangesModal.View(a.width, a.height)
 	}
 	return ""
 }
@@ -2524,6 +2580,12 @@ func (a *App) renderStatusBar() string {
 		// Show branch indicator if session has a leaf message set and branches are enabled
 		if a.branchesEnabled && a.currentSession != nil && a.currentSession.LeafMessageID != nil {
 			parts = append(parts, a.styles.Muted.Render("branch: "+a.currentSession.Name))
+		}
+
+		// Pending changes indicator: only shown while changes await review,
+		// and only when no transient status message is taking the bar.
+		if a.pendingChangesCount > 0 {
+			parts = append(parts, a.styles.Warning.Render(fmt.Sprintf("%d pending changes (ctrl+d)", a.pendingChangesCount)))
 		}
 
 		// Add context-sensitive quick actions
