@@ -37,6 +37,8 @@ const (
 	CapStreaming  = "streaming"
 	CapCompletion = "completion"
 	CapTools      = "tools"
+	CapImageGen   = "image"
+	CapVideoGen   = "video"
 
 	// Metrics dimension keys.
 	KeyLevel = "level"
@@ -200,6 +202,24 @@ var CanonicalProviders = []ProviderDef{
 		BaseURL:   "https://generativelanguage.googleapis.com/v1beta/openai",
 		DocURL:    "https://ai.google.dev",
 		Supports:  []string{CapStreaming, CapTools, CapImages},
+	},
+	{
+		ID:        "openai-codex",
+		Name:      "ChatGPT / Codex",
+		Transport: TransportCodexResponses,
+		AuthType:  AuthOAuthDevice,
+		BaseURL:   "https://chatgpt.com/backend-api/codex",
+		DocURL:    "https://developers.openai.com/codex",
+		Supports:  []string{CapStreaming, CapTools, CapReasoning},
+	},
+	{
+		ID:        "anthropic-sub",
+		Name:      "Claude (Pro/Max subscription)",
+		Transport: TransportAnthropicMessages,
+		AuthType:  AuthOAuthDevice,
+		BaseURL:   "https://api.anthropic.com",
+		DocURL:    "https://docs.anthropic.com",
+		Supports:  []string{CapStreaming, CapTools, CapImages, CapThinking},
 	},
 }
 

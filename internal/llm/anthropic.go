@@ -39,16 +39,18 @@ var anthropicRetryableStatusCodes = map[int]bool{
 // AnthropicClient implements the Chatter interface for Anthropic's Messages API.
 // It provides native support for Anthropic-specific features including extended thinking.
 type AnthropicClient struct {
-	configMu     sync.RWMutex
-	config       *ModelConfig
-	budget       *Budget
-	httpClient   *http.Client
-	logger       *slog.Logger
-	metricsStore *metrics.Store
-	timeoutCalc  *metrics.Calculator
-	tokenCache   ResponseCache
-	keyBuilder   *CacheKeyBuilder
-	uploadStore  UploadStore
+	configMu      sync.RWMutex
+	config        *ModelConfig
+	budget        *Budget
+	httpClient    *http.Client
+	logger        *slog.Logger
+	metricsStore  *metrics.Store
+	timeoutCalc   *metrics.Calculator
+	tokenCache    ResponseCache
+	keyBuilder    *CacheKeyBuilder
+	uploadStore   UploadStore
+	tokenResolver TokenResolver
+	oauthProvider string
 }
 
 // AnthropicClientOption is a functional option for configuring an AnthropicClient.
@@ -58,6 +60,18 @@ type AnthropicClientOption func(*AnthropicClient)
 func WithAnthropicBudget(budget *Budget) AnthropicClientOption {
 	return func(c *AnthropicClient) {
 		c.budget = budget
+	}
+}
+
+// WithAnthropicTokenResolver sets the OAuth token resolver and provider
+// name for subscription (Bearer) auth. The resolver takes precedence over
+// the static API key. A nil resolver is ignored.
+func WithAnthropicTokenResolver(tr TokenResolver, provider string) AnthropicClientOption {
+	return func(c *AnthropicClient) {
+		if tr != nil {
+			c.tokenResolver = tr
+			c.oauthProvider = provider
+		}
 	}
 }
 
@@ -489,8 +503,8 @@ type anthropicCacheControl struct {
 // CacheControl is set, Anthropic caches the prefix up to and including this
 // block.
 type anthropicSystemBlock struct {
-	Type         string                `json:"type"` // "text"
-	Text         string                `json:"text"`
+	Type         string                 `json:"type"` // "text"
+	Text         string                 `json:"text"`
 	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
@@ -878,6 +892,33 @@ func (c *AnthropicClient) partsToAnthropicContent(parts []ContentPart, store Upl
 }
 
 // doRequest performs a non-streaming HTTP request to Anthropic's API.
+// anthropicOAuthBeta is the beta header value required for Claude
+// subscription (Pro/Max) OAuth access tokens on the Messages API.
+const anthropicOAuthBeta = "oauth-2025-04-20"
+
+// applyAnthropicAuth sets authentication headers. When an OAuth token
+// resolver is configured (Claude Pro/Max subscription auth), Bearer auth
+// with the oauth beta header replaces x-api-key; anthropic-version stays
+// set in both modes. Bedrock keeps its no-auth-header behavior (SigV4 via
+// the transport).
+func (c *AnthropicClient) applyAnthropicAuth(ctx context.Context, httpReq *http.Request) error {
+	if c.config.ProviderID == ProviderIDBedrock {
+		return nil
+	}
+	httpReq.Header.Set("anthropic-version", anthropicAPIVersion)
+	if c.tokenResolver != nil && c.oauthProvider != "" {
+		token, err := c.tokenResolver.ResolveToken(ctx, c.oauthProvider)
+		if err != nil {
+			return &ClientError{Message: "failed to resolve OAuth token", Cause: err}
+		}
+		httpReq.Header.Set("Authorization", "Bearer "+token)
+		httpReq.Header.Set("anthropic-beta", anthropicOAuthBeta)
+		return nil
+	}
+	httpReq.Header.Set("x-api-key", c.config.APIKey)
+	return nil
+}
+
 func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicRequest) (*Response, error) {
 	body, err := json.Marshal(reqBody)
 	if err != nil {
@@ -895,11 +936,8 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
-	// Bedrock rejects x-api-key and anthropic-version headers; it uses
-	// AWS SigV4 authentication via the SDK/HTTP client instead.
-	if c.config.ProviderID != ProviderIDBedrock {
-		httpReq.Header.Set("x-api-key", c.config.APIKey)
-		httpReq.Header.Set("anthropic-version", anthropicAPIVersion)
+	if err := c.applyAnthropicAuth(ctx, httpReq); err != nil {
+		return nil, err
 	}
 
 	start := time.Now()
@@ -1051,11 +1089,8 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
-	// Bedrock rejects x-api-key and anthropic-version headers; it uses
-	// AWS SigV4 authentication via the SDK/HTTP client instead.
-	if c.config.ProviderID != ProviderIDBedrock {
-		httpReq.Header.Set("x-api-key", c.config.APIKey)
-		httpReq.Header.Set("anthropic-version", anthropicAPIVersion)
+	if err := c.applyAnthropicAuth(ctx, httpReq); err != nil {
+		return nil, err
 	}
 
 	start := time.Now()

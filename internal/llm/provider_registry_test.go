@@ -73,8 +73,9 @@ func TestListProviders(t *testing.T) {
 	}
 
 	anthropicProviders := ListProviders(TransportAnthropicMessages)
-	if len(anthropicProviders) != 1 {
-		t.Errorf("expected 1 Anthropic provider, got %d", len(anthropicProviders))
+	// anthropic (API key) + anthropic-sub (OAuth device).
+	if len(anthropicProviders) != 2 {
+		t.Errorf("expected 2 Anthropic providers, got %d", len(anthropicProviders))
 	}
 }
 

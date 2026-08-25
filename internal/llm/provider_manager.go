@@ -133,6 +133,9 @@ func createChatterFor(cfg *ModelConfig, budget *Budget, logger *slog.Logger, tr 
 		if budget != nil {
 			opts = append(opts, WithAnthropicBudget(budget))
 		}
+		if tr != nil && cfg.OAuthProvider != "" {
+			opts = append(opts, WithAnthropicTokenResolver(tr, cfg.OAuthProvider))
+		}
 		if cfg.Timeout > 0 {
 			opts = append(opts, WithAnthropicTimeout(cfg.Timeout))
 		}
