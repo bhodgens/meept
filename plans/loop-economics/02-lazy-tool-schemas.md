@@ -57,9 +57,32 @@ func (r *Registry) SetSchemaMode(mode SchemaMode, alwaysFull []string)
 
 Config [agent.tools]: schema_mode ("indexed" DEFAULT per user directive), always_full list (default: shell,file_read,file_edit,file_write,memory_search,memory_store,web_fetch,websearch,platform_status,tool_view). Loop passes mode through existing wiring path used by FilterToolsForSkill so filtered registries inherit mode+alwaysFull.
 
+PER-MODEL / PER-PROVIDER OVERRIDES (user directive, 2026-08-24):
+
+Resolution order (most specific wins; unset falls through):
+1. Model entry in config/models.json5: `schema_mode` field on a model definition
+2. Provider block: `schema_mode` on the provider
+3. Global [agent.tools].schema_mode
+
+```json5
+// models.json5 shape (fields added to existing structures):
+providers.anthropic: { ..., schema_mode: "indexed" }        // provider default
+providers.anthropic.models["claude-opus-4-5"]: { ..., schema_mode: "full" }
+// opus gets full schemas; every other anthropic model indexed.
+// Unset at both levels -> global [agent.tools].schema_mode ("indexed").
+```
+
+Implementation surface:
+- internal/llm/models_catalog.go ModelCatalogEntry gains `SchemaMode string`
+- Provider config struct gains same field
+- Resolver helper `EffectiveSchemaMode(providerID, modelID string) SchemaMode` in llm package (catalog lookup -> provider -> global default); loop consults it where it currently reads [agent.tools] only
+- always_full list stays global (per-model tool lists would explode config surface; revisit only if benchmarks demand)
+- Validation: unknown mode strings rejected at config load with pointer to the offending model/provider line
+
 ## Tasks
 
 1. Failing tests registry-side: indexed mode stubs non-core (params empty, description contains tool_view); core untouched; switching modes mid-flight safe under -race; FilteredToolRegistry inherits.
+1b. Failing tests EffectiveSchemaMode resolution: model override beats provider, provider beats global, all-unset -> global default, unknown string -> config-load error (test via config parse path).
 2. Implement SetSchemaMode + GetDefinitions branch.
 3. Failing tests tool_view: known tool returns parseable JSON w/ params; unknown errors; LRU eviction bounded (size cap respected); nil-registry guard.
 4. Implement builtin; register in registerBuiltinTools (components.go ~1680 block) — meta category excluded from indexing itself.
