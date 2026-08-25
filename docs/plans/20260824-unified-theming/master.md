@@ -97,10 +97,10 @@ File ownership (no overlap):
 
 | Item | Status | Iterations | Timestamp | Complete | Notes |
 |------|--------|------------|-----------|----------|-------|
-| W0 tokens foundation | COMPLETE | 1 | 2026-08-24T00:00Z | 100% | tokens.json5 + theme pkg parse/validate + parity pins; go test ./theme green. Note: JSON5 unquoted keys unsupported by hujson Standardize→quoted keys used. |
-| L1 flutter palette layer | PENDING | 0 | | 0% | |
-| L2 tui runtime palette | PENDING | 0 | | 0% | |
-| L3 flutter settings + tests | PENDING | 0 | | 0% | |
-| L4 tui stragglers | PENDING | 0 | | 0% | |
-| L5 consistency + docs | PENDING | 0 | | 0% | |
-| Gates (lint/build/tests/report) | PENDING | 0 | | 0% | |
+| W0 tokens foundation | COMPLETE | 1 | 2026-08-24T23:58Z | 100% | tokens.json5 + theme pkg parse/validate + parity pins; go test ./theme green. Note: JSON5 unquoted keys unsupported by hujson Standardize→quoted keys used. |
+| L1 flutter palette layer | COMPLETE | 1 | 2026-08-25T00:45Z | 100% | commit 2d6124d1 | |
+| L2 tui runtime palette | COMPLETE | 1 | 2026-08-24T23:59Z | 100% | commit 660227b4; viz wiring fixed in-session | |
+| L3 flutter settings + tests | COMPLETE | 1 | 2026-08-25T01:31Z | 100% | commit 78db4f98; +2 latent panel bugs fixed | |
+| L4 tui stragglers | COMPLETE | 2 | 2026-08-25T11:55Z | 100% | landed in commit 86af507c (swept by concurrent session's commit — message mismatch noted); stray-literal guard test added | |
+| L5 consistency + docs | COMPLETE | 1 | 2026-08-25T00:50Z | 100% | commit c1fd91d5 | |
+| Gates (lint/build/tests/report) | COMPLETE | 1 | 2026-08-25T11:58Z | 100% | go build+full go test green; flutter 322 pass, analyze 0 errors | |
