@@ -2,6 +2,8 @@ package builtin
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -254,6 +256,187 @@ func TestWriteFileTool(t *testing.T) {
 		})
 		if err == nil {
 			t.Error("expected error for empty path")
+		}
+	})
+}
+
+func TestWriteFileTool_StagedMode(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	// Staged tools register under the session_id carried in context
+	// (mirroring FileEditTool); use a fixed one so lookups are deterministic.
+	sctx := ContextWithSessionID(ctx, "sess-write-staging")
+
+	writeArgs := func(path, content string) map[string]any {
+		return map[string]any{"path": path, "content": content}
+	}
+
+	asToolResult := func(t *testing.T, res any) tools.ToolResult {
+		t.Helper()
+		tr, ok := res.(tools.ToolResult)
+		if !ok {
+			t.Fatalf("unexpected result type %T", res)
+		}
+		return tr
+	}
+
+	hasEvidence := func(tr tools.ToolResult, evidenceType string) bool {
+		for _, ev := range tr.Evidence {
+			if string(ev.Type) == evidenceType {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("registry present stages without disk write", func(t *testing.T) {
+		path := filepath.Join(dir, "staged_new.txt")
+		tool := NewWriteFileTool(nil)
+		reg := NewPendingChangesRegistry()
+		tool.SetPendingChangesRegistry(reg)
+
+		res, err := tool.Execute(sctx, writeArgs(path, "staged content\n"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		tr := asToolResult(t, res)
+		if !tr.Success {
+			t.Fatalf("expected success result: %+v", tr)
+		}
+
+		// No disk write must occur.
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Errorf("file was written to disk in staged mode; statErr=%v", statErr)
+		}
+
+		// Change registered with correct pre-image hash for a new file.
+		// The tool resolves symlinks, so compare against its own resolution.
+		wantResolved, resErr := resolvePathSecure(path)
+		if resErr != nil {
+			t.Fatalf("resolvePathSecure failed: %v", resErr)
+		}
+		changes := reg.GetBySession("sess-write-staging")
+		if len(changes) != 1 {
+			t.Fatalf("expected exactly 1 pending change, got %d", len(changes))
+		}
+		change := changes[0]
+		if change.FilePath != wantResolved {
+			t.Errorf("FilePath = %q, want %q", change.FilePath, wantResolved)
+		}
+		if change.Modified != "staged content\n" {
+			t.Errorf("Modified = %q", change.Modified)
+		}
+		wantHash := sha256HexT("")
+		if change.PreImageSHA256 != wantHash {
+			t.Errorf("PreImageSHA256 = %q, want %q (empty pre-image)", change.PreImageSHA256, wantHash)
+		}
+		if !strings.Contains(change.Diff, "+staged content") {
+			t.Errorf("Diff missing added-line hunk:\n%s", change.Diff)
+		}
+
+		// Result text names the change ID and points at resolve.
+		resText, _ := tr.Result.(string)
+		if !strings.Contains(resText, change.ID) || !strings.Contains(resText, "resolve") {
+			t.Errorf("Result text %q missing change ID / resolve pointer", resText)
+		}
+		// Evidence type matches file_edit staging pattern exactly.
+		if !hasEvidence(tr, "pending_change_created") {
+			t.Errorf("missing pending_change_created evidence; got %+v", tr.Evidence)
+		}
+	})
+
+	t.Run("staged overwrite captures pre-image of existing file", func(t *testing.T) {
+		path := filepath.Join(dir, "staged_overwrite.txt")
+		if err := os.WriteFile(path, []byte("original body\n"), 0o644); err != nil { //nolint:gosec // test temp dir
+			t.Fatal(err)
+		}
+		tool := NewWriteFileTool(nil)
+		reg := NewPendingChangesRegistry()
+		tool.SetPendingChangesRegistry(reg)
+
+		res, err := tool.Execute(sctx, writeArgs(path, "replacement body\n"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		tr := asToolResult(t, res)
+
+		// Existing file must remain untouched on disk.
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("existing file must remain readable: %v", readErr)
+		}
+		if string(data) != "original body\n" {
+			t.Fatalf("existing file was overwritten on disk in staged mode; content=%q", string(data))
+		}
+
+		change := reg.GetBySession("sess-write-staging")[0]
+		if change.Original != "original body\n" {
+			t.Errorf("Original = %q, want pre-image of existing file", change.Original)
+		}
+		if change.PreImageSHA256 != sha256HexT("original body\n") {
+			t.Errorf("PreImageSHA256 mismatch for overwrite case")
+		}
+		if !tr.Success {
+			t.Errorf("expected success result: %+v", tr)
+		}
+	})
+
+	t.Run("legacy mode without registry writes directly", func(t *testing.T) {
+		path := filepath.Join(dir, "direct_write.txt")
+		tool := NewWriteFileTool(nil) // no registry wired
+
+		res, err := tool.Execute(ctx, writeArgs(path, "direct content\n"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		tr := asToolResult(t, res)
+
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("expected direct write to disk: %v", readErr)
+		}
+		if string(data) != "direct content\n" {
+			t.Errorf("content = %q, want direct write", string(data))
+		}
+		if hasEvidence(tr, "pending_change_created") {
+			t.Error("legacy mode must not emit pending_change_created evidence")
+		}
+	})
+
+	t.Run("append mode stages combined pre-image and modified", func(t *testing.T) {
+		path := filepath.Join(dir, "staged_append.txt")
+		if err := os.WriteFile(path, []byte("head"), 0o644); err != nil { //nolint:gosec // test temp dir
+			t.Fatal(err)
+		}
+		tool := NewWriteFileTool(nil)
+		reg := NewPendingChangesRegistry()
+		tool.SetPendingChangesRegistry(reg)
+
+		res, err := tool.Execute(sctx, map[string]any{
+			"path":    path,
+			"content": "-tail",
+			"append":  true,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		asToolResult(t, res)
+
+		// File must still hold its original content — the append was staged.
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("file must remain untouched on disk: %v", readErr)
+		}
+		if string(data) != "head" {
+			t.Fatalf("append performed disk write in staged mode; content=%q", string(data))
+		}
+
+		change := reg.GetBySession("sess-write-staging")[0]
+		if change.Original != "head" || change.Modified != "head-tail" {
+			t.Errorf("Original/Modified = %q/%q, want head/head-tail", change.Original, change.Modified)
+		}
+		if change.PreImageSHA256 != sha256HexT("head") {
+			t.Errorf("PreImageSHA256 mismatch for append case")
 		}
 	})
 }
@@ -793,4 +976,10 @@ func TestReadFileTool_TaintLabel(t *testing.T) {
 	if toolResult.TaintLabel != taint.TaintUserInput {
 		t.Errorf("expected TaintLabel=%q, got %q", taint.TaintUserInput, toolResult.TaintLabel)
 	}
+}
+
+// sha256HexT computes the lowercase hex SHA256 of s for staged-write tests.
+func sha256HexT(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
 }

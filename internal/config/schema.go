@@ -2362,6 +2362,51 @@ type RuntimeConfig struct {
 	DefaultBackend string `json:"default_backend" toml:"default_backend"`
 	// Docker holds Docker-specific configuration.
 	Docker DockerRuntimeConfig `json:"docker" toml:"docker"`
+	// EnvPolicy controls how child process environments are built
+	// (allowlist vs inherit). Normalized by NormalizeRuntimeDefaults.
+	EnvPolicy EnvPolicyConfig `json:"env_policy" toml:"env_policy"`
+}
+
+// EnvPolicyConfig configures child environment construction. This mirrors the
+// shape of runtime.EnvPolicyConfig (internal/runtime/envpolicy.go) rather than
+// importing it: internal/config does NOT import internal/runtime today, and
+// the existing convention is field mirroring + explicit mapping in
+// internal/daemon/components.go (see RuntimeConfig.Docker vs
+// runtime.DockerConfig). Keeping it that way preserves the current dependency
+// direction and avoids any import-cycle risk.
+type EnvPolicyConfig struct {
+	// Mode is "allowlist" (default after normalization) or "inherit".
+	Mode string `json:"env_mode" toml:"env_mode"`
+	// Allowlist lists extra variable names passed through in allowlist mode.
+	Allowlist []string `json:"env_allowlist" toml:"env_allowlist"`
+	// DenyGlobs are name globs (path.Match syntax) always stripped in
+	// allowlist mode. Defaults applied by NormalizeRuntimeDefaults.
+	DenyGlobs []string `json:"env_deny_globs" toml:"env_deny_globs"`
+}
+
+// DefaultEnvDenyGlobs is the default set of env-name deny globs applied when
+// DenyGlobs is empty: common secret-ish suffixes/patterns.
+var DefaultEnvDenyGlobs = []string{"*KEY*", "*TOKEN*", "*SECRET*", "*PASSWORD*", "*CREDENTIAL*"}
+
+// DefaultEnvAllowlist is the default extra-allowlist applied in allowlist
+// mode (on top of runtime.BaseEnvKeys): variables commonly needed by shells
+// that carry no credential value.
+var DefaultEnvAllowlist = []string{"SSH_AUTH_SOCK", "DISPLAY"}
+
+// NormalizeRuntimeDefaults fills safe defaults for [runtime].env_policy:
+// empty Mode becomes "allowlist"; empty DenyGlobs become the standard
+// credential-glob set; empty Allowlist gets a small non-secret convenience
+// set. Explicit user values are preserved untouched.
+func NormalizeRuntimeDefaults(rc *RuntimeConfig) {
+	if rc.EnvPolicy.Mode == "" {
+		rc.EnvPolicy.Mode = "allowlist"
+	}
+	if len(rc.EnvPolicy.DenyGlobs) == 0 {
+		rc.EnvPolicy.DenyGlobs = append([]string(nil), DefaultEnvDenyGlobs...)
+	}
+	if len(rc.EnvPolicy.Allowlist) == 0 {
+		rc.EnvPolicy.Allowlist = append([]string(nil), DefaultEnvAllowlist...)
+	}
 }
 
 // DockerRuntimeConfig holds Docker backend settings.

@@ -3,7 +3,9 @@ package builtin
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -79,6 +81,58 @@ type ResolveResult struct {
 	Message  string   `json:"message"`
 }
 
+// verifyPreImage checks the staged change against the current on-disk state
+// of change.FilePath. It returns (drifted=false, nil) when it is safe to apply
+// the staged Modified content, and (drifted=true, nil) when applying would
+// clobber changes made after staging. A non-nil error means verification
+// itself failed (unreadable file) and the caller must not write.
+//
+// Decision table:
+//
+//	current file hash == PreImageSHA256      -> clean, safe to apply
+//	current file hash == sha256(Modified)    -> already applied; idempotent no-op
+//	PreImageSHA256 empty (legacy change)     -> cannot verify; proceed with warning
+//	otherwise                                -> drift; refuse
+func (t *ResolveTool) verifyPreImage(change *PendingChange) (bool, error) {
+	data, err := os.ReadFile(change.FilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File vanished after staging. Applying recreates it with the
+			// staged content — only meaningful if the pre-image was also
+			// empty (a create). Otherwise treat as drift.
+			if change.PreImageSHA256 == "" || change.PreImageSHA256 == sha256Hex("") {
+				return false, nil
+			}
+			return true, fmt.Errorf("staged file no longer exists on disk")
+		}
+		return false, err
+	}
+
+	currentHash := sha256Hex(string(data))
+
+	switch {
+	case change.PreImageSHA256 == "":
+		slog.Warn("ResolveTool: pending change has no pre-image hash (legacy); proceeding without drift check",
+			"change_id", change.ID, "path", change.FilePath)
+		return false, nil
+
+	case currentHash == change.PreImageSHA256:
+		// Pre-image intact — clean apply.
+		return false, nil
+
+	case currentHash == sha256Hex(change.Modified):
+		// The staged content is already on disk (e.g. duplicate accept).
+		// Idempotent success; skip the rewrite.
+		slog.Info("ResolveTool: staged content already applied; skipping redundant write",
+			"change_id", change.ID, "path", change.FilePath)
+		return false, nil
+
+	default:
+		// Drift: the file changed between staging and accept.
+		return true, nil
+	}
+}
+
 func (t *ResolveTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	changeIDsRaw, _ := args["change_ids"].([]any)
 	if len(changeIDsRaw) == 0 {
@@ -125,6 +179,7 @@ func (t *ResolveTool) Execute(ctx context.Context, args map[string]any) (any, er
 	}
 
 	// Process each change
+	refusalNotes := make([]string, 0)
 	for _, id := range finalIDs {
 		change, ok := t.registry.Get(id)
 		if !ok {
@@ -141,6 +196,30 @@ func (t *ResolveTool) Execute(ctx context.Context, args map[string]any) (any, er
 					result.Failed = append(result.Failed, id)
 					continue
 				}
+			}
+			// Pre-image integrity check: refuse to apply when the on-disk file
+			// drifted after the change was staged. See verifyPreImage for the
+			// decision table (clean / already-applied / legacy / drift).
+			drifted, err := t.verifyPreImage(change)
+			if err != nil {
+				slog.Warn("ResolveTool: pre-image verification failed", "change_id", change.ID, "error", err)
+				result.Failed = append(result.Failed, id)
+				continue
+			}
+			if drifted {
+				stagedShort := shortHash(change.PreImageSHA256)
+				currentShort := ""
+				if data, readErr := os.ReadFile(change.FilePath); readErr == nil {
+					currentShort = shortHash(sha256Hex(string(data)))
+				}
+				refusal := fmt.Sprintf(
+					"file changed since staging (staged pre-image %s… != current file %s…) — refusing to overwrite; re-stage against current content",
+					stagedShort, currentShort,
+				)
+				slog.Warn("ResolveTool: "+refusal, "change_id", change.ID, "path", change.FilePath)
+				refusalNotes = append(refusalNotes, fmt.Sprintf("%s: %s", id, refusal))
+				result.Failed = append(result.Failed, id)
+				continue
 			}
 			// Write the modified content to the file
 			if err := os.WriteFile(change.FilePath, []byte(change.Modified), 0644); err != nil {
@@ -170,6 +249,10 @@ func (t *ResolveTool) Execute(ctx context.Context, args map[string]any) (any, er
 
 	if len(result.Failed) > 0 {
 		result.Message += fmt.Sprintf(", %d failed (not found)", len(result.Failed))
+	}
+
+	if len(refusalNotes) > 0 {
+		result.Message += "; " + strings.Join(refusalNotes, "; ")
 	}
 
 	return result, nil

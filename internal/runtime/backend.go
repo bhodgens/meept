@@ -41,6 +41,10 @@ type Config struct {
 	DefaultBackend string `json:"default_backend"`
 	// DockerConfig holds Docker-specific settings.
 	Docker DockerConfig `json:"docker"`
+	// EnvPolicy controls child environment construction (allowlist vs
+	// inherit). Zero value means "unset"; LocalBackend applies the secure
+	// allowlist default when Mode is empty.
+	EnvPolicy EnvPolicyConfig `json:"env_policy"`
 }
 
 // DockerConfig holds Docker backend configuration.

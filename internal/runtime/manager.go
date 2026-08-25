@@ -25,7 +25,7 @@ func NewContainerManager(cfg Config, logger *slog.Logger) (*ContainerManager, er
 	}
 
 	// Initialize local backend (always available)
-	local := NewLocalBackend()
+	local := NewLocalBackend(cfg, nil)
 	m.backends["local"] = local
 	m.defaultBackend = "local"
 

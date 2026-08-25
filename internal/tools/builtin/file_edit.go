@@ -391,7 +391,7 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 
 		// Create pending change with session ID from context (or generate one)
 		sessionID := id.Generate("edit-")
-		if sid, ok := ctx.Value("session_id").(string); ok && sid != "" {
+		if sid, ok := ctx.Value(sessionIDContextKey).(string); ok && sid != "" {
 			sessionID = sid
 		}
 
@@ -1026,42 +1026,10 @@ func (t *FileEditTool) applyEdits(lines []string, ops []editOp) []string {
 }
 
 // generateDiffPreview creates a unified diff preview between original and modified content.
+// Delegates to the shared generateUnifiedDiff helper (also used by StageWrite)
+// so every staged change carries an identically-formatted diff.
 func (t *FileEditTool) generateDiffPreview(filePath, original, modified string) string {
-	// Simple unified diff format
-	lines := strings.Split(original, "\n")
-	modLines := strings.Split(modified, "\n")
-
-	var diff []string
-	diff = append(diff, fmt.Sprintf("--- a/%s", filePath))
-	diff = append(diff, fmt.Sprintf("+++ b/%s", filePath))
-
-	// Simple line-by-line comparison
-	maxLen := max(len(lines), len(modLines))
-
-	for i := range maxLen {
-		oldLine := ""
-		newLine := ""
-		if i < len(lines) {
-			oldLine = lines[i]
-		}
-		if i < len(modLines) {
-			newLine = modLines[i]
-		}
-
-		if i >= len(lines) {
-			// Added line
-			diff = append(diff, fmt.Sprintf("+%s", newLine))
-		} else if i >= len(modLines) {
-			// Deleted line
-			diff = append(diff, fmt.Sprintf("-%s", oldLine))
-		} else if oldLine != newLine {
-			// Changed line
-			diff = append(diff, fmt.Sprintf("-%s", oldLine))
-			diff = append(diff, fmt.Sprintf("+%s", newLine))
-		}
-	}
-
-	return strings.Join(diff, "\n")
+	return generateUnifiedDiff(filePath, original, modified)
 }
 
 // IsReadOnly reports that file edits are never read-only.

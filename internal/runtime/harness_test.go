@@ -9,7 +9,7 @@ import (
 )
 
 func TestTestHarness_Validate(t *testing.T) {
-	backend := NewLocalBackend()
+	backend := NewLocalBackend(Config{}, nil)
 	harness := NewTestHarness(TestHarnessConfig{
 		InstallCommand: "echo installing",
 		TestCommand:    "echo 'tests passed'",
@@ -22,7 +22,7 @@ func TestTestHarness_Validate(t *testing.T) {
 }
 
 func TestTestHarness_Validate_WithoutInstall(t *testing.T) {
-	backend := NewLocalBackend()
+	backend := NewLocalBackend(Config{}, nil)
 	harness := NewTestHarness(TestHarnessConfig{
 		TestCommand: "echo pass",
 	}, backend)
@@ -34,7 +34,7 @@ func TestTestHarness_Validate_WithoutInstall(t *testing.T) {
 }
 
 func TestTestHarness_Validate_FailingTest(t *testing.T) {
-	backend := NewLocalBackend()
+	backend := NewLocalBackend(Config{}, nil)
 	harness := NewTestHarness(TestHarnessConfig{
 		TestCommand: "exit 1",
 	}, backend)
@@ -57,7 +57,7 @@ func TestTestHarness_Validate_NullBackend(t *testing.T) {
 }
 
 func TestTestHarness_Validate_InstallFails(t *testing.T) {
-	backend := NewLocalBackend()
+	backend := NewLocalBackend(Config{}, nil)
 	harness := NewTestHarness(TestHarnessConfig{
 		InstallCommand: "exit 1",
 		TestCommand:    "echo should-not-run",

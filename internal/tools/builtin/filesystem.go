@@ -17,6 +17,7 @@ import (
 	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
@@ -344,10 +345,11 @@ func (t *ReadFileTool) executeRead(args map[string]any, progress func(tools.Prog
 // WriteFileTool writes content to a file.
 type WriteFileTool struct {
 	tools.ToolDefaults
-	checker      *security.PermissionChecker
-	lspNotifier  LSPWriteNotifier
-	fenceChecker FenceChecker
-	secOrch      *intsecurity.Orchestrator
+	checker                *security.PermissionChecker
+	lspNotifier            LSPWriteNotifier
+	fenceChecker           FenceChecker
+	secOrch                *intsecurity.Orchestrator
+	pendingChangesRegistry *PendingChangesRegistry
 }
 
 // NewWriteFileTool creates a new file write tool.
@@ -367,6 +369,16 @@ func (t *WriteFileTool) SetLSPNotifier(notifier LSPWriteNotifier) {
 func (t *WriteFileTool) SetFenceChecker(fc FenceChecker) {
 	if fc != nil {
 		t.fenceChecker = fc
+	}
+}
+
+// SetPendingChangesRegistry sets the pending changes registry for the
+// preview/accept workflow. When set, writes are staged (no disk I/O) until a
+// pending change is accepted via the resolve tool. Follows the typed-nil
+// interface guard pattern mandated by CLAUDE.md.
+func (t *WriteFileTool) SetPendingChangesRegistry(registry *PendingChangesRegistry) {
+	if registry != nil {
+		t.pendingChangesRegistry = registry
 	}
 }
 
@@ -468,6 +480,45 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 			Message: fmt.Sprintf("writing %s (%d bytes)...", resolved, len(content)),
 			Percent: 10,
 		})
+	}
+
+	// Preview/accept workflow: when a pending changes registry is wired, stage
+	// the write instead of touching disk (mirrors FileEditTool staging).
+	if t.pendingChangesRegistry != nil {
+		var original []byte
+		if data, readErr := os.ReadFile(resolved); readErr == nil {
+			original = data
+		}
+
+		// The staged end-state: overwrite replaces the pre-image; append
+		// concatenates so accept produces the same bytes legacy mode would.
+		modified := content
+		if appendMode {
+			modified = string(original) + content
+		}
+
+		sessionID := id.Generate("write-")
+		if sid, ok := ctx.Value(sessionIDContextKey).(string); ok && sid != "" {
+			sessionID = sid
+		}
+
+		change, err := t.pendingChangesRegistry.StageWrite(sessionID, resolved, original, []byte(modified))
+		if err != nil {
+			return nil, fmt.Errorf("failed to stage write: %w", err)
+		}
+
+		action := "write"
+		if appendMode {
+			action = "append"
+		}
+		return tools.ToolResult{
+			Success: true,
+			Result: fmt.Sprintf("Created pending change %s for %s (%s, %d bytes). Use 'resolve' tool to accept or reject.",
+				change.ID, resolved, action, len(content)),
+			Evidence: []models.Evidence{
+				models.NewEvidence("pending_change_created", resolved, change.ID, t.Name()),
+			},
+		}, nil
 	}
 
 	// Create parent directories
