@@ -134,8 +134,8 @@ func TestOAuthProviderConfig_DeviceFlowConfig(t *testing.T) {
 
 func TestRegisteredProviders(t *testing.T) {
 	providers := RegisteredProviders()
-	if len(providers) != 3 {
-		t.Errorf("expected 3 providers, got %d", len(providers))
+	if len(providers) != 6 {
+		t.Errorf("expected 6 providers, got %d", len(providers))
 	}
 
 	seen := map[string]bool{}
@@ -150,5 +150,8 @@ func TestRegisteredProviders(t *testing.T) {
 	}
 	if !seen["google-calendar"] {
 		t.Error("missing google-calendar")
+	}
+	if !seen["xai-oauth"] {
+		t.Error("missing xai-oauth")
 	}
 }
