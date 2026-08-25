@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -39,6 +42,9 @@ Supported providers:
   github-models
   google-oauth
   google-calendar
+  xai-oauth
+  openai-codex
+  anthropic-sub
 
 The flow will print a URL and code. Open the URL in a browser, enter the
 code, and authorize the application. The CLI will poll until authorization
@@ -123,7 +129,67 @@ func runOAuthConnect(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	flowCfg := providerCfg.DeviceFlowConfig()
+	flowCfg, err := providerCfg.ResolveFlowConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("resolve flow config: %w", err)
+	}
+
+	switch providerCfg.Flow {
+	case auth.FlowDeviceCodex:
+		dcr, err := auth.StartCodexDeviceFlow(ctx, providerCfg.DeviceUserCodeEP, flowCfg.ClientID)
+		if err != nil {
+			return fmt.Errorf("device code request failed: %w", err)
+		}
+
+		fmt.Printf("  visit: %s\n", dcr.VerifyURL)
+		fmt.Printf("  enter code: %s\n\n", dcr.UserCode)
+		fmt.Print("  waiting for authorization...")
+
+		grant, err := auth.PollCodexAuthorization(ctx, providerCfg.DevicePollEP, dcr.DeviceAuthID, dcr.UserCode, dcr.Interval)
+		if err != nil {
+			if ctx.Err() != nil {
+				fmt.Println("\n  cancelled.")
+				return nil
+			}
+			return fmt.Errorf("poll for authorization failed: %w", err)
+		}
+
+		token, err := auth.ExchangeCodexToken(ctx, flowCfg.TokenEP, flowCfg.ClientID, grant)
+		if err != nil {
+			return fmt.Errorf("exchange token failed: %w", err)
+		}
+
+		fmt.Println(" \u2713")
+
+		if err := store.Save(providerID, token); err != nil {
+			return fmt.Errorf("save token: %w", err)
+		}
+
+		fmt.Printf("\n  %s connected.\n", providerID)
+		fmt.Printf("  token saved to %s/%s.json (encrypted)\n", store.Dir(), providerID)
+		return nil
+	case auth.FlowPKCEPaste:
+		verifier, challenge := auth.GeneratePKCE()
+		state := auth.GenerateState()
+		authURL := auth.BuildAnthropicAuthorizeURL(flowCfg.ClientID, challenge, state)
+		fmt.Printf("  visit: %s\n", authURL)
+		fmt.Printf("  %s\n", providerCfg.VerifyHint)
+		fmt.Print("  code: ")
+		code, err := readPastedCode(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("read pasted code: %w", err)
+		}
+		token, err := auth.ExchangeAnthropicCode(ctx, flowCfg.ClientID, code, verifier)
+		if err != nil {
+			return fmt.Errorf("exchange code failed: %w", err)
+		}
+		if err := store.Save(providerID, token); err != nil {
+			return fmt.Errorf("save token: %w", err)
+		}
+		fmt.Printf("\n  %s connected.\n", providerID)
+		fmt.Printf("  token saved to %s/%s.json (encrypted)\n", store.Dir(), providerID)
+		return nil
+	}
 
 	fmt.Printf("\nconnecting to %s...\n\n", providerID)
 
@@ -219,4 +285,20 @@ func humanDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh %dm", h, m)
 	}
 	return fmt.Sprintf("%dm", m)
+}
+
+// readPastedCode reads a pasted authorization code from r, trimming whitespace.
+func readPastedCode(r io.Reader) (string, error) {
+	scanner := bufio.NewScanner(r)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return "", fmt.Errorf("read code: %w", err)
+		}
+		return "", fmt.Errorf("no code entered")
+	}
+	code := strings.TrimSpace(scanner.Text())
+	if code == "" {
+		return "", fmt.Errorf("empty code")
+	}
+	return code, nil
 }
