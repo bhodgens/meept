@@ -95,10 +95,15 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 	// in addition to killing the process.
 	t.cmdCancel = cancel
 
-	// Set up environment
+	// Set up environment. Configured env values of the form "${secret:name}"
+	// are substituted with the MEEPT_SECRET:<name> placeholder at launch —
+	// NEVER with the real secret value. The child (or the egress proxy
+	// intercepting its egress) resolves placeholders; plaintext never enters
+	// a subprocess environment from this path. All other values pass through
+	// unchanged.
 	cmd.Env = os.Environ()
 	for k, v := range t.config.Environment {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+		cmd.Env = append(cmd.Env, k+"="+substituteSecretEnvValue(v))
 	}
 
 	// Set up pipes
@@ -115,8 +120,8 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		stdin.Close()   //nolint:mutexio // one-time init cleanup path
-		stdout.Close()  //nolint:mutexio // one-time init cleanup path
+		stdin.Close()  //nolint:mutexio // one-time init cleanup path
+		stdout.Close() //nolint:mutexio // one-time init cleanup path
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 

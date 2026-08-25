@@ -39,12 +39,18 @@ type ExecutionBackend interface {
 type Config struct {
 	// DefaultBackend is the default backend to use ("local" or "docker").
 	DefaultBackend string `json:"default_backend"`
-	// DockerConfig holds Docker-specific settings.
+	// Docker holds Docker-specific settings.
 	Docker DockerConfig `json:"docker"`
 	// EnvPolicy controls child environment construction (allowlist vs
 	// inherit). Zero value means "unset"; LocalBackend applies the secure
 	// allowlist default when Mode is empty.
 	EnvPolicy EnvPolicyConfig `json:"env_policy"`
+	// Sandbox controls sandboxed-backend selection. Zero Order ("") is
+	// treated as auto by ResolveBackend.
+	Sandbox ResolverConfig `json:"sandbox"`
+	// Bwrap holds bubblewrap backend settings used when the resolver
+	// constructs a bwrap backend.
+	Bwrap BwrapConfig `json:"bwrap"`
 }
 
 // DockerConfig holds Docker backend configuration.

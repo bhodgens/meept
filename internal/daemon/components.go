@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -335,6 +336,82 @@ type Components struct {
 	InstructionContextInjector *agent.ContextInjector
 
 	Logger *slog.Logger
+}
+
+// buildRuntimeConfig maps [runtime] config into the runtime package's Config,
+// normalizing env-policy defaults and warning loudly when the legacy
+// inherit mode is selected: full environment inheritance forwards every
+// daemon-process variable (including secrets) into agent-run shells.
+func buildRuntimeConfig(rc config.RuntimeConfig, logger *slog.Logger) runtime.Config {
+	config.NormalizeRuntimeDefaults(&rc)
+	if rc.EnvPolicy.Mode == string(runtime.EnvModeInherit) {
+		logger.Warn("runtime.env_mode=inherit disables child-environment allowlist; "+
+			"daemon environment variables (including secrets) will be passed to agent-run shells",
+			"env_mode", "inherit",
+		)
+	}
+	return runtime.Config{
+		DefaultBackend: rc.DefaultBackend,
+		Docker: runtime.DockerConfig{
+			Image:       rc.Docker.Image,
+			VolumeBinds: rc.Docker.VolumeBinds,
+			Timeout:     time.Duration(rc.Docker.TimeoutSeconds) * time.Second,
+		},
+		EnvPolicy: runtime.EnvPolicyConfig{
+			Mode:      runtime.EnvMode(rc.EnvPolicy.Mode),
+			Allowlist: rc.EnvPolicy.Allowlist,
+			DenyGlobs: rc.EnvPolicy.DenyGlobs,
+		},
+		Sandbox: runtime.ResolverConfig{
+			Order:          runtime.SandboxOrder(rc.Sandbox.Order),
+			RequireSandbox: rc.Sandbox.RequireSandbox,
+		},
+		Bwrap: runtime.BwrapConfig{
+			BinaryPath: rc.Bwrap.BinaryPath,
+			ExtraArgs:  rc.Bwrap.ExtraArgs,
+			TmpfsDirs:  rc.Bwrap.TmpfsDirs,
+		},
+	}
+}
+
+// runtimeWire carries the outcome of sandbox-aware backend resolution from
+// startup (where ContainerManager is built) to tool registration (where
+// ShellExecuteTool is constructed). Both happen inside initializeComponents;
+// the wire exists so each stage keeps its own local scope.
+type runtimeWire struct {
+	resolved   runtime.ExecutionBackend // non-nil => wire this backend directly
+	resolveErr error                    // non-nil => resolution failed; refuse when require is set
+	require    bool                     // true when resolveErr wraps runtime.ErrSandboxRequired under require_sandbox
+	enabled    bool                     // mirrors [runtime].enabled at resolution time
+}
+
+// runtimeWireSandboxLater holds the deferred wiring decision for the shell
+// tool; nil means [runtime] was disabled entirely (posture unchanged).
+var runtimeWireSandboxLater *runtimeWire
+
+// wireShellToolSandbox applies a resolution outcome to a shell tool:
+//   - resolved backend present  => wired via SetRuntimeManager-equivalent
+//     direct backend injection (tool executes through it);
+//   - require + resolve error   => REFUSING backend installed (fail closed);
+//   - enabled=false             => no-op, preserving the pre-leaf posture.
+//
+// Split out from startup so tests can drive every branch without building a
+// full component set.
+func wireShellToolSandbox(shellTool *builtin.ShellExecuteTool, resolveErr error, runtimeEnabled bool, logger *slog.Logger) {
+	if !runtimeEnabled {
+		return
+	}
+	if resolveErr != nil {
+		shellTool.SetRefusingBackend(resolveErr)
+		logger.Error("shell tool will REFUSE execution: no qualifying sandbox backend available",
+			"error", resolveErr)
+	}
+}
+
+// newRefusingBackend constructs the fail-closed ExecutionBackend used when
+// sandbox resolution fails under require_sandbox=true.
+func newRefusingBackend(reason error) runtime.ExecutionBackend {
+	return builtin.NewRefusingBackend(reason)
 }
 
 // NewComponents creates all daemon components from configuration.
@@ -1646,24 +1723,55 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	pendingChangesRegistry := builtin.NewPendingChangesRegistry()
 	c.PendingChanges = pendingChangesRegistry
 
-	// Create runtime manager for backend-based command execution
+	// Create runtime manager for backend-based command execution.
+	//
+	// Posture distinction (fail-closed leaf):
+	//   - [runtime] enabled: backend selection goes through ResolveBackend.
+	//     With require_sandbox=true and no qualifying sandbox backend, the
+	//     shell tool is wired to a REFUSING backend (every command errors
+	//     wrapping runtime.ErrSandboxRequired) — never silent local exec.
+	//   - [runtime] disabled: behavior is entirely unchanged from before
+	//     this leaf — no manager, shell tool falls back to direct local
+	//     exec. This is a deliberate, documented posture, not a degrade.
 	var containerMgr *runtime.ContainerManager
 	if cfg.Runtime.Enabled {
-		runtimeCfg := runtime.Config{
-			DefaultBackend: cfg.Runtime.DefaultBackend,
-			Docker: runtime.DockerConfig{
-				Image:       cfg.Runtime.Docker.Image,
-				VolumeBinds: cfg.Runtime.Docker.VolumeBinds,
-				Timeout:     time.Duration(cfg.Runtime.Docker.TimeoutSeconds) * time.Second,
-			},
-		}
-		var err error
-		containerMgr, err = runtime.NewContainerManager(runtimeCfg, logger)
-		if err != nil {
-			logger.Warn("Failed to create runtime manager, commands will use local exec", "error", err)
-			containerMgr = nil
+		runtimeCfg := buildRuntimeConfig(cfg.Runtime, logger)
+		mgr, mgrErr := runtime.NewContainerManager(runtimeCfg, logger)
+		if mgrErr != nil {
+			logger.Error("Failed to create runtime manager", "error", mgrErr,
+				"hint", "check [runtime] docker configuration; with require_sandbox=true commands will be refused")
+			runtimeWireSandboxLater = &runtimeWire{
+				resolveErr: fmt.Errorf("creating runtime manager: %w", mgrErr),
+				enabled:    true,
+			}
 		} else {
-			logger.Info("Runtime manager initialized", "backends", containerMgr.ListBackends(), "default", containerMgr.DefaultBackend())
+			containerMgr = mgr
+			resolved, resolveErr := runtime.ResolveBackend(
+				containerMgr, runtimeCfg.Sandbox, logger)
+			if resolveErr != nil {
+				if errors.Is(resolveErr, runtime.ErrSandboxRequired) && runtimeCfg.Sandbox.RequireSandbox {
+					logger.Error("sandbox required but unavailable: command execution will be REFUSED",
+						"order", string(runtimeCfg.Sandbox.Order),
+						"error", resolveErr,
+					)
+				} else {
+					logger.Warn("backend resolution failed; shell tool will use direct exec",
+						"error", resolveErr)
+				}
+				runtimeWireSandboxLater = &runtimeWire{
+					resolveErr: resolveErr,
+					require:    errors.Is(resolveErr, runtime.ErrSandboxRequired),
+					enabled:    true,
+				}
+			} else if resolved == nil {
+				runtimeWireSandboxLater = &runtimeWire{resolveErr: nil, enabled: true}
+			} else {
+				logger.Info("Resolved execution backend",
+					"backend", resolved.Name(),
+					"order", string(runtimeCfg.Sandbox.Order),
+					"require_sandbox", runtimeCfg.Sandbox.RequireSandbox)
+				runtimeWireSandboxLater = &runtimeWire{resolved: resolved, enabled: true}
+			}
 		}
 	}
 
@@ -1680,7 +1788,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if c.TaskRegistry != nil {
 		taskStore = c.TaskRegistry.Store()
 	}
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver)
 
 	// Register /remember tool for agents to propose improvements (Thread E)
 	c.ToolRegistry.Register(builtin.NewRememberTool(".meept/improvements.md"))
@@ -3361,19 +3469,19 @@ func (c *Components) Start(ctx context.Context) error {
 					if executor != nil {
 						loop = loop.WithExecutor(executor)
 					}
-				// Leaf 02 (tier-3 plan): tier-3 autonomous employees get the
-				// ShouldEscalate gate so constitution-matching candidates are
-				// routed to plan signoff instead of immediate execution.
-				// Tier-1/2 loops ignore the gate (decideTier1/2 never call it).
-				if gate := escalationGateForTier(&emp.Constitution, emp.ID, c.Logger); gate != nil {
-					loop = loop.WithEscalationGate(gate)
-				}
-				// Leaf 03 (tier-3 plan): tier-3 loops write escalation audit
-				// findings so `meept agents audit` surfaces them. Nil-safe:
-				// WithAuditStore ignores nil.
-				if c.EmployeeAuditStore != nil {
-					loop = loop.WithAuditStore(c.EmployeeAuditStore)
-				}
+					// Leaf 02 (tier-3 plan): tier-3 autonomous employees get the
+					// ShouldEscalate gate so constitution-matching candidates are
+					// routed to plan signoff instead of immediate execution.
+					// Tier-1/2 loops ignore the gate (decideTier1/2 never call it).
+					if gate := escalationGateForTier(&emp.Constitution, emp.ID, c.Logger); gate != nil {
+						loop = loop.WithEscalationGate(gate)
+					}
+					// Leaf 03 (tier-3 plan): tier-3 loops write escalation audit
+					// findings so `meept agents audit` surfaces them. Nil-safe:
+					// WithAuditStore ignores nil.
+					if c.EmployeeAuditStore != nil {
+						loop = loop.WithAuditStore(c.EmployeeAuditStore)
+					}
 					if planner != nil {
 						loop = loop.WithPlanner(planner)
 					}
@@ -4382,6 +4490,8 @@ func registerBuiltinTools(
 	summarizerChatter llm.Chatter,
 	fenceChecker *intsecurity.FenceChecker,
 	logger *slog.Logger,
+	mediaCfg config.MediaConfig,
+	resolver *llm.Resolver,
 ) {
 	readCache := builtin.NewReadCache(30)
 
@@ -4396,10 +4506,13 @@ func registerBuiltinTools(
 		readFileTool.SetSecurityOrchestrator(secOrch)
 		writeFileTool.SetSecurityOrchestrator(secOrch)
 	}
+	if pendingChangesRegistry != nil {
+		writeFileTool.SetPendingChangesRegistry(pendingChangesRegistry)
+	}
 	registry.Register(readFileTool)
 	registry.Register(writeFileTool)
 	// Use the shared pending changes registry passed by the caller so that
-	// file_edit, ast_edit, and lsp_rename all share the same registry.
+	// file_edit, file_write, ast_edit, and lsp_rename all share the same registry.
 	pendingChanges := pendingChangesRegistry
 
 	fileEditTool := builtin.NewFileEditTool(checker, readCache)
@@ -4456,7 +4569,29 @@ func registerBuiltinTools(
 		shellTool.SetFenceChecker(fenceChecker)
 		logger.Debug("Shell tool configured with fence checker")
 	}
-	if containerMgr != nil {
+	if runtimeWireSandboxLater != nil {
+		wire := runtimeWireSandboxLater
+		switch {
+		case wire.resolveErr != nil && wire.require:
+			// Fail closed: refuse every command rather than degrade to
+			// unsandboxed direct exec.
+			shellTool.SetRefusingBackend(wire.resolveErr)
+			logger.Error("Shell tool wired to REFUSING backend (sandbox required, unavailable)",
+				"error", wire.resolveErr)
+		case wire.resolveErr != nil:
+			// Non-require resolution failure: preserve pre-leaf posture
+			// (no manager wiring => direct exec) — logged at startup.
+		case wire.resolved != nil:
+			shellTool.SetBackend(wire.resolved)
+			logger.Info("Shell tool wired to resolved backend", "backend", wire.resolved.Name())
+		default:
+			// Resolution produced no backend: leave direct-exec posture.
+		}
+		runtimeWireSandboxLater = nil // consume; avoid stale reuse on re-init
+	}
+	if containerMgr != nil && !shellTool.BackendWired() {
+		// Legacy path: manager built without sandbox resolution (e.g. tests
+		// constructing components directly) still gets default-backend wiring.
 		shellTool.SetRuntimeManager(containerMgr)
 		logger.Info("Shell tool wired to runtime manager", "backend", containerMgr.DefaultBackend())
 	}
@@ -4488,6 +4623,12 @@ func registerBuiltinTools(
 
 	// Web search tool (DuckDuckGo)
 	registry.Register(builtin.NewWebSearchTool(15 * time.Second))
+
+	// Image/video generation (models.json5 refs)
+	media := config.EffectiveMediaConfig(mediaCfg)
+	timeout := time.Duration(media.TimeoutSeconds) * time.Second
+	registry.Register(builtin.NewGenerateImageTool(resolver, media.OutputDir, timeout))
+	registry.Register(builtin.NewGenerateVideoTool(resolver, media.OutputDir, timeout))
 
 	// Memory tools (only if memory manager is available AND successfully initialized)
 	if memoryMgr != nil && memoryMgr.IsInitialized() {
