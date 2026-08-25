@@ -7,6 +7,22 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 )
 
+// FlowKind identifies which OAuth flow a provider uses.
+// The empty value means the standard RFC 8628 device code flow
+// (FlowDeviceRFC8628), so existing registry entries need no change.
+type FlowKind string
+
+const (
+	// FlowDeviceRFC8628 is the standard RFC 8628 device code flow.
+	FlowDeviceRFC8628 FlowKind = "device_rfc8628"
+	// FlowDeviceCodex is the Codex-style device flow with separate
+	// user-code and poll endpoints.
+	FlowDeviceCodex FlowKind = "device_codex"
+	// FlowPKCEPaste is the PKCE flow where the user pastes the callback
+	// URL manually.
+	FlowPKCEPaste FlowKind = "pkce_paste"
+)
+
 // OAuthProviderConfig holds the OAuth configuration for a provider.
 // Client IDs and secrets are embedded as defaults with user overrides via
 // environment variables.
@@ -22,6 +38,14 @@ type OAuthProviderConfig struct {
 	Transport           llm.ProviderTransport
 	BaseURL             string
 	ExtraHeaders        map[string]string // e.g., X-GitHub-Api-Version
+
+	Flow             FlowKind // empty == FlowDeviceRFC8628
+	DeviceUserCodeEP string   // codex: usercode endpoint
+	DevicePollEP     string   // codex: poll endpoint
+	AuthorizeURL     string   // claude: authorize endpoint
+	VerifyHint       string   // claude: user-facing hint
+	DiscoveryURL     string   // xai: .well-known/openid-configuration
+	RefreshJSON      bool     // claude: refresh as JSON body
 }
 
 // OAuthProviders is the registry of supported OAuth device code providers.

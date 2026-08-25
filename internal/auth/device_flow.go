@@ -38,6 +38,7 @@ type DeviceFlowConfig struct {
 	DeviceEP     string // device authorization endpoint
 	TokenEP      string // token endpoint
 	Scopes       []string
+	FormEncoded  bool // send the device request as application/x-www-form-urlencoded instead of JSON
 }
 
 // deviceCodeRequest is the JSON payload sent to the device authorization endpoint.
@@ -100,20 +101,34 @@ func (e *DeviceFlowError) Error() string {
 // the device code, user code, verification URI, and polling interval.
 func StartDeviceFlow(ctx context.Context, cfg DeviceFlowConfig) (*DeviceCodeResult, error) {
 	scopeStr := strings.Join(cfg.Scopes, " ")
-	reqBody := deviceCodeRequest{
-		ClientID: cfg.ClientID,
-		Scope:    scopeStr,
-	}
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal device code request: %w", err)
+
+	var bodyStr string
+	var contentType string
+	if cfg.FormEncoded {
+		form := url.Values{
+			"client_id": {cfg.ClientID},
+			"scope":     {scopeStr},
+		}
+		bodyStr = form.Encode()
+		contentType = "application/x-www-form-urlencoded"
+	} else {
+		reqBody := deviceCodeRequest{
+			ClientID: cfg.ClientID,
+			Scope:    scopeStr,
+		}
+		bodyBytes, err := json.Marshal(reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("marshal device code request: %w", err)
+		}
+		bodyStr = string(bodyBytes)
+		contentType = "application/json"
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.DeviceEP, strings.NewReader(string(bodyBytes)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.DeviceEP, strings.NewReader(bodyStr))
 	if err != nil {
 		return nil, fmt.Errorf("create device code request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := deviceFlowHTTPClient.Do(req)
