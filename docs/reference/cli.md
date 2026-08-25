@@ -194,6 +194,7 @@ Running `meept chat` with no message argument opens the interactive TUI. In addi
 **Keybindings:**
 
 - `ctrl+x` — enter command mode.
+- `ctrl+d` — open the pending changes review modal (j/k navigate, v view diff, a accept, r reject, esc close). See [change review](../workflows/change-review.md).
 - `esc` — close the active menu or overlay (double `esc`/`ctrl+c` quits).
 
 **Slash Commands** (type `/` in the input for autocomplete; full list via `/help`):
@@ -436,7 +437,7 @@ Verified against the binary. Run `meept <command> --help` for flags.
 | `meept calendar` | auth, today | Google Calendar integration |
 | `meept changes` | list, revert | Pending-change staging review |
 | `meept cluster` | debug, init, join, keygen, leave, remote, start, status | P2P cluster mesh |
-| `meept config` | get, list, oauth, set, sync | Config editor + dot-notation get/set (`rendering.ui_theme`, `llm.default_model`, …) |
+| `meept config` | get, list, oauth, set, sync | Config editor + dot-notation get/set (`rendering.ui_theme`, `llm.default_model`, …). `config oauth connect <provider>` runs subscription logins — providers: `github-models`, `google-oauth`, `google-calendar`, `xai-oauth` (SuperGrok), `openai-codex` (ChatGPT Plus/Pro), `anthropic-sub` (Claude Pro/Max). See [OAuth Providers](../workflows/auth.md). |
 | `meept daemon` | restart, start, status, stop | Daemon lifecycle |
 | `meept dispatch` | — | Dispatch tasks to cluster nodes |
 | `meept halo` | — | HALO-style trace analysis |
