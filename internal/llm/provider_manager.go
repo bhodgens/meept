@@ -113,6 +113,19 @@ func isAnthropic(cfg *ModelConfig) bool {
 // client implementation (Anthropic vs OpenAI-compatible) based on provider ID
 // and base URL.
 func createChatterFor(cfg *ModelConfig, budget *Budget, logger *slog.Logger, tr TokenResolver) Chatter {
+	if cfg.ProviderID == "openai-codex" {
+		opts := []CodexClientOption{WithCodexLogger(logger)}
+		if budget != nil {
+			opts = append(opts, WithCodexBudget(budget))
+		}
+		if cfg.Timeout > 0 {
+			opts = append(opts, WithCodexTimeout(cfg.Timeout))
+		}
+		if tr != nil && cfg.OAuthProvider != "" {
+			opts = append(opts, WithCodexTokenResolver(tr, cfg.OAuthProvider))
+		}
+		return NewCodexClient(cfg, opts...)
+	}
 	if isAnthropic(cfg) {
 		opts := []AnthropicClientOption{
 			WithAnthropicLogger(logger),
