@@ -39,9 +39,88 @@ Enable in `~/.meept/meept.json5`:
       timeout_seconds: 300,
       auto_cleanup: true,
     },
+    // Sandbox-aware backend selection (see below).
+    sandbox: {
+      sandbox_backend_order: "auto", // auto | bwrap | docker | local
+      require_sandbox: false,        // true = fail closed when no sandbox available
+    },
   },
 }
 ```
+
+## Sandbox Backend Selection (sandbox_backend_order / require_sandbox)
+
+`sandbox.sandbox_backend_order` controls which execution backend the daemon
+resolves at startup:
+
+| Order     | Behavior                                                                    |
+| --------- | --------------------------------------------------------------------------- |
+| `"auto"`  | Prefer the strongest confinement available: docker > bwrap > local          |
+| `"bwrap"` | Use the bubblewrap backend only                                             |
+| `"docker"`| Use the Docker backend only                                                 |
+| `"local"` | Deliberately run unsandboxed on the host (no fallback warning is emitted)   |
+
+### Fail-closed semantics
+
+- `require_sandbox: false` (default): if no qualifying backend (docker,
+  bwrap) is available, the daemon falls back to **unsandboxed local exec**
+  and logs a loud `UNSANDBOXED local fallback` warning.
+- `require_sandbox: true`: if no qualifying backend is available, the shell
+  tool is wired to a **refusing backend** — every command fails with an error
+  wrapping `runtime.ErrSandboxRequired`. The daemon never silently degrades
+  to unsandboxed execution.
+
+> **Posture distinction:** with `[runtime] enabled = false`, behavior is
+> entirely unchanged from before sandbox resolution existed: no runtime
+> manager is built and the shell tool uses direct local exec. That is a
+> deliberate configuration posture, not a silent degrade; only *enabled*
+> runtimes participate in fail-closed sandbox enforcement.
+
+A backend name *qualifies* as a sandbox (`runtime.Qualifies`) when it provides
+OS-level confinement: `bwrap` and `docker` qualify; `local` never does.
+
+## Bubblewrap (bwrap) Backend
+
+On Linux, meep can jail agent commands via [bubblewrap](https://github.com/containers/bubblewrap)
+user namespaces using the external `bwrap` binary:
+
+```bash
+# Debian/Ubuntu
+sudo apt-get install bubblewrap
+# Fedora
+sudo dnf install bubblewrap
+# Arch
+sudo pacman -S bubblewrap
+```
+
+The backend execs the installed binary — no code is vendored. Each command
+runs in a jail assembled as:
+
+```
+bwrap --ro-bind /usr /usr --ro-bind /bin /bin \
+      --ro-bind /lib /lib --ro-bind /lib64 /lib64   # each only if present
+      --bind <workdir> <workdir>                    # writable workspace
+      --dev /dev --proc /proc [--tmpfs /tmp]
+      <extra_args...>
+      -- sh -c <command>
+```
+
+Optional tuning under `[runtime]`:
+
+```json5
+{
+  runtime: {
+    bwrap: {
+      binary_path: "bwrap",            // custom binary location
+      extra_args: ["--unshare-net"],   // e.g. cut network access
+      tmpfs_dirs: ["/tmp"],            // default tmpfs mounts
+    },
+  },
+}
+```
+
+Child environments are filtered through the same `[runtime].env_policy`
+(allowlist by default) as every other backend.
 
 ## Test Harness
 
