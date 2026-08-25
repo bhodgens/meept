@@ -44,3 +44,9 @@ Enable the server itself via the TUI MCP menu (`ctrl-x o`), select
 
 Per-OS install commands live in
 [external-integrations](external-integrations.md#cua-driver-desktop-computer-use).
+
+The bundled `computer-use` skill (`config/skills/computer-use/SKILL.md`)
+encodes the recommended capture → act → verify loop and the safety rules
+agents should follow when driving these tools; see also
+[external-integrations](external-integrations.md#cua-driver-desktop-computer-use)
+for enablement steps.
