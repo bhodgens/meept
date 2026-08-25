@@ -37,6 +37,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/runtime"
 	"github.com/caimlas/meept/pkg/id"
 )
 
@@ -225,22 +226,22 @@ type GoalLookup interface {
 // (consecutive failures, last result). All I/O (LLM calls, plan creation,
 // bot execution) happens outside the lock per CLAUDE.md mutex-scope rule.
 type GoalLoop struct {
-	employeeID string
+	employeeID   string
 	constitution *Constitution
-	goalStore   *GoalStore
-	runner      bot.BotExecutor
-	planner     PlanCreator
-	auditor     *PostTurnAuditor
-	reflector   Reflector
-	logger      *slog.Logger
+	goalStore    *GoalStore
+	runner       bot.BotExecutor
+	planner      PlanCreator
+	auditor      *PostTurnAuditor
+	reflector    Reflector
+	logger       *slog.Logger
 
 	// Configurable thresholds.
 	maxConsecutiveFailures int
 
 	// External callbacks.
-	pauseFn PauseFunc
+	pauseFn    PauseFunc
 	goalLookup GoalLookup
-	statusFn func() string // returns "running"|"paused"|"error"|"" (empty=unknown)
+	statusFn   func() string // returns "running"|"paused"|"error"|"" (empty=unknown)
 
 	// emitMetricFn is the telemetry callback injected by the Manager
 	// (same pattern as pauseFn). When non-nil, Reflect emits the
@@ -262,12 +263,29 @@ type GoalLoop struct {
 	// decideTier3 escalates a candidate to plan signoff (leaf 03).
 	auditStore *AuditStore
 
+	// Quality-gate wiring (leaf 08: quality-gated autonomy). gateBackend
+	// is the ExecutionBackend used to run gate commands and hash the
+	// workspace (nil falls back to a local backend inside RunGate);
+	// gateWorkdir is the employee's project directory; gateState carries
+	// the cross-round skip-on-unchanged memory.
+	gateBackend runtime.ExecutionBackend
+	gateWorkdir string
+	// gateCfg is the resolved quality-gate config (per-goal Gate merged
+	// over [employee.defaults.gate] by the Manager). Nil/empty Command =
+	// legacy, ungated behaviour.
+	gateCfg *GateConfig
+
 	// Mutable state (guarded by mu).
 	mu                   sync.Mutex
 	consecutiveFailures  int
 	consecutiveSuccesses int // G1: tracks consecutive successful turns for recovery
 	lastResult           *bot.BotExecutionResult
 	lastAssessmentTime   time.Time
+	// lastGateState / lastGateFailedOutput carry the quality-gate memory
+	// across rounds (leaf 08). Empty LastFailedOutput means the gate (if
+	// any) is not in a failed state. Guarded by mu.
+	lastGateState        GateState
+	lastGateFailedOutput string
 }
 
 // EmitMetricFunc is the callback signature for emitting telemetry from the
@@ -311,6 +329,40 @@ func (l *GoalLoop) WithAuditStore(s *AuditStore) *GoalLoop {
 		l.mu.Unlock()
 	}
 	return l
+}
+
+// WithGateBackend injects the ExecutionBackend used to run the quality-gate
+// command and compute the workspace hash (leaf 08). Nil is ignored; RunGate
+// then falls back to a local backend. The backend should honor require_sandbox
+// from the runtime config when the caller resolves it.
+func (l *GoalLoop) WithGateBackend(b runtime.ExecutionBackend) *GoalLoop {
+	if b != nil {
+		l.gateBackend = b
+	}
+	return l
+}
+
+// WithGateWorkdir sets the workspace directory the quality gate runs in and
+// hashes (typically the employee's project directory). Empty means no
+// workspace — a configured gate cannot run without one.
+func (l *GoalLoop) WithGateWorkdir(dir string) *GoalLoop {
+	if dir != "" {
+		l.gateWorkdir = dir
+	}
+	return l
+}
+
+// GateFeedbackBlock returns the failed-gate output block appended to the next
+// PLAN/ASSESS prompt as feedback, or "" when there is no pending failure.
+func (l *GoalLoop) GateFeedbackBlock() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.lastGateFailedOutput == "" {
+		return ""
+	}
+	return "\n# quality gate feedback\n\nThe previous round's completion check FAILED. " +
+		"Address this before claiming success:\n\n```\n" +
+		l.lastGateFailedOutput + "\n```\n"
 }
 
 // NewGoalLoop constructs a GoalLoop for the given employee. The constitution
@@ -701,9 +753,9 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 	// Run the post-turn auditor if configured (Checkpoint 2).
 	if auditor != nil && result != nil {
 		turn := TurnRecord{
-			EmployeeID:  l.employeeID,
-			PlanID:      plan.ID,
-			FinalOutput: result.Output,
+			EmployeeID:   l.employeeID,
+			PlanID:       plan.ID,
+			FinalOutput:  result.Output,
 			Constitution: constitution,
 		}
 		if _, auditErr := auditor.Audit(ctx, turn); auditErr != nil {
@@ -753,6 +805,29 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 		if health != GoalHealthy && health != GoalUnknown {
 			health = HealthRecoveryFunc(successCount, recoveryThreshold, health)
 		}
+
+		// Leaf 08 (quality-gated autonomy): when a gate command is
+		// configured AND there is an active goal that would be completed,
+		// the model's judgment alone cannot mark the goal complete — the
+		// gate MUST pass. A failed/skipped gate overrides the health to
+		// at_risk and records the failure output as feedback for the next
+		// round.
+		gateCfg := l.gateConfigForGoal(ctx)
+		if gateCfg != nil && gateCfg.Command != "" && health == GoalHealthy {
+			gateRes, gateErr := l.runCompletionGate(ctx, *gateCfg, logger)
+			switch {
+			case gateErr != nil:
+				logger.Warn("quality gate could not run", "error", gateErr)
+				health = GoalAtRisk
+			case gateRes.Passed:
+				logger.Debug("quality gate passed")
+				l.mu.Lock()
+				l.lastGateFailedOutput = ""
+				l.mu.Unlock()
+			default:
+				health = GoalAtRisk
+			}
+		}
 	}
 
 	// Update the active goal's health in the store.
@@ -783,6 +858,65 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 
 	logger.Info("reflect complete", "health", health.String(), "plan_id", plan.ID)
 	return health, nil
+}
+
+// gateConfigForGoal resolves the effective quality-gate config for the
+// active goal. Returns nil when no goal is active or no gate is configured.
+// The Goal struct carries a per-goal Gate; until goal definitions expose it
+// in storage, the loop-level config (set via SetGateConfig) is authoritative.
+func (l *GoalLoop) gateConfigForGoal(ctx context.Context) *GateConfig {
+	l.mu.Lock()
+	cfg := l.gateCfg
+	l.mu.Unlock()
+	if cfg == nil || cfg.Command == "" {
+		return nil
+	}
+	return cfg
+}
+
+// runCompletionGate executes the configured quality gate via RunGate,
+// threading GateState across rounds and recording failures as feedback.
+// Output is only ever logged at debug level (it may contain code).
+func (l *GoalLoop) runCompletionGate(ctx context.Context, cfg GateConfig, logger *slog.Logger) (*GateResult, error) {
+	l.mu.Lock()
+	prev := l.lastGateState
+	workdir := l.gateWorkdir
+	backend := l.gateBackend
+	l.mu.Unlock()
+
+	if workdir == "" {
+		return nil, errors.New("gate configured but no workspace directory set")
+	}
+	res, state, err := RunGate(ctx, cfg, backend, workdir, &prev)
+	if err != nil {
+		return nil, err
+	}
+	l.mu.Lock()
+	l.lastGateState = state
+	if res.Passed {
+		l.lastGateFailedOutput = ""
+	} else if res.Output != "" {
+		l.lastGateFailedOutput = truncate(res.Output, 4096)
+	}
+	// On a SKIPPED run, keep the previous failure output as pending
+	// feedback (the failure is still unresolved).
+	l.mu.Unlock()
+	logger.Debug("completion gate finished", "passed", res.Passed, "skipped", res.Skipped)
+	return res, nil
+}
+
+// SetGateConfig installs the quality-gate config for this loop's active goal.
+// A nil cfg or empty Command restores legacy (ungated) behaviour. Safe to
+// call concurrently; takes effect from the next Reflect.
+func (l *GoalLoop) SetGateConfig(cfg *GateConfig) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if cfg == nil || cfg.Command == "" {
+		l.gateCfg = nil
+		return
+	}
+	c := *cfg
+	l.gateCfg = &c
 }
 
 // reflectViaLLM asks the reflector LLM to assess the execution outcome.

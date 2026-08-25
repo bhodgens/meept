@@ -27,13 +27,13 @@
     "topic": "bus.publish",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 476
+    "line": 489
   },
   {
     "topic": "bus.stats",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 497
+    "line": 510
   },
   {
     "topic": "bus.subscribe",
@@ -88,6 +88,36 @@
     "handler": "p.makeProxy(\"cache.stats\", \"cache.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
     "line": 134
+  },
+  {
+    "topic": "changes.accept",
+    "handler": "func(_ context.Context, params json.RawMessage",
+    "file": "internal/daemon/changes_rpc.go",
+    "line": 70
+  },
+  {
+    "topic": "changes.journal",
+    "handler": "func(_ context.Context, params json.RawMessage",
+    "file": "internal/daemon/changes_rpc.go",
+    "line": 113
+  },
+  {
+    "topic": "changes.list",
+    "handler": "func(_ context.Context, params json.RawMessage",
+    "file": "internal/daemon/changes_rpc.go",
+    "line": 37
+  },
+  {
+    "topic": "changes.reject",
+    "handler": "func(_ context.Context, params json.RawMessage",
+    "file": "internal/daemon/changes_rpc.go",
+    "line": 90
+  },
+  {
+    "topic": "changes.revert",
+    "handler": "func(_ context.Context, params json.RawMessage",
+    "file": "internal/daemon/changes_rpc.go",
+    "line": 153
   },
   {
     "topic": "chat",
@@ -192,10 +222,22 @@
     "line": 45
   },
   {
+    "topic": "daemon.health",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/daemon/health_rpc.go",
+    "line": 42
+  },
+  {
     "topic": "daemon.restart",
     "handler": "h.handleRestart",
     "file": "internal/daemon/daemon_rpc.go",
     "line": 33
+  },
+  {
+    "topic": "daemon.shutdown",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/daemon/health_rpc.go",
+    "line": 68
   },
   {
     "topic": "daemon.start",
@@ -213,7 +255,7 @@
     "topic": "daemon.status",
     "handler": "statusHandler",
     "file": "internal/rpc/server.go",
-    "line": 465
+    "line": 478
   },
   {
     "topic": "daemon.stop",
@@ -279,7 +321,7 @@
     "topic": "firewall.stats",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 468
+    "line": 481
   },
   {
     "topic": "instruction.add",
@@ -319,6 +361,12 @@
   },
   {
     "topic": "memory.export",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/daemon/memory_rpc.go",
+    "line": 44
+  },
+  {
+    "topic": "memory.export",
     "handler": "p.makeProxy(\"memory.export\", \"memory.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
     "line": 62
@@ -327,7 +375,7 @@
     "topic": "memory.findCanonical",
     "handler": "h.handleFindCanonical",
     "file": "internal/rpc/epistemic.go",
-    "line": 45
+    "line": 46
   },
   {
     "topic": "memory.listAutoClaims",
@@ -339,7 +387,7 @@
     "topic": "memory.listPendingReviews",
     "handler": "h.handleListPendingReviews",
     "file": "internal/rpc/epistemic.go",
-    "line": 44
+    "line": 45
   },
   {
     "topic": "memory.markResolved",
@@ -358,6 +406,12 @@
     "handler": "h.handlePromoteClaim",
     "file": "internal/rpc/epistemic.go",
     "line": 41
+  },
+  {
+    "topic": "memory.purgeAutoClaims",
+    "handler": "h.handlePurgeAutoClaims",
+    "file": "internal/rpc/epistemic.go",
+    "line": 44
   },
   {
     "topic": "memory.query",
@@ -405,7 +459,13 @@
     "topic": "memory.reviewQueue",
     "handler": "h.handleReviewQueue",
     "file": "internal/rpc/epistemic.go",
-    "line": 46
+    "line": 47
+  },
+  {
+    "topic": "memory.vector.search",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/daemon/memory_rpc.go",
+    "line": 29
   },
   {
     "topic": "memory.vector.search",
@@ -468,10 +528,22 @@
     "line": 27
   },
   {
+    "topic": "notifications.get_dnd",
+    "handler": "h.handleGetDND",
+    "file": "internal/rpc/notifications.go",
+    "line": 33
+  },
+  {
+    "topic": "notifications.set_dnd",
+    "handler": "h.handleSetDND",
+    "file": "internal/rpc/notifications.go",
+    "line": 32
+  },
+  {
     "topic": "ping",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 394
+    "line": 400
   },
   {
     "topic": "pipeline.status",
@@ -966,6 +1038,12 @@
     "line": 93
   },
   {
+    "topic": "session.dispatch_trace",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/rpc/dispatch_trace.go",
+    "line": 20
+  },
+  {
     "topic": "session.generate_description",
     "handler": "p.makeProxy(\"session.generate_description\", \"session.result\", 20*time.Second",
     "file": "internal/rpc/proxy.go",
@@ -1137,7 +1215,7 @@
     "topic": "status",
     "handler": "statusHandler",
     "file": "internal/rpc/server.go",
-    "line": 464
+    "line": 477
   },
   {
     "topic": "status",
@@ -1161,7 +1239,7 @@
     "topic": "task.amend.submit",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 502
+    "line": 515
   },
   {
     "topic": "task.cancel",
