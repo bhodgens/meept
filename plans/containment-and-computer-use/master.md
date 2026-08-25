@@ -276,18 +276,21 @@ Output per child: APPROVED or specific gaps with file:line.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-env-policy | PENDING | 0 | |
-| 02-failclosed-backends | PENDING | 0 | |
-| 03-secret-broker | PENDING | 0 | |
-| 04-egress-proxy | PENDING | 0 | |
-| 05-write-staging | PENDING | 0 | |
-| 06-journal | PENDING | 0 | |
-| 07-user-surfaces | PENDING | 0 | |
-| 08-cua-driver-wiring | PENDING | 0 | |
-| 09-computer-use-skill | PENDING | 0 | |
-| 10-integration-tests | PENDING | 0 | |
+| 01-env-policy | COMPLETE | 1 | merged 49c1ea68 (with leaf 05) |
+| 02-failclosed-backends | COMPLETE | 1 | merged 0ec8fa83 (with leaf 03) + 515dff2a refusing backend |
+| 03-secret-broker | COMPLETE | 1 | merged 0ec8fa83 |
+| 04-egress-proxy | COMPLETE | 1 | merged 6df69fc3 |
+| 05-write-staging | COMPLETE | 1 | merged 49c1ea68 |
+| 06-journal | COMPLETE | 1 | merged 36757f6e |
+| 07-user-surfaces | COMPLETE | 1 | merged 578312b7 (go) + d1e10c60 (flutter) |
+| 08-cua-driver-wiring | COMPLETE | 1 | merged c7510ac1 |
+| 09-computer-use-skill | COMPLETE | 1 | merged 86af507c |
+| 10-integration-tests | COMPLETE | 1 | merged cc0d699f |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
+
+**TREE COMPLETE 2026-08-25.** All 10 leaves merged. Final verification:
+`go test -race` green across runtime/secrets/builtin/integration/comm-http.
 
 ## Integration Test Plan
 
