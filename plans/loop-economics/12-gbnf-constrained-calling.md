@@ -4,51 +4,73 @@
 
 ## Meta
 - **Parent:** ../master.md
-- **Scope:** Grammar-constrained tool-call JSON for llama.cpp-family providers: schema->GBNF converter, request attach, fallback warn.
-- **Deps:** 02 (full schemas via tool_view/registry), 11 (local model availability path) | **Context:** 65K | **Group:** E
+- **Scope:** Grammar-constrained tool-call JSON for ANY provider whose endpoint supports it: llama.cpp `grammar`, vLLM `guided_grammar`, OpenAI-compat structured outputs; schema->GBNF converter; capability detection; graceful fallback.
+- **Deps:** 02 (full schemas), 11 (local model availability) | **Context:** 65K | **Group:** E
 
 ## Goal
 
-Small models emit malformed tool-call JSON. llama.cpp server accepts a `grammar` field making invalid output impossible. Generate GBNF from the ACTIVE tool definitions: array-root of tool-call objects (atomic-agent lesson: array-only root defeats sampler first-token bias). Unsupported schema constructs fall back to unconstrained + one-time warning. Config-gated; only for providers whose transport is the managed llama.cpp runtime.
+Small models emit malformed tool-call JSON. Grammar constraints make invalid output impossible. Meept's client is a generic OpenAI-compatible payload builder (client.go buildChatRequest ~line 261-330), so constraint support is a PER-ENDPOINT capability, not per-vendor: llama.cpp server accepts `grammar` (GBNF); vLLM accepts `guided_grammar`; several OpenAI-compatible servers accept `response_format: {type:"json_schema", schema}`. This leaf adds a converter + a per-provider capability flag + attach logic with fallback.
 
 ## Context
 
-internal/llm provider layer — find llama.cpp request construction in runtime_process.go/client paths. Tool definitions arrive as llm.ToolDefinition w/ Parameters (llm.FunctionParameters ~ map[string]any JSON-schema-ish).
+buildChatRequest assembles `payload map[string]any` — adding a key is trivial; knowing WHICH key each endpoint honors is the actual problem. Providers resolve via config/models.json5 (base_url + capabilities). RuntimeManager launches managed llama.cpp/MLX runtimes (leaf 11 wires pulled models). MLX-server and Ollama expose OpenAI-compatible APIs WITHOUT grammar fields — those endpoints simply get no grammar (capability absent), not an error.
 
-Key files: internal/llm/*, new internal/llm/gbnf.go.
+Key files:
+- internal/llm/client.go - buildChatRequest (~290 payload block), chatOptions struct (~636) gains grammar field + WithGrammar option
+- internal/config/models.json5 / models_catalog.go - per-provider capability declaration
+- internal/llm/gbnf.go NEW - converter
 
 ## Interface Contracts (From Parent)
 
 ```go
 // internal/llm/gbnf.go:
 func GrammarForTools(defs []llm.ToolDefinition) (grammar string, complete bool)
-// Root ::= "[" ws item ("," ws item)* "]"? — MUST allow exactly-one array too.
-// Per tool: name enum-literal + arguments object from JSON schema subset:
-//   string(number/string/boolean enums as alternatives), number, integer,
-//   boolean, array<supported>, object{properties,required}
-// Unsupported constructs (oneOf/nested-anyOf/patternProperties/additional
-// schema keywords) mark that TOOL unsupported -> excluded from grammar;
-// if ANY tool excluded or defs empty -> complete=false (caller decides).
-func AttachGrammar(req *CompletionRequest, g string) // no-op on non-llamacpp transports
+// Root allows single-object OR array-of-objects (array-root bias fix).
+// Supported schema subset: string w/ optional enum, number, integer, boolean,
+// array<supported>, object{properties,required} to depth 3.
+// Required-first reordering (GBNF needs required props before optional).
+// Any unsupported construct -> that TOOL excluded from grammar;
+// complete=false when any exclusion or empty defs.
+// NEVER panics on arbitrary schemas.
+
+func AttachGrammar(reqPayload map[string]any, mode string, g string)
+// mode "llamacpp":  payload["grammar"]=g
+// mode "vllm":      payload["guided_grammar"]=g
+// mode "json_schema": payload["response_format"]={type:"json_schema", json_schema:{schema:<from tools>}}
+//   NOTE json_schema mode converts the JSON SCHEMA directly (not GBNF) —
+//   separate small converter JSONSchemaForTools(defs) in same file.
 ```
 
-Provider gating: config [agent.tools] gbnf_constrained bool default FALSE; when true AND active provider is managed llama.cpp runtime -> attach GrammarForTools(current FULL defs incl. always_full set). Incomplete grammar -> log warn once per session, proceed unconstrained. Indexed-mode interplay: when schema_mode=indexed, grammar covers core tools ONLY (stubbed ones can't be called validly anyway) — document.
+Capability declaration (models catalog entry):
+```
+providers.<id>.tool_constraint: "" (default) | "llamacpp" | "vllm" | "json_schema"
+Managed runtimes auto-declare: llama.cpp->"llamacpp". MLX/Ollama/remote default "".
+Config [agent.tools] gbnf_constrained bool default FALSE (global kill-switch).
+```
+
+Attach rule at buildChatRequest: gbnf_constrained AND provider declares capability AND defs present -> AttachGrammar(payload, mode, g). Incomplete grammar -> warn once/session, skip attach. Indexed-mode interplay: grammar covers always_full core tools only (stubbed tools cannot be called validly anyway).
 
 ## Tasks
-1. Failing converter tests table-driven: primitives; enum strings -> alternatives; required vs optional ordering (GBNF requires required-first reordering); nested object depth-2; array of strings; unsupported oneOf -> tool excluded + complete flag false; empty defs -> empty+false; root allows single-object array form.
-2. Golden test: fixture defs -> exact grammar string snapshot (regression pin).
-3. Failing attach tests: llamacpp transport receives grammar field; openai-compat transport untouched; config-off untouched.
-4. Integration smoke test w/ fake llama server asserting request body contains grammar and response parsing unchanged.
-5. Docs section (llm-management page from leaf 11) + config reference line.
+1. Failing converter tests table-driven: primitives; enum strings -> alternatives; required-first ordering; depth-3 nesting; arrays; oneOf -> tool excluded + complete=false; empty defs; root single-vs-array both derivable; quote/backslash escaping golden test.
+2. Golden snapshot test of full fixture grammar (regression pin).
+3. Failing attach tests: llamacpp/vllm/json_schema modes set correct keys; unknown mode no-op; capability-empty provider untouched; config-off untouched; incomplete-grammar warn-once dedupe.
+4. Wire chatOptions field + WithGrammar + buildChatRequest integration reading resolved provider capability (thread through existing cfg path).
+5. Catalog plumbing: tool_constraint field parse + managed-runtime auto-declaration in runtime_config.go.
+6. Docs: llm-management.md section (matrix of endpoint types vs constraint support) + config reference lines.
 
 ## Self-Verification Checklist
 - [ ] -race green internal/llm
-- [ ] Zero behavior change default-off
-- [ ] Warn-once deduplicated per session not per call
+- [ ] Zero wire change for providers without declared capability
+- [ ] Warn-once per session, not per call
+- [ ] Default-off global switch honored everywhere
 
 ## Review Checklist
-- [ ] Converter total function (never panics on weird schemas)
-- [ ] Escaping of quotes/backslashes in string literals correct (test)
+- [ ] Converter total (no panic paths; fuzz-lite test with random maps)
+- [ ] json_schema mode emits valid JSON Schema (marshal roundtrip test)
 - [ ] Conventions per orchestrator
 
-Output: APPROVED or gaps. Notes: correctness > coverage — a wrong grammar bricks generation; exclude aggressively.
+Output: APPROVED or gaps.
+
+## Notes
+- Correctness > coverage: exclude aggressively. A wrong grammar bricks generation entirely.
+- Structured-output servers that only support response_format get PARTIAL value (schema without enum-tightness) — document honestly in the matrix.

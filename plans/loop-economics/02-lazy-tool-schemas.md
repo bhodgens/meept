@@ -9,7 +9,24 @@
 
 ## Goal
 
-Registry.GetDefinitions() ships every tool's full parameter schema on every call (registry.go:169-187). Against small local models this drowns context; against hosted APIs it bloats cached prefixes when toolsets change. Add opt-in indexed mode: non-core tools collapse to one-line descriptions instructing `tool_view{name}`; a new builtin returns the full definition as tool-result JSON; expansions LRU-cached.
+Registry.GetDefinitions() ships every tool's full parameter schema on every call (registry.go:169-187). This costs tokens against EVERY provider — cloud models pay per token too, and large schemas bloat cached prefixes whenever toolsets change. Indexed mode becomes DEFAULT-ON for all providers: non-core tools collapse to one-line descriptions instructing `tool_view{name}`; a new builtin returns the full definition as tool-result JSON; expansions LRU-cached.
+
+TRADE-OFF ANALYSIS (user-requested, 2026-08-24):
+
+Pros of indexed-by-default:
+- Token conservation on every call for every provider (cloud bills shrink too)
+- Smaller stable prefix -> cheaper provider cache writes; toolset changes disturb fewer bytes
+- Small local models become viable (schema flood is their top failure cause)
+- Forces honest tool descriptions (the one-liner IS the pitch)
+
+Cons / risks:
+- Two-step tool use: model must call tool_view before first use of a rare tool (+1 round trip, +latency)
+- Weak models may NOT realize they should call tool_view (mitigation: description suffix instructs exactly that; always_full list keeps common tools full)
+- Tool-selection accuracy can DROP when the model picks from one-liners without seeing parameter shapes (mitigation: keep core set full; measure via benchmark before/after)
+- Failure modes shift from "wrong args" to "no attempt" if descriptions undersell tools
+- More moving parts in prompt assembly (mode switching mid-session must not churn the cached prefix — SetSchemaMode changes definitions payload = cache invalidation by design; document)
+
+Verdict: default ON with a curated always_full core set; [agent.tools] schema_mode="full" restores legacy. Measure selection-quality delta in meept-bench GAIA runs.
 
 ## Context
 
@@ -38,7 +55,7 @@ func (r *Registry) SetSchemaMode(mode SchemaMode, alwaysFull []string)
 // Evidence: models.NewEvidence("tool_view", name, hash, t.Name()) if pattern exists nearby.
 ```
 
-Config [agent.tools]: schema_mode ("full" default), always_full list (default: shell,file_read,file_edit,memory_search,platform_status). Loop passes mode through existing wiring path used by FilterToolsForSkill so filtered registries inherit mode+alwaysFull.
+Config [agent.tools]: schema_mode ("indexed" DEFAULT per user directive), always_full list (default: shell,file_read,file_edit,file_write,memory_search,memory_store,web_fetch,websearch,platform_status,tool_view). Loop passes mode through existing wiring path used by FilterToolsForSkill so filtered registries inherit mode+alwaysFull.
 
 ## Tasks
 
@@ -51,9 +68,9 @@ Config [agent.tools]: schema_mode ("full" default), always_full list (default: s
 
 ## Self-Verification Checklist
 - [ ] -race green internal/tools internal/agent
-- [ ] Default behavior byte-identical (mode=full)
+- [ ] Indexed mode is DEFAULT; full mode restores legacy byte-identical payloads
 - [ ] tool_view not indexable (always in alwaysFull implicitly)
-- [ ] Docs updated
+- [ ] Docs updated incl. trade-off table from Goal section
 
 ## Review Checklist
 - [ ] Contracts exact; no schema loss in expansion roundtrip (JSON marshal/unmarshal equality test)

@@ -25,7 +25,7 @@ type GuardConfig struct {
     NoProgressWarnAt    int  `json:"no_progress_warn_at"`    // default 3
     NoProgressVetoAt    int  `json:"no_progress_veto_at"`    // default 5
     GracefulAfterVetoes int  `json:"graceful_after_vetoes"`  // default 3
-    DuplicateSearchRollback bool `json:"duplicate_search_rollback"` // default FALSE until proven
+    DuplicateSearchRollback bool `json:"duplicate_search_rollback"` // default TRUE (ship-on per user directive)
     RollbackWindow      int  `json:"rollback_window"`        // turns, default 10
     ReasoningTokenCap   int  `json:"reasoning_token_cap"`    // per-streak, default 16384
     ReasoningStreakTurns int `json:"reasoning_streak_turns"` // default 3
@@ -52,7 +52,8 @@ Config [agent.guards] all values overridable; zero-values = defaults above via n
 
 ## Self-Verification Checklist
 - [ ] -race green internal/agent
-- [ ] Default flags keep current behavior EXCEPT ladder+watchdog (on-by-default at conservative thresholds) — document
+- [ ] ALL guards ship ON at the defaults above (user directive: ship-on, break, then fix)
+- [ ] Rollback flag default TRUE — integration test must exercise it enabled
 - [ ] Session store consistency proven by existing persistence tests still passing
 
 ## Review Checklist
@@ -60,4 +61,7 @@ Config [agent.guards] all values overridable; zero-values = defaults above via n
 - [ ] Nudges use existing system-injection path (anchor-message style), not raw prompt concat
 - [ ] Conventions per orchestrator
 
-Output: APPROVED or gaps. Notes: rollback is the riskiest piece — behind flag off by default; ship ladder/watchdog first mentally even though one leaf.
+Output: APPROVED or gaps.
+
+- SHIP-ON DIRECTIVE (2026-08-24): every guard defaults ON including duplicate-search rollback. The point is real-world exposure — if a guard misfires, we see it in production and fix the guard, not hide behind flags. Rollback implementation must therefore be conservative in WHAT it rolls back (only exact-duplicate web_search within window) even while being aggressive about being enabled.
+- Rollback is still the riskiest piece: session-store pop must preserve message-tree consistency (parent chain). If mid-store pop is unsafe, use compaction-entry marking instead; either way tests must prove iteration budget NOT consumed on rollback.
