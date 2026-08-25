@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../services/sdk_client.dart';
 import '../../services/storage_service.dart';
+import '../../theme/app_palette.dart';
 import '../../theme/colors.dart';
+import '../../theme/palette_provider.dart';
 import '../../theme/typography.dart';
 import '../../core/constants.dart';
 import '../../providers/providers.dart';
@@ -166,6 +168,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
       final storage = StorageService.instance;
       final host =
           _formKey.currentState!.value[SettingsFields.daemonHost] as String?;
+      // The field's valueTransformer converts back to int (8081 fallback).
       final port =
           _formKey.currentState!.value[SettingsFields.daemonPort] as int?;
       final theme =
@@ -175,7 +178,14 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
 
       if (host != null && host.isNotEmpty) await storage.setApiHost(host);
       if (port != null) await storage.setApiPort(port);
-      if (theme != null) await storage.setTheme(theme);
+      // Persist the ui variant under its own 'ui_theme' key. The legacy
+      // setTheme call is kept so initStoredTheme()'s fallback (which only
+      // honors legacy values naming a known variant) keeps resolving for
+      // older builds that never wrote ui_theme.
+      if (theme != null) await storage.setUiTheme(theme);
+      if (theme != null && AppPalette.palettes.containsKey(theme)) {
+        await storage.setTheme(theme);
+      }
       if (modifierKey != null) await storage.setModifierKey(modifierKey);
 
       if (mounted) {
@@ -200,6 +210,14 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
     } finally {
       if (mounted) setState(() => _isSavingConnection = false);
     }
+  }
+
+  /// Live-swap the app palette as soon as a new theme is selected (before
+  /// save). Updates both the Riverpod state (rebuilds MaterialApp via
+  /// appThemeProvider) and the static CyberpunkColors forwarding layer so
+  /// direct color call-sites follow immediately.
+  void _onThemeChanged(String value) {
+    applyTheme(ref, value);
   }
 
   Future<void> _saveApiKey() async {
@@ -273,7 +291,9 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
   @override
   Widget build(BuildContext context) {
     final storage = StorageService.instance;
-    return Container(
+    // Material wrapper: the dropdown's ListTiles need a Material ancestor for
+    // ink splashes; a bare colored Container triggers framework assertions.
+    return Material(
       color: CyberpunkColors.darkGray,
       child: Column(
         children: [
@@ -411,8 +431,12 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
       key: _formKey,
       initialValue: {
         SettingsFields.daemonHost: storage.getApiHost() ?? 'localhost',
-        SettingsFields.daemonPort: storage.getApiPort() ?? 8081,
-        SettingsFields.theme: storage.getTheme() ?? 'cyberpunk',
+        SettingsFields.daemonPort: (storage.getApiPort() ?? 8081).toString(),
+        SettingsFields.theme:
+            storage.getUiTheme() ??
+            (AppPalette.palettes.containsKey(storage.getTheme() ?? '')
+                ? storage.getTheme()!
+                : 'cyberpunk'),
         SettingsFields.apiKey: '',
         SettingsFields.sttEnabled: false,
         SettingsFields.sttEngine: 'native',
@@ -429,6 +453,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
         },
         onSaveApiKey: _saveApiKey,
         onSaveConnection: _saveConnectionSettings,
+        onThemeChanged: _onThemeChanged,
         isSavingConnection: _isSavingConnection,
       ),
     );
@@ -553,6 +578,7 @@ class _FormSections extends StatelessWidget {
   final VoidCallback onToggleApiKeyObscure;
   final VoidCallback onSaveApiKey;
   final VoidCallback onSaveConnection;
+  final ValueChanged<String> onThemeChanged;
   final bool isSavingConnection;
 
   const _FormSections({
@@ -562,6 +588,7 @@ class _FormSections extends StatelessWidget {
     required this.onToggleApiKeyObscure,
     required this.onSaveApiKey,
     required this.onSaveConnection,
+    required this.onThemeChanged,
     required this.isSavingConnection,
   });
 
@@ -757,15 +784,17 @@ class _FormSections extends StatelessWidget {
               color: CyberpunkColors.lightGray,
             ),
             dropdownColor: CyberpunkColors.darkGray,
-            // Theme variants: only 'cyberpunk' exists today. The theme is
-            // hardcoded in main.dart (CyberpunkTheme.darkTheme) and 1000+
-            // widget call-sites reference CyberpunkColors directly, so the
-            // other variants are NOT listed here until real ThemeData
-            // routing ships — a dropdown entry that does nothing is worse
-            // than no entry.
             items: const [
               DropdownMenuItem(value: 'cyberpunk', child: Text('cyberpunk')),
+              DropdownMenuItem(value: 'midnight', child: Text('midnight')),
+              DropdownMenuItem(value: 'solarized', child: Text('solarized')),
             ],
+            // Live swap: apply the palette immediately on selection, not
+            // only when the section is saved. Persistence still happens in
+            // _saveConnectionSettings via StorageService.setUiTheme.
+            onChanged: (value) {
+              if (value != null) onThemeChanged(value);
+            },
           ),
           const SizedBox(height: 10),
           // Modifier key preference (ctrl vs cmd for leader shortcut)
@@ -988,6 +1017,12 @@ class _FormSections extends StatelessWidget {
   // ---------------------------------------------------------------------------
 
   Widget _buildSttSection(BuildContext context) {
+    // NOTE: this outer FormBuilderField and the inner FormBuilderSwitch both
+    // register the name 'stt_enabled'. flutter_form_builder 9.x tolerates
+    // registration (with a warning) but asserts on dispose. The switch is
+    // renamed to a private key so only the outer field owns 'stt_enabled';
+    // the switch writes through FormBuilder.of(context).fields[...]
+    // instead of registering its own name.
     return FormBuilderField<bool>(
       name: SettingsFields.sttEnabled,
       builder: (FormFieldState<bool?> field) {
@@ -1024,19 +1059,26 @@ class _FormSections extends StatelessWidget {
                       ),
                     ),
                     const Spacer(),
-                    FormBuilderSwitch(
-                      name: SettingsFields.sttEnabled,
-                      title: const SizedBox.shrink(),
-                      activeColor: CyberpunkColors.orangePrimary,
-                      inactiveTrackColor: CyberpunkColors.midGray,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      decoration: const InputDecoration(
-                        border: InputBorder.none,
+                    // Wrapped in SizedBox: FormBuilderSwitch's InputDecorator
+                    // is unbounded-width and throws inside a bare Row in the
+                    // widget-test layout pass.
+                    SizedBox(
+                      width: 80,
+                      child: FormBuilderSwitch(
+                        name: '__stt_enabled_switch',
+                        initialValue: enabled,
+                        title: const SizedBox.shrink(),
+                        activeColor: CyberpunkColors.orangePrimary,
+                        inactiveTrackColor: CyberpunkColors.midGray,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                        ),
+                        onChanged: (value) {
+                          // Rebuild to show/hide sub-fields.
+                          // FormBuilder handles state internally.
+                        },
                       ),
-                      onChanged: (value) {
-                        // Rebuild to show/hide sub-fields.
-                        // FormBuilder handles state internally.
-                      },
                     ),
                   ],
                 ),
