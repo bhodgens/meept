@@ -486,7 +486,6 @@ func (d *Dispatcher) SetInstructionParser(parser *InstructionParser) {
 	d.instructionParser = parser
 }
 
-
 // suggestReasoningForIntent returns the suggested reasoning tier for a given
 // intent type per LLM Reasoning Effort spec §7.5. Returns empty string when
 // the intent has no defined mapping (meaning "no suggestion"), so callers
@@ -871,6 +870,25 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				"error", err,
 				"failure_kind", kind,
 			)
+			// An empty LLM response usually means the local model is
+			// degraded, not that the input is ambiguous. The keyword table
+			// is verb-dense and misclassifies task-shaped prompts as skill
+			// requests (meept-bench smoke run, 2026-08-24), so when the LLM
+			// path is down we route to chat — the chat agent has the full
+			// tool registry and can do the work itself. Keyword matching
+			// stays available only for the explicit high-confidence platform
+			// patterns handled in Step 1.
+			if kind == llm.ClassificationFailureEmptyResponse {
+				d.recordClassificationMethod("llm_empty_fallback_chat")
+				d.recordAgent(config.AgentIDChat)
+				d.recordIntentType(string(IntentChat))
+				return &Intent{
+					Type:       string(IntentChat),
+					Confidence: 0.6,
+					AgentType:  config.AgentIDChat,
+					Summary:    extractSummary(input),
+				}, nil
+			}
 		}
 	}
 
@@ -1121,9 +1139,9 @@ func (d *Dispatcher) buildClarificationResult(input string, analysis *TrueIntent
 	)
 
 	return &DispatchResult{
-		AgentID:            config.AgentIDChat,
-		Intent:             intent,
-		ClarificationReply: sb.String(),
+		AgentID:             config.AgentIDChat,
+		Intent:              intent,
+		ClarificationReply:  sb.String(),
 		ClarificationNeeded: true,
 	}, nil
 }
@@ -2066,6 +2084,12 @@ var keywordPatterns = []keywordPattern{
 	{[]string{"design a system", "design system", "architect a", "architect the", "architect this", "tech stack", "trade-off", "tradeoff", "should we use", "evaluate technology", "compare technologies"}, string(IntentArchitect), config.AgentIDArchitect, 0.85, true},
 	{[]string{"stress-test", "stress test", "steelman", "what's wrong with", "what is wrong with", "challenge this", "adversarial review", "challenge my"}, string(IntentSkeptic), config.AgentIDSkeptic, 0.85, false},
 	{[]string{"review my memory", "review memory", "memory review", "clean up tags", "mine backlog", "what contradictions", "what have i been thinking", "clean up my tags"}, string(IntentLibrarian), config.AgentIDLibrarian, 0.85, false},
+
+	// Media intents. Longer compound phrases first so they beat generic
+	// "create"/"analyze"/"find" patterns on the best-score-wins classifier.
+	{[]string{"generate an image", "generate image", "text to image", "txt2img", "image generation", "create an image", "make an image", "draw me", "render an image", "draw an image"}, string(IntentImageGen), config.AgentIDImageGen, 0.9, false},
+	{[]string{"generate a video", "generate video", "text to video", "txt2video", "video generation", "create a video", "make a video", "animate this", "animate the"}, string(IntentVideoGen), config.AgentIDVideoGen, 0.9, false},
+	{[]string{"identify this image", "identify the image", "what is this image", "describe this image", "what's in this photo", "whats in this photo", "analyze this image", "what is in this picture", "reverse image"}, string(IntentImageID), config.AgentIDImageID, 0.9, false},
 
 	// Collaboration (pair programming, differential analysis)
 	{[]string{"collaborate", "pair program", "differential", "a/b test", "compare approaches", "work together", "collaborative"}, string(IntentCollaborate), config.AgentIDAnalyst, 0.8, true},

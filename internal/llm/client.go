@@ -951,16 +951,29 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 	return parsedResp, err
 }
 
+// ErrEmptyResponse is returned when the model replies with an empty body.
+// It is a sentinel so callers (e.g. ClassifyClassificationFailure) can
+// identify the failure kind without string matching.
+var ErrEmptyResponse = &ClientError{Message: "empty content"}
+
 // parseResponse converts a raw ChatResponse to a Response.
 func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 	if len(chatResp.Choices) == 0 {
-		return nil, &ClientError{Message: "no choices in response"}
+		return nil, ErrEmptyResponse
 	}
 
 	choice := chatResp.Choices[0]
 	msg := choice.Message
 
 	content := msg.ContentString()
+
+	// Empty content with no tool calls is the "model said nothing" failure.
+	// Surface the sentinel so ClassifyClassificationFailure sees
+	// ClassificationFailureEmptyResponse instead of falling back to
+	// string-matching heuristics.
+	if content == "" && len(msg.ToolCalls) == 0 {
+		return nil, ErrEmptyResponse
+	}
 
 	var toolCalls []ToolCall
 	if len(msg.ToolCalls) > 0 {

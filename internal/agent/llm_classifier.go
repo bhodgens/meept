@@ -207,7 +207,7 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 		c.unavailMu.Lock()
 		c.unavailUntil = time.Now().Add(c.cooldown)
 		c.unavailMu.Unlock()
-		return nil, fmt.Errorf("LLM classification: empty response")
+		return nil, fmt.Errorf("llm classification: %w", llm.ErrEmptyResponse)
 	}
 
 	// Success: clear the unavailable flag.
