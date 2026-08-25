@@ -125,15 +125,40 @@ func (m *CapabilityMatcher) matchByCapabilityIndex(inputLower string) *MatchResu
 		return nil
 	}
 
-	// Require at least 2 keyword matches to avoid routing generic queries
-	// (e.g. "tell me about this project") to a specific skill based on a
-	// single common word like "project". A single keyword match is too
-	// weak a signal for skill-based routing.
-	if len(match.Matches) < 2 {
-		m.logger.Debug("Capability index match rejected: too few keyword matches",
+	// Require a strong signal before letting keyword matching preempt the
+	// LLM classifier. With 1000+ installed skills whose names/descriptions
+	// are verb-dense, task-shaped prompts ("Create a file named answer.txt")
+	// accumulate incidental whole-word hits ("file", "root", "containing")
+	// on ordinary description prose — counting raw hits cannot distinguish
+	// those from real skill references (meept-bench smoke run, 2026-08-24).
+	// Weight the signal by keyword rarity instead: each match's Weight is
+	// already source-weight × IDF, so rare distinctive terms dominate.
+	// Accept if: exact skill-name mention, OR total IDF weight and at least
+	// one distinctive (rare) keyword clear their floors.
+	const (
+		minTotalWeight    = 6.0 // sum of matched keyword weights
+		minDistinctiveWt  = 2.5 // single best keyword must be reasonably rare
+	)
+	hasExactNameHit := false
+	totalWeight := 0.0
+	bestWeight := 0.0
+	for _, km := range match.Matches {
+		if strings.EqualFold(strings.TrimSpace(km.Keyword), match.Entry.Name) {
+			hasExactNameHit = true
+		}
+		totalWeight += km.Weight
+		if km.Weight > bestWeight {
+			bestWeight = km.Weight
+		}
+	}
+	if !hasExactNameHit && (totalWeight < minTotalWeight || bestWeight < minDistinctiveWt) {
+		m.logger.Debug("Capability index match rejected: weak signal",
 			"skill", match.Entry.Name,
 			"confidence", match.Confidence,
 			"matches", len(match.Matches),
+			"total_weight", totalWeight,
+			"best_weight", bestWeight,
+			"exact_name_hit", hasExactNameHit,
 		)
 		return nil
 	}
@@ -193,7 +218,18 @@ func (m *CapabilityMatcher) matchByAgentCapabilities(inputLower string) *MatchRe
 
 		for _, keyword := range caps.Keywords {
 			kwLower := strings.ToLower(keyword)
-			if strings.Contains(inputLower, kwLower) {
+			// Word-boundary match: substring matching let generic words
+			// inside other words inflate scores ("art" in "start").
+			if !strings.Contains(kwLower, " ") && wordBoundaryContains(inputLower, kwLower) {
+				matched = append(matched, keyword)
+				totalScore += len(keyword)
+				if strings.HasPrefix(inputLower, kwLower) {
+					totalScore += 10
+				}
+				continue
+			}
+			// Multi-word phrases keep substring containment.
+			if strings.Contains(kwLower, " ") && strings.Contains(inputLower, kwLower) {
 				matched = append(matched, keyword)
 				totalScore += len(keyword)
 				if strings.HasPrefix(inputLower, kwLower) {
@@ -405,4 +441,27 @@ func (m *CapabilityMatcher) SetCapabilityIndex(ci *skills.CapabilityIndex) {
 // CapabilityIndex returns the current capability index.
 func (m *CapabilityMatcher) CapabilityIndex() *skills.CapabilityIndex {
 	return m.capabilityIndex
+}
+
+// wordBoundaryContains reports whether word appears in s as a whole word.
+// Multi-word phrases fall back to substring containment.
+func wordBoundaryContains(s, word string) bool {
+	if strings.Contains(word, " ") {
+		return strings.Contains(s, word)
+	}
+	for i := 0; i+len(word) <= len(s); i++ {
+		if s[i:i+len(word)] != word {
+			continue
+		}
+		before := i == 0 || !isAlnumByte(s[i-1])
+		after := i+len(word) == len(s) || !isAlnumByte(s[i+len(word)])
+		if before && after {
+			return true
+		}
+	}
+	return false
+}
+
+func isAlnumByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c >= 0x80
 }
