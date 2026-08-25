@@ -38,7 +38,7 @@ Meept has evolved fairly rapidly from this initial ideation and I've borrowed a 
 
 Look at [features.md](./docs/features.md) to see what else it does. 
 
-The client is currently available as either a console interface, Flutter based local client/web interface, or MCP, with a Web UI in progress. 
+The client is currently available as a console TUI, a Flutter desktop/web client, Telegram bot, macOS MenuBar, and MCP server.
 
 If you use it and find it useful, drop me a message. If you'd like to contribute, please do. 
 
@@ -56,7 +56,7 @@ Instead of massive context due to plan files and SKILLS.md, everything gets load
 | **Claude Code / OpenClaw** | Single-session CLI | **Daemon architecture** with persistent memory, job scheduling, and multi-transport (RPC + HTTP + WebSocket) |
 | **Hermes / OpenCode** | Terminal-only, ephemeral | **Constitution-bound AI Employees** with autonomy tiers, enforcement engines, and goal loops |
 | **Cursor** | IDE-integrated copilot | **Evidence-based execution** - every tool produces verifiable evidence (file hashes, exit codes, API responses) |
-| **OpenAgent (Rust)** | Single agent (ReAct) | **18 specialist agents + 5 reviewers** with intent classification and capability-based routing |
+| **OpenAgent (Rust)** | Single agent (ReAct) | **28 specialist agents + reviewers** with intent classification and capability-based routing |
 | **OpenAgent (Python)** | Team coordination | **Seven-layer safety stack** - watchdog, cycle/convergence detection, budget tracking, hallucination recovery, model failover, context firewall |
 | **oh-my-pi** | Single-agent harness | **Five-tier memory system** - episodic (FTS5), task, knowledge graph, semantic (vector), distributed (memvid) |
 | **Most agents** | Written in Python | **Go implementation** - native threading (goroutines), compiled performance, single binary deployment |
@@ -78,7 +78,7 @@ See [docs/analysis/agent-framework-comparison.md](docs/analysis/agent-framework-
 | **Cross-platform** | Go binary + Flutter GUI + SwiftUI MenuBar + MCP | Terminal-only (most), Electron (OpenAgent-Python) |
 | **Model resolution** | Capability-based resolver + natural language reassignment | Manual selection, Team-as-router (OpenAgent-Python) |
 | **Memory** | 5-tier (episodic/task/KG/semantic/distributed) | 1-2 tiers (Hermes, OpenAgent), None (OpenCode) |
-| **Agent architecture** | 18 specialists + 5 reviewers + Employees | Single agent (Hermes, oh-my-pi), Dynamic teams (OpenAgent-Python) |
+| **Agent architecture** | 28 specialists + 6 reviewers + Employees | Single agent (Hermes, oh-my-pi), Dynamic teams (OpenAgent-Python) |
 
 ## Other Key Differentiators
 #### Autonomous Agent Workcycle 
@@ -155,11 +155,11 @@ Learn more: [Memory System](docs/workflows/memory.md)
 
 ### 4. Multi-Agent Collaboration
 
-**18 specialist agents** discover each other via platform tools and delegate work:
+**28 agents** discover each other via platform tools and delegate work:
 
-**Executor Agents (13):** `dispatcher`, `chat`, `coder`, `debugger`, `planner`, `analyst`, `committer`, `scheduler`, `researcher`, `writer`, `architect`, `skeptic`, `librarian`
+**Executor Agents (22):** `dispatcher`, `chat`, `coder`, `debugger`, `planner`, `analyst`, `committer`, `scheduler`, `researcher`, `writer`, `architect`, `skeptic`, `librarian`, `image-gen`, `video-gen`, `image-id`, `cost-auditor`, `doc-keeper`, `explore`, `flaky-test-hunter`, `onboarding-tour`, `release-manager`
 
-**Reviewer Agents (5):** `code-reviewer`, `test-reviewer`, `debug-reviewer`, `planner-reviewer`, `analyst-reviewer`
+**Reviewer Agents (6):** `code-reviewer`, `test-reviewer`, `debug-reviewer`, `planner-reviewer`, `analyst-reviewer`, `verifier`
 
 The dispatcher supports **model reassignment** via natural language instructions like "use GLM models for coding" or "research with local models, synthesize with glm-4.7".
 
@@ -294,7 +294,7 @@ For complete feature details, see [Features](./docs/features.md).
 | **Model reassignment** | ✅ Complete | Natural language model override, capability-based resolution, vendor-specific reasoning effort translation |
 | **Context firewall** | ✅ Complete | Hierarchical compression, structured summarization, token-aware truncation, thread partitioning |
 | **Evidence pipeline** | ✅ Complete | Tool evidence (hashes, exit codes, API responses) → validator → claim checking |
-| Multi-agent system | ✅ Complete | 18 specialists + 5 reviewers with intent classification, delegation, handoff |
+| Multi-agent system | ✅ Complete | 28 agents (22 executor-role incl. dispatcher + chat, 6 reviewers) with intent classification, delegation, handoff |
 | Memory system | ✅ Complete | 5-tier: episodic (FTS5), task, knowledge graph, semantic (vector), distributed (memvid) |
 | Code intelligence | ✅ Complete | Tree-sitter AST + LSP client tools |
 | LLM management | ✅ Complete | Multi-provider, alias resolution, failover, budgeting, reasoning effort control |
@@ -305,7 +305,9 @@ For complete feature details, see [Features](./docs/features.md).
 | Collaborative planning | ✅ Complete | Programming detection, plan review/approval workflow, workspace tracking |
 | Self-improvement | ✅ Complete | Full cycle: detect → analyze → generate → validate → apply + skill evolution (usage tracking, LLM-driven refinement, pattern promotion, versioning) |
 | Shadow training | 🔄 Partial | Infrastructure complete (parallel execution, quality filtering, export); continuous learning in progress |
-| **External integrations** | 🔄 Partial | macOS MenuBar ✅, MCP server ✅, Telegram ⏳ planned, Web UI ⏳ in progress |
+| **External integrations** | ✅ Complete | macOS MenuBar ✅, MCP server ✅, Telegram bot ✅, Flutter GUI (desktop + web) ✅ |
+| **Speech interfaces** | ✅ Complete | STT (native + Parakeet) and TTS (voice management, playback) wired into chat |
+| **Unified theming** | ✅ Complete | Shared color tokens (`theme/tokens.json5`) drive TUI and GUI; cyberpunk/midnight/solarized variants via `rendering.ui_theme` — see [theming](docs/configuration/theming.md) |
 | **Analytics** | ✅ Complete | Agent performance, model metrics, error records, historical charts |
 | **Notifications** | ✅ Complete | Desktop notifications via WebSocket and platform-native (macOS UNUserNotificationCenter) |
 
@@ -441,8 +443,13 @@ internal/
   metrics/            # Metrics storage and collection
   plan/               # Plan lifecycle and progress tracking
   project/            # Project context: registry, worktrees, fencing
-  comm/               # HTTP REST, MenuBar (Telegram planned)
-config/               # Configuration templates
+  comm/               # HTTP REST, Telegram bot, MenuBar support
+  employee/           # AI employees: constitution, goal loop, enforcement
+  stt/ tts/           # Speech-to-text and text-to-speech
+  tui/                # Terminal UI (bubbletea) with runtime theming
+config/               # Configuration templates (JSON5)
+theme/                # Shared color tokens (tokens.json5) for TUI + GUI
+ui/flutter_ui/        # Flutter GUI client (desktop + web)
 menubar/              # macOS SwiftUI MenuBar app
 docs/                 # MkDocs documentation
 ```

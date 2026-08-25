@@ -1,24 +1,25 @@
 # Agent Configuration
 
-Meept uses a multi-agent system where specialist agents handle different types of tasks. Agents are configured through TOML-based definitions and YAML frontmatter.
+Meept uses a multi-agent system where specialist agents handle different types of tasks. Agents are configured through markdown `AGENT.md` definitions with YAML frontmatter; daemon configuration is JSON5 (a legacy TOML fallback exists).
 
-## Agent System Configuration
+Enable and configure the multi-agent system in `~/.meept/meept.json5`:
 
-Enable and configure the multi-agent system in `~/.meept/meept.toml`:
-
-```toml
-[agents]
-enabled = false
-config_dirs = ["~/.meept/agents", "config/agents"]
-prompts_dir = "config/prompts"
-default_model = ""
-dispatcher_id = "dispatcher"
+```json5
+{
+  agents: {
+    enabled: false,
+    config_dirs: ["~/.meept/agents", "config/agents"],
+    prompts_dir: "config/prompts",
+    default_model: "",
+    dispatcher_id: "dispatcher"
+  }
+}
 ```
 
 ### Configuration Options
 
 - **enabled**: Enable/disable the multi-agent system
-- **config_dirs**: Directories to search for agent definition TOML files (searched in order)
+- **config_dirs**: Directories to search for agent definition files (searched in order)
 - **prompts_dir**: Base directory for prompt components
 - **default_model**: Fallback model for agents without specific model configuration
 - **dispatcher_id**: Agent ID that handles intake and routing

@@ -133,6 +133,12 @@ the meept repo itself). It is NEVER the user's project directory.
   (`internal/tui/`) may use `os.Getwd()` because they run in the user's shell.
 - Tools receive their working directory per-session via
   `tools.ContextWithWorkingDir` or `SetWorkingDir`, not from the daemon's CWD.
+- `generate_image` / `generate_video` write under `media.output_dir`
+  (`~/.meept/media`) or a relative `output_path` resolved against the session
+  working dir. Never `os.Getwd()`.
+- Image and video models are `provider/id` entries in `models.json5` with
+  capability `image` or `video`. Slots: `image_model`, `video_model`. Do not
+  add a second provider catalog.
 - Session creation binds to the user's active project via
   `ProjectManager.GetActive()`. Do NOT call `EnsureDefault()` for session
   binding — it creates a synthetic empty git repo.

@@ -8,7 +8,7 @@ Meept is a Go-based daemon that runs AI agents as background processes. It suppo
 
 | Feature | Description |
 |---------|-------------|
-| **Multi-Agent Orchestration** | 8 specialist agents + reviewers with automatic task routing |
+| **Multi-Agent Orchestration** | 28 specialist agents + reviewers with automatic task routing |
 | **Hybrid Memory** | Episodic, task, personality, knowledge graph, and vector memory |
 | **Skill System** | Three-tier skill discovery with capability-based model resolution |
 | **Security Layers** | Input sanitization, taint tracking, shell scanning, audit logging |
@@ -48,7 +48,7 @@ Unlike single-agent CLI tools (Claude Code, OpenCode) or chat-only interfaces, M
 |-----------|--------|-------|
 | **Daemon Core** | Stable | Full lifecycle, config, RPC server |
 | **Agent Loop** | Stable | Tool use, reasoning, iteration limits |
-| **Multi-Agent** | Stable | 8 specialist agents, 5 reviewers, routing |
+| **Multi-Agent** | Stable | 28 agents (22 executor-role incl. dispatcher + chat, 6 reviewers), routing |
 | **CLI/TUI** | Stable | Interactive chat, vim mode, markdown rendering |
 | **LLM Client** | Stable | Multi-provider, retry, budget tracking |
 | **Tools** | Stable | File ops, shell, web, memory, tasks, scheduling |

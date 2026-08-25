@@ -4,11 +4,12 @@ Meept uses a flexible configuration system with TOML and JSON5 files to control 
 
 ## Configuration Files
 
-Meept uses two main configuration files:
+Meept's primary configuration file is JSON5 (a legacy TOML fallback is supported for `meept.toml`):
 
 | File | Format | Purpose | Location |
 |------|--------|---------|----------|
-| `meept.toml` | TOML | Daemon settings, features, security | `~/.meept/meept.toml` |
+| `meept.json5` | JSON5 | Daemon settings, features, security, client rendering prefs (`rendering.ui_theme`, …) | `~/.meept/meept.json5` |
+| `client.json5` | JSON5 | TUI/GUI client settings: keybindings, rendering, speech, theming | `~/.meept/client.json5` |
 | `models.json5` | JSON5 | LLM providers, models, capabilities | `~/.meept/models.json5` |
 
 ## Quick Start

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Meept is a Go-based autonomous agent daemon with multi-agent orchestration, persistent hybrid memory, LLM integration with failover, production-grade execution controls, and extensibility through skills and tools. It operates as a background process with multiple frontends (CLI/TUI, Telegram, Web API, macOS MenuBar).
+Meept is a Go-based autonomous agent daemon with multi-agent orchestration, persistent hybrid memory, LLM integration with failover, production-grade execution controls, and extensibility through skills and tools. It operates as a background process with multiple frontends (CLI/TUI, Flutter GUI desktop+web, Telegram, HTTP/WebSocket API, macOS MenuBar, MCP server).
 
 ### Architecture Summary
 
@@ -1438,7 +1438,7 @@ Meept supports persistent autonomous bots that execute on schedules and respond 
 
 **Budget controls:** Daily spend caps (cents), invocation limits, auto-pause after 10 consecutive failures.
 
-Bots are defined as JSON documents with prompt, triggers, tools, and constraints, then managed via `meept bots` CLI commands. See [Persistent Bot Framework](workflows/bots.md) for full documentation.
+Bots are defined as JSON documents with prompt, triggers, tools, and constraints. The legacy `meept bots` CLI has been removed — the unified `meept agents` namespace manages AI employees (constitution-bound autonomous agents) instead; `meept agents migrate` converts legacy bot definitions. See [AI Employees](workflows/employees.md) for the full spec and [Persistent Bot Framework](workflows/bots.md) for the original framework documentation.
 
 ---
 
@@ -1453,6 +1453,8 @@ Meept's memory platform supports epistemic memory types — **claim**, **decisio
 ### Extended Agent Roster
 
 Four specialist agents expand Meept beyond coding/ops into knowledge work: `writer` (long-form writing — essays, docs, briefs), `architect` (system design, tech evaluation, trade-off analysis), `skeptic` (stress-tests claims, surfaces contradictions via `contradicts`/`superseded`/`evidence_against` edges), and `librarian` (memory steward — reflection, tag hygiene, backlog mining, auto-claim promotion). The `librarian` and `skeptic` are built on the epistemic memory platform.
+
+Three media specialists sit beside that roster: `image-gen` and `video-gen` each use two models — a description enhancer (`enhancer_model`, default alias `small`) then `generate_image` / `generate_video` against a `models.json5` ref (`image_model` / `video_model`, e.g. `comfyui/flux-dev` or `xai/grok-imagine-image-2.0`). `image-id` identifies subject, text, style, and source clues. See [Media generation](configuration/media.md).
 
 **Learn more:** [Multi-Agent System](concepts/multi-agent.md)
 
@@ -1505,6 +1507,8 @@ Four specialist agents expand Meept beyond coding/ops into knowledge work: `writ
 | **Desktop Notifications** | macOS native notifications via daemon event emitter, WebSocket, and UNUserNotificationCenter |
 | **Analytics System** | Agent performance analytics, response quality analysis, benchmark framework, and CLI analytics commands. The `model_performance` aggregation table tracks per-model metrics (requests, errors, latency, tokens) with period-based aggregation. The `error_records` table tracks individual errors with `limit_type`, `retry_attempts`, and `final_outcome` for retry analysis. |
 | **Unified HTTP Server** | Single HTTP server serving REST API, WebSocket, and MCP over HTTP+SSE with functional options |
+| **Unified Theming** | Shared color tokens (`theme/tokens.json5`, 18 frozen roles) drive both TUI and GUI. Variants: cyberpunk (default), midnight, solarized. Select via `rendering.ui_theme` in client config or the GUI settings dropdown (live swap). TUI restart-applied; GUI live. See [Theming](configuration/theming.md). |
+| **Speech-to-Text / TTS** | STT via native capture and Parakeet models; TTS with voice management and playback commands (`meept tts`). Wired into chat input/output. See [STT](workflows/speech-to-text.md) and [TTS](workflows/tts.md). |
 
 ### External Integrations
 
@@ -1518,7 +1522,7 @@ Four specialist agents expand Meept beyond coding/ops into knowledge work: `writ
 | **macOS MenuBar** | Native SwiftUI monitoring and control app with desktop notifications |
 | **MCP Server** | Expose Meept as MCP server for external agent platforms |
 | **Distributed Cluster** | P2P mesh networking with gossip protocol for multi-node coordination |
-| **Flutter GUI** | Cross-platform GUI client with chat, sessions, tasks, agents, metrics panels |
+| **Flutter GUI** | Cross-platform GUI client (desktop + web) with chat, sessions, tasks, agents, metrics panels, live rendering prefs and theme picker |
 
 ---
 
@@ -1665,13 +1669,13 @@ retention = 30
 ./bin/meept models setup           # Interactive model configuration
 ./bin/meept models list            # List configured models
 
-# Bots
-./bin/meept bots list              # List all bots
-./bin/meept bots show <bot-id>     # Show bot details
-./bin/meept bots create <def.json> # Create a bot from a definition file
-./bin/meept bots pause <bot-id>    # Pause a running bot
-./bin/meept bots resume <bot-id>   # Resume a paused bot
-./bin/meept bots delete <bot-id>   # Delete a bot
+# AI Employees (replaces removed `meept bots`)
+./bin/meept agents list            # List employees, status, tier, drift
+./bin/meept agents show <id>       # Constitution, goals, audit findings
+./bin/meept agents create <def.json5> # Validate + register employee
+./bin/meept agents pause <id>      # Operator pause
+./bin/meept agents resume <id>     # Operator resume
+./bin/meept agents migrate         # Migrate legacy bots
 
 # Cluster
 ./bin/meept cluster status         # Show cluster status
@@ -1700,6 +1704,22 @@ retention = 30
 ./bin/meept plans show <id>        # Show plan details
 ./bin/meept plans approve <id>     # Approve a pending plan
 ./bin/meept plans reject <id>      # Reject a pending plan
+./bin/meept plans confirm <id>     # Confirm completion after execution
+
+# Projects
+./bin/meept projects list          # List registered projects
+./bin/meept projects add <path>    # Register a project directory
+./bin/meept projects status <name> # Show project binding/worktree state
+
+# Config (dot-notation paths into client/daemon config)
+./bin/meept config get rendering.ui_theme          # Read a config value
+./bin/meept config set rendering.ui_theme midnight # Write a config value
+
+# Speech
+./bin/meept tts voices             # List available TTS voices
+
+# Theming — rendering.ui_theme: cyberpunk | midnight | solarized
+# TUI restart-applied; GUI dropdown applies live. See docs/configuration/theming.md
 ```
 
 ---

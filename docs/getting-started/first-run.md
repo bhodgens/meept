@@ -6,11 +6,11 @@ What happens during your first Meept session and how to verify everything is wor
 
 When you run `./bin/meept-daemon -f`, the daemon initializes in this order:
 
-1. **Config loading** — Reads `~/.meept/meept.toml` and `~/.meept/models.json5`
+1. **Config loading** — Reads `~/.meept/meept.json5` (JSON5 preferred; legacy `meept.toml` fallback) and `~/.meept/models.json5`
 2. **Component registry** — Registers all internal components
 3. **RPC server** — Opens Unix socket at `~/.meept/meept.sock`
 4. **Message bus** — Starts pub/sub system
-5. **Agent registry** — Registers 8 specialist agents + 5 reviewers
+5. **Agent registry** — Registers the bundled agents (28: executors, reviewers, dispatcher)
 6. **Tool registry** — Registers all built-in tools
 7. **Memory system** — Opens SQLite database, loads existing memories
 8. **Scheduler** — Loads scheduled jobs (if enabled)
