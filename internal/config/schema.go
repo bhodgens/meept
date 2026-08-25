@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/caimlas/meept/internal/secrets"
 )
 
 // Agent ID constants used throughout the codebase as identifiers. These are
@@ -28,6 +30,11 @@ const (
 	AgentIDArchitect = "architect"
 	AgentIDSkeptic   = "skeptic"
 	AgentIDLibrarian = "librarian"
+
+	// Media specialists (image/video generation + image identification).
+	AgentIDImageGen = "image-gen"
+	AgentIDVideoGen = "video-gen"
+	AgentIDImageID  = "image-id"
 )
 
 // Agent role constants used for role validation and assignment.
@@ -94,6 +101,61 @@ type Config struct {
 	PeerSync            PeerSyncConfig            `json:"peer_sync"           toml:"peer_sync"`
 	ConfigSync          ConfigSyncConfig          `json:"config_sync"         toml:"config_sync"`
 	Learning            LearningConfig            `json:"learning"            toml:"learning"`
+	Media               MediaConfig               `json:"media"               toml:"media"`
+	Secrets             SecretsConfig             `json:"secrets"             toml:"secrets"`
+}
+
+// SecretsConfig holds declared secrets loaded into the daemon's secret broker
+// at startup. Children receive only MEEPT_SECRET:<name> placeholders; real
+// values stay in broker memory (see internal/secrets).
+type SecretsConfig struct {
+	// Sources maps secret name -> where its value is loaded from.
+	// Declared as an alias of internal/secrets.Source so config and broker
+	// share one definition.
+	Sources SecretSources `json:"sources" toml:"sources"`
+
+	// Proxy configures the egress proxy that resolves placeholders in
+	// outgoing requests (behavior owned by leaf 04; declared here so the
+	// knob exists).
+	Proxy SecretsProxyConfig `json:"proxy" toml:"proxy"`
+}
+
+// SecretSources is the secret-name -> source map. An alias of the broker
+// package's Source type keeps the two layers in lockstep.
+type SecretSources map[string]secrets.Source
+
+// SecretsProxyConfig holds egress-proxy settings. Enabled defaults to false;
+// leaf 04 implements behavior against this shape.
+type SecretsProxyConfig struct {
+	Enabled bool   `json:"enabled" toml:"enabled"`
+	Listen  string `json:"listen"  toml:"listen"` // default "127.0.0.1:0" (ephemeral) when enabled
+}
+
+// MediaConfig holds output settings for generate_image / generate_video.
+// Models themselves live in models.json5 (same provider/id + capabilities as LLMs).
+type MediaConfig struct {
+	OutputDir      string `json:"output_dir"      toml:"output_dir"`
+	TimeoutSeconds int    `json:"timeout_seconds" toml:"timeout_seconds"`
+}
+
+// DefaultMediaConfig returns media output defaults.
+func DefaultMediaConfig() MediaConfig {
+	return MediaConfig{
+		OutputDir:      "~/.meept/media",
+		TimeoutSeconds: 180,
+	}
+}
+
+// EffectiveMediaConfig fills empty output fields from defaults.
+func EffectiveMediaConfig(cfg MediaConfig) MediaConfig {
+	out := DefaultMediaConfig()
+	if cfg.OutputDir != "" {
+		out.OutputDir = cfg.OutputDir
+	}
+	if cfg.TimeoutSeconds > 0 {
+		out.TimeoutSeconds = cfg.TimeoutSeconds
+	}
+	return out
 }
 
 // ReasoningGlobalConfig holds global reasoning/thinking settings, currently
@@ -450,13 +512,13 @@ type LSPServerConfig struct {
 //gendoc:desc Configuration for the daemon process including socket, logging, and data directory.
 //gendoc:example [daemon] socket_path = "~/.meept/meept.sock"
 type DaemonConfig struct {
-	SocketPath         string            `json:"socket_path"         toml:"socket_path"`
-	PIDFile            string            `json:"pid_file"             toml:"pid_file"`
-	LogLevel           string            `json:"log_level"             toml:"log_level"`
-	DataDir            string            `json:"data_dir"             toml:"data_dir"`
-	ShutdownTimeout    string            `json:"shutdown_timeout"     toml:"shutdown_timeout"`
-	ChatTimeoutSeconds int               `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
-	Uploads            UploadsConfig     `json:"uploads"              toml:"uploads"`
+	SocketPath         string               `json:"socket_path"         toml:"socket_path"`
+	PIDFile            string               `json:"pid_file"             toml:"pid_file"`
+	LogLevel           string               `json:"log_level"             toml:"log_level"`
+	DataDir            string               `json:"data_dir"             toml:"data_dir"`
+	ShutdownTimeout    string               `json:"shutdown_timeout"     toml:"shutdown_timeout"`
+	ChatTimeoutSeconds int                  `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
+	Uploads            UploadsConfig        `json:"uploads"              toml:"uploads"`
 	UserInstructions   InstructionConfig    `json:"user_instructions"    toml:"user_instructions"`
 	Verification       VerificationDefaults `json:"verification"         toml:"verification"`
 }
@@ -502,22 +564,22 @@ type RPCTransportConfig struct {
 
 // HTTPTransportConfig configures the HTTP REST transport.
 type HTTPTransportConfig struct {
-	Enabled       bool     `json:"enabled"       toml:"enabled"`           // Enable HTTP server (default: false)
-	Addr          string   `json:"addr"          toml:"addr"`              // Listen address (default: ":8081")
-	UseTLS        bool     `json:"use_tls"       toml:"use_tls"`           // Enable HTTPS
-	AutoTLSCert   bool     `json:"auto_tls_cert" toml:"auto_tls_cert"`     // Auto-generate self-signed cert
-	TLSCertFile   string   `json:"tls_cert_file" toml:"tls_cert_file"`     // TLS certificate file path
-	TLSKeyFile    string   `json:"tls_key_file"  toml:"tls_key_file"`      // TLS key file path
-	TLSMinVersion string   `json:"tls_min_version" toml:"tls_min_version"` // Minimum TLS version
-	RequireAuth   bool     `json:"require_auth"  toml:"require_auth"`      // Require API key auth
-	APIKeys       []string `json:"api_keys"      toml:"api_keys"`          // Valid API keys
-	REST          bool     `json:"rest"          toml:"rest"`              // Enable REST API
-	WebSocket     bool     `json:"websocket"     toml:"websocket"`         // Enable WebSocket
-	WSPath        string   `json:"ws_path"       toml:"ws_path"`           // WebSocket endpoint path
-	MCP           bool     `json:"mcp"           toml:"mcp"`               // Enable MCP over HTTP+SSE
-	MCPPath       string   `json:"mcp_path"      toml:"mcp_path"`          // MCP endpoint path
-	RateLimitRPM  int      `json:"rate_limit_rpm"  toml:"rate_limit_rpm"`  // Per-IP request rate limit (0 = default 120 req/min)
-	RateLimitBurst int     `json:"rate_limit_burst" toml:"rate_limit_burst"` // Per-IP burst size (0 = default 30)
+	Enabled        bool     `json:"enabled"       toml:"enabled"`             // Enable HTTP server (default: false)
+	Addr           string   `json:"addr"          toml:"addr"`                // Listen address (default: ":8081")
+	UseTLS         bool     `json:"use_tls"       toml:"use_tls"`             // Enable HTTPS
+	AutoTLSCert    bool     `json:"auto_tls_cert" toml:"auto_tls_cert"`       // Auto-generate self-signed cert
+	TLSCertFile    string   `json:"tls_cert_file" toml:"tls_cert_file"`       // TLS certificate file path
+	TLSKeyFile     string   `json:"tls_key_file"  toml:"tls_key_file"`        // TLS key file path
+	TLSMinVersion  string   `json:"tls_min_version" toml:"tls_min_version"`   // Minimum TLS version
+	RequireAuth    bool     `json:"require_auth"  toml:"require_auth"`        // Require API key auth
+	APIKeys        []string `json:"api_keys"      toml:"api_keys"`            // Valid API keys
+	REST           bool     `json:"rest"          toml:"rest"`                // Enable REST API
+	WebSocket      bool     `json:"websocket"     toml:"websocket"`           // Enable WebSocket
+	WSPath         string   `json:"ws_path"       toml:"ws_path"`             // WebSocket endpoint path
+	MCP            bool     `json:"mcp"           toml:"mcp"`                 // Enable MCP over HTTP+SSE
+	MCPPath        string   `json:"mcp_path"      toml:"mcp_path"`            // MCP endpoint path
+	RateLimitRPM   int      `json:"rate_limit_rpm"  toml:"rate_limit_rpm"`    // Per-IP request rate limit (0 = default 120 req/min)
+	RateLimitBurst int      `json:"rate_limit_burst" toml:"rate_limit_burst"` // Per-IP burst size (0 = default 30)
 }
 
 // LLMConfig holds LLM configuration including budget, broker, and metrics.
@@ -2059,6 +2121,18 @@ func DefaultConfig() *Config {
 				KeepVersions:     3,
 			},
 		},
+		Media: DefaultMediaConfig(),
+		Secrets: SecretsConfig{
+			// Empty non-nil map: no secrets declared by default. Real values
+			// are loaded into the broker at startup; children only ever see
+			// MEEPT_SECRET:<name> placeholders.
+			Sources: SecretSources{},
+			Proxy: SecretsProxyConfig{
+				// Disabled by default; leaf 04 (egress proxy) fills behavior.
+				Enabled: false,
+				Listen:  "",
+			},
+		},
 		Shadow: ShadowConfig{
 			Enabled: false,
 			DataDir: "~/.meept/shadow",
@@ -2354,6 +2428,28 @@ type NotificationsConfig struct {
 	DoNotDisturb bool `json:"do_not_disturb,omitempty" toml:"do_not_disturb"`
 }
 
+// ResolverConfig configures sandboxed-backend selection for [runtime]. It
+// mirrors runtime.ResolverConfig (config does not import runtime; mapping
+// happens in internal/daemon/components.go per existing convention).
+//
+//	Order: "auto" (docker > bwrap > local), "bwrap", "docker", or "local".
+//	RequireSandbox: when true and no qualifying backend is available,
+//	startup REFUSES command execution (fail closed) instead of degrading
+//	to unsandboxed local exec.
+type ResolverConfig struct {
+	Order          string `json:"sandbox_backend_order" toml:"sandbox_backend_order"`
+	RequireSandbox bool   `json:"require_sandbox"       toml:"require_sandbox"`
+}
+
+// BwrapRuntimeConfig configures the bubblewrap backend. Mirrors
+// runtime.BwrapConfig (config does not import runtime; mapping happens in
+// internal/daemon/components.go per existing convention).
+type BwrapRuntimeConfig struct {
+	BinaryPath string   `json:"binary_path" toml:"binary_path"`
+	ExtraArgs  []string `json:"extra_args"  toml:"extra_args"`
+	TmpfsDirs  []string `json:"tmpfs_dirs"  toml:"tmpfs_dirs"`
+}
+
 // RuntimeConfig holds configuration for execution backends (local, Docker).
 type RuntimeConfig struct {
 	// Enabled controls whether runtime backends are initialized.
@@ -2365,6 +2461,12 @@ type RuntimeConfig struct {
 	// EnvPolicy controls how child process environments are built
 	// (allowlist vs inherit). Normalized by NormalizeRuntimeDefaults.
 	EnvPolicy EnvPolicyConfig `json:"env_policy" toml:"env_policy"`
+	// Sandbox controls sandboxed-backend selection and fail-closed
+	// semantics. See ResolverConfig.
+	Sandbox ResolverConfig `json:"sandbox" toml:"sandbox"`
+	// Bwrap holds bubblewrap backend settings used when the sandbox
+	// resolver selects the bwrap backend.
+	Bwrap BwrapRuntimeConfig `json:"bwrap" toml:"bwrap"`
 }
 
 // EnvPolicyConfig configures child environment construction. This mirrors the

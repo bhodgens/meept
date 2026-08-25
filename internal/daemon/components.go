@@ -54,6 +54,7 @@ import (
 	"github.com/caimlas/meept/internal/rpc"
 	"github.com/caimlas/meept/internal/runtime"
 	"github.com/caimlas/meept/internal/scheduler"
+	"github.com/caimlas/meept/internal/secrets"
 	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/internal/selfimprove"
@@ -231,6 +232,11 @@ type Components struct {
 	// Pending changes registry (background-expiry managed by Start/Stop lifecycle)
 	PendingChanges *builtin.PendingChangesRegistry
 
+	// Change journal for applied file changes (revert support via
+	// `meept changes`). Constructed alongside PendingChanges; nil only if
+	// opening the database failed at startup (logged, non-fatal).
+	ChangeJournal *builtin.Journal
+
 	// Reflection engine for auto-lint/test fixing
 	ReflectionEngine *agent.ReflectionEngine
 
@@ -296,6 +302,13 @@ type Components struct {
 	PlacementScheduler *placement.PlacementScheduler
 	DispatchHandler    *rpc.DispatchHandler
 	ClusterMetrics     *cluster.Metrics
+
+	// Secret containment (plans/containment-and-computer-use, leaves 03+04).
+	// SecretBroker holds real secret values in memory; SecretsProxy is the
+	// loopback egress proxy resolving MEEPT_SECRET placeholders. Both nil
+	// unless [secrets.proxy] enabled.
+	SecretBroker *secrets.Broker
+	SecretsProxy *secrets.Proxy
 
 	// dispatchSubmitterMu guards dispatchSubmitter for the team.assign
 	// node-prefix routing (spec §2.3 α). The submitter is wired after
@@ -1723,6 +1736,19 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	pendingChangesRegistry := builtin.NewPendingChangesRegistry()
 	c.PendingChanges = pendingChangesRegistry
 
+	// Create the change journal so every accepted change can be reverted
+	// later (`meept changes revert`). Default ON, stored under the daemon
+	// data directory; a failure to open is logged but not fatal — resolve
+	// simply runs without journaling.
+	changeJournal, err := builtin.NewJournal(builtin.JournalConfig{
+		DBPath: filepath.Join(cfg.Daemon.DataDir, "changes.db"),
+	}, logger)
+	if err != nil {
+		logger.Error("Change journal disabled: failed to open database", "error", err)
+		changeJournal = nil
+	}
+	c.ChangeJournal = changeJournal
+
 	// Create runtime manager for backend-based command execution.
 	//
 	// Posture distinction (fail-closed leaf):
@@ -1788,7 +1814,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if c.TaskRegistry != nil {
 		taskStore = c.TaskRegistry.Store()
 	}
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver)
 
 	// Register /remember tool for agents to propose improvements (Thread E)
 	c.ToolRegistry.Register(builtin.NewRememberTool(".meept/improvements.md"))
@@ -2805,6 +2831,12 @@ func (c *Components) Start(ctx context.Context) error {
 				if c.PendingChanges != nil {
 					c.PendingChanges.Stop()
 				}
+			case "change-journal":
+				if c.ChangeJournal != nil {
+					if err := c.ChangeJournal.Close(); err != nil {
+						c.Logger.Warn("Change journal close failed", "error", err)
+					}
+				}
 			case "pool":
 				if c.WorkerPool != nil {
 					c.WorkerPool.Stop(ctx)
@@ -2967,6 +2999,12 @@ func (c *Components) Start(ctx context.Context) error {
 		c.PendingChanges.Start(5 * time.Minute)
 		c.Logger.Debug("Pending changes expiration started", "interval", "5m")
 		startedHandlers = append(startedHandlers, "pending")
+	}
+
+	// Change journal needs no background lifecycle (write-through on accept);
+	// its DB handle is closed during stopComponents.
+	if c.ChangeJournal != nil {
+		c.Logger.Debug("Change journal ready", "path", "changes.db in data dir")
 	}
 
 	// Start queue handler
@@ -4132,6 +4170,16 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		c.Logger.Debug("Pending changes expiration stopped")
 	}
 
+	// Close the change journal database handle last-ish: revert/list reads
+	// and accept-time writes all go through this single connection.
+	if c.ChangeJournal != nil {
+		if err := c.ChangeJournal.Close(); err != nil {
+			c.Logger.Warn("Change journal close failed", "error", err)
+		} else {
+			c.Logger.Debug("Change journal closed")
+		}
+	}
+
 	return lastErr
 }
 
@@ -4484,6 +4532,7 @@ func registerBuiltinTools(
 	taskStore *task.Store,
 	sched *scheduler.Scheduler,
 	pendingChangesRegistry *builtin.PendingChangesRegistry,
+	changeJournal *builtin.Journal,
 	containerMgr *runtime.ContainerManager,
 	ptyMgr *pty.Manager,
 	llmClient *llm.Client,
@@ -4541,6 +4590,16 @@ func registerBuiltinTools(
 		// Fallback: create a resolve tool with a local registry
 		localPC := builtin.NewPendingChangesRegistry()
 		registry.Register(builtin.NewResolveTool(localPC))
+	}
+	// Wire the change journal into every resolve tool (typed-nil guarded
+	// inside SetJournal) so accepted changes are revertible via
+	// `meept changes revert <id>`.
+	if changeJournal != nil {
+		for _, tool := range registry.List() {
+			if rt, ok := tool.(*builtin.ResolveTool); ok {
+				rt.SetJournal(changeJournal)
+			}
+		}
 	}
 	listDirTool := builtin.NewListDirectoryTool(checker)
 	fileFindTool := builtin.NewFileFindTool(checker)

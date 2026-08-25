@@ -51,3 +51,71 @@ placeholder at launch; other `${VAR}` forms pass through unchanged.
   placeholder string.
 - Plaintext is never logged — the broker logs names and kinds only.
 - Values live in broker memory only; there is no persistence layer.
+
+## Egress Proxy
+
+The egress proxy is the network boundary where `MEEPT_SECRET:<name>`
+placeholders become real credentials. It is a loopback-only reverse proxy:
+requests routed through it are scanned for placeholders in headers and in
+`text/*` / `application/json` bodies (first 1 MiB). When the destination host
+matches the secret's declared `hosts` suffix list, every placeholder
+occurrence is replaced with the `format`-applied real value **in place**.
+Requests toward non-allowlisted hosts pass through completely unmodified and
+increment the `secrets.leak_attempt` counter; unknown secret names behave the
+same way.
+
+Safety rules:
+
+- **Loopback enforced.** The proxy refuses to bind any non-loopback address —
+  misconfiguring `listen` to a routable interface is a hard startup error,
+  not a warning. Resolved credentials must never leave the machine unencrypted.
+- **Chunked requests rejected.** Requests using `Transfer-Encoding: chunked`
+  get `400`; body scanning requires content framing.
+- **Fail closed on mixed placeholders.** If one placeholder in a value targets
+  a non-allowed host, the whole value passes through untouched (no partial
+  injection).
+- **Real values never logged.** Log lines carry secret *names* and destination
+  hosts only.
+- CONNECT/TLS interception and SOCKS are out of scope; the proxy forwards
+  plain HTTP only.
+
+### Configuration
+
+```json5
+[secrets.proxy]
+enabled = true            // default false
+listen  = "127.0.0.1:0"   // default: loopback, ephemeral port; MUST be loopback
+```
+
+When enabled, the daemon logs the bound address at startup (`secrets egress
+proxy started`) and reports it over RPC status as `secrets_proxy.addr`,
+alongside `secrets_proxy.leak_attempts`. Wire shell profiles or tools with:
+
+```bash
+export MEEPT_SECRETS_PROXY=$(meept status | jq -r .secrets_proxy.addr)
+```
+
+### Example
+
+With a source declared as in [Configuration](#configuration) above
+(`gh_token`, hosts `["github.com"]`, header `Authorization`, format
+`Bearer {}`), send a request whose header carries the placeholder through the
+proxy:
+
+```bash
+# Placeholder goes in...
+curl -x "http://$MEEPT_SECRETS_PROXY" \
+     -H "Authorization: MEEPT_SECRET:gh_token" \
+     https://api.github.com/user
+
+# ...and github.com receives:
+#   Authorization: Bearer ghp_realtokenvalue
+#
+# The same request aimed at any other host would arrive with the
+# placeholder untouched and bump secrets.leak_attempt.
+```
+
+A JSON body variant works identically: POSTing
+`{"note": "hello MEEPT_SECRET:gh_tok"}` with `Content-Type: application/json`
+through the proxy delivers `{"note": "hello ghp_realtokenvalue"}` to an
+allowlisted host.

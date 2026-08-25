@@ -56,6 +56,12 @@ type Server struct {
 	// Used by the status handler to report actual token and cost usage (FIX #0031/#0035).
 	BudgetStatusGetter func() (hourlyUsed int, hourlyRemaining int, dailyUsed int, dailyRemaining int, rpmCurrent int, rpmLimit int, dailyCostUsed float64, dailyCostLimit float64, hourlyCostUsed float64, hourlyCostLimit float64, perTaskCost float64, perSessionCost float64, perTaskBudget int, perSessionBudget int)
 
+	// SecretsProxyStatusGetter is an optional callback returning the egress
+	// secrets-proxy status map {"enabled", "addr", "leak_attempts"}; nil or
+	// nil-result means the proxy is disabled/unwired and the "secrets_proxy"
+	// key is omitted from status responses.
+	SecretsProxyStatusGetter func() map[string]any
+
 	// Connection tracking
 	connMu   sync.Mutex
 	conns    map[net.Conn]struct{}
@@ -435,6 +441,13 @@ func (s *Server) registerBuiltinHandlers() {
 			}
 		}
 
+		// Include egress secrets-proxy info if a getter is configured
+		if s.SecretsProxyStatusGetter != nil {
+			if sp := s.SecretsProxyStatusGetter(); sp != nil {
+				result["secrets_proxy"] = sp
+			}
+		}
+
 		// Include budget stats if a getter is configured (FIX #0031/#0035)
 		if s.BudgetStatusGetter != nil {
 			hu, hr, du, dr, rc, rl, dcu, dcl, hcu, hcl, ptc, psc, ptb, psb := s.BudgetStatusGetter()
@@ -541,6 +554,7 @@ func (s *Server) registerBuiltinHandlers() {
 		}, nil
 	})
 }
+
 // isParameterError returns true for parameter-validation errors that should
 // map to JSON-RPC -32602 InvalidParams. Uses structured detection via
 // errcls.IsParameterError (errors.Is / errors.As) instead of the old

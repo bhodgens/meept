@@ -81,6 +81,33 @@ header = "X-Signature"
 	}
 }
 
+// TestSecretsProxyConfigRoundTrip verifies the [secrets.proxy] subsection
+// parses enabled/listen through the real config load path (leaf 04).
+func TestSecretsProxyConfigRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "meept.toml")
+
+	content := `
+[secrets.proxy]
+enabled = true
+listen  = "127.0.0.1:18080"
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if !cfg.Secrets.Proxy.Enabled {
+		t.Error("Secrets.Proxy.Enabled should parse true")
+	}
+	if cfg.Secrets.Proxy.Listen != "127.0.0.1:18080" {
+		t.Errorf("Secrets.Proxy.Listen = %q, want %q", cfg.Secrets.Proxy.Listen, "127.0.0.1:18080")
+	}
+}
+
 // TestSecretsSourceIsBrokerSource pins that the config-layer type IS the
 // broker-layer Source (single definition; no drift between layers).
 func TestSecretsSourceIsBrokerSource(t *testing.T) {
