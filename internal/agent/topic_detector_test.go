@@ -19,7 +19,7 @@ func TestTopicDetector_Detect(t *testing.T) {
 		{"lunch food", "What should I eat for lunch today?", []string{"food"}},
 		{"restaurant", "Recommend a good Italian restaurant", []string{"food"}},
 		{"weekend plans", "What are my weekend plans?", []string{"personal"}},
-		{"heat food", "What's the weather like today?", []string{"food"}}, // "eat" in "we[a]ther"
+		{"heat food", "What's the weather like today?", []string{"general"}}, // "eat" must NOT match inside "we[a]ther" (word-boundary fix, 2026-08-24)
 		{"general fallback", "I need to buy groceries", []string{"general"}},
 	}
 

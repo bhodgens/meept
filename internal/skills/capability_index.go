@@ -234,9 +234,33 @@ func (ci *CapabilityIndex) keywordMatches(inputLower, keyword string) bool {
 		return strings.Contains(inputLower, keyword)
 	}
 
-	// For single words, check word boundaries (avoid partial matches)
-	// Simple approach: check if it's a substring (could be improved with word boundaries)
-	return strings.Contains(inputLower, keyword)
+	// For single words, require word-boundary matches. Substring matching
+	// caused false positives like "create" matching the food keyword "eat"
+	// (meept-bench live smoke run, 2026-08-24), which misroutes threads and
+	// inflates skill-match confidence for task-shaped prompts.
+	return containsWord(inputLower, keyword)
+}
+
+// containsWord reports whether word appears as a whole word in s.
+func containsWord(s, word string) bool {
+	if word == "" || len(word) > len(s) {
+		return false
+	}
+	for i := 0; i+len(word) <= len(s); i++ {
+		if s[i:i+len(word)] != word {
+			continue
+		}
+		beforeOK := i == 0 || !isWordChar(s[i-1])
+		afterOK := i+len(word) == len(s) || !isWordChar(s[i+len(word)])
+		if beforeOK && afterOK {
+			return true
+		}
+	}
+	return false
+}
+
+func isWordChar(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c >= 0x80
 }
 
 // MatchWithThreshold returns matches above a confidence threshold.

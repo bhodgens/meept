@@ -92,7 +92,10 @@ func (td *TopicDetector) Detect(input string) string {
 	for topic, keywords := range td.keywords {
 		score := 0
 		for _, kw := range keywords {
-			if strings.Contains(lowerInput, kw) {
+			// Word-boundary match: substring matching made "create" hit the
+			// food keyword "eat" (meept-bench smoke run, 2026-08-24),
+			// misrouting threads by topic.
+			if containsWordBoundary(lowerInput, kw) {
 				score++
 			}
 		}
@@ -117,4 +120,27 @@ func (td *TopicDetector) GenerateThreadID(sessionID, topic string) string {
 		suffix = suffix[len(suffix)-4:]
 	}
 	return "thread-" + topic + "-" + suffix
+}
+
+// containsWordBoundary reports whether keyword appears in s as a whole
+// word (multi-word phrases fall back to substring containment).
+func containsWordBoundary(s, keyword string) bool {
+	if strings.Contains(keyword, " ") {
+		return strings.Contains(s, keyword)
+	}
+	for i := 0; i+len(keyword) <= len(s); i++ {
+		if s[i:i+len(keyword)] != keyword {
+			continue
+		}
+		before := i == 0 || !isAlnum(s[i-1])
+		after := i+len(keyword) == len(s) || !isAlnum(s[i+len(keyword)])
+		if before && after {
+			return true
+		}
+	}
+	return false
+}
+
+func isAlnum(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c >= 0x80
 }
