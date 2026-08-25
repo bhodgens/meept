@@ -21,6 +21,7 @@ class _HamburgerMenuState extends State<HamburgerMenu> {
   // Hardcoded tool panels that have implementations
   static const _knownTools = {
     'memory': Icons.memory,
+    'changes': Icons.compare_arrows,
     'files': Icons.folder,
     'terminal': Icons.terminal,
     'calendar': Icons.calendar_today,

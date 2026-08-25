@@ -289,6 +289,26 @@ class SdkApiClient {
     }
   }
 
+  /// GET helper for endpoints that return a bare JSON array rather than a
+  /// wrapped object (e.g. pending-changes listing, changes journal).
+  /// Mirrors [_get] but coerces the response to a list of maps.
+  Future<List<Map<String, dynamic>>> _getList(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    try {
+      final response = await _dio.get(path, queryParameters: query);
+      final data = response.data;
+      if (data is! List) return <Map<String, dynamic>>[];
+      return data
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
   // ==================================================================
   // Typed endpoint layer -- uses SDK models for serialization.
   //
@@ -1079,6 +1099,72 @@ class SdkApiClient {
         'justification': justification,
       },
     );
+  }
+
+  // ===== Pending Changes / Changes Journal =====
+  //
+  // Write-staging + journal surfaces (leaves 05/06). These endpoints let a
+  // human review staged file diffs before they are applied and revert
+  // applied changes.  Shapes mirror the daemon's HTTP contract exactly:
+  //
+  //   GET  /api/v1/sessions/{sid}/pending-changes
+  //        200 -> [{id, file_path, diff, created_at, expires_at}]
+  //   POST /api/v1/pending-changes/{id}/accept
+  //        200 -> {status:"applied"} | 409 {error}
+  //   POST /api/v1/pending-changes/{id}/reject
+  //        200 -> {status:"rejected"}
+  //   GET  /api/v1/changes/journal?session=<sid>&limit=<n>
+  //        200 -> [{id, session_id, file_path, post_sha, applied_at,
+  //                 change_ids, pre_image_size}]
+  //   POST /api/v1/changes/journal/{id}/revert
+  //        200 -> {restored_path} | 409 {error} | 400 {error}
+
+  /// Returns the raw pending-changes array for a session (bare JSON array).
+  ///
+  /// Each entry should be passed to `PendingChange.fromJson`.
+  Future<List<Map<String, dynamic>>> listPendingChanges(
+    String sessionId,
+  ) async {
+    return _getList('/api/v1/sessions/$sessionId/pending-changes');
+  }
+
+  /// Accepts a pending change, applying its diff to the working tree.
+  ///
+  /// Returns `{status: "applied"}` on success. A 409 (drift between stage
+  /// and apply) surfaces as [SdkApiException] carrying the daemon's error
+  /// message.
+  Future<Map<String, dynamic>> acceptPendingChange(String id) async {
+    return _post('/api/v1/pending-changes/$id/accept');
+  }
+
+  /// Rejects a pending change, discarding its diff.
+  ///
+  /// Returns `{status: "rejected"}`.
+  Future<Map<String, dynamic>> rejectPendingChange(String id) async {
+    return _post('/api/v1/pending-changes/$id/reject');
+  }
+
+  /// Returns the raw changes-journal array (bare JSON array, newest first).
+  ///
+  /// Entries never include pre-image bytes — those stay server-side for
+  /// revert.  Each entry should be passed to `ChangeJournalEntry.fromJson`.
+  Future<List<Map<String, dynamic>>> listChangesJournal({
+    String? sessionId,
+    int? limit,
+  }) async {
+    final query = <String, dynamic>{};
+    if (sessionId != null && sessionId.isNotEmpty) query['session'] = sessionId;
+    if (limit != null) query['limit'] = limit;
+    return _getList('/api/v1/changes/journal', query: query);
+  }
+
+  /// Reverts an applied change from the journal, restoring the pre-image.
+  ///
+  /// Returns `{restored_path}` on success. 409 (working-tree drift) and
+  /// 400 (size-capped) surface as [SdkApiException] with the daemon's
+  /// error message.
+  Future<Map<String, dynamic>> revertJournalEntry(String id) async {
+    return _post('/api/v1/changes/journal/$id/revert');
   }
 
   // ===== Prompt Templates =====

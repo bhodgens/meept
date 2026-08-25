@@ -693,6 +693,8 @@ class _SidebarState extends ConsumerState<_Sidebar> {
                       switch (route) {
                         case 'memory':
                           context.goToolMemory();
+                        case 'changes':
+                          context.goToolChanges();
                         case 'prompts':
                           context.goToolPrompts();
                         case 'settings':

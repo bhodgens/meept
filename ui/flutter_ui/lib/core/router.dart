@@ -10,6 +10,7 @@ import '../features/projects/branches_panel.dart';
 import '../features/skills/skill_panel.dart';
 import '../features/memory/memory_panel.dart';
 import '../features/reflection/reflection_panel.dart';
+import '../features/changes/changes_panel.dart';
 import '../features/prompts/prompt_panel.dart';
 import '../features/files/files_panel.dart';
 import '../features/terminal/terminal_panel.dart';
@@ -31,6 +32,7 @@ import '../providers/preferences_provider.dart';
 ///   /tools/skills   -> SkillPanel
 ///   /tools/memory   -> MemoryPanel
 ///   /tools/reflection -> ReflectionPanel
+///   /tools/changes    -> ChangesPanel
 ///   /tools/prompts    -> PromptPanel
 final GoRouter router = GoRouter(
   initialLocation: '/',
@@ -119,6 +121,13 @@ final GoRouter router = GoRouter(
       name: 'toolsReflection',
       builder: (context, state) {
         return const ReflectionPanel();
+      },
+    ),
+    GoRoute(
+      path: '/tools/changes',
+      name: 'toolsChanges',
+      builder: (context, state) {
+        return const ChangesPanel();
       },
     ),
     GoRoute(
@@ -345,6 +354,9 @@ extension AppRouterExtension on BuildContext {
 
   /// Navigate to the reflection tool panel (replace current entry).
   void goToolReflection() => go('/tools/reflection');
+
+  /// Navigate to the changes-review tool panel (replace current entry).
+  void goToolChanges() => go('/tools/changes');
 
   /// Navigate to the prompt-editor tool panel (replace current entry).
   void goToolPrompts() => go('/tools/prompts');

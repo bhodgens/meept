@@ -432,6 +432,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         context.goToolMemory();
       case 'reflection':
         context.goToolReflection();
+      case 'changes':
+        context.goToolChanges();
       case 'prompts':
         context.goToolPrompts();
       case 'settings':
@@ -450,6 +452,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       'skills',
       'memory',
       'reflection',
+      'changes',
       'prompts',
       'settings',
     };
