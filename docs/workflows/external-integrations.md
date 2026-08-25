@@ -59,6 +59,51 @@ See [Agent Lateral Interrogation Howto](agent-lateral-interrogation-howto.md) fo
 - **Session Management**: User session tracking
 - **Security**: Authentication and authorization
 
+### Cua-Driver Computer-Use Integration
+
+`cua-driver` (open source, [trycua/cua](https://github.com/trycua/cua)) is a background desktop computer-use driver for macOS, Windows, and Linux. Agents drive the host desktop **without stealing the cursor**: screen/window captures come back with numbered element overlays plus an accessibility-tree index, and input is injected by element index — clicks, typing, scrolling, hotkeys all land on the target app while the user keeps working. It ships in the MCP default catalog (`config/mcp_servers.json5`) as `cua-driver`, **disabled by default**.
+
+**Install the driver** (per OS; no administrator access required):
+
+```bash
+# macOS 14+ (installs CuaDriver.app + ~/.local/bin/cua-driver symlink)
+/bin/bash -c "$(curl -fsSL https://cua.ai/driver/install.sh)"
+```
+
+```powershell
+# Windows 10/11 (PowerShell; registers cua-driver-serve autostart task)
+irm https://cua.ai/driver/install.ps1 | iex
+cua-driver autostart kick
+```
+
+```bash
+# Linux x86_64 with an X11 / XWayland desktop session (headless servers need
+# a desktop session first, e.g. xfce4 under Xvfb)
+/bin/bash -c "$(curl -fsSL https://cua.ai/driver/install.sh)"
+```
+
+Verify with `cua-driver --version` and `cua-driver doctor`. On macOS, grant Accessibility and Screen Recording permissions: start the daemon once (`open -n -g -a CuaDriver --args serve`), then run `cua-driver permissions grant`.
+
+**Enable in meept** (any of the three catalog surfaces):
+
+1. Edit `~/.meept/mcp_servers.json5`: set `enabled: true` on the `cua-driver` entry.
+2. TUI: press `ctl-x o` (mcp menu), select `cua-driver`, press `e`.
+3. Menubar app: settings → tools tab, toggle the switch.
+
+Tools register under the server-name prefix — `cua-driver.capture`, `cua-driver.click`, etc. (see [MCP default catalog](tool-routing.md#mcp-default-catalog) for how namespacing works).
+
+**Risk behavior:** every cua-driver tool call passes through the SecurityEngine ([security](security.md)) before execution:
+
+| Tool class | Examples | Risk | Behavior |
+|------------|----------|------|----------|
+| Observation | `capture`, `screenshot`, `list_apps`, `list_windows`, `get_window_state` | LOW | runs without confirmation |
+| Input injection | `click`, `type_text`, `hotkey`, `key`, `scroll`, `drag`, `move_*`, `wait`, `set_value` | HIGH | requires user confirmation (`require_confirmation_high`) |
+| Unknown action | any unrecognized `cua-driver.*` name | HIGH | fail-closed: confirmation-gated |
+
+The classification is prefix-matched on the registered name (`pkg/security.ComputerUseRule`); DB-seeded rules keep precedence for operator overrides. The HIGH gate means an agent cannot type or click anywhere until you approve each action unless confirmation is disabled in `[tools.security]`.
+
+See the bundled computer-use skill for the recommended capture → act → verify loop (leaf 09 of the containment-and-computer-use plan).
+
 ### Web API Integration
 - **HTTP/JSON API**: RESTful interface for external clients
 - **Authentication**: API key or token-based access

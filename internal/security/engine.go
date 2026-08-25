@@ -16,6 +16,7 @@ import (
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/pathutil"
+	pkgsecurity "github.com/caimlas/meept/pkg/security"
 	"github.com/jmoiron/sqlx"
 	_ "modernc.org/sqlite" // sqlite3 driver registration
 )
@@ -534,6 +535,22 @@ func (e *Engine) lookupBaseRule(action, toolName string) (RiskLevel, bool) {
 		if err == nil {
 			return RiskLevel(row.RiskLevel), row.RequiresConfirmation == 1
 		}
+	}
+
+	// Computer-use (cua-driver MCP server) tools: prefix-matched on the
+	// registered tool name ("cua-driver.<action>"). Observation actions are
+	// LOW; input injection and any unrecognized cua-driver action classify
+	// HIGH (fail-closed) instead of falling through to the MEDIUM default.
+	// The rule-level confirm flag stays false: Stage 5 escalates HIGH-risk
+	// results via needsConfirmation under require_confirmation_high.
+	// Checked after the DB so operator overrides in tool_rules keep
+	// precedence.
+	cuName := toolName
+	if cuName == "" {
+		cuName = action
+	}
+	if cuRisk, ok := pkgsecurity.ComputerUseRule(cuName); ok {
+		return RiskLevel(cuRisk), false
 	}
 
 	e.logger.Warn("No rule found for action; defaulting to MEDIUM", "action", action, "tool", toolName)

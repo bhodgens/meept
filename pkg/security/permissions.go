@@ -301,6 +301,39 @@ type CheckResult struct {
 	NeedsConfirm  bool
 }
 
+// checkRiskResult converts a resolved risk level into a CheckResult,
+// applying the financial gate and the confirmation gating shared with
+// CheckPermissionForAgent.
+func (pc *PermissionChecker) checkRiskResult(details map[string]string, risk RiskLevel) CheckResult {
+	for _, v := range details {
+		if pc.config.BlockFinancial && IsFinancial(v) {
+			return CheckResult{
+				Allowed: false,
+				Reason:  "Financial operations are blocked by policy",
+			}
+		}
+	}
+
+	needsConfirm := risk >= RiskHigh && pc.config.RequireConfirmationHigh
+	if risk >= RiskCritical && pc.config.RequireConfirmationCritical {
+		needsConfirm = true
+	}
+	if needsConfirm {
+		return CheckResult{
+			Allowed:       false,
+			Reason:        "Action requires user confirmation",
+			EffectiveRisk: risk,
+			NeedsConfirm:  true,
+		}
+	}
+
+	return CheckResult{
+		Allowed:       true,
+		Reason:        "Permitted",
+		EffectiveRisk: risk,
+	}
+}
+
 // CheckPermission checks if an action is permitted.
 func (pc *PermissionChecker) CheckPermission(action string, details map[string]string) CheckResult {
 	return pc.CheckPermissionForAgent(action, details, "")
@@ -364,7 +397,15 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 		}
 	}
 
-	// Look up base rule
+	// Look up base rule. cua-driver (computer-use) tools are matched by
+	// registered-name prefix first: observation actions run at LOW, input
+	// injection and any unknown cua-driver action classify HIGH
+	// (fail-closed). Everything else resolves through BuiltinRules, which
+	// denies unknown actions outright.
+	if risk, ok := ComputerUseRule(action); ok {
+		return pc.checkRiskResult(details, risk)
+	}
+
 	rule, ok := BuiltinRules[action]
 	if !ok {
 		return CheckResult{

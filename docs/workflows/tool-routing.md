@@ -59,6 +59,8 @@ Only the zero-config servers are enabled by default (no API keys or external ser
 
 The remaining 17 servers ship `enabled: false` because they need API keys, OAuth credentials, or external daemons. Enable only the ones you want.
 
+The `cua-driver` entry (category `automation`) adds background desktop computer-use via a native binary — install commands, enable steps, and its LOW/HIGH risk-rule table are documented under [Cua-Driver Computer-Use Integration](external-integrations.md#cua-driver-computer-use-integration).
+
 ### Enabling a Server
 
 Three surfaces toggle the `enabled` flag:

@@ -273,5 +273,23 @@
         "SEARXNG_URL": "${SEARXNG_URL:-http://localhost:8080}",
       },
     },
+
+    // ────────────────────────── native binaries ──────────────────────────
+
+    // cua-driver: background desktop computer-use (macos/windows/linux).
+    // capture screens with numbered element overlays, click by index, type,
+    // scroll, hotkey. requires the cua-driver binary installed — see
+    // docs/workflows/external-integrations.md for per-OS install commands.
+    // security: observation tools are low risk; every input-injection tool
+    // is high risk and requires confirmation (internal/security engine rules,
+    // prefix "cua-driver.").
+    {
+      "name": "cua-driver",
+      "enabled": false,
+      "category": "automation",
+      "description": "background desktop computer-use (macos/windows/linux): capture screens with numbered element overlays, click by index, type, scroll, hotkey. requires cua-driver binary installed.",
+      "type": "stdio",
+      "command": ["cua-driver", "mcp"],
+    },
   ],
 }
