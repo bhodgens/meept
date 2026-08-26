@@ -59,6 +59,12 @@ type Manager struct {
 	// Distributed sync (when distributed_memory.enabled && mode == "distributed")
 	distributed bool
 
+	// Usefulness vote store (leaf: memory usefulness scoring). Lazily
+	// initialized on first RecordVote; nil until then.
+	voteOnce sync.Once
+	voteErr  error
+	votes    *voteStore
+
 	consolidator *Consolidator
 	initialized  bool
 	mu           sync.RWMutex

@@ -69,6 +69,15 @@ type EpisodicMemory struct {
 	shutdownFunc context.CancelFunc
 }
 
+// sharedStore exposes the underlying SQLite store so the vote table can
+// share its DB handle. Returns nil when episodic is uninitialized.
+func (e *EpisodicMemory) sharedStore() *SQLiteFTSStore {
+	if e == nil {
+		return nil
+	}
+	return e.store
+}
+
 // EpisodicConfig holds configuration for episodic memory.
 type EpisodicConfig struct {
 	// DataDir is the directory for database files.

@@ -289,6 +289,7 @@ type episodicReport struct {
 // consolidateEpisodic consolidates old episodic memories.
 func (c *Consolidator) consolidateEpisodic(ctx context.Context, cutoff time.Time) (*episodicReport, error) {
 	report := &episodicReport{}
+	now := time.Now()
 
 	// Get old memories
 	oldMemories, err := c.backend.GetOldMemories(ctx, cutoff, 500)
@@ -298,6 +299,40 @@ func (c *Consolidator) consolidateEpisodic(ctx context.Context, cutoff time.Time
 
 	if len(oldMemories) == 0 {
 		return report, nil
+	}
+
+	// Usefulness eviction (leaf: memory usefulness scoring). When enabled,
+	// harmful and bottom-floor memories are deleted in a dedicated FIRST
+	// batch before any legacy age-based deletes.
+	useCfg := ResolveUsefulEviction(c.manager.config.Usefulness)
+	if useCfg.Enabled && c.manager != nil {
+		if initErr := c.manager.initVoteStore(); initErr != nil {
+			c.logger.Warn("usefulness vote store unavailable; skipping usefulness eviction", "error", initErr)
+		} else if netVotes, voteErr := c.manager.NetVotes(ctx, idsOf(oldMemories)); voteErr != nil {
+			c.logger.Warn("usefulness vote query failed; skipping usefulness eviction", "error", voteErr)
+		} else {
+			plan := PlanUsefulEviction(oldMemories, netVotes, now, useCfg)
+			evict := append(append([]string{}, plan.Harmful...), plan.Floor...)
+			if len(evict) > 0 {
+				deleted, delErr := c.backend.DeleteByIDs(ctx, evict)
+				if delErr != nil {
+					c.logger.Warn("usefulness eviction partially failed",
+						"attempted", len(evict), "error", delErr)
+				}
+				report.archived += deleted
+				evictedSet := make(map[string]bool, len(evict))
+				for _, id := range evict {
+					evictedSet[id] = true
+				}
+				var remaining []MemoryResult
+				for _, m := range oldMemories {
+					if !evictedSet[m.Memory.ID] {
+						remaining = append(remaining, m)
+					}
+				}
+				oldMemories = remaining
+			}
+		}
 	}
 
 	// Group memories — prefer LLM-based summarization, fall back to date-based.
@@ -834,4 +869,13 @@ func ParseSummarizeResponse(content string) ([]Summary, error) {
 	}
 
 	return nil, fmt.Errorf("failed to parse summaries from LLM response: no valid JSON array found")
+}
+
+// idsOf extracts the memory IDs from a result slice.
+func idsOf(results []MemoryResult) []string {
+	out := make([]string, 0, len(results))
+	for _, r := range results {
+		out = append(out, r.Memory.ID)
+	}
+	return out
 }

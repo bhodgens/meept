@@ -283,6 +283,108 @@ func (t *MemoryGetContextTool) Execute(ctx context.Context, args map[string]any)
 	}, nil
 }
 
+// MemoryVoteTool records a usefulness vote (+1/-1) on a stored memory.
+// Votes feed the usefulness score that drives opt-in consolidation eviction
+// ordering (see [memory.usefulness] config).
+type MemoryVoteTool struct {
+	tools.ToolDefaults
+	manager *memory.Manager
+}
+
+// NewMemoryVoteTool creates a new memory vote tool.
+func NewMemoryVoteTool(manager *memory.Manager) *MemoryVoteTool {
+	return &MemoryVoteTool{manager: manager}
+}
+
+func (t *MemoryVoteTool) Name() string { return "memory_vote" }
+
+func (t *MemoryVoteTool) Category() string { return "memory" }
+
+func (t *MemoryVoteTool) Description() string {
+	return "Vote on whether a stored memory was useful (+1) or harmful (-1) for your work. Votes with reasons shape which memories are kept vs. evicted during consolidation. Use after relying on a recalled memory."
+}
+
+func (t *MemoryVoteTool) Parameters() llm.FunctionParameters {
+	return llm.FunctionParameters{
+		Type: schemaTypeObject,
+		Properties: map[string]llm.ParameterProperty{
+			schemaPropMemoryID: {
+				Type:        schemaTypeString,
+				Description: "The ID of the memory to vote on.",
+			},
+			"delta": {
+				Type:        schemaTypeInteger,
+				Description: "+1 if the memory was useful, -1 if it was harmful or wrong.",
+				Enum:        []string{"1", "-1"},
+			},
+			"reason": {
+				Type:        schemaTypeString,
+				Description: "Optional short reason for the vote (max 512 bytes).",
+			},
+		},
+		Required: []string{schemaPropMemoryID, "delta"},
+	}
+}
+
+func (t *MemoryVoteTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	if t.manager == nil {
+		return nil, fmt.Errorf("memory manager not configured")
+	}
+
+	memoryID, ok := args[schemaPropMemoryID].(string)
+	if !ok || memoryID == "" {
+		return nil, fmt.Errorf("memory_id is required")
+	}
+
+	var delta int
+	switch v := args["delta"].(type) {
+	case float64:
+		delta = int(v)
+	case int:
+		delta = v
+	default:
+		return nil, fmt.Errorf("delta must be +1 or -1")
+	}
+	if delta != 1 && delta != -1 {
+		return nil, fmt.Errorf("delta must be +1 or -1, got %d", delta)
+	}
+
+	reason, _ := args["reason"].(string)
+	if len(reason) > memory.MaxReasonBytes {
+		reason = reason[:memory.MaxReasonBytes]
+	}
+
+	if err := t.manager.RecordVote(memoryID, delta, reason); err != nil {
+		return nil, fmt.Errorf("failed to record vote: %w", err)
+	}
+
+	votes, err := t.manager.NetVotes(ctx, []string{memoryID})
+	if err != nil {
+		votes = nil // evidence is best-effort; the vote itself persisted
+	}
+	net := 0
+	if votes != nil {
+		net = votes[memoryID]
+	}
+
+	return map[string]any{
+		"success":   true,
+		"voted":     delta,
+		"net_votes": net,
+		"message":   fmt.Sprintf("Recorded vote %+d on memory %s (net votes: %d)", delta, memoryID, net),
+	}, nil
+}
+
+// TerminateHint implements tools.TerminatingTool for MemoryVoteTool:
+// voting is confirmation-free and needs no LLM follow-up.
+func (t *MemoryVoteTool) TerminateHint(args map[string]any) bool { return true }
+
+// Ensure MemoryVoteTool implements the tool interfaces.
+var (
+	_ tools.Tool            = (*MemoryVoteTool)(nil)
+	_ tools.TerminatingTool = (*MemoryVoteTool)(nil)
+)
+
 // Ensure tools implement the Tool interface
 var (
 	_ tools.Tool = (*MemoryStoreTool)(nil)

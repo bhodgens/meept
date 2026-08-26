@@ -4,6 +4,8 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/secrets"
@@ -193,6 +195,34 @@ type EmployeesConfig struct {
 	// enforcement engine. A paused employee cannot self-resume; only an
 	// operator can call `meept agents resume <id>`.
 	AutoPause EmployeesAutoPauseConfig `json:"auto_pause" toml:"auto_pause"`
+
+	// Defaults holds per-aspect defaults merged under each employee's own
+	// definition. Currently only gate is defined.
+	Defaults EmployeesDefaultsConfig `json:"defaults" toml:"defaults"`
+}
+
+// EmployeesDefaultsConfig carries employee-layer default blocks.
+type EmployeesDefaultsConfig struct {
+	// Gate configures the default quality gate (completion check) for all
+	// employees/goals that do not declare their own gate.command. An empty
+	// Command means no gate (legacy model-judgment-only completion).
+	Gate EmployeesGateConfig `json:"gate" toml:"gate"`
+}
+
+// EmployeesGateConfig mirrors the quality-gate settings in
+// internal/employee.GateConfig. It lives in the config package to avoid an
+// import from config → employee; the Manager translates between the two
+// shapes. See docs/workflows/employees.md ("Quality gate").
+type EmployeesGateConfig struct {
+	// Command is the shell command run in the employee's project directory.
+	// Exit 0 passes; anything else fails. Empty = no gate (legacy).
+	Command string `json:"command" toml:"command"`
+	// TimeoutSeconds kills the gate command after this many seconds.
+	// Zero/negative = 300.
+	TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
+	// SkipWhenUnchanged skips re-running a previously failed gate when the
+	// workspace (git status + HEAD) hash is unchanged since the failure.
+	SkipWhenUnchanged bool `json:"skip_when_unchanged" toml:"skip_when_unchanged"`
 }
 
 // Validate validates the EmployeesConfig.
@@ -589,6 +619,7 @@ type HTTPTransportConfig struct {
 //gendoc:example [llm] budget.hourly_token_limit = 100000
 type LLMConfig struct {
 	Budget          BudgetConfig             `json:"budget"           toml:"budget"`
+	ModelsDir       string                   `json:"models_dir"       toml:"models_dir"` // default ~/.meept/models
 	Broker          LLMBrokerConfig          `json:"broker"           toml:"broker"`
 	AdaptiveTimeout LLMAdaptiveTimeoutConfig `json:"adaptive_timeout" toml:"adaptive_timeout"`
 	ContextFirewall LLMContextFirewallConfig `json:"context_firewall" toml:"context_firewall"`
@@ -773,6 +804,28 @@ type MemoryConfig struct {
 	// Epistemic holds epistemic memory settings (ambient extraction,
 	// auto-trust weight, review prompts). See EpistemicConfig.
 	Epistemic EpistemicConfig `json:"epistemic" toml:"epistemic"`
+	// Usefulness holds memory usefulness voting settings. See
+	// MemoryUsefulnessConfig.
+	Usefulness MemoryUsefulnessConfig `json:"usefulness" toml:"usefulness"`
+}
+
+// MemoryUsefulnessConfig holds memory usefulness voting settings driving
+// consolidation eviction ordering (loop-economics leaf 14).
+type MemoryUsefulnessConfig struct {
+	// Enabled turns on usefulness-scored eviction in consolidation.
+	// Default false (opt-in until validated).
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// FloorPct is the bottom fraction of memories (by usefulness) evicted
+	// before any age-based rule. Default 0.05.
+	FloorPct float64 `json:"floor_pct" toml:"floor_pct"`
+	// Base is the baseline score for an unvoted, unused memory. Default 0.5.
+	Base float64 `json:"base" toml:"base"`
+	// Wv is the per-unit net-vote weight. Default 0.08.
+	Wv float64 `json:"wv" toml:"wv"`
+	// Wa is the access-count weight applied via log1p(accesses). Default 0.05.
+	Wa float64 `json:"wa" toml:"wa"`
+	// Ws is the per-day age penalty. Default 0.005.
+	Ws float64 `json:"ws" toml:"ws"`
 }
 
 // EpistemicConfig holds epistemic memory platform settings.
@@ -963,6 +1016,55 @@ type AgentConfig struct {
 	Budget AgentBudgetConfig `json:"budget" toml:"budget"`
 	// ParallelToolExec configures dependency-aware parallel tool execution.
 	ParallelToolExec AgentParallelToolConfig `json:"parallel_tool_execution" toml:"parallel_tool_execution"`
+	// Guards configures loop-safety guards (leaf 07): no-progress ladder,
+	// duplicate-search rollback, reasoning-only watchdog. Zero values
+	// normalize to ship-on defaults via NormalizeAgentGuardsDefaults.
+	Guards AgentGuardsConfig `json:"guards" toml:"guards"`
+}
+
+// AgentGuardsConfig mirrors agent.GuardConfig for the [agent.guards] TOML
+// section. It lives here because internal/config cannot import internal/agent
+// (the dependency points the other way). Zero values mean "use default".
+type AgentGuardsConfig struct {
+	NoProgressWarnAt        int  `json:"no_progress_warn_at"         toml:"no_progress_warn_at"`
+	NoProgressVetoAt        int  `json:"no_progress_veto_at"         toml:"no_progress_veto_at"`
+	GracefulAfterVetoes     int  `json:"graceful_after_vetoes"       toml:"graceful_after_vetoes"`
+	DuplicateSearchRollback bool `json:"duplicate_search_rollback"   toml:"duplicate_search_rollback"`
+	RollbackWindow          int  `json:"rollback_window"             toml:"rollback_window"`
+	ReasoningTokenCap       int  `json:"reasoning_token_cap"         toml:"reasoning_token_cap"`
+	ReasoningStreakTurns    int  `json:"reasoning_streak_turns"      toml:"reasoning_streak_turns"`
+}
+
+// Defaults for [agent.guards] — keep in sync with agent.DefaultGuardConfig().
+const (
+	DefaultCfgNoProgressWarnAt     = 3
+	DefaultCfgNoProgressVetoAt     = 5
+	DefaultCfgGracefulAfterVetoes  = 3
+	DefaultCfgRollbackWindow       = 10
+	DefaultCfgReasoningTokenCap    = 16384
+	DefaultCfgReasoningStreakTurns = 3
+)
+
+// NormalizeAgentGuardsDefaults fills ship-on defaults for zero-valued fields.
+func NormalizeAgentGuardsDefaults(g *AgentGuardsConfig) {
+	if g.NoProgressWarnAt <= 0 {
+		g.NoProgressWarnAt = DefaultCfgNoProgressWarnAt
+	}
+	if g.NoProgressVetoAt <= 0 {
+		g.NoProgressVetoAt = DefaultCfgNoProgressVetoAt
+	}
+	if g.GracefulAfterVetoes <= 0 {
+		g.GracefulAfterVetoes = DefaultCfgGracefulAfterVetoes
+	}
+	if g.RollbackWindow <= 0 {
+		g.RollbackWindow = DefaultCfgRollbackWindow
+	}
+	if g.ReasoningTokenCap <= 0 {
+		g.ReasoningTokenCap = DefaultCfgReasoningTokenCap
+	}
+	if g.ReasoningStreakTurns <= 0 {
+		g.ReasoningStreakTurns = DefaultCfgReasoningStreakTurns
+	}
 }
 
 // AgentRetryConfig configures exponential backoff retry behavior for LLM, tool, and HTTP operations.
@@ -1277,6 +1379,53 @@ type SecurityConfig struct {
 	// Path fencing for agent sandboxing
 	FenceEnabled   bool     `json:"fence_enabled"    toml:"fence_enabled"`
 	FenceAllowRead []string `json:"fence_allow_read" toml:"fence_allow_read"`
+
+	// SSRF guard for outbound web tool fetches (web_fetch, web_search)
+	SSRF SSRFConfig `json:"ssrf" toml:"ssrf"`
+
+	// Declarative shell command permission table ([security.shell_permissions]).
+	// Prefix-keyed allow/ask/deny policy evaluated before tirith scanning.
+	ShellPermissions ShellPermissionsConfig `json:"shell_permissions" toml:"shell_permissions"`
+}
+
+// ShellPermissionsConfig configures the declarative shell permission table.
+//
+//gendoc:section security.shell_permissions
+//gendoc:desc Declarative command-prefix allow/ask/deny policy evaluated before tirith pattern scanning.
+//gendoc:example [security.shell_permissions] preset = "workspace"
+type ShellPermissionsConfig struct {
+	// Preset selects a shipped rule set: "workspace" (default), "readonly",
+	// or "danger" (empty). Use "" only with a custom rules map.
+	Preset string `json:"preset" toml:"preset"`
+	// Rules overrides/extends the preset. Keys are command prefixes
+	// (e.g. "git push", "rm -rf"); values are "allow", "ask", or "deny".
+	Rules map[string]string `json:"rules" toml:"rules"`
+}
+
+// SSRFConfig configures the centralized SSRF guard applied to outbound
+// HTTP clients (web_fetch, web_search). Enabled by default: URLs are
+// restricted to http/https, resolved IPs are denied against private,
+// loopback, link-local, and cloud-metadata CIDRs unless explicitly
+// allowed, and every redirect hop is re-validated.
+//
+//gendoc:section security.ssrf
+//gendoc:desc SSRF guard for web tools: scheme allowlist, IP/CIDR blocking, redirect re-validation.
+//gendoc:example [security.ssrf] enabled = true
+type SSRFConfig struct {
+	// Enabled toggles the centralized SSRF guard. Default true. When
+	// false the tools fall back to the legacy built-in checks and a
+	// startup warning is logged.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// AllowedHosts bypass IP checks via dot-delimited suffix match
+	// (e.g., "api.github.com").
+	AllowedHosts []string `json:"allowed_hosts" toml:"allowed_hosts"`
+	// AllowedCIDRs exempt IPs from the blocklist (e.g., "10.0.0.0/8"
+	// for corporate networks).
+	AllowedCIDRs []string `json:"allowed_cidrs" toml:"allowed_cidrs"`
+	// BlockedCIDRs replaces the default blocklist when non-empty.
+	BlockedCIDRs []string `json:"blocked_cidrs" toml:"blocked_cidrs"`
+	// MaxRedirects caps redirect hops. Default 5.
+	MaxRedirects int `json:"max_redirects" toml:"max_redirects"`
 }
 
 // Validate validates the SecurityConfig.
@@ -1299,6 +1448,40 @@ func (c *SecurityConfig) Validate() error {
 	for _, path := range c.BlockedPaths {
 		if path == "" {
 			return fmt.Errorf("blocked_paths contains empty string")
+		}
+	}
+	// SSRF guard: fail fast on malformed CIDR entries at load time; the
+	// ssrf package re-parses them at guard construction.
+	if c.SSRF.MaxRedirects < 0 {
+		return fmt.Errorf("security.ssrf.max_redirects %d: must be >= 0", c.SSRF.MaxRedirects)
+	}
+	for _, cidr := range append(append([]string{}, c.SSRF.AllowedCIDRs...), c.SSRF.BlockedCIDRs...) {
+		if cidr == "" {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			return fmt.Errorf("security.ssrf: invalid CIDR %q: %w", cidr, err)
+		}
+	}
+	// Shell permission table: fail fast on unknown presets and malformed
+	// actions at config load time.
+	if sp := c.ShellPermissions; sp.Preset != "" {
+		switch sp.Preset {
+		case "workspace", "readonly", "danger":
+			// valid
+		default:
+			return fmt.Errorf("security.shell_permissions.preset %q: must be workspace, readonly, danger, or empty", sp.Preset)
+		}
+	}
+	for prefix, action := range c.ShellPermissions.Rules {
+		switch action {
+		case "allow", "ask", "deny":
+			// valid
+		default:
+			return fmt.Errorf("security.shell_permissions.rules[%q]: invalid action %q (want allow, ask, or deny)", prefix, action)
+		}
+		if strings.TrimSpace(prefix) == "" {
+			return fmt.Errorf("security.shell_permissions.rules: empty command prefix")
 		}
 	}
 	return nil
@@ -1721,6 +1904,7 @@ func DefaultConfig() *Config {
 			},
 		},
 		LLM: LLMConfig{
+			ModelsDir: "~/.meept/models",
 			Budget: BudgetConfig{
 				HourlyTokenLimit:     100000,
 				DailyTokenLimit:      1000000,
@@ -1980,6 +2164,13 @@ func DefaultConfig() *Config {
 			TirithBinary:                "tirith",
 			EnableAuditLog:              false,
 			AuditDBPath:                 "~/.meept/audit.db",
+			SSRF: SSRFConfig{
+				Enabled:      true,
+				MaxRedirects: 5,
+			},
+			ShellPermissions: ShellPermissionsConfig{
+				Preset: "workspace",
+			},
 		},
 		Scheduler: SchedulerConfig{
 			Enabled:  true,
