@@ -74,6 +74,13 @@ type Server struct {
 
 	// Per-request handlers
 	requestHandlers []func()
+
+	// Peer-credential policy (leaf 06). allowedUIDs is a set keyed by UID;
+	// nil or empty means no rejection (log-only mode). peerCredLog enables
+	// the per-connection Debug log of the peer UID. Stored as an immutable
+	// map so reads in acceptLoop need no synchronization.
+	allowedUIDs map[int]bool
+	peerCredLog bool
 }
 
 // Config holds server configuration.
@@ -81,6 +88,17 @@ type Config struct {
 	SocketPath     string
 	Shutdown       time.Duration // Graceful shutdown deadline (default 30s)
 	ShutdownNotify func()        // Called when a request completes during shutdown
+
+	// AllowedUIDs optionally restricts Unix-socket RPC connections to these
+	// kernel-verified peer UIDs. Empty/nil preserves single-user behavior
+	// (socket is still 0600); connections are logged but never rejected on
+	// this basis.
+	AllowedUIDs []int
+
+	// PeerCredLog controls per-connection Debug logging of the kernel-verified
+	// peer UID. Default true; irrelevant on platforms without peer-credential
+	// support, where no lookup ever succeeds.
+	PeerCredLog *bool
 }
 
 // New creates a new RPC server.
@@ -105,6 +123,22 @@ func New(cfg *Config, msgBus *bus.MessageBus, logger *slog.Logger) *Server {
 	}
 	if cfg.ShutdownNotify != nil {
 		s.requestHandlers = append(s.requestHandlers, cfg.ShutdownNotify)
+	}
+
+	// Peer-credential policy: default to log-only with logging enabled. The
+	// *bool lets tests opt out of per-connection Debug logs without logging
+	// infrastructure; a nil field means the default (true).
+	peerCredLog := true
+	if cfg.PeerCredLog != nil {
+		peerCredLog = *cfg.PeerCredLog
+	}
+	s.peerCredLog = peerCredLog
+	if len(cfg.AllowedUIDs) > 0 {
+		uidSet := make(map[int]bool, len(cfg.AllowedUIDs))
+		for _, uid := range cfg.AllowedUIDs {
+			uidSet[uid] = true
+		}
+		s.allowedUIDs = uidSet
 	}
 	return s
 }
@@ -251,6 +285,23 @@ func (s *Server) acceptLoop() {
 			// Brief backoff to avoid a tight loop on transient errors.
 			time.Sleep(50 * time.Millisecond)
 			continue
+		}
+
+		// Kernel-enforced peer identity: extract the peer UID before any
+		// state is registered for the connection so rejected peers leave no
+		// trace behind a closed socket.
+		uid, uidOK := peerCredential(conn)
+		if uidOK {
+			if s.peerCredLog {
+				s.logger.Debug("rpc: connection accepted", "peer_uid", uid)
+			}
+			if len(s.allowedUIDs) > 0 && !s.allowedUIDs[uid] {
+				s.logger.Warn("rpc: connection rejected by uid allowlist",
+					"peer_uid", uid,
+					"allowlist_size", len(s.allowedUIDs))
+				conn.Close()
+				continue
+			}
 		}
 
 		s.connMu.Lock()

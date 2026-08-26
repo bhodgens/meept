@@ -616,6 +616,13 @@ type TransportConfig struct {
 type RPCTransportConfig struct {
 	Enabled    bool   `json:"enabled"     toml:"enabled"`     // Enable Unix socket RPC (default: true)
 	SocketPath string `json:"socket_path" toml:"socket_path"` // Unix socket path (default: "~/.meept/meept.sock")
+	// AllowedUIDs restricts Unix-socket RPC connections to these
+	// kernel-verified peer UIDs. Empty (default) disables enforcement —
+	// log-only mode. The daemon logs each connection's OS user.
+	AllowedUIDs []int `json:"allowed_uids" toml:"allowed_uids"`
+	// PeerCredLog controls per-connection Debug logging of the peer UID
+	// (default: true).
+	PeerCredLog bool `json:"peer_cred_log" toml:"peer_cred_log"`
 }
 
 // HTTPTransportConfig configures the HTTP REST transport.
@@ -1999,8 +2006,9 @@ func DefaultConfig() *Config {
 		},
 		Transport: TransportConfig{
 			RPC: RPCTransportConfig{
-				Enabled:    true,
-				SocketPath: "~/.meept/meept.sock",
+				Enabled:     true,
+				SocketPath:  "~/.meept/meept.sock",
+				PeerCredLog: true,
 			},
 			HTTP: HTTPTransportConfig{
 				Enabled:     false,
@@ -2288,7 +2296,7 @@ func DefaultConfig() *Config {
 			},
 		},
 		Scheduler: SchedulerConfig{
-			Enabled:  true,
+			Enabled: true,
 
 			Timezone: "UTC",
 		},
