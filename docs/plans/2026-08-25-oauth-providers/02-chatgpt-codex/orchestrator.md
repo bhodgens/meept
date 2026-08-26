@@ -139,10 +139,10 @@ Per master `## Coding Conventions`. Additions: no new deps (stdlib JWT parse = s
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-codex-flow | PENDING | 0 | |
-| 02-codex-transport | PENDING | 0 | |
+| 01-codex-flow | COMPLETE | 1 | 100% — commit 9bfc6d63; 429 retry, pending-poll, PKCE exchange all tested |
+| 02-codex-transport | COMPLETE | 1 | 100% — commit 67907774; 17 tests; deviation: dispatch by ProviderID only (ModelConfig has no Transport field) |
 
-## Integration Test Plan
+Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
 1. `go test ./internal/auth/ -run TestCodex -v` — flow tests against httptest-simulated usercode/poll/token endpoints, including 429-retry and pending-then-grant sequences.
 2. `go test ./internal/llm/ -run TestCodex -v` — chatter request shape (model, input, instructions, stream:false, store:false), header table, response parsing (message/reasoning/function_call), error mapping.

@@ -156,10 +156,10 @@ Per master `## Coding Conventions`. Additions: `crypto/rand` for verifier/state 
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-anthropic-flow | PENDING | 0 | |
-| 02-anthropic-bearer | PENDING | 0 | |
+| 01-anthropic-flow | COMPLETE | 1 | 100% — commit 34365514; UA rule + endpoint fallback tested; RefreshAnthropicToken gained jsonBody bool param (documented deviation) |
+| 02-anthropic-bearer | COMPLETE | 1 | 100% — commit 8dd8d94f; orchestrator-completed in-session after subagent 429 stall; 6 tests pass; streaming path covered via shared applyAnthropicAuth helper |
 
-## Integration Test Plan
+Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
 1. `go test ./internal/auth/ -run TestAnthropic -v` — PKCE shape, authorize URL params (exact query string), exchange happy/fallback/both-fail, refresh form vs JSON bodies, UA header asserted.
 2. `go test ./internal/llm/ -run TestAnthropicBearer -v` — Bearer + beta headers set, x-api-key absent, resolver invoked, api-key path regression (no resolver → x-api-key set).

@@ -141,20 +141,10 @@ Inherited from master `## Coding Conventions`. Key repeats: stdlib only; `%w` er
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-registry-extension | PENDING | 0 | |
-| 02-xai-provider-entry | PENDING | 0 | |
+| 01-registry-extension | COMPLETE | 1 | 100% — commit 026ab785; 11 tests pass; vet/gofmt clean |
+| 02-xai-provider-entry | COMPLETE | 1 | 100% — commit a60bdc49; discovery override in connect+refresh |
 
-## Integration Test Plan
-
-1. `go test ./internal/auth/ -run 'TestDiscovery|TestStartDeviceFlow_FormEncoded|TestXai' -v` — discovery parses a served `.well-known/openid-configuration`, form-encoded device request has correct body, xai-oauth config resolves with expected endpoints.
-2. `go build ./cmd/meept && ./bin/meept config oauth connect 2>&1 | grep xai-oauth` lists the provider (compile + help text only; live login is optional manual smoke).
-3. Registry integrity: existing `github-models`/`google-*` entries byte-identical (diff the map literal regions).
-
-## Open Questions
-
-- See ../../master.md Open Questions #2 (FormEncoded derivation owns this branch's leaf 02 Task 1).
-
-## Notes
+Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
 - Leaf 01 is the root-wave gate: branches 02 and 03 import `FlowKind`. Land it first, commit, then fan out.
 - xAI tokens ~6h expiry; existing 10m refresh margin suffices.
