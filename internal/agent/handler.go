@@ -698,6 +698,13 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			reply, err = h.startCollaborationSession(ctx, result, conversationID)
 		case h.dispatcher.ShouldDispatchAsync(result) && result.Task != nil:
 			handlerCase = "async_dispatch"
+			// Headless benchmark clients (source_client prefix "meept-bench")
+			// drive outcome-level evaluation: they need the FINAL result, not
+			// an acknowledgment. Force synchronous dispatch for them so the
+			// chat RPC reply carries task completion instead of an ack.
+			if strings.HasPrefix(req.SourceClient, "meept-bench") {
+				h.syncMode = true
+			}
 			// Async dispatch goes through the orchestrator pipeline, which is
 			// currently text-only. Warn if parts are being dropped.
 			if len(req.Parts) > 0 {
