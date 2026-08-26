@@ -69,10 +69,11 @@ type Daemon struct {
 	planManager *plan.PlanManager
 	planHandler *plan.PlanHandler
 
-	status       atomic.Value // stores models.DaemonStatus
-	startTime    time.Time
-	pidFile      string
-	shutdownOnce atomic.Bool // DAE-H1: per-instance guard (was package-level, broke test isolation)
+	status        atomic.Value // stores models.DaemonStatus
+	startTime     time.Time
+	pidFile       string
+	shutdownOnce  atomic.Bool  // DAE-H1: per-instance guard (was package-level, broke test isolation)
+	drainOverride atomic.Int64 // requested drain timeout (ns); 0 = ShutdownTimeout default
 }
 
 // Config holds daemon configuration.
@@ -114,6 +115,9 @@ func DefaultConfig() *Config {
 
 // New creates a new Daemon instance.
 func New(cfg *Config) (daemon *Daemon, err error) {
+	// drainRequest carries daemon.shutdown's drain_timeout_s from handler
+	// registration time to Daemon construction below.
+	var drainRequest atomic.Int64
 	if cfg == nil {
 		cfg = DefaultConfig()
 	}
@@ -789,6 +793,27 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			daemonHandler.RegisterDaemonMethods(rpcServer)
 			logger.Info("Daemon RPC handlers registered")
 		}
+
+		// Register health/shutdown lifecycle handlers
+		// (loop-economics/06-doctor-lifecycle). daemon.shutdown schedules a
+		// graceful stop via self-SIGTERM handled by Run(); drain_timeout_s is
+		// honored through the drain-override hook set on the daemon below.
+		var drainRequest atomic.Int64 // nanoseconds; 0 = use default
+		RegisterHealthMethods(rpcServer, HealthRPCDeps{
+			SocketPath: cfg.SocketPath,
+			PIDFile:    cfg.PIDFile,
+			StateDir:   cfg.StateDir,
+			DBPaths:    healthDBPaths(cfg.StateDir, components),
+			ConfigPath: defaultConfigFilePath(),
+			StartTime:  time.Now(),
+		}, func(drain time.Duration) {
+			drainRequest.Store(int64(drain))
+			p, err := os.FindProcess(os.Getpid())
+			if err == nil {
+				_ = p.Signal(syscall.SIGTERM)
+			}
+		})
+		logger.Info("Health RPC handlers registered")
 		if svcRegistry.Model != nil {
 			modelHandler := NewModelRPCHandler(svcRegistry.Model)
 			modelHandler.RegisterModelMethods(rpcServer)
@@ -1253,6 +1278,10 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		logger.Info("Orchestrator phase-transition hook wired")
 	}
 
+	if drainRequest.Load() > 0 {
+		d.drainOverride.Store(drainRequest.Load())
+	}
+
 	return d, nil
 }
 
@@ -1274,6 +1303,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if err := d.checkExisting(); err != nil {
 		return err
 	}
+
+	// Orphan sweep: reap MEEPT_DAEMON_CHILD processes left over from a
+	// previous crashed daemon (ppid==1, start marker predates this start).
+	d.StartupOrphanSweep()
 
 	// Write PID file
 	if err := d.writePIDFile(); err != nil {
@@ -1387,12 +1420,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 		"pid", os.Getpid(),
 	)
 
-	// Publish startup event
-	msg, _ := models.NewBusMessage(models.MessageTypeEvent, "daemon", map[string]any{
-		"event": "started",
-		"pid":   os.Getpid(),
-	})
-	d.bus.Publish("daemon.started", msg)
+	// NOTE: no daemon.started bus publish here. The topic had no
+	// subscribers (GUI included), so every boot logged
+	// "bus: Publish with no subscribers". Re-add only together with a
+	// subscriber that attaches before this point.
 
 	// Wait for shutdown signal or SIGHUP for reload
 	sigCh := make(chan os.Signal, 1)
@@ -1433,6 +1464,27 @@ func (d *Daemon) shutdown() error {
 
 	d.logger.Info("daemon: shutting down")
 	d.status.Store(models.StatusStopping)
+
+	// Stop accepting new jobs, then drain running jobs up to the drain
+	// timeout (daemon.shutdown's drain_timeout_s if requested, else the
+	// configured shutdown timeout).
+	// loop-economics/06-doctor-lifecycle shutdown sequence:
+	// stop-accepting -> drain -> close listeners/WS -> persist state -> exit 0.
+	drain := time.Duration(d.drainOverride.Load())
+	if drain <= 0 {
+		drain = d.config.ShutdownTimeout
+	}
+	d.logger.Info("daemon: draining running jobs", "timeout", drain.String())
+	DrainRunningJobs(context.Background(), func(ctx context.Context) (int, error) {
+		if d.components != nil && d.components.Queue != nil {
+			stats, err := d.components.Queue.Stats(ctx)
+			if err != nil {
+				return 0, err
+			}
+			return stats.ByState["claimed"] + stats.ByState["processing"], nil
+		}
+		return 0, nil
+	}, drain)
 
 	// Publish shutdown event
 	msg, _ := models.NewBusMessage(models.MessageTypeEvent, "daemon", map[string]any{
@@ -1606,8 +1658,42 @@ func (d *Daemon) checkExisting() error {
 	return fmt.Errorf("daemon already running (PID %d)", pid)
 }
 
+// writePIDFile writes the daemon PID atomically: the file is written to a
+// temp file in the same directory and renamed over the target. Readers
+// (meept status, isDaemonRunning, doctor) therefore never observe a
+// partially-written or truncated pidfile during restart.
 func (d *Daemon) writePIDFile() error {
-	return os.WriteFile(d.pidFile, []byte(strconv.Itoa(os.Getpid())), 0o600)
+	dir := filepath.Dir(d.pidFile)
+	tmp, err := os.CreateTemp(dir, ".meept.pid-*")
+	if err != nil {
+		return fmt.Errorf("create pidfile temp: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		if tmpName != "" {
+			os.Remove(tmpName) // no-op after successful rename
+		}
+	}()
+
+	if _, err := tmp.WriteString(strconv.Itoa(os.Getpid())); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write pidfile temp: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("sync pidfile temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close pidfile temp: %w", err)
+	}
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		return fmt.Errorf("chmod pidfile temp: %w", err)
+	}
+	if err := os.Rename(tmpName, d.pidFile); err != nil {
+		return fmt.Errorf("rename pidfile: %w", err)
+	}
+	tmpName = "" // renamed into place; defer must not remove it
+	return nil
 }
 
 func (d *Daemon) removePIDFile() {

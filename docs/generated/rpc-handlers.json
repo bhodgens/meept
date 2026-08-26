@@ -9,13 +9,13 @@
     "topic": "backup.list",
     "handler": "h.handleBackupList",
     "file": "internal/rpc/backup_sync.go",
-    "line": 43
+    "line": 53
   },
   {
     "topic": "backup.push",
     "handler": "h.handleBackupPush",
     "file": "internal/rpc/backup_sync.go",
-    "line": 44
+    "line": 54
   },
   {
     "topic": "bus.poll",
@@ -27,13 +27,13 @@
     "topic": "bus.publish",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 489
+    "line": 540
   },
   {
     "topic": "bus.stats",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 510
+    "line": 561
   },
   {
     "topic": "bus.subscribe",
@@ -207,25 +207,25 @@
     "topic": "config_sync.pull",
     "handler": "h.handleConfigSyncPull",
     "file": "internal/rpc/backup_sync.go",
-    "line": 46
+    "line": 56
   },
   {
     "topic": "config_sync.push",
     "handler": "h.handleConfigSyncPush",
     "file": "internal/rpc/backup_sync.go",
-    "line": 47
+    "line": 57
   },
   {
     "topic": "config_sync.status",
     "handler": "h.handleConfigSyncStatus",
     "file": "internal/rpc/backup_sync.go",
-    "line": 45
+    "line": 55
   },
   {
     "topic": "daemon.health",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/daemon/health_rpc.go",
-    "line": 42
+    "line": 43
   },
   {
     "topic": "daemon.restart",
@@ -237,7 +237,7 @@
     "topic": "daemon.shutdown",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/daemon/health_rpc.go",
-    "line": 68
+    "line": 69
   },
   {
     "topic": "daemon.start",
@@ -255,7 +255,7 @@
     "topic": "daemon.status",
     "handler": "statusHandler",
     "file": "internal/rpc/server.go",
-    "line": 478
+    "line": 529
   },
   {
     "topic": "daemon.stop",
@@ -321,7 +321,7 @@
     "topic": "firewall.stats",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 481
+    "line": 532
   },
   {
     "topic": "instruction.add",
@@ -543,7 +543,7 @@
     "topic": "ping",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 400
+    "line": 451
   },
   {
     "topic": "pipeline.status",
@@ -1215,7 +1215,7 @@
     "topic": "status",
     "handler": "statusHandler",
     "file": "internal/rpc/server.go",
-    "line": 477
+    "line": 528
   },
   {
     "topic": "status",
@@ -1227,19 +1227,19 @@
     "topic": "sync.pull",
     "handler": "h.handleSyncPull",
     "file": "internal/rpc/backup_sync.go",
-    "line": 49
+    "line": 59
   },
   {
     "topic": "sync.status",
     "handler": "h.handleSyncStatus",
     "file": "internal/rpc/backup_sync.go",
-    "line": 48
+    "line": 58
   },
   {
     "topic": "task.amend.submit",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 515
+    "line": 566
   },
   {
     "topic": "task.cancel",
